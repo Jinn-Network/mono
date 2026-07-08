@@ -144,6 +144,14 @@ export interface RunJinnLayerCliOptions {
 const DEFAULT_CLI_SEARCH_LIMIT = 20;
 
 /**
+ * Byte ceiling on any single IPFS object fetched by the distill pipeline
+ * (PR #1476 security review): envelopes are KBs; donation-wrapped
+ * system_snapshots observed live are ≤ ~400 KB. 64 MiB leaves generous
+ * headroom while preventing a malicious multi-GB wrapper from OOMing the run.
+ */
+const MAX_IPFS_FETCH_BYTES = 64 * 1024 * 1024;
+
+/**
  * Default install directory name for `skills install`: a safe slug of the
  * publisher-controlled skill name (#1394). The name is corpus data, never a
  * path — anything outside [a-z0-9._-] collapses to '-', leading/trailing
@@ -497,7 +505,13 @@ export async function runJinnLayerCli(
           ipfs: async (cid: string) => {
             const res = await fetch(`${gateway}/ipfs/${cid}`, { signal: AbortSignal.timeout(30_000) });
             if (!res.ok) throw new Error(`ipfs ${cid}: HTTP ${res.status}`);
-            return res.json();
+            // Byte ceiling on attacker-published IPFS objects (system_snapshot
+            // wrappers are the large hop): res.json() would buffer unboundedly.
+            const buf = await res.arrayBuffer();
+            if (buf.byteLength > MAX_IPFS_FETCH_BYTES) {
+              throw new Error(`ipfs ${cid}: ${buf.byteLength} bytes exceeds the ${MAX_IPFS_FETCH_BYTES}-byte fetch ceiling`);
+            }
+            return JSON.parse(Buffer.from(buf).toString('utf8'));
           },
           gql: async (query: string) => {
             const res = await fetch(graphqlUrl, {

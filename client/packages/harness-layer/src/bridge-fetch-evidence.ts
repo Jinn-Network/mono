@@ -10,6 +10,9 @@
  *     → attemptEnvelopeMetas(requestId = restorationRequestId) → .manifestCid   (solution envelope)
  *     → solution envelope (IPFS)  → .payload.patch          (the coding diff)
  *   problem statement = task doc .description ?? .spec.problem_statement
+ *   step trace (hop 4, best-effort, #1472) = the solution's system_snapshot
+ *     artifact → donation unwrap → gunzip+untar → the harness stdout
+ *     transcript → outline (snapshot-transcript.ts + transcript-outline.ts)
  *
  * The predecessor joined `attemptEnvelopeMeta(requestId = verdict.requestId)`,
  * which returns empty on the real ledger (the on-chain verdict.requestId is not
@@ -23,11 +26,13 @@
  */
 
 import { type AttemptRef, type BridgeEvidence, repoFromInstanceId } from './bridge.js';
+import { extractSnapshotTranscript } from './snapshot-transcript.js';
+import { outlineTranscript } from './transcript-outline.js';
 
 /** Cap the fetched patch / problem so one huge diff does not blow the prompt. */
 const MAX_PATCH_CHARS = 6000;
 const MAX_PROBLEM_CHARS = 1500;
-/** Cap the compressed solver trace (§8, v0.5) so a long run does not blow the prompt. */
+/** Cap the compressed solver trace (§8, #1472) so a long run does not blow the prompt. */
 const MAX_TRACE_CHARS = 4000;
 
 export interface EvidenceFetcherPorts {
@@ -38,59 +43,37 @@ export interface EvidenceFetcherPorts {
 }
 
 /**
- * Resolve the solver's trajectory-doc CID off a solution envelope: prefer the
- * top-level `trajectory.sources[].cid`, else the first artifact's
- * `metadata.producedBy.trajectoryCid` (client/src/types/envelope.ts). Returns
- * `undefined` when neither is present.
- */
-function trajectoryCidOf(solutionEnv: any): string | undefined {
-  const top = solutionEnv?.trajectory?.sources?.[0]?.cid;
-  if (typeof top === 'string' && top) return top;
-  const arts = solutionEnv?.artifacts;
-  if (Array.isArray(arts)) {
-    for (const a of arts) {
-      const cid = a?.metadata?.producedBy?.trajectoryCid;
-      if (typeof cid === 'string' && cid) return cid;
-    }
-  }
-  return undefined;
-}
-
-/**
- * Compress a `jinn.trajectory.v1` doc into a compact decision-path trace — one
- * line per span (`- <name> [<jinn.span.kind>]`), capped at `MAX_TRACE_CHARS`.
- * Hash-chain / signature plumbing is dropped; only the reasoning shape is kept.
- * Returns `undefined` when the doc carries no usable spans.
- */
-function compressTrajectory(doc: any): string | undefined {
-  const spans = doc?.spans;
-  if (!Array.isArray(spans) || spans.length === 0) return undefined;
-  const lines: string[] = [];
-  for (const s of spans) {
-    const name = typeof s?.name === 'string' ? s.name.trim() : '';
-    if (!name) continue;
-    const kind = typeof s?.attributes?.['jinn.span.kind'] === 'string' ? s.attributes['jinn.span.kind'] : 'span';
-    lines.push(`- ${name} [${kind}]`);
-  }
-  if (lines.length === 0) return undefined;
-  return lines.join('\n').slice(0, MAX_TRACE_CHARS);
-}
-
-/**
- * Fetch + compress the solver's trajectory for one solution envelope (§8, v0.5).
- * Best-effort: ANY failure (no ref, unresolvable CID, malformed doc, fetch
- * error) degrades to `undefined` — the trajectory is enrichment, never a gate
- * on the evidence fetch. Absence is later recorded as a `patch-only` tag.
+ * Fetch + outline the solver's reasoning for one solution envelope (§8, #1472).
+ *
+ * The decision path does NOT live in `jinn.trajectory.v1` (that carries only
+ * the packaging step's 2 `jinn.artifact.emit` spans — #1473 tracks making it
+ * truthful at solve time). It lives in the `system_snapshot` artifact: a
+ * donation-wrapped gzipped tar of the solve working dir containing the
+ * harness's raw stdout transcript. Resolve that artifact, unwrap (sha256-
+ * verified), decompress (bomb-guarded), locate the transcript, and outline it
+ * for the distiller.
+ *
+ * Best-effort: ANY failure (no snapshot, unresolvable CID, sha mismatch,
+ * corrupt bytes, no transcript — e.g. hermes) degrades to `undefined` — the
+ * trace is enrichment, never a gate on the evidence fetch. Absence is later
+ * recorded as a `patch-only` tag.
  */
 async function fetchStepTrace(
   ipfs: (cid: string) => Promise<any>,
   solutionEnv: any,
 ): Promise<string | undefined> {
   try {
-    const cid = trajectoryCidOf(solutionEnv);
-    if (!cid) return undefined;
-    const doc = await ipfs(cid);
-    return compressTrajectory(doc);
+    const arts = solutionEnv?.artifacts;
+    if (!Array.isArray(arts)) return undefined;
+    const snap = arts.find((a) => a?.artifactType === 'system_snapshot');
+    const cid = snap?.sources?.[0]?.cid;
+    const sha256 = typeof snap?.sha256 === 'string' ? snap.sha256 : snap?.sources?.[0]?.sha256;
+    if (typeof cid !== 'string' || !cid || typeof sha256 !== 'string' || !sha256) return undefined;
+    const wrapper = await ipfs(cid); // the donation wrapper is itself JSON
+    const transcript = extractSnapshotTranscript(wrapper, sha256);
+    if (!transcript) return undefined;
+    const outline = outlineTranscript(transcript.harness, transcript.jsonl);
+    return outline?.slice(0, MAX_TRACE_CHARS);
   } catch {
     return undefined;
   }

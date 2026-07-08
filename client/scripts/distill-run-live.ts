@@ -39,10 +39,17 @@ async function gql<T>(query: string): Promise<T> {
   return body.data as T;
 }
 
+/** Byte ceiling per fetched IPFS object (PR #1476 security review — OOM guard). */
+const MAX_IPFS_FETCH_BYTES = 64 * 1024 * 1024;
+
 async function ipfs(cid: string): Promise<any> {
   const res = await fetch(`${GATEWAY}/${cid}`, { signal: AbortSignal.timeout(30_000) });
   if (!res.ok) throw new Error(`ipfs ${cid}: HTTP ${res.status}`);
-  return res.json();
+  const buf = await res.arrayBuffer();
+  if (buf.byteLength > MAX_IPFS_FETCH_BYTES) {
+    throw new Error(`ipfs ${cid}: ${buf.byteLength} bytes exceeds the fetch ceiling`);
+  }
+  return JSON.parse(Buffer.from(buf).toString('utf8'));
 }
 
 interface VerdictRow { instanceId: string; actualPassed: boolean; evaluatorVerdict: string; manifestCid: string; }

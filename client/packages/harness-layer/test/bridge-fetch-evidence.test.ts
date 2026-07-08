@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createEvidenceFetcher } from '../src/bridge-fetch-evidence.js';
 import type { AttemptRef } from '../src/bridge.js';
+import { makeTarGz, wrapDonation } from './tar-fixture.js';
 
 function ref(over: Partial<AttemptRef> = {}): AttemptRef {
   return {
@@ -20,35 +21,28 @@ const PATCH = 'diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-o
 const VERDICT_CID = 'bafyVerdict';
 const TASK_CID = 'bafyTask';
 const SOLUTION_CID = 'bafySolution';
-const TRAJECTORY_CID = 'bafyTrajectory';
+const SNAPSHOT_CID = 'bafySnapshot';
 const SOLVE_REQ = '0x' + 'b'.repeat(64);
-
-/** A minimal jinn.trajectory.v1-shaped doc — only the fields the compressor reads. */
-function traj(spans: Array<{ name: string; kind?: string }>) {
-  return {
-    schemaVersion: 'jinn.trajectory.v1',
-    spans: spans.map((s) => ({ name: s.name, attributes: { 'jinn.span.kind': s.kind ?? 'jinn.phase' } })),
-  };
-}
 
 /**
  * Canned ports for the VERIFIED 3-hop join:
  *   verdict envelope → task doc → attemptEnvelopeMetas → solution envelope patch.
- * Optionally registers a trajectory doc under TRAJECTORY_CID (§8 enrichment).
+ * Optionally registers a donation-wrapped system_snapshot under SNAPSHOT_CID
+ * (§8 enrichment, #1472).
  */
 function ports(over: {
   verdict?: unknown;
   task?: unknown;
   attempts?: { manifestCid: string }[];
   solution?: unknown;
-  trajectory?: unknown;
+  snapshot?: unknown;
 } = {}) {
   const ipfsStore: Record<string, unknown> = {
     [VERDICT_CID]: over.verdict ?? { task: { cid: TASK_CID } },
     [TASK_CID]: over.task ?? { description: 'Fix the widget factory', restorationRequestId: SOLVE_REQ },
     [SOLUTION_CID]: over.solution ?? { payload: { patch: PATCH } },
   };
-  if (over.trajectory !== undefined) ipfsStore[TRAJECTORY_CID] = over.trajectory;
+  if (over.snapshot !== undefined) ipfsStore[SNAPSHOT_CID] = over.snapshot;
   return {
     ipfs: async (cid: string) => {
       if (!(cid in ipfsStore)) throw new Error(`ipfs test: unexpected cid ${cid}`);
@@ -116,63 +110,104 @@ describe('createEvidenceFetcher', () => {
   });
 });
 
-describe('createEvidenceFetcher — solver-trajectory enrichment (§8, v0.5)', () => {
-  it('includes a compressed step trace when the solution envelope carries a top-level trajectory ref', async () => {
-    const fetch = createEvidenceFetcher(
-      ports({
-        solution: { payload: { patch: PATCH }, trajectory: { sources: [{ cid: TRAJECTORY_CID }] } },
-        trajectory: traj([
-          { name: 'plan the fix', kind: 'jinn.phase' },
-          { name: 'edit models.py', kind: 'jinn.mcp_call' },
-        ]),
-      }),
-    );
+describe('createEvidenceFetcher — snapshot-transcript enrichment (§8, #1472)', () => {
+  const CLAUDE_JSONL = [
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'plan the certificate fix' }] } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Edit', input: { file_path: '/path/to/x.py' } }] } }),
+  ].join('\n');
+
+  /** A solution envelope carrying a real (in-memory) system_snapshot artifact. */
+  function solutionWithSnapshot(files: Record<string, string>) {
+    const { wrapper, sha256 } = wrapDonation(makeTarGz(files));
+    return {
+      solution: {
+        payload: { patch: PATCH },
+        artifacts: [{ artifactType: 'system_snapshot', sha256, sources: [{ cid: SNAPSHOT_CID, sha256 }] }],
+      },
+      snapshot: wrapper,
+    };
+  }
+
+  it('derives the step trace from the claude-code transcript inside system_snapshot', async () => {
+    const fetch = createEvidenceFetcher(ports(solutionWithSnapshot({ '.claude-code/stdout.jsonl': CLAUDE_JSONL, 'task.json': '{}' })));
     const ev = await fetch(ref());
     expect(ev.stepTrace).toBeDefined();
-    expect(ev.stepTrace).toContain('plan the fix');
-    expect(ev.stepTrace).toContain('edit models.py');
-    expect(ev.stepTrace).toContain('jinn.mcp_call');
+    expect(ev.stepTrace).toContain('plan the certificate fix');
+    expect(ev.stepTrace).toMatch(/- tool Edit:/);
     expect(ev.patch).toBe(PATCH); // enrichment never displaces the patch
   });
 
-  it('resolves the trajectory ref from an artifact producedBy.trajectoryCid fallback', async () => {
-    const fetch = createEvidenceFetcher(
-      ports({
-        solution: {
-          payload: { patch: PATCH },
-          artifacts: [{ metadata: { producedBy: { trajectoryCid: TRAJECTORY_CID } } }],
-        },
-        trajectory: traj([{ name: 'run tests', kind: 'jinn.venue_io' }]),
-      }),
-    );
+  it('derives the step trace from the codex transcript inside system_snapshot', async () => {
+    const codexJsonl = JSON.stringify({ type: 'item.completed', item: { type: 'command_execution', command: 'pytest -x', exit_code: 0 } });
+    const fetch = createEvidenceFetcher(ports(solutionWithSnapshot({ '.codex-code/stdout.jsonl': codexJsonl })));
     const ev = await fetch(ref());
-    expect(ev.stepTrace).toContain('run tests');
+    expect(ev.stepTrace).toContain('- cmd: pytest -x');
   });
 
   it('caps the step trace at MAX_TRACE_CHARS (4000)', async () => {
-    const many = Array.from({ length: 500 }, (_, i) => ({ name: `step number ${i} does a thing`, kind: 'jinn.phase' }));
-    const fetch = createEvidenceFetcher(
-      ports({
-        solution: { payload: { patch: PATCH }, trajectory: { sources: [{ cid: TRAJECTORY_CID }] } },
-        trajectory: traj(many),
-      }),
-    );
+    const many = Array.from({ length: 300 }, (_, i) =>
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: `step number ${i} does a thing in detail` }] } }),
+    ).join('\n');
+    const fetch = createEvidenceFetcher(ports(solutionWithSnapshot({ '.claude-code/stdout.jsonl': many })));
     const ev = await fetch(ref());
     expect(ev.stepTrace!.length).toBeLessThanOrEqual(4000);
   });
 
-  it('degrades to no step trace when the solution envelope has no trajectory ref (patch still returned)', async () => {
-    const fetch = createEvidenceFetcher(ports()); // default solution carries no trajectory
+  it('degrades to no step trace for a hermes-style snapshot (plain-text log, no decision path)', async () => {
+    const fetch = createEvidenceFetcher(ports(solutionWithSnapshot({ '.hermes-agent/stdout.log': 'started\ndone\n' })));
     const ev = await fetch(ref());
     expect(ev.stepTrace).toBeUndefined();
     expect(ev.patch).toBe(PATCH);
   });
 
-  it('degrades to no step trace when the trajectory fetch throws (never fails the whole evidence fetch)', async () => {
+  it('degrades to no step trace when the solution has no system_snapshot artifact', async () => {
+    const fetch = createEvidenceFetcher(ports()); // default solution carries no artifacts
+    const ev = await fetch(ref());
+    expect(ev.stepTrace).toBeUndefined();
+    expect(ev.patch).toBe(PATCH);
+  });
+
+  it('degrades to no step trace when the snapshot fetch throws (never fails the whole evidence fetch)', async () => {
     const fetch = createEvidenceFetcher(
       ports({
-        // references a cid that is NOT registered → the ipfs port throws on that hop
-        solution: { payload: { patch: PATCH }, trajectory: { sources: [{ cid: 'bafyMissing' }] } },
+        solution: {
+          payload: { patch: PATCH },
+          // references a cid that is NOT registered → the ipfs port throws on that hop
+          artifacts: [{ artifactType: 'system_snapshot', sha256: 'a'.repeat(64), sources: [{ cid: 'bafyMissing' }] }],
+        },
+      }),
+    );
+    const ev = await fetch(ref());
+    expect(ev.stepTrace).toBeUndefined();
+    expect(ev.patch).toBe(PATCH);
+  });
+
+  it('degrades to no step trace on a sha256 mismatch (tampered snapshot)', async () => {
+    const { wrapper } = wrapDonation(makeTarGz({ '.claude-code/stdout.jsonl': CLAUDE_JSONL }));
+    const fetch = createEvidenceFetcher(
+      ports({
+        solution: {
+          payload: { patch: PATCH },
+          artifacts: [{ artifactType: 'system_snapshot', sha256: 'f'.repeat(64), sources: [{ cid: SNAPSHOT_CID }] }],
+        },
+        snapshot: wrapper,
+      }),
+    );
+    const ev = await fetch(ref());
+    expect(ev.stepTrace).toBeUndefined();
+    expect(ev.patch).toBe(PATCH);
+  });
+
+  it('degrades to no step trace on corrupt snapshot bytes', async () => {
+    const bogus = Buffer.from('definitely not a tarball');
+    const { wrapper, sha256 } = wrapDonation(bogus);
+    const fetch = createEvidenceFetcher(
+      ports({
+        solution: {
+          payload: { patch: PATCH },
+          artifacts: [{ artifactType: 'system_snapshot', sha256, sources: [{ cid: SNAPSHOT_CID }] }],
+        },
+        snapshot: wrapper,
       }),
     );
     const ev = await fetch(ref());

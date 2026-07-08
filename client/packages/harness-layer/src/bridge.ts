@@ -53,10 +53,12 @@ export interface BridgeEvidence {
   /** `owner/repo` when known (tag + audit); defaults from the instance id. */
   repo?: string;
   /**
-   * The solver's own compressed step trace (span names + `jinn.span.kind`),
-   * present when the solution envelope carried a resolvable trajectory ref
-   * (§8, v0.5). A patch shows *what* changed, not the decision path;
-   * pattern-mode under-feeds without it. When absent, the layer-1 record is
+   * The solver's own compressed decision-path outline, derived from the raw
+   * harness transcript inside the solution's `system_snapshot` artifact
+   * (`.claude-code/stdout.jsonl` / `.codex-code/stdout.jsonl` — §8, #1472;
+   * `jinn.trajectory.v1` carries no reasoning until #1473). A patch shows
+   * *what* changed, not the decision path; pattern-mode under-feeds without
+   * it. When absent (hermes, missing/corrupt snapshot), the layer-1 record is
    * tagged `patch-only` (see `toBridgeCapturedTask`) so measurement can
    * stratify by evidence richness. Rides a step attribute → scrubbed by the
    * same layer-2 pipeline as every other attribute; it does not bypass scrub.

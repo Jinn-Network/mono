@@ -524,20 +524,24 @@ to the actual ledger shape:
   - `environment.harness.name: 'jinn-execution-ledger-bridge'` (segmentation key; see below),
   - `task.summary` from the instance problem statement,
   - `task.distributionTags: ['coding', 'swe-rebench', <language>]`,
-  - `steps`: a patch step and a verdict step — plus, **where the solution envelope carries the
-    solver's own trajectory ref** (`trajectory.sources[].cid`, or an artifact's
-    `metadata.producedBy.trajectoryCid`), a **solver-trajectory step** holding a compressed step
-    trace (span names + `jinn.span.kind`, capped). A patch shows *what* changed, not the decision
-    path; pattern-mode under-feeds without it. The trajectory content is placed in a step attribute
-    and therefore passes through **the same layer-2 scrub** `capture()` applies to every attribute
-    (§10) — it does **not** bypass the scrub.
-- **Evidence-richness stratification (`patch-only` tag, v0.5).** When the solver trajectory is
-  **unavailable** (older envelopes, or the ref does not resolve), the bridged layer-1 envelope's
-  freeform `distributionTags` gains **`'patch-only'`**, so the three-arm measurement (§11) can
-  stratify distillation quality by evidence richness (patch-only vs trajectory-enriched). This rides
-  the freeform tag array — **no frozen-envelope change** (§2.1); the tag count stays well under the
-  16-tag cap. Bridged evidence remains coarser than a native trace and this is stated honestly; the
-  trajectory enrichment narrows, not closes, the gap.
+  - `steps`: a patch step and a verdict step — plus, **where the solution's `system_snapshot`
+    artifact carries the harness's raw stdout transcript** (`.claude-code/stdout.jsonl` /
+    `.codex-code/stdout.jsonl` — the snapshot is a donation-wrapped gzipped tar of the solve
+    working dir), a **solver-trajectory step** holding a compressed decision-path outline
+    (assistant reasoning + tool/command invocations + error results, capped; #1472). This is the
+    corrected mechanics (2026-07-08): the solver's reasoning does NOT live in `jinn.trajectory.v1`
+    — every solution's trajectory carries only the packaging step's 2 `jinn.artifact.emit` spans;
+    making it truthful at solve time is #1473. A patch shows *what* changed, not the decision path;
+    pattern-mode under-feeds without it. The outline is placed in a step attribute and therefore
+    passes through **the same layer-2 scrub** `capture()` applies to every attribute (§10) — it
+    does **not** bypass the scrub (the snapshot content is additionally scrubbed at tar-build time).
+- **Evidence-richness stratification (`patch-only` tag, v0.5).** When no transcript is available
+  (hermes-agent's ~1KB plain-text log, a missing/corrupt snapshot, or a sha-mismatched wrapper),
+  the bridged layer-1 envelope's freeform `distributionTags` gains **`'patch-only'`**, so the
+  three-arm measurement (§11) can stratify distillation quality by evidence richness (patch-only vs
+  transcript-enriched). This rides the freeform tag array — **no frozen-envelope change** (§2.1);
+  the tag count stays well under the 16-tag cap. Bridged evidence remains coarser than a native
+  trace and this is stated honestly; the transcript enrichment narrows, not closes, the gap.
 - **Scrub at layer-2 altitude (D6), not trace-grade.** A verified swe-rebench solve is public-repo
   work, not raw private-machine activity, and its problem statements + patch identifiers are
   token-dense technical prose that #1409's trace-grade pipeline defaces — which the §6 guard would
