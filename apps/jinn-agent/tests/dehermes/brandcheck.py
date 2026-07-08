@@ -37,47 +37,91 @@ _TOOLSET_KEY_PATTERN = "|".join(re.escape(k) for k in _TOOLSET_KEYS)
 #   - hermes-agent\.nousresearch\.com — live upstream docs domain (fallback,
 #     secrets, kanban --help). Rewriting the string would 404 the link;
 #     re-pointing docs is a separate, larger undertaking than this sweep.
+#   - bare `hermes-agent` in a `pip install`/`uv pip install --upgrade`
+#     invocation (proxy's aiohttp-missing message, config.py's update-banner
+#     hint) — the real PyPI package name (pyproject.toml `name = "hermes-agent"`).
+#     Renaming the string would tell users to install a package that doesn't
+#     exist. Anchored to the pip-install context so it can't widen into a
+#     general "hermes-agent" brand-string exemption.
 #   - hermes\.service — legacy systemd unit filename `gateway migrate-legacy`
 #     detects and removes; filesystem truth like bin/hermes above.
+#   - hermes-gateway-<profile>.service — the current (non-legacy) per-profile
+#     systemd/launchd unit name pattern that same command's help text
+#     explicitly says it does NOT touch; also filesystem truth. argparse
+#     line-wraps this one right after the hyphen too (`hermes-\ngateway-...`),
+#     same tolerance as hermes-backup- above.
 #   - hermes\.exe — real Windows executable name `update --force` checks for
 #     (electron-builder output), filesystem truth.
-#   - hermes-root — the literal `--hermes-root` flag name (desktop/gui
-#     --help); an existing script-facing flag, not prose.
+#   - --hermes-root — the literal `--hermes-root` flag name (desktop/gui
+#     --help); an existing script-facing flag, not prose. Anchored to the
+#     `--` prefix (not bare `hermes-root`) so a stray bare mention would
+#     still be flagged as branding rather than silently swallowed.
 #   - nous-approved mcps — factual claim that Nous curates the bundled MCP
 #     catalog (mcp catalog --help); a statement about who vetted the
 #     content, not incidental branding.
-#   - --nous / nous-internal storage — debug.py's real Nous-operated S3
-#     bucket for private uploads; naming the operator of real infra.
-#   - bare `nous` as a --provider/auth choice value (logout, portal --help)
-#     — a provider-id enum literal users type verbatim, like a toolset key.
+#   - --nous / nous-internal storage / nous staff — debug.py's real
+#     Nous-operated S3 bucket for private uploads and who can view it;
+#     naming the operator of real infra, not incidental branding.
+#   - bare `nous` as a --provider/auth choice value (logout, portal --help,
+#     proxy start/gateway enroll's "nous or xai (default: nous)") — a
+#     provider-id enum literal users type verbatim, like a toolset key.
 #   - docs/hermes-kanban-v1-spec.pdf — a real repo-relative file path
 #     (kanban --help points users at it); filesystem truth, not branding.
+#   - anpicasso/hermes-plugin-chrome-profiles — a real third-party GitHub
+#     repo name used as a `plugins install` shorthand example; renaming it
+#     would point at a repo that doesn't exist. Also line-wraps right after
+#     the hyphen (`hermes-plugin-\nchrome-profiles`), same tolerance as
+#     hermes-backup- above.
+# Word/hyphen-boundary anchor: `\b` alone treats `-` as a non-word
+# character, so it sits on *both* sides of a hyphen and happily matches
+# `hermes-cli` in the middle of `hermes-cli-extra` or `prefix-hermes-slack`
+# — stripping just the real key and leaving `-extra` / `prefix-` behind,
+# which then passes the brand check even though the surrounding text is
+# not a real toolset key. (?<![\w-]) / (?![\w-]) instead require the
+# character immediately outside the match to be neither a word char nor a
+# hyphen, so adjacent-hyphen spillover is left in place and still flagged.
 _TECHNICAL = re.compile(
     r"HERMES_[A-Z0-9_]+|\.hermes\b|hermes_[a-z0-9_]+|nous_[a-z0-9_]+"
     r"|(?:venv/|\.local/)?bin/hermes\b"
     r"|hermes-\s*backup-"
     r"|hermes-\s*agent\.nousresearch\.com"
+    r"|(?:pip install(?:\s+--upgrade)?\s+'?)hermes-\s*agent(?=[\[\'\s]|$)"
     r"|hermes\.service\b"
+    r"|hermes-\s*gateway-<profile>\.service\b"
     r"|hermes\.exe\b"
-    r"|hermes-root\b"
+    r"|(?<![\w-])--hermes-root(?![\w-])"
     r"|(?i:nous-approved)\b"
     r"|(?i:nous-internal)\b"
+    r"|(?i:nous staff)\b"
     r"|--nous\b"
     r"|\{nous,"
     r"|add nous --type"
+    r"|nous or xai \(default: nous\)"
     r"|docs/hermes-\s*kanban-v1-spec\.pdf"
-    rf"|\b(?:{_TOOLSET_KEY_PATTERN})\b"
+    r"|anpicasso/hermes-\s*plugin-\s*chrome-profiles"
+    rf"|(?<![\w-])(?:{_TOOLSET_KEY_PATTERN})(?![\w-])"
 )
-_BRAND_WORDS = ("hermes", "nous")
+# "nous" as a bare substring also matches inside ordinary English words that
+# have nothing to do with the brand — e.g. "synchronous" (a real, legitimate
+# flag name: `curator run --help`'s `--sync, --synchronous`). "hermes" has
+# no such collision (checked against hermeneutics/hermetic/isotherms — none
+# contain it), so only "nous" needs the letter-boundary guard: it must not
+# be immediately preceded by a letter, which rules out "...chro-NOUS" while
+# still catching "Nous Portal", "Nous Research", "-nous", start-of-string
+# "nous", etc.
+_BRAND_PATTERNS = {
+    "hermes": re.compile(r"hermes"),
+    "nous": re.compile(r"(?<![a-z])nous"),
+}
 
 def strip_technical(text: str) -> str:
     return _TECHNICAL.sub("", text)
 
 def assert_no_upstream_brand(text: str) -> None:
     cleaned = strip_technical(text).lower()
-    for w in _BRAND_WORDS:
-        i = cleaned.find(w)
-        assert i == -1, f"upstream brand {w!r} leaked: ...{cleaned[max(0,i-40):i+40]!r}..."
+    for w, pattern in _BRAND_PATTERNS.items():
+        m = pattern.search(cleaned)
+        assert m is None, f"upstream brand {w!r} leaked: ...{cleaned[max(0,m.start()-40):m.start()+40]!r}..."
 
 def run_cli(*args: str, home: str) -> str:
     env = {**os.environ, "HERMES_HOME": home}

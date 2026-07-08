@@ -25,7 +25,7 @@ def test_main_path_surface_is_hermes_free(argline, tmp_path):
     assert_no_upstream_brand(run_cli(*argline.split(), home=str(tmp_path)))
 
 
-def _subcommand_names(top_level_help: str) -> list[str]:
+def _subcommand_names(help_text: str) -> list[str]:
     """Extract the exact subcommand list from argparse's own choices set.
 
     argparse renders the positional-argument choices as a single
@@ -37,9 +37,15 @@ def _subcommand_names(top_level_help: str) -> list[str]:
     "Examples:" block contains indented lines that look like more of the
     same table (e.g. ``jinn-agent auth add <provider>    Add a pooled
     credential``) but aren't subcommands at all.
+
+    Returns an empty list (not an error) when there is no nested choices
+    block — that's the normal, expected shape for a depth-1 subcommand with
+    no children (e.g. ``doctor --help``, ``status --help``), and callers at
+    depth 2 rely on that to mean "nothing further to descend into".
     """
-    m = re.search(r"positional arguments:\n\s+\{([^}]+)\}", top_level_help)
-    assert m, "could not find the positional-arguments choices set in --help output"
+    m = re.search(r"positional arguments:\n\s+\{([^}]+)\}", help_text)
+    if not m:
+        return []
     return sorted(m.group(1).split(","))
 
 
@@ -49,6 +55,7 @@ def test_every_subcommand_help_is_hermes_free(tmp_path):
     assert len(subs) > 50, f"scrape looks too small ({len(subs)}); parser surface may have changed"
 
     unreachable: dict[str, str] = {}
+    checked_depth2 = 0
     for s in subs:
         out = run_cli(s, "--help", home=str(tmp_path))
         # Every subcommand in this CLI answers `--help` non-interactively
@@ -59,21 +66,48 @@ def test_every_subcommand_help_is_hermes_free(tmp_path):
         # exclusion path below exists so we can still assert something, but
         # it is not a way to quietly drop coverage.
         if not out.strip():
-            unreachable[s] = "empty output"
+            unreachable[(s,)] = "empty output"
             continue
         try:
             assert_no_upstream_brand(out)
         except AssertionError as e:
             raise AssertionError(f"subcommand {s!r} --help leaked brand: {e}") from e
 
+        # Recurse one level: a depth-1 subcommand's --help only shows each
+        # child's one-line `help=` blurb, never its full `description=` or
+        # its own nested flags/epilog — brand leaks live in exactly that
+        # untested text (this is precisely how the review's 17 depth-2
+        # leaks escaped the original depth-1-only gate). Bound at depth 2:
+        # only recurse where a nested `{a,b,...}` choices block is actually
+        # present (grandchildren, e.g. `skills snapshot export`, are out of
+        # scope for this gate — the brief bounds depth at 2).
+        children = _subcommand_names(out)
+        for c in children:
+            checked_depth2 += 1
+            child_out = run_cli(s, c, "--help", home=str(tmp_path))
+            if not child_out.strip():
+                unreachable[(s, c)] = "empty output"
+                continue
+            try:
+                assert_no_upstream_brand(child_out)
+            except AssertionError as e:
+                raise AssertionError(
+                    f"subcommand {s!r} {c!r} --help leaked brand: {e}"
+                ) from e
+
+    assert checked_depth2 > 0, (
+        "no depth-2 nested subcommands were found to probe; the recursive "
+        "scrape may be broken (parser surface may have changed shape)"
+    )
+
     # Fallback path for any subcommand whose --help could not be exercised
     # this way (documented per-case, not a silent catch-all): fall back to
     # asserting on the registered description/help string in source.
-    for s, reason in unreachable.items():
+    for path, reason in unreachable.items():
         raise AssertionError(
-            f"subcommand {s!r} --help was unreachable ({reason}); add a "
-            f"source-level assertion here against its description= string "
-            f"instead of silently excluding it"
+            f"subcommand {' '.join(path)!r} --help was unreachable ({reason}); "
+            f"add a source-level assertion here against its description= "
+            f"string instead of silently excluding it"
         )
 
 
