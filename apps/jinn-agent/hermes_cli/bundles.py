@@ -44,7 +44,7 @@ def _cmd_list(args) -> None:
     if not bundles:
         c.print(
             f"[dim]No bundles installed yet. Create one with:\n"
-            f"  hermes bundles create <name> --skill skill1 --skill skill2[/]\n"
+            f"  jinn-agent bundles create <name> --skill skill1 --skill skill2[/]\n"
             f"Bundles directory: [bold]{_bundles_dir()}[/]"
         )
         return
@@ -194,7 +194,7 @@ def register_cli(subparser) -> None:
     )
     p_create.add_argument(
         "--description", "-d", default="",
-        help="Human-readable description shown in /help and `hermes bundles list`",
+        help="Human-readable description shown in /help and `jinn-agent bundles list`",
     )
     p_create.add_argument(
         "--instruction", "-i", default="",

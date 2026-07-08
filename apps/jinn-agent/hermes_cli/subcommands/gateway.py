@@ -218,7 +218,7 @@ def build_gateway_parser(
         "migrate-legacy",
         help="Remove legacy hermes.service units from pre-rename installs",
         description=(
-            "Stop, disable, and remove legacy Hermes gateway unit files "
+            "Stop, disable, and remove legacy jinn-agent gateway unit files "
             "(e.g. hermes.service) left over from older installs. Profile "
             "units (hermes-gateway-<profile>.service) and unrelated "
             "third-party services are never touched."
@@ -248,11 +248,11 @@ def build_gateway_parser(
         help="Enroll this gateway with a relay connector (writes relay auth creds to .env)",
         description=(
             "Redeem a single-use enrollment token with a relay connector. "
-            "Authenticates as your Nous Portal account (the connector derives the "
+            "Authenticates as your provider portal account (the connector derives the "
             "authoritative tenant from it), mints this gateway's per-gateway secret "
             "and per-tenant delivery key, and writes GATEWAY_RELAY_ID / "
             "GATEWAY_RELAY_SECRET / GATEWAY_RELAY_DELIVERY_KEY into ~/.hermes/.env. "
-            "Requires being logged in (hermes setup). Not available in managed installs."
+            "Requires being logged in (jinn-agent setup). Not available in managed installs."
         ),
     )
     gateway_enroll.add_argument(
@@ -321,7 +321,7 @@ def build_gateway_parser(
     proxy_start.add_argument(
         "--provider",
         default="nous",
-        help="Upstream provider: nous or xai (default: nous). See `hermes proxy providers`.",
+        help="Upstream provider: nous or xai (default: nous). See `jinn-agent proxy providers`.",
     )
     proxy_start.add_argument(
         "--host",

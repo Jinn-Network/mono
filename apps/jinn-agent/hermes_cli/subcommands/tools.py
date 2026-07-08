@@ -79,7 +79,7 @@ def build_tools_parser(subparsers, *, cmd_tools: Callable) -> None:
         help="Run a provider's post-setup install hook (npm/pip/binary)",
         description=(
             "Run the install/bootstrap hook a tool backend declares — the\n"
-            "same step `hermes tools` runs after you pick a provider that\n"
+            "same step `jinn-agent tools` runs after you pick a provider that\n"
             "needs extra dependencies (browser Chromium, Camofox, cua-driver,\n"
             "KittenTTS/Piper, ddgs, Spotify, Langfuse, xAI). Stable,\n"
             "non-interactive target the dashboard spawns to drive backend\n"
