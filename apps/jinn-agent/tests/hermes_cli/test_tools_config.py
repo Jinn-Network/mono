@@ -1253,14 +1253,19 @@ def test_get_platform_tools_recovers_non_configurable_toolsets_from_composite():
         "tools": ["_test_special_tool"],
         "includes": [],
     }
-    fake_toolsets["hermes-_test_platform"] = {
+    # Canonical bundle naming (jinn-<platform>) — must match what
+    # _get_platform_tools synthesises via platform_bundle_toolset() when the
+    # PLATFORMS patch is not visible (another test re-importing tools_config
+    # leaves this test's mock on a stale module object; see the module-object
+    # split between sys.modules and the executing function's globals).
+    fake_toolsets["jinn-_test_platform"] = {
         "description": "test composite",
         "tools": ["web_search", "web_extract", "terminal", "process", "_test_special_tool"],
         "includes": [],
     }
 
     test_platforms = {
-        "_test_platform": {"label": "Test", "default_toolset": "hermes-_test_platform"},
+        "_test_platform": {"label": "Test", "default_toolset": "jinn-_test_platform"},
     }
 
     with mock_patch("hermes_cli.tools_config.PLATFORMS", {**PLATFORMS, **test_platforms}):
