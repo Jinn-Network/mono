@@ -58,6 +58,22 @@ describe('toBridgeCapturedTask (both polarities, D10)', () => {
     const verdictStep = t.steps.find((s) => s.name === 'evaluator:verdict');
     expect(verdictStep?.attributes.actualPassed).toBe(false);
   });
+
+  it('inserts a solver:trajectory step between patch and verdict when enriched (§8, v0.5)', () => {
+    const t = toBridgeCapturedTask(ref(), { ...ev, stepTrace: '- plan [jinn.phase]\n- edit [jinn.mcp_call]' }, NOW);
+    const names = t.steps.map((s) => s.name);
+    expect(names).toEqual(['tool:apply_patch', 'solver:trajectory', 'evaluator:verdict']);
+    const traceStep = t.steps.find((s) => s.name === 'solver:trajectory');
+    expect(String(traceStep!.attributes.trace)).toContain('plan');
+    // enriched evidence is NOT tagged patch-only
+    expect(t.task.distributionTags).not.toContain('patch-only');
+  });
+
+  it('tags patch-only and inserts no trace step when the trajectory is unavailable (§8, v0.5)', () => {
+    const t = toBridgeCapturedTask(ref(), ev, NOW); // ev has no stepTrace
+    expect(t.steps.map((s) => s.name)).toEqual(['tool:apply_patch', 'evaluator:verdict']);
+    expect(t.task.distributionTags).toContain('patch-only');
+  });
 });
 
 describe('bridgeAttempts', () => {
@@ -164,6 +180,28 @@ describe('buildBridgeEvidencePublisher (reuses capture→publish at layer-2 alti
     const patchVal = String(patchStep!.attributes.patch);
     expect(patchVal).not.toContain('wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'); // secret redacted
     expect(patchVal).toContain('use this token'); // ordinary prose preserved (layer-2 altitude)
+  });
+
+  it('scrubs the solver-trajectory step at layer-2 too (a planted secret in the trace is redacted)', async () => {
+    const { deps, artifacts } = publishDeps();
+    const publisher = buildBridgeEvidencePublisher(deps);
+    const task = toBridgeCapturedTask(
+      ref(),
+      {
+        taskSummary: 'Fix the bug',
+        patch: 'diff --git a/x b/x',
+        stepTrace: '- read config using wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY [jinn.venue_io]\n- edit models.py [jinn.mcp_call]',
+      },
+      NOW,
+    );
+    await publisher(task, ref());
+
+    const traceUpload = artifacts.find((a) => a.artifactType === 'jinn.trace-envelope.v0');
+    const env = parseTraceEnvelopeV0(traceUpload!.payload);
+    const traceStep = env.steps.find((s) => s.name === 'solver:trajectory')!;
+    const traceVal = String(traceStep.attributes.trace);
+    expect(traceVal).not.toContain('wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'); // secret redacted
+    expect(traceVal).toContain('edit models.py'); // ordinary prose preserved (layer-2 altitude)
   });
 
   it('bridges a patch larger than the 16 KiB step-attribute cap with a receipted truncation (not a crash, not silent)', async () => {

@@ -27,12 +27,73 @@ import { type AttemptRef, type BridgeEvidence, repoFromInstanceId } from './brid
 /** Cap the fetched patch / problem so one huge diff does not blow the prompt. */
 const MAX_PATCH_CHARS = 6000;
 const MAX_PROBLEM_CHARS = 1500;
+/** Cap the compressed solver trace (§8, v0.5) so a long run does not blow the prompt. */
+const MAX_TRACE_CHARS = 4000;
 
 export interface EvidenceFetcherPorts {
   /** Fetch + JSON-parse an IPFS object by CID (autonolas gateway in production). */
   ipfs: (cid: string) => Promise<any>;
   /** Run a GraphQL query string against the Ponder indexer, returning `data`. */
   gql: (query: string) => Promise<any>;
+}
+
+/**
+ * Resolve the solver's trajectory-doc CID off a solution envelope: prefer the
+ * top-level `trajectory.sources[].cid`, else the first artifact's
+ * `metadata.producedBy.trajectoryCid` (client/src/types/envelope.ts). Returns
+ * `undefined` when neither is present.
+ */
+function trajectoryCidOf(solutionEnv: any): string | undefined {
+  const top = solutionEnv?.trajectory?.sources?.[0]?.cid;
+  if (typeof top === 'string' && top) return top;
+  const arts = solutionEnv?.artifacts;
+  if (Array.isArray(arts)) {
+    for (const a of arts) {
+      const cid = a?.metadata?.producedBy?.trajectoryCid;
+      if (typeof cid === 'string' && cid) return cid;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Compress a `jinn.trajectory.v1` doc into a compact decision-path trace — one
+ * line per span (`- <name> [<jinn.span.kind>]`), capped at `MAX_TRACE_CHARS`.
+ * Hash-chain / signature plumbing is dropped; only the reasoning shape is kept.
+ * Returns `undefined` when the doc carries no usable spans.
+ */
+function compressTrajectory(doc: any): string | undefined {
+  const spans = doc?.spans;
+  if (!Array.isArray(spans) || spans.length === 0) return undefined;
+  const lines: string[] = [];
+  for (const s of spans) {
+    const name = typeof s?.name === 'string' ? s.name.trim() : '';
+    if (!name) continue;
+    const kind = typeof s?.attributes?.['jinn.span.kind'] === 'string' ? s.attributes['jinn.span.kind'] : 'span';
+    lines.push(`- ${name} [${kind}]`);
+  }
+  if (lines.length === 0) return undefined;
+  return lines.join('\n').slice(0, MAX_TRACE_CHARS);
+}
+
+/**
+ * Fetch + compress the solver's trajectory for one solution envelope (§8, v0.5).
+ * Best-effort: ANY failure (no ref, unresolvable CID, malformed doc, fetch
+ * error) degrades to `undefined` — the trajectory is enrichment, never a gate
+ * on the evidence fetch. Absence is later recorded as a `patch-only` tag.
+ */
+async function fetchStepTrace(
+  ipfs: (cid: string) => Promise<any>,
+  solutionEnv: any,
+): Promise<string | undefined> {
+  try {
+    const cid = trajectoryCidOf(solutionEnv);
+    if (!cid) return undefined;
+    const doc = await ipfs(cid);
+    return compressTrajectory(doc);
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -78,6 +139,10 @@ export function createEvidenceFetcher(
       throw new Error(`no payload.patch on solution envelope ${solutionCid}`);
     }
 
+    // Hop 4 (best-effort, §8 v0.5): the solver's own trajectory off the SAME
+    // solution envelope. Never throws — absence is recorded as `patch-only`.
+    const stepTrace = await fetchStepTrace(ports.ipfs, solutionEnv);
+
     const problem = String(taskDoc?.description ?? taskDoc?.spec?.problem_statement ?? '')
       .replace(/\s+/g, ' ')
       .trim()
@@ -87,6 +152,7 @@ export function createEvidenceFetcher(
       taskSummary: problem || ref.instanceId,
       patch: patch.slice(0, MAX_PATCH_CHARS),
       ...(repo ? { repo } : {}),
+      ...(stepTrace ? { stepTrace } : {}),
     };
   };
 }

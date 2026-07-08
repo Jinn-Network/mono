@@ -100,6 +100,18 @@ describe('clusterEvidence (distinct-instance clustering by tier, §7)', () => {
     expect(input[0]!.steps[0]!.name).toBe('tool:apply_patch');
   });
 
+  it('projects step ATTRIBUTES (patch content), not just names — the distiller must see the evidence (§8, v0.5)', () => {
+    const clusters = clusterEvidence([
+      { ref: 'evA-p1', instanceId: 'instA', env: pattern() },
+    ]);
+    const input = clusters[0]!.input as Array<{
+      steps: Array<{ name: string; attributes?: Record<string, unknown> }>;
+    }>;
+    const patchStep = input[0]!.steps.find((s) => s.name === 'tool:apply_patch')!;
+    // the fixture env() carries a real diff in the patch attribute
+    expect(String(patchStep.attributes?.patch)).toContain('qs.distinct()');
+  });
+
   it('honours the heldOut predicate — a slate instance is dropped', () => {
     const clusters = clusterEvidence(items, { heldOut: (id) => id === 'instA' });
     expect(clusters.map((c) => c.clusterId)).toEqual(['pattern:instB']);

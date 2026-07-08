@@ -32,7 +32,11 @@ export interface ClusterOptions {
 
 /**
  * A compact projection of one eligible item's envelope — enough for the LLM
- * port to distil without carrying the full trace body.
+ * port to distil. Steps carry their `attributes` (the patch diff, the solver
+ * step trace) as well as their name: a name-only projection under-feeds the
+ * distiller — the patch is *what changed* and the trace is *the decision path*
+ * (§8, v0.5). Each attribute is already ≤16 KiB (capped by `capture()`), so no
+ * further bound is applied here.
  */
 interface ClusterInputItem {
   ref: string;
@@ -40,7 +44,7 @@ interface ClusterInputItem {
   taskSummary: string;
   distributionTags: string[];
   outcome: { status: TraceEnvelopeV0['outcome']['status']; summary?: string };
-  steps: Array<{ name: string }>;
+  steps: Array<{ name: string; attributes?: Record<string, unknown> }>;
 }
 
 /**
@@ -75,7 +79,7 @@ export function clusterEvidence(items: ClusterItem[], opts: ClusterOptions = {})
       taskSummary: it.env.task.summary,
       distributionTags: it.env.task.distributionTags,
       outcome: { status: it.env.outcome.status, summary: it.env.outcome.summary },
-      steps: it.env.steps.map((s) => ({ name: s.name })),
+      steps: it.env.steps.map((s) => ({ name: s.name, attributes: s.attributes })),
     }));
     clusters.push({
       clusterId,

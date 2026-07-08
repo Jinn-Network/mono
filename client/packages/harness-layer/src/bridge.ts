@@ -52,6 +52,16 @@ export interface BridgeEvidence {
   patch: string;
   /** `owner/repo` when known (tag + audit); defaults from the instance id. */
   repo?: string;
+  /**
+   * The solver's own compressed step trace (span names + `jinn.span.kind`),
+   * present when the solution envelope carried a resolvable trajectory ref
+   * (§8, v0.5). A patch shows *what* changed, not the decision path;
+   * pattern-mode under-feeds without it. When absent, the layer-1 record is
+   * tagged `patch-only` (see `toBridgeCapturedTask`) so measurement can
+   * stratify by evidence richness. Rides a step attribute → scrubbed by the
+   * same layer-2 pipeline as every other attribute; it does not bypass scrub.
+   */
+  stepTrace?: string;
 }
 
 export interface BridgeDeps {
@@ -101,11 +111,18 @@ const NANO = (d: Date): string => `${d.getTime()}000000`;
  * bound is stored truncated (inherited from the frozen pipe, D5 — not
  * re-implemented here). Real SWE-bench patches can exceed 16 KiB; the truncation
  * is recorded in the envelope's step receipt, not silent.
+ *
+ * Evidence-richness (§8, v0.5): when `ev.stepTrace` is present, a
+ * `solver:trajectory` step is inserted between the patch and verdict steps (its
+ * content is a plain step attribute → scrubbed like the patch). When absent, a
+ * `patch-only` tag is appended to `distributionTags` so the three-arm
+ * measurement (§11) can stratify distillation quality by evidence richness.
  */
 export function toBridgeCapturedTask(ref: AttemptRef, ev: BridgeEvidence, now: Date): CapturedTask {
   const nano = NANO(now);
   const isPass = ref.polarity === 'pass';
   const repo = ev.repo ?? repoFromInstanceId(ref.instanceId) ?? undefined;
+  const enriched = typeof ev.stepTrace === 'string' && ev.stepTrace.length > 0;
   return {
     session: {
       sessionId: `bridge:${ref.instanceId}:${ref.polarity}:${ref.requestId}`,
@@ -113,7 +130,12 @@ export function toBridgeCapturedTask(ref: AttemptRef, ev: BridgeEvidence, now: D
     },
     task: {
       summary: `swe-rebench ${ref.instanceId}: ${ev.taskSummary}`.slice(0, 500),
-      distributionTags: ['coding', 'swe-rebench', ...(repo ? [repo.slice(0, 64)] : [])],
+      distributionTags: [
+        'coding',
+        'swe-rebench',
+        ...(repo ? [repo.slice(0, 64)] : []),
+        ...(enriched ? [] : ['patch-only']),
+      ],
     },
     environment: {
       harness: { name: 'jinn-execution-ledger-bridge', version: '0.1.0' },
@@ -130,6 +152,19 @@ export function toBridgeCapturedTask(ref: AttemptRef, ev: BridgeEvidence, now: D
         attributes: { patch: ev.patch },
         redactedKeys: [],
       },
+      ...(enriched
+        ? [
+            {
+              spanId: 'trace',
+              parentSpanId: null,
+              name: 'solver:trajectory',
+              startTimeUnixNano: nano,
+              endTimeUnixNano: nano,
+              attributes: { trace: ev.stepTrace as string },
+              redactedKeys: [],
+            },
+          ]
+        : []),
       {
         spanId: 'verdict',
         parentSpanId: null,
