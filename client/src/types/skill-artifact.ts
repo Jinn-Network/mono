@@ -79,12 +79,13 @@ export const SkillProvenanceSchema = z.object({
   // --- distilled-skill fields (DR-2026-07-06, additive; producer is
   // publishSkill() in client/packages/harness-layer/src/publish-skill.ts) ---
   /**
-   * Success→strategic-pattern, failure→lesson, or both-polarity→contrastive
-   * (spec §7, D10 + v0.5). `contrastive` is an additive enum value: strict
-   * consumers (`extractSkill`) reject it until upgraded — acceptable at
-   * testnet volume, named in the spec.
+   * Success→strategic-pattern, failure→lesson, both-polarity→contrastive
+   * (spec §7, D10 + v0.5), or cross-instance corroboration→cross-instance
+   * (stage-2 meta-distill). `contrastive` and `cross-instance` are additive
+   * enum values: strict consumers (`extractSkill`) reject them until upgraded
+   * — acceptable at testnet volume, named in the spec.
    */
-  skillKind: z.enum(['strategic-pattern', 'failure-lesson', 'contrastive']).optional(),
+  skillKind: z.enum(['strategic-pattern', 'failure-lesson', 'contrastive', 'cross-instance']).optional(),
   /** SHA-256 of the exact distill prompt that produced the skill (auditability, D4). */
   distillPromptSha256: z
     .string()

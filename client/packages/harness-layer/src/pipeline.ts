@@ -25,8 +25,8 @@ import { capture } from './capture.js';
 import { publish, type HarnessPublishDeps } from './publish.js';
 import { buildLayer2ScrubPipeline } from '../../../src/trajectory/scrub/layer2.js';
 import { parseTraceEnvelopeV0, type TraceEnvelopeV0 } from './envelope.js';
-import { clusterEvidence } from './cluster.js';
-import { distillClusters, type DistillCluster, type DistillLLMOutput, type DistillResult } from './distill.js';
+import { clusterEvidence, buildMetaClusters, type MetaCluster, type Stage1PublishedSkill } from './cluster.js';
+import { distillClusters, metaDistill, type DistillCluster, type DistillLLMOutput, type DistillResult, type MetaDistillLLMOutput, type MetaDistillResult } from './distill.js';
 import type { SkillPackage } from './skill-package.js';
 
 export interface PipelineDeps {
@@ -45,6 +45,10 @@ export interface PipelineDeps {
   distribution?: string;
   /** The distilling model, recorded in each skill's provenance (§5 auditability). */
   distillModel?: string;
+  /** Enable stage-2 cross-instance meta-distill (issue #1463). Default off (opt-in). */
+  meta?: boolean;
+  /** The stage-2 meta LLM port. Required when `meta` is true. */
+  metaDistill?: (cluster: MetaCluster) => Promise<MetaDistillLLMOutput>;
   limit?: number;
   now?: () => Date;
 }
@@ -53,6 +57,8 @@ export interface PipelineResult {
   bridge: BridgeResult;
   clusterCount: number;
   distilled: DistillResult;
+  /** Stage-2 result — present only when `meta` was enabled. */
+  metaDistilled?: MetaDistillResult;
 }
 
 export async function runDistillationPipeline(deps: PipelineDeps): Promise<PipelineResult> {
@@ -100,5 +106,28 @@ export async function runDistillationPipeline(deps: PipelineDeps): Promise<Pipel
     ...(deps.now ? { now: deps.now } : {}),
   });
 
-  return { bridge, clusterCount: clusters.length, distilled };
+  // 4. Stage-2 (opt-in) — cross-instance meta-distill over the stage-1 skills
+  //    this run just published. Reads only in-memory results (no corpus round-trip).
+  let metaDistilled: MetaDistillResult | undefined;
+  if (deps.meta) {
+    if (!deps.metaDistill) {
+      throw new Error('runDistillationPipeline: meta is enabled but no metaDistill port was provided');
+    }
+    const clusterById = new Map(clusters.map((c) => [c.clusterId, c]));
+    const stage1: Stage1PublishedSkill[] = distilled.published.map((p) => {
+      const cl = clusterById.get(p.clusterId);
+      if (!cl) throw new Error(`meta: no originating cluster for ${p.clusterId}`);
+      return { clusterId: p.clusterId, skillKind: p.skillKind, pkg: p.pkg, evidenceRefs: cl.evidenceRefs, instanceIds: cl.instanceIds };
+    });
+    metaDistilled = await metaDistill(buildMetaClusters(stage1), {
+      metaDistill: deps.metaDistill,
+      publishSkill: deps.publishSkill,
+      slate: deps.slate,
+      ...(deps.distribution ? { distribution: deps.distribution } : {}),
+      ...(deps.distillModel ? { distillModel: deps.distillModel } : {}),
+      ...(deps.now ? { now: deps.now } : {}),
+    });
+  }
+
+  return { bridge, clusterCount: clusters.length, distilled, ...(metaDistilled ? { metaDistilled } : {}) };
 }

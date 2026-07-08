@@ -404,7 +404,9 @@ A human-run script (`yarn distill --distribution coding`), **not** a SolverNet (
 1. **Select** — pull eligible evidence (the §6 gate) for the target distribution from the corpus.
 2. **Cluster** — group into sub-problems by *distinct* `instance_id` (§6), then by
    `distributionTags` overlap + `task.summary` similarity; **human-curated grouping is acceptable**
-   for the first skills. Automated clustering beyond this is out of scope.
+   for the first skills. Automated *evidence-level* clustering beyond this is out of scope (the
+   opt-in stage-2 pass below groups *already-distilled* stage-1 skills by polarity — that is in
+   scope; it does not auto-cluster raw evidence).
 3. **Distil — both polarities (SkillRL decomposition, D10).** Run **`jinn-skill-distill-prompt-v1`**
    (a new prompt, distinct from the session-derived task prompt) over each cluster's evidence —
    `task.summary`, `outcome.summary`, step names **and step content** (patches/diffs + the solver's
@@ -476,6 +478,16 @@ A human-run script (`yarn distill --distribution coding`), **not** a SolverNet (
 Output of v1: a small set of coding skills, each provenance-linked to evaluator-verified evidence,
 anchored, installable — and each of which must *earn its place* against raw-evidence retrieval
 (§11, D9).
+
+**Stage-2 — cross-instance meta-distill (in scope, additive/opt-in; issue #1463).** After the
+single-pass distillation above, an opt-in second pass groups the stage-1 skills this run just
+published **by polarity** (their `skillKind`) and asks a distinct prompt
+(`jinn-skill-meta-distill-prompt-v1`, its own published SHA) for the recurring rule corroborated
+across **≥2 distinct instances**. It emits a `skillKind: 'cross-instance'` skill whose provenance is
+the **union** of the supporting sources' layer-1 evidence CIDs (so `distilledFrom > 1`), and reuses
+the same output-scrub → contamination-scan → structural-gate → publish path unchanged. It reads only
+stage-1's in-memory results — no corpus round-trip — and never groups a `cross-instance` skill (no
+recursion). Disabled by default (`yarn distill … --meta` / pipeline `meta: true`).
 
 ## 8. The bridge — execution ledger → layer-1 evidence
 
@@ -732,7 +744,9 @@ guardrail) + the pilot + the held-out interface.
   this is v3 and is where DR-2026-05-07's session-derived machinery re-enters.
 - **Classification / routing** of evidence into multiple distributions (DR-2026-05-07 β/γ).
 - **Multiple distributions** beyond coding.
-- **Automated clustering** beyond distinct-instance + tags + summary similarity.
+- **Automated *evidence-level* clustering** beyond distinct-instance + tags + summary similarity (§7.2).
+  Stage-2's polarity-grouping of *already-distilled* stage-1 skills is in scope (§7 Stage-2 note); auto-
+  clustering *raw evidence* beyond the §7.2 grouping is not.
 - **The `skills` source resolver / `/jinn skills install` command** — contract defined (§9), build
   deferred.
 - **A discovery-time ranking surface** and an **indexed `artifactType` column** — v1 accepts the

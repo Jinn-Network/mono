@@ -46,10 +46,11 @@ import { isInsidePackageDir } from '../../../src/util/path-safety.js';
 import { runDistillationPipeline } from './pipeline.js';
 import { createVerdictSource, type VerdictSource } from './bridge-verdict-source.js';
 import { createEvidenceFetcher } from './bridge-fetch-evidence.js';
-import { createClaudeDistiller, DEFAULT_MODEL as DEFAULT_DISTILL_MODEL } from './distill-llm.js';
+import { createClaudeDistiller, createClaudeMetaDistiller, DEFAULT_MODEL as DEFAULT_DISTILL_MODEL } from './distill-llm.js';
 import { buildSkillMarkdown } from './skill-package.js';
 import type { AttemptRef, BridgeEvidence } from './bridge.js';
-import type { DistillCluster, DistillLLMOutput } from './distill.js';
+import type { DistillCluster, DistillLLMOutput, MetaDistillLLMOutput } from './distill.js';
+import type { MetaCluster } from './cluster.js';
 import { DEFAULT_TESTNET_DISCOVERY_URL } from '../../../src/config.js';
 import {
   loadActiveHeldOutSlateIds,
@@ -83,11 +84,13 @@ Commands:
                                                  Publish the approved import rows (APPROVAL
                                                  GATE: run only after the plan report is
                                                  signed off)
-  distill run [--limit N] [--out <dir>]          Run the distillation pipeline over the
+  distill run [--limit N] [--out <dir>] [--meta] Run the distillation pipeline over the
                                                  swe-rebench-v2 verdict ledger: verdict→solution
                                                  join → distil (claude) → local SKILL.md packages.
                                                  Held-out slate instances are excluded. Writes
                                                  <out>/<name>/SKILL.md and prints the summary.
+                                                 --meta also runs stage-2 cross-instance
+                                                 meta-distill over the stage-1 skills.
 
 Environment:
   JINN_DISCOVERY_URL       Override the discovery indexer URL (default: testnet Ponder indexer)
@@ -118,6 +121,8 @@ export interface DistillCliDeps {
   fetchEvidence?: (ref: AttemptRef) => Promise<BridgeEvidence>;
   /** The LLM distill port. Default: createClaudeDistiller. */
   distill?: (cluster: DistillCluster) => Promise<DistillLLMOutput>;
+  /** The stage-2 meta LLM port. Default: createClaudeMetaDistiller. */
+  metaDistill?: (cluster: MetaCluster) => Promise<MetaDistillLLMOutput>;
   /** Layer-1 evidence publish deps. Default: live testnet wiring from env. */
   publishDeps?: HarnessPublishDeps;
   /** Held-out slate instance ids. Default: the active swe-rebench-v2 slate. */
@@ -372,6 +377,7 @@ export async function runJinnLayerCli(
         path: { type: 'string' },
         veto: { type: 'boolean', default: false },
         source: { type: 'string' },
+        meta: { type: 'boolean', default: false },
       },
       allowPositionals: true,
     });
@@ -510,6 +516,8 @@ export async function runJinnLayerCli(
     // `distillModel` recorded in provenance (§5), so the record matches the run.
     const distillModel = process.env['JINN_DISTILL_MODEL'] ?? DEFAULT_DISTILL_MODEL;
     const distill = dd.distill ?? createClaudeDistiller({ model: distillModel });
+    const metaEnabled = parsed.values.meta as boolean;
+    const metaDistillPort = dd.metaDistill ?? createClaudeMetaDistiller({ model: distillModel });
     const publishDeps = dd.publishDeps ?? buildLivePublishDepsFromEnv();
 
     // Local-fs publishSkill: write <out>/<name>/SKILL.md (mirror distill-run-live.ts).
@@ -529,6 +537,7 @@ export async function runJinnLayerCli(
       slate: { instanceIds: slateInstanceIds },
       distribution: 'coding',
       distillModel,
+      ...(metaEnabled ? { meta: true, metaDistill: metaDistillPort } : {}),
       ...(limit !== undefined ? { limit } : {}),
     });
 
@@ -543,10 +552,18 @@ export async function runJinnLayerCli(
       for (const p of result.distilled.published) lines.push(`  PUBLISHED ${p.skillKind} ${p.envelopeRef} (${p.clusterId})`);
       for (const r of result.distilled.rejected) lines.push(`  rejected  ${r.clusterId} — ${r.reason}`);
       for (const e of result.distilled.errors) lines.push(`  ERROR     ${e.clusterId} — ${e.error}`);
+      if (result.metaDistilled) {
+        lines.push('', `meta-distilled: published ${result.metaDistilled.published.length}, rejected ${result.metaDistilled.rejected.length}, errors ${result.metaDistilled.errors.length}`);
+        for (const p of result.metaDistilled.published) {
+          lines.push(`  META ${p.skillKind} ${p.envelopeRef} (${p.metaClusterId}) evidenceTokens=${p.pkg.jinn.evidenceTokens} skillTokens=${p.pkg.jinn.skillTokens}`);
+        }
+        for (const r of result.metaDistilled.rejected) lines.push(`  meta-rejected ${r.metaClusterId} — ${r.reason}`);
+        for (const e of result.metaDistilled.errors) lines.push(`  META-ERROR ${e.metaClusterId} — ${e.error}`);
+      }
       lines.push('', `skills written under: ${outDir}`);
       writer.write(lines.join('\n') + '\n');
     }
-    return result.distilled.errors.length > 0 ? 1 : 0;
+    return result.distilled.errors.length > 0 || (result.metaDistilled?.errors.length ?? 0) > 0 ? 1 : 0;
   }
 
   if (isPublish) {

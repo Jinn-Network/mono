@@ -31,7 +31,8 @@ import {
   assertConformantName,
   type SkillPackage,
 } from './skill-package.js';
-import { JINN_SKILL_DISTILL_PROMPT_V1_SHA256 } from './distill-prompt.js';
+import { JINN_SKILL_DISTILL_PROMPT_V1_SHA256, JINN_SKILL_META_DISTILL_PROMPT_V1_SHA256 } from './distill-prompt.js';
+import type { MetaCluster, MetaSource } from './cluster.js';
 
 export interface DistillCluster {
   clusterId: string;
@@ -69,10 +70,10 @@ export interface DistillDeps {
   now?: () => Date;
 }
 
-export type SkillKind = 'strategic-pattern' | 'failure-lesson' | 'contrastive';
+export type SkillKind = 'strategic-pattern' | 'failure-lesson' | 'contrastive' | 'cross-instance';
 
 export interface DistillResult {
-  published: Array<{ clusterId: string; skillKind: SkillKind; envelopeRef: string }>;
+  published: Array<{ clusterId: string; skillKind: SkillKind; envelopeRef: string; pkg: SkillPackage }>;
   rejected: Array<{ clusterId: string; reason: string }>;
   errors: Array<{ clusterId: string; error: string }>;
 }
@@ -203,80 +204,234 @@ const SKILL_KIND_BY_TIER: Record<DistillCluster['tier'], SkillKind> = {
   contrastive: 'contrastive',
 };
 
+/** The gate/skill parameters `finalizeSkill` needs — the only per-cluster axes that vary. */
+interface FinalizeSpec {
+  /** Drives the structural gate (incl. the lesson imperative-counterfactual guard). */
+  tier: DistillCluster['tier'];
+  /** Provenance back-links → `metadata.jinn.provenance`; its length is `distilledFrom`. */
+  evidenceRefs: string[];
+  /** The distiller input, for the honest `evidenceTokens` estimate. */
+  input: unknown;
+  /** The published `metadata.jinn.skillKind`. */
+  skillKind: SkillKind;
+  /** SHA of the prompt that produced `out` → `metadata.jinn.distillPromptSha256`. */
+  promptSha: string;
+}
+
+/** Resolved (not lazy) deps shared by both distill stages. */
+interface FinalizeDeps {
+  pipeline: ScrubPipeline;
+  distribution: string;
+  now: Date;
+  slate: { instanceIds: Set<string>; repos?: Set<string> };
+  distillModel?: string;
+  publishSkill: (pkg: SkillPackage) => Promise<{ envelopeRef: string; anchorTx: string | null }>;
+}
+
+type FinalizeResult =
+  | { ok: true; pkg: SkillPackage; envelopeRef: string }
+  | { ok: false; reason: string };
+
+/**
+ * The shared per-skill finish: fail-closed output scrub (2) → contamination scan
+ * (3) → structural gate (4) → name check → package build → publish (5). Returns a
+ * deterministic rejection reason, or the published package. `publishSkill`
+ * failures throw (the caller records them as errors). Called by BOTH
+ * `distillClusters` and `metaDistill` so stage-2 passes the identical gate.
+ */
+async function finalizeSkill(
+  out: DistillLLMOutput,
+  spec: FinalizeSpec,
+  deps: FinalizeDeps,
+): Promise<FinalizeResult> {
+  // (2) fail-closed output secret scrub.
+  const scrubbed = await deps.pipeline.run({ 'skill.md': out.body });
+  if (scrubbed.redactions.length > 0 || String(scrubbed.attributes['skill.md']) !== out.body) {
+    const hits = [...new Set(scrubbed.redactions.map((r) => `${r.stage}/${r.detail ?? r.kind}`))];
+    const detail = hits.length > 0 ? hits.join(', ') : 'body altered by scrub';
+    return { ok: false, reason: `secret-in-output (dropped, fail-closed): ${detail}` };
+  }
+
+  // (3) contamination scan against the held-out slate.
+  const scan = lexicalContaminationScan(out.body, deps.slate);
+  if (scan.contaminated) return { ok: false, reason: `contamination: ${scan.hits.join(', ')}` };
+
+  // (4) deterministic structural conformance gate.
+  const structuralReason = structuralRejection(out, spec.tier);
+  if (structuralReason) return { ok: false, reason: structuralReason };
+
+  const name = sanitizeName(out.name);
+  if (!name) return { ok: false, reason: `non-conformant skill name from distiller: ${JSON.stringify(out.name)}` };
+  assertConformantName(name);
+
+  const pkg: SkillPackage = {
+    name,
+    description: out.description,
+    license: null,
+    jinn: {
+      schema: 'jinn.skill.v1',
+      distribution: deps.distribution,
+      verifiabilityTier: 'evaluator-verified',
+      distilledFrom: spec.evidenceRefs.length,
+      provenance: spec.evidenceRefs,
+      distillPromptSha256: spec.promptSha,
+      distilledAt: deps.now.toISOString(),
+      skillKind: spec.skillKind,
+      ...(deps.distillModel ? { distillModel: deps.distillModel } : {}),
+      evidenceTokens: estimateTokens(JSON.stringify(spec.input ?? '')),
+      skillTokens: estimateTokens(out.body),
+    },
+    body: out.body,
+  };
+  const pub = await deps.publishSkill(pkg);
+  return { ok: true, pkg, envelopeRef: pub.envelopeRef };
+}
+
+/** Resolve the lazy per-stage deps into the concrete {@link FinalizeDeps} both stages share. */
+function resolveFinalizeDeps(
+  deps: Pick<DistillDeps, 'scrubPipeline' | 'distribution' | 'now' | 'slate' | 'distillModel' | 'publishSkill'>,
+): FinalizeDeps {
+  return {
+    pipeline: deps.scrubPipeline ?? buildLayer2ScrubPipeline(),
+    distribution: deps.distribution ?? 'coding',
+    now: deps.now?.() ?? new Date(),
+    slate: deps.slate,
+    ...(deps.distillModel ? { distillModel: deps.distillModel } : {}),
+    publishSkill: deps.publishSkill,
+  };
+}
+
 export async function distillClusters(
   clusters: DistillCluster[],
   deps: DistillDeps,
 ): Promise<DistillResult> {
-  const pipeline = deps.scrubPipeline ?? buildLayer2ScrubPipeline();
-  const distribution = deps.distribution ?? 'coding';
-  const now = deps.now?.() ?? new Date();
+  const finalizeDeps = resolveFinalizeDeps(deps);
   const result: DistillResult = { published: [], rejected: [], errors: [] };
 
   for (const cluster of clusters) {
     try {
       const out = await deps.distill(cluster);
+      const skillKind = SKILL_KIND_BY_TIER[cluster.tier];
+      const fin = await finalizeSkill(
+        out,
+        {
+          tier: cluster.tier,
+          evidenceRefs: cluster.evidenceRefs,
+          input: cluster.input,
+          skillKind,
+          promptSha: JINN_SKILL_DISTILL_PROMPT_V1_SHA256,
+        },
+        finalizeDeps,
+      );
+      if (fin.ok) {
+        result.published.push({ clusterId: cluster.clusterId, skillKind, envelopeRef: fin.envelopeRef, pkg: fin.pkg });
+      } else {
+        result.rejected.push({ clusterId: cluster.clusterId, reason: fin.reason });
+      }
+    } catch (err) {
+      result.errors.push({ clusterId: cluster.clusterId, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return result;
+}
 
-      // (2) fail-closed output secret scrub: publish only bodies that scrub to a
-      // no-op — so a published skill is provably secret-free and never re-defaced.
-      const scrubbed = await pipeline.run({ 'skill.md': out.body });
-      if (scrubbed.redactions.length > 0 || String(scrubbed.attributes['skill.md']) !== out.body) {
-        // Name WHAT tripped the scrub: check-mode rejection is deterministic
-        // (the same body re-rejects on every re-distill), so the operator needs
-        // the stage/detail to fix the prompt or the evidence — not a blind retry.
-        const hits = [...new Set(scrubbed.redactions.map((r) => `${r.stage}/${r.detail ?? r.kind}`))];
-        const detail = hits.length > 0 ? hits.join(', ') : 'body altered by scrub';
+/** Stage-2 (cross-instance) LLM output: a distilled skill plus the source ids it corroborates. */
+export interface MetaDistillLLMOutput extends DistillLLMOutput {
+  /** Opaque source ids (s1, s2, …) the model says corroborate the emitted rule. */
+  supports: string[];
+}
+
+export interface MetaDistillDeps {
+  /** The meta LLM port: runs jinn-skill-meta-distill-prompt-v1 over one meta-cluster. */
+  metaDistill: (cluster: MetaCluster) => Promise<MetaDistillLLMOutput>;
+  publishSkill: (pkg: SkillPackage) => Promise<{ envelopeRef: string; anchorTx: string | null }>;
+  slate: { instanceIds: Set<string>; repos?: Set<string> };
+  distribution?: string;
+  distillModel?: string;
+  scrubPipeline?: ScrubPipeline;
+  now?: () => Date;
+}
+
+export interface MetaDistillResult {
+  published: Array<{ metaClusterId: string; skillKind: 'cross-instance'; envelopeRef: string; pkg: SkillPackage }>;
+  rejected: Array<{ metaClusterId: string; reason: string }>;
+  errors: Array<{ metaClusterId: string; error: string }>;
+}
+
+/**
+ * Stage-2 cross-instance meta-distill (issue #1463). For each same-polarity
+ * meta-cluster: run the meta LLM, keep only the sources it names in `supports`,
+ * require **≥2 distinct supporting instances**, union their layer-1 evidence
+ * CIDs into the provenance, and finish through the SAME `finalizeSkill` gate as
+ * stage-1 — so a meta-skill passes the identical scrub / contamination /
+ * structural checks. Additive and opt-in; never called unless the pipeline
+ * enables it.
+ */
+export async function metaDistill(
+  clusters: MetaCluster[],
+  deps: MetaDistillDeps,
+): Promise<MetaDistillResult> {
+  const finalizeDeps = resolveFinalizeDeps(deps);
+  const result: MetaDistillResult = { published: [], rejected: [], errors: [] };
+
+  for (const cluster of clusters) {
+    try {
+      const out = await deps.metaDistill(cluster);
+
+      // Keep sources the model corroborated, in the cluster's stable id order
+      // (deterministic regardless of the model's `supports` ordering).
+      const supported = new Set(out.supports);
+      const supportedSources: MetaSource[] = cluster.sources.filter((s) => supported.has(s.id));
+
+      const distinctInstances = new Set(supportedSources.flatMap((s) => s.instanceIds));
+      if (distinctInstances.size < 2) {
         result.rejected.push({
-          clusterId: cluster.clusterId,
-          reason: `secret-in-output (dropped, fail-closed): ${detail}`,
+          metaClusterId: cluster.metaClusterId,
+          reason: `cross-instance: fewer than 2 distinct supporting instances (got ${distinctInstances.size})`,
         });
         continue;
       }
 
-      // (3) contamination scan against the held-out slate.
-      const scan = lexicalContaminationScan(out.body, deps.slate);
-      if (scan.contaminated) {
-        result.rejected.push({ clusterId: cluster.clusterId, reason: `contamination: ${scan.hits.join(', ')}` });
+      // Union the supporting evidence refs (dedup, preserve first-seen order) →
+      // provenance; its length is distilledFrom (> 1). The finalize `input` is
+      // the supported source bodies, so evidenceTokens is the honest union size.
+      const seen = new Set<string>();
+      const unionRefs: string[] = [];
+      for (const s of supportedSources) for (const ref of s.evidenceRefs) {
+        if (!seen.has(ref)) { seen.add(ref); unionRefs.push(ref); }
+      }
+      // Defensive publish-boundary guard: the feature's invariant (AC1) is that a
+      // cross-instance skill's provenance is the *union* of >1 supporting evidence
+      // refs. buildMetaClusters upholds this, but metaDistill is exported and a
+      // direct caller could pass sources whose refs collapse to <2 (shared or empty
+      // evidenceRefs). Reject rather than publish a skill that violates distilledFrom > 1.
+      if (unionRefs.length < 2) {
+        result.rejected.push({
+          metaClusterId: cluster.metaClusterId,
+          reason: `cross-instance: union provenance has fewer than 2 evidence refs (got ${unionRefs.length})`,
+        });
         continue;
       }
+      const finalizeInput = supportedSources.map((s) => ({ name: s.name, description: s.description, body: s.body }));
 
-      // (4) deterministic structural conformance gate (§7 step 6, v0.5).
-      const structuralReason = structuralRejection(out, cluster.tier);
-      if (structuralReason) {
-        result.rejected.push({ clusterId: cluster.clusterId, reason: structuralReason });
-        continue;
-      }
-
-      const name = sanitizeName(out.name);
-      if (!name) {
-        // An empty/all-symbol LLM name is a rejection (bad output), not an error.
-        result.rejected.push({ clusterId: cluster.clusterId, reason: `non-conformant skill name from distiller: ${JSON.stringify(out.name)}` });
-        continue;
-      }
-      assertConformantName(name); // defensive; sanitizeName should already conform
-      const skillKind = SKILL_KIND_BY_TIER[cluster.tier];
-      const pkg: SkillPackage = {
-        name,
-        description: out.description,
-        license: null,
-        jinn: {
-          schema: 'jinn.skill.v1',
-          distribution,
-          verifiabilityTier: 'evaluator-verified',
-          distilledFrom: cluster.evidenceRefs.length,
-          provenance: cluster.evidenceRefs,
-          distillPromptSha256: JINN_SKILL_DISTILL_PROMPT_V1_SHA256,
-          distilledAt: now.toISOString(),
-          skillKind,
-          ...(deps.distillModel ? { distillModel: deps.distillModel } : {}),
-          evidenceTokens: estimateTokens(JSON.stringify(cluster.input ?? '')),
-          skillTokens: estimateTokens(out.body),
+      const fin = await finalizeSkill(
+        out,
+        {
+          tier: cluster.gateTier,
+          evidenceRefs: unionRefs,
+          input: finalizeInput,
+          skillKind: 'cross-instance',
+          promptSha: JINN_SKILL_META_DISTILL_PROMPT_V1_SHA256,
         },
-        body: out.body,
-      };
-      const pub = await deps.publishSkill(pkg);
-      result.published.push({ clusterId: cluster.clusterId, skillKind, envelopeRef: pub.envelopeRef });
+        finalizeDeps,
+      );
+      if (fin.ok) {
+        result.published.push({ metaClusterId: cluster.metaClusterId, skillKind: 'cross-instance', envelopeRef: fin.envelopeRef, pkg: fin.pkg });
+      } else {
+        result.rejected.push({ metaClusterId: cluster.metaClusterId, reason: fin.reason });
+      }
     } catch (err) {
-      result.errors.push({ clusterId: cluster.clusterId, error: err instanceof Error ? err.message : String(err) });
+      result.errors.push({ metaClusterId: cluster.metaClusterId, error: err instanceof Error ? err.message : String(err) });
     }
   }
   return result;

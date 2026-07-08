@@ -272,6 +272,25 @@ describe('extractSkill()', () => {
     expect(extractSkill(record)!.shape).toBe('jinn.skill.v1');
   });
 
+  it('round-trips a jinn.skill.v1 artifact carrying skillKind cross-instance (enum widened downstream)', async () => {
+    const input = skillArtifact({
+      provenance: {
+        kind: 'distilled',
+        sourceEnvelopeCids: ['bafySrc1', 'bafySrc2'],
+        operator: { safeAddress: TEST_SAFE },
+        solverType: 'skill-distiller.v0',
+        skillKind: 'cross-instance',
+      },
+    });
+    const { deps, published, envelopes } = mockPublishDeps();
+    const result = await publish(await capture(capturedTask()), deps, { skill: input });
+    if (result.vetoed) throw new Error('unexpected veto');
+    const record = toRecord(envelopes[0]!, published, result.envelopeRef);
+    const extracted = extractSkill(record);
+    expect(extracted!.shape).toBe('jinn.skill.v1');
+    expect(extracted!.skill.provenance.skillKind).toBe('cross-instance');
+  });
+
   it('returns null for a record with no skill in either shape', async () => {
     const { deps, published, envelopes } = mockPublishDeps();
     const result = await publish(await capture(capturedTask()), deps);

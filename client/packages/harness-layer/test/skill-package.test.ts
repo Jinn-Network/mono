@@ -63,4 +63,9 @@ describe('jinn.skill.v1 package builder (skill-package.ts)', () => {
     const withKind: SkillPackage = { ...pkg, jinn: { ...pkg.jinn, skillKind: 'failure-lesson' } };
     expect(parseSkillMarkdown(buildSkillMarkdown(withKind)).jinn.skillKind).toBe('failure-lesson');
   });
+
+  it('accepts the additive cross-instance skillKind on the meta block', () => {
+    const withKind: SkillPackage = { ...pkg, jinn: { ...pkg.jinn, skillKind: 'cross-instance' } };
+    expect(parseSkillMarkdown(buildSkillMarkdown(withKind)).jinn.skillKind).toBe('cross-instance');
+  });
 });

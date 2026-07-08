@@ -11,7 +11,8 @@
  */
 
 import { evaluateEligibility } from './gate.js';
-import type { DistillCluster } from './distill.js';
+import type { DistillCluster, SkillKind } from './distill.js';
+import type { SkillPackage } from './skill-package.js';
 import type { TraceEnvelopeV0 } from './envelope.js';
 
 export interface ClusterItem {
@@ -117,5 +118,95 @@ export function clusterEvidence(items: ClusterItem[], opts: ClusterOptions = {})
   }
 
   clusters.sort((a, b) => (a.clusterId < b.clusterId ? -1 : a.clusterId > b.clusterId ? 1 : 0));
+  return clusters;
+}
+
+/**
+ * A stage-1 published skill joined to its originating cluster's provenance —
+ * the stage-2 (cross-instance meta-distill) input (issue #1463). `pkg` supplies
+ * the meta-distiller's reading material (the distilled skill); `evidenceRefs` /
+ * `instanceIds` supply the union provenance and the ≥2-distinct-instance test.
+ */
+export interface Stage1PublishedSkill {
+  clusterId: string;
+  skillKind: SkillKind;
+  pkg: SkillPackage;
+  evidenceRefs: string[];
+  instanceIds: string[];
+}
+
+/** One labelled source inside a meta-cluster (its id is what the model echoes in `supports`). */
+export interface MetaSource {
+  id: string;
+  name: string;
+  description: string;
+  body: string;
+  evidenceRefs: string[];
+  instanceIds: string[];
+}
+
+/**
+ * The three stage-1 polarities eligible for stage-2 — `cross-instance` is
+ * excluded (no meta-of-meta), so it is deliberately absent from this union.
+ */
+export type MetaPolarity = 'strategic-pattern' | 'failure-lesson' | 'contrastive';
+
+/** A same-polarity batch of ≥2-distinct-instance stage-1 skills for the meta-distiller. */
+export interface MetaCluster {
+  metaClusterId: string;
+  polarity: MetaPolarity;
+  gateTier: DistillCluster['tier'];
+  sources: MetaSource[];
+}
+
+/** The structural-gate tier each meta-eligible polarity keeps in stage-2. */
+const META_GATE_TIER: Record<MetaPolarity, DistillCluster['tier']> = {
+  'strategic-pattern': 'pattern',
+  'failure-lesson': 'lesson',
+  'contrastive': 'contrastive',
+};
+
+/** Meta-eligible polarity guard — the type-level "never recurse on cross-instance" gate. */
+function isMetaPolarity(kind: SkillKind): kind is MetaPolarity {
+  return kind in META_GATE_TIER;
+}
+
+/**
+ * Group stage-1 published skills into one meta-cluster per polarity. A polarity
+ * is meta-distillable only when it spans **≥2 distinct instances** (a
+ * cross-instance rule needs corroboration from different problems). Meta-of-meta
+ * is impossible: a `cross-instance` polarity is skipped. Deterministic —
+ * meta-clusters and their sources come back in a stable order.
+ */
+export function buildMetaClusters(published: Stage1PublishedSkill[]): MetaCluster[] {
+  const byPolarity = new Map<MetaPolarity, Stage1PublishedSkill[]>();
+  for (const p of published) {
+    if (!isMetaPolarity(p.skillKind)) continue; // never recurse on cross-instance
+    const group = byPolarity.get(p.skillKind) ?? [];
+    group.push(p);
+    byPolarity.set(p.skillKind, group);
+  }
+
+  const clusters: MetaCluster[] = [];
+  for (const [polarity, group] of byPolarity) {
+    const distinctInstances = new Set(group.flatMap((g) => g.instanceIds));
+    if (distinctInstances.size < 2) continue;
+    const sources: MetaSource[] = group.map((g, i) => ({
+      id: `s${i + 1}`,
+      name: g.pkg.name,
+      description: g.pkg.description,
+      body: g.pkg.body,
+      evidenceRefs: g.evidenceRefs,
+      instanceIds: g.instanceIds,
+    }));
+    clusters.push({
+      metaClusterId: `cross-instance:${polarity}`,
+      polarity,
+      gateTier: META_GATE_TIER[polarity],
+      sources,
+    });
+  }
+
+  clusters.sort((a, b) => (a.metaClusterId < b.metaClusterId ? -1 : a.metaClusterId > b.metaClusterId ? 1 : 0));
   return clusters;
 }

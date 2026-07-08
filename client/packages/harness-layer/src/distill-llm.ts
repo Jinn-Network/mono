@@ -18,7 +18,8 @@
  */
 
 import { spawn } from 'node:child_process';
-import type { DistillCluster, DistillLLMOutput } from './distill.js';
+import type { DistillCluster, DistillLLMOutput, MetaDistillLLMOutput } from './distill.js';
+import type { MetaCluster } from './cluster.js';
 
 /** Default `claude` executable (resolved from PATH), mirrors the daemon default. */
 const DEFAULT_CLAUDE_PATH = 'claude';
@@ -125,18 +126,83 @@ function extractJsonObject(stdout: string): unknown {
   throw new Error(`distill LLM: unterminated JSON object in model output: ${stdout.slice(start, start + 200)}`);
 }
 
-/** Validate the parsed object is a `{ name, description, body }` of non-empty strings. */
-function assertDistillOutput(parsed: unknown): DistillLLMOutput {
+/**
+ * Validate `parsed` is a JSON object whose `name`/`description`/`body` are all
+ * non-empty strings, and return it narrowed. Shared by both distill asserts;
+ * `label` prefixes the error so the stage (distill vs meta-distill) stays legible.
+ */
+function assertSkillOutputFields(parsed: unknown, label: string): Record<string, unknown> {
   if (typeof parsed !== 'object' || parsed === null) {
-    throw new Error('distill LLM: model output is not a JSON object');
+    throw new Error(`${label}: model output is not a JSON object`);
   }
   const obj = parsed as Record<string, unknown>;
   for (const field of ['name', 'description', 'body'] as const) {
     if (typeof obj[field] !== 'string' || obj[field] === '') {
-      throw new Error(`distill LLM: model output missing/invalid field "${field}"`);
+      throw new Error(`${label}: model output missing/invalid field "${field}"`);
     }
   }
+  return obj;
+}
+
+/** Validate the parsed object is a `{ name, description, body }` of non-empty strings. */
+function assertDistillOutput(parsed: unknown): DistillLLMOutput {
+  const obj = assertSkillOutputFields(parsed, 'distill LLM');
   return { name: obj.name as string, description: obj.description as string, body: obj.body as string };
+}
+
+/**
+ * Shared `claude -p` runner for the distill ports: spawn `claude -p --model`,
+ * pipe `input` on stdin, collect stdout, and on a clean exit hand stdout to
+ * `parse` (which extracts + validates the JSON, and may throw). A non-zero exit
+ * or a spawn error rejects; `label` prefixes the process-level errors so the
+ * calling stage stays identifiable.
+ *
+ * `-p` (non-interactive print mode) with the prompt on stdin mirrors the daemon's
+ * other claude call sites (src/runner/claude.ts, the claude-code adapter) minus
+ * the MCP wiring these ports have no use for.
+ */
+function runClaudeJson<T>(
+  claudePath: string,
+  model: string,
+  spawnImpl: SpawnLike,
+  input: string,
+  parse: (stdout: string) => T,
+  label: string,
+): Promise<T> {
+  const args = ['-p', '--model', model];
+  return new Promise<T>((resolve, reject) => {
+    const child = spawnImpl(claudePath, args);
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    child.stdout?.on('data', (d) => { stdout += d.toString(); });
+    child.stderr?.on('data', (d) => { stderr += d.toString(); });
+
+    child.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    });
+
+    child.on('exit', (code) => {
+      if (settled) return;
+      settled = true;
+      if (code !== 0) {
+        reject(new Error(`${label}: claude exited with code ${code}: ${stderr.slice(0, 500)}`));
+        return;
+      }
+      try {
+        resolve(parse(stdout));
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
+    });
+
+    // Feed the prompt on stdin, then close it so `claude -p` runs and exits.
+    child.stdin?.write(input);
+    child.stdin?.end();
+  });
 }
 
 /**
@@ -161,44 +227,70 @@ export function createClaudeDistiller(
     // prompt's SHA sidecar; the prompt text itself is what we send.
     const { JINN_SKILL_DISTILL_PROMPT_V1 } = await import('./distill-prompt.js');
     const input = buildDistillInput(JINN_SKILL_DISTILL_PROMPT_V1, cluster);
+    return runClaudeJson(claudePath, model, spawnImpl, input, (stdout) => assertDistillOutput(extractJsonObject(stdout)), 'distill LLM');
+  };
+}
 
-    // `-p` (non-interactive print mode) with the prompt on stdin; `--model` picks
-    // the model. Mirrors the daemon's other claude call sites (src/runner/claude.ts,
-    // the claude-code adapter) minus the MCP wiring this port has no use for.
-    const args = ['-p', '--model', model];
+/**
+ * Serialize a meta-cluster into the model input appended after the meta prompt:
+ * the POLARITY (so the model keeps the right voice — diagnosis-only for
+ * failure-lesson) and each source labelled with its opaque id. Only id + the
+ * distilled skill's name/description/body are sent — evidence refs and instance
+ * ids are audit metadata the model must not echo.
+ */
+function serializeMetaCluster(cluster: MetaCluster): string {
+  const sources = cluster.sources
+    .map((s) => `--- ${s.id} ---\nname: ${s.name}\ndescription: ${s.description}\nbody:\n${s.body}`)
+    .join('\n\n');
+  return `POLARITY = ${cluster.polarity}\n\nSOURCES (already-distilled skills, one per instance):\n${sources}`;
+}
 
-    return new Promise<DistillLLMOutput>((resolve, reject) => {
-      const child = spawnImpl(claudePath, args);
-      let stdout = '';
-      let stderr = '';
-      let settled = false;
+/** Build the full meta model input: the versioned meta prompt + the sources + the JSON contract. */
+export function buildMetaDistillInput(prompt: string, cluster: MetaCluster): string {
+  return [
+    prompt,
+    '',
+    serializeMetaCluster(cluster),
+    '',
+    'Return ONLY a single JSON object with exactly these fields, and nothing else:',
+    '{ "name": "...", "description": "...", "body": "...", "supports": ["s1", "s2"] }',
+    '- name: lowercase-hyphen skill name.',
+    '- description: the retrieval surface ("Use when … Not for: …").',
+    '- body: the markdown SKILL.md body (the five fixed sections).',
+    '- supports: the source ids (s1, s2, …) that corroborate the rule; at least two DISTINCT sources.',
+  ].join('\n');
+}
 
-      child.stdout?.on('data', (d) => { stdout += d.toString(); });
-      child.stderr?.on('data', (d) => { stderr += d.toString(); });
+/** Validate the parsed object is a { name, description, body, supports } meta output. */
+function assertMetaDistillOutput(parsed: unknown): MetaDistillLLMOutput {
+  const obj = assertSkillOutputFields(parsed, 'meta-distill LLM');
+  if (!Array.isArray(obj.supports) || !obj.supports.every((s) => typeof s === 'string' && s.length > 0)) {
+    throw new Error('meta-distill LLM: model output missing/invalid field "supports" (expected a string[])');
+  }
+  return {
+    name: obj.name as string,
+    description: obj.description as string,
+    body: obj.body as string,
+    supports: obj.supports as string[],
+  };
+}
 
-      child.on('error', (err) => {
-        if (settled) return;
-        settled = true;
-        reject(err);
-      });
+/**
+ * Build the stage-2 meta-distill LLM port (issue #1463). Same spawn/parse
+ * scaffolding as {@link createClaudeDistiller}: spawns `claude -p --model`,
+ * pipes {@link buildMetaDistillInput} on stdin, and parses the strict JSON
+ * (tolerating a prose wrapper via the shared {@link extractJsonObject}).
+ */
+export function createClaudeMetaDistiller(
+  opts: { claudePath?: string; model?: string; spawnImpl?: SpawnLike } = {},
+): (cluster: MetaCluster) => Promise<MetaDistillLLMOutput> {
+  const claudePath = opts.claudePath ?? DEFAULT_CLAUDE_PATH;
+  const model = opts.model ?? DEFAULT_MODEL;
+  const spawnImpl: SpawnLike = opts.spawnImpl ?? ((command, args) => spawn(command, [...args]));
 
-      child.on('exit', (code) => {
-        if (settled) return;
-        settled = true;
-        if (code !== 0) {
-          reject(new Error(`distill LLM: claude exited with code ${code}: ${stderr.slice(0, 500)}`));
-          return;
-        }
-        try {
-          resolve(assertDistillOutput(extractJsonObject(stdout)));
-        } catch (err) {
-          reject(err instanceof Error ? err : new Error(String(err)));
-        }
-      });
-
-      // Feed the prompt on stdin, then close it so `claude -p` runs and exits.
-      child.stdin?.write(input);
-      child.stdin?.end();
-    });
+  return async function metaDistillPort(cluster: MetaCluster): Promise<MetaDistillLLMOutput> {
+    const { JINN_SKILL_META_DISTILL_PROMPT_V1 } = await import('./distill-prompt.js');
+    const input = buildMetaDistillInput(JINN_SKILL_META_DISTILL_PROMPT_V1, cluster);
+    return runClaudeJson(claudePath, model, spawnImpl, input, (stdout) => assertMetaDistillOutput(extractJsonObject(stdout)), 'meta-distill LLM');
   };
 }

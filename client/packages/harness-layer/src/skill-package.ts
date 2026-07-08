@@ -45,7 +45,7 @@ export const SkillPackageMetaSchema = z
     distillPromptSha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
     distilledAt: z.string().optional(),
     seedSource: z.string().optional(),
-    skillKind: z.enum(['strategic-pattern', 'failure-lesson', 'contrastive']).optional(),
+    skillKind: z.enum(['strategic-pattern', 'failure-lesson', 'contrastive', 'cross-instance']).optional(),
     // Auditability (spec §5, v0.5): the distilling model + a deterministic
     // ceil(chars/4) token estimate of input vs body (the compression ratio).
     distillModel: z.string().min(1).optional(),

@@ -1,8 +1,9 @@
 import { EventEmitter } from 'node:events';
 import { describe, it, expect } from 'vitest';
-import { createClaudeDistiller, type ChildLike, type SpawnLike } from '../src/distill-llm.js';
-import { JINN_SKILL_DISTILL_PROMPT_V1 } from '../src/distill-prompt.js';
+import { createClaudeDistiller, createClaudeMetaDistiller, buildMetaDistillInput, type ChildLike, type SpawnLike } from '../src/distill-llm.js';
+import { JINN_SKILL_DISTILL_PROMPT_V1, JINN_SKILL_META_DISTILL_PROMPT_V1 } from '../src/distill-prompt.js';
 import type { DistillCluster } from '../src/distill.js';
+import type { MetaCluster } from '../src/cluster.js';
 
 /**
  * Fake `claude` child. The port pipes the built input on stdin and reads the
@@ -156,5 +157,52 @@ describe('createClaudeDistiller', () => {
     const distill = createClaudeDistiller({ spawnImpl: spawn });
 
     await expect(distill(cluster)).rejects.toThrow(/exited with code 1/);
+  });
+});
+
+const metaCluster: MetaCluster = {
+  metaClusterId: 'cross-instance:failure-lesson',
+  polarity: 'failure-lesson',
+  gateTier: 'lesson',
+  sources: [
+    { id: 's1', name: 'a', description: 'da', body: 'body-a-distinct', evidenceRefs: ['ev-a'], instanceIds: ['a'] },
+    { id: 's2', name: 'b', description: 'db', body: 'body-b-distinct', evidenceRefs: ['ev-b'], instanceIds: ['b'] },
+  ],
+};
+
+describe('createClaudeMetaDistiller', () => {
+  it('parses a { name, description, body, supports } object from stdout', async () => {
+    const out = { name: 'xi', description: 'Use when … Not for: …', body: 'b', supports: ['s1', 's2'] };
+    const child = fakeChild({ stdout: JSON.stringify(out) });
+    const { spawn } = makeSpawn(child);
+    const meta = createClaudeMetaDistiller({ spawnImpl: spawn });
+    await expect(meta(metaCluster)).resolves.toEqual(out);
+  });
+
+  it('sends the meta prompt, the POLARITY hint, and the labelled sources on stdin', async () => {
+    const child = fakeChild({ stdout: JSON.stringify({ name: 'n', description: 'd', body: 'b', supports: ['s1', 's2'] }) });
+    const { spawn } = makeSpawn(child);
+    const meta = createClaudeMetaDistiller({ spawnImpl: spawn });
+    await meta(metaCluster);
+    const sent = (child as unknown as { writes: string[] }).writes.join('');
+    expect(sent).toContain(JINN_SKILL_META_DISTILL_PROMPT_V1);
+    expect(sent).toContain('POLARITY = failure-lesson');
+    expect(sent).toContain('s1');
+    expect(sent).toContain('body-a-distinct');
+  });
+
+  it('throws when supports is missing or not an array of strings', async () => {
+    const child = fakeChild({ stdout: JSON.stringify({ name: 'n', description: 'd', body: 'b' }) });
+    const { spawn } = makeSpawn(child);
+    const meta = createClaudeMetaDistiller({ spawnImpl: spawn });
+    await expect(meta(metaCluster)).rejects.toThrow(/supports/);
+  });
+
+  it('buildMetaDistillInput labels each source and states the JSON contract', () => {
+    const input = buildMetaDistillInput(JINN_SKILL_META_DISTILL_PROMPT_V1, metaCluster);
+    expect(input).toContain('POLARITY = failure-lesson');
+    expect(input).toContain('s1');
+    expect(input).toContain('s2');
+    expect(input).toContain('"supports"');
   });
 });

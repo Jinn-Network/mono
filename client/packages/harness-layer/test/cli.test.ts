@@ -9,7 +9,8 @@ import { runJinnLayerCli, type DistillCliDeps } from '../src/cli.js';
 import { createMemoryLedger } from '../src/ledger.js';
 import type { HarnessPublishDeps } from '../src/publish.js';
 import type { AttemptRef, BridgeEvidence } from '../src/bridge.js';
-import type { DistillCluster, DistillLLMOutput } from '../src/distill.js';
+import type { DistillCluster, DistillLLMOutput, MetaDistillLLMOutput } from '../src/distill.js';
+import type { MetaCluster } from '../src/cluster.js';
 import { parseSkillMarkdown } from '../src/skill-package.js';
 
 function fakeHit(overrides: Partial<CorpusSearchHit> = {}): CorpusSearchHit {
@@ -398,6 +399,31 @@ describe('jinn-layer distill run', () => {
     };
   }
 
+  const META_OUT = {
+    name: 'cross-instance-orm-dedup',
+    description: 'Use when a class of ORM queries fans out rows. Not for: single-table reads.',
+    body: [
+      '## When to use', 'A class of queries returns duplicate rows after a join.',
+      '## Strategy', 'Collapse duplicates at the ORM layer across the shared pattern.',
+      '## Steps', '1. Spot the fan-out. 2. Dedup at the join.',
+      '## Pitfalls', 'An order_by on a joined column can re-expand the rows.',
+      '## Verify', 'Assert the row count equals the expected unique count.',
+    ].join('\n\n'),
+    supports: ['s1', 's2'],
+  };
+
+  function stubMetaDeps(): Partial<DistillCliDeps> {
+    return {
+      verdictSource: {
+        list: async () => [
+          dref('flask__flask-1', 'pass'),
+          dref('requests__requests-3', 'pass'),
+        ],
+      },
+      metaDistill: async (_c: MetaCluster): Promise<MetaDistillLLMOutput> => META_OUT,
+    };
+  }
+
   it('runs the pipeline under stubs and writes SKILL.md packages', async () => {
     const { writer, out } = capture();
     const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-cli-'));
@@ -441,5 +467,39 @@ describe('jinn-layer distill run', () => {
     expect(result.clusterCount).toBe(2);
     // The held-out instance is excluded at the bridge.
     expect(result.bridge.excludedHeldOut.length).toBeGreaterThan(0);
+  });
+
+  it('AC4: --meta runs stage-2 and shows a cross-instance skill with evidenceTokens > skillTokens', async () => {
+    const { writer, out } = capture();
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-cli-'));
+    const code = await runJinnLayerCli(['distill', 'run', '--meta', '--out', outDir, '--json'], {
+      writer,
+      distillDeps: stubDeps(stubMetaDeps()),
+    });
+    expect(code).toBe(0);
+    const result = JSON.parse(out());
+    expect(result.metaDistilled.published).toHaveLength(1);
+    const meta = result.metaDistilled.published[0];
+    expect(meta.skillKind).toBe('cross-instance');
+    expect(meta.pkg.jinn.evidenceTokens).toBeGreaterThan(meta.pkg.jinn.skillTokens);
+  });
+
+  it('--meta prints the meta section in human output', async () => {
+    const { writer, out } = capture();
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-cli-'));
+    await runJinnLayerCli(['distill', 'run', '--meta', '--out', outDir], {
+      writer,
+      distillDeps: stubDeps(stubMetaDeps()),
+    });
+    const text = out();
+    expect(text).toContain('meta-distilled: published 1');
+    expect(text).toMatch(/META cross-instance .*evidenceTokens=\d+ skillTokens=\d+/);
+  });
+
+  it('without --meta, no meta section is printed (stage-1 unchanged)', async () => {
+    const { writer, out } = capture();
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-cli-'));
+    await runJinnLayerCli(['distill', 'run', '--out', outDir], { writer, distillDeps: stubDeps() });
+    expect(out()).not.toContain('meta-distilled');
   });
 });

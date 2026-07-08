@@ -14,9 +14,23 @@ import { createMemoryLedger } from '../src/ledger.js';
 import type { AttemptRef, BridgeEvidence } from '../src/bridge.js';
 import type { HarnessPublishDeps } from '../src/publish.js';
 import type { SkillPackage } from '../src/skill-package.js';
-import type { DistillCluster, DistillLLMOutput } from '../src/distill.js';
+import type { DistillCluster, DistillLLMOutput, MetaDistillLLMOutput } from '../src/distill.js';
+import type { MetaCluster } from '../src/cluster.js';
 
 const NOW = () => new Date('2026-07-07T00:00:00.000Z');
+
+const META_OUT: MetaDistillLLMOutput = {
+  name: 'cross-instance-orm-dedup',
+  description: 'Use when a class of ORM queries fans out rows. Not for: single-table reads.',
+  body: [
+    '## When to use', 'A class of queries returns duplicate rows after a join.',
+    '## Strategy', 'Collapse duplicates at the ORM layer across the shared pattern.',
+    '## Steps', '1. Spot the fan-out. 2. Dedup at the join.',
+    '## Pitfalls', 'An order_by on a joined column can re-expand the rows.',
+    '## Verify', 'Assert the row count equals the expected unique count.',
+  ].join('\n\n'),
+  supports: ['s1', 's2'],
+};
 
 function ref(instanceId: string, polarity: 'pass' | 'fail'): AttemptRef {
   return { requestId: `0x${instanceId}`, chainId: 84532, instanceId, model: 'claude-haiku-4-5-20251001', manifestCid: `bafy-${instanceId}-${polarity}`, polarity };
@@ -99,6 +113,41 @@ describe('runDistillationPipeline (Tier-0 dry-run)', () => {
       expect(s.jinn.distillPromptSha256).toMatch(/^[0-9a-f]{64}$/);
       expect(s.jinn.distribution).toBe('coding');
     }
+  });
+
+  it('AC5: leaves metaDistilled undefined and stage-1 unchanged when meta is disabled', async () => {
+    const { d } = deps();
+    const res = await runDistillationPipeline(d);
+    expect(res.metaDistilled).toBeUndefined();
+    expect(res.distilled.published).toHaveLength(2); // stage-1 identical to today
+  });
+
+  it('runs stage-2 when meta is enabled and a polarity spans ≥2 distinct instances', async () => {
+    // two passing instances → two strategic-pattern skills → one meta-cluster.
+    const { d, skills } = deps({
+      verdictSource: {
+        list: async () => [
+          ref('flask__flask-1', 'pass'),
+          ref('requests__requests-3', 'pass'),
+          ref('django__django-99999', 'pass'), // held-out → excluded
+        ],
+      },
+      meta: true,
+      metaDistill: async (_c: MetaCluster) => META_OUT,
+    });
+    const res = await runDistillationPipeline(d);
+    expect(res.distilled.published).toHaveLength(2);
+    expect(res.metaDistilled).toBeDefined();
+    expect(res.metaDistilled!.published).toHaveLength(1);
+    const meta = res.metaDistilled!.published[0]!;
+    expect(meta.skillKind).toBe('cross-instance');
+    // provenance unions BOTH instances' layer-1 evidence refs (distilledFrom > 1).
+    expect(meta.pkg.jinn.distilledFrom).toBeGreaterThan(1);
+    expect(meta.pkg.jinn.provenance.length).toBe(meta.pkg.jinn.distilledFrom);
+    // AC4: the union of source bodies is larger than the one meta body.
+    expect(meta.pkg.jinn.evidenceTokens!).toBeGreaterThan(meta.pkg.jinn.skillTokens!);
+    // the meta skill was actually published as a package too
+    expect(skills.some((s) => s.jinn.skillKind === 'cross-instance')).toBe(true);
   });
 
   it('drops a distilled skill whose body leaks a secret (fail-closed, end-to-end)', async () => {
