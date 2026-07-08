@@ -49,10 +49,10 @@ def fake_venv(tmp_path, monkeypatch):
     return {"venv_bin": venv_bin, "home": home, "cmd_link": cmd_link}
 
 
-def _run(capsys):
+def _run(capsys, should_fix=False):
     issues: list[str] = []
     manual_issues: list[str] = []
-    fixed = doctor._check_command_installation(issues, manual_issues, should_fix=False)
+    fixed = doctor._check_command_installation(issues, manual_issues, should_fix=should_fix)
     out = capsys.readouterr().out
     return issues, manual_issues, fixed, out
 
@@ -77,12 +77,14 @@ def test_missing_symlink_issue_is_jinn_agent_free(fake_venv, capsys):
 
 
 def test_broken_symlink_issue_is_jinn_agent_free(fake_venv, capsys):
-    """~/.local/bin/hermes exists but resolves to a target that no longer
-    matches the venv entry point (simulates a stale symlink from another
-    install/worktree) — the classic 'wrong-binary hint' leak scenario."""
+    """~/.local/bin/hermes resolves inside this install's project root but no
+    longer matches the venv entry point (simulates a stale link left by a
+    recreated venv) — the classic 'wrong-binary hint' leak scenario, and the
+    only wrong-target shape doctor is allowed to offer --fix for."""
     cmd_link = fake_venv["cmd_link"]
     cmd_link.parent.mkdir(parents=True, exist_ok=True)
-    stale_target = fake_venv["home"] / "stale-hermes-binary"
+    stale_target = fake_venv["venv_bin"].parent.parent.parent / "old-venv" / "bin" / "hermes"
+    stale_target.parent.mkdir(parents=True)
     stale_target.write_text("#!/bin/sh\n")
     cmd_link.symlink_to(stale_target)
 
@@ -96,10 +98,11 @@ def test_broken_symlink_issue_is_jinn_agent_free(fake_venv, capsys):
     assert_no_upstream_brand(issues[0])
 
 
-def test_foreign_target_symlink_issue_is_jinn_agent_free(fake_venv, capsys):
-    """~/.local/bin/hermes is a symlink to some other real binary entirely
-    (foreign target) — distinct from 'broken' (dangling) but the same
-    'points to wrong target' code path and issue string."""
+def test_foreign_target_symlink_is_reported_not_claimed(fake_venv, capsys):
+    """~/.local/bin/hermes resolves outside this install's project root
+    (e.g. a coexisting stock hermes install on a dual-install machine).
+    Doctor must NOT advertise --fix for it — --fix would refuse — and must
+    surface it as a manual issue instead."""
     cmd_link = fake_venv["cmd_link"]
     cmd_link.parent.mkdir(parents=True, exist_ok=True)
     foreign_dir = fake_venv["home"] / "other-project" / "venv" / "bin"
@@ -112,11 +115,63 @@ def test_foreign_target_symlink_issue_is_jinn_agent_free(fake_venv, capsys):
     issues, manual_issues, fixed, out = _run(capsys)
 
     assert fixed == 0
-    assert len(issues) == 1
-    assert "points to wrong target" in out
-    assert "run 'jinn-agent doctor --fix'" in issues[0]
-    assert "run 'hermes doctor --fix'" not in issues[0]
-    assert_no_upstream_brand(issues[0])
+    assert issues == []
+    assert len(manual_issues) == 1
+    assert "doctor --fix" not in manual_issues[0]
+    assert "another install" in out
+    assert_no_upstream_brand(manual_issues[0])
+
+
+def test_fix_refuses_to_repoint_foreign_target_symlink(fake_venv, capsys):
+    """The dual-install hazard itself: with --fix, doctor must leave a
+    foreign-target ~/.local/bin/hermes exactly as it found it — unlinking
+    and repointing it would hijack the user's stock hermes command."""
+    cmd_link = fake_venv["cmd_link"]
+    cmd_link.parent.mkdir(parents=True, exist_ok=True)
+    foreign_dir = fake_venv["home"] / "stock-hermes" / "venv" / "bin"
+    foreign_dir.mkdir(parents=True)
+    foreign_target = foreign_dir / "hermes"
+    foreign_target.write_text("#!/bin/sh\n")
+    foreign_target.chmod(0o755)
+    cmd_link.symlink_to(foreign_target)
+
+    issues, manual_issues, fixed, out = _run(capsys, should_fix=True)
+
+    assert fixed == 0
+    assert cmd_link.is_symlink()
+    assert cmd_link.resolve() == foreign_target.resolve()
+    assert "Fixed symlink" not in out
+    assert len(manual_issues) == 1
+
+
+def test_fix_repairs_stale_link_into_own_install(fake_venv, capsys):
+    """With --fix, a wrong-target link that still resolves inside this
+    install's project root IS ours to repair — repoint it at the venv
+    entry point."""
+    cmd_link = fake_venv["cmd_link"]
+    cmd_link.parent.mkdir(parents=True, exist_ok=True)
+    stale_target = fake_venv["venv_bin"].parent.parent.parent / "old-venv" / "bin" / "hermes"
+    stale_target.parent.mkdir(parents=True)
+    stale_target.write_text("#!/bin/sh\n")
+    cmd_link.symlink_to(stale_target)
+
+    issues, manual_issues, fixed, out = _run(capsys, should_fix=True)
+
+    assert fixed == 1
+    assert cmd_link.is_symlink()
+    assert cmd_link.resolve() == fake_venv["venv_bin"].resolve()
+    assert "Fixed symlink" in out
+
+
+def test_fix_creates_missing_symlink(fake_venv, capsys):
+    """Control: creating ~/.local/bin/hermes where nothing exists stays
+    allowed under --fix — there is no foreign launcher to hijack."""
+    assert not fake_venv["cmd_link"].exists()
+
+    issues, manual_issues, fixed, out = _run(capsys, should_fix=True)
+
+    assert fixed == 1
+    assert fake_venv["cmd_link"].resolve() == fake_venv["venv_bin"].resolve()
 
 
 def test_correct_symlink_produces_no_issue(fake_venv, capsys):

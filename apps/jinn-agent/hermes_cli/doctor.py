@@ -442,7 +442,12 @@ def _check_command_installation(
             _expected = _venv_bin.resolve()
             if _target == _expected:
                 check_ok(f"{_cmd_link_display}/hermes → correct target")
-            else:
+            elif (
+                _cmd_link.name == "jinn-agent"
+                or _target.is_relative_to(PROJECT_ROOT.resolve())
+            ):
+                # Wrong target but still resolves inside this install (e.g.
+                # a stale link left by a recreated venv) — ours to repair.
                 check_warn(
                     f"{_cmd_link_display}/hermes points to wrong target",
                     f"(→ {_target}, expected → {_expected})"
@@ -454,6 +459,18 @@ def _check_command_installation(
                     fixed_count += 1
                 else:
                     issues.append(f"Broken symlink at {_cmd_link_display}/hermes — run 'jinn-agent doctor --fix'")
+            else:
+                # Foreign target: on a dual-install machine this is the
+                # user's coexisting stock hermes. Unlinking/repointing it
+                # would hijack their `hermes` command — report, never repair.
+                check_warn(
+                    f"{_cmd_link_display}/hermes belongs to another install",
+                    f"(→ {_target} — not this jinn-agent install; doctor will not modify it)"
+                )
+                manual_issues.append(
+                    f"{_cmd_link_display}/hermes points to {_target} (another install) — "
+                    "doctor leaves it alone; repoint it manually if this install should own it"
+                )
         elif _cmd_link.exists():
             # It's a regular file, not a symlink — possibly a wrapper script
             check_ok(f"{_cmd_link_display}/hermes exists (non-symlink)")
