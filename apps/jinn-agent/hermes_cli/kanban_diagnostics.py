@@ -418,7 +418,7 @@ def _rule_triage_aux_unavailable(task, events, runs, now, cfg) -> list[Diagnosti
         primary_desc = "specifier"
         detail_path = (
             "Auto-decompose is off, so triage tasks need "
-            "`hermes kanban specify`, which uses auxiliary.triage_specifier."
+            "`jinn-agent kanban specify`, which uses auxiliary.triage_specifier."
         )
 
     # The primary slot is usable when either: it was explicitly configured by
@@ -434,7 +434,7 @@ def _rule_triage_aux_unavailable(task, events, runs, now, cfg) -> list[Diagnosti
             label=f"Configure {primary_slot}",
             payload={
                 "command": (
-                    f"hermes config set {primary_slot}.provider auto"
+                    f"jinn-agent config set {primary_slot}.provider auto"
                 )
             },
             suggested=True,
@@ -446,15 +446,15 @@ def _rule_triage_aux_unavailable(task, events, runs, now, cfg) -> list[Diagnosti
             label=f"Or configure fallback {fallback_slot}",
             payload={
                 "command": (
-                    f"hermes config set {fallback_slot}.provider auto"
+                    f"jinn-agent config set {fallback_slot}.provider auto"
                 )
             },
         ))
     if not auto_decompose:
         actions.append(DiagnosticAction(
             kind="cli_hint",
-            label=f"Specify manually: hermes kanban specify {task_id}",
-            payload={"command": f"hermes kanban specify {task_id}"},
+            label=f"Specify manually: jinn-agent kanban specify {task_id}",
+            payload={"command": f"jinn-agent kanban specify {task_id}"},
         ))
 
     return [Diagnostic(
@@ -585,8 +585,8 @@ def _rule_repeated_failures(task, events, runs, now, cfg) -> list[Diagnostic]:
         if task_id:
             actions.append(DiagnosticAction(
                 kind="cli_hint",
-                label=f"Check logs: hermes kanban log {task_id}",
-                payload={"command": f"hermes kanban log {task_id}"},
+                label=f"Check logs: jinn-agent kanban log {task_id}",
+                payload={"command": f"jinn-agent kanban log {task_id}"},
                 suggested=True,
             ))
     actions.extend(_generic_recovery_actions(
@@ -687,8 +687,8 @@ def _rule_repeated_crashes(task, events, runs, now, cfg) -> list[Diagnostic]:
     if task_id:
         actions.append(DiagnosticAction(
             kind="cli_hint",
-            label=f"Check logs: hermes kanban log {task_id}",
-            payload={"command": f"hermes kanban log {task_id}"},
+            label=f"Check logs: jinn-agent kanban log {task_id}",
+            payload={"command": f"jinn-agent kanban log {task_id}"},
             suggested=True,
         ))
     running = _task_field(task, "status") == "running"
@@ -825,8 +825,8 @@ def _rule_block_unblock_cycling(task, events, runs, now, cfg) -> list[Diagnostic
     if task_id:
         actions.append(DiagnosticAction(
             kind="cli_hint",
-            label=f"Check block reasons: hermes kanban events {task_id}",
-            payload={"command": f"hermes kanban events {task_id}"},
+            label=f"Check block reasons: jinn-agent kanban events {task_id}",
+            payload={"command": f"jinn-agent kanban events {task_id}"},
             suggested=True,
         ))
     return [Diagnostic(
@@ -946,7 +946,7 @@ def _rule_stranded_in_ready(task, events, runs, now, cfg) -> list[Diagnostic]:
         DiagnosticAction(
             kind="cli_hint",
             label="Check dispatcher status",
-            payload={"command": "hermes kanban diagnostics"},
+            payload={"command": "jinn-agent kanban diagnostics"},
         ),
     ]
 

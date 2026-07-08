@@ -133,7 +133,7 @@ def _install_dependencies(provider_name: str) -> None:
         if not pip_cmd:
             print(f"  ⚠ uv not found — cannot install dependencies")
             print(f"  Install uv: curl -LsSf https://astral.sh/uv/install.sh | sh")
-            print(f"  Then re-run: hermes memory setup")
+            print(f"  Then re-run: jinn-agent memory setup")
             return
         print(f"  ⚠ uv not found. Falling back to standard pip...")
         install_cmd = [sys.executable, "-m", "pip", "install", "--quiet"] + missing
@@ -226,7 +226,7 @@ def cmd_setup_provider(provider_name: str) -> None:
 
     if not match:
         print(f"\n  Memory provider '{provider_name}' not found.")
-        print("  Run 'hermes memory setup' to see available providers.\n")
+        print("  Run 'jinn-agent memory setup' to see available providers.\n")
         return
 
     name, _, provider = match

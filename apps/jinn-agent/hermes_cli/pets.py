@@ -29,7 +29,7 @@ def _cmd_list(args) -> int:
     if getattr(args, "installed", False):
         pets = store.installed_pets()
         if not pets:
-            _print("No pets installed. Try: hermes pets install boba")
+            _print("No pets installed. Try: jinn-agent pets install boba")
             return 0
         _print(f"Installed pets ({len(pets)}):")
         for pet in pets:
@@ -62,7 +62,7 @@ def _cmd_list(args) -> int:
         _print(f"  {mark} {entry.slug:<28} {entry.display_name}  ({entry.kind})")
     if limit and len(entries) > limit:
         _print(f"  … {len(entries) - limit} more (use --limit 0 or --query to filter)")
-    _print("\nInstall one with: hermes pets install <slug>")
+    _print("\nInstall one with: jinn-agent pets install <slug>")
     return 0
 
 
@@ -83,7 +83,7 @@ def _cmd_install(args) -> int:
         _set_active(slug)
         _print(f"✓ {pet.display_name} is now the active pet (display.pet.slug={slug}, enabled)")
     else:
-        _print(f"  Make it active with: hermes pets select {slug}")
+        _print(f"  Make it active with: jinn-agent pets select {slug}")
     return 0
 
 
@@ -105,7 +105,7 @@ def _cmd_select(args) -> int:
     if not slug:
         pets = store.installed_pets()
         if not pets:
-            _err("✗ no pets installed — run: hermes pets install boba")
+            _err("✗ no pets installed — run: jinn-agent pets install boba")
             return 1
         slug = _interactive_pick(pets)
         if not slug:
@@ -113,7 +113,7 @@ def _cmd_select(args) -> int:
 
     pet = store.load_pet(slug)
     if pet is None or not pet.exists:
-        _err(f"✗ '{slug}' is not installed — run: hermes pets install {slug}")
+        _err(f"✗ '{slug}' is not installed — run: jinn-agent pets install {slug}")
         return 1
 
     _set_active(slug)
@@ -154,7 +154,7 @@ def _cmd_show(args) -> int:
     slug = (getattr(args, "slug", "") or "").strip() or str(cfg.get("slug", "") or "")
     pet = store.resolve_active_pet(slug)
     if pet is None:
-        _err("✗ no pet to show — run: hermes pets install boba")
+        _err("✗ no pet to show — run: jinn-agent pets install boba")
         return 1
 
     mode_cfg = getattr(args, "mode", None) or str(cfg.get("render_mode", "auto") or "auto")
@@ -268,13 +268,13 @@ def _cmd_doctor(args) -> int:
 
     ok = True
     if not pets:
-        _print("  → no pets installed. Run: hermes pets install boba")
+        _print("  → no pets installed. Run: jinn-agent pets install boba")
         ok = False
     elif active is None:
-        _print("  → active pet unresolved. Run: hermes pets select <slug>")
+        _print("  → active pet unresolved. Run: jinn-agent pets select <slug>")
         ok = False
     elif not enabled:
-        _print("  → pet display is disabled. Run: hermes pets select " + active.slug)
+        _print("  → pet display is disabled. Run: jinn-agent pets select " + active.slug)
 
     try:
         import PIL  # noqa: F401

@@ -205,7 +205,7 @@ def test_nous_adapter_retry_credential_skips_non_401(tmp_path, monkeypatch):
 def test_nous_adapter_get_credential_raises_when_not_logged_in(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     adapter = NousPortalAdapter()
-    with pytest.raises(RuntimeError, match="hermes auth add nous"):
+    with pytest.raises(RuntimeError, match="jinn-agent auth add nous"):
         adapter.get_credential()
 
 

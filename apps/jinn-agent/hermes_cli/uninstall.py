@@ -560,8 +560,8 @@ def run_gui_uninstall(args):
     print(color("│            ✓ Chat GUI Uninstalled!                      │", Colors.GREEN, Colors.BOLD))
     print(color("└─────────────────────────────────────────────────────────┘", Colors.GREEN, Colors.BOLD))
     print()
-    print("The Hermes agent is still installed. Run 'hermes' to use the CLI,")
-    print("or 'hermes uninstall' to remove the agent too.")
+    print("The agent is still installed. Run 'jinn-agent' to use the CLI,")
+    print("or 'jinn-agent uninstall' to remove the agent too.")
     print()
 
 
@@ -771,7 +771,7 @@ def _perform_uninstall(
             log_info("No Hermes-set User env vars to remove")
     
     # 3. Remove wrapper script
-    log_info("Removing hermes command...")
+    log_info("Removing the `hermes` wrapper script...")
     removed_wrappers = remove_wrapper_script()
     if removed_wrappers:
         for wrapper in removed_wrappers:

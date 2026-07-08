@@ -356,7 +356,7 @@ def test_picker_hints_adds_warning_to_skeleton_rows():
         # hermes model fallback.
         assert (
             row["warning"].startswith("paste ")
-            or row["warning"].startswith("run `hermes model`")
+            or row["warning"].startswith("run `jinn-agent model`")
         )
 
 

@@ -43,7 +43,7 @@ def _model_options() -> list[dict[str, Any]]:
 def _pick_slot(current: dict[str, str] | None = None) -> dict[str, str]:
     providers = _model_options()
     if not providers:
-        raise RuntimeError("No configured model providers found. Run `hermes model` first.")
+        raise RuntimeError("No configured model providers found. Run `jinn-agent model` first.")
     current_provider = (current or {}).get("provider", "")
     provider_default = next(
         (idx for idx, p in enumerate(providers) if p.get("slug") == current_provider),
@@ -117,7 +117,7 @@ def cmd_moa(args) -> None:
         moa = normalize_moa_config(cfg.get("moa") if isinstance(cfg, dict) else {})
         preset_name = (getattr(args, "name", None) or "").strip()
         if not preset_name:
-            raise SystemExit("Usage: hermes moa delete <name>")
+            raise SystemExit("Usage: jinn-agent moa delete <name>")
         if preset_name not in moa["presets"]:
             raise SystemExit(f"Unknown MoA preset: {preset_name}")
         if len(moa["presets"]) <= 1:

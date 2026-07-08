@@ -1085,7 +1085,7 @@ class SessionStore:
                 "Gateway routing index ONLY: maps messaging session keys "
                 "(agent:main:<platform>:...) to active session IDs. This is NOT "
                 "the session list. ALL sessions (CLI, TUI, and gateway) live in "
-                "~/.hermes/state.db and are shown by `hermes sessions list` and "
+                "~/.hermes/state.db and are shown by `jinn-agent sessions list` and "
                 "`/sessions`. Seeing only gateway entries here is expected and "
                 "does not mean CLI sessions are missing."
             ),

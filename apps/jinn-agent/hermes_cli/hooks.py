@@ -28,8 +28,8 @@ def hooks_command(args) -> None:
     sub = getattr(args, "hooks_action", None)
 
     if not sub:
-        print("Usage: hermes hooks {list|test|revoke|doctor}")
-        print("Run 'hermes hooks --help' for details.")
+        print("Usage: jinn-agent hooks {list|test|revoke|doctor}")
+        print("Run 'jinn-agent hooks --help' for details.")
         return
 
     if sub in {"list", "ls"}:
@@ -56,7 +56,7 @@ def _cmd_list(_args) -> None:
 
     if not specs:
         print("No shell hooks configured in ~/.hermes/config.yaml.")
-        print("See `hermes hooks --help` or")
+        print("See `jinn-agent hooks --help` or")
         print("    website/docs/user-guide/features/hooks.md")
         print("for the config schema and worked examples.")
         return
@@ -95,7 +95,7 @@ def _cmd_list(_args) -> None:
                         print(
                             f"      ⚠ script modified since approval "
                             f"(was {mtime_at}, now {mtime_now}) — "
-                            f"run `hermes hooks doctor` to re-validate"
+                            f"run `jinn-agent hooks doctor` to re-validate"
                         )
         print()
 
@@ -351,7 +351,7 @@ def _doctor_one(spec, shell_hooks) -> int:
             problems += 1
             print(f"      ⚠ script modified since approval "
                   f"(was {mtime_at}, now {mtime_now}) — review changes, "
-                  f"then `hermes hooks revoke` + re-approve to refresh")
+                  f"then `jinn-agent hooks revoke` + re-approve to refresh")
         elif mtime_now and mtime_at and mtime_now == mtime_at:
             print("      ✓ script unchanged since approval")
 
@@ -363,7 +363,7 @@ def _doctor_one(spec, shell_hooks) -> int:
     if not entry:
         print("      ℹ skipped JSON smoke test — not allowlisted yet. "
               "Approve the hook first (via TTY prompt or --accept-hooks), "
-              "then re-run `hermes hooks doctor`.")
+              "then re-run `jinn-agent hooks doctor`.")
     elif shell_hooks.script_is_executable(spec.command):
         payload = _DEFAULT_PAYLOADS.get(spec.event, {"extra": {}})
         result = shell_hooks.run_once(spec, payload)

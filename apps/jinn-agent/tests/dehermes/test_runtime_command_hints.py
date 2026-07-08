@@ -17,7 +17,15 @@ the checkout, so it is never executed here).
 Behavioural coverage: probe the swept surfaces that ARE safe to run
 against a throwaway HERMES_HOME — read-only status commands and bad-usage
 error paths.
+
+Wave 2 extended the sweep from the original six files to the whole
+hermes_cli/ + gateway/ tree; SWEPT_FILES is now glob-driven so newly
+added modules are gated automatically. Literals that legitimately keep
+`hermes <word>` (container filesystem truth, legacy markers, matcher
+strings) are enumerated per-file in brandcheck.ALLOWED_HINT_LITERALS.
 """
+from pathlib import Path
+
 import pytest
 
 from tests.dehermes.brandcheck import (
@@ -27,14 +35,19 @@ from tests.dehermes.brandcheck import (
     scan_runtime_hint_violations,
 )
 
-SWEPT_FILES = [
-    "hermes_cli/main.py",
-    "hermes_cli/gateway.py",
-    "hermes_cli/cron.py",
-    "hermes_cli/backup.py",
-    "hermes_cli/config.py",
-    "hermes_cli/gateway_windows.py",
-]
+_REPO = Path(__file__).resolve().parents[2]
+
+# The whole runtime-output surface: every module under hermes_cli/ and
+# gateway/ (subpackages included) is swept and must stay clean. Sole
+# exclusion: tips.py, whose upstream TIPS list is deliberately rebranded
+# at runtime by the skin-gated filter tail (mono#1358/#1366) rather than
+# rewritten at rest.
+SWEPT_FILES = sorted(
+    str(p.relative_to(_REPO))
+    for d in ("hermes_cli", "gateway")
+    for p in (_REPO / d).rglob("*.py")
+    if str(p.relative_to(_REPO)) != "hermes_cli/tips.py"
+)
 
 
 @pytest.mark.parametrize("rel_path", SWEPT_FILES)
@@ -56,6 +69,11 @@ RUNTIME_HINT_INVOCATIONS = [
     "gateway status",   # gateway.py "To start:" block
     "config set",       # config.py bad-usage Usage/Examples block
     "whatsapp",         # main.py _require_tty error (non-tty here)
+    "hooks",            # hooks.py no-action Usage block
+    "webhook",          # webhook.py no-action Usage block
+    "pairing",          # pairing.py no-action Usage block
+    "debug",            # debug.py no-command Usage/Commands block
+    "fallback list",    # fallback_cmd.py empty-chain "Add one with:" hint
 ]
 
 

@@ -69,6 +69,6 @@ def validate_platform_toolsets(
     if valid_count == 0:
         warnings.append(
             "platform_toolsets resolves to zero valid toolsets — the agent will "
-            "have no tools. Run `hermes tools` to reconfigure."
+            "have no tools. Run `jinn-agent tools` to reconfigure."
         )
     return warnings
