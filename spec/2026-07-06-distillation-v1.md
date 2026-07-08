@@ -413,7 +413,10 @@ A human-run script (`yarn distill --distribution coding`), **not** a SolverNet (
    compressed step trace where available, §8), `verifiabilityTier` — producing a SKILL.md
    (frontmatter + body). The cluster input handed to the LLM **carries the evidence content**
    (patch / step-trace attributes), not step names only — a name-only projection under-feeds the
-   distiller. The prompt has **three modes keyed to the cluster's tier (§6)**:
+   distiller. It also carries the **whole per-instance attempt group** (up to `groupCap`, §8) with
+   explicit `{groupSize, nPass, nFail}` stats, so a both-polarity cluster reasons over the pass/fail
+   *distribution* — winning-strategy corroboration plus a failure taxonomy — not a single pass↔fail
+   pair (#1478). The prompt has **three modes keyed to the cluster's tier (§6)**:
    - **Pattern-eligible clusters → a strategic-pattern skill:** the critical decision points and
      generalizable behavior that made the solve work (`metadata.jinn.skillKind: 'strategic-pattern'`).
    - **Lesson-eligible clusters → a failure-lesson skill** (`skillKind: 'failure-lesson'`; the
@@ -510,7 +513,13 @@ to the actual ledger shape:
   indexer today — and evaluator-confirmed **failures are more numerous** (most attempts on a
   contested-band instance fail), so the lesson stream materially expands supply and coverage beyond
   the 92-instance pass pool. The pass pool is instance-skewed (`sympy-27510` ≈ 46/390), so the gate
-  keys corroboration on *distinct* instances (§6) and the bridge **dedups per `(instance_id, polarity)`**.
+  keys corroboration on *distinct* instances (§6, still one skill per instance) — while the bridge
+  **retains the per-instance attempt group** (up to `groupCap` per `(instance_id, polarity)`, default
+  8) so the distiller reasons over the whole pass/fail distribution, not one exemplar
+  (group-relative distillation, #1478). Verified live 2026-07-08: the unmodified distiller already
+  extracts the winner-vs-field discriminator from a real group (`Colin-b__httpx_auth-105`, 3 pass / 13
+  fail → a failure taxonomy drawn from the 13 fails); the change is purely retaining what the bridge
+  had been discarding.
 - **Exclude the held-out `cap-v0` slate** (§12) by **`instance_id` AND repo** via the capability-eval
   session's `excludeHeldOutSlate` — the contamination boundary, enforced *inside the bridge*. Repo
   exclusion matters because a different instance from a slate repo still leaks that repo's solution
@@ -776,9 +785,9 @@ guardrail) + the pilot + the held-out interface.
 1. `jinn.skill.v1` format + `publishSkill()` with **parameterized `role`/`solverType` and the
    `skill:<cid>` anchor key** (§5), and the layer-2 secret-only scrub stage (§10).
 2. The execution-ledger bridge (§8), scrubbing at layer-2 altitude, sourcing **both verified passes
-   and evaluator-confirmed failures** (D10), dedup-per-`(instance_id, polarity)`, consuming the
-   `cap-v0` slate exclusion (§12). *(This also produces the raw-evidence corpus = the shipped v1
-   product baseline, D11.)*
+   and evaluator-confirmed failures** (D10), **retaining the per-instance attempt group** (up to
+   `groupCap` per `(instance_id, polarity)`, #1478), consuming the `cap-v0` slate exclusion (§12).
+   *(This also produces the raw-evidence corpus = the shipped v1 product baseline, D11.)*
 3. The promotion gate + the corrected redaction-health guard, with **tiered eligibility**
    (pattern-eligible passes + lesson-eligible definitive-FAIL) (§6).
 4. `jinn-skill-distill-prompt-v1` (**three modes**: success→patterns, failure→lessons under the

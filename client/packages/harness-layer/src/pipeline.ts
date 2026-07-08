@@ -49,6 +49,15 @@ export interface PipelineDeps {
   meta?: boolean;
   /** The stage-2 meta LLM port. Required when `meta` is true. */
   metaDistill?: (cluster: MetaCluster) => Promise<MetaDistillLLMOutput>;
+  /**
+   * Attempts retained per `(instance_id, polarity)` — the per-instance attempt
+   * group the distiller reasons over for group-relative distillation (#1478).
+   * Default 8. NOTE: for a group to be complete, `verdictSource.list` must
+   * return every attempt of the instance — set `limit` high enough to cover the
+   * corpus (the source pages up to 20k rows; a tight `limit` truncates in
+   * enrichment order and can split a group).
+   */
+  groupCap?: number;
   limit?: number;
   now?: () => Date;
 }
@@ -89,6 +98,7 @@ export async function runDistillationPipeline(deps: PipelineDeps): Promise<Pipel
     slateInstanceIds: slateIds,
     fetchEvidence: deps.fetchEvidence,
     publishEvidence,
+    groupCap: deps.groupCap ?? 8,
     ...(deps.now ? { now: deps.now } : {}),
   });
 

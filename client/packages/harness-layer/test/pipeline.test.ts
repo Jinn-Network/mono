@@ -115,6 +115,52 @@ describe('runDistillationPipeline (Tier-0 dry-run)', () => {
     }
   });
 
+  it('retains the whole per-instance attempt group end-to-end (#1478)', async () => {
+    const seen: DistillCluster[] = [];
+    const validOut: DistillLLMOutput = {
+      name: 'orm-fanout-dedup',
+      description: 'Use when a join fans out rows. Not for: single-table reads.',
+      body: [
+        '## When to use', 'A queryset returns duplicate rows after a join.',
+        '## Strategy', 'Collapse duplicates at the ORM layer near the join.',
+        '## Steps', '1. Find the fan-out. 2. Apply .distinct() after it.',
+        '## Pitfalls', 'An order_by on a joined column can re-expand the rows.',
+        '## Verify', 'Assert the row count equals the expected unique count.',
+      ].join('\n\n'),
+    };
+    // one instance, 3 verified passes + 2 confirmed fails — a real group.
+    const groupRefs: AttemptRef[] = [
+      ...[1, 2, 3].map((i) => ({ ...ref('acme__lib-7', 'pass'), requestId: `0xpass${i}`, manifestCid: `bafy-p${i}` })),
+      ...[1, 2].map((i) => ({ ...ref('acme__lib-7', 'fail'), requestId: `0xfail${i}`, manifestCid: `bafy-f${i}` })),
+    ];
+    const { d } = deps({
+      verdictSource: { list: async () => groupRefs },
+      distill: async (c: DistillCluster) => { seen.push(c); return validOut; },
+    });
+    const res = await runDistillationPipeline(d);
+    // all 5 attempts bridged (default groupCap=8 ≥ 5), folded into ONE contrastive cluster.
+    expect(res.bridge.bridged).toHaveLength(5);
+    expect(res.bridge.deduped).toHaveLength(0);
+    expect(res.clusterCount).toBe(1);
+    const c = seen.find((x) => x.clusterId === 'contrastive:acme__lib-7')!;
+    expect(c.evidenceRefs).toHaveLength(5);
+    const input = c.input as { groupSize: number; nPass: number; nFail: number };
+    expect(input.groupSize).toBe(5);
+    expect(input.nPass).toBe(3);
+    expect(input.nFail).toBe(2);
+  });
+
+  it('caps a fat group at groupCap end-to-end (an instance with >K attempts yields exactly K) (#1478)', async () => {
+    const passRefs: AttemptRef[] = [1, 2, 3, 4, 5].map((i) => ({ ...ref('acme__lib-9', 'pass'), requestId: `0xp${i}`, manifestCid: `bafy-cap-${i}` }));
+    const { d } = deps({
+      groupCap: 3,
+      verdictSource: { list: async () => passRefs },
+    });
+    const res = await runDistillationPipeline(d);
+    expect(res.bridge.bridged).toHaveLength(3);   // exactly K
+    expect(res.bridge.deduped).toHaveLength(2);   // the 2 over the cap
+  });
+
   it('AC5: leaves metaDistilled undefined and stage-1 unchanged when meta is disabled', async () => {
     const { d } = deps();
     const res = await runDistillationPipeline(d);
