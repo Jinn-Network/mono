@@ -29,21 +29,39 @@ def test_still_flags_bare_hermes_near_path_lookalikes():
     with pytest.raises(AssertionError):
         assert_no_upstream_brand("Welcome to Hermes")
 
-def test_allows_real_toolset_keys():
-    # hermes-* toolset registry keys (hermes_cli/platforms.py default_toolset
-    # values) are technical identifiers users type in `-s` flags — not
-    # branding. Controller ruling: exempt the explicit key list only.
-    assert_no_upstream_brand("Available toolsets: hermes-yuanbao, hermes-slack, hermes-cli")
-    assert_no_upstream_brand("⚠ hermes-yuanbao (system dependency not met)")
+def test_flags_legacy_toolset_keys():
+    # The toolset registry keys are canonically jinn-* since the rename
+    # (toolsets.py TOOLSET_BUNDLE_PREFIX); the old Task 10 exemption is gone.
+    # Legacy hermes-* spellings are still accepted on INPUT (configs, -s
+    # flags) via canonical_toolset_name(), but printing one is a brand leak
+    # the check must catch.
+    with pytest.raises(AssertionError):
+        assert_no_upstream_brand("⚠ hermes-yuanbao (system dependency not met)")
+    with pytest.raises(AssertionError):
+        assert_no_upstream_brand("Available toolsets: hermes-slack, hermes-cli")
 
-def test_still_flags_hermes_agent_brand_string_next_to_toolset_keys():
-    # The explicit-list exemption must never widen into a `hermes-[a-z-]+`
-    # pattern: "hermes-agent" is the brand string, not a toolset key, and
-    # must still be caught even in a sentence that also mentions real keys.
+def test_allows_canonical_jinn_toolset_keys():
+    assert_no_upstream_brand("Available toolsets: jinn-yuanbao, jinn-slack, jinn-cli")
+    assert_no_upstream_brand("⚠ jinn-yuanbao (system dependency not met)")
+
+def test_still_flags_hermes_agent_brand_string():
     with pytest.raises(AssertionError):
         assert_no_upstream_brand("hermes-agent is great")
+
+def test_allows_oauth_client_id_default_in_help():
+    # `hermes-cli` as the OAuth client id (DEFAULT_NOUS_CLIENT_ID) is a
+    # protocol literal users pass verbatim via --client-id — same category
+    # as the bare `nous` provider-id enum, not the (renamed) toolset key.
+    assert_no_upstream_brand("OAuth client id to use (default: hermes-cli)")
+    assert_no_upstream_brand(
+        "OAuth client id to use for provider portal login (default: hermes-cli)"
+    )
+
+def test_still_flags_hermes_cli_outside_client_id_context():
+    # The client-id anchor must not resurrect the removed toolset-key
+    # exemption: a bare hermes-cli elsewhere is a brand leak.
     with pytest.raises(AssertionError):
-        assert_no_upstream_brand("hermes-agent is great, see also hermes-slack")
+        assert_no_upstream_brand("Available toolsets: hermes-cli")
 
 def test_allows_pip_install_hermes_agent_package_name():
     # bare `hermes-agent` in a pip-install invocation is the real PyPI

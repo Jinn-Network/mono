@@ -544,18 +544,20 @@ def _is_mcp_toolset_name(name: str) -> bool:
 def _expand_parent_toolsets(parent_toolsets: set) -> set:
     """Expand composite toolsets so individual toolset names are recognized.
 
-    When a parent uses a composite toolset like ``hermes-cli`` (which bundles
+    When a parent uses a composite toolset like ``jinn-cli`` (which bundles
     all core tools), the child may request individual toolsets such as ``web``
     or ``terminal``.  A simple name-based intersection would reject them
-    because ``"web" != "hermes-cli"``.
+    because ``"web" != "jinn-cli"``.
 
     This helper collects the tool names from each parent toolset, then adds
     the names of any individual toolsets whose tools are a *subset* of the
     parent's available tools.  The original parent toolset names are preserved.
     """
+    from toolsets import canonical_toolset_name
+
     parent_tool_names: set = set()
     for ts_name in parent_toolsets:
-        ts_def = TOOLSETS.get(ts_name)
+        ts_def = TOOLSETS.get(canonical_toolset_name(ts_name))
         if ts_def:
             parent_tool_names.update(ts_def.get("tools", []))
 
@@ -1118,7 +1120,7 @@ def _build_child_agent(
 
     if toolsets:
         # Intersect with parent — subagent must not gain tools the parent lacks.
-        # Expand composite toolsets (e.g. hermes-cli) so that individual
+        # Expand composite toolsets (e.g. jinn-cli) so that individual
         # toolset names (e.g. web, terminal) are recognised during intersection.
         expanded_parent = _expand_parent_toolsets(parent_toolsets)
         child_toolsets = [t for t in toolsets if t in expanded_parent]

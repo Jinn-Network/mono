@@ -393,14 +393,15 @@ def _compute_tool_definitions(
             tools_to_include.update(resolve_toolset(ts_name))
 
     # Always apply disabled toolsets as a subtraction step at the end.
-    # This ensures that even if a composite toolset (like hermes-cli)
+    # This ensures that even if a composite toolset (like jinn-cli)
     # is enabled, any tools belonging to a disabled toolset are strictly
     # stripped out. See issue #17309.
     if disabled_toolsets:
+        from toolsets import is_platform_bundle_name
         for toolset_name in disabled_toolsets:
             if validate_toolset(toolset_name):
-                if toolset_name.startswith("hermes-"):
-                    # Platform bundles (hermes-*) include _HERMES_CORE_TOOLS, so
+                if is_platform_bundle_name(toolset_name):
+                    # Platform bundles (jinn-*, legacy hermes-*) include _HERMES_CORE_TOOLS, so
                     # subtracting the whole bundle would strip core tools shared
                     # by other enabled toolsets and empty the tool list (#33924).
                     # Subtract only the bundle's non-core delta; keep core.
