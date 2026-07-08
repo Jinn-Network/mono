@@ -734,7 +734,7 @@ def run_import(args) -> None:
             gw_profiles = [n for n, _ in restored_profiles]
             print("\nTo re-enable gateway services for profiles:")
             for pname in gw_profiles:
-                print(f"  hermes -p {pname} gateway install")
+                print(f"  jinn-agent -p {pname} gateway install")
 
         print("Done. Your Hermes configuration has been restored.")
 

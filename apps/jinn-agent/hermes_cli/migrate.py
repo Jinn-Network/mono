@@ -19,7 +19,7 @@ def cmd_migrate(args: Any) -> int:
     if sub == "xai":
         return cmd_migrate_xai(args)
 
-    print("usage: hermes migrate xai [--apply] [--no-backup]", file=sys.stderr)
+    print("usage: jinn-agent migrate xai [--apply] [--no-backup]", file=sys.stderr)
     return 2
 
 
@@ -63,7 +63,7 @@ def cmd_migrate_xai(args: Any) -> int:
     if not apply:
         print(color("Dry-run mode — no changes written.", Colors.DIM))
         print(color(
-            "Re-run with `hermes migrate xai --apply` to rewrite "
+            "Re-run with `jinn-agent migrate xai --apply` to rewrite "
             f"{config_path} in-place (backup created automatically).",
             Colors.DIM,
         ))
@@ -102,7 +102,7 @@ def cmd_migrate_xai(args: Any) -> int:
     )
     print()
     print(color(
-        "Run `hermes doctor` to confirm no retired xAI models remain.",
+        "Run `jinn-agent doctor` to confirm no retired xAI models remain.",
         Colors.DIM,
     ))
     return 0

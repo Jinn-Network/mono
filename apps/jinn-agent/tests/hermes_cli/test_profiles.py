@@ -856,6 +856,19 @@ class TestAliasCollision:
             result = check_alias_collision("mybot")
         assert result is None  # our own wrapper, safe to overwrite
 
+    def test_new_style_wrapper_safe_to_overwrite(self, profile_env, monkeypatch):
+        # A wrapper that execs the jinn-agent binary is still "our wrapper"
+        # for the collision check.
+        monkeypatch.setattr("sys.platform", "darwin")
+        wrapper_dir = profile_env / ".local" / "bin"
+        wrapper_dir.mkdir(parents=True, exist_ok=True)
+        wrapper_path = wrapper_dir / "mybot"
+        wrapper_path.write_text('#!/bin/sh\nexec /opt/jinn/bin/jinn-agent -p mybot "$@"\n')
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout=str(wrapper_path))
+            result = check_alias_collision("mybot")
+        assert result is None  # our own wrapper, safe to overwrite
+
     def test_traversal_alias_rejected_before_path_lookup(self, profile_env):
         """A path-traversal alias is rejected without ever shelling out to which/where."""
         with patch("subprocess.run") as mock_run:
@@ -873,25 +886,54 @@ class TestWrapperScript:
     """Tests for create_wrapper_script() and remove_wrapper_script()."""
 
     def test_creates_sh_on_posix(self, profile_env, monkeypatch):
+        # Regression (wrong-binary): a plain `hermes` on PATH is a stock
+        # upstream install — the wrapper must exec the jinn-agent binary
+        # even when a `hermes` is also resolvable.
         monkeypatch.setattr("sys.platform", "darwin")
-        monkeypatch.setattr("hermes_cli.profiles.shutil.which", lambda name: "/opt/hermes/bin/hermes")
+        which_map = {
+            "jinn-agent": "/opt/jinn/bin/jinn-agent",
+            "hermes": "/opt/hermes/bin/hermes",
+        }
+        monkeypatch.setattr(
+            "hermes_cli.profiles.shutil.which", lambda name: which_map.get(name)
+        )
         from hermes_cli.profiles import create_wrapper_script
         wrapper = create_wrapper_script("mybot")
         assert wrapper is not None
         assert wrapper.name == "mybot"
         content = wrapper.read_text()
         assert content.startswith("#!/bin/sh")
-        assert "exec /opt/hermes/bin/hermes -p mybot" in content
+        assert "exec /opt/jinn/bin/jinn-agent -p mybot" in content
+        assert "/opt/hermes/bin/hermes" not in content
+
+    def test_posix_wrapper_falls_back_to_checkout_entrypoint(self, profile_env, monkeypatch):
+        # No jinn-agent on PATH: the wrapper points at this checkout's
+        # bin/jinn-agent entrypoint instead of a (wrong) `hermes` binary.
+        monkeypatch.setattr("sys.platform", "darwin")
+        monkeypatch.setattr("hermes_cli.profiles.shutil.which", lambda name: None)
+        from hermes_cli import profiles as profiles_mod
+        from hermes_cli.profiles import create_wrapper_script
+        checkout_bin = Path(profiles_mod.__file__).resolve().parent.parent / "bin" / "jinn-agent"
+        wrapper = create_wrapper_script("mybot")
+        assert wrapper is not None
+        content = wrapper.read_text()
+        assert str(checkout_bin) in content
+        assert "hermes -p" not in content
 
     def test_creates_bat_on_windows(self, profile_env, monkeypatch):
         monkeypatch.setattr("sys.platform", "win32")
+        monkeypatch.setattr(
+            "hermes_cli.profiles.shutil.which",
+            lambda name: r"C:\jinn\jinn-agent.exe" if name == "jinn-agent" else r"C:\hermes\hermes.exe",
+        )
         from hermes_cli.profiles import create_wrapper_script
         wrapper = create_wrapper_script("mybot")
         assert wrapper is not None
         assert wrapper.name == "mybot.bat"
         content = wrapper.read_text()
         assert "@echo off" in content
-        assert "hermes -p mybot" in content
+        assert '"C:\\jinn\\jinn-agent.exe" -p mybot' in content
+        assert "hermes.exe" not in content
         assert "%*" in content
 
     def test_remove_finds_bat_on_windows(self, profile_env, monkeypatch):
@@ -922,27 +964,73 @@ class TestWrapperScript:
         # Custom alias name pointing at a differently-named profile: the file
         # is named after the alias, the -p content references the profile.
         monkeypatch.setattr("sys.platform", "darwin")
+        monkeypatch.setattr(
+            "hermes_cli.profiles.shutil.which",
+            lambda name: "/opt/jinn/bin/jinn-agent" if name == "jinn-agent" else None,
+        )
         from hermes_cli.profiles import create_wrapper_script
         wrapper = create_wrapper_script("rq", target="redqueen")
         assert wrapper is not None
         assert wrapper.name == "rq"
         content = wrapper.read_text()
         assert content.startswith("#!/bin/sh")
-        assert "hermes -p redqueen" in content
+        assert "jinn-agent -p redqueen" in content
 
     def test_custom_alias_target_on_windows(self, profile_env, monkeypatch):
         # Regression: custom-name aliases must still produce an executable
         # .bat (not a clobbered #!/bin/sh) on Windows.
         monkeypatch.setattr("sys.platform", "win32")
+        monkeypatch.setattr(
+            "hermes_cli.profiles.shutil.which",
+            lambda name: r"C:\jinn\jinn-agent.exe" if name == "jinn-agent" else None,
+        )
         from hermes_cli.profiles import create_wrapper_script
         wrapper = create_wrapper_script("rq", target="redqueen")
         assert wrapper is not None
         assert wrapper.name == "rq.bat"
         content = wrapper.read_text()
         assert "@echo off" in content
-        assert "hermes -p redqueen" in content
+        assert "jinn-agent.exe" in content
+        assert "-p redqueen" in content
         assert "%*" in content
         assert "#!/bin/sh" not in content
+
+    def test_new_wrapper_roundtrips_through_alias_map(self, profile_env, monkeypatch):
+        # The alias reverse-lookup must recognise the jinn-agent wrapper form.
+        monkeypatch.setattr("sys.platform", "darwin")
+        monkeypatch.setattr(
+            "hermes_cli.profiles.shutil.which",
+            lambda name: "/opt/jinn/bin/jinn-agent" if name == "jinn-agent" else None,
+        )
+        from hermes_cli.profiles import build_alias_map, create_wrapper_script
+        assert create_wrapper_script("rq", target="redqueen") is not None
+        assert build_alias_map().get("redqueen") == "rq"
+
+    def test_alias_map_recognises_quoted_binary_path(self, profile_env, monkeypatch):
+        # A checkout path with spaces gets shlex-quoted in the wrapper body;
+        # recognition must survive the trailing quote after the binary name.
+        monkeypatch.setattr("sys.platform", "darwin")
+        monkeypatch.setattr(
+            "hermes_cli.profiles.shutil.which",
+            lambda name: "/opt/my agent/bin/jinn-agent" if name == "jinn-agent" else None,
+        )
+        from hermes_cli.profiles import build_alias_map, create_wrapper_script, remove_wrapper_script
+        assert create_wrapper_script("mybot") is not None
+        assert build_alias_map().get("mybot") == "mybot"
+        assert remove_wrapper_script("mybot") is True
+
+    def test_legacy_hermes_wrapper_still_recognised(self, profile_env, monkeypatch):
+        # Wrappers written by pre-fix builds say `hermes -p <profile>`; the
+        # alias map and removal must keep handling them.
+        monkeypatch.setattr("sys.platform", "darwin")
+        from hermes_cli.profiles import build_alias_map, remove_wrapper_script
+        wrapper_dir = profile_env / ".local" / "bin"
+        wrapper_dir.mkdir(parents=True, exist_ok=True)
+        legacy = wrapper_dir / "oldbot"
+        legacy.write_text('#!/bin/sh\nexec /opt/hermes/bin/hermes -p oldbot "$@"\n')
+        assert build_alias_map().get("oldbot") == "oldbot"
+        assert remove_wrapper_script("oldbot") is True
+        assert not legacy.exists()
 
 
 # ===================================================================
@@ -985,11 +1073,15 @@ class TestWrapperScriptSecurity:
 
     def test_legit_alias_stays_inside_wrapper_dir(self, profile_env, monkeypatch):
         monkeypatch.setattr("sys.platform", "darwin")
+        monkeypatch.setattr(
+            "hermes_cli.profiles.shutil.which",
+            lambda name: "/opt/jinn/bin/jinn-agent" if name == "jinn-agent" else None,
+        )
         from hermes_cli.profiles import _get_wrapper_dir
         wrapper = create_wrapper_script("mybot", target="coder")
         assert wrapper is not None
         assert wrapper.resolve().is_relative_to(_get_wrapper_dir().resolve())
-        assert 'hermes -p coder "$@"' in wrapper.read_text()
+        assert 'jinn-agent -p coder "$@"' in wrapper.read_text()
 
 
 # ===================================================================

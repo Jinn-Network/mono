@@ -114,8 +114,8 @@ def projects_command(args: argparse.Namespace) -> int:
             parser.print_help()
         else:
             print(
-                "usage: hermes project <action> [options]\n"
-                "Run 'hermes project --help' for the full list.",
+                "usage: jinn-agent project <action> [options]\n"
+                "Run 'jinn-agent project --help' for the full list.",
                 file=sys.stderr,
             )
         return 0
@@ -223,7 +223,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
             conn, include_archived=getattr(args, "include_archived", False)
         )
     if not projs:
-        print("No projects yet. Create one with `hermes project create <name>`.")
+        print("No projects yet. Create one with `jinn-agent project create <name>`.")
         return 0
     for p in projs:
         marker = "*" if p.id == active else " "
@@ -267,7 +267,7 @@ def _cmd_set_primary(args, conn, proj) -> int:
     if not pdb.set_primary(conn, proj.id, args.path):
         print(
             f"project: '{args.path}' is not a folder of {proj.slug}; "
-            f"add it first with `hermes project add-folder`.",
+            f"add it first with `jinn-agent project add-folder`.",
             file=sys.stderr,
         )
         return 1

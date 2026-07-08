@@ -300,7 +300,7 @@ class TestWizardFlow:
         out = buf.getvalue()
         # Required post-setup guidance
         assert "cloudflared tunnel --url http://localhost:8090" in out
-        assert "hermes gateway" in out
+        assert "jinn-agent gateway" in out
         assert "Verify and save" in out
         assert "messages" in out
         # The verify token should be quotable on the curl line

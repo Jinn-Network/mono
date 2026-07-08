@@ -568,7 +568,7 @@ def _apply_tool_selection(
             print(color(
                 f"  Couldn\'t probe server. Applied manifest default "
                 f"({len(manifest_default)} tools). "
-                f"Run `hermes mcp configure {entry.name}` after the server "
+                f"Run `jinn-agent mcp configure {entry.name}` after the server "
                 "is reachable to refine.",
                 Colors.YELLOW,
             ))
@@ -577,7 +577,7 @@ def _apply_tool_selection(
             print(color(
                 f"  Couldn\'t probe server; installed with no tool filter "
                 "(all tools enabled when reachable). "
-                f"Run `hermes mcp configure {entry.name}` after first "
+                f"Run `jinn-agent mcp configure {entry.name}` after first "
                 "connect to prune.",
                 Colors.YELLOW,
             ))
@@ -638,7 +638,7 @@ def _apply_tool_selection(
         # so the server is installed but contributes nothing until reconfigured.
         _write_tools_include(entry.name, [])
         print(color(
-            f"  No tools selected. Run `hermes mcp configure {entry.name}` "
+            f"  No tools selected. Run `jinn-agent mcp configure {entry.name}` "
             "to change.",
             Colors.YELLOW,
         ))
@@ -708,7 +708,7 @@ def install_entry(entry: CatalogEntry, *, enable: bool = True) -> None:
             # decoupled from provider-auth lifecycle.
             print(color(
                 f"  This MCP uses {entry.auth.provider} OAuth. Run "
-                f"`hermes auth {entry.auth.provider}` if you have not "
+                f"`jinn-agent auth {entry.auth.provider}` if you have not "
                 "already authenticated.",
                 Colors.YELLOW,
             ))

@@ -1264,9 +1264,11 @@ class TestProfileRestoration:
         assert (wrapper_dir / "coder").exists()
         assert (wrapper_dir / "researcher").exists()
 
-        # Wrappers should contain the right content
+        # Wrappers should contain the right content — exec the jinn-agent
+        # binary (or checkout entrypoint), never a stock `hermes`.
         coder_wrapper = (wrapper_dir / "coder").read_text()
-        assert "hermes -p coder" in coder_wrapper
+        assert "jinn-agent" in coder_wrapper
+        assert "-p coder" in coder_wrapper
 
     def test_import_skips_profile_dirs_without_config(self, tmp_path, monkeypatch):
         """Import doesn't create wrappers for profile dirs without config."""

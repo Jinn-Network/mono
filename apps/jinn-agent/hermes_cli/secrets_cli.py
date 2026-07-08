@@ -146,7 +146,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
                 f"  [red]Non-interactive mode (no TTY) requires all setup flags.[/red]\n"
                 f"  Missing: {', '.join(missing)}\n\n"
                 "  Usage:\n"
-                "    hermes secrets bitwarden setup \\\n"
+                "    jinn-agent secrets bitwarden setup \\\n"
                 "      --access-token '0.xxx' \\\n"
                 "      --server-url 'https://vault.bitwarden.com' \\\n"
                 "      --project-id 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'"
@@ -281,9 +281,9 @@ def cmd_setup(args: argparse.Namespace) -> int:
         "Secrets will be pulled at the start of every Hermes process."
     )
     console.print(
-        "  Status:  [cyan]hermes secrets bitwarden status[/cyan]\n"
-        "  Refresh: [cyan]hermes secrets bitwarden sync[/cyan]\n"
-        "  Disable: [cyan]hermes secrets bitwarden disable[/cyan]"
+        "  Status:  [cyan]jinn-agent secrets bitwarden status[/cyan]\n"
+        "  Refresh: [cyan]jinn-agent secrets bitwarden sync[/cyan]\n"
+        "  Disable: [cyan]jinn-agent secrets bitwarden disable[/cyan]"
     )
     return 0
 
@@ -323,7 +323,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     console.print(Panel(table, title="Bitwarden Secrets Manager", border_style="cyan"))
 
     if not enabled:
-        console.print("\n  Run [cyan]hermes secrets bitwarden setup[/cyan] to enable.")
+        console.print("\n  Run [cyan]jinn-agent secrets bitwarden setup[/cyan] to enable.")
         return 0
     if not token_set:
         console.print(
@@ -344,7 +344,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
     if not bw_cfg.get("enabled"):
         console.print(
             "[yellow]Bitwarden integration is disabled.  Run "
-            "`hermes secrets bitwarden setup` first.[/yellow]"
+            "`jinn-agent secrets bitwarden setup` first.[/yellow]"
         )
         return 1
 
@@ -491,7 +491,7 @@ def _list_projects(
             console.print(
                 "  [yellow]'invalid_client' from the US identity endpoint usually "
                 "means the token is for a different Bitwarden region.  Re-run "
-                "[cyan]hermes secrets bitwarden setup[/cyan] and pick EU or "
+                "[cyan]jinn-agent secrets bitwarden setup[/cyan] and pick EU or "
                 "self-hosted at the region prompt, or set [cyan]secrets.bitwarden."
                 "server_url[/cyan] in config.yaml.[/yellow]"
             )

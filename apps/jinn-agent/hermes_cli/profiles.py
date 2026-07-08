@@ -365,6 +365,32 @@ def profile_exists(name: str) -> bool:
 # Alias / wrapper script management
 # ---------------------------------------------------------------------------
 
+# Matches the profile-activation invocation inside a wrapper script we own —
+# both the current form (``exec <path>/jinn-agent -p <profile> "$@"``, where
+# the path may be shlex/cmd-quoted and carry a Windows ``.exe`` suffix) and
+# the legacy upstream form (``hermes -p <profile>``). Group 1 is the profile.
+_WRAPPER_INVOCATION_RE = re.compile(r"(?:jinn-agent|hermes)(?:\.exe)?['\"]? -p (\S+)")
+
+
+def _resolve_agent_bin() -> str:
+    """Executable that alias wrappers should exec to activate a profile.
+
+    A plain ``hermes`` on PATH resolves to a stock upstream install (setup.sh
+    deliberately parks/restores any pre-existing ``~/.local/bin/hermes``), so
+    wrappers must never exec it. Prefer the installed ``jinn-agent`` command,
+    then this checkout's ``bin/jinn-agent`` entrypoint (POSIX shell script),
+    then the bare command name as a last resort.
+    """
+    exe = shutil.which("jinn-agent")
+    if exe:
+        return exe
+    if sys.platform != "win32":
+        checkout_bin = Path(__file__).resolve().parent.parent / "bin" / "jinn-agent"
+        if checkout_bin.is_file():
+            return str(checkout_bin)
+    return "jinn-agent"
+
+
 def check_alias_collision(name: str) -> Optional[str]:
     """Return a human-readable collision message, or None if the name is safe.
 
@@ -379,7 +405,7 @@ def check_alias_collision(name: str) -> Optional[str]:
     if canon in _RESERVED_NAMES:
         return f"'{canon}' is a reserved name"
     if canon in _HERMES_SUBCOMMANDS:
-        return f"'{canon}' conflicts with a hermes subcommand"
+        return f"'{canon}' conflicts with a jinn-agent subcommand"
 
     # Check existing commands in PATH
     wrapper_dir = _get_wrapper_dir()
@@ -396,7 +422,7 @@ def check_alias_collision(name: str) -> Optional[str]:
             if existing_path == str(expected):
                 try:
                     content = expected.read_text()
-                    if "hermes -p" in content:
+                    if _WRAPPER_INVOCATION_RE.search(content):
                         return None  # it's our wrapper, safe to overwrite
                 except Exception:
                     pass
@@ -436,10 +462,11 @@ def create_wrapper_script(name: str, target: Optional[str] = None) -> Optional[P
         return None
 
     is_windows = sys.platform == "win32"
+    agent_exe = _resolve_agent_bin()
     if is_windows:
         wrapper_path = wrapper_dir / f"{canon}.bat"
         try:
-            wrapper_path.write_text(f"@echo off\r\nhermes -p {profile} %*\r\n")
+            wrapper_path.write_text(f'@echo off\r\n"{agent_exe}" -p {profile} %*\r\n')
             return wrapper_path
         except OSError as e:
             print(f"⚠ Could not create wrapper at {wrapper_path}: {e}")
@@ -447,8 +474,7 @@ def create_wrapper_script(name: str, target: Optional[str] = None) -> Optional[P
     else:
         wrapper_path = wrapper_dir / canon
         try:
-            hermes_exe = shutil.which("hermes") or "hermes"
-            wrapper_path.write_text(f'#!/bin/sh\nexec {shlex.quote(hermes_exe)} -p {profile} "$@"\n')
+            wrapper_path.write_text(f'#!/bin/sh\nexec {shlex.quote(agent_exe)} -p {profile} "$@"\n')
             wrapper_path.chmod(wrapper_path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
             return wrapper_path
         except OSError as e:
@@ -478,7 +504,7 @@ def remove_wrapper_script(name: str) -> bool:
             try:
                 # Verify it's our wrapper before removing
                 content = wrapper_path.read_text()
-                if "hermes -p" in content:
+                if _WRAPPER_INVOCATION_RE.search(content):
                     wrapper_path.unlink()
                     return True
             except Exception:
@@ -521,7 +547,8 @@ def find_alias_for_profile(profile_name: str) -> Optional[str]:
     """Return the alias name of the wrapper that activates *profile_name*, or None.
 
     A wrapper created by :func:`create_wrapper_script` is a file named after the
-    alias whose body invokes ``hermes -p <profile>``. When the alias name equals
+    alias whose body invokes ``jinn-agent -p <profile>`` (legacy wrappers say
+    ``hermes -p <profile>``). When the alias name equals
     the profile name this is trivial, but a custom alias (``hermes profile alias
     <profile> --name <custom>``) produces a differently-named file — so the
     display side cannot assume ``wrapper == profile`` and must reverse-look-up.
@@ -539,8 +566,8 @@ def find_alias_for_profile(profile_name: str) -> Optional[str]:
 
 
 # Cap how much of a wrapper file we read when reverse-looking-up its profile.
-# Real wrappers are a few hundred bytes of shell; the needle (``hermes -p X``)
-# sits near the top. The wrapper dir (e.g. ``~/.local/bin``) commonly also holds
+# Real wrappers are a few hundred bytes of shell; the needle (the ``-p X``
+# invocation) sits near the top. The wrapper dir (e.g. ``~/.local/bin``) commonly also holds
 # large unrelated binaries (ffmpeg, node, …) — reading those whole, N times, was
 # the dominant cost in ``list_profiles`` (~4.5s). Reading a small head slice and
 # skipping NUL-bearing (binary) content keeps the scan to a single cheap pass.
@@ -561,7 +588,6 @@ def build_alias_map() -> dict[str, str]:
     if not wrapper_dir.is_dir():
         return result
     is_windows = sys.platform == "win32"
-    prefix = "hermes -p "
 
     for entry in sorted(wrapper_dir.iterdir()):
         if not entry.is_file():
@@ -577,12 +603,11 @@ def build_alias_map() -> dict[str, str]:
         except (OSError, UnicodeDecodeError):
             # UnicodeDecodeError = a binary on PATH (ffmpeg etc.) — not a wrapper.
             continue
-        idx = content.find(prefix)
-        if idx == -1:
+        match = _WRAPPER_INVOCATION_RE.search(content)
+        if not match:
             continue
-        rest = content[idx + len(prefix):]
         # Profile id is the first whitespace-delimited token after the flag.
-        canon = rest.split(None, 1)[0].strip() if rest.strip() else ""
+        canon = match.group(1).strip()
         if not canon:
             continue
         canon = normalize_profile_name(canon)
@@ -1121,8 +1146,8 @@ def create_profile(
         try:
             (profile_dir / NO_BUNDLED_SKILLS_MARKER).write_text(
                 "This profile opted out of bundled-skill seeding "
-                "(`hermes profile create --no-skills`).\n"
-                "Delete this file to re-enable sync on the next `hermes update`.\n",
+                "(`jinn-agent profile create --no-skills`).\n"
+                "Delete this file to re-enable sync on the next `jinn-agent update`.\n",
                 encoding="utf-8",
             )
         except OSError:
@@ -1454,7 +1479,7 @@ def delete_profile(name: str, yes: bool = False) -> Path:
     if canon == "default":
         raise ValueError(
             "Cannot delete the default profile (~/.hermes).\n"
-            "To remove everything, use: hermes uninstall"
+            "To remove everything, use: jinn-agent uninstall"
         )
 
     profile_dir = get_profile_dir(canon)
@@ -1794,7 +1819,7 @@ def set_active_profile(name: str) -> None:
     if canon != "default" and not profile_exists(canon):
         raise FileNotFoundError(
             f"Profile '{canon}' does not exist. "
-            f"Create it with: hermes profile create {canon}"
+            f"Create it with: jinn-agent profile create {canon}"
         )
 
     path = _get_active_profile_path()
@@ -2003,7 +2028,7 @@ def import_profile(archive_path: str, name: Optional[str] = None) -> Path:
     if not inferred_name:
         raise ValueError(
             "Cannot determine profile name from archive. "
-            "Specify it explicitly: hermes profile import <archive> --name <name>"
+            "Specify it explicitly: jinn-agent profile import <archive> --name <name>"
         )
     if archive_root is None:
         raise ValueError(
@@ -2018,7 +2043,7 @@ def import_profile(archive_path: str, name: Optional[str] = None) -> Path:
     if canon == "default":
         raise ValueError(
             "Cannot import as 'default' — that is the built-in root profile (~/.hermes). "
-            "Specify a different name: hermes profile import <archive> --name <name>"
+            "Specify a different name: jinn-agent profile import <archive> --name <name>"
         )
 
     profile_dir = get_profile_dir(canon)
@@ -2184,7 +2209,7 @@ def resolve_profile_env(profile_name: str) -> str:
     if canon != "default" and not profile_dir.is_dir():
         raise FileNotFoundError(
             f"Profile '{canon}' does not exist. "
-            f"Create it with: hermes profile create {canon}"
+            f"Create it with: jinn-agent profile create {canon}"
         )
 
     return str(profile_dir)

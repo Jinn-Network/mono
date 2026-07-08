@@ -158,6 +158,28 @@ ALLOWED_HINT_LITERALS = {
         " hermes gateway ",
         "/hermes gateway ",
     }),
+    # s6/container backend: inside the Docker image the exec shim is
+    # literally /opt/hermes/bin/hermes and the service user is `hermes`
+    # (Dockerfile `useradd … hermes` + `cp docker/hermes-exec-shim.sh
+    # /opt/hermes/bin/hermes`), so the generated s6 run scripts and the
+    # in-container error hints are container filesystem truth, not
+    # wrong-binary hints.
+    "hermes_cli/service_manager.py": frozenset({
+        "hermes gateway run --replace",
+        ": register it with `hermes profile create ",
+        '"\nmkdir -p "$log_dir"\nchown hermes:hermes "$HERMES_HOME/logs/gateways"'
+        ' 2>/dev/null || true\nchown -R hermes:hermes "$log_dir" 2>/dev/null ||'
+        ' true\nrm -f "$log_dir/lock"\n[ "$(id -u)" = 0 ] || exec s6-log 1 n10'
+        ' s1000000 T "$log_dir"\nexec s6-setuidgid hermes s6-log 1 n10 s1000000'
+        ' T "$log_dir"\n',
+    }),
+    # Legacy managed-section marker: prior fork builds wrote this exact
+    # comment line into ~/.codex/config.toml; strip_managed_section must
+    # keep matching it or re-runs duplicate the managed section. New
+    # writes use the jinn-agent marker.
+    "hermes_cli/codex_runtime_plugin_migration.py": frozenset({
+        "# managed by hermes-agent — `hermes codex-runtime migrate` regenerates this section",
+    }),
 }
 
 

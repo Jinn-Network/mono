@@ -48,9 +48,18 @@ logger = logging.getLogger(__name__)
 # Marker comments wrapping the managed section so re-runs can detect
 # what's ours and what's user-edited. Both must appear or strip is a no-op.
 MIGRATION_MARKER = (
-    "# managed by hermes-agent — `hermes codex-runtime migrate` regenerates this section"
+    "# managed by jinn-agent — `jinn-agent codex-runtime migrate` regenerates this section"
 )
 MIGRATION_END_MARKER = (
+    "# end jinn-agent managed section"
+)
+# Markers written by earlier builds. strip_managed_section still matches
+# them so re-runs against a config migrated before the rename replace the
+# old section instead of stacking a duplicate below it.
+LEGACY_MIGRATION_MARKER = (
+    "# managed by hermes-agent — `hermes codex-runtime migrate` regenerates this section"
+)
+LEGACY_MIGRATION_END_MARKER = (
     "# end hermes-agent managed section"
 )
 
@@ -420,12 +429,13 @@ def _strip_existing_managed_block(toml_text: str) -> str:
     saw_end_marker = False
     for line in lines:
         line_stripped_nl = line.rstrip("\n")
-        if line_stripped_nl == MIGRATION_MARKER:
+        if line_stripped_nl in (MIGRATION_MARKER, LEGACY_MIGRATION_MARKER):
             in_managed = True
             saw_end_marker = False
             continue
         if in_managed:
-            if line_stripped_nl == MIGRATION_END_MARKER:
+            if line_stripped_nl in (MIGRATION_END_MARKER,
+                                    LEGACY_MIGRATION_END_MARKER):
                 in_managed = False
                 saw_end_marker = True
                 continue

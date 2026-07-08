@@ -351,7 +351,7 @@ def cmd_journey(args: argparse.Namespace) -> int:
 
 
 if __name__ == "__main__":
-    _p = argparse.ArgumentParser(prog="hermes journey")
+    _p = argparse.ArgumentParser(prog="jinn-agent journey")
     register_cli(_p)
     _a = _p.parse_args()
     sys.exit(_a.func(_a))
