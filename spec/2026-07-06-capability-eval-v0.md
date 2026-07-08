@@ -85,7 +85,9 @@ equal quality, lower cost" becomes two testable sub-claims:
    "equal.")
 2. **Cost superiority.** On tasks **both arms solve** (like-for-like: identical deliverable),
    corpus-ON costs strictly less. Formally, with Δ_cost = cost(B) − cost(A) over the
-   concordant-solve set: we reject H0: Δ_cost ≥ 0 in favour of H1: Δ_cost < 0.
+   concordant-solve set (operative definition in §6.2: tasks where each arm has ≥1 passing
+   repeat, each arm's cost averaged over its passing repeats only): we reject H0: Δ_cost ≥ 0
+   in favour of H1: Δ_cost < 0.
 
 Restricting the cost claim to the both-solve set is deliberate and sharp — "lower cost at equal
 quality" means *the same success reached for fewer dollars*, not "a failure is cheaper than a
