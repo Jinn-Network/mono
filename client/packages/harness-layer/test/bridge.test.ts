@@ -109,6 +109,32 @@ describe('bridgeAttempts', () => {
     expect(res.deduped).toHaveLength(1);
   });
 
+  it('retains up to groupCap attempts per (instance_id, polarity); overflow → deduped, kept-K stable-ordered (#1478)', async () => {
+    const deps = coreDeps({ groupCap: 2 });
+    const passRefs = ['0xa', '0xb', '0xc'].map((p) => ref({ requestId: p.padEnd(66, '0') }));
+    const res = await bridgeAttempts(passRefs, deps);
+    // exactly K kept, the remainder recorded as over-cap.
+    expect(res.bridged).toHaveLength(2);
+    expect(res.deduped).toHaveLength(1);
+    // the kept K are the FIRST K in arrival order (deterministic selection).
+    expect(deps.published.map((r) => r.requestId)).toEqual([
+      '0xa'.padEnd(66, '0'),
+      '0xb'.padEnd(66, '0'),
+    ]);
+  });
+
+  it('caps each polarity independently (a group is per (instance, polarity)) (#1478)', async () => {
+    const deps = coreDeps({ groupCap: 2 });
+    const refs = [
+      ...['0xa', '0xb', '0xc'].map((p) => ref({ requestId: p.padEnd(66, '0'), polarity: 'pass' })),
+      ...['0xd', '0xe', '0xf'].map((p) => ref({ requestId: p.padEnd(66, '0'), polarity: 'fail' })),
+    ];
+    const res = await bridgeAttempts(refs, deps);
+    expect(res.bridged.filter((b) => b.polarity === 'pass')).toHaveLength(2);
+    expect(res.bridged.filter((b) => b.polarity === 'fail')).toHaveLength(2);
+    expect(res.deduped).toHaveLength(2);
+  });
+
   it('excludes held-out by instance_id AND by repo (derived)', async () => {
     const deps = coreDeps({ slateInstanceIds: new Set(['django__django-99999']) });
     const res = await bridgeAttempts(

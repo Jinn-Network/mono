@@ -8,7 +8,9 @@
  * work, not raw private-machine activity). It sources **both polarities** (D10):
  * verified passes → pattern-eligible evidence; evaluator-confirmed failures →
  * lesson-eligible evidence. Held-out `cap-v0` slate instances are excluded by
- * `instance_id` AND repo; each `(instance_id, polarity)` is deduped.
+ * `instance_id` AND repo; each `(instance_id, polarity)` is retained up to
+ * `groupCap` attempts (default 1) so the per-instance attempt group survives for
+ * group-relative distillation (#1478).
  *
  * This module is the bridge **core + the publish adapter**. The ledger row
  * source (indexer GraphQL over `verdictEnvelopeMeta`, both polarities) and the
@@ -73,12 +75,22 @@ export interface BridgeDeps {
   fetchEvidence: (ref: AttemptRef) => Promise<BridgeEvidence>;
   /** Publish a constructed CapturedTask as layer-1 evidence; returns the corpus ref. */
   publishEvidence: (task: CapturedTask, ref: AttemptRef) => Promise<{ envelopeRef: string; anchorTx: string | null }>;
+  /**
+   * Attempts retained per `(instance_id, polarity)` — the per-instance attempt
+   * GROUP is the distiller's raw material for group-relative distillation
+   * (#1478). Default 1 keeps the single-exemplar behavior for standalone
+   * callers; the pipeline passes a higher cap so clustering receives the whole
+   * group. Rows beyond the cap are recorded in `BridgeResult.deduped`, and
+   * since refs arrive in a stable order the kept K are deterministic.
+   */
+  groupCap?: number;
   now?: () => Date;
 }
 
 export interface BridgeResult {
   bridged: Array<{ instanceId: string; polarity: 'pass' | 'fail'; envelopeRef: string; anchorTx: string | null }>;
   excludedHeldOut: Array<{ instanceId: string; reason: 'instance_id' | 'repo' }>;
+  /** Attempts dropped because their `(instance_id, polarity)` group already held `groupCap` (#1478). */
   deduped: Array<{ instanceId: string; polarity: 'pass' | 'fail' }>;
   errors: Array<{ requestId: string; error: string }>;
   /**
@@ -206,7 +218,11 @@ export async function bridgeAttempts(refs: AttemptRef[], deps: BridgeDeps): Prom
     else unresolvedSlateIds.push(id);
   }
   const result: BridgeResult = { bridged: [], excludedHeldOut: [], deduped: [], errors: [], unresolvedSlateIds };
-  const seen = new Set<string>();
+  // Retain up to `groupCap` attempts per (instance_id, polarity) — keep the whole
+  // attempt group, not one exemplar (#1478). Kept-K is deterministic (refs arrive
+  // in a stable order); rows beyond the cap are recorded in `deduped`.
+  const groupCap = Math.max(1, deps.groupCap ?? 1);
+  const kept = new Map<string, number>();
 
   for (const ref of refs) {
     if (deps.slateInstanceIds.has(ref.instanceId)) {
@@ -219,11 +235,12 @@ export async function bridgeAttempts(refs: AttemptRef[], deps: BridgeDeps): Prom
       continue;
     }
     const key = `${ref.instanceId}:${ref.polarity}`;
-    if (seen.has(key)) {
+    const n = kept.get(key) ?? 0;
+    if (n >= groupCap) {
       result.deduped.push({ instanceId: ref.instanceId, polarity: ref.polarity });
       continue;
     }
-    seen.add(key);
+    kept.set(key, n + 1);
     try {
       const ev = await deps.fetchEvidence(ref);
       const task = toBridgeCapturedTask(ref, ev, now);
