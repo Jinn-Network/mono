@@ -1,10 +1,14 @@
 # Distillation v1 — layer-1 evidence → layer-2 consumable skills
 
-- **Version:** 0.5 (v0.4 + quality amendments from the skill-distillation literature review —
+- **Version:** 0.6 (v0.5 + plugin-GTM reconciliation, 2026-07-08 — surfaces the distiller tier into
+  §11 (opus-class, per §14), adds the open-weight runtime replication as the stock-Hermes plugin's
+  GTM-load-bearing cell (§11), and reconciles the shipped-vs-deferred `/jinn skills install` state
+  (§13). Core design unchanged.)
+- **v0.5:** v0.4 + quality amendments from the skill-distillation literature review —
   verified-counterfactual rule, contrastive mode, fixed skill skeleton, anti-triggers, bridged-evidence
   enrichment + `patch-only` stratification, auditability fields, two §13 deferral records; 2026-07-08.
-  Note: the `ContributionActivityChecker` reconciliation previously earmarked "at v0.5" (§8) is NOT
-  taken up by this bump — it moves to a later amendment.)
+  (The `ContributionActivityChecker` reconciliation previously earmarked "at v0.5" (§8) moves to a
+  later amendment.)
 - **v0.4:** v0.3 + the 2026-07-07 reconciliation with the shipped #1394/#1409 substrate —
   see **Reconciliation** below; ratified with DR-2026-07-06
 - **v0.3:** v0.2 + SkillRL / training-substrate framing, a failure→lessons axis,
@@ -668,9 +672,28 @@ trajectory, §8); where the pilot's discordant-pair count allows, report the dis
 rather than a failed distillation step. This is a reporting cut, not a separate gate — at v1 volume
 it is descriptive (the pilot is unlikely to power a stratified test).
 
-**Model:** pinned **Haiku-class** (matches v0), with a **Sonnet-class replication that is
-load-bearing, not optional** — DR-2026-06-02-b and #986 produced Haiku-class nulls on exactly this
-pre-installed-lessons modality, so a Haiku null here is uninformative.
+**Runtime model (the AI that *uses* the skills):** pinned **Haiku-class** (matches v0), with a
+**Sonnet-class replication that is load-bearing, not optional** — DR-2026-06-02-b and #986 produced
+Haiku-class nulls on exactly this pre-installed-lessons modality, so a Haiku null here is uninformative.
+
+**Distiller model (the AI that *writes* the skills — distinct from the runtime).** Pinned to the
+**strongest available model (opus-class)** per §14, recorded per-skill in `distillModel`. This is
+deliberate and does not tax the cost gate: the distiller runs **once per skill and amortises across
+every later run that consumes it**, so it never enters the per-solve cost comparison — the thesis is
+*pay frontier once to distil, serve N cheap runs*. A cheap-distiller setup would undertest the
+"frontier-distilled" claim; v1 does not measure it.
+
+**Open-weight runtime replication (the plugin-GTM cell, 2026-07-08).** One additional replication on a
+**cheap open-weight runtime** (deepseek-class via OpenRouter — the model the capability-eval rig
+already runs, so this is a config flip via `buildSolveArgs` provider/model, not new infra). This is the
+cell the stock-Hermes plugin's adoption case turns on: *does an opus-distilled skill lift a cheap
+runtime measurably toward frontier?* — read as **cheap-alone vs cheap + distilled-skill vs
+frontier-alone**. It is **pilot-first and expected to be power-thin**: the #986 Haiku null and the
+capability-eval flash empty-patch spirals both warn a weak runtime may not follow the skill, making
+this cell simultaneously the most-likely-to-win (most headroom) and most-likely-to-null. Per §11.1 a
+null or sub-MDE result here is a **valid decisive outcome** (the pitch isn't ready), not a pipeline
+failure — and precisely why it stays **one** cheap runtime, not a grid: the second-order
+distilled-vs-seeds effect can't afford dilution.
 
 **Gate (two results, one of them the Bitter-Lesson test):**
 
@@ -768,8 +791,13 @@ guardrail) + the pilot + the held-out interface.
 - **Automated *evidence-level* clustering** beyond distinct-instance + tags + summary similarity (§7.2).
   Stage-2's polarity-grouping of *already-distilled* stage-1 skills is in scope (§7 Stage-2 note); auto-
   clustering *raw evidence* beyond the §7.2 grouping is not.
-- **The `skills` source resolver / `/jinn skills install` command** — contract defined (§9), build
-  deferred.
+- **The Jinn-corpus source resolver behind `/jinn skills install`** — the general
+  `/skills install <name|url>` command **already ships in the fork** (`ui-tui/…/slash/commands/ops.ts`,
+  routes to `skills.manage`); what remains deferred is the **corpus-native resolver** that turns a
+  `jinn:<ref>` / `skill:<cid>` into an installable package (contract in §9). Related cleanup (plugin
+  work, 2026-07-08): the plugin re-implements sha256-verify + envelope-extraction that a shared
+  **`jinn-layer skills install`** already provides — route both through the shared helper rather than
+  the fork's older `jinn.trace-envelope.v0` path.
 - **A discovery-time ranking surface** and an **indexed `artifactType` column** — v1 accepts the
   full-scan floor (§5, §16).
 - **Live-retrieval efficacy (recall@k)** — a separate later gate (§9, §16).
