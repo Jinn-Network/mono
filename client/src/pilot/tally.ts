@@ -9,8 +9,15 @@ export interface PilotReport {
   bothSolveTasks: number;
   excluded: number;
   quality: { lowerBound: number; nonInferior: boolean; deltaPP: number };
-  cost: { verdict: 'lower' | 'not-lower' | 'inconclusive'; medianDeltaUsd: number };
+  /** `n` is the both-solve NON-ZERO cost-diff count the Wilcoxon actually uses;
+   *  `underpowered` marks n below its one-sided minimum-rejectable size (~5), so a
+   *  tiny-n verdict is not mistaken for a powered one. */
+  cost: { verdict: 'lower' | 'not-lower' | 'inconclusive'; medianDeltaUsd: number; n: number; underpowered: boolean };
 }
+
+/** One-sided Wilcoxon signed-rank cannot reject below ~5 non-zero diffs
+ *  (1/2^n ≥ α for n < 5), so a 'lower'/'not-lower' verdict on fewer is unpowered. */
+const WILCOXON_MIN_REJECTABLE_N = 5;
 
 export function tallyPilot(outcomes: SolveOutcome[], opts: { rng: () => number }): PilotReport {
   const byTask = new Map<string, SolveOutcome[]>();
@@ -47,6 +54,7 @@ export function tallyPilot(outcomes: SolveOutcome[], opts: { rng: () => number }
     ? nonInferiorityVerdict(rates, { rng: opts.rng, stockBaseRate: Math.max(stockBaseRate, 1e-9) })
     : { pass: false, lowerBound: NaN, relativeRegression: NaN, reasons: ['no gradeable pairs'] } as ReturnType<typeof nonInferiorityVerdict>;
   // pilot scale — small both-solve sets are expected; minN:1 lets the cost verdict go live rather than always 'inconclusive'.
+  // The verdict is still surfaced with its n + an `underpowered` flag so a tiny-n read isn't mistaken for a powered one.
   const cost = pairedCostVerdict(costDiffs, { minN: 1 });
   const median = (xs: number[]): number => { if (!xs.length) return NaN; const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2; };
 
@@ -57,6 +65,6 @@ export function tallyPilot(outcomes: SolveOutcome[], opts: { rng: () => number }
     bothSolveTasks: bothSolve,
     excluded,
     quality: { lowerBound: ni.lowerBound, nonInferior: ni.pass, deltaPP: 100 * ((bTot > 0 ? bPassTot / bTot : 0) - stockBaseRate) },
-    cost: { verdict: cost.verdict, medianDeltaUsd: median(costDiffs) },
+    cost: { verdict: cost.verdict, medianDeltaUsd: median(costDiffs), n: cost.n, underpowered: cost.n < WILCOXON_MIN_REJECTABLE_N },
   };
 }

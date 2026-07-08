@@ -1,8 +1,11 @@
 # Capability-Eval v0 — measuring the corpus-connected harness against stock
 
-- **Version:** 0.3 (design draft — v0.2 hardened by a 6-lens adversarial review, 2026-07-06,
+- **Version:** 0.4 (design draft — v0.2 hardened by a 6-lens adversarial review, 2026-07-06,
   23 findings folded in; **v0.3 re-pins the model to `gpt-5.4-mini`** after the flash pilot
-  exposed an empty-patch confound — decision E + §9 + §11, 2026-07-08. Core design unchanged.)
+  exposed an empty-patch confound — decision E + §9 + §11, 2026-07-08. Core design unchanged.
+  **v0.4 folds in review findings B1–B4 + advisories, 2026-07-08** — kills the stale Haiku-class
+  pin, pins the cost estimand to passing runs only, adds `loadoutContentCid` for arm-B fidelity,
+  and discloses that N is powered on the quality leg only.)
 - **Date:** 2026-07-06 (updated 2026-07-08)
 - **Author:** Ritsu (design session)
 - **Shape:** `design` — output is this methodology spec. Building the rig is a follow-on
@@ -50,7 +53,7 @@ and the joint gate. §7 records the reuse-vs-rebuild decision line-by-line.
 | **B** | **Corpus ON = seeds pre-installed only.** Arm B is a static, distribution-matched skill loadout installed once via `/jinn skills install` before the per-task meter starts. **No live `corpus_search`/`corpus_fetch` mid-task.** This isolates the "skills in context" value, simplifies contamination control (no dynamic retrieval to audit), and extends cleanly to v1 (swap seeds → distilled skills in the loadout). Live-retrieval value is explicitly **out of scope for v0** — see §2.3 for what a v0 result does and does not license against §8. |
 | **C** | **Gate = non-inferior quality AND strictly-lower cost**, combined as an intersection-union test (§2). |
 | **D** | **Held-out slate = new, power-sized, contested-band construction** (§4). The existing v1 (N=10) and v2 (N=9) slates are reused as *format and tooling precedent only* — they are the very N≈10 artifacts DR-2026-06-02-b diagnosed as underpowered, not the measurement slate. |
-| **E** | **Pinned model = `gpt-5.4-mini` via the OpenAI Codex subscription** (amended 2026-07-08; was `deepseek/deepseek-v4-flash`). The flash pilot exposed a **confound**: flash's weak agentic tool-use spirals into empty-patch / >700k-token runs when handed extra context, so arm B's apparent "seeds hurt by −9.1pp" was largely flash flailing, not a corpus effect. Re-running the same slate on the reasoning-tier `gpt-5.4-mini` **eliminated the spirals** (0 empty patches / 16 solves), lifted arm A's solve rate (54.5%→66.7%), and moved the seeds effect to **Δ=0.0pp, non-inferior** — a clean substrate where any distilled-arm signal is attributable to the skills, not to model noise. Runs on jinn-agent (the Hermes fork, corpus tools intact) via `hermes auth add openai-codex --type oauth`, per-invocation `--provider openai-codex -m gpt-5.4-mini`. **The cost gate still holds on a subscription:** the Codex OAuth backend exports provider-actual token counts (`input`/`output`/`reasoning`/`cache_read`; `output_tokens` already includes `reasoning_tokens` — do not double-count), priced at the published $0.75/$4.50-per-M rate (§5.2) — this **corrects v0.2's claim** that a flat-rate sub cannot supply provider-actual tokens. Tradeoff recorded honestly: gpt-5.4-mini is ~3–4× flash's *representative* cost/solve, so **less "cost-representative of a fork user"** than flash — but inference is free to the operator via the sub, and the signal-quality win (no empty-patch confound) is decisive for a clean measurement. The methodology is **model-agnostic**; only the pinned id changes. `deepseek-v4-flash`/`-pro` on OpenRouter (metered) remain valid fallbacks. |
+| **E** | **Pinned model = `gpt-5.4-mini` via the OpenAI Codex subscription** (amended 2026-07-08; was `deepseek/deepseek-v4-flash`). The flash pilot exposed a **confound**: flash's weak agentic tool-use spirals into empty-patch / >700k-token runs when handed extra context, so arm B's apparent "seeds hurt by −9.1pp" was largely flash flailing, not a corpus effect. Re-running the same slate on the reasoning-tier `gpt-5.4-mini` **removed the spirals in the pilot** (0 empty patches / 16 solves; the 95% upper bound on the empty-patch rate is still ~18% at n=16), lifted arm A's solve rate (54.5%→66.7%), and moved the seeds effect to **Δ=0.0pp, non-inferior** — a clean substrate where any distilled-arm signal is attributable to the skills, not to model noise. Runs on jinn-agent (the Hermes fork, corpus tools intact) via `jinn-agent auth add openai-codex --type oauth`, per-invocation `--provider openai-codex -m gpt-5.4-mini`. **The cost gate still holds on a subscription:** the Codex OAuth backend exports provider-actual token counts (`input`/`output`/`reasoning`/`cache_read`; `output_tokens` already includes `reasoning_tokens` — do not double-count), priced at the published $0.75/$4.50-per-M rate (§5.2) — this **corrects v0.2's claim** that a flat-rate sub cannot supply provider-actual tokens. Tradeoff recorded honestly: gpt-5.4-mini is ~3–4× flash's *representative* cost/solve, so **less "cost-representative of a fork user"** than flash — but inference is free to the operator via the sub, and the signal-quality win (no empty-patch confound) is decisive for a clean measurement. The methodology is **model-agnostic**; only the pinned id changes. `deepseek-v4-flash`/`-pro` on OpenRouter (metered) remain valid fallbacks. |
 | **F** | This is a **human-run measurement, not a CI gate** (§9). |
 
 ---
@@ -118,8 +121,12 @@ null is rejected, the size of the combined test is at most the size of the indiv
 **requiring both at level α controls the overall type-I error at α with no multiplicity
 correction** (Berger 1982). We do not Bonferroni-adjust; the conjunction *is* the control. This
 is the statistically honest way to make a two-part claim without inflating false-positives. The
-IUT α-guarantee covers exactly the two pre-registered one-sided tests above; the corroborating
-statistics in §6.2 carry **no decision rule** and cannot change the gate's boolean value.
+IUT α-guarantee covers the two pre-registered one-sided tests above, **plus a point-threshold
+relative-regression guard ANDed onto the quality leg** (§2.1(1)): that guard is a fixed-threshold
+check on the observed relative regression, **not itself a level-α test**, and ANDing an extra
+necessary condition onto a rejection region can only *shrink* it — so it does not inflate type-I.
+The corroborating statistics in §6.2 carry **no decision rule** and cannot change the gate's boolean
+value.
 
 **Met / not-met is decidable.** The gate is a boolean over two pre-registered one-sided tests
 with a pre-registered δ, α, slate, and pinned inputs. Three honest outcomes:
@@ -139,7 +146,7 @@ are published alongside the boolean so a mixed or null result is legible rather 
 ### 2.3 What a v0 outcome licenses against §8
 
 v0's estimand is deliberately narrow — coding (decision A), installed generic seeds with **no live
-retrieval** (decision B), the contested band (decision D), Haiku-class (decision E) — while the §8
+retrieval** (decision B), the contested band (decision D), `gpt-5.4-mini` (decision E) — while the §8
 bet is broader (the *top usage-selected* distribution, *live* consumption, an empirically-selected
 niche). Therefore:
 
@@ -242,9 +249,11 @@ selection predicate**. The generator's existing three layers become:
    measure noise; see the v1 slate comment and `eval-runner.ts`).
 2. **Contested band (widened from v2's `0/R`).** Screen each candidate with the **pinned stock
    arm** (corpus OFF), frozen, R ≥ 3 runs. **Screen on the SAME harness + endpoint + model the arms
-   use** — jinn-agent (the Hermes fork) on OpenRouter at the pinned model — *not* the legacy
-   `claude-code/Haiku` screening base: a contested band measured with a different scaffold does not
-   transfer to the agent under test. Keep instances whose stock pass-rate is in a **contested
+   use** — jinn-agent (the Hermes fork) at the pinned model+provider (`gpt-5.4-mini` via Codex,
+   decision E) — *not* the legacy `claude-code/Haiku` screening base: a contested band measured
+   with a different scaffold does not transfer to the agent under test, so old Haiku-screened band
+   artifacts are **not** reusable and the band must be re-measured on the pinned model. Keep
+   instances whose stock pass-rate is in a **contested
    band** — target `[0.15, 0.85]` — measured **blind to corpus**. This is the
    generalisation of v2's "base fails 0/R" predicate into the regime where "equal quality, lower
    cost" is actually testable: the stock agent is neither saturated (would give arm B no room)
@@ -278,8 +287,11 @@ toward corpus-favorable tasks invisibly.
   rate — which the spec confines to non-gating context — not the fresh paired difference.
 
 **Screening-yield caveat (named, not hidden).** The v2 screen kept 9 of 59 candidates (~15%).
-The contested band is *wider* than `0/R`, so yield should be higher, but the Haiku-class ceiling
-may still make the band thin (Haiku fails many SWE-rebench tasks ~0). Mitigation, per the runbook's
+The contested band is *wider* than `0/R`, so yield should be higher; with the v0.3 re-pin to the
+reasoning-tier `gpt-5.4-mini` (decision E) the thinning risk **inverts**. It is no longer starvation
+at the *bottom* (a Haiku-class floor that fails many SWE-rebench tasks ~0, leaving nothing in-band);
+the stronger model instead risks **saturating past the 0.85 upper band edge** on the easier
+instances, thinning the band from the *top*. Mitigation, per the runbook's
 "widen, don't pad" rule (`docs/runbooks/held-out-regression-benchmark.md`): widen the candidate pool
 (screen more HF rows), never lower the gradeability bar to hit N. The pilot (§6.4) measures the
 realised yield and band width before the full screen is committed. The screen is itself a full
@@ -308,6 +320,11 @@ train-pool scope to corpus scope:
    names, the `instance_id`, the PR number/URL. Any hit → **exclude the task** (widen, don't
    pad). This is the residual catch under axis 2; it is **known-insufficient against paraphrase,
    identifier renaming, and prose** (SWE-Bench Illusion), so it is a backstop, not the main guard.
+   **Threat-model note (v0 metric limit).** The v0 lexical scan/sketch uses **symmetric** MinHash
+   Jaccard, whose union denominator dilutes overlap when a few distinctive gold tokens sit inside a
+   *large* corpus record — so it can miss them. **Asymmetric containment** (overlap normalised by the
+   *slate task's* token set, not the union) is the correct signal here and is **deferred to the rig
+   `feat`**; it is not re-implemented in v0, matching the seeds-only downgrade-and-defer posture.
 
 **Limit of the three axes (named, not solved).** These axes prove the corpus does not contain the
 *answer* to a slate task. They **cannot** detect a generic seed that supplies a slate task's *fix as
@@ -344,9 +361,13 @@ is a Merkle root over this public derived index, not over private blobs.
 contain the slate), not freeze-*order* (that the snapshot preceded the slate draw). Order is
 enforced procedurally by §12.4 and, optionally, by anchoring the slate hash + index root on-chain so
 the freeze timestamp is external. Additionally, each arm-B run MUST assert at solve time that the
-loadout it actually loaded content-hashes to the artifact's `corpusSnapshotCid`; a mismatch
-aborts/excludes the run rather than being scored (mirrors the §11 treatment-fidelity check) —
-closing the innocent-edit-between-proof-and-run hole without on-chain machinery.
+loadout it actually loaded content-hashes to the artifact's `loadoutContentCid` (§4.4 — the content
+hash over the *actual loaded seed-loadout bytes*, distinct from `corpusSnapshotCid`, which is a
+whole-corpus derived-index root); a mismatch aborts/excludes the run rather than being scored
+(mirrors the §11 treatment-fidelity check). This **narrows** the
+innocent-edit-between-proof-and-run hole rather than fully closing it — a lossy MinHash sketch can
+be gamed by a content-preserving edit; a true per-loadout content hash closes it, and its full
+computation/assertion is **deferred to the rig `feat`** (§13).
 
 The guard is **fail-loud**: a construction that cannot prove disjointness aborts rather than
 emitting a slate. Because v0 is seeds-only and the corpus is small (84 + a few), all scans are
@@ -383,6 +404,10 @@ externally-recomputable axes:
   "construction": "contested-band[0.15,0.85], stock=<model>, R=<n>, repo-stratified",
   "corpusSnapshotCid": "ipfs://...",     // Merkle root over corpusDerivedIndexCid, NOT over private blobs
   "corpusDerivedIndexCid": "ipfs://...", // public: sorted (repos, instance_ids) + per-record token sketches
+  "loadoutContentCid": "sha256:...",     // content hash over the ACTUAL loaded seed-loadout bytes — distinct
+                                         //   from corpusSnapshotCid (a whole-corpus derived-index root); the
+                                         //   arm-B fidelity assert (§4.3) hashes to THIS. Full computation is
+                                         //   deferred to the rig feat (§13).
   "loadoutFrozenBeforeSlate": true,      // technique-leak attestation, §4.3
   "disjointness": {
     "instance": { "verdict": "pass", "flaggedPairs": [] },
@@ -505,10 +530,16 @@ cannot inflate type-I above α (no garden-of-forking-paths on the gate). The opt
 replication (decision E) is pre-registered as a **separate** confirmatory external-validity test
 with its own stated α; it is not pooled with the primary run.
 
-**Cost — paired.** For each both-solve task, Δcost_i = mean$(B) − mean$(A) over the R runs. Test
-H1: mean(Δcost_i) < 0 via one-sided **Wilcoxon signed-rank** (primary; distribution-free — cost
-is skewed) plus a **BCa bootstrap CI** on the median and mean difference. Report median and mean
-Δ$, and the % reduction. **If the both-solve set falls below its pre-registered floor** (§10
+**Cost — paired.** The estimand is pinned to **passing runs only**, so "lower cost" means *the same
+success reached for fewer dollars* (§2.1), not "a failure was cheaper." Stated unambiguously: a
+**both-solve task** is one where **each arm has ≥ 1 passing repeat**; for such a task, each arm's
+mean cost is the mean $ over **that arm's passing repeats only** (failed repeats — which do not
+deliver the success being priced — are excluded, per arm, so an arm with 2 of 3 passing is averaged
+over those 2); and Δcost_i = mean$(B) − mean$(A). Test H1: mean(Δcost_i) < 0 via one-sided
+**Wilcoxon signed-rank** (primary; distribution-free — cost is skewed) plus a **BCa bootstrap CI**
+on the median and mean difference. Report median and mean Δ$, and the % reduction. (The pilot's
+`tally.ts` already implements exactly this — `meanCost(gradedArm, true)` averages each arm's cost
+over its passing repeats.) **If the both-solve set falls below its pre-registered floor** (§10
 pinned inputs), the paired Wilcoxon is underpowered and the cost sub-claim is **INCONCLUSIVE by
 construction** — never re-tuned upward.
 
@@ -581,6 +612,15 @@ Then:
 anything short of a +60pp jump. The pilot exists to justify N from data, not to *be* the
 measurement — and the pilot's *only* sanctioned feedback is N/R sizing; it MUST NOT feed band-edge
 selection (§10.1).
+
+**N is powered on the QUALITY leg only.** Both the Connor table (§6.3) and the pilot bootstrap sim
+(§6.4) size N for the **quality** (pass-rate) leg. The **cost** leg's power and the derivation of
+the both-solve floor are **not** computed here — they are **deferred to the rig `feat`** (§13). This
+spec does **not** claim the cost leg is powered. Because the IUT (§2.2) requires **both** legs to
+reject, a run can be quality-powered yet land the cost leg **INCONCLUSIVE** → gate-INCONCLUSIVE — a
+valid *terminal* state (§2.2), and the *expected* one for v0 seeds, where cost-parity is the null:
+the pilot measured generic seeds at ≈ **+$0.003/solve median** (a small carry tax, not cheaper). An
+INCONCLUSIVE cost leg on a quality-powered run is therefore an honest outcome, not a design defect.
 
 ---
 
@@ -718,7 +758,10 @@ signed measurement, reproducible by re-running the pinned rig against the pinned
 **Envelope** (illustrative, for a mid-size run):
 
 - **Measurement volume:** N × R × 2 solves + the same number of grades. E.g. **N = 200, R = 3 →
-  1,200 solves + 1,200 Docker grades.**
+  1,200 solves + 1,200 Docker grades.** This **N = 200 is illustrative only** — it is *below* the
+  §6.3 power table's smallest 80%-power N (≈ 343, for the most-detectable +15pp effect), and no
+  power number is yet shown for the gate-primary bootstrap at this N. The operative N is the one the
+  §6.4 pilot derives from measured discordance, **not** this envelope figure.
 - **Screening volume (dominates, and was previously uncounted):** the contested band is built by a
   full stock-arm eval pass over candidates at ~15% yield → ≈ **(N / yield) × R stock solves+grades**
   (e.g. N = 200 at ~15% yield ≈ 1,333 candidates × R ≈ **4,000 screening solves+grades**). The
@@ -761,9 +804,11 @@ Every claim must be independently reproducible (PRINCIPLES → Legible). The run
 content-addressed:
 
 - **Pinned inputs:** jinn-agent SHA, model id + params, slate artifact (with its hash, `rowHash`
-  and `imageDigest` per instance, `corpusSnapshotCid`, and the public `corpusDerivedIndexCid`),
-  `evalSemanticsVersion`, the price table, R, δ **and its relative-regression cap**, α, **and the
-  both-solve-set minimum size** — all committed *before* the run (§10.1).
+  and `imageDigest` per instance, `corpusSnapshotCid`, `loadoutContentCid`, and the public
+  `corpusDerivedIndexCid`), `evalSemanticsVersion`, the price table, R, δ **and its
+  relative-regression cap**, α, **the both-solve-set minimum size, the CI method (BCa vs
+  percentile), and the lexical (Jaccard/MinHash) + semantic (cosine) disjointness thresholds** —
+  all committed *before* the run (§10.1).
 - **The corpus derived index** (§4.3), so a third party can re-check the **instance- and repo-axis**
   disjointness from public data; the lexical axis is self-attested (raw corpus text is not released,
   §7.1) and recomputable only against the published per-record token sketches.
@@ -787,8 +832,13 @@ Legible to a skeptic (PRINCIPLES → **Neutral**: the operator cannot be the hou
 requirements:
 
 1. **Pre-registered stopping rule.** The band edges, the candidate HF-row pool, the screening model
-   + R, δ + the relative cap, α, and the both-solve floor are **committed** (content-addressed /
-   signed git tag) **before** the pilot runs. The **first** run executed at the pilot-set N on the
+   + R, δ + the relative cap, α, the both-solve floor, **the CI method (BCa vs percentile), the
+   lexical Jaccard/MinHash disjointness threshold, and the semantic cosine threshold** are
+   **committed** (content-addressed / signed git tag) **before** the pilot runs. (The disjointness
+   thresholds are pre-registered because a loose threshold is a **direct false-PASS channel on the
+   contamination axis** — a slack lexical/semantic cutoff lets a near-duplicate corpus record
+   through and hands arm B a memorized win — so it must be fixed before the run, not tuned to the
+   result.) The **first** run executed at the pilot-set N on the
    frozen slate + pinned agent SHA + pinned model is the **run of record**. Any subsequent
    re-screen, band-edge change, or slate re-draw mints a **new anchored slate version** (distinct
    hash, from-scratch stock-only re-screen) whose existence and reason are published. An
@@ -811,14 +861,14 @@ requirements:
 | **Model-pretraining contamination** | **Main effect** cancels in the paired difference (§4.1). The residual **skill×memorization interaction** (an arm-B-only cue-unlock) does NOT cancel; bounded by the distribution-matched (not task-matched) loadout and flagged by the pilot's memorization-exposure probe (§4.1, §6.4) |
 | **Both-solve conditioning = selection on a post-treatment outcome (collider)** | Bounded: paired cost compares same-task B-vs-A (no set-composition win); the quality NI leg caps the driving regression channel; the both-solve composition delta + the §5.2 all-tasks cost secondary are published as a sanity check (§2.1) |
 | **δ mis-calibration / base-rate sensitivity** | δ = 5pp absolute pre-registered with a stated basis (§2.1); PASS additionally blocked if relative regression > 15% of stock base rate, so a large relative drop at a low band base rate cannot pass on the absolute margin |
-| **Pinned-model ceiling → thin/empty contested band, weak tool-use, or empty-patch spirals** (decision E) | **Largely resolved by the v0.3 re-pin.** flash's spirals (empty-patch / >700k-token runs when handed extra context) confounded the seeds arm — its "seeds hurt −9.1pp" was mostly flailing; `gpt-5.4-mini` eliminated them (0 empty patches / 16 solves) and holds a healthy contested band (arm A 66.7%). Residual, now *inverted*: gpt-5.4-mini is a **stronger** model than a floor fork user, so the band/effect may not transfer *down* — mitigated by the model-agnostic methodology (a cheaper-model replication is pre-registerable, own α) and the honestly-recorded cost-representativeness tradeoff (decision E, §9) |
+| **Pinned-model ceiling → thin/empty contested band, weak tool-use, or empty-patch spirals** (decision E) | **Largely resolved by the v0.3 re-pin.** flash's spirals (empty-patch / >700k-token runs when handed extra context) confounded the seeds arm — its "seeds hurt −9.1pp" was mostly flailing; `gpt-5.4-mini` removed them in the pilot (0/16; 95% upper bound on the empty-patch rate ~18% at n=16) and holds a healthy contested band (arm A 66.7%). Residual, now *inverted*: gpt-5.4-mini is a **stronger** model than a floor fork user, so the band/effect may not transfer *down* — mitigated by the model-agnostic methodology (a cheaper-model replication is pre-registerable, own α) and the honestly-recorded cost-representativeness tradeoff (decision E, §9) |
 | **Contested-band ≠ full distribution / selection-on-baseline** | The claim is *explicitly scoped* to the contested region (§2.3); screening runs are not gate data, so RTM biases only the non-gating marginal rate, not the fresh paired difference (§4.2) |
 | **Ungradeable runs biasing quality** | Never scored as FAIL; re-run K=2 then symmetric drop-the-pair; drop count published (§5.1, §10.1) |
 | **Per-task skill cherry-picking / loadout-composition tuned to the task family** | Loadout is the whole imported seed set or a published fixed rule, frozen *before* slate ids are drawn (§3.1); per-task hand-picking forbidden |
 | **Consensus-collapse noise floor** | Ties→fail is a no-op at odd R; the ≥⌈R/2⌉ polarisation injects symmetric spurious discordance the Connor table ignores — so consensus-McNemar is a direction-only corroborator and N is sized from the pilot bootstrap, not the table (§6.2, §6.3) |
 | **Multiple comparisons / forking paths** | The gate is a single IUT on two pre-registered tests (§2.2); corroborators carry no decision rule and cannot license a PASS (§6.2); the Sonnet replication has its own α |
 | **Regression to the mean** | Periodic re-run of the stock arm during the campaign (runbook guard) rules out drift masquerading as effect |
-| **Treatment fidelity** (is "corpus ON" really on? is arm A really empty? is the screen really blind?) | **Arm A runs with `--ignore-rules`** so no operator memory / `AGENTS.md` / preloaded skill leaks into the "empty" arm (spike-confirmed, §3.1); arm-B runs assert the loadout loaded and content-hashes to `corpusSnapshotCid` (§4.3); screening runs attest empty-loadout / no-corpus-tools / empty-host-skill-dir (§4.2); a fidelity-failed run is excluded, not scored |
+| **Treatment fidelity** (is "corpus ON" really on? is arm A really empty? is the screen really blind?) | **Arm A runs with `--ignore-rules`** so no operator memory / `AGENTS.md` / preloaded skill leaks into the "empty" arm (spike-confirmed, §3.1); arm-B runs assert the loadout loaded and content-hashes to `loadoutContentCid` (§4.3, §4.4); screening runs attest empty-loadout / no-corpus-tools / empty-host-skill-dir (§4.2); a fidelity-failed run is excluded, not scored |
 | **Cost-capture path** (Inspect proxy vs native usage) | Gate decided on provider-actual usage (§5.2); UNMEASURED → INCONCLUSIVE, never PASS on heuristic constants; option-(a) proxy diverges the measured agent's network path from the production binary — prefer option (b); billing cross-check mandatory pre-run (§7.1, §13) |
 | **Conflict of interest** (team measures its own bet) | Pre-registered stopping rule + independent fidelity re-run (§10.1); PRINCIPLES → Neutral |
 
@@ -855,13 +905,15 @@ skill's provenance traces to a slate repo, and (v1) that the semantic axis was r
 ## 13. Decisions deferred to the rig (`feat`, post-sign-off)
 
 These are implementation choices, not methodology, and are settled when the rig is built. (Note:
-δ + its relative cap, α, R, the both-solve floor, and the band edges are **pre-registered before
-the pilot**, §10.1 — they are *not* on this list.)
+δ + its relative cap, α, R, the both-solve floor, the band edges, **the CI method (BCa vs
+percentile), and the lexical/semantic disjointness thresholds** are **pre-registered before the
+pilot**, §10.1 — they are *not* on this list.)
 
 - Exact contested-band edges: **committed before the pilot** (§10.1); if the pilot motivates a
   change it is a new pre-registered slate version, from-scratch re-screened, never an in-place edit.
 - K (ungradeable re-run cap; start 2).
-- Bootstrap resample count and BCa vs percentile CI (start BCa, 10k resamples).
+- Bootstrap resample count (start 10k resamples). *(The BCa-vs-percentile CI method itself is
+  pre-registered before the pilot, not a rig choice — §10.1.)*
 - Parallelism / host orchestration for the grade side.
 - Whether the optional representative sanity sample and the optional semantic disjointness axis are
   run in v0 or deferred.

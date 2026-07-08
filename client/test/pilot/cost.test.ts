@@ -21,4 +21,12 @@ describe('token cost pricing', () => {
     expect(withReasoning).toBe(ignoringReasoningField);
     expect(withReasoning).toBeCloseTo(15107 * 0.75e-6 + 102 * 4.5e-6, 9);
   });
+  it('FAILS LOUD when cache_read > input AND a cacheReadPerM rate is priced (no silent clamp to 0 fresh)', () => {
+    const rates = { ...DEEPSEEK_V4_FLASH_RATES, cacheReadPerM: 0.02 };
+    expect(() => solveCostUsd({ inputTokens: 100, outputTokens: 0, cacheReadTokens: 500, reasoningTokens: 0 }, rates)).toThrow(/invariant|cache_read/i);
+  });
+  it('does NOT throw on cache_read > input when no cacheReadPerM rate is set (no-cache path unchanged)', () => {
+    // Matches the solve.test.ts fixture (input 186114 < cache_read 258944): must still price cleanly.
+    expect(() => solveCostUsd({ inputTokens: 186114, outputTokens: 6207, cacheReadTokens: 258944, reasoningTokens: 0 }, DEEPSEEK_V4_FLASH_RATES)).not.toThrow();
+  });
 });

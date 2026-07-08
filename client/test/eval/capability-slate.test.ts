@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   parseCapabilitySlate,
   hashCapabilitySlate,
+  assertSlateDisjoint,
   CAPABILITY_SLATE_SCHEMA_VERSION,
   type CapabilitySlateArtifact,
 } from '../../src/eval/capability-slate.js';
@@ -76,5 +77,20 @@ describe('capability slate artifact', () => {
   it('rejects a lexical axis missing the self-attested attestation', () => {
     const bad = { ...valid, disjointness: { ...valid.disjointness, lexical: { verdict: 'pass', flaggedPairs: [] } } };
     expect(() => parseCapabilitySlate(bad)).toThrow(/attestation/);
+  });
+
+  it('assertSlateDisjoint refuses a slate whose disjointness axis self-declares verdict:"fail"', () => {
+    const contaminated = parseCapabilitySlate({
+      ...valid,
+      disjointness: {
+        ...valid.disjointness,
+        repo: { verdict: 'fail', flaggedPairs: [['astropy__astropy-19438', 'seed-42']] },
+      },
+    });
+    expect(() => assertSlateDisjoint(contaminated)).toThrow(/fail|contaminated/i);
+  });
+
+  it('assertSlateDisjoint passes a clean slate (all axes pass or n/a-v0)', () => {
+    expect(() => assertSlateDisjoint(valid)).not.toThrow();
   });
 });

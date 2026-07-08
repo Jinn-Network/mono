@@ -135,3 +135,21 @@ function normalize(a: CapabilitySlateArtifact): CapabilitySlateArtifact {
 export function hashCapabilitySlate(a: CapabilitySlateArtifact): `sha256:${string}` {
   return `sha256:${createHash('sha256').update(canonicalJson(normalize(a))).digest('hex')}`;
 }
+
+/** Fail-loud disjointness invariant. A slate whose instance/repo/lexical/semantic
+ *  axis self-declares `verdict:'fail'` is contaminated and MUST NOT be loaded for a
+ *  run — `parseCapabilitySlate` validates *shape* (and `'fail'` is a structurally
+ *  valid AxisVerdict), so this separate guard enforces the *invariant* and closes
+ *  the load-only path a bare parse would leave open (§4.3). `n/a-v0` (semantic axis,
+ *  optional at v0) is not a failure. */
+export function assertSlateDisjoint(slate: CapabilitySlateArtifact): void {
+  const failed = (Object.entries(slate.disjointness) as Array<[string, AxisResult]>)
+    .filter(([, axis]) => axis.verdict === 'fail')
+    .map(([name]) => name);
+  if (failed.length > 0) {
+    throw new Error(
+      `capability slate: disjointness axis/axes [${failed.join(', ')}] declared verdict:'fail' — ` +
+      `contaminated slate, refusing to load (§4.3)`,
+    );
+  }
+}

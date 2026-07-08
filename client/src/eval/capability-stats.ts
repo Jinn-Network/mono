@@ -76,7 +76,11 @@ function invNorm(p: number): number {
 // --- cost leg (append to capability-stats.ts) ---
 
 /** One-sided Wilcoxon signed-rank test that the median paired difference < 0,
- *  using a normal approximation with tie + continuity correction. */
+ *  using a normal approximation with a continuity correction. The variance is the
+ *  UNTIED form sqrt(n(n+1)(2n+1)/24); the tie-correction term (−Σ(t³−t)/48, which
+ *  only ever *subtracts* variance) is omitted, so the SD used here is if anything
+ *  too large — that makes the test slightly HARDER to reject (conservative), never
+ *  wrong-direction. Ranks themselves are still tie-averaged (rankAbs). */
 export function pairedCostVerdict(
   costDiffs: number[],
   opts: { minN?: number; alpha?: number } = {},
@@ -92,7 +96,7 @@ export function pairedCostVerdict(
   nonzero.forEach((d, i) => { if (d < 0) wMinus += ranks[i]!; else wPlus += ranks[i]!; });
   const n = nonzero.length;
   const meanW = (n * (n + 1)) / 4;
-  const sdW = Math.sqrt((n * (n + 1) * (2 * n + 1)) / 24);
+  const sdW = Math.sqrt((n * (n + 1) * (2 * n + 1)) / 24); // untied (conservative) form — tie term omitted, see docstring
   // Test statistic: is W+ (evidence AGAINST cheaper) improbably small?
   const z = (wPlus - meanW + 0.5) / sdW;
   const pValue = normCdfLocal(z); // one-sided: P(W+ ≤ observed)

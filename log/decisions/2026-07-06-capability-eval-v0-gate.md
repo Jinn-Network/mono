@@ -47,7 +47,8 @@ interaction), and scoped what a v0 result licenses against §8. Spec v0.2 folds 
    its MDE, treated as **not a pass**, and **terminal**: never silently re-screened into a PASS).
 
    **Scope (what a v0 result licenses against §8).** v0 is a seeds-only, no-live-retrieval,
-   Haiku-class, contested-band **pre-gate**. A v0 PASS *supports* but does not fully discharge §8;
+   Haiku-class **[amended 2026-07-08 → `gpt-5.4-mini`; see decision 7 + Amendment]**, contested-band
+   **pre-gate**. A v0 PASS *supports* but does not fully discharge §8;
    a v0 FAIL/null does NOT by itself trigger §8's "stop and rethink" — a null is confounded between
    the corpus mechanism not helping and the generic skills.sh seeds being irrelevant to these
    contested tasks. A decisive §8 FAIL needs the deferred live-retrieval or distilled arm.
@@ -95,7 +96,8 @@ interaction), and scoped what a v0 result licenses against §8. Spec v0.2 folds 
    **Pinned model = `deepseek/deepseek-v4-flash` on OpenRouter** for the primary run — ~$0.09/$0.18
    per M (~11–28× cheaper than Haiku) and a capable agentic coder, so cheaper *and* more
    representative of a cost-conscious fork user. **OpenRouter (metered) is required**: the cost gate
-   needs provider-actual tokens, which a flat-rate subscription cannot supply. The pilot confirms
+   needs provider-actual tokens, which a flat-rate subscription cannot supply. **[superseded
+   2026-07-08 — false for the Codex OAuth path; see Amendment]** The pilot confirms
    the contested band is non-empty and tool-use holds (v4-flash is a 13B-activated efficiency tier);
    `deepseek-v4-pro` is the fallback if too weak. Screening must run on the SAME harness+endpoint as
    the arms (jinn-agent/OpenRouter), not the legacy claude-code/Haiku base. The methodology is
@@ -155,8 +157,9 @@ Codex subscription.** Driven by pilot evidence, operator-directed (Ritsu). Spec 
 - **Why.** The flash pilot surfaced a **confound**, not a corpus result: flash's weak agentic
   tool-use spirals into empty-patch / >700k-token runs when handed extra context, so arm B's
   headline "seeds hurt by −9.1pp" was largely flash flailing. Re-running the identical small-repo
-  slate on the reasoning-tier `gpt-5.4-mini` **eliminated the spirals** (0 empty patches across 16
-  solves), lifted arm A's solve rate (54.5% → 66.7%), and moved the seeds effect to **Δ = 0.0pp,
+  slate on the reasoning-tier `gpt-5.4-mini` **removed the spirals in the pilot** (0 empty patches
+  across 16 solves; the 95% upper bound on the empty-patch rate is still ~18% at n = 16), lifted arm
+  A's solve rate (54.5% → 66.7%), and moved the seeds effect to **Δ = 0.0pp,
   non-inferior** — a clean substrate on which a future distilled-arm signal is attributable to the
   skills rather than model noise.
 - **Metering correction.** Decision 7 claimed a flat-rate subscription cannot supply
@@ -169,6 +172,10 @@ Codex subscription.** Driven by pilot evidence, operator-directed (Ritsu). Spec 
   operator via the sub and the signal-quality win is decisive. The powered ~5,200-solve
   screen+measurement will exceed sub caps → run throttle-bound on the sub or on the metered OpenAI
   API (~$490); §4.2's same-model-for-screening constraint forbids a cheap-flash-screen split.
+- **Decision-1 scope label superseded.** Decision 1's scope line still reads "Haiku-class …
+  pre-gate" (marked inline there); that model label is superseded by this re-pin to `gpt-5.4-mini`.
+  The *scope itself* — seeds-only, no-live-retrieval, contested-band pre-gate — is unchanged; only
+  the pinned model moved.
 - **Unchanged.** Everything else in this DR stands: the IUT gate, seeds-only v0 scope, contested
   band, contamination control, reuse posture, and the §12 shared boundary. The methodology is
   model-agnostic; only the pinned id moved. `deepseek-v4-flash`/`-pro` remain valid metered

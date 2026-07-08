@@ -18,7 +18,18 @@ export function solveCostUsd(tokens: SolveTokens, rates: RateTable): number {
   const per = (n: number, rate: number): number => n * rate * 1e-6;
   const outputCost = per(tokens.outputTokens, rates.outputPerM);
   if (typeof rates.cacheReadPerM === 'number') {
-    const fresh = Math.max(0, tokens.inputTokens - tokens.cacheReadTokens);
+    // The fresh/cache split only matters when a discounted cacheReadPerM rate is
+    // priced. Here the `input ⊇ cache_read` invariant must hold — silently
+    // clamping fresh to 0 would hide a bad token export and mis-price the solve,
+    // so fail loud instead. (The no-cache-rate path below is untouched: it prices
+    // all input at inputPerM and never reads cacheReadTokens.)
+    if (tokens.cacheReadTokens > tokens.inputTokens) {
+      throw new Error(
+        `solveCostUsd: cache_read_tokens (${tokens.cacheReadTokens}) > input_tokens (${tokens.inputTokens}) ` +
+        `violates the input ⊇ cache_read invariant when a cacheReadPerM rate is priced`,
+      );
+    }
+    const fresh = tokens.inputTokens - tokens.cacheReadTokens;
     return per(fresh, rates.inputPerM) + per(tokens.cacheReadTokens, rates.cacheReadPerM) + outputCost;
   }
   return per(tokens.inputTokens, rates.inputPerM) + outputCost;

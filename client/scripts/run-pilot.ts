@@ -30,6 +30,7 @@ import { buildSolveArgs, parseSessionTokens, extractSessionId, type Arm } from '
 import { solveCostUsd, DEEPSEEK_V4_FLASH_RATES, GPT_5_4_MINI_RATES, type RateTable } from '../src/pilot/cost.js';
 import { tallyPilot, type SolveOutcome, type PilotReport } from '../src/pilot/tally.js';
 import { parsePilotInstanceRow, type PilotInstance } from '../src/pilot/instance.js';
+import { prepareBaseCheckout, recoverPatch } from '../src/pilot/repo.js';
 import { HttpHfFetcher } from '../src/harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js';
 import { PythonEvalRunner, EvalCouldNotGradeError } from '../src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js';
 import type { HfRow } from '../src/harnesses/impls/swe-rebench-v2-evaluator/index.js';
@@ -183,35 +184,39 @@ function buildPrompt(instance: PilotInstance): string {
 
 async function solveOne(cfg: PilotConfig, instance: PilotInstance, arm: Arm, repeat: number, baseDir: string): Promise<SolveOutcome & { patch: string }> {
   const armDir = await mkdtemp(join(tmpdir(), `pilot-${arm.name}-${repeat}-`));
-  await rm(armDir, { recursive: true, force: true });
-  await cp(baseDir, armDir, { recursive: true });
-
-  const prompt = buildPrompt(instance);
-  const args = buildSolveArgs(arm, prompt, { maxTurns: cfg.maxTurns, provider: cfg.provider, model: cfg.model });
-  console.log(`[pilot] solving ${instance.instance_id} arm=${arm.name} repeat=${repeat}...`);
-  const { stderr, exitCode } = await run(cfg.jinnAgentBin, args, { cwd: armDir });
-
-  const diff = await run('git', ['diff'], { cwd: armDir });
-  const patch = diff.stdout;
-
-  let costUsd = 0;
-  let passed: boolean | null = null;
+  // try/finally so a spawn / git / token-export throw still removes the per-arm
+  // temp dir (it used to leak on any pre-cleanup throw, unlike baseDir).
   try {
-    const sessionId = extractSessionId(stderr);
-    if (!sessionId) throw new Error(`no session_id in stderr (exitCode=${exitCode})`);
-    const exportRes = await run(cfg.jinnAgentBin, ['sessions', 'export', '--session-id', sessionId, '-']);
-    const firstLine = exportRes.stdout.split('\n').find((l) => l.trim().length > 0) ?? '';
-    const tokens = parseSessionTokens(firstLine);
-    const rates: RateTable = cfg.provider === 'openai-codex' ? GPT_5_4_MINI_RATES : DEEPSEEK_V4_FLASH_RATES;
-    costUsd = solveCostUsd(tokens, rates);
-    console.log(`[pilot]   tokens: in=${tokens.inputTokens} out=${tokens.outputTokens} reason=${tokens.reasoningTokens} cost=$${costUsd.toFixed(4)}`);
-  } catch (err) {
-    console.warn(`[pilot]   could not capture tokens for ${instance.instance_id}/${arm.name}/${repeat}: ${(err as Error).message}`);
+    await rm(armDir, { recursive: true, force: true });
+    await cp(baseDir, armDir, { recursive: true });
+
+    const prompt = buildPrompt(instance);
+    const args = buildSolveArgs(arm, prompt, { maxTurns: cfg.maxTurns, provider: cfg.provider, model: cfg.model });
+    console.log(`[pilot] solving ${instance.instance_id} arm=${arm.name} repeat=${repeat}...`);
+    const { stderr, exitCode } = await run(cfg.jinnAgentBin, args, { cwd: armDir });
+
+    // Stage untracked files too — a new-file fix is invisible to a bare `git diff`.
+    const patch = await recoverPatch(run, armDir);
+
+    let costUsd = 0;
+    const passed: boolean | null = null;
+    try {
+      const sessionId = extractSessionId(stderr);
+      if (!sessionId) throw new Error(`no session_id in stderr (exitCode=${exitCode})`);
+      const exportRes = await run(cfg.jinnAgentBin, ['sessions', 'export', '--session-id', sessionId, '-']);
+      const firstLine = exportRes.stdout.split('\n').find((l) => l.trim().length > 0) ?? '';
+      const tokens = parseSessionTokens(firstLine);
+      const rates: RateTable = cfg.provider === 'openai-codex' ? GPT_5_4_MINI_RATES : DEEPSEEK_V4_FLASH_RATES;
+      costUsd = solveCostUsd(tokens, rates);
+      console.log(`[pilot]   tokens: in=${tokens.inputTokens} out=${tokens.outputTokens} reason=${tokens.reasoningTokens} cost=$${costUsd.toFixed(4)}`);
+    } catch (err) {
+      console.warn(`[pilot]   could not capture tokens for ${instance.instance_id}/${arm.name}/${repeat}: ${(err as Error).message}`);
+    }
+
+    return { instance_id: instance.instance_id, arm: arm.name, repeat, passed, costUsd, patch };
+  } finally {
+    await rm(armDir, { recursive: true, force: true });
   }
-
-  await rm(armDir, { recursive: true, force: true });
-
-  return { instance_id: instance.instance_id, arm: arm.name, repeat, passed, costUsd, patch };
 }
 
 async function gradeOne(cfg: PilotConfig, row: HfRow, patch: string): Promise<boolean | null> {
@@ -282,7 +287,7 @@ function printReport(report: PilotReport, outcomes: SolveOutcome[], banner?: str
   console.log(`arm A resolve rate: ${(report.armA.resolveRate * 100).toFixed(1)}%`);
   console.log(`arm B resolve rate: ${(report.armB.resolveRate * 100).toFixed(1)}%`);
   console.log(`quality: Δ=${report.quality.deltaPP.toFixed(1)}pp, lowerBound=${report.quality.lowerBound.toFixed(4)}, non-inferior=${report.quality.nonInferior}`);
-  console.log(`cost verdict: ${report.cost.verdict} (median Δ$=${Number.isFinite(report.cost.medianDeltaUsd) ? report.cost.medianDeltaUsd.toFixed(4) : 'n/a'})`);
+  console.log(`cost verdict: ${report.cost.verdict} (median Δ$=${Number.isFinite(report.cost.medianDeltaUsd) ? report.cost.medianDeltaUsd.toFixed(4) : 'n/a'}, both-solve n=${report.cost.n}${report.cost.underpowered ? ' — UNDERPOWERED (n<5, Wilcoxon cannot reject)' : ''})`);
   console.log(`total solves: ${outcomes.length}`);
   console.log(`total tokens spent: n/a (see per-solve logs above)`);
   console.log(`total $ spent: $${totalCost.toFixed(4)}`);
@@ -325,8 +330,11 @@ async function main(): Promise<void> {
       const baseDir = await mkdtemp(join(tmpdir(), `pilot-base-${instance.instance_id.replace(/[^a-zA-Z0-9_-]/g, '_')}-`));
       try {
         console.log(`[pilot] cloning ${instance.repo} @ ${instance.base_commit}...`);
-        await run('git', ['clone', `https://github.com/${instance.repo}.git`, baseDir]);
-        await run('git', ['checkout', instance.base_commit], { cwd: baseDir });
+        // FAIL-LOUD on a bad clone/checkout: a 404'd/renamed repo or unfetchable
+        // commit makes the INSTANCE ungradeable — it throws to the per-instance
+        // catch below (which skips the instance and continues) instead of leaving
+        // an empty repo that both arms "solve" into empty patches scored false.
+        await prepareBaseCheckout(run, instance.repo, instance.base_commit, baseDir);
 
         const arms: Arm[] = [
           { name: 'A', skills: [] },
