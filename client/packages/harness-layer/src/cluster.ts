@@ -63,14 +63,26 @@ function buildCluster(
   clusterId: string,
   tier: DistillCluster['tier'],
   instanceId: string,
-  items: ClusterItem[],
+  pass: ClusterItem[],
+  fail: ClusterItem[],
 ): DistillCluster {
+  const items = [...pass, ...fail];
   return {
     clusterId,
     tier,
     evidenceRefs: items.map((it) => it.ref),
     instanceIds: [instanceId],
-    input: projectInput(items),
+    // The distiller reads group-relative signal off the pass/fail split; carry
+    // it EXPLICITLY (§7, #1478) rather than making the model re-derive it from
+    // per-item outcomes. `items` is the flat projection (pass then fail).
+    input: {
+      instanceId,
+      tier,
+      groupSize: items.length,
+      nPass: pass.length,
+      nFail: fail.length,
+      items: projectInput(items),
+    },
   };
 }
 
@@ -109,11 +121,11 @@ export function clusterEvidence(items: ClusterItem[], opts: ClusterOptions = {})
     if (hasPattern && hasLesson) {
       // Precedence: the contrastive fold SUPPRESSES the pattern-only/lesson-only
       // singles. Pattern refs precede lesson refs in the merged provenance.
-      clusters.push(buildCluster(`contrastive:${instanceId}`, 'contrastive', instanceId, [...slot.pattern, ...slot.lesson]));
+      clusters.push(buildCluster(`contrastive:${instanceId}`, 'contrastive', instanceId, slot.pattern, slot.lesson));
     } else if (hasPattern) {
-      clusters.push(buildCluster(`pattern:${instanceId}`, 'pattern', instanceId, slot.pattern));
+      clusters.push(buildCluster(`pattern:${instanceId}`, 'pattern', instanceId, slot.pattern, []));
     } else if (hasLesson) {
-      clusters.push(buildCluster(`lesson:${instanceId}`, 'lesson', instanceId, slot.lesson));
+      clusters.push(buildCluster(`lesson:${instanceId}`, 'lesson', instanceId, [], slot.lesson));
     }
   }
 

@@ -100,21 +100,34 @@ describe('clusterEvidence (distinct-instance clustering by tier, §7)', () => {
     const clusters = clusterEvidence([
       { ref: 'evA-p1', instanceId: 'instA', env: env({ summary: 'Dedup queryset rows' }) },
     ]);
-    const input = clusters[0]!.input as Array<{ taskSummary: string; steps: Array<{ name: string }> }>;
-    expect(input[0]!.taskSummary).toBe('Dedup queryset rows');
-    expect(input[0]!.steps[0]!.name).toBe('tool:apply_patch');
+    const input = clusters[0]!.input as { items: Array<{ taskSummary: string; steps: Array<{ name: string }> }> };
+    expect(input.items[0]!.taskSummary).toBe('Dedup queryset rows');
+    expect(input.items[0]!.steps[0]!.name).toBe('tool:apply_patch');
   });
 
   it('projects step ATTRIBUTES (patch content), not just names — the distiller must see the evidence (§8, v0.5)', () => {
     const clusters = clusterEvidence([
       { ref: 'evA-p1', instanceId: 'instA', env: pattern() },
     ]);
-    const input = clusters[0]!.input as Array<{
-      steps: Array<{ name: string; attributes?: Record<string, unknown> }>;
-    }>;
-    const patchStep = input[0]!.steps.find((s) => s.name === 'tool:apply_patch')!;
+    const input = clusters[0]!.input as {
+      items: Array<{ steps: Array<{ name: string; attributes?: Record<string, unknown> }> }>;
+    };
+    const patchStep = input.items[0]!.steps.find((s) => s.name === 'tool:apply_patch')!;
     // the fixture env() carries a real diff in the patch attribute
     expect(String(patchStep.attributes?.patch)).toContain('qs.distinct()');
+  });
+
+  it('carries group stats {groupSize, nPass, nFail} so the distiller sees the pass/fail split (#1478)', () => {
+    // instA in the shared fixture folds pattern×2 + lesson×1 into one contrastive cluster.
+    const clusters = clusterEvidence(items);
+    const a = clusters.find((c) => c.clusterId === 'contrastive:instA')!;
+    const input = a.input as { instanceId: string; tier: string; groupSize: number; nPass: number; nFail: number; items: unknown[] };
+    expect(input.instanceId).toBe('instA');
+    expect(input.tier).toBe('contrastive');
+    expect(input.groupSize).toBe(3);
+    expect(input.nPass).toBe(2);
+    expect(input.nFail).toBe(1);
+    expect(input.items).toHaveLength(3);
   });
 
   it('honours the heldOut predicate — a slate instance is dropped', () => {
