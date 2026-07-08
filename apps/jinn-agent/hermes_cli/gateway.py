@@ -4687,18 +4687,10 @@ def run_gateway(verbose: int = 0, quiet: bool = False, replace: bool = False, fo
 
     from gateway.run import start_gateway
 
-    try:
-        from hermes_cli.config import load_config
-        from hermes_cli.skin_engine import get_active_skin_name, init_skin_from_config
-
-        if get_active_skin_name() == "default":
-            init_skin_from_config(load_config())
-    except Exception:
-        pass
-
-    from hermes_cli.skin_engine import get_active_skin
+    from hermes_cli.skin_engine import ensure_skin_initialised, get_active_skin
     from hermes_cli.status import titled_box
 
+    ensure_skin_initialised()
     _brand = get_active_skin().get_branding("agent_name", "Hermes Agent")
     _box = titled_box(f"{_brand} Gateway Starting...")
 
