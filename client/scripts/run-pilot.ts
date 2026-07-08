@@ -158,8 +158,10 @@ function buildPrompt(instance: PilotInstance): string {
   const spec = instance.interface && instance.interface.trim()
     ? `\n\n## Required interface (the contract your fix must satisfy)\n${instance.interface.trim()}`
     : '';
-  return `You are fixing a bug in this repository. Make the minimal source change needed. ` +
-    `Do not add explanatory files or scripts outside the repo's existing structure.\n\n` +
+  return `You are fixing a bug in this repository. Work efficiently and DO NOT get stuck exploring:\n` +
+    `1. Briefly locate the relevant code — a few targeted searches/reads, not an exhaustive tour of the repo.\n` +
+    `2. Then MAKE THE EDIT: modify the source file(s) to fix the issue. You MUST produce an actual code change (a git diff), not just analysis. Do not end your turn without having edited a file.\n` +
+    `Make the minimal change needed. Do not add explanatory files or scripts outside the repo's existing structure.\n\n` +
     `${instance.problem_statement}${spec}`;
 }
 
