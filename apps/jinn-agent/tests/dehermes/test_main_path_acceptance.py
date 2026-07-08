@@ -42,11 +42,30 @@ def _subcommand_names(help_text: str) -> list[str]:
     block — that's the normal, expected shape for a depth-1 subcommand with
     no children (e.g. ``doctor --help``, ``status --help``), and callers at
     depth 2 rely on that to mean "nothing further to descend into".
+
+    Some subparsers are registered with an explicit ``metavar=`` (e.g.
+    ``checkpoints``, which uses ``metavar="COMMAND"`` in
+    ``hermes_cli/checkpoints.py``) precisely to suppress the ugly
+    ``{status,list,prune,...}`` braces from the usage line. argparse honours
+    that by rendering the *metavar* instead of the choices set everywhere,
+    including under ``positional arguments:`` — so there is no ``{...}``
+    block to scrape at all, even though the subparser has children. Falling
+    through to "no children" here would silently exclude every command
+    registered this way from the gate. Instead, fall back to scraping the
+    indented command listing itself: each child is a 4-space-indented,
+    first-column token directly under ``positional arguments:`` (the same
+    table argparse prints either way), terminated by the next unindented
+    section header (``options:`` and friends) or end of text.
     """
     m = re.search(r"positional arguments:\n\s+\{([^}]+)\}", help_text)
+    if m:
+        return sorted(m.group(1).split(","))
+
+    m = re.search(r"positional arguments:\n(.*?)(?:\n\S|\Z)", help_text, re.S)
     if not m:
         return []
-    return sorted(m.group(1).split(","))
+    names = re.findall(r"^ {4}([A-Za-z][\w-]*)", m.group(1), re.M)
+    return sorted(names)
 
 
 def test_every_subcommand_help_is_hermes_free(tmp_path):
@@ -56,6 +75,7 @@ def test_every_subcommand_help_is_hermes_free(tmp_path):
 
     unreachable: dict[str, str] = {}
     checked_depth2 = 0
+    checkpoints_children_seen = 0
     for s in subs:
         out = run_cli(s, "--help", home=str(tmp_path))
         # Every subcommand in this CLI answers `--help` non-interactively
@@ -82,6 +102,8 @@ def test_every_subcommand_help_is_hermes_free(tmp_path):
         # present (grandchildren, e.g. `skills snapshot export`, are out of
         # scope for this gate — the brief bounds depth at 2).
         children = _subcommand_names(out)
+        if s == "checkpoints":
+            checkpoints_children_seen = len(children)
         for c in children:
             checked_depth2 += 1
             child_out = run_cli(s, c, "--help", home=str(tmp_path))
@@ -98,6 +120,20 @@ def test_every_subcommand_help_is_hermes_free(tmp_path):
     assert checked_depth2 > 0, (
         "no depth-2 nested subcommands were found to probe; the recursive "
         "scrape may be broken (parser surface may have changed shape)"
+    )
+
+    # `checkpoints` registers its subparsers with metavar="COMMAND"
+    # (hermes_cli/checkpoints.py), which suppresses the {a,b,...} choices
+    # block that _subcommand_names() normally scrapes and forces it onto
+    # the indented-listing fallback path instead. Pin the exact count so
+    # a future metavar-suppressed parser (or a change to checkpoints'
+    # own children) that silently drops back to 0 gets caught here rather
+    # than passing quietly.
+    assert checkpoints_children_seen == 5, (
+        f"expected checkpoints to contribute exactly 5 children "
+        f"(status, list, prune, clear, clear-legacy), got "
+        f"{checkpoints_children_seen}; the metavar-suppressed-parser "
+        f"fallback scrape may have regressed"
     )
 
     # Fallback path for any subcommand whose --help could not be exercised
