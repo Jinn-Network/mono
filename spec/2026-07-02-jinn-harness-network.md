@@ -1,8 +1,11 @@
 # Jinn Harness Network — Hermes fork, contribution economy, contributor-steered corpus
 
-- **Version:** 0.3 (draft — open questions resolved in review, 2026-07-02; spike #1316 findings +
-  envelope schema-review consequences folded into §5/§6.1/§12, 2026-07-02)
-- **Date:** 2026-07-02
+- **Version:** 0.4 (draft — open questions resolved in review, 2026-07-02; spike #1316 findings +
+  envelope schema-review consequences folded into §5/§6.1/§12, 2026-07-02; **v0.4, 2026-07-09,
+  issue #1487: added rung-1 local single-player distillation (§1, §5.1) + the symmetric Distiller
+  interface (§5.2 — local/network backends, rung 3 = network); reconciled the moat framing to name
+  the bonded economy as the durable asset (§2, §10). A Decision Record may be warranted — see §13.**)
+- **Date:** 2026-07-09
 - **Author:** Oak (design session)
 - **Shape:** `design` — output is this spec; implementation lands as per-phase plans and Issues
 
@@ -22,6 +25,12 @@ along:
    task distributions**, concentrating corpus-deepening where real users work. Individual
    self-steering is desirable by design: it is users steering a commons toward their own need, not
    founders steering it toward themselves.
+
+**Rung 1 — local distillation (the single-player entry).** Before any network verb, the harness
+earns its place as a *solo* tool: a user distils their own scrubbed local captures with a frontier
+model into installable skills, then runs later tasks cheaper on an open-weight model — the
+frontier-distil → cheap-run **arbitrage**. Private by default (nothing published), nothing on-chain,
+useful on day one. The four network verbs above are the same distillation pointed outward (§5.1–§5.2).
 
 The corpus stays a **public good** (no enclosure, no take-rate). OLAS emissions are **bootstrap
 capital**, not a self-sustenance claim. The single binding bet is **capability**: a corpus-connected
@@ -43,10 +52,20 @@ decisions rather than re-argued:
   therefore *live consumption* (freshness + integration in the tool you're holding), never an
   archival asset to sell — a public archive is absorbed by frontier models (the Stack Overflow
   precedent).
-- **No moat claims, no self-sustenance theatre.** The protocol's durable assets are credible
-  neutrality (the operator cannot be the house), live bonded participation, and legitimacy.
-  Emissions subsidise corpus production; that is what bootstrap capital is for. A native token
-  remains parked optionality; nothing in this spec depends on it.
+- **The moat is the bonded economy — not the archive, not self-sustenance.** Two false moats stay
+  rejected: the *archival-data* moat (a public corpus is absorbed by frontier models — the Stack
+  Overflow precedent above) and the *self-sustenance* claim (emissions are finite bootstrap capital,
+  named as such). What *is* durable is the **live bonded economy**: creators bond that a task
+  matters, solvers stake an attempt, evaluators bond a verdict. Costly, money-backed human choice
+  produces priority- and quality-labelled training data that raw scraped data lacks; and a live
+  market of *independent parties'* financial choices cannot be reproduced by a single operator
+  simulating its own demand — this is the answer to the "single-operator-simulable" objection. The
+  moat holds **only insofar as a bad bond loses money**: the verification-before-eligibility /
+  eviction gate (§6.1) is what makes a bond a *signal* rather than noise — without it the economy is
+  farmable and there is no moat. Credible neutrality (the operator cannot be the house) and
+  legitimacy sit alongside it. A native token remains parked optionality; nothing in this spec
+  depends on it. (This narrows the earlier blanket "no moat claims," which contradicted naming
+  bonded participation a durable asset — see §13.)
 - **Empirical niching.** We do not pick a niche a priori (coding was the leading guess). We capture
   broadly and let contribution data select where to deepen — "capture broadly, deepen narrowly."
   Density in a distribution is what makes a corpus valuable (adjacency/transfer literature);
@@ -65,6 +84,9 @@ decisions rather than re-argued:
 | D7 | Gas UX: user-side actions are **EIP-712 signatures**; one batched, **permissionless, proof-carrying** executor lands L1 state per epoch — built in v1b, only once manual-steering friction is demonstrated (Gall's Law) | veOLAS voting is L1-only; per-user mainnet gas kills casual participation — but manual steering works today, so automation is built on evidence, not speculation |
 | D8 | Seed the corpus from open skill libraries (first: Vercel's skills.sh), licence-checked, provenance-tagged `imported` | Day-one usefulness without polluting the demand signal |
 | D9 | Steerable distributions start as a **bounded, disclosed allowlist**, loosening as the electorate disperses | Whale-steering defence with the Valory seeding precedent; time-limited and stated openly |
+| D10 | **Rung 1 — local single-player distillation** ships first: own scrubbed captures → frontier-distilled skills → cheaper open-weight runs, private by default, no publish. Surface is the **harness CLI** (`jinn-layer`), not the operator dashboard SPA (§4.2) | Day-one solo usefulness with zero network dependency; the frontier-distil → cheap-run arbitrage is value the user keeps whether or not they contribute outward |
+| D11 | **One Distiller interface, two backends** (§5.2): `LocalDistiller` runs the merged distillation engine in-process over own captures (private sink, no anchor); `NetworkDistiller` (rung 3) rebinds source + sink to the bonded network's verified evidence and the public anchored corpus | Local and network distillation stay symmetric; rung 3 is a drop-in behind a proven local one (Gall's Law), deferred until rung 1 earns adoption |
+| D12 | **Rung 2 (selling distilled skills) rejected** | A skill is a non-excludable information good — public-domain on first sale; paywalling leaks immediately and breaks corpus-as-public-good (§2 No enclosure) |
 
 ## 4. Architecture
 
@@ -128,6 +150,55 @@ to. Nothing in the daemon needs to change for v0; the layer shells out to what e
   links. Legibility is the selling point.
 - **Pure readers allowed.** Consumption is not gated on contribution (D4). Revisit if free-riding
   materially outpaces contribution once volumes exist.
+
+### 5.1 Distillation rungs — local first (rung 1), network next (rung 3)
+
+Distillation runs on a **rung ladder** — distinct from the Tier-0…3 *onboarding* ladder in §6.1
+(that ladder is about when a user first touches gas; this one is about where the evidence comes from
+and where the skills go):
+
+- **Rung 1 — local single-player distillation (ships first).** The user points the distillation
+  engine at *their own* scrubbed captures: a frontier model distils them into SKILL.md-compatible
+  skills, installed locally, so later tasks run cheaper on an open-weight model. **Private by
+  default — nothing is published, nothing is anchored, no corpus write.** The surface is the
+  **harness CLI** (`@jinn-network/harness-layer` / the Jinn-Hermes fork), *not* the operator
+  dashboard SPA — this follows the §4.2 packaging inversion (the harness is the container; the
+  daemon is an optional sidecar). Rung 1 is a self-contained loop inside **Consume +
+  Contribute-to-self**: no node, no earning, no chain. It is the wedge that makes the harness worth
+  installing on day one, and the arbitrage (frontier-distil once, cheap-run many times) is value the
+  user keeps whether or not they ever contribute outward.
+- **Rung 2 — selling distilled skills: REJECTED.** A skill is a **non-excludable information good** —
+  public-domain on first sale, trivially re-shared — so a skills market leaks immediately and prices
+  to zero. Paywalling skills also violates the corpus-as-public-good principle (SPEC.md,
+  PRINCIPLES.md; §2 No enclosure). Recorded as rejected so it is not re-proposed.
+- **Rung 3 — bonded network distillation (same interface, deferred).** Distillation pointed
+  *outward*: the operator's captures enter the bonded network (the `session-derived.v1` task path),
+  independent solvers attempt and evaluators verify, and the same distillation engine deepens the
+  **public, anchored** corpus where steering points (§5 "distillation is itself a network task",
+  §6.2). Rung 3 is the *same Distiller interface* (§5.2) with the network backend; it is
+  stubbed/deferred until rung 1 earns adoption — grow the network path from a local one that already
+  works (Gall's Law).
+
+### 5.2 The Distiller interface (one seam, two backends)
+
+Local and network distillation are **symmetric**: one interface — *eligible evidence → verified,
+installable skills, via an injected model port and a publish sink* — with two backends behind it.
+The merged distillation engine already exposes this seam: its evidence source, its skill-publish
+sink, and its anchor deps are all injected ports, and it already runs a sink-only local mode that
+writes SKILL.md packages with no chain write.
+
+- **`LocalDistiller` (rung 1).** Binds the evidence source to the operator's **own captures** and
+  the publish sink to a **local, private** SKILL.md install — no anchor, no corpus record; runs
+  in-process. The sink half already exists; rung 1 adds the own-captures source behind the same
+  interface.
+- **`NetworkDistiller` (rung 3).** Rebinds the evidence source to the **bonded network's verified
+  evidence** (fed by the `session-derived.v1` task path) and the publish sink to the **public,
+  anchored** corpus. A drop-in behind the identical interface, deferred for now.
+
+Keeping both behind one interface is the point: rung 3 is not a second system, it is rung 1 with the
+source and sink rebound to the network. What makes the network backend *worth* its extra machinery is
+exactly the moat argument (§2) — bonded evidence is priority- and quality-labelled by costly,
+independent human choice in a way an operator's own captures are not.
 
 ## 6. Earning and steering
 
@@ -228,6 +299,8 @@ VoteWeighting today, no new infrastructure. Steering ships in two stages:
 2. Jinn-Hermes fork: upstream + layer + first-run consent + contribution ledger.
 3. Seed import: skills.sh, licence-checked, provenance-tagged.
 4. Distribution signal surface (crude counts are enough).
+5. **Rung-1 local distillation** (§5.1): `LocalDistiller` over the user's own captures → local
+   SKILL.md install; private, no anchor. The single-player usefulness wedge.
 
 **Gate:** N external users running the fork daily; contributions flowing and visible on-chain;
 signal shows where usage concentrates. (N small — single digits is fine; this is a usefulness
@@ -274,7 +347,11 @@ pick-up; each phase's items land as Issues with the appropriate shape (`feat`, m
 - No marketplace-first consumption; no "post a task, pay a bonded solver" as the product.
 - No verification-as-product; attestations remain a secondary surface.
 - No corpus enclosure, ever; no take-rate on transactions.
-- No moat or self-sustenance claims; emissions are bootstrap and are named as such.
+- No selling of distilled skills (rung 2, rejected — §5.1): a skill is a non-excludable information
+  good, public-domain on first sale; paywalling it leaks immediately and breaks corpus-as-public-good.
+- No *archival-data* moat and no self-sustenance claim; emissions are finite bootstrap, named as
+  such. (The durable asset is the live **bonded economy** — §2. This non-goal rejects the
+  archive-as-asset and runway-is-self-sustaining framings, not the bonded-economy moat.)
 - No native-token dependency; JINN optionality stays parked.
 - No capture beyond harness task traces.
 
@@ -304,3 +381,13 @@ pick-up; each phase's items land as Issues with the appropriate shape (`feat`, m
   deposit. Blocks Tier-2/Tier-3 mechanics (v0.5→v1), not v0.
 - **Ethereum-mainnet Mech Marketplace availability** — gates only the OLAS-native keeper
   experiment (v1b), nothing else.
+
+## 13. Decision-record flag (added v0.4, issue #1487)
+
+The §2 moat reconciliation is a **position change, not a wording tidy**. It narrows the former
+blanket "no moat claims" — which internally contradicted the same bullet's naming of "live bonded
+participation" as a durable asset — into two specific rejections (the archival-data moat and the
+self-sustenance claim) and **names the bonded economy as the durable, non-mirrorable asset**. Because
+this reverses a stated non-goal (§10) into an affirmative claim about the protocol's durability, it
+**likely warrants a Decision Record** under `log/decisions/` (working handle
+`DR-2026-07-09-bonded-economy-moat`). Flagged here; the DR is not written in this amendment.
