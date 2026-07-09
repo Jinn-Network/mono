@@ -17,9 +17,9 @@
  */
 
 import { parseArgs } from 'node:util';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   createHarnessLayer,
@@ -28,7 +28,7 @@ import {
   type CorpusSearchHit,
   type HarnessLayer,
 } from './consume.js';
-import { capture, parseCapturedTask, type ScrubRedaction } from './capture.js';
+import { capture, parseCapturedTask, type CapturedTask, type ScrubRedaction } from './capture.js';
 import { preview, stripBeforeValues, type ScrubReport } from './preview.js';
 import { createMemoryLedger, DEFAULT_LEDGER_PATH, ledger, type LedgerEntry } from './ledger.js';
 import { publish, type HarnessPublishDeps } from './publish.js';
@@ -54,7 +54,7 @@ import {
   DEFAULT_CODEX_MODEL,
   DEFAULT_MODEL as DEFAULT_CLAUDE_DISTILL_MODEL,
 } from './distill-llm.js';
-import { createLocalSkillSink } from './distiller.js';
+import { createLocalDistiller, createLocalSkillSink } from './distiller.js';
 import type { AttemptRef, BridgeEvidence } from './bridge.js';
 import type { DistillCluster, DistillLLMOutput, MetaDistillLLMOutput } from './distill.js';
 import type { MetaCluster } from './cluster.js';
@@ -102,6 +102,20 @@ Commands:
                                                  meta-distill over the stage-1 skills.
                                                  --local-only avoids chain writes and evidence
                                                  anchors, using in-memory publish deps.
+  distil [--captures <dir>] [--limit N] [--out <dir>]
+         [--distiller claude|codex] [--distiller-model <model>] [--json]
+                                                 Rung-1 own-captures loop: distil YOUR recent local
+                                                 captures into skills and install them, fully local
+                                                 (no corpus publish, no chain anchor). Reads recent
+                                                 CapturedTask JSON files from <captures> (default
+                                                 ~/.jinn-client/harness-layer/captures), runs the
+                                                 same engine as distill run, and installs each skill
+                                                 as <out>/<name>/SKILL.md (default
+                                                 ~/.jinn-client/harness-layer/skills) via the shared
+                                                 local skill sink — all produced skills install.
+                                                 --distiller-model is the arbitrage knob: it is the
+                                                 model that WRITES the skills, distinct from the
+                                                 cheap runtime model your captures ran under.
 
 Environment:
   JINN_DISCOVERY_URL       Override the discovery indexer URL (default: testnet Ponder indexer)
@@ -123,6 +137,11 @@ Environment (distill — reads the testnet ledger + spends model solves):
   JINN_DISTILL_PROVIDER    Distiller provider: claude or codex (default: claude)
   JINN_DISTILL_MODEL       Distiller model (defaults: claude-opus-4-8 for claude, gpt-5.5 for codex)
   (publish env above)      distill also captures + anchors the bridged evidence on testnet unless --local-only
+
+Environment (distil — the rung-1 own-captures loop; runs fully locally):
+  JINN_LAYER_CAPTURES_DIR  Own-captures dir (default: ~/.jinn-client/harness-layer/captures)
+  JINN_DISTILL_PROVIDER    Distiller provider: claude or codex (default: claude)
+  JINN_DISTILL_MODEL       Distiller model (overridden by --distiller-model)
 `;
 
 export type DistillProvider = 'claude' | 'codex';
@@ -150,6 +169,22 @@ export interface DistillCliDeps {
   slateInstanceIds?: Set<string>;
 }
 
+/**
+ * Injectable deps for the rung-1 `distil` own-captures loop (tests). Production
+ * defaults resolve the distill port from the provider + distiller model.
+ */
+export interface DistilCliDeps {
+  /** The LLM distill port. Default: provider factory over the resolved distiller model. */
+  distill?: (cluster: DistillCluster) => Promise<DistillLLMOutput>;
+  /** Provider-aware port factory (tests). Default: Claude or Codex CLI ports. */
+  distillerFactory?: (provider: DistillProvider, model: string) => DistillPorts;
+  /**
+   * Held-out slate ids — defence-in-depth over the gate + contamination scan.
+   * Own captures rarely intersect a public slate, so this defaults to empty.
+   */
+  slateInstanceIds?: Set<string>;
+}
+
 export interface RunJinnLayerCliOptions {
   /** Injectable layer (tests). Default: createHarnessLayer() with env overrides. */
   layer?: HarnessLayer;
@@ -159,6 +194,8 @@ export interface RunJinnLayerCliOptions {
   seedSource?: SeedSource;
   /** Injectable distill-pipeline deps (tests). Default: live wiring per field. */
   distillDeps?: DistillCliDeps;
+  /** Injectable rung-1 own-captures deps (tests). Default: provider-resolved distill port. */
+  distilDeps?: DistilCliDeps;
   writer?: { write: (s: string) => boolean };
 }
 
@@ -170,6 +207,13 @@ const DEFAULT_CLI_SEARCH_LIMIT = 20;
  * to 20k rows, so this covers the current corpus with headroom.
  */
 const DEFAULT_DISTILL_LIMIT = 2000;
+
+/** Own-captures dir the rung-1 `distil` loop reads by default (mirrors the ledger path). */
+const DEFAULT_CAPTURES_DIR = join(homedir(), '.jinn-client', 'harness-layer', 'captures');
+/** Local skills library `distil` installs into by default (harness integration passes --out). */
+const DEFAULT_SKILLS_INSTALL_DIR = join(homedir(), '.jinn-client', 'harness-layer', 'skills');
+/** How many recent own captures `distil` distils over when --limit is unset. */
+const DEFAULT_DISTIL_CAPTURE_LIMIT = 50;
 
 /**
  * Byte ceiling on any single IPFS object fetched by the distill pipeline
@@ -191,6 +235,30 @@ function skillDirSlug(name: string): string {
     .replace(/[^a-z0-9._-]+/g, '-')
     .replace(/^[-.]+|[-.]+$/g, '');
   return slug === '' ? 'skill' : slug;
+}
+
+/**
+ * Load the operator's most recent OWN captures for the rung-1 `distil` loop:
+ * every `*.json` file in `dir` is one `CapturedTask` (the same shape
+ * `capture preview` / `publish` consume). Files are parsed, the newest by
+ * `session.capturedAt` first, and truncated to `limit`. A malformed file is
+ * skipped (warned to stderr, matching the ledger's corrupt-line tolerance —
+ * stderr, not the writer, so `--json` stdout stays parseable); a missing dir
+ * yields no captures.
+ */
+function loadRecentCaptures(dir: string, limit: number): CapturedTask[] {
+  if (!existsSync(dir)) return [];
+  const parsed: CapturedTask[] = [];
+  for (const file of readdirSync(dir)) {
+    if (!file.endsWith('.json')) continue;
+    try {
+      parsed.push(parseCapturedTask(JSON.parse(readFileSync(join(dir, file), 'utf-8'))));
+    } catch (err) {
+      console.warn(`[distil] skipping malformed capture file ${file}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  parsed.sort((a, b) => b.session.capturedAt.localeCompare(a.session.capturedAt));
+  return parsed.slice(0, limit);
 }
 
 /**
@@ -433,13 +501,14 @@ export async function runJinnLayerCli(
   const isSeed = verb === 'seed' && (subverb === 'plan' || subverb === 'execute');
   const isSkillsInstall = verb === 'skills' && subverb === 'install';
   const isDistill = verb === 'distill' && subverb === 'run';
-  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed && !isSkillsInstall && !isDistill) {
+  const isDistil = verb === 'distil';
+  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed && !isSkillsInstall && !isDistill && !isDistil) {
     writer.write(USAGE);
     return verb === undefined || verb === 'help' || verb === '--help' ? 0 : 2;
   }
 
-  // `ledger` and `publish` have no subverb — their args start at argv[1].
-  const flat = isLedger || isPublish;
+  // `ledger`, `publish`, and `distil` have no subverb — their args start at argv[1].
+  const flat = isLedger || isPublish || isDistil;
   let parsed;
   try {
     parsed = parseArgs({
@@ -453,6 +522,8 @@ export async function runJinnLayerCli(
         source: { type: 'string' },
         meta: { type: 'boolean', default: false },
         distiller: { type: 'string' },
+        'distiller-model': { type: 'string' },
+        captures: { type: 'string' },
         'local-only': { type: 'boolean', default: false },
       },
       allowPositionals: true,
@@ -540,6 +611,76 @@ export async function runJinnLayerCli(
       writer.write(lines.join('\n') + '\n');
     }
     return result.errors.length > 0 ? 1 : 0;
+  }
+
+  if (isDistil) {
+    const dd = opts.distilDeps ?? {};
+
+    // Distiller provider + model — the arbitrage knob. The model resolved here
+    // WRITES the skills; it is deliberately distinct from the cheap runtime
+    // model each capture ran under (`environment.model`), which `distil` never
+    // touches. Resolution: --distiller-model > JINN_DISTILL_MODEL > provider default.
+    const rawProvider = (parsed.values.distiller as string | undefined) ?? process.env['JINN_DISTILL_PROVIDER'] ?? 'claude';
+    const distillProvider = parseDistillProvider(rawProvider);
+    if (!distillProvider) {
+      writer.write(`error: distiller must be "claude" or "codex" (got ${JSON.stringify(rawProvider)})\n\n${USAGE}`);
+      return 2;
+    }
+    const defaultDistillModel = distillProvider === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_DISTILL_MODEL;
+    const distillModel =
+      (parsed.values['distiller-model'] as string | undefined) ??
+      process.env['JINN_DISTILL_MODEL'] ??
+      defaultDistillModel;
+    const distill =
+      dd.distill ?? (dd.distillerFactory ?? defaultDistillerFactory)(distillProvider, distillModel).distill;
+
+    // Source: recent OWN captures (default ~/.jinn-client/harness-layer/captures).
+    const capturesDir =
+      (parsed.values.captures as string | undefined) ??
+      process.env['JINN_LAYER_CAPTURES_DIR'] ??
+      DEFAULT_CAPTURES_DIR;
+    const capN = Number.parseInt(parsed.values.limit as string, 10);
+    const capLimit =
+      argv.some((a) => a === '--limit' || a.startsWith('--limit=')) && Number.isFinite(capN) && capN > 0
+        ? capN
+        : DEFAULT_DISTIL_CAPTURE_LIMIT;
+    const captures = loadRecentCaptures(capturesDir, capLimit);
+    if (captures.length === 0) {
+      if (parsed.values.json) {
+        writer.write(JSON.stringify({ clusterCount: 0, distilled: { published: [], rejected: [], errors: [] }, capturesConsidered: 0, distillModel }) + '\n');
+      } else {
+        writer.write(`No local captures found in ${capturesDir} — run some harness tasks first, then distil.\n`);
+      }
+      return 0;
+    }
+
+    // Sink: install every produced skill locally (install-all) under <out>/<name>.
+    const outDir = (parsed.values.out as string | undefined) ?? DEFAULT_SKILLS_INSTALL_DIR;
+    mkdirSync(outDir, { recursive: true });
+
+    const distiller = createLocalDistiller({
+      distill,
+      sink: createLocalSkillSink(outDir),
+      distribution: 'coding',
+      distillModel,
+      ...(dd.slateInstanceIds ? { slate: { instanceIds: dd.slateInstanceIds } } : {}),
+    });
+    const result = await distiller.distil(captures);
+
+    if (parsed.values.json) {
+      writer.write(JSON.stringify({ ...result, outDir, capturesConsidered: captures.length, distillModel }) + '\n');
+    } else {
+      const lines = [
+        `distilled ${captures.length} local capture(s) with ${distillModel}: installed ${result.distilled.published.length}, rejected ${result.distilled.rejected.length}, errors ${result.distilled.errors.length}`,
+        `clusters: ${result.clusterCount}`,
+      ];
+      for (const p of result.distilled.published) lines.push(`  INSTALLED ${p.skillKind} ${p.envelopeRef} (${p.clusterId})`);
+      for (const r of result.distilled.rejected) lines.push(`  rejected  ${r.clusterId} — ${r.reason}`);
+      for (const e of result.distilled.errors) lines.push(`  ERROR     ${e.clusterId} — ${e.error}`);
+      lines.push('', `skills installed under: ${outDir}`);
+      writer.write(lines.join('\n') + '\n');
+    }
+    return result.distilled.errors.length > 0 ? 1 : 0;
   }
 
   if (isDistill) {
