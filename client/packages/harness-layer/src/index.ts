@@ -127,6 +127,14 @@ export {
 } from './distiller.js';
 
 export {
+  readDistilMode,
+  writeDistilMode,
+  DEFAULT_DISTIL_MODE_PATH,
+  type DistilMode,
+  type DistilModeState,
+} from './distil-mode.js';
+
+export {
   threeArmMeasurement,
   pilotPower,
   type ArmResult,
