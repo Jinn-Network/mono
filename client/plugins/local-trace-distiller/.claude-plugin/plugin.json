@@ -1,0 +1,9 @@
+{
+  "name": "local-trace-distiller",
+  "description": "Local trace distillation tools and workflow for deriving experimental skills from private session traces.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Jinn Network",
+    "url": "https://github.com/Jinn-Network/mono"
+  }
+}

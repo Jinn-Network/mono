@@ -21,6 +21,7 @@
     "client": "./dist/bin/jinn.js",
     "jinn": "./dist/bin/jinn.js",
     "jinn-layer": "./dist/bin/jinn-layer.js",
+    "jinn-distil-mcp": "./dist/bin/jinn-distil-mcp.js",
     "jinn-stop-hook": "./dist/bin/jinn-stop-hook.js"
   },
   "main": "./dist/index.js",
@@ -52,7 +53,7 @@
     "typecheck:harness-layer": "tsc --noEmit -p packages/harness-layer/tsconfig.json",
     "dev": "yarn build && node dist/bin/jinn.js",
     "build:sdk": "yarn --cwd ../packages/sdk install --immutable && yarn --cwd ../packages/sdk build",
-    "build": "yarn build:sdk && yarn build:spa && tsc && chmod +x dist/bin/jinn.js && node scripts/bundle-jinn-layer.mjs && rm -rf dist/dashboard && mkdir -p dist/dashboard && cp -R src/dashboard/spa/dist/. dist/dashboard/ && rm -rf dist/templates && cp -R templates dist/templates && rm -rf dist/plugins/learner && mkdir -p dist/plugins && cp -R plugins/learner dist/plugins/learner && mkdir -p dist/scripts && cp scripts/fix-node-pty.mjs scripts/swe-rebench-v2-seed-pool.json scripts/swe-rebench-v2-known-bad.json scripts/swe-rebench-v2-pytest-missing.json dist/scripts/ && mkdir -p dist/solver-types/slates && cp src/solver-types/slates/*.json dist/solver-types/slates/ && node scripts/vendor-sdk.mjs && node scripts/write-dist-build-meta.mjs && yarn typecheck:harness-layer",
+    "build": "yarn build:sdk && yarn build:spa && tsc && chmod +x dist/bin/jinn.js && node scripts/bundle-jinn-layer.mjs && rm -rf dist/dashboard && mkdir -p dist/dashboard && cp -R src/dashboard/spa/dist/. dist/dashboard/ && rm -rf dist/templates && cp -R templates dist/templates && rm -rf dist/plugins && mkdir -p dist/plugins && cp -R plugins/learner dist/plugins/learner && cp -R plugins/local-trace-distiller dist/plugins/local-trace-distiller && mkdir -p dist/scripts && cp scripts/fix-node-pty.mjs scripts/swe-rebench-v2-seed-pool.json scripts/swe-rebench-v2-known-bad.json scripts/swe-rebench-v2-pytest-missing.json dist/scripts/ && mkdir -p dist/solver-types/slates && cp src/solver-types/slates/*.json dist/solver-types/slates/ && node scripts/vendor-sdk.mjs && node scripts/write-dist-build-meta.mjs && yarn typecheck:harness-layer",
     "typecheck": "yarn build:sdk && tsc --noEmit && yarn typecheck:harness-layer",
     "lint:no-late-mount": "node scripts/check-no-late-route-mount.mjs",
     "test": "yarn build:sdk && vitest run",

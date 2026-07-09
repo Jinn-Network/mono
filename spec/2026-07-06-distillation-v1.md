@@ -1,9 +1,12 @@
 # Distillation v1 — layer-1 evidence → layer-2 consumable skills
 
-- **Version:** 0.6 (v0.5 + plugin-GTM reconciliation, 2026-07-08 — surfaces the distiller tier into
+- **Version:** 0.7 (v0.6 + local/private trace distiller adjunct, 2026-07-09 — adds the
+  plugin/MCP path for mining private local traces into experimental skills without changing the
+  evaluator-verified network pipeline or the §11 measurement gate.)
+- **v0.6:** v0.5 + plugin-GTM reconciliation, 2026-07-08 — surfaces the distiller tier into
   §11 (opus-class, per §14), adds the open-weight runtime replication as the stock-Hermes plugin's
   GTM-load-bearing cell (§11), and reconciles the shipped-vs-deferred `/jinn skills install` state
-  (§13). Core design unchanged.)
+  (§13). Core design unchanged.
 - **v0.5:** v0.4 + quality amendments from the skill-distillation literature review —
   verified-counterfactual rule, contrastive mode, fixed skill skeleton, anti-triggers, bridged-evidence
   enrichment + `patch-only` stratification, auditability fields, two §13 deferral records; 2026-07-08.
@@ -305,6 +308,11 @@ and was previously unrecorded; the token pair records the compression ratio the 
 over the serialized cluster input and the body) — the LLM port reports no usage, and an auditable
 estimate serves the ratio's purpose better than an unreproducible exact count.
 
+**Local experimental fields (v0.7).** The private-trace plugin may add `status: experimental`,
+`evidenceTier: single-example | recurring-pattern | contrastive | user-confirmed`, `sourceTools`,
+`targetTools`, and local feedback counters. These are **local confidence labels**, not a substitute
+for evaluator-verified provenance, and must not be used to pass the §11 network measurement gate.
+
 **Body skeleton (distilled skills, v0.5).** Distilled bodies use a **fixed anatomy** — `## When to
 use` / `## Strategy` / `## Steps` / `## Pitfalls` / `## Verify`, each section non-empty — enforced
 structurally at the distilled-publish gate (§7 step 6). Fixed structure keeps distiller output
@@ -503,6 +511,39 @@ the **union** of the supporting sources' layer-1 evidence CIDs (so `distilledFro
 the same output-scrub → contamination-scan → structural-gate → publish path unchanged. It reads only
 stage-1's in-memory results — no corpus round-trip — and never groups a `cross-instance` skill (no
 recursion). Disabled by default (`yarn distill … --meta` / pipeline `meta: true`).
+
+**Local/private trace distiller adjunct (v0.7, plugin path; not the §11 measured network pipeline).**
+The same distillation methodology is also exposed for an operator's **private local traces** through
+the `local-trace-distiller` plugin. This path is deliberately lower-verifiability: it does not have
+public evaluator verdicts, held-out disjointness, or multiple independent attempts. It therefore
+emits skills as **experimental** (`metadata.jinn.status: experimental`,
+`verifiabilityTier: user-accepted`) and records an evidence-tier estimate (`single-example`,
+`recurring-pattern`, or `contrastive`) instead of claiming evaluator-verified quality.
+
+Mechanics:
+
+1. **Source:** stop-hook/session capture writes local `CapturedTask` JSON files under
+   `JINN_LAYER_CAPTURES_DIR` (default `~/.jinn-client/harness-layer/captures`). This reuses the
+   same shape `jinn-layer distil` already reads; there is no second trace schema.
+2. **Tools:** the plugin ships an MCP server (`jinn-distil-mcp`) with `distill_trace_search`
+   (compact cards), `distill_trace_read` (scoped reads with full-transcript gating),
+   `distill_trace_cluster` (cheap repeated-signal candidate discovery), `distill_local` (confirmed
+   call through the existing `jinn-layer distil` flow), and `distill_feedback_record` (local JSONL
+   feedback ledger).
+3. **UX:** `/distill` with no argument defaults to `this` (current/recent session). `/distill all`
+   runs a capped cluster-first scan and asks the user which candidate to distill before calling the
+   LLM. Selected candidates pass `traceIds`/`sessionIds` so the confirmed run distills only that
+   subset.
+4. **Inference:** the agent uses the user's active LLM provider through the normal distiller port;
+   the plugin tools source/search/cluster traces, but do not replace the distillation prompt or
+   gates.
+5. **Feedback:** because no external reward signal exists locally, later use of an experimental
+   skill should ask the user for helped/hurt/mixed/unused feedback and record only user-approved
+   notes/accepted changes. This is a local improvement signal, not admission-quality verification.
+
+Future public listing of locally distilled skills is out of scope for v0.7. A later marketplace flow
+may let users publish useful skills for others to use and pay for, but that requires explicit user
+approval plus a separate publish/evaluation policy; private traces must never be exported by default.
 
 ## 8. The bridge — execution ledger → layer-1 evidence
 
@@ -813,6 +854,10 @@ guardrail) + the pilot + the held-out interface.
   distillation in aggregate, and v1 volume is tiny.
 - **Skill dedup / merge** (library hygiene — collapsing near-duplicate skills, merging a lesson into
   its contrastive sibling) — deferred, pre-v3.
+- **Public marketplace listing for locally distilled skills** — deferred beyond the v0.7 plugin
+  path. Local distillation may stage/install experimental skills for the operator, but publishing
+  them for other users to use and pay for needs a separate explicit consent, evaluation, pricing,
+  and provenance policy.
 - **Any change to the frozen layer-1 envelope** (§2.1) or the `ContributionActivityChecker` contract
   (§8 — a later concern).
 

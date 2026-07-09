@@ -99,6 +99,7 @@ import { createCorpus } from './corpus/index.js';
 import { DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK } from './corpus/onchain-query.js';
 import { CapturesStore } from './store/captures.js';
 import { createLiveCapturePublisher } from './captures/live-publisher.js';
+import { exportStoredCaptureForDistil } from './captures/distil-export.js';
 import { startReceiver, type Receiver } from './trajectory/receiver.js';
 import { startSyntheticSpanProvider, emitSyntheticSpan } from './trajectory/synthetic-span-builder.js';
 import { CredentialScrubProcessor } from './trajectory/processors/credential-scrub.js';
@@ -404,6 +405,18 @@ async function ingestStopHookCapture(
     await provider.flush();
   } finally {
     await provider.shutdown();
+  }
+
+  try {
+    const exported = exportStoredCaptureForDistil(captures, payload.sessionId);
+    if (exported) {
+      console.log(`[main] local distil capture written: ${exported.filePath}`);
+    }
+  } catch (err) {
+    console.warn(
+      `[main] local distil capture export failed for ${payload.sessionId}: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 
