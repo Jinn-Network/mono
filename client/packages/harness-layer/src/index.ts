@@ -135,6 +135,16 @@ export {
 } from './distil-mode.js';
 
 export {
+  DEFAULT_CAPTURES_DIR,
+  DEFAULT_DISTIL_CAPTURE_LIMIT,
+  DEFAULT_SKILLS_INSTALL_DIR,
+  coveredSessionIds,
+  loadRecentCaptures,
+  provenanceLabels,
+  stagingDirFor,
+} from './distil-captures.js';
+
+export {
   threeArmMeasurement,
   pilotPower,
   type ArmResult,

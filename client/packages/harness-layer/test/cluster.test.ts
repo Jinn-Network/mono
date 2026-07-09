@@ -139,4 +139,15 @@ describe('clusterEvidence (distinct-instance clustering by tier, §7)', () => {
     const clusters = clusterEvidence([{ ref: 'x', instanceId: 'instA', env: ineligible() }]);
     expect(clusters).toEqual([]);
   });
+
+  it('local-experimental mode accepts user-accepted completed evidence as a pattern candidate', () => {
+    const clusters = clusterEvidence(
+      [{ ref: 'local-capture:s1', instanceId: 's1', env: ineligible() }],
+      { eligibilityMode: 'local-experimental' },
+    );
+
+    expect(clusters).toHaveLength(1);
+    expect(clusters[0]!.clusterId).toBe('pattern:s1');
+    expect(clusters[0]!.evidenceRefs).toEqual(['local-capture:s1']);
+  });
 });

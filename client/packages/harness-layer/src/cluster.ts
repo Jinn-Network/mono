@@ -29,6 +29,12 @@ export interface ClusterOptions {
   heldOut?: (instanceId: string) => boolean;
   /** Overrides the gate's placeholder-density defacement threshold (§6). */
   maxPlaceholderDensity?: number;
+  /**
+   * `network-strict` preserves the evaluator-verified promotion gate. The
+   * local experimental path may draft private skills from user-accepted traces,
+   * but those are not publishable network evidence.
+   */
+  eligibilityMode?: 'network-strict' | 'local-experimental';
 }
 
 /**
@@ -100,18 +106,28 @@ export function clusterEvidence(items: ClusterItem[], opts: ClusterOptions = {})
   let order = 0;
 
   for (const item of items) {
+    const heldOut = opts.heldOut?.(item.instanceId) ?? false;
     const result = evaluateEligibility(item.env, {
-      heldOut: opts.heldOut?.(item.instanceId),
+      heldOut,
       maxPlaceholderDensity: opts.maxPlaceholderDensity,
     });
-    if (!result.eligible || result.tier === null) continue;
+    let tier = result.eligible ? result.tier : null;
+    if (tier === null && opts.eligibilityMode === 'local-experimental') {
+      const localSafe =
+        item.env.provenance === 'contributed' &&
+        !heldOut &&
+        !result.redactionHealth.defaced;
+      if (localSafe && item.env.outcome.status === 'completed') tier = 'pattern';
+      if (localSafe && item.env.outcome.status === 'failed') tier = 'lesson';
+    }
+    if (tier === null) continue;
 
     let slot = byInstance.get(item.instanceId);
     if (!slot) {
       slot = { pattern: [], lesson: [], order: order++ };
       byInstance.set(item.instanceId, slot);
     }
-    slot[result.tier].push(item);
+    slot[tier].push(item);
   }
 
   const clusters: DistillCluster[] = [];

@@ -145,12 +145,27 @@ export function createLocalDistiller(deps: LocalDistillerDeps): Distiller {
         });
       }
 
-      const clusters = clusterEvidence(items, { heldOut: (id) => slate.instanceIds.has(id) });
+      const clusters = clusterEvidence(items, {
+        heldOut: (id) => slate.instanceIds.has(id),
+        eligibilityMode: 'local-experimental',
+      });
+      const sourceTools = [...new Set(captures.map((task) => task.environment.harness.name))].sort();
+      const evidenceTier =
+        clusters.some((cluster) => cluster.tier === 'contrastive')
+          ? 'contrastive'
+          : captures.length > 1
+            ? 'recurring-pattern'
+            : 'single-example';
       const distilled = await distillClusters(clusters, {
         distill: deps.distill,
         publishSkill: deps.sink,
         slate,
         distribution: deps.distribution ?? 'coding',
+        verifiabilityTier: 'user-accepted',
+        skillStatus: 'experimental',
+        evidenceTier,
+        sourceTools,
+        targetTools: ['current'],
         ...(deps.distillModel ? { distillModel: deps.distillModel } : {}),
         ...(deps.now ? { now: deps.now } : {}),
       });
