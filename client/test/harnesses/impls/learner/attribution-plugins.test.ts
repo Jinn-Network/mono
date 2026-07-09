@@ -10,17 +10,23 @@ class NoOpAdapter implements HarnessAdapter {
 }
 
 describe('LearnerHarness.attributionPlugins', () => {
-  it('returns one descriptor for the claude-code-learner plugin', () => {
+  it('returns descriptors for bundled learner plugins', () => {
     const harness = new LearnerHarness({ adapter: new NoOpAdapter() });
     const plugins = harness.attributionPlugins();
-    expect(plugins).toHaveLength(1);
-    const [learner] = plugins;
+    expect(plugins).toHaveLength(2);
+    const learner = plugins.find((plugin) => plugin.name === 'claude-code-learner')!;
+    const distiller = plugins.find((plugin) => plugin.name === '@jinn-network/local-trace-distiller')!;
     expect(learner.name).toBe('claude-code-learner');
     expect(learner.version).toMatch(/^\d+\.\d+\.\d+/); // whatever version ships
     expect(learner.sha256).toMatch(/^[0-9a-f]{64}$/);
     expect(learner.provenance).toBe('default');
     expect(learner.source).toBe('bundled:learner');
     expect(learner.root).toContain('plugins/learner');
+    expect(distiller.version).toMatch(/^\d+\.\d+\.\d+/);
+    expect(distiller.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(distiller.provenance).toBe('default');
+    expect(distiller.source).toBe('bundled:local-trace-distiller');
+    expect(distiller.root).toContain('plugins/local-trace-distiller');
   });
 
   it('carries the live manifest version (AC3 — observable, not bumped)', () => {

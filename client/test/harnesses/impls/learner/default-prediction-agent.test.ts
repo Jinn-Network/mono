@@ -10,6 +10,8 @@ import { ClaudeCodeHarnessAdapter } from '../../../../src/harnesses/impls/learne
 import { NoOpHarnessAdapter } from '../../../../src/harnesses/impls/learner/test-utils/noop-adapter.js';
 import { PredictionV1BaselineImpl } from '../../../../src/harnesses/impls/prediction-v1-baseline/index.js';
 import { makePredictionV1Task } from '../prediction-v1-test-helpers.js';
+import type { HarnessAdapter, TaskSessionInputs } from '../../../../src/harnesses/impls/learner/types.js';
+import type { HarnessContext } from '../../../../src/harnesses/types.js';
 
 function readJson(path: string): Record<string, unknown> {
   return JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
@@ -105,6 +107,53 @@ describe('default prediction agent runtime plugins', () => {
     expect(`${harnessSource}\n${adapterSource}`).not.toMatch(
       /search_records|inspect_record|polymarket_get_market|polymarket_get_orderbook|prediction-corpus-retrieval/,
     );
+  });
+});
+
+class RecordingAdapter implements HarnessAdapter {
+  readonly name = 'recording';
+  readonly allowsHarnessSelfModification = false;
+  calls: Array<{ inputs: TaskSessionInputs; pluginRoot: string }> = [];
+
+  async runTask(inputs: TaskSessionInputs, pluginRoot: string): Promise<void> {
+    this.calls.push({ inputs, pluginRoot });
+    throw new Error('recording adapter stop');
+  }
+}
+
+describe('LearnerHarness default plugins', () => {
+  it('preinstalls local-trace-distiller for learner sessions', async () => {
+    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-learner-default-plugins-work-'));
+    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-learner-default-plugins-state-'));
+    try {
+      const adapter = new RecordingAdapter();
+      const harness = new LearnerHarness({ adapter });
+
+      await expect(harness.run({
+        task: {
+          id: 'task-1',
+          description: 'Do work',
+          solverType: 'generic.v1',
+          window: { startTs: 1, endTs: 2 },
+        },
+        requestId: 'request-1',
+        implStateDir,
+        workingDir,
+        solverPluginRoots: [],
+        mode: 'train',
+        abort: new AbortController().signal,
+        msUntilEndTs: () => 1,
+      } as unknown as HarnessContext)).rejects.toThrow('recording adapter stop');
+
+      expect(adapter.calls).toHaveLength(1);
+      expect(adapter.calls[0]!.inputs.pluginRoots).toEqual([
+        expect.stringContaining('plugins/local-trace-distiller'),
+      ]);
+      expect(existsSync(join(adapter.calls[0]!.inputs.pluginRoots![0]!, 'skills', 'distill', 'SKILL.md'))).toBe(true);
+    } finally {
+      rmSync(workingDir, { recursive: true, force: true });
+      rmSync(implStateDir, { recursive: true, force: true });
+    }
   });
 });
 

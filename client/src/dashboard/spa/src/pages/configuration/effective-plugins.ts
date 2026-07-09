@@ -49,9 +49,11 @@ const ALL_BUNDLED_PLUGINS: ReadonlyArray<{
   name: string;
   version: string;
   defaultIncluded: true;
+  learnerOwned?: true;
 }> = [
   { name: 'network-tools', version: '0.1.0', defaultIncluded: true },
   { name: 'claude-code-learner', version: '0.2.0', defaultIncluded: true },
+  { name: 'local-trace-distiller', version: '0.1.0', defaultIncluded: true, learnerOwned: true },
 ];
 
 /**
@@ -69,6 +71,7 @@ const DEFAULT_COMPATIBLE_PLUGINS: ReadonlySet<string> = new Set([
 const DISPLAY_NAMES: Record<string, string> = {
   'network-tools': 'Network Tools',
   'claude-code-learner': 'Learner',
+  'local-trace-distiller': 'Local Trace Distiller',
   'swe-rebench-v2-runtime': 'SWE-rebench v2 Runtime',
   'jinn-prediction-plugin': 'Prediction Runtime',
 };
@@ -94,7 +97,7 @@ export function pluginConfigValue(option: { source: string; name: string }): str
  */
 export function includedBundledPluginsFor(harness: string | undefined): EffectivePlugin[] {
   const isHermes = canonicalHarnessName(harness) === HERMES_AGENT_HARNESS;
-  return ALL_BUNDLED_PLUGINS.filter((p) => !(isHermes && p.name === 'claude-code-learner')).map(
+  return ALL_BUNDLED_PLUGINS.filter((p) => !(isHermes && (p.name === 'claude-code-learner' || p.learnerOwned))).map(
     (p) => ({
       name: p.name,
       displayName: displayName(p.name),

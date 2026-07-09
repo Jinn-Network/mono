@@ -31,23 +31,28 @@ function requireAsset(pluginRoot: string, relative: string, hint?: string): void
   }
 }
 
-export function resolvePluginRoot(): string {
+function bundledPluginsDir(): string {
   const here = dirname(fileURLToPath(import.meta.url));
   const threeUp = resolve(here, '..', '..', '..');
+  return threeUp.endsWith('/dist')
+    ? join(threeUp, 'plugins')
+    : join(resolve(here, '..', '..', '..', '..'), 'plugins');
+}
 
-  // Compiled dist layout: dist/harnesses/impls/learner → dist/ → dist/plugins/learner
-  const isDistTree = threeUp.endsWith('/dist');
-  const pluginRoot = isDistTree
-    ? join(threeUp, 'plugins', 'learner')
-    : join(resolve(here, '..', '..', '..', '..'), 'plugins', 'learner');
-
+export function resolveBundledPluginRoot(pluginDirName: string): string {
+  const pluginRoot = join(bundledPluginsDir(), pluginDirName);
   if (!existsSync(pluginRoot)) {
     throw new Error(
-      `learner plugin not found at expected path: ${pluginRoot}. ` +
-        `Resolved from impl dir: ${here}. ` +
-        `Run \`yarn build\` to copy plugins/learner into dist/plugins/learner.`,
+      `bundled plugin not found at expected path: ${pluginRoot}. ` +
+        `Run \`yarn build\` to copy plugins/${pluginDirName} into dist/plugins/${pluginDirName}.`,
     );
   }
+  return pluginRoot;
+}
+
+export function resolvePluginRoot(): string {
+  const pluginRoot = resolveBundledPluginRoot('learner');
+
   requireAsset(pluginRoot, 'skills/learn/SKILL.md');
   requireAsset(pluginRoot, 'hooks/session-start', 'plugin assets may be stale or incomplete; rebuild the plugin');
   requireAsset(pluginRoot, 'hooks/hooks.json', 'plugin assets may be stale or incomplete; rebuild the plugin');
