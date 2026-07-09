@@ -1,9 +1,10 @@
 # Task Creator v0 — mining execution traces into evaluable tasks
 
-- **Version:** 0.2 (design draft — v0.1 synthesized from a four-agent design/adversarial
+- **Version:** 0.3 (design draft — v0.1 synthesized from a four-agent design/adversarial
   panel, 2026-07-08, plus two correction passes: the usage-trace-mining reframe and
   the scrub-collision / lookup-contamination / gate-precision flags, 2026-07-09.
-  **v0.2 locks decisions D1–D4**, 2026-07-09.)
+  **v0.2 locks decisions D1–D4**; **v0.3 adds the public/private boundary + D5
+  (public-repo-only publication for v0)**, 2026-07-09.)
 - **Date:** 2026-07-08 (written 2026-07-09)
 - **Author:** Ritsu (design session)
 - **Shape:** `design` — output is this spec. Building any rung is a follow-on `feat`,
@@ -275,7 +276,9 @@ minting rungs, not first as SWE-smith adoption would have implied.
 
 REPOLAUNCH-class agentic construction of testable Docker environments for arbitrary
 user repos. Activates only when real non-benchmark usage arrives. This is the
-component that makes a general-usage trace's repo mintable at all.
+component that makes a general-usage trace's repo mintable at all. Note this rung
+first meets private repos in force: it is gated behind the code-payload disclosure
+controls of §10.1 (D5) — until those exist, only public-repo sessions are publishable.
 
 ### 5.6 The destination — composition
 
@@ -285,7 +288,9 @@ run, intermediate failures — per the §10 contract), construct the environment
 (rung 4), treat the accepted diff as candidate gold and derive the verifier
 empirically (rung 2 mechanics; the session's own test commands seed the config),
 and push the result through the same mint → admit → post pipeline (rung 1 plumbing).
-Admission is the trust converter throughout.
+Admission is the trust converter throughout. In v0 the composed miner publishes only
+public-repo sessions (§10.1, D5); private-repo publication waits on code-payload
+disclosure controls.
 
 ## 6. Designs rejected (what the panel killed, kept on record)
 
@@ -390,6 +395,48 @@ The envelope-shape extension still warrants a short implementation design pass a
 rung-0 build time (field names, consent UX, scrub-stage wiring), but the policy is
 locked.
 
+### 10.1 Local operation and the public/private boundary (D5)
+
+**Corpus participation and task-launching are independent axes.** An operator can run
+the Task Creator entirely on local data — traces, repos, commit history on its own
+disk — and launch tasks into the marketplace **without any local data ever entering
+the corpus**. The corpus path (capture → scrub → publish → ledger) is a separate
+pipeline that minting never invokes. Mining is a local read; admission
+(`validatePoolInstances`) runs in local Docker. Concretely:
+
+- **Stays local:** the full session transcript, prompts, intermediate failure states,
+  skill-consumption events, and the source trace. Blinded provenance (§7) means a
+  posted task carries only a hash-commitment to its source, so even the *link* back to
+  the operator's trace is opaque until reveal.
+- **The gold patch is never published.** It is consumed at admission time, which is
+  local — the evaluator grades a solver's patch against the *tests*, not against the
+  gold. So even the "answer" stays private.
+- **Necessarily disclosed by posting** (a task must be solvable/gradeable by
+  strangers): the problem statement, a Docker image containing the repo **at the mint
+  commit**, and the test specification (`F2P`/`P2P`, `test_patch`, `install_config`).
+
+The boundary that matters: **a posted task IS a snapshot of the repo's code at that
+commit.** For public repos this discloses nothing new. For a private repo, posting
+would ship the entire repo tree at that commit as an image — and **the scrub pipeline
+protects trace *text*, not a built image** (`client/src/trajectory/scrub/` audits
+envelopes for PII/secrets; nothing audits a code payload for proprietary logic). That
+is unbuilt disclosure-control work, not a consent checkbox.
+
+**Decision (D5): v0 publishes public-repo tasks only.** Task publication is gated to
+repos that are already public. This costs nothing on the near rungs — rung 1
+(commit-echo) targets repos with admitted images (the public benchmark repos), and
+rung 2's SolverNet traces are public benchmark instances — so the gate only constrains
+the destination (§5.6), which is rungs away regardless. **Local mining still runs on
+private data** under D2 tier-1 consent, accumulating candidate instances that are
+simply **not postable in v0**. Private-repo task publication is a deferred follow-on
+that must first solve code-payload disclosure (auditing/scrubbing a built image, or
+minting only a consented sub-tree). Its eventual value is real but narrow — a
+*snapshot-scoped, unlinkable* disclosure (one commit + blinded provenance) is
+genuinely less than going fully public (full history + attribution), which is why a
+"private launcher" persona exists — but it earns its complexity only once the snapshot
+can be made safe. Until then, the honest position is: if the repo is public, launch
+freely; if it is private, we do not yet have the controls to let you launch safely.
+
 ## 11. Held-out hygiene — the repo-keyed extension
 
 The exclusion rule is layered today: the train stream excludes by `instance_id`
@@ -434,6 +481,9 @@ design itself is its own session.
    retaining mineable material where opted in.
 5. **Hygiene enforced.** Repo-keyed exclusion in the mint path with a test proving
    a fresh-ID instance from a slate repo is refused at mint time.
+6. **Public-repo gate enforced (D5).** Publication refuses any task whose source repo
+   is not public, with a test proving a private-repo candidate is blocked at the
+   publish step (local mining of that candidate is still allowed under D2 tier-1).
 
 ## 14. Decisions locked in this session
 
@@ -443,6 +493,7 @@ design itself is its own session.
 | **D2** | Mineable-trace consent tier vs. scrub posture (§10) | **Explicit opt-in consent tier**, split: (1) retain locally for mining, (2) publish/admit as a task. Default capture stays scrubbed/non-mineable. Envelope-shape implementation details deferred to rung-0 build. |
 | **D3** | Discrimination failure: flag or hard-reject (§5.1) | **Hard-reject all newly minted instances** when known-bad passes. **Flag + exclude from distillation/targeting** for the existing benchmark pool initially; re-publish a stricter vetted-pool artifact once impact is measured. |
 | **D4** | Commit-echo before hunk-subset echo (§5 ordering) | **Yes — commit-echo first** as plumbing proof (minted-row store, IPFS route, admission, generator union). Treat as yield validation, not final learning substrate (lookup contamination). Hunk-subset echo next once blinded provenance + dogfood traces are ready. |
+| **D5** | Public vs. private repos for task publication (§10.1) | **v0 publishes public-repo tasks only.** Corpus participation and task-launching are independent — mining runs locally with nothing entering the corpus, and the gold patch is never published. Local mining still runs on private data (D2 tier-1) but its candidates are non-postable in v0. Private-repo publication deferred to a follow-on that solves code-payload disclosure (scrub covers trace text, not built images). |
 
 ## 15. References
 
