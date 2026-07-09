@@ -30,7 +30,7 @@ import {
 } from './consume.js';
 import { capture, parseCapturedTask, type ScrubRedaction } from './capture.js';
 import { preview, stripBeforeValues, type ScrubReport } from './preview.js';
-import { DEFAULT_LEDGER_PATH, ledger, type LedgerEntry } from './ledger.js';
+import { createMemoryLedger, DEFAULT_LEDGER_PATH, ledger, type LedgerEntry } from './ledger.js';
 import { publish, type HarnessPublishDeps } from './publish.js';
 import { createLivePublishDeps } from './publish-live.js';
 import {
@@ -46,7 +46,14 @@ import { isInsidePackageDir } from '../../../src/util/path-safety.js';
 import { runDistillationPipeline } from './pipeline.js';
 import { createVerdictSource, type VerdictSource } from './bridge-verdict-source.js';
 import { createEvidenceFetcher } from './bridge-fetch-evidence.js';
-import { createClaudeDistiller, createClaudeMetaDistiller, DEFAULT_MODEL as DEFAULT_DISTILL_MODEL } from './distill-llm.js';
+import {
+  createClaudeDistiller,
+  createClaudeMetaDistiller,
+  createCodexDistiller,
+  createCodexMetaDistiller,
+  DEFAULT_CODEX_MODEL,
+  DEFAULT_MODEL as DEFAULT_CLAUDE_DISTILL_MODEL,
+} from './distill-llm.js';
 import { buildSkillMarkdown } from './skill-package.js';
 import type { AttemptRef, BridgeEvidence } from './bridge.js';
 import type { DistillCluster, DistillLLMOutput, MetaDistillLLMOutput } from './distill.js';
@@ -84,13 +91,17 @@ Commands:
                                                  Publish the approved import rows (APPROVAL
                                                  GATE: run only after the plan report is
                                                  signed off)
-  distill run [--limit N] [--out <dir>] [--meta] Run the distillation pipeline over the
+  distill run [--limit N] [--out <dir>] [--meta]
+              [--distiller claude|codex] [--local-only]
+                                                 Run the distillation pipeline over the
                                                  swe-rebench-v2 verdict ledger: verdict→solution
-                                                 join → distil (claude) → local SKILL.md packages.
+                                                 join → distil → local SKILL.md packages.
                                                  Held-out slate instances are excluded. Writes
                                                  <out>/<name>/SKILL.md and prints the summary.
                                                  --meta also runs stage-2 cross-instance
                                                  meta-distill over the stage-1 skills.
+                                                 --local-only avoids chain writes and evidence
+                                                 anchors, using in-memory publish deps.
 
 Environment:
   JINN_DISCOVERY_URL       Override the discovery indexer URL (default: testnet Ponder indexer)
@@ -106,12 +117,20 @@ Environment (publish — testnet anchor identity):
   JINN_LAYER_ENDPOINT           Artifact access endpoint recorded on publish (default: http://127.0.0.1:7331)
   JINN_LAYER_LEDGER_PATH        Ledger file (default: ~/.jinn-client/harness-layer/ledger.jsonl)
 
-Environment (distill — reads the testnet ledger + spends claude solves):
+Environment (distill — reads the testnet ledger + spends model solves):
   JINN_DISCOVERY_URL       Ponder indexer base (default: testnet jinn-indexer)
   JINN_IPFS_GATEWAY_URL    IPFS gateway for envelope fetches (default: https://gateway.autonolas.tech)
-  JINN_DISTILL_MODEL       Distiller model (default: claude-opus-4-8 — opus-class; §5)
-  (publish env above)      distill also captures + anchors the bridged evidence on testnet
+  JINN_DISTILL_PROVIDER    Distiller provider: claude or codex (default: claude)
+  JINN_DISTILL_MODEL       Distiller model (defaults: claude-opus-4-8 for claude, gpt-5.5 for codex)
+  (publish env above)      distill also captures + anchors the bridged evidence on testnet unless --local-only
 `;
+
+export type DistillProvider = 'claude' | 'codex';
+
+interface DistillPorts {
+  distill: (cluster: DistillCluster) => Promise<DistillLLMOutput>;
+  metaDistill: (cluster: MetaCluster) => Promise<MetaDistillLLMOutput>;
+}
 
 /** Injectable deps for `distill run` (tests). Production defaults build the live wiring. */
 export interface DistillCliDeps {
@@ -123,6 +142,8 @@ export interface DistillCliDeps {
   distill?: (cluster: DistillCluster) => Promise<DistillLLMOutput>;
   /** The stage-2 meta LLM port. Default: createClaudeMetaDistiller. */
   metaDistill?: (cluster: MetaCluster) => Promise<MetaDistillLLMOutput>;
+  /** Provider-aware port factory (tests/embedders). Default: Claude or Codex CLI ports. */
+  distillerFactory?: (provider: DistillProvider, model: string) => DistillPorts;
   /** Layer-1 evidence publish deps. Default: live testnet wiring from env. */
   publishDeps?: HarnessPublishDeps;
   /** Held-out slate instance ids. Default: the active swe-rebench-v2 slate. */
@@ -352,6 +373,44 @@ function buildLivePublishDepsFromEnv(): HarnessPublishDeps {
   });
 }
 
+function buildLocalOnlyPublishDeps(): HarnessPublishDeps {
+  let n = 0;
+  const nextLocalCid = (kind: string) => `local:${kind}:${++n}`;
+  return {
+    participant: { safeAddress: `0x${'1'.repeat(40)}`, agentEoa: `0x${'2'.repeat(40)}` },
+    signer: { address: `0x${'2'.repeat(40)}` },
+    clientGitSha: 'local-only',
+    defaultArtifactEndpoint: 'http://127.0.0.1:7331',
+    ledger: createMemoryLedger(),
+    publishArtifact: async () => ({ cid: nextLocalCid('artifact') }),
+    publishEnvelope: async () => ({ cid: nextLocalCid('envelope') }),
+    anchorEnvelope: async () => ({ blockNumber: null }),
+    signEnvelope: async () => ({
+      algo: 'secp256k1',
+      signer: `0x${'2'.repeat(40)}`,
+      hash: `0x${'0'.repeat(64)}`,
+      sig: `0x${'f'.repeat(130)}`,
+    }),
+  };
+}
+
+function parseDistillProvider(raw: string): DistillProvider | null {
+  return raw === 'claude' || raw === 'codex' ? raw : null;
+}
+
+function defaultDistillerFactory(provider: DistillProvider, model: string): DistillPorts {
+  if (provider === 'codex') {
+    return {
+      distill: createCodexDistiller({ model }),
+      metaDistill: createCodexMetaDistiller({ model }),
+    };
+  }
+  return {
+    distill: createClaudeDistiller({ model }),
+    metaDistill: createClaudeMetaDistiller({ model }),
+  };
+}
+
 function buildDefaultLayer(): HarnessLayer {
   return createHarnessLayer({
     ...(process.env['JINN_DISCOVERY_URL'] ? { discoveryUrl: process.env['JINN_DISCOVERY_URL'] } : {}),
@@ -393,6 +452,8 @@ export async function runJinnLayerCli(
         veto: { type: 'boolean', default: false },
         source: { type: 'string' },
         meta: { type: 'boolean', default: false },
+        distiller: { type: 'string' },
+        'local-only': { type: 'boolean', default: false },
       },
       allowPositionals: true,
     });
@@ -493,6 +554,14 @@ export async function runJinnLayerCli(
 
     const outDir = (parsed.values.out as string | undefined) ?? mkdtempSync(join(tmpdir(), 'jinn-distill-'));
     mkdirSync(outDir, { recursive: true });
+    const localOnly = parsed.values['local-only'] as boolean;
+
+    const rawProvider = (parsed.values.distiller as string | undefined) ?? process.env['JINN_DISTILL_PROVIDER'] ?? 'claude';
+    const distillProvider = parseDistillProvider(rawProvider);
+    if (!distillProvider) {
+      writer.write(`error: distiller must be "claude" or "codex" (got ${JSON.stringify(rawProvider)})\n\n${USAGE}`);
+      return 2;
+    }
 
     const slateInstanceIds =
       dd.slateInstanceIds ?? loadActiveHeldOutSlateIds('swe-rebench-v2.v1', ACTIVE_HELD_OUT_SLATE_VERSIONS);
@@ -539,11 +608,14 @@ export async function runJinnLayerCli(
 
     // Resolve the distiller model once — it drives BOTH the model call and the
     // `distillModel` recorded in provenance (§5), so the record matches the run.
-    const distillModel = process.env['JINN_DISTILL_MODEL'] ?? DEFAULT_DISTILL_MODEL;
-    const distill = dd.distill ?? createClaudeDistiller({ model: distillModel });
+    const defaultDistillModel = distillProvider === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_DISTILL_MODEL;
+    const distillModel = process.env['JINN_DISTILL_MODEL'] ?? defaultDistillModel;
+    const distillerFactory = dd.distillerFactory ?? defaultDistillerFactory;
+    const distillPorts = dd.distill && dd.metaDistill ? null : distillerFactory(distillProvider, distillModel);
+    const distill = dd.distill ?? distillPorts!.distill;
     const metaEnabled = parsed.values.meta as boolean;
-    const metaDistillPort = dd.metaDistill ?? createClaudeMetaDistiller({ model: distillModel });
-    const publishDeps = dd.publishDeps ?? buildLivePublishDepsFromEnv();
+    const metaDistillPort = dd.metaDistill ?? distillPorts!.metaDistill;
+    const publishDeps = localOnly ? buildLocalOnlyPublishDeps() : (dd.publishDeps ?? buildLivePublishDepsFromEnv());
 
     // Local-fs publishSkill: write <out>/<name>/SKILL.md (mirror distill-run-live.ts).
     const publishSkill = async (pkg: Parameters<typeof buildSkillMarkdown>[0]) => {
@@ -574,6 +646,7 @@ export async function runJinnLayerCli(
         `bridge: ${result.bridge.bridged.length} bridged, ${result.bridge.excludedHeldOut.length} held-out, ${result.bridge.deduped.length} deduped, ${result.bridge.errors.length} error(s)`,
         `clusters: ${result.clusterCount}`,
       ];
+      if (localOnly) lines.push('mode: local-only (no chain publishes or anchors)');
       if (result.verdictsTruncated) {
         lines.push(`warning: verdict fetch hit the ${limit}-row limit — attempt groups may be PARTIAL; raise --limit to cover the corpus (#1478)`);
       }

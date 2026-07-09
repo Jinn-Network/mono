@@ -28,6 +28,21 @@ describe('secretlintStage', () => {
     expect(result.redactions.some((r) => r.kind === 'secret' && r.detail === 'high-entropy')).toBe(true);
   });
 
+  test('preserves public SWE-rebench instance ids while keeping entropy guardrails', async () => {
+    const stage = secretlintStage(policy);
+    for (const instanceId of ['jlowin__fastmcp-3235', 'scikit-learn__scikit-learn-12345']) {
+      const text = `swe-rebench ${instanceId}: SWE-rebench v2: short regression summary`;
+      const result = await stage.scrub({ 'task.summary': text });
+      expect(result.attributes['task.summary']).toBe(text);
+      expect(result.redactions).toEqual([]);
+    }
+
+    const secretLikeNearMiss = 'Zk3pQ9wX7vR2__sT8yU1nB6-3235';
+    const nearMissResult = await stage.scrub({ 'task.summary': `swe-rebench ${secretLikeNearMiss}: summary` });
+    expect(nearMissResult.attributes['task.summary']).not.toContain(secretLikeNearMiss);
+    expect(nearMissResult.redactions.some((r) => r.kind === 'secret' && r.detail === 'high-entropy')).toBe(true);
+  });
+
   test('leaves ordinary prose untouched', async () => {
     const stage = secretlintStage(policy);
     const result = await stage.scrub({ 'tool.output': 'the quick brown fox jumps over the lazy dog' });

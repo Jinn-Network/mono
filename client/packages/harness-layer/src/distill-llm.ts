@@ -18,11 +18,16 @@
  */
 
 import { spawn } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { DistillCluster, DistillLLMOutput, MetaDistillLLMOutput } from './distill.js';
 import type { MetaCluster } from './cluster.js';
 
 /** Default `claude` executable (resolved from PATH), mirrors the daemon default. */
 const DEFAULT_CLAUDE_PATH = 'claude';
+/** Default `codex` executable (resolved from PATH), using the logged-in Codex CLI session. */
+const DEFAULT_CODEX_PATH = 'codex';
 /**
  * Default distiller model — the strongest available (opus-class), NOT the
  * daemon-wide cheap default (spec §5, v0.5). Distillation is offline, one-shot,
@@ -30,6 +35,35 @@ const DEFAULT_CLAUDE_PATH = 'claude';
  * — so it pins the best model. Overridable via `JINN_DISTILL_MODEL` at the CLI.
  */
 export const DEFAULT_MODEL = 'claude-opus-4-8';
+/** Default Codex distiller model for quality runs; override with `JINN_DISTILL_MODEL`. */
+export const DEFAULT_CODEX_MODEL = 'gpt-5.5';
+
+const DISTILL_OUTPUT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['name', 'description', 'body'],
+  properties: {
+    name: { type: 'string', minLength: 1 },
+    description: { type: 'string', minLength: 1 },
+    body: { type: 'string', minLength: 1 },
+  },
+} as const;
+
+const META_DISTILL_OUTPUT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['name', 'description', 'body', 'supports'],
+  properties: {
+    name: { type: 'string', minLength: 1 },
+    description: { type: 'string', minLength: 1 },
+    body: { type: 'string', minLength: 1 },
+    supports: {
+      type: 'array',
+      items: { type: 'string', minLength: 1 },
+      minItems: 1,
+    },
+  },
+} as const;
 
 /**
  * The subset of `node:child_process` a spawned child exposes that this port
@@ -205,6 +239,80 @@ function runClaudeJson<T>(
   });
 }
 
+async function withTempJsonSchema<T>(schema: unknown, fn: (schemaPath: string) => Promise<T>): Promise<T> {
+  const dir = await mkdtemp(join(tmpdir(), 'jinn-codex-schema-'));
+  const schemaPath = join(dir, 'output.schema.json');
+  try {
+    await writeFile(schemaPath, JSON.stringify(schema, null, 2), 'utf-8');
+    return await fn(schemaPath);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Shared Codex runner for the distill ports. `codex exec` reads the full prompt
+ * on stdin, uses its logged-in CLI auth, and constrains the final message with
+ * a temporary JSON schema file so the same strict parser can validate output.
+ */
+async function runCodexJson<T>(
+  codexPath: string,
+  model: string,
+  spawnImpl: SpawnLike,
+  input: string,
+  schema: unknown,
+  parse: (stdout: string) => T,
+  label: string,
+): Promise<T> {
+  return withTempJsonSchema(schema, (schemaPath) => new Promise<T>((resolve, reject) => {
+    const args = [
+      '--ask-for-approval',
+      'never',
+      'exec',
+      '--model',
+      model,
+      '--sandbox',
+      'read-only',
+      '--ephemeral',
+      '--output-schema',
+      schemaPath,
+      '-',
+    ];
+    const child = spawnImpl(codexPath, args);
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    child.stdout?.on('data', (d) => { stdout += d.toString(); });
+    child.stderr?.on('data', (d) => { stderr += d.toString(); });
+
+    child.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    });
+
+    child.on('exit', (code) => {
+      if (settled) return;
+      settled = true;
+      if (code !== 0) {
+        reject(new Error(
+          `${label}: codex exited with code ${code}: stderr=${stderr.slice(0, 500)} stdout=${stdout.slice(0, 500)}`,
+        ));
+        return;
+      }
+      try {
+        resolve(parse(stdout));
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
+    });
+
+    child.stdin?.write(input);
+    child.stdin?.end();
+  }));
+}
+
 /**
  * Build the distill LLM port. Returns the `DistillDeps.distill` function: given
  * a cluster, spawn `claude -p --model <model>`, pipe the built input on stdin,
@@ -228,6 +336,33 @@ export function createClaudeDistiller(
     const { JINN_SKILL_DISTILL_PROMPT_V1 } = await import('./distill-prompt.js');
     const input = buildDistillInput(JINN_SKILL_DISTILL_PROMPT_V1, cluster);
     return runClaudeJson(claudePath, model, spawnImpl, input, (stdout) => assertDistillOutput(extractJsonObject(stdout)), 'distill LLM');
+  };
+}
+
+/**
+ * Build the Codex distill LLM port. This mirrors {@link createClaudeDistiller}
+ * but invokes `codex exec` with read-only sandboxing, no approvals, ephemeral
+ * session state, and a JSON schema file for structured final output.
+ */
+export function createCodexDistiller(
+  opts: { codexPath?: string; model?: string; spawnImpl?: SpawnLike } = {},
+): (cluster: DistillCluster) => Promise<DistillLLMOutput> {
+  const codexPath = opts.codexPath ?? DEFAULT_CODEX_PATH;
+  const model = opts.model ?? DEFAULT_CODEX_MODEL;
+  const spawnImpl: SpawnLike = opts.spawnImpl ?? ((command, args) => spawn(command, [...args]));
+
+  return async function distill(cluster: DistillCluster): Promise<DistillLLMOutput> {
+    const { JINN_SKILL_DISTILL_PROMPT_V1 } = await import('./distill-prompt.js');
+    const input = buildDistillInput(JINN_SKILL_DISTILL_PROMPT_V1, cluster);
+    return runCodexJson(
+      codexPath,
+      model,
+      spawnImpl,
+      input,
+      DISTILL_OUTPUT_SCHEMA,
+      (stdout) => assertDistillOutput(extractJsonObject(stdout)),
+      'distill LLM',
+    );
   };
 }
 
@@ -292,5 +427,31 @@ export function createClaudeMetaDistiller(
     const { JINN_SKILL_META_DISTILL_PROMPT_V1 } = await import('./distill-prompt.js');
     const input = buildMetaDistillInput(JINN_SKILL_META_DISTILL_PROMPT_V1, cluster);
     return runClaudeJson(claudePath, model, spawnImpl, input, (stdout) => assertMetaDistillOutput(extractJsonObject(stdout)), 'meta-distill LLM');
+  };
+}
+
+/**
+ * Build the Codex stage-2 meta-distill port. Same prompt and validation as the
+ * Claude meta port, with Codex structured output enforced by JSON schema.
+ */
+export function createCodexMetaDistiller(
+  opts: { codexPath?: string; model?: string; spawnImpl?: SpawnLike } = {},
+): (cluster: MetaCluster) => Promise<MetaDistillLLMOutput> {
+  const codexPath = opts.codexPath ?? DEFAULT_CODEX_PATH;
+  const model = opts.model ?? DEFAULT_CODEX_MODEL;
+  const spawnImpl: SpawnLike = opts.spawnImpl ?? ((command, args) => spawn(command, [...args]));
+
+  return async function metaDistillPort(cluster: MetaCluster): Promise<MetaDistillLLMOutput> {
+    const { JINN_SKILL_META_DISTILL_PROMPT_V1 } = await import('./distill-prompt.js');
+    const input = buildMetaDistillInput(JINN_SKILL_META_DISTILL_PROMPT_V1, cluster);
+    return runCodexJson(
+      codexPath,
+      model,
+      spawnImpl,
+      input,
+      META_DISTILL_OUTPUT_SCHEMA,
+      (stdout) => assertMetaDistillOutput(extractJsonObject(stdout)),
+      'meta-distill LLM',
+    );
   };
 }

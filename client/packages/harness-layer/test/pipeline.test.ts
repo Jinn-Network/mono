@@ -115,6 +115,25 @@ describe('runDistillationPipeline (Tier-0 dry-run)', () => {
     }
   });
 
+  it('keeps public SWE-rebench instance ids from defacing bridge summaries and dropping clusters', async () => {
+    const instanceId = 'jlowin__fastmcp-3235';
+    const { d, skills } = deps({
+      verdictSource: { list: async () => [ref(instanceId, 'pass')] },
+      fetchEvidence: async (): Promise<BridgeEvidence> => ({
+        taskSummary: `SWE-rebench v2: ${instanceId}`,
+        patch: 'diff --git a/server.py b/server.py\n+ parser.add_argument("--config", nargs="*")\n',
+      }),
+    });
+
+    const res = await runDistillationPipeline(d);
+
+    expect(res.bridge.bridged).toHaveLength(1);
+    expect(res.clusterCount).toBe(1);
+    expect(res.distilled.published).toHaveLength(1);
+    expect(skills).toHaveLength(1);
+    expect(skills[0]!.jinn.skillKind).toBe('strategic-pattern');
+  });
+
   it('retains the whole per-instance attempt group end-to-end (#1478)', async () => {
     const seen: DistillCluster[] = [];
     const validOut: DistillLLMOutput = {

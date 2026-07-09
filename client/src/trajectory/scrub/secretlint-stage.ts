@@ -3,7 +3,7 @@ import { creator } from '@secretlint/secretlint-rule-preset-recommend';
 import { classifyKey, type KeyPolicy } from './key-policy.js';
 import type { Attributes, RedactionRecord, ScrubResult, ScrubStage } from './types.js';
 
-const VERSION = '0.4.0'; // 0.4.0: URL/structured tokens gated per-segment, non-ASCII prose skips the entropy fallback (#1391)
+const VERSION = '0.4.1'; // 0.4.1: public SWE-rebench instance ids skip the entropy fallback
 const PRESET_RULE_ID = '@secretlint/secretlint-rule-preset-recommend';
 
 // Entropy fallback thresholds. Conservative on purpose: a long token whose
@@ -43,6 +43,11 @@ const SECRET_CHARSET = /^[A-Za-z0-9+/=_-]+$/;
 // every `[/.]`-split segment is under 16 chars (or below the entropy bar)
 // qualifies as a path and escapes the fallback.
 const PATH_SHAPED = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)+$/;
+
+// SWE-rebench instance ids are public corpus identifiers (`owner__repo-PR`),
+// not key material. Some short bridge summaries repeat them and otherwise cross
+// the defacement gate after entropy redaction.
+const SWE_REBENCH_INSTANCE_ID = /^[a-z0-9][a-z0-9._-]*__[a-z0-9][a-z0-9._-]*-\d+$/;
 
 // Tuning note (#1391): the entropy fallback's threat model is ASCII key
 // material — base64 / base64url / hex runs. Natural-language text outside the
@@ -108,6 +113,10 @@ function charClassCount(s: string): number {
   return n;
 }
 
+function isSweRebenchInstanceId(token: string): boolean {
+  return SWE_REBENCH_INSTANCE_ID.test(token);
+}
+
 /**
  * Decide whether a single whitespace-delimited token should be redacted as a
  * high-entropy / secret-shaped value. Purely additive over the original rule:
@@ -144,6 +153,7 @@ function charClassCount(s: string): number {
 function isSecretShapedToken(token: string): boolean {
   if (token.length < ENTROPY_MIN_LEN) return false;
   if (nonAsciiShare(token) > NON_ASCII_MAX_SHARE) return false;
+  if (isSweRebenchInstanceId(token)) return false;
   if (PATH_SHAPED.test(token) && charClassCount(token) <= 2) {
     return token.split(/[/.]/).some(passesStrictSegmentGate);
   }

@@ -13,6 +13,23 @@ import type { DistillCluster, DistillLLMOutput, MetaDistillLLMOutput } from '../
 import type { MetaCluster } from '../src/cluster.js';
 import { parseSkillMarkdown } from '../src/skill-package.js';
 
+async function withEnv(updates: Record<string, string | undefined>, fn: () => Promise<void>): Promise<void> {
+  const previous = new Map<string, string | undefined>();
+  for (const key of Object.keys(updates)) previous.set(key, process.env[key]);
+  try {
+    for (const [key, value] of Object.entries(updates)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    await fn();
+  } finally {
+    for (const [key, value] of previous.entries()) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
 function fakeHit(overrides: Partial<CorpusSearchHit> = {}): CorpusSearchHit {
   return {
     title: 'prediction.v1 / solution',
@@ -338,6 +355,8 @@ describe('jinn-layer skills install', () => {
 });
 
 describe('jinn-layer distill run', () => {
+  type RecordedProvider = 'claude' | 'codex';
+
   function dref(instanceId: string, polarity: 'pass' | 'fail'): AttemptRef {
     return {
       requestId: `0x${instanceId}`,
@@ -424,6 +443,31 @@ describe('jinn-layer distill run', () => {
     };
   }
 
+  function recordingDistillerFactory(calls: Array<{ provider: RecordedProvider; model: string }>) {
+    return (provider: RecordedProvider, model: string) => {
+      calls.push({ provider, model });
+      return {
+        distill: async (c: DistillCluster): Promise<DistillLLMOutput> => ({
+          name: `factory-${provider}-${c.tier}-${c.instanceIds[0]!.replace(/[^a-z0-9]+/g, '-')}`,
+          description: 'Use when a queryset returns duplicate rows after a join. Not for: single-table queries.',
+          body: [
+            '## When to use',
+            'A queryset returns duplicate rows after a join or prefetch.',
+            '## Strategy',
+            'Collapse the duplicates at the ORM layer, near the join that produced them.',
+            '## Steps',
+            '1. Identify the fan-out join. 2. Apply .distinct() after it.',
+            '## Pitfalls',
+            'An order_by on a joined column can re-expand the collapsed rows.',
+            '## Verify',
+            'Assert the row count equals the expected unique count.',
+          ].join('\n\n'),
+        }),
+        metaDistill: async (_c: MetaCluster): Promise<MetaDistillLLMOutput> => META_OUT,
+      };
+    };
+  }
+
   it('runs the pipeline under stubs and writes SKILL.md packages', async () => {
     const { writer, out } = capture();
     const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-cli-'));
@@ -501,5 +545,112 @@ describe('jinn-layer distill run', () => {
     const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-cli-'));
     await runJinnLayerCli(['distill', 'run', '--out', outDir], { writer, distillDeps: stubDeps() });
     expect(out()).not.toContain('meta-distilled');
+  });
+
+  it('--distiller codex selects Codex ports with the Codex default model', async () => {
+    await withEnv({ JINN_DISTILL_PROVIDER: undefined, JINN_DISTILL_MODEL: undefined }, async () => {
+      const { writer } = capture();
+      const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-cli-'));
+      const calls: Array<{ provider: RecordedProvider; model: string }> = [];
+      const code = await runJinnLayerCli(['distill', 'run', '--distiller', 'codex', '--out', outDir], {
+        writer,
+        distillDeps: stubDeps({
+          distill: undefined,
+          metaDistill: undefined,
+          distillerFactory: recordingDistillerFactory(calls),
+        }),
+      });
+
+      expect(code).toBe(0);
+      expect(calls).toEqual([{ provider: 'codex', model: 'gpt-5.5' }]);
+    });
+  });
+
+  it('JINN_DISTILL_PROVIDER=codex selects Codex when no --distiller flag is passed', async () => {
+    await withEnv({ JINN_DISTILL_PROVIDER: 'codex', JINN_DISTILL_MODEL: undefined }, async () => {
+      const { writer } = capture();
+      const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-cli-'));
+      const calls: Array<{ provider: RecordedProvider; model: string }> = [];
+      const code = await runJinnLayerCli(['distill', 'run', '--out', outDir], {
+        writer,
+        distillDeps: stubDeps({
+          distill: undefined,
+          metaDistill: undefined,
+          distillerFactory: recordingDistillerFactory(calls),
+        }),
+      });
+
+      expect(code).toBe(0);
+      expect(calls[0]).toEqual({ provider: 'codex', model: 'gpt-5.5' });
+    });
+  });
+
+  it('--distiller overrides JINN_DISTILL_PROVIDER', async () => {
+    await withEnv({ JINN_DISTILL_PROVIDER: 'claude', JINN_DISTILL_MODEL: undefined }, async () => {
+      const { writer } = capture();
+      const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-cli-'));
+      const calls: Array<{ provider: RecordedProvider; model: string }> = [];
+      const code = await runJinnLayerCli(['distill', 'run', '--distiller', 'codex', '--out', outDir], {
+        writer,
+        distillDeps: stubDeps({
+          distill: undefined,
+          metaDistill: undefined,
+          distillerFactory: recordingDistillerFactory(calls),
+        }),
+      });
+
+      expect(code).toBe(0);
+      expect(calls[0]!.provider).toBe('codex');
+    });
+  });
+
+  it('JINN_DISTILL_MODEL overrides the selected provider default', async () => {
+    await withEnv({ JINN_DISTILL_PROVIDER: 'codex', JINN_DISTILL_MODEL: 'gpt-5.4-mini' }, async () => {
+      const { writer } = capture();
+      const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-cli-'));
+      const calls: Array<{ provider: RecordedProvider; model: string }> = [];
+      const code = await runJinnLayerCli(['distill', 'run', '--out', outDir], {
+        writer,
+        distillDeps: stubDeps({
+          distill: undefined,
+          metaDistill: undefined,
+          distillerFactory: recordingDistillerFactory(calls),
+        }),
+      });
+
+      expect(code).toBe(0);
+      expect(calls[0]).toEqual({ provider: 'codex', model: 'gpt-5.4-mini' });
+    });
+  });
+
+  it('--local-only bypasses live publish deps and still writes local skill output', async () => {
+    const { writer, out } = capture();
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-cli-'));
+    const code = await runJinnLayerCli(['distill', 'run', '--local-only', '--out', outDir, '--json'], {
+      writer,
+      distillDeps: stubDeps({ publishDeps: undefined }),
+    });
+
+    expect(code).toBe(0);
+    const result = JSON.parse(out());
+    expect(result.bridge.bridged).toHaveLength(2);
+    expect(result.bridge.bridged.every((b: { envelopeRef: string; anchorTx: string | null }) => b.envelopeRef.startsWith('local:envelope:'))).toBe(true);
+    expect(result.bridge.bridged.every((b: { anchorTx: string | null }) => b.anchorTx === null)).toBe(true);
+    expect(result.outDir).toBe(outDir);
+    expect(readdirSync(outDir, { withFileTypes: true }).filter((d) => d.isDirectory())).toHaveLength(2);
+  });
+
+  it('--local-only overrides injected publish deps', async () => {
+    const { writer, out } = capture();
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-cli-'));
+    const code = await runJinnLayerCli(['distill', 'run', '--local-only', '--out', outDir, '--json'], {
+      writer,
+      distillDeps: stubDeps(),
+    });
+
+    expect(code).toBe(0);
+    const result = JSON.parse(out());
+    expect(result.bridge.bridged.every((b: { envelopeRef: string }) => b.envelopeRef.startsWith('local:envelope:'))).toBe(true);
+    expect(result.bridge.bridged.every((b: { anchorTx: string | null }) => b.anchorTx === null)).toBe(true);
   });
 });

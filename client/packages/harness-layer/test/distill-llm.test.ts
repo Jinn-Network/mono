@@ -1,6 +1,15 @@
 import { EventEmitter } from 'node:events';
 import { describe, it, expect } from 'vitest';
-import { createClaudeDistiller, createClaudeMetaDistiller, buildMetaDistillInput, type ChildLike, type SpawnLike } from '../src/distill-llm.js';
+import {
+  createClaudeDistiller,
+  createClaudeMetaDistiller,
+  createCodexDistiller,
+  createCodexMetaDistiller,
+  DEFAULT_CODEX_MODEL,
+  buildMetaDistillInput,
+  type ChildLike,
+  type SpawnLike,
+} from '../src/distill-llm.js';
 import { JINN_SKILL_DISTILL_PROMPT_V1, JINN_SKILL_META_DISTILL_PROMPT_V1 } from '../src/distill-prompt.js';
 import type { DistillCluster } from '../src/distill.js';
 import type { MetaCluster } from '../src/cluster.js';
@@ -160,6 +169,65 @@ describe('createClaudeDistiller', () => {
   });
 });
 
+describe('createCodexDistiller', () => {
+  it('spawns `codex exec` with read-only sandbox, structured output schema, and the configured model', async () => {
+    const out = { name: 'orm-dedup', description: 'Use when a queryset dups.', body: '# Dedup\n' };
+    const child = fakeChild({ stdout: JSON.stringify(out) });
+    const { spawn, calls } = makeSpawn(child);
+    const distill = createCodexDistiller({ codexPath: '/opt/codex', model: 'gpt-5.4-mini', spawnImpl: spawn });
+
+    await expect(distill(cluster)).resolves.toEqual(out);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.command).toBe('/opt/codex');
+    const args = calls[0]!.args;
+    expect(args.slice(0, 10)).toEqual([
+      '--ask-for-approval',
+      'never',
+      'exec',
+      '--model',
+      'gpt-5.4-mini',
+      '--sandbox',
+      'read-only',
+      '--ephemeral',
+      '--output-schema',
+      args[9],
+    ]);
+    expect(args[9]).toMatch(/jinn-codex-schema-/);
+    expect(args[10]).toBe('-');
+  });
+
+  it('sends the versioned distill prompt to codex on stdin', async () => {
+    const child = fakeChild({ stdout: JSON.stringify({ name: 'n', description: 'd', body: 'b' }) });
+    const { spawn } = makeSpawn(child);
+    const distill = createCodexDistiller({ spawnImpl: spawn });
+
+    await distill(cluster);
+    const sent = (child as unknown as { writes: string[] }).writes.join('');
+    expect(sent).toContain(JINN_SKILL_DISTILL_PROMPT_V1);
+    expect(sent).toContain('MODE = strategic-pattern');
+    expect(sent).toContain('apply .distinct() after the join');
+  });
+
+  it('defaults to `codex` + the quality Codex distiller model when unconfigured', async () => {
+    const child = fakeChild({ stdout: JSON.stringify({ name: 'n', description: 'd', body: 'b' }) });
+    const { spawn, calls } = makeSpawn(child);
+    const distill = createCodexDistiller({ spawnImpl: spawn });
+
+    await distill(cluster);
+    expect(calls[0]!.command).toBe('codex');
+    expect(calls[0]!.args).toContain(DEFAULT_CODEX_MODEL);
+  });
+
+  it('reports stderr and stdout context when codex exits non-zero', async () => {
+    const child = fakeChild({ stdout: 'partial output', code: 1, stderr: 'Not logged in' });
+    const { spawn } = makeSpawn(child);
+    const distill = createCodexDistiller({ spawnImpl: spawn });
+
+    await expect(distill(cluster)).rejects.toThrow(/codex exited with code 1.*Not logged in.*partial output/s);
+  });
+});
+
 const metaCluster: MetaCluster = {
   metaClusterId: 'cross-instance:failure-lesson',
   polarity: 'failure-lesson',
@@ -204,5 +272,24 @@ describe('createClaudeMetaDistiller', () => {
     expect(input).toContain('s1');
     expect(input).toContain('s2');
     expect(input).toContain('"supports"');
+  });
+});
+
+describe('createCodexMetaDistiller', () => {
+  it('parses and validates a meta-distill object with supports', async () => {
+    const out = { name: 'xi', description: 'Use when … Not for: …', body: 'b', supports: ['s1', 's2'] };
+    const child = fakeChild({ stdout: JSON.stringify(out) });
+    const { spawn } = makeSpawn(child);
+    const meta = createCodexMetaDistiller({ spawnImpl: spawn });
+
+    await expect(meta(metaCluster)).resolves.toEqual(out);
+  });
+
+  it('throws when codex meta output omits supports', async () => {
+    const child = fakeChild({ stdout: JSON.stringify({ name: 'n', description: 'd', body: 'b' }) });
+    const { spawn } = makeSpawn(child);
+    const meta = createCodexMetaDistiller({ spawnImpl: spawn });
+
+    await expect(meta(metaCluster)).rejects.toThrow(/supports/);
   });
 });

@@ -12,6 +12,15 @@ describe('buildLayer2ScrubPipeline', () => {
     expect(attributes['skill.md']).toBe(prose); // byte-for-byte, no placeholder tokens
   });
 
+  it('preserves public SWE-rebench instance ids in short bridge summaries', async () => {
+    const p = buildLayer2ScrubPipeline();
+    const summary = 'swe-rebench jlowin__fastmcp-3235: SWE-rebench v2: short regression summary';
+    const { attributes, redactions } = await p.run({ 'task.summary': summary });
+
+    expect(attributes['task.summary']).toBe(summary);
+    expect(redactions).toEqual([]);
+  });
+
   it('still redacts a genuine secret (fail-closed net intact)', async () => {
     const p = buildLayer2ScrubPipeline();
     const withKey =
