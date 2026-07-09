@@ -54,7 +54,7 @@ import {
   DEFAULT_CODEX_MODEL,
   DEFAULT_MODEL as DEFAULT_CLAUDE_DISTILL_MODEL,
 } from './distill-llm.js';
-import { buildSkillMarkdown } from './skill-package.js';
+import { createLocalSkillSink } from './distiller.js';
 import type { AttemptRef, BridgeEvidence } from './bridge.js';
 import type { DistillCluster, DistillLLMOutput, MetaDistillLLMOutput } from './distill.js';
 import type { MetaCluster } from './cluster.js';
@@ -617,13 +617,8 @@ export async function runJinnLayerCli(
     const metaDistillPort = dd.metaDistill ?? distillPorts!.metaDistill;
     const publishDeps = localOnly ? buildLocalOnlyPublishDeps() : (dd.publishDeps ?? buildLivePublishDepsFromEnv());
 
-    // Local-fs publishSkill: write <out>/<name>/SKILL.md (mirror distill-run-live.ts).
-    const publishSkill = async (pkg: Parameters<typeof buildSkillMarkdown>[0]) => {
-      const dir = join(outDir, pkg.name);
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(join(dir, 'SKILL.md'), buildSkillMarkdown(pkg));
-      return { envelopeRef: `local:${pkg.name}`, anchorTx: null };
-    };
+    // Local-fs publishSkill: write <out>/<name>/SKILL.md (shared with LocalDistiller).
+    const publishSkill = createLocalSkillSink(outDir);
 
     const result = await runDistillationPipeline({
       verdictSource,
