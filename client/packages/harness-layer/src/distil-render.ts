@@ -42,12 +42,18 @@ function box(title: string, contentLines: string[]): string {
   return [boxTop(iw, title), ...contentLines.map((l) => boxLine(iw, l)), boxBot(iw)].join('\n');
 }
 
-/** One skill in a run panel: its name, whether it is installed, and its sources. */
+/** One skill in a run panel: its name, install state, forward value, and sources. */
 export interface RenderedSkill {
   name: string;
   installed: boolean;
   /** Human-readable source-capture labels (task summaries, or the raw ref). */
   provenance: string[];
+  /**
+   * Forward-looking value: what this skill will help with next time (the
+   * distiller's when-to-use description). Rendered as the `helps` line so the
+   * operator sees what they are getting, not just where it came from.
+   */
+  helpsWith?: string;
 }
 
 /** Width of the install-state column (mockup uses 14). */
@@ -69,12 +75,16 @@ export function renderConsentDisclosure(o: { captureCount: number; distillModel:
     `  READS    ${plural(o.captureCount, 'capture')} this run — the tasks you've run here so far, more`,
     `           as you work. Nothing else.`,
     '',
-    `  COSTS    one pass of heavy compute — not money — with your distiller,`,
-    `           ${o.distillModel} (local). Pick another with --distiller.`,
+    `  COSTS    one pass of heavy compute — not money — and it runs here, on`,
+    `           this machine.`,
     '',
     `  LEAVES   nothing — read, distilled, and written here; nothing is published`,
-    `           to the Jinn network. A hosted --distiller would send captures out;`,
-    `           ${BIN} names it and asks first.`,
+    `           to the Jinn network. A hosted distiller (below) is the one`,
+    `           exception; ${BIN} names it and asks first.`,
+    '',
+    `  DISTILLER  ${o.distillModel} (local) — the model that writes the skills, and`,
+    `             yours to choose. Change with --distiller <provider> or`,
+    `             --distiller-model <model>.`,
     '',
     `  [L] Local now   ·   [F] Defer (default)   ·   [O] Off   ·   [P] Preview`,
     '',
@@ -189,20 +199,83 @@ export function renderEmpty(o: { capturesDir: string }): string {
   ].join('\n');
 }
 
-/** 1b — the skills panel: per-skill install-state word, name, and provenance. */
+/**
+ * 1b — the skills panel: per-skill install-state word + name, then the
+ * forward-looking `helps` line (what it will help with next) and the backward
+ * `from` line (which captures it came from).
+ */
 export function renderSkillsPanel(skills: RenderedSkill[], title: string): string {
   const content: string[] = [];
   skills.forEach((s, i) => {
     const state = (s.installed ? 'installed' : 'not installed').padEnd(STATE_COL);
     content.push(`${state}${s.name}`);
-    content.push(`${' '.repeat(STATE_COL)}from  ${s.provenance.join(' · ')}`);
+    if (s.helpsWith) content.push(`${' '.repeat(STATE_COL)}helps  ${s.helpsWith}`);
+    content.push(`${' '.repeat(STATE_COL)}from   ${s.provenance.join(' · ')}`);
     if (i < skills.length - 1) content.push('');
   });
   return box(title, content);
 }
 
-/** 1b — the whole run terminus: header, captures→skills summary, panel, footer. */
+/** Title + footer for the run terminus, keyed to how many skills are installed. */
+function runSummaryChrome(installed: number, total: number): { title: string; footer: string[] } {
+  if (installed === 0) {
+    return {
+      title: 'skills · distilled locally · not installed',
+      footer: [
+        `  They stay local until you install them — nothing goes live until you choose.`,
+        `  Install  ·  ${BIN} distil --install all   ·   --install <name>   ·   --install none`,
+        `  List them  ·  /jinn skills`,
+      ],
+    };
+  }
+  if (installed === total) {
+    return {
+      title: 'skills · installed · ready',
+      footer: [
+        `  Next runs use these on a small model — no frontier pass.`,
+        `  Manage  ·  /jinn skills   ·   /jinn skills remove <name>`,
+      ],
+    };
+  }
+  return {
+    title: `skills · ${installed} installed · ${total - installed} available`,
+    footer: [
+      `  Installed skills run on a small model next time — no frontier pass.`,
+      `  Install the rest  ·  ${BIN} distil --install all`,
+      `  Manage  ·  /jinn skills`,
+    ],
+  };
+}
+
+/**
+ * 1b — the run terminus. Header, captures→skills summary, the skills panel with
+ * per-skill install state, and a footer keyed to the install outcome (none
+ * installed = staged/how-to-install, all = ready, some = partial).
+ */
 export function renderRunSummary(o: {
+  distillModel: string;
+  captureCount: number;
+  skills: RenderedSkill[];
+}): string {
+  const installed = o.skills.filter((s) => s.installed).length;
+  const { title, footer } = runSummaryChrome(installed, o.skills.length);
+  return [
+    `  distil: local · distiller ${o.distillModel} · ${plural(o.captureCount, 'capture')}`,
+    '',
+    `  distilled · ${plural(o.captureCount, 'capture')} → ${plural(o.skills.length, 'skill')} · nothing left this machine`,
+    '',
+    renderSkillsPanel(o.skills, title),
+    '',
+    ...footer,
+  ].join('\n');
+}
+
+/**
+ * 1b — the review shown before the install choice (interactive). Frames the
+ * skills FORWARD — what they'll help with next — then asks for an explicit
+ * all / one / skip choice. Nothing is installed until the operator answers.
+ */
+export function renderReview(o: {
   distillModel: string;
   captureCount: number;
   skills: RenderedSkill[];
@@ -210,27 +283,25 @@ export function renderRunSummary(o: {
   return [
     `  distil: local · distiller ${o.distillModel} · ${plural(o.captureCount, 'capture')}`,
     '',
-    `  distilled · ${plural(o.captureCount, 'capture')} → ${plural(o.skills.length, 'skill')} · nothing left this machine`,
+    `  distilled ${plural(o.skills.length, 'skill')} — they'll help with tasks like these next time:`,
     '',
-    renderSkillsPanel(o.skills, 'skills · installed · ready'),
+    renderSkillsPanel(o.skills.map((s) => ({ ...s, installed: false })), 'skills · distilled locally · not installed'),
     '',
-    `  Each skill lists the captures it came from  ·  /jinn skills show <name>`,
-    `  Next runs use these on a small model — no frontier pass.`,
-    `  Manage  ·  /jinn skills   ·   /jinn skills remove <name>`,
+    `  Install all, one, or skip? Nothing goes live until you choose.`,
   ].join('\n');
 }
 
 /** 1d — a run failed mid-way: what stopped, what survived, one resume command. */
 export function renderFailure(o: {
   distillModel: string;
-  installedCount: number;
+  distilledCount: number;
   errors: { clusterId: string; error: string }[];
 }): string {
   const first = o.errors[0]?.error ?? 'the distiller stopped responding';
   return [
     `  distil failed — ${first}`,
     '',
-    `  ${plural(o.installedCount, 'skill')} were distilled and kept. ${plural(o.errors.length, 'cluster')} did not`,
+    `  ${plural(o.distilledCount, 'skill')} were distilled and kept. ${plural(o.errors.length, 'cluster')} did not`,
     `  finish; the rest weren't distilled. Nothing was sent or lost.`,
     '',
     `  Resume the rest  ·  ${BIN} distil --resume`,

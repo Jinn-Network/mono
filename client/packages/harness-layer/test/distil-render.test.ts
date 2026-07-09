@@ -7,6 +7,7 @@ import {
   renderEmpty,
   renderSkillsPanel,
   renderRunSummary,
+  renderReview,
   renderFailure,
   renderResumeNothing,
   type RenderedSkill,
@@ -16,8 +17,18 @@ import {
 const EMOJI = /\p{Extended_Pictographic}/u;
 
 const SKILLS: RenderedSkill[] = [
-  { name: 'retry-backoff-patterns', installed: true, provenance: ['fix flaky retry', 'retry budget'] },
-  { name: 'json-schema-hardening', installed: true, provenance: ['json schema hardening'] },
+  {
+    name: 'retry-backoff-patterns',
+    installed: true,
+    provenance: ['fix flaky retry', 'retry budget'],
+    helpsWith: 'Use when an HTTP client retries without backoff and overloads the server.',
+  },
+  {
+    name: 'json-schema-hardening',
+    installed: true,
+    provenance: ['json schema hardening'],
+    helpsWith: 'Use when untrusted JSON must be validated before use.',
+  },
 ];
 
 describe('distil render — consent disclosure (1a)', () => {
@@ -40,6 +51,20 @@ describe('distil render — consent disclosure (1a)', () => {
   it('names the safe default plainly — defer, nothing runs, nothing is spent', () => {
     expect(s).toMatch(/default is defer/i);
     expect(s).toMatch(/nothing published to the Jinn network|nothing is published/i);
+  });
+
+  it('promotes distiller settability to a first-class line near the mode keys', () => {
+    // A prominent DISTILLER line (not a trailing clause on COSTS) shows the
+    // current model AND both change flags.
+    expect(s).toMatch(/DISTILLER/);
+    const distillerLineIdx = s.indexOf('DISTILLER');
+    const keysIdx = s.indexOf('[L]');
+    expect(distillerLineIdx).toBeGreaterThan(-1);
+    expect(distillerLineIdx).toBeLessThan(keysIdx); // sits just before the keys
+    expect(s).toContain('--distiller-model');
+    // The model is named on that prominent line, not buried on COSTS.
+    const distillerBlock = s.slice(distillerLineIdx, keysIdx);
+    expect(distillerBlock).toContain('llama-4-405b');
   });
 
   it('carries no emoji', () => {
@@ -121,6 +146,20 @@ describe('distil render — skills panel (1b)', () => {
     expect(s).toContain('retry budget');
   });
 
+  it('shows the forward-looking "helps" line — what the skill will help with next', () => {
+    expect(s).toContain('helps');
+    expect(s).toContain('Use when an HTTP client retries without backoff');
+  });
+
+  it('omits the helps line when a skill has no forward description', () => {
+    const panel = renderSkillsPanel(
+      [{ name: 'x', installed: false, provenance: ['cap-a'] }],
+      'skills · distilled locally · not installed',
+    );
+    expect(panel).not.toContain('helps');
+    expect(panel).toContain('from');
+  });
+
   it('renders not-installed skills with the words "not installed"', () => {
     const panel = renderSkillsPanel(
       [{ name: 'nil-guard-defensive', installed: false, provenance: ['empty-payload panic'] }],
@@ -138,27 +177,75 @@ describe('distil render — skills panel (1b)', () => {
 });
 
 describe('distil render — run summary (1b)', () => {
-  const s = renderRunSummary({ distillModel: 'llama-4-405b', captureCount: 6, skills: SKILLS });
+  const allInstalled = renderRunSummary({ distillModel: 'llama-4-405b', captureCount: 6, skills: SKILLS });
   it('headers with the mode, distiller and capture count', () => {
-    expect(s).toMatch(/distil: local/);
-    expect(s).toContain('llama-4-405b');
-    expect(s).toContain('6 capture');
+    expect(allInstalled).toMatch(/distil: local/);
+    expect(allInstalled).toContain('llama-4-405b');
+    expect(allInstalled).toContain('6 capture');
   });
   it('summarises captures in → skills out and that nothing left the machine', () => {
-    expect(s).toMatch(/6 capture/);
-    expect(s).toMatch(/2 skill/);
-    expect(s).toMatch(/nothing left this machine/i);
+    expect(allInstalled).toMatch(/6 capture/);
+    expect(allInstalled).toMatch(/2 skill/);
+    expect(allInstalled).toMatch(/nothing left this machine/i);
   });
-  it('embeds the skills panel and the /jinn skills management hint', () => {
-    expect(s).toContain('retry-backoff-patterns');
-    expect(s).toContain('/jinn skills');
+  it('when all installed, titles the panel installed·ready with the /jinn skills hint', () => {
+    expect(allInstalled).toContain('retry-backoff-patterns');
+    expect(allInstalled).toMatch(/installed · ready/);
+    expect(allInstalled).toContain('/jinn skills');
+  });
+
+  it('when NONE installed (staged), says skills stay local until installed and how to install', () => {
+    const staged = renderRunSummary({
+      distillModel: 'llama-4-405b',
+      captureCount: 6,
+      skills: SKILLS.map((s) => ({ ...s, installed: false })),
+    });
+    expect(staged).toMatch(/distilled locally · not installed/);
+    expect(staged).toMatch(/stay local until you install/i);
+    expect(staged).toContain('--install all');
+    // The panel marks every skill as not installed.
+    expect(staged).toContain('not installed');
+  });
+
+  it('when SOME installed (partial), titles it N installed · M available', () => {
+    const partial = renderRunSummary({
+      distillModel: 'llama-4-405b',
+      captureCount: 6,
+      skills: [
+        { ...SKILLS[0]!, installed: true },
+        { ...SKILLS[1]!, installed: false },
+      ],
+    });
+    expect(partial).toMatch(/1 installed · 1 available/);
+  });
+});
+
+describe('distil render — review before install (1b)', () => {
+  const s = renderReview({ distillModel: 'llama-4-405b', captureCount: 6, skills: SKILLS });
+  it('frames the skills forward — what they will help with next time', () => {
+    expect(s).toMatch(/help with tasks like these/i);
+    expect(s).toContain('helps');
+    expect(s).toContain('Use when an HTTP client retries without backoff');
+  });
+  it('asks an explicit all / one / skip choice and says nothing goes live yet', () => {
+    expect(s).toMatch(/Install all, one, or skip/i);
+    expect(s).toMatch(/nothing goes live until you choose/i);
+  });
+  it('shows every skill as not-yet-installed in the review', () => {
+    expect(s).toContain('not installed');
+    expect(s).not.toContain('installed · ready'); // not the post-install title
+    // No bare "installed" state line (state word at column 0 of a panel body row).
+    expect(s.split('\n').some((l) => /^│ installed\s+\S/.test(l))).toBe(false);
+  });
+  it('carries no emoji', () => {
+    expect(s).not.toMatch(EMOJI);
   });
 });
 
 describe('distil render — failure (1d)', () => {
   const s = renderFailure({
     distillModel: 'llama-4-405b',
-    installedCount: 3,
+    distilledCount: 3,
     errors: [{ clusterId: 'c4', error: 'the distiller stopped responding' }],
   });
   it('says what stopped, what survived, and the one command to resume', () => {
