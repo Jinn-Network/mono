@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import type {
   Harness,
   HarnessContext,
@@ -17,7 +17,7 @@ import type {
   TaskSessionInputs,
   LearnerHarnessConfig,
 } from './types.js';
-import { resolveBundledPluginRoot, resolvePluginRoot } from './plugin-path.js';
+import { resolvePluginRoot } from './plugin-path.js';
 import { digestDirectory } from '../../../plugins/digest.js';
 import { findSolverPluginManifest } from '../../../plugins/manifest.js';
 import { harvestOutput } from './harvest.js';
@@ -46,7 +46,6 @@ export class LearnerHarness implements Harness {
   readonly freezeStateHashIgnore = ['.git'] as const;
   private readonly adapter: HarnessAdapter;
   private readonly pluginRoot: string;
-  private readonly preinstalledPluginRoots: string[];
   private readonly claudePath: string;
   private readonly codexPath: string | undefined;
   private readonly codexDoctorTimeoutMs: number | undefined;
@@ -59,7 +58,6 @@ export class LearnerHarness implements Harness {
     this.name = config.name ?? CLAUDE_CODE_HARNESS;
     this.version = config.version ?? '0.1.0-shim';
     this.pluginRoot = config.pluginRoot ?? resolvePluginRoot();
-    this.preinstalledPluginRoots = [resolveBundledPluginRoot('local-trace-distiller')];
     this.claudePath = config.claudePath ?? 'claude';
     this.codexPath = config.codexPath;
     this.codexDoctorTimeoutMs = config.codexDoctorTimeoutMs;
@@ -80,33 +78,29 @@ export class LearnerHarness implements Harness {
    */
   attributionPlugins(): RuntimePlugin[] {
     if (this.attributionPluginsCache === undefined) {
-      this.attributionPluginsCache = [
-        this.buildAttributionPlugin(this.pluginRoot, 'bundled:learner', 'claude-code-learner'),
-        ...this.preinstalledPluginRoots.map((root) =>
-          this.buildAttributionPlugin(root, `bundled:${basename(root)}`),
-        ),
-      ].filter((plugin): plugin is RuntimePlugin => plugin !== null);
+      const plugin = this.buildAttributionPlugin();
+      this.attributionPluginsCache = plugin ? [plugin] : [];
     }
     return this.attributionPluginsCache;
   }
 
-  private buildAttributionPlugin(root: string, source: string, fallbackName?: string): RuntimePlugin | null {
+  private buildAttributionPlugin(): RuntimePlugin | null {
     try {
-      const manifestPath = findSolverPluginManifest(root);
+      const manifestPath = findSolverPluginManifest(this.pluginRoot);
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as { name?: string; version?: string };
       return {
-        name: manifest.name ?? fallbackName ?? 'plugin',
+        name: manifest.name ?? 'claude-code-learner',
         version: manifest.version ?? '0.0.0',
-        source,
+        source: 'bundled:learner',
         sourceKind: 'bundled',
-        root,
+        root: this.pluginRoot,
         manifestPath,
-        sha256: digestDirectory(root),
+        sha256: digestDirectory(this.pluginRoot),
         provenance: 'default',
       };
     } catch (err) {
       console.warn(
-        `[learner] attributionPlugins: no plugin manifest at ${root}; ` +
+        `[learner] attributionPlugins: no plugin manifest at ${this.pluginRoot}; ` +
           `skipping self-attribution (${err instanceof Error ? err.message : String(err)})`,
       );
       return null;
@@ -298,7 +292,7 @@ export class LearnerHarness implements Harness {
       taskBody: ctx.task as TaskSessionInputs['taskBody'],
       implStateDir: ctx.implStateDir,
       workingDir: ctx.workingDir,
-      pluginRoots: dedupePluginRoots([...this.preinstalledPluginRoots, ...(ctx.solverPluginRoots ?? [])]),
+      pluginRoots: [...(ctx.solverPluginRoots ?? [])],
       windowStartTs: window.startTs,
       windowEndTs: window.endTs,
       msUntilEndTs: ctx.msUntilEndTs(),
@@ -319,8 +313,4 @@ export class LearnerHarness implements Harness {
       venueRef: { ...solution.venueRef, name: this.name },
     };
   }
-}
-
-function dedupePluginRoots(roots: string[]): string[] {
-  return [...new Set(roots)];
 }

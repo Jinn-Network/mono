@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { computeEffectivePlugins } from './effective-plugins.js';
 
 describe('computeEffectivePlugins', () => {
-  it('includes bundled defaults for Hermes (network-tools only, no learner-owned plugins)', () => {
+  it('includes bundled defaults for Hermes (network-tools only, no learner)', () => {
     const out = computeEffectivePlugins({
       harness: 'hermes-agent',
       explicit: [],
@@ -11,10 +11,9 @@ describe('computeEffectivePlugins', () => {
     const names = out.map((p) => p.name);
     expect(names).toContain('network-tools');
     expect(names).not.toContain('claude-code-learner');
-    expect(names).not.toContain('local-trace-distiller');
   });
 
-  it('includes learner bundled defaults for non-Hermes harnesses', () => {
+  it('includes both bundled defaults for non-Hermes harnesses', () => {
     const out = computeEffectivePlugins({
       harness: 'claude-code',
       explicit: [],
@@ -23,7 +22,6 @@ describe('computeEffectivePlugins', () => {
     const names = out.map((p) => p.name);
     expect(names).toContain('network-tools');
     expect(names).toContain('claude-code-learner');
-    expect(names).toContain('local-trace-distiller');
   });
 
   it('auto-includes catalog plugins in DEFAULT_COMPATIBLE_PLUGINS (swe-rebench-v2-runtime)', () => {
