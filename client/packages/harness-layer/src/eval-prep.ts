@@ -5,13 +5,23 @@ import type { TraceEnvelopeV0 } from './envelope.js';
 import type { HarnessPublishDeps } from './publish.js';
 import { prepareDistillationEvidence } from './pipeline.js';
 import { selectUsefulClusters, type ClusterSelectionOptions, type ClusterScore } from './cluster-selection.js';
-import { distillClusters, type DistillCluster, type DistillLLMOutput, type DistillResult } from './distill.js';
+import { buildMetaClusters, type MetaCluster, type Stage1PublishedSkill } from './cluster.js';
+import {
+  distillClusters,
+  metaDistill,
+  type DistillCluster,
+  type DistillLLMOutput,
+  type DistillResult,
+  type MetaDistillLLMOutput,
+  type MetaDistillResult,
+} from './distill.js';
 import { buildSkillMarkdown, type SkillPackage } from './skill-package.js';
 
 export interface EvalPrepModel {
   label: string;
   model: string;
   distill: (cluster: DistillCluster) => Promise<DistillLLMOutput>;
+  metaDistill?: (cluster: MetaCluster) => Promise<MetaDistillLLMOutput>;
 }
 
 export interface EvalPrepDeps {
@@ -22,6 +32,7 @@ export interface EvalPrepDeps {
   models: EvalPrepModel[];
   outDir: string;
   selection?: ClusterSelectionOptions;
+  meta?: boolean;
   distribution?: string;
   groupCap?: number;
   limit?: number;
@@ -43,6 +54,8 @@ export interface EvalPrepModelManifest {
   published: DistillResult['published'];
   rejected: DistillResult['rejected'];
   errors: DistillResult['errors'];
+  metaClusterIds?: string[];
+  metaDistilled?: MetaDistillResult;
 }
 
 export interface EvalPrepManifest {
@@ -51,9 +64,22 @@ export interface EvalPrepManifest {
   mode: 'local-only';
   outDir: string;
   limit?: number;
+  groupCap?: number;
+  meta: boolean;
   clusterCount: number;
   selectedClusterIds: string[];
-  models: Array<{ label: string; model: string; attemptedClusterIds: string[]; published: number; rejected: number; errors: number }>;
+  models: Array<{
+    label: string;
+    model: string;
+    attemptedClusterIds: string[];
+    published: number;
+    rejected: number;
+    errors: number;
+    metaClusterIds?: string[];
+    metaPublished?: number;
+    metaRejected?: number;
+    metaErrors?: number;
+  }>;
   bridge: {
     bridged: number;
     excludedHeldOut: number;
@@ -147,6 +173,7 @@ export async function runEvalPrep(deps: EvalPrepDeps): Promise<EvalPrepResult> {
   for (const model of deps.models) {
     const modelDir = join(deps.outDir, 'distilled', model.label);
     const skillsDir = join(modelDir, 'skills');
+    const metaSkillsDir = join(modelDir, 'meta-skills');
     mkdirSync(skillsDir, { recursive: true });
     const attemptedClusterIds = selectedClusters.map((cluster) => cluster.clusterId);
     assertAttemptedClusterIds(selectedClusterIds, attemptedClusterIds);
@@ -167,6 +194,43 @@ export async function runEvalPrep(deps: EvalPrepDeps): Promise<EvalPrepResult> {
       ...(deps.now ? { now: deps.now } : {}),
     });
 
+    let metaResult: MetaDistillResult | undefined;
+    let metaClusterIds: string[] | undefined;
+    if (deps.meta) {
+      if (!model.metaDistill) {
+        throw new Error(`eval-prep meta enabled but no metaDistill port was provided for ${model.label}`);
+      }
+      mkdirSync(metaSkillsDir, { recursive: true });
+      const clusterById = new Map(selectedClusters.map((cluster) => [cluster.clusterId, cluster]));
+      const stage1: Stage1PublishedSkill[] = distilled.published.map((published) => {
+        const cluster = clusterById.get(published.clusterId);
+        if (!cluster) throw new Error(`eval-prep meta: no originating cluster for ${published.clusterId}`);
+        return {
+          clusterId: published.clusterId,
+          skillKind: published.skillKind,
+          pkg: published.pkg,
+          evidenceRefs: cluster.evidenceRefs,
+          instanceIds: cluster.instanceIds,
+        };
+      });
+      const metaClusters = buildMetaClusters(stage1);
+      metaClusterIds = metaClusters.map((cluster) => cluster.metaClusterId);
+      const publishMetaSkill = async (pkg: SkillPackage): Promise<{ envelopeRef: string; anchorTx: string | null }> => {
+        const dir = join(metaSkillsDir, pkg.name);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'SKILL.md'), buildSkillMarkdown(pkg));
+        return { envelopeRef: `local:${model.label}:meta:${pkg.name}`, anchorTx: null };
+      };
+      metaResult = await metaDistill(metaClusters, {
+        metaDistill: model.metaDistill,
+        publishSkill: publishMetaSkill,
+        slate: deps.slate,
+        distribution: deps.distribution ?? 'coding',
+        distillModel: model.model,
+        ...(deps.now ? { now: deps.now } : {}),
+      });
+    }
+
     const modelManifest: EvalPrepModelManifest = {
       label: model.label,
       model: model.model,
@@ -174,6 +238,8 @@ export async function runEvalPrep(deps: EvalPrepDeps): Promise<EvalPrepResult> {
       published: distilled.published,
       rejected: distilled.rejected,
       errors: distilled.errors,
+      ...(metaClusterIds ? { metaClusterIds } : {}),
+      ...(metaResult ? { metaDistilled: metaResult } : {}),
     };
     assertAttemptedClusterIds(selectedClusterIds, modelManifest.attemptedClusterIds);
     writeJson(join(modelDir, 'manifest.json'), modelManifest);
@@ -187,6 +253,8 @@ export async function runEvalPrep(deps: EvalPrepDeps): Promise<EvalPrepResult> {
     mode: 'local-only',
     outDir: deps.outDir,
     ...(deps.limit !== undefined ? { limit: deps.limit } : {}),
+    ...(deps.groupCap !== undefined ? { groupCap: deps.groupCap } : {}),
+    meta: deps.meta ?? false,
     clusterCount: prepared.clusters.length,
     selectedClusterIds,
     models: modelResults.map((m) => ({
@@ -196,6 +264,12 @@ export async function runEvalPrep(deps: EvalPrepDeps): Promise<EvalPrepResult> {
       published: m.published.length,
       rejected: m.rejected.length,
       errors: m.errors.length,
+      ...(m.metaClusterIds ? { metaClusterIds: m.metaClusterIds } : {}),
+      ...(m.metaDistilled ? {
+        metaPublished: m.metaDistilled.published.length,
+        metaRejected: m.metaDistilled.rejected.length,
+        metaErrors: m.metaDistilled.errors.length,
+      } : {}),
     })),
     bridge: {
       bridged: prepared.bridge.bridged.length,

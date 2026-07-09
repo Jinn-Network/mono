@@ -866,6 +866,88 @@ describe('jinn-layer distill run', () => {
     expect(full.attemptedClusterIds).toEqual(result.selection.map((row: { clusterId: string }) => row.clusterId));
   });
 
+  it('distill eval-prep can retain grouped attempts and run per-model meta distillation', async () => {
+    const { writer, out } = capture();
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-eval-prep-cli-'));
+    const stage1Calls: Record<string, string[]> = {};
+    const metaCalls: Record<string, string[]> = {};
+    const factory = (_provider: RecordedProvider, model: string) => ({
+      distill: async (cluster: DistillCluster): Promise<DistillLLMOutput> => {
+        (stage1Calls[model] ??= []).push(cluster.clusterId);
+        return {
+          name: `eval-${model}-${cluster.instanceIds[0]}`.replace(/[^a-z0-9]+/g, '-'),
+          description: 'Use when a grouped success pattern repeats across attempts. Not for: unrelated tasks.',
+          body: [
+            '## When to use', 'A grouped solver attempt set exposes a repeatable repair signal.',
+            '## Strategy', 'Compare the retained evidence group and distill the shared decision point.',
+            '## Steps', '1. Read the grouped attempts. 2. Extract the stable rule.',
+            '## Pitfalls', 'Do not quote instance identifiers or patch-only trivia.',
+            '## Verify', 'Check the skill against every retained attempt in the cluster.',
+          ].join('\n\n'),
+        };
+      },
+      metaDistill: async (cluster: MetaCluster): Promise<MetaDistillLLMOutput> => {
+        (metaCalls[model] ??= []).push(cluster.metaClusterId);
+        return META_OUT;
+      },
+    });
+    const groupedRefs = [
+      { ...dref('alpha__repo-1', 'pass'), requestId: '0xalpha1', manifestCid: 'bafy-alpha-1' },
+      { ...dref('alpha__repo-1', 'pass'), requestId: '0xalpha2', manifestCid: 'bafy-alpha-2' },
+      { ...dref('beta__repo-2', 'pass'), requestId: '0xbeta1', manifestCid: 'bafy-beta-1' },
+      { ...dref('beta__repo-2', 'pass'), requestId: '0xbeta2', manifestCid: 'bafy-beta-2' },
+    ];
+
+    const code = await runJinnLayerCli([
+      'distill',
+      'eval-prep',
+      '--out',
+      outDir,
+      '--json',
+      '--meta',
+      '--group-cap',
+      '2',
+      '--limit',
+      '4',
+      '--max-clusters',
+      '2',
+      '--max-patterns',
+      '2',
+    ], {
+      writer,
+      distillDeps: stubDeps({
+        verdictSource: { list: async () => groupedRefs },
+        fetchEvidence: async (r: AttemptRef): Promise<BridgeEvidence> => ({
+          taskSummary: `success regression summary for ${r.instanceId}`,
+          patch: `diff --git a/x.py b/x.py\n+ success ${r.requestId}\n`,
+        }),
+        publishDeps: undefined,
+        distill: undefined,
+        metaDistill: undefined,
+        distillerFactory: factory,
+        slateInstanceIds: new Set(),
+      }),
+    });
+
+    expect(code).toBe(0);
+    expect(stage1Calls['gpt-5.4-mini']).toEqual(stage1Calls['gpt-5.5']);
+    expect(metaCalls['gpt-5.4-mini']).toEqual(['cross-instance:strategic-pattern']);
+    expect(metaCalls['gpt-5.5']).toEqual(['cross-instance:strategic-pattern']);
+
+    const result = JSON.parse(out());
+    expect(result.manifest.groupCap).toBe(2);
+    expect(result.manifest.meta).toBe(true);
+    expect(result.selection.map((row: { score: { groupSize: number } }) => row.score.groupSize)).toEqual([2, 2]);
+    for (const model of result.models) {
+      expect(model.metaClusterIds).toEqual(['cross-instance:strategic-pattern']);
+      expect(model.metaDistilled.published).toHaveLength(1);
+      expect(model.metaDistilled.rejected).toHaveLength(0);
+      expect(model.metaDistilled.errors).toHaveLength(0);
+    }
+    expect(existsSync(join(outDir, 'distilled', 'mini', 'meta-skills', 'cross-instance-orm-dedup', 'SKILL.md'))).toBe(true);
+    expect(existsSync(join(outDir, 'distilled', 'gpt-5.5', 'meta-skills', 'cross-instance-orm-dedup', 'SKILL.md'))).toBe(true);
+  });
+
   it('distill eval-prep fails the invariant if a model attempts anything outside the frozen selection', () => {
     expect(() => assertAttemptedClusterIds(
       ['contrastive:alpha__repo-1'],
