@@ -1,6 +1,10 @@
-"""Tests for /distill -- local trace skill distillation."""
+"""Tests for the local-trace-distiller Hermes plugin."""
 
-from agent.distill_prompt import build_distill_prompt, distill_ack
+from plugins.local_trace_distiller import (
+    _handle_distill,
+    build_distill_prompt,
+    distill_ack,
+)
 
 
 class TestBuildDistillPrompt:
@@ -17,6 +21,7 @@ class TestBuildDistillPrompt:
         prompt = build_distill_prompt("all")
         low = prompt.lower()
 
+        assert "distill_trace_cluster" in prompt
         assert "session_search" in prompt
         assert "limit=50" in prompt
         assert "cluster" in low
@@ -40,24 +45,15 @@ class TestBuildDistillPrompt:
 
 
 class TestDistillRegistryWiring:
-    def test_distill_is_registered_and_resolves(self):
+    def test_distill_is_not_a_builtin_command(self):
         from hermes_cli.commands import resolve_command
 
-        cmd = resolve_command("distill")
-        assert cmd is not None
-        assert cmd.name == "distill"
+        assert resolve_command("distill") is None
 
-    def test_distill_is_in_tools_and_skills_category(self):
-        from hermes_cli.commands import resolve_command
+    def test_distill_plugin_command_returns_agent_turn(self):
+        result = _handle_distill("all")
 
-        assert resolve_command("distill").category == "Tools & Skills"
-
-    def test_distill_works_on_the_gateway(self):
-        from hermes_cli.commands import GATEWAY_KNOWN_COMMANDS
-
-        assert "distill" in GATEWAY_KNOWN_COMMANDS
-
-    def test_distill_is_not_cli_only(self):
-        from hermes_cli.commands import resolve_command
-
-        assert not resolve_command("distill").cli_only
+        assert result["action"] == "agent_turn"
+        assert "session_search" in result["prompt"]
+        assert "limit=50" in result["prompt"]
+        assert "recent local sessions" in result["message"].lower()

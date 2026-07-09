@@ -1,15 +1,17 @@
-#!/usr/bin/env python3
-"""``/distill`` -- build the prompt for local trace skill distillation.
+"""Local trace distiller plugin.
 
-The command is intentionally a normal agent turn. The user's active model reads
-local session traces with the existing ``session_search`` tool, then writes or
-updates one skill through ``skill_manage``. No separate distillation service is
-required for jinn-agent.
+Registers ``/distill`` as a plugin-owned command. The plugin does not run a
+separate model. It builds an instruction prompt and asks the host harness to
+run that prompt through the user's active agent turn, where local-distil MCP
+tools or host-native trace tools such as ``session_search`` are available.
 """
 
 from __future__ import annotations
 
+from typing import Any
+
 from agent.learn_prompt import _AUTHORING_STANDARDS
+from hermes_cli.plugins import plugin_command_agent_turn
 
 
 def _mode_for_request(user_request: str) -> tuple[str, str]:
@@ -62,24 +64,31 @@ def build_distill_prompt(user_request: str) -> str:
         "- Any other text is a trace id, session id, query, or scope to use "
         "for finding the relevant local traces.\n\n"
         "Trace workflow:\n"
-        "1. For `this`, start from the current conversation already in context. "
-        "If you need more context, call `session_search()` with no query to "
-        "list recent sessions, or call `session_search(session_id=...)` for a "
-        "specific session.\n"
-        "2. For `all`, begin with `session_search(query=\"skill reusable workflow\", "
-        "limit=50, sort=\"newest\")` or a similarly broad capped search. Do not "
-        "read full transcripts first. Use compact results to cluster candidate "
-        "skill opportunities.\n"
-        "3. For a query or selected scope, call `session_search(query=..., "
-        "limit=10)` first, then use `session_search(session_id=..., "
-        "around_message_id=..., window=...)` for only the relevant portions.\n"
-        "4. Read only what is needed. Prefer summaries, matched windows, tool "
+        "1. Prefer the local trace distiller MCP tools when available: "
+        "`distill_trace_search` for compact cards, `distill_trace_cluster` "
+        "for capped recurring-signal discovery, `distill_trace_read` for "
+        "scoped reads, and `distill_local` only after the user approves a "
+        "specific distillation run.\n"
+        "2. If those MCP tools are not available in this host, use jinn-agent's "
+        "native tools: start from the current conversation, call "
+        "`session_search()` with no query to list recent sessions, or call "
+        "`session_search(session_id=...)` for a specific session.\n"
+        "3. For `all`, begin with `distill_trace_cluster(limit=50)` when "
+        "available; otherwise use `session_search(query=\"skill reusable "
+        "workflow\", limit=50, sort=\"newest\")` or a similarly broad capped "
+        "search. Do not read full transcripts first. Use compact results to "
+        "cluster candidate skill opportunities.\n"
+        "4. For a query or selected scope, search first, then read only the "
+        "relevant portions with `distill_trace_read` or with "
+        "`session_search(session_id=..., around_message_id=..., window=...)`.\n"
+        "5. Read only what is needed. Prefer summaries, matched windows, tool "
         "calls, and nearby messages. Full transcript reads are last resort.\n"
-        "5. Before writing a skill from `all`, summarize the candidate cluster "
+        "6. Before writing a skill from `all`, summarize the candidate cluster "
         "and ask the user to choose or approve the specific skill to distill.\n"
-        "6. Author or update exactly one skill with `skill_manage`. If a "
-        "non-trivial helper is needed, write it under the skill's `scripts/` "
-        "directory and reference it from SKILL.md.\n\n"
+        "7. Author or update exactly one skill. Use `distill_local(confirm=true)` "
+        "when the local-distil MCP flow is available and approved; otherwise "
+        "use `skill_manage`. If a non-trivial helper is needed, write it under "
+        "the skill's `scripts/` directory and reference it from SKILL.md.\n\n"
         "Reuse the existing Jinn distillation methodology rather than "
         "inventing a new one:\n"
         "- Prefer user-accepted successful traces for success patterns.\n"
@@ -106,3 +115,19 @@ def distill_ack(user_request: str) -> str:
     if mode in {"this", "current", "recent"}:
         return "Distilling a reusable skill from this session..."
     return "Distilling a reusable skill from the requested traces..."
+
+
+def _handle_distill(command_args: str = "", **_: Any) -> dict[str, str]:
+    return plugin_command_agent_turn(
+        build_distill_prompt(command_args),
+        message=distill_ack(command_args),
+    )
+
+
+def register(ctx) -> None:
+    ctx.register_command(
+        "distill",
+        handler=_handle_distill,
+        description="Distill a reusable skill from local traces.",
+        args_hint="[this|all|trace/session/query]",
+    )

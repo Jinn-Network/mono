@@ -1561,24 +1561,6 @@ class CLICommandsMixin:
         else:  # pragma: no cover - defensive (no live input loop)
             print("  /learn needs an active chat session to run.")
 
-    def _handle_distill_command(self, cmd: str):
-        """Handle /distill -- derive a skill from local session traces.
-
-        Empty args default to "this". "all" runs as a capped, cluster-first
-        trace review inside the normal agent loop, using session_search and
-        skill_manage rather than a separate distillation engine.
-        """
-        from agent.distill_prompt import build_distill_prompt, distill_ack
-
-        parts = cmd.strip().split(None, 1)
-        user_request = parts[1].strip() if len(parts) > 1 else ""
-
-        print(f"\n{distill_ack(user_request)}")
-        if hasattr(self, "_pending_input"):
-            self._pending_input.put(build_distill_prompt(user_request))
-        else:  # pragma: no cover - defensive (no live input loop)
-            print("  /distill needs an active chat session to run.")
-
     def _handle_memory_command(self, cmd: str):
         """Handle /memory slash command — pending review + approval-gate toggle."""
         from hermes_cli.write_approval_commands import handle_pending_subcommand

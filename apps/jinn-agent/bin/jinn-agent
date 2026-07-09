@@ -91,19 +91,28 @@ if not isinstance(config, dict):
 
 changed = False
 
-# 1. Plugin enablement — skipped (not exited) on explicit user opt-out via
+# 1. Plugin enablement — skipped per plugin on explicit user opt-out via
 #    `plugins.disabled`, so the branding defaults below still apply.
 plugins = config.setdefault("plugins", {})
 if not isinstance(plugins, dict):
     raise SystemExit(0)
-if "jinn" not in (plugins.get("disabled") or []):
-    enabled = plugins.get("enabled")
-    if not isinstance(enabled, list):
-        enabled = []
-    if "jinn" not in enabled:
-        enabled.append("jinn")
-        plugins["enabled"] = enabled
+disabled = plugins.get("disabled") or []
+if not isinstance(disabled, list):
+    disabled = []
+enabled = plugins.get("enabled")
+if not isinstance(enabled, list):
+    enabled = []
+default_plugins = ["jinn", "local-trace-distiller"]
+for plugin_name in default_plugins:
+    disabled_aliases = {plugin_name, plugin_name.replace("-", "_")}
+    if any(alias in disabled for alias in disabled_aliases):
+        continue
+    if plugin_name not in enabled:
+        enabled.append(plugin_name)
         changed = True
+if enabled != plugins.get("enabled"):
+    plugins["enabled"] = enabled
+    changed = True
 
 # 2. Default skin — set only when the user has no explicit choice.
 display = config.get("display")

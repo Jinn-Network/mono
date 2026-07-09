@@ -541,6 +541,13 @@ Mechanics:
    skill should ask the user for helped/hurt/mixed/unused feedback and record only user-approved
    notes/accepted changes. This is a local improvement signal, not admission-quality verification.
 
+Hermes adapter: `jinn-agent` ships a bundled Hermes plugin named `local-trace-distiller` that
+registers `/distill`. The command is **not** a core slash command; the plugin returns a portable
+`agent_turn` payload (`prompt` + optional acknowledgement) and Hermes feeds that prompt into the
+normal active agent loop. When the local-distil MCP tools are configured, the prompt directs the
+agent to use them; otherwise the Hermes adapter falls back to host-native `session_search` +
+`skill_manage` so the plugin remains useful in a plain `jinn-agent` install.
+
 Future public listing of locally distilled skills is out of scope for v0.7. A later marketplace flow
 may let users publish useful skills for others to use and pay for, but that requires explicit user
 approval plus a separate publish/evaluation policy; private traces must never be exported by default.

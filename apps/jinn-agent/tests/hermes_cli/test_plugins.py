@@ -20,6 +20,8 @@ from hermes_cli.plugins import (
     get_pre_tool_call_block_message,
     get_pre_verify_continue_message,
     has_middleware,
+    plugin_command_agent_turn,
+    plugin_command_agent_turn_payload,
     resolve_plugin_command_result,
 )
 from hermes_cli.middleware import (
@@ -1894,6 +1896,17 @@ class TestPluginCommands:
 class TestPluginCommandResultResolution:
     def test_returns_sync_values_unchanged(self):
         assert resolve_plugin_command_result("ok") == "ok"
+
+    def test_agent_turn_payload_helper_round_trips_prompt_and_message(self):
+        result = plugin_command_agent_turn("PROMPT", message="ACK")
+
+        assert plugin_command_agent_turn_payload(result) == {
+            "prompt": "PROMPT",
+            "message": "ACK",
+        }
+
+    def test_agent_turn_payload_helper_ignores_plain_text(self):
+        assert plugin_command_agent_turn_payload("plain output") is None
 
     def test_awaits_async_result_without_running_loop(self):
         async def _handler():

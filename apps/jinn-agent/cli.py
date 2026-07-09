@@ -8612,8 +8612,6 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
                 self._handle_skills_command(cmd_original)
         elif canonical == "learn":
             self._handle_learn_command(cmd_original)
-        elif canonical == "distill":
-            self._handle_distill_command(cmd_original)
         elif canonical == "memory":
             self._handle_memory_command(cmd_original)
         elif canonical == "platforms":
@@ -8887,6 +8885,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
             elif base_cmd.lstrip("/") in _get_plugin_cmd_handler_names():
                 from hermes_cli.plugins import (
                     get_plugin_command_handler,
+                    plugin_command_agent_turn_payload,
                     resolve_plugin_command_result,
                 )
                 plugin_handler = get_plugin_command_handler(base_cmd.lstrip("/"))
@@ -8896,7 +8895,16 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
                         result = resolve_plugin_command_result(
                             plugin_handler(user_args)
                         )
-                        if result:
+                        agent_turn = plugin_command_agent_turn_payload(result)
+                        if agent_turn:
+                            message = agent_turn.get("message") or ""
+                            if message:
+                                _cprint(message)
+                            if hasattr(self, "_pending_input"):
+                                self._pending_input.put(agent_turn["prompt"])
+                            else:  # pragma: no cover - defensive
+                                _cprint("  Plugin command needs an active chat session to run.")
+                        elif result:
                             _cprint(str(result))
                     except Exception as e:
                         _cprint(f"\033[1;31mPlugin command error: {e}{_RST}")

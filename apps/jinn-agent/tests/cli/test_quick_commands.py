@@ -112,6 +112,27 @@ class TestCLIQuickCommands:
         printed = self._printed_plain(cli.console.print.call_args[0][0])
         assert printed == "overridden"
 
+    def test_agent_turn_plugin_command_queues_prompt(self):
+        """Plugin slash commands can start a normal terminal agent turn."""
+        cli = self._make_cli({})
+        cli._pending_input = MagicMock()
+
+        def handler(args):
+            return {
+                "action": "agent_turn",
+                "prompt": f"PROMPT:{args}",
+                "message": "ACK",
+            }
+
+        with patch("cli._get_plugin_cmd_handler_names", return_value={"distill"}), \
+             patch("hermes_cli.plugins.get_plugin_command_handler", return_value=handler), \
+             patch("cli._cprint") as mock_cprint:
+            result = cli.process_command("/distill all")
+
+        assert result is True
+        cli._pending_input.put.assert_called_once_with("PROMPT:all")
+        mock_cprint.assert_called_with("ACK")
+
     def test_unknown_command_still_shows_error(self):
         cli = self._make_cli({})
         with patch("cli._cprint") as mock_cprint:
