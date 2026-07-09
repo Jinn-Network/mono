@@ -77,7 +77,16 @@ export interface PipelineResult {
   metaDistilled?: MetaDistillResult;
 }
 
-export async function runDistillationPipeline(deps: PipelineDeps): Promise<PipelineResult> {
+export interface PreparedDistillationEvidence {
+  bridge: BridgeResult;
+  collected: Array<{ ref: string; instanceId: string; env: TraceEnvelopeV0 }>;
+  clusters: DistillCluster[];
+  verdictsTruncated: boolean;
+}
+
+export async function prepareDistillationEvidence(
+  deps: Pick<PipelineDeps, 'verdictSource' | 'fetchEvidence' | 'publishDeps' | 'slate' | 'groupCap' | 'limit' | 'now'>,
+): Promise<PreparedDistillationEvidence> {
   const layer2 = buildLayer2ScrubPipeline();
   const slateIds = deps.slate.instanceIds;
   const collected: Array<{ ref: string; instanceId: string; env: TraceEnvelopeV0 }> = [];
@@ -113,6 +122,13 @@ export async function runDistillationPipeline(deps: PipelineDeps): Promise<Pipel
   // 2. Gate + cluster — eligible evidence grouped by distinct (instance, tier).
   //    heldOut is defence-in-depth over the bridge's own exclusion.
   const clusters = clusterEvidence(collected, { heldOut: (id) => slateIds.has(id) });
+
+  return { bridge, collected, clusters, verdictsTruncated };
+}
+
+export async function runDistillationPipeline(deps: PipelineDeps): Promise<PipelineResult> {
+  const prepared = await prepareDistillationEvidence(deps);
+  const { bridge, clusters, verdictsTruncated } = prepared;
 
   // 3. Distill — patterns + lessons → layer-2 skills (output scrub + contamination scan inside).
   const distilled = await distillClusters(clusters, {

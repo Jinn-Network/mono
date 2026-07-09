@@ -45,6 +45,7 @@ import { parseImportReport, renderImportReport } from './seed-import/report.js';
 import { extractSkill } from './skill.js';
 import { isInsidePackageDir } from '../../../src/util/path-safety.js';
 import { runDistillationPipeline } from './pipeline.js';
+import { modelLabel, runEvalPrep } from './eval-prep.js';
 import { createVerdictSource, type VerdictSource } from './bridge-verdict-source.js';
 import { createEvidenceFetcher } from './bridge-fetch-evidence.js';
 import {
@@ -179,6 +180,13 @@ Commands:
                                                  --distiller-model is the arbitrage knob: it is the
                                                  model that WRITES the skills, distinct from the
                                                  cheap runtime model your captures ran under.
+  distill eval-prep [--limit N] [--out <dir>] [--json]
+                    [--models gpt-5.4-mini,gpt-5.5]
+                    [--max-clusters N] [--max-contrastive N]
+                    [--max-lessons N] [--max-patterns N]
+                                                 Bridge/gate/cluster once, freeze a useful
+                                                 cluster set, then run each Codex model over
+                                                 exactly those clusters. Always local-only.
 
 Environment:
   JINN_DISCOVERY_URL       Override the discovery indexer URL (default: testnet Ponder indexer)
@@ -654,9 +662,10 @@ export async function runJinnLayerCli(
   const isSeed = verb === 'seed' && (subverb === 'plan' || subverb === 'execute');
   const isSkillsInstall = verb === 'skills' && subverb === 'install';
   const isDistillRun = verb === 'distill' && subverb === 'run';
-  const isDistill = verb === 'distill' && !isDistillRun;
+  const isDistillEvalPrep = verb === 'distill' && subverb === 'eval-prep';
+  const isDistill = verb === 'distill' && !isDistillRun && !isDistillEvalPrep;
   const isDeriveEnv = verb === 'derive-env';
-  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed && !isSkillsInstall && !isDistillRun && !isDistill && !isDeriveEnv) {
+  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed && !isSkillsInstall && !isDistillRun && !isDistillEvalPrep && !isDistill && !isDeriveEnv) {
     writer.write(USAGE);
     return verb === undefined || verb === 'help' || verb === '--help' ? 0 : 2;
   }
@@ -682,6 +691,11 @@ export async function runJinnLayerCli(
         where: { type: 'string' },
         resume: { type: 'boolean', default: false },
         install: { type: 'string' },
+        models: { type: 'string' },
+        'max-clusters': { type: 'string' },
+        'max-contrastive': { type: 'string' },
+        'max-lessons': { type: 'string' },
+        'max-patterns': { type: 'string' },
       },
       allowPositionals: true,
     });
@@ -1000,7 +1014,7 @@ export async function runJinnLayerCli(
     return 0;
   }
 
-  if (isDistillRun) {
+  if (isDistillRun || isDistillEvalPrep) {
     const dd = opts.distillRunDeps ?? {};
 
     // Only honor an EXPLICIT --limit; otherwise fetch the corpus broadly so
@@ -1063,6 +1077,75 @@ export async function runJinnLayerCli(
           },
         });
       })();
+
+    if (isDistillEvalPrep) {
+      const parsePositiveIntFlag = (name: 'max-clusters' | 'max-contrastive' | 'max-lessons' | 'max-patterns'): number | undefined => {
+        const raw = parsed.values[name] as string | undefined;
+        if (raw === undefined) return undefined;
+        const value = Number.parseInt(raw, 10);
+        if (!Number.isFinite(value) || value < 0) {
+          throw new Error(`--${name} must be a non-negative integer`);
+        }
+        return value;
+      };
+
+      const rawModels = (parsed.values.models as string | undefined) ?? 'gpt-5.4-mini,gpt-5.5';
+      const models = rawModels.split(',').map((m) => m.trim()).filter((m) => m.length > 0);
+      if (models.length === 0) {
+        writer.write(`error: --models must include at least one model\n\n${USAGE}`);
+        return 2;
+      }
+
+      const distillerFactory = dd.distillerFactory ?? defaultDistillerFactory;
+      const modelConfigs = models.map((model) => ({
+        label: modelLabel(model),
+        model,
+        distill: distillerFactory('codex', model).distill,
+      }));
+      const maxClusters = parsePositiveIntFlag('max-clusters');
+      const maxContrastive = parsePositiveIntFlag('max-contrastive');
+      const maxLessons = parsePositiveIntFlag('max-lessons');
+      const maxPatterns = parsePositiveIntFlag('max-patterns');
+
+      const result = await runEvalPrep({
+        verdictSource,
+        fetchEvidence,
+        publishDeps: buildLocalOnlyPublishDeps(),
+        slate: { instanceIds: slateInstanceIds },
+        models: modelConfigs,
+        outDir,
+        distribution: 'coding',
+        selection: {
+          ...(maxClusters !== undefined ? { maxClusters } : {}),
+          ...(maxContrastive !== undefined ? { maxContrastive } : {}),
+          ...(maxLessons !== undefined ? { maxLessons } : {}),
+          ...(maxPatterns !== undefined ? { maxPatterns } : {}),
+        },
+        ...(limit !== undefined ? { limit } : {}),
+      });
+
+      if (parsed.values.json) {
+        writer.write(JSON.stringify({ ...result, outDir }) + '\n');
+      } else {
+        const lines = [
+          `eval-prep: selected ${result.selection.length} of ${result.manifest.clusterCount} cluster(s)`,
+          `bridge: ${result.manifest.bridge.bridged} bridged, ${result.manifest.bridge.excludedHeldOut} held-out, ${result.manifest.bridge.deduped} deduped, ${result.manifest.bridge.errors} error(s)`,
+          'mode: local-only (no chain publishes or anchors)',
+        ];
+        if (result.manifest.bridge.verdictsTruncated) {
+          lines.push(`warning: verdict fetch hit the ${limit}-row limit — attempt groups may be PARTIAL; raise --limit to cover the corpus (#1478)`);
+        }
+        for (const model of result.models) {
+          lines.push(
+            `model ${model.label} (${model.model}): published ${model.published.length}, rejected ${model.rejected.length}, errors ${model.errors.length}`,
+          );
+        }
+        lines.push('', `eval artifacts written under: ${outDir}`);
+        writer.write(lines.join('\n') + '\n');
+      }
+
+      return result.models.some((m) => m.errors.length > 0) ? 1 : 0;
+    }
 
     // Resolve the distiller model once — it drives BOTH the model call and the
     // `distillModel` recorded in provenance (§5), so the record matches the run.

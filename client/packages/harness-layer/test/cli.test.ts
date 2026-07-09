@@ -14,6 +14,7 @@ import type { DistillCluster, DistillLLMOutput, MetaDistillLLMOutput } from '../
 import type { MetaCluster } from '../src/cluster.js';
 import { parseSkillMarkdown } from '../src/skill-package.js';
 import { readDistillMode, writeDistillMode } from '../src/distill-mode.js';
+import { assertAttemptedClusterIds } from '../src/eval-prep.js';
 
 /** A distinct temp mode file for a test (env-injected via JINN_LAYER_DISTILL_MODE_PATH). */
 function tmpModeFile(): string {
@@ -708,6 +709,168 @@ describe('jinn-layer distill run', () => {
     const result = JSON.parse(out());
     expect(result.bridge.bridged.every((b: { envelopeRef: string }) => b.envelopeRef.startsWith('local:envelope:'))).toBe(true);
     expect(result.bridge.bridged.every((b: { anchorTx: string | null }) => b.anchorTx === null)).toBe(true);
+  });
+
+  it('distill eval-prep bridges/gates/clusters once and runs both models over the same frozen clusters', async () => {
+    await withEnv({
+      JINN_LAYER_PRIVATE_KEY: undefined,
+      JINN_LAYER_SAFE_ADDRESS: undefined,
+      JINN_LAYER_AGENT_ID: undefined,
+    }, async () => {
+      const { writer, out } = capture();
+      const outDir = mkdtempSync(join(tmpdir(), 'jinn-eval-prep-cli-'));
+      const list = vi.fn(async () => [
+        dref('alpha__repo-1', 'pass'),
+        dref('alpha__repo-1', 'fail'),
+        dref('beta__repo-2', 'fail'),
+        dref('beta__repo-2', 'fail'),
+        dref('gamma__repo-3', 'pass'),
+      ]);
+      const calls: Record<string, string[]> = {};
+      const factoryCalls: Array<{ provider: RecordedProvider; model: string }> = [];
+      const factory = (provider: RecordedProvider, model: string) => {
+        factoryCalls.push({ provider, model });
+        return {
+          distill: async (cluster: DistillCluster): Promise<DistillLLMOutput> => {
+            (calls[model] ??= []).push(cluster.clusterId);
+            return {
+              name: `eval-${model}-${cluster.tier}`.replace(/[^a-z0-9]+/g, '-'),
+              description: 'Use when comparing grouped solver attempts. Not for: unrelated tasks.',
+              body: [
+                '## When to use',
+                'A grouped solver attempt set exposes a repeatable repair signal.',
+                '## Strategy',
+                'Compare the retained evidence group and distill the shared decision point.',
+                '## Steps',
+                '1. Read the grouped attempts. 2. Extract the stable rule.',
+                '## Pitfalls',
+                'Do not quote instance identifiers or patch-only trivia.',
+                '## Verify',
+                'Check the skill against every retained attempt in the cluster.',
+              ].join('\n\n'),
+            };
+          },
+          metaDistill: async (_cluster: MetaCluster): Promise<MetaDistillLLMOutput> => META_OUT,
+        };
+      };
+
+      const code = await runJinnLayerCli([
+        'distill',
+        'eval-prep',
+        '--out',
+        outDir,
+        '--json',
+        '--limit',
+        '5',
+        '--max-clusters',
+        '3',
+      ], {
+        writer,
+        distillDeps: stubDeps({
+          verdictSource: { list },
+          fetchEvidence: async (r: AttemptRef): Promise<BridgeEvidence> => ({
+            taskSummary: `short regression summary for ${r.instanceId}`,
+            patch: `diff --git a/x.py b/x.py\n+ change ${r.polarity}\n`,
+          }),
+          publishDeps: undefined,
+          distill: undefined,
+          metaDistill: undefined,
+          distillerFactory: factory,
+          slateInstanceIds: new Set(),
+        }),
+      });
+
+      expect(code).toBe(0);
+      expect(list).toHaveBeenCalledTimes(1);
+      expect(factoryCalls).toEqual([
+        { provider: 'codex', model: 'gpt-5.4-mini' },
+        { provider: 'codex', model: 'gpt-5.5' },
+      ]);
+      expect(calls['gpt-5.4-mini']).toEqual(calls['gpt-5.5']);
+      expect(calls['gpt-5.4-mini']).toEqual([
+        'contrastive:alpha__repo-1',
+        'lesson:beta__repo-2',
+        'pattern:gamma__repo-3',
+      ]);
+
+      const result = JSON.parse(out());
+      expect(result.selection.map((row: { clusterId: string }) => row.clusterId)).toEqual(calls['gpt-5.5']);
+      expect(existsSync(join(outDir, 'selection.json'))).toBe(true);
+      expect(existsSync(join(outDir, 'manifest.json'))).toBe(true);
+      expect(existsSync(join(outDir, 'raw-evidence', 'manifest.json'))).toBe(true);
+      expect(readFileSync(join(outDir, 'raw-evidence', 'evidence.jsonl'), 'utf-8').trim().split('\n')).toHaveLength(5);
+      expect(existsSync(join(outDir, 'distilled', 'mini', 'manifest.json'))).toBe(true);
+      expect(existsSync(join(outDir, 'distilled', 'gpt-5.5', 'manifest.json'))).toBe(true);
+      expect(readdirSync(join(outDir, 'distilled', 'mini', 'skills'), { withFileTypes: true }).filter((d) => d.isDirectory())).toHaveLength(3);
+      expect(readdirSync(join(outDir, 'distilled', 'gpt-5.5', 'skills'), { withFileTypes: true }).filter((d) => d.isDirectory())).toHaveLength(3);
+    });
+  });
+
+  it('distill eval-prep records per-model rejects without changing the attempted cluster set', async () => {
+    const { writer, out } = capture();
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-eval-prep-cli-'));
+    const calls: Record<string, string[]> = {};
+    const factory = (_provider: RecordedProvider, model: string) => ({
+      distill: async (cluster: DistillCluster): Promise<DistillLLMOutput> => {
+        (calls[model] ??= []).push(cluster.clusterId);
+        const validBody = [
+          '## When to use', 'A grouped solver attempt set exposes a repeatable repair signal.',
+          '## Strategy', 'Compare the retained evidence group and distill the shared decision point.',
+          '## Steps', '1. Read the grouped attempts. 2. Extract the stable rule.',
+          '## Pitfalls', 'Do not quote instance identifiers or patch-only trivia.',
+          '## Verify', 'Check the skill against every retained attempt in the cluster.',
+        ].join('\n\n');
+        return {
+          name: `eval-${model}`.replace(/[^a-z0-9]+/g, '-'),
+          description: model === 'gpt-5.4-mini'
+            ? 'Use when comparing grouped solver attempts.'
+            : 'Use when comparing grouped solver attempts. Not for: unrelated tasks.',
+          body: validBody,
+        };
+      },
+      metaDistill: async (_cluster: MetaCluster): Promise<MetaDistillLLMOutput> => META_OUT,
+    });
+
+    const code = await runJinnLayerCli([
+      'distill',
+      'eval-prep',
+      '--out',
+      outDir,
+      '--json',
+      '--models',
+      'gpt-5.4-mini,gpt-5.5',
+      '--max-clusters',
+      '1',
+    ], {
+      writer,
+      distillDeps: stubDeps({
+        verdictSource: { list: async () => [dref('alpha__repo-1', 'pass')] },
+        publishDeps: undefined,
+        distill: undefined,
+        metaDistill: undefined,
+        distillerFactory: factory,
+        slateInstanceIds: new Set(),
+      }),
+    });
+
+    expect(code).toBe(0);
+    expect(calls['gpt-5.4-mini']).toEqual(calls['gpt-5.5']);
+    const result = JSON.parse(out());
+    const mini = result.models.find((m: { model: string }) => m.model === 'gpt-5.4-mini');
+    const full = result.models.find((m: { model: string }) => m.model === 'gpt-5.5');
+    expect(mini.rejected).toHaveLength(1);
+    expect(mini.published).toHaveLength(0);
+    expect(full.published).toHaveLength(1);
+    expect(full.rejected).toHaveLength(0);
+    expect(mini.attemptedClusterIds).toEqual(result.selection.map((row: { clusterId: string }) => row.clusterId));
+    expect(full.attemptedClusterIds).toEqual(result.selection.map((row: { clusterId: string }) => row.clusterId));
+  });
+
+  it('distill eval-prep fails the invariant if a model attempts anything outside the frozen selection', () => {
+    expect(() => assertAttemptedClusterIds(
+      ['contrastive:alpha__repo-1'],
+      ['contrastive:alpha__repo-1', 'lesson:outside__repo-9'],
+    )).toThrow(/did not match frozen selection/);
   });
 });
 
