@@ -948,6 +948,50 @@ describe('jinn-layer distill run', () => {
     expect(existsSync(join(outDir, 'distilled', 'gpt-5.5', 'meta-skills', 'cross-instance-orm-dedup', 'SKILL.md'))).toBe(true);
   });
 
+  it('distill eval-prep --select-only writes selection artifacts without calling distillers', async () => {
+    const { writer, out } = capture();
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-eval-prep-cli-'));
+    const factory = vi.fn(recordingDistillerFactory([]));
+
+    const code = await runJinnLayerCli([
+      'distill',
+      'eval-prep',
+      '--out',
+      outDir,
+      '--json',
+      '--select-only',
+      '--limit',
+      '3',
+      '--max-clusters',
+      '2',
+    ], {
+      writer,
+      distillDeps: stubDeps({
+        verdictSource: {
+          list: async () => [
+            dref('alpha__repo-1', 'pass'),
+            dref('alpha__repo-1', 'fail'),
+            dref('beta__repo-2', 'fail'),
+          ],
+        },
+        publishDeps: undefined,
+        distill: undefined,
+        metaDistill: undefined,
+        distillerFactory: factory,
+        slateInstanceIds: new Set(),
+      }),
+    });
+
+    expect(code).toBe(0);
+    expect(factory).not.toHaveBeenCalled();
+    const result = JSON.parse(out());
+    expect(result.manifest.selectOnly).toBe(true);
+    expect(result.models).toEqual([]);
+    expect(existsSync(join(outDir, 'selection.json'))).toBe(true);
+    expect(existsSync(join(outDir, 'raw-evidence', 'evidence.jsonl'))).toBe(true);
+    expect(existsSync(join(outDir, 'distilled'))).toBe(false);
+  });
+
   it('distill eval-prep fails the invariant if a model attempts anything outside the frozen selection', () => {
     expect(() => assertAttemptedClusterIds(
       ['contrastive:alpha__repo-1'],

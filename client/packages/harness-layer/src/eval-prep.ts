@@ -32,6 +32,7 @@ export interface EvalPrepDeps {
   models: EvalPrepModel[];
   outDir: string;
   selection?: ClusterSelectionOptions;
+  selectOnly?: boolean;
   meta?: boolean;
   distribution?: string;
   groupCap?: number;
@@ -65,6 +66,7 @@ export interface EvalPrepManifest {
   outDir: string;
   limit?: number;
   groupCap?: number;
+  selectOnly: boolean;
   meta: boolean;
   clusterCount: number;
   selectedClusterIds: string[];
@@ -170,7 +172,7 @@ export async function runEvalPrep(deps: EvalPrepDeps): Promise<EvalPrepResult> {
   });
 
   const modelResults: EvalPrepModelManifest[] = [];
-  for (const model of deps.models) {
+  for (const model of deps.selectOnly ? [] : deps.models) {
     const modelDir = join(deps.outDir, 'distilled', model.label);
     const skillsDir = join(modelDir, 'skills');
     const metaSkillsDir = join(modelDir, 'meta-skills');
@@ -254,6 +256,7 @@ export async function runEvalPrep(deps: EvalPrepDeps): Promise<EvalPrepResult> {
     outDir: deps.outDir,
     ...(deps.limit !== undefined ? { limit: deps.limit } : {}),
     ...(deps.groupCap !== undefined ? { groupCap: deps.groupCap } : {}),
+    selectOnly: deps.selectOnly ?? false,
     meta: deps.meta ?? false,
     clusterCount: prepared.clusters.length,
     selectedClusterIds,

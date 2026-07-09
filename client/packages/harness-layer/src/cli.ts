@@ -180,7 +180,7 @@ Commands:
                                                  --distiller-model is the arbitrage knob: it is the
                                                  model that WRITES the skills, distinct from the
                                                  cheap runtime model your captures ran under.
-  distill eval-prep [--limit N] [--out <dir>] [--json] [--meta]
+  distill eval-prep [--limit N] [--out <dir>] [--json] [--meta] [--select-only]
                     [--group-cap N]
                     [--models gpt-5.4-mini,gpt-5.5]
                     [--max-clusters N] [--max-contrastive N]
@@ -191,6 +191,8 @@ Commands:
                                                  --meta runs per-model cross-instance
                                                  meta-distill over each model's accepted
                                                  stage-1 skills.
+                                                 --select-only writes selection/raw evidence
+                                                 artifacts and skips all model calls.
 
 Environment:
   JINN_DISCOVERY_URL       Override the discovery indexer URL (default: testnet Ponder indexer)
@@ -701,6 +703,7 @@ export async function runJinnLayerCli(
         'max-lessons': { type: 'string' },
         'max-patterns': { type: 'string' },
         'group-cap': { type: 'string' },
+        'select-only': { type: 'boolean', default: false },
       },
       allowPositionals: true,
     });
@@ -1105,13 +1108,14 @@ export async function runJinnLayerCli(
 
       const rawModels = (parsed.values.models as string | undefined) ?? 'gpt-5.4-mini,gpt-5.5';
       const models = rawModels.split(',').map((m) => m.trim()).filter((m) => m.length > 0);
-      if (models.length === 0) {
+      const selectOnly = parsed.values['select-only'] as boolean;
+      if (!selectOnly && models.length === 0) {
         writer.write(`error: --models must include at least one model\n\n${USAGE}`);
         return 2;
       }
 
       const distillerFactory = dd.distillerFactory ?? defaultDistillerFactory;
-      const modelConfigs = models.map((model) => {
+      const modelConfigs = selectOnly ? [] : models.map((model) => {
         const ports = distillerFactory('codex', model);
         return {
           label: modelLabel(model),
@@ -1135,6 +1139,7 @@ export async function runJinnLayerCli(
         models: modelConfigs,
         outDir,
         distribution: 'coding',
+        selectOnly,
         meta: metaEnabled,
         selection: {
           ...(maxClusters !== undefined ? { maxClusters } : {}),
@@ -1154,6 +1159,7 @@ export async function runJinnLayerCli(
           `bridge: ${result.manifest.bridge.bridged} bridged, ${result.manifest.bridge.excludedHeldOut} held-out, ${result.manifest.bridge.deduped} deduped, ${result.manifest.bridge.errors} error(s)`,
           'mode: local-only (no chain publishes or anchors)',
         ];
+        if (result.manifest.selectOnly) lines.push('mode: select-only (no model calls)');
         if (result.manifest.bridge.verdictsTruncated) {
           lines.push(`warning: verdict fetch hit the ${limit}-row limit — attempt groups may be PARTIAL; raise --limit to cover the corpus (#1478)`);
         }
