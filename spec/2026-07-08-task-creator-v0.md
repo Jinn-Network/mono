@@ -1,8 +1,9 @@
 # Task Creator v0 — mining execution traces into evaluable tasks
 
-- **Version:** 0.1 (design draft — synthesized from a four-agent design/adversarial
+- **Version:** 0.2 (design draft — v0.1 synthesized from a four-agent design/adversarial
   panel, 2026-07-08, plus two correction passes: the usage-trace-mining reframe and
-  the scrub-collision / lookup-contamination / gate-precision flags, 2026-07-09)
+  the scrub-collision / lookup-contamination / gate-precision flags, 2026-07-09.
+  **v0.2 locks decisions D1–D4**, 2026-07-09.)
 - **Date:** 2026-07-08 (written 2026-07-09)
 - **Author:** Ritsu (design session)
 - **Shape:** `design` — output is this spec. Building any rung is a follow-on `feat`,
@@ -134,7 +135,8 @@ capable host, then the everyday generator merges the result. The flow:
    `patch`, `test_patch`, `FAIL_TO_PASS`/`PASS_TO_PASS`,
    `install_config.{test_cmd,log_parser}`.
 2. Candidates run through admission (gold must grade as resolving; known-bad must
-   fail once §5.1 lands). Survivors persist to a **`MintedPoolStore`** (sibling of
+   fail — hard-reject for minted instances per D3). Survivors persist to a
+   **`MintedPoolStore`** (sibling of
    `ValidatedPoolStore`) and are published as a **minted-rows artifact on IPFS**.
 3. The fetcher learns one trick: a **row-routing `HfFetcher`** — if
    `hf_dataset` starts with `ipfs://<cid>`, fetch the row from the minted-rows
@@ -190,7 +192,12 @@ Built ahead of all gates, by explicit choice. Four deliverables:
   A task that cannot tell right from wrong is worthless as a data source.
   Motivation: weak-suite rates reported for SWE-bench-family benchmarks (a ~28.5%
   figure surfaced in the design-session research pass — **reported, pending anchor
-  to a primary source**, AC #3). *Decision point D3:* flag vs. hard-reject.
+  to a primary source**, AC #3). **Policy (D3):** hard-reject all newly minted
+  instances when known-bad passes; for the existing benchmark pool, flag failures
+  and exclude flagged instances from distillation and Task Creator targeting, then
+  re-publish a stricter vetted-pool artifact once impact is measured — new supply
+  meets the higher bar immediately; legacy supply migrates deliberately so the
+  current task flow is not mass-invalidated.
 - **Exemplar-pair yield metric.** Count instances that end with **both** a verified
   pass and a verified fail — the pair is exactly what distillation feeds on
   (`bridge.ts` retains per-(instance, polarity) groups). This is the numerator of
@@ -199,6 +206,12 @@ Built ahead of all gates, by explicit choice. Four deliverables:
   deadline: every day of capture without it is raw material lost.
 
 ### 5.2 Rung 1 — commit-echo (mint from real human commits)
+
+**Role (D4):** commit-echo is the **plumbing proof** — it validates the
+minted-row store, IPFS fetcher route, admission, and generator union with the least
+novelty. It is **not** the final learning substrate: public upstream commits create
+lookup contamination (below). Hunk-subset echo (§5.3) is the more trace-native rung
+and follows once blinded provenance and dogfood trace capture are ready.
 
 We already have admitted, image-pinned Docker environments for a set of repos. Real
 developers keep committing real fixes to those repos after our dataset snapshot.
@@ -326,15 +339,18 @@ returns null** — in which case mint *scaling* pauses (distillation is the only
 committed customer), while rung 0 and already-built plumbing stand (verified
 verdicts have other consumers; the "regardless vs. on-proof" line of §2).
 
-## 9. Economics (decision point D1)
+## 9. Economics (D1)
 
-Minted tasks need a funded delivery-fee escrow like any other posting. The panel's
-proposal: **self-funded launcher escrow** via the existing `computeEscrowWei`
-(`client/src/solver-types/_swe-rebench-v2-escrow.ts`) — the operator who runs the
-mint pipeline escrows fees for the tasks it posts, bounded by the ≤25% quota and the
-informative-band stop. This touches parked economics (who ultimately pays for
-synthetic supply, and whether minted-task fees should differ from live-task fees),
-so it is a **decision point for sign-off**, not a resolved design.
+Minted tasks need a funded delivery-fee escrow like any other posting. **Decision
+(D1): self-funded launcher escrow for v0.** The operator who runs the minting/posting
+pipeline pays via the existing `computeEscrowWei`
+(`client/src/solver-types/_swe-rebench-v2-escrow.ts`) path — same delivery-fee
+semantics as live tasks, bounded by the ≤25% synthetic quota and the informative-band
+stop. No protocol subsidy and no special synthetic pricing at v0: the point is to
+learn whether minted supply creates useful verified trajectories per dollar, and
+hiding the cost would corrupt that signal. Broader economics (who ultimately pays
+for synthetic supply at scale, whether minted-task fees should differ) remain parked
+for a later session.
 
 ## 10. The mineable-trace contract (rung-0 deliverable, with a deadline)
 
@@ -354,15 +370,25 @@ mineable:
   evaluation possible at all (§12). Credit assignment without consumption data is
   confounded beyond rescue.
 
-**Decision point D2 — the scrub collision.** This contract is in direct tension
+**Consent tier (D2) — the scrub collision.** This contract is in direct tension
 with the scrub pipeline's fail-closed posture (`client/src/trajectory/scrub/` —
 secretlint, PII stages, layer-2 scrub; and the #1409 over-redaction history). A
-private repo's final diff is not metadata — it *is* the sensitive payload. The
-proposed resolution is a **consent tier**: "mineable" as an explicit opt-in level in
-the capture envelope shape (extending DR-2026-05-07-g), where opting in retains the
-contract fields through scrub and opting out preserves today's behavior. This is
-the largest open design decision in the spec and likely warrants its own short
-design pass before rung-0 implementation.
+private repo's final diff is not metadata — it *is* the sensitive payload. **Decision
+(D2):** mineability is an explicit opt-in consent tier in the capture envelope shape
+(extending DR-2026-05-07-g), split into **two consents**:
+
+1. **Retain locally for mining** — opting in allows the scrub pipeline to retain the
+   contract fields (repo identity, commit, diff, test commands, skill-consumption
+   events) for local trace-mining. Default capture remains scrubbed/non-mineable.
+2. **Publish/admit as a task** — a separate gate. Even with mining consent, publishing
+   a mined task still requires explicit approval, because the diff/test payload may
+   expose private work.
+
+This preserves today's privacy posture without losing option value: traces accumulate
+only where consent is granted, and publication remains a second, deliberate step.
+The envelope-shape extension still warrants a short implementation design pass at
+rung-0 build time (field names, consent UX, scrub-stage wiring), but the policy is
+locked.
 
 ## 11. Held-out hygiene — the repo-keyed extension
 
@@ -397,25 +423,26 @@ design itself is its own session.
    *unmodified* evaluator path (row-routing fetcher + `rowHash` + image pin intact)
    on a proper amd64 host. Same pattern as cap-eval's "the rig is a follow-on
    `feat`" — this spec signs off methodology; the proof is the first build gate.
-2. **Discrimination check live.** `validatePoolInstances` rejects (or flags, per
-   D3) an instance whose known-bad patch scores 1, with a regression test.
+2. **Discrimination check live.** `validatePoolInstances` hard-rejects minted
+   instances whose known-bad patch scores 1; flags (and excludes from distillation
+   targeting) benchmark-pool failures per D3, with regression tests for both paths.
 3. **Claims anchored.** The ~28.5% weak-suite figure cited to a primary source (or
    re-derived on our own pool and the number replaced); the SWE-smith spike findings
    written up as the #994 finding (a DR or issue comment) and the issue closed.
 4. **Contract landed.** The mineable-trace contract fields defined in the capture
-   envelope shape with the consent tier decided (D2), so capture begins retaining
-   mineable material.
+   envelope shape with the two-tier consent model (D2), so capture can begin
+   retaining mineable material where opted in.
 5. **Hygiene enforced.** Repo-keyed exclusion in the mint path with a test proving
    a fresh-ID instance from a slate repo is refused at mint time.
 
-## 14. Decision points for sign-off
+## 14. Decisions locked in this session
 
-| # | Decision | Proposal on the table |
+| # | Decision | Resolution |
 |---|---|---|
-| D1 | Who escrows delivery fees for minted tasks (§9) | Self-funded launcher escrow via `computeEscrowWei`, bounded by quota + band stop |
-| D2 | Mineable-trace consent tier vs. scrub posture (§10) | Explicit opt-in "mineable" tier in the capture envelope; own short design pass |
-| D3 | Discrimination failure: flag or hard-reject (§5.1) | Hard-reject for minted instances; flag-only (initially) for the existing benchmark pool, to avoid mass-invalidating the current pool before the number is re-derived |
-| D4 | Commit-echo before hunk-subset echo (§5 ordering) | Yes — free trustworthy golds first; echo needs blinded provenance + dogfood traces |
+| **D1** | Who escrows delivery fees for minted tasks (§9) | **Self-funded launcher escrow for v0** via `computeEscrowWei`, same fee semantics as live tasks, bounded by ≤25% quota + informative-band stop. No protocol subsidy or special synthetic pricing — cost signal must be honest. |
+| **D2** | Mineable-trace consent tier vs. scrub posture (§10) | **Explicit opt-in consent tier**, split: (1) retain locally for mining, (2) publish/admit as a task. Default capture stays scrubbed/non-mineable. Envelope-shape implementation details deferred to rung-0 build. |
+| **D3** | Discrimination failure: flag or hard-reject (§5.1) | **Hard-reject all newly minted instances** when known-bad passes. **Flag + exclude from distillation/targeting** for the existing benchmark pool initially; re-publish a stricter vetted-pool artifact once impact is measured. |
+| **D4** | Commit-echo before hunk-subset echo (§5 ordering) | **Yes — commit-echo first** as plumbing proof (minted-row store, IPFS route, admission, generator union). Treat as yield validation, not final learning substrate (lookup contamination). Hunk-subset echo next once blinded provenance + dogfood traces are ready. |
 
 ## 15. References
 
