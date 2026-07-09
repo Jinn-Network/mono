@@ -878,7 +878,7 @@ __metadata:
     "@hono/node-server": "npm:^1.19.10"
     "@jinn-network/sdk": "portal:../sdk"
     drizzle-orm: "npm:^0.45.2"
-    hono: "npm:^4.12.25"
+    hono: "npm:^4.12.28"
     ponder: "npm:^0.16.6"
     viem: "npm:^2.52.2"
   languageName: node
@@ -2560,10 +2560,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"hono@npm:^4.12.25":
-  version: 4.12.25
-  resolution: "hono@npm:4.12.25"
-  checksum: 10c0/9216d647fe2f39b17855b0e74913688b837e3fa9519d367c7beeec399265b36608a820928cc33ab926eee58fe2daf7e33296235b52e56dbfac0fbcd51a5e818e
+"hono@npm:^4.12.28":
+  version: 4.12.28
+  resolution: "hono@npm:4.12.28"
+  checksum: 10c0/ae40349d1e2bbc3cd1f08083644287dc8cbdb9ca6ed8f1bcd5cd896a72763a79dd38a4153ef9bfb4102ae8f2203c36fa9033863f03431f9f52d21f4d720dbce5
   languageName: node
   linkType: hard
 
