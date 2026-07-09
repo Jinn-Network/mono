@@ -181,7 +181,7 @@ Commands:
                                                  model that WRITES the skills, distinct from the
                                                  cheap runtime model your captures ran under.
   distill eval-prep [--limit N] [--out <dir>] [--json] [--meta] [--select-only]
-                    [--group-cap N]
+                    [--group-cap N] [--force] [--retry-errors]
                     [--models gpt-5.4-mini,gpt-5.5]
                     [--max-clusters N] [--max-contrastive N]
                     [--max-lessons N] [--max-patterns N]
@@ -193,6 +193,9 @@ Commands:
                                                  stage-1 skills.
                                                  --select-only writes selection/raw evidence
                                                  artifacts and skips all model calls.
+                                                 Existing --out dirs resume by default;
+                                                 --force rebuilds from scratch, and
+                                                 --retry-errors reruns error records.
 
 Environment:
   JINN_DISCOVERY_URL       Override the discovery indexer URL (default: testnet Ponder indexer)
@@ -704,6 +707,8 @@ export async function runJinnLayerCli(
         'max-patterns': { type: 'string' },
         'group-cap': { type: 'string' },
         'select-only': { type: 'boolean', default: false },
+        force: { type: 'boolean', default: false },
+        'retry-errors': { type: 'boolean', default: false },
       },
       allowPositionals: true,
     });
@@ -1131,25 +1136,33 @@ export async function runJinnLayerCli(
       const groupCap = parseRequiredPositiveIntFlag('group-cap');
       const metaEnabled = parsed.values.meta as boolean;
 
-      const result = await runEvalPrep({
-        verdictSource,
-        fetchEvidence,
-        publishDeps: buildLocalOnlyPublishDeps(),
-        slate: { instanceIds: slateInstanceIds },
-        models: modelConfigs,
-        outDir,
-        distribution: 'coding',
-        selectOnly,
-        meta: metaEnabled,
-        selection: {
-          ...(maxClusters !== undefined ? { maxClusters } : {}),
-          ...(maxContrastive !== undefined ? { maxContrastive } : {}),
-          ...(maxLessons !== undefined ? { maxLessons } : {}),
-          ...(maxPatterns !== undefined ? { maxPatterns } : {}),
-        },
-        ...(groupCap !== undefined ? { groupCap } : {}),
-        ...(limit !== undefined ? { limit } : {}),
-      });
+      let result;
+      try {
+        result = await runEvalPrep({
+          verdictSource,
+          fetchEvidence,
+          publishDeps: buildLocalOnlyPublishDeps(),
+          slate: { instanceIds: slateInstanceIds },
+          models: modelConfigs,
+          outDir,
+          distribution: 'coding',
+          selectOnly,
+          meta: metaEnabled,
+          force: parsed.values.force as boolean,
+          retryErrors: parsed.values['retry-errors'] as boolean,
+          selection: {
+            ...(maxClusters !== undefined ? { maxClusters } : {}),
+            ...(maxContrastive !== undefined ? { maxContrastive } : {}),
+            ...(maxLessons !== undefined ? { maxLessons } : {}),
+            ...(maxPatterns !== undefined ? { maxPatterns } : {}),
+          },
+          ...(groupCap !== undefined ? { groupCap } : {}),
+          ...(limit !== undefined ? { limit } : {}),
+        });
+      } catch (err) {
+        writer.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+        return 1;
+      }
 
       if (parsed.values.json) {
         writer.write(JSON.stringify({ ...result, outDir }) + '\n');

@@ -123,7 +123,7 @@ export function scoreCluster(cluster: DistillCluster): ClusterScore {
   };
 }
 
-function capsFromOptions(opts: ClusterSelectionOptions): Required<ClusterSelectionOptions> {
+export function resolveClusterSelectionCaps(opts: ClusterSelectionOptions = {}): Required<ClusterSelectionOptions> {
   return {
     maxContrastive: opts.maxContrastive ?? DEFAULT_CAPS.maxContrastive,
     maxLessons: opts.maxLessons ?? DEFAULT_CAPS.maxLessons,
@@ -136,7 +136,7 @@ export function selectUsefulClusters(
   clusters: DistillCluster[],
   opts: ClusterSelectionOptions = {},
 ): ClusterSelectionResult {
-  const caps = capsFromOptions(opts);
+  const caps = resolveClusterSelectionCaps(opts);
   const ranked = clusters
     .map((cluster) => ({ cluster, score: scoreCluster(cluster) }))
     .sort((a, b) => {

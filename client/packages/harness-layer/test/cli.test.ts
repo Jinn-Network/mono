@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { fileURLToPath } from 'node:url';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -14,7 +14,7 @@ import type { DistillCluster, DistillLLMOutput, MetaDistillLLMOutput } from '../
 import type { MetaCluster } from '../src/cluster.js';
 import { parseSkillMarkdown } from '../src/skill-package.js';
 import { readDistillMode, writeDistillMode } from '../src/distill-mode.js';
-import { assertAttemptedClusterIds } from '../src/eval-prep.js';
+import { assertAttemptedClusterIds, attemptRecordFileName } from '../src/eval-prep.js';
 
 /** A distinct temp mode file for a test (env-injected via JINN_LAYER_DISTILL_MODE_PATH). */
 function tmpModeFile(): string {
@@ -525,6 +525,30 @@ describe('jinn-layer distill run', () => {
     };
   }
 
+  function validEvalOutput(name: string, extra = ''): DistillLLMOutput {
+    return {
+      name,
+      description: 'Use when a grouped solver attempt set exposes a repeatable repair signal. Not for: unrelated tasks.',
+      body: [
+        '## When to use',
+        `A grouped solver attempt set exposes a repeatable repair signal.${extra}`,
+        '## Strategy',
+        'Compare the retained evidence group and distill the shared decision point.',
+        '## Steps',
+        '1. Read the grouped attempts. 2. Extract the stable rule.',
+        '## Pitfalls',
+        'Do not quote instance identifiers or patch-only trivia.',
+        '## Verify',
+        'Check the skill against every retained attempt in the cluster.',
+      ].join('\n\n'),
+    };
+  }
+
+  const TWO_PATTERN_REFS = [
+    dref('alpha__repo-1', 'pass'),
+    dref('beta__repo-2', 'pass'),
+  ];
+
   it('runs the pipeline under stubs and writes SKILL.md packages', async () => {
     const { writer, out } = capture();
     const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-cli-'));
@@ -997,6 +1021,450 @@ describe('jinn-layer distill run', () => {
       ['contrastive:alpha__repo-1'],
       ['contrastive:alpha__repo-1', 'lesson:outside__repo-9'],
     )).toThrow(/did not match frozen selection/);
+  });
+
+  it('distill eval-prep reruns idempotently without bridge, distill, or meta calls', async () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-eval-prep-cli-'));
+    const list = vi.fn(async () => TWO_PATTERN_REFS);
+    const stage1Calls: string[] = [];
+    const metaCalls: string[] = [];
+    const first = await runJinnLayerCli([
+      'distill', 'eval-prep',
+      '--out', outDir,
+      '--models', 'gpt-5.4-mini',
+      '--max-clusters', '2',
+      '--max-patterns', '2',
+      '--meta',
+    ], {
+      writer: capture().writer,
+      distillDeps: stubDeps({
+        verdictSource: { list },
+        publishDeps: undefined,
+        distill: undefined,
+        metaDistill: undefined,
+        slateInstanceIds: new Set(),
+        distillerFactory: () => ({
+          distill: async (cluster: DistillCluster) => {
+            stage1Calls.push(cluster.clusterId);
+            return validEvalOutput(`idem-${cluster.instanceIds[0]}`);
+          },
+          metaDistill: async (cluster: MetaCluster) => {
+            metaCalls.push(cluster.metaClusterId);
+            return META_OUT;
+          },
+        }),
+      }),
+    });
+
+    expect(first).toBe(0);
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(stage1Calls).toHaveLength(2);
+    expect(metaCalls).toEqual(['cross-instance:strategic-pattern']);
+    const topManifestBefore = readFileSync(join(outDir, 'manifest.json'), 'utf-8');
+    const modelManifestBefore = readFileSync(join(outDir, 'distilled', 'mini', 'manifest.json'), 'utf-8');
+
+    const secondList = vi.fn(async () => {
+      throw new Error('should not bridge on resume');
+    });
+    const secondStage1 = vi.fn(async () => {
+      throw new Error('should not distill on resume');
+    });
+    const secondMeta = vi.fn(async () => {
+      throw new Error('should not meta-distill on resume');
+    });
+    const second = await runJinnLayerCli([
+      'distill', 'eval-prep',
+      '--out', outDir,
+      '--models', 'gpt-5.4-mini',
+      '--max-clusters', '2',
+      '--max-patterns', '2',
+      '--meta',
+    ], {
+      writer: capture().writer,
+      distillDeps: stubDeps({
+        verdictSource: { list: secondList },
+        publishDeps: undefined,
+        distill: undefined,
+        metaDistill: undefined,
+        slateInstanceIds: new Set(),
+        distillerFactory: () => ({ distill: secondStage1, metaDistill: secondMeta }),
+      }),
+    });
+
+    expect(second).toBe(0);
+    expect(secondList).not.toHaveBeenCalled();
+    expect(secondStage1).not.toHaveBeenCalled();
+    expect(secondMeta).not.toHaveBeenCalled();
+    expect(readFileSync(join(outDir, 'manifest.json'), 'utf-8')).toBe(topManifestBefore);
+    expect(readFileSync(join(outDir, 'distilled', 'mini', 'manifest.json'), 'utf-8')).toBe(modelManifestBefore);
+  });
+
+  it('distill eval-prep fills only missing stage-1 attempts on resume', async () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-eval-prep-cli-'));
+    const first = await runJinnLayerCli([
+      'distill', 'eval-prep',
+      '--out', outDir,
+      '--models', 'gpt-5.4-mini',
+      '--max-clusters', '2',
+      '--max-patterns', '2',
+      '--json',
+    ], {
+      writer: capture().writer,
+      distillDeps: stubDeps({
+        verdictSource: { list: async () => TWO_PATTERN_REFS },
+        publishDeps: undefined,
+        distill: undefined,
+        metaDistill: undefined,
+        slateInstanceIds: new Set(),
+        distillerFactory: () => ({
+          distill: async (cluster: DistillCluster) => validEvalOutput(`partial-${cluster.instanceIds[0]}`),
+          metaDistill: async (_cluster: MetaCluster) => META_OUT,
+        }),
+      }),
+    });
+    expect(first).toBe(0);
+
+    const selection = JSON.parse(readFileSync(join(outDir, 'selection.json'), 'utf-8')) as { selected: Array<{ clusterId: string }> };
+    const missing = selection.selected[1]!.clusterId;
+    rmSync(join(outDir, 'distilled', 'mini', 'attempts', attemptRecordFileName(missing)));
+
+    const calls: string[] = [];
+    const code = await runJinnLayerCli([
+      'distill', 'eval-prep',
+      '--out', outDir,
+      '--models', 'gpt-5.4-mini',
+      '--max-clusters', '2',
+      '--max-patterns', '2',
+      '--json',
+    ], {
+      writer: capture().writer,
+      distillDeps: stubDeps({
+        verdictSource: { list: async () => { throw new Error('should not bridge on resume'); } },
+        publishDeps: undefined,
+        distill: undefined,
+        metaDistill: undefined,
+        slateInstanceIds: new Set(),
+        distillerFactory: () => ({
+          distill: async (cluster: DistillCluster) => {
+            calls.push(cluster.clusterId);
+            return validEvalOutput(`partial-${cluster.instanceIds[0]}`);
+          },
+          metaDistill: async (_cluster: MetaCluster) => META_OUT,
+        }),
+      }),
+    });
+
+    expect(code).toBe(0);
+    expect(calls).toEqual([missing]);
+    const manifest = JSON.parse(readFileSync(join(outDir, 'distilled', 'mini', 'manifest.json'), 'utf-8'));
+    expect(manifest.published).toHaveLength(2);
+    expect(manifest.errors).toHaveLength(0);
+  });
+
+  it('distill eval-prep can add a new model label to an existing frozen selection', async () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-eval-prep-cli-'));
+    const first = await runJinnLayerCli([
+      'distill', 'eval-prep',
+      '--out', outDir,
+      '--models', 'gpt-5.4-mini',
+      '--max-clusters', '2',
+      '--max-patterns', '2',
+    ], {
+      writer: capture().writer,
+      distillDeps: stubDeps({
+        verdictSource: { list: async () => TWO_PATTERN_REFS },
+        publishDeps: undefined,
+        distill: undefined,
+        metaDistill: undefined,
+        slateInstanceIds: new Set(),
+        distillerFactory: () => ({
+          distill: async (cluster: DistillCluster) => validEvalOutput(`mini-${cluster.instanceIds[0]}`),
+          metaDistill: async (_cluster: MetaCluster) => META_OUT,
+        }),
+      }),
+    });
+    expect(first).toBe(0);
+
+    const calls: string[] = [];
+    const { writer, out } = capture();
+    const second = await runJinnLayerCli([
+      'distill', 'eval-prep',
+      '--out', outDir,
+      '--models', 'gpt-5.5',
+      '--max-clusters', '2',
+      '--max-patterns', '2',
+      '--json',
+    ], {
+      writer,
+      distillDeps: stubDeps({
+        verdictSource: { list: async () => { throw new Error('should not bridge on resume'); } },
+        publishDeps: undefined,
+        distill: undefined,
+        metaDistill: undefined,
+        slateInstanceIds: new Set(),
+        distillerFactory: () => ({
+          distill: async (cluster: DistillCluster) => {
+            calls.push(cluster.clusterId);
+            return validEvalOutput(`full-${cluster.instanceIds[0]}`);
+          },
+          metaDistill: async (_cluster: MetaCluster) => META_OUT,
+        }),
+      }),
+    });
+
+    expect(second).toBe(0);
+    expect(calls).toEqual(['pattern:alpha__repo-1', 'pattern:beta__repo-2']);
+    const result = JSON.parse(out());
+    expect(result.models.map((model: { label: string }) => model.label)).toEqual(['gpt-5.5', 'mini']);
+    const manifest = JSON.parse(readFileSync(join(outDir, 'manifest.json'), 'utf-8'));
+    expect(manifest.models.map((model: { label: string }) => model.label)).toEqual(['gpt-5.5', 'mini']);
+  });
+
+  it('distill eval-prep rejects changed selection config unless --force rebuilds from scratch', async () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-eval-prep-cli-'));
+    const first = await runJinnLayerCli([
+      'distill', 'eval-prep',
+      '--out', outDir,
+      '--models', 'gpt-5.4-mini',
+      '--max-clusters', '1',
+      '--max-patterns', '2',
+    ], {
+      writer: capture().writer,
+      distillDeps: stubDeps({
+        verdictSource: { list: async () => TWO_PATTERN_REFS },
+        publishDeps: undefined,
+        distill: undefined,
+        metaDistill: undefined,
+        slateInstanceIds: new Set(),
+        distillerFactory: () => ({
+          distill: async (cluster: DistillCluster) => validEvalOutput(`force-${cluster.instanceIds[0]}`),
+          metaDistill: async (_cluster: MetaCluster) => META_OUT,
+        }),
+      }),
+    });
+    expect(first).toBe(0);
+
+    const staleDir = join(outDir, 'distilled', 'mini', 'skills', 'stale-skill');
+    mkdirSync(staleDir, { recursive: true });
+    writeFileSync(join(staleDir, 'SKILL.md'), '# stale\n');
+
+    const conflict = capture();
+    const conflictCode = await runJinnLayerCli([
+      'distill', 'eval-prep',
+      '--out', outDir,
+      '--models', 'gpt-5.4-mini',
+      '--max-clusters', '2',
+      '--max-patterns', '2',
+    ], {
+      writer: conflict.writer,
+      distillDeps: stubDeps({
+        verdictSource: { list: async () => TWO_PATTERN_REFS },
+        publishDeps: undefined,
+        distill: undefined,
+        metaDistill: undefined,
+        slateInstanceIds: new Set(),
+        distillerFactory: () => ({
+          distill: async (cluster: DistillCluster) => validEvalOutput(`force-${cluster.instanceIds[0]}`),
+          metaDistill: async (_cluster: MetaCluster) => META_OUT,
+        }),
+      }),
+    });
+    expect(conflictCode).toBe(1);
+    expect(conflict.out()).toContain('different frozen selection config');
+    expect(existsSync(join(staleDir, 'SKILL.md'))).toBe(true);
+
+    const forceCalls: string[] = [];
+    const forced = await runJinnLayerCli([
+      'distill', 'eval-prep',
+      '--out', outDir,
+      '--models', 'gpt-5.4-mini',
+      '--max-clusters', '2',
+      '--max-patterns', '2',
+      '--force',
+    ], {
+      writer: capture().writer,
+      distillDeps: stubDeps({
+        verdictSource: { list: async () => TWO_PATTERN_REFS },
+        publishDeps: undefined,
+        distill: undefined,
+        metaDistill: undefined,
+        slateInstanceIds: new Set(),
+        distillerFactory: () => ({
+          distill: async (cluster: DistillCluster) => {
+            forceCalls.push(cluster.clusterId);
+            return validEvalOutput(`force-${cluster.instanceIds[0]}`);
+          },
+          metaDistill: async (_cluster: MetaCluster) => META_OUT,
+        }),
+      }),
+    });
+
+    expect(forced).toBe(0);
+    expect(forceCalls).toHaveLength(2);
+    expect(existsSync(join(staleDir, 'SKILL.md'))).toBe(false);
+  });
+
+  it('distill eval-prep treats error attempts as terminal unless --retry-errors is passed', async () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-eval-prep-cli-'));
+    const first = await runJinnLayerCli([
+      'distill', 'eval-prep',
+      '--out', outDir,
+      '--models', 'gpt-5.4-mini',
+      '--max-clusters', '1',
+    ], {
+      writer: capture().writer,
+      distillDeps: stubDeps({
+        verdictSource: { list: async () => [dref('alpha__repo-1', 'pass')] },
+        publishDeps: undefined,
+        distill: undefined,
+        metaDistill: undefined,
+        slateInstanceIds: new Set(),
+        distillerFactory: () => ({
+          distill: async () => { throw new Error('temporary model failure'); },
+          metaDistill: async (_cluster: MetaCluster) => META_OUT,
+        }),
+      }),
+    });
+    expect(first).toBe(1);
+
+    const skipped = vi.fn(async () => validEvalOutput('retry-alpha'));
+    const second = await runJinnLayerCli([
+      'distill', 'eval-prep',
+      '--out', outDir,
+      '--models', 'gpt-5.4-mini',
+      '--max-clusters', '1',
+    ], {
+      writer: capture().writer,
+      distillDeps: stubDeps({
+        verdictSource: { list: async () => { throw new Error('should not bridge on resume'); } },
+        publishDeps: undefined,
+        distill: undefined,
+        metaDistill: undefined,
+        slateInstanceIds: new Set(),
+        distillerFactory: () => ({ distill: skipped, metaDistill: async (_cluster: MetaCluster) => META_OUT }),
+      }),
+    });
+    expect(second).toBe(1);
+    expect(skipped).not.toHaveBeenCalled();
+
+    const retried: string[] = [];
+    const third = await runJinnLayerCli([
+      'distill', 'eval-prep',
+      '--out', outDir,
+      '--models', 'gpt-5.4-mini',
+      '--max-clusters', '1',
+      '--retry-errors',
+    ], {
+      writer: capture().writer,
+      distillDeps: stubDeps({
+        verdictSource: { list: async () => { throw new Error('should not bridge on resume'); } },
+        publishDeps: undefined,
+        distill: undefined,
+        metaDistill: undefined,
+        slateInstanceIds: new Set(),
+        distillerFactory: () => ({
+          distill: async (cluster: DistillCluster) => {
+            retried.push(cluster.clusterId);
+            return validEvalOutput('retry-alpha');
+          },
+          metaDistill: async (_cluster: MetaCluster) => META_OUT,
+        }),
+      }),
+    });
+    expect(third).toBe(0);
+    expect(retried).toEqual(['pattern:alpha__repo-1']);
+  });
+
+  it('distill eval-prep resumes meta by source signature and reruns when stage-1 inputs change', async () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-eval-prep-cli-'));
+    let changed = false;
+    const firstMetaCalls: string[] = [];
+    const first = await runJinnLayerCli([
+      'distill', 'eval-prep',
+      '--out', outDir,
+      '--models', 'gpt-5.4-mini',
+      '--max-clusters', '2',
+      '--max-patterns', '2',
+      '--meta',
+    ], {
+      writer: capture().writer,
+      distillDeps: stubDeps({
+        verdictSource: { list: async () => TWO_PATTERN_REFS },
+        publishDeps: undefined,
+        distill: undefined,
+        metaDistill: undefined,
+        slateInstanceIds: new Set(),
+        distillerFactory: () => ({
+          distill: async (cluster: DistillCluster) => validEvalOutput(`meta-${cluster.instanceIds[0]}`, changed ? ' Changed source.' : ''),
+          metaDistill: async (cluster: MetaCluster) => {
+            firstMetaCalls.push(cluster.metaClusterId);
+            return META_OUT;
+          },
+        }),
+      }),
+    });
+    expect(first).toBe(0);
+    expect(firstMetaCalls).toEqual(['cross-instance:strategic-pattern']);
+
+    const skippedMeta = vi.fn(async () => {
+      throw new Error('should not meta-distill when signature matches');
+    });
+    const second = await runJinnLayerCli([
+      'distill', 'eval-prep',
+      '--out', outDir,
+      '--models', 'gpt-5.4-mini',
+      '--max-clusters', '2',
+      '--max-patterns', '2',
+      '--meta',
+    ], {
+      writer: capture().writer,
+      distillDeps: stubDeps({
+        verdictSource: { list: async () => { throw new Error('should not bridge on resume'); } },
+        publishDeps: undefined,
+        distill: undefined,
+        metaDistill: undefined,
+        slateInstanceIds: new Set(),
+        distillerFactory: () => ({
+          distill: async (cluster: DistillCluster) => validEvalOutput(`meta-${cluster.instanceIds[0]}`),
+          metaDistill: skippedMeta,
+        }),
+      }),
+    });
+    expect(second).toBe(0);
+    expect(skippedMeta).not.toHaveBeenCalled();
+
+    const selection = JSON.parse(readFileSync(join(outDir, 'selection.json'), 'utf-8')) as { selected: Array<{ clusterId: string }> };
+    const changedCluster = selection.selected[0]!.clusterId;
+    rmSync(join(outDir, 'distilled', 'mini', 'attempts', attemptRecordFileName(changedCluster)));
+    changed = true;
+    const metaRerunCalls: string[] = [];
+    const third = await runJinnLayerCli([
+      'distill', 'eval-prep',
+      '--out', outDir,
+      '--models', 'gpt-5.4-mini',
+      '--max-clusters', '2',
+      '--max-patterns', '2',
+      '--meta',
+    ], {
+      writer: capture().writer,
+      distillDeps: stubDeps({
+        verdictSource: { list: async () => { throw new Error('should not bridge on resume'); } },
+        publishDeps: undefined,
+        distill: undefined,
+        metaDistill: undefined,
+        slateInstanceIds: new Set(),
+        distillerFactory: () => ({
+          distill: async (cluster: DistillCluster) => validEvalOutput(`meta-${cluster.instanceIds[0]}`, ' Changed source.'),
+          metaDistill: async (cluster: MetaCluster) => {
+            metaRerunCalls.push(cluster.metaClusterId);
+            return META_OUT;
+          },
+        }),
+      }),
+    });
+
+    expect(third).toBe(0);
+    expect(metaRerunCalls).toEqual(['cross-instance:strategic-pattern']);
   });
 });
 
