@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,6 +13,61 @@ import type { AttemptRef, BridgeEvidence } from '../src/bridge.js';
 import type { DistillCluster, DistillLLMOutput, MetaDistillLLMOutput } from '../src/distill.js';
 import type { MetaCluster } from '../src/cluster.js';
 import { parseSkillMarkdown } from '../src/skill-package.js';
+import { readDistilMode, writeDistilMode } from '../src/distil-mode.js';
+
+/** A distinct temp mode file for a test (env-injected via JINN_LAYER_DISTIL_MODE_PATH). */
+function tmpModeFile(): string {
+  return join(mkdtempSync(join(tmpdir(), 'jinn-distil-mode-')), 'distil.json');
+}
+
+/** A well-formed distiller output the own-captures rung-1 fixtures reuse. */
+const VALID_DISTILL: DistillLLMOutput = {
+  name: 'orm-fanout-dedup',
+  description: 'Use when a join fans out duplicate rows. Not for: single-table reads.',
+  body: [
+    '## When to use', 'A queryset returns duplicate rows after a join or prefetch.',
+    '## Strategy', 'Collapse the duplicates at the ORM layer, near the join that produced them.',
+    '## Steps', '1. Identify the fan-out join. 2. Apply .distinct() after it.',
+    '## Pitfalls', 'An order_by on a joined column can re-expand the collapsed rows.',
+    '## Verify', 'Assert the row count equals the expected unique count.',
+  ].join('\n\n'),
+};
+
+/** An evaluator-verified own capture that runs on a CHEAP runtime model. */
+function ownCapture(over: Partial<CapturedTask> = {}): CapturedTask {
+  return {
+    session: { sessionId: 'own-orm-dedup', capturedAt: '2026-07-09T08:00:00.000Z' },
+    task: { summary: 'fix duplicate rows after a join in the report query', distributionTags: ['coding'] },
+    // Runtime model is the CHEAP knob — the distiller model is separate.
+    environment: { harness: { name: 'claude-code', version: '1.0.0' }, model: 'claude-haiku-4-5', tools: [] },
+    steps: [
+      {
+        spanId: 'patch',
+        parentSpanId: null,
+        name: 'tool:apply_patch',
+        startTimeUnixNano: '1720000000000000000',
+        endTimeUnixNano: '1720000000000000000',
+        attributes: { patch: 'diff --git a/report.py b/report.py\n+ return qs.distinct()  # dedup after join\n' },
+        redactedKeys: [],
+      },
+    ],
+    outcome: { status: 'completed', verifiabilityTier: 'evaluator-verified' },
+    cost: { durationMs: 1000 },
+    provenance: 'contributed',
+    ...over,
+  };
+}
+
+/** Write CapturedTask files into a fresh captures dir; returns the dir. */
+function capturesDirWith(...tasks: CapturedTask[]): string {
+  const dir = mkdtempSync(join(tmpdir(), 'jinn-captures-'));
+  for (const t of tasks) writeFileSync(join(dir, `${t.session.sessionId}.json`), JSON.stringify(t));
+  return dir;
+}
+
+function stubDistilDeps(over: Partial<DistilCliDeps> = {}): DistilCliDeps {
+  return { distill: async () => VALID_DISTILL, ...over };
+}
 
 async function withEnv(updates: Record<string, string | undefined>, fn: () => Promise<void>): Promise<void> {
   const previous = new Map<string, string | undefined>();
@@ -657,72 +712,43 @@ describe('jinn-layer distill run', () => {
 });
 
 describe('jinn-layer distil (own captures, rung 1)', () => {
-  const VALID_DISTILL: DistillLLMOutput = {
-    name: 'orm-fanout-dedup',
-    description: 'Use when a join fans out duplicate rows. Not for: single-table reads.',
-    body: [
-      '## When to use', 'A queryset returns duplicate rows after a join or prefetch.',
-      '## Strategy', 'Collapse the duplicates at the ORM layer, near the join that produced them.',
-      '## Steps', '1. Identify the fan-out join. 2. Apply .distinct() after it.',
-      '## Pitfalls', 'An order_by on a joined column can re-expand the collapsed rows.',
-      '## Verify', 'Assert the row count equals the expected unique count.',
-    ].join('\n\n'),
-  };
-
-  /** An evaluator-verified own capture that runs on a CHEAP runtime model. */
-  function ownCapture(over: Partial<CapturedTask> = {}): CapturedTask {
-    return {
-      session: { sessionId: 'own-orm-dedup', capturedAt: '2026-07-09T08:00:00.000Z' },
-      task: { summary: 'fix duplicate rows after a join in the report query', distributionTags: ['coding'] },
-      // Runtime model is the CHEAP knob — the distiller model is separate.
-      environment: { harness: { name: 'claude-code', version: '1.0.0' }, model: 'claude-haiku-4-5', tools: [] },
-      steps: [
-        {
-          spanId: 'patch',
-          parentSpanId: null,
-          name: 'tool:apply_patch',
-          startTimeUnixNano: '1720000000000000000',
-          endTimeUnixNano: '1720000000000000000',
-          attributes: { patch: 'diff --git a/report.py b/report.py\n+ return qs.distinct()  # dedup after join\n' },
-          redactedKeys: [],
-        },
-      ],
-      outcome: { status: 'completed', verifiabilityTier: 'evaluator-verified' },
-      cost: { durationMs: 1000 },
-      provenance: 'contributed',
-      ...over,
-    };
-  }
-
-  /** Write CapturedTask files into a fresh captures dir; returns the dir. */
-  function capturesDirWith(...tasks: CapturedTask[]): string {
-    const dir = mkdtempSync(join(tmpdir(), 'jinn-captures-'));
-    for (const t of tasks) writeFileSync(join(dir, `${t.session.sessionId}.json`), JSON.stringify(t));
-    return dir;
-  }
-
-  function stubDistilDeps(over: Partial<DistilCliDeps> = {}): DistilCliDeps {
-    return { distill: async () => VALID_DISTILL, ...over };
-  }
+  // These tests exercise a consented LOCAL run: point the where-it-runs mode
+  // (#1490) at a fresh file pre-set to `local`, so a bare `distil` runs the
+  // engine rather than showing first-run consent. Consent/mode behaviour has
+  // its own describe below.
+  beforeEach(() => {
+    const modePath = tmpModeFile();
+    writeDistilMode('local', modePath);
+    process.env['JINN_LAYER_DISTIL_MODE_PATH'] = modePath;
+  });
+  afterEach(() => {
+    delete process.env['JINN_LAYER_DISTIL_MODE_PATH'];
+  });
 
   it('AC: distils a fixture capture and installs a parseable SKILL.md on disk', async () => {
     const { writer, out } = capture();
     const capturesDir = capturesDirWith(ownCapture());
     const outDir = mkdtempSync(join(tmpdir(), 'jinn-distil-out-'));
 
+    // #1490: install is now an explicit step — pass --install all to land the
+    // skill in the active dir (default is stage-only, not installed).
     const code = await runJinnLayerCli(
-      ['distil', '--captures', capturesDir, '--out', outDir],
+      ['distil', '--captures', capturesDir, '--out', outDir, '--install', 'all'],
       { writer, distilDeps: stubDistilDeps() },
     );
 
     expect(code).toBe(0);
-    // The skill is installed to disk under <out>/<name>/SKILL.md — the same
-    // shape `skills install` writes, via the shared createLocalSkillSink.
+    // The installed skill lands under <out>/<name>/SKILL.md — the same shape
+    // `skills install` writes, via the shared createLocalSkillSink.
     const md = readFileSync(join(outDir, 'orm-fanout-dedup', 'SKILL.md'), 'utf-8');
     const pkg = parseSkillMarkdown(md);
     expect(pkg.name).toBe('orm-fanout-dedup');
     expect(pkg.jinn.skillKind).toBe('strategic-pattern');
-    expect(out()).toContain('INSTALLED strategic-pattern');
+    // The #1490 run presentation shows the skill in the installed panel with
+    // its source-capture provenance, and states nothing left the machine.
+    expect(out()).toContain('orm-fanout-dedup');
+    expect(out()).toMatch(/installed · ready/);
+    expect(out()).toContain('nothing left this machine');
   });
 
   it('AC: install-all — every produced skill lands in the install dir', async () => {
@@ -738,12 +764,13 @@ describe('jinn-layer distil (own captures, rung 1)', () => {
     // Give each cluster a distinct skill name so both install side by side.
     let n = 0;
     const code = await runJinnLayerCli(
-      ['distil', '--captures', capturesDir, '--out', outDir, '--json'],
+      ['distil', '--captures', capturesDir, '--out', outDir, '--install', 'all', '--json'],
       { writer, distilDeps: stubDistilDeps({ distill: async () => ({ ...VALID_DISTILL, name: `skill-${++n}` }) }) },
     );
     expect(code).toBe(0);
     const result = JSON.parse(out());
     expect(result.distilled.published).toHaveLength(2);
+    expect(result.installed).toHaveLength(2);
     const dirs = readdirSync(outDir, { withFileTypes: true }).filter((d) => d.isDirectory());
     expect(dirs).toHaveLength(2);
   });
@@ -755,7 +782,7 @@ describe('jinn-layer distil (own captures, rung 1)', () => {
     const calls: Array<{ provider: string; model: string }> = [];
 
     const code = await runJinnLayerCli(
-      ['distil', '--captures', capturesDir, '--out', outDir, '--distiller-model', 'claude-opus-4-8'],
+      ['distil', '--captures', capturesDir, '--out', outDir, '--distiller-model', 'claude-opus-4-8', '--install', 'all'],
       {
         writer,
         distilDeps: {
@@ -809,7 +836,8 @@ describe('jinn-layer distil (own captures, rung 1)', () => {
       const outDir = mkdtempSync(join(tmpdir(), 'jinn-distil-out-'));
       const code = await runJinnLayerCli(['distil', '--out', outDir], { writer, distilDeps: stubDistilDeps() });
       expect(code).toBe(0);
-      expect(out()).toContain('INSTALLED');
+      // Install-agnostic: the run rendered the distilled skill by name.
+      expect(out()).toContain('orm-fanout-dedup');
     });
   });
 
@@ -822,7 +850,7 @@ describe('jinn-layer distil (own captures, rung 1)', () => {
       { writer, distilDeps: stubDistilDeps() },
     );
     expect(code).toBe(0);
-    expect(out()).toContain('No local captures');
+    expect(out()).toContain('No eligible captures');
   });
 
   it('skips a malformed capture file without corrupting --json stdout', async () => {
@@ -860,5 +888,423 @@ describe('jinn-layer distil (own captures, rung 1)', () => {
     );
     expect(code).toBe(2);
     expect(out()).toContain('distiller must be "claude" or "codex"');
+  });
+});
+
+describe('jinn-layer distil — consent + where-it-runs (#1490)', () => {
+  /** Record the sessionIds the distiller was actually asked to distil. */
+  function recordingDistil(seen: string[]): DistilCliDeps['distill'] {
+    return async (c) => {
+      seen.push(...c.instanceIds);
+      return { ...VALID_DISTILL, name: `s-${c.instanceIds[0]}` };
+    };
+  }
+
+  it('AC 1c: --where local persists the mode and echoes it, running nothing', async () => {
+    const modePath = tmpModeFile();
+    const seen: string[] = [];
+    await withEnv({ JINN_LAYER_DISTIL_MODE_PATH: modePath }, async () => {
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--where', 'local', '--captures', capturesDirWith(ownCapture())],
+        { writer, distilDeps: { distill: recordingDistil(seen) } },
+      );
+      expect(code).toBe(0);
+      expect(out()).toMatch(/mode set to local/);
+      expect(seen).toEqual([]); // setter only — never ran
+      expect(readDistilMode(modePath)).toBe('local');
+    });
+  });
+
+  it('AC 1c: --where defer and --where off persist and echo, running nothing', async () => {
+    for (const mode of ['defer', 'off'] as const) {
+      const modePath = tmpModeFile();
+      await withEnv({ JINN_LAYER_DISTIL_MODE_PATH: modePath }, async () => {
+        const { writer, out } = capture();
+        const code = await runJinnLayerCli(['distil', '--where', mode], { writer, distilDeps: stubDistilDeps() });
+        expect(code).toBe(0);
+        expect(readDistilMode(modePath)).toBe(mode);
+        expect(out()).toMatch(mode === 'defer' ? /mode set to deferred/ : /mode set to off/);
+      });
+    }
+  });
+
+  it('AC 1c: --where local --json emits the persisted shape', async () => {
+    const modePath = tmpModeFile();
+    await withEnv({ JINN_LAYER_DISTIL_MODE_PATH: modePath }, async () => {
+      const { writer, out } = capture();
+      await runJinnLayerCli(['distil', '--where', 'local', '--json'], { writer, distilDeps: stubDistilDeps() });
+      expect(JSON.parse(out())).toEqual({ where: 'local' });
+    });
+  });
+
+  it('rejects an unknown --where value with exit 2', async () => {
+    const modePath = tmpModeFile();
+    await withEnv({ JINN_LAYER_DISTIL_MODE_PATH: modePath }, async () => {
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(['distil', '--where', 'sideways'], { writer, distilDeps: stubDistilDeps() });
+      expect(code).toBe(2);
+      expect(out()).toContain('--where must be');
+      expect(readDistilMode(modePath)).toBe('unset'); // nothing persisted on error
+    });
+  });
+
+  it('AC 1a: first run (unset, non-interactive) defaults to defer, runs nothing, and does NOT persist', async () => {
+    const modePath = tmpModeFile();
+    const seen: string[] = [];
+    await withEnv({ JINN_LAYER_DISTIL_MODE_PATH: modePath }, async () => {
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--captures', capturesDirWith(ownCapture()), '--out', mkdtempSync(join(tmpdir(), 'jinn-distil-out-'))],
+        { writer, distilDeps: { distill: recordingDistil(seen), isTty: false } },
+      );
+      expect(code).toBe(0);
+      expect(out()).toMatch(/default is defer/i);
+      expect(out()).toMatch(/nothing runs/i);
+      expect(seen).toEqual([]); // safe default never runs the frontier pass
+      expect(readDistilMode(modePath)).toBe('unset'); // not locked in — a TTY run still gets consent
+    });
+  });
+
+  it('AC 1a: consent prompt returning local persists local and runs the pass', async () => {
+    const modePath = tmpModeFile();
+    const seen: string[] = [];
+    await withEnv({ JINN_LAYER_DISTIL_MODE_PATH: modePath }, async () => {
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--captures', capturesDirWith(ownCapture()), '--out', mkdtempSync(join(tmpdir(), 'jinn-distil-out-'))],
+        { writer, distilDeps: { distill: recordingDistil(seen), promptConsent: async () => 'local' } },
+      );
+      expect(code).toBe(0);
+      expect(readDistilMode(modePath)).toBe('local');
+      expect(seen).toEqual(['own-orm-dedup']); // it ran
+      expect(out()).toMatch(/recorded — distil mode is LOCAL/);
+      expect(out()).toContain('nothing left this machine'); // the run presentation followed
+    });
+  });
+
+  it('AC 1a: consent prompt returning defer persists defer and runs nothing', async () => {
+    const modePath = tmpModeFile();
+    const seen: string[] = [];
+    await withEnv({ JINN_LAYER_DISTIL_MODE_PATH: modePath }, async () => {
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--captures', capturesDirWith(ownCapture())],
+        { writer, distilDeps: { distill: recordingDistil(seen), promptConsent: async () => 'defer' } },
+      );
+      expect(code).toBe(0);
+      expect(readDistilMode(modePath)).toBe('defer');
+      expect(seen).toEqual([]);
+      expect(out()).toMatch(/DEFERRED/);
+    });
+  });
+
+  it('AC 1c: persisted defer runs nothing and prints the deferred path', async () => {
+    const modePath = tmpModeFile();
+    writeDistilMode('defer', modePath);
+    const seen: string[] = [];
+    await withEnv({ JINN_LAYER_DISTIL_MODE_PATH: modePath }, async () => {
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--captures', capturesDirWith(ownCapture())],
+        { writer, distilDeps: { distill: recordingDistil(seen) } },
+      );
+      expect(code).toBe(0);
+      expect(seen).toEqual([]);
+      expect(out()).toMatch(/deferred/i);
+      expect(out()).toContain('--where local');
+    });
+  });
+
+  it('persisted off runs nothing and says distil is off', async () => {
+    const modePath = tmpModeFile();
+    writeDistilMode('off', modePath);
+    const seen: string[] = [];
+    await withEnv({ JINN_LAYER_DISTIL_MODE_PATH: modePath }, async () => {
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--captures', capturesDirWith(ownCapture())],
+        { writer, distilDeps: { distill: recordingDistil(seen) } },
+      );
+      expect(code).toBe(0);
+      expect(seen).toEqual([]);
+      expect(out()).toMatch(/distil is OFF/);
+    });
+  });
+
+  it('AC 1b: persisted local renders the run presentation with the skills panel', async () => {
+    const modePath = tmpModeFile();
+    writeDistilMode('local', modePath);
+    const seen: string[] = [];
+    await withEnv({ JINN_LAYER_DISTIL_MODE_PATH: modePath }, async () => {
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--captures', capturesDirWith(ownCapture()), '--out', mkdtempSync(join(tmpdir(), 'jinn-distil-out-'))],
+        { writer, distilDeps: { distill: recordingDistil(seen) } },
+      );
+      expect(code).toBe(0);
+      expect(seen).toEqual(['own-orm-dedup']);
+      const o = out();
+      expect(o).toMatch(/distil: local/);
+      expect(o).toContain('s-own-orm-dedup'); // skill name in the panel
+      expect(o).toContain('from'); // provenance line
+      expect(o).toContain('fix duplicate rows after a join'); // source-capture summary
+      expect(o).toContain('/jinn skills'); // management hint
+    });
+  });
+
+  it('AC 1d: an errored cluster renders the failure state and points at --resume', async () => {
+    const modePath = tmpModeFile();
+    writeDistilMode('local', modePath);
+    await withEnv({ JINN_LAYER_DISTIL_MODE_PATH: modePath }, async () => {
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--captures', capturesDirWith(ownCapture()), '--out', mkdtempSync(join(tmpdir(), 'jinn-distil-out-'))],
+        { writer, distilDeps: { distill: async () => { throw new Error('the distiller stopped responding'); } } },
+      );
+      expect(code).toBe(1);
+      expect(out()).toMatch(/distil failed/i);
+      expect(out()).toContain('--resume');
+    });
+  });
+
+  it('AC 1c: --resume distils only the captures no installed skill covers', async () => {
+    const modePath = tmpModeFile();
+    writeDistilMode('local', modePath);
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-distil-out-'));
+    const capturesDir = capturesDirWith(ownCapture());
+    await withEnv({ JINN_LAYER_DISTIL_MODE_PATH: modePath }, async () => {
+      // First run installs a skill covering own-orm-dedup.
+      const first = capture();
+      const seen1: string[] = [];
+      await runJinnLayerCli(['distil', '--captures', capturesDir, '--out', outDir], {
+        writer: first.writer,
+        distilDeps: { distill: recordingDistil(seen1) },
+      });
+      expect(seen1).toEqual(['own-orm-dedup']);
+
+      // A second capture arrives; --resume distils only the uncovered one.
+      writeFileSync(
+        join(capturesDir, 'own-two.json'),
+        JSON.stringify(ownCapture({ session: { sessionId: 'own-two', capturedAt: '2026-07-09T09:00:00.000Z' } })),
+      );
+      const second = capture();
+      const seen2: string[] = [];
+      const code = await runJinnLayerCli(['distil', '--resume', '--captures', capturesDir, '--out', outDir], {
+        writer: second.writer,
+        distilDeps: { distill: recordingDistil(seen2) },
+      });
+      expect(code).toBe(0);
+      expect(seen2).toEqual(['own-two']); // the covered capture was skipped
+    });
+  });
+
+  it('--resume never bypasses consent: on an unset mode it runs nothing (non-interactive)', async () => {
+    const modePath = tmpModeFile(); // absent → unset
+    const seen: string[] = [];
+    await withEnv({ JINN_LAYER_DISTIL_MODE_PATH: modePath }, async () => {
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--resume', '--captures', capturesDirWith(ownCapture()), '--out', mkdtempSync(join(tmpdir(), 'jinn-distil-out-'))],
+        { writer, distilDeps: { distill: recordingDistil(seen), isTty: false } },
+      );
+      expect(code).toBe(0);
+      expect(seen).toEqual([]); // no frontier pass without consent
+      expect(out()).toMatch(/default is defer/i); // it fell through to first-run consent
+      expect(readDistilMode(modePath)).toBe('unset');
+    });
+  });
+
+  it('AC 1c: --resume with everything already distilled says nothing to resume', async () => {
+    const modePath = tmpModeFile();
+    writeDistilMode('local', modePath);
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-distil-out-'));
+    const capturesDir = capturesDirWith(ownCapture());
+    await withEnv({ JINN_LAYER_DISTIL_MODE_PATH: modePath }, async () => {
+      await runJinnLayerCli(['distil', '--captures', capturesDir, '--out', outDir], {
+        writer: capture().writer,
+        distilDeps: stubDistilDeps(),
+      });
+      const seen: string[] = [];
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(['distil', '--resume', '--captures', capturesDir, '--out', outDir], {
+        writer,
+        distilDeps: { distill: recordingDistil(seen) },
+      });
+      expect(code).toBe(0);
+      expect(seen).toEqual([]);
+      expect(out()).toMatch(/already distilled|nothing to resume/i);
+    });
+  });
+
+  it('AC 1d: empty captures render the design empty state whatever the mode', async () => {
+    const modePath = tmpModeFile();
+    writeDistilMode('local', modePath);
+    await withEnv({ JINN_LAYER_DISTIL_MODE_PATH: modePath }, async () => {
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--captures', mkdtempSync(join(tmpdir(), 'jinn-captures-empty-'))],
+        { writer, distilDeps: stubDistilDeps() },
+      );
+      expect(code).toBe(0);
+      expect(out()).toMatch(/No eligible captures/i);
+    });
+  });
+});
+
+describe('jinn-layer distil — staged install choice (#1490)', () => {
+  /** A fresh mode file pinned to local, plus the env pointing at it. */
+  function withLocalMode(fn: (outDir: string) => Promise<void>): Promise<void> {
+    const modePath = tmpModeFile();
+    writeDistilMode('local', modePath);
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-distil-out-'));
+    return withEnv({ JINN_LAYER_DISTIL_MODE_PATH: modePath }, () => fn(outDir));
+  }
+  /** The skill dir names directly under `dir` (installed = active, staged = -staged). */
+  function skillDirs(dir: string): string[] {
+    return existsSync(dir)
+      ? readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort()
+      : [];
+  }
+  const distinctNames = (): DistilCliDeps => ({
+    distill: async (c) => ({ ...VALID_DISTILL, name: `s-${c.instanceIds[0]}` }),
+  });
+
+  it('default (non-interactive, no --install) distils but installs NOTHING — stage only', async () => {
+    await withLocalMode(async (outDir) => {
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--captures', capturesDirWith(ownCapture()), '--out', outDir, '--json'],
+        { writer, distilDeps: { distill: async () => VALID_DISTILL, isTty: false } },
+      );
+      expect(code).toBe(0);
+      const r = JSON.parse(out());
+      expect(r.distilled.published).toHaveLength(1); // distilled
+      expect(r.installed).toEqual([]); // installed nothing (the consent-consistent default)
+      expect(skillDirs(outDir)).toEqual([]); // active dir empty
+      expect(skillDirs(`${outDir}-staged`)).toEqual(['orm-fanout-dedup']); // waiting in staging
+    });
+  });
+
+  it('--install all installs every distilled skill into the active dir and clears staging', async () => {
+    await withLocalMode(async (outDir) => {
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--captures', capturesDirWith(ownCapture()), '--out', outDir, '--install', 'all', '--json'],
+        { writer, distilDeps: { distill: async () => VALID_DISTILL } },
+      );
+      expect(code).toBe(0);
+      expect(JSON.parse(out()).installed).toEqual(['orm-fanout-dedup']);
+      expect(skillDirs(outDir)).toEqual(['orm-fanout-dedup']); // live
+      expect(skillDirs(`${outDir}-staged`)).toEqual([]); // moved out of staging
+    });
+  });
+
+  it('--install none is the same as staging only', async () => {
+    await withLocalMode(async (outDir) => {
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--captures', capturesDirWith(ownCapture()), '--out', outDir, '--install', 'none', '--json'],
+        { writer, distilDeps: { distill: async () => VALID_DISTILL } },
+      );
+      expect(code).toBe(0);
+      expect(JSON.parse(out()).installed).toEqual([]);
+      expect(skillDirs(outDir)).toEqual([]);
+    });
+  });
+
+  it('--install <name> installs just that skill; the rest stay staged', async () => {
+    await withLocalMode(async (outDir) => {
+      const capturesDir = capturesDirWith(
+        ownCapture(),
+        ownCapture({ session: { sessionId: 'own-two', capturedAt: '2026-07-09T09:00:00.000Z' } }),
+      );
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--captures', capturesDir, '--out', outDir, '--install', 's-own-two', '--json'],
+        { writer, distilDeps: distinctNames() },
+      );
+      expect(code).toBe(0);
+      expect(JSON.parse(out()).installed).toEqual(['s-own-two']);
+      expect(skillDirs(outDir)).toEqual(['s-own-two']); // only the named one is live
+      expect(skillDirs(`${outDir}-staged`)).toEqual(['s-own-orm-dedup']); // the other waits
+    });
+  });
+
+  it('--install <unknown> exits 2 and installs nothing', async () => {
+    await withLocalMode(async (outDir) => {
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--captures', capturesDirWith(ownCapture()), '--out', outDir, '--install', 'nope'],
+        { writer, distilDeps: { distill: async () => VALID_DISTILL } },
+      );
+      expect(code).toBe(2);
+      expect(out()).toContain('no distilled skill by that name');
+      expect(skillDirs(outDir)).toEqual([]);
+    });
+  });
+
+  it('interactive prompt returning all installs all', async () => {
+    await withLocalMode(async (outDir) => {
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--captures', capturesDirWith(ownCapture()), '--out', outDir, '--json'],
+        { writer, distilDeps: { distill: async () => VALID_DISTILL, promptInstall: async () => 'all' } },
+      );
+      expect(code).toBe(0);
+      expect(JSON.parse(out()).installed).toEqual(['orm-fanout-dedup']);
+    });
+  });
+
+  it('interactive prompt returning first installs exactly one of several', async () => {
+    await withLocalMode(async (outDir) => {
+      const capturesDir = capturesDirWith(
+        ownCapture(),
+        ownCapture({ session: { sessionId: 'own-two', capturedAt: '2026-07-09T09:00:00.000Z' } }),
+      );
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--captures', capturesDir, '--out', outDir, '--json'],
+        { writer, distilDeps: { ...distinctNames(), promptInstall: async () => 'first' } },
+      );
+      expect(code).toBe(0);
+      expect(JSON.parse(out()).installed).toHaveLength(1);
+      expect(skillDirs(outDir)).toHaveLength(1);
+    });
+  });
+
+  it('interactive prompt returning none stages only', async () => {
+    await withLocalMode(async (outDir) => {
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--captures', capturesDirWith(ownCapture()), '--out', outDir, '--json'],
+        { writer, distilDeps: { distill: async () => VALID_DISTILL, promptInstall: async () => 'none' } },
+      );
+      expect(code).toBe(0);
+      expect(JSON.parse(out()).installed).toEqual([]);
+      expect(skillDirs(outDir)).toEqual([]);
+    });
+  });
+
+  it('human render: default stages (not installed + how to install); --install all shows installed·ready', async () => {
+    await withLocalMode(async (outDir) => {
+      const staged = capture();
+      await runJinnLayerCli(
+        ['distil', '--captures', capturesDirWith(ownCapture()), '--out', outDir],
+        { writer: staged.writer, distilDeps: { distill: async () => VALID_DISTILL, isTty: false } },
+      );
+      expect(staged.out()).toMatch(/distilled locally · not installed/);
+      expect(staged.out()).toMatch(/stay local until you install/i);
+      expect(staged.out()).toContain('--install all');
+      // The forward-looking value shows in the panel.
+      expect(staged.out()).toContain('helps');
+
+      const installed = capture();
+      await runJinnLayerCli(
+        ['distil', '--captures', capturesDirWith(ownCapture()), '--out', mkdtempSync(join(tmpdir(), 'jinn-distil-out2-')), '--install', 'all'],
+        { writer: installed.writer, distilDeps: { distill: async () => VALID_DISTILL } },
+      );
+      expect(installed.out()).toMatch(/installed · ready/);
+    });
   });
 });

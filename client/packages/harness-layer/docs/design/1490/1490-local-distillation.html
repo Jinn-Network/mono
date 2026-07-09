@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jinn — 1490 · Local distillation CLI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0c1628; --bg-elev:#142340; --fg:#f2f7fc; --fg-muted:#a4b0c2; --fg-dim:#7d8ba3;
+    --border:#1f3a66; --gold:#dcb866; --sky:#7aa7dc;
+    --t-bg:#070d18; --t-fg:#d6e0f0; --t-dim:#6b7b95;
+    --t-sky:#7aa7dc; --t-sky-hi:#a8c8ea; --t-gold:#dcb866;
+    --t-green:#7bb0a2; --t-amber:#cf9a3f; --t-red:#c07070; --t-violet:#8a7ec4;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:'JetBrains Mono',ui-monospace,monospace;-webkit-font-smoothing:antialiased;}
+  .page{max-width:1180px;margin:0 auto;padding:56px 32px 120px;}
+  a{color:var(--sky);text-decoration:underline;text-underline-offset:2px;text-decoration-color:var(--border);}
+  a:hover{color:var(--gold);}
+
+  .doc-head{border-bottom:1px solid var(--border);padding-bottom:22px;margin-bottom:40px;
+    display:flex;justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap;}
+  .doc-title{font-family:'Instrument Serif',serif;font-size:42px;line-height:1.02;margin:0;font-weight:400;}
+  .doc-kicker{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);margin:0 0 12px;}
+  .doc-sub{font-size:12.5px;line-height:1.6;color:var(--fg-muted);max-width:66ch;margin:10px 0 0;letter-spacing:-.01em;}
+  .doc-sub code{color:var(--sky);}
+  .doc-meta{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-dim);text-align:right;line-height:1.9;white-space:nowrap;}
+
+  .sec{margin:64px 0 0;}
+  .sec-head{display:flex;align-items:baseline;gap:14px;margin-bottom:6px;}
+  .sec-num{font-size:11px;letter-spacing:.14em;color:var(--sky);}
+  .sec-title{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg);margin:0;font-weight:500;}
+  .sec-note{font-size:12px;color:var(--fg-muted);line-height:1.6;max-width:78ch;margin:8px 0 22px;letter-spacing:-.01em;}
+  .sec-note code{color:var(--sky);}
+  .sec-note .gold{color:var(--gold);} .sec-note .green{color:var(--t-green);}
+  .sec-note .amber{color:var(--t-amber);} .sec-note .sky{color:var(--sky);}
+  .caption{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-dim);margin:0 0 10px;display:flex;gap:10px;align-items:center;}
+  .caption .dot{width:5px;height:5px;border-radius:50%;background:var(--sky);}
+  .caption.alt .dot{background:var(--gold);}
+
+  .term{background:var(--t-bg);color:var(--t-fg);border:1px solid var(--border);
+    border-radius:10px;padding:22px 26px;white-space:pre;overflow-x:auto;
+    font-size:13.5px;line-height:1.5;box-shadow:2px 2px 0 0 #04080f;}
+  .term.small{font-size:12.5px;padding:18px 20px;}
+  .sky{color:var(--t-sky);} .skyh{color:var(--t-sky-hi);} .gold{color:var(--t-gold);}
+  .dim{color:var(--t-dim);} .green{color:var(--t-green);} .amber{color:var(--t-amber);}
+  .red{color:var(--t-red);} .violet{color:var(--t-violet);} .fg{color:var(--t-fg);} .b{font-weight:600;}
+  .kbd{color:var(--t-gold);font-weight:600;}
+
+  .console-wrap{border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--t-bg);box-shadow:4px 4px 0 0 #04080f;}
+  .console-term{min-height:560px;padding:24px 28px;white-space:pre;overflow-x:auto;font-size:13.5px;line-height:1.5;color:var(--t-fg);}
+  .console-term:focus{outline:none;}
+  .console-term:focus-visible{outline:2px solid var(--sky);outline-offset:-2px;}
+  .console-bar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
+    padding:12px 20px;border-top:1px solid var(--border);background:#0a1120;}
+  .lifecycle{display:flex;align-items:center;gap:8px;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;}
+  .lifecycle .stage{color:var(--t-dim);}
+  .lifecycle .stage.on{color:var(--t-gold);}
+  .lifecycle .arr{color:var(--border);}
+  .keyhints{display:flex;gap:8px;flex-wrap:wrap;}
+  .keyhint{font-family:inherit;font-size:11px;letter-spacing:.06em;padding:5px 11px;border-radius:6px;cursor:pointer;
+    border:1px solid var(--border);background:transparent;color:var(--fg-muted);transition:all 120ms linear;}
+  .keyhint:hover{border-color:var(--sky);color:var(--fg);}
+  .keyhint .k{color:var(--gold);font-weight:600;margin-right:6px;}
+  .statejump{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px;}
+  .statejump button{font-family:inherit;font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+    padding:5px 10px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--fg-dim);cursor:pointer;transition:all 120ms linear;}
+  .statejump button:hover{color:var(--fg);border-color:var(--sky);}
+  .statejump button[data-on="true"]{color:var(--t-bg);background:var(--sky);border-color:var(--sky);}
+  .hint-label{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-dim);align-self:center;margin-right:4px;}
+
+  .twoup{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;}
+  .twoup>div{min-width:0;}
+  .twoup .term{min-width:0;}
+  @media (max-width:900px){.twoup{grid-template-columns:1fr;}}
+
+  .notes{margin-top:80px;border-top:1px solid var(--border);padding-top:40px;}
+  .notes h2{font-family:'Instrument Serif',serif;font-weight:400;font-size:30px;margin:0 0 6px;}
+  .notes h3{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);margin:34px 0 12px;padding-top:18px;border-top:1px solid var(--border);}
+  .notes h3:first-of-type{border-top:none;padding-top:0;}
+  .notes p, .notes li{font-size:13px;line-height:1.7;color:var(--fg-muted);letter-spacing:-.01em;max-width:82ch;}
+  .notes ul{padding-left:18px;margin:8px 0;}
+  .notes li{margin:5px 0;}
+  .notes code{font-size:12px;color:var(--sky);background:var(--t-bg);border:1px solid var(--border);border-radius:4px;padding:1px 6px;}
+  .notes strong{color:var(--fg);font-weight:600;}
+  table.copy{border-collapse:collapse;width:100%;margin:10px 0 4px;font-size:12.5px;}
+  table.copy th{text-align:left;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-dim);font-weight:500;padding:8px 14px 8px 0;border-bottom:1px solid var(--border);vertical-align:bottom;}
+  table.copy td{padding:9px 14px 9px 0;border-bottom:1px solid var(--border);color:var(--fg-muted);vertical-align:top;line-height:1.5;}
+  table.copy td code{white-space:nowrap;}
+  table.copy td .green{color:var(--t-green);} table.copy td .sky{color:var(--t-sky);}
+  table.copy td .amber{color:var(--t-amber);} table.copy td .gold{color:var(--t-gold);} table.copy td .red{color:var(--t-red);}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="doc-head">
+    <div>
+      <p class="doc-kicker">Surface 1 · jinn-agent CLI</p>
+      <h1 class="doc-title">Local distillation — consent, control &amp; run</h1>
+      <p class="doc-sub">Rung 1: distil your own local task captures with a frontier-class model into reusable skills, then run later tasks cheaper on a small open-weight model. This surface is the consent for that spend, the persistent <code>where it runs</code> control — <span class="gold">local</span> / <span class="sky">defer</span> / off — and the terminal view of what a run produced. Distillation is a heavy local pass, so you decide whether and where it happens. Reuses the #1312 consent pattern and #1319 splash conventions; nothing new is invented.</p>
+    </div>
+    <div class="doc-meta">issue&nbsp;1490<br>jinn-agent&nbsp;·&nbsp;TUI<br>rung&nbsp;1&nbsp;·&nbsp;local&nbsp;distil</div>
+  </header>
+
+  <!-- ========== 1a — CONSENT + WHERE IT RUNS ========== -->
+  <section class="sec">
+    <div class="sec-head"><span class="sec-num">1a</span><h2 class="sec-title">Consent &amp; where it runs — interactive</h2></div>
+    <p class="sec-note">Walk it with the keyboard (click the console first). It leads with what distillation is <em>for</em> — distil once, run cheap forever — then states plainly what it reads, what it costs (<span class="gold">compute, not money</span>), and what leaves the machine (<span class="green">nothing</span>). The action lifecycle is <span class="gold">idle → confirming → recorded</span>, shown bottom-left. Three modes: <span class="green">local</span> runs now (a spend, so it confirms), <span class="sky">defer</span> holds captures for later, off stops reserving them. Default on bare <code>Enter</code> is <strong>defer</strong> — the mode that spends nothing and publishes nothing. Jump to any state with the chips.</p>
+
+    <div class="statejump" id="c-jump"><span class="hint-label">Jump to</span></div>
+
+    <div class="console-wrap">
+      <div class="console-term" id="consent" tabindex="0" data-comment-anchor="bb46a14da7-div"></div>
+      <div class="console-bar">
+        <div class="lifecycle" id="c-life">
+          <span class="stage" data-s="idle">idle</span><span class="arr">→</span>
+          <span class="stage" data-s="confirming">confirming</span><span class="arr">→</span>
+          <span class="stage" data-s="recorded">recorded</span>
+        </div>
+        <div class="keyhints" id="c-keys"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== 1b — THE RUN ========== -->
+  <section class="sec">
+    <div class="sec-head"><span class="sec-num">1b</span><h2 class="sec-title">A local distil run — interactive</h2></div>
+    <p class="sec-note">What <code>jinn-agent distil</code> shows once mode is <span class="green">local</span>. Legible progress first — which captures, which distiller, running state — then the skills it produced: each with a <strong>name</strong>, its <strong>source-capture provenance</strong>, and its <strong>install state</strong>. Install through the existing <code>/jinn skills install</code> path: all at once, one by one, or skip and install later. Stopping mid-run keeps whatever finished. Colours match the #1312 tier system, so one vocabulary carries across the harness.</p>
+
+    <div class="statejump" id="r-jump"><span class="hint-label">Jump to</span></div>
+
+    <div class="console-wrap">
+      <div class="console-term" id="run" tabindex="0" style="min-height:520px"></div>
+      <div class="console-bar">
+        <div class="lifecycle" id="r-life">
+          <span class="stage" data-s="distilling">distilling</span><span class="arr">→</span>
+          <span class="stage" data-s="skills">skills</span><span class="arr">→</span>
+          <span class="stage" data-s="installed">installed</span>
+        </div>
+        <div class="keyhints" id="r-keys"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== 1c — PERSISTENT MODE + DEFERRED PATH ========== -->
+  <section class="sec">
+    <div class="sec-head"><span class="sec-num">1c</span><h2 class="sec-title">Persistent mode &amp; the deferred path</h2></div>
+    <p class="sec-note">The <code>where it runs</code> mode is a setting, not an interactive-only prompt — set it with a flag from any script. And when the mode is <span class="sky">defer</span>, a bare <code>jinn-agent distil</code> does nothing but say so: captures are held locally, nothing runs, nothing is published. That is the placeholder for the rung-3 signal path — the point where the bonded network could one day distil a contributed signal, with its own consent, out of scope here.</p>
+    <div class="twoup">
+      <div>
+        <p class="caption alt"><span class="dot"></span>set the mode non-interactively</p>
+        <div class="term small" id="mode-flags"></div>
+      </div>
+      <div>
+        <p class="caption"><span class="dot"></span>deferred · <span style="text-transform:none;letter-spacing:0">jinn-agent distil</span></p>
+        <div class="term small" id="defer-run"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== 1d — EMPTY + ERROR ========== -->
+  <section class="sec">
+    <div class="sec-head"><span class="sec-num">1d</span><h2 class="sec-title">Empty &amp; error states — plain words</h2></div>
+    <p class="sec-note">Two failure shapes, stated plainly, neither narrating what the output already shows. <strong>No eligible captures</strong> says what produces one — run a task with the harness first. A <strong>failed run</strong> says what stopped, what survived, and the one command to pick up the rest. Partial work is always kept; a failure never loses a completed skill.</p>
+    <div class="twoup">
+      <div>
+        <p class="caption"><span class="dot"></span>nothing to distil yet</p>
+        <div class="term small" id="empty-state"></div>
+      </div>
+      <div>
+        <p class="caption"><span class="dot"></span>distiller failed mid-run</p>
+        <div class="term small" id="error-state"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== 1e — THE PAYOFF ========== -->
+  <section class="sec">
+    <div class="sec-head"><span class="sec-num">1e</span><h2 class="sec-title">The payoff, in a later run</h2></div>
+    <p class="sec-note">Outside this surface, a distilled skill shows up the same way a corpus signal does (#1405): one line in the scrying at the point of use — <code>◇ skill</code> prefix in sky, the skill name bright, provenance dim, and the model it ran on. This is the arbitrage made visible: the skill was distilled once with a frontier pass, and here it runs on the small open-weight model, no frontier call in sight.</p>
+    <p class="caption"><span class="dot"></span>mid-run · a distilled skill is used on the cheap model</p>
+    <div class="term small" id="later-run"></div>
+  </section>
+
+  <!-- ========== DESIGN NOTES ========== -->
+  <section class="notes">
+    <h2>Design notes — 1490 local distillation</h2>
+
+    <h3>Two consents, one register</h3>
+    <p>#1312 governs data <em>leaving</em> the machine — publishing a scrubbed trace to a public corpus. #1490 governs a <em>spend on</em> the machine — a heavy frontier pass over local captures whose output stays local. Different risk, same rule: drop the metaphor whenever cost is on the line. So this screen never says <em>summon</em> or <em>smoke</em>; it says "heavy compute, not money", "nothing is sent to a provider", "nothing is published to the Jinn network". Vow-language returns only in neutral chrome — the <code>◇ skill</code> signal line, the run's scrying.</p>
+    <ul>
+      <li><strong>Lead with the upside, flatly.</strong> Distil once, run cheap forever — the arbitrage is the headline, stated clinically. No urgency, no exclamation.</li>
+      <li><strong>The distiller is the operator's choice.</strong> A local frontier-class model is the default, so "nothing leaves the machine" is literally true; the consent screen and preview both show it can be changed with <code>--distiller</code>, and name the one case that isn't local — a hosted model — with a promise to ask before the first send. We do not bury it.</li>
+      <li><strong>Confirm only the spend.</strong> <code>local</code> costs compute, so it takes a deliberate <code>Y/N</code>. <code>defer</code> and off spend nothing and record directly — no friction where there is no cost.</li>
+    </ul>
+
+    <h3>Commands &amp; flags</h3>
+    <table class="copy">
+      <thead><tr><th>Command</th><th>Does</th></tr></thead>
+      <tbody>
+        <tr><td><code>jinn-agent distil</code></td><td>Run distillation in the current mode. If mode is <code>unset</code>, shows the first-run consent (1a); if <code>defer</code>, prints the held-captures line (1c); if <code>local</code>, runs (1b).</td></tr>
+        <tr><td><code>jinn-agent distil --where local|defer|off</code></td><td>Set the persistent mode without entering the interactive prompt. Scriptable. Echoes the resulting behaviour in one line (1c).</td></tr>
+        <tr><td><code>jinn-agent distil --resume</code></td><td>Pick up a stopped or failed run from the first capture that has no skill yet. Completed skills are untouched.</td></tr>
+        <tr><td><code>jinn-agent distil --distiller &lt;model&gt;</code></td><td>Override the distiller. A hosted model here is the one path that sends captures off-machine; the consent line names it and asks before the first send.</td></tr>
+        <tr><td><code>/jinn skills</code></td><td>In-session: list distilled skills, install state, and per-skill provenance.</td></tr>
+        <tr><td><code>/jinn skills install &lt;name&gt; · --all</code></td><td>In-session install — one skill or every skill produced. The existing skills-install path; nothing new invented.</td></tr>
+        <tr><td><code>/jinn skills show &lt;name&gt; · remove &lt;name&gt;</code></td><td>Inspect a skill's source captures, or remove an installed skill.</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Binary name.</strong> The brief writes <code>jinn distil</code>; this doc uses <code>jinn-agent</code> to match the sibling onboarding surface (#1405) and the splash (#1319). In-session slash commands stay <code>/jinn …</code> as the brief specifies. One reconciliation to confirm with the harness owner — see open questions.</p>
+
+    <h3>Where it runs — local · defer · off</h3>
+    <table class="copy">
+      <thead><tr><th>Mode</th><th>Runs a frontier pass?</th><th>Captures kept?</th><th>Anything published?</th></tr></thead>
+      <tbody>
+        <tr><td><span class="green">local</span></td><td>Yes — now, on this machine.</td><td>Yes — read, then distilled.</td><td>No. Skills stay local.</td></tr>
+        <tr><td><span class="sky">defer</span> <span style="color:var(--fg-dim)">(default)</span></td><td>No.</td><td>Yes — held locally, untouched.</td><td>No. Rung-3 placeholder only.</td></tr>
+        <tr><td>off</td><td>No.</td><td>No — not reserved for distillation.</td><td>No.</td></tr>
+      </tbody>
+    </table>
+    <p>Default is <code>defer</code> because it is the mode that changes nothing: no spend, no publish, and captures are the harness's normal task records either way. <code>off</code> is the only mode that stops reserving captures, so it is a deliberate choice, not a default.</p>
+
+    <h3>Run output — shape</h3>
+    <ul>
+      <li><strong>Progress is legible, not chatty.</strong> One header line (mode · distiller · capture count), one progress line (<code>4 of 6 · ~3 min left</code>), then a per-capture list with a state word — <span class="green">distilled</span> / <span class="gold">distilling</span> / <span style="color:var(--fg-dim)">queued</span>, never a glyph.</li>
+      <li><strong>Skills carry provenance.</strong> Each produced skill shows its name, the captures it was distilled from, and its install state, inside the #1312 box idiom. <code>/jinn skills show &lt;name&gt;</code> reaches the full source — the claim is checkable, per the legibility principle.</li>
+      <li><strong>Install is a separate, explicit step.</strong> Distilling writes skills locally but installs nothing. Install-all, install-one, or skip-and-install-later are all one keystroke or one flag.</li>
+      <li><strong>The reused skill announces itself.</strong> In a later run the <code>◇ skill</code> line (1e) marks the point of use and the model it ran on — the same one-line-at-point-of-use rule as the corpus signal.</li>
+    </ul>
+
+    <h3>Exact copy — consent</h3>
+    <table class="copy">
+      <thead><tr><th>Group</th><th>String</th></tr></thead>
+      <tbody>
+        <tr><td>what it is</td><td>A frontier-class model reads the tasks you've run here, once, and pulls out reusable skills — later tasks then reuse them on a small, cheap model. Pay the heavy pass once; reuse the skills for free.</td></tr>
+        <tr><td>what it reads</td><td>6 captures this run — the tasks you've run here so far, more as you work. Nothing else; press P for the exact set.</td></tr>
+        <tr><td>what it costs</td><td>One pass — heavy compute, not money. ~9 min with your distiller, llama-4-405b (local). Pick another with <code>--distiller</code>.</td></tr>
+        <tr><td>what leaves</td><td>Nothing — read, distilled, and written here; nothing is sent to a provider and nothing is published to the Jinn network.</td></tr>
+        <tr><td>the exception</td><td>The one exception — a hosted <code>--distiller</code> — sends captures to that provider; jinn-agent names it and asks before the first send.</td></tr>
+        <tr><td>confirm local</td><td>Run distillation now? One frontier pass with llama-4-405b over 6 captures, here on this machine. About ~9 min of heavy compute — no money, nothing sent. Stop any time; whatever finished is kept.</td></tr>
+        <tr><td>recorded · defer</td><td>Your 6 captures are held on this machine. Nothing runs, nothing is spent, and nothing is published to the Jinn network.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Persistence — facts over flags</h3>
+    <ul>
+      <li><strong>Mode is a real setting</strong> in <code>~/.config/jinn-agent/distil.json</code> — <code>where: local|defer|off</code>, or absent for <code>unset</code> (which triggers first-run consent). Set interactively or by flag; the flag and the prompt write the same value.</li>
+      <li><strong>Install state is a fact, not a flag</strong> — a skill is "installed" because it is on the skills path, read the same way <code>/jinn skills</code> reads it. Onboarding-style seen-flags aren't needed; the run derives everything from the captures on disk and the skills written.</li>
+      <li><strong>Resume is derived</strong> — <code>--resume</code> distils the first eligible capture with no corresponding skill. A stopped run and a failed run resume identically.</li>
+    </ul>
+
+    <h3>Empty &amp; error — exact copy</h3>
+    <table class="copy">
+      <thead><tr><th>State</th><th>String</th></tr></thead>
+      <tbody>
+        <tr><td>no captures</td><td>No eligible captures. Distillation reads captures — the tasks you've run with the harness. There aren't any yet — run a task first. Then run <code>jinn-agent distil</code> again.</td></tr>
+        <tr><td>run failed</td><td><span class="red">distil failed — the distiller stopped responding.</span> N captures were distilled and their skills kept. &lt;distiller&gt; stopped on capture N+1; the rest didn't run. Nothing was sent or lost. Resume: <code>jinn-agent distil --resume</code>.</td></tr>
+        <tr><td>stopped by user</td><td><span class="amber">stopped</span> · N of M captures distilled · partial kept. The completed skills are written locally; pick up where it stopped with <code>--resume</code>.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Open questions</h3>
+    <ul>
+      <li><strong>Binary name.</strong> <code>jinn distil</code> (brief) vs <code>jinn-agent distil</code> (used here, matching #1405/#1319). Assumed <code>jinn-agent</code> for shell, <code>/jinn</code> for in-session. Confirm against <code>bin/jinn-layer.ts</code> and the harness-layer CLI conventions.</li>
+      <li><strong>Default distiller.</strong> The distiller is the operator's choice (shown in the preview and set with <code>--distiller</code>). The default here is a local frontier-class model, so "nothing leaves the machine" is literally true and cost reads as compute/time. If the common default should instead be a hosted frontier model, the cost line becomes a money estimate and the "what leaves" copy leads with the provider send. Product picks the default; both are drafted.</li>
+      <li><strong>Cost estimate source.</strong> <code>~9 min</code> is a placeholder. The real estimate needs a per-capture token/step count and a local throughput read (or the hosted model's price). Flagged for the implementer.</li>
+      <li><strong>Capture eligibility window.</strong> Which traces count — last N, last 7 days, all un-distilled? Shown here as 6 recent captures. Needs a retention/eligibility rule.</li>
+      <li><strong>Re-distillation.</strong> Running <code>distil</code> again after new tasks — does it produce new skills, version existing ones, or merge? Assumed: only un-distilled captures are read; a re-run over the same captures is a no-op. Confirm the skill-versioning model.</li>
+      <li><strong>Relationship to #1312 contribution.</strong> Distillation consent and corpus-contribution consent are independent toggles — you can distil locally while contributing nothing, or contribute while never distilling. Assumed independent; confirm there's no coupling in the harness settings.</li>
+    </ul>
+  </section>
+
+</div>
+
+<script src="distillation-cli.js"></script>
+</body>
+</html>
