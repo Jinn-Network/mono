@@ -301,7 +301,7 @@ class OpenRouterCompatImageProvider(ImageGenProvider):
             return error_response(
                 error=(
                     f"No {self._display} credentials found. "
-                    f"Configure {self._display} in `hermes tools` → Image Generation."
+                    f"Configure {self._display} in `jinn-agent tools` → Image Generation."
                 ),
                 error_type="missing_api_key",
                 provider=self._name,

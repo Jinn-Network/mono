@@ -93,7 +93,7 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
         # missing at import time etc.), leave the subparser present but
         # flag it. The argparse dispatch will surface a clear error.
         def _node_unavailable(args):
-            print(f"hermes meet node: module unavailable ({e})")
+            print(f"jinn-agent meet node: module unavailable ({e})")
             return 1
         node_p.set_defaults(func=_node_unavailable)
 
@@ -107,7 +107,7 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
 def meet_command(args: argparse.Namespace) -> int:
     sub = getattr(args, "meet_command", None)
     if not sub:
-        print("usage: hermes meet {setup,auth,join,status,transcript,say,stop,node}")
+        print("usage: jinn-agent meet {setup,auth,join,status,transcript,say,stop,node}")
         return 2
     if sub == "setup":
         return _cmd_setup()
@@ -140,7 +140,7 @@ def meet_command(args: argparse.Namespace) -> int:
         # whatever its subparsers wired.
         fn = getattr(args, "func", None)
         if fn is None or fn is meet_command:
-            print("usage: hermes meet node {run,list,approve,remove,status,ping}")
+            print("usage: jinn-agent meet node {run,list,approve,remove,status,ping}")
             return 2
         return fn(args)
     print(f"unknown subcommand: {sub}")
@@ -196,7 +196,7 @@ def _cmd_setup() -> int:
     auth_ok = auth_path.is_file()
     print(
         "  google auth    : "
-        + (f"ok ({auth_path})" if auth_ok else "not saved — run: hermes meet auth")
+        + (f"ok ({auth_path})" if auth_ok else "not saved — run: jinn-agent meet auth")
     )
 
     print()
@@ -204,7 +204,7 @@ def _cmd_setup() -> int:
     if all_ok:
         print(
             "ready. Join a meeting:  "
-            "hermes meet join https://meet.google.com/abc-defg-hij"
+            "jinn-agent meet join https://meet.google.com/abc-defg-hij"
         )
     else:
         print("not ready yet — fix the items above.")
@@ -324,12 +324,12 @@ def _cmd_install(*, realtime: bool, assume_yes: bool) -> int:
                 "\n  NOTE: macOS does not auto-route audio. Open\n"
                 "    System Settings → Sound → Input\n"
                 "  and select 'BlackHole 2ch' before starting a realtime meeting.\n"
-                "  hermes will not switch your default input for you."
+                "  jinn-agent will not switch your default input for you."
             )
     else:
         print("\n[3/3] skipped (pass --realtime to install audio tooling too)")
 
-    print("\ndone. verify with: hermes meet setup")
+    print("\ndone. verify with: jinn-agent meet setup")
     return 0
 
 
@@ -364,7 +364,7 @@ def _cmd_auth() -> int:
     except Exception as e:
         print(f"auth failed: {e}")
         return 1
-    print("saved. you can now run: hermes meet join <url>")
+    print("saved. you can now run: jinn-agent meet join <url>")
     return 0
 
 
@@ -465,13 +465,13 @@ def _cmd_transcript(last: Optional[int]) -> int:
 
 
 def _cmd_stop() -> int:
-    res = pm.stop(reason="hermes meet stop")
+    res = pm.stop(reason="jinn-agent meet stop")
     print(json.dumps(res, indent=2))
     return 0 if res.get("ok") else 1
 
 
 if __name__ == "__main__":  # pragma: no cover
-    parser = argparse.ArgumentParser(prog="hermes meet")
+    parser = argparse.ArgumentParser(prog="jinn-agent meet")
     register_cli(parser)
     ns = parser.parse_args()
     sys.exit(meet_command(ns))

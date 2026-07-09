@@ -437,7 +437,7 @@ class TestRaftConfig:
         assert os.environ["RAFT_PROFILE"] == "dev-profile"
         out = capsys.readouterr().out
         assert "Raft configuration saved" in out
-        assert "hermes gateway restart" in out
+        assert "jinn-agent gateway restart" in out
 
     def test_interactive_setup_keeps_existing_profile_when_not_reconfigured(
         self, monkeypatch, tmp_path, capsys

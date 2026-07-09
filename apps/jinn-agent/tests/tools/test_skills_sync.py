@@ -717,7 +717,7 @@ class TestSyncSkills:
 
         captured = capsys.readouterr().out
         assert "new-skill" in captured
-        assert "hermes skills reset new-skill" in captured
+        assert "jinn-agent skills reset new-skill" in captured
 
     def test_backfills_official_optional_provenance_for_existing_identical_skill(self, tmp_path):
         bundled = self._setup_bundled(tmp_path)

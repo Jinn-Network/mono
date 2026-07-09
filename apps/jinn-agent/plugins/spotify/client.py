@@ -348,7 +348,7 @@ def _friendly_spotify_error_message(
     is_playback_path = path.startswith("/me/player")
 
     if status_code == 401:
-        return "Spotify authentication failed or expired. Run `hermes auth spotify` again."
+        return "Spotify authentication failed or expired. Run `jinn-agent auth spotify` again."
 
     if status_code == 403:
         if is_playback_path:
@@ -357,7 +357,7 @@ def _friendly_spotify_error_message(
                 "and an active Spotify Connect device."
             )
         if "scope" in normalized_detail or "permission" in normalized_detail:
-            return "Spotify rejected the request because the current auth scope is insufficient. Re-run `hermes auth spotify` to refresh permissions."
+            return "Spotify rejected the request because the current auth scope is insufficient. Re-run `jinn-agent auth spotify` to refresh permissions."
         return "Spotify rejected the request. The account may not have permission for this action."
 
     if status_code == 404:

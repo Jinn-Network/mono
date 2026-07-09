@@ -524,7 +524,7 @@ def build_bearer_http_client(token_provider: Callable[[], str], **httpx_kwargs: 
             logger.warning(
                 "Bearer hook: Entra ID token provider returned empty (%s) "
                 "— stripping Authorization headers. Azure will respond 401. "
-                "Run `hermes doctor` or `az login` to recover.",
+                "Run `jinn-agent doctor` or `az login` to recover.",
                 exc,
             )
             for header_name in ("Authorization", "authorization", "Api-Key", "api-key", "X-Api-Key", "x-api-key"):

@@ -132,13 +132,13 @@ def _delete_skill(name: str) -> dict[str, Any]:
     from tools import skill_usage
 
     if skill_usage.get_record(name).get("pinned"):
-        return {"ok": False, "message": f"'{name}' is pinned — unpin it first (hermes curator unpin {name})"}
+        return {"ok": False, "message": f"'{name}' is pinned — unpin it first (jinn-agent curator unpin {name})"}
 
     ok, message = skill_usage.archive_skill(name)
     if ok:
         _clear_skill_cache()
 
-    return {"ok": ok, "message": f"archived '{name}' — restore with: hermes curator restore {name}" if ok else message}
+    return {"ok": ok, "message": f"archived '{name}' — restore with: jinn-agent curator restore {name}" if ok else message}
 
 
 def _delete_memory(node_id: str) -> dict[str, Any]:

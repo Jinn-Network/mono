@@ -409,7 +409,7 @@ def _migrate_legacy_store(base: Path) -> Optional[Path]:
     if legacy_root is not None:
         logger.info(
             "Migrated pre-v2 checkpoint repos to %s. "
-            "Clear with `hermes checkpoints clear-legacy` when safe.",
+            "Clear with `jinn-agent checkpoints clear-legacy` when safe.",
             legacy_root,
         )
     return legacy_root

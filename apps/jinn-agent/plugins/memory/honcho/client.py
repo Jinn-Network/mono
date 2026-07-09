@@ -801,7 +801,7 @@ def get_honcho_client(config: HonchoClientConfig | None = None) -> Honcho:
         raise ValueError(
             "Honcho API key not found. "
             "Get your API key at https://app.honcho.dev, "
-            "then run 'hermes honcho setup' or set HONCHO_API_KEY. "
+            "then run 'jinn-agent honcho setup' or set HONCHO_API_KEY. "
             "For local instances, set HONCHO_BASE_URL instead."
         )
 
@@ -832,7 +832,7 @@ def get_honcho_client(config: HonchoClientConfig | None = None) -> Honcho:
             raise ImportError(
                 "honcho-ai is required for Honcho integration. "
                 "Install it with: pip install honcho-ai  "
-                "(or run `hermes honcho setup` to configure)."
+                "(or run `jinn-agent honcho setup` to configure)."
             )
 
         # Allow config.yaml honcho.base_url to override the SDK's environment

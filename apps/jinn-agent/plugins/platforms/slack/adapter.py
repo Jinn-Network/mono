@@ -880,7 +880,7 @@ class SlackAdapter(BasePlatformAdapter):
                     "and 'message.mpim' event. Add 'mpim:history' (and "
                     "'mpim:read') to bot scopes, add 'message.mpim' to event "
                     "subscriptions, then REINSTALL the app to the workspace. "
-                    "Regenerating the app from `hermes slack` produces a "
+                    "Regenerating the app from `jinn-agent slack` produces a "
                     "manifest with these already included.",
                     team_key or "this workspace",
                 )
@@ -4410,7 +4410,7 @@ def interactive_setup() -> None:
                 "reinstall if scopes or slash commands changed."
             )
             print_info(
-                "   Re-run `hermes slack manifest --write` anytime to refresh after "
+                "   Re-run `jinn-agent slack manifest --write` anytime to refresh after "
                 "Hermes adds new commands."
             )
         except Exception as e:
@@ -4425,7 +4425,7 @@ def interactive_setup() -> None:
             # new commands (e.g. /btw, /stop, ...) get registered in Slack.
             if prompt_yes_no(
                 "Regenerate the Slack app manifest with the latest command "
-                "list? (recommended after `hermes update`)",
+                "list? (recommended after `jinn-agent update`)",
                 True,
             ):
                 _write_slack_manifest_and_instruct()

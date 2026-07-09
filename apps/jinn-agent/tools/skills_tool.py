@@ -774,7 +774,7 @@ def _serve_plugin_skill(
                 "success": False,
                 "error": (
                     f"Plugin '{namespace}' is disabled. "
-                    f"Re-enable with: hermes plugins enable {namespace}"
+                    f"Re-enable with: jinn-agent plugins enable {namespace}"
                 ),
             },
             ensure_ascii=False,
@@ -1185,7 +1185,7 @@ def skill_view(
                     "success": False,
                     "error": (
                         f"Skill '{resolved_name}' is disabled. "
-                        "Enable it with `hermes skills` or inspect the files directly on disk."
+                        "Enable it with `jinn-agent skills` or inspect the files directly on disk."
                     ),
                 },
                 ensure_ascii=False,

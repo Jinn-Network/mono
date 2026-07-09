@@ -37,14 +37,17 @@ from tests.dehermes.brandcheck import (
 
 _REPO = Path(__file__).resolve().parents[2]
 
-# The whole runtime-output surface: every module under hermes_cli/ and
-# gateway/ (subpackages included) is swept and must stay clean. Sole
-# exclusion: tips.py, whose upstream TIPS list is deliberately rebranded
-# at runtime by the skin-gated filter tail (mono#1358/#1366) rather than
-# rewritten at rest.
+# The whole runtime-output surface: every module under the swept trees
+# (subpackages included) is gated and must stay clean. Wave 3 extended the
+# sweep beyond hermes_cli/ + gateway/ to the remaining runtime trees:
+# plugins/, agent/, tools/, website/, optional-skills/, tui_gateway/,
+# cron/ and scripts/. Sole exclusion: tips.py, whose upstream TIPS list is
+# deliberately rebranded at runtime by the skin-gated filter tail
+# (mono#1358/#1366) rather than rewritten at rest.
 SWEPT_FILES = sorted(
     str(p.relative_to(_REPO))
-    for d in ("hermes_cli", "gateway")
+    for d in ("hermes_cli", "gateway", "plugins", "agent", "tools",
+              "website", "optional-skills", "tui_gateway", "cron", "scripts")
     for p in (_REPO / d).rglob("*.py")
     if str(p.relative_to(_REPO)) != "hermes_cli/tips.py"
 )

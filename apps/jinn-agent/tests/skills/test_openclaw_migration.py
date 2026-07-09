@@ -823,7 +823,7 @@ def test_cron_store_is_archived_without_config_cron_section(tmp_path: Path):
     assert Path(archived_store["destination"]).joinpath("jobs.json").exists()
 
     notes_text = (output_dir / "MIGRATION_NOTES.md").read_text(encoding="utf-8")
-    assert "Run `hermes cron` to recreate scheduled tasks" in notes_text
+    assert "Run `jinn-agent cron` to recreate scheduled tasks" in notes_text
     assert "archive/cron-config.json" not in notes_text
 
 
