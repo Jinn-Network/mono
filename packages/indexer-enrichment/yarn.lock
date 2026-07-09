@@ -820,12 +820,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@hono/node-server@npm:^1.19.10":
-  version: 1.19.14
-  resolution: "@hono/node-server@npm:1.19.14"
+"@hono/node-server@npm:^2.0.8":
+  version: 2.0.8
+  resolution: "@hono/node-server@npm:2.0.8"
   peerDependencies:
     hono: ^4
-  checksum: 10c0/41a099bb3705d96aac44b7a8db8805f2a22ce8a0f767a27b6d10b74a9964925df01c5f35d3631e882f8bcdeee3518884c30f40588ac8c960d88bf71048ba0df3
+  checksum: 10c0/2284799e7ea8c3ea18dcd29fbc523792d7e42768f11dff8a937ce2e4ec965785552da4e9649354b00079243946bd9f65d23b8d9b923cef4984175e507398bb72
   languageName: node
   linkType: hard
 
@@ -875,7 +875,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/indexer@portal:../indexer::locator=%40jinn-network%2Findexer-enrichment%40workspace%3A."
   dependencies:
-    "@hono/node-server": "npm:^1.19.10"
+    "@hono/node-server": "npm:^2.0.8"
     "@jinn-network/sdk": "portal:../sdk"
     drizzle-orm: "npm:^0.45.2"
     hono: "npm:^4.12.28"
