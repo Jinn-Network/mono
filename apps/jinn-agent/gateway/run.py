@@ -9459,6 +9459,30 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             except Exception:
                 return "Could not start /learn — please try again."
 
+        if canonical == "distill":
+            # Local-trace distillation: rewrite the slash command into a normal
+            # agent turn so the user's active model can inspect session_search
+            # results and author the skill with skill_manage.
+            from agent.distill_prompt import build_distill_prompt, distill_ack
+
+            _distill_req = event.get_command_args().strip()
+            try:
+                adapter = self.adapters.get(source.platform)
+                if adapter:
+                    _ack_meta = self._thread_metadata_for_source(source)
+                    await adapter.send(
+                        str(source.chat_id),
+                        distill_ack(_distill_req),
+                        metadata=_ack_meta,
+                    )
+            except Exception:
+                logger.debug("distill ack send failed", exc_info=True)
+            try:
+                event.text = build_distill_prompt(_distill_req)
+                # fall through to agent processing
+            except Exception:
+                return "Could not start /distill -- please try again."
+
         if canonical == "fast":
             return await self._handle_fast_command(event)
 

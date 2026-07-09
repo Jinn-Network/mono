@@ -191,6 +191,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
                "Tools & Skills", cli_only=True, aliases=("generate-pet",), args_hint="[description]"),
     CommandDef("learn", "Learn a reusable skill from anything you describe (dirs, URLs, this chat, notes)",
                "Tools & Skills", args_hint="<what to learn from>"),
+    CommandDef("distill", "Distill a reusable skill from local traces (/distill defaults to this)",
+               "Tools & Skills", args_hint="[this|all|trace/session/query]"),
     CommandDef("cron", "Manage scheduled tasks", "Tools & Skills",
                cli_only=True, args_hint="[subcommand]",
                subcommands=("list", "add", "create", "edit", "pause", "resume", "run", "remove")),
@@ -1163,7 +1165,8 @@ _SLACK_PRIORITY_ALIASES = ("btw", "bg")
 #   - moa: high-cost slash mode, available through /hermes moa to avoid
 #     displacing existing native Slack slash commands at the 50-command cap.
 #   - debug: the log/report upload surface; reached via /hermes debug on Slack.
-_SLACK_VIA_HERMES_ONLY = frozenset({"credits", "billing", "moa", "debug"})
+#   - version: informational; reached via /hermes version on Slack.
+_SLACK_VIA_HERMES_ONLY = frozenset({"credits", "billing", "moa", "debug", "version"})
 
 
 def _sanitize_slack_name(raw: str) -> str:
