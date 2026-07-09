@@ -115,6 +115,18 @@ export {
 } from './distill.js';
 
 export {
+  createLocalDistiller,
+  createNetworkDistiller,
+  createLocalSkillSink,
+  NetworkDistillerNotWiredError,
+  type Distiller,
+  type DistillerResult,
+  type LocalDistillerDeps,
+  type SkillSink,
+  type HeldOutSlate,
+} from './distiller.js';
+
+export {
   threeArmMeasurement,
   pilotPower,
   type ArmResult,
