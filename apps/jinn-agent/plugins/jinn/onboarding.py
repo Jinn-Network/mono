@@ -47,6 +47,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
 from . import consent
+from . import harness as _harness
 from . import jinn_layer
 from . import ledger_view
 from . import style as _style
@@ -182,7 +183,7 @@ def _step_head(pal, rst: str, n: int, label: str, statuses: Dict[str, str]) -> L
     dim = lambda s: _style.wrap(pal, rst, "dim", s)
     gold = lambda s: _style.wrap(pal, rst, "gold", s)
     head = (
-        sky("◇") + " " + fg("jinn-agent") + dim("  ·  first run  ·  ")
+        sky("◇") + " " + fg(_harness.harness_name()) + dim("  ·  first run  ·  ")
         + gold(f"step {n} of 4") + dim("  ·  ") + fg(label)
     )
     return [head, "  " + _rail(pal, rst, statuses, n - 1), _style.wrap(pal, rst, "dim", "─" * 70)]
@@ -269,7 +270,7 @@ def render_first_publish_waiting(pal=None, rst=None) -> str:
         dim("  This step completes on its own when your first task finishes and"),
         dim("  its trace publishes. Nothing to configure — just work:"),
         "",
-        "  " + dim("$ ") + fg("jinn-agent ") + sky('"fix the flaky retry test in http/client.py"'),
+        "  " + dim("$ ") + fg(_harness.cli_name() + " ") + sky('"fix the flaky retry test in http/client.py"'),
         "",
         dim("  Onboarding stays out of the way until then."),
         "",
@@ -488,7 +489,7 @@ def render_done(reader_only: bool = False, first_publish: str = "", pal=None, rs
     else:
         statuses = {"consent": "done", "publish": "done", "rewards": "done", "signals": "done"}
     head = (
-        sky("◇") + " " + fg("jinn-agent") + dim("  ·  first run  ·  ") + green("complete")
+        sky("◇") + " " + fg(_harness.harness_name()) + dim("  ·  first run  ·  ") + green("complete")
     )
     out = [
         head,
@@ -513,7 +514,7 @@ def render_done(reader_only: bool = False, first_publish: str = "", pal=None, rs
         ]
     out += [
         "",
-        dim("  Replay any time: ") + sky("jinn-agent onboarding --replay")
+        dim("  Replay any time: ") + sky(f"{_harness.cli_name()} onboarding --replay")
         + dim("  (never re-asks consent)"),
     ]
     return "\n".join(out)
@@ -527,12 +528,12 @@ def render_skipped_all(pal=None, rst=None) -> str:
     fg = lambda s: _style.wrap(pal, rst, "fg", s)
     sky = lambda s: _style.wrap(pal, rst, "sky", s)
     return "\n".join([
-        sky("◇") + " " + fg("jinn-agent") + dim("  ·  first run"),
+        sky("◇") + " " + fg(_harness.harness_name()) + dim("  ·  first run"),
         "",
         dim("  Setup skipped. Nothing was decided — capture stays ") + fg("off") + dim(" until"),
         dim("  consent is granted. The steps return next launch, or any time:"),
         "",
-        "  " + sky("jinn-agent onboarding"),
+        "  " + sky(f"{_harness.cli_name()} onboarding"),
     ])
 
 
@@ -671,14 +672,20 @@ def setup_parser(parser) -> None:
     )
 
 
+def render_already_complete() -> str:
+    """The returning-operator no-op copy: nothing repeats, replay hint given."""
+    cli = _harness.cli_name()
+    return (
+        f"{cli} onboarding: already complete on this machine — nothing to do.\n"
+        f"Replay the walkthrough any time: {cli} onboarding --replay"
+    )
+
+
 def cli_handler(args) -> int:
     replay = bool(getattr(args, "replay", False))
     if not replay and is_complete():
         # Returning operator: nothing repeats. Launch is identical to any other.
-        print(
-            "jinn-agent onboarding: already complete on this machine — nothing to do.\n"
-            "Replay the walkthrough any time: jinn-agent onboarding --replay"
-        )
+        print(render_already_complete())
         return 0
 
     def _print(s: str) -> None:

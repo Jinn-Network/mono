@@ -27,14 +27,18 @@ def _assembled(platform: str = ""):
     return task
 
 
-def test_distribution_tag_is_the_product_name():
+def test_distribution_tag_is_the_product_name(monkeypatch):
+    # Fork behaviour: bin/jinn-agent exports JINN_HARNESS_NAME=jinn-agent.
+    monkeypatch.setenv("JINN_HARNESS_NAME", "jinn-agent")
     tags = _assembled()["task"]["distributionTags"]
     assert "jinn-agent" in tags
     assert all("hermes" not in t for t in tags), tags
 
 
-def test_tag_stays_consistent_with_harness_metadata():
+def test_tag_stays_consistent_with_harness_metadata(monkeypatch):
+    # Fork behaviour: bin/jinn-agent exports JINN_HARNESS_NAME=jinn-agent.
+    monkeypatch.setenv("JINN_HARNESS_NAME", "jinn-agent")
     task = _assembled(platform="cli")
-    assert task["environment"]["harness"]["name"] == capture_buffer.HARNESS_NAME
-    assert capture_buffer.HARNESS_NAME in task["task"]["distributionTags"]
+    assert task["environment"]["harness"]["name"] == "jinn-agent"
+    assert "jinn-agent" in task["task"]["distributionTags"]
     assert "cli" in task["task"]["distributionTags"]

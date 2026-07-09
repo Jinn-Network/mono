@@ -24,6 +24,10 @@ done
 cd "$(dirname "$SELF")/.."
 # Repo root for the ensure-block below (skin file lives in the repo).
 export JINN_AGENT_REPO="$PWD"
+# The Jinn plugin resolves its harness identity from these; unset (stock host)
+# it honestly reports the host. The fork asserts its own identity here.
+export JINN_HARNESS_NAME="jinn-agent"
+export JINN_CLI_NAME="jinn-agent"
 # Prefer the repo-local venv the installer creates; fall back to system python.
 PY="python3"
 if [ -x "venv/bin/python" ]; then

@@ -45,6 +45,10 @@ def _truecolor(monkeypatch):
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setenv("COLORTERM", "truecolor")
     monkeypatch.setenv("COLUMNS", "120")
+    # This suite snapshots the fork's copy verbatim (module is named for the
+    # jinn-agent fork); pin the harness identity so the templated renderers
+    # in consent.py resolve to the same literals these snapshots pin.
+    monkeypatch.setenv("JINN_HARNESS_NAME", "jinn-agent")
     yield
 
 

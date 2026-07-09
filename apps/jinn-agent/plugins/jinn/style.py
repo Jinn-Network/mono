@@ -1,12 +1,15 @@
 """Shared ANSI styling for the Jinn-layer TUI surfaces (consent + ledger).
 
-Reuses the #1417 splash palette and colour idiom (``hermes_cli.banner``) so
-consent and the ledger match the splash chrome exactly — same sky/gold/dim
-tokens, same truecolor→16-colour fallback, same softened-brutalist box.
+Mirrors the #1417 splash palette and colour idiom — the tokens and the
+truecolor probe are vendored from ``hermes_cli.banner`` below (that module's
+palette symbols are fork-only, so importing them broke plugin load on a stock
+host) — so consent and the ledger match the splash chrome exactly: same
+sky/gold/dim tokens, same truecolor→16-colour fallback, same softened-brutalist
+box.
 
 Rendering is pure ANSI strings (no Rich, no prompt_toolkit) so every surface
 is trivially snapshot-testable — the #1417 discipline. ``NO_COLOR`` and the
-truecolor probe both defer to ``banner``.
+truecolor probe use the vendored copy below.
 
 The box idiom mirrors the design artifact's ``boxTop/boxMid/boxBot/boxLine``:
 a titled top/mid rule and content lines padded to a fixed inner width, drawn
@@ -18,7 +21,51 @@ from __future__ import annotations
 import re
 from typing import List, Optional, Sequence, Tuple
 
-from hermes_cli.banner import _FB, _RST, _TC, supports_truecolor
+import os
+import shutil
+
+# ── Vendored palette (was hermes_cli.banner; those symbols are fork-only and
+# absent on a stock host — importing them broke plugin load on stock Hermes).
+# Values copied verbatim from the fork banner so the fork's look is unchanged.
+_RST = "\033[0m"
+_TC = {
+    "sky": "\033[38;2;122;167;220m",
+    "gold": "\033[38;2;220;184;102m",
+    "dim": "\033[38;2;107;123;149m",
+    "green": "\033[38;2;123;176;162m",
+    "amber": "\033[38;2;207;154;63m",
+    "red": "\033[38;2;192;112;112m",
+    "fg": "\033[38;2;214;224;240m",
+}
+_FB = {
+    "sky": "\033[36m",
+    "gold": "\033[93m",
+    "dim": "\033[90m",
+    "green": "\033[32m",
+    "amber": "\033[33m",
+    "red": "\033[31m",
+    "fg": "\033[97m",
+}
+
+
+def supports_truecolor(columns=None) -> bool:
+    """Truecolor line-art vs 16-colour fallback. NO_COLOR forces fallback;
+    needs COLORTERM=truecolor/24bit and >= 96 columns. Vendored from banner."""
+    if os.environ.get("NO_COLOR"):
+        return False
+    colorterm = (os.environ.get("COLORTERM") or "").strip().lower()
+    if colorterm not in ("truecolor", "24bit"):
+        return False
+    if columns is None:
+        env_cols = os.environ.get("COLUMNS")
+        if env_cols and env_cols.isdigit():
+            columns = int(env_cols)
+        else:
+            try:
+                columns = shutil.get_terminal_size().columns
+            except Exception:
+                columns = 80
+    return columns >= 96
 
 __all__ = [
     "palette",

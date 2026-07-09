@@ -3,14 +3,16 @@
 At task start the harness works out what kind of task this is, looks up the
 corpus for matching payloads, and decides per candidate:
 
-  - **adopt automatically** when the payload's verifiability tier meets the
-    configured threshold (default: ``evaluator-verified``) AND an adopter
-    exists for its payload type. Verification under bond is the trust gate —
-    not a human keystroke. Today's corpus has nothing verified, so today this
-    path is dormant by honest default.
-  - **suggest** otherwise: the candidate is surfaced to the agent as injected
+  - **suggest** by default: the candidate is surfaced to the agent as injected
     context (cache-safe: Hermes injects plugin context into the user message,
-    never the system prompt), and installing stays a deliberate act.
+    never the system prompt), and installing stays a deliberate act — remote
+    skills are manual-approval by default (ratified).
+  - **adopt automatically** only when the operator has opted in
+    (``autoAdopt: true`` in ``pickup.json``) AND the payload's verifiability
+    tier meets the configured threshold (default: ``evaluator-verified``) AND
+    an adopter exists for its payload type. Verification under bond is the
+    trust gate for the tier check, but auto-adoption itself is opt-in, not
+    the default.
 
 Payload-agnostic: adopters are a registry keyed by payload type. v0 ships
 one adopter (``skill`` → install into Hermes's native skills dir). Richer
@@ -74,7 +76,11 @@ TIER_ORDER = ["user-accepted", "tests-passed", "evaluator-verified"]
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "enabled": True,
-    # The tier at (or above) which a payload is adopted without asking.
+    # Remote skills are manual-approval by default (ratified). Auto-adopt is an
+    # explicit opt-in; when off, verified candidates are SUGGESTED, not installed.
+    "autoAdopt": False,
+    # The tier at (or above) which a payload is adopted without asking, once
+    # autoAdopt is opted in.
     "autoAdoptTier": "evaluator-verified",
     "maxCandidates": 3,
 }
@@ -164,7 +170,9 @@ def classify_payload(trace: Dict[str, Any]) -> str:
 
 
 def _adopt_skill(ref: str, runner: Optional[jinn_layer.Runner]) -> str:
-    path = skills_install.install(ref, runner=runner)
+    # Auto-adopt is a real install: use the default cwd-aware runner (the pickup
+    # runner has no cwd support). Dormant by default (see Task 5).
+    path = skills_install.install(ref, runner=None)
     return f"installed skill at {path}"
 
 
@@ -252,7 +260,7 @@ def _pickup_inner(
                 continue
             if slug in installed:
                 continue
-            if tier_at_least(tier, threshold):
+            if config.get("autoAdopt") and tier_at_least(tier, threshold):
                 try:
                     receipt = PAYLOAD_ADOPTERS[payload_type](ref, runner)
                     adopted.append(f"- {slug} ({tier}): {receipt}")

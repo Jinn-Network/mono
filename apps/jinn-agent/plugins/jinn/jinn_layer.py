@@ -22,7 +22,7 @@ Runner = Callable[[List[str]], Tuple[int, str]]
 _TIMEOUT_S = 120
 
 
-def _default_runner(argv: List[str]) -> Tuple[int, str]:
+def _default_runner(argv: List[str], cwd: Optional[str] = None) -> Tuple[int, str]:
     try:
         proc = subprocess.run(
             argv,
@@ -30,6 +30,7 @@ def _default_runner(argv: List[str]) -> Tuple[int, str]:
             text=True,
             timeout=_TIMEOUT_S,
             check=False,
+            cwd=cwd,
         )
         out = proc.stdout + (("\n" + proc.stderr) if proc.stderr.strip() else "")
         return proc.returncode, out.strip()
@@ -50,8 +51,11 @@ def binary() -> str:
     return (os.environ.get("JINN_LAYER_BIN") or "").strip() or "jinn-layer"
 
 
-def run(args: List[str], runner: Optional[Runner] = None) -> Tuple[int, str]:
-    return (runner or _default_runner)([binary(), *args])
+def run(args: List[str], runner: Optional[Runner] = None, cwd: Optional[str] = None) -> Tuple[int, str]:
+    argv = [binary(), *args]
+    if runner is not None:
+        return runner(argv)  # injected test seam ignores cwd
+    return _default_runner(argv, cwd)
 
 
 # ── Verbs ────────────────────────────────────────────────────────────────────

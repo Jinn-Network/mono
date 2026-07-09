@@ -20,6 +20,8 @@ from typing import Callable, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
+from . import harness as _harness
+
 try:
     from hermes_constants import get_hermes_home
 except Exception:  # pragma: no cover — plugin may load before constants resolves
@@ -35,11 +37,12 @@ DECLINED = "declined"
 
 # ── Exact copy (design artifact) ─────────────────────────────────────────────
 
-OPENING = (
-    "jinn-agent is an open coding harness. When it finishes a task it can "
-    "publish a scrubbed trace of that task to a public corpus — the shared "
-    "record that trains the harness everyone runs."
-)
+def opening() -> str:
+    return (
+        f"{_harness.harness_name()} is an open coding harness. When it finishes a "
+        "task it can publish a scrubbed trace of that task to a public corpus — "
+        "the shared record that trains the harness everyone runs."
+    )
 
 WHY = [
     "Build the open harness — your tasks improve the agent no one company owns.",
@@ -55,7 +58,8 @@ WHAT_LEAVES = [
     "You can veto any task, and preview the exact payload before the first send.",
 ]
 
-DECLINE_LINE = "Decline and jinn-agent still works fully — as a reader."
+def decline_line() -> str:
+    return f"Decline and {_harness.harness_name()} still works fully — as a reader."
 
 CONFIRM_ACCEPT = (
     "Turn on contribution? Every task this harness runs will be scrubbed and "
@@ -165,13 +169,13 @@ def render_explainer(keys_line: str = KEYS_LINE) -> str:
     mechanics (``WHAT LEAVES THIS MACHINE``). The styled TUI variant is
     ``render_explainer_styled``; both carry identical visible text.
     """
-    lines = [state_line(), "", OPENING, "", f"{WHY_HEADER}:"]
+    lines = [state_line(), "", opening(), "", f"{WHY_HEADER}:"]
     lines += [f"  · {s}" for s in WHY]
     lines.append("")
     lines.append(f"{WHAT_LEAVES_HEADER}:")
     lines += [f"  · {s}" for s in WHAT_LEAVES]
     lines.append("")
-    lines.append(DECLINE_LINE)
+    lines.append(decline_line())
     lines.append("")
     lines.append(keys_line)
     return "\n".join(lines)
@@ -265,11 +269,12 @@ from . import style as _style  # noqa: E402  (kept local to the render section)
 
 
 def _sigil_head(pal, rst: str) -> str:
+    suffix = "  ·  first run" + ("  ·  fork of hermes-agent" if _harness.is_fork() else "")
     return (
         _style.wrap(pal, rst, "sky", "◇")
         + " "
-        + _style.wrap(pal, rst, "fg", "jinn-agent")
-        + _style.wrap(pal, rst, "dim", "  ·  first run  ·  fork of hermes-agent")
+        + _style.wrap(pal, rst, "fg", _harness.harness_name())
+        + _style.wrap(pal, rst, "dim", suffix)
     )
 
 
@@ -293,7 +298,7 @@ def render_explainer_styled(keys_line: str = KEYS_LINE) -> str:
         "",
         fg("  Contribute to the open corpus?"),
         "",
-        dim("  " + OPENING),
+        dim("  " + opening()),
         "",
         sky("  " + WHY_HEADER),
     ]
@@ -305,7 +310,7 @@ def render_explainer_styled(keys_line: str = KEYS_LINE) -> str:
     out += [dim("  · " + s) for s in WHAT_LEAVES]
     out += [
         "",
-        dim("  " + DECLINE_LINE),
+        dim("  " + decline_line()),
         "",
         _rule(pal, rst),
         "  " + kbd("[A]") + fg(" Accept & contribute") + "      " + kbd("[P]") + fg(" Preview a real payload"),
@@ -429,7 +434,7 @@ def render_preview_example() -> str:
         bt("example — no task run yet"),
         bl([("schema      ", None), ("jinn.trace/v1", "sky")]),
         bl([("task        ", None), ("(example) fix flaky retry in http client", "fg")]),
-        bl([("harness     ", None), ("jinn-agent", "fg")]),
+        bl([("harness     ", None), (_harness.harness_name(), "fg")]),
         bl([("tier        ", None), ("tests-passed", "green")]),
         bl([("scrub       ", None), ("12 secrets removed · 3 paths anonymised · ", "dim"), ("ok", "green")]),
         bm("redacted before send"),

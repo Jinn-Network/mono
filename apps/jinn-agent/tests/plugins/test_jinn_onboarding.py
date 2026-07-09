@@ -218,10 +218,19 @@ def test_corpus_signal_line_strips_terminal_control_chars():
 def test_corpus_signal_line_hooked_into_pickup(tmp_path, monkeypatch):
     """Adopting a verified corpus skill emits exactly one ◇ corpus line."""
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    # Auto-adopt is opt-in by default (manual-approval-by-default); opt in so
+    # this test can exercise the adopt-signal path.
+    cfg = tmp_path / "jinn" / "pickup.json"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text(json.dumps({"autoAdopt": True}))
     # Reload pickup fresh so its module-level state is clean.
     pickup = importlib.reload(importlib.import_module("plugins.jinn.pickup"))
 
     tp = importlib.import_module("tests.plugins.test_jinn_pickup")
+    skills_install = importlib.import_module("plugins.jinn.skills_install")
+    # The adopt DECISION (and its signal-line emission) is under test here,
+    # not the layer shell-out (that's covered in test_jinn_skills_install.py).
+    monkeypatch.setattr(skills_install, "install", tp._fake_install(tmp_path))
     runner = tp.CorpusRunner(tp.trace(tier="evaluator-verified", slug="tdd"))
 
     lines = []

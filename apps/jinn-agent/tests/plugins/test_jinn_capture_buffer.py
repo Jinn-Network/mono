@@ -54,3 +54,14 @@ def test_buffer_keys_on_session_across_unstable_task_ids():
     assert task["task"]["summary"] == "Do the thing"
     assert task["environment"]["model"] == "m"
     assert len(task["steps"]) == 1
+
+
+def test_assemble_uses_resolved_harness_when_stock(monkeypatch):
+    from plugins.jinn import capture_buffer as buf
+    monkeypatch.delenv("JINN_HARNESS_NAME", raising=False)
+    buf.reset()
+    buf.record_first_turn("t", "s", "fix the retry bug", "gpt-4o-mini", "")
+    buf.record_tool_call("t", "s", "edit", "c1", {}, "ok", 5)
+    task = buf.assemble("t", "s", completed=True, interrupted=False)
+    assert task["environment"]["harness"]["name"] == "hermes-agent"
+    assert task["task"]["distributionTags"][0] == "hermes-agent"

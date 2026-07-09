@@ -20,6 +20,7 @@ import pytest
 jinn = importlib.import_module("plugins.jinn")
 consent = importlib.import_module("plugins.jinn.consent")
 pickup = importlib.import_module("plugins.jinn.pickup")
+skills_install = importlib.import_module("plugins.jinn.skills_install")
 
 REF = "bafyPickupSkill"
 
@@ -76,7 +77,38 @@ def isolated_home(tmp_path, monkeypatch):
 MSG = "Help me with tdd-style refactoring of this suite"
 
 
-def test_verified_payload_adopts_automatically(tmp_path):
+def _fake_install(tmp_path, slug: str = "tdd"):
+    """Stand in for skills_install.install(): the adopt DECISION is under
+    test here, not the layer shell-out (that's covered in
+    test_jinn_skills_install.py). Writes the SKILL.md + .jinn-ref marker so
+    on-disk assertions and list_installed()-based dedup still hold."""
+    def fake(ref, runner=None):
+        target = tmp_path / "skills" / slug
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "SKILL.md").write_text(f"# {slug}\n")
+        (target / ".jinn-ref").write_text(json.dumps({"ref": ref}) + "\n")
+        return str(target / "SKILL.md")
+    return fake
+
+
+def test_verified_candidate_is_suggested_not_adopted_by_default(tmp_path):
+    # Ratified: remote skills are manual-approval by default. With no
+    # pickup.json (autoAdopt defaults to False), even an evaluator-verified
+    # candidate is only suggested — never installed without a keystroke.
+    runner = CorpusRunner(trace(tier="evaluator-verified"))
+    result = pickup.pickup(MSG, runner=runner)
+    assert result is not None
+    ctx = result["context"]
+    assert "install: /jinn skills install" in ctx      # suggested
+    assert "Adopted automatically" not in ctx          # NOT adopted
+    assert not (tmp_path / "skills").exists()
+
+
+def test_opt_in_auto_adopts(tmp_path, monkeypatch):
+    monkeypatch.setattr(skills_install, "install", _fake_install(tmp_path))
+    cfg = tmp_path / "jinn" / "pickup.json"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text(json.dumps({"autoAdopt": True}))
     runner = CorpusRunner(trace(tier="evaluator-verified"))
     result = pickup.pickup(MSG, runner=runner)
     assert result is not None
@@ -94,16 +126,18 @@ def test_unverified_payload_suggests_but_never_installs(tmp_path):
     assert not (tmp_path / "skills").exists()
 
 
-def test_tests_passed_tier_respects_configured_threshold(tmp_path):
+def test_tests_passed_tier_respects_configured_threshold(tmp_path, monkeypatch):
+    monkeypatch.setattr(skills_install, "install", _fake_install(tmp_path))
     # Default threshold is evaluator-verified: tests-passed only suggests…
     runner = CorpusRunner(trace(tier="tests-passed"))
     result = pickup.pickup(MSG, runner=runner)
     assert not (tmp_path / "skills").exists()
     assert result is not None
-    # …but an operator who lowers the threshold gets auto-adoption.
+    # …but an operator who opts into auto-adopt and lowers the threshold
+    # gets auto-adoption.
     cfg = tmp_path / "jinn" / "pickup.json"
     cfg.parent.mkdir(parents=True, exist_ok=True)
-    cfg.write_text(json.dumps({"autoAdoptTier": "tests-passed"}))
+    cfg.write_text(json.dumps({"autoAdopt": True, "autoAdoptTier": "tests-passed"}))
     runner2 = CorpusRunner(trace(tier="tests-passed"))
     pickup.pickup(MSG, runner=runner2)
     assert (tmp_path / "skills" / "tdd" / "SKILL.md").exists()
@@ -112,12 +146,21 @@ def test_tests_passed_tier_respects_configured_threshold(tmp_path):
 def test_unknown_payload_type_is_never_adopted(tmp_path):
     runner = CorpusRunner(trace(tier="evaluator-verified", payload="opaque"))
     result = pickup.pickup(MSG, runner=runner)
+    # Verified unknown payloads are surfaced (suggest-only default must not
+    # swallow them into silence) but never adopted.
+    assert result is not None
+    ctx = result["context"]
+    assert "unknown" in ctx
+    assert REF in ctx
+    assert "Adopted automatically" not in ctx
     assert not (tmp_path / "skills").exists()
-    # Verified unknown payloads are mentioned, not swallowed.
-    assert result is None or "installed" not in result["context"]
 
 
-def test_pickup_is_not_consent_gated(tmp_path):
+def test_pickup_is_not_consent_gated(tmp_path, monkeypatch):
+    monkeypatch.setattr(skills_install, "install", _fake_install(tmp_path))
+    cfg = tmp_path / "jinn" / "pickup.json"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text(json.dumps({"autoAdopt": True}))
     consent.save_state(consent.DECLINED)
     runner = CorpusRunner(trace(tier="evaluator-verified"))
     result = pickup.pickup(MSG, runner=runner)
@@ -134,7 +177,11 @@ def test_disabled_config_is_a_no_op(tmp_path):
     assert runner.calls == []
 
 
-def test_already_installed_skill_is_skipped(tmp_path):
+def test_already_installed_skill_is_skipped(tmp_path, monkeypatch):
+    monkeypatch.setattr(skills_install, "install", _fake_install(tmp_path))
+    cfg = tmp_path / "jinn" / "pickup.json"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text(json.dumps({"autoAdopt": True}))
     runner = CorpusRunner(trace(tier="evaluator-verified"))
     pickup.pickup(MSG, runner=runner)
     runner2 = CorpusRunner(trace(tier="evaluator-verified"))

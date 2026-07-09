@@ -49,6 +49,11 @@ def _sanitise_slug(raw: str) -> str:
     return slug[:80]
 
 
+# RESIDUAL (flagged cross-repo, 2026-07-08 design): these read-only envelope
+# helpers still serve corpus_fetch + pickup classification for DISPLAY. They no
+# longer gate any install write (install() defers to the layer). Fully removing
+# them needs an interpreted `jinn-layer corpus get` projection — a harness-layer
+# follow-up, tracked separately.
 def _extract_trace(record: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:
     """Return (trace envelope, verified sha256) from a corpus-get record.
 
@@ -104,21 +109,29 @@ def _skill_md_and_slug(trace: Dict[str, Any], ref: str) -> Tuple[str, str]:
 
 
 def install(ref: str, runner: Optional[jinn_layer.Runner] = None) -> str:
-    """Install a corpus-published skill by ref. Returns the install path."""
-    code, out = jinn_layer.run(["corpus", "get", ref, "--json"], runner)
-    if code != 0:
-        raise ValueError(f"corpus get failed: {out}")
-    record = json.loads(out)
-    trace, sha256 = _extract_trace(record)
-    skill_md, slug = _skill_md_and_slug(trace, ref)
+    """Install a corpus-published skill by ref via `jinn-layer skills install`.
 
-    target = skills_dir() / slug
-    target.mkdir(parents=True, exist_ok=True)
-    (target / "SKILL.md").write_text(skill_md, encoding="utf-8")
-    (target / MARKER_FILE).write_text(
-        json.dumps({"ref": ref, "sha256": sha256}) + "\n", encoding="utf-8"
+    The layer extracts, sha256-verifies, and writes SKILL.md (+ companions) into
+    the skills dir; this function only chooses the dir and drops the .jinn-ref
+    fence. No envelope parsing or hash verification happens here — that is the
+    layer's job (thin-fork boundary, mono #1345 / distillation-v1 §9).
+    """
+    skills_root = skills_dir()
+    skills_root.mkdir(parents=True, exist_ok=True)
+    code, out = jinn_layer.run(
+        ["skills", "install", ref, "--json"], runner, cwd=str(skills_root)
     )
-    logger.info("jinn: installed skill %s from %s", slug, ref)
+    if code != 0:
+        raise ValueError(f"skills install failed: {out}")
+    try:
+        result = json.loads(out)
+        target = Path(result["dir"])
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise ValueError(f"unreadable skills install result: {exc}")
+    (target / MARKER_FILE).write_text(
+        json.dumps({"ref": ref}) + "\n", encoding="utf-8"
+    )
+    logger.info("jinn: installed skill %s from %s", target.name, ref)
     return str(target / "SKILL.md")
 
 

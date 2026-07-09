@@ -16,11 +16,10 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from . import harness as _harness
+
 _lock = threading.Lock()
 _buffers: Dict[str, Dict[str, Any]] = {}
-
-HARNESS_NAME = "jinn-agent"
-HARNESS_VERSION = "0.1.0"
 
 
 def _key(task_id: str, session_id: str) -> str:
@@ -124,7 +123,8 @@ def assemble(
 
     status = "completed" if (completed and not interrupted) else ("abandoned" if interrupted else "failed")
     duration_ms = max(0, (time.time_ns() - int(buf["startedNs"])) // 1_000_000)
-    tags = [HARNESS_NAME]
+    h_name, h_version = _harness.harness()
+    tags = [h_name]
     if buf.get("platform"):
         tags.append(str(buf["platform"]))
 
@@ -138,7 +138,7 @@ def assemble(
             "distributionTags": tags,
         },
         "environment": {
-            "harness": {"name": HARNESS_NAME, "version": HARNESS_VERSION},
+            "harness": {"name": h_name, "version": h_version},
             "model": buf.get("model") or "unknown",
             "tools": sorted(buf["tools"]),
         },

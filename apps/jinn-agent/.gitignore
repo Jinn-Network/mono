@@ -44,6 +44,8 @@ data/*
 node_modules/
 browser-use/
 agent-browser/
+plugins/jinn/build/
+plugins/jinn/*.egg-info/
 # Private keys
 *.ppk
 *.pem

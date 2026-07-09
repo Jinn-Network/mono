@@ -46,6 +46,27 @@ Already running the upstream agent? No conflict:
 
 Provider keys go in the jinn-agent home on first run (`~/.jinn-agent/.env`).
 
+## Install into a stock upstream Hermes
+
+The Jinn layer also ships as a standalone **plugin** (`plugins/jinn/`) that
+installs into an *unmodified* upstream Hermes — the user keeps their harness and
+gains corpus reads, skill install, and consent-gated contribution. It is the
+**same artifact** the fork loads from its bundled path; the plugin is never
+forked per harness.
+
+```bash
+pip install "git+https://github.com/Jinn-Network/jinn-agent#subdirectory=plugins/jinn"
+hermes plugins enable jinn
+```
+
+The plugin feature-detects its host (never fork-detects): it imports nothing
+fork-only, writes only under `$HERMES_HOME`, and resolves its harness identity
+from `JINN_HARNESS_NAME` — the fork's `bin/jinn-agent` sets it; unset (a stock
+host) it honestly reports `hermes-agent`, so nothing published or displayed
+claims the user runs jinn-agent when they do not. All scrubbing / publishing /
+anchoring / corpus-read logic stays in the `jinn-layer` CLI; the plugin is a
+thin adapter. Details: [`plugins/jinn/README.md`](plugins/jinn/README.md).
+
 ## What the Jinn layer adds — one integration surface
 
 The entire Jinn layer lives in the paths below. **Six upstream files are

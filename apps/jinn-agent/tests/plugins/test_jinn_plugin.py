@@ -98,7 +98,9 @@ def test_declined_consent_captures_nothing(isolated_home, tmp_path):
     assert _pending_files(tmp_path) == []
 
 
-def test_accepted_but_unpreviewed_holds_locally(isolated_home, tmp_path):
+def test_accepted_but_unpreviewed_holds_locally(isolated_home, tmp_path, monkeypatch):
+    # Fork behaviour: bin/jinn-agent exports JINN_HARNESS_NAME=jinn-agent.
+    monkeypatch.setenv("JINN_HARNESS_NAME", "jinn-agent")
     consent.save_state(consent.ACCEPTED)
     _run_session()
     # Held for the preview-first rule: a pending file exists, nothing published.
@@ -423,7 +425,9 @@ def test_preview_with_no_pending_shows_example_fixture(isolated_home):
 
 # ── TUI-safe consent commands (no blocking reads) ────────────────────────────
 
-def test_slash_consent_shows_explainer_with_command_keys(isolated_home):
+def test_slash_consent_shows_explainer_with_command_keys(isolated_home, monkeypatch):
+    # Fork behaviour: bin/jinn-agent exports JINN_HARNESS_NAME=jinn-agent.
+    monkeypatch.setenv("JINN_HARNESS_NAME", "jinn-agent")
     out = jinn._handle_jinn(command_args="consent")
     assert "jinn-agent is an open coding harness" in out
     assert "/jinn consent accept" in out
@@ -468,21 +472,27 @@ def test_jinn_layer_not_found_points_at_canary_tag():
 
 # ── Consent copy: current state + preview next-step (mono#1384) ──────────────
 
-def test_slash_consent_states_current_state_unset(isolated_home):
+def test_slash_consent_states_current_state_unset(isolated_home, monkeypatch):
+    # Fork behaviour: bin/jinn-agent exports JINN_HARNESS_NAME=jinn-agent.
+    monkeypatch.setenv("JINN_HARNESS_NAME", "jinn-agent")
     out = jinn._handle_jinn(command_args="consent")
     first_line = out.splitlines()[0]
     assert first_line == "Contribution is currently OFF (never asked)."
     assert "jinn-agent is an open coding harness" in out
 
 
-def test_slash_consent_states_current_state_accepted(isolated_home):
+def test_slash_consent_states_current_state_accepted(isolated_home, monkeypatch):
+    # Fork behaviour: bin/jinn-agent exports JINN_HARNESS_NAME=jinn-agent.
+    monkeypatch.setenv("JINN_HARNESS_NAME", "jinn-agent")
     consent.save_state(consent.ACCEPTED)
     out = jinn._handle_jinn(command_args="consent")
     assert out.splitlines()[0] == "Contribution is currently ON."
     assert "jinn-agent is an open coding harness" in out
 
 
-def test_slash_consent_states_current_state_declined(isolated_home):
+def test_slash_consent_states_current_state_declined(isolated_home, monkeypatch):
+    # Fork behaviour: bin/jinn-agent exports JINN_HARNESS_NAME=jinn-agent.
+    monkeypatch.setenv("JINN_HARNESS_NAME", "jinn-agent")
     consent.save_state(consent.DECLINED)
     out = jinn._handle_jinn(command_args="consent")
     assert out.splitlines()[0] == "Contribution is currently OFF (declined)."
