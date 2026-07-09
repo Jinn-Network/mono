@@ -730,14 +730,16 @@ describe('jinn-layer distil (own captures, rung 1)', () => {
     const capturesDir = capturesDirWith(ownCapture());
     const outDir = mkdtempSync(join(tmpdir(), 'jinn-distil-out-'));
 
+    // #1490: install is now an explicit step — pass --install all to land the
+    // skill in the active dir (default is stage-only, not installed).
     const code = await runJinnLayerCli(
-      ['distil', '--captures', capturesDir, '--out', outDir],
+      ['distil', '--captures', capturesDir, '--out', outDir, '--install', 'all'],
       { writer, distilDeps: stubDistilDeps() },
     );
 
     expect(code).toBe(0);
-    // The skill is installed to disk under <out>/<name>/SKILL.md — the same
-    // shape `skills install` writes, via the shared createLocalSkillSink.
+    // The installed skill lands under <out>/<name>/SKILL.md — the same shape
+    // `skills install` writes, via the shared createLocalSkillSink.
     const md = readFileSync(join(outDir, 'orm-fanout-dedup', 'SKILL.md'), 'utf-8');
     const pkg = parseSkillMarkdown(md);
     expect(pkg.name).toBe('orm-fanout-dedup');
@@ -745,7 +747,7 @@ describe('jinn-layer distil (own captures, rung 1)', () => {
     // The #1490 run presentation shows the skill in the installed panel with
     // its source-capture provenance, and states nothing left the machine.
     expect(out()).toContain('orm-fanout-dedup');
-    expect(out()).toMatch(/installed/);
+    expect(out()).toMatch(/installed · ready/);
     expect(out()).toContain('nothing left this machine');
   });
 
@@ -762,12 +764,13 @@ describe('jinn-layer distil (own captures, rung 1)', () => {
     // Give each cluster a distinct skill name so both install side by side.
     let n = 0;
     const code = await runJinnLayerCli(
-      ['distil', '--captures', capturesDir, '--out', outDir, '--json'],
+      ['distil', '--captures', capturesDir, '--out', outDir, '--install', 'all', '--json'],
       { writer, distilDeps: stubDistilDeps({ distill: async () => ({ ...VALID_DISTILL, name: `skill-${++n}` }) }) },
     );
     expect(code).toBe(0);
     const result = JSON.parse(out());
     expect(result.distilled.published).toHaveLength(2);
+    expect(result.installed).toHaveLength(2);
     const dirs = readdirSync(outDir, { withFileTypes: true }).filter((d) => d.isDirectory());
     expect(dirs).toHaveLength(2);
   });
@@ -779,7 +782,7 @@ describe('jinn-layer distil (own captures, rung 1)', () => {
     const calls: Array<{ provider: string; model: string }> = [];
 
     const code = await runJinnLayerCli(
-      ['distil', '--captures', capturesDir, '--out', outDir, '--distiller-model', 'claude-opus-4-8'],
+      ['distil', '--captures', capturesDir, '--out', outDir, '--distiller-model', 'claude-opus-4-8', '--install', 'all'],
       {
         writer,
         distilDeps: {
@@ -833,7 +836,8 @@ describe('jinn-layer distil (own captures, rung 1)', () => {
       const outDir = mkdtempSync(join(tmpdir(), 'jinn-distil-out-'));
       const code = await runJinnLayerCli(['distil', '--out', outDir], { writer, distilDeps: stubDistilDeps() });
       expect(code).toBe(0);
-      expect(out()).toMatch(/installed/);
+      // Install-agnostic: the run rendered the distilled skill by name.
+      expect(out()).toContain('orm-fanout-dedup');
     });
   });
 
@@ -1144,6 +1148,163 @@ describe('jinn-layer distil — consent + where-it-runs (#1490)', () => {
       );
       expect(code).toBe(0);
       expect(out()).toMatch(/No eligible captures/i);
+    });
+  });
+});
+
+describe('jinn-layer distil — staged install choice (#1490)', () => {
+  /** A fresh mode file pinned to local, plus the env pointing at it. */
+  function withLocalMode(fn: (outDir: string) => Promise<void>): Promise<void> {
+    const modePath = tmpModeFile();
+    writeDistilMode('local', modePath);
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-distil-out-'));
+    return withEnv({ JINN_LAYER_DISTIL_MODE_PATH: modePath }, () => fn(outDir));
+  }
+  /** The skill dir names directly under `dir` (installed = active, staged = -staged). */
+  function skillDirs(dir: string): string[] {
+    return existsSync(dir)
+      ? readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort()
+      : [];
+  }
+  const distinctNames = (): DistilCliDeps => ({
+    distill: async (c) => ({ ...VALID_DISTILL, name: `s-${c.instanceIds[0]}` }),
+  });
+
+  it('default (non-interactive, no --install) distils but installs NOTHING — stage only', async () => {
+    await withLocalMode(async (outDir) => {
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--captures', capturesDirWith(ownCapture()), '--out', outDir, '--json'],
+        { writer, distilDeps: { distill: async () => VALID_DISTILL, isTty: false } },
+      );
+      expect(code).toBe(0);
+      const r = JSON.parse(out());
+      expect(r.distilled.published).toHaveLength(1); // distilled
+      expect(r.installed).toEqual([]); // installed nothing (the consent-consistent default)
+      expect(skillDirs(outDir)).toEqual([]); // active dir empty
+      expect(skillDirs(`${outDir}-staged`)).toEqual(['orm-fanout-dedup']); // waiting in staging
+    });
+  });
+
+  it('--install all installs every distilled skill into the active dir and clears staging', async () => {
+    await withLocalMode(async (outDir) => {
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--captures', capturesDirWith(ownCapture()), '--out', outDir, '--install', 'all', '--json'],
+        { writer, distilDeps: { distill: async () => VALID_DISTILL } },
+      );
+      expect(code).toBe(0);
+      expect(JSON.parse(out()).installed).toEqual(['orm-fanout-dedup']);
+      expect(skillDirs(outDir)).toEqual(['orm-fanout-dedup']); // live
+      expect(skillDirs(`${outDir}-staged`)).toEqual([]); // moved out of staging
+    });
+  });
+
+  it('--install none is the same as staging only', async () => {
+    await withLocalMode(async (outDir) => {
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--captures', capturesDirWith(ownCapture()), '--out', outDir, '--install', 'none', '--json'],
+        { writer, distilDeps: { distill: async () => VALID_DISTILL } },
+      );
+      expect(code).toBe(0);
+      expect(JSON.parse(out()).installed).toEqual([]);
+      expect(skillDirs(outDir)).toEqual([]);
+    });
+  });
+
+  it('--install <name> installs just that skill; the rest stay staged', async () => {
+    await withLocalMode(async (outDir) => {
+      const capturesDir = capturesDirWith(
+        ownCapture(),
+        ownCapture({ session: { sessionId: 'own-two', capturedAt: '2026-07-09T09:00:00.000Z' } }),
+      );
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--captures', capturesDir, '--out', outDir, '--install', 's-own-two', '--json'],
+        { writer, distilDeps: distinctNames() },
+      );
+      expect(code).toBe(0);
+      expect(JSON.parse(out()).installed).toEqual(['s-own-two']);
+      expect(skillDirs(outDir)).toEqual(['s-own-two']); // only the named one is live
+      expect(skillDirs(`${outDir}-staged`)).toEqual(['s-own-orm-dedup']); // the other waits
+    });
+  });
+
+  it('--install <unknown> exits 2 and installs nothing', async () => {
+    await withLocalMode(async (outDir) => {
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--captures', capturesDirWith(ownCapture()), '--out', outDir, '--install', 'nope'],
+        { writer, distilDeps: { distill: async () => VALID_DISTILL } },
+      );
+      expect(code).toBe(2);
+      expect(out()).toContain('no distilled skill by that name');
+      expect(skillDirs(outDir)).toEqual([]);
+    });
+  });
+
+  it('interactive prompt returning all installs all', async () => {
+    await withLocalMode(async (outDir) => {
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--captures', capturesDirWith(ownCapture()), '--out', outDir, '--json'],
+        { writer, distilDeps: { distill: async () => VALID_DISTILL, promptInstall: async () => 'all' } },
+      );
+      expect(code).toBe(0);
+      expect(JSON.parse(out()).installed).toEqual(['orm-fanout-dedup']);
+    });
+  });
+
+  it('interactive prompt returning first installs exactly one of several', async () => {
+    await withLocalMode(async (outDir) => {
+      const capturesDir = capturesDirWith(
+        ownCapture(),
+        ownCapture({ session: { sessionId: 'own-two', capturedAt: '2026-07-09T09:00:00.000Z' } }),
+      );
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--captures', capturesDir, '--out', outDir, '--json'],
+        { writer, distilDeps: { ...distinctNames(), promptInstall: async () => 'first' } },
+      );
+      expect(code).toBe(0);
+      expect(JSON.parse(out()).installed).toHaveLength(1);
+      expect(skillDirs(outDir)).toHaveLength(1);
+    });
+  });
+
+  it('interactive prompt returning none stages only', async () => {
+    await withLocalMode(async (outDir) => {
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distil', '--captures', capturesDirWith(ownCapture()), '--out', outDir, '--json'],
+        { writer, distilDeps: { distill: async () => VALID_DISTILL, promptInstall: async () => 'none' } },
+      );
+      expect(code).toBe(0);
+      expect(JSON.parse(out()).installed).toEqual([]);
+      expect(skillDirs(outDir)).toEqual([]);
+    });
+  });
+
+  it('human render: default stages (not installed + how to install); --install all shows installed·ready', async () => {
+    await withLocalMode(async (outDir) => {
+      const staged = capture();
+      await runJinnLayerCli(
+        ['distil', '--captures', capturesDirWith(ownCapture()), '--out', outDir],
+        { writer: staged.writer, distilDeps: { distill: async () => VALID_DISTILL, isTty: false } },
+      );
+      expect(staged.out()).toMatch(/distilled locally · not installed/);
+      expect(staged.out()).toMatch(/stay local until you install/i);
+      expect(staged.out()).toContain('--install all');
+      // The forward-looking value shows in the panel.
+      expect(staged.out()).toContain('helps');
+
+      const installed = capture();
+      await runJinnLayerCli(
+        ['distil', '--captures', capturesDirWith(ownCapture()), '--out', mkdtempSync(join(tmpdir(), 'jinn-distil-out2-')), '--install', 'all'],
+        { writer: installed.writer, distilDeps: { distill: async () => VALID_DISTILL } },
+      );
+      expect(installed.out()).toMatch(/installed · ready/);
     });
   });
 });

@@ -17,7 +17,7 @@
  */
 
 import { parseArgs } from 'node:util';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { homedir, tmpdir } from 'node:os';
@@ -72,6 +72,7 @@ import {
   renderRecorded,
   renderEmpty,
   renderRunSummary,
+  renderReview,
   renderFailure,
   renderResumeNothing,
   type RenderedSkill,
@@ -123,25 +124,35 @@ Commands:
                                                  meta-distill over the stage-1 skills.
                                                  --local-only avoids chain writes and evidence
                                                  anchors, using in-memory publish deps.
-  distil [--where local|defer|off] [--resume] [--captures <dir>] [--limit N]
-         [--out <dir>] [--distiller claude|codex] [--distiller-model <model>] [--json]
+  distil [--where local|defer|off] [--install all|<name>|none] [--resume]
+         [--captures <dir>] [--limit N] [--out <dir>]
+         [--distiller claude|codex] [--distiller-model <model>] [--json]
                                                  Rung-1 own-captures loop: distil YOUR recent local
-                                                 captures into skills and install them, fully local
-                                                 (no corpus publish, no chain anchor). A heavy local
-                                                 pass, so you control WHERE it runs (#1490):
+                                                 captures into skills, fully local (no corpus publish,
+                                                 no chain anchor). A heavy local pass, so you control
+                                                 WHERE it runs (#1490):
                                                    --where local  distil here now (a spend; confirms)
                                                    --where defer  hold captures, run nothing (default)
                                                    --where off    stop reserving captures
                                                  --where sets the persistent mode and echoes it —
                                                  nothing runs. A bare 'distil' with no recorded mode
                                                  shows first-run consent (interactive) or takes the
-                                                 safe default (defer) non-interactively. When the mode
-                                                 is local a run installs each skill as
+                                                 safe default (defer) non-interactively.
+                                                 A LOCAL run distils to a STAGING area and installs
+                                                 NOTHING by default — you review the skills (what each
+                                                 came from and will help with) and choose:
+                                                   --install all     install every distilled skill
+                                                   --install <name>  install just that one
+                                                   --install none    stage only (default)
+                                                 Interactively (TTY) the same choice is an [A]ll /
+                                                 [1] first / [S]kip prompt. Installed skills land as
                                                  <out>/<name>/SKILL.md (default
-                                                 ~/.jinn-client/harness-layer/skills) via the shared
-                                                 local skill sink — all produced skills install.
-                                                 --resume distils only the captures no installed skill
-                                                 already covers (a stopped/failed run picks up here).
+                                                 ~/.jinn-client/harness-layer/skills, the active dir
+                                                 /jinn skills reads); the rest wait in <out>-staged.
+                                                 --resume distils only the captures no distilled skill
+                                                 (installed OR staged) already covers.
+                                                 --json reports the distilled and installed sets
+                                                 separately.
                                                  --distiller-model is the arbitrage knob: it is the
                                                  model that WRITES the skills, distinct from the
                                                  cheap runtime model your captures ran under.
@@ -222,12 +233,23 @@ export interface DistilCliDeps {
   promptConsent?: () => Promise<DistilMode>;
   /**
    * Whether to treat this invocation as interactive (tests). Default:
-   * `process.stdout.isTTY`. When false and the mode is unset, the first run
-   * takes the safe default (defer) without persisting — a later interactive
-   * run still gets the prompt.
+   * `process.stdout.isTTY && process.stdin.isTTY`. When false and the mode is
+   * unset, the first run takes the safe default (defer) without persisting — a
+   * later interactive run still gets the prompt. It also gates the install
+   * review/prompt: non-interactive stages only (nothing installed).
    */
   isTty?: boolean;
+  /**
+   * Install-choice resolver (#1490). Called only when a LOCAL run produced
+   * skills, no `--install` flag was given, and the invocation is interactive.
+   * Returns the choice over the produced skill names. Tests inject a fake; the
+   * default is a readline prompt (see {@link readlineInstallPrompt}).
+   */
+  promptInstall?: (skillNames: string[]) => Promise<InstallChoice>;
 }
+
+/** The install-review choice: everything, just the first, or none (stage only). */
+export type InstallChoice = 'all' | 'first' | 'none';
 
 export interface RunJinnLayerCliOptions {
   /** Injectable layer (tests). Default: createHarnessLayer() with env overrides. */
@@ -311,26 +333,30 @@ function distilModePath(): string {
 }
 
 /**
- * The session ids already covered by an installed skill under `outDir` — a
+ * The session ids already covered by a distilled skill under any of `dirs` — a
  * capture is "done" when some skill's provenance names its
  * `local-capture:<sessionId>` ref. `--resume` distils only the uncovered ones
- * (design: resume is derived, not a flag). Unreadable skill dirs are skipped.
+ * (design: resume is derived, not a flag). Both the active-skills dir and the
+ * staging dir are scanned, so a capture already distilled (installed OR only
+ * staged) is never re-spent. Unreadable skill dirs are skipped.
  */
-function coveredSessionIds(outDir: string): Set<string> {
+function coveredSessionIds(dirs: string[]): Set<string> {
   const covered = new Set<string>();
-  if (!existsSync(outDir)) return covered;
-  for (const entry of readdirSync(outDir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const md = join(outDir, entry.name, 'SKILL.md');
-    if (!existsSync(md)) continue;
-    try {
-      const pkg = parseSkillMarkdown(readFileSync(md, 'utf-8'));
-      for (const ref of pkg.jinn.provenance) {
-        const m = /^local-capture:(.+)$/.exec(ref);
-        if (m?.[1]) covered.add(m[1]);
+  for (const dir of dirs) {
+    if (!existsSync(dir)) continue;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const md = join(dir, entry.name, 'SKILL.md');
+      if (!existsSync(md)) continue;
+      try {
+        const pkg = parseSkillMarkdown(readFileSync(md, 'utf-8'));
+        for (const ref of pkg.jinn.provenance) {
+          const m = /^local-capture:(.+)$/.exec(ref);
+          if (m?.[1]) covered.add(m[1]);
+        }
+      } catch {
+        // A skill dir we can't parse can't be proven to cover anything — skip it.
       }
-    } catch {
-      // A skill dir we can't parse can't be proven to cover anything — skip it.
     }
   }
   return covered;
@@ -391,6 +417,35 @@ async function readlineConsentPrompt(o: {
         if (c === 'y' || c === 'yes') return 'local';
         // Anything else backs out to the menu — a spend is never the default.
       }
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+/**
+ * The default (TTY-only) install-review prompt. Prints the forward-framed review
+ * (what each skill will help with next), then reads an explicit all / one / skip
+ * choice. Same proportionate ladder as consent; nothing installs until the
+ * operator answers. Not unit-tested (tests inject `promptInstall`).
+ */
+async function readlineInstallPrompt(o: {
+  distillModel: string;
+  captureCount: number;
+  skills: RenderedSkill[];
+  writer: { write: (s: string) => boolean };
+}): Promise<InstallChoice> {
+  o.writer.write(
+    renderReview({ distillModel: o.distillModel, captureCount: o.captureCount, skills: o.skills }) + '\n',
+  );
+  const rl = createInterface({ input: process.stdin, output: process.stderr, terminal: true });
+  try {
+    for (;;) {
+      const a = (await ask(rl, '\ninstall? [A]ll · [1] just the first · [S]kip (default): ')).trim().toLowerCase();
+      if (a === '' || a === 's' || a === 'skip') return 'none';
+      if (a === 'a' || a === 'all') return 'all';
+      if (a === '1' || a === 'first' || a === 'one') return 'first';
+      // Unrecognised → re-ask; skip is the safe default on empty.
     }
   } finally {
     rl.close();
@@ -663,6 +718,7 @@ export async function runJinnLayerCli(
         'local-only': { type: 'boolean', default: false },
         where: { type: 'string' },
         resume: { type: 'boolean', default: false },
+        install: { type: 'string' },
       },
       allowPositionals: true,
     });
@@ -812,6 +868,7 @@ export async function runJinnLayerCli(
 
     const resume = parsed.values.resume as boolean;
     const mode = readDistilMode(modePath);
+    const isTty = dd.isTty ?? Boolean(process.stdout.isTTY && process.stdin.isTTY);
 
     // Decide the mode this invocation acts on. `--resume` only continues an
     // already-consented LOCAL run — it never grants consent itself, so a
@@ -823,7 +880,6 @@ export async function runJinnLayerCli(
     if (resume && mode === 'local') {
       acting = 'local';
     } else if (mode === 'unset') {
-      const isTty = dd.isTty ?? Boolean(process.stdout.isTTY && process.stdin.isTTY);
       const prompt =
         dd.promptConsent ??
         (isTty
@@ -860,14 +916,21 @@ export async function runJinnLayerCli(
       return 0;
     }
 
-    // acting === 'local' → run the #1489 engine, install-all, then present it.
-    const outDir = (parsed.values.out as string | undefined) ?? DEFAULT_SKILLS_INSTALL_DIR;
-    mkdirSync(outDir, { recursive: true });
+    // acting === 'local' → distil to STAGING, review, install-on-choice.
+    // `--out` is the ACTIVE skills dir (installed skills live here — what /jinn
+    // skills and resume read). Distilled-but-not-installed skills wait in a
+    // sibling staging dir until the operator installs them; nothing goes live
+    // without an explicit choice (the consent-consistent default).
+    const activeDir = (parsed.values.out as string | undefined) ?? DEFAULT_SKILLS_INSTALL_DIR;
+    const stagingDir = activeDir.replace(/[/\\]+$/, '') + '-staged';
+    mkdirSync(activeDir, { recursive: true });
+    mkdirSync(stagingDir, { recursive: true });
 
-    // --resume: distil only the captures no installed skill already covers.
+    // --resume: distil only captures no distilled skill (installed OR staged)
+    // already covers.
     let toDistil = captures;
     if (resume) {
-      const covered = coveredSessionIds(outDir);
+      const covered = coveredSessionIds([activeDir, stagingDir]);
       toDistil = captures.filter((c) => !covered.has(c.session.sessionId));
       if (toDistil.length === 0) {
         if (json) writer.write(JSON.stringify({ mode: 'local', ran: false, resume: true, capturesConsidered: captures.length }) + '\n');
@@ -876,34 +939,102 @@ export async function runJinnLayerCli(
       }
     }
 
+    // Distil to STAGING — nothing is installed yet.
     const distiller = createLocalDistiller({
       distill,
-      sink: createLocalSkillSink(outDir),
+      sink: createLocalSkillSink(stagingDir),
       distribution: 'coding',
       distillModel,
       ...(dd.slateInstanceIds ? { slate: { instanceIds: dd.slateInstanceIds } } : {}),
     });
     const result = await distiller.distil(toDistil);
+    const published = result.distilled.published;
+    const summaryBySession = new Map(toDistil.map((c) => [c.session.sessionId, c.task.summary]));
+
+    // 1d — a run failed mid-way: staged skills are kept, point at --resume. No
+    // install is offered on a partial run.
+    if (result.distilled.errors.length > 0) {
+      if (json) {
+        writer.write(JSON.stringify({ ...result, stagingDir, activeDir, installed: [], capturesConsidered: toDistil.length, distillModel }) + '\n');
+      } else {
+        writer.write(renderFailure({ distillModel, distilledCount: published.length, errors: result.distilled.errors }) + '\n');
+      }
+      return 1;
+    }
+
+    // Resolve the install choice: --install flag > interactive review/prompt >
+    // stage-only. The non-interactive default installs NOTHING — the whole point
+    // of decoupling distil from install is that skills go live only on a choice.
+    const publishedNames = published.map((p) => p.pkg.name);
+    let installNames = new Set<string>();
+    if (published.length > 0) {
+      const installFlag = parsed.values.install as string | undefined;
+      if (installFlag !== undefined) {
+        if (installFlag === 'all') installNames = new Set(publishedNames);
+        else if (installFlag === 'none') installNames = new Set();
+        else if (publishedNames.includes(installFlag)) installNames = new Set([installFlag]);
+        else {
+          writer.write(
+            `error: --install "${installFlag}" — no distilled skill by that name ` +
+              `(available: ${publishedNames.join(', ')}; or "all" / "none")\n`,
+          );
+          return 2;
+        }
+      } else {
+        const reviewSkills: RenderedSkill[] = published.map((p) => ({
+          name: p.pkg.name,
+          installed: false,
+          provenance: provenanceLabels(p.pkg, summaryBySession),
+          helpsWith: p.pkg.description,
+        }));
+        const prompt =
+          dd.promptInstall ??
+          (isTty
+            ? () => readlineInstallPrompt({ distillModel, captureCount: toDistil.length, skills: reviewSkills, writer })
+            : undefined);
+        if (prompt) {
+          const choice = await prompt(publishedNames);
+          installNames =
+            choice === 'all'
+              ? new Set(publishedNames)
+              : choice === 'first'
+                ? new Set(publishedNames.slice(0, 1))
+                : new Set();
+        }
+        // else non-interactive → stage only (installNames stays empty).
+      }
+    }
+
+    // Install the chosen skills into the active dir via the existing local sink,
+    // and clear their staged copies so staging holds only what's not installed.
+    const activeSink = createLocalSkillSink(activeDir);
+    for (const p of published) {
+      if (!installNames.has(p.pkg.name)) continue;
+      await activeSink(p.pkg);
+      rmSync(join(stagingDir, p.pkg.name), { recursive: true, force: true });
+    }
 
     if (json) {
-      writer.write(JSON.stringify({ ...result, outDir, capturesConsidered: toDistil.length, distillModel }) + '\n');
-    } else if (result.distilled.errors.length > 0) {
-      // 1d — a run failed mid-way: name what survived and the one resume command.
-      writer.write(
-        renderFailure({ distillModel, installedCount: result.distilled.published.length, errors: result.distilled.errors }) + '\n',
-      );
+      writer.write(JSON.stringify({
+        ...result,
+        stagingDir,
+        activeDir,
+        installed: [...installNames],
+        capturesConsidered: toDistil.length,
+        distillModel,
+      }) + '\n');
     } else {
-      // 1b — the run terminus: header, captures→skills summary, and the skills
-      // panel with per-skill install-state + source-capture provenance.
-      const summaryBySession = new Map(toDistil.map((c) => [c.session.sessionId, c.task.summary]));
-      const skills: RenderedSkill[] = result.distilled.published.map((p) => ({
+      // 1b — the outcome panel: each distilled skill with its actual install
+      // state, forward `helps` value, and `from` provenance.
+      const skills: RenderedSkill[] = published.map((p) => ({
         name: p.pkg.name,
-        installed: true,
+        installed: installNames.has(p.pkg.name),
         provenance: provenanceLabels(p.pkg, summaryBySession),
+        helpsWith: p.pkg.description,
       }));
       writer.write(renderRunSummary({ distillModel, captureCount: toDistil.length, skills }) + '\n');
     }
-    return result.distilled.errors.length > 0 ? 1 : 0;
+    return 0;
   }
 
   if (isDistill) {
