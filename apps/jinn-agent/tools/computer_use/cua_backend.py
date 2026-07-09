@@ -266,7 +266,7 @@ def cua_driver_update_nudge() -> Optional[str]:
     current = state.get("current_version") or "?"
     return (
         f"cua-driver {latest} is available (you have {current}); "
-        f"update with `hermes computer-use install --upgrade`."
+        f"update with `jinn-agent computer-use install --upgrade`."
     )
 
 
@@ -308,10 +308,10 @@ def cua_driver_install_hint() -> str:
         )
     return (
         "cua-driver is not installed. Install with one of:\n"
-        "  hermes computer-use install\n"
+        "  jinn-agent computer-use install\n"
         "Or run the upstream installer directly:\n"
         f"{installer}\n"
-        "Or run `hermes tools` and enable the Computer Use toolset to install it automatically."
+        "Or run `jinn-agent tools` and enable the Computer Use toolset to install it automatically."
     )
 
 

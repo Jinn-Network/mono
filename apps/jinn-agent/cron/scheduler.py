@@ -2608,7 +2608,7 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
                 "config.yaml model.default missing or empty). "
                 f"Set a per-job model via "
                 f"`cronjob action=update job_id={job_id} model=<name>` or set a "
-                "default with `hermes model <name>`."
+                "default with `jinn-agent model <name>`."
             )
 
         # Apply IPv4 preference if configured.

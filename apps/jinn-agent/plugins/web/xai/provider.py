@@ -166,7 +166,7 @@ class XAIWebSearchProvider(WebSearchProvider):
             return {
                 "success": False,
                 "error": (
-                    "No xAI credentials found. Run `hermes auth` to sign in with "
+                    "No xAI credentials found. Run `jinn-agent auth` to sign in with "
                     "xAI Grok OAuth, or set XAI_API_KEY."
                 ),
             }

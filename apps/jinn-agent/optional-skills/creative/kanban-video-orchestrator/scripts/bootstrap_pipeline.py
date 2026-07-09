@@ -342,7 +342,7 @@ def render_setup_sh(plan: dict, brief_md: str, team_md: str) -> str:
     profile_creates = []
     for t in plan["team"]:
         profile_creates.append(
-            f'hermes profile create {t["profile"]} --clone 2>/dev/null || true'
+            f'jinn-agent profile create {t["profile"]} --clone 2>/dev/null || true'
         )
 
     # Profile config — emit JSON arrays so the bash function can pass them

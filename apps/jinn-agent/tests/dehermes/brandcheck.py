@@ -180,6 +180,18 @@ ALLOWED_HINT_LITERALS = {
     "hermes_cli/codex_runtime_plugin_migration.py": frozenset({
         "# managed by hermes-agent — `hermes codex-runtime migrate` regenerates this section",
     }),
+    # Risky-command labels paired with regex matchers that literally match
+    # `hermes gateway stop|restart` / `hermes update` / launchctl against a
+    # hermes-named unit. The labels describe what the matcher caught, so
+    # they stay truthful to the matcher. Widening the matchers to also
+    # catch the fork's `jinn-agent …` spellings is a functional guard fix
+    # (same class as gateway/run.py's _resolve_hermes_bin above) — rewrite
+    # these labels together with that fix.
+    "tools/approval.py": frozenset({
+        "stop/restart hermes gateway (kills running agents)",
+        "hermes update (restarts gateway, kills running agents)",
+        "stop/restart hermes launchd service (kills running agents)",
+    }),
 }
 
 

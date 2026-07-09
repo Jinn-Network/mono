@@ -1796,7 +1796,7 @@ def interactive_setup() -> None:
             "How should unauthorized users be handled?",
             [
                 "Enable open access (anyone can message the bot)",
-                "Use DM pairing (unknown users request access, you approve with 'hermes pairing approve')",
+                "Use DM pairing (unknown users request access, you approve with 'jinn-agent pairing approve')",
                 "Disable direct messages",
                 "Skip for now (bot will deny all users until configured)",
             ],
@@ -1809,12 +1809,12 @@ def interactive_setup() -> None:
         elif access_idx == 1:
             save_env_value("WECOM_DM_POLICY", "pairing")
             print_success("DM pairing mode — users will receive a code to request access.")
-            print_info("Approve with: hermes pairing approve <platform> <code>")
+            print_info("Approve with: jinn-agent pairing approve <platform> <code>")
         elif access_idx == 2:
             save_env_value("WECOM_DM_POLICY", "disabled")
             print_warning("Direct messages disabled.")
         else:
-            print_info("Skipped — configure later with 'hermes gateway setup'")
+            print_info("Skipped — configure later with 'jinn-agent gateway setup'")
 
     home = prompt("Home chat ID (optional, for cron/notifications)", password=False)
     if home:

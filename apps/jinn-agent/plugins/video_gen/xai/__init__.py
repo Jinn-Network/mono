@@ -747,7 +747,7 @@ async def _extend_xai_video_async(
 def _auth_required_response(prompt: str) -> Dict[str, Any]:
     return error_response(
         error=(
-            "No xAI credentials found. Sign in via `hermes auth add xai-oauth` "
+            "No xAI credentials found. Sign in via `jinn-agent auth add xai-oauth` "
             "(SuperGrok / Premium+) or set XAI_API_KEY from "
             "https://console.x.ai/."
         ),

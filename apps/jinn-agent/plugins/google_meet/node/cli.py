@@ -72,7 +72,7 @@ def node_command(args: argparse.Namespace) -> int:
         print(f"[meet-node] listening on ws://{args.host}:{args.port}")
         print(f"[meet-node] token (copy to gateway): {token}")
         print(f"[meet-node] approve with:")
-        print(f"             hermes meet node approve <name> ws://<host>:{args.port} {token}")
+        print(f"             jinn-agent meet node approve <name> ws://<host>:{args.port} {token}")
         try:
             asyncio.run(server.serve())
         except KeyboardInterrupt:

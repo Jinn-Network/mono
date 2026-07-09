@@ -136,6 +136,6 @@ def check_gateway_lifecycle(
             "Blocked: cron job contains a gateway lifecycle command "
             "(restart/stop/kill). This is blocked to prevent agent-driven "
             "SIGTERM-respawn loops under launchd/systemd supervision "
-            "(#30719). Run `hermes gateway restart` from a shell outside "
+            "(#30719). Run `jinn-agent gateway restart` from a shell outside "
             "the running gateway instead."
         )

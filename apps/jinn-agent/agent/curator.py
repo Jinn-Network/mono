@@ -254,7 +254,7 @@ def should_run_now(now: Optional[datetime] = None) -> bool:
             state["last_run_at"] = now.isoformat()
             state["last_run_summary"] = (
                 "deferred first run — curator seeded, will run after one "
-                "interval; use `hermes curator run --dry-run` to preview now"
+                "interval; use `jinn-agent curator run --dry-run` to preview now"
             )
             save_state(state)
         except Exception as e:  # pragma: no cover — best-effort persistence
@@ -392,7 +392,7 @@ CURATOR_DRY_RUN_BANNER = (
     "produce on a live run — but describe the actions you WOULD take, "
     "not actions you took. A downstream reviewer will read the report "
     "and decide whether to approve a live run with "
-    "`hermes curator run` (no flag).\n"
+    "`jinn-agent curator run` (no flag).\n"
     "\n"
     "If you accidentally take a mutating action, say so explicitly in "
     "the summary so the reviewer can revert it.\n"
@@ -1061,7 +1061,7 @@ def _build_rename_summary(
         shown += 1
     if total > SHOW:
         lines.append(f"  … and {total - SHOW} more")
-    lines.append("full report: hermes curator status")
+    lines.append("full report: jinn-agent curator status")
     # Pin hint — only surface it when there's actually a destination skill
     # worth pinning. The umbrella skills that absorbed content are the natural
     # candidates: pinning one tells future curator runs to leave it alone.
@@ -1071,7 +1071,7 @@ def _build_rename_summary(
         if umbrellas:
             example = umbrellas[0]
             lines.append(
-                f"keep an umbrella stable: hermes curator pin {example}"
+                f"keep an umbrella stable: jinn-agent curator pin {example}"
             )
     return "\n".join(lines)
 
@@ -1322,7 +1322,7 @@ def _render_report_markdown(p: Dict[str, Any]) -> str:
             "_These skills were **absorbed into another skill** during this run — "
             "their content still lives, just under a different name. "
             "The original directory was moved to `~/.hermes/skills/.archive/` for "
-            "safety and can be restored via `hermes curator restore <name>` if the "
+            "safety and can be restored via `jinn-agent curator restore <name>` if the "
             "consolidation was wrong._\n"
         )
         SHOW = 50
@@ -1358,7 +1358,7 @@ def _render_report_markdown(p: Dict[str, Any]) -> str:
             "_These skills were archived without being merged into an umbrella "
             "(e.g. stale, unused, or judged irrelevant). "
             "Directories live under `~/.hermes/skills/.archive/`. "
-            "Restore any via `hermes curator restore <name>`._\n"
+            "Restore any via `jinn-agent curator restore <name>`._\n"
         )
         SHOW = 50
         for entry in pruned[:SHOW]:
@@ -1443,7 +1443,7 @@ def _render_report_markdown(p: Dict[str, Any]) -> str:
 
     # Recovery footer
     lines.append("## Recovery\n")
-    lines.append("- Restore an archived skill: `hermes curator restore <name>`")
+    lines.append("- Restore an archived skill: `jinn-agent curator restore <name>`")
     lines.append("- All archives live under `~/.hermes/skills/.archive/` and are recoverable by `mv`")
     lines.append("- See `run.json` in this directory for the full machine-readable record.")
     lines.append("")
@@ -1649,7 +1649,7 @@ def run_curator_review(
                         "rule #1 for bundled skills ONLY. Hub-installed skills "
                         "remain strictly off-limits. Treat a stale built-in the "
                         "same as a stale agent-created skill: archive it (never "
-                        "delete). It will be restored on `hermes update` only if "
+                        "delete). It will be restored on `jinn-agent update` only if "
                         "the user explicitly restores it."
                     )
                 if dry_run:

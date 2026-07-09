@@ -639,7 +639,7 @@ def interactive_setup() -> None:
 
     print()
     print_success("IRC configuration saved to ~/.hermes/.env")
-    print_info("Restart the gateway for changes to take effect: hermes gateway restart")
+    print_info("Restart the gateway for changes to take effect: jinn-agent gateway restart")
 
 
 def is_connected(config) -> bool:

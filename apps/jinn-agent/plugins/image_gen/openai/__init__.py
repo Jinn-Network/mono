@@ -235,8 +235,8 @@ class OpenAIImageGenProvider(ImageGenProvider):
         if not os.environ.get("OPENAI_API_KEY"):
             return error_response(
                 error=(
-                    "OPENAI_API_KEY not set. Run `hermes tools` → Image "
-                    "Generation → OpenAI to configure, or `hermes setup` "
+                    "OPENAI_API_KEY not set. Run `jinn-agent tools` → Image "
+                    "Generation → OpenAI to configure, or `jinn-agent setup` "
                     "to add the key."
                 ),
                 error_type="auth_required",

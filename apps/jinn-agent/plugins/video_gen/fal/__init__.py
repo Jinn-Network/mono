@@ -386,7 +386,7 @@ def _submit_fal_video_request(endpoint: str, arguments: Dict[str, Any]):
                 f"(HTTP {status}). This model may not yet be enabled on "
                 f"the Nous Portal's FAL proxy. Either:\n"
                 f"  • Set FAL_KEY in your environment to use FAL.ai directly, or\n"
-                f"  • Pick a different model via `hermes tools` → Video Generation."
+                f"  • Pick a different model via `jinn-agent tools` → Video Generation."
             ) from exc
         raise
 
@@ -493,8 +493,8 @@ class FALVideoGenProvider(VideoGenProvider):
             return error_response(
                 error=(
                     "No FAL backend available. Either set FAL_KEY "
-                    "(run `hermes tools` → Video Generation → FAL to configure) "
-                    "or sign in to Nous (`hermes setup`) for managed gateway access."
+                    "(run `jinn-agent tools` → Video Generation → FAL to configure) "
+                    "or sign in to Nous (`jinn-agent setup`) for managed gateway access."
                 ),
                 error_type="auth_required",
                 provider="fal",
@@ -524,7 +524,7 @@ class FALVideoGenProvider(VideoGenProvider):
                     error=(
                         f"FAL family {family_id} has no image-to-video "
                         f"endpoint. Pick a family with image-to-video support "
-                        f"via `hermes tools` → Video Generation."
+                        f"via `jinn-agent tools` → Video Generation."
                     ),
                     error_type="modality_unsupported",
                     provider="fal", model=family_id, prompt=prompt,

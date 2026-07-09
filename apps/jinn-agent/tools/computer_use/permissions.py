@@ -166,7 +166,7 @@ def request_permissions_grant(driver_cmd: Optional[str] = None) -> int:
 
     binary = shutil.which(_driver_cmd(driver_cmd))
     if not binary:
-        print("cua-driver: not installed. Run: hermes computer-use install")
+        print("cua-driver: not installed. Run: jinn-agent computer-use install")
         return 2
 
     print(

@@ -89,7 +89,7 @@ class TestDynamicSchemaBuilder:
 
         desc = _build_dynamic_video_schema()["description"]
         assert "No video backend is configured" in desc
-        assert "hermes tools" in desc
+        assert "jinn-agent tools" in desc
 
     def test_generic_description_keeps_edit_extend_out_of_surface(self, cfg_home):
         from tools.video_generation_tool import _build_dynamic_video_schema, _GENERIC_DESCRIPTION

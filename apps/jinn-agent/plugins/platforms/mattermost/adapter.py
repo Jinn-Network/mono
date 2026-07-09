@@ -1164,7 +1164,7 @@ def interactive_setup() -> None:
     home_channel = prompt("Home channel ID (leave empty to set later with /set-home)")
     if home_channel:
         save_env_value("MATTERMOST_HOME_CHANNEL", home_channel)
-    print_info("   Open config in your editor:  hermes config edit")
+    print_info("   Open config in your editor:  jinn-agent config edit")
 
 
 # ---------------------------------------------------------------------------
