@@ -1,10 +1,8 @@
 # Task Creator v0 — mining execution traces into evaluable tasks
 
-- **Version:** 0.3 (design draft — v0.1 synthesized from a four-agent design/adversarial
+- **Version:** 0.1 (design draft — synthesized from a four-agent design/adversarial
   panel, 2026-07-08, plus two correction passes: the usage-trace-mining reframe and
-  the scrub-collision / lookup-contamination / gate-precision flags, 2026-07-09.
-  **v0.2 locks decisions D1–D4**; **v0.3 adds the public/private boundary + D5
-  (public-repo-only publication for v0)**, 2026-07-09.)
+  the scrub-collision / lookup-contamination / gate-precision flags, 2026-07-09)
 - **Date:** 2026-07-08 (written 2026-07-09)
 - **Author:** Ritsu (design session)
 - **Shape:** `design` — output is this spec. Building any rung is a follow-on `feat`,
@@ -13,7 +11,6 @@
   (SWE-smith spike). Finding, in one line: **fork the machinery, reject the dataset**
   — SWE-smith's value to Jinn is its transform components pointed at trace-derived
   targets, not its ~52k-instance synthetic pool (§5.3, §6).
-- **Plan:** [docs/superpowers/plans/2026-07-09-task-creator-v0.md](../docs/superpowers/plans/2026-07-09-task-creator-v0.md)
 - **Siblings:**
   - `spec/2026-07-06-distillation-v1.md` — the committed customer for this spec's
     output (verified pass/fail exemplar pairs).
@@ -137,8 +134,7 @@ capable host, then the everyday generator merges the result. The flow:
    `patch`, `test_patch`, `FAIL_TO_PASS`/`PASS_TO_PASS`,
    `install_config.{test_cmd,log_parser}`.
 2. Candidates run through admission (gold must grade as resolving; known-bad must
-   fail — hard-reject for minted instances per D3). Survivors persist to a
-   **`MintedPoolStore`** (sibling of
+   fail once §5.1 lands). Survivors persist to a **`MintedPoolStore`** (sibling of
    `ValidatedPoolStore`) and are published as a **minted-rows artifact on IPFS**.
 3. The fetcher learns one trick: a **row-routing `HfFetcher`** — if
    `hf_dataset` starts with `ipfs://<cid>`, fetch the row from the minted-rows
@@ -194,12 +190,7 @@ Built ahead of all gates, by explicit choice. Four deliverables:
   A task that cannot tell right from wrong is worthless as a data source.
   Motivation: weak-suite rates reported for SWE-bench-family benchmarks (a ~28.5%
   figure surfaced in the design-session research pass — **reported, pending anchor
-  to a primary source**, AC #3). **Policy (D3):** hard-reject all newly minted
-  instances when known-bad passes; for the existing benchmark pool, flag failures
-  and exclude flagged instances from distillation and Task Creator targeting, then
-  re-publish a stricter vetted-pool artifact once impact is measured — new supply
-  meets the higher bar immediately; legacy supply migrates deliberately so the
-  current task flow is not mass-invalidated.
+  to a primary source**, AC #3). *Decision point D3:* flag vs. hard-reject.
 - **Exemplar-pair yield metric.** Count instances that end with **both** a verified
   pass and a verified fail — the pair is exactly what distillation feeds on
   (`bridge.ts` retains per-(instance, polarity) groups). This is the numerator of
@@ -208,12 +199,6 @@ Built ahead of all gates, by explicit choice. Four deliverables:
   deadline: every day of capture without it is raw material lost.
 
 ### 5.2 Rung 1 — commit-echo (mint from real human commits)
-
-**Role (D4):** commit-echo is the **plumbing proof** — it validates the
-minted-row store, IPFS fetcher route, admission, and generator union with the least
-novelty. It is **not** the final learning substrate: public upstream commits create
-lookup contamination (below). Hunk-subset echo (§5.3) is the more trace-native rung
-and follows once blinded provenance and dogfood trace capture are ready.
 
 We already have admitted, image-pinned Docker environments for a set of repos. Real
 developers keep committing real fixes to those repos after our dataset snapshot.
@@ -277,9 +262,7 @@ minting rungs, not first as SWE-smith adoption would have implied.
 
 REPOLAUNCH-class agentic construction of testable Docker environments for arbitrary
 user repos. Activates only when real non-benchmark usage arrives. This is the
-component that makes a general-usage trace's repo mintable at all. Note this rung
-first meets private repos in force: it is gated behind the code-payload disclosure
-controls of §10.1 (D5) — until those exist, only public-repo sessions are publishable.
+component that makes a general-usage trace's repo mintable at all.
 
 ### 5.6 The destination — composition
 
@@ -289,9 +272,7 @@ run, intermediate failures — per the §10 contract), construct the environment
 (rung 4), treat the accepted diff as candidate gold and derive the verifier
 empirically (rung 2 mechanics; the session's own test commands seed the config),
 and push the result through the same mint → admit → post pipeline (rung 1 plumbing).
-Admission is the trust converter throughout. In v0 the composed miner publishes only
-public-repo sessions (§10.1, D5); private-repo publication waits on code-payload
-disclosure controls.
+Admission is the trust converter throughout.
 
 ## 6. Designs rejected (what the panel killed, kept on record)
 
@@ -345,18 +326,15 @@ returns null** — in which case mint *scaling* pauses (distillation is the only
 committed customer), while rung 0 and already-built plumbing stand (verified
 verdicts have other consumers; the "regardless vs. on-proof" line of §2).
 
-## 9. Economics (D1)
+## 9. Economics (decision point D1)
 
-Minted tasks need a funded delivery-fee escrow like any other posting. **Decision
-(D1): self-funded launcher escrow for v0.** The operator who runs the minting/posting
-pipeline pays via the existing `computeEscrowWei`
-(`client/src/solver-types/_swe-rebench-v2-escrow.ts`) path — same delivery-fee
-semantics as live tasks, bounded by the ≤25% synthetic quota and the informative-band
-stop. No protocol subsidy and no special synthetic pricing at v0: the point is to
-learn whether minted supply creates useful verified trajectories per dollar, and
-hiding the cost would corrupt that signal. Broader economics (who ultimately pays
-for synthetic supply at scale, whether minted-task fees should differ) remain parked
-for a later session.
+Minted tasks need a funded delivery-fee escrow like any other posting. The panel's
+proposal: **self-funded launcher escrow** via the existing `computeEscrowWei`
+(`client/src/solver-types/_swe-rebench-v2-escrow.ts`) — the operator who runs the
+mint pipeline escrows fees for the tasks it posts, bounded by the ≤25% quota and the
+informative-band stop. This touches parked economics (who ultimately pays for
+synthetic supply, and whether minted-task fees should differ from live-task fees),
+so it is a **decision point for sign-off**, not a resolved design.
 
 ## 10. The mineable-trace contract (rung-0 deliverable, with a deadline)
 
@@ -376,67 +354,15 @@ mineable:
   evaluation possible at all (§12). Credit assignment without consumption data is
   confounded beyond rescue.
 
-**Consent tier (D2) — the scrub collision.** This contract is in direct tension
+**Decision point D2 — the scrub collision.** This contract is in direct tension
 with the scrub pipeline's fail-closed posture (`client/src/trajectory/scrub/` —
 secretlint, PII stages, layer-2 scrub; and the #1409 over-redaction history). A
-private repo's final diff is not metadata — it *is* the sensitive payload. **Decision
-(D2):** mineability is an explicit opt-in consent tier in the capture envelope shape
-(extending DR-2026-05-07-g), split into **two consents**:
-
-1. **Retain locally for mining** — opting in allows the scrub pipeline to retain the
-   contract fields (repo identity, commit, diff, test commands, skill-consumption
-   events) for local trace-mining. Default capture remains scrubbed/non-mineable.
-2. **Publish/admit as a task** — a separate gate. Even with mining consent, publishing
-   a mined task still requires explicit approval, because the diff/test payload may
-   expose private work.
-
-This preserves today's privacy posture without losing option value: traces accumulate
-only where consent is granted, and publication remains a second, deliberate step.
-The envelope-shape extension still warrants a short implementation design pass at
-rung-0 build time (field names, consent UX, scrub-stage wiring), but the policy is
-locked.
-
-### 10.1 Local operation and the public/private boundary (D5)
-
-**Corpus participation and task-launching are independent axes.** An operator can run
-the Task Creator entirely on local data — traces, repos, commit history on its own
-disk — and launch tasks into the marketplace **without any local data ever entering
-the corpus**. The corpus path (capture → scrub → publish → ledger) is a separate
-pipeline that minting never invokes. Mining is a local read; admission
-(`validatePoolInstances`) runs in local Docker. Concretely:
-
-- **Stays local:** the full session transcript, prompts, intermediate failure states,
-  skill-consumption events, and the source trace. Blinded provenance (§7) means a
-  posted task carries only a hash-commitment to its source, so even the *link* back to
-  the operator's trace is opaque until reveal.
-- **The gold patch is never published.** It is consumed at admission time, which is
-  local — the evaluator grades a solver's patch against the *tests*, not against the
-  gold. So even the "answer" stays private.
-- **Necessarily disclosed by posting** (a task must be solvable/gradeable by
-  strangers): the problem statement, a Docker image containing the repo **at the mint
-  commit**, and the test specification (`F2P`/`P2P`, `test_patch`, `install_config`).
-
-The boundary that matters: **a posted task IS a snapshot of the repo's code at that
-commit.** For public repos this discloses nothing new. For a private repo, posting
-would ship the entire repo tree at that commit as an image — and **the scrub pipeline
-protects trace *text*, not a built image** (`client/src/trajectory/scrub/` audits
-envelopes for PII/secrets; nothing audits a code payload for proprietary logic). That
-is unbuilt disclosure-control work, not a consent checkbox.
-
-**Decision (D5): v0 publishes public-repo tasks only.** Task publication is gated to
-repos that are already public. This costs nothing on the near rungs — rung 1
-(commit-echo) targets repos with admitted images (the public benchmark repos), and
-rung 2's SolverNet traces are public benchmark instances — so the gate only constrains
-the destination (§5.6), which is rungs away regardless. **Local mining still runs on
-private data** under D2 tier-1 consent, accumulating candidate instances that are
-simply **not postable in v0**. Private-repo task publication is a deferred follow-on
-that must first solve code-payload disclosure (auditing/scrubbing a built image, or
-minting only a consented sub-tree). Its eventual value is real but narrow — a
-*snapshot-scoped, unlinkable* disclosure (one commit + blinded provenance) is
-genuinely less than going fully public (full history + attribution), which is why a
-"private launcher" persona exists — but it earns its complexity only once the snapshot
-can be made safe. Until then, the honest position is: if the repo is public, launch
-freely; if it is private, we do not yet have the controls to let you launch safely.
+private repo's final diff is not metadata — it *is* the sensitive payload. The
+proposed resolution is a **consent tier**: "mineable" as an explicit opt-in level in
+the capture envelope shape (extending DR-2026-05-07-g), where opting in retains the
+contract fields through scrub and opting out preserves today's behavior. This is
+the largest open design decision in the spec and likely warrants its own short
+design pass before rung-0 implementation.
 
 ## 11. Held-out hygiene — the repo-keyed extension
 
@@ -471,30 +397,25 @@ design itself is its own session.
    *unmodified* evaluator path (row-routing fetcher + `rowHash` + image pin intact)
    on a proper amd64 host. Same pattern as cap-eval's "the rig is a follow-on
    `feat`" — this spec signs off methodology; the proof is the first build gate.
-2. **Discrimination check live.** `validatePoolInstances` hard-rejects minted
-   instances whose known-bad patch scores 1; flags (and excludes from distillation
-   targeting) benchmark-pool failures per D3, with regression tests for both paths.
+2. **Discrimination check live.** `validatePoolInstances` rejects (or flags, per
+   D3) an instance whose known-bad patch scores 1, with a regression test.
 3. **Claims anchored.** The ~28.5% weak-suite figure cited to a primary source (or
    re-derived on our own pool and the number replaced); the SWE-smith spike findings
    written up as the #994 finding (a DR or issue comment) and the issue closed.
 4. **Contract landed.** The mineable-trace contract fields defined in the capture
-   envelope shape with the two-tier consent model (D2), so capture can begin
-   retaining mineable material where opted in.
+   envelope shape with the consent tier decided (D2), so capture begins retaining
+   mineable material.
 5. **Hygiene enforced.** Repo-keyed exclusion in the mint path with a test proving
    a fresh-ID instance from a slate repo is refused at mint time.
-6. **Public-repo gate enforced (D5).** Publication refuses any task whose source repo
-   is not public, with a test proving a private-repo candidate is blocked at the
-   publish step (local mining of that candidate is still allowed under D2 tier-1).
 
-## 14. Decisions locked in this session
+## 14. Decision points for sign-off
 
-| # | Decision | Resolution |
+| # | Decision | Proposal on the table |
 |---|---|---|
-| **D1** | Who escrows delivery fees for minted tasks (§9) | **Self-funded launcher escrow for v0** via `computeEscrowWei`, same fee semantics as live tasks, bounded by ≤25% quota + informative-band stop. No protocol subsidy or special synthetic pricing — cost signal must be honest. |
-| **D2** | Mineable-trace consent tier vs. scrub posture (§10) | **Explicit opt-in consent tier**, split: (1) retain locally for mining, (2) publish/admit as a task. Default capture stays scrubbed/non-mineable. Envelope-shape implementation details deferred to rung-0 build. |
-| **D3** | Discrimination failure: flag or hard-reject (§5.1) | **Hard-reject all newly minted instances** when known-bad passes. **Flag + exclude from distillation/targeting** for the existing benchmark pool initially; re-publish a stricter vetted-pool artifact once impact is measured. |
-| **D4** | Commit-echo before hunk-subset echo (§5 ordering) | **Yes — commit-echo first** as plumbing proof (minted-row store, IPFS route, admission, generator union). Treat as yield validation, not final learning substrate (lookup contamination). Hunk-subset echo next once blinded provenance + dogfood traces are ready. |
-| **D5** | Public vs. private repos for task publication (§10.1) | **v0 publishes public-repo tasks only.** Corpus participation and task-launching are independent — mining runs locally with nothing entering the corpus, and the gold patch is never published. Local mining still runs on private data (D2 tier-1) but its candidates are non-postable in v0. Private-repo publication deferred to a follow-on that solves code-payload disclosure (scrub covers trace text, not built images). |
+| D1 | Who escrows delivery fees for minted tasks (§9) | Self-funded launcher escrow via `computeEscrowWei`, bounded by quota + band stop |
+| D2 | Mineable-trace consent tier vs. scrub posture (§10) | Explicit opt-in "mineable" tier in the capture envelope; own short design pass |
+| D3 | Discrimination failure: flag or hard-reject (§5.1) | Hard-reject for minted instances; flag-only (initially) for the existing benchmark pool, to avoid mass-invalidating the current pool before the number is re-derived |
+| D4 | Commit-echo before hunk-subset echo (§5 ordering) | Yes — free trustworthy golds first; echo needs blinded provenance + dogfood traces |
 
 ## 15. References
 
