@@ -71,6 +71,7 @@ import {
   DEFAULT_MODEL as DEFAULT_CLAUDE_DISTILL_MODEL,
 } from './distill-llm.js';
 import { createLocalDistiller, createLocalSkillSink } from './distiller.js';
+import { parseSkillMarkdown, type SkillPackage } from './skill-package.js';
 import {
   DEFAULT_DISTILL_MODE_PATH,
   readDistillMode,
@@ -95,6 +96,7 @@ import {
   renderRecorded,
   renderEmpty,
   renderRunSummary,
+  renderSkillsPanel,
   renderReview,
   renderFailure,
   renderResumeNothing,
@@ -234,6 +236,14 @@ Commands:
                                                  Pure reads — never prompts, spends, or writes.
   distill runs [--limit N] [--json]              Recorded runs, newest-first (one record per run
                                                  outcome: ok / partial / empty).
+  distill staged [--out <dir>] [--json]          Skills waiting in the staging area (<out>-staged):
+                                                 name, what each helps with, provenance. Read-only.
+  distill install [<name> ...] [--all] [--out <dir>] [--json]
+                                                 Install previously STAGED skills into the active
+                                                 dir — no distillation, no consent gate, no LLM
+                                                 calls; these are artifacts an earlier LOCAL run
+                                                 already produced. Installed staged copies are
+                                                 removed (staging holds only what's not installed).
   distill eval-prep [--limit N] [--out <dir>] [--json] [--meta] [--select-only]
                     [--group-cap N] [--concurrency N] [--force] [--retry-errors]
                     [--models gpt-5.4-mini,gpt-5.5]
@@ -431,6 +441,48 @@ function countSkillDirs(dir: string): number {
   return count;
 }
 
+/**
+ * Parse every staged skill under `stagingDir` (#1536). An unparseable
+ * SKILL.md is skipped with a stderr warning — one bad artifact must not
+ * hide the rest of the staging area.
+ */
+function listStaged(stagingDir: string): SkillPackage[] {
+  if (!existsSync(stagingDir)) return [];
+  const pkgs: SkillPackage[] = [];
+  for (const entry of readdirSync(stagingDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const md = join(stagingDir, entry.name, 'SKILL.md');
+    if (!existsSync(md)) continue;
+    try {
+      pkgs.push(parseSkillMarkdown(readFileSync(md, 'utf-8')));
+    } catch (err) {
+      console.warn(`[distill] skipping unparseable staged skill ${entry.name}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return pkgs;
+}
+
+/**
+ * Install skills into the active dir and remove their staged copies — the
+ * single install path (#1536), shared by the inline run flow and the
+ * `distill install` subverb, so staging always holds exactly what is not
+ * installed. NO LLM calls, NO consent gate: these are artifacts an earlier
+ * consented LOCAL run already produced.
+ */
+async function installStagedSkills(
+  pkgs: SkillPackage[],
+  stagingDir: string,
+  activeDir: string,
+): Promise<Array<{ name: string; path: string }>> {
+  const sink = createLocalSkillSink(activeDir);
+  const installed: Array<{ name: string; path: string }> = [];
+  for (const pkg of pkgs) {
+    await sink(pkg);
+    rmSync(join(stagingDir, pkg.name), { recursive: true, force: true });
+    installed.push({ name: pkg.name, path: join(activeDir, pkg.name, 'SKILL.md') });
+  }
+  return installed;
+}
 function ask(rl: ReturnType<typeof createInterface>, q: string): Promise<string> {
   return new Promise((resolve) => rl.question(q, (a) => resolve(a)));
 }
@@ -958,6 +1010,7 @@ export async function runJinnLayerCli(
         install: { type: 'string' },
         progress: { type: 'string' },
         'cluster-timeout': { type: 'string' },
+        all: { type: 'boolean', default: false },
         models: { type: 'string' },
         'max-clusters': { type: 'string' },
         'max-contrastive': { type: 'string' },
@@ -1118,10 +1171,69 @@ export async function runJinnLayerCli(
     };
     const emptyFacts = { clusterCount: 0, published: [], rejectedCount: 0, errorCount: 0, installed: [] };
 
+    // Subverbs (#1535 status/runs, #1536 staged/install). Routed before the
+    // mode machinery: none of them prompt or spend, and only `install` writes
+    // (moving already-produced artifacts out of staging).
     const sub = parsed.positionals[0];
-    if (sub !== undefined && sub !== 'runs' && sub !== 'status') {
-      writer.write(`error: unknown distill subcommand ${JSON.stringify(sub)} (expected: run, runs, status)\n\n${USAGE}`);
+    if (sub !== undefined && sub !== 'runs' && sub !== 'status' && sub !== 'staged' && sub !== 'install') {
+      writer.write(`error: unknown distill subcommand ${JSON.stringify(sub)} (expected: run, runs, status, staged, install)\n\n${USAGE}`);
       return 2;
+    }
+    if (sub === 'staged') {
+      const activeDir = (parsed.values.out as string | undefined) ?? DEFAULT_SKILLS_INSTALL_DIR;
+      const stagingDir = stagingDirFor(activeDir);
+      const staged = listStaged(stagingDir);
+      if (json) {
+        writer.write(
+          JSON.stringify(staged.map((p) => ({ name: p.name, description: p.description, provenance: p.jinn.provenance }))) + '\n',
+        );
+      } else if (staged.length === 0) {
+        writer.write(`nothing staged in ${stagingDir}\n`);
+      } else {
+        const skills: RenderedSkill[] = staged.map((p) => ({
+          name: p.name,
+          installed: false,
+          provenance: p.jinn.provenance,
+          helpsWith: p.description,
+        }));
+        writer.write(renderSkillsPanel(skills, 'staged — waiting for install') + '\n');
+        writer.write(`install with: distill install <name> · distill install --all\n`);
+      }
+      return 0;
+    }
+
+    if (sub === 'install') {
+      const activeDir = (parsed.values.out as string | undefined) ?? DEFAULT_SKILLS_INSTALL_DIR;
+      const stagingDir = stagingDirFor(activeDir);
+      const names = parsed.positionals.slice(1);
+      const all = parsed.values.all as boolean;
+      if (names.length === 0 && !all) {
+        writer.write(`error: distill install needs skill <name>(s) or --all\n\n${USAGE}`);
+        return 2;
+      }
+      const staged = listStaged(stagingDir);
+      const byName = new Map(staged.map((p) => [p.name, p]));
+      let chosen: SkillPackage[];
+      if (all) {
+        chosen = staged;
+      } else {
+        const unknown = names.filter((n) => !byName.has(n));
+        if (unknown.length > 0) {
+          const available = staged.length > 0 ? staged.map((p) => p.name).join(', ') : 'nothing staged';
+          writer.write(`error: not staged: ${unknown.join(', ')} (staged: ${available})\n`);
+          return 2;
+        }
+        chosen = names.map((n) => byName.get(n)!);
+      }
+      const installed = await installStagedSkills(chosen, stagingDir, activeDir);
+      if (json) {
+        writer.write(JSON.stringify({ installed, stagingDir, activeDir }) + '\n');
+      } else if (installed.length === 0) {
+        writer.write(`nothing staged in ${stagingDir}\n`);
+      } else {
+        writer.write(installed.map((s) => `installed  ${s.name}  →  ${s.path}`).join('\n') + '\n');
+      }
+      return 0;
     }
     if (sub === 'runs') {
       const limN = Number.parseInt(parsed.values.limit as string, 10);
@@ -1420,12 +1532,11 @@ export async function runJinnLayerCli(
 
     // Install the chosen skills into the active dir via the existing local sink,
     // and clear their staged copies so staging holds only what's not installed.
-    const activeSink = createLocalSkillSink(activeDir);
-    for (const p of published) {
-      if (!installNames.has(p.pkg.name)) continue;
-      await activeSink(p.pkg);
-      rmSync(join(stagingDir, p.pkg.name), { recursive: true, force: true });
-    }
+    await installStagedSkills(
+      published.filter((p) => installNames.has(p.pkg.name)).map((p) => p.pkg),
+      stagingDir,
+      activeDir,
+    );
 
     if (json) {
       writer.write(JSON.stringify({

@@ -2488,3 +2488,125 @@ describe('jinn-layer distill run log + status/runs subverbs (#1535)', () => {
     expect(JSON.parse(runsOutput.out())).toEqual([]);
   });
 });
+
+describe('jinn-layer distill staged/install — install from staging (#1536)', () => {
+  beforeEach(() => {
+    const modePath = tmpModeFile();
+    writeDistillMode('local', modePath);
+    process.env['JINN_LAYER_DISTILL_MODE_PATH'] = modePath;
+  });
+  afterEach(() => {
+    delete process.env['JINN_LAYER_DISTILL_MODE_PATH'];
+  });
+
+  /** A distill port that fails loudly if the subverbs ever invoke the LLM. */
+  const forbiddenDistill = async (): Promise<DistillLLMOutput> => {
+    throw new Error('distill install/staged must never invoke the distiller');
+  };
+
+  async function stageOne(outDir: string, name = 'orm-fanout-dedup'): Promise<string> {
+    const capturesDir = capturesDirWith(ownCapture());
+    const w = capture();
+    const code = await runJinnLayerCli(
+      ['distill', '--captures', capturesDir, '--out', outDir, '--install', 'none', '--json'],
+      { writer: w.writer, distillDeps: stubDistillDeps({ distill: async () => ({ ...VALID_DISTILL, name }) }) },
+    );
+    expect(code).toBe(0);
+    return capturesDir;
+  }
+
+  it('distill staged --json lists staged skills with name, description, and provenance', async () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-out-'));
+    await stageOne(outDir);
+    const { writer, out } = capture();
+    const code = await runJinnLayerCli(
+      ['distill', 'staged', '--out', outDir, '--json'],
+      { writer, distillDeps: { distill: forbiddenDistill } },
+    );
+    expect(code).toBe(0);
+    const staged = JSON.parse(out());
+    expect(staged).toHaveLength(1);
+    expect(staged[0].name).toBe('orm-fanout-dedup');
+    expect(typeof staged[0].description).toBe('string');
+    expect(staged[0].provenance.some((r: string) => r.startsWith('local-capture:'))).toBe(true);
+  });
+
+  it('distill staged on an empty staging dir returns [] / a clear message', async () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-out-'));
+    const { writer, out } = capture();
+    const code = await runJinnLayerCli(
+      ['distill', 'staged', '--out', outDir, '--json'],
+      { writer, distillDeps: { distill: forbiddenDistill } },
+    );
+    expect(code).toBe(0);
+    expect(JSON.parse(out())).toEqual([]);
+  });
+
+  it('distill install --all installs every staged skill with zero LLM calls and empties staging', async () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-out-'));
+    await stageOne(outDir);
+    const { writer, out } = capture();
+    const code = await runJinnLayerCli(
+      ['distill', 'install', '--all', '--out', outDir, '--json'],
+      { writer, distillDeps: { distill: forbiddenDistill } },
+    );
+    expect(code).toBe(0);
+    const result = JSON.parse(out());
+    expect(result.installed).toHaveLength(1);
+    expect(result.installed[0].name).toBe('orm-fanout-dedup');
+    // Installed into the active dir, staged copy removed.
+    const md = readFileSync(join(outDir, 'orm-fanout-dedup', 'SKILL.md'), 'utf-8');
+    expect(parseSkillMarkdown(md).name).toBe('orm-fanout-dedup');
+    expect(existsSync(join(outDir + '-staged', 'orm-fanout-dedup'))).toBe(false);
+  });
+
+  it('distill install <name> installs just that skill from a previous run', async () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-out-'));
+    await stageOne(outDir, 'skill-one');
+    const { writer } = capture();
+    const code = await runJinnLayerCli(
+      ['distill', 'install', 'skill-one', '--out', outDir, '--json'],
+      { writer, distillDeps: { distill: forbiddenDistill } },
+    );
+    expect(code).toBe(0);
+    expect(existsSync(join(outDir, 'skill-one', 'SKILL.md'))).toBe(true);
+  });
+
+  it('does not read the mode file — install works on a virgin mode (no consent gate)', async () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-out-'));
+    await stageOne(outDir);
+    const virginMode = join(mkdtempSync(join(tmpdir(), 'jinn-virgin-')), 'distill.json');
+    await withEnv({ JINN_LAYER_DISTILL_MODE_PATH: virginMode }, async () => {
+      const { writer } = capture();
+      const code = await runJinnLayerCli(
+        ['distill', 'install', '--all', '--out', outDir, '--json'],
+        { writer, distillDeps: { distill: forbiddenDistill } },
+      );
+      expect(code).toBe(0);
+    });
+    expect(existsSync(virginMode)).toBe(false);
+  });
+
+  it('an unknown name exits 2 and lists what is staged', async () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-out-'));
+    await stageOne(outDir, 'real-skill');
+    const { writer, out } = capture();
+    const code = await runJinnLayerCli(
+      ['distill', 'install', 'nope', '--out', outDir, '--json'],
+      { writer, distillDeps: { distill: forbiddenDistill } },
+    );
+    expect(code).toBe(2);
+    expect(out()).toContain('real-skill');
+  });
+
+  it('install with neither names nor --all exits 2', async () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-out-'));
+    const { writer, out } = capture();
+    const code = await runJinnLayerCli(
+      ['distill', 'install', '--out', outDir],
+      { writer, distillDeps: { distill: forbiddenDistill } },
+    );
+    expect(code).toBe(2);
+    expect(out()).toMatch(/--all|<name>/);
+  });
+});
