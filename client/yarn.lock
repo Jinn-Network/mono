@@ -4641,14 +4641,23 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@x402/evm@npm:^2.14.0":
-  version: 2.14.0
-  resolution: "@x402/evm@npm:2.14.0"
+"@x402/core@npm:~2.17.0":
+  version: 2.17.0
+  resolution: "@x402/core@npm:2.17.0"
   dependencies:
-    "@x402/core": "npm:~2.14.0"
+    zod: "npm:^3.24.2"
+  checksum: 10c0/4d10624099ed5706b34705bb1f1b0c501a7dcd1404badf5640ffe96bf42be95bd219358ae40af4c4ff96223b1667ee29aab12e1913124e4add33c40612d00439
+  languageName: node
+  linkType: hard
+
+"@x402/evm@npm:^2.14.0":
+  version: 2.17.0
+  resolution: "@x402/evm@npm:2.17.0"
+  dependencies:
+    "@x402/core": "npm:~2.17.0"
     viem: "npm:^2.48.11"
     zod: "npm:^3.24.2"
-  checksum: 10c0/bb5d154f18a81b13c6e0fb23dd8b3f766e3b9cd80664c69f1242b088165a65311e493007b137d2d5e1f109f10510fed350439733228b8294bfe5a993ebc8c30e
+  checksum: 10c0/1be49deb1de28ee9c8c54aaa95953da27bf15652ef59e33160d7116bc4be8bfc6922b0560016aa8a8577177c0c0d6b056d933f8743b07abbf84b2942148a352c
   languageName: node
   linkType: hard
 
