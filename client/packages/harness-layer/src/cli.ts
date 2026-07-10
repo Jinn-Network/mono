@@ -17,7 +17,7 @@
  */
 
 import { parseArgs } from 'node:util';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { tmpdir } from 'node:os';
@@ -93,6 +93,12 @@ import {
   newRunId,
   type ProgressStream,
 } from './distill-progress.js';
+import {
+  appendDistillRun,
+  readDistillRuns,
+  DEFAULT_DISTILL_RUNS_PATH,
+  type DistillRunRecord,
+} from './distill-runs.js';
 import type { MetaCluster } from './cluster.js';
 import { DEFAULT_TESTNET_DISCOVERY_URL } from '../../../src/config.js';
 import {
@@ -199,6 +205,13 @@ Commands:
                                                  subprocess (seconds; default 600). On expiry the
                                                  child is killed, that cluster lands in errors,
                                                  and the run continues.
+  distill status [--captures <dir>] [--out <dir>] [--json]
+                                                 The loop's state in one read: mode, reserved
+                                                 captures (total + not yet distilled), staged and
+                                                 installed counts, resolved distiller, last run.
+                                                 Pure reads — never prompts, spends, or writes.
+  distill runs [--limit N] [--json]              Recorded runs, newest-first (one record per run
+                                                 outcome: ok / partial / empty).
   distill eval-prep [--limit N] [--out <dir>] [--json] [--meta] [--select-only]
                     [--group-cap N] [--concurrency N] [--force] [--retry-errors]
                     [--models gpt-5.4-mini,gpt-5.5]
@@ -241,6 +254,7 @@ Environment (distill — reads the testnet ledger + spends model solves):
 Environment (distill — the rung-1 own-captures loop; runs fully locally):
   JINN_LAYER_CAPTURES_DIR    Own-captures dir (default: ~/.jinn-client/harness-layer/captures)
   JINN_LAYER_DISTILL_MODE_PATH  Where-it-runs mode file (default: ~/.jinn-client/harness-layer/distill.json)
+  JINN_LAYER_DISTILL_RUNS_PATH  Run log (default: ~/.jinn-client/harness-layer/distill-runs.jsonl)
   JINN_DISTILL_PROVIDER      Distiller provider: claude or codex (default: claude)
   JINN_DISTILL_MODEL         Distiller model (overridden by --distiller-model)
 `;
@@ -380,6 +394,17 @@ function distillModePath(): string {
   }
   return DEFAULT_DISTILL_MODE_PATH;
 }
+
+/** Count the skill directories (subdirectories carrying a SKILL.md) under dir. */
+function countSkillDirs(dir: string): number {
+  if (!existsSync(dir)) return 0;
+  let count = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory() && existsSync(join(dir, entry.name, 'SKILL.md'))) count += 1;
+  }
+  return count;
+}
+
 function ask(rl: ReturnType<typeof createInterface>, q: string): Promise<string> {
   return new Promise((resolve) => rl.question(q, (a) => resolve(a)));
 }
@@ -883,6 +908,11 @@ export async function runJinnLayerCli(
     const dd = opts.distillDeps ?? {};
     const json = parsed.values.json as boolean;
 
+    // Share the progress stream and durable run log identity for this invocation.
+    const runId = newRunId();
+    const startedAt = new Date().toISOString();
+    const invokedAtMs = Date.now();
+
     // --progress ndjson (#1533): machine-readable run events on stderr, so a
     // wrapper (the harness background runner) can show progress ambiently.
     // stdout stays reserved for the --json result. `run_end` is emitted on
@@ -894,7 +924,7 @@ export async function runJinnLayerCli(
     }
     const progress =
       progressFlag === 'ndjson'
-        ? createNdjsonProgressEmitter(dd.progressStream ?? process.stderr, newRunId())
+        ? createNdjsonProgressEmitter(dd.progressStream ?? process.stderr, runId)
         : undefined;
     const endedEmpty = () =>
       progress?.runEnd({ outcome: 'empty', clusterCount: 0, published: [], rejectedCount: 0, errorCount: 0, installed: [] });
@@ -923,6 +953,61 @@ export async function runJinnLayerCli(
       dd.distill ?? (dd.distillerFactory ?? defaultDistillerFactory)(distillProvider, distillModel, clusterTimeoutMs).distill;
 
     const modePath = distillModePath();
+    const runsPath = process.env['JINN_LAYER_DISTILL_RUNS_PATH'] ?? DEFAULT_DISTILL_RUNS_PATH;
+    const logRun = (
+      outcome: DistillRunRecord['outcome'],
+      facts: Pick<DistillRunRecord, 'clusterCount' | 'published' | 'rejectedCount' | 'errorCount' | 'installed'>,
+    ): void => {
+      try {
+        appendDistillRun({ runId, startedAt, durationMs: Date.now() - invokedAtMs, outcome, distillModel, ...facts }, runsPath);
+      } catch {
+        // A local observability failure must never fail the distillation run.
+      }
+    };
+    const emptyFacts = { clusterCount: 0, published: [], rejectedCount: 0, errorCount: 0, installed: [] };
+
+    const sub = parsed.positionals[0];
+    if (sub !== undefined && sub !== 'runs' && sub !== 'status') {
+      writer.write(`error: unknown distill subcommand ${JSON.stringify(sub)} (expected: run, runs, status)\n\n${USAGE}`);
+      return 2;
+    }
+    if (sub === 'runs') {
+      const limN = Number.parseInt(parsed.values.limit as string, 10);
+      const limit = argv.some((a) => a === '--limit' || a.startsWith('--limit=')) && Number.isFinite(limN) && limN > 0 ? limN : 20;
+      const runs = readDistillRuns(limit, runsPath);
+      if (json) writer.write(JSON.stringify(runs) + '\n');
+      else if (runs.length === 0) writer.write('no distill runs recorded yet\n');
+      else writer.write(runs.map((r) => `${r.startedAt}  ${r.outcome.padEnd(7)}  ${r.published.length} distilled (${r.published.length > 0 ? r.published.join(', ') : 'no skills'}) · ${r.installed.length} installed · ${r.distillModel}`).join('\n') + '\n');
+      return 0;
+    }
+    if (sub === 'status') {
+      const mode = readDistillMode(modePath);
+      const statusCapturesDir = (parsed.values.captures as string | undefined) ?? process.env['JINN_LAYER_CAPTURES_DIR'] ?? DEFAULT_CAPTURES_DIR;
+      const statusCaptures = loadRecentCaptures(statusCapturesDir, DEFAULT_DISTILL_CAPTURE_LIMIT);
+      const statusActiveDir = (parsed.values.out as string | undefined) ?? DEFAULT_SKILLS_INSTALL_DIR;
+      const statusStagingDir = stagingDirFor(statusActiveDir);
+      const covered = coveredSessionIds([statusActiveDir, statusStagingDir]);
+      const status = {
+        mode,
+        modePath,
+        capturesDir: statusCapturesDir,
+        capturesCount: statusCaptures.length,
+        uncoveredCount: statusCaptures.filter((capture) => !covered.has(capture.session.sessionId)).length,
+        stagingDir: statusStagingDir,
+        stagedCount: countSkillDirs(statusStagingDir),
+        activeDir: statusActiveDir,
+        installedCount: countSkillDirs(statusActiveDir),
+        distillProvider,
+        distillModel,
+        lastRun: readDistillRuns(1, runsPath)[0] ?? null,
+      };
+      if (json) writer.write(JSON.stringify(status) + '\n');
+      else {
+        const last = status.lastRun ? `${status.lastRun.startedAt} ${status.lastRun.outcome} (${status.lastRun.published.length} distilled, ${status.lastRun.installed.length} installed)` : 'never';
+        writer.write([`mode        ${status.mode}`, `captures    ${status.capturesCount} reserved (${status.uncoveredCount} not yet distilled) in ${status.capturesDir}`, `staged      ${status.stagedCount} in ${status.stagingDir}`, `installed   ${status.installedCount} in ${status.activeDir}`, `distiller   ${status.distillProvider} · ${status.distillModel}`, `last run    ${last}`].join('\n') + '\n');
+      }
+      return 0;
+    }
 
     // 1c — `--where <mode>`: the persistent setter. Scriptable, non-interactive;
     // it records the mode and echoes the resulting behaviour, and runs nothing.
@@ -957,6 +1042,7 @@ export async function runJinnLayerCli(
         writer.write(renderEmpty({ capturesDir }) + '\n');
       }
       endedEmpty();
+      logRun('empty', emptyFacts);
       return 0;
     }
 
@@ -1036,6 +1122,7 @@ export async function runJinnLayerCli(
         if (json) writer.write(JSON.stringify({ mode: 'local', ran: false, resume: true, capturesConsidered: captures.length }) + '\n');
         else writer.write(renderResumeNothing({ captureCount: captures.length }) + '\n');
         endedEmpty();
+        logRun('empty', emptyFacts);
         return 0;
       }
     }
@@ -1126,6 +1213,13 @@ export async function runJinnLayerCli(
         installed: [],
         stagingDir,
       });
+      logRun('partial', {
+        clusterCount: result.clusterCount,
+        published: published.map((p) => p.pkg.name),
+        rejectedCount: result.distilled.rejected.length,
+        errorCount: result.distilled.errors.length,
+        installed: [],
+      });
       return 1;
     }
 
@@ -1209,6 +1303,13 @@ export async function runJinnLayerCli(
       errorCount: 0,
       installed: [...installNames],
       stagingDir,
+    });
+    logRun('ok', {
+      clusterCount: result.clusterCount,
+      published: publishedNames,
+      rejectedCount: result.distilled.rejected.length,
+      errorCount: 0,
+      installed: [...installNames],
     });
     return 0;
   }

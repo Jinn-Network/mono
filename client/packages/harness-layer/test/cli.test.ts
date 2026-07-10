@@ -2438,3 +2438,53 @@ describe('ledger', () => {
     expect(text).toContain('anchor');
   });
 });
+
+describe('jinn-layer distill run log + status/runs subverbs (#1535)', () => {
+  let runsPath: string;
+
+  beforeEach(() => {
+    const modePath = tmpModeFile();
+    writeDistillMode('local', modePath);
+    process.env['JINN_LAYER_DISTILL_MODE_PATH'] = modePath;
+    runsPath = join(mkdtempSync(join(tmpdir(), 'jinn-runs-')), 'distill-runs.jsonl');
+    process.env['JINN_LAYER_DISTILL_RUNS_PATH'] = runsPath;
+  });
+
+  afterEach(() => {
+    delete process.env['JINN_LAYER_DISTILL_MODE_PATH'];
+    delete process.env['JINN_LAYER_DISTILL_RUNS_PATH'];
+  });
+
+  it('records successful, partial, and empty runs', async () => {
+    const { writer, out } = capture();
+    await runJinnLayerCli(
+      ['distill', '--captures', capturesDirWith(ownCapture()), '--out', mkdtempSync(join(tmpdir(), 'jinn-distill-out-')), '--install', 'all', '--json'],
+      { writer, distillDeps: stubDistillDeps() },
+    );
+    const successful = JSON.parse(out());
+    await runJinnLayerCli(
+      ['distill', '--captures', capturesDirWith(ownCapture()), '--out', mkdtempSync(join(tmpdir(), 'jinn-distill-out-')), '--json'],
+      { writer, distillDeps: { distill: async () => { throw new Error('boom'); } } },
+    );
+    await runJinnLayerCli(['distill', '--captures', mkdtempSync(join(tmpdir(), 'jinn-captures-empty-')), '--json'], { writer, distillDeps: stubDistillDeps() });
+    const runs = readFileSync(runsPath, 'utf-8').trim().split('\n').map((line) => JSON.parse(line));
+    expect(runs.map((run) => run.outcome)).toEqual(['ok', 'partial', 'empty']);
+    expect(runs[0].published).toEqual(successful.distilled.published.map((p: { pkg: { name: string } }) => p.pkg.name));
+  });
+
+  it('lists runs and reports pure-read status', async () => {
+    const { writer, out } = capture();
+    const modePath = join(mkdtempSync(join(tmpdir(), 'jinn-virgin-')), 'distill.json');
+    const emptyCaptures = mkdtempSync(join(tmpdir(), 'jinn-captures-empty-'));
+    const outDir = join(mkdtempSync(join(tmpdir(), 'jinn-out-parent-')), 'skills');
+    await withEnv({ JINN_LAYER_DISTILL_MODE_PATH: modePath }, async () => {
+      expect(await runJinnLayerCli(['distill', 'status', '--captures', emptyCaptures, '--out', outDir, '--json'], { writer, distillDeps: stubDistillDeps() })).toBe(0);
+    });
+    const status = JSON.parse(out());
+    expect(status).toMatchObject({ mode: 'unset', capturesCount: 0, uncoveredCount: 0, stagedCount: 0, installedCount: 0, lastRun: null });
+    expect(existsSync(modePath)).toBe(false);
+    const runsOutput = capture();
+    expect(await runJinnLayerCli(['distill', 'runs', '--limit', '1', '--json'], { writer: runsOutput.writer, distillDeps: stubDistillDeps() })).toBe(0);
+    expect(JSON.parse(runsOutput.out())).toEqual([]);
+  });
+});
