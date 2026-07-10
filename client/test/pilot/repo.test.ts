@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { prepareBaseCheckout, recoverPatch, GitStepError, type CmdRunner } from '../../src/pilot/repo.js';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createPilotWorkDir, prepareBaseCheckout, recoverPatch, GitStepError, type CmdRunner } from '../../src/pilot/repo.js';
 
 /** A scripted fake runner: returns the queued result per call and records args. */
 function fakeRunner(script: Array<{ stdout?: string; stderr?: string; exitCode: number }>): {
@@ -46,5 +49,40 @@ describe('pilot repo helpers', () => {
     expect(patch).toContain('new file mode');
     expect(calls[0]!.args).toEqual(['add', '-A']);
     expect(calls[1]!.args).toEqual(['diff', '--cached']);
+  });
+
+  it('recoverPatch applies the production SWE-rebench sanitizer to remove model-authored test hunks', async () => {
+    const rawPatch = [
+      'diff --git a/src/fix.py b/src/fix.py',
+      '--- a/src/fix.py',
+      '+++ b/src/fix.py',
+      '@@ -1 +1 @@',
+      '-old',
+      '+new',
+      'diff --git a/tests/test_fix.py b/tests/test_fix.py',
+      '--- a/tests/test_fix.py',
+      '+++ b/tests/test_fix.py',
+      '@@ -1 +1 @@',
+      '-old test',
+      '+new test',
+      '',
+    ].join('\n');
+    const { run } = fakeRunner([{ exitCode: 0 }, { stdout: rawPatch, exitCode: 0 }]);
+
+    const patch = await recoverPatch(run, '/tmp/arm');
+
+    expect(patch).toContain('src/fix.py');
+    expect(patch).not.toContain('tests/test_fix.py');
+  });
+
+  it('creates live solver checkouts under the durable pilot output directory', async () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'pilot-work-root-'));
+    try {
+      const workDir = await createPilotWorkDir(outDir, 'solve-stock-0-');
+      expect(workDir.startsWith(join(outDir, 'work'))).toBe(true);
+      expect(existsSync(workDir)).toBe(true);
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
+    }
   });
 });

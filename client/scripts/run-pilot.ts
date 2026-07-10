@@ -18,22 +18,51 @@
  *   yarn tsx scripts/run-pilot.ts --dry-run
  *   yarn tsx scripts/run-pilot.ts [--repeats N] [--skill NAME] [--max-turns N]
  *                                 [--max-instances N] [--jinn-agent-bin PATH]
- *                                 [--upstream-repo-dir PATH]
+ *                                 [--upstream-repo-dir PATH] [--out DIR]
+ *                                 [--arms-file arms.json]
+ *                                 [--arm-b-jinn-agent-home DIR]
+ *                                 [--max-new-solves N] [--retry-errors] [--force]
  */
 import { spawn } from 'node:child_process';
-import { mkdtemp, cp, rm } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
-import { tmpdir, homedir } from 'node:os';
-import { join } from 'node:path';
+import { cp, rm } from 'node:fs/promises';
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { buildSolveArgs, parseSessionTokens, extractSessionId, type Arm } from '../src/pilot/solve.js';
+import type { SolveTokens } from '../src/pilot/solve.js';
 import { solveCostUsd, DEEPSEEK_V4_FLASH_RATES, GPT_5_4_MINI_RATES, type RateTable } from '../src/pilot/cost.js';
 import { tallyPilot, type SolveOutcome, type PilotReport } from '../src/pilot/tally.js';
-import { parsePilotInstanceRow, type PilotInstance } from '../src/pilot/instance.js';
-import { prepareBaseCheckout, recoverPatch } from '../src/pilot/repo.js';
+import { fetchPilotRawRow, parsePilotInstanceRow, type PilotInstance } from '../src/pilot/instance.js';
+import { createPilotWorkDir, prepareBaseCheckout, recoverPatch } from '../src/pilot/repo.js';
+import {
+  assertCompatiblePilotManifest,
+  attemptKey,
+  buildAttemptSpecs,
+  buildPilotManifest,
+  clearPilotOutput,
+  loadAttemptRecords,
+  loadFrozenInstances,
+  loadPilotManifest,
+  orderedRecordsForSpecs,
+  recordsToOutcomes,
+  selectRunnableAttempts,
+  writeAttemptRecord,
+  writeFrozenInstances,
+  writePatch,
+  writePilotManifest,
+  writePilotReport,
+  type FrozenPilotInstance,
+  type PilotArmConfig,
+  type PilotAttemptRecord,
+  type PilotAttemptSpec,
+  type PilotSemanticConfig,
+} from '../src/pilot/resume.js';
 import { HttpHfFetcher } from '../src/harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js';
 import { PythonEvalRunner, EvalCouldNotGradeError } from '../src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js';
 import type { HfRow } from '../src/harnesses/impls/swe-rebench-v2-evaluator/index.js';
+import { loadHeldOutSlate } from '../src/solver-types/_swe-rebench-v2-held-out-slate.js';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -47,8 +76,10 @@ export interface PilotInstanceRef {
 
 export interface PilotConfig {
   instances: PilotInstanceRef[];
+  instancesExplicit: boolean;
   repeats: number;
   skills: string[];
+  arms: PilotArmConfig[];
   maxTurns: number;
   maxInstances: number;
   upstreamRepoDir: string;
@@ -58,6 +89,13 @@ export interface PilotConfig {
    *  run: provider='openai-codex', model='gpt-5.4-mini'. */
   provider?: string;
   model?: string;
+  taskSource?: string;
+  slateHash?: string;
+  armBJinnAgentHome?: string;
+  outDir?: string;
+  force: boolean;
+  retryErrors: boolean;
+  maxNewSolves: number;
   /** Hard cap per grade (ms). Default 10 min: amd64 SWE-rebench images can wedge
    *  indefinitely under Apple-Silicon emulation, and the eval runner's own default
    *  is 2h — far too long for a pilot. A timed-out grade becomes ungradeable and
@@ -67,22 +105,50 @@ export interface PilotConfig {
   dryRun: boolean;
 }
 
-const DEFAULT_INSTANCE: PilotInstanceRef = {
-  instance_id: 'pilosus__pip-license-checker-119',
-  hf_dataset: 'ibragim-bad/SWE-rebench-V2-sample',
-  hf_split: 'train',
-};
+const DEFAULT_SLATE_VERSION = 'v3';
+
+function loadDefaultPilotSlate(): { refs: PilotInstanceRef[]; hash: string } {
+  const slate = loadHeldOutSlate('swe-rebench-v2.v1', DEFAULT_SLATE_VERSION);
+  const reportPath = join(
+    dirname(fileURLToPath(import.meta.url)),
+    '..',
+    'src',
+    'solver-types',
+    'slates',
+    `held-out-slate.swe-rebench-v2.${DEFAULT_SLATE_VERSION}.screening-report.json`,
+  );
+  const report = JSON.parse(readFileSync(reportPath, 'utf8')) as {
+    selected?: Array<{ instance_id?: unknown; hf_dataset?: unknown; hf_split?: unknown }>;
+  };
+  if (!Array.isArray(report.selected)) throw new Error(`pilot slate screening report is missing selected entries: ${reportPath}`);
+  const refs = report.selected.map((entry, index) => {
+    if (typeof entry.instance_id !== 'string' || typeof entry.hf_dataset !== 'string' || typeof entry.hf_split !== 'string') {
+      throw new Error(`pilot slate screening entry ${index} is malformed`);
+    }
+    return { instance_id: entry.instance_id, hf_dataset: entry.hf_dataset, hf_split: entry.hf_split };
+  });
+  const ids = new Set(refs.map((ref) => ref.instance_id));
+  if (refs.length !== 24 || ids.size !== 24 || ids.size !== slate.instanceIds.size || [...ids].some((id) => !slate.instanceIds.has(id))) {
+    throw new Error('pilot v3 slate and screening report disagree');
+  }
+  return { refs, hash: slate.hash };
+}
 
 function parseArgs(argv: string[]): PilotConfig {
   const cfg: PilotConfig = {
-    instances: [DEFAULT_INSTANCE],
+    instances: [],
+    instancesExplicit: false,
     repeats: 1,
     skills: ['systematic-debugging'],
+    arms: [],
     maxTurns: 20,
     maxInstances: Infinity,
     upstreamRepoDir: join(homedir(), '.jinn-client', 'SWE-rebench-V2-upstream'),
     jinnAgentBin: join(homedir(), '.local', 'bin', 'jinn-agent'),
     gradeTimeoutMs: 600_000,
+    force: false,
+    retryErrors: false,
+    maxNewSolves: Infinity,
     dryRun: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -97,10 +163,21 @@ function parseArgs(argv: string[]): PilotConfig {
       case '--jinn-agent-bin': cfg.jinnAgentBin = String(argv[++i]); break;
       case '--provider': cfg.provider = String(argv[++i]); break;
       case '--model': cfg.model = String(argv[++i]); break;
+      case '--arm-b-jinn-agent-home': cfg.armBJinnAgentHome = String(argv[++i]); break;
+      case '--arms-file': {
+        const parsed = JSON.parse(readFileSync(String(argv[++i]), 'utf8')) as unknown;
+        cfg.arms = parseArms(parsed);
+        break;
+      }
+      case '--out': cfg.outDir = String(argv[++i]); break;
+      case '--force': cfg.force = true; break;
+      case '--retry-errors': cfg.retryErrors = true; break;
+      case '--max-new-solves': cfg.maxNewSolves = Number(argv[++i]); break;
       case '--grade-timeout-ms': cfg.gradeTimeoutMs = Number(argv[++i]); break;
       case '--instances': {
         // JSON array of {instance_id, hf_dataset, hf_split}
         cfg.instances = JSON.parse(String(argv[++i])) as PilotInstanceRef[];
+        cfg.instancesExplicit = true;
         break;
       }
       case '--instances-file': {
@@ -109,21 +186,62 @@ function parseArgs(argv: string[]): PilotConfig {
         const parsed = JSON.parse(readFileSync(String(argv[++i]), 'utf8')) as unknown;
         if (!Array.isArray(parsed)) throw new Error('--instances-file must contain a JSON array');
         cfg.instances = parsed as PilotInstanceRef[];
+        cfg.instancesExplicit = true;
         break;
       }
       default: break;
     }
   }
+  if (cfg.arms.length === 0) {
+    cfg.arms = [
+      { name: 'A', skills: [] },
+      { name: 'B', skills: cfg.skills, ...(cfg.armBJinnAgentHome ? { jinnAgentHome: cfg.armBJinnAgentHome } : {}) },
+    ];
+  }
+  if (!cfg.instancesExplicit) {
+    const slate = loadDefaultPilotSlate();
+    cfg.instances = slate.refs;
+    cfg.taskSource = `held-out-slate:${DEFAULT_SLATE_VERSION}`;
+    cfg.slateHash = slate.hash;
+  }
   return cfg;
+}
+
+function parseArms(value: unknown): PilotArmConfig[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error('--arms-file must contain a non-empty JSON array');
+  }
+  const seen = new Set<string>();
+  return value.map((item, idx) => {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+      throw new Error(`arm ${idx} must be an object`);
+    }
+    const record = item as Record<string, unknown>;
+    const name = typeof record.name === 'string' ? record.name.trim() : '';
+    if (!/^[A-Za-z0-9._-]+$/.test(name)) {
+      throw new Error(`arm ${idx} has invalid name ${JSON.stringify(record.name)}`);
+    }
+    if (seen.has(name)) throw new Error(`duplicate arm name ${name}`);
+    seen.add(name);
+    const rawSkills = record.skills ?? [];
+    if (!Array.isArray(rawSkills) || rawSkills.some((s) => typeof s !== 'string')) {
+      throw new Error(`arm ${name} skills must be an array of strings`);
+    }
+    const skills = rawSkills.map((s) => String(s).trim()).filter(Boolean);
+    const jinnAgentHome = typeof record.jinnAgentHome === 'string' && record.jinnAgentHome.trim()
+      ? record.jinnAgentHome.trim()
+      : undefined;
+    return { name, skills, ...(jinnAgentHome ? { jinnAgentHome } : {}) };
+  });
 }
 
 // ---------------------------------------------------------------------------
 // Shell helpers
 // ---------------------------------------------------------------------------
 
-function run(cmd: string, args: string[], opts: { cwd?: string } = {}): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+function run(cmd: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {}): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { cwd: opts.cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(cmd, args, { cwd: opts.cwd, env: opts.env, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (d) => { stdout += d.toString(); });
@@ -133,35 +251,18 @@ function run(cmd: string, args: string[], opts: { cwd?: string } = {}): Promise<
   });
 }
 
-// ---------------------------------------------------------------------------
-// Raw HF row fetch (base_commit + problem_statement; same path as hf-fetcher.ts)
-// ---------------------------------------------------------------------------
+function envForArm(_cfg: PilotConfig, arm: Arm): NodeJS.ProcessEnv | undefined {
+  if (!arm.jinnAgentHome) return undefined;
+  const env = { ...process.env };
+  env.JINN_AGENT_HOME = arm.jinnAgentHome;
+  delete env.HERMES_HOME;
+  return env;
+}
 
-const HF_ROWS_URL = 'https://datasets-server.huggingface.co/rows';
-
-async function fetchRawRow(ref: PilotInstanceRef): Promise<Record<string, unknown>> {
-  const pageSize = 100;
-  let offset = 0;
-  const maxRows = 1000;
-  while (offset < maxRows) {
-    const url = new URL(HF_ROWS_URL);
-    url.searchParams.set('dataset', ref.hf_dataset);
-    url.searchParams.set('config', 'default');
-    url.searchParams.set('split', ref.hf_split);
-    url.searchParams.set('offset', String(offset));
-    url.searchParams.set('length', String(pageSize));
-    const res = await fetch(url.toString());
-    if (!res.ok) throw new Error(`HF datasets-server returned ${res.status} for ${ref.hf_dataset}/${ref.hf_split}`);
-    const body = (await res.json()) as { rows?: Array<{ row?: Record<string, unknown> }> };
-    const rows = (body.rows ?? []).map((r) => r.row ?? {});
-    if (rows.length === 0) break;
-    for (const row of rows) {
-      if (row['instance_id'] === ref.instance_id) return row;
-    }
-    if (rows.length < pageSize) break;
-    offset += rows.length;
-  }
-  throw new Error(`instance_id ${ref.instance_id} not found in ${ref.hf_dataset}/${ref.hf_split}`);
+function compactProcessOutput(value: string, limit = 4000): string {
+  const trimmed = value.trim();
+  if (trimmed.length <= limit) return trimmed;
+  return `${trimmed.slice(0, limit)}\n...[truncated ${trimmed.length - limit} chars]`;
 }
 
 // ---------------------------------------------------------------------------
@@ -182,8 +283,13 @@ function buildPrompt(instance: PilotInstance): string {
     `${instance.problem_statement}${spec}`;
 }
 
-async function solveOne(cfg: PilotConfig, instance: PilotInstance, arm: Arm, repeat: number, baseDir: string): Promise<SolveOutcome & { patch: string }> {
-  const armDir = await mkdtemp(join(tmpdir(), `pilot-${arm.name}-${repeat}-`));
+async function solveOne(cfg: PilotConfig, instance: PilotInstance, arm: Arm, repeat: number, baseDir: string): Promise<SolveOutcome & {
+  patch: string;
+  tokens?: SolveTokens;
+  sessionId?: string;
+  tokenError?: string;
+}> {
+  const armDir = await createPilotWorkDir(cfg.outDir, `solve-${arm.name}-${repeat}-`);
   // try/finally so a spawn / git / token-export throw still removes the per-arm
   // temp dir (it used to leak on any pre-cleanup throw, unlike baseDir).
   try {
@@ -193,27 +299,36 @@ async function solveOne(cfg: PilotConfig, instance: PilotInstance, arm: Arm, rep
     const prompt = buildPrompt(instance);
     const args = buildSolveArgs(arm, prompt, { maxTurns: cfg.maxTurns, provider: cfg.provider, model: cfg.model });
     console.log(`[pilot] solving ${instance.instance_id} arm=${arm.name} repeat=${repeat}...`);
-    const { stderr, exitCode } = await run(cfg.jinnAgentBin, args, { cwd: armDir });
+    const armEnv = envForArm(cfg, arm);
+    const { stdout, stderr, exitCode } = await run(cfg.jinnAgentBin, args, { cwd: armDir, env: armEnv });
+    if (exitCode !== 0) {
+      const context = compactProcessOutput([stderr, stdout].filter((part) => part.trim()).join('\n'));
+      throw new Error(`jinn-agent exited ${exitCode}${context ? `: ${context}` : ''}`);
+    }
 
     // Stage untracked files too — a new-file fix is invisible to a bare `git diff`.
     const patch = await recoverPatch(run, armDir);
 
     let costUsd = 0;
+    let tokens: SolveTokens | undefined;
+    let sessionId: string | undefined;
+    let tokenError: string | undefined;
     const passed: boolean | null = null;
     try {
-      const sessionId = extractSessionId(stderr);
+      sessionId = extractSessionId(stderr) ?? undefined;
       if (!sessionId) throw new Error(`no session_id in stderr (exitCode=${exitCode})`);
-      const exportRes = await run(cfg.jinnAgentBin, ['sessions', 'export', '--session-id', sessionId, '-']);
+      const exportRes = await run(cfg.jinnAgentBin, ['sessions', 'export', '--session-id', sessionId, '-'], { env: armEnv });
       const firstLine = exportRes.stdout.split('\n').find((l) => l.trim().length > 0) ?? '';
-      const tokens = parseSessionTokens(firstLine);
+      tokens = parseSessionTokens(firstLine);
       const rates: RateTable = cfg.provider === 'openai-codex' ? GPT_5_4_MINI_RATES : DEEPSEEK_V4_FLASH_RATES;
       costUsd = solveCostUsd(tokens, rates);
       console.log(`[pilot]   tokens: in=${tokens.inputTokens} out=${tokens.outputTokens} reason=${tokens.reasoningTokens} cost=$${costUsd.toFixed(4)}`);
     } catch (err) {
-      console.warn(`[pilot]   could not capture tokens for ${instance.instance_id}/${arm.name}/${repeat}: ${(err as Error).message}`);
+      tokenError = (err as Error).message;
+      console.warn(`[pilot]   could not capture tokens for ${instance.instance_id}/${arm.name}/${repeat}: ${tokenError}`);
     }
 
-    return { instance_id: instance.instance_id, arm: arm.name, repeat, passed, costUsd, patch };
+    return { instance_id: instance.instance_id, arm: arm.name, repeat, passed, costUsd, patch, ...(tokens ? { tokens } : {}), ...(sessionId ? { sessionId } : {}), ...(tokenError ? { tokenError } : {}) };
   } finally {
     await rm(armDir, { recursive: true, force: true });
   }
@@ -258,10 +373,17 @@ function synthesizeDryRunOutcomes(cfg: PilotConfig): SolveOutcome[] {
   let i = 0;
   for (const inst of instances) {
     for (let repeat = 0; repeat < cfg.repeats; repeat++) {
-      // alternate pass/fail deterministically; arm B slightly cheaper than A
+      // alternate pass/fail deterministically; treatment arms slightly cheaper than baseline
       const passed = i % 2 === 0;
-      outcomes.push({ instance_id: inst.instance_id, arm: 'A', repeat, passed, costUsd: 0.03 });
-      outcomes.push({ instance_id: inst.instance_id, arm: 'B', repeat, passed, costUsd: 0.025 });
+      for (const [armIdx, arm] of cfg.arms.entries()) {
+        outcomes.push({
+          instance_id: inst.instance_id,
+          arm: arm.name,
+          repeat,
+          passed,
+          costUsd: armIdx === 0 ? 0.03 : 0.025,
+        });
+      }
       i++;
     }
   }
@@ -281,17 +403,309 @@ function printReport(report: PilotReport, outcomes: SolveOutcome[], banner?: str
   console.log('');
   console.log('Pilot report');
   console.log('------------');
-  console.log(`instances (n, incl. excluded): ${report.n}`);
-  console.log(`excluded (ungradeable on one arm): ${report.excluded}`);
-  console.log(`both-solve tasks: ${report.bothSolveTasks}`);
-  console.log(`arm A resolve rate: ${(report.armA.resolveRate * 100).toFixed(1)}%`);
-  console.log(`arm B resolve rate: ${(report.armB.resolveRate * 100).toFixed(1)}%`);
-  console.log(`quality: Δ=${report.quality.deltaPP.toFixed(1)}pp, lowerBound=${report.quality.lowerBound.toFixed(4)}, non-inferior=${report.quality.nonInferior}`);
-  console.log(`cost verdict: ${report.cost.verdict} (median Δ$=${Number.isFinite(report.cost.medianDeltaUsd) ? report.cost.medianDeltaUsd.toFixed(4) : 'n/a'}, both-solve n=${report.cost.n}${report.cost.underpowered ? ' — UNDERPOWERED (n<5, Wilcoxon cannot reject)' : ''})`);
+  console.log(`instances: ${report.n}`);
+  console.log(`baseline arm: ${report.baselineArm}`);
+  for (const [arm, armReport] of Object.entries(report.arms)) {
+    console.log(`arm ${arm} resolve rate: ${(armReport.resolveRate * 100).toFixed(1)}% (${armReport.passed}/${armReport.graded})`);
+  }
+  for (const comparison of Object.values(report.comparisons)) {
+    console.log(
+      `compare ${comparison.treatmentArm} vs ${comparison.baselineArm}: ` +
+      `excluded=${comparison.excluded}, both-solve=${comparison.bothSolveTasks}, ` +
+      `quality Δ=${comparison.quality.deltaPP.toFixed(1)}pp, ` +
+      `lowerBound=${comparison.quality.lowerBound.toFixed(4)}, ` +
+      `non-inferior=${comparison.quality.nonInferior}, ` +
+      `cost=${comparison.cost.verdict} ` +
+      `(median Δ$=${Number.isFinite(comparison.cost.medianDeltaUsd) ? comparison.cost.medianDeltaUsd.toFixed(4) : 'n/a'}, ` +
+      `both-solve n=${comparison.cost.n}${comparison.cost.underpowered ? ' — UNDERPOWERED (n<5, Wilcoxon cannot reject)' : ''})`,
+    );
+  }
   console.log(`total solves: ${outcomes.length}`);
   console.log(`total tokens spent: n/a (see per-solve logs above)`);
   console.log(`total $ spent: $${totalCost.toFixed(4)}`);
   console.log('');
+}
+
+function selectedInstanceRefs(cfg: PilotConfig): PilotInstanceRef[] {
+  return cfg.instances.slice(0, Number.isFinite(cfg.maxInstances) ? cfg.maxInstances : cfg.instances.length);
+}
+
+function semanticConfig(cfg: PilotConfig, instances: PilotInstanceRef[]): PilotSemanticConfig {
+  return {
+    instances,
+    repeats: cfg.repeats,
+    arms: cfg.arms.map((arm) => ({ name: arm.name, skills: arm.skills })),
+    maxTurns: cfg.maxTurns,
+    gradeTimeoutMs: cfg.gradeTimeoutMs,
+    mode: cfg.dryRun ? 'dry-run' : 'real',
+    ...(cfg.provider ? { provider: cfg.provider } : {}),
+    ...(cfg.model ? { model: cfg.model } : {}),
+    ...(cfg.taskSource ? { taskSource: cfg.taskSource } : {}),
+    ...(cfg.slateHash ? { slateHash: cfg.slateHash } : {}),
+  };
+}
+
+function fakeFrozenInstances(refs: PilotInstanceRef[]): FrozenPilotInstance[] {
+  return refs.map((ref) => ({
+    ref,
+    instance: {
+      instance_id: ref.instance_id,
+      repo: 'dry-run/repo',
+      base_commit: 'dry-run',
+      problem_statement: `dry-run problem for ${ref.instance_id}`,
+      hf_dataset: ref.hf_dataset,
+      hf_split: ref.hf_split,
+    },
+    hfRow: {
+      instance_id: ref.instance_id,
+      repo: 'dry-run/repo',
+      image_name: 'dry-run-image',
+      FAIL_TO_PASS: [],
+      PASS_TO_PASS: [],
+      test_patch: '',
+      install_config: { test_cmd: 'true', log_parser: 'dry-run' },
+    },
+  }));
+}
+
+async function resolveFrozenInstances(refs: PilotInstanceRef[], hfFetcher: HttpHfFetcher): Promise<FrozenPilotInstance[]> {
+  const out: FrozenPilotInstance[] = [];
+  for (const ref of refs) {
+    console.log(`[pilot] fetching instance ${ref.instance_id}...`);
+    const [rawRow, hfRow] = await Promise.all([
+      fetchPilotRawRow(ref),
+      hfFetcher.fetchTaskRow(ref),
+    ]);
+    out.push({ ref, instance: parsePilotInstanceRow(rawRow, ref), hfRow });
+  }
+  return out;
+}
+
+async function prepareDurableRun(cfg: PilotConfig, hfFetcher: HttpHfFetcher): Promise<{
+  outDir: string;
+  config: PilotSemanticConfig;
+  specs: PilotAttemptSpec[];
+  frozenInstances: FrozenPilotInstance[];
+}> {
+  if (!cfg.outDir) throw new Error('prepareDurableRun requires --out');
+  const outDir = cfg.outDir;
+
+  if (cfg.force) clearPilotOutput(outDir);
+
+  const existing = loadPilotManifest(outDir);
+  if (existing) {
+    const instances = cfg.instancesExplicit
+      ? selectedInstanceRefs(cfg)
+      : existing.semanticConfig.instances;
+    const resumeCfg = cfg.instancesExplicit
+      ? cfg
+      : {
+          ...cfg,
+          taskSource: existing.semanticConfig.taskSource,
+          slateHash: existing.semanticConfig.slateHash,
+        };
+    const config = semanticConfig(resumeCfg, instances);
+    assertCompatiblePilotManifest(existing, config);
+    const frozenInstances = loadFrozenInstances(outDir);
+    if (!frozenInstances) {
+      throw new Error(`existing pilot output ${outDir} is missing instances.json; pass --force to rebuild`);
+    }
+    return { outDir, config, specs: buildAttemptSpecs(config), frozenInstances };
+  }
+
+  const instances = selectedInstanceRefs(cfg);
+  const config = semanticConfig(cfg, instances);
+  const manifest = buildPilotManifest(config);
+  const frozenInstances = cfg.dryRun
+    ? fakeFrozenInstances(instances)
+    : await resolveFrozenInstances(instances, hfFetcher);
+  writePilotManifest(outDir, manifest);
+  writeFrozenInstances(outDir, frozenInstances);
+  return { outDir, config, specs: buildAttemptSpecs(config), frozenInstances };
+}
+
+function seededRng(seed = 42): () => number {
+  let s = seed;
+  return () => {
+    s = (s * 1103515245 + 12345) & 0x7fffffff;
+    return s / 0x7fffffff;
+  };
+}
+
+function writeCurrentReport(outDir: string, specs: PilotAttemptSpec[], banner?: string, rng: () => number = Math.random): SolveOutcome[] {
+  const records = loadAttemptRecords(outDir);
+  const ordered = orderedRecordsForSpecs(specs, records);
+  const outcomes = recordsToOutcomes(ordered);
+  if (outcomes.length === 0) {
+    console.log('[pilot] no outcomes collected — nothing to report.');
+    return outcomes;
+  }
+  const report = tallyPilot(outcomes, { rng, baselineArm: specs[0]?.arm });
+  writePilotReport(outDir, report, outcomes);
+  printReport(report, outcomes, banner);
+  return outcomes;
+}
+
+function dryRunAttemptRecord(spec: PilotAttemptSpec): PilotAttemptRecord {
+  return {
+    schema: 'jinn.pilot.attempt.v1',
+    instance_id: spec.instance_id,
+    arm: spec.arm,
+    repeat: spec.repeat,
+    status: 'graded',
+    passed: spec.repeat % 2 === 0,
+    costUsd: spec.arm === 'A' || spec.arm === 'stock' ? 0.03 : 0.025,
+  };
+}
+
+async function runDurableDryRun(cfg: PilotConfig, hfFetcher: HttpHfFetcher): Promise<void> {
+  console.log('');
+  console.log('==================== DRY RUN — no spend ====================');
+  console.log('Skipping clone/spawn/grade/network. Synthesizing deterministic fake outcomes.');
+  const runState = await prepareDurableRun(cfg, hfFetcher);
+  const records = loadAttemptRecords(runState.outDir);
+  const runnable = selectRunnableAttempts(runState.specs, records, {
+    retryErrors: cfg.retryErrors,
+    maxNewSolves: cfg.maxNewSolves,
+  });
+
+  if (runnable.length === 0) {
+    console.log('[pilot] no runnable attempts; reporting existing records.');
+  }
+  for (const spec of runnable) {
+    const record = dryRunAttemptRecord(spec);
+    writeAttemptRecord(runState.outDir, record);
+    console.log(`[pilot] dry-run result ${spec.instance_id} arm=${spec.arm} repeat=${spec.repeat}: passed=${record.passed} cost=$${record.costUsd.toFixed(4)}`);
+  }
+  writeCurrentReport(runState.outDir, runState.specs, 'DRY RUN — no spend', seededRng());
+}
+
+function recordFromError(spec: PilotAttemptSpec, status: 'solve-error' | 'grade-error', err: unknown, costUsd = 0): PilotAttemptRecord {
+  return {
+    schema: 'jinn.pilot.attempt.v1',
+    instance_id: spec.instance_id,
+    arm: spec.arm,
+    repeat: spec.repeat,
+    status,
+    passed: null,
+    costUsd,
+    error: err instanceof Error ? err.message : String(err),
+  };
+}
+
+async function runDurableReal(cfg: PilotConfig, hfFetcher: HttpHfFetcher): Promise<void> {
+  const runState = await prepareDurableRun(cfg, hfFetcher);
+  const armByName = new Map(cfg.arms.map((arm) => [arm.name, arm]));
+  const records = loadAttemptRecords(runState.outDir);
+  const runnable = selectRunnableAttempts(runState.specs, records, {
+    retryErrors: cfg.retryErrors,
+    maxNewSolves: cfg.maxNewSolves,
+  });
+
+  if (runnable.length === 0) {
+    console.log('[pilot] no runnable attempts; reporting existing records.');
+    writeCurrentReport(runState.outDir, runState.specs);
+    return;
+  }
+
+  const runnableByInstance = new Map<string, PilotAttemptSpec[]>();
+  for (const spec of runnable) {
+    (runnableByInstance.get(spec.instance_id) ?? runnableByInstance.set(spec.instance_id, []).get(spec.instance_id)!).push(spec);
+  }
+  const frozenById = new Map(runState.frozenInstances.map((item) => [item.ref.instance_id, item]));
+
+  for (const [instanceId, specs] of runnableByInstance.entries()) {
+    const frozen = frozenById.get(instanceId);
+    if (!frozen) {
+      for (const spec of specs) writeAttemptRecord(runState.outDir, recordFromError(spec, 'solve-error', new Error(`missing frozen instance ${instanceId}`)));
+      continue;
+    }
+    const { instance, hfRow } = frozen;
+
+    // A grade-error attempt with a saved patch already paid for its solve —
+    // re-grade from the patch instead of re-spending inference (and skip the
+    // clone entirely when nothing is left to solve).
+    const toSolve: PilotAttemptSpec[] = [];
+    for (const spec of specs) {
+      const existing = records.get(attemptKey(spec));
+      const patchAbsPath = existing?.patchRelPath ? join(runState.outDir, existing.patchRelPath) : null;
+      if (existing?.status !== 'grade-error' || !patchAbsPath || !existsSync(patchAbsPath)) {
+        toSolve.push(spec);
+        continue;
+      }
+      console.log(`[pilot] regrading ${instance.instance_id} arm=${spec.arm} repeat=${spec.repeat} from saved patch (no re-solve)...`);
+      const { error: _prevError, ...carried } = existing;
+      try {
+        const passed = await gradeOne(cfg, hfRow, readFileSync(patchAbsPath, 'utf8'));
+        writeAttemptRecord(runState.outDir, { ...carried, status: passed === null ? 'ungradeable' : 'graded', passed });
+        console.log(`[pilot] result ${instance.instance_id} arm=${spec.arm} repeat=${spec.repeat}: passed=${passed} cost=$${existing.costUsd.toFixed(4)} (regraded)`);
+      } catch (gradeErr) {
+        console.warn(`[pilot]   grade error for ${instance.instance_id}/${spec.arm}/${spec.repeat}: ${(gradeErr as Error).message} — recording grade-error`);
+        writeAttemptRecord(runState.outDir, {
+          ...carried,
+          status: 'grade-error',
+          passed: null,
+          error: gradeErr instanceof Error ? gradeErr.message : String(gradeErr),
+        });
+      }
+    }
+    if (toSolve.length === 0) continue;
+
+    const baseDir = await createPilotWorkDir(cfg.outDir, `base-${instance.instance_id.replace(/[^a-zA-Z0-9_-]/g, '_')}-`);
+    try {
+      console.log(`[pilot] cloning ${instance.repo} @ ${instance.base_commit}...`);
+      await prepareBaseCheckout(run, instance.repo, instance.base_commit, baseDir);
+      for (const spec of toSolve) {
+        const arm = armByName.get(spec.arm);
+        if (!arm) {
+          writeAttemptRecord(runState.outDir, recordFromError(spec, 'solve-error', new Error(`missing configured arm ${spec.arm}`)));
+          continue;
+        }
+        try {
+          const solved = await solveOne(cfg, instance, arm, spec.repeat, baseDir);
+          const patchRelPath = writePatch(runState.outDir, spec, solved.patch);
+          try {
+            const passed = await gradeOne(cfg, hfRow, solved.patch);
+            const status = passed === null ? 'ungradeable' : 'graded';
+            const record: PilotAttemptRecord = {
+              schema: 'jinn.pilot.attempt.v1',
+              instance_id: spec.instance_id,
+              arm: spec.arm,
+              repeat: spec.repeat,
+              status,
+              passed,
+              costUsd: solved.costUsd,
+              patchRelPath,
+              ...(solved.tokens ? { tokens: solved.tokens } : {}),
+              ...(solved.sessionId ? { sessionId: solved.sessionId } : {}),
+              ...(solved.tokenError ? { tokenError: solved.tokenError } : {}),
+            };
+            writeAttemptRecord(runState.outDir, record);
+            console.log(`[pilot] result ${instance.instance_id} arm=${spec.arm} repeat=${spec.repeat}: passed=${passed} cost=$${solved.costUsd.toFixed(4)}`);
+          } catch (gradeErr) {
+            console.warn(`[pilot]   grade error for ${instance.instance_id}/${spec.arm}/${spec.repeat}: ${(gradeErr as Error).message} — recording grade-error`);
+            writeAttemptRecord(runState.outDir, {
+              ...recordFromError(spec, 'grade-error', gradeErr, solved.costUsd),
+              patchRelPath,
+              ...(solved.tokens ? { tokens: solved.tokens } : {}),
+              ...(solved.sessionId ? { sessionId: solved.sessionId } : {}),
+              ...(solved.tokenError ? { tokenError: solved.tokenError } : {}),
+            });
+          }
+        } catch (solveErr) {
+          console.warn(`[pilot]   solve error for ${instance.instance_id}/${spec.arm}/${spec.repeat}: ${(solveErr as Error).message} — recording solve-error, continuing`);
+          writeAttemptRecord(runState.outDir, recordFromError(spec, 'solve-error', solveErr));
+        }
+      }
+    } catch (instErr) {
+      console.warn(`[pilot] instance ${instance.instance_id} failed (${(instErr as Error).message}) — recording solve-errors, continuing`);
+      for (const spec of toSolve) writeAttemptRecord(runState.outDir, recordFromError(spec, 'solve-error', instErr));
+    } finally {
+      await rm(baseDir, { recursive: true, force: true });
+    }
+  }
+
+  writeCurrentReport(runState.outDir, runState.specs);
 }
 
 // ---------------------------------------------------------------------------
@@ -300,34 +714,43 @@ function printReport(report: PilotReport, outcomes: SolveOutcome[], banner?: str
 
 async function main(): Promise<void> {
   const cfg = parseArgs(process.argv.slice(2));
+  const hfFetcher = new HttpHfFetcher();
 
   if (cfg.dryRun) {
+    if (cfg.outDir) {
+      await runDurableDryRun(cfg, hfFetcher);
+      return;
+    }
     console.log('');
     console.log('==================== DRY RUN — no spend ====================');
     console.log('Skipping clone/spawn/grade/network. Synthesizing deterministic fake outcomes.');
     const outcomes = synthesizeDryRunOutcomes(cfg);
     const rng = (() => { let s = 42; return () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; })();
-    const report = tallyPilot(outcomes, { rng });
+    const report = tallyPilot(outcomes, { rng, baselineArm: cfg.arms[0]?.name });
     printReport(report, outcomes, 'DRY RUN — no spend');
     return;
   }
 
+  if (cfg.outDir) {
+    await runDurableReal(cfg, hfFetcher);
+    return;
+  }
+
   const outcomes: SolveOutcome[] = [];
-  const hfFetcher = new HttpHfFetcher();
   const rng = Math.random;
 
-  const instances = cfg.instances.slice(0, Number.isFinite(cfg.maxInstances) ? cfg.maxInstances : cfg.instances.length);
+  const instances = selectedInstanceRefs(cfg);
 
   for (const ref of instances) {
     try {
       console.log(`[pilot] fetching instance ${ref.instance_id}...`);
       const [rawRow, hfRow] = await Promise.all([
-        fetchRawRow(ref),
+        fetchPilotRawRow(ref),
         hfFetcher.fetchTaskRow(ref),
       ]);
       const instance = parsePilotInstanceRow(rawRow, ref);
 
-      const baseDir = await mkdtemp(join(tmpdir(), `pilot-base-${instance.instance_id.replace(/[^a-zA-Z0-9_-]/g, '_')}-`));
+      const baseDir = await createPilotWorkDir(cfg.outDir, `base-${instance.instance_id.replace(/[^a-zA-Z0-9_-]/g, '_')}-`);
       try {
         console.log(`[pilot] cloning ${instance.repo} @ ${instance.base_commit}...`);
         // FAIL-LOUD on a bad clone/checkout: a 404'd/renamed repo or unfetchable
@@ -336,12 +759,7 @@ async function main(): Promise<void> {
         // an empty repo that both arms "solve" into empty patches scored false.
         await prepareBaseCheckout(run, instance.repo, instance.base_commit, baseDir);
 
-        const arms: Arm[] = [
-          { name: 'A', skills: [] },
-          { name: 'B', skills: cfg.skills },
-        ];
-
-        for (const arm of arms) {
+        for (const arm of cfg.arms) {
           for (let repeat = 0; repeat < cfg.repeats; repeat++) {
             // Per-solve containment: a failed solve or grade is recorded as an
             // ungradeable datapoint (passed:null, NEVER a fail) and the run
@@ -380,7 +798,7 @@ async function main(): Promise<void> {
     console.log('[pilot] no outcomes collected — nothing to report.');
     return;
   }
-  const report = tallyPilot(outcomes, { rng });
+  const report = tallyPilot(outcomes, { rng, baselineArm: cfg.arms[0]?.name });
   printReport(report, outcomes);
 }
 

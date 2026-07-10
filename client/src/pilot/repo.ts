@@ -2,6 +2,11 @@
  *  behaviour is unit-testable with an injected runner (the orchestrator's own
  *  I/O is validated by dry-run + smoke, per the pilot plan). */
 
+import { mkdir, mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { stripTestPathHunks } from '../harnesses/impls/learner/restoration-patch.js';
+
 export type CmdRunner = (
   cmd: string,
   args: string[],
@@ -47,5 +52,16 @@ export async function prepareBaseCheckout(
 export async function recoverPatch(run: CmdRunner, cwd: string): Promise<string> {
   await run('git', ['add', '-A'], { cwd });
   const diff = await run('git', ['diff', '--cached'], { cwd });
-  return diff.stdout;
+  return stripTestPathHunks(diff.stdout);
+}
+
+/**
+ * Create an isolated checkout directory. Durable runs keep live work beneath
+ * `<out>/work` so agent path protections see an operator-owned location;
+ * legacy runs without `--out` retain the OS-temp fallback.
+ */
+export async function createPilotWorkDir(outDir: string | undefined, prefix: string): Promise<string> {
+  const root = outDir ? join(outDir, 'work') : tmpdir();
+  await mkdir(root, { recursive: true });
+  return mkdtemp(join(root, prefix));
 }

@@ -19,7 +19,7 @@
  *     (`embedProvenance: false`) so provenance lives in exactly one canonical
  *     place (the structured object) and cannot drift.
  */
-import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import { parse as parseYaml, Scalar, stringify as stringifyYaml } from 'yaml';
 import { z } from 'zod';
 import { SKILL_ARTIFACT_TYPE } from '../../../src/types/skill-artifact.js';
 
@@ -90,6 +90,28 @@ export function assertConformantName(name: string): void {
   }
 }
 
+function quotedYamlString(value: string): Scalar<string> {
+  const scalar = new Scalar(value);
+  scalar.type = Scalar.QUOTE_DOUBLE;
+  return scalar;
+}
+
+function renderableJinnMeta(jinn: SkillPackageMeta): Record<string, unknown> {
+  return {
+    ...jinn,
+    ...(jinn.distilledAt ? { distilledAt: quotedYamlString(jinn.distilledAt) } : {}),
+  };
+}
+
+function normalizeParsedJinnMeta(value: unknown): unknown {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return value;
+  const record = { ...(value as Record<string, unknown>) };
+  if (record.distilledAt instanceof Date) {
+    record.distilledAt = record.distilledAt.toISOString();
+  }
+  return record;
+}
+
 /**
  * Emit a conformant SKILL.md: YAML frontmatter then the markdown body verbatim.
  *
@@ -110,7 +132,7 @@ export function buildSkillMarkdown(
     name: pkg.name,
     description: pkg.description,
     license: pkg.license,
-    ...(embed ? { metadata: { jinn } } : {}),
+    ...(embed ? { metadata: { jinn: renderableJinnMeta(jinn) } } : {}),
   });
   return `---\n${frontmatter}---\n${pkg.body}`;
 }
@@ -129,7 +151,7 @@ export function parseSkillMarkdown(md: string): SkillPackage {
     throw new Error('skill frontmatter is missing a description');
   }
   const metadata = doc.metadata as { jinn?: unknown } | undefined;
-  const jinn = SkillPackageMetaSchema.parse(metadata?.jinn);
+  const jinn = SkillPackageMetaSchema.parse(normalizeParsedJinnMeta(metadata?.jinn));
   return {
     name,
     description: doc.description,

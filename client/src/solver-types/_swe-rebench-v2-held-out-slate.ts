@@ -182,7 +182,7 @@ export function excludeHeldOutSlate(pool: PoolTask[], slateIds: Set<string>): Po
  * version here ONLY when its slate file exists (loadHeldOutSlate fails loud on
  * a missing file).
  */
-export const ACTIVE_HELD_OUT_SLATE_VERSIONS = ['v1', 'v2'] as const;
+export const ACTIVE_HELD_OUT_SLATE_VERSIONS = ['v1', 'v2', 'v3'] as const;
 
 /** Union of instance ids across the given active slate versions. */
 export function loadActiveHeldOutSlateIds(

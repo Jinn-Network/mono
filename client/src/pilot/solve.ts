@@ -1,4 +1,4 @@
-export interface Arm { name: 'A' | 'B'; skills: string[]; }
+export interface Arm { name: string; skills: string[]; jinnAgentHome?: string; }
 export interface SolveTokens { inputTokens: number; outputTokens: number; cacheReadTokens: number; reasoningTokens: number; }
 
 /** The jinn-agent argv for one solve. Arm A = empty loadout enforced via

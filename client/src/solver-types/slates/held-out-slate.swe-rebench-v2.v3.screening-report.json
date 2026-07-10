@@ -1,0 +1,488 @@
+{
+  "schema": "jinn.pilot.slate-screening.v1",
+  "generatedAt": "2026-07-10T12:57:36.423Z",
+  "solverType": "swe-rebench-v2.v1",
+  "slateVersion": "v3",
+  "dataset": "nebius/SWE-rebench-leaderboard",
+  "evalSemanticsVersion": "4",
+  "policyVersion": "jinn.pilot.validated-clean.v1",
+  "seed": "jinn.pilot.validated-clean.v3",
+  "count": 24,
+  "validatedPoolUpdatedAt": "2026-07-09T16:52:17.684Z",
+  "distillation": {
+    "manifestGeneratedAt": "2026-07-10T12:57:36.423Z",
+    "selectionSha256": "sha256:e690917d91829ba060824f7ecef92ddf4327a34e3c78ea4d95eaf5458276e305",
+    "sourceInstanceIds": [
+      "CrossGL__crosstl-257",
+      "agronholm__sqlacodegen-419",
+      "allenneuraldynamics__aind-data-schema-1677",
+      "aws-cloudformation__cfn-python-lint-4368",
+      "cal-itp__benefits-3330",
+      "calliope-project__calliope-854",
+      "gerlero__foamlib-329",
+      "googleapis__python-pubsub-1318",
+      "lincc-frameworks__nested-pandas-190",
+      "marshmallow-code__marshmallow-sqlalchemy-640",
+      "probabl-ai__skore-1056"
+    ]
+  },
+  "qualityScreen": {
+    "model": "claude-haiku-4-5-20251001",
+    "policy": "smallest-input-36 validated non-source non-active-slate candidates; A/B1-B6 alignment review",
+    "sha256": "sha256:469451600d5656e78388a284ec80e1226bcdb0e54f5fbf7488d9c3d1f095dc32",
+    "assessed": 36,
+    "accepted": 34,
+    "assessments": [
+      {
+        "instance_id": "bas-amop__PolarRoute-server-159",
+        "code": "A",
+        "reason": "Problem clearly states redundant error nesting, patch removes one layer, test adapted to match new behavior."
+      },
+      {
+        "instance_id": "networkx__networkx-7804",
+        "code": "A",
+        "reason": "Mathematical correction from exponentiation to multiplication per Ramanujan bound; test parametrization validates the fix."
+      },
+      {
+        "instance_id": "tobymao__sqlglot-4563",
+        "code": "A",
+        "reason": "Problem specifies DATEFROMPARTS function needed for T-SQL, patch adds transform, test validates output."
+      },
+      {
+        "instance_id": "probabl-ai__skore-1136",
+        "code": "A",
+        "reason": "Problem requests guard when y_test is None and estimator unfitted, patch adds early return, test validates behavior."
+      },
+      {
+        "instance_id": "Aunsiels__pyformlang-35",
+        "code": "A",
+        "reason": "Problem identifies incorrect equality between Terminal and Variable, patch restricts isinstance check, test validates concatenation."
+      },
+      {
+        "instance_id": "movingpandas__movingpandas-444",
+        "code": "A",
+        "reason": "Problem states invalid trajectories can be created, patch validates and falls back to original, test confirms behavior."
+      },
+      {
+        "instance_id": "angr__claripy-603",
+        "code": "A",
+        "reason": "Problem identifies BVNone creation from SignExt/ZeroExt, patch adds proper operation handling, test validates correct length."
+      },
+      {
+        "instance_id": "django-guardian__django-guardian-904",
+        "code": "A",
+        "reason": "Problem identifies UnboundLocalError with empty list, patch initializes variables, test validates with empty objects."
+      },
+      {
+        "instance_id": "ets-labs__python-dependency-injector-886",
+        "code": "A",
+        "reason": "Problem shows MRO broken in v4.46.0, patch adds early return guard, test validates MRO is preserved."
+      },
+      {
+        "instance_id": "sympy__sympy-27593",
+        "code": "A",
+        "reason": "Problem identifies inconsistent behavior for zero polynomial primitive(), patch handles edge case, test validates."
+      },
+      {
+        "instance_id": "AzureAD__microsoft-authentication-library-for-python-795",
+        "code": "A",
+        "reason": "Problem states env var ignored, patch reads from os.getenv(), tests validate both standard and pod identity paths."
+      },
+      {
+        "instance_id": "tobymao__sqlglot-4618",
+        "code": "A",
+        "reason": "Problem specifies PRIMARY KEY with sort option fails, patch enables ordered parsing, test validates DESC syntax."
+      },
+      {
+        "instance_id": "cdent__gabbi-342",
+        "code": "A",
+        "reason": "Problem states poll doesn't retry after timeout, patch adds httpx.ReadTimeout to caught exceptions, test validates retry."
+      },
+      {
+        "instance_id": "astropy__astropy-18958",
+        "code": "A",
+        "reason": "Problem identifies unit loss with scipy dev on nearest interpolation, patch fixes condition check, test validates units preserved."
+      },
+      {
+        "instance_id": "BrianPugh__cyclopts-633",
+        "code": "A",
+        "reason": "Problem shows duplicate negative in union types, patch deduplicates by sorting and checking membership, test validates single appearance."
+      },
+      {
+        "instance_id": "Aunsiels__pyformlang-32",
+        "code": "B2",
+        "reason": "Patch completely rewrites parsing logic with complex nested conditions and implicit precedence assumptions that are hard to verify from the test."
+      },
+      {
+        "instance_id": "gitpython-developers__GitPython-2051",
+        "code": "A",
+        "reason": "Problem identifies relative URL handling missing, patch resolves relative paths, test validates cloning with relative submodule."
+      },
+      {
+        "instance_id": "astropy__astropy-18868",
+        "code": "A",
+        "reason": "Problem shows inplace mul fails with dimensionless Quantity, patch changes identity to equality check, test validates behavior."
+      },
+      {
+        "instance_id": "iluvcapra__pycmx-12",
+        "code": "B3",
+        "reason": "Test references external file tests/edls/adobe_dai109_test.txt which is not provided in patch content."
+      },
+      {
+        "instance_id": "ag2ai__faststream-2701",
+        "code": "A",
+        "reason": "Problem states set_broker misses _update_fd_config call, patch adds it via helper, test validates context availability."
+      },
+      {
+        "instance_id": "sympy__sympy-27559",
+        "code": "A",
+        "reason": "Problem identifies parameter semantics inverted, patch swaps formula terms, test expectations updated to match corrected behavior."
+      },
+      {
+        "instance_id": "sympy__sympy-27489",
+        "code": "A",
+        "reason": "Problem shows ask() returns False when should return None, patch removes incorrect early return, test updated accordingly."
+      },
+      {
+        "instance_id": "sympy__sympy-27510",
+        "code": "A",
+        "reason": "Problem shows missing parentheses with negative and low-precedence function, patch checks function precedence, test validates both cases."
+      },
+      {
+        "instance_id": "gitpython-developers__GitPython-2075",
+        "code": "A",
+        "reason": "Problem specifies missing hasconfig:remote.*.url pattern, patch adds regex and logic, test validates URL matching."
+      },
+      {
+        "instance_id": "dag-hammarskjold-library__dlx-564",
+        "code": "A",
+        "reason": "Problem states null field causes indicator parsing error, patch adds guards and handles empty values, test validates."
+      },
+      {
+        "instance_id": "docling-project__docling-2983",
+        "code": "A",
+        "reason": "Problem identifies crash with commas in alt text, patch handles comma-separated alt text properly, test validates comma preservation."
+      },
+      {
+        "instance_id": "zarr-developers__zarr-python-2758",
+        "code": "A",
+        "reason": "Problem shows directory incorrectly yielded as key in ZipStore, patch adds strip() before comparison, test validates against unzipped."
+      },
+      {
+        "instance_id": "BerriAI__litellm-16429",
+        "code": "A",
+        "reason": "Problem identifies ignored env var with hardcoded URL, patch uses os.getenv(), test validates env var honored."
+      },
+      {
+        "instance_id": "iris-hep__func_adl-185",
+        "code": "A",
+        "reason": "Problem requests better error message for missing type parameter, patch adds early validation with helpful message, test validates."
+      },
+      {
+        "instance_id": "probabl-ai__skore-1229",
+        "code": "A",
+        "reason": "Problem requests semantic rename from unsupported to unknown, patch consistently renames, tests updated."
+      },
+      {
+        "instance_id": "probabl-ai__skore-1154",
+        "code": "A",
+        "reason": "Problem shows repr() displays help, patch separates __str__ from __repr__, test validates both forms."
+      },
+      {
+        "instance_id": "gerlero__foamlib-315",
+        "code": "A",
+        "reason": "Problem identifies crash on includeFunc directive, patch adds directive pattern and omits semicolon, test validates parsing."
+      },
+      {
+        "instance_id": "Point72__ccflow-24",
+        "code": "A",
+        "reason": "Problem requests kwargs support for Context construction, patch enables kwargs in wrapper, test validates all calling styles."
+      },
+      {
+        "instance_id": "google__adk-python-3088",
+        "code": "A",
+        "reason": "Problem identifies missing enum support, patch detects enum type and converts to STRING with enum values, test validates."
+      },
+      {
+        "instance_id": "zopefoundation__Zope-1243",
+        "code": "A",
+        "reason": "Problem identifies unclosed file handles on large uploads, patch closes FileUpload objects, test validates closure."
+      },
+      {
+        "instance_id": "iris-hep__func_adl-184",
+        "code": "A",
+        "reason": "Problem states repeated subscript references use same AST, patch adds deepcopy, test validates returned objects are different."
+      }
+    ]
+  },
+  "excludedActiveSlateVersions": [
+    "v1",
+    "v2"
+  ],
+  "selected": [
+    {
+      "instance_id": "sympy__sympy-27593",
+      "hf_dataset": "nebius/SWE-rebench-leaderboard",
+      "hf_split": "2025_02",
+      "rowHash": "sha256:aeb84b6b5c72fb945e88ba7bae675de7f50b6a7589c24b2288430fb164ee2b37",
+      "checkedAt": "2026-05-22T18:19:29.485Z",
+      "reason": "gold-patch-resolves",
+      "qualityCodes": [
+        "A"
+      ]
+    },
+    {
+      "instance_id": "AzureAD__microsoft-authentication-library-for-python-795",
+      "hf_dataset": "nebius/SWE-rebench-leaderboard",
+      "hf_split": "2025_03",
+      "rowHash": "sha256:13e144854ad47e4ef22fd673da94e36a7c38e8f6f7ba4fcce5348067e87b540e",
+      "checkedAt": "2026-06-04T01:44:07.255Z",
+      "reason": "gold-patch-resolves",
+      "qualityCodes": [
+        "A"
+      ]
+    },
+    {
+      "instance_id": "django-guardian__django-guardian-904",
+      "hf_dataset": "nebius/SWE-rebench-leaderboard",
+      "hf_split": "2025_09",
+      "rowHash": "sha256:91249d8960d2811c1ff8a5af070f5e24b499842c15330ffb65dd240d0876dfab",
+      "checkedAt": "2026-05-25T01:19:00.196Z",
+      "reason": "gold-patch-resolves",
+      "qualityCodes": [
+        "A"
+      ]
+    },
+    {
+      "instance_id": "astropy__astropy-18868",
+      "hf_dataset": "nebius/SWE-rebench-leaderboard",
+      "hf_split": "2025_11",
+      "rowHash": "sha256:e9731b8caef7961f4ea0b8aa35671ff66320ff1d86f00ff9ed4edfe470f30013",
+      "checkedAt": "2026-05-24T13:40:09.292Z",
+      "reason": "gold-patch-resolves",
+      "qualityCodes": [
+        "A"
+      ]
+    },
+    {
+      "instance_id": "angr__claripy-603",
+      "hf_dataset": "nebius/SWE-rebench-leaderboard",
+      "hf_split": "2025_03",
+      "rowHash": "sha256:7f6fb0ad1ef441e0337805cb179b8ec8b728152b85d6c21597748e5521127a12",
+      "checkedAt": "2026-05-24T08:49:14.510Z",
+      "reason": "gold-patch-resolves",
+      "qualityCodes": [
+        "A"
+      ]
+    },
+    {
+      "instance_id": "astropy__astropy-18958",
+      "hf_dataset": "nebius/SWE-rebench-leaderboard",
+      "hf_split": "2025_11",
+      "rowHash": "sha256:1803815d3f4c5a6afb7988a1a4ce3a3260c9d06ff6f2b9a0c3a87a6db94fe753",
+      "checkedAt": "2026-05-24T13:25:29.320Z",
+      "reason": "gold-patch-resolves",
+      "qualityCodes": [
+        "A"
+      ]
+    },
+    {
+      "instance_id": "sympy__sympy-27510",
+      "hf_dataset": "nebius/SWE-rebench-leaderboard",
+      "hf_split": "2025_01",
+      "rowHash": "sha256:c89e716ace2393fa968d1478afa8fa681a6f0e2491f99fafac6e139b6aed4ab7",
+      "checkedAt": "2026-05-22T03:54:57.080Z",
+      "reason": "gold-patch-resolves",
+      "qualityCodes": [
+        "A"
+      ]
+    },
+    {
+      "instance_id": "bas-amop__PolarRoute-server-159",
+      "hf_dataset": "nebius/SWE-rebench-leaderboard",
+      "hf_split": "2025_11",
+      "rowHash": "sha256:15e241ff1a1595123ea5187e9ab270fa83ef6a1122f987a3c71c0ae33d0df23e",
+      "checkedAt": "2026-05-24T18:02:51.073Z",
+      "reason": "gold-patch-resolves",
+      "qualityCodes": [
+        "A"
+      ]
+    },
+    {
+      "instance_id": "dag-hammarskjold-library__dlx-564",
+      "hf_dataset": "nebius/SWE-rebench-leaderboard",
+      "hf_split": "2025_05",
+      "rowHash": "sha256:0bf557f81cf45b7ec4be5aca5166943fd54085d525835623368019d7a64263e9",
+      "checkedAt": "2026-05-24T23:36:11.816Z",
+      "reason": "gold-patch-resolves",
+      "qualityCodes": [
+        "A"
+      ]
+    },
+    {
+      "instance_id": "movingpandas__movingpandas-444",
+      "hf_dataset": "nebius/SWE-rebench-leaderboard",
+      "hf_split": "2025_01",
+      "rowHash": "sha256:950904d80ff4c3c1d7abf3199867968d8e24da29177249ad1affc597ecedd38e",
+      "checkedAt": "2026-06-03T23:22:35.474Z",
+      "reason": "gold-patch-resolves",
+      "qualityCodes": [
+        "A"
+      ]
+    },
+    {
+      "instance_id": "probabl-ai__skore-1229",
+      "hf_dataset": "nebius/SWE-rebench-leaderboard",
+      "hf_split": "2025_01",
+      "rowHash": "sha256:9df8794516a13f549d0c42e57b3321b8642734daf5d553ecec6a0f3c5c5b402f",
+      "checkedAt": "2026-05-23T22:07:27.190Z",
+      "reason": "gold-patch-resolves",
+      "qualityCodes": [
+        "A"
+      ]
+    },
+    {
+      "instance_id": "gitpython-developers__GitPython-2051",
+      "hf_dataset": "nebius/SWE-rebench-leaderboard",
+      "hf_split": "2025_06",
+      "rowHash": "sha256:acf16f5f5a1afcfac5f6a0e9a6d23465c672dd1744b5b07835e8ff7b21d1ab8d",
+      "checkedAt": "2026-05-25T04:34:58.715Z",
+      "reason": "gold-patch-resolves",
+      "qualityCodes": [
+        "A"
+      ]
+    },
+    {
+      "instance_id": "docling-project__docling-2983",
+      "hf_dataset": "nebius/SWE-rebench-leaderboard",
+      "hf_split": "2026_02",
+      "rowHash": "sha256:6dbadbb702ddd2558c00da0422838103e94b64ce711d875e9e6461d1b4d54b55",
+      "checkedAt": "2026-05-25T02:33:18.128Z",
+      "reason": "gold-patch-resolves",
+      "qualityCodes": [
+        "A"
+      ]
+    },
+    {
+      "instance_id": "BerriAI__litellm-16429",
+      "hf_dataset": "nebius/SWE-rebench-leaderboard",
+      "hf_split": "2025_11",
+      "rowHash": "sha256:1eeacf9d8ad63e7b0c1640c9830631bce9f95723a8626495ec11bde7e9d40003",
+      "checkedAt": "2026-06-04T02:31:48.470Z",
+      "reason": "gold-patch-resolves",
+      "qualityCodes": [
+        "A"
+      ]
+    },
+    {
+      "instance_id": "tobymao__sqlglot-4563",
+      "hf_dataset": "nebius/SWE-rebench-leaderboard",
+      "hf_split": "2025_01",
+      "rowHash": "sha256:aca0a36d45e729067dea9cc0099c61a3db67ba11d05adc5fdc041be62dbb5b71",
+      "checkedAt": "2026-06-03T10:48:17.677Z",
+      "reason": "gold-patch-resolves",
+      "qualityCodes": [
+        "A"
+      ]
+    },
+    {
+      "instance_id": "gerlero__foamlib-315",
+      "hf_dataset": "nebius/SWE-rebench-leaderboard",
+      "hf_split": "2025_01",
+      "rowHash": "sha256:5f7935576f2a6117a2caf6128d1e0b7a770a9f8d57740778fa08586ef3fec9a3",
+      "checkedAt": "2026-05-23T22:11:08.121Z",
+      "reason": "gold-patch-resolves",
+      "qualityCodes": [
+        "A"
+      ]
+    },
+    {
+      "instance_id": "sympy__sympy-27489",
+      "hf_dataset": "nebius/SWE-rebench-leaderboard",
+      "hf_split": "2025_01",
+      "rowHash": "sha256:ba734ac4bd7ec26e7edf91bb5d3470515a24e562049565b4ba465b5e57a0828f",
+      "checkedAt": "2026-05-22T08:54:46.186Z",
+      "reason": "gold-patch-resolves",
+      "qualityCodes": [
+        "A"
+      ]
+    },
+    {
+      "instance_id": "probabl-ai__skore-1136",
+      "hf_dataset": "nebius/SWE-rebench-leaderboard",
+      "hf_split": "2025_01",
+      "rowHash": "sha256:892ecd97846d11b63443fe490ad7a26ee2065cb343f7948d1cb9037421223b25",
+      "checkedAt": "2026-05-22T04:14:48.552Z",
+      "reason": "gold-patch-resolves",
+      "qualityCodes": [
+        "A"
+      ]
+    },
+    {
+      "instance_id": "tobymao__sqlglot-4618",
+      "hf_dataset": "nebius/SWE-rebench-leaderboard",
+      "hf_split": "2025_01",
+      "rowHash": "sha256:aebfbeb1c9066183156ad3b2ba915690d84670cd3c7610c0fdcea0f8456c809a",
+      "checkedAt": "2026-06-03T10:59:00.781Z",
+      "reason": "gold-patch-resolves",
+      "qualityCodes": [
+        "A"
+      ]
+    },
+    {
+      "instance_id": "zarr-developers__zarr-python-2758",
+      "hf_dataset": "nebius/SWE-rebench-leaderboard",
+      "hf_split": "2025_01",
+      "rowHash": "sha256:8042903b7b3d349c321573c1e37f62a0cd71f21bb218d14d032fe793a9524ab3",
+      "checkedAt": "2026-05-22T04:18:06.891Z",
+      "reason": "gold-patch-resolves",
+      "qualityCodes": [
+        "A"
+      ]
+    },
+    {
+      "instance_id": "Aunsiels__pyformlang-35",
+      "hf_dataset": "nebius/SWE-rebench-leaderboard",
+      "hf_split": "2025_05",
+      "rowHash": "sha256:5263ab1537ccb7656a4aae0781f52ba131720b8550601b1b9e47a75a941eb612",
+      "checkedAt": "2026-06-04T01:52:03.103Z",
+      "reason": "gold-patch-resolves",
+      "qualityCodes": [
+        "A"
+      ]
+    },
+    {
+      "instance_id": "networkx__networkx-7804",
+      "hf_dataset": "nebius/SWE-rebench-leaderboard",
+      "hf_split": "2025_01",
+      "rowHash": "sha256:f9bc9d65884fda47f1085f9320ac9387e502427e9ed5eb632f1d2a60ffe3ed34",
+      "checkedAt": "2026-06-04T01:35:19.985Z",
+      "reason": "gold-patch-resolves",
+      "qualityCodes": [
+        "A"
+      ]
+    },
+    {
+      "instance_id": "sympy__sympy-27559",
+      "hf_dataset": "nebius/SWE-rebench-leaderboard",
+      "hf_split": "2025_02",
+      "rowHash": "sha256:12ea5d1952dfbf7d32b03f3663219e262323f9f5ce7fd94ecb3c6037f99ecd89",
+      "checkedAt": "2026-05-22T17:59:52.097Z",
+      "reason": "gold-patch-resolves",
+      "qualityCodes": [
+        "A"
+      ]
+    },
+    {
+      "instance_id": "zopefoundation__Zope-1243",
+      "hf_dataset": "nebius/SWE-rebench-leaderboard",
+      "hf_split": "2025_01",
+      "rowHash": "sha256:a9e5dd275741d65285419967258113caf198c2874e6fc273294cd75f68400f21",
+      "checkedAt": "2026-06-03T23:20:37.359Z",
+      "reason": "gold-patch-resolves",
+      "qualityCodes": [
+        "A"
+      ]
+    }
+  ]
+}

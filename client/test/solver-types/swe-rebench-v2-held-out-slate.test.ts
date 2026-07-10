@@ -8,6 +8,8 @@ import {
   hashHeldOutSlateArtifact,
   parseHeldOutSlateArtifact,
   excludeHeldOutSlate,
+  loadActiveHeldOutSlateIds,
+  ACTIVE_HELD_OUT_SLATE_VERSIONS,
   HELD_OUT_SLATE_SCHEMA_VERSION,
   type HeldOutSlateArtifact,
 } from '../../src/solver-types/_swe-rebench-v2-held-out-slate.js';
@@ -53,6 +55,19 @@ describe('held-out slate loader (#817 AC#1)', () => {
     expect(slate.hash).toBe(hashHeldOutSlateArtifact(parseHeldOutSlateArtifact(raw)));
     // the declared `hash` field matches the recomputed hash
     expect(raw['hash']).toBe(slate.hash);
+  });
+});
+
+describe('validated clean v3 pilot slate', () => {
+  it('ships 24 unique content-addressed tasks and activates them for train exclusion', () => {
+    expect(ACTIVE_HELD_OUT_SLATE_VERSIONS).toEqual(['v1', 'v2', 'v3']);
+    const slate = loadHeldOutSlate('swe-rebench-v2.v1', 'v3');
+    expect(slate.instanceIds.size).toBe(24);
+    const active = loadActiveHeldOutSlateIds(
+      'swe-rebench-v2.v1',
+      ACTIVE_HELD_OUT_SLATE_VERSIONS,
+    );
+    expect(active.has([...slate.instanceIds][0]!)).toBe(true);
   });
 });
 

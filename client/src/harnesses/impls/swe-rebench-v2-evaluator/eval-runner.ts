@@ -228,6 +228,7 @@ const INFRA_SIGNATURES: Array<{ rx: RegExp; reason: string }> = [
   { rx: /error: corrupt patch at line|patch fragment without header/i, reason: 'patch_corrupt' },
   { rx: /patch does not apply|error: patch failed:/i, reason: 'patch_does_not_apply' },
   { rx: /Applied patch to .+ with conflicts|^U \S/m, reason: 'patch_merge_conflict' },
+  { rx: /fatal: not a git repository \(or any of the parent directories\): \.git/i, reason: 'workdir_not_git_repo' },
   { rx: /: command not found/i, reason: 'test_command_not_found' },
   { rx: /Failed building editable|Failed to build installable wheels/i, reason: 'install_build_failed' },
   { rx: /No virtual environment found/i, reason: 'venv_missing' },

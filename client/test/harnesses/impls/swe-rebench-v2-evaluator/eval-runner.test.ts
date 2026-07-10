@@ -345,6 +345,21 @@ describe('PythonEvalRunner', () => {
     expect((err as EvalCouldNotGradeError).reason).toBe('patch_corrupt');
   });
 
+  it('throws EvalCouldNotGradeError when the container workdir is not a git checkout', async () => {
+    const upstreamRepoDir = makeUpstreamFixture({
+      reportItem: {
+        from_fail_to_pass: [],
+        failed_from_pass_to_pass: ['test_b'],
+        passed_match: false,
+        exit_code: 128,
+      },
+      logBody: 'fatal: not a git repository (or any of the parent directories): .git',
+    });
+    const err = await new PythonEvalRunner({ upstreamRepoDir, maxWorkers: 1 }).runEval(REQUEST).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(EvalCouldNotGradeError);
+    expect((err as EvalCouldNotGradeError).reason).toBe('workdir_not_git_repo');
+  });
+
   it('throws EvalCouldNotGradeError on the upstream setup-error report shape (e.g. missing image_name)', async () => {
     const upstreamRepoDir = makeUpstreamFixture({
       reportItem: { error: 'Task astronomer__astronomer-cosmos-2332 missing top-level image_name.' },
@@ -614,6 +629,11 @@ describe('matchInfraSignature — 2026-05-14 triage fingerprints', () => {
     expect(
       matchInfraSignature('docker: Error response from daemon: pull access denied for foo, repository does not exist'),
     ).not.toBeNull();
+  });
+
+  it('classifies a container workdir that is not a git repository as ungradeable', () => {
+    expect(matchInfraSignature('fatal: not a git repository (or any of the parent directories): .git'))
+      .toBe('workdir_not_git_repo');
   });
 
   it('still leaves a normal pytest FAIL session alone (returns null)', () => {

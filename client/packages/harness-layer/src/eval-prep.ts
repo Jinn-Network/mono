@@ -50,6 +50,7 @@ export interface EvalPrepDeps {
   retryErrors?: boolean;
   distribution?: string;
   groupCap?: number;
+  concurrency?: number;
   limit?: number;
   now?: () => Date;
 }
@@ -80,6 +81,7 @@ export interface EvalPrepManifest {
   outDir: string;
   limit?: number;
   groupCap?: number;
+  concurrency?: number;
   selectOnly: boolean;
   meta: boolean;
   clusterCount: number;
@@ -162,6 +164,8 @@ interface PreparedEvalSelection {
 
 export function modelLabel(model: string): string {
   if (model === 'gpt-5.4-mini') return 'mini';
+  if (model.includes('haiku')) return 'haiku';
+  if (model.includes('opus')) return 'opus';
   const label = model.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
   return label === '' ? 'model' : label;
 }
@@ -596,6 +600,37 @@ function loadUnrequestedModelManifests(outDir: string, requestedLabels: Set<stri
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
+interface ConcurrencyLimiter {
+  run<T>(work: () => Promise<T>): Promise<T>;
+}
+
+function createConcurrencyLimiter(limit: number): ConcurrencyLimiter {
+  if (!Number.isInteger(limit) || limit <= 0) {
+    throw new Error(`eval-prep concurrency must be a positive integer (got ${limit})`);
+  }
+  let active = 0;
+  const queued: Array<() => void> = [];
+  const next = (): void => {
+    const start = queued.shift();
+    if (start) start();
+  };
+  return {
+    run<T>(work: () => Promise<T>): Promise<T> {
+      return new Promise<T>((resolve, reject) => {
+        const start = (): void => {
+          active += 1;
+          void work().then(resolve, reject).finally(() => {
+            active -= 1;
+            next();
+          });
+        };
+        if (active < limit) start();
+        else queued.push(start);
+      });
+    },
+  };
+}
+
 export async function runEvalPrep(deps: EvalPrepDeps): Promise<EvalPrepResult> {
   ensureUniqueLabels(deps.models);
   if (deps.force) rmSync(deps.outDir, { recursive: true, force: true });
@@ -610,8 +645,8 @@ export async function runEvalPrep(deps: EvalPrepDeps): Promise<EvalPrepResult> {
     dirty = true;
   }
 
-  const modelResults: EvalPrepModelManifest[] = [];
-  for (const model of deps.selectOnly ? [] : deps.models) {
+  const limiter = createConcurrencyLimiter(deps.concurrency ?? 1);
+  const modelResults = await Promise.all((deps.selectOnly ? [] : deps.models).map(async (model) => {
     const modelDir = join(deps.outDir, 'distilled', model.label);
     const skillsDir = join(modelDir, 'skills');
     const metaSkillsDir = join(modelDir, 'meta-skills');
@@ -621,30 +656,28 @@ export async function runEvalPrep(deps: EvalPrepDeps): Promise<EvalPrepResult> {
     mkdirSync(attemptsDir, { recursive: true });
 
     let modelDirty = false;
-    const stage1Records: Stage1AttemptRecord[] = [];
-    for (const cluster of prepared.selectedClusters) {
+    const stage1Records = await Promise.all(prepared.selectedClusters.map(async (cluster) => {
       const existing = loadStage1Record(attemptsDir, model.label, model.model, cluster.clusterId);
       if (existing && !(deps.retryErrors && existing.status === 'error')) {
         if (ensurePublishedSkillFile(existing, skillsDir)) {
           modelDirty = true;
           dirty = true;
         }
-        stage1Records.push(existing);
-        continue;
+        return existing;
       }
 
       const publishSkill = async (pkg: SkillPackage): Promise<{ envelopeRef: string; anchorTx: string | null }> => {
         writeSkillPackage(join(skillsDir, pkg.name), pkg);
         return { envelopeRef: `local:${model.label}:${pkg.name}`, anchorTx: null };
       };
-      const result = await distillClusters([cluster], {
-        distill: model.distill,
-        publishSkill,
-        slate: deps.slate,
-        distribution: deps.distribution ?? 'coding',
-        distillModel: model.model,
-        ...(deps.now ? { now: deps.now } : {}),
-      });
+      const result = await limiter.run(() => distillClusters([cluster], {
+          distill: model.distill,
+          publishSkill,
+          slate: deps.slate,
+          distribution: deps.distribution ?? 'coding',
+          distillModel: model.model,
+          ...(deps.now ? { now: deps.now } : {}),
+        }));
       const record = stage1RecordFromResult(
         model.label,
         model.model,
@@ -653,10 +686,10 @@ export async function runEvalPrep(deps: EvalPrepDeps): Promise<EvalPrepResult> {
         (deps.now?.() ?? new Date()).toISOString(),
       );
       writeJson(attemptPath(attemptsDir, cluster.clusterId), record);
-      stage1Records.push(record);
       modelDirty = true;
       dirty = true;
-    }
+      return record;
+    }));
 
     assertAttemptedClusterIds(
       prepared.selectedClusterIds,
@@ -669,6 +702,7 @@ export async function runEvalPrep(deps: EvalPrepDeps): Promise<EvalPrepResult> {
       if (!model.metaDistill) {
         throw new Error(`eval-prep meta enabled but no metaDistill port was provided for ${model.label}`);
       }
+      const metaDistillPort = model.metaDistill;
       mkdirSync(metaSkillsDir, { recursive: true });
       mkdirSync(metaAttemptsDir, { recursive: true });
       const metaClusters = buildMetaClusters(stage1PublishedForMeta(prepared.selectedClusters, stage1Records));
@@ -693,14 +727,14 @@ export async function runEvalPrep(deps: EvalPrepDeps): Promise<EvalPrepResult> {
           writeSkillPackage(join(metaSkillsDir, pkg.name), pkg);
           return { envelopeRef: `local:${model.label}:meta:${pkg.name}`, anchorTx: null };
         };
-        const result = await metaDistill([cluster], {
-          metaDistill: model.metaDistill,
-          publishSkill: publishMetaSkill,
-          slate: deps.slate,
-          distribution: deps.distribution ?? 'coding',
-          distillModel: model.model,
-          ...(deps.now ? { now: deps.now } : {}),
-        });
+        const result = await limiter.run(() => metaDistill([cluster], {
+            metaDistill: metaDistillPort,
+            publishSkill: publishMetaSkill,
+            slate: deps.slate,
+            distribution: deps.distribution ?? 'coding',
+            distillModel: model.model,
+            ...(deps.now ? { now: deps.now } : {}),
+          }));
         const record = metaRecordFromResult(
           model.label,
           model.model,
@@ -727,8 +761,8 @@ export async function runEvalPrep(deps: EvalPrepDeps): Promise<EvalPrepResult> {
     assertAttemptedClusterIds(prepared.selectedClusterIds, modelManifest.attemptedClusterIds);
     const modelManifestPath = join(modelDir, 'manifest.json');
     if (modelDirty || !existsSync(modelManifestPath)) writeJson(modelManifestPath, modelManifest);
-    modelResults.push(modelManifest);
-  }
+    return modelManifest;
+  }));
 
   const requestedLabels = new Set((deps.selectOnly ? [] : deps.models).map((model) => model.label));
   const allModelResults = deps.selectOnly

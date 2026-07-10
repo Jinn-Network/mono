@@ -830,6 +830,88 @@ describe('jinn-layer distill run', () => {
     });
   });
 
+  it('distill eval-prep routes explicitly requested Claude models through Claude ports', async () => {
+    const { writer } = capture();
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-eval-prep-cli-'));
+    const factoryCalls: Array<{ provider: RecordedProvider; model: string }> = [];
+    const factory = (provider: RecordedProvider, model: string) => {
+      factoryCalls.push({ provider, model });
+      return {
+        distill: async (cluster: DistillCluster) => validEvalOutput(`${model}-${cluster.clusterId}`),
+        metaDistill: async () => META_OUT,
+      };
+    };
+
+    const code = await runJinnLayerCli([
+      'distill', 'eval-prep',
+      '--out', outDir,
+      '--distiller', 'claude',
+      '--models', 'claude-haiku-4-5-20251001,claude-opus-4-8',
+      '--max-clusters', '1',
+    ], {
+      writer,
+      distillDeps: stubDeps({
+        verdictSource: { list: async () => [dref('alpha__repo-1', 'pass')] },
+        publishDeps: undefined,
+        distill: undefined,
+        metaDistill: undefined,
+        distillerFactory: factory,
+        slateInstanceIds: new Set(),
+      }),
+    });
+
+    expect(code).toBe(0);
+    expect(factoryCalls).toEqual([
+      { provider: 'claude', model: 'claude-haiku-4-5-20251001' },
+      { provider: 'claude', model: 'claude-opus-4-8' },
+    ]);
+    expect(existsSync(join(outDir, 'distilled', 'haiku', 'manifest.json'))).toBe(true);
+    expect(existsSync(join(outDir, 'distilled', 'opus', 'manifest.json'))).toBe(true);
+  });
+
+  it('distill eval-prep keeps stage-1 calls within the requested shared concurrency limit', async () => {
+    const { writer } = capture();
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-eval-prep-cli-'));
+    let active = 0;
+    let peak = 0;
+    const factory = (_provider: RecordedProvider, model: string) => ({
+      distill: async (cluster: DistillCluster): Promise<DistillLLMOutput> => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await new Promise((resolve) => setTimeout(resolve, 15));
+        active -= 1;
+        return validEvalOutput(`${model}-${cluster.clusterId}`);
+      },
+      metaDistill: async () => META_OUT,
+    });
+
+    const code = await runJinnLayerCli([
+      'distill', 'eval-prep',
+      '--out', outDir,
+      '--models', 'gpt-5.4-mini,gpt-5.5',
+      '--max-clusters', '3',
+      '--max-patterns', '3',
+      '--concurrency', '2',
+    ], {
+      writer,
+      distillDeps: stubDeps({
+        verdictSource: { list: async () => [
+          dref('alpha__repo-1', 'pass'),
+          dref('beta__repo-2', 'pass'),
+          dref('gamma__repo-3', 'pass'),
+        ] },
+        publishDeps: undefined,
+        distill: undefined,
+        metaDistill: undefined,
+        distillerFactory: factory,
+        slateInstanceIds: new Set(),
+      }),
+    });
+
+    expect(code).toBe(0);
+    expect(peak).toBe(2);
+  });
+
   it('distill eval-prep records per-model rejects without changing the attempted cluster set', async () => {
     const { writer, out } = capture();
     const outDir = mkdtempSync(join(tmpdir(), 'jinn-eval-prep-cli-'));

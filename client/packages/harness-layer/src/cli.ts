@@ -181,7 +181,7 @@ Commands:
                                                  model that WRITES the skills, distinct from the
                                                  cheap runtime model your captures ran under.
   distill eval-prep [--limit N] [--out <dir>] [--json] [--meta] [--select-only]
-                    [--group-cap N] [--force] [--retry-errors]
+                    [--group-cap N] [--concurrency N] [--force] [--retry-errors]
                     [--models gpt-5.4-mini,gpt-5.5]
                     [--max-clusters N] [--max-contrastive N]
                     [--max-lessons N] [--max-patterns N]
@@ -706,6 +706,7 @@ export async function runJinnLayerCli(
         'max-lessons': { type: 'string' },
         'max-patterns': { type: 'string' },
         'group-cap': { type: 'string' },
+        concurrency: { type: 'string' },
         'select-only': { type: 'boolean', default: false },
         force: { type: 'boolean', default: false },
         'retry-errors': { type: 'boolean', default: false },
@@ -1041,7 +1042,8 @@ export async function runJinnLayerCli(
     mkdirSync(outDir, { recursive: true });
     const localOnly = parsed.values['local-only'] as boolean;
 
-    const rawProvider = (parsed.values.distiller as string | undefined) ?? process.env['JINN_DISTILL_PROVIDER'] ?? 'claude';
+    const rawProvider = (parsed.values.distiller as string | undefined) ?? process.env['JINN_DISTILL_PROVIDER'] ??
+      (isDistillEvalPrep ? 'codex' : 'claude');
     const distillProvider = parseDistillProvider(rawProvider);
     if (!distillProvider) {
       writer.write(`error: distiller must be "claude" or "codex" (got ${JSON.stringify(rawProvider)})\n\n${USAGE}`);
@@ -1101,7 +1103,7 @@ export async function runJinnLayerCli(
         }
         return value;
       };
-      const parseRequiredPositiveIntFlag = (name: 'group-cap'): number | undefined => {
+      const parseRequiredPositiveIntFlag = (name: 'group-cap' | 'concurrency'): number | undefined => {
         const raw = parsed.values[name] as string | undefined;
         if (raw === undefined) return undefined;
         const value = Number.parseInt(raw, 10);
@@ -1111,7 +1113,10 @@ export async function runJinnLayerCli(
         return value;
       };
 
-      const rawModels = (parsed.values.models as string | undefined) ?? 'gpt-5.4-mini,gpt-5.5';
+      const rawModels = (parsed.values.models as string | undefined) ??
+        (distillProvider === 'claude'
+          ? 'claude-haiku-4-5-20251001,claude-opus-4-8'
+          : 'gpt-5.4-mini,gpt-5.5');
       const models = rawModels.split(',').map((m) => m.trim()).filter((m) => m.length > 0);
       const selectOnly = parsed.values['select-only'] as boolean;
       if (!selectOnly && models.length === 0) {
@@ -1121,7 +1126,7 @@ export async function runJinnLayerCli(
 
       const distillerFactory = dd.distillerFactory ?? defaultDistillerFactory;
       const modelConfigs = selectOnly ? [] : models.map((model) => {
-        const ports = distillerFactory('codex', model);
+        const ports = distillerFactory(distillProvider, model);
         return {
           label: modelLabel(model),
           model,
@@ -1134,6 +1139,7 @@ export async function runJinnLayerCli(
       const maxLessons = parsePositiveIntFlag('max-lessons');
       const maxPatterns = parsePositiveIntFlag('max-patterns');
       const groupCap = parseRequiredPositiveIntFlag('group-cap');
+      const concurrency = parseRequiredPositiveIntFlag('concurrency');
       const metaEnabled = parsed.values.meta as boolean;
 
       let result;
@@ -1157,6 +1163,7 @@ export async function runJinnLayerCli(
             ...(maxPatterns !== undefined ? { maxPatterns } : {}),
           },
           ...(groupCap !== undefined ? { groupCap } : {}),
+          ...(concurrency !== undefined ? { concurrency } : {}),
           ...(limit !== undefined ? { limit } : {}),
         });
       } catch (err) {

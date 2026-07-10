@@ -31,6 +31,26 @@ describe('jinn.skill.v1 package builder (skill-package.ts)', () => {
     expect(parseSkillMarkdown(md)).toEqual(pkg);
   });
 
+  it('quotes distilledAt so skill loaders keep it as a JSON-serializable string', () => {
+    const withTimestamp: SkillPackage = {
+      ...pkg,
+      jinn: { ...pkg.jinn, distilledAt: '2026-07-09T15:13:10.411Z' },
+    };
+    const md = buildSkillMarkdown(withTimestamp);
+
+    expect(md).toContain('distilledAt: "2026-07-09T15:13:10.411Z"');
+    expect(parseSkillMarkdown(md).jinn.distilledAt).toBe('2026-07-09T15:13:10.411Z');
+  });
+
+  it('parses older unquoted distilledAt frontmatter as a string', () => {
+    const md = buildSkillMarkdown({
+      ...pkg,
+      jinn: { ...pkg.jinn, distilledAt: '2026-07-09T15:13:10.411Z' },
+    }).replace('"2026-07-09T15:13:10.411Z"', '2026-07-09T15:13:10.411Z');
+
+    expect(parseSkillMarkdown(md).jinn.distilledAt).toBe('2026-07-09T15:13:10.411Z');
+  });
+
   it('embedProvenance: false renders name/description only (canonical-form skillMd, anti-drift)', () => {
     const md = buildSkillMarkdown(pkg, { embedProvenance: false });
     expect(md).toContain('name: django-queryset-dedup-debugging');
