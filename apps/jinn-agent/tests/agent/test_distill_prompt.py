@@ -15,14 +15,17 @@ class TestBuildDistillPrompt:
         assert "[/distill]" in prompt
         assert "this session" in low
         assert "current conversation" in low
-        assert "skill_manage" in prompt
+        assert "distill_trace_search" in prompt
+        assert "do not use another trace-mining path" in prompt
+        assert "skill_manage" not in prompt
 
-    def test_all_mode_uses_capped_session_search_before_reading_deeply(self):
+    def test_all_mode_uses_capped_plugin_cluster_before_reading_deeply(self):
         prompt = build_distill_prompt("all")
         low = prompt.lower()
 
         assert "distill_trace_cluster" in prompt
-        assert "session_search" in prompt
+        assert "distill_local" in prompt
+        assert "session_search" not in prompt
         assert "limit=50" in prompt
         assert "cluster" in low
         assert "ask the user" in low
@@ -54,6 +57,8 @@ class TestDistillRegistryWiring:
         result = _handle_distill("all")
 
         assert result["action"] == "agent_turn"
-        assert "session_search" in result["prompt"]
+        assert "distill_trace_cluster" in result["prompt"]
+        assert "session_search" not in result["prompt"]
+        assert "skill_manage" not in result["prompt"]
         assert "limit=50" in result["prompt"]
         assert "recent local sessions" in result["message"].lower()

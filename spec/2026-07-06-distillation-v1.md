@@ -544,9 +544,10 @@ Mechanics:
 Hermes adapter: `jinn-agent` ships a bundled Hermes plugin named `local-trace-distiller` that
 registers `/distill`. The command is **not** a core slash command; the plugin returns a portable
 `agent_turn` payload (`prompt` + optional acknowledgement) and Hermes feeds that prompt into the
-normal active agent loop. When the local-distil MCP tools are configured, the prompt directs the
-agent to use them; otherwise the Hermes adapter falls back to host-native `session_search` +
-`skill_manage` so the plugin remains useful in a plain `jinn-agent` install.
+normal active agent loop. The prompt directs the agent through the local-distil MCP tools; Hermes is
+only the host adapter for the plugin command, not a second trace-mining implementation. If those MCP
+tools are not exposed, `/distill` reports the plugin installation as incomplete rather than using a
+host-native trace fallback.
 
 Future public listing of locally distilled skills is out of scope for v0.7. A later marketplace flow
 may let users publish useful skills for others to use and pay for, but that requires explicit user

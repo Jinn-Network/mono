@@ -32,7 +32,8 @@ def test_local_trace_distiller_loads_and_registers_distill(tmp_path, monkeypatch
     handler = fresh._plugin_commands["distill"]["handler"]
     result = handler("all")
     assert result["action"] == "agent_turn"
-    assert "session_search" in result["prompt"]
+    assert "distill_trace_cluster" in result["prompt"]
+    assert "session_search" not in result["prompt"]
     assert "recent local sessions" in result["message"].lower()
 
 
