@@ -472,6 +472,81 @@ def reattach_watcher(sink: Optional[Sink] = None) -> None:
     _archive_current("died")
 
 
+# ── Payoff surface (mono #1550) ──────────────────────────────────────────────
+#
+# The join: the harness's usage sidecar ($HERMES_HOME/skills/.usage.json,
+# keyed by skill NAME, bumped by the native skill tools) × the .jinn-ref
+# markers whose ref starts with `local-distill:`. Sessions snapshot at start,
+# diff at end, and print one ◇ line per used distilled skill (cap 3).
+
+PAYOFF_LINE_CAP = 3
+
+
+def _distilled_markers() -> Dict[str, int]:
+    """name → provenance_count for installed skills with a local-distill ref."""
+    out: Dict[str, int] = {}
+    directory = skills_install.skills_dir()
+    if not directory.exists():
+        return out
+    for child in directory.iterdir():
+        marker = child / ".jinn-ref"
+        if not (child.is_dir() and marker.exists()):
+            continue
+        try:
+            data = json.loads(marker.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        ref = str(data.get("ref", ""))
+        if not ref.startswith("local-distill:"):
+            continue
+        count = data.get("provenance_count")
+        out[child.name] = int(count) if isinstance(count, int) else 0
+    return out
+
+
+def _read_usage() -> Dict[str, Dict[str, Any]]:
+    """The upstream usage sidecar, read directly (never written here)."""
+    path = skills_install.skills_dir() / ".usage.json"
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def snapshot_usage() -> Dict[str, int]:
+    """use_count per installed DISTILLED skill, at session start."""
+    usage = _read_usage()
+    snapshot: Dict[str, int] = {}
+    for name in _distilled_markers():
+        rec = usage.get(name)
+        count = rec.get("use_count") if isinstance(rec, dict) else 0
+        snapshot[name] = int(count) if isinstance(count, int) else 0
+    return snapshot
+
+
+def payoff_lines(snapshot: Dict[str, int]) -> List[str]:
+    """◇ lines for distilled skills used since `snapshot` (cap 3). Never raises."""
+    try:
+        markers = _distilled_markers()
+        usage = _read_usage()
+        lines: List[str] = []
+        for name, provenance_count in sorted(markers.items()):
+            rec = usage.get(name)
+            count = rec.get("use_count") if isinstance(rec, dict) else 0
+            count = int(count) if isinstance(count, int) else 0
+            if count > snapshot.get(name, 0):
+                sources = f"{provenance_count} of your captures" if provenance_count else "your captures"
+                lines.append(f"◇ skill used — {name} · distilled from {sources}")
+            if len(lines) >= PAYOFF_LINE_CAP:
+                break
+        return lines
+    except Exception:
+        return []
+
+
 # ── /jinn distill — the in-session surface (mono #1538) ─────────────────────
 #
 # All handlers return stateless strings (input() would deadlock the TUI; the
@@ -687,6 +762,34 @@ def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
                 pass
             lines.append(f"installed  {name}  →  {row.get('path', '')}")
         lines.append("The agent's skill loader picks these up from here.")
+        # First install: one-time invitation to close the loop (mono #1550).
+        if not load_ux_flags()["payoff_invited"]:
+            mark_ux_flag("payoff_invited")
+            lines.append("")
+            lines.append(
+                "try one: run a task like the ones these came from — the agent"
+                " picks the skills up automatically, and you'll see a"
+                " ◇ skill used line when it does."
+            )
+        return "\n".join(lines)
+
+    if action == "skills":
+        markers = _distilled_markers()
+        usage = _read_usage()
+        status = distill_status(runner) or {}
+        staged_count = status.get("stagedCount", 0)
+        if not markers and not staged_count:
+            return "no distilled skills yet — /jinn distill start runs a distillation over your captures"
+        lines = ["◇ distilled skills"]
+        for name, provenance_count in sorted(markers.items()):
+            rec = usage.get(name) if isinstance(usage.get(name), dict) else {}
+            count = rec.get("use_count", 0)
+            last = rec.get("last_used_at") or "never"
+            lines.append(f"  {name}")
+            lines.append(f"    used   {count}x · last {last}")
+            lines.append(f"    from   {provenance_count} of your captures")
+        if staged_count:
+            lines.append(f"  staged      {staged_count}  → /jinn distill review")
         return "\n".join(lines)
 
     if action == "where":
@@ -721,5 +824,6 @@ def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
         "  /jinn distill stop            end the live run (staged skills kept)\n"
         "  /jinn distill review          the staged skills — what each helps with, where it came from\n"
         "  /jinn distill install <name>|all   install staged skills (no re-distillation)\n"
+        "  /jinn distill skills          the distilled skillset with usage\n"
         "  /jinn distill where local|defer|off   set where it runs\n"
     )
