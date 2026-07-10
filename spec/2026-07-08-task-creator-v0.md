@@ -1,11 +1,12 @@
 # Task Creator v0 — mining execution traces into evaluable tasks
 
-- **Version:** 0.3 (design draft — v0.1 synthesized from a four-agent design/adversarial
+- **Version:** 0.4 (design draft — v0.1 synthesized from a four-agent design/adversarial
   panel, 2026-07-08, plus two correction passes: the usage-trace-mining reframe and
   the scrub-collision / lookup-contamination / gate-precision flags, 2026-07-09.
   **v0.2 locks decisions D1–D4**; **v0.3 adds the public/private boundary + D5
-  (public-repo-only publication for v0)**, 2026-07-09.)
-- **Date:** 2026-07-08 (written 2026-07-09)
+  (public-repo-only publication for v0)**, 2026-07-09; **v0.4 adds D6 and the
+  generalized Task Capsule companion design**, 2026-07-10.)
+- **Date:** 2026-07-08 (written 2026-07-09; amended 2026-07-10)
 - **Author:** Ritsu (design session)
 - **Shape:** `design` — output is this spec. Building any rung is a follow-on `feat`,
   gated per §5. Nothing in this document merges code.
@@ -21,6 +22,9 @@
     `cap-v0` boundary this spec must respect (§11).
   - `spec/2026-07-06-harness-network-roadmap-v0-v3.md` — the sequencing spine
     (§2).
+  - `docs/superpowers/specs/2026-07-10-task-creator-generalized-task-capsules-design.md`
+    — domain-neutral Task Capsule, ALE compatibility adapter, and automated dynamic
+    task-creation roadmap (D6).
 
 ---
 
@@ -50,8 +54,12 @@ build: each rung earns one component of the usage-trace miner on ground where it
 be proven cheaply, and the components compose into the destination when real
 non-benchmark usage arrives at volume (§5.6).
 
-This spec deliberately reuses the entire existing quality machine (§4). The Task
-Creator is only a new way of putting tasks in front of the admission bouncer.
+This spec deliberately reuses the entire existing quality machine (§4) for work that
+can compile to `swe-rebench-v2.v1`. General artifact-producing work uses the same
+mine → admit → post → solve → grade → distill pipeline through the Task Capsule
+boundary defined by the companion design. The Task Creator remains one way of
+putting tasks in front of admission; task-family adapters own only the final
+domain-specific materialization and grading shape.
 
 ## 2. Position in the program — sequencing, stated plainly
 
@@ -167,6 +175,25 @@ One further gap the panel found, fixed at rung 0: admission never checks that
 F2P tests *fail pre-patch* — it proves only the gold transition. Inherited-test-set
 mints would admit vacuous instances. §5.1's discrimination check closes this.
 
+### 4.4 Generalized Task Capsule boundary (D6)
+
+The `PoolTask` + task-row boundary above remains correct for coding tasks and is not
+replaced in the Task Creator v0 implementation. It is one task-family adapter.
+
+For work that cannot compile to SWE-rebench, the domain-neutral boundary is
+`jinn.task-capsule.v1`, specified in
+`docs/superpowers/specs/2026-07-10-task-creator-generalized-task-capsules-design.md`.
+It separates the public instruction, inputs, environment requirements, and Solution
+projection from an evaluator-only reference bundle and a public admission receipt.
+The existing `session-derived` contract family is the target for this generalized
+family through a new `session-derived.v2` contract; the already-versioned v1 schemas
+remain unchanged. Rebench-compatible mints stay in `swe-rebench-v2.v1`.
+
+This distinction moves the environment **runtime contract** earlier without moving
+automatic environment **synthesis** earlier. Docker/QEMU/cloud providers can run a
+curated capsule before the Task Creator can infer a safe environment from an
+arbitrary local session.
+
 ## 5. The ladder
 
 | Rung | What | Gate to build it |
@@ -175,7 +202,7 @@ mints would admit vacuous instances. §5.1's discrimination check closes this.
 | 1 — Commit-echo | Generalize `jinn-repo-extract` to walk fresh upstream commits in repos with admitted images | The **three-arm distillation measurement** exists (distillation §11; cap-v0 is its prerequisite, PR #1416) — don't run a factory without its output sensor |
 | 2 — Hunk-subset echo | Revert a hunk subset from a verified-solved state; empirical F2P/P2P; blinded provenance | Rung-1 yield proves mint→admit→harvest; dogfood capture producing mineable traces |
 | 3 — Targeted perturbation (forked SWE-smith machinery) | AST/LM mutation aimed at trace-touched files; backtranslated problem statements | Echo supply exhausted **and** positive McNemar for synthetic-fed distillation |
-| 4 — Environment construction (REPOLAUNCH-class) | Build testable envs for arbitrary user repos | Real non-benchmark users |
+| 4 — Automatic environment synthesis (REPOLAUNCH-class) | Build new testable environment recipes from real unsupported work; the provider/runtime seam already exists via D6 | Real non-benchmark users plus the generalized capsule pilot |
 | ∞ — Composition | The usage-trace miner = rung-1 plumbing + rung-2 verifier derivation + rung-4 envs | All three components proven |
 
 ### 5.1 Rung 0 — instruments, targeting, and the contract
@@ -272,24 +299,33 @@ distilled from artificial bugs may not transfer; the null priors in distillation
 §2.4 make this a doubly-unproven chain) — which is why this rung is last among the
 minting rungs, not first as SWE-smith adoption would have implied.
 
-### 5.5 Rung 4 — environment construction
+### 5.5 Rung 4 — automatic environment synthesis
 
 REPOLAUNCH-class agentic construction of testable Docker environments for arbitrary
-user repos. Activates only when real non-benchmark usage arrives. This is the
-component that makes a general-usage trace's repo mintable at all. Note this rung
-first meets private repos in force: it is gated behind the code-payload disclosure
-controls of §10.1 (D5) — until those exist, only public-repo sessions are publishable.
+user repos, followed by broader artifact and desktop environments. Activates only
+when real non-benchmark usage arrives. This is the component that makes a trace from
+an *unsupported* environment mintable; it is not the first point at which Jinn can
+run a non-Rebench environment. D6 lands the versioned Task Capsule, provider seam,
+submission projection, and ALE compatibility adapter earlier against curated
+environment recipes.
+
+This rung first meets private repos and proprietary workspace state in force. It is
+gated behind the code-payload disclosure controls of §10.1 (D5) — until those exist,
+only public or otherwise explicitly redistributable environment inputs are
+publishable.
 
 ### 5.6 The destination — composition
 
 The usage-trace miner is not a sixth build; it is the composition of three proven
-components: take a captured session (repo @ commit, accepted diff, test commands
-run, intermediate failures — per the §10 contract), construct the environment
-(rung 4), treat the accepted diff as candidate gold and derive the verifier
-empirically (rung 2 mechanics; the session's own test commands seed the config),
-and push the result through the same mint → admit → post pipeline (rung 1 plumbing).
-Admission is the trust converter throughout. In v0 the composed miner publishes only
-public-repo sessions (§10.1, D5); private-repo publication waits on code-payload
+components: take a captured session (starting state, accepted output, validation
+signals, and intermediate failures — per §10 plus the D6 Source Capture extension),
+materialize it through a task-family adapter, derive a discriminating evaluator, and
+push the result through the same mint → admit → post pipeline. Coding uses rung-1
+plumbing, rung-2 verifier derivation, and rung-4 synthesis when the repo has no
+supported environment. General artifact work uses the companion design's capsule,
+submission projection, and provider path. Admission is the trust converter
+throughout. In v0 publication remains limited to public or otherwise explicitly
+redistributable inputs (§10.1, D5); private-work publication waits on payload
 disclosure controls.
 
 ## 6. Designs rejected (what the panel killed, kept on record)
@@ -309,9 +345,11 @@ disclosure controls.
   static pool, structurally identical to the benchmark we already post; nothing
   about it derives from traces. The machinery forks per §5.3/§5.4. (This is the
   #994 finding.)
-- **A dedicated SolverNet for minted tasks** — rejected; forks the evaluator, claim
-  eligibility, and distillation surfaces for no benefit (§4.1). This also answers
-  #994's (a)-vs-(b): **(b) augment `swe-rebench-v2`**.
+- **A dedicated SolverNet for SWE-rebench-compatible minted tasks** — rejected;
+  forks the evaluator, claim eligibility, and distillation surfaces for no benefit
+  (§4.1). This answers #994's (a)-vs-(b): **(b) augment `swe-rebench-v2`**. D6 does
+  not reverse this decision: only work that cannot satisfy the Rebench Task/Solution
+  contract uses `session-derived.v2` in the existing contract family.
 
 ## 7. Integrity guards
 
@@ -437,6 +475,12 @@ genuinely less than going fully public (full history + attribution), which is wh
 can be made safe. Until then, the honest position is: if the repo is public, launch
 freely; if it is private, we do not yet have the controls to let you launch safely.
 
+**D6 extension for non-repository Tasks.** The equivalent rule is that every public
+input and environment layer must already be public or carry explicit redistribution
+rights. This permits the unlicensed ALE compatibility pilot without weakening D5:
+private workspace state, proprietary inputs, and licensed software remain
+non-postable until their separate disclosure controls exist.
+
 ## 11. Held-out hygiene — the repo-keyed extension
 
 The exclusion rule is layered today: the train stream excludes by `instance_id`
@@ -484,6 +528,10 @@ design itself is its own session.
 6. **Public-repo gate enforced (D5).** Publication refuses any task whose source repo
    is not public, with a test proving a private-repo candidate is blocked at the
    publish step (local mining of that candidate is still allowed under D2 tier-1).
+7. **Generalized boundary specified (D6).** The companion design defines the public
+   Task Capsule, evaluator-only bundle, portable Solution projection, admission
+   receipt, task-family adapter, and provider lifecycle without changing the shipped
+   Rebench semantics.
 
 ## 14. Decisions locked in this session
 
@@ -493,7 +541,8 @@ design itself is its own session.
 | **D2** | Mineable-trace consent tier vs. scrub posture (§10) | **Explicit opt-in consent tier**, split: (1) retain locally for mining, (2) publish/admit as a task. Default capture stays scrubbed/non-mineable. Envelope-shape implementation details deferred to rung-0 build. |
 | **D3** | Discrimination failure: flag or hard-reject (§5.1) | **Hard-reject all newly minted instances** when known-bad passes. **Flag + exclude from distillation/targeting** for the existing benchmark pool initially; re-publish a stricter vetted-pool artifact once impact is measured. |
 | **D4** | Commit-echo before hunk-subset echo (§5 ordering) | **Yes — commit-echo first** as plumbing proof (minted-row store, IPFS route, admission, generator union). Treat as yield validation, not final learning substrate (lookup contamination). Hunk-subset echo next once blinded provenance + dogfood traces are ready. |
-| **D5** | Public vs. private repos for task publication (§10.1) | **v0 publishes public-repo tasks only.** Corpus participation and task-launching are independent — mining runs locally with nothing entering the corpus, and the gold patch is never published. Local mining still runs on private data (D2 tier-1) but its candidates are non-postable in v0. Private-repo publication deferred to a follow-on that solves code-payload disclosure (scrub covers trace text, not built images). |
+| **D5** | Public vs. private inputs for task publication (§10.1) | **v0 coding Tasks publish public repos only; D6 generalized Tasks require every disclosed input/environment layer to be public or explicitly redistributable.** Corpus participation and task-launching are independent — mining runs locally with nothing entering the corpus, and the gold result is never published. Local mining still runs on private data (D2 tier-1) but its candidates are non-postable. Private-work publication is deferred to a follow-on that solves payload disclosure (scrub covers trace text, not code images or arbitrary artifacts). |
+| **D6** | Where ALE-style task/environment/evaluator infrastructure enters the Task Creator | **At a domain-neutral Task Capsule boundary between mining and admission.** The existing Rebench path remains the coding adapter. Provider/runtime contracts and a portable artifact Solution land before rung 4; rung 4 becomes automatic environment synthesis. `session-derived.v2` in the existing contract family carries generalized capsule-backed work without mutating v1. |
 
 ## 15. References
 
@@ -513,3 +562,8 @@ design itself is its own session.
   §5.3/§5.4, dataset rejected per §6); R2E-Gym (backtranslation); REPOLAUNCH
   (agentic env construction); LiveCodeBench (recency-based contamination
   resistance).
+- `docs/superpowers/specs/2026-07-10-task-creator-generalized-task-capsules-design.md`
+  — D6 contract, ALE adapter mapping, admission policy, and automation roadmap.
+- Agents' Last Exam — https://github.com/rdi-berkeley/agents-last-exam (Apache-2.0
+  framework; task data/content CC-BY-4.0), inspected for D6 at commit
+  `186691830cd6906a405cb997b39bc5f5ca82e2a4`.
