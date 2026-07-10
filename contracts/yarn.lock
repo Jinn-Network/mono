@@ -676,20 +676,20 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@nomicfoundation/hardhat-ignition@npm:^3.1.7":
-  version: 3.1.7
-  resolution: "@nomicfoundation/hardhat-ignition@npm:3.1.7"
+"@nomicfoundation/hardhat-ignition@npm:^3.1.8":
+  version: 3.1.8
+  resolution: "@nomicfoundation/hardhat-ignition@npm:3.1.8"
   dependencies:
-    "@nomicfoundation/hardhat-errors": "npm:^3.0.15"
-    "@nomicfoundation/hardhat-utils": "npm:^4.1.2"
-    "@nomicfoundation/ignition-core": "npm:^3.1.7"
+    "@nomicfoundation/hardhat-errors": "npm:^3.0.16"
+    "@nomicfoundation/hardhat-utils": "npm:^4.1.4"
+    "@nomicfoundation/ignition-core": "npm:^3.1.8"
     "@nomicfoundation/ignition-ui": "npm:^3.1.2"
     json5: "npm:^2.2.3"
     prompts: "npm:^2.4.2"
   peerDependencies:
     "@nomicfoundation/hardhat-verify": ^3.0.0
     hardhat: ^3.8.0
-  checksum: 10c0/5084ea84ccbb70775f2c2db9a6ab362dfff5e053fbd52d02918d705a9377fe00fa705061e0078d49fe4ccdb0ba7c2d288187a88536cc49238b44869ef52afc31
+  checksum: 10c0/611a302be4e4ce484f4251bf86ce425e05dd6d573823bdf2c319ff847427d92ff99970c82275faed6c4ff98644ba78b8e84373f572db4d1f6dd23698568db945
   languageName: node
   linkType: hard
 
@@ -2157,7 +2157,7 @@ __metadata:
     "@gnosis.pm/safe-contracts": "npm:^1.3.0"
     "@nomicfoundation/hardhat-ethers": "npm:^4.0.13"
     "@nomicfoundation/hardhat-ethers-chai-matchers": "npm:^3.0.10"
-    "@nomicfoundation/hardhat-ignition": "npm:^3.1.7"
+    "@nomicfoundation/hardhat-ignition": "npm:^3.1.8"
     "@nomicfoundation/hardhat-ignition-ethers": "npm:^3.1.6"
     "@nomicfoundation/hardhat-keystore": "npm:^3.0.12"
     "@nomicfoundation/hardhat-mocha": "npm:^3.0.21"
