@@ -76,7 +76,6 @@ export function tallyPilot(
   }
 
   const comparisons: Record<string, PilotComparisonReport> = {};
-  const baselineRate = arms[baselineArm]?.resolveRate ?? 0;
   for (const treatmentArm of armOrder.filter((arm) => arm !== baselineArm)) {
     const rates: TaskRates[] = [];
     const costDiffs: number[] = [];
@@ -108,9 +107,14 @@ export function tallyPilot(
       }
     }
 
-    const treatmentRate = arms[treatmentArm]?.resolveRate ?? 0;
+    // All comparison figures come from the PAIRED task subset (tasks graded in
+    // both arms). Pooled per-arm rates over every graded outcome live in `arms`
+    // for display; mixing them in here lets asymmetric ungradeables shift the
+    // deltas independently of the paired lowerBound.
+    const pairedBaselineRate = rates.length ? rates.reduce((s, r) => s + r.pA, 0) / rates.length : 0;
+    const pairedTreatmentRate = rates.length ? rates.reduce((s, r) => s + r.pB, 0) / rates.length : 0;
     const ni = rates.length
-      ? nonInferiorityVerdict(rates, { rng: opts.rng, stockBaseRate: Math.max(baselineRate, 1e-9) })
+      ? nonInferiorityVerdict(rates, { rng: opts.rng, stockBaseRate: Math.max(pairedBaselineRate, 1e-9) })
       : { pass: false, lowerBound: NaN, relativeRegression: NaN, reasons: ['no gradeable pairs'] } as ReturnType<typeof nonInferiorityVerdict>;
     const cost = pairedCostVerdict(costDiffs, { minN: 1 });
 
@@ -122,7 +126,7 @@ export function tallyPilot(
       quality: {
         lowerBound: ni.lowerBound,
         nonInferior: ni.pass,
-        deltaPP: 100 * (treatmentRate - baselineRate),
+        deltaPP: 100 * (pairedTreatmentRate - pairedBaselineRate),
       },
       cost: {
         verdict: cost.verdict,

@@ -39,6 +39,26 @@ describe('pilot tally', () => {
     expect(rep.comparisons.mini.cost.n).toBe(3);
     expect(rep.comparisons.mini.cost.underpowered).toBe(true);
   });
+  it('computes comparison deltas from the paired task subset, not pooled per-arm rates', () => {
+    const out: SolveOutcome[] = [];
+    // 3 paired tasks: stock and mini each pass exactly the same one → paired Δ = 0.
+    for (let i = 0; i < 3; i++) {
+      out.push({ instance_id: `p${i}`, arm: 'stock', repeat: 0, passed: i === 0, costUsd: 0.03 });
+      out.push({ instance_id: `p${i}`, arm: 'mini', repeat: 0, passed: i === 0, costUsd: 0.02 });
+    }
+    // 2 extra tasks gradeable ONLY in mini (stock ungradeable), both passing:
+    // pooled rates diverge (mini 3/5 vs stock 1/3) but the paired subset is unchanged.
+    for (let i = 0; i < 2; i++) {
+      out.push({ instance_id: `x${i}`, arm: 'stock', repeat: 0, passed: null, costUsd: 0 });
+      out.push({ instance_id: `x${i}`, arm: 'mini', repeat: 0, passed: true, costUsd: 0.02 });
+    }
+    const rep = tallyPilot(out, { rng: lcg(7), baselineArm: 'stock' });
+    expect(rep.comparisons.mini.excluded).toBe(2);
+    expect(rep.comparisons.mini.quality.deltaPP).toBeCloseTo(0, 5);
+    // Pooled per-arm rates stay available for display and must still differ.
+    expect(rep.arms.mini.resolveRate).toBeCloseTo(0.6, 5);
+    expect(rep.arms.stock.resolveRate).toBeCloseTo(1 / 3, 5);
+  });
   it('excludes a task with a fully-ungradeable arm; keeps a partially-null but still-scorable task', () => {
     const o = mk(4);
     // t0: arm B fully ungradeable → the whole task is excluded (out of n, counted in excluded)
