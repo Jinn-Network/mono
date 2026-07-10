@@ -154,3 +154,16 @@ def test_handlers_never_call_blocking_input(monkeypatch):
 
 def test_jinn_help_mentions_the_distill_family():
     assert "/jinn distill" in jinn._JINN_HELP
+
+
+def test_status_reads_are_scoped_to_the_native_skills_dir():
+    # The plugin installs into $HERMES_HOME/skills — status must count
+    # coverage/staged/installed against THAT dir, not the layer default,
+    # or the hub shows stale numbers after a run (e2e finding).
+    runner = LayerRunner(make_status())
+    jinn._runner = runner
+    _distill()
+    status_calls = [c for c in runner.calls if c[1:3] == ["distill", "status"]]
+    assert status_calls, "hub reads status"
+    for call in status_calls:
+        assert "--out" in call, f"status call missing --out: {call}"

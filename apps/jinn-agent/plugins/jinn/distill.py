@@ -81,9 +81,17 @@ def episodes_dir() -> Path:
 
 
 def distill_status(runner: Optional[Runner] = None) -> Optional[Dict[str, Any]]:
-    """One `distill status --json` read; None when the layer lacks the verb."""
+    """One `distill status --json` read; None when the layer lacks the verb.
+
+    Scoped with `--out` to the harness's native skills dir — the plugin
+    installs there, so coverage/staged/installed must count against it, not
+    the layer's default dir (otherwise the hub shows stale numbers after a
+    run — e2e finding).
+    """
     try:
-        code, out = jinn_layer.run(["distill", "status", "--json"], runner)
+        code, out = jinn_layer.run(
+            ["distill", "status", "--json", "--out", str(skills_install.skills_dir())], runner
+        )
     except Exception:
         return None
     if code != 0:
