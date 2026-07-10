@@ -31,6 +31,7 @@ from typing import Any, Dict, Optional, Set
 
 from . import capture_buffer as buf
 from . import consent
+from . import distill
 from . import jinn_layer
 from . import ledger_view
 from . import onboarding
@@ -116,8 +117,10 @@ def _on_pre_llm_call(
     # Contribution side — consent-gated. Not gated on is_first_turn: the buffer
     # is keyed per session and record_first_turn is setdefault-idempotent, so
     # calling it every turn recovers the summary/model even when the first-turn
-    # signal is unreliable on some provider paths (mono #1404).
-    if consent.capture_enabled():
+    # signal is unreliable on some provider paths (mono #1404). A distill
+    # opt-in (mode local/defer, mono #1537) also fills the buffer — but the
+    # publish path stays gated on publish consent alone (see _on_session_end).
+    if consent.capture_enabled() or distill.distill_capture_enabled(_runner):
         buf.record_first_turn(task_id, session_id, user_message, model, platform)
     # Consumption side — NEVER consent-gated: payload-agnostic corpus pickup.
     # Returns {"context": ...} (injected into the user message, cache-safe)
@@ -137,7 +140,7 @@ def _on_post_tool_call(
     duration_ms: Optional[int] = None,
     **_: Any,
 ) -> None:
-    if not consent.capture_enabled():
+    if not (consent.capture_enabled() or distill.distill_capture_enabled(_runner)):
         return
     buf.record_tool_call(task_id, session_id, tool_name, tool_call_id, args, result, duration_ms)
 
@@ -149,10 +152,23 @@ def _on_session_end(
     interrupted: bool = False,
     **_: Any,
 ) -> None:
-    if not consent.capture_enabled():
+    publish_enabled = consent.capture_enabled()
+    if not (publish_enabled or distill.distill_capture_enabled(_runner)):
         return
     task = buf.assemble(task_id, session_id, completed, interrupted)
     if task is None:
+        return
+
+    # Tee for local distillation (mono #1537) — BEFORE the veto/publish
+    # branching, so held, vetoed and published tasks all reserve a local
+    # capture (a veto withholds from the NETWORK; local distillation never
+    # leaves this machine). Distinct dir + lifecycle from the pending file:
+    # the publish drain unlinks pending files, never captures.
+    distill.tee_capture(task, session_id or task_id, runner=_runner)
+
+    # Everything below is the PUBLISH lifecycle — gated on publish consent
+    # alone. A distill-only opt-in must never cause a publish.
+    if not publish_enabled:
         return
 
     task_file = jinn_layer.write_task_file(task, _pending_dir(), session_id or task_id)
