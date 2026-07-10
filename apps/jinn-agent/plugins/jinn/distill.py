@@ -584,8 +584,11 @@ def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
             return "nothing to distill yet — captures accrue as you work; check back after a few tasks"
         model = status.get("distillModel", "")
         if parts[1:2] == ["confirm"]:
-            if status.get("mode") == "unset":
-                # First run: record the mode the same way the CLI flag does.
+            if status.get("mode") != "local":
+                # `unset` and `defer` both mean "no standing local consent" —
+                # and this explicit two-step start IS that consent. Record it
+                # the same way the CLI flag does, or the spawned run would
+                # read the persisted mode and silently run nothing.
                 code, out = jinn_layer.run(["distill", "--where", "local", "--json"], runner)
                 if code != 0:
                     return out.strip() or UPDATE_LAYER_LINE

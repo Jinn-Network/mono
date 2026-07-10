@@ -264,3 +264,16 @@ def test_start_while_running_is_refused(monkeypatch):
 def test_stop_without_a_run_says_so():
     out = _cmd("stop", LayerRunner())
     assert "no distillation" in out.lower() or "not running" in out.lower()
+
+
+def test_start_confirm_upgrades_defer_to_local_and_spawns(monkeypatch):
+    # `defer` means "hold captures, run nothing AMBIENTLY" — an explicit
+    # two-step start IS the operator choosing local; record it and run.
+    runner = LayerRunner(make_status(mode="defer", uncoveredCount=2))
+    started: list[dict] = []
+    monkeypatch.setattr(distill, "start_run", lambda **kw: (started.append(kw) or (True, "started")))
+    out = _cmd("start confirm", runner)
+    where_calls = [c for c in runner.calls if "--where" in c]
+    assert where_calls and "local" in where_calls[0]
+    assert started
+    assert "started" in out.lower()
