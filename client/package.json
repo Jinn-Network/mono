@@ -20,8 +20,8 @@
   "bin": {
     "client": "./dist/bin/jinn.js",
     "jinn": "./dist/bin/jinn.js",
-    "jinn-layer": "./dist/bin/jinn-layer.js",
     "jinn-distil-mcp": "./dist/bin/jinn-distil-mcp.js",
+    "jinn-layer": "./dist/bin/jinn-layer.js",
     "jinn-stop-hook": "./dist/bin/jinn-stop-hook.js"
   },
   "main": "./dist/index.js",
