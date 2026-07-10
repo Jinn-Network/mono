@@ -88,6 +88,11 @@ import {
 } from './distill-render.js';
 import type { AttemptRef, BridgeEvidence } from './bridge.js';
 import type { DistillCluster, DistillLLMOutput, MetaDistillLLMOutput } from './distill.js';
+import {
+  createNdjsonProgressEmitter,
+  newRunId,
+  type ProgressStream,
+} from './distill-progress.js';
 import type { MetaCluster } from './cluster.js';
 import { DEFAULT_TESTNET_DISCOVERY_URL } from '../../../src/config.js';
 import {
@@ -154,6 +159,7 @@ Commands:
   distill [--where local|defer|off] [--install all|<name>|none] [--resume]
          [--captures <dir>] [--limit N] [--out <dir>]
          [--distiller claude|codex] [--distiller-model <model>] [--json]
+         [--progress ndjson]
                                                  Rung-1 own-captures loop: distill YOUR recent local
                                                  captures into skills, fully local (no corpus publish,
                                                  no chain anchor). A heavy local pass, so you control
@@ -183,6 +189,12 @@ Commands:
                                                  --distiller-model is the arbitrage knob: it is the
                                                  model that WRITES the skills, distinct from the
                                                  cheap runtime model your captures ran under.
+                                                 --progress ndjson streams machine-readable run
+                                                 events (run_start/cluster_*/heartbeat/run_end,
+                                                 one JSON object per line, stamped v/ts/runId) on
+                                                 stderr for wrappers; run_end is always emitted.
+                                                 Non-interactive use only — stdout --json is
+                                                 unaffected; ignore stderr lines without a v field.
   distill eval-prep [--limit N] [--out <dir>] [--json] [--meta] [--select-only]
                     [--group-cap N] [--concurrency N] [--force] [--retry-errors]
                     [--models gpt-5.4-mini,gpt-5.5]
@@ -290,6 +302,11 @@ export interface DistillCliDeps {
    * default is a readline prompt (see {@link readlineInstallPrompt}).
    */
   promptInstall?: (skillNames: string[]) => Promise<InstallChoice>;
+  /**
+   * Where `--progress ndjson` events are written (#1533). Default:
+   * `process.stderr` — stdout stays reserved for the `--json` result.
+   */
+  progressStream?: ProgressStream;
 }
 
 /** The install-review choice: everything, just the first, or none (stage only). */
@@ -742,6 +759,7 @@ export async function runJinnLayerCli(
         where: { type: 'string' },
         resume: { type: 'boolean', default: false },
         install: { type: 'string' },
+        progress: { type: 'string' },
         models: { type: 'string' },
         'max-clusters': { type: 'string' },
         'max-contrastive': { type: 'string' },
@@ -844,6 +862,22 @@ export async function runJinnLayerCli(
     const dd = opts.distillDeps ?? {};
     const json = parsed.values.json as boolean;
 
+    // --progress ndjson (#1533): machine-readable run events on stderr, so a
+    // wrapper (the harness background runner) can show progress ambiently.
+    // stdout stays reserved for the --json result. `run_end` is emitted on
+    // every terminal branch — a watcher treats it as the end-of-run signal.
+    const progressFlag = parsed.values.progress as string | undefined;
+    if (progressFlag !== undefined && progressFlag !== 'ndjson') {
+      writer.write(`error: --progress must be "ndjson" (got ${JSON.stringify(progressFlag)})\n\n${USAGE}`);
+      return 2;
+    }
+    const progress =
+      progressFlag === 'ndjson'
+        ? createNdjsonProgressEmitter(dd.progressStream ?? process.stderr, newRunId())
+        : undefined;
+    const endedEmpty = () =>
+      progress?.runEnd({ outcome: 'empty', clusterCount: 0, published: [], rejectedCount: 0, errorCount: 0, installed: [] });
+
     // Distiller provider + model — the arbitrage knob. The model resolved here
     // WRITES the skills; it is deliberately distinct from the cheap runtime
     // model each capture ran under (`environment.model`), which `distill` never
@@ -896,6 +930,7 @@ export async function runJinnLayerCli(
       } else {
         writer.write(renderEmpty({ capturesDir }) + '\n');
       }
+      endedEmpty();
       return 0;
     }
 
@@ -927,12 +962,16 @@ export async function runJinnLayerCli(
           writer.write(renderConsentDisclosure({ captureCount: captures.length, distillModel }) + '\n\n');
           writer.write(renderDeferredRun({ captureCount: captures.length, capturesDir }) + '\n');
         }
+        endedEmpty();
         return 0;
       }
       const chosen = await prompt();
       writeDistillMode(chosen, modePath);
       writer.write(renderRecorded(chosen, { captureCount: captures.length }) + '\n');
-      if (chosen !== 'local') return 0;
+      if (chosen !== 'local') {
+        endedEmpty();
+        return 0;
+      }
       acting = 'local';
     } else {
       acting = mode;
@@ -941,11 +980,13 @@ export async function runJinnLayerCli(
     if (acting === 'off') {
       if (json) writer.write(JSON.stringify({ mode: 'off', ran: false, capturesConsidered: captures.length }) + '\n');
       else writer.write(renderRecorded('off', { captureCount: captures.length }) + '\n');
+      endedEmpty();
       return 0;
     }
     if (acting === 'defer') {
       if (json) writer.write(JSON.stringify({ mode: 'defer', ran: false, capturesConsidered: captures.length }) + '\n');
       else writer.write(renderDeferredRun({ captureCount: captures.length, capturesDir }) + '\n');
+      endedEmpty();
       return 0;
     }
 
@@ -968,9 +1009,31 @@ export async function runJinnLayerCli(
       if (toDistill.length === 0) {
         if (json) writer.write(JSON.stringify({ mode: 'local', ran: false, resume: true, capturesConsidered: captures.length }) + '\n');
         else writer.write(renderResumeNothing({ captureCount: captures.length }) + '\n');
+        endedEmpty();
         return 0;
       }
     }
+
+    const summaryBySession = new Map(toDistill.map((c) => [c.session.sessionId, c.task.summary]));
+
+    // Progress wiring (#1533): map each cluster back to the source capture's
+    // task summary — the label the operator recognises in an ambient tick.
+    const labelByCluster = new Map<string, string>();
+    const labelFor = (refs: string[]): string | undefined => {
+      const sessionId = refs[0]?.replace(/^local-capture:/, '');
+      const summary = sessionId === undefined ? undefined : summaryBySession.get(sessionId);
+      return summary === undefined ? undefined : summary.length > 80 ? summary.slice(0, 79) + '…' : summary;
+    };
+    progress?.runStart({
+      capturesConsidered: captures.length,
+      toDistill: toDistill.length,
+      resume,
+      distillProvider,
+      distillModel,
+      capturesDir,
+      stagingDir,
+      activeDir,
+    });
 
     // Distill to STAGING — nothing is installed yet.
     const distiller = createLocalDistiller({
@@ -979,10 +1042,46 @@ export async function runJinnLayerCli(
       distribution: 'coding',
       distillModel,
       ...(dd.slateInstanceIds ? { slate: { instanceIds: dd.slateInstanceIds } } : {}),
+      ...(progress
+        ? {
+            onPlan: (plan) => {
+              for (const p of plan) {
+                const label = labelFor(p.refs);
+                if (label !== undefined) labelByCluster.set(p.clusterId, label);
+              }
+              progress.clusterPlan({
+                clusterCount: plan.length,
+                clusters: plan.map((p) => ({
+                  clusterId: p.clusterId,
+                  index: p.index,
+                  captureCount: p.captureCount,
+                  ...(labelByCluster.has(p.clusterId) ? { label: labelByCluster.get(p.clusterId) } : {}),
+                })),
+              });
+            },
+            onCluster: (ev) => {
+              const label = labelByCluster.get(ev.clusterId);
+              if (ev.phase === 'start') {
+                progress.clusterStart({ clusterId: ev.clusterId, index: ev.index, total: ev.total, ...(label !== undefined ? { label } : {}) });
+              } else {
+                progress.clusterEnd({
+                  clusterId: ev.clusterId,
+                  index: ev.index,
+                  total: ev.total,
+                  outcome: ev.outcome ?? 'error',
+                  ...(label !== undefined ? { label } : {}),
+                  ...(ev.skillName !== undefined ? { skillName: ev.skillName } : {}),
+                  ...(ev.reason !== undefined ? { reason: ev.reason } : {}),
+                  ...(ev.error !== undefined ? { error: ev.error } : {}),
+                  ...(ev.durationMs !== undefined ? { durationMs: ev.durationMs } : {}),
+                });
+              }
+            },
+          }
+        : {}),
     });
     const result = await distiller.distill(toDistill);
     const published = result.distilled.published;
-    const summaryBySession = new Map(toDistill.map((c) => [c.session.sessionId, c.task.summary]));
 
     // 1d — a run failed mid-way: staged skills are kept, point at --resume. No
     // install is offered on a partial run.
@@ -992,6 +1091,15 @@ export async function runJinnLayerCli(
       } else {
         writer.write(renderFailure({ distillModel, distilledCount: published.length, errors: result.distilled.errors }) + '\n');
       }
+      progress?.runEnd({
+        outcome: 'partial',
+        clusterCount: result.clusterCount,
+        published: published.map((p) => p.pkg.name),
+        rejectedCount: result.distilled.rejected.length,
+        errorCount: result.distilled.errors.length,
+        installed: [],
+        stagingDir,
+      });
       return 1;
     }
 
@@ -1067,6 +1175,15 @@ export async function runJinnLayerCli(
       }));
       writer.write(renderRunSummary({ distillModel, captureCount: toDistill.length, skills }) + '\n');
     }
+    progress?.runEnd({
+      outcome: 'ok',
+      clusterCount: result.clusterCount,
+      published: publishedNames,
+      rejectedCount: result.distilled.rejected.length,
+      errorCount: 0,
+      installed: [...installNames],
+      stagingDir,
+    });
     return 0;
   }
 

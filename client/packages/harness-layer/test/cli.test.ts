@@ -2182,6 +2182,133 @@ describe('jinn-layer distill — staged install choice (#1490)', () => {
   });
 });
 
+describe('jinn-layer distill --progress ndjson (#1533)', () => {
+  beforeEach(() => {
+    const modePath = tmpModeFile();
+    writeDistillMode('local', modePath);
+    process.env['JINN_LAYER_DISTILL_MODE_PATH'] = modePath;
+  });
+  afterEach(() => {
+    delete process.env['JINN_LAYER_DISTILL_MODE_PATH'];
+  });
+
+  function progressSink(): { stream: { write: (s: string) => boolean }; events: () => Array<Record<string, unknown>> } {
+    const chunks: string[] = [];
+    return {
+      stream: { write: (s: string) => (chunks.push(s), true) },
+      events: () =>
+        chunks
+          .join('')
+          .split('\n')
+          .filter((l) => l.trim() !== '')
+          .map((l) => JSON.parse(l) as Record<string, unknown>),
+    };
+  }
+
+  it('emits the full event sequence on stderr-side stream while --json stdout stays a single result object', async () => {
+    const { writer, out } = capture();
+    const { stream, events } = progressSink();
+    const code = await runJinnLayerCli(
+      ['distill', '--captures', capturesDirWith(ownCapture()), '--out', mkdtempSync(join(tmpdir(), 'jinn-distill-out-')), '--install', 'none', '--progress', 'ndjson', '--json'],
+      { writer, distillDeps: stubDistillDeps({ progressStream: stream }) },
+    );
+    expect(code).toBe(0);
+
+    // stdout: exactly one JSON object, the unchanged result shape.
+    const result = JSON.parse(out());
+    expect(result.distilled.published).toHaveLength(1);
+
+    // progress stream: stamped, ordered events bracketing the run.
+    const evs = events();
+    const names = evs.map((e) => e['event']);
+    expect(names[0]).toBe('run_start');
+    expect(names).toContain('cluster_plan');
+    expect(names).toContain('cluster_start');
+    expect(names).toContain('cluster_end');
+    expect(names.at(-1)).toBe('run_end');
+    for (const ev of evs) {
+      expect(ev['v']).toBe(1);
+      expect(typeof ev['runId']).toBe('string');
+    }
+
+    const runStart = evs.find((e) => e['event'] === 'run_start')!;
+    expect(runStart['toDistill']).toBe(1);
+    expect(runStart['distillModel']).toBeDefined();
+
+    // The cluster label is the source capture's task summary (what the operator recognises).
+    const clusterStart = evs.find((e) => e['event'] === 'cluster_start')!;
+    expect(clusterStart['label']).toBe(ownCapture().task.summary);
+
+    const clusterEnd = evs.find((e) => e['event'] === 'cluster_end')!;
+    expect(clusterEnd['outcome']).toBe('published');
+    expect(typeof clusterEnd['skillName']).toBe('string');
+
+    const runEnd = evs.at(-1)!;
+    expect(runEnd['outcome']).toBe('ok');
+    expect(runEnd['published']).toEqual(result.distilled.published.map((p: { pkg: { name: string } }) => p.pkg.name));
+    expect(runEnd['installed']).toEqual([]);
+  });
+
+  it('emits run_end outcome=empty when there is nothing to distill', async () => {
+    const { writer } = capture();
+    const { stream, events } = progressSink();
+    const emptyDir = mkdtempSync(join(tmpdir(), 'jinn-captures-empty-'));
+    const code = await runJinnLayerCli(
+      ['distill', '--captures', emptyDir, '--progress', 'ndjson', '--json'],
+      { writer, distillDeps: stubDistillDeps({ progressStream: stream }) },
+    );
+    expect(code).toBe(0);
+    const evs = events();
+    expect(evs.at(-1)?.['event']).toBe('run_end');
+    expect(evs.at(-1)?.['outcome']).toBe('empty');
+  });
+
+  it('emits cluster_end outcome=error and run_end outcome=partial on a failed run (exit 1)', async () => {
+    const { writer } = capture();
+    const { stream, events } = progressSink();
+    const code = await runJinnLayerCli(
+      ['distill', '--captures', capturesDirWith(ownCapture()), '--out', mkdtempSync(join(tmpdir(), 'jinn-distill-out-')), '--progress', 'ndjson', '--json'],
+      {
+        writer,
+        distillDeps: {
+          distill: async () => { throw new Error('the distiller stopped responding'); },
+          progressStream: stream,
+        },
+      },
+    );
+    expect(code).toBe(1);
+    const evs = events();
+    const clusterEnd = evs.find((e) => e['event'] === 'cluster_end')!;
+    expect(clusterEnd['outcome']).toBe('error');
+    expect(clusterEnd['error']).toMatch(/stopped responding/);
+    const runEnd = evs.at(-1)!;
+    expect(runEnd['event']).toBe('run_end');
+    expect(runEnd['outcome']).toBe('partial');
+    expect(runEnd['errorCount']).toBe(1);
+  });
+
+  it('writes nothing to the progress stream without --progress', async () => {
+    const { writer } = capture();
+    const { stream, events } = progressSink();
+    const code = await runJinnLayerCli(
+      ['distill', '--captures', capturesDirWith(ownCapture()), '--out', mkdtempSync(join(tmpdir(), 'jinn-distill-out-')), '--install', 'none', '--json'],
+      { writer, distillDeps: stubDistillDeps({ progressStream: stream }) },
+    );
+    expect(code).toBe(0);
+    expect(events()).toHaveLength(0);
+  });
+
+  it('rejects an unknown --progress format with exit 2', async () => {
+    const { writer, out } = capture();
+    const code = await runJinnLayerCli(
+      ['distill', '--captures', capturesDirWith(ownCapture()), '--progress', 'xml'],
+      { writer, distillDeps: stubDistillDeps() },
+    );
+    expect(code).toBe(2);
+    expect(out()).toMatch(/--progress/);
+  });
+});
+
 describe('ledger', () => {
   function fixtureFile(): string {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-ledger-'));
