@@ -33,6 +33,7 @@ describe('run-pilot durable dry-run resume', () => {
       '--dry-run',
       '--out', outDir,
       '--arms-file', armsFile,
+      '--skills-nudge',
       '--max-new-solves', '0',
     ]);
 
@@ -43,8 +44,10 @@ describe('run-pilot durable dry-run resume', () => {
         instances: Array<{ instance_id: string; hf_dataset: string }>;
         taskSource?: string;
         slateHash?: string;
+        skillsNudge?: boolean;
       };
     };
+    expect(manifest.semanticConfig.skillsNudge).toBe(true);
     expect(manifest.semanticConfig.instances).toHaveLength(24);
     expect(manifest.semanticConfig.instances.every((ref) => ref.hf_dataset === 'nebius/SWE-rebench-leaderboard')).toBe(true);
     expect(manifest.semanticConfig.instances.some((ref) => ref.instance_id === 'pilosus__pip-license-checker-119')).toBe(false);

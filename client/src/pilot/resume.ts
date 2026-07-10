@@ -33,6 +33,11 @@ export interface PilotSemanticConfig {
    *  report. Absent (legacy manifests) normalizes to 'real', so a dry run
    *  against a pre-mode store fails closed. */
   mode?: 'dry-run' | 'real';
+  /** Whether every arm's solve prompt carries the neutral "check your
+   *  available skills" line. Semantic: it changes solve behavior, so nudged
+   *  and un-nudged attempts must not share a store. Absent (legacy
+   *  manifests) normalizes to false. */
+  skillsNudge?: boolean;
   provider?: string;
   model?: string;
   taskSource?: string;
@@ -146,6 +151,7 @@ export function normalizePilotSemanticConfig(config: PilotSemanticConfig | Legac
     maxTurns: raw.maxTurns,
     gradeTimeoutMs: raw.gradeTimeoutMs,
     mode: raw.mode ?? 'real',
+    skillsNudge: raw.skillsNudge ?? false,
     ...(raw.provider ? { provider: raw.provider } : {}),
     ...(raw.model ? { model: raw.model } : {}),
     ...(raw.taskSource ? { taskSource: raw.taskSource } : {}),
@@ -191,7 +197,7 @@ export function assertCompatiblePilotManifest(manifest: PilotManifest, requested
       `(e.g. ${missing[0]!.instance_id}); instances may only be added, not removed or changed — pass --force to rebuild`,
     );
   }
-  const keys = ['repeats', 'arms', 'maxTurns', 'gradeTimeoutMs', 'mode', 'provider', 'model', 'taskSource', 'slateHash'] as const;
+  const keys = ['repeats', 'arms', 'maxTurns', 'gradeTimeoutMs', 'mode', 'skillsNudge', 'provider', 'model', 'taskSource', 'slateHash'] as const;
   for (const key of keys) {
     const frozenValue = comparableSemanticValue(frozen, key);
     const requestedValue = comparableSemanticValue(normalizedRequested, key);

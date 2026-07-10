@@ -220,6 +220,21 @@ describe('pilot resume durability', () => {
     }))).toThrow(/instances may only be added/i);
   });
 
+  it('separates nudged and un-nudged stores; legacy manifests normalize to skillsNudge=false', () => {
+    const nudged = buildPilotManifest(cfg({ skillsNudge: true }), { generatedAt: '2026-07-10T00:00:00.000Z' });
+    expect(() => assertCompatiblePilotManifest(nudged, cfg({ skillsNudge: true }))).not.toThrow();
+    expect(() => assertCompatiblePilotManifest(nudged, cfg({ skillsNudge: false })))
+      .toThrow(/different frozen pilot config for skillsNudge/i);
+
+    // Pre-nudge manifests (no field) are un-nudged stores: an un-nudged resume
+    // is compatible, a nudged one fails closed.
+    const legacy = buildPilotManifest(cfg(), { generatedAt: '2026-07-10T00:00:00.000Z' });
+    delete (legacy.semanticConfig as { skillsNudge?: boolean }).skillsNudge;
+    expect(() => assertCompatiblePilotManifest(legacy, cfg({ skillsNudge: false }))).not.toThrow();
+    expect(() => assertCompatiblePilotManifest(legacy, cfg({ skillsNudge: true })))
+      .toThrow(/different frozen pilot config for skillsNudge/i);
+  });
+
   it('treats a legacy manifest without a mode field as a real-mode store', () => {
     // Pre-mode-marker manifests were only ever meant for real runs; a dry run
     // against one must fail closed rather than pollute it with fake records.

@@ -109,6 +109,11 @@ export interface PilotConfig {
    *  frozen semantic config). Grading is always strictly serial regardless —
    *  see the pipeline note in runDurableReal. Default 1. */
   solveConcurrency: number;
+  /** Append the neutral "check your available skills" line to every arm's
+   *  prompt. Skills are lazy (manifest entry + skill_view) — without this the
+   *  eval measures the model's skill-browsing propensity, not the knowledge.
+   *  Identical text in all arms; semantic (recorded in the manifest). */
+  skillsNudge: boolean;
   dryRun: boolean;
 }
 
@@ -157,6 +162,7 @@ function parseArgs(argv: string[]): PilotConfig {
     retryErrors: false,
     maxNewSolves: Infinity,
     solveConcurrency: 1,
+    skillsNudge: false,
     dryRun: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -183,6 +189,7 @@ function parseArgs(argv: string[]): PilotConfig {
       case '--max-new-solves': cfg.maxNewSolves = Number(argv[++i]); break;
       case '--grade-timeout-ms': cfg.gradeTimeoutMs = Number(argv[++i]); break;
       case '--solve-concurrency': cfg.solveConcurrency = Math.max(1, Number(argv[++i]) || 1); break;
+      case '--skills-nudge': cfg.skillsNudge = true; break;
       case '--instances': {
         // JSON array of {instance_id, hf_dataset, hf_split}
         cfg.instances = JSON.parse(String(argv[++i])) as PilotInstanceRef[];
@@ -278,18 +285,25 @@ function compactProcessOutput(value: string, limit = 4000): string {
 // One solve: spawn jinn-agent, recover patch + tokens
 // ---------------------------------------------------------------------------
 
-function buildPrompt(instance: PilotInstance): string {
+function buildPrompt(instance: PilotInstance, skillsNudge: boolean): string {
   // The `interface` field is the acceptance SPEC (the API contract the solution
   // must satisfy) — NOT the hidden test. Fed to both arms when present, it removes
   // "correct behavior, wrong surface detail" failures (e.g. header casing).
   const spec = instance.interface && instance.interface.trim()
     ? `\n\n## Required interface (the contract your fix must satisfy)\n${instance.interface.trim()}`
     : '';
+  // Identical in every arm — arms differ only in which skills are installed
+  // (per-arm jinnAgentHome), so the nudge tests the knowledge, not the
+  // model's propensity to browse its skill catalog.
+  const nudge = skillsNudge
+    ? `Before starting, check your available skills (skill_view) and apply any that are relevant to this bug.\n`
+    : '';
   return `You are fixing a bug in this repository. Work efficiently and DO NOT get stuck exploring:\n` +
     `1. Briefly locate the relevant code — a few targeted searches/reads, not an exhaustive tour of the repo.\n` +
     `2. Then MAKE THE EDIT: modify the source file(s) to fix the issue. You MUST produce an actual code change (a git diff), not just analysis. Do not end your turn without having edited a file.\n` +
-    `Make the minimal change needed. Do not add explanatory files or scripts outside the repo's existing structure.\n\n` +
-    `${instance.problem_statement}${spec}`;
+    `Make the minimal change needed. Do not add explanatory files or scripts outside the repo's existing structure.\n` +
+    nudge +
+    `\n${instance.problem_statement}${spec}`;
 }
 
 async function solveOne(cfg: PilotConfig, instance: PilotInstance, arm: Arm, repeat: number, baseDir: string): Promise<SolveOutcome & {
@@ -305,7 +319,7 @@ async function solveOne(cfg: PilotConfig, instance: PilotInstance, arm: Arm, rep
     await rm(armDir, { recursive: true, force: true });
     await cp(baseDir, armDir, { recursive: true });
 
-    const prompt = buildPrompt(instance);
+    const prompt = buildPrompt(instance, cfg.skillsNudge);
     const args = buildSolveArgs(arm, prompt, { maxTurns: cfg.maxTurns, provider: cfg.provider, model: cfg.model });
     console.log(`[pilot] solving ${instance.instance_id} arm=${arm.name} repeat=${repeat}...`);
     const armEnv = envForArm(cfg, arm);
@@ -447,6 +461,7 @@ function semanticConfig(cfg: PilotConfig, instances: PilotInstanceRef[]): PilotS
     maxTurns: cfg.maxTurns,
     gradeTimeoutMs: cfg.gradeTimeoutMs,
     mode: cfg.dryRun ? 'dry-run' : 'real',
+    skillsNudge: cfg.skillsNudge,
     ...(cfg.provider ? { provider: cfg.provider } : {}),
     ...(cfg.model ? { model: cfg.model } : {}),
     ...(cfg.taskSource ? { taskSource: cfg.taskSource } : {}),
