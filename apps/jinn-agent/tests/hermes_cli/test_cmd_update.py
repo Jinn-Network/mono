@@ -1,5 +1,6 @@
 """Tests for cmd_update — branch fallback when remote branch doesn't exist."""
 
+import pathlib
 import subprocess
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -7,6 +8,30 @@ from unittest.mock import patch
 import pytest
 
 from hermes_cli.main import cmd_update, PROJECT_ROOT
+
+
+@pytest.fixture(autouse=True)
+def _pretend_project_is_git_checkout(monkeypatch):
+    """Make cmd_update's ``PROJECT_ROOT/.git`` gate pass in the monorepo.
+
+    ``apps/jinn-agent`` is a git *subtree* with no nested ``.git``, so
+    ``cmd_update``'s "is this a git checkout?" gate (correct for real
+    ``git clone`` installs, where ``PROJECT_ROOT`` is the clone root) reports
+    False here and the git-update flow bails with "Not a git repository". The
+    subtree carries the full repo content, so every other path the flow reads
+    (``web/``, ``package.json``, lockfiles) still resolves under the real
+    ``PROJECT_ROOT`` — only ``.git`` is missing. Report just that one path as
+    existing; delegate every other ``Path.exists`` call to the real impl.
+    """
+    git_dir = PROJECT_ROOT / ".git"
+    real_exists = pathlib.Path.exists
+
+    def fake_exists(self, *args, **kwargs):
+        if self == git_dir:
+            return True
+        return real_exists(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "exists", fake_exists)
 
 
 def _make_run_side_effect(branch="main", verify_ok=True, commit_count="0"):
