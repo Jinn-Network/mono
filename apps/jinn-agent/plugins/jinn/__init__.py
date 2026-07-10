@@ -45,6 +45,10 @@ _veto_lock = threading.Lock()
 _vetoed_tasks: Set[str] = set()
 _session_hint_shown: Set[str] = set()
 
+# Distilled-skill use counts at session start; the session-end payoff surface
+# reports only skills used during this session.
+_distill_usage_snapshot: Dict[str, int] = {}
+
 # Test seam: overridable subprocess runner (None = real jinn-layer binary).
 _runner: Optional[jinn_layer.Runner] = None
 
@@ -251,6 +255,8 @@ def _on_session_start(session_id: str = "", platform: str = "", **_: Any) -> Non
         distill.reattach_watcher(sink=_user_line)
     except Exception:
         pass
+    global _distill_usage_snapshot
+    _distill_usage_snapshot = distill.snapshot_usage()
     if consent.consent_decided():
         return
     if session_id in _session_hint_shown:
@@ -417,6 +423,14 @@ def _on_session_end(
     output_tokens: Optional[int] = None,
     **_: Any,
 ) -> None:
+    # Usage is native local telemetry, so show payoff independently of sharing
+    # consent and before any capture-path early return.
+    try:
+        for line in distill.payoff_lines(_distill_usage_snapshot):
+            _user_line(line)
+    except Exception:
+        pass
+
     # Local capture is unconditional (mono#1714); only the share step is gated.
     share_enabled = consent.share_enabled()
     # Record the skills loadout + token fallback (host forward, mono #1662) —
@@ -571,6 +585,13 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
         pending = _latest_pending()
         if pending:
             lines.append(f"pending trace: {pending}")
+        d_status = distill.distill_status(_runner)
+        if d_status:
+            lines.append(
+                f"distill: {d_status.get('mode', 'unset')} — "
+                f"{d_status.get('uncoveredCount', 0)} capture(s) not yet distilled, "
+                f"{d_status.get('stagedCount', 0)} staged, {d_status.get('installedCount', 0)} installed"
+            )
         return "\n".join(lines)
 
     if sub == "consent":
