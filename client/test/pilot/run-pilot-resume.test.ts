@@ -230,6 +230,110 @@ describe('run-pilot durable dry-run resume', () => {
     expect(updated.error).toBeUndefined();
   });
 
+  it('regrades multiple instances under --solve-concurrency without re-solving any', () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'pilot-run-concurrency-'));
+    const refs = [
+      { instance_id: 'example__repo-1', hf_dataset: 'ds', hf_split: 'train' },
+      { instance_id: 'example__repo-2', hf_dataset: 'ds', hf_split: 'train' },
+    ];
+
+    const sentinel = join(outDir, 'agent-was-invoked');
+    const agentBin = join(outDir, 'stub-jinn-agent');
+    writeFileSync(agentBin, `#!/bin/sh\ntouch ${JSON.stringify(sentinel)}\nexit 1\n`);
+    chmodSync(agentBin, 0o755);
+
+    const upstreamDir = join(outDir, 'upstream');
+    mkdirSync(join(upstreamDir, 'scripts'), { recursive: true });
+    writeFileSync(join(upstreamDir, 'scripts', '__init__.py'), '');
+    writeFileSync(join(upstreamDir, 'scripts', 'eval.py'), [
+      'import argparse, json',
+      'from pathlib import Path',
+      'parser = argparse.ArgumentParser()',
+      'parser.add_argument("--json", required=True)',
+      'parser.add_argument("--patches", required=True)',
+      'parser.add_argument("--max-workers")',
+      'parser.add_argument("--report-json", required=True)',
+      'args = parser.parse_args()',
+      'tasks = json.loads(Path(args.json).read_text())',
+      'item = {"instance_id": tasks[0]["instance_id"], "from_fail_to_pass": ["test_a"],',
+      '        "failed_from_pass_to_pass": [], "passed_match": True, "exit_code": 0, "error": ""}',
+      'Path(args.report_json).write_text(json.dumps({"total": 1, "items": [item]}))',
+    ].join('\n'));
+
+    const arms = [{ name: 'stock', skills: [] }];
+    const armsFile = join(outDir, 'arms.json');
+    writeFileSync(armsFile, JSON.stringify(arms));
+
+    writeFileSync(join(outDir, 'manifest.json'), JSON.stringify({
+      schema: 'jinn.pilot.manifest.v1',
+      generatedAt: '2026-07-10T00:00:00.000Z',
+      semanticConfig: {
+        instances: refs,
+        repeats: 1,
+        arms,
+        maxTurns: 20,
+        gradeTimeoutMs: 600_000,
+        mode: 'real',
+      },
+      attemptCount: 2,
+    }));
+    writeFileSync(join(outDir, 'instances.json'), JSON.stringify({
+      schema: 'jinn.pilot.instances.v1',
+      instances: refs.map((ref) => ({
+        ref,
+        instance: { instance_id: ref.instance_id, repo: 'example/repo', base_commit: 'deadbeef', problem_statement: 'x' },
+        hfRow: {
+          instance_id: ref.instance_id,
+          repo: 'example/repo',
+          image_name: 'example-image:latest',
+          test_patch: 'diff --git a/t b/t\n',
+          install_config: { install: 'true', test_cmd: 'pytest -q', log_parser: 'parse_log_pytest' },
+          FAIL_TO_PASS: ['test_a'],
+          PASS_TO_PASS: [],
+        },
+      })),
+    }));
+
+    mkdirSync(join(outDir, 'patches'), { recursive: true });
+    mkdirSync(join(outDir, 'attempts'), { recursive: true });
+    const bases = refs.map((ref) => Buffer.from(`${ref.instance_id}:stock:0`, 'utf8').toString('base64url'));
+    for (const [i, ref] of refs.entries()) {
+      writeFileSync(join(outDir, 'patches', `${bases[i]}.patch`), 'diff --git a/x b/x\n+fix\n');
+      writeFileSync(join(outDir, 'attempts', `${bases[i]}.json`), JSON.stringify({
+        schema: 'jinn.pilot.attempt.v1',
+        instance_id: ref.instance_id,
+        arm: 'stock',
+        repeat: 0,
+        status: 'grade-error',
+        passed: null,
+        costUsd: 0.05,
+        patchRelPath: `patches/${bases[i]}.patch`,
+        error: 'docker was down',
+      }));
+    }
+
+    const run = runPilot([
+      '--out', outDir,
+      '--instances', JSON.stringify(refs),
+      '--arms-file', armsFile,
+      '--max-turns', '20',
+      '--grade-timeout-ms', '600000',
+      '--retry-errors',
+      '--max-new-solves', '2',
+      '--solve-concurrency', '2',
+      '--jinn-agent-bin', agentBin,
+      '--upstream-repo-dir', upstreamDir,
+    ]);
+
+    expect(run.status).toBe(0);
+    expect(existsSync(sentinel)).toBe(false);
+    for (const base of bases) {
+      const updated = JSON.parse(readFileSync(join(outDir, 'attempts', `${base}.json`), 'utf-8')) as { status: string; passed: boolean | null };
+      expect(updated.status).toBe('graded');
+      expect(updated.passed).toBe(true);
+    }
+  });
+
   it('accepts a configurable arms file and runs one attempt per arm', () => {
     const outDir = mkdtempSync(join(tmpdir(), 'pilot-run-arms-'));
     const armsFile = join(outDir, 'arms.json');

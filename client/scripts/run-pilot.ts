@@ -22,6 +22,7 @@
  *                                 [--arms-file arms.json]
  *                                 [--arm-b-jinn-agent-home DIR]
  *                                 [--max-new-solves N] [--retry-errors] [--force]
+ *                                 [--solve-concurrency N]
  */
 import { spawn } from 'node:child_process';
 import { cp, rm } from 'node:fs/promises';
@@ -35,6 +36,7 @@ import type { SolveTokens } from '../src/pilot/solve.js';
 import { solveCostUsd, DEEPSEEK_V4_FLASH_RATES, GPT_5_4_MINI_RATES, type RateTable } from '../src/pilot/cost.js';
 import { tallyPilot, type SolveOutcome, type PilotReport } from '../src/pilot/tally.js';
 import { fetchPilotRawRow, parsePilotInstanceRow, type PilotInstance } from '../src/pilot/instance.js';
+import { mapWithConcurrency, SerialTaskQueue } from '../src/pilot/pipeline.js';
 import { createPilotWorkDir, prepareBaseCheckout, recoverPatch } from '../src/pilot/repo.js';
 import {
   assertCompatiblePilotManifest,
@@ -102,6 +104,10 @@ export interface PilotConfig {
    *  the run CONTINUES (it never hangs the whole pilot). Real runs on a Linux
    *  amd64 host can raise this. */
   gradeTimeoutMs: number;
+  /** How many instances solve in parallel (runtime knob, not part of the
+   *  frozen semantic config). Grading is always strictly serial regardless —
+   *  see the pipeline note in runDurableReal. Default 1. */
+  solveConcurrency: number;
   dryRun: boolean;
 }
 
@@ -149,6 +155,7 @@ function parseArgs(argv: string[]): PilotConfig {
     force: false,
     retryErrors: false,
     maxNewSolves: Infinity,
+    solveConcurrency: 1,
     dryRun: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -174,6 +181,7 @@ function parseArgs(argv: string[]): PilotConfig {
       case '--retry-errors': cfg.retryErrors = true; break;
       case '--max-new-solves': cfg.maxNewSolves = Number(argv[++i]); break;
       case '--grade-timeout-ms': cfg.gradeTimeoutMs = Number(argv[++i]); break;
+      case '--solve-concurrency': cfg.solveConcurrency = Math.max(1, Number(argv[++i]) || 1); break;
       case '--instances': {
         // JSON array of {instance_id, hf_dataset, hf_split}
         cfg.instances = JSON.parse(String(argv[++i])) as PilotInstanceRef[];
@@ -614,13 +622,43 @@ async function runDurableReal(cfg: PilotConfig, hfFetcher: HttpHfFetcher): Promi
   }
   const frozenById = new Map(runState.frozenInstances.map((item) => [item.ref.instance_id, item]));
 
-  for (const [instanceId, specs] of runnableByInstance.entries()) {
+  // Pipeline shape: solve lanes fan out across instances (network/API-bound,
+  // cfg.solveConcurrency wide); every grade goes through one strictly-serial
+  // queue (each eval pulls a multi-GB Docker image under amd64 emulation, and
+  // the disk-floor check + prune are not concurrency-safe). Grades of earlier
+  // attempts overlap the next solves, so even --solve-concurrency 1 pipelines.
+  const gradeQueue = new SerialTaskQueue();
+
+  await mapWithConcurrency([...runnableByInstance.entries()], cfg.solveConcurrency, async ([instanceId, specs]) => {
     const frozen = frozenById.get(instanceId);
     if (!frozen) {
       for (const spec of specs) writeAttemptRecord(runState.outDir, recordFromError(spec, 'solve-error', new Error(`missing frozen instance ${instanceId}`)));
-      continue;
+      return;
     }
     const { instance, hfRow } = frozen;
+
+    const enqueueGrade = (
+      spec: PilotAttemptSpec,
+      patch: string,
+      carried: Omit<PilotAttemptRecord, 'status' | 'passed' | 'error'>,
+      regraded: boolean,
+    ): void => {
+      gradeQueue.push(async () => {
+        try {
+          const passed = await gradeOne(cfg, hfRow, patch);
+          writeAttemptRecord(runState.outDir, { ...carried, status: passed === null ? 'ungradeable' : 'graded', passed });
+          console.log(`[pilot] result ${instance.instance_id} arm=${spec.arm} repeat=${spec.repeat}: passed=${passed} cost=$${carried.costUsd.toFixed(4)}${regraded ? ' (regraded)' : ''}`);
+        } catch (gradeErr) {
+          console.warn(`[pilot]   grade error for ${instance.instance_id}/${spec.arm}/${spec.repeat}: ${(gradeErr as Error).message} — recording grade-error`);
+          writeAttemptRecord(runState.outDir, {
+            ...carried,
+            status: 'grade-error',
+            passed: null,
+            error: gradeErr instanceof Error ? gradeErr.message : String(gradeErr),
+          });
+        }
+      });
+    };
 
     // A grade-error attempt with a saved patch already paid for its solve —
     // re-grade from the patch instead of re-spending inference (and skip the
@@ -635,21 +673,9 @@ async function runDurableReal(cfg: PilotConfig, hfFetcher: HttpHfFetcher): Promi
       }
       console.log(`[pilot] regrading ${instance.instance_id} arm=${spec.arm} repeat=${spec.repeat} from saved patch (no re-solve)...`);
       const { error: _prevError, ...carried } = existing;
-      try {
-        const passed = await gradeOne(cfg, hfRow, readFileSync(patchAbsPath, 'utf8'));
-        writeAttemptRecord(runState.outDir, { ...carried, status: passed === null ? 'ungradeable' : 'graded', passed });
-        console.log(`[pilot] result ${instance.instance_id} arm=${spec.arm} repeat=${spec.repeat}: passed=${passed} cost=$${existing.costUsd.toFixed(4)} (regraded)`);
-      } catch (gradeErr) {
-        console.warn(`[pilot]   grade error for ${instance.instance_id}/${spec.arm}/${spec.repeat}: ${(gradeErr as Error).message} — recording grade-error`);
-        writeAttemptRecord(runState.outDir, {
-          ...carried,
-          status: 'grade-error',
-          passed: null,
-          error: gradeErr instanceof Error ? gradeErr.message : String(gradeErr),
-        });
-      }
+      enqueueGrade(spec, readFileSync(patchAbsPath, 'utf8'), carried, true);
     }
-    if (toSolve.length === 0) continue;
+    if (toSolve.length === 0) return;
 
     const baseDir = await createPilotWorkDir(cfg.outDir, `base-${instance.instance_id.replace(/[^a-zA-Z0-9_-]/g, '_')}-`);
     try {
@@ -664,34 +690,27 @@ async function runDurableReal(cfg: PilotConfig, hfFetcher: HttpHfFetcher): Promi
         try {
           const solved = await solveOne(cfg, instance, arm, spec.repeat, baseDir);
           const patchRelPath = writePatch(runState.outDir, spec, solved.patch);
-          try {
-            const passed = await gradeOne(cfg, hfRow, solved.patch);
-            const status = passed === null ? 'ungradeable' : 'graded';
-            const record: PilotAttemptRecord = {
-              schema: 'jinn.pilot.attempt.v1',
-              instance_id: spec.instance_id,
-              arm: spec.arm,
-              repeat: spec.repeat,
-              status,
-              passed,
-              costUsd: solved.costUsd,
-              patchRelPath,
-              ...(solved.tokens ? { tokens: solved.tokens } : {}),
-              ...(solved.sessionId ? { sessionId: solved.sessionId } : {}),
-              ...(solved.tokenError ? { tokenError: solved.tokenError } : {}),
-            };
-            writeAttemptRecord(runState.outDir, record);
-            console.log(`[pilot] result ${instance.instance_id} arm=${spec.arm} repeat=${spec.repeat}: passed=${passed} cost=$${solved.costUsd.toFixed(4)}`);
-          } catch (gradeErr) {
-            console.warn(`[pilot]   grade error for ${instance.instance_id}/${spec.arm}/${spec.repeat}: ${(gradeErr as Error).message} — recording grade-error`);
-            writeAttemptRecord(runState.outDir, {
-              ...recordFromError(spec, 'grade-error', gradeErr, solved.costUsd),
-              patchRelPath,
-              ...(solved.tokens ? { tokens: solved.tokens } : {}),
-              ...(solved.sessionId ? { sessionId: solved.sessionId } : {}),
-              ...(solved.tokenError ? { tokenError: solved.tokenError } : {}),
-            });
-          }
+          const carried: Omit<PilotAttemptRecord, 'status' | 'passed' | 'error'> = {
+            schema: 'jinn.pilot.attempt.v1',
+            instance_id: spec.instance_id,
+            arm: spec.arm,
+            repeat: spec.repeat,
+            costUsd: solved.costUsd,
+            patchRelPath,
+            ...(solved.tokens ? { tokens: solved.tokens } : {}),
+            ...(solved.sessionId ? { sessionId: solved.sessionId } : {}),
+            ...(solved.tokenError ? { tokenError: solved.tokenError } : {}),
+          };
+          // Crash-recovery placeholder: if the process dies before the queued
+          // grade runs, this attempt resumes as a $0 regrade-from-patch
+          // instead of a re-bought solve. The grade job overwrites it.
+          writeAttemptRecord(runState.outDir, {
+            ...carried,
+            status: 'grade-error',
+            passed: null,
+            error: 'grade pending (pipeline interrupted before grading; re-run with --retry-errors to regrade from the saved patch)',
+          });
+          enqueueGrade(spec, solved.patch, carried, false);
         } catch (solveErr) {
           console.warn(`[pilot]   solve error for ${instance.instance_id}/${spec.arm}/${spec.repeat}: ${(solveErr as Error).message} — recording solve-error, continuing`);
           writeAttemptRecord(runState.outDir, recordFromError(spec, 'solve-error', solveErr));
@@ -703,8 +722,9 @@ async function runDurableReal(cfg: PilotConfig, hfFetcher: HttpHfFetcher): Promi
     } finally {
       await rm(baseDir, { recursive: true, force: true });
     }
-  }
+  });
 
+  await gradeQueue.drain();
   writeCurrentReport(runState.outDir, runState.specs);
 }
 
