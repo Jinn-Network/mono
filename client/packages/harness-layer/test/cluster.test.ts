@@ -150,4 +150,20 @@ describe('clusterEvidence (distinct-instance clustering by tier, §7)', () => {
     expect(clusters[0]!.clusterId).toBe('pattern:s1');
     expect(clusters[0]!.evidenceRefs).toEqual(['local-capture:s1']);
   });
+
+  it('local-experimental mode admits only user-accepted completed and failed evidence', () => {
+    const clusters = clusterEvidence(
+      [
+        { ref: 'local-capture:pass', instanceId: 'pass', env: env({ status: 'completed', tier: 'user-accepted' }) },
+        { ref: 'local-capture:fail', instanceId: 'fail', env: env({ status: 'failed', tier: 'user-accepted' }) },
+        { ref: 'local-capture:tests', instanceId: 'tests', env: env({ status: 'completed', tier: 'tests-passed' }) },
+      ],
+      { eligibilityMode: 'local-experimental' },
+    );
+
+    expect(clusters.map((cluster) => cluster.clusterId)).toEqual([
+      'lesson:fail',
+      'pattern:pass',
+    ]);
+  });
 });

@@ -112,16 +112,9 @@ export function clusterEvidence(items: ClusterItem[], opts: ClusterOptions = {})
     const result = evaluateEligibility(item.env, {
       heldOut,
       maxPlaceholderDensity: opts.maxPlaceholderDensity,
+      acceptUserAccepted: opts.eligibilityMode === 'local-experimental',
     });
-    let tier = result.eligible ? result.tier : null;
-    if (tier === null && opts.eligibilityMode === 'local-experimental') {
-      const localSafe =
-        item.env.provenance === 'contributed' &&
-        !heldOut &&
-        !result.redactionHealth.defaced;
-      if (localSafe && item.env.outcome.status === 'completed') tier = 'pattern';
-      if (localSafe && item.env.outcome.status === 'failed') tier = 'lesson';
-    }
+    const tier = result.eligible ? result.tier : null;
     if (tier === null) continue;
 
     let slot = byInstance.get(item.instanceId);
