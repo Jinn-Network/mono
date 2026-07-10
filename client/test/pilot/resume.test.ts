@@ -194,6 +194,32 @@ describe('pilot resume durability', () => {
       .toThrow(/different frozen pilot config for mode/i);
   });
 
+  it('accepts an instance superset (slates are append-only) but rejects removal or mutation', () => {
+    const manifest = buildPilotManifest(cfg(), { generatedAt: '2026-07-10T00:00:00.000Z' });
+
+    // Adding instances is additive — records for existing tasks stay valid.
+    expect(() => assertCompatiblePilotManifest(manifest, cfg({
+      instances: [
+        { instance_id: 'alpha/repo__bug-1', hf_dataset: 'ds', hf_split: 'train' },
+        { instance_id: 'beta__bug-2', hf_dataset: 'ds', hf_split: 'train' },
+        { instance_id: 'gamma__bug-3', hf_dataset: 'ds', hf_split: 'train' },
+      ],
+    }))).not.toThrow();
+
+    // Dropping a frozen instance is a semantic change.
+    expect(() => assertCompatiblePilotManifest(manifest, cfg({
+      instances: [{ instance_id: 'alpha/repo__bug-1', hf_dataset: 'ds', hf_split: 'train' }],
+    }))).toThrow(/instances may only be added/i);
+
+    // Same id from a different dataset/split is a mutation, not an addition.
+    expect(() => assertCompatiblePilotManifest(manifest, cfg({
+      instances: [
+        { instance_id: 'alpha/repo__bug-1', hf_dataset: 'ds', hf_split: 'train' },
+        { instance_id: 'beta__bug-2', hf_dataset: 'other-ds', hf_split: 'train' },
+      ],
+    }))).toThrow(/instances may only be added/i);
+  });
+
   it('treats a legacy manifest without a mode field as a real-mode store', () => {
     // Pre-mode-marker manifests were only ever meant for real runs; a dry run
     // against one must fail closed rather than pollute it with fake records.

@@ -42,6 +42,7 @@ import {
   assertCompatiblePilotManifest,
   attemptKey,
   buildAttemptSpecs,
+  instanceRefKey,
   buildPilotManifest,
   clearPilotOutput,
   loadAttemptRecords,
@@ -517,6 +518,19 @@ async function prepareDurableRun(cfg: PilotConfig, hfFetcher: HttpHfFetcher): Pr
     const frozenInstances = loadFrozenInstances(outDir);
     if (!frozenInstances) {
       throw new Error(`existing pilot output ${outDir} is missing instances.json; pass --force to rebuild`);
+    }
+    // Append-only slate extension: freeze rows for any instance refs added
+    // since the manifest was written, then re-stamp the manifest so the
+    // extended instance set becomes the frozen config.
+    const frozenRefKeys = new Set(existing.semanticConfig.instances.map(instanceRefKey));
+    const newRefs = instances.filter((ref) => !frozenRefKeys.has(instanceRefKey(ref)));
+    if (newRefs.length > 0) {
+      console.log(`[pilot] extending durable store with ${newRefs.length} new instance(s)...`);
+      const newFrozen = cfg.dryRun ? fakeFrozenInstances(newRefs) : await resolveFrozenInstances(newRefs, hfFetcher);
+      const merged = [...frozenInstances, ...newFrozen];
+      writeFrozenInstances(outDir, merged);
+      writePilotManifest(outDir, buildPilotManifest(config));
+      return { outDir, config, specs: buildAttemptSpecs(config), frozenInstances: merged };
     }
     return { outDir, config, specs: buildAttemptSpecs(config), frozenInstances };
   }

@@ -173,10 +173,25 @@ function comparableSemanticValue(config: PilotSemanticConfig, key: keyof PilotSe
   return config[key];
 }
 
+export function instanceRefKey(ref: PilotInstanceRef): string {
+  return `${ref.instance_id}|${ref.hf_dataset}|${ref.hf_split}`;
+}
+
 export function assertCompatiblePilotManifest(manifest: PilotManifest, requested: PilotSemanticConfig): void {
   const frozen = normalizePilotSemanticConfig(manifest.semanticConfig);
   const normalizedRequested = normalizePilotSemanticConfig(requested);
-  const keys = ['instances', 'repeats', 'arms', 'maxTurns', 'gradeTimeoutMs', 'mode', 'provider', 'model', 'taskSource', 'slateHash'] as const;
+  // Slates are append-only: a requested instance SUPERSET is compatible (the
+  // run extends the store; existing per-attempt records stay valid), while
+  // dropping or mutating a frozen instance is a semantic change.
+  const requestedRefKeys = new Set(normalizedRequested.instances.map(instanceRefKey));
+  const missing = frozen.instances.filter((ref) => !requestedRefKeys.has(instanceRefKey(ref)));
+  if (missing.length > 0) {
+    throw new Error(
+      `different frozen pilot config for instances: requested set is missing ${missing.length} frozen instance(s) ` +
+      `(e.g. ${missing[0]!.instance_id}); instances may only be added, not removed or changed — pass --force to rebuild`,
+    );
+  }
+  const keys = ['repeats', 'arms', 'maxTurns', 'gradeTimeoutMs', 'mode', 'provider', 'model', 'taskSource', 'slateHash'] as const;
   for (const key of keys) {
     const frozenValue = comparableSemanticValue(frozen, key);
     const requestedValue = comparableSemanticValue(normalizedRequested, key);

@@ -99,6 +99,39 @@ describe('run-pilot durable dry-run resume', () => {
     expect(forced.status).toBe(0);
   });
 
+  it('extends an existing durable store when new instances are added (append-only slates)', () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'pilot-run-extend-'));
+    const one = [{ instance_id: 'alpha__repo-1', hf_dataset: 'ds', hf_split: 'train' }];
+    const two = [...one, { instance_id: 'beta__repo-2', hf_dataset: 'ds', hf_split: 'train' }];
+
+    const first = runPilot(['--dry-run', '--out', outDir, '--instances', JSON.stringify(one), '--repeats', '1']);
+    expect(first.status).toBe(0);
+    expect(attemptCount(outDir)).toBe(2); // one instance × arms A/B
+
+    // Superset resume freezes the new instance and runs only its attempts.
+    const second = runPilot(['--dry-run', '--out', outDir, '--instances', JSON.stringify(two), '--repeats', '1']);
+    expect(second.status).toBe(0);
+    expect(second.stdout).toMatch(/extending durable store with 1 new instance/i);
+    expect(attemptCount(outDir)).toBe(4);
+
+    const manifest = JSON.parse(readFileSync(join(outDir, 'manifest.json'), 'utf-8')) as {
+      attemptCount: number;
+      semanticConfig: { instances: Array<{ instance_id: string }> };
+    };
+    expect(manifest.semanticConfig.instances.map((ref) => ref.instance_id)).toEqual(['alpha__repo-1', 'beta__repo-2']);
+    expect(manifest.attemptCount).toBe(4);
+
+    const frozen = JSON.parse(readFileSync(join(outDir, 'instances.json'), 'utf-8')) as {
+      instances: Array<{ ref: { instance_id: string } }>;
+    };
+    expect(frozen.instances.map((item) => item.ref.instance_id)).toEqual(['alpha__repo-1', 'beta__repo-2']);
+
+    // Removal still fails closed.
+    const removal = runPilot(['--dry-run', '--out', outDir, '--instances', JSON.stringify([two[1]]), '--repeats', '1']);
+    expect(removal.status).toBe(1);
+    expect(removal.stderr).toMatch(/instances may only be added/i);
+  });
+
   it('refuses to resume a dry-run durable store with a real run (and vice versa)', () => {
     const outDir = mkdtempSync(join(tmpdir(), 'pilot-run-mode-'));
     const instances = JSON.stringify([
