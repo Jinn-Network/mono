@@ -859,6 +859,23 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@nomicfoundation/ignition-core@npm:^3.1.8":
+  version: 3.1.8
+  resolution: "@nomicfoundation/ignition-core@npm:3.1.8"
+  dependencies:
+    "@ethersproject/address": "npm:5.6.1"
+    "@nomicfoundation/hardhat-errors": "npm:^3.0.16"
+    "@nomicfoundation/hardhat-utils": "npm:^4.1.4"
+    "@nomicfoundation/solidity-analyzer": "npm:^0.1.1"
+    cbor2: "npm:^1.9.0"
+    ethers: "npm:^6.14.0"
+    immer: "npm:10.0.2"
+    lodash-es: "npm:4.17.21"
+    ndjson: "npm:2.0.0"
+  checksum: 10c0/136c19e6121bc7d644dbbe9640cc4d84067b8df132b145d2f48c152d6ba8b497c003ceb9ac806f21a16eb3c203bc137e834063a784b0a81bfc82418550b4edfb
+  languageName: node
+  linkType: hard
+
 "@nomicfoundation/ignition-ui@npm:^3.1.2":
   version: 3.1.2
   resolution: "@nomicfoundation/ignition-ui@npm:3.1.2"
@@ -2148,7 +2165,7 @@ __metadata:
     "@nomicfoundation/hardhat-toolbox-mocha-ethers": "npm:^3.0.7"
     "@nomicfoundation/hardhat-typechain": "npm:^3.1.1"
     "@nomicfoundation/hardhat-verify": "npm:^3.0.20"
-    "@nomicfoundation/ignition-core": "npm:^3.1.7"
+    "@nomicfoundation/ignition-core": "npm:^3.1.8"
     "@openzeppelin/contracts": "npm:^5.6.1"
     "@prb/math": "npm:^4.1.2"
     "@types/chai": "npm:^5.2.3"
