@@ -3264,11 +3264,11 @@ __metadata:
   linkType: hard
 
 "@safe-global/safe-deployments@npm:^1.37.56":
-  version: 1.37.56
-  resolution: "@safe-global/safe-deployments@npm:1.37.56"
+  version: 1.37.59
+  resolution: "@safe-global/safe-deployments@npm:1.37.59"
   dependencies:
     semver: "npm:^7.6.2"
-  checksum: 10c0/f4cc628816a858416f91c2b47d6a13c3f8a833f4c377feb5d26e0884600fb72377983bae0321df2dc82fa318c0bd70a166d31f85f53b66c3f92f8477d5073a9d
+  checksum: 10c0/9fd629d6a88390aaffe4e68ada1022e9021aeb9d40693c7a2bf7c9629f7cf0f312d3ca3a6caf4f4898e7bc3edfb17f443b76c0bcef1532d288a6b278e8a5de26
   languageName: node
   linkType: hard
 
