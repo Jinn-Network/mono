@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import type { HarnessLayer, CorpusSearchHit, CorpusRecord } from '../src/consume.js';
-import { runJinnLayerCli, type DistillRunCliDeps, type DistillCliDeps } from '../src/cli.js';
+import { runJinnLayerCli, type DistillRunCliDeps, type DistillCliDeps, type DistillProvider, type DistillPorts } from '../src/cli.js';
 import type { CapturedTask } from '../src/capture.js';
 import { createMemoryLedger, type LedgerEntry } from '../src/ledger.js';
 import type { HarnessPublishDeps } from '../src/publish.js';
@@ -2306,6 +2306,78 @@ describe('jinn-layer distill --progress ndjson (#1533)', () => {
     );
     expect(code).toBe(2);
     expect(out()).toMatch(/--progress/);
+  });
+});
+
+describe('jinn-layer distill --cluster-timeout (#1534)', () => {
+  beforeEach(() => {
+    const modePath = tmpModeFile();
+    writeDistillMode('local', modePath);
+    process.env['JINN_LAYER_DISTILL_MODE_PATH'] = modePath;
+  });
+  afterEach(() => {
+    delete process.env['JINN_LAYER_DISTILL_MODE_PATH'];
+  });
+
+  function captureFactory(): {
+    factory: (provider: DistillProvider, model: string, timeoutMs?: number) => DistillPorts;
+    calls: Array<{ provider: string; model: string; timeoutMs?: number }>;
+  } {
+    const calls: Array<{ provider: string; model: string; timeoutMs?: number }> = [];
+    return {
+      calls,
+      factory: (provider, model, timeoutMs) => {
+        calls.push({ provider, model, ...(timeoutMs !== undefined ? { timeoutMs } : {}) });
+        return { distill: async () => VALID_DISTILL, metaDistill: async () => ({ ...VALID_DISTILL, supports: ['s1'] }) };
+      },
+    };
+  }
+
+  it('passes --cluster-timeout (seconds) to the distiller factory as milliseconds', async () => {
+    const { writer } = capture();
+    const { factory, calls } = captureFactory();
+    const code = await runJinnLayerCli(
+      ['distill', '--captures', capturesDirWith(ownCapture()), '--out', mkdtempSync(join(tmpdir(), 'jinn-distill-out-')), '--install', 'none', '--cluster-timeout', '120', '--json'],
+      { writer, distillDeps: { distillerFactory: factory } },
+    );
+    expect(code).toBe(0);
+    expect(calls[0]?.timeoutMs).toBe(120_000);
+  });
+
+  it('falls back to JINN_DISTILL_CLUSTER_TIMEOUT_S when no flag is passed', async () => {
+    const { writer } = capture();
+    const { factory, calls } = captureFactory();
+    await withEnv({ JINN_DISTILL_CLUSTER_TIMEOUT_S: '45' }, async () => {
+      const code = await runJinnLayerCli(
+        ['distill', '--captures', capturesDirWith(ownCapture()), '--out', mkdtempSync(join(tmpdir(), 'jinn-distill-out-')), '--install', 'none', '--json'],
+        { writer, distillDeps: { distillerFactory: factory } },
+      );
+      expect(code).toBe(0);
+    });
+    expect(calls[0]?.timeoutMs).toBe(45_000);
+  });
+
+  it('leaves the factory default when neither flag nor env is set', async () => {
+    const { writer } = capture();
+    const { factory, calls } = captureFactory();
+    const code = await runJinnLayerCli(
+      ['distill', '--captures', capturesDirWith(ownCapture()), '--out', mkdtempSync(join(tmpdir(), 'jinn-distill-out-')), '--install', 'none', '--json'],
+      { writer, distillDeps: { distillerFactory: factory } },
+    );
+    expect(code).toBe(0);
+    expect(calls[0]?.timeoutMs).toBeUndefined();
+  });
+
+  it('rejects a non-positive or non-numeric --cluster-timeout with exit 2', async () => {
+    for (const bad of ['0', '-5', 'soon']) {
+      const { writer, out } = capture();
+      const code = await runJinnLayerCli(
+        ['distill', '--captures', capturesDirWith(ownCapture()), '--cluster-timeout', bad],
+        { writer, distillDeps: stubDistillDeps() },
+      );
+      expect(code).toBe(2);
+      expect(out()).toMatch(/--cluster-timeout/);
+    }
   });
 });
 

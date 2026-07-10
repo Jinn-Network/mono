@@ -293,3 +293,52 @@ describe('createCodexMetaDistiller', () => {
     await expect(meta(metaCluster)).rejects.toThrow(/supports/);
   });
 });
+
+describe('per-cluster subprocess timeout (#1534)', () => {
+  /** A child whose process never exits — stdin closes, nothing comes back. */
+  function hungChild(): ChildLike & { killed: NodeJS.Signals[] } {
+    const emitter = new EventEmitter();
+    const killed: NodeJS.Signals[] = [];
+    const child = {
+      killed,
+      stdin: { write() {}, end() {} },
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+      on(event: string, listener: (...a: unknown[]) => void) { emitter.on(event, listener); },
+      kill(signal?: NodeJS.Signals) { killed.push(signal ?? 'SIGTERM'); },
+    };
+    return child as unknown as ChildLike & { killed: NodeJS.Signals[] };
+  }
+
+  it('kills a hung claude child and rejects with a timeout error', async () => {
+    const child = hungChild();
+    const { spawn } = makeSpawn(child);
+    const distill = createClaudeDistiller({ spawnImpl: spawn, timeoutMs: 30 });
+    await expect(distill(cluster)).rejects.toThrow(/timed out after 30ms/);
+    expect(child.killed).toContain('SIGKILL');
+  });
+
+  it('kills a hung codex child and rejects with a timeout error', async () => {
+    const child = hungChild();
+    const { spawn } = makeSpawn(child);
+    const distill = createCodexDistiller({ spawnImpl: spawn, timeoutMs: 30 });
+    await expect(distill(cluster)).rejects.toThrow(/timed out after 30ms/);
+    expect(child.killed).toContain('SIGKILL');
+  });
+
+  it('a fast child resolves normally under a timeout (timer cleared, no late rejection)', async () => {
+    const out = { name: 'orm-fanout-dedup', description: 'Use when X. Not for: Y.', body: 'B' };
+    const child = fakeChild({ stdout: JSON.stringify(out) });
+    const { spawn } = makeSpawn(child);
+    const distill = createClaudeDistiller({ spawnImpl: spawn, timeoutMs: 5_000 });
+    await expect(distill(cluster)).resolves.toEqual(out);
+  });
+
+  it('meta distillers honour the timeout too', async () => {
+    const child = hungChild();
+    const { spawn } = makeSpawn(child);
+    const meta = createClaudeMetaDistiller({ spawnImpl: spawn, timeoutMs: 30 });
+    await expect(meta(metaCluster)).rejects.toThrow(/timed out after 30ms/);
+    expect(child.killed).toContain('SIGKILL');
+  });
+});

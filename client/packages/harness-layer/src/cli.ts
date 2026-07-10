@@ -159,7 +159,7 @@ Commands:
   distill [--where local|defer|off] [--install all|<name>|none] [--resume]
          [--captures <dir>] [--limit N] [--out <dir>]
          [--distiller claude|codex] [--distiller-model <model>] [--json]
-         [--progress ndjson]
+         [--progress ndjson] [--cluster-timeout <seconds>]
                                                  Rung-1 own-captures loop: distill YOUR recent local
                                                  captures into skills, fully local (no corpus publish,
                                                  no chain anchor). A heavy local pass, so you control
@@ -195,6 +195,10 @@ Commands:
                                                  stderr for wrappers; run_end is always emitted.
                                                  Non-interactive use only — stdout --json is
                                                  unaffected; ignore stderr lines without a v field.
+                                                 --cluster-timeout caps each cluster's distiller
+                                                 subprocess (seconds; default 600). On expiry the
+                                                 child is killed, that cluster lands in errors,
+                                                 and the run continues.
   distill eval-prep [--limit N] [--out <dir>] [--json] [--meta] [--select-only]
                     [--group-cap N] [--concurrency N] [--force] [--retry-errors]
                     [--models gpt-5.4-mini,gpt-5.5]
@@ -243,7 +247,7 @@ Environment (distill — the rung-1 own-captures loop; runs fully locally):
 
 export type DistillProvider = 'claude' | 'codex';
 
-interface DistillPorts {
+export interface DistillPorts {
   distill: (cluster: DistillCluster) => Promise<DistillLLMOutput>;
   metaDistill: (cluster: MetaCluster) => Promise<MetaDistillLLMOutput>;
 }
@@ -259,7 +263,7 @@ export interface DistillRunCliDeps {
   /** The stage-2 meta LLM port. Default: createClaudeMetaDistiller. */
   metaDistill?: (cluster: MetaCluster) => Promise<MetaDistillLLMOutput>;
   /** Provider-aware port factory (tests/embedders). Default: Claude or Codex CLI ports. */
-  distillerFactory?: (provider: DistillProvider, model: string) => DistillPorts;
+  distillerFactory?: (provider: DistillProvider, model: string, timeoutMs?: number) => DistillPorts;
   /** Layer-1 evidence publish deps. Default: live testnet wiring from env. */
   publishDeps?: HarnessPublishDeps;
   /** Held-out slate instance ids. Default: the active swe-rebench-v2 slate. */
@@ -274,7 +278,7 @@ export interface DistillCliDeps {
   /** The LLM distill port. Default: provider factory over the resolved distiller model. */
   distill?: (cluster: DistillCluster) => Promise<DistillLLMOutput>;
   /** Provider-aware port factory (tests). Default: Claude or Codex CLI ports. */
-  distillerFactory?: (provider: DistillProvider, model: string) => DistillPorts;
+  distillerFactory?: (provider: DistillProvider, model: string, timeoutMs?: number) => DistillPorts;
   /**
    * Held-out slate ids — defence-in-depth over the gate + contamination scan.
    * Own captures rarely intersect a public slate, so this defaults to empty.
@@ -694,17 +698,33 @@ function parseDistillProvider(raw: string): DistillProvider | null {
   return raw === 'claude' || raw === 'codex' ? raw : null;
 }
 
-function defaultDistillerFactory(provider: DistillProvider, model: string): DistillPorts {
+function defaultDistillerFactory(provider: DistillProvider, model: string, timeoutMs?: number): DistillPorts {
+  const timeout = timeoutMs !== undefined ? { timeoutMs } : {};
   if (provider === 'codex') {
     return {
-      distill: createCodexDistiller({ model }),
-      metaDistill: createCodexMetaDistiller({ model }),
+      distill: createCodexDistiller({ model, ...timeout }),
+      metaDistill: createCodexMetaDistiller({ model, ...timeout }),
     };
   }
   return {
-    distill: createClaudeDistiller({ model }),
-    metaDistill: createClaudeMetaDistiller({ model }),
+    distill: createClaudeDistiller({ model, ...timeout }),
+    metaDistill: createClaudeMetaDistiller({ model, ...timeout }),
   };
+}
+
+/**
+ * Resolve the per-cluster distiller deadline (#1534): `--cluster-timeout`
+ * (seconds) > `JINN_DISTILL_CLUSTER_TIMEOUT_S` > undefined (the port default).
+ * Returns milliseconds, or an error message for a bad value.
+ */
+function resolveClusterTimeoutMs(flagValue: string | undefined): number | undefined | { error: string } {
+  const raw = flagValue ?? process.env['JINN_DISTILL_CLUSTER_TIMEOUT_S'];
+  if (raw === undefined) return undefined;
+  const seconds = Number(raw);
+  if (!Number.isFinite(seconds) || !Number.isInteger(seconds) || seconds <= 0) {
+    return { error: `error: --cluster-timeout must be a positive integer number of seconds (got ${JSON.stringify(raw)})` };
+  }
+  return seconds * 1000;
 }
 
 function buildDefaultLayer(): HarnessLayer {
@@ -760,6 +780,7 @@ export async function runJinnLayerCli(
         resume: { type: 'boolean', default: false },
         install: { type: 'string' },
         progress: { type: 'string' },
+        'cluster-timeout': { type: 'string' },
         models: { type: 'string' },
         'max-clusters': { type: 'string' },
         'max-contrastive': { type: 'string' },
@@ -893,8 +914,13 @@ export async function runJinnLayerCli(
       (parsed.values['distiller-model'] as string | undefined) ??
       process.env['JINN_DISTILL_MODEL'] ??
       defaultDistillModel;
+    const clusterTimeoutMs = resolveClusterTimeoutMs(parsed.values['cluster-timeout'] as string | undefined);
+    if (typeof clusterTimeoutMs === 'object') {
+      writer.write(`${clusterTimeoutMs.error}\n\n${USAGE}`);
+      return 2;
+    }
     const distill =
-      dd.distill ?? (dd.distillerFactory ?? defaultDistillerFactory)(distillProvider, distillModel).distill;
+      dd.distill ?? (dd.distillerFactory ?? defaultDistillerFactory)(distillProvider, distillModel, clusterTimeoutMs).distill;
 
     const modePath = distillModePath();
 
@@ -1363,8 +1389,13 @@ export async function runJinnLayerCli(
     // `distillModel` recorded in provenance (§5), so the record matches the run.
     const defaultDistillModel = distillProvider === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_DISTILL_MODEL;
     const distillModel = process.env['JINN_DISTILL_MODEL'] ?? defaultDistillModel;
+    const runClusterTimeoutMs = resolveClusterTimeoutMs(parsed.values['cluster-timeout'] as string | undefined);
+    if (typeof runClusterTimeoutMs === 'object') {
+      writer.write(`${runClusterTimeoutMs.error}\n\n${USAGE}`);
+      return 2;
+    }
     const distillerFactory = dd.distillerFactory ?? defaultDistillerFactory;
-    const distillPorts = dd.distill && dd.metaDistill ? null : distillerFactory(distillProvider, distillModel);
+    const distillPorts = dd.distill && dd.metaDistill ? null : distillerFactory(distillProvider, distillModel, runClusterTimeoutMs);
     const distill = dd.distill ?? distillPorts!.distill;
     const metaEnabled = parsed.values.meta as boolean;
     const metaDistillPort = dd.metaDistill ?? distillPorts!.metaDistill;
