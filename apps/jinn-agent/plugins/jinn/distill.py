@@ -36,7 +36,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import jinn_layer
+from . import consent, jinn_layer
 
 Runner = Callable[[List[str]], Tuple[int, str]]
 
@@ -234,3 +234,133 @@ def write_episode_fallback(episode: Dict[str, Any]) -> Optional[Path]:
                     pass
     except Exception:
         return None
+
+
+# ── /jinn distill — the in-session surface (mono #1538) ─────────────────────
+#
+# All handlers return stateless strings (input() would deadlock the TUI; the
+# two-step pattern from /jinn consent covers anything that needs confirming).
+# First-run detection is facts-over-flags (onboarding.py precedent): the FACT
+# is `mode == "unset"` from the layer's status read; the only stored flag is
+# that the splash was shown.
+
+UPDATE_LAYER_LINE = (
+    "The Jinn layer here doesn't know distillation yet — update it:\n"
+    "  npm install -g @jinn-network/client@canary"
+)
+
+
+def ux_flags_path() -> Path:
+    return consent.get_hermes_home() / "jinn" / "distill-ux.json"
+
+
+def load_ux_flags() -> Dict[str, object]:
+    """Pure seen-flags only — never mode, consent, or run state."""
+    path = ux_flags_path()
+    if not path.exists():
+        return {"splash_shown": False, "payoff_invited": False}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return {
+            "splash_shown": bool(data.get("splash_shown", False)),
+            "payoff_invited": bool(data.get("payoff_invited", False)),
+        }
+    except Exception:
+        return {"splash_shown": False, "payoff_invited": False}
+
+
+def mark_ux_flag(name: str) -> None:
+    if name not in ("splash_shown", "payoff_invited"):
+        raise ValueError(f"unknown distill ux flag: {name}")
+    flags = load_ux_flags()
+    flags[name] = True
+    path = ux_flags_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(flags, indent=2) + "\n", encoding="utf-8")
+
+
+def render_splash(status: Dict[str, Any]) -> str:
+    count = status.get("capturesCount", 0)
+    provider = status.get("distillProvider", "claude")
+    model = status.get("distillModel", "")
+    return "\n".join(
+        [
+            "◇ distill — turn your own work into reusable skills",
+            "",
+            "  As you work, completed tasks are reserved on this machine as",
+            f"  captures ({count} so far). A distillation run reads them and writes",
+            "  SKILL.md files the agent picks up on later tasks — fully locally:",
+            "  nothing is published, nothing leaves this machine.",
+            "",
+            f"  distiller   {provider} · {model}",
+            "              (the frontier model that WRITES the skills — distinct",
+            "              from the runtime model your sessions run on)",
+            "",
+            "  start one   /jinn distill start",
+            "  or decide later — captures keep accruing either way.",
+        ]
+    )
+
+
+def render_hub(status: Dict[str, Any]) -> str:
+    mode = status.get("mode", "unset")
+    captures = status.get("capturesCount", 0)
+    uncovered = status.get("uncoveredCount", 0)
+    staged = status.get("stagedCount", 0)
+    installed = status.get("installedCount", 0)
+    provider = status.get("distillProvider", "claude")
+    model = status.get("distillModel", "")
+    last = status.get("lastRun")
+    if isinstance(last, dict):
+        last_line = (
+            f"{last.get('startedAt', '?')}  {last.get('outcome', '?')} — "
+            f"{len(last.get('published', []) or [])} distilled, {len(last.get('installed', []) or [])} installed"
+        )
+    else:
+        last_line = "never · /jinn distill start"
+    lines = [
+        "◇ distill",
+        f"  mode        {mode}",
+        f"  captures    {uncovered} of {captures} not yet distilled",
+        f"  staged      {staged}" + ("  → /jinn distill review" if staged else ""),
+        f"  installed   {installed}",
+        f"  distiller   {provider} · {model}",
+        f"  last run    {last_line}",
+    ]
+    return "\n".join(lines)
+
+
+def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
+    """`/jinn distill ...` — dispatch on the first word after `distill`."""
+    action = parts[0] if parts else ""
+
+    if action == "where":
+        mode = parts[1] if len(parts) > 1 else ""
+        if mode not in ("local", "defer", "off"):
+            return "usage: /jinn distill where local|defer|off"
+        code, out = jinn_layer.run(["distill", "--where", mode, "--json"], runner)
+        if code != 0:
+            return out.strip() or UPDATE_LAYER_LINE
+        cached_mode(runner, refresh=True)
+        behaviour = {
+            "local": "runs happen here when you start them",
+            "defer": "captures keep accruing; nothing runs",
+            "off": "captures stop being reserved for distillation",
+        }[mode]
+        return f"distill mode recorded: {mode} — {behaviour}."
+
+    if action == "":
+        status = distill_status(runner)
+        if status is None:
+            return UPDATE_LAYER_LINE
+        cached_mode(runner, refresh=True)
+        if status.get("mode") == "unset" and not load_ux_flags()["splash_shown"]:
+            mark_ux_flag("splash_shown")
+            return render_splash(status)
+        return render_hub(status)
+
+    return (
+        "/jinn distill — local distillation\n"
+        "  /jinn distill                 status (first run: what this is)\n"
+        "  /jinn distill where local|defer|off   set where it runs\n"
+    )

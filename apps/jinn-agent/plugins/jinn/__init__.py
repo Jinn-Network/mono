@@ -533,6 +533,8 @@ _JINN_HELP = (
     "  /jinn skills install <ref>   install a corpus-published skill into the agent's skills\n"
     "  /jinn skills list            jinn-installed skills\n"
     "  /jinn skills uninstall <slug>  remove a jinn-installed skill\n"
+    "  /jinn distill   local distillation — your captures into reusable skills\n"
+    "  /jinn distill where local|defer|off   set where distillation runs\n"
 )
 
 
@@ -717,6 +719,11 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
         if not installed:
             return "No jinn-installed skills. /corpus <query> to find some, then /jinn skills install <ref>."
         return "\n".join(f"{row['slug']}  ({row['ref'] or 'ref unknown'})" for row in installed)
+
+    if sub == "distill":
+        # Local distillation (mono #1538) — all logic + rendering in distill.py;
+        # this dispatch stays a one-liner like the other module-backed verbs.
+        return distill.handle_command(parts[1:], runner=_runner)
 
     if sub == "veto":
         if not buf.has_steps(task_id, session_id):
