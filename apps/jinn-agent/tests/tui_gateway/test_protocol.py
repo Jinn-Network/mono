@@ -1296,6 +1296,68 @@ def test_slash_exec_handles_plugin_commands_in_live_gateway(server):
     assert worker.calls == []
 
 
+def test_command_dispatch_plugin_agent_turn_returns_send_payload(server):
+    """Plugin commands can request a normal agent turn through command.dispatch."""
+    sid = "test-session"
+    server._sessions[sid] = {"session_key": sid, "agent": None}
+
+    with patch(
+        "hermes_cli.plugins.get_plugin_command_handler",
+        lambda name: (
+            lambda arg: {
+                "action": "agent_turn",
+                "prompt": f"PROMPT:{arg}",
+                "message": "ACK",
+            }
+        )
+        if name == "plugin-cmd"
+        else None,
+    ):
+        resp = server.handle_request({
+            "id": "r-plugin-agent-turn",
+            "method": "command.dispatch",
+            "params": {"name": "plugin-cmd", "arg": "hello", "session_id": sid},
+        })
+
+    assert "error" not in resp
+    assert resp["result"] == {
+        "type": "send",
+        "message": "PROMPT:hello",
+        "output": "ACK",
+    }
+
+
+def test_slash_exec_plugin_agent_turn_routes_to_command_dispatch(server):
+    """slash.exec must not stringify plugin agent-turn dicts."""
+    sid = "test-session"
+    server._sessions[sid] = {"session_key": sid, "agent": None}
+
+    with patch(
+        "hermes_cli.plugins.get_plugin_command_handler",
+        lambda name: (
+            lambda arg: {
+                "action": "agent_turn",
+                "prompt": f"PROMPT:{arg}",
+                "message": "ACK",
+            }
+        )
+        if name == "plugin-cmd"
+        else None,
+    ):
+        resp = server.handle_request({
+            "id": "r-plugin-agent-turn-slash",
+            "method": "slash.exec",
+            "params": {"command": "plugin-cmd hello", "session_id": sid},
+        })
+
+    assert "error" not in resp
+    assert resp["result"] == {
+        "type": "send",
+        "message": "PROMPT:hello",
+        "output": "ACK",
+    }
+
+
 def test_slash_exec_plugin_lookup_failure_falls_back_to_worker(server):
     """Plugin discovery failures must not break ordinary slash-worker commands."""
     sid = "test-session"

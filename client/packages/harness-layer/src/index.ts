@@ -135,6 +135,48 @@ export {
 } from './distil-mode.js';
 
 export {
+  DEFAULT_CAPTURES_DIR,
+  DEFAULT_DISTIL_CAPTURE_LIMIT,
+  DEFAULT_SKILLS_INSTALL_DIR,
+  coveredSessionIds,
+  loadRecentCaptures,
+  provenanceLabels,
+  stagingDirFor,
+} from './distil-captures.js';
+
+export {
+  clusterTraceCards,
+  readTrace,
+  searchTraceCards,
+  traceCardFromCapture,
+  type EvidenceTierEstimate,
+  type EstimatedDistillCost,
+  type LocalTraceCard,
+  type TraceCandidate,
+  type TraceEventView,
+  type TraceReadMode,
+  type TraceReadResult,
+  type TraceSearchQuery,
+} from './distil-traces.js';
+
+export {
+  createDistilMcpServer,
+  runLocalDistil,
+  type DistilMcpDeps,
+  type LocalDistilRunArgs,
+} from './distil-mcp-server.js';
+
+export {
+  DEFAULT_DISTIL_FEEDBACK_PATH,
+  distilFeedbackPathFromEnv,
+  readDistilFeedback,
+  recordDistilFeedback,
+  type DistilFeedbackInput,
+  type DistilFeedbackRecord,
+  type DistilFeedbackVerdict,
+} from './distil-feedback.js';
+
+export {
   threeArmMeasurement,
   pilotPower,
   type ArmResult,

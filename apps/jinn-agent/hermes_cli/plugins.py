@@ -533,8 +533,11 @@ class PluginContext:
     ) -> None:
         """Register a slash command (e.g. ``/lcm``) available in CLI and gateway sessions.
 
-        The handler signature is ``fn(raw_args: str) -> str | None``.
+        The handler signature is ``fn(raw_args: str) -> str | dict | None``.
         It may also be an async callable — the gateway dispatch handles both.
+        Use :func:`plugin_command_agent_turn` when a command should acknowledge
+        the user and then run a prompt through the host agent loop instead of
+        returning display text directly.
 
         Unlike ``register_cli_command()`` (which creates ``hermes <subcommand>``
         terminal commands), this registers in-session slash commands that users
@@ -2166,6 +2169,39 @@ def get_plugin_command_handler(name: str) -> Optional[Callable]:
     """Return the handler for a plugin-registered slash command, or ``None``."""
     entry = _ensure_plugins_discovered()._plugin_commands.get(name)
     return entry["handler"] if entry else None
+
+
+def plugin_command_agent_turn(prompt: str, *, message: str = "") -> dict[str, str]:
+    """Build a plugin command result that asks the host to run an agent turn.
+
+    Plugin slash commands normally return text that is shown directly to the
+    operator. Commands like a distiller need a different behavior: acknowledge
+    the slash command, then feed a host-built prompt into the normal agent loop.
+    Keep this as a JSON-ish dict so non-Hermes harnesses can implement the same
+    small contract without importing Hermes classes.
+    """
+    return {
+        "action": "agent_turn",
+        "prompt": str(prompt),
+        "message": str(message or ""),
+    }
+
+
+def plugin_command_agent_turn_payload(result: Any) -> Optional[dict[str, str]]:
+    """Return normalized agent-turn payload for a plugin command result."""
+    if not isinstance(result, dict):
+        return None
+    action = str(result.get("action") or "").strip().lower()
+    if action != "agent_turn":
+        return None
+    prompt = result.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        return None
+    message = result.get("message")
+    return {
+        "prompt": prompt,
+        "message": message if isinstance(message, str) else "",
+    }
 
 
 _PLUGIN_COMMAND_AWAIT_TIMEOUT_SECS = 30.0

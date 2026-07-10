@@ -7,11 +7,11 @@ enablement — was invisible to the suite. ``/jinn`` was an unknown command
 on a fresh install.
 
 Two invariants:
-  1. With ``plugins.enabled: [jinn]`` (what ``bin/jinn-agent`` ensures on
-     every launch), the real ``PluginManager.discover_and_load`` loads the
+  1. With ``plugins.enabled: [jinn]`` the real
+     ``PluginManager.discover_and_load`` loads the
      plugin, registers the ``/jinn`` + ``/corpus`` commands and the corpus
      tools.
-  2. The entrypoint's config-ensure block produces exactly that enablement
+  2. The entrypoint's config-ensure block enables the bundled Jinn plugins
      from a fresh home, is idempotent, and respects an explicit
      ``plugins.disabled`` opt-out.
 """
@@ -79,7 +79,7 @@ def test_entrypoint_enables_jinn_from_a_fresh_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     _run_ensure(tmp_path)
     cfg = yaml.safe_load((tmp_path / "config.yaml").read_text())
-    assert cfg["plugins"]["enabled"] == ["jinn"]
+    assert cfg["plugins"]["enabled"] == ["jinn", "local-trace-distiller"]
     # Idempotent, and preserves unrelated user config.
     (tmp_path / "config.yaml").write_text(
         yaml.safe_dump({"model": "x", "plugins": {"enabled": ["disk-cleanup", "jinn"]}})
@@ -87,7 +87,7 @@ def test_entrypoint_enables_jinn_from_a_fresh_home(tmp_path, monkeypatch):
     _run_ensure(tmp_path)
     cfg = yaml.safe_load((tmp_path / "config.yaml").read_text())
     assert cfg["model"] == "x"
-    assert cfg["plugins"]["enabled"] == ["disk-cleanup", "jinn"]
+    assert cfg["plugins"]["enabled"] == ["disk-cleanup", "jinn", "local-trace-distiller"]
 
 
 def test_entrypoint_respects_explicit_disable(tmp_path, monkeypatch):
@@ -96,3 +96,4 @@ def test_entrypoint_respects_explicit_disable(tmp_path, monkeypatch):
     _run_ensure(tmp_path)
     cfg = yaml.safe_load((tmp_path / "config.yaml").read_text())
     assert "jinn" not in (cfg["plugins"].get("enabled") or [])
+    assert "local-trace-distiller" in (cfg["plugins"].get("enabled") or [])

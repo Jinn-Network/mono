@@ -9724,7 +9724,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # Plugin-registered slash commands
         if command:
             try:
-                from hermes_cli.plugins import get_plugin_command_handler
+                from hermes_cli.plugins import (
+                    get_plugin_command_handler,
+                    plugin_command_agent_turn_payload,
+                )
                 # Normalize underscores to hyphens so Telegram's underscored
                 # autocomplete form matches plugin commands registered with
                 # hyphens. See hermes_cli/commands.py:_build_telegram_menu.
@@ -9734,7 +9737,27 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     result = plugin_handler(user_args)
                     if asyncio.iscoroutine(result):
                         result = await result
-                    return str(result) if result else None
+                    agent_turn = plugin_command_agent_turn_payload(result)
+                    if agent_turn:
+                        ack = agent_turn.get("message") or ""
+                        if ack:
+                            try:
+                                adapter = self.adapters.get(source.platform)
+                                if adapter:
+                                    ack_meta = self._thread_metadata_for_source(source)
+                                    await adapter.send(
+                                        str(source.chat_id), ack, metadata=ack_meta
+                                    )
+                            except Exception:
+                                logger.debug("plugin command ack send failed", exc_info=True)
+                        try:
+                            event.text = agent_turn["prompt"]
+                        except Exception:
+                            return "Could not start plugin command -- please try again."
+                        command = ""
+                        canonical = ""
+                    else:
+                        return str(result) if result else None
             except Exception as e:
                 logger.warning("Plugin command dispatch failed: %s", e)
 

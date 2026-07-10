@@ -120,15 +120,21 @@ describe('LocalDistiller', () => {
     expect(parsed.jinn.skillKind).toBe('strategic-pattern');
   });
 
-  it('drops an ineligible own-capture (not evaluator-verified) — no skill', async () => {
+  it('distils a user-accepted own-capture into an experimental local skill', async () => {
     const { sink, installed } = memorySink();
     const distiller = createLocalDistiller({ distill: async () => VALID_OUT, sink, now: NOW });
     const result = await distiller.distil([
       fixtureCapture({ outcome: { status: 'completed', verifiabilityTier: 'user-accepted' } }),
     ]);
-    expect(result.clusterCount).toBe(0);
-    expect(result.distilled.published).toHaveLength(0);
-    expect(installed).toHaveLength(0);
+
+    expect(result.clusterCount).toBe(1);
+    expect(result.distilled.published).toHaveLength(1);
+    expect(installed).toHaveLength(1);
+    expect(installed[0]!.jinn.verifiabilityTier).toBe('user-accepted');
+    expect(installed[0]!.jinn.status).toBe('experimental');
+    expect(installed[0]!.jinn.evidenceTier).toBe('single-example');
+    expect(installed[0]!.jinn.sourceTools).toEqual(['claude-code']);
+    expect(installed[0]!.jinn.targetTools).toEqual(['current']);
   });
 
   it('preserves the engine fail-closed secret gate behind the interface', async () => {

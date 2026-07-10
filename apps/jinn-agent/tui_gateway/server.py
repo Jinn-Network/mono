@@ -11425,12 +11425,19 @@ def _(rid, params: dict) -> dict:
     try:
         from hermes_cli.plugins import (
             get_plugin_command_handler,
+            plugin_command_agent_turn_payload,
             resolve_plugin_command_result,
         )
 
         handler = get_plugin_command_handler(name)
         if handler:
             result = resolve_plugin_command_result(handler(arg))
+            agent_turn = plugin_command_agent_turn_payload(result)
+            if agent_turn:
+                payload = {"type": "send", "message": agent_turn["prompt"]}
+                if agent_turn.get("message"):
+                    payload["output"] = agent_turn["message"]
+                return _ok(rid, payload)
             return _ok(rid, {"type": "plugin", "output": str(result or "")})
     except Exception:
         pass
@@ -12609,22 +12616,35 @@ def _(rid, params: dict) -> dict:
         pass
 
     plugin_handler = None
+    plugin_command_agent_turn_payload = None
     resolve_plugin_command_result = None
     if _cmd_base:
         try:
             from hermes_cli.plugins import (
                 get_plugin_command_handler,
+                plugin_command_agent_turn_payload,
                 resolve_plugin_command_result,
             )
 
             plugin_handler = get_plugin_command_handler(_cmd_base)
         except Exception:
             plugin_handler = None
+            plugin_command_agent_turn_payload = None
             resolve_plugin_command_result = None
 
     if plugin_handler and resolve_plugin_command_result:
         try:
             result = resolve_plugin_command_result(plugin_handler(_cmd_arg))
+            agent_turn = (
+                plugin_command_agent_turn_payload(result)
+                if plugin_command_agent_turn_payload
+                else None
+            )
+            if agent_turn:
+                payload = {"type": "send", "message": agent_turn["prompt"]}
+                if agent_turn.get("message"):
+                    payload["output"] = agent_turn["message"]
+                return _ok(rid, payload)
             return _ok(rid, {"output": str(result or "(no output)")})
         except Exception as e:
             return _ok(rid, {"output": f"Plugin command error: {e}"})

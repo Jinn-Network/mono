@@ -371,3 +371,56 @@ async def test_command_hook_rewrite_routes_to_plugin(monkeypatch):
     # First emit_collect fires on the original command; after rewrite the
     # dispatcher does NOT re-fire for the new command (one decision per turn).
     assert call_log == ["command:status"]
+
+
+@pytest.mark.asyncio
+async def test_plugin_agent_turn_rewrites_to_normal_agent_run(monkeypatch):
+    """A plugin slash command can start a normal agent turn by returning
+    {"action": "agent_turn", "prompt": ...}.
+    """
+    import gateway.run as gateway_run
+
+    runner = _make_runner()
+    runner._run_agent = AsyncMock(return_value={"final_response": "done"})
+
+    monkeypatch.setattr(
+        gateway_run, "_resolve_runtime_agent_kwargs", lambda: {"api_key": "***"}
+    )
+
+    from hermes_cli import commands as cmd_mod
+    from hermes_cli import plugins as plugins_mod
+
+    monkeypatch.setattr(
+        plugins_mod,
+        "get_plugin_commands",
+        lambda: {"distill": {"description": "Distill", "args_hint": "[all]"}},
+    )
+    monkeypatch.setattr(
+        plugins_mod,
+        "get_plugin_command_handler",
+        lambda name: (
+            lambda args: {
+                "action": "agent_turn",
+                "prompt": f"PROMPT:{args}",
+                "message": "ACK",
+            }
+        )
+        if name == "distill"
+        else None,
+    )
+    monkeypatch.setattr(cmd_mod, "resolve_command", lambda name: None)
+    monkeypatch.setattr(
+        cmd_mod,
+        "is_gateway_known_command",
+        lambda name: name == "distill",
+    )
+
+    result = await runner._handle_message(_make_event("/distill all"))
+
+    assert result == "done"
+    sent_texts = [
+        call.args[1]
+        for call in runner.adapters[Platform.TELEGRAM].send.await_args_list
+    ]
+    assert "ACK" in sent_texts
+    assert runner._run_agent.await_args.kwargs["message"] == "PROMPT:all"

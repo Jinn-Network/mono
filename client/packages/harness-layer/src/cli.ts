@@ -17,10 +17,10 @@
  */
 
 import { parseArgs } from 'node:util';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createInterface } from 'node:readline';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   createHarnessLayer,
@@ -56,13 +56,21 @@ import {
   DEFAULT_MODEL as DEFAULT_CLAUDE_DISTILL_MODEL,
 } from './distill-llm.js';
 import { createLocalDistiller, createLocalSkillSink } from './distiller.js';
-import { parseSkillMarkdown } from './skill-package.js';
 import {
   DEFAULT_DISTIL_MODE_PATH,
   readDistilMode,
   writeDistilMode,
   type DistilMode,
 } from './distil-mode.js';
+import {
+  DEFAULT_CAPTURES_DIR,
+  DEFAULT_DISTIL_CAPTURE_LIMIT,
+  DEFAULT_SKILLS_INSTALL_DIR,
+  coveredSessionIds,
+  loadRecentCaptures,
+  provenanceLabels,
+  stagingDirFor,
+} from './distil-captures.js';
 import {
   renderConsentDisclosure,
   renderPreview,
@@ -274,13 +282,6 @@ const DEFAULT_CLI_SEARCH_LIMIT = 20;
  */
 const DEFAULT_DISTILL_LIMIT = 2000;
 
-/** Own-captures dir the rung-1 `distil` loop reads by default (mirrors the ledger path). */
-const DEFAULT_CAPTURES_DIR = join(homedir(), '.jinn-client', 'harness-layer', 'captures');
-/** Local skills library `distil` installs into by default (harness integration passes --out). */
-const DEFAULT_SKILLS_INSTALL_DIR = join(homedir(), '.jinn-client', 'harness-layer', 'skills');
-/** How many recent own captures `distil` distils over when --limit is unset. */
-const DEFAULT_DISTIL_CAPTURE_LIMIT = 50;
-
 /**
  * Byte ceiling on any single IPFS object fetched by the distill pipeline
  * (PR #1476 security review): envelopes are KBs; donation-wrapped
@@ -303,78 +304,9 @@ function skillDirSlug(name: string): string {
   return slug === '' ? 'skill' : slug;
 }
 
-/**
- * Load the operator's most recent OWN captures for the rung-1 `distil` loop:
- * every `*.json` file in `dir` is one `CapturedTask` (the same shape
- * `capture preview` / `publish` consume). Files are parsed, the newest by
- * `session.capturedAt` first, and truncated to `limit`. A malformed file is
- * skipped (warned to stderr, matching the ledger's corrupt-line tolerance —
- * stderr, not the writer, so `--json` stdout stays parseable); a missing dir
- * yields no captures.
- */
-function loadRecentCaptures(dir: string, limit: number): CapturedTask[] {
-  if (!existsSync(dir)) return [];
-  const parsed: CapturedTask[] = [];
-  for (const file of readdirSync(dir)) {
-    if (!file.endsWith('.json')) continue;
-    try {
-      parsed.push(parseCapturedTask(JSON.parse(readFileSync(join(dir, file), 'utf-8'))));
-    } catch (err) {
-      console.warn(`[distil] skipping malformed capture file ${file}: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-  parsed.sort((a, b) => b.session.capturedAt.localeCompare(a.session.capturedAt));
-  return parsed.slice(0, limit);
-}
-
 /** Where the persisted `distil` mode lives; env-overridable for tests / CI. */
 function distilModePath(): string {
   return process.env['JINN_LAYER_DISTIL_MODE_PATH'] ?? DEFAULT_DISTIL_MODE_PATH;
-}
-
-/**
- * The session ids already covered by a distilled skill under any of `dirs` — a
- * capture is "done" when some skill's provenance names its
- * `local-capture:<sessionId>` ref. `--resume` distils only the uncovered ones
- * (design: resume is derived, not a flag). Both the active-skills dir and the
- * staging dir are scanned, so a capture already distilled (installed OR only
- * staged) is never re-spent. Unreadable skill dirs are skipped.
- */
-function coveredSessionIds(dirs: string[]): Set<string> {
-  const covered = new Set<string>();
-  for (const dir of dirs) {
-    if (!existsSync(dir)) continue;
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      const md = join(dir, entry.name, 'SKILL.md');
-      if (!existsSync(md)) continue;
-      try {
-        const pkg = parseSkillMarkdown(readFileSync(md, 'utf-8'));
-        for (const ref of pkg.jinn.provenance) {
-          const m = /^local-capture:(.+)$/.exec(ref);
-          if (m?.[1]) covered.add(m[1]);
-        }
-      } catch {
-        // A skill dir we can't parse can't be proven to cover anything — skip it.
-      }
-    }
-  }
-  return covered;
-}
-
-/**
- * Map a skill's provenance refs to human labels for the run panel: a
- * `local-capture:<sessionId>` ref becomes that capture's task summary when it is
- * in this run's set, else the raw ref.
- */
-function provenanceLabels(
-  pkg: { jinn: { provenance: string[] } },
-  summaryBySession: Map<string, string>,
-): string[] {
-  return pkg.jinn.provenance.map((ref) => {
-    const m = /^local-capture:(.+)$/.exec(ref);
-    return m?.[1] ? (summaryBySession.get(m[1]) ?? m[1]) : ref;
-  });
 }
 
 function ask(rl: ReturnType<typeof createInterface>, q: string): Promise<string> {
@@ -922,7 +854,7 @@ export async function runJinnLayerCli(
     // sibling staging dir until the operator installs them; nothing goes live
     // without an explicit choice (the consent-consistent default).
     const activeDir = (parsed.values.out as string | undefined) ?? DEFAULT_SKILLS_INSTALL_DIR;
-    const stagingDir = activeDir.replace(/[/\\]+$/, '') + '-staged';
+    const stagingDir = stagingDirFor(activeDir);
     mkdirSync(activeDir, { recursive: true });
     mkdirSync(stagingDir, { recursive: true });
 

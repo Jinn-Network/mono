@@ -64,6 +64,14 @@ export interface DistillDeps {
   /** The held-out slate for the contamination scan (§12). */
   slate: { instanceIds: Set<string>; repos?: Set<string> };
   distribution?: string;
+  /** Evidence tier recorded on generated local skills. Defaults to evaluator-verified network posture. */
+  verifiabilityTier?: string;
+  /** Local lifecycle status for private generated skills. */
+  skillStatus?: 'experimental' | 'stable' | 'deprecated';
+  /** Local evidence tier for private generated skills. */
+  evidenceTier?: 'single-example' | 'recurring-pattern' | 'contrastive' | 'user-confirmed' | 'stable' | 'deprecated';
+  sourceTools?: string[];
+  targetTools?: string[];
   /** The model that ran distillation — recorded in provenance (§5 auditability). */
   distillModel?: string;
   scrubPipeline?: ScrubPipeline;
@@ -232,6 +240,11 @@ interface FinalizeDeps {
   now: Date;
   slate: { instanceIds: Set<string>; repos?: Set<string> };
   distillModel?: string;
+  verifiabilityTier?: string;
+  skillStatus?: DistillDeps['skillStatus'];
+  evidenceTier?: DistillDeps['evidenceTier'];
+  sourceTools?: string[];
+  targetTools?: string[];
   publishSkill: (pkg: SkillPackage) => Promise<{ envelopeRef: string; anchorTx: string | null }>;
 }
 
@@ -278,12 +291,16 @@ async function finalizeSkill(
     jinn: {
       schema: 'jinn.skill.v1',
       distribution: deps.distribution,
-      verifiabilityTier: 'evaluator-verified',
+      verifiabilityTier: deps.verifiabilityTier ?? 'evaluator-verified',
       distilledFrom: spec.distinctInstances,
       provenance: spec.evidenceRefs,
       distillPromptSha256: spec.promptSha,
       distilledAt: deps.now.toISOString(),
       skillKind: spec.skillKind,
+      ...(deps.skillStatus ? { status: deps.skillStatus } : {}),
+      ...(deps.evidenceTier ? { evidenceTier: deps.evidenceTier } : {}),
+      ...(deps.sourceTools ? { sourceTools: deps.sourceTools } : {}),
+      ...(deps.targetTools ? { targetTools: deps.targetTools } : {}),
       ...(deps.distillModel ? { distillModel: deps.distillModel } : {}),
       evidenceTokens: estimateTokens(JSON.stringify(spec.input ?? '')),
       skillTokens: estimateTokens(out.body),
@@ -296,7 +313,20 @@ async function finalizeSkill(
 
 /** Resolve the lazy per-stage deps into the concrete {@link FinalizeDeps} both stages share. */
 function resolveFinalizeDeps(
-  deps: Pick<DistillDeps, 'scrubPipeline' | 'distribution' | 'now' | 'slate' | 'distillModel' | 'publishSkill'>,
+  deps: Pick<
+    DistillDeps,
+    | 'scrubPipeline'
+    | 'distribution'
+    | 'now'
+    | 'slate'
+    | 'distillModel'
+    | 'verifiabilityTier'
+    | 'skillStatus'
+    | 'evidenceTier'
+    | 'sourceTools'
+    | 'targetTools'
+    | 'publishSkill'
+  >,
 ): FinalizeDeps {
   return {
     pipeline: deps.scrubPipeline ?? buildLayer2ScrubPipeline(),
@@ -304,6 +334,11 @@ function resolveFinalizeDeps(
     now: deps.now?.() ?? new Date(),
     slate: deps.slate,
     ...(deps.distillModel ? { distillModel: deps.distillModel } : {}),
+    ...(deps.verifiabilityTier ? { verifiabilityTier: deps.verifiabilityTier } : {}),
+    ...(deps.skillStatus ? { skillStatus: deps.skillStatus } : {}),
+    ...(deps.evidenceTier ? { evidenceTier: deps.evidenceTier } : {}),
+    ...(deps.sourceTools ? { sourceTools: deps.sourceTools } : {}),
+    ...(deps.targetTools ? { targetTools: deps.targetTools } : {}),
     publishSkill: deps.publishSkill,
   };
 }

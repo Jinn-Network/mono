@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Bundle the jinn-layer CLI into dist/bin/jinn-layer.js (#1356).
+ * Bundle harness-layer binaries into dist/bin (#1356).
  *
  * The harness-layer workspace package imports client code across the
  * package boundary (`../../../src/...`), which a second tsc pass cannot
@@ -11,15 +11,20 @@
 import { build } from 'esbuild';
 import { chmodSync } from 'node:fs';
 
-await build({
-  entryPoints: ['packages/harness-layer/src/bin/jinn-layer.ts'],
-  outfile: 'dist/bin/jinn-layer.js',
-  bundle: true,
-  platform: 'node',
-  format: 'esm',
-  target: 'node22',
-  packages: 'external',
-  logLevel: 'warning',
-});
-chmodSync('dist/bin/jinn-layer.js', 0o755);
-console.log('[bundle-jinn-layer] dist/bin/jinn-layer.js written');
+for (const entry of [
+  { in: 'packages/harness-layer/src/bin/jinn-layer.ts', out: 'dist/bin/jinn-layer.js' },
+  { in: 'packages/harness-layer/src/bin/jinn-distil-mcp.ts', out: 'dist/bin/jinn-distil-mcp.js' },
+]) {
+  await build({
+    entryPoints: [entry.in],
+    outfile: entry.out,
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    target: 'node22',
+    packages: 'external',
+    logLevel: 'warning',
+  });
+  chmodSync(entry.out, 0o755);
+  console.log(`[bundle-jinn-layer] ${entry.out} written`);
+}

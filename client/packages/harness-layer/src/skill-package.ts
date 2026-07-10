@@ -46,6 +46,15 @@ export const SkillPackageMetaSchema = z
     distilledAt: z.string().optional(),
     seedSource: z.string().optional(),
     skillKind: z.enum(['strategic-pattern', 'failure-lesson', 'contrastive', 'cross-instance']).optional(),
+    status: z.enum(['experimental', 'stable', 'deprecated']).optional(),
+    evidenceTier: z
+      .enum(['single-example', 'recurring-pattern', 'contrastive', 'user-confirmed', 'stable', 'deprecated'])
+      .optional(),
+    sourceTools: z.array(z.string().min(1)).optional(),
+    targetTools: z.array(z.string().min(1)).optional(),
+    uses: z.number().int().nonnegative().optional(),
+    positiveFeedback: z.number().int().nonnegative().optional(),
+    negativeFeedback: z.number().int().nonnegative().optional(),
     // Auditability (spec §5, v0.5): the distilling model + a deterministic
     // ceil(chars/4) token estimate of input vs body (the compression ratio).
     distillModel: z.string().min(1).optional(),
