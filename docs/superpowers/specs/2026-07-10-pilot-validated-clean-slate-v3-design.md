@@ -87,3 +87,44 @@ work, stale validation fails closed, and chunked reruns make only the requested
 new calls without repeating completed stock attempts.
 
 No live solver or grader calls are made by unit tests.
+
+## As-built errata (2026-07-10, post-run)
+
+Recorded after the first live runs against this slate; each item names where
+the shipped implementation or the first experiment diverged from this design.
+
+1. **Quality screening as-built.** Admission point 2 ("every available dataset
+   quality assessment") was implemented as a locally generated
+   claude-haiku-4-5 screen over the 36 smallest-input validated candidates
+   (34 rated `A`; one `B2`, one `B3` rejected), recorded in
+   `held-out-slate.swe-rebench-v2.v3.quality-screen.json`. The deterministic
+   hash selection therefore operated over ≤34 pre-screened candidates, and the
+   slate inherits a smallest-input size bias. The screen replaced each task's
+   `meta` wholesale rather than merging with dataset-provided assessments.
+2. **Run-time admission verification not wired.** The fail-closed re-check
+   described under Pilot Integration (`verifySelectedTaskAdmission`) exists
+   and is unit-tested but is not called by `run-pilot.ts`; the pilot pins the
+   frozen artifact by sha256 only. A semantics bump does not currently fail
+   closed at run time.
+3. **Repo-level leakage.** Exclusion (admission point 4) was instance-id-only.
+   Three slate members share a repository with distillation source instances:
+   `probabl-ai__skore-1229`, `probabl-ai__skore-1136` (source
+   `probabl-ai__skore-1056`) and `gerlero__foamlib-315` (source
+   `gerlero__foamlib-329`). These bias skill arms and are excluded from
+   cross-repo analyses; they are, deliberately, the same-repo (rung-2)
+   transfer probe set.
+4. **Arm isolation was absent in the 2026-07-10 runs.** All arms ran against
+   the shared `~/.jinn-agent`, so every arm's system prompt carried the full
+   installed skills catalog (all 20 distilled skills, stock arm included) —
+   the arms were not experimentally distinct, and all same-day arm
+   comparisons (v2 slate 0/9-all-arms; v3 partial runs) are void as transfer
+   evidence. Difficulty reads (stock-condition resolve rates) remain valid.
+   Isolation is now per-arm `jinnAgentHome` homes built by
+   `client/scripts/build-pilot-arm-homes.ts` and verified by a live
+   system-prompt probe before spend; skills are lazy (manifest entry +
+   `skill_view`), so runs testing knowledge rather than browsing propensity
+   pass `--skills-nudge` (recorded as semantic in the manifest).
+5. **Slate repurposing.** With stock at 71% on the screened subset, v3 is
+   repurposed as the cost/efficiency eval (both-solve cost deltas,
+   non-inferiority on solvable tasks); the difficulty/efficacy question moved
+   to the v2 baseline-failure slate and the rung-2 probe.
