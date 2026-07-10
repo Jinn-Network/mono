@@ -481,7 +481,7 @@ __metadata:
     "@types/node": "npm:^26.1.1"
     drizzle-orm: "npm:^0.45.2"
     hono: "npm:^4.12.28"
-    ponder: "npm:^0.16.6"
+    ponder: "npm:^0.16.8"
     typescript: "npm:^5.4.0"
     viem: "npm:^2.55.0"
     vitest: "npm:^4.1.10"
@@ -2509,9 +2509,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ponder@npm:^0.16.6":
-  version: 0.16.6
-  resolution: "ponder@npm:0.16.6"
+"ponder@npm:^0.16.8":
+  version: 0.16.8
+  resolution: "ponder@npm:0.16.8"
   dependencies:
     "@babel/code-frame": "npm:^7.23.4"
     "@commander-js/extra-typings": "npm:^12.0.1"
@@ -2558,7 +2558,7 @@ __metadata:
       optional: true
   bin:
     ponder: dist/esm/bin/ponder.js
-  checksum: 10c0/66dcaab64b40e0227f6a9125766dcfb54e47ae27a2784dc2b6db0674969fc76b8ce4f1fcaf5259e7c415484326e8e7065b23e2d4a122d108695cdae9a57d6397
+  checksum: 10c0/56e4732e397bbd198b1ebb36d010af241cc43fb83c1efa17236b16149a1d879465ba4923bcb527bb793cd9d22b7306e804cc296cb2bfc2b597d06815c3358c17
   languageName: node
   linkType: hard
 
