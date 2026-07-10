@@ -57,7 +57,7 @@ __metadata:
     smol-toml: "npm:^1.7.0"
     twitter-api-v2: "npm:^1.18.0"
     typescript: "npm:^5.4.0"
-    viem: "npm:^2.54.2"
+    viem: "npm:^2.55.0"
     vitest: "npm:^4.1.10"
     zod: "npm:^3.23.0"
   bin:
@@ -760,9 +760,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ox@npm:0.14.29":
-  version: 0.14.29
-  resolution: "ox@npm:0.14.29"
+"ox@npm:0.14.30":
+  version: 0.14.30
+  resolution: "ox@npm:0.14.30"
   dependencies:
     "@adraffy/ens-normalize": "npm:^1.11.0"
     "@noble/ciphers": "npm:^1.3.0"
@@ -777,7 +777,7 @@ __metadata:
   peerDependenciesMeta:
     typescript:
       optional: true
-  checksum: 10c0/bf36b2cd83d67bf43893b73876630554d0bd1748c7ad769607ceb8fe1aaf6afa6f9411a31e7e815de107a035811ebfa790c0af591aa403e363b83a1896acfc7b
+  checksum: 10c0/dfefa9218269103b3da3686c4da62849aef15e4347fd21f898fa113d9b4c2b86afab7c662c94d58206257736202647ce96249405c021c4a233712ac34fa3cc1b
   languageName: node
   linkType: hard
 
@@ -1024,9 +1024,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"viem@npm:^2.54.2":
-  version: 2.54.2
-  resolution: "viem@npm:2.54.2"
+"viem@npm:^2.55.0":
+  version: 2.55.0
+  resolution: "viem@npm:2.55.0"
   dependencies:
     "@noble/curves": "npm:1.9.1"
     "@noble/hashes": "npm:1.8.0"
@@ -1034,14 +1034,14 @@ __metadata:
     "@scure/bip39": "npm:1.6.0"
     abitype: "npm:1.2.3"
     isows: "npm:1.0.7"
-    ox: "npm:0.14.29"
+    ox: "npm:0.14.30"
     ws: "npm:8.21.0"
   peerDependencies:
     typescript: ">=5.0.4"
   peerDependenciesMeta:
     typescript:
       optional: true
-  checksum: 10c0/9f798c9581d910409e613db16b0db9dc09d0fce2c94211e0516fa9e38da090dd064703afbc27e8ad7368e19bdb479701c2bebce87402d2267503bcde3bc95a32
+  checksum: 10c0/6baed9096ed427397c137b4d313719a86012fc0812a36924667f5b972c0940755d05f49d8b87442d97e0184c4bbf4e208221b712b27cce5c677cdb03e9a3895b
   languageName: node
   linkType: hard
 
