@@ -1,5 +1,5 @@
 /**
- * The promotion gate — which layer-1 evidence is eligible to distil
+ * The promotion gate — which layer-1 evidence is eligible to distill
  * (spec/2026-07-06-distillation-v1.md §6, D3/D10).
  *
  * Tiered eligibility: a `completed` + `evaluator-verified` trace is

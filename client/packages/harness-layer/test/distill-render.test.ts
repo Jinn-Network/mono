@@ -11,7 +11,7 @@ import {
   renderFailure,
   renderResumeNothing,
   type RenderedSkill,
-} from '../src/distil-render.js';
+} from '../src/distill-render.js';
 
 /** The two hard rules apply to every string this surface prints. */
 const EMOJI = /\p{Extended_Pictographic}/u;
@@ -31,7 +31,7 @@ const SKILLS: RenderedSkill[] = [
   },
 ];
 
-describe('distil render — consent disclosure (1a)', () => {
+describe('distill render — consent disclosure (1a)', () => {
   const s = renderConsentDisclosure({ captureCount: 6, distillModel: 'llama-4-405b' });
 
   it('leads with what distillation is for and states it is compute, not money', () => {
@@ -72,7 +72,7 @@ describe('distil render — consent disclosure (1a)', () => {
   });
 });
 
-describe('distil render — persistent mode echo (1c)', () => {
+describe('distill render — persistent mode echo (1c)', () => {
   it('echoes local as running here with a frontier-class model', () => {
     const s = renderModeSet('local');
     expect(s).toMatch(/mode set to local/i);
@@ -90,7 +90,7 @@ describe('distil render — persistent mode echo (1c)', () => {
   });
 });
 
-describe('distil render — deferred path (1c)', () => {
+describe('distill render — deferred path (1c)', () => {
   const s = renderDeferredRun({ captureCount: 6, capturesDir: '/caps' });
   it('says captures are held locally and nothing runs', () => {
     expect(s).toMatch(/deferred/i);
@@ -105,7 +105,7 @@ describe('distil render — deferred path (1c)', () => {
   });
 });
 
-describe('distil render — recorded states (1a)', () => {
+describe('distill render — recorded states (1a)', () => {
   it('recorded defer explains captures are held, nothing spent or published', () => {
     const s = renderRecorded('defer', { captureCount: 6 });
     expect(s).toMatch(/DEFERRED/);
@@ -118,7 +118,7 @@ describe('distil render — recorded states (1a)', () => {
   });
 });
 
-describe('distil render — empty state (1d)', () => {
+describe('distill render — empty state (1d)', () => {
   const s = renderEmpty({ capturesDir: '/caps' });
   it('says there are no eligible captures and what produces one', () => {
     expect(s).toMatch(/no eligible captures/i);
@@ -129,7 +129,7 @@ describe('distil render — empty state (1d)', () => {
   });
 });
 
-describe('distil render — skills panel (1b)', () => {
+describe('distill render — skills panel (1b)', () => {
   const s = renderSkillsPanel(SKILLS, 'skills · installed · ready');
 
   it('shows each skill with an install-state word (not a glyph) and its name', () => {
@@ -176,10 +176,10 @@ describe('distil render — skills panel (1b)', () => {
   });
 });
 
-describe('distil render — run summary (1b)', () => {
+describe('distill render — run summary (1b)', () => {
   const allInstalled = renderRunSummary({ distillModel: 'llama-4-405b', captureCount: 6, skills: SKILLS });
   it('headers with the mode, distiller and capture count', () => {
-    expect(allInstalled).toMatch(/distil: local/);
+    expect(allInstalled).toMatch(/distill: local/);
     expect(allInstalled).toContain('llama-4-405b');
     expect(allInstalled).toContain('6 capture');
   });
@@ -220,7 +220,7 @@ describe('distil render — run summary (1b)', () => {
   });
 });
 
-describe('distil render — review before install (1b)', () => {
+describe('distill render — review before install (1b)', () => {
   const s = renderReview({ distillModel: 'llama-4-405b', captureCount: 6, skills: SKILLS });
   it('frames the skills forward — what they will help with next time', () => {
     expect(s).toMatch(/help with tasks like these/i);
@@ -242,21 +242,21 @@ describe('distil render — review before install (1b)', () => {
   });
 });
 
-describe('distil render — failure (1d)', () => {
+describe('distill render — failure (1d)', () => {
   const s = renderFailure({
     distillModel: 'llama-4-405b',
     distilledCount: 3,
     errors: [{ clusterId: 'c4', error: 'the distiller stopped responding' }],
   });
   it('says what stopped, what survived, and the one command to resume', () => {
-    expect(s).toMatch(/distil failed/i);
+    expect(s).toMatch(/distill failed/i);
     expect(s).toContain('3');
     expect(s).toMatch(/kept|nothing was (sent or )?lost/i);
     expect(s).toContain('--resume');
   });
 });
 
-describe('distil render — nothing to resume (1c/1d)', () => {
+describe('distill render — nothing to resume (1c/1d)', () => {
   it('says all captures are already distilled', () => {
     const s = renderResumeNothing({ captureCount: 6 });
     expect(s).toMatch(/already distilled|nothing to resume/i);

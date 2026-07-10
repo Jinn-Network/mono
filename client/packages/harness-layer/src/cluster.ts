@@ -39,7 +39,7 @@ export interface ClusterOptions {
 
 /**
  * A compact projection of one eligible item's envelope — enough for the LLM
- * port to distil. Steps carry their `attributes` (the patch diff, the solver
+ * port to distill. Steps carry their `attributes` (the patch diff, the solver
  * step trace) as well as their name: a name-only projection under-feeds the
  * distiller — the patch is *what changed* and the trace is *the decision path*
  * (§8, v0.5). Each attribute is already ≤16 KiB (capped by `capture()`), so no

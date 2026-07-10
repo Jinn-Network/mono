@@ -57,11 +57,11 @@ import {
 } from './distill-llm.js';
 import { createLocalDistiller, createLocalSkillSink } from './distiller.js';
 import {
-  DEFAULT_DISTIL_MODE_PATH,
-  readDistilMode,
-  writeDistilMode,
-  type DistilMode,
-} from './distil-mode.js';
+  DEFAULT_DISTILL_MODE_PATH,
+  readDistillMode,
+  writeDistillMode,
+  type DistillMode,
+} from './distill-mode.js';
 import {
   DEFAULT_CAPTURES_DIR,
   DEFAULT_DISTIL_CAPTURE_LIMIT,
@@ -84,7 +84,7 @@ import {
   renderFailure,
   renderResumeNothing,
   type RenderedSkill,
-} from './distil-render.js';
+} from './distill-render.js';
 import type { AttemptRef, BridgeEvidence } from './bridge.js';
 import type { DistillCluster, DistillLLMOutput, MetaDistillLLMOutput } from './distill.js';
 import type { MetaCluster } from './cluster.js';
@@ -140,28 +140,28 @@ Commands:
               [--distiller claude|codex] [--local-only]
                                                  Run the distillation pipeline over the
                                                  swe-rebench-v2 verdict ledger: verdict→solution
-                                                 join → distil → local SKILL.md packages.
+                                                 join → distill → local SKILL.md packages.
                                                  Held-out slate instances are excluded. Writes
                                                  <out>/<name>/SKILL.md and prints the summary.
                                                  --meta also runs stage-2 cross-instance
                                                  meta-distill over the stage-1 skills.
                                                  --local-only avoids chain writes and evidence
                                                  anchors, using in-memory publish deps.
-  distil [--where local|defer|off] [--install all|<name>|none] [--resume]
+  distill [--where local|defer|off] [--install all|<name>|none] [--resume]
          [--captures <dir>] [--limit N] [--out <dir>]
          [--distiller claude|codex] [--distiller-model <model>] [--json]
-                                                 Rung-1 own-captures loop: distil YOUR recent local
+                                                 Rung-1 own-captures loop: distill YOUR recent local
                                                  captures into skills, fully local (no corpus publish,
                                                  no chain anchor). A heavy local pass, so you control
                                                  WHERE it runs (#1490):
-                                                   --where local  distil here now (a spend; confirms)
+                                                   --where local  distill here now (a spend; confirms)
                                                    --where defer  hold captures, run nothing (default)
                                                    --where off    stop reserving captures
                                                  --where sets the persistent mode and echoes it —
-                                                 nothing runs. A bare 'distil' with no recorded mode
+                                                 nothing runs. A bare 'distill' with no recorded mode
                                                  shows first-run consent (interactive) or takes the
                                                  safe default (defer) non-interactively.
-                                                 A LOCAL run distils to a STAGING area and installs
+                                                 A LOCAL run distills to a STAGING area and installs
                                                  NOTHING by default — you review the skills (what each
                                                  came from and will help with) and choose:
                                                    --install all     install every distilled skill
@@ -172,7 +172,7 @@ Commands:
                                                  <out>/<name>/SKILL.md (default
                                                  ~/.jinn-client/harness-layer/skills, the active dir
                                                  /jinn skills reads); the rest wait in <out>-staged.
-                                                 --resume distils only the captures no distilled skill
+                                                 --resume distills only the captures no distilled skill
                                                  (installed OR staged) already covers.
                                                  --json reports the distilled and installed sets
                                                  separately.
@@ -202,9 +202,9 @@ Environment (distill — reads the testnet ledger + spends model solves):
   JINN_DISTILL_MODEL       Distiller model (defaults: claude-opus-4-8 for claude, gpt-5.5 for codex)
   (publish env above)      distill also captures + anchors the bridged evidence on testnet unless --local-only
 
-Environment (distil — the rung-1 own-captures loop; runs fully locally):
+Environment (distill — the rung-1 own-captures loop; runs fully locally):
   JINN_LAYER_CAPTURES_DIR    Own-captures dir (default: ~/.jinn-client/harness-layer/captures)
-  JINN_LAYER_DISTIL_MODE_PATH  Where-it-runs mode file (default: ~/.jinn-client/harness-layer/distil.json)
+  JINN_LAYER_DISTILL_MODE_PATH  Where-it-runs mode file (default: ~/.jinn-client/harness-layer/distill.json)
   JINN_DISTILL_PROVIDER      Distiller provider: claude or codex (default: claude)
   JINN_DISTILL_MODEL         Distiller model (overridden by --distiller-model)
 `;
@@ -217,7 +217,7 @@ interface DistillPorts {
 }
 
 /** Injectable deps for `distill run` (tests). Production defaults build the live wiring. */
-export interface DistillCliDeps {
+export interface DistillRunCliDeps {
   /** Ledger verdict-row source (both polarities). Default: live indexer. */
   verdictSource?: VerdictSource;
   /** Fetch the patch + problem statement for an attempt. Default: live gateway + indexer. */
@@ -235,10 +235,10 @@ export interface DistillCliDeps {
 }
 
 /**
- * Injectable deps for the rung-1 `distil` own-captures loop (tests). Production
+ * Injectable deps for the rung-1 `distill` own-captures loop (tests). Production
  * defaults resolve the distill port from the provider + distiller model.
  */
-export interface DistilCliDeps {
+export interface DistillCliDeps {
   /** The LLM distill port. Default: provider factory over the resolved distiller model. */
   distill?: (cluster: DistillCluster) => Promise<DistillLLMOutput>;
   /** Provider-aware port factory (tests). Default: Claude or Codex CLI ports. */
@@ -254,7 +254,7 @@ export interface DistilCliDeps {
    * consent flow needs no TTY; the default is a readline prompt (see
    * {@link readlineConsentPrompt}), used only when `isTty`.
    */
-  promptConsent?: () => Promise<DistilMode>;
+  promptConsent?: () => Promise<DistillMode>;
   /**
    * Whether to treat this invocation as interactive (tests). Default:
    * `process.stdout.isTTY && process.stdin.isTTY`. When false and the mode is
@@ -283,9 +283,9 @@ export interface RunJinnLayerCliOptions {
   /** Injectable seed source (tests). Default: GitHub source over --source list. */
   seedSource?: SeedSource;
   /** Injectable distill-pipeline deps (tests). Default: live wiring per field. */
-  distillDeps?: DistillCliDeps;
+  distillRunDeps?: DistillRunCliDeps;
   /** Injectable rung-1 own-captures deps (tests). Default: provider-resolved distill port. */
-  distilDeps?: DistilCliDeps;
+  distillDeps?: DistillCliDeps;
   writer?: { write: (s: string) => boolean };
 }
 
@@ -320,11 +320,25 @@ function skillDirSlug(name: string): string {
   return slug === '' ? 'skill' : slug;
 }
 
-/** Where the persisted `distil` mode lives; env-overridable for tests / CI. */
-function distilModePath(): string {
-  return process.env['JINN_LAYER_DISTIL_MODE_PATH'] ?? DEFAULT_DISTIL_MODE_PATH;
-}
+/** Warn-once latch for the legacy single-l env name (issue #1532). */
+let warnedLegacyModePathEnv = false;
 
+/** Where the persisted `distill` mode lives; env-overridable for tests / CI. */
+function distillModePath(): string {
+  const current = process.env['JINN_LAYER_DISTILL_MODE_PATH'];
+  if (current !== undefined) return current;
+  const legacy = process.env['JINN_LAYER_DISTIL_MODE_PATH'];
+  if (legacy !== undefined) {
+    if (!warnedLegacyModePathEnv) {
+      warnedLegacyModePathEnv = true;
+      console.warn(
+        '[distill] JINN_LAYER_DISTIL_MODE_PATH is renamed to JINN_LAYER_DISTILL_MODE_PATH (double l); the old name still works but will be dropped',
+      );
+    }
+    return legacy;
+  }
+  return DEFAULT_DISTILL_MODE_PATH;
+}
 function ask(rl: ReturnType<typeof createInterface>, q: string): Promise<string> {
   return new Promise((resolve) => rl.question(q, (a) => resolve(a)));
 }
@@ -342,12 +356,12 @@ async function readlineConsentPrompt(o: {
   capturesDir: string;
   captures: CapturedTask[];
   writer: { write: (s: string) => boolean };
-}): Promise<DistilMode> {
+}): Promise<DistillMode> {
   o.writer.write(renderConsentDisclosure({ captureCount: o.captureCount, distillModel: o.distillModel }) + '\n');
   const rl = createInterface({ input: process.stdin, output: process.stderr, terminal: true });
   try {
     for (;;) {
-      const a = (await ask(rl, '\ndistil where? [L]ocal now · [F] defer (default) · [O]ff · [P]review: ')).trim().toLowerCase();
+      const a = (await ask(rl, '\ndistill where? [L]ocal now · [F] defer (default) · [O]ff · [P]review: ')).trim().toLowerCase();
       if (a === '' || a === 'f' || a === 'defer') return 'defer';
       if (a === 'o' || a === 'off') return 'off';
       if (a === 'p' || a === 'preview') {
@@ -639,16 +653,16 @@ export async function runJinnLayerCli(
   const isPublish = verb === 'publish';
   const isSeed = verb === 'seed' && (subverb === 'plan' || subverb === 'execute');
   const isSkillsInstall = verb === 'skills' && subverb === 'install';
-  const isDistill = verb === 'distill' && subverb === 'run';
-  const isDistil = verb === 'distil';
+  const isDistillRun = verb === 'distill' && subverb === 'run';
+  const isDistill = verb === 'distill' && !isDistillRun;
   const isDeriveEnv = verb === 'derive-env';
-  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed && !isSkillsInstall && !isDistill && !isDistil && !isDeriveEnv) {
+  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed && !isSkillsInstall && !isDistillRun && !isDistill && !isDeriveEnv) {
     writer.write(USAGE);
     return verb === undefined || verb === 'help' || verb === '--help' ? 0 : 2;
   }
 
-  // `ledger`, `publish`, `distil`, and `derive-env` have no subverb — their args start at argv[1].
-  const flat = isLedger || isPublish || isDistil || isDeriveEnv;
+  // `ledger`, `publish`, `distill`, and `derive-env` have no subverb — their args start at argv[1].
+  const flat = isLedger || isPublish || isDistill || isDeriveEnv;
   let parsed;
   try {
     parsed = parseArgs({
@@ -756,13 +770,13 @@ export async function runJinnLayerCli(
     return result.errors.length > 0 ? 1 : 0;
   }
 
-  if (isDistil) {
-    const dd = opts.distilDeps ?? {};
+  if (isDistill) {
+    const dd = opts.distillDeps ?? {};
     const json = parsed.values.json as boolean;
 
     // Distiller provider + model — the arbitrage knob. The model resolved here
     // WRITES the skills; it is deliberately distinct from the cheap runtime
-    // model each capture ran under (`environment.model`), which `distil` never
+    // model each capture ran under (`environment.model`), which `distill` never
     // touches. Resolution: --distiller-model > JINN_DISTILL_MODEL > provider default.
     const rawProvider = (parsed.values.distiller as string | undefined) ?? process.env['JINN_DISTILL_PROVIDER'] ?? 'claude';
     const distillProvider = parseDistillProvider(rawProvider);
@@ -778,7 +792,7 @@ export async function runJinnLayerCli(
     const distill =
       dd.distill ?? (dd.distillerFactory ?? defaultDistillerFactory)(distillProvider, distillModel).distill;
 
-    const modePath = distilModePath();
+    const modePath = distillModePath();
 
     // 1c — `--where <mode>`: the persistent setter. Scriptable, non-interactive;
     // it records the mode and echoes the resulting behaviour, and runs nothing.
@@ -788,7 +802,7 @@ export async function runJinnLayerCli(
         writer.write(`error: --where must be "local", "defer" or "off" (got ${JSON.stringify(whereFlag)})\n\n${USAGE}`);
         return 2;
       }
-      writeDistilMode(whereFlag, modePath);
+      writeDistillMode(whereFlag, modePath);
       writer.write((json ? JSON.stringify({ where: whereFlag }) : renderModeSet(whereFlag)) + '\n');
       return 0;
     }
@@ -802,10 +816,10 @@ export async function runJinnLayerCli(
     const capLimit =
       argv.some((a) => a === '--limit' || a.startsWith('--limit=')) && Number.isFinite(capN) && capN > 0
         ? capN
-        : DEFAULT_DISTIL_CAPTURE_LIMIT;
+        : DEFAULT_DISTILL_CAPTURE_LIMIT;
     const captures = loadRecentCaptures(capturesDir, capLimit);
 
-    // 1d — empty: nothing to distil, whatever the mode. Short-circuits consent.
+    // 1d — empty: nothing to distill, whatever the mode. Short-circuits consent.
     if (captures.length === 0) {
       if (json) {
         writer.write(JSON.stringify({ clusterCount: 0, distilled: { published: [], rejected: [], errors: [] }, capturesConsidered: 0, distillModel }) + '\n');
@@ -816,16 +830,16 @@ export async function runJinnLayerCli(
     }
 
     const resume = parsed.values.resume as boolean;
-    const mode = readDistilMode(modePath);
+    const mode = readDistillMode(modePath);
     const isTty = dd.isTty ?? Boolean(process.stdout.isTTY && process.stdin.isTTY);
 
     // Decide the mode this invocation acts on. `--resume` only continues an
     // already-consented LOCAL run — it never grants consent itself, so a
     // `--resume` under any other mode falls through to normal mode handling
     // (unset → first-run consent, defer/off → run nothing). This closes the
-    // bypass where `distil --resume` on a fresh machine would spend without ever
+    // bypass where `distill --resume` on a fresh machine would spend without ever
     // passing the consent gate.
-    let acting: DistilMode;
+    let acting: DistillMode;
     if (resume && mode === 'local') {
       acting = 'local';
     } else if (mode === 'unset') {
@@ -846,7 +860,7 @@ export async function runJinnLayerCli(
         return 0;
       }
       const chosen = await prompt();
-      writeDistilMode(chosen, modePath);
+      writeDistillMode(chosen, modePath);
       writer.write(renderRecorded(chosen, { captureCount: captures.length }) + '\n');
       if (chosen !== 'local') return 0;
       acting = 'local';
@@ -865,7 +879,7 @@ export async function runJinnLayerCli(
       return 0;
     }
 
-    // acting === 'local' → distil to STAGING, review, install-on-choice.
+    // acting === 'local' → distill to STAGING, review, install-on-choice.
     // `--out` is the ACTIVE skills dir (installed skills live here — what /jinn
     // skills and resume read). Distilled-but-not-installed skills wait in a
     // sibling staging dir until the operator installs them; nothing goes live
@@ -875,20 +889,20 @@ export async function runJinnLayerCli(
     mkdirSync(activeDir, { recursive: true });
     mkdirSync(stagingDir, { recursive: true });
 
-    // --resume: distil only captures no distilled skill (installed OR staged)
+    // --resume: distill only captures no distilled skill (installed OR staged)
     // already covers.
-    let toDistil = captures;
+    let toDistill = captures;
     if (resume) {
       const covered = coveredSessionIds([activeDir, stagingDir]);
-      toDistil = captures.filter((c) => !covered.has(c.session.sessionId));
-      if (toDistil.length === 0) {
+      toDistill = captures.filter((c) => !covered.has(c.session.sessionId));
+      if (toDistill.length === 0) {
         if (json) writer.write(JSON.stringify({ mode: 'local', ran: false, resume: true, capturesConsidered: captures.length }) + '\n');
         else writer.write(renderResumeNothing({ captureCount: captures.length }) + '\n');
         return 0;
       }
     }
 
-    // Distil to STAGING — nothing is installed yet.
+    // Distill to STAGING — nothing is installed yet.
     const distiller = createLocalDistiller({
       distill,
       sink: createLocalSkillSink(stagingDir),
@@ -896,15 +910,15 @@ export async function runJinnLayerCli(
       distillModel,
       ...(dd.slateInstanceIds ? { slate: { instanceIds: dd.slateInstanceIds } } : {}),
     });
-    const result = await distiller.distil(toDistil);
+    const result = await distiller.distill(toDistill);
     const published = result.distilled.published;
-    const summaryBySession = new Map(toDistil.map((c) => [c.session.sessionId, c.task.summary]));
+    const summaryBySession = new Map(toDistill.map((c) => [c.session.sessionId, c.task.summary]));
 
     // 1d — a run failed mid-way: staged skills are kept, point at --resume. No
     // install is offered on a partial run.
     if (result.distilled.errors.length > 0) {
       if (json) {
-        writer.write(JSON.stringify({ ...result, stagingDir, activeDir, installed: [], capturesConsidered: toDistil.length, distillModel }) + '\n');
+        writer.write(JSON.stringify({ ...result, stagingDir, activeDir, installed: [], capturesConsidered: toDistill.length, distillModel }) + '\n');
       } else {
         writer.write(renderFailure({ distillModel, distilledCount: published.length, errors: result.distilled.errors }) + '\n');
       }
@@ -913,7 +927,7 @@ export async function runJinnLayerCli(
 
     // Resolve the install choice: --install flag > interactive review/prompt >
     // stage-only. The non-interactive default installs NOTHING — the whole point
-    // of decoupling distil from install is that skills go live only on a choice.
+    // of decoupling distill from install is that skills go live only on a choice.
     const publishedNames = published.map((p) => p.pkg.name);
     let installNames = new Set<string>();
     if (published.length > 0) {
@@ -939,7 +953,7 @@ export async function runJinnLayerCli(
         const prompt =
           dd.promptInstall ??
           (isTty
-            ? () => readlineInstallPrompt({ distillModel, captureCount: toDistil.length, skills: reviewSkills, writer })
+            ? () => readlineInstallPrompt({ distillModel, captureCount: toDistill.length, skills: reviewSkills, writer })
             : undefined);
         if (prompt) {
           const choice = await prompt(publishedNames);
@@ -969,7 +983,7 @@ export async function runJinnLayerCli(
         stagingDir,
         activeDir,
         installed: [...installNames],
-        capturesConsidered: toDistil.length,
+        capturesConsidered: toDistill.length,
         distillModel,
       }) + '\n');
     } else {
@@ -981,13 +995,13 @@ export async function runJinnLayerCli(
         provenance: provenanceLabels(p.pkg, summaryBySession),
         helpsWith: p.pkg.description,
       }));
-      writer.write(renderRunSummary({ distillModel, captureCount: toDistil.length, skills }) + '\n');
+      writer.write(renderRunSummary({ distillModel, captureCount: toDistill.length, skills }) + '\n');
     }
     return 0;
   }
 
-  if (isDistill) {
-    const dd = opts.distillDeps ?? {};
+  if (isDistillRun) {
+    const dd = opts.distillRunDeps ?? {};
 
     // Only honor an EXPLICIT --limit; otherwise fetch the corpus broadly so
     // attempt groups stay complete (#1478) rather than inheriting the 20-row

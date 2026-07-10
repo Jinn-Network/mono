@@ -423,7 +423,7 @@ sign-off should confirm or overturn:
 7. **`outcome.status` enum is `completed | failed | abandoned`.** The spec
    says "outcome with a verifiability tier" without enumerating statuses;
    `abandoned` (user walked away mid-task) is distinguished from `failed`
-   (task ran to a negative result) because they distil differently.
+   (task ran to a negative result) because they distill differently.
 
 **2026-07-02 schema review:** calls 1–7 were reviewed and confirmed, with #5
 amended — the caps now bound the compressed *output* of the capture→envelope

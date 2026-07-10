@@ -127,12 +127,12 @@ export {
 } from './distiller.js';
 
 export {
-  readDistilMode,
-  writeDistilMode,
-  DEFAULT_DISTIL_MODE_PATH,
-  type DistilMode,
-  type DistilModeState,
-} from './distil-mode.js';
+  readDistillMode,
+  writeDistillMode,
+  DEFAULT_DISTILL_MODE_PATH,
+  type DistillMode,
+  type DistillModeState,
+} from './distill-mode.js';
 
 export {
   DEFAULT_CAPTURES_DIR,

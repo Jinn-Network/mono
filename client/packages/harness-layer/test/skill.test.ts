@@ -53,7 +53,7 @@ function capturedTask(): CapturedTask {
   const nano = '1751587200000000000';
   return {
     session: { sessionId: 'sess-skill-1', capturedAt: '2026-07-04T00:00:00.000Z' },
-    task: { summary: 'Distil a skill from traces', distributionTags: ['skills', 'tdd'] },
+    task: { summary: 'Distill a skill from traces', distributionTags: ['skills', 'tdd'] },
     environment: {
       harness: { name: 'test-harness', version: '0.0.1' },
       model: 'none',
@@ -63,7 +63,7 @@ function capturedTask(): CapturedTask {
       {
         spanId: 's1',
         parentSpanId: null,
-        name: 'distil',
+        name: 'distill',
         startTimeUnixNano: nano,
         endTimeUnixNano: nano,
         attributes: { note: 'hello' },

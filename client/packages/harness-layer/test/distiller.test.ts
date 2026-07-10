@@ -76,7 +76,7 @@ function memorySink(): { sink: SkillSink; installed: SkillPackage[] } {
 }
 
 describe('LocalDistiller', () => {
-  it('distils an operator-owned capture into a skill via the local sink', async () => {
+  it('distills an operator-owned capture into a skill via the local sink', async () => {
     const { sink, installed } = memorySink();
     const distiller = createLocalDistiller({
       distill: async (_c: DistillCluster) => VALID_OUT,
@@ -86,7 +86,7 @@ describe('LocalDistiller', () => {
       now: NOW,
     });
 
-    const result = await distiller.distil([fixtureCapture()]);
+    const result = await distiller.distill([fixtureCapture()]);
 
     // One pattern cluster → one published skill, provenance-linked + prompt-hashed.
     expect(result.clusterCount).toBe(1);
@@ -110,7 +110,7 @@ describe('LocalDistiller', () => {
       now: NOW,
     });
 
-    const result = await distiller.distil([fixtureCapture()]);
+    const result = await distiller.distill([fixtureCapture()]);
     expect(result.distilled.published).toHaveLength(1);
 
     const md = readFileSync(join(outDir, 'orm-fanout-dedup', 'SKILL.md'), 'utf-8');
@@ -123,7 +123,7 @@ describe('LocalDistiller', () => {
   it('distils a user-accepted own-capture into an experimental local skill', async () => {
     const { sink, installed } = memorySink();
     const distiller = createLocalDistiller({ distill: async () => VALID_OUT, sink, now: NOW });
-    const result = await distiller.distil([
+    const result = await distiller.distill([
       fixtureCapture({ outcome: { status: 'completed', verifiabilityTier: 'user-accepted' } }),
     ]);
 
@@ -148,7 +148,7 @@ describe('LocalDistiller', () => {
       sink,
       now: NOW,
     });
-    const result = await distiller.distil([fixtureCapture()]);
+    const result = await distiller.distill([fixtureCapture()]);
     expect(installed).toHaveLength(0);
     expect(result.distilled.rejected.length).toBeGreaterThan(0);
     expect(result.distilled.rejected[0]!.reason).toMatch(/secret/);
@@ -158,7 +158,7 @@ describe('LocalDistiller', () => {
 describe('NetworkDistiller (rung-3 seam)', () => {
   it('fails closed — not wired for the MVP (#1395)', async () => {
     const distiller = createNetworkDistiller();
-    await expect(distiller.distil([fixtureCapture()])).rejects.toBeInstanceOf(NetworkDistillerNotWiredError);
-    await expect(distiller.distil([])).rejects.toThrow(/not wired/i);
+    await expect(distiller.distill([fixtureCapture()])).rejects.toBeInstanceOf(NetworkDistillerNotWiredError);
+    await expect(distiller.distill([])).rejects.toThrow(/not wired/i);
   });
 });

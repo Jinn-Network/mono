@@ -93,7 +93,7 @@ function deps(over: Partial<PipelineDeps> = {}): { d: PipelineDeps; skills: Skil
 }
 
 describe('runDistillationPipeline (Tier-0 dry-run)', () => {
-  it('bridges both polarities, excludes held-out, and distils a pattern + a lesson skill', async () => {
+  it('bridges both polarities, excludes held-out, and distills a pattern + a lesson skill', async () => {
     const { d, skills } = deps();
     const res = await runDistillationPipeline(d);
 
@@ -104,7 +104,7 @@ describe('runDistillationPipeline (Tier-0 dry-run)', () => {
     // Cluster: one pattern (flask pass) + one lesson (pytest fail).
     expect(res.clusterCount).toBe(2);
 
-    // Distil: two skills, one of each kind, each provenance-linked + prompt-hashed.
+    // Distill: two skills, one of each kind, each provenance-linked + prompt-hashed.
     expect(res.distilled.published).toHaveLength(2);
     const kinds = skills.map((s) => s.jinn.skillKind).sort();
     expect(kinds).toEqual(['failure-lesson', 'strategic-pattern']);

@@ -39,6 +39,9 @@ Touch only what you must. Clean up only your own mess. Don't "improve" adjacent 
 ### Rule 4 — Goal-Driven Execution
 Define success criteria. Loop until verified. Don't follow steps. Define success and iterate. Strong success criteria let you loop independently.
 
+### Rule 5 — American English in the codebase
+Identifiers, CLI verbs, file names, env vars, paths, and user-facing copy use American English spelling. Canonical example: `distill` / `distillation`, never `distil`. Dated historical documents (specs, DRs, press releases) and pinned hash-published artifacts (e.g. versioned LLM prompts) are not retro-edited.
+
 ## Engineering handbook
 
 How this team ships — cadence, dist-tags, work-shape taxonomy, AI workflow rules. Full text at [`docs/engineering/handbook.md`](docs/engineering/handbook.md). Always read the handbook before doing non-trivial work; it ratifies the SOPs that apply to every shape.

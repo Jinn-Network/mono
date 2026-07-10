@@ -1,7 +1,7 @@
 /**
  * The `Distiller` seam (issue #1488) — one interface, two backends.
  *
- * A single surface, "distil these captures → skills", sits OVER the merged
+ * A single surface, "distill these captures → skills", sits OVER the merged
  * distillation engine (`clusterEvidence` → `distillClusters`, spec
  * §6–§7). The engine is untouched; a backend only binds the SOURCE (where the
  * captures come from) and the SINK (where the distilled skills go):
@@ -19,7 +19,7 @@
  *     the public anchored corpus. STUBBED for the MVP: it fails closed until
  *     #1395 wires the source + sink, so it is a drop-in later.
  *
- * The two rungs are symmetric behind the one interface: the same `distil()`
+ * The two rungs are symmetric behind the one interface: the same `distill()`
  * call, a different backend.
  */
 
@@ -68,8 +68,8 @@ export interface DistillerResult {
  * shared and unchanged.
  */
 export interface Distiller {
-  /** Distil a batch of captures into layer-2 skills via this backend's sink. */
-  distil(captures: CapturedTask[]): Promise<DistillerResult>;
+  /** Distill a batch of captures into layer-2 skills via this backend's sink. */
+  distill(captures: CapturedTask[]): Promise<DistillerResult>;
 }
 
 /**
@@ -112,7 +112,7 @@ export interface LocalDistillerDeps {
 }
 
 /**
- * Rung-1 backend: distil the operator's OWN local captures in-process.
+ * Rung-1 backend: distill the operator's OWN local captures in-process.
  *
  * Each capture is scrubbed at the layer-2 altitude and turned into an in-memory
  * layer-1 envelope (never published), then the whole batch runs through the
@@ -123,7 +123,7 @@ export interface LocalDistillerDeps {
  */
 export function createLocalDistiller(deps: LocalDistillerDeps): Distiller {
   return {
-    async distil(captures: CapturedTask[]): Promise<DistillerResult> {
+    async distill(captures: CapturedTask[]): Promise<DistillerResult> {
       const layer2 = deps.scrubPipeline ?? buildLayer2ScrubPipeline();
       const slate: HeldOutSlate = deps.slate ?? { instanceIds: new Set<string>() };
 
@@ -199,12 +199,12 @@ export class NetworkDistillerNotWiredError extends Error {
  * `session-derived.v1` task path over the bonded network's verified evidence
  * (bridge-verdict-source.ts → bridgeAttempts → clusterEvidence) — and the
  * anchored-corpus SINK (`publishSkill` with a chain anchor). Until #1395 wires
- * those ports, `distil()` fails closed with {@link NetworkDistillerNotWiredError}
+ * those ports, `distill()` fails closed with {@link NetworkDistillerNotWiredError}
  * so the not-wired state is loud, never a silent no-op.
  */
 export function createNetworkDistiller(): Distiller {
   return {
-    async distil(): Promise<DistillerResult> {
+    async distill(): Promise<DistillerResult> {
       throw new NetworkDistillerNotWiredError();
     },
   };
