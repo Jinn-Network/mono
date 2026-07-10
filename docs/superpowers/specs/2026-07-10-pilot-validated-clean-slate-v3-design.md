@@ -33,16 +33,17 @@ or network response order.
 Add a versioned held-out slate artifact rather than modifying the existing v1
 or v2 artifacts in place. The existing v2 is a nine-task baseline-failure
 regression benchmark with different admission criteria; it remains unchanged.
-The new v3 artifact records:
+The new v3 slate artifact retains the repository's existing
+`held-out-slate.v1` format and records:
 
 - schema and slate version;
-- evaluator semantics version;
-- dataset and source splits;
-- selection seed and policy version;
-- validated-pool timestamp;
-- distillation artifact identity;
-- 24 entries containing instance ID, split, row hash, and validation evidence;
-- an artifact hash over canonical selection inputs and entries.
+- 24 instance IDs;
+- an artifact hash over the canonical slate.
+
+A sibling v3 screening report records the evaluator semantics version, dataset
+and source splits, selection seed and policy version, validated-pool timestamp,
+distillation artifact identity, and per-instance split, row hash, quality, and
+validation evidence. The pilot checks both files before starting a new run.
 
 The pilot verifies these bindings before a new run. Existing output directories
 continue from their frozen `instances.json`; they are never silently changed by
