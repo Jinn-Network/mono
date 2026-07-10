@@ -33,10 +33,16 @@ import json
 import os
 import re
 import tempfile
+import signal
+import sys
+import threading
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import consent, jinn_layer
+from . import skills_install
 
 Runner = Callable[[List[str]], Tuple[int, str]]
 
@@ -235,6 +241,236 @@ def write_episode_fallback(episode: Dict[str, Any]) -> Optional[Path]:
     except Exception:
         return None
 
+# ── Background runner (mono #1539) ──────────────────────────────────────────
+#
+# A run takes minutes (one frontier call per cluster); the plugin's default
+# subprocess runner caps at 120s. Runs therefore spawn DETACHED
+# (jinn_layer.spawn: file-redirected output, own session — survives the TUI
+# exiting), and a daemon watcher tails the events file (#1533 NDJSON) into
+# throttled ◇ lines above the prompt. Run state lives in
+# $HERMES_HOME/jinn/distill/: current.json while live, last-run.json after.
+
+Sink = Callable[[str], None]
+
+THROTTLE_S = 5.0
+WATCH_POLL_S = 1.0
+
+
+def _default_sink(msg: str) -> None:
+    """stderr, same rendering path as the plugin's other ambient lines."""
+    try:
+        print(msg, file=sys.stderr, flush=True)
+    except Exception:
+        pass
+
+
+def state_dir() -> Path:
+    return consent.get_hermes_home() / "jinn" / "distill"
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _read_current() -> Optional[Dict[str, Any]]:
+    path = state_dir() / "current.json"
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def is_running() -> bool:
+    current = _read_current()
+    return bool(current and isinstance(current.get("pid"), int) and _pid_alive(current["pid"]))
+
+
+def _archive_current(outcome: str) -> None:
+    """current.json → last-run.json with the terminal outcome. Best-effort."""
+    try:
+        current = _read_current() or {}
+        current["outcome"] = outcome
+        current["endedAt"] = datetime.now(timezone.utc).isoformat()
+        (state_dir() / "last-run.json").write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
+        (state_dir() / "current.json").unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def start_run(spawn: Optional[Callable[..., int]] = None, sink: Optional[Sink] = None) -> Tuple[bool, str]:
+    """Spawn a detached stage-only run and start the watcher.
+
+    `--resume` keeps re-runs cheap (already-covered captures are skipped) and
+    `--install` is never passed — skills stage; installing is an explicit
+    choice (/jinn distill review → install).
+    """
+    if is_running():
+        return False, "a distillation is already running — /jinn distill stop to end it"
+    sd = state_dir()
+    sd.mkdir(parents=True, exist_ok=True)
+    file_id = time.strftime("%Y%m%dT%H%M%S") + f"-{os.getpid()}"
+    events_path = sd / f"{file_id}.events.ndjson"
+    result_path = sd / f"{file_id}.result.json"
+    args = [
+        "distill",
+        "--progress",
+        "ndjson",
+        "--json",
+        "--resume",
+        "--out",
+        str(skills_install.skills_dir()),
+    ]
+    pid = (spawn or jinn_layer.spawn)(args, result_path, events_path)
+    current = {
+        "pid": pid,
+        "fileId": file_id,
+        "startedAt": datetime.now(timezone.utc).isoformat(),
+        "eventsPath": str(events_path),
+        "resultPath": str(result_path),
+    }
+    (sd / "current.json").write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
+    _start_watcher(sink=sink)
+    return True, "◇ distill started — keep working, progress shows here"
+
+
+def stop_run() -> str:
+    current = _read_current()
+    if not current or not isinstance(current.get("pid"), int):
+        return "no distillation is running"
+    try:
+        os.kill(current["pid"], signal.SIGTERM)
+    except OSError:
+        pass
+    _archive_current("stopped")
+    return "◇ distill stopped — staged skills are kept; /jinn distill start confirm resumes the rest"
+
+
+def _watch_state(sink: Optional[Sink] = None, now_fn: Callable[[], float] = time.monotonic) -> Dict[str, Any]:
+    """The watcher's mutable state over the CURRENT run — offset, throttle clock."""
+    current = _read_current() or {}
+    return {
+        "eventsPath": current.get("eventsPath", ""),
+        "pid": current.get("pid"),
+        "offset": 0,
+        "lastEmit": {},  # event type → monotonic seconds
+        "sink": sink or _default_sink,
+        "now": now_fn,
+    }
+
+
+def _line_for_event(event: Dict[str, Any]) -> Optional[str]:
+    """Map one progress event to its ambient line; None = print nothing."""
+    kind = event.get("event")
+    if kind == "run_start":
+        n = event.get("toDistill", "?")
+        model = event.get("distillModel", "")
+        return f"◇ distill started — {n} capture(s) queued behind {model} · runs locally, keep working"
+    if kind == "cluster_end":
+        pos = f"{event.get('index', '?')}/{event.get('total', '?')}"
+        if event.get("outcome") == "published":
+            return f"◇ distill {pos} — staged \"{event.get('skillName', '?')}\""
+        if event.get("outcome") == "error":
+            return f"◇ distill {pos} — cluster failed (kept going)"
+        return None  # rejected: a quality gate did its job; the summary covers it
+    if kind == "run_end":
+        outcome = event.get("outcome")
+        published = event.get("published") or []
+        if outcome == "empty":
+            return "◇ distill — nothing to distill"
+        if outcome == "partial":
+            return (
+                f"◇ distill ended early — {len(published)} skill(s) staged, "
+                f"{event.get('errorCount', '?')} cluster(s) failed · /jinn distill start confirm resumes"
+            )
+        return f"◇ distill done — {len(published)} skill(s) staged · /jinn distill review"
+    return None  # cluster_plan / cluster_start / heartbeat: liveness only
+
+
+def _drain_events(state: Dict[str, Any]) -> bool:
+    """One watcher step: read new event lines, print throttled ◇ lines.
+
+    Returns True when the run is over (run_end seen, or the pid died without
+    one — archived as `died`). Never raises.
+    """
+    try:
+        path = Path(state["eventsPath"]) if state.get("eventsPath") else None
+        text = ""
+        if path is not None and path.exists():
+            raw = path.read_bytes()
+            text = raw[state["offset"] :].decode("utf-8", errors="replace")
+            state["offset"] = len(raw)
+        done_outcome: Optional[str] = None
+        for line in text.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue  # plain-text warnings share stderr — the v filter
+            if not isinstance(event, dict) or event.get("v") != 1:
+                continue
+            msg = _line_for_event(event)
+            if event.get("event") == "run_end":
+                done_outcome = str(event.get("outcome") or "ok")
+            if msg is None:
+                continue
+            kind = str(event.get("event"))
+            now = state["now"]()
+            last = state["lastEmit"].get(kind)
+            # run_start / run_end always print; per-cluster lines throttle.
+            if kind == "cluster_end" and last is not None and (now - last) < THROTTLE_S:
+                continue
+            state["lastEmit"][kind] = now
+            state["sink"](msg)
+        if done_outcome is not None:
+            # The pointer record; the layer's run log holds the full facts.
+            _archive_current(done_outcome)
+            return True
+        pid = state.get("pid")
+        if isinstance(pid, int) and not _pid_alive(pid):
+            state["sink"]("◇ distill — previous run died mid-way · staged skills kept, /jinn distill start confirm resumes")
+            _archive_current("died")
+            return True
+        return False
+    except Exception:
+        return False  # the watcher must never raise
+
+
+def _watch_loop(sink: Optional[Sink]) -> None:
+    state = _watch_state(sink=sink)
+    while True:
+        if _drain_events(state):
+            return
+        time.sleep(WATCH_POLL_S)
+
+
+def _start_watcher(sink: Optional[Sink] = None) -> None:
+    thread = threading.Thread(target=_watch_loop, args=(sink,), name="jinn-distill-watch", daemon=True)
+    thread.start()
+
+
+def reattach_watcher(sink: Optional[Sink] = None) -> None:
+    """On plugin start: pick up a run left over from a previous process."""
+    current = _read_current()
+    if not current:
+        return
+    pid = current.get("pid")
+    if isinstance(pid, int) and _pid_alive(pid):
+        _start_watcher(sink=sink)
+        return
+    (sink or _default_sink)(
+        "◇ distill — previous run died mid-way · staged skills kept, /jinn distill start confirm resumes"
+    )
+    _archive_current("died")
+
 
 # ── /jinn distill — the in-session surface (mono #1538) ─────────────────────
 #
@@ -334,6 +570,44 @@ def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
     """`/jinn distill ...` — dispatch on the first word after `distill`."""
     action = parts[0] if parts else ""
 
+    if action == "start":
+        # Two-step (the /jinn consent precedent): `start` shows the spend
+        # facts, `start confirm` begins. A run is a frontier-model pass — it
+        # runs locally and nothing leaves, but it is still a spend.
+        if is_running():
+            return "a distillation is already running — /jinn distill stop to end it"
+        status = distill_status(runner)
+        if status is None:
+            return UPDATE_LAYER_LINE
+        uncovered = status.get("uncoveredCount", 0)
+        if not uncovered:
+            return "nothing to distill yet — captures accrue as you work; check back after a few tasks"
+        model = status.get("distillModel", "")
+        if parts[1:2] == ["confirm"]:
+            if status.get("mode") == "unset":
+                # First run: record the mode the same way the CLI flag does.
+                code, out = jinn_layer.run(["distill", "--where", "local", "--json"], runner)
+                if code != 0:
+                    return out.strip() or UPDATE_LAYER_LINE
+                cached_mode(runner, refresh=True)
+            ok, msg = start_run()
+            return msg
+        return "\n".join(
+            [
+                "◇ distill — ready to run",
+                "",
+                f"  captures    {uncovered} not yet distilled → up to {uncovered} cluster(s)",
+                f"  distiller   {model} — a frontier pass, one call per cluster",
+                "  where       locally, on this machine; nothing is published",
+                "",
+                "  begin with  /jinn distill start confirm",
+                "  (keep working while it runs — progress shows here)",
+            ]
+        )
+
+    if action == "stop":
+        return stop_run()
+
     if action == "where":
         mode = parts[1] if len(parts) > 1 else ""
         if mode not in ("local", "defer", "off"):
@@ -362,5 +636,7 @@ def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
     return (
         "/jinn distill — local distillation\n"
         "  /jinn distill                 status (first run: what this is)\n"
+        "  /jinn distill start           run one (two-step: start → start confirm)\n"
+        "  /jinn distill stop            end the live run (staged skills kept)\n"
         "  /jinn distill where local|defer|off   set where it runs\n"
     )

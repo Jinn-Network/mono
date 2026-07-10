@@ -244,6 +244,13 @@ def _on_session_start(session_id: str = "", platform: str = "", **_: Any) -> Non
     cwd = _.get("cwd") or _.get("working_directory")
     _state_for(session_id, Path(cwd) if isinstance(cwd, str) and cwd else None)
     _check_contract()
+    # Pick up a background distillation left over from a previous process:
+    # live pid → resume the ambient tail; dead without a run_end → one
+    # recovery line + archive (mono #1539). Never blocks, never raises.
+    try:
+        distill.reattach_watcher(sink=_user_line)
+    except Exception:
+        pass
     if consent.consent_decided():
         return
     if session_id in _session_hint_shown:

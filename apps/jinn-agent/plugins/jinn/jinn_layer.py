@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import tempfile
+import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -68,6 +69,31 @@ def run(
     if runner is not None:
         return runner(argv, input=input) if input is not None else runner(argv)
     return _default_runner(argv, cwd, input)
+
+
+def spawn(args: List[str], stdout_path: Path, stderr_path: Path) -> int:
+    """Detached long-run launch (mono #1539) — NOT `_default_runner`.
+
+    A distillation run takes minutes (one frontier call per cluster); the
+    default runner's pipes + 120s timeout would kill it. File-redirected
+    output (no pipe backpressure) and a new session (no SIGINT propagation
+    from the TUI) let the child survive the harness exiting. POSIX-only
+    detach; on win32 it degrades to a plain child process.
+    """
+    stdout_path.parent.mkdir(parents=True, exist_ok=True)
+    stderr_path.parent.mkdir(parents=True, exist_ok=True)
+    kwargs: Dict[str, Any] = {}
+    if sys.platform != "win32":
+        kwargs["start_new_session"] = True
+    with open(stdout_path, "ab") as out_f, open(stderr_path, "ab") as err_f:
+        proc = subprocess.Popen(
+            [binary(), *args],
+            stdout=out_f,
+            stderr=err_f,
+            stdin=subprocess.DEVNULL,
+            **kwargs,
+        )
+    return proc.pid
 
 
 # ── Verbs ────────────────────────────────────────────────────────────────────
