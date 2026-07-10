@@ -19,19 +19,35 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - run: python -m venv venv && ./venv/bin/pip install -e ".[dev]"
-      - run: |
-          ./venv/bin/python -m pytest tests/hermes_cli/ tests/dehermes/ -q \
-            --deselect "tests/hermes_cli/test_cmd_update.py::TestCmdUpdateMigrationPrompt::test_version_bump_only_applies_silently_without_prompt"
-          # Deselected: pre-existing upstream test-isolation gap — this test
-          # fails in any environment with live network access (not a
-          # regression introduced by the mono migration).
-          # tests/dehermes/ is the de-hermes acceptance gate (Task 10): it
-          # must run in CI so the "hermes doctor --fix" wrong-binary-hint
-          # class of leak (only visible in certain symlink states) can't
-          # silently regress on a green run.
+
+      # Per-file isolation via scripts/run_tests.sh: each test file runs in its
+      # own freshly-spawned `python -m pytest <file>` subprocess (clean, hermetic
+      # env). Running the whole tree in one pytest process leaked module-level
+      # state across files and produced ~239 spurious failures in tests that pass
+      # individually — this runner is the project's canonical fix for that (also
+      # used by apps/jinn-agent's own tests.yml). The old `--deselect` for the
+      # migration-prompt test is no longer needed: it fails only with live network
+      # access, which the hermetic env (env -i) + conftest live-system guard now
+      # preclude. tests/dehermes/ is the de-hermes acceptance gate (Task 10).
+      #
+      # Two steps because tests/dehermes/test_main_path_acceptance.py is a heavy
+      # outlier (~13 min: it cold-spawns every subcommand's `--help`, and now runs
+      # to completion because the de-hermes gate passes instead of bailing on the
+      # first brand leak). Sharing the parallel pool, its own subprocess fan-out
+      # oversubscribes CPU and it blows any per-file timeout; run it ALONE first so
+      # it is uncontended, then run everything else in parallel, excluding it.
+      - name: Acceptance gate (heavy, run alone)
+        run: ./scripts/run_tests.sh --file-timeout 1200 tests/dehermes/test_main_path_acceptance.py -q
+
+      - name: Unit + dehermes suite (per-file isolated, parallel)
+        run: |
+          FILES=$(find tests/hermes_cli tests/dehermes -name 'test_*.py' \
+            ! -name 'test_main_path_acceptance.py' | sort | paste -sd:)
+          ./scripts/run_tests.sh --files "$FILES" -j 4 --file-timeout 1200 -q
