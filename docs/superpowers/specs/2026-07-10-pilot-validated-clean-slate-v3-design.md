@@ -1,4 +1,4 @@
-# Validated Clean Pilot Slate V2
+# Validated Clean Pilot Slate V3
 
 ## Goal
 
@@ -25,13 +25,15 @@ smoke sample. A task is eligible only when all of the following hold:
 
 Selection is deterministic: eligible tasks are ordered by a stable hash of the
 instance ID and slate seed, with `instance_id` as the final tie-break. The first
-24 become slate v2. Selection does not depend on filesystem enumeration order
+24 become slate v3. Selection does not depend on filesystem enumeration order
 or network response order.
 
 ## Frozen Artifact
 
-Add a versioned held-out slate artifact rather than modifying v1 in place. It
-records:
+Add a versioned held-out slate artifact rather than modifying the existing v1
+or v2 artifacts in place. The existing v2 is a nine-task baseline-failure
+regression benchmark with different admission criteria; it remains unchanged.
+The new v3 artifact records:
 
 - schema and slate version;
 - evaluator semantics version;
@@ -48,13 +50,13 @@ a newer slate or validated pool.
 
 ## Pilot Integration
 
-The default non-dry-run pilot source becomes the v2 slate. Explicit
+The default non-dry-run pilot source becomes the v3 slate. Explicit
 `--instances` remains available for diagnostics. The 20-row sample task is no
 longer the implicit smoke default.
 
 Before freezing a new run, the pilot loads the production historical pool,
 loads current-semantics scorable entries through `ValidatedPoolStore`, verifies
-the v2 slate bindings, and materializes the 24 complete task rows. Admission
+the v3 slate bindings, and materializes the 24 complete task rows. Admission
 fails closed with an actionable error if the pool file is missing, semantics
 are stale, a slate row changed, or fewer than 24 eligible tasks remain.
 
@@ -70,7 +72,7 @@ attempts are reused on later invocations just like completed treatment attempts.
 - Missing current validation or row-hash mismatch: reject the slate/run.
 - Solver, grader, or rate-limit error: persist the existing terminal error
   record; reopen only with `--retry-errors`.
-- Selection inputs change: create a new slate version, never mutate v2.
+- Selection inputs change: create a new slate version, never mutate v3.
 
 ## Testing
 
@@ -78,7 +80,7 @@ Unit coverage will prove that admission requires both clean metadata and
 current-semantics validation, rejects missing metadata, excludes all
 distillation source IDs, and produces deterministic 24-task output and hashes.
 
-Pilot tests will prove that default task loading uses the frozen v2 slate, all
+Pilot tests will prove that default task loading uses the frozen v3 slate, all
 three arms receive identical task IDs, explicit diagnostic instances still
 work, stale validation fails closed, and chunked reruns make only the requested
 new calls without repeating completed stock attempts.
