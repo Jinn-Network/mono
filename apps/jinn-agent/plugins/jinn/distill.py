@@ -611,6 +611,84 @@ def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
     if action == "stop":
         return stop_run()
 
+    if action == "review":
+        code, out = jinn_layer.run(
+            ["distill", "staged", "--json", "--out", str(skills_install.skills_dir())], runner
+        )
+        if code != 0:
+            return out.strip() or UPDATE_LAYER_LINE
+        try:
+            staged = json.loads(out)
+        except ValueError:
+            return UPDATE_LAYER_LINE
+        if not staged:
+            return "nothing staged — /jinn distill start runs a distillation over your captures"
+        lines = ["◇ distilled skills — staged, waiting for your choice", ""]
+        for skill in staged:
+            name = skill.get("name", "?")
+            provenance = skill.get("provenance") or []
+            sources = ", ".join(str(p).replace("local-capture:", "") for p in provenance)
+            lines.append(f"  {name}")
+            lines.append(f"    helps  {skill.get('description', '')}")
+            lines.append(f"    from   {len(provenance)} capture(s): {sources}")
+            lines.append("")
+        lines.append("  install with  /jinn distill install <name> · /jinn distill install all")
+        return "\n".join(lines)
+
+    if action == "install":
+        target = parts[1] if len(parts) > 1 else ""
+        if not target:
+            return "usage: /jinn distill install <name>|all"
+        skills_dir = skills_install.skills_dir()
+        # Read the staged provenance FIRST — the install below clears the
+        # staged copies, and the marker (payoff join, uninstall guard) needs it.
+        staged_code, staged_out = jinn_layer.run(
+            ["distill", "staged", "--json", "--out", str(skills_dir)], runner
+        )
+        provenance_by_name: Dict[str, List[str]] = {}
+        if staged_code == 0:
+            try:
+                for skill in json.loads(staged_out):
+                    provenance_by_name[str(skill.get("name"))] = list(skill.get("provenance") or [])
+            except ValueError:
+                pass
+        selector = ["--all"] if target == "all" else [target]
+        code, out = jinn_layer.run(
+            ["distill", "install", *selector, "--json", "--out", str(skills_dir)], runner
+        )
+        if code != 0:
+            return out.strip() or UPDATE_LAYER_LINE
+        try:
+            result = json.loads(out)
+        except ValueError:
+            return UPDATE_LAYER_LINE
+        installed = result.get("installed") or []
+        if not installed:
+            return "nothing staged — /jinn distill start runs a distillation over your captures"
+        lines = []
+        for row in installed:
+            name = str(row.get("name"))
+            provenance = provenance_by_name.get(name, [])
+            marker = skills_dir / name / ".jinn-ref"
+            try:
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.write_text(
+                    json.dumps(
+                        {
+                            "ref": f"local-distill:{name}",
+                            "provenance": provenance,
+                            "provenance_count": len(provenance),
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+            except OSError:
+                pass
+            lines.append(f"installed  {name}  →  {row.get('path', '')}")
+        lines.append("The agent's skill loader picks these up from here.")
+        return "\n".join(lines)
+
     if action == "where":
         mode = parts[1] if len(parts) > 1 else ""
         if mode not in ("local", "defer", "off"):
@@ -641,5 +719,7 @@ def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
         "  /jinn distill                 status (first run: what this is)\n"
         "  /jinn distill start           run one (two-step: start → start confirm)\n"
         "  /jinn distill stop            end the live run (staged skills kept)\n"
+        "  /jinn distill review          the staged skills — what each helps with, where it came from\n"
+        "  /jinn distill install <name>|all   install staged skills (no re-distillation)\n"
         "  /jinn distill where local|defer|off   set where it runs\n"
     )
