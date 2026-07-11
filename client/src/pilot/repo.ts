@@ -41,8 +41,17 @@ export async function prepareBaseCheckout(
 ): Promise<void> {
   const clone = await run('git', ['clone', `https://github.com/${repo}.git`, baseDir]);
   if (clone.exitCode !== 0) throw new GitStepError('clone', clone.exitCode, clone.stderr.trim().slice(0, 300));
-  const checkout = await run('git', ['checkout', baseCommit], { cwd: baseDir });
-  if (checkout.exitCode !== 0) throw new GitStepError('checkout', checkout.exitCode, checkout.stderr.trim().slice(0, 300));
+  let checkout = await run('git', ['checkout', baseCommit], { cwd: baseDir });
+  if (checkout.exitCode !== 0) {
+    // Upstream history rewrites leave dataset base commits unreachable from
+    // any ref — absent from a plain clone ("unable to read tree") yet still
+    // served by GitHub to an explicit fetch-by-sha. Fetch, then retry once.
+    const fetch = await run('git', ['fetch', 'origin', baseCommit], { cwd: baseDir });
+    if (fetch.exitCode === 0) {
+      checkout = await run('git', ['checkout', baseCommit], { cwd: baseDir });
+    }
+    if (checkout.exitCode !== 0) throw new GitStepError('checkout', checkout.exitCode, checkout.stderr.trim().slice(0, 300));
+  }
 }
 
 /** Recover the working-tree patch, INCLUDING new (untracked) files: `git add -A`

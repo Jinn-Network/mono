@@ -27,12 +27,31 @@ describe('pilot repo helpers', () => {
     expect(calls).toEqual([{ cmd: 'git', args: ['clone', 'https://github.com/ghost/missing.git', '/tmp/base'] }]);
   });
 
-  it('prepareBaseCheckout FAILS LOUD on a non-zero checkout (unfetchable base_commit)', async () => {
-    const { run, calls } = fakeRunner([{ exitCode: 0 }, { stderr: 'fatal: reference is not a tree', exitCode: 128 }]);
+  it('prepareBaseCheckout recovers a ref-unreachable base_commit via fetch-by-sha, then checks out', async () => {
+    // Upstream history rewrites leave dataset base commits unreachable from
+    // any ref: a plain clone lacks them ("unable to read tree"), but GitHub
+    // still serves them to an explicit fetch-by-sha (sqlglot-4563/-4618).
+    const { run, calls } = fakeRunner([
+      { exitCode: 0 },                                                        // clone
+      { stderr: 'fatal: unable to read tree (795e7e0e…)', exitCode: 128 },    // checkout misses
+      { exitCode: 0 },                                                        // fetch origin <sha>
+      { exitCode: 0 },                                                        // retry checkout
+    ]);
+    await expect(prepareBaseCheckout(run, 'tobymao/sqlglot', '795e7e0e', '/tmp/base')).resolves.toBeUndefined();
+    expect(calls[2]!.args).toEqual(['fetch', 'origin', '795e7e0e']);
+    expect(calls[3]!.args).toEqual(['checkout', '795e7e0e']);
+  });
+
+  it('prepareBaseCheckout FAILS LOUD when the base_commit is unfetchable even by sha', async () => {
+    const { run, calls } = fakeRunner([
+      { exitCode: 0 },                                                          // clone
+      { stderr: 'fatal: reference is not a tree', exitCode: 128 },              // checkout misses
+      { stderr: 'fatal: remote error: upload-pack: not our ref', exitCode: 128 }, // fetch-by-sha refused
+    ]);
     const err = await prepareBaseCheckout(run, 'a/b', 'deadbeef', '/tmp/base').catch((e: unknown) => e);
     expect(err).toBeInstanceOf(GitStepError);
     expect((err as GitStepError).step).toBe('checkout');
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(3);
   });
 
   it('prepareBaseCheckout resolves when both git steps exit 0', async () => {
