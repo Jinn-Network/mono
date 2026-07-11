@@ -689,14 +689,15 @@ async function runDurableReal(cfg: PilotConfig, hfFetcher: HttpHfFetcher): Promi
       });
     };
 
-    // A grade-error attempt with a saved patch already paid for its solve —
-    // re-grade from the patch instead of re-spending inference (and skip the
-    // clone entirely when nothing is left to solve).
+    // A grade-error or infra-ungradeable attempt with a saved patch already
+    // paid for its solve — re-grade from the patch instead of re-spending
+    // inference (and skip the clone entirely when nothing is left to solve).
     const toSolve: PilotAttemptSpec[] = [];
     for (const spec of specs) {
       const existing = records.get(attemptKey(spec));
       const patchAbsPath = existing?.patchRelPath ? join(runState.outDir, existing.patchRelPath) : null;
-      if (existing?.status !== 'grade-error' || !patchAbsPath || !existsSync(patchAbsPath)) {
+      const regradeable = existing?.status === 'grade-error' || existing?.status === 'ungradeable';
+      if (!regradeable || !patchAbsPath || !existsSync(patchAbsPath)) {
         toSolve.push(spec);
         continue;
       }

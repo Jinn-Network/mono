@@ -333,6 +333,9 @@ describe('run-pilot durable dry-run resume', () => {
     mkdirSync(join(outDir, 'patches'), { recursive: true });
     mkdirSync(join(outDir, 'attempts'), { recursive: true });
     const bases = refs.map((ref) => Buffer.from(`${ref.instance_id}:stock:0`, 'utf8').toString('base64url'));
+    // One grade-error and one infra-ungradeable (eval_timeout-style) — both
+    // have banked patches, both must regrade without a re-solve.
+    const statuses = ['grade-error', 'ungradeable'] as const;
     for (const [i, ref] of refs.entries()) {
       writeFileSync(join(outDir, 'patches', `${bases[i]}.patch`), 'diff --git a/x b/x\n+fix\n');
       writeFileSync(join(outDir, 'attempts', `${bases[i]}.json`), JSON.stringify({
@@ -340,11 +343,11 @@ describe('run-pilot durable dry-run resume', () => {
         instance_id: ref.instance_id,
         arm: 'stock',
         repeat: 0,
-        status: 'grade-error',
+        status: statuses[i],
         passed: null,
         costUsd: 0.05,
         patchRelPath: `patches/${bases[i]}.patch`,
-        error: 'docker was down',
+        ...(statuses[i] === 'grade-error' ? { error: 'docker was down' } : {}),
       }));
     }
 

@@ -268,7 +268,11 @@ export function loadAttemptRecords(outDir: string): Map<string, PilotAttemptReco
 }
 
 function isRetryableError(record: PilotAttemptRecord): boolean {
-  return record.status === 'solve-error' || record.status === 'grade-error';
+  if (record.status === 'solve-error' || record.status === 'grade-error') return true;
+  // An infra-ungradeable (eval_timeout, docker outage, …) whose solve is
+  // banked as a saved patch retries as a $0 regrade — the inference is
+  // already paid for. An ungradeable without a patch never auto-respends.
+  return record.status === 'ungradeable' && Boolean(record.patchRelPath);
 }
 
 export function selectRunnableAttempts(

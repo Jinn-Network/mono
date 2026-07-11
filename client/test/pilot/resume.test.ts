@@ -169,6 +169,28 @@ describe('pilot resume durability', () => {
       .toEqual([specs[1], specs[2]]);
   });
 
+  it('retries an ungradeable attempt only when its solve is banked as a saved patch', () => {
+    const specs = buildAttemptSpecs(cfg({ repeats: 1 }));
+    const records = new Map<string, PilotAttemptRecord>();
+    // Infra-ungradeable WITH a saved patch (e.g. eval_timeout under load):
+    // the solve is already paid for — retryable as a $0 regrade.
+    records.set(attemptKey(specs[0]!), record(specs[0]!.instance_id, specs[0]!.arm, specs[0]!.repeat, {
+      status: 'ungradeable',
+      passed: null,
+      patchRelPath: 'patches/banked.patch',
+    }));
+    // Ungradeable WITHOUT a patch: nothing banked, do not auto-respend.
+    records.set(attemptKey(specs[1]!), record(specs[1]!.instance_id, specs[1]!.arm, specs[1]!.repeat, {
+      status: 'ungradeable',
+      passed: null,
+    }));
+
+    expect(selectRunnableAttempts(specs, records, { retryErrors: true, maxNewSolves: 2 }))
+      .toEqual([specs[0], specs[2]]);
+    expect(selectRunnableAttempts(specs, records, { retryErrors: false, maxNewSolves: 2 }))
+      .toEqual([specs[2], specs[3]]);
+  });
+
   it('builds one attempt per configured arm without duplicating the baseline', () => {
     expect(buildAttemptSpecs(cfg({ instances: [{ instance_id: 'alpha', hf_dataset: 'ds', hf_split: 'train' }], repeats: 1 })))
       .toEqual([
