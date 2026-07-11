@@ -8,11 +8,39 @@ Covers:
      input() call) and the stash is applied automatically
 """
 
+import pathlib
 import subprocess
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from hermes_cli.main import cmd_update
+import pytest
+
+from hermes_cli.main import cmd_update, PROJECT_ROOT
+
+
+@pytest.fixture(autouse=True)
+def _pretend_project_is_git_checkout(monkeypatch):
+    """Make cmd_update's ``PROJECT_ROOT/.git`` gate pass in the monorepo.
+
+    ``apps/jinn-agent`` is a git *subtree* with no nested ``.git``, so
+    ``cmd_update``'s "is this a git checkout?" gate (correct for real
+    ``git clone`` installs, where ``PROJECT_ROOT`` is the clone root) reports
+    False here. Without it the update flow falls back to the pip/PyPI path and
+    returns before ever reaching the config-migration prompt logic these tests
+    exercise. The subtree carries the full repo content, so every other path
+    the flow reads still resolves under the real ``PROJECT_ROOT`` — only
+    ``.git`` is missing. Report just that one path as existing; delegate every
+    other ``Path.exists`` call to the real impl.
+    """
+    git_dir = PROJECT_ROOT / ".git"
+    real_exists = pathlib.Path.exists
+
+    def fake_exists(self, *args, **kwargs):
+        if self == git_dir:
+            return True
+        return real_exists(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "exists", fake_exists)
 
 
 def _make_run_side_effect(

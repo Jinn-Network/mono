@@ -118,11 +118,14 @@ class TestDoctorCommandInstallation:
     def test_wrong_target_symlink_shows_warn(self, monkeypatch, tmp_path):
         home, project, hermes_bin = _setup_doctor_env(monkeypatch, tmp_path)
 
-        # Create a symlink pointing to the wrong target
+        # Create a symlink pointing to a wrong target that still resolves
+        # inside this install's project root (a stale link left by a
+        # recreated venv) — doctor treats this as its own to repair/warn on.
         cmd_link_dir = tmp_path / ".local" / "bin"
         cmd_link_dir.mkdir(parents=True)
         cmd_link = cmd_link_dir / "hermes"
-        wrong_target = tmp_path / "wrong_hermes"
+        wrong_target = project / "old-venv" / "bin" / "hermes"
+        wrong_target.parent.mkdir(parents=True)
         wrong_target.write_text("#!/usr/bin/env python\n")
         cmd_link.symlink_to(wrong_target)
 
@@ -136,11 +139,14 @@ class TestDoctorCommandInstallation:
     def test_fix_repairs_wrong_symlink(self, monkeypatch, tmp_path):
         home, project, hermes_bin = _setup_doctor_env(monkeypatch, tmp_path)
 
-        # Create a symlink pointing to wrong target
+        # Create a symlink pointing to a wrong target that still resolves
+        # inside this install's project root — this is doctor's to repair
+        # under --fix (a foreign target outside the install is left alone).
         cmd_link_dir = tmp_path / ".local" / "bin"
         cmd_link_dir.mkdir(parents=True)
         cmd_link = cmd_link_dir / "hermes"
-        wrong_target = tmp_path / "wrong_hermes"
+        wrong_target = project / "old-venv" / "bin" / "hermes"
+        wrong_target.parent.mkdir(parents=True)
         wrong_target.write_text("#!/usr/bin/env python\n")
         cmd_link.symlink_to(wrong_target)
 

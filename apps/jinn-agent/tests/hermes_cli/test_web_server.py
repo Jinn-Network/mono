@@ -258,7 +258,14 @@ class TestWebServerEndpoints:
         self.client = TestClient(app)
         self.client.headers[_SESSION_HEADER_NAME] = _SESSION_TOKEN
 
-    def test_get_status(self):
+    def test_get_status(self, monkeypatch):
+        # ``can_update_hermes`` is suppressed in externally-managed installs
+        # (containerized pip installs). Pin the container probe to False so this
+        # asserts the self-managed branch deterministically regardless of where
+        # the suite runs (CI executes inside a container).
+        import hermes_constants
+
+        monkeypatch.setattr(hermes_constants, "is_container", lambda: False)
         resp = self.client.get("/api/status")
         assert resp.status_code == 200
         data = resp.json()
