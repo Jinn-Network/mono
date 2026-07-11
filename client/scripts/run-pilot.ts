@@ -36,6 +36,7 @@ import type { SolveTokens } from '../src/pilot/solve.js';
 import { solveCostUsd, DEEPSEEK_V4_FLASH_RATES, GPT_5_4_MINI_RATES, type RateTable } from '../src/pilot/cost.js';
 import { tallyPilot, type SolveOutcome, type PilotReport } from '../src/pilot/tally.js';
 import { fetchPilotRawRow, parsePilotInstanceRow, type PilotInstance } from '../src/pilot/instance.js';
+import { assertArmIsolation } from '../src/pilot/arm-homes.js';
 import { mapWithConcurrency, SerialTaskQueue } from '../src/pilot/pipeline.js';
 import { createPilotWorkDir, prepareBaseCheckout, recoverPatch } from '../src/pilot/repo.js';
 import {
@@ -765,6 +766,11 @@ async function runDurableReal(cfg: PilotConfig, hfFetcher: HttpHfFetcher): Promi
 async function main(): Promise<void> {
   const cfg = parseArgs(process.argv.slice(2));
   const hfFetcher = new HttpHfFetcher();
+
+  // Isolation gate BEFORE any freeze/spend: differing arm loadouts without
+  // verified per-arm homes made the 2026-07-10 run arm-invariant. Dry runs
+  // spawn no solver, so fake/absent homes are fine there.
+  if (!cfg.dryRun) assertArmIsolation(cfg.arms);
 
   if (cfg.dryRun) {
     if (cfg.outDir) {

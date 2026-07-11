@@ -22,10 +22,58 @@ import { join } from 'node:path';
 export interface ArmHomeSpec {
   name: string;
   skills: string[];
+  jinnAgentHome?: string;
 }
 
 export interface ArmWithHome extends ArmHomeSpec {
   jinnAgentHome: string;
+}
+
+/**
+ * Fail-loud isolation gate, run before any solve is spawned. Arms whose skill
+ * loadouts differ MUST each run in their own agent home whose filesystem
+ * actually realizes that loadout — otherwise every arm sees the same shared
+ * catalog and the run is arm-invariant (the 2026-07-10 trap: a 27-attempt
+ * "comparison" of one condition to itself). Same-loadout arms are one
+ * experimental condition and need no isolation.
+ */
+export function assertArmIsolation(arms: ArmHomeSpec[]): void {
+  const loadouts = new Set(arms.map((arm) => JSON.stringify([...arm.skills].sort())));
+  if (loadouts.size <= 1) return;
+
+  const missingHome = arms.filter((arm) => !arm.jinnAgentHome);
+  if (missingHome.length > 0) {
+    throw new Error(
+      `arms differ in skill loadout but ${missingHome.map((a) => `'${a.name}'`).join(', ')} ` +
+      `have no jinnAgentHome — without per-arm isolated homes every arm sees the same shared ` +
+      `skills catalog and the comparison is void. Build homes with scripts/build-pilot-arm-homes.ts.`,
+    );
+  }
+  const homes = arms.map((arm) => arm.jinnAgentHome!);
+  if (new Set(homes).size !== homes.length) {
+    throw new Error('arms differ in skill loadout but share a jinnAgentHome — homes must be distinct per arm');
+  }
+
+  for (const arm of arms) {
+    const skillsDir = join(arm.jinnAgentHome!, 'skills');
+    const installed = existsSync(skillsDir)
+      ? readdirSync(skillsDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
+      : [];
+    for (const skill of arm.skills) {
+      if (!installed.includes(skill)) {
+        throw new Error(`arm '${arm.name}' home ${arm.jinnAgentHome} is missing its skill '${skill}' — rebuild the arm homes`);
+      }
+    }
+    const allowed = new Set(arm.skills);
+    for (const name of installed) {
+      if (!allowed.has(name) && isDistilledSkill(join(skillsDir, name))) {
+        throw new Error(
+          `arm '${arm.name}' home ${arm.jinnAgentHome} contains distilled skill '${name}' outside its loadout — ` +
+          `the arm is contaminated; rebuild the arm homes`,
+        );
+      }
+    }
+  }
 }
 
 /** Top-level home files carried into every arm home (skipped if absent). */

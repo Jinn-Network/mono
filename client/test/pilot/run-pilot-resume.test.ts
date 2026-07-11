@@ -135,19 +135,45 @@ describe('run-pilot durable dry-run resume', () => {
     expect(removal.stderr).toMatch(/instances may only be added/i);
   });
 
+  it('refuses a real run whose arms differ in loadout without per-arm isolated homes', () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'pilot-run-isolation-'));
+    const armsFile = join(outDir, 'arms.json');
+    // The 2026-07-10 arm-invariance trap: distinct skills, shared implicit home.
+    writeFileSync(armsFile, JSON.stringify([
+      { name: 'stock', skills: [] },
+      { name: 'haiku', skills: ['some-skill'] },
+    ]));
+
+    const run = runPilot([
+      '--out', outDir,
+      '--instances', JSON.stringify([{ instance_id: 'a__b-1', hf_dataset: 'ds', hf_split: 'train' }]),
+      '--arms-file', armsFile,
+      '--max-new-solves', '1',
+    ]);
+
+    expect(run.status).toBe(1);
+    expect(run.stderr).toMatch(/jinnAgentHome/i);
+    // Fails before freezing anything — no store contamination, no spend.
+    expect(existsSync(join(outDir, 'manifest.json'))).toBe(false);
+  });
+
   it('refuses to resume a dry-run durable store with a real run (and vice versa)', () => {
     const outDir = mkdtempSync(join(tmpdir(), 'pilot-run-mode-'));
     const instances = JSON.stringify([
       { instance_id: 'alpha__repo-1', hf_dataset: 'ds', hf_split: 'train' },
     ]);
+    // Single-condition arms so the isolation gate is not what fires here —
+    // this test's subject is the mode marker.
+    const armsFile = join(outDir, 'arms.json');
+    writeFileSync(armsFile, JSON.stringify([{ name: 'stock', skills: [] }]));
 
-    const dry = runPilot(['--dry-run', '--out', outDir, '--instances', instances, '--max-new-solves', '0']);
+    const dry = runPilot(['--dry-run', '--out', outDir, '--instances', instances, '--arms-file', armsFile, '--max-new-solves', '0']);
     expect(dry.status).toBe(0);
 
     // Real run against the dry-run store must fail closed at the manifest
     // check (before any network/solve) — fake graded records must never be
     // resumable as real results.
-    const real = runPilot(['--out', outDir, '--instances', instances, '--max-new-solves', '0']);
+    const real = runPilot(['--out', outDir, '--instances', instances, '--arms-file', armsFile, '--max-new-solves', '0']);
     expect(real.status).toBe(1);
     expect(real.stderr).toMatch(/different frozen pilot config for mode/i);
   });
