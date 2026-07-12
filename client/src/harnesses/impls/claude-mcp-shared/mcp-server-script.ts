@@ -12,7 +12,7 @@
  */
 
 import { writeFileSync, existsSync, chmodSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export interface WriteMcpServerScriptOptions {
@@ -60,14 +60,17 @@ export function writeMcpServerScript(outPath: string, opts: WriteMcpServerScript
     );
   }
 
+  const wrapperBasename = basename(outPath);
   const script = `#!/usr/bin/env node
 // Auto-generated ${opts.serverLabel} MCP wrapper — do not edit.
+// Delegates to the compiled mcp-tools module; no business logic in the wrapper.
+// Config is read from argv[2].
 import { readFileSync } from 'node:fs';
 import { startMcpServer } from ${JSON.stringify(mcpToolsPath)};
 
 const configPath = process.argv[2];
 if (!configPath) {
-  process.stderr.write('Usage: ${opts.serverLabel}-server.mjs <config-file-path>\\n');
+  process.stderr.write('Usage: ${wrapperBasename} <config-file-path>\\n');
   process.exit(1);
 }
 

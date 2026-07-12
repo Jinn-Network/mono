@@ -35,6 +35,29 @@ describe('writeMcpServerScript', () => {
     expect(script).toContain(JSON.stringify(siblingToolsPath));
   });
 
+  it('rewrites a /src/ caller path to /dist/ to resolve the sibling mcp-tools.js', () => {
+    // Caller lives under /src/ with NO sibling mcp-tools.js; the compiled
+    // sibling exists under the mirrored /dist/ path. The resolver must rewrite.
+    const srcDir = join(tmpDir, 'src', 'venue');
+    const distDir = join(tmpDir, 'dist', 'venue');
+    mkdirSync(srcDir, { recursive: true });
+    mkdirSync(distDir, { recursive: true });
+    const distToolsPath = join(distDir, 'mcp-tools.js');
+    writeFileSync(distToolsPath, '// stub compiled mcp-tools\n');
+
+    const callerFileUrl = pathToFileURL(join(srcDir, 'index.ts')).href;
+    const outPath = join(tmpDir, 'server.mjs');
+
+    expect(() =>
+      writeMcpServerScript(outPath, { callerFileUrl, serverLabel: 'jinn-prediction' }),
+    ).not.toThrow();
+
+    const script = readFileSync(outPath, 'utf-8');
+    // The import target must be the /dist/ sibling, not the /src/ caller dir.
+    expect(script).toContain(JSON.stringify(distToolsPath));
+    expect(script).not.toContain(join(srcDir, 'mcp-tools.js'));
+  });
+
   it('throws E_DAEMON_MUST_RUN_FROM_DIST when the sibling mcp-tools.js is absent', () => {
     // A caller dir with NO sibling mcp-tools.js and no /src/ segment to rewrite.
     const callerDir = join(tmpDir, 'no-tools');
