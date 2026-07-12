@@ -19,6 +19,7 @@ import {
   writeDistillDefaults,
   writeDistillMode,
 } from '../src/distill-mode.js';
+import { DISTILLER_CATALOG } from '../src/distill-llm.js';
 import { assertAttemptedClusterIds, attemptRecordFileName } from '../src/eval-prep.js';
 
 /** A distinct temp mode file for a test (env-injected via JINN_LAYER_DISTILL_MODE_PATH). */
@@ -2701,74 +2702,132 @@ describe('jinn-layer distill staged/install — install from staging (#1536)', (
   });
 });
 
-describe('jinn-layer distil — persistent distiller setter (#1496)', () => {
+describe('jinn-layer distill — persistent distiller setter (#1496)', () => {
   it('--set-distiller persists the provider and runs nothing', async () => {
     const modePath = tmpModeFile();
     const seen: string[] = [];
-    await withEnv({ JINN_LAYER_DISTIL_MODE_PATH: modePath }, async () => {
+    await withEnv({ JINN_LAYER_DISTILL_MODE_PATH: modePath }, async () => {
       const { writer, out } = capture();
       const code = await runJinnLayerCli(
-        ['distil', '--set-distiller', 'codex', '--captures', capturesDirWith(ownCapture())],
-        { writer, distilDeps: { distill: async (c: DistillCluster) => { seen.push(...c.instanceIds); return VALID_DISTILL; } } },
+        ['distill', '--set-distiller', 'codex', '--captures', capturesDirWith(ownCapture())],
+        { writer, distillDeps: { distill: async (c: DistillCluster) => { seen.push(...c.instanceIds); return VALID_DISTILL; } } },
       );
       expect(code).toBe(0);
       expect(seen).toEqual([]); // setter only — never ran
-      expect(readDistilDefaults(modePath)).toEqual({ distiller: 'codex' });
+      expect(readDistillDefaults(modePath)).toEqual({ distiller: 'codex' });
       expect(out()).toMatch(/codex/);
     });
   });
 
   it('--set-distiller-model persists the model and runs nothing', async () => {
     const modePath = tmpModeFile();
-    await withEnv({ JINN_LAYER_DISTIL_MODE_PATH: modePath }, async () => {
+    await withEnv({ JINN_LAYER_DISTILL_MODE_PATH: modePath }, async () => {
       const { writer, out } = capture();
-      const code = await runJinnLayerCli(['distil', '--set-distiller-model', 'claude-opus-4-9'], { writer, distilDeps: stubDistilDeps() });
+      const code = await runJinnLayerCli(['distill', '--set-distiller-model', 'claude-opus-4-9'], { writer, distillDeps: stubDistillDeps() });
       expect(code).toBe(0);
-      expect(readDistilDefaults(modePath)).toEqual({ distillerModel: 'claude-opus-4-9' });
+      expect(readDistillDefaults(modePath)).toEqual({ distillerModel: 'claude-opus-4-9' });
       expect(out()).toContain('claude-opus-4-9');
     });
   });
 
   it('accepts both flags in one call and writes both', async () => {
     const modePath = tmpModeFile();
-    await withEnv({ JINN_LAYER_DISTIL_MODE_PATH: modePath }, async () => {
+    await withEnv({ JINN_LAYER_DISTILL_MODE_PATH: modePath }, async () => {
       const { writer } = capture();
       const code = await runJinnLayerCli(
-        ['distil', '--set-distiller', 'codex', '--set-distiller-model', 'gpt-5.5'],
-        { writer, distilDeps: stubDistilDeps() },
+        ['distill', '--set-distiller', 'codex', '--set-distiller-model', 'gpt-5.5'],
+        { writer, distillDeps: stubDistillDeps() },
       );
       expect(code).toBe(0);
-      expect(readDistilDefaults(modePath)).toEqual({ distiller: 'codex', distillerModel: 'gpt-5.5' });
+      expect(readDistillDefaults(modePath)).toEqual({ distiller: 'codex', distillerModel: 'gpt-5.5' });
     });
   });
 
   it('rejects an unknown --set-distiller provider with exit 2 and writes nothing', async () => {
     const modePath = tmpModeFile();
-    await withEnv({ JINN_LAYER_DISTIL_MODE_PATH: modePath }, async () => {
+    await withEnv({ JINN_LAYER_DISTILL_MODE_PATH: modePath }, async () => {
       const { writer, out } = capture();
-      const code = await runJinnLayerCli(['distil', '--set-distiller', 'gpt'], { writer, distilDeps: stubDistilDeps() });
+      const code = await runJinnLayerCli(['distill', '--set-distiller', 'gpt'], { writer, distillDeps: stubDistillDeps() });
       expect(code).toBe(2);
       expect(out()).toContain('distiller must be "claude" or "codex"');
-      expect(readDistilDefaults(modePath)).toEqual({});
+      expect(readDistillDefaults(modePath)).toEqual({});
     });
   });
 
   it('rejects an empty --set-distiller-model with exit 2 and writes nothing', async () => {
     const modePath = tmpModeFile();
-    await withEnv({ JINN_LAYER_DISTIL_MODE_PATH: modePath }, async () => {
+    await withEnv({ JINN_LAYER_DISTILL_MODE_PATH: modePath }, async () => {
       const { writer } = capture();
-      const code = await runJinnLayerCli(['distil', '--set-distiller-model', ''], { writer, distilDeps: stubDistilDeps() });
+      const code = await runJinnLayerCli(['distill', '--set-distiller-model', ''], { writer, distillDeps: stubDistillDeps() });
       expect(code).toBe(2);
-      expect(readDistilDefaults(modePath)).toEqual({});
+      expect(readDistillDefaults(modePath)).toEqual({});
     });
   });
 
   it('--set-distiller --json emits the persisted patch', async () => {
     const modePath = tmpModeFile();
-    await withEnv({ JINN_LAYER_DISTIL_MODE_PATH: modePath }, async () => {
+    await withEnv({ JINN_LAYER_DISTILL_MODE_PATH: modePath }, async () => {
       const { writer, out } = capture();
-      await runJinnLayerCli(['distil', '--set-distiller', 'codex', '--json'], { writer, distilDeps: stubDistilDeps() });
+      await runJinnLayerCli(['distill', '--set-distiller', 'codex', '--json'], { writer, distillDeps: stubDistillDeps() });
       expect(JSON.parse(out())).toEqual({ distiller: 'codex' });
+    });
+  });
+});
+
+describe('jinn-layer distill models — discovery (#1496)', () => {
+  it('lists every catalog model with execution/cost/privacy attributes', async () => {
+    const { writer, out } = capture();
+    const code = await runJinnLayerCli(['distill', 'models'], { writer, distillDeps: stubDistillDeps() });
+    expect(code).toBe(0);
+    for (const e of DISTILLER_CATALOG) {
+      expect(out()).toContain(e.model);
+      expect(out()).toContain(e.execution);
+    }
+    expect(out()).toMatch(/frontier pass/); // cost
+    expect(out()).toMatch(/local/); // privacy/execution
+  });
+
+  it('marks the resolved default (persisted default wins the marker)', async () => {
+    const modePath = tmpModeFile();
+    writeDistillDefaults({ distiller: 'codex', distillerModel: 'gpt-5.5' }, modePath);
+    await withEnv(
+      { JINN_LAYER_DISTILL_MODE_PATH: modePath, JINN_DISTILL_PROVIDER: undefined, JINN_DISTILL_MODEL: undefined },
+      async () => {
+        const { writer, out } = capture();
+        await runJinnLayerCli(['distill', 'models'], { writer, distillDeps: stubDistillDeps() });
+        const gptLine = out().split('\n').find((l) => l.includes('gpt-5.5'));
+        expect(gptLine).toMatch(/default/i);
+      },
+    );
+  });
+
+  it('--json emits the catalog array and the resolved selection', async () => {
+    const modePath = tmpModeFile();
+    await withEnv(
+      { JINN_LAYER_DISTILL_MODE_PATH: modePath, JINN_DISTILL_PROVIDER: undefined, JINN_DISTILL_MODEL: undefined },
+      async () => {
+        const { writer, out } = capture();
+        const code = await runJinnLayerCli(['distill', 'models', '--json'], { writer, distillDeps: stubDistillDeps() });
+        expect(code).toBe(0);
+        const parsed = JSON.parse(out());
+        expect(parsed.catalog).toHaveLength(DISTILLER_CATALOG.length);
+        expect(parsed.resolved).toEqual({ provider: 'claude', model: 'claude-opus-4-8' });
+      },
+    );
+  });
+
+  it('a bare distill is NOT treated as models (run path intact)', async () => {
+    // Regression guard: bare distil with an empty captures dir still runs the
+    // normal path (No eligible captures), not the models catalog.
+    const modePath = tmpModeFile();
+    writeDistillMode('local', modePath);
+    await withEnv({ JINN_LAYER_DISTILL_MODE_PATH: modePath }, async () => {
+      const { writer, out } = capture();
+      const emptyDir = mkdtempSync(join(tmpdir(), 'jinn-captures-empty-'));
+      const code = await runJinnLayerCli(['distill', '--captures', emptyDir], { writer, distillDeps: stubDistillDeps() });
+      expect(code).toBe(0);
+      expect(out()).toContain('No eligible captures');
+      expect(out()).not.toMatch(/frontier pass/);
     });
   });
 });
