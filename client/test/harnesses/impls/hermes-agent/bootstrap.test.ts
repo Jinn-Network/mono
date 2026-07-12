@@ -509,6 +509,26 @@ describe('writePerTaskHermesConfig', () => {
       }
     });
 
+    it('ignores empty/whitespace env vars and preserves the per-SolverNet config value', () => {
+      const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+      try {
+        writePerTaskHermesConfig({
+          hermesHome: home,
+          workingDir: '/work',
+          model: 'config-model',
+          provider: 'config-provider',
+          solverPluginRoots: [],
+          env: { daemonApiUrl: 'http://127.0.0.1:7331', daemonApiToken: 'tok', corpusEnv: {} },
+          processEnv: { JINN_HERMES_MODEL: '   ', JINN_HERMES_PROVIDER: '' },
+        });
+        const cfg = readConfig(home);
+        expect(cfg.model.default).toBe('config-model');
+        expect(cfg.model.provider).toBe('config-provider');
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+
     it('keeps the custom-endpoint provider when a base_url is set (env provider does not override)', () => {
       const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
       try {
