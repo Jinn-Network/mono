@@ -6,7 +6,7 @@ import { CreatorLoop } from './creator.js';
 import { DeliveryWatcherLoop } from './delivery-watcher.js';
 import { startApiServer, type ApiServer } from '../api/server.js';
 import type { StatusGatherConfig } from '../api/gather-status.js';
-import { PeerSync } from '../api/peers.js';
+import { PeerSync } from './peer-sync.js';
 import type { EthHttpSigner } from '../auth/erc8128.js';
 import type { Corpus } from '../corpus/index.js';
 import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop.js';

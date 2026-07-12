@@ -12,7 +12,7 @@ import {
   createPrivateKeyHttpSigner,
   type EthHttpSigner,
 } from '../auth/erc8128.js';
-import { recordLoopTick } from '../daemon/loop-heartbeat.js';
+import { recordLoopTick } from './loop-heartbeat.js';
 
 export interface PeerSyncConfig {
   peers: string[];           // Peer HTTP endpoints, e.g., ['http://localhost:3001']
