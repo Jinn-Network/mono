@@ -1064,7 +1064,7 @@ export function loadConfig(configPath?: string): JinnConfig {
     }
   }
 
-  const resolvedNetwork = merged.network === 'testnet' ? 'testnet' : 'mainnet';
+  const resolvedNetwork = merged.network === 'mainnet' ? 'mainnet' : 'testnet';
 
   // Testnet default: point discovery at the privately-operated Ponder indexer
   // (jinn-mono-280n.4), unless the operator has set their own `discovery` block.

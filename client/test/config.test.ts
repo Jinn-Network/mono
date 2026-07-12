@@ -356,6 +356,25 @@ describe('loadConfig RPC override handling', () => {
     expect(config.subgraphUrl).toBeUndefined();
   });
 
+  it('config-less first run defaults to testnet with the Ponder discovery default (#1239)', async () => {
+    // Empty {} config file = no `network` key, which reproduces the config-less
+    // first-run state (`merged.network === undefined`) deterministically, without
+    // depending on ~/.jinn-client/config.json in CI. Regression for #1239.
+    const configPath = await writeConfigFile({});
+    delete process.env['JINN_NETWORK'];
+    delete process.env['JINN_DISCOVERY_MODE'];
+    delete process.env['JINN_DISCOVERY_URL'];
+    delete process.env['BASE_RPC_URL'];
+    delete process.env['BASE_SEPOLIA_RPC_URL'];
+    delete process.env['JINN_RPC_URL'];
+
+    const config = loadConfig(configPath);
+
+    expect(config.network).toBe('testnet'); // AC1
+    expect(config.discovery?.mode).toBe('http'); // AC2
+    expect(config.discovery?.url).toBe(DEFAULT_TESTNET_DISCOVERY_URL); // AC2
+  });
+
   it('does not set a discovery or subgraph default on mainnet', async () => {
     const configPath = await writeConfigFile({ network: 'mainnet' });
     delete process.env['JINN_SUBGRAPH_URL'];
