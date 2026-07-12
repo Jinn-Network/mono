@@ -304,35 +304,22 @@ function applyFilters(rows: SliceInputRow[], filter: SliceFilter): SliceInputRow
   });
 }
 
-function computePluginSeries(
+/**
+ * Groups rows by a multi-valued dimension (one attempt can carry several keys,
+ * so it explodes across series) and rolls each group into a series. Used for
+ * both group=plugin (keys = plugins) and group=builder (keys = builder).
+ */
+function computeExplodedSeries(
   rows: SliceInputRow[],
+  keysOf: (r: SliceInputRow) => string[],
   bucket: SliceBucketSize,
   window: number,
 ): SliceSeries[] {
   const groups = new Map<string, SliceInputRow[]>();
   for (const r of rows) {
-    if (!r.plugins || r.plugins.length === 0) continue;
-    for (const p of r.plugins) {
-      if (!groups.has(p)) groups.set(p, []);
-      groups.get(p)!.push(r);
-    }
-  }
-  return Array.from(groups.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, groupRows]) => computeOneSeries(groupRows, key, bucket, window));
-}
-
-function computeBuilderSeries(
-  rows: SliceInputRow[],
-  bucket: SliceBucketSize,
-  window: number,
-): SliceSeries[] {
-  const groups = new Map<string, SliceInputRow[]>();
-  for (const r of rows) {
-    if (!r.builder || r.builder.length === 0) continue;
-    for (const b of r.builder) {
-      if (!groups.has(b)) groups.set(b, []);
-      groups.get(b)!.push(r);
+    for (const key of keysOf(r)) {
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(r);
     }
   }
   return Array.from(groups.entries())
@@ -362,9 +349,9 @@ export function computeSlice(
   if (params.group === 'none') {
     series = [computeOneSeries(filtered, null, params.bucket, window)];
   } else if (params.group === 'plugin') {
-    series = computePluginSeries(filtered, params.bucket, window);
+    series = computeExplodedSeries(filtered, (r) => r.plugins ?? [], params.bucket, window);
   } else if (params.group === 'builder') {
-    series = computeBuilderSeries(filtered, params.bucket, window);
+    series = computeExplodedSeries(filtered, (r) => r.builder ?? [], params.bucket, window);
   } else {
     series = computeGroupedSeries(filtered, params.group, params.bucket, window);
   }

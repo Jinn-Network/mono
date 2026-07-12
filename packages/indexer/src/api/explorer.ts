@@ -1708,9 +1708,8 @@ app.get('/slice', async (c) => {
   // non-unique — the same tarball can be published by multiple builders), so a
   // cid maps to *all* matching builders and rows explode across them, matching
   // the exploded plugin semantics. Builders are deduped per row below.
-  const cids = [
-    ...new Set(joinedRows.flatMap((r) => parsePluginCids(r.pluginsJson))),
-  ];
+  const rowCids = joinedRows.map((r) => parsePluginCids(r.pluginsJson));
+  const cids = [...new Set(rowCids.flat())];
   const builderMap = new Map<string, string[]>();
   if (cids.length > 0) {
     const pubRows = await db
@@ -1733,7 +1732,7 @@ app.get('/slice', async (c) => {
   }
 
   // Decode pluginsJson into a string[] of "name@version".
-  const sliceRows = joinedRows.map((r) => ({
+  const sliceRows = joinedRows.map((r, i) => ({
     requestId: r.requestId,
     operator: r.operator ?? '0x0000000000000000000000000000000000000000',
     createdAtBlock: r.createdAtBlock,
@@ -1745,9 +1744,7 @@ app.get('/slice', async (c) => {
     model: r.model,
     plugins: parsePluginsJson(r.pluginsJson),
     builder: [
-      ...new Set(
-        parsePluginCids(r.pluginsJson).flatMap((cid) => builderMap.get(cid) ?? []),
-      ),
+      ...new Set(rowCids[i].flatMap((cid) => builderMap.get(cid) ?? [])),
     ],
   }));
 
