@@ -151,6 +151,35 @@ updates:
           - patch
     ignore: *npm-major-ignores
 
+  # Standalone worker + autopilot packages. Live and first-party, but were
+  # omitted from the allowlist above — so they accrued Dependabot security
+  # alerts with no version-update PRs to clear them. Added so routine
+  # minor+patch bumps (and security updates) are auto-managed like the rest.
+  # NOTE: apps/jinn-agent is deliberately NOT listed — it is a subtree of the
+  # standalone Jinn-Network/jinn-agent repo, which carries its own
+  # .github/dependabot.yml; its updates flow in via subtree sync.
+  - package-ecosystem: npm
+    directory: "/packages/indexer-enrichment"
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    ignore: *npm-major-ignores
+
+  - package-ecosystem: npm
+    directory: "/packages/eng-loop"
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    ignore: *npm-major-ignores
+
   # Apps
   - package-ecosystem: npm
     directory: "/apps/broadcast-bot"
