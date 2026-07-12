@@ -11,6 +11,7 @@ import {
 import { base, baseSepolia } from 'viem/chains';
 import type { CorpusQuery, EnvelopeRef } from './types.js';
 import { PAYLOAD_TUPLE, PAYLOAD_TUPLE_V2 } from '../erc8004/abis.js';
+import { IDENTITY_REGISTRY_ADDRESSES } from '../contracts/addresses.js';
 
 const DEFAULT_LIMIT = 50;
 const HARD_LIMIT = 500;
@@ -19,11 +20,6 @@ const DEFAULT_CHUNK_BLOCKS = 9_999n;
 export const DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK: Record<number, bigint> = {
   84532: 41_100_000n,
   8453: 25_000_000n,
-};
-
-export const DEFAULT_IDENTITY_REGISTRY_BY_CHAIN_ID: Record<number, Address> = {
-  84532: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
-  8453: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
 };
 
 const IDENTITY_METADATA_ABI = [
@@ -148,7 +144,7 @@ export async function runOnchainCorpusQuery(
   q: CorpusQuery,
   opts: OnchainCorpusQueryOptions,
 ): Promise<EnvelopeRef[]> {
-  const address = opts.identityRegistryAddress ?? DEFAULT_IDENTITY_REGISTRY_BY_CHAIN_ID[opts.chainId];
+  const address = opts.identityRegistryAddress ?? IDENTITY_REGISTRY_ADDRESSES[opts.chainId];
   if (!address) return [];
   const client = opts.publicClient ?? createPublicClient({
     chain: chainForId(opts.chainId),

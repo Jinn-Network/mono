@@ -7,6 +7,7 @@ import type { PublicClient } from 'viem';
 import type { WalletClient } from 'viem';
 import { loadConfig, getConfigPathFromArgs, type JinnConfig } from '../config.js';
 import { getChainConfig, type ChainConfig } from '../earning/contracts.js';
+import { getJinnRouterAddress } from '../contracts/addresses.js';
 import { FleetStateStore } from '../earning/store.js';
 import { isOperationalServiceStep, type FleetState, type ServiceState } from '../earning/types.js';
 import { decryptMnemonic, deriveMasterSigner, walletPrivateKeyAtIndex } from '../earning/wallet.js';
@@ -158,7 +159,7 @@ export async function createCliExecutionContext(
   const agentEoaPrivateKey = walletPrivateKeyAtIndex(mnemonic, primaryService.index);
   const marketplaceAddress = chainConfig.mechMarketplace as `0x${string}`;
   const routerAddress = (chainConfig.jinnRouter ??
-    '0xfFa7118A3D820cd4E820010837D65FAfF463181B') as `0x${string}`;
+    getJinnRouterAddress(chainConfig.chainId)) as `0x${string}`;
 
   const adapter = new MechAdapter(
     {

@@ -54,6 +54,7 @@ import { detectAuthContext } from './preflight/claude-auth.js';
 import { FleetBootstrapper, recoverEvictedService as recoverEvictedServiceFn } from './earning/bootstrap.js';
 import { runFleetBootstrap, SetupBootstrapHalted } from './earning/bootstrap-run.js';
 import { applyChainGasOverrides, getChainConfig } from './earning/contracts.js';
+import { getJinnRouterAddress } from './contracts/addresses.js';
 import { FleetStateStore } from './earning/store.js';
 import { isOperationalServiceStep } from './earning/types.js';
 import { decryptMnemonic, deriveMasterSigner } from './earning/wallet.js';
@@ -222,7 +223,7 @@ const CHAIN_CONFIG = applyChainGasOverrides(getChainConfig(NETWORK_CHAIN, {
   minSafeEthWei: config.minSafeEthWei,
 });
 const MARKETPLACE_ADDRESS = CHAIN_CONFIG.mechMarketplace as `0x${string}`;
-const ROUTER_ADDRESS = (CHAIN_CONFIG.jinnRouter ?? '0xfFa7118A3D820cd4E820010837D65FAfF463181B') as `0x${string}`;
+const ROUTER_ADDRESS = (CHAIN_CONFIG.jinnRouter ?? getJinnRouterAddress(CHAIN_CONFIG.chainId)) as `0x${string}`;
 
 /** #913: the bundled public RPC fallback chain for the current network. The
  *  setup/network endpoint persists `[primary, ...RPC_PUBLIC_DEFAULTS]` so the

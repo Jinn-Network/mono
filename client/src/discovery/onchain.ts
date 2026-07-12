@@ -43,8 +43,9 @@ import { base, baseSepolia } from 'viem/chains';
 import type { DiscoveryAPI, ClaimableTaskCandidate, InstanceClaimCount, TaskStatusSnapshot, SolverNetManifestSummary, SolverNetLifecycleStatus, PluginPublication, PluginScoreHistoryRow, PublishedArtifact, CodeDigestRewardRow, TaskPostCounts } from './types.js';
 import { DiscoveryUnavailableError, TASK_POST_WINDOW_BLOCKS, bucketTaskPostCounts } from './types.js';
 import type { EnvelopeRef, CorpusQuery } from '../corpus/types.js';
-import { runOnchainCorpusQuery, DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK, DEFAULT_IDENTITY_REGISTRY_BY_CHAIN_ID } from '../corpus/onchain-query.js';
+import { runOnchainCorpusQuery, DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK } from '../corpus/onchain-query.js';
 import { JINN_ROUTER_ABI } from '../adapters/mech/types.js';
+import { JINN_ROUTER_ADDRESSES, IDENTITY_REGISTRY_ADDRESSES } from '../contracts/addresses.js';
 import {
   canClaimTask,
   ROUTER_TASK_ATTEMPT_CREATED_EVENT,
@@ -83,12 +84,6 @@ const DEFAULT_MAX_PAGES = 5;
 // higher-limit RPC can override via `chunkBlocks`, but the default must work
 // against the bare public endpoint since this is the always-live fallback floor.
 const DEFAULT_CHUNK_BLOCKS = 1_999n;
-
-/** Default JinnRouter addresses by chain ID. */
-const DEFAULT_ROUTER_BY_CHAIN_ID: Record<number, Address> = {
-  8453: '0xfFa7118A3D820cd4E820010837D65FAfF463181B',  // Base mainnet
-  // Base Sepolia is loaded from deployment artifact; no fixed default
-};
 
 /** Concurrency cap for parallel canClaimTask calls. */
 const CLAIM_CHECK_CONCURRENCY = 8;
@@ -582,10 +577,10 @@ export async function limitedConcurrency<T>(
  */
 export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): DiscoveryAPI {
   const routerAddress: Address = (opts.routerAddress ??
-    DEFAULT_ROUTER_BY_CHAIN_ID[opts.chainId]) as Address;
+    JINN_ROUTER_ADDRESSES[opts.chainId]) as Address;
 
   const identityRegistryAddress: Address | undefined = (opts.identityRegistryAddress ??
-    DEFAULT_IDENTITY_REGISTRY_BY_CHAIN_ID[opts.chainId]) as Address | undefined;
+    IDENTITY_REGISTRY_ADDRESSES[opts.chainId]) as Address | undefined;
 
   const chunk = toBigInt(opts.chunkBlocks, DEFAULT_CHUNK_BLOCKS);
 

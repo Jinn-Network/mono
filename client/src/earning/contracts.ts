@@ -10,6 +10,14 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { keccak256, stringToBytes } from 'viem';
+import {
+  JINN_ROUTER_ADDRESSES,
+  IDENTITY_REGISTRY_ADDRESSES,
+  OLAS_TOKEN,
+  MECH_MARKETPLACE,
+  STAKING_CONTRACT,
+  STOLAS_DISTRIBUTOR as STOLAS_DISTRIBUTOR_ADDRESS,
+} from '../contracts/addresses.js';
 
 // Package root, resolved from this file's location. Works identically from
 // src/earning/ (tsx) and dist/earning/ (tsc output) — both are 2 dirs below client/.
@@ -200,22 +208,22 @@ const BASE_CONFIG: ChainConfig = {
   gnosisSafeSameAddressMultisig: '0xFbBEc0C8b13B38a9aC0499694A69a10204c5E2aB',
 
   // Tokens
-  olasToken: '0x54330d28ca3357F294334BDC454a032e7f353416',
+  olasToken: OLAS_TOKEN,
 
   // Mech marketplace
-  mechMarketplace: '0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020',
+  mechMarketplace: MECH_MARKETPLACE,
   mechFactory: '0x2E008211f34b25A7d7c102403c6C2C3B665a1abe', // Native payment type
   mechRequestPrice: 99n, // wei — ecosystem standard
 
   // Jinn staking (JinnRouter activity checker)
-  stakingContract: '0x51c5f4982b9b0b3c0482678f5847ea6228cc8e54',
-  jinnRouter: '0xfFa7118A3D820cd4E820010837D65FAfF463181B',
+  stakingContract: STAKING_CONTRACT,
+  jinnRouter: JINN_ROUTER_ADDRESSES[8453],
 
   // stOLAS ExternalStakingDistributor (LemonTree, Base mainnet)
-  distributorAddress: '0x40abf47B926181148000DbCC7c8DE76A3a61a66f',
+  distributorAddress: STOLAS_DISTRIBUTOR_ADDRESS,
 
   // ERC-8004 IdentityRegistry (Base mainnet, vanity 0x8004…)
-  identityRegistry: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+  identityRegistry: IDENTITY_REGISTRY_ADDRESSES[8453],
 
   // Service package
   agentId: 103,
@@ -269,7 +277,7 @@ const BASE_SEPOLIA_CONFIG: ChainConfig = {
   stakingContract: '0xe9c8DaBb4062deEc921562e7E286be3cEcb826b0',
 
   // ERC-8004 IdentityRegistry (Base Sepolia, vanity 0x8004…)
-  identityRegistry: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
+  identityRegistry: IDENTITY_REGISTRY_ADDRESSES[84532],
 
   // Reuse the current service package defaults unless testnet-specific overrides are supplied.
   agentId: 103,
@@ -658,20 +666,10 @@ export const EVENT_TOPICS = {
 // ERC-8004 IdentityRegistry (vanity 0x8004… on every supported chain)
 // ---------------------------------------------------------------------------
 //
-// Source of truth: erc-8004/erc-8004-contracts/scripts/addresses.ts. Only the
-// chains the client compiles for are mirrored here; the registry is also
-// deployed on Sepolia/Mainnet for completeness, but the bootstrap currently
-// runs against Base or Base Sepolia.
+// Addresses moved to `client/src/contracts/addresses.ts` (the canonical
+// per-chainId map). Re-exported here to keep existing import paths alive.
 
-export const IDENTITY_REGISTRY_ADDRESSES: Record<number, string> = {
-  8453: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',  // Base mainnet
-  84532: '0x8004A818BFB912233c491871b3d84c89A494BD9e', // Base Sepolia
-  // Mainnet (1) and Sepolia (11155111) share the Base mainnet / Base
-  // Sepolia vanity addresses respectively; not currently consumed from
-  // the client.
-  1: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
-  11155111: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
-};
+export { IDENTITY_REGISTRY_ADDRESSES, getIdentityRegistryAddress } from '../contracts/addresses.js';
 
 /**
  * Minimal ABI surface used by the bootstrap mint step — only what the
@@ -732,7 +730,7 @@ export const IDENTITY_REGISTRY_ABI = [
 // stOLAS ExternalStakingDistributor (Base mainnet)
 // ---------------------------------------------------------------------------
 
-export const STOLAS_DISTRIBUTOR = '0x40abf47B926181148000DbCC7c8DE76A3a61a66f';
+export { STOLAS_DISTRIBUTOR } from '../contracts/addresses.js';
 
 export const STOLAS_DISTRIBUTOR_ABI = [
   {

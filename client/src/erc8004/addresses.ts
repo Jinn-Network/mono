@@ -11,15 +11,18 @@
  * reference. Mainnets and their respective testnets share vanity prefixes
  * (0x8004…); the chains 1/8453 vs 11155111/84532 pair accordingly.
  *
- * IdentityRegistry addresses live alongside the staking contract config in
- * `client/src/earning/contracts.ts` (since the bootstrap reads them at mint
- * time); we duplicate the lookup here for the consolidated ERC-8004 surface.
+ * IdentityRegistry addresses are defined in
+ * `client/src/contracts/addresses.ts` (the canonical per-chainId map); we
+ * re-export them below for the consolidated ERC-8004 surface.
  *
- * If you add a chain, update all three maps here and the IdentityRegistry
- * lookup in `client/src/earning/contracts.ts`.
+ * If you add a chain, update the ReputationRegistry/ValidationRegistry maps
+ * here and the IdentityRegistry map in `client/src/contracts/addresses.ts`.
  */
 
 import type { Address } from 'viem';
+
+// IdentityRegistry addresses live in the canonical contracts/addresses.ts map.
+export { IDENTITY_REGISTRY_ADDRESSES, getIdentityRegistryAddress } from '../contracts/addresses.js';
 
 // ── ReputationRegistry ────────────────────────────────────────────────────────
 
