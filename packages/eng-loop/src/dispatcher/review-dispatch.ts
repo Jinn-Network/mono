@@ -5,7 +5,7 @@ import type { ReviewablePr, DispatcherConfig, InFlightReview } from './types.js'
 import type { CommandRunner } from './issue-source.js';
 import type { SpawnFn } from './dispatch.js';
 import { WORKTREES_BASE } from './dispatch.js';
-import { sessionTokenEnv } from './identity.js';
+import { sessionSpawnEnv } from './identity.js';
 import { parseOwnedPrefixes, touchesCodeOwnedPath } from './code-owned.js';
 import { buildHeadlessPrompt } from '../headless.js';
 
@@ -106,7 +106,7 @@ export async function dispatchReview(
     cwd: worktreePath,
     detached: true,
     stdio: 'ignore',
-    ...sessionTokenEnv(cfg.reviewGhToken),
+    ...sessionSpawnEnv(cfg.reviewGhToken),
   });
 
   return {

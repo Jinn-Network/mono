@@ -355,11 +355,20 @@ describe('dispatchIssue', () => {
     expect(env?.GH_TOKEN).toBe('impl-token-xyz');
   });
 
-  it('inherits the ambient gh account when no implementer token is configured', async () => {
+  it('inherits the ambient gh account (no GH_TOKEN) when no implementer token is configured', async () => {
     const { runner } = makeRunner();
     const { spawn, calls } = makeSpawn();
     await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } }); // implGhToken: ''
-    expect(calls[0].opts.env).toBeUndefined();
+    const env = calls[0].opts.env as Record<string, string> | undefined;
+    expect(env?.GH_TOKEN).toBeUndefined();
+  });
+
+  it('disables the print-mode background-wait ceiling so the session reaches its PR stage', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+    const env = calls[0].opts.env as Record<string, string> | undefined;
+    expect(env?.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS).toBe('0');
   });
 
   it('spawns with a prompt containing the CLAUDE.md canon', async () => {

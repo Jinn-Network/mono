@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { basename, dirname, join } from 'node:path';
 import type { ReadyIssue, DispatcherConfig, InFlightSession } from './types.js';
 import type { CommandRunner } from './issue-source.js';
-import { sessionTokenEnv } from './identity.js';
+import { sessionSpawnEnv } from './identity.js';
 import {
   fetchFieldIds,
   isStaleFieldError,
@@ -271,8 +271,9 @@ export async function dispatchIssue(
     stdio: ['ignore', 'inherit', 'inherit'],
     logPath,
     // Author this PR as the implementer identity (DR-2026-06-15); inherits the
-    // ambient gh account when no token is configured.
-    ...sessionTokenEnv(cfg.implGhToken),
+    // ambient gh account when no token is configured. Also disables the
+    // print-mode background-wait ceiling so the session reaches its PR stage.
+    ...sessionSpawnEnv(cfg.implGhToken),
   });
 
   // AC#2: surface pid + log path on the dispatch log line so an operator can

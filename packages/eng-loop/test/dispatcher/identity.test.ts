@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { assertReviewIdentities, sessionTokenEnv } from '../../src/dispatcher/identity.js';
+import { assertReviewIdentities, sessionSpawnEnv } from '../../src/dispatcher/identity.js';
 import { DEFAULT_CONFIG } from '../../src/dispatcher/types.js';
 import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
 
@@ -8,13 +8,22 @@ function loginRunner(byToken: Record<string, string>): CommandRunner {
   return async (_cmd, _args, opts) => `${byToken[opts?.env?.GH_TOKEN ?? ''] ?? ''}\n`;
 }
 
-describe('sessionTokenEnv', () => {
-  it('returns {} (inherit the ambient gh account) when the token is empty', () => {
-    expect(sessionTokenEnv('')).toEqual({});
+describe('sessionSpawnEnv', () => {
+  it('always disables the print-mode background-wait ceiling (0 = wait indefinitely)', () => {
+    // Without this the spawned `claude -p` self-terminates once its background
+    // subagents pass the 600s default, stranding committed-but-unpushed work.
+    expect(sessionSpawnEnv('').env?.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS).toBe('0');
+    expect(sessionSpawnEnv('tok').env?.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS).toBe('0');
+  });
+
+  it('inherits the ambient gh account (no GH_TOKEN) when the token is empty', () => {
+    const e = sessionSpawnEnv('');
+    expect(e.env?.GH_TOKEN).toBeUndefined();
+    expect(e.env?.PATH).toBe(process.env.PATH); // ambient preserved
   });
 
   it('overlays GH_TOKEN (preserving ambient env) when a token is set', () => {
-    const e = sessionTokenEnv('tok-abc');
+    const e = sessionSpawnEnv('tok-abc');
     expect(e.env?.GH_TOKEN).toBe('tok-abc');
     expect(e.env?.PATH).toBe(process.env.PATH); // ambient preserved
   });

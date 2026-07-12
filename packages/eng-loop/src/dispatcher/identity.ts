@@ -2,15 +2,27 @@ import type { CommandRunner } from './issue-source.js';
 import type { DispatcherConfig } from './types.js';
 
 /**
- * Spawn-opts overlay that makes a session authenticate as a specific GitHub
- * identity (DR-2026-06-15). Returns `{ env: { ...process.env, GH_TOKEN } }`
- * when a token is given, or `{}` (inherit the ambient `gh` account) when it is
- * empty. Spread into the `spawn` opts; the production spawn lambda forwards
- * `env` to Node's `child_process.spawn`.
+ * Spawn-opts overlay for a dispatched `claude -p` session. Spread into the
+ * `spawn` opts; the production spawn lambda forwards `env` to Node's
+ * `child_process.spawn`. Always sets an explicit `env` (a copy of
+ * `process.env` plus the keys below):
+ *
+ *  - `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` — print-mode otherwise terminates
+ *    a session once its background subagents have run past the 600s default,
+ *    which strands committed-but-unpushed work before the push/PR stage. `0` =
+ *    wait indefinitely, so a session runs its inner pipeline to completion. The
+ *    eng-loop wall-clock (hours, pause-not-kill) remains the runaway backstop.
+ *  - `GH_TOKEN` — set only when a per-identity token is configured
+ *    (DR-2026-06-15); when empty the ambient `gh` account is inherited via the
+ *    copied `process.env`.
  */
-export function sessionTokenEnv(token: string): { env?: NodeJS.ProcessEnv } {
-  if (!token) return {};
-  return { env: { ...process.env, GH_TOKEN: token } };
+export function sessionSpawnEnv(token: string): { env: NodeJS.ProcessEnv } {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: '0',
+  };
+  if (token) env.GH_TOKEN = token;
+  return { env };
 }
 
 async function resolveLogin(runner: CommandRunner, token: string): Promise<string> {

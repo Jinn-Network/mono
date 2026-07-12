@@ -97,11 +97,20 @@ describe('dispatchReview', () => {
     expect(env?.GH_TOKEN).toBe('rev-token-xyz');
   });
 
-  it('inherits the ambient gh account when no reviewer token is configured', async () => {
+  it('inherits the ambient gh account (no GH_TOKEN) when no reviewer token is configured', async () => {
     const { runner } = makeRunner();
     const { spawn, calls } = makeSpawn();
     await dispatchReview(PR, CFG, { runner, spawn }); // reviewGhToken: ''
-    expect(calls[0].opts.env).toBeUndefined();
+    const env = calls[0].opts.env as Record<string, string> | undefined;
+    expect(env?.GH_TOKEN).toBeUndefined();
+  });
+
+  it('disables the print-mode background-wait ceiling so the review session runs to completion', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchReview(PR, CFG, { runner, spawn });
+    const env = calls[0].opts.env as Record<string, string> | undefined;
+    expect(env?.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS).toBe('0');
   });
 
   // P3 (DR-2026-06-15): human-surface detection. The gate reads the changed-file
