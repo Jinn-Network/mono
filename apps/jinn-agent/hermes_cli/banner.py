@@ -365,11 +365,11 @@ def gather_splash_state() -> Dict[str, object]:
       - contribution: real consent state — ``unset`` omits the line,
         ``accepted`` → on, ``declined`` → off.
 
-    Degraded (no cheap sync fork source — see the PR data-wiring notes):
-      - corpus reachability + count: needs a ``jinn-layer corpus`` call.
-        A real source exists but not synchronously; wiring it is follow-up
-        Jinn-Network/mono#1420, so this stays ``checking…`` for now (not a bug).
-      - contribution_count: needs a ``jinn-layer ledger`` call.
+    Wired via the background prefetch (non-blocking, ``timeout=0.0``):
+      - corpus reachability + count and contribution_count come from
+        ``prefetch_splash_reads()`` (jinn-layer corpus search + ledger). Until
+        the prefetch resolves the read yields None and corpus honestly stays
+        ``checking…`` — the settle can't shift layout (label-column-fixed).
 
     Omitted (no source at all in the fork — the line is not rendered):
       - node status + vessel: the harness has no local node/vessel concept
@@ -401,11 +401,23 @@ def gather_splash_state() -> Dict[str, object]:
     except Exception:
         pass  # No consent module → treat as pre-consent, omit the line.
 
-    # corpus: no cheap synchronous source yet → left unresolved (checking…).
-    # A real corpus source exists but not synchronously; wiring it (reachability
-    # + envelope count without blocking the paint) is follow-up
-    # Jinn-Network/mono#1420. Until then this line honestly reads checking… —
-    # it is not a bug. node: key never set → line omitted (see _status_lines).
+    # Corpus + contribution count — reuse the prefetched reads; never block.
+    # Un-prefetched / not-yet-resolved → None → corpus stays checking… (paint
+    # never shifts layout: the status strings are label-column-fixed). node:
+    # key never set → line omitted (see _status_lines).
+    try:
+        reads = get_splash_reads(timeout=0.0)
+    except Exception:
+        reads = None
+    if reads is not None:
+        if "corpus" in reads:
+            state["corpus"] = reads["corpus"]
+        if "corpus_count" in reads:
+            state["corpus_count"] = reads["corpus_count"]
+        # contribution_count only when contribution is on (renderer degrades to
+        # 'on · traces published' without a count otherwise).
+        if state.get("contribution") == "on" and "contribution_count" in reads:
+            state["contribution_count"] = reads["contribution_count"]
     return state
 
 
@@ -885,6 +897,81 @@ def get_update_result(timeout: float = 0.5) -> Optional[int]:
     """Get result of prefetched check. Returns None if not ready."""
     _update_check_done.wait(timeout=timeout)
     return _update_result
+
+
+# =========================================================================
+# Non-blocking splash reads (corpus reachability+count, contribution count)
+# =========================================================================
+
+_splash_result: Optional[Dict[str, object]] = None
+_splash_reads_done = threading.Event()
+
+
+def _read_contribution_count() -> Optional[int]:
+    """Published-trace count via jinn-layer ``ledger --json``, or None.
+
+    Mirrors ``/jinn ledger``'s "N published" (ledger_view.render_ledger) and
+    the ``onboarding.ledger_nonempty`` degrade rule: any layer error /
+    unparseable output / unrecognised shape → None (never a false count, never
+    raise). Stored raw — consent-gating is applied at merge time in
+    ``gather_splash_state``.
+    """
+    try:
+        from plugins.jinn import jinn_layer, ledger_view
+        code, out = jinn_layer.ledger_json()
+        if code != 0:
+            return None
+        rows = ledger_view.rows_from_json(json.loads(out))
+        if rows is None:
+            return None
+        return sum(1 for r in rows if r.get("state") not in ("vetoed", "failed"))
+    except Exception:
+        return None
+
+
+def _read_corpus() -> Dict[str, object]:
+    """Corpus reachability+count via ``corpus search '' --limit 500 --json``.
+
+    exit 0 + a parseable JSON array → connected + len(hits); anything else →
+    unreachable. NOTE: corpus_count is capped at the ``--limit`` (500) — the
+    only corpus verb is ``search`` (no total-count/stats verb in harness-layer),
+    so this is exact at testnet scale and under-reports past 500 records. A real
+    total-count verb is the follow-up if/when mainnet scale demands it.
+    """
+    try:
+        from plugins.jinn import jinn_layer
+        code, out = jinn_layer.corpus_search("", limit=500, as_json=True)
+        if code == 0:
+            hits = json.loads(out)
+            if isinstance(hits, list):
+                return {"corpus": "connected", "corpus_count": len(hits)}
+    except Exception:
+        pass
+    return {"corpus": "unreachable"}
+
+
+def prefetch_splash_reads():
+    """Kick both splash subprocess reads in a background daemon thread."""
+    def _run():
+        global _splash_result
+        result: Dict[str, object] = {}
+        try:
+            result.update(_read_corpus())
+            cc = _read_contribution_count()
+            if cc is not None:
+                result["contribution_count"] = cc
+        except Exception:
+            pass  # never raise — publish whatever resolved, honest checking… for the rest
+        _splash_result = result
+        _splash_reads_done.set()
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+
+
+def get_splash_reads(timeout: float = 0.0) -> Optional[Dict[str, object]]:
+    """Result of the prefetched reads, or None if unresolved. Never blocks at 0.0."""
+    _splash_reads_done.wait(timeout=timeout)
+    return _splash_result
 
 
 # =========================================================================

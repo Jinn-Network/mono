@@ -122,8 +122,26 @@ def ledger_json(runner: Optional[Runner] = None) -> Tuple[int, str]:
     return run(["ledger", "--json"], runner)
 
 
-def corpus_search(query: str, runner: Optional[Runner] = None) -> Tuple[int, str]:
-    return run(["corpus", "search", query], runner)
+def corpus_search(
+    query: str,
+    *,
+    limit: int = 500,
+    as_json: bool = True,
+    runner: Optional[Runner] = None,
+) -> Tuple[int, str]:
+    """Corpus search. The CLI owns clamping ([1,500]) and ``""`` = all records.
+
+    ``as_json`` emits ``--json`` (harness-layer prints ``JSON.stringify(hits)``,
+    a JSON array); ``limit`` emits ``--limit N``. Keyword-only past ``query`` so
+    the one production caller (``plugins/jinn/__init__.py``) that already passes
+    ``runner=`` by keyword stays backward-compatible.
+    """
+    args = ["corpus", "search", query]
+    if limit is not None:
+        args += ["--limit", str(limit)]
+    if as_json:
+        args.append("--json")
+    return run(args, runner)
 
 
 def contract(runner: Optional[Runner] = None) -> Tuple[int, str]:
