@@ -2,7 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readDistillMode, writeDistillMode } from '../src/distill-mode.js';
+import {
+  readDistillDefaults,
+  readDistillMode,
+  writeDistillDefaults,
+  writeDistillMode,
+} from '../src/distill-mode.js';
 
 function tmpModePath(): string {
   return join(mkdtempSync(join(tmpdir(), 'jinn-distill-mode-')), 'distill.json');
@@ -58,5 +63,58 @@ describe('distill mode store', () => {
     writeDistillMode('local', path);
     writeFileSync(legacy, JSON.stringify({ where: 'off' }));
     expect(readDistillMode(path, legacy)).toBe('local');
+  });
+});
+
+describe('distill defaults store (distiller + distillerModel)', () => {
+  it('reads empty defaults when the file is absent', () => {
+    expect(readDistillDefaults(tmpModePath())).toEqual({});
+  });
+
+  it('reads empty defaults when the file is malformed JSON', () => {
+    const path = tmpModePath();
+    writeFileSync(path, '{ not valid');
+    expect(readDistillDefaults(path)).toEqual({});
+  });
+
+  it('drops an unrecognised distiller provider (fail-safe → absent)', () => {
+    const path = tmpModePath();
+    writeFileSync(path, JSON.stringify({ distiller: 'gpt', distillerModel: 'x' }));
+    expect(readDistillDefaults(path)).toEqual({ distillerModel: 'x' });
+  });
+
+  it('drops a non-string distillerModel (fail-safe → absent)', () => {
+    const path = tmpModePath();
+    writeFileSync(path, JSON.stringify({ distiller: 'claude', distillerModel: 42 }));
+    expect(readDistillDefaults(path)).toEqual({ distiller: 'claude' });
+  });
+
+  it('round-trips distiller and distillerModel', () => {
+    const path = tmpModePath();
+    writeDistillDefaults({ distiller: 'codex', distillerModel: 'gpt-5.5' }, path);
+    expect(readDistillDefaults(path)).toEqual({ distiller: 'codex', distillerModel: 'gpt-5.5' });
+  });
+
+  it('merges defaults without clobbering an existing where mode', () => {
+    const path = tmpModePath();
+    writeDistillMode('local', path);
+    writeDistillDefaults({ distiller: 'codex' }, path);
+    expect(readDistillMode(path)).toBe('local');
+    expect(readDistillDefaults(path)).toEqual({ distiller: 'codex' });
+  });
+
+  it('writeDistillMode preserves already-set distiller defaults', () => {
+    const path = tmpModePath();
+    writeDistillDefaults({ distiller: 'codex', distillerModel: 'gpt-5.5' }, path);
+    writeDistillMode('off', path);
+    expect(readDistillMode(path)).toBe('off');
+    expect(readDistillDefaults(path)).toEqual({ distiller: 'codex', distillerModel: 'gpt-5.5' });
+  });
+
+  it('merges a partial patch without dropping the other default', () => {
+    const path = tmpModePath();
+    writeDistillDefaults({ distiller: 'claude', distillerModel: 'claude-opus-4-8' }, path);
+    writeDistillDefaults({ distillerModel: 'claude-opus-4-9' }, path);
+    expect(readDistillDefaults(path)).toEqual({ distiller: 'claude', distillerModel: 'claude-opus-4-9' });
   });
 });
