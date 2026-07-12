@@ -196,26 +196,53 @@ describe('jinn-layer capture preview', () => {
     new URL('./fixtures/seeded-secrets-task.json', import.meta.url),
   );
 
-  it('renders the redaction diff and the envelope as it would publish', async () => {
+  it('renders a compact readable summary by default — no raw envelope JSON, no pre-scrub secrets', async () => {
     const { writer, out } = capture();
     const code = await runJinnLayerCli(['capture', 'preview', fixturePath], { writer });
     expect(code).toBe(0);
     const text = out();
-    // The before → after diff is local display; the seeded secrets appear
-    // there (that IS the audit surface) with their scrubbed replacements.
+
+    // Header + tools + per-step lines: the publishable surface, as fields.
+    expect(text).toContain('scrub preview — what would leave this machine');
+    expect(text).toContain('Wire the todo-app deploy script to the new staging bucket');
+    expect(text).toContain('steps');
+    expect(text).toContain('tools');
+    expect(text).toContain('read_file');
+    // Grouped redaction counts (the safety core): a count summary line plus the
+    // per-stage grouping. The seeded secrets fire the key-policy stage.
+    expect(text).toMatch(/redactions\s+\d+ across \d+ field\(s\)/);
+    expect(text).toContain('key-policy');
+
+    // The default view must NOT dump the envelope JSON wall …
+    expect(text).not.toContain('envelope as it would publish');
+    // … and must NOT carry any raw pre-scrub secret (before values live under --full only).
+    expect(text).not.toContain('AKIAIOSFODNN7EXAMPLE');
+    expect(text).not.toContain('ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789');
+    expect(text).not.toContain('jane.doe@example-corp.com');
+  });
+
+  it('--full appends the before→after audit and the full envelope JSON', async () => {
+    const { writer, out } = capture();
+    const code = await runJinnLayerCli(['capture', 'preview', fixturePath, '--full'], { writer });
+    expect(code).toBe(0);
+    const text = out();
+
+    // The compact summary is still present (full is additive).
+    expect(text).toContain('scrub preview — what would leave this machine');
+
+    // The local-only before→after audit reappears, with the seeded secret + its scrubbed form.
     expect(text).toContain('never leaves this machine');
     expect(text).toContain('AKIAIOSFODNN7EXAMPLE');
-    expect(text).toContain('jane.doe@example-corp.com');
     expect(text).toContain('[EMAIL]');
-    expect(text).toContain('/users/anon');
-    // The envelope section — what would actually publish — carries none of them.
+
+    // The envelope-as-it-would-publish JSON wall reappears …
     const marker = 'envelope as it would publish';
     expect(text).toContain(marker);
+    // … and that section carries none of the seeded secrets.
     const envelopeSection = text.slice(text.indexOf(marker));
     expect(envelopeSection).not.toContain('AKIAIOSFODNN7EXAMPLE');
     expect(envelopeSection).not.toContain('ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789');
     expect(envelopeSection).not.toContain('jane.doe@example-corp.com');
-    expect(envelopeSection).not.toContain('janedoe');
   });
 
   it('--json emits the report with before values stripped (persistence-safe)', async () => {
