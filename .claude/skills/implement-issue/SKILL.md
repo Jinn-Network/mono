@@ -94,7 +94,7 @@ SUGGESTED_BLOCKED_ON=$(echo "$VERDICT_JSON" | jq -r '.suggestedBlockedOn')
 For an issue numbered `<N>`, it sequences four shell commands (then `git branch -a --contains <sha>` per matching commit):
 
 1. `git fetch --all --quiet`
-2. `gh search prs "#<N> in:body" --repo Jinn-Network/mono --state all --json number,state,title,headRefName,mergedAt,closedAt,body,mergeCommit`
+2. `gh search prs "#<N> in:body" --repo Jinn-Network/mono --json number,body --limit 50` — no `--state` flag (`gh search prs` rejects `--state all`; its default already returns both open and closed PRs). Then, per PR found: `gh pr view <n> --repo Jinn-Network/mono --json number,state,title,headRefName,mergedAt,closedAt,body,mergeCommit`.
 3. `gh issue view <N> --repo Jinn-Network/mono --json closedByPullRequestsReferences`
 4. `git log --all --grep="#<N>" --format="%H%x09%D%x09%s"`
 5. For each commit SHA: `git branch -a --contains <sha>` — buckets reachable refs into `{ origin/next, origin/main, origin/release/*, origin/hotfix/* }`.
