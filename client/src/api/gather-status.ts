@@ -50,6 +50,7 @@ import {
 } from '../solver-nets/prediction-operator-ux.js';
 import {
   findJoinedByName,
+  joinedDisplayName,
   rolesFromJoinedConfig,
   solverTypeFromJoinedContract,
 } from '../solver-nets/registry.js';
@@ -208,7 +209,7 @@ function chainKey(network: 'mainnet' | 'testnet'): 'base' | 'base-sepolia' {
  */
 export function derivePredictionSolverNetName(config: JinnConfig): string {
   for (const [cid, entry] of Object.entries(config.joinedSolverNets ?? {})) {
-    if (entry.contract?.id === 'prediction') return entry.name ?? cid;
+    if (entry.contract?.id === 'prediction') return joinedDisplayName(cid, entry);
   }
   return 'prediction';
 }
