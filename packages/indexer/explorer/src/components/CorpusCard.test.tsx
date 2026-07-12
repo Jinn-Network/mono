@@ -114,6 +114,19 @@ describe('CorpusCard', () => {
     });
   });
 
+  it('links a preview Cluster chip to the filtered index (#1414 AC3, shared table)', async () => {
+    mockFetch(SIGNAL, LIST);
+    const { Wrapper } = makeWrapper();
+    render(<CorpusCard />, { wrapper: Wrapper });
+    await waitFor(() => {
+      const chipLink = screen.getByText(LIST.items[0].cluster).closest('a');
+      expect(chipLink).toHaveAttribute(
+        'href',
+        `/corpus?cluster=${encodeURIComponent(LIST.items[0].cluster)}`,
+      );
+    });
+  });
+
   it('links to the corpus via a Browse button', async () => {
     mockFetch(SIGNAL, LIST);
     const { Wrapper } = makeWrapper();

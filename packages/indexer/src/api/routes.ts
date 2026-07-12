@@ -509,6 +509,8 @@ const CORPUS_SORT_KEYS: readonly CorpusSortKey[] = [
 
 export interface CorpusListOpts {
   includeSeeds?: boolean;
+  /** Exact, case-sensitive cluster (primary-tag) filter; omit for unfiltered (#1414). */
+  cluster?: string;
   /** Page size (default 25, max 200). */
   limit?: number;
   /** Zero-based offset for pagination. */
@@ -598,11 +600,19 @@ export function buildCorpusList(
     });
   }
 
-  all.sort((a, b) => compareCorpus(a, b, sortKey, factor));
+  // Cluster filter (#1414): exact, case-sensitive match on the primary tag,
+  // applied AFTER the seed-exclusion loop (so seedsExcluded stays a pre-filter
+  // provenance stat) and BEFORE sort/slice (so total reflects the filtered set).
+  const filtered =
+    typeof opts.cluster === 'string' && opts.cluster !== ''
+      ? all.filter((r) => r.cluster === opts.cluster)
+      : all;
+
+  filtered.sort((a, b) => compareCorpus(a, b, sortKey, factor));
 
   return {
-    items: all.slice(offset, offset + limit),
-    total: all.length,
+    items: filtered.slice(offset, offset + limit),
+    total: filtered.length,
     seedsExcluded,
     includeSeeds,
   };

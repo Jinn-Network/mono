@@ -96,9 +96,9 @@ The Corpus is three surfaces: the Dashboard **summary card**, the **index** (`/c
 - **State messages** — empty ("No attempts yet — the corpus grows as operators publish them."); loading / error (shared, §3.1). No HBars, no cluster breakdown table, no footer legend.
 
 **Index (`/corpus`).**
-- **Static** — attempt total (`N attempts`). No seeds-excluded line, no seed filter — imported seeds stay excluded by the backend default, silently.
-- **Collections** — attempts, item shape `{ cid, summary, cluster, contributor, createdAt }` (plus `tier`, `model`, `stepCount` carried but not columned); newest-first; server-side sort over the full corpus before slicing; paginated consistent with §2.5/§2.7. Columns: **Attempt** (summary, 2-line clamp, → detail) · **Cluster** · **Contributor** (→ basescan address) · **Age**. Sortable: Cluster, Age. Removed from the roster: Tier, Steps, the content-hash subline.
-- **Actions** — open attempt → detail; sort (Cluster / Age); page; follow contributor → basescan address.
+- **Static** — attempt total (`N attempts`). When a cluster filter is active (`?cluster=<name>`), an active-filter chip naming the cluster is shown with a clear control; absent when unfiltered. No seeds-excluded line, no seed filter — imported seeds stay excluded by the backend default, silently.
+- **Collections** — attempts, item shape `{ cid, summary, cluster, contributor, createdAt }` (plus `tier`, `model`, `stepCount` carried but not columned); newest-first; server-side sort over the full corpus before slicing; server-side cluster filter (exact, case-sensitive; `?cluster=<name>`) applied before sort/slice; paginated consistent with §2.5/§2.7. Columns: **Attempt** (summary, 2-line clamp, → detail) · **Cluster** · **Contributor** (→ basescan address) · **Age**. Sortable: Cluster, Age. Removed from the roster: Tier, Steps, the content-hash subline.
+- **Actions** — open attempt → detail; sort (Cluster / Age); page; follow contributor → basescan address; filter by cluster (click a Cluster chip → `/corpus?cluster=<name>`); clear the active cluster filter.
 - **State messages** — empty ("No attempts yet…"); loading / error (shared, §3.1).
 
 **Item detail (`/corpus/:cid`).** A single attempt at a stable, deep-linkable URL — the target the CLI's ledger and preview link to. Two columns: the attempt (left), its provenance + metadata (right).

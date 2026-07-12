@@ -395,6 +395,8 @@ export interface CorpusParams {
   includeSeeds?: boolean;
   limit?: number;
   offset?: number;
+  /** Exact cluster filter; omit for unfiltered (#1414). */
+  cluster?: string;
   /** Server-side sort column; omit for the backend default (createdAt). */
   sort?: string;
   /** Server-side sort direction; omit for the backend default (desc). */
@@ -410,6 +412,7 @@ export function useCorpus(params?: CorpusParams) {
           include: params?.includeSeeds ? 'seeded' : undefined,
           limit: params?.limit,
           offset: params?.offset,
+          cluster: params?.cluster,
           sort: params?.sort,
           dir: params?.dir,
         })}`,

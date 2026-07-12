@@ -245,4 +245,77 @@ describe('CorpusView', () => {
       expect(calls.some((u) => u.includes('sort=cluster') && u.includes('offset=0'))).toBe(true),
     );
   });
+
+  // ── Cluster filter (#1414) ──────────────────────────────────────────────────
+
+  it('carries cluster= in the request when ?cluster= is set', async () => {
+    const calls = mockFetchCapturing();
+    const { Wrapper } = makeWrapper('/corpus?cluster=jinn-agent');
+    render(<CorpusView />, { wrapper: Wrapper });
+    await waitFor(() => expect(calls.length).toBeGreaterThan(0));
+    expect(calls.some((u) => u.includes('cluster=jinn-agent'))).toBe(true);
+  });
+
+  it('omits cluster= from the request when ?cluster= is unset', async () => {
+    const calls = mockFetchCapturing();
+    const { Wrapper } = makeWrapper('/corpus');
+    render(<CorpusView />, { wrapper: Wrapper });
+    await waitFor(() => expect(calls.length).toBeGreaterThan(0));
+    expect(calls.every((u) => !u.includes('cluster='))).toBe(true);
+  });
+
+  it('shows an active cluster-filter chip with a clear control when filtered', async () => {
+    // A cluster name absent from the fixture rows, so the only 'zeta-only' text
+    // on screen is the active-filter chip itself (getByText stays unambiguous).
+    mockFetch(EMPTY_FIXTURE);
+    const { Wrapper } = makeWrapper('/corpus?cluster=zeta-only');
+    render(<CorpusView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      expect(screen.getByText('zeta-only')).toBeInTheDocument();
+      expect(screen.getByLabelText('Clear cluster filter')).toBeInTheDocument();
+    });
+  });
+
+  it('shows no cluster-filter chip when unfiltered', async () => {
+    mockFetch(FIXTURE);
+    const { Wrapper } = makeWrapper('/corpus');
+    render(<CorpusView />, { wrapper: Wrapper });
+    await waitFor(() => expect(screen.getByText(/^2 attempts$/i)).toBeInTheDocument());
+    expect(screen.queryByLabelText('Clear cluster filter')).toBeNull();
+  });
+
+  it('clearing the cluster filter removes cluster= and resets the page atomically', async () => {
+    const calls = mockFetchCapturing();
+    const { Wrapper } = makeWrapper('/corpus?cluster=jinn-agent&page=2', { static: false });
+    render(<CorpusView />, { wrapper: Wrapper });
+    await waitFor(() =>
+      expect(calls.some((u) => u.includes('cluster=jinn-agent') && u.includes('offset=50'))).toBe(true),
+    );
+    await waitFor(() => expect(screen.getByLabelText('Clear cluster filter')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByLabelText('Clear cluster filter'));
+    await waitFor(() =>
+      expect(calls.some((u) => !u.includes('cluster=') && !u.includes('offset=50'))).toBe(true),
+    );
+  });
+
+  it('renders the empty state when the filtered cluster has no items', async () => {
+    mockFetch(EMPTY_FIXTURE);
+    const { Wrapper } = makeWrapper('/corpus?cluster=nonexistent');
+    render(<CorpusView />, { wrapper: Wrapper });
+    await waitFor(() => expect(screen.getByText(/No attempts yet/i)).toBeInTheDocument());
+  });
+
+  it('links each Cluster chip to the filtered index (#1414 AC3)', async () => {
+    mockFetch(FIXTURE);
+    const { Wrapper } = makeWrapper();
+    render(<CorpusView />, { wrapper: Wrapper });
+    await waitFor(() => {
+      const chipLink = screen.getByText(ITEM_A.cluster).closest('a');
+      expect(chipLink).toHaveAttribute(
+        'href',
+        `/corpus?cluster=${encodeURIComponent(ITEM_A.cluster)}`,
+      );
+    });
+  });
 });

@@ -22,7 +22,8 @@ import type { CorpusItemRow } from '../lib/api';
 import { StatusBar } from '../components/StatusBar';
 import { DataTable } from '../components/DataTable';
 import { corpusColumns, renderCorpusRow } from '../components/CorpusTable';
-import { useEnumParam, useNumParam, usePatchParams } from '../lib/url-state';
+import { CorpusTagChip } from '../components/CorpusChips';
+import { useEnumParam, useNumParam, useQueryParam, usePatchParams } from '../lib/url-state';
 import { int } from '../lib/format';
 
 const PAGE_SIZE = 25;
@@ -96,6 +97,7 @@ export function CorpusView() {
   const [page] = useNumParam('page', 0);
   const [sort] = useEnumParam('sort', 'createdAt', ['createdAt', 'cluster']);
   const [dir] = useEnumParam('dir', 'desc', ['asc', 'desc']);
+  const [cluster] = useQueryParam('cluster', '');
   // Coupled writes (sort/dir both reset the page) go through one atomic patch —
   // the per-key setters clobber each other in a single handler (usePatchParams).
   const patchParams = usePatchParams();
@@ -103,6 +105,8 @@ export function CorpusView() {
   const { data, isLoading, isError, refetch } = useCorpus({
     limit: PAGE_SIZE,
     offset: Math.max(page, 0) * PAGE_SIZE,
+    // Filter to a single cluster (#1414); omit when unset.
+    cluster: cluster || undefined,
     // Sort is server-side over the full corpus (not the fetched page) so the
     // ordering holds across pages.
     sort,
@@ -118,6 +122,12 @@ export function CorpusView() {
 
   function goToPage(next: number | null) {
     patchParams({ page: next === null || next <= 0 ? null : next });
+  }
+
+  // Clearing the cluster filter re-orders the full corpus — reset the page in
+  // the SAME write so the viewer isn't stranded at a stale offset (#1414).
+  function clearCluster() {
+    patchParams({ cluster: null, page: null });
   }
 
   const rows = data?.items ?? [];
@@ -154,6 +164,9 @@ export function CorpusView() {
         </h1>
         <div
           style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
             fontFamily: 'var(--font-mono)',
             fontSize: 'var(--text-xs)',
             letterSpacing: '0.14em',
@@ -161,7 +174,30 @@ export function CorpusView() {
             color: 'var(--fg-dim)',
           }}
         >
-          {data ? `${int(total)} attempts` : 'loading…'}
+          <span>{data ? `${int(total)} attempts` : 'loading…'}</span>
+          {cluster && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <CorpusTagChip>{cluster}</CorpusTagChip>
+              <button
+                aria-label="Clear cluster filter"
+                onClick={clearCluster}
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 10,
+                  letterSpacing: '0.10em',
+                  textTransform: 'uppercase',
+                  padding: '3px 8px',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-1)',
+                  background: 'transparent',
+                  color: 'var(--fg-muted)',
+                  cursor: 'pointer',
+                }}
+              >
+                Clear ×
+              </button>
+            </span>
+          )}
         </div>
       </div>
 

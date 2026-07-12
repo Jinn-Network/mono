@@ -171,6 +171,86 @@ describe('buildCorpusList', () => {
     const out = buildCorpusList(rows, { sort: 'not-a-column' });
     expect(out.items.map((i) => i.cid)).toEqual(['bafy-new', 'bafy-old']);
   });
+
+  it('filters to a single cluster (#1414)', () => {
+    const rows = [
+      meta({ manifestCid: 'bafy-a', tagsJson: JSON.stringify(['jinn-agent']) }),
+      meta({ manifestCid: 'bafy-b', tagsJson: JSON.stringify(['codex-swe']) }),
+      meta({ manifestCid: 'bafy-c', tagsJson: JSON.stringify(['jinn-agent']) }),
+    ];
+    const out = buildCorpusList(rows, { cluster: 'jinn-agent' });
+    expect(out.items.map((i) => i.cid).sort()).toEqual(['bafy-a', 'bafy-c']);
+    expect(out.items.every((i) => i.cluster === 'jinn-agent')).toBe(true);
+  });
+
+  it('total reflects the post-filter count (#1414)', () => {
+    const rows = [
+      meta({ manifestCid: 'bafy-a', tagsJson: JSON.stringify(['jinn-agent']) }),
+      meta({ manifestCid: 'bafy-b', tagsJson: JSON.stringify(['codex-swe']) }),
+      meta({ manifestCid: 'bafy-c', tagsJson: JSON.stringify(['jinn-agent']) }),
+    ];
+    const out = buildCorpusList(rows, { cluster: 'jinn-agent' });
+    expect(out.total).toBe(2);
+  });
+
+  it('returns an empty list for a cluster with no items (#1414)', () => {
+    const rows = [
+      meta({ manifestCid: 'bafy-a', tagsJson: JSON.stringify(['jinn-agent']) }),
+    ];
+    const out = buildCorpusList(rows, { cluster: 'nonexistent' });
+    expect(out.total).toBe(0);
+    expect(out.items).toEqual([]);
+  });
+
+  it('matches clusters case-sensitively (#1414)', () => {
+    const rows = [meta({ manifestCid: 'bafy-a', tagsJson: JSON.stringify(['Alpha']) })];
+    const out = buildCorpusList(rows, { cluster: 'alpha' });
+    expect(out.total).toBe(0);
+  });
+
+  it('leaves the list unchanged when no cluster is given (#1414)', () => {
+    const rows = [
+      meta({ manifestCid: 'bafy-old', tagsJson: JSON.stringify(['a']), createdAtTimestamp: 100n }),
+      meta({ manifestCid: 'bafy-new', tagsJson: JSON.stringify(['b']), createdAtTimestamp: 300n }),
+    ];
+    const out = buildCorpusList(rows);
+    expect(out.total).toBe(2);
+    expect(out.items.map((i) => i.cid)).toEqual(['bafy-new', 'bafy-old']);
+  });
+
+  it('filters by cluster BEFORE pagination (#1414)', () => {
+    // 30 in-cluster + 30 out-of-cluster; a page of 10 over the filtered set must
+    // draw only in-cluster rows and total must be the filtered length (30).
+    const inCluster = Array.from({ length: 30 }, (_, i) =>
+      meta({ manifestCid: `in-${String(i).padStart(2, '0')}`, tagsJson: JSON.stringify(['wanted']), stepCount: i }),
+    );
+    const outCluster = Array.from({ length: 30 }, (_, i) =>
+      meta({ manifestCid: `out-${String(i).padStart(2, '0')}`, tagsJson: JSON.stringify(['other']), stepCount: i }),
+    );
+    const out = buildCorpusList([...inCluster, ...outCluster], {
+      cluster: 'wanted',
+      sort: 'stepCount',
+      dir: 'asc',
+      limit: 10,
+      offset: 0,
+    });
+    expect(out.total).toBe(30);
+    expect(out.items).toHaveLength(10);
+    expect(out.items.every((i) => i.cluster === 'wanted')).toBe(true);
+  });
+
+  it('keeps seedsExcluded a PRE-filter provenance stat (#1414)', () => {
+    // A seed in cluster z + a contributed row NOT in z. Default includeSeeds:false
+    // drops the seed (seedsExcluded 1), then the cluster:z filter drops the rest —
+    // pinning the ordering provenance → cluster → count.
+    const rows = [
+      meta({ manifestCid: 'bafy-seed', provenance: 'imported', tagsJson: JSON.stringify(['z']) }),
+      meta({ manifestCid: 'bafy-real', provenance: 'contributed', tagsJson: JSON.stringify(['other']) }),
+    ];
+    const out = buildCorpusList(rows, { cluster: 'z' });
+    expect(out.total).toBe(0);
+    expect(out.seedsExcluded).toBe(1);
+  });
 });
 
 describe('buildCorpusItem', () => {

@@ -51,7 +51,15 @@ export function renderCorpusRow(row: CorpusItemRow) {
       </td>
       <td style={cellStyle}>
         {row.cluster ? (
-          <CorpusTagChip>{row.cluster}</CorpusTagChip>
+          // Cluster chip → filtered index (#1414 AC3 intent). Shared by CorpusView + CorpusCard,
+          // so the dashboard card's preview clusters drill into /corpus?cluster= for free —
+          // no per-cluster list re-added to CorpusCard (contradicts #1431/spec §2.4).
+          <Link
+            href={`/corpus?cluster=${encodeURIComponent(row.cluster)}`}
+            style={{ textDecoration: 'none', color: 'inherit' }}
+          >
+            <CorpusTagChip>{row.cluster}</CorpusTagChip>
+          </Link>
         ) : (
           <span style={{ color: 'var(--fg-dim)' }}>—</span>
         )}

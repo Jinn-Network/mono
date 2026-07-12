@@ -2515,7 +2515,8 @@ app.use('/corpus/:cid', explorerFreshness());
  * Sort is server-side over the full corpus (?sort=createdAt|cluster|tier|
  * stepCount, ?dir=asc|desc; default createdAt desc). Pagination via ?limit
  * (default 25, max 200) and ?offset. Seeds excluded by default;
- * ?include=seeded folds seeded/imported envelopes back in.
+ * ?include=seeded folds seeded/imported envelopes back in. ?cluster=<name>
+ * filters to a single cluster (exact, case-sensitive; #1414).
  */
 app.get('/corpus', async (c) => {
   const includeSeeds = c.req.query('include') === 'seeded';
@@ -2523,9 +2524,11 @@ app.get('/corpus', async (c) => {
   const offsetRaw = Number.parseInt(c.req.query('offset') ?? '', 10);
   const sort = c.req.query('sort');
   const dir = c.req.query('dir') === 'asc' ? 'asc' : 'desc';
+  const cluster = c.req.query('cluster') || undefined;
   const metas = await loadCaptureMetas();
   const result = buildCorpusList(metas, {
     includeSeeds,
+    cluster,
     limit: Number.isFinite(limitRaw) ? limitRaw : undefined,
     offset: Number.isFinite(offsetRaw) ? offsetRaw : undefined,
     sort,
