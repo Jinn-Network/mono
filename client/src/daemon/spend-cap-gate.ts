@@ -5,18 +5,10 @@
  * See docs/superpowers/specs/2026-05-21-per-credential-spend-budget-design.md.
  */
 import type { GateLogger } from './gate-logger.js';
+import { isOverSpendCap } from '../spend/spend-cap.js';
 
 /** Per-credential paused state, so the warn/info logs fire once per transition. */
 const lastPausedByCredential = new Map<string, boolean>();
-
-/**
- * Whether today's spend has reached or exceeded the cap. The single source of
- * the cap predicate — shared by the gate and the `/v1/status` spend block so
- * the two surfaces cannot disagree.
- */
-export function isOverSpendCap(spentTodayUsd: number, capUsd: number): boolean {
-  return spentTodayUsd >= capUsd;
-}
 
 /**
  * Decide whether a claim may proceed for a credential given today's spend.

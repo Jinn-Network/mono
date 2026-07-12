@@ -12,7 +12,7 @@ import { base, baseSepolia } from 'viem/chains';
 import type { Store } from '../store/store.js';
 import type { JinnConfig } from '../config.js';
 import type { CredentialId } from '../spend/credential.js';
-import { isOverSpendCap } from '../daemon/spend-cap-gate.js';
+import { isOverSpendCap } from '../spend/spend-cap.js';
 import type { AiUnitsDaemonConfig } from '../spend/ai-units-config.js';
 import { blockResetsAtUtc, weekResetsAtUtc, GPT_5_4_MINI_USD_PER_BLOCK } from '../spend/ai-units.js';
 import { FleetStateStore } from '../earning/store.js';
