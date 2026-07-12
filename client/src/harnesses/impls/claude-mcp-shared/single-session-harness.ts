@@ -13,8 +13,9 @@
  *
  * The only per-venue pieces are threaded in as params: the wrapper basename,
  * the mcp-server key, the SingleSessionConfig, the wrapper config builder, the
- * script writer, and a `parseRecord` that turns a JSONL line into the venue's
- * submission shape. The test-mode short-circuit + `_finalize` stay per-venue.
+ * script writer, and an `onRecord` that validates a JSONL line and fires the
+ * venue's submission side-effect. The test-mode short-circuit + `_finalize`
+ * stay per-venue.
  */
 
 import { writeFileSync, mkdirSync, readFileSync, chmodSync } from 'node:fs';
@@ -25,9 +26,8 @@ import {
   type SingleSessionConfig,
   type SingleSessionResult,
 } from './single-session-orchestrator.js';
-import type { TrajectoryCollector } from '../../../trajectory/index.js';
 
-export interface RunSingleSessionHarnessParams<TSubmission> {
+export interface RunSingleSessionHarnessParams {
   sessionId: string;
   prompt: string;
   workingDir: string;
@@ -41,10 +41,11 @@ export interface RunSingleSessionHarnessParams<TSubmission> {
   buildWrapperConfig: (submissionLogPath: string) => Record<string, unknown>;
   /** Write the venue wrapper script to the given path. */
   writeScript: (outPath: string) => void;
-  /** Parse a JSONL record into the venue submission shape, or null if invalid. */
-  parseRecord: (record: unknown) => TSubmission | null;
-  /** Called with the parsed submission when a valid record is first seen. */
-  onParsed: (submission: TSubmission) => void;
+  /**
+   * Handle a JSONL record: validate it, fire the venue submission side-effect,
+   * and return true iff it was a valid submission (false otherwise).
+   */
+  onRecord: (record: unknown) => boolean;
 }
 
 export interface RunSingleSessionHarnessDeps {
@@ -53,15 +54,14 @@ export interface RunSingleSessionHarnessDeps {
   abort: AbortSignal;
   log: (event: { level: 'info' | 'warn' | 'error'; msg: string; data?: unknown }) => void;
   sessionMaxMs?: number;
-  trajectory?: TrajectoryCollector;
 }
 
 /**
  * Run the venue-agnostic live-path middle and return the raw session result
  * (transcriptPath / startedAt / endedAt) for the venue's `_finalize` to consume.
  */
-export async function runSingleSessionHarness<TSubmission>(
-  params: RunSingleSessionHarnessParams<TSubmission>,
+export async function runSingleSessionHarness(
+  params: RunSingleSessionHarnessParams,
   deps: RunSingleSessionHarnessDeps,
 ): Promise<SingleSessionResult> {
   const mcpDir = join(params.workingDir, 'mcp');
@@ -101,22 +101,17 @@ export async function runSingleSessionHarness<TSubmission>(
     ),
   );
 
-  // isSubmitted reads the JSONL log; as soon as there's a valid line, we know
-  // the tool fired and we surface the parsed submission via onParsed.
+  // isSubmitted reads the JSONL log; as soon as there's a valid line, we hand
+  // it to the venue's onRecord, which fires the submission side-effect.
   const isSubmitted = (): boolean => {
     try {
       const contents = readFileSync(submissionLogPath, 'utf-8');
       const lastLine = contents.trim().split('\n').pop() ?? '';
       if (!lastLine) return false;
-      const parsed = params.parseRecord(JSON.parse(lastLine));
-      if (parsed !== null) {
-        params.onParsed(parsed);
-        return true;
-      }
+      return params.onRecord(JSON.parse(lastLine));
     } catch {
       return false;
     }
-    return false;
   };
 
   return runSingleSession(params.sessionId, params.prompt, params.sessionConfig, {
@@ -128,6 +123,5 @@ export async function runSingleSessionHarness<TSubmission>(
     log: deps.log,
     isSubmitted,
     ...(deps.sessionMaxMs !== undefined ? { sessionMaxMs: deps.sessionMaxMs } : {}),
-    ...(deps.trajectory ? { trajectory: deps.trajectory } : {}),
   });
 }

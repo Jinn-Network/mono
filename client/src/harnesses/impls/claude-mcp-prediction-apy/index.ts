@@ -125,7 +125,7 @@ export class ClaudeMcpPredictionApyImpl implements Harness {
     // ── Live path ──────────────────────────────────────────────────────────────
     log({ level: 'info', msg: 'claude-mcp-prediction-apy: spawning session', data: { sessionId } });
 
-    const session = await runSingleSessionHarness<{ predictedBps: string; rationale: string }>(
+    const session = await runSingleSessionHarness(
       {
         sessionId,
         prompt,
@@ -142,16 +142,14 @@ export class ClaudeMcpPredictionApyImpl implements Harness {
           submissionLogPath,
         }),
         writeScript: _writeApyPredictionMcpServerScript,
-        parseRecord: (record) =>
-          record &&
-          typeof (record as { predictedBps?: unknown }).predictedBps === 'string' &&
-          typeof (record as { rationale?: unknown }).rationale === 'string'
-            ? {
-                predictedBps: (record as { predictedBps: string }).predictedBps,
-                rationale: (record as { rationale: string }).rationale,
-              }
-            : null,
-        onParsed: (s) => signalSubmit(s.predictedBps, s.rationale),
+        onRecord: (record) => {
+          const r = record as { predictedBps?: unknown; rationale?: unknown };
+          if (typeof r.predictedBps === 'string' && typeof r.rationale === 'string') {
+            signalSubmit(r.predictedBps, r.rationale);
+            return true;
+          }
+          return false;
+        },
       },
       {
         claudePath: this.config.claudePath ?? 'claude',
