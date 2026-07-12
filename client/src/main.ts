@@ -28,7 +28,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_RPC_URLS } from './config.js';
 import { Store } from './store/store.js';
 import { startApiServer, isEmbeddedAgentEnabled, type ApiServer } from './api/server.js';
-import { setDefaultTxSubmissionLedger } from './tx-retry.js';
+import { setDefaultTxSubmissionLedger, withEoaBroadcastLock } from './tx-retry.js';
 // addHarnessReadinessRoutes is wired through startApiServer's holder ref now
 // (jinn-mono-u34i). No direct import needed.
 import { CapturePublishUnavailableError } from './api/captures.js';
@@ -2121,21 +2121,23 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             store: earningStore,
             chain: NETWORK_CHAIN,
             writeCheckpoint: async ({ stakingProxy }) => {
-              const txHash = await masterWallet.writeContract({
-                address: stakingProxy,
-                abi: [
-                  {
-                    type: 'function',
-                    name: 'checkpoint',
-                    stateMutability: 'nonpayable',
-                    inputs: [],
-                    outputs: [],
-                  },
-                ] as const,
-                functionName: 'checkpoint',
-                account: masterAccount,
-                chain: null,
-              });
+              const txHash = await withEoaBroadcastLock(masterAccount.address, () =>
+                masterWallet.writeContract({
+                  address: stakingProxy,
+                  abi: [
+                    {
+                      type: 'function',
+                      name: 'checkpoint',
+                      stateMutability: 'nonpayable',
+                      inputs: [],
+                      outputs: [],
+                    },
+                  ] as const,
+                  functionName: 'checkpoint',
+                  account: masterAccount,
+                  chain: null,
+                }),
+              );
               return { txHash };
             },
           }

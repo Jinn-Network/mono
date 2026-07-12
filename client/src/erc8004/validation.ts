@@ -35,6 +35,7 @@ import {
   type PublicClient,
   type WalletClient,
 } from 'viem';
+import { withEoaBroadcastLock } from '../tx-retry.js';
 import { VALIDATION_REGISTRY_ABI } from './abis.js';
 import {
   VALIDATION_REGISTRY_ADDRESSES,
@@ -140,14 +141,16 @@ export class ValidationRegistryClient {
       throw new Error('[ValidationRegistryClient] walletClient has no account');
     }
 
-    return wallet.writeContract({
-      address: this.contractAddress,
-      abi: VALIDATION_REGISTRY_ABI,
-      functionName: 'validationRequest',
-      args: [args.validatorAddress, args.agentId, args.requestURI, args.requestHash],
-      account,
-      chain: wallet.chain ?? null,
-    });
+    return withEoaBroadcastLock(account.address, () =>
+      wallet.writeContract({
+        address: this.contractAddress,
+        abi: VALIDATION_REGISTRY_ABI,
+        functionName: 'validationRequest',
+        args: [args.validatorAddress, args.agentId, args.requestURI, args.requestHash],
+        account,
+        chain: wallet.chain ?? null,
+      }),
+    );
   }
 
   /**
@@ -178,20 +181,22 @@ export class ValidationRegistryClient {
       throw new Error('[ValidationRegistryClient] walletClient has no account');
     }
 
-    return wallet.writeContract({
-      address: this.contractAddress,
-      abi: VALIDATION_REGISTRY_ABI,
-      functionName: 'validationResponse',
-      args: [
-        args.requestHash,
-        args.response,
-        args.responseURI,
-        args.responseHash,
-        args.tag,
-      ],
-      account,
-      chain: wallet.chain ?? null,
-    });
+    return withEoaBroadcastLock(account.address, () =>
+      wallet.writeContract({
+        address: this.contractAddress,
+        abi: VALIDATION_REGISTRY_ABI,
+        functionName: 'validationResponse',
+        args: [
+          args.requestHash,
+          args.response,
+          args.responseURI,
+          args.responseHash,
+          args.tag,
+        ],
+        account,
+        chain: wallet.chain ?? null,
+      }),
+    );
   }
 
   // ── Read methods ───────────────────────────────────────────────────────────

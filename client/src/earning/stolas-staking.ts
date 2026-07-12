@@ -6,6 +6,7 @@
  */
 
 import type { PublicClient, WalletClient } from 'viem';
+import { withEoaBroadcastLock } from '../tx-retry.js';
 
 // ---------------------------------------------------------------------------
 // ABI fragment — only the functions we call
@@ -110,22 +111,27 @@ export async function claimJinnRewards(
     return { claimed: false, amount: 0n };
   }
 
-  // Submit claim transaction
+  // Submit claim transaction. Hold the per-EOA broadcast lock across submit +
+  // receipt so the nonce stays reserved until the tx mines — concurrent
+  // operator-EOA broadcasts (checkpoint, 8004 writes) cannot claim the same
+  // nonce (#792 / #525).
   const [account] = await walletClient.getAddresses();
-  const hash = await walletClient.writeContract({
-    address: stakingContractAddress,
-    abi: JINN_STAKING_ABI,
-    functionName: options.checkpoint ? 'checkpointAndClaim' : 'claim',
-    args: [BigInt(serviceId)],
-    account,
-    chain: walletClient.chain ?? null,
+  return withEoaBroadcastLock(account, async () => {
+    const hash = await walletClient.writeContract({
+      address: stakingContractAddress,
+      abi: JINN_STAKING_ABI,
+      functionName: options.checkpoint ? 'checkpointAndClaim' : 'claim',
+      args: [BigInt(serviceId)],
+      account,
+      chain: walletClient.chain ?? null,
+    });
+
+    // Wait for confirmation
+    const receipt = await publicClient.waitForTransactionReceipt({ hash });
+    if (receipt.status !== 'success') {
+      throw new Error(`OLAS staking reward claim tx reverted: ${hash}`);
+    }
+
+    return { claimed: true, amount: pending };
   });
-
-  // Wait for confirmation
-  const receipt = await publicClient.waitForTransactionReceipt({ hash });
-  if (receipt.status !== 'success') {
-    throw new Error(`OLAS staking reward claim tx reverted: ${hash}`);
-  }
-
-  return { claimed: true, amount: pending };
 }

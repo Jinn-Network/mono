@@ -18,6 +18,9 @@ vi.mock('../../src/tx-retry.js', () => ({
   }),
   isRecoverableTransactionError: vi.fn().mockReturnValue(false),
   backoffDelay: vi.fn().mockResolvedValue(undefined),
+  // Passthrough — the serializer's ordering is exercised in the dedicated
+  // tx-retry tests; here we only need the wrapped fn to run.
+  withEoaBroadcastLock: vi.fn(<T>(_from: unknown, fn: () => Promise<T>) => fn()),
 }));
 
 const REPUTATION_ADDRESS = '0x8004BAa17C55a88189AE136b182e5fdA19dE9b63' as `0x${string}`;

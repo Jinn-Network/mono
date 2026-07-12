@@ -85,7 +85,7 @@ import {
   type WalletClient,
 } from 'viem';
 import { executeSafeTransaction } from '../adapters/mech/safe.js';
-import { waitForTransactionReceiptWithRetry } from '../tx-retry.js';
+import { waitForTransactionReceiptWithRetry, withEoaBroadcastLock } from '../tx-retry.js';
 import { REPUTATION_REGISTRY_ABI } from './abis.js';
 import {
   REPUTATION_REGISTRY_ADDRESSES,
@@ -505,19 +505,23 @@ export class ReputationRegistryClient {
     }
 
     // Direct EOA path — used by tests and ad-hoc scripts. Production wires
-    // safeAddress so this branch is rarely hit on real chains.
-    const txHash = await walletClient.sendTransaction({
-      account,
-      to: this.contractAddress,
-      data: calldata,
-      value: 0n,
-      // viem requires the chain to be specified; we resolve it from the
-      // public client's configured chain to avoid double-config drift.
-      chain: walletClient.chain ?? null,
-    });
+    // safeAddress so this branch is rarely hit on real chains. Hold the per-EOA
+    // broadcast lock across submit + receipt so a concurrent operator-EOA
+    // broadcast cannot claim the same nonce (#792 / #525).
+    return withEoaBroadcastLock(account.address, async () => {
+      const txHash = await walletClient.sendTransaction({
+        account,
+        to: this.contractAddress,
+        data: calldata,
+        value: 0n,
+        // viem requires the chain to be specified; we resolve it from the
+        // public client's configured chain to avoid double-config drift.
+        chain: walletClient.chain ?? null,
+      });
 
-    await waitForTransactionReceiptWithRetry(this.publicClient, txHash);
-    return txHash;
+      await waitForTransactionReceiptWithRetry(this.publicClient, txHash);
+      return txHash;
+    });
   }
 }
 
