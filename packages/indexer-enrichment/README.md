@@ -60,7 +60,7 @@ Shared with the indexer (the worker writes into the indexer's Ponder schema):
 | Env | Required | Default | Notes |
 |-----|----------|---------|-------|
 | `DATABASE_URL` | yes | — | Same Postgres as the indexer. |
-| `DATABASE_SCHEMA` | yes | — | Same per-deploy schema (e.g. `jinn_indexer_v1`). |
+| `DATABASE_SCHEMA` | no | auto-derived | Auto-derived at boot from `sha256(ponder.schema.ts)[:8]`, identical to the indexer's (#1429). Set only when pinning (`JINN_INDEXER_SCHEMA_AUTO=false`) — then set the SAME value on the indexer. |
 | `JINN_IPFS_GATEWAY_URL` | no | autonolas gateway | Shared with the indexer. |
 
 Worker-specific knobs:

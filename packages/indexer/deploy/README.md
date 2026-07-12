@@ -61,8 +61,8 @@ If (2) does not auto-deploy, the base is rootDirectory-relative → set `watchPa
 
 1. Copy `.env.example` to `.env` and fill in:
    - `DATABASE_URL` — Postgres connection string
-   - `DATABASE_SCHEMA` — e.g. `jinn_indexer_v1` (this becomes the schema under which Ponder writes tables; pick a name you can version)
    - `PONDER_RPC_URL_*` — RPC endpoints
+   - `DATABASE_SCHEMA` — **leave unset.** It is auto-derived at boot from a hash of `ponder.schema.ts` (see §Automated schema derivation below). Only set it, together with `JINN_INDEXER_SCHEMA_AUTO=false`, if you deliberately want to pin a name.
 2. `docker build -t jinn-indexer:latest -f deploy/Dockerfile .` from `packages/indexer/`.
 3. `docker run --env-file deploy/.env -p 42069:42069 jinn-indexer:latest`.
 4. Wait for `/ready` to return 200 — this means indexing has caught up to realtime.
@@ -133,11 +133,11 @@ The original "GraphQL serves 0 tasks" symptom no longer reproduces on production
 - `/health/task-coverage` was reading a stale hard-coded coordinator instead of resolving `taskCoordinator()` from the active router, so the route returned `status: "unknown"` even when indexed tasks existed.
 - The tokenless router no longer emits `requiredVerdicts`; `TaskCoordinator.recordVerdict` finalizes on the first delivered verdict, but old indexer rows persisted the missing value as `0` and never finalized.
 
-Fixing existing bad rows requires a clean `DATABASE_SCHEMA` bump and re-sync so `TaskCreated` rows are re-folded with `requiredVerdicts = 1`. The verdict handler also normalizes existing non-positive rows during replay, but the deployment answer should be schema bump plus re-sync for legible state.
+Fixing existing bad rows requires a fresh data schema + re-sync so `TaskCreated` rows are re-folded with `requiredVerdicts = 1`. A `ponder.schema.ts` change already re-hashes to a new schema automatically (§Automated schema derivation); to force a re-sync without a schema change, pin `JINN_INDEXER_SCHEMA_AUTO=false` + a new explicit `DATABASE_SCHEMA` on both services. The verdict handler also normalizes existing non-positive rows during replay, but the deployment answer should be a fresh schema plus re-sync for legible state.
 
 Post-deploy smoke for this class of issue:
 
-1. Deploy the indexer and enrichment worker against the same bumped `DATABASE_SCHEMA`.
+1. Deploy the indexer and enrichment worker; both auto-derive the same `DATABASE_SCHEMA` from `ponder.schema.ts` (§Automated schema derivation).
 2. Wait for `/ready` to return 200 before traffic cutover.
 3. Verify `/health/task-coverage` returns 200 with `status: "ok"` and `taskGap` near 0.
 4. Verify `/graphql` returns non-empty `task` rows for the active router/operator scope being tested.
@@ -157,19 +157,31 @@ The harness/mode/plugin/model facets, the train/frozen leaderboard split, the ch
 
 The historical sync is noticeably slower with execution enrichment on (one IPFS round-trip per execution envelope). If that's a problem, either run a faster (HyperSync-backed) RPC, or set `JINN_INDEXER_ENRICH_ENVELOPES=false` and accept that the enriched facets won't populate — note that Ponder won't backfill enrichment after the fact, so flipping it on later requires a re-sync (`DATABASE_SCHEMA` bump). `HarnessCheckpoint` anchors are indexed on-chain (key prefix `harness.checkpoint:`); their manifest bodies (codeDigest, parentCid, implStateDirCid) are not yet fetched, so per-checkpoint frozen-eval scores are pending — a tracked follow-up.
 
-**Deploy sequencing with the enrichment worker (#779):** the verdict path is enriched by `packages/indexer-enrichment`, a separate Railway service on the **same** `DATABASE_URL` + `DATABASE_SCHEMA`. Because adding the worker's `retryCount`/`nextAttemptAt` columns to `verdict_envelope_meta` is an `onchainTable` change (Ponder does not online-migrate), a `DATABASE_SCHEMA` bump + re-sync is required when this version first deploys; repoint **both** the indexer and the worker to the new schema together. See `packages/indexer-enrichment/README.md` for the worker's env, the O2/O3/O4 caveats, and the backfill-drain note.
+**Deploy sequencing with the enrichment worker (#779, #1429):** the verdict path is enriched by `packages/indexer-enrichment`, a separate Railway service on the **same** `DATABASE_URL` + `DATABASE_SCHEMA`. Adding the worker's `retryCount`/`nextAttemptAt` columns to `verdict_envelope_meta` is an `onchainTable` change (Ponder does not online-migrate), so it needs a fresh data schema + re-sync — but this is now **automatic**: both services derive `DATABASE_SCHEMA` from the byte-identical `ponder.schema.ts` (§Automated schema derivation), so they resolve the same `jinn_indexer_<hash>` name with no manual coordination. If you pin a name (`JINN_INDEXER_SCHEMA_AUTO=false`), set the identical `DATABASE_SCHEMA` on **both** services. See `packages/indexer-enrichment/README.md` for the worker's env, the O2/O3/O4 caveats, and the backfill-drain note.
+
+## Automated schema derivation (#1429)
+
+A `ponder.schema.ts` change to an `onchainTable` needs a fresh Ponder data schema — Ponder does not online-migrate, so reusing the old schema name after a schema change crash-loops the new container (`MigrationError: Schema "..." was previously used by a different Ponder app`) while the stale one keeps serving. This used to require a manual Railway `DATABASE_SCHEMA` bump per schema PR, and forgetting it was a silent failure (issue #1429).
+
+`DATABASE_SCHEMA` is now **auto-derived at container boot** from a content hash of `ponder.schema.ts`:
+
+- **Mechanism.** `deploy/derive-schema.mjs` computes `jinn_indexer_<sha256(ponder.schema.ts)[:8]>` and prints it to stdout; both Dockerfile CMDs capture it into `DATABASE_SCHEMA` before `exec`-ing the process (`export DATABASE_SCHEMA="$(node deploy/derive-schema.mjs)" && exec …`). An unchanged schema hashes to the same name → the deployment resumes in place. Any change → a fresh namespace → a clean re-sync, automatically.
+- **Two entrypoints, one file.** The indexer image and the enrichment worker image (`packages/indexer-enrichment`) both COPY the byte-identical `indexer/ponder.schema.ts` and `indexer/deploy/derive-schema.mjs`, so they derive matching names and always write into the same schema — no manual coordination.
+- **Boot log line.** Each container logs (to stderr) `[schema] auto-derived DATABASE_SCHEMA=jinn_indexer_<hash> from ponder.schema.ts` (or `[schema] using operator-set DATABASE_SCHEMA=<name> (JINN_INDEXER_SCHEMA_AUTO=false)`). Grep this in Railway logs to learn the resolved name for the recovery commands below.
+- **Views schema unchanged.** `--views-schema=jinn_indexer` is unaffected; a hash-named data schema can never equal the literal `jinn_indexer` views schema.
+- **Override.** To pin a name, set `JINN_INDEXER_SCHEMA_AUTO=false` and an explicit `DATABASE_SCHEMA` (validated against `/^[A-Za-z_][A-Za-z0-9_]*$/`). Set the **same** pair on both the indexer and the enrichment worker.
 
 ## Zero-downtime rolling deploys (the views pattern)
 
 Ponder's canonical approach for re-deploys without operator-visible downtime:
 
-1. Existing deployment is running with `DATABASE_SCHEMA=jinn_indexer_v1`. Views in a static "public-facing" schema (e.g. `jinn_indexer`) point at `jinn_indexer_v1.*`.
-2. Deploy a new version with `DATABASE_SCHEMA=jinn_indexer_v2`. It indexes from scratch into its own tables; the old `v1` deployment keeps serving.
+1. Existing deployment runs under some data schema (e.g. `jinn_indexer_<hashA>`). Views in a static "public-facing" schema (`jinn_indexer`) point at that schema's tables.
+2. Deploy a version whose `ponder.schema.ts` changed. It auto-derives a fresh data schema (`jinn_indexer_<hashB>`) and indexes from scratch into its own tables; the old deployment keeps serving. (If the schema is **unchanged**, the hash is identical, so the new deployment resumes in place under the same schema — no re-sync.)
 3. Wait for `/ready` to return 200 on the new deployment.
-4. Run `ponder db create-views --schema=jinn_indexer_v2 --views-schema=jinn_indexer` to swap the public-facing views over to `v2`'s tables.
-5. Decommission the `v1` instance and drop its schema.
+4. Run `ponder db create-views --schema=jinn_indexer_<hashB> --views-schema=jinn_indexer` to swap the public-facing views over — or let the CMD do it (below).
+5. Decommission the old instance and drop its schema.
 
-The Dockerfile CMD now runs `ponder start --views-schema=jinn_indexer`, so step 4 happens automatically: each deployment swaps the public-facing `jinn_indexer` views to its own data schema once `/ready` is 200. (Invariant: `DATABASE_SCHEMA` must stay a different, versioned name — `jinn_indexer_vN` — or the data schema and the views schema collide and the deploy fails; see `.env.example`.)
+The Dockerfile CMD runs `ponder start --views-schema=jinn_indexer`, so step 4 happens automatically: each deployment swaps the public-facing `jinn_indexer` views to its own data schema once `/ready` is 200. The data schema is auto-derived (§Automated schema derivation) — a hash-named schema can never equal the literal `jinn_indexer` views schema, so the historical "data schema collides with views schema" failure is now structurally impossible.
 
 **Scope — what the auto-swap does and does not deliver.** The auto-swap benefits **external SQL consumers** (psql, the recovery procedure below, future read-replicas / BI) and removes the manual `ponder db create-views` footgun (the partial-swap hazard in §The all-entities-atomic view swap). It does **not** itself deliver operator-facing zero-downtime for `/explorer` + `/graphql` — those routes read through Ponder's runtime `db` bound to the running process's own `DATABASE_SCHEMA`, not through the public `jinn_indexer` views. Operator-facing zero-downtime is delivered by `railway.toml`'s `/ready` healthcheck cutover (#998): the old container keeps serving until the new one is `/ready`.
 
@@ -191,7 +203,11 @@ Wire `/health/task-coverage` (see §Monitoring above) into your post-deploy smok
 
 ## Recovery procedure (suspected stuck-view scenario)
 
-If `/health/task-coverage` reports `status: 'degraded'` with a large `taskGap` but the indexer process is healthy (`/health` 200, `/ready` 200, logs show ongoing realtime indexing), the most likely cause is a partial view swap — the public-facing `task` view is pointing at a stale `DATABASE_SCHEMA`. Recovery:
+If `/health/task-coverage` reports `status: 'degraded'` with a large `taskGap` but the indexer process is healthy (`/health` 200, `/ready` 200, logs show ongoing realtime indexing), the most likely cause is a partial view swap — the public-facing `task` view is pointing at a stale `DATABASE_SCHEMA`.
+
+The recovery commands below need the deployment's **resolved** data schema. Since `DATABASE_SCHEMA` is auto-derived (§Automated schema derivation), read it from the boot log line — grep the Railway logs for `[schema] auto-derived DATABASE_SCHEMA=` (or `[schema] using operator-set DATABASE_SCHEMA=` if a name is pinned). Substitute that value for `<DATABASE_SCHEMA>` below.
+
+Recovery:
 
 1. **Confirm** the divergence is in the views layer, not the indexer:
    - `curl https://<indexer>/health/task-coverage` — note `maxIndexedTaskId` (from the public views) and `onchainNextTaskId`.
@@ -204,7 +220,7 @@ If `/health/task-coverage` reports `status: 'degraded'` with a large `taskGap` b
 3. **If the gap does not close**, the issue is in the indexing process itself. Continue with the indexer-side recovery:
    - Inspect the process logs for `TaskCreated`-handler errors. The handler is in `packages/indexer/src/handlers.ts`.
    - Bounce the process: a fresh `ponder start` with the same `DATABASE_SCHEMA` resumes from its last checkpoint and will catch up.
-4. **Last-resort full re-sync**: bump `DATABASE_SCHEMA` (e.g. `jinn_indexer_v1` → `jinn_indexer_v2`), deploy, wait for `/ready`, then perform the views swap as documented above.
+4. **Last-resort full re-sync**: force a fresh data schema. The clean way is a trivial `ponder.schema.ts` edit (any content change re-hashes to a new `jinn_indexer_<hash>`), deploy, wait for `/ready`, then perform the views swap as documented above. If you cannot touch the schema, pin `JINN_INDEXER_SCHEMA_AUTO=false` + a new explicit `DATABASE_SCHEMA` on both the indexer and the enrichment worker.
 
 Per the all-entities-atomic note, never re-run a swap that only touches the `task` view — that is the failure mode this recovery procedure exists to undo.
 
