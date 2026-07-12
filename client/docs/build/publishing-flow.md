@@ -4,6 +4,8 @@ Plain-prose walk through `jinn solver-plugins publish <source>`. Spec references
 
 ## Sequence
 
+The `<source>` may be a **local plugin directory** (a bare path resolves as a `local` source), or an `npm:` / `git:` / `github:` reference. Publishing to Jinn is independent of npm publication: Jinn anchors its own IPFS tarball + on-chain record either way, so a public `npm publish` is optional.
+
 1. **Resolve.** The verb resolves the plug-in source (npm, git, github, local path) via `client/src/plugins/resolvers.ts`. It vendors the plug-in under `~/.jinn-client/solver-plugins/` and reads the manifest.
 
 2. **Pack.** The packer (`jinn solver-plugins pack`) computes a deterministic sha256 digest over the directory and writes a tarball.

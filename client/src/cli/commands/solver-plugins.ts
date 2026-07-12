@@ -752,7 +752,7 @@ async function show(ctx: CommandContext, rest: string[]): Promise<void> {
     return;
   }
   try {
-    const plugin = await resolveSolverPlugin(target);
+    const plugin = await resolveSolverPlugin(target, { noVendor: true });
     writeJson(ctx, {
       verb: 'solver-plugins show',
       plugin: {
@@ -784,7 +784,7 @@ async function validate(ctx: CommandContext, rest: string[]): Promise<void> {
     return;
   }
   try {
-    const plugin = await resolveSolverPlugin(target);
+    const plugin = await resolveSolverPlugin(target, { noVendor: true });
     writeJson(ctx, {
       verb: 'solver-plugins validate',
       ok: true,

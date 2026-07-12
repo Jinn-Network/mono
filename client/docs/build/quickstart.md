@@ -27,16 +27,27 @@ The scaffolder emits a working package modeled on `swe-rebench-v2-runtime`:
 
 Open `skills/example/SKILL.md` and replace it with the skill your plug-in offers. A SolverType plug-in can ship one or more skills; a runtime plug-in usually ships an MCP server in `.mcp.json` instead. See `shape-reference.md`.
 
-## 3. Publish to npm + chain
+## 3. Publish to IPFS + chain
+
+Point `publish` straight at your local plugin directory:
 
 ```bash
-npm publish --access public
+jinn solver-plugins publish .
+```
+
+A bare path resolves as a `local` source. The verb packs that directory, pins the tarball to IPFS itself, and writes the on-chain record — no npm round-trip. A public `npm publish --access public` is **optional**, not required: Jinn anchors its own tarball to IPFS and chain regardless of source.
+
+Already on npm? Point at it instead:
+
+```bash
 jinn solver-plugins publish npm:@you/my-swe-skill
 ```
 
 `jinn solver-plugins publish` lazily completes your identity bootstrap (Stage 1) the first time you call it. If you have not yet funded your agent EOA with ETH on testnet, the verb pauses and tells you what to send where. Re-run when the wallet is funded.
 
 The verb packs the plug-in, uploads the tarball to IPFS, and writes a `plugin:<cid>` record on the on-chain IdentityRegistry under your builder agentId.
+
+> `publish .` expects a plugin **directory** (the resolver has no `.tgz`-extraction path). Add npm support by publishing there and pointing at `npm:<name>`; true `.tgz` publish would need resolver extraction and is out of scope.
 
 ## 4. Confirm it published
 

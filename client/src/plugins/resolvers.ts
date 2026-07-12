@@ -111,12 +111,15 @@ export async function resolveSolverPlugin(
   let root: string;
   if (kind === 'bundled') {
     const bundledName = source.slice('bundled:'.length);
-    root = materializeLocal(join(bundledRoot(opts.bundledRoot), bundledName), vendorRoot, bundledName, {
-      refresh: true,
-    });
+    const bundledSrc = join(bundledRoot(opts.bundledRoot), bundledName);
+    root = opts.noVendor
+      ? bundledSrc
+      : materializeLocal(bundledSrc, vendorRoot, bundledName, { refresh: true });
   } else if (kind === 'local') {
     const localRoot = localPathFromSource(source);
-    root = materializeLocal(localRoot, vendorRoot, entryName(entry, basename(localRoot)));
+    root = opts.noVendor
+      ? localRoot
+      : materializeLocal(localRoot, vendorRoot, entryName(entry, basename(localRoot)));
   } else {
     root = join(vendorRoot, safeVendorName(source));
     if (!existsSync(root)) {

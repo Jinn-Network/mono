@@ -44,4 +44,12 @@ export interface LoadedSolverPlugin {
 export interface ResolveSolverPluginOptions {
   bundledRoot?: string;
   vendorRoot?: string;
+  /**
+   * When set, resolve the plug-in in place (use the source path directly as
+   * `root`) instead of copying it into the vendor root. Read-only inspection
+   * verbs (`show`, `validate`) pass this so they never silently write to
+   * `~/.jinn-client/solver-plugins/`. Only honoured for `bundled` / `local`
+   * sources; remote kinds still require a pre-vendored root.
+   */
+  noVendor?: boolean;
 }
