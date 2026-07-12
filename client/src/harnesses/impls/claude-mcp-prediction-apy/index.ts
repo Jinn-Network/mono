@@ -6,7 +6,7 @@
  * Isolation gate: test/harnesses/impls/claude-mcp-prediction-apy/isolation.test.ts
  */
 
-import { writeFileSync, mkdirSync, readFileSync, chmodSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { createPublicClient, http } from 'viem';
 import { base, baseSepolia, mainnet } from 'viem/chains';
@@ -26,8 +26,9 @@ import { buildClaudeIsReady } from '../../../preflight/claude-auth.js';
 import { PredictionApyV0TaskSchema } from '../../../types/prediction-apy.js';
 
 import { buildSessionPrompt } from './prompt.js';
-import { spawnSession } from './session-orchestrator.js';
+import { PREDICTION_APY_CONFIG } from './session-orchestrator.js';
 import { writeMcpServerScript } from '../claude-mcp-shared/mcp-server-script.js';
+import { runSingleSessionHarness } from '../claude-mcp-shared/single-session-harness.js';
 import type { ClaudeMcpPredictionApyConfig, SubmissionState, AaveV3Venue } from './types.js';
 
 function chainForVenue(venue: AaveV3Venue) {
@@ -111,6 +112,7 @@ export class ClaudeMcpPredictionApyImpl implements Harness {
       return this._finalize(parsed, sessionId, session.transcriptPath, submissionState, session.startedAt, session.endedAt, claudeModel);
     }
 
+    // ── Chain-id preflight (apy-only; no prediction counterpart) ────────────────
     const { venue, pool, reserve, reserveSymbol } = parsed.spec.oracle;
     const { chain, chainId } = chainForVenue(venue);
     const rpcUrl = this.config.archiveRpcUrl ?? this.config.rpcUrl ?? this._defaultRpcUrl(venue);
@@ -120,70 +122,45 @@ export class ClaudeMcpPredictionApyImpl implements Harness {
       throw new Error(`oracle venue mismatch: ${venue} expects chain ${chainId}, got ${actual}`);
     }
 
-    const mcpDir = join(workingDir, 'mcp');
-    mkdirSync(mcpDir, { recursive: true });
-
-    const submissionLogPath = join(mcpDir, 'submissions.jsonl');
-    writeFileSync(submissionLogPath, '', { encoding: 'utf-8', mode: 0o600 });
-    chmodSync(submissionLogPath, 0o600);
-
-    const wrapperPath = join(mcpDir, 'apy-prediction-server.mjs');
-    const wrapperConfigPath = join(mcpDir, 'apy-prediction-server-config.json');
-    const wrapperConfig = {
-      venue,
-      pool,
-      reserve,
-      reserveSymbol,
-      rpcUrl,
-      submissionLogPath,
-    };
-    writeFileSync(wrapperConfigPath, JSON.stringify(wrapperConfig), { encoding: 'utf-8', mode: 0o600 });
-    chmodSync(wrapperConfigPath, 0o600);
-    _writeApyPredictionMcpServerScript(wrapperPath);
-
-    const mcpConfigPath = join(mcpDir, 'mcp-config.json');
-    writeFileSync(
-      mcpConfigPath,
-      JSON.stringify({
-        mcpServers: {
-          'jinn-apy-prediction': {
-            command: process.execPath,
-            args: [wrapperPath, wrapperConfigPath],
-          },
-        },
-      }, null, 2),
-    );
-
-    const isSubmitted = (): boolean => {
-      try {
-        const contents = readFileSync(submissionLogPath, 'utf-8');
-        const lastLine = contents.trim().split('\n').pop() ?? '';
-        if (!lastLine) return false;
-        const record = JSON.parse(lastLine);
-        if (record && typeof record.predictedBps === 'string' && typeof record.rationale === 'string') {
-          signalSubmit(record.predictedBps, record.rationale);
-          return true;
-        }
-      } catch {
-        return false;
-      }
-      return false;
-    };
-
+    // ── Live path ──────────────────────────────────────────────────────────────
     log({ level: 'info', msg: 'claude-mcp-prediction-apy: spawning session', data: { sessionId } });
 
-    const session = await spawnSession(sessionId, prompt, {
-      claudePath: this.config.claudePath ?? 'claude',
-      ...(claudeModel ? { claudeModel } : {}),
-      mcpConfigPath,
-      workingDir,
-      abort: ctx.abort,
-      log,
-      isSubmitted,
-      ...(this.config.sessionMaxMs !== undefined ? { sessionMaxMs: this.config.sessionMaxMs } : {}),
-    });
-
-    if (!submissionState.predictedBps) isSubmitted();
+    const session = await runSingleSessionHarness<{ predictedBps: string; rationale: string }>(
+      {
+        sessionId,
+        prompt,
+        workingDir,
+        wrapperBasename: 'apy-prediction-server',
+        mcpServerKey: 'jinn-apy-prediction',
+        sessionConfig: PREDICTION_APY_CONFIG,
+        buildWrapperConfig: (submissionLogPath) => ({
+          venue,
+          pool,
+          reserve,
+          reserveSymbol,
+          rpcUrl,
+          submissionLogPath,
+        }),
+        writeScript: _writeApyPredictionMcpServerScript,
+        parseRecord: (record) =>
+          record &&
+          typeof (record as { predictedBps?: unknown }).predictedBps === 'string' &&
+          typeof (record as { rationale?: unknown }).rationale === 'string'
+            ? {
+                predictedBps: (record as { predictedBps: string }).predictedBps,
+                rationale: (record as { rationale: string }).rationale,
+              }
+            : null,
+        onParsed: (s) => signalSubmit(s.predictedBps, s.rationale),
+      },
+      {
+        claudePath: this.config.claudePath ?? 'claude',
+        ...(claudeModel ? { claudeModel } : {}),
+        abort: ctx.abort,
+        log,
+        ...(this.config.sessionMaxMs !== undefined ? { sessionMaxMs: this.config.sessionMaxMs } : {}),
+      },
+    );
 
     return this._finalize(parsed, sessionId, session.transcriptPath, submissionState, session.startedAt, session.endedAt, claudeModel);
   }
