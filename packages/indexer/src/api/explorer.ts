@@ -1701,6 +1701,37 @@ app.get('/slice', async (c) => {
     // for the same reason (see line ~722 above).
     .orderBy(schema.verdict.createdAtBlock);
 
+  // Resolve builder agentIds from the plugin tarball cids carried in each
+  // attempt's pluginsJson, via the pluginPublication entity (the same store
+  // /builders/:address/artifacts reads). One batched IN query, not N+1 (#1050).
+  // Note: pluginCid → builderAgentId is one-to-many (the pluginCid index is
+  // non-unique — the same tarball can be published by multiple builders), so a
+  // cid maps to *all* matching builders and rows explode across them, matching
+  // the exploded plugin semantics. Builders are deduped per row below.
+  const cids = [
+    ...new Set(joinedRows.flatMap((r) => parsePluginCids(r.pluginsJson))),
+  ];
+  const builderMap = new Map<string, string[]>();
+  if (cids.length > 0) {
+    const pubRows = await db
+      .select({
+        pluginCid: schema.pluginPublication.pluginCid,
+        builderAgentId: schema.pluginPublication.builderAgentId,
+      })
+      .from(schema.pluginPublication)
+      .where(
+        and(
+          inArray(schema.pluginPublication.pluginCid, cids),
+          eq(schema.pluginPublication.chainId, EXPLORER_CHAIN_ID),
+        ),
+      );
+    for (const p of pubRows) {
+      const list = builderMap.get(p.pluginCid) ?? [];
+      list.push(p.builderAgentId);
+      builderMap.set(p.pluginCid, list);
+    }
+  }
+
   // Decode pluginsJson into a string[] of "name@version".
   const sliceRows = joinedRows.map((r) => ({
     requestId: r.requestId,
@@ -1713,6 +1744,11 @@ app.get('/slice', async (c) => {
     harness: r.harness,
     model: r.model,
     plugins: parsePluginsJson(r.pluginsJson),
+    builder: [
+      ...new Set(
+        parsePluginCids(r.pluginsJson).flatMap((cid) => builderMap.get(cid) ?? []),
+      ),
+    ],
   }));
 
   const out = computeSlice(sliceRows, params, { rawVerdictCount });
@@ -1756,6 +1792,26 @@ function toSliceLeaderboardRow(
     dominantMode: r.dominantMode,
     dominantHarness: r.dominantHarness,
   };
+}
+
+/**
+ * Decode AttemptEnvelopeMeta.pluginsJson → the plugin tarball cids it carries,
+ * deduped. Mirrors {@link parsePluginsJson}'s try/catch but keeps `entry.cid`
+ * (which the name@version decode discards). The cid is the join key against the
+ * pluginPublication entity for builder-agentId resolution (#1050).
+ */
+export function parsePluginCids(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw) as Array<{ cid?: unknown }>;
+    if (!Array.isArray(arr)) return [];
+    const cids = arr
+      .map((p) => (typeof p?.cid === 'string' && p.cid ? p.cid : ''))
+      .filter(Boolean);
+    return [...new Set(cids)];
+  } catch {
+    return [];
+  }
 }
 
 /** Decode AttemptEnvelopeMeta.pluginsJson → ["name@version", ...]. */

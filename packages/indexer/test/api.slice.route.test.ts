@@ -67,6 +67,7 @@ const mockState = vi.hoisted(() => {
     'rewardDistribution',
     'stakingService',
     'stakingRewardCheckpoint',
+    'pluginPublication',
   ] as const;
 
   const tableIdentity = new WeakMap<object, string>();
@@ -365,7 +366,9 @@ describe('GET /explorer/slice — route integration', () => {
             mode: 'train',
             harness: 'hermes-agent',
             model: 'claude-haiku-4-5',
-            pluginsJson: null,
+            pluginsJson: JSON.stringify([
+              { name: '@a/x', version: '0.1', cid: 'cidX', sha256: 'aa' },
+            ]),
           },
           {
             requestId: '0x02',
@@ -377,7 +380,9 @@ describe('GET /explorer/slice — route integration', () => {
             mode: 'train',
             harness: 'hermes-agent',
             model: 'claude-haiku-4-5',
-            pluginsJson: null,
+            pluginsJson: JSON.stringify([
+              { name: '@b/y', version: '0.2', cid: 'cidY', sha256: 'bb' },
+            ]),
           },
           {
             requestId: '0x03',
@@ -405,7 +410,16 @@ describe('GET /explorer/slice — route integration', () => {
           },
         ],
       },
-      // 5) buildLeaderboardRows -> attempt lookups for the train/frozen
+      // 5) pluginPublication lookup — cid → builderAgentId. cidX built by
+      //    builder 101, cidY by builder 202.
+      {
+        match: (q) => q.fromTable === 'pluginPublication',
+        rows: [
+          { pluginCid: 'cidX', builderAgentId: '101' },
+          { pluginCid: 'cidY', builderAgentId: '202' },
+        ],
+      },
+      // 6) buildLeaderboardRows -> attempt lookups for the train/frozen
       //    overlay. Return empty arrays — the leaderboard overlay is not
       //    what's under test.
       {
@@ -527,6 +541,34 @@ describe('GET /explorer/slice — route integration', () => {
     const sum = body.series.reduce((a, s) => a + s.kpis.verdicts, 0);
     expect(sum).toBe(body.kpis.verdicts);
     expect(body.kpis.verdicts).toBe(4);
+  });
+
+  it('group=builder returns a distinct series per builder resolved from pluginsJson cids', async () => {
+    const res = await explorerApp.request(
+      `/slice?manifestDigest=${MANIFEST_CID}&group=builder`,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      series: { groupValue: string | null; kpis: { verdicts: number } }[];
+    };
+
+    // cidX→101 (row 0x01), cidY→202 (row 0x02); rows 0x03/0x04 carry no
+    // plugins → no builders → contribute to no series.
+    const groupValues = body.series.map((s) => s.groupValue).sort();
+    expect(groupValues).toEqual(['101', '202']);
+  });
+
+  it('issues a pluginPublication query keyed on the pluginsJson cids', async () => {
+    await explorerApp.request(
+      `/slice?manifestDigest=${MANIFEST_CID}&group=builder`,
+    );
+    const pubQuery = mockState.recordedQueries.find(
+      (q) => q.fromTable === 'pluginPublication',
+    );
+    expect(
+      pubQuery,
+      'expected a pluginPublication query for builder resolution',
+    ).toBeDefined();
   });
 
   it('group=mode returns a series per mode (train/frozen)', async () => {
