@@ -34,11 +34,20 @@ describe('deploy/Dockerfile CMD (issue #652)', () => {
   it('invokes ponder.js start', () => {
     const cmd = readCmdLine();
     expect(cmd).toContain('ponder.js');
-    expect(cmd).toContain('"start"');
+    expect(cmd).toContain('start');
   });
 
   it('wires the zero-downtime views pattern via --views-schema=jinn_indexer', () => {
     const cmd = readCmdLine();
     expect(cmd).toContain('--views-schema=jinn_indexer');
+  });
+
+  // #1429: the CMD auto-derives DATABASE_SCHEMA from ponder.schema.ts at boot
+  // (shell form so the export + exec run), rather than pinning a manual name.
+  it('auto-derives DATABASE_SCHEMA before exec-ing ponder', () => {
+    const cmd = readCmdLine();
+    expect(cmd).toContain('deploy/derive-schema.mjs');
+    expect(cmd).toContain('export DATABASE_SCHEMA=');
+    expect(cmd).toContain('exec node');
   });
 });

@@ -45,6 +45,7 @@ RUN corepack enable && yarn install --immutable
 
 # Copy source.
 COPY indexer/ponder.config.ts indexer/ponder.schema.ts indexer/tsconfig.json ./
+COPY indexer/deploy/derive-schema.mjs ./deploy/derive-schema.mjs
 COPY indexer/abis ./abis
 COPY indexer/src ./src
 
@@ -73,6 +74,7 @@ COPY --from=build /app/sdk /app/sdk
 COPY --from=build /app/indexer/node_modules ./node_modules
 COPY --from=build /app/indexer/package.json /app/indexer/yarn.lock ./
 COPY --from=build /app/indexer/ponder.config.ts /app/indexer/ponder.schema.ts /app/indexer/tsconfig.json ./
+COPY --from=build /app/indexer/deploy/derive-schema.mjs ./deploy/derive-schema.mjs
 COPY --from=build /app/indexer/ponder-env.d.ts ./
 COPY --from=build /app/indexer/abis ./abis
 COPY --from=build /app/indexer/src ./src
@@ -83,8 +85,15 @@ EXPOSE 42069
 # `ponder start` runs both the indexer and the HTTP server (GraphQL + built-in
 # /health and /ready endpoints). For HTTP-only replicas behind a proxy, use
 # `ponder serve` instead — see Ponder's "Horizontal scaling" docs.
-# `--views-schema=jinn_indexer` auto-swaps the public-facing `jinn_indexer`
-# views to this deployment's data schema on /ready (Ponder's zero-downtime
-# views pattern) — DATABASE_SCHEMA MUST stay a different, versioned name
-# (`jinn_indexer_vN`) or the two collide and the deploy fails. See deploy/README.md.
-CMD ["node", "node_modules/ponder/dist/esm/bin/ponder.js", "start", "--views-schema=jinn_indexer"]
+#
+# DATABASE_SCHEMA is auto-derived at boot from a content hash of
+# ponder.schema.ts (deploy/derive-schema.mjs, issue #1429): an unchanged schema
+# resumes in place, and any onchainTable change lands in a fresh
+# `jinn_indexer_<hash>` data schema automatically — no manual Railway bump.
+# `--views-schema=jinn_indexer` swaps the public-facing `jinn_indexer` views
+# onto that data schema on /ready (Ponder's zero-downtime views pattern). A
+# hash-named data schema can never equal the literal `jinn_indexer` views
+# schema, so they cannot collide. Set JINN_INDEXER_SCHEMA_AUTO=false +
+# DATABASE_SCHEMA to pin a name (must match on the enrichment worker too).
+# See deploy/README.md.
+CMD export DATABASE_SCHEMA="$(node deploy/derive-schema.mjs)" && exec node node_modules/ponder/dist/esm/bin/ponder.js start --views-schema=jinn_indexer

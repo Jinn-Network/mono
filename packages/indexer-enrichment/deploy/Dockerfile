@@ -51,6 +51,7 @@ WORKDIR /app/indexer
 COPY indexer/package.json indexer/yarn.lock ./
 RUN corepack enable && yarn install --immutable
 COPY indexer/ponder.schema.ts indexer/tsconfig.json ./
+COPY indexer/deploy/derive-schema.mjs ./deploy/derive-schema.mjs
 COPY indexer/src ./src
 
 # ── Worker ──
@@ -87,8 +88,20 @@ COPY --from=build /app/indexer-enrichment/node_modules ./node_modules
 COPY --from=build /app/indexer-enrichment/package.json /app/indexer-enrichment/yarn.lock ./
 COPY --from=build /app/indexer-enrichment/dist ./dist
 
+# The worker writes into the indexer's Ponder schema, so it MUST derive the same
+# DATABASE_SCHEMA as the indexer. Both services COPY the byte-identical
+# indexer/ponder.schema.ts + deploy/derive-schema.mjs and run the same hash, so
+# the two names match (issue #1429). `../ponder.schema.ts` in derive-schema.mjs
+# resolves to /app/indexer-enrichment/ponder.schema.ts, so it sits next to the
+# script's ./deploy/ dir just like in the indexer image.
+COPY --from=build /app/indexer/ponder.schema.ts ./ponder.schema.ts
+COPY --from=build /app/indexer/deploy/derive-schema.mjs ./deploy/derive-schema.mjs
+
 EXPOSE 8738
 
 # Fail-loud boot: a DB-connect failure exits non-zero so Railway ON_FAILURE
 # restarts (the #1068 lesson). /ready gates traffic until the schema resolves.
-CMD ["node", "dist/index.js"]
+# DATABASE_SCHEMA is auto-derived from the shared ponder.schema.ts hash so it
+# always matches the indexer's data schema; JINN_INDEXER_SCHEMA_AUTO=false +
+# DATABASE_SCHEMA pins a name (set the SAME pair on both services).
+CMD export DATABASE_SCHEMA="$(node deploy/derive-schema.mjs)" && exec node dist/index.js
