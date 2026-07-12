@@ -80,6 +80,8 @@ export interface LauncherGeneratorStateSnapshot {
   poolPublicationUpdatedAt?: string;
   poolPublicationPriorSize?: number;
   poolPublicationCurrentSize?: number;
+  totalPosted?: number;
+  lastPostedInstanceId?: string;
 }
 
 export interface GatherLauncherStatusDeps {

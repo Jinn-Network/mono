@@ -309,6 +309,18 @@ function PanelShell({
           value={record.generatorEnabled ? 'yes' : 'no'}
           testid="launcher-launched-generator-enabled"
         />
+        <MetaItem
+          label="Total posted"
+          value={record.generatorState?.totalPosted !== undefined
+            ? String(record.generatorState.totalPosted)
+            : '—'}
+          testid="launcher-launched-generator-total-posted"
+        />
+        <MetaItem
+          label="Last posted"
+          value={record.generatorState?.lastPostedInstanceId ?? '—'}
+          testid="launcher-launched-generator-last-posted"
+        />
       </dl>
 
       <GeneratorPoolSummary record={record} />

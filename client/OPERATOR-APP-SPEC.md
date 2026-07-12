@@ -383,6 +383,8 @@ Rendered inside a launched-SolverNet detail view, this panel surfaces the live s
   - admission mode (`required` / `python-floor`, swe-rebench-v2 only)
   - pool size
   - entry counts (posted / unposted / live / repostable / saturated / abandoned)
+  - total posted (cumulative Tasks the generator has posted this process, swe-rebench-v2 only)
+  - last posted instance (most recent instance id the generator posted, swe-rebench-v2 only)
   - publication timestamp (most recent vetted-pool publication, swe-rebench-v2 only)
 - **State messages**
   - `vetted_pool_republished` — **info** severity. Raised when `generatorState.poolPublicationUpdatedAt` is defined. Carries prior pool size, current pool size, and the publication timestamp. Purely informational — no action; the daemon has already re-published the vetted-pool artifact and pinned the new CID. (swe-rebench-v2 only.)

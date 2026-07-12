@@ -299,6 +299,46 @@ describe('GeneratorPanel', () => {
     expect(screen.getByTestId('launcher-launched-generator-saturated').textContent).toBe('5');
   });
 
+  it('surfaces swe-rebench-v2 total-posted + last-posted instance', () => {
+    render(
+      <GeneratorPanel
+        record={buildSweRebenchRecord({
+          generatorState: {
+            lastPollAt: '2026-05-05T15:00:00Z',
+            lastPollSummary: {
+              poolSize: 42,
+              posted: 3,
+              unposted: 10,
+              live: 11,
+              repostable: 4,
+              saturated: 5,
+            },
+            totalPosted: 7,
+            lastPostedInstanceId: 'astropy__astropy-14096',
+          },
+        })}
+        onSave={async () => undefined}
+      />,
+    );
+
+    expect(
+      screen.getByTestId('launcher-launched-generator-total-posted').textContent,
+    ).toBe('7');
+    expect(
+      screen.getByTestId('launcher-launched-generator-last-posted').textContent,
+    ).toBe('astropy__astropy-14096');
+  });
+
+  it('renders — for total-posted / last-posted when the generator omits them', () => {
+    render(<GeneratorPanel record={buildSweRebenchRecord()} onSave={async () => undefined} />);
+    expect(
+      screen.getByTestId('launcher-launched-generator-total-posted').textContent,
+    ).toBe('—');
+    expect(
+      screen.getByTestId('launcher-launched-generator-last-posted').textContent,
+    ).toBe('—');
+  });
+
   it('renders swe-rebench-v2 generator fields for swe launched records', () => {
     render(<GeneratorPanel record={buildSweRebenchRecord()} onSave={async () => undefined} />);
     expandGeneratorConfig();

@@ -226,6 +226,11 @@ function projectLauncherGeneratorState(raw: unknown): LauncherGeneratorStateSnap
   const poolPublicationCurrentSize = finiteNumber(snapshot['poolPublicationCurrentSize']);
   if (poolPublicationCurrentSize !== undefined) projected.poolPublicationCurrentSize = poolPublicationCurrentSize;
 
+  const totalPosted = finiteNumber(snapshot['totalPosted']);
+  if (totalPosted !== undefined) projected.totalPosted = totalPosted;
+  const lastPostedInstanceId = optionalString(snapshot['lastPostedInstanceId']);
+  if (lastPostedInstanceId) projected.lastPostedInstanceId = lastPostedInstanceId;
+
   return projected;
 }
 

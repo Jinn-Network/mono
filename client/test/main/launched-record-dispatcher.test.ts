@@ -57,6 +57,7 @@ describe('launched-record generator dispatcher', () => {
           saturated: 4,
         },
         totalPosted: 4,
+        lastPostedInstanceId: 'astropy__astropy-14096',
         config: {
           N_target_successes: 5,
           posting_window_ms: 604_800_000,
@@ -128,6 +129,8 @@ describe('launched-record generator dispatcher', () => {
         repostable: 3,
         saturated: 4,
       },
+      totalPosted: 4,
+      lastPostedInstanceId: 'astropy__astropy-14096',
     });
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('unknown.v1'));
     expect(logger.info).toHaveBeenCalledWith(
