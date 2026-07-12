@@ -17,9 +17,8 @@
 import { z } from 'zod';
 import { createPublicClient, http, type PublicClient } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
+import { createStdioMcpServer, appendSubmissionRecord } from '../claude-mcp-shared/mcp-server.js';
 import { readChainlinkLatest, scaleToDecimal } from '../../../venues/chainlink/client.js';
 import type {
   McpToolResult,
@@ -145,17 +144,11 @@ export async function startMcpServer(config: McpServerConfig): Promise<void> {
   // The wrapper's onSubmit appends a JSONL record to submissionLogPath.
   // The daemon's orchestrator tails the file and reads the submission from
   // disk. This is the only IPC mechanism that survives the process boundary.
-  const { appendFileSync } = await import('node:fs');
   const onSubmit: PredictionToolDeps['onSubmit'] = (submission) => {
-    appendFileSync(
-      config.submissionLogPath,
-      JSON.stringify({
-        ts: Date.now(),
-        probability: submission.probability,
-        rationale: submission.rationale,
-      }) + '\n',
-      { encoding: 'utf-8' },
-    );
+    appendSubmissionRecord(config.submissionLogPath, {
+      probability: submission.probability,
+      rationale: submission.rationale,
+    });
   };
 
   const tools = buildPredictionTools({
@@ -166,25 +159,5 @@ export async function startMcpServer(config: McpServerConfig): Promise<void> {
     onSubmit,
   });
 
-  const server = new McpServer({ name: 'jinn-prediction', version: '1.0.0' });
-
-  // Same cast-around-MCP-index-signature pattern as hyperliquid's startMcpServer.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const registerTool = server.tool.bind(server) as (...args: any[]) => void;
-
-  for (const tool of tools) {
-    const shape = (tool.schema as z.ZodObject<z.ZodRawShape>).shape ?? {};
-    registerTool(tool.name, tool.description, shape, async (args: unknown) =>
-      tool.handler(args),
-    );
-  }
-
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-
-  // Keep alive until stdin closes (Claude closes it at session end).
-  await new Promise<void>((resolve) => {
-    process.stdin.on('close', resolve);
-    process.stdin.on('end', resolve);
-  });
+  await createStdioMcpServer({ serverName: 'jinn-prediction', version: '1.0.0', tools });
 }

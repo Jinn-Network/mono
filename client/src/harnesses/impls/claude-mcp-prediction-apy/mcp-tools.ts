@@ -9,9 +9,8 @@
 import { z } from 'zod';
 import { createPublicClient, http, type PublicClient } from 'viem';
 import { base, baseSepolia, mainnet } from 'viem/chains';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
+import { createStdioMcpServer, appendSubmissionRecord } from '../claude-mcp-shared/mcp-server.js';
 import {
   AAVE_POOL_ABI,
   liquidityRateRayToApyBps,
@@ -133,17 +132,11 @@ export async function startMcpServer(config: McpServerConfig): Promise<void> {
     transport: http(config.rpcUrl),
   }) as unknown as PublicClient;
 
-  const { appendFileSync } = await import('node:fs');
   const onSubmit: ApyPredictionToolDeps['onSubmit'] = (submission) => {
-    appendFileSync(
-      config.submissionLogPath,
-      JSON.stringify({
-        ts: Date.now(),
-        predictedBps: submission.predictedBps,
-        rationale: submission.rationale,
-      }) + '\n',
-      { encoding: 'utf-8' },
-    );
+    appendSubmissionRecord(config.submissionLogPath, {
+      predictedBps: submission.predictedBps,
+      rationale: submission.rationale,
+    });
   };
 
   const tools = buildApyPredictionTools({
@@ -155,21 +148,5 @@ export async function startMcpServer(config: McpServerConfig): Promise<void> {
     onSubmit,
   });
 
-  const server = new McpServer({ name: 'jinn-apy-prediction', version: '1.0.0' });
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const registerTool = server.tool.bind(server) as (...args: any[]) => void;
-
-  for (const tool of tools) {
-    const shape = (tool.schema as z.ZodObject<z.ZodRawShape>).shape ?? {};
-    registerTool(tool.name, tool.description, shape, async (args: unknown) => tool.handler(args));
-  }
-
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-
-  await new Promise<void>((resolve) => {
-    process.stdin.on('close', resolve);
-    process.stdin.on('end', resolve);
-  });
+  await createStdioMcpServer({ serverName: 'jinn-apy-prediction', version: '1.0.0', tools });
 }
