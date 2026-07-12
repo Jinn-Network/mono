@@ -114,9 +114,12 @@ Commands:
                                                  (jinn.skill.v1 artifact, or the legacy seeded
                                                  trace shape): writes SKILL.md + companion files
                                                  to <dir> (default ./<skill-name slug>)
-  capture preview <task-file> [--json]           Scrub a captured task and show exactly what
-                                                 would leave this machine: the redaction diff
-                                                 plus the envelope as it would publish
+  capture preview <task-file> [--json] [--full]  Scrub a captured task and show a compact,
+                                                 readable summary of what would leave this
+                                                 machine (task, tools, grouped redaction
+                                                 counts, one line per step). --full also prints
+                                                 the per-field before→after audit and the full
+                                                 envelope JSON; --json emits the machine report.
   ledger [--path <file>] [--json]                The contribution ledger: what left this
                                                  machine, with anchor tx explorer links
   publish <task-file> [--veto] [--json]          Scrub, consent, publish and anchor a captured
@@ -544,32 +547,70 @@ function renderRedactionsByField(redactions: ScrubRedaction[]): string[] {
   return lines;
 }
 
-function renderScrubReport(report: ScrubReport): string {
-  const truncated = report.envelope.steps.reduce(
-    (n, s) => n + (s.truncatedKeys?.length ?? 0),
-    0,
-  );
+function renderScrubReport(report: ScrubReport, opts: { full: boolean }): string {
+  const env = report.envelope;
+  const truncated = env.steps.reduce((n, s) => n + (s.truncatedKeys?.length ?? 0), 0);
+  const distinctFields = new Set(report.redactions.map((r) => r.field)).size;
+
   const lines = [
     'scrub preview — what would leave this machine',
-    `  task     ${report.envelope.task.summary}`,
-    `  steps    ${report.envelope.steps.length}`,
-    `  scrub    ${report.redactions.length} redaction(s), ${truncated} truncation receipt(s)`,
+    `  task     ${env.task.summary}`,
+    `  tags     ${env.task.distributionTags.join(', ')}`,
+    `  harness  ${env.environment.harness.name}@${env.environment.harness.version}`,
+    `  model    ${env.environment.model}`,
+    `  outcome  ${env.outcome.status} / tier ${env.outcome.verifiabilityTier}`,
+    `  steps    ${env.steps.length}`,
+    `  tools    ${env.environment.tools.length > 0 ? env.environment.tools.join(', ') : '(none)'}`,
     '',
   ];
+
+  // Redactions grouped by stage → detail, with counts — the safety core.
   if (report.redactions.length === 0) {
     lines.push('no redactions — the scrub pipeline found nothing to remove');
   } else {
     lines.push(
-      `${report.redactions.length} redaction(s) — "before" is shown here only and never leaves this machine`,
-      '',
-      ...renderRedactionsByField(report.redactions),
+      `redactions   ${report.redactions.length} across ${distinctFields} field(s), ${truncated} truncation(s)`,
     );
+    const byStage = new Map<string, ScrubRedaction[]>();
+    for (const r of report.redactions) {
+      const group = byStage.get(r.stage) ?? [];
+      group.push(r);
+      byStage.set(r.stage, group);
+    }
+    for (const [stage, group] of byStage) {
+      lines.push(`  ${stage}  ${group.length}`);
+      const byDetail = new Map<string, number>();
+      for (const r of group) {
+        const key = r.detail ?? '(no detail)';
+        byDetail.set(key, (byDetail.get(key) ?? 0) + 1);
+      }
+      for (const [detail, count] of byDetail) {
+        lines.push(`    ${detail} ×${count}`);
+      }
+    }
   }
-  lines.push(
-    '',
-    'envelope as it would publish:',
-    JSON.stringify(report.envelope, null, 2),
-  );
+
+  // One short line per step — no attributes dump.
+  lines.push('', 'steps:');
+  env.steps.forEach((s, i) => {
+    const parts = [`${s.redactedKeys.length} redacted`];
+    const tk = s.truncatedKeys?.length ?? 0;
+    if (tk > 0) parts.push(`${tk} truncated`);
+    lines.push(`  [${i}] ${s.name}  ${parts.join(', ')}`);
+  });
+
+  if (opts.full) {
+    if (report.redactions.length > 0) {
+      lines.push(
+        '',
+        `${report.redactions.length} redaction(s) — "before" is shown here only and never leaves this machine`,
+        '',
+        ...renderRedactionsByField(report.redactions),
+      );
+    }
+    lines.push('', 'envelope as it would publish:', JSON.stringify(env, null, 2));
+  }
+
   return lines.join('\n');
 }
 
@@ -688,6 +729,7 @@ export async function runJinnLayerCli(
       options: {
         limit: { type: 'string', default: String(DEFAULT_CLI_SEARCH_LIMIT) },
         json: { type: 'boolean', default: false },
+        full: { type: 'boolean', default: false },
         out: { type: 'string' },
         path: { type: 'string' },
         veto: { type: 'boolean', default: false },
@@ -735,7 +777,7 @@ export async function runJinnLayerCli(
         redactions: stripBeforeValues(report.redactions),
       }) + '\n');
     } else {
-      writer.write(renderScrubReport(report) + '\n');
+      writer.write(renderScrubReport(report, { full: Boolean(parsed.values.full) }) + '\n');
     }
     return 0;
   }
