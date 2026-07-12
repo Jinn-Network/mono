@@ -6,9 +6,8 @@
  * Isolation gate: test/harnesses/impls/claude-mcp-prediction-apy/isolation.test.ts
  */
 
-import { writeFileSync, mkdirSync, existsSync, readFileSync, chmodSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readFileSync, chmodSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createPublicClient, http } from 'viem';
 import { base, baseSepolia, mainnet } from 'viem/chains';
 import type { PublicClient } from 'viem';
@@ -28,6 +27,7 @@ import { PredictionApyV0TaskSchema } from '../../../types/prediction-apy.js';
 
 import { buildSessionPrompt } from './prompt.js';
 import { spawnSession } from './session-orchestrator.js';
+import { writeMcpServerScript } from '../claude-mcp-shared/mcp-server-script.js';
 import type { ClaudeMcpPredictionApyConfig, SubmissionState, AaveV3Venue } from './types.js';
 
 function chainForVenue(venue: AaveV3Venue) {
@@ -263,40 +263,7 @@ export class ClaudeMcpPredictionApyImpl implements Harness {
 }
 
 export function _writeApyPredictionMcpServerScript(outPath: string): void {
-  const __filename = fileURLToPath(import.meta.url);
-
-  let mcpToolsPath = join(dirname(__filename), 'mcp-tools.js');
-  if (!existsSync(mcpToolsPath) && __filename.includes(`${'/'}src${'/'}`)) {
-    mcpToolsPath = __filename
-      .replace(`${'/'}src${'/'}`, `${'/'}dist${'/'}`)
-      .replace(/index\.(ts|js)$/, 'mcp-tools.js');
-  }
-
-  if (!existsSync(mcpToolsPath)) {
-    throw new Error(
-      `E_DAEMON_MUST_RUN_FROM_DIST: ${mcpToolsPath} does not exist. ` +
-        `The claude-mcp-prediction-apy wrapper subprocess loads this compiled artifact. ` +
-        `Run \`yarn build\` before starting the daemon or isolation test.`,
-    );
-  }
-
-  const script = `#!/usr/bin/env node
-// Auto-generated jinn-apy-prediction MCP wrapper — do not edit.
-import { readFileSync } from 'node:fs';
-import { startMcpServer } from ${JSON.stringify(mcpToolsPath)};
-
-const configPath = process.argv[2];
-if (!configPath) {
-  process.stderr.write('Usage: apy-prediction-server.mjs <config-file-path>\\n');
-  process.exit(1);
-}
-
-const config = JSON.parse(readFileSync(configPath, 'utf-8'));
-await startMcpServer(config);
-`.trim();
-
-  writeFileSync(outPath, script, { encoding: 'utf-8', mode: 0o600 });
-  chmodSync(outPath, 0o600);
+  writeMcpServerScript(outPath, { callerFileUrl: import.meta.url, serverLabel: 'jinn-apy-prediction' });
 }
 
 export default ClaudeMcpPredictionApyImpl;
