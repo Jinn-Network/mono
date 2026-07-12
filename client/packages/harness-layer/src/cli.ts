@@ -31,7 +31,7 @@ import {
 } from './consume.js';
 import { capture, parseCapturedTask, type CapturedTask, type ScrubRedaction } from './capture.js';
 import { preview, stripBeforeValues, type ScrubReport } from './preview.js';
-import { createMemoryLedger, DEFAULT_LEDGER_PATH, ledger, type LedgerEntry } from './ledger.js';
+import { createMemoryLedger, DEFAULT_LEDGER_PATH, ledger, toLedgerRow, type LedgerEntry } from './ledger.js';
 import { publish, type HarnessPublishDeps } from './publish.js';
 import { createLivePublishDeps } from './publish-live.js';
 import {
@@ -1191,7 +1191,7 @@ export async function runJinnLayerCli(
     const path = (parsed.values.path as string | undefined) ?? DEFAULT_LEDGER_PATH;
     const entries = ledger(path);
     if (parsed.values.json) {
-      writer.write(JSON.stringify(entries) + '\n');
+      writer.write(JSON.stringify(entries.map(toLedgerRow)) + '\n');
     } else if (entries.length === 0) {
       writer.write(`No contributions yet — the ledger at ${path} is empty.\n`);
     } else {

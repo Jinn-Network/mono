@@ -197,9 +197,12 @@ export {
   createFileLedger,
   createMemoryLedger,
   ledger,
+  toLedgerRow,
   LedgerEntrySchema,
+  LedgerRowSchema,
   DEFAULT_LEDGER_PATH,
   type LedgerEntry,
+  type LedgerRow,
   type LedgerStore,
 } from './ledger.js';
 

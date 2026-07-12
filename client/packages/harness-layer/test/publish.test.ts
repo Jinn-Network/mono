@@ -32,6 +32,7 @@ import {
   createMemoryLedger,
   ledger,
   type LedgerEntry,
+  type LedgerRow,
 } from '../src/ledger.js';
 import { runJinnLayerCli } from '../src/cli.js';
 
@@ -284,7 +285,7 @@ describe('jinn-layer ledger CLI', () => {
     expect(out).toContain('tests-passed');
   });
 
-  it('--json emits the typed entries', async () => {
+  it('--json emits the fork row shape', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-ledger-'));
     const path = join(dir, 'ledger.jsonl');
     writeFileSync(
@@ -301,9 +302,9 @@ describe('jinn-layer ledger CLI', () => {
     const sink = writerSink();
     const code = await runJinnLayerCli(['ledger', '--path', path, '--json'], { writer: sink });
     expect(code).toBe(0);
-    const parsed = JSON.parse(sink.output()) as LedgerEntry[];
+    const parsed = JSON.parse(sink.output()) as LedgerRow[];
     expect(parsed).toHaveLength(1);
-    expect(parsed[0]!.envelopeRef).toBe('bafy-1');
+    expect(parsed[0]!.env).toBe('bafy-1');
   });
 
   it('an empty ledger renders an explicit empty state', async () => {

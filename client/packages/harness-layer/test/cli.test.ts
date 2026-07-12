@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import type { HarnessLayer, CorpusSearchHit, CorpusRecord } from '../src/consume.js';
 import { runJinnLayerCli, type DistillCliDeps, type DistilCliDeps } from '../src/cli.js';
 import type { CapturedTask } from '../src/capture.js';
-import { createMemoryLedger } from '../src/ledger.js';
+import { createMemoryLedger, type LedgerEntry } from '../src/ledger.js';
 import type { HarnessPublishDeps } from '../src/publish.js';
 import type { AttemptRef, BridgeEvidence } from '../src/bridge.js';
 import type { DistillCluster, DistillLLMOutput, MetaDistillLLMOutput } from '../src/distill.js';
@@ -1306,5 +1306,63 @@ describe('jinn-layer distil — staged install choice (#1490)', () => {
       );
       expect(installed.out()).toMatch(/installed · ready/);
     });
+  });
+});
+
+describe('ledger', () => {
+  function fixtureFile(): string {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-ledger-'));
+    const file = join(dir, 'ledger.jsonl');
+    const published: LedgerEntry = {
+      ts: '2026-07-11T08:00:00.000Z',
+      taskSummary: 'fix duplicate rows after a join in the report query',
+      envelopeRef: 'bafyEnvelopePublished',
+      anchorTx: '0xabc123',
+      verifiabilityTier: 'evaluator-verified',
+      status: 'published',
+    };
+    const vetoed: LedgerEntry = {
+      ts: '2026-07-11T09:00:00.000Z',
+      taskSummary: 'rename a private helper',
+      envelopeRef: null,
+      anchorTx: null,
+      verifiabilityTier: 'user-accepted',
+      status: 'vetoed (local only)',
+    };
+    writeFileSync(file, `${JSON.stringify(published)}\n${JSON.stringify(vetoed)}\n`, 'utf-8');
+    return file;
+  }
+
+  it('--json emits the fork row shape, not raw entries', async () => {
+    const file = fixtureFile();
+    const { writer, out } = capture();
+    const code = await runJinnLayerCli(['ledger', '--path', file, '--json'], { writer });
+    expect(code).toBe(0);
+    const rows = JSON.parse(out());
+    expect(rows).toHaveLength(2);
+
+    const [row0, row1] = rows;
+    expect(Object.keys(row0).sort()).toEqual(['anchor', 'env', 'task', 'tier', 'time']);
+    expect(row0.tier).toBe('evaluator-verified');
+    expect('state' in row0).toBe(false);
+
+    expect(row1.state).toBe('vetoed');
+    expect(row1.env).toBeNull();
+    expect(row1.anchor).toBeNull();
+  });
+
+  it('human-readable output (no --json) is unchanged', async () => {
+    const file = fixtureFile();
+    const { writer, out } = capture();
+    const code = await runJinnLayerCli(['ledger', '--path', file], { writer });
+    expect(code).toBe(0);
+    const text = out();
+    expect(text).toContain('contribution(s)');
+    expect(text).toContain('published');
+    expect(text).toContain('vetoed (local only)');
+    expect(text).toContain('task');
+    expect(text).toContain('tier');
+    expect(text).toContain('ref');
+    expect(text).toContain('anchor');
   });
 });

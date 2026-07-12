@@ -35,6 +35,44 @@ export const LedgerEntrySchema = z.strictObject({
 });
 export type LedgerEntry = z.infer<typeof LedgerEntrySchema>;
 
+/**
+ * Fork-shaped projection of a ledger entry — the row shape the TUI consumer
+ * (`apps/jinn-agent/plugins/jinn/ledger_view.py`, `rows_from_json`) reads.
+ * `state` is absent for published rows; the schema also accepts a `failed`
+ * state for forward-compat, even though `toLedgerRow` never emits it.
+ */
+export const LedgerRowSchema = z.strictObject({
+  time: z.string().min(1),
+  task: z.string().min(1),
+  env: z.string().min(1).nullable(),
+  anchor: z.string().min(1).nullable(),
+  tier: VerifiabilityTierSchema,
+  state: z.enum(['vetoed', 'failed']).optional(),
+});
+export type LedgerRow = z.infer<typeof LedgerRowSchema>;
+
+/** Project an internal ledger entry into the fork-consumed row shape. */
+export function toLedgerRow(entry: LedgerEntry): LedgerRow {
+  const base = {
+    time: entry.ts,
+    task: entry.taskSummary,
+    env: entry.envelopeRef,
+    anchor: entry.anchorTx,
+    tier: entry.verifiabilityTier,
+  };
+  switch (entry.status) {
+    case 'published':
+      return base;
+    case 'vetoed (local only)':
+      return { ...base, state: 'vetoed' };
+    default: {
+      // Exhaustiveness: a new status forces this branch to fail compilation.
+      const _never: never = entry.status;
+      return _never;
+    }
+  }
+}
+
 export interface LedgerStore {
   append(entry: LedgerEntry): void;
   /** Entries in append order. */
