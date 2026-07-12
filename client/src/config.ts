@@ -1148,6 +1148,10 @@ export function loadConfig(configPath?: string): JinnConfig {
       'Open Operator > SolverNets in the dashboard to re-join via the registry ' +
       '(replaces the synthetic legacy:* keys with real manifest CIDs).'
     );
+    // Persist the migration so the legacy block is pruned from disk (issue
+    // #445). Re-reads the raw file (never the env-merged object) so transient
+    // env overrides are not baked in; best-effort.
+    persistLegacySolverNetsMigration(filePath);
   }
 
   // 3. Validate
@@ -1218,6 +1222,35 @@ export function loadConfig(configPath?: string): JinnConfig {
 export function getConfigPathFromArgs(argv: string[] = process.argv): string | undefined {
   const idx = argv.indexOf('--config');
   return idx >= 0 && argv[idx + 1] ? argv[idx + 1] : undefined;
+}
+
+/**
+ * Persist the legacy-solverNets migration to disk. Re-reads the RAW config file
+ * (never the env-merged object — that would bake transient env overrides such as
+ * JINN_RPC_URL into the file), runs migrateLegacySolverNets on that copy, and
+ * writes the pruned shape back. Idempotent: when the file already has no
+ * `solverNets` block the migration is a no-op and nothing is written, so a
+ * restart produces a byte-identical file (no resurrection). Best-effort — a
+ * read-only config mount degrades to in-memory-only migration (logs a warning)
+ * rather than crashing boot. See issue #445.
+ *
+ * @returns true when the file was rewritten, false otherwise.
+ */
+function persistLegacySolverNetsMigration(filePath: string): boolean {
+  if (!existsSync(filePath)) return false; // pure-env config, no on-disk file → nothing to prune
+  try {
+    const raw = JSON.parse(readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
+    if (raw['solverNets'] === undefined) return false; // already pruned → no write, keeps restarts byte-stable
+    migrateLegacySolverNets(raw); // mutates raw in place (deletes solverNets, sets joinedSolverNets)
+    writeFileSync(filePath, `${JSON.stringify(raw, null, 2)}\n`, 'utf-8');
+    return true;
+  } catch (err) {
+    console.warn(
+      `[config] Could not persist legacy solverNets migration to ${filePath} ` +
+      `(${err instanceof Error ? err.message : String(err)}); continuing with in-memory migration only.`,
+    );
+    return false;
+  }
 }
 
 /**

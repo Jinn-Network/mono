@@ -1519,6 +1519,35 @@ describe('DELETE /v1/operator/join/:cid', () => {
     expect(persisted.joinedSolverNets.bafybeiiii).toBeDefined();
   });
 
+  // Issue #445 (AC1) — a migrated legacy net is leaveable via its synthetic
+  // `legacy:<name>` key, and once the on-disk shape is already the migrated
+  // shape the delete sticks (nothing under `solverNets` resurrects it).
+  it('removes a migrated legacy:<name> entry and it stays gone', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-leave-legacy-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, {
+      joinedSolverNets: {
+        'legacy:prediction': {
+          manifestCid: 'legacy:prediction',
+          name: 'prediction',
+          roles: ['solver'],
+        },
+      },
+    });
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+
+    const res = await app.request('/v1/operator/join/legacy:prediction', {
+      method: 'DELETE',
+    });
+
+    expect(res.status).toBe(200);
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(persisted.joinedSolverNets['legacy:prediction']).toBeUndefined();
+    expect(persisted.solverNets).toBeUndefined();
+  });
+
   it('returns 404 when the entry does not exist', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-leave-404-'));
     const configPath = join(dir, 'config.json');

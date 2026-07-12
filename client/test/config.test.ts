@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -853,6 +853,74 @@ describe('loadConfig legacy solverNets migration via loader', () => {
     });
     const cfg = loadConfig(configPath);
     expect(cfg.joinedSolverNets?.['legacy:prediction']?.roles).toEqual(['solver']);
+  });
+
+  // Issue #445 — the in-memory migration was never persisted, so the stale
+  // `solverNets.<name>` block lingered on disk forever and kept re-triggering
+  // prediction code paths every boot.
+  it('persists the migration to disk so the legacy block is pruned from the file', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      rpcUrl: 'https://example/rpc',
+      solverNets: {
+        prediction: {
+          enabled: false,
+          solverType: 'prediction.v1',
+          harness: 'claude-code',
+          plugins: [],
+          taskGenerator: { enabled: true },
+        },
+      },
+    });
+    loadConfig(configPath);
+    const onDisk = JSON.parse(await readFile(configPath, 'utf-8')) as Record<string, unknown>;
+    expect(onDisk.solverNets).toBeUndefined();
+    expect(onDisk.joinedSolverNets).toEqual({
+      'legacy:prediction': {
+        manifestCid: 'legacy:prediction',
+        name: 'prediction',
+        contract: { id: 'prediction', version: 'v1' },
+        roles: ['solver'],
+        harness: 'claude-code',
+        plugins: [],
+        disabledDefaultPlugins: [],
+      },
+    });
+  });
+
+  it('does not resurrect the legacy entry on a second load (restart-safe)', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      rpcUrl: 'https://example/rpc',
+      solverNets: { prediction: { solverType: 'prediction.v1', roles: ['solving'] } },
+    });
+    loadConfig(configPath); // first boot migrates + persists
+    const afterFirst = await readFile(configPath, 'utf-8');
+    loadConfig(configPath); // simulated restart
+    const afterSecond = await readFile(configPath, 'utf-8');
+    expect(afterSecond).toBe(afterFirst); // byte-identical → nothing rewritten
+    const onDisk = JSON.parse(afterSecond) as Record<string, unknown>;
+    expect(onDisk.solverNets).toBeUndefined();
+    expect(Object.keys(onDisk.joinedSolverNets as object)).toContain('legacy:prediction');
+  });
+
+  it('does not persist transient env overrides into the config file', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      rpcUrl: 'https://example/rpc',
+      solverNets: { prediction: { solverType: 'prediction.v1', roles: ['solving'] } },
+    });
+    const prev = process.env['JINN_RPC_URL'];
+    process.env['JINN_RPC_URL'] = 'https://env-injected/rpc';
+    try {
+      loadConfig(configPath);
+    } finally {
+      if (prev === undefined) delete process.env['JINN_RPC_URL'];
+      else process.env['JINN_RPC_URL'] = prev;
+    }
+    const onDisk = JSON.parse(await readFile(configPath, 'utf-8')) as Record<string, unknown>;
+    expect(onDisk.rpcUrl).toBe('https://example/rpc'); // original file value, NOT the env override
+    expect(onDisk.solverNets).toBeUndefined();
   });
 });
 
