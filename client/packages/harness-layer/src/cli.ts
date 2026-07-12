@@ -519,6 +519,17 @@ function renderDiffValue(value: unknown): string {
     : flat;
 }
 
+/** Collect items into a Map keyed by `key`, preserving first-seen key order. */
+function groupBy<T>(items: T[], key: (item: T) => string): Map<string, T[]> {
+  const out = new Map<string, T[]>();
+  for (const item of items) {
+    const group = out.get(key(item)) ?? [];
+    group.push(item);
+    out.set(key(item), group);
+  }
+  return out;
+}
+
 /**
  * Group redaction entries by field: the pipeline reports one entry per
  * detection, so a busy attribute produces many entries with identical
@@ -526,12 +537,7 @@ function renderDiffValue(value: unknown): string {
  * readable audit view.
  */
 function renderRedactionsByField(redactions: ScrubRedaction[]): string[] {
-  const byField = new Map<string, ScrubRedaction[]>();
-  for (const r of redactions) {
-    const group = byField.get(r.field) ?? [];
-    group.push(r);
-    byField.set(r.field, group);
-  }
+  const byField = groupBy(redactions, (r) => r.field);
   const lines: string[] = [];
   for (const [field, group] of byField) {
     const stages = [...new Set(group.map((r) => `${r.stage}${r.detail ? ` (${r.detail})` : ''}`))];
@@ -547,7 +553,7 @@ function renderRedactionsByField(redactions: ScrubRedaction[]): string[] {
   return lines;
 }
 
-function renderScrubReport(report: ScrubReport, opts: { full: boolean }): string {
+function renderScrubReport(report: ScrubReport, full: boolean): string {
   const env = report.envelope;
   const truncated = env.steps.reduce((n, s) => n + (s.truncatedKeys?.length ?? 0), 0);
   const distinctFields = new Set(report.redactions.map((r) => r.field)).size;
@@ -571,13 +577,7 @@ function renderScrubReport(report: ScrubReport, opts: { full: boolean }): string
     lines.push(
       `redactions   ${report.redactions.length} across ${distinctFields} field(s), ${truncated} truncation(s)`,
     );
-    const byStage = new Map<string, ScrubRedaction[]>();
-    for (const r of report.redactions) {
-      const group = byStage.get(r.stage) ?? [];
-      group.push(r);
-      byStage.set(r.stage, group);
-    }
-    for (const [stage, group] of byStage) {
+    for (const [stage, group] of groupBy(report.redactions, (r) => r.stage)) {
       lines.push(`  ${stage}  ${group.length}`);
       const byDetail = new Map<string, number>();
       for (const r of group) {
@@ -599,7 +599,7 @@ function renderScrubReport(report: ScrubReport, opts: { full: boolean }): string
     lines.push(`  [${i}] ${s.name}  ${parts.join(', ')}`);
   });
 
-  if (opts.full) {
+  if (full) {
     if (report.redactions.length > 0) {
       lines.push(
         '',
@@ -777,7 +777,7 @@ export async function runJinnLayerCli(
         redactions: stripBeforeValues(report.redactions),
       }) + '\n');
     } else {
-      writer.write(renderScrubReport(report, { full: Boolean(parsed.values.full) }) + '\n');
+      writer.write(renderScrubReport(report, Boolean(parsed.values.full)) + '\n');
     }
     return 0;
   }
