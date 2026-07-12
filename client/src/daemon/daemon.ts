@@ -15,7 +15,7 @@ import { BalanceTopupLoop, type BalanceTopupLoopConfig } from './balance-topup-l
 import { EvictionLoop, type EvictionLoopConfig } from './eviction-loop.js';
 import { CheckpointLoop, type CheckpointLoopConfig } from './checkpoint-loop.js';
 import { WatchdogLoop, type WatchdogLoopRegistration } from './watchdog-loop.js';
-import { recordLoopTick } from './loop-heartbeat.js';
+import { recordLoopTick, LOOP_REGISTRY, type LoopName } from './loop-heartbeat.js';
 import { emitEvent } from '../observability/emit-event.js';
 import { emitStructured } from '../events/emitter.js';
 import {
@@ -500,16 +500,21 @@ export class Daemon {
     // idempotent, so a restart cannot double-claim / double-deliver / double-pay.
     if (this.config.watchdog) {
       const interval = this.config.pollIntervalMs ?? 5000;
-      const FOR_AWAIT_FLOOR_MS = 5 * 60_000; // the #1038 wedge lasted 4.5h
-      const registrations: WatchdogLoopRegistration[] = [
-        { name: 'creator', intervalMs: 5000 },
-        { name: 'engine-tick', intervalMs: interval },
-        { name: 'engine-watcher', intervalMs: interval, floorMs: FOR_AWAIT_FLOOR_MS },
-        { name: 'delivery-watcher', intervalMs: interval, floorMs: FOR_AWAIT_FLOOR_MS },
-      ];
-      if (this.rewardClaimLoop) registrations.push({ name: 'reward-claim', intervalMs: this.config.rewardClaim!.intervalMs });
-      if (this.balanceTopupLoop) registrations.push({ name: 'balance-topup', intervalMs: this.config.balanceTopup!.intervalMs });
-      if (peers.length > 0) registrations.push({ name: 'peer-sync', intervalMs: 60_000 });
+      // Derive the watchdog registrations from LOOP_REGISTRY (the single source
+      // of loop names + defaults) — filter to the loops actually started, then
+      // override the intervals that are operator/config-driven.
+      const started = new Set<LoopName>(['creator', 'engine-tick', 'engine-watcher', 'delivery-watcher']);
+      if (this.rewardClaimLoop) started.add('reward-claim');
+      if (this.balanceTopupLoop) started.add('balance-topup');
+      if (peers.length > 0) started.add('peer-sync');
+      const overrides: Partial<Record<LoopName, number>> = {
+        'engine-tick': interval,
+        'reward-claim': this.config.rewardClaim?.intervalMs,
+        'balance-topup': this.config.balanceTopup?.intervalMs,
+      };
+      const registrations: WatchdogLoopRegistration[] = LOOP_REGISTRY
+        .filter(r => started.has(r.name))
+        .map(r => ({ name: r.name, intervalMs: overrides[r.name] ?? r.intervalMs, ...('floorMs' in r ? { floorMs: r.floorMs } : {}) }));
 
       // Seed every started loop so the watchdog never trips on first boot
       // before any loop has had a chance to tick.
