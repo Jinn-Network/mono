@@ -219,6 +219,16 @@ def render_ledger(
     return "\n".join(out)
 
 
+def published_count(rows: Sequence[Dict[str, object]]) -> int:
+    """Number of published rows — the canonical "N published" definition.
+
+    Published = any row whose ``state`` is neither ``vetoed`` nor ``failed``.
+    Single source of truth for the count ``render_ledger`` shows and the splash
+    line mirrors, so the two never drift.
+    """
+    return sum(1 for r in rows if r.get("state") not in ("vetoed", "failed"))
+
+
 def rows_from_json(payload: object) -> Optional[List[Dict[str, object]]]:
     """Coerce a parsed ``jinn-layer ledger --json`` payload into render rows.
 

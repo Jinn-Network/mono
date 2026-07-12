@@ -924,7 +924,7 @@ def _read_contribution_count() -> Optional[int]:
         rows = ledger_view.rows_from_json(json.loads(out))
         if rows is None:
             return None
-        return sum(1 for r in rows if r.get("state") not in ("vetoed", "failed"))
+        return ledger_view.published_count(rows)
     except Exception:
         return None
 
