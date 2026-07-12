@@ -74,6 +74,28 @@ export interface TaskStatusSnapshot {
 }
 
 /**
+ * Resolved verdict tally for one task, returned by `getVerdictTallies` keyed by
+ * decimal taskId. This is a DISPLAY/advisory signal (like `getTaskStatuses`) —
+ * it backs the operator Activity table's task-relative Outcome column, NOT a
+ * correctness gate.
+ *
+ * `pass` / `fail` count `verdictEnvelopeMeta` rows whose `evaluatorVerdict` is
+ * `PASS` / `FAIL` respectively; the indexer folds REJECTED→FAIL, and INVALID /
+ * INDETERMINATE / UNKNOWN verdicts are excluded from both poles. `evaluators`
+ * lists the lowercased evaluator Safe addresses that posted a resolved verdict
+ * (deduped). The quorum rule over `pass` / `fail` lives in
+ * `client/src/api/run-outcome.ts` (spec/2026-05-22-run-outcome.md §2).
+ *
+ * Callers map an absent taskId (or a floor-empty Map) to `'awaiting'` — never a
+ * wrong `'fail'`.
+ */
+export interface VerdictTallyResult {
+  pass: number;
+  fail: number;
+  evaluators: string[];
+}
+
+/**
  * Per-on-chain-task claim-budget snapshot for a launched SolverNet. Returned by
  * `getInstanceClaimCounts`, keyed by **on-chain taskId** (decimal string) — NOT
  * by instance_id, because the on-chain `task`/`attempt` tables carry no
@@ -568,6 +590,25 @@ export interface DiscoveryAPI {
    * window as `'unknown'` rather than guessing `'open'`.
    */
   getTaskStatuses(args: { manifestCid: string }): Promise<Map<string, TaskStatusSnapshot>>;
+
+  /**
+   * Returns resolved verdict tallies for a set of tasks, keyed by decimal
+   * taskId, backing the operator Activity table's task-relative Outcome column
+   * (spec/2026-05-22-run-outcome.md).
+   *
+   * DISPLAY/advisory signal, not a correctness gate — so it is *tolerant*: like
+   * `getTaskStatuses`, the `withFallback` wrapper routes it to the on-chain
+   * floor on an indexer outage rather than propagating
+   * `DiscoveryUnavailableError`. The on-chain floor returns an empty Map (it
+   * cannot decode the IPFS-enrichment-backed verdict poles); callers map an
+   * absent taskId / floor-empty to `'awaiting'` and MUST NEVER guess a wrong
+   * `'fail'`.
+   *
+   * Backed by `verdictEnvelopeMeta` in the indexer, keyed by the on-chain
+   * `taskId` (decimal string). An empty `taskIds` array returns an empty Map
+   * without a network call.
+   */
+  getVerdictTallies(args: { taskIds: string[] }): Promise<Map<string, VerdictTallyResult>>;
 }
 
 // ── Error ────────────────────────────────────────────────────────────────────
