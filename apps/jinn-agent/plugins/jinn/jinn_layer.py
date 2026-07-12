@@ -136,9 +136,7 @@ def corpus_search(
     the one production caller (``plugins/jinn/__init__.py``) that already passes
     ``runner=`` by keyword stays backward-compatible.
     """
-    args = ["corpus", "search", query]
-    if limit is not None:
-        args += ["--limit", str(limit)]
+    args = ["corpus", "search", query, "--limit", str(limit)]
     if as_json:
         args.append("--json")
     return run(args, runner)
