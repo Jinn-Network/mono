@@ -18,23 +18,30 @@ import { emitEvent } from '../observability/emit-event.js';
 export const LOOP_HEARTBEAT_PREFIX = 'loop_heartbeat:';
 
 /**
- * The eight canonical long-running loops the watchdog supervises. The two
- * for-await adapter loops (engine-watcher, delivery-watcher) heartbeat at the
- * poll-cycle tail so an idle-but-polling loop never looks stale. The
- * eviction/checkpoint loops use FleetStateStore (not this observability Store)
- * and are deliberately NOT in this set.
+ * The canonical long-running loops the watchdog supervises, with their default
+ * poll intervals and (for the for-await polling loops) a staleness floor. The
+ * two for-await adapter loops (engine-watcher, delivery-watcher) heartbeat at
+ * the poll-cycle tail inside the mech adapter so an idle-but-polling loop never
+ * looks stale — hence their `floorMs`. The eviction/checkpoint loops use
+ * FleetStateStore (not this observability Store) and are deliberately NOT here.
+ *
+ * This registry is the single source of truth: LOOP_NAMES, the LoopName union,
+ * and the daemon's watchdog registrations are all derived from it. Order is
+ * load-bearing (LOOP_NAMES preserves it).
  */
-export const LOOP_NAMES = [
-  'creator',
-  'engine-tick',
-  'engine-watcher',
-  'delivery-watcher',
-  'reward-claim',
-  'balance-topup',
-  'peer-sync',
+export const LOOP_REGISTRY = [
+  { name: 'creator', intervalMs: 5000 },
+  { name: 'engine-tick', intervalMs: 5000 },
+  { name: 'engine-watcher', intervalMs: 5000, floorMs: 5 * 60_000 },
+  { name: 'delivery-watcher', intervalMs: 5000, floorMs: 5 * 60_000 },
+  { name: 'reward-claim', intervalMs: 5000 },
+  { name: 'balance-topup', intervalMs: 5000 },
+  { name: 'peer-sync', intervalMs: 60_000 },
 ] as const;
 
-export type LoopName = (typeof LOOP_NAMES)[number];
+export const LOOP_NAMES = LOOP_REGISTRY.map(r => r.name);
+
+export type LoopName = (typeof LOOP_REGISTRY)[number]['name'];
 
 /** The config-row key for a given loop's heartbeat. */
 export function loopHeartbeatKey(name: LoopName): string {
