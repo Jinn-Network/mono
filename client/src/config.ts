@@ -1226,30 +1226,24 @@ export function getConfigPathFromArgs(argv: string[] = process.argv): string | u
 
 /**
  * Persist the legacy-solverNets migration to disk. Re-reads the RAW config file
- * (never the env-merged object — that would bake transient env overrides such as
- * JINN_RPC_URL into the file), runs migrateLegacySolverNets on that copy, and
- * writes the pruned shape back. Idempotent: when the file already has no
- * `solverNets` block the migration is a no-op and nothing is written, so a
- * restart produces a byte-identical file (no resurrection). Best-effort — a
- * read-only config mount degrades to in-memory-only migration (logs a warning)
- * rather than crashing boot. See issue #445.
- *
- * @returns true when the file was rewritten, false otherwise.
+ * — never the env-merged object, which would bake transient env overrides such
+ * as JINN_RPC_URL into the file — runs migrateLegacySolverNets on that copy, and
+ * writes the pruned shape back. Best-effort. See issue #445.
  */
-function persistLegacySolverNetsMigration(filePath: string): boolean {
-  if (!existsSync(filePath)) return false; // pure-env config, no on-disk file → nothing to prune
+function persistLegacySolverNetsMigration(filePath: string): void {
+  if (!existsSync(filePath)) return; // pure-env config, no on-disk file → nothing to prune
   try {
     const raw = JSON.parse(readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
-    if (raw['solverNets'] === undefined) return false; // already pruned → no write, keeps restarts byte-stable
+    if (raw['solverNets'] === undefined) return; // already pruned → no write, keeps restarts byte-stable
     migrateLegacySolverNets(raw); // mutates raw in place (deletes solverNets, sets joinedSolverNets)
     writeFileSync(filePath, `${JSON.stringify(raw, null, 2)}\n`, 'utf-8');
-    return true;
   } catch (err) {
+    // A read-only config mount degrades to in-memory-only migration rather than
+    // crashing boot.
     console.warn(
       `[config] Could not persist legacy solverNets migration to ${filePath} ` +
       `(${err instanceof Error ? err.message : String(err)}); continuing with in-memory migration only.`,
     );
-    return false;
   }
 }
 
