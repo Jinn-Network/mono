@@ -1024,3 +1024,76 @@ describe('gather-status autoRestake gating (#651)', () => {
     });
   });
 });
+
+describe('derivePredictionSolverNetName (#446)', () => {
+  function makeConfig(
+    joinedSolverNets: Record<string, unknown>,
+  ): JinnConfig {
+    return { joinedSolverNets } as unknown as JinnConfig;
+  }
+
+  it("returns 'prediction' when the operator has only non-prediction joined entries", async () => {
+    const { derivePredictionSolverNetName } = await import(
+      '../../src/api/gather-status.js'
+    );
+    const config = makeConfig({
+      'bafy-restoration': {
+        manifestCid: 'bafy-restoration',
+        name: 'Restoration Net',
+        contract: { id: 'restoration', version: 'v1' },
+        roles: ['solver'],
+      },
+      'bafy-no-contract': {
+        manifestCid: 'bafy-no-contract',
+        name: 'Some Other Net',
+        roles: ['solver'],
+      },
+    });
+
+    expect(derivePredictionSolverNetName(config)).toBe('prediction');
+  });
+
+  it("returns the prediction entry's name when a prediction SolverNet is joined", async () => {
+    const { derivePredictionSolverNetName } = await import(
+      '../../src/api/gather-status.js'
+    );
+    const config = makeConfig({
+      'bafy-restoration': {
+        manifestCid: 'bafy-restoration',
+        name: 'Restoration Net',
+        contract: { id: 'restoration', version: 'v1' },
+        roles: ['solver'],
+      },
+      'bafy-prediction': {
+        manifestCid: 'bafy-prediction',
+        name: 'SWE-rebench v2',
+        contract: { id: 'prediction', version: 'v1' },
+        roles: ['solver'],
+      },
+    });
+
+    expect(derivePredictionSolverNetName(config)).toBe('SWE-rebench v2');
+  });
+
+  it('falls back to the manifestCid when the prediction entry has no name', async () => {
+    const { derivePredictionSolverNetName } = await import(
+      '../../src/api/gather-status.js'
+    );
+    const config = makeConfig({
+      'bafy-prediction-cid': {
+        manifestCid: 'bafy-prediction-cid',
+        contract: { id: 'prediction', version: 'v1' },
+        roles: ['solver'],
+      },
+    });
+
+    expect(derivePredictionSolverNetName(config)).toBe('bafy-prediction-cid');
+  });
+
+  it("returns 'prediction' when joinedSolverNets is empty", async () => {
+    const { derivePredictionSolverNetName } = await import(
+      '../../src/api/gather-status.js'
+    );
+    expect(derivePredictionSolverNetName(makeConfig({}))).toBe('prediction');
+  });
+});

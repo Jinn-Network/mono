@@ -196,18 +196,19 @@ function chainKey(network: 'mainnet' | 'testnet'): 'base' | 'base-sepolia' {
 /**
  * Derive the SolverNet name to use for the prediction operator diagnostic.
  *
- * Priority: (1) first joined entry's `name` field, (2) first joined entry's
- * manifestCid, (3) fallback `'prediction'`.
+ * Only a joined entry whose `contract.id === 'prediction'` names the
+ * prediction SolverNet — returns its `name` (or, if unnamed, its manifestCid
+ * map key). If the operator has joined no prediction SolverNet (the normal
+ * case post-deprecation), returns the literal `'prediction'` rather than
+ * mislabeling some other joined net (#446).
  *
  * Post-issue-#421 the legacy `solverNets` config block has been retired; the
  * operator's participation choices live in `joinedSolverNets` keyed by
- * manifestCid.
+ * manifestCid, with migrated-legacy entries carrying a populated `contract`.
  */
-function derivePredictionSolverNetName(config: JinnConfig): string {
-  const joinedEntries = Object.entries(config.joinedSolverNets ?? {});
-  if (joinedEntries.length > 0) {
-    const [cid, entry] = joinedEntries[0]!;
-    return entry.name ?? cid;
+export function derivePredictionSolverNetName(config: JinnConfig): string {
+  for (const [cid, entry] of Object.entries(config.joinedSolverNets ?? {})) {
+    if (entry.contract?.id === 'prediction') return entry.name ?? cid;
   }
   return 'prediction';
 }
