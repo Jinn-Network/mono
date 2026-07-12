@@ -10,8 +10,11 @@ import {
   renderReview,
   renderFailure,
   renderResumeNothing,
+  renderDistillerSet,
+  renderDistillerModels,
   type RenderedSkill,
 } from '../src/distill-render.js';
+import { DISTILLER_CATALOG } from '../src/distill-llm.js';
 
 /** The two hard rules apply to every string this surface prints. */
 const EMOJI = /\p{Extended_Pictographic}/u;
@@ -260,5 +263,51 @@ describe('distill render — nothing to resume (1c/1d)', () => {
   it('says all captures are already distilled', () => {
     const s = renderResumeNothing({ captureCount: 6 });
     expect(s).toMatch(/already distilled|nothing to resume/i);
+  });
+});
+
+describe('distill render — distiller setter echo', () => {
+  it('echoes the provider when only the provider is set', () => {
+    const s = renderDistillerSet({ distiller: 'codex' });
+    expect(s).toMatch(/codex/);
+    expect(s).toMatch(/distiller/i);
+    expect(s).not.toMatch(EMOJI);
+  });
+  it('echoes the model when only the model is set', () => {
+    const s = renderDistillerSet({ distillerModel: 'gpt-5.5' });
+    expect(s).toContain('gpt-5.5');
+    expect(s).not.toMatch(EMOJI);
+  });
+  it('echoes both when both are set', () => {
+    const s = renderDistillerSet({ distiller: 'claude', distillerModel: 'claude-opus-4-8' });
+    expect(s).toMatch(/claude/);
+    expect(s).toContain('claude-opus-4-8');
+  });
+});
+
+describe('distill render — distiller catalog (discovery)', () => {
+  const s = renderDistillerModels({
+    catalog: DISTILLER_CATALOG,
+    resolved: { provider: 'claude', model: 'claude-opus-4-8' },
+  });
+
+  it('lists every catalog model with its execution/cost/privacy attributes', () => {
+    for (const e of DISTILLER_CATALOG) {
+      expect(s).toContain(e.model);
+      expect(s).toContain(e.execution);
+    }
+    expect(s).toMatch(/local/);
+    expect(s).toMatch(/frontier pass/);
+  });
+
+  it('marks the currently-resolved default with a word, not a glyph', () => {
+    const line = s.split('\n').find((l) => l.includes('claude-opus-4-8'));
+    expect(line).toMatch(/default/i);
+    expect(s).not.toMatch(EMOJI);
+  });
+
+  it('does not mark a non-resolved model as default', () => {
+    const line = s.split('\n').find((l) => l.includes('gpt-5.5'));
+    expect(line).not.toMatch(/\(default\)/);
   });
 });
