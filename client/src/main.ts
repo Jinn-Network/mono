@@ -36,6 +36,7 @@ import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js'
 import type { LauncherGeneratorStateSnapshot } from './api/launcher-status.js';
 import { ensureUiToken } from './api/ui-token.js';
 import { getFileLogger, closeFileLogger } from './observability/file-logger.js';
+import { emitProgress, type ProgressEnvelope } from './observability/progress.js';
 import { hashImplStateDir } from './harnesses/freeze.js';
 import { readModeState } from './harnesses/mode-state.js';
 import { attachAgentWs, updateAgentClaudePath } from './agent/agent-ws.js';
@@ -641,34 +642,6 @@ class SetupBootstrapHalted extends Error {
 // effects (password resolution, config load) into the test.
 
 // ── Main ────────────────────────────────────────────────────────────────────
-
-/**
- * --json-progress: emit NDJSON progress envelopes on stdout during long
- * phases (init, bootstrap, daemon startup). The `jinn run --json-progress`
- * flag flips JINN_JSON_PROGRESS=1 in run.ts before calling main(); when
- * unset this is a no-op so tests / non-flag invocations stay silent on
- * stdout.
- */
-function progressEnabled(): boolean {
-  return process.env['JINN_JSON_PROGRESS'] === '1';
-}
-
-interface ProgressEnvelope {
-  type: 'progress';
-  phase: 'init' | 'bootstrap' | 'daemon';
-  step: string;
-  attempt?: number;
-  blocking?: boolean;
-  nextAction?: string;
-  addresses?: Record<string, string>;
-  estimatedWaitMs?: number;
-}
-
-function emitProgress(envelope: ProgressEnvelope): void {
-  if (progressEnabled()) {
-    process.stdout.write(JSON.stringify(envelope) + '\n');
-  }
-}
 
 export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void> {
   // Issue #909: chdir to a stable directory before spawning any child process.
