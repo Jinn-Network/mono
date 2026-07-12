@@ -6,7 +6,8 @@ import type {
   EnvelopeProjectionMetadataValue,
   EnvelopeProjectionQuery,
 } from '../corpus/types.js';
-import { TASK_RUNS_SCHEMA } from '../harnesses/engine/persistence.js';
+import { TASK_RUNS_SCHEMA, TaskRunPersistence } from '../harnesses/engine/persistence.js';
+import type { TaskRunReadModel } from '../types/task-run-read-model.js';
 import type { TxSubmissionKey, TxSubmissionLedgerEntry } from '../tx-retry.js';
 import { normalizeEnvelopeRole, type Role } from '../types/envelope.js';
 
@@ -583,6 +584,15 @@ export class Store {
     this.ensureActivityEventCostColumns();
     this.backfillActivityEvents();
     this.recordLegacyRestorationIntentsIgnored();
+  }
+
+  /**
+   * Read-only task-run view for the status/build endpoints (#1584). Returns a
+   * `TaskRunReadModel` backed by the engine persistence layer, keeping the
+   * concrete `TaskRunPersistence` construction out of `api/`.
+   */
+  taskRunReadModel(): TaskRunReadModel {
+    return new TaskRunPersistence(this.db);
   }
 
   /** Older request-first DBs keyed artifacts by desired_state_id before Task-native IDs landed. */
