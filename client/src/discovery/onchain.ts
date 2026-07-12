@@ -40,7 +40,7 @@ import {
   type PublicClient,
 } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
-import type { DiscoveryAPI, ClaimableTaskCandidate, InstanceClaimCount, TaskStatusSnapshot, SolverNetManifestSummary, SolverNetLifecycleStatus, PluginPublication, PluginScoreHistoryRow, PublishedArtifact, CodeDigestRewardRow, TaskPostCounts } from './types.js';
+import type { DiscoveryAPI, ClaimableTaskCandidate, InstanceClaimCount, TaskStatusSnapshot, VerdictTallyResult, SolverNetManifestSummary, SolverNetLifecycleStatus, PluginPublication, PluginScoreHistoryRow, PublishedArtifact, CodeDigestRewardRow, TaskPostCounts } from './types.js';
 import { DiscoveryUnavailableError, TASK_POST_WINDOW_BLOCKS, bucketTaskPostCounts } from './types.js';
 import type { EnvelopeRef, CorpusQuery } from '../corpus/types.js';
 import { runOnchainCorpusQuery, DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK } from '../corpus/onchain-query.js';
@@ -1347,6 +1347,17 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     return new Map();
   }
 
+  // ── getVerdictTallies (#502) — empty Map stub ──────────────────────────────
+  // Resolved verdict poles derive from the indexer's IPFS enrichment
+  // (verdictEnvelopeMeta.evaluatorVerdict), which the on-chain floor cannot
+  // decode. Returning an empty Map is the documented contract: callers map an
+  // absent taskId to 'awaiting', the safe degraded default. This is a DISPLAY
+  // signal, so withFallback DOES route here on an indexer outage — an empty Map
+  // → all-'awaiting' outcomes, which is honest rather than guessing a 'fail'.
+  async function getVerdictTallies(): Promise<Map<string, VerdictTallyResult>> {
+    return new Map();
+  }
+
   // ── getTaskPostCounts (#918) ───────────────────────────────────────────────
   // Windowed count of TaskCreated events (last 1h / 6h / 24h) sourced directly
   // from the JinnRouter logs. Block-window approximation; capped at
@@ -1546,5 +1557,6 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     getTaskPostCounts,
     getMostRecentTaskCidDigest,
     getTaskStatuses,
+    getVerdictTallies,
   };
 }
