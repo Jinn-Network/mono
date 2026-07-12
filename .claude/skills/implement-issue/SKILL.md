@@ -390,7 +390,7 @@ Never forward the coordinator's own conversation history to a stage. Keep each s
 
 ### Running a depth-needing stage via `stage:run`
 
-Stages 1, 3, 4, 5 must run as `claude -p` **root sessions** so their composed skills can fan out sub-agents at depth-1. Launch each one with the `stage:run` CLI — the same shape as the Step 1.5 `triage:check` invocation:
+Stages 1, 3, 4, 5 must run as `claude -p` **root sessions** so their composed skills can fan out sub-agents at depth-1. Launch each one with the `stage:run` CLI, run from the `packages/eng-loop` package dir:
 
 ```bash
 # 1. Write the curated prompt to a temp file. Include the stage task + issue
@@ -404,10 +404,13 @@ cat > /tmp/stage-<N>-<stage>.md <<'EOF'
 EOF
 
 # 2. Run the stage as a root session in the worktree. --model is optional.
-yarn workspace @jinn-network/eng-loop stage:run \
+#    packages/eng-loop is a self-contained yarn project (no root workspace
+#    registers it), so run stage:run from the package dir, not via
+#    `yarn workspace`. The subshell keeps the coordinator's cwd unchanged.
+(cd "$WORKTREE_PATH/packages/eng-loop" && yarn stage:run \
   --prompt-file /tmp/stage-<N>-<stage>.md \
   --worktree "$WORKTREE_PATH" \
-  [--model <model>]
+  [--model <model>])
 ```
 
 The child's stdout is streamed back — read it as the stage report, exactly as you read an Agent-tool sub-agent's report. Because the session runs at depth-0, its composed skill's sub-agents spawn at depth-1 (the depth-2 restriction that silently no-ops an Agent-tool-dispatched stage does not apply). The session runs with `cwd = $WORKTREE_PATH`, so worktree isolation is unchanged. Because a `stage:run` session is its own `claude -p` session — which does not auto-load `CLAUDE.md` — `runStageHeadless` prepends canon (CLAUDE.md + handbook) and the headless-override block itself; the curated prompt-file must include neither.
