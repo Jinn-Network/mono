@@ -19,7 +19,7 @@ import type { FleetState } from '../earning/types.js';
 import type { Store } from '../store/store.js';
 import { emitEvent } from '../observability/emit-event.js';
 import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
-import { recordLoopTick } from './loop-heartbeat.js';
+import { runLoop } from './loop-heartbeat.js';
 
 export interface RewardClaimLoopConfig {
   intervalMs: number;
@@ -112,20 +112,37 @@ export class RewardClaimLoop {
       return;
     }
 
-    while (!this.stopped) {
-      try {
-        await this.runOnce();
-      } catch (err) {
+    const jinnStore = this.config.jinnStore;
+    if (!jinnStore) {
+      // Without a Store there is no heartbeat surface; keep the minimal inline
+      // loop so runLoop's always-stamp behavior can't fire without a store.
+      while (!this.stopped) {
+        try {
+          await this.runOnce();
+        } catch (err) {
+          console.debug('[reward-claim] Tick failed (non-fatal):', err instanceof Error ? err.message : err);
+        }
+        await new Promise(r => setTimeout(r, this.config.intervalMs));
+      }
+      return;
+    }
+
+    await runLoop({
+      name: 'reward-claim',
+      store: jinnStore,
+      tick: () => this.runOnce(),
+      intervalMs: this.config.intervalMs,
+      stopSignal: () => this.stopped,
+      emitSource: 'reward-claim',
+      onError: (err) => {
         console.debug('[reward-claim] Tick failed (non-fatal):', err instanceof Error ? err.message : err);
-        this.config.jinnStore && emitEvent(this.config.jinnStore, {
+        emitEvent(jinnStore, {
           kind: 'tick_error',
           outcome: 'failed',
           detail: err instanceof Error ? err.message : String(err),
         }, 'reward-claim');
-      }
-      this.config.jinnStore?.setConfigValue('last_reward_claim_tick_at', new Date().toISOString());
-      if (this.config.jinnStore) recordLoopTick(this.config.jinnStore, 'reward-claim'); // #1043 loop watchdog
-      await new Promise(r => setTimeout(r, this.config.intervalMs));
-    }
+      },
+      afterTick: () => jinnStore.setConfigValue('last_reward_claim_tick_at', new Date().toISOString()),
+    });
   }
 }
