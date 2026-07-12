@@ -7,9 +7,8 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { signCanonical } from '../../engine/signing.js';
 import { buildVerificationStub } from '../../engine/verification-stub.js';
 import type { PublicClient } from 'viem';
-import type { Harness, HarnessContext, Solution, ReadyStatus } from '../../types.js';
-import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
-import type { Task } from '../../../types/task.js';
+import type { HarnessContext, Solution } from '../../types.js';
+import { EvaluatorHarness, type EvaluatorHarnessShape } from '../_evaluator-base.js';
 import { PredictionApyV0TaskSchema } from '../../../types/prediction-apy.js';
 import { twApyBpsOverWindow } from '../../../venues/aave-v3/client.js';
 import {
@@ -53,34 +52,24 @@ function chainForVenue(venue: 'aave-v3-base-sepolia' | 'aave-v3-base' | 'aave-v3
   return { chain: base, chainId: 8453 };
 }
 
-export class PredictionApyV0Evaluator implements Harness {
+export class PredictionApyV0Evaluator extends EvaluatorHarness {
   readonly name = 'prediction-apy-v0-evaluator';
-  readonly version = '1.0.0';
 
-  constructor(private readonly config: PredictionApyV0EvaluatorConfig) {}
+  protected readonly shape: EvaluatorHarnessShape = {
+    solverType: 'prediction.apy.v0',
+    requiresRestorationRequestId: false,
+  };
 
-  supports(ctx: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {
-    return ctx.solverType === 'prediction.apy.v0' && ctx.role === 'evaluation';
+  constructor(private readonly config: PredictionApyV0EvaluatorConfig) {
+    super();
   }
 
-  async isReady(): Promise<ReadyStatus> {
-    if (this.config.stub) return { ...REQUIRES_LIVE_DAEMON_READINESS };
-    return { ready: true };
-  }
-
-  async canAttempt(task: Task): Promise<{ ok: true } | { ok: false; reason: string }> {
-    if (task.solverType !== 'prediction.apy.v0') return { ok: false, reason: 'solverType is not prediction.apy.v0' };
-    if (task.role !== 'evaluation') return { ok: false, reason: 'role is not evaluation' };
-    if (typeof task.context?.['restorationResult'] !== 'string') {
-      return { ok: false, reason: 'context.restorationResult required' };
-    }
-    return { ok: true };
+  protected get stub(): boolean {
+    return Boolean(this.config.stub);
   }
 
   async run(ctx: HarnessContext): Promise<Solution> {
-    if (this.config.stub) {
-      throw new Error('prediction-apy-v0-evaluator: stub registry cannot run evaluation (requires live daemon)');
-    }
+    this.assertLive();
     if (!this.config.evaluatorPk || !this.config.evaluatorSafeAddress) {
       throw new Error('prediction-apy-v0-evaluator: evaluatorPk and evaluatorSafeAddress are required');
     }
