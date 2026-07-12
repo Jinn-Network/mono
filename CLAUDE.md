@@ -287,6 +287,8 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 |------------------|--------------------------|-----------------------------------|
 | rpcUrl           | BASE_RPC_URL/JINN_RPC_URL| mainnet (default fallback chain): `["https://mainnet.base.org", …4 more]` · testnet (default fallback chain): `["https://base-sepolia.publicnode.com", …3 more, "https://sepolia.base.org"]` (≥5 free providers per chain, #911) |
 | claudeModel      | JINN_CLAUDE_MODEL        | claude-haiku-4-5-20251001         |
+| hermesModel      | JINN_HERMES_MODEL        | per-SolverNet config (env wins over SolverNet config) |
+| hermesProvider   | JINN_HERMES_PROVIDER     | per-SolverNet config (env wins; ignored when a base_url/custom endpoint is set) |
 | claudePath       | JINN_CLAUDE_PATH         | claude                            |
 | pollIntervalMs   | JINN_POLL_INTERVAL_MS    | 5000                              |
 | apiPort          | JINN_API_PORT            | 7331                              |
