@@ -117,9 +117,10 @@ def _thread_panic_hook(args):
 threading.excepthook = _thread_panic_hook
 
 try:
-    from hermes_cli.banner import prefetch_update_check
+    from hermes_cli.banner import prefetch_update_check, prefetch_splash_reads
 
     prefetch_update_check()
+    prefetch_splash_reads()
 except Exception:
     pass
 
