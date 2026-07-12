@@ -11,26 +11,27 @@ export interface IdentityScrubConfig {
 }
 
 // Octet-bounded so version strings like "22.1.0.0" don't trigger false positives
-// — each segment must be a valid 0-255 octet.
+// - each segment must be a valid 0-255 octet.
 const IPV4_PATTERN =
   /\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)\b/g;
 
-// Reserved-protocol tokens (jinn.span.kind, jinn.artifact.emit, …) are masked
+// Reserved-protocol tokens (jinn.span.kind, jinn.artifact.emit, ...) are masked
 // out before identity scrubbing and restored after, so an identity token that
 // is a substring of a protocol token (e.g. username === 'jinn') cannot deface
 // the protocol namespace (#1474). The mask/restore is confined to this shared
 // function so all consumers (trajectory span-processor, artifact-scrub, capture
 // export) inherit the protection.
 const PROTOCOL_TOKEN_PATTERN = /\bjinn\.[A-Za-z0-9_.-]+/g;
-// Sentinels are framed by control characters (U+0001 … U+0002) that cannot
+// Sentinels are framed by control characters (U+0001 and U+0002) that cannot
 // appear in identity tokens or normal trajectory content, so they never overlap
 // an identity substring and never leak an alphanumeric placeholder.
-const SENTINEL_OPEN = '';
-const SENTINEL_CLOSE = '';
+const SENTINEL_OPEN = '\u0001';
+const SENTINEL_CLOSE = '\u0002';
+// Matches a masked placeholder (SENTINEL_OPEN <index> SENTINEL_CLOSE) for restore.
+const SENTINEL_RESTORE_PATTERN = /\u0001(\d+)\u0002/g;
 
 export function scrubIdentityString(s: string, cfg: IdentityScrubConfig): string {
-  // Mask reserved protocol tokens first so identity replacement can't rewrite
-  // a jinn.-prefixed token when an identity value is a substring of it.
+  // Mask reserved protocol tokens first (see PROTOCOL_TOKEN_PATTERN above).
   const protectedTokens: string[] = [];
   let out = s.replace(PROTOCOL_TOKEN_PATTERN, (match) => {
     const idx = protectedTokens.push(match) - 1;
@@ -49,13 +50,8 @@ export function scrubIdentityString(s: string, cfg: IdentityScrubConfig): string
   if (cfg.machineId) out = out.split(cfg.machineId).join('<MACHINE>');
   out = out.replace(IPV4_PATTERN, '<IPV4>');
 
-  // Restore protocol tokens byte-for-byte.
-  if (protectedTokens.length > 0) {
-    out = out.replace(
-      new RegExp(`${SENTINEL_OPEN}(\\d+)${SENTINEL_CLOSE}`, 'g'),
-      (_m, idx) => protectedTokens[Number(idx)],
-    );
-  }
+  // Restore protocol tokens byte-for-byte (no-op when none were masked).
+  out = out.replace(SENTINEL_RESTORE_PATTERN, (_m, idx) => protectedTokens[Number(idx)]);
   return out;
 }
 
