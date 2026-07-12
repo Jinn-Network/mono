@@ -512,4 +512,172 @@ describe('RegistryCatalog', () => {
     const action = screen.getByTestId('registry-catalog-error-action');
     expect(action.getAttribute('href')).toBe('/operator#network');
   });
+
+  // #1240 — the running swe-rebench-v2 net is the first-run demo target.
+  function summary(
+    overrides: Partial<{
+      manifestCid: string;
+      name: string;
+      contractId: string;
+      status: 'launched' | 'paused' | 'retired';
+    }>,
+  ) {
+    return {
+      manifestCid: 'bafybeidefault',
+      solverNetId: 'agent5474_prediction.v1-1_default',
+      name: 'A Net',
+      network: 'base-sepolia',
+      launcherAgentId: '5474',
+      launcherSafeAddress: '0xE64bAfABCDEF0123456789abcdef0123456789B5CF',
+      status: 'launched',
+      statusUpdatedAt: '2026-05-05T00:00:00Z',
+      contractId: 'prediction',
+      contractVersion: 'v1',
+      solutionPriceWei: '10000000000',
+      verdictPriceWei: '5000000000',
+      openRoles: ['solver', 'evaluator'],
+      anchorBlock: 1,
+      ...overrides,
+    };
+  }
+
+  it('hoists the canonical swe-rebench-v2 demo net to the first card', async () => {
+    listRegistryMock.mockResolvedValue({
+      summaries: [
+        summary({ manifestCid: 'bafybeipred', name: 'Prediction Markets', contractId: 'prediction' }),
+        summary({ manifestCid: 'bafybeidemo', name: 'SWE-rebench v2', contractId: 'swe-rebench-v2' }),
+        summary({ manifestCid: 'bafybeiother', name: 'Another Prediction', contractId: 'prediction' }),
+      ],
+      lastRefreshedAt: null,
+      lastError: null,
+    });
+    render(withProviders(<RegistryCatalog />));
+    await waitFor(() =>
+      expect(screen.queryAllByTestId('registry-card')).toHaveLength(3),
+    );
+    const first = screen.getAllByTestId('registry-card')[0];
+    expect(first.getAttribute('data-manifest-cid')).toBe('bafybeidemo');
+  });
+
+  it('badges the canonical demo net as Recommended demo', async () => {
+    listRegistryMock.mockResolvedValue({
+      summaries: [
+        summary({ manifestCid: 'bafybeidemo', name: 'SWE-rebench v2', contractId: 'swe-rebench-v2' }),
+        summary({ manifestCid: 'bafybeipred', name: 'Prediction Markets', contractId: 'prediction' }),
+      ],
+      lastRefreshedAt: null,
+      lastError: null,
+    });
+    render(withProviders(<RegistryCatalog />));
+    await waitFor(() =>
+      expect(screen.queryAllByTestId('registry-card')).toHaveLength(2),
+    );
+    const cards = screen.getAllByTestId('registry-card');
+    const demoCard = cards.find(
+      (c) => c.getAttribute('data-manifest-cid') === 'bafybeidemo',
+    )!;
+    const predCard = cards.find(
+      (c) => c.getAttribute('data-manifest-cid') === 'bafybeipred',
+    )!;
+    const badge = demoCard.querySelector(
+      '[data-testid="registry-card-recommended"]',
+    );
+    expect(badge).toBeTruthy();
+    expect(badge!.textContent).toMatch(/recommended demo/i);
+    expect(
+      predCard.querySelector('[data-testid="registry-card-recommended"]'),
+    ).toBeNull();
+  });
+
+  it('frames the demo CTA as "Try the demo"', async () => {
+    listRegistryMock.mockResolvedValue({
+      summaries: [
+        summary({ manifestCid: 'bafybeidemo', name: 'SWE-rebench v2', contractId: 'swe-rebench-v2' }),
+        summary({ manifestCid: 'bafybeipred', name: 'Prediction Markets', contractId: 'prediction' }),
+      ],
+      lastRefreshedAt: null,
+      lastError: null,
+    });
+    render(withProviders(<RegistryCatalog />));
+    await waitFor(() =>
+      expect(screen.queryAllByTestId('registry-card')).toHaveLength(2),
+    );
+    const cards = screen.getAllByTestId('registry-card');
+    const demoCard = cards.find(
+      (c) => c.getAttribute('data-manifest-cid') === 'bafybeidemo',
+    )!;
+    const predCard = cards.find(
+      (c) => c.getAttribute('data-manifest-cid') === 'bafybeipred',
+    )!;
+    const demoCta = demoCard.querySelector(
+      '[data-testid="registry-join-cta"]',
+    )!;
+    expect(demoCta.textContent).toMatch(/try the demo/i);
+    expect(demoCta.getAttribute('href')).toBe('/operator/join/bafybeidemo');
+    const predCta = predCard.querySelector(
+      '[data-testid="registry-join-cta"]',
+    )!;
+    expect(predCta.textContent).toBe('Join');
+  });
+
+  it('excludes smoke / internal nets from Discover', async () => {
+    listRegistryMock.mockResolvedValue({
+      summaries: [
+        summary({ manifestCid: 'bafybeidemo', name: 'SWE-rebench v2', contractId: 'swe-rebench-v2' }),
+        summary({ manifestCid: 'bafybeismoke', name: 'smoke-e2e-throwaway', contractId: 'prediction' }),
+      ],
+      lastRefreshedAt: null,
+      lastError: null,
+    });
+    render(withProviders(<RegistryCatalog />));
+    await waitFor(() =>
+      expect(screen.queryAllByTestId('registry-card')).toHaveLength(1),
+    );
+    const cards = screen.getAllByTestId('registry-card');
+    expect(cards[0].getAttribute('data-manifest-cid')).toBe('bafybeidemo');
+    expect(screen.queryByText(/smoke-e2e-throwaway/i)).toBeNull();
+    expect(screen.getByTestId('registry-catalog-meta').textContent).toContain(
+      '1 discoverable',
+    );
+  });
+
+  it('keeps non-canonical launched nets visible after the demo net', async () => {
+    listRegistryMock.mockResolvedValue({
+      summaries: [
+        summary({ manifestCid: 'bafybeipred', name: 'Prediction Markets', contractId: 'prediction' }),
+        summary({ manifestCid: 'bafybeidemo', name: 'SWE-rebench v2', contractId: 'swe-rebench-v2' }),
+      ],
+      lastRefreshedAt: null,
+      lastError: null,
+    });
+    render(withProviders(<RegistryCatalog />));
+    await waitFor(() =>
+      expect(screen.queryAllByTestId('registry-card')).toHaveLength(2),
+    );
+    const cards = screen.getAllByTestId('registry-card');
+    expect(cards.map((c) => c.getAttribute('data-manifest-cid'))).toEqual([
+      'bafybeidemo',
+      'bafybeipred',
+    ]);
+    expect(screen.getByText('Prediction Markets')).toBeTruthy();
+  });
+
+  it('does not treat the canonical demo net as internal even if unusual', async () => {
+    listRegistryMock.mockResolvedValue({
+      summaries: [
+        summary({ manifestCid: 'bafybeidemo', name: 'smoke SWE-rebench v2', contractId: 'swe-rebench-v2' }),
+      ],
+      lastRefreshedAt: null,
+      lastError: null,
+    });
+    render(withProviders(<RegistryCatalog />));
+    await waitFor(() =>
+      expect(screen.queryAllByTestId('registry-card')).toHaveLength(1),
+    );
+    const card = screen.getAllByTestId('registry-card')[0];
+    expect(card.getAttribute('data-manifest-cid')).toBe('bafybeidemo');
+    expect(
+      card.querySelector('[data-testid="registry-card-recommended"]'),
+    ).toBeTruthy();
+  });
 });

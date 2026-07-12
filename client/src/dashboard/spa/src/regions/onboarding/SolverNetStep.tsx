@@ -7,6 +7,7 @@ import { Badge } from '../../components/ui/badge.js';
 import { Button } from '../../components/ui/button.js';
 import { Skeleton } from '../../components/ui/skeleton.js';
 import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert.js';
+import { DEMO_CONTRACT_ID } from '../../lib/demo-solvernet.js';
 
 /**
  * Onboarding step 4 — pick your first SolverNet.
@@ -28,8 +29,6 @@ import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert.j
  * PR A hot-applies the join to the running daemon, so a join made here after
  * the flip takes effect with no restart (restartRequired:false).
  */
-const ONBOARDING_CONTRACT_ID = 'swe-rebench-v2';
-
 /** Treated as "still starting", not a hard error (mirrors RegistryCatalog). */
 const STARTING_CODES = new Set(['subsystem_not_ready', 'registry_unavailable']);
 
@@ -61,7 +60,7 @@ export function SolverNetStep({
   });
 
   const entry: SolverNetManifestSummary | undefined = registryQuery.data?.summaries.find(
-    (s) => s.contractId === ONBOARDING_CONTRACT_ID && s.status === 'launched',
+    (s) => s.contractId === DEMO_CONTRACT_ID && s.status === 'launched',
   );
   const cid = entry?.manifestCid;
   const alreadyJoined = cid !== undefined && joinedCids.includes(cid);

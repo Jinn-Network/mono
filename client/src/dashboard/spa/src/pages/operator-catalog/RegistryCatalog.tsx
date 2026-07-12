@@ -11,6 +11,7 @@ import { Badge } from '../../components/ui/badge.js';
 import { Button } from '../../components/ui/button.js';
 import { Card } from '../../components/ui/card.js';
 import { formatWeiAmount } from '../launcher-launched/helpers.js';
+import { isDemoSolverNet, isInternalSolverNet } from '../../lib/demo-solvernet.js';
 
 import type { JSX } from 'react';
 
@@ -209,12 +210,19 @@ interface RegistryCardProps {
    * config.joinedSolverNets). Empty / undefined means not joined.
    */
   joinedRoles?: ReadonlyArray<'solver' | 'evaluator'>;
+  /**
+   * True for the canonical first-run demo net (#1240). When set and the
+   * operator has not joined, the card is badged "Recommended demo" and its
+   * CTA reads "Try the demo" instead of "Join".
+   */
+  recommended?: boolean;
 }
 
-function RegistryCard({ summary, joinedRoles }: RegistryCardProps): JSX.Element {
+function RegistryCard({ summary, joinedRoles, recommended }: RegistryCardProps): JSX.Element {
   const joinHref = `/operator/join/${encodeURIComponent(summary.manifestCid)}`;
   const isJoined = (joinedRoles ?? []).length > 0;
   const isLaunched = summary.status === 'launched';
+  const ctaLabel = isJoined ? 'Edit' : recommended ? 'Try the demo' : 'Join';
   return (
     <Card
       data-testid="registry-card"
@@ -238,7 +246,18 @@ function RegistryCard({ summary, joinedRoles }: RegistryCardProps): JSX.Element 
               {summary.launcherAgentId}
             </span>
           </div>
-          <StatusBadge status={summary.status} />
+          <span className="flex items-center gap-2">
+            {recommended && !isJoined && (
+              <Badge
+                data-testid="registry-card-recommended"
+                variant="secondary"
+                className="whitespace-nowrap"
+              >
+                Recommended demo
+              </Badge>
+            )}
+            <StatusBadge status={summary.status} />
+          </span>
         </header>
 
         <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 font-mono text-[12px] text-[var(--fg-muted)]">
@@ -272,7 +291,7 @@ function RegistryCard({ summary, joinedRoles }: RegistryCardProps): JSX.Element 
               data-testid="registry-join-cta"
               data-manifest-cid={summary.manifestCid}
             >
-              <Link href={joinHref}>{isJoined ? 'Edit' : 'Join'}</Link>
+              <Link href={joinHref}>{ctaLabel}</Link>
             </Button>
           ) : (
             <Button
@@ -371,9 +390,13 @@ export function RegistryCatalog({
   }
 
   const allSummaries = data?.summaries ?? [];
-  const summaries = allSummaries.filter(
-    (summary) => joinedByCid[summary.manifestCid] === undefined,
-  );
+  const summaries = allSummaries
+    .filter((summary) => joinedByCid[summary.manifestCid] === undefined)
+    // AC2: internal / smoke-test nets are never the primary Discover choice.
+    .filter((summary) => !isInternalSolverNet(summary))
+    // AC1/AC4: hoist the canonical demo net to the top. Stable sort preserves
+    // prior order otherwise.
+    .sort((a, b) => Number(isDemoSolverNet(b)) - Number(isDemoSolverNet(a)));
   const lastRefreshed = formatTimestamp(data?.lastRefreshedAt ?? null);
   const lastError = data?.lastError ?? null;
 
@@ -408,6 +431,7 @@ export function RegistryCatalog({
               key={summary.manifestCid}
               summary={summary}
               joinedRoles={joinedByCid[summary.manifestCid]?.roles}
+              recommended={isDemoSolverNet(summary)}
             />
           ))}
         </div>
