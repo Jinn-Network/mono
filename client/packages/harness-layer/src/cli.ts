@@ -93,6 +93,14 @@ import {
   loadActiveHeldOutSlateIds,
   ACTIVE_HELD_OUT_SLATE_VERSIONS,
 } from '../../../src/solver-types/_swe-rebench-v2-held-out-slate.js';
+import { decryptMnemonic, walletPrivateKeyAtIndex } from '../../../src/earning/wallet.js';
+import {
+  FleetStateStore,
+  DEFAULT_EARNING_DIR,
+  mnemonicKeystorePath,
+} from '../../../src/earning/store.js';
+import { isOperationalServiceStep } from '../../../src/earning/types.js';
+import { resolveCliPassword } from '../../../src/cli/password.js';
 
 const USAGE = `Usage: jinn-layer <command> [args]
 
@@ -113,6 +121,13 @@ Commands:
   publish <task-file> [--veto] [--json]          Scrub, consent, publish and anchor a captured
                                                  task on testnet (--veto records locally and
                                                  publishes nothing)
+  derive-env                                     Print export lines for this operator's publish
+                                                 identity (JINN_LAYER_PRIVATE_KEY/_SAFE_ADDRESS/
+                                                 _AGENT_ID) derived from ~/.jinn-client:
+                                                 eval "\$(jinn-layer derive-env)" then
+                                                 jinn-layer publish. Reads the keystore +
+                                                 password; the key stays in-process (stdout only,
+                                                 never on disk)
   seed plan --source <list-file> [--out <report-file>] [--json]
                                                  Fetch + licence-check the disclosed seed list
                                                  (owner/repo[#path] per line); ZERO writes —
@@ -170,6 +185,7 @@ Environment:
   JINN_IPFS_GATEWAY_URL    Override the IPFS gateway (default: https://gateway.autonolas.tech)
 
 Environment (publish — testnet anchor identity):
+  JINN_EARNING_DIR              Earning dir derive-env reads (default: ~/.jinn-client/earning)
   JINN_LAYER_PRIVATE_KEY        Operator agent EOA key (required; signs envelope + anchor tx)
   JINN_LAYER_SAFE_ADDRESS       Operator Safe address (required)
   JINN_LAYER_AGENT_ID           ERC-8004 agent NFT id (required)
@@ -625,13 +641,14 @@ export async function runJinnLayerCli(
   const isSkillsInstall = verb === 'skills' && subverb === 'install';
   const isDistill = verb === 'distill' && subverb === 'run';
   const isDistil = verb === 'distil';
-  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed && !isSkillsInstall && !isDistill && !isDistil) {
+  const isDeriveEnv = verb === 'derive-env';
+  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed && !isSkillsInstall && !isDistill && !isDistil && !isDeriveEnv) {
     writer.write(USAGE);
     return verb === undefined || verb === 'help' || verb === '--help' ? 0 : 2;
   }
 
-  // `ledger`, `publish`, and `distil` have no subverb — their args start at argv[1].
-  const flat = isLedger || isPublish || isDistil;
+  // `ledger`, `publish`, `distil`, and `derive-env` have no subverb — their args start at argv[1].
+  const flat = isLedger || isPublish || isDistil || isDeriveEnv;
   let parsed;
   try {
     parsed = parseArgs({
@@ -1087,6 +1104,61 @@ export async function runJinnLayerCli(
       writer.write(lines.join('\n') + '\n');
     }
     return result.distilled.errors.length > 0 || (result.metaDistilled?.errors.length ?? 0) > 0 ? 1 : 0;
+  }
+
+  if (isDeriveEnv) {
+    // Read-only replay of the daemon's identity path (client/src/main.ts
+    // resolveBootstrapIdentity): read the encrypted mnemonic keystore + the
+    // resolved password from the local earning dir, derive the agent key
+    // in-process, and pull Safe address + agent id from persisted fleet state.
+    // Prints exactly three `export …` lines to stdout for
+    // `eval "$(jinn-layer derive-env)"` capture. Every failure is a one-line
+    // stderr message + non-zero exit with ZERO stdout — so an error `eval`s to
+    // a no-op rather than exporting partial identity.
+    const err = (msg: string): number => {
+      process.stderr.write(`${msg}\n`);
+      return 1;
+    };
+    const earningDir = process.env['JINN_EARNING_DIR'] ?? DEFAULT_EARNING_DIR;
+    const store = new FleetStateStore(earningDir);
+
+    // (a) keystore guard — before anything else, zero stdout.
+    if (!store.hasMnemonicKeystore()) {
+      return err(
+        `derive-env: no keystore at ${mnemonicKeystorePath(earningDir)} — run \`jinn run\` to bootstrap first`,
+      );
+    }
+    // (b) password — resolveCliPassword (NO auto-generate; a read-only derive
+    // must never mint a fresh password, which would derive a wrong identity).
+    const pw = resolveCliPassword(argv.slice(1), process.env);
+    if (!pw.ok) return err(`derive-env: ${pw.message}`);
+    // (d) fleet state + first operational service (the daemon's exact selector).
+    const state = await store.tryLoadExisting();
+    const svc = state?.services.find((s) => isOperationalServiceStep(s.step));
+    if (!svc || !svc.safe_address || !svc.agent_id) {
+      return err(
+        'derive-env: no fully-bootstrapped agent identity found (Safe/agent not yet registered) — finish `jinn run` bootstrap',
+      );
+    }
+    // (c) decrypt — catch the self-verify throw so no stack trace leaks.
+    let mnemonic: string;
+    try {
+      mnemonic = await decryptMnemonic(await store.loadMnemonicKeystore(), pw.password);
+    } catch {
+      return err('derive-env: could not decrypt keystore (wrong password?)');
+    }
+    const privateKey = walletPrivateKeyAtIndex(mnemonic, svc.index);
+    // stderr: the derived agent ADDRESS (never the key) so the operator can eyeball it.
+    process.stderr.write(
+      `derive-env: agent ${svc.agent_address} (index ${svc.index})\n`,
+    );
+    // stdout: exactly the three export lines — a single atomic write.
+    writer.write(
+      `export JINN_LAYER_PRIVATE_KEY=${privateKey}\n` +
+        `export JINN_LAYER_SAFE_ADDRESS=${svc.safe_address}\n` +
+        `export JINN_LAYER_AGENT_ID=${svc.agent_id}\n`,
+    );
+    return 0;
   }
 
   if (isPublish) {
