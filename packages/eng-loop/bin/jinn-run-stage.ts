@@ -10,12 +10,16 @@
  *
  * The coordinator writes the CURATED stage prompt (stage task + issue body/ACs
  * + prior-stage outputs) to <prompt-file> and passes it here. That file must
- * NOT include the headless-override block — `runStageHeadless` prepends it, so
- * embedding it in the file too would double-inject it.
+ * NOT include canon (CLAUDE.md / handbook) OR the headless-override block —
+ * `runStageHeadless` prepends BOTH exactly once, so embedding either in the
+ * file too would double-inject it.
  *
  * Streams the child's stdout to this process's stdout (the coordinator reads it
  * as the stage report) and forwards stderr; exits with the child's exit code
- * (non-zero on timeout).
+ * (non-zero on timeout). On the normal path we set `process.exitCode` and
+ * return (letting Node flush stdout and exit naturally) rather than calling
+ * `process.exit()`, which can truncate un-flushed pipe writes — the whole
+ * stage report — before the coordinator reads it (mirrors jinn-triage-check).
  */
 
 import { readFileSync } from 'node:fs';
@@ -53,7 +57,10 @@ async function main(): Promise<void> {
 
   process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
-  process.exit(result.timedOut ? 1 : result.exitCode);
+  // Set exitCode and return — do NOT call process.exit(), which can truncate
+  // the un-flushed stdout pipe the coordinator reads as the stage report.
+  // Node flushes stdout and exits with this code once the event loop drains.
+  process.exitCode = result.timedOut ? 1 : result.exitCode;
 }
 
 main().catch((err: unknown) => {

@@ -122,7 +122,7 @@ function titleSlug(title: string): string {
  * These are always prepended to the session prompt because `-p` mode does not
  * auto-load CLAUDE.md (spec Appendix).
  */
-function loadCanon(): string {
+export function loadCanon(): string {
   const claudeMd = readFileSync(join(REPO_ROOT, 'CLAUDE.md'), 'utf8').trim();
   const handbook = readFileSync(
     join(REPO_ROOT, 'docs', 'engineering', 'handbook.md'),

@@ -104,6 +104,18 @@ describe('runStageHeadless', () => {
     expect(prompt).toContain('non-interactive');
   });
 
+  it('(c2) prepends canon (CLAUDE.md + handbook) — a stage `-p` session is canon-blind otherwise', async () => {
+    const { spawn, calls } = makeSpawn('close-0', 'ok');
+    await runStageHeadless(BASE_OPTS, spawn);
+
+    const pIdx = calls[0].args.indexOf('-p');
+    const prompt = calls[0].args[pIdx + 1];
+    // Distinctive token from the real CLAUDE.md at the repo root.
+    expect(prompt).toContain('Jinn Network monorepo');
+    // Distinctive token from the engineering handbook heading loadCanon injects.
+    expect(prompt).toContain('Engineering handbook');
+  });
+
   it('(d) forwards the curated stageTask and the worktree line verbatim', async () => {
     const { spawn, calls } = makeSpawn('close-0', 'ok');
     await runStageHeadless(BASE_OPTS, spawn);

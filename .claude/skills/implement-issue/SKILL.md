@@ -395,8 +395,10 @@ Stages 1, 3, 4, 5 must run as `claude -p` **root sessions** so their composed sk
 ```bash
 # 1. Write the curated prompt to a temp file. Include the stage task + issue
 #    body/ACs + worktree path/branch + relevant prior-stage outputs.
-#    Do NOT include the headless-override block — runStageHeadless prepends it
-#    (embedding it here would double-inject it).
+#    Do NOT include canon (CLAUDE.md / handbook) OR the headless-override block —
+#    runStageHeadless prepends BOTH exactly once (embedding either here would
+#    double-inject it). The runner supplies canon, so do not stuff CLAUDE.md
+#    into this file.
 cat > /tmp/stage-<N>-<stage>.md <<'EOF'
 <curated stage prompt>
 EOF
@@ -408,7 +410,7 @@ yarn workspace @jinn-network/eng-loop stage:run \
   [--model <model>]
 ```
 
-The child's stdout is streamed back — read it as the stage report, exactly as you read an Agent-tool sub-agent's report. Because the session runs at depth-0, its composed skill's sub-agents spawn at depth-1 (the depth-2 restriction that silently no-ops an Agent-tool-dispatched stage does not apply). The session runs with `cwd = $WORKTREE_PATH`, so worktree isolation is unchanged.
+The child's stdout is streamed back — read it as the stage report, exactly as you read an Agent-tool sub-agent's report. Because the session runs at depth-0, its composed skill's sub-agents spawn at depth-1 (the depth-2 restriction that silently no-ops an Agent-tool-dispatched stage does not apply). The session runs with `cwd = $WORKTREE_PATH`, so worktree isolation is unchanged. Because a `stage:run` session is its own `claude -p` session — which does not auto-load `CLAUDE.md` — `runStageHeadless` prepends canon (CLAUDE.md + handbook) and the headless-override block itself; the curated prompt-file must include neither.
 
 The lightweight stages (2, 6, 7, 8) stay Agent-tool sub-agents — dispatch them the usual way with the same curated prompt.
 
@@ -502,7 +504,7 @@ After the first push, **stop** — do not proceed to Stage 3 or open a PR. Write
 
 ## Step 7 — Headless-mode note
 
-When this skill runs in a headless session (dispatched by `eng-orchestrator` with `-p` / `--print`), the caller injects the headless-override block from `packages/eng-loop/headless-override.md` at the top of the coordinating agent's prompt. The coordinator and all subagents then make approval decisions themselves — they do not wait for user input. For the depth-needing stages launched via `stage:run`, the same override block is prepended automatically by `runStageHeadless` — so the curated prompt-file you write must **not** include it (see Step 4).
+When this skill runs in a headless session (dispatched by `eng-orchestrator` with `-p` / `--print`), the caller injects canon (CLAUDE.md + handbook) followed by the headless-override block from `packages/eng-loop/headless-override.md` at the top of the coordinating agent's prompt (`-p` mode does not auto-load `CLAUDE.md`). The coordinator and all subagents then make approval decisions themselves — they do not wait for user input. For the depth-needing stages launched via `stage:run`, `runStageHeadless` prepends both canon and the same override block automatically — so the curated prompt-file you write must **not** include canon OR the override block (see Step 4).
 
 When run interactively (Phase 1, hand-cranked), the human is present for genuine escalations.
 

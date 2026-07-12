@@ -1,5 +1,6 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import { headlessOverride } from '../headless.js';
+import { loadCanon } from './dispatch.js';
 
 /**
  * A minimal child handle the stage runner needs: stdout/stderr streams to
@@ -39,7 +40,8 @@ export interface StageRunOpts {
    * The fully-curated stage prompt (stage task + issue body/ACs + prior-stage
    * outputs) that the coordinator writes to the `--prompt-file`. This helper
    * does NOT assemble those pieces — the coordinator owns curation (SKILL.md
-   * Step 4); the only thing prepended here is the headless-override block.
+   * Step 4); the only things prepended here are canon (CLAUDE.md + handbook)
+   * and the headless-override block.
    */
   stageTask: string;
   /** Absolute worktree path — becomes the session `cwd` (AC#5 isolation). */
@@ -53,18 +55,27 @@ export interface StageRunOpts {
 const DEFAULT_TIMEOUT_MS = 600_000;
 
 /**
- * Compose the stage prompt: the headless-override block (so the root-session
- * stage self-approves), then the coordinator's curated stage prompt. Plain
- * string join, mirroring buildHeadlessPrompt.
+ * Compose the stage prompt: canon (CLAUDE.md + handbook), then the
+ * headless-override block (so the root-session stage self-approves), then the
+ * coordinator's curated stage prompt. Plain string join, mirroring
+ * dispatch.ts's coordinator prompt (canon first, then the headless part).
  *
- * NOTE: this prepends `headlessOverride()`. The `stageTask` passed in is
- * already curated (the CLI shim reads it from the prompt-file), so it must NOT
- * include the override block itself — that would double-inject it.
+ * Canon is prepended because a stage runs as its own `claude -p` root session,
+ * and `-p` mode does not auto-load CLAUDE.md — same reason dispatch.ts prepends
+ * it for the coordinator. We reuse dispatch.ts's `loadCanon` so both call sites
+ * stay in lockstep (and the repo-root derivation lives in one place).
+ *
+ * NOTE: this prepends BOTH canon and `headlessOverride()`. The `stageTask`
+ * passed in is already curated (the CLI shim reads it from the prompt-file), so
+ * it must NOT include canon OR the override block itself — either would
+ * double-inject.
  */
 export function buildStagePrompt(
   opts: Pick<StageRunOpts, 'stageTask' | 'worktreePath'>,
 ): string {
   return [
+    loadCanon(),
+    '',
     headlessOverride(),
     '',
     opts.stageTask.trim(),
