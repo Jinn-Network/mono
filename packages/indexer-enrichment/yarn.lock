@@ -879,7 +879,7 @@ __metadata:
     "@jinn-network/sdk": "portal:../sdk"
     drizzle-orm: "npm:^0.45.2"
     hono: "npm:^4.12.28"
-    ponder: "npm:^0.16.6"
+    ponder: "npm:^0.16.8"
     viem: "npm:^2.55.0"
   languageName: node
   linkType: soft
@@ -3179,9 +3179,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ponder@npm:^0.16.6":
-  version: 0.16.6
-  resolution: "ponder@npm:0.16.6"
+"ponder@npm:^0.16.8":
+  version: 0.16.9
+  resolution: "ponder@npm:0.16.9"
   dependencies:
     "@babel/code-frame": "npm:^7.23.4"
     "@commander-js/extra-typings": "npm:^12.0.1"
@@ -3228,7 +3228,7 @@ __metadata:
       optional: true
   bin:
     ponder: dist/esm/bin/ponder.js
-  checksum: 10c0/66dcaab64b40e0227f6a9125766dcfb54e47ae27a2784dc2b6db0674969fc76b8ce4f1fcaf5259e7c415484326e8e7065b23e2d4a122d108695cdae9a57d6397
+  checksum: 10c0/614bbeddfab2bce72a5efad143c7a381e5b4796cda066b4a9580496b25cb4872847e706bbf2d1001cf7440e390cc851d6fece5ccd0b299294cf33c043abf22df
   languageName: node
   linkType: hard
 
