@@ -4,7 +4,7 @@ import type { Store } from '../store/store.js';
 import { PermanentError, TransientError } from '../types/index.js';
 import { isRecoverableTransactionError } from '../tx-retry.js';
 import { emitEvent } from '../observability/emit-event.js';
-import { recordLoopTick } from './loop-heartbeat.js';
+import { runLoop } from './loop-heartbeat.js';
 import { TaskPostingService } from '../tasks/posting-service.js';
 import type { TaskSource } from '../tasks/sources.js';
 import { getSweRebenchV2StateStore } from '../solver-types/swe-rebench-v2.js';
@@ -127,11 +127,19 @@ export class CreatorLoop {
   }
 
   async run(): Promise<void> {
-    while (!this.stopped) {
-      let delayMs = 5000;
-      try {
+    let delayMs = 5000;
+    await runLoop({
+      name: 'creator',
+      store: this.store,
+      tick: async () => {
+        delayMs = 5000;
         await this.tick();
-      } catch (err) {
+      },
+      intervalMs: () => delayMs,
+      stopSignal: () => this.stopped,
+      stopPromise: this.stopPromise,
+      emitSource: 'creator',
+      onError: (err) => {
         console.error('[creator] Error:', err);
         emitEvent(this.store, {
           kind: 'tick_error',
@@ -139,13 +147,8 @@ export class CreatorLoop {
           detail: err instanceof Error ? err.message : String(err),
         }, 'creator');
         delayMs = isRecoverableTransactionError(err) ? 12_000 : 8000;
-      }
-      recordLoopTick(this.store, 'creator'); // #1043 loop watchdog
-      await Promise.race([
-        new Promise(r => setTimeout(r, delayMs)),
-        this.stopPromise,
-      ]);
-    }
+      },
+    });
   }
 
   stop(): void {
