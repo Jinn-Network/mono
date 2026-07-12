@@ -55,16 +55,6 @@ const optimizerSettings = {
   viaIR: true,
 };
 
-// Tokenomics and Dispenser exceed the 24KB contract size limit with high
-// optimizer runs. Use fewer runs to reduce bytecode size.
-const largeContractSettings = {
-  optimizer: {
-    enabled: true,
-    runs: 200,
-  },
-  viaIR: true,
-};
-
 export default defineConfig({
   plugins: [hardhatToolboxMochaEthers],
   solidity: {
@@ -78,16 +68,6 @@ export default defineConfig({
       { version: "0.8.28", settings: optimizerSettings },
       { version: "0.8.30", settings: { ...optimizerSettings, evmVersion: "cancun" } },
     ],
-    overrides: {
-      "src/vendor/tokenomics/Tokenomics.sol": {
-        version: "0.8.30",
-        settings: largeContractSettings,
-      },
-      "src/vendor/tokenomics/Dispenser.sol": {
-        version: "0.8.25",
-        settings: largeContractSettings,
-      },
-    },
   },
   paths: {
     sources: "./src",
