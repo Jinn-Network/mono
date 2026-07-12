@@ -26,8 +26,8 @@ import { join } from 'node:path';
 import { keccak256, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
-import type { Harness, HarnessContext, Solution, ReadyStatus } from '../../types.js';
-import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
+import type { HarnessContext, Solution } from '../../types.js';
+import { EvaluatorHarness, type EvaluatorHarnessShape } from '../_evaluator-base.js';
 import type { Task } from '../../../types/task.js';
 import type { HlFill, HlGridPoint } from '../../../venues/hyperliquid/types.js';
 import { HyperliquidClient, HL_MAINNET_BASE_URL, HL_TESTNET_BASE_URL } from '../../../venues/hyperliquid/client.js';
@@ -255,48 +255,27 @@ function _writeVerdictArtifact(
 
 // ── PortfolioV0Evaluator ──────────────────────────────────────────────────────
 
-export class PortfolioV0Evaluator implements Harness {
+export class PortfolioV0Evaluator extends EvaluatorHarness {
   readonly name = 'portfolio-v0-evaluator';
-  readonly version = '1.0.0';
+
+  protected readonly shape: EvaluatorHarnessShape = {
+    solverType: 'portfolio.v0',
+    requiresRestorationRequestId: true,
+  };
 
   private readonly config: PortfolioV0EvaluatorConfig;
 
   constructor(config: PortfolioV0EvaluatorConfig = {}) {
+    super();
     this.config = config;
   }
 
-  supports(ctx: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {
-    return ctx.solverType === 'portfolio.v0' && ctx.role === 'evaluation';
-  }
-
-  async isReady(): Promise<ReadyStatus> {
-    if (this.config.stub) return { ...REQUIRES_LIVE_DAEMON_READINESS };
-    return { ready: true };
-  }
-
-  async canAttempt(
-    task: Task,
-  ): Promise<{ ok: true } | { ok: false; reason: string }> {
-    if (task.solverType !== 'portfolio.v0') {
-      return { ok: false, reason: 'solverType is not portfolio.v0' };
-    }
-    if (task.role !== 'evaluation') {
-      return { ok: false, reason: 'Task.role is not evaluation' };
-    }
-    if (!task.restorationRequestId) {
-      return { ok: false, reason: 'restorationRequestId is required' };
-    }
-    const restorationResult = task.context?.['restorationResult'];
-    if (typeof restorationResult !== 'string') {
-      return { ok: false, reason: 'context.restorationResult (manifest JSON) is required' };
-    }
-    return { ok: true };
+  protected get stub(): boolean {
+    return Boolean(this.config.stub);
   }
 
   async run(ctx: HarnessContext): Promise<Solution> {
-    if (this.config.stub) {
-      throw new Error('portfolio-v0-evaluator: stub registry cannot run evaluation (requires live daemon)');
-    }
+    this.assertLive();
     const { task: task, log } = ctx;
 
     // ── Step 1: Parse harness's SignedEnvelope from inlined context ─────────
