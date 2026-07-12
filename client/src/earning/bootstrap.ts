@@ -101,6 +101,9 @@ import {
   parseMultisigFromReceipt as parseMultisigFromReceiptImpl,
   parseServiceIdFromReceipt as parseServiceIdFromReceiptImpl,
 } from './steps/receipt-parsing.js';
+import { stepFleetSafePredict as stepFleetSafePredictImpl } from './steps/fleet-safe-predict.js';
+import { stepFleetSafeDeploy as stepFleetSafeDeployImpl } from './steps/fleet-safe-deploy.js';
+import { stepFleetIdentityRegister as stepFleetIdentityRegisterImpl } from './steps/fleet-identity-register.js';
 
 const addr = (value: string): Address => getAddress(value) as Address;
 
@@ -1019,184 +1022,16 @@ export class FleetBootstrapper {
 
   // ── Stage 1: fleet-level identity steps (nghf) ────────────────────────
 
-  /** Deterministic Safe predict from the HD-index-1 agent EOA. */
-  private async stepFleetSafePredict(
-    state: FleetState,
-    mnemonic: string,
-  ): Promise<FleetState> {
-    const agentAddress = deriveAgentAddress(mnemonic, 1);
-    const agentKey = walletPrivateKeyAtIndex(mnemonic, 1);
-
-    console.error(
-      `[fleet-bootstrap] Stage 1: predicting fleet Safe (owner=${agentAddress})`,
-    );
-    const { address } = await initPredictedSafe({
-      rpcUrl: this.config.rpcUrl,
-      signerKey: agentKey,
-      owners: [agentAddress],
-      threshold: 1,
-    });
-
-    void state;
-    return this.store.patchFleet({ fleet_safe_address: getAddress(address) });
+  private async stepFleetSafePredict(state: FleetState, mnemonic: string): Promise<FleetState> {
+    return stepFleetSafePredictImpl(this.stepContext(), state, mnemonic);
   }
 
-  /** Deploy the predicted fleet Safe. Funds the agent EOA from master if needed. */
-  private async stepFleetSafeDeploy(
-    state: FleetState,
-    mnemonic: string,
-  ): Promise<FleetState> {
-    const agentAddress = deriveAgentAddress(mnemonic, 1);
-    const agentKey = walletPrivateKeyAtIndex(mnemonic, 1);
-    const agentSigner = deriveAgentSigner(mnemonic, 1);
-    const fleetSafe = state.fleet_safe_address!;
-
-    // Fund agent EOA so it can pay for Safe deploy + setAgentWallet gas.
-    // 0.01 ETH covers Safe deploy (~250k gas) + register (~80k) + setAgentWallet
-    // (~200k) at testnet gas prices comfortably. STAGE1_AGENT_ETH is the
-    // module-level constant used both here and in `stage1MinMasterEth` so the
-    // gate and the transfer agree (jinn-mono-u34i).
-    const masterAccount = deriveMasterSigner(mnemonic);
-    const masterWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, masterAccount);
-    const agentBalance = await this.publicClient.getBalance({
-      address: getAddress(agentAddress) as Address,
-    });
-    if (agentBalance < STAGE1_AGENT_ETH) {
-      const fundAmount = STAGE1_AGENT_ETH - agentBalance;
-      console.error(
-        `[fleet-bootstrap] Stage 1: funding fleet agent EOA with ${fundAmount} wei from master`,
-      );
-      const fundHash = await viemSendTransactionWithRetry(
-        masterWallet,
-        this.publicClient,
-        {
-          account: masterAccount as Account,
-          to: addr(agentAddress),
-          value: fundAmount,
-        },
-      );
-      await waitForTransactionReceiptWithRetry(this.publicClient, fundHash);
-    }
-
-    console.error(`[fleet-bootstrap] Stage 1: deploying fleet Safe at ${fleetSafe}`);
-    const { safe } = await initPredictedSafe({
-      rpcUrl: this.config.rpcUrl,
-      signerKey: agentKey,
-      owners: [agentAddress],
-      threshold: 1,
-    });
-    const deployTx = await safe.createSafeDeploymentTransaction();
-    const agentWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, agentSigner);
-    const deployHash = await viemSendTransactionWithRetry(
-      agentWallet,
-      this.publicClient,
-      {
-        account: agentSigner as Account,
-        to: deployTx.to as Address,
-        value: BigInt(deployTx.value),
-        data: deployTx.data as Hex,
-      },
-    );
-    const receipt = await waitForTransactionReceiptWithRetry(this.publicClient, deployHash);
-    if (receipt.status !== 'success') {
-      throw new Error(`Fleet Safe deployment tx failed: ${deployHash}`);
-    }
-    try {
-      await waitForContractCode(this.publicClient, getAddress(fleetSafe) as Address);
-    } catch {
-      throw new Error(`Fleet Safe deployment succeeded but no code at ${fleetSafe}`);
-    }
-    console.error(`[fleet-bootstrap] Stage 1: fleet Safe deployed (tx=${deployHash})`);
-
-    return this.store.load(this.chain);
+  private async stepFleetSafeDeploy(state: FleetState, mnemonic: string): Promise<FleetState> {
+    return stepFleetSafeDeployImpl(this.stepContext(), state, mnemonic);
   }
 
-  /** Mint the fleet agentId + bind Safe via setAgentWallet (ERC-1271). */
-  private async stepFleetIdentityRegister(
-    state: FleetState,
-    mnemonic: string,
-  ): Promise<FleetState> {
-    const identityRegistry =
-      this.config.identityRegistry ?? IDENTITY_REGISTRY_ADDRESSES[this.config.chainId];
-    if (!identityRegistry) {
-      throw new Error(
-        `IdentityRegistry address not configured for chainId=${this.config.chainId}.`,
-      );
-    }
-
-    const fleetSafe = state.fleet_safe_address!;
-    const agentSigner = deriveAgentSigner(mnemonic, 1);
-    const agentWallet = createJinnWalletClient(this.config.rpcUrl, this.chain, agentSigner);
-
-    // Mint agentId — empty agent URI for v0 (matches stepRegisterAgent §6.1 in spec).
-    const registerData = encodeFunctionData({
-      abi: IDENTITY_REGISTRY_ABI,
-      functionName: 'register',
-      args: [''],
-    }) as Hex;
-
-    console.error(
-      `[fleet-bootstrap] Stage 1: minting fleet agentId ` +
-        `(IdentityRegistry=${identityRegistry}, agentEOA=${agentSigner.address})`,
-    );
-    const mintTxHash = await viemSendTransactionWithRetry(
-      agentWallet,
-      this.publicClient,
-      {
-        account: agentSigner as Account,
-        to: addr(identityRegistry),
-        data: registerData,
-      },
-    );
-    const mintReceipt = await waitForTransactionReceiptWithRetry(this.publicClient, mintTxHash);
-    if (mintReceipt.status !== 'success') {
-      throw new Error(`Fleet IdentityRegistry.register() failed: ${mintTxHash}`);
-    }
-    const fleetAgentId = this.parseAgentIdFromReceipt(mintReceipt, identityRegistry);
-    if (fleetAgentId === null) {
-      throw new Error(
-        `Fleet IdentityRegistry.register() succeeded but Registered event missing (tx=${mintTxHash})`,
-      );
-    }
-
-    // Persist agentId IMMEDIATELY so a crash between mint and bind doesn't lose it.
-    await this.store.patchFleet({
-      fleet_agent_id: fleetAgentId,
-      fleet_identity_registry: getAddress(identityRegistry),
-    });
-
-    // Bind the Safe via setAgentWallet (ERC-1271).
-    // Wrapped in the freshly-deployed-Safe retry (jinn-mono-k1ng). The
-    // pre-k1ng single-attempt version halted bootstrap when the documented
-    // race fired on the first attempt — exactly the 2026-05-18 canary's
-    // second-time-around failure mode.
-    console.error(
-      `[fleet-bootstrap] Stage 1: binding fleet Safe ${fleetSafe} to agentId=${fleetAgentId}`,
-    );
-    const bindResult = await this.bindAgentWalletWithRetry(
-      {
-        identityRegistryAddress: addr(identityRegistry),
-        agentId: BigInt(fleetAgentId),
-        safeAddress: addr(fleetSafe),
-        agentEoaAccount: agentSigner,
-        agentEoaWalletClient: agentWallet,
-        publicClient: this.publicClient,
-        chainId: this.config.chainId,
-      },
-      'Stage 1',
-    );
-    if (!bindResult.ok) {
-      const bindErr = bindResult.error;
-      throw new Error(
-        `Fleet setAgentWallet failed after ${this.safeBindingMaxAttempts} attempts: ${bindErr.shortMessage}` +
-          (bindErr.revertReason ? ` (revert: ${bindErr.revertReason})` : ''),
-      );
-    }
-    console.error(
-      `[fleet-bootstrap] Stage 1: setAgentWallet succeeded (tx=${bindResult.txHash})`,
-    );
-
-    return this.store.patchFleet({ fleet_stage: 'stage1' });
+  private async stepFleetIdentityRegister(state: FleetState, mnemonic: string): Promise<FleetState> {
+    return stepFleetIdentityRegisterImpl(this.stepContext(), state, mnemonic);
   }
 
   // ── Phase 2: Per-service bootstrap ───────────────────────────────────
