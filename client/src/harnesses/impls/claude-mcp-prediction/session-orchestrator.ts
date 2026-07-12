@@ -43,7 +43,7 @@ export interface OrchestratorDeps {
   trajectory?: TrajectoryCollector;
 }
 
-const PREDICTION_CONFIG: SingleSessionConfig = {
+export const PREDICTION_CONFIG: SingleSessionConfig = {
   allowedTools: 'mcp__jinn-prediction__*',
   logTag: 'prediction-session',
   submissionToolName: 'submit_prediction',

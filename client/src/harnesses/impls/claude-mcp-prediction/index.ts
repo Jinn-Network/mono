@@ -12,7 +12,7 @@
  * rails, and the session cadence loop. Single-shot only.
  */
 
-import { writeFileSync, mkdirSync, readFileSync, chmodSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
 import type { Harness, HarnessContext, Solution, ReadyStatus } from '../../types.js';
@@ -22,8 +22,9 @@ import { buildClaudeIsReady } from '../../../preflight/claude-auth.js';
 import { PredictionV1TaskSchema } from '../../../types/prediction.js';
 
 import { buildSessionPrompt } from './prompt.js';
-import { spawnSession } from './session-orchestrator.js';
+import { PREDICTION_CONFIG } from './session-orchestrator.js';
 import { writeMcpServerScript } from '../claude-mcp-shared/mcp-server-script.js';
+import { runSingleSessionHarness } from '../claude-mcp-shared/single-session-harness.js';
 import type { ClaudeMcpPredictionConfig, SubmissionState } from './types.js';
 
 // ── Impl ──────────────────────────────────────────────────────────────────────
@@ -101,74 +102,43 @@ export class ClaudeMcpPredictionImpl implements Harness {
     }
 
     // ── Live path ──────────────────────────────────────────────────────────────
-    const mcpDir = join(workingDir, 'mcp');
-    mkdirSync(mcpDir, { recursive: true });
-
-    // Per-session submission log. The wrapper appends JSON lines here when
-    // submit_prediction is invoked. We tail it to detect the submission.
-    const submissionLogPath = join(mcpDir, 'submissions.jsonl');
-    writeFileSync(submissionLogPath, '', { encoding: 'utf-8', mode: 0o600 });
-    chmodSync(submissionLogPath, 0o600);
-
-    // Write the wrapper script + its config.
-    const wrapperPath = join(mcpDir, 'prediction-server.mjs');
-    const wrapperConfigPath = join(mcpDir, 'prediction-server-config.json');
-    const wrapperConfig = {
-      feed: parsed.spec.oracle.feed,
-      feedDescription: parsed.spec.oracle.feedDescription,
-      venue: parsed.spec.oracle.venue,
-      rpcUrl: this.config.rpcUrl ?? this._defaultRpcUrl(parsed.spec.oracle.venue),
-      submissionLogPath,
-    };
-    writeFileSync(wrapperConfigPath, JSON.stringify(wrapperConfig), { encoding: 'utf-8', mode: 0o600 });
-    chmodSync(wrapperConfigPath, 0o600);
-    _writePredictionMcpServerScript(wrapperPath);
-
-    // MCP config file Claude reads via --mcp-config.
-    const mcpConfigPath = join(mcpDir, 'mcp-config.json');
-    writeFileSync(mcpConfigPath, JSON.stringify({
-      mcpServers: {
-        'jinn-prediction': {
-          command: process.execPath,
-          args: [wrapperPath, wrapperConfigPath],
-        },
-      },
-    }, null, 2));
-
-    // isSubmitted reads the JSONL log; as soon as there's a line, we know
-    // the tool fired. We also pull the probability + rationale from it so
-    // the cross-process boundary is clean.
-    const isSubmitted = (): boolean => {
-      try {
-        const contents = readFileSync(submissionLogPath, 'utf-8');
-        const lastLine = contents.trim().split('\n').pop() ?? '';
-        if (!lastLine) return false;
-        const record = JSON.parse(lastLine);
-        if (record && typeof record.probability === 'string' && typeof record.rationale === 'string') {
-          signalSubmit(record.probability, record.rationale);
-          return true;
-        }
-      } catch {
-        return false;
-      }
-      return false;
-    };
-
     log({ level: 'info', msg: 'claude-mcp-prediction: spawning session', data: { sessionId } });
 
-    const session = await spawnSession(sessionId, prompt, {
-      claudePath: this.config.claudePath ?? 'claude',
-      ...(claudeModel ? { claudeModel } : {}),
-      mcpConfigPath,
-      workingDir,
-      abort: ctx.abort,
-      log,
-      isSubmitted,
-      ...(this.config.sessionMaxMs !== undefined ? { sessionMaxMs: this.config.sessionMaxMs } : {}),
-    });
-
-    // One final read in case isSubmitted's poll raced with session exit.
-    if (!submissionState.probability) isSubmitted();
+    const session = await runSingleSessionHarness<{ probability: string; rationale: string }>(
+      {
+        sessionId,
+        prompt,
+        workingDir,
+        wrapperBasename: 'prediction-server',
+        mcpServerKey: 'jinn-prediction',
+        sessionConfig: PREDICTION_CONFIG,
+        buildWrapperConfig: (submissionLogPath) => ({
+          feed: parsed.spec.oracle.feed,
+          feedDescription: parsed.spec.oracle.feedDescription,
+          venue: parsed.spec.oracle.venue,
+          rpcUrl: this.config.rpcUrl ?? this._defaultRpcUrl(parsed.spec.oracle.venue),
+          submissionLogPath,
+        }),
+        writeScript: _writePredictionMcpServerScript,
+        parseRecord: (record) =>
+          record &&
+          typeof (record as { probability?: unknown }).probability === 'string' &&
+          typeof (record as { rationale?: unknown }).rationale === 'string'
+            ? {
+                probability: (record as { probability: string }).probability,
+                rationale: (record as { rationale: string }).rationale,
+              }
+            : null,
+        onParsed: (s) => signalSubmit(s.probability, s.rationale),
+      },
+      {
+        claudePath: this.config.claudePath ?? 'claude',
+        ...(claudeModel ? { claudeModel } : {}),
+        abort: ctx.abort,
+        log,
+        ...(this.config.sessionMaxMs !== undefined ? { sessionMaxMs: this.config.sessionMaxMs } : {}),
+      },
+    );
 
     return this._finalize(parsed, sessionId, session.transcriptPath, submissionState, session.startedAt, session.endedAt, claudeModel);
   }
