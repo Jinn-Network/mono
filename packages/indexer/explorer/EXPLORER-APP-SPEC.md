@@ -147,8 +147,8 @@ One SolverNet's detail: its learning curve, checkpoint lineage, freeze integrity
   - Milestone-2 gate — conditional, only when `cid === MILESTONE2_MANIFEST_CID`; owns a pinned slice (harness=codex, model=gpt-5.4-mini, window=30)
 - **Actions**
   - window — segmented control (20 / 30 / 50 / 100 / ALL)
-  - group by — none / operator / harness / plugin / mode / model
-  - filter — add (dimension → value popover) / remove (chip ×) across operator, harness, plugin, mode, model
+  - group by — none / operator / harness / plugin / mode / model / builder
+  - filter — add (dimension → value popover) / remove (chip ×) across operator, harness, plugin, mode, model, builder
   - raw toggle — `include=raw` (§3.2)
   - reset — atomic clear of all slice params
   - board select — train / frozen
