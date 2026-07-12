@@ -13,7 +13,7 @@ Read the issue body the person gave you. Most of the information you need is alr
 
 ## Step 2 — The interview
 
-The person is mid-dogfooding with fresh context. Do not over-question. You need exactly four things:
+The person is mid-dogfooding with fresh context. Do not over-question. You need exactly five things:
 
 | Slot | What you need | Acceptable if missing |
 |------|---------------|----------------------|
@@ -21,6 +21,7 @@ The person is mid-dogfooding with fresh context. Do not over-question. You need 
 | **Impact** | Why it matters / who it affects (operators, contributors, the loop) | Ask if absent |
 | **Acceptance criteria** | What "done" looks like as binary yes/no statements | Ask if absent |
 | **Files/components** | Where in the codebase, if they know | Yes — "don't know" is fine |
+| **Dependencies / base** | What in-flight work this builds on (a stacked PR, unmerged branch, shared file), and which branch/PR it must stack on or wait for | Yes — infer "none / independent" if not mentioned |
 
 **Cap the interview at 1–3 questions** beyond their opening description. If you can infer a slot from context, do — do not ask for what you can reasonably fill in.
 
@@ -67,7 +68,7 @@ Do **not** route the person to a separate design skill — the required fields a
 
 ## Step 4 — Draft the issue body
 
-The issue body has four short sections. Keep it tight — scoped issues with binary acceptance criteria and file/component hints raise autonomous-implementation merge rates; long bodies lower them. External web URLs and Slack links go in comments after filing, not in the body; internal repo paths (spec files, source files) belong in `Files/components` and are encouraged.
+The issue body has five short sections. Keep it tight — scoped issues with binary acceptance criteria and file/component hints raise autonomous-implementation merge rates; long bodies lower them. External web URLs and Slack links go in comments after filing, not in the body; internal repo paths (spec files, source files) belong in `Files/components` and are encouraged.
 
 **Title:** a one-line summary, no shape prefix (the Issue Type field carries the shape).
 
@@ -83,9 +84,11 @@ The issue body has four short sections. Keep it tight — scoped issues with bin
 - [ ] [Binary yes/no statement, if there are multiple.]
 
 **Files/components.** [Path(s) and surface name(s), or "Unknown." If a path was inferred by you — not stated by the person — mark it `(estimated)`. If genuinely uncertain, write "Unknown." Internal repo paths (spec files, source files) are welcome here; they help autonomous agents navigate the codebase.]
+
+**Base / stacking.** [The branch/PR this stacks on or must wait for, or "None — independent of all in-flight work." When the base is an unmerged PR/branch, name it here **and** set `Blocked on: Another issue` referencing that PR — not `Nothing`.]
 ```
 
-**Human-surface section (only when the `human-surface` label applies).** After the four sections above, append a `## Human-surface change` block carrying the three fields from Step 3.5 — Domain-model delta, Design artifact, and Existing-user impact + comms plan.
+**Human-surface section (only when the `human-surface` label applies).** After the five sections above, append a `## Human-surface change` block carrying the three fields from Step 3.5 — Domain-model delta, Design artifact, and Existing-user impact + comms plan.
 
 **Worked example — use this as the model:**
 
@@ -105,6 +108,16 @@ is not re-reading it.
 
 **Files/components.** `client/src/dashboard/spa/` — HeroStats, and the
 claim-status query that feeds it.
+
+**Base / stacking.** None — independent of all in-flight work.
+```
+
+If instead the issue built on unmerged code, that line would name the base and the `Blocked on` field would follow it:
+
+```markdown
+**Base / stacking.** Stacks on #1461 (branch `feat/1461-hero-schema`) — the
+shared claim-status schema change lands there first. `Blocked on: Another
+issue` (#1461).
 ```
 
 **Quality bar:** if an acceptance criterion cannot be answered yes or no by running the app or a test, rewrite it until it can.
@@ -118,7 +131,9 @@ Three Project fields route the issue to the right queue. Set all three — an is
 **Blocked on** — choose one:
 - `Nothing` (default — almost all fresh dogfooding issues)
 - `Human` — only if a product or design decision is needed before any work can start
-- `Another issue` — only if the person names a prerequisite issue (the Project option is named `Another issue`; put the specific issue number in the issue body)
+- `Another issue` — the person names a prerequisite. Two kinds both map here (the Project option is named `Another issue`; put the specific issue/PR number in the issue body):
+  - **Branch/base dependency** — the work builds on unmerged code (a stacked PR / unmerged schema change / a shared file an open PR also edits), so it must start from that base, not `next`. Example: "builds on the JinnRouterV3 ABI change in unmerged PR #1461." This is the case the `Base / stacking` body line names.
+  - **Resource / logical blocker** — a pure prerequisite that is not a code-base dependency (a decision, an external dependency, an ordering constraint). Example: "can't start until the testnet-gate secrets are provisioned."
 
 **Effort** — estimate from the drafted scope, then confirm with the person:
 - `Low` — a localized change in one or two files
@@ -141,7 +156,7 @@ Ask: "What priority would you give this? P0 (blocking), P1 (next sprint), P2 (go
 Filing a GitHub issue is an outward-facing, published action. Always show the person the complete draft and confirm before filing.
 
 **Show:**
-1. The full issue body (title + four sections) formatted for easy reading
+1. The full issue body (title + five sections) formatted for easy reading
 2. The four taxonomy values:
    - Issue Type: `fix`
    - Blocked on: `Nothing`
@@ -161,9 +176,10 @@ Before you output the draft to the person, verify:
 
 - [ ] Title is a one-line summary with no shape prefix.
 - [ ] Issue Type is from the nine in Step 3 and confirmed.
-- [ ] All four body sections are present and non-empty (or `Files/components: Unknown`).
+- [ ] All five body sections are present and non-empty (or `Files/components: Unknown` / `Base / stacking: None — independent`).
 - [ ] Every acceptance criterion is binary — answerable yes/no.
 - [ ] All three routing fields are set (`Blocked on`, `Effort`, `Priority`).
+- [ ] If this touches files an open PR also touches, is the base/stacking stated (`Base / stacking` line set, and `Blocked on: Another issue` if it stacks on unmerged code)?
 - [ ] The body is short — no paragraph longer than 4 sentences, no external URLs or Slack links in the body (internal repo paths in `Files/components` are fine and encouraged).
 - [ ] If this is a human-surface change: the `human-surface` label is applied and the body carries the `## Human-surface change` block (domain-model delta, design artifact, existing-user impact + comms plan).
 
@@ -179,4 +195,5 @@ If any check fails, fix before showing the draft.
 | Leaving a routing field unset | All three fields must be set; an issue without them is not triage-complete |
 | Putting external URLs or Slack links in the body | Put web/Slack links in a comment after filing; internal repo paths in `Files/components` are fine |
 | Long body with multiple problems bundled | One issue per problem; offer to file separate issues if scope is unclear |
+| Filing as `Blocked on: Nothing` when the issue stacks on an unmerged PR | Set `Another issue` (referencing that PR) and add the `Base / stacking` line naming the branch/base |
 | Filing a frontend / operator-visible change without the human-surface fields | Run the Step 3.5 check; if it's a human-surface change, add the label and the `## Human-surface change` block, or `implement-issue` will refuse it |
