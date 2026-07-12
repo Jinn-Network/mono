@@ -55,6 +55,41 @@ export class DistillTimeoutError extends Error {
   }
 }
 
+/** One row of the discoverable distiller catalog (`distill models`). */
+export interface DistillerCatalogEntry {
+  provider: 'claude' | 'codex';
+  model: string;
+  /** `local` runs on this machine; `hosted` sends captures off-machine (none yet). */
+  execution: 'local' | 'hosted';
+  cost: string;
+  privacy: string;
+  isDefault?: boolean;
+}
+
+/**
+ * The static, honest catalog of runnable distillers. Every entry is `local`
+ * today — no hosted distiller exists (both ports spawn a local CLI). The models
+ * reference `DEFAULT_MODEL` / `DEFAULT_CODEX_MODEL` directly so the catalog and
+ * the provider defaults cannot drift.
+ */
+export const DISTILLER_CATALOG: readonly DistillerCatalogEntry[] = [
+  {
+    provider: 'claude',
+    model: DEFAULT_MODEL,
+    execution: 'local',
+    cost: 'high (frontier pass)',
+    privacy: 'local — captures never leave the machine',
+    isDefault: true,
+  },
+  {
+    provider: 'codex',
+    model: DEFAULT_CODEX_MODEL,
+    execution: 'local',
+    cost: 'high (frontier pass)',
+    privacy: 'local — captures never leave the machine',
+  },
+];
+
 const DISTILL_OUTPUT_SCHEMA = {
   type: 'object',
   additionalProperties: false,

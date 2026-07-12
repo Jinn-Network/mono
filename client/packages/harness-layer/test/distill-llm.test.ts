@@ -6,6 +6,8 @@ import {
   createCodexDistiller,
   createCodexMetaDistiller,
   DEFAULT_CODEX_MODEL,
+  DEFAULT_MODEL,
+  DISTILLER_CATALOG,
   buildMetaDistillInput,
   type ChildLike,
   type SpawnLike,
@@ -340,5 +342,26 @@ describe('per-cluster subprocess timeout (#1534)', () => {
     const meta = createClaudeMetaDistiller({ spawnImpl: spawn, timeoutMs: 30 });
     await expect(meta(metaCluster)).rejects.toThrow(/timed out after 30ms/);
     expect(child.killed).toContain('SIGKILL');
+  });
+});
+
+describe('distiller catalog', () => {
+  it('lists exactly the two runnable providers, both local', () => {
+    expect(DISTILLER_CATALOG.map((e) => e.provider)).toEqual(['claude', 'codex']);
+    expect(DISTILLER_CATALOG.every((e) => e.execution === 'local')).toBe(true);
+  });
+
+  it('mirrors the hard-coded provider default models (cannot drift)', () => {
+    const claude = DISTILLER_CATALOG.find((e) => e.provider === 'claude');
+    const codex = DISTILLER_CATALOG.find((e) => e.provider === 'codex');
+    expect(claude?.model).toBe(DEFAULT_MODEL);
+    expect(codex?.model).toBe(DEFAULT_CODEX_MODEL);
+  });
+
+  it('marks the claude default entry and carries cost + privacy prose', () => {
+    const claude = DISTILLER_CATALOG.find((e) => e.provider === 'claude');
+    expect(claude?.isDefault).toBe(true);
+    expect(claude?.cost).toBeTruthy();
+    expect(claude?.privacy).toMatch(/local/i);
   });
 });
