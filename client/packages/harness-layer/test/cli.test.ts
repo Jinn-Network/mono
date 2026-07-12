@@ -215,10 +215,17 @@ describe('jinn-layer capture preview', () => {
 
     // The default view must NOT dump the envelope JSON wall …
     expect(text).not.toContain('envelope as it would publish');
-    // … and must NOT carry any raw pre-scrub secret (before values live under --full only).
+    // … and must NOT carry ANY of the raw pre-scrub `before` values seeded into
+    // the fixture (before values live under --full only). These are exactly the
+    // value-redacted secrets — the AWS key, GitHub token, generic API key, email,
+    // and home-dir path. (The two dropped-key secrets — env.OPENAI_API_KEY and
+    // the authorization header — have no `before` value: the whole attribute is
+    // dropped, so there is no raw literal to pin here.)
     expect(text).not.toContain('AKIAIOSFODNN7EXAMPLE');
     expect(text).not.toContain('ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789');
+    expect(text).not.toContain('sk-proj-Zx9Yw8Vu7Ts6Rq5Po4Nm3Lk2Jh1Gf0De9Cb8Aa7');
     expect(text).not.toContain('jane.doe@example-corp.com');
+    expect(text).not.toContain('/Users/janedoe');
   });
 
   it('--full appends the before→after audit and the full envelope JSON', async () => {
