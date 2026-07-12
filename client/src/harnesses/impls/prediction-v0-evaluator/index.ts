@@ -16,9 +16,8 @@ import { signCanonical } from '../../engine/signing.js';
 import { buildVerificationStub } from '../../engine/verification-stub.js';
 
 import type { PublicClient } from 'viem';
-import type { Harness, HarnessContext, Solution, ReadyStatus } from '../../types.js';
-import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
-import type { Task } from '../../../types/task.js';
+import type { HarnessContext, Solution } from '../../types.js';
+import { EvaluatorHarness, type EvaluatorHarnessShape } from '../_evaluator-base.js';
 import {
   PredictionV1TaskSchema,
 } from '../../../types/prediction.js';
@@ -66,35 +65,24 @@ export interface PredictionV1EvaluatorConfig {
 }
 
 
-export class PredictionV1Evaluator implements Harness {
+export class PredictionV1Evaluator extends EvaluatorHarness {
   readonly name = 'prediction-v0-evaluator';
-  readonly version = '1.0.0';
 
-  constructor(private readonly config: PredictionV1EvaluatorConfig) {}
+  protected readonly shape: EvaluatorHarnessShape = {
+    solverType: 'prediction.v1',
+    requiresRestorationRequestId: true,
+  };
 
-  supports(ctx: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {
-    return ctx.solverType === 'prediction.v1' && ctx.role === 'evaluation';
+  constructor(private readonly config: PredictionV1EvaluatorConfig) {
+    super();
   }
 
-  async isReady(): Promise<ReadyStatus> {
-    if (this.config.stub) return { ...REQUIRES_LIVE_DAEMON_READINESS };
-    return { ready: true };
-  }
-
-  async canAttempt(task: Task): Promise<{ ok: true } | { ok: false; reason: string }> {
-    if (task.solverType !== 'prediction.v1') return { ok: false, reason: 'solverType is not prediction.v1' };
-    if (task.role !== 'evaluation') return { ok: false, reason: 'role is not evaluation' };
-    if (!task.restorationRequestId) return { ok: false, reason: 'restorationRequestId is required' };
-    if (typeof task.context?.['restorationResult'] !== 'string') {
-      return { ok: false, reason: 'context.restorationResult required' };
-    }
-    return { ok: true };
+  protected get stub(): boolean {
+    return Boolean(this.config.stub);
   }
 
   async run(ctx: HarnessContext): Promise<Solution> {
-    if (this.config.stub) {
-      throw new Error('prediction-v0-evaluator: stub registry cannot run evaluation (requires live daemon)');
-    }
+    this.assertLive();
     if (!this.config.evaluatorPk || !this.config.evaluatorSafeAddress) {
       throw new Error('prediction-v0-evaluator: evaluatorPk and evaluatorSafeAddress are required');
     }
