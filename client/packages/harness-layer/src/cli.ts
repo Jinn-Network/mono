@@ -74,7 +74,9 @@ import { createLocalDistiller, createLocalSkillSink } from './distiller.js';
 import { parseSkillMarkdown, type SkillPackage } from './skill-package.js';
 import {
   DEFAULT_DISTILL_MODE_PATH,
+  readDistillDefaults,
   readDistillMode,
+  writeDistillDefaults,
   writeDistillMode,
   type DistillMode,
 } from './distill-mode.js';
@@ -1134,20 +1136,38 @@ export async function runJinnLayerCli(
     const endedEmpty = () =>
       progress?.runEnd({ outcome: 'empty', clusterCount: 0, published: [], rejectedCount: 0, errorCount: 0, installed: [] });
 
+    const modePath = distillModePath();
+    const persisted = readDistillDefaults(modePath);
+
     // Distiller provider + model — the arbitrage knob. The model resolved here
     // WRITES the skills; it is deliberately distinct from the cheap runtime
     // model each capture ran under (`environment.model`), which `distill` never
-    // touches. Resolution: --distiller-model > JINN_DISTILL_MODEL > provider default.
-    const rawProvider = (parsed.values.distiller as string | undefined) ?? process.env['JINN_DISTILL_PROVIDER'] ?? 'claude';
+    // touches. Resolution: flag > env > persisted default > provider default.
+    const rawProvider =
+      (parsed.values.distiller as string | undefined) ??
+      process.env['JINN_DISTILL_PROVIDER'] ??
+      persisted.distiller ??
+      'claude';
     const distillProvider = parseDistillProvider(rawProvider);
     if (!distillProvider) {
       writer.write(`error: distiller must be "claude" or "codex" (got ${JSON.stringify(rawProvider)})\n\n${USAGE}`);
       return 2;
     }
     const defaultDistillModel = distillProvider === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_DISTILL_MODEL;
+    // The persisted model belongs to the persisted provider. If the effective
+    // provider was overridden away from it by a flag/env, the persisted model
+    // no longer applies — fall to the new provider's default instead.
+    const providerOverridden =
+      (parsed.values.distiller as string | undefined) !== undefined ||
+      process.env['JINN_DISTILL_PROVIDER'] !== undefined;
+    const persistedModel =
+      providerOverridden && persisted.distiller !== undefined && persisted.distiller !== distillProvider
+        ? undefined
+        : persisted.distillerModel;
     const distillModel =
       (parsed.values['distiller-model'] as string | undefined) ??
       process.env['JINN_DISTILL_MODEL'] ??
+      persistedModel ??
       defaultDistillModel;
     const clusterTimeoutMs = resolveClusterTimeoutMs(parsed.values['cluster-timeout'] as string | undefined);
     if (typeof clusterTimeoutMs === 'object') {
@@ -1157,7 +1177,6 @@ export async function runJinnLayerCli(
     const distill =
       dd.distill ?? (dd.distillerFactory ?? defaultDistillerFactory)(distillProvider, distillModel, clusterTimeoutMs).distill;
 
-    const modePath = distillModePath();
     const runsPath = process.env['JINN_LAYER_DISTILL_RUNS_PATH'] ?? DEFAULT_DISTILL_RUNS_PATH;
     const logRun = (
       outcome: DistillRunRecord['outcome'],

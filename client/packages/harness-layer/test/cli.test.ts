@@ -13,7 +13,12 @@ import type { AttemptRef, BridgeEvidence } from '../src/bridge.js';
 import type { DistillCluster, DistillLLMOutput, MetaDistillLLMOutput } from '../src/distill.js';
 import type { MetaCluster } from '../src/cluster.js';
 import { parseSkillMarkdown } from '../src/skill-package.js';
-import { readDistillMode, writeDistillMode } from '../src/distill-mode.js';
+import {
+  readDistillDefaults,
+  readDistillMode,
+  writeDistillDefaults,
+  writeDistillMode,
+} from '../src/distill-mode.js';
 import { assertAttemptedClusterIds, attemptRecordFileName } from '../src/eval-prep.js';
 
 /** A distinct temp mode file for a test (env-injected via JINN_LAYER_DISTILL_MODE_PATH). */
@@ -188,6 +193,91 @@ describe('jinn-layer CLI', () => {
     const code = await runJinnLayerCli(['bogus'], { layer, writer });
     expect(code).not.toBe(0);
     expect(out()).toContain('Usage');
+  });
+});
+
+describe('jinn-layer distill — persisted distiller default (resolution order, #1496)', () => {
+  /** A distill dep that records the (provider, model) the factory was built with. */
+  function recordingFactory(calls: Array<{ provider: string; model: string }>): DistillCliDeps {
+    return {
+      distillerFactory: (provider, model) => {
+        calls.push({ provider, model });
+        return { distill: async () => VALID_DISTILL, metaDistill: async () => { throw new Error('unused'); } };
+      },
+    };
+  }
+
+  it('uses the persisted distiller + model when no flag or env is set', async () => {
+    const modePath = tmpModeFile();
+    writeDistillMode('local', modePath);
+    writeDistillDefaults({ distiller: 'codex', distillerModel: 'gpt-5.5-custom' }, modePath);
+    const calls: Array<{ provider: string; model: string }> = [];
+    await withEnv(
+      { JINN_LAYER_DISTILL_MODE_PATH: modePath, JINN_DISTILL_PROVIDER: undefined, JINN_DISTILL_MODEL: undefined },
+      async () => {
+        const { writer } = capture();
+        const code = await runJinnLayerCli(
+          ['distill', '--captures', capturesDirWith(ownCapture()), '--out', mkdtempSync(join(tmpdir(), 'o-')), '--install', 'all'],
+          { writer, distillDeps: recordingFactory(calls) },
+        );
+        expect(code).toBe(0);
+        expect(calls).toEqual([{ provider: 'codex', model: 'gpt-5.5-custom' }]);
+      },
+    );
+  });
+
+  it('a per-run --distiller flag overrides the persisted default', async () => {
+    const modePath = tmpModeFile();
+    writeDistillMode('local', modePath);
+    writeDistillDefaults({ distiller: 'codex', distillerModel: 'gpt-5.5-custom' }, modePath);
+    const calls: Array<{ provider: string; model: string }> = [];
+    await withEnv(
+      { JINN_LAYER_DISTILL_MODE_PATH: modePath, JINN_DISTILL_PROVIDER: undefined, JINN_DISTILL_MODEL: undefined },
+      async () => {
+        const { writer } = capture();
+        await runJinnLayerCli(
+          ['distill', '--distiller', 'claude', '--captures', capturesDirWith(ownCapture()), '--out', mkdtempSync(join(tmpdir(), 'o-')), '--install', 'all'],
+          { writer, distillDeps: recordingFactory(calls) },
+        );
+        expect(calls).toEqual([{ provider: 'claude', model: 'claude-opus-4-8' }]);
+      },
+    );
+  });
+
+  it('env overrides the persisted default but loses to a flag', async () => {
+    const modePath = tmpModeFile();
+    writeDistillMode('local', modePath);
+    writeDistillDefaults({ distiller: 'codex', distillerModel: 'gpt-persisted' }, modePath);
+    const calls: Array<{ provider: string; model: string }> = [];
+    await withEnv(
+      { JINN_LAYER_DISTILL_MODE_PATH: modePath, JINN_DISTILL_PROVIDER: 'claude', JINN_DISTILL_MODEL: 'model-from-env' },
+      async () => {
+        const { writer } = capture();
+        await runJinnLayerCli(
+          ['distill', '--captures', capturesDirWith(ownCapture()), '--out', mkdtempSync(join(tmpdir(), 'o-')), '--install', 'all'],
+          { writer, distillDeps: recordingFactory(calls) },
+        );
+        expect(calls).toEqual([{ provider: 'claude', model: 'model-from-env' }]);
+      },
+    );
+  });
+
+  it('a corrupt persisted distiller falls back to the provider default (fail-safe)', async () => {
+    const modePath = tmpModeFile();
+    writeDistillMode('local', modePath);
+    writeFileSync(modePath, JSON.stringify({ where: 'local', distiller: 'bogus', distillerModel: 5 }));
+    const calls: Array<{ provider: string; model: string }> = [];
+    await withEnv(
+      { JINN_LAYER_DISTILL_MODE_PATH: modePath, JINN_DISTILL_PROVIDER: undefined, JINN_DISTILL_MODEL: undefined },
+      async () => {
+        const { writer } = capture();
+        await runJinnLayerCli(
+          ['distill', '--captures', capturesDirWith(ownCapture()), '--out', mkdtempSync(join(tmpdir(), 'o-')), '--install', 'all'],
+          { writer, distillDeps: recordingFactory(calls) },
+        );
+        expect(calls).toEqual([{ provider: 'claude', model: 'claude-opus-4-8' }]);
+      },
+    );
   });
 });
 
