@@ -7,10 +7,7 @@
   "type": "module",
   "scripts": {
     "compile": "hardhat build",
-    "test": "hardhat test",
-    "deploy:l2-token": "hardhat run scripts/create-phase1a-l2-token.ts --network baseSepolia",
-    "validate:phase1a": "hardhat run scripts/validate-phase1a.ts",
-    "checkpoint": "hardhat run scripts/checkpoint-and-verify.ts --network sepolia"
+    "test": "hardhat test"
   },
   "resolutions": {
     "axios": "^1.15.2",
