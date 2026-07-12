@@ -101,15 +101,41 @@ describe('scrubIdentityString protects the jinn. protocol prefix (#1474)', () =>
       .toBe('jinn.artifact.emit at /home/<USER>/x');
   });
 
-  it('never leaks sentinel delimiter chars into output', () => {
+  it('never leaks control chars into output', () => {
     const outputs = [
       scrubIdentityString('jinn.artifact.emit', jinnId),
       scrubIdentityString('jinn.span.kind', jinnId),
       scrubIdentityString('jinn.artifact.emit at /home/jinn/x', jinnId),
+      // Numeric-username input: the old sentinel design corrupted the index and
+      // leaked raw control chars here; the split approach must not.
+      scrubIdentityString('jinn.span.0', { username: '0' }),
     ];
     for (const out of outputs) {
-      // Control characters (U+0000-U+001F) are the sentinel delimiter frame.
+      // No control characters (U+0000-U+001F) should ever reach the corpus.
       expect(out).not.toMatch(/[\u0000-\u001f]/);
     }
+  });
+});
+
+describe('scrubIdentityString protects protocol tokens against digit/short identity tokens (#1474 regression)', () => {
+  it('leaves a protocol token intact when username is a bare digit', () => {
+    // The trailing "0" is part of the protocol token, not PII to redact.
+    expect(scrubIdentityString('jinn.span.0', { username: '0' })).toBe('jinn.span.0');
+    expect(scrubIdentityString('jinn.artifact.emit', { username: '0' })).toBe('jinn.artifact.emit');
+  });
+
+  it('leaves a protocol token intact when gitAuthorName is a bare digit', () => {
+    expect(scrubIdentityString('jinn.span.kind', { gitAuthorName: '0' })).toBe('jinn.span.kind');
+  });
+
+  it('preserves many protocol tokens in one string under a digit identity', () => {
+    // 12 tokens; under the old numeric-sentinel design, indices >= 10 corrupted.
+    const tokens = Array.from({ length: 12 }, (_, i) => `jinn.t${i}.emit`);
+    const input = tokens.join(' ');
+    expect(scrubIdentityString(input, { username: '1' })).toBe(input);
+  });
+
+  it('still redacts a genuine digit-username outside protocol tokens', () => {
+    expect(scrubIdentityString('/home/0/x', { username: '0' })).toBe('/home/<USER>/x');
   });
 });

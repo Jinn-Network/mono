@@ -15,29 +15,17 @@ export interface IdentityScrubConfig {
 const IPV4_PATTERN =
   /\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)\b/g;
 
-// Reserved-protocol tokens (jinn.span.kind, jinn.artifact.emit, ...) are masked
-// out before identity scrubbing and restored after, so an identity token that
-// is a substring of a protocol token (e.g. username === 'jinn') cannot deface
-// the protocol namespace (#1474). The mask/restore is confined to this shared
-// function so all consumers (trajectory span-processor, artifact-scrub, capture
-// export) inherit the protection.
-const PROTOCOL_TOKEN_PATTERN = /\bjinn\.[A-Za-z0-9_.-]+/g;
-// Sentinels are framed by control characters (U+0001 and U+0002) that cannot
-// appear in identity tokens or normal trajectory content, so they never overlap
-// an identity substring and never leak an alphanumeric placeholder.
-const SENTINEL_OPEN = '\u0001';
-const SENTINEL_CLOSE = '\u0002';
-// Matches a masked placeholder (SENTINEL_OPEN <index> SENTINEL_CLOSE) for restore.
-const SENTINEL_RESTORE_PATTERN = /\u0001(\d+)\u0002/g;
+// Reserved-protocol tokens (jinn.span.kind, jinn.artifact.emit, ...) must pass
+// through identity scrubbing untouched, so an identity token that is a substring
+// of a protocol token (e.g. username === 'jinn') cannot deface the protocol
+// namespace (#1474). We achieve this by splitting the input on protocol tokens
+// and scrubbing only the non-protocol segments - there is no sentinel to leak or
+// collide with. The protection is confined to this shared function so all
+// consumers (trajectory span-processor, artifact-scrub, capture export) inherit it.
 
-export function scrubIdentityString(s: string, cfg: IdentityScrubConfig): string {
-  // Mask reserved protocol tokens first (see PROTOCOL_TOKEN_PATTERN above).
-  const protectedTokens: string[] = [];
-  let out = s.replace(PROTOCOL_TOKEN_PATTERN, (match) => {
-    const idx = protectedTokens.push(match) - 1;
-    return `${SENTINEL_OPEN}${idx}${SENTINEL_CLOSE}`;
-  });
-
+// Scrub one non-protocol segment via the ordered identity replacements.
+function scrubSegment(s: string, cfg: IdentityScrubConfig): string {
+  let out = s;
   // Order matters: email and full git-author name resolve first as
   // composite identifiers. Email-before-username avoids mangling addresses
   // whose local-part matches a username; gitAuthorName-before-hostname/
@@ -49,10 +37,19 @@ export function scrubIdentityString(s: string, cfg: IdentityScrubConfig): string
   if (cfg.hostname) out = out.split(cfg.hostname).join('<HOST>');
   if (cfg.machineId) out = out.split(cfg.machineId).join('<MACHINE>');
   out = out.replace(IPV4_PATTERN, '<IPV4>');
-
-  // Restore protocol tokens byte-for-byte (no-op when none were masked).
-  out = out.replace(SENTINEL_RESTORE_PATTERN, (_m, idx) => protectedTokens[Number(idx)]);
   return out;
+}
+
+export function scrubIdentityString(s: string, cfg: IdentityScrubConfig): string {
+  // Split on protocol tokens; the capturing group keeps them in the array at
+  // odd indices. Even indices are ordinary text to scrub; odd indices are
+  // jinn.-prefixed protocol tokens that pass through verbatim (#1474) - so an
+  // identity token that is a substring of a protocol token cannot deface it,
+  // and there is no sentinel to collide with.
+  return s
+    .split(/(\bjinn\.[A-Za-z0-9_.-]+)/g)
+    .map((part, i) => (i % 2 === 1 ? part : scrubSegment(part, cfg)))
+    .join('');
 }
 
 export class IdentityScrubProcessor implements SpanProcessor {
