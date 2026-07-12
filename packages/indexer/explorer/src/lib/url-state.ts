@@ -173,7 +173,7 @@ export function useStringArrayParam(
  * The set of filter dimensions the slice engine accepts (mirrors
  * SliceFilter in slice-types.ts).
  */
-export const FILTER_DIMS = ['operator', 'harness', 'plugin', 'mode', 'model'] as const;
+export const FILTER_DIMS = ['operator', 'harness', 'plugin', 'mode', 'model', 'builder'] as const;
 export type FilterDim = (typeof FILTER_DIMS)[number];
 export type FilterMap = Partial<Record<FilterDim, string[]>>;
 
@@ -222,7 +222,7 @@ export function useFilterParams(): [FilterMap, (v: FilterMap) => void] {
 // ── useGroupParam ────────────────────────────────────────────────────────────
 
 export const GROUP_VALUES = [
-  'none', 'operator', 'harness', 'plugin', 'mode', 'model',
+  'none', 'operator', 'harness', 'plugin', 'mode', 'model', 'builder',
 ] as const;
 export type GroupValue = (typeof GROUP_VALUES)[number];
 

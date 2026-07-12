@@ -12,7 +12,8 @@ export type SliceGroupBy =
   | 'harness'
   | 'plugin'
   | 'mode'
-  | 'model';
+  | 'model'
+  | 'builder';
 
 export type SliceBucketSize = 'auto' | 'per-block' | 'per-day' | 'per-week';
 
@@ -22,6 +23,7 @@ export interface SliceFilter {
   plugin?: string[];
   mode?: string[];
   model?: string[];
+  builder?: string[];
 }
 
 export interface SliceParams {

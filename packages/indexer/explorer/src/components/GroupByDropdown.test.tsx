@@ -21,7 +21,7 @@ describe('GroupByDropdown', () => {
     expect(screen.getByRole('button', { name: /Group by:/i })).toHaveAttribute('data-active', 'true');
   });
 
-  it('opens menu on click and shows all six options', () => {
+  it('opens menu on click and shows all seven options', () => {
     render(<GroupByDropdown value="none" onChange={() => {}} />);
     fireEvent.click(screen.getByRole('button', { name: /Group by:/i }));
     expect(screen.getByRole('menuitem', { name: 'none' })).toBeInTheDocument();
@@ -30,6 +30,7 @@ describe('GroupByDropdown', () => {
     expect(screen.getByRole('menuitem', { name: 'plugin' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'mode' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'model' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'builder' })).toBeInTheDocument();
   });
 
   it('calls onChange with the picked dimension and closes the menu', () => {

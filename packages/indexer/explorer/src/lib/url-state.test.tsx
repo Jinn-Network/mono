@@ -44,6 +44,13 @@ describe('useGroupParam', () => {
     });
     expect(result.current[0]).toBe('none');
   });
+
+  it('returns builder when present', () => {
+    const { result } = renderHook(() => useGroupParam(), {
+      wrapper: makeWrapper('/explore/cid?group=builder'),
+    });
+    expect(result.current[0]).toBe('builder');
+  });
 });
 
 describe('useFilterParams', () => {
@@ -69,6 +76,13 @@ describe('useFilterParams', () => {
       wrapper: makeWrapper('/explore/cid?filter[operator]=0xabc,0xdef'),
     });
     expect(result.current[0]).toEqual({ operator: ['0xabc', '0xdef'] });
+  });
+
+  it('reads filter[builder] as a comma-separated allow-list', () => {
+    const { result } = renderHook(() => useFilterParams(), {
+      wrapper: makeWrapper('/explore/cid?filter[builder]=101,202'),
+    });
+    expect(result.current[0]).toEqual({ builder: ['101', '202'] });
   });
 
   it('removing a value via setter strips the key from the URL', () => {

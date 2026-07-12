@@ -24,6 +24,7 @@ describe('AddFilterPopover', () => {
     expect(screen.getByRole('button', { name: 'plugin' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'mode' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'model' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'builder' })).toBeInTheDocument();
   });
 
   it('calls onPickDim when a dimension is clicked at step 1', () => {
