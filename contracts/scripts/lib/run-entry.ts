@@ -5,8 +5,8 @@
  * Under Hardhat 3, `hardhat run scripts/x.ts` imports the script module via
  * `import(pathToFileURL(script))`, executing its top-level code; there is no
  * `require.main`/`module` binding. Scripts that are ALSO imported by the test
- * suite (e.g. `deploy-phase1a-l2`, `deploy-jinn-mvi-l1`) must not run their
- * `main()` on import — only when invoked directly via `hardhat run`.
+ * suite (e.g. `deploy-task-coordinator-router-v3`, `deploy-stolas-l2`) must not
+ * run their `main()` on import — only when invoked directly via `hardhat run`.
  *
  * `isRunEntry(import.meta.url)` returns true exactly when the calling module is
  * the script `hardhat run` was pointed at: it scans `process.argv` for a
