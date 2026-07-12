@@ -35,16 +35,15 @@ export interface StageRunResult {
 }
 
 export interface StageRunOpts {
-  /** The stage's task, verbatim from the SKILL.md step. */
+  /**
+   * The fully-curated stage prompt (stage task + issue body/ACs + prior-stage
+   * outputs) that the coordinator writes to the `--prompt-file`. This helper
+   * does NOT assemble those pieces — the coordinator owns curation (SKILL.md
+   * Step 4); the only thing prepended here is the headless-override block.
+   */
   stageTask: string;
-  /** The issue body (context, impact, acceptance criteria, file hints). */
-  issueBody: string;
   /** Absolute worktree path — becomes the session `cwd` (AC#5 isolation). */
   worktreePath: string;
-  /** The branch name for this issue's worktree. */
-  branch: string;
-  /** Relevant prior-stage outputs (design note, plan, diff, etc.). */
-  priorOutputs?: string;
   /** Optional model override for this stage session. */
   model?: string;
   /** Wall-clock ceiling; default 10 minutes (pressure-suite starting value). */
@@ -55,30 +54,23 @@ const DEFAULT_TIMEOUT_MS = 600_000;
 
 /**
  * Compose the stage prompt: the headless-override block (so the root-session
- * stage self-approves), then the curated stage context. Plain string join,
- * mirroring buildHeadlessPrompt.
+ * stage self-approves), then the coordinator's curated stage prompt. Plain
+ * string join, mirroring buildHeadlessPrompt.
  *
- * NOTE: this prepends `headlessOverride()`. Callers passing a pre-curated
- * prompt as `stageTask` (the CLI shim does this) must NOT include the override
- * block themselves — that would double-inject it.
+ * NOTE: this prepends `headlessOverride()`. The `stageTask` passed in is
+ * already curated (the CLI shim reads it from the prompt-file), so it must NOT
+ * include the override block itself — that would double-inject it.
  */
 export function buildStagePrompt(
-  opts: Pick<StageRunOpts, 'stageTask' | 'issueBody' | 'worktreePath' | 'branch' | 'priorOutputs'>,
+  opts: Pick<StageRunOpts, 'stageTask' | 'worktreePath'>,
 ): string {
-  const parts = [
+  return [
     headlessOverride(),
     '',
     opts.stageTask.trim(),
     '',
-    `Worktree: ${opts.worktreePath} (branch ${opts.branch}). Do all work here.`,
-  ];
-  if (opts.issueBody.trim()) {
-    parts.push('', '## Issue body', opts.issueBody.trim());
-  }
-  if (opts.priorOutputs && opts.priorOutputs.trim()) {
-    parts.push('', '## Prior-stage outputs', opts.priorOutputs.trim());
-  }
-  return parts.join('\n');
+    `Worktree: ${opts.worktreePath}. Do all work here.`,
+  ].join('\n');
 }
 
 /** Production spawn: real `claude -p` root session with captured stdout/stderr. */

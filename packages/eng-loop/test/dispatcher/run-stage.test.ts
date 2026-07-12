@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { EventEmitter } from 'node:events';
 import {
   runStageHeadless,
-  buildStagePrompt,
   type StageSpawnFn,
 } from '../../src/dispatcher/run-stage.js';
 
@@ -70,12 +69,11 @@ function makeSpawn(
   return { spawn, calls, child: () => built as FakeChild };
 }
 
+// The coordinator curates the whole stage prompt (stage task + issue body/ACs
+// + prior-stage outputs) into `stageTask`; this fake mirrors that.
 const BASE_OPTS = {
-  stageTask: 'STAGE-3 IMPLEMENT MARKER',
-  issueBody: 'ISSUE-BODY-MARKER',
+  stageTask: 'STAGE-3 IMPLEMENT MARKER\nISSUE-BODY-MARKER\nPLAN-MARKER',
   worktreePath: '/tmp/jinn-mono_worktrees/657',
-  branch: 'fix/657-x',
-  priorOutputs: 'PLAN-MARKER',
 };
 
 describe('runStageHeadless', () => {
@@ -106,7 +104,7 @@ describe('runStageHeadless', () => {
     expect(prompt).toContain('non-interactive');
   });
 
-  it('(d) curated prompt carries stageTask + issueBody + priorOutputs', async () => {
+  it('(d) forwards the curated stageTask and the worktree line verbatim', async () => {
     const { spawn, calls } = makeSpawn('close-0', 'ok');
     await runStageHeadless(BASE_OPTS, spawn);
 
@@ -115,6 +113,7 @@ describe('runStageHeadless', () => {
     expect(prompt).toContain('STAGE-3 IMPLEMENT MARKER');
     expect(prompt).toContain('ISSUE-BODY-MARKER');
     expect(prompt).toContain('PLAN-MARKER');
+    expect(prompt).toContain(BASE_OPTS.worktreePath);
   });
 
   it('passes --model <m> when a model is supplied', async () => {
@@ -148,17 +147,5 @@ describe('runStageHeadless', () => {
 
     expect(result.timedOut).toBe(true);
     expect(child().__killed).toBe(true);
-  });
-});
-
-describe('buildStagePrompt', () => {
-  it('prepends the override and includes every curated section', () => {
-    const prompt = buildStagePrompt(BASE_OPTS);
-    expect(prompt).toContain('non-interactive'); // override
-    expect(prompt).toContain('STAGE-3 IMPLEMENT MARKER');
-    expect(prompt).toContain('ISSUE-BODY-MARKER');
-    expect(prompt).toContain('PLAN-MARKER');
-    expect(prompt).toContain(BASE_OPTS.worktreePath);
-    expect(prompt).toContain(BASE_OPTS.branch);
   });
 });

@@ -46,9 +46,7 @@ async function main(): Promise<void> {
 
   const result = await runStageHeadless({
     stageTask,
-    issueBody: '',
     worktreePath: worktree,
-    branch: '',
     model,
     timeoutMs,
   });
