@@ -7,7 +7,7 @@ import { Badge } from '../../components/ui/badge.js';
 import { Button } from '../../components/ui/button.js';
 import { Skeleton } from '../../components/ui/skeleton.js';
 import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert.js';
-import { DEMO_CONTRACT_ID } from '../../lib/demo-solvernet.js';
+import { isDemoSolverNet } from '../../lib/demo-solvernet.js';
 
 /**
  * Onboarding step 4 — pick your first SolverNet.
@@ -29,6 +29,7 @@ import { DEMO_CONTRACT_ID } from '../../lib/demo-solvernet.js';
  * PR A hot-applies the join to the running daemon, so a join made here after
  * the flip takes effect with no restart (restartRequired:false).
  */
+
 /** Treated as "still starting", not a hard error (mirrors RegistryCatalog). */
 const STARTING_CODES = new Set(['subsystem_not_ready', 'registry_unavailable']);
 
@@ -59,9 +60,8 @@ export function SolverNetStep({
     retry: false,
   });
 
-  const entry: SolverNetManifestSummary | undefined = registryQuery.data?.summaries.find(
-    (s) => s.contractId === DEMO_CONTRACT_ID && s.status === 'launched',
-  );
+  const entry: SolverNetManifestSummary | undefined =
+    registryQuery.data?.summaries.find(isDemoSolverNet);
   const cid = entry?.manifestCid;
   const alreadyJoined = cid !== undefined && joinedCids.includes(cid);
 
