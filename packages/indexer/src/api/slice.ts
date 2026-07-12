@@ -20,7 +20,8 @@ export type SliceGroupBy =
   | 'harness'
   | 'plugin'
   | 'mode'
-  | 'model';
+  | 'model'
+  | 'builder';
 
 export type SliceBucketSize = 'auto' | 'per-block' | 'per-day' | 'per-week';
 
@@ -30,6 +31,7 @@ export interface SliceFilter {
   plugin?: string[];
   mode?: string[];
   model?: string[];
+  builder?: string[];
 }
 
 export interface SliceParams {
@@ -98,12 +100,12 @@ export interface SliceResponse {
 }
 
 const ALLOWED_GROUPS: SliceGroupBy[] = [
-  'none', 'operator', 'harness', 'plugin', 'mode', 'model',
+  'none', 'operator', 'harness', 'plugin', 'mode', 'model', 'builder',
 ];
 const ALLOWED_BUCKETS: SliceBucketSize[] = [
   'auto', 'per-block', 'per-day', 'per-week',
 ];
-const FILTER_DIMS = ['operator', 'harness', 'plugin', 'mode', 'model'] as const;
+const FILTER_DIMS = ['operator', 'harness', 'plugin', 'mode', 'model', 'builder'] as const;
 
 function parseEnum<T extends string>(
   raw: string | null,
@@ -167,6 +169,12 @@ export interface SliceInputRow {
   harness: string | null;
   model: string | null;
   plugins: string[];
+  /**
+   * Builder agentIds (decimal strings) resolved from this attempt's plugin
+   * cids via the pluginPublication entity. Exploded like `plugins` — one
+   * attempt can carry several builders. Empty when no plugins resolve.
+   */
+  builder: string[];
 }
 
 const DEFAULT_BUCKET_BLOCKS = 7200n; // ≈1 day on Base at ~12s/block
@@ -217,7 +225,7 @@ function computeOneSeries(
   };
 }
 
-type SingleKeyGroup = Exclude<SliceGroupBy, 'none' | 'plugin'>;
+type SingleKeyGroup = Exclude<SliceGroupBy, 'none' | 'plugin' | 'builder'>;
 
 function groupKeyFor(row: SliceInputRow, group: SingleKeyGroup): string {
   switch (group) {
@@ -248,10 +256,11 @@ function computeGroupedSeries(
 /**
  * Sums KPIs across series for the top-level SliceResponse.kpis.
  *
- * NOTE: For group=plugin, a single attempt can carry multiple plugins and
- * therefore appears in multiple series. Top-level `attempts` will be overcounted
- * relative to true unique-attempt count. For group=operator/harness/mode/model,
- * attempts are mutually exclusive and the sum is exact.
+ * NOTE: For group=plugin and group=builder, a single attempt can carry multiple
+ * plugins (and therefore multiple builders) and appears in multiple series.
+ * Top-level `attempts` will be overcounted relative to true unique-attempt count.
+ * For group=operator/harness/mode/model, attempts are mutually exclusive and the
+ * sum is exact.
  * (LIM-2 — documented, not a bug; matches composition.byPlugin semantics.)
  */
 function sumSeriesKPIs(series: SliceSeries[]): SliceSeriesKPIs {
@@ -287,6 +296,10 @@ function applyFilters(rows: SliceInputRow[], filter: SliceFilter): SliceInputRow
       const matches = r.plugins?.some((p) => filter.plugin!.includes(p));
       if (!matches) return false;
     }
+    if (filter.builder && filter.builder.length > 0) {
+      const matches = r.builder?.some((b) => filter.builder!.includes(b));
+      if (!matches) return false;
+    }
     return true;
   });
 }
@@ -302,6 +315,24 @@ function computePluginSeries(
     for (const p of r.plugins) {
       if (!groups.has(p)) groups.set(p, []);
       groups.get(p)!.push(r);
+    }
+  }
+  return Array.from(groups.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, groupRows]) => computeOneSeries(groupRows, key, bucket, window));
+}
+
+function computeBuilderSeries(
+  rows: SliceInputRow[],
+  bucket: SliceBucketSize,
+  window: number,
+): SliceSeries[] {
+  const groups = new Map<string, SliceInputRow[]>();
+  for (const r of rows) {
+    if (!r.builder || r.builder.length === 0) continue;
+    for (const b of r.builder) {
+      if (!groups.has(b)) groups.set(b, []);
+      groups.get(b)!.push(r);
     }
   }
   return Array.from(groups.entries())
@@ -332,6 +363,8 @@ export function computeSlice(
     series = [computeOneSeries(filtered, null, params.bucket, window)];
   } else if (params.group === 'plugin') {
     series = computePluginSeries(filtered, params.bucket, window);
+  } else if (params.group === 'builder') {
+    series = computeBuilderSeries(filtered, params.bucket, window);
   } else {
     series = computeGroupedSeries(filtered, params.group, params.bucket, window);
   }

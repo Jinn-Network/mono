@@ -26,6 +26,7 @@ function row(opts: Partial<SliceInputRow> = {}): SliceInputRow {
     harness: 'hermes-agent',
     model: 'claude-haiku-4-5',
     plugins: [],
+    builder: [],
     ...opts,
   };
 }
@@ -51,7 +52,7 @@ describe('parseSliceParams', () => {
   });
 
   it('parses group when it is one of the allowed values', () => {
-    for (const g of ['none', 'operator', 'harness', 'plugin', 'mode', 'model']) {
+    for (const g of ['none', 'operator', 'harness', 'plugin', 'mode', 'model', 'builder']) {
       const p = parseSliceParams(urlSearchParams(`manifestDigest=bafy&group=${g}`));
       expect(p.group).toBe(g);
     }
@@ -318,6 +319,35 @@ describe('computeSlice — group=plugin', () => {
   });
 });
 
+describe('computeSlice — group=builder', () => {
+  const params: SliceParams = {
+    manifestDigest: 'bafy',
+    group: 'builder',
+    filter: {},
+    includeUnenriched: false,
+    bucket: 'auto',
+  };
+
+  it('one verdict with two builders contributes to two series', () => {
+    const rows = [
+      row({ requestId: '0x1', builder: ['101', '202'], actualPassed: true }),
+    ];
+    const out = computeSlice(rows, params, { rawVerdictCount: 1 });
+    expect(out.series.map((s) => s.groupValue).sort()).toEqual(['101', '202']);
+    expect(out.series[0].kpis.verdicts).toBe(1);
+    expect(out.series[1].kpis.verdicts).toBe(1);
+  });
+
+  it('rows with no builders are dropped (do not appear in any series)', () => {
+    const rows = [
+      row({ requestId: '0x1', builder: ['101'], actualPassed: true }),
+      row({ requestId: '0x2', builder: [], actualPassed: false }),
+    ];
+    const out = computeSlice(rows, params, { rawVerdictCount: 2 });
+    expect(out.series.map((s) => s.groupValue)).toEqual(['101']);
+  });
+});
+
 describe('computeSlice — filters', () => {
   it('filter[operator] drops rows from other operators', () => {
     const rows = [
@@ -337,6 +367,25 @@ describe('computeSlice — filters', () => {
     );
     expect(out.kpis.verdicts).toBe(1);
     expect(out.kpis.verdictsPass).toBe(1);
+  });
+
+  it('filter[builder] keeps a row iff one of its builders is in the allow-list', () => {
+    const rows = [
+      row({ requestId: '0x1', builder: ['101', '202'], actualPassed: true }),
+      row({ requestId: '0x2', builder: ['303'], actualPassed: true }),
+    ];
+    const out = computeSlice(
+      rows,
+      {
+        manifestDigest: 'bafy',
+        group: 'none',
+        filter: { builder: ['202'] },
+        includeUnenriched: false,
+        bucket: 'auto',
+      },
+      { rawVerdictCount: 2 },
+    );
+    expect(out.kpis.verdicts).toBe(1); // only the row carrying builder 202
   });
 
   it('filter[mode]=train and filter[operator]=0xA AND together', () => {
