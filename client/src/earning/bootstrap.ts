@@ -97,6 +97,7 @@ import {
   migrateDeprecatedTestnetSetup,
 } from './testnet-setup-migration.js';
 import type { Account } from 'viem/accounts';
+import type { StepContext } from './steps/context.js';
 
 const addr = (value: string): Address => getAddress(value) as Address;
 
@@ -2441,6 +2442,41 @@ export class FleetBootstrapper {
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────
+
+  /**
+   * Fresh dependency bag for an extracted step. Rebuilt on every call so a
+   * spy installed after construction is honoured; the spied helper arrows
+   * dispatch through `this` at call time (see plan Binding rule).
+   */
+  private stepContext(): StepContext {
+    return {
+      store: this.store,
+      config: this.config,
+      publicClient: this.publicClient,
+      chain: this.chain,
+      stakingMode: this.stakingMode,
+      targetServices: this.targetServices,
+      debug: this.debug,
+      env: this.env,
+      safeBindingMaxAttempts: this.safeBindingMaxAttempts,
+      safeBindingRetryDelayMs: this.safeBindingRetryDelayMs,
+      bindAgentWalletWithRetry: (args, label) => this.bindAgentWalletWithRetry(args, label),
+      getServiceState: (serviceId) => this.getServiceState(serviceId),
+      waitForSuccessfulTx: (txHash, label) => this.waitForSuccessfulTx(txHash, label),
+      firstServiceUpdate: (index, patch) => this.firstServiceUpdate(index, patch),
+      stakingAddressForService: (svc) => this.stakingAddressForService(svc),
+      shouldPreserveExistingSetup: (svc) => this.shouldPreserveExistingSetup(svc),
+      parseServiceIdFromReceipt: (receipt) => this.parseServiceIdFromReceipt(receipt),
+      parseMultisigFromReceipt: (receipt) => this.parseMultisigFromReceipt(receipt),
+      getStakingState: (serviceId, stakingAddress) => this.getStakingState(serviceId, stakingAddress),
+      getBondTokenBalance: (address) => this.getBondTokenBalance(address),
+      parseAgentIdFromReceipt: (receipt, identityRegistry) =>
+        this.parseAgentIdFromReceipt(receipt, identityRegistry),
+      stolasPreflightCheck: () => this.stolasPreflightCheck(),
+      sweepAbandonedSafeForService: (state, mnemonic, serviceIndex, abandonedSafeAddress) =>
+        this.sweepAbandonedSafeForService(state, mnemonic, serviceIndex, abandonedSafeAddress),
+    };
+  }
 
   private async getBondTokenBalance(address: string): Promise<bigint> {
     return this.publicClient.readContract({
