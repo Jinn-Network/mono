@@ -18,11 +18,7 @@ import {
   buildCostSurfaceStatus,
   type CostSurfaceStatus,
 } from '../spend/cost-surface-status.js';
-
-// Mirror of DEFAULT_MASTER_ETH_DAILY_WEI in client/src/earning/bootstrap.ts —
-// see that constant for the full #288 rationale. A follow-up will collapse
-// the two copies.
-const DEFAULT_MASTER_ETH_DAILY_WEI = 500_000_000_000_000n;
+import { DEFAULT_MASTER_ETH_DAILY_WEI } from '../earning/master-gas.js';
 
 export type StatusHintsScope = 'full' | 'sqlite_only';
 

@@ -89,6 +89,7 @@ import { createJinnPublicClient, createJinnWalletClient, type JinnOnchainNetwork
 import { isTransientEthReadError } from '../chain-read-errors.js';
 import { nextFleetServiceIndex } from './next-service-index.js';
 import { displayFleetServiceIndex } from './fleet-display-index.js';
+import { DEFAULT_MASTER_ETH_DAILY_WEI } from './master-gas.js';
 import { rpcHostForDisplay } from '../preflight/rpc-network.js';
 import {
   detectDeprecatedTestnetSetup,
@@ -259,17 +260,6 @@ export function stage1MinMasterEth(
   );
 }
 
-/**
- * Conservative default: ~0.0005 ETH/day master gas if not configured.
- *
- * Post-bootstrap master burn is dominated by rare BalanceTopupLoop top-ups,
- * not every-poll activity — the previous 0.001 ETH/day floor (alongside a
- * poll-based blend, since removed) over-estimated steady-state burn and
- * surfaced a misleading "1 days runway" dashboard reading at ~0.008 ETH
- * balances (#288). Mirrored at client/src/api/status-build.ts; collapsing
- * the two copies is a deferred follow-up per the #288 design note.
- */
-const DEFAULT_MASTER_ETH_DAILY_WEI = 500_000_000_000_000n;
 /** Warn when ETH above the minimum would last fewer than this many days at the daily estimate. */
 const MASTER_ETH_RUNWAY_WARN_DAYS = 7n;
 
