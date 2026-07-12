@@ -24,6 +24,7 @@ import {
 } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
+import { SAFE_ABI } from '../contracts/abis.js';
 import {
   isNonceTooLowError,
   removeConflictingLegacyGasPrice,
@@ -52,52 +53,6 @@ const SAFE_EXECUTION_FALLBACK_GAS_LIMIT = 5_000_000;
  *  keeps us well clear of the cap on the heaviest call we measure. */
 const SAFE_EXECUTION_GAS_ESTIMATE_BUFFER_NUMERATOR = 130n;
 const SAFE_EXECUTION_GAS_ESTIMATE_BUFFER_DENOMINATOR = 100n;
-
-const SAFE_ABI = [
-  {
-    type: 'function',
-    name: 'execTransaction',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'to', type: 'address' },
-      { name: 'value', type: 'uint256' },
-      { name: 'data', type: 'bytes' },
-      { name: 'operation', type: 'uint8' },
-      { name: 'safeTxGas', type: 'uint256' },
-      { name: 'baseGas', type: 'uint256' },
-      { name: 'gasPrice', type: 'uint256' },
-      { name: 'gasToken', type: 'address' },
-      { name: 'refundReceiver', type: 'address' },
-      { name: 'signatures', type: 'bytes' },
-    ],
-    outputs: [{ name: '', type: 'bool' }],
-  },
-  {
-    type: 'function',
-    name: 'nonce',
-    stateMutability: 'view',
-    inputs: [],
-    outputs: [{ name: '', type: 'uint256' }],
-  },
-  {
-    type: 'function',
-    name: 'getTransactionHash',
-    stateMutability: 'view',
-    inputs: [
-      { name: 'to', type: 'address' },
-      { name: 'value', type: 'uint256' },
-      { name: 'data', type: 'bytes' },
-      { name: 'operation', type: 'uint8' },
-      { name: 'safeTxGas', type: 'uint256' },
-      { name: 'baseGas', type: 'uint256' },
-      { name: 'gasPrice', type: 'uint256' },
-      { name: 'gasToken', type: 'address' },
-      { name: 'refundReceiver', type: 'address' },
-      { name: '_nonce', type: 'uint256' },
-    ],
-    outputs: [{ name: '', type: 'bytes32' }],
-  },
-] as const;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SafeInitFn = (config: any) => Promise<SafeInstance>;
