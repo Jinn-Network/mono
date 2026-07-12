@@ -36,7 +36,7 @@ import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js'
 import type { LauncherGeneratorStateSnapshot } from './api/launcher-status.js';
 import { ensureUiToken } from './api/ui-token.js';
 import { getFileLogger, closeFileLogger } from './observability/file-logger.js';
-import { emitProgress, type ProgressEnvelope } from './observability/progress.js';
+import { emitProgress } from './observability/progress.js';
 import { hashImplStateDir } from './harnesses/freeze.js';
 import { readModeState } from './harnesses/mode-state.js';
 import { attachAgentWs, updateAgentClaudePath } from './agent/agent-ws.js';

@@ -1,4 +1,4 @@
-import { mkdirSync, unlinkSync, writeFileSync as writeFileSyncMain } from 'node:fs';
+import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { JinnConfig } from '../config.js';
 import type { ProgressEnvelope } from '../observability/progress.js';
@@ -185,7 +185,7 @@ export async function runFleetBootstrap(deps: {
   const fundingGatePath = join(config.earningDir, 'bootstrap-funding.json');
   const persistFundingGate = (funding: NonNullable<Awaited<ReturnType<typeof bootstrapper.ensureStage1And2>>['funding']>): void => {
     mkdirSync(config.earningDir, { recursive: true, mode: 0o700 });
-    writeFileSyncMain(fundingGatePath, `${JSON.stringify({
+    writeFileSync(fundingGatePath, `${JSON.stringify({
       schemaVersion: 1,
       generatedAt: new Date().toISOString(),
       ...funding,
