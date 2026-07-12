@@ -18,6 +18,7 @@ import type {
   ClaimableTaskCandidate,
   InstanceClaimCount,
   TaskStatusSnapshot,
+  VerdictTallyResult,
   SolverNetManifestSummary,
   SolverNetLifecycleStatus,
   EnvelopeRef,
@@ -360,6 +361,41 @@ query TaskStatuses($manifestDigest: String!, $limit: Int!, $after: String) {
 `;
 
 /**
+ * Resolved verdict tallies per task (#502). Pages `verdictEnvelopeMeta` rows
+ * for a batch of taskIds, grouping client-side into PASS/FAIL poles. Backs the
+ * operator Activity table's task-relative Outcome column — a DISPLAY signal.
+ *
+ * The `taskId_in` filter relies on Ponder auto-generating an `_in` operator for
+ * the indexed `verdictEnvelopeMeta.taskId` column (see packages/indexer
+ * ponder.schema.ts — taskId is indexed). If a live indexer ever rejects
+ * `taskId_in`, the portable fallback is `solverNetManifestCid_in` + a
+ * client-side taskId filter (as TASK_POST_COUNTS_QUERY does with manifestDigest).
+ */
+const VERDICT_TALLIES_QUERY = `
+query VerdictTallies($taskIds: [String!]!, $limit: Int!, $after: String) {
+  verdictEnvelopeMetas(
+    where: { taskId_in: $taskIds, enrichmentStatus: "ok" },
+    limit: $limit,
+    after: $after,
+    orderBy: "enrichedAtBlock",
+    orderDirection: "asc"
+  ) {
+    items {
+      taskId
+      evaluatorVerdict
+      evaluator
+      chainId
+      requestId
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+`;
+
+/**
  * Task-post-rate query (#918). Pages the most-recent tasks ordered by
  * createdAtBlock desc; the daemon reads the top row's block as the window head
  * and buckets the three windows (1h / 6h / 24h) AND the per-cid totals
@@ -559,6 +595,19 @@ interface TaskStatusesPage {
       finalized: boolean | string | number | null;
       refunded: boolean | string | number | null;
       claimWindowEnd?: string | number | null;
+    }>;
+    pageInfo?: { hasNextPage: boolean; endCursor: string | null };
+  };
+}
+
+interface VerdictTalliesPage {
+  verdictEnvelopeMetas: {
+    items: Array<{
+      taskId: string;
+      evaluatorVerdict: string;
+      evaluator: string;
+      chainId: number;
+      requestId: string;
     }>;
     pageInfo?: { hasNextPage: boolean; endCursor: string | null };
   };
@@ -1800,6 +1849,62 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     return out;
   }
 
+  // ── getVerdictTallies (#502) ───────────────────────────────────────────────
+  // Resolved PASS/FAIL tallies per task, grouped client-side (Ponder has no
+  // GROUP BY). DISPLAY signal backing the Activity Outcome column. Dedupes on
+  // (requestId|chainId); folds PASS→pass, FAIL→fail; excludes
+  // INVALID/INDETERMINATE/UNKNOWN. Empty taskIds short-circuits with no query.
+  async function getVerdictTallies(args: {
+    taskIds: string[];
+  }): Promise<Map<string, VerdictTallyResult>> {
+    if (args.taskIds.length === 0) return new Map();
+    await ensureReady();
+
+    const MAX_PAGES = 10;
+    const PAGE_LIMIT = 1000;
+    const out = new Map<string, { pass: number; fail: number; evaluators: Set<string> }>();
+    const seen = new Set<string>(); // (requestId|chainId) dedupe across pages
+    let cursor: string | null = null;
+
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const data: VerdictTalliesPage = await postGql<VerdictTalliesPage>(
+        gqlUrl,
+        fetchImpl,
+        VERDICT_TALLIES_QUERY,
+        { taskIds: args.taskIds, limit: PAGE_LIMIT, after: cursor },
+      );
+      const rows = data.verdictEnvelopeMetas?.items ?? [];
+      for (const row of rows) {
+        const key = `${row.requestId}|${row.chainId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const verdict = row.evaluatorVerdict;
+        let entry = out.get(row.taskId);
+        if (!entry) {
+          entry = { pass: 0, fail: 0, evaluators: new Set<string>() };
+          out.set(row.taskId, entry);
+        }
+        if (verdict === 'PASS') entry.pass += 1;
+        else if (verdict === 'FAIL') entry.fail += 1;
+        else continue; // INVALID / INDETERMINATE / UNKNOWN — excluded from poles
+        if (row.evaluator) entry.evaluators.add(row.evaluator.toLowerCase());
+      }
+      const pageInfo = data.verdictEnvelopeMetas?.pageInfo;
+      if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
+      cursor = pageInfo.endCursor;
+    }
+
+    const result = new Map<string, VerdictTallyResult>();
+    for (const [taskId, entry] of out) {
+      result.set(taskId, {
+        pass: entry.pass,
+        fail: entry.fail,
+        evaluators: [...entry.evaluators],
+      });
+    }
+    return result;
+  }
+
   return {
     findClaimableTasks,
     listLaunchedSolverNets,
@@ -1815,5 +1920,6 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     getTaskPostCounts,
     getMostRecentTaskCidDigest,
     getTaskStatuses,
+    getVerdictTallies,
   };
 }
