@@ -20,8 +20,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Store } from '../store/store.js';
-import { TaskRunPersistence } from '../harnesses/engine/persistence.js';
+import type { TaskRunReadModel } from '../types/task-run-read-model.js';
 
 /** Phases the engine self-improvement loop walks; counted in `phaseCounts`. */
 const FULL_LOOP_PHASES = ['improve', 'memory-consolidation'] as const;
@@ -76,7 +75,7 @@ export interface ImplStateCadenceStatus {
  * malformed array yields `[]` for that row, a store read failure yields an
  * all-zero rollup.
  */
-export function gatherLoopCompletion(store: Store): LoopCompletionStatus {
+export function gatherLoopCompletion(runs: TaskRunReadModel): LoopCompletionStatus {
   const empty: LoopCompletionStatus = {
     total: 0,
     delivered: 0,
@@ -90,7 +89,7 @@ export function gatherLoopCompletion(store: Store): LoopCompletionStatus {
 
   let rows: Array<{ phasesJson: string | null; deliveredTxHash: string | null }>;
   try {
-    rows = new TaskRunPersistence(store.db).getGatingRows();
+    rows = runs.getGatingRows();
   } catch {
     return empty;
   }

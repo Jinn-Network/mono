@@ -27,8 +27,8 @@ import { gatherTaskRunsStatus } from '../../../src/api/task-runs-build.js';
  *  - Race-loss prunes land in `RACE_LOST`, not `FAILED`.
  *  - Generic engine errors still land in `FAILED`.
  *  - A `race_lost` activity event is emitted so operators can audit prunes.
- *  - `gatherTaskRunsStatus(store).totals.failed` excludes pruned runs.
- *  - `gatherTaskRunsStatus(store).totals.raceLost` surfaces the prune count.
+ *  - `gatherTaskRunsStatus(store.taskRunReadModel()).totals.failed` excludes pruned runs.
+ *  - `gatherTaskRunsStatus(store.taskRunReadModel()).totals.raceLost` surfaces the prune count.
  */
 
 function makeOpts(store: Store): TaskEngineOptions {
@@ -115,7 +115,7 @@ describe('race-loss pruning (#896)', () => {
     const row = p.getByRequestId('r-pruned')!;
     expect(row.state).toBe('RACE_LOST');
 
-    const status = gatherTaskRunsStatus(store);
+    const status = gatherTaskRunsStatus(store.taskRunReadModel());
     expect(status.totals.failed).toBe(0);
     expect(status.totals.raceLost).toBe(1);
 
@@ -141,7 +141,7 @@ describe('race-loss pruning (#896)', () => {
     const row = p.getByRequestId('r-genuine-fail')!;
     expect(row.state).toBe(TaskRunState.FAILED);
 
-    const status = gatherTaskRunsStatus(store);
+    const status = gatherTaskRunsStatus(store.taskRunReadModel());
     expect(status.totals.failed).toBe(1);
     expect(status.totals.raceLost).toBe(0);
   });
@@ -167,7 +167,7 @@ describe('race-loss pruning (#896)', () => {
     const row = p.getByRequestId('r-process-pruned')!;
     expect(row.state).toBe('RACE_LOST');
 
-    const status = gatherTaskRunsStatus(store);
+    const status = gatherTaskRunsStatus(store.taskRunReadModel());
     expect(status.totals.failed).toBe(0);
     expect(status.totals.raceLost).toBe(1);
 

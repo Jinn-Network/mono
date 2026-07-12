@@ -6,8 +6,8 @@
  * writes them, but task_runs is available in the daemon today.
  */
 
-import type { Store } from '../store/store.js';
-import { TaskRunPersistence, type PersistedTaskRun } from '../harnesses/engine/persistence.js';
+import type { PersistedTaskRun } from '../types/task-run.js';
+import type { TaskRunReadModel } from '../types/task-run-read-model.js';
 import type { PredictionOperatorStatus } from '../solver-nets/prediction-operator-ux.js';
 import { taskRunRoutingKey } from './task-run-routing.js';
 
@@ -90,14 +90,13 @@ export interface GatherPredictionV1StatusOptions {
 }
 
 export function gatherPredictionV1Status(
-  store: Store,
+  runs: TaskRunReadModel,
   options: GatherPredictionV1StatusOptions = {},
 ): PredictionV1Status {
-  const persistence = new TaskRunPersistence(store.db);
-  const inFlight = persistence.getInFlight().filter(isPredictionV1Run);
-  const complete = persistence.getByState('COMPLETE').filter(isPredictionV1Run);
-  const failed = persistence.getByState('FAILED').filter(isPredictionV1Run);
-  const raceLost = persistence.getByState('RACE_LOST').filter(isPredictionV1Run);
+  const inFlight = runs.getInFlight().filter(isPredictionV1Run);
+  const complete = runs.getByState('COMPLETE').filter(isPredictionV1Run);
+  const failed = runs.getByState('FAILED').filter(isPredictionV1Run);
+  const raceLost = runs.getByState('RACE_LOST').filter(isPredictionV1Run);
   const allRuns = [...inFlight, ...complete, ...failed, ...raceLost];
   const allRecent = [...allRuns].sort((a, b) => b.stateUpdatedAt - a.stateUpdatedAt);
   const solutions = complete

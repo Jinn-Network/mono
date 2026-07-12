@@ -134,7 +134,7 @@ describe('transient RPC stall (#912)', () => {
       const inFlight = p.getInFlight().map((t) => t.requestId);
       expect(inFlight).toContain('r-transient');
 
-      const status = gatherTaskRunsStatus(store);
+      const status = gatherTaskRunsStatus(store.taskRunReadModel());
       expect(status.totals.failed).toBe(0);
       expect(status.totals.raceLost).toBe(0);
 
@@ -154,7 +154,7 @@ describe('transient RPC stall (#912)', () => {
     const row = p.getByRequestId('r-transient')!;
     expect(row.state).toBe(TaskRunState.COMPLETE);
 
-    const status = gatherTaskRunsStatus(store);
+    const status = gatherTaskRunsStatus(store.taskRunReadModel());
     expect(status.totals.failed).toBe(0);
     expect(status.totals.completed).toBe(1);
   });
@@ -168,7 +168,7 @@ describe('transient RPC stall (#912)', () => {
     const row = p.getByRequestId('r-recover-transient')!;
     expect(row.state).toBe(TaskRunState.DELIVERING);
 
-    const status = gatherTaskRunsStatus(store);
+    const status = gatherTaskRunsStatus(store.taskRunReadModel());
     expect(status.totals.failed).toBe(0);
     expect(status.totals.raceLost).toBe(0);
   });
@@ -184,7 +184,7 @@ describe('transient RPC stall (#912)', () => {
     const row = p.getByRequestId('r-genuine')!;
     expect(row.state).toBe(TaskRunState.FAILED);
 
-    const status = gatherTaskRunsStatus(store);
+    const status = gatherTaskRunsStatus(store.taskRunReadModel());
     expect(status.totals.failed).toBe(1);
   });
 
@@ -203,7 +203,7 @@ describe('transient RPC stall (#912)', () => {
     const row = p.getByRequestId('r-past-window')!;
     expect(row.state).toBe(TaskRunState.FAILED);
 
-    const status = gatherTaskRunsStatus(store);
+    const status = gatherTaskRunsStatus(store.taskRunReadModel());
     expect(status.totals.failed).toBe(1);
   });
 });

@@ -552,6 +552,7 @@ export async function gatherGatheredStatusRaw(
     outcome: row.outcome,
   }));
   const lastRewardClaimTickAt = store.getConfigValue('last_reward_claim_tick_at');
+  const taskRunReadModel = store.taskRunReadModel();
   const daily = resolveMasterDailyEstimateWei(
     status?.masterEthDailyEstimateWei,
     status?.pollIntervalMs ?? 5000,
@@ -561,6 +562,7 @@ export async function gatherGatheredStatusRaw(
   let portfolioV0: ReturnType<typeof gatherPortfolioV0Status> | undefined;
   try {
     portfolioV0 = gatherPortfolioV0Status(
+      taskRunReadModel,
       store,
       status?.engine?.workingDirRoot ?? DEFAULT_ENGINE_WORKING_DIR_ROOT,
     );
@@ -570,7 +572,7 @@ export async function gatherGatheredStatusRaw(
 
   let taskRuns: ReturnType<typeof gatherTaskRunsStatus> | undefined;
   try {
-    taskRuns = gatherTaskRunsStatus(store);
+    taskRuns = gatherTaskRunsStatus(taskRunReadModel);
   } catch {
     taskRuns = undefined;
   }
@@ -604,7 +606,7 @@ export async function gatherGatheredStatusRaw(
 
   let predictionV1: PredictionV1Status | undefined;
   try {
-    predictionV1 = gatherPredictionV1Status(store, {
+    predictionV1 = gatherPredictionV1Status(taskRunReadModel, {
       operator: predictionOperator,
       operatorError: predictionOperatorError,
     });
@@ -775,7 +777,7 @@ export async function gatherStatusForApi(
   const body = assembleStatusV1(raw);
   // Loop-completion + impl-state commit cadence (#959). Both are read-only and
   // degrade to zeroes / an empty list — they never throw the status endpoint.
-  body.loopCompletion = gatherLoopCompletion(store);
+  body.loopCompletion = gatherLoopCompletion(store.taskRunReadModel());
   if (status?.engine?.implStateDirRoot) {
     body.implStateCadence = gatherImplStateCadence(status.engine.implStateDirRoot);
   }

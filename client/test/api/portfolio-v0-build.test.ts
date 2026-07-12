@@ -24,7 +24,7 @@ function seedIntent(
 describe('gatherPortfolioV0Status', () => {
   it('returns empty lists when no tasks exist', async () => {
     await withTempStore(async (store) => {
-      const result = gatherPortfolioV0Status(store);
+      const result = gatherPortfolioV0Status(store.taskRunReadModel(), store);
       expect(result.inFlight).toEqual([]);
       expect(result.recentVerdicts).toEqual([]);
       expect(result.recentSnapshots).toEqual([]);
@@ -37,7 +37,7 @@ describe('gatherPortfolioV0Status', () => {
       seedIntent(persistence, 'req-1');
       seedIntent(persistence, 'req-2');
 
-      const result = gatherPortfolioV0Status(store);
+      const result = gatherPortfolioV0Status(store.taskRunReadModel(), store);
       expect(result.inFlight).toHaveLength(2);
       expect(result.inFlight.map((i) => i.requestId)).toContain('req-1');
       expect(result.inFlight.map((i) => i.requestId)).toContain('req-2');
@@ -52,7 +52,7 @@ describe('gatherPortfolioV0Status', () => {
       seedIntent(persistence, 'req-fail');
       persistence.markFailed('req-fail', 'test failure reason');
 
-      const result = gatherPortfolioV0Status(store);
+      const result = gatherPortfolioV0Status(store.taskRunReadModel(), store);
       expect(result.inFlight).toHaveLength(0);
       expect(result.recentVerdicts).toHaveLength(1);
       expect(result.recentVerdicts[0].requestId).toBe('req-fail');
@@ -72,7 +72,7 @@ describe('gatherPortfolioV0Status', () => {
         .prepare('UPDATE task_runs SET delivery_tx_hash = ? WHERE request_id = ?')
         .run('0xdeadbeef', 'req-settled-fail');
 
-      const result = gatherPortfolioV0Status(store);
+      const result = gatherPortfolioV0Status(store.taskRunReadModel(), store);
       expect(result.totals.failed).toBe(2);
       expect(result.totals.settledFailed).toBe(1);
       expect(result.totals.localErrors).toBe(1);
@@ -118,7 +118,7 @@ describe('gatherPortfolioV0Status', () => {
       });
       persistence.markFailed('swe-failed', 'swe failure');
 
-      const result = gatherPortfolioV0Status(store);
+      const result = gatherPortfolioV0Status(store.taskRunReadModel(), store);
 
       // Only portfolio.v0 rows are counted.
       expect(result.totals.delivered).toBe(1);
@@ -173,7 +173,7 @@ describe('gatherPortfolioV0Status', () => {
         'legacy-pv0',
       );
 
-      const result = gatherPortfolioV0Status(store);
+      const result = gatherPortfolioV0Status(store.taskRunReadModel(), store);
 
       expect(result.totals.active).toBe(1);
       expect(result.totals.failed).toBe(1);
@@ -187,7 +187,7 @@ describe('gatherPortfolioV0Status', () => {
       const persistence = new TaskRunPersistence(store.db);
       seedIntent(persistence, 'req-spec');
 
-      const result = gatherPortfolioV0Status(store);
+      const result = gatherPortfolioV0Status(store.taskRunReadModel(), store);
       expect(result.inFlight[0].solverType).toBe('portfolio.v0');
       expect(result.inFlight[0].implName).toBeNull(); // not yet assigned
     });
@@ -214,7 +214,7 @@ describe('gatherPortfolioV0Status', () => {
         outcome: 'SUCCESS',
       });
 
-      const result = gatherPortfolioV0Status(store);
+      const result = gatherPortfolioV0Status(store.taskRunReadModel(), store);
       expect(result.recentSnapshots).toHaveLength(1);
       expect(result.recentSnapshots[0].id).toBe('snap-1');
       expect(result.recentSnapshots[0].requestId).toBe('req-snap');

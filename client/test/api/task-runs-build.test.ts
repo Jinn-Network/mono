@@ -37,7 +37,7 @@ describe('gatherTaskRunsStatus', () => {
       store.db.prepare(`UPDATE task_runs SET state = 'FAILED', state_updated_at = ?, failure_reason = ? WHERE request_id = ?`)
         .run(5_000, 'boom', 'evaluation-failed');
 
-      const status = gatherTaskRunsStatus(store);
+      const status = gatherTaskRunsStatus(store.taskRunReadModel());
 
       expect(status.totals).toEqual({
         observedTasks: 4,
@@ -72,7 +72,7 @@ describe('gatherTaskRunsStatus', () => {
       store.db.prepare(`UPDATE task_runs SET state = 'FAILED', state_updated_at = ?, failure_reason = ? WHERE request_id = ?`)
         .run(1_600, 'runner crashed', 'genuine-fail');
 
-      const status = gatherTaskRunsStatus(store);
+      const status = gatherTaskRunsStatus(store.taskRunReadModel());
 
       expect(status.totals.failed).toBe(1);
       expect(status.totals.raceLost).toBe(1);
@@ -127,7 +127,7 @@ describe('gatherTaskRunsStatus', () => {
         )
         .run(1_300, 'verdict rejected', '0xfeedface', 'settled-fail-eval');
 
-      const status = gatherTaskRunsStatus(store);
+      const status = gatherTaskRunsStatus(store.taskRunReadModel());
 
       expect(status.totals.failed).toBe(3);
       expect(status.totals.settledFailed).toBe(2);
@@ -145,7 +145,7 @@ describe('gatherTaskRunsStatus', () => {
         runStartedAt: 10_000,
       });
 
-      const status = gatherTaskRunsStatus(store);
+      const status = gatherTaskRunsStatus(store.taskRunReadModel());
 
       expect(status.inFlight[0]).toMatchObject({
         requestId: 'fresh-claim',

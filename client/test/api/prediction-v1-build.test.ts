@@ -65,7 +65,7 @@ function seedPredictionRun(
 describe('gatherPredictionV1Status', () => {
   it('returns empty lifecycle rows when no prediction tasks exist', async () => {
     await withTempStore(async (store) => {
-      const result = gatherPredictionV1Status(store);
+      const result = gatherPredictionV1Status(store.taskRunReadModel());
       expect(result.operator).toBeNull();
       expect(result.totals).toEqual({
         observedTasks: 0,
@@ -117,7 +117,7 @@ describe('gatherPredictionV1Status', () => {
         solverType: 'portfolio.v0',
       });
 
-      const result = gatherPredictionV1Status(store, {
+      const result = gatherPredictionV1Status(store.taskRunReadModel(), {
         operator: {
           kind: 'prediction.v1.operatorStatus',
           ok: true,
@@ -191,7 +191,7 @@ describe('gatherPredictionV1Status', () => {
         .prepare(`UPDATE task_runs SET delivery_tx_hash = ? WHERE request_id = ?`)
         .run('0xdeadbeef', 'settled-fail');
 
-      const result = gatherPredictionV1Status(store);
+      const result = gatherPredictionV1Status(store.taskRunReadModel());
 
       expect(result.totals.failed).toBe(2);
       expect(result.totals.settledFailed).toBe(1);
@@ -243,7 +243,7 @@ describe('gatherPredictionV1Status', () => {
         'legacy-prediction',
       );
 
-      const result = gatherPredictionV1Status(store);
+      const result = gatherPredictionV1Status(store.taskRunReadModel());
 
       expect(result.totals.observedTasks).toBe(2);
       expect(result.totals.activeTaskRuns).toBe(1);
@@ -264,7 +264,7 @@ describe('gatherPredictionV1Status', () => {
         stateUpdatedAt: 60_000,
       });
 
-      const result = gatherPredictionV1Status(store);
+      const result = gatherPredictionV1Status(store.taskRunReadModel());
 
       expect(result.recentTasks[0]).toMatchObject({
         requestId: 'recent-prediction-claim',

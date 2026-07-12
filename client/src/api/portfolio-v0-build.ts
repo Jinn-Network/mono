@@ -13,8 +13,8 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { Store } from '../store/store.js';
-import { TaskRunPersistence } from '../harnesses/engine/persistence.js';
-import type { PersistedTaskRun } from '../harnesses/engine/persistence.js';
+import type { PersistedTaskRun } from '../types/task-run.js';
+import type { TaskRunReadModel } from '../types/task-run-read-model.js';
 import { taskRunRoutingKey } from './task-run-routing.js';
 
 /** Default per-task engine work root; kept in sync with `config.engine.workingDirRoot`. */
@@ -155,20 +155,19 @@ function toVerdict(task: PersistedTaskRun): VerdictSummary {
  * construction, so this is always present when the daemon is running).
  */
 export function gatherPortfolioV0Status(
+  runs: TaskRunReadModel,
   store: Store,
   workingDirRoot: string = DEFAULT_ENGINE_WORKING_DIR_ROOT,
 ): PortfolioV0Status {
-  const persistence = new TaskRunPersistence(store.db);
-
   // portfolio.v0 is a solver-specific status payload — filter task_runs by
   // the daemon's internal routing key so other SolverNets' runs don't leak
   // into these counters (jinn-mono-0t6p) while historical rows can still be
   // classified from canonical `contractId` / `contractVersion` or the legacy
   // `task_payload.solverType` alias.
-  const inFlight = persistence.getInFlight().filter(isPortfolioV0Run);
-  const complete = persistence.getByState('COMPLETE').filter(isPortfolioV0Run);
-  const failed = persistence.getByState('FAILED').filter(isPortfolioV0Run);
-  const raceLost = persistence.getByState('RACE_LOST').filter(isPortfolioV0Run);
+  const inFlight = runs.getInFlight().filter(isPortfolioV0Run);
+  const complete = runs.getByState('COMPLETE').filter(isPortfolioV0Run);
+  const failed = runs.getByState('FAILED').filter(isPortfolioV0Run);
+  const raceLost = runs.getByState('RACE_LOST').filter(isPortfolioV0Run);
 
   const inFlightSummaries = inFlight.map(toInFlightTask);
 

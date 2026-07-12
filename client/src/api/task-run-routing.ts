@@ -1,4 +1,4 @@
-import type { PersistedTaskRun } from '../harnesses/engine/persistence.js';
+import type { PersistedTaskRun } from '../types/task-run.js';
 
 /**
  * Mirrors the daemon's internal routing-key compatibility logic so status

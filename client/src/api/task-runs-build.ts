@@ -1,5 +1,5 @@
-import type { Store } from '../store/store.js';
-import { TaskRunPersistence, type PersistedTaskRun } from '../harnesses/engine/persistence.js';
+import type { PersistedTaskRun } from '../types/task-run.js';
+import type { TaskRunReadModel } from '../types/task-run-read-model.js';
 
 /**
  * Cap on how many task runs the /v1/status payload carries. The operator
@@ -69,12 +69,11 @@ export interface TaskRunsStatus {
   recentTasks: TaskRunSummary[];
 }
 
-export function gatherTaskRunsStatus(store: Store): TaskRunsStatus {
-  const persistence = new TaskRunPersistence(store.db);
-  const inFlight = persistence.getInFlight();
-  const complete = persistence.getByState('COMPLETE');
-  const failed = persistence.getByState('FAILED');
-  const raceLost = persistence.getByState('RACE_LOST');
+export function gatherTaskRunsStatus(runs: TaskRunReadModel): TaskRunsStatus {
+  const inFlight = runs.getInFlight();
+  const complete = runs.getByState('COMPLETE');
+  const failed = runs.getByState('FAILED');
+  const raceLost = runs.getByState('RACE_LOST');
   // race-loss rows belong in the recentTasks feed so operators can audit
   // them, but they must NOT be folded into `failed` (#896).
   const allRuns = [...inFlight, ...complete, ...failed, ...raceLost];
