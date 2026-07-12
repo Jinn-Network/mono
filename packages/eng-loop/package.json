@@ -6,6 +6,7 @@
   "packageManager": "yarn@4.13.0",
   "bin": {
     "jinn-merge-batch": "./bin/jinn-merge-batch.ts",
+    "jinn-run-stage": "./bin/jinn-run-stage.ts",
     "jinn-triage-check": "./bin/jinn-triage-check.ts"
   },
   "scripts": {
@@ -14,6 +15,7 @@
     "pressure": "tsx scripts/run-pressure-suite.ts",
     "eng:loop": "tsx scripts/run-eng-loop.ts",
     "merge:batch": "tsx bin/jinn-merge-batch.ts",
+    "stage:run": "tsx bin/jinn-run-stage.ts",
     "triage:check": "tsx bin/jinn-triage-check.ts"
   },
   "devDependencies": {

@@ -1,11 +1,11 @@
 ---
 name: implement-issue
-description: Use when asked to implement a specific GitHub issue — e.g. "implement issue #N", "run the pipeline on this issue", "take this issue to a PR". Coordinates the full autonomous superpowers pipeline for exactly one triaged issue, dispatching fresh subagents per stage, from worktree setup to a reviewed draft PR against `next`.
+description: Use when asked to implement a specific GitHub issue — e.g. "implement issue #N", "run the pipeline on this issue", "take this issue to a PR". Coordinates the full autonomous superpowers pipeline for exactly one triaged issue — depth-needing stages run as `claude -p` root sessions, lightweight stages as Agent-tool sub-agents — from worktree setup to a reviewed draft PR against `next`.
 ---
 
 # implement-issue
 
-You are the coordinating agent for exactly one triaged GitHub issue. Your job is to take it from triaged-issue to a reviewed, app-tested **draft PR** against `next`, by dispatching a fresh subagent per pipeline stage. You own the finding→fix loop and the escalation decision; you do not implement directly.
+You are the coordinating agent for exactly one triaged GitHub issue. Your job is to take it from triaged-issue to a reviewed, app-tested **draft PR** against `next`. The depth-needing stages (Design, Implement, `/code-review`, Independent review) run as their **own `claude -p` root sessions** in the shared worktree — invoked via the `stage:run` CLI — so their composed skills can fan out sub-agents at depth-1; the lightweight stages run as Agent-tool sub-agents. You own the finding→fix loop and the escalation decision; you do not implement directly.
 
 ## Read first
 
@@ -194,13 +194,18 @@ Stages scale to **Issue Type + Effort**:
 | `High` any shape | Run all stages fully. |
 | `refactor` (any Effort) | Stage 1 is mandatory and must not be compressed — design upfront is a handbook requirement for this shape. |
 
-**Rule:** Each stage is performed by dispatching a **fresh subagent** — the coordinating agent never implements inline. See Step 4 for dispatch discipline.
+**Rule:** Every stage runs in a fresh context — the coordinating agent never implements inline. The dispatch mechanism splits by whether the stage's composed skill needs to fan out its own sub-agents:
+
+- **Depth-needing stages — 1 (Design), 3 (Implement), 4 (`/code-review`), 5 (Independent review)** run as a fresh **`claude -p` root session** in the worktree, launched via `stage:run` (Step 4). Because these sessions are depth-0, their composed skills (`brainstorming` parallel design-alts, `subagent-driven-development` one-agent-per-task, `code-review` / `requesting-code-review` parallel diff-analysis) can spawn sub-agents at depth-1. Dispatching them as an Agent-tool sub-agent would sit at depth-1, and their inner fan-out — forbidden at depth-2 — would silently no-op.
+- **Lightweight stages — 2 (Plan), 6 (Security review), 7 (Jinn-app test), 8 (Verify + PR)** stay **Agent-tool sub-agents** — they don't fan out, so the extra `claude -p` boot cost buys nothing.
+
+See Step 4 for dispatch discipline.
 
 ---
 
 ### Stage 1 — Design
 
-**Dispatcher:** dispatch a design subagent.
+**Dispatcher:** run as a `claude -p` root session via `stage:run` (see Step 4).
 
 **Prompt the subagent to:** run `superpowers:brainstorming` headlessly — explore the codebase for relevant code, constraints, and existing patterns; then write a short design note (target: 1–3 paragraphs) that names the chosen approach and the key trade-offs considered.
 
@@ -220,7 +225,7 @@ Stages scale to **Issue Type + Effort**:
 
 ### Stage 3 — Implement
 
-**Dispatcher:** dispatch an implement subagent, giving it the design note and the plan. Remember the identity of this subagent — the reviewer (Stage 5) must be a **different** subagent.
+**Dispatcher:** run as a `claude -p` root session via `stage:run` (see Step 4), giving it the design note and the plan. Remember that this is the implementer session — the reviewer (Stage 5) must be a **different**, independent `stage:run` session.
 
 **Prompt the subagent to:** run `superpowers:test-driven-development` then `superpowers:executing-plans`. For a `fix` shape: write the regression test first, watch it fail, then implement the fix. For all shapes: tests must be written before or alongside implementation.
 
@@ -236,7 +241,7 @@ If the log is empty, dispatch a fix subagent before continuing.
 
 ### Stage 4 — `/code-review`
 
-**Dispatcher:** dispatch a code-review subagent.
+**Dispatcher:** run as a `claude -p` root session via `stage:run` (see Step 4).
 
 **Prompt the subagent to:** run the `/code-review` skill on the diff — tighten it for reuse, clarity, and minimal surface area, and self-review the change. If the pass reveals a structural problem (not just style), the subagent raises it as a finding (routes back through Stage 5 finding handling).
 
@@ -244,7 +249,7 @@ If the log is empty, dispatch a fix subagent before continuing.
 
 ### Stage 5 — Independent review
 
-**Dispatcher:** dispatch a **fresh** subagent that has not seen the Stage 3 implementer's work — independence is free when context is clean. This subagent must be different from the Stage 3 implementer.
+**Dispatcher:** run as a **fresh** `claude -p` root session via `stage:run` (see Step 4) that has not seen the Stage 3 implementer's work — independence is free when context is clean. This session must be a **separate** `stage:run` invocation from the Stage 3 implementer.
 
 **Prompt the subagent to:** run `superpowers:requesting-code-review` using the code-reviewer template. The reviewer has **send-back authority** — it may reject changes and enumerate findings. Give it: the diff, the issue body, the acceptance criteria.
 
@@ -371,17 +376,41 @@ git worktree add -B "$BRANCH" "$WORKTREE_PATH" "origin/${BRANCH}"
 
 ---
 
-## Step 4 — Subagent-dispatch discipline
+## Step 4 — Stage-dispatch discipline
 
 ### Curated prompt, not forwarded history
 
-Each subagent receives a **curated prompt** containing:
+Each stage session (whether a `stage:run` root session or an Agent-tool sub-agent) receives a **curated prompt** containing:
 - The stage's task, verbatim from the relevant step above
 - The issue body (context, impact, acceptance criteria, file hints)
 - The worktree path and branch name
 - Relevant prior-stage outputs (design note for Stage 2; design note + plan for Stage 3; etc.)
 
-Never forward the coordinator's own conversation history to a subagent. Keep each subagent's context minimal and task-specific. Bloated context degrades output quality and wastes budget.
+Never forward the coordinator's own conversation history to a stage. Keep each stage's context minimal and task-specific. Bloated context degrades output quality and wastes budget.
+
+### Running a depth-needing stage via `stage:run`
+
+Stages 1, 3, 4, 5 must run as `claude -p` **root sessions** so their composed skills can fan out sub-agents at depth-1. Launch each one with the `stage:run` CLI — the same shape as the Step 1.5 `triage:check` invocation:
+
+```bash
+# 1. Write the curated prompt to a temp file. Include the stage task + issue
+#    body/ACs + worktree path/branch + relevant prior-stage outputs.
+#    Do NOT include the headless-override block — runStageHeadless prepends it
+#    (embedding it here would double-inject it).
+cat > /tmp/stage-<N>-<stage>.md <<'EOF'
+<curated stage prompt>
+EOF
+
+# 2. Run the stage as a root session in the worktree. --model is optional.
+yarn workspace @jinn-network/eng-loop stage:run \
+  --prompt-file /tmp/stage-<N>-<stage>.md \
+  --worktree "$WORKTREE_PATH" \
+  [--model <model>]
+```
+
+The child's stdout is streamed back — read it as the stage report, exactly as you read an Agent-tool sub-agent's report. Because the session runs at depth-0, its composed skill's sub-agents spawn at depth-1 (the depth-2 restriction that silently no-ops an Agent-tool-dispatched stage does not apply). The session runs with `cwd = $WORKTREE_PATH`, so worktree isolation is unchanged.
+
+The lightweight stages (2, 6, 7, 8) stay Agent-tool sub-agents — dispatch them the usual way with the same curated prompt.
 
 ### Computing the change's diff
 
@@ -395,15 +424,19 @@ git diff $(git merge-base origin/next HEAD)..HEAD
 
 ### Independence invariant
 
-**The Stage 3 implementer and the Stage 5 reviewer must be different subagents.** The coordinator enforces this — they are never the same dispatch. Re-review after a fix stays with the independent reviewer.
+**The Stage 3 implementer and the Stage 5 reviewer must be different sessions.** Both run as `stage:run` root sessions (Step 4) — they are two **separate** `stage:run` invocations, never the same one. Running them as distinct `claude -p` sessions strengthens the "reviewer ≠ implementer" isolation, not weakens it. Re-review after a fix stays with the independent reviewer.
 
 ### After each stage
 
-The coordinator reads the subagent's report and decides: proceed to the next stage, or route to finding handling. The coordinator does not forward-continue until it is satisfied the stage is complete and sound.
+The coordinator reads the stage's report (a `stage:run` session's streamed stdout, or an Agent-tool sub-agent's report) and decides: proceed to the next stage, or route to finding handling. The coordinator does not forward-continue until it is satisfied the stage is complete and sound.
 
 ### Zero-commit guard (repeated rule)
 
-After Stages 3 and 8, the coordinator verifies git/PR state with `git log` and `gh pr list` respectively. **It never trusts a subagent's "done" claim.** Agents sometimes report success without committing. The external check is mandatory.
+After Stages 3 and 8, the coordinator verifies git/PR state with `git log` and `gh pr list` respectively. **It never trusts a stage's "done" claim.** These guards run in the shared worktree regardless of how the stage session was launched (`stage:run` root session or Agent-tool sub-agent). Agents sometimes report success without committing. The external check is mandatory:
+
+```bash
+git -C "$WORKTREE_PATH" log origin/next..HEAD --oneline
+```
 
 ---
 
@@ -469,7 +502,7 @@ After the first push, **stop** — do not proceed to Stage 3 or open a PR. Write
 
 ## Step 7 — Headless-mode note
 
-When this skill runs in a headless session (dispatched by `eng-orchestrator` with `-p` / `--print`), the caller injects the headless-override block from `packages/eng-loop/headless-override.md` at the top of the coordinating agent's prompt. The coordinator and all subagents then make approval decisions themselves — they do not wait for user input.
+When this skill runs in a headless session (dispatched by `eng-orchestrator` with `-p` / `--print`), the caller injects the headless-override block from `packages/eng-loop/headless-override.md` at the top of the coordinating agent's prompt. The coordinator and all subagents then make approval decisions themselves — they do not wait for user input. For the depth-needing stages launched via `stage:run`, the same override block is prepended automatically by `runStageHeadless` — so the curated prompt-file you write must **not** include it (see Step 4).
 
 When run interactively (Phase 1, hand-cranked), the human is present for genuine escalations.
 
