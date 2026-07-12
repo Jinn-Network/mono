@@ -1306,6 +1306,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     .filter((entry) => entry.roles.includes('solver'))
     .map((entry) => entry.manifestCid);
 
+  // #547: only scan/ingest evaluation opportunities when this operator holds the
+  // evaluator role in at least one joined SolverNet. The join applier flips this
+  // on live via adapter.setEvaluatorEnabled(true).
+  const evaluatorEnabled = Object.values(config.joinedSolverNets ?? {})
+    .some((entry) => entry.roles.includes('evaluator'));
+
   // ── DiscoveryAPI construction ─────────────────────────────────────────────
   // Build the shared DiscoveryAPI used by MechAdapter (task discovery),
   // the SolverNet registry client (lifecycle status), and the corpus library
@@ -1387,6 +1393,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     routerClaimDeliveryVariant: CHAIN_CONFIG.routerClaimDeliveryVersion,
     evictionRecovery,
     taskDiscovery,
+    evaluatorEnabled,
   }, sharedStore);
 
   // ── TaskEngine wiring ─────────────────────────────────────────────────
@@ -2277,6 +2284,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     readiness: harnessReadinessRegistry,
     registry: solverNetRegistry,
     config,
+    enableEvaluator: () => adapter.setEvaluatorEnabled(true),
   });
 
   if (config.watchdogAutoRestart) {
