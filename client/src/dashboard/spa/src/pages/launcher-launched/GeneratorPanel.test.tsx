@@ -329,14 +329,31 @@ describe('GeneratorPanel', () => {
     ).toBe('astropy__astropy-14096');
   });
 
-  it('renders — for total-posted / last-posted when the generator omits them', () => {
+  it('self-hides total-posted / last-posted rows when the generator omits them', () => {
     render(<GeneratorPanel record={buildSweRebenchRecord()} onSave={async () => undefined} />);
     expect(
-      screen.getByTestId('launcher-launched-generator-total-posted').textContent,
-    ).toBe('—');
+      screen.queryByTestId('launcher-launched-generator-total-posted'),
+    ).toBeNull();
     expect(
-      screen.getByTestId('launcher-launched-generator-last-posted').textContent,
-    ).toBe('—');
+      screen.queryByTestId('launcher-launched-generator-last-posted'),
+    ).toBeNull();
+  });
+
+  it('renders total-posted "0" boundary as a row', () => {
+    render(
+      <GeneratorPanel
+        record={buildSweRebenchRecord({
+          generatorState: {
+            lastPollAt: '2026-05-05T15:00:00Z',
+            totalPosted: 0,
+          },
+        })}
+        onSave={async () => undefined}
+      />,
+    );
+    expect(
+      screen.getByTestId('launcher-launched-generator-total-posted').textContent,
+    ).toBe('0');
   });
 
   it('renders swe-rebench-v2 generator fields for swe launched records', () => {
