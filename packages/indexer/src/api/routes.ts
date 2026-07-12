@@ -603,10 +603,9 @@ export function buildCorpusList(
   // Cluster filter (#1414): exact, case-sensitive match on the primary tag,
   // applied AFTER the seed-exclusion loop (so seedsExcluded stays a pre-filter
   // provenance stat) and BEFORE sort/slice (so total reflects the filtered set).
-  const filtered =
-    typeof opts.cluster === 'string' && opts.cluster !== ''
-      ? all.filter((r) => r.cluster === opts.cluster)
-      : all;
+  const filtered = opts.cluster
+    ? all.filter((r) => r.cluster === opts.cluster)
+    : all;
 
   filtered.sort((a, b) => compareCorpus(a, b, sortKey, factor));
 

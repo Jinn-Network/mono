@@ -28,6 +28,23 @@ import { int } from '../lib/format';
 
 const PAGE_SIZE = 25;
 
+// Shared ghost-button token block (mono uppercase, hairline border, transparent
+// fill) used by the Pager's Prev/Next and the active-filter Clear control.
+// `padding` is the only per-use knob.
+const ghostButtonStyle = (padding: string) =>
+  ({
+    fontFamily: 'var(--font-mono)',
+    fontSize: 10,
+    letterSpacing: '0.10em',
+    textTransform: 'uppercase' as const,
+    padding,
+    border: '1px solid var(--border)',
+    borderRadius: 'var(--radius-1)',
+    background: 'transparent',
+    color: 'var(--fg-muted)',
+    cursor: 'pointer',
+  }) as const;
+
 // ── Pager ─────────────────────────────────────────────────────────────────────
 
 function Pager({
@@ -49,14 +66,7 @@ function Pager({
 }) {
   const btnStyle = (disabled: boolean) =>
     ({
-      fontFamily: 'var(--font-mono)',
-      fontSize: 10,
-      letterSpacing: '0.10em',
-      textTransform: 'uppercase' as const,
-      padding: '5px 12px',
-      border: '1px solid var(--border)',
-      borderRadius: 'var(--radius-1)',
-      background: 'transparent',
+      ...ghostButtonStyle('5px 12px'),
       color: disabled ? 'var(--fg-dim)' : 'var(--fg-muted)',
       opacity: disabled ? 0.4 : 1,
       cursor: disabled ? 'not-allowed' : 'pointer',
@@ -181,18 +191,7 @@ export function CorpusView() {
               <button
                 aria-label="Clear cluster filter"
                 onClick={clearCluster}
-                style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 10,
-                  letterSpacing: '0.10em',
-                  textTransform: 'uppercase',
-                  padding: '3px 8px',
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-1)',
-                  background: 'transparent',
-                  color: 'var(--fg-muted)',
-                  cursor: 'pointer',
-                }}
+                style={ghostButtonStyle('3px 8px')}
               >
                 Clear ×
               </button>
