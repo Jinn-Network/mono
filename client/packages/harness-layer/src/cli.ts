@@ -69,6 +69,7 @@ import {
   createCodexMetaDistiller,
   DEFAULT_CODEX_MODEL,
   DEFAULT_MODEL as DEFAULT_CLAUDE_DISTILL_MODEL,
+  DISTILLER_CATALOG,
 } from './distill-llm.js';
 import { createLocalDistiller, createLocalSkillSink } from './distiller.js';
 import { parseSkillMarkdown, type SkillPackage } from './skill-package.js';
@@ -864,7 +865,8 @@ export async function runJinnLayerCli(
   const isSkillsInstall = verb === 'skills' && subverb === 'install';
   const isDistillRun = verb === 'distill' && subverb === 'run';
   const isDistillEvalPrep = verb === 'distill' && subverb === 'eval-prep';
-  const isDistill = verb === 'distill' && !isDistillRun && !isDistillEvalPrep;
+  const isDistillModels = verb === 'distill' && subverb === 'models';
+  const isDistill = verb === 'distill' && !isDistillRun && !isDistillEvalPrep && !isDistillModels;
   const isDeriveEnv = verb === 'derive-env';
   const isContract = verb === 'contract';
   const isSessionPickup = verb === 'session' && subverb === 'pickup';
@@ -873,7 +875,7 @@ export async function runJinnLayerCli(
   const isContributionPreview = verb === 'contribution' && subverb === 'preview';
   const isContributionLedger = verb === 'contribution' && subverb === 'ledger';
   const isContributionDisable = verb === 'contribution' && subverb === 'disable';
-  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed && !isSkillsInstall && !isDistillRun && !isDistillEvalPrep && !isDistill && !isDeriveEnv && !isContract && !isSessionPickup && !isSessionEnd && !isHistory && !isContributionPreview && !isContributionLedger && !isContributionDisable) {
+  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed && !isSkillsInstall && !isDistillRun && !isDistillEvalPrep && !isDistillModels && !isDistill && !isDeriveEnv && !isContract && !isSessionPickup && !isSessionEnd && !isHistory && !isContributionPreview && !isContributionLedger && !isContributionDisable) {
     writer.write(USAGE);
     return verb === undefined || verb === 'help' || verb === '--help' ? 0 : 2;
   }
@@ -1115,6 +1117,33 @@ export async function runJinnLayerCli(
     return result.errors.length > 0 ? 1 : 0;
   }
 
+  if (isDistillModels) {
+    const json = parsed.values.json as boolean;
+    const persisted = readDistillDefaults(distillModePath());
+    // Resolve exactly as a run would (minus per-run model-vs-provider nuance):
+    // flag > env > persisted > provider default, so the marked row is what a
+    // bare `distill` would actually use.
+    const rawProvider =
+      (parsed.values.distiller as string | undefined) ??
+      process.env['JINN_DISTILL_PROVIDER'] ??
+      persisted.distiller ??
+      'claude';
+    const provider = parseDistillProvider(rawProvider) ?? 'claude';
+    const defaultModel = provider === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_DISTILL_MODEL;
+    const model =
+      (parsed.values['distiller-model'] as string | undefined) ??
+      process.env['JINN_DISTILL_MODEL'] ??
+      persisted.distillerModel ??
+      defaultModel;
+    const resolved = { provider, model };
+    if (json) {
+      writer.write(JSON.stringify({ catalog: DISTILLER_CATALOG, resolved }) + '\n');
+    } else {
+      writer.write(renderDistillerModels({ catalog: DISTILLER_CATALOG, resolved }) + '\n');
+    }
+    return 0;
+  }
+
   if (isDistill) {
     const dd = opts.distillDeps ?? {};
     const json = parsed.values.json as boolean;
@@ -1330,7 +1359,7 @@ export async function runJinnLayerCli(
         }
         patch.distillerModel = setModel;
       }
-      writeDistilDefaults(patch, modePath);
+      writeDistillDefaults(patch, modePath);
       writer.write((json ? JSON.stringify(patch) : renderDistillerSet(patch)) + '\n');
       return 0;
     }
