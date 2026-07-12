@@ -1,26 +1,12 @@
 # Tier 2 scenarios
 
-Three scenarios, all multi-operator, all running against substrate-derived workspaces with an Anvil-fork-of-Base-Sepolia RPC. Tier 2 is invoked by `release-prep` during release-readiness Phase 5; not on every push.
+The automated gate runs **T2.2 + T2.4** (producer/evaluator loops against an Anvil-fork-of-Base-Sepolia RPC). T2.1 and T2.3 are retired/removed; their sections below are kept for provenance. Tier 2 is invoked by `release-prep` during release-readiness Phase 5; not on every push.
 
 The "what does this scenario actually exercise" contracts live in `testing-jinn-app` (one doc per scenario, Plan B). The "how is it wired and what's the runtime shape" details are below.
 
-## T2.1 — cross-operator-donation
+## T2.1 — cross-operator-donation (removed — retired)
 
-**Catches:** x402 + ERC-8128 handshake regressions; corpus indexer attribution bugs; payment-gated artifact access bugs. Designed to catch the #310 class of silent failure.
-
-**Contract:** [`testing-jinn-app/references/scenario-cross-op-donation.md`](../../testing-jinn-app/references/scenario-cross-op-donation.md)
-
-**Implementation:** `client/test/release/tier-2/T2.1-cross-op-donation.ts`
-
-**Wall-clock budget:** 5 minutes
-
-**Prerequisites:**
-- Substrate workspace via `substrate-copy` (gold operator homes under `~/jinn-dev/operators/`).
-- `BASE_SEPOLIA_RPC_URL` set (the scenario forks Base Sepolia; absent → clean `skip`).
-- Built `dist/bin/jinn.js` (the operator daemons are spawned subprocesses).
-- Real corpus surface: `GET /v1/artifacts/:sha256/content` (x402-gated serving), the `Corpus` library's `DiscoveryAPI` for envelope discovery, and `acquireArtifactWithPayment` for the buyer-side x402 dance — all proven by `client/test/e2e/corpus-x402.ts`.
-
-**Status:** Drives the real producer → on-chain attribution → consumer → x402-pay → retrieve → ERC-8128-verify flow. The speculative `/v1/corpus/*` REST endpoints in the original scenario plan were never built — corpus production is a side effect of task execution, not a REST call. T2.1 is `corpus-x402.ts` re-hosted into the Tier 2 substrate-workspace shape; it uses the on-chain `DiscoveryAPI` floor (no Ponder indexer) and hosts the producer's x402-configured `ApiServer` inside the workspace (the production daemon does not wire x402 onto its own `ApiServer`). See GH issue [#349](https://github.com/Jinn-Network/mono/issues/349).
+T2.1 was **retired** with the x402 payment layer (tokenless-OLAS pivot). Its impl `client/test/release/tier-2/T2.1-cross-op-donation.ts` is deleted; the x402 / corpus-donation surface it exercised is gone with the pivot. The original scenario contract is retained for provenance: [`testing-jinn-app/references/scenario-cross-op-donation.md`](../../testing-jinn-app/references/scenario-cross-op-donation.md).
 
 ## T2.2 — producer-evaluator-anvil-fork
 
@@ -48,31 +34,29 @@ The "what does this scenario actually exercise" contracts live in `testing-jinn-
 
 The substrate multi-op workspace from `setupTier2Scenario` is **not** used: those production daemons are pinned to the already-deployed Base Sepolia contracts and cannot be redirected at a freshly-deployed V3 router. The two in-process daemon-harness daemons can be, and the two-operator shape preserves the producer/evaluator contract. T2.2 returns `pass`/`fail` only — the missing-endpoint skip path is removed.
 
-## T2.3 — multi-op-spa-flow
+## T2.4 — producer-evaluator-swe-rebench
 
-**Catches:** Cross-op UI flows that pass with mocks but break with real daemons; SPA state synchronization; Launcher → Operator catalog visibility.
+**Catches:** swe-rebench-v2 on-chain producer → solve → deliver → evaluate → verdict loop regressions at the cheap tier.
 
-**Contract:** [`testing-jinn-app/references/scenario-multi-op-spa-flow.md`](../../testing-jinn-app/references/scenario-multi-op-spa-flow.md)
+**Implementation:** `client/test/release/tier-2/T2.4-producer-evaluator-swe-rebench.ts`
 
-**Implementation:** `client/test/dashboard/multi-op/launcher-join-flow.e2e.test.ts` (Playwright, invoked via subprocess from the orchestrator)
+**Approach:** the sibling of T2.2 for the `swe-rebench-v2.v1` solver type. A hermetic + deterministic StubHarness SOLVE leg (known-good `sympy__sympy-27510.patch` fixture, no LLM / network) drives the real `SweRebenchV2EvaluatorHarness` (Docker `eval.py`) EVALUATOR leg, which returns a classified `skip` (non-blocking) when Docker / the upstream repo / a scorable admission record is absent ([#898](https://github.com/Jinn-Network/mono/issues/898)). T3.1 asserts the real grading on real Base Sepolia.
 
-**Wall-clock budget:** 5 minutes
+## T2.3 — multi-op-spa-flow (removed — superseded)
 
-**Prerequisites:**
-- Substrate workspace via Plan A's `substrate-copy`.
-- SPA test-id attributes (`manifest-cid`, `operator-count`) — `manifest-cid` alias added in Task 9; `operator-count` surface NOT YET ADDED, see GH issue [#351](https://github.com/Jinn-Network/mono/issues/351).
-- The Playwright two-substrate-ops fixture at `client/test/dashboard/multi-op/fixtures/two-substrate-ops.ts`.
+The automated live-fork T2.3 gate was **removed** by DR-2026-06-03 / [#1014](https://github.com/Jinn-Network/mono/issues/1014) (deletion landed in [#960](https://github.com/Jinn-Network/mono/pull/960)). It was a Playwright browser E2E driven against a live Anvil fork + live daemons — a non-deterministic shape that flaked on multiple independent legs. `client/test/dashboard/multi-op/` (including `launcher-join-flow.e2e.test.ts`) is gone.
 
-**Current status (v0.1.6):** Will fail on the `operator-count` selector until the SPA grows that surface (issue #351).
+**Root cause it exposed:** the cross-operator IPFS-visibility bug (op-b fetching op-a's manifest by CID). Resolved by the shared-mock-IPFS helper — the `sharedMockIpfs` opt-in in `client/test/release/tier-2/tier-2-helpers.ts` (commit `727d133c6`), which points both daemons at one in-process `startMockIpfsServer()`. It is available for any Tier-2 scenario that wants a real cross-daemon manifest round-trip; no current gate scenario invokes it.
+
+**Deterministic replacement:** the operator-journey coverage now lives in `client/test/dashboard/solvernet-flow.e2e.test.ts` + `client/test/dashboard/join.e2e.test.ts` (`yarn e2e:app-flow`, hermetic gate).
+
+**Real cross-operator experience:** the MANUAL paired-flow gate — [`testing-jinn-app/references/scenario-multi-op-spa-flow.md`](../../testing-jinn-app/references/scenario-multi-op-spa-flow.md) — run by the Captain per DR-2026-06-08 (a human-run spot check, not automated).
 
 ## Parallelism
 
-All three scenarios run in parallel via `client/scripts/release/run-tier-2.ts`. Each gets its own:
-- Substrate workspace (port-isolated daemons)
-- Anvil fork
-- Ponder indexer (T2.3 only; T2.1 uses the on-chain DiscoveryAPI floor and T2.2 doesn't need it)
+The gate runs **T2.2 + T2.4** in parallel via `client/scripts/release/run-tier-2.ts`. Each gets its own port-isolated Anvil fork and evidence path.
 
-Total wall-clock at full parallelism ≈ max(scenario wall-clocks) ≈ 5 minutes.
+Total wall-clock at full parallelism ≈ max(scenario wall-clocks).
 
 ## RPC budget
 
@@ -94,18 +78,18 @@ This should keep one Tier 2 run under the per-key rate limit. Concurrent Tier 2 
 | Cross-op visibility lag exceeds budget | flake-timing | Retry once with extended timeout |
 | On-chain `verdictCode` not 1 in T2.2 | real-bug | BLOCKING — `PredictionV1Evaluator` scoring regression |
 | T2.2 op never claims/delivers/settles within budget | real-bug or flake-timing | inspect evidence log; flake on first, real-bug on retry |
-| Playwright selector miss in T2.3 | real-bug | UI changed without test-id update |
 
 ## Invocation
 
 ```bash
-# All three scenarios via the orchestrator
+# T2.2 + T2.4 via the orchestrator
 yarn release:tier-2 <candidate-version>
 
 # Per-scenario standalone
-yarn release:tier-2:T2.1
 yarn release:tier-2:T2.2
-yarn release:tier-2:T2.3
+
+# Deterministic operator-journey E2E (hermetic, outside the tier-2 orchestrator)
+yarn e2e:app-flow
 ```
 
 Output: `tier-2-evidence/<timestamp>/` with `summary.json`, `marker.txt`, per-scenario `.log` files.
