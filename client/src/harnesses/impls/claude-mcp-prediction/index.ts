@@ -12,9 +12,8 @@
  * rails, and the session cadence loop. Single-shot only.
  */
 
-import { writeFileSync, mkdirSync, existsSync, readFileSync, chmodSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readFileSync, chmodSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import type { Harness, HarnessContext, Solution, ReadyStatus } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS } from '../../types.js';
@@ -24,6 +23,7 @@ import { PredictionV1TaskSchema } from '../../../types/prediction.js';
 
 import { buildSessionPrompt } from './prompt.js';
 import { spawnSession } from './session-orchestrator.js';
+import { writeMcpServerScript } from '../claude-mcp-shared/mcp-server-script.js';
 import type { ClaudeMcpPredictionConfig, SubmissionState } from './types.js';
 
 // ── Impl ──────────────────────────────────────────────────────────────────────
@@ -250,55 +250,11 @@ export class ClaudeMcpPredictionImpl implements Harness {
 
 /**
  * Generate a wrapper script that spawns the jinn-prediction MCP server.
- * Follows the same "delegate to compiled mcp-tools.js" pattern as
- * _writeHlMcpServerScript — plain Node loads the wrapper, which imports
- * startMcpServer from the compiled file.
+ * Delegates to the shared writer, resolving the sibling compiled mcp-tools.js
+ * off this module's own import.meta.url.
  */
 export function _writePredictionMcpServerScript(outPath: string): void {
-  const __filename = fileURLToPath(import.meta.url);
-
-  // Resolve the COMPILED mcp-tools.js path. The wrapper is spawned by plain
-  // Node (not tsx) via --mcp-config, so it must import a .js file. After
-  // `yarn build` the compiled artifact lives at dist/.../mcp-tools.js.
-  //
-  // - Production (running from dist/): __filename is in /.../dist/... → sibling
-  //   mcp-tools.js exists.
-  // - Dev/test (running source via tsx/vitest): __filename is in /.../src/...
-  //   → rewrite path into /.../dist/... .
-  let mcpToolsPath = join(dirname(__filename), 'mcp-tools.js');
-  if (!existsSync(mcpToolsPath) && __filename.includes(`${'/'}src${'/'}`)) {
-    mcpToolsPath = __filename
-      .replace(`${'/'}src${'/'}`, `${'/'}dist${'/'}`)
-      .replace(/index\.(ts|js)$/, 'mcp-tools.js');
-  }
-
-  if (!existsSync(mcpToolsPath)) {
-    throw new Error(
-      `E_DAEMON_MUST_RUN_FROM_DIST: ${mcpToolsPath} does not exist. ` +
-      `The claude-mcp-prediction wrapper subprocess loads this compiled artifact. ` +
-      `Run \`yarn build\` before starting the daemon or isolation test.`,
-    );
-  }
-
-  const script = `#!/usr/bin/env node
-// Auto-generated jinn-prediction MCP wrapper — do not edit.
-// Delegates to the compiled mcp-tools module; no business logic in the wrapper.
-// Config (feed address, RPC url, submissionLogPath) is read from argv[2].
-import { readFileSync } from 'node:fs';
-import { startMcpServer } from ${JSON.stringify(mcpToolsPath)};
-
-const configPath = process.argv[2];
-if (!configPath) {
-  process.stderr.write('Usage: prediction-server.mjs <config-file-path>\\n');
-  process.exit(1);
-}
-
-const config = JSON.parse(readFileSync(configPath, 'utf-8'));
-await startMcpServer(config);
-`.trim();
-
-  writeFileSync(outPath, script, { encoding: 'utf-8', mode: 0o600 });
-  chmodSync(outPath, 0o600);
+  writeMcpServerScript(outPath, { callerFileUrl: import.meta.url, serverLabel: 'jinn-prediction' });
 }
 
 export default ClaudeMcpPredictionImpl;
