@@ -41,7 +41,7 @@ import { classifyRateLimitError } from '../src/dispatcher/rate-limit-error.js';
 import { GhPrSink } from '../src/dispatcher/delivery-sink.js';
 import type { DeliverySink } from '../src/dispatcher/delivery-sink.js';
 import { DEFAULT_CONFIG } from '../src/dispatcher/types.js';
-import type { DispatcherConfig, ReadyIssue, InFlightSession, SessionResult } from '../src/dispatcher/types.js';
+import type { DispatcherConfig, ReadyIssue, InFlightSession, SessionResult, ImplementerRule } from '../src/dispatcher/types.js';
 import { WallClock } from '../src/dispatcher/wall-clock.js';
 import { shouldRouteToSessions } from '../src/cli/routing.js';
 import { spawn } from 'node:child_process';
@@ -80,6 +80,32 @@ const REVIEW_BOT_LOGIN_ENV = 'JINN_REVIEW_BOT_LOGIN';
 const IMPL_GH_TOKEN_ENV = 'JINN_IMPL_GH_TOKEN';
 const REVIEW_GH_TOKEN_ENV = 'JINN_REVIEW_GH_TOKEN';
 
+/**
+ * Env var carrying the JSON implementer-routing policy (#887). Unset / blank /
+ * malformed degrades to [] (fall through to defaultImplementer) with a warning.
+ */
+const IMPLEMENTER_RULES_ENV = 'JINN_DISPATCHER_IMPLEMENTER_RULES';
+
+/** Valid `implementer` values (mirrors the `Implementer` union in types.ts). */
+const IMPLEMENTERS = ['claude', 'codex', 'cursor'] as const;
+/** Valid `effort` values (mirrors the `Effort` union in types.ts). */
+const EFFORTS = ['Low', 'Medium', 'High'] as const;
+/** Valid `shape` values (mirrors the `IssueShape` union in types.ts). */
+const SHAPES = [
+  'feat', 'fix', 'refactor', 'spike',
+  'chore', 'docs', 'test', 'incident', 'design',
+] as const;
+
+/** The optional predicate fields on an implementer rule and their allowed values. */
+const OPTIONAL_RULE_FIELDS = [
+  { key: 'effort', valid: EFFORTS },
+  { key: 'shape', valid: SHAPES },
+] as const;
+
+/** Whether `v` is one of the recognised literal values in `valid`. */
+const isMember = (valid: readonly string[], v: unknown): v is string =>
+  typeof v === 'string' && valid.includes(v);
+
 /** Parse the allowlist env var into a trimmed, non-empty string array. */
 function parseAuthorAllowlist(raw: string | undefined): string[] {
   if (raw == null) return [];
@@ -87,6 +113,62 @@ function parseAuthorAllowlist(raw: string | undefined): string[] {
     .split(',')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
+}
+
+/**
+ * Parse the implementer-routing policy env var (#887) into a validated
+ * `ImplementerRule[]`. Any input that is null/blank, not valid JSON, or not a
+ * JSON array degrades to `[]` (fall through to `defaultImplementer`) with a
+ * `console.warn`. Within a valid array, each entry is validated independently:
+ * an entry whose `implementer` is missing/unknown, or whose *present* `effort`
+ * or `shape` is not a recognised value, is dropped (with a warning naming the
+ * bad rule); surviving entries keep only `{ effort?, shape?, implementer }`.
+ */
+export function parseImplementerRules(raw: string | undefined): ImplementerRule[] {
+  if (raw == null || raw.trim().length === 0) return [];
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    console.warn(
+      `[eng:loop] WARNING: ${IMPLEMENTER_RULES_ENV} is not valid JSON — ignoring (0 rules).`,
+    );
+    return [];
+  }
+
+  if (!Array.isArray(parsed)) {
+    console.warn(
+      `[eng:loop] WARNING: ${IMPLEMENTER_RULES_ENV} must be a JSON array — ignoring (0 rules).`,
+    );
+    return [];
+  }
+
+  const out: ImplementerRule[] = [];
+  for (const entry of parsed) {
+    const e = entry as Record<string, unknown>;
+    if (!isMember(IMPLEMENTERS, e?.implementer)) {
+      console.warn(
+        `[eng:loop] WARNING: dropping implementer rule with missing/unknown implementer: ${JSON.stringify(entry)}`,
+      );
+      continue;
+    }
+    const bad = OPTIONAL_RULE_FIELDS.find(
+      ({ key, valid }) => e[key] !== undefined && !isMember(valid, e[key]),
+    );
+    if (bad) {
+      console.warn(
+        `[eng:loop] WARNING: dropping implementer rule with invalid ${bad.key}: ${JSON.stringify(entry)}`,
+      );
+      continue;
+    }
+    const rule: ImplementerRule = { implementer: e.implementer as ImplementerRule['implementer'] };
+    for (const { key } of OPTIONAL_RULE_FIELDS) {
+      if (e[key] !== undefined) rule[key] = e[key] as never;
+    }
+    out.push(rule);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -418,6 +500,7 @@ async function main(): Promise<void> {
     ...(capOk ? { concurrencyCap: capOverride } : {}),
     ...(bpOk ? { openPrBackpressure: bpOverride } : {}),
     authorAllowlist,
+    implementerRules: parseImplementerRules(process.env[IMPLEMENTER_RULES_ENV]),
     reviewBotLogin: process.env[REVIEW_BOT_LOGIN_ENV] ?? '',
     implGhToken: process.env[IMPL_GH_TOKEN_ENV] ?? '',
     reviewGhToken: process.env[REVIEW_GH_TOKEN_ENV] ?? '',

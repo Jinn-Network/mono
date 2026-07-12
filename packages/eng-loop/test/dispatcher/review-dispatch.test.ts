@@ -12,6 +12,7 @@ const PR: ReviewablePr = {
 };
 const CFG: DispatcherConfig = {
   concurrencyCap: 3, openPrBackpressure: 30, wallClockMs: 1, defaultImplementer: 'claude',
+  implementerRules: [],
   authorAllowlist: [], reviewCap: 3, engineReviewLabel: 'engine:review', reviewBotLogin: 'jinn-bot',
   implGhToken: '', reviewGhToken: '',
 };

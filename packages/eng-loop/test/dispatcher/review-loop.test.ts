@@ -5,6 +5,7 @@ import type { PolledPr, ReviewablePr, InFlightReview, DispatcherConfig } from '.
 
 const CFG: DispatcherConfig = {
   concurrencyCap: 3, openPrBackpressure: 30, wallClockMs: 1, defaultImplementer: 'claude',
+  implementerRules: [],
   // 'a' is the default PR author in pr(); allowlisting it lets these cycle
   // tests exercise dispatch (the review-side author gate, DR-2026-06-15, drops
   // non-allowlisted authors — covered directly in review-ready-filter.test.ts).

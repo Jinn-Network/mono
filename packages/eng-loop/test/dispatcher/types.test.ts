@@ -22,4 +22,8 @@ describe('review-loop types', () => {
     const s: InFlightReview = { prNumber: 42, branch: 'feat/42-x', worktreePath: '/p/pr-42', pid: 1, startedAt: 0 };
     expect(s.prNumber).toBe(42);
   });
+
+  it('DEFAULT_CONFIG.implementerRules is empty (no policy = single-implementer)', () => {
+    expect(DEFAULT_CONFIG.implementerRules).toEqual([]);
+  });
 });

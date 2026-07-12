@@ -12,6 +12,7 @@ import {
 } from './field-cache.js';
 import { buildHeadlessPrompt } from '../headless.js';
 import { sessionLogPath } from './session-log.js';
+import { resolveImplementer } from './implementer-policy.js';
 
 // ---------------------------------------------------------------------------
 // Repo root + canonical worktree base
@@ -244,7 +245,7 @@ export async function dispatchIssue(
   //    The scenario explicitly tells the session that the worktree is pre-created
   //    so the implement-issue skill's Step 2 skips worktree creation.
   const canon = loadCanon();
-  const implementer = cfg.defaultImplementer;
+  const implementer = resolveImplementer(issue, cfg);
   const scenario = [
     `Use the implement-issue skill on issue #${number}.`,
     `The default implementer for the inner pipeline is: ${implementer}.`,
@@ -278,7 +279,7 @@ export async function dispatchIssue(
 
   // AC#2: surface pid + log path on the dispatch log line so an operator can
   // tail the session straight from the cycle output.
-  console.log(`[dispatch] #${number} pid=${result.pid ?? 'unknown'} log=${logPath}`);
+  console.log(`[dispatch] #${number} impl=${implementer} pid=${result.pid ?? 'unknown'} log=${logPath}`);
 
   // 6. Return InFlightSession (logPath surfaced for downstream visibility).
   return {

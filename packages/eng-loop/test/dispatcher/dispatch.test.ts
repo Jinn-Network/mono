@@ -51,6 +51,7 @@ const CFG: DispatcherConfig = {
   openPrBackpressure: 5,
   wallClockMs: 4 * 60 * 60 * 1000,
   defaultImplementer: 'claude',
+  implementerRules: [],
   authorAllowlist: ['alice'],
   reviewCap: 3,
   engineReviewLabel: 'engine:review',
@@ -532,6 +533,56 @@ describe('dispatchIssue', () => {
     expect(line).toContain('#418');
     expect(line).toContain('pid=54321');
     expect(line).toContain(sessionLogPath(418));
+
+    logSpy.mockRestore();
+  });
+
+  // -------------------------------------------------------------------------
+  // #887 — implementer routing surfaced on the dispatch log line
+  // -------------------------------------------------------------------------
+
+  it('with DEFAULT_CONFIG (empty rules) logs impl=claude and leaves scenario/spawn unchanged (AC#2 regression)', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    // CFG carries no implementerRules (empty), so resolution falls through to
+    // defaultImplementer: 'claude'.
+    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+
+    const line = logSpy.mock.calls.map((c) => String(c[0])).find((s) => s.includes('[dispatch]'));
+    expect(line).toBeDefined();
+    expect(line).toContain('impl=claude');
+
+    // Scenario prompt unchanged: default implementer is claude.
+    const [spawnCall] = calls;
+    const pFlagIdx = spawnCall.args.indexOf('-p');
+    const prompt = spawnCall.args[pFlagIdx + 1];
+    expect(prompt).toContain('The default implementer for the inner pipeline is: claude.');
+
+    logSpy.mockRestore();
+  });
+
+  it('routes to codex when a rule matches the issue effort/shape (impl=codex in log + scenario)', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    // ISSUE is shape 'feat', effort 'Medium' — route it to codex.
+    const cfg: DispatcherConfig = {
+      ...CFG,
+      implementerRules: [{ shape: 'feat', effort: 'Medium', implementer: 'codex' }],
+    };
+    await dispatchIssue(ISSUE, cfg, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+
+    const line = logSpy.mock.calls.map((c) => String(c[0])).find((s) => s.includes('[dispatch]'));
+    expect(line).toBeDefined();
+    expect(line).toContain('impl=codex');
+
+    const [spawnCall] = calls;
+    const pFlagIdx = spawnCall.args.indexOf('-p');
+    const prompt = spawnCall.args[pFlagIdx + 1];
+    expect(prompt).toContain('The default implementer for the inner pipeline is: codex.');
 
     logSpy.mockRestore();
   });

@@ -85,6 +85,22 @@ export interface SessionResult {
   escalationStatus?: 'needs-decision' | 'blocked' | 'stuck';
 }
 
+/** The CLI implementer agents the dispatcher can route work to. */
+export type Implementer = 'claude' | 'codex' | 'cursor';
+
+/**
+ * One entry in the ordered implementer-routing policy. A rule matches an issue
+ * when *every* specified predicate holds: `effort` (if present) must equal the
+ * issue's Effort, and `shape` (if present) must equal the issue's Issue Type. A
+ * rule with neither `effort` nor `shape` matches every issue (a catch-all).
+ * Resolution is first-match-wins over the ordered `implementerRules` list.
+ */
+export interface ImplementerRule {
+  effort?: Effort;
+  shape?: IssueShape;
+  implementer: Implementer;
+}
+
 export interface DispatcherConfig {
   /** Max simultaneous sessions. Default 3; practical ceiling ~5–7. */
   concurrencyCap: number;
@@ -93,7 +109,14 @@ export interface DispatcherConfig {
   /** Per-session wall-clock ceiling, ms. Generous — hours. */
   wallClockMs: number;
   /** v1 default implementer; per-issue label can override. */
-  defaultImplementer: 'claude' | 'codex' | 'cursor';
+  defaultImplementer: Implementer;
+  /**
+   * Ordered implementer-routing policy (#887). Empty (the default) = fall
+   * through to `defaultImplementer` — today's single-implementer behaviour.
+   * First-match-wins; see `ImplementerRule`. Source of truth is
+   * `JINN_DISPATCHER_IMPLEMENTER_RULES` (runner-read JSON array).
+   */
+  implementerRules: ImplementerRule[];
   /**
    * GitHub logins whose issues the dispatcher may pick up (#497). Compared
    * case-insensitively against `PolledIssue.author`. Empty (the default) =
@@ -138,6 +161,7 @@ export const DEFAULT_CONFIG: DispatcherConfig = {
   openPrBackpressure: 30,
   wallClockMs: 4 * 60 * 60 * 1000,
   defaultImplementer: 'claude',
+  implementerRules: [],
   authorAllowlist: [],
   reviewCap: 3,
   engineReviewLabel: 'engine:review',
