@@ -94,6 +94,8 @@ import {
   renderPreview,
   renderConfirmLocal,
   renderModeSet,
+  renderDistillerSet,
+  renderDistillerModels,
   renderDeferredRun,
   renderRecorded,
   renderEmpty,
@@ -1005,6 +1007,8 @@ export async function runJinnLayerCli(
         meta: { type: 'boolean', default: false },
         distiller: { type: 'string' },
         'distiller-model': { type: 'string' },
+        'set-distiller': { type: 'string' },
+        'set-distiller-model': { type: 'string' },
         captures: { type: 'string' },
         'local-only': { type: 'boolean', default: false },
         where: { type: 'string' },
@@ -1302,6 +1306,32 @@ export async function runJinnLayerCli(
       }
       writeDistillMode(whereFlag, modePath);
       writer.write((json ? JSON.stringify({ where: whereFlag }) : renderModeSet(whereFlag)) + '\n');
+      return 0;
+    }
+
+    // 1496 — `--set-distiller[-model]`: the persistent distiller default setter.
+    // Scriptable, non-interactive; records the default and echoes it, runs nothing.
+    const setProvider = parsed.values['set-distiller'] as string | undefined;
+    const setModel = parsed.values['set-distiller-model'] as string | undefined;
+    if (setProvider !== undefined || setModel !== undefined) {
+      const patch: { distiller?: DistillProvider; distillerModel?: string } = {};
+      if (setProvider !== undefined) {
+        const provider = parseDistillProvider(setProvider);
+        if (!provider) {
+          writer.write(`error: distiller must be "claude" or "codex" (got ${JSON.stringify(setProvider)})\n\n${USAGE}`);
+          return 2;
+        }
+        patch.distiller = provider;
+      }
+      if (setModel !== undefined) {
+        if (setModel === '') {
+          writer.write(`error: --set-distiller-model must be a non-empty model id\n\n${USAGE}`);
+          return 2;
+        }
+        patch.distillerModel = setModel;
+      }
+      writeDistilDefaults(patch, modePath);
+      writer.write((json ? JSON.stringify(patch) : renderDistillerSet(patch)) + '\n');
       return 0;
     }
 
