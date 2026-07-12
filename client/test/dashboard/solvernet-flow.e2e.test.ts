@@ -873,6 +873,68 @@ test('Launcher lifecycle transitions: Pause, Resume, Retire send lifecycle reque
   ]);
 });
 
+test('Launched dashboard renders generator runtime posting activity (total posted + last posted) at the app surface (#471)', async ({
+  page,
+}) => {
+  await clearLocalStorage(page);
+  const state = makeMockState({
+    launchedRecord: buildLaunchedRecord({
+      generatorState: {
+        lastPollAt: '2026-05-05T15:00:00.000Z',
+        totalPosted: 7,
+        lastPostedInstanceId: 'astropy__astropy-14096',
+      },
+    }),
+  });
+  await mockDaemonApi(page, state);
+
+  await page.goto(dashboardUrl(`/launcher/launched/${SOLVER_NET_ID}`));
+  await expect(page.getByTestId('launcher-launched')).toBeVisible({
+    timeout: 10_000,
+  });
+
+  // Recent posting activity is exposed by the launched-record API's
+  // generatorState and rendered on the launched dashboard's generator panel.
+  await expect(
+    page.getByTestId('launcher-launched-generator-total-posted'),
+  ).toHaveText('7');
+  await expect(
+    page.getByTestId('launcher-launched-generator-last-posted'),
+  ).toHaveText('astropy__astropy-14096');
+  // Last poll also renders (sibling row in the same runtime-state grid).
+  await expect(
+    page.getByTestId('launcher-launched-generator-last-poll'),
+  ).not.toHaveText('—');
+});
+
+test('Launched dashboard self-hides total-posted / last-posted rows when the generator omits them (#471)', async ({
+  page,
+}) => {
+  await clearLocalStorage(page);
+  // buildLaunchedRecord's default generatorState carries only lastPollAt —
+  // the prediction.v1 generator does not emit totalPosted / lastPostedInstanceId.
+  const state = makeMockState({
+    launchedRecord: buildLaunchedRecord(),
+  });
+  await mockDaemonApi(page, state);
+
+  await page.goto(dashboardUrl(`/launcher/launched/${SOLVER_NET_ID}`));
+  await expect(page.getByTestId('launcher-launched')).toBeVisible({
+    timeout: 10_000,
+  });
+  // The generator panel is present…
+  await expect(
+    page.getByTestId('launcher-launched-generator-panel'),
+  ).toBeVisible();
+  // …but the two posting-activity rows self-hide when the fields are absent.
+  await expect(
+    page.getByTestId('launcher-launched-generator-total-posted'),
+  ).toHaveCount(0);
+  await expect(
+    page.getByTestId('launcher-launched-generator-last-posted'),
+  ).toHaveCount(0);
+});
+
 test('Operator catalog join flow writes manifest-cid keyed evaluator config from the launched registry', async ({
   page,
 }) => {
