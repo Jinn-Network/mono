@@ -15,19 +15,47 @@ export interface IdentityScrubConfig {
 const IPV4_PATTERN =
   /\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)\b/g;
 
+// Reserved-protocol tokens (jinn.span.kind, jinn.artifact.emit, …) are masked
+// out before identity scrubbing and restored after, so an identity token that
+// is a substring of a protocol token (e.g. username === 'jinn') cannot deface
+// the protocol namespace (#1474). The mask/restore is confined to this shared
+// function so all consumers (trajectory span-processor, artifact-scrub, capture
+// export) inherit the protection.
+const PROTOCOL_TOKEN_PATTERN = /\bjinn\.[A-Za-z0-9_.-]+/g;
+// Sentinels are framed by control characters (U+0001 … U+0002) that cannot
+// appear in identity tokens or normal trajectory content, so they never overlap
+// an identity substring and never leak an alphanumeric placeholder.
+const SENTINEL_OPEN = '';
+const SENTINEL_CLOSE = '';
+
 export function scrubIdentityString(s: string, cfg: IdentityScrubConfig): string {
+  // Mask reserved protocol tokens first so identity replacement can't rewrite
+  // a jinn.-prefixed token when an identity value is a substring of it.
+  const protectedTokens: string[] = [];
+  let out = s.replace(PROTOCOL_TOKEN_PATTERN, (match) => {
+    const idx = protectedTokens.push(match) - 1;
+    return `${SENTINEL_OPEN}${idx}${SENTINEL_CLOSE}`;
+  });
+
   // Order matters: email and full git-author name resolve first as
   // composite identifiers. Email-before-username avoids mangling addresses
   // whose local-part matches a username; gitAuthorName-before-hostname/
   // machineId avoids the symmetric trap where a name fragment is masked
   // by an earlier scrub.
-  let out = s;
   if (cfg.gitAuthorEmail) out = out.split(cfg.gitAuthorEmail).join('<EMAIL>');
   if (cfg.gitAuthorName) out = out.split(cfg.gitAuthorName).join('<AUTHOR>');
   if (cfg.username) out = out.split(cfg.username).join('<USER>');
   if (cfg.hostname) out = out.split(cfg.hostname).join('<HOST>');
   if (cfg.machineId) out = out.split(cfg.machineId).join('<MACHINE>');
   out = out.replace(IPV4_PATTERN, '<IPV4>');
+
+  // Restore protocol tokens byte-for-byte.
+  if (protectedTokens.length > 0) {
+    out = out.replace(
+      new RegExp(`${SENTINEL_OPEN}(\\d+)${SENTINEL_CLOSE}`, 'g'),
+      (_m, idx) => protectedTokens[Number(idx)],
+    );
+  }
   return out;
 }
 
