@@ -1148,9 +1148,15 @@ export function loadConfig(configPath?: string): JinnConfig {
       'Open Operator > SolverNets in the dashboard to re-join via the registry ' +
       '(replaces the synthetic legacy:* keys with real manifest CIDs).'
     );
-    // Persist the migration so the legacy block is pruned from disk (issue
-    // #445). Re-reads the raw file (never the env-merged object) so transient
-    // env overrides are not baked in; best-effort.
+  }
+  // Persist whenever the on-disk file carried a legacy `solverNets` block, even
+  // when every entry already had a `legacy:*` counterpart (migratedCount === 0):
+  // `migrateLegacySolverNets` deletes the block in-memory unconditionally, so
+  // gating the persist on migratedCount would leave the stale block on disk
+  // forever and re-trigger prediction code paths every boot (issue #445).
+  // Re-reads the raw file (never the env-merged object) so transient env
+  // overrides are not baked in; best-effort, and a no-op on already-clean files.
+  if ('solverNets' in fileValues) {
     persistLegacySolverNetsMigration(filePath);
   }
 

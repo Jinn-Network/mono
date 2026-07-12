@@ -888,6 +888,40 @@ describe('loadConfig legacy solverNets migration via loader', () => {
     });
   });
 
+  // Issue #445 — even when every legacy entry already has a `legacy:*`
+  // counterpart in joinedSolverNets (migratedCount === 0), the in-memory
+  // migration still deletes the `solverNets` block. If the persist is gated on
+  // migratedCount the stale block survives on disk forever, so in-memory
+  // (deleted) and on-disk (present) permanently disagree. Persist must run
+  // whenever the on-disk file carried a `solverNets` key.
+  it('prunes the legacy block from disk even when every entry was already migrated', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      rpcUrl: 'https://example/rpc',
+      solverNets: {
+        prediction: {
+          enabled: false,
+          solverType: 'prediction.v1',
+          harness: 'claude-code',
+          plugins: [],
+          taskGenerator: { enabled: true },
+        },
+      },
+      joinedSolverNets: {
+        'legacy:prediction': {
+          manifestCid: 'legacy:prediction',
+          name: 'prediction',
+          contract: { id: 'prediction', version: 'v1' },
+          roles: ['solver'],
+          harness: 'claude-code',
+        },
+      },
+    });
+    loadConfig(configPath);
+    const onDisk = JSON.parse(await readFile(configPath, 'utf-8')) as Record<string, unknown>;
+    expect(onDisk.solverNets).toBeUndefined();
+  });
+
   it('does not resurrect the legacy entry on a second load (restart-safe)', async () => {
     const configPath = await writeConfigFile({
       network: 'testnet',
