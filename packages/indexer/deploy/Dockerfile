@@ -96,4 +96,4 @@ EXPOSE 42069
 # schema, so they cannot collide. Set JINN_INDEXER_SCHEMA_AUTO=false +
 # DATABASE_SCHEMA to pin a name (must match on the enrichment worker too).
 # See deploy/README.md.
-CMD export DATABASE_SCHEMA="$(node deploy/derive-schema.mjs)" && exec node node_modules/ponder/dist/esm/bin/ponder.js start --views-schema=jinn_indexer
+CMD DATABASE_SCHEMA="$(node deploy/derive-schema.mjs)" && export DATABASE_SCHEMA && exec node node_modules/ponder/dist/esm/bin/ponder.js start --views-schema=jinn_indexer

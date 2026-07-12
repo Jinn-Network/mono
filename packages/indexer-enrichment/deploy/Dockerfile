@@ -104,4 +104,4 @@ EXPOSE 8738
 # DATABASE_SCHEMA is auto-derived from the shared ponder.schema.ts hash so it
 # always matches the indexer's data schema; JINN_INDEXER_SCHEMA_AUTO=false +
 # DATABASE_SCHEMA pins a name (set the SAME pair on both services).
-CMD export DATABASE_SCHEMA="$(node deploy/derive-schema.mjs)" && exec node dist/index.js
+CMD DATABASE_SCHEMA="$(node deploy/derive-schema.mjs)" && export DATABASE_SCHEMA && exec node dist/index.js
