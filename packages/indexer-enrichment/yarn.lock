@@ -696,9 +696,9 @@ __metadata:
     "@hono/node-server": "npm:^2.0.8"
     "@jinn-network/sdk": "portal:../sdk"
     drizzle-orm: "npm:^0.45.2"
-    hono: "npm:^4.12.29"
-    ponder: "npm:^0.16.8"
-    viem: "npm:^2.55.0"
+    hono: "npm:^4.12.30"
+    ponder: "npm:^0.16.9"
+    viem: "npm:^2.55.1"
   languageName: node
   linkType: soft
 
@@ -2298,10 +2298,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"hono@npm:^4.12.29":
-  version: 4.12.29
-  resolution: "hono@npm:4.12.29"
-  checksum: 10c0/ee56efba993e765088c8e160e3e6fbe28138e0ae84a9f0e810917ef7cbb4dff2c50c947cabad1ec4852a5baf0225354a9e6dc8da9da66af0b0827e842a1870f7
+"hono@npm:^4.12.30":
+  version: 4.12.30
+  resolution: "hono@npm:4.12.30"
+  checksum: 10c0/3262ba275e44dc9515032e15aa6a88e8915bc65f5a4b9a1bc538f3ac2bdd19aa2235e6e2fdd6af3b0e5551c162856c3dccd4f353e721c43fe81e5f3268573dde
   languageName: node
   linkType: hard
 
@@ -2953,7 +2953,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ponder@npm:^0.16.8":
+"ponder@npm:^0.16.9":
   version: 0.16.9
   resolution: "ponder@npm:0.16.9"
   dependencies:
@@ -3639,9 +3639,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"viem@npm:^2.55.0":
-  version: 2.55.0
-  resolution: "viem@npm:2.55.0"
+"viem@npm:^2.55.1":
+  version: 2.55.1
+  resolution: "viem@npm:2.55.1"
   dependencies:
     "@noble/curves": "npm:1.9.1"
     "@noble/hashes": "npm:1.8.0"
@@ -3656,7 +3656,7 @@ __metadata:
   peerDependenciesMeta:
     typescript:
       optional: true
-  checksum: 10c0/6baed9096ed427397c137b4d313719a86012fc0812a36924667f5b972c0940755d05f49d8b87442d97e0184c4bbf4e208221b712b27cce5c677cdb03e9a3895b
+  checksum: 10c0/4747450c511604dc2280b94b6a6eab53638058a559531f7707d31f21de51670449530f9ebc2fbc06d961b8b5a6cfadb920683e701058adc8996619b012bbc56d
   languageName: node
   linkType: hard
 
