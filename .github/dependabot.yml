@@ -15,9 +15,10 @@
 #     blanket "no majors" rule: anything not in the list still surfaces
 #     as a PR, which is how we hear about drift.
 #
-# Adding a new live npm manifest? Add an entry below. To accept a major
-# bump that's currently ignored, remove the corresponding entry from
-# `npm-major-ignores` AND close out the migration row in #768.
+# Adding a new live npm manifest? Add an entry below, copying the inline
+# `ignore:` block verbatim (see the note at the first npm entry). To accept
+# a major bump that's currently ignored, remove that dependency's line from
+# the ignore block on EVERY npm entry AND close out the migration row in #768.
 
 version: 2
 updates:
@@ -34,9 +35,10 @@ updates:
           - patch
 
   # Live npm components — Jinn daemon + dashboard SPA.
-  # First npm entry defines the shared `npm-major-ignores` anchor that
-  # subsequent entries reference. Adding/removing a dep here applies to
-  # every npm manifest.
+  # The major-ignore list below is duplicated verbatim on every npm entry.
+  # Dependabot does NOT support YAML aliases (dependabot/dependabot-core#1582);
+  # a shared &anchor / *alias silently invalidates the whole config — which
+  # disables grouping AND the ignore list — so keep these blocks in sync by hand.
   - package-ecosystem: npm
     directory: "/client"
     schedule:
@@ -47,7 +49,7 @@ updates:
         update-types:
           - minor
           - patch
-    ignore: &npm-major-ignores
+    ignore:
       # Framework majors — migrations tracked in #768
       - dependency-name: "vitest"
         update-types: ["version-update:semver-major"]
@@ -103,7 +105,52 @@ updates:
         update-types:
           - minor
           - patch
-    ignore: *npm-major-ignores
+    ignore:
+      # Framework majors — migrations tracked in #768
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "jsdom"
+        update-types: ["version-update:semver-major"]
+      # @types/node — policy: keep aligned with the Node runtime version
+      # declared in CLAUDE.md (currently Node 22). Bumping to v25 type defs
+      # declines on us; the right place to bump this is when we move to a
+      # newer Node major in CI + tooling.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # Hardhat ecosystem — tracked in #768 (couple-migration)
+      - dependency-name: "hardhat"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@nomicfoundation/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "chai"
+        update-types: ["version-update:semver-major"]
+      # Library majors with non-trivial API surface — tracked in #768
+      - dependency-name: "@hono/node-server"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "sonner"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "zod"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@scure/bip39"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "lucide-react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "better-sqlite3"
+        update-types: ["version-update:semver-major"]
 
   # Solidity tooling workspace (Hardhat + OZ contracts)
   - package-ecosystem: npm
@@ -115,7 +162,52 @@ updates:
         update-types:
           - minor
           - patch
-    ignore: *npm-major-ignores
+    ignore:
+      # Framework majors — migrations tracked in #768
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "jsdom"
+        update-types: ["version-update:semver-major"]
+      # @types/node — policy: keep aligned with the Node runtime version
+      # declared in CLAUDE.md (currently Node 22). Bumping to v25 type defs
+      # declines on us; the right place to bump this is when we move to a
+      # newer Node major in CI + tooling.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # Hardhat ecosystem — tracked in #768 (couple-migration)
+      - dependency-name: "hardhat"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@nomicfoundation/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "chai"
+        update-types: ["version-update:semver-major"]
+      # Library majors with non-trivial API surface — tracked in #768
+      - dependency-name: "@hono/node-server"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "sonner"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "zod"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@scure/bip39"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "lucide-react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "better-sqlite3"
+        update-types: ["version-update:semver-major"]
 
   # First-party packages
   - package-ecosystem: npm
@@ -127,7 +219,52 @@ updates:
         update-types:
           - minor
           - patch
-    ignore: *npm-major-ignores
+    ignore:
+      # Framework majors — migrations tracked in #768
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "jsdom"
+        update-types: ["version-update:semver-major"]
+      # @types/node — policy: keep aligned with the Node runtime version
+      # declared in CLAUDE.md (currently Node 22). Bumping to v25 type defs
+      # declines on us; the right place to bump this is when we move to a
+      # newer Node major in CI + tooling.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # Hardhat ecosystem — tracked in #768 (couple-migration)
+      - dependency-name: "hardhat"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@nomicfoundation/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "chai"
+        update-types: ["version-update:semver-major"]
+      # Library majors with non-trivial API surface — tracked in #768
+      - dependency-name: "@hono/node-server"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "sonner"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "zod"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@scure/bip39"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "lucide-react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "better-sqlite3"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: "/packages/indexer/explorer"
@@ -138,7 +275,52 @@ updates:
         update-types:
           - minor
           - patch
-    ignore: *npm-major-ignores
+    ignore:
+      # Framework majors — migrations tracked in #768
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "jsdom"
+        update-types: ["version-update:semver-major"]
+      # @types/node — policy: keep aligned with the Node runtime version
+      # declared in CLAUDE.md (currently Node 22). Bumping to v25 type defs
+      # declines on us; the right place to bump this is when we move to a
+      # newer Node major in CI + tooling.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # Hardhat ecosystem — tracked in #768 (couple-migration)
+      - dependency-name: "hardhat"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@nomicfoundation/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "chai"
+        update-types: ["version-update:semver-major"]
+      # Library majors with non-trivial API surface — tracked in #768
+      - dependency-name: "@hono/node-server"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "sonner"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "zod"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@scure/bip39"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "lucide-react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "better-sqlite3"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: "/packages/sdk"
@@ -149,7 +331,52 @@ updates:
         update-types:
           - minor
           - patch
-    ignore: *npm-major-ignores
+    ignore:
+      # Framework majors — migrations tracked in #768
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "jsdom"
+        update-types: ["version-update:semver-major"]
+      # @types/node — policy: keep aligned with the Node runtime version
+      # declared in CLAUDE.md (currently Node 22). Bumping to v25 type defs
+      # declines on us; the right place to bump this is when we move to a
+      # newer Node major in CI + tooling.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # Hardhat ecosystem — tracked in #768 (couple-migration)
+      - dependency-name: "hardhat"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@nomicfoundation/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "chai"
+        update-types: ["version-update:semver-major"]
+      # Library majors with non-trivial API surface — tracked in #768
+      - dependency-name: "@hono/node-server"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "sonner"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "zod"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@scure/bip39"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "lucide-react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "better-sqlite3"
+        update-types: ["version-update:semver-major"]
 
   # Standalone worker + autopilot packages. Live and first-party, but were
   # omitted from the allowlist above — so they accrued Dependabot security
@@ -167,7 +394,52 @@ updates:
         update-types:
           - minor
           - patch
-    ignore: *npm-major-ignores
+    ignore:
+      # Framework majors — migrations tracked in #768
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "jsdom"
+        update-types: ["version-update:semver-major"]
+      # @types/node — policy: keep aligned with the Node runtime version
+      # declared in CLAUDE.md (currently Node 22). Bumping to v25 type defs
+      # declines on us; the right place to bump this is when we move to a
+      # newer Node major in CI + tooling.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # Hardhat ecosystem — tracked in #768 (couple-migration)
+      - dependency-name: "hardhat"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@nomicfoundation/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "chai"
+        update-types: ["version-update:semver-major"]
+      # Library majors with non-trivial API surface — tracked in #768
+      - dependency-name: "@hono/node-server"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "sonner"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "zod"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@scure/bip39"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "lucide-react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "better-sqlite3"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: "/packages/eng-loop"
@@ -178,7 +450,52 @@ updates:
         update-types:
           - minor
           - patch
-    ignore: *npm-major-ignores
+    ignore:
+      # Framework majors — migrations tracked in #768
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "jsdom"
+        update-types: ["version-update:semver-major"]
+      # @types/node — policy: keep aligned with the Node runtime version
+      # declared in CLAUDE.md (currently Node 22). Bumping to v25 type defs
+      # declines on us; the right place to bump this is when we move to a
+      # newer Node major in CI + tooling.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # Hardhat ecosystem — tracked in #768 (couple-migration)
+      - dependency-name: "hardhat"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@nomicfoundation/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "chai"
+        update-types: ["version-update:semver-major"]
+      # Library majors with non-trivial API surface — tracked in #768
+      - dependency-name: "@hono/node-server"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "sonner"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "zod"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@scure/bip39"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "lucide-react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "better-sqlite3"
+        update-types: ["version-update:semver-major"]
 
   # Apps
   - package-ecosystem: npm
@@ -190,7 +507,52 @@ updates:
         update-types:
           - minor
           - patch
-    ignore: *npm-major-ignores
+    ignore:
+      # Framework majors — migrations tracked in #768
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "jsdom"
+        update-types: ["version-update:semver-major"]
+      # @types/node — policy: keep aligned with the Node runtime version
+      # declared in CLAUDE.md (currently Node 22). Bumping to v25 type defs
+      # declines on us; the right place to bump this is when we move to a
+      # newer Node major in CI + tooling.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # Hardhat ecosystem — tracked in #768 (couple-migration)
+      - dependency-name: "hardhat"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@nomicfoundation/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "chai"
+        update-types: ["version-update:semver-major"]
+      # Library majors with non-trivial API surface — tracked in #768
+      - dependency-name: "@hono/node-server"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "sonner"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "zod"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@scure/bip39"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "lucide-react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "better-sqlite3"
+        update-types: ["version-update:semver-major"]
 
   # External harness examples
   - package-ecosystem: npm
@@ -202,7 +564,52 @@ updates:
         update-types:
           - minor
           - patch
-    ignore: *npm-major-ignores
+    ignore:
+      # Framework majors — migrations tracked in #768
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "jsdom"
+        update-types: ["version-update:semver-major"]
+      # @types/node — policy: keep aligned with the Node runtime version
+      # declared in CLAUDE.md (currently Node 22). Bumping to v25 type defs
+      # declines on us; the right place to bump this is when we move to a
+      # newer Node major in CI + tooling.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # Hardhat ecosystem — tracked in #768 (couple-migration)
+      - dependency-name: "hardhat"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@nomicfoundation/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "chai"
+        update-types: ["version-update:semver-major"]
+      # Library majors with non-trivial API surface — tracked in #768
+      - dependency-name: "@hono/node-server"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "sonner"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "zod"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@scure/bip39"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "lucide-react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "better-sqlite3"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: "/examples/external-harnesses/polymarket-forecaster"
@@ -213,7 +620,52 @@ updates:
         update-types:
           - minor
           - patch
-    ignore: *npm-major-ignores
+    ignore:
+      # Framework majors — migrations tracked in #768
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "jsdom"
+        update-types: ["version-update:semver-major"]
+      # @types/node — policy: keep aligned with the Node runtime version
+      # declared in CLAUDE.md (currently Node 22). Bumping to v25 type defs
+      # declines on us; the right place to bump this is when we move to a
+      # newer Node major in CI + tooling.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # Hardhat ecosystem — tracked in #768 (couple-migration)
+      - dependency-name: "hardhat"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@nomicfoundation/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "chai"
+        update-types: ["version-update:semver-major"]
+      # Library majors with non-trivial API surface — tracked in #768
+      - dependency-name: "@hono/node-server"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "sonner"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "zod"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@scure/bip39"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "lucide-react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "better-sqlite3"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: "/examples/external-harnesses/prediction-evaluator"
@@ -224,4 +676,49 @@ updates:
         update-types:
           - minor
           - patch
-    ignore: *npm-major-ignores
+    ignore:
+      # Framework majors — migrations tracked in #768
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "jsdom"
+        update-types: ["version-update:semver-major"]
+      # @types/node — policy: keep aligned with the Node runtime version
+      # declared in CLAUDE.md (currently Node 22). Bumping to v25 type defs
+      # declines on us; the right place to bump this is when we move to a
+      # newer Node major in CI + tooling.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # Hardhat ecosystem — tracked in #768 (couple-migration)
+      - dependency-name: "hardhat"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@nomicfoundation/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "chai"
+        update-types: ["version-update:semver-major"]
+      # Library majors with non-trivial API surface — tracked in #768
+      - dependency-name: "@hono/node-server"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "sonner"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "zod"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@scure/bip39"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "lucide-react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "better-sqlite3"
+        update-types: ["version-update:semver-major"]
