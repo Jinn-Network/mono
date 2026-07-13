@@ -106,6 +106,45 @@ describe('ActivityCard', () => {
     expect(screen.getAllByText('evaluate').length).toBeGreaterThan(0);
   });
 
+  it('renders an Outcome column with the task-relative verdict (#502)', () => {
+    const tasks: ActivityTask[] = [
+      // COMPLETE solve run the network judged a fail: both a State badge
+      // (succeeded) and an Outcome badge (fail) render.
+      { ...baseTask, requestId: 'solve-failed-outcome', state: 'COMPLETE', taskRole: 'restoration', outcome: 'fail' },
+    ];
+    const { ui } = wrap(<ActivityCard joined={joined} tasks={tasks} />);
+    render(ui);
+    const table = screen.getByTestId('activity-tasks-table');
+    // The new column header.
+    expect(table.textContent).toMatch(/Outcome/);
+    // State axis unchanged.
+    expect(table.textContent).toMatch(/succeeded/i);
+    // Outcome axis.
+    expect(screen.getByText('fail')).toBeTruthy();
+  });
+
+  it('renders "awaiting eval" for a COMPLETE solve run with no quorum yet (#502)', () => {
+    const tasks: ActivityTask[] = [
+      { ...baseTask, requestId: 'solve-awaiting', state: 'COMPLETE', taskRole: 'restoration', outcome: 'awaiting' },
+    ];
+    const { ui } = wrap(<ActivityCard joined={joined} tasks={tasks} />);
+    render(ui);
+    expect(screen.getByText('awaiting eval')).toBeTruthy();
+  });
+
+  it('renders "—" in the outcome cell for a run with no outcome (#502)', () => {
+    const tasks: ActivityTask[] = [
+      { ...baseTask, requestId: 'no-outcome', state: 'FAILED', taskRole: 'restoration', runStartedAt: Date.now() - 60_000, outcome: null },
+    ];
+    const { ui } = wrap(<ActivityCard joined={joined} tasks={tasks} />);
+    render(ui);
+    const table = screen.getByTestId('activity-tasks-table');
+    // FAILED run has no outcome axis → the cell renders a muted em dash.
+    expect(table.textContent).toContain('—');
+    // No outcome badge label leaked.
+    expect(screen.queryByText('fail')).toBeNull();
+  });
+
   it('drills from a task request id into request-scoped events', () => {
     const { history, ui } = wrap(<ActivityCard joined={joined} tasks={[baseTask]} />);
     render(ui);

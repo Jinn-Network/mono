@@ -200,6 +200,7 @@ describe('OverviewPage layout', () => {
             windowStartTs: now - 60_000,
             stateUpdatedAt: now - 30_000,
             deliveryTxHash: '0xabc',
+            outcome: 'fail',
           },
         ],
       },
@@ -225,6 +226,9 @@ describe('OverviewPage layout', () => {
     const tasks = await screen.findByTestId('activity-tasks-table');
     expect(tasks.textContent).toContain('task-a');
     expect(tasks.textContent).toMatch(/succeeded/i);
+    // The task-relative outcome survives ingest/dedup onto the table (#502).
+    expect(tasks.textContent).toMatch(/Outcome/);
+    expect(screen.getByText('fail')).toBeTruthy();
   });
 });
 

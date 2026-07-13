@@ -67,6 +67,11 @@ export interface ActivityTask {
   deliveryTxHash: string | null;
   /** Optional engine failure reason — used to filter "never engaged" rows. */
   failureReason?: string | null;
+  /**
+   * Task-relative outcome (spec/2026-05-22-run-outcome.md) — the network's
+   * verdict on this run, distinct from `state`. `null`/absent renders `—`.
+   */
+  outcome?: 'pass' | 'fail' | 'awaiting' | 'accepted' | 'rejected' | null;
 }
 
 export interface ActivityJoinedNet {
@@ -149,6 +154,36 @@ function stateBadgeVariant(
   if (tone === 'good') return 'success';
   if (tone === 'active') return 'default';
   return 'outline';
+}
+
+/**
+ * Classify a run's task-relative outcome (spec/2026-05-22-run-outcome.md) into
+ * a label + tone for the Outcome column. `null`/absent → no badge (the cell
+ * renders a muted `—`). Solve vs evaluate rows word the `'awaiting'` state
+ * differently: a solve run awaits the network's verdict quorum ("awaiting
+ * eval"); an evaluate run awaits its own outcome ("awaiting").
+ */
+function classifyOutcome(
+  outcome: ActivityTask['outcome'],
+  taskRole: ActivityTask['taskRole'],
+): { label: string; tone: StateTone } | null {
+  switch (outcome) {
+    case 'pass':
+      return { label: 'pass', tone: 'good' };
+    case 'fail':
+      return { label: 'fail', tone: 'bad' };
+    case 'awaiting':
+      return {
+        label: taskRole === 'evaluation' ? 'awaiting' : 'awaiting eval',
+        tone: 'neutral',
+      };
+    case 'accepted':
+      return { label: 'accepted', tone: 'good' };
+    case 'rejected':
+      return { label: 'rejected', tone: 'bad' };
+    default:
+      return null;
+  }
 }
 
 function formatRelative(ts: number): string {
@@ -342,12 +377,14 @@ export function ActivityCard({ joined, tasks }: ActivityCardProps): JSX.Element 
                         <TableHead>Run</TableHead>
                         <TableHead>Task</TableHead>
                         <TableHead>State</TableHead>
+                        <TableHead>Outcome</TableHead>
                         <TableHead>Started</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {filtered.map((t) => {
                         const stateInfo = classifyState(t.state);
+                        const outcomeInfo = classifyOutcome(t.outcome, t.taskRole);
                         const isActive = stateInfo.tone === 'active';
                         return (
                           <TableRow
@@ -392,6 +429,15 @@ export function ActivityCard({ joined, tasks }: ActivityCardProps): JSX.Element 
                                 </TooltipTrigger>
                                 <TooltipContent>{stateInfo.detail}</TooltipContent>
                               </Tooltip>
+                            </TableCell>
+                            <TableCell>
+                              {outcomeInfo ? (
+                                <Badge variant={stateBadgeVariant(outcomeInfo.tone)}>
+                                  {outcomeInfo.label}
+                                </Badge>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
                             </TableCell>
                             <TableCell className="text-muted-foreground">
                               {formatRelative(t.runStartedAt ?? t.stateUpdatedAt)}

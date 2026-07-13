@@ -51,6 +51,7 @@ interface TaskRunRow {
   manifestCid?: string | null;
   deliveryTxHash?: string | null;
   failureReason?: string | null;
+  outcome?: 'pass' | 'fail' | 'awaiting' | 'accepted' | 'rejected' | null;
 }
 
 interface OverviewStatusV1 {
@@ -335,6 +336,7 @@ export function OverviewPage(): JSX.Element {
           stateUpdatedAt: r.stateUpdatedAt,
           deliveryTxHash: r.deliveryTxHash ?? null,
           failureReason: r.failureReason ?? null,
+          outcome: r.outcome ?? null,
         });
       }
     };
