@@ -36,7 +36,7 @@ function makePolled(overrides: Partial<PolledIssue> = {}): PolledIssue {
     title: 'Test issue',
     shape: 'feat',
     blockedOn: 'Nothing',
-    blockedOnIssue: null,
+    blockedByIssues: [],
     effort: 'Low',
     priority: 'P1',
     status: 'Todo',

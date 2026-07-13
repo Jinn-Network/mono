@@ -60,6 +60,7 @@ function snapshotItem(overrides: Partial<SnapshotItem> & Pick<SnapshotItem, 'id'
     effort: null,
     blockedOn: null,
     issueType: null,
+    blockedByIssues: [],
     sprintIterationId: null,
     ...overrides,
   };
@@ -121,7 +122,7 @@ describe('GhIssueSource', () => {
     expect(issue!.priority).toBe('P1');
     expect(issue!.status).toBe('Done');
     expect(issue!.onBoard).toBe(true);
-    expect(issue!.blockedOnIssue).toBeNull();
+    expect(issue!.blockedByIssues).toEqual([]);
     expect(issue!.author).toBe('alice');
   });
 
@@ -150,7 +151,7 @@ describe('GhIssueSource', () => {
     expect(issue!.effort).toBeNull();
     expect(issue!.priority).toBeNull();
     expect(issue!.status).toBeNull();
-    expect(issue!.blockedOnIssue).toBeNull();
+    expect(issue!.blockedByIssues).toEqual([]);
     expect(issue!.author).toBe('carol');
   });
 

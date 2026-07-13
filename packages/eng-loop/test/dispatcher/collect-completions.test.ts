@@ -18,6 +18,7 @@ function makeItem(overrides: Partial<SnapshotItem> & { number: number }): Snapsh
     effort: null,
     blockedOn: null,
     issueType: null,
+    blockedByIssues: [],
     sprintIterationId: null,
     ...overrides,
   };

@@ -20,12 +20,15 @@ export interface PolledIssue {
   shape: IssueShape | null;
   blockedOn: BlockedOn | null;
   /**
-   * Always `null` in v1. The "Blocked on" Project field stores the literal
-   * string "Another issue" with no number suffix, so no issue number can be
-   * extracted from it. Populating this field requires parsing the issue body,
-   * deferred to Phase 3 (stacked dispatch). Keep the field for that future use.
+   * Issue numbers this issue is blocked_by, from GitHub's native issue
+   * dependencies (the snapshot's `blockedBy` connection). Empty when the issue
+   * has no dependencies. The board `Blocked on` field only carries the flag
+   * `Another issue` with no target; this list is the machine-readable edge the
+   * stack-readiness resolver uses to decide whether a blocked issue can be
+   * auto-unblocked and stacked on its blocker's open PR
+   * (spec 2026-07-13-eng-loop-dependency-stacking-design.md).
    */
-  blockedOnIssue: number | null;
+  blockedByIssues: number[];
   effort: Effort | null;
   priority: Priority | null;
   status: ProjectStatus | null;
@@ -60,6 +63,14 @@ export interface ReadyIssue extends PolledIssue {
   shape: IssueShape;          // non-null: ready issues are triage-complete
   priority: Priority;         // non-null: needed for ordering
   projectItemId: string;      // non-null: onBoard:true requires it (see ready-filter)
+  /**
+   * Git ref to branch the worktree off and target the PR at. Set only when the
+   * issue was admitted despite `Blocked on: Another issue` because its single
+   * blocker has an open PR — the value is the blocker's PR head branch (e.g.
+   * `feat/1570-…`). Absent for normally-ready issues, which default to
+   * `origin/next` in `dispatchIssue`.
+   */
+  stackBase?: string;
 }
 
 /** A session the dispatcher has spawned and is tracking. */

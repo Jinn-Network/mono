@@ -19,6 +19,7 @@ import { deriveInFlight } from '../src/dispatcher/state.js';
 import { dispatchIssue } from '../src/dispatcher/dispatch.js';
 import { SESSIONS_LOG_DIR } from '../src/dispatcher/session-log.js';
 import { GhPrSource } from '../src/dispatcher/pr-source.js';
+import { fetchIssuePrMap } from '../src/dispatcher/pr-links.js';
 import { deriveReviewInFlight } from '../src/dispatcher/review-state.js';
 import { dispatchReview } from '../src/dispatcher/review-dispatch.js';
 import { runReviewCycle } from '../src/dispatcher/review-loop.js';
@@ -314,6 +315,9 @@ export async function runDryRun(opts: RunDryRunOpts): Promise<void> {
       deriveInFlight: () => deriveInFlight(snapshot, runner),
       dispatchIssue: dryDispatch,
       countOpenReadyPrs,
+      // Dry-run still polls the live PR map so the "would dispatch" list
+      // includes dependency-stacked issues (read-only, no mutation).
+      fetchIssuePrMap: () => fetchIssuePrMap(runner),
       wallClock,
       pauseSession: dryPauseSession,
       // Dry-run: no cross-cycle memory and no sink calls (mutation-free,
@@ -697,6 +701,7 @@ async function main(): Promise<void> {
             fieldCache: cycleFieldCache,
           }),
         countOpenReadyPrs,
+        fetchIssuePrMap: () => fetchIssuePrMap(realRunner),
         wallClock,
         pauseSession: pauseSessionForCycle,
         prevInFlight: previousInFlight,

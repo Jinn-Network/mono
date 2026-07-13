@@ -45,6 +45,7 @@ function snapshotItem(overrides: Partial<SnapshotItem> & Pick<SnapshotItem, 'id'
     effort: null,
     blockedOn: null,
     issueType: null,
+    blockedByIssues: [],
     sprintIterationId: null,
     ...overrides,
   };

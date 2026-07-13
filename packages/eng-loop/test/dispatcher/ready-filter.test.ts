@@ -1,15 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import { selectReady } from '../../src/dispatcher/ready-filter.js';
 import type { PolledIssue } from '../../src/dispatcher/types.js';
+import type { StackReady } from '../../src/dispatcher/stack-readiness.js';
 
 const base: PolledIssue = {
   number: 1, title: 't', shape: 'fix', blockedOn: 'Nothing',
-  blockedOnIssue: null, effort: 'Low', priority: 'P2',
+  blockedByIssues: [], effort: 'Low', priority: 'P2',
   status: 'Todo', onBoard: true, author: 'alice', projectItemId: 'PVTI_1',
   inCurrentSprint: false,
 };
 
 const ALLOW_ALICE: ReadonlySet<string> = new Set(['alice']);
+const stack = (e: Record<number, StackReady>): ReadonlyMap<number, StackReady> =>
+  new Map(Object.entries(e).map(([k, v]) => [Number(k), v]));
 
 describe('selectReady', () => {
   it('keeps a triage-complete, unblocked, on-board, Todo issue', () => {
@@ -141,6 +144,49 @@ describe('selectReady', () => {
       );
       expect(ready).toEqual([]);
       expect(skippedForAuthor).toEqual([]);
+    });
+  });
+
+  describe('dependency stacking (spec 2026-07-13)', () => {
+    const blocked = { ...base, number: 100, blockedOn: 'Another issue' as const };
+
+    it('drops a Blocked-on-Another-issue issue absent from stackReady', () => {
+      const { ready } = selectReady([blocked], new Set(), ALLOW_ALICE, new Map());
+      expect(ready).toEqual([]);
+    });
+
+    it('admits a blocked issue in stackReady and stamps its stackBase (real blocker branch)', () => {
+      const { ready } = selectReady(
+        [blocked],
+        new Set(),
+        ALLOW_ALICE,
+        stack({ 100: { baseBranch: 'feat/50-blocker' } }),
+      );
+      expect(ready.map((i) => i.number)).toEqual([100]);
+      expect(ready[0].stackBase).toBe('feat/50-blocker');
+    });
+
+    it('admits a blocked issue whose blockers all merged (base=next) with NO stackBase', () => {
+      const { ready } = selectReady(
+        [blocked],
+        new Set(),
+        ALLOW_ALICE,
+        stack({ 100: { baseBranch: 'next' } }),
+      );
+      expect(ready.map((i) => i.number)).toEqual([100]);
+      expect(ready[0].stackBase).toBeUndefined();
+    });
+
+    it('never stamps stackBase on a normally-unblocked (Nothing) issue', () => {
+      // Even if it somehow appears in stackReady, a Nothing issue dispatches off next.
+      const { ready } = selectReady(
+        [base],
+        new Set(),
+        ALLOW_ALICE,
+        stack({ 1: { baseBranch: 'feat/50-blocker' } }),
+      );
+      expect(ready.map((i) => i.number)).toEqual([1]);
+      expect(ready[0].stackBase).toBeUndefined();
     });
   });
 });

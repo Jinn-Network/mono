@@ -240,17 +240,28 @@ export async function dispatchIssue(
   //    dispatcher, or a previous partial run), reuse it instead of throwing.
   //    We detect this by running `git worktree list --porcelain` and checking
   //    whether any entry's path ends with the expected suffix.
+  //
+  //    Base branch: normally `origin/next`. When this issue was admitted
+  //    *stacked* on its blocker's open PR (`ReadyIssue.stackBase`, a bare
+  //    branch name), branch off that PR's head instead, so B builds on A's
+  //    unmerged work (spec 2026-07-13). The blocker branch is not a local ref
+  //    yet, so fetch it first — mirrors `review-dispatch.ts`.
+  const stackBase = issue.stackBase;
+  const baseRef = stackBase != null ? `origin/${stackBase}` : 'origin/next';
   const worktreeListRaw = await runner('git', ['worktree', 'list', '--porcelain']);
   const worktreeAlreadyExists = worktreeListRaw
     .split('\n')
     .some((line) => line.startsWith('worktree ') && line.trim() === `worktree ${worktreePath}`);
 
   if (!worktreeAlreadyExists) {
+    if (stackBase != null) {
+      await runner('git', ['fetch', 'origin', stackBase, '--quiet']);
+    }
     await runner('git', [
       'worktree', 'add',
       worktreePath,
       '-b', branch,
-      'origin/next',
+      baseRef,
     ]);
   }
 
@@ -265,6 +276,11 @@ export async function dispatchIssue(
     `The default implementer for the inner pipeline is: ${implementer}.`,
     `Issue: #${number} — ${title}`,
     `A git worktree for this issue already exists at \`${worktreePath}\` on branch \`${branch}\` — use it; do not create a new worktree.`,
+    ...(stackBase != null
+      ? [
+          `This issue is stacked on its blocker: the worktree is already branched off \`${stackBase}\` (the blocker's open PR). Open your PR with base branch \`${stackBase}\`, NOT \`next\`. GitHub auto-retargets it to \`next\` when the blocker's PR merges.`,
+        ]
+      : []),
   ].join('\n');
   const headlessPart = buildHeadlessPrompt('implement-issue', scenario);
   const fullPrompt = [canon, '', headlessPart].join('\n');

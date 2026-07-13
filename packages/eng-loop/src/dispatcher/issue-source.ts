@@ -24,6 +24,8 @@ export interface IssueBoardEntry {
   readonly effort: Effort | null;
   readonly blockedOn: BlockedOn | null;
   readonly issueType: IssueShape | null;
+  /** GitHub native `blocked_by` issue-dependency numbers (spec 2026-07-13). */
+  readonly blockedByIssues: number[];
   /** Sprint iteration this entry belongs to, compared against
    *  {@link IssueBoardState.currentSprintIterationId} to derive
    *  `PolledIssue.inCurrentSprint`. */
@@ -140,7 +142,7 @@ export class GhIssueSource implements IssueSource {
         title: ghIssue.title,
         shape: entry?.issueType ?? null,
         blockedOn: entry?.blockedOn ?? null,
-        blockedOnIssue: null,   // Always null in v1 — the field stores "Another issue" with no number suffix; see PolledIssue.blockedOnIssue
+        blockedByIssues: entry?.blockedByIssues ?? [],
         effort: entry?.effort ?? null,
         priority: entry?.priority ?? null,
         status: entry?.status ?? null,

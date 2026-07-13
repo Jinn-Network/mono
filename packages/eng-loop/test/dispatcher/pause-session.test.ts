@@ -45,6 +45,7 @@ function makeIssueItem(number: number, id: string): SnapshotItem {
     effort: 'Medium',
     blockedOn: 'Nothing',
     issueType: 'feat',
+    blockedByIssues: [],
     sprintIterationId: null,
   };
 }
@@ -59,6 +60,7 @@ function makePrItem(number: number, id: string): SnapshotItem {
     effort: null,
     blockedOn: null,
     issueType: null,
+    blockedByIssues: [],
     sprintIterationId: null,
   };
 }

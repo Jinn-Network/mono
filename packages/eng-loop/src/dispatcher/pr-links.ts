@@ -1,0 +1,76 @@
+import { REPO } from './constants.js';
+import type { CommandRunner } from './issue-source.js';
+
+export type PrState = 'OPEN' | 'CLOSED' | 'MERGED';
+
+/** A PR that closes an issue (via a `Closes #N` body keyword → GitHub's
+ *  native `closingIssuesReferences` link). */
+export interface PrLink {
+  prNumber: number;
+  /** Head branch — the ref a dependent issue stacks its worktree/PR onto. */
+  headRefName: string;
+  baseRefName: string;
+  state: PrState;
+  isDraft: boolean;
+}
+
+interface GhPrListEntry {
+  number: number;
+  headRefName: string;
+  baseRefName: string;
+  state: string;
+  isDraft: boolean;
+  closingIssuesReferences?: Array<{ number: number }>;
+}
+
+const PR_LIST_LIMIT = 300;
+
+function normalizeState(s: string): PrState | null {
+  const u = s.toUpperCase();
+  return u === 'OPEN' || u === 'CLOSED' || u === 'MERGED' ? (u as PrState) : null;
+}
+
+/**
+ * Build an issue → closing-PRs map in a single `gh pr list` call.
+ *
+ * Keyed on GitHub's native `closingIssuesReferences` (the "this PR closes
+ * issue #N" link a `Closes/Fixes/Resolves #N` body keyword creates). `--state
+ * all` is deliberate: the {@link resolveStackReady} resolver must distinguish a
+ * blocker that **merged** (a dependent can build on `next`), one with an
+ * **open** PR (stack the dependent on it), or one whose PR was **closed
+ * without merging** (dependent stays blocked). One REST-backed query per cycle
+ * — it does not touch the GraphQL budget the project snapshot guards (#585).
+ *
+ * An issue may map to more than one PR (e.g. a closed attempt plus an open
+ * one); the resolver classifies across the whole list.
+ */
+export async function fetchIssuePrMap(
+  runner: CommandRunner,
+): Promise<Map<number, PrLink[]>> {
+  const raw = await runner('gh', [
+    'pr', 'list',
+    '--repo', REPO,
+    '--state', 'all',
+    '--json', 'number,headRefName,baseRefName,state,isDraft,closingIssuesReferences',
+    '--limit', String(PR_LIST_LIMIT),
+  ]);
+  const entries = JSON.parse(raw) as GhPrListEntry[];
+  const map = new Map<number, PrLink[]>();
+  for (const e of entries) {
+    const state = normalizeState(e.state);
+    if (state === null) continue;
+    const link: PrLink = {
+      prNumber: e.number,
+      headRefName: e.headRefName,
+      baseRefName: e.baseRefName,
+      state,
+      isDraft: Boolean(e.isDraft),
+    };
+    for (const ref of e.closingIssuesReferences ?? []) {
+      const list = map.get(ref.number);
+      if (list) list.push(link);
+      else map.set(ref.number, [link]);
+    }
+  }
+  return map;
+}

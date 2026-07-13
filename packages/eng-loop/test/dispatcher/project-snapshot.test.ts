@@ -92,6 +92,7 @@ function issueNode(args: {
   priority?: string | null;
   effort?: string | null;
   blockedOn?: string | null;
+  blockedBy?: number[];
   sprintIterationId?: string | null;
 }): unknown {
   return {
@@ -100,6 +101,8 @@ function issueNode(args: {
       __typename: 'Issue',
       number: args.number,
       issueType: args.issueType == null ? null : { name: args.issueType },
+      blockedBy:
+        args.blockedBy == null ? null : { nodes: args.blockedBy.map((number) => ({ number })) },
     },
     status: singleSelect(args.status ?? null),
     priority: singleSelect(args.priority ?? null),
@@ -214,6 +217,7 @@ describe('fetchProjectSnapshot — single-page parsing', () => {
       effort: 'Medium',
       blockedOn: 'Nothing',
       issueType: 'fix',
+      blockedByIssues: [],
       sprintIterationId: null,
     });
     expect(snap.items[1]).toEqual({
@@ -225,8 +229,26 @@ describe('fetchProjectSnapshot — single-page parsing', () => {
       effort: 'Low',
       blockedOn: 'Nothing',
       issueType: 'feat',
+      blockedByIssues: [],
       sprintIterationId: null,
     });
+  });
+
+  it('parses native blocked_by dependency edges into blockedByIssues', async () => {
+    const { runner } = makePagedRunner([
+      buildPageResponse({
+        rateLimitRemaining: 4999,
+        nodes: [
+          issueNode({ id: 'PVTI_dep', number: 100, issueType: 'feat', status: 'Todo', blockedBy: [50, 60] }),
+          issueNode({ id: 'PVTI_free', number: 101, issueType: 'fix', status: 'Todo' }),
+        ],
+      }),
+    ]);
+    const snap = await fetchProjectSnapshot(runner);
+    const dep = snap.items.find((i) => i.number === 100);
+    const free = snap.items.find((i) => i.number === 101);
+    expect(dep?.blockedByIssues).toEqual([50, 60]);
+    expect(free?.blockedByIssues).toEqual([]);
   });
 
   it('coerces unset single-select fields to null', async () => {

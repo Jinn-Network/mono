@@ -4,6 +4,8 @@ import { toIssueBoardState } from './project-snapshot.js';
 import type { DispatcherConfig, InFlightSession, ReadyIssue, SessionResult } from './types.js';
 import type { WallClock } from './wall-clock.js';
 import { selectReady, type SkippedForAuthor } from './ready-filter.js';
+import { resolveStackReady } from './stack-readiness.js';
+import type { PrLink } from './pr-links.js';
 import { concurrencyOk, backpressureOk } from './throttles.js';
 
 // ---------------------------------------------------------------------------
@@ -79,6 +81,14 @@ export interface CycleDeps {
    */
   countOpenReadyPrs(): Promise<number>;
   /**
+   * Fetch the issue → closing-PRs map (one `gh pr list` call). Injected so
+   * loop.ts stays gh-free. Feeds `resolveStackReady` so a Blocked-on-Another-
+   * issue issue whose blocker has an open PR can be admitted and stacked on
+   * that PR's branch (spec 2026-07-13-eng-loop-dependency-stacking). Optional:
+   * absent → an empty map → no dependency admission (pre-feature behaviour).
+   */
+  fetchIssuePrMap?(): Promise<Map<number, PrLink[]>>;
+  /**
    * Wall-clock circuit-breaker — checks whether an in-flight session has
    * exceeded its ceiling (spec §4). Injected so loop.ts stays gh-free.
    */
@@ -140,6 +150,7 @@ export async function runCycle(
     deriveInFlight,
     dispatchIssue,
     countOpenReadyPrs,
+    fetchIssuePrMap,
     wallClock,
     pauseSession,
     prevInFlight,
@@ -149,10 +160,13 @@ export async function runCycle(
   // 1. Poll + derive in-flight in parallel. The IssueSource sees only the
   //    abstract IssueBoardState (#600); the full snapshot stays here for
   //    the rate-limit gate and `deriveInFlight`.
-  const [polled, { inFlight, drift }, openPrCount] = await Promise.all([
+  const [polled, { inFlight, drift }, openPrCount, prByIssue] = await Promise.all([
     source.poll(toIssueBoardState(snapshot)),
     deriveInFlight(),
     countOpenReadyPrs(),
+    fetchIssuePrMap
+      ? fetchIssuePrMap()
+      : Promise.resolve(new Map<number, PrLink[]>()),
   ]);
 
   // 1b. Detect finished sessions (#489): hand the previous + current in-flight
@@ -182,8 +196,12 @@ export async function runCycle(
     cfg.authorAllowlist.map((s) => s.toLowerCase()),
   );
 
-  // 4. Apply ready filter (ordered by priority then issue number)
-  const { ready, skippedForAuthor } = selectReady(polled, inFlightSet, allowlistSet);
+  // 4. Resolve dependency-stacking: which Blocked-on-Another-issue issues have
+  //    a satisfied blocker (all merged, or exactly one open PR to stack on).
+  const stackReady = resolveStackReady(polled, prByIssue);
+
+  // 4b. Apply ready filter (ordered by priority then issue number)
+  const { ready, skippedForAuthor } = selectReady(polled, inFlightSet, allowlistSet, stackReady);
 
   // 5. Check backpressure
   if (!backpressureOk(openPrCount, cfg.openPrBackpressure)) {

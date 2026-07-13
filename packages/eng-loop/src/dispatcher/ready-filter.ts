@@ -1,4 +1,5 @@
 import type { PolledIssue, ReadyIssue, Priority } from './types.js';
+import type { StackReady } from './stack-readiness.js';
 
 const PRIORITY_RANK: Record<Priority, number> = {
   P0: 0, P1: 1, P2: 2, P3: 3, P4: 4,
@@ -36,26 +37,40 @@ export function selectReady(
   polled: PolledIssue[],
   inFlight: ReadonlySet<number>,
   authorAllowlist: ReadonlySet<string>,
+  // Empty map (the default) = no dependency admission → identical to pre-feature
+  // behaviour; the live call site (loop.ts) passes the resolved map.
+  stackReady: ReadonlyMap<number, StackReady> = new Map(),
 ): SelectReadyResult {
   // First pass: existing readiness predicates. Failures are excluded from both
-  // arrays — author-skips only apply to otherwise-ready issues.
+  // arrays — author-skips only apply to otherwise-ready issues. The blocked-on
+  // gate admits either `Nothing` OR an issue whose blocker(s) are satisfied per
+  // the dependency resolver (`stackReady`) — so a dependent can be dispatched
+  // stacked on its blocker's open PR (spec 2026-07-13-eng-loop-dependency-stacking).
   const firstPass = polled.filter(
     (i): i is ReadyIssue =>
       i.shape !== null &&
       i.priority !== null &&
-      i.blockedOn === 'Nothing' &&
+      (i.blockedOn === 'Nothing' || stackReady.has(i.number)) &&
       i.onBoard &&
       i.projectItemId !== null &&     // implied by onBoard, but TS needs the guard
       i.status === 'Todo' &&
       !inFlight.has(i.number),
   );
 
-  // Second pass: partition by author allowlist.
+  // Second pass: partition by author allowlist, and stamp the stacked-dispatch
+  // base branch onto issues admitted via the dependency path.
   const ready: ReadyIssue[] = [];
   const skippedForAuthor: SkippedForAuthor[] = [];
   for (const issue of firstPass) {
     if (authorAllowlist.has(issue.author.toLowerCase())) {
-      ready.push(issue);
+      // stackBase is set only when the issue was admitted *because* a blocker
+      // has an open PR (blockedOn !== 'Nothing') and the base is a real blocker
+      // branch — the all-blockers-merged case has baseBranch 'next' and
+      // dispatches off `origin/next` normally (stackBase stays undefined).
+      const sb = stackReady.get(issue.number)?.baseBranch;
+      const stackBase =
+        issue.blockedOn !== 'Nothing' && sb != null && sb !== 'next' ? sb : undefined;
+      ready.push(stackBase != null ? { ...issue, stackBase } : issue);
     } else {
       skippedForAuthor.push({ number: issue.number, author: issue.author });
     }

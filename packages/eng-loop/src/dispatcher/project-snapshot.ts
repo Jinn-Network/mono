@@ -106,6 +106,9 @@ export interface SnapshotItem {
   /** `IssueType.name` from the underlying Issue, mapped to the canonical
    *  shape vocabulary. `null` for non-Issue content or untyped issues. */
   issueType: IssueShape | null;
+  /** GitHub native `blocked_by` issue-dependency numbers. Empty for non-Issue
+   *  content, untyped items, or issues with no dependencies. (spec 2026-07-13) */
+  blockedByIssues: number[];
   /** Iteration id of the item's `Sprint` field value (e.g. `d710be59`).
    *  `null` when the item has no Sprint value or the Sprint field is absent.
    *  Compared against {@link ProjectSnapshot.currentSprintIterationId} to
@@ -268,7 +271,7 @@ const SNAPSHOT_QUERY = `query($cursor: String) {
           id
           content {
             __typename
-            ... on Issue { number issueType { name } }
+            ... on Issue { number issueType { name } blockedBy(first: 10) { nodes { number } } }
             ... on PullRequest { number }
           }
           status:    fieldValueByName(name: "Status")     { ... on ProjectV2ItemFieldSingleSelectValue { name } }
@@ -308,6 +311,8 @@ interface ResponseContent {
   __typename: string;
   number?: number;
   issueType?: { name: string } | null;
+  /** GitHub native issue-dependency edges — issues this Issue is blocked_by. */
+  blockedBy?: { nodes: Array<{ number?: number } | null> } | null;
 }
 
 interface IterationConfig {
@@ -386,6 +391,12 @@ function parseNode(node: ResponseNode): SnapshotItem | null {
     contentType === 'Issue'
       ? parseShape(node.content.issueType?.name)
       : null;
+  const blockedByIssues =
+    contentType === 'Issue'
+      ? (node.content.blockedBy?.nodes ?? [])
+          .map((n) => n?.number)
+          .filter((n): n is number => typeof n === 'number')
+      : [];
   return {
     id: node.id,
     number,
@@ -395,6 +406,7 @@ function parseNode(node: ResponseNode): SnapshotItem | null {
     effort: parseSingleSelect<Effort>(node.effort, VALID_EFFORT),
     blockedOn: parseSingleSelect<BlockedOn>(node.blockedOn, VALID_BLOCKED_ON),
     issueType,
+    blockedByIssues,
     sprintIterationId: node.sprint?.iterationId ?? null,
   };
 }
@@ -581,6 +593,7 @@ export function toIssueBoardState(snapshot: ProjectSnapshot): IssueBoardState {
       effort: item.effort,
       blockedOn: item.blockedOn,
       issueType: item.issueType,
+      blockedByIssues: item.blockedByIssues,
       sprintIterationId: item.sprintIterationId,
     });
   }

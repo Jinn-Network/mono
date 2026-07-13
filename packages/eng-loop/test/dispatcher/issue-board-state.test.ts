@@ -60,6 +60,7 @@ function snapshotItem(
     effort: null,
     blockedOn: null,
     issueType: null,
+    blockedByIssues: [],
     sprintIterationId: null,
     ...overrides,
   };
@@ -79,6 +80,7 @@ describe('IssueBoardState seam', () => {
       effort: 'Low',
       blockedOn: 'Nothing',
       issueType: 'feat',
+      blockedByIssues: [],
       sprintIterationId: sprintId,
     };
     const stub: IssueBoardState = {

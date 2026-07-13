@@ -36,7 +36,7 @@ const ISSUE: ReadyIssue = {
   title: 'feat(operator-app): expose generator health',
   shape: 'feat',
   blockedOn: 'Nothing',
-  blockedOnIssue: null,
+  blockedByIssues: [],
   effort: 'Medium',
   priority: 'P1',
   status: 'Todo',
@@ -248,6 +248,36 @@ describe('dispatchIssue', () => {
 
     // Final arg is origin/next
     expect(worktreeCall!.args[worktreeCall!.args.length - 1]).toBe('origin/next');
+  });
+
+  it('stacks on the blocker PR head when ReadyIssue.stackBase is set (fetch + worktree add origin/<stackBase> + PR-base directive)', async () => {
+    // A stacked issue needs a runner that also serves `git fetch` (the default
+    // makeRunner throws on it, which would prove the fetch never happened).
+    const calls: RunnerCall[] = [];
+    const runner: CommandRunner = async (cmd, args) => {
+      calls.push({ cmd, args });
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') return WORKTREE_LIST_EMPTY;
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') return '';
+      if (cmd === 'git' && args[0] === 'fetch') return '';
+      if (cmd === 'gh' && args[0] === 'project' && args[1] === 'item-edit') return '';
+      throw new Error(`Unexpected command: ${cmd} ${args.join(' ')}`);
+    };
+    const { spawn, calls: spawnCalls } = makeSpawn();
+    const stacked: ReadyIssue = { ...ISSUE, number: 419, stackBase: 'feat/50-blocker' };
+
+    await dispatchIssue(stacked, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+
+    // Fetched the blocker branch before branching off it.
+    const fetchCall = calls.find((c) => c.cmd === 'git' && c.args[0] === 'fetch');
+    expect(fetchCall?.args).toEqual(['fetch', 'origin', 'feat/50-blocker', '--quiet']);
+
+    // Worktree branched off origin/<stackBase>, NOT origin/next.
+    const addCall = calls.find((c) => c.cmd === 'git' && c.args[0] === 'worktree' && c.args[1] === 'add');
+    expect(addCall!.args[addCall!.args.length - 1]).toBe('origin/feat/50-blocker');
+
+    // The session prompt directs the PR base at the blocker branch.
+    const prompt = spawnCalls[0].args[1];
+    expect(prompt).toMatch(/base branch `feat\/50-blocker`/);
   });
 
   it('skips git worktree add when the worktree already exists (idempotent)', async () => {
