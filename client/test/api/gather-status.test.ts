@@ -178,6 +178,84 @@ describe('gatherStatusForApi', () => {
     });
   });
 
+  it('enriches COMPLETE solve run outcomes from discovery.getVerdictTallies (#502)', async () => {
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+
+    await withTempStore(async (store) => {
+      const persistence = new TaskRunPersistence(store.db);
+      persistence.insertDiscovered({
+        requestId: 'swe-complete',
+        taskId: '42',
+        taskCid: 'bafy-swe-complete',
+        onchainCreationTx: '0xabc',
+        onchainCreationBlock: 1,
+        solverType: 'swe-rebench-v2.v1',
+        taskRole: 'restoration',
+        windowStartTs: 1_000,
+        windowEndTs: 2_000,
+        task: {
+          id: 'swe-complete',
+          description: 'SWE task',
+          solverType: 'swe-rebench-v2.v1',
+          role: 'restoration',
+        },
+      });
+      store.db.prepare(
+        `UPDATE task_runs SET state = 'COMPLETE', state_updated_at = ? WHERE request_id = ?`,
+      ).run(2_500, 'swe-complete');
+
+      const getVerdictTallies = vi.fn(async () =>
+        new Map([['42', { pass: 0, fail: 2, evaluators: [] }]]),
+      );
+      const discovery = { getVerdictTallies } as unknown as import('../../src/discovery/types.js').DiscoveryAPI;
+
+      const status = await gatherStatusForApi(store, {
+        earningDir: mkdtempSync(join(tmpdir(), 'jinn-status-test-')),
+        rpcUrl: 'http://127.0.0.1:0',
+        network: 'testnet' as const,
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        discovery,
+      });
+
+      expect(getVerdictTallies).toHaveBeenCalledWith({ taskIds: ['42'] });
+      const row = status.taskRuns?.recentTasks.find((r) => r.requestId === 'swe-complete');
+      expect(row?.outcome).toBe('fail');
+    });
+  });
+
+  it('leaves outcome null when no discovery is supplied (#502)', async () => {
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+
+    await withTempStore(async (store) => {
+      const persistence = new TaskRunPersistence(store.db);
+      persistence.insertDiscovered({
+        requestId: 'swe-complete-nodisc',
+        taskId: '43',
+        taskCid: 'bafy-swe-complete-nodisc',
+        onchainCreationTx: '0xabc',
+        onchainCreationBlock: 1,
+        solverType: 'swe-rebench-v2.v1',
+        taskRole: 'restoration',
+        windowStartTs: 1_000,
+        windowEndTs: 2_000,
+        task: {
+          id: 'swe-complete-nodisc',
+          description: 'SWE task',
+          solverType: 'swe-rebench-v2.v1',
+          role: 'restoration',
+        },
+      });
+      store.db.prepare(
+        `UPDATE task_runs SET state = 'COMPLETE', state_updated_at = ? WHERE request_id = ?`,
+      ).run(2_500, 'swe-complete-nodisc');
+
+      const status = await gatherStatusForApi(store, undefined);
+      const row = status.taskRuns?.recentTasks.find((r) => r.requestId === 'swe-complete-nodisc');
+      expect(row?.outcome).toBeNull();
+    });
+  });
+
   it('caches Prediction operator diagnostic failures for repeated status polls', async () => {
     mockStatusRpc();
     const buildPredictionOperatorStatus = vi.fn(async () => {

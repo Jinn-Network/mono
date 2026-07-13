@@ -40,7 +40,8 @@ import {
   type PredictionOperatorStatusForApi,
   type PredictionV1Status,
 } from './prediction-v1-build.js';
-import { gatherTaskRunsStatus } from './task-runs-build.js';
+import { gatherTaskRunsStatus, applyOutcomes } from './task-runs-build.js';
+import type { DiscoveryAPI, VerdictTallyResult } from '../discovery/types.js';
 import { gatherLoopCompletion, gatherImplStateCadence } from './loop-completion-build.js';
 import type { BalanceCacheEntry } from '../store/store.js';
 import {
@@ -178,6 +179,14 @@ export interface StatusGatherConfig {
    * and sqlite-only contexts omit it ⇒ `null` (issue #441).
    */
   passwordRotation?: PasswordRotationConfig;
+  /**
+   * Resolved DiscoveryAPI, threaded by `server.ts`. When present, the async
+   * status path enriches each COMPLETE solve run's task-relative `outcome`
+   * from `getVerdictTallies` (spec/2026-05-22-run-outcome.md). Absent ⇒
+   * outcomes stay `null` (the SPA renders `—`). This is a DISPLAY signal:
+   * any discovery failure degrades silently to `null`, never a wrong `'fail'`.
+   */
+  discovery?: DiscoveryAPI;
 }
 
 function chainKey(network: 'mainnet' | 'testnet'): 'base' | 'base-sepolia' {
@@ -575,6 +584,28 @@ export async function gatherGatheredStatusRaw(
     taskRuns = gatherTaskRunsStatus(taskRunReadModel);
   } catch {
     taskRuns = undefined;
+  }
+
+  // Enrich task-relative outcomes from the network's verdict tallies
+  // (spec/2026-05-22-run-outcome.md). DISPLAY signal — degrade silently to
+  // null on any discovery failure; never surface a wrong 'fail'.
+  if (taskRuns && status?.discovery) {
+    try {
+      const solveTaskIds = [
+        ...new Set(
+          [...taskRuns.recentTasks, ...taskRuns.inFlight]
+            .filter((r) => r.taskRole !== 'evaluation' && r.state === 'COMPLETE' && r.taskId)
+            .map((r) => r.taskId as string),
+        ),
+      ];
+      const tallies: Map<string, VerdictTallyResult> = solveTaskIds.length
+        ? await status.discovery.getVerdictTallies({ taskIds: solveTaskIds })
+        : new Map();
+      applyOutcomes(taskRuns.recentTasks, tallies);
+      applyOutcomes(taskRuns.inFlight, tallies);
+    } catch {
+      // Outcomes stay null → SPA renders '—'/'awaiting'.
+    }
   }
 
   let harnessRollup: ReturnType<typeof buildHarnessRollup> | undefined;

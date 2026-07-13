@@ -1,7 +1,29 @@
 import { describe, expect, it } from 'vitest';
-import { gatherTaskRunsStatus } from '../../src/api/task-runs-build.js';
+import { gatherTaskRunsStatus, applyOutcomes, type TaskRunSummary } from '../../src/api/task-runs-build.js';
 import { TaskRunPersistence } from '../../src/harnesses/engine/persistence.js';
+import type { VerdictTallyResult } from '../../src/discovery/types.js';
 import { withTempStore } from '@test/store.js';
+
+function makeSummary(overrides: Partial<TaskRunSummary>): TaskRunSummary {
+  return {
+    requestId: 'req',
+    taskId: 'task-1',
+    taskCid: 'bafy',
+    solverType: 'swe-rebench-v2.v1',
+    state: 'COMPLETE',
+    taskRole: 'restoration',
+    implName: null,
+    windowStartTs: 1_000,
+    windowEndTs: 2_000,
+    runStartedAt: null,
+    stateUpdatedAt: 3_000,
+    manifestCid: null,
+    deliveryTxHash: null,
+    failureReason: null,
+    outcome: null,
+    ...overrides,
+  };
+}
 
 describe('gatherTaskRunsStatus', () => {
   it('splits completed generic task runs into solution and verdict totals', async () => {
@@ -153,6 +175,49 @@ describe('gatherTaskRunsStatus', () => {
         runStartedAt: 10_000,
       });
     });
+  });
+
+  it('seeds outcome to null in toSummary (base shape stays stable)', async () => {
+    await withTempStore(async (store) => {
+      const persistence = new TaskRunPersistence(store.db);
+      insertTask(persistence, { requestId: 'r', taskId: 'task-r', taskRole: 'restoration' });
+      const status = gatherTaskRunsStatus(store.taskRunReadModel());
+      expect(status.inFlight[0]?.outcome).toBeNull();
+    });
+  });
+});
+
+describe('applyOutcomes', () => {
+  const tally = (pass: number, fail: number): VerdictTallyResult => ({ pass, fail, evaluators: [] });
+
+  it('derives fail for a COMPLETE solve run with a majority-fail tally', () => {
+    const runs = [makeSummary({ taskId: 'task-1', state: 'COMPLETE', taskRole: 'restoration' })];
+    applyOutcomes(runs, new Map([['task-1', tally(0, 2)]]));
+    expect(runs[0]!.outcome).toBe('fail');
+  });
+
+  it('derives pass for a COMPLETE solve run with a majority-pass tally', () => {
+    const runs = [makeSummary({ taskId: 'task-1', state: 'COMPLETE', taskRole: 'restoration' })];
+    applyOutcomes(runs, new Map([['task-1', tally(3, 0)]]));
+    expect(runs[0]!.outcome).toBe('pass');
+  });
+
+  it('derives awaiting for a COMPLETE solve run with no matching tally', () => {
+    const runs = [makeSummary({ taskId: 'task-1', state: 'COMPLETE', taskRole: 'restoration' })];
+    applyOutcomes(runs, new Map());
+    expect(runs[0]!.outcome).toBe('awaiting');
+  });
+
+  it('leaves outcome null for a non-COMPLETE (FAILED) run', () => {
+    const runs = [makeSummary({ taskId: 'task-1', state: 'FAILED', taskRole: 'restoration' })];
+    applyOutcomes(runs, new Map([['task-1', tally(0, 2)]]));
+    expect(runs[0]!.outcome).toBeNull();
+  });
+
+  it('defers evaluation runs to awaiting (operator-verdict join is a follow-up)', () => {
+    const runs = [makeSummary({ taskId: 'task-1', state: 'COMPLETE', taskRole: 'evaluation' })];
+    applyOutcomes(runs, new Map([['task-1', tally(3, 0)]]));
+    expect(runs[0]!.outcome).toBe('awaiting');
   });
 });
 

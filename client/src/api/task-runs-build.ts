@@ -1,5 +1,7 @@
 import type { PersistedTaskRun } from '../types/task-run.js';
 import type { TaskRunReadModel } from '../types/task-run-read-model.js';
+import type { VerdictTallyResult } from '../discovery/types.js';
+import { deriveSolveOutcome, deriveEvaluateOutcome, type RunOutcome } from './run-outcome.js';
 
 /**
  * Cap on how many task runs the /v1/status payload carries. The operator
@@ -26,6 +28,13 @@ export interface TaskRunSummary {
   manifestCid: string | null;
   deliveryTxHash: string | null;
   failureReason: string | null;
+  /**
+   * Task-relative outcome (spec/2026-05-22-run-outcome.md): the network's
+   * verdict on this run, distinct from the technical `state`. `null` until
+   * enriched (and for non-COMPLETE runs). Enriched in the async status path
+   * via `applyOutcomes`; the pure `toSummary` seeds it to `null`.
+   */
+  outcome: RunOutcome;
 }
 
 export interface TaskRunsStatus {
@@ -126,5 +135,29 @@ function toSummary(run: PersistedTaskRun): TaskRunSummary {
     manifestCid: run.manifestCid,
     deliveryTxHash: run.deliveryTxHash,
     failureReason: run.failureReason,
+    outcome: null,
   };
+}
+
+/**
+ * Mutates each run's `outcome` in place from the network's verdict tallies
+ * (spec/2026-05-22-run-outcome.md). Solve runs use the strict-majority quorum;
+ * evaluation runs defer to `'awaiting'` today (the operator-verdict join is a
+ * follow-up — spec §6), so we pass `operatorPassed = undefined`.
+ *
+ * A run with no matching tally entry keeps `deriveSolveOutcome`'s COMPLETE→
+ * `'awaiting'` (never a wrong `'fail'`); a non-COMPLETE run stays `null`.
+ */
+export function applyOutcomes(
+  runs: TaskRunSummary[],
+  tallies: Map<string, VerdictTallyResult>,
+): void {
+  for (const r of runs) {
+    const tally = r.taskId ? tallies.get(r.taskId) : undefined;
+    if (r.taskRole === 'evaluation') {
+      r.outcome = deriveEvaluateOutcome(r.state, undefined, tally);
+    } else {
+      r.outcome = deriveSolveOutcome(r.state, tally);
+    }
+  }
 }
