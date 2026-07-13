@@ -309,5 +309,18 @@ export function withFallback(
         () => floor.getTaskStatuses(args),
       );
     },
+
+    getVerdictTallies(args) {
+      // DISPLAY/advisory signal (not a correctness gate): fall through to the
+      // floor on an indexer outage, like getTaskStatuses. The floor's empty Map
+      // is the intended degraded result — the caller maps an absent taskId to
+      // 'awaiting' (never a wrong 'fail'), so a tolerant fall-through is honest,
+      // not masking. Propagating the error here would needlessly blank the
+      // Activity Outcome column on a transient indexer blip (#502).
+      return dispatch(
+        () => primary.getVerdictTallies(args),
+        () => floor.getVerdictTallies(args),
+      );
+    },
   };
 }

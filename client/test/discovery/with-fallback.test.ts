@@ -502,6 +502,41 @@ describe('withFallback — all four methods', () => {
     expect(result).toBe(floorResult);
     expect(floor.getTaskStatuses).toHaveBeenCalledOnce();
   });
+
+  it('getVerdictTallies delegates to the primary on success (#502)', async () => {
+    const primaryResult = new Map([
+      ['100', { pass: 2, fail: 0, evaluators: [`0x${'ee'.repeat(20)}`] }],
+    ]);
+    const primary = {
+      getVerdictTallies: vi.fn(async () => primaryResult),
+    } as unknown as DiscoveryAPI;
+    const floor = {
+      getVerdictTallies: vi.fn(async () => new Map()),
+    } as unknown as DiscoveryAPI;
+    const api = makeWrapper(primary, floor);
+    const result = await api.getVerdictTallies({ taskIds: ['100'] });
+    expect(result).toBe(primaryResult);
+    expect(floor.getVerdictTallies).not.toHaveBeenCalled();
+  });
+
+  it('getVerdictTallies routes to floor (empty Map) on DiscoveryUnavailableError — display signal, never rethrows (#502)', async () => {
+    // Tolerant DISPLAY signal, like getTaskStatuses: an indexer outage must
+    // degrade to the floor's empty Map (caller renders 'awaiting' outcomes),
+    // NOT propagate the error.
+    const floorResult = new Map();
+    const primary = {
+      getVerdictTallies: vi.fn(async () => {
+        throw new DiscoveryUnavailableError('indexer down');
+      }),
+    } as unknown as DiscoveryAPI;
+    const floor = {
+      getVerdictTallies: vi.fn(async () => floorResult),
+    } as unknown as DiscoveryAPI;
+    const api = makeWrapper(primary, floor);
+    const result = await api.getVerdictTallies({ taskIds: ['100'] });
+    expect(result).toBe(floorResult);
+    expect(floor.getVerdictTallies).toHaveBeenCalledOnce();
+  });
 });
 
 describe('DiscoveryUnavailableError', () => {
