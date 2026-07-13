@@ -646,17 +646,19 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@nomicfoundation/hardhat-ethers@npm:^4.0.13":
-  version: 4.0.13
-  resolution: "@nomicfoundation/hardhat-ethers@npm:4.0.13"
+"@nomicfoundation/hardhat-ethers@npm:^4.0.14":
+  version: 4.0.14
+  resolution: "@nomicfoundation/hardhat-ethers@npm:4.0.14"
   dependencies:
-    "@nomicfoundation/hardhat-errors": "npm:^3.0.15"
-    "@nomicfoundation/hardhat-utils": "npm:^4.1.2"
+    "@nomicfoundation/hardhat-errors": "npm:^3.0.16"
+    "@nomicfoundation/hardhat-utils": "npm:^4.1.4"
+    "@nomicfoundation/hardhat-zod-utils": "npm:^3.0.5"
     ethereum-cryptography: "npm:^2.2.1"
     ethers: "npm:^6.14.0"
+    zod: "npm:^3.23.8"
   peerDependencies:
     hardhat: ^3.8.0
-  checksum: 10c0/d8c76b46af08c70cb5dbadc237fa6417502a474860b36a2d7e49392d46d22f886d078aec8245d7eb5906d8b9897d6296e89afc4a14c19be979959ab1eb2b2a62
+  checksum: 10c0/574cbbd9fb0c373ced96ae8172ffb59c3373bffdb1b251cbfb0c8910cc084af55c9b3737e887a83eee23f435202e316bdd5be0528af15596068d2bd930090796
   languageName: node
   linkType: hard
 
@@ -814,19 +816,19 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@nomicfoundation/hardhat-verify@npm:^3.0.20":
-  version: 3.0.20
-  resolution: "@nomicfoundation/hardhat-verify@npm:3.0.20"
+"@nomicfoundation/hardhat-verify@npm:^3.0.21":
+  version: 3.0.21
+  resolution: "@nomicfoundation/hardhat-verify@npm:3.0.21"
   dependencies:
     "@ethersproject/abi": "npm:^5.8.0"
-    "@nomicfoundation/hardhat-errors": "npm:^3.0.15"
-    "@nomicfoundation/hardhat-utils": "npm:^4.1.2"
+    "@nomicfoundation/hardhat-errors": "npm:^3.0.16"
+    "@nomicfoundation/hardhat-utils": "npm:^4.1.4"
     "@nomicfoundation/hardhat-zod-utils": "npm:^3.0.5"
     cbor2: "npm:^1.9.0"
     zod: "npm:^3.23.8"
   peerDependencies:
     hardhat: ^3.8.0
-  checksum: 10c0/b644ad7b898467ec5cc64da3bb58411689df86c68be242bf718bfcd83c5a67910b274fdecc9c83b8b18990332272ca3db1cff243d4ba31c9839d4547a0da198a
+  checksum: 10c0/b5a266fe70a790607ba341e8c75ae9b684d07fd000f0370e45d06334b4045b4717e00a86cfc7c61b7b01e06bed389e41ac5c6c1faf7ce4fd32b13294fd044500
   languageName: node
   linkType: hard
 
@@ -2138,7 +2140,7 @@ __metadata:
   dependencies:
     "@account-abstraction/contracts": "npm:^0.8.0"
     "@gnosis.pm/safe-contracts": "npm:^1.3.0"
-    "@nomicfoundation/hardhat-ethers": "npm:^4.0.13"
+    "@nomicfoundation/hardhat-ethers": "npm:^4.0.14"
     "@nomicfoundation/hardhat-ethers-chai-matchers": "npm:^3.0.11"
     "@nomicfoundation/hardhat-ignition": "npm:^3.1.8"
     "@nomicfoundation/hardhat-ignition-ethers": "npm:^3.1.6"
@@ -2147,7 +2149,7 @@ __metadata:
     "@nomicfoundation/hardhat-network-helpers": "npm:^3.0.11"
     "@nomicfoundation/hardhat-toolbox-mocha-ethers": "npm:^3.0.7"
     "@nomicfoundation/hardhat-typechain": "npm:^3.1.1"
-    "@nomicfoundation/hardhat-verify": "npm:^3.0.20"
+    "@nomicfoundation/hardhat-verify": "npm:^3.0.21"
     "@nomicfoundation/ignition-core": "npm:^3.1.8"
     "@openzeppelin/contracts": "npm:^5.6.1"
     "@prb/math": "npm:^4.1.2"
