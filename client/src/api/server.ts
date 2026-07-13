@@ -442,9 +442,17 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
       const reg = config.harnessReadinessRegistry;
       const getRegistry = (): HarnessReadinessRegistry | null =>
         reg && 'holder' in reg ? (reg.holder.current ?? null) : (reg ?? null);
+      // Resolve the live DiscoveryAPI (holder pattern, same as the registry
+      // above) so /v1/status can enrich task-relative outcomes (#502). When
+      // the holder is empty (pre-bootstrap) this is undefined and gather-status
+      // leaves outcomes null.
+      const disc = config.discovery;
+      const liveDiscovery: DiscoveryAPI | undefined =
+        disc && 'holder' in disc ? disc.holder.current : disc;
       const statusConfig: StatusGatherConfig | undefined = liveStatus
         ? {
             ...liveStatus,
+            discovery: liveDiscovery,
             harnessReadiness: () => {
               const live = getRegistry();
               if (!live) return null;
