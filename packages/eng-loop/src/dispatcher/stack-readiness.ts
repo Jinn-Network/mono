@@ -34,6 +34,7 @@ const DEFAULT_BASE = 'next';
 export function resolveStackReady(
   polled: PolledIssue[],
   prByIssue: ReadonlyMap<number, PrLink[]>,
+  authorAllowlist: ReadonlySet<string>,
 ): Map<number, StackReady> {
   const out = new Map<number, StackReady>();
 
@@ -45,10 +46,18 @@ export function resolveStackReady(
 
     for (const blocker of issue.blockedByIssues) {
       const links = prByIssue.get(blocker) ?? [];
-      // A merged PR means the blocker's work is already in `next`.
+      // A merged PR means the blocker's work is already in `next` — reviewed and
+      // merged by a human, so trusted regardless of its author.
       if (links.some((l) => l.state === 'MERGED')) continue;
-      // An open PR means the blocker is in-flight — the dependent can stack on it.
-      const open = links.find((l) => l.state === 'OPEN');
+      // An open PR means the blocker is in-flight — the dependent can stack on
+      // it, BUT only if that PR's author is on the dispatch allowlist. The
+      // blocker branch becomes the base a headless session runs on, so it must
+      // clear the same #497 trust boundary as the dependent's own author (which
+      // `selectReady` gates separately). `authorAllowlist` is pre-lowercased by
+      // the caller. (review 2026-07-13)
+      const open = links.find(
+        (l) => l.state === 'OPEN' && authorAllowlist.has(l.author.toLowerCase()),
+      );
       if (open) {
         openBlockerHeads.push(open.headRefName);
         continue;

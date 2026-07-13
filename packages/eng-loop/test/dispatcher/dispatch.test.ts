@@ -269,7 +269,7 @@ describe('dispatchIssue', () => {
 
     // Fetched the blocker branch before branching off it.
     const fetchCall = calls.find((c) => c.cmd === 'git' && c.args[0] === 'fetch');
-    expect(fetchCall?.args).toEqual(['fetch', 'origin', 'feat/50-blocker', '--quiet']);
+    expect(fetchCall?.args).toEqual(['fetch', '--quiet', 'origin', '--', 'feat/50-blocker']);
 
     // Worktree branched off origin/<stackBase>, NOT origin/next.
     const addCall = calls.find((c) => c.cmd === 'git' && c.args[0] === 'worktree' && c.args[1] === 'add');

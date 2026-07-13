@@ -11,6 +11,7 @@ describe('fetchIssuePrMap', () => {
     const runner = runnerReturning([
       {
         number: 500, headRefName: 'feat/50-a', baseRefName: 'next', state: 'OPEN', isDraft: true,
+        author: { login: 'ritsukai' },
         closingIssuesReferences: [{ number: 50 }],
       },
       {
@@ -24,7 +25,7 @@ describe('fetchIssuePrMap', () => {
     ]);
     const map = await fetchIssuePrMap(runner);
     expect(map.get(50)).toEqual([
-      { prNumber: 500, headRefName: 'feat/50-a', baseRefName: 'next', state: 'OPEN', isDraft: true },
+      { prNumber: 500, headRefName: 'feat/50-a', baseRefName: 'next', state: 'OPEN', isDraft: true, author: 'ritsukai' },
     ]);
     expect(map.get(60)?.[0].state).toBe('MERGED');
     expect(map.get(61)?.[0].prNumber).toBe(501);

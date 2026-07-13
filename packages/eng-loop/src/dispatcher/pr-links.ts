@@ -12,6 +12,15 @@ export interface PrLink {
   baseRefName: string;
   state: PrState;
   isDraft: boolean;
+  /**
+   * GitHub login of the PR author. The stack resolver gates on this: a
+   * dependent may only stack on an *open* blocker PR whose author is on the
+   * dispatch allowlist, since the blocker branch becomes the base a headless
+   * session runs on (#497 trust boundary — the allowlist otherwise gates only
+   * the dependent's author). Empty string when the payload omits it → never
+   * matches the allowlist (fail-safe). (review 2026-07-13)
+   */
+  author: string;
 }
 
 interface GhPrListEntry {
@@ -20,6 +29,7 @@ interface GhPrListEntry {
   baseRefName: string;
   state: string;
   isDraft: boolean;
+  author?: { login?: string };
   closingIssuesReferences?: Array<{ number: number }>;
 }
 
@@ -51,7 +61,7 @@ export async function fetchIssuePrMap(
     'pr', 'list',
     '--repo', REPO,
     '--state', 'all',
-    '--json', 'number,headRefName,baseRefName,state,isDraft,closingIssuesReferences',
+    '--json', 'number,headRefName,baseRefName,state,isDraft,author,closingIssuesReferences',
     '--limit', String(PR_LIST_LIMIT),
   ]);
   const entries = JSON.parse(raw) as GhPrListEntry[];
@@ -65,6 +75,7 @@ export async function fetchIssuePrMap(
       baseRefName: e.baseRefName,
       state,
       isDraft: Boolean(e.isDraft),
+      author: e.author?.login ?? '',
     };
     for (const ref of e.closingIssuesReferences ?? []) {
       const list = map.get(ref.number);

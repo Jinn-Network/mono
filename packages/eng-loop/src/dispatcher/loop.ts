@@ -197,8 +197,9 @@ export async function runCycle(
   );
 
   // 4. Resolve dependency-stacking: which Blocked-on-Another-issue issues have
-  //    a satisfied blocker (all merged, or exactly one open PR to stack on).
-  const stackReady = resolveStackReady(polled, prByIssue);
+  //    a satisfied blocker (all merged, or exactly one open PR — authored by an
+  //    allowlisted login — to stack on).
+  const stackReady = resolveStackReady(polled, prByIssue, allowlistSet);
 
   // 4b. Apply ready filter (ordered by priority then issue number)
   const { ready, skippedForAuthor } = selectReady(polled, inFlightSet, allowlistSet, stackReady);

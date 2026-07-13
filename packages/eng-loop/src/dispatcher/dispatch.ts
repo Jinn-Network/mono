@@ -255,7 +255,11 @@ export async function dispatchIssue(
 
   if (!worktreeAlreadyExists) {
     if (stackBase != null) {
-      await runner('git', ['fetch', 'origin', stackBase, '--quiet']);
+      // `--` terminates option parsing so a branch name that happens to start
+      // with `-` can't be misread as a git option. (The sibling `worktree add
+      // origin/${stackBase}` is already safe — the `origin/` prefix defuses a
+      // leading dash.) (review 2026-07-13)
+      await runner('git', ['fetch', '--quiet', 'origin', '--', stackBase]);
     }
     await runner('git', [
       'worktree', 'add',

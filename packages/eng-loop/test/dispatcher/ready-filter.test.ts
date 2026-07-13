@@ -155,6 +155,19 @@ describe('selectReady', () => {
       expect(ready).toEqual([]);
     });
 
+    it('NEVER admits a Blocked-on-Human issue even when it appears in stackReady', () => {
+      // The Human lane is an unconditional operator override — a satisfied
+      // native blocker must not override an explicit `Blocked on: Human`.
+      const humanBlocked = { ...base, number: 200, blockedOn: 'Human' as const };
+      const { ready } = selectReady(
+        [humanBlocked],
+        new Set(),
+        ALLOW_ALICE,
+        stack({ 200: { baseBranch: 'feat/50-blocker' } }),
+      );
+      expect(ready).toEqual([]);
+    });
+
     it('admits a blocked issue in stackReady and stamps its stackBase (real blocker branch)', () => {
       const { ready } = selectReady(
         [blocked],

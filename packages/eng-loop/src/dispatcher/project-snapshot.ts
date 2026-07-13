@@ -271,7 +271,7 @@ const SNAPSHOT_QUERY = `query($cursor: String) {
           id
           content {
             __typename
-            ... on Issue { number issueType { name } blockedBy(first: 10) { nodes { number } } }
+            ... on Issue { number issueType { name } blockedBy(first: 20) { nodes { number } } }
             ... on PullRequest { number }
           }
           status:    fieldValueByName(name: "Status")     { ... on ProjectV2ItemFieldSingleSelectValue { name } }

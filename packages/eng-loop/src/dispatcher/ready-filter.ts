@@ -50,7 +50,13 @@ export function selectReady(
     (i): i is ReadyIssue =>
       i.shape !== null &&
       i.priority !== null &&
-      (i.blockedOn === 'Nothing' || stackReady.has(i.number)) &&
+      // Admit `Nothing`, OR a dependency-satisfied issue — but ONLY when the
+      // board flag is specifically `Another issue`. An issue a human parked as
+      // `Blocked on: Human` must never be auto-dispatched even if its native
+      // blocker edges happen to be satisfied (the Human lane is an unconditional
+      // override). (review 2026-07-13)
+      (i.blockedOn === 'Nothing' ||
+        (i.blockedOn === 'Another issue' && stackReady.has(i.number))) &&
       i.onBoard &&
       i.projectItemId !== null &&     // implied by onBoard, but TS needs the guard
       i.status === 'Todo' &&
@@ -69,7 +75,7 @@ export function selectReady(
       // dispatches off `origin/next` normally (stackBase stays undefined).
       const sb = stackReady.get(issue.number)?.baseBranch;
       const stackBase =
-        issue.blockedOn !== 'Nothing' && sb != null && sb !== 'next' ? sb : undefined;
+        issue.blockedOn === 'Another issue' && sb != null && sb !== 'next' ? sb : undefined;
       ready.push(stackBase != null ? { ...issue, stackBase } : issue);
     } else {
       skippedForAuthor.push({ number: issue.number, author: issue.author });

@@ -12,6 +12,7 @@ import type {
 } from '../../src/dispatcher/types.js';
 import type { IssueSource } from '../../src/dispatcher/issue-source.js';
 import type { ProjectSnapshot } from '../../src/dispatcher/project-snapshot.js';
+import type { PrLink } from '../../src/dispatcher/pr-links.js';
 
 /**
  * runCycle is now snapshot-driven (jinn-mono#585). These tests inject a
@@ -481,5 +482,55 @@ describe('runCycle — collectCompletions / report.collected', () => {
     expect(report.backpressureTripped).toBe(true);
     expect(collectCompletions).toHaveBeenCalledOnce();
     expect(report.collected).toEqual(collected);
+  });
+
+  // --- dependency-stacking wiring end-to-end (review 2026-07-13) ---
+
+  it('dispatches a Blocked-on-Another-issue issue stacked on its blocker open PR', async () => {
+    const blocked = makePolled({ number: 200, blockedOn: 'Another issue', blockedByIssues: [100] });
+    let dispatchedBase: string | undefined = 'UNSET';
+    const dispatchIssue = vi.fn().mockImplementation((issue: ReadyIssue) => {
+      dispatchedBase = issue.stackBase;
+      return Promise.resolve(makeInFlight(issue.number));
+    });
+    const prMap = new Map<number, PrLink[]>([
+      [100, [{ prNumber: 10, headRefName: 'feat/100-base', baseRefName: 'next', state: 'OPEN', isDraft: true, author: 'alice' }]],
+    ]);
+    const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
+      source: makeSource([blocked]),
+      cfg: makeCfg({ concurrencyCap: 3 }), // allowlist ['alice']
+      deriveInFlight: vi.fn().mockResolvedValue({ inFlight: [], drift: [] }),
+      dispatchIssue,
+      countOpenReadyPrs: vi.fn().mockResolvedValue(0),
+      fetchIssuePrMap: vi.fn().mockResolvedValue(prMap),
+      wallClock: makeNeverExpiredClock(),
+      pauseSession: vi.fn().mockResolvedValue(undefined),
+      prevInFlight: [],
+      collectCompletions: vi.fn().mockResolvedValue([]),
+    });
+    expect(report.dispatched.map((d) => d.issueNumber)).toEqual([200]);
+    expect(dispatchedBase).toBe('feat/100-base');
+  });
+
+  it('does NOT dispatch a blocked issue when the blocker PR author is not allowlisted', async () => {
+    const blocked = makePolled({ number: 200, blockedOn: 'Another issue', blockedByIssues: [100] });
+    const dispatchIssue = vi.fn();
+    const prMap = new Map<number, PrLink[]>([
+      [100, [{ prNumber: 10, headRefName: 'feat/100-base', baseRefName: 'next', state: 'OPEN', isDraft: true, author: 'outsider' }]],
+    ]);
+    const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
+      source: makeSource([blocked]),
+      cfg: makeCfg({ concurrencyCap: 3 }), // allowlist ['alice'] — 'outsider' not on it
+      deriveInFlight: vi.fn().mockResolvedValue({ inFlight: [], drift: [] }),
+      dispatchIssue,
+      countOpenReadyPrs: vi.fn().mockResolvedValue(0),
+      fetchIssuePrMap: vi.fn().mockResolvedValue(prMap),
+      wallClock: makeNeverExpiredClock(),
+      pauseSession: vi.fn().mockResolvedValue(undefined),
+      prevInFlight: [],
+      collectCompletions: vi.fn().mockResolvedValue([]),
+    });
+    expect(report.dispatched).toEqual([]);
+    expect(dispatchIssue).not.toHaveBeenCalled();
   });
 });
