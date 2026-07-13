@@ -6,11 +6,9 @@ describe('VerdictTallyResult shape', () => {
     const row: VerdictTallyResult = {
       pass: 2,
       fail: 1,
-      evaluators: ['0xabc'],
     };
     expect(row.pass).toBe(2);
     expect(row.fail).toBe(1);
-    expect(row.evaluators).toEqual(['0xabc']);
   });
 
   it('DiscoveryAPI declares getVerdictTallies', () => {

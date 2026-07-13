@@ -188,7 +188,7 @@ describe('gatherTaskRunsStatus', () => {
 });
 
 describe('applyOutcomes', () => {
-  const tally = (pass: number, fail: number): VerdictTallyResult => ({ pass, fail, evaluators: [] });
+  const tally = (pass: number, fail: number): VerdictTallyResult => ({ pass, fail });
 
   it('derives fail for a COMPLETE solve run with a majority-fail tally', () => {
     const runs = [makeSummary({ taskId: 'task-1', state: 'COMPLETE', taskRole: 'restoration' })];

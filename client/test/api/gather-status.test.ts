@@ -205,7 +205,7 @@ describe('gatherStatusForApi', () => {
       ).run(2_500, 'swe-complete');
 
       const getVerdictTallies = vi.fn(async () =>
-        new Map([['42', { pass: 0, fail: 2, evaluators: [] }]]),
+        new Map([['42', { pass: 0, fail: 2 }]]),
       );
       const discovery = { getVerdictTallies } as unknown as import('../../src/discovery/types.js').DiscoveryAPI;
 

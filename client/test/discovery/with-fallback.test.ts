@@ -504,9 +504,7 @@ describe('withFallback — all four methods', () => {
   });
 
   it('getVerdictTallies delegates to the primary on success (#502)', async () => {
-    const primaryResult = new Map([
-      ['100', { pass: 2, fail: 0, evaluators: [`0x${'ee'.repeat(20)}`] }],
-    ]);
+    const primaryResult = new Map([['100', { pass: 2, fail: 0 }]]);
     const primary = {
       getVerdictTallies: vi.fn(async () => primaryResult),
     } as unknown as DiscoveryAPI;

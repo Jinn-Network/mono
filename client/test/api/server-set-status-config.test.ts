@@ -115,7 +115,7 @@ describe('ApiServer.setStatusConfig', () => {
     ).run(2_500, 'swe-complete');
 
     const getVerdictTallies = vi.fn(async () =>
-      new Map([['77', { pass: 2, fail: 0, evaluators: [] }]]),
+      new Map([['77', { pass: 2, fail: 0 }]]),
     );
     const discovery = { getVerdictTallies } as unknown as DiscoveryAPI;
 

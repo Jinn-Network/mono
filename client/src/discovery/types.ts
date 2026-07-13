@@ -81,10 +81,9 @@ export interface TaskStatusSnapshot {
  *
  * `pass` / `fail` count `verdictEnvelopeMeta` rows whose `evaluatorVerdict` is
  * `PASS` / `FAIL` respectively; the indexer folds REJECTED→FAIL, and INVALID /
- * INDETERMINATE / UNKNOWN verdicts are excluded from both poles. `evaluators`
- * lists the lowercased evaluator Safe addresses that posted a resolved verdict
- * (deduped). The quorum rule over `pass` / `fail` lives in
- * `client/src/api/run-outcome.ts` (spec/2026-05-22-run-outcome.md §2).
+ * INDETERMINATE / UNKNOWN verdicts are excluded from both poles. The quorum rule
+ * over `pass` / `fail` lives in `client/src/api/run-outcome.ts`
+ * (spec/2026-05-22-run-outcome.md §2).
  *
  * Callers map an absent taskId (or a floor-empty Map) to `'awaiting'` — never a
  * wrong `'fail'`.
@@ -92,7 +91,6 @@ export interface TaskStatusSnapshot {
 export interface VerdictTallyResult {
   pass: number;
   fail: number;
-  evaluators: string[];
 }
 
 /**

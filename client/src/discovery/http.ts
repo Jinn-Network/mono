@@ -383,7 +383,6 @@ query VerdictTallies($taskIds: [String!]!, $limit: Int!, $after: String) {
     items {
       taskId
       evaluatorVerdict
-      evaluator
       chainId
       requestId
     }
@@ -605,7 +604,6 @@ interface VerdictTalliesPage {
     items: Array<{
       taskId: string;
       evaluatorVerdict: string;
-      evaluator: string;
       chainId: number;
       requestId: string;
     }>;
@@ -1862,7 +1860,7 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
 
     const MAX_PAGES = 10;
     const PAGE_LIMIT = 1000;
-    const out = new Map<string, { pass: number; fail: number; evaluators: Set<string> }>();
+    const out = new Map<string, VerdictTallyResult>();
     const seen = new Set<string>(); // (requestId|chainId) dedupe across pages
     let cursor: string | null = null;
 
@@ -1878,31 +1876,21 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
         const key = `${row.requestId}|${row.chainId}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        const verdict = row.evaluatorVerdict;
         let entry = out.get(row.taskId);
         if (!entry) {
-          entry = { pass: 0, fail: 0, evaluators: new Set<string>() };
+          entry = { pass: 0, fail: 0 };
           out.set(row.taskId, entry);
         }
-        if (verdict === 'PASS') entry.pass += 1;
-        else if (verdict === 'FAIL') entry.fail += 1;
-        else continue; // INVALID / INDETERMINATE / UNKNOWN — excluded from poles
-        if (row.evaluator) entry.evaluators.add(row.evaluator.toLowerCase());
+        if (row.evaluatorVerdict === 'PASS') entry.pass += 1;
+        else if (row.evaluatorVerdict === 'FAIL') entry.fail += 1;
+        // else INVALID / INDETERMINATE / UNKNOWN — excluded from both poles
       }
       const pageInfo = data.verdictEnvelopeMetas?.pageInfo;
       if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
       cursor = pageInfo.endCursor;
     }
 
-    const result = new Map<string, VerdictTallyResult>();
-    for (const [taskId, entry] of out) {
-      result.set(taskId, {
-        pass: entry.pass,
-        fail: entry.fail,
-        evaluators: [...entry.evaluators],
-      });
-    }
-    return result;
+    return out;
   }
 
   return {

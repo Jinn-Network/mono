@@ -16,13 +16,13 @@ function isReadyProbe(url: string): boolean {
 }
 
 describe('HttpDiscoveryAPI.getVerdictTallies (#502)', () => {
-  it('tallies PASS/FAIL across two pages and collects lowercased evaluators', async () => {
+  it('tallies PASS/FAIL poles across two pages', async () => {
     const page1 = {
       data: {
         verdictEnvelopeMetas: {
           items: [
-            { taskId: '100', evaluatorVerdict: 'PASS', evaluator: '0xAAA', chainId: 84532, requestId: '0x01' },
-            { taskId: '100', evaluatorVerdict: 'FAIL', evaluator: '0xBBB', chainId: 84532, requestId: '0x02' },
+            { taskId: '100', evaluatorVerdict: 'PASS', chainId: 84532, requestId: '0x01' },
+            { taskId: '100', evaluatorVerdict: 'FAIL', chainId: 84532, requestId: '0x02' },
           ],
           pageInfo: { hasNextPage: true, endCursor: 'cursor1' },
         },
@@ -32,8 +32,8 @@ describe('HttpDiscoveryAPI.getVerdictTallies (#502)', () => {
       data: {
         verdictEnvelopeMetas: {
           items: [
-            { taskId: '100', evaluatorVerdict: 'PASS', evaluator: '0xCCC', chainId: 84532, requestId: '0x03' },
-            { taskId: '101', evaluatorVerdict: 'FAIL', evaluator: '0xAAA', chainId: 84532, requestId: '0x04' },
+            { taskId: '100', evaluatorVerdict: 'PASS', chainId: 84532, requestId: '0x03' },
+            { taskId: '101', evaluatorVerdict: 'FAIL', chainId: 84532, requestId: '0x04' },
           ],
           pageInfo: { hasNextPage: false, endCursor: null },
         },
@@ -52,16 +52,8 @@ describe('HttpDiscoveryAPI.getVerdictTallies (#502)', () => {
     const api = createHttpDiscoveryAPI({ url: 'http://stub/graphql', fetchImpl });
     const tallies = await api.getVerdictTallies({ taskIds: ['100', '101'] });
 
-    expect(tallies.get('100')).toEqual({
-      pass: 2,
-      fail: 1,
-      evaluators: ['0xaaa', '0xbbb', '0xccc'],
-    });
-    expect(tallies.get('101')).toEqual({
-      pass: 0,
-      fail: 1,
-      evaluators: ['0xaaa'],
-    });
+    expect(tallies.get('100')).toEqual({ pass: 2, fail: 1 });
+    expect(tallies.get('101')).toEqual({ pass: 0, fail: 1 });
     expect(tallies.size).toBe(2);
   });
 
@@ -70,10 +62,10 @@ describe('HttpDiscoveryAPI.getVerdictTallies (#502)', () => {
       data: {
         verdictEnvelopeMetas: {
           items: [
-            { taskId: '200', evaluatorVerdict: 'PASS', evaluator: '0xAAA', chainId: 84532, requestId: '0x11' },
-            { taskId: '200', evaluatorVerdict: 'INDETERMINATE', evaluator: '0xBBB', chainId: 84532, requestId: '0x12' },
-            { taskId: '200', evaluatorVerdict: 'UNKNOWN', evaluator: '0xCCC', chainId: 84532, requestId: '0x13' },
-            { taskId: '200', evaluatorVerdict: 'INVALID', evaluator: '0xDDD', chainId: 84532, requestId: '0x14' },
+            { taskId: '200', evaluatorVerdict: 'PASS', chainId: 84532, requestId: '0x11' },
+            { taskId: '200', evaluatorVerdict: 'INDETERMINATE', chainId: 84532, requestId: '0x12' },
+            { taskId: '200', evaluatorVerdict: 'UNKNOWN', chainId: 84532, requestId: '0x13' },
+            { taskId: '200', evaluatorVerdict: 'INVALID', chainId: 84532, requestId: '0x14' },
           ],
           pageInfo: { hasNextPage: false, endCursor: null },
         },
@@ -87,11 +79,11 @@ describe('HttpDiscoveryAPI.getVerdictTallies (#502)', () => {
     }) as unknown as typeof fetch;
     const api = createHttpDiscoveryAPI({ url: 'http://stub/graphql', fetchImpl });
     const tallies = await api.getVerdictTallies({ taskIds: ['200'] });
-    expect(tallies.get('200')).toEqual({ pass: 1, fail: 0, evaluators: ['0xaaa'] });
+    expect(tallies.get('200')).toEqual({ pass: 1, fail: 0 });
   });
 
   it('dedupes rows on requestId|chainId across pages', async () => {
-    const dup = { taskId: '300', evaluatorVerdict: 'PASS', evaluator: '0xAAA', chainId: 84532, requestId: '0x21' };
+    const dup = { taskId: '300', evaluatorVerdict: 'PASS', chainId: 84532, requestId: '0x21' };
     const page1 = {
       data: {
         verdictEnvelopeMetas: {
@@ -118,7 +110,7 @@ describe('HttpDiscoveryAPI.getVerdictTallies (#502)', () => {
     }) as unknown as typeof fetch;
     const api = createHttpDiscoveryAPI({ url: 'http://stub/graphql', fetchImpl });
     const tallies = await api.getVerdictTallies({ taskIds: ['300'] });
-    expect(tallies.get('300')).toEqual({ pass: 1, fail: 0, evaluators: ['0xaaa'] });
+    expect(tallies.get('300')).toEqual({ pass: 1, fail: 0 });
   });
 
   it('returns an empty Map and issues no query for an empty taskIds array', async () => {
