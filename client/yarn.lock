@@ -1019,7 +1019,7 @@ __metadata:
     "@opentelemetry/sdk-node": "npm:^0.220.0"
     "@opentelemetry/sdk-trace-base": "npm:^2.7.1"
     "@playwright/test": "npm:^1.59.1"
-    "@safe-global/protocol-kit": "npm:^7.2.0"
+    "@safe-global/protocol-kit": "npm:^8.0.3"
     "@safe-global/safe-deployments": "npm:^1.37.56"
     "@safe-global/types-kit": "npm:^4.0.1"
     "@scure/bip32": "npm:^2.2.0"
@@ -2659,28 +2659,28 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@safe-global/protocol-kit@npm:^7.2.0":
-  version: 7.2.0
-  resolution: "@safe-global/protocol-kit@npm:7.2.0"
+"@safe-global/protocol-kit@npm:^8.0.3":
+  version: 8.0.3
+  resolution: "@safe-global/protocol-kit@npm:8.0.3"
   dependencies:
     "@noble/curves": "npm:^1.6.0"
     "@peculiar/asn1-schema": "npm:^2.3.13"
-    "@safe-global/safe-deployments": "npm:^1.37.56"
-    "@safe-global/safe-modules-deployments": "npm:^3.0.4"
-    "@safe-global/types-kit": "npm:^3.1.0"
-    abitype: "npm:^1.0.2"
-    semver: "npm:^7.7.2"
-    viem: "npm:^2.21.8"
+    "@safe-global/safe-deployments": "npm:^1.37.59"
+    "@safe-global/safe-modules-deployments": "npm:^3.0.7"
+    "@safe-global/types-kit": "npm:^4.0.1"
+    abitype: "npm:^1.2.3"
+    semver: "npm:^7.8.0"
+    viem: "npm:^2.52.2"
   dependenciesMeta:
     "@noble/curves":
       optional: true
     "@peculiar/asn1-schema":
       optional: true
-  checksum: 10c0/4641daebfd12b48c0315b9301039eccefbe2d356bef26faccd252133c3a0bb34ab4bec33563c3664e7f27f5bb240289bd92890a8084b2524dca77f9ff7e5c85a
+  checksum: 10c0/40f602631e2a664ba7ecbf9c84a6ae6b2591649c87d38b6cc781d1affac948aba99ee6d8c3b1eb00506aaab5cb11fc49b1688badbc60929b9df8f60b29da77cf
   languageName: node
   linkType: hard
 
-"@safe-global/safe-deployments@npm:^1.37.56":
+"@safe-global/safe-deployments@npm:^1.37.56, @safe-global/safe-deployments@npm:^1.37.59":
   version: 1.37.59
   resolution: "@safe-global/safe-deployments@npm:1.37.59"
   dependencies:
@@ -2689,19 +2689,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@safe-global/safe-modules-deployments@npm:^3.0.4":
-  version: 3.0.4
-  resolution: "@safe-global/safe-modules-deployments@npm:3.0.4"
-  checksum: 10c0/fc5439165b8e56445d0cc1027ce3db9177895f4df1868ab9e948c2467e7e0161aafce73b0e5c34cd909c56a8d82e587aa712df6e92b54f4a623060e0c6331e08
-  languageName: node
-  linkType: hard
-
-"@safe-global/types-kit@npm:^3.1.0":
-  version: 3.1.0
-  resolution: "@safe-global/types-kit@npm:3.1.0"
-  dependencies:
-    abitype: "npm:^1.0.2"
-  checksum: 10c0/af044b38320821bbcb5f7f78de9ccd11235266abd3aca4979808c8a0a75d4e8cf6bb92eab77a3b8f2a75d61d72e7db98aeca5cfce8bb758fafc3f0137d69ff6a
+"@safe-global/safe-modules-deployments@npm:^3.0.7":
+  version: 3.0.7
+  resolution: "@safe-global/safe-modules-deployments@npm:3.0.7"
+  checksum: 10c0/9226eadaa160d8cec11bc0ea2474a668d77570e0db3c6a83a629ff49d20459cf2465b936459019d4ca0126886dcfbc7b0a4881a5da54e5f70a957e071a46f2c7
   languageName: node
   linkType: hard
 
@@ -4133,7 +4124,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"abitype@npm:1.2.3, abitype@npm:^1.0.2, abitype@npm:^1.2.3":
+"abitype@npm:1.2.3, abitype@npm:^1.2.3":
   version: 1.2.3
   resolution: "abitype@npm:1.2.3"
   peerDependencies:
@@ -7101,7 +7092,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"semver@npm:^7.3.2, semver@npm:^7.3.5, semver@npm:^7.6.2, semver@npm:^7.7.2, semver@npm:^7.7.3, semver@npm:^7.7.4":
+"semver@npm:^7.3.2, semver@npm:^7.3.5, semver@npm:^7.6.2, semver@npm:^7.7.3, semver@npm:^7.7.4, semver@npm:^7.8.0":
   version: 7.8.5
   resolution: "semver@npm:7.8.5"
   bin:
@@ -7825,7 +7816,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"viem@npm:^2.0.0, viem@npm:^2.21.8, viem@npm:^2.47.0, viem@npm:^2.48.11":
+"viem@npm:^2.0.0, viem@npm:^2.47.0, viem@npm:^2.48.11, viem@npm:^2.52.2":
   version: 2.55.1
   resolution: "viem@npm:2.55.1"
   dependencies:
