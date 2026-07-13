@@ -188,10 +188,10 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord', () => {
 
 describe('makeSweRebenchV2GeneratorForLaunchedRecord — network-truth success reconciliation (#669)', () => {
   it('classifies an instance as saturated when network successes ≥ N_target_successes, even if local successful=0', async () => {
-    // Arrange — local state file says successful=0 for sympy__sympy-27510;
+    // Arrange — local state file says successful=0 for org__repo-669;
     // network truth (the stub DiscoveryAPI) reports passCount=21 for the same
     // instance, which is ≥ N_target_successes=5. The expected behaviour is
-    // that the launcher does NOT post sympy__sympy-27510 — it is saturated
+    // that the launcher does NOT post org__repo-669 — it is saturated
     // from network truth, even though the local counter is zero.
     const stateDir = await mkdtemp(join(tmpdir(), 'jinn-669-'));
     await mkdir(stateDir, { recursive: true });
@@ -200,7 +200,7 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — network-truth success r
       JSON.stringify({
         schemaVersion: 'swe-rebench-v2-generator-state.v1',
         tasks: {
-          'sympy__sympy-27510': { posted: 8, successful: 0, last_posted_at: 0 },
+          'org__repo-669': { posted: 8, successful: 0, last_posted_at: 0 },
         },
       }),
     );
@@ -209,13 +209,17 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — network-truth success r
     // Pool cache file shape per `_swe-rebench-v2-pool-cache.ts`: { schemaVersion,
     // savedAt, tasks }. With a non-empty cache and HF unreachable in the test
     // sandbox, `loadPoolWithCacheFallback` serves from disk.
+    // NB: the instance id MUST be synthetic (not a real dataset instance) — the
+    // generator excludes active held-out-slate instances from the train stream
+    // (`excludeHeldOutSlate`), so a real slate member would vanish from the
+    // eligible pool and this test would never reach the saturation path.
     await writeFile(
       join(stateDir, 'pool-cache.json'),
       JSON.stringify({
         schemaVersion: 'swe-rebench-v2-pool-cache.v1',
         savedAt: new Date().toISOString(),
         tasks: [{
-          instance_id: 'sympy__sympy-27510',
+          instance_id: 'org__repo-669',
           language: 'python',
           hf_dataset: 'nebius/SWE-rebench-leaderboard',
           hf_split: '2024_12',
@@ -237,7 +241,7 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — network-truth success r
     // Stub DiscoveryAPI: only getInstanceSuccessCounts is exercised on this
     // code path; the rest throw so any accidental call surfaces.
     const successCounts = new Map<string, number>([
-      ['sympy__sympy-27510', 21],
+      ['org__repo-669', 21],
     ]);
     const notUsed = vi.fn(async () => { throw new Error('not used'); });
     const discoveryApi = {
