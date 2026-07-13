@@ -57,7 +57,7 @@ __metadata:
     smol-toml: "npm:^1.7.0"
     twitter-api-v2: "npm:^1.18.0"
     typescript: "npm:^5.4.0"
-    viem: "npm:^2.55.0"
+    viem: "npm:^2.55.1"
     vitest: "npm:^4.1.10"
     zod: "npm:^3.23.0"
   bin:
@@ -1024,9 +1024,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"viem@npm:^2.55.0":
-  version: 2.55.0
-  resolution: "viem@npm:2.55.0"
+"viem@npm:^2.55.1":
+  version: 2.55.1
+  resolution: "viem@npm:2.55.1"
   dependencies:
     "@noble/curves": "npm:1.9.1"
     "@noble/hashes": "npm:1.8.0"
@@ -1041,7 +1041,7 @@ __metadata:
   peerDependenciesMeta:
     typescript:
       optional: true
-  checksum: 10c0/6baed9096ed427397c137b4d313719a86012fc0812a36924667f5b972c0940755d05f49d8b87442d97e0184c4bbf4e208221b712b27cce5c677cdb03e9a3895b
+  checksum: 10c0/4747450c511604dc2280b94b6a6eab53638058a559531f7707d31f21de51670449530f9ebc2fbc06d961b8b5a6cfadb920683e701058adc8996619b012bbc56d
   languageName: node
   linkType: hard
 
