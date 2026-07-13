@@ -1888,6 +1888,15 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
       const pageInfo = data.verdictEnvelopeMetas?.pageInfo;
       if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
       cursor = pageInfo.endCursor;
+      // Cap hit with rows still remaining: the tally truncates silently. Warn
+      // once (never per page) so the dropped-rows skew is visible in logs — the
+      // Outcome column is a display signal, so we degrade rather than throw.
+      if (page === MAX_PAGES - 1) {
+        console.warn(
+          `[discovery] getVerdictTallies truncated at page cap (${MAX_PAGES} × ${PAGE_LIMIT} rows) ` +
+          `for ${args.taskIds.length} taskId(s); tally may under-count (#502).`,
+        );
+      }
     }
 
     return out;

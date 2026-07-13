@@ -135,4 +135,44 @@ describe('HttpDiscoveryAPI.getVerdictTallies (#502)', () => {
     await expect(api.getVerdictTallies({ taskIds: ['1'] }))
       .rejects.toBeInstanceOf(DiscoveryUnavailableError);
   });
+
+  it('warns once (not per page) and returns the truncated tally when the page cap is hit', async () => {
+    // Every page reports hasNextPage: true, so the loop exhausts MAX_PAGES (10)
+    // while more rows remain — the silent-truncation case the warning covers.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let leg = 0;
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (isReadyProbe(url)) return new Response('ok', { status: 200 });
+      leg += 1;
+      const body = {
+        data: {
+          verdictEnvelopeMetas: {
+            items: [
+              { taskId: '400', evaluatorVerdict: 'PASS', chainId: 84532, requestId: `0x${leg}` },
+            ],
+            pageInfo: { hasNextPage: true, endCursor: `cursor${leg}` },
+          },
+        },
+      };
+      return new Response(JSON.stringify(body), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    const api = createHttpDiscoveryAPI({ url: 'http://stub/graphql', fetchImpl });
+    // Does not throw — truncates rather than failing the display read.
+    const tallies = await api.getVerdictTallies({ taskIds: ['400'] });
+
+    // The tally still returns the rows scanned before the cap (one PASS per page).
+    expect(tallies.get('400')).toEqual({ pass: 10, fail: 0 });
+
+    // Exactly one warning — not one per page.
+    const capWarnings = warn.mock.calls.filter((c) =>
+      typeof c[0] === 'string' && c[0].includes('getVerdictTallies'),
+    );
+    expect(capWarnings.length).toBe(1);
+    expect(capWarnings[0]?.[0]).toContain('[discovery]');
+
+    warn.mockRestore();
+  });
 });
