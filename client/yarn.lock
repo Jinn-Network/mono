@@ -1080,7 +1080,7 @@ __metadata:
   bin:
     client: ./dist/bin/jinn.js
     jinn: ./dist/bin/jinn.js
-    jinn-distil-mcp: ./dist/bin/jinn-distil-mcp.js
+    jinn-distill-mcp: ./dist/bin/jinn-distill-mcp.js
     jinn-layer: ./dist/bin/jinn-layer.js
     jinn-stop-hook: ./dist/bin/jinn-stop-hook.js
   languageName: unknown

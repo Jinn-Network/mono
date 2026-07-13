@@ -13,7 +13,7 @@ import { chmodSync } from 'node:fs';
 
 for (const entry of [
   { in: 'packages/harness-layer/src/bin/jinn-layer.ts', out: 'dist/bin/jinn-layer.js' },
-  { in: 'packages/harness-layer/src/bin/jinn-distil-mcp.ts', out: 'dist/bin/jinn-distil-mcp.js' },
+  { in: 'packages/harness-layer/src/bin/jinn-distill-mcp.ts', out: 'dist/bin/jinn-distill-mcp.js' },
 ]) {
   await build({
     entryPoints: [entry.in],

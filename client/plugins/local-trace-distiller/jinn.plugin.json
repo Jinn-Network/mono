@@ -4,11 +4,11 @@
   "description": "Local trace distillation plugin. Searches private captures, clusters candidate skill opportunities, and invokes the existing Jinn skill distiller locally.",
   "jinn": {
     "supports": [
-      "jinn.local-distil"
+      "jinn.local-distill"
     ],
     "capabilities": {
       "tools": {
-        "jinn-local-distil": [
+        "jinn-local-distill": [
           "distill_trace_search",
           "distill_trace_read",
           "distill_trace_cluster",
@@ -18,8 +18,8 @@
       }
     },
     "mcpServers": {
-      "jinn-local-distil": {
-        "command": "jinn-distil-mcp",
+      "jinn-local-distill": {
+        "command": "jinn-distill-mcp",
         "tools": [
           "distill_trace_search",
           "distill_trace_read",

@@ -136,13 +136,13 @@ export {
 
 export {
   DEFAULT_CAPTURES_DIR,
-  DEFAULT_DISTIL_CAPTURE_LIMIT,
+  DEFAULT_DISTILL_CAPTURE_LIMIT,
   DEFAULT_SKILLS_INSTALL_DIR,
   coveredSessionIds,
   loadRecentCaptures,
   provenanceLabels,
   stagingDirFor,
-} from './distil-captures.js';
+} from './distill-captures.js';
 
 export {
   clusterTraceCards,
@@ -157,24 +157,24 @@ export {
   type TraceReadMode,
   type TraceReadResult,
   type TraceSearchQuery,
-} from './distil-traces.js';
+} from './distill-traces.js';
 
 export {
-  createDistilMcpServer,
-  runLocalDistil,
-  type DistilMcpDeps,
-  type LocalDistilRunArgs,
-} from './distil-mcp-server.js';
+  createDistillMcpServer,
+  runLocalDistill,
+  type DistillMcpDeps,
+  type LocalDistillRunArgs,
+} from './distill-mcp-server.js';
 
 export {
-  DEFAULT_DISTIL_FEEDBACK_PATH,
-  distilFeedbackPathFromEnv,
-  readDistilFeedback,
-  recordDistilFeedback,
-  type DistilFeedbackInput,
-  type DistilFeedbackRecord,
-  type DistilFeedbackVerdict,
-} from './distil-feedback.js';
+  DEFAULT_DISTILL_FEEDBACK_PATH,
+  distillFeedbackPathFromEnv,
+  readDistillFeedback,
+  recordDistillFeedback,
+  type DistillFeedbackInput,
+  type DistillFeedbackRecord,
+  type DistillFeedbackVerdict,
+} from './distill-feedback.js';
 
 export {
   threeArmMeasurement,

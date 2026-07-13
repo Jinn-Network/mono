@@ -1,7 +1,7 @@
 {
   "mcpServers": {
-    "jinn-local-distil": {
-      "command": "jinn-distil-mcp",
+    "jinn-local-distill": {
+      "command": "jinn-distill-mcp",
       "args": []
     }
   }

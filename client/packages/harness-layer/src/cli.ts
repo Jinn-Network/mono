@@ -64,13 +64,13 @@ import {
 } from './distill-mode.js';
 import {
   DEFAULT_CAPTURES_DIR,
-  DEFAULT_DISTIL_CAPTURE_LIMIT,
+  DEFAULT_DISTILL_CAPTURE_LIMIT,
   DEFAULT_SKILLS_INSTALL_DIR,
   coveredSessionIds,
   loadRecentCaptures,
   provenanceLabels,
   stagingDirFor,
-} from './distil-captures.js';
+} from './distill-captures.js';
 import {
   renderConsentDisclosure,
   renderPreview,

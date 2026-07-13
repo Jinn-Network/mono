@@ -9,7 +9,7 @@ import {
   loadRecentCaptures,
   provenanceLabels,
   stagingDirFor,
-} from '../src/distil-captures.js';
+} from '../src/distill-captures.js';
 
 function capture(sessionId: string, capturedAt: string, summary = sessionId): CapturedTask {
   return {
@@ -66,9 +66,9 @@ function skill(name: string, provenance: string[]): SkillPackage {
   };
 }
 
-describe('distil capture source helpers', () => {
+describe('distill capture source helpers', () => {
   it('loads newest captures first, applies the limit, and skips malformed files', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'distil-captures-'));
+    const dir = mkdtempSync(join(tmpdir(), 'distill-captures-'));
     writeCapture(dir, 'old.json', capture('old', '2026-07-08T00:00:00.000Z', 'old work'));
     writeCapture(dir, 'new.json', capture('new', '2026-07-09T00:00:00.000Z', 'new work'));
     writeFileSync(join(dir, 'broken.json'), '{ not json');
@@ -79,7 +79,7 @@ describe('distil capture source helpers', () => {
   });
 
   it('returns an empty list for a missing captures directory', () => {
-    const dir = join(tmpdir(), `missing-distil-captures-${Date.now()}`);
+    const dir = join(tmpdir(), `missing-distill-captures-${Date.now()}`);
     expect(loadRecentCaptures(dir, 50)).toEqual([]);
   });
 
@@ -88,8 +88,8 @@ describe('distil capture source helpers', () => {
   });
 
   it('finds session ids already covered by installed or staged skills', () => {
-    const active = mkdtempSync(join(tmpdir(), 'distil-active-'));
-    const staged = mkdtempSync(join(tmpdir(), 'distil-staged-'));
+    const active = mkdtempSync(join(tmpdir(), 'distill-active-'));
+    const staged = mkdtempSync(join(tmpdir(), 'distill-staged-'));
     mkdirSync(join(active, 'one'), { recursive: true });
     mkdirSync(join(staged, 'two'), { recursive: true });
     writeFileSync(join(active, 'one', 'SKILL.md'), buildSkillMarkdown(skill('one', ['local-capture:s1'])));

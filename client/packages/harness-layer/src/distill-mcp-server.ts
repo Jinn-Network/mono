@@ -6,15 +6,15 @@ import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod/v3';
 import type { CapturedTask } from './capture.js';
-import { DEFAULT_CAPTURES_DIR, DEFAULT_DISTIL_CAPTURE_LIMIT, loadRecentCaptures } from './distil-captures.js';
+import { DEFAULT_CAPTURES_DIR, DEFAULT_DISTILL_CAPTURE_LIMIT, loadRecentCaptures } from './distill-captures.js';
 import {
   clusterTraceCards,
   readTrace,
   searchTraceCards,
   traceCardFromCapture,
   type TraceReadMode,
-} from './distil-traces.js';
-import { recordDistilFeedback } from './distil-feedback.js';
+} from './distill-traces.js';
+import { recordDistillFeedback } from './distill-feedback.js';
 
 interface McpToolResponse extends Record<string, unknown> {
   content: Array<{ type: 'text'; text: string }>;
@@ -23,22 +23,22 @@ interface McpToolResponse extends Record<string, unknown> {
 
 type SpawnFn = typeof spawn;
 
-export interface DistilMcpDeps {
+export interface DistillMcpDeps {
   spawn?: SpawnFn;
   env?: NodeJS.ProcessEnv;
 }
 
 const traceReadModes = ['summary', 'events', 'tool_calls', 'transcript_excerpt', 'full_transcript'] as const satisfies readonly TraceReadMode[];
 
-export function createDistilMcpServer(deps: DistilMcpDeps = {}): McpServer {
+export function createDistillMcpServer(deps: DistillMcpDeps = {}): McpServer {
   const server = new McpServer({
-    name: 'jinn-local-distil',
+    name: 'jinn-local-distill',
     version: '0.1.0',
   });
 
   server.tool(
     'distill_trace_search',
-    'Search local trace cards from the shared local distil capture directory. Use this before reading full traces; returns compact cards only.',
+    'Search local trace cards from the shared local distill capture directory. Use this before reading full traces; returns compact cards only.',
     {
       capturesDir: z.string().optional().describe('Directory containing CapturedTask JSON files. Defaults to JINN_LAYER_CAPTURES_DIR or ~/.jinn-client/harness-layer/captures.'),
       limit: z.number().int().positive().max(500).optional().describe('Maximum captures to load and maximum cards to return.'),
@@ -51,7 +51,7 @@ export function createDistilMcpServer(deps: DistilMcpDeps = {}): McpServer {
     },
     async (args) => {
       const capturesDir = args.capturesDir ?? capturesDirFromEnv(deps.env);
-      const limit = args.limit ?? DEFAULT_DISTIL_CAPTURE_LIMIT;
+      const limit = args.limit ?? DEFAULT_DISTILL_CAPTURE_LIMIT;
       const captures = loadRecentCaptures(capturesDir, limit);
       const cards = searchTraceCards(captures.map(traceCardFromCapture), {
         query: args.query,
@@ -81,7 +81,7 @@ export function createDistilMcpServer(deps: DistilMcpDeps = {}): McpServer {
     },
     async (args) => {
       const capturesDir = args.capturesDir ?? capturesDirFromEnv(deps.env);
-      const captures = loadRecentCaptures(capturesDir, args.limit ?? DEFAULT_DISTIL_CAPTURE_LIMIT);
+      const captures = loadRecentCaptures(capturesDir, args.limit ?? DEFAULT_DISTILL_CAPTURE_LIMIT);
       const capture = findCapture(captures, { traceId: args.traceId, sessionId: args.sessionId });
       if (!capture) return errorResponse(`Trace not found: ${args.traceId ?? args.sessionId ?? '(missing id)'}`);
       try {
@@ -106,7 +106,7 @@ export function createDistilMcpServer(deps: DistilMcpDeps = {}): McpServer {
     },
     async (args) => {
       const capturesDir = args.capturesDir ?? capturesDirFromEnv(deps.env);
-      const captures = loadRecentCaptures(capturesDir, args.limit ?? DEFAULT_DISTIL_CAPTURE_LIMIT);
+      const captures = loadRecentCaptures(capturesDir, args.limit ?? DEFAULT_DISTILL_CAPTURE_LIMIT);
       const candidates = clusterTraceCards(captures.map(traceCardFromCapture));
       return jsonResponse({ capturesDir, count: candidates.length, candidates });
     },
@@ -114,7 +114,7 @@ export function createDistilMcpServer(deps: DistilMcpDeps = {}): McpServer {
 
   server.tool(
     'distill_local',
-    'Run local skill distillation over captured traces by delegating to jinn-layer distil. Requires confirm:true because it can call an LLM and write staged or installed skills.',
+    'Run local skill distillation over captured traces by delegating to jinn-layer distill. Requires confirm:true because it can call an LLM and write staged or installed skills.',
     {
       confirm: z.boolean().optional().describe('Must be true to execute. Omit or false to receive a preview envelope.'),
       capturesDir: z.string().optional().describe('Directory containing CapturedTask JSON files.'),
@@ -136,7 +136,7 @@ export function createDistilMcpServer(deps: DistilMcpDeps = {}): McpServer {
           description: 'Run local distillation over captured traces.',
           effects: [
             'Reads local captured-task JSON files.',
-            'Calls the selected user LLM provider through the existing jinn-layer distil flow.',
+            'Calls the selected user LLM provider through the existing jinn-layer distill flow.',
             'Writes distilled skill packages under the output/staging directory and may install selected skills.',
           ],
           followUp: {
@@ -145,7 +145,7 @@ export function createDistilMcpServer(deps: DistilMcpDeps = {}): McpServer {
           },
         });
       }
-      return runLocalDistil({
+      return runLocalDistill({
         capturesDir: args.capturesDir,
         out: args.out,
         limit: args.limit,
@@ -168,10 +168,10 @@ export function createDistilMcpServer(deps: DistilMcpDeps = {}): McpServer {
       sessionId: z.string().optional().describe('Session where the skill was used, if known.'),
       notes: z.string().optional().describe('Short user-approved note about what to improve or preserve.'),
       acceptedChanges: z.array(z.string()).optional().describe('Concrete user-approved changes to apply in a later skill improvement pass.'),
-      feedbackPath: z.string().optional().describe('Override feedback JSONL path. Defaults to JINN_LAYER_DISTIL_FEEDBACK_PATH or ~/.jinn-client/harness-layer/distil-feedback.jsonl.'),
+      feedbackPath: z.string().optional().describe('Override feedback JSONL path. Defaults to JINN_LAYER_DISTILL_FEEDBACK_PATH or ~/.jinn-client/harness-layer/distill-feedback.jsonl.'),
     },
     async (args) => {
-      const record = recordDistilFeedback({
+      const record = recordDistillFeedback({
         skillName: args.skillName,
         verdict: args.verdict,
         ...(args.sessionId ? { sessionId: args.sessionId } : {}),
@@ -188,7 +188,7 @@ export function createDistilMcpServer(deps: DistilMcpDeps = {}): McpServer {
   return server;
 }
 
-export interface LocalDistilRunArgs {
+export interface LocalDistillRunArgs {
   capturesDir?: string;
   out?: string;
   limit?: number;
@@ -200,13 +200,13 @@ export interface LocalDistilRunArgs {
   distillerModel?: string;
 }
 
-export async function runLocalDistil(args: LocalDistilRunArgs, deps: DistilMcpDeps = {}): Promise<McpToolResponse> {
+export async function runLocalDistill(args: LocalDistillRunArgs, deps: DistillMcpDeps = {}): Promise<McpToolResponse> {
   const resolved = resolveJinnLayerCommand(deps.env);
   const selected = materializeSelectedCaptures(args, deps.env);
   if (selected.error) return errorResponse(selected.error);
   const argv = [
     ...resolved.prefixArgs,
-    'distil',
+    'distill',
     '--where',
     'local',
     '--json',
@@ -271,7 +271,7 @@ function resolveJinnLayerCommand(env: NodeJS.ProcessEnv = process.env): { comman
 }
 
 function materializeSelectedCaptures(
-  args: LocalDistilRunArgs,
+  args: LocalDistillRunArgs,
   env: NodeJS.ProcessEnv = process.env,
 ): { capturesDir?: string; tempDir?: string; traceCount?: number; error?: string } {
   const selectedIds = new Set([
@@ -281,12 +281,12 @@ function materializeSelectedCaptures(
   if (selectedIds.size === 0) return {};
 
   const sourceDir = args.capturesDir ?? capturesDirFromEnv(env);
-  const captures = loadRecentCaptures(sourceDir, args.limit ?? DEFAULT_DISTIL_CAPTURE_LIMIT)
+  const captures = loadRecentCaptures(sourceDir, args.limit ?? DEFAULT_DISTILL_CAPTURE_LIMIT)
     .filter((capture) => selectedIds.has(capture.session.sessionId));
   if (captures.length === 0) {
     return { error: `No selected traces found in ${sourceDir}` };
   }
-  const tempDir = mkdtempSync(join(tmpdir(), 'jinn-distil-selected-'));
+  const tempDir = mkdtempSync(join(tmpdir(), 'jinn-distill-selected-'));
   for (const capture of captures) {
     writeFileSync(
       join(tempDir, `${safeFilePart(capture.session.sessionId)}.json`),

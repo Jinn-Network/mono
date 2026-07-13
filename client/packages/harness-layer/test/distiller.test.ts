@@ -120,7 +120,7 @@ describe('LocalDistiller', () => {
     expect(parsed.jinn.skillKind).toBe('strategic-pattern');
   });
 
-  it('distils a user-accepted own-capture into an experimental local skill', async () => {
+  it('distills a user-accepted own-capture into an experimental local skill', async () => {
     const { sink, installed } = memorySink();
     const distiller = createLocalDistiller({ distill: async () => VALID_OUT, sink, now: NOW });
     const result = await distiller.distill([

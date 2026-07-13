@@ -5,7 +5,7 @@ import {
   readTrace,
   searchTraceCards,
   traceCardFromCapture,
-} from '../src/distil-traces.js';
+} from '../src/distill-traces.js';
 
 function capture(over: {
   sessionId: string;
@@ -75,7 +75,7 @@ function capture(over: {
   };
 }
 
-describe('local distil trace primitives', () => {
+describe('local distill trace primitives', () => {
   it('normalizes a CapturedTask into a compact trace card', () => {
     const card = traceCardFromCapture(capture({
       sessionId: 's1',

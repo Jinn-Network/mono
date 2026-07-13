@@ -4,12 +4,12 @@ import { join } from 'node:path';
 import { parseCapturedTask, type CapturedTask } from './capture.js';
 import { parseSkillMarkdown } from './skill-package.js';
 
-/** Own-captures dir the rung-1 `distil` loop reads by default. */
+/** Own-captures dir the rung-1 `distill` loop reads by default. */
 export const DEFAULT_CAPTURES_DIR = join(homedir(), '.jinn-client', 'harness-layer', 'captures');
-/** Local skills library `distil` installs into by default. */
+/** Local skills library `distill` installs into by default. */
 export const DEFAULT_SKILLS_INSTALL_DIR = join(homedir(), '.jinn-client', 'harness-layer', 'skills');
-/** How many recent own captures `distil` considers when --limit is unset. */
-export const DEFAULT_DISTIL_CAPTURE_LIMIT = 50;
+/** How many recent own captures `distill` considers when --limit is unset. */
+export const DEFAULT_DISTILL_CAPTURE_LIMIT = 50;
 
 /**
  * Load the operator's most recent own captures from `dir`. Every `*.json` file
@@ -25,7 +25,7 @@ export function loadRecentCaptures(dir: string, limit: number): CapturedTask[] {
       parsed.push(parseCapturedTask(JSON.parse(readFileSync(join(dir, file), 'utf-8'))));
     } catch (err) {
       console.warn(
-        `[distil] skipping malformed capture file ${file}: ` +
+        `[distill] skipping malformed capture file ${file}: ` +
           `${err instanceof Error ? err.message : String(err)}`,
       );
     }

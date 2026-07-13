@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
-import { createDistilMcpServer, runLocalDistil } from '../src/distil-mcp-server.js';
+import { createDistillMcpServer, runLocalDistill } from '../src/distill-mcp-server.js';
 
 const EXPECTED_TOOLS = [
   'distill_trace_search',
@@ -15,9 +15,9 @@ class FakeChildProcess extends EventEmitter {
   stderr = new EventEmitter();
 }
 
-describe('local distil MCP server', () => {
+describe('local distill MCP server', () => {
   it('registers the trace and distill tools with descriptions', () => {
-    const server = createDistilMcpServer();
+    const server = createDistillMcpServer();
     const registered = (server as unknown as { _registeredTools: Record<string, { description?: string }> })._registeredTools;
 
     expect(Object.keys(registered).sort()).toEqual([...EXPECTED_TOOLS].sort());
@@ -26,10 +26,10 @@ describe('local distil MCP server', () => {
     }
   });
 
-  it('runs confirmed distillation through jinn-layer distil with local/json flags', async () => {
+  it('runs confirmed distillation through jinn-layer distill with local/json flags', async () => {
     const child = new FakeChildProcess();
     const spawn = vi.fn(() => child as never);
-    const resultPromise = runLocalDistil(
+    const resultPromise = runLocalDistill(
       {
         capturesDir: '/captures',
         out: '/out',
@@ -50,7 +50,7 @@ describe('local distil MCP server', () => {
     const body = JSON.parse(result.content[0]!.text) as { command: string[]; exitCode: number; stdout: string; stderr: string };
 
     expect(spawn).toHaveBeenCalledWith('/bin/jinn-layer', [
-      'distil',
+      'distill',
       '--where',
       'local',
       '--json',
