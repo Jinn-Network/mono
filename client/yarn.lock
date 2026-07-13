@@ -1021,7 +1021,7 @@ __metadata:
     "@playwright/test": "npm:^1.59.1"
     "@safe-global/protocol-kit": "npm:^7.2.0"
     "@safe-global/safe-deployments": "npm:^1.37.56"
-    "@safe-global/types-kit": "npm:^3.0.0"
+    "@safe-global/types-kit": "npm:^4.0.1"
     "@scure/bip32": "npm:^2.2.0"
     "@scure/bip39": "npm:^1.4.0"
     "@secretlint/core": "npm:^13.0.2"
@@ -2696,12 +2696,21 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@safe-global/types-kit@npm:^3.0.0, @safe-global/types-kit@npm:^3.1.0":
+"@safe-global/types-kit@npm:^3.1.0":
   version: 3.1.0
   resolution: "@safe-global/types-kit@npm:3.1.0"
   dependencies:
     abitype: "npm:^1.0.2"
   checksum: 10c0/af044b38320821bbcb5f7f78de9ccd11235266abd3aca4979808c8a0a75d4e8cf6bb92eab77a3b8f2a75d61d72e7db98aeca5cfce8bb758fafc3f0137d69ff6a
+  languageName: node
+  linkType: hard
+
+"@safe-global/types-kit@npm:^4.0.1":
+  version: 4.0.1
+  resolution: "@safe-global/types-kit@npm:4.0.1"
+  dependencies:
+    abitype: "npm:^1.2.3"
+  checksum: 10c0/f2b5ee0c0292e3954fc67ef25db6a51971c377603186c87d712a1015211fe8a63c9b97cfb2e76bb7f31425fc348e11d9b21df638ebfaec6964004fc879c4b93d
   languageName: node
   linkType: hard
 
