@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deriveNotifications, type DeriveInput } from './derive.js';
+import { deriveNotifications, gasSeverity, type DeriveInput } from './derive.js';
 
 const baseState = {
   bootstrap: { mode: 'running' as const },
@@ -275,6 +275,28 @@ describe('funding notifications (issue #1296)', () => {
       fundsStatus([{ chain: 'Base Sepolia', wallet: '0xM', runwayDays: 99, empty: false }]),
     );
     expect(after.some((n) => n.kind === 'funding_empty' || n.kind === 'funding_low')).toBe(false);
+  });
+});
+
+describe('gasSeverity boundary (#1296, handbook AI workflow rule 7 — boundary tests for numeric gates)', () => {
+  it('balance exactly equal to minEthWei is NOT blocking (strict less-than)', () => {
+    expect(
+      gasSeverity({
+        balanceWei: '1000000000000000',
+        minEthWei: '1000000000000000',
+        runwayDaysExcess: '1',
+      }),
+    ).toBe('warning');
+  });
+
+  it('balance one wei below minEthWei is blocking', () => {
+    expect(
+      gasSeverity({
+        balanceWei: '999999999999999',
+        minEthWei: '1000000000000000',
+        runwayDaysExcess: '1',
+      }),
+    ).toBe('blocking');
   });
 });
 
