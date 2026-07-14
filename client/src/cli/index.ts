@@ -22,6 +22,7 @@ import bootstrapCommand from './commands/bootstrap.js';
 import fundRequirementsCommand from './commands/fund-requirements.js';
 import runCommand from './commands/run.js';
 import stopCommand from './commands/stop.js';
+import killCommand from './commands/kill.js';
 import statusCommand from './commands/status.js';
 import fleetCommand from './commands/fleet.js';
 import balanceCommand from './commands/balance.js';
@@ -59,6 +60,7 @@ const COMMANDS: CommandModule[] = [
   fundRequirementsCommand,
   runCommand,
   stopCommand,
+  killCommand,
   statusCommand,
   fleetCommand,
   balanceCommand,

@@ -268,6 +268,7 @@ docker run --rm ghcr.io/jinn-network/client:latest version --json
 | `jinn bootstrap` | Advance toward a running fleet | Yes |
 | `jinn fund-requirements` | List what needs funding | Yes |
 | `jinn stop` | Signal a running daemon to stop | Yes |
+| `jinn kill` | Force-terminate jinn daemon processes by cmdline enumeration (`--all` for multiple) | Yes |
 | `jinn version` | Version, phase, deployment digest | Yes |
 | `jinn update` | Update the client package + refresh integrations | Yes |
 | `jinn integrations install` | Wire Jinn into Claude Code / Codex / other AI tools | Yes |
