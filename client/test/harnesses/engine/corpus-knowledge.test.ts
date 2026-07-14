@@ -92,8 +92,28 @@ describe('loadCorpusKnowledge (#1393)', () => {
     ]);
   });
 
-  it('returns null (not a hang, not a throw) when the corpus query exceeds timeoutMs', async () => {
+  it('falls back to store-only results (not null) when the corpus query exceeds timeoutMs and local knowledge exists (#1393 review finding 4)', async () => {
     store.saveEnvelopeProjection(projection({ envelopeId: 'env-slow', envelopeCid: 'env-slow' }));
+    const hangingCorpus: ReadOnlyCorpus = {
+      query: () => new Promise(() => { /* never resolves — no AbortSignal to cancel it */ }),
+      fetchManifest: () => Promise.reject(new Error('unused')),
+    };
+    const warnings: string[] = [];
+    const payload = await loadCorpusKnowledge({
+      corpus: hangingCorpus,
+      store,
+      solverType: 'prediction.v1',
+      timeoutMs: 50,
+      log: (msg) => warnings.push(msg),
+    });
+    // A sick network corpus must not deny local knowledge that IS available.
+    expect(payload).not.toBeNull();
+    expect(payload!.records.map((r) => r.envelopeCid)).toEqual(['env-slow']);
+    expect(warnings.join('\n')).toContain('timed out');
+    expect(warnings.join('\n')).toContain('falling back to store-only');
+  });
+
+  it('returns null when the corpus query exceeds timeoutMs and no local knowledge exists', async () => {
     const hangingCorpus: ReadOnlyCorpus = {
       query: () => new Promise(() => { /* never resolves */ }),
       fetchManifest: () => Promise.reject(new Error('unused')),
@@ -108,6 +128,69 @@ describe('loadCorpusKnowledge (#1393)', () => {
     });
     expect(payload).toBeNull();
     expect(warnings.join('\n')).toContain('timed out');
+  });
+
+  it('backfills artifact refs for a ranked record even when its served-artifact row falls outside the local recency window (#1393 review finding 2)', async () => {
+    store.saveEnvelopeProjection(projection({ envelopeId: 'env-target', envelopeCid: 'env-target', generatedAt: 1_000 }));
+    store.saveServedArtifact({
+      sha256: 'aa'.repeat(32),
+      artifactType: 'prediction_v1_solution',
+      envelopeCid: 'env-target',
+      content: Buffer.from('{}'),
+      priceUsdc: '0',
+      createdAt: new Date(1_000).toISOString(),
+    });
+    // Two unrelated, more-recent served-artifact rows push env-target's row
+    // outside a naive top-N-by-recency local join when searchLimit is small.
+    store.saveServedArtifact({
+      sha256: 'bb'.repeat(32),
+      artifactType: 'other_type',
+      envelopeCid: 'env-unrelated-1',
+      content: Buffer.from('{}'),
+      priceUsdc: '0',
+      createdAt: new Date(3_000).toISOString(),
+    });
+    store.saveServedArtifact({
+      sha256: 'cc'.repeat(32),
+      artifactType: 'other_type',
+      envelopeCid: 'env-unrelated-2',
+      content: Buffer.from('{}'),
+      priceUsdc: '0',
+      createdAt: new Date(2_000).toISOString(),
+    });
+
+    const payload = await loadCorpusKnowledge({
+      corpus: null,
+      store,
+      solverType: 'prediction.v1',
+      searchLimit: 2, // smaller than the 3 served-artifact rows above
+    });
+    expect(payload!.records).toHaveLength(1);
+    expect(payload!.records[0]!.artifacts).toEqual([
+      expect.objectContaining({ sha256: 'aa'.repeat(32), artifactType: 'prediction_v1_solution' }),
+    ]);
+  });
+
+  it('does not truncate the ranking pool before the tier sort — an old attested record still wins over 14 newer self-signed ones (#1393 review finding 2)', async () => {
+    for (let i = 0; i < 14; i += 1) {
+      store.saveEnvelopeProjection(projection({
+        envelopeId: `env-recent-${i}`,
+        envelopeCid: `env-recent-${i}`,
+        evidenceTier: 'self-signed',
+        generatedAt: 14_000 - i * 1_000,
+      }));
+    }
+    store.saveEnvelopeProjection(projection({
+      envelopeId: 'env-old-attested',
+      envelopeCid: 'env-old-attested',
+      evidenceTier: 'attested',
+      generatedAt: 1,
+    }));
+
+    // Default searchLimit (raised from the old 12) must still admit the
+    // 15th-oldest record into the ranking pool.
+    const payload = await loadCorpusKnowledge({ corpus: null, store, solverType: 'prediction.v1' });
+    expect(payload!.records[0]!.envelopeCid).toBe('env-old-attested');
   });
 
   it('returns null and logs when the corpus query throws', async () => {

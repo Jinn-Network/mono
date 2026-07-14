@@ -2653,6 +2653,81 @@ export class Store {
     ];
   }
 
+  /**
+   * Deterministic per-envelopeCid artifact lookup — no recency window, unlike
+   * searchOwnAndCached. Used by corpus-knowledge autoload (#1393 review
+   * finding 2) to backfill artifact refs for a small, already-ranked set of
+   * envelope CIDs regardless of how many other artifact rows exist locally.
+   */
+  getArtifactsByEnvelopeCids(envelopeCids: readonly string[]): Array<{
+    sha256: string;
+    artifactType: string;
+    source: 'served' | 'network';
+    envelopeCid: string | null;
+    createdAt: string;
+    contentSize: number;
+    priceUsdc?: string;
+    sourceEndpoint?: string | null;
+    sourceOperator?: string | null;
+    paidAmountUsdc?: string;
+  }> {
+    if (envelopeCids.length === 0) return [];
+    const params: Record<string, unknown> = {};
+    const placeholders = envelopeCids.map((cid, index) => {
+      const key = `cid${index}`;
+      params[key] = cid;
+      return `@${key}`;
+    }).join(', ');
+
+    const own = this.db.prepare(
+      `SELECT sha256, artifact_type, envelope_cid, content_size, price_usdc, created_at
+       FROM served_artifacts WHERE envelope_cid IN (${placeholders})`,
+    ).all(params) as Array<{
+      sha256: string;
+      artifact_type: string;
+      envelope_cid: string | null;
+      content_size: number;
+      price_usdc: string;
+      created_at: string;
+    }>;
+    const cached = this.db.prepare(
+      `SELECT sha256, artifact_type, envelope_cid, content_size, source_operator, source_endpoint, paid_amount_usdc, fetched_at
+       FROM network_artifacts WHERE envelope_cid IN (${placeholders})`,
+    ).all(params) as Array<{
+      sha256: string;
+      artifact_type: string;
+      envelope_cid: string | null;
+      content_size: number;
+      source_operator: string | null;
+      source_endpoint: string | null;
+      paid_amount_usdc: string;
+      fetched_at: string;
+    }>;
+
+    return [
+      ...own.map((r) => ({
+        sha256: r.sha256,
+        artifactType: r.artifact_type,
+        source: 'served' as const,
+        envelopeCid: r.envelope_cid,
+        createdAt: r.created_at,
+        contentSize: r.content_size,
+        priceUsdc: r.price_usdc,
+      })),
+      ...cached.map((r) => ({
+        sha256: r.sha256,
+        artifactType: r.artifact_type,
+        source: 'network' as const,
+        envelopeCid: r.envelope_cid,
+        createdAt: r.fetched_at,
+        contentSize: r.content_size,
+        sourceEndpoint: r.source_endpoint,
+        sourceOperator: r.source_operator,
+        paidAmountUsdc: r.paid_amount_usdc,
+      })),
+    ];
+  }
+
   saveEnvelopeProjection(projection: EnvelopeProjection): void {
     const tx = this.db.transaction((p: EnvelopeProjection) => {
       this.db.prepare(
