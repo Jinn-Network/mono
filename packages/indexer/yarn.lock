@@ -481,9 +481,9 @@ __metadata:
     "@types/node": "npm:^26.1.1"
     drizzle-orm: "npm:^0.45.2"
     hono: "npm:^4.12.30"
-    ponder: "npm:^0.16.9"
+    ponder: "npm:^0.16.10"
     typescript: "npm:^5.4.0"
-    viem: "npm:^2.55.1"
+    viem: "npm:^2.55.2"
     vitest: "npm:^4.1.10"
   languageName: unknown
   linkType: soft
@@ -2509,9 +2509,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ponder@npm:^0.16.9":
-  version: 0.16.9
-  resolution: "ponder@npm:0.16.9"
+"ponder@npm:^0.16.10":
+  version: 0.16.10
+  resolution: "ponder@npm:0.16.10"
   dependencies:
     "@babel/code-frame": "npm:^7.23.4"
     "@commander-js/extra-typings": "npm:^12.0.1"
@@ -2558,7 +2558,7 @@ __metadata:
       optional: true
   bin:
     ponder: dist/esm/bin/ponder.js
-  checksum: 10c0/614bbeddfab2bce72a5efad143c7a381e5b4796cda066b4a9580496b25cb4872847e706bbf2d1001cf7440e390cc851d6fece5ccd0b299294cf33c043abf22df
+  checksum: 10c0/45791687b33414f9ce70fc172cdc3eb248bb77beb1df0fcb2a634935da50aff7017cced1bcdf0b4377be2e14b1bc161d6ce0321ead96913aa36bdc35e4b0181c
   languageName: node
   linkType: hard
 
@@ -3201,9 +3201,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"viem@npm:^2.55.1":
-  version: 2.55.1
-  resolution: "viem@npm:2.55.1"
+"viem@npm:^2.55.2":
+  version: 2.55.2
+  resolution: "viem@npm:2.55.2"
   dependencies:
     "@noble/curves": "npm:1.9.1"
     "@noble/hashes": "npm:1.8.0"
@@ -3218,7 +3218,7 @@ __metadata:
   peerDependenciesMeta:
     typescript:
       optional: true
-  checksum: 10c0/4747450c511604dc2280b94b6a6eab53638058a559531f7707d31f21de51670449530f9ebc2fbc06d961b8b5a6cfadb920683e701058adc8996619b012bbc56d
+  checksum: 10c0/81db14ee0fcea2adc811f496ba37c984ef423fdde91599a0ceecc42c84068c7d4907af001565bbf8837ec63b36a8c5e3534d19e3ae32acf88e30c72e91d5cd10
   languageName: node
   linkType: hard
 

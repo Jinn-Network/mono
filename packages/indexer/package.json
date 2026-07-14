@@ -30,8 +30,8 @@
     "@jinn-network/sdk": "portal:../sdk",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.12.30",
-    "ponder": "^0.16.9",
-    "viem": "^2.55.1"
+    "ponder": "^0.16.10",
+    "viem": "^2.55.2"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
