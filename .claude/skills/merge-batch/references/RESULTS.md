@@ -390,7 +390,7 @@ Expected:
 - Independent PRs are split into bounded waves.
 
 Verdict: PASS when
-`cd packages/eng-loop && yarn test test/merge-batch/large-batch-fixture.test.ts`
+`cd packages/autopilot && yarn test test/merge-batch/large-batch-fixture.test.ts`
 passes.
 
 ---
@@ -414,5 +414,5 @@ Expected:
   branch protection blocks solely on review state.
 - This authorization never applies to `main` promotion.
 
-Verdict: PASS when `cd packages/eng-loop && yarn typecheck && yarn test
+Verdict: PASS when `cd packages/autopilot && yarn typecheck && yarn test
 test/merge-batch/manifest.test.ts` passes.

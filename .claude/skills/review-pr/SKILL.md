@@ -72,4 +72,4 @@ Identical to implement-issue §Step 4 and §Step 7: curated prompts (never forwa
 | Findings not converging | Escalate `stuck`. |
 
 ## Composition
-Composes: `superpowers:requesting-code-review` + code-reviewer template, `/security-review`, `testing-jinn-app`. Downstream of: the engine's draft PR (or any human PR labelled `engine:review`). Upstream of: the merge skill (consumes `review:approved`). Dispatched by: Autopilot's `eng-loop` review pass (the headless-override block is injected by the dispatcher).
+Composes: `superpowers:requesting-code-review` + code-reviewer template, `/security-review`, `testing-jinn-app`. Downstream of: the engine's draft PR (or any human PR labelled `engine:review`). Upstream of: the merge skill (consumes `review:approved`). Dispatched by: Autopilot's review pass (the headless-override block is injected by the dispatcher).

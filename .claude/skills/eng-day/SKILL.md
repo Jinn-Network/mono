@@ -1,13 +1,13 @@
 ---
 name: eng-day
-description: Daily aggregator + human-attention router for Jinn engineering work — reads open GitHub Issues, open PRs, and the "Jinn engineering" GitHub Project (v2) board, and (in the autopilot era) splits work into what the autonomous dispatcher can handle vs what needs the operator's personal attention. Surfaces sprint progress against the upcoming Monday cut, a "Needs you" track (decisions / design / spikes / reviews / Discussion-anchored docs), an engine-queue summary (autonomous-ready count + dispatcher status), yesterday's shipped, and drift flags (canary status, done-but-open issues, non-buildable items in the ready queue, sprint age/bloat, stale PRs). Not a dispatcher — does not run eng:loop or invoke action skills; the operator picks from the brief. Triggers on "eng day", "morning engineering standup", "what should I do today", "what needs my attention", "daily eng check", "what's pending", "start of day engineering", "let's plan today's work", "plan my week", "engineering check-in", "what's next". Reads Issue Type via GraphQL (not `gh issue list --json issueType`, which fails), open PRs via `gh pr list`, and the board via `gh project item-list --limit 800`. Refuses to produce a plan if no active sprint exists (fail-loud). Per DR-2026-05-18 the prior `bd ready` / `bd list` reads are retired.
+description: Daily aggregator + human-attention router for Jinn engineering work — reads open GitHub Issues, open PRs, and the "Jinn engineering" GitHub Project (v2) board, and (in the autopilot era) splits work into what the autonomous dispatcher can handle vs what needs the operator's personal attention. Surfaces sprint progress against the upcoming Monday cut, a "Needs you" track (decisions / design / spikes / reviews / Discussion-anchored docs), an engine-queue summary (autonomous-ready count + dispatcher status), yesterday's shipped, and drift flags (canary status, done-but-open issues, non-buildable items in the ready queue, sprint age/bloat, stale PRs). Not a dispatcher — does not run `yarn autopilot` or invoke action skills; the operator picks from the brief. Triggers on "eng day", "morning engineering standup", "what should I do today", "what needs my attention", "daily eng check", "what's pending", "start of day engineering", "let's plan today's work", "plan my week", "engineering check-in", "what's next". Reads Issue Type via GraphQL (not `gh issue list --json issueType`, which fails), open PRs via `gh pr list`, and the board via `gh project item-list --limit 800`. Refuses to produce a plan if no active sprint exists (fail-loud). Per DR-2026-05-18 the prior `bd ready` / `bd list` reads are retired.
 ---
 
 # Engineering day
 
-The daily aggregator + **human-attention router** for Jinn engineering work. Run by the operator at the start of an engineering block. Reads operational state (open GitHub Issues, open PRs, the "Jinn engineering" Project board) and routes it: **what the autonomous dispatcher handles vs what needs the operator personally.** Not a dispatcher — surfaces the brief; the operator picks and invokes (or launches `eng:loop`) from it.
+The daily aggregator + **human-attention router** for Jinn engineering work. Run by the operator at the start of an engineering block. Reads operational state (open GitHub Issues, open PRs, the "Jinn engineering" Project board) and routes it: **what the autonomous dispatcher handles vs what needs the operator personally.** Not a dispatcher — surfaces the brief; the operator picks and invokes (or launches `yarn autopilot`) from it.
 
-**Autopilot-era reframe.** With the autonomous engine (`packages/eng-loop`, the Autopilot dispatcher) able to take a clean `feat`/`fix` from Todo → green draft PR unattended, the operator's daily question is no longer "what should I implement" — it's **"what needs *me*, that the engine can't do?"** So this brief leads with the **Needs-you** track (decisions, design, spikes, reviews, Discussion-anchored docs) and demotes autonomous work to an **engine-queue summary** the operator just keeps fed and running. That split is the point of the skill — it's how the operator plans the day *and the week* around their own attention.
+**Autopilot-era reframe.** With the autonomous engine (`packages/autopilot`, the Autopilot dispatcher) able to take a clean `feat`/`fix` from Todo → green draft PR unattended, the operator's daily question is no longer "what should I implement" — it's **"what needs *me*, that the engine can't do?"** So this brief leads with the **Needs-you** track (decisions, design, spikes, reviews, Discussion-anchored docs) and demotes autonomous work to an **engine-queue summary** the operator just keeps fed and running. That split is the point of the skill — it's how the operator plans the day *and the week* around their own attention.
 
 Modeled on the `growth-day` skill — same Tier-A discipline, same drift-flag pattern, same fail-loud sprint precondition.
 
@@ -31,7 +31,7 @@ Refuses to produce a plan unless an **active sprint** exists = ≥1 board item w
 
 For each open/ready item, assign one lane. This is what makes the brief route attention rather than list tasks.
 
-- 🤖 **Autonomous** — the dispatcher can take it unattended. Issue Type ∈ {`feat`, `fix`, `refactor`, `test`, `chore`}, **not** an epic/tracker, single-session-sized (Effort `Low`/`Medium`), `Status = Todo`, `Blocked-on = Nothing`, acceptance criteria present. Operator's only job: keep `eng:loop` running and unblocked.
+- 🤖 **Autonomous** — the dispatcher can take it unattended. Issue Type ∈ {`feat`, `fix`, `refactor`, `test`, `chore`}, **not** an epic/tracker, single-session-sized (Effort `Low`/`Medium`), `Status = Todo`, `Blocked-on = Nothing`, acceptance criteria present. Operator's only job: keep `yarn autopilot` running and unblocked.
 - 👤 **Needs you** — requires the operator's judgment/input. Any of:
   - Issue Type ∈ {`design`, `spike`, `incident`} (decision / research / judgment);
   - **epic** (title `EPIC:` or has sub-issues) — needs decomposition, not implementation;
@@ -48,7 +48,7 @@ A five-section brief, **Needs-you first**:
 
 1. **Sprint context** — window (Monday cut), days elapsed, % closed vs queued, and the **autonomy split**: `N 🤖 autonomous-ready · M 👤 needs-you · K 🔍 PRs in review`.
 2. **Needs you today** (the operator's actual plan) — the top 👤/🔍 items, ranked: blockers → decisions/design/spikes → Discussion-anchored docs → under-specified-needs-scoping → the review queue (flag **engine-produced** PRs). This replaces the old "top-3 to implement" — those don't need the operator's per-item attention any more.
-3. **Engine queue** (🤖, runs in parallel to you) — count of dispatcher-eligible issues + **dispatcher status**: is `eng:loop` running? is backpressure tripped (open ready PRs > cap)? what would it pick at the current `--cap`? The operator action here is *keep it fed/running*, not implement item-by-item.
+3. **Engine queue** (🤖, runs in parallel to you) — count of dispatcher-eligible issues + **dispatcher status**: is `yarn autopilot` running? is backpressure tripped (open ready PRs > cap)? what would it pick at the current `--cap`? The operator action here is *keep it fed/running*, not implement item-by-item.
 4. **Yesterday shipped** — PRs merged in the last 24h (shape prefix + author; flag engine-produced), Issues closed.
 5. **Drift flags** — surface only the active ones (below).
 
@@ -57,8 +57,8 @@ A five-section brief, **Needs-you first**:
 1. Read state in parallel (commands in §Read first — Issue Type via **GraphQL**, board via `--limit 800`, + `gh release list --repo Jinn-Network/mono --limit 1 --json publishedAt,tagName` for the canary baseline).
 2. **Classify** every ready item into 🤖 / 👤 / 🔍 (per §Autonomy triage). Join Project fields (Status, Priority, Effort, Blocked-on) by issue number.
 3. Build **Needs you today** from the 👤/🔍 lanes, ranked: stale-PR-review-needed → sprint-blocker → decision/design/spike → Discussion-anchored docs → under-specified → other 👤. Tag each with shape + Effort. Cap ~3–5.
-4. Build the **Engine queue** summary from the 🤖 lane (count by priority) + dispatcher status (probe `eng:loop --dry-run` reasoning: ready-Todo-unblocked-allowlisted count, backpressure vs open-PR count).
-5. Compute drift flags. Format; output to terminal; **do not dispatch or run `eng:loop`.**
+4. Build the **Engine queue** summary from the 🤖 lane (count by priority) + dispatcher status (probe `yarn autopilot --dry-run` reasoning: ready-Todo-unblocked-allowlisted count, backpressure vs open-PR count).
+5. Compute drift flags. Format; output to terminal; **do not dispatch or run `yarn autopilot`.**
 
 ## Routing signals
 
@@ -96,6 +96,6 @@ This is the v0 skill. v1 will: auto-detect the Project number; compute the sugge
 
 - Composes with `growth-day` at the operator's invocation level only (no shared state).
 - Composes downstream with the action skills it lists but does not invoke (`brainstorming`, `writing-plans`, `executing-plans`, `systematic-debugging`, `requesting-code-review`, …).
-- **Autopilot dispatcher (`packages/eng-loop`, `eng:loop`)** reads the *same* ready definition this skill uses (`Status = Todo` + `Blocked-on = Nothing` + author-allowlist). So eng-day's drift flags double as dispatcher hygiene, and the 🤖/👤 split mirrors what the dispatcher will/won't pick. eng-day only *surfaces* the engine queue + status — the operator runs `eng:loop` separately. Keep non-buildables out of the dispatcher's reach by setting `Blocked-on = Human`.
+- **Autopilot dispatcher (`packages/autopilot`, `yarn autopilot`)** reads the *same* ready definition this skill uses (`Status = Todo` + `Blocked-on = Nothing` + author-allowlist). So eng-day's drift flags double as dispatcher hygiene, and the 🤖/👤 split mirrors what the dispatcher will/won't pick. eng-day only *surfaces* the engine queue + status — the operator runs `yarn autopilot` separately. Keep non-buildables out of the dispatcher's reach by setting `Blocked-on = Human`.
 - **PR-vs-issue caution.** When triaging or before closing anything as a duplicate, verify the object's `__typename` via GraphQL — an implementation **PR** can look like an issue by title; closing it as a "duplicate issue" discards real work (incident 2026-06-01).
 - Composes with the Friday triage flow (handbook §Weekly retrace).

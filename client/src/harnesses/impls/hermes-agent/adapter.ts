@@ -24,7 +24,7 @@ const ENV_ALLOWLIST = [
  * launching (after plugin discovery + MCP registration but before the first
  * model call). The per-Task `.env` merge in `bootstrap.ts` only catches
  * operator API keys that live in `$HERMES_HOME/.env`; daemons launched with
- * `set -a; . <somewhere>/.env; set +a` (the substrate / eng-loop pattern,
+ * `set -a; . <somewhere>/.env; set +a` (the substrate / autopilot pattern,
  * and any operator who keeps their key in shell env instead of
  * `~/.hermes/.env`) have the key in `process.env` but NOT in the per-Task
  * `.env`. Passing those through is the canonical path for shell-supplied

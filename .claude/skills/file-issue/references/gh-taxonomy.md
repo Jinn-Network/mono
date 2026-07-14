@@ -308,7 +308,7 @@ echo "Filed: $ISSUE_URL (#$ISSUE_NUMBER) — Blocked on: $BLOCKED_VALUE, Effort:
 ```bash
 git add .claude/skills/file-issue/references/gh-taxonomy.md
 git commit -m "$(cat <<'EOF'
-docs(eng-loop): gh taxonomy reference for the file-issue skill
+docs(autopilot): gh taxonomy reference for the file-issue skill
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF

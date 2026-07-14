@@ -600,7 +600,7 @@ on `next`. When `next` advances (because `A` merged), each subsequent layer must
 be rebased onto its parent in order, bottom-up.
 
 The stack topology comes from `enumerateStacks` in
-`packages/eng-loop/src/dispatcher/stack-order.ts` (base-ref graph:
+`packages/autopilot/src/dispatcher/stack-order.ts` (base-ref graph:
 `baseRefName === another open PR's headRefName` ⇒ stacked). After the parent
 merges, the upper layer is pointed at the now-deleted parent branch — it must be
 re-targeted to `next` (`gh pr edit <N> --repo Jinn-Network/mono --base next`)

@@ -442,7 +442,7 @@ updates:
         update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
-    directory: "/packages/eng-loop"
+    directory: "/packages/autopilot"
     schedule:
       interval: weekly
     groups:

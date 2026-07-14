@@ -1,0 +1,26 @@
+{
+  "name": "@jinn-network/autopilot",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "bin": {
+    "jinn-merge-batch": "./bin/jinn-merge-batch.ts",
+    "jinn-run-stage": "./bin/jinn-run-stage.ts",
+    "jinn-triage-check": "./bin/jinn-triage-check.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "pressure": "tsx scripts/run-pressure-suite.ts",
+    "autopilot": "tsx scripts/run-autopilot.ts",
+    "merge:batch": "tsx bin/jinn-merge-batch.ts",
+    "stage:run": "tsx bin/jinn-run-stage.ts",
+    "triage:check": "tsx bin/jinn-triage-check.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.1",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.9"
+  }
+}

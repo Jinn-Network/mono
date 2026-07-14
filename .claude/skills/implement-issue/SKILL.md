@@ -76,14 +76,14 @@ Run the reality-check from the primary checkout (not the worktree — the worktr
 
 ```bash
 cd <repo-root>
-yarn workspace @jinn-network/eng-loop triage:check <N>
+yarn workspace @jinn-network/autopilot triage:check <N>
 # Emits one line of JSON to stdout; non-zero exit on failure.
 ```
 
 Parse the JSON verdict:
 
 ```bash
-VERDICT_JSON=$(yarn workspace @jinn-network/eng-loop triage:check <N>)
+VERDICT_JSON=$(yarn workspace @jinn-network/autopilot triage:check <N>)
 CLASSIFICATION=$(echo "$VERDICT_JSON" | jq -r '.classification')
 SUGGESTED_COMMENT=$(echo "$VERDICT_JSON" | jq -r '.suggestedComment')
 SUGGESTED_BLOCKED_ON=$(echo "$VERDICT_JSON" | jq -r '.suggestedBlockedOn')
@@ -144,12 +144,12 @@ If the CLI exits non-zero (gh/git unavailable, network failure, JSON parse error
 
 If Step 1.5 returned `clear`, proceed. Per handbook workflow rule 1, all implementation work happens in a dedicated git worktree.
 
-**When dispatched by the eng-loop dispatcher:** the dispatcher pre-creates the worktree and explicitly states the path and branch in the session prompt (look for the sentence "A git worktree for this issue already exists at `<path>` on branch `<branch>` — use it; do not create a new worktree."). If that sentence is present, skip directly to the "All subagents..." paragraph below — do not run `git worktree add`.
+**When dispatched by the Autopilot dispatcher:** the dispatcher pre-creates the worktree and explicitly states the path and branch in the session prompt (look for the sentence "A git worktree for this issue already exists at `<path>` on branch `<branch>` — use it; do not create a new worktree."). If that sentence is present, skip directly to the "All subagents..." paragraph below — do not run `git worktree add`.
 
 **When invoked by a human (interactive mode):** create the worktree yourself. First check whether one already exists for this issue number — if it does, use it:
 
 ```bash
-# Canonical worktree base (matches packages/eng-loop dispatcher + CLAUDE.md rule #1)
+# Canonical worktree base (matches packages/autopilot dispatcher + CLAUDE.md rule #1)
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 PARENT="$(dirname "$REPO_ROOT")"
 if [[ "$(basename "$PARENT")" == "jinn-mono_worktrees" ]]; then
@@ -319,7 +319,7 @@ If the PR does not exist, dispatch a fix subagent.
 
 **Move the issue to `In Review`.** Once the draft PR is confirmed, set the issue's Project `Status` to `In Review` — the pipeline's work is done and the issue now awaits the human's batch-merge. This also removes the issue from the dispatcher's in-flight set (`deriveInFlight` keys on `In Progress`), freeing the concurrency slot; without it a completed session lingers as in-flight. `Status` is single-select — discover the `In Review` option id via `gh project field-list` (Step 2), then `gh project item-edit ... --single-select-option-id <in-review-option-id>`.
 
-**Remove the worktree (final step).** The per-issue worktree is ephemeral scratch — the branch on `origin` is the durable artifact, so once the PR is open the worktree buys nothing and only produces dispatcher drift noise (`packages/eng-loop/src/dispatcher/state.ts` flags every "worktree exists but issue not In Progress" pair as drift, which would otherwise fire on this entirely-legitimate post-PR-open state). Remove it as the **last action of the run**.
+**Remove the worktree (final step).** The per-issue worktree is ephemeral scratch — the branch on `origin` is the durable artifact, so once the PR is open the worktree buys nothing and only produces dispatcher drift noise (`packages/autopilot/src/dispatcher/state.ts` flags every "worktree exists but issue not In Progress" pair as drift, which would otherwise fire on this entirely-legitimate post-PR-open state). Remove it as the **last action of the run**.
 
 `git worktree remove` refuses to remove the worktree you are standing in, and pulling the CWD out from under the shell breaks every subsequent command. `git -C "$PRIMARY"` does not move the coordinator shell/session out of `"$WORKTREE_PATH"`; the removal must run with the tool/session `workdir` set to the primary checkout, or the shell must actually `cd "$PRIMARY"` before removing. `WORKTREE_PATH` is the value from Step 2, or the absolute worktree path from the dispatcher prompt if the worktree was pre-created. Use `--force` only after the guards below pass; it is for ignored build output that can remain after a clean status, not for preserving uncommitted work:
 
@@ -390,7 +390,7 @@ Never forward the coordinator's own conversation history to a stage. Keep each s
 
 ### Running a depth-needing stage via `stage:run`
 
-Stages 1, 3, 4, 5 must run as `claude -p` **root sessions** so their composed skills can fan out sub-agents at depth-1. Launch each one with the `stage:run` CLI, run from the `packages/eng-loop` package dir:
+Stages 1, 3, 4, 5 must run as `claude -p` **root sessions** so their composed skills can fan out sub-agents at depth-1. Launch each one with the `stage:run` CLI, run from the `packages/autopilot` package dir:
 
 ```bash
 # 1. Write the curated prompt to a temp file. Include the stage task + issue
@@ -404,10 +404,10 @@ cat > /tmp/stage-<N>-<stage>.md <<'EOF'
 EOF
 
 # 2. Run the stage as a root session in the worktree. --model is optional.
-#    packages/eng-loop is a self-contained yarn project (no root workspace
+#    packages/autopilot is a self-contained yarn project (no root workspace
 #    registers it), so run stage:run from the package dir, not via
 #    `yarn workspace`. The subshell keeps the coordinator's cwd unchanged.
-(cd "$WORKTREE_PATH/packages/eng-loop" && yarn stage:run \
+(cd "$WORKTREE_PATH/packages/autopilot" && yarn stage:run \
   --prompt-file /tmp/stage-<N>-<stage>.md \
   --worktree "$WORKTREE_PATH" \
   [--model <model>])
@@ -507,7 +507,7 @@ After the first push, **stop** — do not proceed to Stage 3 or open a PR. Write
 
 ## Step 7 — Headless-mode note
 
-When this skill runs in a headless session (dispatched by `eng-orchestrator` with `-p` / `--print`), the caller injects canon (CLAUDE.md + handbook) followed by the headless-override block from `packages/eng-loop/headless-override.md` at the top of the coordinating agent's prompt (`-p` mode does not auto-load `CLAUDE.md`). The coordinator and all subagents then make approval decisions themselves — they do not wait for user input. For the depth-needing stages launched via `stage:run`, `runStageHeadless` prepends both canon and the same override block automatically — so the curated prompt-file you write must **not** include canon OR the override block (see Step 4).
+When this skill runs in a headless session (dispatched by the Autopilot dispatcher with `-p` / `--print`), the caller injects canon (CLAUDE.md + handbook) followed by the headless-override block from `packages/autopilot/headless-override.md` at the top of the coordinating agent's prompt (`-p` mode does not auto-load `CLAUDE.md`). The coordinator and all subagents then make approval decisions themselves — they do not wait for user input. For the depth-needing stages launched via `stage:run`, `runStageHeadless` prepends both canon and the same override block automatically — so the curated prompt-file you write must **not** include canon OR the override block (see Step 4).
 
 When run interactively (Phase 1, hand-cranked), the human is present for genuine escalations.
 
@@ -539,4 +539,4 @@ The headless-override block also reminds subagents not to use `--mode plan` / `-
 - Composes with: `superpowers:brainstorming`, `superpowers:writing-plans`, `superpowers:test-driven-development`, `superpowers:executing-plans`, `/code-review`, `superpowers:requesting-code-review`, `/security-review`, `testing-jinn-app`, `superpowers:verification-before-completion`.
 - Downstream of: `file-issue` (which produces the triaged issue this skill consumes).
 - Upstream of: the merge skill (which batch-integrates the draft PRs this skill produces into `next`).
-- Dispatcher integration: `eng-orchestrator` invokes this skill per issue; the headless-override block is injected by the dispatcher, not this skill.
+- Dispatcher integration: the Autopilot dispatcher invokes this skill per issue; the headless-override block is injected by the dispatcher, not this skill.

@@ -318,7 +318,7 @@ entities accumulate live data.
 
 Local internal-tool packages out of scope for the operator-facing audit:
 [`packages/claim-relayer/`](packages/claim-relayer/),
-[`packages/eng-loop/`](packages/eng-loop/),
+[`packages/autopilot/`](packages/autopilot/),
 [`apps/broadcast-bot/`](apps/broadcast-bot/).
 
 ---

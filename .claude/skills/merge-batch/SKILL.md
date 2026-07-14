@@ -35,7 +35,7 @@ gh pr list \
   --json number,title,headRefName,baseRefName,labels,statusCheckRollup,files
 ```
 
-The survey must see PRs whose base is another open PR's head branch (upper stack layers), not just PRs based on `next` — dropping `--base next` is what makes the candidate set complete (AC #2). `baseRefName` feeds `enumerateStacks` (`packages/eng-loop/src/dispatcher/stack-order.ts`), the candidate-set discovery + ordering function.
+The survey must see PRs whose base is another open PR's head branch (upper stack layers), not just PRs based on `next` — dropping `--base next` is what makes the candidate set complete (AC #2). `baseRefName` feeds `enumerateStacks` (`packages/autopilot/src/dispatcher/stack-order.ts`), the candidate-set discovery + ordering function.
 
 For each PR, re-check `statusCheckRollup`. The `implement-issue` pipeline only opened each PR when every gate passed, but CI can go stale — always verify the current rollup, not the one recorded at PR-open time.
 
@@ -428,4 +428,4 @@ jinn run
 - Upstream: `implement-issue` produces the draft PRs this skill consumes. The skill works on any ready PRs against `next`; it does not require `implement-issue` to have produced them.
 - Downstream: `next` advances; the existing auto-canary publishes a canary build; the human app-tests `next` (spec §6); the Monday `promote-main.yml` cut is unchanged.
 - Rebase mechanics: see `references/merge-mechanics.md`.
-- Does not invoke: `eng-orchestrator` (the dispatcher is not involved in the merge phase), the Monday cut (untouched by this skill).
+- Does not invoke: the Autopilot dispatcher (the dispatcher is not involved in the merge phase), the Monday cut (untouched by this skill).
