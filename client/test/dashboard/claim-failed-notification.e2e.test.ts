@@ -27,16 +27,18 @@
  *       inside the browser context, which buys us no additional coverage
  *       over the unit test that pins the filter directly.
  *   (c) Existing snapshot-derived notifications still work unchanged —
- *       this test asserts that funding_low (from the zero-balance default
- *       /v1/status mock) still renders alongside the SSE-driven
- *       claim_failed, proving the new code path did not regress the deriver.
+ *       this test overrides /v1/status with a low-runway masterGas block
+ *       (see issue #1296 — funding_low now fires per chain on
+ *       `runwayDaysExcess < 3`, not on zero balance alone) and asserts
+ *       funding_low still renders alongside the SSE-driven claim_failed,
+ *       proving the new code path did not regress the deriver.
  */
 import { test, expect } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mockDaemonApi } from './helpers/mock-daemon-api';
+import { mockDaemonApi, DEFAULT_STATUS_PAYLOAD } from './helpers/mock-daemon-api';
 
 const PORT = 17334;
 
@@ -117,6 +119,24 @@ test('claim_failed appears as a warning notification when emitted via SSE (issue
   // Install the standard daemon-API mocks first so the SPA mounts running-mode.
   await mockDaemonApi(page);
 
+  // Override /v1/status with a low-runway masterGas block so funding_low
+  // fires (#1296 — the deriver now keys funding_low on
+  // `runwayDaysExcess < 3` per chain, not on zero balance alone; the shared
+  // DEFAULT_STATUS_PAYLOAD default is healthy at runwayDaysExcess: '4').
+  // Registered AFTER mockDaemonApi so this route wins (Playwright checks
+  // routes in reverse-registration order).
+  await page.route(
+    (url) => url.pathname === '/v1/status',
+    (route) =>
+      route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ...DEFAULT_STATUS_PAYLOAD,
+          masterGas: { ...DEFAULT_STATUS_PAYLOAD.masterGas, runwayDaysExcess: '1' },
+        }),
+      }),
+  );
+
   // Override the `/v1/events` SSE route AFTER mockDaemonApi so this
   // registration wins (Playwright checks routes in reverse-registration
   // order — later registrations are checked first). Match the SSE endpoint
@@ -147,8 +167,8 @@ test('claim_failed appears as a warning notification when emitted via SSE (issue
   await expect(claimFailedItem).toContainText('last 30 minutes');
 
   // Acceptance criterion (c): a snapshot-derived notification still renders
-  // alongside the SSE-driven one. The default mocked /v1/status payload
-  // reports `masterGas.balanceWei: '0'`, which the deriver maps to
+  // alongside the SSE-driven one. The overridden /v1/status payload above
+  // reports a low-runway `masterGas`, which the deriver maps to
   // `funding_low`. Asserting that BOTH notifications render proves the
   // SSE branch did not regress the snapshot deriver.
   const fundingLowItem = page.locator('[data-kind="funding_low"]');
