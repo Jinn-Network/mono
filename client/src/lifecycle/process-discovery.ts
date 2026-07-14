@@ -28,15 +28,24 @@ export interface JinnProcess {
 export type CmdlineMatch = 'match' | 'no-match' | 'unknown';
 
 // Matches:
-//   `node /path/to/dist/bin/jinn.js run [...]`
+//   `node /path/to/dist/bin/jinn.js run [...]`             (published-package entrypoint)
 //   `/usr/bin/node .../dist/bin/jinn.js run`
-//   `jinn run [...]`  (when invoked via the published `jinn` shim)
+//   `jinn run [...]`                                        (published `jinn` shim)
+//   `node --require .../tsx/dist/preflight.cjs --import file://.../tsx/dist/loader.mjs
+//     /path/to/src/bin/jinn.ts run`                          (repo-contributor tsx dev mode,
+//                                                             `yarn jinn run` -> package.json
+//                                                             `"jinn": "tsx src/bin/jinn.ts"`)
 // Does NOT match:
 //   `grep jinn`
 //   `vim jinn-notes.md`
 //   `cat /var/log/jinn.log`
 //   `jinn run-summary.log` (`run` must be followed by whitespace or end-of-string)
-const JINN_CMDLINE_RE = /(?:\bnode\b[^\s]*\s+\S*dist\/bin\/jinn\.js|\bjinn\b)\s+run(?=\s|$)/;
+// `.*?` (not a single `\s+\S*` token) between `node` and the script path is
+// required for the tsx case: `node --require .../preflight.cjs --import
+// file://.../loader.mjs .../src/bin/jinn.ts run` has node flags between the
+// interpreter and the script, not just one path token.
+const JINN_CMDLINE_RE =
+  /(?:\bnode\b.*?(?:dist\/bin\/jinn\.js|src\/bin\/jinn\.ts)|\bjinn\b)\s+run(?=\s|$)/;
 
 // Injectable for tests. Production uses node:child_process.execSync directly.
 type ExecSyncFn = (cmd: string) => string | Buffer;

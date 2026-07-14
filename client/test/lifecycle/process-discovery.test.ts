@@ -50,6 +50,14 @@ describe('pidMatchesJinn (with injected execSync)', () => {
     __setExecSyncForTesting(() => '\n');
     expect(pidMatchesJinn(123456)).toBe('unknown');
   });
+
+  it("returns 'match' for the tsx dev-mode invocation (`yarn jinn run` -> `tsx src/bin/jinn.ts run`, #805)", () => {
+    __setExecSyncForTesting(
+      () =>
+        'node --require /repo/node_modules/tsx/dist/preflight.cjs --import file:///repo/node_modules/tsx/dist/loader.mjs /repo/client/src/bin/jinn.ts run\n',
+    );
+    expect(pidMatchesJinn(123456)).toBe('match');
+  });
 });
 
 describe('enumerateJinnProcesses (with injected execSync)', () => {
@@ -106,5 +114,16 @@ describe('enumerateJinnProcesses (with injected execSync)', () => {
     );
     const result = enumerateJinnProcesses();
     expect(result.map((p) => p.pid)).toEqual([7777]);
+  });
+
+  it('matches the tsx dev-mode invocation (`yarn jinn run` -> `tsx src/bin/jinn.ts run`, #805)', () => {
+    __setExecSyncForTesting(() =>
+      [
+        ' 8888 node --require /repo/node_modules/tsx/dist/preflight.cjs --import file:///repo/node_modules/tsx/dist/loader.mjs /repo/client/src/bin/jinn.ts run',
+        ' 9999 grep jinn',
+      ].join('\n'),
+    );
+    const result = enumerateJinnProcesses();
+    expect(result.map((p) => p.pid)).toEqual([8888]);
   });
 });
