@@ -1,0 +1,42 @@
+{
+  "name": "@jinn-network/plugin",
+  "version": "0.1.0",
+  "description": "Product core for the Jinn Plugin — ports, product schemas, and the createJinnPlugin factory. Stage 1 foundation package (contracts + in-memory kit only).",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "license": "MIT",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "vitest": "^4.1.8"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "typescript": "^5.4.0",
+    "vitest": "^4.1.8"
+  }
+}

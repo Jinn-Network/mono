@@ -1,0 +1,31 @@
+name: Plugin CI
+
+on:
+  pull_request:
+    paths:
+      - 'packages/plugin/**'
+      - '.github/workflows/plugin-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'packages/plugin/**'
+      - '.github/workflows/plugin-ci.yml'
+
+defaults:
+  run:
+    working-directory: packages/plugin
+
+jobs:
+  check:
+    name: Typecheck, Test & Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: yarn install --immutable
+      - run: yarn build
+      - run: yarn typecheck
+      - run: yarn test
