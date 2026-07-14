@@ -459,6 +459,46 @@ describe('gatherStatusForApi', () => {
     });
   });
 
+  it('reports running version and null latestVersion when no getter is supplied (#641)', async () => {
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+    const { buildInfo } = await import('../../src/build-info.js');
+
+    await withTempStore(async (store) => {
+      const status = await gatherStatusForApi(store, undefined);
+      expect(status.version).toBe(buildInfo.implVersion);
+      expect(status.latestVersion).toBeNull();
+    });
+  });
+
+  it('threads latestVersion from the getter, and null when it throws (#641)', async () => {
+    mockStatusRpc();
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+
+    await withTempStore(async (store) => {
+      const ok = await gatherStatusForApi(store, {
+        earningDir: mkdtempSync(join(tmpdir(), 'jinn-status-test-')),
+        rpcUrl: 'http://127.0.0.1:0',
+        network: 'testnet' as const,
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        latestVersion: () => '9.9.9',
+      });
+      expect(ok.latestVersion).toBe('9.9.9');
+
+      const thrown = await gatherStatusForApi(store, {
+        earningDir: mkdtempSync(join(tmpdir(), 'jinn-status-test-')),
+        rpcUrl: 'http://127.0.0.1:0',
+        network: 'testnet' as const,
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        latestVersion: () => {
+          throw new Error('holder not ready');
+        },
+      });
+      expect(thrown.latestVersion).toBeNull();
+    });
+  });
+
   it('threads status.harness from the harnessReadiness getter when supplied', async () => {
     mockStatusRpc();
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');

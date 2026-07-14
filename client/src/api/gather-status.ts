@@ -43,6 +43,7 @@ import {
 import { gatherTaskRunsStatus, applyOutcomes } from './task-runs-build.js';
 import type { DiscoveryAPI, VerdictTallyResult } from '../discovery/types.js';
 import { gatherLoopCompletion, gatherImplStateCadence } from './loop-completion-build.js';
+import { buildInfo } from '../build-info.js';
 import type { BalanceCacheEntry } from '../store/store.js';
 import {
   buildPredictionOperatorStatus,
@@ -186,6 +187,14 @@ export interface StatusGatherConfig {
    * and sqlite-only contexts omit it ⇒ `null` (issue #441).
    */
   passwordRotation?: PasswordRotationConfig;
+  /**
+   * Optional getter for the latest published `@jinn-network/client` version
+   * (issue #641). Threaded by `main.ts` as a holder deref so the start-time
+   * npm-registry check can back-fill `/v1/status.latestVersion` once it
+   * resolves. Best-effort: returning `null` (or throwing) leaves
+   * `latestVersion` null — the SPA simply doesn't show the update banner.
+   */
+  latestVersion?: () => string | null;
   /**
    * Resolved DiscoveryAPI, threaded by `server.ts`. When present, the async
    * status path enriches each COMPLETE solve run's task-relative `outcome`
@@ -659,8 +668,20 @@ export async function gatherGatheredStatusRaw(
     );
   }
 
+  // Version-check surface (issue #641). `version` is always this build's
+  // implVersion; `latestVersion` is a best-effort deref of the npm-registry
+  // getter — any failure degrades to null (no banner), never throws.
+  let latestVersion: string | null = null;
+  try {
+    latestVersion = status?.latestVersion?.() ?? null;
+  } catch {
+    latestVersion = null;
+  }
+
   const baseRaw: GatheredStatusRaw = {
     shutdownState,
+    version: buildInfo.implVersion,
+    latestVersion,
     daemonRuntime: readDaemonRuntime(status?.earningDir),
     daemonStartedAt,
     passwordRotationAt: resolvePasswordRotationAt(status?.passwordRotation),
