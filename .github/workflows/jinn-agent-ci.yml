@@ -6,6 +6,12 @@ on:
   push:
     branches: [next, main]
     paths: ['apps/jinn-agent/**']
+  workflow_dispatch:
+  schedule:
+    - cron: '0 7 * * *'
+
+permissions:
+  contents: read
 
 concurrency:
   group: jinn-agent-ci-${{ github.ref }}
@@ -18,6 +24,7 @@ defaults:
 jobs:
   test:
     name: Test
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -46,8 +53,23 @@ jobs:
       - name: Acceptance gate (heavy, run alone)
         run: ./scripts/run_tests.sh --file-timeout 1200 tests/dehermes/test_main_path_acceptance.py -q
 
-      - name: Unit + dehermes suite (per-file isolated, parallel)
+      - name: Unit + dehermes + jinn-plugin suite (per-file isolated, parallel)
         run: |
-          FILES=$(find tests/hermes_cli tests/dehermes -name 'test_*.py' \
-            ! -name 'test_main_path_acceptance.py' | sort | paste -sd:)
+          FILES=$( { find tests/hermes_cli tests/dehermes -name 'test_*.py' \
+            ! -name 'test_main_path_acceptance.py'; \
+            find tests/plugins -maxdepth 1 -name 'test_jinn_*.py'; } | sort | paste -sd: )
           ./scripts/run_tests.sh --files "$FILES" -j 4 --file-timeout 1200 -q
+
+  cold-stock-e2e:
+    name: Cold-stock e2e (advisory)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Cold-stock e2e (network clone; advisory, never pages)
+        run: bash scripts/cold-stock-e2e.sh
