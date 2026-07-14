@@ -460,6 +460,87 @@ describe('#1393 corpus knowledge injection in runImpl', () => {
       .all('req-know-retry');
     expect(events).toHaveLength(1);
   });
+
+  it('a second TaskEngine instance against the same store reuses the persisted resolution instead of re-querying — cross-restart (#1393 review finding 1)', async () => {
+    seedProjection('env-prior-restart');
+    const querySpy = vi.spyOn(store, 'queryEnvelopeProjections');
+
+    // Engine 1 stands in for the process that resolved corpus knowledge and
+    // then crashed before reaching POST_SNAPSHOT (harness throws a
+    // transient error, leaving the row at RUNNING — same mechanism as the
+    // retry-re-drive test above).
+    const crashingImpl: Harness = {
+      name: 'crashing-stub',
+      version: '0.0.1',
+      supports: (s) => s.role !== 'evaluation' && s.solverType === SOLVER_TYPE,
+      async run(): Promise<Solution> {
+        throw new Error('network error: process crashed mid-run');
+      },
+    };
+    const engine1 = new TaskEngine(engineOpts(store, tmp, crashingImpl));
+    const p = new TaskRunPersistence(store.db);
+    await engine1.observe(runInput('req-know-restart'));
+    p.transition('req-know-restart', TaskRunState.CLAIMED);
+    p.transition('req-know-restart', TaskRunState.WAITING);
+    await expect(engine1.process('req-know-restart')).rejects.toThrow('network error: process crashed mid-run');
+    expect(p.getByRequestId('req-know-restart')!.state).toBe(TaskRunState.RUNNING);
+
+    // The lookup must be durably persisted BEFORE POST_SNAPSHOT — a
+    // restarted process reads this column, not an in-memory map it no
+    // longer has.
+    expect(p.getByRequestId('req-know-restart')!.consumedRefsJson).not.toBeNull();
+
+    // Engine 2: a brand-new TaskEngine instance (empty in-memory caches),
+    // standing in for the restarted process. Picks up the same DB row.
+    const captured: { task?: Task } = {};
+    const engine2 = new TaskEngine(engineOpts(store, tmp, makeCapturingImpl(captured)));
+    await engine2.process('req-know-restart');
+    expect(p.getByRequestId('req-know-restart')!.state).toBe(TaskRunState.POST_SNAPSHOT);
+
+    const payload = captured.task?.context?.['corpusKnowledge'] as { records: Array<{ envelopeCid: string }> };
+    expect(payload.records.map((r) => r.envelopeCid)).toEqual(['env-prior-restart']);
+
+    // The corpus was queried exactly once, by engine1 — engine2 reused the
+    // persisted column despite having no in-memory record of the resolution.
+    expect(querySpy).toHaveBeenCalledTimes(1);
+    const events = store.db
+      .prepare(`SELECT kind FROM activity_events WHERE kind = 'corpus_knowledge' AND request_id = ?`)
+      .all('req-know-restart');
+    expect(events).toHaveLength(1);
+  });
+
+  it('a malformed persisted consumedRefsJson does not wedge the run — falls through to a fresh lookup (#1393 review finding 2)', async () => {
+    seedProjection('env-prior-malformed');
+    const captured: { task?: Task } = {};
+    const engine = new TaskEngine(engineOpts(store, tmp, makeCapturingImpl(captured)));
+    const p = new TaskRunPersistence(store.db);
+    await engine.observe(runInput('req-know-malformed'));
+    p.transition('req-know-malformed', TaskRunState.CLAIMED);
+    p.transition('req-know-malformed', TaskRunState.WAITING);
+
+    // Seed a corrupt persisted value directly (simulates disk corruption or
+    // a future schema mismatch) — this previously threw synchronously out
+    // of runImpl on every retry, permanently wedging the run.
+    store.db.prepare(`UPDATE task_runs SET consumed_refs_json = ? WHERE request_id = ?`)
+      .run('{not-valid-json', 'req-know-malformed');
+
+    const warnings: string[] = [];
+    const origWarn = console.warn;
+    console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(' ')); };
+    try {
+      await engine.process('req-know-malformed');
+    } finally {
+      console.warn = origWarn;
+    }
+
+    expect(p.getByRequestId('req-know-malformed')!.state).toBe(TaskRunState.POST_SNAPSHOT);
+    const payload = captured.task?.context?.['corpusKnowledge'] as { records: Array<{ envelopeCid: string }> };
+    expect(payload.records.map((r) => r.envelopeCid)).toEqual(['env-prior-malformed']);
+    // The malformed value must be overwritten with a valid one, not left to
+    // wedge the next retry too.
+    expect(() => JSON.parse(p.getByRequestId('req-know-malformed')!.consumedRefsJson!)).not.toThrow();
+    expect(warnings.some((w) => w.includes('req-know-malformed'))).toBe(true);
+  });
 });
 
 describe('#1393 pack() saves the envelope projection', () => {
