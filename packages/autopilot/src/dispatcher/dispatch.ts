@@ -11,7 +11,7 @@ import {
   type FieldCache,
 } from './field-cache.js';
 import { buildHeadlessPrompt } from '../headless.js';
-import { sessionLogPath } from './session-log.js';
+import { sessionLogPath, sessionStartedAtPath } from './session-log.js';
 import { resolveImplementer } from './implementer-policy.js';
 
 // ---------------------------------------------------------------------------
@@ -83,6 +83,8 @@ export type SpawnFn = (
      * the fake spawn in tests just records it.
      */
     logPath?: string;
+    /** Absolute path to the dispatch-time marker file. The production lambda rewrites it (truncate) at every dispatch so its mtime is the session's startedAt for crash recovery; the fake spawn in tests just records it. */
+    startedAtMarkerPath?: string;
     [key: string]: unknown;
   },
 ) => SpawnResult;
@@ -316,11 +318,13 @@ export async function dispatchIssue(
   //    test holds. We send stdin to 'ignore' (the session is headless) and
   //    inherit for 1/2 as a safe default the lambda replaces.
   const logPath = sessionLogPath(number);
+  const startedAtMarkerPath = sessionStartedAtPath(number);
   const result = spawn('claude', ['-p', ...effortFlag(issue.effort), fullPrompt], {
     cwd: worktreePath,
     detached: true,
     stdio: ['ignore', 'inherit', 'inherit'],
     logPath,
+    startedAtMarkerPath,
     // Author this PR as the implementer identity (DR-2026-06-15); inherits the
     // ambient gh account when no token is configured. Also disables the
     // print-mode background-wait ceiling so the session reaches its PR stage.

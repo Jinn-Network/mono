@@ -20,3 +20,14 @@ export const SESSIONS_LOG_DIR = join(homedir(), '.jinn-client', 'autopilot', 'se
 export function sessionLogPath(issueNumber: number): string {
   return join(SESSIONS_LOG_DIR, `${issueNumber}.log`);
 }
+
+/**
+ * The dispatch-time marker path for one session, keyed by issue number:
+ * `<SESSIONS_LOG_DIR>/<N>.started-at`. Deterministic and I/O-free — the
+ * production spawn lambda rewrites (truncates) this file at every dispatch,
+ * so its mtime records the most recent dispatch time; `recoverStartedAt`
+ * reads it when re-deriving in-flight sessions.
+ */
+export function sessionStartedAtPath(issueNumber: number): string {
+  return join(SESSIONS_LOG_DIR, `${issueNumber}.started-at`);
+}

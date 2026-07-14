@@ -5,7 +5,7 @@ import { dispatchIssue, WORKTREES_BASE } from '../../src/dispatcher/dispatch.js'
 import type { ReadyIssue, DispatcherConfig } from '../../src/dispatcher/types.js';
 import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
 import type { SpawnFn } from '../../src/dispatcher/dispatch.js';
-import { SESSIONS_LOG_DIR, sessionLogPath } from '../../src/dispatcher/session-log.js';
+import { SESSIONS_LOG_DIR, sessionLogPath, sessionStartedAtPath } from '../../src/dispatcher/session-log.js';
 import {
   fetchFieldIds,
   resetFieldCache,
@@ -579,6 +579,16 @@ describe('dispatchIssue', () => {
     // path to the lambda, which opens the fds. The contract here is just that
     // stdio is no longer the string 'ignore'.
     expect(spawnCall.opts.stdio).not.toBe('ignore');
+  });
+
+  it('passes the per-session startedAtMarkerPath (sessions/<N>.started-at) through the spawn opts (jinn-mono#1296/#1393)', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+
+    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+
+    const [spawnCall] = calls;
+    expect(spawnCall.opts.startedAtMarkerPath).toBe(sessionStartedAtPath(418));
   });
 
   it('returns an InFlightSession whose logPath is deterministic from the issue number (#533 AC#2)', async () => {

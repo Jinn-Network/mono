@@ -52,7 +52,7 @@ import { WallClock } from '../src/dispatcher/wall-clock.js';
 import { shouldRouteToSessions } from '../src/cli/routing.js';
 import { spawn } from 'node:child_process';
 import type { SpawnOptions } from 'node:child_process';
-import { mkdirSync, openSync, closeSync, writeSync } from 'node:fs';
+import { mkdirSync, openSync, closeSync, writeSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { argv } from 'node:process';
@@ -796,6 +796,14 @@ async function main(): Promise<void> {
                   `pid=pending cwd=${opts.cwd} =====\n`;
                 writeSync(fd, delimiter);
                 stdio = ['ignore', fd, fd];
+              }
+              // jinn-mono#1296/#1393: rewrite (truncate, not append) the
+              // dispatch-time started-at marker so its mtime always reflects
+              // the LATEST dispatch — unlike the append-mode log above.
+              // recoverStartedAt in state.ts reads this file's mtime when
+              // re-deriving startedAt for a reused worktree.
+              if (typeof opts.startedAtMarkerPath === 'string') {
+                writeFileSync(opts.startedAtMarkerPath, `${new Date().toISOString()}\n`, { mode: 0o600 });
               }
               const child = spawn(cmd, args, { ...opts, stdio } as SpawnOptions);
               if (child.pid != null) {
