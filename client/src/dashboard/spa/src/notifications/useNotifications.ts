@@ -4,7 +4,7 @@ import { api } from '../api/client.js';
 import { useConnectionState } from '../api/connection-state.js';
 import { useEventStream } from '../api/events.js';
 import { useRestartPending } from '../shell/RestartPendingContext.js';
-import { deriveNotifications, type DeriveInput } from './derive.js';
+import { deriveNotifications, gasSeverity, type DeriveInput } from './derive.js';
 import type { OperatorNotification } from './taxonomy.js';
 
 const SEVERITY_ORDER: Record<OperatorNotification['severity'], number> = {
@@ -73,14 +73,9 @@ function gasChain(
     const n = Number(gas.runwayDaysExcess);
     if (Number.isFinite(n)) runwayDays = n;
   }
-  let empty = false;
-  try {
-    if (gas.minEthWei !== undefined) {
-      empty = BigInt(gas.balanceWei) < BigInt(gas.minEthWei);
-    }
-  } catch {
-    // non-numeric — leave empty=false
-  }
+  // Blocking-threshold math (balanceWei < minEthWei) is owned by gasSeverity
+  // (#1296) — reuse it here instead of restating the BigInt comparison.
+  const empty = gasSeverity(gas) === 'blocking';
   return { chain, wallet: gas.address ?? null, runwayDays, empty };
 }
 

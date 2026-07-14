@@ -8,6 +8,7 @@ import { NodeHealthCard, type DaemonStatus, type RpcStatus } from './overview/No
 import { ActivityCard, type ActivityJoinedNet, type ActivityTask } from './overview/ActivityCard.js';
 import { AiUnitsPauseAlert } from './AiUnitsPauseAlert.js';
 import { computeEffectivePlugins } from './configuration/effective-plugins.js';
+import { gasSeverity } from '../notifications/derive.js';
 import type { RewardsResponse, SolverNetsCatalogResponse, StakingRewardReadState } from '../api/types.js';
 
 /**
@@ -77,15 +78,6 @@ interface OverviewStatusV1 {
     lastPasswordRotationAt?: string | null;
   };
   masterGas?: {
-    balanceWei?: string;
-    runwayDaysExcess?: string | number | null;
-    minEthWei?: string;
-  };
-  /**
-   * L1 (Ethereum Sepolia) master gas runway (#1296) — parallel to `masterGas`.
-   * Present only on testnet daemons that gather the L1 master balance.
-   */
-  l1MasterGas?: {
     balanceWei?: string;
     runwayDaysExcess?: string | number | null;
     minEthWei?: string;
@@ -270,22 +262,10 @@ export function OverviewPage(): JSX.Element {
   const gasRunwayDays = status?.masterGas?.runwayDaysExcess ?? '—';
 
   // Runway severity tint for the Wallet card (#1296). The card shows the L2
-  // master; blocking when the balance can't cover the next tx, warning when
-  // runway is under the low threshold (mirrors the deriver's funding notices).
-  const gasRunwaySeverity: 'warning' | 'blocking' | null = (() => {
-    const mg = status?.masterGas;
-    if (!mg || mg.balanceWei === undefined) return null;
-    try {
-      if (mg.minEthWei !== undefined && BigInt(mg.balanceWei) < BigInt(mg.minEthWei)) {
-        return 'blocking';
-      }
-    } catch {
-      /* non-numeric */
-    }
-    const days = Number(mg.runwayDaysExcess);
-    if (Number.isFinite(days) && days < 3) return 'warning';
-    return null;
-  })();
+  // master; severity math (blocking / warning threshold) is owned by
+  // gasSeverity so the rule lives in one place alongside the deriver's
+  // funding notices.
+  const gasRunwaySeverity = gasSeverity(status?.masterGas ?? {});
 
   // Per-role ETH balances (#430). `?? undefined` coerces the nullable wire shape
   // to formatEth's `string | undefined`; formatEth then renders '—' for missing input.
