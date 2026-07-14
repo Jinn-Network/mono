@@ -1,10 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import {
   processAlive,
-  readPidfile,
   enumerateJinnProcesses,
   pidMatchesJinn,
   __setExecSyncForTesting,
@@ -20,33 +16,6 @@ describe('processAlive', () => {
   });
 });
 
-describe('readPidfile', () => {
-  it('returns alive=false when the file does not exist', () => {
-    const result = readPidfile(join(tmpdir(), 'jinn-does-not-exist-' + Date.now() + '.pid'));
-    expect(result).toEqual({ pid: null, alive: false, isJinn: false });
-  });
-
-  it('parses a bare-pid pidfile', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'jinn-pidfile-'));
-    const path = join(dir, 'daemon.pid');
-    writeFileSync(path, String(process.pid) + '\n');
-    const result = readPidfile(path);
-    expect(result.pid).toBe(process.pid);
-    expect(result.alive).toBe(true);
-    expect(typeof result.isJinn).toBe('boolean');
-  });
-
-  it('returns pid=null for a malformed pidfile', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'jinn-pidfile-'));
-    const path = join(dir, 'daemon.pid');
-    writeFileSync(path, 'not-a-number\n');
-    const result = readPidfile(path);
-    expect(result.pid).toBeNull();
-    expect(result.alive).toBe(false);
-    expect(result.isJinn).toBe(false);
-  });
-});
-
 describe('pidMatchesJinn (with injected execSync)', () => {
   beforeEach(() => {
     __resetExecSyncForTesting();
@@ -55,21 +24,31 @@ describe('pidMatchesJinn (with injected execSync)', () => {
     __resetExecSyncForTesting();
   });
 
-  it('returns true when ps reports a jinn daemon cmdline', () => {
+  it("returns 'match' when ps reports a jinn daemon cmdline", () => {
     __setExecSyncForTesting(() => 'node /opt/jinn/dist/bin/jinn.js run\n');
-    expect(pidMatchesJinn(123456)).toBe(true);
+    expect(pidMatchesJinn(123456)).toBe('match');
   });
 
-  it('returns false when ps reports an unrelated cmdline', () => {
+  it("returns 'no-match' when ps reports a definitively unrelated cmdline", () => {
     __setExecSyncForTesting(() => 'python train.py\n');
-    expect(pidMatchesJinn(123456)).toBe(false);
+    expect(pidMatchesJinn(123456)).toBe('no-match');
   });
 
-  it('returns false when ps throws (pid gone between checks)', () => {
+  it("does not match `jinn run-summary.log` (run must be followed by whitespace or end-of-string, #805)", () => {
+    __setExecSyncForTesting(() => 'jinn run-summary.log\n');
+    expect(pidMatchesJinn(123456)).toBe('no-match');
+  });
+
+  it("returns 'unknown' (not 'no-match') when ps throws — a ps failure must not be misread as a confirmed non-jinn process (#805)", () => {
     __setExecSyncForTesting(() => {
       throw new Error('ps: no such process');
     });
-    expect(pidMatchesJinn(123456)).toBe(false);
+    expect(pidMatchesJinn(123456)).toBe('unknown');
+  });
+
+  it("returns 'unknown' when ps succeeds but reports empty output", () => {
+    __setExecSyncForTesting(() => '\n');
+    expect(pidMatchesJinn(123456)).toBe('unknown');
   });
 });
 

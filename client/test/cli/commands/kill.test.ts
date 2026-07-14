@@ -9,6 +9,7 @@ function makeDeps(overrides: Partial<KillDeps> = {}): KillDeps {
     killSignal: vi.fn(),
     processAlive: () => false,
     sleep: vi.fn().mockResolvedValue(undefined),
+    cmdlineMatch: () => 'match',
     ...overrides,
   };
 }
@@ -98,6 +99,47 @@ describe('kill command', () => {
     expect(killSignal.mock.calls[0]).toEqual([9999, 'SIGTERM']);
     expect(killSignal.mock.calls[killSignal.mock.calls.length - 1]).toEqual([9999, 'SIGKILL']);
     expect(sleep).toHaveBeenCalled();
+  });
+
+  it('skips the SIGKILL when the pid is confirmed no longer a jinn process right before the final signal (#805 recycled-pid re-verify)', async () => {
+    const found: JinnProcess[] = [{ pid: 4321, command: 'node dist/bin/jinn.js run' }];
+    const killSignal = vi.fn();
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      enumerateJinnProcesses: () => found,
+      killSignal,
+      processAlive: () => true, // still alive after the SIGTERM poll times out
+      sleep,
+      cmdlineMatch: () => 'no-match', // pid was recycled to an unrelated process
+    });
+    const cmd = createKillCommand(deps);
+    const { ctx, writes } = makeCommandCtx();
+    await cmd.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]);
+    expect(parsed.killed).toEqual([4321]);
+    expect(parsed.forceKilled).toEqual([]);
+    expect(killSignal).toHaveBeenCalledWith(4321, 'SIGTERM');
+    expect(killSignal).not.toHaveBeenCalledWith(4321, 'SIGKILL');
+  });
+
+  it('still SIGKILLs when the pre-SIGKILL cmdline probe is unknown (ps unavailable) — fail toward completion', async () => {
+    const found: JinnProcess[] = [{ pid: 4321, command: 'node dist/bin/jinn.js run' }];
+    const killSignal = vi.fn();
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      enumerateJinnProcesses: () => found,
+      killSignal,
+      processAlive: () => true,
+      sleep,
+      cmdlineMatch: () => 'unknown',
+    });
+    const cmd = createKillCommand(deps);
+    const { ctx, writes } = makeCommandCtx();
+    await cmd.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]);
+    expect(parsed.killed).toEqual([4321]);
+    expect(parsed.forceKilled).toEqual([4321]);
+    expect(killSignal).toHaveBeenCalledWith(4321, 'SIGKILL');
   });
 
   it('emits invalid_invocation for bad flags', async () => {

@@ -12,21 +12,20 @@
  * Issue: #805
  */
 import { execSync as nodeExecSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-
-export interface PidfileStatus {
-  /** Parsed pid, or null if file missing / malformed. */
-  pid: number | null;
-  /** `process.kill(pid, 0)` succeeded. */
-  alive: boolean;
-  /** `alive` AND cmdline matches the jinn daemon regex. */
-  isJinn: boolean;
-}
 
 export interface JinnProcess {
   pid: number;
   command: string;
 }
+
+/**
+ * Tri-state result of probing a single pid's cmdline (#805). `ps` failing
+ * (permissions, missing/odd `ps` in a minimal container) is NOT the same as
+ * `ps` succeeding and definitively showing a non-jinn cmdline — callers that
+ * collapse the two fail open (misclassify a real daemon as reclaimable).
+ * `'unknown'` MUST be treated as "could not rule out a live jinn daemon".
+ */
+export type CmdlineMatch = 'match' | 'no-match' | 'unknown';
 
 // Matches:
 //   `node /path/to/dist/bin/jinn.js run [...]`
@@ -36,7 +35,8 @@ export interface JinnProcess {
 //   `grep jinn`
 //   `vim jinn-notes.md`
 //   `cat /var/log/jinn.log`
-const JINN_CMDLINE_RE = /(?:\bnode\b[^\s]*\s+\S*dist\/bin\/jinn\.js|\bjinn\b)\s+run\b/;
+//   `jinn run-summary.log` (`run` must be followed by whitespace or end-of-string)
+const JINN_CMDLINE_RE = /(?:\bnode\b[^\s]*\s+\S*dist\/bin\/jinn\.js|\bjinn\b)\s+run(?=\s|$)/;
 
 // Injectable for tests. Production uses node:child_process.execSync directly.
 type ExecSyncFn = (cmd: string) => string | Buffer;
@@ -63,43 +63,26 @@ export function processAlive(pid: number): boolean {
 }
 
 /**
- * Read `pid` from a bare-integer pidfile, then probe liveness and cmdline.
- * Never throws; missing/malformed/dead all return structured negatives.
+ * Read the cmdline for a single pid and classify it against the jinn regex.
+ * Exported (#805) so `pidfile-liveness.ts`'s `jinn run` precheck and `jinn
+ * stop`/`jinn kill`'s identity re-verification can reclaim/skip a
+ * live-but-not-jinn pid instead of refusing/signaling it.
+ *
+ * `-ww` (unlimited width) is required — without it BSD/macOS `ps` truncates
+ * COMMAND to the terminal width, which can cut the regex's match target out
+ * of long cmdlines.
+ *
+ * Returns `'unknown'` (never `'no-match'`) when `ps` throws or reports empty
+ * output — see the `CmdlineMatch` doc comment for why that distinction is
+ * load-bearing.
  */
-export function readPidfile(path: string): PidfileStatus {
-  if (!existsSync(path)) {
-    return { pid: null, alive: false, isJinn: false };
-  }
-  let raw: string;
+export function pidMatchesJinn(pid: number): CmdlineMatch {
   try {
-    raw = readFileSync(path, 'utf-8').trim();
+    const out = String(execSyncImpl(`ps -ww -p ${pid} -o command=`)).trim();
+    if (!out) return 'unknown';
+    return JINN_CMDLINE_RE.test(out) ? 'match' : 'no-match';
   } catch {
-    return { pid: null, alive: false, isJinn: false };
-  }
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return { pid: null, alive: false, isJinn: false };
-  }
-  const alive = processAlive(parsed);
-  if (!alive) {
-    return { pid: parsed, alive: false, isJinn: false };
-  }
-  const isJinn = pidMatchesJinn(parsed);
-  return { pid: parsed, alive: true, isJinn };
-}
-
-/**
- * Read the cmdline for a single pid; true iff it matches the jinn regex.
- * Exported (#805) so `pidfile-liveness.ts`'s `jinn run` precheck can reclaim
- * a live-but-not-jinn pid instead of refusing.
- */
-export function pidMatchesJinn(pid: number): boolean {
-  try {
-    const out = String(execSyncImpl(`ps -p ${pid} -o command=`)).trim();
-    if (!out) return false;
-    return JINN_CMDLINE_RE.test(out);
-  } catch {
-    return false;
+    return 'unknown';
   }
 }
 
@@ -111,7 +94,7 @@ export function pidMatchesJinn(pid: number): boolean {
 export function enumerateJinnProcesses(): JinnProcess[] {
   let out: string;
   try {
-    out = String(execSyncImpl('ps -eo pid=,command=')).trim();
+    out = String(execSyncImpl('ps -ww -eo pid=,command=')).trim();
   } catch {
     return [];
   }

@@ -133,6 +133,47 @@ describe('stop command', () => {
     killSpy.mockRestore();
   });
 
+  it('#805: treats a recorded pid whose cmdline is not a jinn daemon (recycled pid) as stale and falls through to enumeration', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-stop-test-'));
+    writeFileSync(join(dir, 'daemon.pid'), '55501\n');
+    __setExecSyncForTesting((cmd) => {
+      if (String(cmd).includes('-p 55501')) return 'python train.py\n';
+      return ' 66601 node /opt/jinn/dist/bin/jinn.js run';
+    });
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true as never);
+    const { ctx, writes } = makeCommandCtx({ env: { JINN_EARNING_DIR: dir } });
+    await stop.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]);
+    expect(parsed.pid).toBe(55501);
+    expect(parsed.stalePidfileCleaned).toBe(true);
+    expect(parsed.pidfileRemoved).toBe(true);
+    expect(parsed.killed).toBe(true);
+    expect(parsed.discoveredPids).toEqual([66601]);
+    expect(killSpy).not.toHaveBeenCalledWith(55501, 'SIGTERM');
+    expect(killSpy).toHaveBeenCalledWith(66601, 'SIGTERM');
+    killSpy.mockRestore();
+  });
+
+  it('#805: enumeration fallback signals nothing and reports ambiguousPids when more than one jinn process is discovered', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-stop-test-'));
+    __setExecSyncForTesting(() =>
+      [
+        ' 11111 node /opt/jinn/dist/bin/jinn.js run',
+        ' 22222 node /opt/jinn/dist/bin/jinn.js run',
+      ].join('\n'),
+    );
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true as never);
+    const { ctx, writes } = makeCommandCtx({ env: { JINN_EARNING_DIR: dir } });
+    await stop.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]);
+    expect(parsed.state).toBe('stopped');
+    expect(parsed.killed).toBe(false);
+    expect(parsed.discoveredPids).toBeUndefined();
+    expect(parsed.ambiguousPids.slice().sort()).toEqual([11111, 22222]);
+    expect(killSpy).not.toHaveBeenCalled();
+    killSpy.mockRestore();
+  });
+
   it('#805: missing pidfile + no discovered processes reports plain stopped (no regression)', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-stop-test-'));
     // beforeEach already pins execSync to return '' — nothing discovered.

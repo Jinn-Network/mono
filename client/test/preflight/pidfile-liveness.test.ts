@@ -77,6 +77,24 @@ describe('pidfile-liveness preflight', () => {
     }
   });
 
+  it('refuses (fails closed) when the cmdline probe is unknown because ps throws (#805)', () => {
+    // A real jinn daemon plus a ps failure (permissions, missing/odd ps in a
+    // minimal container) must NOT be misclassified as reclaimable — that
+    // would let `jinn run` start a second daemon against the same
+    // store/wallet while the first is still alive.
+    writeFileSync(pidPath, '987654\n', 'utf-8');
+    __setExecSyncForTesting(() => {
+      throw new Error('ps: command not found');
+    });
+    const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as never);
+    try {
+      const decision = checkPidfileLiveness({ pidPath });
+      expect(decision).toMatchObject({ decision: 'refuse', pid: 987654, reason: 'alive' });
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
+
   it('reclaims a pidfile recording PID 1 (container PID-1 / #805) instead of refusing', () => {
     // In a container the daemon is PID 1; on restart the pidfile on the
     // persistent volume outlives the container and `process.kill(1, 0)`
