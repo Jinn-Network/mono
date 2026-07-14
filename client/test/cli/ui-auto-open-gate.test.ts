@@ -10,10 +10,10 @@
  * Rules:
  *  - `noUi` (JINN_NO_UI=1) wins outright: never open, never write the marker.
  *  - Otherwise open when forced (`--ui`) or when the marker doesn't exist yet
- *    (first-ever launch).
- *  - Write the marker whenever it didn't already exist (so the first launch
- *    is recorded even under a headless / no-ui run, and every later run sees
- *    an existing marker).
+ *    (first-ever launch); write the marker whenever it didn't already exist.
+ *  - Because `noUi` short-circuits before the marker is considered, a run
+ *    under JINN_NO_UI=1 never writes it — a later non-headless run still
+ *    counts as first-ever and opens once.
  */
 import { describe, it, expect } from 'vitest';
 import { decideUiAutoOpen } from '../../src/cli/ui-auto-open-gate.js';
