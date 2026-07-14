@@ -62,6 +62,7 @@ or when `process.stdout.isTTY === false`.
 | `jinn fund-requirements` | List what must be funded before the next step | Yes |
 | `jinn run` | Foreground daemon; exits on SIGINT/SIGTERM | N/A (long-running) |
 | `jinn stop` | Signal a running `jinn run` to shut down | Yes |
+| `jinn kill` | Force-terminate jinn daemon processes found by cmdline enumeration (SIGTERM→10s→SIGKILL); `--all` required for more than one match | Yes |
 | `jinn version` | Client version, protocol phase, deployment digest, token map | Yes |
 
 ### 2.2 Introspection verbs
