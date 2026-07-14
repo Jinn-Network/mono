@@ -1,11 +1,13 @@
 # Jinn Harness Network — Hermes fork, contribution economy, contributor-steered corpus
 
-- **Version:** 0.4 (draft — open questions resolved in review, 2026-07-02; spike #1316 findings +
+- **Version:** 0.5 (draft — open questions resolved in review, 2026-07-02; spike #1316 findings +
   envelope schema-review consequences folded into §5/§6.1/§12, 2026-07-02; **v0.4, 2026-07-09,
   issue #1487: added rung-1 local single-player distillation (§1, §5.1) + the symmetric Distiller
   interface (§5.2 — local/network backends, rung 3 = network); reconciled the moat framing to name
-  the bonded economy as the durable asset (§2, §10). A Decision Record may be warranted — see §13.**)
-- **Date:** 2026-07-09
+  the bonded economy as the durable asset (§2, §10). A Decision Record may be warranted — see §13.**
+  **v0.5, 2026-07-14, issue #1657: D3 amended to default-decline/review-first (§1, §3, §5, §6.1);
+  Stage 1 gate-lane note added (§14).**)
+- **Date:** 2026-07-14
 - **Author:** Oak (design session)
 - **Shape:** `design` — output is this spec; implementation lands as per-phase plans and Issues
 
@@ -17,8 +19,9 @@ along:
 
 1. **Consume** — the harness reads the public corpus (verified prior solutions, skills, artifacts)
    to make the user's agent better.
-2. **Contribute** — by default (visible, per-task veto) the harness publishes **scrubbed task
-   traces** to the corpus. Contribution is the demand signal: it tells us where usage concentrates.
+2. **Contribute** — with consent (default-decline, review-first, per-task veto) the harness
+   publishes **scrubbed task traces** to the corpus. Contribution is the demand signal: it tells us
+   where usage concentrates.
 3. **Earn** — contributions are counted by an on-chain activity checker; contributors running the
    sidecar node earn OLAS staking emissions for verified, anchored contributions.
 4. **Steer** — contributors lock earned OLAS into veOLAS and steer emissions toward **their own
@@ -77,7 +80,7 @@ decisions rather than re-argued:
 |---|----------|-----------|
 | D1 | Harness-first distribution: fork Hermes; the Jinn layer is the product surface | Adoption is product adoption; the network is a side effect of use |
 | D2 | The Jinn layer is a **package**; the fork is Hermes + package pre-wired | One component, two containers: same layer becomes the plugin for other harnesses; upstream Hermes merges stay cheap |
-| D3 | Contribution is **default-on, visible, per-task veto**, task-traces only | Signal needs coverage; trust needs legibility — the user can inspect exactly what left the machine, on chain |
+| D3 | Contribution is **default-decline, review-first — consent asked explicitly at onboarding (default off), one-time first-publish preview, per-task veto retained**, task-traces only | Trust needs legibility before it needs signal — the user consents explicitly, sees the first publish before it's silent, and can inspect exactly what left the machine, on chain (amended v0.5, 2026-07-14 — §14) |
 | D4 | Pure readers allowed (consume without contributing) | Adoption over symmetry, early |
 | D5 | Earn-for-contribution via staked sidecar service + contribution-counting activity checker | Reuses the entire earning bootstrap; the checker only counts **verified, anchored** contributions (quality gate wired into emissions eligibility — anti-farming) |
 | D6 | Contributor self-steering: earned OLAS → veOLAS → gauge weight toward per-distribution staking programs | Makes "deepen narrowly" endogenous; manufactures the dispersed electorate that retires founder-decisive steering |
@@ -145,9 +148,9 @@ to. Nothing in the daemon needs to change for v0; the layer shells out to what e
     evidence into consumables.
 - **Scrub is mandatory and fail-closed** at publish altitude (existing pipeline: key-policy →
   openredaction → secretlint → ML PII). No scrub, no publish.
-- **Default-on, visible, per-task veto.** First-run consent, a persistent toggle, a per-task
-  "don't publish this" control, and a contribution ledger showing exactly what left, with anchor
-  links. Legibility is the selling point.
+- **Default-decline, review-first, per-task veto.** First-run consent (default off), a one-time
+  first-publish preview, a persistent toggle, a per-task "don't publish this" control, and a
+  contribution ledger showing exactly what left, with anchor links. Legibility is the selling point.
 - **Pure readers allowed.** Consumption is not gated on contribution (D4). Revisit if free-riding
   materially outpaces contribution once volumes exist.
 
@@ -208,11 +211,12 @@ Design goal: **no user touches gas until they are earning, and then only cents o
 
 - **Tier 0 — Reader.** Install, consume. Nothing on-chain; the layer silently generates a local
   keypair (free — it becomes the user's identity later).
-- **Tier 1 — Contributor (default-on, free).** Traces scrubbed → signed locally with the harness
-  key → uploaded → **batch-anchored by a Jinn relayer** (many contributors' envelopes merkle-batched
-  into one anchor tx; treasury pays cents per batch). **Credits accrue in the indexer**, attributed
-  by envelope signature. User gas: zero, forever. Credits are an IOU with no protocol guarantee —
-  the UI says so plainly ("credits become an earning position when you run a node").
+- **Tier 1 — Contributor (default-decline, review-first; free).** Traces scrubbed → signed locally
+  with the harness key → uploaded → **batch-anchored by a Jinn relayer** (many contributors'
+  envelopes merkle-batched into one anchor tx; treasury pays cents per batch). **Credits accrue in
+  the indexer**, attributed by envelope signature. User gas: zero, forever. Credits are an IOU with
+  no protocol guarantee — the UI says so plainly ("credits become an earning position when you run
+  a node").
 - **Tier 2 — Node (one command, pool-bonded).** The existing 11-step bootstrap runs, with the bond
   supplied from the **stOLAS pool** (no gatekeeper approval required — we have deployed with stOLAS
   before). **Underwriting = Tier-1 credit history**: the pool bonds contributors with N verified
@@ -391,3 +395,34 @@ self-sustenance claim) and **names the bonded economy as the durable, non-mirror
 this reverses a stated non-goal (§10) into an affirmative claim about the protocol's durability, it
 **likely warrants a Decision Record** under `log/decisions/` (working handle
 `DR-2026-07-09-bonded-economy-moat`). Flagged here; the DR is not written in this amendment.
+
+## 14. Amendment: consent defaults + Stage 1 contribution lane (v0.5, 2026-07-14)
+
+**Consent-default correction.** The §1 summary's Contribute item, D3 (§3), the §5 contribution-terms
+bullet, and the §6.1 Tier 1 label previously stated contribution as on by default. This was wrong:
+shipped behavior — and the approved Stage 1 product design — is **default-decline, review-first**.
+Consent is asked explicitly at onboarding, default off (P7: "Publish consent default-decline (as
+shipped); mineable-trace tier-1 (retain local) asked explicitly at onboarding, default off."). The
+first publish shows a one-time preview, after which minting is silent and the user inspects results
+via the ledger rather than being interrupted (P4). Per-task veto is retained unchanged. See
+`docs/superpowers/specs/2026-07-14-jinn-plugin-stage-1-product-design.md` §2 (P4, P7) and §9 item
+1, which flagged this exact drift and required the amendment.
+
+**Stage 1 gate-lane note.** The Stage 1 contribution lane that gates progress is the
+**user-originated public task mint**, not trace publication: "Eligible contribution:
+user-originated public task mint (session-echo at true `repo@commit`, blinded provenance). Trace
+publication remains as the shipped consent-gated lane but is not the gate." (P3). Trace publication
+as described in §5/§6.1 continues to run as the shipped, consent-gated corpus lane — it is not
+retired — but it is not the Stage 1 gate. See also the roadmap's "Initial contribution and privacy
+boundary" section (`docs/superpowers/specs/2026-07-14-jinn-plugin-product-roadmap-design.md`),
+which frames publication as review-first pending the compiler/admission boundary being proven, and
+`docs/superpowers/plans/2026-07-14-jinn-plugin-stage-1-plan.md` §S1-H1, the plan item that required
+this spec amendment.
+
+**On §13.** This amendment does not reopen §13's Decision-Record flag. The consent-default reversal
+was ratified in the approved Stage 1 product design (PR #1653, product design + package
+architecture + decomposition plan), which explicitly required "a one-line spec amendment" here — no
+separate DR is needed for this change.
+
+Context: issue #1657 (this amendment), parent #1654, roadmap PR #1651 (merged 44ac8a484), Stage 1
+product design + plan PR #1653 (merged befcfdf3f).
