@@ -2420,10 +2420,17 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     const refreshVersionCheck = async (): Promise<void> => {
       try {
         const latest = await fetchLatestVersion();
-        if (!latest) return;
-        latestVersionHolder.current = latest;
-        if (isNewerVersion(getRunningVersion(), latest)) {
+        if (latest && isNewerVersion(getRunningVersion(), latest)) {
+          // Only surface a value when the published latest is genuinely newer
+          // than the running build. The dashboard banner derives directly from
+          // a non-null `latestVersion`, so this keeps the log and the banner on
+          // the same semver strictly-greater check.
+          latestVersionHolder.current = latest;
           console.log(formatUpdateLogLine(latest));
+        } else {
+          // Not newer (equal, older, or unfetchable) — clear any prior value so
+          // a stale tick can't linger as a false upgrade signal.
+          latestVersionHolder.current = null;
         }
       } catch {
         // Advisory only — a registry hiccup must never disturb the daemon.
