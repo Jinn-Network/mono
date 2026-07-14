@@ -1435,26 +1435,48 @@ findings below were fixed. Tests 5481 passed, typecheck clean at HEAD.
 
 Outstanding review findings (fix before opening a PR):
 
-1. Projection tier mis-stamping — pack() saves the envelope projection at
-   sign time, when v2/v3 envelopes are already stamped `committed`; a
-   race-lost/failed delivery leaves a `committed` projection that outranks
-   delivered `self-signed` work. Move the save to the deliver() success path
-   (or downgrade tier at pack time).
-2. Artifact join degrades on real stores — handleSearchRecords joins only the
-   12 most-recent served/cached artifact rows of any type, so top-ranked
-   records inject with empty artifact lists once the store has >12 recent
-   rows; the ranking pool itself is the 12 newest projections, so older
-   attested records fall out before the tier sort. Raise the pool and
-   backfill refs by envelopeCid in corpus-knowledge.ts (do not touch MCP code).
-3. Retry re-drive waste — the lookup re-runs in full on every RUNNING
-   retry/recovery re-drive (duplicate corpus_knowledge events, repeated
-   timeout charge). Reuse persisted consumedRefsJson.
-4. Sick corpus beats no corpus — a hung network corpus times out the whole
-   search, discarding local rows; fall back to a local-only pass. The timed-
-   out query is also uncancelled (no AbortSignal).
-5. Defanged #649 regression test — daemon-start-order.test.ts used
-   corpusFactory invocation as its ordering marker; the constructor hoist
-   makes its assertions unfalsifiable. Re-marker the test.
+1. ~~Projection tier mis-stamping~~ — RESOLVED. pack() now saves the
+   projection with `evidenceTier` forced to `'self-signed'` regardless of the
+   envelope's own (aspirational) tier. `deliver()` upgrades the saved
+   projection to `'committed'` via the new `Store.upgradeEnvelopeProjectionEvidenceTier`
+   only after `deliverAndClaim` actually succeeds (v2/v3 variants), mirroring
+   the existing ERC-8004 setMetadata move ("committed must mean observable
+   evidence exists, not intent"). A race-lost/failed delivery now leaves the
+   projection at `self-signed`. Chose the "downgrade at pack time, upgrade on
+   confirmed delivery" option over "move the whole save to deliver()" because
+   the full `SignedEnvelope` is not persisted anywhere — a deliver()-only save
+   would silently lose the projection on any crash-recovery re-drive between
+   pack() and deliver() (deliver() only ever needs manifestCid/evidenceHash,
+   by design). `client/src/harnesses/engine/engine.ts`, `client/src/store/store.ts`.
+2. ~~Artifact join degrades on real stores~~ — RESOLVED, inside
+   `corpus-knowledge.ts` only. Raised the default `searchLimit` from 12 to
+   200 (fixes the ranking-pool truncation, since the same limit already
+   flows into `queryEnvelopeProjections`). Added `Store.getArtifactsByEnvelopeCids`
+   (deterministic, non-windowed lookup) and backfill artifact refs for the
+   final ranked CIDs after ranking, regardless of how many other artifact
+   rows exist locally.
+3. ~~Retry re-drive waste~~ — RESOLVED. Added an in-memory
+   `consumedRefsByRequest` map (checked before the persisted
+   `task.consumedRefsJson` field) so a RUNNING retry/recovery re-drive
+   (transient RPC error left the row at RUNNING, or crash-recovery via
+   `_recoverDispatch`) reuses the first resolution instead of re-querying the
+   corpus or re-emitting `corpus_knowledge`. Cleared after successful pack().
+4. ~~Sick corpus beats no corpus~~ — RESOLVED. `loadCorpusKnowledge` now
+   falls back to a store-only (`corpus: null`) pass on network-corpus
+   timeout/failure, so local knowledge still injects. `ReadOnlyCorpus.query`
+   takes no `AbortSignal`, so the timed-out call cannot be cancelled — it
+   keeps running in the background; real `.then` handlers are attached to it
+   (via the `withTimeout` helper) so it can never surface as an unhandled
+   rejection or produce a duplicate log line when it eventually settles. This
+   limitation is documented in a code comment.
+5. ~~Defanged #649 regression test~~ — RESOLVED.
+   `daemon-start-order.test.ts` now mocks `startApiServer` (still delegating
+   to the real implementation) to push the ordering marker at the actual
+   port-bind call inside `start()`, instead of relying on `corpusFactory`
+   (now invoked in the constructor, before `start()` is ever called, which
+   made the old marker fire unconditionally). Verified the new marker is
+   falsifiable by temporarily reordering `Daemon.start()` and confirming the
+   test fails, then reverting.
 6. (Note) Knowledge keyed on solverType only — SolverNets sharing a
    solverType cross-pollinate; EnvelopeProjection has no manifest-cid
    dimension yet.
