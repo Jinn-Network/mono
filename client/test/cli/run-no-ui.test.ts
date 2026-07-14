@@ -75,6 +75,44 @@ describe('jinn run --no-ui', () => {
   });
 });
 
+describe('jinn run --ui (issue #804)', () => {
+  const FORCE_UI_KEY = 'JINN_FORCE_UI' as const;
+  let snapshot: string | undefined;
+  beforeEach(() => {
+    snapshot = process.env[FORCE_UI_KEY];
+    delete process.env[FORCE_UI_KEY];
+  });
+  afterEach(() => {
+    if (snapshot === undefined) delete process.env[FORCE_UI_KEY];
+    else process.env[FORCE_UI_KEY] = snapshot;
+  });
+
+  it('--ui sets JINN_FORCE_UI=1', async () => {
+    const fakeDeps = makeFakeDeps();
+    const run = createRunCommand(fakeDeps);
+    const { ctx, exits } = makeCommandCtx({
+      argv: ['--ui', '--json'],
+      env: { JINN_PASSWORD: 'test' },
+    });
+    await run.run(ctx);
+    expect(exits).not.toContain(11);
+    expect(process.env['JINN_FORCE_UI']).toBe('1');
+    expect(fakeDeps.mainFn).toHaveBeenCalled();
+  });
+
+  it('without --ui, JINN_FORCE_UI is not set', async () => {
+    const fakeDeps = makeFakeDeps();
+    const run = createRunCommand(fakeDeps);
+    const { ctx, exits } = makeCommandCtx({
+      argv: ['--json'],
+      env: { JINN_PASSWORD: 'test' },
+    });
+    await run.run(ctx);
+    expect(exits).not.toContain(11);
+    expect(process.env['JINN_FORCE_UI']).toBeUndefined();
+  });
+});
+
 describe('jinn run flags (A4 quickstart parity)', () => {
   // Snapshot + restore the env vars these tests mutate via process.env.
   // run.ts's translation block writes JINN_FUNDING_TIMEOUT_MS / JINN_NO_DAEMON
@@ -84,6 +122,7 @@ describe('jinn run flags (A4 quickstart parity)', () => {
     'JINN_NO_DAEMON',
     'JINN_JSON_PROGRESS',
     'JINN_NO_UI',
+    'JINN_FORCE_UI',
   ] as const;
   const snapshot: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
   beforeEach(() => {

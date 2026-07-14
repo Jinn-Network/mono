@@ -35,6 +35,7 @@ import { CapturePublishUnavailableError } from './api/captures.js';
 import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js';
 import type { LauncherGeneratorStateSnapshot } from './api/launcher-status.js';
 import { ensureUiToken } from './api/ui-token.js';
+import { decideUiAutoOpen } from './cli/ui-auto-open-gate.js';
 import { getFileLogger, closeFileLogger } from './observability/file-logger.js';
 import { emitProgress } from './observability/progress.js';
 import { hashImplStateDir } from './harnesses/freeze.js';
@@ -994,10 +995,28 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     `http://127.0.0.1:${setupApiServer.port}/?k=${handshakeKey}`;
   // Auto-open the operator panel as soon as the setup-mode API is up so the
   // operator can watch bootstrap progress (including the funding wait, which
-  // is the whole point of starting the API early). Suppressed by setting
-  // JINN_NO_UI=1 — `jinn run --no-ui` translates the flag into this env var.
-  if (process.env['JINN_NO_UI'] !== '1') {
+  // is the whole point of starting the API early). Only on the first-ever
+  // launch (tracked by a marker file) — otherwise every restart during a
+  // dogfooding session opens a fresh browser tab and stale tabs accumulate
+  // (issue #804). `jinn run --no-ui` / JINN_NO_UI=1 always suppresses;
+  // `jinn run --ui` / JINN_FORCE_UI=1 forces a reopen even past first launch.
+  const uiOpenedMarkerPath = join(config.earningDir, '.ui-opened');
+  const uiAutoOpenDecision = decideUiAutoOpen({
+    noUi: process.env['JINN_NO_UI'] === '1',
+    forceUi: process.env['JINN_FORCE_UI'] === '1',
+    markerExists: existsSync(uiOpenedMarkerPath),
+  });
+  if (uiAutoOpenDecision.shouldOpen) {
     openBrowser(process.env['JINN_UI_HANDSHAKE_URL']!);
+  } else if (process.env['JINN_NO_UI'] !== '1') {
+    console.log(
+      `[main] Dashboard ready at http://127.0.0.1:${setupApiServer.port} — ` +
+        `run 'jinn ui' to open it (auto-open suppressed after first launch; use --ui to force)`,
+    );
+  }
+  if (uiAutoOpenDecision.shouldWriteMarker) {
+    mkdirSync(dirname(uiOpenedMarkerPath), { recursive: true });
+    writeFileSyncMain(uiOpenedMarkerPath, new Date().toISOString() + '\n');
   }
   console.log(
     `[main] Setup-mode API up (mode=${setupController.mode()}). ` +
