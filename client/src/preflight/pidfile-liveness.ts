@@ -8,7 +8,8 @@
  *   - File malformed (NaN/empty) → { decision: 'unlink-stale', reason: 'malformed' }
  *   - PID 1 or our own pid       → { decision: 'unlink-stale', reason: 'self-or-pid1-container' }
  *   - process.kill(pid, 0) ESRCH → { decision: 'unlink-stale', reason: 'esrch' }
- *   - process.kill(pid, 0) ok    → { decision: 'refuse', reason: 'alive' }
+ *   - alive but not a jinn cmdline (#805, recycled pid) → { decision: 'unlink-stale', reason: 'not-jinn' }
+ *   - process.kill(pid, 0) ok AND cmdline is a jinn daemon → { decision: 'refuse', reason: 'alive' }
  *   - process.kill(pid, 0) EPERM → { decision: 'refuse', reason: 'eperm' }
  *   - any other errno            → { decision: 'refuse', reason: 'unknown' }
  *
@@ -25,6 +26,7 @@ import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 
 import { emitEnvelope, type EnvelopeSinks } from '../errors/envelope.js';
 import { emitStructured } from '../events/emitter.js';
+import { pidMatchesJinn } from '../lifecycle/process-discovery.js';
 
 export type PidfileLivenessDecision =
   | { decision: 'proceed' }
@@ -32,7 +34,7 @@ export type PidfileLivenessDecision =
       decision: 'unlink-stale';
       pid: number | null;
       pidfilePath: string;
-      reason: 'malformed' | 'esrch' | 'self-or-pid1-container';
+      reason: 'malformed' | 'esrch' | 'self-or-pid1-container' | 'not-jinn';
     }
   | {
       decision: 'refuse';
@@ -78,6 +80,14 @@ export function checkPidfileLiveness(
 
   try {
     process.kill(parsed, 0);
+    // #805: the OS can recycle a pid after the jinn daemon that owned it
+    // exits — process.kill(pid, 0) succeeds against whatever new process now
+    // holds that pid, which is not a jinn daemon. Refusing here would block
+    // `jinn run` forever on a stale pidfile that happens to alias a live,
+    // unrelated process. Confirm the cmdline before refusing.
+    if (!pidMatchesJinn(parsed)) {
+      return { decision: 'unlink-stale', pid: parsed, pidfilePath: pidPath, reason: 'not-jinn' };
+    }
     return { decision: 'refuse', pid: parsed, pidfilePath: pidPath, reason: 'alive' };
   } catch (err) {
     const errno = (err as NodeJS.ErrnoException).code;
@@ -112,7 +122,7 @@ export function applyPidfileLivenessGate(
       {
         code: 'invalid_invocation',
         message: `Another jinn daemon is already running (PID ${liveness.pid}).`,
-        hint: 'Run `jinn stop` to terminate it, or set JINN_EARNING_DIR to a different earning directory.',
+        hint: 'Run `jinn stop` to terminate it gracefully, or `jinn kill` if it does not respond, or set JINN_EARNING_DIR to a different earning directory.',
         exampleCli: 'jinn stop',
         details: {
           field: 'daemon_pidfile',
