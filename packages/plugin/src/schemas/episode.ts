@@ -1,14 +1,16 @@
 /**
  * EpisodeV1 — the complete-trajectory evidence record (architecture spec §5).
  * Superset of `client/packages/harness-layer/src/capture.ts`'s CapturedTask:
- * all turns (not just the first), a skills loadout, a per-record retention
- * field, and optional lineage hooks. Strict at every level (unknown fields
- * rejected), following the capture.ts / envelope.ts convention.
+ * the full trajectory as one ordered `kind`-discriminated span sequence, a
+ * skills loadout, token + USD cost, a per-record retention field, and optional
+ * lineage hooks. Strict at every level (unknown fields rejected), following the
+ * capture.ts / envelope.ts convention.
  *
  * Deviation from CapturedTask, noted per plan (#1658): `task.distributionTags`
  * defaults to `[]` rather than requiring `.min(1)` — Stage 1 has no tagging
- * policy yet (S1-F2). `toolCalls` is not `.min(1)` — a session can have zero
- * tool calls.
+ * policy yet (S1-F2). `trajectory` is one ordered span sequence (`.min(1)`; a
+ * zero-tool-call session still has ≥1 `jinn.agent_turn` step). `cost.usdEstimate`
+ * is restored (optional) so EpisodeV1 stays a true CapturedTask superset.
  */
 import { z } from 'zod';
 
@@ -16,15 +18,16 @@ export const EPISODE_SCHEMA_VERSION = 'jinn.episode.v1' as const;
 
 const UnixNanoSchema = z.string().regex(/^\d+$/, 'unix-nanosecond digit string');
 
-const TurnSchema = z.strictObject({
-  role: z.enum(['user', 'assistant']),
-  content: z.string().min(1),
-  timestamp: z.iso.datetime(),
-});
-
-const ToolCallSchema = z.strictObject({
+/**
+ * `kind` tracks the DR-2026-07-14 §6 working names: `jinn.agent_turn` carries a
+ * `role: user|assistant` in `attributes`; `jinn.tool_call` is a tool invocation.
+ * Re-declared inline (rather than imported) because #1473 is still open and arch
+ * §6 forbids the plugin package importing from `client/src/**`.
+ */
+const StepSchema = z.strictObject({
   spanId: z.string().min(1),
   parentSpanId: z.string().min(1).nullable(),
+  kind: z.enum(['jinn.agent_turn', 'jinn.tool_call']),
   name: z.string().min(1),
   startTimeUnixNano: UnixNanoSchema,
   endTimeUnixNano: UnixNanoSchema,
@@ -43,8 +46,7 @@ export const EpisodeV1Schema = z.strictObject({
     summary: z.string().min(1),
     distributionTags: z.array(z.string().min(1)).default([]),
   }),
-  turns: z.array(TurnSchema).min(1),
-  toolCalls: z.array(ToolCallSchema),
+  trajectory: z.array(StepSchema).min(1),
   environment: z.strictObject({
     harness: z.strictObject({ name: z.string().min(1), version: z.string().min(1) }),
     model: z.string().min(1),
@@ -62,6 +64,7 @@ export const EpisodeV1Schema = z.strictObject({
       input: z.number().int().nonnegative(),
       output: z.number().int().nonnegative(),
     }).optional(),
+    usdEstimate: z.string().regex(/^\d+(\.\d+)?$/).optional(),
   }),
   retention: z.strictObject({
     policy: z.enum(['local-private', 'contribution-eligible']),

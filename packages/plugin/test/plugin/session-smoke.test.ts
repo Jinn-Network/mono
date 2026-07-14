@@ -62,8 +62,12 @@ describe('createJinnPlugin session → end smoke (AC5)', () => {
     expect(stored.status).toBe('ok');
     const episode = EpisodeV1Schema.parse(stored.status === 'ok' ? stored.value : undefined);
     expect(episode.schemaVersion).toBe('jinn.episode.v1');
-    expect(episode.turns).toHaveLength(2);
-    expect(episode.toolCalls).toHaveLength(1);
+    expect(episode.trajectory.map((s) => s.kind)).toEqual([
+      'jinn.agent_turn',
+      'jinn.agent_turn',
+      'jinn.tool_call',
+    ]);
+    expect(episode.trajectory.every((s) => s.spanId.length > 0)).toBe(true);
     expect(episode.outcome.status).toBe('completed');
   });
 });

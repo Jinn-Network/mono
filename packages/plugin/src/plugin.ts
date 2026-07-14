@@ -70,8 +70,7 @@ export interface SessionEndResult {
 }
 
 export class PluginSession {
-  private readonly turns: EpisodeV1['turns'] = [];
-  private readonly toolCalls: EpisodeV1['toolCalls'] = [];
+  private readonly trajectory: EpisodeV1['trajectory'] = [];
   private surfacedHits: KnowledgeHit[] = [];
   private readonly capturedAt = new Date().toISOString();
 
@@ -92,15 +91,30 @@ export class PluginSession {
   }
 
   noteUserTurn(content: string): void {
-    this.turns.push({ role: 'user', content, timestamp: new Date().toISOString() });
+    this.pushTurn('user', content);
   }
 
   noteAssistantTurn(content: string): void {
-    this.turns.push({ role: 'assistant', content, timestamp: new Date().toISOString() });
+    this.pushTurn('assistant', content);
+  }
+
+  private pushTurn(role: 'user' | 'assistant', content: string): void {
+    // A turn is a zero-duration point event on the single unix-nano time base.
+    const nowNano = `${Date.now()}000000`;
+    this.trajectory.push({
+      spanId: randomUUID(),
+      parentSpanId: null,
+      kind: 'jinn.agent_turn',
+      name: 'turn',
+      startTimeUnixNano: nowNano,
+      endTimeUnixNano: nowNano,
+      attributes: { role, content },
+      redactedKeys: [],
+    });
   }
 
   noteToolCall(call: ToolCallEvent): void {
-    this.toolCalls.push({ ...call, redactedKeys: call.redactedKeys ?? [] });
+    this.trajectory.push({ ...call, kind: 'jinn.tool_call', redactedKeys: call.redactedKeys ?? [] });
   }
 
   async end(outcome: SessionOutcome): Promise<SessionEndResult> {
@@ -112,8 +126,7 @@ export class PluginSession {
         summary: this.meta.taskSummary,
         distributionTags: this.meta.distributionTags ?? [],
       },
-      turns: this.turns,
-      toolCalls: this.toolCalls,
+      trajectory: this.trajectory,
       environment: {
         harness: this.meta.harness,
         model: this.meta.model,

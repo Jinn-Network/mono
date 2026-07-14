@@ -78,8 +78,10 @@ queues; nothing crashes into the host session.
 ## 5. Type ownership
 
 The package owns the product schemas: **`EpisodeV1`** (complete-trajectory episode — superset
-of today's `CapturedTask`: all user/assistant turns, tool calls, skills loadout, token cost,
-per-record privacy/retention field, lineage hooks), `KnowledgeHit`, `EligibilityVerdict` (cheap
+of today's `CapturedTask`: the full trajectory as one ordered `kind`-discriminated span sequence
+(agent turns and tool calls as steps under a single time base, per DR-2026-07-14 §6), a skills
+loadout, token + USD cost, a per-record privacy/retention field, and lineage hooks),
+`KnowledgeHit`, `EligibilityVerdict` (cheap
 candidate verdict; authoritative validation is sidecar-side), `SessionSummary`, `HistoryEntry`.
 Adapters map to/from infra types and handle legacy `CapturedTask` reads.
 **Dependency direction: `harness-layer` imports schemas from `@jinn-network/plugin` — never the
