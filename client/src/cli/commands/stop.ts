@@ -6,7 +6,7 @@ import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { loadConfig } from '../../config.js';
 import { Store } from '../../store/store.js';
-import { enumerateJinnProcesses } from '../../lifecycle/process-discovery.js';
+import { enumerateJinnProcesses, processAlive } from '../../lifecycle/process-discovery.js';
 
 interface StopResult {
   schemaVersion: 1;
@@ -21,15 +21,6 @@ interface StopResult {
    * recorded pidfile pid could not identify a live daemon. Present only
    * when the fallback ran and found something. */
   discoveredPids?: number[];
-}
-
-function processAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function markShutdownClean(dbPath: string | undefined): void {
@@ -126,7 +117,7 @@ async function run(ctx: CommandContext): Promise<void> {
   if (!existsSync(pidPath)) {
     markShutdownClean(dbPath);
     // #805: no pidfile to read — fall through to cmdline enumeration so an
-    // orphaned daemon (pidfile lost or never written) still gets signalled
+    // orphaned daemon (pidfile lost or never written) still gets signaled
     // instead of `jinn stop` silently no-oping.
     const discoveredPids = killDiscoveredJinnProcesses();
     emitResult(
@@ -144,7 +135,7 @@ async function run(ctx: CommandContext): Promise<void> {
       (v) => {
         const value = v as StopResult;
         return value.discoveredPids && value.discoveredPids.length > 0
-          ? `No pidfile found; discovered and signalled ${value.discoveredPids.length} orphaned jinn process(es): ${value.discoveredPids.join(', ')}.`
+          ? `No pidfile found; discovered and signaled ${value.discoveredPids.length} orphaned jinn process(es): ${value.discoveredPids.join(', ')}.`
           : 'Daemon is already stopped.';
       },
       {
@@ -196,7 +187,7 @@ async function run(ctx: CommandContext): Promise<void> {
     (v) => {
       const value = v as StopResult;
       if (value.killed && value.discoveredPids && value.discoveredPids.length > 0) {
-        return `Daemon pid ${value.pid} was already gone; signalled ${value.discoveredPids.length} discovered jinn process(es): ${value.discoveredPids.join(', ')}.`;
+        return `Daemon pid ${value.pid} was already gone; signaled ${value.discoveredPids.length} discovered jinn process(es): ${value.discoveredPids.join(', ')}.`;
       }
       return value.killed
         ? `Sent SIGTERM to daemon pid ${value.pid}.`
