@@ -13,6 +13,22 @@ yarn task-creator:amd64-gold-proof
 
 Workflow: `.github/workflows/ci.yml` → `task-creator-amd64-gold-proof` job.
 
+## HF row source: committed fixture by default (#1683)
+
+The gate proves grading semantics, not HuggingFace uptime. By default the
+script makes **zero HF network calls**: the known instance's pool task + full
+datasets-server row load from the committed fixture at
+`client/test/release/tier-2/fixtures/known-instance-hf.json`. A missing or
+malformed fixture fails loud (naming the record command below) — it never
+silently falls back to a live fetch.
+
+- `AC1_LIVE_HF=1 yarn task-creator:amd64-gold-proof` — run against a live HF
+  fetch (the pre-fixture behaviour).
+- `yarn task-creator:amd64-gold-proof --record-fixture` — fetch live from HF
+  and (re)write the committed fixture. Needs HF network only (no amd64 /
+  Docker); run it when HF is healthy, e.g. after the known instance rotates,
+  and commit the updated JSON.
+
 ## Manual operator run
 
 ### Prerequisites

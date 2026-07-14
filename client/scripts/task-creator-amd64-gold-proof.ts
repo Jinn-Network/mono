@@ -9,10 +9,20 @@
  * Usage: yarn task-creator:amd64-gold-proof
  * CI:    .github/workflows/ci.yml → task-creator-amd64-gold-proof job
  *
+ * Hermetic by default (#1683): the known instance's pool task + HF row load
+ * from the committed fixture (test/release/tier-2/fixtures/known-instance-hf.json)
+ * — zero HF network calls, so a HF datasets-server outage cannot red-gate the
+ * proof. The gate proves grading semantics, not HF uptime.
+ *
+ *   AC1_LIVE_HF=1                            live HF fetch (pre-#1683 behaviour)
+ *   yarn task-creator:amd64-gold-proof --record-fixture
+ *                                            fetch live from HF and (re)write the
+ *                                            committed fixture (no Docker needed)
+ *
  * Spec: spec/2026-07-08-task-creator-v0.md §13 AC #1
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { arch, platform, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -21,6 +31,12 @@ import {
   KNOWN_INSTANCE_ID,
   KNOWN_REPO,
 } from '../test/release/tier-2/fixtures/known-instance.js';
+import {
+  KNOWN_INSTANCE_HF_FIXTURE_PATH,
+  KNOWN_INSTANCE_HF_FIXTURE_SCHEMA,
+  loadKnownInstanceHfFixture,
+} from '../test/release/tier-2/fixtures/known-instance-hf-fixture.js';
+import type { HfFetcher, HfRow } from '../src/harnesses/impls/swe-rebench-v2-evaluator/index.js';
 import {
   SweRebenchV2EvaluatorHarness,
   defaultSweRebenchV2EvaluatorImplStateDir,
@@ -45,9 +61,44 @@ import type { PoolTask } from '../src/solver-types/_swe-rebench-v2-pool.js';
 const MINTED_CID = 'bafybeigdyrztac5ieplqnxnvx5c3jy24k3qioqngxd2k4z7q5b6p5d5z5y';
 const MINTED_DATASET = mintedIpfsDatasetCid(MINTED_CID);
 
+const LIVE_HF = process.env['AC1_LIVE_HF'] === '1';
+const RECORD_FIXTURE = process.argv.includes('--record-fixture');
+
 function fail(msg: string): never {
   console.error(`[ac1-gold-proof] FAIL: ${msg}`);
   process.exit(1);
+}
+
+/** Live HF fetch of the known instance: pool row + full datasets-server row. */
+async function fetchKnownInstanceLive(): Promise<{ poolTask: PoolTask; hfRow: HfRow }> {
+  const pool = await loadSweRebenchV2Pool();
+  const poolTask = pool.find((t) => t.instance_id === KNOWN_INSTANCE_ID);
+  if (!poolTask) fail(`instance ${KNOWN_INSTANCE_ID} not in HF pool`);
+  const hf = new HttpHfFetcher();
+  const hfRow = await hf.fetchTaskRow({
+    hf_dataset: poolTask.hf_dataset,
+    hf_split: poolTask.hf_split,
+    instance_id: poolTask.instance_id,
+  });
+  return { poolTask, hfRow };
+}
+
+/** `--record-fixture`: fetch live from HF and (re)write the committed fixture. */
+async function recordFixture(): Promise<void> {
+  console.log('[ac1-gold-proof] --record-fixture: fetching known-instance row live from HF…');
+  const { poolTask, hfRow } = await fetchKnownInstanceLive();
+  const fixture = {
+    schemaVersion: KNOWN_INSTANCE_HF_FIXTURE_SCHEMA,
+    recordedAt: new Date().toISOString(),
+    source: 'live HF datasets-server (yarn task-creator:amd64-gold-proof --record-fixture)',
+    poolTask,
+    hfRow,
+  };
+  writeFileSync(KNOWN_INSTANCE_HF_FIXTURE_PATH, `${JSON.stringify(fixture, null, 2)}\n`);
+  // Round-trip through the validator so a bad recording fails loud NOW,
+  // not on the next CI run.
+  loadKnownInstanceHfFixture();
+  console.log(`[ac1-gold-proof] fixture recorded: ${KNOWN_INSTANCE_HF_FIXTURE_PATH}`);
 }
 
 function requireAmd64(): void {
@@ -80,6 +131,12 @@ async function ensureEvaluatorEnabled(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  if (RECORD_FIXTURE) {
+    // Recording only needs HF network — no amd64/Docker requirement.
+    await recordFixture();
+    return;
+  }
+
   requireAmd64();
   requireDocker();
 
@@ -93,16 +150,36 @@ async function main(): Promise<void> {
   console.log(`[ac1-gold-proof] instance=${KNOWN_INSTANCE_ID} semantics=v${EVAL_SEMANTICS_VERSION}`);
   console.log(`[ac1-gold-proof] upstream=${upstreamRepoDir}`);
 
-  const pool = await loadSweRebenchV2Pool();
-  const source = pool.find((t) => t.instance_id === KNOWN_INSTANCE_ID);
-  if (!source) fail(`instance ${KNOWN_INSTANCE_ID} not in HF pool`);
-
-  const hf = new HttpHfFetcher();
-  const hfRow = await hf.fetchTaskRow({
-    hf_dataset: source.hf_dataset,
-    hf_split: source.hf_split,
-    instance_id: source.instance_id,
-  });
+  let source: PoolTask;
+  let hfRow: HfRow;
+  let hf: HfFetcher;
+  if (LIVE_HF) {
+    console.log('[ac1-gold-proof] AC1_LIVE_HF=1 — fetching known-instance row live from HF');
+    ({ poolTask: source, hfRow } = await fetchKnownInstanceLive());
+    hf = new HttpHfFetcher();
+  } else {
+    // Hermetic default: load from the committed fixture; fails loud if the
+    // fixture is missing/malformed — never silently falls back to live HF.
+    const fixture = loadKnownInstanceHfFixture();
+    console.log(
+      `[ac1-gold-proof] HF row from committed fixture (recorded ${fixture.recordedAt}); ` +
+      'set AC1_LIVE_HF=1 for a live fetch',
+    );
+    source = fixture.poolTask;
+    hfRow = fixture.hfRow;
+    // Every row lookup below must resolve through the minted artifact; if the
+    // routing ever regresses to a real HF fetch, fail loud instead of
+    // touching the network.
+    hf = {
+      fetchTaskRow: async (args) => {
+        throw new Error(
+          'hermetic AC1 run attempted an HF fetch ' +
+          `(${args.hf_dataset}/${args.hf_split}/${args.instance_id}) — ` +
+          'the minted-artifact routing must serve every lookup; use AC1_LIVE_HF=1 for an explicit live run',
+        );
+      },
+    };
+  }
 
   const artifact: SweRebenchV2MintedPoolArtifact = {
     schemaVersion: 'swe-rebench-v2-minted-pool.v1',

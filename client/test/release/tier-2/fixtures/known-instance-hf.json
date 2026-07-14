@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "ac1-known-instance-hf.v1",
+  "recordedAt": "2026-07-14T00:00:00.000Z",
+  "source": "local artifacts recorded during the 2026-07-14 HF datasets-server 503 outage: poolTask from ~/.jinn-client/swe-rebench-v2/pool-cache.json (savedAt 2026-07-07T16:39:43.832Z), hfRow from a prior live-HF eval snapshot (jinn.pilot.instances.v1); test_patch cross-checked identical between both sources. Refresh via --record-fixture when HF is healthy.",
+  "poolTask": {
+    "instance_id": "sympy__sympy-27510",
+    "hf_dataset": "nebius/SWE-rebench-leaderboard",
+    "hf_split": "2025_01",
+    "repo": "sympy/sympy",
+    "base_commit": "f07466ae38d6f7985c4e9eec2c7dfff43fec3cf7",
+    "problem_statement": "Printing multiplication by negative number with custom (infix) function not correctly parenthesized.\nI am trying to define a custom function with lower precedence than multiplication. However, whenever there is a negative number involved, the parentheses are not there anymore.\r\n\r\n-----\r\n\r\n**Custom function:**\r\n```python\r\nclass F(sympy.Function):\r\n    precedence = 45\r\n\r\n    def _sympystr(self, printer):\r\n        return f\"{printer._print(self.args[0])} F {printer._print(self.args[1])}\"\r\n```\r\n\r\n**Printing:**\r\n```python\r\n>>> a, b = sympy.symbols(\"a b\")\r\n\r\n>>> 2 * F(a, b)\r\n2*(a F b)\r\n\r\n>>> -2 * F(a, b)\r\n-2*a F b  # <-------------- No parentheses!\r\n          # Expected: -2*(a F b)\r\n```\r\n\r\n-----\r\n\r\nAlthough I am able to get around that, this is a bug, right?",
+    "interface": "",
+    "patch": "diff --git a/sympy/printing/precedence.py b/sympy/printing/precedence.py\nindex 563a04b349..d22d5746ae 100644\n--- a/sympy/printing/precedence.py\n+++ b/sympy/printing/precedence.py\n@@ -59,6 +59,11 @@\n \n \n def precedence_Mul(item):\n+    from sympy.core.function import Function\n+    if any(hasattr(arg, 'precedence') and isinstance(arg, Function) and\n+           arg.precedence < PRECEDENCE[\"Mul\"] for arg in item.args):\n+        return PRECEDENCE[\"Mul\"]\n+\n     if item.could_extract_minus_sign():\n         return PRECEDENCE[\"Add\"]\n     return PRECEDENCE[\"Mul\"]\n",
+    "test_patch": "diff --git a/sympy/printing/tests/test_precedence.py b/sympy/printing/tests/test_precedence.py\nindex 372a5b0356..d08ea07483 100644\n--- a/sympy/printing/tests/test_precedence.py\n+++ b/sympy/printing/tests/test_precedence.py\n@@ -1,6 +1,6 @@\n from sympy.concrete.products import Product\n from sympy.concrete.summations import Sum\n-from sympy.core.function import Derivative\n+from sympy.core.function import Derivative, Function\n from sympy.core.numbers import Integer, Rational, Float, oo\n from sympy.core.relational import Rel\n from sympy.core.symbol import symbols\n@@ -87,3 +87,42 @@ def test_And_Or():\n     assert precedence(x & y) == PRECEDENCE[\"And\"]\n     assert precedence(x | y) == PRECEDENCE[\"Or\"]\n     assert precedence(~y) == PRECEDENCE[\"Not\"]\n+\n+\n+def test_custom_function_precedence_comparison():\n+    \"\"\"\n+    Test cases for custom functions with different precedence values,\n+    specifically handling:\n+    1. Functions with precedence < PRECEDENCE[\"Mul\"] (50)\n+    2. Functions with precedence = Func (70)\n+\n+    Key distinction:\n+    1. Lower precedence functions (45) need parentheses: -2*(x F y)\n+    2. Higher precedence functions (70) don't: -2*x F y\n+    \"\"\"\n+    class LowPrecedenceF(Function):\n+        precedence = PRECEDENCE[\"Mul\"] - 5\n+        def _sympystr(self, printer):\n+            return f\"{printer._print(self.args[0])} F {printer._print(self.args[1])}\"\n+\n+    class HighPrecedenceF(Function):\n+        precedence = PRECEDENCE[\"Func\"]\n+        def _sympystr(self, printer):\n+            return f\"{printer._print(self.args[0])} F {printer._print(self.args[1])}\"\n+\n+    def test_low_precedence():\n+        expr1 = 2 * LowPrecedenceF(x, y)\n+        assert str(expr1) == \"2*(x F y)\"\n+\n+        expr2 = -2 * LowPrecedenceF(x, y)\n+        assert str(expr2) == \"-2*(x F y)\"\n+\n+    def test_high_precedence():\n+        expr1 = 2 * HighPrecedenceF(x, y)\n+        assert str(expr1) == \"2*x F y\"\n+\n+        expr2 = -2 * HighPrecedenceF(x, y)\n+        assert str(expr2) == \"-2*x F y\"\n+\n+    test_low_precedence()\n+    test_high_precedence()\n",
+    "meta": {
+      "commit_name": "head_commit",
+      "failed_lite_validators": [],
+      "has_test_patch": true,
+      "is_lite": true,
+      "num_modified_files": 1
+    }
+  },
+  "hfRow": {
+    "instance_id": "sympy__sympy-27510",
+    "repo": "sympy/sympy",
+    "image_name": "swerebench/sweb.eval.x86_64.sympy_1776_sympy-27510:latest",
+    "FAIL_TO_PASS": [
+      "sympy/printing/tests/test_precedence.py::test_custom_function_precedence_comparison"
+    ],
+    "PASS_TO_PASS": [
+      "sympy/printing/tests/test_precedence.py::test_Add",
+      "sympy/printing/tests/test_precedence.py::test_Function",
+      "sympy/printing/tests/test_precedence.py::test_Derivative",
+      "sympy/printing/tests/test_precedence.py::test_Integral",
+      "sympy/printing/tests/test_precedence.py::test_Mul",
+      "sympy/printing/tests/test_precedence.py::test_Number",
+      "sympy/printing/tests/test_precedence.py::test_Order",
+      "sympy/printing/tests/test_precedence.py::test_Pow",
+      "sympy/printing/tests/test_precedence.py::test_Product",
+      "sympy/printing/tests/test_precedence.py::test_Relational",
+      "sympy/printing/tests/test_precedence.py::test_Sum",
+      "sympy/printing/tests/test_precedence.py::test_Symbol",
+      "sympy/printing/tests/test_precedence.py::test_And_Or"
+    ],
+    "test_patch": "diff --git a/sympy/printing/tests/test_precedence.py b/sympy/printing/tests/test_precedence.py\nindex 372a5b0356..d08ea07483 100644\n--- a/sympy/printing/tests/test_precedence.py\n+++ b/sympy/printing/tests/test_precedence.py\n@@ -1,6 +1,6 @@\n from sympy.concrete.products import Product\n from sympy.concrete.summations import Sum\n-from sympy.core.function import Derivative\n+from sympy.core.function import Derivative, Function\n from sympy.core.numbers import Integer, Rational, Float, oo\n from sympy.core.relational import Rel\n from sympy.core.symbol import symbols\n@@ -87,3 +87,42 @@ def test_And_Or():\n     assert precedence(x & y) == PRECEDENCE[\"And\"]\n     assert precedence(x | y) == PRECEDENCE[\"Or\"]\n     assert precedence(~y) == PRECEDENCE[\"Not\"]\n+\n+\n+def test_custom_function_precedence_comparison():\n+    \"\"\"\n+    Test cases for custom functions with different precedence values,\n+    specifically handling:\n+    1. Functions with precedence < PRECEDENCE[\"Mul\"] (50)\n+    2. Functions with precedence = Func (70)\n+\n+    Key distinction:\n+    1. Lower precedence functions (45) need parentheses: -2*(x F y)\n+    2. Higher precedence functions (70) don't: -2*x F y\n+    \"\"\"\n+    class LowPrecedenceF(Function):\n+        precedence = PRECEDENCE[\"Mul\"] - 5\n+        def _sympystr(self, printer):\n+            return f\"{printer._print(self.args[0])} F {printer._print(self.args[1])}\"\n+\n+    class HighPrecedenceF(Function):\n+        precedence = PRECEDENCE[\"Func\"]\n+        def _sympystr(self, printer):\n+            return f\"{printer._print(self.args[0])} F {printer._print(self.args[1])}\"\n+\n+    def test_low_precedence():\n+        expr1 = 2 * LowPrecedenceF(x, y)\n+        assert str(expr1) == \"2*(x F y)\"\n+\n+        expr2 = -2 * LowPrecedenceF(x, y)\n+        assert str(expr2) == \"-2*(x F y)\"\n+\n+    def test_high_precedence():\n+        expr1 = 2 * HighPrecedenceF(x, y)\n+        assert str(expr1) == \"2*x F y\"\n+\n+        expr2 = -2 * HighPrecedenceF(x, y)\n+        assert str(expr2) == \"-2*x F y\"\n+\n+    test_low_precedence()\n+    test_high_precedence()\n",
+    "install_config": {
+      "install": "pip install -e .[dev]",
+      "test_cmd": "pytest --no-header -rA --tb=line --color=no -p no:cacheprovider -W ignore::DeprecationWarning",
+      "log_parser": "parse_log_pytest"
+    }
+  }
+}
