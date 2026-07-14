@@ -225,6 +225,7 @@ import { makeIntentInput } from '../../_support/engine.js';
 import { TaskRunState } from '../../../src/harnesses/engine/state.js';
 import type { Harness, Solution } from '../../../src/harnesses/types.js';
 import type { Task } from '../../../src/types/task.js';
+import { claimDelivery } from '../../../src/adapters/mech/contracts.js';
 
 vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
   uploadToIpfs: vi.fn().mockResolvedValue('bafymock123'),
@@ -232,6 +233,23 @@ vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
   fetchFromIpfs: vi.fn(),
   fetchFromDigest: vi.fn(),
   digestHexToGatewayUrl: vi.fn(),
+}));
+
+// MOCK_JUSTIFICATION: src/adapters/mech/contracts.js is the I/O leaf for chain RPC calls; mocking it is mocking the boundary.
+vi.mock('../../../src/adapters/mech/contracts.js', () => ({
+  callDeliverToMarketplace: vi.fn().mockResolvedValue('0xdeliverytx' as `0x${string}`),
+  claimDelivery: vi.fn().mockResolvedValue('0xclaimtx' as `0x${string}`),
+  submitTask: vi.fn(),
+  submitEvaluationJob: vi.fn(),
+  claimJob: vi.fn(),
+  getJobClaim: vi.fn(),
+  getMechDeliveryRate: vi.fn(),
+  getTimeoutBounds: vi.fn(),
+  pollDeliverEvents: vi.fn(),
+  decodeMarketplaceRequestLogs: vi.fn(),
+  decodeDeliverLogs: vi.fn(),
+  scanTasks: vi.fn(),
+  scanEvaluationJobs: vi.fn(),
 }));
 
 const TEST_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as `0x${string}`;
@@ -387,6 +405,61 @@ describe('#1393 corpus knowledge injection in runImpl', () => {
     expect(captured.task?.context?.['corpusKnowledge']).toBeUndefined();
     expect(p.getByRequestId('req-know-4')!.state).toBe(TaskRunState.POST_SNAPSHOT);
   });
+
+  it('a RUNNING retry re-drive reuses the first resolution instead of re-querying the corpus and re-emitting corpus_knowledge (#1393 review finding 3)', async () => {
+    seedProjection('env-prior-retry');
+    const captured: { task?: Task; runCount: number } = { runCount: 0 };
+    const flaky: Harness = {
+      name: 'flaky-capturing-stub',
+      version: '0.0.1',
+      supports: (s) => s.role !== 'evaluation' && s.solverType === SOLVER_TYPE,
+      async run(ctx): Promise<Solution> {
+        captured.runCount += 1;
+        captured.task = ctx.task;
+        if (captured.runCount === 1) {
+          // Transient/recoverable failure — _classifyAndMarkTerminal leaves
+          // the row at RUNNING for the next tick to retry (task.windowEndTs
+          // is in the future and the message doesn't match any permanent
+          // pattern in isRecoverableTransactionError).
+          throw new Error('network error: transient hiccup');
+        }
+        return {
+          venueRef: { name: 'flaky-capturing-stub' },
+          gating: { ok: true },
+          preSnapshot: { capturedAt: Date.now(), hlTime: 0 },
+          postSnapshot: { capturedAt: Date.now(), hlTime: 0 },
+          fills: [],
+        };
+      },
+    };
+
+    const engine = new TaskEngine(engineOpts(store, tmp, flaky));
+    const querySpy = vi.spyOn(store, 'queryEnvelopeProjections');
+    const p = new TaskRunPersistence(store.db);
+    await engine.observe(runInput('req-know-retry'));
+    p.transition('req-know-retry', TaskRunState.CLAIMED);
+    p.transition('req-know-retry', TaskRunState.WAITING);
+
+    // First attempt: harness throws, row stays at RUNNING.
+    await expect(engine.process('req-know-retry')).rejects.toThrow('network error: transient hiccup');
+    expect(p.getByRequestId('req-know-retry')!.state).toBe(TaskRunState.RUNNING);
+
+    // Second attempt (the retry re-drive): succeeds.
+    await engine.process('req-know-retry');
+    expect(p.getByRequestId('req-know-retry')!.state).toBe(TaskRunState.POST_SNAPSHOT);
+
+    expect(captured.runCount).toBe(2);
+    // The corpus was queried exactly once across both attempts, not twice.
+    expect(querySpy).toHaveBeenCalledTimes(1);
+    // Both attempts saw the same injected knowledge.
+    const payload = captured.task?.context?.['corpusKnowledge'] as { records: Array<{ envelopeCid: string }> };
+    expect(payload.records.map((r) => r.envelopeCid)).toEqual(['env-prior-retry']);
+    // Exactly one corpus_knowledge event, not one per attempt.
+    const events = store.db
+      .prepare(`SELECT kind FROM activity_events WHERE kind = 'corpus_knowledge' AND request_id = ?`)
+      .all('req-know-retry');
+    expect(events).toHaveLength(1);
+  });
 });
 
 describe('#1393 pack() saves the envelope projection', () => {
@@ -430,5 +503,72 @@ describe('#1393 pack() saves the envelope projection', () => {
     const payload = second.task?.context?.['corpusKnowledge'] as { records: Array<{ envelopeCid: string }> };
     expect(payload).toBeDefined();
     expect(payload.records.map((r) => r.envelopeCid)).toContain('bafymock123');
+  });
+});
+
+describe('#1393 review finding 1 — projection evidenceTier reflects actual delivery, not sign-time intent', () => {
+  let store: Store;
+  let tmp: string;
+
+  function engineOptsWithDelivery(impl: Harness): TaskEngineOptions {
+    return {
+      ...engineOpts(store, tmp, impl),
+      deliveryDeps: {
+        publicClient: {} as import('viem').PublicClient,
+        walletClient: {} as import('viem').WalletClient,
+        safeAddress: '0xsafe' as `0x${string}`,
+        mechContractAddress: '0xmech' as `0x${string}`,
+        routerAddress: '0xrouter' as `0x${string}`,
+        claimDeliveryVariant: 'v2',
+      },
+    };
+  }
+
+  beforeEach(() => {
+    store = new Store(':memory:');
+    tmp = mkTmp();
+    vi.clearAllMocks();
+  });
+  afterEach(() => {
+    store.close();
+    try { rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  it('pack() saves the projection as self-signed even though the v2 envelope declares committed', async () => {
+    const captured: { task?: Task } = {};
+    const engine = new TaskEngine(engineOptsWithDelivery(makeCapturingImpl(captured)));
+    await driveToPostSnapshot(engine, store, 'req-tier-1');
+    await engine.process('req-tier-1'); // POST_SNAPSHOT → PACKAGING → pack() → DELIVERING
+
+    const projections = store.queryEnvelopeProjections({ solverType: SOLVER_TYPE, role: 'solution' });
+    expect(projections).toHaveLength(1);
+    expect(projections[0]!.evidenceTier).toBe('self-signed');
+  });
+
+  it('deliver() upgrades the projection to committed once claimDelivery actually succeeds', async () => {
+    const captured: { task?: Task } = {};
+    const engine = new TaskEngine(engineOptsWithDelivery(makeCapturingImpl(captured)));
+    const p = await driveToPostSnapshot(engine, store, 'req-tier-2');
+    await engine.process('req-tier-2'); // pack() → DELIVERING
+    await engine.process('req-tier-2'); // deliver() → COMPLETE
+    expect(p.getByRequestId('req-tier-2')!.state).toBe(TaskRunState.COMPLETE);
+
+    const projections = store.queryEnvelopeProjections({ solverType: SOLVER_TYPE, role: 'solution' });
+    expect(projections).toHaveLength(1);
+    expect(projections[0]!.evidenceTier).toBe('committed');
+  });
+
+  it('a race-lost/failed delivery leaves the projection at self-signed (never mis-stamped committed)', async () => {
+    vi.mocked(claimDelivery).mockRejectedValueOnce(new Error('delivery race lost'));
+    const captured: { task?: Task } = {};
+    const engine = new TaskEngine(engineOptsWithDelivery(makeCapturingImpl(captured)));
+    const p = await driveToPostSnapshot(engine, store, 'req-tier-3');
+    await engine.process('req-tier-3'); // pack() → DELIVERING
+    await expect(engine.process('req-tier-3')).rejects.toThrow('delivery race lost');
+    expect(p.getByRequestId('req-tier-3')!.state).not.toBe(TaskRunState.COMPLETE);
+
+    const projections = store.queryEnvelopeProjections({ solverType: SOLVER_TYPE, role: 'solution' });
+    expect(projections).toHaveLength(1);
+    expect(projections[0]!.evidenceTier).toBe('self-signed');
   });
 });

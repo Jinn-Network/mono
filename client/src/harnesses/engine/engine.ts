@@ -35,7 +35,8 @@ import {
   type PackagingDeps,
 } from './packaging.js';
 import { DONATION_ARTIFACT_ENCODING } from './artifact-scrub.js';
-import { loadCorpusKnowledge } from './corpus-knowledge.js';
+import { loadCorpusKnowledge, buildCorpusKnowledgePayload } from './corpus-knowledge.js';
+import type { CorpusKnowledgeRecordRef } from './corpus-knowledge.js';
 import { projectEnvelope } from '../../corpus/envelope-projection.js';
 import type { ReadOnlyCorpus } from '../../mcp/search-records.js';
 import {
@@ -512,6 +513,16 @@ export class TaskEngine {
   // Keyed by requestId; cleared after successful pack.
   private readonly trajectoryRefs = new Map<string, { cid: string; sha256: string; sources?: ArtifactSource[] } | null>();
   private readonly runtimePluginsByRequest = new Map<string, RuntimePlugin[]>();
+
+  // Corpus knowledge already resolved for this requestId's current run
+  // (#1393 review finding 3). A value (string) means knowledge was found and
+  // injected; `null` means the lookup ran and genuinely found nothing.
+  // Presence in the map (checked via .has) means "already resolved" either
+  // way, so a RUNNING retry/recovery re-drive (transient harness/RPC error,
+  // or crash-recovery via _recoverDispatch — neither transitions the task
+  // out of RUNNING) reuses this instead of re-querying the corpus and
+  // re-emitting the corpus_knowledge event. Cleared after successful pack.
+  private readonly consumedRefsByRequest = new Map<string, string | null>();
 
   private readonly processingRequestIds = new Set<string>();
 
@@ -1303,30 +1314,54 @@ export class TaskEngine {
     let taskForCtx = task.task;
     let consumedRefsJson: string | null = null;
     if (role === 'restoration' && solverType && this.knowledge?.enabled !== false && taskForCtx) {
-      const knowledgePayload = await loadCorpusKnowledge({
-        corpus: this.knowledge?.corpus ?? null,
-        store: this.store,
-        solverType,
-      });
-      if (knowledgePayload) {
-        // Shallow clone: the injected context lives only in the runtime Task
-        // handed to the harness. Envelope integrity references taskCid, so
-        // nothing signed or hashed changes.
-        taskForCtx = {
-          ...taskForCtx,
-          context: { ...taskForCtx.context, corpusKnowledge: knowledgePayload },
-        };
-        consumedRefsJson = JSON.stringify(knowledgePayload.records);
-        emitEvent(this.store, {
-          kind: 'corpus_knowledge',
-          requestId: task.requestId,
+      // #1393 review finding 3: a RUNNING retry/recovery re-drive (transient
+      // harness/RPC error left the row at RUNNING, or crash-recovery via
+      // _recoverDispatch) must not re-query the corpus or re-emit
+      // corpus_knowledge — reuse whatever this run already resolved, found
+      // or not. Prefer the in-memory map (same-process retries); fall back
+      // to the persisted column (defensive, covers the row already having a
+      // value for whatever reason).
+      const alreadyResolved = this.consumedRefsByRequest.has(task.requestId)
+        ? this.consumedRefsByRequest.get(task.requestId)!
+        : task.consumedRefsJson;
+      const seenBefore = this.consumedRefsByRequest.has(task.requestId) || task.consumedRefsJson !== null;
+
+      if (seenBefore) {
+        consumedRefsJson = alreadyResolved;
+        if (consumedRefsJson) {
+          const cachedRecords = JSON.parse(consumedRefsJson) as CorpusKnowledgeRecordRef[];
+          taskForCtx = {
+            ...taskForCtx,
+            context: { ...taskForCtx.context, corpusKnowledge: buildCorpusKnowledgePayload(solverType, cachedRecords) },
+          };
+        }
+      } else {
+        const knowledgePayload = await loadCorpusKnowledge({
+          corpus: this.knowledge?.corpus ?? null,
+          store: this.store,
           solverType,
-          outcome: 'ok',
-          detail: JSON.stringify(knowledgePayload.records.map((record) => ({
-            envelopeCid: record.envelopeCid,
-            artifacts: record.artifacts.map((artifact) => artifact.sha256),
-          }))),
-        }, 'harness-engine');
+        });
+        if (knowledgePayload) {
+          // Shallow clone: the injected context lives only in the runtime Task
+          // handed to the harness. Envelope integrity references taskCid, so
+          // nothing signed or hashed changes.
+          taskForCtx = {
+            ...taskForCtx,
+            context: { ...taskForCtx.context, corpusKnowledge: knowledgePayload },
+          };
+          consumedRefsJson = JSON.stringify(knowledgePayload.records);
+          emitEvent(this.store, {
+            kind: 'corpus_knowledge',
+            requestId: task.requestId,
+            solverType,
+            outcome: 'ok',
+            detail: JSON.stringify(knowledgePayload.records.map((record) => ({
+              envelopeCid: record.envelopeCid,
+              artifacts: record.artifacts.map((artifact) => artifact.sha256),
+            }))),
+          }, 'harness-engine');
+        }
+        this.consumedRefsByRequest.set(task.requestId, consumedRefsJson);
       }
     }
 
@@ -1925,10 +1960,21 @@ export class TaskEngine {
     // NOTE: taskCid is deliberately NOT passed — projectEnvelope resolves it
     // from options.task.context.solutionTaskCid (verdicts) or
     // envelope.task.cid (solutions), both already correct here.
+    //
+    // #1393 review finding 1: the envelope's own evidenceTier (above) is
+    // aspirational for v2/v3 flows — 'committed' is stamped at sign time,
+    // before deliver() has actually landed evidenceHash on chain. Saving
+    // that optimistic tier straight into the corpus-ranking projection means
+    // a race-lost or failed delivery would leave a 'committed' projection
+    // outranking genuinely delivered 'self-signed' work. Save 'self-signed'
+    // here unconditionally; deliver() upgrades it to the real tier only once
+    // on-chain evidence is confirmed (mirrors the ERC-8004 setMetadata move
+    // below — 'committed' must mean observable evidence exists, not intent).
     try {
-      this.store.saveEnvelopeProjection(
-        projectEnvelope(envelope, { envelopeCid, task: task.task }),
-      );
+      this.store.saveEnvelopeProjection({
+        ...projectEnvelope(envelope, { envelopeCid, task: task.task }),
+        evidenceTier: 'self-signed',
+      });
     } catch (err) {
       console.warn(
         `[harness-engine] ${task.requestId}: envelope projection failed (non-fatal): `
@@ -1981,6 +2027,7 @@ export class TaskEngine {
     this.trajectoryRefs.delete(task.requestId);
     this.modesByRequest.delete(task.requestId);
     this.codeDigestsByRequest.delete(task.requestId);
+    this.consumedRefsByRequest.delete(task.requestId);
   }
 
   /**
@@ -2034,6 +2081,25 @@ export class TaskEngine {
       deliveryTxHash,
     });
     console.log(`[harness-engine] ${requestId} DELIVERING → COMPLETE deliveryTx=${deliveryTxHash} claimTx=${claimTxHash}`);
+
+    // #1393 review finding 1: now that claimDelivery has actually succeeded
+    // (on-chain evidenceHash confirmed), upgrade the local corpus projection
+    // — saved as 'self-signed' by pack() regardless of intent — to the tier
+    // the v2/v3 envelope was really entitled to. A race-lost or failed
+    // delivery never reaches this line, so the projection simply stays
+    // 'self-signed', which is the whole point of the downgrade in pack().
+    // Non-fatal: a projection-tier upgrade failure must not fail an already-
+    // successful delivery.
+    if (this.deliveryDeps.claimDeliveryVariant === 'v2' || this.deliveryDeps.claimDeliveryVariant === 'v3') {
+      try {
+        this.store.upgradeEnvelopeProjectionEvidenceTier(manifestCid, 'committed');
+      } catch (err) {
+        console.warn(
+          `[harness-engine] ${requestId}: envelope projection tier upgrade failed (non-fatal): `
+          + `${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
 
     // Emit a SQLite artifact row so consumers (release acceptance gate, search
     // API) see this cycle alongside legacy-claude / MCP-emitted rows. The
