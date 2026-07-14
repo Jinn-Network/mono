@@ -155,6 +155,58 @@ describe('Store', () => {
     }
   });
 
+  it('insertArtifact succeeds against a legacy desired_state_id NOT NULL schema (regression #506)', () => {
+    // Issue #506: a successful on-chain delivery was persisted as FAILED
+    // because insertArtifact() threw on this legacy NOT NULL column, and the
+    // engine's error path flipped the run to FAILED. Guard against a
+    // regression of that throw.
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-legacy-insert-'));
+    const dbPath = join(dir, 'jinn.db');
+    const legacy = new Database(dbPath);
+    legacy.exec(`
+      CREATE TABLE config (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      CREATE TABLE artifacts (
+        id TEXT PRIMARY KEY,
+        desired_state_id TEXT NOT NULL,
+        request_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        content TEXT,
+        tags TEXT NOT NULL DEFAULT '[]',
+        outcome TEXT NOT NULL CHECK (outcome IN ('SUCCESS', 'FAILURE', 'UNKNOWN')),
+        remote INTEGER NOT NULL DEFAULT 0,
+        owner_address TEXT,
+        endpoint TEXT,
+        price TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+    legacy.close();
+
+    const legacyStore = new Store(dbPath);
+    try {
+      expect(() =>
+        legacyStore.insertArtifact({
+          id: 'art-legacy-insert-1',
+          taskId: 'task-legacy-1',
+          requestId: 'req-legacy-1',
+          title: 'Restoration result',
+          content: 'content',
+          tags: ['restoration-result'],
+          outcome: 'SUCCESS',
+        }),
+      ).not.toThrow();
+
+      const results = legacyStore.searchArtifacts({ taskId: 'task-legacy-1' });
+      expect(results).toHaveLength(1);
+      expect(results[0].id).toBe('art-legacy-insert-1');
+    } finally {
+      legacyStore.close();
+    }
+  });
+
   it('stores durable task post records', () => {
     store.upsertTaskPostRecord({
       creatorSafeAddress: '0x00112233445566778899AABbCCdDeeFf00112233',
