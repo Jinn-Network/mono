@@ -5,6 +5,7 @@ import {
   type GatheredStatusRaw,
 } from '../../src/api/status-build.js';
 import type { FleetState } from '../../src/earning/types.js';
+import { buildInfo } from '../../src/build-info.js';
 
 function minimalFleet(overrides: Partial<FleetState> = {}): FleetState {
   return {
@@ -352,6 +353,31 @@ describe('assembleStatusV1', () => {
     expect(j.taskRuns?.totals.solutions).toBe(0);
     expect(j.taskRuns?.totals.verdicts).toBe(0);
     expect(j.taskRuns?.inFlight[0]?.solverType).toBe('swe-rebench-v2.v1');
+  });
+
+  it('projects version + latestVersion (#641)', () => {
+    const base: GatheredStatusRaw = {
+      shutdownState: 'running',
+      dbPath: '/tmp/x.db',
+      activityCounts: {},
+      recentActivity: [],
+      lastRewardClaimTickAt: null,
+      rewardClaimIntervalMs: 0,
+      fleet: null,
+      rpc: { ok: true },
+      master: { address: null },
+      pollIntervalMs: 5000,
+      masterDailyEstimateWei: '1000',
+    };
+    // Explicit version + latestVersion pass through verbatim.
+    const withBoth = assembleStatusV1({ ...base, version: '0.1.8', latestVersion: '0.2.0' });
+    expect(withBoth.version).toBe('0.1.8');
+    expect(withBoth.latestVersion).toBe('0.2.0');
+
+    // Absent latestVersion → null; absent version → buildInfo fallback.
+    const withNeither = assembleStatusV1(base);
+    expect(withNeither.latestVersion).toBeNull();
+    expect(withNeither.version).toBe(buildInfo.implVersion);
   });
 });
 

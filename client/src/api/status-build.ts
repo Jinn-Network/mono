@@ -19,6 +19,7 @@ import {
   type CostSurfaceStatus,
 } from '../spend/cost-surface-status.js';
 import { DEFAULT_MASTER_ETH_DAILY_WEI } from '../earning/master-gas.js';
+import { buildInfo } from '../build-info.js';
 
 export type StatusHintsScope = 'full' | 'sqlite_only';
 
@@ -89,6 +90,16 @@ export interface AiUnitsStatus {
 export interface GatheredStatusRaw {
   /** sqlite_only: only SQLite-backed fields (e2e / API without fleet context). */
   hintsScope?: StatusHintsScope;
+  /**
+   * Running client version (issue #641). Absent ⇒ the assembler falls back to
+   * `buildInfo.implVersion`.
+   */
+  version?: string;
+  /**
+   * Latest published `@jinn-network/client` version from the npm registry, or
+   * `null` when the check hasn't resolved / is disabled (issue #641).
+   */
+  latestVersion?: string | null;
   shutdownState: string | null;
   daemonRuntime?: {
     pidPath: string;
@@ -195,6 +206,15 @@ export interface GatheredStatusRaw {
 
 export interface StatusV1Response {
   statusMode: 'full' | 'sqlite_only';
+  /** Running client version (issue #641). */
+  version: string;
+  /**
+   * Latest published `@jinn-network/client` version from the npm registry, or
+   * `null` when the start-time check hasn't resolved / is disabled. The SPA's
+   * `useNotifications` adapter fires `update_available` when it differs from
+   * `version` (issue #641).
+   */
+  latestVersion: string | null;
   daemon: {
     shutdownState: string | null;
     startedAt: string | null;
@@ -537,6 +557,8 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
 
   return {
     statusMode: mode,
+    version: raw.version ?? buildInfo.implVersion,
+    latestVersion: raw.latestVersion ?? null,
     daemon: {
       shutdownState: raw.shutdownState,
       startedAt: raw.daemonStartedAt ?? null,
