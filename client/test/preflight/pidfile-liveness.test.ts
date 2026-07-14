@@ -4,6 +4,10 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { checkPidfileLiveness } from '../../src/preflight/pidfile-liveness.js';
+import {
+  __setExecSyncForTesting,
+  __resetExecSyncForTesting,
+} from '../../src/lifecycle/process-discovery.js';
 
 describe('pidfile-liveness preflight', () => {
   let tmp: string;
@@ -16,6 +20,7 @@ describe('pidfile-liveness preflight', () => {
 
   afterEach(() => {
     rmSync(tmp, { recursive: true, force: true });
+    __resetExecSyncForTesting();
   });
 
   it('returns proceed when no pidfile exists', () => {
@@ -43,12 +48,30 @@ describe('pidfile-liveness preflight', () => {
     }
   });
 
-  it('returns refuse when the recorded PID is alive', () => {
+  it('returns refuse when the recorded PID is alive and is a jinn daemon', () => {
     writeFileSync(pidPath, '987654\n', 'utf-8');
+    __setExecSyncForTesting(() => 'node /opt/jinn/dist/bin/jinn.js run\n');
     const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as never);
     try {
       const decision = checkPidfileLiveness({ pidPath });
       expect(decision).toMatchObject({ decision: 'refuse', pid: 987654, reason: 'alive' });
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
+
+  it('reclaims a pidfile recording a live pid whose cmdline is not a jinn daemon (recycled pid / #805)', () => {
+    writeFileSync(pidPath, '987654\n', 'utf-8');
+    __setExecSyncForTesting(() => 'python train.py\n');
+    const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as never);
+    try {
+      const decision = checkPidfileLiveness({ pidPath });
+      expect(decision).toMatchObject({
+        decision: 'unlink-stale',
+        pid: 987654,
+        reason: 'not-jinn',
+        pidfilePath: pidPath,
+      });
     } finally {
       killSpy.mockRestore();
     }
