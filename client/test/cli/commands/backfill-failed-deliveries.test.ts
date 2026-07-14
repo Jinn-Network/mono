@@ -31,7 +31,7 @@ const defaultConfig = {
 
 interface FakeDepsOverrides {
   backfillResult?: {
-    reclassified: string[];
+    reclassified: Array<{ requestId: string; originalFailureReason: string | null }>;
     skipped: Array<{ requestId: string; reason: string }>;
     failed: Array<{ requestId: string; error: string }>;
   };
@@ -71,7 +71,7 @@ describe('backfill-failed-deliveries command', () => {
     const cmd = createBackfillFailedDeliveriesCommand(
       makeFakeDeps({
         backfillResult: {
-          reclassified: ['req-1'],
+          reclassified: [{ requestId: 'req-1', originalFailureReason: 'NOT NULL constraint failed: artifacts.desired_state_id' }],
           skipped: [{ requestId: 'req-2', reason: 'no deliveryTxHash recorded' }],
           failed: [{ requestId: 'req-3', error: 'boom' }],
         },
@@ -81,7 +81,9 @@ describe('backfill-failed-deliveries command', () => {
     await cmd.run(ctx);
     expect(exits).toEqual([0]);
     const payload = JSON.parse(writes.join('').trim());
-    expect(payload.reclassified).toEqual(['req-1']);
+    expect(payload.reclassified).toEqual([
+      { requestId: 'req-1', originalFailureReason: 'NOT NULL constraint failed: artifacts.desired_state_id' },
+    ]);
     expect(payload.skipped).toEqual([{ requestId: 'req-2', reason: 'no deliveryTxHash recorded' }]);
     expect(payload.failed).toEqual([{ requestId: 'req-3', error: 'boom' }]);
   });
@@ -90,7 +92,7 @@ describe('backfill-failed-deliveries command', () => {
     const cmd = createBackfillFailedDeliveriesCommand(
       makeFakeDeps({
         backfillResult: {
-          reclassified: ['req-1'],
+          reclassified: [{ requestId: 'req-1', originalFailureReason: 'NOT NULL constraint failed: artifacts.desired_state_id' }],
           skipped: [],
           failed: [],
         },
@@ -102,6 +104,7 @@ describe('backfill-failed-deliveries command', () => {
     const out = writes.join('');
     expect(out).toContain('reclassified: 1');
     expect(out).toContain('req-1');
+    expect(out).toContain('NOT NULL constraint failed: artifacts.desired_state_id');
   });
 
   it('emits fatal envelope when the backfill throws', async () => {

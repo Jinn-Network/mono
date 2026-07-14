@@ -6,10 +6,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import Database from 'better-sqlite3';
 import { Store } from '../../../src/store/store.js';
 import {
   TaskEngine,
@@ -18,6 +17,7 @@ import {
 } from '../../../src/harnesses/engine/engine.js';
 import { TaskRunPersistence, type PersistedTaskRunInput } from '../../../src/harnesses/engine/persistence.js';
 import { TaskRunState } from '../../../src/harnesses/engine/state.js';
+import { createLegacyArtifactsSchemaDb } from '../../helpers/legacy-artifacts-schema.js';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -275,30 +275,7 @@ describe('Engine packaging integration', () => {
     // because insertArtifact() threw on a legacy NOT NULL column, and the
     // engine's _runTransition catch → _classifyAndMarkTerminal → markFailed()
     // flipped the run to FAILED. process() must resolve and land COMPLETE.
-    const dir = mkdtempSync(join(tmpdir(), 'jinn-legacy-engine-'));
-    const dbPath = join(dir, 'jinn.db');
-    const legacy = new Database(dbPath);
-    legacy.exec(`
-      CREATE TABLE config (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-      CREATE TABLE artifacts (
-        id TEXT PRIMARY KEY,
-        desired_state_id TEXT NOT NULL,
-        request_id TEXT NOT NULL,
-        title TEXT NOT NULL,
-        content TEXT,
-        tags TEXT NOT NULL DEFAULT '[]',
-        outcome TEXT NOT NULL CHECK (outcome IN ('SUCCESS', 'FAILURE', 'UNKNOWN')),
-        remote INTEGER NOT NULL DEFAULT 0,
-        owner_address TEXT,
-        endpoint TEXT,
-        price TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-    `);
-    legacy.close();
+    const { dir, dbPath } = createLegacyArtifactsSchemaDb('jinn-legacy-engine-');
 
     const legacyStore = new Store(dbPath);
     const legacyTmp = mkTmp();
