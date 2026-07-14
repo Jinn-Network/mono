@@ -232,6 +232,13 @@ cd client && yarn typecheck && yarn test && yarn build
 
 Do not proceed to merge until the CI rollup is fully green.
 
+**Green means green on the current merge-ref — four hard-won rules (2026-07-14):**
+
+- **Stale runs prove nothing.** CI snapshots the PR+base merge-ref when the run starts; a check that passed before `next` advanced says nothing about the current merge. `gh run rerun` re-runs the OLD snapshot — to re-gate after a base advance, trigger a fresh run with a tree-identical amend: `git commit --amend --no-edit && git push --force-with-lease`.
+- **Git-clean ≠ semantically clean.** A clean `git merge-tree` is necessary, not sufficient: two independently-green PRs can break in combination with zero textual conflict and even zero file overlap (seen: one PR read a spawn argv slot by position while another spliced a flag into it; one PR's new mint denylist rejected another's test-fixture instance). Only green CI on the true merge-ref rules this out — do not substitute merge-tree cleanliness or pre-advance check results for it, even under `--admin`.
+- **Know CI's blind spots.** If the diff touches a package the repo CI does not test (e.g. `packages/autopilot`), CI green is silence, not evidence — run that package's suite locally on the merge result before merging.
+- **Classify a red before acting.** PR-code red → fix on the branch. Infra flake (CDN timeout, port collision, runner-disk lottery) → re-run. Gate-bug red (the check itself is broken or non-hermetic) → fix the gate first in its own PR; never silently `--admin` past a red you haven't classified.
+
 **Review preservation after clean rebase.**
 
 A clean rebase may preserve the skill's review gate only when:
