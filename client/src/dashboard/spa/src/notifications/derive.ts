@@ -50,7 +50,7 @@ export function deriveNotifications(input: DeriveInput): OperatorNotification[] 
       out.push({
         kind: 'funding_empty',
         severity: 'blocking',
-        message: `${c.chain} wallet (${walletLabel}) can no longer cover the next transaction. Top up now.`,
+        message: `Gas exhausted — ${walletLabel} on ${c.chain} can't cover the next transaction.`,
         jumpTo: '/overview',
       });
       continue; // empty supersedes low for this chain
@@ -59,7 +59,7 @@ export function deriveNotifications(input: DeriveInput): OperatorNotification[] 
       out.push({
         kind: 'funding_low',
         severity: 'warning',
-        message: `Runway is ${c.runwayDays} day(s) on ${c.chain}. Top up gas (${walletLabel}) to keep claiming work.`,
+        message: `Gas runway low — ${walletLabel} on ${c.chain} below threshold; top up soon.`,
         jumpTo: '/overview',
       });
     }
