@@ -790,7 +790,7 @@ describe('jinn-layer distill run', () => {
         '3',
       ], {
         writer,
-        distillDeps: stubDeps({
+        distillRunDeps: stubDeps({
           verdictSource: { list },
           fetchEvidence: async (r: AttemptRef): Promise<BridgeEvidence> => ({
             taskSummary: `short regression summary for ${r.instanceId}`,
@@ -850,7 +850,7 @@ describe('jinn-layer distill run', () => {
       '--max-clusters', '1',
     ], {
       writer,
-      distillDeps: stubDeps({
+      distillRunDeps: stubDeps({
         verdictSource: { list: async () => [dref('alpha__repo-1', 'pass')] },
         publishDeps: undefined,
         distill: undefined,
@@ -894,7 +894,7 @@ describe('jinn-layer distill run', () => {
       '--concurrency', '2',
     ], {
       writer,
-      distillDeps: stubDeps({
+      distillRunDeps: stubDeps({
         verdictSource: { list: async () => [
           dref('alpha__repo-1', 'pass'),
           dref('beta__repo-2', 'pass'),
@@ -949,7 +949,7 @@ describe('jinn-layer distill run', () => {
       '1',
     ], {
       writer,
-      distillDeps: stubDeps({
+      distillRunDeps: stubDeps({
         verdictSource: { list: async () => [dref('alpha__repo-1', 'pass')] },
         publishDeps: undefined,
         distill: undefined,
@@ -1021,7 +1021,7 @@ describe('jinn-layer distill run', () => {
       '2',
     ], {
       writer,
-      distillDeps: stubDeps({
+      distillRunDeps: stubDeps({
         verdictSource: { list: async () => groupedRefs },
         fetchEvidence: async (r: AttemptRef): Promise<BridgeEvidence> => ({
           taskSummary: `success regression summary for ${r.instanceId}`,
@@ -1072,7 +1072,7 @@ describe('jinn-layer distill run', () => {
       '2',
     ], {
       writer,
-      distillDeps: stubDeps({
+      distillRunDeps: stubDeps({
         verdictSource: {
           list: async () => [
             dref('alpha__repo-1', 'pass'),
@@ -1119,7 +1119,7 @@ describe('jinn-layer distill run', () => {
       '--meta',
     ], {
       writer: capture().writer,
-      distillDeps: stubDeps({
+      distillRunDeps: stubDeps({
         verdictSource: { list },
         publishDeps: undefined,
         distill: undefined,
@@ -1163,7 +1163,7 @@ describe('jinn-layer distill run', () => {
       '--meta',
     ], {
       writer: capture().writer,
-      distillDeps: stubDeps({
+      distillRunDeps: stubDeps({
         verdictSource: { list: secondList },
         publishDeps: undefined,
         distill: undefined,
@@ -1192,7 +1192,7 @@ describe('jinn-layer distill run', () => {
       '--json',
     ], {
       writer: capture().writer,
-      distillDeps: stubDeps({
+      distillRunDeps: stubDeps({
         verdictSource: { list: async () => TWO_PATTERN_REFS },
         publishDeps: undefined,
         distill: undefined,
@@ -1220,7 +1220,7 @@ describe('jinn-layer distill run', () => {
       '--json',
     ], {
       writer: capture().writer,
-      distillDeps: stubDeps({
+      distillRunDeps: stubDeps({
         verdictSource: { list: async () => { throw new Error('should not bridge on resume'); } },
         publishDeps: undefined,
         distill: undefined,
@@ -1253,7 +1253,7 @@ describe('jinn-layer distill run', () => {
       '--max-patterns', '2',
     ], {
       writer: capture().writer,
-      distillDeps: stubDeps({
+      distillRunDeps: stubDeps({
         verdictSource: { list: async () => TWO_PATTERN_REFS },
         publishDeps: undefined,
         distill: undefined,
@@ -1278,7 +1278,7 @@ describe('jinn-layer distill run', () => {
       '--json',
     ], {
       writer,
-      distillDeps: stubDeps({
+      distillRunDeps: stubDeps({
         verdictSource: { list: async () => { throw new Error('should not bridge on resume'); } },
         publishDeps: undefined,
         distill: undefined,
@@ -1312,7 +1312,7 @@ describe('jinn-layer distill run', () => {
       '--max-patterns', '2',
     ], {
       writer: capture().writer,
-      distillDeps: stubDeps({
+      distillRunDeps: stubDeps({
         verdictSource: { list: async () => TWO_PATTERN_REFS },
         publishDeps: undefined,
         distill: undefined,
@@ -1339,7 +1339,7 @@ describe('jinn-layer distill run', () => {
       '--max-patterns', '2',
     ], {
       writer: conflict.writer,
-      distillDeps: stubDeps({
+      distillRunDeps: stubDeps({
         verdictSource: { list: async () => TWO_PATTERN_REFS },
         publishDeps: undefined,
         distill: undefined,
@@ -1365,7 +1365,7 @@ describe('jinn-layer distill run', () => {
       '--force',
     ], {
       writer: capture().writer,
-      distillDeps: stubDeps({
+      distillRunDeps: stubDeps({
         verdictSource: { list: async () => TWO_PATTERN_REFS },
         publishDeps: undefined,
         distill: undefined,
@@ -1395,7 +1395,7 @@ describe('jinn-layer distill run', () => {
       '--max-clusters', '1',
     ], {
       writer: capture().writer,
-      distillDeps: stubDeps({
+      distillRunDeps: stubDeps({
         verdictSource: { list: async () => [dref('alpha__repo-1', 'pass')] },
         publishDeps: undefined,
         distill: undefined,
@@ -1417,7 +1417,7 @@ describe('jinn-layer distill run', () => {
       '--max-clusters', '1',
     ], {
       writer: capture().writer,
-      distillDeps: stubDeps({
+      distillRunDeps: stubDeps({
         verdictSource: { list: async () => { throw new Error('should not bridge on resume'); } },
         publishDeps: undefined,
         distill: undefined,
@@ -1438,7 +1438,7 @@ describe('jinn-layer distill run', () => {
       '--retry-errors',
     ], {
       writer: capture().writer,
-      distillDeps: stubDeps({
+      distillRunDeps: stubDeps({
         verdictSource: { list: async () => { throw new Error('should not bridge on resume'); } },
         publishDeps: undefined,
         distill: undefined,
@@ -1470,7 +1470,7 @@ describe('jinn-layer distill run', () => {
       '--meta',
     ], {
       writer: capture().writer,
-      distillDeps: stubDeps({
+      distillRunDeps: stubDeps({
         verdictSource: { list: async () => TWO_PATTERN_REFS },
         publishDeps: undefined,
         distill: undefined,
@@ -1500,7 +1500,7 @@ describe('jinn-layer distill run', () => {
       '--meta',
     ], {
       writer: capture().writer,
-      distillDeps: stubDeps({
+      distillRunDeps: stubDeps({
         verdictSource: { list: async () => { throw new Error('should not bridge on resume'); } },
         publishDeps: undefined,
         distill: undefined,
@@ -1529,7 +1529,7 @@ describe('jinn-layer distill run', () => {
       '--meta',
     ], {
       writer: capture().writer,
-      distillDeps: stubDeps({
+      distillRunDeps: stubDeps({
         verdictSource: { list: async () => { throw new Error('should not bridge on resume'); } },
         publishDeps: undefined,
         distill: undefined,
