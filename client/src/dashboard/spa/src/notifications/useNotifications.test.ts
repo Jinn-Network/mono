@@ -105,3 +105,29 @@ describe('mapStatusToDeriveInput gas gate boundary (#1296, handbook AI workflow 
     expect(l2!.empty).toBe(true);
   });
 });
+
+describe('mapStatusToDeriveInput — version check (#641)', () => {
+  it('maps version + latestVersion into daemonVersion + latestVersion', () => {
+    const mapped = mapStatusToDeriveInput(
+      { version: '0.1.8', latestVersion: '0.2.0' },
+      {},
+      false,
+    );
+    expect(mapped.daemonVersion).toBe('0.1.8');
+    expect(mapped.latestVersion).toBe('0.2.0');
+  });
+
+  it('maps a null latestVersion to undefined (banner stays silent)', () => {
+    expect(
+      mapStatusToDeriveInput({ version: '0.1.8', latestVersion: null }, {}, false)
+        .latestVersion,
+    ).toBeUndefined();
+    expect(
+      mapStatusToDeriveInput({ version: '0.1.8' }, {}, false).latestVersion,
+    ).toBeUndefined();
+  });
+
+  it('defaults daemonVersion to 0.0.0 when version is absent', () => {
+    expect(mapStatusToDeriveInput({}, {}, false).daemonVersion).toBe('0.0.0');
+  });
+});
