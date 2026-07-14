@@ -3,13 +3,7 @@
  *
  * The daemon does not surface that a newer `@jinn-network/client` has been
  * published, so operators run stale dashboards. This module supplies the pure,
- * unit-testable pieces main.ts composes into a fire-and-forget check:
- *
- *   - `getRunningVersion()`      — the version this process is running
- *   - `isVersionCheckEnabled()`  — the `JINN_VERSION_CHECK` opt-out gate
- *   - `fetchLatestVersion()`     — best-effort GET of the npm `latest` dist-tag
- *   - `isNewerVersion()`         — semver compare (never throws)
- *   - `formatUpdateLogLine()`    — the one-line "update available" log message
+ * unit-testable pieces main.ts composes into a fire-and-forget check.
  *
  * Nothing here throws: a registry outage, a malformed response, or an
  * unparseable version degrades to `null` / `false`. The check is advisory.
@@ -74,14 +68,8 @@ export async function fetchLatestVersion(
     });
     if (!res.ok) return null;
     const body: unknown = await res.json();
-    if (
-      body &&
-      typeof body === 'object' &&
-      typeof (body as { version?: unknown }).version === 'string'
-    ) {
-      return (body as { version: string }).version;
-    }
-    return null;
+    const version = (body as { version?: unknown })?.version;
+    return typeof version === 'string' ? version : null;
   } catch {
     return null;
   } finally {
