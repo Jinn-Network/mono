@@ -75,3 +75,33 @@ describe('mapStatusToDeriveInput funds mapping (issue #1296)', () => {
     );
   });
 });
+
+describe('mapStatusToDeriveInput gas gate boundary (#1296, handbook AI workflow rule 7 — boundary tests for numeric gates)', () => {
+  it('balance exactly equal to minEthWei is NOT empty (strict less-than)', () => {
+    const status = {
+      masterGas: {
+        address: '0xL2MASTER',
+        balanceWei: '1000000000000000',
+        runwayDaysExcess: '1',
+        minEthWei: '1000000000000000',
+      },
+    };
+    const mapped = mapStatusToDeriveInput(status, {}, false);
+    const l2 = mapped.funds.chains.find((c) => c.wallet === '0xL2MASTER');
+    expect(l2!.empty).toBe(false);
+  });
+
+  it('balance one wei below minEthWei is empty', () => {
+    const status = {
+      masterGas: {
+        address: '0xL2MASTER',
+        balanceWei: '999999999999999',
+        runwayDaysExcess: '1',
+        minEthWei: '1000000000000000',
+      },
+    };
+    const mapped = mapStatusToDeriveInput(status, {}, false);
+    const l2 = mapped.funds.chains.find((c) => c.wallet === '0xL2MASTER');
+    expect(l2!.empty).toBe(true);
+  });
+});
