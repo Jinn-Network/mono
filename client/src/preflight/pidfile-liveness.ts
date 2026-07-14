@@ -84,8 +84,14 @@ export function checkPidfileLiveness(
     // exits — process.kill(pid, 0) succeeds against whatever new process now
     // holds that pid, which is not a jinn daemon. Refusing here would block
     // `jinn run` forever on a stale pidfile that happens to alias a live,
-    // unrelated process. Confirm the cmdline before refusing.
-    if (!pidMatchesJinn(parsed)) {
+    // unrelated process. Confirm the cmdline before refusing — but only
+    // reclaim on a DEFINITIVE non-jinn cmdline. `ps` failing (permissions,
+    // missing/odd `ps` in a minimal container) is indistinguishable from "no
+    // output" and must NOT be treated the same as a confirmed non-jinn
+    // process: fail closed (refuse) rather than risk starting a second
+    // daemon against the same store/wallet while the real one is still up.
+    const match = pidMatchesJinn(parsed);
+    if (match === 'no-match') {
       return { decision: 'unlink-stale', pid: parsed, pidfilePath: pidPath, reason: 'not-jinn' };
     }
     return { decision: 'refuse', pid: parsed, pidfilePath: pidPath, reason: 'alive' };

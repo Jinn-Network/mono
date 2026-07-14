@@ -5,7 +5,9 @@ import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import {
   enumerateJinnProcesses as defaultEnumerateJinnProcesses,
+  pidMatchesJinn as defaultCmdlineMatch,
   processAlive as defaultProcessAlive,
+  type CmdlineMatch,
   type JinnProcess,
 } from '../../lifecycle/process-discovery.js';
 
@@ -17,6 +19,9 @@ export interface KillDeps {
   killSignal: (pid: number, signal: NodeJS.Signals) => void;
   processAlive: (pid: number) => boolean;
   sleep: (ms: number) => Promise<void>;
+  /** #805 — re-verify identity immediately before the SIGKILL escalation, in
+   * case the pid was recycled during the SIGTERM poll window. */
+  cmdlineMatch: (pid: number) => CmdlineMatch;
 }
 
 function defaultKillSignal(pid: number, signal: NodeJS.Signals): void {
@@ -32,6 +37,7 @@ const PRODUCTION_DEPS: KillDeps = {
   killSignal: defaultKillSignal,
   processAlive: defaultProcessAlive,
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  cmdlineMatch: defaultCmdlineMatch,
 };
 
 interface KillResult {
@@ -57,6 +63,14 @@ async function terminateOne(pid: number, deps: KillDeps): Promise<{ pid: number;
     elapsed += POLL_INTERVAL_MS;
   }
   if (deps.processAlive(pid)) {
+    // #805: re-verify identity immediately before SIGKILL — the pid could in
+    // principle have been recycled to an unrelated process during the 10s
+    // SIGTERM window. Only skip the SIGKILL on a definitive no-match;
+    // 'match' or 'unknown' (ps unavailable) proceed, matching the existing
+    // fail-toward-completion posture of `jinn kill`.
+    if (deps.cmdlineMatch(pid) === 'no-match') {
+      return { pid, forced: false };
+    }
     deps.killSignal(pid, 'SIGKILL');
     return { pid, forced: true };
   }
