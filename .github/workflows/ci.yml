@@ -155,6 +155,15 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
+      # ubuntu-latest free disk hovers right at the eval's 20 GB floor
+      # (JINN_EVAL_DISK_FLOOR_GB); runs fail nondeterministically at
+      # "insufficient disk: 17.0 GB free". Drop the big preinstalled
+      # toolchains this job never uses to buy ~25 GB of headroom.
+      - name: Free runner disk (headroom for the Docker gold eval)
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
+          df -h / | tail -1
       - uses: actions/setup-node@v6
         with:
           node-version: 22
