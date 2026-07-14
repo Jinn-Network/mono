@@ -244,7 +244,8 @@ values are the Project-field values to set at filing. Uncertain file paths are m
   issue's own AC) · **Blocked on:** Nothing · **Effort:** High · **Priority:** P1 · **Branch:**
   `feat/1473-typed-solve-transcript` · **Base:** `next`
 - Stage 1 addition to its ACs: fresh attempts on minted tasks carry the typed transcript
-  (product design §6). Recommendation into the DR: the artifact route.
+  (product design §6). Resolved by DR-2026-07-14 (trajectory-is-the-transcript): one record —
+  span-kind enum extension; `jinn.trajectory.v1` carries conversational + operational spans.
 
 ### S1-F3 — CI hardening: plugin tests in mono CI + cold-stock e2e job
 

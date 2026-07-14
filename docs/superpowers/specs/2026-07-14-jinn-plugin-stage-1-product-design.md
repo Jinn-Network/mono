@@ -122,11 +122,12 @@ accepted diff at a public `repo@commit`.
 ## 6. Marketplace-side evidence requirement
 
 Fresh attempts on minted tasks must carry a **typed, discoverable transcript** instead of
-hiding it in `system_snapshot`. #1473's design fork (extend the span enum vs. a first-class
-`agent-transcript.v1` artifact) is resolved by a DR in the Stage 1 foundation work;
-recommendation: the artifact route (lighter, honest, no conformance upheaval). The distiller's
-snapshot-extraction workaround (#1472) remains as the compatibility path for historical
-evidence.
+hiding it in `system_snapshot`. #1473's design fork is resolved by **DR-2026-07-14**
+(`log/decisions/2026-07-14-trajectory-is-the-transcript.md`): **one record** — the span-kind
+enum is extended so `jinn.trajectory.v1` carries the agent's conversational spans (turns,
+tool calls) alongside the operational ones, making the envelope's trajectory slot truthful.
+The distiller's snapshot-extraction workaround (#1472) remains as the compatibility path for
+historical evidence.
 
 ## 7. Minimum acceptance journey (formalized in the Phase 5 gate design)
 
