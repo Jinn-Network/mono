@@ -7,16 +7,23 @@
  * the legacy `artifacts.desired_state_id NOT NULL` column (fixed in #511,
  * commit 65de316e8). The engine's error-classification catch turned that
  * throw into a FAILED run even though the on-chain delivery had already
- * landed. This command scans historical FAILED rows, checks each recorded
- * `deliveryTxHash`'s receipt, and reclassifies the ones whose delivery
- * succeeded. No wallet/password is required — this only reads chain state
- * and writes to the local SQLite DB.
+ * landed. This command scans historical FAILED rows whose `failureReason`
+ * carries the `artifacts.desired_state_id` constraint signature, checks
+ * each candidate's recorded `deliveryTxHash` receipt as secondary
+ * confirmation, and reclassifies the ones whose delivery succeeded.
+ * `deliveryTxHash` + a successful receipt alone is NOT sufficient grounds —
+ * see the scoping note in the harness module below. No wallet/password is
+ * required — this only reads chain state and writes to the local SQLite DB.
+ *
+ * Caveat: reclassified rows have no `artifacts` row and no ERC-8004
+ * metadata anchor (that write is exactly what failed) — this command does
+ * not reconstruct either, it only corrects `task_runs.state`.
  *
  * See `client/src/harnesses/engine/backfill-failed-deliveries.ts` and
  * `client/src/harnesses/engine/persistence.ts#reclassifyFailedAsComplete`.
  */
 
-import type { CommandContext, CommandModule } from '../command.js';
+import type { BaseCommandDeps, CommandContext, CommandModule } from '../command.js';
 import { COMMON_FLAGS, parseCommandArgs } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
@@ -41,8 +48,8 @@ function humanResult(payload: BackfillFailedDeliveriesResult & { dryRun: boolean
     payload.dryRun ? 'Failed-delivery backfill (dry run) complete.' : 'Failed-delivery backfill complete.',
   ];
   lines.push(`  reclassified: ${payload.reclassified.length}`);
-  for (const requestId of payload.reclassified) {
-    lines.push(`    ${requestId}`);
+  for (const r of payload.reclassified) {
+    lines.push(`    ${r.requestId} — was: ${r.originalFailureReason ?? '(no failure reason recorded)'}`);
   }
   lines.push(`  skipped:      ${payload.skipped.length}`);
   for (const s of payload.skipped) {
@@ -75,9 +82,7 @@ async function defaultRunBackfill(
   }
 }
 
-export interface BackfillFailedDeliveriesCommandDeps {
-  loadConfig: typeof defaultLoadConfig;
-  getConfigPathFromArgs: typeof defaultGetConfigPathFromArgs;
+export interface BackfillFailedDeliveriesCommandDeps extends BaseCommandDeps {
   runBackfill: typeof defaultRunBackfill;
 }
 
@@ -178,11 +183,18 @@ export function createBackfillFailedDeliveriesCommand(
     summary: 'Reclassify FAILED runs as COMPLETE when their delivery tx actually succeeded (#506)',
     helpText: `Usage: jinn backfill-failed-deliveries [--dry-run] [--human] [--config <path>]
 
-Scans FAILED task_runs for a recorded deliveryTxHash, checks its on-chain
-receipt, and reclassifies rows whose delivery transaction succeeded as
-COMPLETE. Rows with no deliveryTxHash, a reverted receipt, or an RPC error
-are left FAILED and reported separately. Idempotent — already-COMPLETE rows
-are never touched, and re-running finds nothing left to reclassify.
+Scans FAILED task_runs whose failure reason matches the #506
+artifacts.desired_state_id constraint signature, checks each candidate's
+recorded deliveryTxHash receipt as secondary confirmation, and reclassifies
+rows whose delivery transaction succeeded as COMPLETE. Rows with a
+non-matching failure reason, no deliveryTxHash, a reverted receipt, or an
+RPC error are left FAILED and reported separately. Idempotent —
+already-COMPLETE rows are never touched, and re-running finds nothing left
+to reclassify.
+
+Reclassified rows have no artifacts row and no ERC-8004 metadata anchor
+(that write is exactly what failed) — this command does not reconstruct
+either, it only corrects task_runs.state.
 
 No wallet or password is required.
 

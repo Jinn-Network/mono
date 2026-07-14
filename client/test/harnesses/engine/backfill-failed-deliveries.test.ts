@@ -24,11 +24,20 @@ function makeInput(requestId: string, overrides: Partial<PersistedTaskRunInput> 
   };
 }
 
-/** Walk a fresh row through to a FAILED terminal state, optionally with a deliveryTxHash. */
+/** The #506 failure-reason signature the backfill scopes its candidate filter to. */
+const DESIRED_STATE_ID_REASON = 'NOT NULL constraint failed: artifacts.desired_state_id';
+
+/**
+ * Walk a fresh row through to a FAILED terminal state, optionally with a
+ * deliveryTxHash. Defaults `failureReason` to the #506 bug signature so
+ * seeded rows are backfill candidates by default; pass a different
+ * `failureReason` to simulate a genuinely-failed row (e.g. a claimDelivery
+ * revert) that happens to also carry a deliveryTxHash + success receipt.
+ */
 function seedFailed(
   p: TaskRunPersistence,
   requestId: string,
-  opts: { deliveryTxHash?: string } = {},
+  opts: { deliveryTxHash?: string; failureReason?: string } = {},
 ): void {
   p.insertDiscovered(makeInput(requestId));
   p.transition(requestId, TaskRunState.CLAIMED);
@@ -40,7 +49,7 @@ function seedFailed(
   p.transition(requestId, TaskRunState.DELIVERING, {
     deliveryTxHash: opts.deliveryTxHash ?? null,
   });
-  p.markFailed(requestId, 'insertArtifact threw: NOT NULL constraint failed');
+  p.markFailed(requestId, opts.failureReason ?? DESIRED_STATE_ID_REASON);
 }
 
 describe('backfillFailedDeliveries', () => {
@@ -64,10 +73,59 @@ describe('backfillFailedDeliveries', () => {
 
     const result = await backfillFailedDeliveries({ persistence, publicClient });
 
-    expect(result.reclassified).toEqual(['req-success']);
+    expect(result.reclassified).toEqual([
+      { requestId: 'req-success', originalFailureReason: DESIRED_STATE_ID_REASON },
+    ]);
     expect(result.skipped).toEqual([]);
     expect(result.failed).toEqual([]);
     expect(persistence.getByRequestId('req-success')!.state).toBe(TaskRunState.COMPLETE);
+    // The UPDATE clears failure fields on a genuinely-COMPLETE row — the
+    // original reason is preserved only in the command's output, not the row.
+    expect(persistence.getByRequestId('req-success')!.failureReason).toBeNull();
+  });
+
+  it('skips a FAILED row with a matching deliveryTxHash + success receipt but a non-matching failure reason (#506 review finding 1)', async () => {
+    // A row that failed at claimDelivery (step 2) after deliverToMarketplace
+    // (step 1) already persisted deliveryTxHash — genuinely failed, not the
+    // #506 desired_state_id bug. Must not be reclassified.
+    seedFailed(persistence, 'req-other-failure', {
+      deliveryTxHash: '0xaaa',
+      failureReason: 'execution reverted: TCMaxVerdictsReached',
+    });
+    const publicClient = {
+      getTransactionReceipt: vi.fn().mockResolvedValue({ status: 'success' }),
+    } as unknown as PublicClient;
+
+    const result = await backfillFailedDeliveries({ persistence, publicClient });
+
+    expect(result.reclassified).toEqual([]);
+    expect(result.skipped).toEqual([
+      {
+        requestId: 'req-other-failure',
+        reason: 'failure reason does not match the desired_state_id constraint signature',
+      },
+    ]);
+    expect(publicClient.getTransactionReceipt).not.toHaveBeenCalled();
+    expect(persistence.getByRequestId('req-other-failure')!.state).toBe(TaskRunState.FAILED);
+  });
+
+  it('skips a FAILED row whose failure reason carries the recovery: prefix but still matches the signature', async () => {
+    // _classifyAndMarkTerminal stamps `recovery: ${reason}` when invoked from
+    // the recovery context — the substring check must survive that wrapping.
+    seedFailed(persistence, 'req-recovery-prefixed', {
+      deliveryTxHash: '0xbeef',
+      failureReason: `recovery: ${DESIRED_STATE_ID_REASON}`,
+    });
+    const publicClient = {
+      getTransactionReceipt: vi.fn().mockResolvedValue({ status: 'success' }),
+    } as unknown as PublicClient;
+
+    const result = await backfillFailedDeliveries({ persistence, publicClient });
+
+    expect(result.reclassified).toEqual([
+      { requestId: 'req-recovery-prefixed', originalFailureReason: `recovery: ${DESIRED_STATE_ID_REASON}` },
+    ]);
+    expect(persistence.getByRequestId('req-recovery-prefixed')!.state).toBe(TaskRunState.COMPLETE);
   });
 
   it('skips a FAILED row with no deliveryTxHash', async () => {
@@ -109,7 +167,9 @@ describe('backfillFailedDeliveries', () => {
     const result = await backfillFailedDeliveries({ persistence, publicClient });
 
     expect(result.failed).toEqual([{ requestId: 'req-rpc-down', error: expect.stringContaining('RPC unavailable') }]);
-    expect(result.reclassified).toEqual(['req-healthy']);
+    expect(result.reclassified).toEqual([
+      { requestId: 'req-healthy', originalFailureReason: DESIRED_STATE_ID_REASON },
+    ]);
     expect(persistence.getByRequestId('req-rpc-down')!.state).toBe(TaskRunState.FAILED);
     expect(persistence.getByRequestId('req-healthy')!.state).toBe(TaskRunState.COMPLETE);
   });
@@ -145,7 +205,9 @@ describe('backfillFailedDeliveries', () => {
 
     const result = await backfillFailedDeliveries({ persistence, publicClient, dryRun: true });
 
-    expect(result.reclassified).toEqual(['req-dry-run']);
+    expect(result.reclassified).toEqual([
+      { requestId: 'req-dry-run', originalFailureReason: DESIRED_STATE_ID_REASON },
+    ]);
     expect(persistence.getByRequestId('req-dry-run')!.state).toBe(TaskRunState.FAILED);
   });
 
@@ -156,11 +218,30 @@ describe('backfillFailedDeliveries', () => {
     } as unknown as PublicClient;
 
     const first = await backfillFailedDeliveries({ persistence, publicClient });
-    expect(first.reclassified).toEqual(['req-idempotent']);
+    expect(first.reclassified).toEqual([
+      { requestId: 'req-idempotent', originalFailureReason: DESIRED_STATE_ID_REASON },
+    ]);
 
     const second = await backfillFailedDeliveries({ persistence, publicClient });
     expect(second.reclassified).toEqual([]);
     expect(second.skipped).toEqual([]);
     expect(second.failed).toEqual([]);
+  });
+
+  it('skips (does not push to reclassified) when reclassifyFailedAsComplete reports a concurrent state change (#506 review finding 2)', async () => {
+    seedFailed(persistence, 'req-concurrent', { deliveryTxHash: '0x222' });
+    const publicClient = {
+      getTransactionReceipt: vi.fn().mockResolvedValue({ status: 'success' }),
+    } as unknown as PublicClient;
+    // Simulate another writer flipping the row out of FAILED between our
+    // getByState() read and the UPDATE — reclassifyFailedAsComplete's WHERE
+    // clause guard reports this by returning false without writing.
+    const reclassifySpy = vi.spyOn(persistence, 'reclassifyFailedAsComplete').mockReturnValue(false);
+
+    const result = await backfillFailedDeliveries({ persistence, publicClient });
+
+    expect(reclassifySpy).toHaveBeenCalledWith('req-concurrent');
+    expect(result.reclassified).toEqual([]);
+    expect(result.skipped).toEqual([{ requestId: 'req-concurrent', reason: 'row state changed concurrently' }]);
   });
 });

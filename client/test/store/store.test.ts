@@ -4,6 +4,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../../src/store/store.js';
+import { createLegacyArtifactsSchemaDb } from '../helpers/legacy-artifacts-schema.js';
 
 describe('Store', () => {
   let store: Store;
@@ -160,30 +161,7 @@ describe('Store', () => {
     // because insertArtifact() threw on this legacy NOT NULL column, and the
     // engine's error path flipped the run to FAILED. Guard against a
     // regression of that throw.
-    const dir = mkdtempSync(join(tmpdir(), 'jinn-legacy-insert-'));
-    const dbPath = join(dir, 'jinn.db');
-    const legacy = new Database(dbPath);
-    legacy.exec(`
-      CREATE TABLE config (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-      CREATE TABLE artifacts (
-        id TEXT PRIMARY KEY,
-        desired_state_id TEXT NOT NULL,
-        request_id TEXT NOT NULL,
-        title TEXT NOT NULL,
-        content TEXT,
-        tags TEXT NOT NULL DEFAULT '[]',
-        outcome TEXT NOT NULL CHECK (outcome IN ('SUCCESS', 'FAILURE', 'UNKNOWN')),
-        remote INTEGER NOT NULL DEFAULT 0,
-        owner_address TEXT,
-        endpoint TEXT,
-        price TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-    `);
-    legacy.close();
+    const { dbPath } = createLegacyArtifactsSchemaDb('jinn-legacy-insert-');
 
     const legacyStore = new Store(dbPath);
     try {
