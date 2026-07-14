@@ -1461,6 +1461,28 @@ Outstanding review findings (fix before opening a PR):
    (transient RPC error left the row at RUNNING, or crash-recovery via
    `_recoverDispatch`) reuses the first resolution instead of re-querying the
    corpus or re-emitting `corpus_knowledge`. Cleared after successful pack().
+   **Follow-up review (same-day) raised two should-fix findings on this
+   path, both resolved:**
+   - Cross-restart reuse didn't actually hold: `consumedRefsJson` was only
+     persisted at the RUNNING → POST_SNAPSHOT transition, so a crash between
+     the corpus lookup and that transition left the DB column null — a
+     restarted process (empty in-memory map) would still re-query and
+     re-emit. Fixed by persisting immediately after the lookup resolves, via
+     a new `TaskRunPersistence.setConsumedRefsJson` (a same-state column
+     update, mirroring `setDeliveryTxHash`/`setManifestGeneratedAt` —
+     `transition()` requires a state change, which RUNNING → RUNNING is
+     not). Covered by a test that drives a row to RUNNING with one
+     `TaskEngine` instance, then hands the same store/DB row to a second,
+     freshly-constructed `TaskEngine` instance and asserts a single corpus
+     query and a single `corpus_knowledge` event across both.
+   - The `JSON.parse` of a reused `consumedRefsJson` value was unguarded —
+     a malformed persisted value threw synchronously in `runImpl`,
+     permanently failing the run (violating the never-block invariant,
+     AC3). Fixed by wrapping the parse in try/catch: on failure, log a
+     warning and fall through to a fresh lookup, which also overwrites the
+     bad value so later retries don't hit it again. Covered by a test that
+     seeds a malformed `consumed_refs_json` value directly and proves the
+     run still completes.
 4. ~~Sick corpus beats no corpus~~ — RESOLVED. `loadCorpusKnowledge` now
    falls back to a store-only (`corpus: null`) pass on network-corpus
    timeout/failure, so local knowledge still injects. `ReadOnlyCorpus.query`
