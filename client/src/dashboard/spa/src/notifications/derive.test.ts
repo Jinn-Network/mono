@@ -83,6 +83,23 @@ describe('deriveNotifications', () => {
     expect(out.map(n => n.kind)).toContain('update_available');
   });
 
+  it('does not emit update_available when latestVersion is undefined (null on the wire)', () => {
+    const { latestVersion: _drop, ...rest } = baseState.status;
+    const out = deriveNotifications({
+      ...baseState,
+      status: rest,
+    });
+    expect(out.map(n => n.kind)).not.toContain('update_available');
+  });
+
+  it('does not emit update_available when latestVersion equals daemonVersion', () => {
+    const out = deriveNotifications({
+      ...baseState,
+      status: { ...baseState.status, daemonVersion: '0.1.5', latestVersion: '0.1.5' },
+    });
+    expect(out.map(n => n.kind)).not.toContain('update_available');
+  });
+
   it('does not duplicate categories (each canonical kind emits at most once)', () => {
     const out = deriveNotifications({
       ...baseState,
