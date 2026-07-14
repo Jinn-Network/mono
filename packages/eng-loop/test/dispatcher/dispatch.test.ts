@@ -276,7 +276,7 @@ describe('dispatchIssue', () => {
     expect(addCall!.args[addCall!.args.length - 1]).toBe('origin/feat/50-blocker');
 
     // The session prompt directs the PR base at the blocker branch.
-    const prompt = spawnCalls[0].args[1];
+    const prompt = promptOf(spawnCalls[0]);
     expect(prompt).toMatch(/base branch `feat\/50-blocker`/);
   });
 
