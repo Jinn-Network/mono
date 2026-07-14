@@ -202,6 +202,12 @@ function makeSpawn(
   return { spawn, calls };
 }
 
+/**
+ * The dispatched prompt is always the final positional arg — it follows `-p`
+ * and any spliced `--effort` flag (#1673).
+ */
+const promptOf = (spawnCall: SpawnCall): string => spawnCall.args[spawnCall.args.length - 1];
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -342,8 +348,7 @@ describe('dispatchIssue', () => {
     // The prompt is passed via -p / --print flag
     const pFlagIdx = spawnCall.args.indexOf('-p');
     expect(pFlagIdx).toBeGreaterThan(-1);
-    // Prompt is the final positional arg — after `-p` and any spliced --effort flag (#1673).
-    const prompt = spawnCall.args[spawnCall.args.length - 1];
+    const prompt = promptOf(spawnCall);
 
     // (b) headless-override block — check for a distinctive phrase from headless-override.md
     expect(prompt).toContain('non-interactive');
@@ -380,8 +385,7 @@ describe('dispatchIssue', () => {
     await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
 
     const [spawnCall] = calls;
-    // Prompt is the final positional arg — after `-p` and any spliced --effort flag (#1673).
-    const prompt = spawnCall.args[spawnCall.args.length - 1];
+    const prompt = promptOf(spawnCall);
 
     // (a) CLAUDE.md canon — check for a distinctive phrase from CLAUDE.md
     expect(prompt).toContain('CLAUDE.md');
@@ -394,8 +398,7 @@ describe('dispatchIssue', () => {
     await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
 
     const [spawnCall] = calls;
-    // Prompt is the final positional arg — after `-p` and any spliced --effort flag (#1673).
-    const prompt = spawnCall.args[spawnCall.args.length - 1];
+    const prompt = promptOf(spawnCall);
 
     // (a) handbook — check for a distinctive phrase from the engineering handbook
     expect(prompt).toContain('handbook');
@@ -408,8 +411,7 @@ describe('dispatchIssue', () => {
     await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
 
     const [spawnCall] = calls;
-    // Prompt is the final positional arg — after `-p` and any spliced --effort flag (#1673).
-    const prompt = spawnCall.args[spawnCall.args.length - 1];
+    const prompt = promptOf(spawnCall);
 
     // (c) implement-issue + issue number
     expect(prompt).toContain('implement-issue');
@@ -423,8 +425,7 @@ describe('dispatchIssue', () => {
     await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
 
     const [spawnCall] = calls;
-    // Prompt is the final positional arg — after `-p` and any spliced --effort flag (#1673).
-    const prompt = spawnCall.args[spawnCall.args.length - 1];
+    const prompt = promptOf(spawnCall);
 
     // The dispatcher must tell the session not to create a new worktree, because
     // the worktree is pre-created before spawn. This prevents the double
@@ -595,8 +596,7 @@ describe('dispatchIssue', () => {
 
     // Scenario prompt unchanged: default implementer is claude.
     const [spawnCall] = calls;
-    // Prompt is the final positional arg — after `-p` and any spliced --effort flag (#1673).
-    const prompt = spawnCall.args[spawnCall.args.length - 1];
+    const prompt = promptOf(spawnCall);
     expect(prompt).toContain('The default implementer for the inner pipeline is: claude.');
 
     logSpy.mockRestore();
@@ -619,8 +619,7 @@ describe('dispatchIssue', () => {
     expect(line).toContain('impl=codex');
 
     const [spawnCall] = calls;
-    // Prompt is the final positional arg — after `-p` and any spliced --effort flag (#1673).
-    const prompt = spawnCall.args[spawnCall.args.length - 1];
+    const prompt = promptOf(spawnCall);
     expect(prompt).toContain('The default implementer for the inner pipeline is: codex.');
 
     logSpy.mockRestore();
