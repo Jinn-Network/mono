@@ -31,6 +31,32 @@ export interface DeriveInput {
 const RUNWAY_LOW_THRESHOLD_DAYS = 3;
 const PASSWORD_ROTATION_INTERVAL_MS = 1000 * 60 * 60 * 24 * 90;
 
+/**
+ * Single source of the gas-runway severity rule (#1296): blocking when the
+ * balance can't cover the next tx (`balanceWei < minEthWei`), warning when
+ * the remaining runway is under {@link RUNWAY_LOW_THRESHOLD_DAYS}. Consumed
+ * by both the notifications deriver's chain mapping (`gasChain` in
+ * `useNotifications.ts`) and the Wallet card's tint on Overview — previously
+ * each restated this threshold independently.
+ */
+export function gasSeverity(gas: {
+  balanceWei?: string;
+  runwayDaysExcess?: string | number | null;
+  minEthWei?: string;
+}): 'warning' | 'blocking' | null {
+  if (!gas || gas.balanceWei === undefined) return null;
+  try {
+    if (gas.minEthWei !== undefined && BigInt(gas.balanceWei) < BigInt(gas.minEthWei)) {
+      return 'blocking';
+    }
+  } catch {
+    /* non-numeric */
+  }
+  const days = Number(gas.runwayDaysExcess);
+  if (Number.isFinite(days) && days < RUNWAY_LOW_THRESHOLD_DAYS) return 'warning';
+  return null;
+}
+
 export function deriveNotifications(input: DeriveInput): OperatorNotification[] {
   const out: OperatorNotification[] = [];
   const s = input.status;
