@@ -741,6 +741,32 @@ export class TaskRunPersistence {
   }
 
   /**
+   * Administrative backfill (#506): reclassify a FAILED row as COMPLETE when
+   * its on-chain delivery actually landed — the run failed only because a
+   * downstream persistence step (e.g. the legacy `desired_state_id` NOT NULL
+   * insertArtifact throw, fixed in #511) threw after the delivery tx was
+   * already broadcast and confirmed.
+   *
+   * Deliberately bypasses `assertValidTransition` — there is no FAILED →
+   * COMPLETE edge in the state machine, and there shouldn't be one; this is
+   * an out-of-band operator-invoked correction driven by on-chain evidence
+   * (a successful transaction receipt), not a transition the engine itself
+   * would ever perform. Idempotent: returns `false` and makes no change if
+   * the row is missing or not currently FAILED.
+   */
+  reclassifyFailedAsComplete(requestId: string): boolean {
+    const existing = this.getByRequestId(requestId);
+    if (!existing || existing.state !== 'FAILED') return false;
+    const now = Date.now();
+    const result = this.db.prepare(`
+      UPDATE task_runs
+      SET state = 'COMPLETE', state_updated_at = ?, failure_reason = NULL, failure_at = NULL
+      WHERE request_id = ? AND state = 'FAILED'
+    `).run(now, requestId);
+    return result.changes > 0;
+  }
+
+  /**
    * Mark a task RACE_LOST with a reason (valid from any non-terminal state).
    * Peer to `markFailed`, semantically distinct: the run never produced
    * operator-attributable work — another operator pruned the on-chain slot
