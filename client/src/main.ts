@@ -1001,22 +1001,31 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // (issue #804). `jinn run --no-ui` / JINN_NO_UI=1 always suppresses;
   // `jinn run --ui` / JINN_FORCE_UI=1 forces a reopen even past first launch.
   const uiOpenedMarkerPath = join(config.earningDir, '.ui-opened');
+  const noUi = process.env['JINN_NO_UI'] === '1';
+  const forceUi = process.env['JINN_FORCE_UI'] === '1';
   const uiAutoOpenDecision = decideUiAutoOpen({
-    noUi: process.env['JINN_NO_UI'] === '1',
-    forceUi: process.env['JINN_FORCE_UI'] === '1',
+    noUi,
+    forceUi,
     markerExists: existsSync(uiOpenedMarkerPath),
   });
   if (uiAutoOpenDecision.shouldOpen) {
     openBrowser(process.env['JINN_UI_HANDSHAKE_URL']!);
-  } else if (process.env['JINN_NO_UI'] !== '1') {
+  } else if (!noUi) {
     console.log(
       `[main] Dashboard ready at http://127.0.0.1:${setupApiServer.port} — ` +
         `run 'jinn ui' to open it (auto-open suppressed after first launch; use --ui to force)`,
     );
   }
   if (uiAutoOpenDecision.shouldWriteMarker) {
-    mkdirSync(dirname(uiOpenedMarkerPath), { recursive: true });
-    writeFileSyncMain(uiOpenedMarkerPath, new Date().toISOString() + '\n');
+    try {
+      mkdirSync(dirname(uiOpenedMarkerPath), { recursive: true });
+      writeFileSyncMain(uiOpenedMarkerPath, new Date().toISOString() + '\n');
+    } catch (err) {
+      console.warn(
+        `[main] Failed to write UI-opened marker at ${uiOpenedMarkerPath}: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    }
   }
   console.log(
     `[main] Setup-mode API up (mode=${setupController.mode()}). ` +
