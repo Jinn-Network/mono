@@ -19,6 +19,7 @@ import { EPISODE_SCHEMA_VERSION, EpisodeV1Schema } from './schemas/episode.js';
 import type { EpisodeV1 } from './schemas/episode.js';
 import type { KnowledgeHit } from './schemas/knowledge-hit.js';
 import type { SessionSummary } from './schemas/session-summary.js';
+import type { PortResult } from './outcome.js';
 
 export interface JinnPluginDeps {
   corpus: CorpusPort;
@@ -64,7 +65,14 @@ export interface SessionOutcome {
 }
 
 export interface SessionEndResult {
+  /**
+   * Locally-generated episode id. This is a local reference, NOT proof of
+   * persistence — branch on `persistence.status` to know whether the episode
+   * was durably stored.
+   */
   episodeRef: string;
+  /** Honest surfacing of the `evidence.put()` outcome (#1696 AC2). */
+  persistence: PortResult<{ episodeId: string }>;
   eligibility: EligibilityVerdict;
   summary: SessionSummary;
 }
@@ -146,7 +154,7 @@ export class PluginSession {
       provenance: 'contributed',
     });
 
-    await this.deps.evidence.put(episode);
+    const persistence = await this.deps.evidence.put(episode);
 
     const eligibility: EligibilityVerdict = {
       eligible: false,
@@ -163,7 +171,7 @@ export class PluginSession {
       nothingFound: this.surfacedHits.length === 0,
     };
 
-    return { episodeRef: episode.episodeId, eligibility, summary };
+    return { episodeRef: episode.episodeId, persistence, eligibility, summary };
   }
 }
 

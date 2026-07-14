@@ -15,7 +15,8 @@ import { describe, expect, it } from 'vitest';
 function specifierRegex(innerPattern: string): RegExp {
   return new RegExp(
     `from\\s+['"]${innerPattern}['"]` +
-      `|(?:import|require)\\(\\s*['"]${innerPattern}['"]\\s*\\)`,
+      `|(?:import|require)\\(\\s*['"]${innerPattern}['"]\\s*\\)` +
+      `|import\\s+['"]${innerPattern}['"]`,
   );
 }
 
@@ -26,6 +27,11 @@ const FORBIDDEN_PATTERNS: Array<{ label: string; regex: RegExp }> = [
   { label: '@modelcontextprotocol/sdk', regex: specifierRegex('@modelcontextprotocol\\/sdk(\\/[^\'"]*)?') },
   { label: 'node:fs|node:net|node:child_process', regex: specifierRegex('node:(fs|net|child_process)') },
   { label: 'process.env', regex: /process\.env/ },
+  // Bare global network calls (not method calls on an object): a preceding
+  // `.` or word char means it's `corpus.fetch(` / `this.fetch(`, which is fine.
+  { label: 'global fetch()', regex: /(?<![.\w])fetch\s*\(/ },
+  { label: 'global WebSocket()', regex: /(?<![.\w])WebSocket\s*\(/ },
+  { label: 'global XMLHttpRequest()', regex: /(?<![.\w])XMLHttpRequest\s*\(/ },
 ];
 
 export function findForbiddenImports(sourceText: string): string[] {
@@ -98,5 +104,30 @@ describe('src → forbidden-import boundary (#1658)', () => {
   it('canary: findForbiddenImports flags a require() of a forbidden specifier (AC3)', () => {
     const found = findForbiddenImports("const cp = require('node:child_process');");
     expect(found.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('canary: flags a bare global fetch() call (#1696 AC1)', () => {
+    const found = findForbiddenImports("const res = await fetch('https://x');");
+    expect(found.some((f) => f.includes('global fetch()'))).toBe(true);
+  });
+
+  it('canary: flags a bare global WebSocket() construction (#1696 AC1)', () => {
+    const found = findForbiddenImports("const ws = new WebSocket('wss://x');");
+    expect(found.some((f) => f.includes('global WebSocket()'))).toBe(true);
+  });
+
+  it('canary: flags a bare global XMLHttpRequest() construction (#1696 AC1)', () => {
+    const found = findForbiddenImports('const xhr = new XMLHttpRequest();');
+    expect(found.some((f) => f.includes('global XMLHttpRequest()'))).toBe(true);
+  });
+
+  it('canary: flags a side-effect import of a forbidden specifier (#1696 AC1)', () => {
+    const found = findForbiddenImports("import 'viem';");
+    expect(found.some((f) => f.includes('viem'))).toBe(true);
+  });
+
+  it('does not flag a method call named fetch on an object (#1696 AC1)', () => {
+    const found = findForbiddenImports('const r = await this.deps.corpus.search(x); const f = foo.fetch(x);');
+    expect(found).toEqual([]);
   });
 });
