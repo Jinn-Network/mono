@@ -132,8 +132,12 @@ export function mapStatusToDeriveInput(
     // this default keeps rpc_unreachable from double-firing through the deriver.
     rpc: { reachable: true },
     restartPending,
+    // `version` + `latestVersion` are now populated by the daemon's start-time
+    // npm-registry check (#641). A `string` latestVersion that differs from
+    // daemonVersion fires the `update_available` banner via the deriver; a
+    // null/absent value maps to undefined so the banner stays silent.
     daemonVersion: String(s.version ?? '0.0.0'),
-    latestVersion: undefined,
+    latestVersion: typeof s.latestVersion === 'string' ? s.latestVersion : undefined,
     services: fleetServices.map((svc: any) => ({
       safeBound: svc?.safeBoundToAgent !== false,
     })),
