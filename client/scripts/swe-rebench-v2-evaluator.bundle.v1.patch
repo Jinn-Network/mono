@@ -1,0 +1,79 @@
+diff --git a/lib/agent/log_parsers.py b/lib/agent/log_parsers.py
+--- a/lib/agent/log_parsers.py
++++ b/lib/agent/log_parsers.py
+@@ -1156,6 +1156,53 @@ def parse_log_vitest(log: str) -> dict[str, str]:
+     return test_status_map
+-
+-
++
++
++def parse_log_vitest_json(log: str) -> dict[str, str]:
++    """Parse the stable Vitest JSON reporter output used by Jinn recipes."""
++    decoder = json.JSONDecoder()
++    report = None
++    for offset, char in enumerate(log):
++        if char != "{":
++            continue
++        try:
++            candidate, _ = decoder.raw_decode(log[offset:])
++        except json.JSONDecodeError:
++            continue
++        if isinstance(candidate, dict) and isinstance(candidate.get("testResults"), list):
++            report = candidate
++
++    if report is None:
++        raise ValueError("vitest-json.v1: no Vitest JSON report found")
++
++    test_status_map = {}
++    for suite in report["testResults"]:
++        if not isinstance(suite, dict):
++            continue
++        assertions = suite.get("assertionResults", [])
++        if not isinstance(assertions, list):
++            continue
++        for assertion in assertions:
++            if not isinstance(assertion, dict):
++                continue
++            name = assertion.get("fullName")
++            if not isinstance(name, str) or not name:
++                ancestors = assertion.get("ancestorTitles", [])
++                title = assertion.get("title", "")
++                parts = [part for part in ancestors if isinstance(part, str)]
++                if isinstance(title, str):
++                    parts.append(title)
++                name = " ".join(part for part in parts if part)
++            if not name:
++                continue
++            status = assertion.get("status")
++            if status == "passed":
++                test_status_map[name] = TestStatus.PASSED.value
++            elif status == "failed":
++                test_status_map[name] = TestStatus.FAILED.value
++            elif status in {"pending", "skipped", "todo"}:
++                test_status_map[name] = TestStatus.SKIPPED.value
++    return test_status_map
++
++
+ def parse_log_karma(log: str) -> dict[str, str]:
+     """
+     Parser for test logs generated with Karma. Handles duplicate test names in
+@@ -3533,6 +3580,7 @@ NAME_TO_PARSER = {
+     "parse_log_jest": parse_log_jest,
+     "parse_log_jest_json": parse_log_jest_json,
+     "parse_log_vitest": parse_log_vitest,
++    "vitest-json.v1": parse_log_vitest_json,
+     "parse_log_karma": parse_log_karma,
+     "parse_log_tap": parse_log_tap,
+     "parse_log_elixir": parse_log_elixir,
+diff --git a/scripts/eval.py b/scripts/eval.py
+--- a/scripts/eval.py
++++ b/scripts/eval.py
+@@ -375,6 +375,8 @@ def build_report_item(spec: dict, outcome: dict) -> dict:
+         "instance_id": instance_id,
+         "from_fail_to_pass": from_fail_to_pass,
+         "failed_from_pass_to_pass": failed_from_pass_to_pass,
++        "passed_actual": sorted(passed_actual),
++        "failed_actual": sorted(result.get("failed_actual", [])),
+         "passed_match": result.get("passed_match", False),
+         "exit_code": result.get("exit_code"),
+         "log_path": result.get("log_path"),

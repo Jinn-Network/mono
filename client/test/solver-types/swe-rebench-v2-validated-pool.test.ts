@@ -303,6 +303,34 @@ describe('swe-rebench-v2 vetted pool artifact helpers', () => {
     expect(sweRebenchV2VettedPoolArtifactMetadataKey('bafy-manifest'))
       .toBe('solvernet-artifact:bafy-manifest:swe-rebench-v2-vetted-pool');
   });
+
+  it('publishes and parses the exact public v2 environment admission binding', async () => {
+    const store = new ValidatedPoolStore({ stateDir: tmpDir() });
+    const digest = `sha256:${'a'.repeat(64)}` as `sha256:${string}`;
+    await store.record('jinn__mono-1', {
+      scorable: true,
+      reason: 'gold-patch-resolves',
+      checkedAt: '2026-07-10T00:00:00.000Z',
+      rowHashVersion: 2,
+      publicRowHash: `sha256:${'b'.repeat(64)}`,
+      v2Environment: {
+        environmentSpecCid: 'bafy-environment',
+        environmentHash: `sha256:${'c'.repeat(64)}`,
+        parser: { id: 'vitest-json.v1', version: 'v1', digest, bundleId: 'jinn.swe-rebench-v2.patch-bundle.v1' },
+        image: { reference: `ghcr.io/jinn-network/task-environment@${digest}`, digest },
+        platform: 'linux/amd64',
+      },
+    }, EVAL_SEMANTICS_VERSION);
+
+    const artifact = await exportScorableVettedPoolArtifact(store, EVAL_SEMANTICS_VERSION);
+    const entry = loadVettedPoolArtifactScorableEntries(artifact!).byId.get('jinn__mono-1');
+
+    expect(entry).toMatchObject({
+      rowHashVersion: 2,
+      publicRowHash: `sha256:${'b'.repeat(64)}`,
+      v2Environment: { environmentSpecCid: 'bafy-environment', platform: 'linux/amd64' },
+    });
+  });
 });
 
 describe('excludeFromVettedPoolArtifact (#986 substrate-level held-out exclusion)', () => {

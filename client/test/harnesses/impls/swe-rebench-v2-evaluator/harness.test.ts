@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { privateKeyToAccount } from 'viem/accounts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SweRebenchV2EvaluatorHarness } from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/harness.js';
@@ -15,6 +17,21 @@ import {
   type SweRebenchV2VettedPoolArtifact,
 } from '../../../../src/solver-types/_swe-rebench-v2-validated-pool.js';
 import { computeRowHash } from '../../../../src/solver-types/_swe-rebench-v2-substrate.js';
+import { RoutingTaskRowFetcher } from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/routing-task-row-fetcher.js';
+import {
+  computeMintedPoolRowV2Hash,
+  type MintedPoolRowV2,
+  type SweRebenchV2MintedPoolArtifactV2,
+} from '../../../../src/solver-types/_swe-rebench-v2-minted-pool.js';
+import {
+  environmentAttestationMessageV1,
+  hashTaskEnvironmentSpecV1,
+  type TaskEnvironmentSpecV1,
+} from '../../../../src/task-creator/environment/contracts.js';
+import {
+  createDifferentialAdmissionReceiptV2,
+  hashDifferentialAdmissionReceiptV2,
+} from '../../../../src/solver-types/_swe-rebench-v2-differential-admission.js';
 
 function makeImplStateDir(): string {
   return mkdtempSync(join(tmpdir(), 'swe-rebench-v2-evaluator-test-'));
@@ -29,6 +46,37 @@ function makeEnabledMarker(implStateDir: string, upstreamRepoDir: string): void 
       enabled: true,
       enabledAt: '2026-05-07T00:00:00Z',
       upstreamRepoDir,
+    }),
+  );
+}
+
+function makeDurableEnabledMarker(implStateDir: string, upstreamRepoDir: string): void {
+  const bundleSha256 = `sha256:${createHash('sha256')
+    .update(readFileSync(join(process.cwd(), 'scripts', 'swe-rebench-v2-evaluator.bundle.v1.patch')))
+    .digest('hex')}`;
+  mkdirSync(upstreamRepoDir, { recursive: true });
+  writeFileSync(
+    join(implStateDir, 'state.json'),
+    JSON.stringify({
+      schemaVersion: 'swe-rebench-v2-evaluator-state.v2',
+      enabled: true,
+      enabledAt: '2026-07-10T00:00:00Z',
+      upstreamRepoDir,
+      upstream: {
+        repoUrl: 'https://github.com/SWE-rebench/SWE-rebench-V2.git',
+        commit: 'c71902a8cf8d2b725f63d51f199f4d3e56f68d2d',
+      },
+      patchBundle: {
+        id: 'jinn.swe-rebench-v2.patch-bundle.v1',
+        version: 'v1',
+        sha256: bundleSha256,
+      },
+      trustedParsers: [{
+        id: 'vitest-json.v1',
+        version: 'v1',
+        bundleId: 'jinn.swe-rebench-v2.patch-bundle.v1',
+        bundleSha256,
+      }],
     }),
   );
 }
@@ -205,7 +253,7 @@ describe('SweRebenchV2EvaluatorHarness — isReady', () => {
   }
 
   it('reports ready when state file + upstream repo are present and Docker is reachable', async () => {
-    makeEnabledMarker(implStateDir, join(implStateDir, 'upstream'));
+    makeDurableEnabledMarker(implStateDir, join(implStateDir, 'upstream'));
     const h = new SweRebenchV2EvaluatorHarness({
       implStateDir,
       _testDeps: { runCommand: dockerOk() },
@@ -215,7 +263,7 @@ describe('SweRebenchV2EvaluatorHarness — isReady', () => {
   });
 
   it('reports not-ready when Docker is unreachable, even with a valid enable marker', async () => {
-    makeEnabledMarker(implStateDir, join(implStateDir, 'upstream'));
+    makeDurableEnabledMarker(implStateDir, join(implStateDir, 'upstream'));
     const runCommand = vi.fn(async (bin: string) =>
       bin === 'docker'
         ? { exitCode: 1, stdout: '', stderr: 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock.' }
@@ -232,8 +280,61 @@ describe('SweRebenchV2EvaluatorHarness — isReady', () => {
     expect(runCommand).toHaveBeenCalledWith('docker', ['info']);
   });
 
+  it('reports not-ready when a v2 marker has stale pinned metadata', async () => {
+    const upstreamRepoDir = join(implStateDir, 'upstream');
+    makeDurableEnabledMarker(implStateDir, upstreamRepoDir);
+    const markerPath = join(implStateDir, 'state.json');
+    const marker = JSON.parse(readFileSync(markerPath, 'utf8'));
+    marker.upstream.commit = '0'.repeat(40);
+    writeFileSync(markerPath, JSON.stringify(marker));
+    const h = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { runCommand: dockerOk() },
+    });
+
+    const r = await h.isReady();
+
+    expect(r.ready).toBe(false);
+    expect(r.reason).toMatch(/repair/i);
+    expect(r.nextStep?.cli).toBe('jinn harnesses enable swe-rebench-v2-evaluator');
+  });
+
+  it('reports not-ready when the persisted bundle hash differs from the current asset', async () => {
+    const upstreamRepoDir = join(implStateDir, 'upstream');
+    makeDurableEnabledMarker(implStateDir, upstreamRepoDir);
+    const markerPath = join(implStateDir, 'state.json');
+    const marker = JSON.parse(readFileSync(markerPath, 'utf8'));
+    marker.patchBundle.sha256 = `sha256:${'f'.repeat(64)}`;
+    marker.trustedParsers[0].bundleSha256 = marker.patchBundle.sha256;
+    writeFileSync(markerPath, JSON.stringify(marker));
+    const h = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { runCommand: dockerOk() },
+    });
+
+    const r = await h.isReady();
+
+    expect(r.ready).toBe(false);
+    expect(r.reason).toMatch(/repair/i);
+  });
+
+  it('treats malformed v2 parser metadata as not-ready rather than throwing', async () => {
+    const upstreamRepoDir = join(implStateDir, 'upstream');
+    makeDurableEnabledMarker(implStateDir, upstreamRepoDir);
+    const markerPath = join(implStateDir, 'state.json');
+    const marker = JSON.parse(readFileSync(markerPath, 'utf8'));
+    marker.trustedParsers = { not: 'an array' };
+    writeFileSync(markerPath, JSON.stringify(marker));
+    const h = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { runCommand: dockerOk() },
+    });
+
+    await expect(h.isReady()).resolves.toMatchObject({ ready: false });
+  });
+
   it('caches the docker info probe across rapid isReady() calls (claim-loop hot path)', async () => {
-    makeEnabledMarker(implStateDir, join(implStateDir, 'upstream'));
+    makeDurableEnabledMarker(implStateDir, join(implStateDir, 'upstream'));
     const runCommand = vi.fn(async (bin: string) =>
       bin === 'docker' ? { exitCode: 0, stdout: 'ok', stderr: '' } : { exitCode: 0, stdout: '', stderr: '' },
     );
@@ -253,7 +354,7 @@ describe('SweRebenchV2EvaluatorHarness — isReady', () => {
         schemaVersion: 'swe-rebench-v2-evaluator-state.v1',
         enabled: true,
         enabledAt: '2026-05-07T00:00:00Z',
-        upstreamRepoDir: join(implStateDir, 'does-not-exist'),
+        upstreamRepoDir: join(implStateDir, 'upstream'),
       }),
     );
     const h = new SweRebenchV2EvaluatorHarness({ implStateDir });
@@ -343,11 +444,180 @@ describe('SweRebenchV2EvaluatorHarness — onEnable', () => {
     const state = JSON.parse(readFileSync(join(implStateDir, 'state.json'), 'utf8'));
     expect(state.enabled).toBe(true);
     expect(state.upstreamRepoDir).toBe(join(implStateDir, 'upstream'));
-    // Idempotent: a second invocation does not re-clone.
+    // Idempotent: a second invocation does not re-clone, but does repeat the
+    // lightweight Python self-test before reporting ready.
     runCommand.mockClear();
     const r2 = await h.onEnable({ args: {}, runtimePlugins: [] });
     expect(r2.status).toBe('ready');
-    expect(runCommand).not.toHaveBeenCalled();
+    expect(runCommand.mock.calls.filter(([bin]) => bin === 'git')).toHaveLength(0);
+    expect(runCommand).toHaveBeenCalledWith(
+      'python3',
+      ['-c', expect.stringContaining('vitest-json.v1')],
+      { cwd: join(implStateDir, 'upstream') },
+    );
+  });
+
+  it('pins, patches, self-tests, and records the durable evaluator bundle on enable', async () => {
+    const upstreamRepoDir = join(implStateDir, 'upstream');
+    const runCommand = makeRunCommand((bin) => {
+      if (bin === 'docker' || bin === 'python3' || bin === 'git') return { exitCode: 0 };
+      return { exitCode: 0 };
+    });
+    const h = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { runCommand },
+    });
+
+    const r = await h.onEnable({ args: {}, runtimePlugins: [] });
+
+    expect(r.status).toBe('ready');
+    expect(runCommand).toHaveBeenCalledWith(
+      'git',
+      [
+        'clone',
+        '--no-checkout',
+        'https://github.com/SWE-rebench/SWE-rebench-V2.git',
+        upstreamRepoDir,
+      ],
+    );
+    expect(runCommand).toHaveBeenCalledWith(
+      'git',
+      ['fetch', '--depth=1', 'origin', 'c71902a8cf8d2b725f63d51f199f4d3e56f68d2d'],
+      { cwd: upstreamRepoDir },
+    );
+    expect(runCommand).toHaveBeenCalledWith(
+      'git',
+      ['checkout', '--detach', '--force', 'c71902a8cf8d2b725f63d51f199f4d3e56f68d2d'],
+      { cwd: upstreamRepoDir },
+    );
+    expect(runCommand).toHaveBeenCalledWith(
+      'git',
+      ['apply', '--check', expect.stringContaining('swe-rebench-v2-evaluator.bundle.v1.patch')],
+      { cwd: upstreamRepoDir },
+    );
+    expect(runCommand).toHaveBeenCalledWith(
+      'git',
+      ['apply', expect.stringContaining('swe-rebench-v2-evaluator.bundle.v1.patch')],
+      { cwd: upstreamRepoDir },
+    );
+    expect(runCommand).toHaveBeenCalledWith(
+      'python3',
+      ['-c', expect.stringContaining('vitest-json.v1')],
+      { cwd: upstreamRepoDir },
+    );
+
+    const state = JSON.parse(readFileSync(join(implStateDir, 'state.json'), 'utf8'));
+    expect(state).toMatchObject({
+      schemaVersion: 'swe-rebench-v2-evaluator-state.v2',
+      enabled: true,
+      upstreamRepoDir,
+      upstream: {
+        commit: 'c71902a8cf8d2b725f63d51f199f4d3e56f68d2d',
+      },
+      patchBundle: {
+        id: 'jinn.swe-rebench-v2.patch-bundle.v1',
+        version: 'v1',
+        sha256: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+      },
+      trustedParsers: [
+        {
+          id: 'vitest-json.v1',
+          version: 'v1',
+        },
+      ],
+    });
+  });
+
+  it('repairs a legacy enable marker before returning ready', async () => {
+    const upstreamRepoDir = join(implStateDir, 'upstream');
+    makeEnabledMarker(implStateDir, upstreamRepoDir);
+    const runCommand = makeRunCommand((bin) => {
+      if (bin === 'docker' || bin === 'python3' || bin === 'git') return { exitCode: 0 };
+      return { exitCode: 0 };
+    });
+    const h = new SweRebenchV2EvaluatorHarness({ implStateDir, _testDeps: { runCommand } });
+
+    const r = await h.onEnable({ args: {}, runtimePlugins: [] });
+
+    expect(r.status).toBe('ready');
+    expect(runCommand).toHaveBeenCalledWith(
+      'git',
+      ['reset', '--hard', 'c71902a8cf8d2b725f63d51f199f4d3e56f68d2d'],
+      { cwd: upstreamRepoDir },
+    );
+    expect(runCommand).toHaveBeenCalledWith(
+      'git',
+      ['apply', expect.stringContaining('swe-rebench-v2-evaluator.bundle.v1.patch')],
+      { cwd: upstreamRepoDir },
+    );
+    const state = JSON.parse(readFileSync(join(implStateDir, 'state.json'), 'utf8'));
+    expect(state.schemaVersion).toBe('swe-rebench-v2-evaluator-state.v2');
+  });
+
+  it('repairs an external stale marker without running git in its referenced directory', async () => {
+    const externalRepoDir = mkdtempSync(join(tmpdir(), 'swe-rebench-v2-external-'));
+    try {
+      makeEnabledMarker(implStateDir, externalRepoDir);
+      const managedRepoDir = join(implStateDir, 'upstream');
+      const runCommand = makeRunCommand((bin, args) => {
+        if (bin === 'git' && args[0] === 'clone') {
+          mkdirSync(args[args.length - 1]!, { recursive: true });
+        }
+        return { exitCode: 0 };
+      });
+      const h = new SweRebenchV2EvaluatorHarness({ implStateDir, _testDeps: { runCommand } });
+
+      const r = await h.onEnable({ args: {}, runtimePlugins: [] });
+
+      expect(r.status).toBe('ready');
+      expect(runCommand).toHaveBeenCalledWith(
+        'git',
+        ['clone', '--no-checkout', 'https://github.com/SWE-rebench/SWE-rebench-V2.git', managedRepoDir],
+      );
+      const gitWorkingDirs = runCommand.mock.calls
+        .filter(([bin]) => bin === 'git')
+        .map(([, , opts]) => (opts as { cwd?: string } | undefined)?.cwd);
+      expect(gitWorkingDirs).not.toContain(externalRepoDir);
+      expect(gitWorkingDirs).toContain(managedRepoDir);
+    } finally {
+      rmSync(externalRepoDir, { recursive: true, force: true });
+    }
+  });
+
+  it('repairs malformed v2 parser metadata instead of throwing', async () => {
+    const upstreamRepoDir = join(implStateDir, 'upstream');
+    makeDurableEnabledMarker(implStateDir, upstreamRepoDir);
+    const markerPath = join(implStateDir, 'state.json');
+    const marker = JSON.parse(readFileSync(markerPath, 'utf8'));
+    marker.trustedParsers = {};
+    writeFileSync(markerPath, JSON.stringify(marker));
+    const runCommand = makeRunCommand((bin) => {
+      if (bin === 'docker' || bin === 'python3' || bin === 'git') return { exitCode: 0 };
+      return { exitCode: 0 };
+    });
+    const h = new SweRebenchV2EvaluatorHarness({ implStateDir, _testDeps: { runCommand } });
+
+    await expect(h.onEnable({ args: {}, runtimePlugins: [] })).resolves.toMatchObject({ status: 'ready' });
+    expect(runCommand).toHaveBeenCalledWith(
+      'git',
+      ['reset', '--hard', 'c71902a8cf8d2b725f63d51f199f4d3e56f68d2d'],
+      { cwd: upstreamRepoDir },
+    );
+  });
+
+  it('does not mark the evaluator ready when the patched upstream self-test fails', async () => {
+    const upstreamRepoDir = join(implStateDir, 'upstream');
+    const runCommand = makeRunCommand((bin, args) => {
+      if (bin === 'docker') return { exitCode: 0 };
+      if (bin === 'python3' && args[0] === '-c') return { exitCode: 1, stderr: 'parser missing' };
+      return { exitCode: 0 };
+    });
+    const h = new SweRebenchV2EvaluatorHarness({ implStateDir, _testDeps: { runCommand } });
+
+    const r = await h.onEnable({ args: {}, runtimePlugins: [] });
+
+    expect(r).toMatchObject({ status: 'error' });
+    expect(existsSync(join(implStateDir, 'state.json'))).toBe(false);
   });
 
   it('surfaces a clone failure as status=error', async () => {
@@ -995,5 +1265,550 @@ describe('SweRebenchV2EvaluatorHarness — verdict-time substrate recheck', () =
     expect(err).toBeInstanceOf(SkippableError);
     expect(err.reason).toBe('vetted_pool_instance_missing_or_unscorable');
     expect(err.reason).not.toBe('admission_missing_or_unscorable');
+  });
+});
+
+describe('SweRebenchV2EvaluatorHarness — minted-pool.v2 environment recheck', () => {
+  const INSTANCE_ID = 'jinn-network__mono__echo-5b76bade3198';
+  const IMAGE_DIGEST = `sha256:${'d'.repeat(64)}`;
+  const IMAGE = `ghcr.io/jinn-network/task-environment@${IMAGE_DIGEST}`;
+  const BASE_COMMIT = 'c7701007'.padEnd(40, '0');
+  let implStateDir: string;
+  let stateDir: string;
+
+  beforeEach(() => {
+    implStateDir = makeImplStateDir();
+    stateDir = mkdtempSync(join(tmpdir(), 'swe-rebench-v2-minted-v2-state-'));
+    makeDurableEnabledMarker(implStateDir, join(implStateDir, 'upstream'));
+  });
+  afterEach(() => {
+    rmSync(implStateDir, { recursive: true, force: true });
+    rmSync(stateDir, { recursive: true, force: true });
+  });
+
+  function parserDigest(): `sha256:${string}` {
+    return `sha256:${createHash('sha256')
+      .update(readFileSync(join(process.cwd(), 'scripts', 'swe-rebench-v2-evaluator.bundle.v1.patch')))
+      .digest('hex')}`;
+  }
+
+  async function environmentSpec(): Promise<TaskEnvironmentSpecV1> {
+    const unsigned = {
+      schemaVersion: 'jinn.task-environment.v1' as const,
+      source: {
+        repo: 'Jinn-Network/mono',
+        repoUrl: 'https://github.com/Jinn-Network/mono.git',
+        baseCommit: BASE_COMMIT,
+      },
+      inputs: [{
+        inputRef: `git+https://github.com/Jinn-Network/mono.git#${BASE_COMMIT}`,
+        sha256: `sha256:${'e'.repeat(64)}` as `sha256:${string}`,
+        rights: {
+          inputRef: `git+https://github.com/Jinn-Network/mono.git#${BASE_COMMIT}`,
+          rightsRef: 'https://spdx.org/licenses/Apache-2.0.html',
+          basis: 'spdx' as const,
+          spdxId: 'Apache-2.0',
+        },
+      }],
+      execution: {
+        platform: 'linux/amd64' as const,
+        workspace: '/testbed' as const,
+        image: { reference: IMAGE, digest: IMAGE_DIGEST as `sha256:${string}` },
+        testCommands: [{ bin: 'yarn', args: ['vitest', 'run'] }],
+        parser: {
+          id: 'vitest-json.v1', version: 'v1', digest: parserDigest(),
+          bundleId: 'jinn.swe-rebench-v2.patch-bundle.v1',
+        },
+        timeoutSeconds: 300,
+        environment: {},
+      },
+      build: {
+        recipeCid: 'bafy-recipe', recipeHash: `sha256:${'f'.repeat(64)}` as `sha256:${string}`,
+        provider: 'explicit' as const, providerId: 'jinn-mono.v1', providerVersion: 'v1',
+      },
+      publication: {
+        publicRepoVerifiedAt: '2026-07-10T00:00:00.000Z', rightsPolicyVersion: 'g0b.v1',
+        buildSmoke: 'pass' as const, imageSecretScan: 'pass' as const, sbomCid: 'bafy-sbom',
+      },
+      attestation: {
+        scheme: 'eip191' as const, algo: 'secp256k1' as const,
+        environmentHash: `sha256:${'0'.repeat(64)}` as `sha256:${string}`,
+        operatorSafe: `0x${'1'.repeat(40)}`, signer: `0x${'2'.repeat(40)}`,
+        signature: `0x${'3'.repeat(130)}`,
+      },
+    } satisfies TaskEnvironmentSpecV1;
+    const environmentHash = hashTaskEnvironmentSpecV1(unsigned);
+    const account = privateKeyToAccount(`0x${'4'.repeat(64)}`);
+    return {
+      ...unsigned,
+      attestation: {
+        ...unsigned.attestation,
+        environmentHash,
+        signer: account.address,
+        signature: await account.signMessage({ message: environmentAttestationMessageV1(environmentHash) }),
+      },
+    };
+  }
+
+  function artifact(spec: TaskEnvironmentSpecV1): SweRebenchV2MintedPoolArtifactV2 {
+    const row = {
+      instance_id: INSTANCE_ID,
+      repo: 'Jinn-Network/mono',
+      base_commit: BASE_COMMIT,
+      language: 'typescript',
+      problem_statement: 'regression',
+      image_name: IMAGE,
+      FAIL_TO_PASS: ['test/task-creator/public-repo.test.ts > regression'],
+      PASS_TO_PASS: [],
+      test_patch: 'diff --git a/test/a.ts b/test/a.ts',
+      install_config: { test_cmd: ['yarn', 'vitest', 'run'], log_parser: 'vitest-json.v1' },
+      rowHashVersion: 2 as const,
+      environment: {
+        environmentSpecCid: 'bafy-environment',
+        environmentHash: hashTaskEnvironmentSpecV1(spec),
+        attestation: spec.attestation,
+        parser: spec.execution.parser,
+        image: spec.execution.image,
+        platform: spec.execution.platform,
+      },
+      publicRowHash: '' as `sha256:${string}`,
+    } satisfies Omit<MintedPoolRowV2, 'publicRowHash'> & { publicRowHash: `sha256:${string}` };
+    return {
+      schemaVersion: 'swe-rebench-v2-minted-pool.v2',
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      generatedAt: '2026-07-10T00:00:00.000Z',
+      rows: [{ ...row, publicRowHash: computeMintedPoolRowV2Hash(row) }],
+    };
+  }
+
+  function hardenedArtifact(spec: TaskEnvironmentSpecV1): {
+    minted: SweRebenchV2MintedPoolArtifactV2;
+    receipt: ReturnType<typeof createDifferentialAdmissionReceiptV2>;
+  } {
+    const minted = artifact(spec);
+    const original = minted.rows[0]!;
+    const receipt = createDifferentialAdmissionReceiptV2({
+      task: {
+        instanceId: INSTANCE_ID,
+        repo: original.repo,
+        baseCommit: BASE_COMMIT,
+        fixCommit: 'f'.repeat(40),
+      },
+      goldPatchHash: `sha256:${createHash('sha256').update('private gold').digest('hex')}`,
+      testPatchHash: `sha256:${createHash('sha256').update(original.test_patch).digest('hex')}`,
+      environment: spec,
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      testPaths: [{
+        testPath: 'test/a.ts',
+        broken: [
+          { passed: [], failed: [original.FAIL_TO_PASS[0]!], passed_match: false },
+          { passed: [], failed: [original.FAIL_TO_PASS[0]!], passed_match: false },
+        ],
+        fixed: [
+          { passed: [original.FAIL_TO_PASS[0]!], failed: [], passed_match: true },
+          { passed: [original.FAIL_TO_PASS[0]!], failed: [], passed_match: true },
+        ],
+      }],
+    });
+    const row = {
+      ...original,
+      fix_commit: 'f'.repeat(40),
+      differentialAdmission: {
+        admissionPolicyVersion: receipt.admissionPolicyVersion,
+        receiptCid: 'bafy-differential-receipt',
+        receiptHash: hashDifferentialAdmissionReceiptV2(receipt),
+      },
+    };
+    minted.rows[0] = {
+      ...row,
+      publicRowHash: computeMintedPoolRowV2Hash(row as MintedPoolRowV2),
+    } as MintedPoolRowV2;
+    return { minted, receipt };
+  }
+
+  function vettedAdmission(minted: SweRebenchV2MintedPoolArtifactV2): SweRebenchV2VettedPoolArtifact {
+    const row = minted.rows[0]!;
+    return {
+      schemaVersion: 'swe-rebench-v2-vetted-pool.v1',
+      evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+      generatedAt: '2026-07-10T00:00:00.000Z',
+      entries: [{
+        instance_id: row.instance_id,
+        scorable: true,
+        reason: 'gold-patch-resolves',
+        checkedAt: '2026-07-10T00:00:00.000Z',
+        rowHashVersion: 2,
+        publicRowHash: row.publicRowHash,
+        v2Environment: {
+          environmentSpecCid: row.environment.environmentSpecCid,
+          environmentHash: row.environment.environmentHash,
+          parser: row.environment.parser,
+          image: row.environment.image,
+          platform: row.environment.platform,
+        },
+        ...(row.fix_commit ? { v2FixCommit: row.fix_commit } : {}),
+        ...(row.differentialAdmission ? { differentialAdmission: row.differentialAdmission } : {}),
+      }],
+    };
+  }
+
+  function withVettedAdmission(task: Task, admission: SweRebenchV2VettedPoolArtifact): Task {
+    task.solverNetManifestCid = 'bafy-v2-manifest';
+    task.eligibility = {
+      vettedPoolRef: createVettedPoolArtifactRef({
+        manifestCid: 'bafy-v2-manifest',
+        artifactCid: 'bafy-v2-admission',
+        artifactHash: hashVettedPoolArtifact(admission),
+        evalSemanticsVersion: EVAL_SEMANTICS_VERSION,
+        publishedAt: '2026-07-10T00:00:00.000Z',
+      }),
+    };
+    return task;
+  }
+
+  function mintedTask(): Task {
+    const task = buildEvaluationTask(buildSolverEnvelope());
+    task.spec = {
+      ...task.spec,
+      instance_id: INSTANCE_ID,
+      repo: 'Jinn-Network/mono',
+      base_commit: BASE_COMMIT,
+      language: 'typescript',
+      hf_dataset: 'ipfs://bafymintedv2',
+      hf_split: 'minted',
+    };
+    return task;
+  }
+
+  function imageInspect() {
+    return vi.fn(async (bin: string, args: string[]) => {
+      if (bin === 'docker' && args[0] === 'image' && args.includes('{{json .RepoDigests}}')) {
+        return { exitCode: 0, stdout: JSON.stringify([IMAGE]), stderr: '' };
+      }
+      if (bin === 'docker' && args[0] === 'image' && args.includes('{{.Os}}/{{.Architecture}}')) {
+        return { exitCode: 0, stdout: 'linux/amd64\n', stderr: '' };
+      }
+      return { exitCode: 0, stdout: '', stderr: '' };
+    });
+  }
+
+  it('grades a v2 task only after immutable row, environment, parser, image, and platform bindings match', async () => {
+    const spec = await environmentSpec();
+    const mintedArtifact = artifact(spec);
+    const admission = vettedAdmission(mintedArtifact);
+    const fetchFromIpfs = vi.fn(async (_gateway: string, cid: string) => cid === 'bafy-v2-admission' ? admission : spec);
+    const fetcher = new RoutingTaskRowFetcher({
+      hf: { fetchTaskRow: vi.fn() },
+      fetchMintedArtifact: async () => mintedArtifact,
+    });
+    const runner = { runEval: vi.fn().mockResolvedValue({ passed_match: true, passed: ['regression'], failed: [], log: 'ok', exitCode: 0 }) };
+    const harness = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { stateDir, fetcher, fetchFromIpfs, runCommand: imageInspect(), runner, uploadToIpfs: vi.fn().mockResolvedValue('bafy-log') },
+    });
+
+    const solution = await harness.run(buildHarnessContext(implStateDir, withVettedAdmission(mintedTask(), admission)));
+
+    expect(solution.gating).toMatchObject({ verdict: 'PASS' });
+    expect(runner.runEval).toHaveBeenCalledOnce();
+    expect(fetchFromIpfs).toHaveBeenCalledWith(expect.any(String), 'bafy-environment');
+  });
+
+  it('pulls the bound digest-qualified v2 image before inspection on a fresh evaluator', async () => {
+    const spec = await environmentSpec();
+    const mintedArtifact = artifact(spec);
+    const admission = vettedAdmission(mintedArtifact);
+    const calls: string[] = [];
+    let pulled = false;
+    const runCommand = vi.fn(async (bin: string, args: string[]) => {
+      if (bin !== 'docker') return { exitCode: 0, stdout: '', stderr: '' };
+      if (args[0] === 'pull') {
+        calls.push(`pull:${args[1]}`);
+        pulled = true;
+        return { exitCode: 0, stdout: 'pulled', stderr: '' };
+      }
+      if (args[0] === 'image' && args.includes('{{json .RepoDigests}}')) {
+        calls.push('inspect:digest');
+        return pulled
+          ? { exitCode: 0, stdout: JSON.stringify([IMAGE]), stderr: '' }
+          : { exitCode: 1, stdout: '', stderr: 'image missing' };
+      }
+      if (args[0] === 'image' && args.includes('{{.Os}}/{{.Architecture}}')) {
+        calls.push('inspect:platform');
+        return pulled
+          ? { exitCode: 0, stdout: 'linux/amd64\n', stderr: '' }
+          : { exitCode: 1, stdout: '', stderr: 'image missing' };
+      }
+      return { exitCode: 0, stdout: '', stderr: '' };
+    });
+    const fetcher = new RoutingTaskRowFetcher({
+      hf: { fetchTaskRow: vi.fn() },
+      fetchMintedArtifact: async () => mintedArtifact,
+    });
+    const runner = { runEval: vi.fn().mockResolvedValue({ passed_match: true, passed: ['regression'], failed: [], log: 'ok', exitCode: 0 }) };
+    const harness = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: {
+        stateDir, fetcher,
+        fetchFromIpfs: vi.fn(async (_gateway: string, cid: string) => cid === 'bafy-v2-admission' ? admission : spec),
+        runCommand, runner, uploadToIpfs: vi.fn().mockResolvedValue('bafy-log'),
+      },
+    });
+
+    await expect(harness.run(buildHarnessContext(implStateDir, withVettedAdmission(mintedTask(), admission)))).resolves.toBeDefined();
+
+    expect(calls).toEqual([`pull:${IMAGE}`, 'inspect:digest', 'inspect:platform']);
+    expect(runner.runEval).toHaveBeenCalledOnce();
+  });
+
+  it('emits no verdict when the bound v2 image pull fails', async () => {
+    const spec = await environmentSpec();
+    const mintedArtifact = artifact(spec);
+    const admission = vettedAdmission(mintedArtifact);
+    const fetcher = new RoutingTaskRowFetcher({
+      hf: { fetchTaskRow: vi.fn() },
+      fetchMintedArtifact: async () => mintedArtifact,
+    });
+    const runner = { runEval: vi.fn() };
+    const runCommand = vi.fn(async (bin: string, args: string[]) =>
+      bin === 'docker' && args[0] === 'pull'
+        ? { exitCode: 1, stdout: '', stderr: 'pull denied' }
+        : { exitCode: 0, stdout: '', stderr: '' },
+    );
+    const harness = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: {
+        stateDir, fetcher,
+        fetchFromIpfs: vi.fn(async (_gateway: string, cid: string) => cid === 'bafy-v2-admission' ? admission : spec),
+        runCommand, runner, uploadToIpfs: vi.fn(),
+      },
+    });
+    const { SkippableError } = await import('../../../../src/harnesses/types.js');
+
+    const error = await harness.run(buildHarnessContext(implStateDir, withVettedAdmission(mintedTask(), admission))).catch((err) => err);
+
+    expect(error).toBeInstanceOf(SkippableError);
+    expect(error.reason).toBe('minted_substrate_image_pull_failed');
+    expect(runner.runEval).not.toHaveBeenCalled();
+  });
+
+  it('emits no verdict for a v2 row without an exact published vetted-pool admission', async () => {
+    const spec = await environmentSpec();
+    const mintedArtifact = artifact(spec);
+    const fetcher = new RoutingTaskRowFetcher({
+      hf: { fetchTaskRow: vi.fn() },
+      fetchMintedArtifact: async () => mintedArtifact,
+    });
+    const runner = { runEval: vi.fn().mockResolvedValue({ passed_match: true, passed: ['regression'], failed: [], log: 'ok', exitCode: 0 }) };
+    const harness = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { stateDir, fetcher, fetchFromIpfs: vi.fn().mockResolvedValue(spec), runCommand: imageInspect(), runner, uploadToIpfs: vi.fn() },
+    });
+    const { SkippableError } = await import('../../../../src/harnesses/types.js');
+
+    const error = await harness.run(buildHarnessContext(implStateDir, mintedTask())).catch((err) => err);
+
+    expect(error).toBeInstanceOf(SkippableError);
+    expect(error.reason).toBe('minted_v2_admission_missing');
+    expect(runner.runEval).not.toHaveBeenCalled();
+  });
+
+  it('emits no verdict when the vetted-pool public row binding differs', async () => {
+    const spec = await environmentSpec();
+    const mintedArtifact = artifact(spec);
+    const admission = vettedAdmission(mintedArtifact);
+    admission.entries[0] = { ...admission.entries[0]!, publicRowHash: `sha256:${'8'.repeat(64)}` };
+    const fetcher = new RoutingTaskRowFetcher({
+      hf: { fetchTaskRow: vi.fn() },
+      fetchMintedArtifact: async () => mintedArtifact,
+    });
+    const runner = { runEval: vi.fn() };
+    const harness = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { stateDir, fetcher, fetchFromIpfs: vi.fn(async (_gateway: string, cid: string) => cid === 'bafy-v2-admission' ? admission : spec), runCommand: imageInspect(), runner, uploadToIpfs: vi.fn() },
+    });
+    const { SkippableError } = await import('../../../../src/harnesses/types.js');
+
+    const error = await harness.run(buildHarnessContext(implStateDir, withVettedAdmission(mintedTask(), admission))).catch((err) => err);
+
+    expect(error).toBeInstanceOf(SkippableError);
+    expect(error.reason).toBe('minted_v2_admission_drift');
+    expect(runner.runEval).not.toHaveBeenCalled();
+  });
+
+  it('emits no verdict when a hardened receipt hash differs from the vetted admission', async () => {
+    const spec = await environmentSpec();
+    const { minted, receipt } = hardenedArtifact(spec);
+    const admission = vettedAdmission(minted);
+    admission.entries[0] = {
+      ...admission.entries[0]!,
+      differentialAdmission: {
+        admissionPolicyVersion: receipt.admissionPolicyVersion,
+        receiptCid: 'bafy-differential-receipt',
+        receiptHash: `sha256:${'9'.repeat(64)}`,
+      },
+    } as typeof admission.entries[number];
+    const fetcher = new RoutingTaskRowFetcher({
+      hf: { fetchTaskRow: vi.fn() },
+      fetchMintedArtifact: async () => minted,
+    });
+    const runner = { runEval: vi.fn() };
+    const harness = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: {
+        stateDir,
+        fetcher,
+        fetchFromIpfs: vi.fn(async (_gateway: string, cid: string) => {
+          if (cid === 'bafy-v2-admission') return admission;
+          if (cid === 'bafy-differential-receipt') return receipt;
+          return spec;
+        }),
+        runCommand: imageInspect(),
+        runner,
+        uploadToIpfs: vi.fn(),
+      },
+    });
+    const { SkippableError } = await import('../../../../src/harnesses/types.js');
+
+    const error = await harness.run(buildHarnessContext(implStateDir, withVettedAdmission(mintedTask(), admission))).catch((err) => err);
+
+    expect(error).toBeInstanceOf(SkippableError);
+    expect(error.reason).toBe('minted_v2_differential_admission_drift');
+    expect(runner.runEval).not.toHaveBeenCalled();
+  });
+
+  it('emits no verdict when a hardened receipt fix commit drifts from the public row', async () => {
+    const spec = await environmentSpec();
+    const { minted, receipt } = hardenedArtifact(spec);
+    const original = minted.rows[0]!;
+    const drifted = { ...original, fix_commit: 'e'.repeat(40) };
+    minted.rows[0] = {
+      ...drifted,
+      publicRowHash: computeMintedPoolRowV2Hash(drifted as MintedPoolRowV2),
+    } as MintedPoolRowV2;
+    const admission = vettedAdmission(minted);
+    const fetcher = new RoutingTaskRowFetcher({
+      hf: { fetchTaskRow: vi.fn() },
+      fetchMintedArtifact: async () => minted,
+    });
+    const runner = { runEval: vi.fn() };
+    const harness = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: {
+        stateDir,
+        fetcher,
+        fetchFromIpfs: vi.fn(async (_gateway: string, cid: string) => {
+          if (cid === 'bafy-v2-admission') return admission;
+          if (cid === 'bafy-differential-receipt') return receipt;
+          return spec;
+        }),
+        runCommand: imageInspect(),
+        runner,
+        uploadToIpfs: vi.fn(),
+      },
+    });
+    const { SkippableError } = await import('../../../../src/harnesses/types.js');
+
+    const error = await harness.run(buildHarnessContext(implStateDir, withVettedAdmission(mintedTask(), admission))).catch((err) => err);
+
+    expect(error).toBeInstanceOf(SkippableError);
+    expect(error.reason).toBe('minted_v2_differential_fix_commit_drift');
+    expect(runner.runEval).not.toHaveBeenCalled();
+  });
+
+  it('emits no verdict when a v2 public row hash drifts', async () => {
+    const spec = await environmentSpec();
+    const mintedArtifact = artifact(spec);
+    mintedArtifact.rows[0] = { ...mintedArtifact.rows[0]!, publicRowHash: `sha256:${'0'.repeat(64)}` };
+    const fetcher = new RoutingTaskRowFetcher({
+      hf: { fetchTaskRow: vi.fn() },
+      fetchMintedArtifact: async () => mintedArtifact,
+    });
+    const runner = { runEval: vi.fn() };
+    const harness = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { stateDir, fetcher, fetchFromIpfs: vi.fn().mockResolvedValue(spec), runCommand: imageInspect(), runner, uploadToIpfs: vi.fn() },
+    });
+    const { SkippableError } = await import('../../../../src/harnesses/types.js');
+
+    const error = await harness.run(buildHarnessContext(implStateDir, mintedTask())).catch((err) => err);
+
+    expect(error).toBeInstanceOf(SkippableError);
+    expect(error.reason).toBe('minted_substrate_drift_public_row_hash');
+    expect(runner.runEval).not.toHaveBeenCalled();
+  });
+
+  it('emits no verdict when a hash-valid v2 row points at a different signed environment', async () => {
+    const spec = await environmentSpec();
+    const mintedArtifact = artifact(spec);
+    const original = mintedArtifact.rows[0]!;
+    const wrongHash = `sha256:${'9'.repeat(64)}` as `sha256:${string}`;
+    const row = {
+      ...original,
+      environment: {
+        ...original.environment,
+        environmentHash: wrongHash,
+        attestation: { ...original.environment.attestation, environmentHash: wrongHash },
+      },
+    };
+    mintedArtifact.rows[0] = { ...row, publicRowHash: computeMintedPoolRowV2Hash(row) };
+    const admission = vettedAdmission(mintedArtifact);
+    const fetcher = new RoutingTaskRowFetcher({
+      hf: { fetchTaskRow: vi.fn() },
+      fetchMintedArtifact: async () => mintedArtifact,
+    });
+    const runner = { runEval: vi.fn() };
+    const harness = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { stateDir, fetcher, fetchFromIpfs: vi.fn(async (_gateway: string, cid: string) => cid === 'bafy-v2-admission' ? admission : spec), runCommand: imageInspect(), runner, uploadToIpfs: vi.fn() },
+    });
+    const { SkippableError } = await import('../../../../src/harnesses/types.js');
+
+    const error = await harness.run(buildHarnessContext(implStateDir, withVettedAdmission(mintedTask(), admission))).catch((err) => err);
+
+    expect(error).toBeInstanceOf(SkippableError);
+    expect(error.reason).toBe('minted_substrate_drift_environment_hash');
+    expect(runner.runEval).not.toHaveBeenCalled();
+  });
+
+  it('emits no verdict when the published environment uses a non-canonical source URL or input ref', async () => {
+    const original = await environmentSpec();
+    const unsigned = {
+      ...original,
+      source: { ...original.source, repoUrl: 'https://github.com/Jinn-Network/not-mono.git' },
+      inputs: original.inputs.map((input) => ({
+        ...input,
+        inputRef: `git+https://github.com/Jinn-Network/not-mono.git#${BASE_COMMIT}`,
+        rights: { ...input.rights, inputRef: `git+https://github.com/Jinn-Network/not-mono.git#${BASE_COMMIT}` },
+      })),
+    } satisfies TaskEnvironmentSpecV1;
+    const environmentHash = hashTaskEnvironmentSpecV1(unsigned);
+    const account = privateKeyToAccount(`0x${'4'.repeat(64)}`);
+    const spec = {
+      ...unsigned,
+      attestation: {
+        ...unsigned.attestation,
+        environmentHash,
+        signature: await account.signMessage({ message: environmentAttestationMessageV1(environmentHash) }),
+      },
+    } satisfies TaskEnvironmentSpecV1;
+    const mintedArtifact = artifact(spec);
+    const admission = vettedAdmission(mintedArtifact);
+    const fetcher = new RoutingTaskRowFetcher({
+      hf: { fetchTaskRow: vi.fn() },
+      fetchMintedArtifact: async () => mintedArtifact,
+    });
+    const runner = { runEval: vi.fn() };
+    const harness = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { stateDir, fetcher, fetchFromIpfs: vi.fn(async (_gateway: string, cid: string) => cid === 'bafy-v2-admission' ? admission : spec), runCommand: imageInspect(), runner, uploadToIpfs: vi.fn() },
+    });
+    const { SkippableError } = await import('../../../../src/harnesses/types.js');
+
+    const error = await harness.run(buildHarnessContext(implStateDir, withVettedAdmission(mintedTask(), admission))).catch((err) => err);
+
+    expect(error).toBeInstanceOf(SkippableError);
+    expect(error.reason).toBe('minted_substrate_source_binding_drift');
+    expect(runner.runEval).not.toHaveBeenCalled();
   });
 });

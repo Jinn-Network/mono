@@ -621,6 +621,11 @@ export const JinnConfigSchema = z.object({
             /** GitHub `owner/repo`; inferred from `git remote` when omitted. */
             repo: z.string().min(1).optional(),
             remote: z.string().optional(),
+            /**
+             * Operator-approved G0b recipe plus its published, attested
+             * environment binding. Parsed strictly by the harvest adapter.
+             */
+            explicitRecipe: z.unknown().optional(),
           }),
         )
         .default([]),

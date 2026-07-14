@@ -25,9 +25,44 @@ import {
   summarizeValidatedPool,
   type ValidatedPoolSummary,
 } from '../../solver-types/_swe-rebench-v2-validated-pool.js';
+import { parseMintedEnvironmentBindingV1 } from '../../solver-types/_swe-rebench-v2-minted-pool.js';
+import type { MintTasksInput } from '../../solver-types/_swe-rebench-v2-mint-cli.js';
 import { defaultStateDir as sweRebenchV2DefaultStateDir } from '../../solver-types/swe-rebench-v2.js';
 
 const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
+
+/**
+ * Keeps the public-repository v2 environment binding intact at the CLI edge.
+ * Legacy candidates omit it and retain the immutable v1 artifact path.
+ */
+export function parseMintTaskCandidates(raw: unknown, noPost = false): MintTasksInput['candidates'] {
+  const candidates = Array.isArray(raw) ? raw : [raw];
+  return candidates.map((candidate, index) => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+      throw new Error(`mint candidate ${index} must be an object`);
+    }
+    const c = candidate as Record<string, unknown>;
+    if (!c['poolTask'] || typeof c['poolTask'] !== 'object' || Array.isArray(c['poolTask'])) {
+      throw new Error(`mint candidate ${index} requires poolTask`);
+    }
+    if (typeof c['goldPatch'] !== 'string') throw new Error(`mint candidate ${index} requires goldPatch`);
+    if (!c['provenance'] || typeof c['provenance'] !== 'object' || Array.isArray(c['provenance'])) {
+      throw new Error(`mint candidate ${index} requires provenance`);
+    }
+    return {
+      poolTask: c['poolTask'] as MintTasksInput['candidates'][number]['poolTask'],
+      goldPatch: c['goldPatch'],
+      provenance: c['provenance'] as MintTasksInput['candidates'][number]['provenance'],
+      ...(c['environment'] === undefined ? {} : { environment: parseMintedEnvironmentBindingV1(c['environment']) }),
+      ...(c['fixCommit'] === undefined ? {} : { fixCommit: c['fixCommit'] as string }),
+      ...(c['row'] === undefined ? {} : { row: c['row'] as MintTasksInput['candidates'][number]['row'] }),
+      ...(c['differentialAdmission'] === undefined
+        ? {}
+        : { differentialAdmission: c['differentialAdmission'] as MintTasksInput['candidates'][number]['differentialAdmission'] }),
+      publish: noPost ? false : c['publish'] as boolean | undefined,
+    };
+  });
+}
 
 // ---------------------------------------------------------------------------
 // resolveValidatePoolInstanceIds — exported for unit testing
@@ -932,13 +967,8 @@ Output flags:
       const loaded = loadConfig(configPath);
       const stateDir = sweRebenchV2DefaultStateDir();
       const raw = JSON.parse(readFileSync(resolvePath(candidatesPath), 'utf8')) as unknown;
-      const candidates = (Array.isArray(raw) ? raw : [raw]) as Array<{
-        poolTask: Record<string, unknown>;
-        goldPatch: string;
-        provenance: Record<string, unknown>;
-        publish?: boolean;
-      }>;
       const noPost = Boolean(parsed.values['no-post']);
+      const candidates = parseMintTaskCandidates(raw, noPost);
 
       const { runMintTasksPipeline } = await import('../../solver-types/_swe-rebench-v2-mint-cli.js');
       const { getDefaultMintedPoolStore } = await import('../../solver-types/_swe-rebench-v2-minted-pool.js');
@@ -949,15 +979,18 @@ Output flags:
       const { PythonEvalRunner } = await import('../../harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js');
       const { createGitHubPublicRepoChecker } = await import('../../solver-types/_swe-rebench-v2-guards.js');
       const { fetchFromIpfs } = await import('../../adapters/mech/ipfs.js');
+      const { parseJinnDifferentialAttesterPolicyV1 } = await import('../../task-creator/environment/jinn-differential-policy.js');
+      const approvedAttesters = process.env.JINN_TASK_CREATOR_JINN_APPROVED_ATTESTERS;
+      const jinnDifferentialAttesterPolicy = approvedAttesters
+        ? parseJinnDifferentialAttesterPolicyV1(
+            approvedAttesters.split(',').map((value) => value.trim()).filter(Boolean),
+            'JINN_TASK_CREATOR_JINN_APPROVED_ATTESTERS',
+          )
+        : undefined;
 
       process.stderr.write(`[mint-tasks] admitting ${candidates.length} candidate(s)…\n`);
       const result = await runMintTasksPipeline({
-        candidates: candidates.map((c) => ({
-          poolTask: c.poolTask as unknown as import('../../solver-types/_swe-rebench-v2-pool.js').PoolTask,
-          goldPatch: c.goldPatch,
-          provenance: c.provenance as unknown as import('../../solver-types/_swe-rebench-v2-minted-pool.js').MintedProvenance,
-          publish: noPost ? false : c.publish,
-        })),
+        candidates,
         stateDir,
         ipfsRegistryUrl: loaded.ipfsRegistryUrl,
         ipfsGatewayUrl: loaded.ipfsGatewayUrl,
@@ -973,6 +1006,7 @@ Output flags:
         publicRepoChecker: createGitHubPublicRepoChecker({
           token: process.env.GITHUB_TOKEN,
         }),
+        ...(jinnDifferentialAttesterPolicy ? { jinnDifferentialAttesterPolicy } : {}),
       });
       emit(
         ctx,

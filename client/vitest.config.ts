@@ -49,6 +49,9 @@ const exclude = [
   'test/hermetic/bootstrap-from-scratch.test.ts',
   'test/hermetic/full-loop.test.ts',
   'test/hermetic/indexer-roundtrip.test.ts',
+  // G0b's on-chain public-repository lifecycle compiles contracts and spawns
+  // local Anvil. It runs only through task-creator:public-repo-anvil-e2e.
+  'test/hermetic/public-repo-anvil-lifecycle.test.ts',
 ];
 
 const alias = {

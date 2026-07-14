@@ -1,8 +1,9 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import solverNetsCommand from '@/cli/commands/solver-nets.js';
+import { describe, expect, it, vi } from 'vitest';
+import solverNetsCommand, { parseMintTaskCandidates } from '@/cli/commands/solver-nets.js';
 import { loadConfig, type JinnConfig } from '@/config.js';
 import type { Harness, RuntimePlugin } from '@/harnesses/types.js';
 import {
@@ -11,6 +12,16 @@ import {
   type PredictionOperatorDiagnostic,
 } from '@/solver-nets/prediction-operator-ux.js';
 import { makeCommandCtx } from '@test/cli.js';
+import { JINN_MONO_VITEST_JSON_PARSER_CONTRACT_FIXTURE } from '@/task-creator/proofs/public-repo-fixtures.js';
+import { runPublicRepoParityFixture } from '@/task-creator/proofs/vitest-json-fixture.js';
+import {
+  createDifferentialAdmissionReceiptV2,
+  hashDifferentialAdmissionReceiptV2,
+} from '@/solver-types/_swe-rebench-v2-differential-admission.js';
+import { runMintTasksPipeline } from '@/solver-types/_swe-rebench-v2-mint-cli.js';
+import { MintedPoolStore } from '@/solver-types/_swe-rebench-v2-minted-pool.js';
+import { ValidatedPoolStore } from '@/solver-types/_swe-rebench-v2-validated-pool.js';
+import { jinnDifferentialReceiptContractFixture } from '../../task-creator/jinn-differential-receipt-contract-fixture.js';
 
 function tempConfig(values: Record<string, unknown> = {}): string {
   const dir = mkdtempSync(join(tmpdir(), 'jinn-solver-nets-test-'));
@@ -129,6 +140,131 @@ function expectDiagnosticContract(
 }
 
 describe('solver-nets command', () => {
+  it('preserves a receipt-bound differential admission candidate through the mint CLI edge', () => {
+    const fixture = jinnDifferentialReceiptContractFixture();
+    const [candidate] = parseMintTaskCandidates({
+      poolTask: {
+        instance_id: fixture.receipt.task.instanceId,
+        repo: fixture.receipt.task.repo,
+        base_commit: fixture.receipt.task.baseCommit,
+        language: 'typescript',
+        test_patch: fixture.testPatch,
+      },
+      goldPatch: 'local-only-gold',
+      fixCommit: fixture.receipt.task.fixCommit,
+      provenance: { synthetic: true, mintFamily: 'commit-echo', sourceLineageHash: 'sha256:fixture' },
+      environment: fixture.environment,
+      differentialAdmission: {
+        receipt: fixture.receipt,
+        receiptHash: hashDifferentialAdmissionReceiptV2(fixture.receipt),
+        receiptCid: 'bafy-test-only-jinn-differential-receipt',
+      },
+    });
+
+    expect(candidate?.fixCommit).toBe(fixture.receipt.task.fixCommit);
+    expect(candidate?.differentialAdmission).toEqual({
+      receipt: fixture.receipt,
+      receiptHash: hashDifferentialAdmissionReceiptV2(fixture.receipt),
+      receiptCid: 'bafy-test-only-jinn-differential-receipt',
+    });
+  });
+
+  it('keeps an explicit public-repository environment binding at the mint CLI edge', () => {
+    const fixture = runPublicRepoParityFixture(JINN_MONO_VITEST_JSON_PARSER_CONTRACT_FIXTURE);
+    const [candidate] = parseMintTaskCandidates({
+      poolTask: { instance_id: fixture.proof.instanceId },
+      goldPatch: 'local-only-gold',
+      provenance: { synthetic: true, mintFamily: 'commit-echo', sourceLineageHash: 'sha256:fixture' },
+      environment: fixture.environment,
+    });
+
+    expect(candidate?.environment).toEqual(fixture.environment);
+    expect(candidate?.publish).toBeUndefined();
+    expect(parseMintTaskCandidates({
+      poolTask: { instance_id: fixture.proof.instanceId },
+      goldPatch: 'local-only-gold',
+      provenance: { synthetic: true, mintFamily: 'commit-echo', sourceLineageHash: 'sha256:fixture' },
+      environment: fixture.environment,
+      publish: true,
+    }, true)[0]?.publish).toBe(false);
+  });
+
+  it('admits the documented receipt-bound fresh v2 CLI candidate shape without fetching its local IPFS placeholder', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-cli-mint-v2-'));
+    const digest = `sha256:${'a'.repeat(64)}`;
+    const environment = {
+      environmentSpecCid: 'bafy-environment', environmentHash: `sha256:${'c'.repeat(64)}`,
+      attestation: {
+        scheme: 'eip191' as const, algo: 'secp256k1' as const, environmentHash: `sha256:${'c'.repeat(64)}`,
+        operatorSafe: `0x${'1'.repeat(40)}`, signer: `0x${'2'.repeat(40)}`, signature: `0x${'3'.repeat(130)}`,
+      },
+      parser: { id: 'vitest-json.v1', version: 'v1', digest, bundleId: 'jinn.swe-rebench-v2.patch-bundle.v1' },
+      image: { reference: `ghcr.io/jinn-network/task-environment@${digest}`, digest },
+      platform: 'linux/amd64' as const,
+    };
+    const environmentSpec = {
+      source: { repo: 'acme/widget', baseCommit: 'b'.repeat(40) },
+      attestation: { environmentHash: environment.environmentHash },
+      execution: {
+        platform: environment.platform,
+        image: environment.image,
+        parser: environment.parser,
+        testCommands: [{ bin: 'yarn', args: ['vitest', 'run'] }],
+      },
+    } as unknown as import('@/task-creator/environment/contracts.js').TaskEnvironmentSpecV1;
+    const receipt = createDifferentialAdmissionReceiptV2({
+      task: { instanceId: 'acme__widget__echo-123', repo: 'acme/widget', baseCommit: 'b'.repeat(40), fixCommit: 'f'.repeat(40) },
+      goldPatchHash: `sha256:${createHash('sha256').update('local-only-gold').digest('hex')}`,
+      testPatchHash: `sha256:${createHash('sha256').update('diff --git a/test/widget.test.ts b/test/widget.test.ts').digest('hex')}`,
+      environment: environmentSpec,
+      evalSemanticsVersion: '4',
+      testPaths: [{
+        testPath: 'test/widget.test.ts',
+        broken: [{ passed: [], failed: ['public regression'], passed_match: false }, { passed: [], failed: ['public regression'], passed_match: false }],
+        fixed: [{ passed: ['public regression'], failed: [], passed_match: true }, { passed: ['public regression'], failed: [], passed_match: true }],
+      }],
+    });
+    const [candidate] = parseMintTaskCandidates({
+      poolTask: {
+        instance_id: 'acme__widget__echo-123', repo: 'acme/widget', base_commit: 'b'.repeat(40),
+        language: 'typescript', test_patch: 'diff --git a/test/widget.test.ts b/test/widget.test.ts',
+      },
+      goldPatch: 'local-only-gold',
+      fixCommit: 'f'.repeat(40),
+      provenance: { synthetic: true, mintFamily: 'commit-echo', sourceLineageHash: 'sha256:fixture' },
+      environment,
+      differentialAdmission: {
+        receipt,
+        receiptHash: hashDifferentialAdmissionReceiptV2(receipt),
+        receiptCid: 'QmYwAPJzv5CZsnAzt8auVTLF9rYx8S1R52eX5GJH2RGfZp',
+      },
+      publish: false,
+    });
+    const fallbackFetcher = { fetchTaskRow: vi.fn().mockRejectedValue(new Error('must not fetch ipfs://local-minted-pending')) };
+    const runner = {
+      runEval: vi.fn()
+        .mockResolvedValueOnce({ passed_match: true, passed: ['public regression'], failed: [], log: '', exitCode: 0, imageDigest: digest })
+        .mockResolvedValueOnce({ passed_match: false, passed: [], failed: ['public regression'], log: '', exitCode: 0 }),
+    };
+
+    const result = await runMintTasksPipeline({
+      candidates: [candidate!], stateDir: dir,
+      ipfsRegistryUrl: 'https://registry.example', ipfsGatewayUrl: 'https://gateway.example',
+      validatedStore: new ValidatedPoolStore({ stateDir: dir }), mintedStore: new MintedPoolStore({ stateDir: dir }),
+      fetcher: fallbackFetcher, runner, upstreamRepoDir: dir,
+      publicRepoChecker: { isPublic: async () => true },
+      environmentVerifier: {
+        verify: async () => ({
+          ...environmentSpec,
+        }),
+      },
+    });
+
+    expect(result.admitted).toEqual(['acme__widget__echo-123']);
+    expect(fallbackFetcher.fetchTaskRow).not.toHaveBeenCalled();
+    expect(runner.runEval).toHaveBeenCalledTimes(2);
+  });
+
   it('diagnoses Prediction SolverNet status with plugin and Harness details', async () => {
     const configPath = tempConfig(predictionConfig());
     const result = await runSolverNets(['doctor', 'prediction', '--config', configPath]);

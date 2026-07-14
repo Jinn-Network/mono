@@ -14,7 +14,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getSolverNetContract } from '@jinn-network/sdk/solvernets';
-import { SweRebenchV2TaskSchema } from '@jinn-network/sdk/solvernets/swe-rebench-v2';
+import { SweRebenchV2LanguageSchema, SweRebenchV2TaskSchema } from '@jinn-network/sdk/solvernets/swe-rebench-v2';
 import type { Task } from '../types/task.js';
 import type { TaskGenerator } from '../tasks/sources.js';
 import type { TaskClaimPolicy, TaskV1 } from '../types/task-document.js';
@@ -270,7 +270,7 @@ function normalizeLanguage(
   task: PoolTask,
 ): 'python' | 'javascript' | 'typescript' | 'go' | 'c' | 'cpp' | 'cs' | 'java' | 'rust' | 'dart' {
   const raw = task.language ?? inferLanguageFromPatch(task.patch) ?? inferLanguageFromPatch(task.test_patch);
-  const parsed = SweRebenchV2TaskSchema.shape.language.safeParse(raw);
+  const parsed = SweRebenchV2LanguageSchema.safeParse(raw);
   return parsed.success ? parsed.data : 'python';
 }
 

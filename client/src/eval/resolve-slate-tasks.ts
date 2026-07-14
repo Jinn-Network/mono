@@ -15,7 +15,7 @@
  * drop).
  */
 
-import { SweRebenchV2TaskSchema, type SweRebenchV2Task } from '@jinn-network/sdk/solvernets/swe-rebench-v2';
+import { SweRebenchV2LanguageSchema, SweRebenchV2TaskSchema, type SweRebenchV2Task } from '@jinn-network/sdk/solvernets/swe-rebench-v2';
 import type { HfFetcher, HfRow } from '../harnesses/impls/swe-rebench-v2-evaluator/index.js';
 import type { PoolTask } from '../solver-types/_swe-rebench-v2-pool.js';
 
@@ -64,7 +64,7 @@ function buildTask(
   hf_split: string,
   row: HfRow,
 ): SweRebenchV2Task {
-  const language = SweRebenchV2TaskSchema.shape.language.safeParse(poolTask.language);
+  const language = SweRebenchV2LanguageSchema.safeParse(poolTask.language);
   return {
     schemaVersion: 'swe-rebench-v2.v1',
     instance_id: poolTask.instance_id,

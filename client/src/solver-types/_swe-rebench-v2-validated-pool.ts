@@ -33,6 +33,7 @@ import {
   type CommandRunner,
 } from './_swe-rebench-v2-substrate.js';
 import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import { DifferentialAdmissionPolicyV2 } from './_swe-rebench-v2-differential-admission.js';
 
 // In-process mutex map: serialises concurrent record() calls against the
 // same file. Entries are never removed; bounded by the number of distinct
@@ -87,6 +88,30 @@ export const VETTED_POOL_REF_ELIGIBILITY_KEY = 'vettedPoolRef' as const;
 const PUBLICATION_SCHEMA_VERSION = 'swe-rebench-v2-vetted-pool-publication.v1' as const;
 const PUBLICATION_FILE = 'vetted-pool-artifact-publication.json';
 
+/** Public admission binding for an explicit-environment minted-pool.v2 row. */
+export interface V2MintedEnvironmentAdmissionBinding {
+  environmentSpecCid: string;
+  environmentHash: `sha256:${string}`;
+  parser: {
+    id: string;
+    version: string;
+    digest: `sha256:${string}`;
+    bundleId: string;
+  };
+  image: {
+    reference: string;
+    digest: `sha256:${string}`;
+  };
+  platform: 'linux/amd64';
+}
+
+/** Public receipt pointer mirrored from a hardened minted-pool.v2 row. */
+export interface V2DifferentialAdmissionBinding {
+  admissionPolicyVersion: typeof DifferentialAdmissionPolicyV2.admissionPolicyVersion;
+  receiptCid: string;
+  receiptHash: `sha256:${string}`;
+}
+
 export interface ValidatedPoolEntry {
   scorable: boolean;
   /**
@@ -125,6 +150,17 @@ export interface ValidatedPoolEntry {
    * discrimination check existed.
    */
   discrimination?: 'pass' | 'fail' | 'unchecked';
+  /**
+   * v2 public-repository admission. It is intentionally separate from the
+   * legacy HF `rowHash`: `publicRowHash` excludes gold material and binds the
+   * explicit evaluator environment instead.
+   */
+  rowHashVersion?: 2;
+  publicRowHash?: `sha256:${string}`;
+  v2Environment?: V2MintedEnvironmentAdmissionBinding;
+  /** Public fix identity mirrored from a hardened minted-pool.v2 row. */
+  v2FixCommit?: string;
+  differentialAdmission?: V2DifferentialAdmissionBinding;
 }
 
 /** Instances whose known-bad patch passes are weak-suite — excluded from
@@ -304,12 +340,92 @@ function isSha256(value: unknown): value is `sha256:${string}` {
   return typeof value === 'string' && /^sha256:[0-9a-f]{64}$/u.test(value);
 }
 
+function isCommitSha(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{40}$/u.test(value);
+}
+
+function parseV2MintedEnvironmentAdmissionBinding(raw: unknown): V2MintedEnvironmentAdmissionBinding | null {
+  if (!isObject(raw)) return null;
+  const parser = raw['parser'];
+  const image = raw['image'];
+  if (!isObject(parser) || !isObject(image)) return null;
+  if (typeof raw['environmentSpecCid'] !== 'string' || raw['environmentSpecCid'].length === 0) return null;
+  if (!isSha256(raw['environmentHash'])) return null;
+  if (
+    typeof parser['id'] !== 'string' || parser['id'].length === 0 ||
+    typeof parser['version'] !== 'string' || parser['version'].length === 0 ||
+    !isSha256(parser['digest']) ||
+    typeof parser['bundleId'] !== 'string' || parser['bundleId'].length === 0
+  ) return null;
+  if (
+    typeof image['reference'] !== 'string' ||
+    !/@sha256:[0-9a-f]{64}$/u.test(image['reference']) ||
+    !isSha256(image['digest']) ||
+    !image['reference'].endsWith(`@${image['digest']}`)
+  ) return null;
+  if (raw['platform'] !== 'linux/amd64') return null;
+  return {
+    environmentSpecCid: raw['environmentSpecCid'],
+    environmentHash: raw['environmentHash'],
+    parser: {
+      id: parser['id'], version: parser['version'], digest: parser['digest'], bundleId: parser['bundleId'],
+    },
+    image: { reference: image['reference'], digest: image['digest'] },
+    platform: 'linux/amd64',
+  };
+}
+
+function parseV2DifferentialAdmissionBinding(raw: unknown): V2DifferentialAdmissionBinding | null {
+  if (!isObject(raw)) return null;
+  if (raw['admissionPolicyVersion'] !== DifferentialAdmissionPolicyV2.admissionPolicyVersion) return null;
+  if (typeof raw['receiptCid'] !== 'string' || raw['receiptCid'].length === 0) return null;
+  if (!isSha256(raw['receiptHash'])) return null;
+  return {
+    admissionPolicyVersion: DifferentialAdmissionPolicyV2.admissionPolicyVersion,
+    receiptCid: raw['receiptCid'],
+    receiptHash: raw['receiptHash'],
+  };
+}
+
+function v2AdmissionFields(raw: Record<string, unknown>): {
+  rowHashVersion: 2;
+  publicRowHash: `sha256:${string}`;
+  v2Environment: V2MintedEnvironmentAdmissionBinding;
+  v2FixCommit?: string;
+  differentialAdmission?: V2DifferentialAdmissionBinding;
+} | null {
+  const present = raw['rowHashVersion'] !== undefined || raw['publicRowHash'] !== undefined || raw['v2Environment'] !== undefined || raw['v2FixCommit'] !== undefined || raw['differentialAdmission'] !== undefined;
+  if (!present) return null;
+  if (raw['rowHashVersion'] !== 2 || !isSha256(raw['publicRowHash'])) return null;
+  const v2Environment = parseV2MintedEnvironmentAdmissionBinding(raw['v2Environment']);
+  if (!v2Environment) return null;
+  const differentialAdmission = raw['differentialAdmission'] === undefined
+    ? undefined
+    : parseV2DifferentialAdmissionBinding(raw['differentialAdmission']);
+  if (raw['differentialAdmission'] !== undefined && !differentialAdmission) return null;
+  const v2FixCommit = raw['v2FixCommit'] === undefined ? undefined : raw['v2FixCommit'];
+  if (v2FixCommit !== undefined && !isCommitSha(v2FixCommit)) return null;
+  if (differentialAdmission && !v2FixCommit) return null;
+  return {
+    rowHashVersion: 2,
+    publicRowHash: raw['publicRowHash'],
+    v2Environment,
+    ...(v2FixCommit ? { v2FixCommit } : {}),
+    ...(differentialAdmission ? { differentialAdmission } : {}),
+  };
+}
+
 function parseVettedPoolArtifactEntry(raw: unknown): SweRebenchV2VettedPoolArtifactEntry | null {
   if (!isObject(raw)) return null;
   if (typeof raw['instance_id'] !== 'string' || raw['instance_id'].length === 0) return null;
   if (raw['scorable'] !== true) return null;
   if (typeof raw['reason'] !== 'string') return null;
   if (typeof raw['checkedAt'] !== 'string') return null;
+  const v2 = v2AdmissionFields(raw);
+  if (
+    (raw['rowHashVersion'] !== undefined || raw['publicRowHash'] !== undefined || raw['v2Environment'] !== undefined || raw['v2FixCommit'] !== undefined || raw['differentialAdmission'] !== undefined) &&
+    !v2
+  ) return null;
   const entry: SweRebenchV2VettedPoolArtifactEntry = {
     instance_id: raw['instance_id'],
     scorable: true,
@@ -319,6 +435,7 @@ function parseVettedPoolArtifactEntry(raw: unknown): SweRebenchV2VettedPoolArtif
     ...(typeof raw['imageName'] === 'string' ? { imageName: raw['imageName'] } : {}),
     ...(typeof raw['imageDigest'] === 'string' ? { imageDigest: raw['imageDigest'] } : {}),
     ...(typeof raw['upstreamEvalCommit'] === 'string' ? { upstreamEvalCommit: raw['upstreamEvalCommit'] } : {}),
+    ...(v2 ?? {}),
   };
   return entry;
 }
@@ -698,7 +815,15 @@ export async function exportScorableVettedPoolArtifact(
   const scorable = await store.getScorableEntries(evalSemanticsVersion);
   if (!scorable) return null;
   const entries = Object.entries(scorable.entries)
-    .map(([instance_id, entry]) => ({
+    .map(([instance_id, entry]) => {
+      const v2 = v2AdmissionFields(entry as unknown as Record<string, unknown>);
+      if (
+        (entry.rowHashVersion !== undefined || entry.publicRowHash !== undefined || entry.v2Environment !== undefined || entry.v2FixCommit !== undefined || entry.differentialAdmission !== undefined) &&
+        !v2
+      ) {
+        throw new Error(`invalid v2 minted admission for ${instance_id}`);
+      }
+      return {
       instance_id,
       scorable: true as const,
       reason: entry.reason,
@@ -707,7 +832,9 @@ export async function exportScorableVettedPoolArtifact(
       ...(entry.imageName ? { imageName: entry.imageName } : {}),
       ...(entry.imageDigest ? { imageDigest: entry.imageDigest } : {}),
       ...(entry.upstreamEvalCommit ? { upstreamEvalCommit: entry.upstreamEvalCommit } : {}),
-    }))
+      ...(v2 ?? {}),
+    };
+    })
     .sort((a, b) => a.instance_id.localeCompare(b.instance_id));
   return {
     schemaVersion: SWE_REBENCH_V2_VETTED_POOL_ARTIFACT_TYPE,
@@ -927,7 +1054,13 @@ function buildBoundedTransientEntry(args: {
 export async function validatePoolInstances(
   pool: PoolTask[],
   deps: ValidatePoolDeps,
-  opts: { limit?: number; force?: boolean; poolSource?: ValidatePoolSource } = {},
+  opts: {
+    limit?: number;
+    force?: boolean;
+    poolSource?: ValidatePoolSource;
+    /** Explicit G0b environments have an admitted non-pytest parser. */
+    allowNonPythonInstanceIds?: ReadonlySet<string>;
+  } = {},
 ): Promise<ValidatePoolSummary> {
   const poolSource = opts.poolSource ?? 'benchmark';
   const log = deps.log ?? (() => {});
@@ -944,7 +1077,7 @@ export async function validatePoolInstances(
     // override; everything else can't be scored cleanly today. The leaderboard
     // rows don't carry an explicit language field — infer from the patch when
     // unset.
-    if (!isPythonInstance(task)) {
+    if (!isPythonInstance(task) && !opts.allowNonPythonInstanceIds?.has(task.instance_id)) {
       await deps.store.record(task.instance_id, { scorable: false, reason: 'non-pytest-unsupported', checkedAt: new Date().toISOString() }, deps.semanticsVersion);
       summary.skipped += 1;
       continue;

@@ -6,12 +6,12 @@
  * Operator setup is automated via {@link SweRebenchV2EvaluatorHarness.onEnable}:
  *   `jinn harnesses enable swe-rebench-v2-evaluator`
  *   - Validates Docker + Python availability.
- *   - Clones the upstream `SWE-rebench/SWE-rebench-V2` repo into
- *     `<implStateDir>/upstream` (one-time; idempotent on rerun).
- *   - Writes a `state.json` marker with `enabled: true`.
+ *   - Pins the upstream `SWE-rebench/SWE-rebench-V2` checkout at a reviewed commit.
+ *   - Applies the versioned Jinn report/parser bundle and runs its Python self-test.
+ *   - Writes a state marker binding commit, bundle digest, and trusted parser metadata.
  *
  * `isReady()` reports `ready: false` (with a `nextStep` pointing at the
- * enable command) until the marker file is written.
+ * enable command) until a current durable marker is written.
  *
  * Spec: docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §3.4
  */
@@ -19,8 +19,10 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { spawn, type SpawnOptions } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   SweRebenchV2TaskSchema,
   SweRebenchV2SolutionPayloadSchema,
@@ -55,13 +57,39 @@ import {
   parseVettedPoolArtifact,
   vettedPoolArtifactRefFromEligibility,
   type ScorableVettedPoolArtifactEntries,
+  type SweRebenchV2VettedPoolArtifactEntry,
+  type V2MintedEnvironmentAdmissionBinding,
 } from '../../../solver-types/_swe-rebench-v2-validated-pool.js';
 import {
   computeRowHash,
+  pullDigestQualifiedImage,
   resolveImageDigest,
+  resolveImagePlatform,
   type CommandRunner,
   type CommandResult,
 } from '../../../solver-types/_swe-rebench-v2-substrate.js';
+import {
+  computeMintedPoolRowV2Hash,
+  isMintedPoolRowV2,
+  parseMintedIpfsDataset,
+  type DifferentialAdmissionReceiptReferenceV2,
+  type MintedEnvironmentBindingV1,
+  type MintedPoolRowV2,
+} from '../../../solver-types/_swe-rebench-v2-minted-pool.js';
+import {
+  hashTaskEnvironmentSpecV1,
+  parseTaskEnvironmentSpecV1,
+  verifyEnvironmentAttestationV1,
+  type TaskEnvironmentSpecV1,
+  type TrustedParserIdentityV1,
+} from '../../../task-creator/environment/contracts.js';
+import { canonicalJson } from '../../engine/canonical-json.js';
+import {
+  hashDifferentialAdmissionReceiptV2,
+  targetRecipeCommandForTestPath,
+  verifyDifferentialAdmissionReceiptV2,
+  type DifferentialAdmissionReceiptV2,
+} from '../../../solver-types/_swe-rebench-v2-differential-admission.js';
 import type { PoolTask } from '../../../solver-types/_swe-rebench-v2-pool.js';
 import {
   defaultStateDir as defaultSolverTypeStateDir,
@@ -75,8 +103,133 @@ import {
 const DEFAULT_IPFS_REGISTRY_URL = 'https://registry.autonolas.tech';
 const DEFAULT_IPFS_GATEWAY_URL = 'https://gateway.autonolas.tech';
 const UPSTREAM_REPO_URL = 'https://github.com/SWE-rebench/SWE-rebench-V2.git';
+const UPSTREAM_COMMIT = 'c71902a8cf8d2b725f63d51f199f4d3e56f68d2d';
+const PATCH_BUNDLE_ID = 'jinn.swe-rebench-v2.patch-bundle.v1';
+const PATCH_BUNDLE_VERSION = 'v1';
+const PATCH_BUNDLE_FILE = 'swe-rebench-v2-evaluator.bundle.v1.patch';
+const VITEST_JSON_PARSER = { id: 'vitest-json.v1', version: 'v1' } as const;
 const STATE_FILE = 'state.json';
 const ENABLE_CLI = 'jinn harnesses enable swe-rebench-v2-evaluator';
+
+/**
+ * The source tree keeps the bundle in `client/scripts`; the published package
+ * copies it to `dist/scripts`. Resolve both layouts so `tsx` development runs
+ * and the built CLI apply the identical, versioned patch bytes.
+ */
+function patchBundlePath(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    resolve(here, '../../../../scripts', PATCH_BUNDLE_FILE),
+    resolve(here, '../../../scripts', PATCH_BUNDLE_FILE),
+  ];
+  const path = candidates.find(existsSync);
+  if (!path) {
+    throw new Error(`missing ${PATCH_BUNDLE_FILE}; reinstall @jinn-network/client`);
+  }
+  return path;
+}
+
+function patchBundleMetadata(bundlePath: string): PatchBundleMetadata {
+  const digest = createHash('sha256').update(readFileSync(bundlePath)).digest('hex');
+  return {
+    id: PATCH_BUNDLE_ID,
+    version: PATCH_BUNDLE_VERSION,
+    sha256: `sha256:${digest}`,
+  };
+}
+
+function hasCurrentEnableContract(state: ReadEnabledState | null): state is EnabledState {
+  if (!state || state.schemaVersion !== 'swe-rebench-v2-evaluator-state.v2') return false;
+  if (state.upstream?.repoUrl !== UPSTREAM_REPO_URL || state.upstream?.commit !== UPSTREAM_COMMIT) return false;
+  if (state.patchBundle?.id !== PATCH_BUNDLE_ID || state.patchBundle.version !== PATCH_BUNDLE_VERSION) return false;
+  return state.trustedParsers.some((parser) =>
+    parser.id === VITEST_JSON_PARSER.id &&
+    parser.version === VITEST_JSON_PARSER.version &&
+    parser.bundleId === state.patchBundle.id &&
+    parser.bundleSha256 === state.patchBundle.sha256,
+  );
+}
+
+function isCurrentEnabledState(
+  state: ReadEnabledState | null,
+  bundle: PatchBundleMetadata,
+  upstreamRepoDir: string,
+): state is EnabledState {
+  if (!hasCurrentEnableContract(state)) return false;
+  if (state.upstreamRepoDir !== upstreamRepoDir) return false;
+  if (
+    state.patchBundle.id !== bundle.id ||
+    state.patchBundle.version !== bundle.version ||
+    state.patchBundle.sha256 !== bundle.sha256
+  ) return false;
+  return state.trustedParsers.some((parser) =>
+    parser.bundleId === bundle.id &&
+    parser.bundleSha256 === bundle.sha256,
+  );
+}
+
+function sameParser(a: TrustedParserIdentityV1, b: TrustedParserIdentityV1): boolean {
+  return a.id === b.id && a.version === b.version && a.digest === b.digest && a.bundleId === b.bundleId;
+}
+
+function sameAttestation(
+  a: TaskEnvironmentSpecV1['attestation'],
+  b: TaskEnvironmentSpecV1['attestation'],
+): boolean {
+  return a.scheme === b.scheme &&
+    a.algo === b.algo &&
+    a.environmentHash === b.environmentHash &&
+    a.operatorSafe.toLowerCase() === b.operatorSafe.toLowerCase() &&
+    a.signer.toLowerCase() === b.signer.toLowerCase() &&
+    a.signature.toLowerCase() === b.signature.toLowerCase();
+}
+
+function sameV2AdmissionBinding(
+  a: V2MintedEnvironmentAdmissionBinding,
+  b: MintedEnvironmentBindingV1,
+): boolean {
+  return a.environmentSpecCid === b.environmentSpecCid &&
+    a.environmentHash === b.environmentHash &&
+    sameParser(a.parser, b.parser) &&
+    a.image.reference === b.image.reference &&
+    a.image.digest === b.image.digest &&
+    a.platform === b.platform;
+}
+
+function sameDifferentialAdmissionBinding(
+  a: DifferentialAdmissionReceiptReferenceV2,
+  b: DifferentialAdmissionReceiptReferenceV2,
+): boolean {
+  return a.admissionPolicyVersion === b.admissionPolicyVersion &&
+    a.receiptCid === b.receiptCid &&
+    a.receiptHash === b.receiptHash;
+}
+
+function canonicalCommandHash(command: unknown): `sha256:${string}` {
+  return `sha256:${createHash('sha256').update(canonicalJson(command)).digest('hex')}`;
+}
+
+function sha256(value: string): `sha256:${string}` {
+  return `sha256:${createHash('sha256').update(value).digest('hex')}`;
+}
+
+function sameStringArray(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+/** Runs without Docker: it proves the patched final report exposes actual
+ * empirical sets and that the checked-in Vitest JSON parser is registered. */
+const EMPIRICAL_SELF_TEST = [
+  'import json',
+  'from scripts.eval import build_report_item',
+  'from lib.agent.log_parsers import NAME_TO_PARSER, TestStatus',
+  "item = build_report_item({'instance_id': 'jinn-enable-self-test', 'FAIL_TO_PASS': [], 'PASS_TO_PASS': []}, {'result': {'passed_actual': ['passes'], 'failed_actual': ['fails'], 'passed_match': False, 'exit_code': 1, 'log_path': 'log'}})",
+  "assert item['passed_actual'] == ['passes']",
+  "assert item['failed_actual'] == ['fails']",
+  "parser = NAME_TO_PARSER['vitest-json.v1']",
+  "parsed = parser(json.dumps({'testResults': [{'assertionResults': [{'fullName': 'suite passes', 'status': 'passed'}, {'ancestorTitles': ['suite'], 'title': 'fails', 'status': 'failed'}]}]}))",
+  "assert parsed == {'suite passes': TestStatus.PASSED.value, 'suite fails': TestStatus.FAILED.value}",
+].join('\n');
 
 /** The two verdict values emitted by this evaluator. The broader registry
  *  shape (`reputation.ts`) also recognises `'INDETERMINATE'` / `'REJECTED'`,
@@ -84,12 +237,38 @@ const ENABLE_CLI = 'jinn harnesses enable swe-rebench-v2-evaluator';
  *  they don't. Mirrors the pattern in `prediction-v0-evaluator/types.ts`. */
 type SweRebenchVerdict = 'PASS' | 'FAIL';
 
-interface EnabledState {
+interface LegacyEnabledState {
   schemaVersion: 'swe-rebench-v2-evaluator-state.v1';
   enabled: true;
   enabledAt: string;
   upstreamRepoDir: string;
 }
+
+interface PatchBundleMetadata {
+  id: typeof PATCH_BUNDLE_ID;
+  version: typeof PATCH_BUNDLE_VERSION;
+  sha256: `sha256:${string}`;
+}
+
+interface EnabledState {
+  schemaVersion: 'swe-rebench-v2-evaluator-state.v2';
+  enabled: true;
+  enabledAt: string;
+  upstreamRepoDir: string;
+  upstream: {
+    repoUrl: typeof UPSTREAM_REPO_URL;
+    commit: typeof UPSTREAM_COMMIT;
+  };
+  patchBundle: PatchBundleMetadata;
+  trustedParsers: Array<{
+    id: typeof VITEST_JSON_PARSER.id;
+    version: typeof VITEST_JSON_PARSER.version;
+    bundleId: typeof PATCH_BUNDLE_ID;
+    bundleSha256: `sha256:${string}`;
+  }>;
+}
+
+type ReadEnabledState = EnabledState | LegacyEnabledState;
 
 interface CachedPublishedPoolArtifact {
   evalSemanticsVersion: string;
@@ -323,6 +502,7 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
       };
     }
     const state = readEnabledState(this.implStateDir);
+    const upstreamRepoDir = join(this.implStateDir, 'upstream');
     if (!state) {
       return {
         ready: false,
@@ -334,13 +514,52 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
         },
       };
     }
-    if (!existsSync(state.upstreamRepoDir)) {
+    if (state.upstreamRepoDir !== upstreamRepoDir) {
       return {
         ready: false,
-        reason: `upstream repo missing at ${state.upstreamRepoDir}`,
+        reason: 'swe-rebench-v2 evaluator enable state requires durable bundle repair',
+        nextStep: {
+          description:
+            `Re-run \`${ENABLE_CLI}\` to restore the managed upstream evaluator checkout.`,
+          cli: ENABLE_CLI,
+        },
+      };
+    }
+    if (!existsSync(upstreamRepoDir)) {
+      return {
+        ready: false,
+        reason: `upstream repo missing at ${upstreamRepoDir}`,
         nextStep: {
           description:
             `Re-run \`${ENABLE_CLI}\` to re-clone the upstream eval harness.`,
+          cli: ENABLE_CLI,
+        },
+      };
+    }
+    // v1 markers are intentionally readable so callers can locate their old
+    // checkout, but they do not prove that the required patch bundle and
+    // parser are present. Re-enable repairs them before this evaluator may
+    // claim more work.
+    let bundle: PatchBundleMetadata;
+    try {
+      bundle = patchBundleMetadata(patchBundlePath());
+    } catch (err) {
+      return {
+        ready: false,
+        reason: `cannot load durable evaluator patch bundle: ${err instanceof Error ? err.message : String(err)}`,
+        nextStep: {
+          description: `Reinstall @jinn-network/client, then re-run \`${ENABLE_CLI}\`.`,
+          cli: ENABLE_CLI,
+        },
+      };
+    }
+    if (!isCurrentEnabledState(state, bundle, upstreamRepoDir)) {
+      return {
+        ready: false,
+        reason: 'swe-rebench-v2 evaluator enable state requires durable bundle repair',
+        nextStep: {
+          description:
+            `Re-run \`${ENABLE_CLI}\` to pin and self-test the upstream evaluator bundle.`,
           cli: ENABLE_CLI,
         },
       };
@@ -370,7 +589,7 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
       description:
         'swe-rebench-v2.v1 — code-issue benchmark from the SWE-rebench/SWE-rebench-V2 dataset. ' +
         'Requires Docker (per-instance images) and Python 3 (upstream eval.py harness). ' +
-        'Enable will clone https://github.com/SWE-rebench/SWE-rebench-V2 into the impl state directory.',
+        'Enable pins and self-tests https://github.com/SWE-rebench/SWE-rebench-V2 in the impl state directory.',
       externalResources: [
         { name: 'SWE-rebench-V2 (upstream)', url: 'https://github.com/SWE-rebench/SWE-rebench-V2' },
         { name: 'Docker install', url: 'https://docs.docker.com/get-docker/' },
@@ -386,13 +605,11 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
           'implStateDir is not configured. Set JINN_ENGINE_IMPL_STATE_DIR_ROOT (or engine.implStateDirRoot in config) and restart the daemon, then re-run.',
       };
     }
-    const upstreamRepoDir = join(this.implStateDir, 'upstream');
-
-    // Idempotent: if already enabled and the repo is present, we're done.
     const existing = readEnabledState(this.implStateDir);
-    if (existing && existsSync(existing.upstreamRepoDir)) {
-      return { status: 'ready', details: { upstreamRepoDir: existing.upstreamRepoDir } };
-    }
+    // Never trust the marker to select a checkout: a stale or corrupt marker
+    // must be repairable without allowing `checkout --force` / `reset --hard`
+    // to run in another repository.
+    const upstreamRepoDir = join(this.implStateDir, 'upstream');
 
     const run = this.deps.runCommand ?? runCommand;
 
@@ -429,35 +646,104 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
       };
     }
 
-    // Clone upstream repo.
-    await mkdir(this.implStateDir, { recursive: true, mode: 0o755 });
-    if (!existsSync(upstreamRepoDir)) {
-      const clone = await run('git', [
-        'clone',
-        '--depth=1',
-        UPSTREAM_REPO_URL,
-        upstreamRepoDir,
-      ]);
-      if (clone.exitCode !== 0) {
+    let bundlePath: string;
+    let bundle: PatchBundleMetadata;
+    try {
+      bundlePath = patchBundlePath();
+      bundle = patchBundleMetadata(bundlePath);
+    } catch (err) {
+      return {
+        status: 'error',
+        message: `cannot load durable evaluator patch bundle: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+
+    // A v2 marker binds the exact commit, patch bytes, and parser registry.
+    // Any legacy or stale marker is repaired from a clean checkout. The
+    // upstream directory is managed evaluator state, so --force is deliberate:
+    // carrying a local manual patch forward would defeat the recorded binding.
+    if (!isCurrentEnabledState(existing, bundle, upstreamRepoDir) || !existsSync(upstreamRepoDir)) {
+      await mkdir(this.implStateDir, { recursive: true, mode: 0o755 });
+      if (!existsSync(upstreamRepoDir)) {
+        const clone = await run('git', [
+          'clone',
+          '--no-checkout',
+          UPSTREAM_REPO_URL,
+          upstreamRepoDir,
+        ]);
+        if (clone.exitCode !== 0) {
+          return {
+            status: 'error',
+            message: `git clone failed (exit ${clone.exitCode}): ${clone.stderr.slice(-500)}`,
+          };
+        }
+      }
+
+      const fetch = await run('git', ['fetch', '--depth=1', 'origin', UPSTREAM_COMMIT], { cwd: upstreamRepoDir });
+      if (fetch.exitCode !== 0) {
         return {
           status: 'error',
-          message: `git clone failed (exit ${clone.exitCode}): ${clone.stderr.slice(-500)}`,
+          message: `git fetch pinned upstream failed (exit ${fetch.exitCode}): ${fetch.stderr.slice(-500)}`,
+        };
+      }
+      const checkout = await run('git', ['checkout', '--detach', '--force', UPSTREAM_COMMIT], { cwd: upstreamRepoDir });
+      if (checkout.exitCode !== 0) {
+        return {
+          status: 'error',
+          message: `git checkout pinned upstream failed (exit ${checkout.exitCode}): ${checkout.stderr.slice(-500)}`,
+        };
+      }
+      const reset = await run('git', ['reset', '--hard', UPSTREAM_COMMIT], { cwd: upstreamRepoDir });
+      if (reset.exitCode !== 0) {
+        return {
+          status: 'error',
+          message: `git reset pinned upstream failed (exit ${reset.exitCode}): ${reset.stderr.slice(-500)}`,
+        };
+      }
+      const patchCheck = await run('git', ['apply', '--check', bundlePath], { cwd: upstreamRepoDir });
+      if (patchCheck.exitCode !== 0) {
+        return {
+          status: 'error',
+          message: `evaluator patch bundle is incompatible with ${UPSTREAM_COMMIT}: ${patchCheck.stderr.slice(-500)}`,
+        };
+      }
+      const apply = await run('git', ['apply', bundlePath], { cwd: upstreamRepoDir });
+      if (apply.exitCode !== 0) {
+        return {
+          status: 'error',
+          message: `evaluator patch bundle failed to apply: ${apply.stderr.slice(-500)}`,
         };
       }
     }
 
-    // Persist marker.
+    // Never write the durable marker until both empirical actual-result fields
+    // and the trusted Vitest JSON parser work in the patched upstream tree.
+    const selfTest = await run('python3', ['-c', EMPIRICAL_SELF_TEST], { cwd: upstreamRepoDir });
+    if (selfTest.exitCode !== 0) {
+      return {
+        status: 'error',
+        message: `patched upstream empirical self-test failed (exit ${selfTest.exitCode}): ${selfTest.stderr.slice(-500)}`,
+      };
+    }
+
     const state: EnabledState = {
-      schemaVersion: 'swe-rebench-v2-evaluator-state.v1',
+      schemaVersion: 'swe-rebench-v2-evaluator-state.v2',
       enabled: true,
       enabledAt: new Date().toISOString(),
       upstreamRepoDir,
+      upstream: { repoUrl: UPSTREAM_REPO_URL, commit: UPSTREAM_COMMIT },
+      patchBundle: bundle,
+      trustedParsers: [{
+        ...VITEST_JSON_PARSER,
+        bundleId: bundle.id,
+        bundleSha256: bundle.sha256,
+      }],
     };
     await writeFile(join(this.implStateDir, STATE_FILE), JSON.stringify(state, null, 2));
 
     return {
       status: 'ready',
-      details: { upstreamRepoDir },
+      details: { upstreamRepoDir, upstreamCommit: UPSTREAM_COMMIT, patchBundle: bundle.id },
     };
   }
 
@@ -565,6 +851,330 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
     }
 
     return recheckRow;
+  }
+
+  /**
+   * Recheck an explicit-environment v2 minted row. Unlike v1 benchmark rows,
+   * every grading input is supplied by the immutable IPFS artifact and the
+   * signed TaskEnvironmentSpec. Any missing/changed observation is a skip —
+   * never a fallback to a local admission record or a binary verdict.
+   */
+  private async recheckMintedV2(
+    task: ReturnType<typeof SweRebenchV2TaskSchema.parse>,
+    runtimeTask: Task,
+    fetcher: HfFetcher,
+    enabledState: ReadEnabledState,
+  ): Promise<HfRow | null> {
+    if (!parseMintedIpfsDataset(task.hf_dataset)) return null;
+    if (!(fetcher instanceof RoutingTaskRowFetcher)) {
+      throw new SkippableError(
+        'minted_pool_router_unavailable',
+        `cannot resolve immutable minted artifact for ${task.instance_id}`,
+      );
+    }
+
+    let routed;
+    try {
+      routed = await fetcher.fetchMintedRow({
+        hf_dataset: task.hf_dataset,
+        instance_id: task.instance_id,
+      });
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new SkippableError(
+        /publicRowHash/u.test(detail) ? 'minted_substrate_drift_public_row_hash' : 'minted_pool_artifact_invalid',
+        `cannot load minted artifact for ${task.instance_id}: ${detail}`,
+      );
+    }
+    // v1 is deliberately routed through the historical admission path below.
+    if (!routed || routed.artifact.schemaVersion !== 'swe-rebench-v2-minted-pool.v2') return null;
+    if (routed.artifact.evalSemanticsVersion !== EVAL_SEMANTICS_VERSION) {
+      throw new SkippableError(
+        'minted_pool_semantics_mismatch',
+        `minted artifact semanticsVersion=${routed.artifact.evalSemanticsVersion} does not match evaluator semanticsVersion=${EVAL_SEMANTICS_VERSION}`,
+      );
+    }
+    if (!isMintedPoolRowV2(routed.row)) {
+      throw new SkippableError('minted_pool_artifact_invalid', `v2 artifact row lacks v2 bindings for ${task.instance_id}`);
+    }
+    const row = routed.row;
+    const binding = row.environment;
+
+    if (computeMintedPoolRowV2Hash(row) !== row.publicRowHash) {
+      throw new SkippableError(
+        'minted_substrate_drift_public_row_hash',
+        `public row hash drift for ${task.instance_id}`,
+      );
+    }
+    if (
+      row.instance_id !== task.instance_id ||
+      row.repo !== task.repo ||
+      row.base_commit !== task.base_commit ||
+      row.language !== task.language
+    ) {
+      throw new SkippableError(
+        'minted_substrate_task_binding_drift',
+        `on-chain task fields do not match v2 minted row for ${task.instance_id}`,
+      );
+    }
+    if (row.image_name !== binding.image.reference || row.install_config.log_parser !== binding.parser.id) {
+      throw new SkippableError(
+        'minted_substrate_grading_binding_drift',
+        `grading image or parser id does not match v2 environment binding for ${task.instance_id}`,
+      );
+    }
+
+    const admission = await this.requireMintedV2Admission(task, runtimeTask, row);
+
+    const spec = await this.loadAndVerifyMintedEnvironmentSpec(binding, task, enabledState);
+    await this.recheckMintedV2DifferentialAdmission(task, row, admission, spec);
+    // The environment contract declares the image which the runner must use;
+    // checking the row too prevents a public artifact from redirecting tests to
+    // an otherwise valid but unrelated environment image.
+    if (spec.execution.image.reference !== row.image_name) {
+      throw new SkippableError(
+        'minted_substrate_image_reference_drift',
+        `v2 row image does not match published environment spec for ${task.instance_id}`,
+      );
+    }
+
+    const commandRunner: CommandRunner = (this.deps.runCommand ?? runCommand) as CommandRunner;
+    if (!(await pullDigestQualifiedImage(binding.image.reference, commandRunner))) {
+      throw new SkippableError(
+        'minted_substrate_image_pull_failed',
+        `cannot pull digest-qualified evaluator image for ${task.instance_id}`,
+      );
+    }
+    const currentDigest = await resolveImageDigest(binding.image.reference, commandRunner);
+    if (!currentDigest) {
+      throw new SkippableError(
+        'minted_substrate_image_unavailable',
+        `cannot inspect digest-qualified evaluator image for ${task.instance_id}`,
+      );
+    }
+    if (currentDigest !== binding.image.digest) {
+      throw new SkippableError(
+        'minted_substrate_drift_image_digest',
+        `evaluator image digest drift for ${task.instance_id}: bound=${binding.image.digest}, current=${currentDigest}`,
+      );
+    }
+    const currentPlatform = await resolveImagePlatform(binding.image.reference, commandRunner);
+    if (currentPlatform !== binding.platform) {
+      throw new SkippableError(
+        'minted_substrate_drift_image_platform',
+        `evaluator image platform unavailable or mismatched for ${task.instance_id}: bound=${binding.platform}`,
+      );
+    }
+
+    return {
+      instance_id: row.instance_id,
+      repo: row.repo,
+      image_name: row.image_name,
+      FAIL_TO_PASS: row.FAIL_TO_PASS,
+      PASS_TO_PASS: row.PASS_TO_PASS,
+      test_patch: row.test_patch,
+      install_config: row.install_config,
+    };
+  }
+
+  /** A v2 row is gradeable only when the launcher-published vetted pool binds
+   * the exact public row and explicit evaluator environment. */
+  private async requireMintedV2Admission(
+    task: ReturnType<typeof SweRebenchV2TaskSchema.parse>,
+    runtimeTask: Task,
+    row: MintedPoolRowV2,
+  ): Promise<SweRebenchV2VettedPoolArtifactEntry> {
+    let ref;
+    try {
+      ref = vettedPoolArtifactRefFromEligibility(runtimeTask.eligibility);
+    } catch (err) {
+      throw new SkippableError('minted_v2_admission_invalid', `invalid vetted-pool ref: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (!ref) {
+      throw new SkippableError('minted_v2_admission_missing', `v2 minted row ${task.instance_id} has no vetted-pool admission ref`);
+    }
+    if (runtimeTask.solverNetManifestCid && ref.manifestCid !== runtimeTask.solverNetManifestCid) {
+      throw new SkippableError('minted_v2_admission_invalid', `vetted-pool manifest mismatch for ${task.instance_id}`);
+    }
+    if (ref.evalSemanticsVersion !== EVAL_SEMANTICS_VERSION) {
+      throw new SkippableError('minted_v2_admission_invalid', `vetted-pool semantics mismatch for ${task.instance_id}`);
+    }
+    const artifact = await this.loadPublishedPoolArtifact(ref.artifactCid);
+    if (artifact.evalSemanticsVersion !== ref.evalSemanticsVersion || artifact.artifactHash !== ref.artifactHash) {
+      throw new SkippableError('minted_v2_admission_invalid', `vetted-pool artifact binding mismatch for ${task.instance_id}`);
+    }
+    const entry = artifact.entries.byId.get(task.instance_id);
+    if (!entry || entry.rowHashVersion !== 2 || !entry.publicRowHash || !entry.v2Environment) {
+      throw new SkippableError('minted_v2_admission_missing', `no v2 scorable admission for ${task.instance_id}`);
+    }
+    if (
+      entry.publicRowHash !== row.publicRowHash ||
+      !sameV2AdmissionBinding(entry.v2Environment, row.environment)
+    ) {
+      throw new SkippableError('minted_v2_admission_drift', `vetted-pool admission drift for ${task.instance_id}`);
+    }
+    if (row.differentialAdmission && (!row.fix_commit || entry.v2FixCommit !== row.fix_commit)) {
+      throw new SkippableError(
+        'minted_v2_differential_fix_commit_drift',
+        `differential fix commit admission drift for ${task.instance_id}`,
+      );
+    }
+    return entry;
+  }
+
+  /** Re-derive every receipt command from the signed environment before grade. */
+  private async recheckMintedV2DifferentialAdmission(
+    task: ReturnType<typeof SweRebenchV2TaskSchema.parse>,
+    row: MintedPoolRowV2,
+    admission: SweRebenchV2VettedPoolArtifactEntry,
+    spec: TaskEnvironmentSpecV1,
+  ): Promise<void> {
+    const rowReference = row.differentialAdmission;
+    const admissionReference = admission.differentialAdmission;
+    // Pre-hardening v2 rows retain their historical contract. New public-repo
+    // admissions always include both references, and never fail open if one is
+    // stripped or changed after publication.
+    if (!rowReference && !admissionReference) return;
+    if (!rowReference || !admissionReference || !sameDifferentialAdmissionBinding(rowReference, admissionReference)) {
+      throw new SkippableError(
+        'minted_v2_differential_admission_drift',
+        `differential admission reference drift for ${task.instance_id}`,
+      );
+    }
+
+    let receipt: DifferentialAdmissionReceiptV2;
+    try {
+      const fetchArtifact = this.deps.fetchFromIpfs ?? fetchFromIpfs;
+      const raw = await fetchArtifact(this.ipfsGatewayUrl, rowReference.receiptCid);
+      receipt = verifyDifferentialAdmissionReceiptV2(raw);
+    } catch (err) {
+      throw new SkippableError(
+        'minted_v2_differential_receipt_unavailable',
+        `cannot load or parse differential receipt for ${task.instance_id}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    if (hashDifferentialAdmissionReceiptV2(receipt) !== rowReference.receiptHash) {
+      throw new SkippableError(
+        'minted_v2_differential_receipt_hash_drift',
+        `differential receipt hash drift for ${task.instance_id}`,
+      );
+    }
+    if (receipt.task.fixCommit !== row.fix_commit) {
+      throw new SkippableError(
+        'minted_v2_differential_fix_commit_drift',
+        `differential receipt fix commit drift for ${task.instance_id}`,
+      );
+    }
+    if (
+      receipt.task.instanceId !== task.instance_id ||
+      receipt.task.repo !== task.repo ||
+      receipt.task.baseCommit !== task.base_commit ||
+      receipt.testPatchHash !== sha256(row.test_patch) ||
+      receipt.evalSemanticsVersion !== EVAL_SEMANTICS_VERSION ||
+      receipt.environment.environmentHash !== spec.attestation.environmentHash ||
+      receipt.environment.image.reference !== spec.execution.image.reference ||
+      receipt.environment.image.digest !== spec.execution.image.digest ||
+      receipt.environment.platform !== spec.execution.platform ||
+      !sameParser(receipt.environment.parser, spec.execution.parser)
+    ) {
+      throw new SkippableError(
+        'minted_v2_differential_context_drift',
+        `differential receipt task/environment/parser/semantics drift for ${task.instance_id}`,
+      );
+    }
+    try {
+      for (const path of receipt.testPaths) {
+        if (canonicalCommandHash(targetRecipeCommandForTestPath(spec, path.testPath)) !== path.commandHash) {
+          throw new Error(`command binding drift for ${path.testPath}`);
+        }
+      }
+    } catch (err) {
+      throw new SkippableError(
+        'minted_v2_differential_command_drift',
+        `differential receipt command drift for ${task.instance_id}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    const FAIL_TO_PASS = receipt.testPaths.flatMap((path) => path.FAIL_TO_PASS);
+    const PASS_TO_PASS = receipt.testPaths.flatMap((path) => path.PASS_TO_PASS);
+    if (!sameStringArray(row.FAIL_TO_PASS, FAIL_TO_PASS) || !sameStringArray(row.PASS_TO_PASS, PASS_TO_PASS)) {
+      throw new SkippableError(
+        'minted_v2_differential_row_drift',
+        `differential receipt assertions do not match public row for ${task.instance_id}`,
+      );
+    }
+  }
+
+  private async loadAndVerifyMintedEnvironmentSpec(
+    binding: MintedEnvironmentBindingV1,
+    task: ReturnType<typeof SweRebenchV2TaskSchema.parse>,
+    enabledState: ReadEnabledState,
+  ): Promise<TaskEnvironmentSpecV1> {
+    let spec: TaskEnvironmentSpecV1;
+    try {
+      const fetchArtifact = this.deps.fetchFromIpfs ?? fetchFromIpfs;
+      const raw = await fetchArtifact(this.ipfsGatewayUrl, binding.environmentSpecCid);
+      spec = parseTaskEnvironmentSpecV1(raw);
+    } catch (err) {
+      throw new SkippableError(
+        'minted_environment_spec_unavailable',
+        `cannot load or parse environment spec ${binding.environmentSpecCid}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    const environmentHash = hashTaskEnvironmentSpecV1(spec);
+    if (environmentHash !== binding.environmentHash || spec.attestation.environmentHash !== binding.environmentHash) {
+      throw new SkippableError(
+        'minted_substrate_drift_environment_hash',
+        `environment hash drift for ${task.instance_id}`,
+      );
+    }
+    if (!sameAttestation(spec.attestation, binding.attestation)) {
+      throw new SkippableError(
+        'minted_substrate_drift_attestation',
+        `environment attestation drift for ${task.instance_id}`,
+      );
+    }
+    if (!(await verifyEnvironmentAttestationV1(spec.attestation))) {
+      throw new SkippableError(
+        'minted_substrate_attestation_invalid',
+        `environment attestation signature is invalid for ${task.instance_id}`,
+      );
+    }
+    if (
+      spec.source.repo !== task.repo ||
+      spec.source.baseCommit !== task.base_commit ||
+      spec.execution.platform !== binding.platform ||
+      spec.execution.image.reference !== binding.image.reference ||
+      spec.execution.image.digest !== binding.image.digest ||
+      !sameParser(spec.execution.parser, binding.parser)
+    ) {
+      throw new SkippableError(
+        'minted_substrate_environment_binding_drift',
+        `published environment binding drift for ${task.instance_id}`,
+      );
+    }
+    const canonicalRepoUrl = `https://github.com/${task.repo}.git`;
+    const canonicalInputRef = `git+${canonicalRepoUrl}#${task.base_commit}`;
+    if (
+      spec.source.repoUrl !== canonicalRepoUrl ||
+      !spec.inputs.some((input) => input.inputRef === canonicalInputRef)
+    ) {
+      throw new SkippableError(
+        'minted_substrate_source_binding_drift',
+        `published environment source URL/input binding drift for ${task.instance_id}`,
+      );
+    }
+    if (!hasCurrentEnableContract(enabledState) || !enabledState.trustedParsers.some((parser) =>
+      parser.id === binding.parser.id &&
+      parser.version === binding.parser.version &&
+      parser.bundleId === binding.parser.bundleId &&
+      parser.bundleSha256 === binding.parser.digest,
+    )) {
+      throw new SkippableError(
+        'minted_substrate_parser_untrusted',
+        `environment parser is not enabled and trusted for ${task.instance_id}`,
+      );
+    }
+    return spec;
   }
 
   private async loadPublishedPoolRow(
@@ -675,8 +1285,11 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
       process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ??
       defaultSolverTypeStateDir();
     const fetcher: HfFetcher = this.getFetcher();
-    const publishedPoolRow = await this.loadPublishedPoolRow(task, ctx.task, fetcher);
-    const recheckRow = publishedPoolRow ?? await this.recheckSubstrate(
+    const mintedV2Row = await this.recheckMintedV2(task, ctx.task, fetcher, state);
+    const publishedPoolRow = mintedV2Row
+      ? null
+      : await this.loadPublishedPoolRow(task, ctx.task, fetcher);
+    const recheckRow = mintedV2Row ?? publishedPoolRow ?? await this.recheckSubstrate(
       task,
       fetcher,
       () => this.loadPoolForRecheck(stateDir),
@@ -812,13 +1425,55 @@ export function defaultSweRebenchV2EvaluatorImplStateDir(): string {
   return join(process.env['HOME'] ?? homedir(), '.jinn-client', 'engine', 'impl-state', 'swe-rebench-v2-evaluator');
 }
 
-export function readEnabledState(implStateDir: string): EnabledState | null {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isSha256(value: unknown): value is `sha256:${string}` {
+  return typeof value === 'string' && /^sha256:[a-f0-9]{64}$/.test(value);
+}
+
+function isLegacyEnabledState(value: unknown): value is LegacyEnabledState {
+  return isRecord(value) &&
+    value['schemaVersion'] === 'swe-rebench-v2-evaluator-state.v1' &&
+    value['enabled'] === true &&
+    typeof value['enabledAt'] === 'string' &&
+    typeof value['upstreamRepoDir'] === 'string';
+}
+
+function isEnabledState(value: unknown): value is EnabledState {
+  if (!isRecord(value) ||
+    value['schemaVersion'] !== 'swe-rebench-v2-evaluator-state.v2' ||
+    value['enabled'] !== true ||
+    typeof value['enabledAt'] !== 'string' ||
+    typeof value['upstreamRepoDir'] !== 'string' ||
+    !isRecord(value['upstream']) ||
+    typeof value['upstream']['repoUrl'] !== 'string' ||
+    typeof value['upstream']['commit'] !== 'string' ||
+    !isRecord(value['patchBundle']) ||
+    typeof value['patchBundle']['id'] !== 'string' ||
+    typeof value['patchBundle']['version'] !== 'string' ||
+    !isSha256(value['patchBundle']['sha256']) ||
+    !Array.isArray(value['trustedParsers'])) return false;
+
+  return value['trustedParsers'].every((parser) =>
+    isRecord(parser) &&
+    typeof parser['id'] === 'string' &&
+    typeof parser['version'] === 'string' &&
+    typeof parser['bundleId'] === 'string' &&
+    isSha256(parser['bundleSha256']),
+  );
+}
+
+export function readEnabledState(implStateDir: string): ReadEnabledState | null {
   const path = join(implStateDir, STATE_FILE);
   if (!existsSync(path)) return null;
   try {
-    const raw = JSON.parse(readFileSync(path, 'utf8')) as Partial<EnabledState>;
-    if (raw.enabled !== true || typeof raw.upstreamRepoDir !== 'string') return null;
-    return raw as EnabledState;
+    const raw: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    // Keep structurally-valid v1 state readable so enable can repair it in
+    // place, while refusing every partial or malformed v2 marker.
+    if (isLegacyEnabledState(raw) || isEnabledState(raw)) return raw;
+    return null;
   } catch {
     return null;
   }

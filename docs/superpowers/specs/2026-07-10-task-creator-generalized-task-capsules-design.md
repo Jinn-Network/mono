@@ -97,10 +97,12 @@ environment.
 ### 3.3 Implementation unit
 
 This is a program-level amendment, not one implementation tranche. Phases G0-G5 in
-§10 are separate gated feature cycles. The next implementation plan covers **G1
-only**: schemas, adapter boundary, `session-derived.v2` registration, Docker capability
-matching, and one synthetic file-artifact integration proof. G2 begins only after
-G1's gate passes; later phases receive their own design/plan review at their gate.
+§10 are separate gated feature cycles. The current public-repository G0b bootstrap
+does not start G1: it only hardens the existing SWE-rebench evaluator and defines
+the hand-off vocabulary. G1 schemas, adapter boundaries, `session-derived.v2`, Docker
+capability matching, and synthetic capsule proofs are explicitly out of scope until
+their own approved plan begins. G2 begins only after G1's gate passes; later phases
+receive their own design/plan review at their gate.
 
 ## 4. Domain model
 
@@ -140,7 +142,10 @@ interface TaskCapsuleV1 {
   taskId: string;
   instruction: string;
   environment: EnvironmentRequirementV1;
-  inputs: InputArtifactV1[];
+  inputs: Array<{
+    artifact: InputArtifactV1;
+    rightsRef: string; // independent redistribution evidence for this input
+  }>;
   submission: SubmissionProjectionV1;
   evaluator: {
     semanticsVersion: string;
@@ -162,6 +167,10 @@ evaluator credential, or unblinded source pointer. The outer signed `task.v1`
 document references both the capsule and its admission receipt. Keeping the receipt
 reference outside the capsule avoids a content-addressing cycle: the receipt commits
 to the already-final capsule digest.
+
+Rights are input-scoped: every public artifact and environment layer has its own
+`rightsRef`. A source repository licence is evidence for that repository input only;
+it is not a blanket authorization for an unrelated setup bundle, fixture, or image.
 
 ### 4.4 Environment requirement
 
@@ -317,10 +326,10 @@ design's decision not to fork SWE-rebench for coding mints.
 Both SolverNets publish attempts into the same corpus. Distillation consumes the
 attempt and verdict evidence, not the SolverNet name.
 
-### 5.4 Environment provider
+### 5.4 Sandbox provider (G1 runtime)
 
-An `EnvironmentProvider` has one responsibility: materialize a committed starting
-state and expose a uniform sandbox handle. It must support:
+`SandboxProvider` is the later G1 runtime abstraction that materializes a committed
+starting state and exposes a uniform sandbox handle. It must support:
 
 - `supports(requirement)`;
 - `acquire(requirement)`;
@@ -342,15 +351,19 @@ runtime `supports()` is the second, local fail-closed check.
 The provider sequence is Docker, then local QEMU, then cloud VM/desktop. Licensed
 snapshot providers are a separate opt-in capability class.
 
+It is deliberately distinct from `EnvironmentRecipeResolver`, which discovers a
+public-repository evaluator build recipe in G0b. The resolver does not acquire a
+sandbox, and G0b does not implement this provider interface.
+
 ### 5.5 Capsule runtime
 
 The capsule runtime is shared by solver and evaluator operators. It reads the public
 capsule, selects a supporting provider, verifies environment/setup digests, stages
-public inputs, and launches the SolverNet's configured agent Harness. On the solver
-side it extracts and canonicalizes the declared Solution projection. On the evaluator
-side it additionally obtains the commitment-matching evaluator bundle, injects the
-delivered Solution into a separate clean environment, stages the hidden reference,
-and invokes the evaluator.
+public inputs, and launches the SolverNet's configured agent Harness. The solver
+environment is a clean solve-time environment and never receives evaluator-only
+material. The evaluator environment is a distinct clean environment; it additionally
+obtains the commitment-matching evaluator bundle, injects the delivered Solution only
+after solver completion, stages the hidden reference, and invokes the evaluator.
 
 This keeps task-family logic out of the daemon's claim loop. The claim loop sees
 capabilities and versioned payloads; the runtime owns environment lifecycle.

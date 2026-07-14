@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
   createGitCommitEchoDeps,
+  extractCommitEchoPatchesAtBase,
   splitGoldAndTestPatch,
 } from '../../src/solver-types/_swe-rebench-v2-commit-echo-git.js';
 import { discoverCommitEchoCandidates } from '../../src/solver-types/_swe-rebench-v2-commit-echo.js';
@@ -37,6 +38,70 @@ describe('splitGoldAndTestPatch', () => {
     expect(goldPatch).toContain('widget.py');
     expect(goldPatch).not.toContain('tests/test_widget.py');
     expect(testPatch).toContain('tests/test_widget.py');
+  });
+});
+
+describe('source-derived patch extraction (Jinn #1422 shape)', () => {
+  // Hermetic fixture reproducing the shape of the real #1422 fix pair
+  // (two source files + two regression-test files in one fix commit).
+  // Built in a throwaway repo so the test never depends on host-repo
+  // history — CI checks out pull/N/merge with fetch-depth 1.
+  const codePaths = [
+    'client/src/daemon/daemon.ts',
+    'client/src/harnesses/engine/engine.ts',
+  ];
+  const testPaths = [
+    'client/test/daemon/daemon-recovery-nonblocking.test.ts',
+    'client/test/harnesses/engine/recovery.test.ts',
+  ];
+  let dir: string;
+  let baseCommit: string;
+  let fixCommit: string;
+
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'commit-echo-extract-'));
+    await git(dir, ['init']);
+    await git(dir, ['config', 'user.email', 'test@example.com']);
+    await git(dir, ['config', 'user.name', 'Test']);
+
+    const writeAll = async (marker: string) => {
+      for (const path of [...codePaths, ...testPaths]) {
+        await mkdir(join(dir, dirname(path)), { recursive: true });
+        await writeFile(join(dir, path), `// ${marker} ${path}\n`);
+      }
+    };
+
+    await writeAll('base');
+    await git(dir, ['add', '.']);
+    await git(dir, ['commit', '-m', 'initial']);
+    baseCommit = (await git(dir, ['rev-parse', 'HEAD'])).trim();
+
+    await writeAll('fixed');
+    await git(dir, ['add', '.']);
+    await git(dir, ['commit', '-m', 'fix: bound recovery scope']);
+    fixCommit = (await git(dir, ['rev-parse', 'HEAD'])).trim();
+  });
+
+  afterAll(async () => {
+    if (dir) await rm(dir, { recursive: true, force: true });
+  });
+
+  it('uses the exact parent/fix pair and keeps both regression files out of the gold patch', async () => {
+    const patches = await extractCommitEchoPatchesAtBase(dir, { baseCommit, fixCommit });
+
+    expect(patches.testPaths).toEqual(testPaths);
+    expect(patches.goldPatch).toContain('client/src/daemon/daemon.ts');
+    expect(patches.goldPatch).toContain('client/src/harnesses/engine/engine.ts');
+    for (const path of testPaths) {
+      expect(patches.goldPatch).not.toContain(`diff --git a/${path} b/${path}`);
+      expect(patches.testPatch).toContain(`diff --git a/${path} b/${path}`);
+    }
+  });
+
+  it('rejects a declared base that is not the fix commit exact parent', async () => {
+    await expect(
+      extractCommitEchoPatchesAtBase(dir, { baseCommit: fixCommit, fixCommit }),
+    ).rejects.toThrow(/exact parent/);
   });
 });
 
@@ -98,6 +163,9 @@ EOF`], { cwd: dir });
     expect(candidates[0]!.fix_commit).toBe(fixCommit);
     expect(candidates[0]!.base_commit).toBe(snapshot);
     expect(candidates[0]!.gold_patch).toContain('return 1');
+    expect(candidates[0]!.test_patch).toContain('tests/test_widget.py');
+    expect(candidates[0]!.test_paths).toEqual(['tests/test_widget.py']);
+    expect(candidates[0]!.language).toBe('python');
     expect(candidates[0]!.problem_statement).toContain('fix:');
   });
 });

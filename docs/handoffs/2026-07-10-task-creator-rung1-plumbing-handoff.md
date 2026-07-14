@@ -3,7 +3,167 @@
 **Date:** 2026-07-10  
 **Branch:** `feat/task-creator-v0` (PR [#1485](https://github.com/Jinn-Network/mono/pull/1485))  
 **Spec:** `spec/2026-07-08-task-creator-v0.md` §5.2 (D4 plumbing proof)  
-**Status:** Rung 1 **plumbing verified** on operator hardware. Not yet useful at scale.
+**Status:** Rung 1 **plumbing verified** on operator hardware. The subsequent
+G0b public-repository substrate and differential-admission interfaces are
+implemented, but the first real Jinn empirical receipt has not yet been
+produced. Do not represent fixture, Anvil, or parser-contract coverage as a
+Jinn source-derived or public-testnet success.
+
+---
+
+## Differential-admission update (2026-07-12)
+
+The public-repository coding adapter now has a hardened differential-admission
+contract: each target path needs two stable broken and two stable fixed runs,
+with a non-empty F2P set and receipt/environment/parser bindings. This is a
+trust-boundary implementation update, not proof that the real Jinn change has
+been empirically graded.
+
+### Reviewed real Jinn source
+
+| Field | Value |
+|---|---|
+| Repository | `Jinn-Network/mono` |
+| Base commit | `ae8093a8848e70e581f46d66dcdb56789c0808a3` |
+| Fix commit | `ef9608876511b4dff000cda1537ff7c1a227677d` |
+| Instance ID | `Jinn-Network__mono__echo-ef9608876511` |
+| Targeted regression paths | `client/test/daemon/daemon-recovery-nonblocking.test.ts`; `client/test/harnesses/engine/recovery.test.ts` |
+
+`5b76bade…` is the historical documentation-only merge commit. It remains
+useful only as a Vitest JSON parser-contract fixture and must not be used for
+Jinn empirical evidence, admission, minting, or a network-proof claim.
+
+### Actual proof status
+
+No signed evaluator environment specification, real receipt, receipt hash, or
+receipt CID exists for the reviewed source. The fresh archive-export Docker
+integration passed on 2026-07-13, so archive export/import plumbing is no
+longer the observed local blocker; it is still only test coverage and did not
+create a signed Jinn image or any proof artifact.
+
+The current operator recheck found these immediate proof prerequisites missing:
+the expected `$HOME/secure/jinn-environment-publish.json` configuration file
+(which must name the IPFS registry and external signer), and
+`JINN_TASK_CREATOR_JINN_APPROVED_ATTESTERS`. With no publication config, there
+is no external signer command to validate or invoke. A Docker GHCR credential
+configuration is present, but that alone cannot publish, sign, or verify this
+proof. Therefore publication, receipt generation, offline verification, and
+the operational receipt-bound Anvil command were not attempted.
+
+Separately, `JINN_TASK_CREATOR_IPFS_GATEWAY_URL` is unset. It is a later
+mint/network-preflight and network-wrapper prerequisite, not a blocker for
+environment publication, receipt generation, offline verification, or the
+local receipt-bound Anvil lifecycle. There is no real source-derived F2P/P2P
+evidence and no Jinn public-testnet success.
+
+The local receipt command deliberately requires a structurally valid,
+EIP-191-signed environment specification available at a local path and a
+writable output location:
+
+```sh
+cd client
+yarn task-creator:jinn-differential-e2e \
+  --environment-spec /secure/jinn-signed-environment.json \
+  --approved-attester '0x1111111111111111111111111111111111111111:0x2222222222222222222222222222222222222222' \
+  --output /secure/jinn-differential-receipt.json
+
+# Docker-free: after a real receipt was generated, re-derive and verify every
+# source, patch, environment, parser, semantic, and command binding.
+yarn task-creator:jinn-differential-e2e \
+  --verify /secure/jinn-differential-receipt.json \
+  --environment-spec /secure/jinn-signed-environment.json \
+  --approved-attester '0x1111111111111111111111111111111111111111:0x2222222222222222222222222222222222222222' \
+  --expected-receipt-hash "$JINN_TASK_CREATOR_EXPECTED_RECEIPT_HASH"
+```
+
+It is not meaningful to run this command, or receipt verification, until a
+real signed environment specification exists; `--verify` additionally requires
+a real generated receipt and its independently known canonical SHA-256 hash.
+Both modes also require an externally approved `operatorSafe:signer` pair via
+`--approved-attester`. It is an explicit proof-policy input, not inferred from
+the self-signed environment artifact: the command verifies that the signed
+environment uses the exact `resolveJinnMonoRecipeV1(baseCommit)` provider,
+recipe hash, and test-command template before it accepts that pair. No default
+attester is trusted, so a missing approval fails closed.
+The later network/factory wrapper additionally requires the operator's IPFS
+gateway and preserves the approved pair plus signed-environment binding in its
+secret-free handoff document. It re-fetches and applies the same canonical
+Jinn policy immediately before it starts the external runner.
+Set `JINN_TASK_CREATOR_EXPECTED_RECEIPT_HASH` to that exact
+`sha256:<64-lowercase-hex>` value before invoking the command.
+The generation mode creates the receipt at the supplied output path after its
+eight Docker runs; `--verify` is Docker-free and does not publish. It rejects
+`--output` and `--ipfs-registry` so a verification invocation cannot generate
+or publish. `--ipfs-registry` is an explicit optional publication step for
+generation only. Environment and receipt publication, with matching CIDs and
+hashes, are later mint/network prerequisites. Test fixtures with
+`bafy-test-only-*` CIDs or mock signatures are contract coverage only and are
+not substitutes.
+
+Only after generation and the offline verification above both succeed, run the
+receipt-bound lifecycle command using the exact public values returned by
+generation. This writes local lifecycle evidence; it is **not a second
+empirical Docker result**. The Docker differential-admission receipt remains
+the empirical result.
+
+```sh
+yarn task-creator:jinn-differential-anvil-e2e \
+  --environment-spec /secure/jinn-signed-environment.json \
+  --environment-cid '<environmentCid returned by publication>' \
+  --receipt /secure/jinn-differential-receipt.json \
+  --receipt-cid '<receiptCid returned by generation>' \
+  --expected-receipt-hash '<receiptHash returned by generation>' \
+  --approved-attester '<operatorSafe>:<signer>' \
+  --evidence-output /secure/jinn-receipt-bound-anvil-evidence.json
+```
+
+Do not substitute a fixture CID, mock signature, or placeholder SHA. The command
+first verifies the canonical signed environment, receipt bytes, environment
+CID, receipt CID, receipt SHA-256, approved attester, recipe, and source
+bindings; only then does it start Anvil and write its evidence.
+
+### Fresh local verification
+
+These commands were run with Node 24. Operators should provide Node 24 through
+their project-supported runtime manager or a system `PATH`; the developer-local
+runtime cache used for this verification is not an operational prerequisite:
+
+| Command | Result |
+|---|---|
+| `cd client && yarn typecheck` | exit 0 |
+| `cd client && yarn vitest run test/task-creator/environment/{adapters,contracts,github,publication,publish-cli}.test.ts test/task-creator/jinn-differential-proof.test.ts` | exit 0 — 6 files, 69 tests passed |
+| `cd client && yarn task-creator:harvest-e2e` | exit 0 — 1 test passed |
+| `cd client && yarn task-creator:public-repo-e2e` | exit 0 — 18 tests passed |
+| `cd client && yarn task-creator:public-repo-anvil-e2e` | exit 0 — 1 file, 13 tests passed |
+| `cd client && JINN_TEST_DOCKER_ARCHIVE_EXPORT=1 yarn vitest run test/task-creator/environment/archive-export.integration.test.ts` | exit 0 — 1 file, 1 test passed |
+| `cd client && yarn test --no-file-parallelism --maxWorkers=1` | exit 0 — 709 files / 6,147 tests passed; 7 files / 24 tests skipped; 526.07s |
+
+The package's default `test` script is `yarn build:sdk && vitest run`.
+Vitest 4.1.8 exposes `--no-file-parallelism` and `--maxWorkers`; the serialized
+command above disables file concurrency and limits workers to one, avoiding the
+known concurrent Hardhat `compile-cache.json.tmp` rename race. This green run
+is not evidence of a Docker image, signed environment, real receipt, or public
+testnet grade. There is no documentation-test harness in this repository; the
+package command and this receipt prerequisite were manually reviewed.
+
+### Public-testnet operational gate (manual; not run)
+
+The runbook requires a valid local Docker receipt and a green Anvil lifecycle
+before an operator explicitly opts in to public testnet. This is an operational
+gate, not a programmatic guarantee. The later mint/network operation requires
+all of the following:
+
+1. a digest-qualified, Linux/amd64 image and its published, EIP-191-signed
+   environment specification;
+2. the exact canonical receipt file, its matching SHA-256 hash, and its
+   published IPFS CID;
+3. configured RPC, registry/IPFS, and funding credentials; and
+4. three distinct configured operator identities: minter, solver, and
+   evaluator.
+
+The external network runner must record the task, environment, receipt,
+artifact, deliveries, verdict, and corpus references. Missing any item is a
+blocker, not a partial success.
 
 ---
 

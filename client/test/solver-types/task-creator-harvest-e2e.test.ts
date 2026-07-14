@@ -205,6 +205,11 @@ EOF`], { cwd: repoDir });
 
     const mintedId = result.admitted[0]!;
     expect(mintedId).toContain('sympy__sympy__echo-');
+    // Discovery writes its resumable job before moving the cursor; admission
+    // completes that same durable job rather than relying on an in-memory loop.
+    const job = await harvestState.getJob(`task:${REPO}@${fixCommit}`);
+    expect(job?.disposition).toBe('admitted');
+    expect((await harvestState.getRepo(REPO))?.lastScannedCommit).toBe(fixCommit);
 
     const publishedCid = await mintedStore.getPublishedArtifactCid(EVAL_SEMANTICS_VERSION);
     expect(publishedCid).toBe('bafyharveste2e');

@@ -14,6 +14,7 @@
   (SWE-smith spike). Finding, in one line: **fork the machinery, reject the dataset**
   — SWE-smith's value to Jinn is its transform components pointed at trace-derived
   targets, not its ~52k-instance synthetic pool (§5.3, §6).
+- **Plan:** [docs/superpowers/plans/2026-07-09-task-creator-v0.md](../docs/superpowers/plans/2026-07-09-task-creator-v0.md)
 - **Siblings:**
   - `spec/2026-07-06-distillation-v1.md` — the committed customer for this spec's
     output (verified pass/fail exemplar pairs).
@@ -193,6 +194,14 @@ This distinction moves the environment **runtime contract** earlier without movi
 automatic environment **synthesis** earlier. Docker/QEMU/cloud providers can run a
 curated capsule before the Task Creator can infer a safe environment from an
 arbitrary local session.
+
+For the public-repository G0b bootstrap, discovery is specifically an
+`EnvironmentRecipeResolver`: it resolves a build recipe for the evaluator image and
+does not provision a solver sandbox. `SandboxProvider` belongs to the later G1
+capsule runtime and is out of scope for G0b. Solver and evaluator environments are
+separate clean starting states; the evaluator receives the delivered Solution only
+after solver completion. Every disclosed input or environment layer carries its own
+rights reference rather than inheriting one repository-wide licence assertion.
 
 ## 5. The ladder
 

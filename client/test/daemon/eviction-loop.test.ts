@@ -4,8 +4,10 @@
  * jinn-mono-hjex.3 — surface service eviction + in-process auto-restake.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EvictionLoop } from '../../src/daemon/eviction-loop.js';
+import { Store } from '../../src/store/store.js';
+import { getLoopTick } from '../../src/daemon/loop-heartbeat.js';
 
 // Valid checksummed Ethereum addresses
 const STAKING_ADDR = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
@@ -194,5 +196,44 @@ describe('EvictionLoop', () => {
 
     await expect(loop.run()).resolves.toBeUndefined();
     expect(store.load).not.toHaveBeenCalled();
+  });
+
+  describe('loop heartbeat', () => {
+    let jinnStore: Store;
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      jinnStore = new Store(':memory:');
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      jinnStore.close();
+    });
+
+    it('records eviction-check after each completed iteration', async () => {
+      const loop = new EvictionLoop({
+        intervalMs: 60_000,
+        store: mockStore([]),
+        chain: 'base-sepolia',
+        readContract: vi.fn(),
+        recoverEvictedService: vi.fn(),
+        jinnStore,
+      });
+
+      const running = loop.run();
+      await vi.advanceTimersByTimeAsync(0);
+      const first = getLoopTick(jinnStore, 'eviction-check');
+
+      expect(first).not.toBeNull();
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      const second = getLoopTick(jinnStore, 'eviction-check');
+      expect(second).toBeGreaterThan(first!);
+
+      loop.stop();
+      await vi.advanceTimersByTimeAsync(60_000);
+      await running;
+    });
   });
 });

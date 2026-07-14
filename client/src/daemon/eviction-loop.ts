@@ -15,6 +15,8 @@ import type { FleetStateStore } from '../earning/store.js';
 import type { JinnOnchainNetwork } from '../earning/viem-clients.js';
 import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
 import { isStakedLikeServiceStep, type ServiceState } from '../earning/types.js';
+import type { Store } from '../store/store.js';
+import { recordLoopTick } from './loop-heartbeat.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -42,6 +44,8 @@ export interface EvictionLoopConfig {
   reStakeThrottleMs?: number;
   /** Injectable clock for tests. Default () => Date.now(). */
   now?: () => number;
+  /** Daemon observability store used by the loop watchdog. */
+  jinnStore?: Store;
 }
 
 // ---------------------------------------------------------------------------
@@ -121,6 +125,7 @@ export class EvictionLoop {
           err instanceof Error ? err.message : err,
         );
       }
+      if (this.config.jinnStore) recordLoopTick(this.config.jinnStore, 'eviction-check');
       await new Promise<void>(r => setTimeout(r, this.config.intervalMs));
     }
   }

@@ -4,7 +4,7 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { CommitEchoDeps } from './_swe-rebench-v2-commit-echo.js';
+import type { CommitEchoDeps, CommitEchoPatches } from './_swe-rebench-v2-commit-echo.js';
 
 const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 60_000;
@@ -34,27 +34,98 @@ async function git(
   args: string[],
   exec: typeof execFileAsync,
 ): Promise<string> {
-  const { stdout } = await execFileAsync('git', ['-C', repoPath, ...args], {
+  const { stdout } = await exec('git', ['-C', repoPath, ...args], {
     timeout: GIT_TIMEOUT_MS,
     maxBuffer: 16 * 1024 * 1024,
   });
   return stdout;
 }
 
+export interface CommitEchoPatchRange {
+  /** The exact pre-fix parent to evaluate. */
+  baseCommit: string;
+  /** The single-parent source fix whose diff is split into code/test material. */
+  fixCommit: string;
+}
+
+/**
+ * Extract a commit-echo patch only when the declared base is the fix's exact
+ * parent.  A range such as a GitHub merge commit can otherwise silently
+ * produce unrelated documentation or accumulated changes as "gold".
+ */
+export async function extractCommitEchoPatchesAtBase(
+  repoPath: string,
+  range: CommitEchoPatchRange,
+  exec: typeof execFileAsync = execFileAsync,
+  testPathRe: RegExp = DEFAULT_TEST_PATH,
+): Promise<CommitEchoPatches> {
+  if (!/^[0-9a-f]{40}$/i.test(range.baseCommit) || !/^[0-9a-f]{40}$/i.test(range.fixCommit)) {
+    throw new Error('commit-echo patch extraction requires full 40-hex base and fix commits');
+  }
+  const parent = (await git(repoPath, ['rev-parse', `${range.fixCommit}^`], exec)).trim();
+  if (parent !== range.baseCommit) {
+    throw new Error(
+      `commit-echo fix ${range.fixCommit} must have declared base ${range.baseCommit} as its exact parent (got ${parent})`,
+    );
+  }
+  const diff = await git(repoPath, ['diff', '--binary', range.baseCommit, range.fixCommit], exec);
+  const split = splitGoldAndTestPatch(diff, testPathRe);
+  return {
+    goldPatch: split.goldPatch,
+    testPatch: split.testPatch,
+    testPaths: split.testPaths,
+    language: inferLanguageFromPaths(split.paths),
+  };
+}
+
 export function splitGoldAndTestPatch(
   unifiedDiff: string,
   testPathRe: RegExp = DEFAULT_TEST_PATH,
-): { goldPatch: string; testPatch: string } {
+): { goldPatch: string; testPatch: string; testPaths: string[]; paths: string[] } {
   const hunks = unifiedDiff.split(/(?=^diff --git )/m).filter(Boolean);
   const gold: string[] = [];
   const test: string[] = [];
+  const testPaths: string[] = [];
+  const paths: string[] = [];
   for (const hunk of hunks) {
     const pathMatch = hunk.match(/^diff --git a\/(.+?) b\//m);
     const path = pathMatch?.[1] ?? '';
-    if (testPathRe.test(path)) test.push(hunk);
-    else gold.push(hunk);
+    if (path && !path.includes('..')) paths.push(path);
+    // A supplied RegExp can be global; reset its cursor so paths cannot
+    // alternate between test/non-test classifications.
+    testPathRe.lastIndex = 0;
+    if (testPathRe.test(path)) {
+      test.push(hunk);
+      if (path && !path.includes('..')) testPaths.push(path);
+    } else gold.push(hunk);
   }
-  return { goldPatch: gold.join(''), testPatch: test.join('') };
+  return {
+    goldPatch: gold.join(''),
+    testPatch: test.join(''),
+    testPaths: [...new Set(testPaths)],
+    paths: [...new Set(paths)],
+  };
+}
+
+/** Conservative, commit-local language inference for a public code task. */
+export function inferLanguageFromPaths(paths: readonly string[]): string {
+  const extensions = paths
+    .map((path) => /\.([a-z0-9]+)$/i.exec(path)?.[1]?.toLowerCase())
+    .filter((extension): extension is string => Boolean(extension));
+  const counts = new Map<string, number>();
+  const byExtension: Record<string, string> = {
+    py: 'python', pyw: 'python',
+    ts: 'typescript', tsx: 'typescript',
+    js: 'javascript', jsx: 'javascript', mjs: 'javascript', cjs: 'javascript',
+    rs: 'rust', go: 'go', java: 'java', kt: 'kotlin',
+    rb: 'ruby', php: 'php', cs: 'csharp', cpp: 'cpp', cc: 'cpp', c: 'c',
+  };
+  for (const extension of extensions) {
+    const language = byExtension[extension];
+    if (language) counts.set(language, (counts.get(language) ?? 0) + 1);
+  }
+  const best = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+  return best?.[0] ?? 'unknown';
 }
 
 export function createGitCommitEchoDeps(
@@ -64,6 +135,14 @@ export function createGitCommitEchoDeps(
   const testPathRe = opts.testPathRe ?? DEFAULT_TEST_PATH;
   const repoPath = opts.path;
   const repoSlug = opts.repo;
+
+  const extractPatches = async (_repo: string, fixCommit: string): Promise<CommitEchoPatches> => {
+    const parent = (await git(repoPath, ['rev-parse', `${fixCommit}^`], exec)).trim();
+    return extractCommitEchoPatchesAtBase(repoPath, {
+      baseCommit: parent,
+      fixCommit,
+    }, exec, testPathRe);
+  };
 
   return {
     listCommitsAfter: async (_repo, sinceCommit) => {
@@ -86,11 +165,9 @@ export function createGitCommitEchoDeps(
         .filter((l) => /^[0-9a-f]{40}$/i.test(l));
     },
 
-    extractGoldPatch: async (_repo, fixCommit) => {
-      const parent = (await git(repoPath, ['rev-parse', `${fixCommit}^`], exec)).trim();
-      const diff = await git(repoPath, ['diff', '--binary', parent, fixCommit], exec);
-      return splitGoldAndTestPatch(diff, testPathRe).goldPatch;
-    },
+    extractGoldPatch: async (repo, fixCommit) => (await extractPatches(repo, fixCommit)).goldPatch,
+
+    extractPatches,
 
     parentOf: async (_repo, fixCommit) =>
       (await git(repoPath, ['rev-parse', `${fixCommit}^`], exec)).trim(),

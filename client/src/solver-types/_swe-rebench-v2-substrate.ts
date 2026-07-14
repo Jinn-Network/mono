@@ -100,6 +100,36 @@ export async function resolveImageDigest(
   return /^sha256:[0-9a-f]{64}$/.test(digest) ? digest : null;
 }
 
+/** Pull only a digest-qualified OCI reference before explicit-environment
+ * rechecks. Callers already bind the digest in a signed public artifact; this
+ * guard prevents the runner from treating arbitrary mutable image names as a
+ * pre-grade fetch target. */
+export async function pullDigestQualifiedImage(
+  imageName: string,
+  runner: CommandRunner,
+): Promise<boolean> {
+  if (!/^.+@sha256:[0-9a-f]{64}$/u.test(imageName)) return false;
+  const res = await runner('docker', ['pull', imageName]);
+  return res.exitCode === 0;
+}
+
+/**
+ * Resolve the OS/architecture of a local Docker image. Unlike the legacy
+ * benchmark recheck, explicit-environment v2 rows fail closed when this is not
+ * observable: their artifact promises a Linux/amd64 evaluator environment.
+ */
+export async function resolveImagePlatform(
+  imageName: string,
+  runner: CommandRunner,
+): Promise<'linux/amd64' | null> {
+  const res = await runner('docker', [
+    'image', 'inspect', imageName, '--format', '{{.Os}}/{{.Architecture}}',
+  ]);
+  if (res.exitCode !== 0) return null;
+  const platform = res.stdout.trim();
+  return platform === 'linux/amd64' ? platform : null;
+}
+
 /**
  * Resolve the upstream SWE-rebench-V2 repo's HEAD commit via `git rev-parse`.
  * Returns null when git fails (not a repo, missing, etc.).

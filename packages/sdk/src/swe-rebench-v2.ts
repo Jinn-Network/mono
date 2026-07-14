@@ -33,10 +33,17 @@ export const SweRebenchV2TaskSchema = z.object({
    * touched symbols). Empty string when no interface is provided.
    */
   interface: z.string(),
-  /** HuggingFace dataset id, e.g. 'nebius/SWE-rebench-leaderboard'. */
-  hf_dataset: z.string().regex(/^[^/]+\/[^/]+$/),
-  /** HF split identifier, e.g. '2026_02'. */
-  hf_split: z.string().regex(/^\d{4}_\d{2}$/),
+  /**
+   * Benchmark rows use a HuggingFace dataset id. Task-creator minted rows use
+   * an immutable IPFS artifact CID; the paired `minted` split is deliberately
+   * narrow so arbitrary URL schemes do not become evaluator routing inputs.
+   */
+  hf_dataset: z.union([
+    z.string().regex(/^[^/]+\/[^/]+$/),
+    z.string().regex(/^ipfs:\/\/[A-Za-z0-9]+$/),
+  ]),
+  /** HF monthly split, or the sole IPFS minted-artifact split. */
+  hf_split: z.union([z.string().regex(/^\d{4}_\d{2}$/), z.literal('minted')]),
   /** Unix epoch (seconds) deadline for Solution submission. */
   deadline_unix: z.number().int().positive(),
   /**
@@ -44,6 +51,22 @@ export const SweRebenchV2TaskSchema = z.object({
    * Used for per-round dashboard rollups and per-round reward distribution.
    */
   round_month: z.string().regex(/^\d{4}-\d{2}$/),
+}).superRefine((task, ctx) => {
+  const isMintedArtifact = task.hf_dataset.startsWith('ipfs://');
+  if (isMintedArtifact && task.hf_split !== 'minted') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['hf_split'],
+      message: 'ipfs:// minted artifacts require hf_split="minted"',
+    });
+  }
+  if (!isMintedArtifact && task.hf_split === 'minted') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['hf_split'],
+      message: 'hf_split="minted" requires an ipfs:// minted artifact',
+    });
+  }
 });
 
 export type SweRebenchV2Task = z.infer<typeof SweRebenchV2TaskSchema>;

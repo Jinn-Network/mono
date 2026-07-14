@@ -315,7 +315,7 @@ export class Daemon {
       });
     }
     if (config.evictionCheck && config.evictionCheck.intervalMs > 0) {
-      this.evictionLoop = new EvictionLoop(config.evictionCheck);
+      this.evictionLoop = new EvictionLoop({ ...config.evictionCheck, jinnStore: this.store });
     }
     if (config.harvest && config.harvest.intervalMs > 0 && config.harvest.repos.length > 0) {
       this.harvestLoop = new HarvestLoop({ ...config.harvest, store: this.store });
@@ -530,13 +530,15 @@ export class Daemon {
       const started = new Set<LoopName>(['creator', 'engine-tick', 'engine-watcher', 'delivery-watcher']);
       if (this.rewardClaimLoop) started.add('reward-claim');
       if (this.balanceTopupLoop) started.add('balance-topup');
+      if (this.evictionLoop) started.add('eviction-check');
       if (this.harvestLoop) started.add('harvest');
       if (peers.length > 0) started.add('peer-sync');
       const overrides: Partial<Record<LoopName, number>> = {
         'engine-tick': interval,
         'reward-claim': this.config.rewardClaim?.intervalMs,
         'balance-topup': this.config.balanceTopup?.intervalMs,
-        'harvest': this.config.harvest?.intervalMs,
+        'eviction-check': this.config.evictionCheck?.intervalMs,
+        harvest: this.config.harvest?.intervalMs,
       };
       const registrations: WatchdogLoopRegistration[] = LOOP_REGISTRY
         .filter(r => started.has(r.name))

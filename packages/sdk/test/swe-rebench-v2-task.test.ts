@@ -39,4 +39,26 @@ describe('SweRebenchV2TaskSchema', () => {
   it('allows interface to be empty string (some tasks have no auxiliary interface)', () => {
     expect(() => SweRebenchV2TaskSchema.parse({ ...validTask, interface: '' })).not.toThrow();
   });
+
+  it('allows immutable minted-pool IPFS row routing without broad URL routing', () => {
+    expect(() => SweRebenchV2TaskSchema.parse({
+      ...validTask,
+      hf_dataset: 'ipfs://bafymintedpool',
+      hf_split: 'minted',
+    })).not.toThrow();
+    expect(() => SweRebenchV2TaskSchema.parse({ ...validTask, hf_dataset: 'https://example.test/rows' })).toThrow();
+  });
+
+  it('requires the IPFS/minted and HuggingFace/monthly transport pairs', () => {
+    expect(() => SweRebenchV2TaskSchema.parse({
+      ...validTask,
+      hf_dataset: 'ipfs://bafymintedpool',
+      hf_split: '2026_07',
+    })).toThrow();
+    expect(() => SweRebenchV2TaskSchema.parse({
+      ...validTask,
+      hf_dataset: 'nebius/SWE-rebench-leaderboard',
+      hf_split: 'minted',
+    })).toThrow();
+  });
 });
