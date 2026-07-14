@@ -35,7 +35,7 @@ gh project item-list 1 --owner Jinn-Network --format json \
 The fields you need:
 - **Issue Type** — the shape: `fix` / `feat` / `refactor` / `spike` / `chore` / `docs` / `test` / `design` / `incident`
 - **Blocked on** — `Nothing` / `Human` / `Another issue`
-- **Effort** — `Low` / `Medium` / `High`
+- **Effort** — `Low` / `Medium` / `High` / `XHigh` / `Max`
 - **Priority** — `P0`–`P4`
 
 ### Hard preconditions — fail loud if violated

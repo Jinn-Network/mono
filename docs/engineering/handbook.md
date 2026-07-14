@@ -117,7 +117,7 @@ The `## Run-mode` body section is **kept but slimmed**: it is no longer the cano
 Three Project (v2) single-select fields, set at Friday triage (see §Weekly retrace), drive routing alongside the Issue Type:
 
 - **Blocked on** — `Nothing` / `Human` / `Another issue`. The readiness signal. When the value is `Another issue`, the specific blocker is named with a native issue-dependency / tracked-by link; the field is the queryable tri-state, the link is the specific edge.
-- **Effort** — `Low` / `Medium` / `High`. The model-routing signal — `Low` routes to a cheap/fast model, `High` to a strong one.
+- **Effort** — `Low` / `Medium` / `High` / `XHigh` / `Max`. The model-routing signal — `Low` routes to a cheap/fast model, `Max` to the strongest. The autopilot dispatcher passes this value through to the spawned session as the `claude` CLI `--effort <tier>` flag (lowercased); an unset Effort leaves the CLI default.
 - **Priority** — `P0` … `P4`. How urgent.
 
 These fields live on the "Jinn engineering" Project board and are queryable via the Projects API (`gh project item-list`), not via plain `gh issue list`. `eng-day` reads them; the documented `gh issue list` fallback does not see them, which is acceptable for a fallback.

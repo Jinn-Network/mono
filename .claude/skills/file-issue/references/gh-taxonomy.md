@@ -183,6 +183,10 @@ Field id: `PVTSSF_lADODh3-Ac4BXYaIzhTdqRw`
 | `Low`    | `ef2a043d` |
 | `Medium` | `6539eb71` |
 | `High`   | `081839fa` |
+| `XHigh`  | `(added after board provisioning)` |
+| `Max`    | `(added after board provisioning)` |
+
+> `XHigh` and `Max` are added to the board via the field settings UI; re-discover their option ids at run time (see the prerequisite note).
 
 ### Priority
 
@@ -272,7 +276,7 @@ PRIORITY_FIELD_ID=$(echo "$FIELDS" | jq -r '.[] | select(.name == "Priority") | 
 
 # Set BLOCKED_VALUE, EFFORT_VALUE, PRIORITY_VALUE to the chosen option names:
 #   Blocked on: "Nothing" | "Human" | "Another issue"
-#   Effort:     "Low" | "Medium" | "High"
+#   Effort:     "Low" | "Medium" | "High" | "XHigh" | "Max"
 #   Priority:   "P0" | "P1" | "P2" | "P3" | "P4"
 BLOCKED_VALUE="Nothing"
 EFFORT_VALUE="Low"

@@ -342,7 +342,8 @@ describe('dispatchIssue', () => {
     // The prompt is passed via -p / --print flag
     const pFlagIdx = spawnCall.args.indexOf('-p');
     expect(pFlagIdx).toBeGreaterThan(-1);
-    const prompt = spawnCall.args[pFlagIdx + 1];
+    // Prompt is the final positional arg — after `-p` and any spliced --effort flag (#1673).
+    const prompt = spawnCall.args[spawnCall.args.length - 1];
 
     // (b) headless-override block — check for a distinctive phrase from headless-override.md
     expect(prompt).toContain('non-interactive');
@@ -379,8 +380,8 @@ describe('dispatchIssue', () => {
     await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
 
     const [spawnCall] = calls;
-    const pFlagIdx = spawnCall.args.indexOf('-p');
-    const prompt = spawnCall.args[pFlagIdx + 1];
+    // Prompt is the final positional arg — after `-p` and any spliced --effort flag (#1673).
+    const prompt = spawnCall.args[spawnCall.args.length - 1];
 
     // (a) CLAUDE.md canon — check for a distinctive phrase from CLAUDE.md
     expect(prompt).toContain('CLAUDE.md');
@@ -393,8 +394,8 @@ describe('dispatchIssue', () => {
     await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
 
     const [spawnCall] = calls;
-    const pFlagIdx = spawnCall.args.indexOf('-p');
-    const prompt = spawnCall.args[pFlagIdx + 1];
+    // Prompt is the final positional arg — after `-p` and any spliced --effort flag (#1673).
+    const prompt = spawnCall.args[spawnCall.args.length - 1];
 
     // (a) handbook — check for a distinctive phrase from the engineering handbook
     expect(prompt).toContain('handbook');
@@ -407,8 +408,8 @@ describe('dispatchIssue', () => {
     await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
 
     const [spawnCall] = calls;
-    const pFlagIdx = spawnCall.args.indexOf('-p');
-    const prompt = spawnCall.args[pFlagIdx + 1];
+    // Prompt is the final positional arg — after `-p` and any spliced --effort flag (#1673).
+    const prompt = spawnCall.args[spawnCall.args.length - 1];
 
     // (c) implement-issue + issue number
     expect(prompt).toContain('implement-issue');
@@ -422,8 +423,8 @@ describe('dispatchIssue', () => {
     await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
 
     const [spawnCall] = calls;
-    const pFlagIdx = spawnCall.args.indexOf('-p');
-    const prompt = spawnCall.args[pFlagIdx + 1];
+    // Prompt is the final positional arg — after `-p` and any spliced --effort flag (#1673).
+    const prompt = spawnCall.args[spawnCall.args.length - 1];
 
     // The dispatcher must tell the session not to create a new worktree, because
     // the worktree is pre-created before spawn. This prevents the double
@@ -454,6 +455,44 @@ describe('dispatchIssue', () => {
     // The flags themselves must not appear at all
     expect(args).not.toContain('--mode');
     expect(args).not.toContain('--permission-mode');
+  });
+
+  // -------------------------------------------------------------------------
+  // #1673 — route the session --effort from the board Effort field
+  // -------------------------------------------------------------------------
+
+  it('splices --effort <tier> (lowercased) between -p and the prompt when the issue carries an Effort', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+
+    // ISSUE.effort is 'Medium' → --effort medium.
+    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+
+    const [spawnCall] = calls;
+    const { args } = spawnCall;
+    const pFlagIdx = args.indexOf('-p');
+    // Order: -p, --effort, medium, <prompt> (mirrors run-skill.ts).
+    expect(args[pFlagIdx + 1]).toBe('--effort');
+    expect(args[pFlagIdx + 2]).toBe('medium');
+    // The prompt stays the final positional arg.
+    expect(args[args.length - 1]).toContain('implement-issue');
+  });
+
+  it('omits --effort entirely when the issue Effort is unset (null) — CLI default applies', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+
+    await dispatchIssue(
+      { ...ISSUE, effort: null },
+      CFG,
+      { runner, spawn, fieldCache: { ...FIELD_CACHE } },
+    );
+
+    const [spawnCall] = calls;
+    expect(spawnCall.args).not.toContain('--effort');
+    // -p is immediately followed by the prompt (no flag spliced in).
+    const pFlagIdx = spawnCall.args.indexOf('-p');
+    expect(spawnCall.args[pFlagIdx + 1]).toContain('implement-issue');
   });
 
   it('returns an InFlightSession with the correct issue number, branch, absolute worktree path, pid, and startedAt', async () => {
@@ -556,8 +595,8 @@ describe('dispatchIssue', () => {
 
     // Scenario prompt unchanged: default implementer is claude.
     const [spawnCall] = calls;
-    const pFlagIdx = spawnCall.args.indexOf('-p');
-    const prompt = spawnCall.args[pFlagIdx + 1];
+    // Prompt is the final positional arg — after `-p` and any spliced --effort flag (#1673).
+    const prompt = spawnCall.args[spawnCall.args.length - 1];
     expect(prompt).toContain('The default implementer for the inner pipeline is: claude.');
 
     logSpy.mockRestore();
@@ -580,8 +619,8 @@ describe('dispatchIssue', () => {
     expect(line).toContain('impl=codex');
 
     const [spawnCall] = calls;
-    const pFlagIdx = spawnCall.args.indexOf('-p');
-    const prompt = spawnCall.args[pFlagIdx + 1];
+    // Prompt is the final positional arg — after `-p` and any spliced --effort flag (#1673).
+    const prompt = spawnCall.args[spawnCall.args.length - 1];
     expect(prompt).toContain('The default implementer for the inner pipeline is: codex.');
 
     logSpy.mockRestore();

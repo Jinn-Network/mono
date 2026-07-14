@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { basename, dirname, join } from 'node:path';
-import type { ReadyIssue, DispatcherConfig, InFlightSession } from './types.js';
+import type { ReadyIssue, DispatcherConfig, InFlightSession, Effort } from './types.js';
 import type { CommandRunner } from './issue-source.js';
 import { sessionSpawnEnv } from './identity.js';
 import {
@@ -138,6 +138,20 @@ function loadCanon(): string {
 }
 
 // ---------------------------------------------------------------------------
+// Effort → --effort flag
+// ---------------------------------------------------------------------------
+
+/**
+ * Map a board Effort value to the `claude` CLI `--effort` flag args (#1673).
+ * Unset (null) → [] so the CLI default applies. Board casing lowercases to the
+ * exact CLI tier: Low→low, Medium→medium, High→high, XHigh→xhigh, Max→max — a
+ * single `.toLowerCase()` covers all five (no lookup table needed).
+ */
+export function effortFlag(effort: Effort | null): string[] {
+  return effort == null ? [] : ['--effort', effort.toLowerCase()];
+}
+
+// ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
 
@@ -266,7 +280,7 @@ export async function dispatchIssue(
   //    test holds. We send stdin to 'ignore' (the session is headless) and
   //    inherit for 1/2 as a safe default the lambda replaces.
   const logPath = sessionLogPath(number);
-  const result = spawn('claude', ['-p', fullPrompt], {
+  const result = spawn('claude', ['-p', ...effortFlag(issue.effort), fullPrompt], {
     cwd: worktreePath,
     detached: true,
     stdio: ['ignore', 'inherit', 'inherit'],

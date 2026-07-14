@@ -4,7 +4,7 @@ export type IssueShape =
   | 'chore' | 'docs' | 'test' | 'incident' | 'design';
 
 export type BlockedOn = 'Nothing' | 'Human' | 'Another issue';
-export type Effort = 'Low' | 'Medium' | 'High';
+export type Effort = 'Low' | 'Medium' | 'High' | 'XHigh' | 'Max';
 export type Priority = 'P0' | 'P1' | 'P2' | 'P3' | 'P4';
 // 'Human' is a parked lane: the dispatcher promotes escalated (Blocked on:
 // Human) sessions into it so they leave the active "In Progress" column and

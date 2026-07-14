@@ -62,7 +62,7 @@ Seven shapes plus one emergency sub-flow plus one meta-shape (`design`, for desi
 
 If an Issue does not fit one of these shapes, it is mis-scoped — split or reshape it. Per-shape SOPs (v0 flows) live in the handbook §The shapes of work; they evolve via iterative refinement (file a GitHub Issue under the engineering handbook umbrella when friction surfaces).
 
-Routing is governed by three Project (v2) single-select fields set at Friday triage: **Blocked on** (`Nothing` / `Human` / `Another issue`), **Effort** (`Low` / `Medium` / `High` — the model-routing signal), and **Priority** (`P0` … `P4`).
+Routing is governed by three Project (v2) single-select fields set at Friday triage: **Blocked on** (`Nothing` / `Human` / `Another issue`), **Effort** (`Low` / `Medium` / `High` / `XHigh` / `Max` — the model-routing signal), and **Priority** (`P0` … `P4`).
 
 ### Ten ratified AI workflow rules
 
