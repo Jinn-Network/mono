@@ -719,6 +719,21 @@ export class TaskRunPersistence {
   }
 
   /**
+   * Persist `consumedRefsJson` without triggering a state transition (state
+   * remains RUNNING). Called by runImpl right after the corpus-knowledge
+   * lookup resolves — BEFORE harness spawn — so that a crash between the
+   * lookup and the RUNNING → POST_SNAPSHOT transition still leaves the
+   * result durably recorded (#1393 review finding 1). Without this, a
+   * restarted process (empty in-memory cache, DB column still null) would
+   * re-query the corpus and re-emit a duplicate `corpus_knowledge` event.
+   */
+  setConsumedRefsJson(requestId: string, consumedRefsJson: string | null): void {
+    this.db.prepare(
+      'UPDATE task_runs SET consumed_refs_json = ? WHERE request_id = ?',
+    ).run(consumedRefsJson, requestId);
+  }
+
+  /**
    * Persist `manifestGeneratedAt` for the first time without triggering a
    * state transition. Used by pack() to lock in the generatedAt timestamp
    * before assembling the manifest, ensuring idempotent CID on retry.

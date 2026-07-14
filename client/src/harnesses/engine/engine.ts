@@ -1309,59 +1309,92 @@ export class TaskEngine {
     // #1393: corpus knowledge autoload. Restoration runs only — never bias
     // evaluators with prior solutions. The lookup is bounded (10 s) and
     // never throws; failure or an empty result simply injects nothing.
-    // consumedRefsJson is persisted at the RUNNING → POST_SNAPSHOT transition
-    // below; it stays null when nothing was injected.
+    // consumedRefsJson is ALSO persisted at the RUNNING → POST_SNAPSHOT
+    // transition below (harmless re-write of the same value — see
+    // resolveFreshKnowledge) so a crash-free run still gets a single,
+    // consistent column write; it stays null when nothing was injected.
     let taskForCtx = task.task;
     let consumedRefsJson: string | null = null;
+
+    // #1393 review finding 3 (fresh lookup + immediate persist) and finding
+    // 1/2 of the follow-up review (cross-restart durability + malformed-JSON
+    // guard). Runs the corpus query, injects the result, emits the
+    // corpus_knowledge event, and — critically — persists consumedRefsJson
+    // to the DB immediately (setConsumedRefsJson), BEFORE harness spawn.
+    // Without the immediate persist, a crash between the lookup and the
+    // RUNNING → POST_SNAPSHOT transition would leave consumed_refs_json
+    // null; a restarted process (empty in-memory cache) would then re-query
+    // the corpus and re-emit a duplicate corpus_knowledge event.
+    const resolveFreshKnowledge = async (): Promise<void> => {
+      if (!taskForCtx) return;
+      const knowledgePayload = await loadCorpusKnowledge({
+        corpus: this.knowledge?.corpus ?? null,
+        store: this.store,
+        solverType,
+      });
+      if (knowledgePayload) {
+        // Shallow clone: the injected context lives only in the runtime Task
+        // handed to the harness. Envelope integrity references taskCid, so
+        // nothing signed or hashed changes.
+        taskForCtx = {
+          ...taskForCtx,
+          context: { ...taskForCtx.context, corpusKnowledge: knowledgePayload },
+        };
+        consumedRefsJson = JSON.stringify(knowledgePayload.records);
+        emitEvent(this.store, {
+          kind: 'corpus_knowledge',
+          requestId: task.requestId,
+          solverType,
+          outcome: 'ok',
+          detail: JSON.stringify(knowledgePayload.records.map((record) => ({
+            envelopeCid: record.envelopeCid,
+            artifacts: record.artifacts.map((artifact) => artifact.sha256),
+          }))),
+        }, 'harness-engine');
+      }
+      this.consumedRefsByRequest.set(task.requestId, consumedRefsJson);
+      this.persistence.setConsumedRefsJson(task.requestId, consumedRefsJson);
+    };
+
     if (role === 'restoration' && solverType && this.knowledge?.enabled !== false && taskForCtx) {
-      // #1393 review finding 3: a RUNNING retry/recovery re-drive (transient
-      // harness/RPC error left the row at RUNNING, or crash-recovery via
-      // _recoverDispatch) must not re-query the corpus or re-emit
-      // corpus_knowledge — reuse whatever this run already resolved, found
-      // or not. Prefer the in-memory map (same-process retries); fall back
-      // to the persisted column (defensive, covers the row already having a
-      // value for whatever reason).
+      // A RUNNING retry/recovery re-drive (transient harness/RPC error left
+      // the row at RUNNING, or crash-recovery via _recoverDispatch) must not
+      // re-query the corpus or re-emit corpus_knowledge — reuse whatever
+      // this run already resolved, found or not. Prefer the in-memory map
+      // (same-process retries); fall back to the persisted column (the
+      // cross-restart case — a fresh TaskEngine instance has no in-memory
+      // record of a prior process's resolution).
       const alreadyResolved = this.consumedRefsByRequest.has(task.requestId)
         ? this.consumedRefsByRequest.get(task.requestId)!
         : task.consumedRefsJson;
       const seenBefore = this.consumedRefsByRequest.has(task.requestId) || task.consumedRefsJson !== null;
 
       if (seenBefore) {
-        consumedRefsJson = alreadyResolved;
-        if (consumedRefsJson) {
-          const cachedRecords = JSON.parse(consumedRefsJson) as CorpusKnowledgeRecordRef[];
-          taskForCtx = {
-            ...taskForCtx,
-            context: { ...taskForCtx.context, corpusKnowledge: buildCorpusKnowledgePayload(solverType, cachedRecords) },
-          };
+        try {
+          consumedRefsJson = alreadyResolved;
+          if (consumedRefsJson) {
+            const cachedRecords = JSON.parse(consumedRefsJson) as CorpusKnowledgeRecordRef[];
+            taskForCtx = {
+              ...taskForCtx,
+              context: { ...taskForCtx.context, corpusKnowledge: buildCorpusKnowledgePayload(solverType, cachedRecords) },
+            };
+          }
+        } catch (err) {
+          // #1393 review finding 2 (follow-up): a malformed persisted value
+          // must never wedge the run — corpus problems can never block the
+          // solve path (AC3). Log and fall through to a fresh lookup, which
+          // also overwrites the bad value so subsequent retries don't hit it
+          // again.
+          console.warn(
+            `[harness-engine] ${task.requestId}: malformed persisted consumedRefsJson `
+            + `(${err instanceof Error ? err.message : String(err)}) — treating as not-yet-resolved`,
+          );
+          taskForCtx = task.task;
+          consumedRefsJson = null;
+          await resolveFreshKnowledge();
         }
       } else {
-        const knowledgePayload = await loadCorpusKnowledge({
-          corpus: this.knowledge?.corpus ?? null,
-          store: this.store,
-          solverType,
-        });
-        if (knowledgePayload) {
-          // Shallow clone: the injected context lives only in the runtime Task
-          // handed to the harness. Envelope integrity references taskCid, so
-          // nothing signed or hashed changes.
-          taskForCtx = {
-            ...taskForCtx,
-            context: { ...taskForCtx.context, corpusKnowledge: knowledgePayload },
-          };
-          consumedRefsJson = JSON.stringify(knowledgePayload.records);
-          emitEvent(this.store, {
-            kind: 'corpus_knowledge',
-            requestId: task.requestId,
-            solverType,
-            outcome: 'ok',
-            detail: JSON.stringify(knowledgePayload.records.map((record) => ({
-              envelopeCid: record.envelopeCid,
-              artifacts: record.artifacts.map((artifact) => artifact.sha256),
-            }))),
-          }, 'harness-engine');
-        }
-        this.consumedRefsByRequest.set(task.requestId, consumedRefsJson);
+        await resolveFreshKnowledge();
       }
     }
 
