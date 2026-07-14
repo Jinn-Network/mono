@@ -99,6 +99,12 @@ describe('isNewerVersion', () => {
     expect(isNewerVersion('0.2.0', '0.1.9')).toBe(false);
   });
 
+  it('is false when the running build is a canary ahead of the registry latest (#641)', () => {
+    // The holder must stay null here so the dashboard banner does not advertise
+    // a downgrade (registry latest) as an upgrade over a newer local canary.
+    expect(isNewerVersion('0.2.0-canary.1', '0.1.9')).toBe(false);
+  });
+
   it('treats the dev placeholder as older than any real release', () => {
     expect(isNewerVersion('0.0.0-dev', '0.1.0')).toBe(true);
   });
