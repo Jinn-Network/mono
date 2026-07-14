@@ -33,8 +33,13 @@ vi.mock('../../src/adapters/mech/ipfs.js', () => ({
 }));
 
 const execFileAsync = promisify(execFile);
-const SOURCE_INSTANCE = 'sympy__sympy-27510';
-const REPO = 'sympy/sympy';
+// NB: the instance id and repo MUST be synthetic (not a real dataset
+// instance/repo) — minting derives a repo denylist from the active held-out
+// slates (`loadMintRepoDenylist`), so a real slate member (e.g. sympy/sympy,
+// held out since slate v3 via sympy__sympy-27510) would be rejected at
+// admission and this test would never reach the minted pool.
+const SOURCE_INSTANCE = 'org__repo-1647';
+const REPO = 'org/repo';
 const MINTER_SAFE = '0x00000000000000000000000000000000000000aa';
 
 const SOURCE_TASK: PoolTask = {
@@ -51,7 +56,7 @@ const SOURCE_TASK: PoolTask = {
 const HF_ROW = {
   instance_id: SOURCE_INSTANCE,
   repo: REPO,
-  image_name: 'swe-rebench/sympy:27510',
+  image_name: 'swe-rebench/repo:1647',
   FAIL_TO_PASS: ['sympy/tests/test_x.py::test_fix'],
   PASS_TO_PASS: ['sympy/tests/test_x.py::test_other'],
   test_patch: 'diff --git a/sympy/tests/test_x.py',
@@ -204,7 +209,7 @@ EOF`], { cwd: repoDir });
     expect(result.rejected).toHaveLength(0);
 
     const mintedId = result.admitted[0]!;
-    expect(mintedId).toContain('sympy__sympy__echo-');
+    expect(mintedId).toContain('org__repo__echo-');
     // Discovery writes its resumable job before moving the cursor; admission
     // completes that same durable job rather than relying on an in-memory loop.
     const job = await harvestState.getJob(`task:${REPO}@${fixCommit}`);
