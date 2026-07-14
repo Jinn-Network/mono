@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createJoinApplier } from '../../src/daemon/join-applier.js';
 import { SolverNetRegistry } from '../../src/solver-nets/registry.js';
 import { createMutableJoinedSolverNetsView } from '../../src/harnesses/engine/engine.js';
@@ -96,6 +96,30 @@ describe('createJoinApplier', () => {
     const status = readiness.isReadyForClaim(CID);
     expect(status.reason ?? '').not.toContain('not in joinedSolverNets');
     expect(status.ready).toBe(true);
+  });
+
+  it('flips the evaluator gate on live for an evaluator-role join, but not for a solver-only join (#547)', async () => {
+    const { HarnessReadinessRegistry } = await import('../../src/harnesses/readiness-registry.js');
+    const readiness = new HarnessReadinessRegistry({ harnessesByName: {}, joinedHarnessesByCid: {} });
+    await readiness.refreshNow();
+
+    const makeApplier = (enableEvaluator: () => void) =>
+      createJoinApplier({
+        taskDiscovery: { solverNetManifestCids: [] as string[] },
+        view: createMutableJoinedSolverNetsView({}),
+        readiness,
+        registry: new SolverNetRegistry(),
+        config: {},
+        enableEvaluator,
+      });
+
+    const solverEnable = vi.fn();
+    await makeApplier(solverEnable)({ ...joined, roles: ['solver'] });
+    expect(solverEnable).not.toHaveBeenCalled();
+
+    const evaluatorEnable = vi.fn();
+    await makeApplier(evaluatorEnable)({ ...joined, roles: ['solver', 'evaluator'] });
+    expect(evaluatorEnable).toHaveBeenCalledOnce();
   });
 
   it('is idempotent on the cid set (re-apply does not duplicate)', async () => {
