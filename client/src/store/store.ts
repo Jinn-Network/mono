@@ -2807,6 +2807,21 @@ export class Store {
     tx(projection);
   }
 
+  /**
+   * Upgrade a previously-saved projection's evidence_tier in place (#1393
+   * review finding 1). pack() saves projections as 'self-signed' regardless
+   * of the envelope's own (aspirational) tier — a race-lost or failed
+   * delivery must never leave a 'committed' projection outranking genuinely
+   * delivered self-signed work. deliver() calls this to upgrade the tier
+   * only once on-chain evidence actually exists (claimDelivery succeeded).
+   * No-op if the envelope_id isn't found (defensive; never fatal to deliver()).
+   */
+  upgradeEnvelopeProjectionEvidenceTier(envelopeId: string, tier: EnvelopeProjection['evidenceTier']): void {
+    this.db.prepare(
+      `UPDATE envelope_projections SET evidence_tier = @tier WHERE envelope_id = @envelopeId`,
+    ).run({ envelopeId, tier });
+  }
+
   queryEnvelopeProjections(query: EnvelopeProjectionQuery = {}): EnvelopeProjection[] {
     const conditions: string[] = [];
     const params: Record<string, unknown> = {};
