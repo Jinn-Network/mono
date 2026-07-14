@@ -121,6 +121,14 @@ import {
   summarizeFallbackChain,
 } from './preflight/rpc-network.js';
 import { apiPortFailureMessage, checkApiPortAvailable } from './preflight/api-port.js';
+import {
+  fetchLatestVersion,
+  getRunningVersion,
+  isNewerVersion,
+  isVersionCheckEnabled,
+  formatUpdateLogLine,
+  VERSION_CHECK_INTERVAL_MS,
+} from './preflight/version-check.js';
 import { openBrowser } from './cli/open-browser.js';
 
 if (process.env['JINN_LOAD_DEV_ENV'] === '1' || process.env['NODE_ENV'] === 'development') {
@@ -544,6 +552,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   const joinApplierHolder: {
     current: import('./daemon/join-applier.js').JoinApplier | undefined;
   } = { current: undefined };
+
+  // #641: latest published `@jinn-network/client` version, back-filled by the
+  // start-time npm-registry check below. `/v1/status.latestVersion` reads this
+  // via the `latestVersion` getter threaded into the ApiServer status config.
+  const latestVersionHolder: { current: string | null } = { current: null };
 
   // hjex.6: retry signal for the bootstrap halt-and-resume loop.
   // When a SetupBootstrapHalted is caught (fatal non-funding error or funding
@@ -2138,6 +2151,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         source: passwordResolution.source,
         filePath: passwordResolution.filePath,
       },
+      // #641: back-fills /v1/status.latestVersion from the start-time
+      // npm-registry check (populated after the daemon-running line below).
+      latestVersion: () => latestVersionHolder.current,
       spendCaps: spendCap?.caps,
       aiUnits,
     },
@@ -2333,12 +2349,15 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // flow (they were created in setup-mode before bootstrap), so we close
   // them explicitly after Daemon.stop() completes.
   let shutdownPromise: Promise<void> | null = null;
+  // #641: recurring npm-registry version check; cleared on shutdown.
+  let versionCheckTimer: ReturnType<typeof setInterval> | null = null;
   const shutdown = async (signal: string) => {
     if (shutdownPromise) return shutdownPromise;
     shutdownPromise = (async () => {
       let exitCode = 0;
       console.log(`\n[main] Received ${signal}, shutting down...`);
       try {
+        if (versionCheckTimer) clearInterval(versionCheckTimer);
         harnessReadinessRegistry.stop();
         await daemon.stop();
         await setupApiServer.close().catch(() => undefined);
@@ -2392,6 +2411,31 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     throw error;
   }
   console.log(`[main] Daemon running. Dashboard: http://127.0.0.1:${config.apiPort}`);
+
+  // #641: start-time (and recurring) npm-registry version check. Fire-and-forget
+  // — never awaited, never rejects into boot. When a newer client is published
+  // it logs one line and back-fills the dashboard's update_available banner via
+  // `latestVersionHolder`. Opt out with JINN_VERSION_CHECK=0.
+  if (isVersionCheckEnabled(process.env)) {
+    const refreshVersionCheck = async (): Promise<void> => {
+      try {
+        const latest = await fetchLatestVersion();
+        if (!latest) return;
+        latestVersionHolder.current = latest;
+        if (isNewerVersion(getRunningVersion(), latest)) {
+          console.log(formatUpdateLogLine(latest));
+        }
+      } catch {
+        // Advisory only — a registry hiccup must never disturb the daemon.
+      }
+    };
+    void refreshVersionCheck();
+    versionCheckTimer = setInterval(() => {
+      void refreshVersionCheck();
+    }, VERSION_CHECK_INTERVAL_MS);
+    versionCheckTimer.unref();
+  }
+
   return {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
