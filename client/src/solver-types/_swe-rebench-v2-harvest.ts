@@ -12,6 +12,8 @@ import {
   type MintedEnvironmentBindingV1,
   type MintedProvenance,
 } from './_swe-rebench-v2-minted-pool.js';
+import type { MineableTraceRecord } from './_swe-rebench-v2-mineable-store.js';
+import { lineageHash } from './_swe-rebench-v2-hunk-echo.js';
 import type { EvalRunner, HfFetcher, HfRow } from '../harnesses/impls/swe-rebench-v2-evaluator/index.js';
 import {
   deriveF2pP2pFromReports,
@@ -491,6 +493,107 @@ export async function buildCommitEchoMintCandidate(args: {
     built: {
       poolTask,
       goldPatch: args.candidate.gold_patch,
+      provenance,
+      row,
+    },
+    empirical,
+  };
+}
+
+/**
+ * Session-echo instance id — blinded (spec §7): derived only from the repo
+ * slug and the FULL {@link lineageHash} of the session's opaque local
+ * `sourceId`, never the `sourceId` itself. `<repo-slug>__session-<hash12>`.
+ */
+export function sessionEchoInstanceId(repo: string, sourceId: string): string {
+  const slug = repo.replace(/\//g, '__');
+  return `${slug}__session-${lineageHash(sourceId, 'full').slice(0, 12)}`;
+}
+
+/**
+ * Session-echo mint candidate — sibling of {@link buildCommitEchoMintCandidate}.
+ * v0 session-echo mints the record's whole `acceptedDiff` as gold at the
+ * record's true `repo @ baseCommit` (one candidate per record; hunk-subset
+ * echo is deferred — `base ⊕ S ⊖ H` isn't representable as a swe-rebench row).
+ * `source` borrows eval infra (image, install config, test framework) from an
+ * already-admitted instance in the same repo — it plays no role in naming or
+ * provenance, so nothing about the session's origin leaks through it.
+ */
+export async function buildSessionEchoMintCandidate(args: {
+  record: MineableTraceRecord;
+  source: PoolTask;
+  fetcher: HfFetcher;
+  runner: EvalRunner;
+  minterSafe?: string;
+  /** Recording operator's Safe — stamped as `sourceSolverSafe` so
+   *  `syntheticClaimBlocked` refuses that operator's own claim (§7). */
+  operatorSafe?: string;
+}): Promise<{ built: BuiltMintCandidate | null; reason?: string; empirical?: EmpiricalTestDerivationResult }> {
+  const sourceRow = await args.fetcher.fetchTaskRow({
+    hf_dataset: args.source.hf_dataset,
+    hf_split: args.source.hf_split,
+    instance_id: args.source.instance_id,
+  });
+
+  const instanceId = sessionEchoInstanceId(args.record.repo, args.record.sourceId);
+  const sourceLineageHash = lineageHash(args.record.sourceId, 'full');
+
+  const empirical = await runEmpiricalTestDerivation(
+    {
+      instance_id: instanceId,
+      repo: args.record.repo,
+      image: sourceRow.image_name,
+      test_patch: sourceRow.test_patch,
+      install: sourceRow.install_config?.install
+        ? (Array.isArray(sourceRow.install_config.install)
+          ? sourceRow.install_config.install
+          : [sourceRow.install_config.install])
+        : undefined,
+      test_cmd: sourceRow.install_config?.test_cmd ?? 'pytest',
+      log_parser: sourceRow.install_config?.log_parser ?? 'parse_log_pytest',
+      gold_patch: args.record.acceptedDiff,
+      broken_patch: '',
+    },
+    args.runner,
+  );
+  if (empirical.dead) {
+    return { built: null, reason: 'empirical-dead: no FAIL_TO_PASS tests', empirical };
+  }
+
+  const row: HfRow = {
+    instance_id: instanceId,
+    repo: args.record.repo,
+    image_name: sourceRow.image_name,
+    FAIL_TO_PASS: empirical.FAIL_TO_PASS,
+    PASS_TO_PASS: empirical.PASS_TO_PASS,
+    test_patch: sourceRow.test_patch,
+    install_config: sourceRow.install_config,
+  };
+
+  const poolTask: PoolTask = {
+    instance_id: instanceId,
+    hf_dataset: MINTED_DATASET_PLACEHOLDER,
+    hf_split: 'minted',
+    repo: args.record.repo,
+    base_commit: args.record.baseCommit,
+    patch: args.record.acceptedDiff,
+    test_patch: row.test_patch,
+    language: args.source.language ?? 'python',
+    problem_statement: `Session-echo mint from a captured task-creator session (${instanceId}).`,
+  };
+
+  const provenance: MintedProvenance = {
+    synthetic: true,
+    mintFamily: 'session-echo',
+    sourceLineageHash,
+    ...(args.minterSafe ? { minterSafe: args.minterSafe } : {}),
+    ...(args.operatorSafe ? { sourceSolverSafe: args.operatorSafe } : {}),
+  };
+
+  return {
+    built: {
+      poolTask,
+      goldPatch: args.record.acceptedDiff,
       provenance,
       row,
     },

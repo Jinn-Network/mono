@@ -19,6 +19,10 @@ import {
   type SyntheticTaskProvenance,
 } from '../../solver-types/_swe-rebench-v2-synthetic-claim.js';
 import {
+  buildMineableRecord,
+  type MineableTraceStore,
+} from '../../solver-types/_swe-rebench-v2-mineable-store.js';
+import {
   reapWorkDirs,
   DEFAULT_ORPHAN_MAX_AGE_MS,
   type ReapWorkDirsReport,
@@ -250,6 +254,23 @@ export interface TaskEngineOptions {
    */
   deliveryDeps?: DeliveryDeps;
   /**
+   * Mineable-trace store (task-creator spec §10, decision D2, tier-1). When
+   * provided, pack() best-effort-appends a MineableTraceRecord for
+   * restoration tasks whose spec carries repo identity (repo + baseCommit)
+   * and whose impl produced a solution patch — other solver types are
+   * skipped rather than fabricating values. Absent by default: no record is
+   * ever written unless the daemon constructed this store under explicit
+   * `'retain_local'` consent (see `config.mineableTraces.consent` in
+   * `client/src/config.ts`). Store errors are logged and never fail the task.
+   */
+  mineableStore?: MineableTraceStore;
+  /**
+   * Tier-2 (D2) "publish/admit as a task" consent, stamped onto every record
+   * this engine appends via `mineableStore`. Independent of the tier-1 gate
+   * above — see `config.mineableTraces.publishConsent`. Defaults to false.
+   */
+  mineablePublishConsent?: boolean;
+  /**
    * Impl registry for resolving which Harness to run.
    * When provided and findFor() returns an impl, runImpl() dispatches to it.
    */
@@ -422,6 +443,8 @@ export class TaskEngine {
   protected readonly packagingDeps: TaskEngineOptions['packagingDeps'];
   protected readonly envelopeDeps: TaskEngineOptions['envelopeDeps'];
   protected readonly deliveryDeps: TaskEngineOptions['deliveryDeps'];
+  protected readonly mineableStore: TaskEngineOptions['mineableStore'];
+  protected readonly mineablePublishConsent: boolean;
   protected readonly implRegistry: TaskEngineOptions['implRegistry'];
   protected readonly solverNetRegistry: TaskEngineOptions['solverNetRegistry'];
   protected readonly scrubPipeline: ScrubPipeline;
@@ -484,6 +507,8 @@ export class TaskEngine {
     this.packagingDeps = opts.packagingDeps;
     this.envelopeDeps = opts.envelopeDeps;
     this.deliveryDeps = opts.deliveryDeps;
+    this.mineableStore = opts.mineableStore;
+    this.mineablePublishConsent = opts.mineablePublishConsent ?? false;
     this.implRegistry = opts.implRegistry;
     this.solverNetRegistry = opts.solverNetRegistry;
     this.scrubPipeline = opts.scrubPipeline ?? buildScrubPipeline();
@@ -1633,6 +1658,60 @@ export class TaskEngine {
           : {}),
         ...(implOutput?.rationale != null ? { rationale: implOutput.rationale } : {}),
       };
+    }
+
+    // 3b. Mineable-trace record (task-creator spec §10, D2 tier-1). Best-effort
+    // and never fatal — a store failure must not fail the task. Only records
+    // for restoration tasks whose spec carries repo identity (repo +
+    // baseCommit) and whose impl produced a solution patch; other solver
+    // types are skipped rather than fabricating values (§10 contract fields
+    // 1-2). `intermediateFailureDiffs` is always [] here — the engine has no
+    // retry-loop plumbing at this hook point today, an honest gap against
+    // contract field 4, not invented data.
+    if (this.mineableStore && !isEvaluation) {
+      try {
+        // Synthetic tasks (minted echoes) must never be re-recorded as mineable
+        // traces — that would let a future harvest mint an echo of an echo,
+        // severing lineage (spec §7: no second-generation echoes).
+        const synthetic = task.task?.eligibility?.['syntheticProvenance'] as
+          | SyntheticTaskProvenance
+          | undefined;
+        const spec = task.task?.spec as Record<string, unknown> | undefined;
+        const repo = typeof spec?.['repo'] === 'string' ? spec['repo'] : undefined;
+        const baseCommit = typeof spec?.['base_commit'] === 'string' ? spec['base_commit'] : undefined;
+        const sourceInstanceId = typeof spec?.['instance_id'] === 'string' ? spec['instance_id'] : undefined;
+        const acceptedDiff =
+          typeof implOutput?.solutionPayload?.['patch'] === 'string'
+            ? (implOutput.solutionPayload['patch'] as string)
+            : undefined;
+        if (synthetic?.synthetic) {
+          console.debug(
+            `[harness-engine] ${task.requestId}: mineable-trace record skipped — task is a synthetic mint (no second-generation echoes)`,
+          );
+        } else if (repo && baseCommit && acceptedDiff) {
+          const record = buildMineableRecord({
+            sourceId: task.requestId,
+            kind: 'solvernet-execution',
+            repo,
+            baseCommit,
+            acceptedDiff,
+            intermediateFailureDiffs: [],
+            ...(sourceInstanceId !== undefined ? { sourceInstanceId } : {}),
+            publishMinedTasksConsent: this.mineablePublishConsent,
+            now: () => new Date().toISOString(),
+          });
+          await this.mineableStore.append(record, 'retain_local');
+        } else {
+          console.debug(
+            `[harness-engine] ${task.requestId}: mineable-trace record skipped — repo/baseCommit/patch not present for this solver type`,
+          );
+        }
+      } catch (err) {
+        console.warn(
+          `[harness-engine] ${task.requestId}: mineable-trace record failed (non-fatal):`,
+          err instanceof Error ? err.message : err,
+        );
+      }
     }
 
     // 4. Persist generatedAt once (first pack); reuse on retry for CID determinism.

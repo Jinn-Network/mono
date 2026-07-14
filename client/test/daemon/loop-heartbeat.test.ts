@@ -10,6 +10,7 @@ import { Store } from '../../src/store/store.js';
 import {
   LOOP_HEARTBEAT_PREFIX,
   LOOP_NAMES,
+  LOOP_REGISTRY,
   getLoopTick,
   loopHeartbeatKey,
   recordLoopTick,
@@ -64,5 +65,16 @@ describe('#1043 loop-heartbeat helper', () => {
         'reward-claim',
       ].sort(),
     );
+  });
+});
+
+describe('loop registry invariant (AC5 / #1656)', () => {
+  it('LOOP_NAMES is exactly LOOP_REGISTRY.map(name) — cannot diverge', () => {
+    expect(LOOP_NAMES).toEqual(LOOP_REGISTRY.map((r) => r.name));
+  });
+
+  it('LOOP_NAMES has no duplicates and matches the registry length', () => {
+    expect(new Set(LOOP_NAMES).size).toBe(LOOP_REGISTRY.length);
+    expect(LOOP_NAMES.length).toBe(LOOP_REGISTRY.length);
   });
 });

@@ -43,6 +43,10 @@ export interface MintedProvenance {
   sourceInstanceId?: string;
   minterSafe?: string;
   blindedUntil?: string;
+  /** Recording operator's Safe (session-echo, Task 8) — feeds
+   *  `syntheticClaimBlocked` (`_swe-rebench-v2-synthetic-claim.ts`) so the
+   *  operator whose session produced the echo cannot claim it. */
+  sourceSolverSafe?: string;
 }
 
 /** Published v1 row — no gold `patch` field. */
@@ -99,6 +103,16 @@ export interface MintedPoolEntry {
   hf_dataset: string;
   hf_split: string;
   mintedAt: string;
+  /**
+   * Per-entry publish marker (D2 tier-2). `true` only once the publish path
+   * has backfilled this row into a published IPFS artifact
+   * ({@link MintedPoolStore.setPublishedArtifact}). `false` for entries the
+   * pipeline recorded without publish consent. `undefined` marks a legacy
+   * entry written before this field existed — those are treated as published
+   * iff the store carries a `publishedArtifactCid` (every pre-marker store
+   * used uniform publish batches, so store-wide == per-entry for them).
+   */
+  published?: boolean;
 }
 
 interface MintedPoolFileV1 {
@@ -282,6 +296,23 @@ function entryRowHashVersion(entry: MintedPoolEntry): RowHashVersion {
   return entry.rowHashVersion === 2 || isMintedPoolRowV2(entry.row) ? 2 : 1;
 }
 
+/**
+ * Shared export predicate for {@link MintedPoolStore.exportArtifact} and
+ * {@link MintedPoolStore.exportArtifactV2}: an entry is exportable when it is a
+ * scorable, non-discrimination-failing admission that also clears the tier-2
+ * publish gate (D2) — `published !== false`, or named in `includeIds` (the
+ * publish path passes rows it is publishing *right now*, before
+ * `setPublishedArtifact` has stamped their marker). Both exporters must keep
+ * this consent gate in lockstep, so it lives in one place.
+ */
+function isExportableEntry(entry: MintedPoolEntry, includeIds: Set<string>): boolean {
+  return (
+    entry.admission.scorable &&
+    entry.admission.discrimination !== 'fail' &&
+    (entry.published !== false || includeIds.has(entry.row.instance_id))
+  );
+}
+
 function isV1File(raw: unknown): raw is MintedPoolFileV1 {
   return typeof raw === 'object' && raw !== null &&
     (raw as MintedPoolFileV1).schemaVersion === STORE_SCHEMA_VERSION_V1 &&
@@ -365,7 +396,11 @@ export class MintedPoolStore {
 
   /**
    * Back-fill only rows belonging to the published artifact version. A v2
-   * publication therefore cannot retarget historical v1 rows or CIDs.
+   * publication therefore cannot retarget historical v1 rows or CIDs. After
+   * IPFS publish, back-fill resolvable `hf_dataset` refs on the version-scoped
+   * entries so posted tasks grade through RoutingTaskRowFetcher, and stamp the
+   * per-entry `published` marker (D2 tier-2) — only the backfilled entries
+   * become eligible for the postable union ({@link loadMintedPoolTasks}).
    */
   async setPublishedArtifact(
     evalSemanticsVersion: string,
@@ -382,6 +417,7 @@ export class MintedPoolStore {
       const entry = file.entries[id];
       if (!entry || entryRowHashVersion(entry) !== rowHashVersion) continue;
       entry.hf_dataset = hfDataset;
+      entry.published = true;
     }
     file.updatedAt = new Date().toISOString();
     await writeJsonAtomic(this.file, file);
@@ -398,12 +434,21 @@ export class MintedPoolStore {
     return Object.values(file.entries);
   }
 
-  /** Legacy v1 export; immutable historical publication contract. */
-  async exportArtifact(evalSemanticsVersion: string, opts: { generatedAt?: string } = {}): Promise<SweRebenchV2MintedPoolArtifactV1> {
+  /**
+   * Legacy v1 export; immutable historical publication contract. Entries
+   * explicitly marked `published: false` are excluded — publishing their row
+   * data would defeat the tier-2 consent gate (D2) — unless named in
+   * `opts.includeIds` (the publish path passes the candidates it is publishing
+   * *right now*, before `setPublishedArtifact` has stamped them). Legacy
+   * entries with no marker are included, preserving pre-marker uniform-batch
+   * behaviour.
+   */
+  async exportArtifact(evalSemanticsVersion: string, opts: { generatedAt?: string; includeIds?: string[] } = {}): Promise<SweRebenchV2MintedPoolArtifactV1> {
     const entries = await this.listEntries(evalSemanticsVersion);
+    const includeIds = new Set(opts.includeIds ?? []);
     const rows = entries
       .filter((e) => entryRowHashVersion(e) === 1)
-      .filter((e) => e.admission.scorable && e.admission.discrimination !== 'fail')
+      .filter((e) => isExportableEntry(e, includeIds))
       .map((e) => e.row as MintedPoolRow)
       .sort((a, b) => a.instance_id.localeCompare(b.instance_id));
     return {
@@ -414,12 +459,17 @@ export class MintedPoolStore {
     };
   }
 
-  /** New explicit-environment export. It never silently downgrades a v2 row. */
-  async exportArtifactV2(evalSemanticsVersion: string, opts: { generatedAt?: string } = {}): Promise<SweRebenchV2MintedPoolArtifactV2> {
+  /**
+   * New explicit-environment export. It never silently downgrades a v2 row.
+   * Applies the same tier-2 publish gate as {@link exportArtifact}: entries
+   * marked `published: false` are excluded unless named in `opts.includeIds`.
+   */
+  async exportArtifactV2(evalSemanticsVersion: string, opts: { generatedAt?: string; includeIds?: string[] } = {}): Promise<SweRebenchV2MintedPoolArtifactV2> {
     const entries = await this.listEntries(evalSemanticsVersion);
+    const includeIds = new Set(opts.includeIds ?? []);
     const rows = entries
       .filter((e) => entryRowHashVersion(e) === 2)
-      .filter((e) => e.admission.scorable && e.admission.discrimination !== 'fail')
+      .filter((e) => isExportableEntry(e, includeIds))
       .map((e) => MintedPoolRowV2Schema.parse(e.row) as MintedPoolRowV2)
       .sort((a, b) => a.instance_id.localeCompare(b.instance_id));
     return {
@@ -471,7 +521,10 @@ export function getDefaultMintedPoolStore(stateDir: string): MintedPoolStore {
   return new MintedPoolStore({ stateDir });
 }
 
-/** Pool tasks from admitted minted entries (generator union; quotas untouched). */
+/** Pool tasks from admitted minted entries (generator union; quotas untouched).
+ *  Only entries actually published (per-entry marker, D2 tier-2) enter the
+ *  postable union; legacy entries with no marker fall back to the store-wide
+ *  cid check. */
 export async function loadMintedPoolTasks(
   store: MintedPoolStore,
   evalSemanticsVersion: string,
@@ -485,6 +538,11 @@ export async function loadMintedPoolTasks(
   return entries
     .filter((e) => e.admission.scorable && e.admission.discrimination !== 'fail')
     .flatMap((e) => {
+      // Tier-2 publish gate (D2): an entry explicitly marked `published: false`
+      // never enters the postable union. A marker-less legacy entry falls back
+      // to the version-scoped published-CID check below (pre-marker stores used
+      // uniform publish batches, so store-wide cid ≡ per-entry published).
+      if (e.published === false) return [];
       const version = entryRowHashVersion(e);
       const cid = cids[version];
       if (!cid) return [];

@@ -23,6 +23,7 @@ import {
 import {
   EVAL_SEMANTICS_VERSION,
   summarizeValidatedPool,
+  summarizeWeakSuite,
   type ValidatedPoolSummary,
 } from '../../solver-types/_swe-rebench-v2-validated-pool.js';
 import { parseMintedEnvironmentBindingV1 } from '../../solver-types/_swe-rebench-v2-minted-pool.js';
@@ -436,10 +437,17 @@ const command: CommandModule = {
                                 [--instance-id <id>]... [--instances-file <path>]
                                 [--seed-positive] [--known-bad]
                                 [--known-pytest-missing]
+                                [--recheck-discrimination [--limit <n>]]
             Run the gold patch of each pool instance through the eval harness
             and cache which instances are scorable; the generator then posts
             only those. Requires Docker + \`jinn harnesses enable
             swe-rebench-v2-evaluator\`.
+            --recheck-discrimination runs ONLY the known-bad discrimination
+            eval (no gold-patch re-run) against already-scorable entries that
+            predate the check (\`discrimination: undefined\`). Flags failures
+            (benchmark pool: scorable stays true — never hard-rejects an
+            existing entry); \`--limit\` bounds how many entries one run
+            rechecks.
             --seed-positive scopes the run to instances in
             client/scripts/swe-rebench-v2-seed-pool.json (gold eval runs;
             most expected to record scorable:true).
@@ -490,6 +498,7 @@ Output flags:
         'seed-positive': { type: 'boolean' },
         'known-bad': { type: 'boolean' },
         'known-pytest-missing': { type: 'boolean' },
+        'recheck-discrimination': { type: 'boolean' },
         // screen-held-out (#986)
         runs: { type: 'string' },
         'held-out-count': { type: 'string' },
@@ -565,6 +574,7 @@ Output flags:
       const evalSemanticsVersion = (raw as { evalSemanticsVersion?: string }).evalSemanticsVersion ?? 'unknown';
       const freshness = await describeSweRebenchV2PoolFreshness({ stateDir });
       const highestYieldBlocker = summary.byReason.find((b) => b.reason !== 'gold-patch-resolves')?.reason ?? null;
+      const weakSuite = summarizeWeakSuite(raw);
       const value = {
         verb: 'solver-nets validate-pool-report',
         solverNet: 'swe-rebench-v2',
@@ -573,6 +583,7 @@ Output flags:
         stateDir,
         ...summary,
         highestYieldBlocker,
+        weakSuite,
         freshness,
       };
       emit(ctx, value, human, json, (v) => {
@@ -592,6 +603,14 @@ Output flags:
         }
         if (s.highestYieldBlocker) {
           lines.push(`Highest-yield unscorable blocker: ${s.highestYieldBlocker}`);
+        }
+        // D3 second half: weak-suite rate over discrimination-checked entries;
+        // entries that predate the check (or await a recheck) are surfaced
+        // separately as unchecked, never folded into the rate.
+        const pct = s.weakSuite.rate !== null ? (s.weakSuite.rate * 100).toFixed(1) : 'n/a';
+        lines.push(`weak-suite rate: ${s.weakSuite.flagged}/${s.weakSuite.checked} checked (${pct}%)`);
+        if (s.weakSuite.unchecked > 0) {
+          lines.push(`  ${s.weakSuite.unchecked} scorable entr${s.weakSuite.unchecked === 1 ? 'y' : 'ies'} unchecked — run \`validate-pool --recheck-discrimination\``);
         }
         // #806: gold-patch-not-resolved entries whose PASS_TO_PASS tests broke
         // (p2p_broke > 0) are usually an environment/setup problem, not a
@@ -636,7 +655,7 @@ Output flags:
       const { loadSweRebenchV2Pool, getSweRebenchV2ValidatedPoolStore } = await import('../../solver-types/swe-rebench-v2.js');
       const { HttpHfFetcher } = await import('../../harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js');
       const { PythonEvalRunner } = await import('../../harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js');
-      const { validatePoolInstances, EVAL_SEMANTICS_VERSION } = await import('../../solver-types/_swe-rebench-v2-validated-pool.js');
+      const { validatePoolInstances, recheckDiscrimination, EVAL_SEMANTICS_VERSION } = await import('../../solver-types/_swe-rebench-v2-validated-pool.js');
 
       const limitRaw = parsed.values['limit'] as string | undefined;
       const limitParsed = limitRaw ? Number.parseInt(limitRaw, 10) : undefined;
@@ -659,6 +678,30 @@ Output flags:
         process.stderr.write(`[validate-pool] restricted to ${poolTasks.length} of ${wanted.size} requested instance ids\n`);
       }
       const store = getSweRebenchV2ValidatedPoolStore();
+
+      if (Boolean(parsed.values['recheck-discrimination'])) {
+        const result = await recheckDiscrimination({
+          pool: poolTasks,
+          store,
+          fetcher: new HttpHfFetcher(),
+          runner: new PythonEvalRunner({ upstreamRepoDir }),
+          semanticsVersion: EVAL_SEMANTICS_VERSION,
+          limit,
+          log: (m) => process.stderr.write(`${m}\n`),
+        });
+        emit(
+          ctx,
+          { verb: 'solver-nets validate-pool --recheck-discrimination', solverNet: 'swe-rebench-v2', evalSemanticsVersion: EVAL_SEMANTICS_VERSION, poolSize: poolTasks.length, ...result },
+          human,
+          json,
+          (v) => {
+            const s = v as { checked: number; flagged: string[]; skipped: number };
+            return `recheck-discrimination: checked=${s.checked}  flagged=${s.flagged.length}  skipped=${s.skipped}`;
+          },
+        );
+        return;
+      }
+
       const summary = await validatePoolInstances(
         poolTasks,
         {

@@ -1,8 +1,12 @@
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   parseCapabilitySlate,
   hashCapabilitySlate,
   assertSlateDisjoint,
+  loadCapabilitySlateRepos,
   CAPABILITY_SLATE_SCHEMA_VERSION,
   type CapabilitySlateArtifact,
 } from '../../src/eval/capability-slate.js';
@@ -92,5 +96,20 @@ describe('capability slate artifact', () => {
 
   it('assertSlateDisjoint passes a clean slate (all axes pass or n/a-v0)', () => {
     expect(() => assertSlateDisjoint(valid)).not.toThrow();
+  });
+});
+
+describe('loadCapabilitySlateRepos', () => {
+  it('returns the empty set when the slate directory has no frozen cap-v0 artifact', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cap-slate-empty-'));
+    try {
+      expect(loadCapabilitySlateRepos(dir).size).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('defaults to the shipped slates dir, which has no frozen cap-v0 artifact yet', () => {
+    expect(loadCapabilitySlateRepos().size).toBe(0);
   });
 });

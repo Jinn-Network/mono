@@ -299,9 +299,12 @@ This is aligned with spec **D5** (v0 publishes public-repo tasks only) and §5.6
   "intervalMs": 3600000,
   "limitPerRepo": 3,
   "publish": true,
-  "repos": [{ "path": "/path/to/clone", "repo": "owner/repo" }]
+  "repos": [{ "path": "/path/to/clone", "repo": "owner/repo" }],
+  "sources": ["commits"]
 }
 ```
+
+`sources` (Task 9) selects which harvest sources the loop mines each tick — defaults to `["commits"]`; add `"sessions"` to also drain locally-captured task-creator sessions (needs `mineableTraces.consent: "retain_local"`). Env: `JINN_HARVEST_SOURCES` (comma-separated).
 
 ```bash
 cd client

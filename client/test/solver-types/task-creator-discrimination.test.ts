@@ -10,6 +10,8 @@ import {
   WEAK_SUITE_REASON,
   validatePoolInstances,
   runDiscriminationCheck,
+  recheckDiscrimination,
+  summarizeWeakSuite,
 } from '../../src/solver-types/_swe-rebench-v2-validated-pool.js';
 import type { PoolTask } from '../../src/solver-types/_swe-rebench-v2-pool.js';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -114,5 +116,82 @@ describe('discrimination check', () => {
     const ids = await store.getScorableIds(EVAL_SEMANTICS_VERSION);
     expect(ids?.has('a__1')).toBe(false);
     await rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe('recheckDiscrimination', () => {
+  it('flags an unchecked benchmark entry whose known-bad patch passes, and leaves it scorable=true (D3)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jinn-disc-recheck-'));
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    await store.record('repo__pkg-1', { scorable: true, reason: 'gold-patch-resolves', checkedAt: new Date().toISOString() }, EVAL_SEMANTICS_VERSION);
+    const fetcher = {
+      fetchTaskRow: async () => ({
+        instance_id: 'repo__pkg-1',
+        repo: 'acme/widget',
+        image_name: 'img:tag',
+        FAIL_TO_PASS: ['t1'],
+        PASS_TO_PASS: [],
+        test_patch: '',
+        install_config: { test_cmd: 'pytest', log_parser: 'parse_log_pytest' },
+      }),
+    };
+    const runner = {
+      runEval: vi.fn().mockResolvedValue({ passed_match: true, passed: ['t1'], failed: [] }),
+    };
+    const result = await recheckDiscrimination({
+      pool: [poolTask('repo__pkg-1')],
+      store,
+      fetcher,
+      runner,
+      semanticsVersion: EVAL_SEMANTICS_VERSION,
+    });
+    expect(result.checked).toBe(1);
+    expect(result.skipped).toBe(0);
+    expect(result.flagged).toEqual(['repo__pkg-1']);
+    const entry = await store.getEntry('repo__pkg-1', EVAL_SEMANTICS_VERSION);
+    expect(entry?.discrimination).toBe('fail');
+    expect(entry?.scorable).toBe(true); // benchmark pool: flag, never hard-reject
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('skips entries that already carry a discrimination verdict', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jinn-disc-recheck-'));
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    await store.record('repo__pkg-2', { scorable: true, reason: 'gold-patch-resolves', checkedAt: new Date().toISOString(), discrimination: 'pass' }, EVAL_SEMANTICS_VERSION);
+    const fetcher = { fetchTaskRow: vi.fn() };
+    const runner = { runEval: vi.fn(async () => { throw new Error('must not be called'); }) };
+    const result = await recheckDiscrimination({
+      pool: [poolTask('repo__pkg-2')],
+      store,
+      fetcher,
+      runner,
+      semanticsVersion: EVAL_SEMANTICS_VERSION,
+    });
+    expect(result.checked).toBe(0);
+    expect(result.skipped).toBe(1);
+    expect(result.flagged).toEqual([]);
+    expect(fetcher.fetchTaskRow).not.toHaveBeenCalled();
+    expect(runner.runEval).not.toHaveBeenCalled();
+    await rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe('summarizeWeakSuite', () => {
+  it('computes the rate over verdicted entries only, reporting undecided entries as unchecked', () => {
+    const file = {
+      entries: {
+        pass1: { scorable: true, reason: 'gold-patch-resolves', checkedAt: 't', discrimination: 'pass' },
+        pass2: { scorable: true, reason: 'gold-patch-resolves', checkedAt: 't', discrimination: 'pass' },
+        fail1: { scorable: true, reason: 'gold-patch-resolves', checkedAt: 't', discrimination: 'fail' },
+        unchecked1: { scorable: true, reason: 'gold-patch-resolves', checkedAt: 't' },
+        unscorable1: { scorable: false, reason: 'gold-patch-not-resolved', checkedAt: 't' },
+      },
+    };
+    expect(summarizeWeakSuite(file)).toEqual({ checked: 3, flagged: 1, unchecked: 1, rate: 1 / 3 });
+  });
+
+  it('returns a null rate when nothing has been discrimination-checked yet', () => {
+    const file = { entries: { a: { scorable: true, reason: 'gold-patch-resolves', checkedAt: 't' } } };
+    expect(summarizeWeakSuite(file)).toEqual({ checked: 0, flagged: 0, unchecked: 1, rate: null });
   });
 });

@@ -807,6 +807,43 @@ export function summarizeValidatedPool(file: unknown): ValidatedPoolSummary {
   return { totalEntries: scorable + unscorable, scorable, unscorable, byReason };
 }
 
+export interface WeakSuiteSummary {
+  /** Scorable entries with a discrimination verdict (`'pass'` or `'fail'`). */
+  checked: number;
+  /** Of those, `discrimination === 'fail'` — the weak-suite count. */
+  flagged: number;
+  /** Scorable entries with `discrimination === undefined` — not yet
+   *  discrimination-checked (predates the check, or awaiting a recheck). */
+  unchecked: number;
+  /** `flagged / checked`, or `null` when `checked === 0`. */
+  rate: number | null;
+}
+
+/**
+ * D3 second half: the weak-suite rate — the fraction of scorable pool
+ * entries whose known-bad patch incorrectly passes — over entries that carry
+ * a discrimination verdict. Entries still `discrimination: undefined` are
+ * reported as `unchecked` and excluded from the rate (see
+ * {@link recheckDiscrimination}); unscorable entries never carry a
+ * discrimination verdict for the benchmark pool and are excluded entirely.
+ */
+export function summarizeWeakSuite(file: unknown): WeakSuiteSummary {
+  if (!isObject(file) || !isObject(file['entries'])) {
+    throw new Error('summarizeWeakSuite: file must include an `entries` object');
+  }
+  let flagged = 0;
+  let passed = 0;
+  let unchecked = 0;
+  for (const entry of Object.values(file['entries'])) {
+    if (!isObject(entry) || entry['scorable'] !== true) continue;
+    if (entry['discrimination'] === 'fail') flagged += 1;
+    else if (entry['discrimination'] === 'pass') passed += 1;
+    else unchecked += 1;
+  }
+  const checked = flagged + passed;
+  return { checked, flagged, unchecked, rate: checked > 0 ? flagged / checked : null };
+}
+
 export async function exportScorableVettedPoolArtifact(
   store: ValidatedPoolStore,
   evalSemanticsVersion: string,
@@ -1011,6 +1048,78 @@ export async function runDiscriminationCheck(args: {
     };
   }
   return { scorable: true, reason: 'gold-patch-resolves', discrimination: 'pass' };
+}
+
+export interface RecheckDiscriminationOpts {
+  /** Same `PoolTask[]` `validatePoolInstances` consumes — a `ValidatedPoolEntry`
+   *  doesn't itself carry `hf_dataset`/`hf_split`, so the pool is needed to
+   *  re-fetch each instance's HF row for the eval. */
+  pool: PoolTask[];
+  store: ValidatedPoolStore;
+  fetcher: HfFetcher;
+  runner: EvalRunner;
+  semanticsVersion: string;
+  /** Optional batch bound for long pools. */
+  limit?: number;
+  log?: (msg: string) => void;
+}
+
+export interface RecheckDiscriminationSummary {
+  checked: number;
+  flagged: string[];
+  skipped: number;
+}
+
+/**
+ * D3 second half: retroactively run the known-bad discrimination eval
+ * ({@link runDiscriminationCheck}) against already-scorable entries validated
+ * before the check existed (`discrimination === undefined`). Never re-runs
+ * the gold patch — only the cheap known-bad-patch eval.
+ *
+ * Benchmark pool ⇒ flag only: a flagged entry keeps `scorable: true` (matches
+ * `runDiscriminationCheck`'s `poolSource: 'benchmark'` branch) — existing pool
+ * entries are never hard-rejected by a recheck.
+ *
+ * Entries already carrying a verdict (`discrimination === 'pass' | 'fail'`)
+ * are skipped, as are entries with no matching `PoolTask` in `pool` (nothing
+ * to re-fetch the HF row with) and entries beyond `opts.limit`. A fetch/eval
+ * error for one instance is logged and counted as skipped rather than
+ * aborting the whole pass — the entry's `discrimination` stays `undefined`
+ * so a future recheck retries it.
+ */
+export async function recheckDiscrimination(opts: RecheckDiscriminationOpts): Promise<RecheckDiscriminationSummary> {
+  const log = opts.log ?? (() => {});
+  const scorable = await opts.store.getScorableEntries(opts.semanticsVersion);
+  const flagged: string[] = [];
+  let checked = 0;
+  let skipped = 0;
+  if (!scorable) return { checked, flagged, skipped };
+
+  const taskById = new Map(opts.pool.map((t) => [t.instance_id, t]));
+  for (const [instanceId, entry] of Object.entries(scorable.entries)) {
+    if (entry.discrimination !== undefined) { skipped += 1; continue; }
+    if (opts.limit !== undefined && checked >= opts.limit) { skipped += 1; continue; }
+    const task = taskById.get(instanceId);
+    if (!task) { skipped += 1; continue; }
+    try {
+      const row = await opts.fetcher.fetchTaskRow({ hf_dataset: task.hf_dataset, hf_split: task.hf_split, instance_id: instanceId });
+      const disc = await runDiscriminationCheck({
+        task,
+        row,
+        runner: opts.runner,
+        poolSource: 'benchmark',
+        substrate: { checkedAt: new Date().toISOString() },
+      });
+      checked += 1;
+      if (disc.discrimination === 'fail') flagged.push(instanceId);
+      await opts.store.record(instanceId, { ...entry, discrimination: disc.discrimination }, opts.semanticsVersion);
+      log(`[recheck-discrimination] ${instanceId} → ${disc.discrimination}`);
+    } catch (err) {
+      skipped += 1;
+      log(`[recheck-discrimination] ${instanceId} error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return { checked, flagged, skipped };
 }
 
 /**

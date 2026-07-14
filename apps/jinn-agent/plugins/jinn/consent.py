@@ -63,17 +63,28 @@ def decline_line() -> str:
 
 MINEABLE_TRACE_HEADER = "LOCAL TRACE MINING (OPTIONAL, TIER 1)"
 MINEABLE_TRACE_BODY = (
-    "Keep a scrubbed copy of task traces on this machine so Jinn can mine new "
+    "Keep a copy of task traces on this machine so Jinn can mine new "
     "tasks from your work. Nothing is published unless you also consent to "
     "corpus contribution and pass the public-repo publish gate."
 )
 MINEABLE_TRACE_ACCEPT = (
-    "Retain mineable traces locally? Scrubbed repo, commit, diff, and test "
-    "outcomes stay on disk for mining only. [Y] Yes · [N] No"
+    "Retain mineable traces locally? Repo, commit, diff, and test "
+    "outcomes are kept on this machine for mining only. [Y] Yes · [N] No"
 )
 MINEABLE_TRACE_DECLINE = (
     "Skip local mining retention? Only standard scrubbed corpus traces apply "
     "when contribution is on. [Y] Yes · [N] No"
+)
+
+MINEABLE_PUBLISH_HEADER = "PUBLISH MINED TASKS (OPTIONAL, TIER 2)"
+MINEABLE_PUBLISH_BODY = (
+    "Even with local mining on, publishing a mined task as public work needs "
+    "its own consent — separate from local retention and from corpus "
+    "contribution. Only tasks from public repos are ever eligible."
+)
+MINEABLE_PUBLISH_ACCEPT = (
+    "Allow mined tasks to be published when eligible? Nothing publishes "
+    "without this. [Y] Yes · [N] No"
 )
 
 CONFIRM_ACCEPT = (
@@ -184,6 +195,10 @@ def render_mineable_trace_prompt() -> str:
     return "\n".join([MINEABLE_TRACE_HEADER + ":", MINEABLE_TRACE_BODY, "", MINEABLE_TRACE_ACCEPT])
 
 
+def render_mineable_publish_prompt() -> str:
+    return "\n".join([MINEABLE_PUBLISH_HEADER + ":", MINEABLE_PUBLISH_BODY, "", MINEABLE_PUBLISH_ACCEPT])
+
+
 # ── The flow ─────────────────────────────────────────────────────────────────
 
 def state_line() -> str:
@@ -279,6 +294,30 @@ def run_consent_flow(
             break
 
     status = str(load_state().get("status"))
+
+    # Mineable-trace consent (task-creator spec §10, D2) — two deliberate
+    # tiers, asked here regardless of the contribution decision above. Bare
+    # Enter (or anything but 'y') declines each tier; the safe default
+    # retains and publishes nothing. Tier-2 is CONDITIONAL on tier-1: with
+    # local retention declined there is nothing that could ever be
+    # published, so the publish question is skipped entirely (never asked —
+    # not asked-and-ignored) and publish consent is forced off.
+    print_fn(render_mineable_trace_prompt())
+    mineable_choice = input_fn("> ").strip().lower()
+    mineable_trace_consent = "retain_local" if mineable_choice == "y" else "off"
+
+    publish_mined_tasks_consent = False
+    if mineable_trace_consent == "retain_local":
+        print_fn(render_mineable_publish_prompt())
+        publish_choice = input_fn("> ").strip().lower()
+        publish_mined_tasks_consent = publish_choice == "y"
+
+    save_state(
+        status,
+        mineable_trace_consent=mineable_trace_consent,
+        publish_mined_tasks_consent=publish_mined_tasks_consent,
+    )
+
     print_fn(render_node_stub_styled())
     node = input_fn("> ").strip().lower()
     if node == "l":

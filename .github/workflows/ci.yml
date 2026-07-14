@@ -6,6 +6,11 @@ on:
   push:
     branches: [main]
     paths: ['client/**']
+  # Manual trigger for the soft-gate e2e jobs (task-creator-marketplace-e2e).
+  # Deliberately NOT wired to `schedule:` — a cron trigger on this workflow
+  # would run every other job nightly too; dispatch keeps the soft gate
+  # on-demand without changing the PR-blocking surface.
+  workflow_dispatch:
 
 defaults:
   run:
@@ -145,6 +150,33 @@ jobs:
           name: playwright-traces
           path: client/test-results/
           retention-days: 7
+
+  task-creator-marketplace-e2e:
+    # Task Creator marketplace-leg e2e (WP6) — SOFT GATE, not PR-blocking.
+    # Runs only on manual workflow_dispatch (see `on:` comment above). Anvil
+    # fork of Base + two FleetBootstrapper cycles + full post → guarded claim
+    # → deliver → grade → exemplar-pair loop; needs internet for the fork RPC.
+    name: Task Creator marketplace e2e (soft gate)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: yarn install --immutable
+      # The e2e compiles the local V3 task stack via `yarn compile` in
+      # contracts/ (task-first-helpers.compileContracts), so the contracts
+      # workspace needs its own install.
+      - run: yarn install --immutable
+        working-directory: contracts
+      # Foundry provides `anvil` for the Base-mainnet fork.
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly-1c7c4bebce1e075989780fd401bf6bffcb424746
+      - run: yarn e2e:task-creator
 
   task-creator-amd64-gold-proof:
     # Task Creator v0 AC #1 — native amd64 Docker gold eval through RoutingTaskRowFetcher.

@@ -2,9 +2,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { privateKeyToAccount } from 'viem/accounts';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { SweRebenchV2EvaluatorHarness } from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/harness.js';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  SweRebenchV2EvaluatorHarness,
+  applyUpstreamPatches,
+} from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/harness.js';
 import { HttpHfFetcher } from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js';
 import type { Task } from '../../../../src/types/task.js';
 import type { HarnessContext } from '../../../../src/harnesses/types.js';
@@ -32,6 +37,8 @@ import {
   createDifferentialAdmissionReceiptV2,
   hashDifferentialAdmissionReceiptV2,
 } from '../../../../src/solver-types/_swe-rebench-v2-differential-admission.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 function makeImplStateDir(): string {
   return mkdtempSync(join(tmpdir(), 'swe-rebench-v2-evaluator-test-'));
@@ -431,15 +438,20 @@ describe('SweRebenchV2EvaluatorHarness — onEnable', () => {
       }
       return { exitCode: 0 };
     });
+    // applyUpstreamPatches is exercised for real (against real upstream
+    // content) in the dedicated 'applyUpstreamPatches' describe block below;
+    // stub it here so this test stays focused on the clone/marker flow.
+    const applyUpstreamPatches = vi.fn();
     const h = new SweRebenchV2EvaluatorHarness({
       implStateDir,
-      _testDeps: { runCommand },
+      _testDeps: { runCommand, applyUpstreamPatches },
     });
     const r = await h.onEnable({ args: {}, runtimePlugins: [] });
     expect(r.status).toBe('ready');
     if (r.status === 'ready') {
       expect(r.details?.['upstreamRepoDir']).toBe(join(implStateDir, 'upstream'));
     }
+    expect(applyUpstreamPatches).toHaveBeenCalledWith(join(implStateDir, 'upstream'));
     expect(existsSync(join(implStateDir, 'state.json'))).toBe(true);
     const state = JSON.parse(readFileSync(join(implStateDir, 'state.json'), 'utf8'));
     expect(state.enabled).toBe(true);
@@ -465,7 +477,7 @@ describe('SweRebenchV2EvaluatorHarness — onEnable', () => {
     });
     const h = new SweRebenchV2EvaluatorHarness({
       implStateDir,
-      _testDeps: { runCommand },
+      _testDeps: { runCommand, applyUpstreamPatches: vi.fn() },
     });
 
     const r = await h.onEnable({ args: {}, runtimePlugins: [] });
@@ -535,7 +547,7 @@ describe('SweRebenchV2EvaluatorHarness — onEnable', () => {
       if (bin === 'docker' || bin === 'python3' || bin === 'git') return { exitCode: 0 };
       return { exitCode: 0 };
     });
-    const h = new SweRebenchV2EvaluatorHarness({ implStateDir, _testDeps: { runCommand } });
+    const h = new SweRebenchV2EvaluatorHarness({ implStateDir, _testDeps: { runCommand, applyUpstreamPatches: vi.fn() } });
 
     const r = await h.onEnable({ args: {}, runtimePlugins: [] });
 
@@ -565,7 +577,7 @@ describe('SweRebenchV2EvaluatorHarness — onEnable', () => {
         }
         return { exitCode: 0 };
       });
-      const h = new SweRebenchV2EvaluatorHarness({ implStateDir, _testDeps: { runCommand } });
+      const h = new SweRebenchV2EvaluatorHarness({ implStateDir, _testDeps: { runCommand, applyUpstreamPatches: vi.fn() } });
 
       const r = await h.onEnable({ args: {}, runtimePlugins: [] });
 
@@ -595,7 +607,7 @@ describe('SweRebenchV2EvaluatorHarness — onEnable', () => {
       if (bin === 'docker' || bin === 'python3' || bin === 'git') return { exitCode: 0 };
       return { exitCode: 0 };
     });
-    const h = new SweRebenchV2EvaluatorHarness({ implStateDir, _testDeps: { runCommand } });
+    const h = new SweRebenchV2EvaluatorHarness({ implStateDir, _testDeps: { runCommand, applyUpstreamPatches: vi.fn() } });
 
     await expect(h.onEnable({ args: {}, runtimePlugins: [] })).resolves.toMatchObject({ status: 'ready' });
     expect(runCommand).toHaveBeenCalledWith(
@@ -620,6 +632,79 @@ describe('SweRebenchV2EvaluatorHarness — onEnable', () => {
     expect(existsSync(join(implStateDir, 'state.json'))).toBe(false);
   });
 
+  it('surfaces an upstream-patch failure as status=error', async () => {
+    const runCommand = makeRunCommand((bin, args) => {
+      if (bin === 'docker') return { exitCode: 0 };
+      if (bin === 'python3') return { exitCode: 0, stdout: 'Python 3.12.0' };
+      if (bin === 'git' && args[0] === 'clone') {
+        mkdirSync(args[args.length - 1]!, { recursive: true });
+        return { exitCode: 0 };
+      }
+      return { exitCode: 0 };
+    });
+    const applyUpstreamPatches = vi.fn(() => {
+      throw new Error('failed to apply upstream patch passed-actual.patch');
+    });
+    const h = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { runCommand, applyUpstreamPatches },
+    });
+    const r = await h.onEnable({ args: {}, runtimePlugins: [] });
+    expect(r.status).toBe('error');
+    if (r.status === 'error') {
+      expect(r.message).toMatch(/failed to apply upstream patch/);
+    }
+    // No marker written — enable did not complete successfully.
+    expect(existsSync(join(implStateDir, 'state.json'))).toBe(false);
+  });
+
+  it('M2 (WP1): re-applies upstream eval.py patches on re-enable so operators who enabled before the patch shipped still get it', async () => {
+    // Real (trimmed, unpatched) upstream eval.py fixture, committed to a
+    // fresh git repo — same fixture the 'applyUpstreamPatches' describe
+    // block below exercises directly.
+    const repoDir = join(implStateDir, 'upstream');
+    mkdirSync(join(repoDir, 'scripts'), { recursive: true });
+    const fixture = readFileSync(
+      join(__dirname, 'fixtures', 'eval.py'),
+      'utf8',
+    );
+    writeFileSync(join(repoDir, 'scripts', 'eval.py'), fixture);
+    execFileSync('git', ['init', '-q'], { cwd: repoDir });
+    execFileSync('git', ['config', 'user.email', 'test@test.local'], { cwd: repoDir });
+    execFileSync('git', ['config', 'user.name', 'test'], { cwd: repoDir });
+    execFileSync('git', ['add', '-A'], { cwd: repoDir });
+    execFileSync('git', ['commit', '-q', '-m', 'unpatched upstream fixture'], { cwd: repoDir });
+
+    // Simulate an operator who ran `onEnable` before this patch existed:
+    // the marker is present and the repo exists, but eval.py is unpatched.
+    writeFileSync(
+      join(implStateDir, 'state.json'),
+      JSON.stringify({
+        schemaVersion: 'swe-rebench-v2-evaluator-state.v1',
+        enabled: true,
+        enabledAt: '2026-05-07T00:00:00Z',
+        upstreamRepoDir: repoDir,
+      }),
+    );
+
+    // Every git/docker/python invocation is a no-op against the real fixture
+    // repo (exitCode 0); the WP1 guarantee is that `applyUpstreamPatches` (run
+    // for real here, not stubbed) patches eval.py on this re-enable. next's
+    // enable path re-runs the self-test and the patch step unconditionally, so
+    // the patch is applied without a separate already-enabled fast path.
+    const runCommand = makeRunCommand(() => ({ exitCode: 0 }));
+    const h = new SweRebenchV2EvaluatorHarness({
+      implStateDir,
+      _testDeps: { runCommand },
+    });
+    const r = await h.onEnable({ args: {}, runtimePlugins: [] });
+    expect(r.status).toBe('ready');
+
+    const evalPy = readFileSync(join(repoDir, 'scripts', 'eval.py'), 'utf8');
+    expect(evalPy).toContain('"passed_actual": sorted(passed_actual)');
+    expect(evalPy).toContain('"failed_actual": sorted(failed_actual)');
+  });
+
   it('surfaces a clone failure as status=error', async () => {
     const runCommand = makeRunCommand((bin, args) => {
       if (bin === 'docker' || bin === 'python3') return { exitCode: 0 };
@@ -637,6 +722,65 @@ describe('SweRebenchV2EvaluatorHarness — onEnable', () => {
     if (r.status === 'error') {
       expect(r.message).toMatch(/git clone failed/);
     }
+  });
+});
+
+describe('applyUpstreamPatches', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = makeImplStateDir();
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  /**
+   * A tmp git repo seeded with `fixtures/eval.py` — the real (trimmed,
+   * unpatched) SWE-rebench-V2 `scripts/eval.py` as cloned by `onEnable`
+   * today, committed as-is. This exercises `git apply --check --reverse`
+   * against genuine upstream content rather than a synthetic stand-in.
+   */
+  function cloneFixtureUpstream(): string {
+    const repoDir = join(dir, 'upstream');
+    mkdirSync(join(repoDir, 'scripts'), { recursive: true });
+    const fixture = readFileSync(
+      join(__dirname, 'fixtures', 'eval.py'),
+      'utf8',
+    );
+    writeFileSync(join(repoDir, 'scripts', 'eval.py'), fixture);
+    execFileSync('git', ['init', '-q'], { cwd: repoDir });
+    execFileSync('git', ['config', 'user.email', 'test@test.local'], { cwd: repoDir });
+    execFileSync('git', ['config', 'user.name', 'test'], { cwd: repoDir });
+    execFileSync('git', ['add', '-A'], { cwd: repoDir });
+    execFileSync('git', ['commit', '-q', '-m', 'unpatched upstream fixture'], { cwd: repoDir });
+    return repoDir;
+  }
+
+  it('applies the passed_actual patch to upstream eval.py, idempotently', () => {
+    const repoDir = cloneFixtureUpstream();
+    applyUpstreamPatches(repoDir);
+    const evalPy = readFileSync(join(repoDir, 'scripts', 'eval.py'), 'utf8');
+    expect(evalPy).toContain('"passed_actual": sorted(passed_actual)');
+    expect(evalPy).toContain('"failed_actual": sorted(failed_actual)');
+    // Second run is a no-op (already-applied, detected via reverse-check).
+    expect(() => applyUpstreamPatches(repoDir)).not.toThrow();
+  });
+
+  it('no-ops when the fix is already present (upstream shipped it natively)', () => {
+    const repoDir = cloneFixtureUpstream();
+    applyUpstreamPatches(repoDir); // apply once
+    const afterFirstApply = readFileSync(join(repoDir, 'scripts', 'eval.py'), 'utf8');
+    applyUpstreamPatches(repoDir); // simulate a second onEnable against the same clone
+    const afterSecondApply = readFileSync(join(repoDir, 'scripts', 'eval.py'), 'utf8');
+    expect(afterSecondApply).toBe(afterFirstApply);
+  });
+
+  it('throws when the patch neither applies nor is already applied', () => {
+    const repoDir = join(dir, 'upstream');
+    mkdirSync(join(repoDir, 'scripts'), { recursive: true });
+    // scripts/eval.py missing entirely — patch can't match any context.
+    execFileSync('git', ['init', '-q'], { cwd: repoDir });
+    expect(() => applyUpstreamPatches(repoDir)).toThrow(/failed to apply upstream patch/);
   });
 });
 

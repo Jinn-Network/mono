@@ -334,16 +334,20 @@ def test_session_end_without_capture_prints_nothing(isolated_home, capsys):
 # ── Consent flow ─────────────────────────────────────────────────────────────
 
 def test_consent_flow_bare_enter_defaults_to_decline(isolated_home):
-    answers = iter(["", "y", ""])  # explainer -> decline confirm -> node stub skip
+    # explainer -> decline confirm -> mineable-trace tier1 skip -> tier2 skip -> node stub skip
+    answers = iter(["", "y", "", "", ""])
     printed: list[str] = []
     status = consent.run_consent_flow(lambda _: next(answers), printed.append)
     assert status == consent.DECLINED
     assert consent.capture_enabled() is False
     assert any("Contribution is OFF" in line for line in printed)
+    assert consent.mineable_trace_enabled() is False
+    assert consent.load_state()["publishMinedTasksConsent"] is False
 
 
 def test_consent_flow_accept_requires_deliberate_confirm(isolated_home):
-    answers = iter(["a", "n", "a", "y", ""])  # accept -> back out -> accept -> confirm -> skip stub
+    # accept -> back out -> accept -> confirm -> mineable-trace tier1 skip -> tier2 skip -> skip stub
+    answers = iter(["a", "n", "a", "y", "", "", ""])
     printed: list[str] = []
     status = consent.run_consent_flow(lambda _: next(answers), printed.append)
     assert status == consent.ACCEPTED

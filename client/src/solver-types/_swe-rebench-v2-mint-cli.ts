@@ -463,6 +463,9 @@ export async function runMintTasksPipeline(input: MintTasksInput): Promise<MintT
       hf_dataset: c.poolTask.hf_dataset,
       hf_split: c.poolTask.hf_split,
       mintedAt: new Date().toISOString(),
+      // Explicit per-entry marker (D2 tier-2): flipped to true only by
+      // setPublishedArtifact below, and only for publish-path candidates.
+      published: false,
       goldPatch: c.goldPatch,
     };
     await input.mintedStore.record(c.poolTask.instance_id, mintedEntry, EVAL_SEMANTICS_VERSION);
@@ -478,13 +481,18 @@ export async function runMintTasksPipeline(input: MintTasksInput): Promise<MintT
   const publishCandidates = input.candidates.filter((c) => c.publish !== false && admitted.includes(c.poolTask.instance_id));
   const v1PublishCandidates = publishCandidates.filter((candidate) => candidate.environment === undefined);
   const v2PublishCandidates = publishCandidates.filter((candidate) => candidate.environment !== undefined);
+  // includeIds: the candidates being published right now are still marked
+  // published:false at export time (the marker flips only after a successful
+  // upload via setPublishedArtifact); everything else marked false stays out
+  // of the published artifact (D2 tier-2 gate).
   if (v1PublishCandidates.length > 0) {
-    const artifact = await input.mintedStore.exportArtifact(EVAL_SEMANTICS_VERSION);
+    const v1PublishIds = v1PublishCandidates.map((c) => c.poolTask.instance_id);
+    const artifact = await input.mintedStore.exportArtifact(EVAL_SEMANTICS_VERSION, { includeIds: v1PublishIds });
     const artifactCid = await uploadToIpfs(input.ipfsRegistryUrl, artifact);
     await input.mintedStore.setPublishedArtifact(
       EVAL_SEMANTICS_VERSION,
       artifactCid,
-      v1PublishCandidates.map((c) => c.poolTask.instance_id),
+      v1PublishIds,
       { rowHashVersion: 1 },
     );
     await input.progress?.onIpfsPublished?.({
@@ -495,12 +503,13 @@ export async function runMintTasksPipeline(input: MintTasksInput): Promise<MintT
     artifactCids[1] = mintedIpfsDatasetCid(artifactCid);
   }
   if (v2PublishCandidates.length > 0) {
-    const artifact = await input.mintedStore.exportArtifactV2(EVAL_SEMANTICS_VERSION);
+    const v2PublishIds = v2PublishCandidates.map((c) => c.poolTask.instance_id);
+    const artifact = await input.mintedStore.exportArtifactV2(EVAL_SEMANTICS_VERSION, { includeIds: v2PublishIds });
     const artifactCid = await uploadToIpfs(input.ipfsRegistryUrl, artifact);
     await input.mintedStore.setPublishedArtifact(
       EVAL_SEMANTICS_VERSION,
       artifactCid,
-      v2PublishCandidates.map((c) => c.poolTask.instance_id),
+      v2PublishIds,
       { rowHashVersion: 2 },
     );
     await input.progress?.onIpfsPublished?.({

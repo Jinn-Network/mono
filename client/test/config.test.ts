@@ -1053,6 +1053,82 @@ describe('harness.mode config field', () => {
   });
 });
 
+describe('mineableTraces config field (task-creator spec §10, D2)', () => {
+  afterEach(() => {
+    delete process.env['JINN_MINEABLE_CONSENT'];
+    delete process.env['JINN_MINEABLE_PUBLISH_CONSENT'];
+  });
+
+  it('defaults to off / declined (fail-closed)', () => {
+    const config = loadConfig();
+    expect(config.mineableTraces?.consent).toBe('off');
+    expect(config.mineableTraces?.publishConsent).toBe(false);
+  });
+
+  it('accepts consent: retain_local and publishConsent: true from a config file', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-config-'));
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(
+      configPath,
+      JSON.stringify({ mineableTraces: { consent: 'retain_local', publishConsent: true } }, null, 2),
+    );
+    const config = loadConfig(configPath);
+    expect(config.mineableTraces?.consent).toBe('retain_local');
+    expect(config.mineableTraces?.publishConsent).toBe(true);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('rejects invalid consent values', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-config-'));
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify({ mineableTraces: { consent: 'on' } }, null, 2));
+    expect(() => loadConfig(configPath)).toThrow();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('JINN_MINEABLE_CONSENT and JINN_MINEABLE_PUBLISH_CONSENT env vars override the file', async () => {
+    process.env['JINN_MINEABLE_CONSENT'] = 'retain_local';
+    process.env['JINN_MINEABLE_PUBLISH_CONSENT'] = 'true';
+    const config = loadConfig();
+    expect(config.mineableTraces?.consent).toBe('retain_local');
+    expect(config.mineableTraces?.publishConsent).toBe(true);
+  });
+});
+
+describe('harvest.sources config field (Task 9)', () => {
+  afterEach(() => {
+    delete process.env['JINN_HARVEST_SOURCES'];
+  });
+
+  it('defaults to ["commits"]', () => {
+    const config = loadConfig();
+    expect(config.harvest.sources).toEqual(['commits']);
+  });
+
+  it('accepts sources: ["commits", "sessions"] from a config file', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-config-'));
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify({ harvest: { sources: ['commits', 'sessions'] } }, null, 2));
+    const config = loadConfig(configPath);
+    expect(config.harvest.sources).toEqual(['commits', 'sessions']);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('rejects invalid source values', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-config-'));
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify({ harvest: { sources: ['commits', 'bogus'] } }, null, 2));
+    expect(() => loadConfig(configPath)).toThrow();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('JINN_HARVEST_SOURCES env var overrides the file (comma-separated)', () => {
+    process.env['JINN_HARVEST_SOURCES'] = 'commits,sessions';
+    const config = loadConfig();
+    expect(config.harvest.sources).toEqual(['commits', 'sessions']);
+  });
+});
+
 describe('operator config (jinn-mono-vy37.1.3)', () => {
   const dirs: string[] = [];
   const ENV_KEYS = [

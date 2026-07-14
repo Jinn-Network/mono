@@ -1108,6 +1108,15 @@ export async function startDaemon(
         implStateDirRoot: join(fixture.implStateRoot, `${label}-impl-state`),
       },
       implRegistry,
+      // Production (main.ts:2654) always wires operatorSafeAddress into the
+      // engine so the synthetic-task claim guard (syntheticClaimBlocked,
+      // engine.ts:1134) can compare `task.eligibility.syntheticProvenance`
+      // against the running daemon's own Safe. This test rig previously never
+      // set it, which silently no-oped that guard for every e2e daemon built
+      // here. Setting it unconditionally is safe for existing consumers: the
+      // guard is a no-op unless a task carries `syntheticProvenance` (only
+      // task-creator-marketplace.ts does).
+      operatorSafeAddress: operator.safeAddress,
       // Optional registry: undefined for the prediction consumer (no change);
       // the jinn-repo driver passes one so the engine resolves the
       // jinn-repo-runtime bundled plugin into solverPluginRoots and the solver
@@ -1195,6 +1204,16 @@ export async function startSweRebenchSolverDaemon(
       v3Env,
       ipfsRegistryUrl,
       { instanceLabel: opts.instanceLabel ?? 'op-a' },
+      // HarnessRegistry.findFor() checks the configured `default` (claude-code,
+      // DEFAULT_HARNESS) BEFORE falling through to first-match-by-supports() —
+      // and LearnerHarness.supports() returns true for every solverType except
+      // prediction.v1/prediction.apy.v0, so without this override the daemon
+      // would dispatch swe-rebench-v2.v1 restoration to a real `claude` CLI
+      // subprocess instead of the env-gated StubHarness, defeating the whole
+      // point of this helper. `harness:stub` is StubHarness.name (stub.ts) —
+      // its own supports() hardcodes solverType === 'swe-rebench-v2.v1', so
+      // this mapping is unconditionally correct for every caller.
+      { 'swe-rebench-v2.v1': 'harness:stub' },
     );
   } finally {
     // The stub harness is captured inside buildHarnesses synchronously during

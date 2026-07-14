@@ -56,16 +56,20 @@ Add to `~/.jinn-client/config.json`:
         "path": "/path/to/your/clone",
         "repo": "owner/repo"
       }
-    ]
+    ],
+    "sources": ["commits"]
   }
 }
 ```
+
+`sources` defaults to `["commits"]`; set `["commits", "sessions"]` (or `["sessions"]` alone) to also mine locally-captured task-creator sessions from the mineable-trace store (needs `mineableTraces.consent: "retain_local"`).
 
 Or via env:
 
 ```bash
 export JINN_HARVEST_ENABLED=1
 export JINN_HARVEST_REPOS=/path/to/clone:owner/repo
+export JINN_HARVEST_SOURCES=commits,sessions
 ```
 
 ## Run

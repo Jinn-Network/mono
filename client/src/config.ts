@@ -372,6 +372,24 @@ export const JinnConfigSchema = z.object({
     .default({ mode: 'train' }),
 
   /**
+   * Mineable-trace retention consent (task-creator spec §10, decision D2).
+   * Two independent, deliberate opt-in tiers:
+   *   - `consent` ('off' default) — retain contract fields (repo,
+   *     commit, diff, test outcomes) locally for mining. The store is
+   *     fail-closed: the daemon only constructs it when this is
+   *     'retain_local'.
+   *   - `publishConsent` (false default) — even with tier-1 on, publishing
+   *     a mined task as public work needs its own separate approval.
+   * Env: JINN_MINEABLE_CONSENT, JINN_MINEABLE_PUBLISH_CONSENT.
+   */
+  mineableTraces: z
+    .object({
+      consent: z.enum(['off', 'retain_local']).default('off'),
+      publishConsent: z.boolean().default(false),
+    })
+    .default({ consent: 'off', publishConsent: false }),
+
+  /**
    * Manifest-keyed joined SolverNets.
    *
    * Spec: spec/2026-05-05-solvernet-creation-and-launch.md §12.
@@ -607,6 +625,12 @@ export const JinnConfigSchema = z.object({
   /**
    * Commit-echo harvest loop (task-creator v0). When enabled, the daemon scans
    * configured local git clones for fix-shaped commits and admits minted tasks.
+   *
+   * `sources` selects which harvest sources the loop mines each tick — absent
+   * ⇒ `['commits']`, so existing configs behave identically. `'sessions'`
+   * mines locally-captured task-creator sessions (needs `mineableTraces.consent
+   * === 'retain_local'`, see `mineableTraces` above). Env: JINN_HARVEST_SOURCES
+   * (comma-separated).
    */
   harvest: z
     .object({
@@ -629,6 +653,7 @@ export const JinnConfigSchema = z.object({
           }),
         )
         .default([]),
+      sources: z.array(z.enum(['commits', 'sessions'])).default(['commits']),
     })
     .default({
       enabled: false,
@@ -636,6 +661,7 @@ export const JinnConfigSchema = z.object({
       limitPerRepo: 3,
       publish: true,
       repos: [],
+      sources: ['commits'],
     }),
 });
 
@@ -1010,6 +1036,23 @@ export function loadConfig(configPath?: string): JinnConfig {
       intervalMs: parseInt(env['JINN_HARVEST_INTERVAL_MS'], 10),
     };
   }
+  if (env['JINN_HARVEST_SOURCES']) {
+    const sources = env['JINN_HARVEST_SOURCES'].split(',').map((s) => s.trim()).filter(Boolean);
+    merged.harvest = {
+      ...(typeof merged.harvest === 'object' && merged.harvest ? merged.harvest : {}),
+      sources,
+    };
+  }
+  if (env['JINN_MINEABLE_CONSENT'] !== undefined || env['JINN_MINEABLE_PUBLISH_CONSENT'] !== undefined) {
+    merged.mineableTraces = {
+      ...(typeof merged.mineableTraces === 'object' && merged.mineableTraces ? merged.mineableTraces : {}),
+      ...(env['JINN_MINEABLE_CONSENT'] !== undefined ? { consent: env['JINN_MINEABLE_CONSENT'] } : {}),
+      ...(env['JINN_MINEABLE_PUBLISH_CONSENT'] !== undefined
+        ? { publishConsent: ['1', 'true', 'yes'].includes(env['JINN_MINEABLE_PUBLISH_CONSENT'].trim().toLowerCase()) }
+        : {}),
+    };
+  }
+
   // Legacy `JINN_PREDICTION_V1_*` env vars are no longer recognised. Their
   // values now live in the launched-record's generator-config block per
   // spec/2026-05-05-solvernet-creation-and-launch.md (Decision 5 + Task 14)

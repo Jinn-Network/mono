@@ -18,7 +18,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { spawn, type SpawnOptions } from 'node:child_process';
+import { spawn, spawnSync, type SpawnOptions } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -295,6 +295,8 @@ export interface SweRebenchV2EvaluatorHarnessOptions {
    */
   _testDeps?: {
     runCommand?: typeof runCommand;
+    /** Override for `onEnable`'s upstream-patch step. Defaults to {@link applyUpstreamPatches}. */
+    applyUpstreamPatches?: typeof applyUpstreamPatches;
     fetcher?: HfFetcher;
     /**
      * Per-call runner override. When set, used directly on every `run()` —
@@ -609,6 +611,13 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
     // Never trust the marker to select a checkout: a stale or corrupt marker
     // must be repairable without allowing `checkout --force` / `reset --hard`
     // to run in another repository.
+    //
+    // WP1 (#1646): operators who enabled before a given upstream patch shipped
+    // must still receive it. next's enable path already re-runs the self-test
+    // and `applyUpstreamPatches` unconditionally on every enable (the guarded
+    // block below only skips the clone/checkout when the marker is already
+    // current), so the patches are re-applied idempotently without a separate
+    // already-enabled fast-path early-return.
     const upstreamRepoDir = join(this.implStateDir, 'upstream');
 
     const run = this.deps.runCommand ?? runCommand;
@@ -726,6 +735,17 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
       };
     }
 
+    // Apply Jinn's upstream eval.py patches (idempotent — see applyUpstreamPatches).
+    try {
+      (this.deps.applyUpstreamPatches ?? applyUpstreamPatches)(upstreamRepoDir);
+    } catch (err) {
+      return {
+        status: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      };
+    }
+
+    // Persist marker.
     const state: EnabledState = {
       schemaVersion: 'swe-rebench-v2-evaluator-state.v2',
       enabled: true,
@@ -1413,6 +1433,48 @@ async function runCommand(
       resolve({ exitCode: code ?? 1, stdout, stderr });
     });
   });
+}
+
+/**
+ * Upstream `SWE-rebench/SWE-rebench-V2` ships `scripts/eval.py` with a
+ * `build_report_item()` that never surfaces `passed_actual`/`failed_actual`
+ * on the report item it returns, even though it already derives
+ * `passed_actual` internally to compute `from_fail_to_pass`. Jinn's
+ * `PythonEvalRunner` (`eval-runner.ts`) reads exactly those two keys off
+ * each report item to derive empirical F2P/P2P — without this patch they
+ * are always empty, silently breaking empirical mining. See
+ * `docs/handoffs/2026-07-10-task-creator-rung1-plumbing-handoff.md` ("Bugs
+ * fixed during verification" #1) and `upstream-patches/passed-actual.patch`.
+ */
+const UPSTREAM_PATCHES = ['passed-actual.patch'];
+
+/**
+ * Apply Jinn's upstream `eval.py` patches to a freshly-cloned (or
+ * previously-cloned) `SWE-rebench-V2` checkout, idempotently. Each patch is
+ * checked with `git apply --check --reverse` first — if it reverse-applies
+ * cleanly the fix is already present (either from a prior run of this
+ * function, or because upstream has since shipped it natively) and the
+ * patch is skipped rather than re-applied.
+ *
+ * Throws if a patch is neither already applied nor cleanly appliable, so
+ * `onEnable` can surface it as a setup error instead of silently shipping a
+ * harness that can't derive empirical F2P/P2P.
+ */
+export function applyUpstreamPatches(upstreamRepoDir: string): void {
+  const patchesDir = join(dirname(fileURLToPath(import.meta.url)), 'upstream-patches');
+  for (const patchFile of UPSTREAM_PATCHES) {
+    const patchPath = join(patchesDir, patchFile);
+    const reversed = spawnSync('git', ['apply', '--check', '--reverse', patchPath], {
+      cwd: upstreamRepoDir,
+    });
+    if (reversed.status === 0) continue; // already applied — no-op.
+    const applied = spawnSync('git', ['apply', patchPath], { cwd: upstreamRepoDir });
+    if (applied.status !== 0) {
+      throw new Error(
+        `failed to apply upstream patch ${patchFile} to ${upstreamRepoDir}: ${applied.stderr?.toString() ?? ''}`,
+      );
+    }
+  }
 }
 
 /**

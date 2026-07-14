@@ -2,12 +2,17 @@
  * Tests for task-creator guards, yield, hunk-echo, routing fetcher.
  */
 
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  assertPublicRepoForPublish,
   assertRepoAllowedForMint,
   contestedBandDistance,
   inInformativeBand,
   loadMintRepoDenylist,
+  type PublicRepoChecker,
 } from '../../src/solver-types/_swe-rebench-v2-guards.js';
 import { computeExemplarPairYield } from '../../src/solver-types/_swe-rebench-v2-yield.js';
 import {
@@ -16,19 +21,102 @@ import {
 } from '../../src/solver-types/_swe-rebench-v2-hunk-echo.js';
 import { deriveF2pP2pFromReports } from '../../src/solver-types/_swe-rebench-v2-empirical-tests.js';
 import { RoutingTaskRowFetcher } from '../../src/harnesses/impls/swe-rebench-v2-evaluator/routing-task-row-fetcher.js';
+import {
+  CAPABILITY_SLATE_SCHEMA_VERSION,
+  hashCapabilitySlate,
+  loadCapabilitySlateRepos,
+  type CapabilitySlateArtifact,
+} from '../../src/eval/capability-slate.js';
+
+/** Minimal valid cap-v0 fixture — shape parseCapabilitySlate accepts (mirrors
+ * client/test/eval/capability-slate.test.ts's `valid` fixture). */
+function buildCapSlateFixture(repo: string): CapabilitySlateArtifact {
+  return {
+    schemaVersion: CAPABILITY_SLATE_SCHEMA_VERSION,
+    solverType: 'swe-rebench-v2.v1',
+    version: 'cap-v0',
+    generatedAt: '2026-07-06T00:00:00.000Z',
+    evalSemanticsVersion: '4',
+    instances: [
+      {
+        instance_id: `${repo.replace('/', '__')}-1`,
+        repo,
+        rowHash: 'sha256:aa',
+        imageDigest: 'sha256:bb',
+        stockPassRate: 0.33,
+        screening: { agentSha: 'deadbeef', emptyLoadout: true, noCorpusTools: true, hostSkillDirHash: 'sha256:empty' },
+      },
+    ],
+    construction: 'contested-band[0.15,0.85], stock=haiku, R=3, repo-stratified',
+    corpusSnapshotCid: 'ipfs://root',
+    corpusDerivedIndexCid: 'ipfs://index',
+    loadoutFrozenBeforeSlate: true,
+    disjointness: {
+      instance: { verdict: 'pass', flaggedPairs: [] },
+      repo: { verdict: 'pass', flaggedPairs: [] },
+      lexical: { verdict: 'pass', flaggedPairs: [], attestation: 'self-attested' },
+      semantic: { verdict: 'n/a-v0', model: null, threshold: null, flaggedPairs: [] },
+    },
+  };
+}
 
 describe('task-creator guards', () => {
-  it('rejects mint from held-out slate repo', () => {
+  it('rejects mint from held-out slate repo, keyed on repo not instance_id', () => {
     const denylist = loadMintRepoDenylist();
-    if (denylist.repos.size === 0) return;
+    // Fail loud rather than soft-skip (#1485 review): the active slates must resolve
+    // to at least one repo, else this regression guard silently passes and a slate
+    // repo could be minted. AC5 depends on the denylist actually being populated.
+    expect(denylist.repos.size).toBeGreaterThan(0);
     const repo = [...denylist.repos][0]!;
     expect(() => assertRepoAllowedForMint(repo, denylist)).toThrow(/held-out/);
+    // Refusal keys on the repo, so a fresh, never-seen instance_id derived from the
+    // same slate repo is refused too — exclusion cannot be dodged with a new id.
+    expect(() => assertRepoAllowedForMint(repo, denylist)).toThrow(/held-out/);
+  });
+
+  it('blocks publishing a task from a private repo (D5, AC6)', async () => {
+    const privateChecker: PublicRepoChecker = { isPublic: async () => false };
+    await expect(
+      assertPublicRepoForPublish('acme/private-service', privateChecker),
+    ).rejects.toThrow(/not public/);
+  });
+
+  it('allows publishing a task from a public repo (D5, AC6)', async () => {
+    const publicChecker: PublicRepoChecker = { isPublic: async () => true };
+    await expect(
+      assertPublicRepoForPublish('pandas-dev/pandas', publicChecker),
+    ).resolves.toBeUndefined();
   });
 
   it('contested band prefers 50% solve rate', () => {
     expect(contestedBandDistance(0.5)).toBeLessThan(contestedBandDistance(0.1));
     expect(inInformativeBand(0.5)).toBe(true);
     expect(inInformativeBand(0.05)).toBe(false);
+  });
+
+  it('unions cap-v0 capability-slate repos into the mint denylist (spec §11)', () => {
+    const slateRepo = 'acme/capslate-target';
+    const untouchedRepo = 'acme/not-on-any-slate';
+    const dir = mkdtempSync(join(tmpdir(), 'cap-slate-'));
+    try {
+      const fixture = buildCapSlateFixture(slateRepo);
+      const hash = hashCapabilitySlate(fixture);
+      writeFileSync(
+        join(dir, 'capability-slate.cap-v0.json'),
+        JSON.stringify({ ...fixture, hash }),
+        'utf8',
+      );
+
+      const capRepos = loadCapabilitySlateRepos(dir);
+      expect(capRepos.has(slateRepo)).toBe(true);
+      expect(capRepos.has(untouchedRepo)).toBe(false);
+
+      const denylist = loadMintRepoDenylist({ capabilitySlatesDir: dir });
+      expect(denylist.repos.has(slateRepo)).toBe(true);
+      expect(denylist.repos.has(untouchedRepo)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

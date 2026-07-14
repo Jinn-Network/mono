@@ -39,6 +39,10 @@ import { emitEvent } from '../observability/emit-event.js';
 import { recordLoopTick } from './loop-heartbeat.js';
 import { canonicalJson } from '../harnesses/engine/canonical-json.js';
 import { uploadToIpfs } from '../adapters/mech/ipfs.js';
+import { mineSessionEchoes } from '../solver-types/_swe-rebench-v2-session-echo.js';
+import type { MineableTraceStore } from '../solver-types/_swe-rebench-v2-mineable-store.js';
+
+export type HarvestSource = 'commits' | 'sessions';
 
 export interface HarvestRepoConfig {
   path: string;
@@ -62,6 +66,21 @@ export interface HarvestLoopConfig {
   isDockerAvailable?: () => boolean;
   store?: Store;
   now?: () => number;
+  /**
+   * Which harvest sources this tick mines. Absent ⇒ `['commits']` — existing
+   * configs behave byte-identically. `'sessions'` mines locally-captured
+   * task-creator sessions via {@link mineSessionEchoes} (Task 8); it needs
+   * `mineableStore` set, otherwise that source is skipped (non-fatal).
+   */
+  sources?: HarvestSource[];
+  /** Mineable-trace store to drain when `sources` includes `'sessions'`.
+   *  Constructed only when the operator opted into `mineableTraces.consent
+   *  === 'retain_local'` — see `main.ts`. */
+  mineableStore?: MineableTraceStore;
+  /** Recording operator's Safe, stamped into session-echo provenance as
+   *  `sourceSolverSafe` so the operator's own claim on their own echo is
+   *  refused (spec §7). Same value as `minterSafe` in practice. */
+  operatorSafe?: string;
 }
 
 export interface HarvestTickResult {
@@ -161,7 +180,13 @@ async function publishBoundAdmission(args: {
   rowHashVersion: 2;
   mintDeps: HarvestMintDeps;
 }): Promise<string> {
-  const artifact = await args.mintDeps.mintedStore.exportArtifactV2(EVAL_SEMANTICS_VERSION);
+  // includeIds: the row we are publishing right now is still marked
+  // published:false at export time (the marker flips only after this
+  // setPublishedArtifact call), so it must be named to survive the tier-2
+  // publish gate in exportArtifactV2.
+  const artifact = await args.mintDeps.mintedStore.exportArtifactV2(EVAL_SEMANTICS_VERSION, {
+    includeIds: [args.instanceId],
+  });
   const artifactCid = await uploadToIpfs(args.mintDeps.ipfsRegistryUrl, artifact);
   await args.mintDeps.mintedStore.setPublishedArtifact(
     EVAL_SEMANTICS_VERSION,
@@ -173,6 +198,7 @@ async function publishBoundAdmission(args: {
 }
 
 export async function runHarvestTick(config: HarvestLoopConfig): Promise<HarvestTickResult> {
+  const sources = config.sources ?? ['commits'];
   const dockerOk = (config.isDockerAvailable ?? defaultDockerCheck)();
   if (!dockerOk) {
     return { discovered: 0, admitted: [], rejected: [], awaitingInput: [], quarantined: [], skipped: ['docker-unavailable'] };
@@ -190,7 +216,7 @@ export async function runHarvestTick(config: HarvestLoopConfig): Promise<Harvest
   const skipped: string[] = [];
   let discovered = 0;
 
-  for (const repoCfg of config.repos) {
+  for (const repoCfg of sources.includes('commits') ? config.repos : []) {
     const repoState = await harvestState.getRepo(repoCfg.repo);
     const snapshot = repoState?.lastScannedCommit ?? '';
     const gitDeps = createGitCommitEchoDeps(repoCfg as GitCommitEchoRepoConfig);
@@ -479,6 +505,26 @@ export async function runHarvestTick(config: HarvestLoopConfig): Promise<Harvest
         `infrastructure: ${error instanceof Error ? error.message : String(error)}`,
         tickNow ? { now: tickNow } : {},
       );
+    }
+  }
+
+  if (sources.includes('sessions')) {
+    if (config.mineableStore) {
+      const sessionsResult = await mineSessionEchoes({
+        ...config.mintDeps,
+        validatedStore,
+        minterSafe: config.minterSafe,
+        publish: config.publish,
+        mineableStore: config.mineableStore,
+        operatorSafe: config.operatorSafe,
+        pool,
+      });
+      discovered += sessionsResult.discovered;
+      admitted.push(...sessionsResult.admitted);
+      rejected.push(...sessionsResult.rejected);
+      skipped.push(...sessionsResult.skipped);
+    } else {
+      skipped.push('sessions-source-missing-mineable-store');
     }
   }
 

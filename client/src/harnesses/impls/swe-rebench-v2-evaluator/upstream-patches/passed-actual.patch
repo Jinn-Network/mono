@@ -1,0 +1,21 @@
+diff --git a/scripts/eval.py b/scripts/eval.py
+index 7176135..f9e95e1 100644
+--- a/scripts/eval.py
++++ b/scripts/eval.py
+@@ -369,6 +369,7 @@ def build_report_item(spec: dict, outcome: dict) -> dict:
+ 
+     result = outcome["result"]
+     passed_actual = set(result.get("passed_actual", []))
++    failed_actual = set(result.get("failed_actual", []))
+     from_fail_to_pass = sorted(passed_actual.intersection(fail_to_pass_expected))
+     failed_from_pass_to_pass = sorted(pass_to_pass_expected.difference(passed_actual))
+     return {
+@@ -378,6 +379,8 @@ def build_report_item(spec: dict, outcome: dict) -> dict:
+         "passed_match": result.get("passed_match", False),
+         "exit_code": result.get("exit_code"),
+         "log_path": result.get("log_path"),
++        "passed_actual": sorted(passed_actual),
++        "failed_actual": sorted(failed_actual),
+         "error": "",
+     }
+ 

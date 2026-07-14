@@ -284,7 +284,13 @@ describe('explicit v2 mint environment verifier', () => {
       expect(runner.runEval).toHaveBeenCalled();
       expect(result.rejected).toEqual([]);
       expect(result.admitted).toEqual([source.instanceId]);
-      expect((await new MintedPoolStore({ stateDir: dir }).exportArtifactV2('4')).rows[0]).toMatchObject({
+      // The row is recorded locally but unpublished (publish:false ⇒ published
+      // marker is false, D2 tier-2). Inspecting it via exportArtifactV2 requires
+      // naming it in includeIds, exactly as the publish path does for the batch
+      // it is publishing right now.
+      expect(
+        (await new MintedPoolStore({ stateDir: dir }).exportArtifactV2('4', { includeIds: [source.instanceId] })).rows[0],
+      ).toMatchObject({
         FAIL_TO_PASS: expectedF2p,
         PASS_TO_PASS: expectedP2p,
       });
@@ -525,7 +531,11 @@ describe('explicit v2 mint environment verifier', () => {
       expect(result.admitted).toEqual([poolTask.instance_id]);
       expect(result.rejected).toEqual([]);
       expect(uploadReceipt).not.toHaveBeenCalled();
-      expect((await mintedStore.exportArtifactV2('4')).rows[0]).toMatchObject({
+      // Unpublished local row (publish:false) — name it in includeIds to inspect
+      // it through the tier-2 publish gate (D2).
+      expect(
+        (await mintedStore.exportArtifactV2('4', { includeIds: [poolTask.instance_id] })).rows[0],
+      ).toMatchObject({
         FAIL_TO_PASS: ['regression'], PASS_TO_PASS: ['unaffected'], test_patch: poolTask.test_patch,
         differentialAdmission: { receiptCid: 'QmYwAPJzv5CZsnAzt8auVTLF9rYx8S1R52eX5GJH2RGfZp' },
       });

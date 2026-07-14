@@ -282,6 +282,27 @@ export interface SetupHaltedInfo {
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
+/**
+ * #1649: a loud boot warning when `harvest.sources` includes `'sessions'` but
+ * mineable-trace retention is off. Without tier-1 consent the mineable store is
+ * never constructed, so the sessions source is silently skipped every tick;
+ * this surfaces the misconfiguration once, at boot, instead of leaving the
+ * operator to wonder why no sessions are ever mined.
+ */
+export function warnSessionsWithoutConsent(
+  config: { harvest?: { sources?: string[] }; mineableTraces?: { consent?: string } },
+): void {
+  if (
+    config.harvest?.sources?.includes('sessions') &&
+    config.mineableTraces?.consent !== 'retain_local'
+  ) {
+    console.warn(
+      "[main] harvest.sources includes 'sessions' but mineableTraces.consent is 'off' — " +
+        "no sessions will be mined; set mineableTraces.consent='retain_local' to enable (#1649)",
+    );
+  }
+}
+
 export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void> {
   // Issue #909: chdir to a stable directory before spawning any child process.
   // `jinn run` inherits the launch shell's CWD; when daemonised from an
@@ -1588,6 +1609,27 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     evictionRecovery,
   };
 
+  // ── Mineable-trace store (task-creator spec §10, D2 tier-1) ────────────────
+  //
+  // Only constructed when the operator explicitly opted into local trace
+  // retention (config.mineableTraces.consent === 'retain_local'; default is
+  // 'off'). The store itself is fail-closed (MineableTraceStore.append throws
+  // on any other consent value) — gating construction here means a
+  // never-opted-in operator never even has the file created.
+  let mineableStore: import('./solver-types/_swe-rebench-v2-mineable-store.js').MineableTraceStore | undefined;
+  if (config.mineableTraces.consent === 'retain_local') {
+    const { MineableTraceStore } = await import('./solver-types/_swe-rebench-v2-mineable-store.js');
+    mineableStore = new MineableTraceStore({
+      stateDir: join(homedir(), '.jinn-client', 'mineable'),
+    });
+    console.log(
+      `[main] mineable-trace retention: ON (local only) — publishConsent=${config.mineableTraces.publishConsent}`,
+    );
+  } else {
+    console.log('[main] mineable-trace retention: OFF (default) — set mineableTraces.consent to enable');
+  }
+  warnSessionsWithoutConsent(config);
+
   // ── IdentityPublisher (jinn-mono-3zk) ───────────────────────────────────────
   //
   // When the bootstrap has minted an ERC-8004 IdentityRegistry NFT for the
@@ -1982,10 +2024,18 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   }
 
   let harvestLoopConfig: import('./daemon/harvest-loop.js').HarvestLoopConfig | undefined;
-  if (config.harvest.enabled && config.harvest.intervalMs > 0 && config.harvest.repos.length > 0) {
+  const harvestMinesSessions = config.harvest.sources.includes('sessions');
+  if (
+    config.harvest.enabled &&
+    config.harvest.intervalMs > 0 &&
+    (config.harvest.repos.length > 0 || harvestMinesSessions)
+  ) {
     const { resolveHarvestRepoConfigs } = await import('./daemon/harvest-loop.js');
     const harvestRepos = await resolveHarvestRepoConfigs(config.harvest.repos);
-    if (harvestRepos.length > 0) {
+    // A sessions-only operator legitimately has zero repos — the commit
+    // walker is then a no-op (unchanged), but the loop still needs to build
+    // below so the session-echo miner can run.
+    if (harvestRepos.length > 0 || harvestMinesSessions) {
       const { readEnabledState, defaultSweRebenchV2EvaluatorImplStateDir } =
         await import('./harnesses/impls/swe-rebench-v2-evaluator/harness.js');
       const { existsSync } = await import('node:fs');
@@ -2009,6 +2059,14 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           limitPerRepo: config.harvest.limitPerRepo,
           publish: config.harvest.publish,
           minterSafe: safeAddress,
+          sources: config.harvest.sources,
+          // Reuse the same mineable-trace store instance Task 7 constructs
+          // above (gated on mineableTraces.consent === 'retain_local'), not
+          // a second store pointing elsewhere. Undefined when the operator
+          // hasn't opted into tier-1 retention — the loop then skips the
+          // 'sessions' source (non-fatal) rather than crashing.
+          mineableStore,
+          operatorSafe: safeAddress,
           mintDeps: {
             stateDir: harvestStateDir,
             ipfsRegistryUrl: config.ipfsRegistryUrl,
@@ -2024,7 +2082,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           },
         };
         console.log(
-          `[main] harvest loop enabled: ${harvestRepos.length} repo(s), interval=${config.harvest.intervalMs}ms`,
+          `[main] harvest loop enabled: ${harvestRepos.length} repo(s), sources=${config.harvest.sources.join(',')}, interval=${config.harvest.intervalMs}ms`,
         );
       }
     }
@@ -2118,6 +2176,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // Share the one maintained scrub pipeline (incl. optional ML PII) so task
       // trajectories and captures are scrubbed by the same stack before publish.
       scrubPipeline: sellerScrubPipeline,
+      // Task-creator spec §10 (D2): absent unless the operator opted into
+      // tier-1 local retention above.
+      mineableStore,
+      mineablePublishConsent: config.mineableTraces.publishConsent,
     },
     balanceTopup:
       config.balanceTopupIntervalMs > 0

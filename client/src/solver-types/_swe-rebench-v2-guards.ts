@@ -4,6 +4,7 @@
  */
 
 import { loadActiveHeldOutSlateIds, ACTIVE_HELD_OUT_SLATE_VERSIONS } from './_swe-rebench-v2-held-out-slate.js';
+import { loadCapabilitySlateRepos } from '../eval/capability-slate.js';
 
 export const SYNTHETIC_POSTING_QUOTA_FRACTION = 0.25;
 export const INFORMATIVE_BAND_LOW = 0.1;
@@ -15,14 +16,15 @@ export interface RepoDenylist {
 
 const SWE_REBENCH_V2_SOLVER_TYPE = 'swe-rebench-v2.v1';
 
-/** Union of active held-out slate repos (§11). */
-export function loadMintRepoDenylist(): RepoDenylist {
+/** Union of active held-out slate repos and cap-v0 capability-slate repos (§11). */
+export function loadMintRepoDenylist(opts: { capabilitySlatesDir?: string } = {}): RepoDenylist {
   const slateIds = loadActiveHeldOutSlateIds(SWE_REBENCH_V2_SOLVER_TYPE, ACTIVE_HELD_OUT_SLATE_VERSIONS);
   const repos = new Set<string>();
   for (const id of slateIds) {
     const repo = repoFromSweInstanceId(id);
     if (repo) repos.add(repo);
   }
+  for (const repo of loadCapabilitySlateRepos(opts.capabilitySlatesDir)) repos.add(repo);
   return { repos };
 }
 

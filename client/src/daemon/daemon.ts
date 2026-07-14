@@ -134,8 +134,10 @@ export interface DaemonConfig {
   evictionCheck?: EvictionLoopConfig;
 
   /**
-   * Commit-echo harvest loop (task-creator v0). Scans configured local repos
-   * and admits minted tasks. Omitted or interval 0 → loop not started.
+   * Commit-echo + session-echo harvest loop (task-creator v0). Scans
+   * configured local repos and/or drains the mineable-trace store (per
+   * `harvest.sources`) and admits minted tasks. Omitted or interval 0 → loop
+   * not started.
    */
   harvest?: HarvestLoopConfig;
 
@@ -317,7 +319,11 @@ export class Daemon {
     if (config.evictionCheck && config.evictionCheck.intervalMs > 0) {
       this.evictionLoop = new EvictionLoop({ ...config.evictionCheck, jinnStore: this.store });
     }
-    if (config.harvest && config.harvest.intervalMs > 0 && config.harvest.repos.length > 0) {
+    if (
+      config.harvest &&
+      config.harvest.intervalMs > 0 &&
+      (config.harvest.repos.length > 0 || config.harvest.sources?.includes('sessions'))
+    ) {
       this.harvestLoop = new HarvestLoop({ ...config.harvest, store: this.store });
     }
     if (config.checkpoint && config.checkpoint.intervalMs > 0) {

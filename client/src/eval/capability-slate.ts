@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { canonicalJson } from '../harnesses/engine/canonical-json.js';
 
 export const CAPABILITY_SLATE_SCHEMA_VERSION = 'capability-slate.v1' as const;
@@ -134,6 +137,23 @@ function normalize(a: CapabilitySlateArtifact): CapabilitySlateArtifact {
 
 export function hashCapabilitySlate(a: CapabilitySlateArtifact): `sha256:${string}` {
   return `sha256:${createHash('sha256').update(canonicalJson(normalize(a))).digest('hex')}`;
+}
+
+/**
+ * Repos on the frozen cap-v0 capability slate (spec §11 — unioned into the
+ * task-creator mint denylist alongside the held-out slates). Unlike the
+ * held-out loader, a missing artifact is NOT an error here: the cap-v0 slate
+ * may legitimately not be frozen yet (§4.4), so this returns the empty set
+ * until it is. `slatesDirOverride` lets tests point at a fixture directory;
+ * production callers omit it and resolve the module-relative `slates/` dir
+ * (mirrors `_swe-rebench-v2-held-out-slate.ts`'s `slatesDir()`).
+ */
+export function loadCapabilitySlateRepos(slatesDirOverride?: string): Set<string> {
+  const dir = slatesDirOverride ?? join(dirname(fileURLToPath(import.meta.url)), 'slates');
+  const file = join(dir, 'capability-slate.cap-v0.json');
+  if (!existsSync(file)) return new Set();
+  const artifact = parseCapabilitySlate(JSON.parse(readFileSync(file, 'utf8')));
+  return new Set(artifact.instances.map((i) => i.repo));
 }
 
 /** Fail-loud disjointness invariant. A slate whose instance/repo/lexical/semantic
