@@ -15,6 +15,8 @@ describe('JinnSpanKindSchema', () => {
       'jinn.artifact.emit',
       'jinn.venue_io',
       'jinn.state_transition',
+      'jinn.agent_turn',
+      'jinn.tool_call',
     ]) {
       expect(() => JinnSpanKindSchema.parse(k)).not.toThrow();
     }

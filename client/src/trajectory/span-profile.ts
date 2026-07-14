@@ -31,6 +31,20 @@ export const SPAN_PROFILE: Record<JinnSpanKind, readonly string[]> = {
     'http.response.status_code',
   ],
   'jinn.state_transition': ['jinn.state.from', 'jinn.state.to'],
+  'jinn.agent_turn': [
+    'jinn.turn.role',
+    'message.content',
+    'jinn.transcript.sourceFormat',
+    'jinn.transcript.parser',
+    'jinn.transcript.parserVersion',
+  ],
+  'jinn.tool_call': [
+    'tool.name',
+    'tool.args',
+    'jinn.transcript.sourceFormat',
+    'jinn.transcript.parser',
+    'jinn.transcript.parserVersion',
+  ],
 };
 
 export type SpanProfileResult =

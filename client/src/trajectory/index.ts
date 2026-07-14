@@ -78,3 +78,7 @@ export { createLlmProxyApp, startLlmProxyServer } from './llm-proxy.js';
 export type { LlmProxyConfig, LlmProxyServer } from './llm-proxy.js';
 export { exchangeToSpanAttributes, emitLlmProxyExchange } from './llm-proxy-spans.js';
 export type { LlmProxyExchange, LlmProxyProvider } from './llm-proxy-spans.js';
+
+// Transcript-to-spans (DR-2026-07-14, #1473)
+export { getTranscriptSpanParser } from './transcript-to-spans/index.js';
+export type { TranscriptSpanParser, TranscriptSpanParserResolution } from './transcript-to-spans/types.js';

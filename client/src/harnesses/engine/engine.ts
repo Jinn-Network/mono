@@ -73,6 +73,7 @@ import {
 import type { ArtifactSource, Role } from '../../types/envelope.js';
 import type { Task } from '../../types/task.js';
 import { TrajectoryCollector, emitTrajectory } from '../../trajectory/index.js';
+import { addTranscriptSpans } from '../../trajectory/transcript-to-spans/index.js';
 import { buildScrubPipeline } from '../../trajectory/scrub/build.js';
 import type { ScrubPipeline } from '../../trajectory/scrub/pipeline.js';
 import { uploadToIpfs } from '../../adapters/mech/ipfs.js';
@@ -1489,6 +1490,27 @@ export class TaskEngine {
     // jinn.artifact.emit spans and attach producedBy back-refs (Task 16 forward
     // linkage). emitTrajectory is called AFTER upload so artifact spans are included.
     const collector = this.trajectoryCollectors.get(task.requestId);
+
+    // Parse the solve transcript into jinn.agent_turn / jinn.tool_call spans
+    // (DR-2026-07-14, #1473) BEFORE artifact-emit spans are added below, so the
+    // trajectory reads chronologically: the run's conversation, then its
+    // packaging. Degrade-never-fail: any resolution/parse error is caught and
+    // logged — a missing or unparseable transcript must never fail the solve.
+    // addTranscriptSpans is itself idempotent per collector (finding 3: pack()
+    // retries in place and the collector isn't cleared until DELIVERING, so a
+    // failure after this point would otherwise re-parse and duplicate spans
+    // on the next attempt).
+    if (collector) {
+      try {
+        await addTranscriptSpans(collector, task.implName, workingDir);
+      } catch (err) {
+        console.warn(
+          `[harness-engine] ${task.requestId}: transcript-to-spans parse failed (non-fatal):`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+
     const packagingDepsWithReq: PackagingDeps = {
       ...this.packagingDeps,
       requestId: task.requestId,

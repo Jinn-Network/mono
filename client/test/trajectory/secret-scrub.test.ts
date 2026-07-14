@@ -74,11 +74,66 @@ describe('scrubMcpArgs', () => {
     expect(redactedKeys).toEqual(['apiKey']);
   });
 
-  it('handles nested objects shallowly (only top-level keys)', () => {
-    // V1 is top-level only; nested is Plan F tightening.
+  it('recurses into nested objects — a nested secret-named key is redacted (#1473 finding 2)', () => {
+    // Tightened from the original V1 top-level-only behaviour: a low-entropy
+    // secret under a secret-named NESTED key (e.g. tool.args: { apiKey: ... })
+    // was surviving both the add-time and emit-time scrub layers. Deep
+    // recursion here closes the add-time side of that gap.
     const args = { outer: { apiKey: 'x' } };
-    const { redactedKeys } = scrubMcpArgs(args);
+    const { scrubbed, redactedKeys } = scrubMcpArgs(args);
+    expect((scrubbed.outer as Record<string, unknown>).apiKey).toBe('<redacted:outer.apiKey>');
+    expect(redactedKeys).toEqual(['outer.apiKey']);
+  });
+});
+
+describe('scrubAttributes deep recursion (#1473 finding 2)', () => {
+  it('redacts a secret-named key nested one level inside an object value', () => {
+    const attrs = { 'tool.args': { apiKey: 'hunter2', command: 'echo hi' } };
+    const { scrubbed, redactedKeys } = scrubAttributes(attrs);
+    const nested = scrubbed['tool.args'] as Record<string, unknown>;
+    expect(nested.apiKey).toBe('<redacted:tool.args.apiKey>');
+    expect(nested.command).toBe('echo hi');
+    expect(redactedKeys).toEqual(['tool.args.apiKey']);
+  });
+
+  it('redacts a secret-named key nested inside an array of objects', () => {
+    const attrs = { 'tool.args': { headers: [{ name: 'x' }, { token: 'abc123' }] } };
+    const { scrubbed, redactedKeys } = scrubAttributes(attrs);
+    const headers = (scrubbed['tool.args'] as Record<string, unknown>).headers as Array<
+      Record<string, unknown>
+    >;
+    expect(headers[0].name).toBe('x');
+    expect(headers[1].token).toBe('<redacted:tool.args.headers.token>');
+    expect(redactedKeys).toContain('tool.args.headers.token');
+  });
+
+  it('leaves non-secret nested keys untouched', () => {
+    const attrs = { 'tool.args': { symbol: 'BTC', nested: { notional: 100 } } };
+    const { scrubbed, redactedKeys } = scrubAttributes(attrs);
+    expect(scrubbed['tool.args']).toEqual({ symbol: 'BTC', nested: { notional: 100 } });
     expect(redactedKeys).toEqual([]);
+  });
+
+  it('redacts at arbitrary depth (object under an object under an object)', () => {
+    const attrs = { a: { b: { c: { secret: 'deep-value' } } } };
+    const { scrubbed, redactedKeys } = scrubAttributes(attrs);
+    expect(((scrubbed.a as Record<string, unknown>).b as Record<string, unknown>).c).toEqual({
+      secret: '<redacted:a.b.c.secret>',
+    });
+    expect(redactedKeys).toEqual(['a.b.c.secret']);
+  });
+
+  it('replaces the whole value when a top-level key itself is secret-named, even if the value is an object', () => {
+    const attrs = { password: { anything: 'goes-here' } };
+    const { scrubbed, redactedKeys } = scrubAttributes(attrs);
+    expect(scrubbed.password).toBe('<redacted:password>');
+    expect(redactedKeys).toEqual(['password']);
+  });
+
+  it('does not mutate the input object on nested redaction', () => {
+    const attrs = { 'tool.args': { apiKey: 'x' } };
+    scrubAttributes(attrs);
+    expect(attrs['tool.args']).toEqual({ apiKey: 'x' });
   });
 });
 

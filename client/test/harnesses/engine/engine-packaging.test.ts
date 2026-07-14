@@ -875,3 +875,270 @@ describe('Engine pack() — trajectory↔artifact bidirectional linkage', () => 
     expect(envelope['trajectory']).toBeNull();
   });
 });
+
+// ── #1473: transcript-to-spans engine pack() hook ──────────────────────────
+
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { CODEX_HARNESS } from '../../../src/harnesses/names.js';
+
+const CLAUDE_CODE_FIXTURE = readFileSync(
+  fileURLToPath(
+    new URL('../../../fixtures/transcripts/claude-code/stream-json-example.jsonl', import.meta.url),
+  ),
+  'utf-8',
+);
+
+const CODEX_FIXTURE = readFileSync(
+  fileURLToPath(
+    new URL('../../../fixtures/transcripts/codex/exec-json-with-usage.jsonl', import.meta.url),
+  ),
+  'utf-8',
+);
+
+describe('Engine pack() — transcript-to-spans hook (#1473)', () => {
+  let store: Store;
+  let tmp: string;
+  let engine: TrajectoryTestEngine;
+
+  beforeEach(() => {
+    store = new Store(':memory:');
+    tmp = mkTmp();
+    engine = new TrajectoryTestEngine(makeOpts(store, tmp));
+  });
+
+  afterEach(() => {
+    store.close();
+    try { rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  it('adds jinn.agent_turn/jinn.tool_call spans from the claude-code transcript before jinn.artifact.emit spans', async () => {
+    const { uploadToIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const uploadMock = uploadToIpfs as ReturnType<typeof vi.fn>;
+    uploadMock.mockClear();
+    let callIndex = 0;
+    uploadMock.mockImplementation(async (_url: string, payload: unknown) => {
+      callIndex++;
+      if (typeof payload === 'object' && payload !== null && 'signature' in (payload as Record<string, unknown>)) {
+        return 'bafy-trajectory-cid';
+      }
+      return `bafy-artifact-${callIndex}`;
+    });
+
+    const requestId = 'req-transcript-to-spans';
+    const workingDir = join(tmp, 'restorations', requestId);
+    mkdirSync(join(workingDir, 'sessions'), { recursive: true });
+    mkdirSync(join(workingDir, 'env'), { recursive: true });
+    mkdirSync(join(workingDir, '.claude-code'), { recursive: true });
+    writeFileSync(join(workingDir, 'intent.json'), '{}');
+    writeFileSync(join(workingDir, 'sessions', 'session.jsonl'), '{"msg":"hi"}');
+    writeFileSync(join(workingDir, '.claude-code', 'stdout.jsonl'), CLAUDE_CODE_FIXTURE);
+
+    await engine.observe(makeInput(requestId, tmp));
+    const p = engine.testPersistence;
+    p.transition(requestId, TaskRunState.CLAIMED);
+    p.transition(requestId, TaskRunState.WAITING);
+    p.transition(requestId, TaskRunState.PRE_SNAPSHOT, {
+      workingDir,
+      implStateDir: join(tmp, 'impls', 'test'),
+      preSnapshotCapturedAt: Date.now(),
+      preSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+    });
+    p.transition(requestId, TaskRunState.RUNNING);
+    p.transition(requestId, TaskRunState.POST_SNAPSHOT, {
+      postSnapshotCapturedAt: Date.now(),
+      postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+      fillsPayload: [],
+      gatingClaim: { equityReturnPct: '10', maxDrawdownPct: '5', closedTradesCount: 25, tradedNotionalMultiple: '8' },
+      implName: 'claude-code',
+    });
+    p.transition(requestId, TaskRunState.PACKAGING);
+
+    // Empty injected collector — simulates a run whose impl didn't add any of
+    // its own spans; the transcript-to-spans hook is the only span source.
+    const collector = new TrajectoryCollector({ taskCid: 'bafyintent123', runId: 'run-transcript-to-spans' });
+    engine.injectCollector(requestId, collector);
+
+    await engine.process(requestId);
+
+    const intent = engine.testPersistence.getByRequestId(requestId);
+    expect(intent!.state).toBe(TaskRunState.DELIVERING);
+
+    const trajectoryCall = uploadMock.mock.calls.find(
+      ([, payload]: [string, unknown]) =>
+        typeof payload === 'object' && payload !== null && 'signature' in (payload as Record<string, unknown>),
+    );
+    expect(trajectoryCall).toBeDefined();
+    const trajectory = trajectoryCall![1] as Record<string, unknown>;
+    const spans = trajectory['spans'] as Array<Record<string, unknown>>;
+    expect(Array.isArray(spans)).toBe(true);
+
+    const kinds = spans.map((s) => (s['attributes'] as Record<string, unknown>)['jinn.span.kind']);
+    expect(kinds).toContain('jinn.agent_turn');
+    expect(kinds).toContain('jinn.tool_call');
+    expect(kinds).toContain('jinn.artifact.emit');
+
+    const lastTranscriptIdx = Math.max(
+      kinds.lastIndexOf('jinn.agent_turn'),
+      kinds.lastIndexOf('jinn.tool_call'),
+    );
+    const firstArtifactEmitIdx = kinds.indexOf('jinn.artifact.emit');
+    expect(lastTranscriptIdx).toBeLessThan(firstArtifactEmitIdx);
+  });
+
+  // #1473 finding 1 regression: task.implName for codex solves is CODEX_HARNESS
+  // ('codex'), never 'codex-code' — this closes the coverage hole that let the
+  // registry key mismatch ship as dead code (see transcript-to-spans/index.ts).
+  it('adds jinn.agent_turn/jinn.tool_call spans from the codex transcript with the PRODUCTION implName "codex"', async () => {
+    const { uploadToIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const uploadMock = uploadToIpfs as ReturnType<typeof vi.fn>;
+    uploadMock.mockClear();
+    let callIndex = 0;
+    uploadMock.mockImplementation(async (_url: string, payload: unknown) => {
+      callIndex++;
+      if (typeof payload === 'object' && payload !== null && 'signature' in (payload as Record<string, unknown>)) {
+        return 'bafy-trajectory-cid';
+      }
+      return `bafy-artifact-${callIndex}`;
+    });
+
+    const requestId = 'req-transcript-to-spans-codex';
+    const workingDir = join(tmp, 'restorations', requestId);
+    mkdirSync(join(workingDir, 'sessions'), { recursive: true });
+    mkdirSync(join(workingDir, 'env'), { recursive: true });
+    // The transcript DIRECTORY name is adapter-owned and unchanged — codex
+    // still writes to .codex-code/ even though its implName is 'codex'.
+    mkdirSync(join(workingDir, '.codex-code'), { recursive: true });
+    writeFileSync(join(workingDir, 'intent.json'), '{}');
+    writeFileSync(join(workingDir, 'sessions', 'session.jsonl'), '{"msg":"hi"}');
+    writeFileSync(join(workingDir, '.codex-code', 'stdout.jsonl'), CODEX_FIXTURE);
+
+    await engine.observe(makeInput(requestId, tmp));
+    const p = engine.testPersistence;
+    p.transition(requestId, TaskRunState.CLAIMED);
+    p.transition(requestId, TaskRunState.WAITING);
+    p.transition(requestId, TaskRunState.PRE_SNAPSHOT, {
+      workingDir,
+      implStateDir: join(tmp, 'impls', 'test'),
+      preSnapshotCapturedAt: Date.now(),
+      preSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+    });
+    p.transition(requestId, TaskRunState.RUNNING);
+    p.transition(requestId, TaskRunState.POST_SNAPSHOT, {
+      postSnapshotCapturedAt: Date.now(),
+      postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+      fillsPayload: [],
+      gatingClaim: { equityReturnPct: '10', maxDrawdownPct: '5', closedTradesCount: 25, tradedNotionalMultiple: '8' },
+      implName: CODEX_HARNESS,
+    });
+    p.transition(requestId, TaskRunState.PACKAGING);
+
+    const collector = new TrajectoryCollector({ taskCid: 'bafyintent123', runId: 'run-transcript-to-spans-codex' });
+    engine.injectCollector(requestId, collector);
+
+    await engine.process(requestId);
+
+    const intent = engine.testPersistence.getByRequestId(requestId);
+    expect(intent!.state).toBe(TaskRunState.DELIVERING);
+
+    const trajectoryCall = uploadMock.mock.calls.find(
+      ([, payload]: [string, unknown]) =>
+        typeof payload === 'object' && payload !== null && 'signature' in (payload as Record<string, unknown>),
+    );
+    expect(trajectoryCall).toBeDefined();
+    const trajectory = trajectoryCall![1] as Record<string, unknown>;
+    const spans = trajectory['spans'] as Array<Record<string, unknown>>;
+    const kinds = spans.map((s) => (s['attributes'] as Record<string, unknown>)['jinn.span.kind']);
+    expect(kinds).toContain('jinn.agent_turn');
+    expect(kinds).toContain('jinn.tool_call');
+  });
+
+  // AC-4: a missing/unparseable transcript degrades, never fails — the solve
+  // still publishes with operational (artifact.emit etc.) spans only.
+  async function runToDelivering(
+    engine: TrajectoryTestEngine,
+    tmp: string,
+    requestId: string,
+    setupTranscript: (workingDir: string) => void,
+  ): Promise<void> {
+    const workingDir = join(tmp, 'restorations', requestId);
+    mkdirSync(join(workingDir, 'sessions'), { recursive: true });
+    mkdirSync(join(workingDir, 'env'), { recursive: true });
+    writeFileSync(join(workingDir, 'intent.json'), '{}');
+    writeFileSync(join(workingDir, 'sessions', 'session.jsonl'), '{"msg":"hi"}');
+    setupTranscript(workingDir);
+
+    await engine.observe(makeInput(requestId, tmp));
+    const p = engine.testPersistence;
+    p.transition(requestId, TaskRunState.CLAIMED);
+    p.transition(requestId, TaskRunState.WAITING);
+    p.transition(requestId, TaskRunState.PRE_SNAPSHOT, {
+      workingDir,
+      implStateDir: join(tmp, 'impls', 'test'),
+      preSnapshotCapturedAt: Date.now(),
+      preSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+    });
+    p.transition(requestId, TaskRunState.RUNNING);
+    p.transition(requestId, TaskRunState.POST_SNAPSHOT, {
+      postSnapshotCapturedAt: Date.now(),
+      postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0 },
+      fillsPayload: [],
+      gatingClaim: { equityReturnPct: '10', maxDrawdownPct: '5', closedTradesCount: 25, tradedNotionalMultiple: '8' },
+      implName: 'claude-code',
+    });
+    p.transition(requestId, TaskRunState.PACKAGING);
+
+    const collector = new TrajectoryCollector({ taskCid: 'bafyintent123', runId: `run-${requestId}` });
+    engine.injectCollector(requestId, collector);
+
+    await engine.process(requestId);
+  }
+
+  it('degrades cleanly when the transcript file is absent (no .claude-code dir at all)', async () => {
+    const { uploadToIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const uploadMock = uploadToIpfs as ReturnType<typeof vi.fn>;
+    uploadMock.mockResolvedValue('bafymock123');
+    uploadMock.mockClear();
+
+    await runToDelivering(engine, tmp, 'req-transcript-missing', () => {
+      // Deliberately do not create .claude-code/ at all.
+    });
+
+    const intent = engine.testPersistence.getByRequestId('req-transcript-missing');
+    expect(intent!.state).toBe(TaskRunState.DELIVERING);
+  });
+
+  it('degrades cleanly when the transcript file is empty', async () => {
+    const { uploadToIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const uploadMock = uploadToIpfs as ReturnType<typeof vi.fn>;
+    uploadMock.mockResolvedValue('bafymock123');
+    uploadMock.mockClear();
+
+    await runToDelivering(engine, tmp, 'req-transcript-empty', (workingDir) => {
+      mkdirSync(join(workingDir, '.claude-code'), { recursive: true });
+      writeFileSync(join(workingDir, '.claude-code', 'stdout.jsonl'), '');
+    });
+
+    const intent = engine.testPersistence.getByRequestId('req-transcript-empty');
+    expect(intent!.state).toBe(TaskRunState.DELIVERING);
+  });
+
+  it('degrades cleanly when the transcript path is unreadable (EISDIR — a directory, not a file)', async () => {
+    // Both in-repo parsers already swallow readFile failures internally
+    // (return [] rather than throw); this exercises that internal degrade
+    // path end-to-end. The engine's own try/catch around the hook is
+    // defense-in-depth for any future parser that does not self-degrade.
+    const { uploadToIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const uploadMock = uploadToIpfs as ReturnType<typeof vi.fn>;
+    uploadMock.mockResolvedValue('bafymock123');
+    uploadMock.mockClear();
+
+    await runToDelivering(engine, tmp, 'req-transcript-eisdir', (workingDir) => {
+      // stdout.jsonl is itself a directory — readFile() throws EISDIR.
+      mkdirSync(join(workingDir, '.claude-code', 'stdout.jsonl'), { recursive: true });
+    });
+
+    const intent = engine.testPersistence.getByRequestId('req-transcript-eisdir');
+    expect(intent!.state).toBe(TaskRunState.DELIVERING);
+  });
+});

@@ -19,6 +19,8 @@ export const JinnSpanKindSchema = z.enum([
   'jinn.artifact.emit',
   'jinn.venue_io',
   'jinn.state_transition',
+  'jinn.agent_turn',
+  'jinn.tool_call',
 ]);
 export type JinnSpanKind = z.infer<typeof JinnSpanKindSchema>;
 

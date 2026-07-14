@@ -91,8 +91,56 @@ describe('validateSpanProfile', () => {
       'jinn.artifact.emit',
       'jinn.venue_io',
       'jinn.state_transition',
+      'jinn.agent_turn',
+      'jinn.tool_call',
     ]) {
       expect(SPAN_PROFILE[k]).toBeDefined();
     }
+  });
+
+  it('accepts jinn.agent_turn with role, content, and transcript provenance', () => {
+    const s = mkSpan('jinn.agent_turn', {
+      'jinn.turn.role': 'user',
+      'message.content': 'hello',
+      'jinn.transcript.sourceFormat': 'claude-code-stream-json',
+      'jinn.transcript.parser': 'claude-code-stream-json',
+      'jinn.transcript.parserVersion': '1.0.0',
+    });
+    expect(validateSpanProfile(s).valid).toBe(true);
+  });
+
+  it('rejects jinn.agent_turn missing jinn.turn.role', () => {
+    const s = mkSpan('jinn.agent_turn', {
+      'message.content': 'hello',
+      'jinn.transcript.sourceFormat': 'claude-code-stream-json',
+      'jinn.transcript.parser': 'claude-code-stream-json',
+      'jinn.transcript.parserVersion': '1.0.0',
+    });
+    const r = validateSpanProfile(s);
+    expect(r.valid).toBe(false);
+    if (!r.valid) expect(r.missing).toContain('jinn.turn.role');
+  });
+
+  it('accepts jinn.tool_call with tool.name, tool.args, and transcript provenance', () => {
+    const s = mkSpan('jinn.tool_call', {
+      'tool.name': 'Bash',
+      'tool.args': { command: 'ls' },
+      'jinn.transcript.sourceFormat': 'codex-exec-json',
+      'jinn.transcript.parser': 'codex-exec-json',
+      'jinn.transcript.parserVersion': '1.0.0',
+    });
+    expect(validateSpanProfile(s).valid).toBe(true);
+  });
+
+  it('rejects jinn.tool_call missing tool.args', () => {
+    const s = mkSpan('jinn.tool_call', {
+      'tool.name': 'Bash',
+      'jinn.transcript.sourceFormat': 'codex-exec-json',
+      'jinn.transcript.parser': 'codex-exec-json',
+      'jinn.transcript.parserVersion': '1.0.0',
+    });
+    const r = validateSpanProfile(s);
+    expect(r.valid).toBe(false);
+    if (!r.valid) expect(r.missing).toContain('tool.args');
   });
 });
