@@ -62,6 +62,12 @@ import {
 } from './_swe-rebench-v2-pool.js';
 import { fetchHfWithRetry } from '../harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js';
 import { PoolCacheStore, loadPoolWithCacheFallback } from './_swe-rebench-v2-pool-cache.js';
+import { getDefaultMintedPoolStore, loadMintedPoolTasks } from './_swe-rebench-v2-minted-pool.js';
+import { computeHaltedMintFamilies } from './_swe-rebench-v2-guards.js';
+import {
+  DEFAULT_SYNTHETIC_ESCROW_PARAMS,
+  escrowInputsFromPatch,
+} from './_swe-rebench-v2-harvest.js';
 
 export const HF_DATASET = 'nebius/SWE-rebench-leaderboard';
 const SOLVER_TYPE = 'swe-rebench-v2.v1';
@@ -433,6 +439,7 @@ async function maybeSignTask(
 function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig): SweRebenchV2GeneratorTick {
   const stateStore = new GeneratorStateStore({ stateDir: config.stateDir });
   const validatedPoolStore = new ValidatedPoolStore({ stateDir: config.stateDir });
+  const mintedPoolStore = getDefaultMintedPoolStore(config.stateDir);
 
   const poolCache = new PoolCacheStore({ stateDir: config.stateDir });
   let pool: PoolTask[] = [];
@@ -656,11 +663,28 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
       : genConfig.admissionMode === 'python-floor'
         ? await validatedPoolStore.getScorableIds(EVAL_SEMANTICS_VERSION)
         : null;
-    const { pool: scorablePool, mode: poolMode } = filterToScorablePool(
+    const { pool: scorablePoolBase, mode: poolMode } = filterToScorablePool(
       pool,
       scorableIds,
       genConfig.admissionMode,
     );
+    const mintedTasks = await loadMintedPoolTasks(mintedPoolStore, EVAL_SEMANTICS_VERSION);
+    const syntheticInstanceIds = new Set(mintedTasks.map((t) => t.instance_id));
+    const mintedEntries = await mintedPoolStore.listEntries(EVAL_SEMANTICS_VERSION);
+    const mintFamilyByInstance = new Map(
+      mintedEntries.map((e) => [e.row.instance_id, e.provenance.mintFamily]),
+    );
+    const haltedMintFamilies = computeHaltedMintFamilies(
+      mintedEntries.map((e) => {
+        const c = counters.get(e.row.instance_id);
+        return {
+          family: e.provenance.mintFamily,
+          posted: c?.posted ?? 0,
+          successful: c?.successful ?? 0,
+        };
+      }),
+    );
+    const scorablePool = [...scorablePoolBase, ...mintedTasks];
     // Held-out eval slate exclusion (issue #817 AC#2, #986). Exclude the UNION
     // of active slate versions so every held-out exam stays out of the train
     // stream while non-slate instances of every repo remain trainable.
@@ -789,6 +813,16 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
       now,
       claimCounts,
       lastPostedLanguage,
+      discriminationFails: await validatedPoolStore.getDiscriminationFailIds(EVAL_SEMANTICS_VERSION),
+      syntheticInstanceIds,
+      haltedMintFamilies,
+      mintFamilyByInstance,
+      instanceSolveStats: new Map(
+        [...counters.entries()].map(([id, c]) => [
+          id,
+          { passed: c.successful, attempts: Math.max(c.posted, c.successful, 1) },
+        ]),
+      ),
     });
     if (candidates.length === 0) {
       lastPollSummary = summarizePoolState({
@@ -854,6 +888,20 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
           instance_id: candidate.instance_id,
           posted_count_after_record: afterRecord.posted,
           generatorConfig: genConfig,
+          ...(syntheticInstanceIds.has(candidate.instance_id)
+            ? (() => {
+                const minted = mintedEntries.find((e) => e.row.instance_id === candidate.instance_id);
+                return {
+                  syntheticEscrow: true,
+                  syntheticProvenance: minted?.provenance,
+                  syntheticEscrowInputs: escrowInputsFromPatch(
+                    candidate.patch ?? '',
+                    minted?.row.FAIL_TO_PASS ?? [],
+                  ),
+                  syntheticEscrowParams: DEFAULT_SYNTHETIC_ESCROW_PARAMS,
+                };
+              })()
+            : {}),
           ...(publishedPool.artifactRef
             ? { [VETTED_POOL_REF_ELIGIBILITY_KEY]: publishedPool.artifactRef }
             : {}),

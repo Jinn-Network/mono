@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { computeEscrowWei, type EscrowParams } from '../../src/solver-types/_swe-rebench-v2-escrow.js';
+import {
+  computeEscrowWei,
+  resolveMintedTaskDeliveryRate,
+  type EscrowParams,
+} from '../../src/solver-types/_swe-rebench-v2-escrow.js';
+import { DEFAULT_SYNTHETIC_ESCROW_PARAMS } from '../../src/solver-types/_swe-rebench-v2-harvest.js';
 
 const params: EscrowParams = {
   base_escrow_wei: 1_000_000_000_000_000_000n,
@@ -27,5 +32,22 @@ describe('computeEscrowWei', () => {
   it('caps the multiplier so single-task escrow does not blow up', () => {
     const huge = computeEscrowWei({ loc: 10000, files: 100, tests: 1000, params });
     expect(huge).toBeLessThanOrEqual(5n * params.base_escrow_wei);
+  });
+});
+
+describe('resolveMintedTaskDeliveryRate', () => {
+  const base = 1_000_000_000_000_000_000n;
+
+  it('returns flat rate for benchmark tasks', () => {
+    expect(resolveMintedTaskDeliveryRate(base, undefined)).toBe(base);
+  });
+
+  it('returns complexity-weighted rate for minted tasks with inputs', () => {
+    const rate = resolveMintedTaskDeliveryRate(base, {
+      syntheticEscrow: true,
+      syntheticEscrowInputs: { loc: 100, files: 5, tests: 10 },
+      syntheticEscrowParams: DEFAULT_SYNTHETIC_ESCROW_PARAMS,
+    });
+    expect(rate).toBeGreaterThan(base);
   });
 });

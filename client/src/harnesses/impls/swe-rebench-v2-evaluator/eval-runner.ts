@@ -510,6 +510,9 @@ export class PythonEvalRunner implements EvalRunner {
     // `failed_from_pass_to_pass`: PASS_TO_PASS tests that no longer pass.
     const fromFailToPass = asStringArray(item['from_fail_to_pass']);
     const failedFromPassToPass = asStringArray(item['failed_from_pass_to_pass']);
+    const passedActual = asStringArray(item['passed_actual']);
+    const failedActual = asStringArray(item['failed_actual']);
+    const empiricalMode = args.fail_to_pass.length === 0 && args.pass_to_pass.length === 0;
 
     // The upstream eval.py writes the full container log to
     // <upstreamRepoDir>/logs/<instance>_log.txt and records `log_path` —
@@ -556,8 +559,10 @@ export class PythonEvalRunner implements EvalRunner {
 
     return {
       passed_match: resolved,
-      passed: fromFailToPass,
-      failed: failedFromPassToPass,
+      passed: empiricalMode && passedActual.length > 0 ? passedActual : fromFailToPass,
+      failed: empiricalMode && (passedActual.length > 0 || failedActual.length > 0)
+        ? failedActual
+        : failedFromPassToPass,
       log: fullLog,
       exitCode: containerExit,
     };

@@ -1981,6 +1981,55 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     );
   }
 
+  let harvestLoopConfig: import('./daemon/harvest-loop.js').HarvestLoopConfig | undefined;
+  if (config.harvest.enabled && config.harvest.intervalMs > 0 && config.harvest.repos.length > 0) {
+    const { resolveHarvestRepoConfigs } = await import('./daemon/harvest-loop.js');
+    const harvestRepos = await resolveHarvestRepoConfigs(config.harvest.repos);
+    if (harvestRepos.length > 0) {
+      const { readEnabledState, defaultSweRebenchV2EvaluatorImplStateDir } =
+        await import('./harnesses/impls/swe-rebench-v2-evaluator/harness.js');
+      const { existsSync } = await import('node:fs');
+      const enabled = readEnabledState(defaultSweRebenchV2EvaluatorImplStateDir());
+      if (!enabled || !existsSync(enabled.upstreamRepoDir)) {
+        console.warn(
+          '[main] harvest enabled but swe-rebench-v2 evaluator is not set up — run `jinn harnesses enable swe-rebench-v2-evaluator`',
+        );
+      } else {
+        const { defaultStateDir, getSweRebenchV2ValidatedPoolStore } =
+          await import('./solver-types/swe-rebench-v2.js');
+        const { getDefaultMintedPoolStore } = await import('./solver-types/_swe-rebench-v2-minted-pool.js');
+        const { HttpHfFetcher } = await import('./harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js');
+        const { PythonEvalRunner } = await import('./harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js');
+        const { createGitHubPublicRepoChecker } = await import('./solver-types/_swe-rebench-v2-guards.js');
+        const harvestStateDir = defaultStateDir();
+        harvestLoopConfig = {
+          intervalMs: config.harvest.intervalMs,
+          stateDir: harvestStateDir,
+          repos: harvestRepos,
+          limitPerRepo: config.harvest.limitPerRepo,
+          publish: config.harvest.publish,
+          minterSafe: safeAddress,
+          mintDeps: {
+            stateDir: harvestStateDir,
+            ipfsRegistryUrl: config.ipfsRegistryUrl,
+            ipfsGatewayUrl: config.ipfsGatewayUrl,
+            validatedStore: getSweRebenchV2ValidatedPoolStore(harvestStateDir),
+            mintedStore: getDefaultMintedPoolStore(harvestStateDir),
+            hfFetcher: new HttpHfFetcher(),
+            runner: new PythonEvalRunner({ upstreamRepoDir: enabled.upstreamRepoDir }),
+            upstreamRepoDir: enabled.upstreamRepoDir,
+            publicRepoChecker: createGitHubPublicRepoChecker({
+              token: process.env.GITHUB_TOKEN,
+            }),
+          },
+        };
+        console.log(
+          `[main] harvest loop enabled: ${harvestRepos.length} repo(s), interval=${config.harvest.intervalMs}ms`,
+        );
+      }
+    }
+  }
+
   const daemon = new Daemon({
     adapter,
     runner,
@@ -2064,6 +2113,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       identityPublisher,
       reputationFeedback,
       operatorConfig,
+      operatorSafeAddress: safeAddress,
       harnessMode: config.harness.mode,
       // Share the one maintained scrub pipeline (incl. optional ML PII) so task
       // trajectories and captures are scrubbed by the same stack before publish.
@@ -2142,6 +2192,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             },
           }
         : undefined,
+    harvest: harvestLoopConfig,
     // #1043 loop watchdog. Always constructed in production so a stale loop is
     // detected + surfaced; the process-exit recovery is flag-gated (default
     // OFF) by config.watchdogAutoRestart.

@@ -16,6 +16,10 @@ export const SessionProvenanceSchema = z.object({
     spdxId: z.string().optional(),
     operatorAssertion: z.enum(['asserted', 'unspecified']),
   }),
+  /** Tier-1 mineable-trace consent echoed on published envelopes (D2). */
+  mineableTraceConsent: z.enum(['off', 'retain_local']).optional(),
+  /** Tier-2 publish-mined-tasks consent (enforced at mint publish gate). */
+  publishMinedTasksConsent: z.boolean().optional(),
 });
 
 export type SessionProvenance = z.infer<typeof SessionProvenanceSchema>;

@@ -44,6 +44,9 @@ export interface AttemptRef {
    * `manifestCid` (e.g. the corpus fetcher) do not need it.
    */
   verdictManifestCid?: string;
+  /** Echo/lineage key — instances sharing a key are not independent corroboration. */
+  sourceLineageKey?: string;
+  lookupFlagged?: boolean;
 }
 
 /** Evidence fetched for one attempt (the injected IPFS/corpus port). */
@@ -75,6 +78,10 @@ export interface BridgeDeps {
   fetchEvidence: (ref: AttemptRef) => Promise<BridgeEvidence>;
   /** Publish a constructed CapturedTask as layer-1 evidence; returns the corpus ref. */
   publishEvidence: (task: CapturedTask, ref: AttemptRef) => Promise<{ envelopeRef: string; anchorTx: string | null }>;
+  /** Weak-suite instance ids (discrimination fail) — excluded from bridge input. */
+  weakSuiteInstanceIds?: Set<string>;
+  /** Lookup-flagged instance ids — excluded from distillation input. */
+  lookupFlaggedInstanceIds?: Set<string>;
   /**
    * Attempts retained per `(instance_id, polarity)` — the per-instance attempt
    * GROUP is the distiller's raw material for group-relative distillation
@@ -225,6 +232,14 @@ export async function bridgeAttempts(refs: AttemptRef[], deps: BridgeDeps): Prom
   const kept = new Map<string, number>();
 
   for (const ref of refs) {
+    if (deps.weakSuiteInstanceIds?.has(ref.instanceId)) {
+      result.excludedHeldOut.push({ instanceId: ref.instanceId, reason: 'instance_id' });
+      continue;
+    }
+    if (deps.lookupFlaggedInstanceIds?.has(ref.instanceId)) {
+      result.deduped.push({ instanceId: ref.instanceId, polarity: ref.polarity });
+      continue;
+    }
     if (deps.slateInstanceIds.has(ref.instanceId)) {
       result.excludedHeldOut.push({ instanceId: ref.instanceId, reason: 'instance_id' });
       continue;

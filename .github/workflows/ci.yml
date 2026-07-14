@@ -145,3 +145,28 @@ jobs:
           name: playwright-traces
           path: client/test-results/
           retention-days: 7
+
+  task-creator-amd64-gold-proof:
+    # Task Creator v0 AC #1 — native amd64 Docker gold eval through RoutingTaskRowFetcher.
+    # ubuntu-latest is linux/amd64; arm64 Mac dev cannot satisfy this gate.
+    name: Task Creator AC1 (amd64 gold proof)
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: yarn install --immutable
+      - run: yarn build
+      - name: Verify amd64 host
+        run: |
+          test "$(uname -m)" = "x86_64"
+          docker info
+          python3 --version
+      - name: Run AC #1 gold proof
+        run: yarn task-creator:amd64-gold-proof
+        env:
+          HOME: ${{ runner.temp }}

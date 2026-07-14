@@ -42,3 +42,22 @@ export function computeEscrowWei(input: EscrowInputs): bigint {
   const cap = MAX_MULTIPLIER * params.base_escrow_wei;
   return result > cap ? cap : result;
 }
+
+/** D1: minted tasks use complexity-weighted escrow when eligibility requests it. */
+export function resolveMintedTaskDeliveryRate(
+  defaultRate: bigint,
+  eligibility: Record<string, unknown> | undefined,
+): bigint {
+  if (!eligibility?.['syntheticEscrow']) return defaultRate;
+  const inputs = eligibility['syntheticEscrowInputs'] as
+    | { loc: number; files: number; tests: number }
+    | undefined;
+  const weights = eligibility['syntheticEscrowParams'] as
+    | Omit<EscrowParams, 'base_escrow_wei'>
+    | undefined;
+  if (!inputs || !weights) return defaultRate;
+  return computeEscrowWei({
+    ...inputs,
+    params: { base_escrow_wei: defaultRate, ...weights },
+  });
+}

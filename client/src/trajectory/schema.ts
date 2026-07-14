@@ -118,6 +118,10 @@ export const CaptureManifestSchema = z.object({
     allowedDirectoriesHash: z.string().regex(/^[0-9a-f]{64}$/),
     capturePath: z.enum(['A', 'B', 'C', 'D']),
   }),
+  /** Tier-1: retain mineable trace fields locally (spec/2026-07-08-task-creator-v0.md §10, D2). */
+  mineableTraceConsent: z.enum(['off', 'retain_local']).optional().default('off'),
+  /** Tier-2: consent to publish mined tasks (enforced at mint publish gate). */
+  publishMinedTasksConsent: z.boolean().optional().default(false),
 });
 
 export type CaptureManifest = z.infer<typeof CaptureManifestSchema>;

@@ -13,6 +13,7 @@ import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop
 import { TaskEngine, type TaskEngineOptions } from '../harnesses/engine/engine.js';
 import { BalanceTopupLoop, type BalanceTopupLoopConfig } from './balance-topup-loop.js';
 import { EvictionLoop, type EvictionLoopConfig } from './eviction-loop.js';
+import { HarvestLoop, type HarvestLoopConfig } from './harvest-loop.js';
 import { CheckpointLoop, type CheckpointLoopConfig } from './checkpoint-loop.js';
 import { WatchdogLoop, type WatchdogLoopRegistration } from './watchdog-loop.js';
 import { recordLoopTick, LOOP_REGISTRY, type LoopName } from './loop-heartbeat.js';
@@ -131,6 +132,12 @@ export interface DaemonConfig {
    * Omitted or interval 0 → loop not started.
    */
   evictionCheck?: EvictionLoopConfig;
+
+  /**
+   * Commit-echo harvest loop (task-creator v0). Scans configured local repos
+   * and admits minted tasks. Omitted or interval 0 → loop not started.
+   */
+  harvest?: HarvestLoopConfig;
 
   /**
    * Periodic `checkpoint()` loop (issue #505). Advances `tsCheckpoint` on
@@ -257,6 +264,7 @@ export class Daemon {
   private rewardClaimLoop?: RewardClaimLoop;
   private balanceTopupLoop?: BalanceTopupLoop;
   private evictionLoop?: EvictionLoop;
+  private harvestLoop?: HarvestLoop;
   private checkpointLoop?: CheckpointLoop;
   private watchdogLoop?: WatchdogLoop;
   private skipLogDeduper = new SkipLogDeduper();
@@ -308,6 +316,9 @@ export class Daemon {
     }
     if (config.evictionCheck && config.evictionCheck.intervalMs > 0) {
       this.evictionLoop = new EvictionLoop(config.evictionCheck);
+    }
+    if (config.harvest && config.harvest.intervalMs > 0 && config.harvest.repos.length > 0) {
+      this.harvestLoop = new HarvestLoop({ ...config.harvest, store: this.store });
     }
     if (config.checkpoint && config.checkpoint.intervalMs > 0) {
       this.checkpointLoop = new CheckpointLoop(config.checkpoint);
@@ -475,6 +486,19 @@ export class Daemon {
         }),
       );
     }
+    if (this.harvestLoop) {
+      this.loopPromises.push(
+        this.harvestLoop.run().catch(err => {
+          console.error('[daemon] harvest crashed:', err);
+          emitStructured({
+            kind: 'error',
+            message: 'harvest loop crashed',
+            errorCode: 'harvest_crashed',
+            details: { error: err instanceof Error ? err.message : String(err) },
+          });
+        }),
+      );
+    }
     if (this.checkpointLoop) {
       this.loopPromises.push(
         this.checkpointLoop.run().catch(err => {
@@ -506,11 +530,13 @@ export class Daemon {
       const started = new Set<LoopName>(['creator', 'engine-tick', 'engine-watcher', 'delivery-watcher']);
       if (this.rewardClaimLoop) started.add('reward-claim');
       if (this.balanceTopupLoop) started.add('balance-topup');
+      if (this.harvestLoop) started.add('harvest');
       if (peers.length > 0) started.add('peer-sync');
       const overrides: Partial<Record<LoopName, number>> = {
         'engine-tick': interval,
         'reward-claim': this.config.rewardClaim?.intervalMs,
         'balance-topup': this.config.balanceTopup?.intervalMs,
+        'harvest': this.config.harvest?.intervalMs,
       };
       const registrations: WatchdogLoopRegistration[] = LOOP_REGISTRY
         .filter(r => started.has(r.name))
@@ -564,6 +590,7 @@ export class Daemon {
     this.rewardClaimLoop?.stop();
     this.balanceTopupLoop?.stop();
     this.evictionLoop?.stop();
+    this.harvestLoop?.stop();
     this.checkpointLoop?.stop();
     this.peerSync?.stop();
     this.watchdogLoop?.stop();
@@ -636,7 +663,20 @@ export class Daemon {
 
       const solverType = taskAnnouncement.task.solverType ?? undefined;
       const taskRole = (taskAnnouncement.task.role ?? 'restoration') as 'restoration' | 'evaluation';
-      const accept = await engine.canAcceptTask({ solverType, taskRole, task: taskAnnouncement.task });
+      const taskForEligibility = this.config.creatorSafeAddress
+        ? {
+            ...taskAnnouncement.task,
+            eligibility: {
+              ...(taskAnnouncement.task.eligibility ?? {}),
+              claimantSafe: this.config.creatorSafeAddress,
+            },
+          }
+        : taskAnnouncement.task;
+      const accept = await engine.canAcceptTask({
+        solverType,
+        taskRole,
+        task: taskForEligibility,
+      });
       if (!accept.ok) {
         // Log once per (taskId, reason) — the engine-watcher re-observes every
         // pending task each pass, so an unguarded log here floods the console.

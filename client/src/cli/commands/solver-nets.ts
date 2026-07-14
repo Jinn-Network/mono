@@ -419,6 +419,8 @@ const command: CommandModule = {
             Repeatable --instance-id and --instances-file scope the run to
             a specific subset.
   jinn solver-nets validate-pool-report swe-rebench-v2 [--human|--json]
+  jinn solver-nets yield-report
+  jinn solver-nets mint-tasks swe-rebench-v2 --candidates <json> [--no-post]
             Read-only report of the local validated-pool.json: total entries,
             scorable/unscorable counts, histogram by normalised reason, and
             the highest-yield unscorable blocker. Does not run any eval.
@@ -461,6 +463,8 @@ Output flags:
         'prover-harness': { type: 'string' },
         'prover-model': { type: 'string' },
         repo: { type: 'string' },
+        candidates: { type: 'string' },
+        'no-post': { type: 'boolean' },
       },
     });
     const human = Boolean(parsed.values['human']);
@@ -892,6 +896,95 @@ Output flags:
       );
       writeConfig(configPath, cfg);
       writeJson(ctx, { verb: 'solver-nets remove-plugin', configPath, name, removed: arg2 });
+      return;
+    }
+
+    if (subverb === 'yield-report') {
+      const { computeExemplarPairYield } = await import('../../solver-types/_swe-rebench-v2-yield.js');
+      const stats = (await import('../../solver-types/_swe-rebench-v2-yield-report-data.js')).loadYieldStatsFromEnv();
+      writeJson(ctx, { verb: 'solver-nets yield-report', report: computeExemplarPairYield(stats) });
+      return;
+    }
+
+    if (subverb === 'mint-tasks') {
+      if (name !== 'swe-rebench-v2') {
+        fail(ctx, 'solver-nets mint-tasks currently supports only `swe-rebench-v2`');
+        return;
+      }
+      const candidatesPath = parsed.values['candidates'] as string | undefined;
+      if (!candidatesPath) {
+        fail(ctx, 'solver-nets mint-tasks requires --candidates <json> (see docs/runbooks/task-creator-amd64-gold-proof.md)');
+        return;
+      }
+      const { readEnabledState, defaultSweRebenchV2EvaluatorImplStateDir } =
+        await import('../../harnesses/impls/swe-rebench-v2-evaluator/harness.js');
+      const enabled = readEnabledState(defaultSweRebenchV2EvaluatorImplStateDir());
+      if (!enabled || !existsSync(enabled.upstreamRepoDir)) {
+        fail(ctx, 'swe-rebench-v2 evaluator is not set up — run `jinn harnesses enable swe-rebench-v2-evaluator` first');
+        return;
+      }
+      const upstreamRepoDir = enabled.upstreamRepoDir;
+      if (spawnSync('docker', ['info'], { stdio: 'ignore' }).status !== 0) {
+        fail(ctx, 'Docker daemon not reachable — start Docker, then re-run `jinn solver-nets mint-tasks`');
+        return;
+      }
+
+      const loaded = loadConfig(configPath);
+      const stateDir = sweRebenchV2DefaultStateDir();
+      const raw = JSON.parse(readFileSync(resolvePath(candidatesPath), 'utf8')) as unknown;
+      const candidates = (Array.isArray(raw) ? raw : [raw]) as Array<{
+        poolTask: Record<string, unknown>;
+        goldPatch: string;
+        provenance: Record<string, unknown>;
+        publish?: boolean;
+      }>;
+      const noPost = Boolean(parsed.values['no-post']);
+
+      const { runMintTasksPipeline } = await import('../../solver-types/_swe-rebench-v2-mint-cli.js');
+      const { getDefaultMintedPoolStore } = await import('../../solver-types/_swe-rebench-v2-minted-pool.js');
+      const { getSweRebenchV2ValidatedPoolStore } = await import('../../solver-types/swe-rebench-v2.js');
+      const { HttpHfFetcher } = await import('../../harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js');
+      const { RoutingTaskRowFetcher, parseMintedPoolArtifact } =
+        await import('../../harnesses/impls/swe-rebench-v2-evaluator/routing-task-row-fetcher.js');
+      const { PythonEvalRunner } = await import('../../harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js');
+      const { createGitHubPublicRepoChecker } = await import('../../solver-types/_swe-rebench-v2-guards.js');
+      const { fetchFromIpfs } = await import('../../adapters/mech/ipfs.js');
+
+      process.stderr.write(`[mint-tasks] admitting ${candidates.length} candidate(s)…\n`);
+      const result = await runMintTasksPipeline({
+        candidates: candidates.map((c) => ({
+          poolTask: c.poolTask as unknown as import('../../solver-types/_swe-rebench-v2-pool.js').PoolTask,
+          goldPatch: c.goldPatch,
+          provenance: c.provenance as unknown as import('../../solver-types/_swe-rebench-v2-minted-pool.js').MintedProvenance,
+          publish: noPost ? false : c.publish,
+        })),
+        stateDir,
+        ipfsRegistryUrl: loaded.ipfsRegistryUrl,
+        ipfsGatewayUrl: loaded.ipfsGatewayUrl,
+        validatedStore: getSweRebenchV2ValidatedPoolStore(stateDir),
+        mintedStore: getDefaultMintedPoolStore(stateDir),
+        fetcher: new RoutingTaskRowFetcher({
+          hf: new HttpHfFetcher(),
+          fetchMintedArtifact: async (cid) =>
+            parseMintedPoolArtifact(await fetchFromIpfs(loaded.ipfsGatewayUrl, cid)),
+        }),
+        runner: new PythonEvalRunner({ upstreamRepoDir }),
+        upstreamRepoDir,
+        publicRepoChecker: createGitHubPublicRepoChecker({
+          token: process.env.GITHUB_TOKEN,
+        }),
+      });
+      emit(
+        ctx,
+        { verb: 'solver-nets mint-tasks', solverNet: 'swe-rebench-v2', ...result },
+        human,
+        json,
+        (v) => {
+          const s = v as { admitted: string[]; rejected: Array<{ instance_id: string; reason: string }> };
+          return `admitted=${s.admitted.length}  rejected=${s.rejected.length}` +
+            (result.artifactCid ? `  artifact=${result.artifactCid}` : '');
+        },
+      );
       return;
     }
 

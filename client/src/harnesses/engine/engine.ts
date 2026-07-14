@@ -15,6 +15,10 @@ import { TaskRunPersistence, type PersistedTaskRun, type PersistedTaskRunInput }
 import { TaskRunState, MissingEvidenceHashError } from './state.js';
 import type { Store } from '../../store/store.js';
 import {
+  syntheticClaimBlocked,
+  type SyntheticTaskProvenance,
+} from '../../solver-types/_swe-rebench-v2-synthetic-claim.js';
+import {
   reapWorkDirs,
   DEFAULT_ORPHAN_MAX_AGE_MS,
   type ReapWorkDirsReport,
@@ -276,6 +280,11 @@ export interface TaskEngineOptions {
    */
   joinedSolverNets?: JoinedSolverNetsView;
   /**
+   * Operator Safe address used for synthetic task claim filtering (§7).
+   * When set, `canAcceptTask` / `claim` reject mint-and-solve self-claims.
+   */
+  operatorSafeAddress?: `0x${string}`;
+  /**
    * Resolves a launched SolverNet manifest by `solverNetManifestCid`.
    * Required for production wiring; tests that don't exercise schema
    * validation can omit it.
@@ -417,6 +426,7 @@ export class TaskEngine {
   protected readonly solverNetRegistry: TaskEngineOptions['solverNetRegistry'];
   protected readonly scrubPipeline: ScrubPipeline;
   protected readonly joinedSolverNets: TaskEngineOptions['joinedSolverNets'];
+  protected readonly operatorSafeAddress: TaskEngineOptions['operatorSafeAddress'];
   protected readonly manifestResolver: TaskEngineOptions['manifestResolver'];
   protected readonly identityPublisher: TaskEngineOptions['identityPublisher'];
   protected readonly reputationFeedback: TaskEngineOptions['reputationFeedback'];
@@ -478,6 +488,7 @@ export class TaskEngine {
     this.solverNetRegistry = opts.solverNetRegistry;
     this.scrubPipeline = opts.scrubPipeline ?? buildScrubPipeline();
     this.joinedSolverNets = opts.joinedSolverNets;
+    this.operatorSafeAddress = opts.operatorSafeAddress;
     this.manifestResolver = opts.manifestResolver;
     this.identityPublisher = opts.identityPublisher;
     this.reputationFeedback = opts.reputationFeedback;
@@ -1120,6 +1131,11 @@ export class TaskEngine {
       return `no Harness registered or enabled for solverType '${routingKey}'; run \`${setHarnessHint}\``;
     }
     if (task) {
+      if (this.operatorSafeAddress) {
+        const synthetic = task.eligibility?.['syntheticProvenance'] as SyntheticTaskProvenance | undefined;
+        const blocked = syntheticClaimBlocked(synthetic, this.operatorSafeAddress);
+        if (blocked) return blocked;
+      }
       if (impl.canAttempt) {
         const attempt = await impl.canAttempt(task);
         if (!attempt.ok) {

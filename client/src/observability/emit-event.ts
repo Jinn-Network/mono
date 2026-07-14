@@ -16,6 +16,7 @@ export const ALLOWED_LIFECYCLE_KINDS = [
   'ai_units_cap_reached',
   'startup',
   'shutdown',
+  'harvest_admitted',
 ] as const;
 
 export type LifecycleKind = (typeof ALLOWED_LIFECYCLE_KINDS)[number];

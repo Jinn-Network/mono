@@ -46,6 +46,7 @@ import {
   type PythonEvalRunnerOptions,
 } from './eval-runner.js';
 import { HttpHfFetcher } from './hf-fetcher.js';
+import { RoutingTaskRowFetcher, parseMintedPoolArtifact } from './routing-task-row-fetcher.js';
 import {
   ValidatedPoolStore,
   EVAL_SEMANTICS_VERSION,
@@ -206,7 +207,12 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
   private getFetcher(): HfFetcher {
     if (this.deps.fetcher) return this.deps.fetcher;
     if (!this.cachedFetcher) {
-      this.cachedFetcher = new HttpHfFetcher();
+      const fetchArtifact = this.deps.fetchFromIpfs ?? fetchFromIpfs;
+      this.cachedFetcher = new RoutingTaskRowFetcher({
+        hf: new HttpHfFetcher(),
+        fetchMintedArtifact: async (cid) =>
+          parseMintedPoolArtifact(await fetchArtifact(this.ipfsGatewayUrl, cid)),
+      });
     }
     return this.cachedFetcher;
   }

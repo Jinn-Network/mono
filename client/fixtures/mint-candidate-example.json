@@ -1,0 +1,22 @@
+[
+  {
+    "poolTask": {
+      "instance_id": "acme__widget__echo-deadbeef01",
+      "hf_dataset": "nebius/SWE-rebench-leaderboard",
+      "hf_split": "test",
+      "repo": "acme/widget",
+      "base_commit": "0000000000000000000000000000000000000000",
+      "patch": "",
+      "test_patch": "",
+      "language": "python",
+      "problem_statement": "Example mint candidate — replace with a real admitted row before amd64 proof."
+    },
+    "goldPatch": "",
+    "provenance": {
+      "synthetic": true,
+      "mintFamily": "commit-echo",
+      "sourceLineageHash": "sha256:example"
+    },
+    "publish": false
+  }
+]

@@ -9,6 +9,7 @@
 import type { PoolTask } from './_swe-rebench-v2-pool.js';
 import type { TaskCounters } from './_swe-rebench-v2-state.js';
 import type { AdmissionMode } from './_swe-rebench-v2-validated-pool.js';
+import { contestedBandDistance, solveRate } from './_swe-rebench-v2-guards.js';
 
 export interface GeneratorConfig {
   N_target_successes: number;
@@ -67,6 +68,16 @@ export interface SelectArgs {
   /** Language of the most-recently-posted task; used to bias toward a different
    *  language for round-robin balancing. */
   lastPostedLanguage?: string;
+  /** Instance ids failing discrimination (weak-suite) — excluded from targeting. */
+  discriminationFails?: Set<string>;
+  /** Per-instance solve stats for contested-band ordering (attempts = posted count proxy). */
+  instanceSolveStats?: Map<string, { passed: number; attempts: number }>;
+  /** Tag synthetic (minted) pool rows for quota enforcement. */
+  syntheticInstanceIds?: Set<string>;
+  /** Mint families halted by informative-band stop (§7). */
+  haltedMintFamilies?: Set<string>;
+  /** instance_id → mintFamily for synthetic rows. */
+  mintFamilyByInstance?: Map<string, string>;
 }
 
 export function classifyPoolTask(
@@ -146,6 +157,9 @@ export function selectNextPostingCandidates(args: SelectArgs): PoolTask[] {
     return tid ? args.claimCounts?.get(tid) : undefined;
   };
   const eligible = args.pool.filter((task) => {
+    if (args.discriminationFails?.has(task.instance_id)) return false;
+    const family = args.mintFamilyByInstance?.get(task.instance_id);
+    if (family && args.haltedMintFamilies?.has(family)) return false;
     const c =
       args.counters.get(task.instance_id) ??
       { posted: 0, successful: 0, last_posted_at: 0 };
@@ -160,6 +174,13 @@ export function selectNextPostingCandidates(args: SelectArgs): PoolTask[] {
   const candidates = differentLanguage.length > 0 ? differentLanguage : eligible;
 
   candidates.sort((a, b) => {
+    const statsA = args.instanceSolveStats?.get(a.instance_id);
+    const statsB = args.instanceSolveStats?.get(b.instance_id);
+    if (statsA && statsB && statsA.attempts > 0 && statsB.attempts > 0) {
+      const distA = contestedBandDistance(solveRate(statsA.passed, statsA.attempts));
+      const distB = contestedBandDistance(solveRate(statsB.passed, statsB.attempts));
+      if (distA !== distB) return distA - distB;
+    }
     const cA = args.counters.get(a.instance_id) ?? { posted: 0, successful: 0, last_posted_at: 0 };
     const cB = args.counters.get(b.instance_id) ?? { posted: 0, successful: 0, last_posted_at: 0 };
     if (cA.posted !== cB.posted) return cA.posted - cB.posted;
@@ -177,7 +198,31 @@ export function selectNextPostingCandidates(args: SelectArgs): PoolTask[] {
     seenInstance.add(candidate.instance_id);
     selected.push(candidate);
   }
-  return selected;
+
+  const withSynthetic = selected.map((t) => ({
+    task: t,
+    synthetic: args.syntheticInstanceIds?.has(t.instance_id) ?? false,
+  }));
+  const quotaApplied = applySyntheticQuotaFromTagged(withSynthetic, args.config.post_batch_size);
+  return quotaApplied.map((x) => x.task);
+}
+
+function applySyntheticQuotaFromTagged<T extends { synthetic?: boolean }>(
+  selected: T[],
+  batchSize: number,
+): T[] {
+  const maxSynthetic = Math.floor(batchSize * 0.25);
+  let syntheticCount = 0;
+  const out: T[] = [];
+  for (const item of selected) {
+    if (item.synthetic) {
+      if (syntheticCount >= maxSynthetic) continue;
+      syntheticCount += 1;
+    }
+    out.push(item);
+    if (out.length >= batchSize) break;
+  }
+  return out;
 }
 
 export function selectNextPostingCandidate(args: SelectArgs): PoolTask | undefined {

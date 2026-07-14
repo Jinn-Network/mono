@@ -11,6 +11,7 @@ import type {
 import { displayPath, type HarnessAuthSource } from '../../auth-source.js';
 import type { Task } from '../../../types/task.js';
 import { vettedPoolRefSemanticsMismatch } from '../../../solver-types/_swe-rebench-v2-validated-pool.js';
+import { syntheticClaimBlocked } from '../../../solver-types/_swe-rebench-v2-synthetic-claim.js';
 import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, canonicalHarnessName } from '../../names.js';
 import type {
   HarnessAdapter,
@@ -277,6 +278,14 @@ export class LearnerHarness implements Harness {
   async canAttempt(task: Task): Promise<{ ok: true } | { ok: false; reason: string }> {
     const mismatch = vettedPoolRefSemanticsMismatch(task.eligibility);
     if (mismatch) return { ok: false, reason: mismatch };
+    const synthetic = task.eligibility?.['syntheticProvenance'] as
+      | { synthetic?: boolean; minterSafe?: string; sourceSolverSafe?: string }
+      | undefined;
+    const operatorSafe = task.eligibility?.['claimantSafe'] as string | undefined;
+    if (operatorSafe) {
+      const blocked = syntheticClaimBlocked(synthetic, operatorSafe);
+      if (blocked) return { ok: false, reason: blocked };
+    }
     return { ok: true };
   }
 

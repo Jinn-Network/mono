@@ -119,7 +119,19 @@ export interface ValidatedPoolEntry {
   transientRetryCount?: number;
   /** ISO timestamp of the most recent transient pass. Undefined for non-transient entries. */
   lastTransientAt?: string;
+  /**
+   * Whether a known-bad patch (empty patch) is rejected by the grader. v5+ /
+   * task-creator rung 0 (D3). `unchecked` for entries validated before the
+   * discrimination check existed.
+   */
+  discrimination?: 'pass' | 'fail' | 'unchecked';
 }
+
+/** Instances whose known-bad patch passes are weak-suite — excluded from
+ *  distillation and contested-band targeting; minted instances are hard-rejected. */
+export const WEAK_SUITE_REASON = 'weak-suite' as const;
+
+export type ValidatePoolSource = 'benchmark' | 'minted';
 
 /**
  * Cap on consecutive transient passes before an instance flips to the
@@ -551,7 +563,9 @@ export class ValidatedPoolStore {
     // generator's no-validation-data floor. A migratable prior version yields
     // the carried-forward scorable set, never `null`.
     const ids = (isValidFile(raw, evalSemanticsVersion) || (hasValidShape(raw) && MIGRATIONS[raw.evalSemanticsVersion]?.[evalSemanticsVersion]))
-      ? new Set(Object.entries(loadOrMigrateFile(raw, evalSemanticsVersion).entries).filter(([, e]) => e.scorable).map(([id]) => id))
+      ? new Set(Object.entries(loadOrMigrateFile(raw, evalSemanticsVersion).entries)
+        .filter(([, e]) => e.scorable && e.discrimination !== 'fail')
+        .map(([id]) => id))
       : null;
     this.scorableIdsCache = { mtimeMs, semanticsVersion: evalSemanticsVersion, ids };
     return ids;
@@ -566,7 +580,7 @@ export class ValidatedPoolStore {
     const file = loadOrMigrateFile(raw, evalSemanticsVersion);
     return {
       updatedAt: file.updatedAt,
-      entries: Object.fromEntries(Object.entries(file.entries).filter(([, entry]) => entry.scorable)),
+      entries: Object.fromEntries(Object.entries(file.entries).filter(([, entry]) => entry.scorable && entry.discrimination !== 'fail')),
     };
   }
 
@@ -574,6 +588,19 @@ export class ValidatedPoolStore {
   async getEntry(instanceId: string, evalSemanticsVersion: string): Promise<ValidatedPoolEntry | null> {
     const f = await this.loadForWrite(evalSemanticsVersion);
     return f.entries[instanceId] ?? null;
+  }
+
+  async getDiscriminationFailIds(evalSemanticsVersion: string): Promise<Set<string>> {
+    const raw = await this.readRaw();
+    if (!isValidFile(raw, evalSemanticsVersion) && !(hasValidShape(raw) && MIGRATIONS[raw.evalSemanticsVersion]?.[evalSemanticsVersion])) {
+      return new Set();
+    }
+    const file = loadOrMigrateFile(raw, evalSemanticsVersion);
+    return new Set(
+      Object.entries(file.entries)
+        .filter(([, e]) => e.discrimination === 'fail')
+        .map(([id]) => id),
+    );
   }
 
   async record(instanceId: string, entry: ValidatedPoolEntry, evalSemanticsVersion: string): Promise<void> {
@@ -824,6 +851,41 @@ function reasonOf(err: unknown): string {
     ? (err as { reason: string }).reason : 'unknown';
 }
 
+/** Known-bad patch for discrimination: empty unified diff must not resolve. */
+export const KNOWN_BAD_DISCRIMINATION_PATCH = '';
+
+export async function runDiscriminationCheck(args: {
+  task: PoolTask;
+  row: HfRow;
+  runner: EvalRunner;
+  poolSource: ValidatePoolSource;
+  substrate: Pick<ValidatedPoolEntry, 'checkedAt' | 'rowHash' | 'imageName' | 'imageDigest' | 'upstreamEvalCommit'>;
+}): Promise<Pick<ValidatedPoolEntry, 'scorable' | 'reason' | 'discrimination'>> {
+  const badRes = await args.runner.runEval({
+    instance_id: args.task.instance_id,
+    repo: args.task.repo ?? args.row.repo,
+    image: args.row.image_name,
+    patch: KNOWN_BAD_DISCRIMINATION_PATCH,
+    test_patch: args.row.test_patch ?? args.task.test_patch,
+    install: args.row.install_config.install,
+    test_cmd: args.row.install_config.test_cmd,
+    log_parser: args.row.install_config.log_parser,
+    fail_to_pass: args.row.FAIL_TO_PASS,
+    pass_to_pass: args.row.PASS_TO_PASS,
+  });
+  if (badRes.passed_match) {
+    if (args.poolSource === 'minted') {
+      return { scorable: false, reason: WEAK_SUITE_REASON, discrimination: 'fail' };
+    }
+    return {
+      scorable: true,
+      reason: 'gold-patch-resolves',
+      discrimination: 'fail',
+    };
+  }
+  return { scorable: true, reason: 'gold-patch-resolves', discrimination: 'pass' };
+}
+
 /**
  * Build a bounded-transient `ValidatedPoolEntry`. Shared by the HF-429 branch
  * and the operator-environment infra branch (issue #811): both record a
@@ -865,8 +927,9 @@ function buildBoundedTransientEntry(args: {
 export async function validatePoolInstances(
   pool: PoolTask[],
   deps: ValidatePoolDeps,
-  opts: { limit?: number; force?: boolean } = {},
+  opts: { limit?: number; force?: boolean; poolSource?: ValidatePoolSource } = {},
 ): Promise<ValidatePoolSummary> {
+  const poolSource = opts.poolSource ?? 'benchmark';
   const log = deps.log ?? (() => {});
   const runner = deps.commandRunner ?? defaultCommandRunner;
   const summary: ValidatePoolSummary = { checked: 0, scorable: 0, unscorable: 0, skipped: 0 };
@@ -958,7 +1021,20 @@ export async function validatePoolInstances(
         // Every admission must carry a digest. No digest → not admissible.
         entry = { scorable: false, reason: 'unresolvable-image-digest', ...substrate };
       } else if (res.passed_match) {
-        entry = { scorable: true, reason: 'gold-patch-resolves', ...substrate };
+        const disc = await runDiscriminationCheck({
+          task,
+          row,
+          runner: deps.runner,
+          poolSource,
+          substrate: {
+            checkedAt,
+            rowHash,
+            imageName: row.image_name,
+            ...(imageDigest ? { imageDigest } : {}),
+            ...(upstreamEvalCommit ? { upstreamEvalCommit } : {}),
+          },
+        });
+        entry = { ...disc, ...substrate };
       } else {
         entry = { scorable: false, reason: `gold-patch-not-resolved (f2p ${res.passed.length}, p2p_broke ${res.failed.length})`, ...substrate };
       }

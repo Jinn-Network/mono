@@ -603,6 +603,35 @@ export const JinnConfigSchema = z.object({
       blockedCids: z.array(z.string()).default([]),
     })
     .default({ blockedCids: [] }),
+
+  /**
+   * Commit-echo harvest loop (task-creator v0). When enabled, the daemon scans
+   * configured local git clones for fix-shaped commits and admits minted tasks.
+   */
+  harvest: z
+    .object({
+      enabled: z.boolean().default(false),
+      intervalMs: z.number().int().positive().default(60 * 60 * 1000),
+      limitPerRepo: z.number().int().positive().default(3),
+      publish: z.boolean().default(true),
+      repos: z
+        .array(
+          z.object({
+            path: z.string().min(1),
+            /** GitHub `owner/repo`; inferred from `git remote` when omitted. */
+            repo: z.string().min(1).optional(),
+            remote: z.string().optional(),
+          }),
+        )
+        .default([]),
+    })
+    .default({
+      enabled: false,
+      intervalMs: 60 * 60 * 1000,
+      limitPerRepo: 3,
+      publish: true,
+      repos: [],
+    }),
 });
 
 const DEFAULT_ENGINE = {
@@ -951,6 +980,30 @@ export function loadConfig(configPath?: string): JinnConfig {
   }
   if (env['JINN_FAUCET_TOPUP_COOLDOWN_MS'] !== undefined) {
     merged.faucetTopupCooldownMs = parseInt(env['JINN_FAUCET_TOPUP_COOLDOWN_MS'], 10);
+  }
+  if (env['JINN_HARVEST_ENABLED'] !== undefined) {
+    const v = env['JINN_HARVEST_ENABLED'].trim().toLowerCase();
+    const enabled = v === '1' || v === 'true' || v === 'yes';
+    merged.harvest = {
+      ...(typeof merged.harvest === 'object' && merged.harvest ? merged.harvest : {}),
+      enabled,
+    };
+  }
+  if (env['JINN_HARVEST_REPOS']) {
+    const paths = env['JINN_HARVEST_REPOS'].split(',').map((s) => s.trim()).filter(Boolean);
+    merged.harvest = {
+      ...(typeof merged.harvest === 'object' && merged.harvest ? merged.harvest : {}),
+      repos: paths.map((path) => {
+        const [repoPath, repo] = path.split(':');
+        return repo ? { path: repoPath!, repo } : { path: repoPath! };
+      }),
+    };
+  }
+  if (env['JINN_HARVEST_INTERVAL_MS']) {
+    merged.harvest = {
+      ...(typeof merged.harvest === 'object' && merged.harvest ? merged.harvest : {}),
+      intervalMs: parseInt(env['JINN_HARVEST_INTERVAL_MS'], 10),
+    };
   }
   // Legacy `JINN_PREDICTION_V1_*` env vars are no longer recognised. Their
   // values now live in the launched-record's generator-config block per

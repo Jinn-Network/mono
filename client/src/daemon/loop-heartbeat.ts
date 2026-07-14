@@ -36,6 +36,10 @@ export const LOOP_REGISTRY = [
   { name: 'delivery-watcher', intervalMs: 5000, floorMs: 5 * 60_000 },
   { name: 'reward-claim', intervalMs: 5000 },
   { name: 'balance-topup', intervalMs: 5000 },
+  // Commit-echo harvest loop (task-creator v0). Interval mirrors the config
+  // default (config.ts `harvest.intervalMs`); the daemon only registers it
+  // with the watchdog when config.harvest is enabled with repos.
+  { name: 'harvest', intervalMs: 60 * 60 * 1000 },
   { name: 'peer-sync', intervalMs: 60_000 },
 ] as const;
 

@@ -295,6 +295,26 @@ describe('PythonEvalRunner', () => {
     expect(result.passed).toEqual([]);
   });
 
+  it('returns full passed_actual/failed_actual lists in empirical mode (empty FAIL_TO_PASS/PASS_TO_PASS)', async () => {
+    const upstreamRepoDir = makeUpstreamFixture({
+      reportItem: {
+        from_fail_to_pass: [],
+        failed_from_pass_to_pass: [],
+        passed_actual: ['test_a'],
+        failed_actual: ['test_b'],
+        passed_match: false,
+        exit_code: 1,
+      },
+    });
+    const result = await new PythonEvalRunner({ upstreamRepoDir, maxWorkers: 1 }).runEval({
+      ...REQUEST,
+      fail_to_pass: [],
+      pass_to_pass: [],
+    });
+    expect(result.passed).toEqual(['test_a']);
+    expect(result.failed).toEqual(['test_b']);
+  });
+
   it('throws EvalCouldNotGradeError when Docker is unreachable (no test passed, non-zero exit, infra signature)', async () => {
     const upstreamRepoDir = makeUpstreamFixture({
       reportItem: {

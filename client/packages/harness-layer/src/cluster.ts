@@ -20,6 +20,8 @@ export interface ClusterItem {
   ref: string;
   /** The SWE-bench-style instance id this evidence belongs to. */
   instanceId: string;
+  /** Lineage equivalence key — echo instances collapse to source (§7). */
+  lineageKey?: string;
   /** The scrubbed layer-1 trace envelope. */
   env: TraceEnvelopeV0;
 }
@@ -161,6 +163,7 @@ export interface Stage1PublishedSkill {
   pkg: SkillPackage;
   evidenceRefs: string[];
   instanceIds: string[];
+  lineageKeys?: string[];
 }
 
 /** One labelled source inside a meta-cluster (its id is what the model echoes in `supports`). */
@@ -199,6 +202,10 @@ function isMetaPolarity(kind: SkillKind): kind is MetaPolarity {
   return kind in META_GATE_TIER;
 }
 
+export function lineageEquivalenceKey(item: ClusterItem): string {
+  return item.lineageKey ?? item.instanceId;
+}
+
 /**
  * Group stage-1 published skills into one meta-cluster per polarity. A polarity
  * is meta-distillable only when it spans **≥2 distinct instances** (a
@@ -217,7 +224,11 @@ export function buildMetaClusters(published: Stage1PublishedSkill[]): MetaCluste
 
   const clusters: MetaCluster[] = [];
   for (const [polarity, group] of byPolarity) {
-    const distinctInstances = new Set(group.flatMap((g) => g.instanceIds));
+    const distinctInstances = new Set(
+      group.flatMap((g, gi) =>
+        g.instanceIds.map((id, ii) => g.lineageKeys?.[ii] ?? id),
+      ),
+    );
     if (distinctInstances.size < 2) continue;
     const sources: MetaSource[] = group.map((g, i) => ({
       id: `s${i + 1}`,

@@ -722,8 +722,8 @@ describe('ValidatedPoolStore — targeted v3→v4 carry-forward migration (#493)
       [poolTask('scor__1'), poolTask('pyt__1')],
       { fetcher, runner: { runEval }, store, semanticsVersion: '4', upstreamRepoDir: '/fake/upstream', commandRunner },
     );
-    // scor__1 carried forward → skipped; pyt__1 dropped → re-validated.
-    expect(runEval).toHaveBeenCalledTimes(1);
+    // scor__1 carried forward → skipped; pyt__1 dropped → re-validated (gold + discrimination).
+    expect(runEval).toHaveBeenCalledTimes(2);
     expect(runEval.mock.calls.every(([a]) => (a as { instance_id: string }).instance_id === 'pyt__1')).toBe(true);
     expect(summary.checked).toBe(1);
     expect((await store.getEntry('scor__1', '4'))?.reason).toBe('gold-patch-resolves');

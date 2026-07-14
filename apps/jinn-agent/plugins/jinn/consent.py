@@ -61,6 +61,21 @@ WHAT_LEAVES = [
 def decline_line() -> str:
     return f"Decline and {_harness.harness_name()} still works fully — as a reader."
 
+MINEABLE_TRACE_HEADER = "LOCAL TRACE MINING (OPTIONAL, TIER 1)"
+MINEABLE_TRACE_BODY = (
+    "Keep a scrubbed copy of task traces on this machine so Jinn can mine new "
+    "tasks from your work. Nothing is published unless you also consent to "
+    "corpus contribution and pass the public-repo publish gate."
+)
+MINEABLE_TRACE_ACCEPT = (
+    "Retain mineable traces locally? Scrubbed repo, commit, diff, and test "
+    "outcomes stay on disk for mining only. [Y] Yes · [N] No"
+)
+MINEABLE_TRACE_DECLINE = (
+    "Skip local mining retention? Only standard scrubbed corpus traces apply "
+    "when contribution is on. [Y] Yes · [N] No"
+)
+
 CONFIRM_ACCEPT = (
     "Turn on contribution? Every task this harness runs will be scrubbed and "
     "published to the public corpus. You can veto any task and turn this off "
@@ -119,25 +134,29 @@ def state_path() -> Path:
 def load_state() -> Dict[str, object]:
     path = state_path()
     if not path.exists():
-        return {"status": UNSET, "previewed": False}
+        return {"status": UNSET, "previewed": False, "mineableTraceConsent": "off", "publishMinedTasksConsent": False}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         if data.get("status") not in (UNSET, ACCEPTED, DECLINED):
-            return {"status": UNSET, "previewed": False}
+            return {"status": UNSET, "previewed": False, "mineableTraceConsent": "off", "publishMinedTasksConsent": False}
         data.setdefault("previewed", False)
+        data.setdefault("mineableTraceConsent", "off")
+        data.setdefault("publishMinedTasksConsent", False)
         return data
     except Exception:
         logger.warning("jinn: unreadable consent state at %s — treating as unset", path)
         return {"status": UNSET, "previewed": False}
 
 
-def save_state(status: str, *, previewed: Optional[bool] = None) -> Dict[str, object]:
+def save_state(status: str, *, previewed: Optional[bool] = None, mineable_trace_consent: Optional[str] = None, publish_mined_tasks_consent: Optional[bool] = None) -> Dict[str, object]:
     if status not in (UNSET, ACCEPTED, DECLINED):
         raise ValueError(f"invalid consent status: {status}")
     current = load_state()
     state: Dict[str, object] = {
         "status": status,
         "previewed": bool(current.get("previewed") if previewed is None else previewed),
+        "mineableTraceConsent": mineable_trace_consent if mineable_trace_consent is not None else current.get("mineableTraceConsent", "off"),
+        "publishMinedTasksConsent": publish_mined_tasks_consent if publish_mined_tasks_consent is not None else current.get("publishMinedTasksConsent", False),
         "recordedAt": datetime.now(timezone.utc).isoformat(),
     }
     path = state_path()
@@ -154,6 +173,15 @@ def mark_previewed() -> None:
 def capture_enabled() -> bool:
     """True only when the operator explicitly accepted. unset == declined."""
     return load_state().get("status") == ACCEPTED
+
+
+def mineable_trace_enabled() -> bool:
+    """Tier-1: retain mineable fields locally for task mining (D2)."""
+    return load_state().get("mineableTraceConsent") == "retain_local"
+
+
+def render_mineable_trace_prompt() -> str:
+    return "\n".join([MINEABLE_TRACE_HEADER + ":", MINEABLE_TRACE_BODY, "", MINEABLE_TRACE_ACCEPT])
 
 
 # ── The flow ─────────────────────────────────────────────────────────────────

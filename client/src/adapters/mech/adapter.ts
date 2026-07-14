@@ -598,7 +598,12 @@ export class MechAdapter implements ExecutionAdapter {
     const digestNo0x = restorationDataHex.startsWith('0x') ? restorationDataHex.slice(2) : restorationDataHex;
     const restorationTaskCid = `f01551220${digestNo0x}`;
 
-    const deliveryRate = await getMechDeliveryRate(this.publicClient, this.config.mechContractAddress);
+    const baseDeliveryRate = await getMechDeliveryRate(this.publicClient, this.config.mechContractAddress);
+    const { resolveMintedTaskDeliveryRate } = await import('../../solver-types/_swe-rebench-v2-escrow.js');
+    const deliveryRate = resolveMintedTaskDeliveryRate(
+      baseDeliveryRate,
+      signedTask.eligibility as Record<string, unknown> | undefined,
+    );
     const { max: maxTimeout } = await getTimeoutBounds(this.publicClient, this.config.mechMarketplaceAddress);
     // Task 24 (spec/2026-05-05-solvernet-creation-and-launch.md §14): the
     // on-chain digest is now manifest-bound — `keccak256(manifestCid)` —
