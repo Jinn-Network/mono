@@ -28,7 +28,7 @@ script = 'script'
 # in. forge_test --match-contract Invariant only compiles what the test
 # tree imports, but we still need a clean global build for
 # `forge build`.
-no_match_path = '{src/vendor/**,src/staking/RestorationActivityChecker.sol,src/staking/JinnRouter.sol,src/staking/JinnRouterProxy.sol,src/staking/ActivityCheckerProxy.sol,src/stubs/**,src/testnet/**,src/claiming/**,src/jinn/distribution/DistributionTestMocks.sol,src/jinn/cross-chain/CrossChainTestMocks.sol,test/**.ts,test/**.test.ts}'
+no_match_path = '{src/vendor/**,src/staking/JinnRouterProxy.sol,src/staking/ActivityCheckerProxy.sol,src/stubs/**,src/testnet/**,src/claiming/**,src/jinn/distribution/DistributionTestMocks.sol,src/jinn/cross-chain/CrossChainTestMocks.sol,test/**.ts,test/**.test.ts}'
 
 # Invariant tuning — kept conservative for empty stubs. Real authoring
 # under a follow-up issue will tune these per-contract.
