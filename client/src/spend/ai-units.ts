@@ -90,7 +90,7 @@ function unitsToUsdMicros(units: number): number {
 /** 6h block in milliseconds — UTC blocks start at 00:00 / 06:00 / 12:00 / 18:00. */
 const SIX_HOUR_BLOCK_MS = 6 * 60 * 60 * 1_000;
 /** 7 days in milliseconds — UTC-aligned. */
-const SEVEN_DAY_MS = 7 * 24 * 60 * 60 * 1_000;
+export const SEVEN_DAY_MS = 7 * 24 * 60 * 60 * 1_000;
 
 /**
  * Project the AI-unit cost of one task for a harness/model combination.

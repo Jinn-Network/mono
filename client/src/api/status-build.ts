@@ -42,6 +42,9 @@ export interface SpendStatus {
   credentials: SpendCredentialRow[];
 }
 
+/** The AI-units window a paused credential is binding on, or `null` when not paused. */
+export type AiUnitsPausedWindow = 'block' | 'week' | null;
+
 /** Per-credential AI-units row exposed on /v1/status (issues #815, #1004). */
 export interface AiUnitsCredentialRow {
   credentialId: string;
@@ -83,7 +86,7 @@ export interface AiUnitsCredentialRow {
    * cap). `null` when not paused. Lets the SPA render the pause reason
    * without re-deriving the precedence locally (issue #830, item 2).
    */
-  pausedWindow: 'block' | 'week' | null;
+  pausedWindow: AiUnitsPausedWindow;
   /** ISO timestamp of the next 6h block boundary (00:00 / 06:00 / 12:00 / 18:00 UTC). */
   blockResetsAt: string;
   /**

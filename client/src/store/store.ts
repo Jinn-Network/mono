@@ -10,9 +10,7 @@ import { TASK_RUNS_SCHEMA, TaskRunPersistence } from '../harnesses/engine/persis
 import type { TaskRunReadModel } from '../types/task-run-read-model.js';
 import type { TxSubmissionKey, TxSubmissionLedgerEntry } from '../tx-retry.js';
 import { normalizeEnvelopeRole, type Role } from '../types/envelope.js';
-
-/** 7 days in milliseconds — mirrors `SEVEN_DAY_MS` in `spend/ai-units.ts`. */
-const SEVEN_DAY_MS = 7 * 24 * 60 * 60 * 1_000;
+import { SEVEN_DAY_MS } from '../spend/ai-units.js';
 
 export interface ActivityEventInput {
   ts: string | null;
@@ -1518,16 +1516,16 @@ export class Store {
     let remaining = rows.reduce((sum, r) => sum + r.usdMicros, 0);
     if (remaining < capUsdMicros) return null;
 
+    // Guaranteed to return inside this loop: `remaining` starts >=
+    // `capUsdMicros` (checked above) and strictly decreases each iteration,
+    // reaching 0 after the last row — which is always < capUsdMicros.
     for (const row of rows) {
       remaining -= row.usdMicros;
       if (remaining < capUsdMicros) {
         return new Date(new Date(row.ts).getTime() + SEVEN_DAY_MS).toISOString();
       }
     }
-    // Degenerate: dropping every row still doesn't clear the cap — resume
-    // once the newest row itself ages out.
-    const last = rows[rows.length - 1];
-    return new Date(new Date(last.ts).getTime() + SEVEN_DAY_MS).toISOString();
+    throw new Error('unreachable: weekWindowResumeAt loop must return before exhausting rows');
   }
 
   /** Shared COALESCE-sum + estimate-flag query for the USD accumulators. */

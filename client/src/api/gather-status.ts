@@ -25,6 +25,7 @@ import type { FleetState } from '../earning/types.js';
 import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
 import {
   assembleStatusV1,
+  type AiUnitsPausedWindow,
   type GatheredStatusRaw,
   type ServiceBalanceErrorEntry,
   type StatusV1Response,
@@ -906,14 +907,16 @@ export async function gatherStatusForApi(
         // Block-preferred precedence — mirrors the daemon gate
         // (`src/daemon/ai-units-gate.ts`): when both windows are over, the
         // binding window is the block (issue #830, item 2).
-        const pausedWindow: 'block' | 'week' | null = overBlock ? 'block' : overWeek ? 'week' : null;
+        const pausedWindow: AiUnitsPausedWindow = overBlock ? 'block' : overWeek ? 'week' : null;
         // The true "claims resume at" instant for the week window (issue
-        // #830, item 1) — null when the week window is under cap, in which
-        // case the fixed `now + 7d` fallback is used since the value isn't
-        // operator-relevant.
-        const weekResetsAt =
-          store.weekWindowResumeAt(credentialId, aiUnitsCfg.capPerWeekUsdMicros, now) ??
-          weekResetsAtFallback;
+        // #830, item 1) — only computed when actually paused on the week
+        // window; otherwise the fixed `now + 7d` fallback is used since the
+        // value isn't operator-relevant (and querying it would cost an
+        // unconditional per-credential row scan on every status poll).
+        const weekResetsAt = overWeek
+          ? (store.weekWindowResumeAt(credentialId, aiUnitsCfg.capPerWeekUsdMicros, now) ??
+            weekResetsAtFallback)
+          : weekResetsAtFallback;
         return {
           credentialId,
           // #1006: legacy unit fields, derived from USD via the peg.
