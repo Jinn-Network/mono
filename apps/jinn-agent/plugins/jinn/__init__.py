@@ -338,6 +338,11 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
         pending = _latest_pending()
         if pending:
             lines.append(f"pending trace: {pending}")
+            # A held pre-publish trace (share ON, not yet previewed → nothing
+            # published) reads `recorded` — the queued enum's human label. No
+            # sidecar, no separate dir, no error when absent (mono#1664 AC4).
+            if not state.get("previewed"):
+                lines.append("contribution: recorded")
         return "\n".join(lines)
 
     if sub == "consent":
