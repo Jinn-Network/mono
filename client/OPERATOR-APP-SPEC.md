@@ -388,6 +388,7 @@ Rendered inside a launched-SolverNet detail view, this panel surfaces the live s
   - publication timestamp (most recent vetted-pool publication, swe-rebench-v2 only)
 - **State messages**
   - `vetted_pool_republished` — **info** severity. Raised when `generatorState.poolPublicationUpdatedAt` is defined. Carries prior pool size, current pool size, and the publication timestamp. Purely informational — no action; the daemon has already re-published the vetted-pool artifact and pinned the new CID. (swe-rebench-v2 only.)
+  - `vetted_pool_stale` — **warning** severity. Raised when `generatorState.poolPublicationStale` is `true` (an on-disk vetted-pool publication exists under an older `evalSemanticsVersion` than the running daemon's `EVAL_SEMANTICS_VERSION`). Rendered as a one-line notice **distinct from** `vetted_pool_republished` and from the no-publication case (which surfaces no notice). Informational with implicit resolution — no action; the daemon auto-re-publishes under the current version on the next generator tick. (swe-rebench-v2 only.)
   - `vetted_pool_publication_failed` — **warning** severity. Raised when `generatorState.lastError.message` starts with `"vetted pool publication failed"`. Rendered as the existing `GeneratorError` block; the daemon retries on the next tick. (swe-rebench-v2 only.)
 - **Collections** — none. The pool is a derived view rendered inline; the panel does not own a paginated collection.
 - **Actions** — none in v1. Hot-applyable config edits are owned by the sibling generator-config form on the same panel.

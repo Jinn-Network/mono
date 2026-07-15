@@ -478,6 +478,73 @@ describe('GeneratorPanel — pool re-publication notice', () => {
   });
 });
 
+describe('GeneratorPanel — vetted-pool stale notice (#796)', () => {
+  it('renders the stale notice when poolPublicationStale is true', () => {
+    render(
+      <GeneratorPanel
+        record={buildSweRebenchRecord({
+          generatorState: { poolPublicationStale: true },
+        })}
+        onSave={async () => undefined}
+      />,
+    );
+
+    const notice = screen.getByTestId('launcher-launched-generator-pool-stale');
+    expect(notice).toBeTruthy();
+    expect(notice.textContent).toMatch(/Vetted pool re-publish needed/);
+    expect(notice.textContent).toMatch(/older eval-semantics version/);
+  });
+
+  it('surfaces stale DISTINCTLY from re-published (stale alone shows only the stale notice)', () => {
+    render(
+      <GeneratorPanel
+        record={buildSweRebenchRecord({
+          generatorState: { poolPublicationStale: true },
+        })}
+        onSave={async () => undefined}
+      />,
+    );
+
+    expect(
+      screen.getByTestId('launcher-launched-generator-pool-stale'),
+    ).toBeTruthy();
+    expect(
+      screen.queryByTestId('launcher-launched-generator-pool-republished'),
+    ).toBeNull();
+  });
+
+  it('shows neither notice for the no-publication case (distinct from stale)', () => {
+    render(
+      <GeneratorPanel
+        record={buildSweRebenchRecord({ generatorState: {} })}
+        onSave={async () => undefined}
+      />,
+    );
+
+    expect(
+      screen.queryByTestId('launcher-launched-generator-pool-stale'),
+    ).toBeNull();
+    expect(
+      screen.queryByTestId('launcher-launched-generator-pool-republished'),
+    ).toBeNull();
+  });
+
+  it('does not render the stale notice when poolPublicationStale is false or absent', () => {
+    render(
+      <GeneratorPanel
+        record={buildSweRebenchRecord({
+          generatorState: { poolPublicationStale: false },
+        })}
+        onSave={async () => undefined}
+      />,
+    );
+
+    expect(
+      screen.queryByTestId('launcher-launched-generator-pool-stale'),
+    ).toBeNull();
+  });
+});
+
 describe('buildPatch', () => {
   const prior = {
     cadenceMs: '21600000',

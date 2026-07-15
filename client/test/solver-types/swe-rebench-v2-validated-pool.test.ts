@@ -20,6 +20,11 @@ import {
   vettedPoolRefSemanticsMismatch,
   SOLVERNET_ARTIFACT_REF_SCHEMA_VERSION,
   SWE_REBENCH_V2_VETTED_POOL_ARTIFACT_TYPE,
+  isPublicationStale,
+  readVettedPoolArtifactPublicationUnfiltered,
+  writeVettedPoolArtifactPublication,
+  createVettedPoolArtifactRef,
+  parseVettedPoolArtifact,
 } from '../../src/solver-types/_swe-rebench-v2-validated-pool.js';
 import { computeRowHash } from '../../src/solver-types/_swe-rebench-v2-substrate.js';
 import type { PoolTask } from '../../src/solver-types/_swe-rebench-v2-pool.js';
@@ -756,6 +761,55 @@ describe('ValidatedPoolStore — targeted v3→v4 carry-forward migration (#493)
     expect(summary.checked).toBe(1);
     expect((await store.getEntry('scor__1', '4'))?.reason).toBe('gold-patch-resolves');
     expect((await store.getEntry('pyt__1', '4'))?.scorable).toBe(true);
+  });
+});
+
+describe('isPublicationStale + readVettedPoolArtifactPublicationUnfiltered (#493)', () => {
+  function makeArtifact(version: string) {
+    return parseVettedPoolArtifact({
+      schemaVersion: 'swe-rebench-v2-vetted-pool.v1',
+      evalSemanticsVersion: version,
+      generatedAt: '2026-05-25T00:00:00Z',
+      entries: [
+        { instance_id: 'a__1', scorable: true, reason: 'gold-patch-resolves', checkedAt: '2026-05-25T00:00:00Z' },
+      ],
+    });
+  }
+
+  it('isPublicationStale returns false for a null publication (no publication ≠ stale publication)', () => {
+    expect(isPublicationStale(null, EVAL_SEMANTICS_VERSION)).toBe(false);
+  });
+
+  it('isPublicationStale returns true when ref.evalSemanticsVersion differs from current', async () => {
+    const dir = tmpDir();
+    const artifact = makeArtifact('3');
+    const ref = createVettedPoolArtifactRef({
+      manifestCid: 'bafy-test',
+      artifactCid: 'bafkrei-test',
+      artifactHash: hashVettedPoolArtifact(artifact),
+      evalSemanticsVersion: '3',
+      publishedAt: '2026-05-25T00:00:00Z',
+    });
+    await writeVettedPoolArtifactPublication({ stateDir: dir, ref, artifact });
+    const pub = await readVettedPoolArtifactPublicationUnfiltered({ stateDir: dir });
+    expect(pub).not.toBeNull();
+    expect(isPublicationStale(pub, '4')).toBe(true);
+    expect(isPublicationStale(pub, '3')).toBe(false);
+  });
+
+  it('readVettedPoolArtifactPublicationUnfiltered returns the publication regardless of version mismatch', async () => {
+    const dir = tmpDir();
+    const artifact = makeArtifact('3');
+    const ref = createVettedPoolArtifactRef({
+      manifestCid: 'bafy-test',
+      artifactCid: 'bafkrei-test',
+      artifactHash: hashVettedPoolArtifact(artifact),
+      evalSemanticsVersion: '3',
+      publishedAt: '2026-05-25T00:00:00Z',
+    });
+    await writeVettedPoolArtifactPublication({ stateDir: dir, ref, artifact });
+    const pub = await readVettedPoolArtifactPublicationUnfiltered({ stateDir: dir });
+    expect(pub?.ref.evalSemanticsVersion).toBe('3');
   });
 });
 
