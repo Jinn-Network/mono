@@ -375,6 +375,11 @@ def finalize_turn(
                 conversation_history=list(messages),
                 model=agent.model,
                 platform=getattr(agent, "platform", None) or "",
+                # Session token counters live on the agent, not in-plugin — the
+                # jinn plugin's EpisodeV1 capture reads them for cost.tokens
+                # (mono #1662). Additive kwargs; every handler takes **kwargs.
+                input_tokens=getattr(agent, "session_input_tokens", 0),
+                output_tokens=getattr(agent, "session_output_tokens", 0),
             )
         except Exception as exc:
             logger.warning("post_llm_call hook failed: %s", exc)
@@ -500,6 +505,11 @@ def finalize_turn(
             interrupted=interrupted,
             model=agent.model,
             platform=getattr(agent, "platform", None) or "",
+            # Tokens + preloaded skills loadout for the jinn EpisodeV1 capture
+            # (mono #1662) — both reachable only on the agent. Additive kwargs.
+            input_tokens=getattr(agent, "session_input_tokens", 0),
+            output_tokens=getattr(agent, "session_output_tokens", 0),
+            skills_loadout=getattr(agent, "loaded_skill_names", None) or [],
         )
     except Exception as exc:
         logger.warning("on_session_end hook failed: %s", exc)

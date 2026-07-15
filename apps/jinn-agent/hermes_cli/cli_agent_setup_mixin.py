@@ -402,6 +402,11 @@ class CLIAgentSetupMixin:
             # forever — so memory shutdown never ran on /exit (#49287).
             import cli as _cli
             _cli._active_agent_ref = self.agent
+            # Carry the preloaded skills loadout onto the agent so session-end
+            # can forward it to the jinn EpisodeV1 capture (mono #1662). Set
+            # here (not at the build_preloaded_skills_prompt consumer) because
+            # the agent object does not exist until this point.
+            self.agent.loaded_skill_names = list(getattr(self, "preloaded_skills", None) or [])
             # Route agent status output through prompt_toolkit so ANSI escape
             # sequences aren't garbled by patch_stdout's StdoutProxy (#2262).
             self.agent._print_fn = _cprint

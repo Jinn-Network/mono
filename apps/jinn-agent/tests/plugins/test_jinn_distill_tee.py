@@ -53,6 +53,7 @@ class DistillAwareRunner:
 def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("JINN_LAYER_CAPTURES_DIR", str(tmp_path / "captures"))
+    monkeypatch.setenv("JINN_LAYER_EPISODES_DIR", str(tmp_path / "episodes"))
     capture_buffer.reset()
     distill.reset()
     jinn._vetoed_tasks.clear()
@@ -61,7 +62,12 @@ def isolated(tmp_path, monkeypatch):
     jinn._runner = None
 
 
-def _drive_session(session_id: str = "s1", task_id: str = "t1") -> None:
+def _drive_session(
+    session_id: str = "s1",
+    task_id: str = "t1",
+    input_tokens: int = 100,
+    output_tokens: int = 50,
+) -> None:
     jinn._on_pre_llm_call(
         session_id=session_id,
         task_id=task_id,
@@ -79,7 +85,27 @@ def _drive_session(session_id: str = "s1", task_id: str = "t1") -> None:
         result="1 failed",
         duration_ms=10,
     )
-    jinn._on_session_end(session_id=session_id, task_id=task_id, completed=True, interrupted=False)
+    jinn._on_post_llm_call(
+        session_id=session_id,
+        task_id=task_id,
+        user_message="Fix the failing retry test",
+        assistant_response="Fixed the retry test.",
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+    )
+    jinn._on_session_end(
+        session_id=session_id,
+        task_id=task_id,
+        completed=True,
+        interrupted=False,
+        skills_loadout=["tdd"],
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+    )
+
+
+def _episode_files() -> list[Path]:
+    return sorted(distill.episodes_dir().glob("*.json"))
 
 
 def _capture_files(tmp_path_env: str | None = None) -> list[Path]:
@@ -164,6 +190,107 @@ def test_prune_keeps_the_newest_files(tmp_path):
     distill.prune_captures(keep=3)
     kept = sorted(f.name for f in d.glob("*.json"))
     assert kept == ["cap-2.json", "cap-3.json", "cap-4.json"]
+
+
+def test_full_hook_drive_yields_ordered_episode(tmp_path):
+    consent.save_state(consent.ACCEPTED)
+    consent.mark_previewed()
+    runner = DistillAwareRunner(mode="unset")
+    jinn._runner = runner
+
+    _drive_session()
+
+    episodes = _episode_files()
+    assert len(episodes) == 1, "an EpisodeV1 is written under accepted consent"
+    ep = json.loads(episodes[0].read_text())
+    assert ep["schemaVersion"] == "jinn.episode.v1"
+    assert [step["kind"] for step in ep["trajectory"]] == [
+        "jinn.agent_turn",
+        "jinn.tool_call",
+        "jinn.agent_turn",
+    ]
+    assert ep["trajectory"][0]["attributes"]["role"] == "user"
+    assert ep["trajectory"][2]["attributes"]["role"] == "assistant"
+    assert ep["environment"]["skillsLoadout"] == ["tdd"]
+    assert ep["cost"]["tokens"] == {"input": 100, "output": 50}
+
+
+def test_full_hook_drive_omits_cost_tokens_when_host_reports_no_usage(tmp_path):
+    # AC2 on the REAL path: when the host forwards 0/0 (the getattr default when
+    # the agent recorded no usage), the plugin must OMIT cost.tokens rather than
+    # emit {input:0, output:0} (mono #1662).
+    consent.save_state(consent.ACCEPTED)
+    consent.mark_previewed()
+    runner = DistillAwareRunner(mode="unset")
+    jinn._runner = runner
+
+    _drive_session(input_tokens=0, output_tokens=0)
+
+    episodes = _episode_files()
+    assert len(episodes) == 1
+    ep = json.loads(episodes[0].read_text())
+    assert "tokens" not in ep["cost"], "no host usage => cost.tokens omitted, not {0,0}"
+
+
+def test_no_consent_no_distill_writes_nothing(tmp_path):
+    consent.save_state(consent.UNSET)
+    runner = DistillAwareRunner(mode="unset")  # unset + no publish consent => off
+    jinn._runner = runner
+
+    _drive_session()
+
+    assert _capture_files() == [], "no consent, no distill: nothing tee'd"
+    assert _episode_files() == [], "no consent, no distill: no episode"
+    assert runner.published() == []
+
+
+def test_legacy_capture_still_written_byte_shape(tmp_path):
+    consent.save_state(consent.ACCEPTED)
+    consent.mark_previewed()
+    runner = DistillAwareRunner(mode="unset")
+    jinn._runner = runner
+
+    _drive_session()
+
+    files = _capture_files()
+    assert len(files) == 1
+    task = json.loads(files[0].read_text())
+    # Legacy CapturedTask shape — no schemaVersion, the keys parseCapturedTask reads.
+    assert "schemaVersion" not in task
+    assert set(task.keys()) == {
+        "session",
+        "task",
+        "environment",
+        "steps",
+        "outcome",
+        "cost",
+        "provenance",
+    }
+
+
+def test_episode_written_to_separate_location(tmp_path):
+    consent.save_state(consent.ACCEPTED)
+    consent.mark_previewed()
+    runner = DistillAwareRunner(mode="unset")
+    jinn._runner = runner
+
+    _drive_session()
+
+    assert distill.episodes_dir() != distill.captures_dir()
+    episodes = _episode_files()
+    assert len(episodes) == 1
+    assert json.loads(episodes[0].read_text())["schemaVersion"] == "jinn.episode.v1"
+
+
+def test_episode_not_written_without_gate(tmp_path):
+    consent.save_state(consent.DECLINED)
+    runner = DistillAwareRunner(status_code=2)  # old layer: distill gating off
+    jinn._runner = runner
+
+    _drive_session()
+
+    assert _capture_files() == []
+    assert _episode_files() == []
 
 
 def test_tee_failure_never_breaks_session_end(tmp_path, monkeypatch):

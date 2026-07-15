@@ -4260,6 +4260,9 @@ def _make_agent(
     agent_cfg = cfg.get("agent") or {}
     system_prompt = _prompt_text(agent_cfg.get("system_prompt", ""))
     startup_skills = _parse_tui_skills_env()
+    # Carried onto the agent below so session-end can forward the loadout to the
+    # jinn EpisodeV1 capture (mono #1662).
+    _loaded_skills: list = []
     if startup_skills:
         from agent.skill_commands import build_preloaded_skills_prompt
 
@@ -4267,6 +4270,7 @@ def _make_agent(
             startup_skills,
             task_id=session_id or key,
         )
+        _loaded_skills = list(loaded_skills or [])
         if missing_skills:
             missing_display = ", ".join(missing_skills)
             # Degrade gracefully when some skills loaded; only hard-fail when
@@ -4340,7 +4344,7 @@ def _make_agent(
             "target_model": model or None,
         })
     _pr = _load_provider_routing()
-    return AIAgent(
+    _agent = AIAgent(
         model=model,
         max_iterations=_cfg_max_turns(cfg, 90),
         provider=runtime.get("provider"),
@@ -4387,6 +4391,8 @@ def _make_agent(
         fallback_model=_load_fallback_model(),
         **_agent_cbs(sid),
     )
+    _agent.loaded_skill_names = _loaded_skills
+    return _agent
 
 
 def _init_session(

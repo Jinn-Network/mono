@@ -60,6 +60,19 @@ def captures_dir() -> Path:
     return Path.home() / ".jinn-client" / "harness-layer" / "captures"
 
 
+def episodes_dir() -> Path:
+    """Where the EpisodeV1 dual-write lands — distinct from captures_dir().
+
+    A separate dir keeps EpisodeV1 records out of the legacy captures dir the
+    rung-1 distill loop reads, so the strict ``parseCapturedTask`` reader is
+    never even offered an episode file to skip (mono #1662).
+    """
+    env = (os.environ.get("JINN_LAYER_EPISODES_DIR") or "").strip()
+    if env:
+        return Path(env).expanduser()
+    return Path.home() / ".jinn-client" / "harness-layer" / "episodes"
+
+
 def distill_status(runner: Optional[Runner] = None) -> Optional[Dict[str, Any]]:
     """One `distill status --json` read; None when the layer lacks the verb."""
     try:
@@ -139,5 +152,21 @@ def tee_capture(task: Dict[str, Any], session_id: str, runner: Optional[Runner] 
         path = jinn_layer.write_task_file(task, captures_dir(), session_id)
         prune_captures()
         return path
+    except Exception:
+        return None
+
+
+def write_episode(episode: Optional[Dict[str, Any]], session_id: str, runner: Optional[Runner] = None) -> Optional[Path]:
+    """Dual-write the EpisodeV1 record to its own dir (mono #1662).
+
+    Same gating table as ``tee_capture`` (``should_tee``) and the same
+    best-effort discipline: an episode-write failure must never break a session
+    end. Written to ``episodes_dir()`` so it never collides with the legacy
+    capture nor reaches ``parseCapturedTask``.
+    """
+    try:
+        if episode is None or not should_tee(runner):
+            return None
+        return jinn_layer.write_task_file(episode, episodes_dir(), session_id)
     except Exception:
         return None

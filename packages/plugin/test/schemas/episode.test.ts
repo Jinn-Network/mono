@@ -42,4 +42,104 @@ describe('EpisodeV1Schema', () => {
     const withLineage = { ...valid, lineage: { episodeId: 'ep-0', mintRef: 'mint-1' } };
     expect(EpisodeV1Schema.parse(withLineage).lineage?.mintRef).toBe('mint-1');
   });
+
+  // Cross-runtime contract guard (mono #1662): the Python plugin's
+  // capture_buffer.assemble_episode() is the sole producer of this record; if its
+  // emitted shape drifts from EpisodeV1Schema, the network drops real traces. The
+  // two fixtures below are verbatim assemble_episode() output (a full user→tool→
+  // assistant episode and a turn-only, no-tokens episode) — parsing them through
+  // the strict schema pins the producer↔schema contract.
+  it('parses a real assemble_episode full-trajectory output', () => {
+    const fromPython = {
+      schemaVersion: 'jinn.episode.v1',
+      episodeId: 's-1784073615851964000',
+      session: { sessionId: 's', capturedAt: '2026-07-15T00:00:15.851854Z' },
+      task: { summary: 'fix the retry bug', distributionTags: [] },
+      trajectory: [
+        {
+          spanId: 'turn-1',
+          parentSpanId: null,
+          kind: 'jinn.agent_turn',
+          name: 'turn:user',
+          startTimeUnixNano: '1784073615851967000',
+          endTimeUnixNano: '1784073615851967000',
+          attributes: { 'turn.text': 'fix the retry bug', role: 'user' },
+          redactedKeys: [],
+        },
+        {
+          spanId: 'c1',
+          parentSpanId: null,
+          kind: 'jinn.tool_call',
+          name: 'tool:edit',
+          startTimeUnixNano: '1784073615846972000',
+          endTimeUnixNano: '1784073615851972000',
+          attributes: { 'tool.args': { path: 'x' }, 'tool.result': 'ok' },
+          redactedKeys: [],
+        },
+        {
+          spanId: 'turn-2',
+          parentSpanId: null,
+          kind: 'jinn.agent_turn',
+          name: 'turn:assistant',
+          startTimeUnixNano: '1784073615851975000',
+          endTimeUnixNano: '1784073615851975000',
+          attributes: { 'turn.text': 'fixed it', role: 'assistant' },
+          redactedKeys: [],
+        },
+      ],
+      environment: {
+        harness: { name: 'hermes-agent', version: '0.1.0' },
+        model: 'gpt-4o-mini',
+        tools: ['edit'],
+        skillsLoadout: ['tdd', 'debugging'],
+      },
+      outcome: { status: 'completed', verifiabilityTier: 'user-accepted' },
+      cost: { durationMs: 0, tokens: { input: 100, output: 50 } },
+      retention: { policy: 'local-private' },
+      provenance: 'contributed',
+    };
+    expect(() => EpisodeV1Schema.parse(fromPython)).not.toThrow();
+  });
+
+  it('parses a real assemble_episode turn-only output (no tool calls, cost.tokens omitted)', () => {
+    const fromPython = {
+      schemaVersion: 'jinn.episode.v1',
+      episodeId: 't-1784073615852046000',
+      session: { sessionId: 't', capturedAt: '2026-07-15T00:00:15.852044Z' },
+      task: { summary: 'just a question', distributionTags: [] },
+      trajectory: [
+        {
+          spanId: 'turn-1',
+          parentSpanId: null,
+          kind: 'jinn.agent_turn',
+          name: 'turn:user',
+          startTimeUnixNano: '1784073615852047000',
+          endTimeUnixNano: '1784073615852047000',
+          attributes: { 'turn.text': 'just a question', role: 'user' },
+          redactedKeys: [],
+        },
+        {
+          spanId: 'turn-2',
+          parentSpanId: null,
+          kind: 'jinn.agent_turn',
+          name: 'turn:assistant',
+          startTimeUnixNano: '1784073615852049000',
+          endTimeUnixNano: '1784073615852049000',
+          attributes: { 'turn.text': 'here is the answer', role: 'assistant' },
+          redactedKeys: [],
+        },
+      ],
+      environment: {
+        harness: { name: 'hermes-agent', version: '0.1.0' },
+        model: 'gpt-4o-mini',
+        tools: [],
+        skillsLoadout: [],
+      },
+      outcome: { status: 'completed', verifiabilityTier: 'user-accepted' },
+      cost: { durationMs: 0 },
+      retention: { policy: 'contribution-eligible' },
+      provenance: 'contributed',
+    };
+    expect(() => EpisodeV1Schema.parse(fromPython)).not.toThrow();
+  });
 });

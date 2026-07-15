@@ -122,6 +122,11 @@ def _on_pre_llm_call(
     # publish path stays gated on publish consent alone (see _on_session_end).
     if consent.capture_enabled() or distill.distill_capture_enabled(_runner):
         buf.record_first_turn(task_id, session_id, user_message, model, platform)
+        # Ordered user-turn span for the EpisodeV1 trajectory (mono #1662).
+        # record_first_turn stores metadata only; this appends the turn span so
+        # it precedes this turn's tool calls (post_tool_call) and the assistant
+        # turn (post_llm_call).
+        buf.record_user_turn(task_id, session_id, user_message)
     # Consumption side — NEVER consent-gated: payload-agnostic corpus pickup.
     # Returns {"context": ...} (injected into the user message, cache-safe)
     # or None. Fails open inside pickup().
@@ -145,17 +150,60 @@ def _on_post_tool_call(
     buf.record_tool_call(task_id, session_id, tool_name, tool_call_id, args, result, duration_ms)
 
 
+def _on_post_llm_call(
+    session_id: str = "",
+    task_id: str = "",
+    user_message: str = "",
+    assistant_response: str = "",
+    input_tokens: Optional[int] = None,
+    output_tokens: Optional[int] = None,
+    **_: Any,
+) -> None:
+    # Complete the EpisodeV1 turn (mono #1662): the assistant span lands AFTER
+    # this turn's tool calls (post_tool_call fires inside the tool loop, which
+    # completes before post_llm_call). Same gate as every other recorder — a
+    # distill-only opt-in fills the buffer; publish stays gated in session-end.
+    if not (consent.capture_enabled() or distill.distill_capture_enabled(_runner)):
+        return
+    buf.record_assistant_turn(task_id, session_id, assistant_response)
+    # Record tokens only when the host reports meaningful usage. Zero/zero (the
+    # getattr default when the agent has no usage) is treated as "no usage" so
+    # cost.tokens is OMITTED rather than emitted as {0,0} (AC2, mono #1662).
+    if input_tokens or output_tokens:
+        buf.record_tokens(task_id, session_id, input_tokens or 0, output_tokens or 0)
+
+
 def _on_session_end(
     session_id: str = "",
     task_id: str = "",
     completed: bool = False,
     interrupted: bool = False,
+    skills_loadout: Optional[list] = None,
+    input_tokens: Optional[int] = None,
+    output_tokens: Optional[int] = None,
     **_: Any,
 ) -> None:
     publish_enabled = consent.capture_enabled()
     if not (publish_enabled or distill.distill_capture_enabled(_runner)):
         return
-    task = buf.assemble(task_id, session_id, completed, interrupted)
+    # Record the skills loadout + token fallback (host forward, mono #1662)
+    # under the same gate, before the single popping assembly.
+    buf.record_environment(task_id, session_id, skills_loadout or [])
+    # See _on_post_llm_call — zero/no usage omits cost.tokens (AC2, mono #1662).
+    if input_tokens or output_tokens:
+        buf.record_tokens(task_id, session_id, input_tokens or 0, output_tokens or 0)
+
+    # Pop the buffer ONCE for both shapes (assemble pops — see assemble_both).
+    task, episode = buf.assemble_both(
+        task_id, session_id, completed, interrupted, publish_consented=publish_enabled
+    )
+
+    # Dual-write the complete-trajectory EpisodeV1 to its own dir (mono #1662),
+    # same gate as the tee, best-effort (never breaks the session end). Written
+    # before the legacy None-guard so a turn-only session (no tool call) still
+    # emits its ≥1-turn episode.
+    distill.write_episode(episode, session_id or task_id, runner=_runner)
+
     if task is None:
         return
 
@@ -469,6 +517,7 @@ def register(ctx) -> None:
     ctx.register_hook("on_session_start", _on_session_start)
     ctx.register_hook("pre_llm_call", _on_pre_llm_call)
     ctx.register_hook("post_tool_call", _on_post_tool_call)
+    ctx.register_hook("post_llm_call", _on_post_llm_call)
     ctx.register_hook("on_session_end", _on_session_end)
     ctx.register_command(
         "jinn",
