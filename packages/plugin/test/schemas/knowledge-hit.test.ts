@@ -25,4 +25,21 @@ describe('KnowledgeHitSchema', () => {
   it('rejects an unknown field (strict)', () => {
     expect(() => KnowledgeHitSchema.parse({ ref: 'x', kind: 'seed', extra: 1 })).toThrow();
   });
+
+  it('parses the optional tier + payloadKind classification fields', () => {
+    const parsed = KnowledgeHitSchema.parse({
+      ref: 'ipfs://abc',
+      kind: 'skill',
+      tier: 'evaluator-verified',
+      payloadKind: 'skill',
+    });
+    expect(parsed.tier).toBe('evaluator-verified');
+    expect(parsed.payloadKind).toBe('skill');
+  });
+
+  it('rejects an unknown tier value', () => {
+    expect(() =>
+      KnowledgeHitSchema.parse({ ref: 'x', kind: 'skill', tier: 'bogus' }),
+    ).toThrow();
+  });
 });

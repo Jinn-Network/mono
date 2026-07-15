@@ -12,7 +12,9 @@ describe('createJinnPlugin session → end smoke (AC5)', () => {
   it('completes a session on in-memory adapters and returns a schema-valid EpisodeV1', async () => {
     const evidence = new InMemoryEvidencePort();
     const plugin = createJinnPlugin({
-      corpus: new InMemoryCorpusPort([{ ref: 'seed-1', kind: 'seed', title: 'Fixing flaky tests' }]),
+      corpus: new InMemoryCorpusPort([
+        { ref: 'seed-1', kind: 'skill', title: 'flaky', snippet: 'Fixing flaky tests', tier: 'user-accepted', payloadKind: 'skill' },
+      ]),
       evidence,
       contribution: new InMemoryContributionPort(),
       localLearning: new InMemoryLocalLearningPort(),
@@ -27,7 +29,7 @@ describe('createJinnPlugin session → end smoke (AC5)', () => {
       tools: ['bash', 'edit'],
     });
 
-    const pickup = await session.firstTurnPickup('how do I fix this flaky test?');
+    const pickup = await session.firstTurnPickup('debug this flaky assertion');
     expect(pickup.suggestions).toHaveLength(1);
     expect(pickup.markers).toContain('corpus');
 
@@ -46,15 +48,13 @@ describe('createJinnPlugin session → end smoke (AC5)', () => {
       status: 'completed',
       verifiabilityTier: 'user-accepted',
       durationMs: 1500,
-      retentionPolicy: 'local-private',
+      retentionPolicy: 'contribution-eligible',
+      acceptedDiff: true,
     });
 
     expect(result.episodeRef).toBeTruthy();
-    expect(result.eligibility).toEqual({
-      eligible: false,
-      reason: 'stage-1-stub',
-      checkedAt: expect.any(String),
-    });
+    expect(result.eligibility.eligible).toBe(true);
+    expect(result.eligibility.reason.length).toBeGreaterThan(0);
     expect(result.summary.episodeRef).toBe(result.episodeRef);
     expect(result.summary.nothingFound).toBe(false);
 
@@ -69,5 +69,34 @@ describe('createJinnPlugin session → end smoke (AC5)', () => {
     ]);
     expect(episode.trajectory.every((s) => s.spanId.length > 0)).toBe(true);
     expect(episode.outcome.status).toBe('completed');
+  });
+
+  it('end() fails loud on a session with no recorded turns (EpisodeV1Schema turns.min(1))', async () => {
+    const plugin = createJinnPlugin({
+      corpus: new InMemoryCorpusPort([]),
+      evidence: new InMemoryEvidencePort(),
+      contribution: new InMemoryContributionPort(),
+      localLearning: new InMemoryLocalLearningPort(),
+      skills: new InMemorySkillsPort(),
+    });
+
+    const session = plugin.session({
+      sessionId: 'sess-empty',
+      taskSummary: 'no turns recorded',
+      harness: { name: 'hermes', version: '0.1.0' },
+      model: 'claude-test',
+      tools: ['bash'],
+    });
+
+    // No noteUserTurn / noteAssistantTurn — assembling the episode must throw,
+    // not silently persist an invalid record. The throw is the intended contract.
+    await expect(
+      session.end({
+        status: 'completed',
+        verifiabilityTier: 'user-accepted',
+        durationMs: 100,
+        retentionPolicy: 'local-private',
+      }),
+    ).rejects.toThrow();
   });
 });

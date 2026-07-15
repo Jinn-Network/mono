@@ -1,7 +1,7 @@
 // packages/plugin/src/index.ts
 // Public entry — grows incrementally as ports/schemas/factory land (S1-F1).
 export type { PortResult } from './outcome.js';
-export { ok, degraded, unavailable } from './outcome.js';
+export { ok, degraded, unavailable, valueOr, unwrap } from './outcome.js';
 export { EPISODE_SCHEMA_VERSION, EpisodeV1Schema } from './schemas/episode.js';
 export type { EpisodeV1 } from './schemas/episode.js';
 export { KnowledgeHitSchema } from './schemas/knowledge-hit.js';
@@ -27,3 +27,11 @@ export type {
   SessionOutcome,
   SessionEndResult,
 } from './plugin.js';
+export { PickupConfigSchema, DEFAULT_PICKUP_CONFIG, parsePickupConfig, TIER_ORDER } from './schemas/pickup-config.js';
+export type { PickupConfig, Tier } from './schemas/pickup-config.js';
+export { deriveTerms, tierAtLeast, classifyPayload, hitToCandidate, decidePickup } from './pickup.js';
+export type { PickupCandidate, PickupDecision } from './pickup.js';
+export { deriveEligibility } from './eligibility.js';
+export type { EligibilityInputs } from './eligibility.js';
+export { foldHistory, foldExplain } from './history.js';
+export type { HistoryResult, SessionExplanation, HistoryDeps } from './history.js';

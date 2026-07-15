@@ -19,7 +19,11 @@ import { EPISODE_SCHEMA_VERSION, EpisodeV1Schema } from './schemas/episode.js';
 import type { EpisodeV1 } from './schemas/episode.js';
 import type { KnowledgeHit } from './schemas/knowledge-hit.js';
 import type { SessionSummary } from './schemas/session-summary.js';
-import type { PortResult } from './outcome.js';
+import { decidePickup, deriveTerms, hitToCandidate, type PickupCandidate } from './pickup.js';
+import { valueOr, type PortResult } from './outcome.js';
+import { parsePickupConfig, type PickupConfig } from './schemas/pickup-config.js';
+import { deriveEligibility } from './eligibility.js';
+import { foldExplain, foldHistory, type HistoryResult, type SessionExplanation } from './history.js';
 
 export interface JinnPluginDeps {
   corpus: CorpusPort;
@@ -37,6 +41,7 @@ export interface SessionMeta {
   model: string;
   tools: string[];
   skillsLoadout?: string[];
+  pickup?: PickupConfig;
 }
 
 export interface FirstTurnPickupResult {
@@ -62,6 +67,8 @@ export interface SessionOutcome {
   durationMs: number;
   tokens?: { input: number; output: number };
   retentionPolicy: 'local-private' | 'contribution-eligible';
+  publicRepo?: boolean;
+  acceptedDiff?: boolean;
 }
 
 export interface SessionEndResult {
@@ -80,6 +87,8 @@ export interface SessionEndResult {
 export class PluginSession {
   private readonly trajectory: EpisodeV1['trajectory'] = [];
   private surfacedHits: KnowledgeHit[] = [];
+  private fetchedHits: KnowledgeHit[] = [];
+  private installedSkillRefs: string[] = [];
   private readonly capturedAt = new Date().toISOString();
 
   constructor(
@@ -88,13 +97,51 @@ export class PluginSession {
   ) {}
 
   async firstTurnPickup(firstMessage: string): Promise<FirstTurnPickupResult> {
-    const result = await this.deps.corpus.search(firstMessage);
-    const suggestions = result.status === 'ok' ? result.value : [];
-    this.surfacedHits = suggestions;
+    const empty: FirstTurnPickupResult = { contextBlock: undefined, suggestions: [], markers: [] };
+    const config = parsePickupConfig(this.meta.pickup);
+    if (!config.enabled) return empty;
+
+    const terms = deriveTerms(firstMessage);
+    if (terms.length === 0) return empty;
+
+    // Phase 1: search per term, dedupe by ref (skip non-ok reads → fail open).
+    const byRef = new Map<string, KnowledgeHit>();
+    for (const term of terms) {
+      const hits = valueOr(await this.deps.corpus.search(term), [] as KnowledgeHit[]);
+      for (const hit of hits) if (!byRef.has(hit.ref)) byRef.set(hit.ref, hit);
+    }
+    if (byRef.size === 0) return empty;
+
+    // Phase 2: get per capped candidate to classify (tier + payloadKind).
+    const refs = [...byRef.keys()].slice(0, config.maxCandidates);
+    const fetched: KnowledgeHit[] = [];
+    const candidates: PickupCandidate[] = [];
+    for (const ref of refs) {
+      const hit = valueOr(await this.deps.corpus.get(ref), null as KnowledgeHit | null);
+      if (!hit) continue;
+      fetched.push(hit);
+      candidates.push(hitToCandidate(hit));
+    }
+    this.surfacedHits = fetched;
+    this.fetchedHits = fetched;
+    if (candidates.length === 0) return empty;
+
+    // Installed-slug dedup (fail open: unknown installed set on non-ok read).
+    const listed = valueOr(await this.deps.skills.list(), []);
+    const installedSlugs = new Set<string>(listed.map((r) => r.ref.split('/').pop() ?? r.ref));
+
+    const decision = decidePickup(candidates, installedSlugs, config);
+
+    // Auto-adopt actually installs (the adopter rail; dormant by default).
+    for (const c of decision.adopted) {
+      const res = await this.deps.skills.install(c.ref);
+      if (res.status === 'ok') this.installedSkillRefs.push(c.ref);
+    }
+
     return {
-      contextBlock: suggestions.length > 0 ? suggestions.map((hit) => hit.title ?? hit.ref).join('\n') : undefined,
-      suggestions,
-      markers: suggestions.length > 0 ? ['corpus'] : [],
+      contextBlock: decision.contextBlock,
+      suggestions: fetched,
+      markers: decision.contextBlock ? ['corpus'] : [],
     };
   }
 
@@ -156,17 +203,22 @@ export class PluginSession {
 
     const persistence = await this.deps.evidence.put(episode);
 
-    const eligibility: EligibilityVerdict = {
-      eligible: false,
-      reason: 'stage-1-stub',
-      checkedAt: new Date().toISOString(),
-    };
+    const eligibility = deriveEligibility(
+      {
+        status: outcome.status,
+        verifiabilityTier: outcome.verifiabilityTier,
+        retentionPolicy: outcome.retentionPolicy,
+        publicRepo: outcome.publicRepo,
+        acceptedDiff: outcome.acceptedDiff,
+      },
+      new Date().toISOString(),
+    );
 
     const summary: SessionSummary = {
       episodeRef: episode.episodeId,
       surfacedHits: this.surfacedHits,
-      fetchedHits: [],
-      installedSkillRefs: [],
+      fetchedHits: this.fetchedHits,
+      installedSkillRefs: this.installedSkillRefs,
       eligibility,
       nothingFound: this.surfacedHits.length === 0,
     };
@@ -177,12 +229,20 @@ export class PluginSession {
 
 export interface JinnPlugin {
   session(meta: SessionMeta): PluginSession;
+  history(): Promise<HistoryResult>;
+  explain(sessionRef: string): Promise<SessionExplanation>;
 }
 
 export function createJinnPlugin(deps: JinnPluginDeps): JinnPlugin {
   return {
     session(meta: SessionMeta): PluginSession {
       return new PluginSession(deps, meta);
+    },
+    history(): Promise<HistoryResult> {
+      return foldHistory(deps);
+    },
+    explain(sessionRef: string): Promise<SessionExplanation> {
+      return foldExplain(sessionRef, deps);
     },
   };
 }
