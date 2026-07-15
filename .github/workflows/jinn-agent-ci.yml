@@ -2,10 +2,32 @@ name: jinn-agent CI
 
 on:
   pull_request:
-    paths: ['apps/jinn-agent/**']
+    paths:
+      - 'apps/jinn-agent/**'
+      - 'packages/plugin/**'
+      - 'client/packages/harness-layer/**'
+      - 'client/src/solver-types/_swe-rebench-v2-*.ts'
+      - 'client/src/adapters/mech/ipfs.ts'
+      - 'client/src/harnesses/impls/swe-rebench-v2-evaluator/**'
+      - 'client/scripts/bundle-jinn-layer.mjs'
+      - 'client/scripts/stage1-task-creator-acceptance.mjs'
+      - 'client/package.json'
+      - 'client/yarn.lock'
+      - '.github/workflows/jinn-agent-ci.yml'
   push:
     branches: [next, main]
-    paths: ['apps/jinn-agent/**']
+    paths:
+      - 'apps/jinn-agent/**'
+      - 'packages/plugin/**'
+      - 'client/packages/harness-layer/**'
+      - 'client/src/solver-types/_swe-rebench-v2-*.ts'
+      - 'client/src/adapters/mech/ipfs.ts'
+      - 'client/src/harnesses/impls/swe-rebench-v2-evaluator/**'
+      - 'client/scripts/bundle-jinn-layer.mjs'
+      - 'client/scripts/stage1-task-creator-acceptance.mjs'
+      - 'client/package.json'
+      - 'client/yarn.lock'
+      - '.github/workflows/jinn-agent-ci.yml'
   workflow_dispatch:
   schedule:
     - cron: '0 7 * * *'
@@ -61,15 +83,38 @@ jobs:
           ./scripts/run_tests.sh --files "$FILES" -j 4 --file-timeout 1200 -q
 
   cold-stock-e2e:
-    name: Cold-stock e2e (advisory)
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    name: Cold-stock Stage 1 product gate
+    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    continue-on-error: true
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
-      - name: Cold-stock e2e (network clone; advisory, never pages)
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Enable Corepack
+        working-directory: client
+        run: corepack enable
+      - name: Install client dependencies
+        working-directory: client
+        run: yarn install --immutable
+      - name: Build the real jinn-layer and daemon
+        working-directory: client
+        run: yarn build
+      - name: Plugin package boundary, schema, type, test, and build gates
+        working-directory: client
+        run: yarn --cwd ../packages/plugin typecheck && yarn --cwd ../packages/plugin test && yarn --cwd ../packages/plugin build
+      - name: Harness store, process contract, and task-creator privacy gates
+        working-directory: client
+        run: >-
+          yarn vitest run
+          packages/harness-layer/test/contribution-store.test.ts
+          packages/harness-layer/test/process-contract.test.ts
+          test/solver-types/task-creator-session-echo.test.ts
+      - name: Pinned stock-Hermes Stage 1 product journey
+        env:
+          JINN_STAGE1_SKIP_CLIENT_BUILD: '1'
         run: bash scripts/cold-stock-e2e.sh
