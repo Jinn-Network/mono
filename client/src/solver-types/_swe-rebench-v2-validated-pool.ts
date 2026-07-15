@@ -941,15 +941,9 @@ export async function readVettedPoolArtifactPublicationUnfiltered(args: {
   stateDir: string;
   manifestCid?: string;
 }): Promise<VettedPoolArtifactPublication | null> {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(await readFile(publicationPath(args.stateDir), 'utf8'));
-  } catch {
-    return null;
-  }
-  const publication = parsePublication(raw);
-  if (args.manifestCid !== undefined && publication.ref.manifestCid !== args.manifestCid) return null;
-  return publication;
+  // Delegate to the filtered reader, omitting evalSemanticsVersion so the
+  // version filter stays inactive — that is the whole "unfiltered" difference.
+  return readVettedPoolArtifactPublication(args);
 }
 
 export async function readVettedPoolArtifactPublication(args: {
