@@ -44,6 +44,8 @@ import {
   hashVettedPoolArtifact,
   loadVettedPoolArtifactScorableEntries,
   readVettedPoolArtifactPublication,
+  readVettedPoolArtifactPublicationUnfiltered,
+  isPublicationStale,
   writeVettedPoolArtifactPublication,
   type AdmissionMode,
   type SolverNetArtifactRef,
@@ -149,6 +151,7 @@ export interface SweRebenchV2GeneratorStateSnapshot {
   poolPublicationUpdatedAt?: string;
   poolPublicationPriorSize?: number;
   poolPublicationCurrentSize?: number;
+  poolPublicationStale?: boolean;
 }
 
 export type SweRebenchV2GeneratorTick = TaskGenerator & {
@@ -465,6 +468,15 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
   let publishedPoolCache: PublishedVettedPool | null = null;
   let lastValidatedPoolMtimeMs = -1;
   let lastRepublication: PublishedVettedPool['republication'] | undefined;
+  let poolPublicationStale = false;
+
+  async function refreshPoolStale(): Promise<void> {
+    const pub = await readVettedPoolArtifactPublicationUnfiltered({
+      stateDir: config.stateDir,
+      manifestCid: config.solverNetManifestCid,
+    });
+    poolPublicationStale = isPublicationStale(pub, EVAL_SEMANTICS_VERSION);
+  }
 
   async function refreshPool(): Promise<void> {
     const result = await loadPoolWithCacheFallback({
@@ -631,6 +643,7 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
         }
       }
     }
+    await refreshPoolStale().catch(() => {});
     if (publishedPool === null) {
       lastPollSummary = {
         poolSize: 0,
@@ -931,6 +944,10 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
     return signed.length > 0 ? signed : null;
   };
 
+  // Construction-time lazy refresh so a cold getState() (before the first
+  // tick) can already report a stale on-disk publication.
+  void refreshPoolStale().catch(() => {});
+
   return Object.assign(tick, {
     getState(): SweRebenchV2GeneratorStateSnapshot {
       const liveConfig = normalizeGeneratorConfig(
@@ -951,6 +968,7 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
               poolPublicationCurrentSize: lastRepublication.currentSize,
             }
           : {}),
+        ...(poolPublicationStale ? { poolPublicationStale: true } : {}),
       };
     },
   });

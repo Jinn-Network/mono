@@ -329,6 +329,8 @@ function PanelShell({
 
       <PoolRepublishedNotice record={record} />
 
+      <PoolStaleNotice record={record} />
+
       {record.generatorState?.lastError && <GeneratorError record={record} />}
 
       {children}
@@ -716,6 +718,26 @@ function PoolRepublishedNotice({
       <AlertTitle>Vetted pool re-published</AlertTitle>
       <AlertDescription>
         {sizeFragment} · {formatTimestamp(updatedAt)}
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+function PoolStaleNotice({
+  record,
+}: {
+  record: LaunchedSolverNetRecord;
+}): JSX.Element | null {
+  if (record.generatorState?.poolPublicationStale !== true) return null;
+  return (
+    <Alert
+      data-testid="launcher-launched-generator-pool-stale"
+      variant="warning"
+    >
+      <AlertTitle>Vetted pool re-publish needed</AlertTitle>
+      <AlertDescription>
+        Published under an older eval-semantics version; the daemon
+        re-publishes on the next generator tick.
       </AlertDescription>
     </Alert>
   );

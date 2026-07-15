@@ -80,6 +80,7 @@ export interface LauncherGeneratorStateSnapshot {
   poolPublicationUpdatedAt?: string;
   poolPublicationPriorSize?: number;
   poolPublicationCurrentSize?: number;
+  poolPublicationStale?: boolean;
   totalPosted?: number;
   lastPostedInstanceId?: string;
 }
