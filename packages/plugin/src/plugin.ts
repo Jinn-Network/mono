@@ -7,7 +7,11 @@
 
 /// <reference types="node" />
 import { randomUUID } from 'node:crypto';
-import type { ContributionLedgerEntry, ContributionPort } from './ports/contribution-port.js';
+import type {
+  ContributionLedgerEntry,
+  ContributionPort,
+  ContributionStatusSnapshot,
+} from './ports/contribution-port.js';
 import type { CorpusPort } from './ports/corpus-port.js';
 import type { EvidencePort } from './ports/evidence-port.js';
 import type { LocalLearningPort } from './ports/local-learning-port.js';
@@ -99,8 +103,7 @@ export interface SessionEndResult {
 }
 
 export type ContributionCompletionReceipt =
-  | { recordId: string }
-  | { recordId: string; publicationState: 'vetoed'; status: 'vetoed' };
+  { recordId: string } & Partial<ContributionStatusSnapshot>;
 
 export interface ContributionPreview {
   recordId: string;
@@ -248,6 +251,23 @@ async function completeSession(
             { recordId },
           );
         }
+      } else if (contribution.status === 'ok') {
+        const recordId = contribution.value.recordId;
+        try {
+          const snapshot = await deps.contribution.mintStatus(recordId);
+          if (snapshot.status === 'ok') {
+            contribution = ok({ recordId, ...snapshot.value });
+          } else if (snapshot.status === 'degraded' && snapshot.value !== undefined) {
+            contribution = degraded(snapshot.reason, { recordId, ...snapshot.value });
+          } else {
+            contribution = degraded(snapshot.reason, { recordId });
+          }
+        } catch (error) {
+          contribution = degraded(
+            `contribution status failed: ${errorReason(error)}`,
+            { recordId },
+          );
+        }
       }
     }
   }
@@ -260,7 +280,10 @@ async function completeSession(
     fetchedHits: hits.fetchedHits,
     installedSkillRefs: activity.installedSkillRefs,
     eligibility,
-    nothingFound: activity.surfacedRefs.length === 0,
+    nothingFound:
+      activity.surfacedRefs.length === 0
+      && activity.fetchedRefs.length === 0
+      && activity.installedSkillRefs.length === 0,
   };
 
   return {

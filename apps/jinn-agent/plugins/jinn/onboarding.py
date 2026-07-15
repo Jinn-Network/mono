@@ -414,6 +414,8 @@ def render_corpus_signal_line(
     env_ref: str,
     pal=None,
     rst=None,
+    *,
+    action: str = "using",
 ) -> str:
     """One in-run line at the point of corpus use (design 1c) — the permanent
     artefact of step 4. ``◇ corpus`` prefix (sky), skill name bright, provenance
@@ -435,12 +437,13 @@ def render_corpus_signal_line(
     skill = _style.sanitise(skill)
     provenance = _style.sanitise(provenance)
     env_ref = _style.sanitise(env_ref)
+    action = "surfaced" if action == "surfaced" else "using"
     sky = lambda s: _style.wrap(pal, rst, "sky", s)
     skyh = lambda s: _style.wrap(pal, rst, "fg", s)  # bright skill name
     fg = lambda s: _style.wrap(pal, rst, "fg", s)
     dim = lambda s: _style.wrap(pal, rst, "dim", s)
     return (
-        "  " + sky("◇ corpus") + "  " + fg("using ") + skyh(skill)
+        "  " + sky("◇ corpus") + "  " + fg(action + " ") + skyh(skill)
         + dim(f"  ·  {provenance}  ·  ") + sky(f"env {env_ref}")
     )
 

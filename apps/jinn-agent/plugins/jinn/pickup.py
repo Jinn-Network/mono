@@ -40,10 +40,9 @@ from .consent import get_hermes_home
 logger = logging.getLogger(__name__)
 
 # The point-of-use corpus signal (design 1c / #1405 step 4). Emitted once per
-# adopted contribution — the harness is actually *using* another operator's
-# work in this run, so the operator sees a checkable line at that moment. A
-# suggested-but-not-adopted candidate is only injected context (not used), so
-# it never emits a signal. Default sink mirrors _user_line in __init__.py:
+# surfaced contribution: suggestions say ``surfaced`` while auto-adopted
+# knowledge says ``using``, so visibility never overclaims adoption. Default
+# sink mirrors _user_line in __init__.py:
 # stderr, which prompt_toolkit proxies above the input area while the TUI runs.
 SignalSink = Callable[[str], None]
 
@@ -55,11 +54,20 @@ def _default_signal_sink(line: str) -> None:
         pass
 
 
-def _emit_corpus_signal(sink: SignalSink, skill: str, provenance: str, env_ref: str) -> None:
+def _emit_corpus_signal(
+    sink: SignalSink,
+    skill: str,
+    provenance: str,
+    env_ref: str,
+    *,
+    action: str = "using",
+) -> None:
     """Render + emit one ``◇ corpus`` line. Never raises — a signal must not
     break a pickup that otherwise succeeded."""
     try:
-        sink(onboarding.render_corpus_signal_line(skill, provenance, env_ref))
+        sink(onboarding.render_corpus_signal_line(
+            skill, provenance, env_ref, action=action
+        ))
     except Exception:
         logger.debug("jinn: corpus signal render failed", exc_info=True)
 
@@ -195,7 +203,7 @@ def pickup(
     pre_llm_call hook (or None when there is nothing worth saying).
     Fails open: any error returns None and the task proceeds untouched.
 
-    ``signal_sink`` receives one ``◇ corpus`` line per adopted contribution
+    ``signal_sink`` receives one ``◇ corpus`` line per surfaced contribution
     (design 1c). Defaults to stderr; tests pass a collector.
     """
     try:
@@ -291,12 +299,26 @@ def _pickup_inner(
             )
             if activity is not None and ref not in activity.setdefault("surfacedRefs", []):
                 activity["surfacedRefs"].append(ref)
+            _emit_corpus_signal(
+                signal_sink,
+                slug,
+                f"{tier} · {summary}",
+                _short_ref(ref),
+                action="surfaced",
+            )
         else:
             # Unknown payload types are never adopted; mention verified ones only.
             if tier_at_least(tier, threshold):
                 suggested.append(f"- ({payload_type}, {tier}) {summary} — ref: {ref}")
                 if activity is not None and ref not in activity.setdefault("surfacedRefs", []):
                     activity["surfacedRefs"].append(ref)
+                _emit_corpus_signal(
+                    signal_sink,
+                    payload_type,
+                    f"{tier} · {summary}",
+                    _short_ref(ref),
+                    action="surfaced",
+                )
 
     if not adopted and not suggested:
         return None

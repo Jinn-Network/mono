@@ -160,6 +160,13 @@ def has_steps(task_id: str, session_id: str) -> bool:
         return bool(buf and buf["steps"])
 
 
+def has_capture(task_id: str, session_id: str) -> bool:
+    """Whether any ordinary agent activity is currently captured locally."""
+    with _lock:
+        buf = _buffers.get(_key(task_id, session_id))
+        return bool(buf and (buf["steps"] or buf.get("turns")))
+
+
 def _pop(task_id: str, session_id: str) -> Optional[Dict[str, Any]]:
     """Pop the buffer once (None if absent or wholly empty).
 

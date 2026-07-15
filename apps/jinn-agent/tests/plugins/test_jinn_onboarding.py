@@ -247,9 +247,8 @@ def test_corpus_signal_line_hooked_into_pickup(tmp_path, monkeypatch):
     assert "env " in plain
 
 
-def test_pickup_suggested_but_not_adopted_emits_no_signal(tmp_path, monkeypatch):
-    """A suggested (unadopted) candidate is only injected context, not used —
-    so it must NOT emit a signal."""
+def test_pickup_suggested_but_not_adopted_emits_surfaced_signal(tmp_path, monkeypatch):
+    """Every suggestion is visibly marked without claiming it was used."""
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     pickup = importlib.reload(importlib.import_module("plugins.jinn.pickup"))
     tp = importlib.import_module("tests.plugins.test_jinn_pickup")
@@ -258,7 +257,25 @@ def test_pickup_suggested_but_not_adopted_emits_no_signal(tmp_path, monkeypatch)
     result = pickup.pickup(tp.MSG, runner=runner, signal_sink=lines.append)
     assert result is not None
     assert "unverified" in result["context"]
-    assert lines == []
+    assert len(lines) == 1
+    plain = _plain(lines[0])
+    assert plain.startswith("  ◇ corpus")
+    assert "surfaced tdd" in plain
+    assert "using tdd" not in plain
+
+
+def test_pickup_unknown_suggestion_is_also_visibly_surfaced(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    pickup = importlib.reload(importlib.import_module("plugins.jinn.pickup"))
+    tp = importlib.import_module("tests.plugins.test_jinn_pickup")
+    runner = tp.CorpusRunner(tp.trace(
+        tier="evaluator-verified", payload="opaque", slug="opaque-pattern"
+    ))
+    lines = []
+    result = pickup.pickup(tp.MSG, runner=runner, signal_sink=lines.append)
+    assert result is not None
+    assert len(lines) == 1
+    assert "surfaced unknown" in _plain(lines[0])
 
 
 # ── Persistence — facts over flags ───────────────────────────────────────────

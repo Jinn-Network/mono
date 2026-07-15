@@ -9,6 +9,7 @@ import pytest
 
 jinn = importlib.import_module("plugins.jinn")
 buf = importlib.import_module("plugins.jinn.capture_buffer")
+session_view = importlib.import_module("plugins.jinn.session_view")
 
 
 @pytest.fixture(autouse=True)
@@ -61,13 +62,15 @@ def test_veto_marker_and_directory_are_owner_only():
 
 
 def test_published_message_says_the_record_is_immutable():
-    line = jinn._contribution_line(
-        {
-            "contribution": {
-                "status": "ok",
-                "value": {"recordId": "episode-1", "status": "published"},
-            }
-        }
+    line = session_view.render_complete(
+        summary=None,
+        activity={},
+        capture_status="captured",
+        local_learning_status="pending",
+        contribution={
+            "status": "ok",
+            "value": {"recordId": "episode-1", "status": "published"},
+        },
     )
 
-    assert line == "jinn: contribution published — immutable (/jinn ledger for the anchor)"
+    assert "jinn: contribution published — immutable (/jinn ledger for the anchor)" in line

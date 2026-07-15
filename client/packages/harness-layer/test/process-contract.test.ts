@@ -368,6 +368,26 @@ describe('jinn-layer process contract v1', () => {
           skills: new InMemorySkillsPort(),
         },
       })).toBe(0);
+      expect(JSON.parse(out.output())).toMatchObject({
+        contractVersion: 1,
+        status: 'ok',
+        value: {
+          persistence: { status: 'ok', value: { episodeId: 'episode-host-1' } },
+          contribution: {
+            status: 'ok',
+            value: {
+              localState: 'recorded',
+              publicationState: 'disabled',
+              status: 'recorded',
+            },
+          },
+          summary: {
+            surfacedRefs: ['knowledge/ref-1'],
+            fetchedRefs: ['knowledge/ref-1'],
+            nothingFound: false,
+          },
+        },
+      });
 
       const persisted = JSON.parse(readFileSync(join(episodes, 'episode-host-1.episode.json'), 'utf8'));
       expect(persisted.episodeId).toBe('episode-host-1');
