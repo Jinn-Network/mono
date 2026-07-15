@@ -935,6 +935,35 @@ test('Launched dashboard self-hides total-posted / last-posted rows when the gen
   ).toHaveCount(0);
 });
 
+test('Launched dashboard surfaces the vetted-pool stale notice, distinct from re-published, at the app surface (#796)', async ({
+  page,
+}) => {
+  await clearLocalStorage(page);
+  const state = makeMockState({
+    launchedRecord: buildLaunchedRecord({
+      generatorState: { poolPublicationStale: true },
+    }),
+  });
+  await mockDaemonApi(page, state);
+
+  await page.goto(dashboardUrl(`/launcher/launched/${SOLVER_NET_ID}`));
+  await expect(page.getByTestId('launcher-launched')).toBeVisible({
+    timeout: 10_000,
+  });
+
+  // The warning notice renders when the daemon flags the pool as stale…
+  await expect(
+    page.getByTestId('launcher-launched-generator-pool-stale'),
+  ).toBeVisible();
+  await expect(
+    page.getByTestId('launcher-launched-generator-pool-stale'),
+  ).toContainText('Vetted pool re-publish needed');
+  // …and it is DISTINCT from the re-published notice, which is absent here.
+  await expect(
+    page.getByTestId('launcher-launched-generator-pool-republished'),
+  ).toHaveCount(0);
+});
+
 test('Operator catalog join flow writes manifest-cid keyed evaluator config from the launched registry', async ({
   page,
 }) => {
