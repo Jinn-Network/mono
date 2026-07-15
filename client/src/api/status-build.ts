@@ -76,9 +76,25 @@ export interface AiUnitsCredentialRow {
    * enrolled one in the /v1/status footprint (issue #891).
    */
   active: boolean;
+  /**
+   * The binding window when `paused` is true, using the same
+   * block-preferred precedence as the daemon gate
+   * (`src/daemon/ai-units-gate.ts`: block wins when both windows are over
+   * cap). `null` when not paused. Lets the SPA render the pause reason
+   * without re-deriving the precedence locally (issue #830, item 2).
+   */
+  pausedWindow: 'block' | 'week' | null;
   /** ISO timestamp of the next 6h block boundary (00:00 / 06:00 / 12:00 / 18:00 UTC). */
   blockResetsAt: string;
-  /** ISO timestamp of the next 7d window reset. */
+  /**
+   * ISO timestamp claims resume for the 7d window. When the week window is
+   * over cap, this is the accurate rolling-window resume instant (the
+   * moment the oldest in-window spend ages out enough to drop the sum back
+   * under the cap — see `Store.weekWindowResumeAt`). When the week window
+   * is under cap, this falls back to the coarse `weekResetsAtUtc(now)`
+   * (`now + 7d`) instant, which is not operator-relevant in that case
+   * (issue #830, item 1).
+   */
   weekResetsAt: string;
 }
 

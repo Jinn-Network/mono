@@ -888,7 +888,7 @@ export async function gatherStatusForApi(
   if (aiUnitsCfg) {
     const now = new Date();
     const blockResetsAt = blockResetsAtUtc(now).toISOString();
-    const weekResetsAt = weekResetsAtUtc(now).toISOString();
+    const weekResetsAtFallback = weekResetsAtUtc(now).toISOString();
     // Dedupe credentials across manifests — multiple SolverNets on the same
     // credential share one row.
     const uniqueCredentials = new Set(Object.values(aiUnitsCfg.manifestCredentials));
@@ -900,9 +900,20 @@ export async function gatherStatusForApi(
       credentials: [...uniqueCredentials].map((credentialId) => {
         const block = store.usdMicrosThisBlock(credentialId, now);
         const week = store.usdMicrosThisWeek(credentialId, now);
-        const paused =
-          block.usdMicros >= aiUnitsCfg.capPerBlockUsdMicros ||
-          week.usdMicros >= aiUnitsCfg.capPerWeekUsdMicros;
+        const overBlock = block.usdMicros >= aiUnitsCfg.capPerBlockUsdMicros;
+        const overWeek = week.usdMicros >= aiUnitsCfg.capPerWeekUsdMicros;
+        const paused = overBlock || overWeek;
+        // Block-preferred precedence — mirrors the daemon gate
+        // (`src/daemon/ai-units-gate.ts`): when both windows are over, the
+        // binding window is the block (issue #830, item 2).
+        const pausedWindow: 'block' | 'week' | null = overBlock ? 'block' : overWeek ? 'week' : null;
+        // The true "claims resume at" instant for the week window (issue
+        // #830, item 1) — null when the week window is under cap, in which
+        // case the fixed `now + 7d` fallback is used since the value isn't
+        // operator-relevant.
+        const weekResetsAt =
+          store.weekWindowResumeAt(credentialId, aiUnitsCfg.capPerWeekUsdMicros, now) ??
+          weekResetsAtFallback;
         return {
           credentialId,
           // #1006: legacy unit fields, derived from USD via the peg.
@@ -928,6 +939,7 @@ export async function gatherStatusForApi(
           // first cost row lands in the window (fresh node or just-reset 7d
           // window), so this can transiently under-report the live credential.
           active: week.usdMicros > 0,
+          pausedWindow,
           blockResetsAt,
           weekResetsAt,
         };

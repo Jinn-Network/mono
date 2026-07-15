@@ -253,7 +253,18 @@ export function blockIdUtc(now: Date): string {
   return blockStartUtc(now).toISOString();
 }
 
-/** Reset instant for the 7-day window — `now + (boundary - elapsed)`. We use rolling 7d here. */
+/**
+ * Coarse fallback reset instant for the 7-day window: `now + 7d`. This is
+ * NOT the true "claims resume at" instant for a paused week window — the
+ * window is rolling, so it sheds its oldest rows continuously rather than
+ * resetting all at once at a fixed point 7 days out. When a credential is
+ * actually paused on the week window, `Store.weekWindowResumeAt` computes
+ * the accurate resume instant (the moment the oldest in-window spend ages
+ * out enough to drop the sum back under the cap); callers should prefer
+ * that and fall back to this fixed instant only when the week window is
+ * under cap (in which case the value isn't operator-relevant). See issue
+ * #830.
+ */
 export function weekResetsAtUtc(now: Date): Date {
   return new Date(now.getTime() + SEVEN_DAY_MS);
 }

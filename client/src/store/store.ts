@@ -11,6 +11,9 @@ import type { TaskRunReadModel } from '../types/task-run-read-model.js';
 import type { TxSubmissionKey, TxSubmissionLedgerEntry } from '../tx-retry.js';
 import { normalizeEnvelopeRole, type Role } from '../types/envelope.js';
 
+/** 7 days in milliseconds — mirrors `SEVEN_DAY_MS` in `spend/ai-units.ts`. */
+const SEVEN_DAY_MS = 7 * 24 * 60 * 60 * 1_000;
+
 export interface ActivityEventInput {
   ts: string | null;
   kind: string;
@@ -1483,6 +1486,48 @@ export class Store {
   ): { usdMicros: number; estimated: boolean } {
     const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1_000).toISOString();
     return this.sumUsdMicros(credentialId, weekStart, undefined);
+  }
+
+  /**
+   * The true "claims resume at" instant for the rolling 7-day window
+   * (issue #830, item 1). `weekResetsAtUtc(now)` (`now + 7d`) is a fixed
+   * instant that overstates the wait — a rolling window sheds its oldest
+   * rows continuously, not all at once. This walks the in-window rows
+   * oldest-to-newest, subtracting each from the running total, and returns
+   * the instant the remaining sum first drops below `capUsdMicros` (that
+   * row's `ts + 7d`). Returns `null` when the window is already under cap
+   * (not paused on the week window — the fixed-instant fallback is used by
+   * the caller in that case, since the value isn't operator-relevant).
+   */
+  weekWindowResumeAt(credentialId: string, capUsdMicros: number, now: Date = new Date()): string | null {
+    const weekStart = new Date(now.getTime() - SEVEN_DAY_MS).toISOString();
+    const rows = this.db
+      .prepare(
+        `SELECT ts, COALESCE(actual_cost_usd_micros, estimated_cost_usd_micros, 0) AS usdMicros
+         FROM activity_events
+         WHERE credential_id = @cid
+           AND ts IS NOT NULL AND ts >= @weekStart AND ts < @now
+           AND claim_status IN ('claimed', 'delivered')
+         ORDER BY ts ASC`,
+      )
+      .all({ cid: credentialId, weekStart, now: now.toISOString() }) as {
+      ts: string;
+      usdMicros: number;
+    }[];
+
+    let remaining = rows.reduce((sum, r) => sum + r.usdMicros, 0);
+    if (remaining < capUsdMicros) return null;
+
+    for (const row of rows) {
+      remaining -= row.usdMicros;
+      if (remaining < capUsdMicros) {
+        return new Date(new Date(row.ts).getTime() + SEVEN_DAY_MS).toISOString();
+      }
+    }
+    // Degenerate: dropping every row still doesn't clear the cap — resume
+    // once the newest row itself ages out.
+    const last = rows[rows.length - 1];
+    return new Date(new Date(last.ts).getTime() + SEVEN_DAY_MS).toISOString();
   }
 
   /** Shared COALESCE-sum + estimate-flag query for the USD accumulators. */

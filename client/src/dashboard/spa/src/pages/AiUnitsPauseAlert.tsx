@@ -26,6 +26,14 @@ export interface AiUnitsStatusRow {
    * field (see the `?? true` default at the use site).
    */
   active?: boolean;
+  /**
+   * The binding window the daemon gate is actually pausing on
+   * (block-preferred precedence), from the /v1/status feed. Optional for
+   * backward-compat with daemons that predate the field (see the
+   * `?? (unitsThisBlock >= capPerBlock ? 'block' : 'week')` fallback at the
+   * use site) — issue #830, item 2.
+   */
+  pausedWindow?: 'block' | 'week' | null;
   blockResetsAt: string;
   weekResetsAt: string;
 }
@@ -54,9 +62,12 @@ export function AiUnitsPauseAlert({ aiUnits }: AiUnitsPauseAlertProps): JSX.Elem
   return (
     <div className="flex flex-col gap-2">
       {paused.map((row) => {
-        // Pick the binding window — whichever sum has actually reached its cap.
-        const blockHit = row.unitsThisBlock >= row.capPerBlock;
-        const window: 'block' | 'week' = blockHit ? 'block' : 'week';
+        // Prefer the gate-sourced binding window (issue #830, item 2) — it
+        // reflects the daemon's actual block-preferred precedence and can't
+        // disagree with it. Fall back to local derivation only for daemons
+        // predating the `pausedWindow` field.
+        const window: 'block' | 'week' =
+          row.pausedWindow ?? (row.unitsThisBlock >= row.capPerBlock ? 'block' : 'week');
         const resumeAt = window === 'block' ? row.blockResetsAt : row.weekResetsAt;
         const windowLabel = window === 'block' ? '6h' : '7d';
         // A paused credential is by definition the active one; default to active
