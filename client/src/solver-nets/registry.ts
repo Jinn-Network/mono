@@ -252,10 +252,20 @@ export async function registerJoinedNet(
   cid: string,
   joined: JoinedSolverNetConfig,
 ): Promise<void> {
-  if (!joined.contract) return;
+  if (!joined.contract) {
+    console.warn(
+      `[solver-nets] joinedSolverNets[${cid}] missing contract field — entry will not participate in claim flow`,
+    );
+    return;
+  }
   const solverType = `${joined.contract.id}.${joined.contract.version}`;
   const contract = getSolverNetContract(joined.contract);
-  if (!contract) return;
+  if (!contract) {
+    console.warn(
+      `[solver-nets] joinedSolverNets[${cid}] contract ${solverType} did not resolve to a known SolverNet — entry will not participate in claim flow`,
+    );
+    return;
+  }
   const roles = rolesFromJoinedConfig(joined);
   if (roles.length === 0) return;
   const disabledDefaults = joined.disabledDefaultPlugins ?? [];
