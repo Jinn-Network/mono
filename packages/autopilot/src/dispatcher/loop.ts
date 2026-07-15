@@ -54,6 +54,15 @@ export interface CycleReport {
    * operator log only — the sink has already recorded each result.
    */
   collected: SessionResult[];
+  /**
+   * Per-issue dispatch failures this cycle. A failing `dispatchIssue` (e.g. a
+   * git collision) must never abort the remaining dispatches — one bad issue
+   * previously took the whole cycle's dispatch loop down with it (review
+   * 2026-07-15, observed live). The failed issue stays In Progress (status
+   * flips before the failing step), so it does not hot-loop; the drift sweep
+   * reconciles it on a later cycle.
+   */
+  dispatchErrors: Array<{ issueNumber: number; message: string }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -217,6 +226,7 @@ export async function runCycle(
       // Completions are detected before the backpressure gate — surface them
       // even when no new work is dispatched this cycle. (#489)
       collected,
+      dispatchErrors: [],
     };
   }
 
@@ -228,15 +238,24 @@ export async function runCycle(
   const toDispatch = ready.slice(0, budget);
   const skippedForThrottle = ready.length - toDispatch.length;
 
-  // 7. Dispatch
+  // 7. Dispatch — isolated per issue: one failing dispatch must not abort
+  //    the rest of the batch (review 2026-07-15).
   const dispatched: DispatchedSession[] = [];
+  const dispatchErrors: Array<{ issueNumber: number; message: string }> = [];
   for (const issue of toDispatch) {
-    const session = await dispatchIssue(issue);
-    dispatched.push({
-      issueNumber: session.issueNumber,
-      pid: session.pid,
-      logPath: session.logPath,
-    });
+    try {
+      const session = await dispatchIssue(issue);
+      dispatched.push({
+        issueNumber: session.issueNumber,
+        pid: session.pid,
+        logPath: session.logPath,
+      });
+    } catch (err) {
+      dispatchErrors.push({
+        issueNumber: issue.number,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   return {
@@ -247,5 +266,6 @@ export async function runCycle(
     paused,
     skippedForAuthor,
     collected,
+    dispatchErrors,
   };
 }

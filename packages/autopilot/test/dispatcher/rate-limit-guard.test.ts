@@ -27,6 +27,7 @@ function buildReport(): CycleReport {
     dispatched: [],
     skippedForThrottle: 0,
     drift: [],
+    dispatchErrors: [],
     backpressureTripped: false,
     paused: [],
     skippedForAuthor: [],

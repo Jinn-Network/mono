@@ -534,3 +534,38 @@ describe('runCycle — collectCompletions / report.collected', () => {
     expect(dispatchIssue).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Dispatch isolation (review 2026-07-15): one failing dispatchIssue must not
+// abort the remaining dispatches — observed live when a dangling branch ref
+// fataled `worktree add` and took the whole cycle's dispatch loop down.
+// ---------------------------------------------------------------------------
+
+describe('runCycle — dispatch isolation', () => {
+  it('a failing dispatch is reported and the rest of the batch still dispatches', async () => {
+    const a = makePolled({ number: 100 });
+    const b = makePolled({ number: 200 });
+    const dispatchIssue = vi.fn().mockImplementation((issue: ReadyIssue) => {
+      if (issue.number === 100) {
+        return Promise.reject(new Error('git worktree add failed: branch already exists'));
+      }
+      return Promise.resolve(makeInFlight(issue.number));
+    });
+    const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
+      source: makeSource([a, b]),
+      cfg: makeCfg({ concurrencyCap: 5 }),
+      deriveInFlight: vi.fn().mockResolvedValue({ inFlight: [], drift: [] }),
+      dispatchIssue,
+      countOpenReadyPrs: vi.fn().mockResolvedValue(0),
+      wallClock: makeNeverExpiredClock(),
+      pauseSession: vi.fn().mockResolvedValue(undefined),
+      prevInFlight: [],
+      collectCompletions: vi.fn().mockResolvedValue([]),
+    });
+    expect(dispatchIssue).toHaveBeenCalledTimes(2);
+    expect(report.dispatched.map((d) => d.issueNumber)).toEqual([200]);
+    expect(report.dispatchErrors).toEqual([
+      { issueNumber: 100, message: 'git worktree add failed: branch already exists' },
+    ]);
+  });
+});

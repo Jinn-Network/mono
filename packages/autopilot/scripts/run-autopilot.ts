@@ -242,6 +242,13 @@ export function printReport(report: CycleReport, label: string): void {
     console.log(`\n   WALL-CLOCK PAUSED: #${report.paused.join(', #')} (Blocked on: Human)`);
   }
 
+  if (report.dispatchErrors.length > 0) {
+    console.log('\n   DISPATCH ERRORS (issue stays In Progress; drift sweep reconciles):');
+    for (const e of report.dispatchErrors) {
+      console.log(`     #${e.issueNumber}: ${e.message}`);
+    }
+  }
+
   if (report.drift.length > 0) {
     console.log('\n   DRIFT:');
     for (const d of report.drift) {
