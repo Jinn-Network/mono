@@ -228,6 +228,14 @@ export class HermesHarnessAdapter {
     const extraEnv: Record<string, string> = { HERMES_HOME: hermesHome };
     if (providerAuthVar && process.env[providerAuthVar]) {
       extraEnv[providerAuthVar] = process.env[providerAuthVar]!;
+    } else if (providerAuthVar) {
+      // The provider named a credential var but it is absent/empty in the
+      // environment. Injection is skipped (behavior preserved); Hermes would
+      // otherwise die later at the first model call with a generic "empty API
+      // key" and no clue why. Name the missing var so it is diagnosable.
+      console.warn(
+        `[hermes-agent] provider authVar ${providerAuthVar} is not set — skipping credential injection; Hermes will fail at the first model call with an empty API key`,
+      );
     }
     const env = buildAgentEnv(extraEnv);
 

@@ -484,6 +484,67 @@ describe('HermesHarnessAdapter', () => {
     }
   });
 
+  it('warns when a provider authVar names an unset env var and does not fire when it is present', async () => {
+    // Observability gap (issue #1243): a custom provider object declaring
+    // `authVar: 'MY_CRED'` with `process.env.MY_CRED` unset silently skips the
+    // credential injection, and Hermes dies later at first model call with a
+    // generic "empty API key" and no diagnostic. Warn (do NOT throw) naming the
+    // missing env var so the misconfiguration is diagnosable.
+    const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+    const work = mkdtempSync(join(tmpdir(), 'hermes-wd-'));
+
+    const AUTH_VAR = 'MISSING_CUSTOM_ENDPOINT_CRED';
+    const originalAuth = process.env[AUTH_VAR];
+    delete process.env[AUTH_VAR];
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      const adapter = new HermesHarnessAdapter({
+        hermesPath: '/bin/fake-hermes',
+        operatorHermesHome: home,
+        daemonApiUrl: 'http://127.0.0.1:7331',
+        daemonApiToken: 'tok',
+        corpusEnv: {},
+        _spawnFn: vi.fn(() => fakeHermesChild() as any) as any,
+      });
+
+      // Unset authVar → warn fires, run still proceeds (injection skipped).
+      const missingInputs = inputs(work, home);
+      missingInputs.model = 'my-model';
+      missingInputs.provider = {
+        name: 'my-endpoint',
+        baseUrl: 'http://127.0.0.1:9000/v1',
+        authVar: AUTH_VAR,
+      };
+      await adapter.runTask(missingInputs);
+
+      const missingWarn = warnSpy.mock.calls.find((c) => String(c[0]).includes(AUTH_VAR));
+      expect(missingWarn).toBeDefined();
+
+      // Now with the var present → no warn about a missing authVar.
+      warnSpy.mockClear();
+      process.env[AUTH_VAR] = 'secret-cred-value';
+      const presentInputs = inputs(work, home);
+      presentInputs.model = 'my-model';
+      presentInputs.provider = {
+        name: 'my-endpoint',
+        baseUrl: 'http://127.0.0.1:9000/v1',
+        authVar: AUTH_VAR,
+      };
+      await adapter.runTask(presentInputs);
+
+      const presentWarn = warnSpy.mock.calls.find((c) => String(c[0]).includes(AUTH_VAR));
+      expect(presentWarn).toBeUndefined();
+    } finally {
+      warnSpy.mockRestore();
+      if (originalAuth === undefined) delete process.env[AUTH_VAR];
+      else process.env[AUTH_VAR] = originalAuth;
+      rmSync(home, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
   it('per-task inputs.provider wins over daemon-global hermesProvider and inference', async () => {
     // Precedence guard (issue #1243): inputs.provider > hermesProvider > inference.
     const spawnCalls: SpawnCall[] = [];
