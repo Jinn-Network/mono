@@ -17,9 +17,9 @@ function makeStoreAndAdapter() {
   return { store, adapter: createContributionAdapter({ statusStore: store }) };
 }
 
-// AC1 — the ledger surfaces the four mint states an off-adapter mint/publish
-// path sets (queued|minted|published), plus the adapter-authored vetoed.
-describe('ContributionAdapter — forward states (AC1)', () => {
+// AC1 — adapter-state foundation coverage for queued/minted/published values
+// already present in the store, plus the adapter-authored vetoed state.
+describe('ContributionAdapter — adapter-state foundation (AC1)', () => {
   it('ledger() surfaces queued / minted / published entries from the store', async () => {
     const { store, adapter } = makeStoreAndAdapter();
     store.put({ recordId: 'r-queued', episodeId: 'e-queued', status: 'queued' });
@@ -48,10 +48,9 @@ describe('ContributionAdapter — forward states (AC1)', () => {
   });
 });
 
-// AC4 — a freshly recorded mineable record (no mint sidecar has advanced it)
-// reads back as queued, with no error. Distinct from the unknown-id case,
-// which is `unavailable`.
-describe('ContributionAdapter — sidecar absent reads queued (AC4)', () => {
+// AC4 — foundation coverage for a freshly recorded mineable record reading
+// back as queued. Distinct from the unknown-id case, which is `unavailable`.
+describe('ContributionAdapter — queued-state foundation (AC4)', () => {
   it('recordMineable then mintStatus is ok/queued, ledger lists it, no throw', async () => {
     const { adapter } = makeStoreAndAdapter();
     const rec = await adapter.recordMineable('e1');
@@ -68,8 +67,8 @@ describe('ContributionAdapter — sidecar absent reads queued (AC4)', () => {
   });
 });
 
-// AC3 (TS half) — recordMineable → veto → mintStatus/ledger both show vetoed.
-describe('ContributionAdapter — veto withholds the record (AC3)', () => {
+// AC3 — adapter-state foundation for recordMineable → veto projection.
+describe('ContributionAdapter — veto-state foundation (AC3)', () => {
   it('recordMineable then veto reads vetoed in mintStatus and ledger', async () => {
     const { adapter } = makeStoreAndAdapter();
     const rec = await adapter.recordMineable('e-veto');

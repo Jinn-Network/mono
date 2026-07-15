@@ -14,7 +14,7 @@ import type {
 } from '../src/ports/contribution-port.js';
 
 /**
- * AC1 — history projects the four contribution states from the ledger.
+ * AC1 — history projection foundation folds four contribution states from the ledger.
  * The in-memory testing port only authors `queued`/`vetoed`, so this stub
  * seeds `minted`/`published` directly to prove the fold surfaces them.
  */
@@ -47,7 +47,7 @@ function buildPlugin(evidence: InMemoryEvidencePort, contribution: ContributionP
   });
 }
 
-describe('plugin.history — forward mint states (AC1)', () => {
+describe('plugin.history — contribution-state projection foundation (AC1)', () => {
   it('projects queued / minted / published / vetoed onto history rows', async () => {
     const evidence = new InMemoryEvidencePort();
     const statuses = ['queued', 'minted', 'published', 'vetoed'] as const;

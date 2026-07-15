@@ -9,8 +9,8 @@ retained-local retry sub-line, and the exact empty-state copy.
 
 Rows are dicts with keys: ``time``, ``task``, ``env``, ``anchor``, ``tier``
 (one of ``user-accepted`` | ``tests-passed`` | ``evaluator-verified``), and an
-optional ``state`` (``vetoed`` | ``failed``). Colours reuse the #1417 splash
-palette via ``style``.
+optional ``state`` (``queued`` | ``minted`` | ``vetoed`` | ``failed``).
+Colours reuse the #1417 splash palette via ``style``.
 
 The renderer is pure and snapshot-testable. ``/jinn ledger`` calls it when the
 layer yields JSON, and degrades to the layer's raw text otherwise.
@@ -47,9 +47,9 @@ EMPTY_LINES = (
 VETOED_LABEL = "vetoed (local only)"
 FAILED_LABEL = "publish failed — retained locally"
 
-# `queued`/`minted` are pre-publish enum states — human labels only, chosen
-# here (never in the schema/port). A recorded or minted trace has not left the
-# machine, so envelope + anchor stay em-dash placeholders like the vetoed row.
+# `queued`/`minted` are local projection states — human labels only, chosen
+# here (never in the schema/port). Envelope + anchor stay em-dash placeholders
+# like the vetoed row.
 RECORDED_LABEL = "recorded"
 MINTED_LABEL = "minted"
 
@@ -73,7 +73,8 @@ def _row(pal, rst: str, r: Dict[str, object]) -> str:
 
     time = dim(_cell(r.get("time"), _COL["time"]))
     task = fg(_cell(r.get("task"), _COL["task"]))
-    state = r.get("state")
+    raw_state = r.get("state")
+    state = raw_state if isinstance(raw_state, str) else None
 
     if state == "vetoed":
         env = dim(_cell("—", _COL["env"]))

@@ -1,4 +1,4 @@
-"""Ledger render — mint-state chips (Jinn-Network/mono#1664, AC1).
+"""Ledger contribution-state projection foundation (Jinn-Network/mono#1664, AC1).
 
 The contribution enum is ``queued | minted | published | vetoed``. The render
 layer is the only place a human-facing LABEL is chosen: ``queued`` renders as
@@ -57,14 +57,31 @@ def test_minted_renders_as_minted_chip():
     assert "minted" in plain
 
 
-def test_recorded_and_minted_rows_have_no_env_or_anchor_leak():
-    # A recorded/minted trace has not left the machine — envelope + anchor are
-    # em-dash placeholders (mirrors the vetoed row), never a raw value.
+def test_recorded_and_minted_projection_hides_env_and_anchor_values():
+    # The renderer foundation treats recorded/minted rows as local: envelope
+    # and anchor are placeholders, never adapter-supplied values.
     for state in ("queued", "minted"):
+        env_sentinel = f"ENV-SENTINEL-{state}"
+        anchor_sentinel = f"ANCHOR-SENTINEL-{state}"
         plain = _plain(ledger_view.render_ledger([
-            {"time": "05-26 06:40", "task": "x", "state": state},
+            {
+                "time": "05-26 06:40",
+                "task": "x",
+                "state": state,
+                "env": env_sentinel,
+                "anchor": anchor_sentinel,
+            },
         ]))
         assert "—" in plain
+        assert env_sentinel not in plain
+        assert anchor_sentinel not in plain
+
+
+def test_non_string_state_is_ignored_by_projection_renderer():
+    plain = _plain(ledger_view.render_ledger([
+        {"time": "05-26 06:40", "task": "malformed state", "state": {"queued": True}},
+    ]))
+    assert "malformed state" in plain
 
 
 def test_all_states_render_their_labels_together():
