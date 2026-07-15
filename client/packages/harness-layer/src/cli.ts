@@ -39,6 +39,7 @@ import {
   SessionEndRequestV1Schema,
   SessionPickupRequestV1Schema,
   envelope as processEnvelope,
+  contributionLedgerRow,
   sessionEndEnvelope,
   trackingCorpus,
 } from './process-contract.js';
@@ -135,6 +136,7 @@ Commands:
   session end                                     Read a complete EpisodeV1 request on stdin
   contribution preview [--ack] --json             Show the next sanitized first-share preview;
                                                    --ack records the one-time acknowledgement
+  contribution ledger --json                      Show privacy-safe canonical contribution states
   contribution disable --json                     Disable every unpublished authorization
   corpus search "<query>" [--limit N] [--json]   Search corpus records (substring match on
                                                  solverType / role / artifactType / refs)
@@ -811,8 +813,9 @@ export async function runJinnLayerCli(
   const isSessionPickup = verb === 'session' && subverb === 'pickup';
   const isSessionEnd = verb === 'session' && subverb === 'end';
   const isContributionPreview = verb === 'contribution' && subverb === 'preview';
+  const isContributionLedger = verb === 'contribution' && subverb === 'ledger';
   const isContributionDisable = verb === 'contribution' && subverb === 'disable';
-  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed && !isSkillsInstall && !isDistillRun && !isDistillEvalPrep && !isDistill && !isDeriveEnv && !isContract && !isSessionPickup && !isSessionEnd && !isContributionPreview && !isContributionDisable) {
+  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed && !isSkillsInstall && !isDistillRun && !isDistillEvalPrep && !isDistill && !isDeriveEnv && !isContract && !isSessionPickup && !isSessionEnd && !isContributionPreview && !isContributionLedger && !isContributionDisable) {
     writer.write(USAGE);
     return verb === undefined || verb === 'help' || verb === '--help' ? 0 : 2;
   }
@@ -869,6 +872,27 @@ export async function runJinnLayerCli(
       writer.write(`${JSON.stringify(processEnvelope('ok', result.value))}\n`);
     } else if (result.status === 'degraded') {
       writer.write(`${JSON.stringify(processEnvelope('degraded', result.value, result.reason))}\n`);
+    } else {
+      writer.write(`${JSON.stringify(processEnvelope('unavailable', undefined, result.reason))}\n`);
+    }
+    return 0;
+  }
+
+  if (isContributionLedger) {
+    if (rest.length !== 1 || rest[0] !== '--json') {
+      writer.write('error: invalid contribution ledger command; use contribution ledger --json\n');
+      return 2;
+    }
+    const result = await createJinnPlugin(buildPluginDepsFromEnv(opts.pluginOverrides ?? {}))
+      .contributionLedger();
+    if (result.status === 'ok') {
+      writer.write(`${JSON.stringify(processEnvelope('ok', {
+        rows: result.value.map(contributionLedgerRow),
+      }))}\n`);
+    } else if (result.status === 'degraded') {
+      writer.write(`${JSON.stringify(processEnvelope('degraded', {
+        rows: (result.value ?? []).map(contributionLedgerRow),
+      }, result.reason))}\n`);
     } else {
       writer.write(`${JSON.stringify(processEnvelope('unavailable', undefined, result.reason))}\n`);
     }

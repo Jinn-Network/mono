@@ -25,6 +25,10 @@ class StubContributionPort implements ContributionPort {
     this.entries.push({
       recordId,
       sourceId: candidate.sourceId,
+      createdAt: candidate.createdAt,
+      verifiabilityTier: candidate.testRuns.some((run) => run.exitCode === 0)
+        ? 'tests-passed'
+        : 'user-accepted',
       localState: 'recorded',
       publicationState: candidate.publishMinedTasksConsent ? 'preview-required' : 'disabled',
       status: candidate.publishMinedTasksConsent ? 'preview-required' : 'recorded',
@@ -67,20 +71,25 @@ function buildPlugin(evidence: InMemoryEvidencePort, contribution: ContributionP
 describe('plugin.history — two-axis contribution-state projection', () => {
   it('projects local and publication states onto their derived user-facing status', async () => {
     const evidence = new InMemoryEvidencePort();
+    const facts = {
+      createdAt: '2026-07-15T12:00:00.000Z',
+      verifiabilityTier: 'user-accepted' as const,
+    };
     const states: Array<Omit<ContributionLedgerEntry, 'recordId' | 'sourceId'>> = [
-      { localState: 'recorded', publicationState: 'disabled', status: 'recorded' },
-      { localState: 'minted', publicationState: 'disabled', status: 'minted', mintRef: 'mint-1' },
-      { localState: 'rejected', publicationState: 'disabled', status: 'rejected' },
-      { localState: 'recorded', publicationState: 'preview-required', status: 'preview-required' },
-      { localState: 'minted', publicationState: 'queued', status: 'queued', mintRef: 'mint-2' },
+      { ...facts, localState: 'recorded', publicationState: 'disabled', status: 'recorded' },
+      { ...facts, localState: 'minted', publicationState: 'disabled', status: 'minted', mintRef: 'mint-1' },
+      { ...facts, localState: 'rejected', publicationState: 'disabled', status: 'rejected' },
+      { ...facts, localState: 'recorded', publicationState: 'preview-required', status: 'preview-required' },
+      { ...facts, localState: 'minted', publicationState: 'queued', status: 'queued', mintRef: 'mint-2' },
       {
+        ...facts,
         localState: 'minted',
         publicationState: 'published',
         status: 'published',
         mintRef: 'mint-3',
         publicationRef: 'publication-1',
       },
-      { localState: 'recorded', publicationState: 'vetoed', status: 'vetoed' },
+      { ...facts, localState: 'recorded', publicationState: 'vetoed', status: 'vetoed' },
     ];
     const ledger: ContributionLedgerEntry[] = [];
     for (const state of states) {

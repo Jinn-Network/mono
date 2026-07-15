@@ -17,6 +17,7 @@ jinn = importlib.import_module("plugins.jinn")
 consent = importlib.import_module("plugins.jinn.consent")
 capture_buffer = importlib.import_module("plugins.jinn.capture_buffer")
 session_bridge = importlib.import_module("plugins.jinn.session_bridge")
+jinn_layer = importlib.import_module("plugins.jinn.jinn_layer")
 
 
 class RunnerSpy:
@@ -375,15 +376,19 @@ def test_corpus_command_delegates_to_layer(isolated_home):
 # ── Ledger: structured render vs degrade (mono#1418) ─────────────────────────
 
 def test_ledger_renders_structured_rows_from_json(isolated_home):
-    # `jinn-layer ledger --json` yields rows → the design 1b table.
+    # The canonical contribution ledger yields rows → the design 1b table.
     rows = [
         {"time": "05-26 06:41", "task": "fix retry", "envelope": "env-8f21c2",
-         "anchor": "0x7a2f…c019", "tier": "tests-passed"},
+         "anchor": "0x7a2f…c019", "tier": "tests-passed", "state": "published"},
         {"time": "05-25 22:41", "task": "refactor auth", "state": "vetoed"},
     ]
-    isolated_home.out = json.dumps(rows)
+    isolated_home.out = json.dumps({
+        "contractVersion": 1,
+        "status": "ok",
+        "value": {"rows": rows},
+    })
     out = jinn._handle_jinn(command_args="ledger")
-    assert isolated_home.calls[0][1:3] == ["ledger", "--json"]
+    assert isolated_home.calls[0][1:4] == ["contribution", "ledger", "--json"]
     assert "TIER" in out
     assert "tests-passed" in out
     assert "vetoed (local only)" in out
@@ -396,8 +401,26 @@ def test_ledger_degrades_to_raw_text_when_json_unavailable(isolated_home):
     out = jinn._handle_jinn(command_args="ledger")
     assert out == "PLAIN LEDGER TEXT (no --json support)"
     # Both the --json probe and the plain ledger were attempted.
+    assert ["contribution", "ledger", "--json"] in [c[1:4] for c in isolated_home.calls]
     assert ["ledger", "--json"] in [c[1:3] for c in isolated_home.calls]
     assert any(c[1:] == ["ledger"] for c in isolated_home.calls)
+
+
+def test_ledger_reports_canonical_store_unavailable_without_manufacturing_empty_state(
+    isolated_home,
+):
+    isolated_home.out = json.dumps({
+        "contractVersion": 1,
+        "status": "unavailable",
+        "reason": "contribution store offline",
+    })
+
+    out = jinn._handle_jinn(command_args="ledger")
+
+    assert out == "contribution ledger unavailable:\ncontribution store offline"
+    assert isolated_home.calls == [[
+        jinn_layer.binary(), "contribution", "ledger", "--json"
+    ]]
 
 
 def test_preview_with_no_pending_shows_example_fixture(isolated_home):
@@ -477,7 +500,6 @@ def test_jinn_layer_not_found_points_at_canary_tag():
     """mono#1382: bare `npm install -g @jinn-network/client` installs latest,
     which has no jinn-layer bin until stable >= 0.1.10 — the error must name
     the canary tag."""
-    jinn_layer = importlib.import_module("plugins.jinn.jinn_layer")
     code, out = jinn_layer._default_runner(["definitely-not-a-real-binary-xyz"])
     assert code == 127
     assert "@jinn-network/client@canary" in out

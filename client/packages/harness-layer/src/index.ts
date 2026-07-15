@@ -268,4 +268,6 @@ export {
   type SessionEndRequestV1,
   type SessionPickupEnvelope,
   type SessionPickupRequestV1,
+  contributionLedgerRow,
+  type ContributionLedgerRowV1,
 } from './process-contract.js';
