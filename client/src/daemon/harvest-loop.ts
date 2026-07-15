@@ -74,8 +74,8 @@ export interface HarvestLoopConfig {
    */
   sources?: HarvestSource[];
   /** Mineable-trace store to drain when `sources` includes `'sessions'`.
-   *  Constructed only when the operator opted into `mineableTraces.consent
-   *  === 'retain_local'` — see `main.ts`. */
+   *  Always constructed by the daemon (local retention is unconditional per
+   *  mono#1714) — see `main.ts`. */
   mineableStore?: MineableTraceStore;
   /** Recording operator's Safe, stamped into session-echo provenance as
    *  `sourceSolverSafe` so the operator's own claim on their own echo is

@@ -55,34 +55,31 @@ def _truecolor(monkeypatch):
 # ── Consent explainer (design 1a) ────────────────────────────────────────────
 
 
-def test_explainer_leads_with_benefits_then_safety():
+def test_explainer_is_the_single_sharing_question():
     plain = _plain(consent.render_explainer_styled())
-    why = plain.index("WHY TURN IT ON")
-    what = plain.index("WHAT LEAVES THIS MACHINE")
-    # Benefits header precedes the safety header (design: lead with the upside).
-    assert why < what
-    # Three exact benefit lines, in order, before the safety block.
-    for line in consent.WHY:
-        assert line in plain
-        assert plain.index(line) < what
-    for line in consent.WHAT_LEAVES:
-        assert line in plain
+    assert "Contribute tasks from your work?" in plain
+    assert (
+        "When you solve something on a public project, Jinn can turn it into a "
+        "task other agents can attempt" in plain
+    )
+    assert "a reproducible problem based on your work" in plain
+    assert "Your actual code and history stay on your machine." in plain
+    assert "Jinn works fully either way." in plain
 
 
-def test_explainer_states_the_plain_safety_guarantees():
+def test_explainer_no_jargon():
+    plain = _plain(consent.render_explainer_styled()).lower()
+    for jargon in ("trace", "mining", "mineable", "scrubbed", "corpus"):
+        assert jargon not in plain
+
+
+def test_explainer_shows_keys_default_decline():
     plain = _plain(consent.render_explainer_styled())
-    assert "scrubbed of secrets and personal data here, first" in plain
-    assert "fails closed" in plain
-    assert "Decline and jinn-agent still works fully — as a reader." in plain
-
-
-def test_explainer_shows_all_four_keys_default_decline():
-    plain = _plain(consent.render_explainer_styled())
-    assert "[A]" in plain and "Accept" in plain
-    assert "[D]" in plain and "Decline" in plain
+    assert "[Y]" in plain and "Yes" in plain
+    assert "[N]" in plain and "No" in plain
     assert "[P]" in plain and "Preview" in plain
     assert "[?]" in plain and "Docs" in plain
-    assert "default is decline" in plain
+    assert "default is no" in plain
 
 
 def test_explainer_no_emoji_no_vow_language():
@@ -92,34 +89,28 @@ def test_explainer_no_emoji_no_vow_language():
         assert vow not in plain.lower()
 
 
-def test_explainer_section_headers_are_sky():
-    out = consent.render_explainer_styled()
-    assert f"{_TC['sky']}  WHY TURN IT ON" in out
-    assert f"{_TC['sky']}  WHAT LEAVES THIS MACHINE" in out
-
-
-# ── Confirm + recorded (design 1a) ───────────────────────────────────────────
+# ── Confirm + recorded ───────────────────────────────────────────────────────
 
 
 def test_confirm_accept_and_decline_copy():
     a = _plain(consent.render_confirm_styled(accept=True))
-    assert "Turn on contribution?" in a
+    assert "Share tasks from your work?" in a
     assert "[Y]" in a and "[N]" in a
     d = _plain(consent.render_confirm_styled(accept=False))
-    assert "Decline contribution?" in d
-    assert "No trace will leave this machine." in d
+    assert "Keep everything on your machine?" in d
+    assert "Nothing derived from your work will be shared." in d
 
 
 def test_recorded_on_states_preview_gate():
     on = _plain(consent.render_recorded_styled(on=True))
-    assert "contribution is ON" in on
-    assert "Nothing publishes until you" in on  # preview gate, plain speech
+    assert "sharing is ON" in on
+    assert "nothing is shared until you" in on.lower()  # preview gate, plain speech
 
 
-def test_recorded_off_is_reader_only():
+def test_recorded_off_keeps_everything_local():
     off = _plain(consent.render_recorded_styled(on=False))
-    assert "contribution is OFF · reader only" in off
-    assert "No trace leaves this machine" in off
+    assert "sharing is OFF" in off
+    assert "Nothing derived from your work leaves this machine" in off
 
 
 def test_node_stub_is_later_or_skip_and_sets_nothing_up():
@@ -127,19 +118,17 @@ def test_node_stub_is_later_or_skip_and_sets_nothing_up():
     assert "RUN A NETWORK NODE?" in plain
     assert "[L]" in plain and "Later" in plain
     assert "[Enter]" in plain and "Skip" in plain
-    # Not needed to contribute or read — the stub configures nothing.
-    assert "not needed to contribute or to read" in plain
+    # Not needed to share or read — the stub configures nothing.
+    assert "not needed to share or to read" in plain
 
 
-# ── Preview example fixture (design requirement iv) ──────────────────────────
+# ── Preview example fixture ──────────────────────────────────────────────────
 
 
 def test_preview_example_is_labelled_no_task_run_yet():
     plain = _plain(consent.render_preview_example())
     assert "example — no task run yet" in plain
-    assert "NOTHING IS SENT FROM THIS SCREEN" in plain
-    # Redaction is shown (the fail-closed scrub is visible), plainly.
-    assert "«redacted:secret»" in plain
+    assert "NOTHING IS SHARED FROM THIS SCREEN" in plain
     assert not _EMOJI.search(plain)
 
 

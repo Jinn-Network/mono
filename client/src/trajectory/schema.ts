@@ -128,9 +128,11 @@ export const CaptureManifestSchema = z.object({
     allowedDirectoriesHash: z.string().regex(/^[0-9a-f]{64}$/),
     capturePath: z.enum(['A', 'B', 'C', 'D']),
   }),
-  /** Tier-1: retain mineable trace fields locally (spec/2026-07-08-task-creator-v0.md §10, D2). */
-  mineableTraceConsent: z.enum(['off', 'retain_local']).optional().default('off'),
-  /** Tier-2: consent to publish mined tasks (enforced at mint publish gate). */
+  /**
+   * The single `share` consent (mono#1714): may a mined task be published off
+   * the box (enforced at the mint publish gate). Local retention is
+   * unconditional, so there is no separate retention-consent field.
+   */
   publishMinedTasksConsent: z.boolean().optional().default(false),
 });
 

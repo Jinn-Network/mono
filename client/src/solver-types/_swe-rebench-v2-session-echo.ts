@@ -110,12 +110,13 @@ export async function mineSessionEchoes(deps: SessionEchoMintDeps): Promise<Sess
       continue;
     }
 
-    // Tier-2 gate: a record without publish consent still mints locally
-    // (tier-1 allows that) but is never published. `Boolean(...)` guarantees
-    // a real boolean (never `undefined`) so `runMintTasksPipeline`'s
-    // `c.publish !== false` publish-path check is skipped, not defaulted on.
-    // `deps` already satisfies HarvestMintDeps (SessionEchoMintDeps extends it);
-    // spread it and override only `publish` rather than re-listing every field.
+    // Share gate (mono#1714): a record without share consent still mints
+    // locally (local retention is unconditional) but is never published.
+    // `Boolean(...)` guarantees a real boolean (never `undefined`) so
+    // `runMintTasksPipeline`'s `c.publish !== false` publish-path check is
+    // skipped, not defaulted on. `deps` already satisfies HarvestMintDeps
+    // (SessionEchoMintDeps extends it); spread it and override only `publish`
+    // rather than re-listing every field.
     const publish = Boolean(deps.publish) && record.publishMinedTasksConsent;
 
     const mintResult = await admitBuiltMintCandidates([builtResult.built], { ...deps, publish });

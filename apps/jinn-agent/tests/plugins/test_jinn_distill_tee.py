@@ -113,7 +113,7 @@ def _capture_files(tmp_path_env: str | None = None) -> list[Path]:
 
 
 def test_accepted_consent_mode_unset_tees_and_publishes(tmp_path):
-    consent.save_state(consent.ACCEPTED)
+    consent.save_state(True)
     consent.mark_previewed()
     runner = DistillAwareRunner(mode="unset")
     jinn._runner = runner
@@ -128,7 +128,7 @@ def test_accepted_consent_mode_unset_tees_and_publishes(tmp_path):
 
 
 def test_mode_off_tees_nothing_but_publish_path_unaffected(tmp_path):
-    consent.save_state(consent.ACCEPTED)
+    consent.save_state(True)
     consent.mark_previewed()
     runner = DistillAwareRunner(mode="off")
     jinn._runner = runner
@@ -140,7 +140,7 @@ def test_mode_off_tees_nothing_but_publish_path_unaffected(tmp_path):
 
 
 def test_declined_consent_with_defer_mode_tees_but_never_publishes(tmp_path):
-    consent.save_state(consent.DECLINED)
+    consent.save_state(False)
     runner = DistillAwareRunner(mode="defer")
     jinn._runner = runner
 
@@ -155,7 +155,7 @@ def test_declined_consent_with_defer_mode_tees_but_never_publishes(tmp_path):
 
 
 def test_declined_consent_and_old_layer_degrades_to_nothing(tmp_path):
-    consent.save_state(consent.DECLINED)
+    consent.save_state(False)
     runner = DistillAwareRunner(status_code=2)  # old layer: no `distill status`
     jinn._runner = runner
 
@@ -166,7 +166,7 @@ def test_declined_consent_and_old_layer_degrades_to_nothing(tmp_path):
 
 
 def test_mode_is_cached_one_status_read_per_process(tmp_path):
-    consent.save_state(consent.ACCEPTED)
+    consent.save_state(True)
     consent.mark_previewed()
     runner = DistillAwareRunner(mode="defer")
     jinn._runner = runner
@@ -193,7 +193,7 @@ def test_prune_keeps_the_newest_files(tmp_path):
 
 
 def test_full_hook_drive_yields_ordered_episode(tmp_path):
-    consent.save_state(consent.ACCEPTED)
+    consent.save_state(True)
     consent.mark_previewed()
     runner = DistillAwareRunner(mode="unset")
     jinn._runner = runner
@@ -219,7 +219,7 @@ def test_full_hook_drive_omits_cost_tokens_when_host_reports_no_usage(tmp_path):
     # AC2 on the REAL path: when the host forwards 0/0 (the getattr default when
     # the agent recorded no usage), the plugin must OMIT cost.tokens rather than
     # emit {input:0, output:0} (mono #1662).
-    consent.save_state(consent.ACCEPTED)
+    consent.save_state(True)
     consent.mark_previewed()
     runner = DistillAwareRunner(mode="unset")
     jinn._runner = runner
@@ -232,20 +232,24 @@ def test_full_hook_drive_omits_cost_tokens_when_host_reports_no_usage(tmp_path):
     assert "tokens" not in ep["cost"], "no host usage => cost.tokens omitted, not {0,0}"
 
 
-def test_no_consent_no_distill_writes_nothing(tmp_path):
-    consent.save_state(consent.UNSET)
-    runner = DistillAwareRunner(mode="unset")  # unset + no publish consent => off
+def test_no_share_consent_still_reserves_locally(tmp_path):
+    # mono#1714: local distillation is ungated. With distill reserving (mode
+    # "unset" => should_tee True) the tee AND episode are written locally even
+    # with no share consent — only the publish path is consent-gated, so the
+    # reserved material never leaves the machine.
+    consent.save_state(False)  # sharing not consented
+    runner = DistillAwareRunner(mode="unset")
     jinn._runner = runner
 
     _drive_session()
 
-    assert _capture_files() == [], "no consent, no distill: nothing tee'd"
-    assert _episode_files() == [], "no consent, no distill: no episode"
-    assert runner.published() == []
+    assert len(_capture_files()) == 1, "local tee reserved regardless of share consent"
+    assert len(_episode_files()) == 1, "local episode written regardless of share consent"
+    assert runner.published() == [], "nothing is published without share consent"
 
 
 def test_legacy_capture_still_written_byte_shape(tmp_path):
-    consent.save_state(consent.ACCEPTED)
+    consent.save_state(True)
     consent.mark_previewed()
     runner = DistillAwareRunner(mode="unset")
     jinn._runner = runner
@@ -269,7 +273,7 @@ def test_legacy_capture_still_written_byte_shape(tmp_path):
 
 
 def test_episode_written_to_separate_location(tmp_path):
-    consent.save_state(consent.ACCEPTED)
+    consent.save_state(True)
     consent.mark_previewed()
     runner = DistillAwareRunner(mode="unset")
     jinn._runner = runner
@@ -283,7 +287,7 @@ def test_episode_written_to_separate_location(tmp_path):
 
 
 def test_episode_not_written_without_gate(tmp_path):
-    consent.save_state(consent.DECLINED)
+    consent.save_state(False)
     runner = DistillAwareRunner(status_code=2)  # old layer: distill gating off
     jinn._runner = runner
 
@@ -294,7 +298,7 @@ def test_episode_not_written_without_gate(tmp_path):
 
 
 def test_tee_failure_never_breaks_session_end(tmp_path, monkeypatch):
-    consent.save_state(consent.ACCEPTED)
+    consent.save_state(True)
     consent.mark_previewed()
     runner = DistillAwareRunner(mode="defer")
     jinn._runner = runner

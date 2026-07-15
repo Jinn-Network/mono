@@ -375,19 +375,19 @@ export const JinnConfigSchema = z.object({
    * Mineable-trace retention consent (task-creator spec §10, decision D2).
    * Two independent, deliberate opt-in tiers:
    *   - `consent` ('off' default) — retain contract fields (repo,
-   *     commit, diff, test outcomes) locally for mining. The store is
-   *     fail-closed: the daemon only constructs it when this is
-   *     'retain_local'.
-   *   - `publishConsent` (false default) — even with tier-1 on, publishing
-   *     a mined task as public work needs its own separate approval.
-   * Env: JINN_MINEABLE_CONSENT, JINN_MINEABLE_PUBLISH_CONSENT.
+   * The single sharing consent (mono#1714): local capture, mining, and
+   * distillation happen unconditionally (they never leave the machine), and
+   * `share` governs only whether a mined task is published off the box.
+   * Default is false — nothing derived from work leaves the machine unless
+   * the operator opts in. Env: JINN_SHARE_CONSENT. Legacy
+   * `consent`/`publishConsent` (and JINN_MINEABLE_PUBLISH_CONSENT) migrate to
+   * `share` at load time (only the old publish bit maps).
    */
   mineableTraces: z
     .object({
-      consent: z.enum(['off', 'retain_local']).default('off'),
-      publishConsent: z.boolean().default(false),
+      share: z.boolean().default(false),
     })
-    .default({ consent: 'off', publishConsent: false }),
+    .default({ share: false }),
 
   /**
    * Manifest-keyed joined SolverNets.
@@ -628,8 +628,9 @@ export const JinnConfigSchema = z.object({
    *
    * `sources` selects which harvest sources the loop mines each tick — absent
    * ⇒ `['commits']`, so existing configs behave identically. `'sessions'`
-   * mines locally-captured task-creator sessions (needs `mineableTraces.consent
-   * === 'retain_local'`, see `mineableTraces` above). Env: JINN_HARVEST_SOURCES
+   * mines locally-captured task-creator sessions (local retention is
+   * unconditional per mono#1714; whether a mined task is published off the box
+   * is gated by `mineableTraces.share`, see above). Env: JINN_HARVEST_SOURCES
    * (comma-separated).
    */
   harvest: z
@@ -1043,13 +1044,18 @@ export function loadConfig(configPath?: string): JinnConfig {
       sources,
     };
   }
-  if (env['JINN_MINEABLE_CONSENT'] !== undefined || env['JINN_MINEABLE_PUBLISH_CONSENT'] !== undefined) {
+  // Single sharing consent (mono#1714). JINN_SHARE_CONSENT is authoritative;
+  // the legacy JINN_MINEABLE_PUBLISH_CONSENT still maps to `share` for one
+  // release (only the old publish bit ever meant "a task may leave").
+  if (env['JINN_SHARE_CONSENT'] !== undefined || env['JINN_MINEABLE_PUBLISH_CONSENT'] !== undefined) {
+    const truthy = (v: string) => ['1', 'true', 'yes'].includes(v.trim().toLowerCase());
+    const share =
+      env['JINN_SHARE_CONSENT'] !== undefined
+        ? truthy(env['JINN_SHARE_CONSENT'])
+        : truthy(env['JINN_MINEABLE_PUBLISH_CONSENT'] as string);
     merged.mineableTraces = {
       ...(typeof merged.mineableTraces === 'object' && merged.mineableTraces ? merged.mineableTraces : {}),
-      ...(env['JINN_MINEABLE_CONSENT'] !== undefined ? { consent: env['JINN_MINEABLE_CONSENT'] } : {}),
-      ...(env['JINN_MINEABLE_PUBLISH_CONSENT'] !== undefined
-        ? { publishConsent: ['1', 'true', 'yes'].includes(env['JINN_MINEABLE_PUBLISH_CONSENT'].trim().toLowerCase()) }
-        : {}),
+      share,
     };
   }
 
@@ -1259,6 +1265,19 @@ export function loadConfig(configPath?: string): JinnConfig {
   // overrides are not baked in; best-effort, and a no-op on already-clean files.
   if ('solverNets' in fileValues) {
     persistLegacySolverNetsMigration(filePath);
+  }
+
+  // Migrate legacy `mineableTraces.{consent,publishConsent}` → single `share`
+  // (mono#1714, one release). Only the old publish bit ever meant "a task may
+  // leave the machine"; the tier-1 retention bit is discarded (retention is now
+  // unconditional). Env-set `share` (above) wins over the legacy file keys.
+  if (typeof merged.mineableTraces === 'object' && merged.mineableTraces) {
+    const mt = merged.mineableTraces as Record<string, unknown>;
+    if (!('share' in mt) && ('publishConsent' in mt || 'consent' in mt)) {
+      merged.mineableTraces = { share: mt['publishConsent'] === true };
+    }
+    // A stray legacy `consent`/`publishConsent` alongside `share` is dropped by
+    // the schema's non-strict parse — no explicit reshape needed.
   }
 
   // 3. Validate

@@ -104,11 +104,11 @@ def mark_flag(name: str) -> None:
 
 
 def consent_decided() -> bool:
-    """True once consent is recorded either way (accepted OR declined).
+    """True once the sharing consent is recorded either way.
 
-    ``unset`` means step 1 is not satisfied — the question re-asks.
+    Undecided means step 1 is not satisfied — the question re-asks.
     """
-    return consent.load_state().get("status") in (consent.ACCEPTED, consent.DECLINED)
+    return consent.consent_decided()
 
 
 def ledger_nonempty(runner: Optional[jinn_layer.Runner] = None) -> bool:
@@ -144,7 +144,7 @@ def is_complete(runner: Optional[jinn_layer.Runner] = None) -> bool:
     # not gate them — steps 2–3 are set aside on the decline path. They are
     # complete once consent is decided and the signals flag is set.
     flags = load_flags()
-    if consent.load_state().get("status") == consent.DECLINED:
+    if not consent.share_enabled():
         return bool(flags["signals_shown"])
     if not ledger_nonempty(runner):
         return False
@@ -209,11 +209,11 @@ def render_consent_recorded(pal=None, rst=None) -> str:
     return "\n".join([
         *_step_head(pal, rst, 1, "contribute?", {}),
         "",
-        green("  recorded") + dim(" — contribution is ") + green("ON"),
+        green("  recorded") + dim(" — sharing is ") + green("ON"),
         "",
-        dim("  Scrubbed task traces will publish to the public corpus. Nothing"),
-        dim("  publishes until you preview once — run ") + sky("/jinn preview") + dim(" any time to"),
-        dim("  see the next payload before it sends."),
+        dim("  A reproducible task from your work may be shared for other agents"),
+        dim("  to attempt. Nothing is shared until you preview once — run ") + sky("/jinn preview"),
+        dim("  any time to see the next task before it leaves."),
         "",
         dim("  Manage:  ") + sky("/jinn consent") + dim("  |  ") + sky("/jinn veto")
         + dim("  |  ") + sky("/jinn ledger"),
@@ -234,15 +234,15 @@ def render_consent_recorded_off(pal=None, rst=None) -> str:
     return "\n".join([
         *_step_head(pal, rst, 1, "contribute?", {}),
         "",
-        sky("  recorded") + dim(" — contribution is ") + fg("OFF · reader only"),
+        sky("  recorded") + dim(" — sharing is ") + fg("OFF · reader only"),
         "",
-        dim("  This harness will run tasks and read the corpus, and will publish"),
-        dim("  nothing. No trace leaves this machine."),
+        dim("  This harness will run tasks and read the corpus, and will share"),
+        dim("  nothing derived from your work. Nothing leaves this machine."),
         "",
         dim("  Turn on any time:  ") + sky("/jinn consent"),
         "",
-        dim("  Steps 2 and 3 cover publishing and rewards — they apply only when"),
-        dim("  contribution is on, so they're set aside. Step 4 still applies:"),
+        dim("  Steps 2 and 3 cover sharing and rewards — they apply only when"),
+        dim("  sharing is on, so they're set aside. Step 4 still applies:"),
         dim("  reading the corpus is on for everyone."),
         "",
         _style.wrap(pal, rst, "dim", "─" * 70),
@@ -569,14 +569,12 @@ def run_onboarding(
     # ── Step 1 · consent ──
     if replay:
         # Never re-ask; show the recorded state as-is.
-        status = str(consent.load_state().get("status", consent.UNSET))
-        on = status == consent.ACCEPTED
+        on = consent.share_enabled()
         print_fn(render_consent_recorded(pal, rst) if on else render_consent_recorded_off(pal, rst))
         input_fn("> ")
     else:
         # Reuse the #1418 consent flow VERBATIM for the decision itself.
-        status = consent.run_consent_flow(input_fn, print_fn)
-        on = status == consent.ACCEPTED
+        on = consent.run_consent_flow(input_fn, print_fn)
         print_fn(render_consent_recorded(pal, rst) if on else render_consent_recorded_off(pal, rst))
         input_fn("> ")
 

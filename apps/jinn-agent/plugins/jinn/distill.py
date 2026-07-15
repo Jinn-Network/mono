@@ -11,21 +11,20 @@ Discipline unchanged: all distillation logic (scrub, clustering, consent mode,
 staging) lives in ``jinn-layer``; this module only mirrors the layer's default
 captures path and reads ``distill status --json`` for gating.
 
-Gating (mode from the layer's status read, cached once per process):
+Gating (mono#1714 — local distillation is ungated; only an explicit ``off``
+mode opts out; sharing consent is never consulted):
 
-  =============== ============= ==========================================
-  publish consent distill mode  tee?
-  =============== ============= ==========================================
-  accepted        unset         yes — reserve material for the first run
-  accepted        local / defer yes
-  accepted        off           no ("off = stop reserving captures")
-  declined/unset  local / defer yes — explicit distill opt-in
-  declined/unset  unset / off   no
-  any             unavailable   no — old layer without the status verb
-  =============== ============= ==========================================
+  ============= ==========================================
+  distill mode  tee?
+  ============= ==========================================
+  unset         yes — reserve material for the first run
+  local / defer yes
+  off           no ("off = stop reserving captures")
+  unavailable   no — old layer without the status verb
+  ============= ==========================================
 
-A distill-only opt-in fills the capture buffer but can NEVER cause a publish —
-the publish path stays gated on publish consent alone (see ``_on_session_end``).
+Reserving captures never leaves the machine — it can NEVER cause a share;
+the share path stays gated on the single share consent (see ``_on_session_end``).
 """
 
 from __future__ import annotations
@@ -35,7 +34,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import consent, jinn_layer
+from . import jinn_layer
 
 Runner = Callable[[List[str]], Tuple[int, str]]
 
@@ -102,24 +101,19 @@ def cached_mode(runner: Optional[Runner] = None, refresh: bool = False) -> str:
     return _cached_mode
 
 
-def distill_capture_enabled(runner: Optional[Runner] = None) -> bool:
-    """Should the capture buffer fill for distillation alone (publish consent aside)?
-
-    Only an explicit opt-in (mode local/defer) extends the buffer gate — the
-    accepted-consent path already fills the buffer, and `unset` without publish
-    consent must not capture anything.
-    """
-    return cached_mode(runner) in ("local", "defer")
-
-
 def should_tee(runner: Optional[Runner] = None) -> bool:
-    """The gating table in the module docstring."""
+    """Local distillation is ungated (mono#1714): reserve captures by default.
+
+    The only opt-out is an explicit ``off`` mode from the layer. ``unavailable``
+    (old layer without the status verb) still declines. Sharing consent is
+    never consulted — local distillation never leaves the machine.
+    """
     mode = cached_mode(runner)
-    if mode in ("local", "defer"):
-        return True
-    if mode == "unset":
-        return consent.capture_enabled()
-    return False  # off / unavailable
+    if mode == "off":
+        return False
+    if mode == "unavailable":
+        return False
+    return True  # local / defer / unset — reserve material locally
 
 
 def prune_captures(keep: int = KEEP_CAPTURES) -> None:

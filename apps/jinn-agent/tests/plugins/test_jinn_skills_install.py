@@ -69,7 +69,7 @@ def test_install_raises_on_unreadable_result(tmp_path):
 
 def test_declined_consent_does_not_block_install(tmp_path):
     # Consuming is always allowed — consent gates contributing only.
-    consent.save_state(consent.DECLINED)
+    consent.save_state(False)
     skills_root = tmp_path / "skills"
 
     def fake_runner(argv):

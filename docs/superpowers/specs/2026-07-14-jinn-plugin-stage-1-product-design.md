@@ -32,11 +32,11 @@ The Stage 1 gate (from the roadmap):
 |---|----------|-----------|
 | P1 | **Host: Hermes.** The Jinn Plugin is a plugin for the user's own agent harness; the daemon-injected `client/plugins/*` are the separate marketplace-solving concern. | Open-source harness; the plugin-into-host integration already exists (`apps/jinn-agent/plugins/jinn/`). |
 | P2 | **Acceptance target: stock upstream Hermes + the pip-installed plugin.** The jinn-agent fork is the batteries-included distribution and inherits everything. | Proves "keep your harness, add Jinn" honestly; cold-stock e2e already exists (`apps/jinn-agent/scripts/cold-stock-e2e.sh`). |
-| P3 | **Eligible contribution: user-originated public task mint** (session-echo at true `repo@commit`, blinded provenance). Trace publication remains as the shipped consent-gated lane but is not the gate. | Faithful to the roadmap boundary: "anything leaving the machine must be independently executable against a public OSS base"; the user's own trace never leaves. |
-| P4 | **Contribution is background work.** Consent decided once at onboarding (mineable-trace tiers); the first publish shows a one-time preview; thereafter minting is silent. The user inspects results (`/jinn history`, ledger) rather than being interrupted. Per-task veto remains. | The felt product moment is the boost, not the contribution. Satisfies "publication begins review-first" via consent + first-publish preview + standing visibility/veto. |
+| P3 | **The single sharing lane is the user-originated public task mint** (session-echo at true `repo@commit`, blinded provenance — a reproducible OSS problem based on the user's work). Local traces are **input-only and never leave the machine**; the mint is the sole thing that is shared. | Faithful to the roadmap boundary: "anything leaving the machine must be independently executable against a public OSS base"; the user's own code and history never leave. (mono#1714 collapses the earlier three-consent/tier framing to one.) |
+| P4 | **Contribution is background work.** The one sharing consent is decided once at onboarding; local capture, mining, and distillation happen by default (they never leave the machine); the first shared task shows a one-time preview; thereafter minting is silent. The user inspects results (`/jinn history`, ledger) rather than being interrupted. Per-task veto remains. | The felt product moment is the boost, not the contribution. Satisfies "sharing begins review-first" via consent + first-share preview + standing visibility/veto. |
 | P5 | **Trajectory source: complete the hook collector.** Subscribe `post_llm_call` and record all user turns so the existing capture buffer yields a complete trajectory via Hermes's public plugin API; the episode is assembled at session end. Hermes's sqlite session store is diagnostic backfill only, never a dependency. | Hermes has no native session-evidence seam (its `/learn` and background review distill in-context and discard the trajectory). Hooks are the stable public contract and the pattern ports to future hosts. |
 | P6 | **Session-level feedback: deferred to Stage 2**, alongside attribution. Stage 1 keeps outcome status + the existing skill-scoped `jinn.distill.feedback.v1`. | Attribution is a Stage 2 concern per the roadmap; don't build a feedback surface before the analytics that consume it. |
-| P7 | **Consent defaults: decline/off.** Publish consent default-decline (as shipped); mineable-trace tier-1 (retain local) asked explicitly at onboarding, default off. | Resolves the drift between harness-network spec D3 ("default-on") and shipped behavior in favor of the roadmap's review-first posture. Needs a one-line spec amendment (§9). |
+| P7 | **One consent, default decline.** A single `shareConsent` (default decline) governs the sole sharing lane — whether a mined task leaves the machine. There is no separate retention or trace-publication consent: local capture, mining, and distillation are unconditional. | Resolves the drift between harness-network spec D3 ("default-on") and shipped behavior in favor of the roadmap's review-first posture (mono#1714; harness-network spec amended in §9). |
 | P8 | **Coexist with the host's native self-improvement.** Hermes auto-authors skills/memories per turn (`background_review.py`) and curates them when idle (`curator.py`). Jinn never disables or duplicates this; Jinn's distiller competes on cross-session patterns, provenance, and shareability. #1561 stays the open kill-test. | The host owns single-session learning; the network and durable evidence are Jinn's differentiators. `.jinn-ref` fencing already keeps the two skill populations disjoint. |
 
 ## 3. Primary user and use case
@@ -49,8 +49,9 @@ users (the epic's usefulness bar). No benchmark workflow, no Jinn-specific task 
 
 ### 4.1 Install and onboarding
 `pip install` the plugin (repo subdirectory today; PyPI later) → `hermes plugins enable jinn`
-→ `npm i -g @jinn-network/client` (the `jinn-layer` CLI). First session: existing onboarding
-asks publish consent (default decline) and mineable-trace consent tiers (default off).
+→ `npm i -g @jinn-network/client` (the `jinn-layer` CLI). First session: onboarding asks
+exactly one sharing consent (default decline) — whether a reproducible task derived from your
+work may be shared. Local capture, mining, and distillation are unconditional.
 Stage 1 adds a `jinn-layer` version-compatibility check (the #1380 gap) and keeps `/jinn
 status` as the install doctor.
 
@@ -78,10 +79,11 @@ format is untouched; episode-schema mechanics are Phase 3 design.
 
 ### 4.4 Contribution — silent, inspectable
 If the session produced an accepted diff on a public repo, the plugin records a mineable
-trace (tier-1 consent). Background machinery (the daemon-sidecar `HarvestLoop` + session-echo
-miner) validates eligibility — public repo, resolvable `repo@commit`, empirical F2P/P2P echo,
-no private facts (blinded provenance, lineage hash only) — and mints a task into the pool;
-publication is gated by the standing tier-2 consent, applied automatically per record (no
+trace locally (unconditional — it never leaves the machine). Background machinery (the
+daemon-sidecar `HarvestLoop` + session-echo miner) validates eligibility — public repo,
+resolvable `repo@commit`, empirical F2P/P2P echo, no private facts (blinded provenance,
+lineage hash only) — and mints a task into the pool; whether the mint is published off the
+box is gated by the single standing `shareConsent`, applied automatically per record (no
 per-mint interaction). Publication to chain runs through the **optional
 daemon sidecar**; without it, approved mints queue locally with an honest status. First
 publish shows a one-time preview; after that, silence + inspection surfaces. Gasless relayer
@@ -152,9 +154,10 @@ issues already exist and stay owned there.
 
 ## 9. Recorded drifts and required amendments
 
-1. `spec/2026-07-02-jinn-harness-network.md` D3 says contribution is default-on; shipped
-   behavior and this design (P7) are default-decline/review-first per the roadmap. Needs a
-   spec amendment PR (docs shape) once PR #1651 merges.
+1. `spec/2026-07-02-jinn-harness-network.md` D3 said contribution is default-on with tier-1/
+   tier-2 consents; shipped behavior and this design (P7) are one `shareConsent`,
+   default-decline/review-first, gating only mint-leaves-machine. **Resolved by mono#1714** —
+   the harness-network spec D3 is amended (v0.6) in that PR alongside this edit.
 2. PR #1646 (session-echo real-usage mining) was closed 2026-07-14 pending rebase onto merged
    #1485; its scope is load-bearing for P3/P4 and must be re-landed (tracked in Phase 4
    decomposition; #1648/#1649 ride along).

@@ -395,12 +395,9 @@ def gather_splash_state() -> Dict[str, object]:
     # Consent — synchronous, real. Drives the contribution line's presence.
     try:
         from plugins.jinn import consent as _consent
-        status = str(_consent.load_state().get("status", _consent.UNSET))
-        if status == _consent.ACCEPTED:
-            state["contribution"] = "on"  # count stays unresolved (ledger call)
-        elif status == _consent.DECLINED:
-            state["contribution"] = "off"
-        # UNSET → key absent → contribution line omitted (pre-consent).
+        if _consent.consent_decided():
+            state["contribution"] = "on" if _consent.share_enabled() else "off"
+        # Undecided → key absent → contribution line omitted (pre-consent).
     except Exception:
         pass  # No consent module → treat as pre-consent, omit the line.
 

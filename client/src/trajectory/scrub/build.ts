@@ -1,7 +1,5 @@
-import type { CaptureManifest } from '../schema.js';
 import { ScrubPipeline } from './pipeline.js';
 import { keyPolicyStage, type KeyPolicy } from './key-policy.js';
-import { mineableTraceGateStage } from './mineable-trace-gate.js';
 import { openredactionStage } from './openredaction-stage.js';
 import { plainPatternsStage } from './plain-patterns-stage.js';
 import { secretlintStage } from './secretlint-stage.js';
@@ -46,19 +44,6 @@ export interface BuildScrubPipelineOptions {
 export function buildScrubPipeline(opts: BuildScrubPipelineOptions = {}): ScrubPipeline {
   const policy = opts.policy ?? DEFAULT_KEY_POLICY;
   return new ScrubPipeline(assembleScrubStages(policy, opts.piiDetector));
-}
-
-/** Capture/consent-aware pipeline — tier-1 mineable fields gated first. */
-export function buildCaptureScrubPipeline(
-  manifest: Pick<CaptureManifest, 'mineableTraceConsent'>,
-  opts: BuildScrubPipelineOptions = {},
-): ScrubPipeline {
-  const policy = opts.policy ?? DEFAULT_KEY_POLICY;
-  const stages = [
-    mineableTraceGateStage(manifest.mineableTraceConsent ?? 'off'),
-    ...assembleScrubStages(policy, opts.piiDetector),
-  ];
-  return new ScrubPipeline(stages);
 }
 
 function assembleScrubStages(policy: KeyPolicy, piiDetector?: PiiDetector) {

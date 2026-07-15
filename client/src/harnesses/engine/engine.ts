@@ -259,16 +259,16 @@ export interface TaskEngineOptions {
    * provided, pack() best-effort-appends a MineableTraceRecord for
    * restoration tasks whose spec carries repo identity (repo + baseCommit)
    * and whose impl produced a solution patch — other solver types are
-   * skipped rather than fabricating values. Absent by default: no record is
-   * ever written unless the daemon constructed this store under explicit
-   * `'retain_local'` consent (see `config.mineableTraces.consent` in
-   * `client/src/config.ts`). Store errors are logged and never fail the task.
+   * skipped rather than fabricating values. Per mono#1714 the daemon always
+   * constructs the store (local retention is unconditional). Store errors are
+   * logged and never fail the task.
    */
   mineableStore?: MineableTraceStore;
   /**
-   * Tier-2 (D2) "publish/admit as a task" consent, stamped onto every record
-   * this engine appends via `mineableStore`. Independent of the tier-1 gate
-   * above — see `config.mineableTraces.publishConsent`. Defaults to false.
+   * The single `share` consent, stamped onto every record this engine appends
+   * via `mineableStore` as `publishMinedTasksConsent` — governs whether a
+   * mined task may be published off the box (see `config.mineableTraces.share`
+   * in `client/src/config.ts`). Defaults to false.
    */
   mineablePublishConsent?: boolean;
   /**
@@ -1722,7 +1722,7 @@ export class TaskEngine {
             publishMinedTasksConsent: this.mineablePublishConsent,
             now: () => new Date().toISOString(),
           });
-          await this.mineableStore.append(record, 'retain_local');
+          await this.mineableStore.append(record);
         } else {
           console.debug(
             `[harness-engine] ${task.requestId}: mineable-trace record skipped — repo/baseCommit/patch not present for this solver type`,

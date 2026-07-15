@@ -323,8 +323,8 @@ def test_gather_state_contribution_follows_consent(monkeypatch, tmp_path):
     # unset → contribution key absent (line omitted pre-consent)
     assert "contribution" not in banner.gather_splash_state()
 
-    consent.save_state(consent.ACCEPTED)
+    consent.save_state(True)
     assert banner.gather_splash_state().get("contribution") == "on"
 
-    consent.save_state(consent.DECLINED)
+    consent.save_state(False)
     assert banner.gather_splash_state().get("contribution") == "off"

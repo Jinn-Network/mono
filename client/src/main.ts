@@ -282,27 +282,6 @@ export interface SetupHaltedInfo {
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
-/**
- * #1649: a loud boot warning when `harvest.sources` includes `'sessions'` but
- * mineable-trace retention is off. Without tier-1 consent the mineable store is
- * never constructed, so the sessions source is silently skipped every tick;
- * this surfaces the misconfiguration once, at boot, instead of leaving the
- * operator to wonder why no sessions are ever mined.
- */
-export function warnSessionsWithoutConsent(
-  config: { harvest?: { sources?: string[] }; mineableTraces?: { consent?: string } },
-): void {
-  if (
-    config.harvest?.sources?.includes('sessions') &&
-    config.mineableTraces?.consent !== 'retain_local'
-  ) {
-    console.warn(
-      "[main] harvest.sources includes 'sessions' but mineableTraces.consent is 'off' — " +
-        "no sessions will be mined; set mineableTraces.consent='retain_local' to enable (#1649)",
-    );
-  }
-}
-
 export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void> {
   // Issue #909: chdir to a stable directory before spawning any child process.
   // `jinn run` inherits the launch shell's CWD; when daemonised from an
@@ -1609,26 +1588,18 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     evictionRecovery,
   };
 
-  // ── Mineable-trace store (task-creator spec §10, D2 tier-1) ────────────────
+  // ── Mineable-trace store (task-creator spec §10) ──────────────────────────
   //
-  // Only constructed when the operator explicitly opted into local trace
-  // retention (config.mineableTraces.consent === 'retain_local'; default is
-  // 'off'). The store itself is fail-closed (MineableTraceStore.append throws
-  // on any other consent value) — gating construction here means a
-  // never-opted-in operator never even has the file created.
-  let mineableStore: import('./solver-types/_swe-rebench-v2-mineable-store.js').MineableTraceStore | undefined;
-  if (config.mineableTraces.consent === 'retain_local') {
-    const { MineableTraceStore } = await import('./solver-types/_swe-rebench-v2-mineable-store.js');
-    mineableStore = new MineableTraceStore({
-      stateDir: join(homedir(), '.jinn-client', 'mineable'),
-    });
-    console.log(
-      `[main] mineable-trace retention: ON (local only) — publishConsent=${config.mineableTraces.publishConsent}`,
-    );
-  } else {
-    console.log('[main] mineable-trace retention: OFF (default) — set mineableTraces.consent to enable');
-  }
-  warnSessionsWithoutConsent(config);
+  // ALWAYS constructed (mono#1714): local retention/mining/distillation happen
+  // by default and never leave the machine. Whether a mined task is published
+  // off the box is gated separately by `config.mineableTraces.share`.
+  const { MineableTraceStore } = await import('./solver-types/_swe-rebench-v2-mineable-store.js');
+  const mineableStore = new MineableTraceStore({
+    stateDir: join(homedir(), '.jinn-client', 'mineable'),
+  });
+  console.log(
+    `[main] mineable-trace retention: local (always on) — share=${config.mineableTraces.share}`,
+  );
 
   // ── IdentityPublisher (jinn-mono-3zk) ───────────────────────────────────────
   //
@@ -2060,11 +2031,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           publish: config.harvest.publish,
           minterSafe: safeAddress,
           sources: config.harvest.sources,
-          // Reuse the same mineable-trace store instance Task 7 constructs
-          // above (gated on mineableTraces.consent === 'retain_local'), not
-          // a second store pointing elsewhere. Undefined when the operator
-          // hasn't opted into tier-1 retention — the loop then skips the
-          // 'sessions' source (non-fatal) rather than crashing.
+          // Reuse the same mineable-trace store instance constructed above
+          // (always present per mono#1714 — local retention is unconditional),
+          // not a second store pointing elsewhere.
           mineableStore,
           operatorSafe: safeAddress,
           mintDeps: {
@@ -2179,7 +2148,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // Task-creator spec §10 (D2): absent unless the operator opted into
       // tier-1 local retention above.
       mineableStore,
-      mineablePublishConsent: config.mineableTraces.publishConsent,
+      mineablePublishConsent: config.mineableTraces.share,
     },
     balanceTopup:
       config.balanceTopupIntervalMs > 0

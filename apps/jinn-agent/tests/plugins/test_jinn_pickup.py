@@ -161,7 +161,7 @@ def test_pickup_is_not_consent_gated(tmp_path, monkeypatch):
     cfg = tmp_path / "jinn" / "pickup.json"
     cfg.parent.mkdir(parents=True, exist_ok=True)
     cfg.write_text(json.dumps({"autoAdopt": True}))
-    consent.save_state(consent.DECLINED)
+    consent.save_state(False)
     runner = CorpusRunner(trace(tier="evaluator-verified"))
     result = pickup.pickup(MSG, runner=runner)
     assert result is not None

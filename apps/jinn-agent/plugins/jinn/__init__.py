@@ -93,7 +93,7 @@ def _task_key(task_id: str, session_id: str) -> str:
 # ── Hooks ────────────────────────────────────────────────────────────────────
 
 def _on_session_start(session_id: str = "", platform: str = "", **_: Any) -> None:
-    if consent.load_state().get("status") != consent.UNSET:
+    if consent.consent_decided():
         return
     if session_id in _session_hint_shown:
         return
@@ -101,7 +101,7 @@ def _on_session_start(session_id: str = "", platform: str = "", **_: Any) -> Non
     # Never block a session with an interactive flow from inside a hook —
     # surface the one-line hint; the flow itself runs via /jinn consent.
     logger.info(
-        "jinn: contribution consent not set — capture is OFF. Run /jinn consent to decide."
+        "jinn: sharing consent not set — nothing is shared. Run /jinn consent to decide."
     )
 
 
@@ -114,19 +114,19 @@ def _on_pre_llm_call(
     task_id: str = "",
     **_: Any,
 ) -> Optional[Dict[str, str]]:
-    # Contribution side — consent-gated. Not gated on is_first_turn: the buffer
-    # is keyed per session and record_first_turn is setdefault-idempotent, so
-    # calling it every turn recovers the summary/model even when the first-turn
-    # signal is unreliable on some provider paths (mono #1404). A distill
-    # opt-in (mode local/defer, mono #1537) also fills the buffer — but the
-    # publish path stays gated on publish consent alone (see _on_session_end).
-    if consent.capture_enabled() or distill.distill_capture_enabled(_runner):
-        buf.record_first_turn(task_id, session_id, user_message, model, platform)
-        # Ordered user-turn span for the EpisodeV1 trajectory (mono #1662).
-        # record_first_turn stores metadata only; this appends the turn span so
-        # it precedes this turn's tool calls (post_tool_call) and the assistant
-        # turn (post_llm_call).
-        buf.record_user_turn(task_id, session_id, user_message)
+    # Local capture — UNCONDITIONAL (mono#1714): filling the buffer never
+    # leaves the machine; local retention, mining, and distillation happen by
+    # default. Not gated on is_first_turn: the buffer is keyed per session and
+    # record_first_turn is setdefault-idempotent, so calling it every turn
+    # recovers the summary/model even when the first-turn signal is unreliable
+    # on some provider paths (mono #1404). Only the share step (a task leaving
+    # the machine) is gated — see _on_session_end.
+    buf.record_first_turn(task_id, session_id, user_message, model, platform)
+    # Ordered user-turn span for the EpisodeV1 trajectory (mono #1662).
+    # record_first_turn stores metadata only; this appends the turn span so it
+    # precedes this turn's tool calls (post_tool_call) and the assistant turn
+    # (post_llm_call). Local capture, so unconditional per mono#1714.
+    buf.record_user_turn(task_id, session_id, user_message)
     # Consumption side — NEVER consent-gated: payload-agnostic corpus pickup.
     # Returns {"context": ...} (injected into the user message, cache-safe)
     # or None. Fails open inside pickup().
@@ -145,8 +145,8 @@ def _on_post_tool_call(
     duration_ms: Optional[int] = None,
     **_: Any,
 ) -> None:
-    if not (consent.capture_enabled() or distill.distill_capture_enabled(_runner)):
-        return
+    # Local capture — UNCONDITIONAL (mono#1714): recording tool calls never
+    # leaves the machine.
     buf.record_tool_call(task_id, session_id, tool_name, tool_call_id, args, result, duration_ms)
 
 
@@ -161,10 +161,8 @@ def _on_post_llm_call(
 ) -> None:
     # Complete the EpisodeV1 turn (mono #1662): the assistant span lands AFTER
     # this turn's tool calls (post_tool_call fires inside the tool loop, which
-    # completes before post_llm_call). Same gate as every other recorder — a
-    # distill-only opt-in fills the buffer; publish stays gated in session-end.
-    if not (consent.capture_enabled() or distill.distill_capture_enabled(_runner)):
-        return
+    # completes before post_llm_call). Local capture is UNCONDITIONAL (mono#1714)
+    # — the buffer never leaves the machine; only the share step is gated.
     buf.record_assistant_turn(task_id, session_id, assistant_response)
     # Record tokens only when the host reports meaningful usage. Zero/zero (the
     # getattr default when the agent has no usage) is treated as "no usage" so
@@ -183,25 +181,26 @@ def _on_session_end(
     output_tokens: Optional[int] = None,
     **_: Any,
 ) -> None:
-    publish_enabled = consent.capture_enabled()
-    if not (publish_enabled or distill.distill_capture_enabled(_runner)):
-        return
-    # Record the skills loadout + token fallback (host forward, mono #1662)
-    # under the same gate, before the single popping assembly.
+    # Local capture is unconditional (mono#1714); only the share step is gated.
+    share_enabled = consent.share_enabled()
+    # Record the skills loadout + token fallback (host forward, mono #1662) —
+    # local writes, so unconditional per mono#1714, before the popping assembly.
     buf.record_environment(task_id, session_id, skills_loadout or [])
     # See _on_post_llm_call — zero/no usage omits cost.tokens (AC2, mono #1662).
     if input_tokens or output_tokens:
         buf.record_tokens(task_id, session_id, input_tokens or 0, output_tokens or 0)
 
     # Pop the buffer ONCE for both shapes (assemble pops — see assemble_both).
+    # publish_consented mirrors the single share consent (mono#1714): the
+    # network-facing shape is only prepared when the operator has consented.
     task, episode = buf.assemble_both(
-        task_id, session_id, completed, interrupted, publish_consented=publish_enabled
+        task_id, session_id, completed, interrupted, publish_consented=share_enabled
     )
 
     # Dual-write the complete-trajectory EpisodeV1 to its own dir (mono #1662),
-    # same gate as the tee, best-effort (never breaks the session end). Written
-    # before the legacy None-guard so a turn-only session (no tool call) still
-    # emits its ≥1-turn episode.
+    # local capture so unconditional, best-effort (never breaks the session
+    # end). Written before the legacy None-guard so a turn-only session (no tool
+    # call) still emits its ≥1-turn episode.
     distill.write_episode(episode, session_id or task_id, runner=_runner)
 
     if task is None:
@@ -214,9 +213,10 @@ def _on_session_end(
     # the publish drain unlinks pending files, never captures.
     distill.tee_capture(task, session_id or task_id, runner=_runner)
 
-    # Everything below is the PUBLISH lifecycle — gated on publish consent
-    # alone. A distill-only opt-in must never cause a publish.
-    if not publish_enabled:
+    # Everything below is the SHARE lifecycle (a task leaving the machine) —
+    # gated on the single share consent alone. Local capture/distill above is
+    # never gated.
+    if not share_enabled:
         return
 
     task_file = jinn_layer.write_task_file(task, _pending_dir(), session_id or task_id)
@@ -328,13 +328,13 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
 
     if sub == "status":
         state = consent.load_state()
-        status = state.get("status")
-        lines = [f"consent: {status}"]
-        if status == consent.ACCEPTED:
-            lines.append(f"previewed: {'yes' if state.get('previewed') else 'no — first publish is held until /jinn preview'}")
-            lines.append("capture: ON — scrubbed task traces publish at task end")
+        share = bool(state.get("shareConsent"))
+        lines = [f"sharing: {'ON' if share else 'OFF'}"]
+        if share:
+            lines.append(f"previewed: {'yes' if state.get('previewed') else 'no — first share is held until /jinn preview'}")
+            lines.append("share: ON — reproducible tasks from your work may be shared at task end")
         else:
-            lines.append("capture: OFF — reader only, nothing leaves this machine")
+            lines.append("share: OFF — nothing derived from your work leaves this machine")
         pending = _latest_pending()
         if pending:
             lines.append(f"pending trace: {pending}")
@@ -376,7 +376,7 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
             except json.JSONDecodeError:
                 rows = None
             if rows is not None:
-                return ledger_view.render_ledger(rows, enabled=consent.capture_enabled())
+                return ledger_view.render_ledger(rows, enabled=consent.share_enabled())
         code, out = jinn_layer.ledger(runner=_runner)
         return out if code == 0 else f"ledger unavailable:\n{out}"
 

@@ -36,23 +36,22 @@ async function withTmpDir(fn: (dir: string) => Promise<void>): Promise<void> {
 }
 
 describe('MineableTraceStore', () => {
-  it('refuses to append without tier-1 consent (fail closed, D2)', async () => {
-    await withTmpDir(async (dir) => {
-      const store = new MineableTraceStore({ stateDir: dir });
-      await expect(store.append(record(), 'off')).rejects.toThrow(/consent/);
-      expect(await store.listUnmined()).toEqual([]);
-      // AC1a: a tier-1 refused append performs ZERO I/O — the store file must not
-      // even be created. The store throws before any writeJsonAtomic, so no file
-      // exists on disk after a refused append.
-      expect(existsSync(join(dir, 'mineable-traces.json'))).toBe(false);
-    });
-  });
-
-  it('appends with consent and round-trips all five contract fields', async () => {
+  it('appends unconditionally (local retention is always on, mono#1714)', async () => {
     await withTmpDir(async (dir) => {
       const store = new MineableTraceStore({ stateDir: dir });
       const r = record();
-      await store.append(r, 'retain_local');
+      await store.append(r);
+      const [got] = await store.listUnmined();
+      expect(got).toEqual(r);
+      expect(existsSync(join(dir, 'mineable-traces.json'))).toBe(true);
+    });
+  });
+
+  it('round-trips all five contract fields', async () => {
+    await withTmpDir(async (dir) => {
+      const store = new MineableTraceStore({ stateDir: dir });
+      const r = record();
+      await store.append(r);
       const [got] = await store.listUnmined();
       expect(got).toEqual(r);
     });
@@ -61,7 +60,7 @@ describe('MineableTraceStore', () => {
   it('markMined removes from the unmined list but keeps the record on disk', async () => {
     await withTmpDir(async (dir) => {
       const store = new MineableTraceStore({ stateDir: dir });
-      await store.append(record({ sourceId: 's1' }), 'retain_local');
+      await store.append(record({ sourceId: 's1' }));
       await store.markMined('s1');
       expect(await store.listUnmined()).toEqual([]);
     });

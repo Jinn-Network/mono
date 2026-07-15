@@ -154,7 +154,7 @@ describe('mineSessionEchoes', () => {
     const env = await setup();
     try {
       const record = makeRecord();
-      await env.mineableStore.append(record, 'retain_local');
+      await env.mineableStore.append(record);
 
       const result = await mineSessionEchoes(baseDeps(env, makeSuccessfulRunner()));
       expect(result.admitted).toHaveLength(1);
@@ -177,7 +177,7 @@ describe('mineSessionEchoes', () => {
     const env = await setup();
     try {
       const record = makeRecord();
-      await env.mineableStore.append(record, 'retain_local');
+      await env.mineableStore.append(record);
 
       const result = await mineSessionEchoes(baseDeps(env, makeSuccessfulRunner()));
       const mintedId = result.admitted[0]!;
@@ -193,21 +193,21 @@ describe('mineSessionEchoes', () => {
     }
   });
 
-  it('rule 3: tier-2 gate — no consent mints locally but is never published, and D5 is never consulted for it', async () => {
+  it('rule 3: share gate — no share consent mints locally but is never published, and D5 is never consulted for it', async () => {
     const env = await setup();
     try {
       const record = makeRecord({ publishMinedTasksConsent: false });
-      await env.mineableStore.append(record, 'retain_local');
+      await env.mineableStore.append(record);
 
       const isPublic = vi.fn().mockResolvedValue(true);
       const result = await mineSessionEchoes(baseDeps(env, makeSuccessfulRunner(), { publish: true, publicRepoChecker: { isPublic } }));
 
-      // Tier-1 still mints locally.
+      // Local mining still happens.
       expect(result.admitted).toHaveLength(1);
       const mintedId = result.admitted[0]!;
 
       // D5 (assertPublicRepoForPublish) belongs to the publish path only —
-      // never consulted for a tier-1-only record.
+      // never consulted for a share-off record.
       expect(isPublic).not.toHaveBeenCalled();
       expect(uploadToIpfs).not.toHaveBeenCalled();
 
@@ -231,7 +231,7 @@ describe('mineSessionEchoes', () => {
       const deniedRepo = [...denylist.repos][0]!;
 
       const record = makeRecord({ repo: deniedRepo });
-      await env.mineableStore.append(record, 'retain_local');
+      await env.mineableStore.append(record);
 
       const runner = makeSuccessfulRunner();
       const result = await mineSessionEchoes(baseDeps(env, runner));
@@ -249,7 +249,7 @@ describe('mineSessionEchoes', () => {
     const env = await setup();
     try {
       const record = makeRecord({ publishMinedTasksConsent: true });
-      await env.mineableStore.append(record, 'retain_local');
+      await env.mineableStore.append(record);
 
       const isPublic = vi.fn().mockResolvedValue(false);
       const result = await mineSessionEchoes(baseDeps(env, makeSuccessfulRunner(), { publish: true, publicRepoChecker: { isPublic } }));
@@ -267,7 +267,7 @@ describe('mineSessionEchoes', () => {
     const env = await setup();
     try {
       const record = makeRecord();
-      await env.mineableStore.append(record, 'retain_local');
+      await env.mineableStore.append(record);
 
       const result = await mineSessionEchoes(baseDeps(env, makeDeadRunner()));
 
@@ -283,7 +283,7 @@ describe('mineSessionEchoes', () => {
     const env = await setup();
     try {
       const record = makeRecord();
-      await env.mineableStore.append(record, 'retain_local');
+      await env.mineableStore.append(record);
 
       const firstResult = await mineSessionEchoes(baseDeps(env, makeSuccessfulRunner()));
       expect(firstResult.discovered).toBe(1);
@@ -326,7 +326,7 @@ describe('mineSessionEchoes', () => {
       }, EVAL_SEMANTICS_VERSION);
 
       const record = makeRecord({ kind: 'solvernet-execution', sourceInstanceId: priorMintedId });
-      await env.mineableStore.append(record, 'retain_local');
+      await env.mineableStore.append(record);
 
       const runner = makeSuccessfulRunner();
       const result = await mineSessionEchoes(baseDeps(env, runner));
@@ -345,7 +345,7 @@ describe('mineSessionEchoes', () => {
     const env = await setup();
     try {
       const record = makeRecord();
-      await env.mineableStore.append(record, 'retain_local');
+      await env.mineableStore.append(record);
 
       await mineSessionEchoes(baseDeps(env, makeDeadRunner()));
       expect(await env.mineableStore.listUnmined()).toEqual([]);
@@ -392,8 +392,8 @@ describe('D2 tier-2 — unpublished mints never enter the postable union (per-en
       // Two session records, same repo: A consents to tier-2 publish, B does not.
       const recordA = makeRecord({ sourceId: 'session-a-consented', publishMinedTasksConsent: true });
       const recordB = makeRecord({ sourceId: 'session-b-tier1-only', publishMinedTasksConsent: false });
-      await env.mineableStore.append(recordA, 'retain_local');
-      await env.mineableStore.append(recordB, 'retain_local');
+      await env.mineableStore.append(recordA);
+      await env.mineableStore.append(recordB);
 
       const result = await mineSessionEchoes(baseDeps(env, makeSmartRunner(), { publish: true }));
       expect(result.admitted).toHaveLength(2);

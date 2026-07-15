@@ -77,7 +77,7 @@ _PUBLISHED_ROW = {
 def test_step1_recorded_on_continues_to_publish():
     plain = _plain(onboarding.render_consent_recorded())
     assert "step 1 of 4" in plain
-    assert "contribution is ON" in plain
+    assert "sharing is ON" in plain
     assert "Continue — step 2 · your first publish" in plain
     assert "[Enter]" in plain
     assert not _EMOJI.search(plain)
@@ -362,14 +362,14 @@ def test_driver_accept_path_walks_all_four_steps(tmp_path, monkeypatch):
     d = Driver(["a", "y", "", "", "", "", ""])
     onboarding.run_onboarding(d.input, d.print)
     text = d.plain()
-    # Consent recorded ON, then all four step surfaces + done.
-    assert "contribution is ON" in text
+    # Sharing recorded ON, then all four step surfaces + done.
+    assert "sharing is ON" in text
     assert "your first publish" in text
     assert "OLAS earned:" in text
     assert "When a run draws on the corpus" in text
     assert "complete" in text.lower()
-    # Flags set (facts-over-flags: consent is ACCEPTED, both seen-flags true).
-    assert consent.load_state().get("status") == consent.ACCEPTED
+    # Flags set (facts-over-flags: sharing consent is on, both seen-flags true).
+    assert consent.share_enabled() is True
     flags = onboarding.load_flags()
     assert flags["rewards_explained"] and flags["signals_shown"]
 
@@ -404,7 +404,7 @@ def test_driver_replay_re_asks_nothing_and_writes_nothing(tmp_path):
     onboarding.run_onboarding(d.input, d.print, replay=True, runner=runner)
     text = d.plain()
     # Shows the recorded consent state + the ACTUAL first envelope from ledger.
-    assert "contribution is ON" in text
+    assert "sharing is ON" in text
     assert "bafkFIRSTenv" in text
     # Replay mutates neither consent nor the flag file.
     assert consent.state_path().read_text() == before_consent

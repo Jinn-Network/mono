@@ -708,7 +708,7 @@ describe('runHarvestTick — harvest.sources union (Task 9)', () => {
     const env = await setupSessionEnv();
     try {
       const record = makeSessionRecord();
-      await env.mineableStore.append(record, 'retain_local');
+      await env.mineableStore.append(record);
 
       const result = await runHarvestTick(baseSourcesConfig(env));
 
@@ -725,7 +725,7 @@ describe('runHarvestTick — harvest.sources union (Task 9)', () => {
     const env = await setupSessionEnv();
     try {
       const record = makeSessionRecord();
-      await env.mineableStore.append(record, 'retain_local');
+      await env.mineableStore.append(record);
 
       const result = await runHarvestTick(baseSourcesConfig(env, { sources: ['commits', 'sessions'] }));
 
@@ -757,7 +757,7 @@ describe('runHarvestTick — harvest.sources union (Task 9)', () => {
     const env = await setupSessionEnv();
     try {
       const record = makeSessionRecord();
-      await env.mineableStore.append(record, 'retain_local');
+      await env.mineableStore.append(record);
 
       const result = await runHarvestTick(baseSourcesConfig(env, { sources: ['sessions'] }));
       const mintedId = result.admitted[0]!;

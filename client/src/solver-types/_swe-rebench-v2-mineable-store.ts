@@ -1,8 +1,9 @@
 /**
  * Local mineable-trace retention store for task-creator sessions.
- * Spec: spec/2026-07-08-task-creator-v0.md §10 (decision D2) — sessions are
- * retained for mining ONLY under tier-1 consent ('retain_local'); default is
- * 'off' and the store fails closed (throws, retains nothing).
+ * Spec: spec/2026-07-08-task-creator-v0.md §10. Per mono#1714 local retention
+ * is UNCONDITIONAL — the store never leaves the machine; whether a mined task
+ * is published off the box is gated separately by the single `share` consent
+ * (stamped onto each record as `publishMinedTasksConsent`).
  */
 
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
@@ -32,7 +33,7 @@ export interface MineableTraceRecord {
   intermediateFailureDiffs: string[]; // negative exemplars (field 4)
   skillEvents: MineableSkillEvent[]; // §12 option value (field 5)
   sourceInstanceId?: string; // set when kind === 'solvernet-execution'
-  publishMinedTasksConsent: boolean; // tier-2, from the capture manifest
+  publishMinedTasksConsent: boolean; // the single `share` consent — may this mint be published
   createdAt: string; // ISO — injected by caller, never Date.now() in the store
 }
 
@@ -113,13 +114,8 @@ export class MineableTraceStore {
     return this.cache;
   }
 
-  /** Fail-closed: throws if tier-1 consent is not 'retain_local'. */
-  async append(record: MineableTraceRecord, consent: 'off' | 'retain_local'): Promise<void> {
-    if (consent !== 'retain_local') {
-      throw new Error(
-        `MineableTraceStore.append refused: tier-1 consent is '${consent}', not 'retain_local' (D2 fail-closed)`,
-      );
-    }
+  /** Unconditional local retention (mono#1714) — the store never leaves the machine. */
+  async append(record: MineableTraceRecord): Promise<void> {
     const file = await this.load();
     file.records[record.sourceId] = { ...record };
     await writeJsonAtomic(this.file, file);
