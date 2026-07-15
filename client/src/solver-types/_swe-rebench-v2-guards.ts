@@ -43,28 +43,27 @@ export interface PublicRepoChecker {
   isPublic(repo: string): Promise<boolean>;
 }
 
-/** GitHub API probe with simple in-memory cache. */
+/** GitHub API probe. Visibility is deliberately fresh for every call. */
 export function createGitHubPublicRepoChecker(opts: {
   fetchImpl?: typeof fetch;
   token?: string;
 } = {}): PublicRepoChecker {
   const fetchImpl = opts.fetchImpl ?? fetch;
-  const cache = new Map<string, boolean>();
   return {
     async isPublic(repo: string): Promise<boolean> {
-      const cached = cache.get(repo);
-      if (cached !== undefined) return cached;
-      const [owner, name] = repo.split('/');
-      if (!owner || !name) {
-        cache.set(repo, false);
-        return false;
-      }
+      const parts = repo.split('/');
+      if (parts.length !== 2 || !parts[0] || !parts[1]) return false;
+      const [owner, name] = parts as [string, string];
       const headers: Record<string, string> = { Accept: 'application/vnd.github+json' };
       if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
-      const res = await fetchImpl(`https://api.github.com/repos/${owner}/${name}`, { headers });
-      const isPublic = res.ok && !(await res.json().catch(() => ({})) as { private?: boolean }).private;
-      cache.set(repo, isPublic);
-      return isPublic;
+      const res = await fetchImpl(
+        `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,
+        { headers },
+      );
+      if (!res.ok) return false;
+      const body = await res.json().catch(() => null) as unknown;
+      return typeof body === 'object' && body !== null &&
+        (body as { private?: unknown }).private === false;
     },
   };
 }

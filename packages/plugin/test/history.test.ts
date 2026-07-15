@@ -11,6 +11,22 @@ import { makeSampleEpisode } from './_fixtures/episode.js';
 import type { ContributionPort } from '../src/ports/contribution-port.js';
 import { unavailable, type PortResult } from '../src/outcome.js';
 import type { ContributionLedgerEntry } from '../src/ports/contribution-port.js';
+import type { ContributionCandidateV1 } from '../src/schemas/contribution-candidate.js';
+
+function candidate(sourceId: string, consent = false): ContributionCandidateV1 {
+  return {
+    schemaVersion: 'jinn.contribution-candidate.v1',
+    sourceId,
+    repositorySlug: 'Jinn-Network/mono',
+    baseCommit: '0123456789abcdef',
+    acceptedDiff: 'diff --git a/a b/a\n+fixed\n',
+    testRuns: [],
+    intermediateFailureDiffs: [],
+    skillEvents: [],
+    publishMinedTasksConsent: consent,
+    createdAt: '2026-07-15T12:00:00.000Z',
+  };
+}
 
 function buildPlugin(evidence: InMemoryEvidencePort, contribution = new InMemoryContributionPort()) {
   return createJinnPlugin({
@@ -39,7 +55,9 @@ describe('plugin.history / explain (AC3 — reproducible from port reads)', () =
     const evidence = new InMemoryEvidencePort();
     await evidence.put(makeSampleEpisode({ episodeId: 'ep-1' }));
     const contribution = new InMemoryContributionPort();
-    await contribution.recordMineable('ep-1'); // → status 'queued'
+    const recorded = await contribution.recordMineable(candidate('ep-1', true));
+    if (recorded.status !== 'ok') throw new Error('record failed');
+    await contribution.authorize(recorded.value.recordId);
     const plugin = buildPlugin(evidence, contribution);
     const { entries } = await plugin.history();
     const row = entries.find((e) => e.sessionId === makeSampleEpisode().session.sessionId);
@@ -74,6 +92,38 @@ describe('plugin.history / explain (AC3 — reproducible from port reads)', () =
     expect(ex.eligibility?.reason).toBe(indeterminate);
   });
 
+  it('projects persisted activity facts and the authoritative eligibility verdict', async () => {
+    const evidence = new InMemoryEvidencePort();
+    const eligibility = {
+      eligible: true,
+      reason: 'accepted diff on a public repository',
+      checkedAt: '2026-07-15T12:00:00.000Z',
+    };
+    await evidence.put(makeSampleEpisode({
+      episodeId: 'ep-enriched',
+      activity: {
+        surfacedRefs: ['knowledge/a', 'knowledge/b'],
+        fetchedRefs: ['knowledge/b'],
+        installedSkillRefs: ['skills/tdd@1'],
+      },
+      eligibility,
+    }));
+    const plugin = buildPlugin(evidence);
+
+    const history = await plugin.history();
+    expect(history.entries[0]).toMatchObject({
+      knowledgeSurfaced: 2,
+      knowledgeUsed: 1,
+      eligibility,
+    });
+
+    const explanation = await plugin.explain('sess-fixture-1');
+    expect(explanation.surfacedRefs).toEqual(['knowledge/a', 'knowledge/b']);
+    expect(explanation.fetchedRefs).toEqual(['knowledge/b']);
+    expect(explanation.installedSkillRefs).toEqual(['skills/tdd@1']);
+    expect(explanation.eligibility).toEqual(eligibility);
+  });
+
   it('explain returns a structured trace for a session', async () => {
     const evidence = new InMemoryEvidencePort();
     await evidence.put(makeSampleEpisode({ episodeId: 'ep-1' }));
@@ -99,6 +149,7 @@ describe('plugin.history / explain (AC3 — reproducible from port reads)', () =
       async recordMineable() { return unavailable('down'); },
       async ledger(): Promise<PortResult<ContributionLedgerEntry[]>> { return unavailable('ledger down'); },
       async mintStatus() { return unavailable('down'); },
+      async authorize() { return unavailable('down'); },
       async veto() { return unavailable('down'); },
     };
     const plugin = buildPlugin(evidence, brokenContribution as unknown as InMemoryContributionPort);

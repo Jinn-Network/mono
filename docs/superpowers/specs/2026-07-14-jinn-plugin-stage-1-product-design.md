@@ -5,8 +5,7 @@
 - **Author:** Ritsu (planning session, Claude Fable 5)
 - **Shape:** `design` — output is this product design; implementation lands as Stage 1 Issues
 - **Parent direction:** PR #1651 "Jinn Plugin product lifecycle roadmap"
-  (`docs/superpowers/specs/2026-07-14-jinn-plugin-product-roadmap-design.md`, **unmerged — a
-  blocker for dependent implementation issues**). This document is the Stage 1 interaction
+  (`docs/superpowers/specs/2026-07-14-jinn-plugin-product-roadmap-design.md`, merged). This document is the Stage 1 interaction
   design the roadmap deliberately does not specify. It does not extend PR #1651.
 - **Sibling design:** `spec/2026-07-02-jinn-harness-network.md` v0.4 (harness-first
   distribution, D1–D12). Stage 1 assembles what that spec's v0 shipped; divergences are
@@ -17,7 +16,7 @@
 Stage 1 is the **complete connected product**: assemble existing retrieval, capture, task,
 evaluation, distillation, and history capabilities into one coherent, end-to-end experience a
 person has while doing ordinary OSS work — plus two structural requirements that are not
-deferrable: an enforceable plugin package boundary (separate design, Phase 3) and durable,
+deferrable: the enforceable standalone boundary defined in the sibling package architecture and durable,
 reusable evidence episodes.
 
 The Stage 1 gate (from the roadmap):
@@ -69,22 +68,27 @@ status` as the install doctor.
 
 ### 4.3 Session end — evidence
 The episode is assembled at session end from the completed hook collector (P5) and retained
-locally: **all turns** (user, assistant, tool calls/results), environment (harness, model,
+locally. The ordered trajectory is a first-class field, not material hidden in a snapshot:
+**all turns** (user, assistant, tool calls/results), environment (harness, model,
 tools, **skills loadout** — new), outcome status, cost (duration + **tokens** — new), a
 **per-record privacy/retention field** (new; today gating is implicit external state), and
 lineage hooks (episode → mint → eventual marketplace evidence). Private by default; the
-existing tee to the distill captures dir continues under its current gating. Retention (prune
-newest 200) becomes a stated, user-visible policy. The frozen `jinn.trace-envelope.v0` publish
-format is untouched; episode-schema mechanics are Phase 3 design.
+existing tee to the distill captures dir continues. Retention (prune
+newest 200) becomes a stated, user-visible policy. `EpisodeV1` is the canonical reusable
+knowledge artifact from Stage 1 onward. Existing `jinn.trace-envelope.v0` pending files are
+preserved as private local material but are retired from outbound publication and never
+auto-published by the new flow.
 
 ### 4.4 Contribution — silent, inspectable
-If the session produced an accepted diff on a public repo, the plugin records a mineable
-trace locally (unconditional — it never leaves the machine). Background machinery (the
+If the session produced an accepted diff, the plugin records a reusable task candidate locally
+(unconditional — it never leaves the machine, including for private repositories). Background machinery (the
 daemon-sidecar `HarvestLoop` + session-echo miner) validates eligibility — public repo,
 resolvable `repo@commit`, empirical F2P/P2P echo, no private facts (blinded provenance,
-lineage hash only) — and mints a task into the pool; whether the mint is published off the
-box is gated by the single standing `shareConsent`, applied automatically per record (no
-per-mint interaction). Publication to chain runs through the **optional
+lineage hash only) — and may mint a task into the local pool. Local candidate recording and
+minting are independent of publication. Whether a public task leaves the box is gated by the
+single standing `shareConsent`, applied automatically per record (no per-mint interaction).
+The first-task preview is a one-time disclosure acknowledgement, not a second consent.
+Publication to chain runs through the **optional
 daemon sidecar**; without it, approved mints queue locally with an honest status. First
 publish shows a one-time preview; after that, silence + inspection surfaces. Gasless relayer
 intake is Stage 2+.
@@ -104,14 +108,16 @@ plugin-level outcome; never a crash into the host session.
 
 ### 4.7 Privacy and permissions
 The roadmap boundary, unchanged: raw traces stay local; scrub is fail-closed on anything
-outbound; mints carry blinded provenance; consent tiers per P7; per-task veto; the ledger is
-the receipt. Private and public episodes share one semantic evidence contract; storage,
+outbound; mints carry blinded provenance; the single consent in P7 gates publication only;
+per-task veto remains effective until publication; the ledger is the receipt. Private and
+public episodes share one semantic evidence contract; storage,
 retention, scrubbing, and permitted derived views differ.
 
 ### 4.8 Disable and rollback
 As shipped: `hermes plugins disable jinn`, `pip uninstall jinn-plugin`, `HERMES_SAFE_MODE=1`;
-consent-off = zero capture; separate state home. The acceptance gate asserts the host returns
-to stock behavior.
+disabled means zero Jinn hooks, output, subprocesses, or state writes. Share-consent off still
+captures, distills, and records candidates locally, but performs zero outbound publication.
+The acceptance gate asserts the host returns to stock behavior when the plugin is disabled.
 
 ## 5. Outcome model
 

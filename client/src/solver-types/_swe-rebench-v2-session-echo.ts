@@ -10,7 +10,10 @@
  * reprocessed regardless of outcome.
  */
 
-import type { MineableTraceStore } from './_swe-rebench-v2-mineable-store.js';
+import {
+  mineableTraceRecordFromStored,
+  type MineableTraceStore,
+} from './_swe-rebench-v2-mineable-store.js';
 import type { PoolTask } from './_swe-rebench-v2-pool.js';
 import type { HarvestTickResult } from '../daemon/harvest-loop.js';
 
@@ -33,7 +36,13 @@ import {
   sessionEchoInstanceId,
   type HarvestMintDeps,
 } from './_swe-rebench-v2-harvest.js';
-import { assertRepoAllowedForMint, loadMintRepoDenylist } from './_swe-rebench-v2-guards.js';
+import {
+  assertPublicRepoForPublish,
+  assertRepoAllowedForMint,
+  loadMintRepoDenylist,
+} from './_swe-rebench-v2-guards.js';
+import { mintedIpfsDatasetCid, parseMintedIpfsDataset } from './_swe-rebench-v2-minted-pool.js';
+import { uploadToIpfs } from '../adapters/mech/ipfs.js';
 import { EVAL_SEMANTICS_VERSION } from './_swe-rebench-v2-validated-pool.js';
 
 export interface SessionEchoMintDeps extends HarvestMintDeps {
@@ -54,23 +63,39 @@ export async function mineSessionEchoes(deps: SessionEchoMintDeps): Promise<Sess
     return { discovered: 0, admitted: [], rejected: [], skipped: ['no-validated-pool'] };
   }
 
-  const records = await deps.mineableStore.listUnmined();
+  // Newly recorded candidates always run through local mining, even when
+  // sharing is disabled. A locally minted candidate is revisited only when a
+  // preview acknowledgement (or the persisted standing acknowledgement for a
+  // later candidate) has moved its publication axis to queued.
+  const pending = (await deps.mineableStore.list()).filter((record) =>
+    record.localState === 'recorded' ||
+    (Boolean(deps.publish) && record.localState === 'minted' && record.publicationState === 'queued'),
+  );
+  const records = pending.map(mineableTraceRecordFromStored);
   const denylist = loadMintRepoDenylist();
   const admitted: string[] = [];
   const rejected: Array<{ instance_id: string; reason: string }> = [];
 
   for (const record of records) {
+    const stored = pending.find((candidate) => candidate.recordId === record.sourceId);
+    if (!stored) continue;
     const provisionalId = sessionEchoInstanceId(record.repo, record.sourceId);
 
-    const rejectAndMine = async (reason: string): Promise<void> => {
+    const rejectAndFinish = async (reason: string): Promise<void> => {
       rejected.push({ instance_id: provisionalId, reason });
-      await deps.mineableStore.markMined(record.sourceId);
+      if (stored.localState === 'recorded') {
+        await deps.mineableStore.markRejected(record.sourceId, reason);
+      } else {
+        // The local mint remains useful, but a failed final publication gate
+        // must not retry outbound forever.
+        await deps.mineableStore.veto(record.sourceId);
+      }
     };
 
     try {
       assertRepoAllowedForMint(record.repo, denylist);
     } catch (err) {
-      await rejectAndMine(err instanceof Error ? err.message : String(err));
+      await rejectAndFinish(err instanceof Error ? err.message : String(err));
       continue;
     }
 
@@ -86,14 +111,70 @@ export async function mineSessionEchoes(deps: SessionEchoMintDeps): Promise<Sess
         (entry) => entry.row.instance_id === record.sourceInstanceId,
       );
       if (sourceIsSynthetic) {
-        await rejectAndMine('synthetic-source');
+        await rejectAndFinish('synthetic-source');
         continue;
       }
     }
 
+    // A prior tick may have committed the local mint (or even its IPFS
+    // artifact) before the contribution record advanced. Resume from that
+    // durable state without repeating Docker evaluation or overwriting it.
+    const existingMint = await deps.mintedStore.getEntry(provisionalId, EVAL_SEMANTICS_VERSION);
+    if (existingMint) {
+      admitted.push(provisionalId);
+      if (stored.publicationState === 'queued' && deps.publish) {
+        try {
+          await deps.mineableStore.publishAuthorized(record.sourceId, async () => {
+            let publicationRef = existingMint.published
+              ? existingMint.hf_dataset
+              : undefined;
+            if (existingMint.published && !parseMintedIpfsDataset(existingMint.hf_dataset)) {
+              throw new Error(`published mint ${provisionalId} has no IPFS artifact reference`);
+            }
+            if (!publicationRef) {
+              const artifact = await deps.mintedStore.exportArtifact(EVAL_SEMANTICS_VERSION, {
+                generatedAt: existingMint.mintedAt,
+                includeIds: [provisionalId],
+              });
+              await assertPublicRepoForPublish(record.repo, deps.publicRepoChecker);
+              const cid = await uploadToIpfs(deps.ipfsRegistryUrl, artifact);
+              await deps.mintedStore.setPublishedArtifact(
+                EVAL_SEMANTICS_VERSION,
+                cid,
+                [provisionalId],
+                { rowHashVersion: 1 },
+              );
+              await deps.progress?.onIpfsPublished?.({
+                instanceIds: [provisionalId],
+                rowHashVersion: 1,
+                artifactCid: cid,
+              });
+              publicationRef = mintedIpfsDatasetCid(cid);
+            }
+            return {
+              value: undefined,
+              mintRef: provisionalId,
+              publicationRef,
+            };
+          });
+        } catch (error) {
+          rejected.push({
+            instance_id: provisionalId,
+            reason: error instanceof Error ? error.message : String(error),
+          });
+          // The local mint remains useful even when consent/repo publication
+          // authorization disappeared before outbound I/O.
+          await deps.mineableStore.markMinted(record.sourceId, provisionalId);
+        }
+      } else if (stored.localState !== 'minted') {
+        await deps.mineableStore.markMinted(record.sourceId, provisionalId);
+      }
+      continue;
+    }
+
     const source = findSourceInstanceForRepo(deps.pool, scorableIds, record.repo);
     if (!source) {
-      await rejectAndMine(`no admitted source instance for repo ${record.repo}`);
+      await rejectAndFinish(`no admitted source instance for repo ${record.repo}`);
       continue;
     }
 
@@ -106,23 +187,59 @@ export async function mineSessionEchoes(deps: SessionEchoMintDeps): Promise<Sess
       operatorSafe: deps.operatorSafe,
     });
     if (!builtResult.built) {
-      await rejectAndMine(builtResult.reason ?? 'build-failed');
+      await rejectAndFinish(builtResult.reason ?? 'build-failed');
       continue;
     }
 
-    // Share gate (mono#1714): a record without share consent still mints
-    // locally (local retention is unconditional) but is never published.
-    // `Boolean(...)` guarantees a real boolean (never `undefined`) so
-    // `runMintTasksPipeline`'s `c.publish !== false` publish-path check is
-    // skipped, not defaulted on. `deps` already satisfies HarvestMintDeps
-    // (SessionEchoMintDeps extends it); spread it and override only `publish`
-    // rather than re-listing every field.
-    const publish = Boolean(deps.publish) && record.publishMinedTasksConsent;
+    // Publication is a persisted state transition, not a process-local
+    // interpretation of the old consent boolean. Disabled, preview-required,
+    // and vetoed candidates may mint locally but cause zero outbound I/O.
+    const publish = Boolean(deps.publish) && stored.publicationState === 'queued';
 
-    const mintResult = await admitBuiltMintCandidates([builtResult.built], { ...deps, publish });
+    let mintResult;
+    try {
+      mintResult = await admitBuiltMintCandidates([builtResult.built], {
+        ...deps,
+        publish,
+        ...(publish ? {
+          withPublicationAuthorization: async (_args, publishArtifact) =>
+            deps.mineableStore.publishAuthorized(record.sourceId, async () => {
+              const cid = await publishArtifact();
+              return {
+                value: cid,
+                mintRef: builtResult.built!.poolTask.instance_id,
+                publicationRef: mintedIpfsDatasetCid(cid),
+              };
+            }),
+        } : {}),
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      const durableMint = await deps.mintedStore.getEntry(provisionalId, EVAL_SEMANTICS_VERSION);
+      if (durableMint) {
+        if (!admitted.includes(provisionalId)) admitted.push(provisionalId);
+        rejected.push({ instance_id: provisionalId, reason });
+        await deps.mineableStore.markMinted(record.sourceId, provisionalId);
+      } else {
+        await rejectAndFinish(reason);
+      }
+      continue;
+    }
     for (const id of mintResult.admitted) admitted.push(id);
     for (const r of mintResult.rejected) rejected.push(r);
-    await deps.mineableStore.markMined(record.sourceId);
+    const admittedId = mintResult.admitted[0];
+    if (admittedId) {
+      if (!publish) {
+        await deps.mineableStore.markMinted(record.sourceId, admittedId);
+      }
+    } else if (stored.localState === 'recorded') {
+      await deps.mineableStore.markRejected(
+        record.sourceId,
+        mintResult.rejected[0]?.reason ?? 'admission-failed',
+      );
+    } else if (mintResult.rejected.length > 0) {
+      await deps.mineableStore.veto(record.sourceId);
+    }
   }
 
   return { discovered: records.length, admitted, rejected, skipped: [] };

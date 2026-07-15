@@ -4,12 +4,11 @@ The rung-1 `jinn-layer distill` loop reads ~/.jinn-client/harness-layer/captures
 the plugin is the producer. The trust invariants under test:
 
   - the tee follows the distill mode (off => nothing reserved);
-  - a distill-only opt-in (publish consent declined, mode local/defer) fills
-    the buffer and tees, but NEVER publishes;
-  - an old layer without `distill status` degrades to no tee, publish path
-    untouched;
-  - pending files (publish lifecycle) and capture files (distill lifecycle)
-    are distinct — the publish drain never touches the captures dir.
+  - a distill-only opt-in (share consent declined, mode local/defer) fills
+    the buffer and tees, but NEVER authorizes publication;
+  - an old/missing layer still reserves a local tee while the complete
+    EpisodeV1 gets a local fallback write;
+  - the retired raw publish verb and pending queue are never used.
 """
 
 from __future__ import annotations
@@ -36,7 +35,7 @@ class DistillAwareRunner:
         self.mode = mode
         self.status_code = status_code
 
-    def __call__(self, argv: list[str]) -> tuple[int, str]:
+    def __call__(self, argv: list[str], *, input: str | None = None) -> tuple[int, str]:
         self.calls.append(argv)
         # argv[0] is the jinn-layer binary; the verb starts at argv[1].
         if argv[1:3] == ["distill", "status"]:
@@ -45,7 +44,10 @@ class DistillAwareRunner:
             return 0, json.dumps({"mode": self.mode})
         return 0, "ok"
 
-    def published(self) -> list[list[str]]:
+    def delegated(self) -> list[list[str]]:
+        return [c for c in self.calls if c[1:3] == ["session", "end"]]
+
+    def legacy_published(self) -> list[list[str]]:
         return [c for c in self.calls if c[1:2] == ["publish"]]
 
 
@@ -56,6 +58,10 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("JINN_LAYER_EPISODES_DIR", str(tmp_path / "episodes"))
     capture_buffer.reset()
     distill.reset()
+    jinn._reset_contract_state()
+    jinn._reset_session_state()
+    jinn._contract_checked = True
+    jinn._degraded = None
     jinn._vetoed_tasks.clear()
     jinn._session_hint_shown.clear()
     yield
@@ -112,7 +118,7 @@ def _capture_files(tmp_path_env: str | None = None) -> list[Path]:
     return sorted(distill.captures_dir().glob("*.json"))
 
 
-def test_accepted_consent_mode_unset_tees_and_publishes(tmp_path):
+def test_accepted_consent_mode_unset_tees_and_delegates_episode(tmp_path):
     consent.save_state(True)
     consent.mark_previewed()
     runner = DistillAwareRunner(mode="unset")
@@ -124,10 +130,11 @@ def test_accepted_consent_mode_unset_tees_and_publishes(tmp_path):
     assert len(files) == 1, "accepted + unset must reserve a capture for the first run"
     task = json.loads(files[0].read_text())
     assert task["steps"], "the tee'd file is the full CapturedTask shape"
-    assert runner.published(), "the publish path still runs under accepted consent"
+    assert runner.delegated(), "the complete episode is delegated once"
+    assert runner.legacy_published() == []
 
 
-def test_mode_off_tees_nothing_but_publish_path_unaffected(tmp_path):
+def test_mode_off_tees_nothing_but_episode_delegation_is_unaffected(tmp_path):
     consent.save_state(True)
     consent.mark_previewed()
     runner = DistillAwareRunner(mode="off")
@@ -136,7 +143,8 @@ def test_mode_off_tees_nothing_but_publish_path_unaffected(tmp_path):
     _drive_session()
 
     assert _capture_files() == [], "off = stop reserving captures"
-    assert runner.published(), "publish stays consent-gated, independent of distill mode"
+    assert runner.delegated(), "session delegation is independent of distill mode"
+    assert runner.legacy_published() == []
 
 
 def test_declined_consent_with_defer_mode_tees_but_never_publishes(tmp_path):
@@ -147,22 +155,22 @@ def test_declined_consent_with_defer_mode_tees_but_never_publishes(tmp_path):
     _drive_session()
 
     assert len(_capture_files()) == 1, "distill opt-in fills the buffer and tees"
-    assert runner.published() == [], "a distill-only opt-in must NEVER publish"
+    assert runner.legacy_published() == [], "a distill-only opt-in must NEVER publish raw"
     pending = Path(os.environ["HERMES_HOME"]) / "jinn" / "pending"
     assert not pending.exists() or list(pending.glob("*.json")) == [], (
         "no pending file — pending is the publish lifecycle"
     )
 
 
-def test_declined_consent_and_old_layer_degrades_to_nothing(tmp_path):
+def test_declined_consent_and_old_layer_still_reserves_locally(tmp_path):
     consent.save_state(False)
     runner = DistillAwareRunner(status_code=2)  # old layer: no `distill status`
     jinn._runner = runner
 
     _drive_session()
 
-    assert _capture_files() == [], "old layer degrades: distill gating off"
-    assert runner.published() == []
+    assert len(_capture_files()) == 1, "missing status disables only the process bridge"
+    assert runner.legacy_published() == []
 
 
 def test_mode_is_cached_one_status_read_per_process(tmp_path):
@@ -245,7 +253,7 @@ def test_no_share_consent_still_reserves_locally(tmp_path):
 
     assert len(_capture_files()) == 1, "local tee reserved regardless of share consent"
     assert len(_episode_files()) == 1, "local episode written regardless of share consent"
-    assert runner.published() == [], "nothing is published without share consent"
+    assert runner.legacy_published() == [], "nothing uses the retired raw publish path"
 
 
 def test_legacy_capture_still_written_byte_shape(tmp_path):
@@ -272,6 +280,34 @@ def test_legacy_capture_still_written_byte_shape(tmp_path):
     }
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission assertion")
+def test_legacy_capture_is_owner_only(tmp_path):
+    runner = DistillAwareRunner(mode="defer")
+    path = distill.tee_capture({"private": "raw trajectory"}, "private-session", runner)
+
+    assert path is not None
+    assert path.parent.stat().st_mode & 0o777 == 0o700
+    assert path.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink semantics differ")
+def test_legacy_capture_refuses_a_symlink_destination(tmp_path):
+    directory = distill.captures_dir()
+    directory.mkdir(parents=True)
+    target = tmp_path / "outside.json"
+    target.write_text("do not overwrite", encoding="utf-8")
+    (directory / "private-session.json").symlink_to(target)
+
+    result = distill.tee_capture(
+        {"private": "raw trajectory"},
+        "private-session",
+        DistillAwareRunner(mode="defer"),
+    )
+
+    assert result is None
+    assert target.read_text(encoding="utf-8") == "do not overwrite"
+
+
 def test_episode_written_to_separate_location(tmp_path):
     consent.save_state(True)
     consent.mark_previewed()
@@ -286,15 +322,15 @@ def test_episode_written_to_separate_location(tmp_path):
     assert json.loads(episodes[0].read_text())["schemaVersion"] == "jinn.episode.v1"
 
 
-def test_episode_not_written_without_gate(tmp_path):
+def test_episode_fallback_is_written_even_when_distill_gate_is_off(tmp_path):
     consent.save_state(False)
     runner = DistillAwareRunner(status_code=2)  # old layer: distill gating off
     jinn._runner = runner
 
     _drive_session()
 
-    assert _capture_files() == []
-    assert _episode_files() == []
+    assert len(_capture_files()) == 1
+    assert len(_episode_files()) == 1
 
 
 def test_tee_failure_never_breaks_session_end(tmp_path, monkeypatch):
@@ -306,4 +342,5 @@ def test_tee_failure_never_breaks_session_end(tmp_path, monkeypatch):
 
     _drive_session()  # must not raise
 
-    assert runner.published(), "the publish path survives a broken tee"
+    assert runner.delegated(), "session delegation survives a broken tee"
+    assert len(_episode_files()) == 1, "malformed process reply falls back locally"

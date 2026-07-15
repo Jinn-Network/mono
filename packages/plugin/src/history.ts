@@ -1,7 +1,11 @@
 /** Derived history + explain views (product design §4.5). Owns no facts —
  *  recomputed from Evidence + Contribution + LocalLearning on every call, so
  *  deleting any cache leaves output identical (there is no cache). */
-import type { ContributionPort, ContributionLedgerEntry } from './ports/contribution-port.js';
+import {
+  deriveContributionStatus,
+  type ContributionPort,
+  type ContributionLedgerEntry,
+} from './ports/contribution-port.js';
 import type { EvidencePort } from './ports/evidence-port.js';
 import type { LocalLearningPort } from './ports/local-learning-port.js';
 import type { EpisodeV1 } from './schemas/episode.js';
@@ -44,24 +48,28 @@ function collect<T>(res: PortResult<T[]>, label: string, fallback: T[], reasons:
 
 function ledgerByEpisode(
   ledger: ContributionLedgerEntry[],
-): Map<string, ContributionLedgerEntry['status']> {
-  const map = new Map<string, ContributionLedgerEntry['status']>();
-  for (const row of ledger) map.set(row.episodeId, row.status);
+): Map<string, ContributionLedgerEntry> {
+  const map = new Map<string, ContributionLedgerEntry>();
+  for (const row of ledger) map.set(row.sourceId, row);
   return map;
 }
 
+function contributionState(row: ContributionLedgerEntry | undefined): HistoryEntry['contributionState'] {
+  if (!row) return { status: 'none' };
+  const anchorRef = row.publicationRef ?? row.mintRef;
+  return {
+    status: deriveContributionStatus(row),
+    ...(anchorRef !== undefined ? { anchorRef } : {}),
+  };
+}
+
 /**
- * History cannot re-derive an eligibility verdict: `deriveEligibility` reads the
- * accepted-diff / public-repo contribution signals that `end()` sees at
- * session-close, but EpisodeV1 does not persist them (episode-schema mechanics
- * are out of S1-F2 scope). Recomputing from the persisted `status`/tier/policy
- * alone would silently manufacture a `false` verdict from absent signals and
- * disagree with the authoritative `end()` verdict for the same episode. So
- * history reports the verdict as honestly indeterminate. `checkedAt` is pinned
- * to `capturedAt` to keep history deterministic (AC3 reproducibility).
+ * New episodes persist the authoritative completion verdict. Historical v1
+ * records omit it, so reads stay backward compatible and honestly indeterminate
+ * rather than silently manufacturing a verdict from incomplete inputs.
  */
 function episodeEligibility(ep: EpisodeV1): EligibilityVerdict {
-  return {
+  return ep.eligibility ?? {
     eligible: false,
     reason: 'eligibility indeterminate from episode (contribution signals not persisted)',
     checkedAt: ep.session.capturedAt,
@@ -82,11 +90,11 @@ export async function foldHistory(deps: HistoryDeps): Promise<HistoryResult> {
   const entries: HistoryEntry[] = episodes.map((ep) => ({
     sessionId: ep.session.sessionId,
     taskSummary: ep.task.summary,
-    knowledgeSurfaced: 0,
-    knowledgeUsed: 0,
+    knowledgeSurfaced: ep.activity?.surfacedRefs.length ?? 0,
+    knowledgeUsed: ep.activity?.fetchedRefs.length ?? 0,
     captureStatus: 'captured' as const,
     eligibility: episodeEligibility(ep),
-    contributionState: { status: byEpisode.get(ep.episodeId) ?? ('none' as const) },
+    contributionState: contributionState(byEpisode.get(ep.episodeId)),
     distilledSkillRefs: [],
   }));
 
@@ -102,19 +110,19 @@ export async function foldExplain(sessionRef: string, deps: HistoryDeps): Promis
   const ledger = collect(await deps.contribution.ledger(), 'contribution', [] as ContributionLedgerEntry[], reasons);
 
   const episode = episodes.find((ep) => ep.session.sessionId === sessionRef);
-  const status = episode
-    ? ledger.find((row) => row.episodeId === episode.episodeId)?.status ?? ('none' as const)
-    : ('none' as const);
+  const contribution = episode
+    ? contributionState(ledger.find((row) => row.sourceId === episode.episodeId))
+    : contributionState(undefined);
 
   return {
     sessionRef,
     found: Boolean(episode),
-    surfacedRefs: [],
-    fetchedRefs: [],
-    installedSkillRefs: [],
+    surfacedRefs: episode?.activity?.surfacedRefs ?? [],
+    fetchedRefs: episode?.activity?.fetchedRefs ?? [],
+    installedSkillRefs: episode?.activity?.installedSkillRefs ?? [],
     captureStatus: episode ? 'captured' : 'not-captured',
     eligibility: episode ? episodeEligibility(episode) : null,
-    contributionState: { status },
+    contributionState: contribution,
     degraded: reasons.length > 0,
     ...(reasons.length > 0 ? { reason: reasons.join('; ') } : {}),
   };

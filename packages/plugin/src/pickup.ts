@@ -71,6 +71,34 @@ export interface PickupDecision {
   contextBlock?: string;
 }
 
+/** Render only confirmed adoptions as installed. Orchestrators can re-render
+ * after performing auto-adoption I/O and move failed installs to suggestions. */
+export function renderPickupDecision(
+  adopted: PickupCandidate[],
+  suggested: PickupCandidate[],
+): string | undefined {
+  if (adopted.length === 0 && suggested.length === 0) return undefined;
+
+  const lines = ['[jinn corpus] Relevant to this task:'];
+  if (adopted.length > 0) {
+    lines.push('Adopted automatically (verified):');
+    for (const c of adopted) lines.push(`- ${c.slug} (${c.tier}): installed skill`);
+  }
+  if (suggested.length > 0) {
+    lines.push(
+      'Available in the corpus (unverified — read with the corpus tools, or the user can install):',
+    );
+    for (const c of suggested) {
+      lines.push(
+        c.payloadKind === 'skill'
+          ? `- ${c.slug} (tier: ${c.tier}) — ${c.summary}\n  ref: ${c.ref} · install: /jinn skills install ${c.ref}`
+          : `- (${c.payloadKind}, ${c.tier}) ${c.summary} — ref: ${c.ref}`,
+      );
+    }
+  }
+  return lines.join('\n');
+}
+
 /** Ports the adopt/suggest branch of _pickup_inner. Pure: candidates are
  *  already fetched + classified; installed slugs are already known. */
 export function decidePickup(
@@ -96,26 +124,5 @@ export function decidePickup(
     }
   }
 
-  if (adopted.length === 0 && suggested.length === 0) {
-    return { adopted, suggested, contextBlock: undefined };
-  }
-
-  const lines = ['[jinn corpus] Relevant to this task:'];
-  if (adopted.length > 0) {
-    lines.push('Adopted automatically (verified):');
-    for (const c of adopted) lines.push(`- ${c.slug} (${c.tier}): installed skill`);
-  }
-  if (suggested.length > 0) {
-    lines.push(
-      'Available in the corpus (unverified — read with the corpus tools, or the user can install):',
-    );
-    for (const c of suggested) {
-      lines.push(
-        c.payloadKind === 'skill'
-          ? `- ${c.slug} (tier: ${c.tier}) — ${c.summary}\n  ref: ${c.ref} · install: /jinn skills install ${c.ref}`
-          : `- (${c.payloadKind}, ${c.tier}) ${c.summary} — ref: ${c.ref}`,
-      );
-    }
-  }
-  return { adopted, suggested, contextBlock: lines.join('\n') };
+  return { adopted, suggested, contextBlock: renderPickupDecision(adopted, suggested) };
 }

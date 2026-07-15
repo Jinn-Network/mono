@@ -1,114 +1,114 @@
-/**
- * ContributionPort adapter (#1660) — projects the plugin's 4-state
- * (`queued|minted|published|vetoed`) contribution ledger over an adapter-owned
- * JSON status store.
- *
- * BINDING (#1660 plan): backed SOLELY by the adapter-owned
- * `ContributionStatusStore`. It does NOT import `MineableTraceStore` or
- * anything from `client/src/**` — that would create a backwards
- * `harness-layer → client/src` dependency the Stage-1 package split exists to
- * prevent. `minted`/`published` are forward states an off-adapter mint/publish
- * path sets; the adapter only authors `queued` and `vetoed`.
- */
-import type {
-  ContributionLedgerEntry,
-  ContributionPort,
-  PortResult,
+/** ContributionPort projection over the shared daemon/jinn-layer store. */
+import {
+  deriveContributionStatus,
+  ok,
+  unavailable,
+  type ContributionCandidateV1,
+  type ContributionLedgerEntry,
+  type ContributionPort,
+  type ContributionStatusSnapshot,
+  type PortResult,
 } from '@jinn-network/plugin';
-import { ok, unavailable } from '@jinn-network/plugin';
-import { readJsonMap, writeJsonMap } from './json-map-store.js';
+import { ContributionStore } from '../contribution-store.js';
 
-export type ContributionStatus = ContributionLedgerEntry['status'];
-
-export interface ContributionStatusEntry {
-  recordId: string;
-  episodeId: string;
-  status: ContributionStatus;
-}
+/** Compatibility name retained for existing composition roots. */
+export type ContributionStatusStore = ContributionStore;
 
 /**
- * A tiny file-backed JSON status store: `{ recordId → { episodeId, status } }`,
- * over the shared atomic JSON-map primitive. Missing file ⇒ empty.
+ * Compatibility factory retained for callers that previously supplied a
+ * sidecar status-file path. It now opens the canonical contribution store at
+ * exactly that path, so adapter writes and daemon reads share one file.
  */
-export interface ContributionStatusStore {
-  get(recordId: string): ContributionStatusEntry | undefined;
-  list(): ContributionStatusEntry[];
-  put(entry: ContributionStatusEntry): void;
-  setStatus(recordId: string, status: ContributionStatus): void;
-}
-
-type StatusValue = Omit<ContributionStatusEntry, 'recordId'>;
-
 export function createContributionStatusStore(path: string): ContributionStatusStore {
-  return {
-    get(recordId) {
-      const entry = readJsonMap<StatusValue>(path)[recordId];
-      return entry ? { recordId, ...entry } : undefined;
-    },
-    list() {
-      const map = readJsonMap<StatusValue>(path);
-      return Object.entries(map).map(([recordId, entry]) => ({ recordId, ...entry }));
-    },
-    put(entry) {
-      const map = readJsonMap<StatusValue>(path);
-      map[entry.recordId] = { episodeId: entry.episodeId, status: entry.status };
-      writeJsonMap(path, map);
-    },
-    setStatus(recordId, status) {
-      const map = readJsonMap<StatusValue>(path);
-      const existing = map[recordId];
-      if (!existing) return;
-      map[recordId] = { ...existing, status };
-      writeJsonMap(path, map);
-    },
-  };
+  return new ContributionStore({ filePath: path });
 }
 
 export interface ContributionAdapterDeps {
+  /** `statusStore` is retained as a source-compatible dependency name. */
   statusStore: ContributionStatusStore;
+  now?: () => string;
+}
+
+function snapshot(record: Awaited<ReturnType<ContributionStore['get']>>): ContributionStatusSnapshot | null {
+  if (!record) return null;
+  return {
+    localState: record.localState,
+    publicationState: record.publicationState,
+    ...(record.mintRef ? { mintRef: record.mintRef } : {}),
+    ...(record.publicationRef ? { publicationRef: record.publicationRef } : {}),
+    status: deriveContributionStatus(record),
+  };
 }
 
 export function createContributionAdapter(deps: ContributionAdapterDeps): ContributionPort {
-  const { statusStore } = deps;
-  let recordCounter = 0;
+  const store = deps.statusStore;
+  const now = deps.now ?? (() => new Date().toISOString());
 
   return {
-    async recordMineable(episodeId: string): Promise<PortResult<{ recordId: string }>> {
+    async recordMineable(candidate, options): Promise<PortResult<{ recordId: string }>> {
       try {
-        recordCounter += 1;
-        const recordId = `record-${Date.now()}-${recordCounter}`;
-        statusStore.put({ recordId, episodeId, status: 'queued' });
-        return ok({ recordId });
-      } catch (e) {
-        return unavailable(`contribution store recordMineable failed: ${String(e)}`);
+        const record = await store.record(candidate, undefined, options);
+        return ok({ recordId: record.recordId });
+      } catch (error) {
+        return unavailable(`contribution store recordMineable failed: ${String(error)}`);
       }
     },
 
     async ledger(): Promise<PortResult<ContributionLedgerEntry[]>> {
       try {
-        const entries: ContributionLedgerEntry[] = statusStore
-          .list()
-          .map((r) => ({ recordId: r.recordId, episodeId: r.episodeId, status: r.status }));
+        const entries = (await store.list()).map((record): ContributionLedgerEntry => ({
+          recordId: record.recordId,
+          sourceId: record.candidate.sourceId,
+          repositorySlug: record.candidate.repositorySlug,
+          baseCommit: record.candidate.baseCommit,
+          localState: record.localState,
+          publicationState: record.publicationState,
+          ...(record.mintRef ? { mintRef: record.mintRef } : {}),
+          ...(record.publicationRef ? { publicationRef: record.publicationRef } : {}),
+          status: deriveContributionStatus(record),
+        }));
         return ok(entries);
-      } catch (e) {
-        return unavailable(`contribution ledger failed: ${String(e)}`);
+      } catch (error) {
+        return unavailable(`contribution ledger failed: ${String(error)}`);
       }
     },
 
-    async mintStatus(recordId: string): Promise<PortResult<{ status: ContributionStatus }>> {
-      const record = statusStore.get(recordId);
-      if (!record) return unavailable(`no such record: ${recordId}`);
-      return ok({ status: record.status });
+    async mintStatus(recordId: string): Promise<PortResult<ContributionStatusSnapshot>> {
+      try {
+        const value = snapshot(await store.get(recordId));
+        return value ? ok(value) : unavailable(`no such record: ${recordId}`);
+      } catch (error) {
+        return unavailable(`contribution status failed: ${String(error)}`);
+      }
     },
 
-    async veto(recordId: string): Promise<PortResult<{ recordId: string; status: 'vetoed' }>> {
-      const record = statusStore.get(recordId);
-      if (!record) return unavailable(`no such record: ${recordId}`);
+    async authorize(recordId) {
       try {
-        statusStore.setStatus(recordId, 'vetoed');
-        return ok({ recordId, status: 'vetoed' as const });
-      } catch (e) {
-        return unavailable(`contribution veto failed: ${String(e)}`);
+        const record = await store.authorize(recordId, now());
+        const status = deriveContributionStatus(record);
+        if (record.publicationState !== 'queued' || status !== 'queued') {
+          return unavailable(`contribution ${recordId} did not enter the queued state`);
+        }
+        return ok({ recordId, publicationState: 'queued' as const, status: 'queued' as const });
+      } catch (error) {
+        return unavailable(`contribution authorization failed: ${String(error)}`);
+      }
+    },
+
+    async veto(recordId) {
+      try {
+        await store.veto(recordId);
+        return ok({ recordId, publicationState: 'vetoed' as const, status: 'vetoed' as const });
+      } catch (error) {
+        return unavailable(`contribution veto failed: ${String(error)}`);
+      }
+    },
+
+    async disableUnpublished() {
+      try {
+        return ok({ recordIds: await store.disableUnpublished() });
+      } catch (error) {
+        return unavailable(`contribution disable failed: ${String(error)}`);
       }
     },
   };

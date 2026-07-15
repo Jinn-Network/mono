@@ -16,11 +16,16 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$(mktemp -d)"; export HERMES_HOME="$WORK/home"; mkdir -p "$HERMES_HOME"
 export JINN_LAYER_BIN="$HERE/scripts/fixtures/jinn-layer-stub"
 export JINN_LAYER_STUB_LOG="$WORK/stub.log"
+HERMES_UPSTREAM_SHA="9df5f879b4a5925c0f8f947e7e16ed8e845932c3"
 
 cleanup() { rm -rf "$WORK"; }
 trap cleanup EXIT
 
-git clone --depth 1 https://github.com/NousResearch/hermes-agent "$WORK/upstream"
+git init -q "$WORK/upstream"
+git -C "$WORK/upstream" remote add origin https://github.com/NousResearch/hermes-agent
+git -C "$WORK/upstream" fetch -q --depth 1 origin "$HERMES_UPSTREAM_SHA"
+git -C "$WORK/upstream" checkout -q --detach FETCH_HEAD
+test "$(git -C "$WORK/upstream" rev-parse HEAD)" = "$HERMES_UPSTREAM_SHA"
 python3 -m venv "$WORK/venv"
 "$WORK/venv/bin/pip" install -q "$WORK/upstream"
 "$WORK/venv/bin/pip" install -q "$HERE/plugins/jinn"
@@ -30,15 +35,17 @@ python3 -m venv "$WORK/venv"
 # env exported (this venv only has stock hermes_cli/hermes_constants).
 "$WORK/venv/bin/python" - <<'PY'
 import jinn_plugin, types
-calls = {"hooks": [], "tools": [], "cmds": [], "cli": []}
+calls = {"hooks": {}, "tools": [], "cmds": [], "cli": []}
 ctx = types.SimpleNamespace(
-    register_hook=lambda n, cb: calls["hooks"].append(n),
+    register_hook=lambda n, cb: calls["hooks"].__setitem__(n, cb),
     register_tool=lambda **k: calls["tools"].append(k["name"]),
     register_command=lambda n, **k: calls["cmds"].append(n),
     register_cli_command=lambda n, **k: calls["cli"].append(n),
 )
 jinn_plugin.register(ctx)
-assert set(calls["hooks"]) == {"on_session_start","pre_llm_call","post_tool_call","on_session_end"}, calls
+required_hooks = {"on_session_start","pre_llm_call","post_tool_call","post_llm_call","on_session_end"}
+assert required_hooks.issubset(calls["hooks"]), calls
+assert all(callable(calls["hooks"][name]) for name in required_hooks), calls
 assert set(calls["tools"]) == {"corpus_search","corpus_fetch"}, calls
 assert "jinn" in calls["cmds"] and "corpus" in calls["cmds"], calls
 assert "onboarding" in calls["cli"], calls

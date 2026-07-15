@@ -57,6 +57,8 @@ describe('createJinnPlugin session → end smoke (AC5)', () => {
     expect(result.eligibility.reason.length).toBeGreaterThan(0);
     expect(result.summary.episodeRef).toBe(result.episodeRef);
     expect(result.summary.nothingFound).toBe(false);
+    expect(result.summary.surfacedRefs).toEqual(['seed-1']);
+    expect(result.summary.fetchedRefs).toEqual(['seed-1']);
 
     const stored = await evidence.get(result.episodeRef);
     expect(stored.status).toBe('ok');
@@ -69,6 +71,13 @@ describe('createJinnPlugin session → end smoke (AC5)', () => {
     ]);
     expect(episode.trajectory.every((s) => s.spanId.length > 0)).toBe(true);
     expect(episode.outcome.status).toBe('completed');
+    expect(episode.activity).toEqual({
+      surfacedRefs: ['seed-1'],
+      fetchedRefs: ['seed-1'],
+      installedSkillRefs: [],
+    });
+    expect(episode.eligibility).toEqual(result.eligibility);
+    expect(episode.eligibility?.checkedAt).toBe(episode.session.capturedAt);
   });
 
   it('end() fails loud on a session with no recorded turns (EpisodeV1Schema turns.min(1))', async () => {

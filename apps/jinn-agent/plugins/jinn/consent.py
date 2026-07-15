@@ -5,7 +5,8 @@ your work be shared so other agents can attempt it. It persists a single
 boolean, ``shareConsent`` (default ``False`` — bare Enter declines). Local
 capture, mining, and distillation happen unconditionally and are never gated
 on this flag; the flag governs only whether a mined task leaves the machine.
-Review-first safety (preview + per-task veto + ledger) still applies on top.
+Preview remains informational, while per-session veto and the ledger remain
+available on top.
 
 Copy is the single sharing question from mono#1714: plain language, no
 "trace/mining/corpus" jargon, and it never claims your code or history is
@@ -58,8 +59,8 @@ CONFIRM_DECLINE = (
 )
 RECORDED_ON = (
     "Sharing is ON. A reproducible problem based on your work may be shared "
-    "for other agents to attempt. Run /jinn preview to see exactly what would "
-    "be shared before anything leaves — nothing is shared until you do."
+    "for other agents to attempt. Run /jinn preview to see a labelled example "
+    "of what may be shared."
 )
 RECORDED_OFF = (
     "Sharing is OFF. Nothing derived from your work leaves this machine. "

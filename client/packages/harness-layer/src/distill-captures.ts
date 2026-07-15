@@ -6,6 +6,8 @@ import { parseSkillMarkdown } from './skill-package.js';
 
 /** Own-captures dir the rung-1 `distill` loop reads by default. */
 export const DEFAULT_CAPTURES_DIR = join(homedir(), '.jinn-client', 'harness-layer', 'captures');
+/** Canonical complete EpisodeV1 records, distinct from legacy distill captures. */
+export const DEFAULT_EPISODES_DIR = join(homedir(), '.jinn-client', 'harness-layer', 'episodes');
 /** Local skills library `distill` installs into by default. */
 export const DEFAULT_SKILLS_INSTALL_DIR = join(homedir(), '.jinn-client', 'harness-layer', 'skills');
 /** How many recent own captures `distill` considers when --limit is unset. */

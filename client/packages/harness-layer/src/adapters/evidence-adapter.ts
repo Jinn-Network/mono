@@ -14,8 +14,19 @@
  * would reject the extra `EpisodeV1` fields, so `.episode.json` files are read
  * back only as episodes and legacy `.json` files only as captures.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import {
+  chmod,
+  link,
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  rm,
+} from 'node:fs/promises';
+import { basename, join, resolve, sep } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import type {
   EvidenceListQuery,
   EvidencePort,
@@ -28,6 +39,12 @@ import { parseCapturedTask, type CapturedTask } from '../capture.js';
 
 const DEFAULT_RETENTION: EvidenceRetentionPolicy = { policy: 'local-private', maxEpisodes: 200 };
 const EPISODE_SUFFIX = '.episode.json';
+
+function nodeErrorCode(error: unknown): string | undefined {
+  return error && typeof error === 'object' && 'code' in error
+    ? String((error as { code?: unknown }).code)
+    : undefined;
+}
 
 export interface EvidenceAdapterDeps {
   /** The one dir this store reads legacy captures from AND writes episodes to. */
@@ -101,14 +118,13 @@ export function createEvidenceAdapter(deps: EvidenceAdapterDeps): EvidencePort {
   const retention = deps.retention ?? DEFAULT_RETENTION;
 
   function episodePath(id: string): string {
-    // Defense-in-depth (#1660): `episodeId` is only `z.string().min(1)`, so it
-    // permits `/`, `\`, and `..`. Reject any id that isn't a safe single path
-    // segment, then belt-and-suspenders assert the resolved path stays inside
-    // capturesDir — a crafted id must never escape the captures dir on write.
-    if (id.includes('/') || id.includes('\\') || id.split(/[/\\]/).includes('..')) {
-      throw new Error(`unsafe episodeId (path traversal): ${JSON.stringify(id)}`);
-    }
-    const path = join(capturesDir, `${id}${EPISODE_SUFFIX}`);
+    // EpisodeV1 intentionally permits opaque host ids. Safe ids retain the
+    // original filename; path-shaped or platform-unsafe ids use a stable hash
+    // that the Python fallback mirrors exactly.
+    const stem = /^[A-Za-z0-9._-]+$/.test(id) && id !== '.' && id !== '..'
+      ? id
+      : `episode-${createHash('sha256').update(id).digest('hex')}`;
+    const path = join(capturesDir, `${stem}${EPISODE_SUFFIX}`);
     const base = resolve(capturesDir);
     if (!resolve(path).startsWith(base + sep)) {
       throw new Error(`unsafe episodeId (escapes captures dir): ${JSON.stringify(id)}`);
@@ -116,13 +132,76 @@ export function createEvidenceAdapter(deps: EvidenceAdapterDeps): EvidencePort {
     return path;
   }
 
+  async function classifyExisting(
+    path: string,
+    episode: EpisodeV1,
+  ): Promise<'missing' | 'identical' | 'collision'> {
+    try {
+      const stat = await lstat(path);
+      if (!stat.isFile() || stat.isSymbolicLink()) return 'collision';
+      if (process.platform !== 'win32') await chmod(path, 0o600);
+      const existing = EpisodeV1Schema.parse(JSON.parse(await readFile(path, 'utf8')));
+      return isDeepStrictEqual(existing, episode) ? 'identical' : 'collision';
+    } catch (error) {
+      return nodeErrorCode(error) === 'ENOENT' ? 'missing' : 'collision';
+    }
+  }
+
+  async function prepareEvidenceDir(): Promise<void> {
+    await mkdir(capturesDir, { recursive: true, mode: 0o700 });
+    if (process.platform !== 'win32') await chmod(capturesDir, 0o700);
+  }
+
+  async function persistEpisode(episode: EpisodeV1): Promise<PortResult<{ episodeId: string }>> {
+    await prepareEvidenceDir();
+    const path = episodePath(episode.episodeId);
+    const existing = await classifyExisting(path, episode);
+    if (existing === 'identical') {
+      if (process.platform !== 'win32') await chmod(path, 0o600);
+      return ok({ episodeId: episode.episodeId });
+    }
+    if (existing === 'collision') {
+      return unavailable(`evidence episodeId collision: ${episode.episodeId}`);
+    }
+
+    const tmp = join(
+      capturesDir,
+      `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`,
+    );
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
+    try {
+      handle = await open(tmp, 'wx', 0o600);
+      await handle.writeFile(JSON.stringify(episode), 'utf8');
+      await handle.sync();
+      await handle.close();
+      handle = undefined;
+      if (process.platform !== 'win32') await chmod(tmp, 0o600);
+
+      try {
+        // A hard link atomically publishes the complete temp file without
+        // overwriting a concurrent winner at the canonical destination.
+        await link(tmp, path);
+        return ok({ episodeId: episode.episodeId });
+      } catch (error) {
+        if (nodeErrorCode(error) !== 'EEXIST') throw error;
+        const raced = await classifyExisting(path, episode);
+        if (raced === 'identical') {
+          if (process.platform !== 'win32') await chmod(path, 0o600);
+          return ok({ episodeId: episode.episodeId });
+        }
+        return unavailable(`evidence episodeId collision: ${episode.episodeId}`);
+      }
+    } finally {
+      if (handle !== undefined) await handle.close().catch(() => undefined);
+      await rm(tmp, { force: true });
+    }
+  }
+
   return {
     async put(episode: EpisodeV1): Promise<PortResult<{ episodeId: string }>> {
       try {
         const parsed = EpisodeV1Schema.parse(episode);
-        mkdirSync(capturesDir, { recursive: true });
-        writeFileSync(episodePath(parsed.episodeId), JSON.stringify(parsed), 'utf-8');
-        return ok({ episodeId: parsed.episodeId });
+        return await persistEpisode(parsed);
       } catch (e) {
         return unavailable(`evidence store put failed: ${String(e)}`);
       }

@@ -5,6 +5,8 @@ import { KnowledgeHitSchema } from './knowledge-hit.js';
 
 export const SessionSummarySchema = z.strictObject({
   episodeRef: z.string().min(1),
+  surfacedRefs: z.array(z.string().min(1)).default([]),
+  fetchedRefs: z.array(z.string().min(1)).default([]),
   surfacedHits: z.array(KnowledgeHitSchema),
   fetchedHits: z.array(KnowledgeHitSchema),
   installedSkillRefs: z.array(z.string().min(1)),

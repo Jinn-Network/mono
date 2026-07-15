@@ -10,6 +10,20 @@
  */
 import { build } from 'esbuild';
 import { chmodSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+// @jinn-network/plugin is intentionally private in Stage 1 and therefore is
+// not an installable runtime dependency of @jinn-network/client. Inline it
+// into the shipped jinn-layer binaries while leaving ordinary npm packages
+// external for the package manager to provide.
+const inlinePrivatePlugin = {
+  name: 'inline-private-jinn-plugin',
+  setup(buildApi) {
+    buildApi.onResolve({ filter: /^@jinn-network\/plugin$/ }, () => ({
+      path: resolve('../packages/plugin/src/index.ts'),
+    }));
+  },
+};
 
 for (const entry of [
   { in: 'packages/harness-layer/src/bin/jinn-layer.ts', out: 'dist/bin/jinn-layer.js' },
@@ -23,6 +37,7 @@ for (const entry of [
     format: 'esm',
     target: 'node22',
     packages: 'external',
+    plugins: [inlinePrivatePlugin],
     logLevel: 'warning',
   });
   chmodSync(entry.out, 0o755);

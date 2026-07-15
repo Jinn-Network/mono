@@ -101,10 +101,11 @@ def test_confirm_accept_and_decline_copy():
     assert "Nothing derived from your work will be shared." in d
 
 
-def test_recorded_on_states_preview_gate():
+def test_recorded_on_describes_preview_as_informational():
     on = _plain(consent.render_recorded_styled(on=True))
     assert "sharing is ON" in on
-    assert "nothing is shared until you" in on.lower()  # preview gate, plain speech
+    assert "labelled example" in on.lower()
+    assert "nothing is shared until you" not in on.lower()
 
 
 def test_recorded_off_keeps_everything_local():

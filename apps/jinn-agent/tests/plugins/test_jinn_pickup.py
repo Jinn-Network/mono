@@ -71,7 +71,9 @@ class CorpusRunner:
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    jinn._reset_session_state()
     yield tmp_path
+    jinn._reset_session_state()
 
 
 MSG = "Help me with tdd-style refactoring of this suite"
@@ -115,6 +117,35 @@ def test_opt_in_auto_adopts(tmp_path, monkeypatch):
     assert "Adopted automatically (verified)" in result["context"]
     # The skill landed where Hermes's native loader reads it — no confirm step.
     assert (tmp_path / "skills" / "tdd" / "SKILL.md").exists()
+
+
+def test_pickup_reports_only_safely_observed_activity(tmp_path):
+    runner = CorpusRunner(trace(tier="evaluator-verified"))
+    activity = {"surfacedRefs": [], "fetchedRefs": [], "installedSkillRefs": []}
+
+    pickup.pickup(MSG, runner=runner, activity=activity)
+
+    assert activity == {
+        "surfacedRefs": [REF],
+        "fetchedRefs": [REF],
+        "installedSkillRefs": [],
+    }
+
+
+def test_auto_adopt_reports_the_installed_ref(tmp_path, monkeypatch):
+    monkeypatch.setattr(skills_install, "install", _fake_install(tmp_path))
+    cfg = tmp_path / "jinn" / "pickup.json"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text(json.dumps({"autoAdopt": True}))
+    activity = {"surfacedRefs": [], "fetchedRefs": [], "installedSkillRefs": []}
+
+    pickup.pickup(
+        MSG,
+        runner=CorpusRunner(trace(tier="evaluator-verified")),
+        activity=activity,
+    )
+
+    assert activity["installedSkillRefs"] == [REF]
 
 
 def test_unverified_payload_suggests_but_never_installs(tmp_path):
@@ -215,23 +246,25 @@ def test_derive_terms_skips_stopwords():
 
 # ── Agent tools ──────────────────────────────────────────────────────────────
 
-def test_corpus_search_tool_formats_hits(tmp_path):
+def test_corpus_search_tool_formats_hits_and_records_surfaced_refs(tmp_path):
     runner = CorpusRunner(trace())
     jinn._runner = runner
     try:
-        out = jinn._tool_corpus_search({"query": "tdd"})
+        out = jinn._tool_corpus_search({"query": "tdd"}, session_id="s1")
     finally:
         jinn._runner = None
     assert f"ref={REF}" in out
     assert "tags=[tdd]" in out
+    assert jinn._state_for("s1")["activity"]["surfacedRefs"] == [REF]
 
 
-def test_corpus_fetch_tool_returns_skill_content(tmp_path):
+def test_corpus_fetch_tool_returns_skill_content_and_records_fetched_ref(tmp_path):
     runner = CorpusRunner(trace(tier="user-accepted"))
     jinn._runner = runner
     try:
-        out = jinn._tool_corpus_fetch({"ref": REF})
+        out = jinn._tool_corpus_fetch({"ref": REF}, session_id="s1")
     finally:
         jinn._runner = None
     assert "[user-accepted]" in out
     assert "Red, green, refactor." in out
+    assert jinn._state_for("s1")["activity"]["fetchedRefs"] == [REF]

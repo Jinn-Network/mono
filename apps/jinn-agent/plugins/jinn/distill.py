@@ -1,11 +1,10 @@
-"""Local distillation wiring — the captures tee + layer status reads (mono #1537).
+"""Local distillation tee plus EpisodeV1 fallback persistence.
 
-The rung-1 ``jinn-layer distill`` loop reads its own captures dir
-(``~/.jinn-client/harness-layer/captures``) — and until now nothing wrote it.
-The plugin is the producer: at session end the assembled CapturedTask is tee'd
-there. That lifecycle is DISTINCT from ``$HERMES_HOME/jinn/pending`` — pending
-files are consumed (unlinked) by the publish drain, so pointing the distill
-loop at them would race the drain and lose material. Two dirs, two lifecycles.
+The rung-1 ``jinn-layer distill`` loop reads its own captures directory, so
+the plugin tees the legacy CapturedTask shape there. Complete EpisodeV1
+persistence is owned canonically by the core session-end process bridge; the
+separate episodes directory is used only when that bridge cannot confirm its
+write. The retired raw pending/publication queue is never touched here.
 
 Discipline unchanged: all distillation logic (scrub, clustering, consent mode,
 staging) lives in ``jinn-layer``; this module only mirrors the layer's default
@@ -29,8 +28,11 @@ the share path stays gated on the single share consent (see ``_on_session_end``)
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
+import tempfile
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -60,7 +62,7 @@ def captures_dir() -> Path:
 
 
 def episodes_dir() -> Path:
-    """Where the EpisodeV1 dual-write lands — distinct from captures_dir().
+    """Where the host's EpisodeV1 fallback lands — distinct from captures.
 
     A separate dir keeps EpisodeV1 records out of the legacy captures dir the
     rung-1 distill loop reads, so the strict ``parseCapturedTask`` reader is
@@ -90,8 +92,8 @@ def distill_status(runner: Optional[Runner] = None) -> Optional[Dict[str, Any]]:
 def cached_mode(runner: Optional[Runner] = None, refresh: bool = False) -> str:
     """The persisted distill mode, one subprocess read per process.
 
-    ``unavailable`` = the layer predates the status verb (or errored) — distill
-    gating degrades to off; the publish path is unaffected.
+    ``unavailable`` = the layer predates the status verb (or errored). Local
+    capture still reserves material so distillation can resume when restored.
     """
     global _cached_mode
     if _cached_mode is None or refresh:
@@ -104,16 +106,14 @@ def cached_mode(runner: Optional[Runner] = None, refresh: bool = False) -> str:
 def should_tee(runner: Optional[Runner] = None) -> bool:
     """Local distillation is ungated (mono#1714): reserve captures by default.
 
-    The only opt-out is an explicit ``off`` mode from the layer. ``unavailable``
-    (old layer without the status verb) still declines. Sharing consent is
-    never consulted — local distillation never leaves the machine.
+    The only opt-out is an explicit ``off`` mode from the layer. Sharing
+    consent and process-bridge availability are never consulted — local
+    distillation never leaves the machine.
     """
     mode = cached_mode(runner)
     if mode == "off":
         return False
-    if mode == "unavailable":
-        return False
-    return True  # local / defer / unset — reserve material locally
+    return True  # local / defer / unset / unavailable — reserve locally
 
 
 def prune_captures(keep: int = KEEP_CAPTURES) -> None:
@@ -136,9 +136,8 @@ def prune_captures(keep: int = KEEP_CAPTURES) -> None:
 def tee_capture(task: Dict[str, Any], session_id: str, runner: Optional[Runner] = None) -> Optional[Path]:
     """Reserve the assembled CapturedTask for local distillation.
 
-    Same file shape and sanitisation as the pending write (the layer's
-    `parseCapturedTask` reads both). Best-effort: a tee failure must never
-    break a session end.
+    This is the legacy shape consumed by ``parseCapturedTask``. Best-effort:
+    a tee failure must never break a session end.
     """
     try:
         if not should_tee(runner):
@@ -150,17 +149,88 @@ def tee_capture(task: Dict[str, Any], session_id: str, runner: Optional[Runner] 
         return None
 
 
-def write_episode(episode: Optional[Dict[str, Any]], session_id: str, runner: Optional[Runner] = None) -> Optional[Path]:
-    """Dual-write the EpisodeV1 record to its own dir (mono #1662).
+def write_episode_fallback(episode: Dict[str, Any]) -> Optional[Path]:
+    """Persist one complete EpisodeV1 when the core did not.
 
-    Same gating table as ``tee_capture`` (``should_tee``) and the same
-    best-effort discipline: an episode-write failure must never break a session
-    end. Written to ``episodes_dir()`` so it never collides with the legacy
-    capture nor reaches ``parseCapturedTask``.
+    This path is deliberately independent of ``jinn-layer`` status and the
+    legacy distill mode: it is the host's evidence-safety fallback. A complete
+    private temp file is atomically linked at the canonical path, so concurrent
+    retries are idempotent while different content for the same id fails closed.
     """
     try:
-        if episode is None or not should_tee(runner):
+        if episode.get("schemaVersion") != "jinn.episode.v1":
             return None
-        return jinn_layer.write_task_file(episode, episodes_dir(), session_id)
+        episode_id = episode.get("episodeId")
+        if not isinstance(episode_id, str) or not episode_id:
+            return None
+        safe = re.fullmatch(r"[A-Za-z0-9._-]+", episode_id) and episode_id not in (".", "..")
+        stem = (
+            episode_id
+            if safe
+            else f"episode-{hashlib.sha256(episode_id.encode('utf-8')).hexdigest()}"
+        )
+        serialized = json.dumps(
+            episode,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ) + "\n"
+        canonical_episode = json.loads(serialized)
+        directory = episodes_dir()
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(directory, 0o700)
+        path = directory / f"{stem}.episode.json"
+
+        def existing_is_identical() -> bool:
+            try:
+                if path.is_symlink() or not path.is_file():
+                    return False
+                os.chmod(path, 0o600)
+                existing = json.loads(path.read_text(encoding="utf-8"))
+                return existing == canonical_episode
+            except (OSError, ValueError, TypeError):
+                return False
+
+        if os.path.lexists(path):
+            if not existing_is_identical():
+                return None
+            os.chmod(path, 0o600)
+            return path
+
+        fd = -1
+        tmp_path: Optional[Path] = None
+        try:
+            fd, tmp_name = tempfile.mkstemp(
+                prefix=f".{stem}.", suffix=".tmp", dir=directory
+            )
+            tmp_path = Path(tmp_name)
+            os.fchmod(fd, 0o600)
+            handle = os.fdopen(fd, "w", encoding="utf-8", newline="")
+            fd = -1
+            with handle:
+                handle.write(serialized)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.chmod(tmp_path, 0o600)
+            try:
+                # Unlike rename/replace, link never overwrites a concurrent
+                # winner. The destination appears only after the temp is whole.
+                os.link(tmp_path, path)
+            except FileExistsError:
+                if not existing_is_identical():
+                    return None
+                os.chmod(path, 0o600)
+                return path
+            os.chmod(path, 0o600)
+            return path
+        finally:
+            if fd >= 0:
+                os.close(fd)
+            if tmp_path is not None:
+                try:
+                    tmp_path.unlink()
+                except FileNotFoundError:
+                    pass
     except Exception:
         return None

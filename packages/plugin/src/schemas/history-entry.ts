@@ -10,7 +10,16 @@ export const HistoryEntrySchema = z.strictObject({
   captureStatus: z.enum(['captured', 'not-captured']),
   eligibility: EligibilityVerdictSchema,
   contributionState: z.strictObject({
-    status: z.enum(['none', 'queued', 'minted', 'published', 'vetoed']),
+    status: z.enum([
+      'none',
+      'recorded',
+      'minted',
+      'rejected',
+      'preview-required',
+      'queued',
+      'published',
+      'vetoed',
+    ]),
     anchorRef: z.string().min(1).optional(),
   }),
   distilledSkillRefs: z.array(z.string().min(1)),

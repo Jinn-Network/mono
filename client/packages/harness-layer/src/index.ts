@@ -240,3 +240,32 @@ export {
   type VerifiabilityTier,
   type OutcomeStatus,
 } from './envelope.js';
+
+export {
+  CONTRIBUTION_STORE_FILE,
+  CONTRIBUTION_STORE_SCHEMA_VERSION,
+  CONTRIBUTION_PUBLICATION_SCHEMA_VERSION,
+  CONTRIBUTION_PUBLICATION_DISABLED_FILE,
+  DEFAULT_CONTRIBUTION_STATE_DIR,
+  ContributionStore,
+  resolveContributionStateDir,
+  type ContributionLocalMetadata,
+  type ContributionPublicationV1,
+  type ContributionStoreLockOptions,
+  type ContributionStoreOptions,
+  type ContributionStoreRecordOptions,
+  type ContributionStoreRecord,
+} from './contribution-store.js';
+
+export {
+  PROCESS_CONTRACT_VERSION,
+  SessionEndRequestV1Schema,
+  SessionPickupRequestV1Schema,
+  envelope as processEnvelope,
+  sessionEndEnvelope,
+  type ProcessEnvelope,
+  type ProcessStatus,
+  type SessionEndRequestV1,
+  type SessionPickupEnvelope,
+  type SessionPickupRequestV1,
+} from './process-contract.js';

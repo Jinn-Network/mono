@@ -43,6 +43,39 @@ describe('EpisodeV1Schema', () => {
     expect(EpisodeV1Schema.parse(withLineage).lineage?.mintRef).toBe('mint-1');
   });
 
+  it('persists strict optional session activity facts and an authoritative eligibility verdict', () => {
+    const enriched = {
+      ...valid,
+      activity: {
+        surfacedRefs: ['knowledge/surfaced-1'],
+        fetchedRefs: ['knowledge/fetched-1'],
+        installedSkillRefs: ['skills/testing@1'],
+      },
+      eligibility: {
+        eligible: true,
+        reason: 'accepted diff on a public repository',
+        checkedAt: '2026-07-15T12:00:00.000Z',
+      },
+    };
+
+    const parsed = EpisodeV1Schema.parse(enriched);
+
+    expect(parsed.activity).toEqual(enriched.activity);
+    expect(parsed.eligibility).toEqual(enriched.eligibility);
+  });
+
+  it('rejects unknown persisted activity facts', () => {
+    expect(() => EpisodeV1Schema.parse({
+      ...valid,
+      activity: {
+        surfacedRefs: [],
+        fetchedRefs: [],
+        installedSkillRefs: [],
+        privatePrompt: 'must never be persisted here',
+      },
+    })).toThrow();
+  });
+
   // Cross-runtime contract guard (mono #1662): the Python plugin's
   // capture_buffer.assemble_episode() is the sole producer of this record; if its
   // emitted shape drifts from EpisodeV1Schema, the network drops real traces. The
