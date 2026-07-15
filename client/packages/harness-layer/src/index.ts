@@ -139,6 +139,7 @@ export {
   DEFAULT_DISTILL_CAPTURE_LIMIT,
   DEFAULT_SKILLS_INSTALL_DIR,
   coveredSessionIds,
+  localSkillProvenance,
   loadRecentCaptures,
   provenanceLabels,
   stagingDirFor,

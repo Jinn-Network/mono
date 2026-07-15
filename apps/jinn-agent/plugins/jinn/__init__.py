@@ -30,6 +30,7 @@ from typing import Any, Dict, Optional, Set
 from . import capture_buffer as buf
 from . import consent
 from . import distill
+from . import history_view
 from . import jinn_layer
 from . import ledger_view
 from . import onboarding
@@ -474,6 +475,7 @@ _JINN_HELP = (
     "  /jinn status    consent + capture state\n"
     "  /jinn consent   run the consent flow\n"
     "  /jinn preview   inspect a retained legacy capture, or a labelled example\n"
+    "  /jinn history   sessions derived from episodes, contributions, and local skills\n"
     "  /jinn ledger    the contribution ledger — what left this machine\n"
     "  /jinn veto      withhold the current task (recorded locally, never published)\n"
     "  /jinn skills install <ref>   install a corpus-published skill into the agent's skills\n"
@@ -570,6 +572,29 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
             consent.mark_previewed()
             return out + "\n\nlegacy preview only — this retained file will not auto-publish."
         return f"preview failed:\n{out}"
+
+    if sub == "history":
+        code, out = jinn_layer.history_json(runner=_runner)
+        if code != 0:
+            return f"history unavailable:\n{out}"
+        try:
+            reply = jinn_layer.parse_process_response(out)
+        except ValueError as exc:
+            return f"history unavailable:\n{exc}"
+        if reply.get("status") == "unavailable":
+            reason = history_view.safe_text(reply.get("reason"), "details unavailable")
+            return f"history unavailable:\n{reason}"
+        value = reply.get("value")
+        entries = value.get("entries") if isinstance(value, dict) else None
+        if not isinstance(entries, list):
+            return "history unavailable:\njinn-layer response omitted history entries"
+        rendered = history_view.render_history(entries)
+        if reply.get("status") == "degraded":
+            rendered += (
+                "\n\nhistory degraded — "
+                + history_view.safe_text(reply.get("reason"), "details unavailable")
+            )
+        return rendered
 
     if sub == "ledger":
         # Prefer canonical contribution-store rows. A layer that predates the

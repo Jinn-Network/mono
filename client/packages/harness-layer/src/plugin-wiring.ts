@@ -10,6 +10,8 @@ import { ContributionStore, resolveContributionStateDir } from './contribution-s
 import {
   DEFAULT_EPISODES_DIR,
   DEFAULT_SKILLS_INSTALL_DIR,
+  localSkillProvenance,
+  stagingDirFor,
 } from './distill-captures.js';
 import { buildDefaultLayer } from './layer-default.js';
 
@@ -37,6 +39,10 @@ export function buildPluginDepsFromEnv(overrides: Partial<JinnPluginDeps> = {}):
       }),
     },
     loadCaptures: async () => [],
+    listSkills: async () => localSkillProvenance(
+      skillsInstallDir(),
+      stagingDirFor(skillsInstallDir()),
+    ),
   });
   return { corpus, evidence, contribution, localLearning, skills };
 }

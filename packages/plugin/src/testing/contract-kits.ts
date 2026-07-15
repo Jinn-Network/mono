@@ -181,6 +181,13 @@ export function describeLocalLearningPortContract(makeAdapter: () => LocalLearni
         expect(listResult.value.map((r) => r.runId)).toContain(runResult.value.runId);
       }
     });
+
+    it('skills() is typed when the adapter exposes persisted skill provenance', async () => {
+      const adapter = makeAdapter();
+      if (!adapter.skills) return;
+      const skills = await adapter.skills();
+      expect(skills.status).toBe('ok');
+    });
   });
 }
 

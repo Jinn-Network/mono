@@ -29,7 +29,11 @@ export type {
   ContributionStatus,
   ContributionStatusSnapshot,
 } from './ports/contribution-port.js';
-export type { LocalLearningPort, LocalLearningRun } from './ports/local-learning-port.js';
+export type {
+  LocalLearningPort,
+  LocalLearningRun,
+  LocalLearningSkill,
+} from './ports/local-learning-port.js';
 export type { SkillsPort, SkillRecord } from './ports/skills-port.js';
 export { createJinnPlugin, JINN_PLUGIN_CONTRACT_VERSION, PluginSession } from './plugin.js';
 export type {

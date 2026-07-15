@@ -129,6 +129,11 @@ def contribution_disable(runner: Optional[Runner] = None) -> Tuple[int, str]:
     return run(["contribution", "disable", "--json"], runner)
 
 
+def history_json(runner: Optional[Runner] = None) -> Tuple[int, str]:
+    """Read history derived from canonical layer-owned evidence."""
+    return run(["history", "--json"], runner)
+
+
 def parse_process_response(raw: str) -> Dict[str, Any]:
     try:
         parsed = json.loads(raw)

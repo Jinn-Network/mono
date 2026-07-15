@@ -7,7 +7,12 @@
  * The returned object exposes `awaitRun(runId)` beyond the port surface so
  * tests can observe the terminal state deterministically (no timers).
  */
-import type { LocalLearningPort, LocalLearningRun, PortResult } from '@jinn-network/plugin';
+import type {
+  LocalLearningPort,
+  LocalLearningRun,
+  LocalLearningSkill,
+  PortResult,
+} from '@jinn-network/plugin';
 import { ok, unavailable } from '@jinn-network/plugin';
 import type { CapturedTask } from '../capture.js';
 import type { Distiller } from '../distiller.js';
@@ -16,6 +21,8 @@ export interface LocalLearningAdapterDeps {
   distiller: Distiller;
   /** Resolve episodeIds → the captures the distiller consumes. */
   loadCaptures: (episodeIds: string[]) => Promise<CapturedTask[]>;
+  /** Read durable skill state; unlike process-local run state this survives CLI invocations. */
+  listSkills?: () => Promise<LocalLearningSkill[]>;
 }
 
 /** The port plus a test-only completion handle. */
@@ -59,6 +66,15 @@ export function createLocalLearningAdapter(deps: LocalLearningAdapterDeps): Loca
 
     async list(): Promise<PortResult<LocalLearningRun[]>> {
       return ok([...runs.values()]);
+    },
+
+    async skills(): Promise<PortResult<LocalLearningSkill[]>> {
+      if (!deps.listSkills) return unavailable('local skill provenance is unavailable');
+      try {
+        return ok(await deps.listSkills());
+      } catch (error) {
+        return unavailable(`local skill provenance failed: ${String(error)}`);
+      }
     },
 
     async awaitRun(runId: string): Promise<void> {

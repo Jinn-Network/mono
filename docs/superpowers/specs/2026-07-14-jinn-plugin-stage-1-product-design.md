@@ -94,11 +94,13 @@ publish shows a one-time preview; after that, silence + inspection surfaces. Gas
 intake is Stage 2+.
 
 ### 4.5 History
-Net-new but small: a local, plugin-owned session history — per session: task summary,
+Net-new but small: a local, plugin-rendered session history — per session: task summary,
 knowledge surfaced/used, capture status, eligibility verdict, contribution state (queued /
 published + anchor), distilled skills produced. Surfaces: `/jinn history` (TUI) and
 `jinn-layer history` (CLI). `/jinn ledger` remains the what-left-this-machine receipt trail.
-**Invariant: history is a derived view** over episodes + ledger + mint pool; it owns no facts.
+**Invariant: history is a derived view** over canonical episodes, the canonical contribution
+store, and active/staged local-skill provenance; it owns no facts or duplicate cache. Missing
+evidence is displayed as degraded or unavailable rather than inferred as zero, false, or empty.
 
 ### 4.6 Fallbacks and failure behavior
 No network → retrieval degrades to nothing-found (fails open), work proceeds. `jinn-layer`

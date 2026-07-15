@@ -23,7 +23,15 @@ function makeDistiller(distill = stubDistill): Distiller {
 const loadNothing = async (_episodeIds: string[]): Promise<CapturedTask[]> => [];
 
 function makeAdapter() {
-  return createLocalLearningAdapter({ distiller: makeDistiller(), loadCaptures: loadNothing });
+  return createLocalLearningAdapter({
+    distiller: makeDistiller(),
+    loadCaptures: loadNothing,
+    listSkills: async () => [{
+      ref: 'local-skill:stub-skill',
+      sourceSessionIds: ['session-1'],
+      state: 'installed',
+    }],
+  });
 }
 
 describeLocalLearningPortContract(makeAdapter);
@@ -71,5 +79,17 @@ describe('LocalLearningAdapter — run lifecycle', () => {
     if (runResult.status !== 'ok') throw new Error('run failed');
     await adapter.awaitRun(runResult.value.runId);
     expect(loadCaptures).toHaveBeenCalledWith(['e1', 'e2']);
+  });
+
+  it('exposes persisted skill provenance through the port', async () => {
+    const result = await makeAdapter().skills();
+    expect(result).toEqual({
+      status: 'ok',
+      value: [{
+        ref: 'local-skill:stub-skill',
+        sourceSessionIds: ['session-1'],
+        state: 'installed',
+      }],
+    });
   });
 });

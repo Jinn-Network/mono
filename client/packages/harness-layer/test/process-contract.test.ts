@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -17,6 +17,7 @@ import {
 } from '@jinn-network/plugin';
 import { runJinnLayerCli } from '../src/cli.js';
 import { ContributionStore } from '../src/contribution-store.js';
+import { buildSkillMarkdown } from '../src/skill-package.js';
 import {
   MineableTraceStore,
   resolveMineableStateDir,
@@ -108,6 +109,7 @@ describe('jinn-layer process contract v1', () => {
     ['contract', ['contract', 'unexpected']],
     ['session pickup', ['session', 'pickup', '--unexpected']],
     ['session end', ['session', 'end', '--unexpected']],
+    ['history', ['history', '--unexpected']],
     ['contribution ledger', ['contribution', 'ledger', '--unexpected']],
   ])('rejects extra arguments on the %s interface', async (_label, argv) => {
     const out = capture();
@@ -351,8 +353,10 @@ describe('jinn-layer process contract v1', () => {
     const mineable = join(root, 'mineable');
     const previousEpisodes = process.env['JINN_LAYER_EPISODES_DIR'];
     const previousMineable = process.env['JINN_MINEABLE_STATE_DIR'];
+    const previousSkills = process.env['JINN_LAYER_SKILLS_INSTALL_DIR'];
     process.env['JINN_LAYER_EPISODES_DIR'] = episodes;
     process.env['JINN_MINEABLE_STATE_DIR'] = mineable;
+    process.env['JINN_LAYER_SKILLS_INSTALL_DIR'] = join(root, 'skills');
     try {
       const out = capture();
       expect(await runJinnLayerCli(['session', 'end'], {
@@ -405,11 +409,54 @@ describe('jinn-layer process contract v1', () => {
         },
       });
       expect(ledgerOut.output()).not.toMatch(/episode-host-1|acceptedDiff|diff --git|skillEvents/);
+
+      const skillDir = join(root, 'skills', 'session-bridge-skill');
+      mkdirSync(skillDir, { recursive: true });
+      writeFileSync(join(skillDir, 'SKILL.md'), buildSkillMarkdown({
+        name: 'session-bridge-skill',
+        description: 'Use for session bridge work. Not for: unrelated tasks.',
+        license: null,
+        jinn: {
+          schema: 'jinn.skill.v1',
+          distribution: 'coding',
+          verifiabilityTier: 'tests-passed',
+          distilledFrom: 1,
+          provenance: ['local-capture:session-host-1'],
+          distilledAt: '2026-07-15T12:03:00.000Z',
+        },
+        body: '## When to use\nBridge work.\n\n## Strategy\nReuse evidence.\n\n## Steps\n1. Verify.\n\n## Pitfalls\nKeep facts local.\n\n## Verify\nRun tests.',
+      }));
+      const historyOut = capture();
+      expect(await runJinnLayerCli(['history', '--json'], {
+        writer: historyOut.writer,
+        pluginOverrides: {
+          corpus: new InMemoryCorpusPort([]),
+          skills: new InMemorySkillsPort(),
+        },
+      })).toBe(0);
+      expect(JSON.parse(historyOut.output())).toMatchObject({
+        contractVersion: 1,
+        status: 'ok',
+        value: {
+          entries: [{
+            sessionId: 'session-host-1',
+            knowledgeSurfaced: 1,
+            knowledgeUsed: 1,
+            contributionState: { status: 'recorded' },
+            distilledSkills: [{
+              ref: 'local-skill:session-bridge-skill',
+              state: 'installed',
+            }],
+          }],
+        },
+      });
     } finally {
       if (previousEpisodes === undefined) delete process.env['JINN_LAYER_EPISODES_DIR'];
       else process.env['JINN_LAYER_EPISODES_DIR'] = previousEpisodes;
       if (previousMineable === undefined) delete process.env['JINN_MINEABLE_STATE_DIR'];
       else process.env['JINN_MINEABLE_STATE_DIR'] = previousMineable;
+      if (previousSkills === undefined) delete process.env['JINN_LAYER_SKILLS_INSTALL_DIR'];
+      else process.env['JINN_LAYER_SKILLS_INSTALL_DIR'] = previousSkills;
       rmSync(root, { recursive: true, force: true });
     }
   });
@@ -509,6 +556,88 @@ describe('jinn-layer process contract v1', () => {
       contractVersion: 1,
       status: 'unavailable',
       reason: 'contribution store offline',
+    });
+  });
+
+  it('returns derived session history through the versioned process contract', async () => {
+    const evidence = new InMemoryEvidencePort();
+    await evidence.put({
+      ...episode(),
+      activity: {
+        surfacedRefs: ['knowledge/ref-1'],
+        fetchedRefs: ['knowledge/ref-1'],
+        installedSkillRefs: [],
+      },
+      eligibility: {
+        eligible: true,
+        reason: 'accepted diff on a public repository',
+        checkedAt: '2026-07-15T12:02:00.000Z',
+      },
+    });
+    const learning = new InMemoryLocalLearningPort();
+    learning.recordSkill({
+      ref: 'local-skill:retry-budget',
+      sourceSessionIds: ['session-host-1'],
+      state: 'installed',
+    });
+    const out = capture();
+
+    expect(await runJinnLayerCli(['history', '--json'], {
+      writer: out.writer,
+      pluginOverrides: memoryDeps({ evidence, localLearning: learning }),
+    })).toBe(0);
+
+    expect(JSON.parse(out.output())).toEqual({
+      contractVersion: 1,
+      status: 'ok',
+      value: {
+        entries: [{
+          sessionId: 'session-host-1',
+          capturedAt: '2026-07-15T12:00:00.000Z',
+          taskSummary: 'Fix the session bridge',
+          knowledgeSurfaced: 1,
+          knowledgeUsed: 1,
+          captureStatus: 'captured',
+          eligibility: {
+            eligible: true,
+            reason: 'accepted diff on a public repository',
+            checkedAt: '2026-07-15T12:02:00.000Z',
+          },
+          contributionState: { status: 'none' },
+          distilledSkills: [{ ref: 'local-skill:retry-budget', state: 'installed' }],
+        }],
+      },
+    });
+  });
+
+  it('keeps history rows useful when contribution state is unavailable', async () => {
+    const evidence = new InMemoryEvidencePort();
+    await evidence.put({
+      ...episode(),
+      activity: { surfacedRefs: [], fetchedRefs: [], installedSkillRefs: [] },
+      eligibility: {
+        eligible: false,
+        reason: 'no accepted diff',
+        checkedAt: '2026-07-15T12:02:00.000Z',
+      },
+    });
+    const contribution = {
+      ...new InMemoryContributionPort(),
+      async ledger() { return unavailable('contribution store offline'); },
+    } as JinnPluginDeps['contribution'];
+    const out = capture();
+
+    expect(await runJinnLayerCli(['history', '--json'], {
+      writer: out.writer,
+      pluginOverrides: memoryDeps({ evidence, contribution }),
+    })).toBe(0);
+    expect(JSON.parse(out.output())).toMatchObject({
+      contractVersion: 1,
+      status: 'degraded',
+      reason: 'contribution: contribution store offline',
+      value: {
+        entries: [{ contributionState: { status: 'unavailable' } }],
+      },
     });
   });
 
