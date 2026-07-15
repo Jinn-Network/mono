@@ -8,7 +8,7 @@ import { GeminiSessionParser } from '../trajectory/transcript-parsers/gemini-ses
 import { CursorSqliteParser } from '../trajectory/transcript-parsers/cursor-sqlite.js';
 import type { TranscriptParser } from '../trajectory/transcript-parsers/types.js';
 import type { StopHookPayload, StopHookTool } from '../api/stop-hook.js';
-import { exportStoredCaptureForDistil } from './distil-export.js';
+import { exportStoredCaptureForDistill } from './distill-export.js';
 
 export class EnsurePendingCaptureProcessor implements SpanProcessor {
   constructor(private readonly captures: CapturesStore) {}
@@ -154,13 +154,13 @@ export async function ingestStopHookCapture(
   }
 
   try {
-    const exported = exportStoredCaptureForDistil(captures, payload.sessionId);
+    const exported = exportStoredCaptureForDistill(captures, payload.sessionId);
     if (exported) {
-      console.log(`[main] local distil capture written: ${exported.filePath}`);
+      console.log(`[main] local distill capture written: ${exported.filePath}`);
     }
   } catch (err) {
     console.warn(
-      `[main] local distil capture export failed for ${payload.sessionId}: ` +
+      `[main] local distill capture export failed for ${payload.sessionId}: ` +
         `${err instanceof Error ? err.message : String(err)}`,
     );
   }

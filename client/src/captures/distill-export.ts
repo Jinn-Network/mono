@@ -5,7 +5,7 @@ import type { CapturesStore, PendingCaptureRow, SpanRow } from '../store/capture
 
 type OutcomeStatus = 'completed' | 'failed' | 'abandoned';
 
-export interface LocalDistilCapturedTask {
+export interface LocalDistillCapturedTask {
   session: {
     sessionId: string;
     capturedAt: string;
@@ -47,18 +47,18 @@ export interface LocalDistilCapturedTask {
   provenance: 'contributed' | 'imported';
 }
 
-export const DEFAULT_LOCAL_DISTIL_CAPTURES_DIR = join(homedir(), '.jinn-client', 'harness-layer', 'captures');
+export const DEFAULT_LOCAL_DISTILL_CAPTURES_DIR = join(homedir(), '.jinn-client', 'harness-layer', 'captures');
 
-export function localDistilCapturesDirFromEnv(env: NodeJS.ProcessEnv = process.env): string {
-  return env['JINN_LAYER_CAPTURES_DIR'] || DEFAULT_LOCAL_DISTIL_CAPTURES_DIR;
+export function localDistillCapturesDirFromEnv(env: NodeJS.ProcessEnv = process.env): string {
+  return env['JINN_LAYER_CAPTURES_DIR'] || DEFAULT_LOCAL_DISTILL_CAPTURES_DIR;
 }
 
 export function capturedTaskFromStoredCapture(
   capture: PendingCaptureRow,
   spans: SpanRow[],
-): LocalDistilCapturedTask {
+): LocalDistillCapturedTask {
   if (spans.length === 0) {
-    throw new Error(`Cannot export capture ${capture.sessionId} for distil without transcript spans`);
+    throw new Error(`Cannot export capture ${capture.sessionId} for distill without transcript spans`);
   }
   const summary = inferSummary(capture, spans);
   const tools = uniq([
@@ -102,7 +102,7 @@ export function capturedTaskFromStoredCapture(
   };
 }
 
-export function writeCapturedTaskForDistil(task: LocalDistilCapturedTask, capturesDir: string): string {
+export function writeCapturedTaskForDistill(task: LocalDistillCapturedTask, capturesDir: string): string {
   mkdirSync(capturesDir, { recursive: true, mode: 0o700 });
   const filePath = join(capturesDir, `${safeFilePart(task.session.sessionId)}.json`);
   const tmpPath = join(dirname(filePath), `.${safeFilePart(task.session.sessionId)}.${process.pid}.tmp`);
@@ -111,16 +111,16 @@ export function writeCapturedTaskForDistil(task: LocalDistilCapturedTask, captur
   return filePath;
 }
 
-export function exportStoredCaptureForDistil(
+export function exportStoredCaptureForDistill(
   captures: CapturesStore,
   sessionId: string,
   opts: { capturesDir?: string } = {},
-): { task: LocalDistilCapturedTask; filePath: string } | null {
+): { task: LocalDistillCapturedTask; filePath: string } | null {
   const capture = captures.getBySession(sessionId);
   if (!capture) return null;
   const spans = captures.getSpansBySession(sessionId);
   const task = capturedTaskFromStoredCapture(capture, spans);
-  const filePath = writeCapturedTaskForDistil(task, opts.capturesDir ?? localDistilCapturesDirFromEnv());
+  const filePath = writeCapturedTaskForDistill(task, opts.capturesDir ?? localDistillCapturesDirFromEnv());
   return { task, filePath };
 }
 
@@ -138,7 +138,7 @@ function inferModel(spans: SpanRow[]): string {
   return 'unknown';
 }
 
-function inferCost(capture: PendingCaptureRow, spans: SpanRow[]): LocalDistilCapturedTask['cost'] {
+function inferCost(capture: PendingCaptureRow, spans: SpanRow[]): LocalDistillCapturedTask['cost'] {
   const input = firstNumber(spans, ['gen_ai.usage.input_tokens', 'llm.usage.input_tokens', 'usage.input_tokens']);
   const output = firstNumber(spans, ['gen_ai.usage.output_tokens', 'llm.usage.output_tokens', 'usage.output_tokens']);
   return {

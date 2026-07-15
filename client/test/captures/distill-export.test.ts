@@ -6,9 +6,9 @@ import { parseCapturedTask } from '../../packages/harness-layer/src/capture.js';
 import type { PendingCaptureRow, SpanRow } from '../../src/store/captures.js';
 import {
   capturedTaskFromStoredCapture,
-  localDistilCapturesDirFromEnv,
-  writeCapturedTaskForDistil,
-} from '../../src/captures/distil-export.js';
+  localDistillCapturesDirFromEnv,
+  writeCapturedTaskForDistill,
+} from '../../src/captures/distill-export.js';
 
 function pending(over: Partial<PendingCaptureRow> = {}): PendingCaptureRow {
   return {
@@ -43,7 +43,7 @@ function span(over: Partial<SpanRow> = {}): SpanRow {
   };
 }
 
-describe('local distil capture export', () => {
+describe('local distill capture export', () => {
   it('normalizes stored capture rows into harness-layer CapturedTask JSON', () => {
     const task = capturedTaskFromStoredCapture(pending(), [
       span(),
@@ -78,10 +78,10 @@ describe('local distil capture export', () => {
   });
 
   it('writes schema-parseable JSON under a sanitized session filename', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'jinn-local-distil-captures-'));
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-local-distill-captures-'));
     const task = capturedTaskFromStoredCapture(pending(), [span()]);
 
-    const filePath = writeCapturedTaskForDistil(task, dir);
+    const filePath = writeCapturedTaskForDistill(task, dir);
     const parsed = parseCapturedTask(JSON.parse(readFileSync(filePath, 'utf8')) as unknown);
 
     expect(filePath).toBe(join(dir, 'sess_local_1.json'));
@@ -89,7 +89,7 @@ describe('local distil capture export', () => {
     expect(parsed.outcome.verifiabilityTier).toBe('user-accepted');
   });
 
-  it('uses JINN_LAYER_CAPTURES_DIR for the shared distil dropbox', () => {
-    expect(localDistilCapturesDirFromEnv({ JINN_LAYER_CAPTURES_DIR: '/tmp/local-captures' })).toBe('/tmp/local-captures');
+  it('uses JINN_LAYER_CAPTURES_DIR for the shared distill dropbox', () => {
+    expect(localDistillCapturesDirFromEnv({ JINN_LAYER_CAPTURES_DIR: '/tmp/local-captures' })).toBe('/tmp/local-captures');
   });
 });
