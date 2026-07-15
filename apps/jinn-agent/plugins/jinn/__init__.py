@@ -36,6 +36,7 @@ from . import ledger_view
 from . import onboarding
 from . import pickup
 from . import session_bridge
+from . import session_view
 from . import skills_install
 
 logger = logging.getLogger(__name__)
@@ -169,16 +170,6 @@ def _clear_veto(session_id: str) -> None:
         _vetoed_tasks.discard(session_id)
 
 
-def _contribution_line(result: Dict[str, Any]) -> Optional[str]:
-    contribution = result.get("contribution")
-    if not isinstance(contribution, dict) or contribution.get("status") not in ("ok", "degraded"):
-        return None
-    value = contribution.get("value")
-    if isinstance(value, dict) and value.get("status") == "published":
-        return "jinn: contribution published — immutable (/jinn ledger for the anchor)"
-    return None
-
-
 def _state_for(session_id: str, cwd: Optional[Path] = None) -> Dict[str, Any]:
     key = session_id or "default"
     with _session_state_lock:
@@ -212,6 +203,27 @@ def _pop_state(session_id: str) -> Dict[str, Any]:
                 "intermediateFailureDiffs": [],
             },
         )
+
+
+def _peek_state(session_id: str) -> Dict[str, Any]:
+    key = session_id or "default"
+    with _session_state_lock:
+        state = _session_states.get(key)
+        if state is None:
+            return {
+                "activity": {
+                    "surfacedRefs": [],
+                    "fetchedRefs": [],
+                    "installedSkillRefs": [],
+                },
+            }
+        return {
+            **state,
+            "activity": {
+                field: list(state.get("activity", {}).get(field) or [])
+                for field in ("surfacedRefs", "fetchedRefs", "installedSkillRefs")
+            },
+        }
 
 
 def _record_activity(session_id: str, field: str, refs: list[str]) -> None:
@@ -415,7 +427,15 @@ def _on_session_end(
     )
 
     if episode is None:
-        _pop_state(session_id)
+        state = _pop_state(session_id)
+        _user_line(session_view.render_complete(
+            summary=None,
+            activity=state.get("activity") or {},
+            capture_status="unavailable",
+            local_learning_status="unavailable",
+            contribution=None,
+            candidate_created=False,
+        ))
         return
 
     # Tee for local distillation (mono #1537) — BEFORE the veto/publish
@@ -423,8 +443,11 @@ def _on_session_end(
     # capture (a veto withholds from the NETWORK; local distillation never
     # leaves this machine). Distinct dir + lifecycle from the pending file:
     # the publish drain unlinks pending files, never captures.
-    if task is not None:
+    tee_path = (
         distill.tee_capture(task, session_id or task_id, runner=_runner)
+        if task is not None
+        else None
+    )
 
     state = _pop_state(session_id)
     snapshot = state.get("snapshot")
@@ -451,7 +474,25 @@ def _on_session_end(
         contribution_vetoed=vetoed,
     )
     if result is None:
-        distill.write_episode_fallback(episode)
+        fallback_path = distill.write_episode_fallback(episode)
+        learning_status = (
+            "pending" if tee_path is not None
+            else "off" if distill.cached_mode(_runner) == "off"
+            else "unavailable"
+        )
+        _user_line(session_view.render_complete(
+            summary={
+                **(state.get("activity") or {}),
+                "nothingFound": not bool(
+                    (state.get("activity") or {}).get("surfacedRefs")
+                ),
+            },
+            activity=state.get("activity") or {},
+            capture_status="captured-locally" if fallback_path is not None else "unavailable",
+            local_learning_status=learning_status,
+            contribution=None,
+            candidate_created=candidate is not None,
+        ))
     else:
         contribution = result.get("contribution")
         value = contribution.get("value") if isinstance(contribution, dict) else None
@@ -463,9 +504,19 @@ def _on_session_end(
             and value.get("status") == "vetoed"
         ):
             _clear_veto(session_id)
-        line = _contribution_line(result)
-        if line:
-            _user_line(line)
+        learning_status = (
+            "pending" if tee_path is not None
+            else "off" if distill.cached_mode(_runner) == "off"
+            else "unavailable"
+        )
+        _user_line(session_view.render_complete(
+            summary=result.get("summary"),
+            activity=state.get("activity") or {},
+            capture_status="captured",
+            local_learning_status=learning_status,
+            contribution=result.get("contribution"),
+            candidate_created=candidate is not None,
+        ))
 
 
 # ── Slash commands ───────────────────────────────────────────────────────────
@@ -475,6 +526,7 @@ _JINN_HELP = (
     "  /jinn status    consent + capture state\n"
     "  /jinn consent   run the consent flow\n"
     "  /jinn preview   inspect a retained legacy capture, or a labelled example\n"
+    "  /jinn session   current surfaced, capture, learning, and contribution state\n"
     "  /jinn history   sessions derived from episodes, contributions, and local skills\n"
     "  /jinn ledger    the contribution ledger — what left this machine\n"
     "  /jinn veto      withhold the current task (recorded locally, never published)\n"
@@ -572,6 +624,14 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
             consent.mark_previewed()
             return out + "\n\nlegacy preview only — this retained file will not auto-publish."
         return f"preview failed:\n{out}"
+
+    if sub == "session":
+        state = _peek_state(session_id)
+        return session_view.render_current(
+            activity=state.get("activity") or {},
+            capture_active=buf.has_capture(task_id, session_id),
+            share_enabled=consent.share_enabled(),
+        )
 
     if sub == "history":
         code, out = jinn_layer.history_json(runner=_runner)
@@ -784,7 +844,7 @@ def register(ctx) -> None:
     ctx.register_command(
         "jinn",
         handler=_handle_jinn,
-        description="Jinn layer: consent, preview, ledger, veto.",
+        description="Jinn layer: session, history, consent, and contribution state.",
     )
     ctx.register_command(
         "corpus",

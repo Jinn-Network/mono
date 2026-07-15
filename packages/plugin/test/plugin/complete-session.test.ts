@@ -84,6 +84,14 @@ describe('JinnPlugin.completeSession()', () => {
     expect(result.episodeRef).toBe('episode-complete');
     expect(result.persistence.status).toBe('ok');
     expect(result.contribution?.status).toBe('ok');
+    expect(result.contribution).toMatchObject({
+      status: 'ok',
+      value: {
+        localState: 'recorded',
+        publicationState: 'disabled',
+        status: 'recorded',
+      },
+    });
     expect(result.summary.surfacedRefs).toEqual(ACTIVITY.surfacedRefs);
     expect(result.summary.fetchedRefs).toEqual(ACTIVITY.fetchedRefs);
 
@@ -154,6 +162,31 @@ describe('JinnPlugin.completeSession()', () => {
     if (result.contribution?.status === 'ok') {
       expect(contribution.getCandidate(result.contribution.value.recordId)).toEqual(candidate());
     }
+  });
+
+  it('keeps a recorded candidate when its immediate status projection is unavailable', async () => {
+    class StatusUnavailablePort extends InMemoryContributionPort {
+      override async mintStatus() {
+        return unavailable('sidecar status unavailable');
+      }
+    }
+    const contribution = new StatusUnavailablePort();
+
+    const result = await invoke(pluginWith(new InMemoryEvidencePort(), contribution), {
+      contractVersion: 1,
+      episode: makeSampleEpisode({ episodeId: 'episode-complete' }),
+      activity: ACTIVITY,
+      eligibilityInputs: { publicRepo: true, acceptedDiff: true },
+      contributionCandidate: candidate(),
+    });
+    if (!result) return;
+
+    expect(result.contribution).toEqual({
+      status: 'degraded',
+      reason: 'sidecar status unavailable',
+      value: { recordId: 'record-1' },
+    });
+    expect(contribution.getCandidate('record-1')).toEqual(candidate());
   });
 
   it('rejects a cross-episode candidate attachment without losing the episode', async () => {

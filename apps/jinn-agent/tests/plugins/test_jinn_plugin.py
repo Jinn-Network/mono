@@ -245,7 +245,9 @@ def test_veto_with_no_active_task_reports_nothing_to_veto(isolated_home):
     assert not jinn._vetoed_tasks
 
 
-def test_process_failure_persists_episode_fallback_without_pending_file(tmp_path, monkeypatch):
+def test_process_failure_persists_episode_fallback_without_pending_file(
+    tmp_path, monkeypatch, capsys
+):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     capture_buffer.reset()
     consent.save_state(True, previewed=True)
@@ -260,6 +262,11 @@ def test_process_failure_persists_episode_fallback_without_pending_file(tmp_path
     episodes = sorted((tmp_path / "episodes").glob("*.json"))
     assert len(episodes) == 1
     assert json.loads(episodes[0].read_text())["schemaVersion"] == "jinn.episode.v1"
+    err = capsys.readouterr().err
+    assert "episode captured locally — process bridge degraded" in err
+    assert "local learning pending" in err
+    assert "eligibility unavailable" in err
+    assert "contribution unavailable" in err
 
 
 def test_abandoned_session_is_marked_abandoned(isolated_home, tmp_path):
@@ -309,9 +316,15 @@ def test_session_end_published_outcome_says_contribution_is_immutable(
     assert "jinn: contribution published — immutable (/jinn ledger for the anchor)" in err
 
 
-def test_session_end_without_capture_prints_nothing(isolated_home, capsys):
-    _run_session()  # local persistence without a contribution is terminal-silent
-    assert capsys.readouterr().err == ""
+def test_session_end_without_corpus_result_prints_complete_summary(isolated_home, capsys):
+    _run_session()
+    err = capsys.readouterr().err
+    assert "Jinn session complete" in err
+    assert "nothing relevant found" in err
+    assert "episode captured" in err
+    assert "local learning pending" in err
+    assert "eligibility not eligible — test fixture" in err
+    assert "contribution unavailable" in err
 
 
 # ── Consent flow ─────────────────────────────────────────────────────────────
