@@ -254,4 +254,172 @@ describe('Store', () => {
     });
     expect(otherSolverType).toBe(0);
   });
+
+  // #1672 — derived_trajectories table (backfill sink + idempotency probe).
+  describe('derived_trajectories', () => {
+    it('round-trips a parsed derived-trajectory row', () => {
+      expect(store.hasDerivedTrajectory('sha-1')).toBe(false);
+      store.saveDerivedTrajectory({
+        sourceSha256: 'sha-1',
+        sourceEnvelopeCid: 'bafy-src',
+        sourceRequestId: 'req-1',
+        harness: 'claude-code',
+        outcome: 'parsed',
+        spanCount: 3,
+        trajectoryJson: '{"schemaVersion":"jinn.trajectory.v1"}',
+        parserName: 'claude-code-stream-json',
+        parserVersion: '1.0.0',
+        createdAt: '2026-07-15T00:00:00.000Z',
+      });
+      expect(store.hasDerivedTrajectory('sha-1')).toBe(true);
+      const row = store.getDerivedTrajectory('sha-1');
+      expect(row).not.toBeNull();
+      expect(row!.sourceEnvelopeCid).toBe('bafy-src');
+      expect(row!.harness).toBe('claude-code');
+      expect(row!.outcome).toBe('parsed');
+      expect(row!.spanCount).toBe(3);
+      expect(row!.trajectoryJson).toBe('{"schemaVersion":"jinn.trajectory.v1"}');
+      expect(row!.parserName).toBe('claude-code-stream-json');
+      expect(row!.parserVersion).toBe('1.0.0');
+      expect(row!.publishedCid).toBeNull();
+    });
+
+    it('persists a no_transcript skip row with null trajectory_json', () => {
+      store.saveDerivedTrajectory({
+        sourceSha256: 'sha-skip',
+        sourceEnvelopeCid: null,
+        sourceRequestId: null,
+        harness: null,
+        outcome: 'no_transcript',
+        spanCount: 0,
+        trajectoryJson: null,
+        parserName: null,
+        parserVersion: null,
+        createdAt: '2026-07-15T00:00:00.000Z',
+      });
+      const row = store.getDerivedTrajectory('sha-skip');
+      expect(row!.outcome).toBe('no_transcript');
+      expect(row!.trajectoryJson).toBeNull();
+      expect(row!.spanCount).toBe(0);
+    });
+
+    it('INSERT OR REPLACE updates in place, does not duplicate', () => {
+      const base = {
+        sourceSha256: 'sha-dup',
+        sourceEnvelopeCid: null,
+        sourceRequestId: null,
+        harness: 'codex' as const,
+        outcome: 'parsed' as const,
+        spanCount: 1,
+        trajectoryJson: '{}',
+        parserName: 'codex-exec-json',
+        parserVersion: '1.0.0',
+        createdAt: '2026-07-15T00:00:00.000Z',
+      };
+      store.saveDerivedTrajectory(base);
+      store.saveDerivedTrajectory({ ...base, spanCount: 9 });
+      expect(store.getDerivedTrajectory('sha-dup')!.spanCount).toBe(9);
+    });
+
+    it('setDerivedTrajectoryPublishedCid sets the published cid', () => {
+      store.saveDerivedTrajectory({
+        sourceSha256: 'sha-pub',
+        sourceEnvelopeCid: 'bafy-src',
+        sourceRequestId: null,
+        harness: 'claude-code',
+        outcome: 'parsed',
+        spanCount: 2,
+        trajectoryJson: '{}',
+        parserName: 'claude-code-stream-json',
+        parserVersion: '1.0.0',
+        createdAt: '2026-07-15T00:00:00.000Z',
+      });
+      store.setDerivedTrajectoryPublishedCid('sha-pub', 'bafy-published');
+      expect(store.getDerivedTrajectory('sha-pub')!.publishedCid).toBe('bafy-published');
+    });
+  });
+
+  // #1672 — a full historical walk pages served_artifacts via a `before` cursor.
+  it('listServedArtifactMetadata pages a full walk via the before cursor', () => {
+    const total = 7;
+    for (let i = 0; i < total; i++) {
+      const idx = String(i).padStart(2, '0');
+      store.saveServedArtifact({
+        sha256: `sha-${idx}`,
+        artifactType: 'system_snapshot',
+        requestId: `req-${idx}`,
+        envelopeCid: null,
+        content: Buffer.from(`c-${idx}`),
+        priceUsdc: '0',
+        createdAt: `2026-07-15T00:00:${idx}.000Z`,
+      });
+    }
+    const pageSize = 3;
+    const seen: string[] = [];
+    let before: string | undefined;
+    for (;;) {
+      const page = store.listServedArtifactMetadata({
+        artifactType: 'system_snapshot',
+        limit: pageSize,
+        before,
+      });
+      if (page.length === 0) break;
+      for (const r of page) seen.push(r.sha256);
+      before = page[page.length - 1]!.createdAt;
+      if (page.length < pageSize) break;
+    }
+    expect(new Set(seen).size).toBe(total);
+    // DESC order across the whole walk.
+    expect(seen[0]).toBe('sha-06');
+    expect(seen[seen.length - 1]).toBe('sha-00');
+  });
+
+  // #1672 — keyset pagination survives a created_at tie at a page boundary.
+  // Three rows share the EXACT same millisecond; the composite (created_at,
+  // sha256) cursor must enumerate every row exactly once with no drop.
+  it('listServedArtifactMetadata pages a tie-on-created_at walk without dropping rows', () => {
+    const tie = '2026-07-15T00:00:01.000Z';
+    const rows = [
+      { sha256: 'sha-z', createdAt: '2026-07-15T00:00:02.000Z' }, // after the tie
+      { sha256: 'sha-c', createdAt: tie },
+      { sha256: 'sha-b', createdAt: tie },
+      { sha256: 'sha-a', createdAt: tie },
+      { sha256: 'sha-0', createdAt: '2026-07-15T00:00:00.000Z' }, // before the tie
+    ];
+    for (const r of rows) {
+      store.saveServedArtifact({
+        sha256: r.sha256,
+        artifactType: 'system_snapshot',
+        requestId: r.sha256,
+        envelopeCid: null,
+        content: Buffer.from(r.sha256),
+        priceUsdc: '0',
+        createdAt: r.createdAt,
+      });
+    }
+    const pageSize = 2; // forces a page boundary inside the tie group
+    const seen: string[] = [];
+    let before: string | undefined;
+    let beforeSha256: string | undefined;
+    for (;;) {
+      const page = store.listServedArtifactMetadata({
+        artifactType: 'system_snapshot',
+        limit: pageSize,
+        before,
+        beforeSha256,
+      });
+      if (page.length === 0) break;
+      for (const r of page) seen.push(r.sha256);
+      const last = page[page.length - 1]!;
+      before = last.createdAt;
+      beforeSha256 = last.sha256;
+      if (page.length < pageSize) break;
+    }
+    // Every row enumerated exactly once, no drop, no duplicate.
+    expect(seen.length).toBe(rows.length);
+    expect(new Set(seen).size).toBe(rows.length);
+    expect(new Set(seen)).toEqual(new Set(rows.map((r) => r.sha256)));
+    // Stable DESC order on (created_at, sha256): tie group is c > b > a.
+    expect(seen).toEqual(['sha-z', 'sha-c', 'sha-b', 'sha-a', 'sha-0']);
+  });
 });

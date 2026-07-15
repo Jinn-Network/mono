@@ -104,6 +104,36 @@ export interface ServedArtifactMetadataRow {
   createdAt: string;
 }
 
+/** A backfilled derived-trajectory record (#1672). */
+export type DerivedTrajectoryOutcome = 'parsed' | 'no_transcript' | 'unavailable';
+
+export interface DerivedTrajectoryInput {
+  sourceSha256: string;
+  sourceEnvelopeCid?: string | null;
+  sourceRequestId?: string | null;
+  harness?: string | null;
+  outcome: DerivedTrajectoryOutcome;
+  spanCount: number;
+  trajectoryJson?: string | null;
+  parserName?: string | null;
+  parserVersion?: string | null;
+  createdAt: string;
+}
+
+export interface DerivedTrajectoryRow {
+  sourceSha256: string;
+  sourceEnvelopeCid: string | null;
+  sourceRequestId: string | null;
+  harness: string | null;
+  outcome: DerivedTrajectoryOutcome;
+  spanCount: number;
+  trajectoryJson: string | null;
+  parserName: string | null;
+  parserVersion: string | null;
+  publishedCid: string | null;
+  createdAt: string;
+}
+
 export type ArtifactAccessOutcome =
   | 'free_served'
   | 'payment_required'
@@ -386,6 +416,27 @@ CREATE TABLE IF NOT EXISTS served_artifacts (
 CREATE INDEX IF NOT EXISTS idx_served_artifacts_request ON served_artifacts (request_id);
 CREATE INDEX IF NOT EXISTS idx_served_artifacts_envelope ON served_artifacts (envelope_cid);
 CREATE INDEX IF NOT EXISTS idx_served_artifacts_artifact_type ON served_artifacts (artifact_type);
+
+-- Derived jinn.trajectory.v1 records backfilled from historical system_snapshot
+-- transcripts (#1672). Keyed on the SOURCE snapshot sha256 (idempotency), NOT
+-- the derived blob's own hash. Records no_transcript / unavailable skips too so
+-- re-runs don't re-untar them. Stored unsigned/unscrubbed at rest (local only);
+-- signing + layer-2 scrub happen only on the opt-in publish edge.
+CREATE TABLE IF NOT EXISTS derived_trajectories (
+  source_sha256       TEXT PRIMARY KEY,
+  source_envelope_cid TEXT,
+  source_request_id   TEXT,
+  harness             TEXT,
+  outcome             TEXT NOT NULL,
+  span_count          INTEGER NOT NULL DEFAULT 0,
+  trajectory_json     TEXT,
+  parser_name         TEXT,
+  parser_version      TEXT,
+  published_cid       TEXT,
+  created_at          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_derived_trajectories_envelope ON derived_trajectories (source_envelope_cid);
+CREATE INDEX IF NOT EXISTS idx_derived_trajectories_outcome  ON derived_trajectories (outcome);
 
 CREATE TABLE IF NOT EXISTS artifact_access_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2079,21 +2130,37 @@ export class Store {
     };
   }
 
-  listServedArtifactMetadata(filter: { artifactType?: string; limit?: number } = {}): ServedArtifactMetadataRow[] {
+  listServedArtifactMetadata(
+    filter: { artifactType?: string; limit?: number; before?: string; beforeSha256?: string } = {},
+  ): ServedArtifactMetadataRow[] {
     const limit = Math.min(Math.max(1, filter.limit ?? 100), 500);
-    const sql = filter.artifactType
-      ? `SELECT sha256, artifact_type, request_id, envelope_cid, content_size, price_usdc, created_at
+    // `before` is a created_at cursor for a full paginated walk (#1672): pass
+    // the last row's createdAt to fetch the next DESC page past the 500 clamp.
+    // When `beforeSha256` is also supplied, page on the composite key
+    // (created_at, sha256) so rows sharing an exact created_at millisecond
+    // across a page boundary are never skipped (#1672). sha256 is the PK, so
+    // it is a total tiebreak; without it a strict `created_at < @before` drops
+    // every row at the boundary timestamp.
+    const conditions: string[] = [];
+    if (filter.artifactType) conditions.push('artifact_type = @artifactType');
+    if (filter.before && filter.beforeSha256) {
+      conditions.push(
+        '(created_at < @before OR (created_at = @before AND sha256 < @beforeSha256))',
+      );
+    } else if (filter.before) {
+      conditions.push('created_at < @before');
+    }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const sql = `SELECT sha256, artifact_type, request_id, envelope_cid, content_size, price_usdc, created_at
          FROM served_artifacts
-         WHERE artifact_type = @artifactType
-         ORDER BY created_at DESC
-         LIMIT @limit`
-      : `SELECT sha256, artifact_type, request_id, envelope_cid, content_size, price_usdc, created_at
-         FROM served_artifacts
-         ORDER BY created_at DESC
+         ${where}
+         ORDER BY created_at DESC, sha256 DESC
          LIMIT @limit`;
     const rows = this.db.prepare(sql).all({
       limit,
       ...(filter.artifactType ? { artifactType: filter.artifactType } : {}),
+      ...(filter.before ? { before: filter.before } : {}),
+      ...(filter.before && filter.beforeSha256 ? { beforeSha256: filter.beforeSha256 } : {}),
     }) as Array<{
       sha256: string;
       artifact_type: string;
@@ -2112,6 +2179,76 @@ export class Store {
       priceUsdc: row.price_usdc,
       createdAt: row.created_at,
     }));
+  }
+
+  /** Idempotency probe: has this source snapshot already been backfilled? (#1672) */
+  hasDerivedTrajectory(sourceSha256: string): boolean {
+    const row = this.db
+      .prepare('SELECT 1 FROM derived_trajectories WHERE source_sha256 = ?')
+      .get(sourceSha256);
+    return row !== undefined;
+  }
+
+  saveDerivedTrajectory(input: DerivedTrajectoryInput): void {
+    this.db.prepare(
+      `INSERT OR REPLACE INTO derived_trajectories
+         (source_sha256, source_envelope_cid, source_request_id, harness, outcome,
+          span_count, trajectory_json, parser_name, parser_version, published_cid, created_at)
+       VALUES
+         (@sourceSha256, @sourceEnvelopeCid, @sourceRequestId, @harness, @outcome,
+          @spanCount, @trajectoryJson, @parserName, @parserVersion, NULL, @createdAt)`,
+    ).run({
+      sourceSha256: input.sourceSha256,
+      sourceEnvelopeCid: input.sourceEnvelopeCid ?? null,
+      sourceRequestId: input.sourceRequestId ?? null,
+      harness: input.harness ?? null,
+      outcome: input.outcome,
+      spanCount: input.spanCount,
+      trajectoryJson: input.trajectoryJson ?? null,
+      parserName: input.parserName ?? null,
+      parserVersion: input.parserVersion ?? null,
+      createdAt: input.createdAt,
+    });
+  }
+
+  getDerivedTrajectory(sourceSha256: string): DerivedTrajectoryRow | null {
+    const row = this.db.prepare(
+      `SELECT source_sha256, source_envelope_cid, source_request_id, harness, outcome,
+              span_count, trajectory_json, parser_name, parser_version, published_cid, created_at
+       FROM derived_trajectories WHERE source_sha256 = ?`,
+    ).get(sourceSha256) as {
+      source_sha256: string;
+      source_envelope_cid: string | null;
+      source_request_id: string | null;
+      harness: string | null;
+      outcome: DerivedTrajectoryOutcome;
+      span_count: number;
+      trajectory_json: string | null;
+      parser_name: string | null;
+      parser_version: string | null;
+      published_cid: string | null;
+      created_at: string;
+    } | undefined;
+    if (!row) return null;
+    return {
+      sourceSha256: row.source_sha256,
+      sourceEnvelopeCid: row.source_envelope_cid,
+      sourceRequestId: row.source_request_id,
+      harness: row.harness,
+      outcome: row.outcome,
+      spanCount: row.span_count,
+      trajectoryJson: row.trajectory_json,
+      parserName: row.parser_name,
+      parserVersion: row.parser_version,
+      publishedCid: row.published_cid,
+      createdAt: row.created_at,
+    };
+  }
+
+  setDerivedTrajectoryPublishedCid(sourceSha256: string, cid: string): void {
+    this.db
+      .prepare('UPDATE derived_trajectories SET published_cid = ? WHERE source_sha256 = ?')
+      .run(cid, sourceSha256);
   }
 
   recordArtifactAccessEvent(input: ArtifactAccessEventInput): void {
