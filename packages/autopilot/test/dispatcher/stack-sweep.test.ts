@@ -24,7 +24,7 @@ function snap(items: SnapshotItem[]): ProjectSnapshot {
 }
 
 function link(prNumber: number, headRefName: string, baseRefName: string, state: PrState): PrLink {
-  return { prNumber, headRefName, baseRefName, state, isDraft: true, author: 'ritsukai' };
+  return { prNumber, headRefName, baseRefName, state, isDraft: true, author: 'ritsukai', labels: [] };
 }
 
 function recordingRunner(): { runner: CommandRunner; calls: { cmd: string; args: string[] }[] } {

@@ -135,6 +135,19 @@ Three Project fields route the issue to the right queue. Set all three — an is
   - **Branch/base dependency** — the work builds on unmerged code (a stacked PR / unmerged schema change / a shared file an open PR also edits), so it must start from that base, not `next`. Example: "builds on the JinnRouterV3 ABI change in unmerged PR #1461." This is the case the `Base / stacking` body line names.
   - **Resource / logical blocker** — a pure prerequisite that is not a code-base dependency (a decision, an external dependency, an ordering constraint). Example: "can't start until the testnet-gate secrets are provisioned."
 
+  **Whenever the prerequisite is another issue, ALSO set the GitHub-native `blocked_by` edge — the Project field alone is not machine-readable.** The dispatcher's stacking resolver (#1626) reads ONLY native `blocked_by` edges: with the edge set, a dependent auto-unblocks the moment its blocker's PR opens and dispatches **stacked on that PR's branch**; without it, the tri-state field leaves the issue waiting for a manual flip, and same-surface siblings dispatched in parallel invalidate each other (observed 2026-07-15: Stage 1 PRs #1730/#1731 were built on stale bases and thrown away because the plan's ordering existed only as prose). Recipe:
+
+  ```bash
+  # node IDs for both issues
+  gh api graphql -f query='query{repository(owner:"Jinn-Network",name:"mono"){issue(number:<N>){id}}}' --jq .data.repository.issue.id
+  # set: <dependent> is blocked by <blocker>
+  gh api graphql -H "GraphQL-Features: issue_dependencies" -f query='mutation{addBlockedBy(input:{issueId:"<dependent-node-id>",blockingIssueId:"<blocker-node-id>"}){clientMutationId}}'
+  # verify
+  gh api graphql -H "GraphQL-Features: issue_dependencies" -f query='query{repository(owner:"Jinn-Network",name:"mono"){issue(number:<N>){blockedBy(first:10){nodes{number}}}}}' --jq '.data.repository.issue.blockedBy.nodes'
+  ```
+
+  Set BOTH surfaces: the `Blocked on: Another issue` field (the dispatcher ready-filter reads it) and the native edge (the stacking resolver reads it).
+
 **Effort** — estimate from the drafted scope, then confirm with the person:
 - `Low` — a localized change in one or two files
 - `Medium` — a few files, or a small feature with tests

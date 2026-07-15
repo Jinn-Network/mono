@@ -128,6 +128,37 @@ function recoverStartedAt(worktreePath: string): number {
 // Public API
 // ---------------------------------------------------------------------------
 
+/** One task worktree (`jinn-mono_worktrees/<N>`) keyed by its issue number. */
+export interface TaskWorktree {
+  issueNumber: number;
+  worktreePath: string;
+  /** Short branch name, or '' when the worktree is detached. */
+  branch: string;
+}
+
+/**
+ * List the task worktrees (`jinn-mono_worktrees/<N>`) via
+ * `git worktree list --porcelain`. Shared by {@link deriveInFlight} and the
+ * drift sweep (#1734) so both read the identical external state.
+ */
+export async function listTaskWorktrees(
+  runner: CommandRunner,
+): Promise<Map<number, TaskWorktree>> {
+  const raw = await runner('git', ['worktree', 'list', '--porcelain']);
+  const out = new Map<number, TaskWorktree>();
+  for (const wt of parseWorktreePorcelain(raw)) {
+    const n = extractTaskIssueNumber(wt.worktreePath);
+    if (n != null) {
+      out.set(n, {
+        issueNumber: n,
+        worktreePath: wt.worktreePath,
+        branch: wt.branchRef != null ? shortBranch(wt.branchRef) : '',
+      });
+    }
+  }
+  return out;
+}
+
 /**
  * Re-derive the dispatcher's in-flight set from authoritative external state:
  * - GitHub Project board (issues with `status === 'In Progress'`), consumed

@@ -494,7 +494,7 @@ describe('runCycle — collectCompletions / report.collected', () => {
       return Promise.resolve(makeInFlight(issue.number));
     });
     const prMap = new Map<number, PrLink[]>([
-      [100, [{ prNumber: 10, headRefName: 'feat/100-base', baseRefName: 'next', state: 'OPEN', isDraft: true, author: 'alice' }]],
+      [100, [{ prNumber: 10, headRefName: 'feat/100-base', baseRefName: 'next', state: 'OPEN', isDraft: true, author: 'alice', labels: [] }]],
     ]);
     const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
       source: makeSource([blocked]),
@@ -516,7 +516,7 @@ describe('runCycle — collectCompletions / report.collected', () => {
     const blocked = makePolled({ number: 200, blockedOn: 'Another issue', blockedByIssues: [100] });
     const dispatchIssue = vi.fn();
     const prMap = new Map<number, PrLink[]>([
-      [100, [{ prNumber: 10, headRefName: 'feat/100-base', baseRefName: 'next', state: 'OPEN', isDraft: true, author: 'outsider' }]],
+      [100, [{ prNumber: 10, headRefName: 'feat/100-base', baseRefName: 'next', state: 'OPEN', isDraft: true, author: 'outsider', labels: [] }]],
     ]);
     const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
       source: makeSource([blocked]),

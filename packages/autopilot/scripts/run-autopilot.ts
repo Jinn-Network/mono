@@ -15,7 +15,10 @@
 
 import { GhIssueSource, defaultRunner as realRunner } from '../src/dispatcher/issue-source.js';
 import type { CommandRunner } from '../src/dispatcher/issue-source.js';
-import { deriveInFlight } from '../src/dispatcher/state.js';
+import { deriveInFlight, listTaskWorktrees } from '../src/dispatcher/state.js';
+import { syncReviewLabels } from '../src/dispatcher/label-sweep.js';
+import { syncDrift } from '../src/dispatcher/drift-sweep.js';
+import { syncMerges } from '../src/dispatcher/merge-sweep.js';
 import { dispatchIssue } from '../src/dispatcher/dispatch.js';
 import { SESSIONS_LOG_DIR } from '../src/dispatcher/session-log.js';
 import { GhPrSource } from '../src/dispatcher/pr-source.js';
@@ -548,6 +551,9 @@ async function main(): Promise<void> {
   // so `loop.ts` stays pure. Empty on the first cycle; losing it on restart
   // costs at most one un-collected log line, not a correctness bug.
   let previousInFlight: InFlightSession[] = [];
+  // One `gh pr update-branch` per BEHIND PR per process run (merge sweep,
+  // #1735) — still-behind-after-update is surfaced, never retried forever.
+  const attemptedUpdateBranch = new Set<number>();
 
   if (isDryRun) {
     // Dry-run intentionally skips the field-id cache + makePauseSession + any
@@ -662,6 +668,76 @@ async function main(): Promise<void> {
         }
       } catch (err) {
         console.error('[eng:loop] stack-base sweep error (cycle unaffected):', err);
+      }
+
+      // Review-label enforcement (#1733): a session PR opened without the
+      // review label is invisible to the review loop (GhPrSource polls BY the
+      // label), so skill drift silently opts a PR out of review — observed
+      // live 2026-07-15 (#1730/#1731). Re-apply it from the shared PR map.
+      const cycleAllowlist: ReadonlySet<string> = new Set(
+        cfg.authorAllowlist.map((s) => s.toLowerCase()),
+      );
+      try {
+        const { labeled } = await syncReviewLabels(
+          cyclePrByIssue, cycleAllowlist, realRunner, cfg.engineReviewLabel,
+        );
+        if (labeled.length > 0) {
+          console.log(`[autopilot] review label re-applied → PR #${labeled.join(', PR #')}`);
+        }
+      } catch (err) {
+        console.error('[autopilot] label sweep error (cycle unaffected):', err);
+      }
+
+      // Self-healing drift sweep (#1734): reconcile board↔worktree drift
+      // instead of only logging it — phantoms re-queue or move to In Review,
+      // stale worktrees are removed (branch refs preserve commits), dead
+      // sessions' stranded branches are reaped into draft PRs.
+      try {
+        const taskWorktrees = await listTaskWorktrees(realRunner);
+        const dr = await syncDrift(
+          snapshot, cyclePrByIssue, taskWorktrees, cycleFieldCache, realRunner,
+          { reviewLabel: cfg.engineReviewLabel },
+        );
+        if (dr.toInReview.length > 0) {
+          console.log(`[autopilot] drift: phantom → In Review (open PR) → #${dr.toInReview.join(', #')}`);
+        }
+        if (dr.toTodo.length > 0) {
+          console.log(`[autopilot] drift: phantom → Todo (no PR, re-dispatchable) → #${dr.toTodo.join(', #')}`);
+        }
+        if (dr.removed.length > 0) {
+          console.log(`[autopilot] drift: stale worktrees removed → #${dr.removed.join(', #')}`);
+        }
+        for (const r of dr.reaped) {
+          console.log(`[autopilot] drift: strand reaped → #${r.issueNumber} → draft PR #${r.prNumber ?? '?'}`);
+        }
+        for (const s of dr.skipped) {
+          console.log(`[autopilot] drift (needs a human): ${s}`);
+        }
+      } catch (err) {
+        console.error('[autopilot] drift sweep error (cycle unaffected):', err);
+      }
+
+      // Auto-merge sweep (#1735, handbook rule-4 carve-out): merge PRs that
+      // are engine-approved + un-drafted + CI-green + non-code-owned. Runs
+      // only while the review loop is armed — the approvals it trusts come
+      // from that loop's independent reviewer identity.
+      if (cfg.reviewBotLogin !== '') {
+        try {
+          const mr = await syncMerges(
+            realRunner, cycleAllowlist, attemptedUpdateBranch, cfg.engineReviewLabel,
+          );
+          if (mr.merged.length > 0) {
+            console.log(`[autopilot] auto-merged → PR #${mr.merged.join(', PR #')}`);
+          }
+          if (mr.updatedBranch.length > 0) {
+            console.log(`[autopilot] merge: update-branch (BEHIND) → PR #${mr.updatedBranch.join(', PR #')}`);
+          }
+          for (const s of mr.skipped) {
+            console.log(`[autopilot] merge (waiting/needs a human): ${s}`);
+          }
+        } catch (err) {
+          console.error('[autopilot] merge sweep error (cycle unaffected):', err);
+        }
       }
 
       // Build a per-cycle pause closure that resolves the project item id
