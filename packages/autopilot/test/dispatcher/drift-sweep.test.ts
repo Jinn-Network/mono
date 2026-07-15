@@ -217,7 +217,9 @@ describe('syncDrift — stale worktrees', () => {
 });
 
 describe('syncDrift — strand reaper', () => {
-  it('dead session + committed work + no PR → push, draft PR, In Review', async () => {
+  it('dead session + committed work + no PR → push, draft PR HUMAN-GATED, parked Blocked-on:Human', async () => {
+    // A dead session's work may be incomplete — it must be routed to a human,
+    // NOT into auto-review/auto-merge (review 2026-07-15).
     const { runner, calls } = fakeRunner();
     const report = await syncDrift(
       snap([item(100)]),
@@ -228,9 +230,15 @@ describe('syncDrift — strand reaper', () => {
     expect(push?.args).toContain('feat/100-work');
     const pr = calls.find((c) => c.cmd === 'gh' && c.args[1] === 'create');
     expect(pr?.args).toContain('--draft');
-    expect(pr?.args).toContain('engine:review');
     expect(pr?.args.join(' ')).toContain('Closes #100');
-    expect(calls.find((c) => c.args.includes('item-edit'))?.args).toContain('o_ir');
+    // Human-gated: review:needs-human, NEVER engine:review.
+    expect(pr?.args).toContain('review:needs-human');
+    expect(pr?.args).not.toContain('engine:review');
+    // Parked on the Blocked-on field (Human), not moved to In Review.
+    const edit = calls.find((c) => c.args.includes('item-edit'));
+    expect(edit?.args).toContain('F_blk');       // Blocked-on field, not Status
+    expect(edit?.args).toContain('o_bhuman');    // Blocked-on: Human option
+    expect(edit?.args).not.toContain('o_ir');    // NOT In Review
   });
 
   it('live session (fresh log) → untouched', async () => {

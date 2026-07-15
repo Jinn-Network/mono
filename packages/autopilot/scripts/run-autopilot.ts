@@ -703,7 +703,6 @@ async function main(): Promise<void> {
         const taskWorktrees = await listTaskWorktrees(realRunner);
         const dr = await syncDrift(
           snapshot, cyclePrByIssue, taskWorktrees, cycleFieldCache, realRunner,
-          { reviewLabel: cfg.engineReviewLabel },
         );
         if (dr.toInReview.length > 0) {
           console.log(`[autopilot] drift: phantom → In Review (open PR) → #${dr.toInReview.join(', #')}`);

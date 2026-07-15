@@ -54,6 +54,12 @@ export function selectUnlabeled(
       if (!authorAllowlist.has(link.author.toLowerCase())) continue;
       if (!isSessionBranch(link.headRefName, issueNumber)) continue;
       if (link.labels.includes(reviewLabel)) continue;
+      // Never auto-enrol a human-gated PR (a reaped strand — possibly
+      // incomplete — parked for a human by the drift sweep). Its branch
+      // matches the session fingerprint, so without this it would be
+      // re-labelled `engine:review` next cycle and re-enter auto-merge,
+      // defeating the human gate (review 2026-07-15).
+      if (link.labels.includes('review:needs-human')) continue;
       seen.add(link.prNumber);
       out.push({ issueNumber, prNumber: link.prNumber });
     }

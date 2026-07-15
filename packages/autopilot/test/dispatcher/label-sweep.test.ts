@@ -41,6 +41,14 @@ describe('selectUnlabeled', () => {
     expect(selectUnlabeled(map, ALLOWLIST, LABEL)).toEqual([]);
   });
 
+  it('never re-enrols a human-gated (reaped-strand) PR', () => {
+    // A reaped strand carries review:needs-human and a session-fingerprint
+    // branch; without the guard it would be re-labelled engine:review and
+    // re-enter auto-merge, defeating the human gate (review 2026-07-15).
+    const map = new Map([[100, [link({ labels: ['review:needs-human'] })]]]);
+    expect(selectUnlabeled(map, ALLOWLIST, LABEL)).toEqual([]);
+  });
+
   it('skips closed and merged PRs', () => {
     const map = new Map([
       [100, [link({ state: 'CLOSED' as PrState })]],

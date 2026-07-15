@@ -39,13 +39,28 @@ import { REPO } from './constants.js';
  *    PR and the session is dead (session log idle past `reapIdleMs` — a live
  *    `claude -p` session streams to its log continuously, so a stale log is
  *    a high-confidence death signal):
- *      · push the branch and open a draft PR (`Closes #N`, review label) so
- *        the work enters the normal review pipeline; Status = In Review.
+ *      · push the branch and open a draft PR (`Closes #N`) labelled
+ *        `review:needs-human`, and PARK the issue `Blocked on: Human`. A dead
+ *        session's work may be INCOMPLETE, so — unlike a cleanly-finished
+ *        session — it must NOT enter the auto-review→auto-merge path: the
+ *        review loop only polls `engine:review` and the merge sweep excludes
+ *        `review:needs-human`, so this PR reaches neither. A human decides
+ *        whether the recovered work is complete and, if so, enrols it. This
+ *        is the distinction between "finished, awaiting the review gate" and
+ *        "interrupted, needs a human" (review 2026-07-15).
  *      · detached HEAD → skipped (nothing addressable to push).
  *
  * Best-effort per item (a failure is logged, never fatal) and idempotent —
  * mirrors `syncStackBases` / `syncHumanLane`.
  */
+
+/**
+ * Label on a reaped-strand PR. The merge sweep excludes it and the review loop
+ * never polls it (it polls `engine:review`), so a recovered — possibly
+ * incomplete — strand never auto-merges. A human enrols it (`engine:review`)
+ * once they confirm it is complete.
+ */
+const HUMAN_LABEL = 'review:needs-human';
 
 export interface DriftSweepReport {
   /** Phantom issues moved In Progress → In Review (open PR found). */
@@ -68,8 +83,6 @@ export interface DriftSweepOpts {
    * Injectable for tests; defaults to `statSync` mtime against `Date.now()`.
    */
   fileAgeMs?: (path: string) => number | null;
-  /** Review label applied to reaped PRs. Default `engine:review`. */
-  reviewLabel?: string;
 }
 
 const DEFAULT_REAP_IDLE_MS = 45 * 60_000;
@@ -94,6 +107,22 @@ async function setStatus(
     '--project-id', fieldCache.projectId,
     '--field-id', fieldCache.status.fieldId,
     '--single-select-option-id', optionId,
+  ]);
+}
+
+/** Park an issue on the `Blocked on: Human` field (frees its slot via the
+ *  `deriveInFlight` carve-out; retains its worktree). Mirrors `syncStackBases`. */
+async function setBlockedHuman(
+  itemId: string,
+  fieldCache: FieldCache,
+  runner: CommandRunner,
+): Promise<void> {
+  await runner('gh', [
+    'project', 'item-edit',
+    '--id', itemId,
+    '--project-id', fieldCache.projectId,
+    '--field-id', fieldCache.blockedOn.fieldId,
+    '--single-select-option-id', fieldCache.blockedOn.options.Human,
   ]);
 }
 
@@ -122,7 +151,6 @@ export async function syncDrift(
 ): Promise<DriftSweepReport> {
   const reapIdleMs = opts.reapIdleMs ?? DEFAULT_REAP_IDLE_MS;
   const fileAgeMs = opts.fileAgeMs ?? defaultFileAgeMs;
-  const reviewLabel = opts.reviewLabel ?? 'engine:review';
 
   const report: DriftSweepReport = {
     toInReview: [],
@@ -202,22 +230,29 @@ export async function syncDrift(
           continue;
         }
         await runner('git', ['-C', wt.worktreePath, 'push', '-u', 'origin', wt.branch]);
+        // A dead session's work may be INCOMPLETE, so it must NOT enter the
+        // auto-review→auto-merge path a cleanly-finished session uses. The
+        // `review:needs-human` label keeps it out of both (review loop polls
+        // `engine:review`; merge sweep excludes `review:needs-human`), and the
+        // issue is parked `Blocked on: Human`. A human enrols it once complete.
         const prOut = await runner('gh', [
           'pr', 'create',
           '--repo', REPO,
           '--draft',
           '--base', 'next',
           '--head', wt.branch,
-          '--label', reviewLabel,
+          '--label', HUMAN_LABEL,
           '--title', `chore(reap): recover stranded session work for #${issueNumber}`,
           '--body',
           `Auto-recovered by the dispatcher drift sweep: the session for #${issueNumber} ` +
-            `died leaving committed work on \`${wt.branch}\` with no PR. Opening as a ` +
-            `draft so it enters the normal review pipeline.\n\nCloses #${issueNumber}`,
+            `died leaving committed work on \`${wt.branch}\` with no PR. **The work may be ` +
+            `incomplete** (the session did not finish), so this is parked for a human and is ` +
+            `**not** enrolled in auto-review/auto-merge. Review it; if it is complete, add the ` +
+            `\`engine:review\` label (or merge manually).\n\nCloses #${issueNumber}`,
         ]);
         const m = /\/pull\/(\d+)/.exec(prOut);
         if (board != null) {
-          await setStatus(board.itemId, fieldCache.status.options['In Review'], fieldCache, runner);
+          await setBlockedHuman(board.itemId, fieldCache, runner);
         }
         report.reaped.push({ issueNumber, prNumber: m ? Number(m[1]) : null });
       } catch (err) {
