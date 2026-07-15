@@ -9,6 +9,7 @@ import {
   providerRefName,
   providerRefBaseUrl,
   providerRefAuthVar,
+  isOpenRouterModelId,
   type ProviderRef,
 } from '../../provider-ref.js';
 import type { TaskSessionInputs } from '../learner/types.js';
@@ -66,10 +67,8 @@ const ENV_PATTERN_ALLOWLIST: readonly RegExp[] = [
  * legacy path the joinedSolverNets backfill does not cover; deleting inference
  * outright would regress it. See the issue #1243 design note.
  */
-const OPENROUTER_MODEL_FORMAT = /^[a-z0-9_-]+\/[a-z0-9_.\-:]+$/i;
 function inferProviderFromModelId(modelId: string | undefined): string | undefined {
-  if (!modelId) return undefined;
-  return OPENROUTER_MODEL_FORMAT.test(modelId) ? 'openrouter' : undefined;
+  return isOpenRouterModelId(modelId) ? 'openrouter' : undefined;
 }
 
 export interface HermesHarnessAdapterConfig {

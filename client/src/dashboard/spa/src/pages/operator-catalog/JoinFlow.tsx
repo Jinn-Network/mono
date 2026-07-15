@@ -305,8 +305,12 @@ export function JoinFlow({
   const costGateBlocked = requiresCostConfirmation && !highCostAcknowledged;
 
   const submitMutation = useMutation({
-    mutationFn: () =>
-      api.operator.join(cid!, {
+    mutationFn: () => {
+      // Persist the selected model's declared provider first-class (issue
+      // #1243) so the adapter routes through it rather than inferring from the
+      // id shape at runtime.
+      const provider = providerForModel(form.model, form.harness);
+      return api.operator.join(cid!, {
         ...(manifest?.name !== undefined ? { name: manifest.name } : {}),
         ...(manifest?.contract !== undefined
           ? { contract: { id: manifest.contract.id, version: manifest.contract.version } }
@@ -318,16 +322,11 @@ export function JoinFlow({
               plugins: form.plugins,
               disabledDefaultPlugins: form.disabledDefaultPlugins,
               model: form.model,
-              // Persist the selected model's declared provider first-class
-              // (issue #1243) so the adapter routes through it rather than
-              // inferring from the id shape at runtime.
-              ...((): { provider?: import('../../../../../harnesses/provider-ref.js').ProviderRef } => {
-                const provider = providerForModel(form.model, form.harness);
-                return provider !== undefined ? { provider } : {};
-              })(),
+              ...(provider !== undefined ? { provider } : {}),
             }
           : {}),
-      }),
+      });
+    },
     onSuccess: (result) => {
       // Invalidate so the catalog's joined-indicator badge and the Overview
       // page's joined list pick the new entry up on the next tick instead of

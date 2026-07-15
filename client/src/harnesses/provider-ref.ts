@@ -40,3 +40,15 @@ export function providerRefAuthVar(ref: ProviderRef | undefined): string | undef
   if (ref === undefined || typeof ref === 'string') return undefined;
   return ref.authVar;
 }
+
+/**
+ * OpenRouter model-id shape (`<org>/<model>`). Shared so the load-time backfill
+ * (`config.ts`) and the adapter's inference bridge (`hermes-agent/adapter.ts`)
+ * stamp/route exactly the same ids without drifting out of sync (issue #1243).
+ */
+export const OPENROUTER_MODEL_FORMAT = /^[a-z0-9_-]+\/[a-z0-9_.\-:]+$/i;
+
+/** Whether `id` is an OpenRouter-shaped `<org>/<model>` model id. */
+export function isOpenRouterModelId(id: string | undefined): boolean {
+  return typeof id === 'string' && OPENROUTER_MODEL_FORMAT.test(id);
+}

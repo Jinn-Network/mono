@@ -21,6 +21,7 @@ import { z } from 'zod/v3';
 import { TaskSchema, parseTask } from './types/task.js';
 import type { Task } from './types/task.js';
 import { canonicalHarnessName, CLAUDE_CODE_HARNESS } from './harnesses/names.js';
+import { isOpenRouterModelId } from './harnesses/provider-ref.js';
 import { parseRpcUrls } from './rpc/transport.js';
 import { canonicalLocalHttpBaseUrl } from './local-provider-url.js';
 
@@ -875,7 +876,7 @@ export function migrateLegacySolverNets(raw: Record<string, unknown>): number {
       // Stamp the OpenRouter provider first-class when the migrated model is
       // OpenRouter-shaped (issue #1243) so the synthetic entry matches what a
       // fresh join would persist and the adapter routes without inference.
-      ...(typeof entry.model === 'string' && OPENROUTER_MODEL_FORMAT.test(entry.model)
+      ...(typeof entry.model === 'string' && isOpenRouterModelId(entry.model)
         ? { provider: 'openrouter' as const }
         : {}),
       plugins: Array.isArray(entry.plugins) ? entry.plugins : [],
@@ -890,13 +891,6 @@ export function migrateLegacySolverNets(raw: Record<string, unknown>): number {
   delete raw['solverNets'];
   return migrated;
 }
-
-/**
- * OpenRouter model-id shape (`<org>/<model>`), matching the adapter's
- * `inferProviderFromModelId` regex. Kept in sync so the load-time backfill
- * stamps exactly the entries the adapter would otherwise infer.
- */
-const OPENROUTER_MODEL_FORMAT = /^[a-z0-9_-]+\/[a-z0-9_.\-:]+$/i;
 
 /**
  * Backfill `provider: 'openrouter'` onto legacy `joinedSolverNets` entries that
@@ -917,8 +911,7 @@ export function backfillJoinedProviders(merged: Record<string, unknown>): number
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
     const e = entry as Record<string, unknown>;
     if (e['provider'] !== undefined) continue;
-    if (typeof e['model'] !== 'string') continue;
-    if (!OPENROUTER_MODEL_FORMAT.test(e['model'])) continue;
+    if (!isOpenRouterModelId(e['model'] as string | undefined)) continue;
     e['provider'] = 'openrouter';
     backfilled += 1;
   }
