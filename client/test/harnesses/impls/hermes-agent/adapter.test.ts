@@ -1,6 +1,6 @@
 // client/test/harnesses/impls/hermes-agent/adapter.test.ts
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -508,6 +508,116 @@ describe('HermesHarnessAdapter', () => {
         if (v === undefined) delete process.env[k];
         else process.env[k] = v;
       }
+      rmSync(home, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
+  it('lifts only THIS run\'s session record, never a prior task\'s stale one (AC-1)', async () => {
+    // AC-1: the raw Hermes session record must land under workingDir so it rides
+    // system_snapshot (which tars only workingDir). $HERMES_HOME is shared across
+    // tasks of a solverType, so a stale prior record must NEVER be lifted — only
+    // a record written after this run's pre-spawn baseline.
+    const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+    const work = mkdtempSync(join(tmpdir(), 'hermes-wd-'));
+
+    try {
+      const sessionsDir = join(home, 'sessions');
+      mkdirSync(sessionsDir, { recursive: true });
+      // A prior task's record, already present before this run — must NOT be lifted.
+      const stale = { session_id: 'stale', messages: [{ role: 'user', content: 'a prior task' }] };
+      writeFileSync(join(sessionsDir, 'session_stale.json'), JSON.stringify(stale));
+      utimesSync(join(sessionsDir, 'session_stale.json'), new Date(2_000_000), new Date(2_000_000));
+
+      const fresh = {
+        session_id: 'fresh',
+        messages: [
+          { role: 'user', content: 'Fix the failing test' },
+          { role: 'assistant', content: 'done' },
+        ],
+      };
+
+      const adapter = new HermesHarnessAdapter({
+        hermesPath: '/bin/fake-hermes',
+        operatorHermesHome: home,
+        daemonApiUrl: 'http://127.0.0.1:7331',
+        daemonApiToken: 'tok',
+        corpusEnv: {},
+        // The child writes this run's record AFTER the pre-spawn baseline snapshot,
+        // so its (real-now) mtime is strictly newer than the stale prior record.
+        _spawnFn: vi.fn(() => {
+          writeFileSync(join(sessionsDir, 'session_fresh.json'), JSON.stringify(fresh));
+          return fakeHermesChild() as any;
+        }) as any,
+      });
+
+      await adapter.runTask(inputs(work, home));
+
+      const lifted = JSON.parse(
+        readFileSync(join(work, '.hermes-agent', 'session.json'), 'utf8'),
+      );
+      // This run's record wins; the stale prior record is never lifted.
+      expect(lifted.session_id).toBe('fresh');
+      expect(lifted.messages).toEqual(fresh.messages);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
+  it('degrades (lifts nothing) when the solve writes no record even though a stale prior record exists', async () => {
+    // The no-record edge #1670's review flagged: a prior task's record is present
+    // but this run wrote none. The lift must copy nothing rather than bleed the
+    // foreign record into this task's signed snapshot/trajectory.
+    const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+    const work = mkdtempSync(join(tmpdir(), 'hermes-wd-'));
+
+    try {
+      const sessionsDir = join(home, 'sessions');
+      mkdirSync(sessionsDir, { recursive: true });
+      const stale = { session_id: 'stale', messages: [{ role: 'user', content: 'a prior task' }] };
+      writeFileSync(join(sessionsDir, 'session_stale.json'), JSON.stringify(stale));
+      utimesSync(join(sessionsDir, 'session_stale.json'), new Date(2_000_000), new Date(2_000_000));
+
+      const adapter = new HermesHarnessAdapter({
+        hermesPath: '/bin/fake-hermes',
+        operatorHermesHome: home,
+        daemonApiUrl: 'http://127.0.0.1:7331',
+        daemonApiToken: 'tok',
+        corpusEnv: {},
+        _spawnFn: vi.fn(() => fakeHermesChild() as any) as any, // writes no record
+      });
+
+      await adapter.runTask(inputs(work, home));
+
+      expect(existsSync(join(work, '.hermes-agent', 'session.json'))).toBe(false);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
+  it('does not fail the solve when the sessions dir is missing/empty (AC-3 degradation)', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+    const work = mkdtempSync(join(tmpdir(), 'hermes-wd-'));
+
+    try {
+      // No sessions/ dir under home — the lift must degrade, not throw.
+      const adapter = new HermesHarnessAdapter({
+        hermesPath: '/bin/fake-hermes',
+        operatorHermesHome: home,
+        daemonApiUrl: 'http://127.0.0.1:7331',
+        daemonApiToken: 'tok',
+        corpusEnv: {},
+        _spawnFn: vi.fn(() => fakeHermesChild() as any) as any,
+      });
+
+      await expect(adapter.runTask(inputs(work, home))).resolves.toBeUndefined();
+      // No transcript lifted — degradation, not failure.
+      expect(existsSync(join(work, '.hermes-agent', 'session.json'))).toBe(false);
+    } finally {
+      warnSpy.mockRestore();
       rmSync(home, { recursive: true, force: true });
       rmSync(work, { recursive: true, force: true });
     }

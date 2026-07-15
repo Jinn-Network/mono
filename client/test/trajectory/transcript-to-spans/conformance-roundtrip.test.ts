@@ -12,6 +12,7 @@ import { TrajectoryCollector } from '../../../src/trajectory/collector.js';
 import { findFirstProfileViolation } from '../../../src/trajectory/span-profile.js';
 import { ClaudeCodeStreamJsonParser } from '../../../src/trajectory/transcript-to-spans/claude-code-stream-json.js';
 import { CodexExecJsonParser } from '../../../src/trajectory/transcript-to-spans/codex-exec-json.js';
+import { HermesSessionJsonParser } from '../../../src/trajectory/transcript-to-spans/hermes-session-json.js';
 import type { TranscriptSpanParser } from '../../../src/trajectory/transcript-to-spans/types.js';
 
 const CLAUDE_CODE_FIXTURE = fileURLToPath(
@@ -20,10 +21,14 @@ const CLAUDE_CODE_FIXTURE = fileURLToPath(
 const CODEX_FIXTURE = fileURLToPath(
   new URL('../../../fixtures/transcripts/codex/exec-json-with-usage.jsonl', import.meta.url),
 );
+const HERMES_FIXTURE = fileURLToPath(
+  new URL('../../../fixtures/transcripts/hermes-agent/session-example.json', import.meta.url),
+);
 
 const cases: Array<{ name: string; parser: TranscriptSpanParser; fixture: string }> = [
   { name: 'claude-code-stream-json', parser: new ClaudeCodeStreamJsonParser(), fixture: CLAUDE_CODE_FIXTURE },
   { name: 'codex-exec-json', parser: new CodexExecJsonParser(), fixture: CODEX_FIXTURE },
+  { name: 'hermes-session-json', parser: new HermesSessionJsonParser(), fixture: HERMES_FIXTURE },
 ];
 
 describe('transcript-to-spans conformance round-trip', () => {
