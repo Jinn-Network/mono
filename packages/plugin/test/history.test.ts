@@ -12,6 +12,7 @@ import type { ContributionPort } from '../src/ports/contribution-port.js';
 import { unavailable, type PortResult } from '../src/outcome.js';
 import type { ContributionLedgerEntry } from '../src/ports/contribution-port.js';
 import type { ContributionCandidateV1 } from '../src/schemas/contribution-candidate.js';
+import type { EpisodeV1 } from '../src/schemas/episode.js';
 
 function candidate(sourceId: string, consent = false): ContributionCandidateV1 {
   return {
@@ -28,12 +29,28 @@ function candidate(sourceId: string, consent = false): ContributionCandidateV1 {
   };
 }
 
-function buildPlugin(evidence: InMemoryEvidencePort, contribution = new InMemoryContributionPort()) {
+function currentEpisode(overrides: Partial<EpisodeV1> = {}): EpisodeV1 {
+  return makeSampleEpisode({
+    activity: { surfacedRefs: [], fetchedRefs: [], installedSkillRefs: [] },
+    eligibility: {
+      eligible: false,
+      reason: 'no accepted diff',
+      checkedAt: '2026-07-14T00:00:00.000Z',
+    },
+    ...overrides,
+  });
+}
+
+function buildPlugin(
+  evidence: InMemoryEvidencePort,
+  contribution = new InMemoryContributionPort(),
+  localLearning = new InMemoryLocalLearningPort(),
+) {
   return createJinnPlugin({
     corpus: new InMemoryCorpusPort([]),
     evidence,
     contribution,
-    localLearning: new InMemoryLocalLearningPort(),
+    localLearning,
     skills: new InMemorySkillsPort(),
   });
 }
@@ -41,8 +58,8 @@ function buildPlugin(evidence: InMemoryEvidencePort, contribution = new InMemory
 describe('plugin.history / explain (AC3 — reproducible from port reads)', () => {
   it('is reproducible: two calls over the same port state are deep-equal', async () => {
     const evidence = new InMemoryEvidencePort();
-    await evidence.put(makeSampleEpisode({ episodeId: 'ep-1' }));
-    await evidence.put(makeSampleEpisode({ episodeId: 'ep-2' }));
+    await evidence.put(currentEpisode({ episodeId: 'ep-1' }));
+    await evidence.put(currentEpisode({ episodeId: 'ep-2' }));
     const plugin = buildPlugin(evidence);
     const first = await plugin.history();
     const second = await plugin.history();
@@ -53,21 +70,18 @@ describe('plugin.history / explain (AC3 — reproducible from port reads)', () =
 
   it('joins contribution state by episodeId', async () => {
     const evidence = new InMemoryEvidencePort();
-    await evidence.put(makeSampleEpisode({ episodeId: 'ep-1' }));
+    await evidence.put(currentEpisode({ episodeId: 'ep-1' }));
     const contribution = new InMemoryContributionPort();
     const recorded = await contribution.recordMineable(candidate('ep-1', true));
     if (recorded.status !== 'ok') throw new Error('record failed');
     await contribution.authorize(recorded.value.recordId);
     const plugin = buildPlugin(evidence, contribution);
     const { entries } = await plugin.history();
-    const row = entries.find((e) => e.sessionId === makeSampleEpisode().session.sessionId);
+    const row = entries.find((e) => e.sessionId === currentEpisode().session.sessionId);
     expect(row?.contributionState.status).toBe('queued');
   });
 
-  it('reports eligibility as indeterminate — never a silently-recomputed verdict', async () => {
-    // A completed + contribution-eligible episode: at end() the accepted-diff
-    // signal made it eligible, but that signal is NOT persisted on the episode,
-    // so history must not assert a verdict it can't derive (would read false).
+  it('reports legacy eligibility as unavailable — never as a false verdict', async () => {
     const evidence = new InMemoryEvidencePort();
     await evidence.put(
       makeSampleEpisode({
@@ -78,18 +92,15 @@ describe('plugin.history / explain (AC3 — reproducible from port reads)', () =
     );
     const plugin = buildPlugin(evidence);
 
-    const indeterminate =
-      'eligibility indeterminate from episode (contribution signals not persisted)';
-
     const { entries } = await plugin.history();
     expect(entries).toHaveLength(1);
-    expect(entries[0]?.eligibility.eligible).toBe(false);
-    expect(entries[0]?.eligibility.reason).toBe(indeterminate);
+    expect(entries[0]?.eligibility).toBeNull();
+    expect(entries[0]?.knowledgeSurfaced).toBeNull();
+    expect(entries[0]?.knowledgeUsed).toBeNull();
 
     const ex = await plugin.explain('sess-fixture-1');
     expect(ex.found).toBe(true);
-    expect(ex.eligibility?.eligible).toBe(false);
-    expect(ex.eligibility?.reason).toBe(indeterminate);
+    expect(ex.eligibility).toBeNull();
   });
 
   it('projects persisted activity facts and the authoritative eligibility verdict', async () => {
@@ -99,7 +110,7 @@ describe('plugin.history / explain (AC3 — reproducible from port reads)', () =
       reason: 'accepted diff on a public repository',
       checkedAt: '2026-07-15T12:00:00.000Z',
     };
-    await evidence.put(makeSampleEpisode({
+    await evidence.put(currentEpisode({
       episodeId: 'ep-enriched',
       activity: {
         surfacedRefs: ['knowledge/a', 'knowledge/b'],
@@ -126,7 +137,7 @@ describe('plugin.history / explain (AC3 — reproducible from port reads)', () =
 
   it('explain returns a structured trace for a session', async () => {
     const evidence = new InMemoryEvidencePort();
-    await evidence.put(makeSampleEpisode({ episodeId: 'ep-1' }));
+    await evidence.put(currentEpisode({ episodeId: 'ep-1' }));
     const plugin = buildPlugin(evidence);
     const ex = await plugin.explain('sess-fixture-1');
     expect(ex.sessionRef).toBe('sess-fixture-1');
@@ -144,7 +155,7 @@ describe('plugin.history / explain (AC3 — reproducible from port reads)', () =
 
   it('folds a degraded contribution read into degraded history (no throw)', async () => {
     const evidence = new InMemoryEvidencePort();
-    await evidence.put(makeSampleEpisode({ episodeId: 'ep-1' }));
+    await evidence.put(currentEpisode({ episodeId: 'ep-1' }));
     const brokenContribution: ContributionPort = {
       async recordMineable() { return unavailable('down'); },
       async ledger(): Promise<PortResult<ContributionLedgerEntry[]>> { return unavailable('ledger down'); },
@@ -157,5 +168,28 @@ describe('plugin.history / explain (AC3 — reproducible from port reads)', () =
     expect(result.degraded).toBe(true);
     expect(result.reason).toBeTruthy();
     expect(result.entries).toHaveLength(1); // partial rows, not a throw
+    expect(result.entries[0]?.contributionState.status).toBe('unavailable');
+  });
+
+  it('joins installed and staged local skills from their session provenance', async () => {
+    const evidence = new InMemoryEvidencePort();
+    await evidence.put(currentEpisode({ episodeId: 'ep-skills' }));
+    const learning = new InMemoryLocalLearningPort();
+    learning.recordSkill({
+      ref: 'local-skill:retry-budget',
+      sourceSessionIds: ['sess-fixture-1'],
+      state: 'installed',
+    });
+    learning.recordSkill({
+      ref: 'local-skill:test-first',
+      sourceSessionIds: ['sess-fixture-1'],
+      state: 'staged',
+    });
+
+    const result = await buildPlugin(evidence, new InMemoryContributionPort(), learning).history();
+    expect(result.entries[0]?.distilledSkills).toEqual([
+      { ref: 'local-skill:retry-budget', state: 'installed' },
+      { ref: 'local-skill:test-first', state: 'staged' },
+    ]);
   });
 });

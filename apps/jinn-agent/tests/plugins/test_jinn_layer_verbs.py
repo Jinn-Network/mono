@@ -40,14 +40,16 @@ def test_session_end_writes_one_complete_request_to_stdin():
     ]
 
 
-def test_contribution_preview_ledger_and_disable_use_versioned_json_commands():
+def test_history_contribution_preview_ledger_and_disable_use_versioned_json_commands():
     runner = StdinRunner()
 
+    assert jinn_layer.history_json(runner=runner)[0] == 0
     assert jinn_layer.contribution_preview(acknowledge=True, runner=runner)[0] == 0
     assert jinn_layer.contribution_ledger_json(runner=runner)[0] == 0
     assert jinn_layer.contribution_disable(runner=runner)[0] == 0
 
     assert runner.calls == [
+        ([jinn_layer.binary(), "history", "--json"], None),
         ([jinn_layer.binary(), "contribution", "preview", "--ack", "--json"], None),
         ([jinn_layer.binary(), "contribution", "ledger", "--json"], None),
         ([jinn_layer.binary(), "contribution", "disable", "--json"], None),

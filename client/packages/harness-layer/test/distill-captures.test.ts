@@ -6,6 +6,7 @@ import type { CapturedTask } from '../src/capture.js';
 import { buildSkillMarkdown, type SkillPackage } from '../src/skill-package.js';
 import {
   coveredSessionIds,
+  localSkillProvenance,
   loadRecentCaptures,
   provenanceLabels,
   stagingDirFor,
@@ -105,5 +106,33 @@ describe('distill capture source helpers', () => {
     );
 
     expect(labels).toEqual(['Fix flaky distill test', 'bafyOther']);
+  });
+
+  it('derives installed and staged skill state from SKILL.md provenance', () => {
+    const active = mkdtempSync(join(tmpdir(), 'history-active-'));
+    const staged = mkdtempSync(join(tmpdir(), 'history-staged-'));
+    mkdirSync(join(active, 'installed-skill'), { recursive: true });
+    mkdirSync(join(staged, 'staged-skill'), { recursive: true });
+    writeFileSync(
+      join(active, 'installed-skill', 'SKILL.md'),
+      buildSkillMarkdown(skill('installed-skill', ['local-capture:s1', 'bafy-public'])),
+    );
+    writeFileSync(
+      join(staged, 'staged-skill', 'SKILL.md'),
+      buildSkillMarkdown(skill('staged-skill', ['local-capture:s1', 'local-capture:s2'])),
+    );
+
+    expect(localSkillProvenance(active, staged)).toEqual([
+      {
+        ref: 'local-skill:installed-skill',
+        sourceSessionIds: ['s1'],
+        state: 'installed',
+      },
+      {
+        ref: 'local-skill:staged-skill',
+        sourceSessionIds: ['s1', 's2'],
+        state: 'staged',
+      },
+    ]);
   });
 });

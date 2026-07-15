@@ -7,7 +7,7 @@ import {
   type ContributionLedgerEntry,
 } from './ports/contribution-port.js';
 import type { EvidencePort } from './ports/evidence-port.js';
-import type { LocalLearningPort } from './ports/local-learning-port.js';
+import type { LocalLearningPort, LocalLearningSkill } from './ports/local-learning-port.js';
 import type { EpisodeV1 } from './schemas/episode.js';
 import type { EligibilityVerdict } from './schemas/eligibility-verdict.js';
 import type { HistoryEntry } from './schemas/history-entry.js';
@@ -23,6 +23,7 @@ export interface HistoryDeps {
 export interface HistoryResult {
   entries: HistoryEntry[];
   degraded: boolean;
+  unavailable: boolean;
   reason?: string;
 }
 
@@ -54,7 +55,11 @@ function ledgerByEpisode(
   return map;
 }
 
-function contributionState(row: ContributionLedgerEntry | undefined): HistoryEntry['contributionState'] {
+function contributionState(
+  row: ContributionLedgerEntry | undefined,
+  available = true,
+): HistoryEntry['contributionState'] {
+  if (!available) return { status: 'unavailable' };
   if (!row) return { status: 'none' };
   const anchorRef = row.publicationRef ?? row.mintRef;
   return {
@@ -68,51 +73,78 @@ function contributionState(row: ContributionLedgerEntry | undefined): HistoryEnt
  * records omit it, so reads stay backward compatible and honestly indeterminate
  * rather than silently manufacturing a verdict from incomplete inputs.
  */
-function episodeEligibility(ep: EpisodeV1): EligibilityVerdict {
-  return ep.eligibility ?? {
-    eligible: false,
-    reason: 'eligibility indeterminate from episode (contribution signals not persisted)',
-    checkedAt: ep.session.capturedAt,
-  };
+function episodeEligibility(ep: EpisodeV1): EligibilityVerdict | null {
+  return ep.eligibility ?? null;
+}
+
+function skillsBySession(skills: LocalLearningSkill[]): Map<string, HistoryEntry['distilledSkills']> {
+  const bySession = new Map<string, NonNullable<HistoryEntry['distilledSkills']>>();
+  for (const skill of skills) {
+    for (const sessionId of skill.sourceSessionIds) {
+      const rows = bySession.get(sessionId) ?? [];
+      if (!rows.some((row) => row.ref === skill.ref && row.state === skill.state)) {
+        rows.push({ ref: skill.ref, state: skill.state });
+      }
+      bySession.set(sessionId, rows);
+    }
+  }
+  return bySession;
 }
 
 export async function foldHistory(deps: HistoryDeps): Promise<HistoryResult> {
   const reasons: string[] = [];
 
-  const episodes = collect(await deps.evidence.list(), 'evidence', [] as EpisodeV1[], reasons);
-  const ledger = collect(await deps.contribution.ledger(), 'contribution', [] as ContributionLedgerEntry[], reasons);
-
-  const runsRes = await deps.localLearning.list();
-  if (runsRes.status !== 'ok') reasons.push(`localLearning: ${runsRes.reason}`);
+  const episodesResult = await deps.evidence.list();
+  const episodes = collect(episodesResult, 'evidence', [] as EpisodeV1[], reasons);
+  const ledgerResult = await deps.contribution.ledger();
+  const ledger = collect(ledgerResult, 'contribution', [] as ContributionLedgerEntry[], reasons);
+  const skillsResult = deps.localLearning.skills
+    ? await deps.localLearning.skills()
+    : ({ status: 'unavailable', reason: 'skill provenance is unavailable' } as const);
+  const skills = collect(skillsResult, 'localLearning', [] as LocalLearningSkill[], reasons);
 
   const byEpisode = ledgerByEpisode(ledger);
+  const bySession = skillsBySession(skills);
+  const contributionAvailable = ledgerResult.status !== 'unavailable';
+  const skillsAvailable = skillsResult.status !== 'unavailable';
 
-  const entries: HistoryEntry[] = episodes.map((ep) => ({
-    sessionId: ep.session.sessionId,
-    taskSummary: ep.task.summary,
-    knowledgeSurfaced: ep.activity?.surfacedRefs.length ?? 0,
-    knowledgeUsed: ep.activity?.fetchedRefs.length ?? 0,
-    captureStatus: 'captured' as const,
-    eligibility: episodeEligibility(ep),
-    contributionState: contributionState(byEpisode.get(ep.episodeId)),
-    distilledSkillRefs: [],
-  }));
+  const entries: HistoryEntry[] = [...episodes]
+    .sort((a, b) => b.session.capturedAt.localeCompare(a.session.capturedAt))
+    .map((ep) => ({
+      sessionId: ep.session.sessionId,
+      capturedAt: ep.session.capturedAt,
+      taskSummary: ep.task.summary,
+      knowledgeSurfaced: ep.activity?.surfacedRefs.length ?? null,
+      knowledgeUsed: ep.activity?.fetchedRefs.length ?? null,
+      captureStatus: 'captured' as const,
+      eligibility: episodeEligibility(ep),
+      contributionState: contributionState(byEpisode.get(ep.episodeId), contributionAvailable),
+      distilledSkills: skillsAvailable ? bySession.get(ep.session.sessionId) ?? [] : null,
+    }));
+
+  const legacyFactsUnavailable = episodes.some((ep) => !ep.activity || !ep.eligibility);
+  if (legacyFactsUnavailable) reasons.push('one or more episodes predate activity or eligibility facts');
+  const evidenceUnavailable = episodesResult.status === 'unavailable';
 
   return reasons.length > 0
-    ? { entries, degraded: true, reason: reasons.join('; ') }
-    : { entries, degraded: false };
+    ? { entries, degraded: true, unavailable: evidenceUnavailable, reason: reasons.join('; ') }
+    : { entries, degraded: false, unavailable: false };
 }
 
 export async function foldExplain(sessionRef: string, deps: HistoryDeps): Promise<SessionExplanation> {
   const reasons: string[] = [];
 
   const episodes = collect(await deps.evidence.list(), 'evidence', [] as EpisodeV1[], reasons);
-  const ledger = collect(await deps.contribution.ledger(), 'contribution', [] as ContributionLedgerEntry[], reasons);
+  const ledgerResult = await deps.contribution.ledger();
+  const ledger = collect(ledgerResult, 'contribution', [] as ContributionLedgerEntry[], reasons);
 
   const episode = episodes.find((ep) => ep.session.sessionId === sessionRef);
   const contribution = episode
-    ? contributionState(ledger.find((row) => row.sourceId === episode.episodeId))
-    : contributionState(undefined);
+    ? contributionState(
+        ledger.find((row) => row.sourceId === episode.episodeId),
+        ledgerResult.status !== 'unavailable',
+      )
+    : contributionState(undefined, ledgerResult.status !== 'unavailable');
 
   return {
     sessionRef,

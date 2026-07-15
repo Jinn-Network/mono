@@ -134,6 +134,7 @@ Commands:
   contract --json                                 Print process contract version 1
   session pickup                                  Read a v1 pickup request on stdin
   session end                                     Read a complete EpisodeV1 request on stdin
+  history --json                                  Derive local session history from canonical stores
   contribution preview [--ack] --json             Show the next sanitized first-share preview;
                                                    --ack records the one-time acknowledgement
   contribution ledger --json                      Show privacy-safe canonical contribution states
@@ -812,10 +813,11 @@ export async function runJinnLayerCli(
   const isContract = verb === 'contract';
   const isSessionPickup = verb === 'session' && subverb === 'pickup';
   const isSessionEnd = verb === 'session' && subverb === 'end';
+  const isHistory = verb === 'history';
   const isContributionPreview = verb === 'contribution' && subverb === 'preview';
   const isContributionLedger = verb === 'contribution' && subverb === 'ledger';
   const isContributionDisable = verb === 'contribution' && subverb === 'disable';
-  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed && !isSkillsInstall && !isDistillRun && !isDistillEvalPrep && !isDistill && !isDeriveEnv && !isContract && !isSessionPickup && !isSessionEnd && !isContributionPreview && !isContributionLedger && !isContributionDisable) {
+  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed && !isSkillsInstall && !isDistillRun && !isDistillEvalPrep && !isDistill && !isDeriveEnv && !isContract && !isSessionPickup && !isSessionEnd && !isHistory && !isContributionPreview && !isContributionLedger && !isContributionDisable) {
     writer.write(USAGE);
     return verb === undefined || verb === 'help' || verb === '--help' ? 0 : 2;
   }
@@ -858,6 +860,22 @@ export async function runJinnLayerCli(
     } catch (error) {
       return interfaceError(writer, error);
     }
+  }
+
+  if (isHistory) {
+    if (subverb !== '--json' || rest.length !== 0) {
+      writer.write('error: invalid history command; use jinn-layer history --json\n');
+      return 2;
+    }
+    const result = await createJinnPlugin(buildPluginDepsFromEnv(opts.pluginOverrides ?? {}))
+      .history();
+    const status = result.unavailable ? 'unavailable' : result.degraded ? 'degraded' : 'ok';
+    writer.write(`${JSON.stringify(processEnvelope(
+      status,
+      { entries: result.entries },
+      result.reason,
+    ))}\n`);
+    return 0;
   }
 
   if (isContributionPreview) {

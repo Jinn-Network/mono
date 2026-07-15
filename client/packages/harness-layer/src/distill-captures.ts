@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parseCapturedTask, type CapturedTask } from './capture.js';
 import { parseSkillMarkdown } from './skill-package.js';
+import type { LocalLearningSkill } from '@jinn-network/plugin';
 
 /** Own-captures dir the rung-1 `distill` loop reads by default. */
 export const DEFAULT_CAPTURES_DIR = join(homedir(), '.jinn-client', 'harness-layer', 'captures');
@@ -39,6 +40,43 @@ export function loadRecentCaptures(dir: string, limit: number): CapturedTask[] {
 /** Staging directory beside the active generated-skill directory. */
 export function stagingDirFor(activeDir: string): string {
   return `${activeDir.replace(/[/\\]+$/, '')}-staged`;
+}
+
+/** Derive local skill history from the canonical active/staged SKILL.md files. */
+export function localSkillProvenance(
+  activeDir: string,
+  stagedDir: string = stagingDirFor(activeDir),
+): LocalLearningSkill[] {
+  const skills = new Map<string, LocalLearningSkill>();
+  const scan = (dir: string, state: LocalLearningSkill['state']): void => {
+    if (!existsSync(dir)) return;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const md = join(dir, entry.name, 'SKILL.md');
+      if (!existsSync(md)) continue;
+      try {
+        const pkg = parseSkillMarkdown(readFileSync(md, 'utf-8'));
+        const sourceSessionIds = pkg.jinn.provenance
+          .map((ref) => /^local-capture:(.+)$/.exec(ref)?.[1])
+          .filter((sessionId): sessionId is string => Boolean(sessionId));
+        if (sourceSessionIds.length === 0) continue;
+        const ref = `local-skill:${pkg.name}`;
+        const existing = skills.get(ref);
+        if (existing?.state === 'installed') continue;
+        skills.set(ref, {
+          ref,
+          sourceSessionIds: [...new Set(sourceSessionIds)],
+          state,
+        });
+      } catch {
+        // History is a structured JSON process command. Skip malformed local
+        // artifacts without contaminating its process output.
+      }
+    }
+  };
+  scan(activeDir, 'installed');
+  scan(stagedDir, 'staged');
+  return [...skills.values()].sort((a, b) => a.ref.localeCompare(b.ref));
 }
 
 /**
