@@ -20,6 +20,7 @@ import { dispatchIssue } from '../src/dispatcher/dispatch.js';
 import { SESSIONS_LOG_DIR } from '../src/dispatcher/session-log.js';
 import { GhPrSource } from '../src/dispatcher/pr-source.js';
 import { fetchIssuePrMap } from '../src/dispatcher/pr-links.js';
+import type { PrLink } from '../src/dispatcher/pr-links.js';
 import { deriveReviewInFlight } from '../src/dispatcher/review-state.js';
 import { dispatchReview } from '../src/dispatcher/review-dispatch.js';
 import { runReviewCycle } from '../src/dispatcher/review-loop.js';
@@ -33,6 +34,7 @@ import {
 } from '../src/dispatcher/field-cache.js';
 import { makePauseSession } from '../src/dispatcher/pause-session.js';
 import { syncHumanLane } from '../src/dispatcher/human-lane.js';
+import { syncStackBases } from '../src/dispatcher/stack-sweep.js';
 import { runCycle } from '../src/dispatcher/loop.js';
 import type { CycleReport } from '../src/dispatcher/loop.js';
 import { fetchProjectSnapshot } from '../src/dispatcher/project-snapshot.js';
@@ -636,6 +638,32 @@ async function main(): Promise<void> {
         console.error('[autopilot] Human-lane sync error (cycle unaffected):', err);
       }
 
+      // Fetch the issue→PR map ONCE per cycle and share it: the stacked-base
+      // sweep (below) and the dependency resolver inside runCycle (via the
+      // injected `fetchIssuePrMap` closure) both consume it, so one `gh pr list`
+      // serves both and they reason about the same PR snapshot. Best-effort — a
+      // failure degrades both to "no dependency awareness this cycle", never
+      // fatal. (REST, not GraphQL budget.) (review 2026-07-13)
+      let cyclePrByIssue: Map<number, PrLink[]> = new Map();
+      try {
+        cyclePrByIssue = await fetchIssuePrMap(realRunner);
+      } catch (err) {
+        console.error('[eng:loop] PR-map fetch error (dependency features degraded this cycle):', err);
+      }
+
+      // Abandoned-base re-block sweep (spec 2026-07-13 §4): a child dispatched
+      // stacked on its blocker's open PR is left on a dead branch if that PR is
+      // closed without merging (GitHub only auto-retargets on merge). Park such
+      // a child to `Blocked on: Human` + comment so a human resolves it.
+      try {
+        const { reblocked } = await syncStackBases(snapshot, cyclePrByIssue, cycleFieldCache, realRunner);
+        if (reblocked.length > 0) {
+          console.log(`[eng:loop] stacked base abandoned → re-blocked (Human): #${reblocked.join(', #')}`);
+        }
+      } catch (err) {
+        console.error('[eng:loop] stack-base sweep error (cycle unaffected):', err);
+      }
+
       // Build a per-cycle pause closure that resolves the project item id
       // from the snapshot already in scope (jinn-mono#599) — no extra
       // `gh project item-list` call per pause.
@@ -701,7 +729,8 @@ async function main(): Promise<void> {
             fieldCache: cycleFieldCache,
           }),
         countOpenReadyPrs,
-        fetchIssuePrMap: () => fetchIssuePrMap(realRunner),
+        // Reuse the map fetched once above (shared with the stacked-base sweep).
+        fetchIssuePrMap: () => Promise.resolve(cyclePrByIssue),
         wallClock,
         pauseSession: pauseSessionForCycle,
         prevInFlight: previousInFlight,

@@ -77,11 +77,19 @@ machine-readable edge. That is decision 1 below.
 ### 4. Merge & abandoned-base handling
 
 - **A merges:** GitHub auto-retargets B's PR base to `next`. No dispatcher action.
-- ⚑ **Abandoned-base default:** if A's PR is closed **without** merging, a small
-  per-cycle sweep detects that B is dispatched/open on a now-dead base branch and
-  **re-blocks** B (flips it back to `Blocked` + posts an explanatory comment) so it
-  does not sit on a dead branch. Re-block, not silent re-target, so a human sees
-  the base died.
+- **Abandoned-base sweep (`syncStackBases`, as built — refined from the original
+  sketch during review 2026-07-13):** if A's PR is closed **without** merging,
+  B's PR base still points at A's dead branch (GitHub only auto-retargets on
+  *merge*). Each cycle, for every open child PR whose base isn't `next`, the
+  sweep finds the PR whose head *is* that base (A) and, if A's PR is `CLOSED`,
+  parks B to **`Blocked on: Human`** + posts an explanatory comment. Parking (not
+  `Another issue`) frees B's slot via the existing `deriveInFlight`
+  `blockedOn === 'Human'` carve-out and avoids the `syncHumanLane` demote-
+  conflict — so no `state.ts` change is needed.
+  - **Detection is PR-data only (no marker file):** it reads B's PR `baseRefName`,
+    so it acts on children in `In Progress` **or** `In Review` (a session flips to
+    In Review seconds after opening its PR, so In Review is the common case). The
+    brief pre-PR window is caught on the child's next cycle once its PR exists.
 
 ### 5. Reuse
 
