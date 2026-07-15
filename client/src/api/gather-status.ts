@@ -8,7 +8,7 @@ import { join } from 'node:path';
 
 /** Narrow RPC surface for balance fan-out (avoids PublicClient / chain-specific getBlock incompatibilities). */
 type StatusBalanceRpc = Pick<PublicClient, 'getBalance' | 'readContract'>;
-import { base, baseSepolia } from 'viem/chains';
+import { base, baseSepolia, sepolia } from 'viem/chains';
 import type { Store } from '../store/store.js';
 import type { JinnConfig } from '../config.js';
 import type { CredentialId } from '../spend/credential.js';
@@ -69,6 +69,12 @@ const ERC20_BALANCE_OF_ABI = [
     outputs: [{ name: '', type: 'uint256' }],
   },
 ] as const;
+
+// The tokenless-OLAS configuration no longer carries an Ethereum-L1 RPC
+// surface. The operator dashboard still needs the Sepolia master-gas runway on
+// testnet, so this read uses the public endpoint directly; failures remain
+// status-only and suppress runway severity rather than blocking the daemon.
+const TESTNET_ETHEREUM_RPC_URL = 'https://ethereum-sepolia-rpc.publicnode.com';
 
 function readDaemonRuntime(earningDir: string | undefined): GatheredStatusRaw['daemonRuntime'] | undefined {
   if (!earningDir) return undefined;
@@ -788,13 +794,15 @@ export async function gatherGatheredStatusRaw(
   // gate above.
   if (
     status.network === 'testnet' &&
-    status.config?.ethereumRpcUrl &&
     fleet?.master_address
   ) {
     raw.l1MasterDailyEstimateWei = daily.toString();
     raw.minL1MasterEthWei = chainCfg.minEoaGasEth.toString();
     try {
-      const l1Client = createJinnL1PublicClient(status.config.ethereumRpcUrl, 'sepolia');
+      const l1Client = createPublicClient({
+        chain: sepolia,
+        transport: http(TESTNET_ETHEREUM_RPC_URL),
+      });
       const l1Bal = await l1Client.getBalance({
         address: fleet.master_address as `0x${string}`,
       });

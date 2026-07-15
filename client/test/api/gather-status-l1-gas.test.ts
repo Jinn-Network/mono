@@ -2,7 +2,6 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { JinnConfig } from '../../src/config.js';
 import { FleetStateStore } from '../../src/earning/store.js';
 import { withTempStore } from '@test/store.js';
 
@@ -64,7 +63,6 @@ describe('gatherGatheredStatusRaw — L1 master gas (issue #1296)', () => {
       const raw = await gatherGatheredStatusRaw(store, {
         earningDir,
         rpcUrl: 'http://base-sepolia.example',
-        config: { ethereumRpcUrl: 'http://sepolia.example' } as unknown as JinnConfig,
         network: 'testnet',
         pollIntervalMs: 5000,
         rewardClaimIntervalMs: 0,

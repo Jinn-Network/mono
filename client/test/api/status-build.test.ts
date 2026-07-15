@@ -440,7 +440,6 @@ describe('assembleStatusV1 — autoRestake observability (#651)', () => {
 describe('assembleStatusV1 l1MasterGas (issue #1296)', () => {
   function rawWithL1(over: Partial<GatheredStatusRaw> = {}): GatheredStatusRaw {
     return {
-      ...tjinnIdentityFields,
       shutdownState: 'running',
       dbPath: '/tmp/x.db',
       activityCounts: {},
