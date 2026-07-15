@@ -60,9 +60,11 @@ def test_minted_renders_as_minted_chip():
 def test_recorded_and_minted_projection_hides_env_and_anchor_values():
     # The renderer foundation treats recorded/minted rows as local: envelope
     # and anchor are placeholders, never adapter-supplied values.
-    for state in ("queued", "minted"):
-        env_sentinel = f"ENV-SENTINEL-{state}"
-        anchor_sentinel = f"ANCHOR-SENTINEL-{state}"
+    sentinels = {
+        "queued": ("QENV7", "QANCHOR9"),
+        "minted": ("MENV7", "MANCHOR9"),
+    }
+    for state, (env_sentinel, anchor_sentinel) in sentinels.items():
         plain = _plain(ledger_view.render_ledger([
             {
                 "time": "05-26 06:40",
