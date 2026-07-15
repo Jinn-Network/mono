@@ -26,6 +26,8 @@ export interface ContributionStatusSnapshot extends ContributionState {
 export interface ContributionLedgerEntry extends ContributionStatusSnapshot {
   recordId: string;
   sourceId: string;
+  createdAt: string;
+  verifiabilityTier: 'user-accepted' | 'tests-passed';
   /** Sanitized repository facts used by the local first-share preview. */
   repositorySlug?: string;
   baseCommit?: string;

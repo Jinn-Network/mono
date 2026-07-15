@@ -207,6 +207,8 @@ describe('JinnPlugin.completeSession()', () => {
       value: [{
         recordId: 'record-1',
         sourceId: 'episode-complete',
+        createdAt: '2026-07-15T12:01:00.000Z',
+        verifiabilityTier: 'tests-passed',
         repositorySlug: 'Jinn-Network/mono',
         baseCommit: '0123456789abcdef',
         localState: 'recorded',

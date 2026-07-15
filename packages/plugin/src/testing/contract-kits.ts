@@ -99,6 +99,8 @@ export function describeContributionPortContract(makeAdapter: () => Contribution
         expect(ledgerResult.value).toContainEqual({
           recordId: recordResult.value.recordId,
           sourceId: 'episode-1',
+          createdAt: '2026-07-15T12:00:00.000Z',
+          verifiabilityTier: 'user-accepted',
           repositorySlug: 'Jinn-Network/mono',
           baseCommit: '0123456789abcdef',
           localState: 'recorded',

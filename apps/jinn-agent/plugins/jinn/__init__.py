@@ -572,9 +572,31 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
         return f"preview failed:\n{out}"
 
     if sub == "ledger":
-        # Prefer structured rows (design 1b columns + tier chips + retry
-        # sub-line + exact empty state). Degrade to the layer's raw text when
-        # the installed layer predates `ledger --json`.
+        # Prefer canonical contribution-store rows. A layer that predates the
+        # command falls back to the legacy publication-receipt ledger.
+        ccode, cout = jinn_layer.contribution_ledger_json(runner=_runner)
+        if ccode == 0:
+            try:
+                reply = jinn_layer.parse_process_response(cout)
+            except ValueError:
+                reply = None
+            if isinstance(reply, dict):
+                if reply.get("status") == "unavailable":
+                    return f"contribution ledger unavailable:\n{reply.get('reason', 'details unavailable')}"
+                rows = ledger_view.rows_from_json(reply.get("value"))
+                if rows is not None:
+                    rendered = ledger_view.render_ledger(
+                        rows, enabled=consent.share_enabled()
+                    )
+                    if reply.get("status") == "degraded":
+                        rendered += (
+                            "\n\ncontribution state degraded — "
+                            + str(reply.get("reason") or "details unavailable")
+                        )
+                    return rendered
+
+        # Prefer structured legacy rows (design 1b columns + tier chips +
+        # exact empty state), then degrade to the layer's raw text.
         jcode, jout = jinn_layer.ledger_json(runner=_runner)
         if jcode == 0:
             try:

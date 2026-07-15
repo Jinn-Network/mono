@@ -7,7 +7,7 @@
 
 /// <reference types="node" />
 import { randomUUID } from 'node:crypto';
-import type { ContributionPort } from './ports/contribution-port.js';
+import type { ContributionLedgerEntry, ContributionPort } from './ports/contribution-port.js';
 import type { CorpusPort } from './ports/corpus-port.js';
 import type { EvidencePort } from './ports/evidence-port.js';
 import type { LocalLearningPort } from './ports/local-learning-port.js';
@@ -428,6 +428,7 @@ export interface JinnPlugin {
   history(): Promise<HistoryResult>;
   explain(sessionRef: string): Promise<SessionExplanation>;
   previewContribution(acknowledge?: boolean): Promise<PortResult<ContributionPreview | null>>;
+  contributionLedger(): Promise<PortResult<ContributionLedgerEntry[]>>;
   disableContributionPublication(): Promise<PortResult<{ recordIds: string[] }>>;
 }
 
@@ -447,6 +448,13 @@ export function createJinnPlugin(deps: JinnPluginDeps): JinnPlugin {
     },
     previewContribution(acknowledge = false): Promise<PortResult<ContributionPreview | null>> {
       return previewContribution(deps, acknowledge);
+    },
+    async contributionLedger(): Promise<PortResult<ContributionLedgerEntry[]>> {
+      try {
+        return await deps.contribution.ledger();
+      } catch (error) {
+        return unavailable(`contribution ledger failed: ${errorReason(error)}`);
+      }
     },
     async disableContributionPublication(): Promise<PortResult<{ recordIds: string[] }>> {
       if (!deps.contribution.disableUnpublished) {

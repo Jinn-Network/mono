@@ -121,6 +121,10 @@ def contribution_preview(
     return run(args, runner)
 
 
+def contribution_ledger_json(runner: Optional[Runner] = None) -> Tuple[int, str]:
+    return run(["contribution", "ledger", "--json"], runner)
+
+
 def contribution_disable(runner: Optional[Runner] = None) -> Tuple[int, str]:
     return run(["contribution", "disable", "--json"], runner)
 

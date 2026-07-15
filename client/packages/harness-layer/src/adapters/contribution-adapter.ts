@@ -59,6 +59,10 @@ export function createContributionAdapter(deps: ContributionAdapterDeps): Contri
         const entries = (await store.list()).map((record): ContributionLedgerEntry => ({
           recordId: record.recordId,
           sourceId: record.candidate.sourceId,
+          createdAt: record.candidate.createdAt,
+          verifiabilityTier: record.candidate.testRuns.some((run) => run.exitCode === 0)
+            ? 'tests-passed'
+            : 'user-accepted',
           repositorySlug: record.candidate.repositorySlug,
           baseCommit: record.candidate.baseCommit,
           localState: record.localState,

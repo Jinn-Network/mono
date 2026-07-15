@@ -9,8 +9,14 @@ import {
   InMemoryLocalLearningPort,
   InMemorySkillsPort,
 } from '@jinn-network/plugin/testing';
-import { unavailable, type EpisodeV1, type JinnPluginDeps } from '@jinn-network/plugin';
+import {
+  unavailable,
+  type ContributionCandidateV1,
+  type EpisodeV1,
+  type JinnPluginDeps,
+} from '@jinn-network/plugin';
 import { runJinnLayerCli } from '../src/cli.js';
+import { ContributionStore } from '../src/contribution-store.js';
 import {
   MineableTraceStore,
   resolveMineableStateDir,
@@ -102,6 +108,7 @@ describe('jinn-layer process contract v1', () => {
     ['contract', ['contract', 'unexpected']],
     ['session pickup', ['session', 'pickup', '--unexpected']],
     ['session end', ['session', 'end', '--unexpected']],
+    ['contribution ledger', ['contribution', 'ledger', '--unexpected']],
   ])('rejects extra arguments on the %s interface', async (_label, argv) => {
     const out = capture();
     expect(await runJinnLayerCli(argv, {
@@ -373,6 +380,31 @@ describe('jinn-layer process contract v1', () => {
         publicationState: 'disabled',
         candidate: { sourceId: 'episode-host-1' },
       });
+
+      const ledgerOut = capture();
+      expect(await runJinnLayerCli(['contribution', 'ledger', '--json'], {
+        writer: ledgerOut.writer,
+        pluginOverrides: {
+          corpus: new InMemoryCorpusPort([]),
+          localLearning: new InMemoryLocalLearningPort(),
+          skills: new InMemorySkillsPort(),
+        },
+      })).toBe(0);
+      expect(JSON.parse(ledgerOut.output())).toEqual({
+        contractVersion: 1,
+        status: 'ok',
+        value: {
+          rows: [{
+            time: '07-15 12:02',
+            task: 'Jinn-Network/mono @ 01234567',
+            env: null,
+            anchor: null,
+            tier: 'tests-passed',
+            state: 'recorded',
+          }],
+        },
+      });
+      expect(ledgerOut.output()).not.toMatch(/episode-host-1|acceptedDiff|diff --git|skillEvents/);
     } finally {
       if (previousEpisodes === undefined) delete process.env['JINN_LAYER_EPISODES_DIR'];
       else process.env['JINN_LAYER_EPISODES_DIR'] = previousEpisodes;
@@ -380,6 +412,104 @@ describe('jinn-layer process contract v1', () => {
       else process.env['JINN_MINEABLE_STATE_DIR'] = previousMineable;
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it('projects every real contribution-store transition without requiring a sidecar', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jinn-contribution-ledger-'));
+    const previousMineable = process.env['JINN_MINEABLE_STATE_DIR'];
+    process.env['JINN_MINEABLE_STATE_DIR'] = root;
+    const base = request().contributionCandidate as ContributionCandidateV1;
+    const candidate = (
+      sourceId: string,
+      publishMinedTasksConsent: boolean,
+      minute: string,
+    ): ContributionCandidateV1 => ({
+      ...base,
+      sourceId,
+      publishMinedTasksConsent,
+      createdAt: `2026-07-15T12:${minute}:00.000Z`,
+    });
+    try {
+      const store = new ContributionStore({ stateDir: root });
+      await store.record(candidate('recorded-local-id', false, '01'));
+      await store.record(candidate('minted-local-id', false, '02'));
+      await store.markMinted('minted-local-id', 'mint:local-only');
+      await store.record(candidate('preview-local-id', true, '03'));
+
+      const previewOut = capture();
+      expect(await runJinnLayerCli(['contribution', 'ledger', '--json'], {
+        writer: previewOut.writer,
+        pluginOverrides: {
+          corpus: new InMemoryCorpusPort([]),
+          localLearning: new InMemoryLocalLearningPort(),
+          skills: new InMemorySkillsPort(),
+        },
+      })).toBe(0);
+      expect(JSON.parse(previewOut.output()).value.rows.map((row: { state: string }) => row.state))
+        .toEqual(['recorded', 'minted', 'preview-required']);
+
+      await store.authorize('preview-local-id', '2026-07-15T12:04:00.000Z');
+      await store.record(candidate('queued-local-id', true, '04'));
+      await store.record(candidate('published-local-id', true, '05'));
+      await store.markMinted('published-local-id', 'mint:published');
+      await store.markPublished('published-local-id', 'ipfs://published');
+      await store.record(candidate('vetoed-local-id', true, '06'), undefined, {
+        publicationState: 'vetoed',
+      });
+      await store.record(candidate('rejected-local-id', false, '07'));
+      await store.markRejected('rejected-local-id', 'not reproducible');
+
+      const out = capture();
+      expect(await runJinnLayerCli(['contribution', 'ledger', '--json'], {
+        writer: out.writer,
+        pluginOverrides: {
+          corpus: new InMemoryCorpusPort([]),
+          localLearning: new InMemoryLocalLearningPort(),
+          skills: new InMemorySkillsPort(),
+        },
+      })).toBe(0);
+
+      const reply = JSON.parse(out.output());
+      expect(reply.status).toBe('ok');
+      expect(reply.value.rows.map((row: { state: string }) => row.state)).toEqual([
+        'recorded',
+        'minted',
+        'queued',
+        'queued',
+        'published',
+        'vetoed',
+        'rejected',
+      ]);
+      expect(reply.value.rows[4]).toMatchObject({
+        env: 'mint:published',
+        anchor: 'ipfs://published',
+        state: 'published',
+      });
+      expect(out.output()).not.toMatch(/-local-id|acceptedDiff|diff --git|skillEvents/);
+    } finally {
+      if (previousMineable === undefined) delete process.env['JINN_MINEABLE_STATE_DIR'];
+      else process.env['JINN_MINEABLE_STATE_DIR'] = previousMineable;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('reports an unavailable contribution store as product state, not a command failure', async () => {
+    const base = new InMemoryContributionPort();
+    const contribution = {
+      ...base,
+      async ledger() { return unavailable('contribution store offline'); },
+    } as JinnPluginDeps['contribution'];
+    const out = capture();
+
+    expect(await runJinnLayerCli(['contribution', 'ledger', '--json'], {
+      writer: out.writer,
+      pluginOverrides: memoryDeps({ contribution }),
+    })).toBe(0);
+    expect(JSON.parse(out.output())).toEqual({
+      contractVersion: 1,
+      status: 'unavailable',
+      reason: 'contribution store offline',
+    });
   });
 
   it('returns unavailable with the typed persistence result when evidence did not persist', async () => {

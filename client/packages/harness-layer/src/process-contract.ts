@@ -6,6 +6,7 @@ import {
   PickupConfigSchema,
   SessionActivityFactsSchema,
   type FirstTurnPickupResult,
+  type ContributionLedgerEntry,
   type JinnPluginDeps,
   type SessionEndResult,
 } from '@jinn-network/plugin';
@@ -107,3 +108,32 @@ export function trackingCorpus(deps: JinnPluginDeps): {
 }
 
 export type SessionPickupEnvelope = ProcessEnvelope<FirstTurnPickupResult>;
+
+export interface ContributionLedgerRowV1 {
+  time: string;
+  task: string;
+  env: string | null;
+  anchor: string | null;
+  tier: 'user-accepted' | 'tests-passed';
+  state: ContributionLedgerEntry['status'];
+}
+
+function displayTimestamp(value: string): string {
+  const match = /^\d{4}-(\d{2})-(\d{2})T(\d{2}):(\d{2})/u.exec(value);
+  return match ? `${match[1]}-${match[2]} ${match[3]}:${match[4]}` : value;
+}
+
+/** Persistence-safe terminal projection. Local IDs and candidate evidence do not cross it. */
+export function contributionLedgerRow(entry: ContributionLedgerEntry): ContributionLedgerRowV1 {
+  const published = entry.status === 'published';
+  const repository = entry.repositorySlug ?? 'repository unavailable';
+  const commit = entry.baseCommit ? entry.baseCommit.slice(0, 8) : 'commit unavailable';
+  return {
+    time: displayTimestamp(entry.createdAt),
+    task: `${repository} @ ${commit}`,
+    env: published ? entry.mintRef ?? null : null,
+    anchor: published ? entry.publicationRef ?? null : null,
+    tier: entry.verifiabilityTier,
+    state: entry.status,
+  };
+}

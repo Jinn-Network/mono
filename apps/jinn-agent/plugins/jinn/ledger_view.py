@@ -9,7 +9,9 @@ retained-local retry sub-line, and the exact empty-state copy.
 
 Rows are dicts with keys: ``time``, ``task``, ``env``, ``anchor``, ``tier``
 (one of ``user-accepted`` | ``tests-passed`` | ``evaluator-verified``), and an
-optional ``state`` (``queued`` | ``minted`` | ``vetoed`` | ``failed``).
+optional ``state``. Canonical contribution rows use ``recorded``, ``minted``,
+``preview-required``, ``queued``, ``published``, ``vetoed``, or ``rejected``;
+legacy receipt rows omit the state when published and may use ``failed``.
 Colours reuse the #1417 splash palette via ``style``.
 
 The renderer is pure and snapshot-testable. ``/jinn ledger`` calls it when the
@@ -52,8 +54,17 @@ FAILED_LABEL = "publish failed — retained locally"
 # like the vetoed row.
 RECORDED_LABEL = "recorded"
 MINTED_LABEL = "minted"
+QUEUED_LABEL = "queued"
+PREVIEW_REQUIRED_LABEL = "preview required"
+REJECTED_LABEL = "rejected (local)"
 
-_LOCAL_STATE_LABELS = {"queued": RECORDED_LABEL, "minted": MINTED_LABEL}
+_LOCAL_STATE_LABELS = {
+    "recorded": RECORDED_LABEL,
+    "minted": MINTED_LABEL,
+    "queued": QUEUED_LABEL,
+    "preview-required": PREVIEW_REQUIRED_LABEL,
+    "rejected": REJECTED_LABEL,
+}
 
 
 def _cell(text: Optional[str], w: int, align_right: bool = False) -> str:
@@ -84,7 +95,8 @@ def _row(pal, rst: str, r: Dict[str, object]) -> str:
     if state in _LOCAL_STATE_LABELS:
         env = dim(_cell("—", _COL["env"]))
         anc = dim(_cell("—", _COL["anchor"]))
-        return f"{time}  {task}  {env}  {anc}  {sky(_LOCAL_STATE_LABELS[state])}"
+        chip = red if state == "rejected" else amber if state == "preview-required" else sky
+        return f"{time}  {task}  {env}  {anc}  {chip(_LOCAL_STATE_LABELS[state])}"
 
     if state == "failed":
         env = sky(_cell(r.get("env"), _COL["env"]))
@@ -172,7 +184,9 @@ def render_ledger(
     red = lambda s: _style.wrap(pal, rst, "red", s)
 
     published = sum(
-        1 for r in rows if r.get("state") not in ("vetoed", "failed", "queued", "minted")
+        1
+        for r in rows
+        if r.get("state") is None or r.get("state") == "published"
     )
     vetoed = sum(1 for r in rows if r.get("state") == "vetoed")
     retained = sum(1 for r in rows if r.get("state") == "failed")
