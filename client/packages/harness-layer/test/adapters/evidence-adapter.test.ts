@@ -1,4 +1,14 @@
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import {
+  existsSync,
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -152,7 +162,7 @@ describe('EvidenceAdapter — AC2 byte-exact round-trip', () => {
     expect(result).toEqual({ status: 'ok', value: null });
   });
 
-  it('rejects a traversal episodeId without escaping capturesDir (#1660)', async () => {
+  it('encodes a traversal-shaped episodeId without escaping capturesDir (#1660)', async () => {
     const parent = mkdtempSync(join(tmpdir(), 'ev-trav-'));
     const capturesDir = join(parent, 'captures');
     const adapter = createEvidenceAdapter({ capturesDir });
@@ -161,13 +171,109 @@ describe('EvidenceAdapter — AC2 byte-exact round-trip', () => {
     const escapeTarget = join(parent, 'evil.episode.json');
 
     const putResult = await adapter.put(makeSampleEpisode({ episodeId: '../evil' }));
-    expect(putResult.status).not.toBe('ok');
+    expect(putResult).toEqual({ status: 'ok', value: { episodeId: '../evil' } });
     expect(existsSync(escapeTarget)).toBe(false);
+    const digest = createHash('sha256').update('../evil').digest('hex');
+    expect(existsSync(join(capturesDir, `episode-${digest}.episode.json`))).toBe(true);
+    expect(await adapter.get('../evil')).toMatchObject({
+      status: 'ok',
+      value: { episodeId: '../evil' },
+    });
 
     const getResult = await adapter.get('../../etc/whatever');
-    // Either a non-ok PortResult, or ok(null) — but never a read outside the dir.
-    if (getResult.status === 'ok') expect(getResult.value).toBeNull();
-    else expect(getResult.status).not.toBe('ok');
+    expect(getResult).toEqual({ status: 'ok', value: null });
     expect(existsSync(join(parent, 'etc'))).toBe(false);
+  });
+
+  it('uses canonical filenames and private permissions for safe and unsafe ids', async () => {
+    const parent = mkdtempSync(join(tmpdir(), 'ev-names-'));
+    const capturesDir = join(parent, 'evidence');
+    const adapter = createEvidenceAdapter({ capturesDir });
+    const unsafeId = 'host/session:1';
+    const unsafeDigest = createHash('sha256').update(unsafeId).digest('hex');
+
+    await adapter.put(makeSampleEpisode({ episodeId: 'safe-id_1' }));
+    await adapter.put(makeSampleEpisode({ episodeId: unsafeId }));
+
+    const safePath = join(capturesDir, 'safe-id_1.episode.json');
+    const unsafePath = join(capturesDir, `episode-${unsafeDigest}.episode.json`);
+    expect(existsSync(safePath)).toBe(true);
+    expect(existsSync(unsafePath)).toBe(true);
+    if (process.platform !== 'win32') {
+      expect(statSync(capturesDir).mode & 0o777).toBe(0o700);
+      expect(statSync(safePath).mode & 0o777).toBe(0o600);
+      expect(statSync(unsafePath).mode & 0o777).toBe(0o600);
+    }
+    expect(readdirSync(capturesDir).filter((name) => name.includes('.tmp'))).toEqual([]);
+  });
+
+  it('is idempotent for schema-canonical identical content without rewriting the file', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-idempotent-'));
+    const episode = makeSampleEpisode({ episodeId: 'same-episode' });
+    const path = join(capturesDir, 'same-episode.episode.json');
+    const preexistingBytes = `${JSON.stringify(episode, null, 2)}\n`;
+    writeFileSync(path, preexistingBytes, 'utf8');
+    const adapter = createEvidenceAdapter({ capturesDir });
+
+    const result = await adapter.put(episode);
+
+    expect(result).toEqual({ status: 'ok', value: { episodeId: 'same-episode' } });
+    expect(readFileSync(path, 'utf8')).toBe(preexistingBytes);
+    if (process.platform !== 'win32') expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  it('rejects an episodeId collision without changing the first episode', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-collision-'));
+    const adapter = createEvidenceAdapter({ capturesDir });
+    const first = makeSampleEpisode({ episodeId: 'collision-id' });
+    const second = makeSampleEpisode({
+      episodeId: 'collision-id',
+      task: { summary: 'different content', distributionTags: [] },
+    });
+
+    expect((await adapter.put(first)).status).toBe('ok');
+    const path = join(capturesDir, 'collision-id.episode.json');
+    if (process.platform !== 'win32') chmodSync(path, 0o644);
+    const collision = await adapter.put(second);
+
+    expect(collision.status).toBe('unavailable');
+    if (collision.status === 'unavailable') expect(collision.reason).toContain('collision');
+    expect(await adapter.get('collision-id')).toEqual({ status: 'ok', value: first });
+    if (process.platform !== 'win32') expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  it('handles concurrent identical puts idempotently', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-concurrent-same-'));
+    const episode = makeSampleEpisode({ episodeId: 'concurrent-same' });
+    const adapters = Array.from({ length: 16 }, () => createEvidenceAdapter({ capturesDir }));
+
+    const results = await Promise.all(adapters.map((adapter) => adapter.put(episode)));
+
+    expect(results.every((result) => result.status === 'ok')).toBe(true);
+    expect(readdirSync(capturesDir).filter((name) => name.endsWith('.episode.json')))
+      .toEqual(['concurrent-same.episode.json']);
+    expect(readdirSync(capturesDir).filter((name) => name.includes('.tmp'))).toEqual([]);
+  });
+
+  it('allows exactly one winner for concurrent different content with the same id', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-concurrent-collision-'));
+    mkdirSync(capturesDir, { recursive: true });
+    const first = makeSampleEpisode({ episodeId: 'concurrent-collision' });
+    const second = makeSampleEpisode({
+      episodeId: 'concurrent-collision',
+      task: { summary: 'other content', distributionTags: [] },
+    });
+
+    const results = await Promise.all([
+      createEvidenceAdapter({ capturesDir }).put(first),
+      createEvidenceAdapter({ capturesDir }).put(second),
+    ]);
+
+    expect(results.filter((result) => result.status === 'ok')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'unavailable')).toHaveLength(1);
+    const stored = await createEvidenceAdapter({ capturesDir }).get('concurrent-collision');
+    expect(stored.status).toBe('ok');
+    if (stored.status === 'ok') expect([first, second]).toContainEqual(stored.value);
+    expect(readdirSync(capturesDir).filter((name) => name.includes('.tmp'))).toEqual([]);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -37,6 +37,11 @@ describe('MintedPoolStore published artifact backfill', () => {
         hf_split: 'minted',
         mintedAt: new Date().toISOString(),
       }, EVAL_SEMANTICS_VERSION);
+
+      if (process.platform !== 'win32') {
+        expect((await stat(dir)).mode & 0o777).toBe(0o700);
+        expect((await stat(join(dir, 'minted-pool.json'))).mode & 0o777).toBe(0o600);
+      }
 
       let tasks = await loadMintedPoolTasks(store, EVAL_SEMANTICS_VERSION);
       expect(tasks).toHaveLength(0);

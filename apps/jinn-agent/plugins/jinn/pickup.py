@@ -189,6 +189,7 @@ def pickup(
     user_message: str,
     runner: Optional[jinn_layer.Runner] = None,
     signal_sink: Optional[SignalSink] = None,
+    activity: Optional[Dict[str, List[str]]] = None,
 ) -> Optional[Dict[str, str]]:
     """First-turn corpus lookup. Returns ``{"context": ...}`` for the
     pre_llm_call hook (or None when there is nothing worth saying).
@@ -198,7 +199,12 @@ def pickup(
     (design 1c). Defaults to stderr; tests pass a collector.
     """
     try:
-        return _pickup_inner(user_message, runner or _pickup_runner, signal_sink or _default_signal_sink)
+        return _pickup_inner(
+            user_message,
+            runner or _pickup_runner,
+            signal_sink or _default_signal_sink,
+            activity,
+        )
     except Exception as exc:
         logger.warning("jinn: pickup failed open: %s", exc)
         return None
@@ -208,6 +214,7 @@ def _pickup_inner(
     user_message: str,
     runner: jinn_layer.Runner,
     signal_sink: SignalSink,
+    activity: Optional[Dict[str, List[str]]] = None,
 ) -> Optional[Dict[str, str]]:
     config = load_config()
     if not config.get("enabled", True):
@@ -248,6 +255,8 @@ def _pickup_inner(
             trace, _sha = skills_install._extract_trace(record)
         except Exception:
             continue
+        if activity is not None and ref not in activity.setdefault("fetchedRefs", []):
+            activity["fetchedRefs"].append(ref)
 
         payload_type = classify_payload(trace)
         tier = str(((trace.get("outcome") or {}).get("verifiabilityTier")) or "")
@@ -264,6 +273,11 @@ def _pickup_inner(
                 try:
                     receipt = PAYLOAD_ADOPTERS[payload_type](ref, runner)
                     adopted.append(f"- {slug} ({tier}): {receipt}")
+                    if activity is not None:
+                        if ref not in activity.setdefault("surfacedRefs", []):
+                            activity["surfacedRefs"].append(ref)
+                        if ref not in activity.setdefault("installedSkillRefs", []):
+                            activity["installedSkillRefs"].append(ref)
                     # Point-of-use signal: the harness is now using this
                     # operator-contributed skill in the run. One line, checkable.
                     _emit_corpus_signal(
@@ -275,10 +289,14 @@ def _pickup_inner(
             suggested.append(
                 f"- {slug} (tier: {tier}) — {summary}\n  ref: {ref} · install: /jinn skills install {ref}"
             )
+            if activity is not None and ref not in activity.setdefault("surfacedRefs", []):
+                activity["surfacedRefs"].append(ref)
         else:
             # Unknown payload types are never adopted; mention verified ones only.
             if tier_at_least(tier, threshold):
                 suggested.append(f"- ({payload_type}, {tier}) {summary} — ref: {ref}")
+                if activity is not None and ref not in activity.setdefault("surfacedRefs", []):
+                    activity["surfacedRefs"].append(ref)
 
     if not adopted and not suggested:
         return None

@@ -635,6 +635,7 @@ export interface HarvestMintDeps {
   minterSafe?: string;
   publish?: boolean;
   progress?: MintTasksInput['progress'];
+  withPublicationAuthorization?: MintTasksInput['withPublicationAuthorization'];
 }
 
 export async function admitBuiltMintCandidates(
@@ -674,6 +675,7 @@ export async function admitBuiltMintCandidates(
     publicRepoChecker: deps.publicRepoChecker,
     environmentVerifier: deps.environmentVerifier,
     progress: deps.progress,
+    withPublicationAuthorization: deps.withPublicationAuthorization,
   };
   return runMintTasksPipeline(input);
 }

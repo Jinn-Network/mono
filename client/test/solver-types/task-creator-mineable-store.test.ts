@@ -4,6 +4,10 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
+  createContributionAdapter,
+  createContributionStatusStore,
+} from '../../packages/harness-layer/src/adapters/contribution-adapter.js';
+import {
   MineableTraceStore,
   buildMineableRecord,
   type MineableTraceRecord,
@@ -36,6 +40,40 @@ async function withTmpDir(fn: (dir: string) => Promise<void>): Promise<void> {
 }
 
 describe('MineableTraceStore', () => {
+  it('reads a canonical candidate written by the jinn-layer contribution adapter', async () => {
+    await withTmpDir(async (dir) => {
+      const statusStore = createContributionStatusStore(join(dir, 'mineable-traces.json'));
+      const adapter = createContributionAdapter({ statusStore });
+      const result = await adapter.recordMineable({
+        schemaVersion: 'jinn.contribution-candidate.v1',
+        sourceId: 'adapter-source',
+        repositorySlug: 'acme/widget',
+        baseCommit: 'abc123',
+        acceptedDiff: 'diff --git a/x b/x\n+adapter\n',
+        testRuns: [{ command: 'pytest', exitCode: 0, at: '2026-07-01T00:00:00.000Z' }],
+        intermediateFailureDiffs: ['diff --git a/x b/x\n-adapter\n'],
+        skillEvents: [{ skillRef: 'systematic-debugging', action: 'invoked' }],
+        publishMinedTasksConsent: false,
+        createdAt: '2026-07-01T00:00:00.000Z',
+      });
+      expect(result.status).toBe('ok');
+
+      const daemonReader = new MineableTraceStore({ stateDir: dir });
+      expect(await daemonReader.listUnmined()).toEqual([{
+        sourceId: 'adapter-source',
+        kind: 'harness-session',
+        repo: 'acme/widget',
+        baseCommit: 'abc123',
+        acceptedDiff: 'diff --git a/x b/x\n+adapter\n',
+        testRuns: [{ cmd: 'pytest', exitCode: 0, at: '2026-07-01T00:00:00.000Z' }],
+        intermediateFailureDiffs: ['diff --git a/x b/x\n-adapter\n'],
+        skillEvents: [{ skill: 'systematic-debugging', action: 'invoked' }],
+        publishMinedTasksConsent: false,
+        createdAt: '2026-07-01T00:00:00.000Z',
+      }]);
+    });
+  });
+
   it('appends unconditionally (local retention is always on, mono#1714)', async () => {
     await withTmpDir(async (dir) => {
       const store = new MineableTraceStore({ stateDir: dir });

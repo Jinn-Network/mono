@@ -13,6 +13,7 @@
  * is restored (optional) so EpisodeV1 stays a true CapturedTask superset.
  */
 import { z } from 'zod';
+import { EligibilityVerdictSchema } from './eligibility-verdict.js';
 
 export const EPISODE_SCHEMA_VERSION = 'jinn.episode.v1' as const;
 
@@ -33,6 +34,12 @@ const StepSchema = z.strictObject({
   endTimeUnixNano: UnixNanoSchema,
   attributes: z.record(z.string(), z.unknown()),
   redactedKeys: z.array(z.string().min(1)).default([]),
+});
+
+export const SessionActivityFactsSchema = z.strictObject({
+  surfacedRefs: z.array(z.string().min(1)),
+  fetchedRefs: z.array(z.string().min(1)),
+  installedSkillRefs: z.array(z.string().min(1)),
 });
 
 export const EpisodeV1Schema = z.strictObject({
@@ -74,6 +81,9 @@ export const EpisodeV1Schema = z.strictObject({
     episodeId: z.string().min(1),
     mintRef: z.string().min(1).optional(),
   }).optional(),
+  activity: SessionActivityFactsSchema.optional(),
+  eligibility: EligibilityVerdictSchema.optional(),
 });
 
 export type EpisodeV1 = z.infer<typeof EpisodeV1Schema>;
+export type SessionActivityFacts = z.infer<typeof SessionActivityFactsSchema>;

@@ -23,12 +23,25 @@ import { createInterface } from 'node:readline';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
-  createHarnessLayer,
   DEFAULT_IPFS_GATEWAY_URL,
   type CorpusRecord,
   type CorpusSearchHit,
   type HarnessLayer,
 } from './consume.js';
+import {
+  createJinnPlugin,
+  type JinnPluginDeps,
+} from '@jinn-network/plugin';
+import { buildDefaultLayer } from './layer-default.js';
+import { buildPluginDepsFromEnv } from './plugin-wiring.js';
+import {
+  PROCESS_CONTRACT_VERSION,
+  SessionEndRequestV1Schema,
+  SessionPickupRequestV1Schema,
+  envelope as processEnvelope,
+  sessionEndEnvelope,
+  trackingCorpus,
+} from './process-contract.js';
 import { capture, parseCapturedTask, type CapturedTask, type ScrubRedaction } from './capture.js';
 import { preview, stripBeforeValues, type ScrubReport } from './preview.js';
 import { createMemoryLedger, DEFAULT_LEDGER_PATH, ledger, toLedgerRow, type LedgerEntry } from './ledger.js';
@@ -117,6 +130,12 @@ import { resolveCliPassword } from '../../../src/cli/password.js';
 const USAGE = `Usage: jinn-layer <command> [args]
 
 Commands:
+  contract --json                                 Print process contract version 1
+  session pickup                                  Read a v1 pickup request on stdin
+  session end                                     Read a complete EpisodeV1 request on stdin
+  contribution preview [--ack] --json             Show the next sanitized first-share preview;
+                                                   --ack records the one-time acknowledgement
+  contribution disable --json                     Disable every unpublished authorization
   corpus search "<query>" [--limit N] [--json]   Search corpus records (substring match on
                                                  solverType / role / artifactType / refs)
   corpus get <ref> [--json] [--out <dir>]        Fetch a record by ref (manifest CID from a
@@ -341,6 +360,10 @@ export interface RunJinnLayerCliOptions {
   distillRunDeps?: DistillRunCliDeps;
   /** Injectable rung-1 own-captures deps (tests). Default: provider-resolved distill port. */
   distillDeps?: DistillCliDeps;
+  /** Injectable stdin reader for versioned process commands. */
+  reader?: () => Promise<string>;
+  /** Real ports are used by default; tests can override any subset. */
+  pluginOverrides?: Partial<JinnPluginDeps>;
   writer?: { write: (s: string) => boolean };
 }
 
@@ -752,11 +775,17 @@ function resolveClusterTimeoutMs(flagValue: string | undefined): number | undefi
   return seconds * 1000;
 }
 
-function buildDefaultLayer(): HarnessLayer {
-  return createHarnessLayer({
-    ...(process.env['JINN_DISCOVERY_URL'] ? { discoveryUrl: process.env['JINN_DISCOVERY_URL'] } : {}),
-    ...(process.env['JINN_IPFS_GATEWAY_URL'] ? { ipfsGatewayUrl: process.env['JINN_IPFS_GATEWAY_URL'] } : {}),
-  });
+async function readStdinToEnd(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+function interfaceError(writer: { write: (s: string) => boolean }, error: unknown): number {
+  writer.write(`error: invalid process request: ${error instanceof Error ? error.message : String(error)}\n`);
+  return 2;
 }
 
 /** Returns the process exit code (0 = success). */
@@ -765,6 +794,7 @@ export async function runJinnLayerCli(
   opts: RunJinnLayerCliOptions = {},
 ): Promise<number> {
   const writer = opts.writer ?? process.stdout;
+  const reader = opts.reader ?? readStdinToEnd;
   const [verb, subverb, ...rest] = argv;
 
   const isCorpus = verb === 'corpus' && (subverb === 'search' || subverb === 'get');
@@ -777,9 +807,89 @@ export async function runJinnLayerCli(
   const isDistillEvalPrep = verb === 'distill' && subverb === 'eval-prep';
   const isDistill = verb === 'distill' && !isDistillRun && !isDistillEvalPrep;
   const isDeriveEnv = verb === 'derive-env';
-  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed && !isSkillsInstall && !isDistillRun && !isDistillEvalPrep && !isDistill && !isDeriveEnv) {
+  const isContract = verb === 'contract';
+  const isSessionPickup = verb === 'session' && subverb === 'pickup';
+  const isSessionEnd = verb === 'session' && subverb === 'end';
+  const isContributionPreview = verb === 'contribution' && subverb === 'preview';
+  const isContributionDisable = verb === 'contribution' && subverb === 'disable';
+  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed && !isSkillsInstall && !isDistillRun && !isDistillEvalPrep && !isDistill && !isDeriveEnv && !isContract && !isSessionPickup && !isSessionEnd && !isContributionPreview && !isContributionDisable) {
     writer.write(USAGE);
     return verb === undefined || verb === 'help' || verb === '--help' ? 0 : 2;
+  }
+
+  if (isContract) {
+    if (!((subverb === undefined && rest.length === 0) || (subverb === '--json' && rest.length === 0))) {
+      writer.write('error: invalid contract command; use jinn-layer contract --json\n');
+      return 2;
+    }
+    writer.write(`${JSON.stringify({ contractVersion: PROCESS_CONTRACT_VERSION })}\n`);
+    return 0;
+  }
+
+  if (isSessionPickup || isSessionEnd) {
+    if (rest.length > 0) {
+      writer.write(`error: invalid ${isSessionPickup ? 'session pickup' : 'session end'} command; request JSON belongs on stdin\n`);
+      return 2;
+    }
+    let raw: unknown;
+    try {
+      raw = JSON.parse(await reader());
+    } catch (error) {
+      return interfaceError(writer, error);
+    }
+    try {
+      const deps = buildPluginDepsFromEnv(opts.pluginOverrides ?? {});
+      if (isSessionPickup) {
+        const request = SessionPickupRequestV1Schema.parse(raw);
+        const tracked = trackingCorpus(deps);
+        const result = await createJinnPlugin(tracked.deps)
+          .session(request.meta)
+          .firstTurnPickup(request.firstMessage);
+        writer.write(`${JSON.stringify(processEnvelope(tracked.status(), result, tracked.reason()))}\n`);
+      } else {
+        const request = SessionEndRequestV1Schema.parse(raw);
+        const result = await createJinnPlugin(deps).completeSession(request);
+        writer.write(`${JSON.stringify(sessionEndEnvelope(result))}\n`);
+      }
+      return 0;
+    } catch (error) {
+      return interfaceError(writer, error);
+    }
+  }
+
+  if (isContributionPreview) {
+    const flags = new Set(rest);
+    if ([...flags].some((arg) => arg !== '--ack' && arg !== '--json') || flags.size !== rest.length) {
+      writer.write('error: invalid contribution preview command\n');
+      return 2;
+    }
+    const result = await createJinnPlugin(buildPluginDepsFromEnv(opts.pluginOverrides ?? {}))
+      .previewContribution(flags.has('--ack'));
+    if (result.status === 'ok') {
+      writer.write(`${JSON.stringify(processEnvelope('ok', result.value))}\n`);
+    } else if (result.status === 'degraded') {
+      writer.write(`${JSON.stringify(processEnvelope('degraded', result.value, result.reason))}\n`);
+    } else {
+      writer.write(`${JSON.stringify(processEnvelope('unavailable', undefined, result.reason))}\n`);
+    }
+    return 0;
+  }
+
+  if (isContributionDisable) {
+    if (rest.some((arg) => arg !== '--json') || rest.length > 1) {
+      writer.write('error: invalid contribution disable command\n');
+      return 2;
+    }
+    const result = await createJinnPlugin(buildPluginDepsFromEnv(opts.pluginOverrides ?? {}))
+      .disableContributionPublication();
+    if (result.status === 'ok') {
+      writer.write(`${JSON.stringify(processEnvelope('ok', result.value))}\n`);
+    } else if (result.status === 'degraded') {
+      writer.write(`${JSON.stringify(processEnvelope('degraded', result.value, result.reason))}\n`);
+    } else {
+      writer.write(`${JSON.stringify(processEnvelope('unavailable', undefined, result.reason))}\n`);
+    }
+    return 0;
   }
 
   // `ledger`, `publish`, `distill`, and `derive-env` have no subverb — their args start at argv[1].

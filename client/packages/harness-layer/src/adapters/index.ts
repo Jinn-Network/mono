@@ -16,7 +16,6 @@ export {
   createContributionAdapter,
   createContributionStatusStore,
   type ContributionStatusStore,
-  type ContributionStatusEntry,
 } from './contribution-adapter.js';
 export { createLocalLearningAdapter } from './local-learning-adapter.js';
 export { createSkillsAdapter } from './skills-adapter.js';

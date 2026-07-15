@@ -2,7 +2,7 @@
  * Session-echo miner tests (Task 8) — one test per rule from the task brief:
  *   1. Blinded provenance: instance_id/row/provenance never carry `sourceId`.
  *   2. Provenance blocks both minter and source-solver claims.
- *   3. Tier-2 gate: publish = deps.publish && record.publishMinedTasksConsent.
+ *   3. Publication gate: consented first share requires preview acknowledgement.
  *   4. Repo gates in order: denylist before Docker spend; D5 only on publish path.
  *   5. Dead mints (no FAIL_TO_PASS) are rejected.
  *   6. Mined-or-rejected records are always `markMined`.
@@ -16,7 +16,7 @@ import { mineSessionEchoes, type SessionEchoMintDeps } from '../../src/solver-ty
 import { MineableTraceStore, type MineableTraceRecord } from '../../src/solver-types/_swe-rebench-v2-mineable-store.js';
 import { ValidatedPoolStore, EVAL_SEMANTICS_VERSION } from '../../src/solver-types/_swe-rebench-v2-validated-pool.js';
 import { MintedPoolStore, loadMintedPoolTasks } from '../../src/solver-types/_swe-rebench-v2-minted-pool.js';
-import { MINTED_DATASET_PLACEHOLDER } from '../../src/solver-types/_swe-rebench-v2-harvest.js';
+import { MINTED_DATASET_PLACEHOLDER, sessionEchoInstanceId } from '../../src/solver-types/_swe-rebench-v2-harvest.js';
 import { loadMintRepoDenylist } from '../../src/solver-types/_swe-rebench-v2-guards.js';
 import { syntheticClaimBlocked } from '../../src/solver-types/_swe-rebench-v2-synthetic-claim.js';
 import { uploadToIpfs } from '../../src/adapters/mech/ipfs.js';
@@ -218,6 +218,69 @@ describe('mineSessionEchoes', () => {
       expect(await env.mintedStore.getPublishedArtifactCid(EVAL_SEMANTICS_VERSION)).toBeNull();
       const poolTasks = await loadMintedPoolTasks(env.mintedStore, EVAL_SEMANTICS_VERSION);
       expect(poolTasks.map((t) => t.instance_id)).not.toContain(mintedId);
+      expect(await env.mineableStore.get(record.sourceId)).toMatchObject({
+        localState: 'minted',
+        publicationState: 'disabled',
+      });
+    } finally {
+      await cleanup(env);
+    }
+  });
+
+  it('rule 3b: first share mints locally, waits for preview acknowledgement, then publishes on a later tick', async () => {
+    const env = await setup();
+    try {
+      const record = makeRecord({ publishMinedTasksConsent: true });
+      await env.mineableStore.append(record);
+      const isPublic = vi.fn().mockResolvedValue(true);
+      const deps = baseDeps(env, makeSuccessfulRunner(), { publish: true, publicRepoChecker: { isPublic } });
+
+      const first = await mineSessionEchoes(deps);
+
+      expect(first.admitted).toHaveLength(1);
+      expect(isPublic).not.toHaveBeenCalled();
+      expect(uploadToIpfs).not.toHaveBeenCalled();
+      expect(await env.mineableStore.get(record.sourceId)).toMatchObject({
+        localState: 'minted',
+        publicationState: 'preview-required',
+      });
+
+      await env.mineableStore.authorize(record.sourceId, '2026-07-15T12:01:00.000Z');
+      const second = await mineSessionEchoes({ ...deps, runner: makeSuccessfulRunner() });
+
+      expect(second.admitted).toEqual(first.admitted);
+      expect(isPublic).toHaveBeenCalledWith(REPO);
+      expect(uploadToIpfs).toHaveBeenCalledTimes(1);
+      expect(await env.mineableStore.get(record.sourceId)).toMatchObject({
+        localState: 'minted',
+        publicationState: 'published',
+        publicationRef: 'ipfs://bafysessionecho',
+      });
+    } finally {
+      await cleanup(env);
+    }
+  });
+
+  it('publishes only the public task artifact, never the local source id or accepted diff/gold', async () => {
+    const env = await setup();
+    try {
+      const record = makeRecord({
+        sourceId: 'SECRET_LOCAL_EPISODE_ID',
+        acceptedDiff: 'SECRET_ACCEPTED_DIFF_GOLD',
+        intermediateFailureDiffs: ['SECRET_PRIVATE_FAILURE_DIFF'],
+        skillEvents: [{ skill: 'SECRET_LOCAL_SKILL', action: 'loaded' }],
+        publishMinedTasksConsent: true,
+      });
+      await env.mineableStore.append(record);
+      await env.mineableStore.authorize(record.sourceId, '2026-07-15T12:01:00.000Z');
+
+      await mineSessionEchoes(baseDeps(env, makeSuccessfulRunner(), { publish: true }));
+
+      const outbound = JSON.stringify(vi.mocked(uploadToIpfs).mock.calls);
+      expect(outbound).not.toContain('SECRET_LOCAL_EPISODE_ID');
+      expect(outbound).not.toContain('SECRET_ACCEPTED_DIFF_GOLD');
+      expect(outbound).not.toContain('SECRET_PRIVATE_FAILURE_DIFF');
+      expect(outbound).not.toContain('SECRET_LOCAL_SKILL');
     } finally {
       await cleanup(env);
     }
@@ -245,19 +308,124 @@ describe('mineSessionEchoes', () => {
     }
   });
 
-  it('rule 4b: assertPublicRepoForPublish runs only on the publish path, and refuses a private repo', async () => {
+  it('rule 4b: a private repo still mints locally but the final publication gate refuses outbound I/O', async () => {
     const env = await setup();
     try {
       const record = makeRecord({ publishMinedTasksConsent: true });
       await env.mineableStore.append(record);
+      await env.mineableStore.authorize(record.sourceId, '2026-07-15T12:01:00.000Z');
 
       const isPublic = vi.fn().mockResolvedValue(false);
       const result = await mineSessionEchoes(baseDeps(env, makeSuccessfulRunner(), { publish: true, publicRepoChecker: { isPublic } }));
 
       expect(isPublic).toHaveBeenCalledWith(REPO);
-      expect(result.admitted).toHaveLength(0);
+      expect(uploadToIpfs).not.toHaveBeenCalled();
+      expect(result.admitted).toEqual([sessionEchoInstanceId(REPO, record.sourceId)]);
       expect(result.rejected).toHaveLength(1);
       expect(result.rejected[0]!.reason).toMatch(/not public/);
+      expect(await env.mineableStore.get(record.sourceId)).toMatchObject({
+        localState: 'minted',
+        publicationState: 'queued',
+      });
+    } finally {
+      await cleanup(env);
+    }
+  });
+
+  it('rule 4c: rechecks the public repository immediately before the outbound upload', async () => {
+    const env = await setup();
+    try {
+      const record = makeRecord({ publishMinedTasksConsent: true });
+      await env.mineableStore.append(record);
+      await env.mineableStore.authorize(record.sourceId, '2026-07-15T12:01:00.000Z');
+      const events: string[] = [];
+      const runner = makeSuccessfulRunner();
+      const runEval = runner.runEval;
+      runner.runEval = vi.fn(async (args) => {
+        events.push('eval');
+        return runEval(args);
+      });
+      const isPublic = vi.fn(async () => {
+        events.push('public-check');
+        return true;
+      });
+      vi.mocked(uploadToIpfs).mockImplementationOnce(async () => {
+        events.push('upload');
+        return 'bafysessionecho';
+      });
+
+      await mineSessionEchoes(baseDeps(env, runner, { publish: true, publicRepoChecker: { isPublic } }));
+
+      expect(events.slice(-2)).toEqual(['public-check', 'upload']);
+    } finally {
+      await cleanup(env);
+    }
+  });
+
+  it('rechecks durable authorization after evaluation so a concurrent veto causes zero outbound I/O', async () => {
+    const env = await setup();
+    try {
+      const record = makeRecord({ publishMinedTasksConsent: true });
+      await env.mineableStore.append(record);
+      await env.mineableStore.authorize(record.sourceId, '2026-07-15T12:01:00.000Z');
+      const runner = makeSuccessfulRunner();
+      const runEval = runner.runEval;
+      let vetoed = false;
+      runner.runEval = vi.fn(async (args) => {
+        const result = await runEval(args);
+        if (!vetoed) {
+          vetoed = true;
+          await env.mineableStore.veto(record.sourceId);
+        }
+        return result;
+      });
+
+      await mineSessionEchoes(baseDeps(env, runner, { publish: true }));
+
+      expect(uploadToIpfs).not.toHaveBeenCalled();
+      expect(await env.mineableStore.get(record.sourceId)).toMatchObject({
+        localState: 'minted',
+        publicationState: 'vetoed',
+      });
+    } finally {
+      await cleanup(env);
+    }
+  });
+
+  it('recovers a crash after minted-pool publication without rebuilding or uploading again', async () => {
+    const env = await setup();
+    try {
+      const record = makeRecord({ publishMinedTasksConsent: true });
+      await env.mineableStore.append(record);
+      await env.mineableStore.authorize(record.sourceId, '2026-07-15T12:01:00.000Z');
+      const mintedId = sessionEchoInstanceId(REPO, record.sourceId);
+      await env.mintedStore.record(mintedId, {
+        row: {
+          ...SOURCE_HF_ROW,
+          instance_id: mintedId,
+          base_commit: record.baseCommit,
+        },
+        provenance: { synthetic: true, mintFamily: 'session-echo', sourceLineageHash: 'existing' },
+        admission: { scorable: true, reason: 'gold-patch-resolves', checkedAt: record.createdAt },
+        hf_dataset: 'ipfs://bafyexisting',
+        hf_split: 'minted',
+        mintedAt: record.createdAt,
+        published: true,
+        goldPatch: record.acceptedDiff,
+      }, EVAL_SEMANTICS_VERSION);
+      const runner = makeSuccessfulRunner();
+
+      const result = await mineSessionEchoes(baseDeps(env, runner, { publish: true }));
+
+      expect(result.admitted).toEqual([mintedId]);
+      expect(runner.runEval).not.toHaveBeenCalled();
+      expect(uploadToIpfs).not.toHaveBeenCalled();
+      expect(await env.mineableStore.get(record.sourceId)).toMatchObject({
+        localState: 'minted',
+        publicationState: 'published',
+        mintRef: mintedId,
+        publicationRef: 'ipfs://bafyexisting',
+      });
     } finally {
       await cleanup(env);
     }
@@ -394,6 +562,7 @@ describe('D2 tier-2 — unpublished mints never enter the postable union (per-en
       const recordB = makeRecord({ sourceId: 'session-b-tier1-only', publishMinedTasksConsent: false });
       await env.mineableStore.append(recordA);
       await env.mineableStore.append(recordB);
+      await env.mineableStore.authorize(recordA.sourceId, '2026-07-15T12:01:00.000Z');
 
       const result = await mineSessionEchoes(baseDeps(env, makeSmartRunner(), { publish: true }));
       expect(result.admitted).toHaveLength(2);

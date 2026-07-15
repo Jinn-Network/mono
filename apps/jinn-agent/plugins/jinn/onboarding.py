@@ -50,6 +50,7 @@ from . import consent
 from . import harness as _harness
 from . import jinn_layer
 from . import ledger_view
+from . import session_bridge
 from . import style as _style
 from .consent import get_hermes_home
 
@@ -575,6 +576,9 @@ def run_onboarding(
     else:
         # Reuse the #1418 consent flow VERBATIM for the decision itself.
         on = consent.run_consent_flow(input_fn, print_fn)
+        if not on:
+            jinn_layer.contribution_disable(runner=runner)
+        session_bridge.set_publication_enabled(on)
         print_fn(render_consent_recorded(pal, rst) if on else render_consent_recorded_off(pal, rst))
         input_fn("> ")
 

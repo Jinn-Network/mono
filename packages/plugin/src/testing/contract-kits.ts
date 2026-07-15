@@ -5,6 +5,25 @@ import type { EvidencePort } from '../ports/evidence-port.js';
 import type { LocalLearningPort } from '../ports/local-learning-port.js';
 import type { SkillsPort } from '../ports/skills-port.js';
 import type { EpisodeV1 } from '../schemas/episode.js';
+import type { ContributionCandidateV1 } from '../schemas/contribution-candidate.js';
+
+function contributionCandidate(
+  overrides: Partial<ContributionCandidateV1> = {},
+): ContributionCandidateV1 {
+  return {
+    schemaVersion: 'jinn.contribution-candidate.v1',
+    sourceId: 'episode-1',
+    repositorySlug: 'Jinn-Network/mono',
+    baseCommit: '0123456789abcdef',
+    acceptedDiff: 'diff --git a/a.ts b/a.ts\n+fixed\n',
+    testRuns: [],
+    intermediateFailureDiffs: [],
+    skillEvents: [],
+    publishMinedTasksConsent: false,
+    createdAt: '2026-07-15T12:00:00.000Z',
+    ...overrides,
+  };
+}
 
 export function describeCorpusPortContract(makeAdapter: () => CorpusPort): void {
   describe('CorpusPort contract', () => {
@@ -59,28 +78,79 @@ export function describeEvidencePortContract(
 
 export function describeContributionPortContract(makeAdapter: () => ContributionPort): void {
   describe('ContributionPort contract', () => {
-    it('recordMineable() then mintStatus() reports queued', async () => {
+    it('records a candidate locally even when publication consent is disabled', async () => {
       const adapter = makeAdapter();
-      const recordResult = await adapter.recordMineable('episode-1');
+      const recordResult = await adapter.recordMineable(contributionCandidate());
       expect(recordResult.status).toBe('ok');
       if (recordResult.status !== 'ok') return;
       const statusResult = await adapter.mintStatus(recordResult.value.recordId);
-      expect(statusResult).toEqual({ status: 'ok', value: { status: 'queued' } });
+      expect(statusResult).toEqual({
+        status: 'ok',
+        value: {
+          localState: 'recorded',
+          publicationState: 'disabled',
+          status: 'recorded',
+        },
+      });
+
+      const ledgerResult = await adapter.ledger();
+      expect(ledgerResult.status).toBe('ok');
+      if (ledgerResult.status === 'ok') {
+        expect(ledgerResult.value).toContainEqual({
+          recordId: recordResult.value.recordId,
+          sourceId: 'episode-1',
+          repositorySlug: 'Jinn-Network/mono',
+          baseCommit: '0123456789abcdef',
+          localState: 'recorded',
+          publicationState: 'disabled',
+          status: 'recorded',
+        });
+      }
     });
 
-    it('veto() transitions status to vetoed', async () => {
+    it('requires preview authorization before a consented candidate is queued', async () => {
       const adapter = makeAdapter();
-      const recordResult = await adapter.recordMineable('episode-1');
+      const recordResult = await adapter.recordMineable(contributionCandidate({
+        publishMinedTasksConsent: true,
+      }));
+      if (recordResult.status !== 'ok') throw new Error('recordMineable failed');
+      expect(await adapter.mintStatus(recordResult.value.recordId)).toEqual({
+        status: 'ok',
+        value: {
+          localState: 'recorded',
+          publicationState: 'preview-required',
+          status: 'preview-required',
+        },
+      });
+
+      const authorizeResult = await adapter.authorize(recordResult.value.recordId);
+      expect(authorizeResult).toEqual({
+        status: 'ok',
+        value: { recordId: recordResult.value.recordId, publicationState: 'queued', status: 'queued' },
+      });
+    });
+
+    it('veto() changes only publication state and preserves the local record', async () => {
+      const adapter = makeAdapter();
+      const recordResult = await adapter.recordMineable(contributionCandidate({
+        publishMinedTasksConsent: true,
+      }));
       if (recordResult.status !== 'ok') throw new Error('recordMineable failed');
       const vetoResult = await adapter.veto(recordResult.value.recordId);
-      expect(vetoResult.status).toBe('ok');
+      expect(vetoResult).toEqual({
+        status: 'ok',
+        value: { recordId: recordResult.value.recordId, publicationState: 'vetoed', status: 'vetoed' },
+      });
       const statusResult = await adapter.mintStatus(recordResult.value.recordId);
-      expect(statusResult).toEqual({ status: 'ok', value: { status: 'vetoed' } });
+      expect(statusResult).toEqual({
+        status: 'ok',
+        value: { localState: 'recorded', publicationState: 'vetoed', status: 'vetoed' },
+      });
     });
 
     it('ledger() lists recorded entries', async () => {
       const adapter = makeAdapter();
-      await adapter.recordMineable('episode-1');
+      await adapter.recordMineable(contributionCandidate());
       const ledgerResult = await adapter.ledger();
       expect(ledgerResult.status).toBe('ok');
       if (ledgerResult.status === 'ok') expect(ledgerResult.value.length).toBeGreaterThan(0);

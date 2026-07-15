@@ -1593,10 +1593,15 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // ALWAYS constructed (mono#1714): local retention/mining/distillation happen
   // by default and never leave the machine. Whether a mined task is published
   // off the box is gated separately by `config.mineableTraces.share`.
-  const { MineableTraceStore } = await import('./solver-types/_swe-rebench-v2-mineable-store.js');
+  const { MineableTraceStore, resolveMineableStateDir } = await import('./solver-types/_swe-rebench-v2-mineable-store.js');
   const mineableStore = new MineableTraceStore({
-    stateDir: join(homedir(), '.jinn-client', 'mineable'),
+    stateDir: resolveMineableStateDir(),
   });
+  if (config.mineableTraces.share) {
+    await mineableStore.enablePublication();
+  } else {
+    await mineableStore.disableUnpublished();
+  }
   console.log(
     `[main] mineable-trace retention: local (always on) — share=${config.mineableTraces.share}`,
   );

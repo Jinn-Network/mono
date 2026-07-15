@@ -8,21 +8,27 @@ live in ``jinn-layer``; this module only shells out to it. Resolve order:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
+import re
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-Runner = Callable[[List[str]], Tuple[int, str]]
+Runner = Callable[..., Tuple[int, str]]
 
 _TIMEOUT_S = 120
+CONTRACT_VERSION = 1
 
 
-def _default_runner(argv: List[str], cwd: Optional[str] = None) -> Tuple[int, str]:
+def _default_runner(
+    argv: List[str], cwd: Optional[str] = None, input: Optional[str] = None
+) -> Tuple[int, str]:
     try:
         proc = subprocess.run(
             argv,
@@ -31,6 +37,7 @@ def _default_runner(argv: List[str], cwd: Optional[str] = None) -> Tuple[int, st
             timeout=_TIMEOUT_S,
             check=False,
             cwd=cwd,
+            input=input,
         )
         out = proc.stdout + (("\n" + proc.stderr) if proc.stderr.strip() else "")
         return proc.returncode, out.strip()
@@ -51,11 +58,16 @@ def binary() -> str:
     return (os.environ.get("JINN_LAYER_BIN") or "").strip() or "jinn-layer"
 
 
-def run(args: List[str], runner: Optional[Runner] = None, cwd: Optional[str] = None) -> Tuple[int, str]:
+def run(
+    args: List[str],
+    runner: Optional[Runner] = None,
+    cwd: Optional[str] = None,
+    input: Optional[str] = None,
+) -> Tuple[int, str]:
     argv = [binary(), *args]
     if runner is not None:
-        return runner(argv)  # injected test seam ignores cwd
-    return _default_runner(argv, cwd)
+        return runner(argv, input=input) if input is not None else runner(argv)
+    return _default_runner(argv, cwd, input)
 
 
 # ── Verbs ────────────────────────────────────────────────────────────────────
@@ -88,10 +100,82 @@ def corpus_search(query: str, runner: Optional[Runner] = None) -> Tuple[int, str
     return run(["corpus", "search", query], runner)
 
 
+def contract(runner: Optional[Runner] = None) -> Tuple[int, str]:
+    """Read the layer's versioned host/process contract."""
+    return run(["contract", "--json"], runner)
+
+
+def session_end(request: Dict[str, Any], runner: Optional[Runner] = None) -> Tuple[int, str]:
+    """Delegate one already-assembled EpisodeV1 through stdin."""
+    payload = json.dumps(request, separators=(",", ":"))
+    return run(["session", "end"], runner, input=payload)
+
+
+def contribution_preview(
+    *, acknowledge: bool = False, runner: Optional[Runner] = None
+) -> Tuple[int, str]:
+    args = ["contribution", "preview"]
+    if acknowledge:
+        args.append("--ack")
+    args.append("--json")
+    return run(args, runner)
+
+
+def contribution_disable(runner: Optional[Runner] = None) -> Tuple[int, str]:
+    return run(["contribution", "disable", "--json"], runner)
+
+
+def parse_process_response(raw: str) -> Dict[str, Any]:
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ValueError("jinn-layer returned malformed JSON") from exc
+    if not isinstance(parsed, dict) or parsed.get("contractVersion") != CONTRACT_VERSION:
+        raise ValueError("jinn-layer response contract version mismatch")
+    if parsed.get("status") not in ("ok", "degraded", "unavailable"):
+        raise ValueError("jinn-layer response has an invalid status")
+    return parsed
+
+
+def parse_session_end_response(raw: str) -> Dict[str, Any]:
+    """Parse the outer v1 status envelope; reject transport/version drift."""
+    return parse_process_response(raw)
+
+
 def write_task_file(task: Dict[str, Any], directory: Path, session_id: str) -> Path:
-    """Persist the assembled CapturedTask for preview/publish/retry."""
-    directory.mkdir(parents=True, exist_ok=True)
-    safe = "".join(c if c.isalnum() or c in "-_" else "-" for c in session_id)[:80]
-    path = directory / f"{safe or 'task'}.json"
-    path.write_text(json.dumps(task, indent=2) + "\n", encoding="utf-8")
-    return path
+    """Atomically persist one private local CapturedTask."""
+    if directory.is_symlink():
+        raise OSError(f"unsafe capture directory symlink: {directory}")
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(directory, 0o700)
+    safe = (
+        session_id
+        if re.fullmatch(r"[A-Za-z0-9_-]{1,80}", session_id or "")
+        else f"task-{hashlib.sha256(session_id.encode('utf-8')).hexdigest()}"
+    )
+    path = directory / f"{safe}.json"
+    if os.path.lexists(path) and (path.is_symlink() or not path.is_file()):
+        raise OSError(f"unsafe capture destination: {path}")
+
+    descriptor = -1
+    tmp_path: Optional[Path] = None
+    try:
+        descriptor, tmp_name = tempfile.mkstemp(
+            prefix=f".{safe}.", suffix=".tmp", dir=directory
+        )
+        tmp_path = Path(tmp_name)
+        os.fchmod(descriptor, 0o600)
+        handle = os.fdopen(descriptor, "w", encoding="utf-8", newline="")
+        descriptor = -1
+        with handle:
+            handle.write(json.dumps(task, indent=2, ensure_ascii=False, allow_nan=False) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+        os.chmod(path, 0o600)
+        return path
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)

@@ -26,7 +26,9 @@ REF = "bafySeedTdd"
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    jinn._reset_session_state()
     yield tmp_path
+    jinn._reset_session_state()
 
 
 def test_install_shells_to_layer_and_drops_marker(tmp_path, monkeypatch):
@@ -81,11 +83,14 @@ def test_declined_consent_does_not_block_install(tmp_path):
 
     jinn._runner = fake_runner
     try:
-        out = jinn._handle_jinn(command_args=f"skills install {REF}")
+        out = jinn._handle_jinn(
+            command_args=f"skills install {REF}", session_id="session-1"
+        )
     finally:
         jinn._runner = None
     assert "installed" in out
     assert (tmp_path / "skills" / "test-driven-development" / "SKILL.md").exists()
+    assert jinn._state_for("session-1")["activity"]["installedSkillRefs"] == [REF]
 
 
 def test_uninstall_refuses_unmarked(tmp_path, monkeypatch):

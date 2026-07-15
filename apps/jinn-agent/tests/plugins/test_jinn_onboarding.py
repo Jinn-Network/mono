@@ -42,6 +42,7 @@ _EMOJI = re.compile(
 @pytest.fixture(autouse=True)
 def _truecolor(monkeypatch, tmp_path):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("JINN_MINEABLE_STATE_DIR", str(tmp_path / "mineable"))
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setenv("COLORTERM", "truecolor")
     monkeypatch.setenv("COLUMNS", "120")
