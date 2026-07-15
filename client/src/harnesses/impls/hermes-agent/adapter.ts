@@ -5,6 +5,12 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { finished } from 'node:stream/promises';
 import { HERMES_AGENT_HARNESS } from '../../names.js';
+import {
+  providerRefName,
+  providerRefBaseUrl,
+  providerRefAuthVar,
+  type ProviderRef,
+} from '../../provider-ref.js';
 import type { TaskSessionInputs } from '../learner/types.js';
 import { writePerTaskHermesConfig } from './bootstrap.js';
 import { buildInitialPrompt } from './prompt.js';
@@ -49,13 +55,16 @@ const ENV_PATTERN_ALLOWLIST: readonly RegExp[] = [
 /**
  * Detects OpenRouter-style `<org>/<model>` model ids so the adapter can default
  * `--provider openrouter` for the catalog entries shipped in `HERMES_MODELS`.
- * This is a v0.1.6 PATCH — it routes the catalog correctly today by exploiting
- * the fact that every catalog entry happens to be OpenRouter-routed. The
- * PROPER fix is provider as a first-class field on the catalog + join config
- * (gh issue #295); when that lands, this inference goes away.
  *
- * Explicit `hermesProvider` always wins — this fallback only fires when nothing
- * was configured at the join site.
+ * As of issue #1243, provider is FIRST-CLASS: it flows through the catalog →
+ * join config → `joinedSolverNets` → `TaskSessionInputs.provider`, and a
+ * load-time backfill stamps `provider: 'openrouter'` onto legacy `{model}`-only
+ * joined entries. This inference is now the FINAL MIGRATION BRIDGE — it only
+ * fires when neither a per-task `inputs.provider` nor a daemon-global
+ * `hermesProvider` is set. Full removal is deferred because the top-level
+ * operator `config.hermesModel` (hand-typed, no `hermesProvider`) is a separate
+ * legacy path the joinedSolverNets backfill does not cover; deleting inference
+ * outright would regress it. See the issue #1243 design note.
  */
 const OPENROUTER_MODEL_FORMAT = /^[a-z0-9_-]+\/[a-z0-9_.\-:]+$/i;
 function inferProviderFromModelId(modelId: string | undefined): string | undefined {
@@ -131,10 +140,20 @@ export class HermesHarnessAdapter {
   async runTask(inputs: TaskSessionInputs): Promise<void> {
     const hermesHome = inputs.implStateDir;
     const model = this.hermesBaseUrl ? this.hermesModel : (inputs.model ?? inputs.claudeModel ?? this.hermesModel);
-    // Provider resolution: local OpenAI-compatible endpoints must use Hermes'
-    // custom provider. Otherwise, explicit `hermesProvider` wins, then model-id
-    // inference. See `inferProviderFromModelId` above + gh #293 / #295.
-    const provider = this.hermesBaseUrl ? 'custom' : (this.hermesProvider ?? inferProviderFromModelId(model));
+    // Provider resolution (issue #1243). Precedence, highest first:
+    //   1. local `hermesBaseUrl` — an OpenAI-compatible endpoint must use
+    //      Hermes' `custom` provider (unchanged local-endpoint behaviour).
+    //   2. per-task `inputs.provider` — the first-class route stamped from the
+    //      joined SolverNet catalog entry.
+    //   3. daemon-global `hermesProvider`.
+    //   4. legacy `inferProviderFromModelId(model)` — the final migration
+    //      bridge (see its docstring); string form only.
+    const resolvedProvider: ProviderRef | undefined = this.hermesBaseUrl
+      ? { name: 'custom', baseUrl: this.hermesBaseUrl }
+      : (inputs.provider ?? this.hermesProvider ?? inferProviderFromModelId(model));
+    const provider = providerRefName(resolvedProvider);
+    const providerBaseUrl = providerRefBaseUrl(resolvedProvider) ?? this.hermesBaseUrl;
+    const providerAuthVar = providerRefAuthVar(resolvedProvider);
 
     // Step 1: bootstrap — seed auth from the operator's home, write config.yaml + .env.
     //
@@ -152,7 +171,7 @@ export class HermesHarnessAdapter {
       workingDir: inputs.workingDir,
       model,
       provider,
-      baseUrl: this.hermesBaseUrl,
+      baseUrl: providerBaseUrl,
       solverPluginRoots: inputs.pluginRoots ?? [],
       env: {
         storePath: this.storePath,
@@ -204,9 +223,14 @@ export class HermesHarnessAdapter {
       args.push('--provider', provider);
     }
 
-    const env = buildAgentEnv({
-      HERMES_HOME: hermesHome,
-    });
+    // Inject a custom provider's credential env var when it is named and
+    // present in `process.env` but would not otherwise pass the pattern
+    // allowlist (e.g. a bespoke `MYENDPOINT_KEY`). See ENV_PATTERN_ALLOWLIST.
+    const extraEnv: Record<string, string> = { HERMES_HOME: hermesHome };
+    if (providerAuthVar && process.env[providerAuthVar]) {
+      extraEnv[providerAuthVar] = process.env[providerAuthVar]!;
+    }
+    const env = buildAgentEnv(extraEnv);
 
     const spawnOpts: SpawnOptions = {
       stdio: ['ignore', 'pipe', 'pipe'],

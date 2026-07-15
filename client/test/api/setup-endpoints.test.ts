@@ -1287,6 +1287,82 @@ describe('POST /v1/operator/join/:cid', () => {
     });
   });
 
+  it('persists a string provider first-class (issue #1243)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-join-prov-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, {});
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+
+    const res = await app.request('/v1/operator/join/bafybeiprv', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        contract: { id: 'swe-rebench-v2', version: 'v1' },
+        roles: ['solver'],
+        harness: 'hermes-agent',
+        model: 'anthropic/claude-opus-4.7',
+        provider: 'openrouter',
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(persisted.joinedSolverNets.bafybeiprv.provider).toBe('openrouter');
+  });
+
+  it('persists a custom provider object (issue #1243)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-join-provobj-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, {});
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+
+    const res = await app.request('/v1/operator/join/bafybeiobj', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        contract: { id: 'swe-rebench-v2', version: 'v1' },
+        roles: ['solver'],
+        harness: 'hermes-agent',
+        model: 'my-model',
+        provider: { name: 'my-endpoint', baseUrl: 'http://127.0.0.1:9000/v1', authVar: 'MY_CRED' },
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(persisted.joinedSolverNets.bafybeiobj.provider).toEqual({
+      name: 'my-endpoint',
+      baseUrl: 'http://127.0.0.1:9000/v1',
+      authVar: 'MY_CRED',
+    });
+  });
+
+  it('rejects a provider object with no name (issue #1243)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-join-provbad-'));
+    const configPath = join(dir, 'config.json');
+    writeConfig(configPath, {});
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+
+    const res = await app.request('/v1/operator/join/bafybeibad', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        roles: ['solver'],
+        provider: { baseUrl: 'http://x' },
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('invalid_body');
+  });
+
   it('deduplicates roles in the canonical order', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-operator-join-dedup-'));
     const configPath = join(dir, 'config.json');

@@ -18,6 +18,7 @@ import { cn } from '../../lib/utils.js';
 import {
   defaultModelForHarness,
   modelOptionsForHarness,
+  providerForModel,
   resolveModelOption,
 } from '../configuration/claudeModels.js';
 import {
@@ -317,6 +318,13 @@ export function JoinFlow({
               plugins: form.plugins,
               disabledDefaultPlugins: form.disabledDefaultPlugins,
               model: form.model,
+              // Persist the selected model's declared provider first-class
+              // (issue #1243) so the adapter routes through it rather than
+              // inferring from the id shape at runtime.
+              ...((): { provider?: import('../../../../../harnesses/provider-ref.js').ProviderRef } => {
+                const provider = providerForModel(form.model, form.harness);
+                return provider !== undefined ? { provider } : {};
+              })(),
             }
           : {}),
       }),

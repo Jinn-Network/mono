@@ -9,6 +9,7 @@ import {
   loadConfig,
   buildConfigProvenance,
   migrateLegacySolverNets,
+  backfillJoinedProviders,
 } from '../src/config.js';
 
 /**
@@ -955,6 +956,96 @@ describe('loadConfig legacy solverNets migration via loader', () => {
     const onDisk = JSON.parse(await readFile(configPath, 'utf-8')) as Record<string, unknown>;
     expect(onDisk.rpcUrl).toBe('https://example/rpc'); // original file value, NOT the env override
     expect(onDisk.solverNets).toBeUndefined();
+  });
+});
+
+describe('joinedSolverNets provider backfill (issue #1243)', () => {
+  const dirs: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  async function writeConfigFile(contents: Record<string, unknown>): Promise<string> {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-provider-'));
+    dirs.push(dir);
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify(contents, null, 2));
+    return configPath;
+  }
+
+  // Acceptance #2: a v0.1.6 `{ model }`-only joined SolverNet config backfills
+  // to `openrouter` without breaking load.
+  it('backfills provider=openrouter onto a {model}-only OpenRouter-shaped joined entry at load', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      joinedSolverNets: {
+        bafkreireal: {
+          manifestCid: 'bafkreireal',
+          name: 'real-net',
+          roles: ['solver'],
+          harness: 'hermes-agent',
+          model: 'anthropic/claude-opus-4.7',
+          plugins: [],
+          disabledDefaultPlugins: [],
+        },
+      },
+    });
+    const cfg = loadConfig(configPath);
+    expect(cfg.joinedSolverNets?.['bafkreireal']?.provider).toBe('openrouter');
+  });
+
+  it('does not backfill a non-OpenRouter-shaped model id', () => {
+    const merged: Record<string, unknown> = {
+      joinedSolverNets: {
+        x: { manifestCid: 'x', roles: ['solver'], model: 'qwen2.5-coder' },
+      },
+    };
+    expect(backfillJoinedProviders(merged)).toBe(0);
+    const entry = (merged.joinedSolverNets as Record<string, Record<string, unknown>>)['x'];
+    expect(entry['provider']).toBeUndefined();
+  });
+
+  it('leaves an entry with an explicit provider untouched', () => {
+    const merged: Record<string, unknown> = {
+      joinedSolverNets: {
+        x: { manifestCid: 'x', roles: ['solver'], model: 'anthropic/claude-opus-4.7', provider: 'nous-portal' },
+      },
+    };
+    expect(backfillJoinedProviders(merged)).toBe(0);
+    const entry = (merged.joinedSolverNets as Record<string, Record<string, unknown>>)['x'];
+    expect(entry['provider']).toBe('nous-portal');
+  });
+
+  it('is a no-op when the model is absent', () => {
+    const merged: Record<string, unknown> = {
+      joinedSolverNets: { x: { manifestCid: 'x', roles: ['solver'] } },
+    };
+    expect(backfillJoinedProviders(merged)).toBe(0);
+  });
+
+  it('preserves an explicit object-form provider on load (custom endpoint)', async () => {
+    const configPath = await writeConfigFile({
+      network: 'testnet',
+      joinedSolverNets: {
+        bafcustom: {
+          manifestCid: 'bafcustom',
+          name: 'custom-net',
+          roles: ['solver'],
+          harness: 'hermes-agent',
+          model: 'my-model',
+          provider: { name: 'my-endpoint', baseUrl: 'http://127.0.0.1:9000/v1', authVar: 'MY_CRED' },
+          plugins: [],
+          disabledDefaultPlugins: [],
+        },
+      },
+    });
+    const cfg = loadConfig(configPath);
+    expect(cfg.joinedSolverNets?.['bafcustom']?.provider).toEqual({
+      name: 'my-endpoint',
+      baseUrl: 'http://127.0.0.1:9000/v1',
+      authVar: 'MY_CRED',
+    });
   });
 });
 

@@ -660,6 +660,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       roles?: unknown;
       harness?: unknown;
       model?: unknown;
+      provider?: unknown;
       plugins?: unknown;
       disabledDefaultPlugins?: unknown;
       contract?: unknown;
@@ -693,6 +694,38 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     }
     if (body.model !== undefined && typeof body.model !== 'string') {
       return c.json({ error: 'invalid_body', detail: '`model` must be a string' }, 400);
+    }
+    // `provider` (issue #1243): a named provider (string) OR a custom endpoint
+    // object `{ name, baseUrl?, authVar? }`. Mirrors the zod shape in config.ts.
+    let provider: string | { name: string; baseUrl?: string; authVar?: string } | undefined;
+    if (body.provider !== undefined) {
+      if (typeof body.provider === 'string') {
+        provider = body.provider;
+      } else if (isRecord(body.provider)) {
+        const p = body.provider;
+        if (typeof p['name'] !== 'string' || p['name'].length === 0) {
+          return c.json({
+            error: 'invalid_body',
+            detail: '`provider` object must have a non-empty string `name`',
+          }, 400);
+        }
+        if (p['baseUrl'] !== undefined && typeof p['baseUrl'] !== 'string') {
+          return c.json({ error: 'invalid_body', detail: '`provider.baseUrl` must be a string' }, 400);
+        }
+        if (p['authVar'] !== undefined && typeof p['authVar'] !== 'string') {
+          return c.json({ error: 'invalid_body', detail: '`provider.authVar` must be a string' }, 400);
+        }
+        provider = {
+          name: p['name'],
+          ...(typeof p['baseUrl'] === 'string' ? { baseUrl: p['baseUrl'] } : {}),
+          ...(typeof p['authVar'] === 'string' ? { authVar: p['authVar'] } : {}),
+        };
+      } else {
+        return c.json({
+          error: 'invalid_body',
+          detail: '`provider` must be a string or an object with a `name`',
+        }, 400);
+      }
     }
     let contract: { id: string; version: string } | undefined;
     if (body.contract !== undefined) {
@@ -799,6 +832,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     // them in the body.
     if (typeof body.harness === 'string') entry['harness'] = canonicalHarnessName(body.harness);
     if (typeof body.model === 'string') entry['model'] = body.model;
+    if (provider !== undefined) entry['provider'] = provider;
     if (Array.isArray(body.plugins)) entry['plugins'] = body.plugins;
     if (Array.isArray(body.disabledDefaultPlugins)) {
       entry['disabledDefaultPlugins'] = Array.from(new Set(body.disabledDefaultPlugins));

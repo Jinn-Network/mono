@@ -389,6 +389,136 @@ describe('HermesHarnessAdapter', () => {
     }
   });
 
+  it('per-task inputs.provider (string) routes a non-OpenRouter catalog entry through its declared provider', async () => {
+    // Acceptance #1 (issue #1243): a Hermes catalog entry whose provider is not
+    // OpenRouter must route through its declared provider. The per-task provider
+    // is threaded first-class from the joined SolverNet entry.
+    const spawnCalls: SpawnCall[] = [];
+    const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+    const work = mkdtempSync(join(tmpdir(), 'hermes-wd-'));
+
+    try {
+      const adapter = new HermesHarnessAdapter({
+        hermesPath: '/bin/fake-hermes',
+        operatorHermesHome: home,
+        // No daemon-global hermesProvider — the per-task route must win.
+        daemonApiUrl: 'http://127.0.0.1:7331',
+        daemonApiToken: 'tok',
+        corpusEnv: {},
+        _spawnFn: vi.fn((command: string, args: string[], options: any) => {
+          spawnCalls.push({ command, args, options });
+          return fakeHermesChild() as any;
+        }) as any,
+      });
+
+      const taskInputs = inputs(work, home);
+      taskInputs.model = 'some-vendor/some-model';
+      taskInputs.provider = 'nous-portal';
+      await adapter.runTask(taskInputs);
+
+      const call = spawnCalls[0];
+      expect(call.args).toContain('--provider');
+      expect(call.args).toContain('nous-portal');
+      // Inference would have said openrouter for the slashed id — the
+      // first-class per-task provider overrides it.
+      expect(call.args).not.toContain('openrouter');
+
+      const cfg = yamlParse(readFileSync(join(home, 'config.yaml'), 'utf8')) as any;
+      expect(cfg.model.provider).toBe('nous-portal');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
+  it('per-task provider object writes base_url + provider and injects authVar env', async () => {
+    // Acceptance #3 (issue #1243): a custom provider object produces the
+    // expected Hermes config (base_url + provider) and injects its credential
+    // env var even when the var name is outside the pattern allowlist.
+    const spawnCalls: SpawnCall[] = [];
+    const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+    const work = mkdtempSync(join(tmpdir(), 'hermes-wd-'));
+
+    const AUTH_VAR = 'MY_CUSTOM_ENDPOINT_CRED';
+    const originalAuth = process.env[AUTH_VAR];
+    process.env[AUTH_VAR] = 'secret-cred-value';
+
+    try {
+      const adapter = new HermesHarnessAdapter({
+        hermesPath: '/bin/fake-hermes',
+        operatorHermesHome: home,
+        daemonApiUrl: 'http://127.0.0.1:7331',
+        daemonApiToken: 'tok',
+        corpusEnv: {},
+        _spawnFn: vi.fn((command: string, args: string[], options: any) => {
+          spawnCalls.push({ command, args, options });
+          return fakeHermesChild() as any;
+        }) as any,
+      });
+
+      const taskInputs = inputs(work, home);
+      taskInputs.model = 'my-model';
+      taskInputs.provider = {
+        name: 'my-endpoint',
+        baseUrl: 'http://127.0.0.1:9000/v1',
+        authVar: AUTH_VAR,
+      };
+      await adapter.runTask(taskInputs);
+
+      const call = spawnCalls[0];
+      expect(call.args).toContain('--provider');
+      expect(call.args).toContain('my-endpoint');
+
+      const cfg = yamlParse(readFileSync(join(home, 'config.yaml'), 'utf8')) as any;
+      expect(cfg.model.provider).toBe('my-endpoint');
+      expect(cfg.model.base_url).toBe('http://127.0.0.1:9000/v1');
+
+      // The bespoke credential var does NOT match the *_API_KEY/*_TOKEN
+      // pattern; it must still reach the child because the provider named it.
+      expect(call.options.env?.[AUTH_VAR]).toBe('secret-cred-value');
+    } finally {
+      if (originalAuth === undefined) delete process.env[AUTH_VAR];
+      else process.env[AUTH_VAR] = originalAuth;
+      rmSync(home, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
+  it('per-task inputs.provider wins over daemon-global hermesProvider and inference', async () => {
+    // Precedence guard (issue #1243): inputs.provider > hermesProvider > inference.
+    const spawnCalls: SpawnCall[] = [];
+    const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
+    const work = mkdtempSync(join(tmpdir(), 'hermes-wd-'));
+
+    try {
+      const adapter = new HermesHarnessAdapter({
+        hermesPath: '/bin/fake-hermes',
+        operatorHermesHome: home,
+        hermesProvider: 'daemon-global-provider',
+        daemonApiUrl: 'http://127.0.0.1:7331',
+        daemonApiToken: 'tok',
+        corpusEnv: {},
+        _spawnFn: vi.fn((command: string, args: string[], options: any) => {
+          spawnCalls.push({ command, args, options });
+          return fakeHermesChild() as any;
+        }) as any,
+      });
+
+      const taskInputs = inputs(work, home);
+      taskInputs.provider = 'per-task-provider';
+      await adapter.runTask(taskInputs);
+
+      const call = spawnCalls[0];
+      expect(call.args).toContain('--provider');
+      expect(call.args).toContain('per-task-provider');
+      expect(call.args).not.toContain('daemon-global-provider');
+      expect(call.args).not.toContain('openrouter');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
   it('forwards abort signal to SIGTERM on the child', async () => {
     const controller = new AbortController();
     const home = mkdtempSync(join(tmpdir(), 'hermes-home-'));
