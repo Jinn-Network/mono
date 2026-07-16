@@ -58,6 +58,8 @@ const CFG: DispatcherConfig = {
   reviewBotLogin: '',
   implGhToken: '',
   reviewGhToken: '',
+  mergePrepEnabled: false,
+  mergePrepCap: 1,
 };
 
 /**
