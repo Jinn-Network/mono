@@ -144,6 +144,35 @@ describe('runMergePrepCycle', () => {
     expect(r.reaped).toEqual([]);
   });
 
+  it('isolates a per-PR failure — a throwing PR is recorded, the rest still run', async () => {
+    const seen: number[] = [];
+    const { deps: d } = deps({
+      stuck: [stuck(1), stuck(2)],
+      cfg: { ...CFG, mergePrepCap: 5 },
+      dispatch: async (s) => {
+        if (s.number === 1) throw new Error('dispatch boom');
+        seen.push(s.number);
+        return { prNumber: s.number, branch: s.headRefName, worktreePath: `/merge-${s.number}`, pid: 1, startedAt: 0 };
+      },
+    });
+    const r = await runMergePrepCycle(d);
+    expect(r.failed).toEqual([1]);
+    expect(seen).toEqual([2]); // #2 still dispatched despite #1 throwing
+  });
+
+  it('isolates a reap failure — the worktree stays live and counts against the cap', async () => {
+    const { deps: d, dispatched } = deps({
+      stuck: [stuck(5)],
+      now: () => 10 * MERGE_PREP_REAP_MS,
+      deriveInFlight: async () => ({ inFlight: [{ prNumber: 99, branch: '', worktreePath: '/merge-99', pid: 1, startedAt: 1 }] }),
+      removeWorktree: async () => { throw new Error('remove boom'); },
+    });
+    const r = await runMergePrepCycle(d);
+    expect(r.reaped).toEqual([]);       // reap failed
+    expect(dispatched).toEqual([]);     // #99 stayed live, cap(1) still full
+    expect(r.skippedForCap).toBe(1);
+  });
+
   it('does NOT reap a fresh worktree, and it still counts against the cap', async () => {
     const now = 1_000_000;
     const { deps: d, dispatched, reaped } = deps({

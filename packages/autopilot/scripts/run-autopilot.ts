@@ -412,11 +412,18 @@ export async function runReviewPass(
       return { pid: child.pid };
     });
   const prSource = new GhPrSource(runner, cfg.engineReviewLabel, cfg.reviewBotLogin);
+  // Exclude PRs with a live merge-prep session from review dispatch (symmetric
+  // to the prep loop's reviewInFlight guard) so the two never push to the same
+  // branch at once. Only relevant when merge-prep is armed.
+  const busyPrNumbers = cfg.mergePrepEnabled
+    ? new Set<number>((await deriveMergePrepInFlight(runner)).inFlight.map((w) => w.prNumber))
+    : undefined;
   const report = await runReviewCycle({
     prSource,
     cfg,
     deriveReviewInFlight: () => deriveReviewInFlight(runner),
     dispatchReview: (pr: ReviewablePr) => dispatchReview(pr, cfg, { runner, spawn: spawnImpl }),
+    busyPrNumbers,
   });
   if (report.dispatched.length > 0) {
     console.log(`[autopilot] review-pr dispatched: PR #${report.dispatched.join(', #')}`);
