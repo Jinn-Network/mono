@@ -4,6 +4,12 @@
 The surrounding shell owns the stock checkout and built artifacts. This driver
 owns the user-visible lifecycle and a local HTTP stand-in for external corpus
 services; the plugin and ``jinn-layer`` process bridge are the real builds.
+
+Stage 1 rescope (R5, closes #1774): the corpus fixture serves the R4 seed set
+(client/packages/harness-layer/fixtures/stage1-seeds/) instead of one
+hand-written skill trace — the real built `jinn-layer` performs search, get,
+and evidence-first packet projection against it (no plugin stubs). Scenarios
+follow the rescope plan §4.5.
 """
 
 from __future__ import annotations
@@ -14,6 +20,7 @@ import importlib.metadata
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -26,7 +33,61 @@ import yaml
 
 
 PINNED_HERMES = "9df5f879b4a5925c0f8f947e7e16ed8e845932c3"
-CORPUS_REF = "bafyStage1TddSkill"
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+SEED_FIXTURES_DIR = REPO_ROOT / "client" / "packages" / "harness-layer" / "fixtures" / "stage1-seeds"
+
+# The five curated Stage 1 seed fixtures (rescope R4, #1771 / PR #1779),
+# identified by filename stem. Refs below are this driver's own stand-in
+# CIDs — deterministic, not real IPFS content addresses.
+SOURCE_FIXTURE = "source-dashboard-flake"
+DISTRACTOR_SAME_REPO = "distractor-operator-claims"
+DISTRACTOR_OTHER_DOMAIN = "distractor-sympy-printing"
+DISTRACTOR_SKILL = "distractor-skill-tdd"
+DISTRACTOR_SKILL_DUP = "distractor-skill-tdd-dup"
+
+
+def _to_ref(stem: str) -> str:
+    """Deterministic stand-in CID from a fixture filename stem."""
+    parts = re.split(r"[-_]", stem)
+    return "bafyStage1" + "".join(p.capitalize() for p in parts if p)
+
+
+SOURCE_REF = _to_ref(SOURCE_FIXTURE)
+DISTRACTOR_SAME_REPO_REF = _to_ref(DISTRACTOR_SAME_REPO)
+DISTRACTOR_OTHER_DOMAIN_REF = _to_ref(DISTRACTOR_OTHER_DOMAIN)
+DISTRACTOR_SKILL_REF = _to_ref(DISTRACTOR_SKILL)
+DISTRACTOR_SKILL_DUP_REF = _to_ref(DISTRACTOR_SKILL_DUP)
+
+# A distinctive, verbatim excerpt line from the source fixture's "fix" step
+# (client/packages/harness-layer/fixtures/stage1-seeds/source-dashboard-flake.episode.json)
+# that is NOT one of the scenario-1 message's derived search terms — proves
+# the injection carries real content, not metadata (rescope plan §4.5 item 1).
+SOURCE_DISTINCTIVE_CONTENT = "apiMocks.getStatus"
+
+# Scenario 1/2 message: shares vocabulary with the source fixture's tags
+# (mono, dashboard, vitest, version-status, async, flake) and taskSummary
+# without quoting its sentences verbatim — verified empirically to score
+# >= the relevance floor against the source and 0 against every distractor.
+TARGET_TASK_MESSAGE = (
+    "The client dashboard vitest suite is flaky again, and the "
+    "update_available check seems to race against the version-status "
+    "endpoint. Please track it down in client/src/dashboard and get the "
+    "suite green"
+)
+
+# Scenario 3: shares no vocabulary with any of the five fixtures.
+NO_RESULT_MESSAGE = (
+    "Investigate why the OLAS staking reward-claim loop occasionally "
+    "double-counts checkpoint epochs on Base Sepolia."
+)
+
+# Scenario 4 (corpus unavailable): content is irrelevant — the corpus 503s
+# before any query would matter — but still evidence-shaped, for realism.
+UNAVAILABLE_MESSAGE = "Offline corpus investigation for a flaky dashboard test."
+
+MISSING_LAYER_MESSAGE = "Preserve local capture"
+INCOMPATIBLE_LAYER_MESSAGE = "Preserve incompatible capture"
 
 
 def require_env(name: str) -> Path:
@@ -73,65 +134,156 @@ def make_repo(path: Path) -> Path:
     return path
 
 
-class CorpusFixture:
-    def __init__(self) -> None:
-        self.unavailable = False
-        self.requests: list[tuple[str, str]] = []
-        self.endpoint = ""
-        self.trace = {
-            "schemaVersion": "jinn.trace-envelope.v0",
-            "session": {
-                "sessionId": "seed:acme/skills/test-driven-development",
-                "capturedAt": "2026-07-04T00:00:00.000Z",
+# ── Seed fixture loading (rescope R4 seed set → wire shapes) ─────────────────
+#
+# Mirrors the SAME wire shapes the real seed-import lane produces
+# (client/packages/harness-layer/src/seed-import/{episode-execute,execute}.ts)
+# so the real built jinn-layer performs search/get/packet-projection exactly
+# as it would against a seeded testnet corpus. No bespoke fixture format.
+
+_NANO_BASE = 1_751_587_200_000_000_000
+
+
+def _episode_trace(seed: dict[str, Any]) -> dict[str, Any]:
+    """`jinn.trace-envelope.v0` for an evidence-episode seed — the same step
+    shape `episode-execute.ts`'s `toCapturedTask()` produces: one step per
+    authored excerpt (`seed.step.label/title/text`) plus a final
+    `seed:synthesis` step (`seed.synthesis`/`seed.attribution`)."""
+    content_steps = []
+    for i, step in enumerate(seed["steps"]):
+        nano = str(_NANO_BASE + i)
+        content_steps.append({
+            "spanId": f"seed-{i + 1}",
+            "parentSpanId": None,
+            "name": f"seed:step:{step['label']}",
+            "startTimeUnixNano": nano,
+            "endTimeUnixNano": nano,
+            "attributes": {
+                "seed.step.label": step["label"],
+                "seed.step.title": step["title"],
+                "seed.step.text": step["text"],
             },
-            "task": {
-                "summary": "Seed import: acme/skills/test-driven-development",
-                "distributionTags": ["seed-import", "tdd", "refactoring"],
+            "redactedKeys": [],
+        })
+    meta_index = len(content_steps)
+    nano = str(_NANO_BASE + meta_index)
+    attribution: dict[str, Any] = {
+        "repo": seed["repo"],
+        "origin": seed["attribution"]["origin"],
+    }
+    if seed.get("baseCommit"):
+        attribution["baseCommit"] = seed["baseCommit"]
+    if seed["attribution"].get("sourceUrl"):
+        attribution["sourceUrl"] = seed["attribution"]["sourceUrl"]
+    meta_step = {
+        "spanId": f"seed-{meta_index + 1}",
+        "parentSpanId": None,
+        "name": "seed:synthesis",
+        "startTimeUnixNano": nano,
+        "endTimeUnixNano": nano,
+        "attributes": {
+            "seed.synthesis": seed["synthesis"],
+            "seed.attribution": attribution,
+        },
+        "redactedKeys": [],
+    }
+    tags = ["seed-import"] + [t for t in seed["tags"] if t != "seed-import"]
+    return {
+        "schemaVersion": "jinn.trace-envelope.v0",
+        "session": {"sessionId": f"seed-episode:{seed['id']}", "capturedAt": "2026-07-04T00:00:00.000Z"},
+        "task": {"summary": seed["taskSummary"], "distributionTags": tags},
+        "environment": {
+            "harness": {"name": "jinn-layer-seed-episode-import", "version": "0.1.0"},
+            "model": "none",
+            "tools": [],
+        },
+        "steps": content_steps + [meta_step],
+        "outcome": {"status": seed["outcome"]["status"], "verifiabilityTier": seed["outcome"]["verifiabilityTier"]},
+        "cost": {"durationMs": 0},
+        "consent": {"contributionConsent": True, "scrubCompleted": True},
+        "provenance": "imported",
+    }
+
+
+def _skill_tags(seed: dict[str, Any]) -> list[str]:
+    segments = [s for s in seed["skill"].split("/") if s]
+    repo_name = segments[1] if len(segments) > 1 else seed["skill"]
+    slug = segments[-1] if segments else seed["skill"]
+    tags = ["seed-import"]
+    for candidate in (repo_name, slug):
+        if candidate not in tags:
+            tags.append(candidate)
+    return tags
+
+
+def _skill_trace(seed: dict[str, Any]) -> dict[str, Any]:
+    """`jinn.trace-envelope.v0` for a skill seed — the existing skills.sh
+    lane's wire shape (`seed-import/execute.ts`'s `toCapturedTask()`):
+    `skill.md` + `seed.attribution` on one step. Legacy shape (no first-class
+    `jinn.skill.v1` artifact) — proves selection excludes it by relevance,
+    same as any other unrelated record (rescope plan §3.3 step 1)."""
+    summary = f"Seed import: {seed['skill']}"
+    if seed.get("description"):
+        summary += f" — {seed['description']}"
+    return {
+        "schemaVersion": "jinn.trace-envelope.v0",
+        "session": {"sessionId": f"seed:{seed['skill']}", "capturedAt": "2026-07-04T00:00:00.000Z"},
+        "task": {"summary": summary, "distributionTags": _skill_tags(seed)},
+        "environment": {
+            "harness": {"name": "jinn-layer-seed-import", "version": "0.1.0"},
+            "model": "none",
+            "tools": [],
+        },
+        "steps": [{
+            "spanId": "seed-1",
+            "parentSpanId": None,
+            "name": "seed:skill-md",
+            "startTimeUnixNano": str(_NANO_BASE),
+            "endTimeUnixNano": str(_NANO_BASE),
+            "attributes": {
+                "skill.md": seed["skillMd"],
+                "seed.attribution": {
+                    "skill": seed["skill"],
+                    "source": seed["source"],
+                    "licence": seed["licence"],
+                },
             },
-            "environment": {
-                "harness": {"name": "jinn-layer-seed-import", "version": "0.1.0"},
-                "model": "none",
-                "tools": [],
-            },
-            "steps": [
-                {
-                    "spanId": "seed-1",
-                    "parentSpanId": None,
-                    "name": "seed:skill-md",
-                    "startTimeUnixNano": "1751587200000000000",
-                    "endTimeUnixNano": "1751587200000000000",
-                    "attributes": {
-                        "skill.md": "# Test-driven development\n\nRed, green, refactor.\n",
-                        "seed.attribution": {
-                            "skill": "acme/skills/test-driven-development",
-                            "source": "https://github.com/acme/skills",
-                            "licence": "MIT",
-                        },
-                    },
-                    "redactedKeys": [],
-                }
-            ],
-            "outcome": {
-                "status": "completed",
-                "verifiabilityTier": "user-accepted",
-            },
-            "cost": {"durationMs": 0},
-            "consent": {"contributionConsent": True, "scrubCompleted": True},
-            "provenance": "imported",
-        }
-        self.trace_bytes = json.dumps(
-            self.trace, separators=(",", ":"), sort_keys=True
-        ).encode()
+            "redactedKeys": [],
+        }],
+        "outcome": {"status": "completed", "verifiabilityTier": "user-accepted"},
+        "cost": {"durationMs": 0},
+        "consent": {"contributionConsent": True, "scrubCompleted": True},
+        "provenance": "imported",
+    }
+
+
+class FixtureRecord:
+    def __init__(self, ref: str, trace: dict[str, Any]):
+        self.ref = ref
+        self.trace = trace
+        self.trace_bytes = json.dumps(trace, separators=(",", ":"), sort_keys=True).encode()
         self.trace_sha = hashlib.sha256(self.trace_bytes).hexdigest()
 
-    def envelope(self) -> dict[str, Any]:
+    @property
+    def task_summary(self) -> str:
+        return str(self.trace["task"]["summary"])
+
+    @property
+    def tags(self) -> list[str]:
+        return list(self.trace["task"]["distributionTags"])
+
+    @property
+    def verifiability_tier(self) -> str:
+        return str(self.trace["outcome"]["verifiabilityTier"])
+
+    def envelope(self, endpoint: str) -> dict[str, Any]:
         return {
             "schemaVersion": "jinn.execution.v1",
             "solverType": "capture",
             "role": "solution",
             "generatedAt": 1_745_978_400,
             "task": {
-                "cid": "bafyStage1Task",
+                "cid": self.ref,
                 "onchainCreationTx": "0x" + "a" * 64,
                 "onchainCreationBlock": 1,
                 "requestId": "0x" + "b" * 64,
@@ -160,7 +312,7 @@ class CorpusFixture:
                 {
                     "artifactType": "jinn.trace-envelope.v0",
                     "sha256": self.trace_sha,
-                    "access": {"endpoint": self.endpoint, "priceUsdc": "0"},
+                    "access": {"endpoint": endpoint, "priceUsdc": "0"},
                 }
             ],
             "payload": {},
@@ -171,6 +323,54 @@ class CorpusFixture:
                 "sig": "0x" + "f" * 130,
             },
         }
+
+
+def load_seed_records() -> dict[str, FixtureRecord]:
+    """The five curated Stage 1 fixtures, keyed by filename stem."""
+    episodes = {
+        SOURCE_FIXTURE: SOURCE_REF,
+        DISTRACTOR_SAME_REPO: DISTRACTOR_SAME_REPO_REF,
+        DISTRACTOR_OTHER_DOMAIN: DISTRACTOR_OTHER_DOMAIN_REF,
+    }
+    skills = {
+        DISTRACTOR_SKILL: DISTRACTOR_SKILL_REF,
+        DISTRACTOR_SKILL_DUP: DISTRACTOR_SKILL_DUP_REF,
+    }
+    records: dict[str, FixtureRecord] = {}
+    for stem, ref in episodes.items():
+        seed = json.loads((SEED_FIXTURES_DIR / f"{stem}.episode.json").read_text(encoding="utf-8"))
+        records[stem] = FixtureRecord(ref, _episode_trace(seed))
+    for stem, ref in skills.items():
+        seed = json.loads((SEED_FIXTURES_DIR / f"{stem}.json").read_text(encoding="utf-8"))
+        records[stem] = FixtureRecord(ref, _skill_trace(seed))
+    return records
+
+
+class CorpusFixture:
+    def __init__(self) -> None:
+        self.unavailable = False
+        self.requests: list[tuple[str, str]] = []
+        self.endpoint = ""
+        self.records = load_seed_records()
+        self.by_ref = {record.ref: record for record in self.records.values()}
+        self.by_sha = {record.trace_sha: record for record in self.records.values()}
+
+    def search(self, query: str) -> list[dict[str, Any]]:
+        needle = query.strip().lower()
+        if not needle:
+            return []
+        hits = []
+        for record in self.records.values():
+            haystack = f"{record.task_summary} {' '.join(record.tags)}".lower()
+            if needle in haystack:
+                hits.append({
+                    "manifestCid": record.ref,
+                    "taskSummary": record.task_summary,
+                    "tags": record.tags,
+                    "provenance": "imported",
+                    "verifiabilityTier": record.verifiability_tier,
+                })
+        return hits
 
 
 def start_corpus_server(fixture: CorpusFixture) -> tuple[ThreadingHTTPServer, threading.Thread]:
@@ -199,29 +399,28 @@ def start_corpus_server(fixture: CorpusFixture) -> tuple[ThreadingHTTPServer, th
                 if fixture.unavailable:
                     self.write_json(503, {"error": "fixture unavailable"})
                     return
-                query = " ".join(parse_qs(parsed.query).get("q", [])).lower()
-                hits: list[dict[str, Any]] = []
-                if "tdd-style" in query or "refactoring" in query:
-                    hits.append(
-                        {
-                            "manifestCid": CORPUS_REF,
-                            "taskSummary": "Seed import: acme/skills/test-driven-development",
-                            "tags": ["seed-import", "tdd", "refactoring"],
-                            "provenance": "imported",
-                            "verifiabilityTier": "user-accepted",
-                        }
-                    )
-                self.write_json(200, hits)
+                query = " ".join(parse_qs(parsed.query).get("q", []))
+                self.write_json(200, fixture.search(query))
                 return
-            if parsed.path == f"/ipfs/{CORPUS_REF}":
-                self.write_json(200, fixture.envelope())
+            if parsed.path.startswith("/ipfs/"):
+                ref = parsed.path[len("/ipfs/"):]
+                record = fixture.by_ref.get(ref)
+                if record is None:
+                    self.write_json(404, {"error": "not found"})
+                    return
+                self.write_json(200, record.envelope(fixture.endpoint))
                 return
-            if parsed.path == f"/v1/artifacts/{fixture.trace_sha}/content":
+            if parsed.path.startswith("/v1/artifacts/"):
+                sha = parsed.path[len("/v1/artifacts/"):].removesuffix("/content")
+                record = fixture.by_sha.get(sha)
+                if record is None:
+                    self.write_json(404, {"error": "not found"})
+                    return
                 self.send_response(200)
                 self.send_header("content-type", "application/octet-stream")
-                self.send_header("content-length", str(len(fixture.trace_bytes)))
+                self.send_header("content-length", str(len(record.trace_bytes)))
                 self.end_headers()
-                self.wfile.write(fixture.trace_bytes)
+                self.wfile.write(record.trace_bytes)
                 return
             self.write_json(404, {"error": "not found"})
 
@@ -334,8 +533,12 @@ def finish_session(
     expected_pickup: bool,
     expected_publication: str,
     mutate: str | None = None,
-    install_ref: bool = False,
-) -> tuple[str, str | None]:
+) -> tuple[str, str | None, str]:
+    """Drive one complete session lifecycle.
+
+    Returns (session-end stderr, the injected pickup context or None, the
+    pickup point-of-use marker text observed on stderr).
+    """
     jinn._on_session_start(session_id=session_id, cwd=str(repo), platform="cli")
     pickup_stderr = io.StringIO()
     with contextlib.redirect_stderr(pickup_stderr):
@@ -347,19 +550,13 @@ def finish_session(
             model="stage1-model",
             platform="cli",
         )
+    marker = pickup_stderr.getvalue()
     if expected_pickup:
-        assert pickup and "[jinn corpus] Relevant to this task" in pickup["context"]
-        marker = pickup_stderr.getvalue()
-        assert "◇ corpus" in marker and "surfaced" in marker, marker
-        if install_ref:
-            receipt = jinn._handle_jinn(
-                f"skills install {CORPUS_REF}",
-                session_id=session_id,
-                task_id=task_id,
-            )
-            assert receipt.startswith("installed —"), receipt
+        assert pickup is not None, f"expected pickup context, got None (marker={marker!r})"
+        assert "[jinn corpus] Prior evidence relevant to this task:" in pickup["context"]
+        assert "◇ corpus" in marker and "provided" in marker, marker
     else:
-        assert pickup is None
+        assert pickup is None, f"expected no pickup, got {pickup!r}"
 
     current = jinn._handle_jinn("session", session_id=session_id, task_id=task_id)
     assert "capture active" in current.lower(), current
@@ -391,9 +588,9 @@ def finish_session(
             session_id=session_id,
             task_id=task_id,
             completed=True,
-            skills_loadout=[CORPUS_REF] if install_ref else [],
+            skills_loadout=[],
         )
-    return summary.getvalue(), pickup["context"] if pickup else None
+    return summary.getvalue(), (pickup["context"] if pickup else None), marker
 
 
 def read_store_records() -> list[dict[str, Any]]:
@@ -403,7 +600,12 @@ def read_store_records() -> list[dict[str, Any]]:
 
 
 def write_local_skill_provenance(session_id: str) -> None:
-    """Install a deterministic output of the already-local distillation rail."""
+    """Install a deterministic output of the already-local distillation rail.
+
+    Unrelated to network evidence pickup: local distillation (rung 1) is an
+    independent capability (#1486) whose provenance rows still surface in
+    history (rescope plan §2 — "keep local distilledSkills provenance").
+    """
     target = LOCAL_SKILLS_DIR / "stage1-local-pattern"
     target.mkdir(parents=True, exist_ok=True)
     target.joinpath("SKILL.md").write_text(
@@ -431,6 +633,13 @@ Use this for the Stage 1 acceptance fixture.
     )
 
 
+def episode_by_provided_ref(episodes: list[dict[str, Any]], ref: str) -> dict[str, Any] | None:
+    for episode in episodes:
+        if ref in ((episode.get("activity") or {}).get("providedRefs") or []):
+            return episode
+    return None
+
+
 def main() -> None:
     assert_installed_product()
     assert_disabled_is_stock_silent()
@@ -445,8 +654,11 @@ def main() -> None:
     os.environ["JINN_DISCOVERY_URL"] = fixture.endpoint
     os.environ["JINN_IPFS_GATEWAY_URL"] = fixture.endpoint
 
+    # Smoke-check the real jinn-layer against the real fixture rails before
+    # driving any session — search finds the source episode by content, get
+    # returns it by ref.
     search_probe = subprocess.run(
-        [str(LAYER_BIN), "corpus", "search", "tdd-style", "--json", "--limit", "3"],
+        [str(LAYER_BIN), "corpus", "search", "dashboard", "--json", "--limit", "10"],
         check=False,
         capture_output=True,
         text=True,
@@ -456,13 +668,14 @@ def main() -> None:
         f"stderr={search_probe.stderr!r} requests={fixture.requests!r}"
     )
     search_hits = json.loads(search_probe.stdout)
-    assert search_hits and search_hits[0]["ref"] == CORPUS_REF, (
-        f"real jinn-layer corpus search returned no fixture: "
+    search_refs = {hit["ref"] for hit in search_hits}
+    assert SOURCE_REF in search_refs, (
+        f"real jinn-layer corpus search did not return the source fixture: "
         f"stdout={search_probe.stdout!r} stderr={search_probe.stderr!r} "
         f"requests={fixture.requests!r}"
     )
     get_probe = subprocess.run(
-        [str(LAYER_BIN), "corpus", "get", CORPUS_REF, "--json"],
+        [str(LAYER_BIN), "corpus", "get", SOURCE_REF, "--json"],
         check=False,
         capture_output=True,
         text=True,
@@ -471,7 +684,7 @@ def main() -> None:
         f"real jinn-layer corpus get failed: stdout={get_probe.stdout!r} "
         f"stderr={get_probe.stderr!r} requests={fixture.requests!r}"
     )
-    assert json.loads(get_probe.stdout)["ref"] == CORPUS_REF
+    assert json.loads(get_probe.stdout)["ref"] == SOURCE_REF
 
     legacy = HERMES_HOME / "jinn" / "pending" / "legacy-raw-trace.json"
     legacy.parent.mkdir(parents=True, exist_ok=True)
@@ -480,36 +693,75 @@ def main() -> None:
     work_repo = make_repo(WORK / "oss-work")
     clean_repo = make_repo(WORK / "oss-clean")
     try:
+        # ── Scenario 1/2/5/7: target-task session, evidence provided, most
+        # relevant wins, attribution visible, sharing off stays local ──────
         reset_session_runtime(jinn)
         jinn.consent.save_state(False, previewed=False)
-        share_off_summary, _ = finish_session(
+        requests_before_target = list(fixture.requests)
+        share_off_summary, target_context, target_marker = finish_session(
             jinn,
-            session_id="stage1-share-off",
-            task_id="task-share-off",
+            session_id="stage1-target-task",
+            task_id="task-target-task",
             repo=work_repo,
-            message="Tdd-style refactoring for this widget",
+            message=TARGET_TASK_MESSAGE,
             expected_pickup=True,
             expected_publication="OFF",
             mutate="SECRET_ACCEPTED_DIFF_OFF = True",
-            install_ref=True,
         )
+        assert target_context is not None
+        # (1) Content, not metadata: a distinctive excerpt line, source
+        # attribution, and the corpus_fetch pointer.
+        assert SOURCE_DISTINCTIVE_CONTENT in target_context, target_context
+        assert f"source: {SOURCE_REF}" in target_context, target_context
+        assert f"corpus_fetch {SOURCE_REF}" in target_context, target_context
+        # (2) Most relevant wins: distractor and skill refs absent.
+        for absent_ref in (
+            DISTRACTOR_SAME_REPO_REF,
+            DISTRACTOR_OTHER_DOMAIN_REF,
+            DISTRACTOR_SKILL_REF,
+            DISTRACTOR_SKILL_DUP_REF,
+        ):
+            assert absent_ref not in target_context, (absent_ref, target_context)
+        # Boundary: no skill-install language in the injection, ever.
+        assert "skills install" not in target_context.lower()
+        assert "adopted automatically" not in target_context.lower()
+        # (5) Attribution visible in /jinn session mid-task.
+        mid_session = jinn._handle_jinn(
+            "session", session_id="stage1-target-task", task_id="task-target-task"
+        )
+        assert SOURCE_REF in mid_session, mid_session
         assert "captured" in share_off_summary.lower()
         assert "contribution recorded" in share_off_summary.lower(), share_off_summary
+        assert SOURCE_REF in share_off_summary, share_off_summary
         assert list(CAPTURES_DIR.glob("*.json")), "local distillation tee missing"
-        write_local_skill_provenance("stage1-share-off")
+        write_local_skill_provenance("stage1-target-task")
+        # (7) Sharing off: only /graphql search traffic (never a publish-
+        # shaped POST) happened during this session.
+        new_requests = fixture.requests[len(requests_before_target):]
+        assert all(method != "POST" or path == "/graphql" for method, path in new_requests), (
+            f"a non-search POST happened with sharing off: {new_requests!r}"
+        )
 
+        # ── Scenario 3: honest no-result, on the sharing-on session that
+        # also carries the mint/preview/history mechanics ──────────────────
         jinn.consent.save_state(True, previewed=False)
-        share_on_summary, _ = finish_session(
+        no_result_summary, no_result_context, _no_result_marker = finish_session(
             jinn,
-            session_id="stage1-share-on",
-            task_id="task-share-on",
+            session_id="stage1-no-result",
+            task_id="task-no-result",
             repo=work_repo,
-            message="Investigate quasar unobtainium",
+            message=NO_RESULT_MESSAGE,
             expected_pickup=False,
             expected_publication="ON",
             mutate="SECRET_ACCEPTED_DIFF_ON = True",
         )
-        assert "nothing relevant found" in share_on_summary.lower()
+        assert no_result_context is None
+        assert "knowledge searched · nothing relevant found" in no_result_summary.lower()
+        no_result_session = jinn._handle_jinn(
+            "session", session_id="stage1-no-result", task_id="task-no-result"
+        )
+        assert "nothing relevant found" in no_result_session.lower()
+
         records_before_preview = read_store_records()
         share_on = next(
             row for row in records_before_preview if row["candidate"]["publishMinedTasksConsent"]
@@ -529,33 +781,40 @@ def main() -> None:
         )["publicationState"] == "queued"
         history_after_preview = jinn._handle_jinn("history")
         assert "queued" in history_after_preview.lower()
+        # Local distillation provenance still shows (a retained, independent
+        # concept — rescope plan §2), but no shared/network-skill install copy.
         assert "stage1-local-pattern" in history_after_preview, history_after_preview
+        assert "jinn-installed skill" not in history_after_preview.lower()
+        assert "skills install" not in history_after_preview.lower()
 
+        # ── Scenario 4: corpus 503 — session proceeds, degraded, no injection ──
         fixture.unavailable = True
-        unavailable_summary, _ = finish_session(
+        unavailable_summary, unavailable_context, _unavailable_marker = finish_session(
             jinn,
             session_id="stage1-corpus-unavailable",
             task_id="task-corpus-unavailable",
             repo=clean_repo,
-            message="Offline corpus investigation",
+            message=UNAVAILABLE_MESSAGE,
             expected_pickup=False,
             expected_publication="ON",
         )
         fixture.unavailable = False
-        assert "nothing relevant found" in unavailable_summary.lower()
+        assert unavailable_context is None
+        assert "knowledge searched · nothing relevant found" in unavailable_summary.lower()
 
         real_layer = os.environ["JINN_LAYER_BIN"]
         os.environ["JINN_LAYER_BIN"] = str(WORK / "missing-jinn-layer")
         reset_session_runtime(jinn)
-        missing_summary, _ = finish_session(
+        missing_summary, missing_context, _missing_marker = finish_session(
             jinn,
             session_id="stage1-missing-layer",
             task_id="task-missing-layer",
             repo=clean_repo,
-            message="Preserve local capture",
+            message=MISSING_LAYER_MESSAGE,
             expected_pickup=False,
             expected_publication="ON",
         )
+        assert missing_context is None
         assert "captured locally" in missing_summary.lower()
         assert "process bridge degraded" in missing_summary.lower()
         os.environ["JINN_LAYER_BIN"] = real_layer
@@ -571,24 +830,51 @@ def main() -> None:
 
         jinn._runner = IncompatibleRunner()
         reset_session_runtime(jinn)
-        incompatible_summary, _ = finish_session(
+        incompatible_summary, incompatible_context, _incompatible_marker = finish_session(
             jinn,
             session_id="stage1-incompatible-layer",
             task_id="task-incompatible-layer",
             repo=clean_repo,
-            message="Preserve incompatible capture",
+            message=INCOMPATIBLE_LAYER_MESSAGE,
             expected_pickup=False,
             expected_publication="ON",
         )
+        assert incompatible_context is None
         assert "captured locally" in incompatible_summary.lower()
         assert "process bridge degraded" in incompatible_summary.lower()
         jinn._runner = None
+
+        # ── Boundary: no shared/network-skill install-or-adopt state anywhere
+        # (disabled plugin stays stock-silent, asserted up front). Local
+        # distillation's own "N installed" count (a different, retained
+        # concept — rescope plan §2) is deliberately NOT banned wholesale;
+        # the boundary is the removed shared-skill command surface and its
+        # copy, not the bare word "installed".
+        for rendered in (
+            share_off_summary, no_result_summary, unavailable_summary,
+            missing_summary, incompatible_summary,
+            mid_session, no_result_session,
+        ):
+            assert "skills install" not in rendered.lower()
+            assert "adopted automatically" not in rendered.lower()
+            assert "jinn-installed skill" not in rendered.lower()
+        # The `/jinn skills` command branch is gone outright — every
+        # subcommand now falls through to the unknown-command help text.
+        for skills_args in (
+            f"skills install {SOURCE_REF}", "skills list", "skills uninstall anything",
+        ):
+            reply = jinn._handle_jinn(skills_args, session_id="stage1-boundary-check")
+            assert reply == jinn._JINN_HELP, (skills_args, reply)
+        status_output = jinn._handle_jinn("status")
+        assert "skills install" not in status_output.lower()
+        assert "jinn-installed skill" not in status_output.lower()
 
         assert legacy.read_text(encoding="utf-8") == '{"raw":"LEGACY_RAW_TRACE_SENTINEL"}\n'
         episodes = [
             json.loads(path.read_text(encoding="utf-8"))
             for path in sorted(EPISODES_DIR.glob("*.episode.json"))
         ]
+        # (6) Exactly one episode per completed session.
         assert len(episodes) >= 5
         for episode in episodes:
             assert episode["schemaVersion"] == "jinn.episode.v1"
@@ -597,7 +883,20 @@ def main() -> None:
             assert episode["trajectory"]
             assert all(str(span["startTimeUnixNano"]).isdigit() for span in episode["trajectory"])
 
+        # (6) The target-task episode's activity carries populated
+        # searchedTerms/providedRefs; every other episode's providedRefs is
+        # honestly empty.
+        target_episode = episode_by_provided_ref(episodes, SOURCE_REF)
+        assert target_episode is not None, [e.get("activity") for e in episodes]
+        assert target_episode["activity"]["searchedTerms"], target_episode["activity"]
+        assert target_episode["activity"]["providedRefs"] == [SOURCE_REF]
+        for episode in episodes:
+            if episode is target_episode:
+                continue
+            assert episode.get("activity", {}).get("providedRefs") in ([], None), episode["activity"]
+
         records = read_store_records()
+        # (6) Exactly one contribution candidate per eligible session.
         assert len(records) == 2, records
         episode_ids = {episode["episodeId"] for episode in episodes}
         assert {row["candidate"]["sourceId"] for row in records}.issubset(episode_ids)
