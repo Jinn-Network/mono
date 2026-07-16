@@ -128,7 +128,7 @@ Publishing needs a live operator identity. Derive one from your local
 `~/.jinn-client` keystore and export it for this shell:
 
 ```bash
-eval "$(yarn --silent jinn-layer derive-env)"
+eval "$(yarn jinn-layer derive-env)"
 ```
 
 Then run the approved report:
