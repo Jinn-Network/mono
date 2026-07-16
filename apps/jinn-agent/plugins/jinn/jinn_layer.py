@@ -69,10 +69,14 @@ def binary() -> str:
 def _normalize_result(result: Tuple[int, str] | Tuple[int, str, str]) -> Tuple[int, str, str]:
     """A custom `Runner` returns `(code, out)`; `_default_runner` returns
     `(code, stdout, stderr)`. Every caller of `run()`/`session_pickup()` sees
-    the 3-tuple regardless of which one produced it (mono #1787)."""
+    the 3-tuple regardless of which one produced it (mono #1787).
+
+    Static checkers don't narrow a tuple union on `len()`, so the branches
+    below are annotated explicitly rather than left to inference.
+    """
     if len(result) == 3:
         return result  # type: ignore[return-value]
-    code, out = result
+    code, out = result  # type: ignore[misc]
     return code, out, ""
 
 
