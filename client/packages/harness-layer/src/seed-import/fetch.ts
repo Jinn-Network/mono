@@ -10,6 +10,8 @@
  * content.
  */
 
+import { z } from 'zod';
+
 export interface SeedSkill {
   /** Registry-style id, e.g. `vercel-labs/skills/find-skills`. */
   skill: string;
@@ -21,6 +23,21 @@ export interface SeedSkill {
   /** The SKILL.md content (the layer-2 consumable, spec §5). */
   skillMd: string;
 }
+
+/**
+ * Zod mirror of `SeedSkill` (issue #1771): the wire shape of a skill-shaped
+ * seed fixture on disk (e.g. `fixtures/stage1-seeds/distractor-skill-*.json`),
+ * used by the fixture-lint test to validate skill-shaped fixtures without a
+ * live GitHub source. Not consumed by `createGithubSeedSource` — that source
+ * still speaks `SeedSkill` directly.
+ */
+export const SeedSkillSchema = z.strictObject({
+  skill: z.string().min(1),
+  source: z.string().min(1),
+  licence: z.string().min(1).nullable(),
+  description: z.string().min(1).optional(),
+  skillMd: z.string().min(1),
+});
 
 export interface SeedSource {
   name: string;
