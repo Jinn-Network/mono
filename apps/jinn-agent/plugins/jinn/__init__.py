@@ -174,6 +174,19 @@ def _clear_veto(session_id: str) -> None:
         _vetoed_tasks.discard(session_id)
 
 
+def _empty_activity() -> Dict[str, list]:
+    """Evidence-first pickup facts (searchedTerms/providedRefs, rescope §3.6)
+    plus the internal fetch-attempt detail the corpus_search/corpus_fetch
+    agent tools still record (surfacedRefs/fetchedRefs). installedSkillRefs
+    is gone with the skill adopt/install path pickup no longer has."""
+    return {
+        "searchedTerms": [],
+        "providedRefs": [],
+        "surfacedRefs": [],
+        "fetchedRefs": [],
+    }
+
+
 def _state_for(session_id: str, cwd: Optional[Path] = None) -> Dict[str, Any]:
     key = session_id or "default"
     with _session_state_lock:
@@ -181,11 +194,7 @@ def _state_for(session_id: str, cwd: Optional[Path] = None) -> Dict[str, Any]:
         if state is None:
             state = {
                 "snapshot": session_bridge.snapshot_repository(key, cwd=cwd),
-                "activity": {
-                    "surfacedRefs": [],
-                    "fetchedRefs": [],
-                    "installedSkillRefs": [],
-                },
+                "activity": _empty_activity(),
                 "intermediateFailureDiffs": [],
             }
             _session_states[key] = state
@@ -199,11 +208,7 @@ def _pop_state(session_id: str) -> Dict[str, Any]:
             key,
             {
                 "snapshot": None,
-                "activity": {
-                    "surfacedRefs": [],
-                    "fetchedRefs": [],
-                    "installedSkillRefs": [],
-                },
+                "activity": _empty_activity(),
                 "intermediateFailureDiffs": [],
             },
         )
@@ -214,25 +219,24 @@ def _peek_state(session_id: str) -> Dict[str, Any]:
     with _session_state_lock:
         state = _session_states.get(key)
         if state is None:
-            return {
-                "activity": {
-                    "surfacedRefs": [],
-                    "fetchedRefs": [],
-                    "installedSkillRefs": [],
-                },
-            }
+            return {"activity": _empty_activity()}
         return {
             **state,
             "activity": {
                 field: list(state.get("activity", {}).get(field) or [])
-                for field in ("surfacedRefs", "fetchedRefs", "installedSkillRefs")
+                for field in ("searchedTerms", "providedRefs", "surfacedRefs", "fetchedRefs")
             },
         }
 
 
 def _record_activity(session_id: str, field: str, refs: list[str]) -> None:
-    """Record only refs a successful host action actually observed."""
-    if not session_id or field not in ("surfacedRefs", "fetchedRefs", "installedSkillRefs"):
+    """Record only refs a successful host action actually observed.
+
+    Internal fetch-attempt detail only (surfacedRefs/fetchedRefs, from the
+    corpus_search/corpus_fetch agent tools) — searchedTerms/providedRefs are
+    set wholesale by pickup.pickup()'s own response, not appended here.
+    """
+    if not session_id or field not in ("surfacedRefs", "fetchedRefs"):
         return
     state = _state_for(session_id)
     with _session_state_lock:
@@ -291,12 +295,21 @@ def _on_pre_llm_call(
     # precedes this turn's tool calls (post_tool_call) and the assistant turn
     # (post_llm_call). Local capture, so unconditional per mono#1714.
     buf.record_user_turn(task_id, session_id, user_message)
-    # Consumption side — NEVER consent-gated: payload-agnostic corpus pickup.
+    # Consumption side — NEVER consent-gated: evidence-first corpus pickup.
     # Returns {"context": ...} (injected into the user message, cache-safe)
     # or None. Fails open inside pickup().
     if is_first_turn:
         state = _state_for(session_id)
-        return pickup.pickup(user_message, runner=_runner, activity=state["activity"])
+        snapshot = state.get("snapshot")
+        repository_slug = snapshot.repository_slug if snapshot is not None else None
+        return pickup.pickup(
+            user_message,
+            runner=_runner,
+            activity=state["activity"],
+            session_id=session_id,
+            model=model,
+            repository_slug=repository_slug,
+        )
     return None
 
 
@@ -359,9 +372,10 @@ def _delegate_session_end(
     if _degraded is not None:
         return None
     normalized_activity = {
+        "searchedTerms": list(activity.get("searchedTerms") or []),
+        "providedRefs": list(activity.get("providedRefs") or []),
         "surfacedRefs": list(activity.get("surfacedRefs") or []),
         "fetchedRefs": list(activity.get("fetchedRefs") or []),
-        "installedSkillRefs": list(activity.get("installedSkillRefs") or []),
     }
     request: Dict[str, Any] = {
         "contractVersion": jinn_layer.CONTRACT_VERSION,
@@ -501,14 +515,16 @@ def _on_session_end(
             else "off" if distill.cached_mode(_runner) == "off"
             else "unavailable"
         )
+        activity = state.get("activity") or {}
         _user_line(session_view.render_complete(
             summary={
-                **(state.get("activity") or {}),
-                "nothingFound": not bool(
-                    (state.get("activity") or {}).get("surfacedRefs")
-                ),
+                "searchedTerms": list(activity.get("searchedTerms") or []),
+                "providedPackets": [
+                    {"ref": ref, "title": ref} for ref in (activity.get("providedRefs") or [])
+                ],
+                "nothingFound": not bool(activity.get("providedRefs")),
             },
-            activity=state.get("activity") or {},
+            activity=activity,
             capture_status="captured-locally" if fallback_path is not None else "unavailable",
             local_learning_status=learning_status,
             contribution=None,
@@ -547,13 +563,10 @@ _JINN_HELP = (
     "  /jinn status    consent + capture state\n"
     "  /jinn consent   run the consent flow\n"
     "  /jinn preview   inspect a retained legacy capture, or a labelled example\n"
-    "  /jinn session   current surfaced, capture, learning, and contribution state\n"
+    "  /jinn session   current searched/provided, capture, learning, and contribution state\n"
     "  /jinn history   sessions derived from episodes, contributions, and local skills\n"
     "  /jinn ledger    the contribution ledger — what left this machine\n"
     "  /jinn veto      withhold the current task (recorded locally, never published)\n"
-    "  /jinn skills install <ref>   install a corpus-published skill into the agent's skills\n"
-    "  /jinn skills list            jinn-installed skills\n"
-    "  /jinn skills uninstall <slug>  remove a jinn-installed skill\n"
     "  /jinn distill   local distillation — your captures into reusable skills\n"
     "  /jinn distill where local|defer|off   set where distillation runs\n"
 )
@@ -723,31 +736,6 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
         code, out = jinn_layer.ledger(runner=_runner)
         return out if code == 0 else f"ledger unavailable:\n{out}"
 
-    if sub == "skills":
-        # Consuming is always allowed — no consent check on this entire path.
-        action = parts[1] if len(parts) > 1 else "list"
-        if action == "install":
-            if len(parts) < 3:
-                return "usage: /jinn skills install <ref> (a corpus ref from /corpus search)"
-            try:
-                path = skills_install.install(parts[2], runner=_runner)
-            except Exception as exc:
-                return f"install failed: {exc}"
-            _record_activity(session_id, "installedSkillRefs", [parts[2]])
-            return f"installed — {path}\nThe agent's skill loader picks it up from here."
-        if action == "uninstall":
-            if len(parts) < 3:
-                return "usage: /jinn skills uninstall <slug>"
-            try:
-                skills_install.uninstall(parts[2])
-            except Exception as exc:
-                return f"uninstall failed: {exc}"
-            return f"uninstalled {parts[2]}."
-        installed = skills_install.list_installed()
-        if not installed:
-            return "No jinn-installed skills. /corpus <query> to find some, then /jinn skills install <ref>."
-        return "\n".join(f"{row['slug']}  ({row['ref'] or 'ref unknown'})" for row in installed)
-
     if sub == "distill":
         # Local distillation (mono #1538) — all logic + rendering in distill.py;
         # this dispatch stays a one-liner like the other module-backed verbs.
@@ -893,7 +881,7 @@ def register(ctx) -> None:
     # a no-op; --replay re-renders without re-asking.
     ctx.register_cli_command(
         "onboarding",
-        help="Guided first-run onboarding (consent → publish → rewards → signals).",
+        help="Guided first-run onboarding (consent → publish → signals).",
         setup_fn=onboarding.setup_parser,
         handler_fn=onboarding.cli_handler,
         description="Walk the core loop once, one confirmed step at a time. --replay re-shows it.",

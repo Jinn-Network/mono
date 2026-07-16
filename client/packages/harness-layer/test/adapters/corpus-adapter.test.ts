@@ -215,6 +215,71 @@ describe('CorpusAdapter.get() — content-bearing decode (rescope R2, #1772)', (
     expect(result.value).toBeNull();
   });
 
+  it('falls back to a seed-authored synthesis step when outcome.summary is absent (rescope R4 seed lane)', async () => {
+    // The evidence-episode seed lane (seed-import/episode-execute.ts) authors
+    // synthesis longer than outcome.summary's 500-char cap allows, so it
+    // carries the text on a `seed.synthesis` step attribute instead.
+    const layer = makeFakeLayer();
+    const wireRecord = wireRecordWithTrace({
+      outcome: { status: 'completed', verifiabilityTier: 'tests-passed' },
+      steps: [
+        {
+          spanId: 's1',
+          parentSpanId: null,
+          name: 'seed:step:failure',
+          startTimeUnixNano: '1000000000',
+          endTimeUnixNano: '1000000000',
+          attributes: { 'seed.step.label': 'failure', 'seed.step.title': 't', 'seed.step.text': 'FAIL' },
+          redactedKeys: [],
+        },
+        {
+          spanId: 's2',
+          parentSpanId: null,
+          name: 'seed:synthesis',
+          startTimeUnixNano: '2000000000',
+          endTimeUnixNano: '2000000000',
+          attributes: {
+            'seed.synthesis': 'A synthesis longer than the 500-char outcome.summary cap would allow.',
+            'seed.attribution': { repo: 'acme/widget', origin: 'operator-recorded-session' },
+          },
+          redactedKeys: [],
+        },
+      ],
+    });
+    layer.corpus.get = async () => wireRecord;
+    const adapter = createCorpusAdapter({ layer });
+
+    const result = await adapter.get('bafySourceEpisode');
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok' || result.value === null) throw new Error('expected a decoded record');
+    expect(result.value.synthesis).toBe('A synthesis longer than the 500-char outcome.summary cap would allow.');
+  });
+
+  it('prefers outcome.summary over a seed-authored synthesis step when both are present', async () => {
+    const layer = makeFakeLayer();
+    const wireRecord = wireRecordWithTrace({
+      outcome: { status: 'completed', verifiabilityTier: 'tests-passed', summary: 'the real capture synthesis' },
+      steps: [
+        {
+          spanId: 's1',
+          parentSpanId: null,
+          name: 'seed:synthesis',
+          startTimeUnixNano: '1000000000',
+          endTimeUnixNano: '1000000000',
+          attributes: { 'seed.synthesis': 'a seed synthesis that must not win' },
+          redactedKeys: [],
+        },
+      ],
+    });
+    layer.corpus.get = async () => wireRecord;
+    const adapter = createCorpusAdapter({ layer });
+
+    const result = await adapter.get('bafySourceEpisode');
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok' || result.value === null) throw new Error('expected a decoded record');
+    expect(result.value.synthesis).toBe('the real capture synthesis');
+  });
+
   it('returns ok(null) for a record carrying no trace-envelope artifact (e.g. a skill-only record)', async () => {
     const layer = makeFakeLayer();
     const wireRecord = wireRecordWithTrace();

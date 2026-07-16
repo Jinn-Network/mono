@@ -1,11 +1,19 @@
-"""/jinn skills install — shells to the layer (mono #1345, thin-fork boundary).
+"""skills_install module — shells to the layer (mono #1345, thin-fork boundary).
 
 The acceptance criteria: install() no longer parses envelopes or verifies
 hashes itself — it shells to `jinn-layer skills install <ref> --json`, which
 does the extraction + sha256 verification + SKILL.md write, and only drops
-the `.jinn-ref` marker into the dir the layer reports back. Declined consent
-does NOT block install (consuming is always allowed — consent gates
-contributing only); uninstall never touches skills the user made themselves.
+the `.jinn-ref` marker into the dir the layer reports back; uninstall never
+touches skills the user made themselves.
+
+The module is retained as a quarantined Stage-3 surface (rescope plan §2):
+the `/jinn skills install|list|uninstall` command branch that used to call
+these functions is removed (Stage 1 rescope R3; skills are Stage 3), and
+pickup's own auto-adopt path (which also called `install()`) is gone with
+it. `skills_dir()`/`_extract_trace()`/`_skill_md_and_slug()` stay live,
+consumed by `/jinn distill`'s staging dir and the `corpus_fetch` agent tool.
+These tests cover the module's own functions directly, independent of any
+command surface.
 """
 
 from __future__ import annotations
@@ -17,7 +25,6 @@ from pathlib import Path
 import pytest
 
 jinn = importlib.import_module("plugins.jinn")
-consent = importlib.import_module("plugins.jinn.consent")
 skills_install = importlib.import_module("plugins.jinn.skills_install")
 
 REF = "bafySeedTdd"
@@ -67,30 +74,6 @@ def test_install_raises_on_unreadable_result(tmp_path):
 
     with pytest.raises(ValueError, match="unreadable skills install result"):
         skills_install.install(REF, runner=fake_runner)
-
-
-def test_declined_consent_does_not_block_install(tmp_path):
-    # Consuming is always allowed — consent gates contributing only.
-    consent.save_state(False)
-    skills_root = tmp_path / "skills"
-
-    def fake_runner(argv):
-        target = skills_root / "test-driven-development"
-        target.mkdir(parents=True)
-        (target / "SKILL.md").write_text("# TDD\n")
-        return 0, json.dumps({"dir": str(target), "name": "test-driven-development",
-                              "shape": "package", "files": [], "provenance": {}})
-
-    jinn._runner = fake_runner
-    try:
-        out = jinn._handle_jinn(
-            command_args=f"skills install {REF}", session_id="session-1"
-        )
-    finally:
-        jinn._runner = None
-    assert "installed" in out
-    assert (tmp_path / "skills" / "test-driven-development" / "SKILL.md").exists()
-    assert jinn._state_for("session-1")["activity"]["installedSkillRefs"] == [REF]
 
 
 def test_uninstall_refuses_unmarked(tmp_path, monkeypatch):

@@ -35,9 +35,8 @@ def _response(
         },
         "summary": {
             "episodeRef": "episode-1",
-            "surfacedHits": [],
-            "fetchedHits": [],
-            "installedSkillRefs": [],
+            "searchedTerms": [],
+            "providedPackets": [],
             "eligibility": {
                 "eligible": True,
                 "reason": "accepted diff",
@@ -134,9 +133,10 @@ def test_delegate_posts_the_complete_episode_activity_eligibility_and_candidate(
     result = jinn._delegate_session_end(
         episode,
         activity={
+            "searchedTerms": ["dashboard", "vitest"],
+            "providedRefs": ["ref-a"],
             "surfacedRefs": ["ref-a"],
             "fetchedRefs": ["ref-a"],
-            "installedSkillRefs": [],
         },
         eligibility_inputs={"acceptedDiff": True},
         contribution_candidate=candidate,
@@ -149,9 +149,10 @@ def test_delegate_posts_the_complete_episode_activity_eligibility_and_candidate(
         "contractVersion": 1,
         "episode": episode,
         "activity": {
+            "searchedTerms": ["dashboard", "vitest"],
+            "providedRefs": ["ref-a"],
             "surfacedRefs": ["ref-a"],
             "fetchedRefs": ["ref-a"],
-            "installedSkillRefs": [],
         },
         "eligibilityInputs": {"acceptedDiff": True},
         "contributionCandidate": candidate,

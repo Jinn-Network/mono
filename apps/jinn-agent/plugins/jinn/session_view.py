@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, List
 
 from . import style
 
@@ -13,29 +13,31 @@ def _text(value: object, fallback: str = "unavailable") -> str:
     return style.sanitise(value.strip())
 
 
-def _refs(activity: Dict[str, Any], field: str) -> list[str]:
-    value = activity.get(field)
+def _terms(value: object) -> List[str]:
     if not isinstance(value, list):
         return []
-    return [_text(ref, "") for ref in value if _text(ref, "")]
+    return [_text(term, "") for term in value if _text(term, "")]
 
 
-def _knowledge_lines(activity: Dict[str, Any], nothing_found: bool) -> list[str]:
-    surfaced = _refs(activity, "surfacedRefs")
-    fetched = _refs(activity, "fetchedRefs")
-    installed = _refs(activity, "installedSkillRefs")
+def _refs(value: object) -> List[str]:
+    """Accepts either `providedPackets` (`[{ref, title}, ...]`, the
+    SessionSummary shape) or a bare ref list (the activity fallback)."""
+    if not isinstance(value, list):
+        return []
+    refs: List[str] = []
+    for item in value:
+        ref = _text(item.get("ref"), "") if isinstance(item, dict) else _text(item, "")
+        if ref:
+            refs.append(ref)
+    return refs
+
+
+def _knowledge_lines(searched_terms: List[str], provided_refs: List[str], nothing_found: bool) -> List[str]:
     if nothing_found:
-        return ["knowledge nothing relevant found"]
-    lines = [
-        f"knowledge {len(surfaced)} surfaced · {len(fetched)} fetched · "
-        f"{len(installed)} installed"
-    ]
-    if surfaced:
-        lines.append("surfaced " + ", ".join(surfaced))
-    used = list(dict.fromkeys([*fetched, *installed]))
-    if used:
-        lines.append("used " + ", ".join(used))
-    return lines
+        return ["knowledge searched · nothing relevant found"]
+    terms = ", ".join(searched_terms) if searched_terms else "(none)"
+    refs = ", ".join(provided_refs)
+    return [f"knowledge searched {terms} · provided {len(provided_refs)} ({refs})"]
 
 
 def _render(title: str, lines: Iterable[str]) -> str:
@@ -49,14 +51,12 @@ def render_current(
     *, activity: Dict[str, Any], capture_active: bool, share_enabled: bool
 ) -> str:
     """Render live state only; eligibility/contribution are end-of-session facts."""
-    nothing_yet = not any(
-        _refs(activity, field)
-        for field in ("surfacedRefs", "fetchedRefs", "installedSkillRefs")
-    )
+    searched_terms = _terms(activity.get("searchedTerms"))
+    provided_refs = _refs(activity.get("providedRefs"))
     knowledge = (
         ["knowledge nothing relevant found yet"]
-        if nothing_yet
-        else _knowledge_lines(activity, False)
+        if not searched_terms and not provided_refs
+        else _knowledge_lines(searched_terms, provided_refs, nothing_found=not provided_refs)
     )
     return _render("Jinn session", [
         *knowledge,
@@ -102,23 +102,21 @@ def render_complete(
     contribution: object,
     candidate_created: bool = True,
 ) -> str:
-    """Render one complete outcome from core facts plus host-local capture state."""
+    """Render one complete outcome from core facts plus host-local capture state.
+
+    ``summary`` is the core's `SessionSummary` (searchedTerms/providedPackets/
+    nothingFound) when the process bridge produced one; ``activity`` is the
+    host-local fallback (searchedTerms/providedRefs) used when it did not
+    (rescope §3.6).
+    """
     core = summary if isinstance(summary, dict) else {}
-    summary_activity = {
-        "surfacedRefs": core.get("surfacedRefs", activity.get("surfacedRefs", [])),
-        "fetchedRefs": core.get("fetchedRefs", activity.get("fetchedRefs", [])),
-        "installedSkillRefs": core.get(
-            "installedSkillRefs", activity.get("installedSkillRefs", [])
-        ),
-    }
+    searched_terms = _terms(core.get("searchedTerms")) or _terms(activity.get("searchedTerms"))
+    provided_refs = _refs(core.get("providedPackets")) or _refs(activity.get("providedRefs"))
     stated_nothing_found = core.get("nothingFound")
     nothing_found = (
         stated_nothing_found
         if isinstance(stated_nothing_found, bool)
-        else not any(
-            _refs(summary_activity, field)
-            for field in ("surfacedRefs", "fetchedRefs", "installedSkillRefs")
-        )
+        else not bool(provided_refs)
     )
     learning = {
         "pending": "local learning pending — capture reserved for distillation",
@@ -136,7 +134,7 @@ def render_complete(
         else "contribution no reusable public-task candidate"
     )
     return _render("Jinn session complete", [
-        *_knowledge_lines(summary_activity, nothing_found),
+        *_knowledge_lines(searched_terms, provided_refs, nothing_found),
         capture,
         learning,
         _eligibility(core.get("eligibility")),

@@ -1,24 +1,16 @@
-"""Payload-agnostic auto-pickup — the corpus's receiving end (mono #1345).
+"""Evidence-first auto-pickup — thin delegation to ``jinn-layer session
+pickup`` (Stage 1 rescope R3, closes mono #1732).
 
-At task start the harness works out what kind of task this is, looks up the
-corpus for matching payloads, and decides per candidate:
-
-  - **suggest** by default: the candidate is surfaced to the agent as injected
-    context (cache-safe: Hermes injects plugin context into the user message,
-    never the system prompt), and installing stays a deliberate act — remote
-    skills are manual-approval by default (ratified).
-  - **adopt automatically** only when the operator has opted in
-    (``autoAdopt: true`` in ``pickup.json``) AND the payload's verifiability
-    tier meets the configured threshold (default: ``evaluator-verified``) AND
-    an adopter exists for its payload type. Verification under bond is the
-    trust gate for the tier check, but auto-adoption itself is opt-in, not
-    the default.
-
-Payload-agnostic: adopters are a registry keyed by payload type. v0 ships
-one adopter (``skill`` → install into Hermes's native skills dir). Richer
-payloads — loadout recommendations (model/toolset per distribution), full
-optimised loadouts — plug in as new adopters without touching the pickup
-flow: same rail, richer payloads.
+At the first turn the plugin sends the raw first message (plus session
+metadata) to the core's evidence-first retrieval policy
+(``docs/superpowers/plans/2026-07-16-jinn-plugin-stage-1-rescope-plan.md``
+§3, implemented once in ``packages/plugin``) and renders whatever
+``contextBlock`` comes back, verbatim, into the injected context. Term
+derivation, corpus search, selection, and knowledge-packet projection all
+live in the core now — this module owns none of it, and carries no skill
+classification or auto-adopt logic (that entire rail was removed from
+pickup by R1; skills are excluded from evidence selection outright, not
+suggested or installed from here).
 
 Consumption is never consent-gated. Consent gates contributing only.
 """
@@ -27,23 +19,20 @@ from __future__ import annotations
 
 import json
 import logging
-import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
 from . import jinn_layer
-from . import onboarding
-from . import skills_install
 from .consent import get_hermes_home
+from .harness import harness_name, harness_version
 
 logger = logging.getLogger(__name__)
 
-# The point-of-use corpus signal (design 1c / #1405 step 4). Emitted once per
-# surfaced contribution: suggestions say ``surfaced`` while auto-adopted
-# knowledge says ``using``, so visibility never overclaims adoption. Default
-# sink mirrors _user_line in __init__.py:
-# stderr, which prompt_toolkit proxies above the input area while the TUI runs.
+# The point-of-use corpus signal (design 1c / #1405 step 4; rescope §3.4).
+# Emitted once per session, only when evidence was actually provided.
+# Default sink mirrors _user_line in __init__.py: stderr, which
+# prompt_toolkit proxies above the input area while the TUI runs.
 SignalSink = Callable[[str], None]
 
 
@@ -54,56 +43,17 @@ def _default_signal_sink(line: str) -> None:
         pass
 
 
-def _emit_corpus_signal(
-    sink: SignalSink,
-    skill: str,
-    provenance: str,
-    env_ref: str,
-    *,
-    action: str = "using",
-) -> None:
-    """Render + emit one ``◇ corpus`` line. Never raises — a signal must not
-    break a pickup that otherwise succeeded."""
-    try:
-        sink(onboarding.render_corpus_signal_line(
-            skill, provenance, env_ref, action=action
-        ))
-    except Exception:
-        logger.debug("jinn: corpus signal render failed", exc_info=True)
+# The one pickup setting still host-configurable. Auto-adopt, its tier
+# threshold, and the candidate cap moved into the core's fixed evidence-first
+# selection policy (rescope §3.3) and are no longer read from here — see
+# `packages/plugin/src/schemas/pickup-config.ts`'s `@deprecated` fields.
+DEFAULT_CONFIG: Dict[str, Any] = {"enabled": True}
 
-
-def _short_ref(ref: str) -> str:
-    """Abbreviate a long content ref for the signal line's envelope column."""
-    r = str(ref or "")
-    if len(r) <= 12:
-        return r
-    return f"{r[:5]}…{r[-4:]}"
-
-# Weakest → strongest; mirrors VERIFIABILITY_TIERS in the frozen envelope schema.
-TIER_ORDER = ["user-accepted", "tests-passed", "evaluator-verified"]
-
-DEFAULT_CONFIG: Dict[str, Any] = {
-    "enabled": True,
-    # Remote skills are manual-approval by default (ratified). Auto-adopt is an
-    # explicit opt-in; when off, verified candidates are SUGGESTED, not installed.
-    "autoAdopt": False,
-    # The tier at (or above) which a payload is adopted without asking, once
-    # autoAdopt is opted in.
-    "autoAdoptTier": "evaluator-verified",
-    "maxCandidates": 3,
-}
-
-# Pickup runs on the first turn, before the LLM call — keep it snappy and
-# fail-open. A broken jinn-layer must cost seconds, not the session.
-_PICKUP_TIMEOUT_S = 15
-
-_STOPWORDS = {
-    "the", "a", "an", "and", "or", "but", "for", "with", "into", "onto",
-    "this", "that", "these", "those", "from", "then", "than", "when",
-    "what", "which", "where", "how", "why", "can", "could", "should",
-    "would", "will", "just", "please", "help", "need", "want", "make",
-    "using", "about", "have", "has", "had", "you", "your", "our", "not",
-}
+# First-message length carried as the pickup request's placeholder
+# `taskSummary` (the process contract requires a non-empty string; the real
+# task summary isn't assembled until session end). Generous but bounded —
+# never truncates a realistic message, never sends unbounded input.
+_MAX_TASK_SUMMARY_CHARS = 2000
 
 
 def config_path() -> Path:
@@ -111,107 +61,84 @@ def config_path() -> Path:
 
 
 def load_config() -> Dict[str, Any]:
+    """The one pickup setting the host still owns: ``enabled``."""
     path = config_path()
     if not path.exists():
         return dict(DEFAULT_CONFIG)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         merged = dict(DEFAULT_CONFIG)
-        if isinstance(data, dict):
-            merged.update(data)
-        if merged.get("autoAdoptTier") not in TIER_ORDER:
-            merged["autoAdoptTier"] = DEFAULT_CONFIG["autoAdoptTier"]
+        if isinstance(data, dict) and "enabled" in data:
+            merged["enabled"] = bool(data["enabled"])
         return merged
     except Exception:
         logger.warning("jinn: unreadable pickup config at %s — using defaults", path)
         return dict(DEFAULT_CONFIG)
 
 
-def tier_at_least(tier: str, threshold: str) -> bool:
+def _emit_evidence_signal(sink: SignalSink, searched_terms: List[str], provided_count: int) -> None:
+    """Render + emit one ``◇ corpus`` line (rescope §3.4). Never raises — a
+    signal must not break a pickup that otherwise succeeded."""
     try:
-        return TIER_ORDER.index(tier) >= TIER_ORDER.index(threshold)
-    except ValueError:
-        return False  # unknown tier never auto-adopts
+        from . import onboarding  # local import: avoids a module cycle at import time
+        sink(onboarding.render_evidence_signal_line(searched_terms, provided_count))
+    except Exception:
+        logger.debug("jinn: corpus signal render failed", exc_info=True)
 
 
-def _pickup_runner(argv: List[str]) -> Tuple[int, str]:
-    try:
-        proc = subprocess.run(
-            argv, capture_output=True, text=True, timeout=_PICKUP_TIMEOUT_S, check=False,
-        )
-        return proc.returncode, proc.stdout.strip()
-    except Exception as exc:  # timeout, missing binary — pickup fails open
-        return 1, str(exc)
+def _build_request(
+    user_message: str,
+    session_id: str,
+    model: str,
+    repository_slug: Optional[str],
+) -> Dict[str, Any]:
+    meta: Dict[str, Any] = {
+        "sessionId": session_id or "default",
+        "taskSummary": (user_message or "(no message yet)")[:_MAX_TASK_SUMMARY_CHARS],
+        "harness": {"name": harness_name(), "version": harness_version()},
+        "model": model or "unknown",
+        "tools": [],
+    }
+    if repository_slug:
+        meta["repositorySlug"] = repository_slug
+    return {
+        "contractVersion": jinn_layer.CONTRACT_VERSION,
+        "meta": meta,
+        "firstMessage": user_message or "",
+    }
 
-
-def derive_terms(user_message: str, max_terms: int = 2) -> List[str]:
-    """Naive v0 distribution guess: distinctive words from the first line.
-
-    The corpus content search is a substring match over tags + summaries, so
-    single tokens are the useful query shape. Replaceable by real distribution
-    classification (tags from a local model, embedding lookup) without
-    touching the pickup flow.
-    """
-    first_line = (user_message or "").strip().splitlines()[0] if user_message else ""
-    terms: List[str] = []
-    for raw in first_line.lower().split():
-        word = "".join(c for c in raw if c.isalnum() or c in "-_")
-        if len(word) >= 4 and word not in _STOPWORDS and word not in terms:
-            terms.append(word)
-        if len(terms) >= max_terms:
-            break
-    return terms
-
-
-# ── Payload classification + adopters ────────────────────────────────────────
-
-def classify_payload(trace: Dict[str, Any]) -> str:
-    """Payload type of a corpus trace. v0 knows 'skill'; everything else is
-    'unknown' and is never adopted (only mentioned)."""
-    steps = trace.get("steps")
-    if isinstance(steps, list):
-        for step in steps:
-            attrs = step.get("attributes") if isinstance(step, dict) else None
-            if isinstance(attrs, dict) and isinstance(attrs.get("skill.md"), str):
-                return "skill"
-    return "unknown"
-
-
-def _adopt_skill(ref: str, runner: Optional[jinn_layer.Runner]) -> str:
-    # Auto-adopt is a real install: use the default cwd-aware runner (the pickup
-    # runner has no cwd support). Dormant by default (see Task 5).
-    path = skills_install.install(ref, runner=None)
-    return f"installed skill at {path}"
-
-
-# Payload type → adopter(ref, runner) -> human-readable receipt.
-# New payload types (loadout recommendations, full loadouts) register here.
-PAYLOAD_ADOPTERS: Dict[str, Callable[[str, Optional[jinn_layer.Runner]], str]] = {
-    "skill": _adopt_skill,
-}
-
-
-# ── The pickup ───────────────────────────────────────────────────────────────
 
 def pickup(
     user_message: str,
     runner: Optional[jinn_layer.Runner] = None,
     signal_sink: Optional[SignalSink] = None,
     activity: Optional[Dict[str, List[str]]] = None,
+    session_id: str = "",
+    model: str = "",
+    repository_slug: Optional[str] = None,
 ) -> Optional[Dict[str, str]]:
-    """First-turn corpus lookup. Returns ``{"context": ...}`` for the
-    pre_llm_call hook (or None when there is nothing worth saying).
-    Fails open: any error returns None and the task proceeds untouched.
+    """First-turn evidence pickup. Returns ``{"context": ...}`` for the
+    pre_llm_call hook (rendered verbatim into the injected context; cache-safe,
+    as today) or ``None`` when there is nothing worth injecting. Fails open:
+    any error — missing binary, contract mismatch, timeout, malformed
+    response — returns ``None`` and the task proceeds untouched.
 
-    ``signal_sink`` receives one ``◇ corpus`` line per surfaced contribution
-    (design 1c). Defaults to stderr; tests pass a collector.
+    ``activity``, when given, is populated with ``searchedTerms``/
+    ``providedRefs`` from the core's response (rescope §3.6) — the caller's
+    per-session activity dict, mutated in place.
+
+    ``signal_sink`` receives the one ``◇ corpus`` line emitted when evidence
+    is provided (rescope §3.4). Defaults to stderr; tests pass a collector.
     """
     try:
         return _pickup_inner(
             user_message,
-            runner or _pickup_runner,
+            runner,
             signal_sink or _default_signal_sink,
             activity,
+            session_id,
+            model,
+            repository_slug,
         )
     except Exception as exc:
         logger.warning("jinn: pickup failed open: %s", exc)
@@ -220,114 +147,57 @@ def pickup(
 
 def _pickup_inner(
     user_message: str,
-    runner: jinn_layer.Runner,
+    runner: Optional[jinn_layer.Runner],
     signal_sink: SignalSink,
-    activity: Optional[Dict[str, List[str]]] = None,
+    activity: Optional[Dict[str, List[str]]],
+    session_id: str,
+    model: str,
+    repository_slug: Optional[str],
 ) -> Optional[Dict[str, str]]:
     config = load_config()
     if not config.get("enabled", True):
         return None
-    terms = derive_terms(user_message)
-    if not terms:
+
+    request = _build_request(user_message, session_id, model, repository_slug)
+    code, out = jinn_layer.session_pickup(request, runner)
+    if code != 0:
         return None
 
-    # Search per term; dedupe by ref.
-    candidates: Dict[str, Dict[str, Any]] = {}
-    for term in terms:
-        code, out = jinn_layer.run(["corpus", "search", term, "--json", "--limit", "3"], runner)
-        if code != 0:
-            continue
-        try:
-            hits = json.loads(out)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(hits, list):
-            continue
-        for hit in hits:
-            if isinstance(hit, dict) and isinstance(hit.get("ref"), str):
-                candidates.setdefault(hit["ref"], hit)
-    if not candidates:
+    try:
+        envelope = jinn_layer.parse_session_pickup_response(out)
+    except ValueError:
+        return None
+    if envelope.get("status") == "unavailable":
         return None
 
-    installed = {row["slug"] for row in skills_install.list_installed()}
-    threshold = str(config["autoAdoptTier"])
-    adopted: List[str] = []
-    suggested: List[str] = []
-
-    for ref in list(candidates)[: int(config["maxCandidates"])]:
-        code, out = jinn_layer.run(["corpus", "get", ref, "--json"], runner)
-        if code != 0:
-            continue
-        try:
-            record = json.loads(out)
-            trace, _sha = skills_install._extract_trace(record)
-        except Exception:
-            continue
-        if activity is not None and ref not in activity.setdefault("fetchedRefs", []):
-            activity["fetchedRefs"].append(ref)
-
-        payload_type = classify_payload(trace)
-        tier = str(((trace.get("outcome") or {}).get("verifiabilityTier")) or "")
-        summary = str(((trace.get("task") or {}).get("summary")) or ref)[:120]
-
-        if payload_type == "skill":
-            try:
-                _md, slug = skills_install._skill_md_and_slug(trace, ref)
-            except Exception:
-                continue
-            if slug in installed:
-                continue
-            if config.get("autoAdopt") and tier_at_least(tier, threshold):
-                try:
-                    receipt = PAYLOAD_ADOPTERS[payload_type](ref, runner)
-                    adopted.append(f"- {slug} ({tier}): {receipt}")
-                    if activity is not None:
-                        if ref not in activity.setdefault("surfacedRefs", []):
-                            activity["surfacedRefs"].append(ref)
-                        if ref not in activity.setdefault("installedSkillRefs", []):
-                            activity["installedSkillRefs"].append(ref)
-                    # Point-of-use signal: the harness is now using this
-                    # operator-contributed skill in the run. One line, checkable.
-                    _emit_corpus_signal(
-                        signal_sink, slug, f"{tier} · {summary}", _short_ref(ref)
-                    )
-                except Exception as exc:
-                    logger.warning("jinn: auto-adopt of %s failed: %s", ref, exc)
-                continue
-            suggested.append(
-                f"- {slug} (tier: {tier}) — {summary}\n  ref: {ref} · install: /jinn skills install {ref}"
-            )
-            if activity is not None and ref not in activity.setdefault("surfacedRefs", []):
-                activity["surfacedRefs"].append(ref)
-            _emit_corpus_signal(
-                signal_sink,
-                slug,
-                f"{tier} · {summary}",
-                _short_ref(ref),
-                action="surfaced",
-            )
-        else:
-            # Unknown payload types are never adopted; mention verified ones only.
-            if tier_at_least(tier, threshold):
-                suggested.append(f"- ({payload_type}, {tier}) {summary} — ref: {ref}")
-                if activity is not None and ref not in activity.setdefault("surfacedRefs", []):
-                    activity["surfacedRefs"].append(ref)
-                _emit_corpus_signal(
-                    signal_sink,
-                    payload_type,
-                    f"{tier} · {summary}",
-                    _short_ref(ref),
-                    action="surfaced",
-                )
-
-    if not adopted and not suggested:
+    value = envelope.get("value")
+    if not isinstance(value, dict):
+        return None
+    # A v1 response without `packets` is treated as degraded-nothing: a stale
+    # jinn-layer that predates this field would otherwise round-trip an old
+    # `contextBlock` shape (skill suggestion/install text) through the new
+    # rendering path unverified. Never reintroduce install hints (rescope R3 AC).
+    if "packets" not in value:
         return None
 
-    lines = ["[jinn corpus] Relevant to this task:"]
-    if adopted:
-        lines.append("Adopted automatically (verified):")
-        lines.extend(adopted)
-    if suggested:
-        lines.append("Available in the corpus (unverified — read with the corpus tools, or the user can install):")
-        lines.extend(suggested)
-    return {"context": "\n".join(lines)}
+    searched_terms = [
+        term for term in (value.get("searchedTerms") or [])
+        if isinstance(term, str) and term
+    ]
+    packets = value.get("packets")
+    provided_refs: List[str] = []
+    if isinstance(packets, list):
+        for packet in packets:
+            if isinstance(packet, dict) and isinstance(packet.get("ref"), str) and packet["ref"]:
+                provided_refs.append(packet["ref"])
+
+    if activity is not None:
+        activity["searchedTerms"] = searched_terms
+        activity["providedRefs"] = provided_refs
+
+    context_block = value.get("contextBlock")
+    if not isinstance(context_block, str) or not context_block.strip():
+        return None
+
+    _emit_evidence_signal(signal_sink, searched_terms, len(provided_refs))
+    return {"context": context_block}

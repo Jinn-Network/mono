@@ -151,6 +151,46 @@ describe('projectKnowledgePacket (rescope §3.2)', () => {
     expect(packet.excerpts).toEqual([]);
   });
 
+  describe('seed-authored steps (rescope R4 — seed.step.label/text convention)', () => {
+    it('trusts a seed-authored excerpt verbatim, in step order, instead of the tool.* heuristic', () => {
+      const steps: CorpusRecordStep[] = [
+        step({ attributes: { 'seed.step.label': 'failure', 'seed.step.text': 'FAIL: expected true' } }),
+        step({ attributes: { 'seed.step.label': 'note', 'seed.step.text': 'diagnosis prose' } }),
+        step({ attributes: { 'seed.step.label': 'fix', 'seed.step.text': 'the correction, in prose' } }),
+        step({ attributes: { 'seed.step.label': 'diff', 'seed.step.text': '--- a/x\n+++ b/x' } }),
+        step({ attributes: { 'seed.step.label': 'command', 'seed.step.text': 'yarn test — passing' } }),
+      ];
+      const packet = projectKnowledgePacket(record({ steps }));
+      expect(packet.excerpts).toEqual([
+        { label: 'failure', text: 'FAIL: expected true' },
+        { label: 'note', text: 'diagnosis prose' },
+        { label: 'fix', text: 'the correction, in prose' },
+        { label: 'diff', text: '--- a/x\n+++ b/x' },
+        { label: 'command', text: 'yarn test — passing' },
+      ]);
+    });
+
+    it('ignores a seed step with an invalid label rather than crashing', () => {
+      const steps: CorpusRecordStep[] = [
+        step({ attributes: { 'seed.step.label': 'bogus', 'seed.step.text': 'x' } }),
+        step({ attributes: { 'tool.args': 'pytest', 'tool.exitCode': 1, 'tool.result': 'FAIL' } }),
+      ];
+      const packet = projectKnowledgePacket(record({ steps }));
+      // No valid seed-shaped step exists, so selection falls through to the
+      // tool.* heuristic rather than emitting an excerpt for the bogus label.
+      expect(packet.excerpts).toEqual([{ label: 'failure', text: 'pytest\nFAIL' }]);
+    });
+
+    it('never mixes seed-authored steps with the tool.* heuristic on the same record', () => {
+      const steps: CorpusRecordStep[] = [
+        step({ attributes: { 'seed.step.label': 'command', 'seed.step.text': 'the seed-authored command' } }),
+        step({ attributes: { 'tool.args': 'a real tool call', 'tool.exitCode': 0 } }),
+      ];
+      const packet = projectKnowledgePacket(record({ steps }));
+      expect(packet.excerpts).toEqual([{ label: 'command', text: 'the seed-authored command' }]);
+    });
+  });
+
   it('never paraphrases: excerpt text is a verbatim slice of the source attributes', () => {
     const verbatim = 'AssertionError: expected true to be false at line 42';
     const steps: CorpusRecordStep[] = [

@@ -176,8 +176,18 @@ try {
   assert.equal(shareOn.publicationState, 'queued');
   assert.equal(shareOff.candidate.sourceId, result.shareOffRecordId);
   assert.equal(shareOn.candidate.sourceId, result.shareOnRecordId);
-  const shareOnSession = result.sessions.find((row) => row.sessionId === 'stage1-share-on');
-  assert.ok(shareOnSession);
+  // The Python driver declares which of its sessions carried each candidate
+  // (shareOn/shareOffSessionId) — look the sessions up by that declared id,
+  // then verify the store linkage independently via episodeId. Selecting by
+  // episodeId instead would make the linkage assertion tautological.
+  const shareOffSession = result.sessions.find(
+    (row) => row.sessionId === result.shareOffSessionId,
+  );
+  const shareOnSession = result.sessions.find(
+    (row) => row.sessionId === result.shareOnSessionId,
+  );
+  assert.ok(shareOffSession && shareOnSession);
+  assert.equal(shareOff.candidate.sourceId, shareOffSession.episodeId);
   assert.equal(shareOn.candidate.sourceId, shareOnSession.episodeId);
 
   // With no publication sidecar, both records still mint locally and nothing

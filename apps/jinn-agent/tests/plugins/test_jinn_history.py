@@ -51,7 +51,7 @@ def test_history_renders_real_session_facts_and_skill_state():
     out = _plain(history_view.render_history([_entry()]))
     assert "Jinn history · 1 session" in out
     assert "Fix the retry bridge" in out
-    assert "2 surfaced · 1 used" in out
+    assert "knowledge searched 2 · provided 1" in out
     assert "eligible" in out
     assert "contribution queued" in out
     assert "retry-budget (installed)" in out

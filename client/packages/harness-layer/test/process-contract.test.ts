@@ -434,9 +434,12 @@ describe('jinn-layer process contract v1', () => {
             },
           },
           summary: {
-            surfacedRefs: ['knowledge/ref-1'],
-            fetchedRefs: ['knowledge/ref-1'],
-            nothingFound: false,
+            // The request's activity carries only the pre-rescope legacy
+            // fields (no searchedTerms/providedRefs) — the summary honestly
+            // reports nothing provided in the new-shape sense (rescope §3.6).
+            searchedTerms: [],
+            providedPackets: [],
+            nothingFound: true,
           },
         },
       });
