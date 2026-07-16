@@ -161,6 +161,34 @@ def test_delegate_posts_the_complete_episode_activity_eligibility_and_candidate(
     assert request["episode"] == episode
 
 
+def test_delegate_parses_normally_when_stderr_carries_a_warning(monkeypatch):
+    """mono#1787: a stderr diagnostic on the real subprocess path (e.g. the
+    harness's "skipping malformed legacy capture" warning) must never
+    corrupt a structurally valid stdout v1 envelope."""
+    episode = _episode()
+
+    def fake_default_runner(argv, cwd=None, input=None, timeout_s=jinn.jinn_layer._TIMEOUT_S):
+        request = json.loads(input or "{}")
+        episode_id = (request.get("episode") or {}).get("episodeId", "episode-1")
+        return (
+            0,
+            _response(episode_id=episode_id),
+            "[evidence] skipping malformed legacy capture "
+            "s1-1784122564637021000.json: some warning",
+        )
+
+    monkeypatch.setattr(jinn.jinn_layer, "_default_runner", fake_default_runner)
+    jinn._runner = None
+
+    result = jinn._delegate_session_end(
+        episode, activity={}, eligibility_inputs={}, contribution_candidate=None,
+        contribution_vetoed=False,
+    )
+
+    assert result is not None
+    assert result["persistence"]["value"]["episodeId"] == "episode-1"
+
+
 def test_degraded_contribution_does_not_duplicate_successfully_persisted_episode():
     jinn._runner = SessionRunner(
         output=_response(

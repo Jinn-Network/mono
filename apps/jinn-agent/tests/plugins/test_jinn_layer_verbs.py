@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 
 from plugins.jinn import jinn_layer
 
@@ -32,7 +33,7 @@ def test_session_end_writes_one_complete_request_to_stdin():
         "eligibilityInputs": {"acceptedDiff": True},
     }
 
-    code, _ = jinn_layer.session_end(request, runner=runner)
+    code, _out, _err = jinn_layer.session_end(request, runner=runner)
 
     assert code == 0
     assert runner.calls == [
@@ -54,7 +55,7 @@ def test_session_pickup_writes_one_complete_request_to_stdin():
         "firstMessage": "fix the flaky test",
     }
 
-    code, _ = jinn_layer.session_pickup(request, runner=runner)
+    code, _out, _err = jinn_layer.session_pickup(request, runner=runner)
 
     assert code == 0
     assert runner.calls == [
@@ -70,13 +71,60 @@ def test_session_pickup_uses_a_tighter_timeout_than_the_general_default(monkeypa
 
     def fake_default_runner(argv, cwd=None, input=None, timeout_s=jinn_layer._TIMEOUT_S):
         calls.append(timeout_s)
-        return 0, '{"contractVersion":1,"status":"ok","value":{}}'
+        return 0, '{"contractVersion":1,"status":"ok","value":{}}', ""
 
     monkeypatch.setattr(jinn_layer, "_default_runner", fake_default_runner)
     jinn_layer.session_pickup({"contractVersion": 1})
 
     assert calls == [jinn_layer._SESSION_PICKUP_TIMEOUT_S]
     assert jinn_layer._SESSION_PICKUP_TIMEOUT_S < jinn_layer._TIMEOUT_S
+
+
+# ── Stream separation (mono #1787) ──────────────────────────────────────────
+#
+# `_default_runner` genuinely has separate stdout/stderr streams (unlike a
+# test double). A real subprocess writing a diagnostic to stderr — e.g. the
+# evidence-adapter's "skipping malformed legacy capture" warning — must never
+# corrupt a structurally valid stdout JSON response.
+
+def test_default_runner_separates_stdout_and_stderr_so_json_parsing_stays_clean():
+    payload = '{"contractVersion":1,"status":"ok","value":{}}'
+    script = (
+        "import sys; "
+        "sys.stderr.write('[evidence] skipping malformed legacy capture "
+        "s1-1784122564637021000.json: some warning\\n'); "
+        f"sys.stdout.write({payload!r})"
+    )
+
+    code, out, err = jinn_layer._default_runner([sys.executable, "-c", script])
+
+    assert code == 0
+    assert out == payload
+    assert "skipping malformed legacy capture" in err
+    # The actual regression: parsing must consume stdout only.
+    envelope = jinn_layer.parse_process_response(out)
+    assert envelope["status"] == "ok"
+
+
+def test_default_runner_still_reports_stderr_on_a_real_non_zero_exit():
+    script = "import sys; sys.stderr.write('boom\\n'); sys.exit(3)"
+
+    code, out, err = jinn_layer._default_runner([sys.executable, "-c", script])
+
+    assert code == 3
+    assert out == ""
+    assert err == "boom"
+
+
+def test_run_normalizes_a_two_tuple_injected_runner_to_a_three_tuple():
+    """A custom `Runner` never had a stdout/stderr split — `run()` pads it
+    with an empty stderr so every caller sees the same 3-tuple shape."""
+    def two_tuple_runner(argv, *, input=None):
+        return 0, "plain response"
+
+    code, out, err = jinn_layer.run(["contract", "--json"], two_tuple_runner)
+
+    assert (code, out, err) == (0, "plain response", "")
 
 
 def test_parse_session_pickup_response_accepts_the_exact_v1_envelope():

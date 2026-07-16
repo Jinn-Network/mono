@@ -512,11 +512,13 @@ def test_slash_consent_never_calls_blocking_input(isolated_home, monkeypatch):
 def test_jinn_layer_not_found_points_at_canary_tag():
     """mono#1382: bare `npm install -g @jinn-network/client` installs latest,
     which has no jinn-layer bin until stable >= 0.1.10 — the error must name
-    the canary tag."""
-    code, out = jinn_layer._default_runner(["definitely-not-a-real-binary-xyz"])
+    the canary tag. mono#1787: the diagnostic lives on stderr now (stdout
+    and stderr are reported separately), not merged into a single string."""
+    code, out, err = jinn_layer._default_runner(["definitely-not-a-real-binary-xyz"])
     assert code == 127
-    assert "@jinn-network/client@canary" in out
-    assert "JINN_LAYER_BIN" in out
+    assert out == ""
+    assert "@jinn-network/client@canary" in err
+    assert "JINN_LAYER_BIN" in err
 
 
 # ── Consent copy: current state + preview next-step (mono#1384) ──────────────

@@ -18,9 +18,10 @@ def test_corpus_search_emits_limit_and_json_flags():
         captured.append(argv)
         return 0, "[]"
 
-    code, out = jinn_layer.corpus_search("", limit=500, as_json=True, runner=runner)
+    code, out, err = jinn_layer.corpus_search("", limit=500, as_json=True, runner=runner)
     assert code == 0
     assert out == "[]"
+    assert err == ""
     assert captured[0][1:] == ["corpus", "search", "", "--limit", "500", "--json"]
 
 

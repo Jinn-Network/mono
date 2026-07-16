@@ -118,11 +118,11 @@ def install(ref: str, runner: Optional[jinn_layer.Runner] = None) -> str:
     """
     skills_root = skills_dir()
     skills_root.mkdir(parents=True, exist_ok=True)
-    code, out = jinn_layer.run(
+    code, out, err = jinn_layer.run(
         ["skills", "install", ref, "--json"], runner, cwd=str(skills_root)
     )
     if code != 0:
-        raise ValueError(f"skills install failed: {out}")
+        raise ValueError(f"skills install failed: {err or out}")
     try:
         result = json.loads(out)
         target = Path(result["dir"])

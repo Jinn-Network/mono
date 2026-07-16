@@ -21,6 +21,11 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+# The injected/test-double contract: a mock has no real OS-level stdout vs
+# stderr split, so it returns one string. `_default_runner` (the real
+# subprocess wrapper, below) genuinely has both streams and returns a
+# 3-tuple; `run()`/`session_pickup()` normalize either shape to the 3-tuple
+# every caller now sees (mono #1787).
 Runner = Callable[..., Tuple[int, str]]
 
 _TIMEOUT_S = 120
@@ -32,7 +37,7 @@ def _default_runner(
     cwd: Optional[str] = None,
     input: Optional[str] = None,
     timeout_s: int = _TIMEOUT_S,
-) -> Tuple[int, str]:
+) -> Tuple[int, str, str]:
     try:
         proc = subprocess.run(
             argv,
@@ -43,23 +48,32 @@ def _default_runner(
             cwd=cwd,
             input=input,
         )
-        out = proc.stdout + (("\n" + proc.stderr) if proc.stderr.strip() else "")
-        return proc.returncode, out.strip()
+        return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
     except FileNotFoundError:
         # The jinn-layer bin ships on the canary tag until the next stable
         # release (>= 0.1.10) carries it — flip @canary back to bare
         # @jinn-network/client here and in README.md once that stable ships
         # (see Jinn-Network/mono#1368).
-        return 127, (
+        return 127, "", (
             f"{argv[0]}: not found. Install the Jinn layer "
             "(npm install -g @jinn-network/client@canary) or set JINN_LAYER_BIN."
         )
     except subprocess.TimeoutExpired:
-        return 124, f"{argv[0]}: timed out after {timeout_s}s"
+        return 124, "", f"{argv[0]}: timed out after {timeout_s}s"
 
 
 def binary() -> str:
     return (os.environ.get("JINN_LAYER_BIN") or "").strip() or "jinn-layer"
+
+
+def _normalize_result(result: Tuple[int, str] | Tuple[int, str, str]) -> Tuple[int, str, str]:
+    """A custom `Runner` returns `(code, out)`; `_default_runner` returns
+    `(code, stdout, stderr)`. Every caller of `run()`/`session_pickup()` sees
+    the 3-tuple regardless of which one produced it (mono #1787)."""
+    if len(result) == 3:
+        return result  # type: ignore[return-value]
+    code, out = result
+    return code, out, ""
 
 
 def run(
@@ -67,10 +81,11 @@ def run(
     runner: Optional[Runner] = None,
     cwd: Optional[str] = None,
     input: Optional[str] = None,
-) -> Tuple[int, str]:
+) -> Tuple[int, str, str]:
     argv = [binary(), *args]
     if runner is not None:
-        return runner(argv, input=input) if input is not None else runner(argv)
+        result = runner(argv, input=input) if input is not None else runner(argv)
+        return _normalize_result(result)
     return _default_runner(argv, cwd, input)
 
 
@@ -100,23 +115,26 @@ def spawn(args: List[str], stdout_path: Path, stderr_path: Path) -> int:
 
 
 # ── Verbs ────────────────────────────────────────────────────────────────────
+# Every verb below is a thin `run()` wrapper, so each now returns
+# `(code, stdout, stderr)` — no verb body changes, only the shared `run()`
+# they call through (mono #1787).
 
-def capture_preview(task_file: Path, runner: Optional[Runner] = None) -> Tuple[int, str]:
+def capture_preview(task_file: Path, runner: Optional[Runner] = None) -> Tuple[int, str, str]:
     return run(["capture", "preview", str(task_file)], runner)
 
 
-def publish(task_file: Path, veto: bool = False, runner: Optional[Runner] = None) -> Tuple[int, str]:
+def publish(task_file: Path, veto: bool = False, runner: Optional[Runner] = None) -> Tuple[int, str, str]:
     args = ["publish", str(task_file)]
     if veto:
         args.append("--veto")
     return run(args, runner)
 
 
-def ledger(runner: Optional[Runner] = None) -> Tuple[int, str]:
+def ledger(runner: Optional[Runner] = None) -> Tuple[int, str, str]:
     return run(["ledger"], runner)
 
 
-def ledger_json(runner: Optional[Runner] = None) -> Tuple[int, str]:
+def ledger_json(runner: Optional[Runner] = None) -> Tuple[int, str, str]:
     """Structured ledger rows for the fork-side renderer (ledger_view).
 
     Depends on ``jinn-layer ledger --json`` (harness-layer). When the layer
@@ -131,7 +149,7 @@ def corpus_search(
     limit: int = 500,
     as_json: bool = True,
     runner: Optional[Runner] = None,
-) -> Tuple[int, str]:
+) -> Tuple[int, str, str]:
     """Corpus search. The CLI owns clamping ([1,500]) and ``""`` = all records.
 
     ``as_json`` emits ``--json`` (harness-layer prints ``JSON.stringify(hits)``,
@@ -145,12 +163,12 @@ def corpus_search(
     return run(args, runner)
 
 
-def contract(runner: Optional[Runner] = None) -> Tuple[int, str]:
+def contract(runner: Optional[Runner] = None) -> Tuple[int, str, str]:
     """Read the layer's versioned host/process contract."""
     return run(["contract", "--json"], runner)
 
 
-def session_end(request: Dict[str, Any], runner: Optional[Runner] = None) -> Tuple[int, str]:
+def session_end(request: Dict[str, Any], runner: Optional[Runner] = None) -> Tuple[int, str, str]:
     """Delegate one already-assembled EpisodeV1 through stdin."""
     payload = json.dumps(request, separators=(",", ":"))
     return run(["session", "end"], runner, input=payload)
@@ -163,20 +181,20 @@ def session_end(request: Dict[str, Any], runner: Optional[Runner] = None) -> Tup
 _SESSION_PICKUP_TIMEOUT_S = 15
 
 
-def session_pickup(request: Dict[str, Any], runner: Optional[Runner] = None) -> Tuple[int, str]:
+def session_pickup(request: Dict[str, Any], runner: Optional[Runner] = None) -> Tuple[int, str, str]:
     """Delegate one first-turn evidence-pickup request through stdin
     (Stage 1 rescope R3) — the ``session end`` stdin-JSON pattern, applied
     to the sibling verb."""
     payload = json.dumps(request, separators=(",", ":"))
     argv = [binary(), "session", "pickup"]
     if runner is not None:
-        return runner(argv, input=payload)
+        return _normalize_result(runner(argv, input=payload))
     return _default_runner(argv, input=payload, timeout_s=_SESSION_PICKUP_TIMEOUT_S)
 
 
 def contribution_preview(
     *, acknowledge: bool = False, runner: Optional[Runner] = None
-) -> Tuple[int, str]:
+) -> Tuple[int, str, str]:
     args = ["contribution", "preview"]
     if acknowledge:
         args.append("--ack")
@@ -184,15 +202,15 @@ def contribution_preview(
     return run(args, runner)
 
 
-def contribution_ledger_json(runner: Optional[Runner] = None) -> Tuple[int, str]:
+def contribution_ledger_json(runner: Optional[Runner] = None) -> Tuple[int, str, str]:
     return run(["contribution", "ledger", "--json"], runner)
 
 
-def contribution_disable(runner: Optional[Runner] = None) -> Tuple[int, str]:
+def contribution_disable(runner: Optional[Runner] = None) -> Tuple[int, str, str]:
     return run(["contribution", "disable", "--json"], runner)
 
 
-def history_json(runner: Optional[Runner] = None) -> Tuple[int, str]:
+def history_json(runner: Optional[Runner] = None) -> Tuple[int, str, str]:
     """Read history derived from canonical layer-owned evidence."""
     return run(["history", "--json"], runner)
 

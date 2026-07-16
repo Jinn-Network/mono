@@ -918,7 +918,7 @@ def _read_contribution_count() -> Optional[int]:
     """
     try:
         from plugins.jinn import jinn_layer, ledger_view
-        code, out = jinn_layer.ledger_json()
+        code, out, _err = jinn_layer.ledger_json()
         if code != 0:
             return None
         rows = ledger_view.rows_from_json(json.loads(out))
@@ -940,7 +940,7 @@ def _read_corpus() -> Dict[str, object]:
     """
     try:
         from plugins.jinn import jinn_layer
-        code, out = jinn_layer.corpus_search("", limit=500, as_json=True)
+        code, out, _err = jinn_layer.corpus_search("", limit=500, as_json=True)
         if code == 0:
             hits = json.loads(out)
             if isinstance(hits, list):
