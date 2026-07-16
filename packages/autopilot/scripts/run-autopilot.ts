@@ -19,6 +19,7 @@ import { deriveInFlight, listTaskWorktrees } from '../src/dispatcher/state.js';
 import { syncReviewLabels } from '../src/dispatcher/label-sweep.js';
 import { syncDrift } from '../src/dispatcher/drift-sweep.js';
 import { syncMerges } from '../src/dispatcher/merge-sweep.js';
+import { escalateStuckPrs } from '../src/dispatcher/stuck-escalation.js';
 import { dispatchIssue } from '../src/dispatcher/dispatch.js';
 import { SESSIONS_LOG_DIR } from '../src/dispatcher/session-log.js';
 import { GhPrSource } from '../src/dispatcher/pr-source.js';
@@ -740,6 +741,23 @@ async function main(): Promise<void> {
           }
           for (const s of mr.skipped) {
             console.log(`[autopilot] merge (waiting/needs a human): ${s}`);
+          }
+          // Stage A: make stuck PRs (conflict / still-behind) visible on the
+          // board — label review:needs-human + linked-issue Blocked on: Human +
+          // one comment. Idempotent (the label suppresses re-escalation next
+          // cycle via StuckPr.escalated).
+          if (mr.stuck.length > 0) {
+            const esc = await escalateStuckPrs(
+              mr.stuck, snapshot, cyclePrByIssue, cycleFieldCache, realRunner,
+            );
+            if (esc.escalated.length > 0) {
+              console.log(
+                `[autopilot] merge: stuck → escalated (needs-human) → PR #${esc.escalated.join(', PR #')}`,
+              );
+            }
+            for (const sk of esc.skipped) {
+              console.log(`[autopilot] merge: stuck escalation skipped: ${sk}`);
+            }
           }
         } catch (err) {
           console.error('[autopilot] merge sweep error (cycle unaffected):', err);
