@@ -37,15 +37,24 @@ const EXPECTED_FILES = [...EPISODE_FILES, ...SKILL_FILES].sort();
  * raw JSON text's `\n`/`\t` escape sequences are single-backslash-plus-letter
  * and would otherwise false-positive against a naive "letter:\" pattern.
  */
-const ABSOLUTE_PATH_PATTERNS: Array<[string, RegExp]> = [
-  [
-    'common Unix absolute path',
-    /\/(?:Users|Volumes|home|root|private|tmp|var|etc|opt|usr|srv|mnt)(?:\/[^\s"'`]+)+/,
-  ],
-  ['Windows drive path', /\b[A-Za-z]:[\\/][^\s"'`]+/],
-  ['Windows UNC path', /\\\\[^\\/\s"'`]+[\\/][^\s"'`]+/],
-  ['forward-slash UNC path', /(?<!:)\/\/[^/\s"'`]+\/[^\s"'`]+/],
-  ['home-dir tilde path', /~\/[^\s"'`]+/],
+function hasPosixAbsolutePath(value: string): boolean {
+  for (const match of value.matchAll(/(?:^|[\s("'`=\[:,])\/[^\s"'`]+/g)) {
+    const slash = match[0]!.indexOf('/');
+    const candidate = match[0]!.slice(slash).replace(/[)\],.;:]+$/, '');
+    if (candidate.startsWith('//')) continue; // URL/UNC handled separately.
+    const segments = candidate.slice(1).split('/').filter(Boolean);
+    if (/^v\d+$/i.test(segments[0] ?? '')) continue; // HTTP API route, not a filesystem path.
+    if (segments.length >= 2) return true;
+  }
+  return false;
+}
+
+const ABSOLUTE_PATH_DETECTORS: Array<[string, (value: string) => boolean]> = [
+  ['POSIX absolute path', hasPosixAbsolutePath],
+  ['Windows drive path', (value) => /\b[A-Za-z]:[\\/][^\s"'`]+/.test(value)],
+  ['Windows UNC path', (value) => /\\\\[^\\/\s"'`]+[\\/][^\s"'`]+/.test(value)],
+  ['forward-slash UNC path', (value) => /(?<!:)\/\/[^/\s"'`]+\/[^\s"'`]+/.test(value)],
+  ['home-dir tilde path', (value) => /~\/[^\s"'`]+/.test(value)],
 ];
 
 function rawText(file: string): string {
@@ -91,13 +100,17 @@ describe('stage1-seeds fixture set (issue #1771)', () => {
       ['/root/.jinn-client/state.json'],
       ['/mnt/data/results.json'],
       ['/Volumes/build/output.json'],
+      ['/workspace/project/file.ts'],
+      ['/builds/group/project/file.ts'],
+      ['/data/results/output.json'],
+      ['/nix/store/abc123-package/bin/tool'],
       ['C:\\Users\\someone\\project\\file.ts'],
       ['D:/work/project/file.ts'],
       ['\\\\server\\share\\project\\file.ts'],
       ['//server/share/project/file.ts'],
       ['~/project/file.ts'],
     ])('flags %j', (canary) => {
-      expect(ABSOLUTE_PATH_PATTERNS.some(([, pattern]) => pattern.test(canary))).toBe(true);
+      expect(ABSOLUTE_PATH_DETECTORS.some(([, detects]) => detects(canary))).toBe(true);
     });
 
     it('does not flag repo-relative paths', () => {
@@ -105,9 +118,12 @@ describe('stage1-seeds fixture set (issue #1771)', () => {
         'client/src/dashboard/spa/src/notifications/useNotifications.test.tsx',
         'sympy/printing/tests/test_latex.py',
         '$ yarn --cwd client test',
+        'https://example.com/workspace/project/file.ts',
+        'Run /jinn to start the command.',
+        'Use /capture-meta for metadata.',
       ]) {
         expect(
-          ABSOLUTE_PATH_PATTERNS.some(([, pattern]) => pattern.test(clean)),
+          ABSOLUTE_PATH_DETECTORS.some(([, detects]) => detects(clean)),
           `false positive on ${JSON.stringify(clean)}`,
         ).toBe(false);
       }
@@ -121,8 +137,8 @@ describe('stage1-seeds fixture set (issue #1771)', () => {
 
     it('contains no absolute path, home-dir tilde, or Windows drive path', () => {
       for (const s of allStrings(parseJson(file))) {
-        for (const [label, pattern] of ABSOLUTE_PATH_PATTERNS) {
-          expect(pattern.test(s), `${file}: matched ${label} in ${JSON.stringify(s.slice(0, 80))}`).toBe(false);
+        for (const [label, detects] of ABSOLUTE_PATH_DETECTORS) {
+          expect(detects(s), `${file}: matched ${label} in ${JSON.stringify(s.slice(0, 80))}`).toBe(false);
         }
       }
     });
@@ -160,8 +176,8 @@ describe('stage1-seeds fixture set (issue #1771)', () => {
 
     it('contains no absolute path, home-dir tilde, or Windows drive path', () => {
       for (const s of allStrings(parseJson(file))) {
-        for (const [label, pattern] of ABSOLUTE_PATH_PATTERNS) {
-          expect(pattern.test(s), `${file}: matched ${label} in ${JSON.stringify(s.slice(0, 80))}`).toBe(false);
+        for (const [label, detects] of ABSOLUTE_PATH_DETECTORS) {
+          expect(detects(s), `${file}: matched ${label} in ${JSON.stringify(s.slice(0, 80))}`).toBe(false);
         }
       }
     });

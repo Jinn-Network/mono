@@ -16,6 +16,7 @@
 import { capture, type CapturedTask } from '../capture.js';
 import { buildScrubPipeline } from '../../../../src/trajectory/scrub/build.js';
 import { publish, type HarnessPublishDeps } from '../publish.js';
+import type { Attributes } from '../../../../src/trajectory/scrub/types.js';
 import { episodeContentDigest, type EpisodeSource, type SeedEpisode } from './episode-fetch.js';
 import type { EpisodeImportReport } from './episode-report.js';
 import {
@@ -32,6 +33,8 @@ export interface EpisodeImportResult {
     supersedes: string | null;
     /** Publication succeeded, but local lineage state needs operator recovery. */
     stateWarning?: string;
+    /** Anchor succeeded, but the local publication ledger needs recovery. */
+    ledgerWarning?: string;
   }>;
   skipped: Array<{ id: string; reason: string }>;
   errors: Array<{ id: string; error: string }>;
@@ -108,6 +111,32 @@ function toCapturedTask(episode: SeedEpisode, now: Date, supersedes: string | un
   };
 }
 
+/** Every episode-originated string that can influence the published envelope. */
+function episodePrivacyAttributes(episode: SeedEpisode): Attributes {
+  const attributes: Attributes = {
+    'episode.id': episode.id,
+    'episode.repo': episode.repo,
+    'episode.taskSummary': episode.taskSummary,
+    'episode.outcome.status': episode.outcome.status,
+    'episode.outcome.verifiabilityTier': episode.outcome.verifiabilityTier,
+    'episode.synthesis': episode.synthesis,
+    'episode.attribution.origin': episode.attribution.origin,
+  };
+  if (episode.baseCommit) attributes['episode.baseCommit'] = episode.baseCommit;
+  if (episode.attribution.sourceUrl) {
+    attributes['episode.attribution.sourceUrl'] = episode.attribution.sourceUrl;
+  }
+  episode.tags.forEach((tag, index) => {
+    attributes[`episode.tags[${index}]`] = tag;
+  });
+  episode.steps.forEach((step, index) => {
+    attributes[`episode.steps[${index}].label`] = step.label;
+    attributes[`episode.steps[${index}].title`] = step.title;
+    attributes[`episode.steps[${index}].text`] = step.text;
+  });
+  return attributes;
+}
+
 export async function executeEpisodes(
   report: EpisodeImportReport,
   source: EpisodeSource,
@@ -149,6 +178,17 @@ export async function executeEpisodes(
         continue;
       }
 
+      const privacy = await episodeScrubPipeline.run(episodePrivacyAttributes(episode));
+      if (privacy.redactions.length > 0) {
+        const detectors = [
+          ...new Set(privacy.redactions.map((redaction) =>
+            `${redaction.stage}${redaction.detail ? `:${redaction.detail}` : ''}`)),
+        ];
+        throw new Error(
+          `sensitive content detected (${detectors.join(', ')}); refusing to publish evidence episode ${row.id}`,
+        );
+      }
+
       const pending = await capture(toCapturedTask(episode, now, prior?.envelopeRef), {
         pipeline: episodeScrubPipeline,
       });
@@ -162,7 +202,17 @@ export async function executeEpisodes(
           `sensitive content detected (${detectors.join(', ')}); refusing to publish evidence episode ${row.id}`,
         );
       }
-      const published = await publish(pending, deps);
+      let published;
+      try {
+        published = await publish(pending, deps);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        result.errors.push({
+          id: row.id,
+          error: `publication outcome unknown; do not auto-retry: ${detail}`,
+        });
+        break;
+      }
       if (published.vetoed) throw new Error('unexpected veto on seed publish');
 
       let stateWarning: string | undefined;
@@ -179,8 +229,10 @@ export async function executeEpisodes(
         envelopeRef: published.envelopeRef,
         anchorTx: published.anchorTx,
         supersedes: prior?.envelopeRef ?? null,
+        ...(published.ledgerWarning ? { ledgerWarning: published.ledgerWarning } : {}),
         ...(stateWarning ? { stateWarning } : {}),
       });
+      if (published.ledgerWarning || stateWarning) break;
     } catch (err) {
       result.errors.push({
         id: row.id,

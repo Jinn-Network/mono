@@ -1183,6 +1183,7 @@ export async function runJinnLayerCli(
             `    ref     ${row.envelopeRef}`,
             `    anchor  ${row.anchorTx ? `${TESTNET_EXPLORER_TX_URL}${row.anchorTx}` : '-'}`,
             ...(row.supersedes ? [`    supersedes ${row.supersedes}`] : []),
+            ...(row.ledgerWarning ? [`    WARNING ${row.ledgerWarning}`] : []),
             ...(row.stateWarning ? [`    WARNING ${row.stateWarning}`] : []),
           );
         }
@@ -1190,7 +1191,10 @@ export async function runJinnLayerCli(
         for (const row of result.errors) lines.push(`  ERROR    ${row.id} — ${row.error}`);
         writer.write(lines.join('\n') + '\n');
       }
-      return result.errors.length > 0 || result.imported.some((row) => row.stateWarning !== undefined) ? 1 : 0;
+      return result.errors.length > 0 ||
+        result.imported.some((row) => row.stateWarning !== undefined || row.ledgerWarning !== undefined)
+        ? 1
+        : 0;
     }
 
     const report = parseImportReport(JSON.parse(readFileSync(reportFile, 'utf-8')));
@@ -1210,6 +1214,7 @@ export async function runJinnLayerCli(
           `  IMPORTED ${row.skill}`,
           `    ref     ${row.envelopeRef}`,
           `    anchor  ${row.anchorTx ? `${TESTNET_EXPLORER_TX_URL}${row.anchorTx}` : '-'}`,
+          ...(row.ledgerWarning ? [`    WARNING ${row.ledgerWarning}`] : []),
           ...(row.stateWarning ? [`    WARNING ${row.stateWarning}`] : []),
         );
       }
@@ -1217,7 +1222,10 @@ export async function runJinnLayerCli(
       for (const row of result.errors) lines.push(`  ERROR    ${row.skill} — ${row.error}`);
       writer.write(lines.join('\n') + '\n');
     }
-    return result.errors.length > 0 || result.imported.some((row) => row.stateWarning !== undefined) ? 1 : 0;
+    return result.errors.length > 0 ||
+      result.imported.some((row) => row.stateWarning !== undefined || row.ledgerWarning !== undefined)
+      ? 1
+      : 0;
   }
 
   if (isDistillModels) {

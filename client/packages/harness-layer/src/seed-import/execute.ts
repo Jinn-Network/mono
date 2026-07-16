@@ -47,6 +47,8 @@ export interface ImportResult {
     anchorTx: string | null;
     /** Publication succeeded, but local lineage state needs operator recovery. */
     stateWarning?: string;
+    /** Anchor succeeded, but the local publication ledger needs recovery. */
+    ledgerWarning?: string;
   }>;
   skipped: Array<{ skill: string; reason: string }>;
   errors: Array<{ skill: string; error: string }>;
@@ -219,9 +221,19 @@ export async function execute(
       const pending = await capture(toCapturedTask(skill, now), {
         pipeline: seedScrubPipeline,
       });
-      const published = await publish(pending, deps, {
-        skill: toSkillArtifact(skill, deps.participant.safeAddress, prior?.envelopeRef),
-      });
+      let published;
+      try {
+        published = await publish(pending, deps, {
+          skill: toSkillArtifact(skill, deps.participant.safeAddress, prior?.envelopeRef),
+        });
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        result.errors.push({
+          skill: row.skill,
+          error: `publication outcome unknown; do not auto-retry: ${detail}`,
+        });
+        break;
+      }
       if (published.vetoed) throw new Error('unexpected veto on seed publish');
       let stateWarning: string | undefined;
       try {
@@ -236,8 +248,10 @@ export async function execute(
         skill: row.skill,
         envelopeRef: published.envelopeRef,
         anchorTx: published.anchorTx,
+        ...(published.ledgerWarning ? { ledgerWarning: published.ledgerWarning } : {}),
         ...(stateWarning ? { stateWarning } : {}),
       });
+      if (published.ledgerWarning || stateWarning) break;
     } catch (err) {
       result.errors.push({
         skill: row.skill,

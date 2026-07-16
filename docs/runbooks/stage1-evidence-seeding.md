@@ -16,7 +16,7 @@ least once.
 
 A seed-episode JSON file is a *transformed*, human-reviewed artifact, not a
 raw capture. It is published through the exact same `capture() -> publish()`
-path a real contribution uses (seed-profile scrub, `provenance: 'imported'`,
+path a real contribution uses (strict trace scrub, `provenance: 'imported'`,
 excluded from the demand signal and emissions eligibility), so a seeded
 evidence record is indistinguishable on the wire from an organically
 captured one — see `client/packages/harness-layer/src/seed-import/episode-execute.ts`.
@@ -34,11 +34,13 @@ captured one — see `client/packages/harness-layer/src/seed-import/episode-exec
    machine/user identifiers from command output (hostnames, local
    usernames, absolute paths in stack traces).
 3. **Scrub.** Read the episode once, end to end, for anything that
-   shouldn't leave the machine — tokens, keys, private URLs. The seed-profile
-   scrub (`buildSeedScrubPipeline()`, #1409: deterministic secret patterns
-   only) runs automatically at `seed execute` time as a second, mandatory
-   net, but authored content should already be clean; the scrub is a
-   backstop, not a substitute for review.
+   shouldn't leave the machine — tokens, keys, private URLs. The strict trace
+   scrub (`buildScrubPipeline()`: structured PII plus entropy-backed secret
+   detection) runs automatically at `seed execute` time as a second,
+   mandatory net over every episode-originated string, including the ID,
+   tags, summary, steps, outcome, synthesis, and attribution. Authored content
+   should already be clean; the scrub is a backstop, not a substitute for
+   review.
 4. **Author `synthesis` and `tags`.** `synthesis` is a 3-6 sentence,
    task-linked "how it was solved" — write it yourself; it is never
    generated at retrieval time. `tags` should name the subsystem vocabulary
@@ -136,7 +138,7 @@ yarn jinn-layer seed execute /tmp/stage1-episode-report.json \
   --episodes-dir packages/harness-layer/fixtures/stage1-seeds
 ```
 
-Each `import`-verdict row runs through `capture()` (seed-profile scrub) then
+Each `import`-verdict row runs through `capture()` (strict trace scrub) then
 `publish()` (the same anchor path a real contribution uses) and prints the
 published `envelopeRef` (the corpus ref) plus the anchor tx. `--json`
 emits the machine-readable `EpisodeImportResult` instead of the table.
@@ -189,11 +191,22 @@ preserving the last known lineage instead of overwriting it as empty. State
 writes use a same-directory temp file plus atomic rename.
 
 If publication succeeds but state persistence fails, the result still prints
-the published `envelopeRef` with a recovery warning and exits nonzero. Stop
-automation, preserve that ref, repair/reconcile the local state, and only then
-retry. This state is **local to the machine that ran `seed execute`**; it is
-not itself published, and it does not query the corpus — it only answers "did
-*I* already publish this exact seed identity, unchanged?".
+the published `envelopeRef` with a recovery warning, stops the batch, and
+exits nonzero. If the on-chain anchor succeeds but the local contribution
+ledger append fails, the result likewise preserves the ref and anchor tx,
+persists seed idempotency state from that known result, reports a ledger
+recovery warning, stops the batch, and exits nonzero.
+
+Any other publish error is treated as ambiguous: the batch stops immediately
+and reports `publication outcome unknown; do not auto-retry`. Do not assume a
+transport error means the anchor failed; reconcile the envelope/transaction
+externally before deciding whether a retry is safe.
+
+Stop automation on any recovery warning, preserve the printed ref, and repair
+or reconcile local state before retrying. This state is **local to the machine
+that ran `seed execute`**; it is not itself published, and it does not query
+the corpus — it only answers "did *I* already publish this exact seed identity,
+unchanged?".
 
 ## Fixture-file reference
 

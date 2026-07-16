@@ -373,6 +373,90 @@ describe('execute()', () => {
       expect(hashSeedContent({ b: value.b, a: value.a, c: value.c })).toBe(hashSeedContent(value));
     });
   });
+
+  it('stops the batch after post-publication state persistence fails', async () => {
+    const source = mockSource([
+      skill({ skill: 'acme/skills/first' }),
+      skill({ skill: 'acme/skills/second' }),
+    ]);
+    const { deps, published } = mockPublishDeps();
+    const state = {
+      get: () => undefined,
+      set: () => {
+        throw new Error('synthetic state disk full');
+      },
+    };
+
+    const result = await execute(await plan(source), source, deps, { state });
+
+    expect(published).toHaveLength(2); // first row's trace + skill only
+    expect(result.imported).toHaveLength(1);
+    expect(result.imported[0]).toMatchObject({
+      skill: 'acme/skills/first',
+      stateWarning: expect.stringMatching(/recovery required/i),
+    });
+    expect(result.errors).toEqual([]);
+  });
+
+  it('persists the published ref, exposes a ledger warning, and stops the batch after ledger append fails', async () => {
+    const source = mockSource([
+      skill({ skill: 'acme/skills/first' }),
+      skill({ skill: 'acme/skills/second' }),
+    ]);
+    const { deps, published } = mockPublishDeps();
+    deps.ledger = {
+      append: () => {
+        throw new Error('synthetic ledger disk full');
+      },
+      list: () => [],
+    };
+    const records: Array<{ identity: string; envelopeRef: string }> = [];
+    const state = {
+      get: () => undefined,
+      set: (identity: string, record: { envelopeRef: string }) => {
+        records.push({ identity, envelopeRef: record.envelopeRef });
+      },
+    };
+
+    const result = await execute(await plan(source), source, deps, { state });
+
+    expect(published).toHaveLength(2); // first row's trace + skill only
+    expect(records).toEqual([
+      { identity: 'skill:acme/skills/first', envelopeRef: expect.stringContaining('bafy-envelope') },
+    ]);
+    expect(result.imported).toEqual([
+      expect.objectContaining({
+        skill: 'acme/skills/first',
+        ledgerWarning: expect.stringMatching(/anchored.*ledger/i),
+      }),
+    ]);
+    expect(result.errors).toEqual([]);
+  });
+
+  it('halts after an ambiguous publication error and never publishes later rows', async () => {
+    const source = mockSource([
+      skill({ skill: 'acme/skills/first' }),
+      skill({ skill: 'acme/skills/second' }),
+    ]);
+    const { deps, published } = mockPublishDeps();
+    let envelopeCalls = 0;
+    deps.publishEnvelope = async () => {
+      envelopeCalls += 1;
+      throw new Error('synthetic transport timeout');
+    };
+
+    const result = await execute(await plan(source), source, deps);
+
+    expect(envelopeCalls).toBe(1);
+    expect(published).toHaveLength(2); // first row's trace + skill artifacts
+    expect(result.imported).toEqual([]);
+    expect(result.errors).toEqual([
+      expect.objectContaining({
+        skill: 'acme/skills/first',
+        error: expect.stringMatching(/publication outcome unknown; do not auto-retry/i),
+      }),
+    ]);
+  });
 });
 
 describe('jinn-layer seed CLI', () => {

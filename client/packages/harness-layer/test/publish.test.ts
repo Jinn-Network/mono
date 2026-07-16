@@ -190,6 +190,26 @@ describe('publish', () => {
     });
   });
 
+  it('preserves the anchored result with a ledger warning when local ledger append fails', async () => {
+    const { deps, calls } = mockDeps();
+    deps.ledger = {
+      append: () => {
+        throw new Error('synthetic ledger disk full');
+      },
+      list: () => [],
+    };
+
+    const result = await publish(await pendingFixture(), deps);
+
+    expect(calls.anchorEnvelope).toEqual([{ envelopeCid: 'bafy-signed-envelope' }]);
+    expect(result).toEqual({
+      vetoed: false,
+      envelopeRef: 'bafy-signed-envelope',
+      anchorTx: TEST_TX,
+      ledgerWarning: expect.stringMatching(/anchored.*ledger.*synthetic ledger disk full/i),
+    });
+  });
+
   it('veto: publishes nothing, anchors nothing, ledger entry marked vetoed (local only)', async () => {
     const { deps, calls } = mockDeps();
     const pending = await pendingFixture();
