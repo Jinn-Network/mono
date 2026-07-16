@@ -35,7 +35,9 @@ export interface CorpusRecord {
   steps: CorpusRecordStep[];
   tags: string[];
   provenance: 'imported' | 'contributed';
-  /** Publisher/attribution identity — mirrors `KnowledgeHit.origin`. */
+  /** Display attribution for the rendered packet. The adapter may fall back
+   *  to safeAddress here because cross-record dedup already happened on the
+   *  search hit's trustworthy `origin`. */
   origin: string;
   capturedAt: string;
 }

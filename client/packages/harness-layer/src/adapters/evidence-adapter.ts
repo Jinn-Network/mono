@@ -181,7 +181,10 @@ export function createEvidenceAdapter(deps: EvidenceAdapterDeps): EvidencePort {
           return { file, capturedAt: '' };
         }
       })
-      .sort((a, b) => b.capturedAt.localeCompare(a.capturedAt));
+      .sort((a, b) =>
+        b.capturedAt.localeCompare(a.capturedAt)
+        || a.file.localeCompare(b.file),
+      );
 
     for (const { file } of byRecency.slice(retention.maxEpisodes)) {
       try {

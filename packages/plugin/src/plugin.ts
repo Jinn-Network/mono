@@ -290,9 +290,10 @@ async function completeSession(
     episodeRef: episode.episodeId,
     searchedTerms: activity.searchedTerms,
     providedPackets,
-    // Legacy fields (rescope §3.6): a new-shape activity (providedRefs
-    // populated) wins; a pre-rescope caller's own surfacedRefs echoes through
-    // unchanged, so callers that have not migrated see identical output.
+    // Transitional legacy fields (rescope §3.6): retained through this PR;
+    // R3+R5 remove them when the host and acceptance gate flip. A new-shape
+    // activity (providedRefs populated) wins; a pre-rescope caller's own
+    // surfacedRefs echoes through unchanged until then.
     surfacedRefs: activity.providedRefs.length > 0 ? activity.providedRefs : activity.surfacedRefs,
     fetchedRefs: activity.fetchedRefs,
     surfacedHits: hits.surfacedHits,

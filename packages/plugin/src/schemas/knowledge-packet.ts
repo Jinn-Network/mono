@@ -140,14 +140,20 @@ function selectExcerpts(steps: CorpusRecordStep[]): ExcerptCandidate[] {
   return excerpts;
 }
 
-/** Line-boundary-aware truncation ending with an explicit, pointer-bearing tail. */
+/**
+ * Line-boundary-aware truncation ending with an explicit, pointer-bearing
+ * tail. Returns an empty string when the budget cannot fit both meaningful
+ * source text and the complete tail.
+ */
 export function truncateLineBoundary(text: string, maxChars: number, ref: string): string {
   if (text.length <= maxChars) return text;
   const tail = `\n[truncated — full episode: corpus_fetch ${ref}]`;
-  const budget = Math.max(0, maxChars - tail.length);
+  const budget = maxChars - tail.length;
+  if (budget <= 0) return '';
   let cut = text.slice(0, budget);
   const lastNewline = cut.lastIndexOf('\n');
   if (lastNewline > 0) cut = cut.slice(0, lastNewline);
+  if (cut.trim().length === 0) return '';
   return `${cut}${tail}`;
 }
 
@@ -178,10 +184,8 @@ export function projectKnowledgePacket(
       excerpts.push(candidate);
       used += candidate.text.length;
     } else {
-      excerpts.push({
-        label: candidate.label,
-        text: truncateLineBoundary(candidate.text, remaining, record.ref),
-      });
+      const text = truncateLineBoundary(candidate.text, remaining, record.ref);
+      if (text.length > 0) excerpts.push({ label: candidate.label, text });
       break;
     }
   }

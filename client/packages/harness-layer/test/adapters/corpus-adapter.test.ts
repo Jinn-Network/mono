@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import { dedupeKnowledgeHits } from '@jinn-network/plugin';
 import { describeCorpusPortContract } from '@jinn-network/plugin/testing';
 import type { HarnessLayer, CorpusSearchHit, CorpusRecord as WireCorpusRecord } from '../../src/consume.js';
 import { createCorpusAdapter } from '../../src/adapters/corpus-adapter.js';
@@ -79,6 +80,30 @@ describe('CorpusAdapter mapping', () => {
     expect(result.status).toBe('ok');
     if (result.status !== 'ok') return;
     expect(result.value[0]).toMatchObject({ tags: ['dashboard', 'vitest'], origin: '42' });
+  });
+
+  it('does not let a forged safeAddress collapse distinct unattributed records during content dedup', async () => {
+    const layer = makeFakeLayer();
+    layer.corpus.search = async () => [
+      makeHit({
+        ref: 'bafyDistinctA',
+        summary: 'same task summary',
+        operator: { agentId: '', safeAddress: '0xforged' },
+      }),
+      makeHit({
+        ref: 'bafyDistinctB',
+        summary: 'same task summary',
+        operator: { agentId: '', safeAddress: '0xforged' },
+      }),
+    ];
+    const adapter = createCorpusAdapter({ layer });
+
+    const result = await adapter.search('anything');
+
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok') return;
+    expect(result.value.map((hit) => hit.origin)).toEqual(['bafyDistinctA', 'bafyDistinctB']);
+    expect(dedupeKnowledgeHits(result.value)).toHaveLength(2);
   });
 
   it('degrades to an empty array when the underlying search throws', async () => {
@@ -163,7 +188,7 @@ describe('CorpusAdapter.get() — content-bearing decode (rescope R2, #1772)', (
     });
   });
 
-  it('prefers the on-chain agentId as origin, falling back to safeAddress when agentId is absent', async () => {
+  it('prefers the on-chain agentId for display attribution, falling back to safeAddress when absent', async () => {
     const layer = makeFakeLayer();
     const wireRecord = wireRecordWithTrace();
     wireRecord.provenance.operator = { agentId: '', safeAddress: '0xfallback' };

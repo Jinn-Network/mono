@@ -103,7 +103,7 @@ describe('plugin.history / explain (AC3 — reproducible from port reads)', () =
     expect(ex.eligibility).toBeNull();
   });
 
-  it('projects persisted legacy activity facts (fallback) and the authoritative eligibility verdict', async () => {
+  it('explain exposes canonical searched/provided fields from legacy activity via the established fallback', async () => {
     const evidence = new InMemoryEvidencePort();
     const eligibility = {
       eligible: true,
@@ -131,13 +131,12 @@ describe('plugin.history / explain (AC3 — reproducible from port reads)', () =
     });
 
     const explanation = await plugin.explain('sess-fixture-1');
-    expect(explanation.surfacedRefs).toEqual(['knowledge/a', 'knowledge/b']);
-    expect(explanation.fetchedRefs).toEqual(['knowledge/b']);
-    expect(explanation.installedSkillRefs).toEqual(['skills/tdd@1']);
+    expect(explanation.searchedTerms).toEqual(['knowledge/a', 'knowledge/b']);
+    expect(explanation.providedRefs).toEqual(['knowledge/b']);
     expect(explanation.eligibility).toEqual(eligibility);
   });
 
-  it('projects provided counts from the evidence-first activity fields (rescope §3.6), no legacy fallback needed', async () => {
+  it('explain exposes canonical searched/provided fields from new-shape activity without legacy fallback', async () => {
     const evidence = new InMemoryEvidencePort();
     await evidence.put(currentEpisode({
       episodeId: 'ep-rescoped',
@@ -153,6 +152,10 @@ describe('plugin.history / explain (AC3 — reproducible from port reads)', () =
 
     const history = await plugin.history();
     expect(history.entries[0]).toMatchObject({ knowledgeSurfaced: 3, knowledgeUsed: 1 });
+
+    const explanation = await plugin.explain('sess-fixture-1');
+    expect(explanation.searchedTerms).toEqual(['dashboard', 'vitest', 'flake']);
+    expect(explanation.providedRefs).toEqual(['bafyProvided1']);
   });
 
   it('reports zero/zero for a rescoped nothing-found episode rather than falling back to legacy fields', async () => {
@@ -181,7 +184,8 @@ describe('plugin.history / explain (AC3 — reproducible from port reads)', () =
     expect(ex.sessionRef).toBe('sess-fixture-1');
     expect(ex.captureStatus).toBe('captured');
     expect(ex.degraded).toBe(false);
-    expect(Array.isArray(ex.surfacedRefs)).toBe(true);
+    expect(Array.isArray(ex.searchedTerms)).toBe(true);
+    expect(Array.isArray(ex.providedRefs)).toBe(true);
   });
 
   it('explain marks an unknown session not-captured', async () => {

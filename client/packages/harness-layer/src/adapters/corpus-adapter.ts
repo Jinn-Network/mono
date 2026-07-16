@@ -30,12 +30,14 @@ function isLayerDeps(deps: CorpusAdapterDeps | HarnessLayerConfig): deps is Corp
   return 'layer' in deps;
 }
 
-/** `CorpusSearchHit` → `KnowledgeHit`. `summary` → `snippet`; `score` omitted.
- *  `origin` prefers the on-chain-derived `agentId` over the free-form
- *  `safeAddress` manifest field (same non-forgeability rationale as
- *  `consume.ts`'s `resolveHeads` same-operator check). */
+/**
+ * `CorpusSearchHit` → `KnowledgeHit`. `summary` → `snippet`; `score` omitted.
+ * `origin` is the identity used by cross-record content dedup: prefer the
+ * on-chain-derived `agentId`, otherwise use the record ref so unattributed
+ * records cannot collide through a forged manifest `safeAddress`.
+ */
 function toKnowledgeHit(hit: CorpusSearchHit): KnowledgeHit {
-  const origin = hit.operator.agentId || hit.operator.safeAddress;
+  const origin = hit.operator.agentId || hit.ref;
   return {
     ref: hit.ref,
     kind: hit.kind === 'skill' ? 'skill' : 'trace',
@@ -69,6 +71,8 @@ function decodeRecord(record: WireCorpusRecord): CorpusRecord | null {
   }
 
   const envelope = parseTraceEnvelopeV0(JSON.parse(artifact.content.toString('utf-8')));
+  // Packet attribution is display-only, so safeAddress remains an acceptable
+  // fallback here after trustworthy agentId; it is never used for hit dedup.
   const origin = record.provenance.operator.agentId || record.provenance.operator.safeAddress || record.ref;
 
   return {

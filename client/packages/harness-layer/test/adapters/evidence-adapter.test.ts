@@ -300,6 +300,22 @@ describe('EvidenceAdapter — episode retention (#1772 rider: declared maxEpisod
     expect((await adapter.get('ep-newest')).status).toBe('ok');
   });
 
+  it('breaks equal capturedAt ties deterministically by filename', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-retention-tie-'));
+    const adapter = createEvidenceAdapter({ capturesDir, retention: { policy: 'local-private', maxEpisodes: 2 } });
+    const capturedAt = '2026-07-01T00:00:00.000Z';
+
+    for (const episodeId of ['ep-c', 'ep-a', 'ep-b']) {
+      expect((await adapter.put(makeSampleEpisode({
+        episodeId,
+        session: { sessionId: episodeId, capturedAt },
+      }))).status).toBe('ok');
+    }
+
+    expect(readdirSync(capturesDir).filter((name) => name.endsWith('.episode.json')).sort())
+      .toEqual(['ep-a.episode.json', 'ep-b.episode.json']);
+  });
+
   it('is a no-op at or under the cap', async () => {
     const capturesDir = mkdtempSync(join(tmpdir(), 'ev-retention-noop-'));
     const adapter = createEvidenceAdapter({ capturesDir, retention: { policy: 'local-private', maxEpisodes: 5 } });

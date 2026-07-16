@@ -152,6 +152,20 @@ describe('selectKnowledgeHits (rescope §3.3)', () => {
     expect(selectKnowledgeHits([skill], ['dashboard', 'vitest', 'async', 'flake'])).toEqual([]);
   });
 
+  it('never selects an evaluator-verified skill hit', () => {
+    const verifiedSkill = hit({
+      ref: 'skill-evaluator-verified',
+      kind: 'skill',
+      tier: 'evaluator-verified',
+      snippet: 'dashboard vitest async flake fix',
+      tags: ['dashboard', 'vitest', 'async', 'flake'],
+    });
+    expect(selectKnowledgeHits(
+      [verifiedSkill],
+      ['dashboard', 'vitest', 'async', 'flake'],
+    )).toEqual([]);
+  });
+
   it('never selects a hit whose payload classifies as a skill package even when kind says otherwise', () => {
     const skillish = hit({
       ref: 'skill-2',

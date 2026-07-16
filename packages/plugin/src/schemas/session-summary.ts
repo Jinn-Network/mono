@@ -11,10 +11,11 @@ export const SessionSummarySchema = z.strictObject({
     ref: z.string().min(1),
     title: z.string().min(1),
   })).default([]),
-  /** @deprecated rescope — retained for downstream harness-layer/cli/Python
-   *  renderers until they migrate to searchedTerms/providedPackets. Populated
-   *  from providedPackets when present, else echoes whatever legacy refs a
-   *  pre-rescope caller submitted. */
+  /** @deprecated Transitional rescope compatibility — retained through this
+   *  PR for downstream harness-layer/CLI/Python renderers. R3+R5 remove these
+   *  fields when the host and acceptance gate flip to searchedTerms/
+   *  providedPackets. Populated from providedPackets when present, else echoes
+   *  whatever legacy refs a pre-rescope caller submitted. */
   surfacedRefs: z.array(z.string().min(1)).default([]),
   /** @deprecated rescope */
   fetchedRefs: z.array(z.string().min(1)).default([]),

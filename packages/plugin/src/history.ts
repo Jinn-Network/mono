@@ -30,9 +30,8 @@ export interface HistoryResult {
 export interface SessionExplanation {
   sessionRef: string;
   found: boolean;
-  surfacedRefs: string[];
-  fetchedRefs: string[];
-  installedSkillRefs: string[];
+  searchedTerms: string[];
+  providedRefs: string[];
   captureStatus: 'captured' | 'not-captured';
   eligibility: EligibilityVerdict | null;
   contributionState: { status: HistoryEntry['contributionState']['status']; anchorRef?: string };
@@ -78,8 +77,8 @@ function episodeEligibility(ep: EpisodeV1): EligibilityVerdict | null {
 }
 
 /**
- * Provided/searched counts from the new activity fields, falling back to the
- * legacy surfaced/fetched refs for episodes captured before the rescope
+ * Canonical searched/provided activity from the new fields, falling back to
+ * the legacy surfaced/fetched refs for episodes captured before the rescope
  * (rescope §3.6). An episode is "legacy" here when both new fields are empty
  * AND at least one legacy field is not — a genuinely new episode with a
  * nothing-found result has both sides empty, so the fallback is a no-op for it.
@@ -87,8 +86,10 @@ function episodeEligibility(ep: EpisodeV1): EligibilityVerdict | null {
  * schema-validate on read (the in-memory test double does not), so a record
  * older than any given field must not crash the fold.
  */
-function knowledgeCounts(activity: EpisodeV1['activity']): { surfaced: number; used: number } {
-  if (!activity) return { surfaced: 0, used: 0 };
+function canonicalKnowledgeActivity(
+  activity: EpisodeV1['activity'],
+): { searchedTerms: string[]; providedRefs: string[] } {
+  if (!activity) return { searchedTerms: [], providedRefs: [] };
   const searchedTerms = activity.searchedTerms ?? [];
   const providedRefs = activity.providedRefs ?? [];
   const surfacedRefs = activity.surfacedRefs ?? [];
@@ -98,8 +99,13 @@ function knowledgeCounts(activity: EpisodeV1['activity']): { surfaced: number; u
     && providedRefs.length === 0
     && (surfacedRefs.length > 0 || fetchedRefs.length > 0 || installedSkillRefs.length > 0);
   return isLegacy
-    ? { surfaced: surfacedRefs.length, used: fetchedRefs.length }
-    : { surfaced: searchedTerms.length, used: providedRefs.length };
+    ? { searchedTerms: surfacedRefs, providedRefs: fetchedRefs }
+    : { searchedTerms, providedRefs };
+}
+
+function knowledgeCounts(activity: EpisodeV1['activity']): { surfaced: number; used: number } {
+  const canonical = canonicalKnowledgeActivity(activity);
+  return { surfaced: canonical.searchedTerms.length, used: canonical.providedRefs.length };
 }
 
 function skillsBySession(skills: LocalLearningSkill[]): Map<string, HistoryEntry['distilledSkills']> {
@@ -173,13 +179,13 @@ export async function foldExplain(sessionRef: string, deps: HistoryDeps): Promis
         ledgerResult.status !== 'unavailable',
       )
     : contributionState(undefined, ledgerResult.status !== 'unavailable');
+  const activity = canonicalKnowledgeActivity(episode?.activity);
 
   return {
     sessionRef,
     found: Boolean(episode),
-    surfacedRefs: episode?.activity?.surfacedRefs ?? [],
-    fetchedRefs: episode?.activity?.fetchedRefs ?? [],
-    installedSkillRefs: episode?.activity?.installedSkillRefs ?? [],
+    searchedTerms: activity.searchedTerms,
+    providedRefs: activity.providedRefs,
     captureStatus: episode ? 'captured' : 'not-captured',
     eligibility: episode ? episodeEligibility(episode) : null,
     contributionState: contribution,

@@ -26,6 +26,11 @@ function record(overrides: Partial<CorpusRecord> = {}): CorpusRecord {
   };
 }
 
+function packetContentChars(packet: ReturnType<typeof projectKnowledgePacket>): number {
+  return (packet.synthesis?.length ?? 0)
+    + packet.excerpts.reduce((sum, excerpt) => sum + excerpt.text.length, 0);
+}
+
 describe('KnowledgePacketSchema', () => {
   it('parses a minimal valid packet', () => {
     const parsed = KnowledgePacketSchema.parse({
@@ -181,4 +186,30 @@ describe('projectKnowledgePacket (rescope §3.2)', () => {
     expect(totalChars).toBeLessThanOrEqual(200);
     expect(totalChars).toBeLessThan(502); // proves truncation actually happened
   });
+
+  it.each([
+    { remaining: 80, expectedExcerpts: 1 },
+    { remaining: 20, expectedExcerpts: 0 },
+    { remaining: 5, expectedExcerpts: 0 },
+  ])(
+    'never exceeds 3,500 chars with $remaining chars remaining for a truncated excerpt',
+    ({ remaining, expectedExcerpts }) => {
+      const steps: CorpusRecordStep[] = [
+        step({
+          attributes: {
+            'tool.args': 'run-long-command',
+            'tool.result': 'x'.repeat(500),
+            'tool.exitCode': 1,
+          },
+        }),
+      ];
+      const packet = projectKnowledgePacket(record({
+        synthesis: 's'.repeat(DEFAULT_PACKET_CHAR_BUDGET - remaining),
+        steps,
+      }));
+
+      expect(packet.excerpts).toHaveLength(expectedExcerpts);
+      expect(packetContentChars(packet)).toBeLessThanOrEqual(DEFAULT_PACKET_CHAR_BUDGET);
+    },
+  );
 });
