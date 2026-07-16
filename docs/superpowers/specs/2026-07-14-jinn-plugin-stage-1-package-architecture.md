@@ -147,6 +147,23 @@ shims in `harness-layer` → CLI session-end contract + handshake → Python ses
 with local fallback → shared contribution-store extraction → architecture tests. Pickup remains
 in Python for Stage 1. No Hermes core changes or model tools are required.
 
+## 11a. Amendment — Stage 1 rescope (2026-07-16)
+
+Per `docs/superpowers/plans/2026-07-16-jinn-plugin-stage-1-rescope-plan.md` (walkthrough
+decision: iterate):
+
+- **`SkillsPort` is quarantined later-stage machinery.** It is not reachable from pickup or any
+  registered Stage 1 command; its sole Stage 1 consumer is the local-distill staging install.
+  `plugin.skills.{install,list,uninstall}` in §3's library API is a Stage 3 surface and is not
+  part of the Stage 1 process contract. This also reconciles the shipped API subset (issue
+  #1755).
+- **`CorpusPort.get` returns a content-bearing record** (not metadata-only), so the core can
+  project `jinn.knowledge-packet.v1` — the §4 CorpusPort row's Stage 1 behavior is evidence
+  retrieval; skill records are excluded from pickup.
+- Episode `activity` gains `searchedTerms`/`providedRefs`; `SessionSummary` replaces
+  `surfacedHits`/`installedSkillRefs` with searched/provided facts. Legacy fields remain
+  accepted on read.
+
 ## 12. Boundary requirements compliance (prompt's 15)
 
 Own package+manifest (§2) · intentional entry (§3) · no internal-path consumer imports (§7.2) ·

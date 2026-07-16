@@ -298,6 +298,12 @@ VoteWeighting today, no new infrastructure. Steering ships in two stages:
   run the seed-profile scrub (deterministic secret patterns only — key policy, plain-patterns,
   secretlint preset rules; no probabilistic openredaction/entropy stages) because they are public,
   licence-checked content, not operator trace data (#1409).
+- **Stage 1 note (2026-07-16, mono rescope):** Stage 1 acceptance requires **evidence seeds** —
+  canonical prior-work episodes published through the same scrub → publish path — because the
+  plugin's Stage 1 retrieval serves evidence records only. skills.sh skill imports remain in the
+  corpus for later stages (and distillation measurement) but are excluded from Stage 1
+  auto-pickup. Evidence-seed imports must be idempotent and set `supersedes` on re-import. See
+  `docs/superpowers/plans/2026-07-16-jinn-plugin-stage-1-rescope-plan.md` §4.
 
 ## 8. Phasing
 
