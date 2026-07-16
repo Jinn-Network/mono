@@ -65,15 +65,28 @@ DISTRACTOR_SKILL_DUP_REF = _to_ref(DISTRACTOR_SKILL_DUP)
 # the injection carries real content, not metadata (rescope plan §4.5 item 1).
 SOURCE_DISTINCTIVE_CONTENT = "apiMocks.getStatus"
 
-# Scenario 1/2 message: shares vocabulary with the source fixture's tags
-# (mono, dashboard, vitest, version-status, async, flake) and taskSummary
-# without quoting its sentences verbatim — verified empirically to score
-# >= the relevance floor against the source and 0 against every distractor.
+# Scenario 1/2 message (mono #1786): representative multi-sentence prose —
+# every sentence ends with a period, like real task messages do — sharing
+# vocabulary with the source fixture's tags (dashboard, vitest,
+# version-status) and taskSummary without quoting its sentences verbatim.
+# Deliberately NOT the old single-run-on-sentence message: this one carries
+# four sentence-final periods ("again.", "out.", "holds.", "green.") plus
+# one real identifier ("version-status"), so it doubles as a regression
+# canary for #1786 — verified empirically (built dist, real
+# deriveSearchTerms/scoreKnowledgeHit):
+#   - fixed cleanWord: terms = ["version-status", "acme/widget", "dashboard",
+#     "confirm", "vitest", "racing"]; source scores 3 (>= the floor of 2);
+#     both non-skill distractors score 0.
+#   - pre-#1786-fix cleanWord: the four punctuation artifacts fill the
+#     6-term budget in the identifier-shaped pass alone (`again.`, `out.`,
+#     `holds.`, `green.` plus `version-status`, then the repository slug) —
+#     `dashboard` never reaches the remainder bucket, so the source scores
+#     only 1 (< the floor) and the gate fails. A #1786 regression trips this
+#     gate instead of hiding behind a message that happens not to exercise it.
 TARGET_TASK_MESSAGE = (
-    "The client dashboard vitest suite is flaky again, and the "
-    "update_available check seems to race against the version-status "
-    "endpoint. Please track it down in client/src/dashboard and get the "
-    "suite green"
+    "The dashboard vitest suite is flaky again. It keeps racing the "
+    "version-status check and timing out. Track down the root cause and "
+    "confirm the fix holds. Report back once the suite is green."
 )
 
 # Scenario 3: shares no vocabulary with any of the five fixtures.
