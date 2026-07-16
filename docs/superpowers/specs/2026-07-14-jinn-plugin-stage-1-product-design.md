@@ -105,7 +105,7 @@ intake is Stage 2+.
 
 ### 4.5 History
 Net-new but small: a local, plugin-rendered session history — per session: task summary,
-knowledge surfaced/used, capture status, eligibility verdict, contribution state (queued /
+knowledge searched/provided, capture status, eligibility verdict, contribution state (queued /
 published + anchor), distilled skills produced. Surfaces: `/jinn history` (TUI) and
 `jinn-layer history` (CLI). `/jinn ledger` remains the what-left-this-machine receipt trail.
 **Invariant: history is a derived view** over canonical episodes, the canonical contribution
@@ -193,6 +193,6 @@ issues already exist and stay owned there.
    suggestions, `surfaced/fetched/installed` states, skill-only seeds; the 2026-07-16 #1654
    walkthrough recorded it). The Stage 1 rescope
    (`docs/superpowers/plans/2026-07-16-jinn-plugin-stage-1-rescope-plan.md`) corrects §4.2,
-   §4.5, §7, and §8 to evidence retrieval with `searched → provided` states. Locked decisions
+   §4.5, §4.6, §7, and §8 to evidence retrieval with `searched → provided` states. Locked decisions
    P1–P8 are unchanged; `spec/2026-07-06-distillation-v1.md` D11 (retrieval over anchored
    evidence is the v1 product baseline) is the governing precedent.

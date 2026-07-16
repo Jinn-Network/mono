@@ -343,8 +343,8 @@ sequential.
 | # | Shape / Effort | Title | Depends on | Parallel with |
 |---|---|---|---|---|
 | R0 | docs / Low | File walkthrough record; amend Stage 1 docs to the evidence scope | — | — (first) |
-| R1 | feat / High | Evidence-first pickup core: terms, selection, knowledge packet, activity states (`packages/plugin`) | R0 | R4 draft, R7 |
-| R2 | feat / Medium | Content-capable corpus adapter + `session pickup` response; seed-import idempotency (`harness-layer`) | R1 | R4 draft, R7 |
+| R1 | feat / High | Evidence-first pickup core: terms, selection, knowledge packet, activity states (`packages/plugin`) | R0 | R4 draft |
+| R2 | feat / Medium | Content-capable corpus adapter + `session pickup` response; seed-import idempotency (`harness-layer`) | R1 | R4 draft |
 | R3 | feat / Medium | Host switch: delegated pickup, `searched → provided` surfaces, skills/rewards surface removal (`apps/jinn-agent`) | R2 | R4 |
 | R4 | feat / Medium | Evidence-episode seed lane + curated Stage 1 seed set + testnet runbook | R0 (final tags after R1) | R1–R3 |
 | R5 | test / Medium | Acceptance gate rewrite: evidence scenarios, boundary assertions, static pins | R3 + R4 | — |
@@ -367,8 +367,8 @@ declares `maxEpisodes: 200`, nothing prunes) rides R2 (same package, ~20 lines +
   (AC3 stays open for R6's re-run); this plan committed; amendments landed in the same PR:
   - `docs/superpowers/specs/2026-07-14-jinn-plugin-stage-1-product-design.md` §4.2 (evidence
     retrieval, `searched → provided`, skills bullet removed, corpus content = evidence), §4.5
-    (retrieval failure wording), §7 (acceptance journey), §8 (non-goals per §1 above), §9 (record
-    this drift and its resolution).
+    (history vocabulary), §4.6 (retrieval failure wording), §7 (acceptance journey), §8
+    (non-goals per §1 above), §9 (record this drift and its resolution).
   - `docs/superpowers/plans/2026-07-14-jinn-plugin-stage-1-plan.md` §3 "Host product experience"
     (states) and §4 coverage lines.
   - `docs/superpowers/specs/2026-07-14-jinn-plugin-stage-1-package-architecture.md` §3/§4/§10:

@@ -155,8 +155,18 @@ decision: iterate):
 - **`SkillsPort` is quarantined later-stage machinery.** It is not reachable from pickup or any
   registered Stage 1 command; its sole Stage 1 consumer is the local-distill staging install.
   `plugin.skills.{install,list,uninstall}` in §3's library API is a Stage 3 surface and is not
-  part of the Stage 1 process contract. This also reconciles the shipped API subset (issue
-  #1755).
+  part of the Stage 1 process contract.
+- **§3's library-API sample is design-time illustration, superseded by the shipped subset**
+  (reconciles issue #1755, all items): `plugin.skills.*` (above) and `plugin.distill.*` are
+  later-stage surfaces, not Stage 1 contract; contribution inspection ships as
+  `contribution.{ledger,mintStatus}` with veto carried via `completeSession(...
+  contributionVetoed)` rather than `plugin.contribution.{status,veto}`; `history()` takes no
+  query; `.end(outcome)` takes no events batch (the host delegates the complete episode);
+  `.firstTurnPickup` returns `{ contextBlock, packets, searchedTerms, degraded? }` per the
+  rescope R1 (`suggestions[]`/`markers` are superseded); §4.3's `jinn-layer publish
+  <task-file>` note describes the retained-internal legacy verb, not a product surface. §3 is
+  not retro-edited (dated design record); this section is authoritative for the shipped
+  contract until the Stage 2 boundary refactor restates it.
 - **`CorpusPort.get` returns a content-bearing record** (not metadata-only), so the core can
   project `jinn.knowledge-packet.v1` — the §4 CorpusPort row's Stage 1 behavior is evidence
   retrieval; skill records are excluded from pickup.
