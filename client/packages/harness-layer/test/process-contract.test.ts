@@ -173,7 +173,7 @@ describe('jinn-layer process contract v1', () => {
     });
   });
 
-  it('keeps the future-host session pickup verb versioned and structured', async () => {
+  it('keeps the session pickup verb versioned and structured (additive v1 shape, rescope R2 #1772)', async () => {
     const out = capture();
     expect(await runJinnLayerCli(['session', 'pickup'], {
       writer: out.writer,
@@ -190,11 +190,62 @@ describe('jinn-layer process contract v1', () => {
       }),
       pluginOverrides: memoryDeps(),
     })).toBe(0);
-    expect(JSON.parse(out.output())).toMatchObject({
-      contractVersion: 1,
-      status: 'ok',
-      value: { suggestions: [], markers: [] },
+    const reply = JSON.parse(out.output());
+    expect(reply).toMatchObject({ contractVersion: 1, status: 'ok' });
+    // Empty corpus: nothing to provide, but the response is still the
+    // additive shape (contextBlock/packets/searchedTerms), not the retired
+    // suggestions/markers shape.
+    expect(reply.value.contextBlock).toBeNull();
+    expect(reply.value.packets).toEqual([]);
+    expect(Array.isArray(reply.value.searchedTerms)).toBe(true);
+    expect(reply.value).not.toHaveProperty('suggestions');
+    expect(reply.value).not.toHaveProperty('markers');
+  });
+
+  it('provides real evidence content end to end through the process contract (additive shape, rescope R2 #1772)', async () => {
+    const corpus = new InMemoryCorpusPort([{
+      ref: 'bafySourceEpisode',
+      kind: 'trace',
+      task: { summary: 'Fix the dashboard version-status flake', repositorySlug: 'Jinn-Network/mono' },
+      outcome: { status: 'completed', verifiabilityTier: 'tests-passed' },
+      steps: [{
+        name: 'run tests',
+        attributes: { 'tool.args': 'yarn test', 'tool.result': 'FAIL version-status', 'tool.exitCode': 1 },
+      }],
+      tags: ['mono', 'dashboard', 'vitest', 'version-status', 'async', 'flake'],
+      provenance: 'imported',
+      origin: 'seed:mono-dashboard-flake',
+      capturedAt: '2026-07-04T00:00:00.000Z',
+      tier: 'tests-passed',
+    }]);
+    const out = capture();
+    expect(await runJinnLayerCli(['session', 'pickup'], {
+      writer: out.writer,
+      reader: async () => JSON.stringify({
+        contractVersion: 1,
+        meta: {
+          sessionId: 'pickup-evidence',
+          taskSummary: 'ordinary OSS work',
+          harness: { name: 'host', version: '1' },
+          model: 'test',
+          tools: [],
+          repositorySlug: 'Jinn-Network/mono',
+        },
+        firstMessage: 'the dashboard version-status test is flaking on vitest',
+      }),
+      pluginOverrides: memoryDeps({ corpus }),
+    })).toBe(0);
+
+    const reply = JSON.parse(out.output());
+    expect(reply).toMatchObject({ contractVersion: 1, status: 'ok' });
+    expect(reply.value.packets).toHaveLength(1);
+    expect(reply.value.packets[0]).toMatchObject({
+      schemaVersion: 'jinn.knowledge-packet.v1',
+      ref: 'bafySourceEpisode',
     });
+    expect(reply.value.contextBlock).toContain('[jinn corpus] Prior evidence relevant to this task:');
+    expect(reply.value.contextBlock).toContain('FAIL version-status');
+    expect(reply.value.searchedTerms.length).toBeGreaterThan(0);
   });
 
   it('acknowledges the first sanitized contribution preview through a production command', async () => {
@@ -274,24 +325,34 @@ describe('jinn-layer process contract v1', () => {
     expect(JSON.parse(out.output())).toMatchObject({
       contractVersion: 1,
       status: 'unavailable',
-      value: { suggestions: [] },
+      value: { contextBlock: null, packets: [] },
       reason: 'corpus offline',
     });
   });
 
-  it('reports unavailable skills and never claims a failed auto-adoption was installed', async () => {
+  it('never touches the skills port from pickup, and a skill-kind hit never surfaces (rescope R1 closes #1729)', async () => {
     const hit = {
       ref: 'ipfs://retry-skill',
       kind: 'skill' as const,
       title: 'retry-skill',
-      snippet: 'verified retry workflow',
-      tier: 'evaluator-verified',
+      task: { summary: 'verified retry workflow' },
+      outcome: { status: 'completed' as const, verifiabilityTier: 'evaluator-verified' as const },
+      steps: [],
+      tags: ['retry', 'workflow'],
+      provenance: 'imported' as const,
+      origin: 'seed:retry-skill',
+      capturedAt: '2026-07-10T00:00:00.000Z',
+      tier: 'evaluator-verified' as const,
       payloadKind: 'skill' as const,
     };
+    // A skills port that throws on every call — pickup must never reach it
+    // now that the adopt/suggest/install path is deleted from pickup
+    // entirely (the port stays wired into JinnPluginDeps for the local-distill
+    // install path, just unreachable from firstTurnPickup).
     const skills = {
-      async list() { return unavailable('skills directory unavailable'); },
-      async install() { return unavailable('skills directory unavailable'); },
-      async uninstall() { return unavailable('skills directory unavailable'); },
+      async list(): Promise<never> { throw new Error('skills port must not be called from pickup'); },
+      async install(): Promise<never> { throw new Error('skills port must not be called from pickup'); },
+      async uninstall(): Promise<never> { throw new Error('skills port must not be called from pickup'); },
     };
     const out = capture();
 
@@ -300,32 +361,23 @@ describe('jinn-layer process contract v1', () => {
       reader: async () => JSON.stringify({
         contractVersion: 1,
         meta: {
-          sessionId: 'pickup-skills-unavailable',
+          sessionId: 'pickup-skills-untouched',
           taskSummary: 'ordinary OSS work',
           harness: { name: 'host', version: '1' },
           model: 'test',
           tools: [],
-          pickup: {
-            enabled: true,
-            autoAdopt: true,
-            autoAdoptTier: 'evaluator-verified',
-            maxCandidates: 3,
-          },
         },
-        firstMessage: 'fix the retry tests',
+        firstMessage: 'fix the retry workflow',
       }),
       pluginOverrides: memoryDeps({ corpus: new InMemoryCorpusPort([hit]), skills }),
     })).toBe(0);
 
     const reply = JSON.parse(out.output());
-    expect(reply).toMatchObject({
-      contractVersion: 1,
-      status: 'unavailable',
-      reason: 'skills directory unavailable',
-      value: { suggestions: [expect.objectContaining({ ref: 'ipfs://retry-skill' })] },
-    });
-    expect(reply.value.contextBlock).toContain('install: /jinn skills install ipfs://retry-skill');
-    expect(reply.value.contextBlock).not.toMatch(/installed skill|Adopted automatically/);
+    expect(reply).toMatchObject({ contractVersion: 1, status: 'ok' });
+    expect(reply.value.packets).toEqual([]);
+    expect(reply.value.contextBlock).toBeNull();
+    expect(JSON.stringify(reply)).not.toContain('skills install');
+    expect(JSON.stringify(reply)).not.toMatch(/installed skill|Adopted automatically/);
   });
 
   it('returns degraded when contribution is unavailable but evidence persisted', async () => {

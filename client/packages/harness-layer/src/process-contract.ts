@@ -30,6 +30,8 @@ const SessionMetaSchema = z.strictObject({
   tools: z.array(z.string().min(1)),
   skillsLoadout: z.array(z.string().min(1)).optional(),
   pickup: PickupConfigSchema.optional(),
+  /** Fed into `deriveSearchTerms`'s repo-slug bonus (rescope §3.3). Additive — absent is fine. */
+  repositorySlug: z.string().min(1).optional(),
 });
 
 export const SessionPickupRequestV1Schema = z.strictObject({
