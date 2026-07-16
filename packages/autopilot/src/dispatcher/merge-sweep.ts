@@ -326,6 +326,15 @@ export async function syncMerges(
       continue;
     }
 
+    // Refuse to merge without a head to pin: gh silently drops an empty
+    // `--match-head-commit ''`, which would merge unvalidated — the exact
+    // "merge blind" the pin exists to prevent. An eligible OPEN PR always
+    // carries a headRefOid, so this is a fail-safe for a malformed payload.
+    if (c.headRefOid === '') {
+      report.skipped.push(`PR #${c.number}: missing headRefOid — refusing to merge without a validated head pin`);
+      continue;
+    }
+
     try {
       // Pin the head we validated: a push landing between the list fetch above
       // and this merge (e.g. a merge-prep session's resolution) must not be

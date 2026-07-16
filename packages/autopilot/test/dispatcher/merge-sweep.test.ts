@@ -276,6 +276,14 @@ describe('syncMerges', () => {
     expect(report.stuck).toEqual([]);
   });
 
+  it('refuses to merge an eligible PR with an empty headRefOid (no blind merge)', async () => {
+    const { runner, calls } = scriptedRunner({ list: [ghEntry({ headRefOid: '' })] });
+    const report = await syncMerges(runner, ALLOWLIST, new Set());
+    expect(report.merged).toEqual([]);
+    expect(report.skipped.some((s) => s.includes('missing headRefOid'))).toBe(true);
+    expect(calls.some((c) => c.args[1] === 'merge')).toBe(false);
+  });
+
   it('code-owned PR is never merged (DR-2026-06-03)', async () => {
     const { runner, calls } = scriptedRunner({
       list: [ghEntry()],
