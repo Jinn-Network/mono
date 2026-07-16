@@ -44,6 +44,20 @@ describe('runReviewCycle', () => {
     expect(dispatched).toEqual([5]);
   });
 
+  it('excludes a PR with a live merge-prep session (busyPrNumbers), without consuming the review cap', async () => {
+    const source: PrSource = { poll: async () => [pr(5), pr(6)] };
+    const dispatched: number[] = [];
+    const report = await runReviewCycle({
+      prSource: source,
+      cfg: CFG, // reviewCap 2
+      deriveReviewInFlight: async () => ({ inFlight: [] as InFlightReview[], drift: [] }),
+      dispatchReview: async (p: ReviewablePr) => { dispatched.push(p.number); return { prNumber: p.number, branch: p.headRefName, worktreePath: `/pr-${p.number}`, pid: 1, startedAt: 0 }; },
+      busyPrNumbers: new Set([5]),
+    });
+    expect(dispatched).toEqual([6]);       // #5 excluded (prep in flight)
+    expect(report.skippedForCap).toBe(0);  // #5 did NOT eat a cap slot
+  });
+
   it('does not re-dispatch a PR already in flight', async () => {
     const source: PrSource = { poll: async () => [pr(7)] };
     const dispatched: number[] = [];

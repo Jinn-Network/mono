@@ -24,6 +24,8 @@ export interface MergePrepCycleReport {
   waiting: number[];
   reaped: number[];
   skippedForCap: number;
+  /** PRs whose handling threw this cycle (isolated — the others still ran). */
+  failed: number[];
 }
 
 export interface MergePrepCycleDeps {
@@ -68,15 +70,21 @@ export interface MergePrepCycleDeps {
 export async function runMergePrepCycle(deps: MergePrepCycleDeps): Promise<MergePrepCycleReport> {
   const { stuck, cfg, attemptedPrep, reviewInFlight, deriveInFlight, dispatch, escalate, isCodeOwned, removeWorktree } = deps;
   const now = deps.now ?? (() => Date.now());
-  const report: MergePrepCycleReport = { dispatched: [], escalated: [], waiting: [], reaped: [], skippedForCap: 0 };
+  const report: MergePrepCycleReport = { dispatched: [], escalated: [], waiting: [], reaped: [], skippedForCap: 0, failed: [] };
 
-  // 1. Reap stale worktrees before computing the budget.
+  // 1. Reap stale worktrees before computing the budget. A failed removal is
+  //    isolated — the worktree stays counted against the cap, never aborts.
   const { inFlight } = await deriveInFlight();
   const live: InFlightMergePrep[] = [];
   for (const w of inFlight) {
     if (w.startedAt > 0 && now() - w.startedAt > MERGE_PREP_REAP_MS) {
-      await removeWorktree(w);
-      report.reaped.push(w.prNumber);
+      try {
+        await removeWorktree(w);
+        report.reaped.push(w.prNumber);
+      } catch (err) {
+        console.error(`[merge-prep] reap failed for #${w.prNumber} (keeping it live):`, err);
+        live.push(w);
+      }
     } else {
       live.push(w);
     }
@@ -85,7 +93,9 @@ export async function runMergePrepCycle(deps: MergePrepCycleDeps): Promise<Merge
   const inFlightSet = new Set<number>(live.map((w) => w.prNumber));
   let budget = Math.max(0, cfg.mergePrepCap - live.length);
 
-  // 2. FIFO by PR number for determinism.
+  // 2. FIFO by PR number for determinism. Each PR is isolated: a throw from
+  //    isCodeOwned/escalate/dispatch drops that PR to `failed` and the rest of
+  //    the stuck set still runs (mirrors Stage A's escalateStuckPrs).
   const ordered = [...stuck].sort((a, b) => a.number - b.number);
   for (const s of ordered) {
     if (s.escalated) continue; // a human owns it
@@ -93,30 +103,35 @@ export async function runMergePrepCycle(deps: MergePrepCycleDeps): Promise<Merge
       report.waiting.push(s.number);
       continue;
     }
-    if (await isCodeOwned(s.number)) {
-      await escalate(s, 'touches a code-owned path — a human resolves and merges it');
-      report.escalated.push(s.number);
-      continue;
+    try {
+      if (await isCodeOwned(s.number)) {
+        await escalate(s, 'touches a code-owned path — a human resolves and merges it');
+        report.escalated.push(s.number);
+        continue;
+      }
+      const prev = attemptedPrep.get(s.number);
+      if (prev != null && prev.headOid === s.headRefOid) {
+        await escalate(s, 'merge-prep already ran on this exact head and it is still stuck');
+        report.escalated.push(s.number);
+        continue;
+      }
+      if (prev != null && prev.attempts >= MAX_PREP_ATTEMPTS) {
+        await escalate(s, `merge-prep hit the attempt ceiling (${MAX_PREP_ATTEMPTS}) across advancing heads`);
+        report.escalated.push(s.number);
+        continue;
+      }
+      if (budget <= 0) {
+        report.skippedForCap += 1;
+        continue;
+      }
+      await dispatch(s);
+      attemptedPrep.set(s.number, { headOid: s.headRefOid, attempts: (prev?.attempts ?? 0) + 1 });
+      report.dispatched.push(s.number);
+      budget -= 1;
+    } catch (err) {
+      console.error(`[merge-prep] handling PR #${s.number} threw (continuing):`, err);
+      report.failed.push(s.number);
     }
-    const prev = attemptedPrep.get(s.number);
-    if (prev != null && prev.headOid === s.headRefOid) {
-      await escalate(s, 'merge-prep already ran on this exact head and it is still stuck');
-      report.escalated.push(s.number);
-      continue;
-    }
-    if (prev != null && prev.attempts >= MAX_PREP_ATTEMPTS) {
-      await escalate(s, `merge-prep hit the attempt ceiling (${MAX_PREP_ATTEMPTS}) across advancing heads`);
-      report.escalated.push(s.number);
-      continue;
-    }
-    if (budget <= 0) {
-      report.skippedForCap += 1;
-      continue;
-    }
-    await dispatch(s);
-    attemptedPrep.set(s.number, { headOid: s.headRefOid, attempts: (prev?.attempts ?? 0) + 1 });
-    report.dispatched.push(s.number);
-    budget -= 1;
   }
 
   return report;
