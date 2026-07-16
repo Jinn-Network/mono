@@ -93,10 +93,10 @@ captured one — see `client/packages/harness-layer/src/seed-import/episode-exec
    yarn vitest run packages/harness-layer/test/stage1-seeds-fixtures.test.ts
    ```
 
-   That test is the fixture set's own lint: schema-valid, no absolute
-   paths/usernames, deterministically formatted. Point it at a scratch
-   directory (or add your file under `fixtures/stage1-seeds/` and extend the
-   expected-file list) to lint a new episode the same way.
+   That test is the curated fixture set's own lint: schema-valid, no absolute
+   paths/usernames, deterministically formatted. It reads
+   `fixtures/stage1-seeds/` directly; to lint a new episode with this test,
+   add it there and extend the expected-file list before running the command.
 
 ## 2. Plan (zero writes)
 

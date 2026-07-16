@@ -250,6 +250,28 @@ describe('executeEpisodes()', () => {
     ]);
   });
 
+  it('rejects substituting the approved episode id while keeping all other content identical', async () => {
+    const approved = mockEpisodeSource([episode({ id: 'approved-id' })]);
+    const [approvedRow] = await planEpisodes(approved);
+    const substituted = episode({ id: 'substituted-id' });
+    const source = mockEpisodeSource([substituted]);
+    const report: EpisodeImportReport = [
+      { ...approvedRow!, id: substituted.id },
+    ];
+    const { deps, published } = mockPublishDeps();
+
+    const result = await executeEpisodes(report, source, deps);
+
+    expect(published).toHaveLength(0);
+    expect(result.imported).toHaveLength(0);
+    expect(result.errors).toEqual([
+      expect.objectContaining({
+        id: 'substituted-id',
+        error: expect.stringMatching(/approved content digest.*does not match/i),
+      }),
+    ]);
+  });
+
   it.each([
     ['payment card', 'Customer card: 4111 1111 1111 1111.'],
     ['phone-like PII', 'Call the customer at +1 (415) 555-2671.'],
@@ -368,6 +390,41 @@ describe('executeEpisodes()', () => {
       id: 'first',
       stateWarning: expect.stringMatching(/recovery required/i),
     });
+    expect(result.errors).toEqual([]);
+  });
+
+  it('persists the anchored ref, exposes a ledger warning, and stops after ledger append fails', async () => {
+    const source = mockEpisodeSource([
+      episode({ id: 'first' }),
+      episode({ id: 'second' }),
+    ]);
+    const { deps, published } = mockPublishDeps();
+    deps.ledger = {
+      append: () => {
+        throw new Error('synthetic ledger disk full');
+      },
+      list: () => [],
+    };
+    const records: Array<{ identity: string; envelopeRef: string }> = [];
+    const state = {
+      get: () => undefined,
+      set: (identity: string, record: { envelopeRef: string }) => {
+        records.push({ identity, envelopeRef: record.envelopeRef });
+      },
+    };
+
+    const result = await executeEpisodes(await planEpisodes(source), source, deps, { state });
+
+    expect(published).toHaveLength(1);
+    expect(records).toEqual([
+      { identity: 'episode:first', envelopeRef: expect.stringContaining('bafy-envelope') },
+    ]);
+    expect(result.imported).toEqual([
+      expect.objectContaining({
+        id: 'first',
+        ledgerWarning: expect.stringMatching(/anchored.*ledger/i),
+      }),
+    ]);
     expect(result.errors).toEqual([]);
   });
 
