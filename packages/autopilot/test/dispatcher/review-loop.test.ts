@@ -54,6 +54,7 @@ describe('runReviewCycle', () => {
       cfg: CFG, // reviewCap 2
       deriveReviewInFlight: async () => ({ inFlight: [] as InFlightReview[], drift: [] }),
       dispatchReview: async (p: ReviewablePr) => { dispatched.push(p.number); return { prNumber: p.number, branch: p.headRefName, worktreePath: `/pr-${p.number}`, pid: 1, startedAt: 0 }; },
+      removeWorktree: async () => {},
       busyPrNumbers: new Set([5]),
     });
     expect(dispatched).toEqual([6]);       // #5 excluded (prep in flight)
