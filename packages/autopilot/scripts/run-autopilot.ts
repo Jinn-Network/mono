@@ -18,8 +18,11 @@ import type { CommandRunner } from '../src/dispatcher/issue-source.js';
 import { deriveInFlight, listTaskWorktrees } from '../src/dispatcher/state.js';
 import { syncReviewLabels } from '../src/dispatcher/label-sweep.js';
 import { syncDrift } from '../src/dispatcher/drift-sweep.js';
-import { syncMerges } from '../src/dispatcher/merge-sweep.js';
-import { escalateStuckPrs } from '../src/dispatcher/stuck-escalation.js';
+import { syncMerges, touchesOwned } from '../src/dispatcher/merge-sweep.js';
+import { escalateStuckPrs, escalateStuckPr } from '../src/dispatcher/stuck-escalation.js';
+import { deriveMergePrepInFlight } from '../src/dispatcher/merge-prep-state.js';
+import { dispatchMergePrep } from '../src/dispatcher/merge-prep-dispatch.js';
+import { runMergePrepCycle, type PrepAttempt } from '../src/dispatcher/merge-prep-loop.js';
 import { dispatchIssue } from '../src/dispatcher/dispatch.js';
 import { SESSIONS_LOG_DIR } from '../src/dispatcher/session-log.js';
 import { GhPrSource } from '../src/dispatcher/pr-source.js';
@@ -28,7 +31,7 @@ import type { PrLink } from '../src/dispatcher/pr-links.js';
 import { deriveReviewInFlight } from '../src/dispatcher/review-state.js';
 import { dispatchReview } from '../src/dispatcher/review-dispatch.js';
 import { runReviewCycle } from '../src/dispatcher/review-loop.js';
-import { assertReviewIdentities } from '../src/dispatcher/identity.js';
+import { assertReviewIdentities, assertMergePrepArming } from '../src/dispatcher/identity.js';
 import type { SpawnFn } from '../src/dispatcher/dispatch.js';
 import type { ReviewablePr } from '../src/dispatcher/types.js';
 import {
@@ -86,6 +89,8 @@ const AUTHOR_ALLOWLIST_ENV = 'JINN_DISPATCHER_AUTHOR_ALLOWLIST';
 const REVIEW_BOT_LOGIN_ENV = 'JINN_REVIEW_BOT_LOGIN';
 const IMPL_GH_TOKEN_ENV = 'JINN_IMPL_GH_TOKEN';
 const REVIEW_GH_TOKEN_ENV = 'JINN_REVIEW_GH_TOKEN';
+/** Arm the merge-prep session loop (DR-2026-07-16). '1' = on. Default off. */
+const MERGE_PREP_ENV = 'JINN_MERGE_PREP';
 
 /**
  * Env var carrying the JSON implementer-routing policy (#887). Unset / blank /
@@ -112,6 +117,42 @@ const OPTIONAL_RULE_FIELDS = [
 /** Whether `v` is one of the recognised literal values in `valid`. */
 const isMember = (valid: readonly string[], v: unknown): v is string =>
   typeof v === 'string' && valid.includes(v);
+
+/**
+ * Build the production logging `SpawnFn` (#533): open the per-session log in
+ * append mode wired to stdout+stderr, write the dispatch delimiter and (when
+ * supplied) the started-at marker, then spawn detached + unref. Shared by the
+ * implement-dispatch and merge-prep-dispatch call sites so both get identical
+ * per-session log capture. Extracted verbatim from the former inline lambda.
+ */
+function makeLoggingSpawn(): SpawnFn {
+  return (cmd, args, opts) => {
+    const logPath = opts.logPath;
+    let fd: number | undefined;
+    let stdio = opts.stdio;
+    if (typeof logPath === 'string') {
+      mkdirSync(SESSIONS_LOG_DIR, { recursive: true });
+      // Owner-only (0o600) on create: session logs may contain secrets surfaced
+      // by the spawned session (tokens in gh/git error output, env echoes).
+      fd = openSync(logPath, 'a', 0o600);
+      const delimiter =
+        `\n===== dispatch ${new Date().toISOString()} ` +
+        `pid=pending cwd=${opts.cwd} =====\n`;
+      writeSync(fd, delimiter);
+      stdio = ['ignore', fd, fd];
+    }
+    // #1296/#1393: rewrite (truncate) the started-at marker so its mtime records
+    // the LATEST dispatch (only implement sessions supply this path).
+    if (typeof opts.startedAtMarkerPath === 'string') {
+      writeFileSync(opts.startedAtMarkerPath, `${new Date().toISOString()}\n`, { mode: 0o600 });
+    }
+    const child = spawn(cmd, args, { ...opts, stdio } as SpawnOptions);
+    if (child.pid != null) child.unref();
+    // Close the parent's dup of the fd; the detached child kept its own.
+    if (fd != null) closeSync(fd);
+    return { pid: child.pid };
+  };
+}
 
 /** Parse the allowlist env var into a trimmed, non-empty string array. */
 function parseAuthorAllowlist(raw: string | undefined): string[] {
@@ -371,11 +412,18 @@ export async function runReviewPass(
       return { pid: child.pid };
     });
   const prSource = new GhPrSource(runner, cfg.engineReviewLabel, cfg.reviewBotLogin);
+  // Exclude PRs with a live merge-prep session from review dispatch (symmetric
+  // to the prep loop's reviewInFlight guard) so the two never push to the same
+  // branch at once. Only relevant when merge-prep is armed.
+  const busyPrNumbers = cfg.mergePrepEnabled
+    ? new Set<number>((await deriveMergePrepInFlight(runner)).inFlight.map((w) => w.prNumber))
+    : undefined;
   const report = await runReviewCycle({
     prSource,
     cfg,
     deriveReviewInFlight: () => deriveReviewInFlight(runner),
     dispatchReview: (pr: ReviewablePr) => dispatchReview(pr, cfg, { runner, spawn: spawnImpl }),
+    busyPrNumbers,
   });
   if (report.dispatched.length > 0) {
     console.log(`[autopilot] review-pr dispatched: PR #${report.dispatched.join(', #')}`);
@@ -521,6 +569,7 @@ async function main(): Promise<void> {
     reviewBotLogin: process.env[REVIEW_BOT_LOGIN_ENV] ?? '',
     implGhToken: process.env[IMPL_GH_TOKEN_ENV] ?? '',
     reviewGhToken: process.env[REVIEW_GH_TOKEN_ENV] ?? '',
+    mergePrepEnabled: (process.env[MERGE_PREP_ENV] ?? '') === '1',
   };
 
   if (cfg.authorAllowlist.length === 0) {
@@ -552,6 +601,14 @@ async function main(): Promise<void> {
   // or posting self-approvals that GitHub rejects. No-op when review is off.
   await assertReviewIdentities(cfg, realRunner);
 
+  // Fail-loud merge-prep arming (DR-2026-07-16): a prepped PR is re-drafted and
+  // relies on the review loop to re-approve/un-draft it — refuse to arm
+  // merge-prep without the review loop, or every prep wedges its PR in draft.
+  assertMergePrepArming(cfg);
+  if (cfg.mergePrepEnabled) {
+    console.log(`[autopilot] merge-prep enabled (cap=${cfg.mergePrepCap}) — stuck PRs are prepped, not just escalated`);
+  }
+
   const source = new GhIssueSource(realRunner);
   const wallClock = new WallClock(cfg.wallClockMs);
 
@@ -562,6 +619,10 @@ async function main(): Promise<void> {
   // One `gh pr update-branch` per BEHIND PR per process run (merge sweep,
   // #1735) — still-behind-after-update is surfaced, never retried forever.
   const attemptedUpdateBranch = new Set<number>();
+  // Per-process merge-prep attempt tracking (DR-2026-07-16): a same-head second
+  // sighting escalates; ≤MAX_PREP_ATTEMPTS across advancing heads. Lost on
+  // restart (same tradeoff as attemptedUpdateBranch).
+  const attemptedPrep = new Map<number, PrepAttempt>();
 
   if (isDryRun) {
     // Dry-run intentionally skips the field-id cache + makePauseSession + any
@@ -742,11 +803,36 @@ async function main(): Promise<void> {
           for (const s of mr.skipped) {
             console.log(`[autopilot] merge (waiting/needs a human): ${s}`);
           }
-          // Stage A: make stuck PRs (conflict / still-behind) visible on the
-          // board — label review:needs-human + linked-issue Blocked on: Human +
-          // one comment. Idempotent (the label suppresses re-escalation next
-          // cycle via StuckPr.escalated).
-          if (mr.stuck.length > 0) {
+          // Stuck PRs (conflict / still-behind). Armed → the merge-prep session
+          // resolves mechanical conflicts and escalates the rest (DR-2026-07-16).
+          // Disarmed → Stage A deterministic escalation only (label
+          // review:needs-human + linked-issue Blocked on: Human + one comment).
+          // Both are idempotent via StuckPr.escalated.
+          if (mr.stuck.length > 0 && cfg.mergePrepEnabled) {
+            const reviewInFlight = new Set<number>(
+              (await deriveReviewInFlight(realRunner)).inFlight.map((r) => r.prNumber),
+            );
+            const mp = await runMergePrepCycle({
+              stuck: mr.stuck,
+              cfg,
+              attemptedPrep,
+              reviewInFlight,
+              deriveInFlight: () => deriveMergePrepInFlight(realRunner),
+              dispatch: (s) => dispatchMergePrep(s, cfg, { runner: realRunner, spawn: makeLoggingSpawn() }),
+              escalate: async (s, why) => {
+                console.log(`[autopilot] merge-prep: escalating PR #${s.number} — ${why}`);
+                await escalateStuckPr(s, snapshot, cyclePrByIssue, cycleFieldCache, realRunner);
+              },
+              isCodeOwned: (n) => touchesOwned(n, realRunner),
+              removeWorktree: async (w) => {
+                await realRunner('git', ['worktree', 'remove', '--force', w.worktreePath]);
+              },
+            });
+            if (mp.dispatched.length > 0) console.log(`[autopilot] merge-prep dispatched → PR #${mp.dispatched.join(', PR #')}`);
+            if (mp.escalated.length > 0) console.log(`[autopilot] merge-prep escalated (needs-human) → PR #${mp.escalated.join(', PR #')}`);
+            if (mp.reaped.length > 0) console.log(`[autopilot] merge-prep reaped stale worktree → PR #${mp.reaped.join(', PR #')}`);
+            if (mp.waiting.length > 0) console.log(`[autopilot] merge-prep waiting (in-flight) → PR #${mp.waiting.join(', PR #')}`);
+          } else if (mr.stuck.length > 0) {
             const esc = await escalateStuckPrs(
               mr.stuck, snapshot, cyclePrByIssue, cycleFieldCache, realRunner,
             );
@@ -790,50 +876,7 @@ async function main(): Promise<void> {
         dispatchIssue: (issue) =>
           dispatchIssue(issue, cfg, {
             runner: realRunner,
-            spawn: (cmd, args, opts) => {
-              // #533: open the per-session log in append mode and wire it to
-              // BOTH stdout(1) and stderr(2) so the two streams interleave in
-              // one tailable file. Append (not truncate, not timestamp) keeps
-              // the path stable for `tail -f` while never clobbering a prior
-              // run's output. `dispatchIssue` supplied opts.logPath; if it is
-              // somehow absent we fall back to the opts.stdio it set.
-              const logPath = opts.logPath;
-              let fd: number | undefined;
-              let stdio = opts.stdio;
-              if (typeof logPath === 'string') {
-                mkdirSync(SESSIONS_LOG_DIR, { recursive: true });
-                // Owner-only (0o600) on create: session logs may contain
-                // secrets surfaced by the spawned session (tokens in gh/git
-                // error output, env echoes, prompt material). The mode only
-                // applies when the file is created; an existing log (re-dispatch)
-                // is not chmod'd — that's fine, the append target is unchanged.
-                fd = openSync(logPath, 'a', 0o600);
-                // Visual delimiter so successive append runs are separable.
-                const delimiter =
-                  `\n===== dispatch ${new Date().toISOString()} ` +
-                  `pid=pending cwd=${opts.cwd} =====\n`;
-                writeSync(fd, delimiter);
-                stdio = ['ignore', fd, fd];
-              }
-              // jinn-mono#1296/#1393: rewrite (truncate, not append) the
-              // dispatch-time started-at marker so its mtime always reflects
-              // the LATEST dispatch — unlike the append-mode log above.
-              // recoverStartedAt in state.ts reads this file's mtime when
-              // re-deriving startedAt for a reused worktree.
-              if (typeof opts.startedAtMarkerPath === 'string') {
-                writeFileSync(opts.startedAtMarkerPath, `${new Date().toISOString()}\n`, { mode: 0o600 });
-              }
-              const child = spawn(cmd, args, { ...opts, stdio } as SpawnOptions);
-              if (child.pid != null) {
-                child.unref();
-              }
-              // Close the parent's copy of the fd: the detached child inherited
-              // its own dup, so closing here avoids leaking an fd per dispatch.
-              if (fd != null) {
-                closeSync(fd);
-              }
-              return { pid: child.pid };
-            },
+            spawn: makeLoggingSpawn(),
             fieldCache: cycleFieldCache,
           }),
         countOpenReadyPrs,

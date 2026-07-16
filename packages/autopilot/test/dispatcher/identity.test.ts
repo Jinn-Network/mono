@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { assertReviewIdentities, sessionSpawnEnv } from '../../src/dispatcher/identity.js';
+import { assertReviewIdentities, assertMergePrepArming, sessionSpawnEnv } from '../../src/dispatcher/identity.js';
 import { DEFAULT_CONFIG } from '../../src/dispatcher/types.js';
 import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
 
@@ -26,6 +26,24 @@ describe('sessionSpawnEnv', () => {
     const e = sessionSpawnEnv('tok-abc');
     expect(e.env?.GH_TOKEN).toBe('tok-abc');
     expect(e.env?.PATH).toBe(process.env.PATH); // ambient preserved
+  });
+});
+
+describe('assertMergePrepArming', () => {
+  it('no-op when merge-prep is disabled', () => {
+    expect(() => assertMergePrepArming({ ...DEFAULT_CONFIG, mergePrepEnabled: false })).not.toThrow();
+  });
+
+  it('throws when merge-prep is armed but the review loop is not (would wedge PRs in draft)', () => {
+    expect(() =>
+      assertMergePrepArming({ ...DEFAULT_CONFIG, mergePrepEnabled: true, reviewBotLogin: '' }),
+    ).toThrow(/review loop is disabled/);
+  });
+
+  it('passes when merge-prep is armed alongside an armed review loop', () => {
+    expect(() =>
+      assertMergePrepArming({ ...DEFAULT_CONFIG, mergePrepEnabled: true, reviewBotLogin: 'jinn-review' }),
+    ).not.toThrow();
   });
 });
 
