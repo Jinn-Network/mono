@@ -79,8 +79,9 @@ captured one — see `client/packages/harness-layer/src/seed-import/episode-exec
    Vocabulary in use (freeform by schema — document any new value here):
    - `operator-recorded-session` — transformed from a real recorded session;
      carry `sourceUrl` when it re-performs a merged fix.
-   - `operator-authored-distractor` — hand-authored negative/contrast
-     material (e.g. the sympy distractor). It must not claim the
+   - `synthetic-selection-distractor` — hand-authored negative/contrast
+     material (e.g. the sympy distractor). Pair it with
+     `verifiabilityTier: "user-accepted"`; it must not claim the
      recorded-session evidentiary standard.
 
 6. **Validate locally** before touching the network:
@@ -166,8 +167,12 @@ repeat:
 - **Unchanged content** — nothing publishes. The row prints as `skipped`
   with the reason `unchanged since <prior envelopeRef>`. No new IPFS
   upload, no new anchor tx.
-- **Changed content** (you edited the episode's steps, synthesis, tags,
-  outcome, or attribution) — a fresh record publishes, and its
+- **Changed content after planning** — execution refuses the row because its
+  canonical digest no longer matches the approved report. Re-run `seed plan`,
+  review the new digest/content, and approve that new report.
+- **Changed, newly approved content** (you edited the episode's steps,
+  synthesis, tags, outcome, or attribution and approved a fresh report) — a
+  fresh record publishes, and its
   `seed.attribution.supersedes` step attribute is set to the prior
   `envelopeRef`. The old record is not deleted or hidden by this alone
   (that collapse is a consumer-side / corpus-hygiene concern — rescope plan
@@ -179,13 +184,16 @@ Idempotency state lives at
 `seed identity -> {contentHash, envelopeRef, publishedAt}`; path overridable
 via `JINN_LAYER_SEED_STATE_PATH`), shared with the existing skill-seed lane.
 Deleting that file resets idempotency — the next `seed execute` treats every
-row as new. A corrupt/unreadable state file is fail-open: treated as empty,
-with a warning on the command's own output (`warnings` in `--json` mode, a
-`WARNING` line in table mode) — worst case is one redundant republish, which
-then supersedes cleanly. This state is **local to the machine that ran
-`seed execute`**; it is not itself published, and it does not query the
-corpus — it only answers "did *I* already publish this exact seed identity,
-unchanged?".
+row as new. A corrupt/unreadable state file fails closed before publication,
+preserving the last known lineage instead of overwriting it as empty. State
+writes use a same-directory temp file plus atomic rename.
+
+If publication succeeds but state persistence fails, the result still prints
+the published `envelopeRef` with a recovery warning and exits nonzero. Stop
+automation, preserve that ref, repair/reconcile the local state, and only then
+retry. This state is **local to the machine that ran `seed execute`**; it is
+not itself published, and it does not query the corpus — it only answers "did
+*I* already publish this exact seed identity, unchanged?".
 
 ## Fixture-file reference
 
@@ -193,6 +201,6 @@ unchanged?".
 |---|---|---|
 | `source-dashboard-flake.episode.json` | evidence | The positive match: re-performs the real dashboard `update_available` test flake fix (`163e070d`) at its pre-fix commit. |
 | `distractor-operator-claims.episode.json` | evidence | Same repo, different module (`d682f811`) — proves selection is finer than repository match. |
-| `distractor-sympy-printing.episode.json` | evidence | Different domain entirely (sympy LaTeX printing) — proves domain relevance. Hand-authored (`origin: operator-authored-distractor`, no source commit), unlike the two commit-verified episodes above. |
+| `distractor-sympy-printing.episode.json` | evidence | Different domain entirely (sympy LaTeX printing) — proves domain relevance. Explicitly synthetic (`origin: synthetic-selection-distractor`, `verifiabilityTier: user-accepted`, no source commit), unlike the two commit-verified episodes above. |
 | `distractor-skill-tdd.json` | skill | Skill-shaped seed (existing lane's format) — proves skills are excluded from evidence pickup. |
 | `distractor-skill-tdd-dup.json` | skill | Same `skillMd` content as the above under a distinct identity — proves content-key dedup at the consumer. |

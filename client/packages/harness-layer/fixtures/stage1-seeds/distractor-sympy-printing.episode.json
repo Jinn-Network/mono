@@ -37,10 +37,10 @@
   ],
   "outcome": {
     "status": "completed",
-    "verifiabilityTier": "tests-passed"
+    "verifiabilityTier": "user-accepted"
   },
   "synthesis": "sympy's LaTeX printer represents a symbol like Symbol('x_i_j') as two separate subscript indices, i and j, rendered as x_{i j} — a space-separated brace group that reads unambiguously as two indices rather than one two-character subscript. _print_Symbol builds this by joining the parts split_super_sub extracts from the symbol's name, and the subscript branch had regressed to an empty-string join, collapsing ['i', 'j'] into the ambiguous x_{ij}. The superscript branch a few lines below already joined with a space, so the fix makes the subscript branch consistent with it. The regression test test_latex_symbols pins the exact rendered string for a two-part subscript symbol, so this class of join-separator bug cannot reappear silently.",
   "attribution": {
-    "origin": "operator-authored-distractor"
+    "origin": "synthetic-selection-distractor"
   }
 }

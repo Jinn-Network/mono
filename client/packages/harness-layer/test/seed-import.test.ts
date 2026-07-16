@@ -430,6 +430,41 @@ describe('jinn-layer seed CLI', () => {
     ]);
     expect(sink.output()).toContain('bafy-envelope');
   });
+
+  it('returns the published skill ref with a recovery warning and nonzero exit when state persistence fails', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-seed-'));
+    const reportFile = join(dir, 'report.json');
+    const source = mockSource([skill()]);
+    writeFileSync(reportFile, JSON.stringify(await plan(source)));
+    const { deps, published } = mockPublishDeps();
+    const sink = writerSink();
+
+    const code = await runJinnLayerCli(['seed', 'execute', reportFile, '--json'], {
+      writer: sink,
+      seedSource: source,
+      publishDeps: deps,
+      seedImportState: {
+        get: () => undefined,
+        set: () => {
+          throw new Error('synthetic disk full');
+        },
+      },
+    });
+
+    expect(code).toBe(1);
+    expect(published).toHaveLength(2);
+    const payload = JSON.parse(sink.output()) as {
+      imported: Array<{ envelopeRef: string; stateWarning?: string }>;
+      errors: unknown[];
+    };
+    expect(payload.errors).toEqual([]);
+    expect(payload.imported).toEqual([
+      expect.objectContaining({
+        envelopeRef: expect.stringContaining('bafy-envelope'),
+        stateWarning: expect.stringMatching(/published.*state.*recovery/i),
+      }),
+    ]);
+  });
 });
 
 // ── Seed-profile scrub (#1409) — regression: seeds anchored but defaced ─────

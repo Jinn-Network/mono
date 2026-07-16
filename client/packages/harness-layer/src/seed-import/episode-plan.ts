@@ -7,7 +7,7 @@
  * second, silently dropping the first from the report.
  */
 
-import type { EpisodeSource, SeedEpisode } from './episode-fetch.js';
+import { episodeContentDigest, type EpisodeSource, type SeedEpisode } from './episode-fetch.js';
 import type { EpisodeImportReport } from './episode-report.js';
 
 export async function planEpisodes(source: EpisodeSource): Promise<EpisodeImportReport> {
@@ -20,6 +20,7 @@ export async function planEpisodes(source: EpisodeSource): Promise<EpisodeImport
       id: episode.id,
       taskSummary: episode.taskSummary,
       tags: episode.tags,
+      contentDigest: episodeContentDigest(episode),
       verdict: duplicate ? 'skip' : 'import',
       reason: duplicate
         ? `duplicate id "${episode.id}" in source — first occurrence wins`

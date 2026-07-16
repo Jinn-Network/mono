@@ -1080,9 +1080,15 @@ export async function runJinnLayerCli(
   }
 
   if (isSeed) {
+    const listFile = parsed.values.source as string | undefined;
+    const episodesDir = parsed.values['episodes-dir'] as string | undefined;
+    if (listFile !== undefined && episodesDir !== undefined) {
+      writer.write(`error: seed commands require exactly one of --source or --episodes-dir\n\n${USAGE}`);
+      return 2;
+    }
+
     const buildSource = (): SeedSource => {
       if (opts.seedSource) return opts.seedSource;
-      const listFile = parsed.values.source as string | undefined;
       if (!listFile) {
         throw new Error('seed commands require --source <list-file> (owner/repo[#path] per line) or an injected source');
       }
@@ -1101,7 +1107,6 @@ export async function runJinnLayerCli(
     // --episodes-dir, chosen instead of --source when either is present. The
     // two lanes never mix in one report — episodes are first-party content
     // with no licence gate, so their report shape differs from ImportReport.
-    const episodesDir = parsed.values['episodes-dir'] as string | undefined;
     const isEpisodes = Boolean(opts.episodeSource) || episodesDir !== undefined;
     const buildEpisodeSource = (): EpisodeSource => {
       if (opts.episodeSource) return opts.episodeSource;
@@ -1150,11 +1155,9 @@ export async function runJinnLayerCli(
     // File-backed by default (issue #1771): real `seed execute` runs persist
     // idempotency state across invocations (path overridable via
     // JINN_LAYER_SEED_STATE_PATH, mirroring JINN_LAYER_LEDGER_PATH). Tests
-    // inject an in-memory store. A corrupt state file is fail-open (treated
-    // as empty; semantics in state.ts); its warning is collected here and
-    // surfaced on THIS command's own output below — a `warnings` field in
-    // --json mode, a WARNING line in table mode — not only console.warn
-    // (PR #1779 review).
+    // inject an in-memory store. A corrupt state file fails closed (semantics
+    // in state.ts); its diagnostic is collected here and surfaced on THIS
+    // command's own output in addition to the per-row error.
     const stateWarnings: string[] = [];
     const state = opts.seedImportState ?? createFileSeedImportState(
       process.env['JINN_LAYER_SEED_STATE_PATH'],
@@ -1180,13 +1183,14 @@ export async function runJinnLayerCli(
             `    ref     ${row.envelopeRef}`,
             `    anchor  ${row.anchorTx ? `${TESTNET_EXPLORER_TX_URL}${row.anchorTx}` : '-'}`,
             ...(row.supersedes ? [`    supersedes ${row.supersedes}`] : []),
+            ...(row.stateWarning ? [`    WARNING ${row.stateWarning}`] : []),
           );
         }
         for (const row of result.skipped) lines.push(`  skipped  ${row.id} — ${row.reason}`);
         for (const row of result.errors) lines.push(`  ERROR    ${row.id} — ${row.error}`);
         writer.write(lines.join('\n') + '\n');
       }
-      return result.errors.length > 0 ? 1 : 0;
+      return result.errors.length > 0 || result.imported.some((row) => row.stateWarning !== undefined) ? 1 : 0;
     }
 
     const report = parseImportReport(JSON.parse(readFileSync(reportFile, 'utf-8')));
@@ -1202,13 +1206,18 @@ export async function runJinnLayerCli(
         ...stateWarnings.map((w) => `  WARNING  ${w}`),
       ];
       for (const row of result.imported) {
-        lines.push(`  IMPORTED ${row.skill}`, `    ref     ${row.envelopeRef}`, `    anchor  ${row.anchorTx ? `${TESTNET_EXPLORER_TX_URL}${row.anchorTx}` : '-'}`);
+        lines.push(
+          `  IMPORTED ${row.skill}`,
+          `    ref     ${row.envelopeRef}`,
+          `    anchor  ${row.anchorTx ? `${TESTNET_EXPLORER_TX_URL}${row.anchorTx}` : '-'}`,
+          ...(row.stateWarning ? [`    WARNING ${row.stateWarning}`] : []),
+        );
       }
       for (const row of result.skipped) lines.push(`  skipped  ${row.skill} — ${row.reason}`);
       for (const row of result.errors) lines.push(`  ERROR    ${row.skill} — ${row.error}`);
       writer.write(lines.join('\n') + '\n');
     }
-    return result.errors.length > 0 ? 1 : 0;
+    return result.errors.length > 0 || result.imported.some((row) => row.stateWarning !== undefined) ? 1 : 0;
   }
 
   if (isDistillModels) {

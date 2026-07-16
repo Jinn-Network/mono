@@ -30,6 +30,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { OutcomeStatusSchema, VerifiabilityTierSchema } from '../envelope.js';
+import { hashSeedContent } from './state.js';
 
 /** Rescope plan §3.2 excerpt labels — the knowledge-packet projection's vocabulary. */
 export const SEED_EPISODE_EXCERPT_LABELS = ['failure', 'fix', 'command', 'diff', 'note'] as const;
@@ -74,9 +75,9 @@ export const SeedEpisodeSchema = z.strictObject({
      * docs/runbooks/stage1-evidence-seeding.md):
      * - 'operator-recorded-session' — transformed from a real recorded
      *   session; pair with `sourceUrl` when it re-performs a merged fix.
-     * - 'operator-authored-distractor' — hand-authored negative/contrast
-     *   material that must not claim the recorded-session evidentiary
-     *   standard (PR #1779 review).
+     * - 'synthetic-selection-distractor' — hand-authored negative/contrast
+     *   material, explicitly synthetic and paired with the unverified
+     *   `user-accepted` tier (PR #1779 review).
      */
     origin: z.string().min(1),
     /** Link to the real merged fix, when the episode re-performs one. */
@@ -84,6 +85,20 @@ export const SeedEpisodeSchema = z.strictObject({
   }),
 });
 export type SeedEpisode = z.infer<typeof SeedEpisodeSchema>;
+
+/** Canonical content approved by an episode report row (the id is its separate identity key). */
+export function episodeContentDigest(episode: SeedEpisode): string {
+  return hashSeedContent({
+    repo: episode.repo,
+    baseCommit: episode.baseCommit ?? null,
+    taskSummary: episode.taskSummary,
+    tags: episode.tags,
+    steps: episode.steps,
+    outcome: episode.outcome,
+    synthesis: episode.synthesis,
+    attribution: episode.attribution,
+  });
+}
 
 /** Parse an untrusted value (a seed-episode JSON file) as a SeedEpisode; throws ZodError. */
 export function parseSeedEpisode(input: unknown): SeedEpisode {

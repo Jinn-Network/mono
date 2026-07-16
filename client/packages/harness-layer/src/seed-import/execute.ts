@@ -41,7 +41,13 @@ import {
 } from './state.js';
 
 export interface ImportResult {
-  imported: Array<{ skill: string; envelopeRef: string; anchorTx: string | null }>;
+  imported: Array<{
+    skill: string;
+    envelopeRef: string;
+    anchorTx: string | null;
+    /** Publication succeeded, but local lineage state needs operator recovery. */
+    stateWarning?: string;
+  }>;
   skipped: Array<{ skill: string; reason: string }>;
   errors: Array<{ skill: string; error: string }>;
 }
@@ -217,11 +223,20 @@ export async function execute(
         skill: toSkillArtifact(skill, deps.participant.safeAddress, prior?.envelopeRef),
       });
       if (published.vetoed) throw new Error('unexpected veto on seed publish');
-      state.set(identity, { contentHash, envelopeRef: published.envelopeRef, publishedAt: now.toISOString() });
+      let stateWarning: string | undefined;
+      try {
+        state.set(identity, { contentHash, envelopeRef: published.envelopeRef, publishedAt: now.toISOString() });
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        stateWarning =
+          `published ${published.envelopeRef}, but seed-import state persistence failed: ${detail}; ` +
+          'recovery required before retrying this seed';
+      }
       result.imported.push({
         skill: row.skill,
         envelopeRef: published.envelopeRef,
         anchorTx: published.anchorTx,
+        ...(stateWarning ? { stateWarning } : {}),
       });
     } catch (err) {
       result.errors.push({

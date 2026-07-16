@@ -229,6 +229,7 @@ export {
 // Evidence-episode seed lane (issue #1771).
 export {
   createLocalEpisodeSeedSource,
+  episodeContentDigest,
   parseSeedEpisode,
   SeedEpisodeSchema,
   SEED_EPISODE_EXCERPT_LABELS,
