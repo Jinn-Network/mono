@@ -56,6 +56,11 @@ import {
 import { plan as seedPlan } from './seed-import/plan.js';
 import { execute as seedExecute } from './seed-import/execute.js';
 import { parseImportReport, renderImportReport } from './seed-import/report.js';
+import { createLocalEpisodeSeedSource, type EpisodeSource } from './seed-import/episode-fetch.js';
+import { planEpisodes } from './seed-import/episode-plan.js';
+import { executeEpisodes } from './seed-import/episode-execute.js';
+import { parseEpisodeImportReport, renderEpisodeImportReport } from './seed-import/episode-report.js';
+import { createFileSeedImportState, type SeedImportStateStore } from './seed-import/state.js';
 import { extractSkill } from './skill.js';
 import { isInsidePackageDir } from '../../../src/util/path-safety.js';
 import { runDistillationPipeline } from './pipeline.js';
@@ -179,7 +184,17 @@ Commands:
   seed execute <report-file> --source <list-file> [--json]
                                                  Publish the approved import rows (APPROVAL
                                                  GATE: run only after the plan report is
-                                                 signed off)
+                                                 signed off). Idempotent: unchanged seeds
+                                                 republish nothing; changed seeds supersede
+                                                 the prior record
+  seed plan --episodes-dir <dir> [--out <report-file>] [--json]
+                                                 List + validate evidence-episode seed files
+                                                 (docs/runbooks/stage1-evidence-seeding.md);
+                                                 ZERO writes
+  seed execute <report-file> --episodes-dir <dir> [--json]
+                                                 Publish the approved evidence episodes
+                                                 (APPROVAL GATE, idempotent + supersedes,
+                                                 same as the skill lane above)
   distill run [--limit N] [--out <dir>] [--meta]
               [--distiller claude|codex] [--local-only]
                                                  Run the distillation pipeline over the
@@ -374,6 +389,10 @@ export interface RunJinnLayerCliOptions {
   publishDeps?: HarnessPublishDeps;
   /** Injectable seed source (tests). Default: GitHub source over --source list. */
   seedSource?: SeedSource;
+  /** Injectable evidence-episode seed source (tests). Default: local dir source over --episodes-dir. */
+  episodeSource?: EpisodeSource;
+  /** Injectable seed-import idempotency state (tests). Default: file-backed store (real `seed execute` runs). */
+  seedImportState?: SeedImportStateStore;
   /** Injectable distill-pipeline deps (tests). Default: live wiring per field. */
   distillRunDeps?: DistillRunCliDeps;
   /** Injectable rung-1 own-captures deps (tests). Default: provider-resolved distill port. */
@@ -1006,6 +1025,7 @@ export async function runJinnLayerCli(
         path: { type: 'string' },
         veto: { type: 'boolean', default: false },
         source: { type: 'string' },
+        'episodes-dir': { type: 'string' },
         meta: { type: 'boolean', default: false },
         distiller: { type: 'string' },
         'distiller-model': { type: 'string' },
@@ -1077,7 +1097,35 @@ export async function runJinnLayerCli(
       });
     };
 
+    // Evidence-episode source (issue #1771): a separate, parallel lane over
+    // --episodes-dir, chosen instead of --source when either is present. The
+    // two lanes never mix in one report — episodes are first-party content
+    // with no licence gate, so their report shape differs from ImportReport.
+    const episodesDir = parsed.values['episodes-dir'] as string | undefined;
+    const isEpisodes = Boolean(opts.episodeSource) || episodesDir !== undefined;
+    const buildEpisodeSource = (): EpisodeSource => {
+      if (opts.episodeSource) return opts.episodeSource;
+      if (!episodesDir) {
+        throw new Error('seed commands require --episodes-dir <dir> (seed-episode JSON files) or an injected episodeSource');
+      }
+      return createLocalEpisodeSeedSource(episodesDir);
+    };
+
     if (subverb === 'plan') {
+      if (isEpisodes) {
+        const episodeReport = await planEpisodes(buildEpisodeSource());
+        const outFile = parsed.values.out as string | undefined;
+        if (outFile) writeFileSync(outFile, JSON.stringify(episodeReport, null, 2) + '\n');
+        if (parsed.values.json) {
+          writer.write(JSON.stringify(episodeReport) + '\n');
+        } else {
+          writer.write(renderEpisodeImportReport(episodeReport) + '\n');
+          writer.write(outFile
+            ? `\nReport written to ${outFile}. APPROVAL GATE: review (edit verdicts if needed), then run seed execute ${outFile} --episodes-dir ${episodesDir ?? '<dir>'}.\n`
+            : '\nAPPROVAL GATE: re-run with --out <report-file>, review, then seed execute.\n');
+        }
+        return 0;
+      }
       const report = await seedPlan(buildSource());
       const outFile = parsed.values.out as string | undefined;
       if (outFile) writeFileSync(outFile, JSON.stringify(report, null, 2) + '\n');
@@ -1098,9 +1146,37 @@ export async function runJinnLayerCli(
       writer.write(`error: seed execute requires a <report-file> argument (the approved plan report)\n\n${USAGE}`);
       return 2;
     }
-    const report = parseImportReport(JSON.parse(readFileSync(reportFile, 'utf-8')));
     const deps = opts.publishDeps ?? buildLivePublishDepsFromEnv();
-    const result = await seedExecute(report, buildSource(), deps);
+    // File-backed by default (issue #1771): real `seed execute` runs persist
+    // idempotency state across invocations. Tests inject an in-memory store.
+    const state = opts.seedImportState ?? createFileSeedImportState();
+
+    if (isEpisodes) {
+      const episodeReport = parseEpisodeImportReport(JSON.parse(readFileSync(reportFile, 'utf-8')));
+      const result = await executeEpisodes(episodeReport, buildEpisodeSource(), deps, { state });
+      if (parsed.values.json) {
+        writer.write(JSON.stringify(result) + '\n');
+      } else {
+        const lines = [
+          `${result.imported.length} imported, ${result.skipped.length} skipped, ${result.errors.length} error(s)`,
+        ];
+        for (const row of result.imported) {
+          lines.push(
+            `  IMPORTED ${row.id}`,
+            `    ref     ${row.envelopeRef}`,
+            `    anchor  ${row.anchorTx ? `${TESTNET_EXPLORER_TX_URL}${row.anchorTx}` : '-'}`,
+            ...(row.supersedes ? [`    supersedes ${row.supersedes}`] : []),
+          );
+        }
+        for (const row of result.skipped) lines.push(`  skipped  ${row.id} — ${row.reason}`);
+        for (const row of result.errors) lines.push(`  ERROR    ${row.id} — ${row.error}`);
+        writer.write(lines.join('\n') + '\n');
+      }
+      return result.errors.length > 0 ? 1 : 0;
+    }
+
+    const report = parseImportReport(JSON.parse(readFileSync(reportFile, 'utf-8')));
+    const result = await seedExecute(report, buildSource(), deps, { state });
     if (parsed.values.json) {
       writer.write(JSON.stringify(result) + '\n');
     } else {

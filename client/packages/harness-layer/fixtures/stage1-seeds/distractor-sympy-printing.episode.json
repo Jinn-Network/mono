@@ -1,0 +1,46 @@
+{
+  "id": "distractor-sympy-printing",
+  "repo": "sympy/sympy",
+  "taskSummary": "Fix LaTeX printer dropping the separator between multi-part symbol subscripts",
+  "tags": [
+    "sympy",
+    "printing",
+    "latex",
+    "regression"
+  ],
+  "steps": [
+    {
+      "label": "failure",
+      "title": "run the failing scoped test",
+      "text": "$ python -m pytest sympy/printing/tests/test_latex.py -k test_latex_symbols -q\n\nF                                                                        [100%]\n================================== FAILURES ==================================\n_____________________________ test_latex_symbols ______________________________\n\n    def test_latex_symbols():\n        ...\n>       assert latex(Symbol('x_i_j')) == 'x_{i j}'\nE       AssertionError: assert 'x_{ij}' == 'x_{i j}'\nE         - x_{i j}\nE         + x_{ij}\n\nsympy/printing/tests/test_latex.py:842: AssertionError\n1 failed, 1 passed in 0.42s"
+    },
+    {
+      "label": "note",
+      "title": "diagnose the failure",
+      "text": "Symbol('x_i_j') represents x with two separate subscript indices, i and j, rendered as x_{i j} — a space-separated brace group that reads unambiguously as two indices rather than one two-character subscript. _print_Symbol builds this by joining the parts split_super_sub extracts from the symbol's name; the subscript branch was joining with an empty separator, collapsing ['i', 'j'] into the ambiguous x_{ij}."
+    },
+    {
+      "label": "fix",
+      "title": "join subscript parts with a space, matching the superscript branch",
+      "text": "Join multiple subscript parts with a literal space before wrapping them in braces, the same convention the superscript branch two lines below already uses: ' '.join(subs) instead of ''.join(subs)."
+    },
+    {
+      "label": "diff",
+      "title": "the fix",
+      "text": "--- a/sympy/printing/latex.py\n+++ b/sympy/printing/latex.py\n@@ def _print_Symbol(self, expr, style='plain'):\n     name, supers, subs = split_super_sub(expr.name)\n     name = translate(name)\n     supers = [translate(sup) for sup in supers]\n     subs = [translate(sub) for sub in subs]\n \n     if subs:\n-        name += '_{%s}' % ''.join(subs)\n+        name += '_{%s}' % ' '.join(subs)\n     if supers:\n         name += '^{%s}' % ' '.join(supers)\n \n     return name"
+    },
+    {
+      "label": "command",
+      "title": "rerun — passing",
+      "text": "$ python -m pytest sympy/printing/tests/test_latex.py -k test_latex_symbols -q\n\n.                                                                        [100%]\n1 passed in 0.31s"
+    }
+  ],
+  "outcome": {
+    "status": "completed",
+    "verifiabilityTier": "tests-passed"
+  },
+  "synthesis": "sympy's LaTeX printer represents a symbol like Symbol('x_i_j') as two separate subscript indices, i and j, rendered as x_{i j} — a space-separated brace group that reads unambiguously as two indices rather than one two-character subscript. _print_Symbol builds this by joining the parts split_super_sub extracts from the symbol's name, and the subscript branch had regressed to an empty-string join, collapsing ['i', 'j'] into the ambiguous x_{ij}. The superscript branch a few lines below already joined with a space, so the fix makes the subscript branch consistent with it. The regression test test_latex_symbols pins the exact rendered string for a two-part subscript symbol, so this class of join-separator bug cannot reappear silently.",
+  "attribution": {
+    "origin": "operator-recorded-session"
+  }
+}
