@@ -55,16 +55,26 @@ Stage 1 adds a `jinn-layer` version-compatibility check (the #1380 gap) and keep
 status` as the install doctor.
 
 ### 4.2 During work — the boost, made visible
-- First turn: auto-pickup searches the corpus from the first user message; suggestions inject
-  as `[jinn corpus]` context (cache-safe, user-message injection).
+
+*(Amended 2026-07-16 by the Stage 1 rescope — see §9 item 4 and
+`docs/superpowers/plans/2026-07-16-jinn-plugin-stage-1-rescope-plan.md`.)*
+
+- First turn: auto-pickup derives search terms from the first user message and the session's
+  repository, searches the corpus, and injects up to two bounded **knowledge packets** —
+  evidence content (the record's own synthesis plus failure/fix/command/diff excerpts)
+  projected deterministically from published evidence records — as `[jinn corpus]` context
+  (cache-safe, user-message injection), each attributed to its source record with a
+  `corpus_fetch <ref>` pointer.
+- Retrieval serves **evidence records only**; skill records are excluded from pickup (shared
+  skills are the Stage 3 product per the roadmap and distillation-v1 D11). A relevance floor
+  makes "nothing relevant found" a real, honest outcome.
 - Mid-task: `corpus_search` / `corpus_fetch` agent tools and `/corpus <q>`.
-- Skills: `/jinn skills install <ref>` into the host's native skills dir (`.jinn-ref` fenced).
-- Auto-adopt stays tier-gated (`evaluator-verified`) and therefore dormant in Stage 1;
-  the experience is **suggest-first**. Corpus content: seeds + prior traces + distilled skills.
-- **Legibility (new build):** the point-of-use `◇ corpus` marker fires on *suggestions* (today
-  it fires only on auto-adopt, i.e. never); a session-end Jinn summary states what was
-  surfaced/fetched/installed, capture status, and the eligibility verdict; `/jinn session`
-  shows the current session's Jinn activity on demand. When Jinn found nothing, it says so.
+- **Legibility:** the point-of-use `◇ corpus` marker fires when packets are provided; the
+  session-end Jinn summary and `/jinn session` state what was **searched** and what was
+  **provided to the agent** — the only user-facing knowledge states — plus capture status and
+  the eligibility verdict. Internal fetch/parse detail is recorded, not headlined. Stage 1
+  never claims provided knowledge helped (attribution is Stage 2, P6). When Jinn found
+  nothing, it says so.
 
 ### 4.3 Session end — evidence
 The episode is assembled at session end from the completed hook collector (P5) and retained
@@ -95,7 +105,7 @@ intake is Stage 2+.
 
 ### 4.5 History
 Net-new but small: a local, plugin-rendered session history — per session: task summary,
-knowledge surfaced/used, capture status, eligibility verdict, contribution state (queued /
+knowledge searched/provided, capture status, eligibility verdict, contribution state (queued /
 published + anchor), distilled skills produced. Surfaces: `/jinn history` (TUI) and
 `jinn-layer history` (CLI). `/jinn ledger` remains the what-left-this-machine receipt trail.
 **Invariant: history is a derived view** over canonical episodes, the canonical contribution
@@ -103,7 +113,8 @@ store, and active/staged local-skill provenance; it owns no facts or duplicate c
 evidence is displayed as degraded or unavailable rather than inferred as zero, false, or empty.
 
 ### 4.6 Fallbacks and failure behavior
-No network → retrieval degrades to nothing-found (fails open), work proceeds. `jinn-layer`
+No network → retrieval degrades to nothing-found (fails open), work proceeds; search, fetch,
+and packet-projection failures all degrade the same way, with a typed reason. `jinn-layer`
 missing → commands degrade with instructive errors. Publish failure → local retention with
 honest status. Sidecar absent → mints queue. Rule: every adapter failure surfaces as a typed
 plugin-level outcome; never a crash into the host session.
@@ -141,13 +152,19 @@ historical evidence.
 
 ## 7. Minimum acceptance journey (formalized in the Phase 5 gate design)
 
-On stock upstream Hermes + plugin: enable → OSS session where seeded corpus knowledge is
-surfaced and visibly attributed → complete work → episode retained with complete trajectory →
+On stock upstream Hermes + plugin: enable → OSS session where seeded prior-work evidence is
+provided to the agent in context (`searched → provided`) and visibly attributed to its source
+episode → complete work → episode retained with complete trajectory →
 eligibility verdict → mint validated and queued/published via sidecar → session appears in
 history → private-session variant proves nothing leaves → disable returns the host to stock.
 
 ## 8. Stage 1 non-goals
 
+- Shared-skill discovery, installation, uninstall, counts, or auto-adoption anywhere in the
+  user surface (Stage 3; the machinery is retained internally behind the later-stage boundary).
+- Any claim that provided knowledge helped (Stage 2 attribution).
+- Retrieval beyond deterministic term-overlap + tier + recency — no embeddings, no model calls
+  in the retrieval path, no new services.
 - Proving Jinn beats stock Hermes (the harness-network spec §8 capability gate, later).
 - Multi-host portability (Claude Code / Codex adapters).
 - Auto-adopt activation; evaluator economics; Skill Factory / network distillation (rung 3).
@@ -172,3 +189,10 @@ issues already exist and stay owned there.
 3. Task Creator harvest today assumes the operator daemon; Stage 1 frames the daemon as the
    **optional sidecar** for contribution (packaging inversion, harness-network §4.2) — mints
    queue without it.
+4. The shipped v0.1 consumption surface drifted into the Stage 3 skills product (skill-install
+   suggestions, `surfaced/fetched/installed` states, skill-only seeds; the 2026-07-16 #1654
+   walkthrough recorded it). The Stage 1 rescope
+   (`docs/superpowers/plans/2026-07-16-jinn-plugin-stage-1-rescope-plan.md`) corrects §4.2,
+   §4.5, §4.6, §7, and §8 to evidence retrieval with `searched → provided` states. Locked decisions
+   P1–P8 are unchanged; `spec/2026-07-06-distillation-v1.md` D11 (retrieval over anchored
+   evidence is the v1 product baseline) is the governing precedent.

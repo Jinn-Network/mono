@@ -1,9 +1,12 @@
 # Jinn Plugin Stage 1 — Completion Plan
 
-- **Updated:** 2026-07-15
+- **Updated:** 2026-07-16
 - **Product:** the Jinn Plugin; Hermes is the first host adapter, not the product boundary
 - **Parent:** #1654
-- **Status:** implementation in progress; only the live walkthrough remains after the automated gate
+- **Status:** §2's implementation issues shipped; the 2026-07-16 walkthrough recorded **iterate**
+  (consumption drift). Completion now runs through the rescope plan
+  (`docs/superpowers/plans/2026-07-16-jinn-plugin-stage-1-rescope-plan.md`, units R0–R7), which
+  amends this document's knowledge states below; the contribution-side contracts in §3 stand.
 
 ## 1. Outcome
 
@@ -11,7 +14,8 @@ Stage 1 proves one complete product lifecycle in an unmodified Hermes installati
 
 1. Install and enable the standalone Jinn Plugin.
 2. Start ordinary OSS agentic work.
-3. Receive visibly marked shared-knowledge suggestions.
+3. Receive relevant prior evidence provided into the agent context, visibly marked and
+   attributed (rescope: knowledge packets, not skill suggestions).
 4. Capture the complete ordered trajectory locally as `EpisodeV1`.
 5. Tee the same session into the existing local distillation workflow.
 6. Record a reusable public-task candidate without exposing raw trajectory or gold.
@@ -56,7 +60,8 @@ branch is cut. #1732 is a post-Stage-1 refactor: pickup stays implemented in Pyt
 
 - `EpisodeV1` is the canonical reusable knowledge artifact. Its complete ordered trajectory is
   first-class rather than hidden in snapshots.
-- Optional persisted `activity` records surfaced/fetched knowledge and installed skills.
+- Optional persisted `activity` records the searched terms and provided refs (rescope; legacy
+  surfaced/fetched/installed fields remain accepted on read).
 - Optional persisted `eligibility` records the session-end verdict used by history.
 - `JinnPlugin.completeSession(...)` accepts an already-captured `EpisodeV1`, activity,
   eligibility inputs, and an optional `ContributionCandidateV1`.
@@ -115,14 +120,14 @@ Legacy raw-trace pending envelopes remain local and are never auto-published by 
   untracked files without changing the worktree or index.
 - Integration stays inside the standalone Jinn Plugin and generic Hermes hooks. Hermes core and
   the model toolset are unchanged.
-- Every surfaced suggestion is marked, not only auto-adopted knowledge.
-- `/jinn session` shows surfaced, fetched, installed, capture, eligibility, and contribution
-  state.
+- Every provided knowledge packet is marked at point of use, with source attribution.
+- `/jinn session` shows searched terms, provided packets, capture, eligibility, and
+  contribution state (rescope: no installed-skill state).
 - `/jinn history` is derived from canonical episodes, contribution records, and existing local
   skill provenance. It owns no duplicate history cache and reports degraded/unavailable facts
   honestly.
-- Session end always reports what Jinn surfaced/used, capture status, local-learning state,
-  contribution status, and an explicit nothing-relevant-found state.
+- Session end always reports what Jinn searched and provided, capture status, local-learning
+  state, contribution status, and an explicit nothing-relevant-found state.
 - Disabled means no Jinn output, subprocesses, or state writes.
 
 ## 4. Automated acceptance
