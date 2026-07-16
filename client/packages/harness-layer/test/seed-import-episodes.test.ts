@@ -278,6 +278,24 @@ describe('executeEpisodes()', () => {
     ]);
   });
 
+  it.each([
+    ['id/sessionId', { id: 'ghp_016C7e0aBcDeFgHiJkLmNoPqRsTuVwXyZ012' }],
+    ['tag/distributionTag', { tags: ['acme', '4111 1111 1111 1111'] }],
+  ])('rejects sensitive %s before any publish call', async (_label, overrides) => {
+    const source = mockEpisodeSource([episode(overrides)]);
+    const { deps, published } = mockPublishDeps();
+
+    const result = await executeEpisodes(await planEpisodes(source), source, deps);
+
+    expect(published).toHaveLength(0);
+    expect(result.imported).toHaveLength(0);
+    expect(result.errors).toEqual([
+      expect.objectContaining({
+        error: expect.stringMatching(/sensitive.*refusing to publish/i),
+      }),
+    ]);
+  });
+
   describe('idempotency + supersedes', () => {
     it('re-running executeEpisodes() with the same state store over unchanged content publishes nothing new', async () => {
       const source = mockEpisodeSource([episode()]);
@@ -327,6 +345,55 @@ describe('executeEpisodes()', () => {
       expect(second.imported[0]!.envelopeRef).not.toBe(first.imported[0]!.envelopeRef);
       expect(published).toHaveLength(2);
     });
+  });
+
+  it('stops the batch after post-publication state persistence fails', async () => {
+    const source = mockEpisodeSource([
+      episode({ id: 'first' }),
+      episode({ id: 'second' }),
+    ]);
+    const { deps, published } = mockPublishDeps();
+    const state = {
+      get: () => undefined,
+      set: () => {
+        throw new Error('synthetic state disk full');
+      },
+    };
+
+    const result = await executeEpisodes(await planEpisodes(source), source, deps, { state });
+
+    expect(published).toHaveLength(1);
+    expect(result.imported).toHaveLength(1);
+    expect(result.imported[0]).toMatchObject({
+      id: 'first',
+      stateWarning: expect.stringMatching(/recovery required/i),
+    });
+    expect(result.errors).toEqual([]);
+  });
+
+  it('halts after an ambiguous publication error and never publishes later rows', async () => {
+    const source = mockEpisodeSource([
+      episode({ id: 'first' }),
+      episode({ id: 'second' }),
+    ]);
+    const { deps, published } = mockPublishDeps();
+    let envelopeCalls = 0;
+    deps.publishEnvelope = async () => {
+      envelopeCalls += 1;
+      throw new Error('synthetic transport timeout');
+    };
+
+    const result = await executeEpisodes(await planEpisodes(source), source, deps);
+
+    expect(envelopeCalls).toBe(1);
+    expect(published).toHaveLength(1); // first row's trace artifact only
+    expect(result.imported).toEqual([]);
+    expect(result.errors).toEqual([
+      expect.objectContaining({
+        id: 'first',
+        error: expect.stringMatching(/publication outcome unknown; do not auto-retry/i),
+      }),
+    ]);
   });
 });
 

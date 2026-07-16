@@ -84,7 +84,13 @@ export interface PublishOptions {
 }
 
 export type PublishResult =
-  | { vetoed: false; envelopeRef: string; anchorTx: `0x${string}` | null }
+  | {
+      vetoed: false;
+      envelopeRef: string;
+      anchorTx: `0x${string}` | null;
+      /** Anchor succeeded, but the local receipt could not be appended. */
+      ledgerWarning?: string;
+    }
   | { vetoed: true };
 
 function assertPending(pending: PendingEnvelope): void {
@@ -228,16 +234,28 @@ export async function publish(
   });
   const anchorTx = anchor.txHash ?? null;
 
-  deps.ledger.append({
-    ts: now.toISOString(),
-    taskSummary: trace.task.summary,
+  let ledgerWarning: string | undefined;
+  try {
+    deps.ledger.append({
+      ts: now.toISOString(),
+      taskSummary: trace.task.summary,
+      envelopeRef,
+      anchorTx,
+      verifiabilityTier: trace.outcome.verifiabilityTier,
+      status: 'published',
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    ledgerWarning =
+      `anchored ${envelopeRef}${anchorTx ? ` at ${anchorTx}` : ''}, but local ledger append failed: ${detail}`;
+  }
+
+  return {
+    vetoed: false,
     envelopeRef,
     anchorTx,
-    verifiabilityTier: trace.outcome.verifiabilityTier,
-    status: 'published',
-  });
-
-  return { vetoed: false, envelopeRef, anchorTx };
+    ...(ledgerWarning ? { ledgerWarning } : {}),
+  };
 }
 
 async function signWithPrivateKey(
