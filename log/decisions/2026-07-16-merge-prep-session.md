@@ -70,10 +70,11 @@ preserved — the PR still passes independent review and the auto-merge gate, or
 
 ## Rollout & rollback
 
-Ships as three stacked PRs against `next`: Stage A (#1757, structured stuck report + deterministic
-needs-human escalation — valuable on its own, no session), Stage C (#1758, this DR + handbook),
-Stage B (#1759, the flag-gated session). `packages/autopilot` is not covered by repo CI, so each
-PR's gate is `yarn typecheck && yarn test` in that package, run on the merge result.
+Ships as three stacked PRs against `next`, one per tracking issue: Stage A (issue #1757 → PR #1760,
+structured stuck report + deterministic needs-human escalation — valuable on its own, no session),
+Stage C (issue #1758 → PR #1761, this DR + handbook), Stage B (issue #1759 → PR #1762, the flag-gated
+session). `packages/autopilot` is not covered by repo CI, so each PR's gate is
+`yarn typecheck && yarn test` in that package, run on the merge result.
 
 **Arming is operator-local.** `supervise.sh` (gitignored, per-operator) exports `JINN_MERGE_PREP=1`
 under a Gate parallel to the review-loop gate: unset by default, keyed on a `next`-file-presence

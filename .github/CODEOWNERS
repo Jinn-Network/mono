@@ -29,3 +29,12 @@
 /packages/indexer/explorer/src/views/      @oaksprout @ritsukai
 /packages/indexer/explorer/src/components/ @oaksprout @ritsukai
 /packages/indexer/explorer/src/styles/     @oaksprout @ritsukai
+
+# Engineering governance — the handbook defines the AI workflow rules (including
+# the auto-merge carve-outs) and the decision log records the decisions the
+# autopilot enforces. These must NOT be auto-mergeable under the very rules they
+# set: a human MUST review a change to them. CODEOWNERS itself is included so the
+# owner set can't be edited without human review. (DR-2026-07-16, review of #1761.)
+/.github/CODEOWNERS           @oaksprout @ritsukai
+/docs/engineering/handbook.md @oaksprout @ritsukai
+/log/decisions/               @oaksprout @ritsukai
