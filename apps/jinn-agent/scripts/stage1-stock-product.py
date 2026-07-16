@@ -533,11 +533,14 @@ def finish_session(
     expected_pickup: bool,
     expected_publication: str,
     mutate: str | None = None,
-) -> tuple[str, str | None, str]:
+) -> tuple[str, str | None, str, str]:
     """Drive one complete session lifecycle.
 
     Returns (session-end stderr, the injected pickup context or None, the
-    pickup point-of-use marker text observed on stderr).
+    pickup point-of-use marker text observed on stderr, the mid-session
+    `/jinn session` text). The mid-session text is captured HERE, while the
+    session's state is live — `_on_session_end` pops it, so a caller
+    re-querying `/jinn session` after this returns would read empty state.
     """
     jinn._on_session_start(session_id=session_id, cwd=str(repo), platform="cli")
     pickup_stderr = io.StringIO()
@@ -590,7 +593,7 @@ def finish_session(
             completed=True,
             skills_loadout=[],
         )
-    return summary.getvalue(), (pickup["context"] if pickup else None), marker
+    return summary.getvalue(), (pickup["context"] if pickup else None), marker, current
 
 
 def read_store_records() -> list[dict[str, Any]]:
@@ -698,7 +701,7 @@ def main() -> None:
         reset_session_runtime(jinn)
         jinn.consent.save_state(False, previewed=False)
         requests_before_target = list(fixture.requests)
-        share_off_summary, target_context, target_marker = finish_session(
+        share_off_summary, target_context, target_marker, target_mid_session = finish_session(
             jinn,
             session_id="stage1-target-task",
             task_id="task-target-task",
@@ -725,11 +728,10 @@ def main() -> None:
         # Boundary: no skill-install language in the injection, ever.
         assert "skills install" not in target_context.lower()
         assert "adopted automatically" not in target_context.lower()
-        # (5) Attribution visible in /jinn session mid-task.
-        mid_session = jinn._handle_jinn(
-            "session", session_id="stage1-target-task", task_id="task-target-task"
-        )
-        assert SOURCE_REF in mid_session, mid_session
+        # (5) Attribution visible in /jinn session mid-task — asserted on the
+        # mid-session text finish_session captured while the state was live
+        # (session end pops it; a re-query here would read empty state).
+        assert SOURCE_REF in target_mid_session, target_mid_session
         assert "captured" in share_off_summary.lower()
         assert "contribution recorded" in share_off_summary.lower(), share_off_summary
         assert SOURCE_REF in share_off_summary, share_off_summary
@@ -745,7 +747,7 @@ def main() -> None:
         # ── Scenario 3: honest no-result, on the sharing-on session that
         # also carries the mint/preview/history mechanics ──────────────────
         jinn.consent.save_state(True, previewed=False)
-        no_result_summary, no_result_context, _no_result_marker = finish_session(
+        no_result_summary, no_result_context, _no_result_marker, no_result_mid_session = finish_session(
             jinn,
             session_id="stage1-no-result",
             task_id="task-no-result",
@@ -757,10 +759,12 @@ def main() -> None:
         )
         assert no_result_context is None
         assert "knowledge searched · nothing relevant found" in no_result_summary.lower()
-        no_result_session = jinn._handle_jinn(
-            "session", session_id="stage1-no-result", task_id="task-no-result"
+        # The honest no-result line comes from THIS session's live state (the
+        # search happened, nothing cleared the floor) — not from the empty
+        # render an ended/unknown session would also produce.
+        assert "knowledge searched · nothing relevant found" in no_result_mid_session.lower(), (
+            no_result_mid_session
         )
-        assert "nothing relevant found" in no_result_session.lower()
 
         records_before_preview = read_store_records()
         share_on = next(
@@ -789,7 +793,7 @@ def main() -> None:
 
         # ── Scenario 4: corpus 503 — session proceeds, degraded, no injection ──
         fixture.unavailable = True
-        unavailable_summary, unavailable_context, _unavailable_marker = finish_session(
+        unavailable_summary, unavailable_context, _unavailable_marker, _unavailable_mid = finish_session(
             jinn,
             session_id="stage1-corpus-unavailable",
             task_id="task-corpus-unavailable",
@@ -805,7 +809,7 @@ def main() -> None:
         real_layer = os.environ["JINN_LAYER_BIN"]
         os.environ["JINN_LAYER_BIN"] = str(WORK / "missing-jinn-layer")
         reset_session_runtime(jinn)
-        missing_summary, missing_context, _missing_marker = finish_session(
+        missing_summary, missing_context, _missing_marker, _missing_mid = finish_session(
             jinn,
             session_id="stage1-missing-layer",
             task_id="task-missing-layer",
@@ -830,7 +834,7 @@ def main() -> None:
 
         jinn._runner = IncompatibleRunner()
         reset_session_runtime(jinn)
-        incompatible_summary, incompatible_context, _incompatible_marker = finish_session(
+        incompatible_summary, incompatible_context, _incompatible_marker, _incompatible_mid = finish_session(
             jinn,
             session_id="stage1-incompatible-layer",
             task_id="task-incompatible-layer",
@@ -853,7 +857,7 @@ def main() -> None:
         for rendered in (
             share_off_summary, no_result_summary, unavailable_summary,
             missing_summary, incompatible_summary,
-            mid_session, no_result_session,
+            target_mid_session, no_result_mid_session,
         ):
             assert "skills install" not in rendered.lower()
             assert "adopted automatically" not in rendered.lower()
@@ -874,8 +878,8 @@ def main() -> None:
             json.loads(path.read_text(encoding="utf-8"))
             for path in sorted(EPISODES_DIR.glob("*.episode.json"))
         ]
-        # (6) Exactly one episode per completed session.
-        assert len(episodes) >= 5
+        # (6) Exactly one episode per completed session — five sessions driven.
+        assert len(episodes) == 5, [e["session"]["sessionId"] for e in episodes]
         for episode in episodes:
             assert episode["schemaVersion"] == "jinn.episode.v1"
             assert episode["episodeId"]
