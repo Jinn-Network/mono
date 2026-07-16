@@ -907,6 +907,13 @@ def main() -> None:
         assert any(not row["candidate"]["publishMinedTasksConsent"] for row in records)
         assert any(row["candidate"]["publishMinedTasksConsent"] for row in records)
 
+        episode_by_id = {episode["episodeId"]: episode for episode in episodes}
+        share_off_row = next(
+            row for row in records if not row["candidate"]["publishMinedTasksConsent"]
+        )
+        share_on_row = next(
+            row for row in records if row["candidate"]["publishMinedTasksConsent"]
+        )
         result = {
             "episodeIds": sorted(episode_ids),
             "sessions": [
@@ -917,16 +924,18 @@ def main() -> None:
                 }
                 for episode in episodes
             ],
-            "shareOffRecordId": next(
-                row["recordId"]
-                for row in records
-                if not row["candidate"]["publishMinedTasksConsent"]
-            ),
-            "shareOnRecordId": next(
-                row["recordId"]
-                for row in records
-                if row["candidate"]["publishMinedTasksConsent"]
-            ),
+            "shareOffRecordId": share_off_row["recordId"],
+            "shareOnRecordId": share_on_row["recordId"],
+            # Explicit session handoff for the daemon-side .mjs leg (PR #1781
+            # review): derived from the store rows via each candidate's
+            # sourceId → episode → sessionId, never hard-coded, so renaming a
+            # driver session cannot silently break the second leg's lookup.
+            "shareOffSessionId": episode_by_id[
+                share_off_row["candidate"]["sourceId"]
+            ]["session"]["sessionId"],
+            "shareOnSessionId": episode_by_id[
+                share_on_row["candidate"]["sourceId"]
+            ]["session"]["sessionId"],
             "legacyPending": str(legacy),
         }
         (WORK / "stock-product-result.json").write_text(
