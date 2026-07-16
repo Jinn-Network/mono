@@ -31,3 +31,14 @@ export function sessionLogPath(issueNumber: number): string {
 export function sessionStartedAtPath(issueNumber: number): string {
   return join(SESSIONS_LOG_DIR, `${issueNumber}.started-at`);
 }
+
+/**
+ * The log-file path for one merge-prep session, keyed by PR number:
+ * `<SESSIONS_LOG_DIR>/merge-prep-<N>.log`. Merge-prep sessions get a captured
+ * log (unlike review sessions' `stdio: 'ignore'`) — a new, risky session type
+ * that mutates a PR branch warrants observability. Namespaced with a
+ * `merge-prep-` prefix so it never collides with an issue-keyed `<N>.log`.
+ */
+export function mergePrepLogPath(prNumber: number): string {
+  return join(SESSIONS_LOG_DIR, `merge-prep-${prNumber}.log`);
+}

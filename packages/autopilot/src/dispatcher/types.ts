@@ -161,6 +161,18 @@ export interface DispatcherConfig {
    * Both are checked fail-loud at boot. Source: `JINN_REVIEW_GH_TOKEN`.
    */
   reviewGhToken: string;
+  /**
+   * Arm the merge-prep session loop (DR-2026-07-16): when a stuck (conflicting /
+   * still-behind) pipeline PR is detected, dispatch an AI session that resolves
+   * MECHANICAL conflicts on the PR branch and escalates SEMANTIC ones. Default
+   * false — dead code until set. Requires the review loop armed (a re-drafted PR
+   * is re-approved there); enforced fail-loud by `assertMergePrepArming`.
+   * Source: `JINN_MERGE_PREP` (=== '1').
+   */
+  mergePrepEnabled: boolean;
+  /** Max simultaneous merge-prep sessions. Default 1 (singleton — stuck PRs are
+   *  rare, and serializing removes prep-vs-prep races on shared `origin/next`). */
+  mergePrepCap: number;
 }
 
 export const DEFAULT_CONFIG: DispatcherConfig = {
@@ -179,6 +191,8 @@ export const DEFAULT_CONFIG: DispatcherConfig = {
   reviewBotLogin: '',
   implGhToken: '',
   reviewGhToken: '',
+  mergePrepEnabled: false,
+  mergePrepCap: 1,
 };
 
 /** A PR as polled from the PR source, with the fields the review loop needs. */
@@ -210,6 +224,17 @@ export interface ReviewablePr extends PolledPr {
 
 /** A review-pr session the dispatcher has spawned and is tracking (PR-keyed). */
 export interface InFlightReview {
+  prNumber: number;
+  branch: string;
+  worktreePath: string;
+  pid: number | null;
+  startedAt: number;
+}
+
+/** An in-flight merge-prep session, one per `jinn-mono_worktrees/merge-<N>`
+ *  worktree. Mirrors InFlightReview (PR-keyed, no logPath in the derived shape;
+ *  the worktree is detached so `branch` is ''). */
+export interface InFlightMergePrep {
   prNumber: number;
   branch: string;
   worktreePath: string;
