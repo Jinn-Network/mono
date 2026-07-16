@@ -1,10 +1,10 @@
-/** Pure pickup policy — port of apps/jinn-agent/plugins/jinn/pickup.py
- *  decision logic. No I/O: term derivation + adopt/suggest classification
- *  only. Orchestration (search/get over ports) lives in plugin.ts. */
+/** Evidence-first pickup policy (rescope design §3.3). No I/O: term
+ *  derivation + selection only. Orchestration (search/get over ports,
+ *  packet projection, rendering) lives in plugin.ts. */
 import type { KnowledgeHit } from './schemas/knowledge-hit.js';
-import { TIER_ORDER, type PickupConfig, type Tier } from './schemas/pickup-config.js';
+import { TIER_ORDER } from './schemas/pickup-config.js';
 
-// Ported verbatim from _STOPWORDS.
+// Ported verbatim from the pre-rescope heuristic (still the plugin's stopword list).
 export const STOPWORDS: ReadonlySet<string> = new Set([
   'the', 'a', 'an', 'and', 'or', 'but', 'for', 'with', 'into', 'onto',
   'this', 'that', 'these', 'those', 'from', 'then', 'than', 'when',
@@ -13,28 +13,82 @@ export const STOPWORDS: ReadonlySet<string> = new Set([
   'using', 'about', 'have', 'has', 'had', 'you', 'your', 'our', 'not',
 ]);
 
-/** Naive v0 distribution guess: distinctive words from the FIRST LINE only,
- *  alnum + '-'/'_', min length 4, drop stopwords, dedupe, cap at maxTerms.
- *  Alnum is Unicode-aware (\p{L}\p{N}) to match Python's str.isalnum() (AC1). */
-export function deriveTerms(userMessage: string, maxTerms = 2): string[] {
-  const firstLine = (userMessage ?? '').trim().split(/\r?\n/)[0] ?? '';
-  const terms: string[] = [];
-  for (const rawWord of firstLine.toLowerCase().split(/\s+/)) {
-    const word = [...rawWord].filter((c) => /[\p{L}\p{N}]/u.test(c) || c === '-' || c === '_').join('');
-    if (word.length >= 4 && !STOPWORDS.has(word) && !terms.includes(word)) {
-      terms.push(word);
-    }
-    if (terms.length >= maxTerms) break;
-  }
-  return terms;
+const MAX_TERMS = 6;
+const MIN_REMAINDER_LENGTH = 4;
+
+const QUOTED_SPAN_RE = /`([^`]+)`|"([^"]+)"|'([^']+)'/g;
+
+/** Unicode-aware alnum filter (matches Python's `str.isalnum()`), keeping the
+ *  identifier separators this function itself tests for. */
+function cleanWord(raw: string): string {
+  return [...raw].filter((c) => /[\p{L}\p{N}]/u.test(c) || '_-./'.includes(c)).join('');
 }
 
-/** Ports tier_at_least — unknown tier never satisfies the threshold. */
-export function tierAtLeast(tier: string, threshold: Tier): boolean {
-  const ti = (TIER_ORDER as readonly string[]).indexOf(tier);
-  const thi = (TIER_ORDER as readonly string[]).indexOf(threshold);
-  if (ti < 0 || thi < 0) return false;
-  return ti >= thi;
+/** "Identifier-shaped": contains `_`, `-`, `.`, `/`, a digit, or a camelCase
+ *  transition (a lowercase letter immediately followed by an uppercase one). */
+function isIdentifierShaped(word: string): boolean {
+  return /[_\-./]/.test(word) || /\d/.test(word) || /[a-z][A-Z]/.test(word);
+}
+
+/**
+ * Up to `maxTerms` deterministic lowercase search terms, in priority order
+ * (rescope §3.3): backticked/quoted tokens; identifier-shaped tokens; the
+ * session's repository slug; the longest remaining non-stopword tokens.
+ * Operates over the whole message (not just the first line). Deduplicated.
+ */
+export function deriveSearchTerms(
+  message: string,
+  repositorySlug?: string,
+  maxTerms = MAX_TERMS,
+): string[] {
+  const text = message ?? '';
+  const terms: string[] = [];
+  const seen = new Set<string>();
+
+  const push = (raw: string): void => {
+    const trimmed = raw.trim();
+    if (trimmed.length === 0 || terms.length >= maxTerms) return;
+    const lower = trimmed.toLowerCase();
+    if (seen.has(lower)) return;
+    seen.add(lower);
+    terms.push(lower);
+  };
+
+  // 1. Backticked/quoted tokens — each span is one term, taken near-verbatim.
+  for (const match of text.matchAll(QUOTED_SPAN_RE)) {
+    if (terms.length >= maxTerms) break;
+    push(match[1] ?? match[2] ?? match[3] ?? '');
+  }
+
+  // 2. Identifier-shaped tokens (whole message).
+  if (terms.length < maxTerms) {
+    for (const rawWord of text.split(/\s+/)) {
+      if (terms.length >= maxTerms) break;
+      const word = cleanWord(rawWord);
+      if (word.length < 2 || STOPWORDS.has(word.toLowerCase())) continue;
+      if (isIdentifierShaped(word)) push(word);
+    }
+  }
+
+  // 3. The session's repository slug.
+  if (terms.length < maxTerms && repositorySlug && repositorySlug.trim().length > 0) {
+    push(repositorySlug);
+  }
+
+  // 4. Remaining longest non-stopword tokens (>=4 chars), longest first.
+  if (terms.length < maxTerms) {
+    const remainder = text
+      .split(/\s+/)
+      .map(cleanWord)
+      .filter((word) => word.length >= MIN_REMAINDER_LENGTH && !STOPWORDS.has(word.toLowerCase()))
+      .sort((a, b) => b.length - a.length);
+    for (const word of remainder) {
+      if (terms.length >= maxTerms) break;
+      push(word);
+    }
+  }
+
+  return terms;
 }
 
 /** Ports classify_payload — 'skill' or 'unknown'. Prefers the explicit
@@ -45,84 +99,89 @@ export function classifyPayload(hit: Pick<KnowledgeHit, 'payloadKind' | 'kind'>)
   return hit.kind === 'skill' ? 'skill' : 'unknown';
 }
 
-export interface PickupCandidate {
-  ref: string;
-  slug: string;
-  tier: string;
-  summary: string;
-  payloadKind: 'skill' | 'unknown';
+function isSkillHit(hit: KnowledgeHit): boolean {
+  return hit.kind === 'skill' || classifyPayload(hit) === 'skill';
 }
 
-/** Project a fetched corpus hit into a classified pickup candidate. Owns the
- *  slug/summary derivation and routes payloadKind through classifyPayload. */
-export function hitToCandidate(hit: KnowledgeHit): PickupCandidate {
-  return {
-    ref: hit.ref,
-    slug: hit.title ?? hit.ref.split('/').pop() ?? hit.ref,
-    tier: hit.tier ?? '',
-    summary: hit.snippet ?? hit.title ?? hit.ref,
-    payloadKind: classifyPayload(hit),
-  };
+/** `(taskSummary, origin)` content key — kills the duplicated-seed symptom at
+ *  the consumer even before store hygiene lands (rescope §3.3 step 2). Hits
+ *  that carry neither a summary/title nor an origin never collide on this key
+ *  (an empty key would otherwise collapse unrelated hits). */
+function contentKey(hit: KnowledgeHit): string | undefined {
+  const summary = (hit.snippet ?? hit.title ?? '').trim().toLowerCase();
+  const origin = (hit.origin ?? '').trim().toLowerCase();
+  if (summary.length === 0 && origin.length === 0) return undefined;
+  return `${summary} ${origin}`;
 }
 
-export interface PickupDecision {
-  adopted: PickupCandidate[];
-  suggested: PickupCandidate[];
-  contextBlock?: string;
-}
-
-/** Render only confirmed adoptions as installed. Orchestrators can re-render
- * after performing auto-adoption I/O and move failed installs to suggestions. */
-export function renderPickupDecision(
-  adopted: PickupCandidate[],
-  suggested: PickupCandidate[],
-): string | undefined {
-  if (adopted.length === 0 && suggested.length === 0) return undefined;
-
-  const lines = ['[jinn corpus] Relevant to this task:'];
-  if (adopted.length > 0) {
-    lines.push('Adopted automatically (verified):');
-    for (const c of adopted) lines.push(`- ${c.slug} (${c.tier}): installed skill`);
+/** Dedup by ref, then by content key (rescope §3.3 step 2). */
+export function dedupeKnowledgeHits(hits: KnowledgeHit[]): KnowledgeHit[] {
+  const seenRefs = new Set<string>();
+  const seenContent = new Set<string>();
+  const out: KnowledgeHit[] = [];
+  for (const hit of hits) {
+    if (seenRefs.has(hit.ref)) continue;
+    const key = contentKey(hit);
+    if (key !== undefined && seenContent.has(key)) continue;
+    seenRefs.add(hit.ref);
+    if (key !== undefined) seenContent.add(key);
+    out.push(hit);
   }
-  if (suggested.length > 0) {
-    lines.push(
-      'Available in the corpus (unverified — read with the corpus tools, or the user can install):',
-    );
-    for (const c of suggested) {
-      lines.push(
-        c.payloadKind === 'skill'
-          ? `- ${c.slug} (tier: ${c.tier}) — ${c.summary}\n  ref: ${c.ref} · install: /jinn skills install ${c.ref}`
-          : `- (${c.payloadKind}, ${c.tier}) ${c.summary} — ref: ${c.ref}`,
-      );
-    }
-  }
-  return lines.join('\n');
+  return out;
 }
 
-/** Ports the adopt/suggest branch of _pickup_inner. Pure: candidates are
- *  already fetched + classified; installed slugs are already known. */
-export function decidePickup(
-  candidates: PickupCandidate[],
-  installed: Set<string>,
-  config: PickupConfig,
-): PickupDecision {
-  const adopted: PickupCandidate[] = [];
-  const suggested: PickupCandidate[] = [];
-  const threshold = config.autoAdoptTier;
+const RELEVANCE_FLOOR = 2;
+export const MAX_SELECTED_PACKETS = 2;
 
-  for (const cand of candidates.slice(0, config.maxCandidates)) {
-    if (cand.payloadKind === 'skill') {
-      if (installed.has(cand.slug)) continue;
-      if (config.autoAdopt && tierAtLeast(cand.tier, threshold)) {
-        adopted.push(cand);
-        continue;
-      }
-      suggested.push(cand);
-    } else {
-      // Unknown payload types are never adopted; mention verified ones only.
-      if (tierAtLeast(cand.tier, threshold)) suggested.push(cand);
-    }
+function haystackFor(hit: KnowledgeHit): string {
+  return `${hit.snippet ?? hit.title ?? ''} ${hit.tags.join(' ')}`.toLowerCase();
+}
+
+/** Count of matched terms across `taskSummary + tags`; a repository-slug
+ *  match counts 2 (rescope §3.3 step 3). */
+export function scoreKnowledgeHit(
+  hit: KnowledgeHit,
+  terms: string[],
+  repositorySlug?: string,
+): number {
+  const haystack = haystackFor(hit);
+  const repoTerm = repositorySlug?.trim().toLowerCase();
+  let score = 0;
+  for (const term of terms) {
+    if (!haystack.includes(term)) continue;
+    score += term.length > 0 && term === repoTerm ? 2 : 1;
   }
+  return score;
+}
 
-  return { adopted, suggested, contextBlock: renderPickupDecision(adopted, suggested) };
+function tierRank(tier: string | undefined): number {
+  if (tier === undefined) return -1;
+  return (TIER_ORDER as readonly string[]).indexOf(tier);
+}
+
+/**
+ * Evidence-first selection (rescope §3.3): drop skill hits, dedup, score,
+ * apply the relevance floor (honest nothing-found below it), rank
+ * score desc → tier desc → recency desc, take the top
+ * `MAX_SELECTED_PACKETS`.
+ */
+export function selectKnowledgeHits(
+  hits: KnowledgeHit[],
+  terms: string[],
+  repositorySlug?: string,
+): KnowledgeHit[] {
+  const evidence = hits.filter((hit) => !isSkillHit(hit));
+  const deduped = dedupeKnowledgeHits(evidence);
+  const scored = deduped
+    .map((hit) => ({ hit, score: scoreKnowledgeHit(hit, terms, repositorySlug) }))
+    .filter((scoredHit) => scoredHit.score >= RELEVANCE_FLOOR);
+
+  scored.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    const tierDiff = tierRank(b.hit.tier) - tierRank(a.hit.tier);
+    if (tierDiff !== 0) return tierDiff;
+    return (b.hit.publishedAt ?? 0) - (a.hit.publishedAt ?? 0);
+  });
+
+  return scored.slice(0, MAX_SELECTED_PACKETS).map((scoredHit) => scoredHit.hit);
 }

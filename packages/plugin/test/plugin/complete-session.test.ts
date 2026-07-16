@@ -18,6 +18,8 @@ import {
 import { makeSampleEpisode } from '../_fixtures/episode.js';
 
 const ACTIVITY = {
+  searchedTerms: [] as string[],
+  providedRefs: [] as string[],
   surfacedRefs: ['knowledge/surfaced-1'],
   fetchedRefs: ['knowledge/fetched-1'],
   installedSkillRefs: ['skills/tdd@1'],

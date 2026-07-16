@@ -43,13 +43,15 @@ describe('EpisodeV1Schema', () => {
     expect(EpisodeV1Schema.parse(withLineage).lineage?.mintRef).toBe('mint-1');
   });
 
-  it('persists strict optional session activity facts and an authoritative eligibility verdict', () => {
+  it('persists strict evidence-first session activity facts and an authoritative eligibility verdict', () => {
     const enriched = {
       ...valid,
       activity: {
-        surfacedRefs: ['knowledge/surfaced-1'],
-        fetchedRefs: ['knowledge/fetched-1'],
-        installedSkillRefs: ['skills/testing@1'],
+        searchedTerms: ['dashboard', 'vitest'],
+        providedRefs: ['knowledge/provided-1'],
+        surfacedRefs: [],
+        fetchedRefs: ['knowledge/provided-1'],
+        installedSkillRefs: [],
       },
       eligibility: {
         eligible: true,
@@ -64,10 +66,33 @@ describe('EpisodeV1Schema', () => {
     expect(parsed.eligibility).toEqual(enriched.eligibility);
   });
 
+  it('accepts a pre-rescope (legacy) activity shape lacking searchedTerms/providedRefs, defaulting them to []', () => {
+    const legacy = {
+      ...valid,
+      activity: {
+        surfacedRefs: ['knowledge/surfaced-1'],
+        fetchedRefs: ['knowledge/fetched-1'],
+        installedSkillRefs: ['skills/testing@1'],
+      },
+    };
+
+    const parsed = EpisodeV1Schema.parse(legacy);
+
+    expect(parsed.activity).toEqual({
+      searchedTerms: [],
+      providedRefs: [],
+      surfacedRefs: ['knowledge/surfaced-1'],
+      fetchedRefs: ['knowledge/fetched-1'],
+      installedSkillRefs: ['skills/testing@1'],
+    });
+  });
+
   it('rejects unknown persisted activity facts', () => {
     expect(() => EpisodeV1Schema.parse({
       ...valid,
       activity: {
+        searchedTerms: [],
+        providedRefs: [],
         surfacedRefs: [],
         fetchedRefs: [],
         installedSkillRefs: [],

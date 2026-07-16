@@ -277,3 +277,59 @@ describe('EvidenceAdapter — AC2 byte-exact round-trip', () => {
     expect(readdirSync(capturesDir).filter((name) => name.includes('.tmp'))).toEqual([]);
   });
 });
+
+describe('EvidenceAdapter — episode retention (#1772 rider: declared maxEpisodes now enforced)', () => {
+  it('prunes to the newest maxEpisodes by session.capturedAt, deleting the oldest', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-retention-'));
+    const adapter = createEvidenceAdapter({ capturesDir, retention: { policy: 'local-private', maxEpisodes: 3 } });
+
+    const oldest = makeSampleEpisode({ episodeId: 'ep-oldest', session: { sessionId: 's1', capturedAt: '2026-07-01T00:00:00.000Z' } });
+    const older = makeSampleEpisode({ episodeId: 'ep-older', session: { sessionId: 's2', capturedAt: '2026-07-02T00:00:00.000Z' } });
+    const mid = makeSampleEpisode({ episodeId: 'ep-mid', session: { sessionId: 's3', capturedAt: '2026-07-03T00:00:00.000Z' } });
+    const newer = makeSampleEpisode({ episodeId: 'ep-newer', session: { sessionId: 's4', capturedAt: '2026-07-04T00:00:00.000Z' } });
+    const newest = makeSampleEpisode({ episodeId: 'ep-newest', session: { sessionId: 's5', capturedAt: '2026-07-05T00:00:00.000Z' } });
+
+    for (const episode of [oldest, older, mid, newer, newest]) {
+      expect((await adapter.put(episode)).status).toBe('ok');
+    }
+
+    const remaining = readdirSync(capturesDir).filter((name) => name.endsWith('.episode.json')).sort();
+    expect(remaining).toEqual(['ep-mid.episode.json', 'ep-newer.episode.json', 'ep-newest.episode.json']);
+    expect(await adapter.get('ep-oldest')).toEqual({ status: 'ok', value: null });
+    expect(await adapter.get('ep-older')).toEqual({ status: 'ok', value: null });
+    expect((await adapter.get('ep-newest')).status).toBe('ok');
+  });
+
+  it('breaks equal capturedAt ties deterministically by filename', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-retention-tie-'));
+    const adapter = createEvidenceAdapter({ capturesDir, retention: { policy: 'local-private', maxEpisodes: 2 } });
+    const capturedAt = '2026-07-01T00:00:00.000Z';
+
+    for (const episodeId of ['ep-c', 'ep-a', 'ep-b']) {
+      expect((await adapter.put(makeSampleEpisode({
+        episodeId,
+        session: { sessionId: episodeId, capturedAt },
+      }))).status).toBe('ok');
+    }
+
+    expect(readdirSync(capturesDir).filter((name) => name.endsWith('.episode.json')).sort())
+      .toEqual(['ep-a.episode.json', 'ep-b.episode.json']);
+  });
+
+  it('is a no-op at or under the cap', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-retention-noop-'));
+    const adapter = createEvidenceAdapter({ capturesDir, retention: { policy: 'local-private', maxEpisodes: 5 } });
+
+    await adapter.put(makeSampleEpisode({ episodeId: 'ep-a', session: { sessionId: 's1', capturedAt: '2026-07-01T00:00:00.000Z' } }));
+    await adapter.put(makeSampleEpisode({ episodeId: 'ep-b', session: { sessionId: 's2', capturedAt: '2026-07-02T00:00:00.000Z' } }));
+
+    expect(readdirSync(capturesDir).filter((name) => name.endsWith('.episode.json'))).toHaveLength(2);
+  });
+
+  it('defaults to the declared 200-episode cap when no override is supplied', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-retention-default-'));
+    const adapter = createEvidenceAdapter({ capturesDir });
+    const retention = await adapter.retention();
+    expect(retention).toEqual({ status: 'ok', value: { policy: 'local-private', maxEpisodes: 200 } });
+  });
+});

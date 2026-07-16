@@ -152,6 +152,49 @@ export function createEvidenceAdapter(deps: EvidenceAdapterDeps): EvidencePort {
     if (process.platform !== 'win32') await chmod(capturesDir, 0o700);
   }
 
+  /**
+   * Enforce the declared newest-`maxEpisodes` retention (#1772 rider — was
+   * declared via `retention()` but never enforced). Keeps the
+   * `maxEpisodes` episodes with the most recent `session.capturedAt`,
+   * deleting the rest. Runs after every successful write; a no-op once the
+   * dir is at or under the cap. Never throws into `put()` — pruning is
+   * hygiene, not the write contract; a failure to prune is warned and
+   * skipped, same posture as the malformed-file skip in `list()`.
+   */
+  async function pruneOldEpisodes(): Promise<void> {
+    let files: string[];
+    try {
+      files = readdirSync(capturesDir).filter((file) => file.endsWith(EPISODE_SUFFIX));
+    } catch {
+      return;
+    }
+    if (files.length <= retention.maxEpisodes) return;
+
+    const byRecency = files
+      .map((file) => {
+        try {
+          const episode = EpisodeV1Schema.parse(JSON.parse(readFileSync(join(capturesDir, file), 'utf-8')));
+          return { file, capturedAt: episode.session.capturedAt };
+        } catch {
+          // An unparseable file sorts oldest — never preferentially retained
+          // over a valid, dated episode.
+          return { file, capturedAt: '' };
+        }
+      })
+      .sort((a, b) =>
+        b.capturedAt.localeCompare(a.capturedAt)
+        || a.file.localeCompare(b.file),
+      );
+
+    for (const { file } of byRecency.slice(retention.maxEpisodes)) {
+      try {
+        await rm(join(capturesDir, file), { force: true });
+      } catch (err) {
+        console.warn(`[evidence] failed to prune old episode ${file}: ${String(err)}`);
+      }
+    }
+  }
+
   async function persistEpisode(episode: EpisodeV1): Promise<PortResult<{ episodeId: string }>> {
     await prepareEvidenceDir();
     const path = episodePath(episode.episodeId);
@@ -201,7 +244,9 @@ export function createEvidenceAdapter(deps: EvidenceAdapterDeps): EvidencePort {
     async put(episode: EpisodeV1): Promise<PortResult<{ episodeId: string }>> {
       try {
         const parsed = EpisodeV1Schema.parse(episode);
-        return await persistEpisode(parsed);
+        const result = await persistEpisode(parsed);
+        if (result.status === 'ok') await pruneOldEpisodes();
+        return result;
       } catch (e) {
         return unavailable(`evidence store put failed: ${String(e)}`);
       }

@@ -8,6 +8,8 @@ export type Tier = (typeof TIER_ORDER)[number];
 
 export const PickupConfigSchema = z.strictObject({
   enabled: z.boolean().default(true),
+  /** @deprecated Legacy host compatibility only. Pickup does not read either
+   *  auto-adopt field; R3+R5 remove them when the host and acceptance gate flip. */
   autoAdopt: z.boolean().default(false),
   autoAdoptTier: z.enum(TIER_ORDER).default('evaluator-verified'),
   maxCandidates: z.number().int().positive().default(3),
