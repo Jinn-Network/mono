@@ -13,7 +13,7 @@ import { statSync } from 'node:fs';
  * Task worktrees use the issue number as `<name>`, so the full shape is
  * `…/jinn-mono_worktrees/<N>`.
  */
-export const WORKTREE_PARENT_COMPONENT = 'jinn-mono_worktrees';
+const WORKTREE_PARENT_COMPONENT = 'jinn-mono_worktrees';
 
 /**
  * One parsed worktree block from `git worktree list --porcelain`.

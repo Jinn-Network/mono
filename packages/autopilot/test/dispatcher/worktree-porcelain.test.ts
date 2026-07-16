@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -91,6 +91,9 @@ describe('shortBranch', () => {
   });
 });
 
+// Two-signal (marker + worktree) coverage lives in
+// test/dispatcher/recover-started-at.test.ts; only the one-arg call shape
+// (no dispatch marker — the review-state.ts usage) is covered here.
 describe('recoverStartedAt', () => {
   let dir: string;
 
@@ -98,7 +101,7 @@ describe('recoverStartedAt', () => {
     if (dir) rmSync(dir, { recursive: true, force: true });
   });
 
-  it('no markerPath argument → returns the worktree-derived value (one-signal behaviour)', () => {
+  it('no markerPath argument → returns the worktree-derived value (one-signal behavior)', () => {
     dir = mkdtempSync(join(tmpdir(), 'worktree-porcelain-'));
     const worktreePath = join(dir, 'worktree');
     mkdirSync(worktreePath);
@@ -108,24 +111,10 @@ describe('recoverStartedAt', () => {
     expect(result).toBeGreaterThan(0);
   });
 
-  it('with markerPath → takes the max of marker mtime and worktree signal', () => {
-    dir = mkdtempSync(join(tmpdir(), 'worktree-porcelain-'));
-    const worktreePath = join(dir, 'worktree');
-    mkdirSync(worktreePath);
-    const markerPath = join(dir, 'marker');
-    writeFileSync(markerPath, 'x');
-    const future = new Date(Date.now() + 1_000_000);
-    utimesSync(markerPath, future, future);
-
-    const result = recoverStartedAt(worktreePath, markerPath);
-
-    expect(Math.abs(result - future.getTime())).toBeLessThan(10);
-  });
-
-  it('neither path exists → returns 0 (unknown-age sentinel)', () => {
+  it('no markerPath argument and missing worktree → returns 0 (unknown-age sentinel)', () => {
     dir = mkdtempSync(join(tmpdir(), 'worktree-porcelain-'));
 
-    const result = recoverStartedAt(join(dir, 'no-worktree'), join(dir, 'no-marker'));
+    const result = recoverStartedAt(join(dir, 'no-worktree'));
 
     expect(result).toBe(0);
   });
