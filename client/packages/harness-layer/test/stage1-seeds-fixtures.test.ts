@@ -37,15 +37,25 @@ const EXPECTED_FILES = [...EPISODE_FILES, ...SKILL_FILES].sort();
  * raw JSON text's `\n`/`\t` escape sequences are single-backslash-plus-letter
  * and would otherwise false-positive against a naive "letter:\" pattern.
  */
+const ALLOWED_POSIX_ROUTES = new Set([
+  '/jinn/session',
+  '/jinn/status',
+  '/capture-meta/search',
+  '/api/corpus/search',
+  '/corpus/search',
+]);
+const ALLOWED_VERSIONED_POSIX_ROUTE =
+  /^\/v\d+\/(?:status(?:\/health|\.latestVersion)|corpus\/search)$/i;
+
 function hasPosixAbsolutePath(value: string): boolean {
-  const routeRoots = new Set(['jinn', 'capture-meta', 'api', 'corpus']);
   for (const match of value.matchAll(/(?:^|[\s("'`=\[:,])\/[^\s"'`]+/g)) {
     const slash = match[0]!.indexOf('/');
     const candidate = match[0]!.slice(slash).replace(/[)\],.;:]+$/, '');
     if (candidate.startsWith('//')) continue; // URL/UNC handled separately.
+    if (ALLOWED_POSIX_ROUTES.has(candidate) || ALLOWED_VERSIONED_POSIX_ROUTE.test(candidate)) {
+      continue;
+    }
     const segments = candidate.slice(1).split('/').filter(Boolean);
-    const root = segments[0] ?? '';
-    if (routeRoots.has(root) || /^v\d+$/i.test(root)) continue; // Product/API route, not a filesystem path.
     if (segments.length >= 2) return true;
   }
   return false;
@@ -123,17 +133,30 @@ describe('stage1-seeds fixture set (issue #1771)', () => {
         'https://example.com/workspace/project/file.ts',
         'Run /jinn to start the command.',
         'Use /capture-meta for metadata.',
+        'POST /jinn/session',
         'GET /jinn/status',
-        'POST /capture-meta/session',
+        'GET /capture-meta/search',
         'GET /api/corpus/search',
-        'GET /corpus/records/bafy-ref',
+        'GET /corpus/search',
+        'Read /v1/status.latestVersion after the response.',
         'GET /v2/status/health',
+        'GET /v3/corpus/search',
       ]) {
         expect(
           ABSOLUTE_PATH_DETECTORS.some(([, detects]) => detects(clean)),
           `false positive on ${JSON.stringify(clean)}`,
         ).toBe(false);
       }
+    });
+
+    it.each([
+      ['/api/private/key.json'],
+      ['/jinn/private/key.json'],
+      ['/capture-meta/private/token.txt'],
+      ['/corpus/private/index.sqlite'],
+      ['/v2/private/key.json'],
+    ])('flags filesystem-like path beneath a route-shaped root: %j', (canary) => {
+      expect(ABSOLUTE_PATH_DETECTORS.some(([, detects]) => detects(canary))).toBe(true);
     });
   });
 
