@@ -12,7 +12,7 @@ import type {
   ContributionPort,
   ContributionStatusSnapshot,
 } from './ports/contribution-port.js';
-import type { CorpusPort } from './ports/corpus-port.js';
+import type { CorpusPort, CorpusRecord } from './ports/corpus-port.js';
 import type { EvidencePort } from './ports/evidence-port.js';
 import type { LocalLearningPort } from './ports/local-learning-port.js';
 import type { SkillsPort } from './ports/skills-port.js';
@@ -29,13 +29,8 @@ import {
 } from './schemas/contribution-candidate.js';
 import type { KnowledgeHit } from './schemas/knowledge-hit.js';
 import type { SessionSummary } from './schemas/session-summary.js';
-import {
-  decidePickup,
-  deriveTerms,
-  hitToCandidate,
-  renderPickupDecision,
-  type PickupCandidate,
-} from './pickup.js';
+import { projectKnowledgePacket, type KnowledgePacket } from './schemas/knowledge-packet.js';
+import { deriveSearchTerms, selectKnowledgeHits } from './pickup.js';
 import { degraded, ok, unavailable, valueOr, type PortResult } from './outcome.js';
 import { parsePickupConfig, type PickupConfig } from './schemas/pickup-config.js';
 import { deriveEligibility } from './eligibility.js';
@@ -58,12 +53,16 @@ export interface SessionMeta {
   tools: string[];
   skillsLoadout?: string[];
   pickup?: PickupConfig;
+  /** Known at session start (e.g. `session_bridge.snapshot_repository`) —
+   *  fed into `deriveSearchTerms` and the selection policy's repo-match bonus. */
+  repositorySlug?: string;
 }
 
 export interface FirstTurnPickupResult {
-  contextBlock?: string;
-  suggestions: KnowledgeHit[];
-  markers: string[];
+  contextBlock: string | null;
+  packets: KnowledgePacket[];
+  searchedTerms: string[];
+  degraded?: string;
 }
 
 export interface ToolCallEvent {
@@ -182,16 +181,27 @@ export interface CompleteSessionInput {
 interface CompletionSummaryHits {
   surfacedHits: KnowledgeHit[];
   fetchedHits: KnowledgeHit[];
+  /** The packets actually provided to the agent this session, when the
+   *  caller drove pickup through `PluginSession` (embedded-host path). Absent
+   *  (defaults to `[]`) for process-delegated `session end` calls, which
+   *  never round-trip packets through this in-process value — same as
+   *  `surfacedHits`/`fetchedHits` today. */
+  providedPackets: KnowledgePacket[];
 }
 
 function errorReason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** Titles for `SessionSummary.providedPackets` — the packet's own task summary. */
+function packetTitle(packet: KnowledgePacket): { ref: string; title: string } {
+  return { ref: packet.ref, title: packet.task.summary };
+}
+
 async function completeSession(
   deps: JinnPluginDeps,
   input: CompleteSessionInput,
-  hits: CompletionSummaryHits = { surfacedHits: [], fetchedHits: [] },
+  hits: CompletionSummaryHits = { surfacedHits: [], fetchedHits: [], providedPackets: [] },
 ): Promise<SessionEndResult> {
   if (input.contractVersion !== JINN_PLUGIN_CONTRACT_VERSION) {
     throw new Error(`unsupported plugin contract version: ${String(input.contractVersion)}`);
@@ -272,16 +282,26 @@ async function completeSession(
     }
   }
 
+  const providedPackets = hits.providedPackets.length > 0
+    ? hits.providedPackets.map(packetTitle)
+    : activity.providedRefs.map((ref) => ({ ref, title: ref }));
+
   const summary: SessionSummary = {
     episodeRef: episode.episodeId,
-    surfacedRefs: activity.surfacedRefs,
+    searchedTerms: activity.searchedTerms,
+    providedPackets,
+    // Legacy fields (rescope §3.6): a new-shape activity (providedRefs
+    // populated) wins; a pre-rescope caller's own surfacedRefs echoes through
+    // unchanged, so callers that have not migrated see identical output.
+    surfacedRefs: activity.providedRefs.length > 0 ? activity.providedRefs : activity.surfacedRefs,
     fetchedRefs: activity.fetchedRefs,
     surfacedHits: hits.surfacedHits,
     fetchedHits: hits.fetchedHits,
-    installedSkillRefs: activity.installedSkillRefs,
+    installedSkillRefs: [],
     eligibility,
     nothingFound:
-      activity.surfacedRefs.length === 0
+      activity.providedRefs.length === 0
+      && activity.surfacedRefs.length === 0
       && activity.fetchedRefs.length === 0
       && activity.installedSkillRefs.length === 0,
   };
@@ -297,9 +317,13 @@ async function completeSession(
 
 export class PluginSession {
   private readonly trajectory: EpisodeV1['trajectory'] = [];
-  private surfacedHits: KnowledgeHit[] = [];
-  private fetchedHits: KnowledgeHit[] = [];
-  private installedSkillRefs: string[] = [];
+  private searchedTerms: string[] = [];
+  private providedRefs: string[] = [];
+  private fetchedRefs: string[] = [];
+  private packets: KnowledgePacket[] = [];
+  /** The selected hits behind `packets` — kept only to populate the legacy
+   *  `SessionSummary.surfacedHits`/`fetchedHits` fields (rescope §3.6). */
+  private selectedHits: KnowledgeHit[] = [];
   private readonly capturedAt = new Date().toISOString();
 
   constructor(
@@ -308,64 +332,75 @@ export class PluginSession {
   ) {}
 
   async firstTurnPickup(firstMessage: string): Promise<FirstTurnPickupResult> {
-    const empty: FirstTurnPickupResult = { contextBlock: undefined, suggestions: [], markers: [] };
     const config = parsePickupConfig(this.meta.pickup);
-    if (!config.enabled) return empty;
+    if (!config.enabled) return { contextBlock: null, packets: [], searchedTerms: [] };
 
-    const terms = deriveTerms(firstMessage);
-    if (terms.length === 0) return empty;
+    const terms = deriveSearchTerms(firstMessage, this.meta.repositorySlug);
+    this.searchedTerms = terms;
+    if (terms.length === 0) return { contextBlock: null, packets: [], searchedTerms: terms };
 
-    // Phase 1: search per term, dedupe by ref (skip non-ok reads → fail open).
+    // Search per term, merge hits (skip non-ok reads → fail open; keep the
+    // first degraded reason observed for an honest, non-crashing report).
+    let degradedReason: string | undefined;
     const byRef = new Map<string, KnowledgeHit>();
     for (const term of terms) {
-      const hits = valueOr(await this.deps.corpus.search(term), [] as KnowledgeHit[]);
-      for (const hit of hits) if (!byRef.has(hit.ref)) byRef.set(hit.ref, hit);
-    }
-    if (byRef.size === 0) return empty;
-
-    // Phase 2: get per capped candidate to classify (tier + payloadKind).
-    const refs = [...byRef.keys()].slice(0, config.maxCandidates);
-    const fetched: KnowledgeHit[] = [];
-    const candidates: PickupCandidate[] = [];
-    for (const ref of refs) {
-      const hit = valueOr(await this.deps.corpus.get(ref), null as KnowledgeHit | null);
-      if (!hit) continue;
-      fetched.push(hit);
-      candidates.push(hitToCandidate(hit));
-    }
-    this.surfacedHits = fetched;
-    this.fetchedHits = fetched;
-    if (candidates.length === 0) return empty;
-
-    // Installed-slug dedup (fail open: unknown installed set on non-ok read).
-    const listed = valueOr(await this.deps.skills.list(), []);
-    const installedSlugs = new Set<string>(listed.map((r) => r.ref.split('/').pop() ?? r.ref));
-
-    const decision = decidePickup(candidates, installedSlugs, config);
-
-    // Auto-adopt actually installs (the adopter rail; dormant by default).
-    // Only a confirmed port success may be rendered as an installed skill.
-    const adopted: PickupCandidate[] = [];
-    const failedAdoptions: PickupCandidate[] = [];
-    for (const c of decision.adopted) {
-      const res = await this.deps.skills.install(c.ref);
-      if (res.status === 'ok') {
-        this.installedSkillRefs.push(c.ref);
-        adopted.push(c);
-      } else {
-        failedAdoptions.push(c);
+      const result = await this.deps.corpus.search(term);
+      if (result.status !== 'ok' && degradedReason === undefined) degradedReason = result.reason;
+      for (const hit of valueOr(result, [] as KnowledgeHit[])) {
+        if (!byRef.has(hit.ref)) byRef.set(hit.ref, hit);
       }
     }
 
-    const contextBlock = renderPickupDecision(
-      adopted,
-      [...decision.suggested, ...failedAdoptions],
-    );
+    const selected = selectKnowledgeHits([...byRef.values()], terms, this.meta.repositorySlug);
+    if (selected.length === 0) {
+      return {
+        contextBlock: null,
+        packets: [],
+        searchedTerms: terms,
+        ...(degradedReason !== undefined ? { degraded: degradedReason } : {}),
+      };
+    }
+
+    // Fetch full content for the selected refs and project packets. A
+    // projection failure degrades that one ref to nothing-found rather than
+    // throwing into the caller (§3.5).
+    const fetchedRefs: string[] = [];
+    const packets: KnowledgePacket[] = [];
+    for (const hit of selected) {
+      fetchedRefs.push(hit.ref);
+      const result = await this.deps.corpus.get(hit.ref);
+      if (result.status !== 'ok') {
+        if (degradedReason === undefined) degradedReason = result.reason;
+        continue;
+      }
+      const record: CorpusRecord | null = result.value;
+      if (record === null) continue;
+      try {
+        packets.push(projectKnowledgePacket(record));
+      } catch (error) {
+        degradedReason ??= `packet projection failed for ${hit.ref}: ${errorReason(error)}`;
+      }
+    }
+
+    this.fetchedRefs = fetchedRefs;
+    this.providedRefs = packets.map((packet) => packet.ref);
+    this.packets = packets;
+    this.selectedHits = selected;
+
+    if (packets.length === 0) {
+      return {
+        contextBlock: null,
+        packets: [],
+        searchedTerms: terms,
+        ...(degradedReason !== undefined ? { degraded: degradedReason } : {}),
+      };
+    }
 
     return {
-      contextBlock,
-      suggestions: fetched,
-      markers: contextBlock ? ['corpus'] : [],
+      contextBlock: renderKnowledgePackets(packets),
+      packets,
+      searchedTerms: terms,
+      ...(degradedReason !== undefined ? { degraded: degradedReason } : {}),
     };
   }
 
@@ -431,18 +466,49 @@ export class PluginSession {
         contractVersion: JINN_PLUGIN_CONTRACT_VERSION,
         episode,
         activity: {
-          surfacedRefs: this.surfacedHits.map((hit) => hit.ref),
-          fetchedRefs: this.fetchedHits.map((hit) => hit.ref),
-          installedSkillRefs: this.installedSkillRefs,
+          searchedTerms: this.searchedTerms,
+          providedRefs: this.providedRefs,
+          surfacedRefs: [],
+          fetchedRefs: this.fetchedRefs,
+          installedSkillRefs: [],
         },
         eligibilityInputs: {
           publicRepo: outcome.publicRepo,
           acceptedDiff: outcome.acceptedDiff,
         },
       },
-      { surfacedHits: this.surfacedHits, fetchedHits: this.fetchedHits },
+      {
+        surfacedHits: this.selectedHits,
+        fetchedHits: this.selectedHits,
+        providedPackets: this.packets,
+      },
     );
   }
+}
+
+/**
+ * Composes the block the host injects into the first user message, verbatim
+ * and cache-safe (rescope §3.4).
+ */
+function renderKnowledgePacket(packet: KnowledgePacket): string {
+  const lines: string[] = [
+    `${packet.task.summary} · ${packet.outcome.status}/${packet.outcome.verifiabilityTier}`,
+  ];
+  if (packet.synthesis) lines.push(packet.synthesis);
+  for (const excerpt of packet.excerpts) lines.push(`- ${excerpt.label}: ${excerpt.text}`);
+  const capturedDate = packet.attribution.capturedAt.slice(0, 10);
+  lines.push(
+    `  source: ${packet.ref} · ${packet.attribution.origin} · captured ${capturedDate} · `
+    + `full episode: corpus_fetch ${packet.ref}`,
+  );
+  return lines.join('\n');
+}
+
+function renderKnowledgePackets(packets: KnowledgePacket[]): string {
+  return [
+    '[jinn corpus] Prior evidence relevant to this task:',
+    ...packets.map(renderKnowledgePacket),
+  ].join('\n');
 }
 
 export interface JinnPlugin {

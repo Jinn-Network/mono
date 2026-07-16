@@ -77,6 +77,31 @@ function episodeEligibility(ep: EpisodeV1): EligibilityVerdict | null {
   return ep.eligibility ?? null;
 }
 
+/**
+ * Provided/searched counts from the new activity fields, falling back to the
+ * legacy surfaced/fetched refs for episodes captured before the rescope
+ * (rescope §3.6). An episode is "legacy" here when both new fields are empty
+ * AND at least one legacy field is not — a genuinely new episode with a
+ * nothing-found result has both sides empty, so the fallback is a no-op for it.
+ * Reads defensively (`?? []`): an `EvidencePort` is not required to
+ * schema-validate on read (the in-memory test double does not), so a record
+ * older than any given field must not crash the fold.
+ */
+function knowledgeCounts(activity: EpisodeV1['activity']): { surfaced: number; used: number } {
+  if (!activity) return { surfaced: 0, used: 0 };
+  const searchedTerms = activity.searchedTerms ?? [];
+  const providedRefs = activity.providedRefs ?? [];
+  const surfacedRefs = activity.surfacedRefs ?? [];
+  const fetchedRefs = activity.fetchedRefs ?? [];
+  const installedSkillRefs = activity.installedSkillRefs ?? [];
+  const isLegacy = searchedTerms.length === 0
+    && providedRefs.length === 0
+    && (surfacedRefs.length > 0 || fetchedRefs.length > 0 || installedSkillRefs.length > 0);
+  return isLegacy
+    ? { surfaced: surfacedRefs.length, used: fetchedRefs.length }
+    : { surfaced: searchedTerms.length, used: providedRefs.length };
+}
+
 function skillsBySession(skills: LocalLearningSkill[]): Map<string, HistoryEntry['distilledSkills']> {
   const bySession = new Map<string, NonNullable<HistoryEntry['distilledSkills']>>();
   for (const skill of skills) {
@@ -110,17 +135,20 @@ export async function foldHistory(deps: HistoryDeps): Promise<HistoryResult> {
 
   const entries: HistoryEntry[] = [...episodes]
     .sort((a, b) => b.session.capturedAt.localeCompare(a.session.capturedAt))
-    .map((ep) => ({
-      sessionId: ep.session.sessionId,
-      capturedAt: ep.session.capturedAt,
-      taskSummary: ep.task.summary,
-      knowledgeSurfaced: ep.activity?.surfacedRefs.length ?? null,
-      knowledgeUsed: ep.activity?.fetchedRefs.length ?? null,
-      captureStatus: 'captured' as const,
-      eligibility: episodeEligibility(ep),
-      contributionState: contributionState(byEpisode.get(ep.episodeId), contributionAvailable),
-      distilledSkills: skillsAvailable ? bySession.get(ep.session.sessionId) ?? [] : null,
-    }));
+    .map((ep) => {
+      const counts = knowledgeCounts(ep.activity);
+      return {
+        sessionId: ep.session.sessionId,
+        capturedAt: ep.session.capturedAt,
+        taskSummary: ep.task.summary,
+        knowledgeSurfaced: ep.activity ? counts.surfaced : null,
+        knowledgeUsed: ep.activity ? counts.used : null,
+        captureStatus: 'captured' as const,
+        eligibility: episodeEligibility(ep),
+        contributionState: contributionState(byEpisode.get(ep.episodeId), contributionAvailable),
+        distilledSkills: skillsAvailable ? bySession.get(ep.session.sessionId) ?? [] : null,
+      };
+    });
 
   const legacyFactsUnavailable = episodes.some((ep) => !ep.activity || !ep.eligibility);
   if (legacyFactsUnavailable) reasons.push('one or more episodes predate activity or eligibility facts');

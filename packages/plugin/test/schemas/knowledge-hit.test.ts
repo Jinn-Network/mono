@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { KnowledgeHitSchema } from '../../src/schemas/knowledge-hit.js';
 
 describe('KnowledgeHitSchema', () => {
-  it('parses a minimal hit (ref + kind only)', () => {
+  it('parses a minimal hit (ref + kind only), defaulting tags to []', () => {
     const parsed = KnowledgeHitSchema.parse({ ref: 'ipfs://abc', kind: 'seed' });
     expect(parsed.ref).toBe('ipfs://abc');
+    expect(parsed.tags).toEqual([]);
   });
 
   it('parses a full hit', () => {
@@ -40,6 +41,25 @@ describe('KnowledgeHitSchema', () => {
   it('rejects an unknown tier value', () => {
     expect(() =>
       KnowledgeHitSchema.parse({ ref: 'x', kind: 'skill', tier: 'bogus' }),
+    ).toThrow();
+  });
+
+  it('parses the evidence-first selection fields: tags, origin, publishedAt', () => {
+    const parsed = KnowledgeHitSchema.parse({
+      ref: 'ipfs://abc',
+      kind: 'trace',
+      tags: ['dashboard', 'vitest'],
+      origin: 'agent-42',
+      publishedAt: 1_752_000_000_000,
+    });
+    expect(parsed.tags).toEqual(['dashboard', 'vitest']);
+    expect(parsed.origin).toBe('agent-42');
+    expect(parsed.publishedAt).toBe(1_752_000_000_000);
+  });
+
+  it('rejects an empty-string origin', () => {
+    expect(() =>
+      KnowledgeHitSchema.parse({ ref: 'x', kind: 'trace', origin: '' }),
     ).toThrow();
   });
 });

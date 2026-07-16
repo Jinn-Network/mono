@@ -31,7 +31,7 @@ function candidate(sourceId: string, consent = false): ContributionCandidateV1 {
 
 function currentEpisode(overrides: Partial<EpisodeV1> = {}): EpisodeV1 {
   return makeSampleEpisode({
-    activity: { surfacedRefs: [], fetchedRefs: [], installedSkillRefs: [] },
+    activity: { searchedTerms: [], providedRefs: [], surfacedRefs: [], fetchedRefs: [], installedSkillRefs: [] },
     eligibility: {
       eligible: false,
       reason: 'no accepted diff',
@@ -103,7 +103,7 @@ describe('plugin.history / explain (AC3 — reproducible from port reads)', () =
     expect(ex.eligibility).toBeNull();
   });
 
-  it('projects persisted activity facts and the authoritative eligibility verdict', async () => {
+  it('projects persisted legacy activity facts (fallback) and the authoritative eligibility verdict', async () => {
     const evidence = new InMemoryEvidencePort();
     const eligibility = {
       eligible: true,
@@ -113,6 +113,8 @@ describe('plugin.history / explain (AC3 — reproducible from port reads)', () =
     await evidence.put(currentEpisode({
       episodeId: 'ep-enriched',
       activity: {
+        searchedTerms: [],
+        providedRefs: [],
         surfacedRefs: ['knowledge/a', 'knowledge/b'],
         fetchedRefs: ['knowledge/b'],
         installedSkillRefs: ['skills/tdd@1'],
@@ -133,6 +135,42 @@ describe('plugin.history / explain (AC3 — reproducible from port reads)', () =
     expect(explanation.fetchedRefs).toEqual(['knowledge/b']);
     expect(explanation.installedSkillRefs).toEqual(['skills/tdd@1']);
     expect(explanation.eligibility).toEqual(eligibility);
+  });
+
+  it('projects provided counts from the evidence-first activity fields (rescope §3.6), no legacy fallback needed', async () => {
+    const evidence = new InMemoryEvidencePort();
+    await evidence.put(currentEpisode({
+      episodeId: 'ep-rescoped',
+      activity: {
+        searchedTerms: ['dashboard', 'vitest', 'flake'],
+        providedRefs: ['bafyProvided1'],
+        surfacedRefs: [],
+        fetchedRefs: [],
+        installedSkillRefs: [],
+      },
+    }));
+    const plugin = buildPlugin(evidence);
+
+    const history = await plugin.history();
+    expect(history.entries[0]).toMatchObject({ knowledgeSurfaced: 3, knowledgeUsed: 1 });
+  });
+
+  it('reports zero/zero for a rescoped nothing-found episode rather than falling back to legacy fields', async () => {
+    const evidence = new InMemoryEvidencePort();
+    await evidence.put(currentEpisode({
+      episodeId: 'ep-rescoped-empty',
+      activity: {
+        searchedTerms: [],
+        providedRefs: [],
+        surfacedRefs: [],
+        fetchedRefs: [],
+        installedSkillRefs: [],
+      },
+    }));
+    const plugin = buildPlugin(evidence);
+
+    const history = await plugin.history();
+    expect(history.entries[0]).toMatchObject({ knowledgeSurfaced: 0, knowledgeUsed: 0 });
   });
 
   it('explain returns a structured trace for a session', async () => {

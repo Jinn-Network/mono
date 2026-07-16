@@ -17,7 +17,7 @@ export { SessionSummarySchema } from './schemas/session-summary.js';
 export type { SessionSummary } from './schemas/session-summary.js';
 export { HistoryEntrySchema } from './schemas/history-entry.js';
 export type { HistoryEntry } from './schemas/history-entry.js';
-export type { CorpusPort } from './ports/corpus-port.js';
+export type { CorpusPort, CorpusRecord, CorpusRecordStep } from './ports/corpus-port.js';
 export type { EvidencePort, EvidenceListQuery, EvidenceRetentionPolicy } from './ports/evidence-port.js';
 export { deriveContributionStatus } from './ports/contribution-port.js';
 export type {
@@ -51,8 +51,27 @@ export type {
 } from './plugin.js';
 export { PickupConfigSchema, DEFAULT_PICKUP_CONFIG, parsePickupConfig, TIER_ORDER } from './schemas/pickup-config.js';
 export type { PickupConfig, Tier } from './schemas/pickup-config.js';
-export { deriveTerms, tierAtLeast, classifyPayload, hitToCandidate, decidePickup } from './pickup.js';
-export type { PickupCandidate, PickupDecision } from './pickup.js';
+export {
+  deriveSearchTerms,
+  classifyPayload,
+  dedupeKnowledgeHits,
+  scoreKnowledgeHit,
+  selectKnowledgeHits,
+  MAX_SELECTED_PACKETS,
+} from './pickup.js';
+export {
+  KNOWLEDGE_PACKET_SCHEMA_VERSION,
+  KnowledgePacketSchema,
+  KnowledgePacketExcerptSchema,
+  DEFAULT_PACKET_CHAR_BUDGET,
+  projectKnowledgePacket,
+  truncateLineBoundary,
+} from './schemas/knowledge-packet.js';
+export type {
+  KnowledgePacket,
+  KnowledgePacketExcerpt,
+  KnowledgePacketBudget,
+} from './schemas/knowledge-packet.js';
 export { deriveEligibility } from './eligibility.js';
 export type { EligibilityInputs } from './eligibility.js';
 export { foldHistory, foldExplain } from './history.js';
