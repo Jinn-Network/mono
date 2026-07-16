@@ -28,9 +28,10 @@
  * (#1776), not a publish-time concern.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { z } from 'zod';
 import { canonicalJson } from '../../../../src/harnesses/engine/canonical-json.js';
 import { sha256Hex } from '../../../../src/captures/publish.js';
@@ -75,12 +76,8 @@ export function createMemorySeedImportState(
 
 export interface FileSeedImportStateOptions {
   /**
-   * Sink for the corrupt-state-file warning. Default: `console.warn`
-   * (unchanged behavior for non-CLI callers). The CLI passes a collector so
-   * the warning reaches its own writer / `--json` output (PR #1779 review)
-   * instead of only stderr. Fired at most once per store instance — every
-   * `get()`/`set()` re-reads the file, and repeating an identical line per
-   * report row would drown the output.
+   * Optional sink for the fail-closed corrupt-state warning. The read still
+   * throws; this hook only lets a CLI surface the same diagnostic separately.
    */
   onWarning?: (message: string) => void;
 }
@@ -91,28 +88,28 @@ export interface FileSeedImportStateOptions {
  * scale (dozens to low hundreds of curated, human-approved entries via the
  * plan/execute gate), not a database.
  *
- * A corrupt/foreign state file is FAIL-OPEN: treated as empty, with a
- * warning through `onWarning` — worst case is one redundant republish
- * (which then supersedes cleanly), never a crash (mirrors ledger.ts's
- * malformed-line handling). A subsequent `set()` rewrites the file with
- * valid JSON, self-healing it.
+ * A corrupt/foreign state file is FAIL-CLOSED: reads and writes throw rather
+ * than treating it as empty and destroying supersedes lineage. Persistence
+ * writes a complete same-directory temp file and atomically renames it over
+ * the destination, so interruption cannot leave a partial JSON document.
  */
 export function createFileSeedImportState(
   path: string = DEFAULT_SEED_IMPORT_STATE_PATH,
   opts: FileSeedImportStateOptions = {},
 ): SeedImportStateStore {
-  const warn = opts.onWarning ?? ((message: string) => console.warn(message));
+  const warn = opts.onWarning;
   let warned = false;
   const read = (): Record<string, SeedPublicationRecord> => {
     if (!existsSync(path)) return {};
     try {
       return SeedImportStateFileSchema.parse(JSON.parse(readFileSync(path, 'utf-8')));
-    } catch {
+    } catch (cause) {
+      const message = `[harness-layer] seed-import state at ${path} is unreadable; refusing to continue so publication lineage is preserved`;
       if (!warned) {
         warned = true;
-        warn(`[harness-layer] seed-import state at ${path} is unreadable — treating as empty`);
+        warn?.(message);
       }
-      return {};
+      throw new Error(message, { cause });
     }
   };
   return {
@@ -122,8 +119,20 @@ export function createFileSeedImportState(
     set(identity, record) {
       const all = read();
       all[identity] = SeedPublicationRecordSchema.parse(record);
-      mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, JSON.stringify(all, null, 2) + '\n', 'utf-8');
+      const dir = dirname(path);
+      mkdirSync(dir, { recursive: true });
+      const tempPath = join(dir, `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`);
+      try {
+        writeFileSync(tempPath, JSON.stringify(all, null, 2) + '\n', 'utf-8');
+        renameSync(tempPath, path);
+      } catch (cause) {
+        try {
+          rmSync(tempPath, { force: true });
+        } catch {
+          // Preserve the persistence failure that triggered cleanup.
+        }
+        throw cause;
+      }
     },
   };
 }

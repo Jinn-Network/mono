@@ -144,6 +144,7 @@ describe('planEpisodes()', () => {
     const report = await planEpisodes(source);
     expect(report).toHaveLength(2);
     expect(report.every((r) => r.verdict === 'import')).toBe(true);
+    expect(report.every((r) => /^[0-9a-f]{64}$/.test((r as Record<string, unknown>)['contentDigest'] as string))).toBe(true);
     expect(source.listCalls).toBe(1);
   });
 
@@ -153,12 +154,18 @@ describe('planEpisodes()', () => {
     expect(parseEpisodeImportReport(report)).toEqual(report);
   });
 
-  it('flags a duplicate id as skip, first occurrence wins', async () => {
-    const source = mockEpisodeSource([episode({ id: 'dup' }), episode({ id: 'dup' })]);
+  it('flags a different-content duplicate id as skip, first occurrence wins', async () => {
+    const source = mockEpisodeSource([
+      episode({ id: 'dup', taskSummary: 'first occurrence' }),
+      episode({ id: 'dup', taskSummary: 'second occurrence' }),
+    ]);
     const report = await planEpisodes(source);
     expect(report[0]).toMatchObject({ id: 'dup', verdict: 'import' });
     expect(report[1]).toMatchObject({ id: 'dup', verdict: 'skip' });
     expect(report[1]!.reason).toContain('duplicate id');
+    expect((report[0] as Record<string, unknown>)['contentDigest']).not.toBe(
+      (report[1] as Record<string, unknown>)['contentDigest'],
+    );
   });
 });
 
@@ -210,15 +217,65 @@ describe('executeEpisodes()', () => {
     expect(entries[0]!.status).toBe('published');
   });
 
-  it('a skipped plan row (duplicate id) is carried through as skipped, not published', async () => {
-    const source = mockEpisodeSource([episode({ id: 'dup' }), episode({ id: 'dup' })]);
+  it('a different-content duplicate id publishes the first occurrence, not the last', async () => {
+    const source = mockEpisodeSource([
+      episode({ id: 'dup', taskSummary: 'first occurrence' }),
+      episode({ id: 'dup', taskSummary: 'second occurrence' }),
+    ]);
     const report = await planEpisodes(source);
     const { deps, published } = mockPublishDeps();
     const result = await executeEpisodes(report, source, deps);
     expect(published).toHaveLength(1); // only the first "dup" publishes
+    expect(parseTraceEnvelopeV0(published[0]!.payload).task.summary).toBe('first occurrence');
     expect(result.imported).toHaveLength(1);
     expect(result.skipped).toHaveLength(1);
     expect(result.skipped[0]!.reason).toContain('duplicate id');
+  });
+
+  it('rejects an execute-time episode whose canonical content differs from the approved row', async () => {
+    const approved = mockEpisodeSource([episode({ taskSummary: 'approved content' })]);
+    const report = await planEpisodes(approved);
+    const changed = mockEpisodeSource([episode({ taskSummary: 'changed after approval' })]);
+    const { deps, published } = mockPublishDeps();
+
+    const result = await executeEpisodes(report, changed, deps);
+
+    expect(published).toHaveLength(0);
+    expect(result.imported).toHaveLength(0);
+    expect(result.errors).toEqual([
+      expect.objectContaining({
+        id: 'source-fixture',
+        error: expect.stringMatching(/approved content digest.*does not match/i),
+      }),
+    ]);
+  });
+
+  it.each([
+    ['payment card', 'Customer card: 4111 1111 1111 1111.'],
+    ['phone-like PII', 'Call the customer at +1 (415) 555-2671.'],
+    [
+      'JWT',
+      'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IlN5bnRoZXRpYyJ9.c2lnbmF0dXJlU3ludGhldGljVmFsdWU',
+    ],
+    ['high-entropy credential', 'Credential: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'],
+  ])('rejects %s before any publish call', async (_label, sensitiveText) => {
+    const source = mockEpisodeSource([
+      episode({
+        steps: [{ label: 'note', title: 'sensitive fixture', text: sensitiveText }],
+      }),
+    ]);
+    const { deps, published } = mockPublishDeps();
+
+    const result = await executeEpisodes(await planEpisodes(source), source, deps);
+
+    expect(published).toHaveLength(0);
+    expect(result.imported).toHaveLength(0);
+    expect(result.errors).toEqual([
+      expect.objectContaining({
+        id: 'source-fixture',
+        error: expect.stringMatching(/sensitive.*refusing to publish/i),
+      }),
+    ]);
   });
 
   describe('idempotency + supersedes', () => {
@@ -285,6 +342,23 @@ describe('jinn-layer seed CLI — episodes', () => {
     };
   }
 
+  it('rejects passing both --source and --episodes-dir', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-seed-episodes-'));
+    const listFile = join(dir, 'skills.txt');
+    writeFileSync(listFile, 'acme/skills\n');
+    const source = mockEpisodeSource([episode()]);
+    const sink = writerSink();
+
+    const code = await runJinnLayerCli(
+      ['seed', 'plan', '--source', listFile, '--episodes-dir', dir],
+      { writer: sink, episodeSource: source },
+    );
+
+    expect(code).toBe(2);
+    expect(sink.output()).toMatch(/exactly one of --source or --episodes-dir/i);
+    expect(source.listCalls).toBe(0);
+  });
+
   it('seed plan --episodes-dir renders the report and writes the report file', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-seed-episodes-'));
     const out = join(dir, 'report.json');
@@ -333,5 +407,43 @@ describe('jinn-layer seed CLI — episodes', () => {
     expect(code2).toBe(0);
     expect(sink2.output()).toContain('0 imported, 1 skipped');
     expect(published).toHaveLength(1); // still just the first run's publish
+  });
+
+  it('returns the published episode ref with a recovery warning and nonzero exit when state persistence fails', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-seed-episodes-'));
+    const reportFile = join(dir, 'report.json');
+    const source = mockEpisodeSource([episode()]);
+    writeFileSync(reportFile, JSON.stringify(await planEpisodes(source)));
+    const { deps, published } = mockPublishDeps();
+    const sink = writerSink();
+
+    const code = await runJinnLayerCli(
+      ['seed', 'execute', reportFile, '--episodes-dir', dir, '--json'],
+      {
+        writer: sink,
+        episodeSource: source,
+        publishDeps: deps,
+        seedImportState: {
+          get: () => undefined,
+          set: () => {
+            throw new Error('synthetic disk full');
+          },
+        },
+      },
+    );
+
+    expect(code).toBe(1);
+    expect(published).toHaveLength(1);
+    const payload = JSON.parse(sink.output()) as {
+      imported: Array<{ envelopeRef: string; stateWarning?: string }>;
+      errors: unknown[];
+    };
+    expect(payload.errors).toEqual([]);
+    expect(payload.imported).toEqual([
+      expect.objectContaining({
+        envelopeRef: expect.stringContaining('bafy-envelope'),
+        stateWarning: expect.stringMatching(/published.*state.*recovery/i),
+      }),
+    ]);
   });
 });

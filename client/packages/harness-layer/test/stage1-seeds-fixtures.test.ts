@@ -38,13 +38,14 @@ const EXPECTED_FILES = [...EPISODE_FILES, ...SKILL_FILES].sort();
  * and would otherwise false-positive against a naive "letter:\" pattern.
  */
 const ABSOLUTE_PATH_PATTERNS: Array<[string, RegExp]> = [
-  ['macOS/Linux /Users/ path', /\/Users\/[^/\s"]+/],
-  ['Linux /home/ path', /\/home\/[^/\s"]+/],
-  // What fs.realpath / tempfile APIs emit on macOS (/private/tmp,
-  // /private/var/folders/...) — PR #1779 review.
-  ['macOS /private/ path', /\/private\/[^/\s"]+/],
-  ['Windows drive path', /[A-Za-z]:\\[^\\\s"]+/],
-  ['home-dir tilde path', /~\/[^\s"]+/],
+  [
+    'common Unix absolute path',
+    /\/(?:Users|Volumes|home|root|private|tmp|var|etc|opt|usr|srv|mnt)(?:\/[^\s"'`]+)+/,
+  ],
+  ['Windows drive path', /\b[A-Za-z]:[\\/][^\s"'`]+/],
+  ['Windows UNC path', /\\\\[^\\/\s"'`]+[\\/][^\s"'`]+/],
+  ['forward-slash UNC path', /(?<!:)\/\/[^/\s"'`]+\/[^\s"'`]+/],
+  ['home-dir tilde path', /~\/[^\s"'`]+/],
 ];
 
 function rawText(file: string): string {
@@ -82,7 +83,18 @@ describe('stage1-seeds fixture set (issue #1771)', () => {
       ['/home/someone/project/file.ts'],
       ['saved output to /private/tmp/jinn-scratch/out.json'],
       ['/private/var/folders/ab/c123xyz/T/tmpfile.json'],
+      ['/tmp/jinn-scratch/out.json'],
+      ['/var/log/jinn/output.log'],
+      ['/etc/jinn/config.json'],
+      ['/opt/jinn/bin/run'],
+      ['/usr/local/bin/jinn'],
+      ['/root/.jinn-client/state.json'],
+      ['/mnt/data/results.json'],
+      ['/Volumes/build/output.json'],
       ['C:\\Users\\someone\\project\\file.ts'],
+      ['D:/work/project/file.ts'],
+      ['\\\\server\\share\\project\\file.ts'],
+      ['//server/share/project/file.ts'],
       ['~/project/file.ts'],
     ])('flags %j', (canary) => {
       expect(ABSOLUTE_PATH_PATTERNS.some(([, pattern]) => pattern.test(canary))).toBe(true);
@@ -234,9 +246,10 @@ describe('stage1-seeds fixture set (issue #1771)', () => {
       }
     });
 
-    it('the hand-authored sympy distractor does not claim a recorded session', () => {
+    it('the hand-authored sympy distractor is explicitly synthetic and unverified', () => {
       const ep = SeedEpisodeSchema.parse(parseJson('distractor-sympy-printing.episode.json'));
-      expect(ep.attribution.origin).toBe('operator-authored-distractor');
+      expect(ep.outcome).toEqual({ status: 'completed', verifiabilityTier: 'user-accepted' });
+      expect(ep.attribution.origin).toBe('synthetic-selection-distractor');
       expect(ep.attribution.sourceUrl).toBeUndefined();
     });
   });

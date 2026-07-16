@@ -3,15 +3,13 @@
  *
  * `createFileSeedImportState` is the production default behind
  * `seed execute` (cli.ts). Covered here: round-trip persistence across
- * store instances, the documented fail-open corrupt-file behavior (empty
- * state + a warning, at most once per store instance), `set()` self-heal,
- * and — at the CLI level — that the corruption warning is surfaced through
- * the command's own writer/output path (a `warnings` field in `--json`
- * mode, a WARNING line in table mode), not only `console.warn`.
+ * store instances, fail-closed corrupt-file behavior, atomic replace
+ * persistence, and the CLI guarantee that corrupt lineage blocks before any
+ * publication call.
  */
 
-import { describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { describe, it, expect } from 'vitest';
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createMemoryLedger } from '../src/ledger.js';
@@ -42,68 +40,54 @@ describe('createFileSeedImportState', () => {
     expect(second.get('episode:missing')).toBeUndefined();
   });
 
-  it('a missing file is an empty state — no warning', () => {
-    const warn = vi.fn();
-    const store = createFileSeedImportState(tmpStatePath(), { onWarning: warn });
+  it('a missing file is an empty state', () => {
+    const store = createFileSeedImportState(tmpStatePath());
     expect(store.get('episode:x')).toBeUndefined();
-    expect(warn).not.toHaveBeenCalled();
   });
 
-  it('a corrupt file is fail-open: empty state plus exactly one warning per store instance', () => {
+  it('a corrupt file fails closed instead of becoming empty state', () => {
     const path = tmpStatePath();
     writeFileSync(path, '{ definitely not json', 'utf-8');
-    const warn = vi.fn();
-    const store = createFileSeedImportState(path, { onWarning: warn });
+    const store = createFileSeedImportState(path);
 
-    expect(store.get('episode:x')).toBeUndefined();
-    expect(store.get('episode:y')).toBeUndefined(); // second read: latched, no second warning
-    expect(warn).toHaveBeenCalledTimes(1);
-    const message = String(warn.mock.calls[0]![0]);
-    expect(message).toContain('unreadable');
-    expect(message).toContain(path);
+    expect(() => store.get('episode:x')).toThrow(/state.*unreadable/i);
+    expect(readFileSync(path, 'utf-8')).toBe('{ definitely not json');
   });
 
-  it('a schema-invalid (but valid JSON) file is treated the same as corrupt', () => {
+  it('a schema-invalid (but valid JSON) file also fails closed', () => {
     const path = tmpStatePath();
     writeFileSync(path, JSON.stringify({ 'episode:x': { nope: true } }), 'utf-8');
-    const warn = vi.fn();
-    const store = createFileSeedImportState(path, { onWarning: warn });
+    const store = createFileSeedImportState(path);
 
-    expect(store.get('episode:x')).toBeUndefined();
-    expect(warn).toHaveBeenCalledTimes(1);
+    expect(() => store.get('episode:x')).toThrow(/state.*unreadable/i);
   });
 
-  it('set() self-heals a corrupt file — the write wins and later reads succeed cleanly', () => {
+  it('set() refuses to overwrite corrupt lineage', () => {
     const path = tmpStatePath();
     writeFileSync(path, '{ corrupt', 'utf-8');
-    const store = createFileSeedImportState(path, { onWarning: vi.fn() });
+    const store = createFileSeedImportState(path);
+
+    expect(() => store.set('episode:x', RECORD)).toThrow(/state.*unreadable/i);
+    expect(readFileSync(path, 'utf-8')).toBe('{ corrupt');
+  });
+
+  it('persists by replacing the state file atomically', () => {
+    const path = tmpStatePath();
+    const store = createFileSeedImportState(path);
     store.set('episode:x', RECORD);
+    const beforeInode = statSync(path).ino;
 
-    // A fresh instance reads the healed file with no warning.
-    const warn = vi.fn();
-    const fresh = createFileSeedImportState(path, { onWarning: warn });
-    expect(fresh.get('episode:x')).toEqual(RECORD);
-    expect(warn).not.toHaveBeenCalled();
-    // And the on-disk content is the canonical JSON map shape.
-    expect(JSON.parse(readFileSync(path, 'utf-8'))).toEqual({ 'episode:x': RECORD });
-  });
+    store.set('episode:y', { ...RECORD, envelopeRef: 'bafy-envelope-2' });
 
-  it('the default warning sink is console.warn (non-CLI callers keep the old behavior)', () => {
-    const path = tmpStatePath();
-    writeFileSync(path, '{ corrupt', 'utf-8');
-    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      createFileSeedImportState(path).get('episode:x');
-      expect(spy).toHaveBeenCalledTimes(1);
-      expect(String(spy.mock.calls[0]![0])).toContain('unreadable');
-    } finally {
-      spy.mockRestore();
-    }
+    expect(statSync(path).ino).not.toBe(beforeInode);
+    expect(JSON.parse(readFileSync(path, 'utf-8'))).toEqual({
+      'episode:x': RECORD,
+      'episode:y': { ...RECORD, envelopeRef: 'bafy-envelope-2' },
+    });
   });
 });
 
-// ── CLI surfacing (PR #1779 review): the warning reaches the command's own
-// output, not only console.warn ────────────────────────────────────────────
+// ── CLI fail-closed behavior ──────────────────────────────────────────────
 
 const TEST_ADDRESS = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266' as const;
 const TEST_PRIVATE_KEY =
@@ -130,9 +114,9 @@ function mockEpisodeSource(episodes: SeedEpisode[]): EpisodeSource {
   return { name: 'mock-episodes', list: async () => episodes };
 }
 
-function mockPublishDeps(): HarnessPublishDeps {
+function mockPublishDeps(): { deps: HarnessPublishDeps; publishCalls: () => number } {
   let n = 0;
-  return {
+  const deps: HarnessPublishDeps = {
     participant: { safeAddress: TEST_SAFE, agentEoa: TEST_ADDRESS },
     signer: { address: TEST_ADDRESS, privateKey: TEST_PRIVATE_KEY },
     clientGitSha: 'test-sha',
@@ -142,10 +126,11 @@ function mockPublishDeps(): HarnessPublishDeps {
     publishEnvelope: async () => ({ cid: `bafy-envelope-${++n}`, sha256: 'b'.repeat(64) }),
     anchorEnvelope: async () => ({ txHash: `0x${'cd'.repeat(32)}` as `0x${string}`, blockNumber: 7 }),
   };
+  return { deps, publishCalls: () => n };
 }
 
-describe('seed execute — corrupt state warning on the CLI output', () => {
-  async function runExecuteWithCorruptState(json: boolean): Promise<{ code: number; out: string }> {
+describe('seed execute — corrupt state fails closed', () => {
+  async function runExecuteWithCorruptState(json: boolean): Promise<{ code: number; out: string; publishCalls: number }> {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-seed-state-cli-'));
     const statePath = join(dir, 'state.json');
     writeFileSync(statePath, '{ corrupt', 'utf-8');
@@ -158,33 +143,33 @@ describe('seed execute — corrupt state warning on the CLI output', () => {
     const prev = process.env['JINN_LAYER_SEED_STATE_PATH'];
     process.env['JINN_LAYER_SEED_STATE_PATH'] = statePath;
     try {
-      // No seedImportState injection: the CLI builds its file-backed default
-      // at the env-overridden path — the production wiring under test.
+      const publish = mockPublishDeps();
       const code = await runJinnLayerCli(
         ['seed', 'execute', reportFile, ...(json ? ['--json'] : [])],
-        { writer, episodeSource: source, publishDeps: mockPublishDeps() },
+        { writer, episodeSource: source, publishDeps: publish.deps },
       );
-      return { code, out };
+      return { code, out, publishCalls: publish.publishCalls() };
     } finally {
       if (prev === undefined) delete process.env['JINN_LAYER_SEED_STATE_PATH'];
       else process.env['JINN_LAYER_SEED_STATE_PATH'] = prev;
     }
   }
 
-  it('--json output carries the warning as a warnings field (not only console.warn)', async () => {
-    const { code, out } = await runExecuteWithCorruptState(true);
-    expect(code).toBe(0);
-    const payload = JSON.parse(out.trim()) as { imported: unknown[]; warnings?: string[] };
-    expect(payload.imported).toHaveLength(1); // fail-open: the corrupt state never blocked the publish
-    expect(payload.warnings).toHaveLength(1);
-    expect(String(payload.warnings![0])).toContain('unreadable');
+  it('--json exits nonzero and publishes nothing', async () => {
+    const { code, out, publishCalls } = await runExecuteWithCorruptState(true);
+    expect(code).toBe(1);
+    const payload = JSON.parse(out.trim()) as { imported: unknown[]; errors: Array<{ error: string }> };
+    expect(payload.imported).toHaveLength(0);
+    expect(payload.errors[0]!.error).toMatch(/state.*unreadable/i);
+    expect(publishCalls).toBe(0);
   });
 
-  it('table output carries a WARNING line', async () => {
-    const { code, out } = await runExecuteWithCorruptState(false);
-    expect(code).toBe(0);
-    expect(out).toContain('WARNING');
-    expect(out).toContain('unreadable');
-    expect(out).toContain('1 imported');
+  it('table output reports the state error without claiming an import', async () => {
+    const { code, out, publishCalls } = await runExecuteWithCorruptState(false);
+    expect(code).toBe(1);
+    expect(out).toContain('ERROR');
+    expect(out).toMatch(/state.*unreadable/i);
+    expect(out).toContain('0 imported');
+    expect(publishCalls).toBe(0);
   });
 });

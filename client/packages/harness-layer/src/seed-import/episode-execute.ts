@@ -14,13 +14,12 @@
  */
 
 import { capture, type CapturedTask } from '../capture.js';
-import { buildSeedScrubPipeline } from '../../../../src/trajectory/scrub/build.js';
+import { buildScrubPipeline } from '../../../../src/trajectory/scrub/build.js';
 import { publish, type HarnessPublishDeps } from '../publish.js';
-import type { EpisodeSource, SeedEpisode } from './episode-fetch.js';
+import { episodeContentDigest, type EpisodeSource, type SeedEpisode } from './episode-fetch.js';
 import type { EpisodeImportReport } from './episode-report.js';
 import {
   createMemorySeedImportState,
-  hashSeedContent,
   type SeedImportStateStore,
 } from './state.js';
 
@@ -31,6 +30,8 @@ export interface EpisodeImportResult {
     anchorTx: string | null;
     /** Prior envelopeRef this publish supersedes, or null for a fresh identity. */
     supersedes: string | null;
+    /** Publication succeeded, but local lineage state needs operator recovery. */
+    stateWarning?: string;
   }>;
   skipped: Array<{ id: string; reason: string }>;
   errors: Array<{ id: string; error: string }>;
@@ -52,25 +53,6 @@ function episodeTags(episode: SeedEpisode): string[] {
     if (tag && !tags.includes(tag)) tags.push(tag);
   }
   return tags.slice(0, MAX_TAGS);
-}
-
-/**
- * The content fields that define "did this seed change" for idempotency —
- * excludes nothing capture-time-derived (episodes carry no such field; `id`
- * is the identity key, not content, and is excluded so renaming the id alone
- * is treated as a distinct identity rather than a content change).
- */
-function episodeContentFingerprint(episode: SeedEpisode): unknown {
-  return {
-    repo: episode.repo,
-    baseCommit: episode.baseCommit ?? null,
-    taskSummary: episode.taskSummary,
-    tags: episode.tags,
-    steps: episode.steps,
-    outcome: episode.outcome,
-    synthesis: episode.synthesis,
-    attribution: episode.attribution,
-  };
 }
 
 function toCapturedTask(episode: SeedEpisode, now: Date, supersedes: string | undefined): CapturedTask {
@@ -132,13 +114,17 @@ export async function executeEpisodes(
   deps: HarnessPublishDeps,
   opts: { state?: SeedImportStateStore } = {},
 ): Promise<EpisodeImportResult> {
-  const episodes = new Map((await source.list()).map((e) => [e.id, e]));
+  const episodes = new Map<string, SeedEpisode>();
+  for (const episode of await source.list()) {
+    if (!episodes.has(episode.id)) episodes.set(episode.id, episode);
+  }
   const result: EpisodeImportResult = { imported: [], skipped: [], errors: [] };
   const now = deps.now?.() ?? new Date();
-  // Seed profile (#1409): deterministic secret detectors only — same
-  // pipeline the skill lane uses, for the same reason (episodes are
-  // human-curated prose/commands, not raw operator trace data).
-  const seedScrubPipeline = buildSeedScrubPipeline();
+  // Evidence episodes can contain copied command output and must use the
+  // strict deterministic trace profile: structured PII plus entropy-backed
+  // secret detection. The skill lane intentionally keeps its permissive
+  // public-prose profile (#1409).
+  const episodeScrubPipeline = buildScrubPipeline();
   const state = opts.state ?? createMemorySeedImportState();
 
   for (const row of report) {
@@ -151,7 +137,12 @@ export async function executeEpisodes(
       if (!episode) throw new Error(`episode ${row.id} not found in source ${source.name}`);
 
       const identity = `episode:${episode.id}`;
-      const contentHash = hashSeedContent(episodeContentFingerprint(episode));
+      const contentHash = episodeContentDigest(episode);
+      if (contentHash !== row.contentDigest) {
+        throw new Error(
+          `approved content digest ${row.contentDigest} does not match execute-time digest ${contentHash} for ${row.id}`,
+        );
+      }
       const prior = state.get(identity);
       if (prior && prior.contentHash === contentHash) {
         result.skipped.push({ id: row.id, reason: `unchanged since ${prior.envelopeRef}` });
@@ -159,17 +150,36 @@ export async function executeEpisodes(
       }
 
       const pending = await capture(toCapturedTask(episode, now, prior?.envelopeRef), {
-        pipeline: seedScrubPipeline,
+        pipeline: episodeScrubPipeline,
       });
+      const sensitiveRedactions = pending.redactions.filter((redaction) => redaction.stage !== 'fit');
+      if (sensitiveRedactions.length > 0) {
+        const detectors = [
+          ...new Set(sensitiveRedactions.map((redaction) =>
+            `${redaction.stage}${redaction.detail ? `:${redaction.detail}` : ''}`)),
+        ];
+        throw new Error(
+          `sensitive content detected (${detectors.join(', ')}); refusing to publish evidence episode ${row.id}`,
+        );
+      }
       const published = await publish(pending, deps);
       if (published.vetoed) throw new Error('unexpected veto on seed publish');
 
-      state.set(identity, { contentHash, envelopeRef: published.envelopeRef, publishedAt: now.toISOString() });
+      let stateWarning: string | undefined;
+      try {
+        state.set(identity, { contentHash, envelopeRef: published.envelopeRef, publishedAt: now.toISOString() });
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        stateWarning =
+          `published ${published.envelopeRef}, but seed-import state persistence failed: ${detail}; ` +
+          'recovery required before retrying this episode';
+      }
       result.imported.push({
         id: row.id,
         envelopeRef: published.envelopeRef,
         anchorTx: published.anchorTx,
         supersedes: prior?.envelopeRef ?? null,
+        ...(stateWarning ? { stateWarning } : {}),
       });
     } catch (err) {
       result.errors.push({
