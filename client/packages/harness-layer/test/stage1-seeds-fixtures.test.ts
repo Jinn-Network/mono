@@ -38,12 +38,14 @@ const EXPECTED_FILES = [...EPISODE_FILES, ...SKILL_FILES].sort();
  * and would otherwise false-positive against a naive "letter:\" pattern.
  */
 function hasPosixAbsolutePath(value: string): boolean {
+  const routeRoots = new Set(['jinn', 'capture-meta', 'api', 'corpus']);
   for (const match of value.matchAll(/(?:^|[\s("'`=\[:,])\/[^\s"'`]+/g)) {
     const slash = match[0]!.indexOf('/');
     const candidate = match[0]!.slice(slash).replace(/[)\],.;:]+$/, '');
     if (candidate.startsWith('//')) continue; // URL/UNC handled separately.
     const segments = candidate.slice(1).split('/').filter(Boolean);
-    if (/^v\d+$/i.test(segments[0] ?? '')) continue; // HTTP API route, not a filesystem path.
+    const root = segments[0] ?? '';
+    if (routeRoots.has(root) || /^v\d+$/i.test(root)) continue; // Product/API route, not a filesystem path.
     if (segments.length >= 2) return true;
   }
   return false;
@@ -121,6 +123,11 @@ describe('stage1-seeds fixture set (issue #1771)', () => {
         'https://example.com/workspace/project/file.ts',
         'Run /jinn to start the command.',
         'Use /capture-meta for metadata.',
+        'GET /jinn/status',
+        'POST /capture-meta/session',
+        'GET /api/corpus/search',
+        'GET /corpus/records/bafy-ref',
+        'GET /v2/status/health',
       ]) {
         expect(
           ABSOLUTE_PATH_DETECTORS.some(([, detects]) => detects(clean)),

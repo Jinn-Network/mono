@@ -44,9 +44,11 @@ export {
 
 export {
   publish,
+  PublishLedgerError,
   toTraceEnvelope,
   TRACE_ENVELOPE_ARTIFACT_TYPE,
   type HarnessPublishDeps,
+  type PublishedResult,
   type PublishOptions,
   type PublishResult,
 } from './publish.js';

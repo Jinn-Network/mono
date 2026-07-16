@@ -15,7 +15,12 @@
 
 import { capture, type CapturedTask } from '../capture.js';
 import { buildScrubPipeline } from '../../../../src/trajectory/scrub/build.js';
-import { publish, type HarnessPublishDeps } from '../publish.js';
+import {
+  publish,
+  PublishLedgerError,
+  type HarnessPublishDeps,
+  type PublishResult,
+} from '../publish.js';
 import type { Attributes } from '../../../../src/trajectory/scrub/types.js';
 import { episodeContentDigest, type EpisodeSource, type SeedEpisode } from './episode-fetch.js';
 import type { EpisodeImportReport } from './episode-report.js';
@@ -202,16 +207,22 @@ export async function executeEpisodes(
           `sensitive content detected (${detectors.join(', ')}); refusing to publish evidence episode ${row.id}`,
         );
       }
-      let published;
+      let published: PublishResult;
+      let ledgerWarning: string | undefined;
       try {
         published = await publish(pending, deps);
       } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err);
-        result.errors.push({
-          id: row.id,
-          error: `publication outcome unknown; do not auto-retry: ${detail}`,
-        });
-        break;
+        if (err instanceof PublishLedgerError) {
+          published = err.result;
+          ledgerWarning = err.message;
+        } else {
+          const detail = err instanceof Error ? err.message : String(err);
+          result.errors.push({
+            id: row.id,
+            error: `publication outcome unknown; do not auto-retry: ${detail}`,
+          });
+          break;
+        }
       }
       if (published.vetoed) throw new Error('unexpected veto on seed publish');
 
@@ -229,10 +240,10 @@ export async function executeEpisodes(
         envelopeRef: published.envelopeRef,
         anchorTx: published.anchorTx,
         supersedes: prior?.envelopeRef ?? null,
-        ...(published.ledgerWarning ? { ledgerWarning: published.ledgerWarning } : {}),
+        ...(ledgerWarning ? { ledgerWarning } : {}),
         ...(stateWarning ? { stateWarning } : {}),
       });
-      if (published.ledgerWarning || stateWarning) break;
+      if (ledgerWarning || stateWarning) break;
     } catch (err) {
       result.errors.push({
         id: row.id,

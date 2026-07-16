@@ -86,9 +86,10 @@ export const SeedEpisodeSchema = z.strictObject({
 });
 export type SeedEpisode = z.infer<typeof SeedEpisodeSchema>;
 
-/** Canonical content approved by an episode report row (the id is its separate identity key). */
+/** Canonical identity and content approved by an episode report row. */
 export function episodeContentDigest(episode: SeedEpisode): string {
   return hashSeedContent({
+    id: episode.id,
     repo: episode.repo,
     baseCommit: episode.baseCommit ?? null,
     taskSummary: episode.taskSummary,
