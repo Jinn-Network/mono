@@ -398,6 +398,35 @@ describe('execute()', () => {
     expect(result.errors).toEqual([]);
   });
 
+  it('stops the batch after state lookup fails and never publishes later rows', async () => {
+    const source = mockSource([
+      skill({ skill: 'acme/skills/first' }),
+      skill({ skill: 'acme/skills/second' }),
+    ]);
+    const { deps, published } = mockPublishDeps();
+    let getCalls = 0;
+    const state = {
+      get: () => {
+        getCalls += 1;
+        if (getCalls === 1) throw new Error('synthetic state read failure');
+        return undefined;
+      },
+      set: () => undefined,
+    };
+
+    const result = await execute(await plan(source), source, deps, { state });
+
+    expect(getCalls).toBe(1);
+    expect(published).toHaveLength(0);
+    expect(result.imported).toEqual([]);
+    expect(result.errors).toEqual([
+      {
+        skill: 'acme/skills/first',
+        error: 'synthetic state read failure',
+      },
+    ]);
+  });
+
   it('persists the published ref, exposes a ledger warning, and stops the batch after ledger append fails', async () => {
     const source = mockSource([
       skill({ skill: 'acme/skills/first' }),

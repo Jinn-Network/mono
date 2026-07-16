@@ -217,7 +217,16 @@ export async function execute(
 
       const identity = `skill:${skill.skill}`;
       const contentHash = hashSeedContent(skillContentFingerprint(skill));
-      const prior = state.get(identity);
+      let prior: ReturnType<SeedImportStateStore['get']>;
+      try {
+        prior = state.get(identity);
+      } catch (err) {
+        result.errors.push({
+          skill: row.skill,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        break;
+      }
       if (prior && prior.contentHash === contentHash) {
         result.skipped.push({ skill: row.skill, reason: `unchanged since ${prior.envelopeRef}` });
         continue;

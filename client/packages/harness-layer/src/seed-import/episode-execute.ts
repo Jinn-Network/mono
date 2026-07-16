@@ -177,7 +177,16 @@ export async function executeEpisodes(
           `approved content digest ${row.contentDigest} does not match execute-time digest ${contentHash} for ${row.id}`,
         );
       }
-      const prior = state.get(identity);
+      let prior: ReturnType<SeedImportStateStore['get']>;
+      try {
+        prior = state.get(identity);
+      } catch (err) {
+        result.errors.push({
+          id: row.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        break;
+      }
       if (prior && prior.contentHash === contentHash) {
         result.skipped.push({ id: row.id, reason: `unchanged since ${prior.envelopeRef}` });
         continue;
