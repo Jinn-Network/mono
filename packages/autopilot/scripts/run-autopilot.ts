@@ -424,7 +424,11 @@ export async function runReviewPass(
     deriveReviewInFlight: () => deriveReviewInFlight(runner),
     dispatchReview: (pr: ReviewablePr) => dispatchReview(pr, cfg, { runner, spawn: spawnImpl }),
     busyPrNumbers,
+    removeWorktree: async (w) => { await runner('git', ['worktree', 'remove', '--force', w.worktreePath]); },
   });
+  if (report.reaped.length > 0) {
+    console.log(`[autopilot] review reaped stale worktree → PR #${report.reaped.join(', #')}`);
+  }
   if (report.dispatched.length > 0) {
     console.log(`[autopilot] review-pr dispatched: PR #${report.dispatched.join(', #')}`);
   }
