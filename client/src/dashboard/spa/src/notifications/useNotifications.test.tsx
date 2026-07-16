@@ -164,9 +164,10 @@ describe('useNotifications', () => {
       wrapper: makeWrapper(),
     });
 
-    // funding_low fires from the zero-balance default; wait for it so the hook
-    // has settled before asserting the negative.
-    await waitFor(() => expect(result.current.map(n => n.kind)).toContain('funding_low'));
+    // Wait until the status fetch has settled before asserting the negative.
+    // Current gas-runway semantics do not manufacture a funding notification
+    // from a status fixture that omits the threshold/runway fields.
+    await waitFor(() => expect(apiMocks.getStatus).toHaveBeenCalled());
     expect(result.current.map(n => n.kind)).not.toContain('update_available');
   });
 
