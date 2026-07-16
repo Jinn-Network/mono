@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { runReviewCycle } from '../../src/dispatcher/review-loop.js';
+import { runReviewCycle, REVIEW_REAP_MS } from '../../src/dispatcher/review-loop.js';
 import type { PrSource } from '../../src/dispatcher/pr-source.js';
 import type { PolledPr, ReviewablePr, InFlightReview, DispatcherConfig } from '../../src/dispatcher/types.js';
 
@@ -25,6 +25,7 @@ describe('runReviewCycle', () => {
       prSource: source,
       cfg: CFG,
       deriveReviewInFlight: async () => ({ inFlight: [] as InFlightReview[], drift: [] }),
+      removeWorktree: async () => {},
       dispatchReview: async (p: ReviewablePr) => { dispatched.push(p.number); return { prNumber: p.number, branch: p.headRefName, worktreePath: `/pr-${p.number}`, pid: 1, startedAt: 0 }; },
     });
     expect(dispatched).toEqual([1, 2]);
@@ -39,6 +40,7 @@ describe('runReviewCycle', () => {
       prSource: source,
       cfg: CFG,
       deriveReviewInFlight: async () => ({ inFlight: [{ prNumber: 9, branch: 'x', worktreePath: '/pr-9', pid: 1, startedAt: 0 }], drift: [] }),
+      removeWorktree: async () => {},
       dispatchReview: async (p: ReviewablePr) => { dispatched.push(p.number); return { prNumber: p.number, branch: p.headRefName, worktreePath: '/x', pid: 1, startedAt: 0 }; },
     });
     expect(dispatched).toEqual([5]);
@@ -65,6 +67,7 @@ describe('runReviewCycle', () => {
       prSource: source,
       cfg: CFG,
       deriveReviewInFlight: async () => ({ inFlight: [{ prNumber: 7, branch: 'b/7', worktreePath: '/pr-7', pid: 1, startedAt: 0 }], drift: [] }),
+      removeWorktree: async () => {},
       dispatchReview: async (p: ReviewablePr) => { dispatched.push(p.number); return { prNumber: p.number, branch: p.headRefName, worktreePath: '/x', pid: 1, startedAt: 0 }; },
     });
     expect(dispatched).toEqual([]);
@@ -80,8 +83,55 @@ describe('runReviewCycle', () => {
       prSource: source,
       cfg: CFG, // allowlists 'a' only
       deriveReviewInFlight: async () => ({ inFlight: [] as InFlightReview[], drift: [] }),
+      removeWorktree: async () => {},
       dispatchReview: async (p: ReviewablePr) => { dispatched.push(p.number); return { prNumber: p.number, branch: p.headRefName, worktreePath: '/x', pid: 1, startedAt: 0 }; },
     });
     expect(dispatched).toEqual([8]);
+  });
+
+  it('reaps a stale worktree, frees its cap slot, and dispatches a waiting PR in the same cycle', async () => {
+    const NOW = 10_000_000_000; // arbitrary fixed instant
+    const stale: InFlightReview = { prNumber: 20, branch: 'b/20', worktreePath: '/pr-20', pid: 1, startedAt: NOW - REVIEW_REAP_MS - 1 };
+    const fresh: InFlightReview = { prNumber: 21, branch: 'b/21', worktreePath: '/pr-21', pid: 1, startedAt: NOW - 1_000 };
+    const unknown: InFlightReview = { prNumber: 22, branch: 'b/22', worktreePath: '/pr-22', pid: 1, startedAt: 0 };
+    const source: PrSource = { poll: async () => [pr(30)] }; // 30 = the waiting reviewable PR
+    const removed: number[] = [];
+    const dispatched: number[] = [];
+    const report = await runReviewCycle({
+      prSource: source,
+      // reviewCap: 3, deliberately equal to the 3 in-flight worktrees below —
+      // the cap is fully occupied (budget 0) BEFORE the reap runs, so a
+      // dispatch after reaping only the stale one proves the freed slot (not
+      // just spare cap) is what let PR 30 through: live drops to 2 (fresh +
+      // unknown), budget = max(0, 3 − 2) = 1.
+      cfg: { ...CFG, reviewCap: 3 },
+      now: () => NOW,
+      deriveReviewInFlight: async () => ({ inFlight: [stale, fresh, unknown], drift: [] }),
+      removeWorktree: async (w) => { removed.push(w.prNumber); },
+      dispatchReview: async (p: ReviewablePr) => { dispatched.push(p.number); return { prNumber: p.number, branch: p.headRefName, worktreePath: `/pr-${p.number}`, pid: 1, startedAt: NOW }; },
+    });
+    expect(removed).toEqual([20]);
+    expect(report.reaped).toEqual([20]);
+    expect(dispatched).toEqual([30]);
+    expect(report.dispatched).toEqual([30]);
+  });
+
+  it('keeps a worktree counted as live when removeWorktree throws, without aborting other dispatch', async () => {
+    const NOW = 10_000_000_000;
+    const stale: InFlightReview = { prNumber: 40, branch: 'b/40', worktreePath: '/pr-40', pid: 1, startedAt: NOW - REVIEW_REAP_MS - 1 };
+    const source: PrSource = { poll: async () => [pr(41)] };
+    const dispatched: number[] = [];
+    const report = await runReviewCycle({
+      prSource: source,
+      cfg: CFG, // reviewCap: 2
+      now: () => NOW,
+      deriveReviewInFlight: async () => ({ inFlight: [stale], drift: [] }),
+      removeWorktree: async () => { throw new Error('git worktree remove failed: locked'); },
+      dispatchReview: async (p: ReviewablePr) => { dispatched.push(p.number); return { prNumber: p.number, branch: p.headRefName, worktreePath: `/pr-${p.number}`, pid: 1, startedAt: NOW }; },
+    });
+    expect(report.reaped).toEqual([]);
+    // stale(40) still counts as live (1 slot used) + reviewCap 2 ⇒ budget 1 ⇒ PR 41 still dispatches
+    expect(dispatched).toEqual([41]);
+    expect(report.dispatched).toEqual([41]);
   });
 });
