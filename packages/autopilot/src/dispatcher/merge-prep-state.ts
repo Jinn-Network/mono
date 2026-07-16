@@ -1,6 +1,11 @@
-import { statSync } from 'node:fs';
 import type { CommandRunner } from './issue-source.js';
 import type { InFlightMergePrep } from './types.js';
+import {
+  parseWorktreePorcelain,
+  extractWorktreeNumber,
+  shortBranch,
+  recoverStartedAt,
+} from './worktree-porcelain.js';
 
 /**
  * In-flight derivation for merge-prep sessions — the third worktree namespace.
@@ -10,53 +15,10 @@ import type { InFlightMergePrep } from './types.js';
  * and the drift sweep ignores it — so no double-counting across session types.
  */
 
-const WORKTREE_PARENT_COMPONENT = 'jinn-mono_worktrees';
-const MERGE_PREFIX = 'merge-';
-
-interface ParsedWorktree { worktreePath: string; branchRef: string | null; }
-
-function parsePorcelain(output: string): ParsedWorktree[] {
-  const result: ParsedWorktree[] = [];
-  for (const block of output.split(/\n\n+/)) {
-    const lines = block.trim().split('\n');
-    if (lines.length === 0 || lines[0] === '') continue;
-    let worktreePath: string | null = null;
-    let branchRef: string | null = null;
-    for (const line of lines) {
-      if (line.startsWith('worktree ')) worktreePath = line.slice('worktree '.length);
-      else if (line.startsWith('branch ')) branchRef = line.slice('branch '.length);
-    }
-    if (worktreePath != null) result.push({ worktreePath, branchRef });
-  }
-  return result;
-}
-
 /** Extract the PR number from a `jinn-mono_worktrees/merge-<N>` path; null
  *  otherwise. `merge-<N>` must be the final path component. */
 export function extractMergePrepPrNumber(worktreePath: string): number | null {
-  const parts = worktreePath.split('/').filter((p, i) => i > 0 || p !== '');
-  for (let i = 0; i < parts.length - 1; i++) {
-    if (parts[i] === WORKTREE_PARENT_COMPONENT) {
-      const candidate = parts[i + 1];
-      if (candidate == null || i + 2 !== parts.length) return null;
-      if (!candidate.startsWith(MERGE_PREFIX)) return null;
-      const digits = candidate.slice(MERGE_PREFIX.length);
-      const n = parseInt(digits, 10);
-      if (isNaN(n) || String(n) !== digits) return null;
-      return n;
-    }
-  }
-  return null;
-}
-
-function shortBranch(ref: string): string {
-  const p = 'refs/heads/';
-  return ref.startsWith(p) ? ref.slice(p.length) : ref;
-}
-
-function recoverStartedAt(worktreePath: string): number {
-  try { const st = statSync(worktreePath); return st.birthtimeMs > 0 ? st.birthtimeMs : st.mtimeMs; }
-  catch { return 0; }
+  return extractWorktreeNumber(worktreePath, 'merge-');
 }
 
 /**
@@ -69,7 +31,7 @@ export async function deriveMergePrepInFlight(
 ): Promise<{ inFlight: InFlightMergePrep[] }> {
   const raw = await runner('git', ['worktree', 'list', '--porcelain']);
   const inFlight: InFlightMergePrep[] = [];
-  for (const wt of parsePorcelain(raw)) {
+  for (const wt of parseWorktreePorcelain(raw)) {
     const prNumber = extractMergePrepPrNumber(wt.worktreePath);
     if (prNumber == null) continue;
     inFlight.push({
