@@ -374,7 +374,7 @@ def test_contribution_count_only_when_on(monkeypatch, tmp_path):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     from plugins.jinn import consent
 
-    consent.save_state(consent.ACCEPTED)
+    consent.save_state(True)
     _resolve(contribution_count=7)
     assert banner.gather_splash_state()["contribution_count"] == 7  # AC2
 
@@ -383,6 +383,6 @@ def test_contribution_count_suppressed_when_off(monkeypatch, tmp_path):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     from plugins.jinn import consent
 
-    consent.save_state(consent.DECLINED)
+    consent.save_state(False)
     _resolve(contribution_count=7)
     assert "contribution_count" not in banner.gather_splash_state()  # AC2 gate
