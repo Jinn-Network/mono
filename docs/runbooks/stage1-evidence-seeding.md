@@ -75,6 +75,14 @@ captured one — see `client/packages/harness-layer/src/seed-import/episode-exec
    `failure` and its `fix`; distractor/negative fixtures are freeform.
    File name convention: `<id>.episode.json`.
 
+   `attribution.origin` states how the episode entered the corpus, honestly.
+   Vocabulary in use (freeform by schema — document any new value here):
+   - `operator-recorded-session` — transformed from a real recorded session;
+     carry `sourceUrl` when it re-performs a merged fix.
+   - `operator-authored-distractor` — hand-authored negative/contrast
+     material (e.g. the sympy distractor). It must not claim the
+     recorded-session evidentiary standard.
+
 6. **Validate locally** before touching the network:
 
    ```bash
@@ -102,10 +110,14 @@ report file) before executing; nothing publishes that wasn't on this list.
 
 Skill-shaped fixtures (`distractor-skill-tdd.json`,
 `distractor-skill-tdd-dup.json`) are **not** picked up by `--episodes-dir` —
-that flag only reads `*.episode.json` files. They exist for the R5
-acceptance gate (boundary assertion: skills are excluded from pickup, and
-duplicate content collapses at the consumer) and are published, if at all,
-through the existing skill lane (`seed plan/execute --source <list-file>`).
+that flag only reads `*.episode.json` files. They are consumed only by the
+fixture-lint test and, later, by the R5 acceptance gate's local corpus
+fixture server (boundary assertions: skills are excluded from pickup, and
+duplicate content collapses at the consumer). They are **not** publishable
+via `seed plan/execute --source <list-file>` either: that source fetches
+live from the GitHub API, and these fixtures' placeholder repos
+(`distractor/skill-tdd*`) do not exist — a fetch would 404. Nothing
+publishes them to the shared corpus.
 
 ## 3. Execute (publishes to testnet)
 
@@ -164,12 +176,16 @@ repeat:
 
 Idempotency state lives at
 `~/.jinn-client/harness-layer/seed-import-state.json` (one JSON map,
-`seed identity -> {contentHash, envelopeRef, publishedAt}`), shared with the
-existing skill-seed lane. Deleting that file resets idempotency — the next
-`seed execute` treats every row as new. This state is **local to the
-machine that ran `seed execute`**; it is not itself published, and it does
-not query the corpus — it only answers "did *I* already publish this exact
-seed identity, unchanged?".
+`seed identity -> {contentHash, envelopeRef, publishedAt}`; path overridable
+via `JINN_LAYER_SEED_STATE_PATH`), shared with the existing skill-seed lane.
+Deleting that file resets idempotency — the next `seed execute` treats every
+row as new. A corrupt/unreadable state file is fail-open: treated as empty,
+with a warning on the command's own output (`warnings` in `--json` mode, a
+`WARNING` line in table mode) — worst case is one redundant republish, which
+then supersedes cleanly. This state is **local to the machine that ran
+`seed execute`**; it is not itself published, and it does not query the
+corpus — it only answers "did *I* already publish this exact seed identity,
+unchanged?".
 
 ## Fixture-file reference
 
@@ -177,6 +193,6 @@ seed identity, unchanged?".
 |---|---|---|
 | `source-dashboard-flake.episode.json` | evidence | The positive match: re-performs the real dashboard `update_available` test flake fix (`163e070d`) at its pre-fix commit. |
 | `distractor-operator-claims.episode.json` | evidence | Same repo, different module (`d682f811`) — proves selection is finer than repository match. |
-| `distractor-sympy-printing.episode.json` | evidence | Different domain entirely (sympy LaTeX printing) — proves domain relevance. |
+| `distractor-sympy-printing.episode.json` | evidence | Different domain entirely (sympy LaTeX printing) — proves domain relevance. Hand-authored (`origin: operator-authored-distractor`, no source commit), unlike the two commit-verified episodes above. |
 | `distractor-skill-tdd.json` | skill | Skill-shaped seed (existing lane's format) — proves skills are excluded from evidence pickup. |
 | `distractor-skill-tdd-dup.json` | skill | Same `skillMd` content as the above under a distinct identity — proves content-key dedup at the consumer. |

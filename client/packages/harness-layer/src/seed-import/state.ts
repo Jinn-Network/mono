@@ -73,17 +73,16 @@ export function createMemorySeedImportState(
   };
 }
 
-function readStateFile(path: string): Record<string, SeedPublicationRecord> {
-  if (!existsSync(path)) return {};
-  try {
-    return SeedImportStateFileSchema.parse(JSON.parse(readFileSync(path, 'utf-8')));
-  } catch {
-    // A corrupt/foreign file must not crash seed-import — worst case is one
-    // redundant republish, never a crash (mirrors ledger.ts's malformed-line
-    // handling).
-    console.warn(`[harness-layer] seed-import state at ${path} is unreadable — treating as empty`);
-    return {};
-  }
+export interface FileSeedImportStateOptions {
+  /**
+   * Sink for the corrupt-state-file warning. Default: `console.warn`
+   * (unchanged behavior for non-CLI callers). The CLI passes a collector so
+   * the warning reaches its own writer / `--json` output (PR #1779 review)
+   * instead of only stderr. Fired at most once per store instance — every
+   * `get()`/`set()` re-reads the file, and repeating an identical line per
+   * report row would drown the output.
+   */
+  onWarning?: (message: string) => void;
 }
 
 /**
@@ -91,14 +90,37 @@ function readStateFile(path: string): Record<string, SeedPublicationRecord> {
  * by default) — read-modify-write on every `set()`. Fine at seed-import's
  * scale (dozens to low hundreds of curated, human-approved entries via the
  * plan/execute gate), not a database.
+ *
+ * A corrupt/foreign state file is FAIL-OPEN: treated as empty, with a
+ * warning through `onWarning` — worst case is one redundant republish
+ * (which then supersedes cleanly), never a crash (mirrors ledger.ts's
+ * malformed-line handling). A subsequent `set()` rewrites the file with
+ * valid JSON, self-healing it.
  */
-export function createFileSeedImportState(path: string = DEFAULT_SEED_IMPORT_STATE_PATH): SeedImportStateStore {
+export function createFileSeedImportState(
+  path: string = DEFAULT_SEED_IMPORT_STATE_PATH,
+  opts: FileSeedImportStateOptions = {},
+): SeedImportStateStore {
+  const warn = opts.onWarning ?? ((message: string) => console.warn(message));
+  let warned = false;
+  const read = (): Record<string, SeedPublicationRecord> => {
+    if (!existsSync(path)) return {};
+    try {
+      return SeedImportStateFileSchema.parse(JSON.parse(readFileSync(path, 'utf-8')));
+    } catch {
+      if (!warned) {
+        warned = true;
+        warn(`[harness-layer] seed-import state at ${path} is unreadable — treating as empty`);
+      }
+      return {};
+    }
+  };
   return {
     get(identity) {
-      return readStateFile(path)[identity];
+      return read()[identity];
     },
     set(identity, record) {
-      const all = readStateFile(path);
+      const all = read();
       all[identity] = SeedPublicationRecordSchema.parse(record);
       mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, JSON.stringify(all, null, 2) + '\n', 'utf-8');

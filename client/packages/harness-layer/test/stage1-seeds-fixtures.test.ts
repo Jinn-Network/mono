@@ -40,6 +40,9 @@ const EXPECTED_FILES = [...EPISODE_FILES, ...SKILL_FILES].sort();
 const ABSOLUTE_PATH_PATTERNS: Array<[string, RegExp]> = [
   ['macOS/Linux /Users/ path', /\/Users\/[^/\s"]+/],
   ['Linux /home/ path', /\/home\/[^/\s"]+/],
+  // What fs.realpath / tempfile APIs emit on macOS (/private/tmp,
+  // /private/var/folders/...) — PR #1779 review.
+  ['macOS /private/ path', /\/private\/[^/\s"]+/],
   ['Windows drive path', /[A-Za-z]:\\[^\\\s"]+/],
   ['home-dir tilde path', /~\/[^\s"]+/],
 ];
@@ -68,6 +71,35 @@ describe('stage1-seeds fixture set (issue #1771)', () => {
   it('contains exactly the expected files', () => {
     const actual = readdirSync(FIXTURES_DIR).filter((f) => f.endsWith('.json')).sort();
     expect(actual).toEqual(EXPECTED_FILES);
+  });
+
+  // Self-test of the checker itself (PR #1779 review): every pattern must
+  // actually fire on an injected canary — a scrub check that silently
+  // matches nothing is worse than none.
+  describe('ABSOLUTE_PATH_PATTERNS catch injected canaries', () => {
+    it.each([
+      ['/Users/someone/project/file.ts'],
+      ['/home/someone/project/file.ts'],
+      ['saved output to /private/tmp/jinn-scratch/out.json'],
+      ['/private/var/folders/ab/c123xyz/T/tmpfile.json'],
+      ['C:\\Users\\someone\\project\\file.ts'],
+      ['~/project/file.ts'],
+    ])('flags %j', (canary) => {
+      expect(ABSOLUTE_PATH_PATTERNS.some(([, pattern]) => pattern.test(canary))).toBe(true);
+    });
+
+    it('does not flag repo-relative paths', () => {
+      for (const clean of [
+        'client/src/dashboard/spa/src/notifications/useNotifications.test.tsx',
+        'sympy/printing/tests/test_latex.py',
+        '$ yarn --cwd client test',
+      ]) {
+        expect(
+          ABSOLUTE_PATH_PATTERNS.some(([, pattern]) => pattern.test(clean)),
+          `false positive on ${JSON.stringify(clean)}`,
+        ).toBe(false);
+      }
+    });
   });
 
   describe.each(EPISODE_FILES)('%s', (file) => {
@@ -100,9 +132,12 @@ describe('stage1-seeds fixture set (issue #1771)', () => {
       expect(JSON.stringify(parsed, null, 2) + '\n').toBe(raw);
     });
 
-    it('the idempotency content hash is a pure function of the fixture', () => {
-      const parsed = parseJson(file);
-      expect(hashSeedContent(parsed)).toBe(hashSeedContent(parsed));
+    it('the idempotency content hash is deterministic across independent parses', () => {
+      // Two independent JSON.parse calls yield distinct object graphs; the
+      // canonical-JSON hash must still agree (was a tautological same-
+      // reference comparison — PR #1779 review).
+      const raw = rawText(file);
+      expect(hashSeedContent(JSON.parse(raw))).toBe(hashSeedContent(JSON.parse(raw)));
     });
   });
 
@@ -185,6 +220,24 @@ describe('stage1-seeds fixture set (issue #1771)', () => {
       const d2 = SeedEpisodeSchema.parse(parseJson('distractor-sympy-printing.episode.json'));
       expect(d2.repo).not.toBe('Jinn-Network/mono');
       expect(d2.tags).not.toEqual(expect.arrayContaining(['mono']));
+    });
+  });
+
+  // PR #1779 review: attribution.origin must state each fixture's actual
+  // evidentiary standard — these publish to the shared corpus.
+  describe('attribution honesty (origin vocabulary)', () => {
+    it('commit-verified episodes claim operator-recorded-session and carry a sourceUrl', () => {
+      for (const file of ['source-dashboard-flake.episode.json', 'distractor-operator-claims.episode.json']) {
+        const ep = SeedEpisodeSchema.parse(parseJson(file));
+        expect(ep.attribution.origin, file).toBe('operator-recorded-session');
+        expect(ep.attribution.sourceUrl, `${file}: recorded-session claim needs its source commit`).toBeDefined();
+      }
+    });
+
+    it('the hand-authored sympy distractor does not claim a recorded session', () => {
+      const ep = SeedEpisodeSchema.parse(parseJson('distractor-sympy-printing.episode.json'));
+      expect(ep.attribution.origin).toBe('operator-authored-distractor');
+      expect(ep.attribution.sourceUrl).toBeUndefined();
     });
   });
 });

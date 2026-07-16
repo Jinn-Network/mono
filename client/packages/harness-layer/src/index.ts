@@ -253,6 +253,7 @@ export {
   DEFAULT_SEED_IMPORT_STATE_PATH,
   type SeedImportStateStore,
   type SeedPublicationRecord,
+  type FileSeedImportStateOptions,
 } from './seed-import/state.js';
 
 export {

@@ -1148,17 +1148,31 @@ export async function runJinnLayerCli(
     }
     const deps = opts.publishDeps ?? buildLivePublishDepsFromEnv();
     // File-backed by default (issue #1771): real `seed execute` runs persist
-    // idempotency state across invocations. Tests inject an in-memory store.
-    const state = opts.seedImportState ?? createFileSeedImportState();
+    // idempotency state across invocations (path overridable via
+    // JINN_LAYER_SEED_STATE_PATH, mirroring JINN_LAYER_LEDGER_PATH). Tests
+    // inject an in-memory store. A corrupt state file is fail-open (treated
+    // as empty; semantics in state.ts); its warning is collected here and
+    // surfaced on THIS command's own output below — a `warnings` field in
+    // --json mode, a WARNING line in table mode — not only console.warn
+    // (PR #1779 review).
+    const stateWarnings: string[] = [];
+    const state = opts.seedImportState ?? createFileSeedImportState(
+      process.env['JINN_LAYER_SEED_STATE_PATH'],
+      { onWarning: (message) => stateWarnings.push(message) },
+    );
 
     if (isEpisodes) {
       const episodeReport = parseEpisodeImportReport(JSON.parse(readFileSync(reportFile, 'utf-8')));
       const result = await executeEpisodes(episodeReport, buildEpisodeSource(), deps, { state });
       if (parsed.values.json) {
-        writer.write(JSON.stringify(result) + '\n');
+        writer.write(JSON.stringify({
+          ...result,
+          ...(stateWarnings.length > 0 ? { warnings: stateWarnings } : {}),
+        }) + '\n');
       } else {
         const lines = [
           `${result.imported.length} imported, ${result.skipped.length} skipped, ${result.errors.length} error(s)`,
+          ...stateWarnings.map((w) => `  WARNING  ${w}`),
         ];
         for (const row of result.imported) {
           lines.push(
@@ -1178,10 +1192,14 @@ export async function runJinnLayerCli(
     const report = parseImportReport(JSON.parse(readFileSync(reportFile, 'utf-8')));
     const result = await seedExecute(report, buildSource(), deps, { state });
     if (parsed.values.json) {
-      writer.write(JSON.stringify(result) + '\n');
+      writer.write(JSON.stringify({
+        ...result,
+        ...(stateWarnings.length > 0 ? { warnings: stateWarnings } : {}),
+      }) + '\n');
     } else {
       const lines = [
         `${result.imported.length} imported, ${result.skipped.length} skipped, ${result.errors.length} error(s)`,
+        ...stateWarnings.map((w) => `  WARNING  ${w}`),
       ];
       for (const row of result.imported) {
         lines.push(`  IMPORTED ${row.skill}`, `    ref     ${row.envelopeRef}`, `    anchor  ${row.anchorTx ? `${TESTNET_EXPLORER_TX_URL}${row.anchorTx}` : '-'}`);

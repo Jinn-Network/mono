@@ -68,7 +68,16 @@ export const SeedEpisodeSchema = z.strictObject({
   /** 3-6 sentence how-it-was-solved text (rescope plan §3.2 `synthesis`). */
   synthesis: z.string().min(1),
   attribution: z.strictObject({
-    /** How this episode entered the corpus, e.g. 'operator-recorded-session'. */
+    /**
+     * How this episode entered the corpus — stated honestly. Vocabulary in
+     * use (freeform by schema; document new values in
+     * docs/runbooks/stage1-evidence-seeding.md):
+     * - 'operator-recorded-session' — transformed from a real recorded
+     *   session; pair with `sourceUrl` when it re-performs a merged fix.
+     * - 'operator-authored-distractor' — hand-authored negative/contrast
+     *   material that must not claim the recorded-session evidentiary
+     *   standard (PR #1779 review).
+     */
     origin: z.string().min(1),
     /** Link to the real merged fix, when the episode re-performs one. */
     sourceUrl: z.string().min(1).optional(),
