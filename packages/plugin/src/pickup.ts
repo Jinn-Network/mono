@@ -19,9 +19,15 @@ const MIN_REMAINDER_LENGTH = 4;
 const QUOTED_SPAN_RE = /`([^`]+)`|"([^"]+)"|'([^']+)'/g;
 
 /** Unicode-aware alnum filter (matches Python's `str.isalnum()`), keeping the
- *  identifier separators this function itself tests for. */
+ *  identifier separators this function itself tests for — but only when they
+ *  are internal. Leading/trailing separators are stripped so ordinary
+ *  sentence-final prose (`done.`, `else.`) never reads as identifier-shaped
+ *  (mono #1786); a leading `/` on a path-like token (`/v1/status`) is
+ *  stripped too — `v1/status` stays a useful, greppable search term, and
+ *  treating every separator position the same way keeps the rule one rule. */
 function cleanWord(raw: string): string {
-  return [...raw].filter((c) => /[\p{L}\p{N}]/u.test(c) || '_-./'.includes(c)).join('');
+  const kept = [...raw].filter((c) => /[\p{L}\p{N}]/u.test(c) || '_-./'.includes(c)).join('');
+  return kept.replace(/^[_\-./]+/, '').replace(/[_\-./]+$/, '');
 }
 
 /** "Identifier-shaped": contains `_`, `-`, `.`, `/`, a digit, or a camelCase

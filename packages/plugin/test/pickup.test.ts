@@ -78,6 +78,52 @@ describe('deriveSearchTerms (rescope §3.3)', () => {
     const terms = deriveSearchTerms('café-menu needs a refactor');
     expect(terms).toContain('café-menu');
   });
+
+  // Term hygiene (mono #1786, found by the R6 live walkthrough): trailing
+  // sentence punctuation must not make an ordinary prose word look
+  // identifier-shaped and steal a priority-2 slot from real content words.
+  describe('term hygiene: leading/trailing separator stripping (#1786)', () => {
+    it('strips a trailing period from a sentence-final word instead of treating it as identifier-shaped', () => {
+      const terms = deriveSearchTerms('Say OK.');
+      expect(terms).not.toContain('ok.');
+    });
+
+    it('never derives a punctuation-suffixed term from natural prose ending in periods', () => {
+      const message =
+        'The operator dashboard still labels the AI-units claim gate in units, ' +
+        'even though the daemon now reports actual USD spend with an estimated ' +
+        'flag. Update the dashboard so it shows USD and distinguishes a metered ' +
+        'figure from an estimated one. Run the dashboard tests when you are done.';
+
+      const terms = deriveSearchTerms(message, 'Jinn-Network/mono');
+
+      expect(terms).toContain('dashboard');
+      for (const term of terms) {
+        expect(term.endsWith('.')).toBe(false);
+      }
+    });
+
+    it('strips leading/trailing separators but preserves internal ones on real identifiers', () => {
+      const terms = deriveSearchTerms(
+        'ship update_available, fix version-status, review client/src/dashboard, tune AI-units, hit /v1/status.',
+      );
+      expect(terms).toContain('update_available');
+      expect(terms).toContain('version-status');
+      expect(terms).toContain('client/src/dashboard');
+      expect(terms).toContain('ai-units');
+      // Leading `/` is stripped like any other leading separator (see #1786
+      // AC and the pickup.ts docstring for the trade-off this accepts).
+      expect(terms).toContain('v1/status');
+    });
+
+    it('falls a stripped prose word through to the remainder bucket rather than promoting it to priority 2', () => {
+      // 'else.' cleans to 'else', which is not identifier-shaped (no
+      // separator survives the strip) — it must only ever appear via the
+      // length-ranked remainder bucket, alongside ordinary prose words.
+      const terms = deriveSearchTerms('done. else. contribution');
+      expect(terms).toEqual(['contribution', 'done', 'else']);
+    });
+  });
 });
 
 describe('classifyPayload', () => {
