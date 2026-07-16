@@ -19,6 +19,7 @@
     "triage:check": "tsx bin/jinn-triage-check.ts"
   },
   "devDependencies": {
+    "@types/node": "^22",
     "tsx": "^4.23.1",
     "typescript": "^5.6.0",
     "vitest": "^2.1.9"
