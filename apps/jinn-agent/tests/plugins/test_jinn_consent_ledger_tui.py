@@ -114,13 +114,13 @@ def test_recorded_off_keeps_everything_local():
     assert "Nothing derived from your work leaves this machine" in off
 
 
-def test_node_stub_is_later_or_skip_and_sets_nothing_up():
-    plain = _plain(consent.render_node_stub_styled())
-    assert "RUN A NETWORK NODE?" in plain
-    assert "[L]" in plain and "Later" in plain
-    assert "[Enter]" in plain and "Skip" in plain
-    # Not needed to share or read — the stub configures nothing.
-    assert "not needed to share or to read" in plain
+def test_recorded_screens_never_mention_a_network_node():
+    # The node-stub prompt (a second, unrelated question after the one
+    # sharing question) is removed — the recorded screens are the flow's end.
+    for on in (True, False):
+        plain = _plain(consent.render_recorded_styled(on=on)).lower()
+        assert "network node" not in plain
+        assert "olas" not in plain
 
 
 # ── Preview example fixture ──────────────────────────────────────────────────

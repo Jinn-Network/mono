@@ -28,14 +28,17 @@ CONTRACT_VERSION = 1
 
 
 def _default_runner(
-    argv: List[str], cwd: Optional[str] = None, input: Optional[str] = None
+    argv: List[str],
+    cwd: Optional[str] = None,
+    input: Optional[str] = None,
+    timeout_s: int = _TIMEOUT_S,
 ) -> Tuple[int, str]:
     try:
         proc = subprocess.run(
             argv,
             capture_output=True,
             text=True,
-            timeout=_TIMEOUT_S,
+            timeout=timeout_s,
             check=False,
             cwd=cwd,
             input=input,
@@ -52,7 +55,7 @@ def _default_runner(
             "(npm install -g @jinn-network/client@canary) or set JINN_LAYER_BIN."
         )
     except subprocess.TimeoutExpired:
-        return 124, f"{argv[0]}: timed out after {_TIMEOUT_S}s"
+        return 124, f"{argv[0]}: timed out after {timeout_s}s"
 
 
 def binary() -> str:
@@ -153,6 +156,24 @@ def session_end(request: Dict[str, Any], runner: Optional[Runner] = None) -> Tup
     return run(["session", "end"], runner, input=payload)
 
 
+# Pickup runs on the first turn, before the LLM call — tighter than the
+# general 120s default (rescope plan §3.5): a broken jinn-layer must cost
+# seconds, not the session. Only applies to the real subprocess runner; an
+# injected test runner owns its own return timing.
+_SESSION_PICKUP_TIMEOUT_S = 15
+
+
+def session_pickup(request: Dict[str, Any], runner: Optional[Runner] = None) -> Tuple[int, str]:
+    """Delegate one first-turn evidence-pickup request through stdin
+    (Stage 1 rescope R3) — the ``session end`` stdin-JSON pattern, applied
+    to the sibling verb."""
+    payload = json.dumps(request, separators=(",", ":"))
+    argv = [binary(), "session", "pickup"]
+    if runner is not None:
+        return runner(argv, input=payload)
+    return _default_runner(argv, input=payload, timeout_s=_SESSION_PICKUP_TIMEOUT_S)
+
+
 def contribution_preview(
     *, acknowledge: bool = False, runner: Optional[Runner] = None
 ) -> Tuple[int, str]:
@@ -189,6 +210,11 @@ def parse_process_response(raw: str) -> Dict[str, Any]:
 
 
 def parse_session_end_response(raw: str) -> Dict[str, Any]:
+    """Parse the outer v1 status envelope; reject transport/version drift."""
+    return parse_process_response(raw)
+
+
+def parse_session_pickup_response(raw: str) -> Dict[str, Any]:
     """Parse the outer v1 status envelope; reject transport/version drift."""
     return parse_process_response(raw)
 

@@ -4,20 +4,20 @@ The capstone of the CLI TUI chain (#1417 splash → #1418 consent/ledger →
 this). These tests assert the *presentation* (exact copy, keys, step-rail
 states) and the *contract*: facts-over-flags persistence (returning operators
 see nothing; reads are non-destructive), the confirmed-step-at-a-time flow,
-``--replay`` re-rendering without re-asking, and the ``◇ corpus`` signal-line
-format wired into pickup's consumption path.
+``--replay`` re-rendering without re-asking, and the ``◇ corpus`` evidence
+signal-line format wired into pickup's first-turn pickup path (Stage 1
+rescope R3 — the walk is now consent → publish → signals; the rewards step
+and the "run a network node" stub are Stage 3 economy concepts, removed).
 
 Design artifact:
 ``docs/design/artifacts/2026-07-06-corpus-onboarding/1405-cli-onboarding.html``.
 
-Rendering is pure ANSI (reuses the #1417 splash palette), so every screen is
-re-derivable from these strings. Colours asserted against the truecolor
-palette; visible text against the ANSI-stripped render.
+Rendering is pure ANSI (reuses the #1417 splash palette). Colours asserted
+against the truecolor palette; visible text against the ANSI-stripped render.
 """
 
 from __future__ import annotations
 
-import importlib
 import json
 import re
 
@@ -77,25 +77,31 @@ _PUBLISHED_ROW = {
 
 def test_step1_recorded_on_continues_to_publish():
     plain = _plain(onboarding.render_consent_recorded())
-    assert "step 1 of 4" in plain
+    assert "step 1 of 3" in plain
     assert "sharing is ON" in plain
     assert "Continue — step 2 · your first publish" in plain
     assert "[Enter]" in plain
     assert not _EMOJI.search(plain)
 
 
-def test_step1_recorded_off_sets_aside_publish_and_rewards():
+def test_step1_recorded_off_sets_aside_publish():
     plain = _plain(onboarding.render_consent_recorded_off())
     assert "OFF · reader only" in plain
-    assert "they're set aside" in plain
+    assert "set aside" in plain
     assert "reading the corpus is on for everyone" in plain
-    assert "Continue — step 4 · corpus signals" in plain
+    assert "Continue — step 3 · corpus signals" in plain
 
 
 def test_step1_rail_shows_consent_current_gold():
     out = onboarding.render_consent_recorded()
     # The rail's current step (consent, index 0) is gold.
     assert f"{_TC['gold']}consent" in out
+
+
+def test_step1_rail_has_exactly_three_steps():
+    plain = _plain(onboarding.render_consent_recorded())
+    assert "consent" in plain and "publish" in plain and "signals" in plain
+    assert "rewards" not in plain.lower()
 
 
 # ── Step 2 · first publish ───────────────────────────────────────────────────
@@ -131,160 +137,99 @@ def test_step2_rail_consent_done_publish_current():
     assert f"{_TC['gold']}publish" in out    # current
 
 
-# ── Step 3 · rewards ─────────────────────────────────────────────────────────
+def test_step2_confirmed_continues_directly_to_signals():
+    # No rewards step: publish transitions straight to step 3.
+    plain = _plain(onboarding.render_first_publish_confirmed())
+    assert "Continue — step 3 · corpus signals" in plain
+    assert "rewards" not in plain.lower()
 
 
-def test_step3_none_yet_states_the_honest_trigger():
-    plain = _plain(onboarding.render_rewards_none())
-    assert "OLAS earned:" in plain and "none yet" in plain
-    # Plain speech on money — protocol-native verb (no pay/paid): publication
-    # alone does not earn; verification triggers it and is not guaranteed.
-    assert "Publication alone does not earn" in plain
-    assert "verification" in plain and "it is not guaranteed." in plain
-    assert not _EMOJI.search(plain)
+# ── Step 3 · corpus signals + the evidence signal line ───────────────────────
 
 
-def test_step3_names_the_tier_ladder_with_ledger_colours():
-    out = onboarding.render_rewards_none()
-    assert f"{_TC['green']}tests-passed" in out
-    assert f"{_TC['gold']}evaluator-verified" in out
-
-
-def test_step3_earned_variant_states_amount_and_count():
-    plain = _plain(onboarding.render_rewards_earned("12.40 OLAS", 3))
-    assert "12.40 OLAS" in plain
-    assert "3 traces evaluator-verified" in plain
-    assert "not publication" in plain
-
-
-def test_step3_earned_singular_count_grammar():
-    plain = _plain(onboarding.render_rewards_earned("4.10 OLAS", 1))
-    assert "1 trace evaluator-verified" in plain
-
-
-def test_step3_earned_degrades_amount_honestly():
-    # No fabricated figure — 'checking…' is passed straight through.
-    plain = _plain(onboarding.render_rewards_earned("checking…", 2))
-    assert "checking…" in plain
-
-
-# ── Step 4 · corpus signals + the signal line ────────────────────────────────
-
-
-def test_step4_shows_the_signal_line_format_once():
-    plain = _plain(onboarding.render_signals({"consent": "done", "publish": "done", "rewards": "done"}))
-    assert "When a run draws on the corpus, you'll see it." in plain
+def test_step3_shows_the_signal_line_format_once():
+    plain = _plain(onboarding.render_signals({"consent": "done", "publish": "done"}))
+    assert "step 3 of 3" in plain
+    assert "prior evidence" in plain.lower()
     assert "◇ corpus" in plain
-    assert "One line per use" in plain
     assert "Finish" in plain
 
 
-def test_corpus_signal_line_format():
-    out = onboarding.render_corpus_signal_line(
-        "retry-backoff-patterns", "learned from 214 contributions", "bafkr…hx2c"
-    )
+def test_evidence_signal_line_format():
+    out = onboarding.render_evidence_signal_line(["dashboard", "vitest", "flake"], 1)
     plain = _plain(out)
     assert plain.startswith("  ◇ corpus")
-    assert "using retry-backoff-patterns" in plain
-    assert "learned from 214 contributions" in plain
-    assert "env bafkr…hx2c" in plain
-    # ◇ prefix is sky (structure), skill name is bright fg.
+    assert "provided 1 evidence packet" in plain
+    assert "searched: dashboard, vitest, flake" in plain
+    # ◇ prefix is sky (structure); the provided-count phrase is bright fg.
     assert f"{_TC['sky']}◇ corpus" in out
-    assert f"{_TC['fg']}retry-backoff-patterns" in out
+    assert f"{_TC['fg']}provided 1 evidence packet" in out
     assert not _EMOJI.search(plain)
 
 
-def test_corpus_signal_line_strips_terminal_control_chars():
-    # The corpus is PUBLIC + cross-operator: a hostile adopted skill/summary/ref
-    # carrying ESC / CR / BEL must not reach a victim operator's terminal raw
-    # (ANSI injection, screen manipulation) on auto-adoption.
-    out = onboarding.render_corpus_signal_line(
-        "evil\x1b[31mSKILL",
-        "pwn\rned\x07",
-        "bafk\x1b[2Jref",
-    )
+def test_evidence_signal_line_pluralises_the_packet_noun():
+    plain = _plain(onboarding.render_evidence_signal_line(["dashboard"], 2))
+    assert "provided 2 evidence packets" in plain
+    singular = _plain(onboarding.render_evidence_signal_line(["dashboard"], 1))
+    assert "provided 1 evidence packet " in singular or singular.rstrip().endswith("packet")
+
+
+def test_evidence_signal_line_strips_terminal_control_chars():
+    # Searched terms are derived from the session's own first message, but
+    # sanitise unconditionally anyway (matches the rest of this module's
+    # convention for any dynamic field reaching the terminal).
+    out = onboarding.render_evidence_signal_line(["evil\x1b[31mterm", "pwn\rned\x07"], 1)
     plain = _plain(out)
-    # The ESC that would open a raw ANSI sequence is stripped; the bracket text
-    # that follows survives as inert literal characters.
-    assert "evil[31mSKILL" in plain
+    assert "evil[31mterm" in plain
     assert "pwnned" in plain
-    assert "bafk[2Jref" in plain
-    # CR and BEL (never emitted by styling) are gone from the raw output.
     assert "\r" not in out and "\x07" not in out
-    # No stray ESC other than the palette's own well-formed SGR codes.
     stray = _ANSI.sub("", out)
     assert "\033" not in stray
 
 
-def test_corpus_signal_line_hooked_into_pickup(tmp_path, monkeypatch):
-    """Adopting a verified corpus skill emits exactly one ◇ corpus line."""
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    # Auto-adopt is opt-in by default (manual-approval-by-default); opt in so
-    # this test can exercise the adopt-signal path.
-    cfg = tmp_path / "jinn" / "pickup.json"
-    cfg.parent.mkdir(parents=True, exist_ok=True)
-    cfg.write_text(json.dumps({"autoAdopt": True}))
-    # Reload pickup fresh so its module-level state is clean.
-    pickup = importlib.reload(importlib.import_module("plugins.jinn.pickup"))
-
-    tp = importlib.import_module("tests.plugins.test_jinn_pickup")
-    skills_install = importlib.import_module("plugins.jinn.skills_install")
-    # The adopt DECISION (and its signal-line emission) is under test here,
-    # not the layer shell-out (that's covered in test_jinn_skills_install.py).
-    monkeypatch.setattr(skills_install, "install", tp._fake_install(tmp_path))
-    runner = tp.CorpusRunner(tp.trace(tier="evaluator-verified", slug="tdd"))
-
-    lines = []
-    result = pickup.pickup(tp.MSG, runner=runner, signal_sink=lines.append)
-    assert result is not None
-    assert "Adopted automatically (verified)" in result["context"]
-    # Exactly one signal line, at the point of use, carrying the ref.
-    assert len(lines) == 1
-    plain = _plain(lines[0])
-    assert plain.startswith("  ◇ corpus")
-    assert "using tdd" in plain
-    assert "evaluator-verified" in plain
-    assert "env " in plain
+def test_no_installed_skill_or_adopt_language_anywhere_in_onboarding():
+    # Boundary: Stage 3 concepts (skill install/adopt) must not leak into
+    # Stage 1 onboarding copy.
+    screens = [
+        onboarding.render_consent_recorded(),
+        onboarding.render_consent_recorded_off(),
+        onboarding.render_first_publish_waiting(),
+        onboarding.render_first_publish_confirmed(),
+        onboarding.render_signals({"consent": "done", "publish": "done"}),
+        onboarding.render_done(reader_only=False),
+        onboarding.render_done(reader_only=True),
+    ]
+    for screen in screens:
+        plain = _plain(screen).lower()
+        assert "install" not in plain
+        assert "adopt" not in plain
+        assert "skill" not in plain
 
 
-def test_pickup_suggested_but_not_adopted_emits_surfaced_signal(tmp_path, monkeypatch):
-    """Every suggestion is visibly marked without claiming it was used."""
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    pickup = importlib.reload(importlib.import_module("plugins.jinn.pickup"))
-    tp = importlib.import_module("tests.plugins.test_jinn_pickup")
-    runner = tp.CorpusRunner(tp.trace(tier="user-accepted", slug="tdd"))
-    lines = []
-    result = pickup.pickup(tp.MSG, runner=runner, signal_sink=lines.append)
-    assert result is not None
-    assert "unverified" in result["context"]
-    assert len(lines) == 1
-    plain = _plain(lines[0])
-    assert plain.startswith("  ◇ corpus")
-    assert "surfaced tdd" in plain
-    assert "using tdd" not in plain
-
-
-def test_pickup_unknown_suggestion_is_also_visibly_surfaced(tmp_path, monkeypatch):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    pickup = importlib.reload(importlib.import_module("plugins.jinn.pickup"))
-    tp = importlib.import_module("tests.plugins.test_jinn_pickup")
-    runner = tp.CorpusRunner(tp.trace(
-        tier="evaluator-verified", payload="opaque", slug="opaque-pattern"
-    ))
-    lines = []
-    result = pickup.pickup(tp.MSG, runner=runner, signal_sink=lines.append)
-    assert result is not None
-    assert len(lines) == 1
-    assert "surfaced unknown" in _plain(lines[0])
+def test_no_rewards_or_olas_earning_language_anywhere_in_onboarding():
+    screens = [
+        onboarding.render_consent_recorded(),
+        onboarding.render_consent_recorded_off(),
+        onboarding.render_first_publish_waiting(),
+        onboarding.render_first_publish_confirmed(),
+        onboarding.render_signals({"consent": "done", "publish": "done"}),
+        onboarding.render_done(reader_only=False),
+        onboarding.render_done(reader_only=True),
+    ]
+    for screen in screens:
+        plain = _plain(screen).lower()
+        assert "rewards" not in plain
+        assert "olas earned" not in plain
+        assert "/jinn rewards" not in plain
+        assert "run a network node" not in plain
 
 
 # ── Persistence — facts over flags ───────────────────────────────────────────
 
 
 def test_returning_operator_is_complete_and_sees_nothing(tmp_path):
-    # Consent recorded + ledger non-empty + both flags → complete.
+    # Consent recorded + ledger non-empty + the signals flag → complete.
     consent.record_accept()
-    onboarding.mark_flag("rewards_explained")
     onboarding.mark_flag("signals_shown")
     runner = LedgerRunner([_PUBLISHED_ROW])
     assert onboarding.is_complete(runner=runner) is True
@@ -299,7 +244,6 @@ def test_unset_consent_is_not_complete(tmp_path):
 
 def test_accepted_but_empty_ledger_is_not_complete(tmp_path):
     consent.record_accept()
-    onboarding.mark_flag("rewards_explained")
     onboarding.mark_flag("signals_shown")
     runner = LedgerRunner([])  # ledger empty → step 2 fact unsatisfied
     assert onboarding.ledger_nonempty(runner=runner) is False
@@ -307,7 +251,7 @@ def test_accepted_but_empty_ledger_is_not_complete(tmp_path):
 
 
 def test_declined_operator_complete_on_signals_flag_only(tmp_path):
-    # Reader-only: publish/rewards set aside, so the ledger fact does not gate.
+    # Reader-only: publish is set aside, so the ledger fact does not gate.
     consent.record_decline()
     runner = LedgerRunner([])
     assert onboarding.is_complete(runner=runner) is False  # signals not shown yet
@@ -315,23 +259,26 @@ def test_declined_operator_complete_on_signals_flag_only(tmp_path):
     assert onboarding.is_complete(runner=runner) is True
 
 
-def test_deleting_flag_file_reruns_only_steps_3_and_4(tmp_path):
-    # Consent + publish are facts (survive); flags are onboarding's own.
+def test_only_signals_shown_is_a_valid_flag_name(tmp_path):
+    with pytest.raises(ValueError):
+        onboarding.mark_flag("rewards_explained")
+
+
+def test_deleting_flag_file_reruns_only_step_3(tmp_path):
+    # Consent + publish are facts (survive); the flag is onboarding's own.
     consent.record_accept()
-    onboarding.mark_flag("rewards_explained")
     onboarding.mark_flag("signals_shown")
     onboarding.state_path().unlink()
     # Facts survive:
     assert onboarding.consent_decided() is True
-    # Flags reset:
+    # Flag resets:
     flags = onboarding.load_flags()
-    assert flags["rewards_explained"] is False and flags["signals_shown"] is False
+    assert flags["signals_shown"] is False
 
 
 def test_flag_writes_never_touch_consent_or_ledger(tmp_path):
     consent.record_accept()
     before = consent.state_path().read_text()
-    onboarding.mark_flag("rewards_explained")
     onboarding.mark_flag("signals_shown")
     # Non-destructive: onboarding writes only its own flag file.
     assert consent.state_path().read_text() == before
@@ -374,51 +321,48 @@ class Driver:
         return _plain("\n".join(self.screens))
 
 
-def test_driver_accept_path_walks_all_four_steps(tmp_path, monkeypatch):
-    # consent 'a' → confirm 'y' → node skip enter, then step-1 enter, step-2
-    # enter, step-3 enter, step-4 enter.
-    d = Driver(["a", "y", "", "", "", "", ""])
+def test_driver_accept_path_walks_all_three_steps(tmp_path, monkeypatch):
+    # consent 'a' → confirm 'y', then step-1 enter, step-2 enter, step-3 enter.
+    d = Driver(["a", "y", "", "", ""])
     onboarding.run_onboarding(d.input, d.print)
     text = d.plain()
-    # Sharing recorded ON, then all four step surfaces + done.
+    # Sharing recorded ON, then both remaining step surfaces + done.
     assert "sharing is ON" in text
     assert "your first publish" in text
-    assert "OLAS earned:" in text
-    assert "When a run draws on the corpus" in text
+    assert "prior evidence" in text.lower()
     assert "complete" in text.lower()
-    # Flags set (facts-over-flags: sharing consent is on, both seen-flags true).
+    assert "rewards" not in text.lower()
+    # Facts-over-flags: sharing consent is on, the signals flag is true.
     assert consent.share_enabled() is True
     flags = onboarding.load_flags()
-    assert flags["rewards_explained"] and flags["signals_shown"]
+    assert flags["signals_shown"]
 
 
 def test_driver_decline_path_skips_to_signals(tmp_path):
-    # consent bare-enter → decline confirm 'y' → node enter; step-1 enter,
-    # step-4 enter.
-    d = Driver(["", "y", "", "", ""])
+    # consent bare-enter → decline confirm 'y'; step-1 enter, step-3 enter.
+    d = Driver(["", "y", "", ""])
     onboarding.run_onboarding(d.input, d.print)
     text = d.plain()
     assert "reader only" in text
-    # Publish + rewards are set aside — never rendered on the decline path.
-    assert "your first publish" not in text
-    assert "OLAS earned:" not in text
-    assert "When a run draws on the corpus" in text
-    # Only the signals flag is set; rewards stays unseen.
+    # The publish CONFIRMATION SCREEN is never rendered on the decline path
+    # (step 1's own explanation names step 2, which is a different thing).
+    assert "Run your first task." not in text
+    assert "published — your first contribution" not in text
+    assert "prior evidence" in text.lower()
     flags = onboarding.load_flags()
-    assert flags["signals_shown"] and not flags["rewards_explained"]
+    assert flags["signals_shown"]
 
 
 def test_driver_replay_re_asks_nothing_and_writes_nothing(tmp_path):
     # A returning operator replays: consent recorded, ledger has the row.
     consent.record_accept()
-    onboarding.mark_flag("rewards_explained")
     onboarding.mark_flag("signals_shown")
     before_consent = consent.state_path().read_text()
     before_flags = onboarding.state_path().read_text()
 
     runner = LedgerRunner([_PUBLISHED_ROW])
-    # 4 confirmations, one per screen. No consent keystrokes — never re-asked.
-    d = Driver(["", "", "", ""])
+    # 3 confirmations, one per screen. No consent keystrokes — never re-asked.
+    d = Driver(["", "", ""])
     onboarding.run_onboarding(d.input, d.print, replay=True, runner=runner)
     text = d.plain()
     # Shows the recorded consent state + the ACTUAL first envelope from ledger.
@@ -429,15 +373,12 @@ def test_driver_replay_re_asks_nothing_and_writes_nothing(tmp_path):
     assert onboarding.state_path().read_text() == before_flags
 
 
-def test_driver_earned_variant_when_rewards_fn_reports(tmp_path):
-    d = Driver(["a", "y", "", "", "", "", ""])
-    onboarding.run_onboarding(
-        d.input, d.print,
-        rewards_fn=lambda: {"amount": "12.40 OLAS", "count": 3},
-    )
-    text = d.plain()
-    assert "12.40 OLAS" in text
-    assert "3 traces evaluator-verified" in text
+def test_run_onboarding_no_longer_accepts_a_rewards_fn(tmp_path):
+    # The rewards step (and its rewards_fn hook) is gone — passing it is a
+    # TypeError, proving the parameter was actually removed, not just unused.
+    d = Driver(["a", "y", "", "", ""])
+    with pytest.raises(TypeError):
+        onboarding.run_onboarding(d.input, d.print, rewards_fn=lambda: None)
 
 
 # ── NO_COLOR degrades to plain text ──────────────────────────────────────────
@@ -449,9 +390,8 @@ def test_no_color_yields_plain_text(monkeypatch, tmp_path):
     for out in (
         onboarding.render_consent_recorded(),
         onboarding.render_first_publish_confirmed(),
-        onboarding.render_rewards_none(),
         onboarding.render_signals({"consent": "done"}),
-        onboarding.render_corpus_signal_line("s", "p", "e"),
+        onboarding.render_evidence_signal_line(["dashboard"], 1),
     ):
         assert _ANSI.search(out) is None
 
@@ -462,7 +402,6 @@ def test_no_color_yields_plain_text(monkeypatch, tmp_path):
 def test_cli_returning_operator_is_a_noop(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     consent.record_accept()
-    onboarding.mark_flag("rewards_explained")
     onboarding.mark_flag("signals_shown")
     # Patch the ledger fact to "non-empty" so is_complete() is satisfied.
     monkeypatch.setattr(onboarding, "ledger_nonempty", lambda runner=None: True)

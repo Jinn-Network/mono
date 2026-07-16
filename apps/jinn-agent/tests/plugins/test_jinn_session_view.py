@@ -1,4 +1,4 @@
-"""Current-session and session-completion product legibility."""
+"""Current-session and session-completion product legibility (searched → provided)."""
 
 from __future__ import annotations
 
@@ -29,19 +29,18 @@ def reset(tmp_path, monkeypatch):
     jinn._reset_session_state()
 
 
-def test_current_session_renders_all_stage_1_state():
+def test_current_session_renders_searched_and_provided():
     out = _plain(session_view.render_current(
         activity={
-            "surfacedRefs": ["knowledge/ref-a", "knowledge/ref-b"],
-            "fetchedRefs": ["knowledge/ref-a"],
-            "installedSkillRefs": ["knowledge/ref-a"],
+            "searchedTerms": ["dashboard", "vitest"],
+            "providedRefs": ["knowledge/ref-a"],
         },
         capture_active=True,
         share_enabled=False,
     ))
 
     assert "Jinn session" in out
-    assert "2 surfaced · 1 fetched · 1 installed" in out
+    assert "knowledge searched dashboard, vitest · provided 1 (knowledge/ref-a)" in out
     assert "capture active" in out
     assert "eligibility pending until session end" in out
     assert "contribution pending until session end · publication OFF" in out
@@ -50,7 +49,7 @@ def test_current_session_renders_all_stage_1_state():
 
 def test_current_session_nothing_found_yet_is_explicit():
     out = _plain(session_view.render_current(
-        activity={"surfacedRefs": [], "fetchedRefs": [], "installedSkillRefs": []},
+        activity={"searchedTerms": [], "providedRefs": []},
         capture_active=False,
         share_enabled=True,
     ))
@@ -58,51 +57,46 @@ def test_current_session_nothing_found_yet_is_explicit():
     assert "capture waiting for ordinary work" in out
 
 
-def test_current_session_does_not_call_directly_fetched_knowledge_nothing():
+def test_current_session_searched_but_nothing_provided_is_the_honest_line():
     out = _plain(session_view.render_current(
-        activity={
-            "surfacedRefs": [],
-            "fetchedRefs": ["knowledge/direct-ref"],
-            "installedSkillRefs": [],
-        },
+        activity={"searchedTerms": ["quasar", "unobtainium"], "providedRefs": []},
         capture_active=True,
         share_enabled=False,
     ))
-    assert "0 surfaced · 1 fetched · 0 installed" in out
-    assert "nothing relevant found" not in out
+    assert "knowledge searched · nothing relevant found" in out
+    # The honest nothing-found line never lists terms (rescope §3.4).
+    assert "quasar" not in out
 
 
 def test_session_end_renders_nothing_found_capture_learning_and_contribution():
     out = _plain(session_view.render_complete(
         summary={
-            "surfacedRefs": [],
-            "fetchedRefs": [],
-            "installedSkillRefs": [],
+            "searchedTerms": ["quasar"],
+            "providedPackets": [],
             "nothingFound": True,
             "eligibility": {
                 "eligible": True,
                 "reason": "accepted diff on a public repository",
             },
         },
-        activity={"surfacedRefs": [], "fetchedRefs": [], "installedSkillRefs": []},
+        activity={"searchedTerms": ["quasar"], "providedRefs": []},
         capture_status="captured",
         local_learning_status="pending",
         contribution={"status": "ok", "value": {"status": "recorded"}},
     ))
     assert "Jinn session complete" in out
-    assert "nothing relevant found" in out
+    assert "knowledge searched · nothing relevant found" in out
     assert "episode captured" in out
     assert "local learning pending" in out
     assert "eligibility eligible — accepted diff on a public repository" in out
     assert "contribution recorded" in out
 
 
-def test_session_end_renders_relevant_knowledge_and_used_refs():
+def test_session_end_renders_relevant_knowledge_and_provided_refs():
     out = _plain(session_view.render_complete(
         summary={
-            "surfacedRefs": ["knowledge/ref-a", "knowledge/ref-b"],
-            "fetchedRefs": ["knowledge/ref-a"],
-            "installedSkillRefs": ["knowledge/ref-a"],
+            "searchedTerms": ["dashboard", "vitest", "flake"],
+            "providedPackets": [{"ref": "bafySourceEpisode", "title": "Fix the dashboard flake"}],
             "nothingFound": False,
             "eligibility": {"eligible": False, "reason": "no accepted diff"},
         },
@@ -111,9 +105,7 @@ def test_session_end_renders_relevant_knowledge_and_used_refs():
         local_learning_status="pending",
         contribution={"status": "ok", "value": {"status": "queued"}},
     ))
-    assert "2 surfaced · 1 fetched · 1 installed" in out
-    assert "surfaced knowledge/ref-a, knowledge/ref-b" in out
-    assert "used knowledge/ref-a" in out
+    assert "knowledge searched dashboard, vitest, flake · provided 1 (bafySourceEpisode)" in out
     assert "contribution queued" in out
 
 
@@ -132,12 +124,28 @@ def test_session_end_distinguishes_no_candidate_from_unavailable_pipeline():
     assert "contribution no reusable public-task candidate" in out
 
 
+def test_session_end_falls_back_to_activity_when_summary_is_absent():
+    # The process-bridge-degraded fallback path (__init__.py) builds a
+    # synthetic summary from the local activity dict — render_complete must
+    # honor it the same way it honors a real core summary.
+    out = _plain(session_view.render_complete(
+        summary=None,
+        activity={"searchedTerms": ["dashboard"], "providedRefs": ["bafySourceEpisode"]},
+        capture_status="captured-locally",
+        local_learning_status="pending",
+        contribution=None,
+        candidate_created=True,
+    ))
+    assert "knowledge searched dashboard · provided 1 (bafySourceEpisode)" in out
+
+
 def test_jinn_session_reads_the_live_buffer_and_activity(monkeypatch):
     state = jinn._state_for("s1")
     state["activity"] = {
-        "surfacedRefs": ["knowledge/ref-a"],
-        "fetchedRefs": ["knowledge/ref-a"],
-        "installedSkillRefs": [],
+        "searchedTerms": ["dashboard"],
+        "providedRefs": ["knowledge/ref-a"],
+        "surfacedRefs": [],
+        "fetchedRefs": [],
     }
     buf.record_first_turn("t1", "s1", "fix retry", "model", "cli")
     buf.record_user_turn("t1", "s1", "fix retry")
@@ -146,5 +154,28 @@ def test_jinn_session_reads_the_live_buffer_and_activity(monkeypatch):
     out = _plain(jinn._handle_jinn(
         command_args="session", session_id="s1", task_id="t1"
     ))
-    assert "1 surfaced · 1 fetched · 0 installed" in out
+    assert "knowledge searched dashboard · provided 1 (knowledge/ref-a)" in out
     assert "capture active" in out
+
+
+def test_boundary_no_installed_skill_state_anywhere_in_session_rendering():
+    complete = _plain(session_view.render_complete(
+        summary={
+            "searchedTerms": ["dashboard"],
+            "providedPackets": [{"ref": "bafyRef1", "title": "x"}],
+            "nothingFound": False,
+            "eligibility": {"eligible": True, "reason": "ok"},
+        },
+        activity={},
+        capture_status="captured",
+        local_learning_status="pending",
+        contribution={"status": "ok", "value": {"status": "recorded"}},
+    ))
+    current = _plain(session_view.render_current(
+        activity={"searchedTerms": ["dashboard"], "providedRefs": ["bafyRef1"]},
+        capture_active=True,
+        share_enabled=True,
+    ))
+    for out in (complete, current):
+        assert "installed" not in out.lower()
+        assert "skill" not in out.lower()

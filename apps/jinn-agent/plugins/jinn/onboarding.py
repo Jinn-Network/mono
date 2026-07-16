@@ -8,12 +8,13 @@ confirmed step at a time:
   2. publish   — a waiting screen shown once; the publish confirmation
                  (task · tier · envelope · anchor + the gold ``view it``
                  deep link) fires on the real publish event.
-  3. rewards   — "None yet" + the honest trigger (evaluator verification
-                 under bond, not publication, not guaranteed); an earned
-                 variant states amount + count.
-  4. signals   — the ``◇ corpus`` signal-line format, shown once; thereafter
-                 the line renders in real runs at the point of use (product
-                 behaviour, wired into pickup.py's consumption path).
+  3. signals   — the ``◇ corpus`` evidence-pickup signal-line format, shown
+                 once; thereafter the line renders in real runs at the
+                 point of use (product behaviour, wired into pickup.py's
+                 first-turn pickup). Rewards/OLAS-earning copy and the
+                 "run a network node" stub are Stage 3 economy concepts and
+                 do not belong in Stage 1 onboarding (rescope plan §1); a
+                 prior draft of this flow had a step 3 for them, removed.
 
 Persistence is FACTS OVER FLAGS (design's model). A per-machine flag file
 lives beside the other jinn state (``<home>/jinn/onboarding.json``), but
@@ -30,9 +31,9 @@ writes them.
 
 Rendering is pure ANSI (reuses the #1417 splash palette via ``style``), so
 every screen is snapshot-testable — the #1417/#1418 discipline. The step
-rail (``consent · publish · rewards · signals``) is words, colour carries
-state (green done · gold current · amber skipped · dim future); no glyph
-icons. Voice is plain on consent + money (design copy verbatim).
+rail (``consent · publish · signals``) is words, colour carries state
+(green done · gold current · amber skipped · dim future); no glyph icons.
+Voice is plain on consent + money (design copy verbatim).
 
 Design artifact:
 ``docs/design/artifacts/2026-07-06-corpus-onboarding/1405-cli-onboarding.html``.
@@ -56,17 +57,17 @@ from .consent import get_hermes_home
 
 logger = logging.getLogger(__name__)
 
-# The four steps, in order. Rail labels are words (no glyphs) — colour carries
-# state per the no-unicode-icons rule.
-STEPS = ("consent", "publish", "rewards", "signals")
+# The three steps, in order. Rail labels are words (no glyphs) — colour
+# carries state per the no-unicode-icons rule.
+STEPS = ("consent", "publish", "signals")
 
 
 # ── Persistence — facts over flags ───────────────────────────────────────────
 #
-# The flag file only holds the two pure seen-flags (steps 3 and 4). Consent and
-# publish are never flags: they are derived from the consent record and the
-# ledger. Deleting the flag file therefore re-runs ONLY steps 3–4 — consent and
-# publish state survive because they were never onboarding's to keep.
+# The flag file holds the one pure seen-flag (step 3). Consent and publish are
+# never flags: they are derived from the consent record and the ledger.
+# Deleting the flag file therefore re-runs ONLY step 3 — consent and publish
+# state survive because they were never onboarding's to keep.
 
 
 def state_path() -> Path:
@@ -74,24 +75,21 @@ def state_path() -> Path:
 
 
 def load_flags() -> Dict[str, object]:
-    """The two pure seen-flags. Never carries consent or publish state."""
+    """The one pure seen-flag. Never carries consent or publish state."""
     path = state_path()
     if not path.exists():
-        return {"rewards_explained": False, "signals_shown": False}
+        return {"signals_shown": False}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        return {
-            "rewards_explained": bool(data.get("rewards_explained", False)),
-            "signals_shown": bool(data.get("signals_shown", False)),
-        }
+        return {"signals_shown": bool(data.get("signals_shown", False))}
     except Exception:
         logger.warning("jinn: unreadable onboarding flags at %s — treating as unseen", path)
-        return {"rewards_explained": False, "signals_shown": False}
+        return {"signals_shown": False}
 
 
 def mark_flag(name: str) -> None:
-    """Set one seen-flag. ``name`` is ``rewards_explained`` | ``signals_shown``."""
-    if name not in ("rewards_explained", "signals_shown"):
+    """Set one seen-flag. ``name`` is ``signals_shown``."""
+    if name != "signals_shown":
         raise ValueError(f"unknown onboarding flag: {name}")
     flags = load_flags()
     flags[name] = True
@@ -134,22 +132,22 @@ def ledger_nonempty(runner: Optional[jinn_layer.Runner] = None) -> bool:
 def is_complete(runner: Optional[jinn_layer.Runner] = None) -> bool:
     """True when every gate is satisfied — a returning operator sees nothing.
 
-    consent decided AND ledger non-empty AND both seen-flags set. Because the
-    first two are facts, a returning operator (consented + published) satisfies
-    them without ever having run onboarding, and the flags are the only piece
-    onboarding itself owns.
+    consent decided AND ledger non-empty AND the signals flag set. Because
+    the first two are facts, a returning operator (consented + published)
+    satisfies them without ever having run onboarding, and the flag is the
+    only piece onboarding itself owns.
     """
     if not consent_decided():
         return False
     # Reader-only operators (declined) never publish, so the ledger fact does
-    # not gate them — steps 2–3 are set aside on the decline path. They are
+    # not gate them — step 2 is set aside on the decline path. They are
     # complete once consent is decided and the signals flag is set.
     flags = load_flags()
     if not consent.share_enabled():
         return bool(flags["signals_shown"])
     if not ledger_nonempty(runner):
         return False
-    return bool(flags["rewards_explained"] and flags["signals_shown"])
+    return bool(flags["signals_shown"])
 
 
 # ── Shared chrome (design 1b) ────────────────────────────────────────────────
@@ -185,7 +183,7 @@ def _step_head(pal, rst: str, n: int, label: str, statuses: Dict[str, str]) -> L
     gold = lambda s: _style.wrap(pal, rst, "gold", s)
     head = (
         sky("◇") + " " + fg(_harness.harness_name()) + dim("  ·  first run  ·  ")
-        + gold(f"step {n} of 4") + dim("  ·  ") + fg(label)
+        + gold(f"step {n} of {len(STEPS)}") + dim("  ·  ") + fg(label)
     )
     return [head, "  " + _rail(pal, rst, statuses, n - 1), _style.wrap(pal, rst, "dim", "─" * 70)]
 
@@ -242,12 +240,12 @@ def render_consent_recorded_off(pal=None, rst=None) -> str:
         "",
         dim("  Turn on any time:  ") + sky("/jinn consent"),
         "",
-        dim("  Steps 2 and 3 cover sharing and rewards — they apply only when"),
-        dim("  sharing is on, so they're set aside. Step 4 still applies:"),
+        dim("  Step 2 (your first publish) applies only when sharing is on, so"),
+        dim("  it's set aside. Step 3 still applies:"),
         dim("  reading the corpus is on for everyone."),
         "",
         _style.wrap(pal, rst, "dim", "─" * 70),
-        "  " + kbd("[Enter]") + fg(" Continue — step 4 · corpus signals"),
+        "  " + kbd("[Enter]") + fg(" Continue — step 3 · corpus signals"),
     ])
 
 
@@ -335,143 +333,72 @@ def render_first_publish_confirmed(
         dim("  ref, and check its anchor. Your ledger: ") + sky("/jinn ledger"),
         "",
         _style.wrap(pal, rst, "dim", "─" * 70),
-        "  " + kbd("[Enter]") + fg(" Continue — step 3 · rewards")
+        "  " + kbd("[Enter]") + fg(" Continue — step 3 · corpus signals")
         + "      " + kbd("[V]") + dim(" Veto — pull it back"),
     ])
 
 
-# ── Step 3 · rewards ─────────────────────────────────────────────────────────
+# ── Step 3 · corpus signals ──────────────────────────────────────────────────
 
 
-def render_rewards_none(pal=None, rst=None) -> str:
-    """"None yet" + the honest trigger. Plain speech on money (design verbatim):
-    publication alone does not earn; verification triggers it, not guaranteed."""
-    if pal is None:
-        pal, rst = _style.palette()
-    dim = lambda s: _style.wrap(pal, rst, "dim", s)
-    fg = lambda s: _style.wrap(pal, rst, "fg", s)
-    sky = lambda s: _style.wrap(pal, rst, "sky", s)
-    green = lambda s: _style.wrap(pal, rst, "green", s)
-    gold = lambda s: _style.wrap(pal, rst, "gold", s)
-    kbd = lambda s: _style.wrap(pal, rst, "gold", s)
-    return "\n".join([
-        *_step_head(pal, rst, 3, "rewards", {"consent": "done", "publish": "done"}),
-        "",
-        fg("  OLAS earned: ") + dim("none yet."),
-        "",
-        dim("  Publication alone does not earn — verification does. OLAS accrues"),
-        dim("  when an evaluator scores one of your published traces under bond;"),
-        dim("  verification triggers it, and it is not guaranteed."),
-        "",
-        dim("  Your first trace is published at tier ") + green("tests-passed") + dim(". If an"),
-        dim("  evaluator verifies it, the tier moves to ") + gold("evaluator-verified"),
-        dim("  and the reward lands on your operator address."),
-        "",
-        dim("  Check any time:  ") + sky("/jinn rewards"),
-        "",
-        _style.wrap(pal, rst, "dim", "─" * 70),
-        "  " + kbd("[Enter]") + fg(" Continue — step 4 · corpus signals")
-        + "      " + kbd("[S]") + dim(" Skip"),
-    ])
-
-
-def render_rewards_earned(amount: str, count: int, pal=None, rst=None) -> str:
-    """Earned variant — states amount + verified count, links the rewards view.
-
-    The amount is not a fork-native synchronous source (no rewards lookup wired
-    yet); callers pass ``amount='checking…'`` to degrade honestly (design's
-    error state) rather than fabricate a figure.
-    """
-    if pal is None:
-        pal, rst = _style.palette()
-    dim = lambda s: _style.wrap(pal, rst, "dim", s)
-    fg = lambda s: _style.wrap(pal, rst, "fg", s)
-    sky = lambda s: _style.wrap(pal, rst, "sky", s)
-    gold = lambda s: _style.wrap(pal, rst, "gold", s)
-    kbd = lambda s: _style.wrap(pal, rst, "gold", s)
-    verified = f"{count} trace{'s' if count != 1 else ''} evaluator-verified"
-    return "\n".join([
-        *_step_head(pal, rst, 3, "rewards", {"consent": "done", "publish": "done"}),
-        "",
-        fg("  OLAS earned: ") + gold(amount) + dim(f" · {verified}."),
-        "",
-        dim("  Accrues on verification, not publication: an evaluator scored those"),
-        dim("  traces under bond. Details and per-trace provenance:"),
-        "",
-        dim("  ") + sky("/jinn rewards") + dim("   ·   each entry links its evaluation and anchor tx."),
-        "",
-        _style.wrap(pal, rst, "dim", "─" * 70),
-        "  " + kbd("[Enter]") + fg(" Continue — step 4 · corpus signals"),
-    ])
-
-
-# ── Step 4 · corpus signals ──────────────────────────────────────────────────
-
-
-def render_corpus_signal_line(
-    skill: str,
-    provenance: str,
-    env_ref: str,
+def render_evidence_signal_line(
+    searched_terms: List[str],
+    provided_count: int,
     pal=None,
     rst=None,
-    *,
-    action: str = "using",
 ) -> str:
-    """One in-run line at the point of corpus use (design 1c) — the permanent
-    artefact of step 4. ``◇ corpus`` prefix (sky), skill name bright, provenance
-    dim, the envelope ref carried so the claim is checkable. One line per use.
+    """One in-run line at the point of evidence pickup (rescope plan §3.4) —
+    the permanent artefact of step 3. ``◇ corpus`` prefix (sky), the provided
+    count bright, the searched terms dim. One line per session, emitted only
+    when evidence was actually provided.
 
-    This is the product-behaviour render hooked into pickup.py's consumption
-    path — NOT onboarding-only. Kept here so the format has a single source.
+    This is the product-behaviour render hooked into pickup.py's first-turn
+    pickup path — NOT onboarding-only. Kept here so the format has a single
+    source.
 
-    Every dynamic field (``skill``, ``provenance``, ``env_ref``) is sanitised
-    of C0/C1 control chars at this boundary: the corpus is PUBLIC and
-    cross-operator, so a hostile ``summary``/``slug``/``ref`` carrying
-    ``\\x1b[…]``/``\\r``/CSI bytes would otherwise reach a victim operator's
-    terminal raw on auto-adoption (screen manipulation, output spoofing). We
-    sanitise unconditionally here rather than trusting upstream slug/tier
-    constraints, so every caller is covered.
+    ``searched_terms`` are sanitised of C0/C1 control chars at this boundary:
+    they are derived from the session's own first message, but a corpus
+    record's `contextBlock` (rendered separately, not here) is PUBLIC and
+    cross-operator, so this boundary sanitises unconditionally rather than
+    trusting upstream term derivation, matching the rest of this module's
+    convention.
     """
     if pal is None:
         pal, rst = _style.palette()
-    skill = _style.sanitise(skill)
-    provenance = _style.sanitise(provenance)
-    env_ref = _style.sanitise(env_ref)
-    action = "surfaced" if action == "surfaced" else "using"
+    terms = ", ".join(_style.sanitise(term) for term in searched_terms)
+    noun = "packet" if provided_count == 1 else "packets"
     sky = lambda s: _style.wrap(pal, rst, "sky", s)
-    skyh = lambda s: _style.wrap(pal, rst, "fg", s)  # bright skill name
     fg = lambda s: _style.wrap(pal, rst, "fg", s)
     dim = lambda s: _style.wrap(pal, rst, "dim", s)
     return (
-        "  " + sky("◇ corpus") + "  " + fg(action + " ") + skyh(skill)
-        + dim(f"  ·  {provenance}  ·  ") + sky(f"env {env_ref}")
+        "  " + sky("◇ corpus") + "  " + fg(f"provided {provided_count} evidence {noun}")
+        + dim(f"  ·  searched: {terms}")
     )
 
 
 def render_signals(statuses: Dict[str, str], pal=None, rst=None) -> str:
-    """The step-4 screen — shows the signal-line format once."""
+    """The step-3 screen — shows the signal-line format once."""
     if pal is None:
         pal, rst = _style.palette()
     dim = lambda s: _style.wrap(pal, rst, "dim", s)
     fg = lambda s: _style.wrap(pal, rst, "fg", s)
+    sky = lambda s: _style.wrap(pal, rst, "sky", s)
     kbd = lambda s: _style.wrap(pal, rst, "gold", s)
-    example = render_corpus_signal_line(
-        "retry-backoff-patterns", "learned from 214 contributions", "bafkr…hx2c", pal, rst
-    )
+    example = render_evidence_signal_line(["dashboard", "vitest", "flake"], 1, pal, rst)
     return "\n".join([
-        *_step_head(pal, rst, 4, "corpus signals", statuses),
+        *_step_head(pal, rst, 3, "corpus signals", statuses),
         "",
-        fg("  When a run draws on the corpus, you'll see it."),
+        fg("  When your work matches prior evidence, you'll see it."),
         "",
-        dim("  Any time this harness uses a network skill or another operator's"),
-        dim("  contribution inside your own run, one line marks it at the point"),
+        dim("  Any time your first message matches relevant evidence in the shared"),
+        dim("  corpus, one line marks what was searched and provided at the point"),
         dim("  of use — like this:"),
         "",
         example,
         "",
-        dim("  One line per use, in the scrying as it happens. Every line carries"),
-        dim("  the envelope ref, so the claim is checkable — nothing uses the"),
-        dim("  corpus invisibly."),
+        dim("  One line per session, when evidence is provided. The source is"),
+        dim("  checkable in the injected context and ") + sky("/jinn session")
+        + dim(" — nothing uses the corpus invisibly."),
         "",
         _style.wrap(pal, rst, "dim", "─" * 70),
         "  " + kbd("[Enter]") + fg(" Finish"),
@@ -489,9 +416,9 @@ def render_done(reader_only: bool = False, first_publish: str = "", pal=None, rs
     sky = lambda s: _style.wrap(pal, rst, "sky", s)
     green = lambda s: _style.wrap(pal, rst, "green", s)
     if reader_only:
-        statuses = {"consent": "done", "publish": "skipped", "rewards": "skipped", "signals": "done"}
+        statuses = {"consent": "done", "publish": "skipped", "signals": "done"}
     else:
-        statuses = {"consent": "done", "publish": "done", "rewards": "done", "signals": "done"}
+        statuses = {"consent": "done", "publish": "done", "signals": "done"}
     head = (
         sky("◇") + " " + fg(_harness.harness_name()) + dim("  ·  first run  ·  ") + green("complete")
     )
@@ -507,13 +434,12 @@ def render_done(reader_only: bool = False, first_publish: str = "", pal=None, rs
         out += [
             dim("  Contribution is ") + fg("off · reader only") + dim(" — no trace leaves this"),
             dim("  machine. If you turn it on later (") + sky("/jinn consent") + dim("), the"),
-            dim("  publish and rewards steps run then, once."),
+            dim("  publish step runs then, once."),
         ]
     else:
         out += [
             dim("  contribution   ") + green("on"),
             dim("  first publish  ") + sky(first_publish or "recorded"),
-            dim("  rewards        ") + dim("explained"),
             dim("  signals        ") + dim("shown"),
         ]
     out += [
@@ -551,16 +477,15 @@ def run_onboarding(
     replay: bool = False,
     runner: Optional[jinn_layer.Runner] = None,
     publish_wait_fn: Optional[Callable[[], Optional[Dict[str, str]]]] = None,
-    rewards_fn: Optional[Callable[[], Optional[Dict[str, object]]]] = None,
 ) -> None:
-    """Walk the four steps for a PLAIN TERMINAL (blocking reads).
+    """Walk the three steps for a PLAIN TERMINAL (blocking reads).
 
     One confirmed step at a time — every screen exits on an explicit key.
     Nothing auto-advances on a timer. Step 2 advances on the real publish event
     (``publish_wait_fn``) and says so; when no event source is wired it degrades
     to a keyboard confirm in walkthrough mode.
 
-    ``replay=True`` re-renders all four screens but re-asks nothing: a recorded
+    ``replay=True`` re-renders all three screens but re-asks nothing: a recorded
     consent shows its current state, step 2 shows the actual first envelope from
     the ledger. It never mutates consent or the ledger.
 
@@ -586,9 +511,9 @@ def run_onboarding(
         input_fn("> ")
 
     if not on:
-        # Decline / reader-only path: steps 2–3 set aside, jump to step 4.
+        # Decline / reader-only path: step 2 set aside, jump to step 3.
         print_fn(render_signals(
-            {"consent": "done", "publish": "skipped", "rewards": "skipped"}, pal, rst
+            {"consent": "done", "publish": "skipped"}, pal, rst
         ))
         input_fn("> ")
         if not replay:
@@ -622,20 +547,9 @@ def run_onboarding(
                 print_fn(render_first_publish_confirmed(pal=pal, rst=rst))
             input_fn("> ")
 
-    # ── Step 3 · rewards ──
-    earned = rewards_fn() if rewards_fn is not None else None
-    if earned and earned.get("count"):
-        amount = str(earned.get("amount") or "checking…")
-        print_fn(render_rewards_earned(amount, int(earned["count"]), pal, rst))
-    else:
-        print_fn(render_rewards_none(pal, rst))
-    input_fn("> ")
-    if not replay:
-        mark_flag("rewards_explained")
-
-    # ── Step 4 · corpus signals ──
+    # ── Step 3 · corpus signals ──
     print_fn(render_signals(
-        {"consent": "done", "publish": "done", "rewards": "done"}, pal, rst
+        {"consent": "done", "publish": "done"}, pal, rst
     ))
     input_fn("> ")
     if not replay:
@@ -673,7 +587,7 @@ def setup_parser(parser) -> None:
     parser.add_argument(
         "--replay",
         action="store_true",
-        help="Re-render all four onboarding screens without re-asking consent.",
+        help="Re-render all three onboarding screens without re-asking consent.",
     )
 
 

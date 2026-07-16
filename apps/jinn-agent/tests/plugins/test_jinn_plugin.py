@@ -47,9 +47,8 @@ class RunnerSpy:
                 "eligibility": eligibility,
                 "summary": {
                     "episodeRef": episode_id,
-                    "surfacedHits": [],
-                    "fetchedHits": [],
-                    "installedSkillRefs": [],
+                    "searchedTerms": [],
+                    "providedPackets": [],
                     "eligibility": eligibility,
                     "nothingFound": True,
                 },
@@ -330,8 +329,9 @@ def test_session_end_without_corpus_result_prints_complete_summary(isolated_home
 # ── Consent flow ─────────────────────────────────────────────────────────────
 
 def test_consent_flow_bare_enter_defaults_to_decline(isolated_home):
-    # explainer -> decline confirm -> node stub skip
-    answers = iter(["", "y", ""])
+    # explainer -> decline confirm. The single sharing question — no second,
+    # unrelated question follows it.
+    answers = iter(["", "y"])
     printed: list[str] = []
     share = consent.run_consent_flow(lambda _: next(answers), printed.append)
     assert share is False
@@ -339,8 +339,8 @@ def test_consent_flow_bare_enter_defaults_to_decline(isolated_home):
 
 
 def test_consent_flow_accept_requires_deliberate_confirm(isolated_home):
-    # accept -> back out -> accept -> confirm -> skip stub
-    answers = iter(["a", "n", "a", "y", ""])
+    # accept -> back out -> accept -> confirm
+    answers = iter(["a", "n", "a", "y"])
     printed: list[str] = []
     share = consent.run_consent_flow(lambda _: next(answers), printed.append)
     assert share is True
