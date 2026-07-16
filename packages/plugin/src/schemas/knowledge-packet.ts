@@ -85,15 +85,45 @@ function stepNote(step: CorpusRecordStep): string | undefined {
   return attrString(step.attributes, 'note') ?? attrString(step.attributes, 'turn.text');
 }
 
+const EXCERPT_LABELS = new Set<KnowledgePacketExcerpt['label']>([
+  'failure', 'fix', 'command', 'diff', 'note',
+]);
+
 /**
- * Deterministic excerpt selection over a record's steps, in step order:
- * the first failing command with its output, the next command after it that
- * is not itself a failure (the correction), the last passing command overall
- * (the final backstop), and a diff step when present. Falls back to a single
- * free-form note when nothing command-shaped is found. Selects only — never
- * paraphrases.
+ * Seed-authored evidence (`client/packages/harness-layer/src/seed-import/
+ * episode-execute.ts`) carries its own excerpt directly on the step —
+ * `seed.step.label` (one of this schema's five excerpt labels) and
+ * `seed.step.text` (the excerpt content, already selected by the seed
+ * author offline) — rather than the `tool.args`/`tool.exitCode` real-capture
+ * convention `stepCommand`/`stepExitCode` read. Trust it verbatim: the
+ * heuristic below exists to *infer* an excerpt from a raw trajectory; a seed
+ * step has already done that inference by hand, so re-deriving it from a
+ * synthetic exit code would only risk corrupting what the seed author wrote.
+ */
+function seedStepExcerpt(step: CorpusRecordStep): ExcerptCandidate | undefined {
+  const label = step.attributes['seed.step.label'];
+  const text = attrString(step.attributes, 'seed.step.text');
+  if (typeof label !== 'string' || text === undefined) return undefined;
+  return EXCERPT_LABELS.has(label as KnowledgePacketExcerpt['label'])
+    ? { label: label as KnowledgePacketExcerpt['label'], text }
+    : undefined;
+}
+
+/**
+ * Deterministic excerpt selection over a record's steps, in step order.
+ * Seed-authored steps (see `seedStepExcerpt`) are trusted verbatim, in step
+ * order, when present. Otherwise: the first failing command with its
+ * output, the next command after it that is not itself a failure (the
+ * correction), the last passing command overall (the final backstop), and a
+ * diff step when present. Falls back to a single free-form note when
+ * nothing command-shaped is found. Selects only — never paraphrases.
  */
 function selectExcerpts(steps: CorpusRecordStep[]): ExcerptCandidate[] {
+  const seedExcerpts = steps
+    .map(seedStepExcerpt)
+    .filter((candidate): candidate is ExcerptCandidate => candidate !== undefined);
+  if (seedExcerpts.length > 0) return seedExcerpts;
+
   const excerpts: ExcerptCandidate[] = [];
 
   let failureIndex = -1;

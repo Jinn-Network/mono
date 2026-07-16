@@ -8,10 +8,17 @@ export type Tier = (typeof TIER_ORDER)[number];
 
 export const PickupConfigSchema = z.strictObject({
   enabled: z.boolean().default(true),
-  /** @deprecated Legacy host compatibility only. Pickup does not read either
-   *  auto-adopt field; R3+R5 remove them when the host and acceptance gate flip. */
+  /** @deprecated Legacy host compatibility only — a pre-rescope `pickup.json`
+   *  may still send this; evidence-first pickup (rescope §3.3) never reads
+   *  it. Auto-adopt and skill classification were removed from the pickup
+   *  path entirely by R1/R3 (skills are excluded from selection outright,
+   *  not gated by a threshold), so there is no adopt decision left for a
+   *  tier to threshold. */
   autoAdopt: z.boolean().default(false),
+  /** @deprecated Legacy host compatibility only — same as `autoAdopt`. */
   autoAdoptTier: z.enum(TIER_ORDER).default('evaluator-verified'),
+  /** @deprecated Legacy host compatibility only — selection has a fixed cap
+   *  (`MAX_SELECTED_PACKETS` in `pickup.ts`), not an operator-configurable one. */
   maxCandidates: z.number().int().positive().default(3),
 });
 

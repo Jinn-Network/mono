@@ -69,10 +69,6 @@ describe('createJinnPlugin session → end smoke (AC5)', () => {
     expect(result.summary.nothingFound).toBe(false);
     expect(result.summary.searchedTerms.length).toBeGreaterThan(0);
     expect(result.summary.providedPackets).toEqual([{ ref: 'seed-1', title: 'Fixing a flaky assertion in the debug harness' }]);
-    // Legacy fields stay populated for compatibility (rescope §3.6).
-    expect(result.summary.surfacedRefs).toEqual(['seed-1']);
-    expect(result.summary.fetchedRefs).toEqual(['seed-1']);
-    expect(result.summary.installedSkillRefs).toEqual([]);
 
     const stored = await evidence.get(result.episodeRef);
     expect(stored.status).toBe('ok');

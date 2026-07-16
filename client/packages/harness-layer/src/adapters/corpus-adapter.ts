@@ -18,7 +18,7 @@ import {
   type HarnessLayer,
   type HarnessLayerConfig,
 } from '../consume.js';
-import { parseTraceEnvelopeV0 } from '../envelope.js';
+import { parseTraceEnvelopeV0, type TraceStep } from '../envelope.js';
 import { TRACE_ENVELOPE_ARTIFACT_TYPE } from '../publish.js';
 
 export interface CorpusAdapterDeps {
@@ -50,6 +50,21 @@ function toKnowledgeHit(hit: CorpusSearchHit): KnowledgeHit {
 }
 
 /**
+ * The evidence-episode seed lane (`seed-import/episode-execute.ts`) authors a
+ * synthesis longer than `outcome.summary`'s 500-char cap allows, so it carries
+ * the text on a step attribute (`seed.synthesis`, on the final `seed:synthesis`
+ * step) instead. Fall back to it only when the envelope's own `outcome.summary`
+ * is absent — a real capture's synthesis, when present, always wins.
+ */
+function seedStepSynthesis(steps: readonly TraceStep[]): string | undefined {
+  for (const step of steps) {
+    const value = step.attributes['seed.synthesis'];
+    if (typeof value === 'string' && value.trim().length > 0) return value;
+  }
+  return undefined;
+}
+
+/**
  * Decode the record's `jinn.trace-envelope.v0` artifact into the plugin's
  * content-bearing `CorpusRecord`. Verifies the artifact bytes against the
  * record's own sha256 before parsing — a mismatch refuses to serve
@@ -74,12 +89,13 @@ function decodeRecord(record: WireCorpusRecord): CorpusRecord | null {
   // Packet attribution is display-only, so safeAddress remains an acceptable
   // fallback here after trustworthy agentId; it is never used for hit dedup.
   const origin = record.provenance.operator.agentId || record.provenance.operator.safeAddress || record.ref;
+  const synthesis = envelope.outcome.summary ?? seedStepSynthesis(envelope.steps);
 
   return {
     ref: record.ref,
     task: { summary: envelope.task.summary },
     outcome: { status: envelope.outcome.status, verifiabilityTier: envelope.outcome.verifiabilityTier },
-    ...(envelope.outcome.summary ? { synthesis: envelope.outcome.summary } : {}),
+    ...(synthesis ? { synthesis } : {}),
     steps: envelope.steps.map((step) => ({ name: step.name, attributes: step.attributes })),
     tags: envelope.task.distributionTags,
     provenance: envelope.provenance,

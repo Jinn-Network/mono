@@ -94,9 +94,6 @@ describe('JinnPlugin.completeSession()', () => {
         status: 'recorded',
       },
     });
-    expect(result.summary.surfacedRefs).toEqual(ACTIVITY.surfacedRefs);
-    expect(result.summary.fetchedRefs).toEqual(ACTIVITY.fetchedRefs);
-
     const stored = await evidence.get('episode-complete');
     expect(stored.status).toBe('ok');
     if (stored.status !== 'ok' || !stored.value) return;

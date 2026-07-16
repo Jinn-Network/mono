@@ -179,13 +179,10 @@ export interface CompleteSessionInput {
 }
 
 interface CompletionSummaryHits {
-  surfacedHits: KnowledgeHit[];
-  fetchedHits: KnowledgeHit[];
   /** The packets actually provided to the agent this session, when the
    *  caller drove pickup through `PluginSession` (embedded-host path). Absent
    *  (defaults to `[]`) for process-delegated `session end` calls, which
-   *  never round-trip packets through this in-process value — same as
-   *  `surfacedHits`/`fetchedHits` today. */
+   *  never round-trip packets through this in-process value. */
   providedPackets: KnowledgePacket[];
 }
 
@@ -201,7 +198,7 @@ function packetTitle(packet: KnowledgePacket): { ref: string; title: string } {
 async function completeSession(
   deps: JinnPluginDeps,
   input: CompleteSessionInput,
-  hits: CompletionSummaryHits = { surfacedHits: [], fetchedHits: [], providedPackets: [] },
+  hits: CompletionSummaryHits = { providedPackets: [] },
 ): Promise<SessionEndResult> {
   if (input.contractVersion !== JINN_PLUGIN_CONTRACT_VERSION) {
     throw new Error(`unsupported plugin contract version: ${String(input.contractVersion)}`);
@@ -290,21 +287,8 @@ async function completeSession(
     episodeRef: episode.episodeId,
     searchedTerms: activity.searchedTerms,
     providedPackets,
-    // Transitional legacy fields (rescope §3.6): retained through this PR;
-    // R3+R5 remove them when the host and acceptance gate flip. A new-shape
-    // activity (providedRefs populated) wins; a pre-rescope caller's own
-    // surfacedRefs echoes through unchanged until then.
-    surfacedRefs: activity.providedRefs.length > 0 ? activity.providedRefs : activity.surfacedRefs,
-    fetchedRefs: activity.fetchedRefs,
-    surfacedHits: hits.surfacedHits,
-    fetchedHits: hits.fetchedHits,
-    installedSkillRefs: [],
     eligibility,
-    nothingFound:
-      activity.providedRefs.length === 0
-      && activity.surfacedRefs.length === 0
-      && activity.fetchedRefs.length === 0
-      && activity.installedSkillRefs.length === 0,
+    nothingFound: activity.providedRefs.length === 0,
   };
 
   return {
@@ -322,9 +306,6 @@ export class PluginSession {
   private providedRefs: string[] = [];
   private fetchedRefs: string[] = [];
   private packets: KnowledgePacket[] = [];
-  /** The selected hits behind `packets` — kept only to populate the legacy
-   *  `SessionSummary.surfacedHits`/`fetchedHits` fields (rescope §3.6). */
-  private selectedHits: KnowledgeHit[] = [];
   private readonly capturedAt = new Date().toISOString();
 
   constructor(
@@ -386,7 +367,6 @@ export class PluginSession {
     this.fetchedRefs = fetchedRefs;
     this.providedRefs = packets.map((packet) => packet.ref);
     this.packets = packets;
-    this.selectedHits = selected;
 
     if (packets.length === 0) {
       return {
@@ -478,11 +458,7 @@ export class PluginSession {
           acceptedDiff: outcome.acceptedDiff,
         },
       },
-      {
-        surfacedHits: this.selectedHits,
-        fetchedHits: this.selectedHits,
-        providedPackets: this.packets,
-      },
+      { providedPackets: this.packets },
     );
   }
 }
