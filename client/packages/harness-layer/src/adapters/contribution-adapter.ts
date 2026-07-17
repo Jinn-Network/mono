@@ -9,7 +9,7 @@ import {
   type ContributionStatusSnapshot,
   type PortResult,
 } from '@jinn-network/plugin';
-import { ContributionStore } from '../contribution-store.js';
+import { ContributionStore } from '@jinn-network/core';
 
 /** Compatibility name retained for existing composition roots. */
 export type ContributionStatusStore = ContributionStore;

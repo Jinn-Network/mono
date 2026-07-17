@@ -290,7 +290,7 @@ export {
   type ContributionStoreOptions,
   type ContributionStoreRecordOptions,
   type ContributionStoreRecord,
-} from './contribution-store.js';
+} from '@jinn-network/core';
 
 export {
   PROCESS_CONTRACT_VERSION,
