@@ -3,6 +3,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFileSync, rmSync } from 'node:fs';
 import { HERMES_HOMES_DIR } from '../../src/dispatcher/hermes-home.js';
+import { HERMES_STATELESS_LAUNCHER } from '../../src/dispatcher/hermes-runtime.js';
 import { dispatchIssue, WORKTREES_BASE } from '../../src/dispatcher/dispatch.js';
 import type { ReadyIssue, DispatcherConfig } from '../../src/dispatcher/types.js';
 import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
@@ -64,7 +65,7 @@ const CFG: DispatcherConfig = {
   mergePrepCap: 1,
   hermesModel: 'gpt-5.6-sol',
   hermesProvider: 'openai-codex',
-  hermesPath: 'hermes',
+  hermesPythonPath: '/opt/hermes/python',
 };
 
 /**
@@ -628,7 +629,7 @@ describe('dispatchIssue', () => {
   // #887 — implementer routing surfaced on the dispatch log line
   // -------------------------------------------------------------------------
 
-  it('with DEFAULT_CONFIG (empty rules) logs impl=claude and leaves scenario/spawn unchanged (AC#2 regression)', async () => {
+  it('with DEFAULT_CONFIG (empty rules) logs impl=claude and selects the canonical claude adapter', async () => {
     const { runner } = makeRunner();
     const { spawn, calls } = makeSpawn();
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -641,10 +642,13 @@ describe('dispatchIssue', () => {
     expect(line).toBeDefined();
     expect(line).toContain('impl=claude');
 
-    // Scenario prompt unchanged: default implementer is claude.
     const [spawnCall] = calls;
     const prompt = promptOf(spawnCall);
+    const env = spawnCall.opts.env as Record<string, string>;
+    expect(prompt).toContain('Use the implement-issue skill');
+    expect(prompt).toContain('references/claude.md');
     expect(prompt).toContain('The default implementer for the inner pipeline is: claude.');
+    expect(env.JINN_IMPLEMENT_ISSUE_ADAPTER).toBe('claude');
 
     logSpy.mockRestore();
   });
@@ -964,14 +968,15 @@ describe('dispatchIssue — hermes implementer', () => {
     rmSync(join(HERMES_HOMES_DIR, '418'), { recursive: true, force: true });
   });
 
-  it('spawns the hermes CLI with the non-interactive contract and the configured model', async () => {
+  it('spawns Hermes through the stateless launcher with the non-interactive contract and configured model', async () => {
     const { runner } = makeRunner();
     const { spawn, calls } = makeSpawn();
     await dispatchIssue(ISSUE, HERMES_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
 
     expect(calls).toHaveLength(1);
-    expect(calls[0].cmd).toBe('hermes');
-    expect(calls[0].args[0]).toBe('chat');
+    expect(calls[0].cmd).toBe('/opt/hermes/python');
+    expect(calls[0].args[0]).toBe(HERMES_STATELESS_LAUNCHER);
+    expect(calls[0].args[1]).toBe('chat');
     expect(calls[0].args).toContain('-q');          // single non-interactive query
     expect(calls[0].args).toContain('-Q');          // quiet / machine-readable
     expect(calls[0].args).toContain('--yolo');      // no human to approve commands
@@ -1016,7 +1021,7 @@ describe('dispatchIssue — hermes implementer', () => {
     expect(yaml).toContain('default: "gpt-5.6-sol"');
   });
 
-  it('points HERMES_HOME at a per-issue home and keeps the implementer GH identity', async () => {
+  it('passes the explicit Hermes runtime environment and keeps the implementer GH identity', async () => {
     const { runner } = makeRunner();
     const { spawn, calls } = makeSpawn();
     await dispatchIssue(
@@ -1027,6 +1032,10 @@ describe('dispatchIssue — hermes implementer', () => {
     const env = calls[0].opts.env as Record<string, string>;
     expect(env.HERMES_HOME).toBe(join(HERMES_HOMES_DIR, '418'));
     expect(env.GH_TOKEN).toBe('impl-token');
+    expect(env.JINN_IMPLEMENT_ISSUE_ADAPTER).toBe('hermes');
+    expect(env.JINN_DISPATCHER_HERMES_PYTHON).toBe('/opt/hermes/python');
+    expect(env.JINN_DISPATCHER_HERMES_MODEL).toBe('gpt-5.6-sol');
+    expect(env.JINN_DISPATCHER_HERMES_PROVIDER).toBe('openai-codex');
     // The generated config is what actually carries the effort.
     const yaml = readFileSync(join(env.HERMES_HOME, 'config.yaml'), 'utf8');
     expect(yaml).toContain('reasoning_effort: "medium"'); // ISSUE.effort = Medium
@@ -1041,13 +1050,14 @@ describe('dispatchIssue — hermes implementer', () => {
     expect(env.JINN_AUTOPILOT_PACKAGE_DIR).toBe(join(REPO_ROOT, 'packages', 'autopilot'));
   });
 
-  it('invokes the hermes SIBLING skill and reuses the worktree', async () => {
+  it('invokes the canonical skill with the Hermes adapter and reuses the worktree', async () => {
     const { runner } = makeRunner();
     const { spawn, calls } = makeSpawn();
     await dispatchIssue(ISSUE, HERMES_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
     const prompt = hermesPromptOf(calls[0]);
-    expect(prompt).toContain('implement-issue-hermes');
-    expect(prompt).not.toContain('Use the implement-issue skill'); // not the claude sibling
+    expect(prompt).toContain('Use the implement-issue skill');
+    expect(prompt).toContain('references/hermes.md');
+    expect(prompt).not.toContain('implement-issue-hermes');
     expect(prompt).toContain('CLAUDE.md');            // canon still prepended
     expect(prompt).toContain(EXPECTED_WORKTREE_PATH); // pre-created worktree
     expect(prompt).toContain('do not create a new worktree');

@@ -1,3 +1,5 @@
+import { DEFAULT_HERMES_PYTHON } from './hermes-runtime.js';
+
 /** The nine work-shape Issue Types (DR-2026-05-20-b). */
 export type IssueShape =
   | 'feat' | 'fix' | 'refactor' | 'spike'
@@ -195,9 +197,9 @@ export interface DispatcherConfig {
    * token store. Source: `JINN_DISPATCHER_HERMES_PROVIDER`.
    */
   hermesProvider: string;
-  /** Path to the hermes CLI for coordinator sessions. Source:
-   *  `JINN_DISPATCHER_HERMES_PATH`. */
-  hermesPath: string;
+  /** Python interpreter from the Hermes installation. Source:
+   * `JINN_DISPATCHER_HERMES_PYTHON`. */
+  hermesPythonPath: string;
 }
 
 export const DEFAULT_CONFIG: DispatcherConfig = {
@@ -224,7 +226,7 @@ export const DEFAULT_CONFIG: DispatcherConfig = {
   // OpenRouter instead of the subscription.
   hermesModel: 'gpt-5.6-sol',
   hermesProvider: 'openai-codex',
-  hermesPath: 'hermes',
+  hermesPythonPath: DEFAULT_HERMES_PYTHON,
 };
 
 /** A PR as polled from the PR source, with the fields the review loop needs. */

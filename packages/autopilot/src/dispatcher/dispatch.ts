@@ -12,6 +12,7 @@ import {
 } from './field-cache.js';
 import { buildHeadlessPrompt, buildHermesHeadlessPrompt } from '../headless.js';
 import { prepareHermesHome } from './hermes-home.js';
+import { hermesChatArgs } from './hermes-runtime.js';
 import { sessionLogPath, sessionStartedAtPath } from './session-log.js';
 import { resolveImplementer } from './implementer-policy.js';
 
@@ -295,14 +296,16 @@ export async function dispatchIssue(
   //    so the implement-issue skill's Step 2 skips worktree creation.
   const canon = loadCanon();
   const implementer = resolveImplementer(issue, cfg);
-  // `hermes` is a REAL coordinator: we spawn its CLI, and it runs its own
-  // sibling skill with its own native subagents (delegate_task). Every other
-  // implementer runs inside a claude coordinator, where the value is only a
-  // directive naming the inner pipeline's CLI.
+  // `hermes` is a REAL coordinator: we spawn its Python runtime through the
+  // stateless launcher. Every other implementer runs inside a claude
+  // coordinator, where the value is only a directive naming the inner
+  // pipeline's CLI. Both coordinators enter through the canonical skill.
   const isHermes = implementer === 'hermes';
-  const skill = isHermes ? 'implement-issue-hermes' : 'implement-issue';
+  const skill = 'implement-issue';
+  const adapter = isHermes ? 'hermes' : 'claude';
   const scenario = [
-    `Use the ${skill} skill on issue #${number}.`,
+    `Use the implement-issue skill on issue #${number}.`,
+    `Runtime adapter: ${adapter}. Read \`.claude/skills/implement-issue/references/${adapter}.md\` before dispatching any stage.`,
     ...(isHermes ? [] : [`The default implementer for the inner pipeline is: ${implementer}.`]),
     `Issue: #${number} — ${title}`,
     `A git worktree for this issue already exists at \`${worktreePath}\` on branch \`${branch}\` — use it; do not create a new worktree.`,
@@ -347,24 +350,15 @@ export async function dispatchIssue(
       effort: issue.effort,
       cfg,
     });
-    // -q <prompt>: single non-interactive query (prompt is one argv — hermes has
-    // no @file/stdin path; canon is ~100KB, well under ARG_MAX).
-    // -Q: quiet/machine-readable. --yolo: skip dangerous-command approval
-    // prompts (no human present; `bin/tirith` still scans every command and the
-    // hardline floor still blocks). --accept-hooks: auto-approve config hooks.
-    // --provider is passed EXPLICITLY and must stay that way: hermes infers the
-    // provider from the model id's shape, and anything `<org>/<model>` infers
-    // `openrouter` — which would bill an API key instead of the operator's
-    // Codex subscription. `openai-codex` auto-selects the codex_responses
-    // api_mode + Codex base_url. No --effort: that flag is claude-only (hermes
+    // The shared argv helper pins the stateless launcher and explicit
+    // model/provider contract. No --effort: that flag is claude-only (Hermes
     // takes reasoning effort from the generated config.yaml).
     result = spawn(
-      cfg.hermesPath,
-      [
-        'chat', '-q', fullPrompt, '-Q', '--yolo', '--accept-hooks',
-        '--model', cfg.hermesModel,
-        '--provider', cfg.hermesProvider,
-      ],
+      cfg.hermesPythonPath,
+      hermesChatArgs(fullPrompt, {
+        model: cfg.hermesModel,
+        provider: cfg.hermesProvider,
+      }),
       {
         cwd: worktreePath,
         detached: true,
@@ -376,6 +370,10 @@ export async function dispatchIssue(
           ...identityEnv.env,
           HERMES_HOME: hermesHome,
           JINN_AUTOPILOT_PACKAGE_DIR: AUTOPILOT_PACKAGE_DIR,
+          JINN_IMPLEMENT_ISSUE_ADAPTER: 'hermes',
+          JINN_DISPATCHER_HERMES_PYTHON: cfg.hermesPythonPath,
+          JINN_DISPATCHER_HERMES_MODEL: cfg.hermesModel,
+          JINN_DISPATCHER_HERMES_PROVIDER: cfg.hermesProvider,
         },
       },
     );
@@ -387,6 +385,10 @@ export async function dispatchIssue(
       logPath,
       startedAtMarkerPath,
       ...identityEnv,
+      env: {
+        ...identityEnv.env,
+        JINN_IMPLEMENT_ISSUE_ADAPTER: 'claude',
+      },
     });
   }
 
