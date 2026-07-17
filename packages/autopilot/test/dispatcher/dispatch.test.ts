@@ -28,6 +28,7 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 // test/dispatcher → test → packages/autopilot → packages → repo root
 const REPO_ROOT = join(HERE, '..', '..', '..', '..');
+const EXPECTED_AUTOPILOT_PACKAGE_DIR = join(REPO_ROOT, 'packages', 'autopilot');
 const EXPECTED_WORKTREE_PATH = join(WORKTREES_BASE, '418');
 
 // ---------------------------------------------------------------------------
@@ -649,6 +650,7 @@ describe('dispatchIssue', () => {
     expect(prompt).toContain('references/claude.md');
     expect(prompt).toContain('The default implementer for the inner pipeline is: claude.');
     expect(env.JINN_IMPLEMENT_ISSUE_ADAPTER).toBe('claude');
+    expect(env.JINN_AUTOPILOT_PACKAGE_DIR).toBe(EXPECTED_AUTOPILOT_PACKAGE_DIR);
 
     logSpy.mockRestore();
   });
@@ -1047,7 +1049,7 @@ describe('dispatchIssue — hermes implementer', () => {
     await dispatchIssue(ISSUE, HERMES_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
 
     const env = calls[0].opts.env as Record<string, string>;
-    expect(env.JINN_AUTOPILOT_PACKAGE_DIR).toBe(join(REPO_ROOT, 'packages', 'autopilot'));
+    expect(env.JINN_AUTOPILOT_PACKAGE_DIR).toBe(EXPECTED_AUTOPILOT_PACKAGE_DIR);
   });
 
   it('invokes the canonical skill with the Hermes adapter and reuses the worktree', async () => {

@@ -387,6 +387,7 @@ export async function dispatchIssue(
       ...identityEnv,
       env: {
         ...identityEnv.env,
+        JINN_AUTOPILOT_PACKAGE_DIR: AUTOPILOT_PACKAGE_DIR,
         JINN_IMPLEMENT_ISSUE_ADAPTER: 'claude',
       },
     });

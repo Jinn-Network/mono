@@ -163,12 +163,17 @@ describe('implement-issue SKILL.md triage invocation', () => {
     expect(doc).not.toContain(
       '(cd "<repo-root>/packages/autopilot" && yarn triage:check <N>)',
     );
+    expect(doc).not.toContain(
+      'yarn --cwd "<repo-root>/packages/autopilot" triage:check <N>',
+    );
   });
 
   it('aborts triage when the reality-check command fails', () => {
-    expect(doc).toContain(
-      'if ! VERDICT_JSON=$(yarn --cwd "$AUTOPILOT_PACKAGE_DIR" triage:check <N>); then',
+    const failureBlock = doc.match(
+      /if ! VERDICT_JSON=\$\(yarn --cwd "\$AUTOPILOT_PACKAGE_DIR" triage:check <N>\); then[\s\S]*?\nfi/,
     );
+    expect(failureBlock).not.toBeNull();
+    expect(failureBlock?.[0]).toContain('exit 1');
     expect(doc).toContain(
       'If the CLI exits non-zero (gh/git unavailable, network failure, JSON parse error), **abort triage entirely**.',
     );
