@@ -384,13 +384,16 @@ jobs:
           echo "::notice::Created date tag ${DATE_TAG} pointing at ${SHA} (alongside ${RELEASE_TAG})"
 
       # Publish-failure alert (issue #1797) — self-healing open-or-update pattern
-      # mirroring main-next-ancestor-check.yml. A failed run of this job (canary or
-      # stable — the body records the event + SHA so a human can tell which) opens
-      # or updates a single [canary-publish-failure] issue; the next successful run
-      # auto-closes it. Without this, a failed canary publish is silent and
-      # operators stay on a stale client (run 29539701552 sat unnoticed ~10h).
+      # mirroring main-next-ancestor-check.yml. A failed or cancelled/timed-out run
+      # of this job (canary or stable — the body records the event + SHA so a human
+      # can tell which) opens or updates a single [canary-publish-failure] issue;
+      # the next successful run auto-closes it. Without this, a failed canary
+      # publish is silent and operators stay on a stale client (run 29539701552
+      # sat unnoticed ~10h). cancelled() is included because a job killed by
+      # timeout-minutes concludes cancelled, not failure — the same silent-staleness
+      # class this alert exists to catch.
       - name: Alert on publish failure
-        if: failure()
+        if: failure() || cancelled()
         working-directory: ${{ github.workspace }}
         shell: bash
         env:
@@ -398,7 +401,10 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          SHORT_SHA="${GITHUB_SHA:0:8}"
+          # JINN_BUILD_COMMIT (job env) resolves inputs.release_sha on
+          # workflow_dispatch recovery runs, where GITHUB_SHA is the branch tip,
+          # not the commit being published.
+          SHORT_SHA="${JINN_BUILD_COMMIT:0:8}"
 
           gh label create "automated:canary-publish-failure" \
             --color "D93F0B" \
@@ -408,7 +414,7 @@ jobs:
 
           EXISTING="$(gh issue list \
             --repo "${REPO}" \
-            --search "[canary-publish-failure] is:open" \
+            --search '[canary-publish-failure] in:title is:open label:"automated:canary-publish-failure"' \
             --json number \
             --jq '.[0].number // empty' 2>/dev/null || true)"
 
@@ -419,7 +425,7 @@ jobs:
           | | |
           |---|---|
           | Event | \`${GITHUB_EVENT_NAME}\` |
-          | Trigger SHA | \`${GITHUB_SHA}\` |
+          | Trigger SHA | \`${JINN_BUILD_COMMIT}\` |
           | Run | ${RUN_URL} |
 
           A failed publish leaves operators on a stale \`@jinn-network/client\`.
@@ -452,7 +458,7 @@ jobs:
           RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           EXISTING="$(gh issue list \
             --repo "${REPO}" \
-            --search "[canary-publish-failure] is:open" \
+            --search '[canary-publish-failure] in:title is:open label:"automated:canary-publish-failure"' \
             --json number \
             --jq '.[0].number // empty' 2>/dev/null || true)"
           if [ -n "$EXISTING" ]; then
