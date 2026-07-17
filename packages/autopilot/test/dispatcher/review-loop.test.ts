@@ -58,6 +58,26 @@ describe('runReviewCycle', () => {
     expect(report.skippedForCap).toBe(0);  // #5 did NOT eat a cap slot
   });
 
+  it('isolates a failing dispatch — the remaining PRs still dispatch (one bad PR cannot starve the pass)', async () => {
+    // Regression: a `git worktree add` collision on the first PR used to throw
+    // out of runReviewCycle and abort the whole review pass, every cycle.
+    const source: PrSource = { poll: async () => [pr(1), pr(2)] };
+    const dispatched: number[] = [];
+    const report = await runReviewCycle({
+      prSource: source,
+      cfg: CFG, // reviewCap 2
+      deriveReviewInFlight: async () => ({ inFlight: [] as InFlightReview[], drift: [] }),
+      dispatchReview: async (p: ReviewablePr) => {
+        if (p.number === 1) throw new Error("fatal: 'feat/1' is already used by worktree at '.../1'");
+        dispatched.push(p.number);
+        return { prNumber: p.number, branch: p.headRefName, worktreePath: '/x', pid: 1, startedAt: 0 };
+      },
+    });
+    expect(report.failed).toEqual([1]);
+    expect(dispatched).toEqual([2]);        // #2 still dispatched
+    expect(report.dispatched).toEqual([2]);
+  });
+
   it('does not re-dispatch a PR already in flight', async () => {
     const source: PrSource = { poll: async () => [pr(7)] };
     const dispatched: number[] = [];
