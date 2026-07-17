@@ -1079,8 +1079,6 @@ __metadata:
     "@jinn-network/plugin": "*"
     vitest: ^4.1.8
   peerDependenciesMeta:
-    "@jinn-network/plugin":
-      optional: true
     vitest:
       optional: true
   languageName: node
@@ -1095,8 +1093,6 @@ __metadata:
     "@jinn-network/plugin": "*"
     vitest: ^4.1.8
   peerDependenciesMeta:
-    "@jinn-network/plugin":
-      optional: true
     vitest:
       optional: true
   languageName: node
