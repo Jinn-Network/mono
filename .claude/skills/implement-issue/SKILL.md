@@ -72,18 +72,19 @@ Before any worktree is created and before `Status` is flipped to `In Progress`, 
 
 ### Invoke the CLI
 
-Run the reality-check from the primary checkout (not the worktree — the worktree doesn't exist yet):
+Run the reality-check from the self-contained Autopilot package in the primary checkout
+(not the worktree — the worktree doesn't exist yet). The repository root has no Yarn
+workspace, so invoke the package directly:
 
 ```bash
-cd <repo-root>
-yarn workspace @jinn-network/autopilot triage:check <N>
+(cd "<repo-root>/packages/autopilot" && yarn triage:check <N>)
 # Emits one line of JSON to stdout; non-zero exit on failure.
 ```
 
 Parse the JSON verdict:
 
 ```bash
-VERDICT_JSON=$(yarn workspace @jinn-network/autopilot triage:check <N>)
+VERDICT_JSON=$(cd "<repo-root>/packages/autopilot" && yarn triage:check <N>)
 CLASSIFICATION=$(echo "$VERDICT_JSON" | jq -r '.classification')
 SUGGESTED_COMMENT=$(echo "$VERDICT_JSON" | jq -r '.suggestedComment')
 SUGGESTED_BLOCKED_ON=$(echo "$VERDICT_JSON" | jq -r '.suggestedBlockedOn')
