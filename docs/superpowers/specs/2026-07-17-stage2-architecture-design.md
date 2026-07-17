@@ -239,7 +239,9 @@ exist); everything else exploratory; no per-packet / per-repo slicing until N su
 (SUTVA/policy identity: the delivered-refs set is the content-addressed identity of the
 intervention). Reuse `client/src/eval/paired.ts` / `wilson.ts`; build no new stats.
 
-**Non-binding mechanism recommendation** (recorded for the meta session): the marketplace lane
+**Mechanism recommendation** (*decided — DR-2026-07-17 Decision 2: C12 is required Stage 2
+scope; the gate reads "instrument live + first readout produced"; C13's posture is decided at
+the C12 readout review; C14 stays optional*): the marketplace lane
 is the *powered* instrument — corpus-autoload on/off arms over the existing three-arm
 measurement machinery on verdict-grounded tasks — and is mostly ops over existing code; it is
 the realistic satisfier of W4's "embeddings only with Stage 2 attribution evidence." The
@@ -321,7 +323,7 @@ listed invariant is the phase's gate.
 | C3 | Evidence contract v1.1: session.kind/parent, origin/writer stamp, outcome observables, eligibility/delivery split, repositorySlug (absorbs #1799 + #1800 design) | feat | plugin, harness-layer, jinn-agent | C1 (serialize on episode.ts with C2) | Medium |
 | C4 | Machine-local evidence index + `reindex` + store repair/rescue (§3.5; coordinates with #1811's fix) | feat | core | C2 | Medium |
 | C5 | Move scrub + trajectory + corpus-read into `core`; re-point daemon and layer | refactor | core, client, harness-layer | C2 | High |
-| C6 | `packages/layer`: process contract + adapters + distill + seed-import + CLI; plain-tsc; independent publish (bin leaves client) | refactor | layer (new), client, core | C5 | High |
+| C6 | `packages/layer`: process contract + adapters + distill + seed-import + CLI; plain-tsc; independent publish (bin leaves client) **+ the plugin↔layer handshake spec absorbed from A1 (bin discovery, version pinning, resolution order — DR-2026-07-17 Decision 3)** | refactor | layer (new), client, core | C5 | High |
 | C7 | Retire Hermes captures tee; distiller reads episodes; slim mineable store to references | refactor | layer, jinn-agent, client | C4, C6 | Medium |
 | C8 | Delete `client/packages/harness-layer`; final consumer sweep | refactor | client | C6, C7 | Low |
 | C9 | Tokens verify: host-reported usage actually lands in `cost.tokens` (mono #1662 wiring exists, 0% populated live) | fix | jinn-agent | — | Low |
@@ -331,9 +333,12 @@ listed invariant is the phase's gate.
 | C13 | Interactive randomized-holdback measurement mode (operator-visible; posture decision at pickup) | feat | plugin, layer, jinn-agent | C3, C12 finding | Medium |
 | C14 | Session-end feedback verb (optional supplement; analytics must not require it) | feat | jinn-agent, layer | C3 | Low |
 
-Sequencing note for meta: C1→C2→C5→C6→C7→C8 is the refactor spine (serialized); C3/C4 ride
-alongside after C1/C2 with the schema-file serialization rule; C9/C10 are independent and early;
-C11 waits on B; C12–C14 are the post-refactor feature tier, prioritized separately.
+Sequencing (amended by DR-2026-07-17): C1→C2→C5→C6→C7→C8 is the refactor spine (serialized)
+and the program's declared critical path; C3/C4 ride alongside after C1/C2 with the
+schema-file serialization rule; C9/C10 are independent and early; C11 pairs with B's
+native-fields unit and owns the tier-axis reconciliation (umbrella plan §6). **C12 is
+required Stage 2 scope (Decision 2); C13/C14 are deferred pending C12's readout** — C13's
+posture is decided at that review.
 
 ## 10. Verification posture
 
@@ -383,7 +388,8 @@ missed. Gates are necessary, never sufficient.
 **Would renegotiate**
 - **"Chores are autopilot-bound" (framing packet §Status of known chores):** verified false;
   either the meta session triages them onto the board or they will not move. Recommend the meta
-  session own this explicitly.
+  session own this explicitly. **Resolved — the charter owns triage; disposition table in the
+  umbrella plan §9.**
 - **Publication surface:** if operating five published packages proves too heavy, the fallback
   is layer-only publication with `core`/`plugin` inlined at build — but that re-introduces a
   bespoke bundler and single-sources the #1797 class rather than ending it; renegotiate only

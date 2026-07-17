@@ -161,11 +161,15 @@ denylist to maintain and no way for bulk supply to flood retrieval by accident.
   specifies the semantics; **C decides where the field lives** in the unified schema and
   whether the indexer ever indexes it (not required for v0 — enforcement is consumer-side,
   where all visibility logic already lives: pickup ranking + post-fetch guards).
-- **Who marks.** The publishing curator. In the W1/W3 era that is the operator running the
-  curated seed lane — the only retrieval-visible producer by default. Marking criteria (the
-  curation bar): repo-targeted vocabulary, authored synthesis and tags (the walkthrough
-  proved these determine retrievability), scrub-clean, evidence-backed (an episode projecting
-  a real tuple or a re-performed merged fix per the seed runbook).
+- **Who marks.** The publishing curator — by hand or by policy. In the W1/W3 era the
+  operator running the curated seed lane is the only marking producer. *Amended by
+  DR-2026-07-17 Decision 4:* the mark may also be set by a **declared admission policy over
+  record facts** (verdict, evidence tier, repo tags, freshness) as those signals mature on
+  bulk records — hand-marking is the day-one policy, not a standing obligation; the policy
+  hook lands with the mark's semantics. Marking criteria (the curation bar): repo-targeted
+  vocabulary, authored synthesis and tags (the walkthrough proved these determine
+  retrievability), scrub-clean, evidence-backed (an episode projecting a real tuple or a
+  re-performed merged fix per the seed runbook).
 - **Promotion.** A substrate record is promoted by publishing a retrieval **projection** of
   it — an episode derived from the tuple, carrying the mark, with provenance pointing at the
   source envelope CIDs (not a supersede of the original). The immutable original is never
@@ -341,7 +345,8 @@ checklist.**
   pattern); repo license recorded on the task.
 
 I2/I3 *extend* the cap-eval boundary; they do not relax I1. Because they touch a constraint
-the framing packet marks hard, they are flagged for meta-session ratification (§14).
+the framing packet marks hard, they required meta-session ratification — **ratified,
+DR-2026-07-17 Decision 5**.
 
 ### 8.4 Distribution-safety classes (license discipline)
 
@@ -367,7 +372,7 @@ Facts (§2): one EOA `setMetadata` per record; no batching; no measured gas numb
 in-repo (the "cents on Base" line in the harness-network spec is aspirational); discovery is
 anchor-event-driven; fetch-by-CID needs no anchor.
 
-**Position — tiered anchoring:**
+**Position — tiered anchoring (ratified, DR-2026-07-17 Decision 5):**
 
 - **Per-record anchors stay** for retrieval-tier records and genuinely contributed evidence
   (low volume; the full Legibility ceremony is the point).
@@ -451,6 +456,12 @@ This is the A↔B first-session-aha check executed for real.
 
 (#1776 — hygiene sweep — already open; not re-filed.)
 
+*Banding per DR-2026-07-17 Decision 7:* the mark, seed-lane, curated-batch (scoped to the
+charter's named repo: mono), native-fields, and evaluator-metering rows are gate-blocking;
+the **bridge wave** (bridge run v0, manifest anchor record, #1672 retirement) files as
+trailing, non-gate-blocking; K>1 minting, source expansion, and the dataset-reference
+convention are deferred. See `docs/superpowers/plans/2026-07-17-stage2-umbrella-plan.md` §3.
+
 ## 14. Seams & assumptions register
 
 **Assumes from other tracks**
@@ -478,14 +489,20 @@ This is the A↔B first-session-aha check executed for real.
   content cannot enter retrieval even accidentally. If the meta session prefers the softer
   reading (default-visible with exclusions), §5's flood-risk argument (false positive at
   three records; ~1,500 bridged records pending) is the evidence against it.
+  **Ratified in the strengthened form, amended with policy admission — DR-2026-07-17
+  Decision 4 (§5 amended in place).**
 - **Cap-eval boundary, extended not relaxed:** I2/I3 (date-based freshness + dump-provenance
-  joins) added on top of I1. Touches a packet-hard constraint → meta session ratifies.
+  joins) added on top of I1. Touches a packet-hard constraint — **ratified, DR-2026-07-17
+  Decision 5**.
 - **W1, one addition:** local capture must stay tuple-shaped (span vocabulary — already
   true via #1658/#1473 alignment) so un-parking is a consent flip, not a re-capture. No
-  gating change requested.
+  gating change requested. **Accepted as a rider on W1 — DR-2026-07-17 Decision 1.**
 - **"Parked" semantics needed by B:** mint→preview→publish stays *code-present behind the
   consent gate* (not deleted) — the local capture store is the future supply; deleting the
-  lane would forfeit it.
+  lane would forfeit it. **Resolved — DR-2026-07-17 Decision 1: stores and machinery are
+  retained (this bullet's rationale is fully satisfied — nothing store- or lane-side is
+  deleted); the plugin's UX surfaces are deleted and a consent moment is rebuilt at
+  un-park.**
 - **Anchoring:** substrate residency without per-record anchors (§9) is a Legibility
   position the meta session should explicitly ratify, since "anchored per record" has been
-  the implicit norm.
+  the implicit norm. **Ratified — DR-2026-07-17 Decision 5.**

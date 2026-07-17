@@ -75,14 +75,15 @@ That is the entire user-facing install. Mechanics:
   `main` promote. The slim repo's default branch is therefore the release channel:
   `hermes plugins install` delivers the latest Monday cut, and `hermes plugins update jinn`
   (git pull) is the upgrade verb. Both artifacts a user needs ride this one channel.
-- **The `jinn-layer` runtime arrives through the same single command.** How it gets there is an
-  **open question deliberately not specified here** — it requires scoping together with the
-  Session C package-extraction design, in a separate operator-led session. The constraint that
-  session must satisfy, discovered here: today's `dist/bin/jinn-layer.js` is esbuild-bundled
-  with npm dependencies left external, so it only runs inside an npm install; the one-command
-  story needs a layer artifact that works from the cloned plugin directory (or an equivalent
-  mechanism) without a second ecosystem's install step appearing in the user path. Until that
-  scoping lands, onboarding instructions stay dogfooder-grade (repo-based); the two-command
+- **The `jinn-layer` runtime arrives through the same single command.** *Resolved —
+  DR-2026-07-17 Decision 3:* the plugin acquires the **published `@jinn-network/jinn-layer`**
+  (Session C's C6); the plugin↔layer handshake spec (bin discovery, version pinning, the
+  resolution order below) rides C6, and this track's final ratification waits for it. The
+  constraint discovered here stands and binds C6: today's `dist/bin/jinn-layer.js` is
+  esbuild-bundled with npm dependencies left external, so it only runs inside an npm install;
+  the one-command story needs a layer artifact that works from the cloned plugin directory
+  without a second ecosystem's install step appearing in the user path. Until C6 publishes,
+  onboarding instructions stay dogfooder-grade (repo-based); the two-command
   `npm install -g` story does not ship as an interim.
 - **Layer resolution order** becomes: the in-plugin-dir artifact (per the mechanism above) →
   `JINN_LAYER_BIN` → bare PATH — the last two demoted to dev/dogfood overrides. The remediation
@@ -98,7 +99,7 @@ That is the entire user-facing install. Mechanics:
 - **Locked decision P2 is amended in letter, kept in spirit** — "stock upstream Hermes + the
   pip-installed plugin" becomes "stock upstream Hermes + the `hermes plugins install`ed plugin".
   The proof obligation ("keep your harness, add Jinn") is identical; the pip path is what
-  finding 1 showed never worked. Flagged in §6 for the meta session to ratify.
+  finding 1 showed never worked. Ratified — DR-2026-07-17.
 
 ### 3.2 First run under W1 (no wizard, zero questions)
 
@@ -235,7 +236,7 @@ C's architecture call.
 
 | # | Title | Shape | Packages | Depends on | Effort |
 |---|---|---|---|---|---|
-| A1 | Layer-acquisition mechanism scoping (one-command install) — operator-led, with Session C context | design | — | C spec merged | — |
+| A1 | Layer acquisition — **resolved, DR-2026-07-17 Decision 3**: folds into C6 as the plugin↔layer handshake spec; not filed separately | design | — | — | — |
 | A2 | Slim-repo release channel: `Jinn-Network/jinn-plugin` + split-and-push job on `main` promote | chore | `.github/workflows`, `apps/jinn-agent/plugins/jinn` | A1 (layer artifact inclusion) | Medium |
 | A3 | Doctor: checks, output contract, session-start loudness, first-session banner | feat | `apps/jinn-agent/plugins/jinn` | — (layer-available check is mechanism-agnostic) | High |
 | A4 | Delete wizard + consent surfaces; relocate `◇` renderer; parked status line | refactor | `apps/jinn-agent/plugins/jinn` | — | Medium |
@@ -256,8 +257,8 @@ one paired train (the rescope's convergent-file discipline); A6 follows them.
   onboarding targets them; B defines "enough corpus" in a form the `corpus-content` check can
   query; B owns the relevance quality bar (wrong-first is worse than empty — #1791's documented
   collision).
-- From **C**: the layer-acquisition mechanism for the one-command install (open question A1 —
-  operator-scoped with the refactor context; constraint in §3.1); process contract v1 stability
+- From **C**: the layer-acquisition mechanism for the one-command install (resolved —
+  DR-2026-07-17 Decision 3: the C6-published layer; §3.1's constraint binds C6); process contract v1 stability
   through the package extraction, or a versioned migration the doctor can name; the plugin
   directory stays self-contained and movable (slim-repo split viability); placement of the
   doctor's layer-side checks (A fixes the checks and contract, C places them); the
@@ -275,8 +276,9 @@ one paired train (the rescope's convergent-file discipline); A6 follows them.
 **Would renegotiate**
 
 - **P2's letter**: "pip-installed plugin" → "`hermes plugins install`ed plugin" (spirit intact;
-  the pip path never worked on the target — §2 finding 1). Meta ratifies.
+  the pip path never worked on the target — §2 finding 1). Ratified — DR-2026-07-17.
 - **The brief's gate**: "one install command per ecosystem" → "one install command, total".
+  Ratified — DR-2026-07-17.
 - Nothing on W1–W4 — all four hold; W1 makes onboarding strictly simpler.
 
 ## 7. Verification moment
