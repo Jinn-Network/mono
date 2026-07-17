@@ -57,6 +57,7 @@ function minimalRecord(ref: string, summary: string): CorpusRecord {
     provenance: 'imported',
     origin: `seed:${ref}`,
     capturedAt: '2026-07-16T00:00:00.000Z',
+    retrievalVisible: true,
   };
 }
 
@@ -105,6 +106,7 @@ describe('firstTurnPickup — concurrent per-term corpus search (mono #1795)', (
       snippet: 'alpha beta content match',
       tags: [],
       tier: 'tests-passed',
+      retrievalVisible: true,
     };
     const betaHit: KnowledgeHit = {
       ref: 'bafyMarker',
@@ -112,6 +114,7 @@ describe('firstTurnPickup — concurrent per-term corpus search (mono #1795)', (
       snippet: 'unrelated other stuff nothing',
       tags: [],
       tier: 'tests-passed',
+      retrievalVisible: true,
     };
     const corpus: CorpusPort = {
       async search(term): Promise<PortResult<KnowledgeHit[]>> {
@@ -169,6 +172,7 @@ describe('firstTurnPickup — concurrent per-term corpus search (mono #1795)', (
             snippet: 'alpha beta content',
             tags: [],
             tier: 'tests-passed',
+            retrievalVisible: true,
           }]);
         }
         return ok([]);

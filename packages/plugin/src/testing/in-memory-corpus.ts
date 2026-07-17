@@ -23,6 +23,10 @@ function toKnowledgeHit(seed: InMemoryCorpusSeed): KnowledgeHit {
     tags: seed.tags,
     origin: seed.origin,
     ...(seed.publishedAt !== undefined ? { publishedAt: seed.publishedAt } : {}),
+    // Seeds default to retrieval-visible (#1824) so pre-allowlist scenarios
+    // keep exercising their own concern; a test proving exclusion sets
+    // `retrievalVisible: false` explicitly.
+    retrievalVisible: seed.retrievalVisible ?? true,
   };
 }
 
@@ -56,6 +60,7 @@ export class InMemoryCorpusPort implements CorpusPort {
     if (!record) return ok(null);
     // Strip the KnowledgeHit-only fields — get() returns the CorpusRecord shape.
     const { kind: _kind, title: _title, tier: _tier, payloadKind: _payloadKind, publishedAt: _publishedAt, ...corpusRecord } = record;
-    return ok(corpusRecord as CorpusRecord);
+    // Same visible-by-default rule as the search-hit view (#1824).
+    return ok({ ...corpusRecord, retrievalVisible: record.retrievalVisible ?? true } as CorpusRecord);
   }
 }

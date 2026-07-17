@@ -249,12 +249,17 @@ function tierRank(tier: string | undefined): number {
  * this unsliced list and does its own promotion-aware slicing.
  * `selectKnowledgeHits` remains the pre-guards convenience wrapper for
  * callers that only need the top slice.
+ *
+ * Also fail-closed allowlist-filters to `retrievalVisible === true` (#1824,
+ * W2) — absence of the field excludes the hit; this is the ranking-side half
+ * of the two-layer enforcement, `firstTurnPickup`'s post-fetch content guard
+ * is the other half.
  */
 export function rankKnowledgeHits(
   hits: KnowledgeHit[],
   terms: string[],
 ): KnowledgeHit[] {
-  const evidence = hits.filter((hit) => !isSkillHit(hit));
+  const evidence = hits.filter((hit) => !isSkillHit(hit) && hit.retrievalVisible === true);
   const deduped = dedupeKnowledgeHits(evidence);
   const scored = deduped
     .map((hit) => ({ hit, score: scoreKnowledgeHit(hit, terms) }))
