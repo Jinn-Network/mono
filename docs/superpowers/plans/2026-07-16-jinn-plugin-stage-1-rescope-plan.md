@@ -187,11 +187,18 @@ one `corpus_fetch` away; nothing is model-generated in the hot path.
 
 ### 3.3 Search and ranking
 
-- **Terms:** `deriveSearchTerms(firstMessage, repositorySlug?)` replaces the 2-token heuristic.
-  Up to 6 terms, in priority order: backticked/quoted tokens; identifier-shaped tokens (contains
-  `_`, `-`, `.`, `/`, a digit, or CamelCase); the session's repository slug (known at session
-  start from `session_bridge.snapshot_repository`); remaining longest non-stopword tokens.
-  Whole first message, not just line one. Deterministic.
+- **Terms (lexical v2 — #1791, #1790, #1789):** `deriveSearchTerms(firstMessage, repositorySlug?)`
+  replaces the 2-token heuristic. Up to 10 terms, in priority order: backticked/quoted tokens
+  (edge-stripped through the same leading/trailing `_-./` strip as other terms, #1789);
+  identifier-shaped tokens (contains `_`, `-`, `.`, `/`, a digit, or CamelCase) — a `/`-bearing
+  token also contributes its path segments (each cleaned, ≥3 chars, stopword-filtered,
+  deduplicated), right after the full token; the session repository's **name** — the segment
+  after the last `/` of `repositorySlug` (known at session start from
+  `session_bridge.snapshot_repository`), ≥3 chars — not the full slug, which can never appear in
+  a record's text (#1790); the remaining non-stopword tokens (≥4 chars) in **message order**
+  (order of first appearance, not longest-first — length is not a retrievability signal against a
+  corpus of short summaries and tags, #1791). Whole first message, not just line one.
+  Deterministic.
 - **Search:** per-term `CorpusPort.search` (capture-meta first, manifest floor fallback — existing
   rails), results merged.
 - **Selection:**
@@ -200,10 +207,17 @@ one `corpus_fetch` away; nothing is model-generated in the hot path.
      they are simply not what pickup serves.)
   2. Dedup by ref **and** by content key `(taskSummary, origin)` — kills the duplicated-seed
      symptom at the consumer even before store hygiene lands.
-  3. Score = count of matched terms across `taskSummary + tags`, with a repository-slug match
-     counting 2. **Relevance floor: score ≥ 2**, otherwise honest nothing-found. Tier is a
-     ranking preference, not a filter: sort score desc → tier desc (`TIER_ORDER`) → recency desc.
+  3. Score = count of matched terms across `taskSummary + tags`; **every match counts 1** — the
+     old repository-slug +2 bonus is gone (#1790, #1791) now that the repository's name is a
+     normal derived term. A term matches verbatim or, for a term ending in a simple plural `s`
+     (length > 3), by its singular form (plural fold, #1791). **Relevance floor: score ≥ 2**,
+     otherwise honest nothing-found. Tier is a ranking preference, not a filter: sort score desc
+     → tier desc (`TIER_ORDER`) → recency desc.
   4. Take the top 2; fetch full content; project packets.
+
+Escalation ladder if lexical v2 proves insufficient: lexical v2 (above) → two-stage content
+re-scoring for near-miss candidates against synthesis/steps (#1792, deterministic, model-free) →
+embeddings only with Stage 2 evidence.
 
 ### 3.4 Injection
 
