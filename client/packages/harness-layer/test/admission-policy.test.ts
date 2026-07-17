@@ -24,6 +24,16 @@ describe('AdmissionPolicy (#1824)', () => {
         expect(HAND_MARK_POLICY.admit(facts)).toBe(false);
       }
     });
+
+    it('admits nothing even for facts resembling a bulk-derived record (issue #1824 sequencing guard: no bulk record can self-admit before a declared fact-based policy replaces hand.v0)', () => {
+      const bulkLikeFacts: AdmissionFacts = {
+        verdict: 'passed',
+        evidenceTier: 'attested',
+        tags: ['bridge', 'derived'],
+        provenance: 'imported',
+      };
+      expect(HAND_MARK_POLICY.admit(bulkLikeFacts)).toBe(false);
+    });
   });
 
   describe('resolveRetrievalMark chokepoint', () => {
