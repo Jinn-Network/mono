@@ -103,9 +103,7 @@ def _episode(episode_id: str = "episode-1") -> dict:
 def reset(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     buf.reset()
-    jinn._reset_contract_state()
     jinn._reset_session_state()
-    jinn._contract_checked = True
     jinn._degraded = None
     jinn._runner = None
 

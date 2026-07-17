@@ -65,9 +65,7 @@ def isolated_home(tmp_path, monkeypatch):
     monkeypatch.setenv("JINN_LAYER_EPISODES_DIR", str(tmp_path / "episodes"))
     monkeypatch.setenv("JINN_MINEABLE_STATE_DIR", str(tmp_path / "mineable"))
     capture_buffer.reset()
-    jinn._reset_contract_state()
     jinn._reset_session_state()
-    jinn._contract_checked = True
     jinn._degraded = None
     jinn._vetoed_tasks.clear()
     jinn._session_hint_shown.clear()

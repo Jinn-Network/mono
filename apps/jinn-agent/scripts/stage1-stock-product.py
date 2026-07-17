@@ -532,7 +532,6 @@ def register_product(jinn: Any) -> dict[str, Any]:
 def reset_session_runtime(jinn: Any) -> None:
     jinn.buf.reset()
     jinn.distill.reset()
-    jinn._reset_contract_state()
     jinn._reset_session_state()
 
 
