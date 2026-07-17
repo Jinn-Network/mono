@@ -55,10 +55,8 @@ describe('implement-issue SKILL.md (#657 depth-fix)', () => {
     expect(doc).not.toContain('Each stage is performed by dispatching a **fresh subagent**');
   });
 
-  it('runs triage from the dispatcher package with an interactive fallback', () => {
-    expect(doc).toContain(
-      'yarn --cwd "$JINN_AUTOPILOT_PACKAGE_DIR" triage:check <N>',
-    );
+  it('documents the dispatcher package and interactive fallback', () => {
+    expect(doc).toContain('JINN_AUTOPILOT_PACKAGE_DIR');
     expect(doc).toContain('<repo-root>/packages/autopilot');
     expect(doc).not.toContain(
       'yarn workspace @jinn-network/autopilot triage:check <N>',
@@ -148,5 +146,31 @@ describe('implement-issue canonical runtime adapters', () => {
         expect(adapter).not.toContain(marker);
       }
     }
+  });
+});
+
+describe('implement-issue SKILL.md triage invocation', () => {
+  const doc = readFileSync(SKILL_PATH, 'utf8');
+
+  it('resolves one package directory for dispatched and interactive runs', () => {
+    expect(doc).toContain(
+      'AUTOPILOT_PACKAGE_DIR="${JINN_AUTOPILOT_PACKAGE_DIR:-<repo-root>/packages/autopilot}"',
+    );
+    expect(doc).toContain(
+      'VERDICT_JSON=$(yarn --cwd "$AUTOPILOT_PACKAGE_DIR" triage:check <N>)',
+    );
+    expect(doc).not.toContain('yarn workspace @jinn-network/autopilot triage:check');
+    expect(doc).not.toContain(
+      '(cd "<repo-root>/packages/autopilot" && yarn triage:check <N>)',
+    );
+  });
+
+  it('aborts triage when the reality-check command fails', () => {
+    expect(doc).toContain(
+      'if ! VERDICT_JSON=$(yarn --cwd "$AUTOPILOT_PACKAGE_DIR" triage:check <N>); then',
+    );
+    expect(doc).toContain(
+      'If the CLI exits non-zero (gh/git unavailable, network failure, JSON parse error), **abort triage entirely**.',
+    );
   });
 });

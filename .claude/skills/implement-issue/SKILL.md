@@ -86,27 +86,18 @@ Before any worktree is created and before `Status` is flipped to `In Progress`, 
 
 ### Invoke the CLI
 
-When the Autopilot dispatcher invokes this skill, run the reality-check from
-the dispatcher-provided package directory:
-
-```bash
-yarn --cwd "$JINN_AUTOPILOT_PACKAGE_DIR" triage:check <N>
-# Emits one line of JSON to stdout; non-zero exit on failure.
-```
-
 The dispatcher exports `JINN_AUTOPILOT_PACKAGE_DIR` to its installed Autopilot
 package checkout. For an interactive human invocation where that variable is
-unset, use `<repo-root>/packages/autopilot`:
-
-```bash
-yarn --cwd "<repo-root>/packages/autopilot" triage:check <N>
-```
-
-Parse the JSON verdict:
+unset, use the self-contained package at `<repo-root>/packages/autopilot` in
+the primary checkout (not a worktree, which does not exist yet). Resolve that
+location once, then run and parse the JSON verdict:
 
 ```bash
 AUTOPILOT_PACKAGE_DIR="${JINN_AUTOPILOT_PACKAGE_DIR:-<repo-root>/packages/autopilot}"
-VERDICT_JSON=$(yarn --cwd "$AUTOPILOT_PACKAGE_DIR" triage:check <N>)
+if ! VERDICT_JSON=$(yarn --cwd "$AUTOPILOT_PACKAGE_DIR" triage:check <N>); then
+  echo "Reality-check failed; aborting triage." >&2
+  exit 1
+fi
 CLASSIFICATION=$(echo "$VERDICT_JSON" | jq -r '.classification')
 SUGGESTED_COMMENT=$(echo "$VERDICT_JSON" | jq -r '.suggestedComment')
 SUGGESTED_BLOCKED_ON=$(echo "$VERDICT_JSON" | jq -r '.suggestedBlockedOn')

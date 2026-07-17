@@ -162,7 +162,8 @@ export function prepareHermesHome(opts: HermesHomeOpts): { hermesHome: string } 
     delegation: { max_concurrent_children: 3 },
     skills: {
       // Hermes scans SKILL.md trees natively — this is how the coordinator
-      // loads `implement-issue-hermes` (and `testing-jinn-app` for Stage 7).
+      // loads canonical `implement-issue`, its Hermes adapter reference, and
+      // `testing-jinn-app` for Stage 7.
       external_dirs: [join(repoRoot, '.claude', 'skills')],
     },
     mcp_servers: {
