@@ -23,8 +23,6 @@ import {
 
 // --- temp-repo helpers ------------------------------------------------------
 
-const KEEP = ['.git', '.jinn-split-source'];
-
 function git(dir, args) {
   return execFileSync('git', args, { cwd: dir, encoding: 'utf8' });
 }
@@ -84,7 +82,7 @@ test('(a) first mirror: tree changes, plugin files land at slim ROOT verbatim', 
   const pluginDir = makePluginDir();
   const slim = makeSlimRepo();
   try {
-    mirrorContent(pluginDir, slim, { keep: KEEP });
+    mirrorContent(pluginDir, slim);
     writeProvenance(slim, PROV);
     git(slim, ['add', '-A']);
 
@@ -116,13 +114,13 @@ test('(b) idempotent no-op: re-mirroring identical content leaves treeChanged fa
   const pluginDir = makePluginDir();
   const slim = makeSlimRepo();
   try {
-    mirrorContent(pluginDir, slim, { keep: KEEP });
+    mirrorContent(pluginDir, slim);
     writeProvenance(slim, PROV);
     git(slim, ['add', '-A']);
     git(slim, ['commit', '-q', '-m', 'mirror']);
 
     // Re-run with identical inputs.
-    mirrorContent(pluginDir, slim, { keep: KEEP });
+    mirrorContent(pluginDir, slim);
     writeProvenance(slim, PROV);
     git(slim, ['add', '-A']);
 
@@ -138,7 +136,7 @@ test('(c) deletion: a file removed from the plugin dir is removed from the slim 
   const pluginDir = makePluginDir({ 'README.md': 'readme\n' });
   const slim = makeSlimRepo();
   try {
-    mirrorContent(pluginDir, slim, { keep: KEEP });
+    mirrorContent(pluginDir, slim);
     writeProvenance(slim, PROV);
     git(slim, ['add', '-A']);
     git(slim, ['commit', '-q', '-m', 'mirror']);
@@ -147,7 +145,7 @@ test('(c) deletion: a file removed from the plugin dir is removed from the slim 
     rmSync(path.join(pluginDir, 'README.md'));
     rmSync(path.join(pluginDir, 'skin', 'foo'));
 
-    mirrorContent(pluginDir, slim, { keep: KEEP });
+    mirrorContent(pluginDir, slim);
     writeProvenance(slim, PROV);
     git(slim, ['add', '-A']);
 
