@@ -6,7 +6,7 @@ import {
   createLocalLearningAdapter,
   createSkillsAdapter,
 } from './adapters/index.js';
-import { ContributionStore, resolveContributionStateDir } from './contribution-store.js';
+import { ContributionStore, resolveContributionStateDir } from '@jinn-network/core';
 import {
   DEFAULT_EPISODES_DIR,
   DEFAULT_SKILLS_INSTALL_DIR,

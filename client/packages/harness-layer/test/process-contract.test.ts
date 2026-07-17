@@ -16,7 +16,7 @@ import {
   type JinnPluginDeps,
 } from '@jinn-network/plugin';
 import { runJinnLayerCli } from '../src/cli.js';
-import { ContributionStore } from '../src/contribution-store.js';
+import { ContributionStore } from '@jinn-network/core';
 import { buildSkillMarkdown } from '../src/skill-package.js';
 import {
   MineableTraceStore,

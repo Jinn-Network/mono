@@ -52,6 +52,9 @@ import {
 // these symbols keeps working unchanged. The scrub half of this file stays
 // here (C5's move).
 export { CapturedTaskSchema, parseCapturedTask, type CapturedTask } from '@jinn-network/core';
+// A re-export does not create a local binding, and capture() below references
+// CapturedTask as a type — import it locally too.
+import type { CapturedTask } from '@jinn-network/core';
 
 /**
  * One entry in the redaction diff. `before` is the original (sensitive)
