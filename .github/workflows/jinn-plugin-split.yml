@@ -2,8 +2,9 @@
 #
 # WHAT: On each Monday `main` promote (and on plugin hotfixes that land on
 # `main`), mirror `apps/jinn-agent/plugins/jinn/` to the ROOT of the slim
-# standalone repo `Jinn-Network/jinn-plugin`, so `hermes plugins install jinn`
-# (a git clone) yields a working plugin. This is a deterministic CONTENT-MIRROR
+# standalone repo `Jinn-Network/jinn-plugin`, so
+# `hermes plugins install Jinn-Network/jinn-plugin` (a git clone) yields a
+# working plugin. This is a deterministic CONTENT-MIRROR
 # (not `git subtree split`): one linear, fast-forwardable commit per promote,
 # idempotent no-op when the plugin tree is unchanged, loud failure on any error.
 # The mirror decision logic lives in the tested helper
@@ -22,6 +23,10 @@
 # It authenticates BOTH the slim-repo checkout and the push. If the operator's
 # secret is under a different name, rename it to JINN_PLUGIN_PUSH_TOKEN or swap
 # this name throughout. This is the one human-alignment point.
+#
+# DRY-RUN CAVEAT: a workflow_dispatch dry-run still checks out the slim repo with
+# the token, so dry-running against a private slim repo needs the secret set (the
+# slim repo is public as a release target, so this is moot in practice).
 
 name: Split jinn plugin to slim repo
 
@@ -117,9 +122,10 @@ jobs:
             exit 0
           fi
           if [ "${CHANGED}" = "true" ]; then
-            git -C slim push \
-              "https://x-access-token:${JINN_PLUGIN_PUSH_TOKEN}@github.com/Jinn-Network/jinn-plugin.git" \
-              "HEAD:${DEFAULT_BRANCH}"
+            # The slim checkout stored the token as a masked http extraheader in
+            # its .git/config (actions/checkout token:), so origin pushes with no
+            # credential on the command line.
+            git -C slim push origin "HEAD:${DEFAULT_BRANCH}"
             echo "::notice::pushed mirror @ ${MONO_SHA} to Jinn-Network/jinn-plugin (${DEFAULT_BRANCH})"
           else
             echo "::notice::nothing to push — slim tree unchanged."

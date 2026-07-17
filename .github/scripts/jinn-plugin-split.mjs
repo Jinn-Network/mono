@@ -3,7 +3,8 @@
 //
 // Purpose: mirror `apps/jinn-agent/plugins/jinn/` (in Jinn-Network/mono) to the
 // ROOT of the slim release repo `Jinn-Network/jinn-plugin` so that
-// `hermes plugins install jinn` (a git clone) yields a working plugin. The
+// `hermes plugins install Jinn-Network/jinn-plugin` (a git clone) yields a
+// working plugin. The
 // mirror is a deterministic CONTENT-MIRROR (not `git subtree split`): the
 // plugin-dir contents become the slim ROOT, deletions are reflected, and an
 // unchanged plugin tree produces no new slim commit (idempotent no-op).
@@ -12,10 +13,13 @@
 // dir is published verbatim; the published plugin references the future
 // @jinn-network/jinn-layer (C6). Nothing here packages npm/layer artifacts.
 //
-// Pure/local functions (validatePluginDir, mirrorContent, writeProvenance,
-// treeChanged, buildCommitMessage) plus the local orchestrator `run()` are
-// exported and never call process.exit, so the test suite drives them offline
-// against temp git repos. `run()` may call git in slimDir (a local op) but does
+// The offline-testable functions (validatePluginDir, mirrorContent,
+// writeProvenance, treeChanged, buildCommitMessage) plus the local
+// orchestrator `run()` are exported and never call process.exit, so the test
+// suite drives them offline against temp git repos. Only buildCommitMessage and
+// validatePluginDir are genuinely pure; the rest touch the filesystem or a
+// local (non-auth) git repo but need no token, network, or process.exit.
+// `run()` may call git in slimDir (a local op) but does
 // no GitHub-specific side effect. The CLI entry is guarded so `import` is
 // side-effect-free; only the CLI block may exit or touch $GITHUB_OUTPUT.
 
@@ -35,7 +39,13 @@ import { pathToFileURL } from 'node:url';
 const PROVENANCE_FILE = '.jinn-split-source';
 const DEFAULT_KEEP = ['.git', PROVENANCE_FILE];
 
-// --- pure / local logic (exported; never process.exit) ----------------------
+// --- offline-testable logic (exported; free of auth, network, process.exit) --
+// These functions are driven by the test suite against temp git repos. Only
+// buildCommitMessage and validatePluginDir are genuinely pure; mirrorContent
+// (rm+cp), writeProvenance (writes a file), and treeChanged (shells to
+// non-auth git) touch the filesystem or a local repo, but none require a
+// GitHub token, network, or process.exit — the auth-git-in-YAML vs
+// non-auth-git-in-helper seam. The local orchestrator run() is exported too.
 
 /**
  * Assert the source plugin dir exists and holds the required `plugin.yaml`
@@ -58,9 +68,10 @@ export function validatePluginDir(pluginDirPath) {
 
 /**
  * Mirror (not overlay) the full contents of `pluginDir` into `slimCheckout`:
- * remove every top-level slim entry not in `keep`, then recursively copy the
- * plugin-dir tree in. Result: slim tree === plugin tree + kept files. Does NOT
- * run git — staging (`git add -A`) is the caller's job.
+ * remove every top-level slim entry not in DEFAULT_KEEP, then recursively copy
+ * the plugin-dir tree in. Result: slim tree === plugin tree + kept files. Does
+ * NOT run git itself — the CLI orchestrator (run()) does the staging
+ * (`git add -A`); this helper only rearranges files on disk.
  * @param {string} pluginDir
  * @param {string} slimCheckout
  * @param {{ keep?: string[] }} [opts]
@@ -148,6 +159,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const slimDir = process.env.SLIM_DIR ?? 'slim';
   const monoSha = process.env.MONO_SHA ?? '';
   const workflowPath = process.env.WORKFLOW_PATH ?? '.github/workflows/jinn-plugin-split.yml';
+
+  // Defense-in-depth: MONO_SHA flows into the commit message + provenance.
+  // It comes from `git rev-parse HEAD` today, but assert its shape so a future
+  // refactor cannot let non-SHA text ride through.
+  if (monoSha && !/^[0-9a-f]{40}$/.test(monoSha)) {
+    console.log(`::error::MONO_SHA is not a 40-hex commit SHA: ${monoSha}`);
+    process.exit(1);
+  }
 
   let changed;
   try {
