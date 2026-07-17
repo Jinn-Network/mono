@@ -18,6 +18,13 @@ export {
 } from './consume.js';
 
 export {
+  corpusProbes,
+  enoughCorpusForRepo,
+  CORPUS_ONBOARDING_K,
+  type DoctorCheck,
+} from './corpus-probes.js';
+
+export {
   capture,
   parseCapturedTask,
   CapturedTaskSchema,

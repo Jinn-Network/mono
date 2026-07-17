@@ -195,6 +195,29 @@ describe('jinn-layer CLI', () => {
     expect(code).not.toBe(0);
     expect(out()).toContain('Usage');
   });
+
+  it('corpus probe --json emits the two doctor checks (corpus-reachable + corpus-content)', async () => {
+    const { writer, out } = capture();
+    const layer = fakeLayer({ hits: [fakeHit(), fakeHit(), fakeHit()] });
+    const code = await runJinnLayerCli(['corpus', 'probe', 'owner/repo', '--json'], { layer, writer });
+    expect(code).toBe(0);
+    const checks = JSON.parse(out());
+    expect(Array.isArray(checks)).toBe(true);
+    expect(checks.map((c: { name: string }) => c.name)).toEqual(['corpus-reachable', 'corpus-content']);
+    expect(checks.every((c: { ok: boolean }) => c.ok)).toBe(true);
+  });
+
+  it('corpus probe --json on a throwing layer does not throw and reports corpus-reachable failure', async () => {
+    const { writer, out } = capture();
+    const layer = fakeLayer({});
+    (layer.corpus.search as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('discovery unreachable'));
+    const code = await runJinnLayerCli(['corpus', 'probe', 'owner/repo', '--json'], { layer, writer });
+    expect(code).toBe(0);
+    const checks = JSON.parse(out());
+    const reachable = checks.find((c: { name: string }) => c.name === 'corpus-reachable');
+    expect(reachable.ok).toBe(false);
+    expect(reachable.remedy).toBeDefined();
+  });
 });
 
 describe('jinn-layer distill — persisted distiller default (resolution order, #1496)', () => {
