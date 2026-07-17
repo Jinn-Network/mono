@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { dedupeKnowledgeHits } from '@jinn-network/plugin';
+import { dedupeKnowledgeHits, RETRIEVAL_VISIBLE_TAG } from '@jinn-network/plugin';
 import { describeCorpusPortContract } from '@jinn-network/plugin/testing';
 import type { HarnessLayer, CorpusSearchHit, CorpusRecord as WireCorpusRecord } from '../../src/consume.js';
 import { createCorpusAdapter } from '../../src/adapters/corpus-adapter.js';
@@ -62,8 +62,8 @@ describe('CorpusAdapter mapping', () => {
     expect(result.status).toBe('ok');
     if (result.status !== 'ok') return;
     expect(result.value).toEqual([
-      { ref: 'bafySkill', kind: 'skill', title: 'skill / one', snippet: 'a distilled skill', tags: [], origin: '1', publishedAt: 0 },
-      { ref: 'bafyTrace', kind: 'trace', title: 'trace / two', snippet: 'a prior trace', tags: [], origin: '1', publishedAt: 0 },
+      { ref: 'bafySkill', kind: 'skill', title: 'skill / one', snippet: 'a distilled skill', tags: [], origin: '1', publishedAt: 0, retrievalVisible: false },
+      { ref: 'bafyTrace', kind: 'trace', title: 'trace / two', snippet: 'a prior trace', tags: [], origin: '1', publishedAt: 0, retrievalVisible: false },
     ]);
   });
 
@@ -105,6 +105,53 @@ describe('CorpusAdapter mapping', () => {
     if (result.status !== 'ok') return;
     expect(result.value.map((hit) => hit.origin)).toEqual(['bafyDistinctA', 'bafyDistinctB']);
     expect(dedupeKnowledgeHits(result.value)).toHaveLength(2);
+  });
+
+  // Issue #1824 (corpus-supply-design §5 W2): the adapter computes the
+  // ranking-visible fact from the wire hit's tags and strips the mark tag so
+  // it never enters the scoring haystack (haystackFor scores tags — an
+  // unstripped mark would inflate scores via substring matches) or the
+  // rendered packet.
+  describe('retrieval-visibility mark mapping (#1824)', () => {
+    it('maps a marked wire hit to retrievalVisible: true and strips the mark tag from tags', async () => {
+      const layer = makeFakeLayer();
+      layer.corpus.search = async () => [
+        makeHit({ ref: 'bafyMarked', tags: ['dashboard', RETRIEVAL_VISIBLE_TAG, 'vitest'] }),
+      ];
+      const adapter = createCorpusAdapter({ layer });
+      const result = await adapter.search('anything');
+      expect(result.status).toBe('ok');
+      if (result.status !== 'ok') return;
+      expect(result.value[0]?.retrievalVisible).toBe(true);
+      expect(result.value[0]?.tags).toEqual(['dashboard', 'vitest']);
+    });
+
+    it('maps an unmarked wire hit to an explicit retrievalVisible: false with tags unchanged', async () => {
+      const layer = makeFakeLayer();
+      layer.corpus.search = async () => [
+        makeHit({ ref: 'bafyUnmarked', tags: ['dashboard', 'vitest'] }),
+      ];
+      const adapter = createCorpusAdapter({ layer });
+      const result = await adapter.search('anything');
+      expect(result.status).toBe('ok');
+      if (result.status !== 'ok') return;
+      expect(result.value[0]?.retrievalVisible).toBe(false);
+      expect(result.value[0]?.tags).toEqual(['dashboard', 'vitest']);
+    });
+
+    it('maps a wire hit at the 16-tag budget including the mark with no off-by-one in the strip', async () => {
+      const fifteen = Array.from({ length: 15 }, (_, i) => `tag-${i}`);
+      const layer = makeFakeLayer();
+      layer.corpus.search = async () => [
+        makeHit({ ref: 'bafyFullBudget', tags: [...fifteen, RETRIEVAL_VISIBLE_TAG] }),
+      ];
+      const adapter = createCorpusAdapter({ layer });
+      const result = await adapter.search('anything');
+      expect(result.status).toBe('ok');
+      if (result.status !== 'ok') return;
+      expect(result.value[0]?.retrievalVisible).toBe(true);
+      expect(result.value[0]?.tags).toEqual(fifteen);
+    });
   });
 
   it('degrades to an empty array when the underlying search throws', async () => {
@@ -186,6 +233,7 @@ describe('CorpusAdapter.get() — content-bearing decode (rescope R2, #1772)', (
       provenance: 'imported',
       origin: 'agent-77',
       capturedAt: '2026-07-04T00:00:00.000Z',
+      retrievalVisible: false,
     });
   });
 
@@ -385,6 +433,38 @@ describe('CorpusAdapter.get() — content-level skill classification (mono #1782
     expect(result.status).toBe('ok');
     if (result.status !== 'ok' || result.value === null) throw new Error('expected a decoded record');
     expect(result.value.isSkillPayload).toBeUndefined();
+  });
+
+  it('sets retrievalVisible: true when the decoded envelope’s own distributionTags carry the mark (#1824)', async () => {
+    const layer = makeFakeLayer();
+    const wireRecord = wireRecordWithTrace({
+      task: {
+        summary: 'Fix the dashboard version-status flake',
+        distributionTags: ['dashboard', RETRIEVAL_VISIBLE_TAG],
+      },
+    });
+    layer.corpus.get = async () => wireRecord;
+    const adapter = createCorpusAdapter({ layer });
+
+    const result = await adapter.get('bafySourceEpisode');
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok' || result.value === null) throw new Error('expected a decoded record');
+    expect(result.value.retrievalVisible).toBe(true);
+    // CorpusRecord.tags is provenance-adjacent display data on the content
+    // path, not the scoring haystack — deliberately NOT stripped (see the
+    // adapter's comment on the asymmetry with the search-hit path).
+    expect(result.value.tags).toContain(RETRIEVAL_VISIBLE_TAG);
+  });
+
+  it('sets retrievalVisible: false when the decoded envelope lacks the mark (#1824)', async () => {
+    const layer = makeFakeLayer();
+    layer.corpus.get = async () => wireRecordWithTrace();
+    const adapter = createCorpusAdapter({ layer });
+
+    const result = await adapter.get('bafySourceEpisode');
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok' || result.value === null) throw new Error('expected a decoded record');
+    expect(result.value.retrievalVisible).toBe(false);
   });
 
   it('does not classify a step whose skill.md attribute is present but empty or non-string', async () => {
