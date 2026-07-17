@@ -1,6 +1,7 @@
-/** Evidence-first pickup policy (rescope design §3.3). No I/O: term
- *  derivation + selection only. Orchestration (search/get over ports,
- *  packet projection, rendering) lives in plugin.ts. */
+/** Evidence-first pickup policy (rescope design §3.3; lexical v2 term
+ *  selection — #1791, #1790, #1789). No I/O: term derivation + selection
+ *  only. Orchestration (search/get over ports, packet projection, rendering)
+ *  lives in plugin.ts. */
 import type { KnowledgeHit } from './schemas/knowledge-hit.js';
 import { TIER_ORDER } from './schemas/pickup-config.js';
 
@@ -13,8 +14,14 @@ export const STOPWORDS: ReadonlySet<string> = new Set([
   'using', 'about', 'have', 'has', 'had', 'you', 'your', 'our', 'not',
 ]);
 
-const MAX_TERMS = 6;
+// Lexical v2 (#1791): a tight 6-term budget forced real trade-offs between
+// terms that could plausibly match a record's summary/tags — 10 gives
+// selection room to include more of the message before the floor decides
+// relevance. Search is one cheap indexer call per term.
+const MAX_TERMS = 10;
 const MIN_REMAINDER_LENGTH = 4;
+const MIN_PATH_SEGMENT_LENGTH = 3;
+const MIN_REPO_NAME_LENGTH = 3;
 
 const QUOTED_SPAN_RE = /`([^`]+)`|"([^"]+)"|'([^']+)'/g;
 
@@ -24,9 +31,13 @@ const QUOTED_SPAN_RE = /`([^`]+)`|"([^"]+)"|'([^']+)'/g;
  *  sentence-final prose (`done.`, `else.`) never reads as identifier-shaped
  *  (mono #1786); a leading `/` on a path-like token (`/v1/status`) is
  *  stripped too — `v1/status` stays a useful, greppable search term, and
- *  treating every separator position the same way keeps the rule one rule. */
+ *  treating every separator position the same way keeps the rule one rule.
+ *  Space is also kept (not just alnum/`_-./`) so this same function is safe
+ *  to run on a multi-word backticked/quoted span (#1789) — the other two
+ *  call sites split on whitespace first, so a raw space never reaches them
+ *  and this is a no-op there. */
 function cleanWord(raw: string): string {
-  const kept = [...raw].filter((c) => /[\p{L}\p{N}]/u.test(c) || '_-./'.includes(c)).join('');
+  const kept = [...raw].filter((c) => /[\p{L}\p{N}]/u.test(c) || '_-./ '.includes(c)).join('');
   return kept.replace(/^[_\-./]+/, '').replace(/[_\-./]+$/, '');
 }
 
@@ -36,11 +47,37 @@ function isIdentifierShaped(word: string): boolean {
   return /[_\-./]/.test(word) || /\d/.test(word) || /[a-z][A-Z]/.test(word);
 }
 
+/** Path segments of a `/`-bearing identifier-shaped token (#1791 root cause
+ *  1): an over-specific path like `client/src/dashboard/spa/src` rarely
+ *  matches a record's summary/tags verbatim, but a shorter segment within it
+ *  (`dashboard`) often does. Each segment is cleaned, filtered to
+ *  `MIN_PATH_SEGMENT_LENGTH`, stopword-filtered, and deduplicated against
+ *  itself (the caller's `push` handles dedup against the running term list). */
+function pathSegments(token: string): string[] {
+  const seenLocal = new Set<string>();
+  const segments: string[] = [];
+  for (const raw of token.split('/')) {
+    const cleaned = cleanWord(raw);
+    const lower = cleaned.toLowerCase();
+    if (cleaned.length < MIN_PATH_SEGMENT_LENGTH || STOPWORDS.has(lower) || seenLocal.has(lower)) {
+      continue;
+    }
+    seenLocal.add(lower);
+    segments.push(cleaned);
+  }
+  return segments;
+}
+
 /**
  * Up to `maxTerms` deterministic lowercase search terms, in priority order
- * (rescope §3.3): backticked/quoted tokens; identifier-shaped tokens; the
- * session's repository slug; the longest remaining non-stopword tokens.
- * Operates over the whole message (not just the first line). Deduplicated.
+ * (rescope §3.3, lexical v2 — #1791/#1790/#1789): backticked/quoted tokens
+ * (edge-stripped, near-verbatim); identifier-shaped tokens — a `/`-bearing
+ * one also contributes its path segments, right after the full token; the
+ * session repository's NAME (not its full slug, #1790); the remaining
+ * non-stopword tokens (>=4 chars) in MESSAGE ORDER — order of first
+ * appearance, not longest-first (#1791: length is not a retrievability
+ * signal against a corpus of short summaries and tags). Operates over the
+ * whole message (not just the first line). Deduplicated.
  */
 export function deriveSearchTerms(
   message: string,
@@ -60,34 +97,59 @@ export function deriveSearchTerms(
     terms.push(lower);
   };
 
-  // 1. Backticked/quoted tokens — each span is one term, taken near-verbatim.
+  // 1. Backticked/quoted tokens — each span is one term, taken near-verbatim
+  //    but run through cleanWord's leading/trailing `_-./` strip (#1789) so
+  //    a captured span like "npm test." doesn't keep its trailing period.
+  //    cleanWord also keeps internal spaces, so a multi-word span
+  //    ("version status fetch") and a path-shaped one ("client/src/dash")
+  //    both keep their shape.
   for (const match of text.matchAll(QUOTED_SPAN_RE)) {
     if (terms.length >= maxTerms) break;
-    push(match[1] ?? match[2] ?? match[3] ?? '');
+    push(cleanWord(match[1] ?? match[2] ?? match[3] ?? ''));
   }
 
-  // 2. Identifier-shaped tokens (whole message).
+  // 2. Identifier-shaped tokens (whole message). A `/`-bearing token also
+  //    contributes its path segments, right after the full token (#1791
+  //    root cause 1) — the full token is often over-specific for a record's
+  //    summary/tags, while a shorter segment within it often matches.
   if (terms.length < maxTerms) {
     for (const rawWord of text.split(/\s+/)) {
       if (terms.length >= maxTerms) break;
       const word = cleanWord(rawWord);
       if (word.length < 2 || STOPWORDS.has(word.toLowerCase())) continue;
-      if (isIdentifierShaped(word)) push(word);
+      if (!isIdentifierShaped(word)) continue;
+      push(word);
+      if (word.includes('/')) {
+        for (const segment of pathSegments(word)) {
+          if (terms.length >= maxTerms) break;
+          push(segment);
+        }
+      }
     }
   }
 
-  // 3. The session's repository slug.
+  // 3. The session repository's NAME — the segment after the last `/` of
+  //    `repositorySlug` (e.g. `mono` from `Jinn-Network/mono`), not the full
+  //    slug: no record's text ever contains the literal `owner/repo` slug,
+  //    so the slug itself was dead weight as a search term (#1790).
   if (terms.length < maxTerms && repositorySlug && repositorySlug.trim().length > 0) {
-    push(repositorySlug);
+    const slug = repositorySlug.trim();
+    const lastSlash = slug.lastIndexOf('/');
+    const repoName = lastSlash >= 0 ? slug.slice(lastSlash + 1) : slug;
+    if (repoName.length >= MIN_REPO_NAME_LENGTH) push(repoName);
   }
 
-  // 4. Remaining longest non-stopword tokens (>=4 chars), longest first.
+  // 4. Remaining non-stopword tokens (>=4 chars), in MESSAGE ORDER (#1791
+  //    root cause 2) — order of first appearance, not longest-first. Length
+  //    is not a retrievability signal: a short on-topic word ("flaky", 5
+  //    chars) is a better search term than a long one ("deterministic", 13
+  //    chars) against a corpus of short summaries and tags, but the old
+  //    longest-first sort always preferred the long word.
   if (terms.length < maxTerms) {
     const remainder = text
       .split(/\s+/)
       .map(cleanWord)
-      .filter((word) => word.length >= MIN_REMAINDER_LENGTH && !STOPWORDS.has(word.toLowerCase()))
-      .sort((a, b) => b.length - a.length);
+      .filter((word) => word.length >= MIN_REMAINDER_LENGTH && !STOPWORDS.has(word.toLowerCase()));
     for (const word of remainder) {
       if (terms.length >= maxTerms) break;
       push(word);
@@ -143,19 +205,28 @@ function haystackFor(hit: KnowledgeHit): string {
   return `${hit.snippet ?? hit.title ?? ''} ${hit.tags.join(' ')}`.toLowerCase();
 }
 
-/** Count of matched terms across `taskSummary + tags`; a repository-slug
- *  match counts 2 (rescope §3.3 step 3). */
-export function scoreKnowledgeHit(
-  hit: KnowledgeHit,
-  terms: string[],
-  repositorySlug?: string,
-): number {
+/** A term matches if it appears verbatim, or — for a term ending in a
+ *  simple plural `s` — its singular form does (#1791 lexical v2: closes
+ *  small, common bag-of-words vocabulary gaps like `tests` -> `test`).
+ *  One-directional (term -> singular only) and length-gated
+ *  (`term.length > 3`) so a short word like `its` never folds to `it`. */
+function termMatches(haystack: string, term: string): boolean {
+  if (haystack.includes(term)) return true;
+  return term.endsWith('s') && term.length > 3 && haystack.includes(term.slice(0, -1));
+}
+
+/** Count of matched terms across `taskSummary + tags` (rescope §3.3 step 3,
+ *  lexical v2 — #1790/#1791) — every match counts 1. The repository-slug
+ *  match used to count 2, but the slug it matched against could never
+ *  appear in a record's text (#1790); the repository's NAME is now a
+ *  normal derived term (see `deriveSearchTerms` step 3) and scores like any
+ *  other term, with no special case. */
+export function scoreKnowledgeHit(hit: KnowledgeHit, terms: string[]): number {
   const haystack = haystackFor(hit);
-  const repoTerm = repositorySlug?.trim().toLowerCase();
   let score = 0;
   for (const term of terms) {
-    if (!haystack.includes(term)) continue;
-    score += term.length > 0 && term === repoTerm ? 2 : 1;
+    if (term.length === 0) continue;
+    if (termMatches(haystack, term)) score += 1;
   }
   return score;
 }
@@ -174,12 +245,11 @@ function tierRank(tier: string | undefined): number {
 export function selectKnowledgeHits(
   hits: KnowledgeHit[],
   terms: string[],
-  repositorySlug?: string,
 ): KnowledgeHit[] {
   const evidence = hits.filter((hit) => !isSkillHit(hit));
   const deduped = dedupeKnowledgeHits(evidence);
   const scored = deduped
-    .map((hit) => ({ hit, score: scoreKnowledgeHit(hit, terms, repositorySlug) }))
+    .map((hit) => ({ hit, score: scoreKnowledgeHit(hit, terms) }))
     .filter((scoredHit) => scoredHit.score >= RELEVANCE_FLOOR);
 
   scored.sort((a, b) => {

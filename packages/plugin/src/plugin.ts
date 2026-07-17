@@ -54,7 +54,8 @@ export interface SessionMeta {
   skillsLoadout?: string[];
   pickup?: PickupConfig;
   /** Known at session start (e.g. `session_bridge.snapshot_repository`) —
-   *  fed into `deriveSearchTerms` and the selection policy's repo-match bonus. */
+   *  fed into `deriveSearchTerms`, which derives the repository's name (not
+   *  its full slug) as a normal search term (#1790). */
   repositorySlug?: string;
 }
 
@@ -333,7 +334,7 @@ export class PluginSession {
       }
     }
 
-    const selected = selectKnowledgeHits([...byRef.values()], terms, this.meta.repositorySlug);
+    const selected = selectKnowledgeHits([...byRef.values()], terms);
     if (selected.length === 0) {
       return {
         contextBlock: null,

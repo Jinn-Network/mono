@@ -42,15 +42,48 @@ describe('deriveSearchTerms (rescope §3.3)', () => {
     expect(terms).toContain('sessionbridge');
   });
 
-  it('includes the repository slug when provided, lowercased', () => {
+  // The full repository slug can never match a record's text (no record
+  // carries the literal `owner/repo` string) — the repository's NAME (the
+  // segment after the last `/`) replaces it as the derived term (#1790).
+  it('derives the repository NAME, not the full slug, when repositorySlug is provided', () => {
     const terms = deriveSearchTerms('generic unrelated words here', 'Jinn-Network/mono');
-    expect(terms).toContain('jinn-network/mono');
+    expect(terms).toContain('mono');
+    expect(terms).not.toContain('jinn-network/mono');
   });
 
-  it('falls back to the longest remaining non-stopword tokens (>=4 chars)', () => {
+  it('does not derive a repo-name term shorter than 3 chars', () => {
+    const terms = deriveSearchTerms('generic unrelated words here', 'acme/ab');
+    expect(terms).not.toContain('ab');
+  });
+
+  it('uses the whole slug as the repo name when it has no `/`', () => {
+    const terms = deriveSearchTerms('generic unrelated words here', 'monorepo');
+    expect(terms).toContain('monorepo');
+  });
+
+  // #1791: length is not a retrievability signal against a corpus of short
+  // summaries and tags — the remainder bucket is message order (order of
+  // first appearance), not longest-first.
+  it('falls back to the remaining non-stopword tokens (>=4 chars) in message order, not longest-first', () => {
     const terms = deriveSearchTerms('please help with the retry budget for tests');
-    // 'please' and 'help' and 'the' and 'with' and 'for' are stopwords; longest remainder first.
-    expect(terms).toEqual(['budget', 'retry', 'tests']);
+    // 'please', 'help', 'with', 'for' are stopwords; 'retry' appears before
+    // 'budget' in the message even though it is shorter — message order wins
+    // (#1791; the old longest-first sort produced ['budget','retry','tests']).
+    expect(terms).toEqual(['retry', 'budget', 'tests']);
+  });
+
+  it('orders the remainder bucket by first appearance — a short early topical word beats a longer later one (#1791)', () => {
+    // Mirrors the real R6 walkthrough finding: 'flaky' (5 chars) lost the old
+    // longest-first sort to 'deterministic' (13 chars) and was evicted from
+    // the 6-term budget entirely, even though it was the term that would
+    // have matched the seeded record.
+    const terms = deriveSearchTerms(
+      'flaky tests are annoying because the retry logic is not deterministic',
+    );
+    const flakyIndex = terms.indexOf('flaky');
+    const deterministicIndex = terms.indexOf('deterministic');
+    expect(flakyIndex).toBeGreaterThanOrEqual(0);
+    expect(deterministicIndex).toBeGreaterThan(flakyIndex);
   });
 
   it('reads the whole message, not just the first line', () => {
@@ -64,9 +97,28 @@ describe('deriveSearchTerms (rescope §3.3)', () => {
     expect(deriveSearchTerms('retryBudget retryBudget retryBudget')).toEqual(terms);
   });
 
-  it('caps at 6 terms', () => {
-    const terms = deriveSearchTerms('`one` `two` `three` `four` `five` `six` `seven` `eight`');
-    expect(terms).toHaveLength(6);
+  // Budget raised 6 -> 10 (#1791): a tight budget forced real terms out.
+  it('caps at 10 terms', () => {
+    const terms = deriveSearchTerms(
+      '`one` `two` `three` `four` `five` `six` `seven` `eight` `nine` `ten` `eleven` `twelve`',
+    );
+    expect(terms).toHaveLength(10);
+  });
+
+  it('path-segments a `/`-bearing identifier-shaped token, contributing each cleaned segment (>=3 chars) after the full token (#1791)', () => {
+    const terms = deriveSearchTerms('fix the flake under client/src/dashboard/spa/src please');
+    expect(terms).toContain('client/src/dashboard/spa/src');
+    expect(terms).toContain('client');
+    expect(terms).toContain('dashboard');
+    expect(terms).toContain('spa');
+    // 'src' is exactly MIN_PATH_SEGMENT_LENGTH (3 chars) — included, not excluded.
+    expect(terms).toContain('src');
+  });
+
+  it('does not path-segment a token with no `/`', () => {
+    const terms = deriveSearchTerms('fix version-status.test.ts please');
+    expect(terms).not.toContain('version');
+    expect(terms).not.toContain('status');
   });
 
   it('returns an empty list for blank or all-stopword input', () => {
@@ -88,6 +140,13 @@ describe('deriveSearchTerms (rescope §3.3)', () => {
       expect(terms).not.toContain('ok.');
     });
 
+    // This message is Run A from the #1791 decision comment's validation
+    // table (the real #1006 "dashboard USD labels" walkthrough task,
+    // re-derived here) — its pre-lexical-v2 derived terms
+    // (['ai-units','jinn-network/mono','distinguishes','dashboard',
+    // 'estimated','operator']) are recorded verbatim in #1654's R6
+    // walkthrough #3 comment. See the 'lexical v2 validation table' describe
+    // block below for its post-lexical-v2 scores against the real fixtures.
     it('never derives a punctuation-suffixed term from natural prose ending in periods', () => {
       const message =
         'The operator dashboard still labels the AI-units claim gate in units, ' +
@@ -119,9 +178,33 @@ describe('deriveSearchTerms (rescope §3.3)', () => {
     it('falls a stripped prose word through to the remainder bucket rather than promoting it to priority 2', () => {
       // 'else.' cleans to 'else', which is not identifier-shaped (no
       // separator survives the strip) — it must only ever appear via the
-      // length-ranked remainder bucket, alongside ordinary prose words.
+      // remainder bucket, alongside ordinary prose words, in message order
+      // (#1791 — the old longest-first sort produced
+      // ['contribution','done','else']).
       const terms = deriveSearchTerms('done. else. contribution');
-      expect(terms).toEqual(['contribution', 'done', 'else']);
+      expect(terms).toEqual(['done', 'else', 'contribution']);
+    });
+  });
+
+  // #1789: the captured span bypassed cleanWord, keeping trailing
+  // punctuation (`npm test.` never matched a corpus tag or summary).
+  describe('quoted/backtick span cleaning (#1789)', () => {
+    it('strips trailing punctuation from a backticked span via the same edge strip as other terms', () => {
+      const terms = deriveSearchTerms('run `npm test.` now');
+      expect(terms).toContain('npm test');
+      for (const term of terms) {
+        expect(term.endsWith('.')).toBe(false);
+      }
+    });
+
+    it("preserves a multi-word quoted span's shape (internal space, no split)", () => {
+      const terms = deriveSearchTerms('please check `version status fetch` today');
+      expect(terms).toContain('version status fetch');
+    });
+
+    it('preserves internal separators on a path-shaped backticked span', () => {
+      const terms = deriveSearchTerms('look at `client/src/dashboard` please');
+      expect(terms).toContain('client/src/dashboard');
     });
   });
 });
@@ -148,14 +231,35 @@ describe('scoreKnowledgeHit (rescope §3.3 step 3)', () => {
     expect(scoreKnowledgeHit(h, ['dashboard', 'nonexistent'])).toBe(1);
   });
 
-  it('counts a repository-slug match as 2', () => {
-    const h = hit({ snippet: 'fix a bug', tags: ['jinn-network/mono'] });
-    expect(scoreKnowledgeHit(h, ['jinn-network/mono'], 'Jinn-Network/mono')).toBe(2);
+  // The old +2 repository-slug bonus is gone (#1790, #1791): the slug it
+  // matched against could never appear in a record's text, so the bonus
+  // never actually fired. The repository's NAME is now a normal derived
+  // term (see deriveSearchTerms) and counts 1 like everything else.
+  it('a repo-name term counts 1 like any other matched term — no special case', () => {
+    const h = hit({ snippet: 'fix a bug', tags: ['mono'] });
+    expect(scoreKnowledgeHit(h, ['mono'])).toBe(1);
   });
 
   it('is case-insensitive', () => {
     const h = hit({ snippet: 'Fix The Dashboard Flake', tags: [] });
     expect(scoreKnowledgeHit(h, ['dashboard'])).toBe(1);
+  });
+
+  describe('plural fold (#1791 lexical v2)', () => {
+    it('folds a plural term to match a singular haystack', () => {
+      const h = hit({ snippet: 'the flaky test needs a fix', tags: [] });
+      expect(scoreKnowledgeHit(h, ['tests'])).toBe(1);
+    });
+
+    it('does not fold a term of length <= 3 ending in s ("its" does not fold to "it")', () => {
+      const h = hit({ snippet: 'fix it now', tags: [] });
+      expect(scoreKnowledgeHit(h, ['its'])).toBe(0);
+    });
+
+    it('does not require the fold when the plural already matches verbatim', () => {
+      const h = hit({ snippet: 'the flaky tests need a fix', tags: [] });
+      expect(scoreKnowledgeHit(h, ['tests'])).toBe(1);
+    });
   });
 });
 
@@ -261,5 +365,100 @@ describe('selectKnowledgeHits (rescope §3.3)', () => {
 
   it('no candidates → empty selection', () => {
     expect(selectKnowledgeHits([], ['anything'])).toEqual([]);
+  });
+});
+
+// Rebuilds the five-message x three-record validation table from #1791's
+// decision comment as unit tests. Hit shapes mirror the real Stage 1 seed
+// fixtures verbatim (client/packages/harness-layer/fixtures/stage1-seeds/
+// *.episode.json): taskSummary -> snippet, tags -> tags — the only two
+// fields haystackFor() reads, so this is a faithful proxy for the real
+// corpus records without needing the seed-import/IPFS machinery in a unit
+// test. repositorySlug is REPO ('Jinn-Network/mono') throughout, matching
+// the real corpus's actual repository (the source and operator-claims
+// fixtures are both genuinely from Jinn-Network/mono; sympy is not).
+describe('lexical v2 validation table (#1791 decision comment)', () => {
+  const SOURCE = hit({
+    ref: 'source-dashboard-flake',
+    snippet:
+      'Fix flaky dashboard update_available banner test — assert after the version status fetch resolves',
+    tags: ['mono', 'dashboard', 'vitest', 'version-status', 'async', 'flake'],
+  });
+  const OPERATOR_CLAIMS = hit({
+    ref: 'distractor-operator-claims',
+    snippet: 'Warn when a joinedSolverNets entry silently skips claim registration',
+    tags: ['mono', 'operator', 'claims', 'solvernet'],
+  });
+  const SYMPY = hit({
+    ref: 'distractor-sympy-printing',
+    snippet: 'Fix LaTeX printer dropping the separator between multi-part symbol subscripts',
+    tags: ['sympy', 'printing', 'latex', 'regression'],
+  });
+  const ALL_THREE = [SOURCE, OPERATOR_CLAIMS, SYMPY];
+
+  it('Run B (verbatim, #1791): retrieves the on-topic source record; the same-repo distractor scores repo-name-only and is excluded; the other-domain distractor scores 0', () => {
+    const message =
+      'The dashboard notification tests keep going flaky in CI. Please look at the async waits in ' +
+      'the notifications tests under client/src/dashboard/spa/src and make them deterministic, then ' +
+      'run that test file.';
+    const terms = deriveSearchTerms(message, REPO);
+
+    expect(scoreKnowledgeHit(SOURCE, terms)).toBe(3);
+    expect(scoreKnowledgeHit(OPERATOR_CLAIMS, terms)).toBe(1);
+    expect(scoreKnowledgeHit(SYMPY, terms)).toBe(0);
+
+    const selected = selectKnowledgeHits(ALL_THREE, terms);
+    expect(selected.map((h) => h.ref)).toEqual(['source-dashboard-flake']);
+  });
+
+  it('Run A (#1006, dashboard USD labels): both the source and the same-repo distractor clear the floor, and the distractor ranks first — an accepted precision limit', () => {
+    // Accepted trade-off (#1791 decision comment): "Run A's lexical
+    // collision ('AI-units claim gate' vs 'claim registration') ranks D1
+    // above the source. Bag-of-words ceiling; accepted for Stage 1 (provided
+    // != helped; attribution visible; 2-packet cap) and pinned in a unit
+    // test as documented behavior." This is that pin.
+    const message =
+      'The operator dashboard still labels the AI-units claim gate in units, ' +
+      'even though the daemon now reports actual USD spend with an estimated ' +
+      'flag. Update the dashboard so it shows USD and distinguishes a metered ' +
+      'figure from an estimated one. Run the dashboard tests when you are done.';
+    const terms = deriveSearchTerms(message, REPO);
+
+    expect(scoreKnowledgeHit(SOURCE, terms)).toBe(2);
+    expect(scoreKnowledgeHit(OPERATOR_CLAIMS, terms)).toBe(3);
+    expect(scoreKnowledgeHit(SYMPY, terms)).toBe(0);
+
+    const selected = selectKnowledgeHits(ALL_THREE, terms);
+    expect(selected.map((h) => h.ref)).toEqual([
+      'distractor-operator-claims',
+      'source-dashboard-flake',
+    ]);
+  });
+
+  it("the gate's no-result message (verbatim, apps/jinn-agent/scripts/stage1-stock-product.py): scores below the floor against every fixture — honest nothing-found", () => {
+    const message =
+      'Investigate why the OLAS staking reward-claim loop occasionally ' +
+      'double-counts checkpoint epochs on Base Sepolia.';
+    const terms = deriveSearchTerms(message, REPO);
+
+    expect(scoreKnowledgeHit(SOURCE, terms)).toBe(1);
+    expect(scoreKnowledgeHit(OPERATOR_CLAIMS, terms)).toBe(1);
+    expect(scoreKnowledgeHit(SYMPY, terms)).toBe(0);
+    expect(selectKnowledgeHits(ALL_THREE, terms)).toEqual([]);
+  });
+
+  it('an unrelated same-repo message with zero content overlap does not clear the floor on the repo-name term alone (#1791 AC, #1790)', () => {
+    const message = 'Draft the quarterly OKR review deck for the leadership meeting next week.';
+    const terms = deriveSearchTerms(message, REPO);
+
+    // Only the repo-name term ('mono') can possibly match either mono-repo
+    // fixture; content overlap is zero by construction. One point is below
+    // RELEVANCE_FLOOR (2), so nothing is selected — the honest outcome
+    // #1791's AC requires: "A same-repo record with zero content overlap
+    // does not clear the floor."
+    expect(scoreKnowledgeHit(SOURCE, terms)).toBe(1);
+    expect(scoreKnowledgeHit(OPERATOR_CLAIMS, terms)).toBe(1);
+    expect(scoreKnowledgeHit(SYMPY, terms)).toBe(0);
+    expect(selectKnowledgeHits(ALL_THREE, terms)).toEqual([]);
   });
 });
