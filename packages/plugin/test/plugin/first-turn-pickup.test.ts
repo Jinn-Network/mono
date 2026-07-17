@@ -7,7 +7,7 @@ import {
   InMemoryLocalLearningPort,
   InMemorySkillsPort,
 } from '../../src/testing.js';
-import { unavailable, type PortResult } from '../../src/outcome.js';
+import { ok, unavailable, type PortResult } from '../../src/outcome.js';
 import type { CorpusPort, CorpusRecord } from '../../src/ports/corpus-port.js';
 import type { KnowledgeHit } from '../../src/schemas/knowledge-hit.js';
 import type { InMemoryCorpusSeed } from '../../src/testing/in-memory-corpus.js';
@@ -590,3 +590,114 @@ describe('firstTurnPickup over ports — evidence-first pickup (rescope §3/§4.
     expect(result.contextBlock).toBeNull();
   });
 });
+
+/**
+ * Wraps a corpus port so every SEARCH HIT claims retrieval visibility while
+ * the fetched record content keeps the seed's own value — the fast-path /
+ * content mismatch shape (#1824): hit metadata is only a hint used to clear
+ * ranking; the decoded envelope's own tags are the truth.
+ */
+function metadataClaimsVisible(port: CorpusPort): CorpusPort {
+  return {
+    async search(query) {
+      const result = await port.search(query);
+      if (result.status !== 'ok') return result;
+      return ok(result.value.map((hit) => ({ ...hit, retrievalVisible: true })));
+    },
+    get: (ref) => port.get(ref),
+  };
+}
+
+// Issue #1824 (corpus-supply-design §5 W2): the post-fetch half of the
+// two-layer allowlist. Content is the truth — a record whose decoded content
+// lacks the retrieval mark is dropped even when its search-hit metadata
+// cleared ranking, promoting the next-ranked candidate (the #1782 walk-down
+// pattern, but fail-closed).
+describe('firstTurnPickup — post-fetch retrieval-visibility content guard (#1824)', () => {
+  it('a record whose content carries the mark produces a packet as normal', async () => {
+    const plugin = buildPlugin(new InMemoryCorpusPort([sourceEvidence({ retrievalVisible: true })]));
+    const session = plugin.session({ ...META, repositorySlug: 'Jinn-Network/mono' });
+    const result = await session.firstTurnPickup(TARGET_MESSAGE);
+
+    expect(result.packets.map((p) => p.ref)).toEqual(['bafySourceEpisode']);
+  });
+
+  it('drops a record whose hit metadata claims visibility but whose content lacks the mark, promoting the next-ranked candidate', async () => {
+    // Rank order by term-count gradient: the content-invisible record
+    // outscores the valid one, so only walk-down promotion (not truncation)
+    // can surface the valid packet.
+    const contentInvisible = sourceEvidence({
+      ref: 'bafyContentInvisible',
+      task: { summary: 'widget catalog inventory pricing sync' },
+      tags: [],
+      origin: 'seed:content-invisible',
+      synthesis: 'Would be real evidence if it were marked.',
+      retrievalVisible: false,
+    });
+    const validLowerRanked = sourceEvidence({
+      ref: 'bafyValidLowerRanked',
+      task: { summary: 'widget catalog inventory' },
+      tags: [],
+      origin: 'seed:valid-lower-ranked',
+      synthesis: 'The inventory count drifted; a reconciliation job fixed it.',
+      retrievalVisible: true,
+    });
+    const plugin = buildPlugin(metadataClaimsVisible(
+      new InMemoryCorpusPort([contentInvisible, validLowerRanked]),
+    ));
+    const session = plugin.session(META);
+    const result = await session.firstTurnPickup('please sync the widget catalog inventory pricing now');
+
+    expect(result.packets.map((p) => p.ref)).toEqual(['bafyValidLowerRanked']);
+    expect(result.contextBlock).not.toContain('bafyContentInvisible');
+  });
+
+  it('yields the honest empty result when every ranked candidate fails the content guard', async () => {
+    const contentInvisible = sourceEvidence({ retrievalVisible: false });
+    const plugin = buildPlugin(metadataClaimsVisible(new InMemoryCorpusPort([contentInvisible])));
+    const session = plugin.session({ ...META, repositorySlug: 'Jinn-Network/mono' });
+    const result = await session.firstTurnPickup(TARGET_MESSAGE);
+
+    expect(result.packets).toEqual([]);
+    expect(result.contextBlock).toBeNull();
+  });
+
+  it('composes with the skill-payload guard: one promotion per failed guard, no double-counting toward the packet cap', async () => {
+    // Term-count gradient ranks: skill leak (4) > content-invisible (3) >
+    // valid (2, at the floor). Both disqualified candidates must be walked
+    // past to reach the valid one.
+    const rank1SkillLeak = sourceEvidence({
+      ref: 'bafyRank1SkillLeak',
+      task: { summary: 'widget catalog inventory pricing' },
+      tags: [],
+      origin: 'seed:rank1-skill-leak',
+      isSkillPayload: true,
+      retrievalVisible: true,
+    });
+    const rank2ContentInvisible = sourceEvidence({
+      ref: 'bafyRank2ContentInvisible',
+      task: { summary: 'widget catalog inventory' },
+      tags: [],
+      origin: 'seed:rank2-content-invisible',
+      retrievalVisible: false,
+    });
+    const rank3Valid = sourceEvidence({
+      ref: 'bafyRank3Valid',
+      task: { summary: 'widget catalog' },
+      tags: [],
+      origin: 'seed:rank3-valid',
+      synthesis: 'The widget catalog page crashed on an undefined image URL; a null check fixed it.',
+      retrievalVisible: true,
+    });
+    const plugin = buildPlugin(metadataClaimsVisible(
+      new InMemoryCorpusPort([rank1SkillLeak, rank2ContentInvisible, rank3Valid]),
+    ));
+    const session = plugin.session(META);
+    const result = await session.firstTurnPickup('please sync the widget catalog inventory pricing now');
+
+    expect(result.packets.map((p) => p.ref)).toEqual(['bafyRank3Valid']);
+    expect(result.contextBlock).not.toContain('bafyRank1SkillLeak');
+    expect(result.contextBlock).not.toContain('bafyRank2ContentInvisible');
+  });
+});
+
