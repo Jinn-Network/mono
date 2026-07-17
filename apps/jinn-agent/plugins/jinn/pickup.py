@@ -159,7 +159,7 @@ def _pickup_inner(
         return None
 
     request = _build_request(user_message, session_id, model, repository_slug)
-    code, out = jinn_layer.session_pickup(request, runner)
+    code, out, _err = jinn_layer.session_pickup(request, runner)
     if code != 0:
         return None
 

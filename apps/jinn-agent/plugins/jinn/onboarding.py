@@ -119,7 +119,7 @@ def ledger_nonempty(runner: Optional[jinn_layer.Runner] = None) -> bool:
     unreachable ledger must never mark the step complete on a false negative,
     but it also must never block, so callers treat False as "still to do".
     """
-    code, out = jinn_layer.ledger_json(runner=runner)
+    code, out, _err = jinn_layer.ledger_json(runner=runner)
     if code != 0:
         return False
     try:
@@ -565,7 +565,7 @@ def _replay_first_envelope(runner: Optional[jinn_layer.Runner]) -> str:
     envelope. Degrades to the design's example CID when the ledger is
     unavailable or unparseable — honest degrade, no fabrication of a live source.
     """
-    code, out = jinn_layer.ledger_json(runner=runner)
+    code, out, _err = jinn_layer.ledger_json(runner=runner)
     if code != 0:
         return "bafkreid6qv…shxv4"
     try:

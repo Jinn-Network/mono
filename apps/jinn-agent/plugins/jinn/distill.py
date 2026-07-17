@@ -89,7 +89,7 @@ def distill_status(runner: Optional[Runner] = None) -> Optional[Dict[str, Any]]:
     run — e2e finding).
     """
     try:
-        code, out = jinn_layer.run(
+        code, out, _err = jinn_layer.run(
             ["distill", "status", "--json", "--out", str(skills_install.skills_dir())], runner
         )
     except Exception:
@@ -672,9 +672,9 @@ def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
                 # and this explicit two-step start IS that consent. Record it
                 # the same way the CLI flag does, or the spawned run would
                 # read the persisted mode and silently run nothing.
-                code, out = jinn_layer.run(["distill", "--where", "local", "--json"], runner)
+                code, out, err = jinn_layer.run(["distill", "--where", "local", "--json"], runner)
                 if code != 0:
-                    return out.strip() or UPDATE_LAYER_LINE
+                    return (err or out).strip() or UPDATE_LAYER_LINE
                 cached_mode(runner, refresh=True)
             ok, msg = start_run()
             return msg
@@ -695,11 +695,11 @@ def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
         return stop_run()
 
     if action == "review":
-        code, out = jinn_layer.run(
+        code, out, err = jinn_layer.run(
             ["distill", "staged", "--json", "--out", str(skills_install.skills_dir())], runner
         )
         if code != 0:
-            return out.strip() or UPDATE_LAYER_LINE
+            return (err or out).strip() or UPDATE_LAYER_LINE
         try:
             staged = json.loads(out)
         except ValueError:
@@ -725,7 +725,7 @@ def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
         skills_dir = skills_install.skills_dir()
         # Read the staged provenance FIRST — the install below clears the
         # staged copies, and the marker (payoff join, uninstall guard) needs it.
-        staged_code, staged_out = jinn_layer.run(
+        staged_code, staged_out, _staged_err = jinn_layer.run(
             ["distill", "staged", "--json", "--out", str(skills_dir)], runner
         )
         provenance_by_name: Dict[str, List[str]] = {}
@@ -736,11 +736,11 @@ def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
             except ValueError:
                 pass
         selector = ["--all"] if target == "all" else [target]
-        code, out = jinn_layer.run(
+        code, out, err = jinn_layer.run(
             ["distill", "install", *selector, "--json", "--out", str(skills_dir)], runner
         )
         if code != 0:
-            return out.strip() or UPDATE_LAYER_LINE
+            return (err or out).strip() or UPDATE_LAYER_LINE
         try:
             result = json.loads(out)
         except ValueError:
@@ -804,9 +804,9 @@ def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
         mode = parts[1] if len(parts) > 1 else ""
         if mode not in ("local", "defer", "off"):
             return "usage: /jinn distill where local|defer|off"
-        code, out = jinn_layer.run(["distill", "--where", mode, "--json"], runner)
+        code, out, err = jinn_layer.run(["distill", "--where", mode, "--json"], runner)
         if code != 0:
-            return out.strip() or UPDATE_LAYER_LINE
+            return (err or out).strip() or UPDATE_LAYER_LINE
         cached_mode(runner, refresh=True)
         behaviour = {
             "local": "runs happen here when you start them",

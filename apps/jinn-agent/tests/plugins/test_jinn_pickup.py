@@ -197,6 +197,27 @@ def test_pickup_returns_none_on_unavailable_status():
     assert pickup.pickup(MSG, runner=runner) is None
 
 
+# ── Stream separation (mono #1787) ──────────────────────────────────────────
+
+def test_pickup_parses_normally_when_stderr_carries_a_warning(monkeypatch):
+    """A stderr diagnostic on the real subprocess path (e.g. the harness's
+    "skipping malformed legacy capture" warning) must never corrupt a
+    structurally valid stdout v1 envelope."""
+    def fake_default_runner(argv, cwd=None, input=None, timeout_s=jinn_layer._SESSION_PICKUP_TIMEOUT_S):
+        return (
+            0,
+            ok_response(),
+            "[evidence] skipping malformed legacy capture "
+            "s1-1784122564637021000.json: some warning",
+        )
+
+    monkeypatch.setattr(jinn_layer, "_default_runner", fake_default_runner)
+
+    result = pickup.pickup(MSG, runner=None)
+
+    assert result == {"context": CONTEXT_BLOCK}
+
+
 def test_stale_layer_response_without_packets_is_treated_as_degraded_nothing():
     """A v1 response without `packets` (a stale jinn-layer predating the
     rescope) must never reintroduce the old suggestion/install shape via

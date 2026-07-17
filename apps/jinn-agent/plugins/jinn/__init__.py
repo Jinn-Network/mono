@@ -84,7 +84,7 @@ def _check_contract() -> None:
             return
         _contract_checked = True
         try:
-            code, out = jinn_layer.contract(runner=_runner)
+            code, out, _err = jinn_layer.contract(runner=_runner)
         except Exception:
             _degraded = "jinn-layer handshake failed"
             return
@@ -387,7 +387,7 @@ def _delegate_session_end(
     if contribution_candidate is not None:
         request["contributionCandidate"] = contribution_candidate
     try:
-        code, out = jinn_layer.session_end(request, runner=_runner)
+        code, out, _err = jinn_layer.session_end(request, runner=_runner)
         if code != 0:
             return None
         envelope = jinn_layer.parse_session_end_response(out)
@@ -621,7 +621,7 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
         if action == "decline":
             if not confirmed:
                 return consent.confirm_decline_command()
-            code, out = jinn_layer.contribution_disable(runner=_runner)
+            code, out, err = jinn_layer.contribution_disable(runner=_runner)
             # Let the core serialize revocation with any publication already
             # crossing its boundary. The direct marker is the fail-closed host
             # fallback and mirrors the successful core write for old stubs.
@@ -631,11 +631,11 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
                 return message
             if marker_ok:
                 return message + "\nexisting publication queue is fail-closed locally; jinn-layer cleanup is degraded"
-            return message + f"\nwarning: could not disable the existing publication queue: {out}"
+            return message + f"\nwarning: could not disable the existing publication queue: {err or out}"
         return consent.render_explainer(consent.COMMANDS_LINE)
 
     if sub == "preview":
-        code, out = jinn_layer.contribution_preview(acknowledge=True, runner=_runner)
+        code, out, _err = jinn_layer.contribution_preview(acknowledge=True, runner=_runner)
         if code == 0:
             try:
                 reply = jinn_layer.parse_process_response(out)
@@ -662,11 +662,11 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
             # an empty screen. Does not mark previewed — the real gate stays
             # on a real trace.
             return consent.render_preview_example()
-        code, out = jinn_layer.capture_preview(pending, runner=_runner)
+        code, out, err = jinn_layer.capture_preview(pending, runner=_runner)
         if code == 0:
             consent.mark_previewed()
             return out + "\n\nlegacy preview only — this retained file will not auto-publish."
-        return f"preview failed:\n{out}"
+        return f"preview failed:\n{err or out}"
 
     if sub == "session":
         state = _peek_state(session_id)
@@ -677,9 +677,9 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
         )
 
     if sub == "history":
-        code, out = jinn_layer.history_json(runner=_runner)
+        code, out, err = jinn_layer.history_json(runner=_runner)
         if code != 0:
-            return f"history unavailable:\n{out}"
+            return f"history unavailable:\n{err or out}"
         try:
             reply = jinn_layer.parse_process_response(out)
         except ValueError as exc:
@@ -702,7 +702,7 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
     if sub == "ledger":
         # Prefer canonical contribution-store rows. A layer that predates the
         # command falls back to the legacy publication-receipt ledger.
-        ccode, cout = jinn_layer.contribution_ledger_json(runner=_runner)
+        ccode, cout, _cerr = jinn_layer.contribution_ledger_json(runner=_runner)
         if ccode == 0:
             try:
                 reply = jinn_layer.parse_process_response(cout)
@@ -725,7 +725,7 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
 
         # Prefer structured legacy rows (design 1b columns + tier chips +
         # exact empty state), then degrade to the layer's raw text.
-        jcode, jout = jinn_layer.ledger_json(runner=_runner)
+        jcode, jout, _jerr = jinn_layer.ledger_json(runner=_runner)
         if jcode == 0:
             try:
                 rows = ledger_view.rows_from_json(json.loads(jout))
@@ -733,8 +733,8 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
                 rows = None
             if rows is not None:
                 return ledger_view.render_ledger(rows, enabled=consent.share_enabled())
-        code, out = jinn_layer.ledger(runner=_runner)
-        return out if code == 0 else f"ledger unavailable:\n{out}"
+        code, out, err = jinn_layer.ledger(runner=_runner)
+        return out if code == 0 else f"ledger unavailable:\n{err or out}"
 
     if sub == "distill":
         # Local distillation (mono #1538) — all logic + rendering in distill.py;
@@ -759,8 +759,8 @@ def _handle_corpus(command_args: str = "", **_: Any) -> str:
     query = (command_args or "").strip()
     if not query:
         return "usage: /corpus <query> — search the public corpus"
-    code, out = jinn_layer.corpus_search(query, runner=_runner)
-    return out if code == 0 else f"corpus search failed:\n{out}"
+    code, out, err = jinn_layer.corpus_search(query, runner=_runner)
+    return out if code == 0 else f"corpus search failed:\n{err or out}"
 
 
 # ── Agent tools — in-session corpus consumption ──────────────────────────────
@@ -788,9 +788,9 @@ def _tool_corpus_search(args: Dict[str, Any], **_kw: Any) -> str:
     if not query:
         return "corpus_search requires a query."
     limit = int(args.get("limit") or 5)
-    code, out = jinn_layer.run(["corpus", "search", query, "--json", "--limit", str(limit)], _runner)
+    code, out, err = jinn_layer.run(["corpus", "search", query, "--json", "--limit", str(limit)], _runner)
     if code != 0:
-        return f"corpus search unavailable: {out}"
+        return f"corpus search unavailable: {err or out}"
     try:
         hits = json.loads(out)
     except json.JSONDecodeError:
@@ -817,9 +817,9 @@ def _tool_corpus_fetch(args: Dict[str, Any], **_kw: Any) -> str:
     ref = str(args.get("ref") or "").strip()
     if not ref:
         return "corpus_fetch requires a ref."
-    code, out = jinn_layer.run(["corpus", "get", ref, "--json"], _runner)
+    code, out, err = jinn_layer.run(["corpus", "get", ref, "--json"], _runner)
     if code != 0:
-        return f"corpus get unavailable: {out}"
+        return f"corpus get unavailable: {err or out}"
     try:
         record = json.loads(out)
         trace, _sha = skills_install._extract_trace(record)
