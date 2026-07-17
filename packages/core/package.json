@@ -27,9 +27,6 @@
     "vitest": "^4.1.8"
   },
   "peerDependenciesMeta": {
-    "@jinn-network/plugin": {
-      "optional": true
-    },
     "vitest": {
       "optional": true
     }
