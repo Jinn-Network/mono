@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import os
+import re
 import subprocess
 
 import pytest
@@ -75,14 +77,12 @@ def test_render_counts_multiple_failures():
     assert doctor.render(checks).splitlines()[-1] == "2 blocking check(s) failed."
 
 
-def test_remedy_present_iff_failing():
-    checks = [
-        {"name": "x", "ok": False, "detail": "d1", "remedy": "r1"},
-        {"name": "y", "ok": True, "detail": "fine"},
-        {"name": "z", "ok": False, "detail": "d2", "remedy": "r2"},
-    ]
-    for check in checks:
-        assert ("remedy" in check) == (check["ok"] is False)
+def test_remedy_present_iff_failing(healthy_environment):
+    # The output contract, checked on real run_checks output: remedy is
+    # present exactly when a check fails, across healthy and broken layers.
+    for runner in (ContractRunner(), ContractRunner(code=127, output="", err="nope")):
+        for check in doctor.run_checks(full=True, runner=runner):
+            assert ("remedy" in check) == (not check["ok"])
 
 
 # ── Task 2: plugin-build ─────────────────────────────────────────────────────
@@ -94,7 +94,7 @@ def _git(repo, *args):
         check=True,
         capture_output=True,
         env={
-            "PATH": __import__("os").environ["PATH"],
+            "PATH": os.environ["PATH"],
             "GIT_AUTHOR_NAME": "t",
             "GIT_AUTHOR_EMAIL": "t@t",
             "GIT_COMMITTER_NAME": "t",
@@ -120,8 +120,6 @@ def test_plugin_build_clean_git_checkout(git_repo):
     assert check["name"] == "plugin-build"
     assert check["ok"] is True
     assert "remedy" not in check
-    import re
-
     assert re.fullmatch(r"git [0-9a-f]{7,} \(clean\)", check["detail"])
 
 
@@ -236,6 +234,17 @@ def test_layer_checks_share_exactly_one_spawn():
     runner = ContractRunner()
     doctor._check_layer(runner=runner)
     assert len(runner.calls) == 1
+
+
+def test_layer_failure_detail_is_one_bounded_line(monkeypatch):
+    # Raw layer stderr can be a multi-line npm/stack-trace blob; the detail
+    # (and therefore _degraded and `/jinn status`) must stay single-line.
+    monkeypatch.delenv("JINN_LAYER_BIN", raising=False)
+    noisy = "npm warn deprecated\nnpm warn old\n" + "x" * 400
+    available, _ = doctor._check_layer(runner=ContractRunner(code=1, output="", err=noisy))
+    assert available["ok"] is False
+    assert "\n" not in available["detail"]
+    assert len(available["detail"]) <= 240
 
 
 # ── Task 4: prerequisites (node >= 22) ───────────────────────────────────────
@@ -373,6 +382,17 @@ def test_first_session_marker_roundtrip(isolated_home):
     doctor._mark_first_session_done()
 
 
+def test_mark_first_session_done_never_raises(isolated_home, monkeypatch):
+    # A read-only home must not raise into the host session-start hook —
+    # the banner just repeats next session.
+    def _deny(*_a, **_k):
+        raise PermissionError("read-only home")
+
+    monkeypatch.setattr(doctor.os, "open", _deny)
+    doctor._mark_first_session_done()
+    assert doctor._first_session_done() is False
+
+
 _HEALTHY = [
     {"name": "plugin-build", "ok": True, "detail": "git abc1234 (clean)"},
     {"name": "layer-available", "ok": True, "detail": "jinn-layer on PATH"},
@@ -401,6 +421,19 @@ def test_banner_with_failure_leads_with_fail_line_and_remedy():
     assert lines[1] == "       remedy: hermes plugins update jinn"
     assert lines[-1] == "commands: /jinn · re-check: /jinn doctor"
     assert len(lines) == 4
+
+
+def test_degraded_reason_derives_from_layer_checks_only():
+    # plugin-build and prerequisites are reports, not gates: only a failing
+    # layer check disables the session-end bridge.
+    checks = [
+        {"name": "plugin-build", "ok": False, "detail": "fatal: broken", "remedy": "r"},
+        {"name": "layer-available", "ok": True, "detail": "jinn-layer on PATH"},
+        {"name": "layer-contract", "ok": False, "detail": "contract v2 (expected v1)", "remedy": "r"},
+        {"name": "prerequisites", "ok": False, "detail": "v20.9.0", "remedy": "r"},
+    ]
+    assert doctor.degraded_reason(checks) == "contract v2 (expected v1)"
+    assert doctor.degraded_reason(_HEALTHY) is None
 
 
 # ── Task 8: __init__.py wiring ───────────────────────────────────────────────
@@ -432,6 +465,46 @@ def test_session_start_first_session_prints_banner_and_marks(wired, capsys):
         doctor.run_checks(full=False, runner=ContractRunner())
     )
     assert doctor._first_session_done() is True
+
+
+def test_session_start_first_session_failure_prints_banner_only(wired, capsys):
+    # First session with a failure: the banner IS the verdict (spec §3.2) —
+    # the first failure must not print twice (once in a fail loop, once in
+    # the banner).
+    jinn._runner = ContractRunner(code=127, output="", err="jinn-layer: not found")
+
+    jinn._on_session_start(session_id="s1")
+
+    err = capsys.readouterr().err
+    assert err.count("[fail] layer-available: jinn-layer: not found") == 1
+    assert err.rstrip("\n").splitlines() == doctor.first_session_banner(
+        doctor.run_checks(
+            full=False, runner=ContractRunner(code=127, output="", err="jinn-layer: not found")
+        )
+    )
+    assert doctor._first_session_done() is True
+
+
+def test_session_start_non_layer_failure_is_loud_but_keeps_bridge(wired, monkeypatch, capsys):
+    # plugin-build is "a report, not a gate": a git error with a healthy
+    # layer prints, but must not disable the session-end bridge.
+    monkeypatch.setattr(
+        doctor,
+        "_check_plugin_build",
+        lambda plugin_dir=None: {
+            "name": "plugin-build",
+            "ok": False,
+            "detail": "fatal: broken",
+            "remedy": "hermes plugins update jinn",
+        },
+    )
+    jinn._runner = ContractRunner()
+    doctor._mark_first_session_done()
+
+    jinn._on_session_start(session_id="s1")
+
+    assert jinn._degraded is None
+    assert "[fail] plugin-build: fatal: broken" in capsys.readouterr().err
 
 
 def test_session_start_later_sessions_silent_when_healthy(wired, capsys):

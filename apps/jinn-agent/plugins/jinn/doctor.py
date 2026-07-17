@@ -31,21 +31,56 @@ _UPDATE_REMEDY = "hermes plugins update jinn"
 # floor (scripts/cold-stock-e2e.sh), stricter than the client's >=20 check.
 _NODE_FLOOR = 22
 
+# A hung child (git index lock, credential helper, broken node shim) must not
+# stall session start; the layer spawn has its own bound (jinn_layer._TIMEOUT_S).
+_SUBPROCESS_TIMEOUT_S = 10
+
+# The bridge gate: only the layer handshake disables the additive session-end
+# process bridge. plugin-build and prerequisites are reports, not gates.
+_BRIDGE_GATING = {"layer-available", "layer-contract"}
+
+
+def fail_lines(check: dict) -> list[str]:
+    """The canonical two-line failure rendering — every surface uses this."""
+    return [
+        f"[fail] {check['name']}: {check['detail']}",
+        f"       remedy: {check['remedy']}",
+    ]
+
+
+def _one_line(text: str, limit: int = 240) -> str:
+    """Collapse raw subprocess output to one bounded line for ``detail``."""
+    flattened = " ".join(text.split())
+    return flattened if len(flattened) <= limit else flattened[: limit - 1] + "…"
+
 
 def render(checks: list[dict]) -> str:
     """Human rendering mirroring the client CLI (doctor.ts humanDoctor)."""
     lines: list[str] = []
     blocking = 0
     for check in checks:
-        mark = "ok  " if check["ok"] else "fail"
-        lines.append(f"[{mark}] {check['name']}: {check['detail']}")
-        if not check["ok"]:
+        if check["ok"]:
+            lines.append(f"[ok  ] {check['name']}: {check['detail']}")
+        else:
             blocking += 1
-            lines.append(f"       remedy: {check['remedy']}")
+            lines.extend(fail_lines(check))
     lines.append(
         "all checks passed." if blocking == 0 else f"{blocking} blocking check(s) failed."
     )
     return "\n".join(lines)
+
+
+def degraded_reason(checks: list[dict]) -> Optional[str]:
+    """Bridge-degradation reason from a check run, or None when healthy.
+
+    Only layer checks gate the bridge — a git hiccup in plugin-build or a
+    Node-floor miss must not disable episode delegation while the layer
+    handshake itself is fine.
+    """
+    for check in checks:
+        if not check["ok"] and check["name"] in _BRIDGE_GATING:
+            return check["detail"]
+    return None
 
 
 def _check_plugin_build(plugin_dir: Optional[Path] = None) -> dict:
@@ -69,14 +104,16 @@ def _check_plugin_build(plugin_dir: Optional[Path] = None) -> dict:
             ["git", "-C", str(directory), "rev-parse", "--short", "HEAD"],
             capture_output=True,
             text=True,
+            timeout=_SUBPROCESS_TIMEOUT_S,
         )
         status = subprocess.run(
             ["git", "-C", str(directory), "status", "--porcelain"],
             capture_output=True,
             text=True,
+            timeout=_SUBPROCESS_TIMEOUT_S,
         )
         if head.returncode != 0 or status.returncode != 0:
-            detail = (head.stderr or status.stderr or "git error").strip()
+            detail = _one_line(head.stderr or status.stderr or "git error")
             return {"name": name, "ok": False, "detail": detail, "remedy": _UPDATE_REMEDY}
         state = "dirty" if status.stdout.strip() else "clean"
         return {"name": name, "ok": True, "detail": f"git {head.stdout.strip()} ({state})"}
@@ -117,8 +154,9 @@ def _check_layer(runner: Optional[jinn_layer.Runner] = None) -> tuple[dict, dict
         )
     if code != 0:
         # The layer's remediation stderr is the actionable string — surface
-        # it instead of discarding it (folded repair, spec §3.3).
-        detail = (err or out or "").strip() or f"jinn-layer exited {code}"
+        # it instead of discarding it (folded repair, spec §3.3), bounded to
+        # one line so `/jinn status` and the fail line stay single-line.
+        detail = _one_line(err or out or "") or f"jinn-layer exited {code}"
         return (
             {"name": "layer-available", "ok": False, "detail": detail, "remedy": remedy},
             not_checked,
@@ -158,7 +196,12 @@ def _check_prerequisites() -> dict:
     if node is None:
         return {"name": name, "ok": False, "detail": "node not found on PATH", "remedy": remedy}
     try:
-        proc = subprocess.run([node, "--version"], capture_output=True, text=True)
+        proc = subprocess.run(
+            [node, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=_SUBPROCESS_TIMEOUT_S,
+        )
         version = proc.stdout.strip()
         major = int(version.lstrip("v").split(".")[0])
     except Exception:
@@ -211,22 +254,20 @@ def _first_session_done() -> bool:
 
 def _mark_first_session_done() -> None:
     marker = _first_session_marker_path()
-    marker.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     try:
+        marker.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.close(os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
-    except FileExistsError:
-        # Two racing session starts — the marker exists, which is the goal.
+    except OSError:
+        # FileExistsError: two racing session starts — the marker exists,
+        # which is the goal. Anything else (read-only home, EACCES): the
+        # banner repeats next session; never raise into the host session.
         pass
 
 
 def first_session_banner(checks: list[dict]) -> list[str]:
     failing = [c for c in checks if not c["ok"]]
     if failing:
-        first = failing[0]
-        verdict = [
-            f"[fail] {first['name']}: {first['detail']}",
-            f"       remedy: {first['remedy']}",
-        ]
+        verdict = fail_lines(failing[0])
     else:
         verdict = [f"jinn ready — {len(checks)} checks passed"]
     return [
