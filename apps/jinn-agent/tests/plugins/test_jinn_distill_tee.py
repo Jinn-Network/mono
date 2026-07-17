@@ -61,7 +61,6 @@ def isolated(tmp_path, monkeypatch):
     jinn._reset_session_state()
     jinn._degraded = None
     jinn._vetoed_tasks.clear()
-    jinn._session_hint_shown.clear()
     yield
     jinn._runner = None
 

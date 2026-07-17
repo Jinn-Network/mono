@@ -907,28 +907,6 @@ _splash_result: Optional[Dict[str, object]] = None
 _splash_reads_done = threading.Event()
 
 
-def _read_contribution_count() -> Optional[int]:
-    """Published-trace count via jinn-layer ``ledger --json``, or None.
-
-    Mirrors ``/jinn ledger``'s "N published" (ledger_view.render_ledger) and
-    the ``onboarding.ledger_nonempty`` degrade rule: any layer error /
-    unparseable output / unrecognised shape → None (never a false count, never
-    raise). Stored raw — consent-gating is applied at merge time in
-    ``gather_splash_state``.
-    """
-    try:
-        from plugins.jinn import jinn_layer, ledger_view
-        code, out, _err = jinn_layer.ledger_json()
-        if code != 0:
-            return None
-        rows = ledger_view.rows_from_json(json.loads(out))
-        if rows is None:
-            return None
-        return ledger_view.published_count(rows)
-    except Exception:
-        return None
-
-
 def _read_corpus() -> Dict[str, object]:
     """Corpus reachability+count via ``corpus search '' --limit 500 --json``.
 
@@ -957,9 +935,6 @@ def prefetch_splash_reads():
         result: Dict[str, object] = {}
         try:
             result.update(_read_corpus())
-            cc = _read_contribution_count()
-            if cc is not None:
-                result["contribution_count"] = cc
         except Exception:
             pass  # never raise — publish whatever resolved, honest checking… for the rest
         _splash_result = result

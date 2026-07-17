@@ -50,13 +50,11 @@ def _default_runner(
         )
         return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
     except FileNotFoundError:
-        # The jinn-layer bin ships on the canary tag until the next stable
-        # release (>= 0.1.10) carries it — flip @canary back to bare
-        # @jinn-network/client here and in README.md once that stable ships
-        # (see Jinn-Network/mono#1368).
+        # The jinn-layer bin arrives with the plugin update; refresh it
+        # (or set JINN_LAYER_BIN to point at a local build).
         return 127, "", (
-            f"{argv[0]}: not found. Install the Jinn layer "
-            "(npm install -g @jinn-network/client@canary) or set JINN_LAYER_BIN."
+            f"{argv[0]}: not found. Update the Jinn layer "
+            "(hermes plugins update jinn) or set JINN_LAYER_BIN."
         )
     except subprocess.TimeoutExpired:
         return 124, "", f"{argv[0]}: timed out after {timeout_s}s"
@@ -128,19 +126,13 @@ def capture_preview(task_file: Path, runner: Optional[Runner] = None) -> Tuple[i
     return run(["capture", "preview", str(task_file)], runner)
 
 
-def publish(task_file: Path, veto: bool = False, runner: Optional[Runner] = None) -> Tuple[int, str, str]:
-    args = ["publish", str(task_file)]
-    if veto:
-        args.append("--veto")
-    return run(args, runner)
-
-
 def ledger(runner: Optional[Runner] = None) -> Tuple[int, str, str]:
     return run(["ledger"], runner)
 
 
 def ledger_json(runner: Optional[Runner] = None) -> Tuple[int, str, str]:
-    """Structured ledger rows for the fork-side renderer (ledger_view).
+    """Structured ledger rows from the harness layer (residual outbound verb;
+    the fork-side ledger surface was removed in mono#1818).
 
     Depends on ``jinn-layer ledger --json`` (harness-layer). When the layer
     predates that flag it errors and the caller falls back to plain ``ledger``.
