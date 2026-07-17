@@ -124,6 +124,37 @@ def test_fallback_drops_none_valued_optional_keys_before_serializing(
     assert "lineage" not in persisted
 
 
+def test_fallback_treats_a_pre_fix_null_bearing_file_as_identical(tmp_path, monkeypatch):
+    # mono #1811: a file written before the null-stripping fix landed
+    # persisted explicit nulls for the optional slots. A post-upgrade retry
+    # of the same session produces the stripped canonical form, which must
+    # still be recognized as identical to the pre-fix file on disk rather
+    # than reported as a collision (which would incorrectly return None for
+    # an already-valid, already-readable episode).
+    monkeypatch.setenv("JINN_LAYER_EPISODES_DIR", str(tmp_path))
+    episode = _episode()
+    episode["episodeId"] = "pre-fix-null-episode"
+    episode["outcome"]["summary"] = None
+    episode["cost"]["tokens"] = None
+    episode["cost"]["usdEstimate"] = None
+    episode["lineage"] = None
+
+    path = tmp_path / f"{episode['episodeId']}.episode.json"
+    pre_fix_serialized = json.dumps(
+        episode,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ) + "\n"
+    path.write_text(pre_fix_serialized, encoding="utf-8")
+
+    result = distill.write_episode_fallback(episode)
+
+    assert result == path
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
 def test_fallback_uses_the_core_filename_and_does_not_duplicate_a_lost_response(
     tmp_path, monkeypatch
 ):

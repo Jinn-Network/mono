@@ -229,7 +229,7 @@ def write_episode_fallback(episode: Dict[str, Any]) -> Optional[Path]:
                     return False
                 os.chmod(path, 0o600)
                 existing = json.loads(path.read_text(encoding="utf-8"))
-                return existing == canonical_episode
+                return _drop_none_optional_keys(existing) == canonical_episode
             except (OSError, ValueError, TypeError):
                 return False
 
