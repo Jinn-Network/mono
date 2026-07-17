@@ -167,6 +167,26 @@ def test_pickup_emits_no_signal_when_nothing_is_provided():
     assert lines == []
 
 
+def test_pickup_default_signal_sink_prints_the_marker_byte_plain(monkeypatch, capsys):
+    # mono #1798: the default sink (used whenever the host doesn't override
+    # signal_sink, i.e. the real TUI path) must strip ANSI before printing —
+    # prompt_toolkit's patch_stdout proxy renders raw ESC bytes as `?` noise
+    # rather than colour. Force the exact palette the live bug report showed.
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("COLORTERM", "truecolor")
+    monkeypatch.setenv("COLUMNS", "120")
+    runner = PickupRunner()
+
+    result = pickup.pickup(MSG, runner=runner)
+
+    assert result is not None
+    err = capsys.readouterr().err
+    assert "\x1b" not in err
+    assert "◇ corpus" in err
+    assert "provided 1 evidence packet" in err
+    assert "dashboard" in err
+
+
 # ── Fail-open paths ──────────────────────────────────────────────────────────
 
 def test_pickup_fails_open_on_broken_layer():
