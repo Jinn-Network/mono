@@ -30,6 +30,7 @@ from typing import Any, Dict, Optional, Set
 from . import capture_buffer as buf
 from . import consent
 from . import distill
+from . import doctor
 from . import history_view
 from . import jinn_layer
 from . import ledger_view
@@ -53,11 +54,11 @@ _distill_usage_snapshot: Dict[str, int] = {}
 # Test seam: overridable subprocess runner (None = real jinn-layer binary).
 _runner: Optional[jinn_layer.Runner] = None
 
-# Memoized v1 handshake. A reason here disables only the additive session-end
-# process bridge; Python pickup, capture, fallback persistence, and distillation
-# remain live.
+# Per-session v1 handshake, re-checked by the doctor fast path at every
+# session start (mono #1817 — no process-lifetime memoization). A reason here
+# disables only the additive session-end process bridge; Python pickup,
+# capture, fallback persistence, and distillation remain live.
 _contract_lock = threading.Lock()
-_contract_checked = False
 _degraded: Optional[str] = None
 
 # Per-session repo/activity evidence. Populated at session start and consumed
@@ -66,46 +67,9 @@ _session_state_lock = threading.Lock()
 _session_states: Dict[str, Dict[str, Any]] = {}
 
 
-def _reset_contract_state() -> None:
-    global _contract_checked, _degraded
-    _contract_checked = False
-    _degraded = None
-
-
 def _reset_session_state() -> None:
     with _session_state_lock:
         _session_states.clear()
-
-
-def _check_contract() -> None:
-    """Probe contract v1 once; never raise into the host session."""
-    global _contract_checked, _degraded
-    with _contract_lock:
-        if _contract_checked:
-            return
-        _contract_checked = True
-        try:
-            code, out, _err = jinn_layer.contract(runner=_runner)
-        except Exception:
-            _degraded = "jinn-layer handshake failed"
-            return
-        if code == 127:
-            _degraded = "jinn-layer unavailable"
-            return
-        if code != 0:
-            _degraded = "jinn-layer handshake failed"
-            return
-        try:
-            reply = json.loads(out)
-        except (TypeError, json.JSONDecodeError):
-            _degraded = "jinn-layer contract unreadable"
-            return
-        version = reply.get("contractVersion") if isinstance(reply, dict) else None
-        if version != jinn_layer.CONTRACT_VERSION:
-            _degraded = (
-                f"jinn-layer contract v{version} "
-                f"(expected v{jinn_layer.CONTRACT_VERSION})"
-            )
 
 
 def _pending_dir() -> Path:
@@ -258,9 +222,22 @@ def _record_activity(session_id: str, field: str, refs: list[str]) -> None:
 # ── Hooks ────────────────────────────────────────────────────────────────────
 
 def _on_session_start(session_id: str = "", platform: str = "", **_: Any) -> None:
+    global _degraded
     cwd = _.get("cwd") or _.get("working_directory")
     _state_for(session_id, Path(cwd) if isinstance(cwd, str) and cwd else None)
-    _check_contract()
+    # Doctor fast path (mono #1817): re-check per session start — no
+    # process-lifetime memoization. Loud on failure, silent when healthy.
+    with _contract_lock:
+        checks = doctor.run_checks(full=False, runner=_runner)
+        failing = [c for c in checks if not c["ok"]]
+        _degraded = failing[0]["detail"] if failing else None
+    for check in failing:
+        _user_line(f"[fail] {check['name']}: {check['detail']}")
+        _user_line(f"       remedy: {check['remedy']}")
+    if not doctor._first_session_done():
+        for line in doctor.first_session_banner(checks):
+            _user_line(line)
+        doctor._mark_first_session_done()
     # Pick up a background distillation left over from a previous process:
     # live pid → resume the ambient tail; dead without a run_end → one
     # recovery line + archive (mono #1539). Never blocks, never raises.
@@ -570,6 +547,7 @@ def _on_session_end(
 _JINN_HELP = (
     "/jinn — Jinn layer\n"
     "  /jinn status    consent + capture state\n"
+    "  /jinn doctor    environment checks — plugin build, layer, prerequisites\n"
     "  /jinn consent   run the consent flow\n"
     "  /jinn preview   inspect a retained legacy capture, or a labelled example\n"
     "  /jinn session   current searched/provided, capture, learning, and contribution state\n"
@@ -590,8 +568,18 @@ def _latest_pending() -> Optional[Path]:
 
 
 def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = "", **_: Any) -> str:
+    global _degraded
     parts = shlex.split(command_args or "")
     sub = parts[0] if parts else "status"
+
+    if sub == "doctor":
+        checks = doctor.run_checks(full=True, runner=_runner)
+        with _contract_lock:
+            # Refresh the bridge state so a fixed layer recovers mid-process
+            # instead of staying degraded for the process lifetime.
+            failing = [c for c in checks if not c["ok"]]
+            _degraded = failing[0]["detail"] if failing else None
+        return doctor.render(checks)
 
     if sub == "status":
         state = consent.load_state()
@@ -894,4 +882,14 @@ def register(ctx) -> None:
         setup_fn=onboarding.setup_parser,
         handler_fn=onboarding.cli_handler,
         description="Walk the core loop once, one confirmed step at a time. --replay re-shows it.",
+    )
+    # `jinn-agent jinn-doctor` — the doctor without a TUI session (mono #1817).
+    # NOT named `doctor`: that collides with the built-in hermes subcommand
+    # and would silently disable discovery of every plugin CLI command.
+    ctx.register_cli_command(
+        "jinn-doctor",
+        help="Jinn environment checks — plugin build, layer, prerequisites.",
+        setup_fn=doctor.setup_parser,
+        handler_fn=doctor.cli_handler,
+        description="Print-only doctor: [ok]/[fail] per check, one copy-paste remedy per failure.",
     )
