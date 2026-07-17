@@ -52,7 +52,10 @@ import { GhPrSink } from '../src/dispatcher/delivery-sink.js';
 import type { DeliverySink } from '../src/dispatcher/delivery-sink.js';
 import { DEFAULT_CONFIG } from '../src/dispatcher/types.js';
 import type { DispatcherConfig, ReadyIssue, InFlightSession, SessionResult, ImplementerRule } from '../src/dispatcher/types.js';
-import { assertHermesRuntimeFiles } from '../src/dispatcher/hermes-runtime.js';
+import {
+  assertHermesBillingRoute,
+  assertHermesRuntimeReady,
+} from '../src/dispatcher/hermes-runtime.js';
 import { WallClock } from '../src/dispatcher/wall-clock.js';
 import { shouldRouteToSessions } from '../src/cli/routing.js';
 import { spawn } from 'node:child_process';
@@ -632,19 +635,12 @@ async function main(): Promise<void> {
   // model, so an operator reading the log must not have to infer it from the
   // rules JSON.
   if (cfg.implementerRules.some((r) => r.implementer === 'hermes')) {
-    assertHermesRuntimeFiles(cfg.hermesPythonPath);
+    assertHermesBillingRoute(cfg.hermesModel, cfg.hermesProvider);
+    assertHermesRuntimeReady(cfg.hermesPythonPath);
     console.log(
       `[autopilot] hermes coordinator routing ACTIVE (model=${cfg.hermesModel}, provider=${cfg.hermesProvider}, ` +
         `python=${cfg.hermesPythonPath})`,
     );
-    // An org-prefixed id silently defeats the explicit provider downstream in
-    // hermes' own inference; warn loudly rather than bill the wrong account.
-    if (cfg.hermesModel.includes('/')) {
-      console.warn(
-        `[autopilot] WARNING: hermes model '${cfg.hermesModel}' is org-prefixed — hermes infers the ` +
-          `'openrouter' provider from that shape. Use a bare id (e.g. gpt-5.6-sol) to stay on ${cfg.hermesProvider}.`,
-      );
-    }
   }
 
   const source = new GhIssueSource(realRunner);
