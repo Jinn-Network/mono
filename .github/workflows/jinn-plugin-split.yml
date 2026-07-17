@@ -1,0 +1,126 @@
+# Split jinn plugin to the slim release repo (Jinn-Network/jinn-plugin).
+#
+# WHAT: On each Monday `main` promote (and on plugin hotfixes that land on
+# `main`), mirror `apps/jinn-agent/plugins/jinn/` to the ROOT of the slim
+# standalone repo `Jinn-Network/jinn-plugin`, so `hermes plugins install jinn`
+# (a git clone) yields a working plugin. This is a deterministic CONTENT-MIRROR
+# (not `git subtree split`): one linear, fast-forwardable commit per promote,
+# idempotent no-op when the plugin tree is unchanged, loud failure on any error.
+# The mirror decision logic lives in the tested helper
+# `.github/scripts/jinn-plugin-split.mjs`; this YAML owns only auth + the push.
+#
+# EDIT IN MONO, NOT HERE: the slim repo is generated. The source of truth is the
+# plugin dir in Jinn-Network/mono. Never hand-edit the slim repo — it is
+# overwritten on the next promote.
+#
+# CHARTER DECISION 3 (BINDING): NO layer artifact rides the split. The plugin
+# dir is published verbatim; the published plugin references the future
+# @jinn-network/jinn-layer (C6). Nothing here packages npm / layer artifacts.
+#
+# SECRET — JINN_PLUGIN_PUSH_TOKEN: a PAT / fine-grained token with
+# `contents: write` on Jinn-Network/jinn-plugin (this is "the A2 push secret").
+# It authenticates BOTH the slim-repo checkout and the push. If the operator's
+# secret is under a different name, rename it to JINN_PLUGIN_PUSH_TOKEN or swap
+# this name throughout. This is the one human-alignment point.
+
+name: Split jinn plugin to slim repo
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Compute the mirror + log the diff, but do not push.
+        type: boolean
+        default: false
+      source_ref:
+        description: Mono ref to mirror from (default = triggering ref / main).
+        type: string
+        required: false
+
+concurrency:
+  group: jinn-plugin-split
+  cancel-in-progress: false
+
+permissions:
+  contents: read # default GITHUB_TOKEN needs nothing; the slim push uses the PAT
+
+jobs:
+  split:
+    runs-on: ubuntu-latest
+    env:
+      JINN_PLUGIN_PUSH_TOKEN: ${{ secrets.JINN_PLUGIN_PUSH_TOKEN }}
+      DRY_RUN: ${{ inputs.dry_run || 'false' }}
+      WORKFLOW_PATH: .github/workflows/jinn-plugin-split.yml
+    steps:
+      - name: Token guard (gates the real-push path only)
+        run: |
+          set -euo pipefail
+          if [ "${DRY_RUN}" != "true" ] && [ -z "${JINN_PLUGIN_PUSH_TOKEN:-}" ]; then
+            echo "::error::JINN_PLUGIN_PUSH_TOKEN is not configured — cannot push the slim repo. This is the A2 push secret: a repo/org secret with contents:write on Jinn-Network/jinn-plugin. See this workflow's header comment."
+            exit 1
+          fi
+
+      - name: Checkout mono at the promoted SHA
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
+          fetch-depth: 1
+          path: mono
+
+      - name: Checkout the slim repo
+        uses: actions/checkout@v7
+        with:
+          repository: Jinn-Network/jinn-plugin
+          token: ${{ secrets.JINN_PLUGIN_PUSH_TOKEN }}
+          path: slim
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Resolve mono SHA + slim default branch, set git identity
+        id: prep
+        run: |
+          set -euo pipefail
+          MONO_SHA="$(git -C mono rev-parse HEAD)"
+          DEFAULT_BRANCH="$(git -C slim rev-parse --abbrev-ref HEAD)"
+          echo "mono_sha=${MONO_SHA}" >> "$GITHUB_OUTPUT"
+          echo "default_branch=${DEFAULT_BRANCH}" >> "$GITHUB_OUTPUT"
+          git -C slim config user.name "github-actions[bot]"
+          git -C slim config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Mirror the plugin dir into the slim checkout (validate + provenance + local commit)
+        id: mirror
+        env:
+          PLUGIN_DIR: mono/apps/jinn-agent/plugins/jinn
+          SLIM_DIR: slim
+          MONO_SHA: ${{ steps.prep.outputs.mono_sha }}
+        run: |
+          set -euo pipefail
+          node mono/.github/scripts/jinn-plugin-split.mjs
+
+      - name: Push to the slim default branch (skipped on dry-run and no-change)
+        env:
+          CHANGED: ${{ steps.mirror.outputs.changed }}
+          DEFAULT_BRANCH: ${{ steps.prep.outputs.default_branch }}
+          MONO_SHA: ${{ steps.prep.outputs.mono_sha }}
+        run: |
+          set -euo pipefail
+          if [ "${DRY_RUN}" = "true" ]; then
+            echo "::notice::dry_run — planned commit + diff below, NOT pushing:"
+            git -C slim status --porcelain
+            git -C slim log -1 --stat || true
+            exit 0
+          fi
+          if [ "${CHANGED}" = "true" ]; then
+            git -C slim push \
+              "https://x-access-token:${JINN_PLUGIN_PUSH_TOKEN}@github.com/Jinn-Network/jinn-plugin.git" \
+              "HEAD:${DEFAULT_BRANCH}"
+            echo "::notice::pushed mirror @ ${MONO_SHA} to Jinn-Network/jinn-plugin (${DEFAULT_BRANCH})"
+          else
+            echo "::notice::nothing to push — slim tree unchanged."
+          fi
