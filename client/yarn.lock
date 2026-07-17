@@ -1072,6 +1072,12 @@ __metadata:
 "@jinn-network/harness-layer@workspace:packages/harness-layer":
   version: 0.0.0-use.local
   resolution: "@jinn-network/harness-layer@workspace:packages/harness-layer"
+  dependencies:
+    "@jinn-network/plugin": "portal:../../../packages/plugin"
+    "@modelcontextprotocol/sdk": "npm:^1.27.1"
+    viem: "npm:^2.0.0"
+    yaml: "npm:^2.8.4"
+    zod: "npm:^4.4.3"
   languageName: unknown
   linkType: soft
 
@@ -1124,6 +1130,19 @@ __metadata:
     xterm-addon-web-links: "npm:^0.9.0"
     zod: "npm:^4.4.3"
   languageName: unknown
+  linkType: soft
+
+"@jinn-network/plugin@portal:../../../packages/plugin::locator=%40jinn-network%2Fharness-layer%40workspace%3Apackages%2Fharness-layer":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/plugin@portal:../../../packages/plugin::locator=%40jinn-network%2Fharness-layer%40workspace%3Apackages%2Fharness-layer"
+  dependencies:
+    zod: "npm:^4.4.3"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
   linkType: soft
 
 "@jinn-network/plugin@portal:../packages/plugin::locator=%40jinn-network%2Fclient%40workspace%3A.":

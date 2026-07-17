@@ -13,5 +13,12 @@
   "scripts": {
     "build:store": "mkdir -p ../../dist/harness-layer && esbuild src/contribution-store.ts --bundle --platform=node --format=esm --external:zod --outfile=../../dist/harness-layer/contribution-store.js && tsc -p tsconfig.store.json",
     "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@jinn-network/plugin": "portal:../../../packages/plugin",
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "viem": "^2.0.0",
+    "yaml": "^2.8.4",
+    "zod": "^4.4.3"
   }
 }
