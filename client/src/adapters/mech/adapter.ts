@@ -248,6 +248,23 @@ export class MechAdapter implements ExecutionAdapter {
     this.store = store;
   }
 
+  /**
+   * Whether this operator participates as an evaluator. Undefined ⇒ enabled
+   * (opt-out default). Gates evaluation-opportunity ingest, boot rehydrate, and
+   * per-cycle scan (#547).
+   */
+  private get evaluatorEnabled(): boolean {
+    return this.config.evaluatorEnabled !== false;
+  }
+
+  /**
+   * Enable the evaluator role at runtime after a live SolverNet join (a join
+   * never removes a role, so turning it back off is never needed). #547.
+   */
+  public setEvaluatorEnabled(enabled: boolean): void {
+    this.config.evaluatorEnabled = enabled;
+  }
+
   async initialize(): Promise<void> {
     const chain = this.config.chainId === 84532 ? baseSepolia : base;
     const clients = createClients(
@@ -278,7 +295,13 @@ export class MechAdapter implements ExecutionAdapter {
 
     // Recover pending state from on-chain events
     if (this.store) {
-      this.loadPendingEvaluationSolutions();
+      // #547: only rehydrate the evaluation-opportunity set for evaluators.
+      // recoverPendingState recovers this operator's own in-flight restoration
+      // claims (router cursor + TaskCreated scan), not the evaluation set, so it
+      // stays unguarded.
+      if (this.evaluatorEnabled) {
+        this.loadPendingEvaluationSolutions();
+      }
       await this.recoverPendingState(blockNumber);
     } else {
       const fromBlock = this.onchainScanFromBlock(blockNumber);
@@ -1046,6 +1069,7 @@ export class MechAdapter implements ExecutionAdapter {
   }
 
   private async *retryPendingEvaluationSolutions(): AsyncIterable<TaskAnnouncement> {
+    if (!this.evaluatorEnabled) return; // #547: non-evaluators never scan.
     let processed = 0;
     for (const [requestId, solution] of Array.from(this.pendingEvaluationSolutions)) {
       // Yield to the event loop periodically so a large backlog of pending
@@ -1090,9 +1114,13 @@ export class MechAdapter implements ExecutionAdapter {
           const fromBlock = this.requestBlockCursor + 1n;
           const logs = await this.getRouterLogsInChunks(fromBlock, currentBlock);
 
-          const submittedSolutions = decodeSolutionDeliveryClaimedLogs(logs);
-          for (const solution of submittedSolutions) {
-            this.rememberPendingEvaluationSolution(solution);
+          // #547: only evaluators ingest delivery-claimed logs into the
+          // pending-evaluation set. Restoration discovery below is unaffected.
+          if (this.evaluatorEnabled) {
+            const submittedSolutions = decodeSolutionDeliveryClaimedLogs(logs);
+            for (const solution of submittedSolutions) {
+              this.rememberPendingEvaluationSolution(solution);
+            }
           }
 
           const joinedManifestDigests = this.joinedManifestDigestSet();

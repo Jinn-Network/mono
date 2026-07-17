@@ -1,0 +1,50 @@
+{
+  "id": "source-dashboard-flake",
+  "repo": "Jinn-Network/mono",
+  "baseCommit": "3651de92ccda900dc6d052b94035f9a86d5b21be",
+  "taskSummary": "Fix flaky dashboard update_available banner test — assert after the version status fetch resolves",
+  "tags": [
+    "mono",
+    "dashboard",
+    "vitest",
+    "version-status",
+    "async",
+    "flake"
+  ],
+  "steps": [
+    {
+      "label": "failure",
+      "title": "run the failing scoped test",
+      "text": "$ yarn --cwd client test src/dashboard/spa/src/notifications/useNotifications.test.tsx\n\n ❱ |spa-jsdom| src/dashboard/spa/src/notifications/useNotifications.test.tsx (11 tests | 1 failed)\n     × does not emit update_available when /v1/status.latestVersion is null\n\n⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯\n\n FAIL  |spa-jsdom| src/dashboard/spa/src/notifications/useNotifications.test.tsx > useNotifications > does not emit update_available when /v1/status.latestVersion is null\nAssertionError: expected [] to include 'funding_low'\n\n ❱ src/dashboard/spa/src/notifications/useNotifications.test.tsx:169:65\n    167|     // funding_low fires from the zero-balance default; wait for it so…\n    168|     // has settled before asserting the negative.\n    169|     await waitFor(() => expect(result.current.map(n => n.kind)).toCont…\n       |                                                                 ^\n    170|     expect(result.current.map(n => n.kind)).not.toContain('update_avai…\n    171|   });\n\n Test Files  1 failed (1)\n      Tests  1 failed | 10 passed (11)"
+    },
+    {
+      "label": "note",
+      "title": "diagnose the failure",
+      "text": "The test waits for a 'funding_low' notification to appear before asserting that 'update_available' is absent, on the theory that the zero-balance default status fixture would produce one. Current gas-runway semantics do not manufacture 'funding_low' from a status fixture that omits the threshold/runway fields, so that wait condition never becomes true and waitFor times out. The test is waiting on the wrong signal: it needs to wait for the async status fetch itself to settle, not for an unrelated notification whose emission rules can change independently."
+    },
+    {
+      "label": "fix",
+      "title": "wait on the status fetch instead of an unrelated notification",
+      "text": "Replace the wait condition with one anchored to the fetch the test actually depends on: await waitFor(() => expect(apiMocks.getStatus).toHaveBeenCalled()), then assert the negative once the async status resolution has settled. This decouples 'wait for the hook to settle' from notification semantics that can legitimately change without invalidating this test."
+    },
+    {
+      "label": "diff",
+      "title": "the fix, as landed",
+      "text": "--- a/client/src/dashboard/spa/src/notifications/useNotifications.test.tsx\n+++ b/client/src/dashboard/spa/src/notifications/useNotifications.test.tsx\n@@ -164,9 +164,10 @@ describe('useNotifications', () => {\n       wrapper: makeWrapper(),\n     });\n \n-    // funding_low fires from the zero-balance default; wait for it so the hook\n-    // has settled before asserting the negative.\n-    await waitFor(() => expect(result.current.map(n => n.kind)).toContain('funding_low'));\n+    // Wait until the status fetch has settled before asserting the negative.\n+    // Current gas-runway semantics do not manufacture a funding notification\n+    // from a status fixture that omits the threshold/runway fields.\n+    await waitFor(() => expect(apiMocks.getStatus).toHaveBeenCalled());\n     expect(result.current.map(n => n.kind)).not.toContain('update_available');\n   });"
+    },
+    {
+      "label": "command",
+      "title": "rerun — passing",
+      "text": "$ yarn --cwd client test src/dashboard/spa/src/notifications/useNotifications.test.tsx\n\n ✓ |spa-jsdom| src/dashboard/spa/src/notifications/useNotifications.test.tsx > useNotifications > does not emit update_available when /v1/status.latestVersion is null\n\n Test Files  1 passed (1)\n      Tests  11 passed (11)"
+    }
+  ],
+  "outcome": {
+    "status": "completed",
+    "verifiabilityTier": "tests-passed"
+  },
+  "synthesis": "The 'does not emit update_available when /v1/status.latestVersion is null' test waited for a funding_low notification to appear before asserting that update_available was absent, assuming the zero-balance default fixture would produce one. Current gas-runway semantics no longer manufacture funding_low from a status fixture that omits the threshold/runway fields, so the wait condition never became true and waitFor timed out with 'expected [] to include funding_low'. The fix anchors the wait to the async operation the test actually depends on — apiMocks.getStatus having been called — rather than to an unrelated notification whose emission rules can change independently. The general pattern: when a test needs an async hook to settle before asserting a negative, wait on a signal tied directly to the operation in flight (the mock/fetch call itself), not on a side effect that a legitimate, unrelated change can silently stop producing.",
+  "attribution": {
+    "origin": "operator-recorded-session",
+    "sourceUrl": "https://github.com/Jinn-Network/mono/commit/163e070d254aaa1f8e980d1a69888f8d8baf9f14"
+  }
+}

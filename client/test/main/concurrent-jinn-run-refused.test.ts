@@ -33,6 +33,10 @@ import {
   applyPidfileLivenessGate,
   checkPidfileLiveness,
 } from '../../src/preflight/pidfile-liveness.js';
+import {
+  __setExecSyncForTesting,
+  __resetExecSyncForTesting,
+} from '../../src/lifecycle/process-discovery.js';
 
 function minimalEngineConfig(root: string): DaemonConfig['restorationEngine'] {
   const implRegistry = new HarnessRegistry({ default: 'legacy-claude' });
@@ -84,11 +88,15 @@ describe('#649 — second jinn run refuses without corrupting state', () => {
       err.code = 'ESRCH';
       throw err;
     });
+    // #805: the sibling is a genuine jinn daemon — pin the cmdline probe so
+    // the refuse-path tests below aren't at the mercy of real `ps` output.
+    __setExecSyncForTesting(() => 'node /opt/jinn/dist/bin/jinn.js run\n');
   });
 
   afterEach(async () => {
     killSpy?.mockRestore();
     killSpy = undefined;
+    __resetExecSyncForTesting();
     await daemon.stop().catch(() => undefined);
     rmSync(tmp, { recursive: true, force: true });
   });
@@ -206,6 +214,16 @@ describe('#649 — second jinn run refuses without corrupting state', () => {
       }
     } finally {
       killSpy.mockRestore();
+    }
+  });
+
+  it('reclaims (does not refuse) when the sibling pid is alive but not a jinn daemon — #805 recycled-pid case', () => {
+    __setExecSyncForTesting(() => 'python train.py\n');
+    const decision = checkPidfileLiveness({ pidPath });
+    expect(decision.decision).toBe('unlink-stale');
+    if (decision.decision === 'unlink-stale') {
+      expect(decision.pid).toBe(siblingPid);
+      expect(decision.reason).toBe('not-jinn');
     }
   });
 });

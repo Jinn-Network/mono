@@ -2320,9 +2320,10 @@ def cmd_chat(args):
     # competes for CPU on single-core devices, so keep it opt-in there.
     if _termux_should_prefetch_update_check():
         try:
-            from hermes_cli.banner import prefetch_update_check
+            from hermes_cli.banner import prefetch_update_check, prefetch_splash_reads
 
             prefetch_update_check()
+            prefetch_splash_reads()
         except Exception:
             pass
 

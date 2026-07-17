@@ -19,3 +19,16 @@ export function degraded<T>(reason: string, value?: T): PortResult<T> {
 export function unavailable<T = never>(reason: string): PortResult<T> {
   return { status: 'unavailable', reason };
 }
+
+/** Fail-open value access: ok → value; degraded → value ?? fallback; unavailable → fallback. */
+export function valueOr<T>(res: PortResult<T>, fallback: T): T {
+  if (res.status === 'ok') return res.value;
+  if (res.status === 'degraded') return res.value ?? fallback;
+  return fallback;
+}
+
+/** Like valueOr, but also surfaces the failure reason so callers can collect it. */
+export function unwrap<T>(res: PortResult<T>, fallback: T): { value: T; reason?: string } {
+  if (res.status === 'ok') return { value: res.value };
+  return { value: res.status === 'degraded' ? res.value ?? fallback : fallback, reason: res.reason };
+}

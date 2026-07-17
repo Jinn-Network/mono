@@ -69,6 +69,13 @@ export interface PersistedTaskRun {
   runtimePluginsJson: string | null;
 
   /**
+   * JSON array of corpus knowledge refs injected into
+   * task.context.corpusKnowledge for this run (#1393). Null when the
+   * autoload was disabled, found nothing, or the run predates the column.
+   */
+  consumedRefsJson: string | null;
+
+  /**
    * Executor mode declared on this run ('train' | 'frozen').
    * Captured by `pack()` from the freeze-fence's HarnessExecutionMode and
    * read by `deliver()` to emit a payload v2 setMetadata. Null for legacy

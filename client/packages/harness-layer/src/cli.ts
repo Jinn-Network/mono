@@ -17,18 +17,32 @@
  */
 
 import { parseArgs } from 'node:util';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
-  createHarnessLayer,
   DEFAULT_IPFS_GATEWAY_URL,
   type CorpusRecord,
   type CorpusSearchHit,
   type HarnessLayer,
 } from './consume.js';
+import {
+  createJinnPlugin,
+  type JinnPluginDeps,
+} from '@jinn-network/plugin';
+import { buildDefaultLayer } from './layer-default.js';
+import { buildPluginDepsFromEnv } from './plugin-wiring.js';
+import {
+  PROCESS_CONTRACT_VERSION,
+  SessionEndRequestV1Schema,
+  SessionPickupRequestV1Schema,
+  envelope as processEnvelope,
+  contributionLedgerRow,
+  sessionEndEnvelope,
+  trackingCorpus,
+} from './process-contract.js';
 import { capture, parseCapturedTask, type CapturedTask, type ScrubRedaction } from './capture.js';
 import { preview, stripBeforeValues, type ScrubReport } from './preview.js';
 import { createMemoryLedger, DEFAULT_LEDGER_PATH, ledger, toLedgerRow, type LedgerEntry } from './ledger.js';
@@ -42,6 +56,11 @@ import {
 import { plan as seedPlan } from './seed-import/plan.js';
 import { execute as seedExecute } from './seed-import/execute.js';
 import { parseImportReport, renderImportReport } from './seed-import/report.js';
+import { createLocalEpisodeSeedSource, type EpisodeSource } from './seed-import/episode-fetch.js';
+import { planEpisodes } from './seed-import/episode-plan.js';
+import { executeEpisodes } from './seed-import/episode-execute.js';
+import { parseEpisodeImportReport, renderEpisodeImportReport } from './seed-import/episode-report.js';
+import { createFileSeedImportState, type SeedImportStateStore } from './seed-import/state.js';
 import { extractSkill } from './skill.js';
 import { isInsidePackageDir } from '../../../src/util/path-safety.js';
 import { runDistillationPipeline } from './pipeline.js';
@@ -55,11 +74,15 @@ import {
   createCodexMetaDistiller,
   DEFAULT_CODEX_MODEL,
   DEFAULT_MODEL as DEFAULT_CLAUDE_DISTILL_MODEL,
+  DISTILLER_CATALOG,
 } from './distill-llm.js';
 import { createLocalDistiller, createLocalSkillSink } from './distiller.js';
+import { parseSkillMarkdown, type SkillPackage } from './skill-package.js';
 import {
   DEFAULT_DISTILL_MODE_PATH,
+  readDistillDefaults,
   readDistillMode,
+  writeDistillDefaults,
   writeDistillMode,
   type DistillMode,
 } from './distill-mode.js';
@@ -77,10 +100,13 @@ import {
   renderPreview,
   renderConfirmLocal,
   renderModeSet,
+  renderDistillerSet,
+  renderDistillerModels,
   renderDeferredRun,
   renderRecorded,
   renderEmpty,
   renderRunSummary,
+  renderSkillsPanel,
   renderReview,
   renderFailure,
   renderResumeNothing,
@@ -88,6 +114,17 @@ import {
 } from './distill-render.js';
 import type { AttemptRef, BridgeEvidence } from './bridge.js';
 import type { DistillCluster, DistillLLMOutput, MetaDistillLLMOutput } from './distill.js';
+import {
+  createNdjsonProgressEmitter,
+  newRunId,
+  type ProgressStream,
+} from './distill-progress.js';
+import {
+  appendDistillRun,
+  readDistillRuns,
+  DEFAULT_DISTILL_RUNS_PATH,
+  type DistillRunRecord,
+} from './distill-runs.js';
 import type { MetaCluster } from './cluster.js';
 import { DEFAULT_TESTNET_DISCOVERY_URL } from '../../../src/config.js';
 import {
@@ -106,6 +143,14 @@ import { resolveCliPassword } from '../../../src/cli/password.js';
 const USAGE = `Usage: jinn-layer <command> [args]
 
 Commands:
+  contract --json                                 Print process contract version 1
+  session pickup                                  Read a v1 pickup request on stdin
+  session end                                     Read a complete EpisodeV1 request on stdin
+  history --json                                  Derive local session history from canonical stores
+  contribution preview [--ack] --json             Show the next sanitized first-share preview;
+                                                   --ack records the one-time acknowledgement
+  contribution ledger --json                      Show privacy-safe canonical contribution states
+  contribution disable --json                     Disable every unpublished authorization
   corpus search "<query>" [--limit N] [--json]   Search corpus records (substring match on
                                                  solverType / role / artifactType / refs)
   corpus get <ref> [--json] [--out <dir>]        Fetch a record by ref (manifest CID from a
@@ -139,7 +184,17 @@ Commands:
   seed execute <report-file> --source <list-file> [--json]
                                                  Publish the approved import rows (APPROVAL
                                                  GATE: run only after the plan report is
-                                                 signed off)
+                                                 signed off). Idempotent: unchanged seeds
+                                                 republish nothing; changed seeds supersede
+                                                 the prior record
+  seed plan --episodes-dir <dir> [--out <report-file>] [--json]
+                                                 List + validate evidence-episode seed files
+                                                 (docs/runbooks/stage1-evidence-seeding.md);
+                                                 ZERO writes
+  seed execute <report-file> --episodes-dir <dir> [--json]
+                                                 Publish the approved evidence episodes
+                                                 (APPROVAL GATE, idempotent + supersedes,
+                                                 same as the skill lane above)
   distill run [--limit N] [--out <dir>] [--meta]
               [--distiller claude|codex] [--local-only]
                                                  Run the distillation pipeline over the
@@ -154,6 +209,7 @@ Commands:
   distill [--where local|defer|off] [--install all|<name>|none] [--resume]
          [--captures <dir>] [--limit N] [--out <dir>]
          [--distiller claude|codex] [--distiller-model <model>] [--json]
+         [--progress ndjson] [--cluster-timeout <seconds>]
                                                  Rung-1 own-captures loop: distill YOUR recent local
                                                  captures into skills, fully local (no corpus publish,
                                                  no chain anchor). A heavy local pass, so you control
@@ -183,6 +239,31 @@ Commands:
                                                  --distiller-model is the arbitrage knob: it is the
                                                  model that WRITES the skills, distinct from the
                                                  cheap runtime model your captures ran under.
+                                                 --progress ndjson streams machine-readable run
+                                                 events (run_start/cluster_*/heartbeat/run_end,
+                                                 one JSON object per line, stamped v/ts/runId) on
+                                                 stderr for wrappers; run_end is always emitted.
+                                                 Non-interactive use only — stdout --json is
+                                                 unaffected; ignore stderr lines without a v field.
+                                                 --cluster-timeout caps each cluster's distiller
+                                                 subprocess (seconds; default 600). On expiry the
+                                                 child is killed, that cluster lands in errors,
+                                                 and the run continues.
+  distill status [--captures <dir>] [--out <dir>] [--json]
+                                                 The loop's state in one read: mode, reserved
+                                                 captures (total + not yet distilled), staged and
+                                                 installed counts, resolved distiller, last run.
+                                                 Pure reads — never prompts, spends, or writes.
+  distill runs [--limit N] [--json]              Recorded runs, newest-first (one record per run
+                                                 outcome: ok / partial / empty).
+  distill staged [--out <dir>] [--json]          Skills waiting in the staging area (<out>-staged):
+                                                 name, what each helps with, provenance. Read-only.
+  distill install [<name> ...] [--all] [--out <dir>] [--json]
+                                                 Install previously STAGED skills into the active
+                                                 dir — no distillation, no consent gate, no LLM
+                                                 calls; these are artifacts an earlier LOCAL run
+                                                 already produced. Installed staged copies are
+                                                 removed (staging holds only what's not installed).
   distill eval-prep [--limit N] [--out <dir>] [--json] [--meta] [--select-only]
                     [--group-cap N] [--concurrency N] [--force] [--retry-errors]
                     [--models gpt-5.4-mini,gpt-5.5]
@@ -225,13 +306,14 @@ Environment (distill — reads the testnet ledger + spends model solves):
 Environment (distill — the rung-1 own-captures loop; runs fully locally):
   JINN_LAYER_CAPTURES_DIR    Own-captures dir (default: ~/.jinn-client/harness-layer/captures)
   JINN_LAYER_DISTILL_MODE_PATH  Where-it-runs mode file (default: ~/.jinn-client/harness-layer/distill.json)
+  JINN_LAYER_DISTILL_RUNS_PATH  Run log (default: ~/.jinn-client/harness-layer/distill-runs.jsonl)
   JINN_DISTILL_PROVIDER      Distiller provider: claude or codex (default: claude)
   JINN_DISTILL_MODEL         Distiller model (overridden by --distiller-model)
 `;
 
 export type DistillProvider = 'claude' | 'codex';
 
-interface DistillPorts {
+export interface DistillPorts {
   distill: (cluster: DistillCluster) => Promise<DistillLLMOutput>;
   metaDistill: (cluster: MetaCluster) => Promise<MetaDistillLLMOutput>;
 }
@@ -247,7 +329,7 @@ export interface DistillRunCliDeps {
   /** The stage-2 meta LLM port. Default: createClaudeMetaDistiller. */
   metaDistill?: (cluster: MetaCluster) => Promise<MetaDistillLLMOutput>;
   /** Provider-aware port factory (tests/embedders). Default: Claude or Codex CLI ports. */
-  distillerFactory?: (provider: DistillProvider, model: string) => DistillPorts;
+  distillerFactory?: (provider: DistillProvider, model: string, timeoutMs?: number) => DistillPorts;
   /** Layer-1 evidence publish deps. Default: live testnet wiring from env. */
   publishDeps?: HarnessPublishDeps;
   /** Held-out slate instance ids. Default: the active swe-rebench-v2 slate. */
@@ -262,7 +344,7 @@ export interface DistillCliDeps {
   /** The LLM distill port. Default: provider factory over the resolved distiller model. */
   distill?: (cluster: DistillCluster) => Promise<DistillLLMOutput>;
   /** Provider-aware port factory (tests). Default: Claude or Codex CLI ports. */
-  distillerFactory?: (provider: DistillProvider, model: string) => DistillPorts;
+  distillerFactory?: (provider: DistillProvider, model: string, timeoutMs?: number) => DistillPorts;
   /**
    * Held-out slate ids — defence-in-depth over the gate + contamination scan.
    * Own captures rarely intersect a public slate, so this defaults to empty.
@@ -290,6 +372,11 @@ export interface DistillCliDeps {
    * default is a readline prompt (see {@link readlineInstallPrompt}).
    */
   promptInstall?: (skillNames: string[]) => Promise<InstallChoice>;
+  /**
+   * Where `--progress ndjson` events are written (#1533). Default:
+   * `process.stderr` — stdout stays reserved for the `--json` result.
+   */
+  progressStream?: ProgressStream;
 }
 
 /** The install-review choice: everything, just the first, or none (stage only). */
@@ -302,10 +389,18 @@ export interface RunJinnLayerCliOptions {
   publishDeps?: HarnessPublishDeps;
   /** Injectable seed source (tests). Default: GitHub source over --source list. */
   seedSource?: SeedSource;
+  /** Injectable evidence-episode seed source (tests). Default: local dir source over --episodes-dir. */
+  episodeSource?: EpisodeSource;
+  /** Injectable seed-import idempotency state (tests). Default: file-backed store (real `seed execute` runs). */
+  seedImportState?: SeedImportStateStore;
   /** Injectable distill-pipeline deps (tests). Default: live wiring per field. */
   distillRunDeps?: DistillRunCliDeps;
   /** Injectable rung-1 own-captures deps (tests). Default: provider-resolved distill port. */
   distillDeps?: DistillCliDeps;
+  /** Injectable stdin reader for versioned process commands. */
+  reader?: () => Promise<string>;
+  /** Real ports are used by default; tests can override any subset. */
+  pluginOverrides?: Partial<JinnPluginDeps>;
   writer?: { write: (s: string) => boolean };
 }
 
@@ -358,6 +453,59 @@ function distillModePath(): string {
     return legacy;
   }
   return DEFAULT_DISTILL_MODE_PATH;
+}
+
+/** Count the skill directories (subdirectories carrying a SKILL.md) under dir. */
+function countSkillDirs(dir: string): number {
+  if (!existsSync(dir)) return 0;
+  let count = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory() && existsSync(join(dir, entry.name, 'SKILL.md'))) count += 1;
+  }
+  return count;
+}
+
+/**
+ * Parse every staged skill under `stagingDir` (#1536). An unparseable
+ * SKILL.md is skipped with a stderr warning — one bad artifact must not
+ * hide the rest of the staging area.
+ */
+function listStaged(stagingDir: string): SkillPackage[] {
+  if (!existsSync(stagingDir)) return [];
+  const pkgs: SkillPackage[] = [];
+  for (const entry of readdirSync(stagingDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const md = join(stagingDir, entry.name, 'SKILL.md');
+    if (!existsSync(md)) continue;
+    try {
+      pkgs.push(parseSkillMarkdown(readFileSync(md, 'utf-8')));
+    } catch (err) {
+      console.warn(`[distill] skipping unparseable staged skill ${entry.name}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return pkgs;
+}
+
+/**
+ * Install skills into the active dir and remove their staged copies — the
+ * single install path (#1536), shared by the inline run flow and the
+ * `distill install` subverb, so staging always holds exactly what is not
+ * installed. NO LLM calls, NO consent gate: these are artifacts an earlier
+ * consented LOCAL run already produced.
+ */
+async function installStagedSkills(
+  pkgs: SkillPackage[],
+  stagingDir: string,
+  activeDir: string,
+): Promise<Array<{ name: string; path: string }>> {
+  const sink = createLocalSkillSink(activeDir);
+  const installed: Array<{ name: string; path: string }> = [];
+  for (const pkg of pkgs) {
+    await sink(pkg);
+    rmSync(join(stagingDir, pkg.name), { recursive: true, force: true });
+    installed.push({ name: pkg.name, path: join(activeDir, pkg.name, 'SKILL.md') });
+  }
+  return installed;
 }
 function ask(rl: ReturnType<typeof createInterface>, q: string): Promise<string> {
   return new Promise((resolve) => rl.question(q, (a) => resolve(a)));
@@ -677,24 +825,46 @@ function parseDistillProvider(raw: string): DistillProvider | null {
   return raw === 'claude' || raw === 'codex' ? raw : null;
 }
 
-function defaultDistillerFactory(provider: DistillProvider, model: string): DistillPorts {
+function defaultDistillerFactory(provider: DistillProvider, model: string, timeoutMs?: number): DistillPorts {
+  const timeout = timeoutMs !== undefined ? { timeoutMs } : {};
   if (provider === 'codex') {
     return {
-      distill: createCodexDistiller({ model }),
-      metaDistill: createCodexMetaDistiller({ model }),
+      distill: createCodexDistiller({ model, ...timeout }),
+      metaDistill: createCodexMetaDistiller({ model, ...timeout }),
     };
   }
   return {
-    distill: createClaudeDistiller({ model }),
-    metaDistill: createClaudeMetaDistiller({ model }),
+    distill: createClaudeDistiller({ model, ...timeout }),
+    metaDistill: createClaudeMetaDistiller({ model, ...timeout }),
   };
 }
 
-function buildDefaultLayer(): HarnessLayer {
-  return createHarnessLayer({
-    ...(process.env['JINN_DISCOVERY_URL'] ? { discoveryUrl: process.env['JINN_DISCOVERY_URL'] } : {}),
-    ...(process.env['JINN_IPFS_GATEWAY_URL'] ? { ipfsGatewayUrl: process.env['JINN_IPFS_GATEWAY_URL'] } : {}),
-  });
+/**
+ * Resolve the per-cluster distiller deadline (#1534): `--cluster-timeout`
+ * (seconds) > `JINN_DISTILL_CLUSTER_TIMEOUT_S` > undefined (the port default).
+ * Returns milliseconds, or an error message for a bad value.
+ */
+function resolveClusterTimeoutMs(flagValue: string | undefined): number | undefined | { error: string } {
+  const raw = flagValue ?? process.env['JINN_DISTILL_CLUSTER_TIMEOUT_S'];
+  if (raw === undefined) return undefined;
+  const seconds = Number(raw);
+  if (!Number.isFinite(seconds) || !Number.isInteger(seconds) || seconds <= 0) {
+    return { error: `error: --cluster-timeout must be a positive integer number of seconds (got ${JSON.stringify(raw)})` };
+  }
+  return seconds * 1000;
+}
+
+async function readStdinToEnd(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+function interfaceError(writer: { write: (s: string) => boolean }, error: unknown): number {
+  writer.write(`error: invalid process request: ${error instanceof Error ? error.message : String(error)}\n`);
+  return 2;
 }
 
 /** Returns the process exit code (0 = success). */
@@ -703,6 +873,7 @@ export async function runJinnLayerCli(
   opts: RunJinnLayerCliOptions = {},
 ): Promise<number> {
   const writer = opts.writer ?? process.stdout;
+  const reader = opts.reader ?? readStdinToEnd;
   const [verb, subverb, ...rest] = argv;
 
   const isCorpus = verb === 'corpus' && (subverb === 'search' || subverb === 'get');
@@ -713,11 +884,131 @@ export async function runJinnLayerCli(
   const isSkillsInstall = verb === 'skills' && subverb === 'install';
   const isDistillRun = verb === 'distill' && subverb === 'run';
   const isDistillEvalPrep = verb === 'distill' && subverb === 'eval-prep';
-  const isDistill = verb === 'distill' && !isDistillRun && !isDistillEvalPrep;
+  const isDistillModels = verb === 'distill' && subverb === 'models';
+  const isDistill = verb === 'distill' && !isDistillRun && !isDistillEvalPrep && !isDistillModels;
   const isDeriveEnv = verb === 'derive-env';
-  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed && !isSkillsInstall && !isDistillRun && !isDistillEvalPrep && !isDistill && !isDeriveEnv) {
+  const isContract = verb === 'contract';
+  const isSessionPickup = verb === 'session' && subverb === 'pickup';
+  const isSessionEnd = verb === 'session' && subverb === 'end';
+  const isHistory = verb === 'history';
+  const isContributionPreview = verb === 'contribution' && subverb === 'preview';
+  const isContributionLedger = verb === 'contribution' && subverb === 'ledger';
+  const isContributionDisable = verb === 'contribution' && subverb === 'disable';
+  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed && !isSkillsInstall && !isDistillRun && !isDistillEvalPrep && !isDistillModels && !isDistill && !isDeriveEnv && !isContract && !isSessionPickup && !isSessionEnd && !isHistory && !isContributionPreview && !isContributionLedger && !isContributionDisable) {
     writer.write(USAGE);
     return verb === undefined || verb === 'help' || verb === '--help' ? 0 : 2;
+  }
+
+  if (isContract) {
+    if (!((subverb === undefined && rest.length === 0) || (subverb === '--json' && rest.length === 0))) {
+      writer.write('error: invalid contract command; use jinn-layer contract --json\n');
+      return 2;
+    }
+    writer.write(`${JSON.stringify({ contractVersion: PROCESS_CONTRACT_VERSION })}\n`);
+    return 0;
+  }
+
+  if (isSessionPickup || isSessionEnd) {
+    if (rest.length > 0) {
+      writer.write(`error: invalid ${isSessionPickup ? 'session pickup' : 'session end'} command; request JSON belongs on stdin\n`);
+      return 2;
+    }
+    let raw: unknown;
+    try {
+      raw = JSON.parse(await reader());
+    } catch (error) {
+      return interfaceError(writer, error);
+    }
+    try {
+      const deps = buildPluginDepsFromEnv(opts.pluginOverrides ?? {});
+      if (isSessionPickup) {
+        const request = SessionPickupRequestV1Schema.parse(raw);
+        const tracked = trackingCorpus(deps);
+        const result = await createJinnPlugin(tracked.deps)
+          .session(request.meta)
+          .firstTurnPickup(request.firstMessage);
+        writer.write(`${JSON.stringify(processEnvelope(tracked.status(), result, tracked.reason()))}\n`);
+      } else {
+        const request = SessionEndRequestV1Schema.parse(raw);
+        const result = await createJinnPlugin(deps).completeSession(request);
+        writer.write(`${JSON.stringify(sessionEndEnvelope(result))}\n`);
+      }
+      return 0;
+    } catch (error) {
+      return interfaceError(writer, error);
+    }
+  }
+
+  if (isHistory) {
+    if (subverb !== '--json' || rest.length !== 0) {
+      writer.write('error: invalid history command; use jinn-layer history --json\n');
+      return 2;
+    }
+    const result = await createJinnPlugin(buildPluginDepsFromEnv(opts.pluginOverrides ?? {}))
+      .history();
+    const status = result.unavailable ? 'unavailable' : result.degraded ? 'degraded' : 'ok';
+    writer.write(`${JSON.stringify(processEnvelope(
+      status,
+      { entries: result.entries },
+      result.reason,
+    ))}\n`);
+    return 0;
+  }
+
+  if (isContributionPreview) {
+    const flags = new Set(rest);
+    if ([...flags].some((arg) => arg !== '--ack' && arg !== '--json') || flags.size !== rest.length) {
+      writer.write('error: invalid contribution preview command\n');
+      return 2;
+    }
+    const result = await createJinnPlugin(buildPluginDepsFromEnv(opts.pluginOverrides ?? {}))
+      .previewContribution(flags.has('--ack'));
+    if (result.status === 'ok') {
+      writer.write(`${JSON.stringify(processEnvelope('ok', result.value))}\n`);
+    } else if (result.status === 'degraded') {
+      writer.write(`${JSON.stringify(processEnvelope('degraded', result.value, result.reason))}\n`);
+    } else {
+      writer.write(`${JSON.stringify(processEnvelope('unavailable', undefined, result.reason))}\n`);
+    }
+    return 0;
+  }
+
+  if (isContributionLedger) {
+    if (rest.length !== 1 || rest[0] !== '--json') {
+      writer.write('error: invalid contribution ledger command; use contribution ledger --json\n');
+      return 2;
+    }
+    const result = await createJinnPlugin(buildPluginDepsFromEnv(opts.pluginOverrides ?? {}))
+      .contributionLedger();
+    if (result.status === 'ok') {
+      writer.write(`${JSON.stringify(processEnvelope('ok', {
+        rows: result.value.map(contributionLedgerRow),
+      }))}\n`);
+    } else if (result.status === 'degraded') {
+      writer.write(`${JSON.stringify(processEnvelope('degraded', {
+        rows: (result.value ?? []).map(contributionLedgerRow),
+      }, result.reason))}\n`);
+    } else {
+      writer.write(`${JSON.stringify(processEnvelope('unavailable', undefined, result.reason))}\n`);
+    }
+    return 0;
+  }
+
+  if (isContributionDisable) {
+    if (rest.some((arg) => arg !== '--json') || rest.length > 1) {
+      writer.write('error: invalid contribution disable command\n');
+      return 2;
+    }
+    const result = await createJinnPlugin(buildPluginDepsFromEnv(opts.pluginOverrides ?? {}))
+      .disableContributionPublication();
+    if (result.status === 'ok') {
+      writer.write(`${JSON.stringify(processEnvelope('ok', result.value))}\n`);
+    } else if (result.status === 'degraded') {
+      writer.write(`${JSON.stringify(processEnvelope('degraded', result.value, result.reason))}\n`);
+    } else {
+      writer.write(`${JSON.stringify(processEnvelope('unavailable', undefined, result.reason))}\n`);
+    }
+    return 0;
   }
 
   // `ledger`, `publish`, `distill`, and `derive-env` have no subverb — their args start at argv[1].
@@ -734,14 +1025,20 @@ export async function runJinnLayerCli(
         path: { type: 'string' },
         veto: { type: 'boolean', default: false },
         source: { type: 'string' },
+        'episodes-dir': { type: 'string' },
         meta: { type: 'boolean', default: false },
         distiller: { type: 'string' },
         'distiller-model': { type: 'string' },
+        'set-distiller': { type: 'string' },
+        'set-distiller-model': { type: 'string' },
         captures: { type: 'string' },
         'local-only': { type: 'boolean', default: false },
         where: { type: 'string' },
         resume: { type: 'boolean', default: false },
         install: { type: 'string' },
+        progress: { type: 'string' },
+        'cluster-timeout': { type: 'string' },
+        all: { type: 'boolean', default: false },
         models: { type: 'string' },
         'max-clusters': { type: 'string' },
         'max-contrastive': { type: 'string' },
@@ -783,9 +1080,15 @@ export async function runJinnLayerCli(
   }
 
   if (isSeed) {
+    const listFile = parsed.values.source as string | undefined;
+    const episodesDir = parsed.values['episodes-dir'] as string | undefined;
+    if (listFile !== undefined && episodesDir !== undefined) {
+      writer.write(`error: seed commands require exactly one of --source or --episodes-dir\n\n${USAGE}`);
+      return 2;
+    }
+
     const buildSource = (): SeedSource => {
       if (opts.seedSource) return opts.seedSource;
-      const listFile = parsed.values.source as string | undefined;
       if (!listFile) {
         throw new Error('seed commands require --source <list-file> (owner/repo[#path] per line) or an injected source');
       }
@@ -800,7 +1103,34 @@ export async function runJinnLayerCli(
       });
     };
 
+    // Evidence-episode source (issue #1771): a separate, parallel lane over
+    // --episodes-dir, chosen instead of --source when either is present. The
+    // two lanes never mix in one report — episodes are first-party content
+    // with no licence gate, so their report shape differs from ImportReport.
+    const isEpisodes = Boolean(opts.episodeSource) || episodesDir !== undefined;
+    const buildEpisodeSource = (): EpisodeSource => {
+      if (opts.episodeSource) return opts.episodeSource;
+      if (!episodesDir) {
+        throw new Error('seed commands require --episodes-dir <dir> (seed-episode JSON files) or an injected episodeSource');
+      }
+      return createLocalEpisodeSeedSource(episodesDir);
+    };
+
     if (subverb === 'plan') {
+      if (isEpisodes) {
+        const episodeReport = await planEpisodes(buildEpisodeSource());
+        const outFile = parsed.values.out as string | undefined;
+        if (outFile) writeFileSync(outFile, JSON.stringify(episodeReport, null, 2) + '\n');
+        if (parsed.values.json) {
+          writer.write(JSON.stringify(episodeReport) + '\n');
+        } else {
+          writer.write(renderEpisodeImportReport(episodeReport) + '\n');
+          writer.write(outFile
+            ? `\nReport written to ${outFile}. APPROVAL GATE: review (edit verdicts if needed), then run seed execute ${outFile} --episodes-dir ${episodesDir ?? '<dir>'}.\n`
+            : '\nAPPROVAL GATE: re-run with --out <report-file>, review, then seed execute.\n');
+        }
+        return 0;
+      }
       const report = await seedPlan(buildSource());
       const outFile = parsed.values.out as string | undefined;
       if (outFile) writeFileSync(outFile, JSON.stringify(report, null, 2) + '\n');
@@ -821,48 +1151,290 @@ export async function runJinnLayerCli(
       writer.write(`error: seed execute requires a <report-file> argument (the approved plan report)\n\n${USAGE}`);
       return 2;
     }
-    const report = parseImportReport(JSON.parse(readFileSync(reportFile, 'utf-8')));
     const deps = opts.publishDeps ?? buildLivePublishDepsFromEnv();
-    const result = await seedExecute(report, buildSource(), deps);
+    // File-backed by default (issue #1771): real `seed execute` runs persist
+    // idempotency state across invocations (path overridable via
+    // JINN_LAYER_SEED_STATE_PATH, mirroring JINN_LAYER_LEDGER_PATH). Tests
+    // inject an in-memory store. A corrupt state file fails closed (semantics
+    // in state.ts); its diagnostic is collected here and surfaced on THIS
+    // command's own output in addition to the per-row error.
+    const stateWarnings: string[] = [];
+    const state = opts.seedImportState ?? createFileSeedImportState(
+      process.env['JINN_LAYER_SEED_STATE_PATH'],
+      { onWarning: (message) => stateWarnings.push(message) },
+    );
+
+    if (isEpisodes) {
+      const episodeReport = parseEpisodeImportReport(JSON.parse(readFileSync(reportFile, 'utf-8')));
+      const result = await executeEpisodes(episodeReport, buildEpisodeSource(), deps, { state });
+      if (parsed.values.json) {
+        writer.write(JSON.stringify({
+          ...result,
+          ...(stateWarnings.length > 0 ? { warnings: stateWarnings } : {}),
+        }) + '\n');
+      } else {
+        const lines = [
+          `${result.imported.length} imported, ${result.skipped.length} skipped, ${result.errors.length} error(s)`,
+          ...stateWarnings.map((w) => `  WARNING  ${w}`),
+        ];
+        for (const row of result.imported) {
+          lines.push(
+            `  IMPORTED ${row.id}`,
+            `    ref     ${row.envelopeRef}`,
+            `    anchor  ${row.anchorTx ? `${TESTNET_EXPLORER_TX_URL}${row.anchorTx}` : '-'}`,
+            ...(row.supersedes ? [`    supersedes ${row.supersedes}`] : []),
+            ...(row.ledgerWarning ? [`    WARNING ${row.ledgerWarning}`] : []),
+            ...(row.stateWarning ? [`    WARNING ${row.stateWarning}`] : []),
+          );
+        }
+        for (const row of result.skipped) lines.push(`  skipped  ${row.id} — ${row.reason}`);
+        for (const row of result.errors) lines.push(`  ERROR    ${row.id} — ${row.error}`);
+        writer.write(lines.join('\n') + '\n');
+      }
+      return result.errors.length > 0 ||
+        result.imported.some((row) => row.stateWarning !== undefined || row.ledgerWarning !== undefined)
+        ? 1
+        : 0;
+    }
+
+    const report = parseImportReport(JSON.parse(readFileSync(reportFile, 'utf-8')));
+    const result = await seedExecute(report, buildSource(), deps, { state });
     if (parsed.values.json) {
-      writer.write(JSON.stringify(result) + '\n');
+      writer.write(JSON.stringify({
+        ...result,
+        ...(stateWarnings.length > 0 ? { warnings: stateWarnings } : {}),
+      }) + '\n');
     } else {
       const lines = [
         `${result.imported.length} imported, ${result.skipped.length} skipped, ${result.errors.length} error(s)`,
+        ...stateWarnings.map((w) => `  WARNING  ${w}`),
       ];
       for (const row of result.imported) {
-        lines.push(`  IMPORTED ${row.skill}`, `    ref     ${row.envelopeRef}`, `    anchor  ${row.anchorTx ? `${TESTNET_EXPLORER_TX_URL}${row.anchorTx}` : '-'}`);
+        lines.push(
+          `  IMPORTED ${row.skill}`,
+          `    ref     ${row.envelopeRef}`,
+          `    anchor  ${row.anchorTx ? `${TESTNET_EXPLORER_TX_URL}${row.anchorTx}` : '-'}`,
+          ...(row.ledgerWarning ? [`    WARNING ${row.ledgerWarning}`] : []),
+          ...(row.stateWarning ? [`    WARNING ${row.stateWarning}`] : []),
+        );
       }
       for (const row of result.skipped) lines.push(`  skipped  ${row.skill} — ${row.reason}`);
       for (const row of result.errors) lines.push(`  ERROR    ${row.skill} — ${row.error}`);
       writer.write(lines.join('\n') + '\n');
     }
-    return result.errors.length > 0 ? 1 : 0;
+    return result.errors.length > 0 ||
+      result.imported.some((row) => row.stateWarning !== undefined || row.ledgerWarning !== undefined)
+      ? 1
+      : 0;
+  }
+
+  if (isDistillModels) {
+    const json = parsed.values.json as boolean;
+    const persisted = readDistillDefaults(distillModePath());
+    // Resolve exactly as a run would (minus per-run model-vs-provider nuance):
+    // flag > env > persisted > provider default, so the marked row is what a
+    // bare `distill` would actually use.
+    const rawProvider =
+      (parsed.values.distiller as string | undefined) ??
+      process.env['JINN_DISTILL_PROVIDER'] ??
+      persisted.distiller ??
+      'claude';
+    const provider = parseDistillProvider(rawProvider) ?? 'claude';
+    const defaultModel = provider === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_DISTILL_MODEL;
+    const model =
+      (parsed.values['distiller-model'] as string | undefined) ??
+      process.env['JINN_DISTILL_MODEL'] ??
+      persisted.distillerModel ??
+      defaultModel;
+    const resolved = { provider, model };
+    if (json) {
+      writer.write(JSON.stringify({ catalog: DISTILLER_CATALOG, resolved }) + '\n');
+    } else {
+      writer.write(renderDistillerModels({ catalog: DISTILLER_CATALOG, resolved }) + '\n');
+    }
+    return 0;
   }
 
   if (isDistill) {
     const dd = opts.distillDeps ?? {};
     const json = parsed.values.json as boolean;
 
+    // Share the progress stream and durable run log identity for this invocation.
+    const runId = newRunId();
+    const startedAt = new Date().toISOString();
+    const invokedAtMs = Date.now();
+
+    // --progress ndjson (#1533): machine-readable run events on stderr, so a
+    // wrapper (the harness background runner) can show progress ambiently.
+    // stdout stays reserved for the --json result. `run_end` is emitted on
+    // every terminal branch — a watcher treats it as the end-of-run signal.
+    const progressFlag = parsed.values.progress as string | undefined;
+    if (progressFlag !== undefined && progressFlag !== 'ndjson') {
+      writer.write(`error: --progress must be "ndjson" (got ${JSON.stringify(progressFlag)})\n\n${USAGE}`);
+      return 2;
+    }
+    const progress =
+      progressFlag === 'ndjson'
+        ? createNdjsonProgressEmitter(dd.progressStream ?? process.stderr, runId)
+        : undefined;
+    const endedEmpty = () =>
+      progress?.runEnd({ outcome: 'empty', clusterCount: 0, published: [], rejectedCount: 0, errorCount: 0, installed: [] });
+
+    const modePath = distillModePath();
+    const persisted = readDistillDefaults(modePath);
+
     // Distiller provider + model — the arbitrage knob. The model resolved here
     // WRITES the skills; it is deliberately distinct from the cheap runtime
     // model each capture ran under (`environment.model`), which `distill` never
-    // touches. Resolution: --distiller-model > JINN_DISTILL_MODEL > provider default.
-    const rawProvider = (parsed.values.distiller as string | undefined) ?? process.env['JINN_DISTILL_PROVIDER'] ?? 'claude';
+    // touches. Resolution: flag > env > persisted default > provider default.
+    const rawProvider =
+      (parsed.values.distiller as string | undefined) ??
+      process.env['JINN_DISTILL_PROVIDER'] ??
+      persisted.distiller ??
+      'claude';
     const distillProvider = parseDistillProvider(rawProvider);
     if (!distillProvider) {
       writer.write(`error: distiller must be "claude" or "codex" (got ${JSON.stringify(rawProvider)})\n\n${USAGE}`);
       return 2;
     }
     const defaultDistillModel = distillProvider === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_DISTILL_MODEL;
+    // The persisted model belongs to the persisted provider. If the effective
+    // provider was overridden away from it by a flag/env, the persisted model
+    // no longer applies — fall to the new provider's default instead.
+    const providerOverridden =
+      (parsed.values.distiller as string | undefined) !== undefined ||
+      process.env['JINN_DISTILL_PROVIDER'] !== undefined;
+    const persistedModel =
+      providerOverridden && persisted.distiller !== undefined && persisted.distiller !== distillProvider
+        ? undefined
+        : persisted.distillerModel;
     const distillModel =
       (parsed.values['distiller-model'] as string | undefined) ??
       process.env['JINN_DISTILL_MODEL'] ??
+      persistedModel ??
       defaultDistillModel;
+    const clusterTimeoutMs = resolveClusterTimeoutMs(parsed.values['cluster-timeout'] as string | undefined);
+    if (typeof clusterTimeoutMs === 'object') {
+      writer.write(`${clusterTimeoutMs.error}\n\n${USAGE}`);
+      return 2;
+    }
     const distill =
-      dd.distill ?? (dd.distillerFactory ?? defaultDistillerFactory)(distillProvider, distillModel).distill;
+      dd.distill ?? (dd.distillerFactory ?? defaultDistillerFactory)(distillProvider, distillModel, clusterTimeoutMs).distill;
 
-    const modePath = distillModePath();
+    const runsPath = process.env['JINN_LAYER_DISTILL_RUNS_PATH'] ?? DEFAULT_DISTILL_RUNS_PATH;
+    const logRun = (
+      outcome: DistillRunRecord['outcome'],
+      facts: Pick<DistillRunRecord, 'clusterCount' | 'published' | 'rejectedCount' | 'errorCount' | 'installed'>,
+    ): void => {
+      try {
+        appendDistillRun({ runId, startedAt, durationMs: Date.now() - invokedAtMs, outcome, distillModel, ...facts }, runsPath);
+      } catch {
+        // A local observability failure must never fail the distillation run.
+      }
+    };
+    const emptyFacts = { clusterCount: 0, published: [], rejectedCount: 0, errorCount: 0, installed: [] };
+
+    // Subverbs (#1535 status/runs, #1536 staged/install). Routed before the
+    // mode machinery: none of them prompt or spend, and only `install` writes
+    // (moving already-produced artifacts out of staging).
+    const sub = parsed.positionals[0];
+    if (sub !== undefined && sub !== 'runs' && sub !== 'status' && sub !== 'staged' && sub !== 'install') {
+      writer.write(`error: unknown distill subcommand ${JSON.stringify(sub)} (expected: run, runs, status, staged, install)\n\n${USAGE}`);
+      return 2;
+    }
+    if (sub === 'staged') {
+      const activeDir = (parsed.values.out as string | undefined) ?? DEFAULT_SKILLS_INSTALL_DIR;
+      const stagingDir = stagingDirFor(activeDir);
+      const staged = listStaged(stagingDir);
+      if (json) {
+        writer.write(
+          JSON.stringify(staged.map((p) => ({ name: p.name, description: p.description, provenance: p.jinn.provenance }))) + '\n',
+        );
+      } else if (staged.length === 0) {
+        writer.write(`nothing staged in ${stagingDir}\n`);
+      } else {
+        const skills: RenderedSkill[] = staged.map((p) => ({
+          name: p.name,
+          installed: false,
+          provenance: p.jinn.provenance,
+          helpsWith: p.description,
+        }));
+        writer.write(renderSkillsPanel(skills, 'staged — waiting for install') + '\n');
+        writer.write(`install with: distill install <name> · distill install --all\n`);
+      }
+      return 0;
+    }
+
+    if (sub === 'install') {
+      const activeDir = (parsed.values.out as string | undefined) ?? DEFAULT_SKILLS_INSTALL_DIR;
+      const stagingDir = stagingDirFor(activeDir);
+      const names = parsed.positionals.slice(1);
+      const all = parsed.values.all as boolean;
+      if (names.length === 0 && !all) {
+        writer.write(`error: distill install needs skill <name>(s) or --all\n\n${USAGE}`);
+        return 2;
+      }
+      const staged = listStaged(stagingDir);
+      const byName = new Map(staged.map((p) => [p.name, p]));
+      let chosen: SkillPackage[];
+      if (all) {
+        chosen = staged;
+      } else {
+        const unknown = names.filter((n) => !byName.has(n));
+        if (unknown.length > 0) {
+          const available = staged.length > 0 ? staged.map((p) => p.name).join(', ') : 'nothing staged';
+          writer.write(`error: not staged: ${unknown.join(', ')} (staged: ${available})\n`);
+          return 2;
+        }
+        chosen = names.map((n) => byName.get(n)!);
+      }
+      const installed = await installStagedSkills(chosen, stagingDir, activeDir);
+      if (json) {
+        writer.write(JSON.stringify({ installed, stagingDir, activeDir }) + '\n');
+      } else if (installed.length === 0) {
+        writer.write(`nothing staged in ${stagingDir}\n`);
+      } else {
+        writer.write(installed.map((s) => `installed  ${s.name}  →  ${s.path}`).join('\n') + '\n');
+      }
+      return 0;
+    }
+    if (sub === 'runs') {
+      const limN = Number.parseInt(parsed.values.limit as string, 10);
+      const limit = argv.some((a) => a === '--limit' || a.startsWith('--limit=')) && Number.isFinite(limN) && limN > 0 ? limN : 20;
+      const runs = readDistillRuns(limit, runsPath);
+      if (json) writer.write(JSON.stringify(runs) + '\n');
+      else if (runs.length === 0) writer.write('no distill runs recorded yet\n');
+      else writer.write(runs.map((r) => `${r.startedAt}  ${r.outcome.padEnd(7)}  ${r.published.length} distilled (${r.published.length > 0 ? r.published.join(', ') : 'no skills'}) · ${r.installed.length} installed · ${r.distillModel}`).join('\n') + '\n');
+      return 0;
+    }
+    if (sub === 'status') {
+      const mode = readDistillMode(modePath);
+      const statusCapturesDir = (parsed.values.captures as string | undefined) ?? process.env['JINN_LAYER_CAPTURES_DIR'] ?? DEFAULT_CAPTURES_DIR;
+      const statusCaptures = loadRecentCaptures(statusCapturesDir, DEFAULT_DISTILL_CAPTURE_LIMIT);
+      const statusActiveDir = (parsed.values.out as string | undefined) ?? DEFAULT_SKILLS_INSTALL_DIR;
+      const statusStagingDir = stagingDirFor(statusActiveDir);
+      const covered = coveredSessionIds([statusActiveDir, statusStagingDir]);
+      const status = {
+        mode,
+        modePath,
+        capturesDir: statusCapturesDir,
+        capturesCount: statusCaptures.length,
+        uncoveredCount: statusCaptures.filter((capture) => !covered.has(capture.session.sessionId)).length,
+        stagingDir: statusStagingDir,
+        stagedCount: countSkillDirs(statusStagingDir),
+        activeDir: statusActiveDir,
+        installedCount: countSkillDirs(statusActiveDir),
+        distillProvider,
+        distillModel,
+        lastRun: readDistillRuns(1, runsPath)[0] ?? null,
+      };
+      if (json) writer.write(JSON.stringify(status) + '\n');
+      else {
+        const last = status.lastRun ? `${status.lastRun.startedAt} ${status.lastRun.outcome} (${status.lastRun.published.length} distilled, ${status.lastRun.installed.length} installed)` : 'never';
+        writer.write([`mode        ${status.mode}`, `captures    ${status.capturesCount} reserved (${status.uncoveredCount} not yet distilled) in ${status.capturesDir}`, `staged      ${status.stagedCount} in ${status.stagingDir}`, `installed   ${status.installedCount} in ${status.activeDir}`, `distiller   ${status.distillProvider} · ${status.distillModel}`, `last run    ${last}`].join('\n') + '\n');
+      }
+      return 0;
+    }
 
     // 1c — `--where <mode>`: the persistent setter. Scriptable, non-interactive;
     // it records the mode and echoes the resulting behaviour, and runs nothing.
@@ -874,6 +1446,32 @@ export async function runJinnLayerCli(
       }
       writeDistillMode(whereFlag, modePath);
       writer.write((json ? JSON.stringify({ where: whereFlag }) : renderModeSet(whereFlag)) + '\n');
+      return 0;
+    }
+
+    // 1496 — `--set-distiller[-model]`: the persistent distiller default setter.
+    // Scriptable, non-interactive; records the default and echoes it, runs nothing.
+    const setProvider = parsed.values['set-distiller'] as string | undefined;
+    const setModel = parsed.values['set-distiller-model'] as string | undefined;
+    if (setProvider !== undefined || setModel !== undefined) {
+      const patch: { distiller?: DistillProvider; distillerModel?: string } = {};
+      if (setProvider !== undefined) {
+        const provider = parseDistillProvider(setProvider);
+        if (!provider) {
+          writer.write(`error: distiller must be "claude" or "codex" (got ${JSON.stringify(setProvider)})\n\n${USAGE}`);
+          return 2;
+        }
+        patch.distiller = provider;
+      }
+      if (setModel !== undefined) {
+        if (setModel === '') {
+          writer.write(`error: --set-distiller-model must be a non-empty model id\n\n${USAGE}`);
+          return 2;
+        }
+        patch.distillerModel = setModel;
+      }
+      writeDistillDefaults(patch, modePath);
+      writer.write((json ? JSON.stringify(patch) : renderDistillerSet(patch)) + '\n');
       return 0;
     }
 
@@ -896,6 +1494,8 @@ export async function runJinnLayerCli(
       } else {
         writer.write(renderEmpty({ capturesDir }) + '\n');
       }
+      endedEmpty();
+      logRun('empty', emptyFacts);
       return 0;
     }
 
@@ -927,12 +1527,16 @@ export async function runJinnLayerCli(
           writer.write(renderConsentDisclosure({ captureCount: captures.length, distillModel }) + '\n\n');
           writer.write(renderDeferredRun({ captureCount: captures.length, capturesDir }) + '\n');
         }
+        endedEmpty();
         return 0;
       }
       const chosen = await prompt();
       writeDistillMode(chosen, modePath);
       writer.write(renderRecorded(chosen, { captureCount: captures.length }) + '\n');
-      if (chosen !== 'local') return 0;
+      if (chosen !== 'local') {
+        endedEmpty();
+        return 0;
+      }
       acting = 'local';
     } else {
       acting = mode;
@@ -941,11 +1545,13 @@ export async function runJinnLayerCli(
     if (acting === 'off') {
       if (json) writer.write(JSON.stringify({ mode: 'off', ran: false, capturesConsidered: captures.length }) + '\n');
       else writer.write(renderRecorded('off', { captureCount: captures.length }) + '\n');
+      endedEmpty();
       return 0;
     }
     if (acting === 'defer') {
       if (json) writer.write(JSON.stringify({ mode: 'defer', ran: false, capturesConsidered: captures.length }) + '\n');
       else writer.write(renderDeferredRun({ captureCount: captures.length, capturesDir }) + '\n');
+      endedEmpty();
       return 0;
     }
 
@@ -968,9 +1574,32 @@ export async function runJinnLayerCli(
       if (toDistill.length === 0) {
         if (json) writer.write(JSON.stringify({ mode: 'local', ran: false, resume: true, capturesConsidered: captures.length }) + '\n');
         else writer.write(renderResumeNothing({ captureCount: captures.length }) + '\n');
+        endedEmpty();
+        logRun('empty', emptyFacts);
         return 0;
       }
     }
+
+    const summaryBySession = new Map(toDistill.map((c) => [c.session.sessionId, c.task.summary]));
+
+    // Progress wiring (#1533): map each cluster back to the source capture's
+    // task summary — the label the operator recognises in an ambient tick.
+    const labelByCluster = new Map<string, string>();
+    const labelFor = (refs: string[]): string | undefined => {
+      const sessionId = refs[0]?.replace(/^local-capture:/, '');
+      const summary = sessionId === undefined ? undefined : summaryBySession.get(sessionId);
+      return summary === undefined ? undefined : summary.length > 80 ? summary.slice(0, 79) + '…' : summary;
+    };
+    progress?.runStart({
+      capturesConsidered: captures.length,
+      toDistill: toDistill.length,
+      resume,
+      distillProvider,
+      distillModel,
+      capturesDir,
+      stagingDir,
+      activeDir,
+    });
 
     // Distill to STAGING — nothing is installed yet.
     const distiller = createLocalDistiller({
@@ -979,10 +1608,46 @@ export async function runJinnLayerCli(
       distribution: 'coding',
       distillModel,
       ...(dd.slateInstanceIds ? { slate: { instanceIds: dd.slateInstanceIds } } : {}),
+      ...(progress
+        ? {
+            onPlan: (plan) => {
+              for (const p of plan) {
+                const label = labelFor(p.refs);
+                if (label !== undefined) labelByCluster.set(p.clusterId, label);
+              }
+              progress.clusterPlan({
+                clusterCount: plan.length,
+                clusters: plan.map((p) => ({
+                  clusterId: p.clusterId,
+                  index: p.index,
+                  captureCount: p.captureCount,
+                  ...(labelByCluster.has(p.clusterId) ? { label: labelByCluster.get(p.clusterId) } : {}),
+                })),
+              });
+            },
+            onCluster: (ev) => {
+              const label = labelByCluster.get(ev.clusterId);
+              if (ev.phase === 'start') {
+                progress.clusterStart({ clusterId: ev.clusterId, index: ev.index, total: ev.total, ...(label !== undefined ? { label } : {}) });
+              } else {
+                progress.clusterEnd({
+                  clusterId: ev.clusterId,
+                  index: ev.index,
+                  total: ev.total,
+                  outcome: ev.outcome ?? 'error',
+                  ...(label !== undefined ? { label } : {}),
+                  ...(ev.skillName !== undefined ? { skillName: ev.skillName } : {}),
+                  ...(ev.reason !== undefined ? { reason: ev.reason } : {}),
+                  ...(ev.error !== undefined ? { error: ev.error } : {}),
+                  ...(ev.durationMs !== undefined ? { durationMs: ev.durationMs } : {}),
+                });
+              }
+            },
+          }
+        : {}),
     });
     const result = await distiller.distill(toDistill);
     const published = result.distilled.published;
-    const summaryBySession = new Map(toDistill.map((c) => [c.session.sessionId, c.task.summary]));
 
     // 1d — a run failed mid-way: staged skills are kept, point at --resume. No
     // install is offered on a partial run.
@@ -992,6 +1657,22 @@ export async function runJinnLayerCli(
       } else {
         writer.write(renderFailure({ distillModel, distilledCount: published.length, errors: result.distilled.errors }) + '\n');
       }
+      progress?.runEnd({
+        outcome: 'partial',
+        clusterCount: result.clusterCount,
+        published: published.map((p) => p.pkg.name),
+        rejectedCount: result.distilled.rejected.length,
+        errorCount: result.distilled.errors.length,
+        installed: [],
+        stagingDir,
+      });
+      logRun('partial', {
+        clusterCount: result.clusterCount,
+        published: published.map((p) => p.pkg.name),
+        rejectedCount: result.distilled.rejected.length,
+        errorCount: result.distilled.errors.length,
+        installed: [],
+      });
       return 1;
     }
 
@@ -1040,12 +1721,11 @@ export async function runJinnLayerCli(
 
     // Install the chosen skills into the active dir via the existing local sink,
     // and clear their staged copies so staging holds only what's not installed.
-    const activeSink = createLocalSkillSink(activeDir);
-    for (const p of published) {
-      if (!installNames.has(p.pkg.name)) continue;
-      await activeSink(p.pkg);
-      rmSync(join(stagingDir, p.pkg.name), { recursive: true, force: true });
-    }
+    await installStagedSkills(
+      published.filter((p) => installNames.has(p.pkg.name)).map((p) => p.pkg),
+      stagingDir,
+      activeDir,
+    );
 
     if (json) {
       writer.write(JSON.stringify({
@@ -1067,6 +1747,22 @@ export async function runJinnLayerCli(
       }));
       writer.write(renderRunSummary({ distillModel, captureCount: toDistill.length, skills }) + '\n');
     }
+    progress?.runEnd({
+      outcome: 'ok',
+      clusterCount: result.clusterCount,
+      published: publishedNames,
+      rejectedCount: result.distilled.rejected.length,
+      errorCount: 0,
+      installed: [...installNames],
+      stagingDir,
+    });
+    logRun('ok', {
+      clusterCount: result.clusterCount,
+      published: publishedNames,
+      rejectedCount: result.distilled.rejected.length,
+      errorCount: 0,
+      installed: [...installNames],
+    });
     return 0;
   }
 
@@ -1246,8 +1942,13 @@ export async function runJinnLayerCli(
     // `distillModel` recorded in provenance (§5), so the record matches the run.
     const defaultDistillModel = distillProvider === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_DISTILL_MODEL;
     const distillModel = process.env['JINN_DISTILL_MODEL'] ?? defaultDistillModel;
+    const runClusterTimeoutMs = resolveClusterTimeoutMs(parsed.values['cluster-timeout'] as string | undefined);
+    if (typeof runClusterTimeoutMs === 'object') {
+      writer.write(`${runClusterTimeoutMs.error}\n\n${USAGE}`);
+      return 2;
+    }
     const distillerFactory = dd.distillerFactory ?? defaultDistillerFactory;
-    const distillPorts = dd.distill && dd.metaDistill ? null : distillerFactory(distillProvider, distillModel);
+    const distillPorts = dd.distill && dd.metaDistill ? null : distillerFactory(distillProvider, distillModel, runClusterTimeoutMs);
     const distill = dd.distill ?? distillPorts!.distill;
     const metaEnabled = parsed.values.meta as boolean;
     const metaDistillPort = dd.metaDistill ?? distillPorts!.metaDistill;

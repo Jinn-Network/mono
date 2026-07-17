@@ -1173,6 +1173,104 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
+  it('does not scan evaluation opportunities when the operator is not an evaluator (#547)', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { canClaimEvaluation, decodeSolutionDeliveryClaimedLogs } = await import('../../../src/adapters/mech/contracts.js');
+    const solverSafe = ('0x' + '66'.repeat(20)) as `0x${string}`;
+
+    // Seed a delivery-claimed log. A persistent mock (not `Once`) keeps the queue
+    // empty for the tests that follow — the ingest gate means this is never
+    // consumed, and a leftover `Once` value would leak into a later test. Reset
+    // to the module default at the end.
+    vi.mocked(decodeSolutionDeliveryClaimedLogs).mockReturnValue([{
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: solverSafe,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    }]);
+
+    const adapter = new MechAdapter({ ...TEST_CONFIG, evaluatorEnabled: false });
+    await adapter.initialize();
+    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(101n);
+    (adapter as any).publicClient.getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
+    (adapter as any).requestBlockCursor = 100n;
+
+    const gen = adapter.watchForTasks()[Symbol.asyncIterator]();
+    // Drive exactly one poll cycle. With no restoration or evaluation work the
+    // cycle completes without yielding; race it against a microtask so the test
+    // never hangs on the outer while loop.
+    const step = gen.next();
+    await Promise.race([step, new Promise((resolve) => setImmediate(resolve))]);
+
+    expect(canClaimEvaluation).not.toHaveBeenCalled();
+    expect((adapter as any).pendingEvaluationSolutions.size).toBe(0);
+
+    await adapter.stop();
+    await step;
+    vi.mocked(decodeSolutionDeliveryClaimedLogs).mockReturnValue([]);
+  });
+
+  it('scans evaluation opportunities when the operator is an evaluator (#547)', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const {
+      canClaimEvaluation,
+      decodeSolutionDeliveryClaimedLogs,
+      getMarketplaceRequestDeliveryMech,
+    } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchFromIpfs, fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const solverSafe = ('0x' + '66'.repeat(20)) as `0x${string}`;
+    const solverMech = ('0x' + '77'.repeat(20)) as `0x${string}`;
+
+    vi.mocked(decodeSolutionDeliveryClaimedLogs).mockReturnValueOnce([{
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: solverSafe,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    }]);
+    vi.mocked(getMarketplaceRequestDeliveryMech).mockResolvedValueOnce(solverMech);
+    vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ data: 'solution payload' });
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'watched-task' }));
+
+    const adapter = new MechAdapter({ ...TEST_CONFIG, evaluatorEnabled: true });
+    await adapter.initialize();
+    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(101n);
+    (adapter as any).publicClient.getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
+    (adapter as any).requestBlockCursor = 100n;
+
+    const gen = adapter.watchForTasks()[Symbol.asyncIterator]();
+    const { value } = await gen.next();
+
+    expect(value).toMatchObject({ taskId: `evaluation:1:0:${REQUEST_ID}` });
+    expect(canClaimEvaluation).toHaveBeenCalled();
+
+    await adapter.stop();
+  });
+
+  it('does not rehydrate persisted evaluation opportunities on boot when not an evaluator (#547)', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const store = makeConfigStore({
+      mech_pending_evaluation_solutions_v1: JSON.stringify([{
+        taskId: '1',
+        attemptIndex: 0,
+        requestId: REQUEST_ID,
+        operator: ('0x' + '66'.repeat(20)),
+        transactionHash: TX_HASH,
+        blockNumber: 333,
+      }]),
+    });
+
+    const adapter = new MechAdapter({ ...TEST_CONFIG, evaluatorEnabled: false }, store as never);
+    await adapter.initialize();
+
+    expect((adapter as any).pendingEvaluationSolutions.size).toBe(0);
+
+    await adapter.stop();
+  });
+
   it('drops stale evaluation opportunities before yielding them to the daemon', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const {

@@ -15,19 +15,46 @@
  * `import` over a non-allowlisted licence is refused — widening the gate is
  * a code change to the disclosed allowlist, reviewable in a PR, not a
  * report-file edit.
+ *
+ * Idempotent by seed identity (issue #1771, `state.ts`): re-running execute
+ * over an unchanged skill publishes nothing new (a `skipped` row instead);
+ * re-running over a CHANGED skill (different skillMd/description/licence/
+ * source) republishes and sets the new record's
+ * `provenance.supersedes` to the prior envelopeRef. `opts.state` defaults to
+ * a fresh in-memory store per call, so existing callers that never pass one
+ * see unchanged behaviour (every row always publishes) — the CLI wires a
+ * file-backed store for real runs (cli.ts, `seed execute`).
  */
 
 import type { SkillArtifactV1 } from '../../../../src/types/skill-artifact.js';
 import { capture } from '../capture.js';
 import type { CapturedTask } from '../capture.js';
 import { buildSeedScrubPipeline } from '../../../../src/trajectory/scrub/build.js';
-import { publish, type HarnessPublishDeps } from '../publish.js';
+import {
+  publish,
+  PublishLedgerError,
+  type HarnessPublishDeps,
+  type PublishResult,
+} from '../publish.js';
 import { checkLicence } from './licence.js';
 import type { SeedSkill, SeedSource } from './fetch.js';
 import type { ImportReport } from './report.js';
+import {
+  createMemorySeedImportState,
+  hashSeedContent,
+  type SeedImportStateStore,
+} from './state.js';
 
 export interface ImportResult {
-  imported: Array<{ skill: string; envelopeRef: string; anchorTx: string | null }>;
+  imported: Array<{
+    skill: string;
+    envelopeRef: string;
+    anchorTx: string | null;
+    /** Publication succeeded, but local lineage state needs operator recovery. */
+    stateWarning?: string;
+    /** Anchor succeeded, but the local publication ledger needs recovery. */
+    ledgerWarning?: string;
+  }>;
   skipped: Array<{ skill: string; reason: string }>;
   errors: Array<{ skill: string; error: string }>;
 }
@@ -126,7 +153,11 @@ function toCapturedTask(skill: SeedSkill, now: Date): CapturedTask {
 }
 
 /** First-class skill artifact for a seed (#1394). Companion-file fetch is #1381. */
-function toSkillArtifact(skill: SeedSkill, safeAddress: `0x${string}`): SkillArtifactV1 {
+function toSkillArtifact(
+  skill: SeedSkill,
+  safeAddress: `0x${string}`,
+  supersedes?: string,
+): SkillArtifactV1 {
   return {
     schemaVersion: 'jinn.skill.v1',
     skill: {
@@ -140,7 +171,18 @@ function toSkillArtifact(skill: SeedSkill, safeAddress: `0x${string}`): SkillArt
       sourceEnvelopeCids: [],
       operator: { safeAddress },
       seed: { skill: skill.skill, source: skill.source, licence: skill.licence },
+      ...(supersedes ? { supersedes } : {}),
     },
+  };
+}
+
+/** The content fields that define "did this seed change" for idempotency (state.ts). */
+function skillContentFingerprint(skill: SeedSkill): unknown {
+  return {
+    skillMd: skill.skillMd,
+    description: skill.description ?? null,
+    licence: skill.licence,
+    source: skill.source,
   };
 }
 
@@ -148,6 +190,7 @@ export async function execute(
   report: ImportReport,
   source: SeedSource,
   deps: HarnessPublishDeps,
+  opts: { state?: SeedImportStateStore } = {},
 ): Promise<ImportResult> {
   const skills = new Map((await source.list()).map((s) => [s.skill, s]));
   const result: ImportResult = { imported: [], skipped: [], errors: [] };
@@ -157,6 +200,7 @@ export async function execute(
   // probabilistic stages false-positive on SKILL.md content and defaced
   // the anchored corpus. Capture stays mandatory and fail-closed.
   const seedScrubPipeline = buildSeedScrubPipeline();
+  const state = opts.state ?? createMemorySeedImportState();
 
   for (const row of report) {
     if (row.verdict === 'skip') {
@@ -170,18 +214,64 @@ export async function execute(
       if (licence.verdict !== 'import') {
         throw new Error(`licence gate refused ${row.skill}: ${licence.reason}`);
       }
+
+      const identity = `skill:${skill.skill}`;
+      const contentHash = hashSeedContent(skillContentFingerprint(skill));
+      let prior: ReturnType<SeedImportStateStore['get']>;
+      try {
+        prior = state.get(identity);
+      } catch (err) {
+        result.errors.push({
+          skill: row.skill,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        break;
+      }
+      if (prior && prior.contentHash === contentHash) {
+        result.skipped.push({ skill: row.skill, reason: `unchanged since ${prior.envelopeRef}` });
+        continue;
+      }
+
       const pending = await capture(toCapturedTask(skill, now), {
         pipeline: seedScrubPipeline,
       });
-      const published = await publish(pending, deps, {
-        skill: toSkillArtifact(skill, deps.participant.safeAddress),
-      });
+      let published: PublishResult;
+      let ledgerWarning: string | undefined;
+      try {
+        published = await publish(pending, deps, {
+          skill: toSkillArtifact(skill, deps.participant.safeAddress, prior?.envelopeRef),
+        });
+      } catch (err) {
+        if (err instanceof PublishLedgerError) {
+          published = err.result;
+          ledgerWarning = err.message;
+        } else {
+          const detail = err instanceof Error ? err.message : String(err);
+          result.errors.push({
+            skill: row.skill,
+            error: `publication outcome unknown; do not auto-retry: ${detail}`,
+          });
+          break;
+        }
+      }
       if (published.vetoed) throw new Error('unexpected veto on seed publish');
+      let stateWarning: string | undefined;
+      try {
+        state.set(identity, { contentHash, envelopeRef: published.envelopeRef, publishedAt: now.toISOString() });
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        stateWarning =
+          `published ${published.envelopeRef}, but seed-import state persistence failed: ${detail}; ` +
+          'recovery required before retrying this seed';
+      }
       result.imported.push({
         skill: row.skill,
         envelopeRef: published.envelopeRef,
         anchorTx: published.anchorTx,
+        ...(ledgerWarning ? { ledgerWarning } : {}),
+        ...(stateWarning ? { stateWarning } : {}),
       });
+      if (ledgerWarning || stateWarning) break;
     } catch (err) {
       result.errors.push({
         skill: row.skill,

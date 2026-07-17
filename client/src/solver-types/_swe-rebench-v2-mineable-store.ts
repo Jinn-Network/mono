@@ -1,15 +1,18 @@
 /**
- * Local mineable-trace retention store for task-creator sessions.
- * Spec: spec/2026-07-08-task-creator-v0.md §10 (decision D2) — sessions are
- * retained for mining ONLY under tier-1 consent ('retain_local'); default is
- * 'off' and the store fails closed (throws, retains nothing).
+ * Task-creator compatibility facade over harness-layer's canonical
+ * ContributionStore. New jinn-layer and daemon callers therefore share one
+ * cacheless schema, migration, lock, and atomic read-modify-write path.
  */
+import type { ContributionCandidateV1 } from '@jinn-network/plugin';
+import {
+  CONTRIBUTION_STORE_SCHEMA_VERSION,
+  ContributionStore,
+  resolveContributionStateDir,
+  type ContributionStoreRecord,
+} from '../../dist/harness-layer/contribution-store.js';
 
-import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
-import { resolve as resolvePath, join } from 'node:path';
-
-export const MINEABLE_TRACE_STORE_SCHEMA_VERSION = 'mineable-trace-store.v1' as const;
-const MINEABLE_TRACE_FILE = 'mineable-traces.json';
+export const MINEABLE_TRACE_STORE_SCHEMA_VERSION = CONTRIBUTION_STORE_SCHEMA_VERSION;
+export const resolveMineableStateDir = resolveContributionStateDir;
 
 export interface MineableTestRun {
   cmd: string;
@@ -22,39 +25,69 @@ export interface MineableSkillEvent {
   action: 'loaded' | 'invoked';
 }
 
+/** Legacy task-creator view. Persisted v2 candidates use the canonical names. */
 export interface MineableTraceRecord {
-  sourceId: string; // opaque local id; never published
+  sourceId: string;
   kind: 'solvernet-execution' | 'harness-session';
-  repo: string; // owner/name
+  repo: string;
   baseCommit: string;
-  acceptedDiff: string; // candidate gold (spec §10 field 2)
-  testRuns: MineableTestRun[]; // verifier seed (field 3)
-  intermediateFailureDiffs: string[]; // negative exemplars (field 4)
-  skillEvents: MineableSkillEvent[]; // §12 option value (field 5)
-  sourceInstanceId?: string; // set when kind === 'solvernet-execution'
-  publishMinedTasksConsent: boolean; // tier-2, from the capture manifest
-  createdAt: string; // ISO — injected by caller, never Date.now() in the store
+  acceptedDiff: string;
+  testRuns: MineableTestRun[];
+  intermediateFailureDiffs: string[];
+  skillEvents: MineableSkillEvent[];
+  sourceInstanceId?: string;
+  publishMinedTasksConsent: boolean;
+  createdAt: string;
 }
 
-interface MineableTraceFile {
-  schemaVersion: typeof MINEABLE_TRACE_STORE_SCHEMA_VERSION;
-  records: Record<string, MineableTraceRecord & { mined?: boolean }>;
+function toCandidate(record: MineableTraceRecord): ContributionCandidateV1 {
+  return {
+    schemaVersion: 'jinn.contribution-candidate.v1',
+    sourceId: record.sourceId,
+    repositorySlug: record.repo,
+    baseCommit: record.baseCommit,
+    acceptedDiff: record.acceptedDiff,
+    testRuns: record.testRuns.map((run) => ({
+      command: run.cmd,
+      exitCode: run.exitCode,
+      at: run.at,
+    })),
+    intermediateFailureDiffs: record.intermediateFailureDiffs,
+    skillEvents: record.skillEvents.map((event) => ({
+      skillRef: event.skill,
+      action: event.action,
+    })),
+    publishMinedTasksConsent: record.publishMinedTasksConsent,
+    createdAt: record.createdAt,
+  };
 }
 
-async function writeJsonAtomic(file: string, data: unknown): Promise<void> {
-  await mkdir(resolvePath(join(file, '..')), { recursive: true });
-  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
-  await rename(tmp, file);
+export function mineableTraceRecordFromStored(record: ContributionStoreRecord): MineableTraceRecord {
+  const candidate = record.candidate;
+  return {
+    sourceId: candidate.sourceId,
+    kind: record.localMetadata?.kind ?? 'harness-session',
+    repo: candidate.repositorySlug,
+    baseCommit: candidate.baseCommit,
+    acceptedDiff: candidate.acceptedDiff,
+    testRuns: candidate.testRuns.map((run) => ({
+      cmd: run.command,
+      exitCode: run.exitCode,
+      at: run.at,
+    })),
+    intermediateFailureDiffs: candidate.intermediateFailureDiffs,
+    skillEvents: candidate.skillEvents.map((event) => ({
+      skill: event.skillRef,
+      action: event.action,
+    })),
+    ...(record.localMetadata?.sourceInstanceId
+      ? { sourceInstanceId: record.localMetadata.sourceInstanceId }
+      : {}),
+    publishMinedTasksConsent: candidate.publishMinedTasksConsent,
+    createdAt: candidate.createdAt,
+  };
 }
 
-/**
- * Pure assembler: builds a well-formed {@link MineableTraceRecord} from
- * whatever fields a producer (e.g. the engine's pack() hook, Task 7) has in
- * scope, filling optional contract fields (§10) with empty defaults rather
- * than leaving them undefined. `now` is injected so callers stay
- * deterministic in tests — the store itself never calls Date.now().
- */
 export function buildMineableRecord(ctx: {
   sourceId: string;
   kind: MineableTraceRecord['kind'];
@@ -83,62 +116,24 @@ export function buildMineableRecord(ctx: {
   };
 }
 
-export class MineableTraceStore {
-  private readonly file: string;
-  private cache: MineableTraceFile | null = null;
-
-  constructor(opts: { stateDir: string }) {
-    this.file = resolvePath(join(opts.stateDir, MINEABLE_TRACE_FILE));
+export class MineableTraceStore extends ContributionStore {
+  constructor(options: { stateDir: string }) {
+    super(options);
   }
 
-  private fresh(): MineableTraceFile {
-    return {
-      schemaVersion: MINEABLE_TRACE_STORE_SCHEMA_VERSION,
-      records: {},
-    };
-  }
-
-  private async load(): Promise<MineableTraceFile> {
-    if (this.cache) return this.cache;
-    try {
-      const raw = JSON.parse(await readFile(this.file, 'utf8')) as MineableTraceFile;
-      if (raw.schemaVersion === MINEABLE_TRACE_STORE_SCHEMA_VERSION) {
-        this.cache = raw;
-        return raw;
-      }
-    } catch {
-      // missing
-    }
-    this.cache = this.fresh();
-    return this.cache;
-  }
-
-  /** Fail-closed: throws if tier-1 consent is not 'retain_local'. */
-  async append(record: MineableTraceRecord, consent: 'off' | 'retain_local'): Promise<void> {
-    if (consent !== 'retain_local') {
-      throw new Error(
-        `MineableTraceStore.append refused: tier-1 consent is '${consent}', not 'retain_local' (D2 fail-closed)`,
-      );
-    }
-    const file = await this.load();
-    file.records[record.sourceId] = { ...record };
-    await writeJsonAtomic(this.file, file);
-    this.cache = file;
+  async append(record: MineableTraceRecord): Promise<void> {
+    await this.record(toCandidate(record), {
+      kind: record.kind,
+      ...(record.sourceInstanceId ? { sourceInstanceId: record.sourceInstanceId } : {}),
+    });
   }
 
   async listUnmined(): Promise<MineableTraceRecord[]> {
-    const file = await this.load();
-    return Object.values(file.records)
-      .filter((r) => !r.mined)
-      .map(({ mined: _mined, ...record }) => record);
+    return (await this.listRecorded()).map(mineableTraceRecordFromStored);
   }
 
+  /** Legacy alias: session mining completed locally, whether admitted or not. */
   async markMined(sourceId: string): Promise<void> {
-    const file = await this.load();
-    const record = file.records[sourceId];
-    if (!record) return;
-    record.mined = true;
-    await writeJsonAtomic(this.file, file);
-    this.cache = file;
+    await this.markMinted(sourceId);
   }
 }

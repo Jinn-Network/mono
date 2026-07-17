@@ -42,4 +42,162 @@ describe('EpisodeV1Schema', () => {
     const withLineage = { ...valid, lineage: { episodeId: 'ep-0', mintRef: 'mint-1' } };
     expect(EpisodeV1Schema.parse(withLineage).lineage?.mintRef).toBe('mint-1');
   });
+
+  it('persists strict evidence-first session activity facts and an authoritative eligibility verdict', () => {
+    const enriched = {
+      ...valid,
+      activity: {
+        searchedTerms: ['dashboard', 'vitest'],
+        providedRefs: ['knowledge/provided-1'],
+        surfacedRefs: [],
+        fetchedRefs: ['knowledge/provided-1'],
+        installedSkillRefs: [],
+      },
+      eligibility: {
+        eligible: true,
+        reason: 'accepted diff on a public repository',
+        checkedAt: '2026-07-15T12:00:00.000Z',
+      },
+    };
+
+    const parsed = EpisodeV1Schema.parse(enriched);
+
+    expect(parsed.activity).toEqual(enriched.activity);
+    expect(parsed.eligibility).toEqual(enriched.eligibility);
+  });
+
+  it('accepts a pre-rescope (legacy) activity shape lacking searchedTerms/providedRefs, defaulting them to []', () => {
+    const legacy = {
+      ...valid,
+      activity: {
+        surfacedRefs: ['knowledge/surfaced-1'],
+        fetchedRefs: ['knowledge/fetched-1'],
+        installedSkillRefs: ['skills/testing@1'],
+      },
+    };
+
+    const parsed = EpisodeV1Schema.parse(legacy);
+
+    expect(parsed.activity).toEqual({
+      searchedTerms: [],
+      providedRefs: [],
+      surfacedRefs: ['knowledge/surfaced-1'],
+      fetchedRefs: ['knowledge/fetched-1'],
+      installedSkillRefs: ['skills/testing@1'],
+    });
+  });
+
+  it('rejects unknown persisted activity facts', () => {
+    expect(() => EpisodeV1Schema.parse({
+      ...valid,
+      activity: {
+        searchedTerms: [],
+        providedRefs: [],
+        surfacedRefs: [],
+        fetchedRefs: [],
+        installedSkillRefs: [],
+        privatePrompt: 'must never be persisted here',
+      },
+    })).toThrow();
+  });
+
+  // Cross-runtime contract guard (mono #1662): the Python plugin's
+  // capture_buffer.assemble_episode() is the sole producer of this record; if its
+  // emitted shape drifts from EpisodeV1Schema, the network drops real traces. The
+  // two fixtures below are verbatim assemble_episode() output (a full user→tool→
+  // assistant episode and a turn-only, no-tokens episode) — parsing them through
+  // the strict schema pins the producer↔schema contract.
+  it('parses a real assemble_episode full-trajectory output', () => {
+    const fromPython = {
+      schemaVersion: 'jinn.episode.v1',
+      episodeId: 's-1784073615851964000',
+      session: { sessionId: 's', capturedAt: '2026-07-15T00:00:15.851854Z' },
+      task: { summary: 'fix the retry bug', distributionTags: [] },
+      trajectory: [
+        {
+          spanId: 'turn-1',
+          parentSpanId: null,
+          kind: 'jinn.agent_turn',
+          name: 'turn:user',
+          startTimeUnixNano: '1784073615851967000',
+          endTimeUnixNano: '1784073615851967000',
+          attributes: { 'turn.text': 'fix the retry bug', role: 'user' },
+          redactedKeys: [],
+        },
+        {
+          spanId: 'c1',
+          parentSpanId: null,
+          kind: 'jinn.tool_call',
+          name: 'tool:edit',
+          startTimeUnixNano: '1784073615846972000',
+          endTimeUnixNano: '1784073615851972000',
+          attributes: { 'tool.args': { path: 'x' }, 'tool.result': 'ok' },
+          redactedKeys: [],
+        },
+        {
+          spanId: 'turn-2',
+          parentSpanId: null,
+          kind: 'jinn.agent_turn',
+          name: 'turn:assistant',
+          startTimeUnixNano: '1784073615851975000',
+          endTimeUnixNano: '1784073615851975000',
+          attributes: { 'turn.text': 'fixed it', role: 'assistant' },
+          redactedKeys: [],
+        },
+      ],
+      environment: {
+        harness: { name: 'hermes-agent', version: '0.1.0' },
+        model: 'gpt-4o-mini',
+        tools: ['edit'],
+        skillsLoadout: ['tdd', 'debugging'],
+      },
+      outcome: { status: 'completed', verifiabilityTier: 'user-accepted' },
+      cost: { durationMs: 0, tokens: { input: 100, output: 50 } },
+      retention: { policy: 'local-private' },
+      provenance: 'contributed',
+    };
+    expect(() => EpisodeV1Schema.parse(fromPython)).not.toThrow();
+  });
+
+  it('parses a real assemble_episode turn-only output (no tool calls, cost.tokens omitted)', () => {
+    const fromPython = {
+      schemaVersion: 'jinn.episode.v1',
+      episodeId: 't-1784073615852046000',
+      session: { sessionId: 't', capturedAt: '2026-07-15T00:00:15.852044Z' },
+      task: { summary: 'just a question', distributionTags: [] },
+      trajectory: [
+        {
+          spanId: 'turn-1',
+          parentSpanId: null,
+          kind: 'jinn.agent_turn',
+          name: 'turn:user',
+          startTimeUnixNano: '1784073615852047000',
+          endTimeUnixNano: '1784073615852047000',
+          attributes: { 'turn.text': 'just a question', role: 'user' },
+          redactedKeys: [],
+        },
+        {
+          spanId: 'turn-2',
+          parentSpanId: null,
+          kind: 'jinn.agent_turn',
+          name: 'turn:assistant',
+          startTimeUnixNano: '1784073615852049000',
+          endTimeUnixNano: '1784073615852049000',
+          attributes: { 'turn.text': 'here is the answer', role: 'assistant' },
+          redactedKeys: [],
+        },
+      ],
+      environment: {
+        harness: { name: 'hermes-agent', version: '0.1.0' },
+        model: 'gpt-4o-mini',
+        tools: [],
+        skillsLoadout: [],
+      },
+      outcome: { status: 'completed', verifiabilityTier: 'user-accepted' },
+      cost: { durationMs: 0 },
+      retention: { policy: 'contribution-eligible' },
+      provenance: 'contributed',
+    };
+    expect(() => EpisodeV1Schema.parse(fromPython)).not.toThrow();
+  });
 });

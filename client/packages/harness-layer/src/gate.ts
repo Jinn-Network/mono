@@ -91,7 +91,7 @@ export function redactionHealth(env: TraceEnvelopeV0, maxDensity = DEFAULT_MAX_D
 
 export function evaluateEligibility(
   env: TraceEnvelopeV0,
-  opts: { heldOut?: boolean; maxPlaceholderDensity?: number } = {},
+  opts: { heldOut?: boolean; maxPlaceholderDensity?: number; acceptUserAccepted?: boolean } = {},
 ): EligibilityResult {
   const maxDensity = opts.maxPlaceholderDensity ?? DEFAULT_MAX_DENSITY;
   const reasons: string[] = [];
@@ -109,14 +109,17 @@ export function evaluateEligibility(
 
   let tier: EligibilityTier | null = null;
   const evaluatorVerified = env.outcome.verifiabilityTier === 'evaluator-verified';
-  if (env.outcome.status === 'completed' && evaluatorVerified) {
+  const userAccepted = opts.acceptUserAccepted === true && env.outcome.verifiabilityTier === 'user-accepted';
+  const acceptedTier = evaluatorVerified || userAccepted;
+  if (env.outcome.status === 'completed' && acceptedTier) {
     tier = 'pattern';
-  } else if (env.outcome.status === 'failed' && evaluatorVerified) {
+  } else if (env.outcome.status === 'failed' && acceptedTier) {
     tier = 'lesson';
   } else {
     reasons.push(
       `outcome not distillable (status=${env.outcome.status}, tier=${env.outcome.verifiabilityTier}; ` +
-        'need evaluator-verified completed→pattern or failed→lesson)',
+        `need ${opts.acceptUserAccepted ? 'evaluator-verified or user-accepted' : 'evaluator-verified'} ` +
+        'completed→pattern or failed→lesson)',
     );
   }
 

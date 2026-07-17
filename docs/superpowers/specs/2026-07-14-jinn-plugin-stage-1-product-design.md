@@ -5,8 +5,7 @@
 - **Author:** Ritsu (planning session, Claude Fable 5)
 - **Shape:** `design` — output is this product design; implementation lands as Stage 1 Issues
 - **Parent direction:** PR #1651 "Jinn Plugin product lifecycle roadmap"
-  (`docs/superpowers/specs/2026-07-14-jinn-plugin-product-roadmap-design.md`, **unmerged — a
-  blocker for dependent implementation issues**). This document is the Stage 1 interaction
+  (`docs/superpowers/specs/2026-07-14-jinn-plugin-product-roadmap-design.md`, merged). This document is the Stage 1 interaction
   design the roadmap deliberately does not specify. It does not extend PR #1651.
 - **Sibling design:** `spec/2026-07-02-jinn-harness-network.md` v0.4 (harness-first
   distribution, D1–D12). Stage 1 assembles what that spec's v0 shipped; divergences are
@@ -17,7 +16,7 @@
 Stage 1 is the **complete connected product**: assemble existing retrieval, capture, task,
 evaluation, distillation, and history capabilities into one coherent, end-to-end experience a
 person has while doing ordinary OSS work — plus two structural requirements that are not
-deferrable: an enforceable plugin package boundary (separate design, Phase 3) and durable,
+deferrable: the enforceable standalone boundary defined in the sibling package architecture and durable,
 reusable evidence episodes.
 
 The Stage 1 gate (from the roadmap):
@@ -32,11 +31,11 @@ The Stage 1 gate (from the roadmap):
 |---|----------|-----------|
 | P1 | **Host: Hermes.** The Jinn Plugin is a plugin for the user's own agent harness; the daemon-injected `client/plugins/*` are the separate marketplace-solving concern. | Open-source harness; the plugin-into-host integration already exists (`apps/jinn-agent/plugins/jinn/`). |
 | P2 | **Acceptance target: stock upstream Hermes + the pip-installed plugin.** The jinn-agent fork is the batteries-included distribution and inherits everything. | Proves "keep your harness, add Jinn" honestly; cold-stock e2e already exists (`apps/jinn-agent/scripts/cold-stock-e2e.sh`). |
-| P3 | **Eligible contribution: user-originated public task mint** (session-echo at true `repo@commit`, blinded provenance). Trace publication remains as the shipped consent-gated lane but is not the gate. | Faithful to the roadmap boundary: "anything leaving the machine must be independently executable against a public OSS base"; the user's own trace never leaves. |
-| P4 | **Contribution is background work.** Consent decided once at onboarding (mineable-trace tiers); the first publish shows a one-time preview; thereafter minting is silent. The user inspects results (`/jinn history`, ledger) rather than being interrupted. Per-task veto remains. | The felt product moment is the boost, not the contribution. Satisfies "publication begins review-first" via consent + first-publish preview + standing visibility/veto. |
+| P3 | **The single sharing lane is the user-originated public task mint** (session-echo at true `repo@commit`, blinded provenance — a reproducible OSS problem based on the user's work). Local traces are **input-only and never leave the machine**; the mint is the sole thing that is shared. | Faithful to the roadmap boundary: "anything leaving the machine must be independently executable against a public OSS base"; the user's own code and history never leave. (mono#1714 collapses the earlier three-consent/tier framing to one.) |
+| P4 | **Contribution is background work.** The one sharing consent is decided once at onboarding; local capture, mining, and distillation happen by default (they never leave the machine); the first shared task shows a one-time preview; thereafter minting is silent. The user inspects results (`/jinn history`, ledger) rather than being interrupted. Per-task veto remains. | The felt product moment is the boost, not the contribution. Satisfies "sharing begins review-first" via consent + first-share preview + standing visibility/veto. *Parked-era note (DR-2026-07-17): with outbound contribution parked through Stage 2, the local half (capture, mining, distillation) runs unconditionally and the outbound half (consent moment, preview, silent minting, ledger) is deleted surface — rebuilt when the lane returns.* |
 | P5 | **Trajectory source: complete the hook collector.** Subscribe `post_llm_call` and record all user turns so the existing capture buffer yields a complete trajectory via Hermes's public plugin API; the episode is assembled at session end. Hermes's sqlite session store is diagnostic backfill only, never a dependency. | Hermes has no native session-evidence seam (its `/learn` and background review distill in-context and discard the trajectory). Hooks are the stable public contract and the pattern ports to future hosts. |
 | P6 | **Session-level feedback: deferred to Stage 2**, alongside attribution. Stage 1 keeps outcome status + the existing skill-scoped `jinn.distill.feedback.v1`. | Attribution is a Stage 2 concern per the roadmap; don't build a feedback surface before the analytics that consume it. |
-| P7 | **Consent defaults: decline/off.** Publish consent default-decline (as shipped); mineable-trace tier-1 (retain local) asked explicitly at onboarding, default off. | Resolves the drift between harness-network spec D3 ("default-on") and shipped behavior in favor of the roadmap's review-first posture. Needs a one-line spec amendment (§9). |
+| P7 | **One consent, default decline.** A single `shareConsent` (default decline) governs the sole sharing lane — whether a mined task leaves the machine. There is no separate retention or trace-publication consent: local capture, mining, and distillation are unconditional. | Resolves the drift between harness-network spec D3 ("default-on") and shipped behavior in favor of the roadmap's review-first posture (mono#1714; harness-network spec amended in §9). *Parked-era note (DR-2026-07-17): the question is not asked while outbound is parked — zero-consent onboarding; the default-decline semantics are preserved as the un-park contract.* |
 | P8 | **Coexist with the host's native self-improvement.** Hermes auto-authors skills/memories per turn (`background_review.py`) and curates them when idle (`curator.py`). Jinn never disables or duplicates this; Jinn's distiller competes on cross-session patterns, provenance, and shareability. #1561 stays the open kill-test. | The host owns single-session learning; the network and durable evidence are Jinn's differentiators. `.jinn-ref` fencing already keeps the two skill populations disjoint. |
 
 ## 3. Primary user and use case
@@ -49,67 +48,89 @@ users (the epic's usefulness bar). No benchmark workflow, no Jinn-specific task 
 
 ### 4.1 Install and onboarding
 `pip install` the plugin (repo subdirectory today; PyPI later) → `hermes plugins enable jinn`
-→ `npm i -g @jinn-network/client` (the `jinn-layer` CLI). First session: existing onboarding
-asks publish consent (default decline) and mineable-trace consent tiers (default off).
+→ `npm i -g @jinn-network/client` (the `jinn-layer` CLI). First session: onboarding asks
+exactly one sharing consent (default decline) — whether a reproducible task derived from your
+work may be shared. Local capture, mining, and distillation are unconditional.
 Stage 1 adds a `jinn-layer` version-compatibility check (the #1380 gap) and keeps `/jinn
 status` as the install doctor.
 
 ### 4.2 During work — the boost, made visible
-- First turn: auto-pickup searches the corpus from the first user message; suggestions inject
-  as `[jinn corpus]` context (cache-safe, user-message injection).
+
+*(Amended 2026-07-16 by the Stage 1 rescope — see §9 item 4 and
+`docs/superpowers/plans/2026-07-16-jinn-plugin-stage-1-rescope-plan.md`.)*
+
+- First turn: auto-pickup derives search terms from the first user message and the session's
+  repository, searches the corpus, and injects up to two bounded **knowledge packets** —
+  evidence content (the record's own synthesis plus failure/fix/command/diff excerpts)
+  projected deterministically from published evidence records — as `[jinn corpus]` context
+  (cache-safe, user-message injection), each attributed to its source record with a
+  `corpus_fetch <ref>` pointer.
+- Retrieval serves **evidence records only**; skill records are excluded from pickup (shared
+  skills are the Stage 3 product per the roadmap and distillation-v1 D11). A relevance floor
+  makes "nothing relevant found" a real, honest outcome.
 - Mid-task: `corpus_search` / `corpus_fetch` agent tools and `/corpus <q>`.
-- Skills: `/jinn skills install <ref>` into the host's native skills dir (`.jinn-ref` fenced).
-- Auto-adopt stays tier-gated (`evaluator-verified`) and therefore dormant in Stage 1;
-  the experience is **suggest-first**. Corpus content: seeds + prior traces + distilled skills.
-- **Legibility (new build):** the point-of-use `◇ corpus` marker fires on *suggestions* (today
-  it fires only on auto-adopt, i.e. never); a session-end Jinn summary states what was
-  surfaced/fetched/installed, capture status, and the eligibility verdict; `/jinn session`
-  shows the current session's Jinn activity on demand. When Jinn found nothing, it says so.
+- **Legibility:** the point-of-use `◇ corpus` marker fires when packets are provided; the
+  session-end Jinn summary and `/jinn session` state what was **searched** and what was
+  **provided to the agent** — the only user-facing knowledge states — plus capture status and
+  the eligibility verdict. Internal fetch/parse detail is recorded, not headlined. Stage 1
+  never claims provided knowledge helped (attribution is Stage 2, P6). When Jinn found
+  nothing, it says so.
 
 ### 4.3 Session end — evidence
 The episode is assembled at session end from the completed hook collector (P5) and retained
-locally: **all turns** (user, assistant, tool calls/results), environment (harness, model,
+locally. The ordered trajectory is a first-class field, not material hidden in a snapshot:
+**all turns** (user, assistant, tool calls/results), environment (harness, model,
 tools, **skills loadout** — new), outcome status, cost (duration + **tokens** — new), a
 **per-record privacy/retention field** (new; today gating is implicit external state), and
 lineage hooks (episode → mint → eventual marketplace evidence). Private by default; the
-existing tee to the distill captures dir continues under its current gating. Retention (prune
-newest 200) becomes a stated, user-visible policy. The frozen `jinn.trace-envelope.v0` publish
-format is untouched; episode-schema mechanics are Phase 3 design.
+existing tee to the distill captures dir continues. Retention (prune
+newest 200) becomes a stated, user-visible policy. `EpisodeV1` is the canonical reusable
+knowledge artifact from Stage 1 onward. Existing `jinn.trace-envelope.v0` pending files are
+preserved as private local material but are retired from outbound publication and never
+auto-published by the new flow.
 
 ### 4.4 Contribution — silent, inspectable
-If the session produced an accepted diff on a public repo, the plugin records a mineable
-trace (tier-1 consent). Background machinery (the daemon-sidecar `HarvestLoop` + session-echo
-miner) validates eligibility — public repo, resolvable `repo@commit`, empirical F2P/P2P echo,
-no private facts (blinded provenance, lineage hash only) — and mints a task into the pool;
-publication is gated by the standing tier-2 consent, applied automatically per record (no
-per-mint interaction). Publication to chain runs through the **optional
+If the session produced an accepted diff, the plugin records a reusable task candidate locally
+(unconditional — it never leaves the machine, including for private repositories). Background machinery (the
+daemon-sidecar `HarvestLoop` + session-echo miner) validates eligibility — public repo,
+resolvable `repo@commit`, empirical F2P/P2P echo, no private facts (blinded provenance,
+lineage hash only) — and may mint a task into the local pool. Local candidate recording and
+minting are independent of publication. Whether a public task leaves the box is gated by the
+single standing `shareConsent`, applied automatically per record (no per-mint interaction).
+The first-task preview is a one-time disclosure acknowledgement, not a second consent.
+Publication to chain runs through the **optional
 daemon sidecar**; without it, approved mints queue locally with an honest status. First
 publish shows a one-time preview; after that, silence + inspection surfaces. Gasless relayer
 intake is Stage 2+.
 
 ### 4.5 History
-Net-new but small: a local, plugin-owned session history — per session: task summary,
-knowledge surfaced/used, capture status, eligibility verdict, contribution state (queued /
+Net-new but small: a local, plugin-rendered session history — per session: task summary,
+knowledge searched/provided, capture status, eligibility verdict, contribution state (queued /
 published + anchor), distilled skills produced. Surfaces: `/jinn history` (TUI) and
 `jinn-layer history` (CLI). `/jinn ledger` remains the what-left-this-machine receipt trail.
-**Invariant: history is a derived view** over episodes + ledger + mint pool; it owns no facts.
+**Invariant: history is a derived view** over canonical episodes, the canonical contribution
+store, and active/staged local-skill provenance; it owns no facts or duplicate cache. Missing
+evidence is displayed as degraded or unavailable rather than inferred as zero, false, or empty.
 
 ### 4.6 Fallbacks and failure behavior
-No network → retrieval degrades to nothing-found (fails open), work proceeds. `jinn-layer`
+No network → retrieval degrades to nothing-found (fails open), work proceeds; search, fetch,
+and packet-projection failures all degrade the same way, with a typed reason. `jinn-layer`
 missing → commands degrade with instructive errors. Publish failure → local retention with
 honest status. Sidecar absent → mints queue. Rule: every adapter failure surfaces as a typed
 plugin-level outcome; never a crash into the host session.
 
 ### 4.7 Privacy and permissions
 The roadmap boundary, unchanged: raw traces stay local; scrub is fail-closed on anything
-outbound; mints carry blinded provenance; consent tiers per P7; per-task veto; the ledger is
-the receipt. Private and public episodes share one semantic evidence contract; storage,
+outbound; mints carry blinded provenance; the single consent in P7 gates publication only;
+per-task veto remains effective until publication; the ledger is the receipt. Private and
+public episodes share one semantic evidence contract; storage,
 retention, scrubbing, and permitted derived views differ.
 
 ### 4.8 Disable and rollback
 As shipped: `hermes plugins disable jinn`, `pip uninstall jinn-plugin`, `HERMES_SAFE_MODE=1`;
-consent-off = zero capture; separate state home. The acceptance gate asserts the host returns
-to stock behavior.
+disabled means zero Jinn hooks, output, subprocesses, or state writes. Share-consent off still
+captures, distills, and records candidates locally, but performs zero outbound publication.
+The acceptance gate asserts the host returns to stock behavior when the plugin is disabled.
 
 ## 5. Outcome model
 
@@ -131,13 +152,19 @@ historical evidence.
 
 ## 7. Minimum acceptance journey (formalized in the Phase 5 gate design)
 
-On stock upstream Hermes + plugin: enable → OSS session where seeded corpus knowledge is
-surfaced and visibly attributed → complete work → episode retained with complete trajectory →
+On stock upstream Hermes + plugin: enable → OSS session where seeded prior-work evidence is
+provided to the agent in context (`searched → provided`) and visibly attributed to its source
+episode → complete work → episode retained with complete trajectory →
 eligibility verdict → mint validated and queued/published via sidecar → session appears in
 history → private-session variant proves nothing leaves → disable returns the host to stock.
 
 ## 8. Stage 1 non-goals
 
+- Shared-skill discovery, installation, uninstall, counts, or auto-adoption anywhere in the
+  user surface (Stage 3; the machinery is retained internally behind the later-stage boundary).
+- Any claim that provided knowledge helped (Stage 2 attribution).
+- Retrieval beyond deterministic term-overlap + tier + recency — no embeddings, no model calls
+  in the retrieval path, no new services.
 - Proving Jinn beats stock Hermes (the harness-network spec §8 capability gate, later).
 - Multi-host portability (Claude Code / Codex adapters).
 - Auto-adopt activation; evaluator economics; Skill Factory / network distillation (rung 3).
@@ -152,12 +179,27 @@ issues already exist and stay owned there.
 
 ## 9. Recorded drifts and required amendments
 
-1. `spec/2026-07-02-jinn-harness-network.md` D3 says contribution is default-on; shipped
-   behavior and this design (P7) are default-decline/review-first per the roadmap. Needs a
-   spec amendment PR (docs shape) once PR #1651 merges.
+1. `spec/2026-07-02-jinn-harness-network.md` D3 said contribution is default-on with tier-1/
+   tier-2 consents; shipped behavior and this design (P7) are one `shareConsent`,
+   default-decline/review-first, gating only mint-leaves-machine. **Resolved by mono#1714** —
+   the harness-network spec D3 is amended (v0.6) in that PR alongside this edit.
 2. PR #1646 (session-echo real-usage mining) was closed 2026-07-14 pending rebase onto merged
    #1485; its scope is load-bearing for P3/P4 and must be re-landed (tracked in Phase 4
    decomposition; #1648/#1649 ride along).
 3. Task Creator harvest today assumes the operator daemon; Stage 1 frames the daemon as the
    **optional sidecar** for contribution (packaging inversion, harness-network §4.2) — mints
    queue without it.
+4. The shipped v0.1 consumption surface drifted into the Stage 3 skills product (skill-install
+   suggestions, `surfaced/fetched/installed` states, skill-only seeds; the 2026-07-16 #1654
+   walkthrough recorded it). The Stage 1 rescope
+   (`docs/superpowers/plans/2026-07-16-jinn-plugin-stage-1-rescope-plan.md`) corrects §4.2,
+   §4.5, §4.6, §7, and §8 to evidence retrieval with `searched → provided` states. Locked decisions
+   P1–P8 are unchanged; `spec/2026-07-06-distillation-v1.md` D11 (retrieval over anchored
+   evidence is the v1 product baseline) is the governing precedent.
+5. Stage 2 charter (`log/decisions/2026-07-17-stage2-charter.md`): outbound contribution is
+   parked through Stage 2 — P4's outbound half (consent moment, first-share preview, silent
+   minting, ledger) is deleted surface until the lane returns, and P7's single `shareConsent`
+   question is not asked (zero-consent onboarding); both principles' semantics are preserved
+   as the un-park contract. P2 is amended in letter ("pip-installed" → "`hermes plugins
+   install`ed"). §4.1 (install/onboarding) and §4.8 (disable/rollback) are amended by the
+   Stage 2 onboarding design and issue A9.

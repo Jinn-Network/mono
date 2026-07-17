@@ -59,6 +59,30 @@ def test_jinn_plugin_loads_through_the_real_manager(isolated_manager):
     assert "corpus_fetch" in jinn.tools_registered
 
 
+def test_disabled_plugin_registers_nothing_and_creates_no_state(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    (tmp_path / "config.yaml").write_text(
+        yaml.safe_dump({"plugins": {"enabled": ["jinn"], "disabled": ["jinn"]}}),
+        encoding="utf-8",
+    )
+    manager = PluginManager()
+    monkeypatch.setattr(plugins_mod, "_plugin_manager", manager)
+
+    manager.discover_and_load()
+
+    loaded = {
+        (p.manifest.key or p.manifest.name): p for p in manager._plugins.values()
+    }
+    plugin = loaded.get("jinn")
+    assert plugin is not None and plugin.enabled is False
+    assert plugin.hooks_registered == []
+    assert plugin.tools_registered == []
+    assert plugin.commands_registered == []
+    assert not (tmp_path / "jinn").exists()
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err == ""
+
+
 def _ensure_snippet() -> str:
     script = ENTRYPOINT.read_text(encoding="utf-8")
     marker = "<<'PY" + "EOF'\n"

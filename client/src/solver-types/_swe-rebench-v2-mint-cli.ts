@@ -84,6 +84,15 @@ export interface MintTasksInput {
   progress?: MintTasksProgress;
   /** Test seam for the already-public differential receipt publication step. */
   uploadReceipt?: (registryUrl: string, receipt: DifferentialAdmissionReceiptV2) => Promise<string>;
+  /**
+   * Optional durable authorization boundary for public artifact upload. The
+   * caller may hold its canonical consent lock while `publish` rechecks repo
+   * visibility, uploads, and commits the minted-pool publication.
+   */
+  withPublicationAuthorization?: (
+    args: { instanceIds: string[]; rowHashVersion: 1 | 2 },
+    publish: () => Promise<string>,
+  ) => Promise<string>;
 }
 
 export interface MintTasksProgress {
@@ -104,6 +113,14 @@ export interface MintTasksResult {
   rejected: Array<{ instance_id: string; reason: string }>;
   artifactCid?: string;
   artifactCids?: Partial<Record<1 | 2, string>>;
+}
+
+async function assertPublicReposImmediatelyBeforeOutbound(
+  candidates: MintTasksInput['candidates'],
+  checker: PublicRepoChecker,
+): Promise<void> {
+  const repositories = new Set(candidates.map((candidate) => candidate.poolTask.repo ?? 'unknown/unknown'));
+  await Promise.all([...repositories].map((repository) => assertPublicRepoForPublish(repository, checker)));
 }
 
 function toV2AdmissionEnvironment(binding: MintedEnvironmentBindingV1): V2MintedEnvironmentAdmissionBinding {
@@ -303,7 +320,12 @@ export async function runMintTasksPipeline(input: MintTasksInput): Promise<MintT
       assertRequiredJinnDifferentialAdmission(c);
       assertRequiredExplicitEnvironmentDifferentialAdmission(c);
       assertRepoAllowedForMint(repo, denylist);
-      if (c.publish !== false) {
+      // Explicit-environment v2 admission may publish its public receipt while
+      // constructing the local row, so it needs a visibility gate here too.
+      // Ordinary v1/session candidates perform no outbound I/O during local
+      // validation: let them mint regardless of visibility and check only at
+      // the final artifact boundary below.
+      if (c.publish !== false && c.environment !== undefined) {
         await assertPublicRepoForPublish(repo, input.publicRepoChecker);
       }
       if (isRealJinnDifferentialSource(c)) {
@@ -414,6 +436,10 @@ export async function runMintTasksPipeline(input: MintTasksInput): Promise<MintT
         // point only at a CID that the caller has already independently bound.
         receiptCid = evidence.receiptCid;
       } else {
+        // Re-check at the actual outbound boundary. The earlier admission
+        // check prevents wasted work; this one prevents repository visibility
+        // changing between validation and publication.
+        await assertPublicReposImmediatelyBeforeOutbound([c], input.publicRepoChecker);
         receiptCid = await (input.uploadReceipt ?? uploadToIpfs)(input.ipfsRegistryUrl, receipt);
         if (evidence.receiptCid !== undefined && receiptCid !== evidence.receiptCid) {
           throw new Error('policy: published differential receipt CID does not match the configured receipt CID');
@@ -487,36 +513,60 @@ export async function runMintTasksPipeline(input: MintTasksInput): Promise<MintT
   // of the published artifact (D2 tier-2 gate).
   if (v1PublishCandidates.length > 0) {
     const v1PublishIds = v1PublishCandidates.map((c) => c.poolTask.instance_id);
-    const artifact = await input.mintedStore.exportArtifact(EVAL_SEMANTICS_VERSION, { includeIds: v1PublishIds });
-    const artifactCid = await uploadToIpfs(input.ipfsRegistryUrl, artifact);
-    await input.mintedStore.setPublishedArtifact(
-      EVAL_SEMANTICS_VERSION,
-      artifactCid,
-      v1PublishIds,
-      { rowHashVersion: 1 },
-    );
-    await input.progress?.onIpfsPublished?.({
-      instanceIds: v1PublishCandidates.map((candidate) => candidate.poolTask.instance_id),
-      rowHashVersion: 1,
-      artifactCid,
+    const entries = await Promise.all(v1PublishIds.map((id) => input.mintedStore.getEntry(id, EVAL_SEMANTICS_VERSION)));
+    const generatedAt = entries.map((entry) => entry?.mintedAt).filter((value): value is string => Boolean(value)).sort()[0];
+    const artifact = await input.mintedStore.exportArtifact(EVAL_SEMANTICS_VERSION, {
+      includeIds: v1PublishIds,
+      ...(generatedAt ? { generatedAt } : {}),
     });
+    const publish = async () => {
+      await assertPublicReposImmediatelyBeforeOutbound(v1PublishCandidates, input.publicRepoChecker);
+      const artifactCid = await uploadToIpfs(input.ipfsRegistryUrl, artifact);
+      await input.mintedStore.setPublishedArtifact(
+        EVAL_SEMANTICS_VERSION,
+        artifactCid,
+        v1PublishIds,
+        { rowHashVersion: 1 },
+      );
+      await input.progress?.onIpfsPublished?.({
+        instanceIds: v1PublishCandidates.map((candidate) => candidate.poolTask.instance_id),
+        rowHashVersion: 1,
+        artifactCid,
+      });
+      return artifactCid;
+    };
+    const artifactCid = input.withPublicationAuthorization
+      ? await input.withPublicationAuthorization({ instanceIds: v1PublishIds, rowHashVersion: 1 }, publish)
+      : await publish();
     artifactCids[1] = mintedIpfsDatasetCid(artifactCid);
   }
   if (v2PublishCandidates.length > 0) {
     const v2PublishIds = v2PublishCandidates.map((c) => c.poolTask.instance_id);
-    const artifact = await input.mintedStore.exportArtifactV2(EVAL_SEMANTICS_VERSION, { includeIds: v2PublishIds });
-    const artifactCid = await uploadToIpfs(input.ipfsRegistryUrl, artifact);
-    await input.mintedStore.setPublishedArtifact(
-      EVAL_SEMANTICS_VERSION,
-      artifactCid,
-      v2PublishIds,
-      { rowHashVersion: 2 },
-    );
-    await input.progress?.onIpfsPublished?.({
-      instanceIds: v2PublishCandidates.map((candidate) => candidate.poolTask.instance_id),
-      rowHashVersion: 2,
-      artifactCid,
+    const entries = await Promise.all(v2PublishIds.map((id) => input.mintedStore.getEntry(id, EVAL_SEMANTICS_VERSION)));
+    const generatedAt = entries.map((entry) => entry?.mintedAt).filter((value): value is string => Boolean(value)).sort()[0];
+    const artifact = await input.mintedStore.exportArtifactV2(EVAL_SEMANTICS_VERSION, {
+      includeIds: v2PublishIds,
+      ...(generatedAt ? { generatedAt } : {}),
     });
+    const publish = async () => {
+      await assertPublicReposImmediatelyBeforeOutbound(v2PublishCandidates, input.publicRepoChecker);
+      const artifactCid = await uploadToIpfs(input.ipfsRegistryUrl, artifact);
+      await input.mintedStore.setPublishedArtifact(
+        EVAL_SEMANTICS_VERSION,
+        artifactCid,
+        v2PublishIds,
+        { rowHashVersion: 2 },
+      );
+      await input.progress?.onIpfsPublished?.({
+        instanceIds: v2PublishCandidates.map((candidate) => candidate.poolTask.instance_id),
+        rowHashVersion: 2,
+        artifactCid,
+      });
+      return artifactCid;
+    };
+    const artifactCid = input.withPublicationAuthorization
+      ? await input.withPublicationAuthorization({ instanceIds: v2PublishIds, rowHashVersion: 2 }, publish)
+      : await publish();
     artifactCids[2] = mintedIpfsDatasetCid(artifactCid);
   }
 

@@ -11,7 +11,7 @@ import {
   type FieldCache,
 } from './field-cache.js';
 import { buildHeadlessPrompt } from '../headless.js';
-import { sessionLogPath } from './session-log.js';
+import { sessionLogPath, sessionStartedAtPath } from './session-log.js';
 import { resolveImplementer } from './implementer-policy.js';
 
 // ---------------------------------------------------------------------------
@@ -83,6 +83,8 @@ export type SpawnFn = (
      * the fake spawn in tests just records it.
      */
     logPath?: string;
+    /** Absolute path to the dispatch-time marker file. The production lambda rewrites it (truncate) at every dispatch so its mtime is the session's startedAt for crash recovery; the fake spawn in tests just records it. */
+    startedAtMarkerPath?: string;
     [key: string]: unknown;
   },
 ) => SpawnResult;
@@ -182,7 +184,7 @@ export async function dispatchIssue(
 
   // 1. Branch name
   const slug = titleSlug(title);
-  const branch = `${shape}/${number}-${slug}`;
+  let branch = `${shape}/${number}-${slug}`;
   // Absolute path so git resolves correctly regardless of process cwd.
   const worktreePath = join(WORKTREES_BASE, String(number));
 
@@ -261,6 +263,22 @@ export async function dispatchIssue(
       // leading dash.) (review 2026-07-13)
       await runner('git', ['fetch', '--quiet', 'origin', '--', stackBase]);
     }
+    // A dangling local ref with this deterministic name (a prior worktree
+    // removed without its ref — e.g. manual cleanup predating the drift
+    // sweep) makes `worktree add -b` fatal, which used to abort the whole
+    // dispatch loop (review 2026-07-15, observed live on #1664). Never reuse
+    // or force-reset the old ref — it may carry unpushed strand commits —
+    // pick the first free suffixed name instead (`-r2`…`-r9`; the label
+    // sweep's `<shape>/<N>-` fingerprint still matches). If all are somehow
+    // taken, fall through and let `-b` fail loudly.
+    const base = branch;
+    for (let i = 2; i <= 9; i++) {
+      const taken = await runner('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`])
+        .then(() => true)
+        .catch(() => false);
+      if (!taken) break;
+      branch = `${base}-r${i}`;
+    }
     await runner('git', [
       'worktree', 'add',
       worktreePath,
@@ -300,11 +318,13 @@ export async function dispatchIssue(
   //    test holds. We send stdin to 'ignore' (the session is headless) and
   //    inherit for 1/2 as a safe default the lambda replaces.
   const logPath = sessionLogPath(number);
+  const startedAtMarkerPath = sessionStartedAtPath(number);
   const result = spawn('claude', ['-p', ...effortFlag(issue.effort), fullPrompt], {
     cwd: worktreePath,
     detached: true,
     stdio: ['ignore', 'inherit', 'inherit'],
     logPath,
+    startedAtMarkerPath,
     // Author this PR as the implementer identity (DR-2026-06-15); inherits the
     // ambient gh account when no token is configured. Also disables the
     // print-mode background-wait ceiling so the session reaches its PR stage.

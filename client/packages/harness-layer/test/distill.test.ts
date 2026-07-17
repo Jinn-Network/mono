@@ -372,3 +372,65 @@ describe('metaDistill (stage-2 cross-instance, §7 issue #1463)', () => {
     expect(res.rejected[0]!.reason).toMatch(/counterfactual/);
   });
 });
+
+describe('distillClusters progress seam (#1533)', () => {
+  const cleanOut: DistillLLMOutput = {
+    name: 'orm-queryset-dedup',
+    description: 'Use when a queryset returns duplicate rows after a join. Not for: single-table queries.',
+    body: CONFORMANT_BODY,
+  };
+
+  it('fires onPlan once with every cluster, then onCluster start/end per cluster in order', async () => {
+    const plans: unknown[] = [];
+    const events: Array<{ phase: string; clusterId: string; index: number; total: number; outcome?: string; skillName?: string }> = [];
+    const d = deps(cleanOut, {
+      onPlan: (plan) => plans.push(plan),
+      onCluster: (ev) => events.push(ev),
+    });
+    await distillClusters(
+      [cluster({ clusterId: 'c1', tier: 'pattern' }), cluster({ clusterId: 'c2', tier: 'lesson', instanceIds: ['flask__flask-2'] })],
+      d,
+    );
+
+    expect(plans).toHaveLength(1);
+    expect(plans[0]).toEqual([
+      { clusterId: 'c1', index: 1, captureCount: 2, refs: ['bafyEv1', 'bafyEv2'] },
+      { clusterId: 'c2', index: 2, captureCount: 2, refs: ['bafyEv1', 'bafyEv2'] },
+    ]);
+    expect(events.map((e) => [e.phase, e.clusterId, e.index, e.total])).toEqual([
+      ['start', 'c1', 1, 2],
+      ['end', 'c1', 1, 2],
+      ['start', 'c2', 2, 2],
+      ['end', 'c2', 2, 2],
+    ]);
+    expect(events[1]!.outcome).toBe('published');
+    expect(events[1]!.skillName).toBe('orm-queryset-dedup');
+  });
+
+  it('reports rejected and error outcomes on the end event', async () => {
+    const leaky: DistillLLMOutput = { ...cleanOut, body: cleanOut.body + '\nAWS_SECRET=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n' };
+    const events: Array<{ phase: string; outcome?: string; reason?: string; error?: string; durationMs?: number }> = [];
+    const d = deps(leaky, { onCluster: (ev) => events.push(ev) });
+    await distillClusters([cluster({ clusterId: 'c1' })], d);
+    const rejectedEnd = events.find((e) => e.phase === 'end')!;
+    expect(rejectedEnd.outcome).toBe('rejected');
+    expect(rejectedEnd.reason).toMatch(/secret/);
+    expect(typeof rejectedEnd.durationMs).toBe('number');
+
+    events.length = 0;
+    const erroring = deps(cleanOut, {
+      distill: async () => { throw new Error('distiller stopped responding'); },
+      onCluster: (ev) => events.push(ev),
+    });
+    await distillClusters([cluster({ clusterId: 'c1' })], erroring);
+    const errorEnd = events.find((e) => e.phase === 'end')!;
+    expect(errorEnd.outcome).toBe('error');
+    expect(errorEnd.error).toMatch(/stopped responding/);
+  });
+
+  it('runs unchanged when no callbacks are provided (seam is optional)', async () => {
+    const d = deps(cleanOut);
+    const res = await distillClusters([cluster()], d);
+    expect(res.published).toHaveLength(1);
+  });
+});

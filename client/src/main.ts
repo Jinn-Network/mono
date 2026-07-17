@@ -35,6 +35,7 @@ import { CapturePublishUnavailableError } from './api/captures.js';
 import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js';
 import type { LauncherGeneratorStateSnapshot } from './api/launcher-status.js';
 import { ensureUiToken } from './api/ui-token.js';
+import { decideUiAutoOpen } from './cli/ui-auto-open-gate.js';
 import { getFileLogger, closeFileLogger } from './observability/file-logger.js';
 import { emitProgress } from './observability/progress.js';
 import { hashImplStateDir } from './harnesses/freeze.js';
@@ -120,6 +121,14 @@ import {
   summarizeFallbackChain,
 } from './preflight/rpc-network.js';
 import { apiPortFailureMessage, checkApiPortAvailable } from './preflight/api-port.js';
+import {
+  fetchLatestVersion,
+  getRunningVersion,
+  isNewerVersion,
+  isVersionCheckEnabled,
+  formatUpdateLogLine,
+  VERSION_CHECK_INTERVAL_MS,
+} from './preflight/version-check.js';
 import { openBrowser } from './cli/open-browser.js';
 
 if (process.env['JINN_LOAD_DEV_ENV'] === '1' || process.env['NODE_ENV'] === 'development') {
@@ -281,27 +290,6 @@ export interface SetupHaltedInfo {
 // effects (password resolution, config load) into the test.
 
 // ── Main ────────────────────────────────────────────────────────────────────
-
-/**
- * #1649: a loud boot warning when `harvest.sources` includes `'sessions'` but
- * mineable-trace retention is off. Without tier-1 consent the mineable store is
- * never constructed, so the sessions source is silently skipped every tick;
- * this surfaces the misconfiguration once, at boot, instead of leaving the
- * operator to wonder why no sessions are ever mined.
- */
-export function warnSessionsWithoutConsent(
-  config: { harvest?: { sources?: string[] }; mineableTraces?: { consent?: string } },
-): void {
-  if (
-    config.harvest?.sources?.includes('sessions') &&
-    config.mineableTraces?.consent !== 'retain_local'
-  ) {
-    console.warn(
-      "[main] harvest.sources includes 'sessions' but mineableTraces.consent is 'off' — " +
-        "no sessions will be mined; set mineableTraces.consent='retain_local' to enable (#1649)",
-    );
-  }
-}
 
 export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void> {
   // Issue #909: chdir to a stable directory before spawning any child process.
@@ -564,6 +552,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   const joinApplierHolder: {
     current: import('./daemon/join-applier.js').JoinApplier | undefined;
   } = { current: undefined };
+
+  // #641: latest published `@jinn-network/client` version, back-filled by the
+  // start-time npm-registry check below. `/v1/status.latestVersion` reads this
+  // via the `latestVersion` getter threaded into the ApiServer status config.
+  const latestVersionHolder: { current: string | null } = { current: null };
 
   // hjex.6: retry signal for the bootstrap halt-and-resume loop.
   // When a SetupBootstrapHalted is caught (fatal non-funding error or funding
@@ -1015,10 +1008,37 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     `http://127.0.0.1:${setupApiServer.port}/?k=${handshakeKey}`;
   // Auto-open the operator panel as soon as the setup-mode API is up so the
   // operator can watch bootstrap progress (including the funding wait, which
-  // is the whole point of starting the API early). Suppressed by setting
-  // JINN_NO_UI=1 — `jinn run --no-ui` translates the flag into this env var.
-  if (process.env['JINN_NO_UI'] !== '1') {
+  // is the whole point of starting the API early). Only on the first-ever
+  // launch (tracked by a marker file) — otherwise every restart during a
+  // dogfooding session opens a fresh browser tab and stale tabs accumulate
+  // (issue #804). `jinn run --no-ui` / JINN_NO_UI=1 always suppresses;
+  // `jinn run --ui` / JINN_FORCE_UI=1 forces a reopen even past first launch.
+  const uiOpenedMarkerPath = join(config.earningDir, '.ui-opened');
+  const noUi = process.env['JINN_NO_UI'] === '1';
+  const forceUi = process.env['JINN_FORCE_UI'] === '1';
+  const uiAutoOpenDecision = decideUiAutoOpen({
+    noUi,
+    forceUi,
+    markerExists: existsSync(uiOpenedMarkerPath),
+  });
+  if (uiAutoOpenDecision.shouldOpen) {
     openBrowser(process.env['JINN_UI_HANDSHAKE_URL']!);
+  } else if (!noUi) {
+    console.log(
+      `[main] Dashboard ready at http://127.0.0.1:${setupApiServer.port} — ` +
+        `run 'jinn ui' to open it (auto-open suppressed after first launch; use --ui to force)`,
+    );
+  }
+  if (uiAutoOpenDecision.shouldWriteMarker) {
+    try {
+      mkdirSync(dirname(uiOpenedMarkerPath), { recursive: true });
+      writeFileSyncMain(uiOpenedMarkerPath, new Date().toISOString() + '\n');
+    } catch (err) {
+      console.warn(
+        `[main] Failed to write UI-opened marker at ${uiOpenedMarkerPath}: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    }
   }
   console.log(
     `[main] Setup-mode API up (mode=${setupController.mode()}). ` +
@@ -1299,6 +1319,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     .filter((entry) => entry.roles.includes('solver'))
     .map((entry) => entry.manifestCid);
 
+  // #547: only scan/ingest evaluation opportunities when this operator holds the
+  // evaluator role in at least one joined SolverNet. The join applier flips this
+  // on live via adapter.setEvaluatorEnabled(true).
+  const evaluatorEnabled = Object.values(config.joinedSolverNets ?? {})
+    .some((entry) => entry.roles.includes('evaluator'));
+
   // ── DiscoveryAPI construction ─────────────────────────────────────────────
   // Build the shared DiscoveryAPI used by MechAdapter (task discovery),
   // the SolverNet registry client (lifecycle status), and the corpus library
@@ -1380,6 +1406,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     routerClaimDeliveryVariant: CHAIN_CONFIG.routerClaimDeliveryVersion,
     evictionRecovery,
     taskDiscovery,
+    evaluatorEnabled,
   }, sharedStore);
 
   // ── TaskEngine wiring ─────────────────────────────────────────────────
@@ -1609,26 +1636,23 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     evictionRecovery,
   };
 
-  // ── Mineable-trace store (task-creator spec §10, D2 tier-1) ────────────────
+  // ── Mineable-trace store (task-creator spec §10) ──────────────────────────
   //
-  // Only constructed when the operator explicitly opted into local trace
-  // retention (config.mineableTraces.consent === 'retain_local'; default is
-  // 'off'). The store itself is fail-closed (MineableTraceStore.append throws
-  // on any other consent value) — gating construction here means a
-  // never-opted-in operator never even has the file created.
-  let mineableStore: import('./solver-types/_swe-rebench-v2-mineable-store.js').MineableTraceStore | undefined;
-  if (config.mineableTraces.consent === 'retain_local') {
-    const { MineableTraceStore } = await import('./solver-types/_swe-rebench-v2-mineable-store.js');
-    mineableStore = new MineableTraceStore({
-      stateDir: join(homedir(), '.jinn-client', 'mineable'),
-    });
-    console.log(
-      `[main] mineable-trace retention: ON (local only) — publishConsent=${config.mineableTraces.publishConsent}`,
-    );
+  // ALWAYS constructed (mono#1714): local retention/mining/distillation happen
+  // by default and never leave the machine. Whether a mined task is published
+  // off the box is gated separately by `config.mineableTraces.share`.
+  const { MineableTraceStore, resolveMineableStateDir } = await import('./solver-types/_swe-rebench-v2-mineable-store.js');
+  const mineableStore = new MineableTraceStore({
+    stateDir: resolveMineableStateDir(),
+  });
+  if (config.mineableTraces.share) {
+    await mineableStore.enablePublication();
   } else {
-    console.log('[main] mineable-trace retention: OFF (default) — set mineableTraces.consent to enable');
+    await mineableStore.disableUnpublished();
   }
-  warnSessionsWithoutConsent(config);
+  console.log(
+    `[main] mineable-trace retention: local (always on) — share=${config.mineableTraces.share}`,
+  );
 
   // ── IdentityPublisher (jinn-mono-3zk) ───────────────────────────────────────
   //
@@ -2060,11 +2084,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           publish: config.harvest.publish,
           minterSafe: safeAddress,
           sources: config.harvest.sources,
-          // Reuse the same mineable-trace store instance Task 7 constructs
-          // above (gated on mineableTraces.consent === 'retain_local'), not
-          // a second store pointing elsewhere. Undefined when the operator
-          // hasn't opted into tier-1 retention — the loop then skips the
-          // 'sessions' source (non-fatal) rather than crashing.
+          // Reuse the same mineable-trace store instance constructed above
+          // (always present per mono#1714 — local retention is unconditional),
+          // not a second store pointing elsewhere.
           mineableStore,
           operatorSafe: safeAddress,
           mintDeps: {
@@ -2129,6 +2151,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         source: passwordResolution.source,
         filePath: passwordResolution.filePath,
       },
+      // #641: back-fills /v1/status.latestVersion from the start-time
+      // npm-registry check (populated after the daemon-running line below).
+      latestVersion: () => latestVersionHolder.current,
       spendCaps: spendCap?.caps,
       aiUnits,
     },
@@ -2173,13 +2198,16 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       operatorConfig,
       operatorSafeAddress: safeAddress,
       harnessMode: config.harness.mode,
+      // #1393: corpus knowledge autoload — operator opt-out flag. The corpus
+      // instance itself is injected by the Daemon (built from corpusFactory).
+      knowledge: { enabled: config.engine.knowledgeAutoload },
       // Share the one maintained scrub pipeline (incl. optional ML PII) so task
       // trajectories and captures are scrubbed by the same stack before publish.
       scrubPipeline: sellerScrubPipeline,
       // Task-creator spec §10 (D2): absent unless the operator opted into
       // tier-1 local retention above.
       mineableStore,
-      mineablePublishConsent: config.mineableTraces.publishConsent,
+      mineablePublishConsent: config.mineableTraces.share,
     },
     balanceTopup:
       config.balanceTopupIntervalMs > 0
@@ -2272,6 +2300,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     readiness: harnessReadinessRegistry,
     registry: solverNetRegistry,
     config,
+    enableEvaluator: () => adapter.setEvaluatorEnabled(true),
   });
 
   if (config.watchdogAutoRestart) {
@@ -2320,12 +2349,15 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // flow (they were created in setup-mode before bootstrap), so we close
   // them explicitly after Daemon.stop() completes.
   let shutdownPromise: Promise<void> | null = null;
+  // #641: recurring npm-registry version check; cleared on shutdown.
+  let versionCheckTimer: ReturnType<typeof setInterval> | null = null;
   const shutdown = async (signal: string) => {
     if (shutdownPromise) return shutdownPromise;
     shutdownPromise = (async () => {
       let exitCode = 0;
       console.log(`\n[main] Received ${signal}, shutting down...`);
       try {
+        if (versionCheckTimer) clearInterval(versionCheckTimer);
         harnessReadinessRegistry.stop();
         await daemon.stop();
         await setupApiServer.close().catch(() => undefined);
@@ -2379,6 +2411,38 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     throw error;
   }
   console.log(`[main] Daemon running. Dashboard: http://127.0.0.1:${config.apiPort}`);
+
+  // #641: start-time (and recurring) npm-registry version check. Fire-and-forget
+  // — never awaited, never rejects into boot. When a newer client is published
+  // it logs one line and back-fills the dashboard's update_available banner via
+  // `latestVersionHolder`. Opt out with JINN_VERSION_CHECK=0.
+  if (isVersionCheckEnabled(process.env)) {
+    const refreshVersionCheck = async (): Promise<void> => {
+      try {
+        const latest = await fetchLatestVersion();
+        if (latest && isNewerVersion(getRunningVersion(), latest)) {
+          // Only surface a value when the published latest is genuinely newer
+          // than the running build. The dashboard banner derives directly from
+          // a non-null `latestVersion`, so this keeps the log and the banner on
+          // the same semver strictly-greater check.
+          latestVersionHolder.current = latest;
+          console.log(formatUpdateLogLine(latest));
+        } else {
+          // Not newer (equal, older, or unfetchable) — clear any prior value so
+          // a stale tick can't linger as a false upgrade signal.
+          latestVersionHolder.current = null;
+        }
+      } catch {
+        // Advisory only — a registry hiccup must never disturb the daemon.
+      }
+    };
+    void refreshVersionCheck();
+    versionCheckTimer = setInterval(() => {
+      void refreshVersionCheck();
+    }, VERSION_CHECK_INTERVAL_MS);
+    versionCheckTimer.unref();
+  }
+
   return {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),

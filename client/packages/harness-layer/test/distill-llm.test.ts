@@ -6,6 +6,8 @@ import {
   createCodexDistiller,
   createCodexMetaDistiller,
   DEFAULT_CODEX_MODEL,
+  DEFAULT_MODEL,
+  DISTILLER_CATALOG,
   buildMetaDistillInput,
   type ChildLike,
   type SpawnLike,
@@ -291,5 +293,75 @@ describe('createCodexMetaDistiller', () => {
     const meta = createCodexMetaDistiller({ spawnImpl: spawn });
 
     await expect(meta(metaCluster)).rejects.toThrow(/supports/);
+  });
+});
+
+describe('per-cluster subprocess timeout (#1534)', () => {
+  /** A child whose process never exits — stdin closes, nothing comes back. */
+  function hungChild(): ChildLike & { killed: NodeJS.Signals[] } {
+    const emitter = new EventEmitter();
+    const killed: NodeJS.Signals[] = [];
+    const child = {
+      killed,
+      stdin: { write() {}, end() {} },
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+      on(event: string, listener: (...a: unknown[]) => void) { emitter.on(event, listener); },
+      kill(signal?: NodeJS.Signals) { killed.push(signal ?? 'SIGTERM'); },
+    };
+    return child as unknown as ChildLike & { killed: NodeJS.Signals[] };
+  }
+
+  it('kills a hung claude child and rejects with a timeout error', async () => {
+    const child = hungChild();
+    const { spawn } = makeSpawn(child);
+    const distill = createClaudeDistiller({ spawnImpl: spawn, timeoutMs: 30 });
+    await expect(distill(cluster)).rejects.toThrow(/timed out after 30ms/);
+    expect(child.killed).toContain('SIGKILL');
+  });
+
+  it('kills a hung codex child and rejects with a timeout error', async () => {
+    const child = hungChild();
+    const { spawn } = makeSpawn(child);
+    const distill = createCodexDistiller({ spawnImpl: spawn, timeoutMs: 30 });
+    await expect(distill(cluster)).rejects.toThrow(/timed out after 30ms/);
+    expect(child.killed).toContain('SIGKILL');
+  });
+
+  it('a fast child resolves normally under a timeout (timer cleared, no late rejection)', async () => {
+    const out = { name: 'orm-fanout-dedup', description: 'Use when X. Not for: Y.', body: 'B' };
+    const child = fakeChild({ stdout: JSON.stringify(out) });
+    const { spawn } = makeSpawn(child);
+    const distill = createClaudeDistiller({ spawnImpl: spawn, timeoutMs: 5_000 });
+    await expect(distill(cluster)).resolves.toEqual(out);
+  });
+
+  it('meta distillers honour the timeout too', async () => {
+    const child = hungChild();
+    const { spawn } = makeSpawn(child);
+    const meta = createClaudeMetaDistiller({ spawnImpl: spawn, timeoutMs: 30 });
+    await expect(meta(metaCluster)).rejects.toThrow(/timed out after 30ms/);
+    expect(child.killed).toContain('SIGKILL');
+  });
+});
+
+describe('distiller catalog', () => {
+  it('lists exactly the two runnable providers, both local', () => {
+    expect(DISTILLER_CATALOG.map((e) => e.provider)).toEqual(['claude', 'codex']);
+    expect(DISTILLER_CATALOG.every((e) => e.execution === 'local')).toBe(true);
+  });
+
+  it('mirrors the hard-coded provider default models (cannot drift)', () => {
+    const claude = DISTILLER_CATALOG.find((e) => e.provider === 'claude');
+    const codex = DISTILLER_CATALOG.find((e) => e.provider === 'codex');
+    expect(claude?.model).toBe(DEFAULT_MODEL);
+    expect(codex?.model).toBe(DEFAULT_CODEX_MODEL);
+  });
+
+  it('marks the claude default entry and carries cost + privacy prose', () => {
+    const claude = DISTILLER_CATALOG.find((e) => e.provider === 'claude');
+    expect(claude?.isDefault).toBe(true);
+    expect(claude?.cost).toBeTruthy();
+    expect(claude?.privacy).toMatch(/local/i);
   });
 });

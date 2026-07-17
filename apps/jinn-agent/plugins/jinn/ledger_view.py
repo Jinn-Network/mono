@@ -9,8 +9,10 @@ retained-local retry sub-line, and the exact empty-state copy.
 
 Rows are dicts with keys: ``time``, ``task``, ``env``, ``anchor``, ``tier``
 (one of ``user-accepted`` | ``tests-passed`` | ``evaluator-verified``), and an
-optional ``state`` (``vetoed`` | ``failed``). Colours reuse the #1417 splash
-palette via ``style``.
+optional ``state``. Canonical contribution rows use ``recorded``, ``minted``,
+``preview-required``, ``queued``, ``published``, ``vetoed``, or ``rejected``;
+legacy receipt rows omit the state when published and may use ``failed``.
+Colours reuse the #1417 splash palette via ``style``.
 
 The renderer is pure and snapshot-testable. ``/jinn ledger`` calls it when the
 layer yields JSON, and degrades to the layer's raw text otherwise.
@@ -47,6 +49,23 @@ EMPTY_LINES = (
 VETOED_LABEL = "vetoed (local only)"
 FAILED_LABEL = "publish failed — retained locally"
 
+# `queued`/`minted` are local projection states — human labels only, chosen
+# here (never in the schema/port). Envelope + anchor stay em-dash placeholders
+# like the vetoed row.
+RECORDED_LABEL = "recorded"
+MINTED_LABEL = "minted"
+QUEUED_LABEL = "queued"
+PREVIEW_REQUIRED_LABEL = "preview required"
+REJECTED_LABEL = "rejected (local)"
+
+_LOCAL_STATE_LABELS = {
+    "recorded": RECORDED_LABEL,
+    "minted": MINTED_LABEL,
+    "queued": QUEUED_LABEL,
+    "preview-required": PREVIEW_REQUIRED_LABEL,
+    "rejected": REJECTED_LABEL,
+}
+
 
 def _cell(text: Optional[str], w: int, align_right: bool = False) -> str:
     s = "" if text is None else _sanitise(str(text))
@@ -65,12 +84,19 @@ def _row(pal, rst: str, r: Dict[str, object]) -> str:
 
     time = dim(_cell(r.get("time"), _COL["time"]))
     task = fg(_cell(r.get("task"), _COL["task"]))
-    state = r.get("state")
+    raw_state = r.get("state")
+    state = raw_state if isinstance(raw_state, str) else None
 
     if state == "vetoed":
         env = dim(_cell("—", _COL["env"]))
         anc = dim(_cell("—", _COL["anchor"]))
         return f"{time}  {task}  {env}  {anc}  {amber(VETOED_LABEL)}"
+
+    if state in _LOCAL_STATE_LABELS:
+        env = dim(_cell("—", _COL["env"]))
+        anc = dim(_cell("—", _COL["anchor"]))
+        chip = red if state == "rejected" else amber if state == "preview-required" else sky
+        return f"{time}  {task}  {env}  {anc}  {chip(_LOCAL_STATE_LABELS[state])}"
 
     if state == "failed":
         env = sky(_cell(r.get("env"), _COL["env"]))
@@ -157,7 +183,11 @@ def render_ledger(
     amber = lambda s: _style.wrap(pal, rst, "amber", s)
     red = lambda s: _style.wrap(pal, rst, "red", s)
 
-    published = sum(1 for r in rows if r.get("state") not in ("vetoed", "failed"))
+    published = sum(
+        1
+        for r in rows
+        if r.get("state") is None or r.get("state") == "published"
+    )
     vetoed = sum(1 for r in rows if r.get("state") == "vetoed")
     retained = sum(1 for r in rows if r.get("state") == "failed")
     rule = dim("─" * 88)
@@ -187,6 +217,16 @@ def render_ledger(
         + dim("   ·  every published envelope is anchored on-chain"),
     ]
     return "\n".join(out)
+
+
+def published_count(rows: Sequence[Dict[str, object]]) -> int:
+    """Number of published rows — the canonical "N published" definition.
+
+    Published = any row whose ``state`` is neither ``vetoed`` nor ``failed``.
+    Single source of truth for the count ``render_ledger`` shows and the splash
+    line mirrors, so the two never drift.
+    """
+    return sum(1 for r in rows if r.get("state") not in ("vetoed", "failed"))
 
 
 def rows_from_json(payload: object) -> Optional[List[Dict[str, object]]]:

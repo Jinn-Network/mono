@@ -127,7 +127,7 @@ export function createRunCommand(deps: RunDeps = PRODUCTION_DEPS): CommandModule
     name: 'run',
     summary: 'Start the daemon in the foreground; stops on SIGINT/SIGTERM',
     helpText: `Usage: jinn run [--human] [--config <path>] [--password-fd <fd>] [--no-ui]
-                [--no-daemon] [--funding-timeout <duration>] [--json-progress]
+                [--ui] [--no-daemon] [--funding-timeout <duration>] [--json-progress]
 
 Long-running. Starts the creator, harness, and delivery-watcher
 loops and runs until the process receives SIGINT or SIGTERM. Before
@@ -138,12 +138,18 @@ By default, stdout emits a single machine-readable startup record and
 all progress / runtime logs go to stderr. Use \`--human\` for a concise
 terminal summary instead.
 
-By default, the operator panel is opened in your default browser once the
-daemon's API server is up. Pass \`--no-ui\` to suppress this.
+The operator panel is only auto-opened in your default browser on the
+first-ever launch (tracked by a marker file), so restarting the daemon
+doesn't accumulate fresh browser tabs. Use \`jinn ui\` to reopen it any
+time. Pass \`--ui\` to force a browser open on this launch even after the
+first; pass \`--no-ui\` to suppress auto-open entirely — \`--no-ui\` wins
+if both are given.
 
 Flags:
   --human                Print a concise terminal summary instead of JSON.
-  --no-ui                Suppress automatic browser open (default: open the operator panel).
+  --no-ui                Suppress automatic browser open. Overrides --ui.
+  --ui                   Force the operator panel open even after the first
+                         launch (normally auto-open only happens once).
   --no-daemon            Stop after bootstrap completes; do not start daemon
                          loops. Emits a JSON summary on stdout and exits 0.
   --funding-timeout <d>  Bound the wait when the wallet needs funding. Accepts
@@ -156,6 +162,7 @@ Examples:
   jinn run
   jinn run --human
   jinn run --no-ui
+  jinn run --ui
   jinn run --no-daemon --json
   jinn run --funding-timeout 30m --json-progress
   printf '%s\n' secret | jinn run --password-fd 0
@@ -174,6 +181,7 @@ Failure example (funding gate):
           options: {
             ...COMMON_FLAGS,
             'no-ui': { type: 'boolean', default: false },
+            ui: { type: 'boolean', default: false },
             'no-daemon': { type: 'boolean', default: false },
             'funding-timeout': { type: 'string' },
             'json-progress': { type: 'boolean', default: false },
@@ -288,6 +296,13 @@ Failure example (funding gate):
       // can honour it. The flag itself stays for backwards compat.
       if (parsed.values['no-ui'] as boolean) {
         process.env['JINN_NO_UI'] = '1';
+      }
+
+      // Translate --ui into JINN_FORCE_UI so main() re-opens the browser even
+      // after the first-launch marker exists (issue #804). JINN_NO_UI still
+      // wins over this if both are set — see ui-auto-open-gate.ts.
+      if (parsed.values.ui as boolean) {
+        process.env['JINN_FORCE_UI'] = '1';
       }
 
       // Translate --funding-timeout into JINN_FUNDING_TIMEOUT_MS so main()'s

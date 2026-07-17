@@ -38,6 +38,58 @@ export const DEFAULT_MODEL = 'claude-opus-4-8';
 /** Default Codex distiller model for quality runs; override with `JINN_DISTILL_MODEL`. */
 export const DEFAULT_CODEX_MODEL = 'gpt-5.5';
 
+/**
+ * Default per-cluster subprocess deadline (#1534). A hung `claude`/`codex`
+ * child would otherwise block a run forever — silently, since nothing prints
+ * until the run completes. On expiry the child is killed and the cluster lands
+ * in `errors[]`; the run continues. Override with `--cluster-timeout` /
+ * `JINN_DISTILL_CLUSTER_TIMEOUT_S`.
+ */
+export const DEFAULT_CLUSTER_TIMEOUT_MS = 600_000;
+
+/** A distiller subprocess exceeded its per-cluster deadline and was killed. */
+export class DistillTimeoutError extends Error {
+  constructor(label: string, timeoutMs: number) {
+    super(`${label}: distiller subprocess timed out after ${timeoutMs}ms and was killed`);
+    this.name = 'DistillTimeoutError';
+  }
+}
+
+/** One row of the discoverable distiller catalog (`distill models`). */
+export interface DistillerCatalogEntry {
+  provider: 'claude' | 'codex';
+  model: string;
+  /** `local` runs on this machine; `hosted` sends captures off-machine (none yet). */
+  execution: 'local' | 'hosted';
+  cost: string;
+  privacy: string;
+  isDefault?: boolean;
+}
+
+/**
+ * The static, honest catalog of runnable distillers. Every entry is `local`
+ * today — no hosted distiller exists (both ports spawn a local CLI). The models
+ * reference `DEFAULT_MODEL` / `DEFAULT_CODEX_MODEL` directly so the catalog and
+ * the provider defaults cannot drift.
+ */
+export const DISTILLER_CATALOG: readonly DistillerCatalogEntry[] = [
+  {
+    provider: 'claude',
+    model: DEFAULT_MODEL,
+    execution: 'local',
+    cost: 'high (frontier pass)',
+    privacy: 'local — captures never leave the machine',
+    isDefault: true,
+  },
+  {
+    provider: 'codex',
+    model: DEFAULT_CODEX_MODEL,
+    execution: 'local',
+    cost: 'high (frontier pass)',
+    privacy: 'local — captures never leave the machine',
+  },
+];
+
 const DISTILL_OUTPUT_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -76,6 +128,8 @@ export interface ChildLike {
   stderr: { on(event: 'data', listener: (chunk: Buffer | string) => void): void } | null;
   on(event: 'error', listener: (err: Error) => void): void;
   on(event: 'exit', listener: (code: number | null, signal: NodeJS.Signals | null) => void): void;
+  /** Optional so pre-#1534 test fakes stay valid; real children always have it. */
+  kill?(signal?: NodeJS.Signals): void;
 }
 
 /** Minimal spawn signature: `(command, args) => child`. Satisfied by `child_process.spawn`. */
@@ -202,6 +256,7 @@ function runClaudeJson<T>(
   input: string,
   parse: (stdout: string) => T,
   label: string,
+  timeoutMs: number = DEFAULT_CLUSTER_TIMEOUT_MS,
 ): Promise<T> {
   const args = ['-p', '--model', model];
   return new Promise<T>((resolve, reject) => {
@@ -210,18 +265,30 @@ function runClaudeJson<T>(
     let stderr = '';
     let settled = false;
 
+    // #1534: a hung child blocks the whole run — kill it at the deadline and
+    // surface a per-cluster error so the run continues.
+    const deadline = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill?.('SIGKILL');
+      reject(new DistillTimeoutError(label, timeoutMs));
+    }, timeoutMs);
+    deadline.unref?.();
+
     child.stdout?.on('data', (d) => { stdout += d.toString(); });
     child.stderr?.on('data', (d) => { stderr += d.toString(); });
 
     child.on('error', (err) => {
       if (settled) return;
       settled = true;
+      clearTimeout(deadline);
       reject(err);
     });
 
     child.on('exit', (code) => {
       if (settled) return;
       settled = true;
+      clearTimeout(deadline);
       if (code !== 0) {
         reject(new Error(`${label}: claude exited with code ${code}: ${stderr.slice(0, 500)}`));
         return;
@@ -263,6 +330,7 @@ async function runCodexJson<T>(
   schema: unknown,
   parse: (stdout: string) => T,
   label: string,
+  timeoutMs: number = DEFAULT_CLUSTER_TIMEOUT_MS,
 ): Promise<T> {
   return withTempJsonSchema(schema, (schemaPath) => new Promise<T>((resolve, reject) => {
     const args = [
@@ -283,18 +351,29 @@ async function runCodexJson<T>(
     let stderr = '';
     let settled = false;
 
+    // #1534: same deadline as the claude port — kill and surface a per-cluster error.
+    const deadline = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill?.('SIGKILL');
+      reject(new DistillTimeoutError(label, timeoutMs));
+    }, timeoutMs);
+    deadline.unref?.();
+
     child.stdout?.on('data', (d) => { stdout += d.toString(); });
     child.stderr?.on('data', (d) => { stderr += d.toString(); });
 
     child.on('error', (err) => {
       if (settled) return;
       settled = true;
+      clearTimeout(deadline);
       reject(err);
     });
 
     child.on('exit', (code) => {
       if (settled) return;
       settled = true;
+      clearTimeout(deadline);
       if (code !== 0) {
         reject(new Error(
           `${label}: codex exited with code ${code}: stderr=${stderr.slice(0, 500)} stdout=${stdout.slice(0, 500)}`,
@@ -324,7 +403,7 @@ async function runCodexJson<T>(
  *                         pass a fake so no real `claude` is invoked.
  */
 export function createClaudeDistiller(
-  opts: { claudePath?: string; model?: string; spawnImpl?: SpawnLike } = {},
+  opts: { claudePath?: string; model?: string; spawnImpl?: SpawnLike; timeoutMs?: number } = {},
 ): (cluster: DistillCluster) => Promise<DistillLLMOutput> {
   const claudePath = opts.claudePath ?? DEFAULT_CLAUDE_PATH;
   const model = opts.model ?? DEFAULT_MODEL;
@@ -335,7 +414,7 @@ export function createClaudeDistiller(
     // prompt's SHA sidecar; the prompt text itself is what we send.
     const { JINN_SKILL_DISTILL_PROMPT_V1 } = await import('./distill-prompt.js');
     const input = buildDistillInput(JINN_SKILL_DISTILL_PROMPT_V1, cluster);
-    return runClaudeJson(claudePath, model, spawnImpl, input, (stdout) => assertDistillOutput(extractJsonObject(stdout)), 'distill LLM');
+    return runClaudeJson(claudePath, model, spawnImpl, input, (stdout) => assertDistillOutput(extractJsonObject(stdout)), 'distill LLM', opts.timeoutMs);
   };
 }
 
@@ -345,7 +424,7 @@ export function createClaudeDistiller(
  * session state, and a JSON schema file for structured final output.
  */
 export function createCodexDistiller(
-  opts: { codexPath?: string; model?: string; spawnImpl?: SpawnLike } = {},
+  opts: { codexPath?: string; model?: string; spawnImpl?: SpawnLike; timeoutMs?: number } = {},
 ): (cluster: DistillCluster) => Promise<DistillLLMOutput> {
   const codexPath = opts.codexPath ?? DEFAULT_CODEX_PATH;
   const model = opts.model ?? DEFAULT_CODEX_MODEL;
@@ -362,6 +441,7 @@ export function createCodexDistiller(
       DISTILL_OUTPUT_SCHEMA,
       (stdout) => assertDistillOutput(extractJsonObject(stdout)),
       'distill LLM',
+      opts.timeoutMs,
     );
   };
 }
@@ -417,7 +497,7 @@ function assertMetaDistillOutput(parsed: unknown): MetaDistillLLMOutput {
  * (tolerating a prose wrapper via the shared {@link extractJsonObject}).
  */
 export function createClaudeMetaDistiller(
-  opts: { claudePath?: string; model?: string; spawnImpl?: SpawnLike } = {},
+  opts: { claudePath?: string; model?: string; spawnImpl?: SpawnLike; timeoutMs?: number } = {},
 ): (cluster: MetaCluster) => Promise<MetaDistillLLMOutput> {
   const claudePath = opts.claudePath ?? DEFAULT_CLAUDE_PATH;
   const model = opts.model ?? DEFAULT_MODEL;
@@ -426,7 +506,7 @@ export function createClaudeMetaDistiller(
   return async function metaDistillPort(cluster: MetaCluster): Promise<MetaDistillLLMOutput> {
     const { JINN_SKILL_META_DISTILL_PROMPT_V1 } = await import('./distill-prompt.js');
     const input = buildMetaDistillInput(JINN_SKILL_META_DISTILL_PROMPT_V1, cluster);
-    return runClaudeJson(claudePath, model, spawnImpl, input, (stdout) => assertMetaDistillOutput(extractJsonObject(stdout)), 'meta-distill LLM');
+    return runClaudeJson(claudePath, model, spawnImpl, input, (stdout) => assertMetaDistillOutput(extractJsonObject(stdout)), 'meta-distill LLM', opts.timeoutMs);
   };
 }
 
@@ -435,7 +515,7 @@ export function createClaudeMetaDistiller(
  * Claude meta port, with Codex structured output enforced by JSON schema.
  */
 export function createCodexMetaDistiller(
-  opts: { codexPath?: string; model?: string; spawnImpl?: SpawnLike } = {},
+  opts: { codexPath?: string; model?: string; spawnImpl?: SpawnLike; timeoutMs?: number } = {},
 ): (cluster: MetaCluster) => Promise<MetaDistillLLMOutput> {
   const codexPath = opts.codexPath ?? DEFAULT_CODEX_PATH;
   const model = opts.model ?? DEFAULT_CODEX_MODEL;
@@ -452,6 +532,7 @@ export function createCodexMetaDistiller(
       META_DISTILL_OUTPUT_SCHEMA,
       (stdout) => assertMetaDistillOutput(extractJsonObject(stdout)),
       'meta-distill LLM',
+      opts.timeoutMs,
     );
   };
 }

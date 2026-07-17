@@ -18,11 +18,23 @@ surface is re-derivable from these tests.
 from __future__ import annotations
 
 import re
+import threading
 
 import pytest
 
 from hermes_cli import banner
 from hermes_cli.banner import _FB, _TC, render_jinn_splash
+
+
+@pytest.fixture(autouse=True)
+def _reset_splash_globals():
+    """Snapshot+restore the splash-reads module globals so no test leaks a
+    resolved read into the honest-``checking…`` cases (#1420)."""
+    prev_r, prev_e = banner._splash_result, banner._splash_reads_done
+    banner._splash_result = None
+    banner._splash_reads_done = threading.Event()
+    yield
+    banner._splash_result, banner._splash_reads_done = prev_r, prev_e
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -323,8 +335,54 @@ def test_gather_state_contribution_follows_consent(monkeypatch, tmp_path):
     # unset → contribution key absent (line omitted pre-consent)
     assert "contribution" not in banner.gather_splash_state()
 
-    consent.save_state(consent.ACCEPTED)
+    consent.save_state(True)
     assert banner.gather_splash_state().get("contribution") == "on"
 
-    consent.save_state(consent.DECLINED)
+    consent.save_state(False)
     assert banner.gather_splash_state().get("contribution") == "off"
+
+
+# ── splash reads prefetch (#1420) ────────────────────────────────────────────
+
+
+def _resolve(**payload):
+    banner._splash_result = payload
+    banner._splash_reads_done.set()
+
+
+def test_get_splash_reads_returns_none_when_unprefetched():
+    assert banner.get_splash_reads(timeout=0.0) is None  # AC3 non-blocking
+
+
+def test_resolved_connected_populates_corpus_and_count(monkeypatch):
+    monkeypatch.delenv("JINN_NETWORK", raising=False)
+    _resolve(corpus="connected", corpus_count=42)
+    state = banner.gather_splash_state()
+    assert state["corpus"] == "connected"
+    assert state["corpus_count"] == 42  # AC1
+
+
+def test_resolved_unreachable_sets_corpus_no_count(monkeypatch):
+    monkeypatch.delenv("JINN_NETWORK", raising=False)
+    _resolve(corpus="unreachable")
+    state = banner.gather_splash_state()
+    assert state["corpus"] == "unreachable"
+    assert "corpus_count" not in state  # AC1
+
+
+def test_contribution_count_only_when_on(monkeypatch, tmp_path):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    from plugins.jinn import consent
+
+    consent.save_state(True)
+    _resolve(contribution_count=7)
+    assert banner.gather_splash_state()["contribution_count"] == 7  # AC2
+
+
+def test_contribution_count_suppressed_when_off(monkeypatch, tmp_path):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    from plugins.jinn import consent
+
+    consent.save_state(False)
+    _resolve(contribution_count=7)
+    assert "contribution_count" not in banner.gather_splash_state()  # AC2 gate

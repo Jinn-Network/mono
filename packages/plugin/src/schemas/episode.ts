@@ -13,6 +13,7 @@
  * is restored (optional) so EpisodeV1 stays a true CapturedTask superset.
  */
 import { z } from 'zod';
+import { EligibilityVerdictSchema } from './eligibility-verdict.js';
 
 export const EPISODE_SCHEMA_VERSION = 'jinn.episode.v1' as const;
 
@@ -33,6 +34,25 @@ const StepSchema = z.strictObject({
   endTimeUnixNano: UnixNanoSchema,
   attributes: z.record(z.string(), z.unknown()),
   redactedKeys: z.array(z.string().min(1)).default([]),
+});
+
+/**
+ * Rescope (2026-07-16): `searchedTerms`/`providedRefs` are the current
+ * evidence-first pickup facts. The pre-rescope `surfacedRefs`/`fetchedRefs`/
+ * `installedSkillRefs` trio remains in the schema — defaulted, so existing
+ * local episode files (and hosts that have not yet migrated) still parse —
+ * but is no longer the primary signal a new pickup writes.
+ */
+export const SessionActivityFactsSchema = z.strictObject({
+  searchedTerms: z.array(z.string().min(1)).default([]),
+  providedRefs: z.array(z.string().min(1)).default([]),
+  /** @deprecated rescope — retained for read-compat with pre-rescope episode files. */
+  surfacedRefs: z.array(z.string().min(1)).default([]),
+  /** @deprecated rescope — retained for read-compat; still recorded as an
+   *  internal fetch-attempt detail by the current pickup (rescope §3.6). */
+  fetchedRefs: z.array(z.string().min(1)).default([]),
+  /** @deprecated rescope — the skill adopt/install path no longer exists in pickup. */
+  installedSkillRefs: z.array(z.string().min(1)).default([]),
 });
 
 export const EpisodeV1Schema = z.strictObject({
@@ -74,6 +94,9 @@ export const EpisodeV1Schema = z.strictObject({
     episodeId: z.string().min(1),
     mintRef: z.string().min(1).optional(),
   }).optional(),
+  activity: SessionActivityFactsSchema.optional(),
+  eligibility: EligibilityVerdictSchema.optional(),
 });
 
 export type EpisodeV1 = z.infer<typeof EpisodeV1Schema>;
+export type SessionActivityFacts = z.infer<typeof SessionActivityFactsSchema>;

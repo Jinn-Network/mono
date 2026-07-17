@@ -54,28 +54,37 @@ This gives you the `jinn` operator CLI. The built-in MCP server is invoked via `
 | `jinn version` | Print client version, protocol phase, and resolved token map |
 | `jinn doctor` | Preflight checks: answers "would jinn run work?" without running it |
 | `jinn init` | Generate the master wallet and write the encrypted keystore |
+| `jinn quickstart` | Legacy compatibility alias for zero-to-running setup; prefer jinn run |
+| `jinn auth` | Legacy compatibility: check Claude authentication and persist daemon runtime mode |
 | `jinn bootstrap` | Advance the fleet state machine toward a running daemon |
 | `jinn fund-requirements` | List addresses that need funding before the next bootstrap step |
-| `jinn run` | Zero-to-running in one command: init, fund, bootstrap, then start the daemon in the foreground (stops on SIGINT/SIGTERM) |
+| `jinn run` | Start the daemon in the foreground; stops on SIGINT/SIGTERM |
 | `jinn stop` | Signal a running jinn daemon to shut down gracefully |
+| `jinn kill` | Force-terminate jinn daemon processes discovered by cmdline enumeration |
 | `jinn status` | Daemon liveness + roll-up (poll this for monitoring; pull detail separately) |
 | `jinn fleet` | Per-service fleet detail (wallets, staking, rewards, attention) |
 | `jinn balance` | Flat per-wallet balance map across master and service wallets |
 | `jinn history` | Recent protocol activity (Tasks, claims, deliveries, evaluations, rewards) |
-| `jinn rewards` | Earned vs claimed per service, per asset; next checkpoint time |
+| `jinn rewards` | Staking collector queue per service; next checkpoint time |
 | `jinn logs` | Structured event log (one JSON object per line) |
-| `jinn tasks` | Submit, list, and inspect Tasks |
-| `jinn solver-nets` | Enable SolverNets, select Harnesses, and attach SolverNet-scoped SolverPlugins |
-| `jinn harnesses` | List, inspect, add, and remove Harnesses |
-| `jinn solver-plugins` | Validate, inspect, and pack SolverPlugin packages |
-| `jinn integrations` | Configure host AI tools to use the Jinn MCP server and operator skill |
 | `jinn claim-rewards` | Pull pending protocol rewards to the fleet multisigs |
 | `jinn withdraw` | Sweep master / agents per withdraw flags |
 | `jinn keys` | Keystore management: backup, change-password |
-| `jinn update` | Update the client package and refresh integrations in all configured AI tools |
+| `jinn update` | Update the client package, run local Task-native preflight, and refresh integrations |
 | `jinn mcp` | Run the operator MCP server over stdio |
 | `jinn migrate-agent-id` | Backfill ERC-8004 agent_id on legacy complete services (jinn-mono-jgp) |
 | `jinn conformance` | Run the envelope + trajectory conformance suite against a signed envelope CID |
+| `jinn create` | Scaffold a new Jinn external harness or SolverPlugin package |
+| `jinn ui` | Open the operator panel in your browser (assumes daemon is running) |
+| `jinn tasks` | Submit and inspect Tasks |
+| `jinn solver-nets` | Manage SolverNet activation, Harness selection, and SolverNet-scoped plugins |
+| `jinn prediction-scoreboard` | Render the Prediction SolverNet Brier scoreboard Markdown report |
+| `jinn capture` | Import local capture traces or transcripts |
+| `jinn harnesses` | Manage operator-supplied external Harnesses |
+| `jinn solver-plugins` | Inspect, validate, pack, publish, and revoke SolverPlugin packages |
+| `jinn integrations` | Configure host AI tool integrations for Jinn |
+| `jinn codedigest-revert-check` | Decide whether an Improve commit regressed the pass rate (per-codeDigest, #764) |
+| `jinn eval` | Run a held-out slate against a checkpoint and compare its resolved rate vs the parent (#818) |
 <!-- skill:cli-table:end -->
 
 ## Phase 2: MCP Configuration
@@ -111,27 +120,32 @@ Once configured, these MCP tools become available:
 <!-- skill:mcp-table:start -->
 | Tool | What it does |
 |------|--------------|
-| `jinn_auth` | Read-only diagnostic: check Claude authentication status and resolved runtime mode. Do not use this as first-run setup; call `jinn_run` and complete auth in the app if prompted. Fast (<1s). |
+| `jinn_auth` | Read-only diagnostic: check Claude authentication status and the resolved runtime mode (bare/docker-compose/container). Does NOT attempt login — it only probes and reports. Do not use this as first-run setup; call jinn_run and complete auth in the app if prompted. Returns authenticated:true + context + email on success; returns an error envelope if not authenticated. Fast (<1s). |
 | `jinn_doctor` | Preflight checks: node version, claude binary, keystore, deployment config. Read-only. Fast (<5s). |
 | `jinn_fund_requirements` | Read-only: list addresses and amounts that need funding before bootstrap can advance. Note: the underlying command may hydrate wallet state as a side effect of checking funding. Returns an array of funding gaps; empty array means all funded. |
 | `jinn_status` | Daemon liveness and fleet health roll-up. Read-only. Poll this to monitor progress. Fast (<2s). |
 | `jinn_fleet` | Per-service fleet detail: wallets, staking status, activity counts. Read-only. Fast (<5s). |
 | `jinn_balance` | Flat per-wallet balance map across master and service wallets. Read-only. Requires RPC. Fast (<5s). |
-| `jinn_history` | Recent protocol activity: Tasks, claims, deliveries, evaluations, rewards. Read-only from local DB. Fast (<2s). |
+| `jinn_history` | Recent protocol activity: tasks, claims, deliveries, evaluations, rewards. Read-only from local DB. Fast (<2s). |
 | `jinn_logs` | Recent activity event log from the local SQLite store. Read-only. Fast (<2s). Returns events with ts, level, component, msg fields. Call with limit=100 for monitoring; increase for deeper history. |
 | `jinn_rewards` | Pending and claimed reward balances per staked service. Read-only. Requires RPC access. Fast (<5s). Returns per-service pending/claimed amounts and next checkpoint time. |
-| `jinn_solver_nets_list` | List configured SolverNets with their enabled state, solverType, selected Harness, and plugin set. Read-only. Fast (<2s). |
+| `jinn_solver_nets_list` | List configured SolverNets with their enabled state. Read-only. Fast (<2s). |
 | `jinn_solver_nets_show` | Detailed status for one SolverNet. Read-only. Fast (<2s). |
-| `jinn_solver_nets_enable` | MUTATING: Enable a SolverNet and optionally select a Harness. Idempotent. May call Harness onEnable with SolverNet context. |
+| `jinn_solver_nets_enable` | MUTATING: Enable a SolverNet. Idempotent. Optionally selects the restoration Harness for that SolverNet. |
 | `jinn_solver_nets_disable` | MUTATING: Disable a SolverNet. Writes config. Idempotent. Fast (<1s). |
-| `jinn_tasks_submit` | MUTATING. Post a Task to the protocol. Idempotent by id. Sends an on-chain transaction and pays gas when confirmed. Requires confirm: true; default is preview (uses CLI --dry-run, no on-chain action). |
 | `jinn_init` | MUTATING. Create the master wallet and write the encrypted keystore. Idempotent: re-runs return the existing master address. Requires confirm: true; default is preview (no filesystem write). |
-| `jinn_run` | MUTATING: Zero-to-running in one call: resolve/generate password, init wallet, bootstrap fleet, start daemon. Idempotent — safe to call repeatedly; resumes from last completed step. Long-running: can take up to 30 minutes if funding is required. Returns a progress stream via --json-progress; poll jinn_status to monitor after this returns. Use no_daemon=true to skip starting the daemon (useful for CI or when the daemon is managed separately). |
+| `jinn_run` | MUTATING: Run the Jinn daemon end-to-end. Initializes the keystore (if missing), bootstraps the fleet (with funding poll), and starts the daemon loops. Idempotent — safe to call repeatedly; resumes from the last completed step. Long-running: can take up to 30 minutes if funding is required. Returns a progress stream via --json-progress; poll jinn_status to monitor after this returns. Use no_daemon=true to exit after bootstrap (useful for CI or when the daemon is managed separately). Requires confirm: true; default is preview (no mutation). |
 | `jinn_bootstrap` | MUTATING. Advance the fleet state machine. Idempotent. May take several minutes; can post on-chain transactions and request testnet faucet funds. Returns funding_required if a wallet needs ETH. Requires confirm: true; default is preview (no chain or filesystem mutation). |
+| `jinn_tasks_submit` | MUTATING. Post a Task to the protocol. Idempotent by id. Sends an on-chain transaction and pays gas when confirmed. Requires confirm: true; default is preview (uses CLI --dry-run, no on-chain action). |
 | `jinn_claim_rewards` | MUTATING. Pull pending protocol rewards to the fleet multisigs. Idempotent: zero-delta exits 0. Requires confirm: true; default is preview (uses CLI --dry-run, no on-chain action). |
-| `jinn_update` | MUTATING: Update the client package and refresh installed integrations. Step 1: npm update -g @jinn-network/client Step 2: jinn integrations install (refreshes skills in all configured AI tools). May take 1-2 minutes. Use skip_npm=true to only refresh integrations with the current version. |
+| `jinn_update` | MUTATING: Update the client package and refresh host integrations. Step 1: npm update -g @jinn-network/client Step 2: jinn integrations install (refreshes skills in all configured AI tools). May take 1-2 minutes. Use skip_npm=true to only refresh integrations with the current version. |
 | `jinn_start_daemon` | MUTATING. Start the jinn daemon as a detached background process. Spawns a long-lived child process and writes a pidfile. Requires confirm: true; default is preview (does not spawn a process). |
 | `jinn_stop_daemon` | MUTATING. Stop the running jinn daemon. Idempotent: returns success even if already stopped. Requires confirm: true; default is preview (does not signal any process). |
+| `activity_list` | List recent structured daemon events. Filter by kinds: intent, reward, fleet, system, error, log. |
+| `bootstrap_state` | Get the current bootstrap state machine: mode (setup|running|uninitialized), current step, services, master address, chain. |
+| `daemon_restart` | Request a daemon restart. Requires confirm=true. The daemon will shut down gracefully and the process will exit; the supervising shell or systemd unit must restart it. |
+| `loop_pause` | Pause a daemon loop by name (creator | engine_watcher | engine_tick | delivery_watcher | reward_claim | balance_topup | jinn_claim | peer_sync). NOTE: stubbed in v1-Slim; returns not_implemented. |
+| `loop_resume` | Resume a previously-paused daemon loop. NOTE: stubbed in v1-Slim; returns not_implemented. |
 <!-- skill:mcp-table:end -->
 
 ## Phase 3: Zero to Running

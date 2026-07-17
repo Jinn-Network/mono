@@ -1,53 +1,111 @@
 """jinn plugin — the Jinn-Hermes fork's single integration surface.
 
-Thin-fork discipline: everything that touches scrubbing, consent
-conversion, publishing, anchoring, the ledger or the corpus lives in the
-``@jinn-network/harness-layer`` package (the ``jinn-layer`` CLI); this
-plugin only:
+The plugin captures local session evidence unconditionally, assembles one
+complete EpisodeV1, and delegates it through the versioned ``jinn-layer
+session end`` process bridge.  The core owns canonical persistence,
+eligibility, contribution recording/veto, and summaries.  A bridge failure
+falls back to one local EpisodeV1 write; the retired raw pending/publication
+queue is never created or drained here.
 
-1. Runs the first-run consent flow (``/jinn consent``; exact copy from the
-   design artifact). Consent default is OFF — ``unset`` and ``declined``
-   both mean nothing is captured, nothing leaves the machine.
-2. Buffers the session's task trace (``pre_llm_call`` first turn +
-   ``post_tool_call`` steps) and, at ``on_session_end`` — only when consent
-   is ``accepted`` — hands the assembled task to ``jinn-layer``:
-   preview-gated first publish, per-task veto, fail-closed scrub inside
-   the layer.
-3. Exposes ``/jinn`` (status · consent · preview · ledger · veto) and
-   ``/corpus <query>`` (in-session corpus search).
+Sharing remains governed by the single consent bit, and ``/jinn`` exposes
+status, consent, informational preview, ledger, veto, and corpus consumption.
 
 Upstream-merge procedure: see JINN.md at the repo root.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
 import shlex
 import sys
 import threading
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Set
 
 from . import capture_buffer as buf
 from . import consent
 from . import distill
+from . import history_view
 from . import jinn_layer
 from . import ledger_view
 from . import onboarding
 from . import pickup
+from . import session_bridge
+from . import session_view
 from . import skills_install
+from . import style
 
 logger = logging.getLogger(__name__)
-
-PUBLISH_FAILED_LINE = "publish failed — retained locally"
 
 _veto_lock = threading.Lock()
 _vetoed_tasks: Set[str] = set()
 _session_hint_shown: Set[str] = set()
 
+# Distilled-skill use counts at session start; the session-end payoff surface
+# reports only skills used during this session.
+_distill_usage_snapshot: Dict[str, int] = {}
+
 # Test seam: overridable subprocess runner (None = real jinn-layer binary).
 _runner: Optional[jinn_layer.Runner] = None
+
+# Memoized v1 handshake. A reason here disables only the additive session-end
+# process bridge; Python pickup, capture, fallback persistence, and distillation
+# remain live.
+_contract_lock = threading.Lock()
+_contract_checked = False
+_degraded: Optional[str] = None
+
+# Per-session repo/activity evidence. Populated at session start and consumed
+# once at session end.
+_session_state_lock = threading.Lock()
+_session_states: Dict[str, Dict[str, Any]] = {}
+
+
+def _reset_contract_state() -> None:
+    global _contract_checked, _degraded
+    _contract_checked = False
+    _degraded = None
+
+
+def _reset_session_state() -> None:
+    with _session_state_lock:
+        _session_states.clear()
+
+
+def _check_contract() -> None:
+    """Probe contract v1 once; never raise into the host session."""
+    global _contract_checked, _degraded
+    with _contract_lock:
+        if _contract_checked:
+            return
+        _contract_checked = True
+        try:
+            code, out, _err = jinn_layer.contract(runner=_runner)
+        except Exception:
+            _degraded = "jinn-layer handshake failed"
+            return
+        if code == 127:
+            _degraded = "jinn-layer unavailable"
+            return
+        if code != 0:
+            _degraded = "jinn-layer handshake failed"
+            return
+        try:
+            reply = json.loads(out)
+        except (TypeError, json.JSONDecodeError):
+            _degraded = "jinn-layer contract unreadable"
+            return
+        version = reply.get("contractVersion") if isinstance(reply, dict) else None
+        if version != jinn_layer.CONTRACT_VERSION:
+            _degraded = (
+                f"jinn-layer contract v{version} "
+                f"(expected v{jinn_layer.CONTRACT_VERSION})"
+            )
 
 
 def _pending_dir() -> Path:
@@ -66,34 +124,153 @@ def _user_line(msg: str) -> None:
     above the input area (the app is ``full_screen=False``); at shutdown
     and in ``-q`` mode it is plain stderr. Never raise from here — a
     feedback line must not break a session end.
+
+    Strips ANSI unconditionally before printing (mono issue #1798): the
+    ``patch_stdout`` proxy renders raw ESC bytes as ``?[38;2;…m`` noise
+    rather than interpreting them, so this channel emits plain text always,
+    regardless of ``COLORTERM``/``NO_COLOR``. The fork-precedent plugins this
+    channel was modeled on (memory/hindsight) print plain text too — the
+    styling here was our deviation. Styled surfaces that never run inside
+    the TUI (the terminal-blocking onboarding CLI) are unaffected.
     """
     try:
-        print(msg, file=sys.stderr, flush=True)
+        print(style.strip_ansi(msg), file=sys.stderr, flush=True)
     except Exception:
         pass
 
 
-def _published_ref(out: str) -> str:
-    """Extract the envelopeRef from jinn-layer publish output.
+def _veto_path(session_id: str) -> Path:
+    safe = "".join(c if c.isalnum() or c in "-_" else "-" for c in session_id)[:96]
+    digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:12]
+    name = f"{safe or 'session'}-{digest}.json"
+    return consent.get_hermes_home() / "jinn" / "vetoes" / name
 
-    Success output is ``Published.\\n  ref       <envelopeRef>\\n  …``
-    (harness-layer cli.ts). Empty string when absent — callers omit it.
+
+def _record_veto(session_id: str) -> None:
+    marker = _veto_path(session_id)
+    marker.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(marker.parent, 0o700)
+    payload = json.dumps({"sessionId": session_id, "status": "vetoed"}, indent=2) + "\n"
+    try:
+        descriptor = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        if marker.is_symlink() or not marker.is_file():
+            raise OSError(f"unsafe veto marker: {marker}")
+        os.chmod(marker, 0o600)
+    else:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(marker, 0o600)
+    with _veto_lock:
+        _vetoed_tasks.add(session_id)
+
+
+def _session_vetoed(session_id: str) -> bool:
+    with _veto_lock:
+        if session_id in _vetoed_tasks:
+            return True
+    return _veto_path(session_id).is_file()
+
+
+def _clear_veto(session_id: str) -> None:
+    try:
+        _veto_path(session_id).unlink(missing_ok=True)
+    except OSError:
+        return
+    with _veto_lock:
+        _vetoed_tasks.discard(session_id)
+
+
+def _empty_activity() -> Dict[str, list]:
+    """Evidence-first pickup facts (searchedTerms/providedRefs, rescope §3.6)
+    plus the internal fetch-attempt detail the corpus_search/corpus_fetch
+    agent tools still record (surfacedRefs/fetchedRefs). installedSkillRefs
+    is gone with the skill adopt/install path pickup no longer has."""
+    return {
+        "searchedTerms": [],
+        "providedRefs": [],
+        "surfacedRefs": [],
+        "fetchedRefs": [],
+    }
+
+
+def _state_for(session_id: str, cwd: Optional[Path] = None) -> Dict[str, Any]:
+    key = session_id or "default"
+    with _session_state_lock:
+        state = _session_states.get(key)
+        if state is None:
+            state = {
+                "snapshot": session_bridge.snapshot_repository(key, cwd=cwd),
+                "activity": _empty_activity(),
+                "intermediateFailureDiffs": [],
+            }
+            _session_states[key] = state
+        return state
+
+
+def _pop_state(session_id: str) -> Dict[str, Any]:
+    key = session_id or "default"
+    with _session_state_lock:
+        return _session_states.pop(
+            key,
+            {
+                "snapshot": None,
+                "activity": _empty_activity(),
+                "intermediateFailureDiffs": [],
+            },
+        )
+
+
+def _peek_state(session_id: str) -> Dict[str, Any]:
+    key = session_id or "default"
+    with _session_state_lock:
+        state = _session_states.get(key)
+        if state is None:
+            return {"activity": _empty_activity()}
+        return {
+            **state,
+            "activity": {
+                field: list(state.get("activity", {}).get(field) or [])
+                for field in ("searchedTerms", "providedRefs", "surfacedRefs", "fetchedRefs")
+            },
+        }
+
+
+def _record_activity(session_id: str, field: str, refs: list[str]) -> None:
+    """Record only refs a successful host action actually observed.
+
+    Internal fetch-attempt detail only (surfacedRefs/fetchedRefs, from the
+    corpus_search/corpus_fetch agent tools) — searchedTerms/providedRefs are
+    set wholesale by pickup.pickup()'s own response, not appended here.
     """
-    for line in (out or "").splitlines():
-        parts = line.split()
-        if len(parts) == 2 and parts[0] == "ref":
-            return parts[1]
-    return ""
-
-
-def _task_key(task_id: str, session_id: str) -> str:
-    return task_id or session_id or "default"
+    if not session_id or field not in ("surfacedRefs", "fetchedRefs"):
+        return
+    state = _state_for(session_id)
+    with _session_state_lock:
+        seen = state["activity"][field]
+        for ref in refs:
+            if ref and ref not in seen:
+                seen.append(ref)
 
 
 # ── Hooks ────────────────────────────────────────────────────────────────────
 
 def _on_session_start(session_id: str = "", platform: str = "", **_: Any) -> None:
-    if consent.load_state().get("status") != consent.UNSET:
+    cwd = _.get("cwd") or _.get("working_directory")
+    _state_for(session_id, Path(cwd) if isinstance(cwd, str) and cwd else None)
+    _check_contract()
+    # Pick up a background distillation left over from a previous process:
+    # live pid → resume the ambient tail; dead without a run_end → one
+    # recovery line + archive (mono #1539). Never blocks, never raises.
+    try:
+        distill.reattach_watcher(sink=_user_line)
+    except Exception:
+        pass
+    global _distill_usage_snapshot
+    _distill_usage_snapshot = distill.snapshot_usage()
+    if consent.consent_decided():
         return
     if session_id in _session_hint_shown:
         return
@@ -101,7 +278,7 @@ def _on_session_start(session_id: str = "", platform: str = "", **_: Any) -> Non
     # Never block a session with an interactive flow from inside a hook —
     # surface the one-line hint; the flow itself runs via /jinn consent.
     logger.info(
-        "jinn: contribution consent not set — capture is OFF. Run /jinn consent to decide."
+        "jinn: sharing consent not set — nothing is shared. Run /jinn consent to decide."
     )
 
 
@@ -114,19 +291,34 @@ def _on_pre_llm_call(
     task_id: str = "",
     **_: Any,
 ) -> Optional[Dict[str, str]]:
-    # Contribution side — consent-gated. Not gated on is_first_turn: the buffer
-    # is keyed per session and record_first_turn is setdefault-idempotent, so
-    # calling it every turn recovers the summary/model even when the first-turn
-    # signal is unreliable on some provider paths (mono #1404). A distill
-    # opt-in (mode local/defer, mono #1537) also fills the buffer — but the
-    # publish path stays gated on publish consent alone (see _on_session_end).
-    if consent.capture_enabled() or distill.distill_capture_enabled(_runner):
-        buf.record_first_turn(task_id, session_id, user_message, model, platform)
-    # Consumption side — NEVER consent-gated: payload-agnostic corpus pickup.
+    # Local capture — UNCONDITIONAL (mono#1714): filling the buffer never
+    # leaves the machine; local retention, mining, and distillation happen by
+    # default. Not gated on is_first_turn: the buffer is keyed per session and
+    # record_first_turn is setdefault-idempotent, so calling it every turn
+    # recovers the summary/model even when the first-turn signal is unreliable
+    # on some provider paths (mono #1404). Only the share step (a task leaving
+    # the machine) is gated — see _on_session_end.
+    buf.record_first_turn(task_id, session_id, user_message, model, platform)
+    # Ordered user-turn span for the EpisodeV1 trajectory (mono #1662).
+    # record_first_turn stores metadata only; this appends the turn span so it
+    # precedes this turn's tool calls (post_tool_call) and the assistant turn
+    # (post_llm_call). Local capture, so unconditional per mono#1714.
+    buf.record_user_turn(task_id, session_id, user_message)
+    # Consumption side — NEVER consent-gated: evidence-first corpus pickup.
     # Returns {"context": ...} (injected into the user message, cache-safe)
     # or None. Fails open inside pickup().
     if is_first_turn:
-        return pickup.pickup(user_message, runner=_runner)
+        state = _state_for(session_id)
+        snapshot = state.get("snapshot")
+        repository_slug = snapshot.repository_slug if snapshot is not None else None
+        return pickup.pickup(
+            user_message,
+            runner=_runner,
+            activity=state["activity"],
+            session_id=session_id,
+            model=model,
+            repository_slug=repository_slug,
+        )
     return None
 
 
@@ -140,9 +332,108 @@ def _on_post_tool_call(
     duration_ms: Optional[int] = None,
     **_: Any,
 ) -> None:
-    if not (consent.capture_enabled() or distill.distill_capture_enabled(_runner)):
-        return
+    # Local capture — UNCONDITIONAL (mono#1714): recording tool calls never
+    # leaves the machine.
     buf.record_tool_call(task_id, session_id, tool_name, tool_call_id, args, result, duration_ms)
+    state = _state_for(session_id)
+    run = session_bridge.test_run_from_tool_call(
+        tool_name, args, result, str(time.time_ns())
+    )
+    if run is not None and run["exitCode"] != 0 and state["snapshot"] is not None:
+        try:
+            failed_diff = session_bridge.accepted_diff(state["snapshot"])
+        except Exception:
+            failed_diff = ""
+        if failed_diff and failed_diff not in state["intermediateFailureDiffs"]:
+            state["intermediateFailureDiffs"].append(failed_diff)
+
+
+def _on_post_llm_call(
+    session_id: str = "",
+    task_id: str = "",
+    user_message: str = "",
+    assistant_response: str = "",
+    input_tokens: Optional[int] = None,
+    output_tokens: Optional[int] = None,
+    **_: Any,
+) -> None:
+    # Complete the EpisodeV1 turn (mono #1662): the assistant span lands AFTER
+    # this turn's tool calls (post_tool_call fires inside the tool loop, which
+    # completes before post_llm_call). Local capture is UNCONDITIONAL (mono#1714)
+    # — the buffer never leaves the machine; only the share step is gated.
+    buf.record_assistant_turn(task_id, session_id, assistant_response)
+    # Record tokens only when the host reports meaningful usage. Zero/zero (the
+    # getattr default when the agent has no usage) is treated as "no usage" so
+    # cost.tokens is OMITTED rather than emitted as {0,0} (AC2, mono #1662).
+    if input_tokens or output_tokens:
+        buf.record_tokens(task_id, session_id, input_tokens or 0, output_tokens or 0)
+
+
+def _delegate_session_end(
+    episode: Dict[str, Any],
+    *,
+    activity: Dict[str, Any],
+    eligibility_inputs: Dict[str, Any],
+    contribution_candidate: Optional[Dict[str, Any]],
+    contribution_vetoed: bool,
+) -> Optional[Dict[str, Any]]:
+    """Return the core result only when it canonically persisted this episode."""
+    if _degraded is not None:
+        return None
+    normalized_activity = {
+        "searchedTerms": list(activity.get("searchedTerms") or []),
+        "providedRefs": list(activity.get("providedRefs") or []),
+        "surfacedRefs": list(activity.get("surfacedRefs") or []),
+        "fetchedRefs": list(activity.get("fetchedRefs") or []),
+    }
+    request: Dict[str, Any] = {
+        "contractVersion": jinn_layer.CONTRACT_VERSION,
+        "episode": episode,
+        "activity": normalized_activity,
+        "eligibilityInputs": dict(eligibility_inputs),
+        "contributionVetoed": bool(contribution_vetoed),
+    }
+    if contribution_candidate is not None:
+        request["contributionCandidate"] = contribution_candidate
+    try:
+        code, out, _err = jinn_layer.session_end(request, runner=_runner)
+        if code != 0:
+            return None
+        envelope = jinn_layer.parse_session_end_response(out)
+        if envelope["status"] == "unavailable":
+            return None
+        value = envelope.get("value")
+        if not isinstance(value, dict):
+            return None
+        persistence = value.get("persistence")
+        if not isinstance(persistence, dict) or persistence.get("status") not in ("ok", "degraded"):
+            return None
+        persisted_value = persistence.get("value")
+        persisted_id = persisted_value.get("episodeId") if isinstance(persisted_value, dict) else None
+        if persisted_id != episode.get("episodeId"):
+            return None
+        return value
+    except Exception:
+        return None
+
+
+def _episode_test_runs(episode: Dict[str, Any]) -> list[Dict[str, Any]]:
+    runs = []
+    for span in episode.get("trajectory", []):
+        if not isinstance(span, dict) or span.get("kind") != "jinn.tool_call":
+            continue
+        attrs = span.get("attributes") if isinstance(span.get("attributes"), dict) else {}
+        name = str(span.get("name") or "")
+        tool_name = name.split(":", 1)[1] if name.startswith("tool:") else name
+        run = session_bridge.test_run_from_tool_call(
+            tool_name,
+            attrs.get("tool.args"),
+            attrs.get("tool.result"),
+            str(span.get("endTimeUnixNano") or ""),
+        )
+        if run is not None:
+            runs.append(run)
+    return runs
 
 
 def _on_session_end(
@@ -150,13 +441,45 @@ def _on_session_end(
     task_id: str = "",
     completed: bool = False,
     interrupted: bool = False,
+    skills_loadout: Optional[list] = None,
+    input_tokens: Optional[int] = None,
+    output_tokens: Optional[int] = None,
     **_: Any,
 ) -> None:
-    publish_enabled = consent.capture_enabled()
-    if not (publish_enabled or distill.distill_capture_enabled(_runner)):
-        return
-    task = buf.assemble(task_id, session_id, completed, interrupted)
-    if task is None:
+    # Usage is native local telemetry, so show payoff independently of sharing
+    # consent and before any capture-path early return.
+    try:
+        for line in distill.payoff_lines(_distill_usage_snapshot):
+            _user_line(line)
+    except Exception:
+        pass
+
+    # Local capture is unconditional (mono#1714); only the share step is gated.
+    share_enabled = consent.share_enabled()
+    # Record the skills loadout + token fallback (host forward, mono #1662) —
+    # local writes, so unconditional per mono#1714, before the popping assembly.
+    buf.record_environment(task_id, session_id, skills_loadout or [])
+    # See _on_post_llm_call — zero/no usage omits cost.tokens (AC2, mono #1662).
+    if input_tokens or output_tokens:
+        buf.record_tokens(task_id, session_id, input_tokens or 0, output_tokens or 0)
+
+    # Pop the buffer ONCE for both shapes (assemble pops — see assemble_both).
+    # publish_consented mirrors the single share consent (mono#1714): the
+    # network-facing shape is only prepared when the operator has consented.
+    task, episode = buf.assemble_both(
+        task_id, session_id, completed, interrupted, publish_consented=share_enabled
+    )
+
+    if episode is None:
+        state = _pop_state(session_id)
+        _user_line(session_view.render_complete(
+            summary=None,
+            activity=state.get("activity") or {},
+            capture_status="unavailable",
+            local_learning_status="unavailable",
+            contribution=None,
+            candidate_created=False,
+        ))
         return
 
     # Tee for local distillation (mono #1537) — BEFORE the veto/publish
@@ -164,91 +487,82 @@ def _on_session_end(
     # capture (a veto withholds from the NETWORK; local distillation never
     # leaves this machine). Distinct dir + lifecycle from the pending file:
     # the publish drain unlinks pending files, never captures.
-    distill.tee_capture(task, session_id or task_id, runner=_runner)
+    tee_path = (
+        distill.tee_capture(task, session_id or task_id, runner=_runner)
+        if task is not None
+        else None
+    )
 
-    # Everything below is the PUBLISH lifecycle — gated on publish consent
-    # alone. A distill-only opt-in must never cause a publish.
-    if not publish_enabled:
-        return
-
-    task_file = jinn_layer.write_task_file(task, _pending_dir(), session_id or task_id)
-
-    with _veto_lock:
-        vetoed = _task_key(task_id, session_id) in _vetoed_tasks
-        _vetoed_tasks.discard(_task_key(task_id, session_id))
-
-    if vetoed:
-        code, out = jinn_layer.publish(task_file, veto=True, runner=_runner)
-        if code == 0:
-            task_file.unlink(missing_ok=True)
-            logger.info("jinn: task vetoed — recorded locally, nothing published")
-        else:
-            logger.warning("jinn: veto record failed: %s", out)
-        return
-
-    if not consent.load_state().get("previewed"):
-        # Design rule: nothing publishes until the operator has previewed once.
-        logger.info(
-            "jinn: trace captured and held locally at %s — run /jinn preview to "
-            "see exactly what would publish, then it publishes on future task ends",
-            task_file,
-        )
-        _user_line("jinn: trace held locally — /jinn preview to see what would publish")
-        return
-
-    code, out = jinn_layer.publish(task_file, runner=_runner)
-    if code == 0:
-        task_file.unlink(missing_ok=True)
-        logger.info("jinn: contribution published\n%s", out)
-        ref = _published_ref(out)
-        _user_line(
-            f"jinn: contribution published — {ref} (/jinn ledger for the anchor)"
-            if ref
-            else "jinn: contribution published (/jinn ledger for the anchor)"
-        )
-    else:
-        logger.warning("jinn: %s (%s)\n%s", PUBLISH_FAILED_LINE, task_file, out)
-        _user_line(f"jinn: publish failed — trace kept at {task_file}")
-
-    _drain_pending(task_file)
-
-
-def _drain_pending(current: Path) -> None:
-    """Publish traces held in the pending dir by earlier session ends.
-
-    The preview gate holds pre-preview tasks with the promise "then it
-    publishes on future task ends" — this drain keeps that promise
-    (mono issue #1370). Runs only from the publishing path of
-    ``_on_session_end`` (consent accepted + previewed), so vetoed files
-    are never drained: a veto is recorded and unlinked in the veto branch
-    above, which returns early before any drain — acceptable, because the
-    drain simply happens on the next publishing session end. Failures are
-    logged and the file left for a retry at a later session end; a drain
-    must never raise or block the session end.
-    """
+    state = _pop_state(session_id)
+    snapshot = state.get("snapshot")
     try:
-        held = sorted(
-            (p for p in _pending_dir().glob("*.json") if p != current),
-            key=lambda p: p.stat().st_mtime,
+        accepted = session_bridge.accepted_diff(snapshot) if snapshot is not None else ""
+    except Exception:
+        accepted = ""
+    vetoed = _session_vetoed(session_id)
+    candidate = session_bridge.build_contribution_candidate(
+        episode,
+        snapshot,
+        accepted=accepted,
+        test_runs=_episode_test_runs(episode),
+        intermediate_failure_diffs=state.get("intermediateFailureDiffs") or [],
+        skill_refs=skills_loadout or [],
+        publish_consent=share_enabled,
+        created_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    )
+    result = _delegate_session_end(
+        episode,
+        activity=state.get("activity") or {},
+        eligibility_inputs={"acceptedDiff": bool(accepted)},
+        contribution_candidate=candidate,
+        contribution_vetoed=vetoed,
+    )
+    if result is None:
+        fallback_path = distill.write_episode_fallback(episode)
+        learning_status = (
+            "pending" if tee_path is not None
+            else "off" if distill.cached_mode(_runner) == "off"
+            else "unavailable"
         )
-    except OSError:
-        return
-    drained = 0
-    for path in held:
-        try:
-            code, out = jinn_layer.publish(path, runner=_runner)
-            if code == 0:
-                path.unlink(missing_ok=True)
-                drained += 1
-                logger.info("jinn: held contribution published\n%s", out)
-            else:
-                logger.warning("jinn: %s (%s)\n%s", PUBLISH_FAILED_LINE, path, out)
-        except Exception:
-            logger.warning("jinn: %s (%s)", PUBLISH_FAILED_LINE, path, exc_info=True)
-    if drained:
-        # One summary line for the whole drain — with the current task's own
-        # line above, a session end emits at most 2 user-visible lines.
-        _user_line(f"jinn: {drained} held trace(s) published")
+        activity = state.get("activity") or {}
+        _user_line(session_view.render_complete(
+            summary={
+                "searchedTerms": list(activity.get("searchedTerms") or []),
+                "providedPackets": [
+                    {"ref": ref, "title": ref} for ref in (activity.get("providedRefs") or [])
+                ],
+                "nothingFound": not bool(activity.get("providedRefs")),
+            },
+            activity=activity,
+            capture_status="captured-locally" if fallback_path is not None else "unavailable",
+            local_learning_status=learning_status,
+            contribution=None,
+            candidate_created=candidate is not None,
+        ))
+    else:
+        contribution = result.get("contribution")
+        value = contribution.get("value") if isinstance(contribution, dict) else None
+        if (
+            vetoed
+            and isinstance(contribution, dict)
+            and contribution.get("status") in ("ok", "degraded")
+            and isinstance(value, dict)
+            and value.get("status") == "vetoed"
+        ):
+            _clear_veto(session_id)
+        learning_status = (
+            "pending" if tee_path is not None
+            else "off" if distill.cached_mode(_runner) == "off"
+            else "unavailable"
+        )
+        _user_line(session_view.render_complete(
+            summary=result.get("summary"),
+            activity=state.get("activity") or {},
+            capture_status="captured",
+            local_learning_status=learning_status,
+            contribution=result.get("contribution"),
+            candidate_created=candidate is not None,
+        ))
 
 
 # ── Slash commands ───────────────────────────────────────────────────────────
@@ -257,12 +571,13 @@ _JINN_HELP = (
     "/jinn — Jinn layer\n"
     "  /jinn status    consent + capture state\n"
     "  /jinn consent   run the consent flow\n"
-    "  /jinn preview   preview the held (pending) trace exactly as it would publish\n"
+    "  /jinn preview   inspect a retained legacy capture, or a labelled example\n"
+    "  /jinn session   current searched/provided, capture, learning, and contribution state\n"
+    "  /jinn history   sessions derived from episodes, contributions, and local skills\n"
     "  /jinn ledger    the contribution ledger — what left this machine\n"
     "  /jinn veto      withhold the current task (recorded locally, never published)\n"
-    "  /jinn skills install <ref>   install a corpus-published skill into the agent's skills\n"
-    "  /jinn skills list            jinn-installed skills\n"
-    "  /jinn skills uninstall <slug>  remove a jinn-installed skill\n"
+    "  /jinn distill   local distillation — your captures into reusable skills\n"
+    "  /jinn distill where local|defer|off   set where distillation runs\n"
 )
 
 
@@ -280,16 +595,25 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
 
     if sub == "status":
         state = consent.load_state()
-        status = state.get("status")
-        lines = [f"consent: {status}"]
-        if status == consent.ACCEPTED:
-            lines.append(f"previewed: {'yes' if state.get('previewed') else 'no — first publish is held until /jinn preview'}")
-            lines.append("capture: ON — scrubbed task traces publish at task end")
+        share = bool(state.get("shareConsent"))
+        lines = [f"sharing: {'ON' if share else 'OFF'}"]
+        if share:
+            lines.append(f"previewed: {'yes' if state.get('previewed') else 'no'}")
+            lines.append("share: ON — reproducible tasks from your work may be shared at task end")
         else:
-            lines.append("capture: OFF — reader only, nothing leaves this machine")
+            lines.append("share: OFF — nothing derived from your work leaves this machine")
+        if _degraded is not None:
+            lines.append(f"bridge: degraded — {_degraded}")
         pending = _latest_pending()
         if pending:
             lines.append(f"pending trace: {pending}")
+        d_status = distill.distill_status(_runner)
+        if d_status:
+            lines.append(
+                f"distill: {d_status.get('mode', 'unset')} — "
+                f"{d_status.get('uncoveredCount', 0)} capture(s) not yet distilled, "
+                f"{d_status.get('stagedCount', 0)} staged, {d_status.get('installedCount', 0)} installed"
+            )
         return "\n".join(lines)
 
     if sub == "consent":
@@ -298,12 +622,48 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
         action = parts[1] if len(parts) > 1 else ""
         confirmed = len(parts) > 2 and parts[2] == "confirm"
         if action == "accept":
-            return consent.record_accept() if confirmed else consent.confirm_accept_command()
+            if not confirmed:
+                return consent.confirm_accept_command()
+            marker_ok = session_bridge.set_publication_enabled(True)
+            message = consent.record_accept()
+            return message if marker_ok else message + "\nwarning: publication preference marker could not be updated"
         if action == "decline":
-            return consent.record_decline() if confirmed else consent.confirm_decline_command()
+            if not confirmed:
+                return consent.confirm_decline_command()
+            code, out, err = jinn_layer.contribution_disable(runner=_runner)
+            # Let the core serialize revocation with any publication already
+            # crossing its boundary. The direct marker is the fail-closed host
+            # fallback and mirrors the successful core write for old stubs.
+            marker_ok = session_bridge.set_publication_enabled(False)
+            message = consent.record_decline()
+            if code == 0:
+                return message
+            if marker_ok:
+                return message + "\nexisting publication queue is fail-closed locally; jinn-layer cleanup is degraded"
+            return message + f"\nwarning: could not disable the existing publication queue: {err or out}"
         return consent.render_explainer(consent.COMMANDS_LINE)
 
     if sub == "preview":
+        code, out, _err = jinn_layer.contribution_preview(acknowledge=True, runner=_runner)
+        if code == 0:
+            try:
+                reply = jinn_layer.parse_process_response(out)
+                value = reply.get("value")
+                if isinstance(value, dict):
+                    consent.mark_previewed()
+                    lines = [
+                        "Jinn public-task preview",
+                        f"repository: {value.get('repositorySlug', 'unavailable')}",
+                        f"base commit: {value.get('baseCommit', 'unavailable')}",
+                        "shared after validation: public task definition and test contract",
+                        "stays local: raw trajectory, source id, accepted diff/gold, failures, skills, and holdouts",
+                        "preview acknowledged — this and later eligible public tasks may queue silently",
+                    ]
+                    if reply.get("status") == "degraded":
+                        lines.append(f"bridge degraded: {reply.get('reason', 'details unavailable')}")
+                    return "\n".join(lines)
+            except (TypeError, ValueError):
+                pass
         pending = _latest_pending()
         if pending is None:
             # Design requirement iv: preview is reachable before any publish.
@@ -311,59 +671,95 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
             # an empty screen. Does not mark previewed — the real gate stays
             # on a real trace.
             return consent.render_preview_example()
-        code, out = jinn_layer.capture_preview(pending, runner=_runner)
+        code, out, err = jinn_layer.capture_preview(pending, runner=_runner)
         if code == 0:
             consent.mark_previewed()
-            return out + "\n\npreview recorded — future task ends publish automatically."
-        return f"preview failed:\n{out}"
+            return out + "\n\nlegacy preview only — this retained file will not auto-publish."
+        return f"preview failed:\n{err or out}"
+
+    if sub == "session":
+        state = _peek_state(session_id)
+        return session_view.render_current(
+            activity=state.get("activity") or {},
+            capture_active=buf.has_capture(task_id, session_id),
+            share_enabled=consent.share_enabled(),
+        )
+
+    if sub == "history":
+        code, out, err = jinn_layer.history_json(runner=_runner)
+        if code != 0:
+            return f"history unavailable:\n{err or out}"
+        try:
+            reply = jinn_layer.parse_process_response(out)
+        except ValueError as exc:
+            return f"history unavailable:\n{exc}"
+        if reply.get("status") == "unavailable":
+            reason = history_view.safe_text(reply.get("reason"), "details unavailable")
+            return f"history unavailable:\n{reason}"
+        value = reply.get("value")
+        entries = value.get("entries") if isinstance(value, dict) else None
+        if not isinstance(entries, list):
+            return "history unavailable:\njinn-layer response omitted history entries"
+        rendered = history_view.render_history(entries)
+        if reply.get("status") == "degraded":
+            rendered += (
+                "\n\nhistory degraded — "
+                + history_view.safe_text(reply.get("reason"), "details unavailable")
+            )
+        return rendered
 
     if sub == "ledger":
-        # Prefer structured rows (design 1b columns + tier chips + retry
-        # sub-line + exact empty state). Degrade to the layer's raw text when
-        # the installed layer predates `ledger --json`.
-        jcode, jout = jinn_layer.ledger_json(runner=_runner)
+        # Prefer canonical contribution-store rows. A layer that predates the
+        # command falls back to the legacy publication-receipt ledger.
+        ccode, cout, _cerr = jinn_layer.contribution_ledger_json(runner=_runner)
+        if ccode == 0:
+            try:
+                reply = jinn_layer.parse_process_response(cout)
+            except ValueError:
+                reply = None
+            if isinstance(reply, dict):
+                if reply.get("status") == "unavailable":
+                    return f"contribution ledger unavailable:\n{reply.get('reason', 'details unavailable')}"
+                rows = ledger_view.rows_from_json(reply.get("value"))
+                if rows is not None:
+                    rendered = ledger_view.render_ledger(
+                        rows, enabled=consent.share_enabled()
+                    )
+                    if reply.get("status") == "degraded":
+                        rendered += (
+                            "\n\ncontribution state degraded — "
+                            + str(reply.get("reason") or "details unavailable")
+                        )
+                    return rendered
+
+        # Prefer structured legacy rows (design 1b columns + tier chips +
+        # exact empty state), then degrade to the layer's raw text.
+        jcode, jout, _jerr = jinn_layer.ledger_json(runner=_runner)
         if jcode == 0:
             try:
                 rows = ledger_view.rows_from_json(json.loads(jout))
             except json.JSONDecodeError:
                 rows = None
             if rows is not None:
-                return ledger_view.render_ledger(rows, enabled=consent.capture_enabled())
-        code, out = jinn_layer.ledger(runner=_runner)
-        return out if code == 0 else f"ledger unavailable:\n{out}"
+                return ledger_view.render_ledger(rows, enabled=consent.share_enabled())
+        code, out, err = jinn_layer.ledger(runner=_runner)
+        return out if code == 0 else f"ledger unavailable:\n{err or out}"
 
-    if sub == "skills":
-        # Consuming is always allowed — no consent check on this entire path.
-        action = parts[1] if len(parts) > 1 else "list"
-        if action == "install":
-            if len(parts) < 3:
-                return "usage: /jinn skills install <ref> (a corpus ref from /corpus search)"
-            try:
-                path = skills_install.install(parts[2], runner=_runner)
-            except Exception as exc:
-                return f"install failed: {exc}"
-            return f"installed — {path}\nThe agent's skill loader picks it up from here."
-        if action == "uninstall":
-            if len(parts) < 3:
-                return "usage: /jinn skills uninstall <slug>"
-            try:
-                skills_install.uninstall(parts[2])
-            except Exception as exc:
-                return f"uninstall failed: {exc}"
-            return f"uninstalled {parts[2]}."
-        installed = skills_install.list_installed()
-        if not installed:
-            return "No jinn-installed skills. /corpus <query> to find some, then /jinn skills install <ref>."
-        return "\n".join(f"{row['slug']}  ({row['ref'] or 'ref unknown'})" for row in installed)
+    if sub == "distill":
+        # Local distillation (mono #1538) — all logic + rendering in distill.py;
+        # this dispatch stays a one-liner like the other module-backed verbs.
+        return distill.handle_command(parts[1:], runner=_runner)
 
     if sub == "veto":
         if not buf.has_steps(task_id, session_id):
             # mono issue #1383 — vetoing nothing must not return the success
             # copy: with no capture under way the mark would be a no-op.
             return "No active task to veto — veto marks the task currently running in this session."
-        with _veto_lock:
-            _vetoed_tasks.add(_task_key(task_id, session_id))
-        return "This task is vetoed — its trace stays on this machine (ledger will show: vetoed (local only))."
+        _record_veto(session_id)
+        return (
+            f"Session {session_id} is vetoed — its evidence stays local. "
+            "A contribution already published is immutable."
+        )
 
     return _JINN_HELP
 
@@ -372,8 +768,8 @@ def _handle_corpus(command_args: str = "", **_: Any) -> str:
     query = (command_args or "").strip()
     if not query:
         return "usage: /corpus <query> — search the public corpus"
-    code, out = jinn_layer.corpus_search(query, runner=_runner)
-    return out if code == 0 else f"corpus search failed:\n{out}"
+    code, out, err = jinn_layer.corpus_search(query, runner=_runner)
+    return out if code == 0 else f"corpus search failed:\n{err or out}"
 
 
 # ── Agent tools — in-session corpus consumption ──────────────────────────────
@@ -401,9 +797,9 @@ def _tool_corpus_search(args: Dict[str, Any], **_kw: Any) -> str:
     if not query:
         return "corpus_search requires a query."
     limit = int(args.get("limit") or 5)
-    code, out = jinn_layer.run(["corpus", "search", query, "--json", "--limit", str(limit)], _runner)
+    code, out, err = jinn_layer.run(["corpus", "search", query, "--json", "--limit", str(limit)], _runner)
     if code != 0:
-        return f"corpus search unavailable: {out}"
+        return f"corpus search unavailable: {err or out}"
     try:
         hits = json.loads(out)
     except json.JSONDecodeError:
@@ -411,12 +807,17 @@ def _tool_corpus_search(args: Dict[str, Any], **_kw: Any) -> str:
     if not isinstance(hits, list) or not hits:
         return f"No corpus records matched {query!r}."
     lines = []
+    surfaced: list[str] = []
     for hit in hits[:limit]:
         if not isinstance(hit, dict):
             continue
+        ref = str(hit.get("ref") or "").strip()
         tags = ",".join(hit.get("tags") or []) or "-"
         summary = str(hit.get("summary") or hit.get("title") or "")[:100]
-        lines.append(f"ref={hit.get('ref')} tags=[{tags}] {summary}")
+        lines.append(f"ref={ref} tags=[{tags}] {summary}")
+        if ref:
+            surfaced.append(ref)
+    _record_activity(str(_kw.get("session_id") or ""), "surfacedRefs", surfaced)
     lines.append("Use corpus_fetch with a ref to read the full content.")
     return "\n".join(lines)
 
@@ -425,14 +826,15 @@ def _tool_corpus_fetch(args: Dict[str, Any], **_kw: Any) -> str:
     ref = str(args.get("ref") or "").strip()
     if not ref:
         return "corpus_fetch requires a ref."
-    code, out = jinn_layer.run(["corpus", "get", ref, "--json"], _runner)
+    code, out, err = jinn_layer.run(["corpus", "get", ref, "--json"], _runner)
     if code != 0:
-        return f"corpus get unavailable: {out}"
+        return f"corpus get unavailable: {err or out}"
     try:
         record = json.loads(out)
         trace, _sha = skills_install._extract_trace(record)
     except Exception as exc:
         return f"record is not readable as a trace envelope: {exc}"
+    _record_activity(str(_kw.get("session_id") or ""), "fetchedRefs", [ref])
     tier = str(((trace.get("outcome") or {}).get("verifiabilityTier")) or "unknown")
     summary = str(((trace.get("task") or {}).get("summary")) or "")
     steps = trace.get("steps") or []
@@ -469,11 +871,12 @@ def register(ctx) -> None:
     ctx.register_hook("on_session_start", _on_session_start)
     ctx.register_hook("pre_llm_call", _on_pre_llm_call)
     ctx.register_hook("post_tool_call", _on_post_tool_call)
+    ctx.register_hook("post_llm_call", _on_post_llm_call)
     ctx.register_hook("on_session_end", _on_session_end)
     ctx.register_command(
         "jinn",
         handler=_handle_jinn,
-        description="Jinn layer: consent, preview, ledger, veto.",
+        description="Jinn layer: session, history, consent, and contribution state.",
     )
     ctx.register_command(
         "corpus",
@@ -487,7 +890,7 @@ def register(ctx) -> None:
     # a no-op; --replay re-renders without re-asking.
     ctx.register_cli_command(
         "onboarding",
-        help="Guided first-run onboarding (consent → publish → rewards → signals).",
+        help="Guided first-run onboarding (consent → publish → signals).",
         setup_fn=onboarding.setup_parser,
         handler_fn=onboarding.cli_handler,
         description="Walk the core loop once, one confirmed step at a time. --replay re-shows it.",

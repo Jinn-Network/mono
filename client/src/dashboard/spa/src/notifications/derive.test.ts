@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { deriveNotifications } from './derive.js';
+import { deriveNotifications, gasSeverity, type DeriveInput } from './derive.js';
 
 const baseState = {
   bootstrap: { mode: 'running' as const },
   status: {
-    funds: { eth: '1.0', runwayDays: 30 },
+    funds: {
+      eth: '1.0',
+      chains: [
+        { chain: 'Base Sepolia', wallet: '0xM', runwayDays: 30, empty: false },
+      ],
+    },
     harness: { ready: true, name: 'claude-code', reason: null },
     rpc: { reachable: true },
     restartPending: false,
@@ -23,7 +28,15 @@ describe('deriveNotifications', () => {
   it('emits funding_low when runway < 3 days', () => {
     const out = deriveNotifications({
       ...baseState,
-      status: { ...baseState.status, funds: { eth: '0.001', runwayDays: 1 } },
+      status: {
+        ...baseState.status,
+        funds: {
+          eth: '0.001',
+          chains: [
+            { chain: 'Base Sepolia', wallet: '0xM', runwayDays: 1, empty: false },
+          ],
+        },
+      },
     });
     expect(out).toContainEqual(expect.objectContaining({
       kind: 'funding_low',
@@ -68,6 +81,23 @@ describe('deriveNotifications', () => {
       status: { ...baseState.status, daemonVersion: '0.1.4', latestVersion: '0.1.5' },
     });
     expect(out.map(n => n.kind)).toContain('update_available');
+  });
+
+  it('does not emit update_available when latestVersion is undefined (null on the wire)', () => {
+    const { latestVersion: _drop, ...rest } = baseState.status;
+    const out = deriveNotifications({
+      ...baseState,
+      status: rest,
+    });
+    expect(out.map(n => n.kind)).not.toContain('update_available');
+  });
+
+  it('does not emit update_available when latestVersion equals daemonVersion', () => {
+    const out = deriveNotifications({
+      ...baseState,
+      status: { ...baseState.status, daemonVersion: '0.1.5', latestVersion: '0.1.5' },
+    });
+    expect(out.map(n => n.kind)).not.toContain('update_available');
   });
 
   it('does not duplicate categories (each canonical kind emits at most once)', () => {
@@ -184,6 +214,106 @@ describe('freshly-onboarded node (#983 AC5)', () => {
     expect(kinds).not.toContain('no_solvernets_joined');
     expect(kinds).not.toContain('harness_not_ready');
     expect(kinds).not.toContain('restart_required');
+  });
+});
+
+describe('funding notifications (issue #1296)', () => {
+  function fundsStatus(chains: DeriveInput['status']['funds']['chains']): DeriveInput {
+    return {
+      bootstrap: { mode: 'running' },
+      status: {
+        funds: { eth: '0.01', chains },
+        harness: { ready: true, name: null, reason: null },
+        rpc: { reachable: true },
+        restartPending: false,
+        daemonVersion: '1.0.0',
+        latestVersion: undefined,
+        services: [],
+        joinedSolverNets: { cid1: {} },
+        passwordRotatedAt: undefined,
+      },
+    };
+  }
+
+  it('fires funding_low (warning) for a low-but-nonzero runway, naming wallet and chain', () => {
+    const out = deriveNotifications(
+      fundsStatus([
+        { chain: 'Base Sepolia', wallet: '0xMASTER', runwayDays: 1, empty: false },
+      ]),
+    );
+    const low = out.find((n) => n.kind === 'funding_low');
+    expect(low).toBeDefined();
+    expect(low!.severity).toBe('warning');
+    expect(low!.message).toContain('Base Sepolia');
+    expect(low!.message).toContain('0xMASTER');
+  });
+
+  it('fires funding_empty (blocking) when balance cannot cover the next tx, and suppresses funding_low for that chain', () => {
+    const out = deriveNotifications(
+      fundsStatus([
+        { chain: 'Base Sepolia', wallet: '0xMASTER', runwayDays: 0, empty: true },
+      ]),
+    );
+    const empty = out.find((n) => n.kind === 'funding_empty');
+    expect(empty).toBeDefined();
+    expect(empty!.severity).toBe('blocking');
+    expect(empty!.message).toContain('Base Sepolia');
+    expect(out.find((n) => n.kind === 'funding_low')).toBeUndefined();
+  });
+
+  it('fires a separate warning per chain (L1 + L2)', () => {
+    const out = deriveNotifications(
+      fundsStatus([
+        { chain: 'Base Sepolia', wallet: '0xL2', runwayDays: 2, empty: false },
+        { chain: 'Ethereum Sepolia', wallet: '0xL1', runwayDays: 1, empty: false },
+      ]),
+    );
+    expect(out.filter((n) => n.kind === 'funding_low')).toHaveLength(2);
+  });
+
+  it('clears all funding notices when both chains are above threshold', () => {
+    const out = deriveNotifications(
+      fundsStatus([
+        { chain: 'Base Sepolia', wallet: '0xL2', runwayDays: 99, empty: false },
+        { chain: 'Ethereum Sepolia', wallet: '0xL1', runwayDays: 99, empty: false },
+      ]),
+    );
+    expect(out.find((n) => n.kind === 'funding_low')).toBeUndefined();
+    expect(out.find((n) => n.kind === 'funding_empty')).toBeUndefined();
+  });
+
+  it('clears funding_low and funding_empty after a top-up above threshold (AC#3)', () => {
+    const before = deriveNotifications(
+      fundsStatus([{ chain: 'Base Sepolia', wallet: '0xM', runwayDays: 0, empty: true }]),
+    );
+    expect(before.some((n) => n.kind === 'funding_empty')).toBe(true);
+
+    const after = deriveNotifications(
+      fundsStatus([{ chain: 'Base Sepolia', wallet: '0xM', runwayDays: 99, empty: false }]),
+    );
+    expect(after.some((n) => n.kind === 'funding_empty' || n.kind === 'funding_low')).toBe(false);
+  });
+});
+
+describe('gasSeverity boundary (#1296, handbook AI workflow rule 7 — boundary tests for numeric gates)', () => {
+  it('balance exactly equal to minEthWei is NOT blocking (strict less-than)', () => {
+    expect(
+      gasSeverity({
+        balanceWei: '1000000000000000',
+        minEthWei: '1000000000000000',
+        runwayDaysExcess: '1',
+      }),
+    ).toBe('warning');
+  });
+
+  it('balance one wei below minEthWei is blocking', () => {
+    expect(
+      gasSeverity({
+        balanceWei: '999999999999999',
+        minEthWei: '1000000000000000',
+        runwayDaysExcess: '1',
+      }),
+    ).toBe('blocking');
   });
 });
 

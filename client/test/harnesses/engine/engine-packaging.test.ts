@@ -17,6 +17,7 @@ import {
 } from '../../../src/harnesses/engine/engine.js';
 import { TaskRunPersistence, type PersistedTaskRunInput } from '../../../src/harnesses/engine/persistence.js';
 import { TaskRunState } from '../../../src/harnesses/engine/state.js';
+import { createLegacyArtifactsSchemaDb } from '../../helpers/legacy-artifacts-schema.js';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -267,6 +268,46 @@ describe('Engine packaging integration', () => {
     const artifact = store.getArtifactByRequestId(requestId, 'restoration-result');
     expect(artifact).not.toBeNull();
     expect(artifact!.outcome).toBe('SUCCESS');
+  });
+
+  it('deliver() persists COMPLETE (not FAILED) against a legacy desired_state_id NOT NULL artifacts schema (regression #506)', async () => {
+    // Issue #506: a successful on-chain delivery was persisted as FAILED
+    // because insertArtifact() threw on a legacy NOT NULL column, and the
+    // engine's _runTransition catch → _classifyAndMarkTerminal → markFailed()
+    // flipped the run to FAILED. process() must resolve and land COMPLETE.
+    const { dir, dbPath } = createLegacyArtifactsSchemaDb('jinn-legacy-engine-');
+
+    const legacyStore = new Store(dbPath);
+    const legacyTmp = mkTmp();
+    const legacyEngine = new TestEngine(makeOpts(legacyStore, legacyTmp));
+    try {
+      const requestId = 'req-legacy-deliver';
+      await legacyEngine.observe(makeInput(requestId, legacyTmp));
+      const p = legacyEngine.testPersistence;
+      p.transition(requestId, TaskRunState.CLAIMED);
+      p.transition(requestId, TaskRunState.WAITING);
+      p.transition(requestId, TaskRunState.PRE_SNAPSHOT);
+      p.transition(requestId, TaskRunState.RUNNING);
+      p.transition(requestId, TaskRunState.POST_SNAPSHOT);
+      p.transition(requestId, TaskRunState.PACKAGING);
+      p.transition(requestId, TaskRunState.DELIVERING, {
+        manifestCid: 'bafymanifest123',
+        evidenceHash: '0xaabbccdd00000000000000000000000000000000000000000000000000000000',
+      });
+
+      await legacyEngine.process(requestId);
+      const intent = legacyEngine.testPersistence.getByRequestId(requestId);
+      expect(intent!.state).toBe(TaskRunState.COMPLETE);
+      expect(intent!.deliveryTxHash).toBe('0xdeliverytx');
+
+      const artifact = legacyStore.getArtifactByRequestId(requestId, 'restoration-result');
+      expect(artifact).not.toBeNull();
+      expect(artifact!.outcome).toBe('SUCCESS');
+    } finally {
+      legacyStore.close();
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(legacyTmp, { recursive: true, force: true });
+    }
   });
 
   it('pack() throws when safeAddress is not configured', async () => {

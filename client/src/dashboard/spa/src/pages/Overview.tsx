@@ -8,6 +8,7 @@ import { NodeHealthCard, type DaemonStatus, type RpcStatus } from './overview/No
 import { ActivityCard, type ActivityJoinedNet, type ActivityTask } from './overview/ActivityCard.js';
 import { AiUnitsPauseAlert } from './AiUnitsPauseAlert.js';
 import { computeEffectivePlugins } from './configuration/effective-plugins.js';
+import { gasSeverity } from '../notifications/derive.js';
 import type { RewardsResponse, SolverNetsCatalogResponse, StakingRewardReadState } from '../api/types.js';
 
 /**
@@ -79,6 +80,7 @@ interface OverviewStatusV1 {
   masterGas?: {
     balanceWei?: string;
     runwayDaysExcess?: string | number | null;
+    minEthWei?: string;
   };
   /**
    * Per-role ETH balances (master / agent / Safe) exposed on /v1/status (#430).
@@ -258,6 +260,12 @@ export function OverviewPage(): JSX.Element {
 
   const gasBalanceEth = formatEth(status?.masterGas?.balanceWei);
   const gasRunwayDays = status?.masterGas?.runwayDaysExcess ?? '—';
+
+  // Runway severity tint for the Wallet card (#1296). The card shows the L2
+  // master; severity math (blocking / warning threshold) is owned by
+  // gasSeverity so the rule lives in one place alongside the deriver's
+  // funding notices.
+  const gasRunwaySeverity = gasSeverity(status?.masterGas ?? {});
 
   // Per-role ETH balances (#430). `?? undefined` coerces the nullable wire shape
   // to formatEth's `string | undefined`; formatEth then renders '—' for missing input.
@@ -454,6 +462,7 @@ export function OverviewPage(): JSX.Element {
         <WalletCard
           totalEth={gasBalanceEth}
           runwayDays={gasRunwayDays}
+          runwaySeverity={gasRunwaySeverity}
           actionsDisabled={activeAction !== null}
           perRole={{
             master: perRoleMasterEth,

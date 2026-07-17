@@ -50,6 +50,32 @@ function isDistillMode(value: unknown): value is DistillMode {
   return typeof value === 'string' && (MODES as readonly string[]).includes(value);
 }
 
+/** The two distiller providers the persisted default may name. */
+export type DistillDefaultProvider = 'claude' | 'codex';
+
+/** The persisted per-axis distiller defaults, sibling to `where`. */
+export interface DistillDefaults {
+  distiller?: DistillDefaultProvider;
+  distillerModel?: string;
+}
+
+const PROVIDERS: readonly DistillDefaultProvider[] = ['claude', 'codex'];
+
+function isDefaultProvider(value: unknown): value is DistillDefaultProvider {
+  return typeof value === 'string' && (PROVIDERS as readonly string[]).includes(value);
+}
+
+/** Parse the whole doc off disk once; a missing/malformed file is `{}`. */
+function readDoc(path: string): Record<string, unknown> {
+  if (!existsSync(path)) return {};
+  try {
+    const doc = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
+    return typeof doc === 'object' && doc !== null ? (doc as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
 /**
  * Read the recorded mode. A missing file, malformed JSON, or a `where` value
  * that is not one of the three modes all read as `unset` — the fail-safe that
@@ -72,12 +98,8 @@ export function readDistillMode(
     }
     return 'unset';
   }
-  try {
-    const doc = JSON.parse(readFileSync(path, 'utf-8')) as { where?: unknown };
-    return isDistillMode(doc.where) ? doc.where : 'unset';
-  } catch {
-    return 'unset';
-  }
+  const doc = readDoc(path);
+  return isDistillMode(doc.where) ? doc.where : 'unset';
 }
 
 /**
@@ -86,6 +108,38 @@ export function readDistillMode(
  * write identically.
  */
 export function writeDistillMode(mode: DistillMode, path: string = DEFAULT_DISTILL_MODE_PATH): void {
+  const doc = readDoc(path);
+  doc.where = mode;
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify({ where: mode }, null, 2) + '\n', { encoding: 'utf-8' });
+  writeFileSync(path, JSON.stringify(doc, null, 2) + '\n', { encoding: 'utf-8' });
+}
+
+/**
+ * Read the persisted distiller defaults. Same fail-safe as `readDistillMode`:
+ * an unrecognised `distiller` or a non-string `distillerModel` reads as absent,
+ * so a corrupt field falls back to the provider default rather than erroring.
+ */
+export function readDistillDefaults(path: string = DEFAULT_DISTILL_MODE_PATH): DistillDefaults {
+  const doc = readDoc(path);
+  const out: DistillDefaults = {};
+  if (isDefaultProvider(doc.distiller)) out.distiller = doc.distiller;
+  if (typeof doc.distillerModel === 'string' && doc.distillerModel !== '') {
+    out.distillerModel = doc.distillerModel;
+  }
+  return out;
+}
+
+/**
+ * Merge the given distiller-default patch into the doc, preserving `where` and
+ * any default not named in the patch. Writes the same pretty JSON shape.
+ */
+export function writeDistillDefaults(
+  patch: DistillDefaults,
+  path: string = DEFAULT_DISTILL_MODE_PATH,
+): void {
+  const doc = readDoc(path);
+  if (patch.distiller !== undefined) doc.distiller = patch.distiller;
+  if (patch.distillerModel !== undefined) doc.distillerModel = patch.distillerModel;
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(doc, null, 2) + '\n', { encoding: 'utf-8' });
 }

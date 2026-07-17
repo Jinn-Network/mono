@@ -1,0 +1,48 @@
+{
+  "id": "distractor-operator-claims",
+  "repo": "Jinn-Network/mono",
+  "baseCommit": "c041cc4cdc91c364640c4805a3158e192810e70d",
+  "taskSummary": "Warn when a joinedSolverNets entry silently skips claim registration",
+  "tags": [
+    "mono",
+    "operator",
+    "claims",
+    "solvernet"
+  ],
+  "steps": [
+    {
+      "label": "failure",
+      "title": "run the failing scoped test",
+      "text": "$ yarn --cwd client test test/solver-nets/registry-register-joined.test.ts\n\n ❱ |node| test/solver-nets/registry-register-joined.test.ts (5 tests | 2 failed)\n       × warns (missing contract field) and does not register when contract is absent\n       × warns (did not resolve) and does not register when contract is unknown\n\n⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯\n\n FAIL  |node| test/solver-nets/registry-register-joined.test.ts > registerJoinedNet > diagnostic warnings on silent skip > warns (missing contract field) and does not register when contract is absent\nAssertionError: expected \"warn\" to be called 1 times, but got 0 times\n ❱ test/solver-nets/registry-register-joined.test.ts:55:23\n\n Test Files  1 failed (1)\n      Tests  2 failed | 3 passed (5)"
+    },
+    {
+      "label": "note",
+      "title": "diagnose the silent skip",
+      "text": "registerJoinedNet returns early, with no diagnostic, whenever a joinedSolverNets config entry has no `contract` field or references a contract id/version that does not resolve to a known SolverNet. An operator running a hand-written or stale config sees the entry listed in the catalog but it never participates in the claim flow, and there is nothing in the logs to explain why — the two early `return` statements are silent."
+    },
+    {
+      "label": "fix",
+      "title": "warn at each early-return point",
+      "text": "Add a console.warn line immediately before each of the two early returns, naming the manifest CID and the specific reason (missing contract field vs. an unresolved contract), so the skip is visible in operator logs instead of silent."
+    },
+    {
+      "label": "diff",
+      "title": "the fix, as landed",
+      "text": "--- a/client/src/solver-nets/registry.ts\n+++ b/client/src/solver-nets/registry.ts\n@@ -252,10 +252,20 @@ export async function registerJoinedNet(\n   cid: string,\n   joined: JoinedSolverNetConfig,\n ): Promise<void> {\n-  if (!joined.contract) return;\n+  if (!joined.contract) {\n+    console.warn(\n+      `[solver-nets] joinedSolverNets[${cid}] missing contract field — entry will not participate in claim flow`,\n+    );\n+    return;\n+  }\n   const solverType = `${joined.contract.id}.${joined.contract.version}`;\n   const contract = getSolverNetContract(joined.contract);\n-  if (!contract) return;\n+  if (!contract) {\n+    console.warn(\n+      `[solver-nets] joinedSolverNets[${cid}] contract ${solverType} did not resolve to a known SolverNet — entry will not participate in claim flow`,\n+    );\n+    return;\n+  }\n   const roles = rolesFromJoinedConfig(joined);"
+    },
+    {
+      "label": "command",
+      "title": "rerun — passing",
+      "text": "$ yarn --cwd client test test/solver-nets/registry-register-joined.test.ts\n\n ✓ |node| test/solver-nets/registry-register-joined.test.ts > registerJoinedNet > diagnostic warnings on silent skip > warns (missing contract field) and does not register when contract is absent\n ✓ |node| test/solver-nets/registry-register-joined.test.ts > registerJoinedNet > diagnostic warnings on silent skip > warns (did not resolve) and does not register when contract is unknown\n\n Test Files  1 passed (1)\n      Tests  5 passed (5)"
+    }
+  ],
+  "outcome": {
+    "status": "completed",
+    "verifiabilityTier": "tests-passed"
+  },
+  "synthesis": "registerJoinedNet returned early, without any diagnostic, whenever a joinedSolverNets config entry had no contract field or referenced a contract id/version that did not resolve to a known SolverNet — an operator running a hand-written or stale config would see the entry listed in the catalog but never participate in the claim flow, with nothing in the logs to explain why. The fix adds a console.warn line at each of the two early-return points, naming the manifest CID and the specific reason (missing field vs. unresolved contract) so the skip is visible instead of silent. The regression test spies on console.warn and asserts both the count and the message content for each skip path, plus a negative assertion that the happy path stays silent. The general pattern: a validation function that returns early on bad input should say why, not just decline to act — silence indistinguishable from success is exactly what makes misconfiguration invisible.",
+  "attribution": {
+    "origin": "operator-recorded-session",
+    "sourceUrl": "https://github.com/Jinn-Network/mono/commit/d682f811dca6c5bd9fbd5711bae71cead58985f2"
+  }
+}

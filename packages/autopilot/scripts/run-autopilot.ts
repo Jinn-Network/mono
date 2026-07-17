@@ -15,15 +15,23 @@
 
 import { GhIssueSource, defaultRunner as realRunner } from '../src/dispatcher/issue-source.js';
 import type { CommandRunner } from '../src/dispatcher/issue-source.js';
-import { deriveInFlight } from '../src/dispatcher/state.js';
+import { deriveInFlight, listTaskWorktrees } from '../src/dispatcher/state.js';
+import { syncReviewLabels } from '../src/dispatcher/label-sweep.js';
+import { syncDrift } from '../src/dispatcher/drift-sweep.js';
+import { syncMerges, touchesOwned } from '../src/dispatcher/merge-sweep.js';
+import { escalateStuckPrs, escalateStuckPr } from '../src/dispatcher/stuck-escalation.js';
+import { deriveMergePrepInFlight } from '../src/dispatcher/merge-prep-state.js';
+import { dispatchMergePrep } from '../src/dispatcher/merge-prep-dispatch.js';
+import { runMergePrepCycle, type PrepAttempt } from '../src/dispatcher/merge-prep-loop.js';
 import { dispatchIssue } from '../src/dispatcher/dispatch.js';
 import { SESSIONS_LOG_DIR } from '../src/dispatcher/session-log.js';
 import { GhPrSource } from '../src/dispatcher/pr-source.js';
 import { fetchIssuePrMap } from '../src/dispatcher/pr-links.js';
+import type { PrLink } from '../src/dispatcher/pr-links.js';
 import { deriveReviewInFlight } from '../src/dispatcher/review-state.js';
 import { dispatchReview } from '../src/dispatcher/review-dispatch.js';
 import { runReviewCycle } from '../src/dispatcher/review-loop.js';
-import { assertReviewIdentities } from '../src/dispatcher/identity.js';
+import { assertReviewIdentities, assertMergePrepArming } from '../src/dispatcher/identity.js';
 import type { SpawnFn } from '../src/dispatcher/dispatch.js';
 import type { ReviewablePr } from '../src/dispatcher/types.js';
 import {
@@ -33,6 +41,7 @@ import {
 } from '../src/dispatcher/field-cache.js';
 import { makePauseSession } from '../src/dispatcher/pause-session.js';
 import { syncHumanLane } from '../src/dispatcher/human-lane.js';
+import { syncStackBases } from '../src/dispatcher/stack-sweep.js';
 import { runCycle } from '../src/dispatcher/loop.js';
 import type { CycleReport } from '../src/dispatcher/loop.js';
 import { fetchProjectSnapshot } from '../src/dispatcher/project-snapshot.js';
@@ -47,7 +56,7 @@ import { WallClock } from '../src/dispatcher/wall-clock.js';
 import { shouldRouteToSessions } from '../src/cli/routing.js';
 import { spawn } from 'node:child_process';
 import type { SpawnOptions } from 'node:child_process';
-import { mkdirSync, openSync, closeSync, writeSync } from 'node:fs';
+import { mkdirSync, openSync, closeSync, writeSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { argv } from 'node:process';
@@ -80,6 +89,8 @@ const AUTHOR_ALLOWLIST_ENV = 'JINN_DISPATCHER_AUTHOR_ALLOWLIST';
 const REVIEW_BOT_LOGIN_ENV = 'JINN_REVIEW_BOT_LOGIN';
 const IMPL_GH_TOKEN_ENV = 'JINN_IMPL_GH_TOKEN';
 const REVIEW_GH_TOKEN_ENV = 'JINN_REVIEW_GH_TOKEN';
+/** Arm the merge-prep session loop (DR-2026-07-16). '1' = on. Default off. */
+const MERGE_PREP_ENV = 'JINN_MERGE_PREP';
 
 /**
  * Env var carrying the JSON implementer-routing policy (#887). Unset / blank /
@@ -106,6 +117,42 @@ const OPTIONAL_RULE_FIELDS = [
 /** Whether `v` is one of the recognised literal values in `valid`. */
 const isMember = (valid: readonly string[], v: unknown): v is string =>
   typeof v === 'string' && valid.includes(v);
+
+/**
+ * Build the production logging `SpawnFn` (#533): open the per-session log in
+ * append mode wired to stdout+stderr, write the dispatch delimiter and (when
+ * supplied) the started-at marker, then spawn detached + unref. Shared by the
+ * implement-dispatch and merge-prep-dispatch call sites so both get identical
+ * per-session log capture. Extracted verbatim from the former inline lambda.
+ */
+function makeLoggingSpawn(): SpawnFn {
+  return (cmd, args, opts) => {
+    const logPath = opts.logPath;
+    let fd: number | undefined;
+    let stdio = opts.stdio;
+    if (typeof logPath === 'string') {
+      mkdirSync(SESSIONS_LOG_DIR, { recursive: true });
+      // Owner-only (0o600) on create: session logs may contain secrets surfaced
+      // by the spawned session (tokens in gh/git error output, env echoes).
+      fd = openSync(logPath, 'a', 0o600);
+      const delimiter =
+        `\n===== dispatch ${new Date().toISOString()} ` +
+        `pid=pending cwd=${opts.cwd} =====\n`;
+      writeSync(fd, delimiter);
+      stdio = ['ignore', fd, fd];
+    }
+    // #1296/#1393: rewrite (truncate) the started-at marker so its mtime records
+    // the LATEST dispatch (only implement sessions supply this path).
+    if (typeof opts.startedAtMarkerPath === 'string') {
+      writeFileSync(opts.startedAtMarkerPath, `${new Date().toISOString()}\n`, { mode: 0o600 });
+    }
+    const child = spawn(cmd, args, { ...opts, stdio } as SpawnOptions);
+    if (child.pid != null) child.unref();
+    // Close the parent's dup of the fd; the detached child kept its own.
+    if (fd != null) closeSync(fd);
+    return { pid: child.pid };
+  };
+}
 
 /** Parse the allowlist env var into a trimmed, non-empty string array. */
 function parseAuthorAllowlist(raw: string | undefined): string[] {
@@ -237,6 +284,13 @@ export function printReport(report: CycleReport, label: string): void {
     console.log(`\n   WALL-CLOCK PAUSED: #${report.paused.join(', #')} (Blocked on: Human)`);
   }
 
+  if (report.dispatchErrors.length > 0) {
+    console.log('\n   DISPATCH ERRORS (issue stays In Progress; drift sweep reconciles):');
+    for (const e of report.dispatchErrors) {
+      console.log(`     #${e.issueNumber}: ${e.message}`);
+    }
+  }
+
   if (report.drift.length > 0) {
     console.log('\n   DRIFT:');
     for (const d of report.drift) {
@@ -358,11 +412,18 @@ export async function runReviewPass(
       return { pid: child.pid };
     });
   const prSource = new GhPrSource(runner, cfg.engineReviewLabel, cfg.reviewBotLogin);
+  // Exclude PRs with a live merge-prep session from review dispatch (symmetric
+  // to the prep loop's reviewInFlight guard) so the two never push to the same
+  // branch at once. Only relevant when merge-prep is armed.
+  const busyPrNumbers = cfg.mergePrepEnabled
+    ? new Set<number>((await deriveMergePrepInFlight(runner)).inFlight.map((w) => w.prNumber))
+    : undefined;
   const report = await runReviewCycle({
     prSource,
     cfg,
     deriveReviewInFlight: () => deriveReviewInFlight(runner),
     dispatchReview: (pr: ReviewablePr) => dispatchReview(pr, cfg, { runner, spawn: spawnImpl }),
+    busyPrNumbers,
   });
   if (report.dispatched.length > 0) {
     console.log(`[autopilot] review-pr dispatched: PR #${report.dispatched.join(', #')}`);
@@ -508,6 +569,7 @@ async function main(): Promise<void> {
     reviewBotLogin: process.env[REVIEW_BOT_LOGIN_ENV] ?? '',
     implGhToken: process.env[IMPL_GH_TOKEN_ENV] ?? '',
     reviewGhToken: process.env[REVIEW_GH_TOKEN_ENV] ?? '',
+    mergePrepEnabled: (process.env[MERGE_PREP_ENV] ?? '') === '1',
   };
 
   if (cfg.authorAllowlist.length === 0) {
@@ -539,6 +601,14 @@ async function main(): Promise<void> {
   // or posting self-approvals that GitHub rejects. No-op when review is off.
   await assertReviewIdentities(cfg, realRunner);
 
+  // Fail-loud merge-prep arming (DR-2026-07-16): a prepped PR is re-drafted and
+  // relies on the review loop to re-approve/un-draft it — refuse to arm
+  // merge-prep without the review loop, or every prep wedges its PR in draft.
+  assertMergePrepArming(cfg);
+  if (cfg.mergePrepEnabled) {
+    console.log(`[autopilot] merge-prep enabled (cap=${cfg.mergePrepCap}) — stuck PRs are prepped, not just escalated`);
+  }
+
   const source = new GhIssueSource(realRunner);
   const wallClock = new WallClock(cfg.wallClockMs);
 
@@ -546,6 +616,13 @@ async function main(): Promise<void> {
   // so `loop.ts` stays pure. Empty on the first cycle; losing it on restart
   // costs at most one un-collected log line, not a correctness bug.
   let previousInFlight: InFlightSession[] = [];
+  // One `gh pr update-branch` per BEHIND PR per process run (merge sweep,
+  // #1735) — still-behind-after-update is surfaced, never retried forever.
+  const attemptedUpdateBranch = new Set<number>();
+  // Per-process merge-prep attempt tracking (DR-2026-07-16): a same-head second
+  // sighting escalates; ≤MAX_PREP_ATTEMPTS across advancing heads. Lost on
+  // restart (same tradeoff as attemptedUpdateBranch).
+  const attemptedPrep = new Map<number, PrepAttempt>();
 
   if (isDryRun) {
     // Dry-run intentionally skips the field-id cache + makePauseSession + any
@@ -636,6 +713,143 @@ async function main(): Promise<void> {
         console.error('[autopilot] Human-lane sync error (cycle unaffected):', err);
       }
 
+      // Fetch the issue→PR map ONCE per cycle and share it: the stacked-base
+      // sweep (below) and the dependency resolver inside runCycle (via the
+      // injected `fetchIssuePrMap` closure) both consume it, so one `gh pr list`
+      // serves both and they reason about the same PR snapshot. Best-effort — a
+      // failure degrades both to "no dependency awareness this cycle", never
+      // fatal. (REST, not GraphQL budget.) (review 2026-07-13)
+      let cyclePrByIssue: Map<number, PrLink[]> = new Map();
+      try {
+        cyclePrByIssue = await fetchIssuePrMap(realRunner);
+      } catch (err) {
+        console.error('[eng:loop] PR-map fetch error (dependency features degraded this cycle):', err);
+      }
+
+      // Abandoned-base re-block sweep (spec 2026-07-13 §4): a child dispatched
+      // stacked on its blocker's open PR is left on a dead branch if that PR is
+      // closed without merging (GitHub only auto-retargets on merge). Park such
+      // a child to `Blocked on: Human` + comment so a human resolves it.
+      try {
+        const { reblocked } = await syncStackBases(snapshot, cyclePrByIssue, cycleFieldCache, realRunner);
+        if (reblocked.length > 0) {
+          console.log(`[eng:loop] stacked base abandoned → re-blocked (Human): #${reblocked.join(', #')}`);
+        }
+      } catch (err) {
+        console.error('[eng:loop] stack-base sweep error (cycle unaffected):', err);
+      }
+
+      // Review-label enforcement (#1733): a session PR opened without the
+      // review label is invisible to the review loop (GhPrSource polls BY the
+      // label), so skill drift silently opts a PR out of review — observed
+      // live 2026-07-15 (#1730/#1731). Re-apply it from the shared PR map.
+      const cycleAllowlist: ReadonlySet<string> = new Set(
+        cfg.authorAllowlist.map((s) => s.toLowerCase()),
+      );
+      try {
+        const { labeled } = await syncReviewLabels(
+          cyclePrByIssue, cycleAllowlist, realRunner, cfg.engineReviewLabel,
+        );
+        if (labeled.length > 0) {
+          console.log(`[autopilot] review label re-applied → PR #${labeled.join(', PR #')}`);
+        }
+      } catch (err) {
+        console.error('[autopilot] label sweep error (cycle unaffected):', err);
+      }
+
+      // Self-healing drift sweep (#1734): reconcile board↔worktree drift
+      // instead of only logging it — phantoms re-queue or move to In Review,
+      // stale worktrees are removed (branch refs preserve commits), dead
+      // sessions' stranded branches are reaped into draft PRs.
+      try {
+        const taskWorktrees = await listTaskWorktrees(realRunner);
+        const dr = await syncDrift(
+          snapshot, cyclePrByIssue, taskWorktrees, cycleFieldCache, realRunner,
+        );
+        if (dr.toInReview.length > 0) {
+          console.log(`[autopilot] drift: phantom → In Review (open PR) → #${dr.toInReview.join(', #')}`);
+        }
+        if (dr.toTodo.length > 0) {
+          console.log(`[autopilot] drift: phantom → Todo (no PR, re-dispatchable) → #${dr.toTodo.join(', #')}`);
+        }
+        if (dr.removed.length > 0) {
+          console.log(`[autopilot] drift: stale worktrees removed → #${dr.removed.join(', #')}`);
+        }
+        for (const r of dr.reaped) {
+          console.log(`[autopilot] drift: strand reaped → #${r.issueNumber} → draft PR #${r.prNumber ?? '?'}`);
+        }
+        for (const s of dr.skipped) {
+          console.log(`[autopilot] drift (needs a human): ${s}`);
+        }
+      } catch (err) {
+        console.error('[autopilot] drift sweep error (cycle unaffected):', err);
+      }
+
+      // Auto-merge sweep (#1735, handbook rule-4 carve-out): merge PRs that
+      // are engine-approved + un-drafted + CI-green + non-code-owned. Runs
+      // only while the review loop is armed — the approvals it trusts come
+      // from that loop's independent reviewer identity.
+      if (cfg.reviewBotLogin !== '') {
+        try {
+          const mr = await syncMerges(
+            realRunner, cycleAllowlist, attemptedUpdateBranch, cfg.engineReviewLabel,
+          );
+          if (mr.merged.length > 0) {
+            console.log(`[autopilot] auto-merged → PR #${mr.merged.join(', PR #')}`);
+          }
+          if (mr.updatedBranch.length > 0) {
+            console.log(`[autopilot] merge: update-branch (BEHIND) → PR #${mr.updatedBranch.join(', PR #')}`);
+          }
+          for (const s of mr.skipped) {
+            console.log(`[autopilot] merge (waiting/needs a human): ${s}`);
+          }
+          // Stuck PRs (conflict / still-behind). Armed → the merge-prep session
+          // resolves mechanical conflicts and escalates the rest (DR-2026-07-16).
+          // Disarmed → Stage A deterministic escalation only (label
+          // review:needs-human + linked-issue Blocked on: Human + one comment).
+          // Both are idempotent via StuckPr.escalated.
+          if (mr.stuck.length > 0 && cfg.mergePrepEnabled) {
+            const reviewInFlight = new Set<number>(
+              (await deriveReviewInFlight(realRunner)).inFlight.map((r) => r.prNumber),
+            );
+            const mp = await runMergePrepCycle({
+              stuck: mr.stuck,
+              cfg,
+              attemptedPrep,
+              reviewInFlight,
+              deriveInFlight: () => deriveMergePrepInFlight(realRunner),
+              dispatch: (s) => dispatchMergePrep(s, cfg, { runner: realRunner, spawn: makeLoggingSpawn() }),
+              escalate: async (s, why) => {
+                console.log(`[autopilot] merge-prep: escalating PR #${s.number} — ${why}`);
+                await escalateStuckPr(s, snapshot, cyclePrByIssue, cycleFieldCache, realRunner);
+              },
+              isCodeOwned: (n) => touchesOwned(n, realRunner),
+              removeWorktree: async (w) => {
+                await realRunner('git', ['worktree', 'remove', '--force', w.worktreePath]);
+              },
+            });
+            if (mp.dispatched.length > 0) console.log(`[autopilot] merge-prep dispatched → PR #${mp.dispatched.join(', PR #')}`);
+            if (mp.escalated.length > 0) console.log(`[autopilot] merge-prep escalated (needs-human) → PR #${mp.escalated.join(', PR #')}`);
+            if (mp.reaped.length > 0) console.log(`[autopilot] merge-prep reaped stale worktree → PR #${mp.reaped.join(', PR #')}`);
+            if (mp.waiting.length > 0) console.log(`[autopilot] merge-prep waiting (in-flight) → PR #${mp.waiting.join(', PR #')}`);
+          } else if (mr.stuck.length > 0) {
+            const esc = await escalateStuckPrs(
+              mr.stuck, snapshot, cyclePrByIssue, cycleFieldCache, realRunner,
+            );
+            if (esc.escalated.length > 0) {
+              console.log(
+                `[autopilot] merge: stuck → escalated (needs-human) → PR #${esc.escalated.join(', PR #')}`,
+              );
+            }
+            for (const sk of esc.skipped) {
+              console.log(`[autopilot] merge: stuck escalation skipped: ${sk}`);
+            }
+          }
+        } catch (err) {
+          console.error('[autopilot] merge sweep error (cycle unaffected):', err);
+        }
+      }
+
       // Build a per-cycle pause closure that resolves the project item id
       // from the snapshot already in scope (jinn-mono#599) — no extra
       // `gh project item-list` call per pause.
@@ -662,46 +876,12 @@ async function main(): Promise<void> {
         dispatchIssue: (issue) =>
           dispatchIssue(issue, cfg, {
             runner: realRunner,
-            spawn: (cmd, args, opts) => {
-              // #533: open the per-session log in append mode and wire it to
-              // BOTH stdout(1) and stderr(2) so the two streams interleave in
-              // one tailable file. Append (not truncate, not timestamp) keeps
-              // the path stable for `tail -f` while never clobbering a prior
-              // run's output. `dispatchIssue` supplied opts.logPath; if it is
-              // somehow absent we fall back to the opts.stdio it set.
-              const logPath = opts.logPath;
-              let fd: number | undefined;
-              let stdio = opts.stdio;
-              if (typeof logPath === 'string') {
-                mkdirSync(SESSIONS_LOG_DIR, { recursive: true });
-                // Owner-only (0o600) on create: session logs may contain
-                // secrets surfaced by the spawned session (tokens in gh/git
-                // error output, env echoes, prompt material). The mode only
-                // applies when the file is created; an existing log (re-dispatch)
-                // is not chmod'd — that's fine, the append target is unchanged.
-                fd = openSync(logPath, 'a', 0o600);
-                // Visual delimiter so successive append runs are separable.
-                const delimiter =
-                  `\n===== dispatch ${new Date().toISOString()} ` +
-                  `pid=pending cwd=${opts.cwd} =====\n`;
-                writeSync(fd, delimiter);
-                stdio = ['ignore', fd, fd];
-              }
-              const child = spawn(cmd, args, { ...opts, stdio } as SpawnOptions);
-              if (child.pid != null) {
-                child.unref();
-              }
-              // Close the parent's copy of the fd: the detached child inherited
-              // its own dup, so closing here avoids leaking an fd per dispatch.
-              if (fd != null) {
-                closeSync(fd);
-              }
-              return { pid: child.pid };
-            },
+            spawn: makeLoggingSpawn(),
             fieldCache: cycleFieldCache,
           }),
         countOpenReadyPrs,
-        fetchIssuePrMap: () => fetchIssuePrMap(realRunner),
+        // Reuse the map fetched once above (shared with the stacked-base sweep).
+        fetchIssuePrMap: () => Promise.resolve(cyclePrByIssue),
         wallClock,
         pauseSession: pauseSessionForCycle,
         prevInFlight: previousInFlight,

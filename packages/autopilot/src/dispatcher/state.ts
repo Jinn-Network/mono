@@ -1,7 +1,7 @@
 import { statSync } from 'node:fs';
 import type { CommandRunner, ProjectSnapshot } from './project-snapshot.js';
 import type { InFlightSession } from './types.js';
-import { sessionLogPath } from './session-log.js';
+import { sessionLogPath, sessionStartedAtPath } from './session-log.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -106,27 +106,86 @@ function shortBranch(branchRef: string): string {
 }
 
 /**
- * Recover the best-available proxy for when a worktree session was started.
+ * Recover the best-available evidence of when a worktree session was
+ * started, taking the MAX of two signals:
  *
- * Uses the worktree directory's creation time (`birthtimeMs`) as a proxy for
- * the session's `startedAt`. Falls back to `mtimeMs` when `birthtimeMs` is 0
- * (common on Linux where birthtime is not tracked by the filesystem). Returns 0
- * (unknown-age sentinel) if the path cannot be stat-ed — the WallClock guards
- * against `startedAt <= 0` and will not force-pause an unknown-age session.
+ * - The dispatch-time marker file's mtime (`markerPath`, written — and
+ *   truncated — at every dispatch by the production spawn lambda in
+ *   run-eng-loop.ts). 0 if it cannot be stat-ed.
+ * - The worktree directory's creation time (`birthtimeMs`), falling back to
+ *   `mtimeMs` when `birthtimeMs` is 0 (common on Linux where birthtime is not
+ *   tracked by the filesystem). 0 if it cannot be stat-ed.
+ *
+ * The marker is preferred evidence: when `dispatchIssue` reuses a
+ * pre-existing worktree (the crash-recovery path around dispatch.ts:238-255),
+ * the worktree directory's birthtime is wrong — it reflects when the
+ * worktree was first created by an earlier, possibly abandoned session, not
+ * when the current session started. This previously caused a false
+ * wall-clock pause of a session that had started only minutes earlier
+ * (observed live 2026-07-14 on issues #1296/#1393). Taking the max of both
+ * signals means "most recent evidence of a session start" wins, without
+ * regressing the plain worktree-birthtime case when no marker exists yet
+ * (e.g. a worktree created outside the dispatcher).
+ *
+ * Returns 0 (unknown-age sentinel) if both signals are unavailable — the
+ * WallClock guards against `startedAt <= 0` and will not force-pause an
+ * unknown-age session.
+ *
+ * Exported for direct unit testing (test/dispatcher/recover-started-at.test.ts).
  */
-function recoverStartedAt(worktreePath: string): number {
+export function recoverStartedAt(worktreePath: string, markerPath: string): number {
+  let markerMs = 0;
+  try {
+    markerMs = statSync(markerPath).mtimeMs;
+  } catch {
+    markerMs = 0;
+  }
+
+  let worktreeMs = 0;
   try {
     const st = statSync(worktreePath);
-    const birth = st.birthtimeMs;
-    return birth > 0 ? birth : st.mtimeMs;
+    worktreeMs = st.birthtimeMs > 0 ? st.birthtimeMs : st.mtimeMs;
   } catch {
-    return 0;
+    worktreeMs = 0;
   }
+
+  return Math.max(markerMs, worktreeMs);
 }
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
+
+/** One task worktree (`jinn-mono_worktrees/<N>`) keyed by its issue number. */
+export interface TaskWorktree {
+  issueNumber: number;
+  worktreePath: string;
+  /** Short branch name, or '' when the worktree is detached. */
+  branch: string;
+}
+
+/**
+ * List the task worktrees (`jinn-mono_worktrees/<N>`) via
+ * `git worktree list --porcelain`. Shared by {@link deriveInFlight} and the
+ * drift sweep (#1734) so both read the identical external state.
+ */
+export async function listTaskWorktrees(
+  runner: CommandRunner,
+): Promise<Map<number, TaskWorktree>> {
+  const raw = await runner('git', ['worktree', 'list', '--porcelain']);
+  const out = new Map<number, TaskWorktree>();
+  for (const wt of parseWorktreePorcelain(raw)) {
+    const n = extractTaskIssueNumber(wt.worktreePath);
+    if (n != null) {
+      out.set(n, {
+        issueNumber: n,
+        worktreePath: wt.worktreePath,
+        branch: wt.branchRef != null ? shortBranch(wt.branchRef) : '',
+      });
+    }
+  }
+  return out;
+}
 
 /**
  * Re-derive the dispatcher's in-flight set from authoritative external state:
@@ -210,7 +269,7 @@ export async function deriveInFlight(
         branch: branchRef != null ? shortBranch(branchRef) : '',
         worktreePath: wt.worktreePath,
         pid: null,
-        startedAt: recoverStartedAt(wt.worktreePath),
+        startedAt: recoverStartedAt(wt.worktreePath, sessionStartedAtPath(issueNumber)),
         // #533: deterministic per-session log path, so a recovered session is
         // still tailable by the same `sessions/<N>.log` scheme.
         logPath: sessionLogPath(issueNumber),

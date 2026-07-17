@@ -76,6 +76,35 @@ export interface DistillDeps {
   distillModel?: string;
   scrubPipeline?: ScrubPipeline;
   now?: () => Date;
+  /** Progress seam (#1533): fired once before the loop with every cluster. */
+  onPlan?: (plan: ClusterPlanEntry[]) => void;
+  /** Progress seam (#1533): fired around each cluster's distill call. */
+  onCluster?: (ev: ClusterProgressEvent) => void;
+}
+
+/** One row of the up-front cluster plan handed to {@link DistillDeps.onPlan}. */
+export interface ClusterPlanEntry {
+  clusterId: string;
+  /** 1-based position in the run. */
+  index: number;
+  captureCount: number;
+  /** The cluster's evidence refs — a consumer can map these back to sources. */
+  refs: string[];
+}
+
+/** A start/end progress event around one cluster's distill call (#1533). */
+export interface ClusterProgressEvent {
+  phase: 'start' | 'end';
+  clusterId: string;
+  /** 1-based position in the run. */
+  index: number;
+  total: number;
+  /** End-phase only. */
+  outcome?: 'published' | 'rejected' | 'error';
+  skillName?: string;
+  reason?: string;
+  error?: string;
+  durationMs?: number;
 }
 
 export type SkillKind = 'strategic-pattern' | 'failure-lesson' | 'contrastive' | 'cross-instance';
@@ -350,7 +379,21 @@ export async function distillClusters(
   const finalizeDeps = resolveFinalizeDeps(deps);
   const result: DistillResult = { published: [], rejected: [], errors: [] };
 
-  for (const cluster of clusters) {
+  deps.onPlan?.(
+    clusters.map((c, i) => ({
+      clusterId: c.clusterId,
+      index: i + 1,
+      captureCount: c.evidenceRefs.length,
+      refs: [...c.evidenceRefs],
+    })),
+  );
+
+  const total = clusters.length;
+  for (const [i, cluster] of clusters.entries()) {
+    const index = i + 1;
+    const base = { clusterId: cluster.clusterId, index, total } as const;
+    deps.onCluster?.({ phase: 'start', ...base });
+    const startedAt = Date.now();
     try {
       const out = await deps.distill(cluster);
       const skillKind = SKILL_KIND_BY_TIER[cluster.tier];
@@ -368,11 +411,15 @@ export async function distillClusters(
       );
       if (fin.ok) {
         result.published.push({ clusterId: cluster.clusterId, skillKind, envelopeRef: fin.envelopeRef, pkg: fin.pkg });
+        deps.onCluster?.({ phase: 'end', ...base, outcome: 'published', skillName: fin.pkg.name, durationMs: Date.now() - startedAt });
       } else {
         result.rejected.push({ clusterId: cluster.clusterId, reason: fin.reason });
+        deps.onCluster?.({ phase: 'end', ...base, outcome: 'rejected', reason: fin.reason, durationMs: Date.now() - startedAt });
       }
     } catch (err) {
-      result.errors.push({ clusterId: cluster.clusterId, error: err instanceof Error ? err.message : String(err) });
+      const error = err instanceof Error ? err.message : String(err);
+      result.errors.push({ clusterId: cluster.clusterId, error });
+      deps.onCluster?.({ phase: 'end', ...base, outcome: 'error', error, durationMs: Date.now() - startedAt });
     }
   }
   return result;

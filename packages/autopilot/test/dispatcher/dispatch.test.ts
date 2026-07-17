@@ -5,7 +5,7 @@ import { dispatchIssue, WORKTREES_BASE } from '../../src/dispatcher/dispatch.js'
 import type { ReadyIssue, DispatcherConfig } from '../../src/dispatcher/types.js';
 import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
 import type { SpawnFn } from '../../src/dispatcher/dispatch.js';
-import { SESSIONS_LOG_DIR, sessionLogPath } from '../../src/dispatcher/session-log.js';
+import { SESSIONS_LOG_DIR, sessionLogPath, sessionStartedAtPath } from '../../src/dispatcher/session-log.js';
 import {
   fetchFieldIds,
   resetFieldCache,
@@ -58,6 +58,8 @@ const CFG: DispatcherConfig = {
   reviewBotLogin: '',
   implGhToken: '',
   reviewGhToken: '',
+  mergePrepEnabled: false,
+  mergePrepCap: 1,
 };
 
 /**
@@ -581,6 +583,16 @@ describe('dispatchIssue', () => {
     expect(spawnCall.opts.stdio).not.toBe('ignore');
   });
 
+  it('passes the per-session startedAtMarkerPath (sessions/<N>.started-at) through the spawn opts (jinn-mono#1296/#1393)', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+
+    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+
+    const [spawnCall] = calls;
+    expect(spawnCall.opts.startedAtMarkerPath).toBe(sessionStartedAtPath(418));
+  });
+
   it('returns an InFlightSession whose logPath is deterministic from the issue number (#533 AC#2)', async () => {
     const { runner } = makeRunner();
     const { spawn } = makeSpawn();
@@ -870,5 +882,62 @@ describe('dispatchIssue', () => {
     // Reference fetchFieldIds so the import is exercised even when no retry
     // path runs in this case (it's used by the other #599 tests already).
     void fetchFieldIds;
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dangling-ref collision (review 2026-07-15, observed live on #1664): a local
+// branch ref without a worktree must not fatal `worktree add -b` — dispatch
+// picks the first free suffixed name and never touches the old ref.
+// ---------------------------------------------------------------------------
+
+describe('dispatchIssue — branch-ref collision', () => {
+  /** `taken(ref)` decides which branch names rev-parse reports as existing. */
+  function makeCollisionRunner(taken: (ref: string) => boolean): { runner: CommandRunner; calls: RunnerCall[] } {
+    const calls: RunnerCall[] = [];
+    const runner: CommandRunner = async (cmd, args) => {
+      calls.push({ cmd, args });
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') return WORKTREE_LIST_EMPTY;
+      if (cmd === 'git' && args[0] === 'rev-parse') {
+        const ref = args[args.length - 1].replace(/^refs\/heads\//, '');
+        if (taken(ref)) return 'abc123\n';
+        throw new Error('unknown revision'); // free name — rev-parse fails
+      }
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'add') return '';
+      if (cmd === 'gh' && args[0] === 'project' && args[1] === 'item-edit') return '';
+      throw new Error(`Unexpected command: ${cmd} ${args.join(' ')}`);
+    };
+    return { runner, calls };
+  }
+
+  const branchOf = (calls: RunnerCall[]): string | undefined => {
+    const add = calls.find((c) => c.cmd === 'git' && c.args[0] === 'worktree' && c.args[1] === 'add');
+    return add ? add.args[add.args.indexOf('-b') + 1] : undefined;
+  };
+
+  it('dangling ref with the deterministic name → dispatch uses the -r2 suffix', async () => {
+    // Only the un-suffixed deterministic name is taken.
+    const { runner, calls } = makeCollisionRunner((ref) => !/-r\d$/.test(ref));
+    const { spawn } = makeSpawn();
+    const session = await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+    const b = branchOf(calls);
+    expect(b).toMatch(/^feat\/418-.*-r2$/);
+    expect(session.branch).toBe(b);
+    // The old ref is never deleted, reset, or reused.
+    expect(calls.some((c) => c.cmd === 'git' && c.args[0] === 'branch')).toBe(false);
+  });
+
+  it('base and -r2 both taken → -r3', async () => {
+    const { runner, calls } = makeCollisionRunner((ref) => !/-r3$/.test(ref));
+    const { spawn } = makeSpawn();
+    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+    expect(branchOf(calls)).toMatch(/^feat\/418-.*-r3$/);
+  });
+
+  it('no collision → the deterministic name, unchanged behavior', async () => {
+    const { runner, calls } = makeCollisionRunner(() => false);
+    const { spawn } = makeSpawn();
+    await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+    expect(branchOf(calls)).toBe('feat/418-feat-operator-app-expose-generator-health');
   });
 });

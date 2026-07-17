@@ -1,25 +1,40 @@
 /**
- * Stage 1 skeleton (S1-F1): real port wiring, stub product policy.
- * `firstTurnPickup` is a direct `corpus.search()` pass-through (no ranking);
- * `end()` assembles buffered turns into a schema-valid EpisodeV1 and persists
- * it via `evidence.put()`. Pickup policy, real eligibility, and
- * history()/explain() are S1-F2 scope (not implemented here) —
- * docs/superpowers/plans/2026-07-14-jinn-plugin-stage-1-plan.md §S1-F2.
+ * Host-neutral Stage 1 product workflow. Embedded hosts buffer their session
+ * through `PluginSession`; process hosts pass the already-captured EpisodeV1
+ * to `completeSession`. Both paths persist the same canonical evidence and
+ * contribution contracts.
  */
 
 /// <reference types="node" />
 import { randomUUID } from 'node:crypto';
-import type { ContributionPort } from './ports/contribution-port.js';
-import type { CorpusPort } from './ports/corpus-port.js';
+import type {
+  ContributionLedgerEntry,
+  ContributionPort,
+  ContributionStatusSnapshot,
+} from './ports/contribution-port.js';
+import type { CorpusPort, CorpusRecord } from './ports/corpus-port.js';
 import type { EvidencePort } from './ports/evidence-port.js';
 import type { LocalLearningPort } from './ports/local-learning-port.js';
 import type { SkillsPort } from './ports/skills-port.js';
 import type { EligibilityVerdict } from './schemas/eligibility-verdict.js';
-import { EPISODE_SCHEMA_VERSION, EpisodeV1Schema } from './schemas/episode.js';
-import type { EpisodeV1 } from './schemas/episode.js';
+import {
+  EPISODE_SCHEMA_VERSION,
+  EpisodeV1Schema,
+  SessionActivityFactsSchema,
+} from './schemas/episode.js';
+import type { EpisodeV1, SessionActivityFacts } from './schemas/episode.js';
+import {
+  ContributionCandidateV1Schema,
+  type ContributionCandidateV1,
+} from './schemas/contribution-candidate.js';
 import type { KnowledgeHit } from './schemas/knowledge-hit.js';
 import type { SessionSummary } from './schemas/session-summary.js';
-import type { PortResult } from './outcome.js';
+import { projectKnowledgePacket, type KnowledgePacket } from './schemas/knowledge-packet.js';
+import { deriveSearchTerms, rankKnowledgeHits, MAX_SELECTED_PACKETS } from './pickup.js';
+import { degraded, ok, unavailable, valueOr, type PortResult } from './outcome.js';
+import { parsePickupConfig, type PickupConfig } from './schemas/pickup-config.js';
+import { deriveEligibility } from './eligibility.js';
+import { foldExplain, foldHistory, type HistoryResult, type SessionExplanation } from './history.js';
 
 export interface JinnPluginDeps {
   corpus: CorpusPort;
@@ -37,12 +52,18 @@ export interface SessionMeta {
   model: string;
   tools: string[];
   skillsLoadout?: string[];
+  pickup?: PickupConfig;
+  /** Known at session start (e.g. `session_bridge.snapshot_repository`) —
+   *  fed into `deriveSearchTerms`, which derives the repository's name (not
+   *  its full slug) as a normal search term (#1790). */
+  repositorySlug?: string;
 }
 
 export interface FirstTurnPickupResult {
-  contextBlock?: string;
-  suggestions: KnowledgeHit[];
-  markers: string[];
+  contextBlock: string | null;
+  packets: KnowledgePacket[];
+  searchedTerms: string[];
+  degraded?: string;
 }
 
 export interface ToolCallEvent {
@@ -62,6 +83,8 @@ export interface SessionOutcome {
   durationMs: number;
   tokens?: { input: number; output: number };
   retentionPolicy: 'local-private' | 'contribution-eligible';
+  publicRepo?: boolean;
+  acceptedDiff?: boolean;
 }
 
 export interface SessionEndResult {
@@ -73,13 +96,217 @@ export interface SessionEndResult {
   episodeRef: string;
   /** Honest surfacing of the `evidence.put()` outcome (#1696 AC2). */
   persistence: PortResult<{ episodeId: string }>;
+  /** Present iff a candidate was supplied; independent from persistence. */
+  contribution?: PortResult<ContributionCompletionReceipt>;
   eligibility: EligibilityVerdict;
   summary: SessionSummary;
 }
 
+export type ContributionCompletionReceipt =
+  { recordId: string } & Partial<ContributionStatusSnapshot>;
+
+export interface ContributionPreview {
+  recordId: string;
+  repositorySlug: string;
+  baseCommit: string;
+  localState: 'recorded' | 'minted' | 'rejected';
+  publicationState: 'preview-required' | 'queued';
+  status: 'preview-required' | 'queued';
+  acknowledged: boolean;
+}
+
+async function previewContribution(
+  deps: JinnPluginDeps,
+  acknowledge: boolean,
+): Promise<PortResult<ContributionPreview | null>> {
+  let ledger;
+  try {
+    ledger = await deps.contribution.ledger();
+  } catch (error) {
+    return unavailable(`contribution preview failed: ${errorReason(error)}`);
+  }
+  if (ledger.status === 'unavailable') return unavailable(ledger.reason);
+  const rows = ledger.status === 'ok' ? ledger.value : ledger.value ?? [];
+  const row = rows.find((entry) => entry.publicationState === 'preview-required');
+  if (!row) {
+    return ledger.status === 'degraded' ? degraded(ledger.reason, null) : ok(null);
+  }
+  if (!row.repositorySlug || !row.baseCommit) {
+    return unavailable('contribution preview repository facts unavailable');
+  }
+
+  let publicationState: 'preview-required' | 'queued' = 'preview-required';
+  if (acknowledge) {
+    let authorization;
+    try {
+      authorization = await deps.contribution.authorize(row.recordId);
+    } catch (error) {
+      return unavailable(`contribution preview acknowledgement failed: ${errorReason(error)}`);
+    }
+    if (authorization.status === 'unavailable') return unavailable(authorization.reason);
+    if (authorization.status === 'degraded') {
+      return degraded(authorization.reason);
+    }
+    publicationState = 'queued';
+  }
+
+  const value: ContributionPreview = {
+    recordId: row.recordId,
+    repositorySlug: row.repositorySlug,
+    baseCommit: row.baseCommit,
+    localState: row.localState,
+    publicationState,
+    status: publicationState,
+    acknowledged: acknowledge,
+  };
+  return ledger.status === 'degraded' ? degraded(ledger.reason, value) : ok(value);
+}
+
+export const JINN_PLUGIN_CONTRACT_VERSION = 1 as const;
+
+export interface CompleteSessionEligibilityInputs {
+  publicRepo?: boolean;
+  acceptedDiff?: boolean;
+}
+
+export interface CompleteSessionInput {
+  contractVersion: typeof JINN_PLUGIN_CONTRACT_VERSION;
+  episode: EpisodeV1;
+  activity: SessionActivityFacts;
+  eligibilityInputs: CompleteSessionEligibilityInputs;
+  contributionCandidate?: ContributionCandidateV1;
+  /** Per-task publication veto; defaults to false. The candidate is still recorded locally. */
+  contributionVetoed?: boolean;
+}
+
+interface CompletionSummaryHits {
+  /** The packets actually provided to the agent this session, when the
+   *  caller drove pickup through `PluginSession` (embedded-host path). Absent
+   *  (defaults to `[]`) for process-delegated `session end` calls, which
+   *  never round-trip packets through this in-process value. */
+  providedPackets: KnowledgePacket[];
+}
+
+function errorReason(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Titles for `SessionSummary.providedPackets` — the packet's own task summary. */
+function packetTitle(packet: KnowledgePacket): { ref: string; title: string } {
+  return { ref: packet.ref, title: packet.task.summary };
+}
+
+async function completeSession(
+  deps: JinnPluginDeps,
+  input: CompleteSessionInput,
+  hits: CompletionSummaryHits = { providedPackets: [] },
+): Promise<SessionEndResult> {
+  if (input.contractVersion !== JINN_PLUGIN_CONTRACT_VERSION) {
+    throw new Error(`unsupported plugin contract version: ${String(input.contractVersion)}`);
+  }
+
+  const capturedEpisode = EpisodeV1Schema.parse(input.episode);
+  const activity = SessionActivityFactsSchema.parse(input.activity);
+  const eligibility = deriveEligibility(
+    {
+      status: capturedEpisode.outcome.status,
+      verifiabilityTier: capturedEpisode.outcome.verifiabilityTier,
+      retentionPolicy: capturedEpisode.retention.policy,
+      publicRepo: input.eligibilityInputs.publicRepo,
+      acceptedDiff: input.eligibilityInputs.acceptedDiff,
+    },
+    capturedEpisode.session.capturedAt,
+  );
+  const episode = EpisodeV1Schema.parse({
+    ...capturedEpisode,
+    activity,
+    eligibility,
+  });
+
+  let persistence: PortResult<{ episodeId: string }>;
+  try {
+    persistence = await deps.evidence.put(episode);
+  } catch (error) {
+    persistence = unavailable(`evidence put failed: ${errorReason(error)}`);
+  }
+
+  let contribution: PortResult<ContributionCompletionReceipt> | undefined;
+  if (input.contributionCandidate !== undefined) {
+    const parsedCandidate = ContributionCandidateV1Schema.safeParse(input.contributionCandidate);
+    if (!parsedCandidate.success) {
+      contribution = unavailable('invalid contribution candidate');
+    } else if (parsedCandidate.data.sourceId !== episode.episodeId) {
+      contribution = unavailable('contribution candidate sourceId must match episodeId');
+    } else {
+      try {
+        contribution = await deps.contribution.recordMineable(
+          parsedCandidate.data,
+          input.contributionVetoed ? { publicationState: 'vetoed' } : undefined,
+        );
+      } catch (error) {
+        contribution = unavailable(`contribution record failed: ${errorReason(error)}`);
+      }
+      if (contribution.status === 'ok' && input.contributionVetoed === true) {
+        const recordId = contribution.value.recordId;
+        try {
+          const veto = await deps.contribution.veto(recordId);
+          contribution = veto.status === 'unavailable'
+            ? degraded(veto.reason, { recordId })
+            : veto;
+        } catch (error) {
+          contribution = degraded(
+            `contribution veto failed: ${errorReason(error)}`,
+            { recordId },
+          );
+        }
+      } else if (contribution.status === 'ok') {
+        const recordId = contribution.value.recordId;
+        try {
+          const snapshot = await deps.contribution.mintStatus(recordId);
+          if (snapshot.status === 'ok') {
+            contribution = ok({ recordId, ...snapshot.value });
+          } else if (snapshot.status === 'degraded' && snapshot.value !== undefined) {
+            contribution = degraded(snapshot.reason, { recordId, ...snapshot.value });
+          } else {
+            contribution = degraded(snapshot.reason, { recordId });
+          }
+        } catch (error) {
+          contribution = degraded(
+            `contribution status failed: ${errorReason(error)}`,
+            { recordId },
+          );
+        }
+      }
+    }
+  }
+
+  const providedPackets = hits.providedPackets.length > 0
+    ? hits.providedPackets.map(packetTitle)
+    : activity.providedRefs.map((ref) => ({ ref, title: ref }));
+
+  const summary: SessionSummary = {
+    episodeRef: episode.episodeId,
+    searchedTerms: activity.searchedTerms,
+    providedPackets,
+    eligibility,
+    nothingFound: activity.providedRefs.length === 0,
+  };
+
+  return {
+    episodeRef: episode.episodeId,
+    persistence,
+    ...(contribution !== undefined ? { contribution } : {}),
+    eligibility,
+    summary,
+  };
+}
+
 export class PluginSession {
   private readonly trajectory: EpisodeV1['trajectory'] = [];
-  private surfacedHits: KnowledgeHit[] = [];
+  private searchedTerms: string[] = [];
+  private providedRefs: string[] = [];
+  private fetchedRefs: string[] = [];
+  private packets: KnowledgePacket[] = [];
   private readonly capturedAt = new Date().toISOString();
 
   constructor(
@@ -88,13 +315,107 @@ export class PluginSession {
   ) {}
 
   async firstTurnPickup(firstMessage: string): Promise<FirstTurnPickupResult> {
-    const result = await this.deps.corpus.search(firstMessage);
-    const suggestions = result.status === 'ok' ? result.value : [];
-    this.surfacedHits = suggestions;
+    const config = parsePickupConfig(this.meta.pickup);
+    if (!config.enabled) return { contextBlock: null, packets: [], searchedTerms: [] };
+
+    const terms = deriveSearchTerms(firstMessage, this.meta.repositorySlug);
+    this.searchedTerms = terms;
+    if (terms.length === 0) return { contextBlock: null, packets: [], searchedTerms: terms };
+
+    // Issue all per-term searches concurrently — the searches are
+    // independent (mono #1795: sequential awaits serialized ~1.6s/term of
+    // live indexer round-trips, blowing the 15s host deadline once lexical
+    // v2 widened the term budget to 10). `Promise.all` preserves result
+    // order by term index regardless of resolution order, so the merge
+    // below stays in term order — dedup priority and the first-observed
+    // degraded reason are byte-identical to the old sequential loop. A
+    // rejected promise would violate the PortResult convention (ports
+    // resolve, never throw), but is guarded anyway: it degrades that one
+    // term's contribution rather than the whole pickup (fail-open).
+    const results = await Promise.all(
+      terms.map((term) =>
+        this.deps.corpus.search(term).catch((error: unknown) =>
+          degraded<KnowledgeHit[]>(`corpus search rejected: ${errorReason(error)}`),
+        ),
+      ),
+    );
+
+    // Merge hits in term order (skip non-ok reads → fail open; keep the
+    // first degraded reason observed for an honest, non-crashing report).
+    let degradedReason: string | undefined;
+    const byRef = new Map<string, KnowledgeHit>();
+    for (const result of results) {
+      if (result.status !== 'ok' && degradedReason === undefined) degradedReason = result.reason;
+      for (const hit of valueOr(result, [] as KnowledgeHit[])) {
+        if (!byRef.has(hit.ref)) byRef.set(hit.ref, hit);
+      }
+    }
+
+    const ranked = rankKnowledgeHits([...byRef.values()], terms);
+    if (ranked.length === 0) {
+      return {
+        contextBlock: null,
+        packets: [],
+        searchedTerms: terms,
+        ...(degradedReason !== undefined ? { degraded: degradedReason } : {}),
+      };
+    }
+
+    // Fetch full content for ranked candidates and project packets, walking
+    // down the ranked list until MAX_SELECTED_PACKETS valid packets are
+    // found or candidates are exhausted (mono #1782). Two post-fetch guards
+    // can disqualify a candidate without spending its slot, promoting the
+    // next-ranked one: (1) content-level skill classification — excludes a
+    // legacy skill-shaped record (skill.md step attribute) or a
+    // jinn.skill.v1-backed record that slipped the wire kind filter, exactly
+    // as a wire kind:'skill' hit is excluded at selection time; (2)
+    // empty-packet honesty — a projection with zero excerpts and no
+    // synthesis is not evidence. A projection failure degrades that one ref
+    // to nothing-found rather than throwing into the caller (§3.5).
+    const fetchedRefs: string[] = [];
+    const packets: KnowledgePacket[] = [];
+    for (const hit of ranked) {
+      if (packets.length >= MAX_SELECTED_PACKETS) break;
+      fetchedRefs.push(hit.ref);
+      const result = await this.deps.corpus.get(hit.ref);
+      if (result.status !== 'ok') {
+        if (degradedReason === undefined) degradedReason = result.reason;
+        continue;
+      }
+      const record: CorpusRecord | null = result.value;
+      if (record === null) continue;
+      if (record.isSkillPayload === true) continue;
+
+      let packet: KnowledgePacket;
+      try {
+        packet = projectKnowledgePacket(record);
+      } catch (error) {
+        degradedReason ??= `packet projection failed for ${hit.ref}: ${errorReason(error)}`;
+        continue;
+      }
+      if (packet.excerpts.length === 0 && packet.synthesis === undefined) continue;
+
+      packets.push(packet);
+    }
+
+    this.fetchedRefs = fetchedRefs;
+    this.providedRefs = packets.map((packet) => packet.ref);
+    this.packets = packets;
+
+    if (packets.length === 0) {
+      return {
+        contextBlock: null,
+        packets: [],
+        searchedTerms: terms,
+        ...(degradedReason !== undefined ? { degraded: degradedReason } : {}),
+      };
+    }
+
     return {
-      contextBlock: suggestions.length > 0 ? suggestions.map((hit) => hit.title ?? hit.ref).join('\n') : undefined,
-      suggestions,
-      markers: suggestions.length > 0 ? ['corpus'] : [],
+      contextBlock: renderKnowledgePackets(packets),
+      packets,
+      searchedTerms: terms,
+      ...(degradedReason !== undefined ? { degraded: degradedReason } : {}),
     };
   }
 
@@ -154,35 +475,96 @@ export class PluginSession {
       provenance: 'contributed',
     });
 
-    const persistence = await this.deps.evidence.put(episode);
-
-    const eligibility: EligibilityVerdict = {
-      eligible: false,
-      reason: 'stage-1-stub',
-      checkedAt: new Date().toISOString(),
-    };
-
-    const summary: SessionSummary = {
-      episodeRef: episode.episodeId,
-      surfacedHits: this.surfacedHits,
-      fetchedHits: [],
-      installedSkillRefs: [],
-      eligibility,
-      nothingFound: this.surfacedHits.length === 0,
-    };
-
-    return { episodeRef: episode.episodeId, persistence, eligibility, summary };
+    return completeSession(
+      this.deps,
+      {
+        contractVersion: JINN_PLUGIN_CONTRACT_VERSION,
+        episode,
+        activity: {
+          searchedTerms: this.searchedTerms,
+          providedRefs: this.providedRefs,
+          surfacedRefs: [],
+          fetchedRefs: this.fetchedRefs,
+          installedSkillRefs: [],
+        },
+        eligibilityInputs: {
+          publicRepo: outcome.publicRepo,
+          acceptedDiff: outcome.acceptedDiff,
+        },
+      },
+      { providedPackets: this.packets },
+    );
   }
+}
+
+/**
+ * Composes the block the host injects into the first user message, verbatim
+ * and cache-safe (rescope §3.4).
+ */
+function renderKnowledgePacket(packet: KnowledgePacket): string {
+  const lines: string[] = [
+    `${packet.task.summary} · ${packet.outcome.status}/${packet.outcome.verifiabilityTier}`,
+  ];
+  if (packet.synthesis) lines.push(packet.synthesis);
+  for (const excerpt of packet.excerpts) lines.push(`- ${excerpt.label}: ${excerpt.text}`);
+  const capturedDate = packet.attribution.capturedAt.slice(0, 10);
+  lines.push(
+    `  source: ${packet.ref} · ${packet.attribution.origin} · captured ${capturedDate} · `
+    + `full episode: corpus_fetch ${packet.ref}`,
+  );
+  return lines.join('\n');
+}
+
+function renderKnowledgePackets(packets: KnowledgePacket[]): string {
+  return [
+    '[jinn corpus] Prior evidence relevant to this task:',
+    ...packets.map(renderKnowledgePacket),
+  ].join('\n');
 }
 
 export interface JinnPlugin {
   session(meta: SessionMeta): PluginSession;
+  completeSession(input: CompleteSessionInput): Promise<SessionEndResult>;
+  history(): Promise<HistoryResult>;
+  explain(sessionRef: string): Promise<SessionExplanation>;
+  previewContribution(acknowledge?: boolean): Promise<PortResult<ContributionPreview | null>>;
+  contributionLedger(): Promise<PortResult<ContributionLedgerEntry[]>>;
+  disableContributionPublication(): Promise<PortResult<{ recordIds: string[] }>>;
 }
 
 export function createJinnPlugin(deps: JinnPluginDeps): JinnPlugin {
   return {
     session(meta: SessionMeta): PluginSession {
       return new PluginSession(deps, meta);
+    },
+    completeSession(input: CompleteSessionInput): Promise<SessionEndResult> {
+      return completeSession(deps, input);
+    },
+    history(): Promise<HistoryResult> {
+      return foldHistory(deps);
+    },
+    explain(sessionRef: string): Promise<SessionExplanation> {
+      return foldExplain(sessionRef, deps);
+    },
+    previewContribution(acknowledge = false): Promise<PortResult<ContributionPreview | null>> {
+      return previewContribution(deps, acknowledge);
+    },
+    async contributionLedger(): Promise<PortResult<ContributionLedgerEntry[]>> {
+      try {
+        return await deps.contribution.ledger();
+      } catch (error) {
+        return unavailable(`contribution ledger failed: ${errorReason(error)}`);
+      }
+    },
+    async disableContributionPublication(): Promise<PortResult<{ recordIds: string[] }>> {
+      if (!deps.contribution.disableUnpublished) {
+        return unavailable('contribution disable is unavailable');
+      }
+      try {
+        return await deps.contribution.disableUnpublished();
+      } catch (error) {
+        return unavailable(`contribution disable failed: ${errorReason(error)}`);
+      }
     },
   };
 }

@@ -654,3 +654,36 @@ describe('TaskRunPersistence — taskRole', () => {
     store.close();
   });
 });
+
+describe('consumedRefsJson (#1393)', () => {
+  it('persists via the POST_SNAPSHOT transition patch and survives later transitions', () => {
+    const store = new Store(':memory:');
+    try {
+      const p = new TaskRunPersistence(store.db);
+      p.insertDiscovered(makeInput({ requestId: 'req-refs-1' }));
+      p.transition('req-refs-1', TaskRunState.CLAIMED);
+      p.transition('req-refs-1', TaskRunState.WAITING);
+      p.transition('req-refs-1', TaskRunState.PRE_SNAPSHOT);
+      p.transition('req-refs-1', TaskRunState.RUNNING);
+      const refs = JSON.stringify([{ envelopeCid: 'bafyenv1', artifacts: [] }]);
+      p.transition('req-refs-1', TaskRunState.POST_SNAPSHOT, { consumedRefsJson: refs });
+      expect(p.getByRequestId('req-refs-1')!.consumedRefsJson).toBe(refs);
+      // A later patch-less transition must not clear it.
+      p.transition('req-refs-1', TaskRunState.PACKAGING);
+      expect(p.getByRequestId('req-refs-1')!.consumedRefsJson).toBe(refs);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('is null for rows that never set it', () => {
+    const store = new Store(':memory:');
+    try {
+      const p = new TaskRunPersistence(store.db);
+      p.insertDiscovered(makeInput({ requestId: 'req-refs-2' }));
+      expect(p.getByRequestId('req-refs-2')!.consumedRefsJson).toBeNull();
+    } finally {
+      store.close();
+    }
+  });
+});

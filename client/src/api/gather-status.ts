@@ -8,7 +8,7 @@ import { join } from 'node:path';
 
 /** Narrow RPC surface for balance fan-out (avoids PublicClient / chain-specific getBlock incompatibilities). */
 type StatusBalanceRpc = Pick<PublicClient, 'getBalance' | 'readContract'>;
-import { base, baseSepolia } from 'viem/chains';
+import { base, baseSepolia, sepolia } from 'viem/chains';
 import type { Store } from '../store/store.js';
 import type { JinnConfig } from '../config.js';
 import type { CredentialId } from '../spend/credential.js';
@@ -43,6 +43,7 @@ import {
 import { gatherTaskRunsStatus, applyOutcomes } from './task-runs-build.js';
 import type { DiscoveryAPI, VerdictTallyResult } from '../discovery/types.js';
 import { gatherLoopCompletion, gatherImplStateCadence } from './loop-completion-build.js';
+import { buildInfo } from '../build-info.js';
 import type { BalanceCacheEntry } from '../store/store.js';
 import {
   buildPredictionOperatorStatus,
@@ -69,6 +70,12 @@ const ERC20_BALANCE_OF_ABI = [
     outputs: [{ name: '', type: 'uint256' }],
   },
 ] as const;
+
+// The tokenless-OLAS configuration no longer carries an Ethereum-L1 RPC
+// surface. The operator dashboard still needs the Sepolia master-gas runway on
+// testnet, so this read uses the public endpoint directly; failures remain
+// status-only and suppress runway severity rather than blocking the daemon.
+const TESTNET_ETHEREUM_RPC_URL = 'https://ethereum-sepolia-rpc.publicnode.com';
 
 function readDaemonRuntime(earningDir: string | undefined): GatheredStatusRaw['daemonRuntime'] | undefined {
   if (!earningDir) return undefined;
@@ -180,6 +187,14 @@ export interface StatusGatherConfig {
    * and sqlite-only contexts omit it ⇒ `null` (issue #441).
    */
   passwordRotation?: PasswordRotationConfig;
+  /**
+   * Optional getter for the latest published `@jinn-network/client` version
+   * (issue #641). Threaded by `main.ts` as a holder deref so the start-time
+   * npm-registry check can back-fill `/v1/status.latestVersion` once it
+   * resolves. Best-effort: returning `null` (or throwing) leaves
+   * `latestVersion` null — the SPA simply doesn't show the update banner.
+   */
+  latestVersion?: () => string | null;
   /**
    * Resolved DiscoveryAPI, threaded by `server.ts`. When present, the async
    * status path enriches each COMPLETE solve run's task-relative `outcome`
@@ -653,8 +668,20 @@ export async function gatherGatheredStatusRaw(
     );
   }
 
+  // Version-check surface (issue #641). `version` is always this build's
+  // implVersion; `latestVersion` is a best-effort deref of the npm-registry
+  // getter — any failure degrades to null (no banner), never throws.
+  let latestVersion: string | null = null;
+  try {
+    latestVersion = status?.latestVersion?.() ?? null;
+  } catch {
+    latestVersion = null;
+  }
+
   const baseRaw: GatheredStatusRaw = {
     shutdownState,
+    version: buildInfo.implVersion,
+    latestVersion,
     daemonRuntime: readDaemonRuntime(status?.earningDir),
     daemonStartedAt,
     passwordRotationAt: resolvePasswordRotationAt(status?.passwordRotation),
@@ -773,6 +800,36 @@ export async function gatherGatheredStatusRaw(
       };
     } catch (e) {
       raw.master = {
+        address: fleet.master_address,
+        error: e instanceof Error ? e.message : String(e),
+      };
+    }
+  }
+
+  // L1 (Ethereum Sepolia) master gas runway (#1296). Same master key as L2;
+  // balance read on the L1 chain. Testnet-only — mainnet has no L1 gas surface
+  // here. Error-safe: a failed L1 read sets `error`, it never throws the
+  // endpoint. The L1 daily estimate reuses the resolved `daily` (env
+  // JINN_MASTER_ETH_DAILY_WEI — no new config key); the L1 floor reuses the
+  // per-chain `minEoaGasEth`, the same EOA gas floor that sizes the L2 master
+  // gate above.
+  if (
+    status.network === 'testnet' &&
+    fleet?.master_address
+  ) {
+    raw.l1MasterDailyEstimateWei = daily.toString();
+    raw.minL1MasterEthWei = chainCfg.minEoaGasEth.toString();
+    try {
+      const l1Client = createPublicClient({
+        chain: sepolia,
+        transport: http(TESTNET_ETHEREUM_RPC_URL),
+      });
+      const l1Bal = await l1Client.getBalance({
+        address: fleet.master_address as `0x${string}`,
+      });
+      raw.l1Master = { address: fleet.master_address, balanceWei: l1Bal.toString() };
+    } catch (e) {
+      raw.l1Master = {
         address: fleet.master_address,
         error: e instanceof Error ? e.message : String(e),
       };

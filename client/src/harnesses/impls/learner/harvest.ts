@@ -564,6 +564,17 @@ export async function harvestOutput(workingDir: string, phaseRange?: string, tas
   // unless a typed SolverNet payload is already present. In the typed-payload
   // path, phase artifacts are useful learner telemetry, but the payload is the
   // delivery contract the engine needs to package and settle.
+  const phasesCompleted = detectCompletedPhases(workingDir);
+
+  // No solution payload AND no phase artifacts at all: the run produced nothing.
+  // Fail on the real cause (the missing deliverable) rather than naming a phase
+  // telemetry file (e.g. .orient/summary.json), which is a misleading symptom.
+  if (!typedPayload && phasesCompleted.length === 0 && requiredPhases.size > 0) {
+    throw new Error(
+      'harness produced no solution payload and no phase artifacts; the run appears empty (did the harness execute?)',
+    );
+  }
+
   const validated = new Map<Phase, Record<string, unknown>>();
   for (const phase of REQUIRED_PHASES[range]) {
     const path = join(workingDir, `.${phase}`, PHASE_PRIMARY_ARTIFACT[phase]);
@@ -575,7 +586,6 @@ export async function harvestOutput(workingDir: string, phaseRange?: string, tas
     if (artifact) validated.set(phase, artifact);
   }
 
-  const phasesCompleted = detectCompletedPhases(workingDir);
   const gating: Record<string, unknown> = { phasesCompleted };
 
   // Read a phase's primary artifact for optional gating-field extraction.

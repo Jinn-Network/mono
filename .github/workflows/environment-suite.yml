@@ -163,7 +163,7 @@ jobs:
       # so the Thursday skip-if-unchanged short-circuit (§8) cleanly no-ops the
       # whole run when next HEAD already has an environment-suite verdict.
       - if: steps.resolve.outputs.skip != 'true'
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 22
       - if: steps.resolve.outputs.skip != 'true'

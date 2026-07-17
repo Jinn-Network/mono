@@ -44,9 +44,11 @@ export {
 
 export {
   publish,
+  PublishLedgerError,
   toTraceEnvelope,
   TRACE_ENVELOPE_ARTIFACT_TYPE,
   type HarnessPublishDeps,
+  type PublishedResult,
   type PublishOptions,
   type PublishResult,
 } from './publish.js';
@@ -139,6 +141,7 @@ export {
   DEFAULT_DISTILL_CAPTURE_LIMIT,
   DEFAULT_SKILLS_INSTALL_DIR,
   coveredSessionIds,
+  localSkillProvenance,
   loadRecentCaptures,
   provenanceLabels,
   stagingDirFor,
@@ -209,6 +212,7 @@ export {
 export {
   createGithubSeedSource,
   parseSeedListEntry,
+  SeedSkillSchema,
   type SeedSkill,
   type SeedSource,
   type SeedListEntry,
@@ -223,6 +227,37 @@ export {
   type ImportReport,
   type ImportReportRow,
 } from './seed-import/report.js';
+
+// Evidence-episode seed lane (issue #1771).
+export {
+  createLocalEpisodeSeedSource,
+  episodeContentDigest,
+  parseSeedEpisode,
+  SeedEpisodeSchema,
+  SEED_EPISODE_EXCERPT_LABELS,
+  type SeedEpisode,
+  type SeedEpisodeStep,
+  type SeedEpisodeExcerptLabel,
+  type EpisodeSource,
+} from './seed-import/episode-fetch.js';
+export { planEpisodes } from './seed-import/episode-plan.js';
+export { executeEpisodes, type EpisodeImportResult } from './seed-import/episode-execute.js';
+export {
+  parseEpisodeImportReport,
+  renderEpisodeImportReport,
+  EpisodeImportReportSchema,
+  type EpisodeImportReport,
+  type EpisodeImportReportRow,
+} from './seed-import/episode-report.js';
+export {
+  createMemorySeedImportState,
+  createFileSeedImportState,
+  hashSeedContent,
+  DEFAULT_SEED_IMPORT_STATE_PATH,
+  type SeedImportStateStore,
+  type SeedPublicationRecord,
+  type FileSeedImportStateOptions,
+} from './seed-import/state.js';
 
 export {
   TraceEnvelopeV0Schema,
@@ -240,3 +275,34 @@ export {
   type VerifiabilityTier,
   type OutcomeStatus,
 } from './envelope.js';
+
+export {
+  CONTRIBUTION_STORE_FILE,
+  CONTRIBUTION_STORE_SCHEMA_VERSION,
+  CONTRIBUTION_PUBLICATION_SCHEMA_VERSION,
+  CONTRIBUTION_PUBLICATION_DISABLED_FILE,
+  DEFAULT_CONTRIBUTION_STATE_DIR,
+  ContributionStore,
+  resolveContributionStateDir,
+  type ContributionLocalMetadata,
+  type ContributionPublicationV1,
+  type ContributionStoreLockOptions,
+  type ContributionStoreOptions,
+  type ContributionStoreRecordOptions,
+  type ContributionStoreRecord,
+} from './contribution-store.js';
+
+export {
+  PROCESS_CONTRACT_VERSION,
+  SessionEndRequestV1Schema,
+  SessionPickupRequestV1Schema,
+  envelope as processEnvelope,
+  sessionEndEnvelope,
+  type ProcessEnvelope,
+  type ProcessStatus,
+  type SessionEndRequestV1,
+  type SessionPickupEnvelope,
+  type SessionPickupRequestV1,
+  contributionLedgerRow,
+  type ContributionLedgerRowV1,
+} from './process-contract.js';

@@ -30,6 +30,18 @@ export function truncateLeaves(value: unknown): unknown {
   return value;
 }
 
+/**
+ * Coerces a tool-result `content` value to a string for the `tool.result`
+ * attribute. Strings pass through; everything else is JSON-encoded.
+ */
+export function stringifyResultContent(content: unknown): string {
+  if (typeof content === 'string') return content;
+  // JSON.stringify(undefined) returns the value `undefined`, not a string —
+  // guard so a tool result with no `content` field can't crash the
+  // downstream truncate() call (which throws on `.length` of undefined).
+  return JSON.stringify(content) ?? String(content);
+}
+
 /** Builds the jinn.transcript.* provenance attribute triplet recorded on every span. */
 export function makeProvenanceAttrs(
   sourceFormat: string,

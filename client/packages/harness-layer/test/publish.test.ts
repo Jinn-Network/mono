@@ -190,6 +190,29 @@ describe('publish', () => {
     });
   });
 
+  it('throws a typed failure carrying the anchored result when local ledger append fails', async () => {
+    const { deps, calls } = mockDeps();
+    deps.ledger = {
+      append: () => {
+        throw new Error('synthetic ledger disk full');
+      },
+      list: () => [],
+    };
+
+    const failure = publish(await pendingFixture(), deps);
+
+    await expect(failure).rejects.toMatchObject({
+      name: 'PublishLedgerError',
+      message: expect.stringMatching(/anchored.*ledger.*synthetic ledger disk full/i),
+      result: {
+        vetoed: false,
+        envelopeRef: 'bafy-signed-envelope',
+        anchorTx: TEST_TX,
+      },
+    });
+    expect(calls.anchorEnvelope).toEqual([{ envelopeCid: 'bafy-signed-envelope' }]);
+  });
+
   it('veto: publishes nothing, anchors nothing, ledger entry marked vetoed (local only)', async () => {
     const { deps, calls } = mockDeps();
     const pending = await pendingFixture();
@@ -333,6 +356,35 @@ describe('jinn-layer ledger CLI', () => {
     const out = sink.output();
     expect(out).toContain('bafy-signed-envelope');
     expect(out).toContain(`https://sepolia.basescan.org/tx/${TEST_TX}`);
+  });
+
+  it('publish <task-file> throws after an anchored ledger failure and prints no success', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-publish-'));
+    const taskFile = join(dir, 'task.json');
+    writeFileSync(taskFile, JSON.stringify(validTask()));
+    const { deps, calls } = mockDeps();
+    deps.ledger = {
+      append: () => {
+        throw new Error('synthetic ledger disk full');
+      },
+      list: () => [],
+    };
+    const sink = writerSink();
+
+    await expect(runJinnLayerCli(['publish', taskFile], {
+      writer: sink,
+      publishDeps: deps,
+    })).rejects.toMatchObject({
+      name: 'PublishLedgerError',
+      result: {
+        vetoed: false,
+        envelopeRef: 'bafy-signed-envelope',
+        anchorTx: TEST_TX,
+      },
+    });
+
+    expect(calls.anchorEnvelope).toHaveLength(1);
+    expect(sink.output()).not.toContain('Published.');
   });
 
   it('publish --veto records locally and publishes nothing', async () => {

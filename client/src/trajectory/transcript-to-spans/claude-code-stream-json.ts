@@ -43,7 +43,7 @@
 import { readFile } from 'node:fs/promises';
 import type { SpanInput } from '../collector.js';
 import type { TranscriptSpanParser } from './types.js';
-import { truncate, truncateLeaves, makeProvenanceAttrs } from './attrs.js';
+import { truncate, truncateLeaves, makeProvenanceAttrs, stringifyResultContent } from './attrs.js';
 
 const SOURCE_FORMAT = 'claude-code-stream-json';
 const PARSER_NAME = 'claude-code-stream-json';
@@ -80,15 +80,6 @@ interface StreamRecord {
 
 function provenanceAttrs(): Record<string, unknown> {
   return makeProvenanceAttrs(SOURCE_FORMAT, PARSER_NAME, PARSER_VERSION);
-}
-
-function stringifyResultContent(content: unknown): string {
-  if (typeof content === 'string') return content;
-  // JSON.stringify(undefined) returns the value `undefined`, not a string —
-  // guard so a tool_result block with no `content` field can't crash the
-  // downstream truncate() call (which would otherwise throw on `.length`
-  // and lose every span already parsed for this transcript).
-  return JSON.stringify(content) ?? String(content);
 }
 
 export class ClaudeCodeStreamJsonParser implements TranscriptSpanParser {

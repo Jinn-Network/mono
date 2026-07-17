@@ -32,3 +32,19 @@ describe('implement-issue SKILL.md (#657 depth-fix)', () => {
     expect(doc).not.toContain('Each stage is performed by dispatching a **fresh subagent**');
   });
 });
+
+describe('implement-issue SKILL.md triage invocation', () => {
+  const doc = readFileSync(SKILL_PATH, 'utf8');
+
+  it('runs the self-contained Autopilot triage CLI from its package directory', () => {
+    expect(doc).toContain(
+      '(cd "<repo-root>/packages/autopilot" && yarn triage:check <N>)',
+    );
+    expect(doc).toContain(
+      'VERDICT_JSON=$(cd "<repo-root>/packages/autopilot" && yarn triage:check <N>)',
+    );
+    expect(doc).not.toContain('yarn workspace @jinn-network/autopilot triage:check');
+    expect(doc).not.toContain('(cd <repo-root>/packages/autopilot');
+    expect(doc).not.toContain('VERDICT_JSON=$(cd <repo-root>/packages/autopilot');
+  });
+});

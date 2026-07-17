@@ -3,12 +3,12 @@
  *
  * pack() records a MineableTraceRecord (Task 6's MineableTraceStore) for
  * swe-rebench-v2-style restoration tasks whose spec carries repo identity
- * (repo + baseCommit) and whose impl produced a solution patch — but only
- * when the engine was constructed with a mineableStore (tier-1 'retain_local'
- * consent, gated by the daemon at main.ts wiring time; see config.ts
- * `mineableTraces.consent`).
+ * (repo + baseCommit) and whose impl produced a solution patch. Per mono#1714
+ * the daemon always constructs the mineableStore (local retention is
+ * unconditional); each record is stamped with the single `share` consent as
+ * `publishMinedTasksConsent`, which governs whether the mint may be published.
  *
- * Spec: spec/2026-07-08-task-creator-v0.md §10 (D2 — two-tier consent).
+ * Spec: spec/2026-07-08-task-creator-v0.md §10.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';

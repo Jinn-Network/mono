@@ -18,12 +18,7 @@
  *      trail.
  *
  * Other contract-internal slot assumptions noticed but NOT pinned (no
- * cross-contract reader, so layout is free to change with the contract):
- *   - RestorationActivityCheckerV2.evidenceHashes (slot 5),
- *     _evidenceWriteIndex (slot 6) — circular buffer; only `this` reads it.
- *   - Historical JinnRouterV2 activity counters (creationCount …
- *     evaluationDeliveryCount, slots 5–8) — only the contract itself and
- *     legacy ABI callers read these.
+ * cross-contract reader, so layout is free to change with the contract).
  */
 
 import { execFileSync } from 'node:child_process';
@@ -39,18 +34,6 @@ interface PinnedSlot {
 }
 
 const PINNED_SLOTS: PinnedSlot[] = [
-  {
-    contractPath: 'src/staking/JinnRouterV2.sol:JinnRouterV2',
-    variable: 'creators',
-    // NOTE: inline source comments in JinnRouterV2.sol describe `creators` as
-    // "slot 13", but Solidity packs `bool initialized` and `address activityChecker`
-    // into a single slot (slot 4), so the actual compiled slot is 12. The
-    // contract-internal layout is what matters for proxy upgrade safety; we pin
-    // to the observed value. (Source comments could be corrected in a follow-up.)
-    expectedSlot: '12',
-    downstream:
-      'JinnRouterV2 is deployed behind an upgradeable proxy. Proxy upgrades skip the constructor, so there is NO assembly guard — only this CI check enforces layout stability for the V2 → V2.1 upgrade path used by the `pwg` ops phase.',
-  },
   {
     contractPath: 'src/tasks/TaskCoordinator.sol:TaskCoordinator',
     variable: 'nextTaskId',

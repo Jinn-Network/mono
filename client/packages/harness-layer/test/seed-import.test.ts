@@ -31,6 +31,7 @@ import {
 import { plan } from '../src/seed-import/plan.js';
 import { execute } from '../src/seed-import/execute.js';
 import type { SeedSkill, SeedSource } from '../src/seed-import/fetch.js';
+import { createMemorySeedImportState, hashSeedContent } from '../src/seed-import/state.js';
 import { runJinnLayerCli } from '../src/cli.js';
 
 const TEST_ADDRESS = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266' as const;
@@ -308,6 +309,183 @@ describe('execute()', () => {
     expect(entry.metadata?.tags).toContain('seed-import');
     expect(entry.metadata?.tags).toContain('write-tests');
   });
+
+  // ── Idempotency + supersedes (issue #1771, folding the #1772 AC) ──────────
+
+  describe('idempotency + supersedes', () => {
+    it('re-running execute() with the same state store over unchanged content publishes nothing new', async () => {
+      const source = mockSource([skill()]);
+      const report = await plan(source);
+      const { deps, published } = mockPublishDeps();
+      const state = createMemorySeedImportState();
+
+      const first = await execute(report, source, deps, { state });
+      expect(first.imported).toHaveLength(1);
+      expect(published).toHaveLength(2); // trace + skill artifact
+
+      const second = await execute(report, source, deps, { state });
+      expect(second.imported).toHaveLength(0);
+      expect(second.skipped).toHaveLength(1);
+      expect(second.skipped[0]).toMatchObject({ skill: 'acme/skills/write-tests' });
+      expect(second.skipped[0]!.reason).toContain(first.imported[0]!.envelopeRef);
+      // No new publish calls on the second run.
+      expect(published).toHaveLength(2);
+    });
+
+    it('re-running execute() over CHANGED content republishes and sets provenance.supersedes to the prior ref', async () => {
+      const source1 = mockSource([skill({ skillMd: '# write-tests\n\nVersion one.' })]);
+      const { deps, published } = mockPublishDeps();
+      const state = createMemorySeedImportState();
+
+      const first = await execute(await plan(source1), source1, deps, { state });
+      expect(first.imported).toHaveLength(1);
+      const firstRef = first.imported[0]!.envelopeRef;
+
+      const source2 = mockSource([skill({ skillMd: '# write-tests\n\nVersion two — changed.' })]);
+      const second = await execute(await plan(source2), source2, deps, { state });
+      expect(second.imported).toHaveLength(1);
+      expect(second.imported[0]!.envelopeRef).not.toBe(firstRef);
+
+      const secondSkillPayload = SkillArtifactV1Schema.parse(
+        published.filter((p) => p.artifactType === SKILL_ARTIFACT_TYPE)[1]!.payload,
+      );
+      expect(secondSkillPayload.provenance.supersedes).toBe(firstRef);
+    });
+
+    it('without an injected state store, each execute() call starts fresh — no cross-call idempotency', async () => {
+      const source = mockSource([skill()]);
+      const report = await plan(source);
+      const { deps, published } = mockPublishDeps();
+
+      const first = await execute(report, source, deps);
+      const second = await execute(report, source, deps);
+      expect(first.imported).toHaveLength(1);
+      expect(second.imported).toHaveLength(1); // no skip: the default state is fresh per call
+      expect(second.imported[0]!.envelopeRef).not.toBe(first.imported[0]!.envelopeRef);
+      expect(published).toHaveLength(4); // two full publishes (trace + skill each)
+    });
+
+    it('hashSeedContent is a pure function of its input', () => {
+      const value = { a: 1, b: ['x', 'y'], c: { nested: true } };
+      expect(hashSeedContent(value)).toBe(hashSeedContent(value));
+      expect(hashSeedContent(value)).not.toBe(hashSeedContent({ ...value, a: 2 }));
+      // Key order must not affect the hash (canonical JSON).
+      expect(hashSeedContent({ b: value.b, a: value.a, c: value.c })).toBe(hashSeedContent(value));
+    });
+  });
+
+  it('stops the batch after post-publication state persistence fails', async () => {
+    const source = mockSource([
+      skill({ skill: 'acme/skills/first' }),
+      skill({ skill: 'acme/skills/second' }),
+    ]);
+    const { deps, published } = mockPublishDeps();
+    const state = {
+      get: () => undefined,
+      set: () => {
+        throw new Error('synthetic state disk full');
+      },
+    };
+
+    const result = await execute(await plan(source), source, deps, { state });
+
+    expect(published).toHaveLength(2); // first row's trace + skill only
+    expect(result.imported).toHaveLength(1);
+    expect(result.imported[0]).toMatchObject({
+      skill: 'acme/skills/first',
+      stateWarning: expect.stringMatching(/recovery required/i),
+    });
+    expect(result.errors).toEqual([]);
+  });
+
+  it('stops the batch after state lookup fails and never publishes later rows', async () => {
+    const source = mockSource([
+      skill({ skill: 'acme/skills/first' }),
+      skill({ skill: 'acme/skills/second' }),
+    ]);
+    const { deps, published } = mockPublishDeps();
+    let getCalls = 0;
+    const state = {
+      get: () => {
+        getCalls += 1;
+        if (getCalls === 1) throw new Error('synthetic state read failure');
+        return undefined;
+      },
+      set: () => undefined,
+    };
+
+    const result = await execute(await plan(source), source, deps, { state });
+
+    expect(getCalls).toBe(1);
+    expect(published).toHaveLength(0);
+    expect(result.imported).toEqual([]);
+    expect(result.errors).toEqual([
+      {
+        skill: 'acme/skills/first',
+        error: 'synthetic state read failure',
+      },
+    ]);
+  });
+
+  it('persists the published ref, exposes a ledger warning, and stops the batch after ledger append fails', async () => {
+    const source = mockSource([
+      skill({ skill: 'acme/skills/first' }),
+      skill({ skill: 'acme/skills/second' }),
+    ]);
+    const { deps, published } = mockPublishDeps();
+    deps.ledger = {
+      append: () => {
+        throw new Error('synthetic ledger disk full');
+      },
+      list: () => [],
+    };
+    const records: Array<{ identity: string; envelopeRef: string }> = [];
+    const state = {
+      get: () => undefined,
+      set: (identity: string, record: { envelopeRef: string }) => {
+        records.push({ identity, envelopeRef: record.envelopeRef });
+      },
+    };
+
+    const result = await execute(await plan(source), source, deps, { state });
+
+    expect(published).toHaveLength(2); // first row's trace + skill only
+    expect(records).toEqual([
+      { identity: 'skill:acme/skills/first', envelopeRef: expect.stringContaining('bafy-envelope') },
+    ]);
+    expect(result.imported).toEqual([
+      expect.objectContaining({
+        skill: 'acme/skills/first',
+        ledgerWarning: expect.stringMatching(/anchored.*ledger/i),
+      }),
+    ]);
+    expect(result.errors).toEqual([]);
+  });
+
+  it('halts after an ambiguous publication error and never publishes later rows', async () => {
+    const source = mockSource([
+      skill({ skill: 'acme/skills/first' }),
+      skill({ skill: 'acme/skills/second' }),
+    ]);
+    const { deps, published } = mockPublishDeps();
+    let envelopeCalls = 0;
+    deps.publishEnvelope = async () => {
+      envelopeCalls += 1;
+      throw new Error('synthetic transport timeout');
+    };
+
+    const result = await execute(await plan(source), source, deps);
+
+    expect(envelopeCalls).toBe(1);
+    expect(published).toHaveLength(2); // first row's trace + skill artifacts
+    expect(result.imported).toEqual([]);
+    expect(result.errors).toEqual([
+      expect.objectContaining({
+        skill: 'acme/skills/first',
+        error: expect.stringMatching(/publication outcome unknown; do not auto-retry/i),
+      }),
+    ]);
+  });
 });
 
 describe('jinn-layer seed CLI', () => {
@@ -352,6 +530,11 @@ describe('jinn-layer seed CLI', () => {
       writer: sink,
       seedSource: source,
       publishDeps: deps,
+      // In-memory idempotency state: the CLI default is file-backed
+      // (~/.jinn-client/harness-layer/seed-import-state.json, #1771) so a
+      // real operator run persists across invocations — a test must not
+      // touch that path.
+      seedImportState: createMemorySeedImportState(),
     });
     expect(code).toBe(0);
     expect(published.map((p) => p.artifactType)).toEqual([
@@ -359,6 +542,41 @@ describe('jinn-layer seed CLI', () => {
       SKILL_ARTIFACT_TYPE,
     ]);
     expect(sink.output()).toContain('bafy-envelope');
+  });
+
+  it('returns the published skill ref with a recovery warning and nonzero exit when state persistence fails', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-seed-'));
+    const reportFile = join(dir, 'report.json');
+    const source = mockSource([skill()]);
+    writeFileSync(reportFile, JSON.stringify(await plan(source)));
+    const { deps, published } = mockPublishDeps();
+    const sink = writerSink();
+
+    const code = await runJinnLayerCli(['seed', 'execute', reportFile, '--json'], {
+      writer: sink,
+      seedSource: source,
+      publishDeps: deps,
+      seedImportState: {
+        get: () => undefined,
+        set: () => {
+          throw new Error('synthetic disk full');
+        },
+      },
+    });
+
+    expect(code).toBe(1);
+    expect(published).toHaveLength(2);
+    const payload = JSON.parse(sink.output()) as {
+      imported: Array<{ envelopeRef: string; stateWarning?: string }>;
+      errors: unknown[];
+    };
+    expect(payload.errors).toEqual([]);
+    expect(payload.imported).toEqual([
+      expect.objectContaining({
+        envelopeRef: expect.stringContaining('bafy-envelope'),
+        stateWarning: expect.stringMatching(/published.*state.*recovery/i),
+      }),
+    ]);
   });
 });
 

@@ -10,7 +10,7 @@ const CFG: DispatcherConfig = {
   // tests exercise dispatch (the review-side author gate, DR-2026-06-15, drops
   // non-allowlisted authors — covered directly in review-ready-filter.test.ts).
   authorAllowlist: ['a'], reviewCap: 2, engineReviewLabel: 'engine:review', reviewBotLogin: 'jinn-bot',
-  implGhToken: '', reviewGhToken: '',
+  implGhToken: '', reviewGhToken: '', mergePrepEnabled: false, mergePrepCap: 1,
 };
 function pr(n: number, over: Partial<PolledPr> = {}): PolledPr {
   return { number: n, title: `t${n}`, headRefName: `b/${n}`, headRefOid: 's', isDraft: false, author: 'a', hasReviewLabel: true, needsReview: true, ...over };
@@ -42,6 +42,40 @@ describe('runReviewCycle', () => {
       dispatchReview: async (p: ReviewablePr) => { dispatched.push(p.number); return { prNumber: p.number, branch: p.headRefName, worktreePath: '/x', pid: 1, startedAt: 0 }; },
     });
     expect(dispatched).toEqual([5]);
+  });
+
+  it('excludes a PR with a live merge-prep session (busyPrNumbers), without consuming the review cap', async () => {
+    const source: PrSource = { poll: async () => [pr(5), pr(6)] };
+    const dispatched: number[] = [];
+    const report = await runReviewCycle({
+      prSource: source,
+      cfg: CFG, // reviewCap 2
+      deriveReviewInFlight: async () => ({ inFlight: [] as InFlightReview[], drift: [] }),
+      dispatchReview: async (p: ReviewablePr) => { dispatched.push(p.number); return { prNumber: p.number, branch: p.headRefName, worktreePath: `/pr-${p.number}`, pid: 1, startedAt: 0 }; },
+      busyPrNumbers: new Set([5]),
+    });
+    expect(dispatched).toEqual([6]);       // #5 excluded (prep in flight)
+    expect(report.skippedForCap).toBe(0);  // #5 did NOT eat a cap slot
+  });
+
+  it('isolates a failing dispatch — the remaining PRs still dispatch (one bad PR cannot starve the pass)', async () => {
+    // Regression: a `git worktree add` collision on the first PR used to throw
+    // out of runReviewCycle and abort the whole review pass, every cycle.
+    const source: PrSource = { poll: async () => [pr(1), pr(2)] };
+    const dispatched: number[] = [];
+    const report = await runReviewCycle({
+      prSource: source,
+      cfg: CFG, // reviewCap 2
+      deriveReviewInFlight: async () => ({ inFlight: [] as InFlightReview[], drift: [] }),
+      dispatchReview: async (p: ReviewablePr) => {
+        if (p.number === 1) throw new Error("fatal: 'feat/1' is already used by worktree at '.../1'");
+        dispatched.push(p.number);
+        return { prNumber: p.number, branch: p.headRefName, worktreePath: '/x', pid: 1, startedAt: 0 };
+      },
+    });
+    expect(report.failed).toEqual([1]);
+    expect(dispatched).toEqual([2]);        // #2 still dispatched
+    expect(report.dispatched).toEqual([2]);
   });
 
   it('does not re-dispatch a PR already in flight', async () => {

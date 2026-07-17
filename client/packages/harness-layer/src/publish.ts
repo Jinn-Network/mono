@@ -83,9 +83,33 @@ export interface PublishOptions {
   skill?: SkillArtifactV1;
 }
 
-export type PublishResult =
-  | { vetoed: false; envelopeRef: string; anchorTx: `0x${string}` | null }
-  | { vetoed: true };
+export interface PublishedResult {
+  vetoed: false;
+  envelopeRef: string;
+  anchorTx: `0x${string}` | null;
+}
+
+export type PublishResult = PublishedResult | { vetoed: true };
+
+/**
+ * The irreversible publish/anchor succeeded, but the local contribution
+ * ledger receipt could not be appended. Ordinary callers receive a failure;
+ * recovery-aware seed callers may persist `result` before stopping.
+ */
+export class PublishLedgerError extends Error {
+  override readonly name = 'PublishLedgerError';
+
+  constructor(
+    readonly result: PublishedResult,
+    readonly ledgerError: unknown,
+  ) {
+    const detail = ledgerError instanceof Error ? ledgerError.message : String(ledgerError);
+    super(
+      `anchored ${result.envelopeRef}${result.anchorTx ? ` at ${result.anchorTx}` : ''}, ` +
+        `but local ledger append failed: ${detail}`,
+    );
+  }
+}
 
 function assertPending(pending: PendingEnvelope): void {
   if (
@@ -227,17 +251,22 @@ export async function publish(
     envelope,
   });
   const anchorTx = anchor.txHash ?? null;
+  const result: PublishedResult = { vetoed: false, envelopeRef, anchorTx };
 
-  deps.ledger.append({
-    ts: now.toISOString(),
-    taskSummary: trace.task.summary,
-    envelopeRef,
-    anchorTx,
-    verifiabilityTier: trace.outcome.verifiabilityTier,
-    status: 'published',
-  });
+  try {
+    deps.ledger.append({
+      ts: now.toISOString(),
+      taskSummary: trace.task.summary,
+      envelopeRef,
+      anchorTx,
+      verifiabilityTier: trace.outcome.verifiabilityTier,
+      status: 'published',
+    });
+  } catch (err) {
+    throw new PublishLedgerError(result, err);
+  }
 
-  return { vetoed: false, envelopeRef, anchorTx };
+  return result;
 }
 
 async function signWithPrivateKey(

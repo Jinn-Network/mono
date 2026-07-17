@@ -16,6 +16,7 @@
 const BIN = 'jinn-layer';
 
 import type { DistillMode } from './distill-mode.js';
+import type { DistillerCatalogEntry } from './distill-llm.js';
 
 function plural(n: number, one: string): string {
   return `${n} ${one}${n === 1 ? '' : 's'}`;
@@ -140,6 +141,48 @@ export function renderModeSet(mode: DistillMode): string {
     case 'off':
       return `distill: mode set to off. Captures are not reserved for distillation.`;
   }
+}
+
+/** One-line echo after `distill --set-distiller[-model]` records a default. */
+export function renderDistillerSet(o: { distiller?: 'claude' | 'codex'; distillerModel?: string }): string {
+  const parts: string[] = [];
+  if (o.distiller !== undefined) parts.push(`provider ${o.distiller}`);
+  if (o.distillerModel !== undefined) parts.push(`model ${o.distillerModel}`);
+  return `distill: default distiller set — ${parts.join(', ')}. Applies to future runs; a per-run --distiller[-model] flag still wins.`;
+}
+
+/**
+ * `distill models` — the discoverable catalog. One row per runnable distiller
+ * with its execution/cost/privacy attributes; the currently-resolved default
+ * is marked with the word `(default)` (never a glyph).
+ */
+export function renderDistillerModels(o: {
+  catalog: readonly DistillerCatalogEntry[];
+  resolved: { provider: string; model: string };
+}): string {
+  const iw = 74;
+  const rows = o.catalog.map((e) => {
+    const isResolved = e.provider === o.resolved.provider && e.model === o.resolved.model;
+    const mark = isResolved ? ' (default)' : '';
+    return boxLine(
+      iw,
+      `${e.provider.padEnd(8)}${e.execution.padEnd(8)}${e.cost.padEnd(22)}${e.model}${mark}`,
+    );
+  });
+  const panel = [
+    boxTop(iw, 'distillers · the model that writes your skills'),
+    boxLine(iw, `${'provider'.padEnd(8)}${'run'.padEnd(8)}${'cost'.padEnd(22)}model`),
+    ...rows,
+    boxBot(iw),
+  ].join('\n');
+  return [
+    panel,
+    '',
+    ...o.catalog.map((e) => `  ${e.model} — ${e.privacy}`),
+    '',
+    `  Set a default  ·  ${BIN} distill --set-distiller <provider>  |  --set-distiller-model <model>`,
+    `  Override once  ·  ${BIN} distill --distiller <provider>  |  --distiller-model <model>`,
+  ].join('\n');
 }
 
 /** 1c — what a bare `distill` prints while the mode is defer: it runs nothing. */

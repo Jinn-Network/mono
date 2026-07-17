@@ -22,8 +22,10 @@
  *   (a) aged `security.lastPasswordRotationAt` (>90d) ⇒ `password_rotation_due`
  *       renders.
  *   (b) null `security.lastPasswordRotationAt` ⇒ no `password_rotation_due`
- *       notification (while the snapshot deriver still produces the
- *       zero-balance `funding_low`, proving the page mounted notifications).
+ *       notification (while the snapshot deriver still produces a
+ *       `funding_low` from the low-runway masterGas override below, proving
+ *       the page mounted notifications — see issue #1296: funding_low now
+ *       keys on per-chain `runwayDaysExcess < 3`, not zero balance alone).
  */
 import { test, expect } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -95,6 +97,12 @@ test.afterAll(async () => {
  * `lastPasswordRotationAt` is the keystore-password file's ISO mtime (#441);
  * pass a fixed ISO string or `null`. Registered AFTER mockDaemonApi so this
  * route wins (Playwright checks routes in reverse-registration order).
+ *
+ * Also overrides `masterGas` to a low-runway value so `funding_low` still
+ * fires (#1296 — the deriver now keys funding_low on per-chain
+ * `runwayDaysExcess < 3`; the shared DEFAULT_STATUS_PAYLOAD default is
+ * healthy at runwayDaysExcess: '4'). Used as the "notifications surface
+ * mounted" control signal by the absence test below.
  */
 async function mockStatusWithSecurity(
   page: import('@playwright/test').Page,
@@ -107,6 +115,7 @@ async function mockStatusWithSecurity(
         contentType: 'application/json',
         body: JSON.stringify({
           ...DEFAULT_STATUS_PAYLOAD,
+          masterGas: { ...DEFAULT_STATUS_PAYLOAD.masterGas, runwayDaysExcess: '1' },
           security: { lastPasswordRotationAt },
         }),
       }),
@@ -138,8 +147,8 @@ test('password_rotation_due is absent when security.lastPasswordRotationAt is nu
 
   // Control: a snapshot-derived notification must render so we know the
   // notifications surface mounted (otherwise "absent" is vacuously true). The
-  // default mocked /v1/status reports `masterGas.balanceWei: '0'`, which the
-  // deriver maps to `funding_low`.
+  // overridden /v1/status (mockStatusWithSecurity above) reports a
+  // low-runway `masterGas`, which the deriver maps to `funding_low`.
   const fundingLowItem = page.locator('[data-kind="funding_low"]');
   await expect(fundingLowItem).toBeVisible({ timeout: 15_000 });
 

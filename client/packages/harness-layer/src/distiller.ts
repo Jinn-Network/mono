@@ -33,6 +33,7 @@ import { clusterEvidence, type ClusterItem } from './cluster.js';
 import {
   distillClusters,
   type DistillCluster,
+  type DistillDeps,
   type DistillLLMOutput,
   type DistillResult,
 } from './distill.js';
@@ -109,6 +110,9 @@ export interface LocalDistillerDeps {
   /** Injectable layer-2 scrub pipeline (tests). Default: {@link buildLayer2ScrubPipeline}. */
   scrubPipeline?: ScrubPipeline;
   now?: () => Date;
+  /** Progress seam (#1533), threaded through to {@link distillClusters}. */
+  onPlan?: DistillDeps['onPlan'];
+  onCluster?: DistillDeps['onCluster'];
 }
 
 /**
@@ -168,6 +172,8 @@ export function createLocalDistiller(deps: LocalDistillerDeps): Distiller {
         targetTools: ['current'],
         ...(deps.distillModel ? { distillModel: deps.distillModel } : {}),
         ...(deps.now ? { now: deps.now } : {}),
+        ...(deps.onPlan ? { onPlan: deps.onPlan } : {}),
+        ...(deps.onCluster ? { onCluster: deps.onCluster } : {}),
       });
 
       return { clusterCount: clusters.length, distilled };
