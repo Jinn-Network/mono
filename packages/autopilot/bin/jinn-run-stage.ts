@@ -2,11 +2,12 @@
 /**
  * jinn-run-stage — CLI shim invoked by the implement-issue coordinator for the
  * depth-needing pipeline stages (Design / Implement / code-review / Independent
- * review). It runs a stage as a fresh `claude -p` ROOT session in the issue
+ * review). It runs a stage as a fresh runtime ROOT session in the issue
  * worktree, so the stage's composed skill can fan out sub-agents at depth-1.
  *
  * Usage:
- *   jinn-run-stage --prompt-file <path> --worktree <path> [--model <m>] [--timeout-ms <n>]
+ *   jinn-run-stage --prompt-file <path> --worktree <path> [--runtime claude|hermes]
+ *     [--model <m>] [--timeout-ms <n>]
  *
  * The coordinator writes the CURATED stage prompt (stage task + issue body/ACs
  * + prior-stage outputs) to <prompt-file> and passes it here. That file must
@@ -23,7 +24,10 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { runStageHeadless } from '../src/dispatcher/run-stage.js';
+import {
+  parseStageRuntime,
+  runStageHeadless,
+} from '../src/dispatcher/run-stage.js';
 
 function flag(name: string): string | undefined {
   const i = process.argv.indexOf(name);
@@ -42,6 +46,11 @@ function requireFlag(name: string): string {
 async function main(): Promise<void> {
   const promptFile = requireFlag('--prompt-file');
   const worktree = requireFlag('--worktree');
+  const runtime = parseStageRuntime(
+    flag('--runtime') ??
+    process.env.JINN_IMPLEMENT_ISSUE_ADAPTER ??
+    'claude',
+  );
   const model = flag('--model');
   const timeoutRaw = flag('--timeout-ms');
   const timeoutMs = timeoutRaw != null ? Number.parseInt(timeoutRaw, 10) : undefined;
@@ -51,6 +60,7 @@ async function main(): Promise<void> {
   const result = await runStageHeadless({
     stageTask,
     worktreePath: worktree,
+    runtime,
     model,
     timeoutMs,
   });

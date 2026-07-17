@@ -8,9 +8,19 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  *  out for non-claude coordinators (see buildHermesHeadlessPrompt). */
 const CLAUDE_CLI_TOKEN = '`claude -p` / `--print`';
 
+export type HeadlessRuntime = 'claude' | 'hermes';
+
 /** The canonical headless-override block, injected into every headless session. */
 export function headlessOverride(): string {
   return readFileSync(join(HERE, '..', 'headless-override.md'), 'utf8').trim();
+}
+
+/** Render the shared override with runtime-specific CLI framing. */
+export function headlessOverrideFor(runtime: HeadlessRuntime): string {
+  const block = headlessOverride();
+  return runtime === 'hermes'
+    ? block.replace(CLAUDE_CLI_TOKEN, '`hermes chat -q`')
+    : block;
 }
 
 /** Compose a headless prompt: the override block, then a skill invocation, then the scenario. */
@@ -34,12 +44,8 @@ export function buildHeadlessPrompt(skill: string, scenario: string): string {
  * `.claude/skills` by `prepareHermesHome`).
  */
 export function buildHermesHeadlessPrompt(skill: string, scenario: string): string {
-  // Swap only the CLI token, not a whole sentence: a narrower target survives
-  // rewording of the override prose. If the token ever disappears this degrades
-  // to a slightly-off framing line, never to a wrong instruction.
-  const override = headlessOverride().replace(CLAUDE_CLI_TOKEN, '`hermes chat -q`');
   return [
-    override,
+    headlessOverrideFor('hermes'),
     '',
     `Use the ${skill} skill for the following task.`,
     '',

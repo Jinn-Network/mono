@@ -1,6 +1,10 @@
 import { spawn as nodeSpawn } from 'node:child_process';
-import { headlessOverride } from '../headless.js';
+import {
+  headlessOverrideFor,
+  type HeadlessRuntime,
+} from '../headless.js';
 import { loadCanon } from './dispatch.js';
+import { hermesChatArgs } from './hermes-runtime.js';
 
 /**
  * A minimal child handle the stage runner needs: stdout/stderr streams to
@@ -48,6 +52,12 @@ export interface StageRunOpts {
   worktreePath: string;
   /** Optional model override for this stage session. */
   model?: string;
+  /** Root-session runtime; Claude remains the default. */
+  runtime?: HeadlessRuntime;
+  /** Hermes venv Python interpreter. */
+  hermesPythonPath?: string;
+  /** Explicit Hermes provider (for example, the subscription-backed provider). */
+  provider?: string;
   /** Wall-clock ceiling; default 10 minutes (pressure-suite starting value). */
   timeoutMs?: number;
 }
@@ -60,23 +70,24 @@ const DEFAULT_TIMEOUT_MS = 600_000;
  * coordinator's curated stage prompt. Plain string join, mirroring
  * dispatch.ts's coordinator prompt (canon first, then the headless part).
  *
- * Canon is prepended because a stage runs as its own `claude -p` root session,
- * and `-p` mode does not auto-load CLAUDE.md — same reason dispatch.ts prepends
- * it for the coordinator. We reuse dispatch.ts's `loadCanon` so both call sites
- * stay in lockstep (and the repo-root derivation lives in one place).
+ * Canon is prepended because each stage runs as its own runtime root session.
+ * In particular, Claude `-p` mode does not auto-load CLAUDE.md. We reuse
+ * dispatch.ts's `loadCanon` so all runtimes and both call sites stay in
+ * lockstep (and the repo-root derivation lives in one place).
  *
- * NOTE: this prepends BOTH canon and `headlessOverride()`. The `stageTask`
- * passed in is already curated (the CLI shim reads it from the prompt-file), so
- * it must NOT include canon OR the override block itself — either would
- * double-inject.
+ * NOTE: this prepends BOTH canon and the runtime-specific headless override.
+ * The `stageTask` passed in is already curated (the CLI shim reads it from the
+ * prompt-file), so it must NOT include canon OR the override block itself —
+ * either would double-inject.
  */
 export function buildStagePrompt(
-  opts: Pick<StageRunOpts, 'stageTask' | 'worktreePath'>,
+  opts: Pick<StageRunOpts, 'stageTask' | 'worktreePath' | 'runtime'>,
 ): string {
+  const runtime = opts.runtime ?? 'claude';
   return [
     loadCanon(),
     '',
-    headlessOverride(),
+    headlessOverrideFor(runtime),
     '',
     opts.stageTask.trim(),
     '',
@@ -84,26 +95,62 @@ export function buildStagePrompt(
   ].join('\n');
 }
 
-/** Production spawn: real `claude -p` root session with captured stdout/stderr. */
+/** Production spawn with captured stdout/stderr for either runtime. */
 const defaultStageSpawn: StageSpawnFn = (cmd, args, opts) =>
   nodeSpawn(cmd, args, opts) as unknown as StageChild;
 
+export function parseStageRuntime(value: string): HeadlessRuntime {
+  if (value === 'claude' || value === 'hermes') return value;
+  throw new Error(
+    `jinn-run-stage: invalid --runtime ${JSON.stringify(value)}; expected claude or hermes`,
+  );
+}
+
+function requireHermesValue(
+  value: string | undefined,
+  envName: string,
+): string {
+  if (value == null || value === '') {
+    throw new Error(`[autopilot] Hermes runtime is missing ${envName}.`);
+  }
+  return value;
+}
+
 /**
- * Run a pipeline stage as a fresh `claude -p` ROOT session in the issue
- * worktree. Depth-0, so the stage's composed skill can fan out sub-agents at
- * depth-1 (the whole point — an Agent-tool dispatch would sit at depth-1 and
- * its inner fan-out would silently no-op).
+ * Run a pipeline stage as a fresh root session in the issue worktree.
+ * Depth-0 lets the stage's composed skill fan out sub-agents at depth-1.
  */
 export function runStageHeadless(
   opts: StageRunOpts,
   spawn: StageSpawnFn = defaultStageSpawn,
 ): Promise<StageRunResult> {
+  const runtime = opts.runtime ?? 'claude';
   const prompt = buildStagePrompt(opts);
-  const args = ['-p', ...(opts.model ? ['--model', opts.model] : []), prompt];
+  let cmd: string;
+  let args: string[];
+  if (runtime === 'hermes') {
+    const pythonPath = requireHermesValue(
+      opts.hermesPythonPath ?? process.env.JINN_DISPATCHER_HERMES_PYTHON,
+      'JINN_DISPATCHER_HERMES_PYTHON',
+    );
+    const model = requireHermesValue(
+      opts.model ?? process.env.JINN_DISPATCHER_HERMES_MODEL,
+      'JINN_DISPATCHER_HERMES_MODEL',
+    );
+    const provider = requireHermesValue(
+      opts.provider ?? process.env.JINN_DISPATCHER_HERMES_PROVIDER,
+      'JINN_DISPATCHER_HERMES_PROVIDER',
+    );
+    cmd = pythonPath;
+    args = hermesChatArgs(prompt, { model, provider });
+  } else {
+    cmd = 'claude';
+    args = ['-p', ...(opts.model ? ['--model', opts.model] : []), prompt];
+  }
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   return new Promise((resolve) => {
-    const proc = spawn('claude', args, {
+    const proc = spawn(cmd, args, {
       cwd: opts.worktreePath,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
