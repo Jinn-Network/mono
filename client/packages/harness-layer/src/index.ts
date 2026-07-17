@@ -306,3 +306,10 @@ export {
   contributionLedgerRow,
   type ContributionLedgerRowV1,
 } from './process-contract.js';
+
+export {
+  resolveRetrievalMark,
+  HAND_MARK_POLICY,
+  type AdmissionPolicy,
+  type AdmissionFacts,
+} from './admission-policy.js';
