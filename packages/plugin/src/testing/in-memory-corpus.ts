@@ -23,10 +23,7 @@ function toKnowledgeHit(seed: InMemoryCorpusSeed): KnowledgeHit {
     tags: seed.tags,
     origin: seed.origin,
     ...(seed.publishedAt !== undefined ? { publishedAt: seed.publishedAt } : {}),
-    // Seeds default to retrieval-visible (#1824) so pre-allowlist scenarios
-    // keep exercising their own concern; a test proving exclusion sets
-    // `retrievalVisible: false` explicitly.
-    retrievalVisible: seed.retrievalVisible ?? true,
+    retrievalVisible: seed.retrievalVisible,
   };
 }
 
@@ -34,7 +31,15 @@ function toKnowledgeHit(seed: InMemoryCorpusSeed): KnowledgeHit {
  *  content (`CorpusRecord`) so `get()` can return it directly; `search()`
  *  derives the lightweight `KnowledgeHit` view. */
 export class InMemoryCorpusPort implements CorpusPort {
-  constructor(private readonly seed: InMemoryCorpusSeed[] = []) {}
+  private readonly seed: InMemoryCorpusSeed[];
+
+  constructor(seed: InMemoryCorpusSeed[] = []) {
+    // Seeds default to retrieval-visible (#1824) so pre-allowlist scenarios
+    // keep exercising their own concern; a test proving exclusion sets
+    // `retrievalVisible: false` explicitly. Normalized once here so the
+    // search() and get() views cannot disagree about the default.
+    this.seed = seed.map((s) => ({ ...s, retrievalVisible: s.retrievalVisible ?? true }));
+  }
 
   async search(query: string) {
     // Naive token-overlap match, no ranking — a stand-in for the real
@@ -60,7 +65,6 @@ export class InMemoryCorpusPort implements CorpusPort {
     if (!record) return ok(null);
     // Strip the KnowledgeHit-only fields — get() returns the CorpusRecord shape.
     const { kind: _kind, title: _title, tier: _tier, payloadKind: _payloadKind, publishedAt: _publishedAt, ...corpusRecord } = record;
-    // Same visible-by-default rule as the search-hit view (#1824).
-    return ok({ ...corpusRecord, retrievalVisible: record.retrievalVisible ?? true } as CorpusRecord);
+    return ok(corpusRecord as CorpusRecord);
   }
 }

@@ -139,7 +139,7 @@ describe('CorpusAdapter mapping', () => {
       expect(result.value[0]?.tags).toEqual(['dashboard', 'vitest']);
     });
 
-    it('maps a wire hit at the 16-tag budget including the mark with no off-by-one in the strip', async () => {
+    it('strips only the mark tag from a wire hit at the full 16-tag budget', async () => {
       const fifteen = Array.from({ length: 15 }, (_, i) => `tag-${i}`);
       const layer = makeFakeLayer();
       layer.corpus.search = async () => [
