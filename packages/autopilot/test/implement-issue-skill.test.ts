@@ -37,8 +37,14 @@ describe('implement-issue SKILL.md triage invocation', () => {
   const doc = readFileSync(SKILL_PATH, 'utf8');
 
   it('runs the self-contained Autopilot triage CLI from its package directory', () => {
-    expect(doc).toContain('cd <repo-root>/packages/autopilot');
-    expect(doc).toContain('yarn triage:check <N>');
+    expect(doc).toContain(
+      '(cd "<repo-root>/packages/autopilot" && yarn triage:check <N>)',
+    );
+    expect(doc).toContain(
+      'VERDICT_JSON=$(cd "<repo-root>/packages/autopilot" && yarn triage:check <N>)',
+    );
     expect(doc).not.toContain('yarn workspace @jinn-network/autopilot triage:check');
+    expect(doc).not.toContain('(cd <repo-root>/packages/autopilot');
+    expect(doc).not.toContain('VERDICT_JSON=$(cd <repo-root>/packages/autopilot');
   });
 });
