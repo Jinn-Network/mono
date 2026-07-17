@@ -35,6 +35,7 @@ describe('InMemoryCorpusPort (rescope §3 — content-bearing get())', () => {
         provenance: 'imported',
         origin: 'seed:acme',
         capturedAt: '2026-07-15T00:00:00.000Z',
+        retrievalVisible: true,
       },
     });
   });
@@ -52,7 +53,23 @@ describe('InMemoryCorpusPort (rescope §3 — content-bearing get())', () => {
       tier: 'tests-passed',
       tags: ['dashboard', 'vitest'],
       origin: 'seed:acme',
+      retrievalVisible: true,
     }]);
+  });
+
+  // #1824: seeds default to retrieval-visible so pre-allowlist scenarios keep
+  // working; an explicit false must survive both views for exclusion tests.
+  it('carries an explicit retrievalVisible: false through both search() and get()', async () => {
+    const port = new InMemoryCorpusPort([seedRecord({ retrievalVisible: false })]);
+    const hitResult = await port.search('dashboard');
+    expect(hitResult.status).toBe('ok');
+    if (hitResult.status !== 'ok') return;
+    expect(hitResult.value[0]?.retrievalVisible).toBe(false);
+
+    const recordResult = await port.get('bafySeed1');
+    expect(recordResult.status).toBe('ok');
+    if (recordResult.status !== 'ok' || recordResult.value === null) throw new Error('expected a record');
+    expect(recordResult.value.retrievalVisible).toBe(false);
   });
 
   it('get() on an unseeded ref returns ok(null)', async () => {
