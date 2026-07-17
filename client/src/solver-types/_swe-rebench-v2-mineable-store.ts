@@ -9,7 +9,7 @@ import {
   ContributionStore,
   resolveContributionStateDir,
   type ContributionStoreRecord,
-} from '../../dist/harness-layer/contribution-store.js';
+} from '@jinn-network/core';
 
 export const MINEABLE_TRACE_STORE_SCHEMA_VERSION = CONTRIBUTION_STORE_SCHEMA_VERSION;
 export const resolveMineableStateDir = resolveContributionStateDir;

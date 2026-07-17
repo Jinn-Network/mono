@@ -20,18 +20,22 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@jinn-network/plugin": "portal:../plugin",
     "zod": "^4.4.3"
   },
   "peerDependencies": {
+    "@jinn-network/plugin": "*",
     "vitest": "^4.1.8"
   },
   "peerDependenciesMeta": {
+    "@jinn-network/plugin": {
+      "optional": true
+    },
     "vitest": {
       "optional": true
     }
   },
   "devDependencies": {
+    "@jinn-network/plugin": "portal:../plugin",
     "@types/node": "^26.1.0",
     "typescript": "^5.4.0",
     "vitest": "^4.1.8"

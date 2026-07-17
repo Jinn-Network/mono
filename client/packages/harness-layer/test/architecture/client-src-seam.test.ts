@@ -14,9 +14,11 @@ import { SPECIFIER, tsFiles } from './import-scan.js';
  * harness-layer fails this test; removing one requires pruning the matching
  * inventory line so the list stays an accurate record of what remains.
  *
- * Reverse direction: client/src must not grow references into harness-layer.
- * The single existing reference (the mineable-store shim importing the built
- * contribution-store bundle) is frozen; any new one fails.
+ * Reverse direction: client/src must not reference harness-layer at all. The
+ * former mineable-store → dist/harness-layer/contribution-store.js reference
+ * was removed in C2 (#1833) when the contribution store moved to
+ * @jinn-network/core; the daemon now imports the bare core specifier. Any new
+ * client/src → harness-layer reference fails.
  */
 const pkgRoot = fileURLToPath(new URL('../../', import.meta.url));
 const clientRoot = normalize(join(pkgRoot, '..', '..'));
@@ -125,7 +127,7 @@ describe('harness-layer ↔ client/src seam (#1832)', () => {
     ).toEqual([]);
   });
 
-  it('client/src references into harness-layer stay frozen to the mineable-store shim', () => {
+  it('client/src has no references into harness-layer', () => {
     const found: string[] = [];
     for (const file of tsFiles(join(clientRoot, 'src'))) {
       const source = readFileSync(file, 'utf-8');
@@ -135,8 +137,6 @@ describe('harness-layer ↔ client/src seam (#1832)', () => {
         }
       }
     }
-    expect(found.sort()).toEqual([
-      'src/solver-types/_swe-rebench-v2-mineable-store.ts -> ../../dist/harness-layer/contribution-store.js',
-    ]);
+    expect(found.sort()).toEqual([]);
   });
 });
