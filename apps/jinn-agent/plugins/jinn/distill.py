@@ -168,7 +168,7 @@ def _drop_none_optional_keys(episode: Dict[str, Any]) -> Dict[str, Any]:
 
     EpisodeV1's optional fields are absent-OK but null-fatal under the strict
     zod schema, so a persisted literal ``null`` makes the whole file
-    unreadable. Defence-in-depth, deliberately scoped to the known optional
+    unreadable. Defense-in-depth, deliberately scoped to the known optional
     slots — not a generic None sweep, which could mask a producer bug in a
     required field.
     """
