@@ -59,4 +59,33 @@ describe('InMemoryCorpusPort (rescope §3 — content-bearing get())', () => {
     const port = new InMemoryCorpusPort([seedRecord()]);
     expect(await port.get('does-not-exist')).toEqual({ status: 'ok', value: null });
   });
+
+  // Mono #1782: isSkillPayload is a content-level fact on CorpusRecord,
+  // independent of the search hit's wire kind/payloadKind — the kit must
+  // carry it through get() so a fixture can express "hit-level says
+  // nothing, content-level says skill" (the legacy-seed bug shape).
+  it('get() carries the content-level isSkillPayload fact through, independent of the hit-level kind/payloadKind', async () => {
+    const port = new InMemoryCorpusPort([
+      seedRecord({ ref: 'bafySkillPayload', kind: 'trace', isSkillPayload: true }),
+    ]);
+    const result = await port.get('bafySkillPayload');
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok' || result.value === null) throw new Error('expected a decoded record');
+    expect(result.value.isSkillPayload).toBe(true);
+
+    const hitResult = await port.search('bafySkillPayload');
+    expect(hitResult.status).toBe('ok');
+    if (hitResult.status !== 'ok') return;
+    // The synthesized search hit never carries a content-level fact — only
+    // the adapter's real decode path can classify a payload post-fetch.
+    expect(hitResult.value[0]).not.toHaveProperty('isSkillPayload');
+  });
+
+  it('get() omits isSkillPayload when the seed does not set it (no false-y noise on an ordinary record)', async () => {
+    const port = new InMemoryCorpusPort([seedRecord()]);
+    const result = await port.get('bafySeed1');
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok' || result.value === null) throw new Error('expected a decoded record');
+    expect(result.value).not.toHaveProperty('isSkillPayload');
+  });
 });

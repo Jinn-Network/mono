@@ -40,6 +40,20 @@ export interface CorpusRecord {
    *  search hit's trustworthy `origin`. */
   origin: string;
   capturedAt: string;
+  /**
+   * True when the adapter's decode determined the record's payload is a
+   * skill package — a step carrying a string `skill.md` attribute (legacy
+   * pre-#1394 seed shape) or the record backed by a `jinn.skill.v1` artifact
+   * (first-class shape) — regardless of the search hit's wire `kind`/
+   * `payloadKind` (mono #1782: a legacy skill-shaped record classifies as
+   * `kind: 'trace'` on the wire and slips the selection-time filter).
+   * Adapter-computed fact; the core (`plugin.ts` `firstTurnPickup`) enforces
+   * exclusion — keeps the core the policy owner, the adapter the fact
+   * provider. Undefined when undetermined, including when the adapter's own
+   * detection errors — the guard fails open, exactly like an ordinary trace
+   * record.
+   */
+  isSkillPayload?: boolean;
 }
 
 export interface CorpusPort {

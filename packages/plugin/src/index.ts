@@ -57,6 +57,7 @@ export {
   dedupeKnowledgeHits,
   scoreKnowledgeHit,
   selectKnowledgeHits,
+  rankKnowledgeHits,
   MAX_SELECTED_PACKETS,
 } from './pickup.js';
 export {

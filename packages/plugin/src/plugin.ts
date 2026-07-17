@@ -30,7 +30,7 @@ import {
 import type { KnowledgeHit } from './schemas/knowledge-hit.js';
 import type { SessionSummary } from './schemas/session-summary.js';
 import { projectKnowledgePacket, type KnowledgePacket } from './schemas/knowledge-packet.js';
-import { deriveSearchTerms, selectKnowledgeHits } from './pickup.js';
+import { deriveSearchTerms, rankKnowledgeHits, MAX_SELECTED_PACKETS } from './pickup.js';
 import { degraded, ok, unavailable, valueOr, type PortResult } from './outcome.js';
 import { parsePickupConfig, type PickupConfig } from './schemas/pickup-config.js';
 import { deriveEligibility } from './eligibility.js';
@@ -334,8 +334,8 @@ export class PluginSession {
       }
     }
 
-    const selected = selectKnowledgeHits([...byRef.values()], terms);
-    if (selected.length === 0) {
+    const ranked = rankKnowledgeHits([...byRef.values()], terms);
+    if (ranked.length === 0) {
       return {
         contextBlock: null,
         packets: [],
@@ -344,12 +344,21 @@ export class PluginSession {
       };
     }
 
-    // Fetch full content for the selected refs and project packets. A
-    // projection failure degrades that one ref to nothing-found rather than
-    // throwing into the caller (§3.5).
+    // Fetch full content for ranked candidates and project packets, walking
+    // down the ranked list until MAX_SELECTED_PACKETS valid packets are
+    // found or candidates are exhausted (mono #1782). Two post-fetch guards
+    // can disqualify a candidate without spending its slot, promoting the
+    // next-ranked one: (1) content-level skill classification — excludes a
+    // legacy skill-shaped record (skill.md step attribute) or a
+    // jinn.skill.v1-backed record that slipped the wire kind filter, exactly
+    // as a wire kind:'skill' hit is excluded at selection time; (2)
+    // empty-packet honesty — a projection with zero excerpts and no
+    // synthesis is not evidence. A projection failure degrades that one ref
+    // to nothing-found rather than throwing into the caller (§3.5).
     const fetchedRefs: string[] = [];
     const packets: KnowledgePacket[] = [];
-    for (const hit of selected) {
+    for (const hit of ranked) {
+      if (packets.length >= MAX_SELECTED_PACKETS) break;
       fetchedRefs.push(hit.ref);
       const result = await this.deps.corpus.get(hit.ref);
       if (result.status !== 'ok') {
@@ -358,11 +367,18 @@ export class PluginSession {
       }
       const record: CorpusRecord | null = result.value;
       if (record === null) continue;
+      if (record.isSkillPayload === true) continue;
+
+      let packet: KnowledgePacket;
       try {
-        packets.push(projectKnowledgePacket(record));
+        packet = projectKnowledgePacket(record);
       } catch (error) {
         degradedReason ??= `packet projection failed for ${hit.ref}: ${errorReason(error)}`;
+        continue;
       }
+      if (packet.excerpts.length === 0 && packet.synthesis === undefined) continue;
+
+      packets.push(packet);
     }
 
     this.fetchedRefs = fetchedRefs;
