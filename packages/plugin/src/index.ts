@@ -73,6 +73,7 @@ export type {
   KnowledgePacketExcerpt,
   KnowledgePacketBudget,
 } from './schemas/knowledge-packet.js';
+export { RETRIEVAL_VISIBLE_TAG, hasRetrievalMark } from './visibility.js';
 export { deriveEligibility } from './eligibility.js';
 export type { EligibilityInputs } from './eligibility.js';
 export { foldHistory, foldExplain } from './history.js';
