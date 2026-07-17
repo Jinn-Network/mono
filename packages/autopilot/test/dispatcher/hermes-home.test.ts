@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   prepareHermesHome,
   hermesReasoningEffort,
@@ -9,6 +10,20 @@ import {
 } from '../../src/dispatcher/hermes-home.js';
 import { DEFAULT_CONFIG } from '../../src/dispatcher/types.js';
 import type { Effort } from '../../src/dispatcher/types.js';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const HERMES_ADAPTER_PATH = join(
+  HERE,
+  '..',
+  '..',
+  '..',
+  '..',
+  '.claude',
+  'skills',
+  'implement-issue',
+  'references',
+  'hermes.md',
+);
 
 describe('hermesReasoningEffort', () => {
   it('maps the board tiers onto hermes VALID_REASONING_EFFORTS', () => {
@@ -102,9 +117,11 @@ describe('prepareHermesHome', () => {
     expect(yaml).toContain('"skills"');   // SKILL.md loader
   });
 
-  it('leaves max_spawn_depth at the hermes default (flat) — the coordinator is a root, children are leaves', () => {
+  it('keeps process-local depth at one because depth-needing stages are fresh roots', () => {
     const { yaml } = prep('Medium');
     expect(yaml).not.toContain('max_spawn_depth');
+    expect(readFileSync(HERMES_ADAPTER_PATH, 'utf8'))
+      .toMatch(/new\s+depth-0 Hermes process/);
   });
 
   it('does not pin delegation model/provider/effort — children inherit the parent (same Sol, same effort)', () => {

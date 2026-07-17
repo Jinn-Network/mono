@@ -155,11 +155,10 @@ export function prepareHermesHome(opts: HermesHomeOpts): { hermesHome: string } 
         'session_search', 'todo', 'code_execution', 'delegation',
       ],
     },
-    // max_spawn_depth stays at hermes' default of 1 (flat): the coordinator is
-    // a ROOT process, so its delegate_task children are depth-1 leaves — the
-    // pipeline needs no grandchildren, and each extra level multiplies API
-    // cost. model/provider/reasoning_effort are intentionally omitted: empty =
-    // children inherit the parent, i.e. the same Sol at the same effort.
+    // Hermes's default max_spawn_depth=1 is process-local. Lightweight coordinator
+    // children are leaves, while Stages 1/3/4/5 launch as fresh depth-0 OS
+    // processes through stage:run and may each fan out their own depth-1 children.
+    // Do not raise depth to compensate for launching a stage incorrectly as a child.
     delegation: { max_concurrent_children: 3 },
     skills: {
       // Hermes scans SKILL.md trees natively — this is how the coordinator
