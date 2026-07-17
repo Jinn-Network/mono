@@ -86,18 +86,27 @@ Before any worktree is created and before `Status` is flipped to `In Progress`, 
 
 ### Invoke the CLI
 
-Run the reality-check from the primary checkout (not the worktree — the worktree doesn't exist yet):
+When the Autopilot dispatcher invokes this skill, run the reality-check from
+the dispatcher-provided package directory:
 
 ```bash
-cd <repo-root>
-yarn workspace @jinn-network/autopilot triage:check <N>
+yarn --cwd "$JINN_AUTOPILOT_PACKAGE_DIR" triage:check <N>
 # Emits one line of JSON to stdout; non-zero exit on failure.
+```
+
+The dispatcher exports `JINN_AUTOPILOT_PACKAGE_DIR` to its installed Autopilot
+package checkout. For an interactive human invocation where that variable is
+unset, use `<repo-root>/packages/autopilot`:
+
+```bash
+yarn --cwd "<repo-root>/packages/autopilot" triage:check <N>
 ```
 
 Parse the JSON verdict:
 
 ```bash
-VERDICT_JSON=$(yarn workspace @jinn-network/autopilot triage:check <N>)
+AUTOPILOT_PACKAGE_DIR="${JINN_AUTOPILOT_PACKAGE_DIR:-<repo-root>/packages/autopilot}"
+VERDICT_JSON=$(yarn --cwd "$AUTOPILOT_PACKAGE_DIR" triage:check <N>)
 CLASSIFICATION=$(echo "$VERDICT_JSON" | jq -r '.classification')
 SUGGESTED_COMMENT=$(echo "$VERDICT_JSON" | jq -r '.suggestedComment')
 SUGGESTED_BLOCKED_ON=$(echo "$VERDICT_JSON" | jq -r '.suggestedBlockedOn')
@@ -249,7 +258,9 @@ See Step 4 for dispatch discipline.
 git -C "${WORKTREE_PATH}" log origin/next..HEAD --oneline
 ```
 
-If the log is empty, dispatch a fix subagent before continuing.
+If the log is empty, re-run Stage 3 through the active adapter’s fresh-root
+mechanism with the missing-commit gap named, then re-check the log before
+continuing.
 
 ---
 
@@ -329,7 +340,8 @@ The `--label engine:review` opt-in flag enrols this PR in the independent `revie
 gh pr list --head "$BRANCH" --json number,url,isDraft
 ```
 
-If the PR does not exist, dispatch a fix stage through the active adapter.
+If the PR does not exist, re-run Stage 8 through the active adapter’s
+lightweight-child mechanism with the missing-PR gap named, then re-check.
 
 **Move the issue to `In Review`.** Once the draft PR is confirmed, set the issue's Project `Status` to `In Review` — the pipeline's work is done and the issue now awaits the human's batch-merge. This also removes the issue from the dispatcher's in-flight set (`deriveInFlight` keys on `In Progress`), freeing the concurrency slot; without it a completed session lingers as in-flight. `Status` is single-select — discover the `In Review` option id via `gh project field-list` (Step 2), then `gh project item-edit ... --single-select-option-id <in-review-option-id>`.
 
@@ -444,7 +456,7 @@ git -C "$WORKTREE_PATH" log origin/next..HEAD --oneline
 
 | Finding kind | Coordinator action |
 |---|---|
-| **Fixable** — wrong logic, missing test, failing CI, failing app-test, review comment about implementation | Dispatch a fix subagent with the findings; the gate re-runs after the fix. |
+| **Fixable** — wrong logic, missing test, failing CI, failing app-test, review comment about implementation | Re-run the stage responsible for the fix through that stage’s prescribed active-adapter mechanism with the findings; the gate re-runs after the fix. |
 | **Scope / design** — the issue is mis-scoped, the approach is fundamentally wrong, a product decision is needed | Immediate escalation — do not loop. |
 
 ### Escalation is judgment-based — no round count
@@ -459,7 +471,7 @@ An arbitrary cap would escalate legitimate multi-round fixes prematurely. Use ju
 
 Stop the pipeline. Write a one-paragraph note:
 
-> **Where I am:** [last stage completed; what the subagent last produced]
+> **Where I am:** [last stage completed; what the stage last produced]
 > **Why I stopped:** [the finding, verbatim; or "findings not converging after N rounds"]
 > **Status:** `needs-decision` | `blocked` | `stuck`
 
@@ -518,9 +530,9 @@ The headless override also prevents plan-only posture from leaking into stage ex
 | `Blocked on` is `Human` or `Another issue` | Fail loud; stop. Do not proceed. |
 | Reality-check CLI fails / `gh` or `git` unavailable | Fail loud; stop. Do not proceed past Step 1.5. |
 | Step 1.5 returns `pr-open` / `fixed-on-trunk` / `fixed-pending-backmerge` / `fixed-direct-commit` | Comment on the issue, set `Blocked on` to the suggested value, do NOT flip `Status`, exit the skill. |
-| Subagent reports "done" but zero commits | Dispatch a fix subagent; re-check git log. |
-| Stage 5 reviewer is same as Stage 3 implementer | Re-dispatch Stage 5 with a genuinely fresh subagent. |
-| PR does not appear after Stage 8 subagent reports success | Dispatch a fix subagent; re-check `gh pr list`. |
+| Stage 3 reports "done" but zero commits | Re-run Stage 3 through the active adapter’s fresh-root mechanism; re-check git log. |
+| Stage 5 reviewer is same as Stage 3 implementer | Re-run Stage 5 through the active adapter’s fresh-root mechanism in a genuinely fresh context. |
+| PR does not appear after Stage 8 reports success | Re-run Stage 8 through the active adapter’s lightweight-child mechanism; re-check `gh pr list`. |
 | Findings not converging across multiple rounds | Escalate with status `stuck`; stop. |
 | Scope/design finding from any gate | Immediate escalation with status `needs-decision`; stop. |
 | `spike` / `incident` / `design` shape passes Stage 2 | Stop — these shapes must not proceed to Stage 3. |

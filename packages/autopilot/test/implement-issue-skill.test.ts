@@ -54,6 +54,31 @@ describe('implement-issue SKILL.md (#657 depth-fix)', () => {
   it('does NOT contain the superseded blanket "fresh subagent" Step-3 rule', () => {
     expect(doc).not.toContain('Each stage is performed by dispatching a **fresh subagent**');
   });
+
+  it('runs triage from the dispatcher package with an interactive fallback', () => {
+    expect(doc).toContain(
+      'yarn --cwd "$JINN_AUTOPILOT_PACKAGE_DIR" triage:check <N>',
+    );
+    expect(doc).toContain('<repo-root>/packages/autopilot');
+    expect(doc).not.toContain(
+      'yarn workspace @jinn-network/autopilot triage:check <N>',
+    );
+  });
+
+  it("keeps retry dispatch on each stage's prescribed adapter mechanism", () => {
+    expect(doc).not.toContain('dispatch a fix subagent');
+    expect(doc).not.toContain('Subagent reports "done"');
+    expect(doc).not.toContain('Stage 8 subagent reports success');
+    expect(doc).toContain(
+      'Re-run Stage 3 through the active adapter’s fresh-root mechanism',
+    );
+    expect(doc).toContain(
+      'Re-run Stage 5 through the active adapter’s fresh-root mechanism',
+    );
+    expect(doc).toContain(
+      'Re-run Stage 8 through the active adapter’s lightweight-child mechanism',
+    );
+  });
 });
 
 describe('implement-issue canonical runtime adapters', () => {
@@ -74,14 +99,54 @@ describe('implement-issue canonical runtime adapters', () => {
     expect(existsSync(HERMES_ADAPTER_PATH)).toBe(true);
   });
 
-  it('keeps lifecycle gates out of the adapters', () => {
+  it('keeps adapters constrained to mechanics-only headings', () => {
+    const expectedHeadings = new Map([
+      [
+        CLAUDE_ADAPTER_PATH,
+        [
+          '# Claude runtime adapter',
+          '## Fresh-root stages',
+          '## Lightweight children',
+          '## Method skills',
+        ],
+      ],
+      [
+        HERMES_ADAPTER_PATH,
+        [
+          '# Hermes runtime adapter',
+          '## Finite-session invariant',
+          '## Fresh-root stages',
+          '## Lightweight children',
+          '## Method skills',
+        ],
+      ],
+    ]);
+
+    for (const [path, headings] of expectedHeadings) {
+      const adapter = readFileSync(path, 'utf8');
+      expect(adapter.match(/^#{1,2} .+$/gm)).toEqual(headings);
+    }
+  });
+
+  it('keeps lifecycle policy and deliverables out of the adapters', () => {
+    const forbiddenLifecycleMarkers = [
+      'Hard preconditions',
+      'Human-surface gate',
+      'Output the coordinator reads',
+      'Finding handling',
+      'needs-decision',
+      'Full pipeline shapes',
+      'gh pr create',
+      'engine:review',
+      'Closes #',
+      'git worktree remove',
+    ];
+
     for (const path of [CLAUDE_ADAPTER_PATH, HERMES_ADAPTER_PATH]) {
-      const adapter = existsSync(path) ? readFileSync(path, 'utf8') : '';
-      expect(adapter).not.toContain('## Step 1 — Read the issue');
-      expect(adapter).not.toContain(
-        '## Step 5 — Finding handling and escalation',
-      );
-      expect(adapter).not.toContain('## Step 6 — Shape variants');
+      const adapter = readFileSync(path, 'utf8');
+      for (const marker of forbiddenLifecycleMarkers) {
+        expect(adapter).not.toContain(marker);
+      }
     }
   });
 });
