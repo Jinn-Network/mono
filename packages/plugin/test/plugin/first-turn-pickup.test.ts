@@ -215,6 +215,47 @@ function distilledSkillLeak(): InMemoryCorpusSeed {
   };
 }
 
+/**
+ * Isolates guard 1 from guard 2 for the legacy skill.md-attribute detection
+ * path (`distilledSkillLeak` above does the same for the first-class
+ * artifact path). Unlike `runComfySkillLeak` — whose lone `seed:skill-md`
+ * step mirrors the real seed-import shape and never produces an excerpt on
+ * its own — this record ALSO carries an ordinary command step, so guard 2
+ * (empty-packet honesty) would not exclude it by itself: only guard 1
+ * (content-level classification) can be responsible if it is still
+ * excluded. The extra step is not part of the real seed-import shape; it
+ * exists solely to make this isolation possible (independent-review finding
+ * on mono #1782).
+ */
+function skillMdLeakWithExcerpt(): InMemoryCorpusSeed {
+  return {
+    ref: 'bafySkillMdLeakWithExcerpt',
+    kind: 'trace',
+    task: { summary: 'Seed import: acme/skills/deploy-helper' },
+    outcome: { status: 'completed', verifiabilityTier: 'user-accepted' },
+    steps: [
+      {
+        name: 'seed:skill-md',
+        attributes: {
+          'skill.md': '# Deploy Helper\n\nHelps deploy things.',
+          'seed.attribution': {
+            skill: 'acme/skills/deploy-helper',
+            source: 'https://github.com/acme/skills',
+            licence: 'MIT',
+          },
+        },
+      },
+      { name: 'run tests', attributes: { 'tool.args': 'yarn test deploy-helper', 'tool.exitCode': 0 } },
+    ],
+    tags: ['seed-import', 'acme', 'deploy-helper'],
+    provenance: 'imported',
+    origin: 'seed:acme-deploy-helper',
+    capturedAt: '2026-07-08T00:00:00.000Z',
+    tier: 'user-accepted',
+    isSkillPayload: true,
+  };
+}
+
 /** Mono #1782 guard 2: a record whose steps carry nothing excerpt-shaped and
  *  no synthesis — `projectKnowledgePacket` yields zero excerpts. Not
  *  evidence; must not consume a packet slot. */
@@ -259,6 +300,98 @@ function paymentRetryFix(): InMemoryCorpusSeed {
     provenance: 'imported',
     origin: 'seed:payment-retry-queue-fix',
     capturedAt: '2026-07-13T00:00:00.000Z',
+    tier: 'tests-passed',
+  };
+}
+
+/**
+ * Compound promotion scenario (mono #1782, independent-review
+ * recommendation): four above-floor candidates, ranked 1-4 by descending
+ * score. Rank 1 is disqualified by guard 1 (content-classified skill, but
+ * would otherwise project a real excerpt); rank 2 is disqualified by guard
+ * 2 (empty projection). Both must be skipped — not just one — so ranks 3
+ * and 4 are promoted into the two packet slots. Scores are engineered via
+ * a strict term-count gradient (6/4/3/2, all >= the floor of 2) so ranking
+ * is unambiguous without relying on tier tiebreaks.
+ */
+function compoundRank1SkillLeak(): InMemoryCorpusSeed {
+  return {
+    ref: 'bafyCompoundRank1SkillLeak',
+    kind: 'trace',
+    task: { summary: 'widget catalog inventory pricing images sync' },
+    outcome: { status: 'completed', verifiabilityTier: 'evaluator-verified' },
+    steps: [{ name: 'run tests', attributes: { 'tool.args': 'yarn test widget-catalog', 'tool.exitCode': 0 } }],
+    tags: ['widget', 'catalog'],
+    provenance: 'imported',
+    origin: 'seed:compound-rank1-skill-leak',
+    capturedAt: '2026-07-06T00:00:00.000Z',
+    tier: 'evaluator-verified',
+    isSkillPayload: true,
+  };
+}
+
+function compoundRank2EmptyDecoy(): InMemoryCorpusSeed {
+  return {
+    ref: 'bafyCompoundRank2EmptyDecoy',
+    kind: 'trace',
+    task: { summary: 'widget catalog inventory pricing' },
+    outcome: { status: 'completed', verifiabilityTier: 'evaluator-verified' },
+    steps: [],
+    tags: ['widget'],
+    provenance: 'imported',
+    origin: 'seed:compound-rank2-empty-decoy',
+    capturedAt: '2026-07-07T00:00:00.000Z',
+    tier: 'evaluator-verified',
+  };
+}
+
+function compoundRank3Valid(): InMemoryCorpusSeed {
+  return {
+    ref: 'bafyCompoundRank3Valid',
+    kind: 'trace',
+    task: { summary: 'widget catalog inventory' },
+    outcome: { status: 'completed', verifiabilityTier: 'tests-passed' },
+    synthesis:
+      'The widget catalog inventory count drifted from the source of truth; a reconciliation job fixed it.',
+    steps: [
+      {
+        name: 'run tests',
+        attributes: {
+          'tool.args': 'yarn test inventory-sync',
+          'tool.result': 'FAIL: count mismatch',
+          'tool.exitCode': 1,
+        },
+      },
+    ],
+    tags: [],
+    provenance: 'imported',
+    origin: 'seed:compound-rank3-valid',
+    capturedAt: '2026-07-08T00:00:00.000Z',
+    tier: 'tests-passed',
+  };
+}
+
+function compoundRank4Valid(): InMemoryCorpusSeed {
+  return {
+    ref: 'bafyCompoundRank4Valid',
+    kind: 'trace',
+    task: { summary: 'widget catalog' },
+    outcome: { status: 'completed', verifiabilityTier: 'tests-passed' },
+    synthesis: 'The widget catalog page threw on an undefined image URL; a null check fixed the crash.',
+    steps: [
+      {
+        name: 'run tests',
+        attributes: {
+          'tool.args': 'yarn test widget-catalog-page',
+          'tool.result': 'FAIL: cannot read property of undefined',
+          'tool.exitCode': 1,
+        },
+      },
+    ],
+    tags: [],
+    provenance: 'imported',
+    origin: 'seed:compound-rank4-valid',
+    capturedAt: '2026-07-09T00:00:00.000Z',
     tier: 'tests-passed',
   };
 }
@@ -396,6 +529,38 @@ describe('firstTurnPickup over ports — evidence-first pickup (rescope §3/§4.
 
     expect(result.packets).toEqual([]);
     expect(result.contextBlock).toBeNull();
+  });
+
+  // Independent-review finding: runComfySkillLeak (the real seed-import
+  // shape) never produces an excerpt regardless of guard 1, so the pin test
+  // above doesn't by itself prove guard 1 is necessary for that record —
+  // guard 2 alone would also exclude it. This test isolates guard 1: the
+  // record would project a real, non-empty packet if guard 1 did not exist.
+  it('mono #1782 guard 1: a legacy skill.md-attribute record that would otherwise project a non-empty packet is still excluded by content (isolates guard 1 from guard 2)', async () => {
+    const plugin = buildPlugin(new InMemoryCorpusPort([skillMdLeakWithExcerpt()]));
+    const session = plugin.session(META);
+    const result = await session.firstTurnPickup('please use the acme deploy-helper skill for deployment');
+
+    expect(result.packets).toEqual([]);
+    expect(result.contextBlock).toBeNull();
+  });
+
+  // Independent-review recommendation: the promotion loop must skip PAST
+  // multiple consecutive disqualified candidates (a mix of both guards),
+  // not just one, to reach the next valid ones.
+  it('mono #1782: promotion skips past multiple consecutive disqualified candidates (guard 1 then guard 2) to fill both slots', async () => {
+    const plugin = buildPlugin(new InMemoryCorpusPort([
+      compoundRank1SkillLeak(),
+      compoundRank2EmptyDecoy(),
+      compoundRank3Valid(),
+      compoundRank4Valid(),
+    ]));
+    const session = plugin.session(META);
+    const result = await session.firstTurnPickup('please sync the widget catalog inventory pricing images now');
+
+    expect(result.packets.map((p) => p.ref)).toEqual(['bafyCompoundRank3Valid', 'bafyCompoundRank4Valid']);
+    expect(result.contextBlock).not.toContain('bafyCompoundRank1SkillLeak');
+    expect(result.contextBlock).not.toContain('bafyCompoundRank2EmptyDecoy');
   });
 
   it('records the searched terms even when nothing is found', async () => {
