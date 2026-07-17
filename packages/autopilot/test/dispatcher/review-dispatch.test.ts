@@ -14,7 +14,7 @@ const CFG: DispatcherConfig = {
   concurrencyCap: 3, openPrBackpressure: 30, wallClockMs: 1, defaultImplementer: 'claude',
   implementerRules: [],
   authorAllowlist: [], reviewCap: 3, engineReviewLabel: 'engine:review', reviewBotLogin: 'jinn-bot',
-  implGhToken: '', reviewGhToken: '', mergePrepEnabled: false, mergePrepCap: 1,
+  implGhToken: '', reviewGhToken: '', mergePrepEnabled: false, mergePrepCap: 1, hermesModel: 'gpt-5.6-sol', hermesProvider: 'openai-codex', hermesPath: 'hermes',
 };
 const EXPECTED_WT = join(WORKTREES_BASE, 'pr-42');
 

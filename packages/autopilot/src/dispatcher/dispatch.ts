@@ -10,7 +10,8 @@ import {
   resetFieldCache,
   type FieldCache,
 } from './field-cache.js';
-import { buildHeadlessPrompt } from '../headless.js';
+import { buildHeadlessPrompt, buildHermesHeadlessPrompt } from '../headless.js';
+import { prepareHermesHome } from './hermes-home.js';
 import { sessionLogPath, sessionStartedAtPath } from './session-log.js';
 import { resolveImplementer } from './implementer-policy.js';
 
@@ -293,9 +294,15 @@ export async function dispatchIssue(
   //    so the implement-issue skill's Step 2 skips worktree creation.
   const canon = loadCanon();
   const implementer = resolveImplementer(issue, cfg);
+  // `hermes` is a REAL coordinator: we spawn its CLI, and it runs its own
+  // sibling skill with its own native subagents (delegate_task). Every other
+  // implementer runs inside a claude coordinator, where the value is only a
+  // directive naming the inner pipeline's CLI.
+  const isHermes = implementer === 'hermes';
+  const skill = isHermes ? 'implement-issue-hermes' : 'implement-issue';
   const scenario = [
-    `Use the implement-issue skill on issue #${number}.`,
-    `The default implementer for the inner pipeline is: ${implementer}.`,
+    `Use the ${skill} skill on issue #${number}.`,
+    ...(isHermes ? [] : [`The default implementer for the inner pipeline is: ${implementer}.`]),
     `Issue: #${number} — ${title}`,
     `A git worktree for this issue already exists at \`${worktreePath}\` on branch \`${branch}\` — use it; do not create a new worktree.`,
     ...(stackBase != null
@@ -304,7 +311,9 @@ export async function dispatchIssue(
         ]
       : []),
   ].join('\n');
-  const headlessPart = buildHeadlessPrompt('implement-issue', scenario);
+  const headlessPart = isHermes
+    ? buildHermesHeadlessPrompt(skill, scenario)
+    : buildHeadlessPrompt(skill, scenario);
   const fullPrompt = [canon, '', headlessPart].join('\n');
 
   // 5. Spawn — NO plan-posture flags (spec Appendix).
@@ -319,17 +328,62 @@ export async function dispatchIssue(
   //    inherit for 1/2 as a safe default the lambda replaces.
   const logPath = sessionLogPath(number);
   const startedAtMarkerPath = sessionStartedAtPath(number);
-  const result = spawn('claude', ['-p', ...effortFlag(issue.effort), fullPrompt], {
-    cwd: worktreePath,
-    detached: true,
-    stdio: ['ignore', 'inherit', 'inherit'],
-    logPath,
-    startedAtMarkerPath,
-    // Author this PR as the implementer identity (DR-2026-06-15); inherits the
-    // ambient gh account when no token is configured. Also disables the
-    // print-mode background-wait ceiling so the session reaches its PR stage.
-    ...sessionSpawnEnv(cfg.implGhToken),
-  });
+  // Author this PR as the implementer identity (DR-2026-06-15); inherits the
+  // ambient gh account when no token is configured. Also disables the
+  // print-mode background-wait ceiling so a claude session reaches its PR
+  // stage (inert for hermes, which has its own lifetime model).
+  const identityEnv = sessionSpawnEnv(cfg.implGhToken);
+
+  let result;
+  if (isHermes) {
+    // Hermes takes reasoning effort ONLY from $HERMES_HOME/config.yaml — no CLI
+    // flag, no env var — so every session needs its own home (concurrent
+    // sessions may run at different efforts). The home also carries the toolset
+    // (incl. delegation → native subagents), skills dir, and MCP wiring.
+    const { hermesHome } = prepareHermesHome({
+      issueNumber: number,
+      worktreePath,
+      effort: issue.effort,
+      cfg,
+    });
+    // -q <prompt>: single non-interactive query (prompt is one argv — hermes has
+    // no @file/stdin path; canon is ~100KB, well under ARG_MAX).
+    // -Q: quiet/machine-readable. --yolo: skip dangerous-command approval
+    // prompts (no human present; `bin/tirith` still scans every command and the
+    // hardline floor still blocks). --accept-hooks: auto-approve config hooks.
+    // --provider is passed EXPLICITLY and must stay that way: hermes infers the
+    // provider from the model id's shape, and anything `<org>/<model>` infers
+    // `openrouter` — which would bill an API key instead of the operator's
+    // Codex subscription. `openai-codex` auto-selects the codex_responses
+    // api_mode + Codex base_url. No --effort: that flag is claude-only (hermes
+    // takes reasoning effort from the generated config.yaml).
+    result = spawn(
+      cfg.hermesPath,
+      [
+        'chat', '-q', fullPrompt, '-Q', '--yolo', '--accept-hooks',
+        '--model', cfg.hermesModel,
+        '--provider', cfg.hermesProvider,
+      ],
+      {
+        cwd: worktreePath,
+        detached: true,
+        stdio: ['ignore', 'inherit', 'inherit'],
+        logPath,
+        startedAtMarkerPath,
+        ...identityEnv,
+        env: { ...identityEnv.env, HERMES_HOME: hermesHome },
+      },
+    );
+  } else {
+    result = spawn('claude', ['-p', ...effortFlag(issue.effort), fullPrompt], {
+      cwd: worktreePath,
+      detached: true,
+      stdio: ['ignore', 'inherit', 'inherit'],
+      logPath,
+      startedAtMarkerPath,
+      ...identityEnv,
+    });
+  }
 
   // AC#2: surface pid + log path on the dispatch log line so an operator can
   // tail the session straight from the cycle output.

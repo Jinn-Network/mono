@@ -1,6 +1,8 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readFileSync, rmSync } from 'node:fs';
+import { HERMES_HOMES_DIR } from '../../src/dispatcher/hermes-home.js';
 import { dispatchIssue, WORKTREES_BASE } from '../../src/dispatcher/dispatch.js';
 import type { ReadyIssue, DispatcherConfig } from '../../src/dispatcher/types.js';
 import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
@@ -60,6 +62,9 @@ const CFG: DispatcherConfig = {
   reviewGhToken: '',
   mergePrepEnabled: false,
   mergePrepCap: 1,
+  hermesModel: 'gpt-5.6-sol',
+  hermesProvider: 'openai-codex',
+  hermesPath: 'hermes',
 };
 
 /**
@@ -939,5 +944,141 @@ describe('dispatchIssue — branch-ref collision', () => {
     const { spawn } = makeSpawn();
     await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
     expect(branchOf(calls)).toBe('feat/418-feat-operator-app-expose-generator-health');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// hermes coordinator — a REAL second CLI, not a prompt directive
+// ---------------------------------------------------------------------------
+
+describe('dispatchIssue — hermes implementer', () => {
+  /** Route every issue to hermes. */
+  const HERMES_CFG: DispatcherConfig = {
+    ...CFG,
+    implementerRules: [{ implementer: 'hermes' }],
+  };
+  /** hermes prompt is `chat -q <prompt> …` — the arg after -q, NOT the last one. */
+  const hermesPromptOf = (c: SpawnCall): string => c.args[c.args.indexOf('-q') + 1];
+
+  afterEach(() => {
+    rmSync(join(HERMES_HOMES_DIR, '418'), { recursive: true, force: true });
+  });
+
+  it('spawns the hermes CLI with the non-interactive contract and the configured model', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchIssue(ISSUE, HERMES_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].cmd).toBe('hermes');
+    expect(calls[0].args[0]).toBe('chat');
+    expect(calls[0].args).toContain('-q');          // single non-interactive query
+    expect(calls[0].args).toContain('-Q');          // quiet / machine-readable
+    expect(calls[0].args).toContain('--yolo');      // no human to approve commands
+    expect(calls[0].args).toContain('--accept-hooks');
+    expect(calls[0].args).toContain('--model');
+    expect(calls[0].args[calls[0].args.indexOf('--model') + 1]).toBe('gpt-5.6-sol');
+  });
+
+  it('BILLING GUARD: passes --provider openai-codex explicitly, and the model id stays bare', async () => {
+    // Hermes infers the provider from the model id's shape: anything
+    // `<org>/<model>` infers `openrouter`, which would bill an API key instead
+    // of the operator's ChatGPT/Codex subscription. The provider must be
+    // explicit and the id must never be org-prefixed.
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchIssue(ISSUE, HERMES_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+    expect(calls[0].args).toContain('--provider');
+    expect(calls[0].args[calls[0].args.indexOf('--provider') + 1]).toBe('openai-codex');
+    expect(calls[0].args[calls[0].args.indexOf('--model') + 1]).not.toContain('/');
+  });
+
+  it('never passes claude-only flags (--effort is a claude flag; hermes takes effort via config)', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchIssue(ISSUE, HERMES_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+    expect(calls[0].args).not.toContain('--effort');
+    expect(calls[0].args).not.toContain('-p');
+    expect(calls[0].args).not.toContain('--mode');
+    expect(calls[0].args).not.toContain('--permission-mode');
+  });
+
+  it('never routes to openrouter (the inference default) — the subscription provider wins', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchIssue(ISSUE, HERMES_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+    expect(calls[0].args.join(' ')).not.toContain('openrouter');
+    // …and the generated config pins the provider too, so a session cannot fall
+    // back to inference even if the flag path changes.
+    const env = calls[0].opts.env as Record<string, string>;
+    const yaml = readFileSync(join(env.HERMES_HOME, 'config.yaml'), 'utf8');
+    expect(yaml).toContain('provider: "openai-codex"');
+    expect(yaml).toContain('default: "gpt-5.6-sol"');
+  });
+
+  it('points HERMES_HOME at a per-issue home and keeps the implementer GH identity', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchIssue(
+      ISSUE,
+      { ...HERMES_CFG, implGhToken: 'impl-token' },
+      { runner, spawn, fieldCache: { ...FIELD_CACHE } },
+    );
+    const env = calls[0].opts.env as Record<string, string>;
+    expect(env.HERMES_HOME).toBe(join(HERMES_HOMES_DIR, '418'));
+    expect(env.GH_TOKEN).toBe('impl-token');
+    // The generated config is what actually carries the effort.
+    const yaml = readFileSync(join(env.HERMES_HOME, 'config.yaml'), 'utf8');
+    expect(yaml).toContain('reasoning_effort: "medium"'); // ISSUE.effort = Medium
+  });
+
+  it('invokes the hermes SIBLING skill and reuses the worktree', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchIssue(ISSUE, HERMES_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+    const prompt = hermesPromptOf(calls[0]);
+    expect(prompt).toContain('implement-issue-hermes');
+    expect(prompt).not.toContain('Use the implement-issue skill'); // not the claude sibling
+    expect(prompt).toContain('CLAUDE.md');            // canon still prepended
+    expect(prompt).toContain(EXPECTED_WORKTREE_PATH); // pre-created worktree
+    expect(prompt).toContain('do not create a new worktree');
+    expect(calls[0].opts.cwd).toBe(EXPECTED_WORKTREE_PATH);
+    expect(calls[0].opts.detached).toBe(true);
+  });
+
+  it('reframes the headless block for hermes (no stale `claude -p` framing)', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchIssue(ISSUE, HERMES_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+    const prompt = hermesPromptOf(calls[0]);
+    expect(prompt).toContain('hermes chat -q');
+    expect(prompt).not.toContain('`claude -p` / `--print`');
+    // The inner-pipeline directive is claude-only — hermes IS the coordinator.
+    expect(prompt).not.toContain('The default implementer for the inner pipeline');
+  });
+
+  it('still moves the board to In Progress and captures a session log (parity with claude)', async () => {
+    const { runner, calls: runnerCalls } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    const session = await dispatchIssue(ISSUE, HERMES_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+    expect(runnerCalls.some((c) => c.cmd === 'gh' && c.args[1] === 'item-edit')).toBe(true);
+    expect(calls[0].opts.logPath).toBe(sessionLogPath(418));
+    expect(calls[0].opts.startedAtMarkerPath).toBe(sessionStartedAtPath(418));
+    expect(session).toMatchObject({ issueNumber: 418, worktreePath: EXPECTED_WORKTREE_PATH, pid: 99999 });
+  });
+
+  it('REGRESSION: a non-hermes implementer still spawns claude -p with --effort', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchIssue(
+      ISSUE,
+      { ...CFG, implementerRules: [{ implementer: 'codex' }] },
+      { runner, spawn, fieldCache: { ...FIELD_CACHE } },
+    );
+    expect(calls[0].cmd).toBe('claude');
+    expect(calls[0].args).toContain('-p');
+    expect(calls[0].args).toContain('--effort');
+    // codex stays directive-only: it names the inner pipeline inside claude.
+    expect(promptOf(calls[0])).toContain('The default implementer for the inner pipeline is: codex.');
   });
 });
