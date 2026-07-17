@@ -11,7 +11,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { describeEvidencePortContract } from '@jinn-network/plugin/testing';
 import { EPISODE_SCHEMA_VERSION, EpisodeV1Schema, type EpisodeV1 } from '@jinn-network/plugin';
 import type { CapturedTask } from '../../src/capture.js';
@@ -275,5 +275,83 @@ describe('EvidenceAdapter — AC2 byte-exact round-trip', () => {
     expect(stored.status).toBe('ok');
     if (stored.status === 'ok') expect([first, second]).toContainEqual(stored.value);
     expect(readdirSync(capturesDir).filter((name) => name.includes('.tmp'))).toEqual([]);
+  });
+});
+
+describe('EvidenceAdapter — #1811 null-optional read tolerance', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** The real broken on-disk shape: an older wheel wrote literal nulls into
+   * the optional slots, which the strict schema rejects (null ≠ absent). */
+  function makeNullBearingEpisodeJson(episodeId: string): Record<string, unknown> {
+    const base = makeSampleEpisode({ episodeId }) as Record<string, unknown>;
+    return {
+      ...base,
+      outcome: { ...(base.outcome as object), summary: null },
+      cost: { ...(base.cost as object), tokens: null, usdEstimate: null },
+      lineage: null,
+    };
+  }
+
+  it('list() returns an on-disk episode file with null optionals', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-null-list-'));
+    writeFileSync(
+      join(capturesDir, 'null-ep-1.episode.json'),
+      JSON.stringify(makeNullBearingEpisodeJson('null-ep-1')),
+    );
+
+    const adapter = createEvidenceAdapter({ capturesDir });
+    const result = await adapter.list();
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok') return;
+    expect(result.value.map((e) => e.episodeId)).toEqual(['null-ep-1']);
+    expect(result.value[0].outcome.summary).toBeUndefined();
+    expect(result.value[0].cost.tokens).toBeUndefined();
+    expect(result.value[0].lineage).toBeUndefined();
+  });
+
+  it('get() returns an on-disk episode file with null optionals', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-null-get-'));
+    writeFileSync(
+      join(capturesDir, 'null-ep-2.episode.json'),
+      JSON.stringify(makeNullBearingEpisodeJson('null-ep-2')),
+    );
+
+    const adapter = createEvidenceAdapter({ capturesDir });
+    const result = await adapter.get('null-ep-2');
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok') return;
+    expect(result.value?.episodeId).toBe('null-ep-2');
+    expect(result.value?.outcome.summary).toBeUndefined();
+  });
+
+  it('list() still skips a genuinely corrupt episode file', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-null-corrupt-'));
+    writeFileSync(join(capturesDir, 'corrupt.episode.json'), JSON.stringify({ not: 'an episode' }));
+
+    const adapter = createEvidenceAdapter({ capturesDir });
+    const result = await adapter.list();
+    expect(result).toEqual({ status: 'ok', value: [] });
+  });
+
+  it('list() warns with a readable/unreadable summary when files were skipped', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-null-summary-'));
+    writeFileSync(
+      join(capturesDir, 'good.episode.json'),
+      JSON.stringify(makeNullBearingEpisodeJson('good')),
+    );
+    writeFileSync(join(capturesDir, 'bad.episode.json'), JSON.stringify({ not: 'an episode' }));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const adapter = createEvidenceAdapter({ capturesDir });
+    const result = await adapter.list();
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok') return;
+    expect(result.value.map((e) => e.episodeId)).toEqual(['good']);
+    expect(warnSpy.mock.calls.flat()).toContain(
+      '[evidence] list: 1 readable, 1 unreadable episode file(s)',
+    );
   });
 });

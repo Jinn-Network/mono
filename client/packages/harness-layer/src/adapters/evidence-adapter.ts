@@ -33,7 +33,7 @@ import type {
   EvidenceRetentionPolicy,
   PortResult,
 } from '@jinn-network/plugin';
-import { EpisodeV1Schema, type EpisodeV1 } from '@jinn-network/plugin';
+import { EpisodeV1Schema, parseEpisodeV1Read, type EpisodeV1 } from '@jinn-network/plugin';
 import { ok, unavailable } from '@jinn-network/plugin';
 import { parseCapturedTask, type CapturedTask } from '../capture.js';
 
@@ -140,7 +140,7 @@ export function createEvidenceAdapter(deps: EvidenceAdapterDeps): EvidencePort {
       const stat = await lstat(path);
       if (!stat.isFile() || stat.isSymbolicLink()) return 'collision';
       if (process.platform !== 'win32') await chmod(path, 0o600);
-      const existing = EpisodeV1Schema.parse(JSON.parse(await readFile(path, 'utf8')));
+      const existing = parseEpisodeV1Read(JSON.parse(await readFile(path, 'utf8')));
       return isDeepStrictEqual(existing, episode) ? 'identical' : 'collision';
     } catch (error) {
       return nodeErrorCode(error) === 'ENOENT' ? 'missing' : 'collision';
@@ -211,7 +211,7 @@ export function createEvidenceAdapter(deps: EvidenceAdapterDeps): EvidencePort {
       try {
         const path = episodePath(episodeId);
         if (!existsSync(path)) return ok(null);
-        return ok(EpisodeV1Schema.parse(JSON.parse(readFileSync(path, 'utf-8'))));
+        return ok(parseEpisodeV1Read(JSON.parse(readFileSync(path, 'utf-8'))));
       } catch (e) {
         return unavailable(`evidence store get failed: ${String(e)}`);
       }
@@ -221,12 +221,14 @@ export function createEvidenceAdapter(deps: EvidenceAdapterDeps): EvidencePort {
       try {
         if (!existsSync(capturesDir)) return ok([]);
         const episodes: EpisodeV1[] = [];
+        let unreadable = 0;
         for (const file of readdirSync(capturesDir)) {
           const path = join(capturesDir, file);
           if (file.endsWith(EPISODE_SUFFIX)) {
             try {
-              episodes.push(EpisodeV1Schema.parse(JSON.parse(readFileSync(path, 'utf-8'))));
+              episodes.push(parseEpisodeV1Read(JSON.parse(readFileSync(path, 'utf-8'))));
             } catch (err) {
+              unreadable += 1;
               console.warn(`[evidence] skipping malformed episode file ${file}: ${String(err)}`);
             }
           } else if (file.endsWith('.json')) {
@@ -236,9 +238,15 @@ export function createEvidenceAdapter(deps: EvidenceAdapterDeps): EvidencePort {
               const task = parseCapturedTask(JSON.parse(readFileSync(path, 'utf-8')));
               episodes.push(capturedTaskToEpisode(task, retention));
             } catch (err) {
+              unreadable += 1;
               console.warn(`[evidence] skipping malformed legacy capture ${file}: ${String(err)}`);
             }
           }
+        }
+        if (unreadable > 0) {
+          console.warn(
+            `[evidence] list: ${episodes.length} readable, ${unreadable} unreadable episode file(s)`,
+          );
         }
         return ok(query.limit ? episodes.slice(0, query.limit) : episodes);
       } catch (e) {
