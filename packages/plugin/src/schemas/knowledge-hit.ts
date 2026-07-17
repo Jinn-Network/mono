@@ -17,6 +17,10 @@ export const KnowledgeHitSchema = z.strictObject({
   origin: z.string().min(1).optional(),
   /** Unix-ms publish time — the selection policy's recency tiebreaker (rescope §3.3). */
   publishedAt: z.number().int().nonnegative().optional(),
+  /** Computed by the adapter from the wire hit's tags (issue #1824) — presence
+   *  of RETRIEVAL_VISIBLE_TAG. Absent = treat as not visible (fail-closed at
+   *  ranking). */
+  retrievalVisible: z.boolean().optional(),
 });
 
 export type KnowledgeHit = z.infer<typeof KnowledgeHitSchema>;
