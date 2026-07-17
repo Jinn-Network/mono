@@ -14,8 +14,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { describeEvidencePortContract } from '@jinn-network/plugin/testing';
 import { EPISODE_SCHEMA_VERSION, EpisodeV1Schema, type EpisodeV1 } from '@jinn-network/plugin';
-import type { CapturedTask } from '../../src/capture.js';
-import { createEvidenceAdapter } from '../../src/adapters/evidence-adapter.js';
+import type { CapturedTask } from '../src/captured-task.js';
+import { createEvidenceAdapter } from '../src/evidence-adapter.js';
 
 /** A sample EpisodeV1 the byte-exact round-trip is checked against. */
 function makeSampleEpisode(overrides: Partial<EpisodeV1> = {}): EpisodeV1 {

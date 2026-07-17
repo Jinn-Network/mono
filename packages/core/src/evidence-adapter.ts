@@ -35,7 +35,7 @@ import type {
 } from '@jinn-network/plugin';
 import { EpisodeV1Schema, type EpisodeV1 } from '@jinn-network/plugin';
 import { ok, unavailable } from '@jinn-network/plugin';
-import { parseCapturedTask, type CapturedTask } from '../capture.js';
+import { parseCapturedTask, type CapturedTask } from './captured-task.js';
 
 const DEFAULT_RETENTION: EvidenceRetentionPolicy = { policy: 'local-private', maxEpisodes: 200 };
 const EPISODE_SUFFIX = '.episode.json';
