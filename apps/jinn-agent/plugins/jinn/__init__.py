@@ -38,6 +38,7 @@ from . import pickup
 from . import session_bridge
 from . import session_view
 from . import skills_install
+from . import style
 
 logger = logging.getLogger(__name__)
 
@@ -123,9 +124,17 @@ def _user_line(msg: str) -> None:
     above the input area (the app is ``full_screen=False``); at shutdown
     and in ``-q`` mode it is plain stderr. Never raise from here — a
     feedback line must not break a session end.
+
+    Strips ANSI unconditionally before printing (mono issue #1798): the
+    ``patch_stdout`` proxy renders raw ESC bytes as ``?[38;2;…m`` noise
+    rather than interpreting them, so this channel emits plain text always,
+    regardless of ``COLORTERM``/``NO_COLOR``. The fork-precedent plugins this
+    channel was modeled on (memory/hindsight) print plain text too — the
+    styling here was our deviation. Styled surfaces that never run inside
+    the TUI (the terminal-blocking onboarding CLI) are unaffected.
     """
     try:
-        print(msg, file=sys.stderr, flush=True)
+        print(style.strip_ansi(msg), file=sys.stderr, flush=True)
     except Exception:
         pass
 

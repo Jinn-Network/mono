@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from . import jinn_layer
+from . import style
 from .consent import get_hermes_home
 from .harness import harness_name, harness_version
 
@@ -32,13 +33,18 @@ logger = logging.getLogger(__name__)
 # The point-of-use corpus signal (design 1c / #1405 step 4; rescope §3.4).
 # Emitted once per session, only when evidence was actually provided.
 # Default sink mirrors _user_line in __init__.py: stderr, which
-# prompt_toolkit proxies above the input area while the TUI runs.
+# prompt_toolkit proxies above the input area while the TUI runs — and,
+# like that channel, strips ANSI unconditionally before printing (mono
+# issue #1798): the proxy renders raw ESC bytes as noise rather than
+# interpreting them. The onboarding CLI's own rendering of this same line
+# (render_evidence_signal_line's step-3 preview) runs terminal-blocking
+# outside the TUI and stays styled — only this funnel goes plain.
 SignalSink = Callable[[str], None]
 
 
 def _default_signal_sink(line: str) -> None:
     try:
-        print(line, file=sys.stderr, flush=True)
+        print(style.strip_ansi(line), file=sys.stderr, flush=True)
     except Exception:
         pass
 
