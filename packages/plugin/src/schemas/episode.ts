@@ -87,3 +87,52 @@ export const EpisodeV1Schema = z.strictObject({
 
 export type EpisodeV1 = z.infer<typeof EpisodeV1Schema>;
 export type SessionActivityFacts = z.infer<typeof SessionActivityFactsSchema>;
+
+/** Shallow-copy `value` without the listed keys when they are literal `null`. */
+function stripNullKeys(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+): Record<string, unknown> {
+  const out = { ...value };
+  for (const key of keys) {
+    if (out[key] === null) delete out[key];
+  }
+  return out;
+}
+
+/**
+ * READ-side tolerant EpisodeV1 parse (#1811). An older jinn-agent wheel
+ * serialized explicit `None`s into the optional slots, so real on-disk
+ * episodes carry literal JSON `null` in `outcome.summary`, `cost.tokens`,
+ * `cost.usdEstimate`, `lineage`, `lineage.mintRef`, `activity`, and
+ * `eligibility`. `.optional()` on a strictObject is absent-OK but null-fatal,
+ * so every such file failed strict parse and was silently dropped.
+ *
+ * This helper strips literal `null` from exactly those known optional slots,
+ * then delegates to the unchanged strict `EpisodeV1Schema.parse` — it throws
+ * on genuinely invalid input just like `.parse`. Writes stay strict: `put`
+ * and `SessionEndRequestV1Schema` must keep using `EpisodeV1Schema` directly.
+ */
+export function parseEpisodeV1Read(json: unknown): EpisodeV1 {
+  if (json === null || typeof json !== 'object' || Array.isArray(json)) {
+    return EpisodeV1Schema.parse(json);
+  }
+  let candidate = stripNullKeys(json as Record<string, unknown>, [
+    'lineage',
+    'activity',
+    'eligibility',
+  ]);
+  const outcome = candidate.outcome;
+  if (outcome && typeof outcome === 'object' && !Array.isArray(outcome)) {
+    candidate = { ...candidate, outcome: stripNullKeys(outcome as Record<string, unknown>, ['summary']) };
+  }
+  const cost = candidate.cost;
+  if (cost && typeof cost === 'object' && !Array.isArray(cost)) {
+    candidate = { ...candidate, cost: stripNullKeys(cost as Record<string, unknown>, ['tokens', 'usdEstimate']) };
+  }
+  const lineage = candidate.lineage;
+  if (lineage && typeof lineage === 'object' && !Array.isArray(lineage)) {
+    candidate = { ...candidate, lineage: stripNullKeys(lineage as Record<string, unknown>, ['mintRef']) };
+  }
+  return EpisodeV1Schema.parse(candidate);
+}

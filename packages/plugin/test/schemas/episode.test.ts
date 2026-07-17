@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EpisodeV1Schema } from '../../src/schemas/episode.js';
+import { EpisodeV1Schema, parseEpisodeV1Read } from '../../src/schemas/episode.js';
 import { makeSampleEpisode } from '../_fixtures/episode.js';
 
 const valid = makeSampleEpisode({ episodeId: 'ep-1' });
@@ -174,5 +174,66 @@ describe('EpisodeV1Schema', () => {
       provenance: 'contributed',
     };
     expect(() => EpisodeV1Schema.parse(fromPython)).not.toThrow();
+  });
+});
+
+// #1811: real on-disk episodes carry literal JSON `null` in the optional
+// slots (an older wheel serialized explicit Nones). `.optional()` on a
+// strictObject is absent-OK but null-fatal, so every such file failed strict
+// parse. `parseEpisodeV1Read` is the read-side tolerance: strip the known
+// null slots, then delegate to the unchanged strict schema.
+describe('parseEpisodeV1Read', () => {
+  /** The real broken shape from ~/.jinn-client/harness-layer/episodes/. */
+  function makeNullBearingEpisode(): Record<string, unknown> {
+    const base = makeSampleEpisode({ episodeId: 'ep-null-1' }) as Record<string, unknown>;
+    return {
+      ...base,
+      outcome: { ...(base.outcome as object), summary: null },
+      cost: { ...(base.cost as object), tokens: null, usdEstimate: null },
+      lineage: null,
+    };
+  }
+
+  it('strict EpisodeV1Schema rejects the null-bearing on-disk shape', () => {
+    expect(() => EpisodeV1Schema.parse(makeNullBearingEpisode())).toThrow();
+  });
+
+  it('accepts the null-bearing shape, treating null optionals as absent', () => {
+    const parsed = parseEpisodeV1Read(makeNullBearingEpisode());
+    expect(parsed.outcome.summary).toBeUndefined();
+    expect(parsed.cost.tokens).toBeUndefined();
+    expect(parsed.cost.usdEstimate).toBeUndefined();
+    expect(parsed.lineage).toBeUndefined();
+    // The normalized result round-trips the unchanged strict schema.
+    expect(() => EpisodeV1Schema.parse(parsed)).not.toThrow();
+  });
+
+  it('strips a null lineage.mintRef inside a present lineage object', () => {
+    const episode = {
+      ...makeSampleEpisode({ episodeId: 'ep-null-2' }),
+      lineage: { episodeId: 'ep-0', mintRef: null },
+    };
+    const parsed = parseEpisodeV1Read(episode);
+    expect(parsed.lineage).toEqual({ episodeId: 'ep-0' });
+  });
+
+  it('strips null activity and eligibility', () => {
+    const episode = {
+      ...makeSampleEpisode({ episodeId: 'ep-null-3' }),
+      activity: null,
+      eligibility: null,
+    };
+    const parsed = parseEpisodeV1Read(episode);
+    expect(parsed.activity).toBeUndefined();
+    expect(parsed.eligibility).toBeUndefined();
+  });
+
+  it('still throws on a missing required field', () => {
+    const { retention: _retention, ...missingRequired } = makeNullBearingEpisode();
+    expect(() => parseEpisodeV1Read(missingRequired)).toThrow();
+  });
+
+  it('still throws on an unknown top-level field', () => {
+    expect(() => parseEpisodeV1Read({ ...makeNullBearingEpisode(), extra: true })).toThrow();
   });
 });
