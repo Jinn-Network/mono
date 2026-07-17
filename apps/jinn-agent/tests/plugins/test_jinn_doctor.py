@@ -401,3 +401,169 @@ def test_banner_with_failure_leads_with_fail_line_and_remedy():
     assert lines[1] == "       remedy: hermes plugins update jinn"
     assert lines[-1] == "commands: /jinn · re-check: /jinn doctor"
     assert len(lines) == 4
+
+
+# ── Task 8: __init__.py wiring ───────────────────────────────────────────────
+
+
+@pytest.fixture()
+def wired(tmp_path, monkeypatch, healthy_environment):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    capture_buffer.reset()
+    jinn._reset_session_state()
+    jinn._degraded = None
+    jinn._runner = None
+    jinn._vetoed_tasks.clear()
+    jinn._session_hint_shown.clear()
+    yield tmp_path
+    jinn._runner = None
+    jinn._degraded = None
+    jinn._reset_session_state()
+    capture_buffer.reset()
+
+
+def test_session_start_first_session_prints_banner_and_marks(wired, capsys):
+    jinn._runner = ContractRunner()
+
+    jinn._on_session_start(session_id="s1")
+
+    err = capsys.readouterr().err
+    assert err.rstrip("\n").splitlines() == doctor.first_session_banner(
+        doctor.run_checks(full=False, runner=ContractRunner())
+    )
+    assert doctor._first_session_done() is True
+
+
+def test_session_start_later_sessions_silent_when_healthy(wired, capsys):
+    jinn._runner = ContractRunner()
+    doctor._mark_first_session_done()
+
+    jinn._on_session_start(session_id="s1")
+
+    assert capsys.readouterr().err == ""
+
+
+def test_session_start_failure_prints_every_time(wired, capsys):
+    jinn._runner = ContractRunner(code=127, output="", err="jinn-layer: not found")
+    doctor._mark_first_session_done()
+
+    jinn._on_session_start(session_id="s1")
+    jinn._on_session_start(session_id="s2")
+
+    err = capsys.readouterr().err
+    assert err.count("[fail] layer-available: jinn-layer: not found") == 2
+    assert err.count("       remedy: hermes plugins update jinn") == 4  # 2 checks x 2 sessions
+    assert jinn._degraded == "jinn-layer: not found"
+
+
+def test_session_start_probes_contract_every_session(wired):
+    # Migrated (inverted) from the deleted memoization test: the handshake
+    # re-checks per session start now that the process-lifetime memo is gone.
+    runner = ContractRunner()
+    jinn._runner = runner
+    doctor._mark_first_session_done()
+
+    jinn._on_session_start(session_id="s1")
+    jinn._on_session_start(session_id="s2")
+
+    assert jinn._degraded is None
+    assert len(runner.calls) == 2
+
+
+def test_degraded_never_disables_python_pickup_or_local_episode_fallback(wired, monkeypatch):
+    # Migrated from test_jinn_contract_handshake.py — no gate function to
+    # call anymore, so the degraded state is set directly.
+    runner = ContractRunner()
+    jinn._runner = runner
+    jinn._degraded = "contract v2 (expected v1)"
+    monkeypatch.setattr(jinn.pickup, "pickup", lambda *_a, **_k: {"context": "python pickup"})
+    local: list[dict] = []
+    monkeypatch.setattr(jinn.distill, "write_episode_fallback", lambda episode: local.append(episode))
+    monkeypatch.setattr(jinn.distill, "tee_capture", lambda *_a, **_k: None)
+
+    result = jinn._on_pre_llm_call(
+        session_id="s1", task_id="t1", user_message="fix tests", is_first_turn=True, model="m"
+    )
+    jinn._on_post_tool_call(
+        tool_name="terminal",
+        args={"command": "scripts/run_tests.sh tests/plugins/test_jinn_plugin.py"},
+        result={"exit_code": 0},
+        session_id="s1",
+        task_id="t1",
+        tool_call_id="c1",
+    )
+    jinn._on_session_end(session_id="s1", task_id="t1", completed=True)
+
+    assert result == {"context": "python pickup"}
+    assert len(local) == 1
+    assert local[0]["schemaVersion"] == "jinn.episode.v1"
+    assert all(call[1:3] != ["session", "end"] for call in runner.calls)
+
+
+def test_jinn_doctor_command_renders_full_run(wired):
+    jinn._runner = ContractRunner()
+
+    result = jinn._handle_jinn(command_args="doctor")
+
+    assert result == doctor.render(doctor.run_checks(full=True, runner=ContractRunner()))
+    assert "host-provider" in result
+    assert jinn._degraded is None
+
+
+def test_jinn_doctor_command_sets_degraded_on_failure(wired):
+    jinn._runner = ContractRunner(code=127, output="", err="nope")
+
+    jinn._handle_jinn(command_args="doctor")
+
+    assert "bridge: degraded — nope" in jinn._handle_jinn(command_args="status")
+
+
+def test_jinn_doctor_command_recovers_degraded_mid_process(wired):
+    jinn._degraded = "stale reason"
+    jinn._runner = ContractRunner()
+
+    jinn._handle_jinn(command_args="doctor")
+
+    assert jinn._degraded is None
+    assert "bridge: degraded" not in jinn._handle_jinn(command_args="status")
+
+
+def test_jinn_help_documents_doctor(wired):
+    assert "/jinn doctor" in jinn._handle_jinn(command_args="help")
+
+
+def test_cli_handler_prints_report_and_returns_zero(monkeypatch, capsys):
+    canned = [{"name": "x", "ok": True, "detail": "fine"}]
+    monkeypatch.setattr(doctor, "run_checks", lambda full, runner=None: canned)
+
+    assert doctor.cli_handler(argparse.Namespace()) == 0
+
+    out = capsys.readouterr().out
+    assert "[ok  ] x: fine" in out
+    assert "all checks passed." in out
+
+
+def test_cli_command_registers_as_jinn_doctor_not_doctor():
+    # `doctor` is a built-in hermes subcommand (hermes_cli/subcommands/
+    # doctor.py); a colliding plugin name silently disables discovery of
+    # every plugin CLI command. This guard pins the non-colliding verb.
+    class FakeContext:
+        def __init__(self) -> None:
+            self.cli_commands: list[str] = []
+
+        def register_tool(self, **_kw) -> None:
+            pass
+
+        def register_hook(self, _name, _fn) -> None:
+            pass
+
+        def register_command(self, _name, **_kw) -> None:
+            pass
+
+        def register_cli_command(self, name, **_kw) -> None:
+            self.cli_commands.append(name)
+
+    ctx = FakeContext()
+    jinn.register(ctx)
+    assert "jinn-doctor" in ctx.cli_commands
+    assert "doctor" not in ctx.cli_commands
