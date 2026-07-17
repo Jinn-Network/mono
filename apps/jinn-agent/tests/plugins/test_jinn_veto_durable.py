@@ -73,4 +73,4 @@ def test_published_message_says_the_record_is_immutable():
         },
     )
 
-    assert "jinn: contribution published — immutable (/jinn ledger for the anchor)" in line
+    assert "jinn: contribution published — immutable" in line

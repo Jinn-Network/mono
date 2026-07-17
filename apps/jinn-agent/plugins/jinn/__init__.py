@@ -8,7 +8,7 @@ falls back to one local EpisodeV1 write; the retired raw pending/publication
 queue is never created or drained here.
 
 Sharing remains governed by the single consent bit, and ``/jinn`` exposes
-status, consent, informational preview, ledger, veto, and corpus consumption.
+status, session, history, veto, distill, and corpus consumption.
 
 Upstream-merge procedure: see JINN.md at the repo root.
 """
@@ -33,8 +33,6 @@ from . import distill
 from . import doctor
 from . import history_view
 from . import jinn_layer
-from . import ledger_view
-from . import onboarding
 from . import pickup
 from . import session_bridge
 from . import session_view
@@ -45,7 +43,6 @@ logger = logging.getLogger(__name__)
 
 _veto_lock = threading.Lock()
 _vetoed_tasks: Set[str] = set()
-_session_hint_shown: Set[str] = set()
 
 # Distilled-skill use counts at session start; the session-end payoff surface
 # reports only skills used during this session.
@@ -70,10 +67,6 @@ _session_states: Dict[str, Dict[str, Any]] = {}
 def _reset_session_state() -> None:
     with _session_state_lock:
         _session_states.clear()
-
-
-def _pending_dir() -> Path:
-    return consent.get_hermes_home() / "jinn" / "pending"
 
 
 def _user_line(msg: str) -> None:
@@ -254,16 +247,6 @@ def _on_session_start(session_id: str = "", platform: str = "", **_: Any) -> Non
         pass
     global _distill_usage_snapshot
     _distill_usage_snapshot = distill.snapshot_usage()
-    if consent.consent_decided():
-        return
-    if session_id in _session_hint_shown:
-        return
-    _session_hint_shown.add(session_id)
-    # Never block a session with an interactive flow from inside a hook —
-    # surface the one-line hint; the flow itself runs via /jinn consent.
-    logger.info(
-        "jinn: sharing consent not set — nothing is shared. Run /jinn consent to decide."
-    )
 
 
 def _on_pre_llm_call(
@@ -553,25 +536,14 @@ def _on_session_end(
 
 _JINN_HELP = (
     "/jinn — Jinn layer\n"
-    "  /jinn status    consent + capture state\n"
+    "  /jinn status    capture + distillation state\n"
     "  /jinn doctor    environment checks — plugin build, layer, prerequisites\n"
-    "  /jinn consent   run the consent flow\n"
-    "  /jinn preview   inspect a retained legacy capture, or a labelled example\n"
     "  /jinn session   current searched/provided, capture, learning, and contribution state\n"
     "  /jinn history   sessions derived from episodes, contributions, and local skills\n"
-    "  /jinn ledger    the contribution ledger — what left this machine\n"
     "  /jinn veto      withhold the current task (recorded locally, never published)\n"
     "  /jinn distill   local distillation — your captures into reusable skills\n"
     "  /jinn distill where local|defer|off   set where distillation runs\n"
 )
-
-
-def _latest_pending() -> Optional[Path]:
-    directory = _pending_dir()
-    if not directory.exists():
-        return None
-    files = sorted(directory.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-    return files[0] if files else None
 
 
 def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = "", **_: Any) -> str:
@@ -588,19 +560,9 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
         return doctor.render(checks)
 
     if sub == "status":
-        state = consent.load_state()
-        share = bool(state.get("shareConsent"))
-        lines = [f"sharing: {'ON' if share else 'OFF'}"]
-        if share:
-            lines.append(f"previewed: {'yes' if state.get('previewed') else 'no'}")
-            lines.append("share: ON — reproducible tasks from your work may be shared at task end")
-        else:
-            lines.append("share: OFF — nothing derived from your work leaves this machine")
+        lines = []
         if _degraded is not None:
             lines.append(f"bridge: degraded — {_degraded}")
-        pending = _latest_pending()
-        if pending:
-            lines.append(f"pending trace: {pending}")
         d_status = distill.distill_status(_runner)
         if d_status:
             lines.append(
@@ -608,68 +570,8 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
                 f"{d_status.get('uncoveredCount', 0)} capture(s) not yet distilled, "
                 f"{d_status.get('stagedCount', 0)} staged, {d_status.get('installedCount', 0)} installed"
             )
+        lines.append("contribution: parked — nothing leaves this machine")
         return "\n".join(lines)
-
-    if sub == "consent":
-        # TUI-safe: stateless commands, never blocking reads. Same deliberate
-        # two-step as the design's keyboard flow (idle -> confirming -> recorded).
-        action = parts[1] if len(parts) > 1 else ""
-        confirmed = len(parts) > 2 and parts[2] == "confirm"
-        if action == "accept":
-            if not confirmed:
-                return consent.confirm_accept_command()
-            marker_ok = session_bridge.set_publication_enabled(True)
-            message = consent.record_accept()
-            return message if marker_ok else message + "\nwarning: publication preference marker could not be updated"
-        if action == "decline":
-            if not confirmed:
-                return consent.confirm_decline_command()
-            code, out, err = jinn_layer.contribution_disable(runner=_runner)
-            # Let the core serialize revocation with any publication already
-            # crossing its boundary. The direct marker is the fail-closed host
-            # fallback and mirrors the successful core write for old stubs.
-            marker_ok = session_bridge.set_publication_enabled(False)
-            message = consent.record_decline()
-            if code == 0:
-                return message
-            if marker_ok:
-                return message + "\nexisting publication queue is fail-closed locally; jinn-layer cleanup is degraded"
-            return message + f"\nwarning: could not disable the existing publication queue: {err or out}"
-        return consent.render_explainer(consent.COMMANDS_LINE)
-
-    if sub == "preview":
-        code, out, _err = jinn_layer.contribution_preview(acknowledge=True, runner=_runner)
-        if code == 0:
-            try:
-                reply = jinn_layer.parse_process_response(out)
-                value = reply.get("value")
-                if isinstance(value, dict):
-                    consent.mark_previewed()
-                    lines = [
-                        "Jinn public-task preview",
-                        f"repository: {value.get('repositorySlug', 'unavailable')}",
-                        f"base commit: {value.get('baseCommit', 'unavailable')}",
-                        "shared after validation: public task definition and test contract",
-                        "stays local: raw trajectory, source id, accepted diff/gold, failures, skills, and holdouts",
-                        "preview acknowledged — this and later eligible public tasks may queue silently",
-                    ]
-                    if reply.get("status") == "degraded":
-                        lines.append(f"bridge degraded: {reply.get('reason', 'details unavailable')}")
-                    return "\n".join(lines)
-            except (TypeError, ValueError):
-                pass
-        pending = _latest_pending()
-        if pending is None:
-            # Design requirement iv: preview is reachable before any publish.
-            # With no task yet, show the labelled example fixture rather than
-            # an empty screen. Does not mark previewed — the real gate stays
-            # on a real trace.
-            return consent.render_preview_example()
-        code, out, err = jinn_layer.capture_preview(pending, runner=_runner)
-        if code == 0:
-            consent.mark_previewed()
-            return out + "\n\nlegacy preview only — this retained file will not auto-publish."
-        return f"preview failed:\n{err or out}"
 
     if sub == "session":
         state = _peek_state(session_id)
@@ -701,43 +603,6 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
                 + history_view.safe_text(reply.get("reason"), "details unavailable")
             )
         return rendered
-
-    if sub == "ledger":
-        # Prefer canonical contribution-store rows. A layer that predates the
-        # command falls back to the legacy publication-receipt ledger.
-        ccode, cout, _cerr = jinn_layer.contribution_ledger_json(runner=_runner)
-        if ccode == 0:
-            try:
-                reply = jinn_layer.parse_process_response(cout)
-            except ValueError:
-                reply = None
-            if isinstance(reply, dict):
-                if reply.get("status") == "unavailable":
-                    return f"contribution ledger unavailable:\n{reply.get('reason', 'details unavailable')}"
-                rows = ledger_view.rows_from_json(reply.get("value"))
-                if rows is not None:
-                    rendered = ledger_view.render_ledger(
-                        rows, enabled=consent.share_enabled()
-                    )
-                    if reply.get("status") == "degraded":
-                        rendered += (
-                            "\n\ncontribution state degraded — "
-                            + str(reply.get("reason") or "details unavailable")
-                        )
-                    return rendered
-
-        # Prefer structured legacy rows (design 1b columns + tier chips +
-        # exact empty state), then degrade to the layer's raw text.
-        jcode, jout, _jerr = jinn_layer.ledger_json(runner=_runner)
-        if jcode == 0:
-            try:
-                rows = ledger_view.rows_from_json(json.loads(jout))
-            except json.JSONDecodeError:
-                rows = None
-            if rows is not None:
-                return ledger_view.render_ledger(rows, enabled=consent.share_enabled())
-        code, out, err = jinn_layer.ledger(runner=_runner)
-        return out if code == 0 else f"ledger unavailable:\n{err or out}"
 
     if sub == "distill":
         # Local distillation (mono #1538) — all logic + rendering in distill.py;
@@ -870,24 +735,12 @@ def register(ctx) -> None:
     ctx.register_command(
         "jinn",
         handler=_handle_jinn,
-        description="Jinn layer: session, history, consent, and contribution state.",
+        description="Jinn layer: session, history, and corpus state.",
     )
     ctx.register_command(
         "corpus",
         handler=_handle_corpus,
         description="Search the public Jinn corpus.",
-    )
-    # `jinn-agent onboarding [--replay]` — the guided first run (mono#1405).
-    # A terminal subcommand (blocking reads), NOT a slash command: the flow
-    # reuses consent.run_consent_flow, whose input() would deadlock a TUI
-    # session. Returning operators (consent recorded + ledger non-empty) get
-    # a no-op; --replay re-renders without re-asking.
-    ctx.register_cli_command(
-        "onboarding",
-        help="Guided first-run onboarding (consent → publish → signals).",
-        setup_fn=onboarding.setup_parser,
-        handler_fn=onboarding.cli_handler,
-        description="Walk the core loop once, one confirmed step at a time. --replay re-shows it.",
     )
     # `jinn-agent jinn-doctor` — the doctor without a TUI session (mono #1817).
     # NOT named `doctor`: that collides with the built-in hermes subcommand

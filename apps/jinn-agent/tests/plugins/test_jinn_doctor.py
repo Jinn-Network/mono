@@ -478,7 +478,6 @@ def wired(tmp_path, monkeypatch, healthy_environment):
     jinn._degraded = None
     jinn._runner = None
     jinn._vetoed_tasks.clear()
-    jinn._session_hint_shown.clear()
     yield tmp_path
     jinn._runner = None
     jinn._degraded = None

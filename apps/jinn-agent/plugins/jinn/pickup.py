@@ -23,6 +23,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from . import corpus_view
 from . import jinn_layer
 from . import style
 from .consent import get_hermes_home
@@ -36,9 +37,8 @@ logger = logging.getLogger(__name__)
 # prompt_toolkit proxies above the input area while the TUI runs — and,
 # like that channel, strips ANSI unconditionally before printing (mono
 # issue #1798): the proxy renders raw ESC bytes as noise rather than
-# interpreting them. The onboarding CLI's own rendering of this same line
-# (render_evidence_signal_line's step-3 preview) runs terminal-blocking
-# outside the TUI and stays styled — only this funnel goes plain.
+# interpreting them. ``corpus_view.render_evidence_signal_line`` is the sole
+# source of this line's format.
 SignalSink = Callable[[str], None]
 
 
@@ -86,8 +86,7 @@ def _emit_evidence_signal(sink: SignalSink, searched_terms: List[str], provided_
     """Render + emit one ``◇ corpus`` line (rescope §3.4). Never raises — a
     signal must not break a pickup that otherwise succeeded."""
     try:
-        from . import onboarding  # local import: avoids a module cycle at import time
-        sink(onboarding.render_evidence_signal_line(searched_terms, provided_count))
+        sink(corpus_view.render_evidence_signal_line(searched_terms, provided_count))
     except Exception:
         logger.debug("jinn: corpus signal render failed", exc_info=True)
 

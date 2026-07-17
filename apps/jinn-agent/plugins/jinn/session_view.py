@@ -89,7 +89,7 @@ def _contribution(value: object) -> str:
     status = _text(receipt.get("status"), "unavailable")
     line = f"contribution {status}"
     if status == "published":
-        line = "jinn: contribution published — immutable (/jinn ledger for the anchor)"
+        line = "jinn: contribution published — immutable"
     return line
 
 

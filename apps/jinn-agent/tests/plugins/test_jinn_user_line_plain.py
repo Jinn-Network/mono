@@ -6,8 +6,8 @@ while the TUI runs. That proxy renders raw ESC bytes as `?[38;2;…m` noise
 rather than colour, so this channel must strip ANSI unconditionally before
 printing — matching the fork-precedent plugins (memory/hindsight) it was
 modeled on. Styled surfaces that never run inside the TUI (the
-terminal-blocking onboarding CLI) are untouched; see
-`test_jinn_onboarding.py::test_evidence_signal_line_format` for the
+pickup `◇ corpus` line) are untouched; see
+`test_jinn_corpus_view.py::test_evidence_signal_line_format` for the
 still-styled counterpart.
 
 `style.strip_ansi` is unit-tested directly here; the pickup marker-line
