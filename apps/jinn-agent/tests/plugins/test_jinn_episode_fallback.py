@@ -102,6 +102,28 @@ def test_fallback_rejects_same_id_with_different_content_without_overwrite(
     assert list(tmp_path.glob("*.tmp")) == []
 
 
+def test_fallback_drops_none_valued_optional_keys_before_serializing(
+    tmp_path, monkeypatch
+):
+    # mono #1811: an older wheel assigned explicit Nones to the optional
+    # slots; persisted literal nulls fail the strict null-fatal schema on read.
+    monkeypatch.setenv("JINN_LAYER_EPISODES_DIR", str(tmp_path))
+    episode = _episode()
+    episode["episodeId"] = "none-keys-1"
+    episode["outcome"]["summary"] = None
+    episode["cost"]["tokens"] = None
+    episode["cost"]["usdEstimate"] = None
+    episode["lineage"] = None
+
+    path = distill.write_episode_fallback(episode)
+
+    persisted = json.loads(path.read_text(encoding="utf-8"))
+    assert "summary" not in persisted["outcome"]
+    assert "tokens" not in persisted["cost"]
+    assert "usdEstimate" not in persisted["cost"]
+    assert "lineage" not in persisted
+
+
 def test_fallback_uses_the_core_filename_and_does_not_duplicate_a_lost_response(
     tmp_path, monkeypatch
 ):

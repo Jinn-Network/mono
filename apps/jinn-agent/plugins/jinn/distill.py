@@ -163,6 +163,33 @@ def tee_capture(task: Dict[str, Any], session_id: str, runner: Optional[Runner] 
         return None
 
 
+def _drop_none_optional_keys(episode: Dict[str, Any]) -> Dict[str, Any]:
+    """Strip None-valued KNOWN optional slots before serializing (mono #1811).
+
+    EpisodeV1's optional fields are absent-OK but null-fatal under the strict
+    zod schema, so a persisted literal ``null`` makes the whole file
+    unreadable. Defence-in-depth, deliberately scoped to the known optional
+    slots — not a generic None sweep, which could mask a producer bug in a
+    required field.
+    """
+    out = dict(episode)
+    outcome = out.get("outcome")
+    if isinstance(outcome, dict) and outcome.get("summary") is None and "summary" in outcome:
+        out["outcome"] = {k: v for k, v in outcome.items() if k != "summary"}
+    cost = out.get("cost")
+    if isinstance(cost, dict):
+        pruned = {
+            k: v
+            for k, v in cost.items()
+            if not (k in ("tokens", "usdEstimate") and v is None)
+        }
+        if pruned != cost:
+            out["cost"] = pruned
+    if "lineage" in out and out["lineage"] is None:
+        del out["lineage"]
+    return out
+
+
 def write_episode_fallback(episode: Dict[str, Any]) -> Optional[Path]:
     """Persist one complete EpisodeV1 when the core did not.
 
@@ -184,7 +211,7 @@ def write_episode_fallback(episode: Dict[str, Any]) -> Optional[Path]:
             else f"episode-{hashlib.sha256(episode_id.encode('utf-8')).hexdigest()}"
         )
         serialized = json.dumps(
-            episode,
+            _drop_none_optional_keys(episode),
             ensure_ascii=False,
             allow_nan=False,
             sort_keys=True,
