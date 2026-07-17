@@ -227,17 +227,24 @@ def _on_session_start(session_id: str = "", platform: str = "", **_: Any) -> Non
     _state_for(session_id, Path(cwd) if isinstance(cwd, str) and cwd else None)
     # Doctor fast path (mono #1817): re-check per session start — no
     # process-lifetime memoization. Loud on failure, silent when healthy.
+    # Checks run outside the lock (they spawn subprocesses; the layer probe
+    # alone is bounded at 120s) — the lock guards only the _degraded write,
+    # matching the /jinn doctor branch.
+    checks = doctor.run_checks(full=False, runner=_runner)
     with _contract_lock:
-        checks = doctor.run_checks(full=False, runner=_runner)
-        failing = [c for c in checks if not c["ok"]]
-        _degraded = failing[0]["detail"] if failing else None
-    for check in failing:
-        _user_line(f"[fail] {check['name']}: {check['detail']}")
-        _user_line(f"       remedy: {check['remedy']}")
+        _degraded = doctor.degraded_reason(checks)
     if not doctor._first_session_done():
+        # First session ever: the banner is the whole verdict (spec §3.2 —
+        # all green, or the first failure with its fix). No separate fail
+        # loop, or the first failure would print twice.
         for line in doctor.first_session_banner(checks):
             _user_line(line)
         doctor._mark_first_session_done()
+    else:
+        for check in checks:
+            if not check["ok"]:
+                for line in doctor.fail_lines(check):
+                    _user_line(line)
     # Pick up a background distillation left over from a previous process:
     # live pid → resume the ambient tail; dead without a run_end → one
     # recovery line + archive (mono #1539). Never blocks, never raises.
@@ -577,8 +584,7 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
         with _contract_lock:
             # Refresh the bridge state so a fixed layer recovers mid-process
             # instead of staying degraded for the process lifetime.
-            failing = [c for c in checks if not c["ok"]]
-            _degraded = failing[0]["detail"] if failing else None
+            _degraded = doctor.degraded_reason(checks)
         return doctor.render(checks)
 
     if sub == "status":
