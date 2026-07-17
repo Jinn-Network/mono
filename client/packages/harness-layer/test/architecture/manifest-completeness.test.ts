@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { builtinModules } from 'node:module';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SPECIFIER, tsFiles } from './import-scan.js';
 
 /**
  * Architecture manifest test for #1832.
@@ -15,23 +16,6 @@ import { fileURLToPath } from 'node:url';
  */
 const pkgRoot = fileURLToPath(new URL('../../', import.meta.url));
 const srcDir = join(pkgRoot, 'src');
-
-function tsFiles(dir: string): string[] {
-  const out: string[] = [];
-  for (const name of readdirSync(dir)) {
-    const full = join(dir, name);
-    if (statSync(full).isDirectory()) {
-      out.push(...tsFiles(full));
-    } else if (name.endsWith('.ts')) {
-      out.push(full);
-    }
-  }
-  return out;
-}
-
-// Static `import ... from` / `export ... from`, dynamic `import(...)`, and
-// bare side-effect `import '...'` specifiers.
-const SPECIFIER = /(?:from\s+|import\s*\(\s*|import\s+)['"]([^'"]+)['"]/g;
 
 function bareSpecifiers(source: string): string[] {
   const specs: string[] = [];
