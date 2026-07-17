@@ -22,6 +22,7 @@ import { resolveImplementer } from './implementer-policy.js';
 const HERE = dirname(fileURLToPath(import.meta.url));
 // src/dispatcher → src → packages/autopilot → packages → repo root
 const REPO_ROOT = join(HERE, '..', '..', '..', '..');
+const AUTOPILOT_PACKAGE_DIR = join(REPO_ROOT, 'packages', 'autopilot');
 
 /**
  * Per CLAUDE.md AI rule #1, multi-agent worktrees live in
@@ -371,7 +372,11 @@ export async function dispatchIssue(
         logPath,
         startedAtMarkerPath,
         ...identityEnv,
-        env: { ...identityEnv.env, HERMES_HOME: hermesHome },
+        env: {
+          ...identityEnv.env,
+          HERMES_HOME: hermesHome,
+          JINN_AUTOPILOT_PACKAGE_DIR: AUTOPILOT_PACKAGE_DIR,
+        },
       },
     );
   } else {

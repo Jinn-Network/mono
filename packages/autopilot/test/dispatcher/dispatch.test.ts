@@ -1032,6 +1032,15 @@ describe('dispatchIssue — hermes implementer', () => {
     expect(yaml).toContain('reasoning_effort: "medium"'); // ISSUE.effort = Medium
   });
 
+  it('passes the installed autopilot package dir for the coordinator triage gate', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchIssue(ISSUE, HERMES_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+
+    const env = calls[0].opts.env as Record<string, string>;
+    expect(env.JINN_AUTOPILOT_PACKAGE_DIR).toBe(join(REPO_ROOT, 'packages', 'autopilot'));
+  });
+
   it('invokes the hermes SIBLING skill and reuses the worktree', async () => {
     const { runner } = makeRunner();
     const { spawn, calls } = makeSpawn();

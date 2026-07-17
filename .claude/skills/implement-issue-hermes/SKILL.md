@@ -29,8 +29,11 @@ Plus its board fields (Issue Type, Blocked on, Effort, Priority). **Stop and esc
 ## 2. Reality check — the triage gate
 
 ```bash
-yarn workspace @jinn-network/autopilot triage:check <N>
+yarn --cwd "$JINN_AUTOPILOT_PACKAGE_DIR" triage:check <N>
 ```
+The dispatcher sets `JINN_AUTOPILOT_PACKAGE_DIR` to its installed package
+checkout. Use it rather than the issue worktree: the repository has no root
+Yarn workspace, and a fresh issue worktree has no Autopilot install state.
 Read the JSON verdict. If it is **not clear**, do not implement: comment the verdict on the issue, set `Blocked on: Human`, and stop (§8). A nonzero exit is itself a stop — never proceed on an unverified issue.
 
 ## 3. Your worktree already exists

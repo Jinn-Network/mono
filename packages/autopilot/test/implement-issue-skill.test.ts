@@ -16,6 +16,13 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, '..', '..', '..');
 const SKILL_PATH = join(REPO_ROOT, '.claude', 'skills', 'implement-issue', 'SKILL.md');
+const HERMES_SKILL_PATH = join(
+  REPO_ROOT,
+  '.claude',
+  'skills',
+  'implement-issue-hermes',
+  'SKILL.md',
+);
 
 describe('implement-issue SKILL.md (#657 depth-fix)', () => {
   const doc = readFileSync(SKILL_PATH, 'utf8');
@@ -30,5 +37,15 @@ describe('implement-issue SKILL.md (#657 depth-fix)', () => {
 
   it('does NOT contain the superseded blanket "fresh subagent" Step-3 rule', () => {
     expect(doc).not.toContain('Each stage is performed by dispatching a **fresh subagent**');
+  });
+});
+
+describe('implement-issue-hermes SKILL.md triage gate', () => {
+  const doc = readFileSync(HERMES_SKILL_PATH, 'utf8');
+
+  it('runs triage from the dispatcher package instead of the dependency-free issue worktree', () => {
+    expect(doc).toContain(
+      'yarn --cwd "$JINN_AUTOPILOT_PACKAGE_DIR" triage:check <N>',
+    );
   });
 });
