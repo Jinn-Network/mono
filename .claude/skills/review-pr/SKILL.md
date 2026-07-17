@@ -17,7 +17,7 @@ Input: a PR number (`#N`). Fetch it:
 ```bash
 gh pr view <N> --repo Jinn-Network/mono --json number,title,headRefName,headRefOid,isDraft,files,body
 ```
-The dispatcher's prompt states the pre-created worktree path (on the PR head branch). Compute the diff from the merge-base:
+The dispatcher's prompt states the pre-created worktree path. It is **detached** at `origin/<headRefName>` — the head branch is typically checked out in the impl worktree, so git refuses a second checkout. Work in it as-is: do **not** check the branch out, and push fixes with `git push origin HEAD:<headRefName>` (Step 3). Compute the diff from the merge-base:
 ```bash
 git diff $(git merge-base origin/next HEAD)..HEAD
 ```

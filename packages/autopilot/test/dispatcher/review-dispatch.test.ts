@@ -35,17 +35,30 @@ function makeSpawn(pid = 4242) {
 }
 
 describe('dispatchReview', () => {
-  it('creates a pr-<N> worktree on the PR head branch off origin/<headRefName>', async () => {
+  it('creates a DETACHED pr-<N> worktree at origin/<headRefName> (never claims the branch)', async () => {
+    // -B would fail whenever the head branch is checked out in the impl worktree
+    // (`jinn-mono_worktrees/<N>`, which persists while the issue is In Review) —
+    // git refuses a second checkout, and that blocked review dispatch entirely.
     const { runner, calls } = makeRunner();
     const { spawn } = makeSpawn();
     await dispatchReview(PR, CFG, { runner, spawn });
     const add = calls.find((c) => c.cmd === 'git' && c.args[0] === 'worktree' && c.args[1] === 'add');
     expect(add).toBeDefined();
-    expect(add!.args[2]).toBe(EXPECTED_WT);
-    expect(add!.args).toContain('-B');
-    expect(add!.args[add!.args.indexOf('-B') + 1]).toBe('feat/42-thing');
+    expect(add!.args).toContain('--detach');
+    expect(add!.args).not.toContain('-B');
+    expect(add!.args).not.toContain('-b');
+    expect(add!.args[add!.args.indexOf('--detach') + 1]).toBe(EXPECTED_WT);
     expect(add!.args[add!.args.length - 1]).toBe('origin/feat/42-thing');
     expect(calls.some((c) => c.cmd === 'git' && c.args[0] === 'fetch')).toBe(true);
+  });
+
+  it('tells the session the worktree is detached and how to push', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchReview(PR, CFG, { runner, spawn });
+    const prompt = calls[0].args[calls[0].args.indexOf('-p') + 1];
+    expect(prompt).toContain('DETACHED');
+    expect(prompt).toContain('git push origin HEAD:feat/42-thing');
   });
 
   it('is idempotent — skips git worktree add when pr-<N> already exists', async () => {

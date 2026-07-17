@@ -9,6 +9,13 @@ export interface ReviewCycleReport {
   skippedForCap: number;
   /** Drift strings from deriveReviewInFlight (currently always empty). */
   drift: string[];
+  /**
+   * PR numbers whose dispatch threw this cycle. Isolated — the remaining PRs
+   * still dispatched. Before this, one failing `git worktree add` aborted the
+   * entire review pass, so a single bad PR silently starved every other PR
+   * every cycle (observed live 2026-07-17).
+   */
+  failed: number[];
 }
 
 export interface ReviewCycleDeps {
@@ -56,11 +63,20 @@ export async function runReviewCycle(deps: ReviewCycleDeps): Promise<ReviewCycle
   const budget = Math.max(0, cfg.reviewCap - inFlight.length);
   const toDispatch = reviewable.slice(0, budget);
 
+  // Isolate each dispatch: one PR's failure (e.g. a git worktree collision)
+  // must never abort the pass and starve every other PR. Mirrors
+  // merge-prep-loop's per-PR isolation and Stage A's escalateStuckPrs.
   const dispatched: number[] = [];
+  const failed: number[] = [];
   for (const pr of toDispatch) {
-    await dispatchReview(pr);
-    dispatched.push(pr.number);
+    try {
+      await dispatchReview(pr);
+      dispatched.push(pr.number);
+    } catch (err) {
+      console.error(`[review-loop] dispatch failed for PR #${pr.number} (continuing):`, err);
+      failed.push(pr.number);
+    }
   }
 
-  return { dispatched, skippedForCap: reviewable.length - toDispatch.length, drift };
+  return { dispatched, skippedForCap: reviewable.length - toDispatch.length, drift, failed };
 }
