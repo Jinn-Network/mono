@@ -88,7 +88,7 @@ def _user_line(msg: str) -> None:
     regardless of ``COLORTERM``/``NO_COLOR``. The fork-precedent plugins this
     channel was modeled on (memory/hindsight) print plain text too — the
     styling here was our deviation. Styled surfaces that never run inside
-    the TUI (the terminal-blocking onboarding CLI) are unaffected.
+    the TUI are unaffected.
     """
     try:
         print(style.strip_ansi(msg), file=sys.stderr, flush=True)
