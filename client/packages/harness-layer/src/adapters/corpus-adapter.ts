@@ -18,8 +18,9 @@ import {
   type HarnessLayer,
   type HarnessLayerConfig,
 } from '../consume.js';
-import { parseTraceEnvelopeV0, type TraceStep } from '../envelope.js';
+import { parseTraceEnvelopeV0, type TraceEnvelopeV0, type TraceStep } from '../envelope.js';
 import { TRACE_ENVELOPE_ARTIFACT_TYPE } from '../publish.js';
+import { SKILL_ARTIFACT_TYPE } from '../../../../src/types/skill-artifact.js';
 
 export interface CorpusAdapterDeps {
   /** A ready HarnessLayer (test seam: a fake `{ corpus: { search, get } }`). */
@@ -65,6 +66,33 @@ function seedStepSynthesis(steps: readonly TraceStep[]): string | undefined {
 }
 
 /**
+ * True when any step carries a string `skill.md` attribute — the legacy
+ * pre-#1394 seed shape (`seed-import/execute.ts` `toCapturedTask`). Checks
+ * every step, not only one named `seed:skill-md`: the wire shape this guard
+ * exists for already lied about `kind` once, so detection here keys on the
+ * attribute itself, not a step-naming convention layered on top of it.
+ */
+function hasSkillMdAttribute(steps: readonly TraceStep[]): boolean {
+  return steps.some((step) => {
+    const value = step.attributes['skill.md'];
+    return typeof value === 'string' && value.length > 0;
+  });
+}
+
+/**
+ * Content-level skill-payload classification (mono #1782): true when the
+ * record is a skill package regardless of the search hit's wire `kind` —
+ * either a first-class `jinn.skill.v1` artifact (checked by presence only,
+ * not parsed/validated here — parsing a malformed skill artifact's body is
+ * `extractSkill()`'s job, and must not be able to fail *this* guard), or the
+ * legacy seeded shape `hasSkillMdAttribute` recognises.
+ */
+function detectSkillPayload(record: WireCorpusRecord, envelope: TraceEnvelopeV0): boolean {
+  if (record.artifacts.some((a) => a.artifactType === SKILL_ARTIFACT_TYPE)) return true;
+  return hasSkillMdAttribute(envelope.steps);
+}
+
+/**
  * Decode the record's `jinn.trace-envelope.v0` artifact into the plugin's
  * content-bearing `CorpusRecord`. Verifies the artifact bytes against the
  * record's own sha256 before parsing — a mismatch refuses to serve
@@ -91,6 +119,16 @@ function decodeRecord(record: WireCorpusRecord): CorpusRecord | null {
   const origin = record.provenance.operator.agentId || record.provenance.operator.safeAddress || record.ref;
   const synthesis = envelope.outcome.summary ?? seedStepSynthesis(envelope.steps);
 
+  // Fails open (mono #1782): a detection error never blocks the rest of the
+  // record's content from being served — it just leaves the fact
+  // undetermined, exactly as if this guard did not exist for that record.
+  let isSkillPayload = false;
+  try {
+    isSkillPayload = detectSkillPayload(record, envelope);
+  } catch {
+    isSkillPayload = false;
+  }
+
   return {
     ref: record.ref,
     task: { summary: envelope.task.summary },
@@ -101,6 +139,7 @@ function decodeRecord(record: WireCorpusRecord): CorpusRecord | null {
     provenance: envelope.provenance,
     origin,
     capturedAt: envelope.session.capturedAt,
+    ...(isSkillPayload ? { isSkillPayload: true } : {}),
   };
 }
 

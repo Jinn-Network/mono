@@ -3,6 +3,7 @@ import {
   classifyPayload,
   dedupeKnowledgeHits,
   deriveSearchTerms,
+  rankKnowledgeHits,
   scoreKnowledgeHit,
   selectKnowledgeHits,
   MAX_SELECTED_PACKETS,
@@ -365,6 +366,46 @@ describe('selectKnowledgeHits (rescope §3.3)', () => {
 
   it('no candidates → empty selection', () => {
     expect(selectKnowledgeHits([], ['anything'])).toEqual([]);
+  });
+});
+
+// Mono #1782: content-level guards that only run after a candidate's
+// content is fetched (skill-payload classification, empty-packet honesty)
+// need to promote past a disqualified top candidate to the next-ranked one.
+// selectKnowledgeHits alone cannot support that — it is already sliced to
+// MAX_SELECTED_PACKETS before any post-fetch guard could run.
+describe('rankKnowledgeHits (mono #1782)', () => {
+  // Distinct origins: three different source episodes that happen to score
+  // similarly — not duplicated seeds of one another (dedup is covered above).
+  function threeRankedHits(): [KnowledgeHit, KnowledgeHit, KnowledgeHit] {
+    const a = hit({ ref: 'a', snippet: 'dashboard vitest flake', tier: 'evaluator-verified', publishedAt: 3, origin: 'op-a' });
+    const b = hit({ ref: 'b', snippet: 'dashboard vitest flake', tier: 'tests-passed', publishedAt: 2, origin: 'op-b' });
+    const c = hit({ ref: 'c', snippet: 'dashboard vitest flake', tier: 'user-accepted', publishedAt: 1, origin: 'op-c' });
+    return [a, b, c];
+  }
+
+  it('returns every above-floor candidate, not sliced to MAX_SELECTED_PACKETS', () => {
+    const [a, b, c] = threeRankedHits();
+    const terms = ['dashboard', 'vitest', 'flake'];
+
+    const ranked = rankKnowledgeHits([a, b, c], terms);
+    expect(ranked.map((h) => h.ref)).toEqual(['a', 'b', 'c']);
+    expect(ranked.length).toBeGreaterThan(MAX_SELECTED_PACKETS);
+  });
+
+  it('selectKnowledgeHits is exactly the top MAX_SELECTED_PACKETS slice of rankKnowledgeHits', () => {
+    const [a, b, c] = threeRankedHits();
+    const terms = ['dashboard', 'vitest', 'flake'];
+
+    expect(selectKnowledgeHits([a, b, c], terms)).toEqual(
+      rankKnowledgeHits([a, b, c], terms).slice(0, MAX_SELECTED_PACKETS),
+    );
+  });
+
+  it('still drops skill hits and applies the relevance floor — same filter pipeline as selectKnowledgeHits', () => {
+    const skill = hit({ ref: 'skill-1', kind: 'skill', snippet: 'dashboard vitest flake', tags: ['dashboard'] });
+    const weak = hit({ ref: 'weak', snippet: 'dashboard only', tags: [] });
+    expect(rankKnowledgeHits([skill, weak], ['dashboard', 'vitest'])).toEqual([]);
   });
 });
 

@@ -237,12 +237,20 @@ function tierRank(tier: string | undefined): number {
 }
 
 /**
- * Evidence-first selection (rescope §3.3): drop skill hits, dedup, score,
- * apply the relevance floor (honest nothing-found below it), rank
- * score desc → tier desc → recency desc, take the top
- * `MAX_SELECTED_PACKETS`.
+ * Full ranked candidate pool (rescope §3.3 selection policy): drop skill
+ * hits, dedup, score, apply the relevance floor (honest nothing-found below
+ * it), rank score desc → tier desc → recency desc — every candidate that
+ * clears the floor, not sliced to `MAX_SELECTED_PACKETS`.
+ *
+ * Content-level guards that can only run after a candidate's content is
+ * fetched (mono #1782: post-fetch skill-payload classification, empty-packet
+ * honesty) need to walk past a disqualified top candidate to the
+ * next-ranked one, so the orchestrator (`plugin.ts` `firstTurnPickup`) walks
+ * this unsliced list and does its own promotion-aware slicing.
+ * `selectKnowledgeHits` remains the pre-guards convenience wrapper for
+ * callers that only need the top slice.
  */
-export function selectKnowledgeHits(
+export function rankKnowledgeHits(
   hits: KnowledgeHit[],
   terms: string[],
 ): KnowledgeHit[] {
@@ -259,5 +267,20 @@ export function selectKnowledgeHits(
     return (b.hit.publishedAt ?? 0) - (a.hit.publishedAt ?? 0);
   });
 
-  return scored.slice(0, MAX_SELECTED_PACKETS).map((scoredHit) => scoredHit.hit);
+  return scored.map((scoredHit) => scoredHit.hit);
+}
+
+/**
+ * Evidence-first selection (rescope §3.3): the top `MAX_SELECTED_PACKETS` of
+ * `rankKnowledgeHits`. A caller that also needs to apply the post-fetch
+ * content-level guards (mono #1782) should walk `rankKnowledgeHits` directly
+ * instead — slicing here happens before those guards can run, so a
+ * candidate they disqualify would lose its slot rather than promoting the
+ * next-ranked one.
+ */
+export function selectKnowledgeHits(
+  hits: KnowledgeHit[],
+  terms: string[],
+): KnowledgeHit[] {
+  return rankKnowledgeHits(hits, terms).slice(0, MAX_SELECTED_PACKETS);
 }

@@ -5,7 +5,8 @@ import { describeCorpusPortContract } from '@jinn-network/plugin/testing';
 import type { HarnessLayer, CorpusSearchHit, CorpusRecord as WireCorpusRecord } from '../../src/consume.js';
 import { createCorpusAdapter } from '../../src/adapters/corpus-adapter.js';
 import { TRACE_ENVELOPE_ARTIFACT_TYPE } from '../../src/publish.js';
-import type { TraceEnvelopeV0 } from '../../src/envelope.js';
+import type { TraceEnvelopeV0, TraceStep } from '../../src/envelope.js';
+import { SKILL_ARTIFACT_TYPE } from '../../../../src/types/skill-artifact.js';
 
 function makeHit(overrides: Partial<CorpusSearchHit> = {}): CorpusSearchHit {
   return {
@@ -293,5 +294,120 @@ describe('CorpusAdapter.get() — content-bearing decode (rescope R2, #1772)', (
   it('returns ok(null) when the underlying manifest is missing (unknown ref)', async () => {
     const adapter = createCorpusAdapter({ layer: makeFakeLayer() });
     expect(await adapter.get('does-not-exist')).toEqual({ status: 'ok', value: null });
+  });
+});
+
+/** The exact step shape `seed-import/execute.ts` `toCapturedTask` publishes
+ *  for a legacy (pre-#1394) seed-imported skill: a single synthetic step
+ *  named `seed:skill-md` carrying the SKILL.md as a string `skill.md`
+ *  attribute plus `seed.attribution` — no first-class `jinn.skill.v1`
+ *  artifact, so this record's wire `kind` is `'trace'`. */
+function seedSkillMdStep(skillMd = '# Video Edit\n\nEdit video clips with RunComfy workflows.'): TraceStep {
+  return {
+    spanId: 'seed-1',
+    parentSpanId: null,
+    name: 'seed:skill-md',
+    startTimeUnixNano: '1000000000',
+    endTimeUnixNano: '1000000000',
+    attributes: {
+      'skill.md': skillMd,
+      'seed.attribution': {
+        skill: 'agentspace-so/runcomfy-agent-skills/video-edit',
+        source: 'https://github.com/agentspace-so/runcomfy-agent-skills',
+        licence: 'MIT',
+      },
+    },
+    redactedKeys: [],
+  };
+}
+
+describe('CorpusAdapter.get() — content-level skill classification (mono #1782)', () => {
+  it('classifies a legacy pre-#1394 seeded record as a skill payload via its skill.md step attribute, even though the wire kind is trace', async () => {
+    const layer = makeFakeLayer();
+    const wireRecord = wireRecordWithTrace({
+      task: {
+        summary: 'Seed import: agentspace-so/runcomfy-agent-skills/video-edit',
+        distributionTags: ['seed-import', 'runcomfy-agent-skills', 'video-edit'],
+      },
+      steps: [seedSkillMdStep()],
+      outcome: { status: 'completed', verifiabilityTier: 'user-accepted' },
+      provenance: 'imported',
+    });
+    layer.corpus.get = async () => wireRecord;
+    const adapter = createCorpusAdapter({ layer });
+
+    const result = await adapter.get('bafySourceEpisode');
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok' || result.value === null) throw new Error('expected a decoded record');
+    expect(result.value.isSkillPayload).toBe(true);
+  });
+
+  it('recognises a skill.md attribute on any step, not only one named seed:skill-md', async () => {
+    const layer = makeFakeLayer();
+    const wireRecord = wireRecordWithTrace({
+      steps: [{ ...seedSkillMdStep(), name: 'some-other-step-name' }],
+    });
+    layer.corpus.get = async () => wireRecord;
+    const adapter = createCorpusAdapter({ layer });
+
+    const result = await adapter.get('bafySourceEpisode');
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok' || result.value === null) throw new Error('expected a decoded record');
+    expect(result.value.isSkillPayload).toBe(true);
+  });
+
+  it('classifies a first-class jinn.skill.v1-backed record as a skill payload even when the wire kind says trace', async () => {
+    const layer = makeFakeLayer();
+    const wireRecord = wireRecordWithTrace();
+    wireRecord.artifacts.push({
+      sha256: 'a'.repeat(64),
+      artifactType: SKILL_ARTIFACT_TYPE,
+      content: Buffer.from('{}'),
+      source: 'ipfs',
+      sizeBytes: 2,
+    });
+    layer.corpus.get = async () => wireRecord;
+    const adapter = createCorpusAdapter({ layer });
+
+    const result = await adapter.get('bafySourceEpisode');
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok' || result.value === null) throw new Error('expected a decoded record');
+    expect(result.value.isSkillPayload).toBe(true);
+  });
+
+  it('does not set isSkillPayload for an ordinary trace record (regression — the seeded evidence fixtures project as before)', async () => {
+    const layer = makeFakeLayer();
+    const wireRecord = wireRecordWithTrace();
+    layer.corpus.get = async () => wireRecord;
+    const adapter = createCorpusAdapter({ layer });
+
+    const result = await adapter.get('bafySourceEpisode');
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok' || result.value === null) throw new Error('expected a decoded record');
+    expect(result.value.isSkillPayload).toBeUndefined();
+  });
+
+  it('does not classify a step whose skill.md attribute is present but empty or non-string', async () => {
+    const layer = makeFakeLayer();
+    const wireRecord = wireRecordWithTrace({
+      steps: [
+        {
+          spanId: 's1',
+          parentSpanId: null,
+          name: 'run tests',
+          startTimeUnixNano: '1000000000',
+          endTimeUnixNano: '2000000000',
+          attributes: { 'skill.md': '', 'tool.args': 'yarn test', 'tool.exitCode': 0 },
+          redactedKeys: [],
+        },
+      ],
+    });
+    layer.corpus.get = async () => wireRecord;
+    const adapter = createCorpusAdapter({ layer });
+
+    const result = await adapter.get('bafySourceEpisode');
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok' || result.value === null) throw new Error('expected a decoded record');
+    expect(result.value.isSkillPayload).toBeUndefined();
   });
 });
