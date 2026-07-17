@@ -1,0 +1,39 @@
+{
+  "name": "@jinn-network/core",
+  "version": "0.1.0",
+  "description": "Domain core for the Jinn harness network — contribution + evidence stores, captured-task + trace-envelope schemas. Independent of client/src.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "license": "MIT",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@jinn-network/plugin": "portal:../plugin",
+    "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "vitest": "^4.1.8"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "typescript": "^5.4.0",
+    "vitest": "^4.1.8"
+  }
+}
