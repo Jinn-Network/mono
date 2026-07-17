@@ -322,12 +322,29 @@ export class PluginSession {
     this.searchedTerms = terms;
     if (terms.length === 0) return { contextBlock: null, packets: [], searchedTerms: terms };
 
-    // Search per term, merge hits (skip non-ok reads → fail open; keep the
+    // Issue all per-term searches concurrently — the searches are
+    // independent (mono #1795: sequential awaits serialized ~1.6s/term of
+    // live indexer round-trips, blowing the 15s host deadline once lexical
+    // v2 widened the term budget to 10). `Promise.all` preserves result
+    // order by term index regardless of resolution order, so the merge
+    // below stays in term order — dedup priority and the first-observed
+    // degraded reason are byte-identical to the old sequential loop. A
+    // rejected promise would violate the PortResult convention (ports
+    // resolve, never throw), but is guarded anyway: it degrades that one
+    // term's contribution rather than the whole pickup (fail-open).
+    const results = await Promise.all(
+      terms.map((term) =>
+        this.deps.corpus.search(term).catch((error: unknown) =>
+          degraded<KnowledgeHit[]>(`corpus search rejected: ${errorReason(error)}`),
+        ),
+      ),
+    );
+
+    // Merge hits in term order (skip non-ok reads → fail open; keep the
     // first degraded reason observed for an honest, non-crashing report).
     let degradedReason: string | undefined;
     const byRef = new Map<string, KnowledgeHit>();
-    for (const term of terms) {
-      const result = await this.deps.corpus.search(term);
+    for (const result of results) {
       if (result.status !== 'ok' && degradedReason === undefined) degradedReason = result.reason;
       for (const hit of valueOr(result, [] as KnowledgeHit[])) {
         if (!byRef.has(hit.ref)) byRef.set(hit.ref, hit);
