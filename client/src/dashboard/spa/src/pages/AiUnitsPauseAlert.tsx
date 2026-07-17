@@ -2,11 +2,11 @@
  * AiUnitsPauseAlert — issue #815 running-mode surface.
  *
  * Compact per-credential banner shown on the Overview while one or more
- * credentials are paused by the AI-units ceiling. The acceptance
- * criterion: "the running-mode dashboard surfaces the pause reason and
- * the next reset time (e.g. 'Paused — 6h AI-unit cap reached. Claims
- * resume at 12:00 UTC.')". Render-only — no event subscription; the
- * /v1/status poll on Overview is the upstream feed.
+ * credentials are paused by the claim-spend ceiling. The daemon now emits
+ * USD accumulators plus an `estimated` bit, so the running-mode surface must
+ * show the real spend units and distinguish metered from estimated usage.
+ * Render-only — no event subscription; the /v1/status poll on Overview is the
+ * upstream feed.
  */
 import type { JSX } from 'react';
 import { PauseCircle } from 'lucide-react';
@@ -18,6 +18,16 @@ export interface AiUnitsStatusRow {
   unitsThisWeek: number;
   capPerBlock: number;
   capPerWeek: number;
+  /** Actual USD spend this 6h block, in micros. Optional for backward-compat. */
+  usdMicrosThisBlock?: number;
+  /** Actual USD spend this 7d window, in micros. Optional for backward-compat. */
+  usdMicrosThisWeek?: number;
+  /** USD cap for the current 6h block, in micros. Optional for backward-compat. */
+  capPerBlockUsdMicros?: number;
+  /** USD cap for the current 7d window, in micros. Optional for backward-compat. */
+  capPerWeekUsdMicros?: number;
+  /** True when the summed spend includes any estimate-backed rows. */
+  estimated?: boolean;
   paused: boolean;
   /**
    * True when this credential has spend in the current 7d window — i.e. it is
@@ -46,6 +56,10 @@ function formatUtc(iso: string): string {
   return `${hh}:${mm} UTC`;
 }
 
+function formatUsdMicros(usdMicros: number): string {
+  return `$${(usdMicros / 1_000_000).toFixed(4)}`;
+}
+
 export function AiUnitsPauseAlert({ aiUnits }: AiUnitsPauseAlertProps): JSX.Element | null {
   if (!aiUnits) return null;
   const paused = aiUnits.credentials.filter((c) => c.paused);
@@ -54,11 +68,32 @@ export function AiUnitsPauseAlert({ aiUnits }: AiUnitsPauseAlertProps): JSX.Elem
   return (
     <div className="flex flex-col gap-2">
       {paused.map((row) => {
+        const hasUsdFields =
+          typeof row.usdMicrosThisBlock === 'number' &&
+          typeof row.usdMicrosThisWeek === 'number' &&
+          typeof row.capPerBlockUsdMicros === 'number' &&
+          typeof row.capPerWeekUsdMicros === 'number';
+        const usdMicrosThisBlock = row.usdMicrosThisBlock ?? 0;
+        const usdMicrosThisWeek = row.usdMicrosThisWeek ?? 0;
+        const capPerBlockUsdMicros = row.capPerBlockUsdMicros ?? 0;
+        const capPerWeekUsdMicros = row.capPerWeekUsdMicros ?? 0;
         // Pick the binding window — whichever sum has actually reached its cap.
-        const blockHit = row.unitsThisBlock >= row.capPerBlock;
+        const blockHit = hasUsdFields
+          ? usdMicrosThisBlock >= capPerBlockUsdMicros
+          : row.unitsThisBlock >= row.capPerBlock;
         const window: 'block' | 'week' = blockHit ? 'block' : 'week';
         const resumeAt = window === 'block' ? row.blockResetsAt : row.weekResetsAt;
         const windowLabel = window === 'block' ? '6h' : '7d';
+        const usageLabel = hasUsdFields
+          ? `${row.estimated ? 'estimated' : 'metered'} ${
+              window === 'block'
+                ? `${formatUsdMicros(usdMicrosThisBlock)} / ${formatUsdMicros(capPerBlockUsdMicros)}`
+                : `${formatUsdMicros(usdMicrosThisWeek)} / ${formatUsdMicros(capPerWeekUsdMicros)}`
+            }`
+          : window === 'block'
+            ? `${row.unitsThisBlock} / ${row.capPerBlock} units`
+            : `${row.unitsThisWeek} / ${row.capPerWeek} units`;
+        const periodLabel = window === 'block' ? 'this block' : 'this 7-day window';
         // A paused credential is by definition the active one; default to active
         // for daemons predating the `active` field (issue #891).
         const isActive = row.active ?? true;
@@ -70,7 +105,7 @@ export function AiUnitsPauseAlert({ aiUnits }: AiUnitsPauseAlertProps): JSX.Elem
           >
             <PauseCircle className="h-4 w-4" aria-hidden="true" />
             <AlertTitle className="font-mono text-[13px]">
-              Paused — {windowLabel} AI-unit cap reached
+              Paused — {windowLabel} spend cap reached
               {isActive ? (
                 <span
                   className="ml-2 text-foreground"
@@ -83,9 +118,7 @@ export function AiUnitsPauseAlert({ aiUnits }: AiUnitsPauseAlertProps): JSX.Elem
             <AlertDescription className="font-mono text-[12px] text-muted-foreground">
               <span>
                 Credential <span className="text-foreground">{row.credentialId}</span> used{' '}
-                {window === 'block'
-                  ? `${row.unitsThisBlock} / ${row.capPerBlock} units this block`
-                  : `${row.unitsThisWeek} / ${row.capPerWeek} units this 7-day window`}
+                {usageLabel} {periodLabel}
                 . Claims resume at <span className="text-foreground">{formatUtc(resumeAt)}</span>.
               </span>
             </AlertDescription>
