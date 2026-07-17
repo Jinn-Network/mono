@@ -58,9 +58,7 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("JINN_LAYER_EPISODES_DIR", str(tmp_path / "episodes"))
     capture_buffer.reset()
     distill.reset()
-    jinn._reset_contract_state()
     jinn._reset_session_state()
-    jinn._contract_checked = True
     jinn._degraded = None
     jinn._vetoed_tasks.clear()
     jinn._session_hint_shown.clear()
