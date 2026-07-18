@@ -163,14 +163,17 @@ function isMissingPathError(error: unknown): boolean {
  * moves the link itself; the no-follow deletion then unlinks it without
  * traversing its target.
  *
- * Each step is fail-safe. A still-registered failure, quarantine failure, or
- * deletion failure leaves the lease in place for diagnosis/retry.
+ * Each step is fail-safe. A still-registered or pre-rename quarantine failure
+ * leaves the lease in place for retry. A post-rename deletion failure leaves
+ * the lease plus isolated quarantine for diagnosis/manual cleanup; the
+ * canonical path and review slot are already free.
  *
  * The terminal event belongs to the directly spawned reviewer. A reviewer may
  * leave descendant processes behind; this cleanup does not attempt to discover
  * or kill them. If a descendant still holds files or the checkout, either Git
- * removal or quarantine cleanup may fail and the lease deliberately remains for fallback retry or
- * operator diagnosis.
+ * removal or quarantine cleanup may fail and the lease deliberately remains.
+ * Failures before quarantine rename are retryable; failures after the rename
+ * leave isolated residue for operator diagnosis/manual cleanup.
  */
 export async function cleanupReviewWorktree(
   expectedLease: ReviewLease,
