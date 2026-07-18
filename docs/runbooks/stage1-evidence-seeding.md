@@ -43,7 +43,10 @@ captured one — see `client/packages/harness-layer/src/seed-import/episode-exec
    ID, tags, summary, steps, outcome, synthesis, and attribution. It is still
    fail-closed: the lane refuses to publish when a redaction fires. Authored
    content should already be clean; the scrub is a backstop, not a substitute
-   for review.
+   for review. Accepted residual risk under this profile — payment-card
+   numbers, phone numbers, SSN-shaped strings, JWTs, and unprefixed
+   high-entropy blobs — is not caught automatically; catching these is the
+   curator's job during step 1's read-through, not the scrub's.
 4. **Author `synthesis` and `tags`.** `synthesis` is a 3-6 sentence,
    task-linked "how it was solved" — write it yourself; it is never
    generated at retrieval time. `tags` should name the subsystem vocabulary
