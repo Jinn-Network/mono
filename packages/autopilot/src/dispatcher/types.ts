@@ -210,8 +210,9 @@ export interface PolledPr {
   hasReviewLabel: boolean;
   /**
    * True iff the PR needs a (re)review: no review by `reviewBotLogin` has been
-   * submitted at or after the PR's latest commit. Once a current review exists
-   * this is false, so the dispatcher stops re-spawning for an unchanged PR.
+   * submitted at or after the PR's latest commit, or the bot's current verdict
+   * is APPROVED while the PR is still draft (an incomplete ready transition).
+   * A current approval suppresses redispatch only once the PR is non-draft.
    */
   needsReview: boolean;
 }
@@ -229,6 +230,8 @@ export interface InFlightReview {
   worktreePath: string;
   pid: number | null;
   startedAt: number;
+  /** Unique persisted ownership generation; null means cleanup is forbidden. */
+  leaseId?: string | null;
 }
 
 /** An in-flight merge-prep session, one per `jinn-mono_worktrees/merge-<N>`
