@@ -81,7 +81,13 @@ describe('dispatchReview', () => {
     await dispatchReview(PR, CFG, { runner, spawn, leaseStore: TEST_LEASE_STORE });
     const prompt = calls[0].args[calls[0].args.indexOf('-p') + 1];
     expect(prompt).toContain('DETACHED');
-    expect(prompt).toContain('git push origin HEAD:feat/42-thing');
+    expect(prompt).toContain('JINN_REVIEW_HEAD_REF');
+    expect(prompt).toContain('fixed Jinn-Network/mono HTTPS remote');
+    expect(prompt).toContain(
+      'bind every GitHub command to JINN_REVIEW_GH_TOKEN at the command point',
+    );
+    expect(prompt).not.toContain(PR.headRefName);
+    expect(prompt).not.toContain('git push origin');
   });
 
   it('is idempotent — skips git worktree add when pr-<N> already exists', async () => {
@@ -106,6 +112,81 @@ describe('dispatchReview', () => {
     expect(prompt).toContain('non-interactive');
     expect(calls[0].opts.cwd).toBe(EXPECTED_WT);
     expect(calls[0].opts.detached).toBe(true);
+  });
+
+  it('passes the named reviewer credential and expected login to every review shell', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchReview(
+      PR,
+      {
+        ...CFG,
+        reviewGhToken: 'review-token',
+        reviewBotLogin: 'review-bot',
+      },
+      { runner, spawn, leaseStore: TEST_LEASE_STORE },
+    );
+
+    expect(calls[0].opts.env).toMatchObject({
+      GH_TOKEN: 'review-token',
+      JINN_REVIEW_GH_TOKEN: 'review-token',
+      JINN_REVIEW_BOT_LOGIN: 'review-bot',
+      JINN_REVIEW_HEAD_REF: PR.headRefName,
+    });
+  });
+
+  it('validates a safe head ref with git before fetching or spawning', async () => {
+    const { runner, calls } = makeRunner();
+    const { spawn } = makeSpawn();
+
+    await dispatchReview(PR, CFG, { runner, spawn, leaseStore: TEST_LEASE_STORE });
+
+    expect(calls[0]).toEqual({
+      cmd: 'git',
+      args: ['check-ref-format', 'refs/heads/feat/42-thing'],
+    });
+    expect(calls.findIndex((call) => call.args[0] === 'check-ref-format')).toBeLessThan(
+      calls.findIndex((call) => call.args[0] === 'fetch'),
+    );
+  });
+
+  it.each([
+    'feat/$(id)',
+    'feat/`id`',
+  ])('rejects shell-active head ref %s before any command or spawn', async (headRefName) => {
+    const { runner, calls: runnerCalls } = makeRunner();
+    const { spawn, calls: spawnCalls } = makeSpawn();
+
+    await expect(
+      dispatchReview(
+        { ...PR, headRefName },
+        CFG,
+        { runner, spawn, leaseStore: TEST_LEASE_STORE },
+      ),
+    ).rejects.toThrow(/safe Git branch name/);
+
+    expect(runnerCalls).toHaveLength(0);
+    expect(spawnCalls).toHaveLength(0);
+  });
+
+  it('fails a git-invalid head ref before spawn', async () => {
+    const runner: CommandRunner = async (cmd, args) => {
+      if (cmd === 'git' && args[0] === 'check-ref-format') {
+        throw new Error('invalid ref');
+      }
+      throw new Error(`Unexpected command after invalid ref: ${cmd} ${args.join(' ')}`);
+    };
+    const { spawn, calls } = makeSpawn();
+
+    await expect(
+      dispatchReview(
+        { ...PR, headRefName: 'feat/bad..ref' },
+        CFG,
+        { runner, spawn, leaseStore: TEST_LEASE_STORE },
+      ),
+    ).rejects.toThrow(/invalid ref/);
+
+    expect(calls).toHaveLength(0);
   });
 
   it('does NOT pass plan-posture flags', async () => {
