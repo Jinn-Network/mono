@@ -213,6 +213,7 @@ interface RawRow {
   task_cid: string;
   onchain_creation_tx: string;
   onchain_creation_block: number;
+  onchain_creation_timestamp: number | null;
   solver_type: string | null;
   solver_net_manifest_cid: string | null;
   task_role: string | null;
@@ -279,6 +280,11 @@ function runAdditiveMigrations(db: Database.Database): void {
     // own in-flight slot, otherwise a task in SolverNet B is silently
     // rejected while SolverNet A is busy. See `hasInFlightFor`.
     { column: 'solver_net_manifest_cid', ddl: 'ALTER TABLE task_runs ADD COLUMN solver_net_manifest_cid TEXT' },
+    // On-chain creation-block timestamp (#1827), resolved once at claim()
+    // time via publicClient.getBlock and threaded to pack() for
+    // envelope.task.createdAt. NULL when the RPC lookup failed or hasn't
+    // run yet — never backfilled with a guess.
+    { column: 'onchain_creation_timestamp', ddl: 'ALTER TABLE task_runs ADD COLUMN onchain_creation_timestamp INTEGER' },
   ];
 
   // Fetch existing column names once so each ALTER is a no-op if the column
@@ -336,6 +342,7 @@ function rowToTaskRun(row: RawRow): PersistedTaskRun {
     taskCid: row.task_cid,
     onchainCreationTx: row.onchain_creation_tx,
     onchainCreationBlock: row.onchain_creation_block,
+    onchainCreationTimestamp: row.onchain_creation_timestamp ?? null,
     solverType: row.solver_type,
     solverNetManifestCid: row.solver_net_manifest_cid,
     taskRole: (row.task_role ?? null) as 'restoration' | 'evaluation' | null,
@@ -743,6 +750,18 @@ export class TaskRunPersistence {
     this.db.prepare(
       'UPDATE task_runs SET manifest_generated_at = ? WHERE request_id = ? AND manifest_generated_at IS NULL',
     ).run(generatedAt, requestId);
+  }
+
+  /**
+   * Persist the on-chain creation-block timestamp for a task (#1827).
+   * Called once per claimed task from `claim()`. Idempotent — safe to call
+   * repeatedly with the same value (e.g. on retry after a crash between
+   * the RPC call and the CLAIMED transition).
+   */
+  setOnchainCreationTimestamp(requestId: string, timestampSec: number): void {
+    this.db.prepare(
+      'UPDATE task_runs SET onchain_creation_timestamp = ? WHERE request_id = ?',
+    ).run(timestampSec, requestId);
   }
 
   /** Mark an task FAILED with a reason (valid from any non-terminal state). */
