@@ -17,8 +17,10 @@ import type {
   EvidenceTier,
   SignedEnvelope,
   Artifact,
+  GeneratorModel,
 } from '../../types/envelope.js';
 import { normalizeEnvelopeRole } from '../../types/envelope.js';
+import { deriveDistributionClass } from './generator-model.js';
 import { validatePayload } from '../../types/payloads/index.js';
 import { validateManifestForPublish } from './validate-manifest.js';
 
@@ -30,6 +32,12 @@ export interface EnvelopeInputs {
     onchainCreationTx: string;
     onchainCreationBlock: number;
     requestId: string;
+    /** Unix-seconds block timestamp; absent on RPC failure (never "now"). See #1827. */
+    createdAt?: number;
+    /** Copied from the parsed task doc's spec; absent for solver types without repo identity. */
+    instanceId?: string;
+    repo?: string;
+    baseCommit?: string;
   };
   participant: { safeAddress: string; agentEoa: string };
   window: { startTs: number; endTs: number };
@@ -55,6 +63,8 @@ export interface EnvelopeInputs {
      * stamped directly into the envelope's executor.model field (jinn-mono-gbut).
      */
     model?: string;
+    /** Stream-sourced (or config-fallback) generator model provenance. See #1827. */
+    generatorModel?: GeneratorModel;
   };
   evidenceTier?: EvidenceTier;
   attestation?: SignedEnvelope['attestation'];
@@ -102,6 +112,11 @@ export async function assembleAndSignEnvelope(
     trajectory,
     artifacts: inputs.artifacts,
     payload: inputs.payload,
+    // Derived, not caller-supplied (#1827, design trade-off (c)): stamping
+    // here — rather than at read time — means the signed record itself
+    // carries the class, and it can never drift from the executor's actual
+    // generatorModel because it's computed from that same input.
+    distributionClass: deriveDistributionClass(inputs.executor.generatorModel),
   };
 
   // Pre-publish manifest validation: reject malformed envelopes before wasting
