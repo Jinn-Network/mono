@@ -81,7 +81,15 @@ describe('dispatchReview', () => {
     await dispatchReview(PR, CFG, { runner, spawn, leaseStore: TEST_LEASE_STORE });
     const prompt = calls[0].args[calls[0].args.indexOf('-p') + 1];
     expect(prompt).toContain('DETACHED');
-    expect(prompt).toContain('git push origin HEAD:feat/42-thing');
+    expect(prompt).toContain(
+      'GH_TOKEN="$JINN_REVIEW_GH_TOKEN" git push origin HEAD:feat/42-thing',
+    );
+    expect(prompt).toContain(
+      'bind every GitHub command to JINN_REVIEW_GH_TOKEN at the command point',
+    );
+    expect(prompt).not.toContain(
+      'To push a fix, use `git push origin HEAD:feat/42-thing`',
+    );
   });
 
   it('is idempotent — skips git worktree add when pr-<N> already exists', async () => {
@@ -106,6 +114,26 @@ describe('dispatchReview', () => {
     expect(prompt).toContain('non-interactive');
     expect(calls[0].opts.cwd).toBe(EXPECTED_WT);
     expect(calls[0].opts.detached).toBe(true);
+  });
+
+  it('passes the named reviewer credential and expected login to every review shell', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchReview(
+      PR,
+      {
+        ...CFG,
+        reviewGhToken: 'review-token',
+        reviewBotLogin: 'review-bot',
+      },
+      { runner, spawn, leaseStore: TEST_LEASE_STORE },
+    );
+
+    expect(calls[0].opts.env).toMatchObject({
+      GH_TOKEN: 'review-token',
+      JINN_REVIEW_GH_TOKEN: 'review-token',
+      JINN_REVIEW_BOT_LOGIN: 'review-bot',
+    });
   });
 
   it('does NOT pass plan-posture flags', async () => {

@@ -12,12 +12,42 @@ You are the coordinating agent for exactly one open GitHub PR that carries the `
 - `docs/superpowers/specs/2026-05-29-pr-review-loop-design.md` — this skill's design.
 - `.claude/skills/implement-issue/SKILL.md` §Step 4 (subagent-dispatch discipline) and §Step 5 (finding handling) — reused verbatim here.
 
+## Reviewer credential invariant
+The review identity is part of the product contract, not ambient shell state.
+Run this preflight before reading or mutating the PR:
+```bash
+: "${JINN_REVIEW_GH_TOKEN:?JINN_REVIEW_GH_TOKEN is required for review-pr}"
+: "${JINN_REVIEW_BOT_LOGIN:?JINN_REVIEW_BOT_LOGIN is required for review-pr}"
+if ! review_login="$(
+  GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh api user --jq '.login'
+)"; then
+  echo "Failed to resolve JINN_REVIEW_GH_TOKEN identity" >&2
+  exit 1
+fi
+review_login_normalized="$(printf '%s' "$review_login" | tr '[:upper:]' '[:lower:]')"
+configured_login_normalized="$(printf '%s' "$JINN_REVIEW_BOT_LOGIN" | tr '[:upper:]' '[:lower:]')"
+if [[ "$review_login_normalized" != "$configured_login_normalized" ]]; then
+  echo "JINN_REVIEW_GH_TOKEN resolves to '$review_login', expected '$JINN_REVIEW_BOT_LOGIN'" >&2
+  exit 1
+fi
+if ! GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh auth setup-git; then
+  echo "Failed to configure git for the reviewer token" >&2
+  exit 1
+fi
+```
+Shell tool calls do not share a reliable exported environment. Therefore every
+GitHub CLI invocation below binds `GH_TOKEN="$JINN_REVIEW_GH_TOKEN"` on the
+same command line. Never shorten these commands to a bare `gh ...`, never use
+ambient `gh auth`, and never let a review or fix subagent do so. Git pushes use
+the same command-point binding so the `gh auth setup-git` credential helper
+resolves the reviewer token.
+
 ## Step 1 — Read the PR
 Input: a PR number (`#N`). Fetch it:
 ```bash
-gh pr view <N> --repo Jinn-Network/mono --json number,title,headRefName,headRefOid,isDraft,files,body
+GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh pr view <N> --repo Jinn-Network/mono --json number,title,headRefName,headRefOid,isDraft,files,body
 ```
-The dispatcher's prompt states the pre-created worktree path. It is **detached** at `origin/<headRefName>` — the head branch is typically checked out in the impl worktree, so git refuses a second checkout. Work in it as-is: do **not** check the branch out, and push fixes with `git push origin HEAD:<headRefName>` (Step 3). Compute the diff from the merge-base:
+The dispatcher's prompt states the pre-created worktree path. It is **detached** at `origin/<headRefName>` — the head branch is typically checked out in the impl worktree, so git refuses a second checkout. Work in it as-is: do **not** check the branch out, and push fixes with `GH_TOKEN="$JINN_REVIEW_GH_TOKEN" git push origin HEAD:<headRefName>` (Step 3). Compute the diff from the merge-base:
 ```bash
 git diff $(git merge-base origin/next HEAD)..HEAD
 ```
@@ -34,8 +64,8 @@ Collect findings; classify each **blocking** vs **advisory/nit** (reuse implemen
 
 **First, check the dispatcher's verdict directive in the prompt.** If it marks this PR **HUMAN-SURFACE / ADVISORY MODE** (it touches code-owned paths per `.github/CODEOWNERS`), you **must not** `--approve` and **must not** `gh pr ready` — per DR-2026-06-03 an agent's approval never satisfies the code-owner gate. Still run the full review and drive fixes for blocking findings as below; but when the review is clean *from the engine's view*, finish with a **COMMENT** review and hand off to a human code owner instead of approving:
 ```bash
-gh pr review <N> --repo Jinn-Network/mono --comment --body "<engine review summary — human code-owner approval required (human-surface)>"
-gh api --method POST \
+GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh pr review <N> --repo Jinn-Network/mono --comment --body "<engine review summary — human code-owner approval required (human-surface)>"
+GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh api --method POST \
   repos/Jinn-Network/mono/issues/<N>/labels \
   -f 'labels[]=review:needs-human'
 ```
@@ -43,46 +73,46 @@ Do not approve, do not un-draft, do not merge. Blocking findings still go throug
 
 - **No blocking findings** → reconcile verdict labels, post a fresh approval,
   then un-draft **last**. Ready is the terminal publication step. If it fails,
-  the dispatcher treats the approved draft as incomplete and redispatches it
-  for reconciliation:
+   the dispatcher treats the approved draft as incomplete and redispatches it
+   for reconciliation:
   ```bash
-  gh api --method POST \
+  GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh api --method POST \
     repos/Jinn-Network/mono/issues/<N>/labels \
     -f 'labels[]=review:approved'
   if ! current_labels="$(
-    gh api repos/Jinn-Network/mono/issues/<N> --jq '.labels[].name'
+    GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh api repos/Jinn-Network/mono/issues/<N> --jq '.labels[].name'
   )"; then
     echo "Failed to read current PR labels" >&2
     exit 1
   fi
   if grep -Fxq 'review:changes-requested' <<<"$current_labels"; then
-    gh api --method DELETE \
+    GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh api --method DELETE \
       repos/Jinn-Network/mono/issues/<N>/labels/review%3Achanges-requested
   fi
-  gh pr review <N> --repo Jinn-Network/mono --approve --body "<summary>"
-  gh pr ready <N> --repo Jinn-Network/mono   # un-draft → enters the merge queue
+  GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh pr review <N> --repo Jinn-Network/mono --approve --body "<summary>"
+  GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh pr ready <N> --repo Jinn-Network/mono   # un-draft → enters the merge queue
   ```
   Done.
 - **Blocking findings** → post a request-changes review with inline findings + the changes-requested label:
   ```bash
-  gh pr review <N> --repo Jinn-Network/mono --request-changes --body "<findings>"
-  gh api --method POST \
+  GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh pr review <N> --repo Jinn-Network/mono --request-changes --body "<findings>"
+  GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh api --method POST \
     repos/Jinn-Network/mono/issues/<N>/labels \
     -f 'labels[]=review:changes-requested'
   if ! current_labels="$(
-    gh api repos/Jinn-Network/mono/issues/<N> --jq '.labels[].name'
+    GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh api repos/Jinn-Network/mono/issues/<N> --jq '.labels[].name'
   )"; then
     echo "Failed to read current PR labels" >&2
     exit 1
   fi
   if grep -Fxq 'review:approved' <<<"$current_labels"; then
-    gh api --method DELETE \
+    GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh api --method DELETE \
       repos/Jinn-Network/mono/issues/<N>/labels/review%3Aapproved
   fi
   ```
   Then dispatch a **fix subagent** (different from the reviewers) seeded with the findings. It implements fixes on the PR branch, commits, and pushes:
   ```bash
-  git push origin HEAD:<headRefName>
+  GH_TOKEN="$JINN_REVIEW_GH_TOKEN" git push origin HEAD:<headRefName>
   ```
   Then **re-run Step 2** on the new diff. Loop. There is **no round-count bound** — escalate on judgment (see Step 4).
 
