@@ -169,8 +169,12 @@ DELETE /repos/Jinn-Network/mono/issues/<N>/labels/<label>
 ```
 
 These operations require repository access, not organization-read scope.
-`gh pr ready` remains the draft-to-ready operation. The review-skill contract
-tests must reject the old `gh pr edit` form and require the REST form.
+The clean flow reconciles these labels, posts a fresh approval, and runs
+`gh pr ready` last as the draft-to-ready publication step. If ready fails, the
+dispatcher must keep a currently approved draft reviewable for reconciliation;
+a current approval suppresses redispatch only once the PR is non-draft. The
+review-skill contract tests must reject the old `gh pr edit` form, require the
+REST form, and pin this ordering.
 
 This credential repair is a separate commit from lifecycle cleanup so each
 behavior can be independently reviewed or reverted.

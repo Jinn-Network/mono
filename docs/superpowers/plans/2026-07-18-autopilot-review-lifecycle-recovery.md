@@ -11,7 +11,9 @@ callback registered for child `error` and `exit` before
 allows the two-hour fallback only for a valid canonical lease whose reviewer
 PID is provably dead. Review verdict labels move from `gh pr edit` to
 repository REST calls so the current `repo`-scoped reviewer token is
-sufficient; clean-flow approval is posted last.
+sufficient. The clean flow reconciles labels, posts a fresh approval, and
+un-drafts last. If that final ready operation fails, the approved draft remains
+reviewable so the dispatcher can reconcile it on the next pass.
 
 **Tech Stack:** TypeScript, Node.js child processes, Vitest, Git worktrees, GitHub CLI/REST, GitHub Actions YAML.
 
@@ -601,9 +603,11 @@ fi
 
 Use the symmetric commands for `review:changes-requested`. Advisory mode adds
 `review:needs-human` with the same POST endpoint. In the clean approve-eligible
-flow, execute all REST label reconciliation first, then `gh pr ready`, and post
-`gh pr review --approve` last. Approval is the terminal success signal: no
-fallible label or draft-state operation may follow it. Preserve the existing
+flow, execute all REST label reconciliation first, then post a fresh
+`gh pr review --approve`, and execute `gh pr ready` last. Ready is the terminal
+publication step. A failed ready operation leaves an approved draft, which
+`GhPrSource` must mark `needsReview: true` for reconciliation; the same current
+approval on a non-draft PR remains `needsReview: false`. Preserve the existing
 request-changes and advisory review paths.
 
 - [ ] **Step 4: Run the contract test and verify GREEN**

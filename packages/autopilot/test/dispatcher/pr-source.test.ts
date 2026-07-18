@@ -43,10 +43,85 @@ describe('GhPrSource.poll', () => {
     expect(pr10.headRefName).toBe('feat/10-a');
     expect(pr10.headRefOid).toBe('sha10');
     expect(pr10.author).toBe('jinn-bot');
-    expect(pr10.needsReview).toBe(false);
+    expect(pr10.needsReview).toBe(true);
     expect(pr11.needsReview).toBe(true);
     expect(pr11.author).toBe('alice');
   });
+
+  it('reconciles a current bot approval while the PR is still draft', async () => {
+    const runner: CommandRunner = async (_cmd, args) => {
+      if (args[0] === 'pr' && args[1] === 'list') {
+        return JSON.stringify([{
+          number: 14,
+          title: 't',
+          headRefName: 'x',
+          headRefOid: 's',
+          isDraft: true,
+          author: { login: 'jinn-bot' },
+        }]);
+      }
+      if (args[0] === 'pr' && args[1] === 'view') return PR10_VIEW;
+      throw new Error('unexpected');
+    };
+
+    const polled = await new GhPrSource(runner, LABEL, BOT).poll();
+
+    expect(polled[0]).toMatchObject({ isDraft: true, needsReview: true });
+  });
+
+  it('does not redispatch a current bot approval once the PR is ready', async () => {
+    const runner: CommandRunner = async (_cmd, args) => {
+      if (args[0] === 'pr' && args[1] === 'list') {
+        return JSON.stringify([{
+          number: 15,
+          title: 't',
+          headRefName: 'x',
+          headRefOid: 's',
+          isDraft: false,
+          author: { login: 'jinn-bot' },
+        }]);
+      }
+      if (args[0] === 'pr' && args[1] === 'view') return PR10_VIEW;
+      throw new Error('unexpected');
+    };
+
+    const polled = await new GhPrSource(runner, LABEL, BOT).poll();
+
+    expect(polled[0]).toMatchObject({ isDraft: false, needsReview: false });
+  });
+
+  it.each(['CHANGES_REQUESTED', 'COMMENTED'])(
+    'preserves a current %s review on a draft without treating it as incomplete approval',
+    async (state) => {
+      const runner: CommandRunner = async (_cmd, args) => {
+        if (args[0] === 'pr' && args[1] === 'list') {
+          return JSON.stringify([{
+            number: 16,
+            title: 't',
+            headRefName: 'x',
+            headRefOid: 's',
+            isDraft: true,
+            author: { login: 'jinn-bot' },
+          }]);
+        }
+        if (args[0] === 'pr' && args[1] === 'view') {
+          return JSON.stringify({
+            reviews: [{
+              author: { login: BOT },
+              state,
+              submittedAt: '2026-05-29T12:00:00Z',
+            }],
+            commits: [{ committedDate: '2026-05-29T10:00:00Z' }],
+          });
+        }
+        throw new Error('unexpected');
+      };
+
+      const polled = await new GhPrSource(runner, LABEL, BOT).poll();
+
+      expect(polled[0]).toMatchObject({ isDraft: true, needsReview: false });
+    },
+  );
 
   it('treats a bot review OLDER than the latest commit as stale -> needsReview:true', async () => {
     const STALE_VIEW = JSON.stringify({

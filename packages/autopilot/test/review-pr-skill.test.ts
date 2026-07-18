@@ -114,7 +114,7 @@ describe('review-pr review lifecycle commands', () => {
     );
   });
 
-  it('records labels, un-drafts, and only then posts the clean approval', () => {
+  it('records labels, posts a fresh approval, and only then un-drafts', () => {
     const labelPost = approvedFlow.indexOf(
       `gh api --method POST \\\n${labelsEndpoint} \\`,
     );
@@ -134,8 +134,8 @@ describe('review-pr review lifecycle commands', () => {
     expect(labelPost).toBeGreaterThanOrEqual(0);
     expect(labelPost).toBeLessThan(labelLookup);
     expect(labelLookup).toBeLessThan(oppositeDelete);
-    expect(oppositeDelete).toBeLessThan(ready);
-    expect(ready).toBeLessThan(approve);
+    expect(oppositeDelete).toBeLessThan(approve);
+    expect(approve).toBeLessThan(ready);
   });
 
   it('preserves the request-changes review command', () => {
