@@ -934,7 +934,9 @@ export class TaskEngine {
     // (#1827). Best-effort and never fatal: an RPC failure must not block
     // the claim — `onchainCreationTimestamp` simply stays null and
     // `envelope.task.createdAt` is correctly omitted at pack() time.
-    if (this.blockTimestamp) {
+    // Skipped when already persisted: crash-recovery and the event/tick race
+    // both re-enter claim(), and the timestamp of a mined block never changes.
+    if (this.blockTimestamp && task.onchainCreationTimestamp == null) {
       try {
         const timestampSec = await this.blockTimestamp.getBlockTimestamp(task.onchainCreationBlock);
         if (timestampSec !== undefined) {
@@ -1850,6 +1852,15 @@ export class TaskEngine {
       };
     }
 
+    // Task-doc repo identity (spec §10 / #1827), read once for both the
+    // mineable-trace record below and the envelope's task provenance fields.
+    // Correctly absent for solver types without repo identity (e.g.
+    // prediction.*) — not a fabricated default.
+    const taskSpec = task.task?.spec as Record<string, unknown> | undefined;
+    const specRepo = typeof taskSpec?.['repo'] === 'string' ? taskSpec['repo'] : undefined;
+    const specBaseCommit = typeof taskSpec?.['base_commit'] === 'string' ? taskSpec['base_commit'] : undefined;
+    const specInstanceId = typeof taskSpec?.['instance_id'] === 'string' ? taskSpec['instance_id'] : undefined;
+
     // 3b. Mineable-trace record (task-creator spec §10, D2 tier-1). Best-effort
     // and never fatal — a store failure must not fail the task. Only records
     // for restoration tasks whose spec carries repo identity (repo +
@@ -1866,10 +1877,6 @@ export class TaskEngine {
         const synthetic = task.task?.eligibility?.['syntheticProvenance'] as
           | SyntheticTaskProvenance
           | undefined;
-        const spec = task.task?.spec as Record<string, unknown> | undefined;
-        const repo = typeof spec?.['repo'] === 'string' ? spec['repo'] : undefined;
-        const baseCommit = typeof spec?.['base_commit'] === 'string' ? spec['base_commit'] : undefined;
-        const sourceInstanceId = typeof spec?.['instance_id'] === 'string' ? spec['instance_id'] : undefined;
         const acceptedDiff =
           typeof implOutput?.solutionPayload?.['patch'] === 'string'
             ? (implOutput.solutionPayload['patch'] as string)
@@ -1878,15 +1885,15 @@ export class TaskEngine {
           console.debug(
             `[harness-engine] ${task.requestId}: mineable-trace record skipped — task is a synthetic mint (no second-generation echoes)`,
           );
-        } else if (repo && baseCommit && acceptedDiff) {
+        } else if (specRepo && specBaseCommit && acceptedDiff) {
           const record = buildMineableRecord({
             sourceId: task.requestId,
             kind: 'solvernet-execution',
-            repo,
-            baseCommit,
+            repo: specRepo,
+            baseCommit: specBaseCommit,
             acceptedDiff,
             intermediateFailureDiffs: [],
-            ...(sourceInstanceId !== undefined ? { sourceInstanceId } : {}),
+            ...(specInstanceId !== undefined ? { sourceInstanceId: specInstanceId } : {}),
             publishMinedTasksConsent: this.mineablePublishConsent,
             now: () => new Date().toISOString(),
           });
@@ -1976,21 +1983,6 @@ export class TaskEngine {
     const executorMode = this.modesByRequest.get(task.requestId) ?? 'train';
     const fenceCodeDigest = this.codeDigestsByRequest.get(task.requestId) ?? buildInfo.codeDigest;
 
-    // #1827: instanceId/repo/baseCommit — copied from the parsed task doc's
-    // spec, same source the mineable-trace record above already reads.
-    // Correctly absent for solver types without repo identity (e.g.
-    // prediction.*) — not a fabricated default.
-    const provenanceSpec = task.task?.spec as Record<string, unknown> | undefined;
-    const instanceIdForEnvelope = typeof provenanceSpec?.['instance_id'] === 'string'
-      ? provenanceSpec['instance_id']
-      : undefined;
-    const repoForEnvelope = typeof provenanceSpec?.['repo'] === 'string'
-      ? provenanceSpec['repo']
-      : undefined;
-    const baseCommitForEnvelope = typeof provenanceSpec?.['base_commit'] === 'string'
-      ? provenanceSpec['base_commit']
-      : undefined;
-
     // #1827: generatorModel — harvested from the harness's own transcript
     // when possible (source: 'stream'), else falls back to the same
     // SolverNet/daemon-config model string used for executor.model below
@@ -2012,9 +2004,9 @@ export class TaskEngine {
         // #1827: absent (never "now") when the RPC lookup at claim() time
         // failed or never ran — see claim() / setOnchainCreationTimestamp.
         ...(task.onchainCreationTimestamp != null ? { createdAt: task.onchainCreationTimestamp } : {}),
-        ...(instanceIdForEnvelope ? { instanceId: instanceIdForEnvelope } : {}),
-        ...(repoForEnvelope ? { repo: repoForEnvelope } : {}),
-        ...(baseCommitForEnvelope ? { baseCommit: baseCommitForEnvelope } : {}),
+        ...(specInstanceId ? { instanceId: specInstanceId } : {}),
+        ...(specRepo ? { repo: specRepo } : {}),
+        ...(specBaseCommit ? { baseCommit: specBaseCommit } : {}),
       },
       participant: { safeAddress, agentEoa },
       window: { startTs: task.windowStartTs, endTs: task.windowEndTs },

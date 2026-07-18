@@ -2178,18 +2178,15 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       deliveryDeps,
       implRegistry,
       solverNetRegistry,
-      // #1827: resolves envelope.task.createdAt at claim() time. Best-effort
-      // — getBlockTimestamp swallows getBlock errors into `undefined` so a
-      // transient RPC failure never blocks a claim; engine.ts additionally
-      // wraps this call in its own try/catch as belt-and-suspenders.
+      // #1827: resolves envelope.task.createdAt at claim() time. getBlock
+      // errors propagate deliberately — engine.ts's claim() catches, warns,
+      // and continues, so a transient RPC failure never blocks a claim but
+      // stays visible in the logs (swallowing here would make that warn
+      // unreachable).
       blockTimestamp: {
         getBlockTimestamp: async (blockNumber: number): Promise<number | undefined> => {
-          try {
-            const block = await publicClient.getBlock({ blockNumber: BigInt(blockNumber) });
-            return Number(block.timestamp);
-          } catch {
-            return undefined;
-          }
+          const block = await publicClient.getBlock({ blockNumber: BigInt(blockNumber) });
+          return Number(block.timestamp);
         },
       },
       // Spec §14, Task 28: per-launch claim eligibility filter. Operators
