@@ -319,19 +319,29 @@ describe('executeEpisodes()', () => {
     ]);
   });
 
-  it('accepts a payment-card-shaped string under the seed profile (documented residual, #1409/#1784)', async () => {
+  it.each([
+    ['payment-card-shaped string', 'Customer card: 4111 1111 1111 1111.'],
+    ['phone-shaped string', 'Call the customer at +1 (415) 555-2671.'],
+    [
+      'JWT-shaped string',
+      'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IlN5bnRoZXRpYyJ9.c2lnbmF0dXJlU3ludGhldGljVmFsdWU',
+    ],
+    ['unprefixed high-entropy blob', 'Credential: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'],
+  ])('accepts a %s under the seed profile (documented residual, #1409/#1784)', async (_label, residualText) => {
     // The seed profile deliberately does not run openredaction or the
     // entropy fallback (build.ts's buildSeedScrubPipeline doc comment,
     // #1409): seeds are public, licence-checked prose, and those
     // probabilistic stages false-positive on ordinary words and hex-looking
-    // ids in that content (#1784). A structured-PII shape like a payment
-    // card number is accepted residual risk for this lane — the trace
+    // ids in that content (#1784). Shapes only those stages detect —
+    // structured PII (payment cards, phone numbers, SSNs) via
+    // openredaction, JWTs and unprefixed high-entropy blobs via the entropy
+    // fallback — are accepted residual risk for this lane; the trace
     // profile (buildScrubPipeline, used for operator capture) still catches
-    // it. This test pins that trade-off as intentional, not a gap that was
-    // missed.
+    // them. This test pins that trade-off as intentional, not a gap that
+    // was missed.
     const source = mockEpisodeSource([
       episode({
-        steps: [{ label: 'note', title: 'residual fixture', text: 'Customer card: 4111 1111 1111 1111.' }],
+        steps: [{ label: 'note', title: 'residual fixture', text: residualText }],
       }),
     ]);
     const { deps, published } = mockPublishDeps();
