@@ -59,6 +59,25 @@ describe('implement-issue SKILL.md (#657 depth-fix)', () => {
     expect(doc).toContain('active adapter’s fresh-root mechanism');
   });
 
+  it('owns the runtime-neutral stage methodology mapping', () => {
+    const mappings = [
+      '| 1 — Design | `superpowers:brainstorming` |',
+      '| 2 — Plan | `superpowers:writing-plans` |',
+      '| 3 — Implement | `superpowers:test-driven-development` then `superpowers:executing-plans` |',
+      '| 4 — Code review | `/code-review` |',
+      '| 5 — Independent review | `superpowers:requesting-code-review` |',
+      '| 6 — Security review | `/security-review` |',
+      '| 7 — Jinn-app test | `testing-jinn-app` |',
+      '| 8 — Verify + PR | `superpowers:verification-before-completion` |',
+    ];
+
+    expect(doc).toContain('## Canonical stage methodologies');
+    for (const mapping of mappings) expect(doc).toContain(mapping);
+    expect(doc).toContain(
+      'The active runtime adapter resolves these canonical method names',
+    );
+  });
+
   it('does NOT contain the superseded blanket "fresh subagent" Step-3 rule', () => {
     expect(doc).not.toContain('Each stage is performed by dispatching a **fresh subagent**');
   });

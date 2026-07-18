@@ -210,6 +210,25 @@ Stages scale to **Issue Type + Effort**:
 
 See Step 4 for dispatch discipline.
 
+## Canonical stage methodologies
+
+These methodology names are runtime-neutral workflow policy:
+
+| Stage | Method skill |
+|---|---|
+| 1 — Design | `superpowers:brainstorming` |
+| 2 — Plan | `superpowers:writing-plans` |
+| 3 — Implement | `superpowers:test-driven-development` then `superpowers:executing-plans` |
+| 4 — Code review | `/code-review` |
+| 5 — Independent review | `superpowers:requesting-code-review` |
+| 6 — Security review | `/security-review` |
+| 7 — Jinn-app test | `testing-jinn-app` |
+| 8 — Verify + PR | `superpowers:verification-before-completion` |
+
+The active runtime adapter resolves these canonical method names to the closest
+installed runtime skill. If no separately named equivalent exists, the stage
+follows its canonical checklist below without removing or compressing a gate.
+
 ---
 
 ### Stage 1 — Design
@@ -526,7 +545,7 @@ The headless override also prevents plan-only posture from leaking into stage ex
 
 ## Composition
 
-- Composes with: the method skills declared by the active runtime adapter; the canonical stage methodologies and deliverables above remain authoritative.
+- Composes with: the canonical method skills declared above, resolved through the active runtime adapter; the canonical stage methodologies and deliverables remain authoritative.
 - Downstream of: `file-issue` (which produces the triaged issue this skill consumes).
 - Upstream of: the merge skill (which batch-integrates the draft PRs this skill produces into `next`).
 - Dispatcher integration: the Autopilot dispatcher invokes this skill per issue; the headless-override block is injected by the dispatcher, not this skill.

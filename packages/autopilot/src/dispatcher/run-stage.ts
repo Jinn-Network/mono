@@ -8,7 +8,10 @@ import {
   type AutopilotRuntime,
 } from '../autopilot-runtime.js';
 import { loadCanon } from './coordinator-session.js';
-import { hermesChatArgs } from './hermes-runtime.js';
+import {
+  assertHermesBillingRoute,
+  hermesChatArgs,
+} from './hermes-runtime.js';
 
 /**
  * A minimal child handle the stage runner needs: stdout/stderr streams to
@@ -138,6 +141,7 @@ export function runStageHeadless(
       opts.provider ?? process.env.JINN_DISPATCHER_HERMES_PROVIDER,
       'JINN_DISPATCHER_HERMES_PROVIDER',
     );
+    assertHermesBillingRoute(model, provider);
     cmd = pythonPath;
     args = hermesChatArgs(prompt, { model, provider });
   } else {

@@ -198,16 +198,31 @@ describe('runStageHeadless', () => {
 
   it('resolves Hermes Python, model, and provider from named environment variables', async () => {
     process.env.JINN_DISPATCHER_HERMES_PYTHON = '/env/hermes/python';
-    process.env.JINN_DISPATCHER_HERMES_MODEL = 'env-model';
-    process.env.JINN_DISPATCHER_HERMES_PROVIDER = 'env-provider';
+    process.env.JINN_DISPATCHER_HERMES_MODEL = 'gpt-5.6-sol';
+    process.env.JINN_DISPATCHER_HERMES_PROVIDER = 'openai-codex';
     process.env.JINN_AUTOPILOT_RUNTIME = 'hermes';
     const { spawn, calls } = makeSpawn('close-0', 'ok');
 
     await runStageHeadless(BASE_OPTS, spawn);
 
     expect(calls[0].cmd).toBe('/env/hermes/python');
-    expect(calls[0].args[calls[0].args.indexOf('--model') + 1]).toBe('env-model');
-    expect(calls[0].args[calls[0].args.indexOf('--provider') + 1]).toBe('env-provider');
+    expect(calls[0].args[calls[0].args.indexOf('--model') + 1])
+      .toBe('gpt-5.6-sol');
+    expect(calls[0].args[calls[0].args.indexOf('--provider') + 1])
+      .toBe('openai-codex');
+  });
+
+  it('revalidates Hermes billing before an inherited or explicit stage spawn', () => {
+    process.env.JINN_AUTOPILOT_RUNTIME = 'hermes';
+    const { spawn, calls } = makeSpawn('close-0', 'ok');
+
+    expect(() => runStageHeadless({
+      ...BASE_OPTS,
+      hermesPythonPath: '/opt/hermes/python',
+      model: 'openai/gpt-5.6-sol',
+      provider: 'openai-codex',
+    }, spawn)).toThrow(/bare model id/i);
+    expect(calls).toHaveLength(0);
   });
 
   it('reframes the root-stage headless block for Hermes', async () => {

@@ -109,6 +109,14 @@ describe('assertHermesBillingRoute', () => {
       .toThrow(/bare.*JINN_DISPATCHER_HERMES_MODEL/i);
   });
 
+  it.each(['', '   ', ' gpt-5.6-sol', 'gpt-5.6-sol '])(
+    'rejects an empty or whitespace-padded model id: %j',
+    (model) => {
+      expect(() => assertHermesBillingRoute(model, 'openai-codex'))
+        .toThrow(/bare model id.*non-empty.*whitespace/i);
+    },
+  );
+
   it('rejects any provider other than the subscription provider', () => {
     expect(() => assertHermesBillingRoute('gpt-5.6-sol', 'openrouter'))
       .toThrow(/openai-codex.*JINN_DISPATCHER_HERMES_PROVIDER/i);
