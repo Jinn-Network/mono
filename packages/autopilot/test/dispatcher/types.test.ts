@@ -23,7 +23,7 @@ describe('review-loop types', () => {
     expect(s.prNumber).toBe(42);
   });
 
-  it('DEFAULT_CONFIG.implementerRules is empty (no policy = single-implementer)', () => {
-    expect(DEFAULT_CONFIG.implementerRules).toEqual([]);
+  it('DEFAULT_CONFIG uses one process-wide Claude runtime', () => {
+    expect(DEFAULT_CONFIG.runtime).toBe('claude');
   });
 });

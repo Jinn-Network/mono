@@ -10,8 +10,8 @@ import type { DispatcherConfig, InFlightMergePrep } from '../../src/dispatcher/t
 import type { StuckPr } from '../../src/dispatcher/merge-sweep.js';
 
 const CFG: DispatcherConfig = {
-  concurrencyCap: 3, openPrBackpressure: 30, wallClockMs: 1, defaultImplementer: 'claude',
-  implementerRules: [], authorAllowlist: [], reviewCap: 3, engineReviewLabel: 'engine:review',
+  runtime: 'claude', concurrencyCap: 3, openPrBackpressure: 30, wallClockMs: 1,
+  authorAllowlist: [], reviewCap: 3, engineReviewLabel: 'engine:review',
   reviewBotLogin: 'jinn-review', implGhToken: '', reviewGhToken: '',
   mergePrepEnabled: true, mergePrepCap: 1,
   hermesModel: 'gpt-5.6-sol', hermesProvider: 'openai-codex', hermesPythonPath: '/opt/hermes/python',

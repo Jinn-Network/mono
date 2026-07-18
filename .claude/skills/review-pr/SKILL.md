@@ -1,11 +1,19 @@
 ---
 name: review-pr
-description: Use when asked to review a specific GitHub PR through Autopilot — e.g. "review PR #N", "run review-pr on this PR". The coordinating agent for one open PR carrying the `engine:review` label: dispatches independent review subagents (code-review + security + app-test), then owns the review→fix→re-review loop on the PR branch until the PR is approved or escalated. Mirrors implement-issue.
+description: Use when asked to review a specific GitHub PR through Autopilot — e.g. "review PR #N", "run review-pr on this PR". The coordinating agent for one open PR carrying the `engine:review` label: dispatches independent review passes (code-review + security + app-test), then owns the review→fix→re-review loop on the PR branch until the PR is approved or escalated. Mirrors implement-issue.
 ---
 
 # review-pr
 
-You are the coordinating agent for exactly one open GitHub PR that carries the `engine:review` label. Your job: run an independent review, and if there are blocking findings, drive fixes on the PR branch until the PR is clean (approve + un-draft) or a human is needed (escalate). You dispatch a fresh subagent per stage; you never review or fix directly. This mirrors implement-issue — the review→fix loop is the same machinery, re-rooted on a PR.
+You are the coordinating agent for exactly one open GitHub PR that carries the `engine:review` label. Your job: run an independent review, and if there are blocking findings, drive fixes on the PR branch until the PR is clean (approve + un-draft) or a human is needed (escalate). You never review or fix directly. This mirrors implement-issue — the review→fix loop is the same machinery, re-rooted on a PR.
+
+## Runtime adapter
+
+Before Step 1, read the shared
+[`autopilot-runtime`](../autopilot-runtime/SKILL.md) skill completely. It
+selects mechanics from `JINN_AUTOPILOT_RUNTIME=claude|hermes`; unset defaults
+to Claude for an interactive invocation. This file remains authoritative for
+review policy, identity, verdicts, fixes, escalation, and deliverables.
 
 ## Read first
 - `docs/engineering/handbook.md`, `CLAUDE.md`
@@ -39,7 +47,7 @@ fi
 Shell tool calls do not share a reliable exported environment. Therefore every
 GitHub CLI invocation below binds `GH_TOKEN="$JINN_REVIEW_GH_TOKEN"` on the
 same command line. Never shorten these commands to a bare `gh ...`, never use
-ambient `gh auth`, and never let a review or fix subagent do so. Git pushes use
+ambient `gh auth`, and never let a review or fix pass do so. Git pushes use
 the command-local askpass flow below; never configure a persistent credential
 helper and never put the token in a URL or command argument.
 
@@ -69,8 +77,11 @@ Compute the diff from the merge-base:
 git diff $(git merge-base origin/next HEAD)..HEAD
 ```
 
-## Step 2 — Dispatch the review subagents (in parallel)
-Dispatch fresh subagents — each different from any fix subagent (independence invariant, as implement-issue Stage 3 ≠ Stage 5):
+## Step 2 — Dispatch the review passes (in parallel)
+
+Use the active adapter's **synchronous-parallel-child mechanism** for one
+parallel batch. Every reviewer must be different from the later fix pass
+(independence invariant, as implement-issue Stage 3 ≠ Stage 5):
 - **code-review** — run `superpowers:requesting-code-review` with the code-reviewer template, given the diff + PR body.
 - **security** — run `/security-review` on the diff.
 - **app-test** — ONLY if the diff touches `client/src/dashboard/` (or other operator-visible surface): run `testing-jinn-app`.
@@ -142,9 +153,11 @@ Do not approve, do not un-draft, do not merge. Blocking findings still go throug
     exit 1
   fi
   ```
-  Dispatch a **fix subagent** (different from the reviewers) seeded with the
-  findings. It implements and commits fixes locally. After it returns, require
-  a genuinely new commit:
+  Dispatch a **review fix pass** (different from the reviewers) through the
+  active adapter's **fresh-root mechanism**, seeded with the findings. A fresh
+  depth-0 process is required so the fix pass can fan out internally. It
+  implements and commits fixes locally. After it returns, require a genuinely
+  new commit:
   ```bash
   if ! before_fix_marker="$(git rev-parse --git-path jinn-review-before-fix)"; then
     echo "Failed to locate pre-fix marker" >&2
@@ -159,7 +172,7 @@ Do not approve, do not un-draft, do not merge. Blocking findings still go throug
     exit 1
   fi
   if [[ "$after_fix_head" == "$before_fix_head" ]]; then
-    echo "Fix subagent produced no new commit" >&2
+    echo "Review fix pass produced no new commit" >&2
     exit 1
   fi
   ```
@@ -201,8 +214,8 @@ Do not approve, do not un-draft, do not merge. Blocking findings still go throug
   Then **re-run Step 2** on the new diff. Loop. There is **no round-count bound** — escalate on judgment (see Step 4).
 
 ## Step 4 — Finding handling & escalation
-Reuse implement-issue §Step 5's decision rules: fixable findings → fix subagent
-+ re-run; scope/design findings, non-converging findings, or an unpushable
+Reuse implement-issue §Step 5's decision rules: fixable findings → fresh-root
+fix pass + re-run; scope/design findings, non-converging findings, or an unpushable
 branch → escalate. Do not copy its ambient-auth command examples. Bind the
 reviewer token on both the PR comment and Project mutation:
 ```bash
@@ -214,16 +227,16 @@ GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh project item-edit --id <item-id> --project-i
 For a PR with no linked issue, post the note and stop (the request-changes
 review stands as advisory). Never force-merge.
 
-## Step 5 — Subagent-dispatch discipline & headless mode
-Identical to implement-issue §Step 4 and §Step 7: curated prompts (never forward coordinator history), the independence invariant (reviewer ≠ fixer), the headless-override block injected by the dispatcher, no plan-posture flags.
+## Step 5 — Dispatch discipline & headless mode
+Identical to implement-issue §Step 4 and §Step 7: curated prompts (never forward coordinator history), the independence invariant (reviewer ≠ fixer), the headless-override block injected by the dispatcher, no plan-posture flags. Use the shared runtime skill for every parallel reviewer and fresh-root fix pass.
 
 ## Failure modes
 | Failure | Action |
 |---|---|
 | PR lacks the `engine:review` label | Stop — not in scope (the dispatcher should not have spawned this). |
 | Cannot push to the PR branch (fork) | Post advisory review; escalate `Blocked on: Human`. |
-| Fix subagent reports done but no new commit | Re-dispatch; compare the captured pre-fix and post-fix `HEAD` values. |
+| Review fix pass reports done but no new commit | Re-dispatch through the fresh-root mechanism; compare the captured pre-fix and post-fix `HEAD` values. |
 | Findings not converging | Escalate `stuck`. |
 
 ## Composition
-Composes: `superpowers:requesting-code-review` + code-reviewer template, `/security-review`, `testing-jinn-app`. Downstream of: the engine's draft PR (or any human PR labelled `engine:review`). Upstream of: the merge skill (consumes `review:approved`). Dispatched by: Autopilot's review pass (the headless-override block is injected by the dispatcher).
+Composes: `autopilot-runtime`, `superpowers:requesting-code-review` + code-reviewer template, `/security-review`, `testing-jinn-app`. Downstream of: the engine's draft PR (or any human PR labelled `engine:review`). Upstream of: the merge skill (consumes `review:approved`). Dispatched by: Autopilot's review pass (the headless-override block is injected by the dispatcher).

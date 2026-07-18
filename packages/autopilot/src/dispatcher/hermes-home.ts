@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync, existsSync, cpSync } from 'node:fs';
 import type { DispatcherConfig, Effort } from './types.js';
 
 /**
- * Per-session `$HERMES_HOME` for a `hermes` coordinator session (issue #TBD).
+ * Per-session `$HERMES_HOME` for a Hermes coordinator session.
  *
  * Hermes has no CLI flag for reasoning effort and no env override — it reads
  * `agent.reasoning_effort` from `$HERMES_HOME/config.yaml` (hermes_cli/cli.py).
@@ -55,8 +55,8 @@ const OPERATOR_STATE_TO_SEED = ['.env', 'auth', 'auth.json', 'bin'] as const;
  * (hermes_cli/hermes_constants.py). Note **`max` is NOT valid** — hermes
  * silently degrades an unknown value to its provider default, so the board's
  * `Max` is mapped to `xhigh` (its highest real tier) rather than passed
- * through and quietly lost. Returns null when the issue has no Effort, so the
- * key is omitted and hermes uses its own default.
+ * through and quietly lost. Returns null when a session has no Effort, so the
+ * key is omitted and Hermes uses its own default.
  */
 export function hermesReasoningEffort(effort: Effort | null): string | null {
   switch (effort) {
@@ -91,7 +91,8 @@ function toYaml(value: unknown, indent = 0): string {
 }
 
 export interface HermesHomeOpts {
-  issueNumber: number;
+  /** Namespaced coordinator identity, e.g. implement-42 or review-42. */
+  sessionId: string;
   worktreePath: string;
   effort: Effort | null;
   cfg: DispatcherConfig;
@@ -102,16 +103,16 @@ export interface HermesHomeOpts {
 }
 
 /**
- * Create `<HERMES_HOMES_DIR>/<N>` with a generated `config.yaml`, seeding
+ * Create `<HERMES_HOMES_DIR>/<sessionId>` with a generated `config.yaml`, seeding
  * operator auth/bin when available. Returns the home path to set as
- * `HERMES_HOME` on the spawned session. Idempotent: re-dispatching an issue
+ * `HERMES_HOME` on the spawned session. Idempotent: re-dispatching a session
  * rewrites the config (effort may have changed) but never clobbers seeded state.
  */
 export function prepareHermesHome(opts: HermesHomeOpts): { hermesHome: string } {
-  const { issueNumber, worktreePath, effort, cfg } = opts;
+  const { sessionId, worktreePath, effort, cfg } = opts;
   const operatorHome = opts.operatorHome ?? join(homedir(), '.hermes');
   const repoRoot = opts.repoRoot ?? REPO_ROOT;
-  const hermesHome = join(HERMES_HOMES_DIR, String(issueNumber));
+  const hermesHome = join(HERMES_HOMES_DIR, sessionId);
 
   mkdirSync(hermesHome, { recursive: true });
 
@@ -162,8 +163,8 @@ export function prepareHermesHome(opts: HermesHomeOpts): { hermesHome: string } 
     delegation: { max_concurrent_children: 3 },
     skills: {
       // Hermes scans SKILL.md trees natively — this is how the coordinator
-      // loads canonical `implement-issue`, its Hermes adapter reference, and
-      // `testing-jinn-app` for Stage 7.
+      // loads canonical workflow skills, the shared runtime adapter, and
+      // composed repository skills such as `testing-jinn-app`.
       external_dirs: [join(repoRoot, '.claude', 'skills')],
     },
     mcp_servers: {
@@ -173,7 +174,7 @@ export function prepareHermesHome(opts: HermesHomeOpts): { hermesHome: string } 
   };
 
   let yaml = '# Generated per-session by the Jinn autopilot dispatcher — do not edit.\n';
-  yaml += `# Session: issue #${issueNumber}. Regenerated on every dispatch.\n`;
+  yaml += `# Session: ${sessionId}. Regenerated on every dispatch.\n`;
   for (const [k, v] of Object.entries(config)) {
     const rendered = toYaml(v, 1);
     yaml += `${k}:${rendered.startsWith('\n') ? '' : ' '}${rendered.replace(/^ /, '')}`;

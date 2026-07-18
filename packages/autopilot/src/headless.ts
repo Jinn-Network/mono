@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import type { AutopilotRuntime } from './autopilot-runtime.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -8,15 +9,13 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  *  out for non-claude coordinators (see buildHermesHeadlessPrompt). */
 const CLAUDE_CLI_TOKEN = '`claude -p` / `--print`';
 
-export type HeadlessRuntime = 'claude' | 'hermes';
-
 /** The canonical headless-override block, injected into every headless session. */
 export function headlessOverride(): string {
   return readFileSync(join(HERE, '..', 'headless-override.md'), 'utf8').trim();
 }
 
 /** Render the shared override with runtime-specific CLI framing. */
-export function headlessOverrideFor(runtime: HeadlessRuntime): string {
+export function headlessOverrideFor(runtime: AutopilotRuntime): string {
   const block = headlessOverride();
   return runtime === 'hermes'
     ? block.replace(CLAUDE_CLI_TOKEN, '`hermes chat -q`')

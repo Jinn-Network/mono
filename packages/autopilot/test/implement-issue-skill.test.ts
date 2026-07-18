@@ -23,11 +23,18 @@ const HERMES_SKILL_PATH = join(
   'implement-issue-hermes',
   'SKILL.md',
 );
+const RUNTIME_SKILL_PATH = join(
+  REPO_ROOT,
+  '.claude',
+  'skills',
+  'autopilot-runtime',
+  'SKILL.md',
+);
 const CLAUDE_ADAPTER_PATH = join(
   REPO_ROOT,
   '.claude',
   'skills',
-  'implement-issue',
+  'autopilot-runtime',
   'references',
   'claude.md',
 );
@@ -35,7 +42,7 @@ const HERMES_ADAPTER_PATH = join(
   REPO_ROOT,
   '.claude',
   'skills',
-  'implement-issue',
+  'autopilot-runtime',
   'references',
   'hermes.md',
 );
@@ -43,8 +50,9 @@ const HERMES_ADAPTER_PATH = join(
 describe('implement-issue SKILL.md (#657 depth-fix)', () => {
   const doc = readFileSync(SKILL_PATH, 'utf8');
 
-  it('documents the wired `stage:run` invocation', () => {
-    expect(doc).toContain('stage:run');
+  it('delegates runtime mechanics to the shared runtime skill', () => {
+    expect(doc).toContain('../autopilot-runtime/SKILL.md');
+    expect(doc).not.toContain('yarn stage:run');
   });
 
   it('documents depth-needing stages through the active adapter', () => {
@@ -86,13 +94,15 @@ describe('implement-issue canonical runtime adapters', () => {
     expect(existsSync(HERMES_SKILL_PATH)).toBe(false);
   });
 
-  it('links both mechanics-only adapter references from the canonical skill', () => {
-    expect(doc).toContain('references/claude.md');
-    expect(doc).toContain('references/hermes.md');
-    expect(doc).toContain('JINN_IMPLEMENT_ISSUE_ADAPTER');
+  it('links the single shared runtime skill from the canonical workflow', () => {
+    expect(doc).toContain('../autopilot-runtime/SKILL.md');
+    expect(doc).toContain('JINN_AUTOPILOT_RUNTIME');
+    expect(doc).not.toContain('references/claude.md');
+    expect(doc).not.toContain('references/hermes.md');
   });
 
-  it('ships both adapter references', () => {
+  it('ships the shared skill and both adapter references', () => {
+    expect(existsSync(RUNTIME_SKILL_PATH)).toBe(true);
     expect(existsSync(CLAUDE_ADAPTER_PATH)).toBe(true);
     expect(existsSync(HERMES_ADAPTER_PATH)).toBe(true);
   });
@@ -103,9 +113,10 @@ describe('implement-issue canonical runtime adapters', () => {
         CLAUDE_ADAPTER_PATH,
         [
           '# Claude runtime adapter',
-          '## Fresh-root stages',
+          '## Fresh-root sessions',
+          '## Synchronous parallel children',
           '## Lightweight children',
-          '## Method skills',
+          '## Skill loading',
         ],
       ],
       [
@@ -113,9 +124,10 @@ describe('implement-issue canonical runtime adapters', () => {
         [
           '# Hermes runtime adapter',
           '## Finite-session invariant',
-          '## Fresh-root stages',
+          '## Fresh-root sessions',
+          '## Synchronous parallel children',
           '## Lightweight children',
-          '## Method skills',
+          '## Skill loading',
         ],
       ],
     ]);

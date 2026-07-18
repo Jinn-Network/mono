@@ -1,4 +1,5 @@
 import { DEFAULT_HERMES_PYTHON } from './hermes-runtime.js';
+import type { AutopilotRuntime } from '../autopilot-runtime.js';
 
 /** The nine work-shape Issue Types (DR-2026-05-20-b). */
 export type IssueShape =
@@ -98,44 +99,15 @@ export interface SessionResult {
   escalationStatus?: 'needs-decision' | 'blocked' | 'stuck';
 }
 
-/**
- * The CLI implementer agents the dispatcher can route work to.
- *
- * `claude` and `hermes` are REAL coordinators — `dispatch.ts` spawns their
- * respective CLIs. `codex` / `cursor` remain directive-only (they select
- * prompt text inside a claude coordinator); see `dispatch.ts`.
- */
-export type Implementer = 'claude' | 'codex' | 'cursor' | 'hermes';
-
-/**
- * One entry in the ordered implementer-routing policy. A rule matches an issue
- * when *every* specified predicate holds: `effort` (if present) must equal the
- * issue's Effort, and `shape` (if present) must equal the issue's Issue Type. A
- * rule with neither `effort` nor `shape` matches every issue (a catch-all).
- * Resolution is first-match-wins over the ordered `implementerRules` list.
- */
-export interface ImplementerRule {
-  effort?: Effort;
-  shape?: IssueShape;
-  implementer: Implementer;
-}
-
 export interface DispatcherConfig {
+  /** One process-wide runtime for implementation, review, merge-prep, and stages. */
+  runtime: AutopilotRuntime;
   /** Max simultaneous sessions. Default 3; practical ceiling ~5–7. */
   concurrencyCap: number;
   /** Stop pulling new issues when open ready PRs exceed this. */
   openPrBackpressure: number;
   /** Per-session wall-clock ceiling, ms. Generous — hours. */
   wallClockMs: number;
-  /** v1 default implementer; per-issue label can override. */
-  defaultImplementer: Implementer;
-  /**
-   * Ordered implementer-routing policy (#887). Empty (the default) = fall
-   * through to `defaultImplementer` — today's single-implementer behaviour.
-   * First-match-wins; see `ImplementerRule`. Source of truth is
-   * `JINN_DISPATCHER_IMPLEMENTER_RULES` (runner-read JSON array).
-   */
-  implementerRules: ImplementerRule[];
   /**
    * GitHub logins whose issues the dispatcher may pick up (#497). Compared
    * case-insensitively against `PolledIssue.author`. Empty (the default) =
@@ -203,6 +175,7 @@ export interface DispatcherConfig {
 }
 
 export const DEFAULT_CONFIG: DispatcherConfig = {
+  runtime: 'claude',
   concurrencyCap: 3,
   // PR backpressure ceiling: pause dispatch when this many open PRs target `next`.
   // 30 is enough headroom for a normal sprint's worth of in-flight + parked work
@@ -210,8 +183,6 @@ export const DEFAULT_CONFIG: DispatcherConfig = {
   // `--backpressure N` on scripts/run-autopilot.ts.
   openPrBackpressure: 30,
   wallClockMs: 4 * 60 * 60 * 1000,
-  defaultImplementer: 'claude',
-  implementerRules: [],
   authorAllowlist: [],
   reviewCap: 3,
   engineReviewLabel: 'engine:review',
