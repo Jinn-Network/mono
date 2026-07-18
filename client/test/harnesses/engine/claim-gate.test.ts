@@ -262,4 +262,76 @@ describe('TaskEngine.claim — impl gate', () => {
       expect(engine.db.getByRequestId(input.requestId)!.state).toBe(TaskRunState.CLAIMED);
     });
   });
+
+  describe('claim() — onchainCreationTimestamp resolution (#1827)', () => {
+    it('resolves and persists the block timestamp via blockTimestamp.getBlockTimestamp on successful claim', async () => {
+      const getBlockTimestamp = vi.fn().mockResolvedValue(1752000000);
+      const engine = new TestEngine({
+        store,
+        paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
+        implRegistry: { findFor: () => stubImpl({ isReady: async () => ({ ready: true }) }) },
+        blockTimestamp: { getBlockTimestamp },
+      });
+      const input = makeInput('req-createdat-claim-1');
+      engine.db.insertDiscovered(input);
+
+      await engine.callClaim(engine.db.getByRequestId(input.requestId)!);
+
+      expect(getBlockTimestamp).toHaveBeenCalledWith(1); // matches makeInput's onchainCreationBlock: 1
+      const row = engine.db.getByRequestId(input.requestId)!;
+      expect(row.state).toBe(TaskRunState.CLAIMED);
+      expect(row.onchainCreationTimestamp).toBe(1752000000);
+    });
+
+    it('leaves onchainCreationTimestamp null when getBlockTimestamp rejects (RPC failure)', async () => {
+      const getBlockTimestamp = vi.fn().mockRejectedValue(new Error('RPC down'));
+      const engine = new TestEngine({
+        store,
+        paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
+        implRegistry: { findFor: () => stubImpl({ isReady: async () => ({ ready: true }) }) },
+        blockTimestamp: { getBlockTimestamp },
+      });
+      const input = makeInput('req-createdat-claim-2');
+      engine.db.insertDiscovered(input);
+
+      await engine.callClaim(engine.db.getByRequestId(input.requestId)!);
+
+      const row = engine.db.getByRequestId(input.requestId)!;
+      expect(row.state).toBe(TaskRunState.CLAIMED); // claim still succeeds — RPC failure is non-fatal
+      expect(row.onchainCreationTimestamp).toBeNull();
+    });
+
+    it('leaves onchainCreationTimestamp null when getBlockTimestamp resolves undefined', async () => {
+      const getBlockTimestamp = vi.fn().mockResolvedValue(undefined);
+      const engine = new TestEngine({
+        store,
+        paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
+        implRegistry: { findFor: () => stubImpl({ isReady: async () => ({ ready: true }) }) },
+        blockTimestamp: { getBlockTimestamp },
+      });
+      const input = makeInput('req-createdat-claim-3');
+      engine.db.insertDiscovered(input);
+
+      await engine.callClaim(engine.db.getByRequestId(input.requestId)!);
+
+      const row = engine.db.getByRequestId(input.requestId)!;
+      expect(row.onchainCreationTimestamp).toBeNull();
+    });
+
+    it('skips createdAt resolution entirely when blockTimestamp dependency is absent (back-compat)', async () => {
+      const engine = new TestEngine({
+        store,
+        paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
+        implRegistry: { findFor: () => stubImpl({ isReady: async () => ({ ready: true }) }) },
+      });
+      const input = makeInput('req-createdat-claim-4');
+      engine.db.insertDiscovered(input);
+
+      await engine.callClaim(engine.db.getByRequestId(input.requestId)!);
+
+      const row = engine.db.getByRequestId(input.requestId)!;
+      expect(row.state).toBe(TaskRunState.CLAIMED);
+      expect(row.onchainCreationTimestamp).toBeNull();
+    });
+  });
 });
