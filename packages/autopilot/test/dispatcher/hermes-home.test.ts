@@ -20,7 +20,7 @@ const HERMES_ADAPTER_PATH = join(
   '..',
   '.claude',
   'skills',
-  'implement-issue',
+  'autopilot-runtime',
   'references',
   'hermes.md',
 );
@@ -63,13 +63,13 @@ describe('prepareHermesHome', () => {
   afterEach(() => {
     rmSync(tmp, { recursive: true, force: true });
     // Clean any home this test created under the real HERMES_HOMES_DIR.
-    rmSync(join(HERMES_HOMES_DIR, '4242'), { recursive: true, force: true });
-    rmSync(join(HERMES_HOMES_DIR, '4243'), { recursive: true, force: true });
+    rmSync(join(HERMES_HOMES_DIR, 'implement-4242'), { recursive: true, force: true });
+    rmSync(join(HERMES_HOMES_DIR, 'implement-4243'), { recursive: true, force: true });
   });
 
   function prep(effort: Effort | null, issueNumber = 4242) {
     const { hermesHome } = prepareHermesHome({
-      issueNumber,
+      sessionId: `implement-${issueNumber}`,
       worktreePath: worktree,
       effort,
       cfg: DEFAULT_CONFIG,

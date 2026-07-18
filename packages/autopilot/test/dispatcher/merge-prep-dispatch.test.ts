@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { dispatchMergePrep } from '../../src/dispatcher/merge-prep-dispatch.js';
 import { WORKTREES_BASE } from '../../src/dispatcher/dispatch.js';
@@ -7,10 +8,11 @@ import type { DispatcherConfig } from '../../src/dispatcher/types.js';
 import type { StuckPr } from '../../src/dispatcher/merge-sweep.js';
 import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
 import type { SpawnFn } from '../../src/dispatcher/dispatch.js';
+import { HERMES_HOMES_DIR } from '../../src/dispatcher/hermes-home.js';
 
 const CFG: DispatcherConfig = {
-  concurrencyCap: 3, openPrBackpressure: 30, wallClockMs: 1, defaultImplementer: 'claude',
-  implementerRules: [], authorAllowlist: [], reviewCap: 3, engineReviewLabel: 'engine:review',
+  runtime: 'claude', concurrencyCap: 3, openPrBackpressure: 30, wallClockMs: 1,
+  authorAllowlist: [], reviewCap: 3, engineReviewLabel: 'engine:review',
   reviewBotLogin: 'jinn-review', implGhToken: '', reviewGhToken: '',
   mergePrepEnabled: true, mergePrepCap: 1,
   hermesModel: 'gpt-5.6-sol', hermesProvider: 'openai-codex', hermesPythonPath: '/opt/hermes/python',
@@ -21,6 +23,13 @@ const STUCK: StuckPr = {
   headRefName: 'feat/42-thing', headRefOid: 'sha42abcdef01', escalated: false,
 };
 const EXPECTED_WT = join(WORKTREES_BASE, 'merge-42');
+
+afterEach(() => {
+  rmSync(join(HERMES_HOMES_DIR, 'merge-prep-42'), {
+    recursive: true,
+    force: true,
+  });
+});
 
 function makeRunner(worktreeList = `worktree /x\nHEAD a\nbranch refs/heads/next\n`) {
   const calls: Array<{ cmd: string; args: string[] }> = [];
@@ -100,6 +109,24 @@ describe('dispatchMergePrep', () => {
     const env = calls[0].opts.env as Record<string, string> | undefined;
     expect(env?.GH_TOKEN).toBe('impl-token');
     expect(env?.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS).toBe('0');
+    expect(env?.JINN_AUTOPILOT_RUNTIME).toBe('claude');
+  });
+
+  it('uses Hermes globally while preserving implementer identity and runtime-default effort', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchMergePrep(
+      STUCK,
+      { ...CFG, runtime: 'hermes', implGhToken: 'impl-token' },
+      { runner, spawn },
+    );
+    expect(calls[0].cmd).toBe('/opt/hermes/python');
+    expect(calls[0].args).not.toContain('--effort');
+    expect(calls[0].opts.env).toMatchObject({
+      GH_TOKEN: 'impl-token',
+      JINN_AUTOPILOT_RUNTIME: 'hermes',
+      HERMES_HOME: expect.stringContaining('merge-prep-42'),
+    });
   });
 
   it('returns an InFlightMergePrep with prNumber, branch, worktree, pid', async () => {

@@ -1,4 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { dispatchReview } from '../../src/dispatcher/review-dispatch.js';
 import { WORKTREES_BASE } from '../../src/dispatcher/dispatch.js';
@@ -10,14 +11,14 @@ import type {
   ReviewLeaseStore,
 } from '../../src/dispatcher/review-lease.js';
 import type { ReviewCleanupOptions } from '../../src/dispatcher/review-cleanup.js';
+import { HERMES_HOMES_DIR } from '../../src/dispatcher/hermes-home.js';
 
 const PR: ReviewablePr = {
   number: 42, title: 'feat: thing', headRefName: 'feat/42-thing', headRefOid: 'sha42',
   isDraft: true, author: 'jinn-bot', hasReviewLabel: true, needsReview: true,
 };
 const CFG: DispatcherConfig = {
-  concurrencyCap: 3, openPrBackpressure: 30, wallClockMs: 1, defaultImplementer: 'claude',
-  implementerRules: [],
+  runtime: 'claude', concurrencyCap: 3, openPrBackpressure: 30, wallClockMs: 1,
   authorAllowlist: [], reviewCap: 3, engineReviewLabel: 'engine:review', reviewBotLogin: 'jinn-bot',
   implGhToken: '', reviewGhToken: '', mergePrepEnabled: false, mergePrepCap: 1, hermesModel: 'gpt-5.6-sol', hermesProvider: 'openai-codex', hermesPythonPath: '/opt/hermes/python',
 };
@@ -39,6 +40,13 @@ const TEST_CLEANUP_OPTIONS: ReviewCleanupOptions = {
     removeNoFollow: () => {},
   },
 };
+
+afterEach(() => {
+  rmSync(join(HERMES_HOMES_DIR, 'review-42'), {
+    recursive: true,
+    force: true,
+  });
+});
 
 function makeRunner(worktreeList = `worktree /x\nHEAD a\nbranch refs/heads/next\n`) {
   const calls: Array<{ cmd: string; args: string[] }> = [];
@@ -132,6 +140,31 @@ describe('dispatchReview', () => {
       JINN_REVIEW_GH_TOKEN: 'review-token',
       JINN_REVIEW_BOT_LOGIN: 'review-bot',
       JINN_REVIEW_HEAD_REF: PR.headRefName,
+      JINN_AUTOPILOT_RUNTIME: 'claude',
+    });
+  });
+
+  it('uses Hermes globally while preserving the reviewer identity and default effort', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchReview(
+      PR,
+      {
+        ...CFG,
+        runtime: 'hermes',
+        reviewGhToken: 'review-token',
+        reviewBotLogin: 'review-bot',
+      },
+      { runner, spawn, leaseStore: TEST_LEASE_STORE },
+    );
+
+    expect(calls[0].cmd).toBe('/opt/hermes/python');
+    expect(calls[0].args).not.toContain('--effort');
+    expect(calls[0].opts.env).toMatchObject({
+      GH_TOKEN: 'review-token',
+      JINN_REVIEW_GH_TOKEN: 'review-token',
+      JINN_AUTOPILOT_RUNTIME: 'hermes',
+      HERMES_HOME: expect.stringContaining('review-42'),
     });
   });
 

@@ -1,9 +1,13 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import {
   headlessOverrideFor,
-  type HeadlessRuntime,
 } from '../headless.js';
-import { loadCanon } from './dispatch.js';
+import {
+  AUTOPILOT_RUNTIME_ENV,
+  parseAutopilotRuntime,
+  type AutopilotRuntime,
+} from '../autopilot-runtime.js';
+import { loadCanon } from './coordinator-session.js';
 import { hermesChatArgs } from './hermes-runtime.js';
 
 /**
@@ -52,8 +56,6 @@ export interface StageRunOpts {
   worktreePath: string;
   /** Optional model override for this stage session. */
   model?: string;
-  /** Root-session runtime; Claude remains the default. */
-  runtime?: HeadlessRuntime;
   /** Hermes venv Python interpreter. */
   hermesPythonPath?: string;
   /** Explicit Hermes provider (for example, the subscription-backed provider). */
@@ -81,9 +83,11 @@ const DEFAULT_TIMEOUT_MS = 600_000;
  * either would double-inject.
  */
 export function buildStagePrompt(
-  opts: Pick<StageRunOpts, 'stageTask' | 'worktreePath' | 'runtime'>,
+  opts: Pick<StageRunOpts, 'stageTask' | 'worktreePath'>,
+  runtime: AutopilotRuntime = parseAutopilotRuntime(
+    process.env[AUTOPILOT_RUNTIME_ENV],
+  ),
 ): string {
-  const runtime = opts.runtime ?? 'claude';
   return [
     loadCanon(),
     '',
@@ -98,13 +102,6 @@ export function buildStagePrompt(
 /** Production spawn with captured stdout/stderr for either runtime. */
 const defaultStageSpawn: StageSpawnFn = (cmd, args, opts) =>
   nodeSpawn(cmd, args, opts) as unknown as StageChild;
-
-export function parseStageRuntime(value: string): HeadlessRuntime {
-  if (value === 'claude' || value === 'hermes') return value;
-  throw new Error(
-    `jinn-run-stage: invalid --runtime ${JSON.stringify(value)}; expected claude or hermes`,
-  );
-}
 
 function requireHermesValue(
   value: string | undefined,
@@ -124,8 +121,8 @@ export function runStageHeadless(
   opts: StageRunOpts,
   spawn: StageSpawnFn = defaultStageSpawn,
 ): Promise<StageRunResult> {
-  const runtime = opts.runtime ?? 'claude';
-  const prompt = buildStagePrompt(opts);
+  const runtime = parseAutopilotRuntime(process.env[AUTOPILOT_RUNTIME_ENV]);
+  const prompt = buildStagePrompt(opts, runtime);
   let cmd: string;
   let args: string[];
   if (runtime === 'hermes') {

@@ -51,11 +51,10 @@ const ISSUE: ReadyIssue = {
 };
 
 const CFG: DispatcherConfig = {
+  runtime: 'claude',
   concurrencyCap: 3,
   openPrBackpressure: 5,
   wallClockMs: 4 * 60 * 60 * 1000,
-  defaultImplementer: 'claude',
-  implementerRules: [],
   authorAllowlist: ['alice'],
   reviewCap: 3,
   engineReviewLabel: 'engine:review',
@@ -627,53 +626,27 @@ describe('dispatchIssue', () => {
   });
 
   // -------------------------------------------------------------------------
-  // #887 — implementer routing surfaced on the dispatch log line
+  // Global runtime surfaced on the dispatch log line and child environment
   // -------------------------------------------------------------------------
 
-  it('with DEFAULT_CONFIG (empty rules) logs impl=claude and selects the canonical claude adapter', async () => {
+  it('logs the selected Claude runtime and propagates it to the canonical workflow', async () => {
     const { runner } = makeRunner();
     const { spawn, calls } = makeSpawn();
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    // CFG carries no implementerRules (empty), so resolution falls through to
-    // defaultImplementer: 'claude'.
     await dispatchIssue(ISSUE, CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
 
     const line = logSpy.mock.calls.map((c) => String(c[0])).find((s) => s.includes('[dispatch]'));
     expect(line).toBeDefined();
-    expect(line).toContain('impl=claude');
+    expect(line).toContain('runtime=claude');
 
     const [spawnCall] = calls;
     const prompt = promptOf(spawnCall);
     const env = spawnCall.opts.env as Record<string, string>;
     expect(prompt).toContain('Use the implement-issue skill');
-    expect(prompt).toContain('references/claude.md');
-    expect(prompt).toContain('The default implementer for the inner pipeline is: claude.');
-    expect(env.JINN_IMPLEMENT_ISSUE_ADAPTER).toBe('claude');
+    expect(prompt).toContain('Global Autopilot runtime: claude');
+    expect(env.JINN_AUTOPILOT_RUNTIME).toBe('claude');
     expect(env.JINN_AUTOPILOT_PACKAGE_DIR).toBe(EXPECTED_AUTOPILOT_PACKAGE_DIR);
-
-    logSpy.mockRestore();
-  });
-
-  it('routes to codex when a rule matches the issue effort/shape (impl=codex in log + scenario)', async () => {
-    const { runner } = makeRunner();
-    const { spawn, calls } = makeSpawn();
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
-    // ISSUE is shape 'feat', effort 'Medium' — route it to codex.
-    const cfg: DispatcherConfig = {
-      ...CFG,
-      implementerRules: [{ shape: 'feat', effort: 'Medium', implementer: 'codex' }],
-    };
-    await dispatchIssue(ISSUE, cfg, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
-
-    const line = logSpy.mock.calls.map((c) => String(c[0])).find((s) => s.includes('[dispatch]'));
-    expect(line).toBeDefined();
-    expect(line).toContain('impl=codex');
-
-    const [spawnCall] = calls;
-    const prompt = promptOf(spawnCall);
-    expect(prompt).toContain('The default implementer for the inner pipeline is: codex.');
 
     logSpy.mockRestore();
   });
@@ -957,17 +930,16 @@ describe('dispatchIssue — branch-ref collision', () => {
 // hermes coordinator — a REAL second CLI, not a prompt directive
 // ---------------------------------------------------------------------------
 
-describe('dispatchIssue — hermes implementer', () => {
-  /** Route every issue to hermes. */
+describe('dispatchIssue — global Hermes runtime', () => {
   const HERMES_CFG: DispatcherConfig = {
     ...CFG,
-    implementerRules: [{ implementer: 'hermes' }],
+    runtime: 'hermes',
   };
   /** hermes prompt is `chat -q <prompt> …` — the arg after -q, NOT the last one. */
   const hermesPromptOf = (c: SpawnCall): string => c.args[c.args.indexOf('-q') + 1];
 
   afterEach(() => {
-    rmSync(join(HERMES_HOMES_DIR, '418'), { recursive: true, force: true });
+    rmSync(join(HERMES_HOMES_DIR, 'implement-418'), { recursive: true, force: true });
   });
 
   it('spawns Hermes through the stateless launcher with the non-interactive contract and configured model', async () => {
@@ -1032,9 +1004,9 @@ describe('dispatchIssue — hermes implementer', () => {
       { runner, spawn, fieldCache: { ...FIELD_CACHE } },
     );
     const env = calls[0].opts.env as Record<string, string>;
-    expect(env.HERMES_HOME).toBe(join(HERMES_HOMES_DIR, '418'));
+    expect(env.HERMES_HOME).toBe(join(HERMES_HOMES_DIR, 'implement-418'));
     expect(env.GH_TOKEN).toBe('impl-token');
-    expect(env.JINN_IMPLEMENT_ISSUE_ADAPTER).toBe('hermes');
+    expect(env.JINN_AUTOPILOT_RUNTIME).toBe('hermes');
     expect(env.JINN_DISPATCHER_HERMES_PYTHON).toBe('/opt/hermes/python');
     expect(env.JINN_DISPATCHER_HERMES_MODEL).toBe('gpt-5.6-sol');
     expect(env.JINN_DISPATCHER_HERMES_PROVIDER).toBe('openai-codex');
@@ -1052,13 +1024,13 @@ describe('dispatchIssue — hermes implementer', () => {
     expect(env.JINN_AUTOPILOT_PACKAGE_DIR).toBe(EXPECTED_AUTOPILOT_PACKAGE_DIR);
   });
 
-  it('invokes the canonical skill with the Hermes adapter and reuses the worktree', async () => {
+  it('invokes the canonical skill with the shared runtime adapter and reuses the worktree', async () => {
     const { runner } = makeRunner();
     const { spawn, calls } = makeSpawn();
     await dispatchIssue(ISSUE, HERMES_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
     const prompt = hermesPromptOf(calls[0]);
     expect(prompt).toContain('Use the implement-issue skill');
-    expect(prompt).toContain('references/hermes.md');
+    expect(prompt).toContain('autopilot-runtime');
     expect(prompt).not.toContain('implement-issue-hermes');
     expect(prompt).toContain('CLAUDE.md');            // canon still prepended
     expect(prompt).toContain(EXPECTED_WORKTREE_PATH); // pre-created worktree
@@ -1074,8 +1046,7 @@ describe('dispatchIssue — hermes implementer', () => {
     const prompt = hermesPromptOf(calls[0]);
     expect(prompt).toContain('hermes chat -q');
     expect(prompt).not.toContain('`claude -p` / `--print`');
-    // The inner-pipeline directive is claude-only — hermes IS the coordinator.
-    expect(prompt).not.toContain('The default implementer for the inner pipeline');
+    expect(prompt).toContain('Global Autopilot runtime: hermes');
   });
 
   it('still moves the board to In Progress and captures a session log (parity with claude)', async () => {
@@ -1088,18 +1059,17 @@ describe('dispatchIssue — hermes implementer', () => {
     expect(session).toMatchObject({ issueNumber: 418, worktreePath: EXPECTED_WORKTREE_PATH, pid: 99999 });
   });
 
-  it('REGRESSION: a non-hermes implementer still spawns claude -p with --effort', async () => {
+  it('REGRESSION: the Claude runtime still spawns claude -p with --effort', async () => {
     const { runner } = makeRunner();
     const { spawn, calls } = makeSpawn();
     await dispatchIssue(
       ISSUE,
-      { ...CFG, implementerRules: [{ implementer: 'codex' }] },
+      CFG,
       { runner, spawn, fieldCache: { ...FIELD_CACHE } },
     );
     expect(calls[0].cmd).toBe('claude');
     expect(calls[0].args).toContain('-p');
     expect(calls[0].args).toContain('--effort');
-    // codex stays directive-only: it names the inner pipeline inside claude.
-    expect(promptOf(calls[0])).toContain('The default implementer for the inner pipeline is: codex.');
+    expect(promptOf(calls[0])).toContain('Global Autopilot runtime: claude');
   });
 });

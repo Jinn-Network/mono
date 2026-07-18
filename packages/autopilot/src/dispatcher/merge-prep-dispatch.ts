@@ -1,24 +1,12 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import type { DispatcherConfig, InFlightMergePrep } from './types.js';
 import type { CommandRunner } from './issue-source.js';
 import type { SpawnFn } from './dispatch.js';
 import { WORKTREES_BASE } from './dispatch.js';
+import { spawnCoordinatorSession } from './coordinator-session.js';
 import { sessionSpawnEnv } from './identity.js';
 import { mergePrepLogPath } from './session-log.js';
-import { buildHeadlessPrompt } from '../headless.js';
 import type { StuckPr } from './merge-sweep.js';
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-// src/dispatcher → src → packages/autopilot → packages → repo root
-const REPO_ROOT = join(HERE, '..', '..', '..', '..');
-
-function loadCanon(): string {
-  const claudeMd = readFileSync(join(REPO_ROOT, 'CLAUDE.md'), 'utf8').trim();
-  const handbook = readFileSync(join(REPO_ROOT, 'docs', 'engineering', 'handbook.md'), 'utf8').trim();
-  return ['# CLAUDE.md (canonical)\n', claudeMd, '', '# Engineering handbook (canonical)\n', handbook].join('\n');
-}
 
 /**
  * Dispatch one merge-prep session for a stuck PR (DR-2026-07-16):
@@ -29,7 +17,7 @@ function loadCanon(): string {
  *    of the same branch. The session pushes with `git push origin HEAD:<branch>`.
  * 3. Assemble the prompt: canon + headless-override + a PREPARE-ONLY authority
  *    directive + the `merge-prep` task.
- * 4. Spawn `claude -p` detached under the IMPLEMENTER identity — the pushed
+ * 4. Spawn the process-wide runtime under the IMPLEMENTER identity — the pushed
  *    commits must be author-side so the subsequent independent re-review
  *    (reviewer identity) is never a self-review (DR-2026-06-15).
  */
@@ -52,7 +40,6 @@ export async function dispatchMergePrep(
     await runner('git', ['worktree', 'add', '--detach', worktreePath, `origin/${s.headRefName}`]);
   }
 
-  const canon = loadCanon();
   // The PR title is author-controlled free text — strip newlines so it cannot
   // forge a directive line, and state the authoritative directive BEFORE any
   // PR-controlled field.
@@ -65,15 +52,25 @@ export async function dispatchMergePrep(
     `PR: #${s.number} — ${safeTitle} (head branch \`${s.headRefName}\`).`,
     `A DETACHED git worktree already exists at \`${worktreePath}\`, pinned at \`origin/${s.headRefName}\` — use it; do not create another and do not check the branch out.`,
   ].join('\n');
-  const fullPrompt = [canon, '', buildHeadlessPrompt('merge-prep', scenario)].join('\n');
 
-  const result = spawn('claude', ['-p', fullPrompt], {
-    cwd: worktreePath,
-    detached: true,
-    stdio: ['ignore', 'inherit', 'inherit'],
-    logPath: mergePrepLogPath(s.number),
-    ...sessionSpawnEnv(cfg.implGhToken),
-  });
+  const result = spawnCoordinatorSession(
+    {
+      kind: 'merge-prep',
+      number: s.number,
+      skill: 'merge-prep',
+      scenario,
+      worktreePath,
+      effort: null,
+      env: sessionSpawnEnv(cfg.implGhToken).env,
+      spawnOptions: {
+        detached: true,
+        stdio: ['ignore', 'inherit', 'inherit'],
+        logPath: mergePrepLogPath(s.number),
+      },
+    },
+    cfg,
+    { spawn },
+  );
 
   return {
     prNumber: s.number,

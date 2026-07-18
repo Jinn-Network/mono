@@ -262,9 +262,9 @@ describe('review-pr reviewer identity binding', () => {
     expect(skill).toContain(
       'if [[ "$after_fix_head" == "$before_fix_head" ]]; then',
     );
-    expect(skill).toContain('Fix subagent produced no new commit');
+    expect(skill).toContain('Review fix pass produced no new commit');
     expect(skill.indexOf('before_fix_head=')).toBeLessThan(
-      skill.indexOf('Dispatch a **fix subagent**'),
+      skill.indexOf('Dispatch a **review fix pass**'),
     );
     expect(skill.indexOf('after_fix_head=')).toBeLessThan(
       skill.indexOf('GIT_ASKPASS="$review_askpass"'),

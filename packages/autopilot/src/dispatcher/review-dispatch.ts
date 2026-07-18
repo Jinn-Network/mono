@@ -1,11 +1,10 @@
-import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import type { ReviewablePr, DispatcherConfig, InFlightReview } from './types.js';
 import type { CommandRunner } from './issue-source.js';
 import type { SpawnFn } from './dispatch.js';
 import { WORKTREES_BASE } from './dispatch.js';
+import { spawnCoordinatorSession } from './coordinator-session.js';
 import type { ReviewLease, ReviewLeaseStore } from './review-lease.js';
 import {
   cleanupReviewWorktree,
@@ -14,18 +13,7 @@ import {
 } from './review-cleanup.js';
 import { sessionSpawnEnv } from './identity.js';
 import { parseOwnedPrefixes, touchesCodeOwnedPath } from './code-owned.js';
-import { buildHeadlessPrompt } from '../headless.js';
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-// src/dispatcher → src → packages/autopilot → packages → repo root
-const REPO_ROOT = join(HERE, '..', '..', '..', '..');
 const SAFE_HEAD_REF = /^[A-Za-z0-9_][A-Za-z0-9._/-]*$/;
-
-function loadCanon(): string {
-  const claudeMd = readFileSync(join(REPO_ROOT, 'CLAUDE.md'), 'utf8').trim();
-  const handbook = readFileSync(join(REPO_ROOT, 'docs', 'engineering', 'handbook.md'), 'utf8').trim();
-  return ['# CLAUDE.md (canonical)\n', claudeMd, '', '# Engineering handbook (canonical)\n', handbook].join('\n');
-}
 
 /**
  * Decide whether a PR is a human-surface change (touches a code-owned path) and
@@ -62,7 +50,7 @@ async function isHumanSurface(
  * 2. Create a `pr-<N>` worktree CHECKED OUT ON the head branch (so the in-session
  *    fix subagent can commit + push). Idempotent: reuse if it already exists.
  * 3. Assemble the prompt: canon + headless-override + `review-pr` task.
- * 4. Spawn `claude -p` detached, no plan-posture flags.
+ * 4. Spawn the process-wide coordinator runtime detached.
  */
 export async function dispatchReview(
   pr: ReviewablePr,
@@ -130,7 +118,6 @@ async function dispatchReviewLocked(
   // wrongful auto-approval.
   const advisory = await isHumanSurface(runner, worktreePath, pr.number);
 
-  const canon = loadCanon();
   const verdictDirective = advisory
     ? 'HUMAN-SURFACE / ADVISORY MODE (this PR touches code-owned paths per .github/CODEOWNERS): run your full review and drive fixes for blocking findings, then post your summary as a COMMENT review and apply the `review:needs-human` label. Do NOT `--approve` and do NOT `gh pr ready` — per DR-2026-06-03 an agent approval never satisfies the code-owner gate; a human code owner must approve and merge.'
     : 'APPROVE-ELIGIBLE (no code-owned/human-surface files changed): follow the standard review-pr verdict flow — you MAY approve + un-draft once the review is clean.';
@@ -146,7 +133,6 @@ async function dispatchReviewLocked(
     'Reviewer identity is load-bearing: bind every GitHub command to JINN_REVIEW_GH_TOKEN at the command point exactly as the review-pr skill specifies; never rely on ambient gh authentication or a prior export.',
     `A DETACHED git worktree for this PR already exists at \`${worktreePath}\`, pinned to the validated PR head — use it; do not create another and do not check the branch out (it is checked out elsewhere). The validated destination is available only as \`JINN_REVIEW_HEAD_REF\`; follow the review-pr skill's command-local askpass push to the fixed Jinn-Network/mono HTTPS remote.`,
   ].join('\n');
-  const fullPrompt = [canon, '', buildHeadlessPrompt('review-pr', scenario)].join('\n');
 
   // Review/approve as the reviewer identity (DR-2026-06-15) — distinct from the
   // PR author so GitHub permits the approval. Keep both the conventional
@@ -155,38 +141,49 @@ async function dispatchReviewLocked(
   const sessionEnv = sessionSpawnEnv(cfg.reviewGhToken).env;
   const startedAt = Date.now();
   let expectedLease: ReviewLease | null = null;
-  const result = spawn('claude', ['-p', fullPrompt], {
-    cwd: worktreePath,
-    detached: true,
-    stdio: 'ignore',
-    env: {
-      ...sessionEnv,
-      JINN_REVIEW_GH_TOKEN: cfg.reviewGhToken,
-      JINN_REVIEW_BOT_LOGIN: cfg.reviewBotLogin,
-      JINN_REVIEW_HEAD_REF: pr.headRefName,
+  const result = spawnCoordinatorSession(
+    {
+      kind: 'review',
+      number: pr.number,
+      skill: 'review-pr',
+      scenario,
+      worktreePath,
+      effort: null,
+      env: {
+        ...sessionEnv,
+        JINN_REVIEW_GH_TOKEN: cfg.reviewGhToken,
+        JINN_REVIEW_BOT_LOGIN: cfg.reviewBotLogin,
+        JINN_REVIEW_HEAD_REF: pr.headRefName,
+      },
+      spawnOptions: {
+        detached: true,
+        stdio: 'ignore',
+        onExit: (_code, _signal) => {
+          void Promise.resolve()
+            .then(() => {
+              const lease = expectedLease;
+              if (lease == null) {
+                throw new Error('review exited without a persisted ownership lease');
+              }
+              return cleanupReviewWorktree(
+                lease,
+                runner,
+                leaseStore,
+                deps.cleanupOptions,
+              );
+            })
+            .catch((err) => {
+              console.error(
+                `[autopilot] review #${pr.number} worktree cleanup failed (${worktreePath}):`,
+                err,
+              );
+            });
+        },
+      },
     },
-    onExit: (_code, _signal) => {
-      void Promise.resolve()
-        .then(() => {
-          const lease = expectedLease;
-          if (lease == null) {
-            throw new Error('review exited without a persisted ownership lease');
-          }
-          return cleanupReviewWorktree(
-            lease,
-            runner,
-            leaseStore,
-            deps.cleanupOptions,
-          );
-        })
-        .catch((err) => {
-          console.error(
-            `[autopilot] review #${pr.number} worktree cleanup failed (${worktreePath}):`,
-            err,
-          );
-        });
-    },
-  });
+    cfg,
+    { spawn },
+  );
 
   if (result.pid != null) {
     try {

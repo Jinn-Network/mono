@@ -9,17 +9,12 @@ You are the coordinating agent for exactly one triaged GitHub issue. Your job is
 
 ## Runtime adapter
 
-The dispatcher names the active adapter in the task and exports
-`JINN_IMPLEMENT_ISSUE_ADAPTER=claude|hermes`. Before Step 1, read exactly one
-reference completely:
-
-- Claude: [`references/claude.md`](references/claude.md)
-- Hermes: [`references/hermes.md`](references/hermes.md)
-
-If a human invokes this skill without naming an adapter, use Claude. The
-adapter controls process and child-dispatch mechanics only. This file remains
-authoritative for every gate, stage deliverable, retry, escalation, shipping,
-and cleanup decision.
+Before Step 1, read the shared
+[`autopilot-runtime`](../autopilot-runtime/SKILL.md) skill completely. It
+selects mechanics from `JINN_AUTOPILOT_RUNTIME=claude|hermes`; unset defaults
+to Claude for an interactive invocation. This file remains authoritative for
+every gate, stage deliverable, retry, escalation, shipping, and cleanup
+decision.
 
 ## Read first
 
@@ -407,11 +402,10 @@ Never forward the coordinator's own conversation history to a stage. Keep each s
 
 ### Running a depth-needing stage
 
-Use the active adapter reference’s `stage:run` command. The command must launch
-a fresh depth-0 operating-system process in `$WORKTREE_PATH`, prepend canon and
-the runtime-specific headless override exactly once, and return captured output
-as the stage report. Never dispatch a depth-needing stage as a lightweight
-child.
+Use the active adapter's fresh-root mechanism. It must launch a fresh depth-0
+operating-system process in `$WORKTREE_PATH`, prepend canon and the
+runtime-specific headless override exactly once, and return captured output as
+the stage report. Never dispatch a depth-needing stage as a lightweight child.
 
 ### Computing the change's diff
 
@@ -503,7 +497,7 @@ After the first push, **stop** — do not proceed to Stage 3 or open a PR. Write
 
 ## Step 7 — Headless-mode note
 
-When this skill runs in a headless session, the Autopilot dispatcher uses the active adapter to inject canon (`CLAUDE.md` + handbook) followed by the runtime-specific headless override at the top of the coordinating agent's prompt. The coordinator and all stage sessions then make approval decisions themselves — they do not wait for user input. For depth-needing stages, `stage:run` prepends canon and the runtime-specific override exactly once, so the curated prompt-file must include neither (see Step 4).
+When this skill runs in a headless session, the Autopilot dispatcher uses the active adapter to inject canon (`CLAUDE.md` + handbook) followed by the runtime-specific headless override at the top of the coordinating agent's prompt. The coordinator and all stage sessions then make approval decisions themselves — they do not wait for user input. For depth-needing stages, the fresh-root mechanism prepends canon and the runtime-specific override exactly once, so the curated prompt-file must include neither (see Step 4).
 
 When run interactively (Phase 1, hand-cranked), the human is present for genuine escalations.
 
