@@ -36,6 +36,7 @@ import {
 } from './packaging.js';
 import { DONATION_ARTIFACT_ENCODING } from './artifact-scrub.js';
 import { loadCorpusKnowledge, buildCorpusKnowledgePayload } from './corpus-knowledge.js';
+import { harvestGeneratorModel } from './generator-model.js';
 import type { CorpusKnowledgeRecordRef } from './corpus-knowledge.js';
 import { projectEnvelope } from '../../corpus/envelope-projection.js';
 import type { ReadOnlyCorpus } from '../../mcp/search-records.js';
@@ -1975,6 +1976,31 @@ export class TaskEngine {
     const executorMode = this.modesByRequest.get(task.requestId) ?? 'train';
     const fenceCodeDigest = this.codeDigestsByRequest.get(task.requestId) ?? buildInfo.codeDigest;
 
+    // #1827: instanceId/repo/baseCommit — copied from the parsed task doc's
+    // spec, same source the mineable-trace record above already reads.
+    // Correctly absent for solver types without repo identity (e.g.
+    // prediction.*) — not a fabricated default.
+    const provenanceSpec = task.task?.spec as Record<string, unknown> | undefined;
+    const instanceIdForEnvelope = typeof provenanceSpec?.['instance_id'] === 'string'
+      ? provenanceSpec['instance_id']
+      : undefined;
+    const repoForEnvelope = typeof provenanceSpec?.['repo'] === 'string'
+      ? provenanceSpec['repo']
+      : undefined;
+    const baseCommitForEnvelope = typeof provenanceSpec?.['base_commit'] === 'string'
+      ? provenanceSpec['base_commit']
+      : undefined;
+
+    // #1827: generatorModel — harvested from the harness's own transcript
+    // when possible (source: 'stream'), else falls back to the same
+    // SolverNet/daemon-config model string used for executor.model below
+    // (source: 'config'). Never throws.
+    const generatorModelForEnvelope = harvestGeneratorModel(
+      implNameForEnvelope,
+      workingDir,
+      solverNet?.model ?? this.operatorConfig?.claudeModel,
+    );
+
     const envelopeInputs: EnvelopeInputs = {
       solverType,
       role,
@@ -1983,6 +2009,12 @@ export class TaskEngine {
         onchainCreationTx: task.onchainCreationTx,
         onchainCreationBlock: task.onchainCreationBlock,
         requestId: task.requestId,
+        // #1827: absent (never "now") when the RPC lookup at claim() time
+        // failed or never ran — see claim() / setOnchainCreationTimestamp.
+        ...(task.onchainCreationTimestamp != null ? { createdAt: task.onchainCreationTimestamp } : {}),
+        ...(instanceIdForEnvelope ? { instanceId: instanceIdForEnvelope } : {}),
+        ...(repoForEnvelope ? { repo: repoForEnvelope } : {}),
+        ...(baseCommitForEnvelope ? { baseCommit: baseCommitForEnvelope } : {}),
       },
       participant: { safeAddress, agentEoa },
       window: { startTs: task.windowStartTs, endTs: task.windowEndTs },
@@ -2004,6 +2036,10 @@ export class TaskEngine {
         // default from operatorConfig.claudeModel (jinn-mono-gbut, gh#191).
         // Left undefined when neither is set — the field is optional in the schema.
         model: solverNet?.model ?? this.operatorConfig?.claudeModel,
+        // #1827: structured, honesty-flagged model provenance alongside the
+        // existing plain `model` string (which stays untouched for the
+        // indexer's composition.byModel facet).
+        generatorModel: generatorModelForEnvelope,
       },
       evidenceTier,
       trajectory: envelopeTrajectory,
