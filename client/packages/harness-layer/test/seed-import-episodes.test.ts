@@ -278,13 +278,9 @@ describe('executeEpisodes()', () => {
   });
 
   it.each([
-    ['payment card', 'Customer card: 4111 1111 1111 1111.'],
-    ['phone-like PII', 'Call the customer at +1 (415) 555-2671.'],
-    [
-      'JWT',
-      'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IlN5bnRoZXRpYyJ9.c2lnbmF0dXJlU3ludGhldGljVmFsdWU',
-    ],
-    ['high-entropy credential', 'Credential: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'],
+    ['email address', 'Contact the reporter at jane.doe@example.com for repro steps.'],
+    ['home-dir path', 'Logs were written to /Users/jdoe/project/output.log.'],
+    ['AWS access-key id', 'Found a stray credential: AKIAIOSFODNN7EXAMPLE in the diff.'],
   ])('rejects %s before any publish call', async (_label, sensitiveText) => {
     const source = mockEpisodeSource([
       episode({
@@ -307,7 +303,7 @@ describe('executeEpisodes()', () => {
 
   it.each([
     ['id/sessionId', { id: 'ghp_016C7e0aBcDeFgHiJkLmNoPqRsTuVwXyZ012' }],
-    ['tag/distributionTag', { tags: ['acme', '4111 1111 1111 1111'] }],
+    ['tag/distributionTag', { tags: ['acme', 'contact-jane.doe@example.com'] }],
   ])('rejects sensitive %s before any publish call', async (_label, overrides) => {
     const source = mockEpisodeSource([episode(overrides)]);
     const { deps, published } = mockPublishDeps();
@@ -321,6 +317,30 @@ describe('executeEpisodes()', () => {
         error: expect.stringMatching(/sensitive.*refusing to publish/i),
       }),
     ]);
+  });
+
+  it('accepts a payment-card-shaped string under the seed profile (documented residual, #1409/#1784)', async () => {
+    // The seed profile deliberately does not run openredaction or the
+    // entropy fallback (build.ts's buildSeedScrubPipeline doc comment,
+    // #1409): seeds are public, licence-checked prose, and those
+    // probabilistic stages false-positive on ordinary words and hex-looking
+    // ids in that content (#1784). A structured-PII shape like a payment
+    // card number is accepted residual risk for this lane — the trace
+    // profile (buildScrubPipeline, used for operator capture) still catches
+    // it. This test pins that trade-off as intentional, not a gap that was
+    // missed.
+    const source = mockEpisodeSource([
+      episode({
+        steps: [{ label: 'note', title: 'residual fixture', text: 'Customer card: 4111 1111 1111 1111.' }],
+      }),
+    ]);
+    const { deps, published } = mockPublishDeps();
+
+    const result = await executeEpisodes(await planEpisodes(source), source, deps);
+
+    expect(result.errors).toEqual([]);
+    expect(result.imported).toHaveLength(1);
+    expect(published).toHaveLength(1);
   });
 
   describe('idempotency + supersedes', () => {
