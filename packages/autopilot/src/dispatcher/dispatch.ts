@@ -64,6 +64,11 @@ export interface SpawnResult {
   pid: number | undefined;
 }
 
+export type SpawnExitHandler = (
+  code: number | null,
+  signal: NodeJS.Signals | null,
+) => void;
+
 /**
  * Injectable spawn function. In production this wraps Node's `spawn`;
  * in tests it is a fake that records calls and returns a fake pid.
@@ -85,6 +90,7 @@ export type SpawnFn = (
     logPath?: string;
     /** Absolute path to the dispatch-time marker file. The production lambda rewrites it (truncate) at every dispatch so its mtime is the session's startedAt for crash recovery; the fake spawn in tests just records it. */
     startedAtMarkerPath?: string;
+    onExit?: SpawnExitHandler;
     [key: string]: unknown;
   },
 ) => SpawnResult;

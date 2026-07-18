@@ -5,6 +5,7 @@ import type { ReviewablePr, DispatcherConfig, InFlightReview } from './types.js'
 import type { CommandRunner } from './issue-source.js';
 import type { SpawnFn } from './dispatch.js';
 import { WORKTREES_BASE } from './dispatch.js';
+import type { ReviewLeaseStore } from './review-lease.js';
 import { sessionSpawnEnv } from './identity.js';
 import { parseOwnedPrefixes, touchesCodeOwnedPath } from './code-owned.js';
 import { buildHeadlessPrompt } from '../headless.js';
@@ -59,9 +60,17 @@ async function isHumanSurface(
 export async function dispatchReview(
   pr: ReviewablePr,
   cfg: DispatcherConfig,
-  deps: { runner: CommandRunner; spawn: SpawnFn },
+  deps: {
+    runner: CommandRunner;
+    spawn: SpawnFn;
+    leaseStore: ReviewLeaseStore;
+  },
 ): Promise<InFlightReview> {
-  const { runner, spawn } = deps;
+  if (!Number.isSafeInteger(pr.number) || pr.number <= 0) {
+    throw new TypeError('Review PR number must be a positive safe integer');
+  }
+
+  const { runner, spawn, leaseStore } = deps;
   const worktreePath = join(WORKTREES_BASE, `pr-${pr.number}`);
 
   await runner('git', ['fetch', 'origin', pr.headRefName, '--quiet']);
@@ -110,18 +119,47 @@ export async function dispatchReview(
 
   // Review/approve as the reviewer identity (DR-2026-06-15) — distinct from the
   // PR author so GitHub permits the approval; inherits ambient gh when unset.
+  const startedAt = Date.now();
   const result = spawn('claude', ['-p', fullPrompt], {
     cwd: worktreePath,
     detached: true,
     stdio: 'ignore',
     ...sessionSpawnEnv(cfg.reviewGhToken),
+    onExit: (_code, _signal) => {
+      void Promise.resolve()
+        .then(() => runner('git', ['worktree', 'remove', '--force', worktreePath]))
+        .then(() => leaseStore.release(pr.number))
+        .catch((err) => {
+          console.error(
+            `[autopilot] review #${pr.number} worktree cleanup failed (${worktreePath}):`,
+            err,
+          );
+        });
+    },
   });
+
+  if (result.pid != null) {
+    try {
+      leaseStore.record({
+        version: 1,
+        prNumber: pr.number,
+        worktreePath,
+        pid: result.pid,
+        startedAt,
+      });
+    } catch (err) {
+      console.error(
+        `[autopilot] review #${pr.number} ownership lease could not be persisted (${worktreePath}):`,
+        err,
+      );
+    }
+  }
 
   return {
     prNumber: pr.number,
     branch: pr.headRefName,
     worktreePath,
     pid: result.pid ?? null,
-    startedAt: Date.now(),
+    startedAt,
   };
 }

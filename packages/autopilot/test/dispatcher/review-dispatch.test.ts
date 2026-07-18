@@ -1,10 +1,14 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { join } from 'node:path';
 import { dispatchReview } from '../../src/dispatcher/review-dispatch.js';
 import { WORKTREES_BASE } from '../../src/dispatcher/dispatch.js';
 import type { ReviewablePr, DispatcherConfig } from '../../src/dispatcher/types.js';
 import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
 import type { SpawnFn } from '../../src/dispatcher/dispatch.js';
+import type {
+  ReviewLease,
+  ReviewLeaseStore,
+} from '../../src/dispatcher/review-lease.js';
 
 const PR: ReviewablePr = {
   number: 42, title: 'feat: thing', headRefName: 'feat/42-thing', headRefOid: 'sha42',
@@ -17,6 +21,11 @@ const CFG: DispatcherConfig = {
   implGhToken: '', reviewGhToken: '', mergePrepEnabled: false, mergePrepCap: 1,
 };
 const EXPECTED_WT = join(WORKTREES_BASE, 'pr-42');
+const TEST_LEASE_STORE: ReviewLeaseStore = {
+  record: () => {},
+  read: () => null,
+  release: () => {},
+};
 
 function makeRunner(worktreeList = `worktree /x\nHEAD a\nbranch refs/heads/next\n`) {
   const calls: Array<{ cmd: string; args: string[] }> = [];
@@ -41,7 +50,7 @@ describe('dispatchReview', () => {
     // git refuses a second checkout, and that blocked review dispatch entirely.
     const { runner, calls } = makeRunner();
     const { spawn } = makeSpawn();
-    await dispatchReview(PR, CFG, { runner, spawn });
+    await dispatchReview(PR, CFG, { runner, spawn, leaseStore: TEST_LEASE_STORE });
     const add = calls.find((c) => c.cmd === 'git' && c.args[0] === 'worktree' && c.args[1] === 'add');
     expect(add).toBeDefined();
     expect(add!.args).toContain('--detach');
@@ -55,7 +64,7 @@ describe('dispatchReview', () => {
   it('tells the session the worktree is detached and how to push', async () => {
     const { runner } = makeRunner();
     const { spawn, calls } = makeSpawn();
-    await dispatchReview(PR, CFG, { runner, spawn });
+    await dispatchReview(PR, CFG, { runner, spawn, leaseStore: TEST_LEASE_STORE });
     const prompt = calls[0].args[calls[0].args.indexOf('-p') + 1];
     expect(prompt).toContain('DETACHED');
     expect(prompt).toContain('git push origin HEAD:feat/42-thing');
@@ -65,14 +74,14 @@ describe('dispatchReview', () => {
     const list = `worktree /x\nHEAD a\nbranch refs/heads/next\n\nworktree ${EXPECTED_WT}\nHEAD b\nbranch refs/heads/feat/42-thing\n`;
     const { runner, calls } = makeRunner(list);
     const { spawn } = makeSpawn();
-    await dispatchReview(PR, CFG, { runner, spawn });
+    await dispatchReview(PR, CFG, { runner, spawn, leaseStore: TEST_LEASE_STORE });
     expect(calls.find((c) => c.cmd === 'git' && c.args[1] === 'add')).toBeUndefined();
   });
 
   it('spawns claude -p with a review-pr prompt naming the PR and the pre-created worktree', async () => {
     const { runner } = makeRunner();
     const { spawn, calls } = makeSpawn();
-    await dispatchReview(PR, CFG, { runner, spawn });
+    await dispatchReview(PR, CFG, { runner, spawn, leaseStore: TEST_LEASE_STORE });
     expect(calls).toHaveLength(1);
     const prompt = calls[0].args[calls[0].args.indexOf('-p') + 1];
     expect(prompt).toContain('review-pr');
@@ -88,7 +97,7 @@ describe('dispatchReview', () => {
   it('does NOT pass plan-posture flags', async () => {
     const { runner } = makeRunner();
     const { spawn, calls } = makeSpawn();
-    await dispatchReview(PR, CFG, { runner, spawn });
+    await dispatchReview(PR, CFG, { runner, spawn, leaseStore: TEST_LEASE_STORE });
     expect(calls[0].args).not.toContain('--mode');
     expect(calls[0].args).not.toContain('--permission-mode');
   });
@@ -96,17 +105,59 @@ describe('dispatchReview', () => {
   it('returns an InFlightReview with prNumber, branch, worktree, pid', async () => {
     const { runner } = makeRunner();
     const { spawn } = makeSpawn(7777);
-    const s = await dispatchReview(PR, CFG, { runner, spawn });
+    const s = await dispatchReview(PR, CFG, { runner, spawn, leaseStore: TEST_LEASE_STORE });
     expect(s.prNumber).toBe(42);
     expect(s.branch).toBe('feat/42-thing');
     expect(s.worktreePath).toBe(EXPECTED_WT);
     expect(s.pid).toBe(7777);
   });
 
+  it('persists a canonical ownership lease for restart recovery', async () => {
+    const { runner } = makeRunner();
+    const { spawn } = makeSpawn(7777);
+    const recorded: ReviewLease[] = [];
+    const leaseStore: ReviewLeaseStore = {
+      record: (lease) => { recorded.push(lease); },
+      read: () => null,
+      release: () => {},
+    };
+
+    const session = await dispatchReview(PR, CFG, { runner, spawn, leaseStore });
+
+    expect(recorded).toEqual([
+      {
+        version: 1,
+        prNumber: 42,
+        worktreePath: EXPECTED_WT,
+        pid: 7777,
+        startedAt: session.startedAt,
+      },
+    ]);
+  });
+
+  it('releases the ownership lease when the reviewer terminates', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    const released: number[] = [];
+    const leaseStore: ReviewLeaseStore = {
+      record: () => {},
+      read: () => null,
+      release: (prNumber) => { released.push(prNumber); },
+    };
+    await dispatchReview(PR, CFG, { runner, spawn, leaseStore });
+    const onExit = calls[0].opts.onExit as
+      | ((code: number | null, signal: NodeJS.Signals | null) => void)
+      | undefined;
+
+    onExit?.(0, null);
+
+    await vi.waitFor(() => expect(released).toEqual([42]));
+  });
+
   it('authenticates the review session as the reviewer identity via GH_TOKEN (DR-2026-06-15)', async () => {
     const { runner } = makeRunner();
     const { spawn, calls } = makeSpawn();
-    await dispatchReview(PR, { ...CFG, reviewGhToken: 'rev-token-xyz' }, { runner, spawn });
+    await dispatchReview(PR, { ...CFG, reviewGhToken: 'rev-token-xyz' }, { runner, spawn, leaseStore: TEST_LEASE_STORE });
     const env = calls[0].opts.env as Record<string, string> | undefined;
     expect(env?.GH_TOKEN).toBe('rev-token-xyz');
   });
@@ -114,7 +165,7 @@ describe('dispatchReview', () => {
   it('inherits the ambient gh account (no GH_TOKEN) when no reviewer token is configured', async () => {
     const { runner } = makeRunner();
     const { spawn, calls } = makeSpawn();
-    await dispatchReview(PR, CFG, { runner, spawn }); // reviewGhToken: ''
+    await dispatchReview(PR, CFG, { runner, spawn, leaseStore: TEST_LEASE_STORE }); // reviewGhToken: ''
     const env = calls[0].opts.env as Record<string, string> | undefined;
     expect(env?.GH_TOKEN).toBeUndefined();
   });
@@ -122,9 +173,111 @@ describe('dispatchReview', () => {
   it('disables the print-mode background-wait ceiling so the review session runs to completion', async () => {
     const { runner } = makeRunner();
     const { spawn, calls } = makeSpawn();
-    await dispatchReview(PR, CFG, { runner, spawn });
+    await dispatchReview(PR, CFG, { runner, spawn, leaseStore: TEST_LEASE_STORE });
     const env = calls[0].opts.env as Record<string, string> | undefined;
     expect(env?.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS).toBe('0');
+  });
+
+  it.each([
+    0,
+    -1,
+    1.5,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.MAX_SAFE_INTEGER + 1,
+    '../42' as unknown as number,
+  ])('rejects invalid runtime PR number %s before any side effect', async (number) => {
+    const { runner, calls: runnerCalls } = makeRunner();
+    const { spawn, calls: spawnCalls } = makeSpawn();
+
+    await expect(
+      dispatchReview({ ...PR, number }, CFG, { runner, spawn, leaseStore: TEST_LEASE_STORE }),
+    ).rejects.toThrow('positive safe integer');
+
+    expect(runnerCalls).toEqual([]);
+    expect(spawnCalls).toEqual([]);
+  });
+
+  it('removes only its exact pr-N worktree after the review process exits', async () => {
+    const { runner, calls: runnerCalls } = makeRunner();
+    const { spawn, calls: spawnCalls } = makeSpawn();
+
+    await dispatchReview(PR, CFG, { runner, spawn, leaseStore: TEST_LEASE_STORE });
+
+    const onExit = spawnCalls[0].opts.onExit as
+      | ((code: number | null, signal: NodeJS.Signals | null) => void)
+      | undefined;
+    expect(onExit).toBeTypeOf('function');
+
+    onExit?.(0, null);
+    await vi.waitFor(() => {
+      expect(
+        runnerCalls.filter(
+          ({ cmd, args }) =>
+            cmd === 'git' &&
+            args[0] === 'worktree' &&
+            args[1] === 'remove',
+        ),
+      ).toEqual([
+        {
+          cmd: 'git',
+          args: ['worktree', 'remove', '--force', EXPECTED_WT],
+        },
+      ]);
+    });
+  });
+
+  it('logs an asynchronous cleanup rejection without throwing from the child exit event', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { spawn, calls: spawnCalls } = makeSpawn();
+    const runner: CommandRunner = async (cmd, args) => {
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') return '';
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
+        throw new Error('locked');
+      }
+      if (cmd === 'git') return '';
+      throw new Error(`Unexpected: ${cmd} ${args.join(' ')}`);
+    };
+
+    await dispatchReview(PR, CFG, { runner, spawn, leaseStore: TEST_LEASE_STORE });
+    const onExit = spawnCalls[0].opts.onExit as
+      | ((code: number | null, signal: NodeJS.Signals | null) => void)
+      | undefined;
+
+    expect(() => onExit?.(1, null)).not.toThrow();
+    await vi.waitFor(() => {
+      expect(error).toHaveBeenCalledWith(
+        expect.stringContaining('review #42 worktree cleanup failed'),
+        expect.any(Error),
+      );
+    });
+    error.mockRestore();
+  });
+
+  it('logs a synchronous cleanup throw without throwing from the child exit event', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { spawn, calls: spawnCalls } = makeSpawn();
+    const base = makeRunner();
+    const runner = ((cmd: string, args: string[]) => {
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
+        throw new Error('locked synchronously');
+      }
+      return base.runner(cmd, args);
+    }) as CommandRunner;
+
+    await dispatchReview(PR, CFG, { runner, spawn, leaseStore: TEST_LEASE_STORE });
+    const onExit = spawnCalls[0].opts.onExit as
+      | ((code: number | null, signal: NodeJS.Signals | null) => void)
+      | undefined;
+
+    expect(() => onExit?.(1, null)).not.toThrow();
+    await vi.waitFor(() => {
+      expect(error).toHaveBeenCalledWith(
+        expect.stringContaining('review #42 worktree cleanup failed'),
+        expect.objectContaining({ message: 'locked synchronously' }),
+      );
+    });
+    error.mockRestore();
   });
 
   // P3 (DR-2026-06-15): human-surface detection. The gate reads the changed-file
@@ -147,7 +300,7 @@ describe('dispatchReview', () => {
 
   it('marks a PR touching a code-owned path as HUMAN-SURFACE / advisory (no approve)', async () => {
     const { spawn, calls } = makeSpawn();
-    await dispatchReview(PR, CFG, { runner: diffRunner('client/src/dashboard/spa/src/pages/Tasks.tsx\n'), spawn });
+    await dispatchReview(PR, CFG, { runner: diffRunner('client/src/dashboard/spa/src/pages/Tasks.tsx\n'), spawn, leaseStore: TEST_LEASE_STORE });
     const prompt = promptOf(calls);
     expect(prompt).toContain('HUMAN-SURFACE');
     expect(prompt).toContain('review:needs-human');
@@ -156,7 +309,7 @@ describe('dispatchReview', () => {
 
   it('marks a PR touching only non-owned paths as APPROVE-ELIGIBLE', async () => {
     const { spawn, calls } = makeSpawn();
-    await dispatchReview(PR, CFG, { runner: diffRunner('packages/autopilot/src/dispatcher/loop.ts\n'), spawn });
+    await dispatchReview(PR, CFG, { runner: diffRunner('packages/autopilot/src/dispatcher/loop.ts\n'), spawn, leaseStore: TEST_LEASE_STORE });
     const prompt = promptOf(calls);
     expect(prompt).toContain('APPROVE-ELIGIBLE');
     expect(prompt).not.toContain('HUMAN-SURFACE');
@@ -164,7 +317,7 @@ describe('dispatchReview', () => {
 
   it('fails safe to advisory when the changed-file list cannot be determined', async () => {
     const { spawn, calls } = makeSpawn();
-    await dispatchReview(PR, CFG, { runner: diffRunner(''), spawn }); // empty diff → advisory
+    await dispatchReview(PR, CFG, { runner: diffRunner(''), spawn, leaseStore: TEST_LEASE_STORE }); // empty diff → advisory
     expect(promptOf(calls)).toContain('HUMAN-SURFACE');
   });
 });

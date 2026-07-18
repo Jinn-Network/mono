@@ -31,6 +31,11 @@ import type { PrLink } from '../src/dispatcher/pr-links.js';
 import { deriveReviewInFlight } from '../src/dispatcher/review-state.js';
 import { dispatchReview } from '../src/dispatcher/review-dispatch.js';
 import { runReviewCycle } from '../src/dispatcher/review-loop.js';
+import {
+  makeFileReviewLeaseStore,
+  reviewWorktreePath,
+  type ReviewLeaseStore,
+} from '../src/dispatcher/review-lease.js';
 import { assertReviewIdentities, assertMergePrepArming } from '../src/dispatcher/identity.js';
 import type { SpawnFn } from '../src/dispatcher/dispatch.js';
 import type { ReviewablePr } from '../src/dispatcher/types.js';
@@ -55,7 +60,7 @@ import type { DispatcherConfig, ReadyIssue, InFlightSession, SessionResult, Impl
 import { WallClock } from '../src/dispatcher/wall-clock.js';
 import { shouldRouteToSessions } from '../src/cli/routing.js';
 import { spawn } from 'node:child_process';
-import type { SpawnOptions } from 'node:child_process';
+import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { mkdirSync, openSync, closeSync, writeSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
@@ -114,6 +119,28 @@ const OPTIONAL_RULE_FIELDS = [
   { key: 'shape', valid: SHAPES },
 ] as const;
 
+function attachTerminalCleanup(
+  child: ChildProcess,
+  onExit: Parameters<SpawnFn>[2]['onExit'],
+): void {
+  if (onExit == null) return;
+  let handled = false;
+  const finish = (
+    code: number | null,
+    signal: NodeJS.Signals | null,
+  ): void => {
+    if (handled) return;
+    handled = true;
+    try {
+      onExit(code, signal);
+    } catch (err) {
+      console.error('[autopilot] detached child terminal cleanup failed:', err);
+    }
+  };
+  child.once('error', () => finish(null, null));
+  child.once('exit', finish);
+}
+
 /** Whether `v` is one of the recognised literal values in `valid`. */
 const isMember = (valid: readonly string[], v: unknown): v is string =>
   typeof v === 'string' && valid.includes(v);
@@ -146,7 +173,9 @@ function makeLoggingSpawn(): SpawnFn {
     if (typeof opts.startedAtMarkerPath === 'string') {
       writeFileSync(opts.startedAtMarkerPath, `${new Date().toISOString()}\n`, { mode: 0o600 });
     }
-    const child = spawn(cmd, args, { ...opts, stdio } as SpawnOptions);
+    const { onExit, ...spawnOpts } = opts;
+    const child = spawn(cmd, args, { ...spawnOpts, stdio } as SpawnOptions);
+    attachTerminalCleanup(child, onExit);
     if (child.pid != null) child.unref();
     // Close the parent's dup of the fd; the detached child kept its own.
     if (fd != null) closeSync(fd);
@@ -402,16 +431,20 @@ export async function runReviewPass(
   cfg: DispatcherConfig,
   runner: CommandRunner = realRunner,
   spawnFn?: SpawnFn,
+  reviewLeaseStore?: ReviewLeaseStore,
 ): Promise<void> {
   if (cfg.reviewBotLogin.length === 0) return; // disabled — fail-safe
   const spawnImpl: SpawnFn =
     spawnFn ??
     ((cmd, args, opts) => {
-      const child = spawn(cmd, args, opts as SpawnOptions);
+      const { onExit, ...spawnOpts } = opts;
+      const child = spawn(cmd, args, spawnOpts as SpawnOptions);
+      attachTerminalCleanup(child, onExit);
       if (child.pid != null) child.unref();
       return { pid: child.pid };
     });
   const prSource = new GhPrSource(runner, cfg.engineReviewLabel, cfg.reviewBotLogin);
+  const leaseStore = reviewLeaseStore ?? makeFileReviewLeaseStore();
   // Exclude PRs with a live merge-prep session from review dispatch (symmetric
   // to the prep loop's reviewInFlight guard) so the two never push to the same
   // branch at once. Only relevant when merge-prep is armed.
@@ -421,12 +454,49 @@ export async function runReviewPass(
   const report = await runReviewCycle({
     prSource,
     cfg,
-    deriveReviewInFlight: () => deriveReviewInFlight(runner),
-    dispatchReview: (pr: ReviewablePr) => dispatchReview(pr, cfg, { runner, spawn: spawnImpl }),
+    deriveReviewInFlight: () => deriveReviewInFlight(runner, leaseStore),
+    isProcessAlive: (pid) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch (err) {
+        return !(
+          typeof err === 'object' &&
+          err != null &&
+          'code' in err &&
+          err.code === 'ESRCH'
+        );
+      }
+    },
+    removeWorktree: async (review) => {
+      const canonicalPath = reviewWorktreePath(review.prNumber);
+      if (review.worktreePath !== canonicalPath) {
+        throw new Error(
+          `Refusing non-canonical review worktree cleanup: ${review.worktreePath}`,
+        );
+      }
+      await runner('git', [
+        'worktree',
+        'remove',
+        '--force',
+        canonicalPath,
+      ]);
+      leaseStore.release(review.prNumber);
+    },
+    dispatchReview: (pr: ReviewablePr) => dispatchReview(
+      pr,
+      cfg,
+      { runner, spawn: spawnImpl, leaseStore },
+    ),
     busyPrNumbers,
   });
   if (report.dispatched.length > 0) {
     console.log(`[autopilot] review-pr dispatched: PR #${report.dispatched.join(', #')}`);
+  }
+  if (report.reaped.length > 0) {
+    console.log(
+      `[autopilot] review reaped stale worktree → PR #${report.reaped.join(', #')}`,
+    );
   }
 }
 
