@@ -127,6 +127,26 @@ describe('dispatchReview', () => {
     expect(env?.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS).toBe('0');
   });
 
+  it.each([
+    0,
+    -1,
+    1.5,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.MAX_SAFE_INTEGER + 1,
+    '../42' as unknown as number,
+  ])('rejects invalid runtime PR number %s before any side effect', async (number) => {
+    const { runner, calls: runnerCalls } = makeRunner();
+    const { spawn, calls: spawnCalls } = makeSpawn();
+
+    await expect(
+      dispatchReview({ ...PR, number }, CFG, { runner, spawn }),
+    ).rejects.toThrow('positive safe integer');
+
+    expect(runnerCalls).toEqual([]);
+    expect(spawnCalls).toEqual([]);
+  });
+
   it('removes only its exact pr-N worktree after the review process exits', async () => {
     const { runner, calls: runnerCalls } = makeRunner();
     const { spawn, calls: spawnCalls } = makeSpawn();
@@ -140,14 +160,23 @@ describe('dispatchReview', () => {
 
     onExit?.(0, null);
     await vi.waitFor(() => {
-      expect(runnerCalls).toContainEqual({
-        cmd: 'git',
-        args: ['worktree', 'remove', '--force', EXPECTED_WT],
-      });
+      expect(
+        runnerCalls.filter(
+          ({ cmd, args }) =>
+            cmd === 'git' &&
+            args[0] === 'worktree' &&
+            args[1] === 'remove',
+        ),
+      ).toEqual([
+        {
+          cmd: 'git',
+          args: ['worktree', 'remove', '--force', EXPECTED_WT],
+        },
+      ]);
     });
   });
 
-  it('logs cleanup failure without throwing from the child exit event', async () => {
+  it('logs an asynchronous cleanup rejection without throwing from the child exit event', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { spawn, calls: spawnCalls } = makeSpawn();
     const runner: CommandRunner = async (cmd, args) => {
@@ -169,6 +198,32 @@ describe('dispatchReview', () => {
       expect(error).toHaveBeenCalledWith(
         expect.stringContaining('review #42 worktree cleanup failed'),
         expect.any(Error),
+      );
+    });
+    error.mockRestore();
+  });
+
+  it('logs a synchronous cleanup throw without throwing from the child exit event', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { spawn, calls: spawnCalls } = makeSpawn();
+    const base = makeRunner();
+    const runner = ((cmd: string, args: string[]) => {
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
+        throw new Error('locked synchronously');
+      }
+      return base.runner(cmd, args);
+    }) as CommandRunner;
+
+    await dispatchReview(PR, CFG, { runner, spawn });
+    const onExit = spawnCalls[0].opts.onExit as
+      | ((code: number | null, signal: NodeJS.Signals | null) => void)
+      | undefined;
+
+    expect(() => onExit?.(1, null)).not.toThrow();
+    await vi.waitFor(() => {
+      expect(error).toHaveBeenCalledWith(
+        expect.stringContaining('review #42 worktree cleanup failed'),
+        expect.objectContaining({ message: 'locked synchronously' }),
       );
     });
     error.mockRestore();

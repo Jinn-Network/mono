@@ -61,6 +61,10 @@ export async function dispatchReview(
   cfg: DispatcherConfig,
   deps: { runner: CommandRunner; spawn: SpawnFn },
 ): Promise<InFlightReview> {
+  if (!Number.isSafeInteger(pr.number) || pr.number <= 0) {
+    throw new TypeError('Review PR number must be a positive safe integer');
+  }
+
   const { runner, spawn } = deps;
   const worktreePath = join(WORKTREES_BASE, `pr-${pr.number}`);
 
@@ -116,12 +120,14 @@ export async function dispatchReview(
     stdio: 'ignore',
     ...sessionSpawnEnv(cfg.reviewGhToken),
     onExit: (_code, _signal) => {
-      void runner('git', ['worktree', 'remove', '--force', worktreePath]).catch((err) => {
-        console.error(
-          `[autopilot] review #${pr.number} worktree cleanup failed (${worktreePath}):`,
-          err,
-        );
-      });
+      void Promise.resolve()
+        .then(() => runner('git', ['worktree', 'remove', '--force', worktreePath]))
+        .catch((err) => {
+          console.error(
+            `[autopilot] review #${pr.number} worktree cleanup failed (${worktreePath}):`,
+            err,
+          );
+        });
     },
   });
 
