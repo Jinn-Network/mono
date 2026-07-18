@@ -9,6 +9,7 @@ import type {
   ReviewLease,
   ReviewLeaseStore,
 } from '../../src/dispatcher/review-lease.js';
+import type { ReviewCleanupOptions } from '../../src/dispatcher/review-cleanup.js';
 
 const PR: ReviewablePr = {
   number: 42, title: 'feat: thing', headRefName: 'feat/42-thing', headRefOid: 'sha42',
@@ -24,7 +25,19 @@ const EXPECTED_WT = join(WORKTREES_BASE, 'pr-42');
 const TEST_LEASE_STORE: ReviewLeaseStore = {
   record: () => {},
   read: () => null,
-  release: () => {},
+  releaseIfMatches: () => false,
+};
+const TEST_CLEANUP_OPTIONS: ReviewCleanupOptions = {
+  filesystem: {
+    lstat: () => ({
+      isDirectory: () => true,
+      isSymbolicLink: () => false,
+    }),
+    realpath: () => EXPECTED_WT,
+    mkdirExclusive: () => {},
+    rename: () => {},
+    removeNoFollow: () => {},
+  },
 };
 
 function makeRunner(worktreeList = `worktree /x\nHEAD a\nbranch refs/heads/next\n`) {
@@ -32,6 +45,7 @@ function makeRunner(worktreeList = `worktree /x\nHEAD a\nbranch refs/heads/next\
   const runner: CommandRunner = async (cmd, args) => {
     calls.push({ cmd, args });
     if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') return worktreeList;
+    if (cmd === 'git' && args[0] === '-C' && args[2] === 'rev-parse') return `${EXPECTED_WT}\n`;
     if (cmd === 'git') return '';
     throw new Error(`Unexpected: ${cmd} ${args.join(' ')}`);
   };
@@ -119,14 +133,15 @@ describe('dispatchReview', () => {
     const leaseStore: ReviewLeaseStore = {
       record: (lease) => { recorded.push(lease); },
       read: () => null,
-      release: () => {},
+      releaseIfMatches: () => false,
     };
 
     const session = await dispatchReview(PR, CFG, { runner, spawn, leaseStore });
 
     expect(recorded).toEqual([
       {
-        version: 1,
+        version: 2,
+        leaseId: expect.any(String),
         prNumber: 42,
         worktreePath: EXPECTED_WT,
         pid: 7777,
@@ -136,15 +151,27 @@ describe('dispatchReview', () => {
   });
 
   it('releases the ownership lease when the reviewer terminates', async () => {
-    const { runner } = makeRunner();
+    const { runner } = makeRunner(`worktree ${EXPECTED_WT}\nHEAD b\ndetached\n`);
     const { spawn, calls } = makeSpawn();
     const released: number[] = [];
     const leaseStore: ReviewLeaseStore = {
       record: () => {},
-      read: () => null,
-      release: (prNumber) => { released.push(prNumber); },
+      read: () => recordedLease,
+      releaseIfMatches: (prNumber, leaseId) => {
+        if (recordedLease?.leaseId !== leaseId) return false;
+        released.push(prNumber);
+        recordedLease = null;
+        return true;
+      },
     };
-    await dispatchReview(PR, CFG, { runner, spawn, leaseStore });
+    let recordedLease: ReviewLease | null = null;
+    leaseStore.record = (lease) => { recordedLease = lease; };
+    await dispatchReview(PR, CFG, {
+      runner,
+      spawn,
+      leaseStore,
+      cleanupOptions: TEST_CLEANUP_OPTIONS,
+    });
     const onExit = calls[0].opts.onExit as
       | ((code: number | null, signal: NodeJS.Signals | null) => void)
       | undefined;
@@ -187,7 +214,9 @@ describe('dispatchReview', () => {
     Number.MAX_SAFE_INTEGER + 1,
     '../42' as unknown as number,
   ])('rejects invalid runtime PR number %s before any side effect', async (number) => {
-    const { runner, calls: runnerCalls } = makeRunner();
+    const { runner, calls: runnerCalls } = makeRunner(
+      `worktree ${EXPECTED_WT}\nHEAD b\ndetached\n`,
+    );
     const { spawn, calls: spawnCalls } = makeSpawn();
 
     await expect(
@@ -198,11 +227,28 @@ describe('dispatchReview', () => {
     expect(spawnCalls).toEqual([]);
   });
 
-  it('removes only its exact pr-N worktree after the review process exits', async () => {
-    const { runner, calls: runnerCalls } = makeRunner();
+  it('asks Git to remove only its exact pr-N worktree after the reviewer exits', async () => {
+    const { runner, calls: runnerCalls } = makeRunner(
+      `worktree ${EXPECTED_WT}\nHEAD b\ndetached\n`,
+    );
     const { spawn, calls: spawnCalls } = makeSpawn();
 
-    await dispatchReview(PR, CFG, { runner, spawn, leaseStore: TEST_LEASE_STORE });
+    let recordedLease: ReviewLease | null = null;
+    const leaseStore: ReviewLeaseStore = {
+      record: (lease) => { recordedLease = lease; },
+      read: () => recordedLease,
+      releaseIfMatches: (_prNumber, leaseId) => {
+        if (recordedLease?.leaseId !== leaseId) return false;
+        recordedLease = null;
+        return true;
+      },
+    };
+    await dispatchReview(PR, CFG, {
+      runner,
+      spawn,
+      leaseStore,
+      cleanupOptions: TEST_CLEANUP_OPTIONS,
+    });
 
     const onExit = spawnCalls[0].opts.onExit as
       | ((code: number | null, signal: NodeJS.Signals | null) => void)
@@ -215,8 +261,9 @@ describe('dispatchReview', () => {
         runnerCalls.filter(
           ({ cmd, args }) =>
             cmd === 'git' &&
-            args[0] === 'worktree' &&
-            args[1] === 'remove',
+            (
+              (args[0] === 'worktree' && args[1] === 'remove')
+            ),
         ),
       ).toEqual([
         {
@@ -227,11 +274,120 @@ describe('dispatchReview', () => {
     });
   });
 
+  it('retains the lease when Git removal fails and remains registered', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { spawn, calls: spawnCalls } = makeSpawn();
+    const runnerCalls: string[][] = [];
+    const released: number[] = [];
+    const runner: CommandRunner = async (cmd, args) => {
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') {
+        return `worktree ${EXPECTED_WT}\nHEAD b\ndetached\n`;
+      }
+      if (cmd === 'git' && args[0] === '-C' && args[2] === 'rev-parse') {
+        return `${EXPECTED_WT}\n`;
+      }
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
+        runnerCalls.push(args);
+        throw new Error('remove failed');
+      }
+      if (cmd === 'git') {
+        runnerCalls.push(args);
+        return '';
+      }
+      throw new Error(`Unexpected: ${cmd} ${args.join(' ')}`);
+    };
+    const leaseStore: ReviewLeaseStore = {
+      record: (lease) => { recordedLease = lease; },
+      read: () => recordedLease,
+      releaseIfMatches: (prNumber, leaseId) => {
+        if (recordedLease?.leaseId !== leaseId) return false;
+        released.push(prNumber);
+        recordedLease = null;
+        return true;
+      },
+    };
+    let recordedLease: ReviewLease | null = null;
+
+    await dispatchReview(PR, CFG, {
+      runner,
+      spawn,
+      leaseStore,
+      cleanupOptions: TEST_CLEANUP_OPTIONS,
+    });
+    const onExit = spawnCalls[0].opts.onExit as
+      | ((code: number | null, signal: NodeJS.Signals | null) => void)
+      | undefined;
+    onExit?.(1, null);
+
+    await vi.waitFor(() => expect(error).toHaveBeenCalled());
+    expect(
+      runnerCalls.filter((args) => args[0] === 'worktree' && args[1] === 'remove'),
+    ).toEqual([['worktree', 'remove', '--force', EXPECTED_WT]]);
+    expect(released).toEqual([]);
+    error.mockRestore();
+  });
+
+  it('does not run pre-unregister cleanup when canonical removal fails', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { spawn, calls: spawnCalls } = makeSpawn();
+    const cleanupCalls: string[][] = [];
+    const released: number[] = [];
+    const runner: CommandRunner = async (cmd, args) => {
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') {
+        return `worktree ${EXPECTED_WT}\nHEAD b\ndetached\n`;
+      }
+      if (cmd === 'git' && args[0] === '-C' && args[2] === 'rev-parse') {
+        return `${EXPECTED_WT}\n`;
+      }
+      if (cmd === 'git' && args[0] === '-C' && args[2] === 'clean') {
+        cleanupCalls.push(args);
+        return '';
+      }
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
+        throw new Error('remove failed');
+      }
+      if (cmd === 'git') return '';
+      throw new Error(`Unexpected: ${cmd} ${args.join(' ')}`);
+    };
+    const leaseStore: ReviewLeaseStore = {
+      record: (lease) => { recordedLease = lease; },
+      read: () => recordedLease,
+      releaseIfMatches: (prNumber, leaseId) => {
+        if (recordedLease?.leaseId !== leaseId) return false;
+        released.push(prNumber);
+        recordedLease = null;
+        return true;
+      },
+    };
+    let recordedLease: ReviewLease | null = null;
+
+    await dispatchReview(PR, CFG, {
+      runner,
+      spawn,
+      leaseStore,
+      cleanupOptions: TEST_CLEANUP_OPTIONS,
+    });
+    const onExit = spawnCalls[0].opts.onExit as
+      | ((code: number | null, signal: NodeJS.Signals | null) => void)
+      | undefined;
+    onExit?.(1, null);
+
+    await vi.waitFor(() => expect(error).toHaveBeenCalled());
+    expect(cleanupCalls).toEqual([]);
+    expect(released).toEqual([]);
+    error.mockRestore();
+  });
+
   it('logs an asynchronous cleanup rejection without throwing from the child exit event', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { spawn, calls: spawnCalls } = makeSpawn();
     const runner: CommandRunner = async (cmd, args) => {
-      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') return '';
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') {
+        return `worktree ${EXPECTED_WT}\nHEAD b\ndetached\n`;
+      }
+      if (cmd === 'git' && args[0] === '-C' && args[2] === 'rev-parse') {
+        return `${EXPECTED_WT}\n`;
+      }
       if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
         throw new Error('locked');
       }
@@ -239,7 +395,18 @@ describe('dispatchReview', () => {
       throw new Error(`Unexpected: ${cmd} ${args.join(' ')}`);
     };
 
-    await dispatchReview(PR, CFG, { runner, spawn, leaseStore: TEST_LEASE_STORE });
+    let current: ReviewLease | null = null;
+    const leaseStore: ReviewLeaseStore = {
+      record: (lease) => { current = lease; },
+      read: () => current,
+      releaseIfMatches: () => false,
+    };
+    await dispatchReview(PR, CFG, {
+      runner,
+      spawn,
+      leaseStore,
+      cleanupOptions: TEST_CLEANUP_OPTIONS,
+    });
     const onExit = spawnCalls[0].opts.onExit as
       | ((code: number | null, signal: NodeJS.Signals | null) => void)
       | undefined;
@@ -257,7 +424,7 @@ describe('dispatchReview', () => {
   it('logs a synchronous cleanup throw without throwing from the child exit event', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { spawn, calls: spawnCalls } = makeSpawn();
-    const base = makeRunner();
+    const base = makeRunner(`worktree ${EXPECTED_WT}\nHEAD b\ndetached\n`);
     const runner = ((cmd: string, args: string[]) => {
       if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
         throw new Error('locked synchronously');
@@ -265,7 +432,18 @@ describe('dispatchReview', () => {
       return base.runner(cmd, args);
     }) as CommandRunner;
 
-    await dispatchReview(PR, CFG, { runner, spawn, leaseStore: TEST_LEASE_STORE });
+    let current: ReviewLease | null = null;
+    const leaseStore: ReviewLeaseStore = {
+      record: (lease) => { current = lease; },
+      read: () => current,
+      releaseIfMatches: () => false,
+    };
+    await dispatchReview(PR, CFG, {
+      runner,
+      spawn,
+      leaseStore,
+      cleanupOptions: TEST_CLEANUP_OPTIONS,
+    });
     const onExit = spawnCalls[0].opts.onExit as
       | ((code: number | null, signal: NodeJS.Signals | null) => void)
       | undefined;

@@ -1,11 +1,17 @@
 import { readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { ReviewablePr, DispatcherConfig, InFlightReview } from './types.js';
 import type { CommandRunner } from './issue-source.js';
 import type { SpawnFn } from './dispatch.js';
 import { WORKTREES_BASE } from './dispatch.js';
-import type { ReviewLeaseStore } from './review-lease.js';
+import type { ReviewLease, ReviewLeaseStore } from './review-lease.js';
+import {
+  cleanupReviewWorktree,
+  withReviewWorktreeLock,
+  type ReviewCleanupOptions,
+} from './review-cleanup.js';
 import { sessionSpawnEnv } from './identity.js';
 import { parseOwnedPrefixes, touchesCodeOwnedPath } from './code-owned.js';
 import { buildHeadlessPrompt } from '../headless.js';
@@ -64,12 +70,28 @@ export async function dispatchReview(
     runner: CommandRunner;
     spawn: SpawnFn;
     leaseStore: ReviewLeaseStore;
+    cleanupOptions?: ReviewCleanupOptions;
   },
 ): Promise<InFlightReview> {
   if (!Number.isSafeInteger(pr.number) || pr.number <= 0) {
     throw new TypeError('Review PR number must be a positive safe integer');
   }
+  return withReviewWorktreeLock(
+    pr.number,
+    () => dispatchReviewLocked(pr, cfg, deps),
+  );
+}
 
+async function dispatchReviewLocked(
+  pr: ReviewablePr,
+  cfg: DispatcherConfig,
+  deps: {
+    runner: CommandRunner;
+    spawn: SpawnFn;
+    leaseStore: ReviewLeaseStore;
+    cleanupOptions?: ReviewCleanupOptions;
+  },
+): Promise<InFlightReview> {
   const { runner, spawn, leaseStore } = deps;
   const worktreePath = join(WORKTREES_BASE, `pr-${pr.number}`);
 
@@ -120,6 +142,7 @@ export async function dispatchReview(
   // Review/approve as the reviewer identity (DR-2026-06-15) — distinct from the
   // PR author so GitHub permits the approval; inherits ambient gh when unset.
   const startedAt = Date.now();
+  let expectedLease: ReviewLease | null = null;
   const result = spawn('claude', ['-p', fullPrompt], {
     cwd: worktreePath,
     detached: true,
@@ -127,8 +150,18 @@ export async function dispatchReview(
     ...sessionSpawnEnv(cfg.reviewGhToken),
     onExit: (_code, _signal) => {
       void Promise.resolve()
-        .then(() => runner('git', ['worktree', 'remove', '--force', worktreePath]))
-        .then(() => leaseStore.release(pr.number))
+        .then(() => {
+          const lease = expectedLease;
+          if (lease == null) {
+            throw new Error('review exited without a persisted ownership lease');
+          }
+          return cleanupReviewWorktree(
+            lease,
+            runner,
+            leaseStore,
+            deps.cleanupOptions,
+          );
+        })
         .catch((err) => {
           console.error(
             `[autopilot] review #${pr.number} worktree cleanup failed (${worktreePath}):`,
@@ -140,13 +173,16 @@ export async function dispatchReview(
 
   if (result.pid != null) {
     try {
-      leaseStore.record({
-        version: 1,
+      const lease: ReviewLease = {
+        version: 2,
+        leaseId: randomUUID(),
         prNumber: pr.number,
         worktreePath,
         pid: result.pid,
         startedAt,
-      });
+      };
+      leaseStore.record(lease);
+      expectedLease = lease;
     } catch (err) {
       console.error(
         `[autopilot] review #${pr.number} ownership lease could not be persisted (${worktreePath}):`,
@@ -161,5 +197,6 @@ export async function dispatchReview(
     worktreePath,
     pid: result.pid ?? null,
     startedAt,
+    leaseId: expectedLease?.leaseId ?? null,
   };
 }

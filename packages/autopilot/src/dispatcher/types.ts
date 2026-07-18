@@ -230,6 +230,8 @@ export interface InFlightReview {
   worktreePath: string;
   pid: number | null;
   startedAt: number;
+  /** Unique persisted ownership generation; null means cleanup is forbidden. */
+  leaseId?: string | null;
 }
 
 /** An in-flight merge-prep session, one per `jinn-mono_worktrees/merge-<N>`
