@@ -61,6 +61,10 @@ import { GhPrSink } from '../src/dispatcher/delivery-sink.js';
 import type { DeliverySink } from '../src/dispatcher/delivery-sink.js';
 import { DEFAULT_CONFIG } from '../src/dispatcher/types.js';
 import type { DispatcherConfig, ReadyIssue, InFlightSession, SessionResult, ImplementerRule } from '../src/dispatcher/types.js';
+import {
+  assertHermesBillingRoute,
+  assertHermesRuntimeReady,
+} from '../src/dispatcher/hermes-runtime.js';
 import { WallClock } from '../src/dispatcher/wall-clock.js';
 import { shouldRouteToSessions } from '../src/cli/routing.js';
 import { spawn } from 'node:child_process';
@@ -107,8 +111,21 @@ const MERGE_PREP_ENV = 'JINN_MERGE_PREP';
  */
 const IMPLEMENTER_RULES_ENV = 'JINN_DISPATCHER_IMPLEMENTER_RULES';
 
+/**
+ * Model / provider / Python interpreter for `hermes` coordinator sessions. Activation is
+ * NOT a flag: an issue runs on hermes iff a rule in
+ * JINN_DISPATCHER_IMPLEMENTER_RULES routes it there (e.g.
+ * [{"effort":"Low","implementer":"hermes"}]). Defaults mirror the operator's
+ * own codex setup (bare `gpt-5.6-sol` + `openai-codex`), which runs on the
+ * ChatGPT/Codex subscription — NOT OpenRouter. Keep the model id bare: an
+ * `<org>/<model>` id makes hermes infer `openrouter` and bill an API key.
+ */
+const HERMES_MODEL_ENV = 'JINN_DISPATCHER_HERMES_MODEL';
+const HERMES_PROVIDER_ENV = 'JINN_DISPATCHER_HERMES_PROVIDER';
+const HERMES_PYTHON_ENV = 'JINN_DISPATCHER_HERMES_PYTHON';
+
 /** Valid `implementer` values (mirrors the `Implementer` union in types.ts). */
-const IMPLEMENTERS = ['claude', 'codex', 'cursor'] as const;
+const IMPLEMENTERS = ['claude', 'codex', 'cursor', 'hermes'] as const;
 /** Valid `effort` values (mirrors the `Effort` union in types.ts). */
 const EFFORTS = ['Low', 'Medium', 'High'] as const;
 /** Valid `shape` values (mirrors the `IssueShape` union in types.ts). */
@@ -651,6 +668,11 @@ async function main(): Promise<void> {
     implGhToken: process.env[IMPL_GH_TOKEN_ENV] ?? '',
     reviewGhToken: process.env[REVIEW_GH_TOKEN_ENV] ?? '',
     mergePrepEnabled: (process.env[MERGE_PREP_ENV] ?? '') === '1',
+    ...(process.env[HERMES_MODEL_ENV] ? { hermesModel: process.env[HERMES_MODEL_ENV] } : {}),
+    ...(process.env[HERMES_PROVIDER_ENV] ? { hermesProvider: process.env[HERMES_PROVIDER_ENV] } : {}),
+    ...(process.env[HERMES_PYTHON_ENV]
+      ? { hermesPythonPath: process.env[HERMES_PYTHON_ENV] }
+      : {}),
   };
 
   if (cfg.authorAllowlist.length === 0) {
@@ -688,6 +710,18 @@ async function main(): Promise<void> {
   assertMergePrepArming(cfg);
   if (cfg.mergePrepEnabled) {
     console.log(`[autopilot] merge-prep enabled (cap=${cfg.mergePrepCap}) — stuck PRs are prepped, not just escalated`);
+  }
+
+  // Surface hermes routing at boot: it spawns a different CLI on a different
+  // model, so an operator reading the log must not have to infer it from the
+  // rules JSON.
+  if (cfg.implementerRules.some((r) => r.implementer === 'hermes')) {
+    assertHermesBillingRoute(cfg.hermesModel, cfg.hermesProvider);
+    assertHermesRuntimeReady(cfg.hermesPythonPath);
+    console.log(
+      `[autopilot] hermes coordinator routing ACTIVE (model=${cfg.hermesModel}, provider=${cfg.hermesProvider}, ` +
+        `python=${cfg.hermesPythonPath})`,
+    );
   }
 
   const source = new GhIssueSource(realRunner);

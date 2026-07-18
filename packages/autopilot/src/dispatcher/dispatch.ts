@@ -10,7 +10,9 @@ import {
   resetFieldCache,
   type FieldCache,
 } from './field-cache.js';
-import { buildHeadlessPrompt } from '../headless.js';
+import { buildHeadlessPrompt, buildHermesHeadlessPrompt } from '../headless.js';
+import { prepareHermesHome } from './hermes-home.js';
+import { hermesChatArgs } from './hermes-runtime.js';
 import { sessionLogPath, sessionStartedAtPath } from './session-log.js';
 import { resolveImplementer } from './implementer-policy.js';
 
@@ -21,6 +23,7 @@ import { resolveImplementer } from './implementer-policy.js';
 const HERE = dirname(fileURLToPath(import.meta.url));
 // src/dispatcher → src → packages/autopilot → packages → repo root
 const REPO_ROOT = join(HERE, '..', '..', '..', '..');
+const AUTOPILOT_PACKAGE_DIR = join(REPO_ROOT, 'packages', 'autopilot');
 
 /**
  * Per CLAUDE.md AI rule #1, multi-agent worktrees live in
@@ -299,9 +302,17 @@ export async function dispatchIssue(
   //    so the implement-issue skill's Step 2 skips worktree creation.
   const canon = loadCanon();
   const implementer = resolveImplementer(issue, cfg);
+  // `hermes` is a REAL coordinator: we spawn its Python runtime through the
+  // stateless launcher. Every other implementer runs inside a claude
+  // coordinator, where the value is only a directive naming the inner
+  // pipeline's CLI. Both coordinators enter through the canonical skill.
+  const isHermes = implementer === 'hermes';
+  const skill = 'implement-issue';
+  const adapter = isHermes ? 'hermes' : 'claude';
   const scenario = [
     `Use the implement-issue skill on issue #${number}.`,
-    `The default implementer for the inner pipeline is: ${implementer}.`,
+    `Runtime adapter: ${adapter}. Read \`.claude/skills/implement-issue/references/${adapter}.md\` before dispatching any stage.`,
+    ...(isHermes ? [] : [`The default implementer for the inner pipeline is: ${implementer}.`]),
     `Issue: #${number} — ${title}`,
     `A git worktree for this issue already exists at \`${worktreePath}\` on branch \`${branch}\` — use it; do not create a new worktree.`,
     ...(stackBase != null
@@ -310,7 +321,9 @@ export async function dispatchIssue(
         ]
       : []),
   ].join('\n');
-  const headlessPart = buildHeadlessPrompt('implement-issue', scenario);
+  const headlessPart = isHermes
+    ? buildHermesHeadlessPrompt(skill, scenario)
+    : buildHeadlessPrompt(skill, scenario);
   const fullPrompt = [canon, '', headlessPart].join('\n');
 
   // 5. Spawn — NO plan-posture flags (spec Appendix).
@@ -325,17 +338,66 @@ export async function dispatchIssue(
   //    inherit for 1/2 as a safe default the lambda replaces.
   const logPath = sessionLogPath(number);
   const startedAtMarkerPath = sessionStartedAtPath(number);
-  const result = spawn('claude', ['-p', ...effortFlag(issue.effort), fullPrompt], {
-    cwd: worktreePath,
-    detached: true,
-    stdio: ['ignore', 'inherit', 'inherit'],
-    logPath,
-    startedAtMarkerPath,
-    // Author this PR as the implementer identity (DR-2026-06-15); inherits the
-    // ambient gh account when no token is configured. Also disables the
-    // print-mode background-wait ceiling so the session reaches its PR stage.
-    ...sessionSpawnEnv(cfg.implGhToken),
-  });
+  // Author this PR as the implementer identity (DR-2026-06-15); inherits the
+  // ambient gh account when no token is configured. Also disables the
+  // print-mode background-wait ceiling so a claude session reaches its PR
+  // stage (inert for hermes, which has its own lifetime model).
+  const identityEnv = sessionSpawnEnv(cfg.implGhToken);
+
+  let result;
+  if (isHermes) {
+    // Hermes takes reasoning effort ONLY from $HERMES_HOME/config.yaml — no CLI
+    // flag, no env var — so every session needs its own home (concurrent
+    // sessions may run at different efforts). The home also carries the toolset
+    // (incl. delegation → native subagents), skills dir, and MCP wiring.
+    const { hermesHome } = prepareHermesHome({
+      issueNumber: number,
+      worktreePath,
+      effort: issue.effort,
+      cfg,
+    });
+    // The shared argv helper pins the stateless launcher and explicit
+    // model/provider contract. No --effort: that flag is claude-only (Hermes
+    // takes reasoning effort from the generated config.yaml).
+    result = spawn(
+      cfg.hermesPythonPath,
+      hermesChatArgs(fullPrompt, {
+        model: cfg.hermesModel,
+        provider: cfg.hermesProvider,
+      }),
+      {
+        cwd: worktreePath,
+        detached: true,
+        stdio: ['ignore', 'inherit', 'inherit'],
+        logPath,
+        startedAtMarkerPath,
+        ...identityEnv,
+        env: {
+          ...identityEnv.env,
+          HERMES_HOME: hermesHome,
+          JINN_AUTOPILOT_PACKAGE_DIR: AUTOPILOT_PACKAGE_DIR,
+          JINN_IMPLEMENT_ISSUE_ADAPTER: 'hermes',
+          JINN_DISPATCHER_HERMES_PYTHON: cfg.hermesPythonPath,
+          JINN_DISPATCHER_HERMES_MODEL: cfg.hermesModel,
+          JINN_DISPATCHER_HERMES_PROVIDER: cfg.hermesProvider,
+        },
+      },
+    );
+  } else {
+    result = spawn('claude', ['-p', ...effortFlag(issue.effort), fullPrompt], {
+      cwd: worktreePath,
+      detached: true,
+      stdio: ['ignore', 'inherit', 'inherit'],
+      logPath,
+      startedAtMarkerPath,
+      ...identityEnv,
+      env: {
+        ...identityEnv.env,
+        JINN_AUTOPILOT_PACKAGE_DIR: AUTOPILOT_PACKAGE_DIR,
+        JINN_IMPLEMENT_ISSUE_ADAPTER: 'claude',
+      },
+    });
+  }
 
   // AC#2: surface pid + log path on the dispatch log line so an operator can
   // tail the session straight from the cycle output.
