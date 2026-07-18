@@ -37,11 +37,40 @@ export function normalizeEnvelopeRole(role: unknown): unknown {
 
 export const RoleSchema = z.preprocess(normalizeEnvelopeRole, CanonicalRoleSchema);
 
+export const GeneratorModelSchema = z.object({
+  id: z.string().min(1),
+  provider: z.string().optional(),
+  openWeights: z.boolean().optional(),
+  source: z.enum(['stream', 'config']),
+});
+export type GeneratorModel = z.infer<typeof GeneratorModelSchema>;
+
+export const DistributionClassSchema = z.enum(['open', 'restricted-tos', 'unknown']);
+export type DistributionClass = z.infer<typeof DistributionClassSchema>;
+
 const TaskProvenanceSchema = z.object({
   cid: z.string().min(1),
   onchainCreationTx: HexStringSchema,
   onchainCreationBlock: z.number().int(),
   requestId: HexStringSchema,
+  /**
+   * Unix-seconds timestamp of the on-chain creation block. Sourced from
+   * `publicClient.getBlock({ blockNumber })` at claim time (I2 freshness
+   * semantics, #1827). Absent when the RPC lookup failed — NEVER stamped
+   * with "now": a too-late guess would falsely claim post-cutoff freshness.
+   */
+  createdAt: z.number().int().optional(),
+  /**
+   * SWE-bench-style task identity, copied at assembly time from the parsed
+   * task document (`task.spec.instance_id` / `.repo` / `.base_commit`).
+   * Present for swe-rebench-v2.v1 / jinn-repo.v1 solver types; absent
+   * (correctly) for solver types without repo identity (e.g. prediction.*).
+   * Materializes the join key C11 (#1842) needs for F2P/P2P + base-commit
+   * resolution — #1827.
+   */
+  instanceId: z.string().optional(),
+  repo: z.string().optional(),
+  baseCommit: z.string().optional(),
 });
 
 const ParticipantSchema = z.object({
@@ -100,6 +129,14 @@ const ExecutorSchema = z.object({
    * network explorer's composition.byModel facet (jinn-mono-gbut, gh#191).
    */
   model: z.string().optional(),
+  /**
+   * Structured, stream-sourced model provenance (#1827). Distinct from the
+   * plain `model` string above: `source` is the honesty flag — 'stream'
+   * means harvested from the harness's own transcript (verifiable),
+   * 'config' means it fell back to solverNet/config declaration
+   * (unverified, but not fabricated). Optional for back-compat.
+   */
+  generatorModel: GeneratorModelSchema.optional(),
 });
 
 const AttestationSchema = z.object({
@@ -168,6 +205,14 @@ const BaseEnvelopeFields = {
   window: WindowSchema,
   executor: ExecutorSchema,
   evidenceTier: EvidenceTierSchema,
+  /**
+   * Distribution/licensing class of the model that produced this record
+   * (#1827, §8.4). Derived at assembly time from `executor.generatorModel`
+   * — never caller-supplied, so it can't drift from the model that actually
+   * ran. 'unknown' when undeterminable; consumers MUST treat 'unknown' as
+   * 'restricted-tos' (never the reverse) and nothing defaults to 'open'.
+   */
+  distributionClass: DistributionClassSchema.optional(),
   attestation: AttestationSchema.nullable(),
   trajectory: TrajectoryRefSchema.nullable(),
   artifacts: z.array(ArtifactSchema),
