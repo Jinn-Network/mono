@@ -7,19 +7,22 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-import {
+import * as split from './jinn-plugin-split.mjs';
+
+const {
   validatePluginDir,
   mirrorContent,
   writeProvenance,
   treeChanged,
   buildCommitMessage,
   run,
-} from './jinn-plugin-split.mjs';
+} = split;
 
 // --- temp-repo helpers ------------------------------------------------------
 
@@ -67,8 +70,12 @@ function cleanup(...dirs) {
 }
 
 const PROV = {
-  monoSha: 'abc123def456',
+  monoSha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   workflowPath: '.github/workflows/jinn-plugin-split.yml',
+};
+const NEXT_PROV = {
+  ...PROV,
+  monoSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
 };
 
 /** Count commits reachable from HEAD in a git repo. */
@@ -213,7 +220,7 @@ test('(f) writeProvenance emits .jinn-split-source at ROOT with sha/path/do-not-
     const provPath = path.join(slim, '.jinn-split-source');
     assert.ok(existsSync(provPath), '.jinn-split-source at slim ROOT');
     const content = readFileSync(provPath, 'utf8');
-    assert.match(content, /abc123def456/, 'contains the mono SHA');
+    assert.match(content, new RegExp(PROV.monoSha), 'contains the mono SHA');
     assert.doesNotMatch(content, /release:/, 'no release: line (tag axis dropped)');
     assert.match(content, /\.github\/workflows\/jinn-plugin-split\.yml/, 'contains the workflow path');
     assert.match(content, /do not edit here/i, 'contains a do-not-edit line');
@@ -222,7 +229,7 @@ test('(f) writeProvenance emits .jinn-split-source at ROOT with sha/path/do-not-
   }
 });
 
-test('(f2) writeProvenance is deterministic (no timestamps → idempotent)', () => {
+test('(f2) writeProvenance is deterministic within the same promotion', () => {
   const slim = makeSlimRepo();
   try {
     writeProvenance(slim, PROV);
@@ -261,4 +268,141 @@ test('(g) run() commits the mirror on first run, then is an idempotent no-op', (
   } finally {
     cleanup(pluginDir, slim);
   }
+});
+
+test('(h) identical plugin content at a new mono SHA preserves provenance and creates no commit', () => {
+  const pluginDir = makePluginDir();
+  const slim = makeSlimRepo();
+  try {
+    run({ ...PROV, pluginDir, slimDir: slim });
+    const afterFirst = commitCount(slim);
+    const originalProvenance = readFileSync(path.join(slim, '.jinn-split-source'), 'utf8');
+
+    const second = run({ ...NEXT_PROV, pluginDir, slimDir: slim });
+
+    assert.equal(second.changed, false);
+    assert.equal(commitCount(slim), afterFirst, 'same plugin content must not create a commit');
+    assert.equal(
+      readFileSync(path.join(slim, '.jinn-split-source'), 'utf8'),
+      originalProvenance,
+      'provenance describes the promotion that last changed plugin content',
+    );
+  } finally {
+    cleanup(pluginDir, slim);
+  }
+});
+
+test('(i) validateMirrorDestination requires the destination to be a Git worktree root', () => {
+  const pluginDir = makePluginDir();
+  const plainDir = mkdtempSync(path.join(tmpdir(), 'jinn-plugin-not-git-'));
+  try {
+    assert.throws(
+      () => split.validateMirrorDestination(pluginDir, plainDir),
+      /Git worktree/i,
+    );
+  } finally {
+    cleanup(pluginDir, plainDir);
+  }
+});
+
+test('(j) validateMirrorDestination rejects equal and overlapping source/destination paths', () => {
+  const pluginDir = makePluginDir();
+  git(pluginDir, ['init', '-q']);
+  const nestedPlugin = path.join(pluginDir, 'nested-plugin');
+  mkdirSync(nestedPlugin);
+  writeFileSync(path.join(nestedPlugin, 'plugin.yaml'), 'name: nested\n');
+
+  const slim = makeSlimRepo();
+  const nestedSlim = path.join(pluginDir, 'nested-slim');
+  mkdirSync(nestedSlim);
+  git(nestedSlim, ['init', '-q']);
+  try {
+    assert.throws(() => split.validateMirrorDestination(pluginDir, pluginDir), /overlap/i);
+    assert.throws(() => split.validateMirrorDestination(nestedPlugin, pluginDir), /overlap/i);
+    assert.throws(() => split.validateMirrorDestination(pluginDir, nestedSlim), /overlap/i);
+    assert.doesNotThrow(() => split.validateMirrorDestination(pluginDir, slim));
+  } finally {
+    cleanup(pluginDir, slim);
+  }
+});
+
+test('(k) run requires a 40-hex MONO_SHA before touching the destination', () => {
+  const pluginDir = makePluginDir();
+  const slim = makeSlimRepo();
+  try {
+    assert.throws(
+      () => run({ ...PROV, monoSha: '', pluginDir, slimDir: slim }),
+      /MONO_SHA.*40-hex/i,
+    );
+    assert.throws(
+      () => split.validateMonoSha('abc123'),
+      /MONO_SHA.*40-hex/i,
+    );
+    assert.ok(existsSync(path.join(slim, 'OLD.md')), 'validation must precede mirror deletion');
+  } finally {
+    cleanup(pluginDir, slim);
+  }
+});
+
+test('(k2) CLI fails loud when MONO_SHA is absent and leaves the destination untouched', () => {
+  const pluginDir = makePluginDir();
+  const slim = makeSlimRepo();
+  try {
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./jinn-plugin-split.mjs', import.meta.url))], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PLUGIN_DIR: pluginDir,
+        SLIM_DIR: slim,
+        MONO_SHA: '',
+      },
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stdout, /::error::MONO_SHA is not a 40-hex commit SHA/);
+    assert.ok(existsSync(path.join(slim, 'OLD.md')), 'CLI validation must precede mirror deletion');
+  } finally {
+    cleanup(pluginDir, slim);
+  }
+});
+
+test('(l) workflow dispatch is token-free dry-run; only a main push can publish', () => {
+  const workflow = readFileSync(
+    new URL('../workflows/jinn-plugin-split.yml', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(
+    workflow,
+    /PUBLISH:\s*\$\{\{\s*github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'\s*\}\}/,
+    'publish eligibility must be derived exclusively from the triggering event and exact ref',
+  );
+  assert.doesNotMatch(workflow, /inputs\.dry_run|DRY_RUN/);
+  assert.match(
+    workflow,
+    /ref:\s*\$\{\{\s*github\.event_name == 'workflow_dispatch' && inputs\.source_ref \|\| github\.sha\s*\}\}/,
+    'source_ref must only affect manual dry-runs',
+  );
+
+  const jobEnv = workflow.match(/jobs:\n[\s\S]*?\n    env:\n([\s\S]*?)\n    steps:/)?.[1] ?? '';
+  assert.doesNotMatch(jobEnv, /JINN_PLUGIN_PUSH_TOKEN|secrets\./);
+
+  const slimCheckout = workflow.match(/- name: Checkout the slim repo\n([\s\S]*?)(?=\n      - name:)/)?.[1] ?? '';
+  assert.match(slimCheckout, /persist-credentials:\s*false/);
+  assert.doesNotMatch(slimCheckout, /JINN_PLUGIN_PUSH_TOKEN|secrets\./);
+
+  const tokenGuard = workflow.match(/- name: Token guard[\s\S]*?(?=\n      - name:)/)?.[0] ?? '';
+  assert.match(tokenGuard, /if:\s*env\.PUBLISH == 'true'/);
+  assert.match(tokenGuard, /JINN_PLUGIN_PUSH_TOKEN:\s*\$\{\{\s*secrets\.JINN_PLUGIN_PUSH_TOKEN\s*\}\}/);
+
+  const pushStep = workflow.match(/- name: Push to the slim[\s\S]*$/)?.[0] ?? '';
+  assert.match(pushStep, /if:\s*env\.PUBLISH == 'true'/);
+  assert.match(pushStep, /JINN_PLUGIN_PUSH_TOKEN:\s*\$\{\{\s*secrets\.JINN_PLUGIN_PUSH_TOKEN\s*\}\}/);
+  assert.match(pushStep, /https:\/\/github\.com\/Jinn-Network\/jinn-plugin\.git/);
+  assert.match(pushStep, /HEAD:refs\/heads\/main/);
+  assert.doesNotMatch(pushStep, /DEFAULT_BRANCH/);
+  assert.equal(
+    workflow.match(/secrets\.JINN_PLUGIN_PUSH_TOKEN/g)?.length,
+    2,
+    'the write token may appear only in the explicit guard and final push steps',
+  );
 });
