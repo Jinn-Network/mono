@@ -26,6 +26,7 @@
 import {
   existsSync,
   statSync,
+  realpathSync,
   readdirSync,
   rmSync,
   cpSync,
@@ -67,6 +68,58 @@ export function validatePluginDir(pluginDirPath) {
 }
 
 /**
+ * Require an unambiguous full Git commit id before it can enter provenance or
+ * a commit message.
+ * @param {string} monoSha
+ * @returns {string}
+ */
+export function validateMonoSha(monoSha) {
+  if (!/^[0-9a-f]{40}$/i.test(monoSha)) {
+    throw new Error(`MONO_SHA is not a 40-hex commit SHA: ${monoSha}`);
+  }
+  return monoSha;
+}
+
+/**
+ * Guard the destructive mirror destination. It must be the root of a real Git
+ * worktree, and it must be disjoint from the source in both directions.
+ * Canonical paths prevent symlinks from bypassing the overlap check.
+ * @param {string} pluginDir
+ * @param {string} slimCheckout
+ * @returns {string} canonical destination path
+ */
+export function validateMirrorDestination(pluginDir, slimCheckout) {
+  if (!existsSync(slimCheckout) || !statSync(slimCheckout).isDirectory()) {
+    throw new Error(`slim destination is not a Git worktree: ${slimCheckout}`);
+  }
+
+  const source = realpathSync(pluginDir);
+  const destination = realpathSync(slimCheckout);
+  const contains = (parent, child) => {
+    const relative = path.relative(parent, child);
+    return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+  };
+  if (contains(source, destination) || contains(destination, source)) {
+    throw new Error(`plugin source and slim destination overlap: ${source} <> ${destination}`);
+  }
+
+  let worktreeRoot;
+  try {
+    worktreeRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: destination,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    throw new Error(`slim destination is not a Git worktree: ${destination}`);
+  }
+  if (realpathSync(worktreeRoot) !== destination) {
+    throw new Error(`slim destination must be the Git worktree root: ${destination}`);
+  }
+  return destination;
+}
+
+/**
  * Mirror (not overlay) the full contents of `pluginDir` into `slimCheckout`:
  * remove every top-level slim entry not in DEFAULT_KEEP, then recursively copy
  * the plugin-dir tree in. Result: slim tree === plugin tree + kept files. Does
@@ -85,8 +138,10 @@ export function mirrorContent(pluginDir, slimCheckout, { keep = DEFAULT_KEEP } =
 }
 
 /**
- * Write the single provenance marker at the slim ROOT. Deterministic (no
- * timestamps) so an unchanged plugin tree stays an idempotent no-op.
+ * Write the single provenance marker at the slim ROOT. It is deterministic for
+ * the same promotion (no timestamps). run() calls it only after detecting a
+ * plugin-content change, so a later same-content promotion does not rewrite
+ * provenance merely because its mono SHA differs.
  * @param {string} slimCheckout
  * @param {{ monoSha: string, workflowPath: string }} fields
  */
@@ -126,22 +181,28 @@ export function buildCommitMessage({ monoSha }) {
 }
 
 /**
- * Local orchestrator: validate → mirror → provenance → stage → commit-if-changed
- * (all in slimDir). `git commit` on a local checkout needs no token, so it folds
- * in here; only `git push` (in the YAML) is privileged. Pure of GitHub-specific
- * side effects — no `::error::`, no `process.exit`, no `$GITHUB_OUTPUT`.
+ * Local orchestrator: validate → mirror → stage → detect plugin-content change
+ * → update provenance + commit only when content changed (all in slimDir).
+ * Therefore a later mono promotion with identical plugin content retains the
+ * provenance of the last content-changing promotion and creates no commit.
+ * `git commit` on a local checkout needs no token, so it folds in here; only
+ * `git push` (in the YAML) is privileged. Pure of GitHub-specific side effects
+ * — no `::error::`, no `process.exit`, no `$GITHUB_OUTPUT`.
  * @param {{ pluginDir: string, slimDir: string, monoSha: string, workflowPath: string }} args
  * @returns {{ changed: boolean, message: string }}
  */
 export function run({ pluginDir, slimDir, monoSha, workflowPath }) {
+  validateMonoSha(monoSha);
   validatePluginDir(pluginDir);
+  validateMirrorDestination(pluginDir, slimDir);
   mirrorContent(pluginDir, slimDir);
-  writeProvenance(slimDir, { monoSha, workflowPath });
   execFileSync('git', ['add', '-A'], { cwd: slimDir });
 
   const changed = treeChanged(slimDir);
   const message = buildCommitMessage({ monoSha });
   if (changed) {
+    writeProvenance(slimDir, { monoSha, workflowPath });
+    execFileSync('git', ['add', '-A'], { cwd: slimDir });
     execFileSync('git', ['commit', '-F', '-'], { cwd: slimDir, input: message });
   }
   return { changed, message };
@@ -159,14 +220,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const slimDir = process.env.SLIM_DIR ?? 'slim';
   const monoSha = process.env.MONO_SHA ?? '';
   const workflowPath = process.env.WORKFLOW_PATH ?? '.github/workflows/jinn-plugin-split.yml';
-
-  // Defense-in-depth: MONO_SHA flows into the commit message + provenance.
-  // It comes from `git rev-parse HEAD` today, but assert its shape so a future
-  // refactor cannot let non-SHA text ride through.
-  if (monoSha && !/^[0-9a-f]{40}$/.test(monoSha)) {
-    console.log(`::error::MONO_SHA is not a 40-hex commit SHA: ${monoSha}`);
-    process.exit(1);
-  }
 
   let changed;
   try {
