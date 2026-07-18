@@ -243,6 +243,35 @@ describe('review-pr reviewer identity binding', () => {
     expect(skill).not.toContain('HEAD:<headRefName>');
   });
 
+  it('fails the fix loop when the fixer produces no new commit', () => {
+    expect(skill).toContain(
+      'before_fix_head="$(git rev-parse --verify HEAD)"',
+    );
+    expect(skill).toContain(
+      'before_fix_marker="$(git rev-parse --git-path jinn-review-before-fix)"',
+    );
+    expect(skill).toContain(
+      `printf '%s\\n' "$before_fix_head" >"$before_fix_marker"`,
+    );
+    expect(skill).toContain(
+      'IFS= read -r before_fix_head <"$before_fix_marker"',
+    );
+    expect(skill).toContain(
+      'after_fix_head="$(git rev-parse --verify HEAD)"',
+    );
+    expect(skill).toContain(
+      'if [[ "$after_fix_head" == "$before_fix_head" ]]; then',
+    );
+    expect(skill).toContain('Fix subagent produced no new commit');
+    expect(skill.indexOf('before_fix_head=')).toBeLessThan(
+      skill.indexOf('Dispatch a **fix subagent**'),
+    );
+    expect(skill.indexOf('after_fix_head=')).toBeLessThan(
+      skill.indexOf('GIT_ASKPASS="$review_askpass"'),
+    );
+    expect(skill).not.toContain('git log origin/next..HEAD');
+  });
+
   it('token-binds escalation comments and project-field mutations', () => {
     const escalation = bashBlockAfter('## Step 4 — Finding handling & escalation');
     expect(escalation).toContain(
@@ -259,7 +288,9 @@ describe('review-pr reviewer identity binding', () => {
 
   it('states the real allowlist trust boundary without claiming token containment', () => {
     expect(skill).toContain('configured author allowlist');
-    expect(skill).toContain('least-privilege reviewer credential');
+    expect(skill).toMatch(
+      /Deployment requirement: provide a dedicated\s+reviewer credential\. Grant only the minimum scopes needed/,
+    );
     expect(skill).toContain('identity binding, not containment');
     expect(skill).toContain('credential broker');
   });

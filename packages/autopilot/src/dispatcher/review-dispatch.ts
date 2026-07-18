@@ -115,9 +115,9 @@ async function dispatchReviewLocked(
     // while the issue is In Review (the drift sweep deliberately leaves In-Review
     // worktrees alone). Git refuses a second checkout of the same branch, so `-B`
     // failed every cycle for such a PR ("is already used by worktree at …"),
-    // blocking review dispatch entirely. The session pushes with
-    // `git push origin HEAD:<headRefName>`, which works detached — same technique
-    // merge-prep-dispatch already uses (DR-2026-07-16).
+    // blocking review dispatch entirely. The session pushes from detached HEAD
+    // to its validated JINN_REVIEW_HEAD_REF through the skill's fixed-HTTPS,
+    // command-local askpass flow.
     await runner('git', ['worktree', 'add', '--detach', worktreePath, `origin/${pr.headRefName}`]);
   }
 

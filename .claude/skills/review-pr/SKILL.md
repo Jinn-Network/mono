@@ -45,8 +45,9 @@ helper and never put the token in a URL or command argument.
 
 ## Trust boundary
 The dispatcher reaches this skill only after the PR author passes the
-configured author allowlist. The session receives a dedicated,
-least-privilege reviewer credential that can review and update this repository.
+configured author allowlist. Deployment requirement: provide a dedicated
+reviewer credential. Grant only the minimum scopes needed to review and update
+this repository.
 Command-point binding guarantees the GitHub **identity** used by each operation;
 it is identity binding, not containment against a malicious trusted PR. Review
 and app-test stages may execute code from that allowlisted PR. A credential broker
@@ -126,7 +127,43 @@ Do not approve, do not un-draft, do not merge. Blocking findings still go throug
       repos/Jinn-Network/mono/issues/<N>/labels/review%3Aapproved
   fi
   ```
-  Then dispatch a **fix subagent** (different from the reviewers) seeded with the findings. It implements fixes on the PR branch, commits, and pushes:
+  Record the current commit before delegating:
+  ```bash
+  if ! before_fix_marker="$(git rev-parse --git-path jinn-review-before-fix)"; then
+    echo "Failed to locate pre-fix marker" >&2
+    exit 1
+  fi
+  if ! before_fix_head="$(git rev-parse --verify HEAD)"; then
+    echo "Failed to capture pre-fix HEAD" >&2
+    exit 1
+  fi
+  if ! printf '%s\n' "$before_fix_head" >"$before_fix_marker"; then
+    echo "Failed to persist pre-fix HEAD" >&2
+    exit 1
+  fi
+  ```
+  Dispatch a **fix subagent** (different from the reviewers) seeded with the
+  findings. It implements and commits fixes locally. After it returns, require
+  a genuinely new commit:
+  ```bash
+  if ! before_fix_marker="$(git rev-parse --git-path jinn-review-before-fix)"; then
+    echo "Failed to locate pre-fix marker" >&2
+    exit 1
+  fi
+  if ! IFS= read -r before_fix_head <"$before_fix_marker"; then
+    echo "Failed to read pre-fix HEAD" >&2
+    exit 1
+  fi
+  if ! after_fix_head="$(git rev-parse --verify HEAD)"; then
+    echo "Failed to capture post-fix HEAD" >&2
+    exit 1
+  fi
+  if [[ "$after_fix_head" == "$before_fix_head" ]]; then
+    echo "Fix subagent produced no new commit" >&2
+    exit 1
+  fi
+  ```
+  Only then push the verified new head:
   ```bash
   if ! review_askpass="$(mktemp)"; then
     echo "Failed to create reviewer askpass helper" >&2
@@ -158,6 +195,8 @@ Do not approve, do not un-draft, do not merge. Blocking findings still go throug
   fi
   rm -f "$review_askpass"
   trap - EXIT
+  before_fix_marker="$(git rev-parse --git-path jinn-review-before-fix)"
+  rm -f "$before_fix_marker"
   ```
   Then **re-run Step 2** on the new diff. Loop. There is **no round-count bound** — escalate on judgment (see Step 4).
 
@@ -183,7 +222,7 @@ Identical to implement-issue §Step 4 and §Step 7: curated prompts (never forwa
 |---|---|
 | PR lacks the `engine:review` label | Stop — not in scope (the dispatcher should not have spawned this). |
 | Cannot push to the PR branch (fork) | Post advisory review; escalate `Blocked on: Human`. |
-| Fix subagent reports done but no new commit | Re-dispatch; verify with `git log origin/next..HEAD`. |
+| Fix subagent reports done but no new commit | Re-dispatch; compare the captured pre-fix and post-fix `HEAD` values. |
 | Findings not converging | Escalate `stuck`. |
 
 ## Composition
