@@ -13,6 +13,7 @@ const CFG: DispatcherConfig = {
   implementerRules: [], authorAllowlist: [], reviewCap: 3, engineReviewLabel: 'engine:review',
   reviewBotLogin: 'jinn-review', implGhToken: '', reviewGhToken: '',
   mergePrepEnabled: true, mergePrepCap: 1,
+  hermesModel: 'gpt-5.6-sol', hermesProvider: 'openai-codex', hermesPythonPath: '/opt/hermes/python',
 };
 
 const STUCK: StuckPr = {

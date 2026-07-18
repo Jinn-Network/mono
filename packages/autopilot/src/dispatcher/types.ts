@@ -1,3 +1,5 @@
+import { DEFAULT_HERMES_PYTHON } from './hermes-runtime.js';
+
 /** The nine work-shape Issue Types (DR-2026-05-20-b). */
 export type IssueShape =
   | 'feat' | 'fix' | 'refactor' | 'spike'
@@ -96,8 +98,14 @@ export interface SessionResult {
   escalationStatus?: 'needs-decision' | 'blocked' | 'stuck';
 }
 
-/** The CLI implementer agents the dispatcher can route work to. */
-export type Implementer = 'claude' | 'codex' | 'cursor';
+/**
+ * The CLI implementer agents the dispatcher can route work to.
+ *
+ * `claude` and `hermes` are REAL coordinators — `dispatch.ts` spawns their
+ * respective CLIs. `codex` / `cursor` remain directive-only (they select
+ * prompt text inside a claude coordinator); see `dispatch.ts`.
+ */
+export type Implementer = 'claude' | 'codex' | 'cursor' | 'hermes';
 
 /**
  * One entry in the ordered implementer-routing policy. A rule matches an issue
@@ -173,6 +181,25 @@ export interface DispatcherConfig {
   /** Max simultaneous merge-prep sessions. Default 1 (singleton — stuck PRs are
    *  rare, and serializing removes prep-vs-prep races on shared `origin/next`). */
   mergePrepCap: number;
+  /**
+   * Model id for `hermes` coordinator sessions, as `--model` to `hermes chat`.
+   * BARE — never `<org>/<model>`: an org-prefixed id makes hermes infer the
+   * `openrouter` provider and bill an API key instead of the operator's Codex
+   * subscription. Hermes does not validate the id at runtime; only the provider
+   * can reject it. Source: `JINN_DISPATCHER_HERMES_MODEL`.
+   */
+  hermesModel: string;
+  /**
+   * Provider for `hermes` coordinator sessions, passed EXPLICITLY (never
+   * inferred). `openai-codex` = "Codex CLI via ChatGPT subscription or API key"
+   * (models.py ProviderEntry) — it auto-selects the `codex_responses` api_mode
+   * and the Codex base_url, and resolves credentials from hermes' own Codex
+   * token store. Source: `JINN_DISPATCHER_HERMES_PROVIDER`.
+   */
+  hermesProvider: string;
+  /** Python interpreter from the Hermes installation. Source:
+   * `JINN_DISPATCHER_HERMES_PYTHON`. */
+  hermesPythonPath: string;
 }
 
 export const DEFAULT_CONFIG: DispatcherConfig = {
@@ -193,6 +220,13 @@ export const DEFAULT_CONFIG: DispatcherConfig = {
   reviewGhToken: '',
   mergePrepEnabled: false,
   mergePrepCap: 1,
+  // Bare id + explicit provider: mirrors the operator's own working codex setup
+  // (~/.codex/config.toml model = "gpt-5.6-sol"; ~/.hermes/config.yaml
+  // provider: openai-codex). An `openai/`-prefixed id would silently route to
+  // OpenRouter instead of the subscription.
+  hermesModel: 'gpt-5.6-sol',
+  hermesProvider: 'openai-codex',
+  hermesPythonPath: DEFAULT_HERMES_PYTHON,
 };
 
 /** A PR as polled from the PR source, with the fields the review loop needs. */

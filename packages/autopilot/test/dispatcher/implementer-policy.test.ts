@@ -12,6 +12,15 @@ describe('resolveImplementer', () => {
     expect(resolveImplementer(issue, cfg)).toBe('claude');
   });
 
+  it('routes to hermes — the second REAL coordinator (dispatch spawns its CLI)', () => {
+    const cfg: Cfg = {
+      implementerRules: [{ effort: 'Low', implementer: 'hermes' }],
+      defaultImplementer: 'claude',
+    };
+    expect(resolveImplementer({ shape: 'feat', effort: 'Low' }, cfg)).toBe('hermes');
+    expect(resolveImplementer({ shape: 'feat', effort: 'High' }, cfg)).toBe('claude');
+  });
+
   it('effort-only rule matches regardless of shape', () => {
     const cfg: Cfg = {
       implementerRules: [{ effort: 'High', implementer: 'codex' }],
