@@ -115,6 +115,14 @@ export async function dispatchReview(
     detached: true,
     stdio: 'ignore',
     ...sessionSpawnEnv(cfg.reviewGhToken),
+    onExit: (_code, _signal) => {
+      void runner('git', ['worktree', 'remove', '--force', worktreePath]).catch((err) => {
+        console.error(
+          `[autopilot] review #${pr.number} worktree cleanup failed (${worktreePath}):`,
+          err,
+        );
+      });
+    },
   });
 
   return {

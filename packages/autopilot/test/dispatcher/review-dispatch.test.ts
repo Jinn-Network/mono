@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { join } from 'node:path';
 import { dispatchReview } from '../../src/dispatcher/review-dispatch.js';
 import { WORKTREES_BASE } from '../../src/dispatcher/dispatch.js';
@@ -125,6 +125,53 @@ describe('dispatchReview', () => {
     await dispatchReview(PR, CFG, { runner, spawn });
     const env = calls[0].opts.env as Record<string, string> | undefined;
     expect(env?.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS).toBe('0');
+  });
+
+  it('removes only its exact pr-N worktree after the review process exits', async () => {
+    const { runner, calls: runnerCalls } = makeRunner();
+    const { spawn, calls: spawnCalls } = makeSpawn();
+
+    await dispatchReview(PR, CFG, { runner, spawn });
+
+    const onExit = spawnCalls[0].opts.onExit as
+      | ((code: number | null, signal: NodeJS.Signals | null) => void)
+      | undefined;
+    expect(onExit).toBeTypeOf('function');
+
+    onExit?.(0, null);
+    await vi.waitFor(() => {
+      expect(runnerCalls).toContainEqual({
+        cmd: 'git',
+        args: ['worktree', 'remove', '--force', EXPECTED_WT],
+      });
+    });
+  });
+
+  it('logs cleanup failure without throwing from the child exit event', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { spawn, calls: spawnCalls } = makeSpawn();
+    const runner: CommandRunner = async (cmd, args) => {
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') return '';
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
+        throw new Error('locked');
+      }
+      if (cmd === 'git') return '';
+      throw new Error(`Unexpected: ${cmd} ${args.join(' ')}`);
+    };
+
+    await dispatchReview(PR, CFG, { runner, spawn });
+    const onExit = spawnCalls[0].opts.onExit as
+      | ((code: number | null, signal: NodeJS.Signals | null) => void)
+      | undefined;
+
+    expect(() => onExit?.(1, null)).not.toThrow();
+    await vi.waitFor(() => {
+      expect(error).toHaveBeenCalledWith(
+        expect.stringContaining('review #42 worktree cleanup failed'),
+        expect.any(Error),
+      );
+    });
+    error.mockRestore();
   });
 
   // P3 (DR-2026-06-15): human-surface detection. The gate reads the changed-file

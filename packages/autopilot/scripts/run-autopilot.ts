@@ -146,7 +146,9 @@ function makeLoggingSpawn(): SpawnFn {
     if (typeof opts.startedAtMarkerPath === 'string') {
       writeFileSync(opts.startedAtMarkerPath, `${new Date().toISOString()}\n`, { mode: 0o600 });
     }
-    const child = spawn(cmd, args, { ...opts, stdio } as SpawnOptions);
+    const { onExit, ...spawnOpts } = opts;
+    const child = spawn(cmd, args, { ...spawnOpts, stdio } as SpawnOptions);
+    if (onExit != null) child.once('exit', onExit);
     if (child.pid != null) child.unref();
     // Close the parent's dup of the fd; the detached child kept its own.
     if (fd != null) closeSync(fd);
@@ -407,7 +409,9 @@ export async function runReviewPass(
   const spawnImpl: SpawnFn =
     spawnFn ??
     ((cmd, args, opts) => {
-      const child = spawn(cmd, args, opts as SpawnOptions);
+      const { onExit, ...spawnOpts } = opts;
+      const child = spawn(cmd, args, spawnOpts as SpawnOptions);
+      if (onExit != null) child.once('exit', onExit);
       if (child.pid != null) child.unref();
       return { pid: child.pid };
     });
