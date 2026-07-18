@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { SignedEnvelope } from '../../../src/types/envelope.js';
 import { parseTraceEnvelopeV0 } from '../src/envelope.js';
 import { createMemoryLedger } from '../src/ledger.js';
@@ -33,6 +34,10 @@ const TEST_ADDRESS = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266' as const;
 const TEST_PRIVATE_KEY =
   '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as const;
 const TEST_SAFE = '0x1111111111111111111111111111111111111111' as const;
+
+const STAGE1_FIXTURES_DIR = fileURLToPath(
+  new URL('../fixtures/stage1-seeds', import.meta.url),
+);
 
 function episode(overrides: Partial<SeedEpisode> = {}): SeedEpisode {
   return {
@@ -480,6 +485,26 @@ describe('executeEpisodes()', () => {
         error: expect.stringMatching(/publication outcome unknown; do not auto-retry/i),
       }),
     ]);
+  });
+});
+
+describe('executeEpisodes() against the checked-in stage1-seeds fixture set (issue #1784)', () => {
+  it('imports all three fixture episodes cleanly under the seed-lane scrub profile', async () => {
+    const source = createLocalEpisodeSeedSource(STAGE1_FIXTURES_DIR);
+    const report = await planEpisodes(source);
+    expect(report.every((row) => row.verdict === 'import')).toBe(true);
+
+    const { deps, published } = mockPublishDeps();
+    const result = await executeEpisodes(report, source, deps);
+
+    expect(result.errors).toEqual([]);
+    expect(result.imported.map((r) => r.id).sort()).toEqual([
+      'distractor-operator-claims',
+      'distractor-sympy-printing',
+      'source-dashboard-flake',
+    ]);
+    expect(result.skipped).toEqual([]);
+    expect(published).toHaveLength(3);
   });
 });
 
