@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { deriveReviewInFlight } from '../../src/dispatcher/review-state.js';
+import { reviewWorktreePath } from '../../src/dispatcher/review-lease.js';
+import type { ReviewLeaseStore } from '../../src/dispatcher/review-lease.js';
 import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
 
 const PORCELAIN = [
@@ -7,7 +9,7 @@ const PORCELAIN = [
   'HEAD aaaa',
   'branch refs/heads/next',
   '',
-  'worktree /repo/jinn-mono_worktrees/pr-42',
+  `worktree ${reviewWorktreePath(42)}`,
   'HEAD bbbb',
   'branch refs/heads/feat/42-thing',
   '',
@@ -26,6 +28,40 @@ describe('deriveReviewInFlight', () => {
     const { inFlight } = await deriveReviewInFlight(runner);
     expect(inFlight.map((s) => s.prNumber)).toEqual([42]);
     expect(inFlight[0].branch).toBe('feat/42-thing');
-    expect(inFlight[0].worktreePath).toBe('/repo/jinn-mono_worktrees/pr-42');
+    expect(inFlight[0].worktreePath).toBe(reviewWorktreePath(42));
+  });
+
+  it('recovers reviewer pid and start time from the persisted dispatcher lease', async () => {
+    const runner: CommandRunner = async () => PORCELAIN;
+    const leaseStore: ReviewLeaseStore = {
+      record: () => {},
+      release: () => {},
+      read: (prNumber) => prNumber === 42
+        ? {
+            version: 1,
+            prNumber,
+            worktreePath: reviewWorktreePath(prNumber),
+            pid: 4242,
+            startedAt: 123_456,
+          }
+        : null,
+    };
+
+    const { inFlight } = await deriveReviewInFlight(runner, leaseStore);
+
+    expect(inFlight[0]).toMatchObject({ pid: 4242, startedAt: 123_456 });
+  });
+
+  it('does not infer ownership or age when no valid dispatcher lease exists', async () => {
+    const runner: CommandRunner = async () => PORCELAIN;
+    const leaseStore: ReviewLeaseStore = {
+      record: () => {},
+      release: () => {},
+      read: () => null,
+    };
+
+    const { inFlight } = await deriveReviewInFlight(runner, leaseStore);
+
+    expect(inFlight[0]).toMatchObject({ pid: null, startedAt: 0 });
   });
 });

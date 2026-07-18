@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { REVIEW_REAP_MS, runReviewCycle } from '../../src/dispatcher/review-loop.js';
+import { WORKTREES_BASE } from '../../src/dispatcher/dispatch.js';
+import { join } from 'node:path';
 import type { PrSource } from '../../src/dispatcher/pr-source.js';
 import type { PolledPr, ReviewablePr, InFlightReview, DispatcherConfig } from '../../src/dispatcher/types.js';
 
@@ -116,21 +118,21 @@ describe('runReviewCycle', () => {
     const stale: InFlightReview = {
       prNumber: 20,
       branch: 'b/20',
-      worktreePath: '/pr-20',
-      pid: null,
+      worktreePath: join(WORKTREES_BASE, 'pr-20'),
+      pid: 2020,
       startedAt: now - REVIEW_REAP_MS - 1,
     };
     const fresh: InFlightReview = {
       prNumber: 21,
       branch: 'b/21',
-      worktreePath: '/pr-21',
-      pid: null,
+      worktreePath: join(WORKTREES_BASE, 'pr-21'),
+      pid: 2121,
       startedAt: now - 1_000,
     };
     const unknown: InFlightReview = {
       prNumber: 22,
       branch: 'b/22',
-      worktreePath: '/pr-22',
+      worktreePath: join(WORKTREES_BASE, 'pr-22'),
       pid: null,
       startedAt: 0,
     };
@@ -145,6 +147,7 @@ describe('runReviewCycle', () => {
         inFlight: [stale, fresh, unknown],
         drift: [],
       }),
+      isProcessAlive: () => false,
       removeWorktree: async (w) => { removed.push(w.prNumber); },
       dispatchReview: async (p) => {
         dispatched.push(p.number);
@@ -168,8 +171,8 @@ describe('runReviewCycle', () => {
     const stale: InFlightReview = {
       prNumber: 40,
       branch: 'b/40',
-      worktreePath: '/pr-40',
-      pid: null,
+      worktreePath: join(WORKTREES_BASE, 'pr-40'),
+      pid: 4040,
       startedAt: now - REVIEW_REAP_MS - 1,
     };
     const dispatched: number[] = [];
@@ -179,6 +182,7 @@ describe('runReviewCycle', () => {
       cfg: { ...CFG, reviewCap: 2 },
       now: () => now,
       deriveReviewInFlight: async () => ({ inFlight: [stale], drift: [] }),
+      isProcessAlive: () => false,
       removeWorktree: async () => { throw new Error('locked'); },
       dispatchReview: async (p) => {
         dispatched.push(p.number);
@@ -195,5 +199,81 @@ describe('runReviewCycle', () => {
     expect(report.reaped).toEqual([]);
     expect(dispatched).toEqual([41]);
     expect(report.skippedForCap).toBe(1);
+  });
+
+  it('never reaps a stale review while its leased reviewer process is alive', async () => {
+    const now = 10_000_000_000;
+    const active: InFlightReview = {
+      prNumber: 50,
+      branch: 'b/50',
+      worktreePath: join(WORKTREES_BASE, 'pr-50'),
+      pid: 5050,
+      startedAt: now - REVIEW_REAP_MS - 1,
+    };
+    const removed: number[] = [];
+
+    const report = await runReviewCycle({
+      prSource: { poll: async () => [pr(51)] },
+      cfg: { ...CFG, reviewCap: 1 },
+      now: () => now,
+      deriveReviewInFlight: async () => ({ inFlight: [active], drift: [] }),
+      isProcessAlive: (pid) => pid === 5050,
+      removeWorktree: async (w) => { removed.push(w.prNumber); },
+      dispatchReview: async () => { throw new Error('must not dispatch'); },
+    });
+
+    expect(removed).toEqual([]);
+    expect(report.reaped).toEqual([]);
+    expect(report.skippedForCap).toBe(1);
+  });
+
+  it('reaps a stale canonical review only when its leased reviewer process is provably dead', async () => {
+    const now = 10_000_000_000;
+    const dead: InFlightReview = {
+      prNumber: 52,
+      branch: 'b/52',
+      worktreePath: join(WORKTREES_BASE, 'pr-52'),
+      pid: 5252,
+      startedAt: now - REVIEW_REAP_MS - 1,
+    };
+    const removed: number[] = [];
+
+    const report = await runReviewCycle({
+      prSource: { poll: async () => [] },
+      cfg: CFG,
+      now: () => now,
+      deriveReviewInFlight: async () => ({ inFlight: [dead], drift: [] }),
+      isProcessAlive: () => false,
+      removeWorktree: async (w) => { removed.push(w.prNumber); },
+      dispatchReview: async () => { throw new Error('must not dispatch'); },
+    });
+
+    expect(removed).toEqual([52]);
+    expect(report.reaped).toEqual([52]);
+  });
+
+  it('never passes a non-canonical discovered path to fallback removal', async () => {
+    const now = 10_000_000_000;
+    const forged: InFlightReview = {
+      prNumber: 53,
+      branch: 'b/53',
+      worktreePath: '/tmp/attacker/jinn-mono_worktrees/pr-53',
+      pid: 5353,
+      startedAt: now - REVIEW_REAP_MS - 1,
+    };
+    const removed: number[] = [];
+
+    const report = await runReviewCycle({
+      prSource: { poll: async () => [] },
+      cfg: CFG,
+      now: () => now,
+      deriveReviewInFlight: async () => ({ inFlight: [forged], drift: [] }),
+      isProcessAlive: () => false,
+      removeWorktree: async (w) => { removed.push(w.prNumber); },
+      dispatchReview: async () => { throw new Error('must not dispatch'); },
+    });
+
+    expect(removed).toEqual([]);
+    expect(report.reaped).toEqual([]);
   });
 });

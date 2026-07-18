@@ -1,6 +1,7 @@
 import type { PrSource } from './pr-source.js';
 import type { DispatcherConfig, InFlightReview, ReviewablePr } from './types.js';
 import { selectReviewable } from './review-ready-filter.js';
+import { reviewWorktreePath } from './review-lease.js';
 
 export const REVIEW_REAP_MS = 2 * 60 * 60 * 1000;
 
@@ -29,6 +30,9 @@ export interface ReviewCycleDeps {
   removeWorktree(w: InFlightReview): Promise<void>;
   dispatchReview(pr: ReviewablePr): Promise<InFlightReview>;
   now?(): number;
+  /** True only when the persisted reviewer pid is still alive. Fail-safe default
+   * treats every pid as alive, disabling fallback cleanup unless wired. */
+  isProcessAlive?(pid: number): boolean;
   /**
    * PR numbers with a live merge-prep session (a `merge-<N>` worktree). Excluded
    * from review dispatch so a review and a prep never push to the same branch
@@ -57,7 +61,24 @@ export async function runReviewCycle(deps: ReviewCycleDeps): Promise<ReviewCycle
   const reaped: number[] = [];
 
   for (const review of inFlight) {
+    let canonical = false;
+    try {
+      canonical = review.worktreePath === reviewWorktreePath(review.prNumber);
+    } catch {
+      canonical = false;
+    }
+    let processDead = false;
+    if (canonical && review.pid != null) {
+      try {
+        processDead = !(deps.isProcessAlive ?? (() => true))(review.pid);
+      } catch {
+        processDead = false;
+      }
+    }
     const stale =
+      canonical &&
+      review.pid != null &&
+      processDead &&
       review.startedAt > 0 &&
       now() - review.startedAt > REVIEW_REAP_MS;
     if (!stale) {

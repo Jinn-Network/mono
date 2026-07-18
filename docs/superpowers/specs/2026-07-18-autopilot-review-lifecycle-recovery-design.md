@@ -59,7 +59,7 @@ Use PR #1778 unchanged: reap `pr-<N>` worktrees after two hours.
 This is small and crash-safe, but normal successful batches still block the
 review lane for two hours. It does not meet the continuous-loop goal.
 
-### Persistent PID leases
+### General-purpose process lease database
 
 Persist PID, process-start identity, PR head, and lifecycle state outside the
 worktree, then reconcile those leases every cycle.
@@ -69,15 +69,17 @@ cross-platform process identity, state migration, and another durable store.
 The dispatcher already remains alive for normal child completion, so this is
 unnecessary Stage 2 machinery.
 
-### Process-exit cleanup plus timeout fallback
+### Process-exit cleanup plus a minimal ownership lease
 
 Attach cleanup to the child-process exit event before detaching it. Remove the
 exact review worktree immediately when the child exits. Retain the two-hour
 reaper from PR #1778 for orphaned worktrees after dispatcher crashes, restarts,
-or cleanup failures.
+or cleanup failures. Persist only the facts the fallback needs—canonical
+worktree path, reviewer PID, and dispatch timestamp—in a per-PR lease.
 
 This is the selected approach. It makes normal completion immediate and uses
-age only for exceptional recovery.
+age only as one of three exceptional-recovery proofs: canonical ownership,
+reviewer process death, and elapsed time.
 
 ## Design
 
@@ -97,14 +99,16 @@ type SpawnExitHandler = (
 the `ChildProcess` before calling `unref()`. Test spawn adapters may invoke the
 callback deterministically.
 
-On child exit, the callback invokes:
+On child exit or child-process error, one idempotent terminal callback invokes:
 
 ```text
 git worktree remove --force <exact dispatcher-derived pr-N path>
 ```
 
 Cleanup is best-effort and asynchronous. Failure is logged with the PR number
-and path. It never terminates the dispatcher.
+and path. It never terminates the dispatcher. The ownership lease is released
+only after worktree removal succeeds, so a failed immediate cleanup remains
+eligible for safe fallback recovery.
 
 The callback is registered before detachment so a fast exit, including a
 provider quota response, cannot race past registration.
@@ -133,8 +137,13 @@ redispatched from its remote head.
 
 Retain and update PR #1778's reaper:
 
-- worktrees with a known age older than two hours are stale;
-- `startedAt === 0` remains protected because its age is unknown;
+- dispatch writes a per-PR ownership lease containing the exact canonical
+  `pr-<N>` path, reviewer PID, and dispatch timestamp;
+- after restart, only a valid lease may restore PID and age;
+- a worktree is stale only when its path is exactly canonical, its lease is
+  valid, its PID is provably no longer alive, and it is older than two hours;
+- missing/malformed leases, unknown PIDs, liveness-check errors, and
+  `startedAt === 0` remain protected;
 - a successful reap removes the worktree before computing the review budget;
 - the freed slot may dispatch a waiting review in the same cycle;
 - a failed reap is logged and the worktree remains counted as live.
@@ -142,7 +151,7 @@ Retain and update PR #1778's reaper:
 The immediate exit handler is the normal path. The reaper covers:
 
 - dispatcher termination before the child exits;
-- machine restart;
+- machine restart after the reviewer process has exited;
 - lost child exit notification;
 - immediate cleanup failure.
 
@@ -218,8 +227,10 @@ dispatcher dies before child exit
 - Three review processes may occupy all three slots; after their exit callbacks,
   the next cycle dispatches waiting reviews without a two-hour delay.
 - A still-running review is not removed.
-- A stale known-age orphan is reaped before budget calculation.
-- An unknown-age orphan is not reaped.
+- A leased, stale, provably dead orphan is reaped before budget calculation.
+- A live reviewer is never reaped solely because its directory is old.
+- An unknown or invalid lease is not reaped.
+- A non-canonical discovered path is never passed to worktree removal.
 - Failed timeout removal remains counted as live.
 - Review-skill contract tests require REST label mutations and forbid
   `gh pr edit`.

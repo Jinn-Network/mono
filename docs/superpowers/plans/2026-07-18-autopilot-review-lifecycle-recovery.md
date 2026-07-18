@@ -13,10 +13,12 @@
 - Keep the shared Autopilot supervisor paused until the repaired code is merged into `next`.
 - Use test-first development: every behavior change must be preceded by a failing focused test.
 - Cleanup may target only `join(WORKTREES_BASE, "pr-<validated PR number>")`.
-- Never remove a review worktree before its child process exits.
+- Never remove a review worktree while its leased reviewer PID is alive.
 - Immediate cleanup is best-effort; cleanup failure must not terminate the dispatcher.
 - Preserve the two-hour reaper as restart/crash fallback.
-- Unknown-age review worktrees (`startedAt === 0`) must never be age-reaped.
+- Fallback cleanup requires a valid persisted ownership lease, a provably dead
+  reviewer PID, a known age beyond two hours, and the exact canonical path.
+- Unknown-age or unowned review worktrees must never be age-reaped.
 - Do not include #1816's untracked `.tasks-1816-design.md` or `.tasks-1816-plan.md` in its PR.
 - Do not auto-merge #1816; its release-workflow change retains the issue's human-review requirement.
 - Preserve unrelated local changes in every existing checkout.
