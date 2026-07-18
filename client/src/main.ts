@@ -2178,6 +2178,20 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       deliveryDeps,
       implRegistry,
       solverNetRegistry,
+      // #1827: resolves envelope.task.createdAt at claim() time. Best-effort
+      // — getBlockTimestamp swallows getBlock errors into `undefined` so a
+      // transient RPC failure never blocks a claim; engine.ts additionally
+      // wraps this call in its own try/catch as belt-and-suspenders.
+      blockTimestamp: {
+        getBlockTimestamp: async (blockNumber: number): Promise<number | undefined> => {
+          try {
+            const block = await publicClient.getBlock({ blockNumber: BigInt(blockNumber) });
+            return Number(block.timestamp);
+          } catch {
+            return undefined;
+          }
+        },
+      },
       // Spec §14, Task 28: per-launch claim eligibility filter. Operators
       // populate `joinedSolverNets[<manifestCid>]` via the SPA's join flow;
       // the engine refuses tasks whose `manifestDigest = keccak256(cid)`
