@@ -34,6 +34,9 @@ const TEST_CLEANUP_OPTIONS: ReviewCleanupOptions = {
       isSymbolicLink: () => false,
     }),
     realpath: () => EXPECTED_WT,
+    mkdirExclusive: () => {},
+    rename: () => {},
+    removeNoFollow: () => {},
   },
 };
 
@@ -137,7 +140,7 @@ describe('dispatchReview', () => {
 
     expect(recorded).toEqual([
       {
-        version: 1,
+        version: 2,
         leaseId: expect.any(String),
         prNumber: 42,
         worktreePath: EXPECTED_WT,
@@ -224,7 +227,7 @@ describe('dispatchReview', () => {
     expect(spawnCalls).toEqual([]);
   });
 
-  it('cleans then removes only its exact pr-N worktree after the review process exits', async () => {
+  it('asks Git to remove only its exact pr-N worktree after the reviewer exits', async () => {
     const { runner, calls: runnerCalls } = makeRunner(
       `worktree ${EXPECTED_WT}\nHEAD b\ndetached\n`,
     );
@@ -259,15 +262,10 @@ describe('dispatchReview', () => {
           ({ cmd, args }) =>
             cmd === 'git' &&
             (
-              (args[0] === '-C' && args[2] === 'clean') ||
               (args[0] === 'worktree' && args[1] === 'remove')
             ),
         ),
       ).toEqual([
-        {
-          cmd: 'git',
-          args: ['-C', EXPECTED_WT, 'clean', '-ffdx'],
-        },
         {
           cmd: 'git',
           args: ['worktree', 'remove', '--force', EXPECTED_WT],
@@ -276,7 +274,7 @@ describe('dispatchReview', () => {
     });
   });
 
-  it('retains the lease and does not unregister when ignored-artifact cleanup fails', async () => {
+  it('retains the lease when Git removal fails and remains registered', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { spawn, calls: spawnCalls } = makeSpawn();
     const runnerCalls: string[][] = [];
@@ -288,9 +286,9 @@ describe('dispatchReview', () => {
       if (cmd === 'git' && args[0] === '-C' && args[2] === 'rev-parse') {
         return `${EXPECTED_WT}\n`;
       }
-      if (cmd === 'git' && args[0] === '-C' && args[2] === 'clean') {
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
         runnerCalls.push(args);
-        throw new Error('clean failed');
+        throw new Error('remove failed');
       }
       if (cmd === 'git') {
         runnerCalls.push(args);
@@ -323,13 +321,13 @@ describe('dispatchReview', () => {
 
     await vi.waitFor(() => expect(error).toHaveBeenCalled());
     expect(
-      runnerCalls.some((args) => args[0] === 'worktree' && args[1] === 'remove'),
-    ).toBe(false);
+      runnerCalls.filter((args) => args[0] === 'worktree' && args[1] === 'remove'),
+    ).toEqual([['worktree', 'remove', '--force', EXPECTED_WT]]);
     expect(released).toEqual([]);
     error.mockRestore();
   });
 
-  it('retains the lease when canonical worktree removal fails after cleanup', async () => {
+  it('does not run pre-unregister cleanup when canonical removal fails', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { spawn, calls: spawnCalls } = makeSpawn();
     const cleanupCalls: string[][] = [];
@@ -375,9 +373,7 @@ describe('dispatchReview', () => {
     onExit?.(1, null);
 
     await vi.waitFor(() => expect(error).toHaveBeenCalled());
-    expect(cleanupCalls).toEqual([
-      ['-C', EXPECTED_WT, 'clean', '-ffdx'],
-    ]);
+    expect(cleanupCalls).toEqual([]);
     expect(released).toEqual([]);
     error.mockRestore();
   });

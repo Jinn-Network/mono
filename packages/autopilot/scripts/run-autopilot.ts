@@ -486,7 +486,7 @@ export async function runReviewPass(
         );
       }
       await cleanupReviewWorktree({
-        version: 1,
+        version: 2,
         leaseId: review.leaseId,
         prNumber: review.prNumber,
         worktreePath: canonicalPath,

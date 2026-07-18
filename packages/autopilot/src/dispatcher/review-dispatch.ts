@@ -174,7 +174,7 @@ async function dispatchReviewLocked(
   if (result.pid != null) {
     try {
       const lease: ReviewLease = {
-        version: 1,
+        version: 2,
         leaseId: randomUUID(),
         prNumber: pr.number,
         worktreePath,

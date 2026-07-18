@@ -1,4 +1,13 @@
-import { lstatSync, realpathSync } from 'node:fs';
+import {
+  lstatSync,
+  mkdirSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  unlinkSync,
+} from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { dirname, join } from 'node:path';
 import type { CommandRunner } from './issue-source.js';
 import {
   reviewWorktreePath,
@@ -12,16 +21,30 @@ export interface ReviewCleanupFilesystem {
     isSymbolicLink(): boolean;
   };
   realpath(path: string): string;
+  mkdirExclusive(path: string): void;
+  rename(from: string, to: string): void;
+  removeNoFollow(path: string): void;
 }
 
 export interface ReviewCleanupOptions {
   worktreesBase?: string;
   filesystem?: ReviewCleanupFilesystem;
+  quarantineId?: () => string;
 }
 
 const defaultFilesystem: ReviewCleanupFilesystem = {
   lstat: (path) => lstatSync(path),
   realpath: (path) => realpathSync(path),
+  mkdirExclusive: (path) => mkdirSync(path, { mode: 0o700 }),
+  rename: (from, to) => renameSync(from, to),
+  removeNoFollow: (path) => {
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink()) {
+      unlinkSync(path);
+      return;
+    }
+    rmSync(path, { recursive: true, force: false });
+  },
 };
 
 const cleanupTails = new Map<number, Promise<void>>();
@@ -53,6 +76,7 @@ export async function withReviewWorktreeLock<T>(
 function sameLease(current: ReviewLease | null, expected: ReviewLease): boolean {
   return (
     current != null &&
+    current.version === expected.version &&
     current.leaseId === expected.leaseId &&
     current.prNumber === expected.prNumber &&
     current.worktreePath === expected.worktreePath &&
@@ -109,22 +133,43 @@ async function assertCanonicalIdentity(
   }
 }
 
+async function isRegisteredWorktree(
+  canonicalPath: string,
+  runner: CommandRunner,
+): Promise<boolean> {
+  const worktrees = await runner('git', ['worktree', 'list', '--porcelain']);
+  return worktrees
+    .split('\n')
+    .some((line) => line === `worktree ${canonicalPath}`);
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error != null &&
+    'code' in error &&
+    error.code === 'ENOENT'
+  );
+}
+
 /**
  * Remove one dispatcher-owned review checkout and release its ownership lease.
  *
  * The PR number is the only path input: reconstructing the canonical path here
- * prevents a discovered worktree path from becoming a deletion target. Clean
- * ignored and untracked artifacts before asking Git to unregister the
- * worktree; `git worktree remove --force` can otherwise unregister first and
- * then fail with "Directory not empty", leaving a path collision behind.
+ * prevents a discovered worktree path from becoming a deletion target. Git is
+ * always asked to remove the registered worktree first. If Git unregisters it
+ * but leaves residue, the top-level canonical entry is atomically renamed into
+ * a private quarantine before recursive deletion. Renaming a swapped symlink
+ * moves the link itself; the no-follow deletion then unlinks it without
+ * traversing its target.
  *
- * Each step is fail-safe. A failed clean stops before unregistering, and a
- * failed unregister leaves the lease in place for diagnosis/retry.
+ * Each step is fail-safe. A still-registered failure, quarantine failure, or
+ * deletion failure leaves the lease in place for diagnosis/retry.
  *
  * The terminal event belongs to the directly spawned reviewer. A reviewer may
  * leave descendant processes behind; this cleanup does not attempt to discover
  * or kill them. If a descendant still holds files or the checkout, either Git
- * command may fail and the lease deliberately remains for fallback retry or
+ * removal or quarantine cleanup may fail and the lease deliberately remains for fallback retry or
  * operator diagnosis.
  */
 export async function cleanupReviewWorktree(
@@ -133,7 +178,11 @@ export async function cleanupReviewWorktree(
   leaseStore: ReviewLeaseStore,
   options: ReviewCleanupOptions = {},
 ): Promise<void> {
-  const { worktreesBase, filesystem = defaultFilesystem } = options;
+  const {
+    worktreesBase,
+    filesystem = defaultFilesystem,
+    quarantineId = randomUUID,
+  } = options;
   const canonicalPath = reviewWorktreePath(expectedLease.prNumber, worktreesBase);
   if (expectedLease.worktreePath !== canonicalPath) {
     throw new Error(
@@ -145,14 +194,49 @@ export async function cleanupReviewWorktree(
     assertLease(leaseStore, expectedLease);
     await assertCanonicalIdentity(canonicalPath, runner, filesystem);
     assertLease(leaseStore, expectedLease);
-    await runner('git', ['-C', canonicalPath, 'clean', '-ffdx']);
+    try {
+      await runner('git', ['worktree', 'remove', '--force', canonicalPath]);
+    } catch (removeError) {
+      if (await isRegisteredWorktree(canonicalPath, runner)) {
+        throw removeError;
+      }
 
-    // Re-prove both generation ownership and filesystem/git identity at the
-    // remove seam. A stale callback may have waited behind a newer dispatch.
-    assertLease(leaseStore, expectedLease);
-    await assertCanonicalIdentity(canonicalPath, runner, filesystem);
-    assertLease(leaseStore, expectedLease);
-    await runner('git', ['worktree', 'remove', '--force', canonicalPath]);
+      // Git has already unregistered the worktree. Do not recurse through the
+      // canonical pathname: it may have been swapped since validation. Move
+      // the top-level entry itself to a generation-specific quarantine first.
+      assertLease(leaseStore, expectedLease);
+      try {
+        filesystem.lstat(canonicalPath);
+      } catch (error) {
+        if (!isMissingPathError(error)) throw error;
+        if (!leaseStore.releaseIfMatches(
+          expectedLease.prNumber,
+          expectedLease.leaseId,
+        )) {
+          throw new Error(
+            `Review cleanup could not compare-release lease ${expectedLease.leaseId}`,
+          );
+        }
+        return;
+      }
+
+      const suffix = quarantineId();
+      if (!/^[A-Za-z0-9-]+$/.test(suffix)) {
+        throw new Error('Invalid review quarantine identifier');
+      }
+      const quarantineRoot = worktreesBase ?? dirname(canonicalPath);
+      const quarantinePath = join(
+        quarantineRoot,
+        `.review-quarantine-pr-${expectedLease.prNumber}-${expectedLease.leaseId}-${suffix}`,
+      );
+      const quarantinedPath = join(quarantinePath, 'entry');
+      filesystem.mkdirExclusive(quarantinePath);
+      assertLease(leaseStore, expectedLease);
+      filesystem.rename(canonicalPath, quarantinedPath);
+      filesystem.removeNoFollow(quarantinedPath);
+      filesystem.removeNoFollow(quarantinePath);
+    }
+
     if (!leaseStore.releaseIfMatches(expectedLease.prNumber, expectedLease.leaseId)) {
       throw new Error(
         `Review cleanup could not compare-release lease ${expectedLease.leaseId}`,

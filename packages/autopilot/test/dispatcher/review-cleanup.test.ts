@@ -1,286 +1,258 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
+  symlinkSync, writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   cleanupReviewWorktree,
   type ReviewCleanupFilesystem,
 } from '../../src/dispatcher/review-cleanup.js';
-import type {
-  ReviewLease,
-  ReviewLeaseStore,
-} from '../../src/dispatcher/review-lease.js';
+import type { ReviewLease, ReviewLeaseStore } from '../../src/dispatcher/review-lease.js';
 import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
 
 const BASE = '/safe/jinn-mono_worktrees';
 const PATH = join(BASE, 'pr-42');
+const roots: string[] = [];
 
-function lease(leaseId = 'lease-current'): ReviewLease {
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function lease(leaseId = 'lease-current', base = BASE): ReviewLease {
   return {
-    version: 1,
+    version: 2,
     leaseId,
     prNumber: 42,
-    worktreePath: PATH,
+    worktreePath: join(base, 'pr-42'),
     pid: 4242,
     startedAt: 123_456,
   };
 }
 
-function filesystem(overrides: Partial<ReviewCleanupFilesystem> = {}): ReviewCleanupFilesystem {
-  return {
+function leaseStore(initial: ReviewLease | null = lease()) {
+  let current = initial;
+  const released: string[] = [];
+  const store: ReviewLeaseStore = {
+    record: (value) => { current = value; },
+    read: () => current,
+    releaseIfMatches: (_prNumber, leaseId) => {
+      if (current?.leaseId !== leaseId) return false;
+      released.push(leaseId);
+      current = null;
+      return true;
+    },
+  };
+  return { store, released };
+}
+
+function filesystem(overrides: Partial<ReviewCleanupFilesystem> = {}) {
+  const renamed: Array<[string, string]> = [];
+  const removed: string[] = [];
+  const reserved: string[] = [];
+  const value: ReviewCleanupFilesystem = {
     lstat: () => ({
       isDirectory: () => true,
       isSymbolicLink: () => false,
     }),
     realpath: () => PATH,
+    mkdirExclusive: (path) => { reserved.push(path); },
+    rename: (from, to) => { renamed.push([from, to]); },
+    removeNoFollow: (path) => { removed.push(path); },
     ...overrides,
   };
+  return { value, renamed, removed, reserved };
 }
 
-function leaseStore(initial: ReviewLease | null = lease()): {
-  store: ReviewLeaseStore;
-  released: string[];
-  setCurrent(value: ReviewLease | null): void;
-} {
-  let current = initial;
-  const released: string[] = [];
-  return {
-    store: {
-      record: (value) => { current = value; },
-      read: () => current,
-      releaseIfMatches: (_prNumber, leaseId) => {
-        if (current?.leaseId !== leaseId) return false;
-        released.push(leaseId);
-        current = null;
-        return true;
-      },
-    },
-    released,
-    setCurrent: (value) => { current = value; },
-  };
-}
-
-function validRunner(): {
-  runner: CommandRunner;
-  calls: string[][];
-} {
+function runnerFor(remove: 'success' | 'fail-registered' | 'fail-unregistered') {
   const calls: string[][] = [];
+  let removeAttempted = false;
   const runner: CommandRunner = async (cmd, args) => {
     if (cmd !== 'git') throw new Error(`unexpected ${cmd}`);
     calls.push(args);
     if (args[0] === 'worktree' && args[1] === 'list') {
+      if (removeAttempted && remove === 'fail-unregistered') return '';
       return `worktree ${PATH}\nHEAD abc\ndetached\n`;
     }
     if (args[0] === '-C' && args[2] === 'rev-parse') return `${PATH}\n`;
-    return '';
+    if (args[0] === 'worktree' && args[1] === 'remove') {
+      removeAttempted = true;
+      if (remove !== 'success') throw new Error('remove failed');
+      return '';
+    }
+    throw new Error(`unexpected git ${args.join(' ')}`);
   };
   return { runner, calls };
 }
 
 describe('cleanupReviewWorktree security boundary', () => {
-  it('proves canonical filesystem and git identity before clean and again before remove', async () => {
-    const { runner, calls } = validRunner();
+  it('uses Git removal first and compare-releases after normal success', async () => {
+    const { runner, calls } = runnerFor('success');
     const state = leaseStore();
     const fs = filesystem();
-    const lstat = vi.spyOn(fs, 'lstat');
-    const realpath = vi.spyOn(fs, 'realpath');
 
     await cleanupReviewWorktree(lease(), runner, state.store, {
       worktreesBase: BASE,
-      filesystem: fs,
+      filesystem: fs.value,
+      quarantineId: () => 'q1',
     });
 
     expect(calls).toEqual([
       ['worktree', 'list', '--porcelain'],
       ['-C', PATH, 'rev-parse', '--show-toplevel'],
-      ['-C', PATH, 'clean', '-ffdx'],
-      ['worktree', 'list', '--porcelain'],
-      ['-C', PATH, 'rev-parse', '--show-toplevel'],
       ['worktree', 'remove', '--force', PATH],
     ]);
-    expect(lstat).toHaveBeenCalledTimes(2);
-    expect(realpath).toHaveBeenCalledTimes(2);
+    expect(fs.renamed).toEqual([]);
+    expect(fs.removed).toEqual([]);
     expect(state.released).toEqual(['lease-current']);
   });
 
-  it('refuses a symlink before any git command or release', async () => {
-    const { runner, calls } = validRunner();
+  it('retains the lease and residue when Git fails while still registered', async () => {
+    const { runner, calls } = runnerFor('fail-registered');
     const state = leaseStore();
+    const fs = filesystem();
 
     await expect(cleanupReviewWorktree(lease(), runner, state.store, {
       worktreesBase: BASE,
-      filesystem: filesystem({
-        lstat: () => ({
-          isDirectory: () => true,
-          isSymbolicLink: () => true,
-        }),
-      }),
-    })).rejects.toThrow(/symlink/i);
+      filesystem: fs.value,
+    })).rejects.toThrow('remove failed');
 
-    expect(calls).toEqual([]);
+    expect(calls.at(-1)).toEqual(['worktree', 'list', '--porcelain']);
+    expect(fs.renamed).toEqual([]);
+    expect(fs.removed).toEqual([]);
     expect(state.released).toEqual([]);
   });
 
-  it('refuses a path whose realpath differs from the canonical pr-N path', async () => {
-    const { runner, calls } = validRunner();
+  it('quarantines and deletes an unregistered canonical residue before release', async () => {
+    const { runner } = runnerFor('fail-unregistered');
     const state = leaseStore();
+    const fs = filesystem();
 
-    await expect(cleanupReviewWorktree(lease(), runner, state.store, {
+    await cleanupReviewWorktree(lease(), runner, state.store, {
       worktreesBase: BASE,
-      filesystem: filesystem({ realpath: () => '/attacker/repo' }),
-    })).rejects.toThrow(/realpath/i);
+      filesystem: fs.value,
+      quarantineId: () => 'q1',
+    });
 
-    expect(calls).toEqual([]);
-    expect(state.released).toEqual([]);
+    const quarantine = join(BASE, '.review-quarantine-pr-42-lease-current-q1');
+    const quarantined = join(quarantine, 'entry');
+    expect(fs.reserved).toEqual([quarantine]);
+    expect(fs.renamed).toEqual([[PATH, quarantined]]);
+    expect(fs.removed).toEqual([quarantined, quarantine]);
+    expect(state.released).toEqual(['lease-current']);
   });
 
-  it('refuses an unregistered canonical directory before clean', async () => {
-    const { calls } = validRunner();
-    const state = leaseStore();
-    const runner: CommandRunner = async (cmd, args) => {
-      if (cmd !== 'git') throw new Error(`unexpected ${cmd}`);
-      calls.push(args);
-      if (args[0] === 'worktree' && args[1] === 'list') return '';
-      throw new Error('must not continue');
-    };
-
-    await expect(cleanupReviewWorktree(lease(), runner, state.store, {
-      worktreesBase: BASE,
-      filesystem: filesystem(),
-    })).rejects.toThrow(/registered/i);
-
-    expect(calls).toEqual([['worktree', 'list', '--porcelain']]);
-    expect(state.released).toEqual([]);
-  });
-
-  it('refuses a git top-level mismatch before clean', async () => {
-    const { calls } = validRunner();
-    const state = leaseStore();
-    const runner: CommandRunner = async (cmd, args) => {
-      if (cmd !== 'git') throw new Error(`unexpected ${cmd}`);
-      calls.push(args);
+  it('moves and removes a swapped top-level symlink without touching its target', async () => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), 'jinn-review-cleanup-')));
+    roots.push(base);
+    const canonicalPath = join(base, 'pr-42');
+    const target = join(base, 'outside-target');
+    mkdirSync(canonicalPath);
+    mkdirSync(target);
+    writeFileSync(join(target, 'keep.txt'), 'safe');
+    const state = leaseStore(lease('lease-current', base));
+    let removeAttempted = false;
+    const runner: CommandRunner = async (_cmd, args) => {
       if (args[0] === 'worktree' && args[1] === 'list') {
-        return `worktree ${PATH}\nHEAD abc\ndetached\n`;
+        return removeAttempted ? '' : `worktree ${canonicalPath}\nHEAD abc\ndetached\n`;
       }
-      if (args[0] === '-C' && args[2] === 'rev-parse') return '/attacker/repo\n';
-      throw new Error('must not continue');
+      if (args[0] === '-C' && args[2] === 'rev-parse') return `${canonicalPath}\n`;
+      if (args[0] === 'worktree' && args[1] === 'remove') {
+        removeAttempted = true;
+        rmSync(canonicalPath, { recursive: true });
+        symlinkSync(target, canonicalPath, 'dir');
+        throw new Error('Directory not empty');
+      }
+      throw new Error(`unexpected git ${args.join(' ')}`);
     };
+
+    await cleanupReviewWorktree(
+      lease('lease-current', base),
+      runner,
+      state.store,
+      { worktreesBase: base, quarantineId: () => 'q1' },
+    );
+
+    expect(() => lstatSync(canonicalPath)).toThrow();
+    expect(readFileSync(join(target, 'keep.txt'), 'utf8')).toBe('safe');
+    expect(state.released).toEqual(['lease-current']);
+  });
+
+  it('retains the lease when quarantine rename fails', async () => {
+    const { runner } = runnerFor('fail-unregistered');
+    const state = leaseStore();
+    const fs = filesystem({
+      mkdirExclusive: () => { throw new Error('quarantine collision'); },
+    });
 
     await expect(cleanupReviewWorktree(lease(), runner, state.store, {
       worktreesBase: BASE,
-      filesystem: filesystem(),
-    })).rejects.toThrow(/top-level/i);
+      filesystem: fs.value,
+      quarantineId: () => 'collision',
+    })).rejects.toThrow('quarantine collision');
 
-    expect(calls.at(-1)).toEqual(['-C', PATH, 'rev-parse', '--show-toplevel']);
+    expect(fs.removed).toEqual([]);
+    expect(state.released).toEqual([]);
+  });
+
+  it('retains the lease when quarantined deletion fails', async () => {
+    const { runner } = runnerFor('fail-unregistered');
+    const state = leaseStore();
+    const fs = filesystem({ removeNoFollow: () => { throw new Error('delete failed'); } });
+
+    await expect(cleanupReviewWorktree(lease(), runner, state.store, {
+      worktreesBase: BASE,
+      filesystem: fs.value,
+      quarantineId: () => 'q1',
+    })).rejects.toThrow('delete failed');
+
+    expect(fs.renamed).toHaveLength(1);
     expect(state.released).toEqual([]);
   });
 
   it('does nothing when the expected lease generation is stale', async () => {
-    const { runner, calls } = validRunner();
+    const { runner, calls } = runnerFor('success');
     const state = leaseStore(lease('lease-new'));
 
     await expect(cleanupReviewWorktree(
       lease('lease-old'),
       runner,
       state.store,
-      { worktreesBase: BASE, filesystem: filesystem() },
+      { worktreesBase: BASE, filesystem: filesystem().value },
     )).rejects.toThrow(/lease/i);
 
     expect(calls).toEqual([]);
     expect(state.released).toEqual([]);
   });
 
-  it('serializes duplicate cleanup and lets only one generation remove', async () => {
-    let finishClean!: () => void;
-    const cleanBlocked = new Promise<void>((resolve) => { finishClean = resolve; });
-    const { calls } = validRunner();
+  it('serializes duplicate cleanup so only one removes and releases', async () => {
+    let finishRemove!: () => void;
+    const removeBlocked = new Promise<void>((resolve) => { finishRemove = resolve; });
+    const calls: string[][] = [];
     const state = leaseStore();
-    const runner: CommandRunner = async (cmd, args) => {
-      if (cmd !== 'git') throw new Error(`unexpected ${cmd}`);
+    const runner: CommandRunner = async (_cmd, args) => {
       calls.push(args);
       if (args[0] === 'worktree' && args[1] === 'list') {
         return `worktree ${PATH}\nHEAD abc\ndetached\n`;
       }
       if (args[0] === '-C' && args[2] === 'rev-parse') return `${PATH}\n`;
-      if (args[0] === '-C' && args[2] === 'clean') await cleanBlocked;
+      if (args[0] === 'worktree' && args[1] === 'remove') await removeBlocked;
       return '';
     };
+    const options = { worktreesBase: BASE, filesystem: filesystem().value };
 
-    const first = cleanupReviewWorktree(
-      lease(),
-      runner,
-      state.store,
-      { worktreesBase: BASE, filesystem: filesystem() },
-    );
+    const first = cleanupReviewWorktree(lease(), runner, state.store, options);
     await vi.waitFor(() => {
-      expect(calls).toContainEqual(['-C', PATH, 'clean', '-ffdx']);
+      expect(calls).toContainEqual(['worktree', 'remove', '--force', PATH]);
     });
-    const second = cleanupReviewWorktree(
-      lease(),
-      runner,
-      state.store,
-      { worktreesBase: BASE, filesystem: filesystem() },
-    );
-
-    expect(calls.filter((args) => args[2] === 'clean')).toHaveLength(1);
-    finishClean();
+    const second = cleanupReviewWorktree(lease(), runner, state.store, options);
+    expect(calls.filter((args) => args[1] === 'remove')).toHaveLength(1);
+    finishRemove();
     await first;
     await expect(second).rejects.toThrow(/lease/i);
-    expect(calls.filter((args) => args[0] === 'worktree' && args[1] === 'remove')).toHaveLength(1);
+
+    expect(calls.filter((args) => args[1] === 'remove')).toHaveLength(1);
     expect(state.released).toEqual(['lease-current']);
-  });
-
-  it('stops if a newer generation appears before removal', async () => {
-    const state = leaseStore();
-    const calls: string[][] = [];
-    const runner: CommandRunner = async (cmd, args) => {
-      if (cmd !== 'git') throw new Error(`unexpected ${cmd}`);
-      calls.push(args);
-      if (args[0] === 'worktree' && args[1] === 'list') {
-        return `worktree ${PATH}\nHEAD abc\ndetached\n`;
-      }
-      if (args[0] === '-C' && args[2] === 'rev-parse') return `${PATH}\n`;
-      if (args[0] === '-C' && args[2] === 'clean') state.setCurrent(lease('lease-new'));
-      return '';
-    };
-
-    await expect(cleanupReviewWorktree(
-      lease(),
-      runner,
-      state.store,
-      { worktreesBase: BASE, filesystem: filesystem() },
-    )).rejects.toThrow(/lease/i);
-
-    expect(calls.some((args) => args[0] === 'worktree' && args[1] === 'remove')).toBe(false);
-    expect(state.released).toEqual([]);
-  });
-
-  it.each([
-    { failing: 'clean', expectedRemove: false },
-    { failing: 'remove', expectedRemove: true },
-  ])('retains the matching lease when $failing fails', async ({ failing, expectedRemove }) => {
-    const { calls } = validRunner();
-    const state = leaseStore();
-    const runner: CommandRunner = async (cmd, args) => {
-      if (cmd !== 'git') throw new Error(`unexpected ${cmd}`);
-      calls.push(args);
-      if (args[0] === 'worktree' && args[1] === 'list') {
-        return `worktree ${PATH}\nHEAD abc\ndetached\n`;
-      }
-      if (args[0] === '-C' && args[2] === 'rev-parse') return `${PATH}\n`;
-      if (args[0] === '-C' && args[2] === failing) throw new Error(`${failing} failed`);
-      if (args[0] === 'worktree' && args[1] === failing) throw new Error(`${failing} failed`);
-      return '';
-    };
-
-    await expect(cleanupReviewWorktree(
-      lease(),
-      runner,
-      state.store,
-      { worktreesBase: BASE, filesystem: filesystem() },
-    )).rejects.toThrow(`${failing} failed`);
-
-    expect(
-      calls.some((args) => args[0] === 'worktree' && args[1] === 'remove'),
-    ).toBe(expectedRemove);
-    expect(state.released).toEqual([]);
   });
 });

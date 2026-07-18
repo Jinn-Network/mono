@@ -38,7 +38,7 @@ describe('deriveReviewInFlight', () => {
       releaseIfMatches: () => false,
       read: (prNumber) => prNumber === 42
         ? {
-            version: 1,
+            version: 2,
             leaseId: 'lease-42',
             prNumber,
             worktreePath: reviewWorktreePath(prNumber),

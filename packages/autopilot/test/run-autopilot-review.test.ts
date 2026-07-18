@@ -175,6 +175,9 @@ describe('runReviewPass', () => {
             isSymbolicLink: () => false,
           }),
           realpath: () => canonicalPath,
+          mkdirExclusive: () => {},
+          rename: () => {},
+          removeNoFollow: () => {},
         },
       },
     );
@@ -184,7 +187,7 @@ describe('runReviewPass', () => {
     await vi.waitFor(() => expect(removals).toHaveLength(1));
   });
 
-  it('uses the same clean-remove-release sequence for fallback reaping', async () => {
+  it('uses the same Git-first remove-release sequence for fallback reaping', async () => {
     const processKill = vi.spyOn(process, 'kill').mockImplementation(() => {
       throw Object.assign(new Error('not found'), { code: 'ESRCH' });
     });
@@ -196,7 +199,7 @@ describe('runReviewPass', () => {
       record: () => {},
       read: (prNumber) => prNumber === 50
         ? {
-            version: 1,
+            version: 2,
             leaseId: 'lease-50',
             prNumber,
             worktreePath: canonicalPath,
@@ -242,12 +245,14 @@ describe('runReviewPass', () => {
             isSymbolicLink: () => false,
           }),
           realpath: () => canonicalPath,
+          mkdirExclusive: () => {},
+          rename: () => {},
+          removeNoFollow: () => {},
         },
       },
     );
 
     expect(calls).toEqual([
-      ['-C', canonicalPath, 'clean', '-ffdx'],
       ['worktree', 'remove', '--force', canonicalPath],
     ]);
     expect(released).toEqual([50]);
