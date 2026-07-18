@@ -18,6 +18,11 @@ Run this preflight before reading or mutating the PR:
 ```bash
 : "${JINN_REVIEW_GH_TOKEN:?JINN_REVIEW_GH_TOKEN is required for review-pr}"
 : "${JINN_REVIEW_BOT_LOGIN:?JINN_REVIEW_BOT_LOGIN is required for review-pr}"
+: "${JINN_REVIEW_HEAD_REF:?JINN_REVIEW_HEAD_REF is required for review-pr}"
+if ! git check-ref-format "refs/heads/$JINN_REVIEW_HEAD_REF"; then
+  echo "JINN_REVIEW_HEAD_REF is not a valid branch ref" >&2
+  exit 1
+fi
 if ! review_login="$(
   GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh api user --jq '.login'
 )"; then
@@ -30,24 +35,35 @@ if [[ "$review_login_normalized" != "$configured_login_normalized" ]]; then
   echo "JINN_REVIEW_GH_TOKEN resolves to '$review_login', expected '$JINN_REVIEW_BOT_LOGIN'" >&2
   exit 1
 fi
-if ! GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh auth setup-git; then
-  echo "Failed to configure git for the reviewer token" >&2
-  exit 1
-fi
 ```
 Shell tool calls do not share a reliable exported environment. Therefore every
 GitHub CLI invocation below binds `GH_TOKEN="$JINN_REVIEW_GH_TOKEN"` on the
 same command line. Never shorten these commands to a bare `gh ...`, never use
 ambient `gh auth`, and never let a review or fix subagent do so. Git pushes use
-the same command-point binding so the `gh auth setup-git` credential helper
-resolves the reviewer token.
+the command-local askpass flow below; never configure a persistent credential
+helper and never put the token in a URL or command argument.
+
+## Trust boundary
+The dispatcher reaches this skill only after the PR author passes the
+configured author allowlist. The session receives a dedicated,
+least-privilege reviewer credential that can review and update this repository.
+Command-point binding guarantees the GitHub **identity** used by each operation;
+it is identity binding, not containment against a malicious trusted PR. Review
+and app-test stages may execute code from that allowlisted PR. A credential broker
+that withholds the token from the agent process would be stronger future hardening,
+but is a non-goal for this change.
 
 ## Step 1 — Read the PR
 Input: a PR number (`#N`). Fetch it:
 ```bash
 GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh pr view <N> --repo Jinn-Network/mono --json number,title,headRefName,headRefOid,isDraft,files,body
 ```
-The dispatcher's prompt states the pre-created worktree path. It is **detached** at `origin/<headRefName>` — the head branch is typically checked out in the impl worktree, so git refuses a second checkout. Work in it as-is: do **not** check the branch out, and push fixes with `GH_TOKEN="$JINN_REVIEW_GH_TOKEN" git push origin HEAD:<headRefName>` (Step 3). Compute the diff from the merge-base:
+The dispatcher's prompt states the pre-created worktree path. It is **detached**
+at the validated PR head — the head branch is typically checked out in the impl
+worktree, so git refuses a second checkout. Work in it as-is: do **not** check
+the branch out. The validated destination is available only through
+`JINN_REVIEW_HEAD_REF`; never copy a branch name from PR text into a command.
+Compute the diff from the merge-base:
 ```bash
 git diff $(git merge-base origin/next HEAD)..HEAD
 ```
@@ -112,12 +128,52 @@ Do not approve, do not un-draft, do not merge. Blocking findings still go throug
   ```
   Then dispatch a **fix subagent** (different from the reviewers) seeded with the findings. It implements fixes on the PR branch, commits, and pushes:
   ```bash
-  GH_TOKEN="$JINN_REVIEW_GH_TOKEN" git push origin HEAD:<headRefName>
+  if ! review_askpass="$(mktemp)"; then
+    echo "Failed to create reviewer askpass helper" >&2
+    exit 1
+  fi
+  trap 'rm -f "$review_askpass"' EXIT
+  if ! chmod 700 "$review_askpass"; then
+    echo "Failed to secure reviewer askpass helper" >&2
+    exit 1
+  fi
+  if ! printf '%s\n' \
+    '#!/bin/sh' \
+    'case "$1" in' \
+    "  *Username*) printf '%s\\n' 'x-access-token' ;;" \
+    "  *Password*) printf '%s\\n' \"\$JINN_REVIEW_GH_TOKEN\" ;;" \
+    '  *) exit 1 ;;' \
+    'esac' >"$review_askpass"; then
+    echo "Failed to write reviewer askpass helper" >&2
+    exit 1
+  fi
+  if ! GIT_ASKPASS="$review_askpass" \
+    GIT_TERMINAL_PROMPT=0 \
+    LC_ALL=C \
+    JINN_REVIEW_GH_TOKEN="$JINN_REVIEW_GH_TOKEN" \
+    git -c credential.helper= push "https://github.com/Jinn-Network/mono.git" \
+      "HEAD:refs/heads/$JINN_REVIEW_HEAD_REF"; then
+    echo "Failed to push reviewer fix" >&2
+    exit 1
+  fi
+  rm -f "$review_askpass"
+  trap - EXIT
   ```
   Then **re-run Step 2** on the new diff. Loop. There is **no round-count bound** — escalate on judgment (see Step 4).
 
 ## Step 4 — Finding handling & escalation
-Reuse implement-issue §Step 5 verbatim: fixable findings → fix subagent + re-run; scope/design findings, non-converging findings, or an unpushable branch (e.g. a fork PR you cannot push to) → escalate. Escalation = post the structured note as a PR comment and set the PR's linked issue (if any) `Blocked on: Human`; for a PR with no linked issue, post the note and stop (the request-changes review stands as advisory). Never force-merge.
+Reuse implement-issue §Step 5's decision rules: fixable findings → fix subagent
++ re-run; scope/design findings, non-converging findings, or an unpushable
+branch → escalate. Do not copy its ambient-auth command examples. Bind the
+reviewer token on both the PR comment and Project mutation:
+```bash
+GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh pr comment <N> --repo Jinn-Network/mono --body "$ESCALATION_NOTE"
+GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh project item-edit --id <item-id> --project-id <project-id> \
+  --field-id <blocked-on-field-id> \
+  --single-select-option-id <human-option-id>
+```
+For a PR with no linked issue, post the note and stop (the request-changes
+review stands as advisory). Never force-merge.
 
 ## Step 5 — Subagent-dispatch discipline & headless mode
 Identical to implement-issue §Step 4 and §Step 7: curated prompts (never forward coordinator history), the independence invariant (reviewer ≠ fixer), the headless-override block injected by the dispatcher, no plan-posture flags.
@@ -127,7 +183,7 @@ Identical to implement-issue §Step 4 and §Step 7: curated prompts (never forwa
 |---|---|
 | PR lacks the `engine:review` label | Stop — not in scope (the dispatcher should not have spawned this). |
 | Cannot push to the PR branch (fork) | Post advisory review; escalate `Blocked on: Human`. |
-| Fix subagent reports done but no new commit | Re-dispatch; verify with `git log origin/<headRefName>..HEAD`. |
+| Fix subagent reports done but no new commit | Re-dispatch; verify with `git log origin/next..HEAD`. |
 | Findings not converging | Escalate `stuck`. |
 
 ## Composition

@@ -178,6 +178,9 @@ describe('review-pr reviewer identity binding', () => {
       ': "${JINN_REVIEW_BOT_LOGIN:?JINN_REVIEW_BOT_LOGIN is required for review-pr}"',
     );
     expect(preflight).toContain(
+      ': "${JINN_REVIEW_HEAD_REF:?JINN_REVIEW_HEAD_REF is required for review-pr}"',
+    );
+    expect(preflight).toContain(
       withReviewerToken("gh api user --jq '.login'"),
     );
     expect(preflight).toContain(
@@ -187,12 +190,7 @@ describe('review-pr reviewer identity binding', () => {
       `printf '%s' "$JINN_REVIEW_BOT_LOGIN" | tr '[:upper:]' '[:lower:]'`,
     );
     expect(preflight).toContain(
-      [
-        `if ! ${withReviewerToken('gh auth setup-git')}; then`,
-        'echo "Failed to configure git for the reviewer token" >&2',
-        'exit 1',
-        'fi',
-      ].join('\n'),
+      'git check-ref-format "refs/heads/$JINN_REVIEW_HEAD_REF"',
     );
     expect(preflight).toContain('exit 1');
   });
@@ -228,11 +226,41 @@ describe('review-pr reviewer identity binding', () => {
   });
 
   it('binds reviewer fix pushes to the reviewer token at the command point', () => {
+    expect(skill).toContain('GIT_ASKPASS="$review_askpass" \\');
     expect(skill).toContain(
-      withReviewerToken('git push origin HEAD:<headRefName>'),
+      'JINN_REVIEW_GH_TOKEN="$JINN_REVIEW_GH_TOKEN" \\',
     );
-    expect(skill).not.toMatch(
-      /(?<!GH_TOKEN="\$JINN_REVIEW_GH_TOKEN" )git push origin HEAD:<headRefName>/,
+    expect(skill).toContain(
+      'git -c credential.helper= push "https://github.com/Jinn-Network/mono.git" \\',
     );
+    expect(skill).toContain('"HEAD:refs/heads/$JINN_REVIEW_HEAD_REF"');
+    expect(skill).toContain(
+      `*Password*) printf '%s\\\\n' \\"\\$JINN_REVIEW_GH_TOKEN\\" ;;`,
+    );
+    expect(skill).not.toContain('git push origin');
+    expect(skill).not.toContain('gh auth setup-git');
+    expect(skill).not.toMatch(/https:\/\/[^\s]*JINN_REVIEW_GH_TOKEN/);
+    expect(skill).not.toContain('HEAD:<headRefName>');
+  });
+
+  it('token-binds escalation comments and project-field mutations', () => {
+    const escalation = bashBlockAfter('## Step 4 — Finding handling & escalation');
+    expect(escalation).toContain(
+      withReviewerToken(
+        'gh pr comment <N> --repo Jinn-Network/mono --body "$ESCALATION_NOTE"',
+      ),
+    );
+    expect(escalation).toContain(
+      withReviewerToken(
+        'gh project item-edit --id <item-id> --project-id <project-id> \\',
+      ),
+    );
+  });
+
+  it('states the real allowlist trust boundary without claiming token containment', () => {
+    expect(skill).toContain('configured author allowlist');
+    expect(skill).toContain('least-privilege reviewer credential');
+    expect(skill).toContain('identity binding, not containment');
+    expect(skill).toContain('credential broker');
   });
 });
