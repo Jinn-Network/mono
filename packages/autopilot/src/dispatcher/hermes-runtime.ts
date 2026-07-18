@@ -111,10 +111,11 @@ export function assertHermesBillingRoute(
   model: string,
   provider: string,
 ): void {
-  if (model.includes('/')) {
+  if (model === '' || model !== model.trim() || model.includes('/')) {
     throw new Error(
       `[autopilot] Invalid Hermes model '${model}': subscription routing requires a bare model id ` +
-        'without "/" (for example gpt-5.6-sol). ' +
+        'that is non-empty, has no surrounding whitespace, and contains no "/" ' +
+        '(for example gpt-5.6-sol). ' +
         'Set JINN_DISPATCHER_HERMES_MODEL to a bare model id.',
     );
   }
