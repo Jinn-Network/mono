@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { runReviewCycle } from '../../src/dispatcher/review-loop.js';
+import { REVIEW_REAP_MS, runReviewCycle } from '../../src/dispatcher/review-loop.js';
 import type { PrSource } from '../../src/dispatcher/pr-source.js';
 import type { PolledPr, ReviewablePr, InFlightReview, DispatcherConfig } from '../../src/dispatcher/types.js';
 
@@ -25,6 +25,7 @@ describe('runReviewCycle', () => {
       prSource: source,
       cfg: CFG,
       deriveReviewInFlight: async () => ({ inFlight: [] as InFlightReview[], drift: [] }),
+      removeWorktree: async () => {},
       dispatchReview: async (p: ReviewablePr) => { dispatched.push(p.number); return { prNumber: p.number, branch: p.headRefName, worktreePath: `/pr-${p.number}`, pid: 1, startedAt: 0 }; },
     });
     expect(dispatched).toEqual([1, 2]);
@@ -39,6 +40,7 @@ describe('runReviewCycle', () => {
       prSource: source,
       cfg: CFG,
       deriveReviewInFlight: async () => ({ inFlight: [{ prNumber: 9, branch: 'x', worktreePath: '/pr-9', pid: 1, startedAt: 0 }], drift: [] }),
+      removeWorktree: async () => {},
       dispatchReview: async (p: ReviewablePr) => { dispatched.push(p.number); return { prNumber: p.number, branch: p.headRefName, worktreePath: '/x', pid: 1, startedAt: 0 }; },
     });
     expect(dispatched).toEqual([5]);
@@ -51,6 +53,7 @@ describe('runReviewCycle', () => {
       prSource: source,
       cfg: CFG, // reviewCap 2
       deriveReviewInFlight: async () => ({ inFlight: [] as InFlightReview[], drift: [] }),
+      removeWorktree: async () => {},
       dispatchReview: async (p: ReviewablePr) => { dispatched.push(p.number); return { prNumber: p.number, branch: p.headRefName, worktreePath: `/pr-${p.number}`, pid: 1, startedAt: 0 }; },
       busyPrNumbers: new Set([5]),
     });
@@ -67,6 +70,7 @@ describe('runReviewCycle', () => {
       prSource: source,
       cfg: CFG, // reviewCap 2
       deriveReviewInFlight: async () => ({ inFlight: [] as InFlightReview[], drift: [] }),
+      removeWorktree: async () => {},
       dispatchReview: async (p: ReviewablePr) => {
         if (p.number === 1) throw new Error("fatal: 'feat/1' is already used by worktree at '.../1'");
         dispatched.push(p.number);
@@ -85,6 +89,7 @@ describe('runReviewCycle', () => {
       prSource: source,
       cfg: CFG,
       deriveReviewInFlight: async () => ({ inFlight: [{ prNumber: 7, branch: 'b/7', worktreePath: '/pr-7', pid: 1, startedAt: 0 }], drift: [] }),
+      removeWorktree: async () => {},
       dispatchReview: async (p: ReviewablePr) => { dispatched.push(p.number); return { prNumber: p.number, branch: p.headRefName, worktreePath: '/x', pid: 1, startedAt: 0 }; },
     });
     expect(dispatched).toEqual([]);
@@ -100,8 +105,95 @@ describe('runReviewCycle', () => {
       prSource: source,
       cfg: CFG, // allowlists 'a' only
       deriveReviewInFlight: async () => ({ inFlight: [] as InFlightReview[], drift: [] }),
+      removeWorktree: async () => {},
       dispatchReview: async (p: ReviewablePr) => { dispatched.push(p.number); return { prNumber: p.number, branch: p.headRefName, worktreePath: '/x', pid: 1, startedAt: 0 }; },
     });
     expect(dispatched).toEqual([8]);
+  });
+
+  it('reaps a stale worktree and dispatches a waiting review in the same cycle', async () => {
+    const now = 10_000_000_000;
+    const stale: InFlightReview = {
+      prNumber: 20,
+      branch: 'b/20',
+      worktreePath: '/pr-20',
+      pid: null,
+      startedAt: now - REVIEW_REAP_MS - 1,
+    };
+    const fresh: InFlightReview = {
+      prNumber: 21,
+      branch: 'b/21',
+      worktreePath: '/pr-21',
+      pid: null,
+      startedAt: now - 1_000,
+    };
+    const unknown: InFlightReview = {
+      prNumber: 22,
+      branch: 'b/22',
+      worktreePath: '/pr-22',
+      pid: null,
+      startedAt: 0,
+    };
+    const removed: number[] = [];
+    const dispatched: number[] = [];
+
+    const report = await runReviewCycle({
+      prSource: { poll: async () => [pr(30)] },
+      cfg: { ...CFG, reviewCap: 3 },
+      now: () => now,
+      deriveReviewInFlight: async () => ({
+        inFlight: [stale, fresh, unknown],
+        drift: [],
+      }),
+      removeWorktree: async (w) => { removed.push(w.prNumber); },
+      dispatchReview: async (p) => {
+        dispatched.push(p.number);
+        return {
+          prNumber: p.number,
+          branch: p.headRefName,
+          worktreePath: `/pr-${p.number}`,
+          pid: 1,
+          startedAt: now,
+        };
+      },
+    });
+
+    expect(removed).toEqual([20]);
+    expect(report.reaped).toEqual([20]);
+    expect(dispatched).toEqual([30]);
+  });
+
+  it('keeps a failed reap counted as live', async () => {
+    const now = 10_000_000_000;
+    const stale: InFlightReview = {
+      prNumber: 40,
+      branch: 'b/40',
+      worktreePath: '/pr-40',
+      pid: null,
+      startedAt: now - REVIEW_REAP_MS - 1,
+    };
+    const dispatched: number[] = [];
+
+    const report = await runReviewCycle({
+      prSource: { poll: async () => [pr(41), pr(42)] },
+      cfg: { ...CFG, reviewCap: 2 },
+      now: () => now,
+      deriveReviewInFlight: async () => ({ inFlight: [stale], drift: [] }),
+      removeWorktree: async () => { throw new Error('locked'); },
+      dispatchReview: async (p) => {
+        dispatched.push(p.number);
+        return {
+          prNumber: p.number,
+          branch: p.headRefName,
+          worktreePath: `/pr-${p.number}`,
+          pid: 1,
+          startedAt: now,
+        };
+      },
+    });
+
+    expect(report.reaped).toEqual([]);
+    expect(dispatched).toEqual([41]);
+    expect(report.skippedForCap).toBe(1);
   });
 });

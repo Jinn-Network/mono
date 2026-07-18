@@ -2,6 +2,8 @@ import type { PrSource } from './pr-source.js';
 import type { DispatcherConfig, InFlightReview, ReviewablePr } from './types.js';
 import { selectReviewable } from './review-ready-filter.js';
 
+export const REVIEW_REAP_MS = 2 * 60 * 60 * 1000;
+
 export interface ReviewCycleReport {
   /** PR numbers dispatched this cycle, in dispatch order. */
   dispatched: number[];
@@ -16,13 +18,17 @@ export interface ReviewCycleReport {
    * every cycle (observed live 2026-07-17).
    */
   failed: number[];
+  /** PR numbers whose stale review worktrees were removed this cycle. */
+  reaped: number[];
 }
 
 export interface ReviewCycleDeps {
   prSource: PrSource;
   cfg: DispatcherConfig;
   deriveReviewInFlight(): Promise<{ inFlight: InFlightReview[]; drift: string[] }>;
+  removeWorktree(w: InFlightReview): Promise<void>;
   dispatchReview(pr: ReviewablePr): Promise<InFlightReview>;
+  now?(): number;
   /**
    * PR numbers with a live merge-prep session (a `merge-<N>` worktree). Excluded
    * from review dispatch so a review and a prep never push to the same branch
@@ -46,11 +52,36 @@ export async function runReviewCycle(deps: ReviewCycleDeps): Promise<ReviewCycle
     deriveReviewInFlight(),
   ]);
 
+  const now = deps.now ?? Date.now;
+  const live: InFlightReview[] = [];
+  const reaped: number[] = [];
+
+  for (const review of inFlight) {
+    const stale =
+      review.startedAt > 0 &&
+      now() - review.startedAt > REVIEW_REAP_MS;
+    if (!stale) {
+      live.push(review);
+      continue;
+    }
+
+    try {
+      await deps.removeWorktree(review);
+      reaped.push(review.prNumber);
+    } catch (err) {
+      console.error(
+        `[review-loop] reap failed for PR #${review.prNumber} (continuing):`,
+        err,
+      );
+      live.push(review);
+    }
+  }
+
   // Exclude both in-flight reviews AND PRs with a live merge-prep session (the
   // latter don't count against the review cap — they just must not be reviewed
   // while a prep is pushing to the same branch).
   const excludeSet = new Set<number>([
-    ...inFlight.map((s) => s.prNumber),
+    ...live.map((s) => s.prNumber),
     ...(deps.busyPrNumbers ?? []),
   ]);
   // Gate 2 (DR-2026-06-15): only review PRs authored by a trusted login — the
@@ -60,7 +91,7 @@ export async function runReviewCycle(deps: ReviewCycleDeps): Promise<ReviewCycle
   const authorAllowlist = new Set(cfg.authorAllowlist.map((s) => s.toLowerCase()));
   const reviewable = selectReviewable(polled, excludeSet, authorAllowlist);
 
-  const budget = Math.max(0, cfg.reviewCap - inFlight.length);
+  const budget = Math.max(0, cfg.reviewCap - live.length);
   const toDispatch = reviewable.slice(0, budget);
 
   // Isolate each dispatch: one PR's failure (e.g. a git worktree collision)
@@ -78,5 +109,5 @@ export async function runReviewCycle(deps: ReviewCycleDeps): Promise<ReviewCycle
     }
   }
 
-  return { dispatched, skippedForCap: reviewable.length - toDispatch.length, drift, failed };
+  return { dispatched, skippedForCap: reviewable.length - toDispatch.length, drift, failed, reaped };
 }
