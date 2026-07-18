@@ -433,6 +433,20 @@ export interface TaskEngineOptions {
    * error-swallowing (loadCorpusKnowledge never throws).
    */
   knowledge?: { corpus?: ReadOnlyCorpus | null; enabled?: boolean };
+
+  /**
+   * Resolves the on-chain block timestamp for a task's creation block
+   * (#1827). Called once per claimed task from `claim()`. Optional — when
+   * absent, `onchainCreationTimestamp` stays null and `envelope.task.createdAt`
+   * is simply omitted (correct absence, not a fabricated default).
+   *
+   * Returns `undefined` (not a thrown error) on a resolvable-but-unknown
+   * block; throwing is also handled (caught, logged, non-fatal) so a
+   * transient RPC failure never blocks the DISCOVERED → CLAIMED transition.
+   */
+  blockTimestamp?: {
+    getBlockTimestamp(blockNumber: number): Promise<number | undefined>;
+  };
 }
 
 // ── Recovery report ───────────────────────────────────────────────────────────
@@ -476,6 +490,7 @@ export class TaskEngine {
   protected readonly joinedSolverNets: TaskEngineOptions['joinedSolverNets'];
   protected readonly operatorSafeAddress: TaskEngineOptions['operatorSafeAddress'];
   protected readonly manifestResolver: TaskEngineOptions['manifestResolver'];
+  protected readonly blockTimestamp: TaskEngineOptions['blockTimestamp'];
   protected readonly identityPublisher: TaskEngineOptions['identityPublisher'];
   protected readonly reputationFeedback: TaskEngineOptions['reputationFeedback'];
   protected readonly operatorConfig: TaskEngineOptions['operatorConfig'];
@@ -554,6 +569,7 @@ export class TaskEngine {
     this.joinedSolverNets = opts.joinedSolverNets;
     this.operatorSafeAddress = opts.operatorSafeAddress;
     this.manifestResolver = opts.manifestResolver;
+    this.blockTimestamp = opts.blockTimestamp;
     this.identityPublisher = opts.identityPublisher;
     this.reputationFeedback = opts.reputationFeedback;
     this.operatorConfig = opts.operatorConfig;
@@ -911,6 +927,24 @@ export class TaskEngine {
       this.persistence.markFailed(task.requestId, reason);
       console.log(`[harness-engine] ${task.requestId}: skipping claimed task — ${reason}`);
       throw new Error(reason);
+    }
+
+    // Resolve the on-chain creation-block timestamp once per claimed task
+    // (#1827). Best-effort and never fatal: an RPC failure must not block
+    // the claim — `onchainCreationTimestamp` simply stays null and
+    // `envelope.task.createdAt` is correctly omitted at pack() time.
+    if (this.blockTimestamp) {
+      try {
+        const timestampSec = await this.blockTimestamp.getBlockTimestamp(task.onchainCreationBlock);
+        if (timestampSec !== undefined) {
+          this.persistence.setOnchainCreationTimestamp(task.requestId, timestampSec);
+        }
+      } catch (err) {
+        console.warn(
+          `[harness-engine] ${task.requestId}: onchainCreationTimestamp resolution failed (non-fatal): `
+          + `${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
 
     // The event path and tick loop can race on the same DISCOVERED row; if
