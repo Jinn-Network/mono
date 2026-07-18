@@ -10,7 +10,7 @@ import type { ReviewLeaseStore } from '../src/dispatcher/review-lease.js';
 const TEST_LEASE_STORE: ReviewLeaseStore = {
   record: () => {},
   read: () => null,
-  release: () => {},
+  releaseIfMatches: () => false,
 };
 
 const childProcess = vi.hoisted(() => {
@@ -130,12 +130,21 @@ describe('runReviewPass', () => {
     childProcess.child.once.mockClear();
     childProcess.child.unref.mockClear();
     const removals: string[][] = [];
+    const canonicalPath = reviewWorktreePath(50);
+    let currentLease: ReturnType<ReviewLeaseStore['read']> = null;
+    let worktreeListCalls = 0;
 
     const runner: CommandRunner = async (cmd, args) => {
       if (args[0] === 'pr' && args[1] === 'list') return PR_LIST;
       if (args[0] === 'pr' && args[1] === 'view') return PR_VIEW;
       if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') {
-        return 'worktree /x\nHEAD a\nbranch refs/heads/next\n';
+        worktreeListCalls += 1;
+        return worktreeListCalls <= 2
+          ? 'worktree /x\nHEAD a\nbranch refs/heads/next\n'
+          : `worktree ${canonicalPath}\nHEAD a\ndetached\n`;
+      }
+      if (cmd === 'git' && args[0] === '-C' && args[2] === 'rev-parse') {
+        return `${canonicalPath}\n`;
       }
       if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
         removals.push(args);
@@ -144,12 +153,30 @@ describe('runReviewPass', () => {
       if (cmd === 'git') return '';
       throw new Error(`unexpected ${cmd} ${args.join(' ')}`);
     };
+    const leaseStore: ReviewLeaseStore = {
+      record: (lease) => { currentLease = lease; },
+      read: () => currentLease,
+      releaseIfMatches: (_prNumber, leaseId) => {
+        if (currentLease?.leaseId !== leaseId) return false;
+        currentLease = null;
+        return true;
+      },
+    };
 
     await runReviewPass(
       { ...DEFAULT_CONFIG, reviewBotLogin: 'jinn-bot', authorAllowlist: ['jinn-bot'] },
       runner,
       undefined,
-      TEST_LEASE_STORE,
+      leaseStore,
+      {
+        filesystem: {
+          lstat: () => ({
+            isDirectory: () => true,
+            isSymbolicLink: () => false,
+          }),
+          realpath: () => canonicalPath,
+        },
+      },
     );
 
     expect(() => childProcess.getErrorHandler()?.(new Error('spawn failed'))).not.toThrow();
@@ -162,6 +189,7 @@ describe('runReviewPass', () => {
       throw Object.assign(new Error('not found'), { code: 'ESRCH' });
     });
     const canonicalPath = reviewWorktreePath(50);
+    const startedAt = Date.now() - REVIEW_REAP_MS - 10_000;
     const calls: string[][] = [];
     const released: number[] = [];
     const leaseStore: ReviewLeaseStore = {
@@ -169,13 +197,18 @@ describe('runReviewPass', () => {
       read: (prNumber) => prNumber === 50
         ? {
             version: 1,
+            leaseId: 'lease-50',
             prNumber,
             worktreePath: canonicalPath,
             pid: 5050,
-            startedAt: Date.now() - REVIEW_REAP_MS - 10_000,
+            startedAt,
           }
         : null,
-      release: (prNumber) => { released.push(prNumber); },
+      releaseIfMatches: (prNumber, leaseId) => {
+        if (leaseId !== 'lease-50') return false;
+        released.push(prNumber);
+        return true;
+      },
     };
     const runner: CommandRunner = async (cmd, args) => {
       if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'list') return '[]';
@@ -186,6 +219,9 @@ describe('runReviewPass', () => {
           'detached',
           '',
         ].join('\n');
+      }
+      if (cmd === 'git' && args[0] === '-C' && args[2] === 'rev-parse') {
+        return `${canonicalPath}\n`;
       }
       if (cmd === 'git') {
         calls.push(args);
@@ -199,6 +235,15 @@ describe('runReviewPass', () => {
       runner,
       undefined,
       leaseStore,
+      {
+        filesystem: {
+          lstat: () => ({
+            isDirectory: () => true,
+            isSymbolicLink: () => false,
+          }),
+          realpath: () => canonicalPath,
+        },
+      },
     );
 
     expect(calls).toEqual([

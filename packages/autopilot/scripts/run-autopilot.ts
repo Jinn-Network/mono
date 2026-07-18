@@ -31,7 +31,10 @@ import type { PrLink } from '../src/dispatcher/pr-links.js';
 import { deriveReviewInFlight } from '../src/dispatcher/review-state.js';
 import { dispatchReview } from '../src/dispatcher/review-dispatch.js';
 import { runReviewCycle } from '../src/dispatcher/review-loop.js';
-import { cleanupReviewWorktree } from '../src/dispatcher/review-cleanup.js';
+import {
+  cleanupReviewWorktree,
+  type ReviewCleanupOptions,
+} from '../src/dispatcher/review-cleanup.js';
 import {
   makeFileReviewLeaseStore,
   reviewWorktreePath,
@@ -433,6 +436,7 @@ export async function runReviewPass(
   runner: CommandRunner = realRunner,
   spawnFn?: SpawnFn,
   reviewLeaseStore?: ReviewLeaseStore,
+  cleanupOptions?: ReviewCleanupOptions,
 ): Promise<void> {
   if (cfg.reviewBotLogin.length === 0) return; // disabled — fail-safe
   const spawnImpl: SpawnFn =
@@ -476,12 +480,24 @@ export async function runReviewPass(
           `Refusing non-canonical review worktree cleanup: ${review.worktreePath}`,
         );
       }
-      await cleanupReviewWorktree(review.prNumber, runner, leaseStore);
+      if (review.leaseId == null || review.pid == null) {
+        throw new Error(
+          `Refusing review cleanup without persisted ownership generation: PR #${review.prNumber}`,
+        );
+      }
+      await cleanupReviewWorktree({
+        version: 1,
+        leaseId: review.leaseId,
+        prNumber: review.prNumber,
+        worktreePath: canonicalPath,
+        pid: review.pid,
+        startedAt: review.startedAt,
+      }, runner, leaseStore, cleanupOptions);
     },
     dispatchReview: (pr: ReviewablePr) => dispatchReview(
       pr,
       cfg,
-      { runner, spawn: spawnImpl, leaseStore },
+      { runner, spawn: spawnImpl, leaseStore, cleanupOptions },
     ),
     busyPrNumbers,
   });

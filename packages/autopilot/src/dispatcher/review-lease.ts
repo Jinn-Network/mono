@@ -13,6 +13,7 @@ const LEASE_DIR = '.review-leases';
 
 export interface ReviewLease {
   version: 1;
+  leaseId: string;
   prNumber: number;
   worktreePath: string;
   pid: number;
@@ -22,11 +23,20 @@ export interface ReviewLease {
 export interface ReviewLeaseStore {
   record(lease: ReviewLease): void;
   read(prNumber: number): ReviewLease | null;
-  release(prNumber: number): void;
+  releaseIfMatches(prNumber: number, leaseId: string): boolean;
 }
 
 function validPrNumber(prNumber: number): boolean {
   return Number.isSafeInteger(prNumber) && prNumber > 0;
+}
+
+function validLeaseId(leaseId: unknown): leaseId is string {
+  return (
+    typeof leaseId === 'string' &&
+    leaseId.length > 0 &&
+    leaseId.length <= 128 &&
+    /^[A-Za-z0-9-]+$/.test(leaseId)
+  );
 }
 
 export function reviewWorktreePath(
@@ -55,6 +65,7 @@ function isValidLease(
   const lease = value as Partial<ReviewLease>;
   return (
     lease.version === LEASE_VERSION &&
+    validLeaseId(lease.leaseId) &&
     lease.prNumber === expectedPrNumber &&
     lease.worktreePath === reviewWorktreePath(expectedPrNumber, worktreesBase) &&
     typeof lease.pid === 'number' &&
@@ -93,9 +104,12 @@ export function makeFileReviewLeaseStore(
       }
     },
 
-    release(prNumber) {
-      if (!validPrNumber(prNumber)) return;
+    releaseIfMatches(prNumber, leaseId) {
+      if (!validPrNumber(prNumber) || !validLeaseId(leaseId)) return false;
+      const current = this.read(prNumber);
+      if (current?.leaseId !== leaseId) return false;
       rmSync(reviewLeasePath(worktreesBase, prNumber), { force: true });
+      return true;
     },
   };
 }

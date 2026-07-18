@@ -25,6 +25,7 @@ describe('file review leases', () => {
     const store = makeFileReviewLeaseStore(root);
     const lease = {
       version: 1 as const,
+      leaseId: 'lease-42',
       prNumber: 42,
       worktreePath: join(root, 'pr-42'),
       pid: 4242,
@@ -42,6 +43,7 @@ describe('file review leases', () => {
     const store = makeFileReviewLeaseStore(root);
     store.record({
       version: 1,
+      leaseId: 'lease-42',
       prNumber: 42,
       worktreePath: join(root, 'pr-42'),
       pid: 4242,
@@ -49,6 +51,7 @@ describe('file review leases', () => {
     });
     writeFileSync(path, JSON.stringify({
       version: 1,
+      leaseId: 'lease-42',
       prNumber: 42,
       worktreePath: join(root, 'nested', 'pr-42'),
       pid: 4242,
@@ -69,6 +72,7 @@ describe('file review leases', () => {
 
     writeFileSync(reviewLeasePath(root, 42), JSON.stringify({
       version: 1,
+      leaseId: 'lease-42',
       prNumber: 42,
       worktreePath: join(root, 'pr-42'),
       pid: 0,
@@ -77,19 +81,22 @@ describe('file review leases', () => {
     expect(store.read(42)).toBeNull();
   });
 
-  it('removes its lease idempotently', () => {
+  it('releases only the matching lease generation', () => {
     const root = tempRoot();
     const store = makeFileReviewLeaseStore(root);
     store.record({
       version: 1,
+      leaseId: 'lease-current',
       prNumber: 42,
       worktreePath: join(root, 'pr-42'),
       pid: 4242,
       startedAt: 123_456,
     });
 
-    store.release(42);
-    expect(() => store.release(42)).not.toThrow();
+    expect(store.releaseIfMatches(42, 'lease-stale')).toBe(false);
+    expect(store.read(42)?.leaseId).toBe('lease-current');
+    expect(store.releaseIfMatches(42, 'lease-current')).toBe(true);
+    expect(store.releaseIfMatches(42, 'lease-current')).toBe(false);
     expect(store.read(42)).toBeNull();
   });
 });

@@ -40,6 +40,7 @@ export async function deriveReviewInFlight(
       worktreePath: wt.worktreePath,
       pid: ownedLease?.pid ?? null,
       startedAt: ownedLease?.startedAt ?? 0,
+      leaseId: ownedLease?.leaseId ?? null,
     });
   }
   return { inFlight, drift: [] };
