@@ -41,9 +41,10 @@ gh api --method POST \
 ```
 Do not approve, do not un-draft, do not merge. Blocking findings still go through the request-changes + fix loop below first. If the prompt marks the PR **APPROVE-ELIGIBLE**, use the standard verdict flow:
 
-- **No blocking findings** → post an approving review and the verdict label, then un-draft:
+- **No blocking findings** → reconcile verdict labels, un-draft, then post the
+  approving review **last**. Approval is the terminal success signal consumed
+  by review detection; never post it before an operation that can still fail:
   ```bash
-  gh pr review <N> --repo Jinn-Network/mono --approve --body "<summary>"
   gh api --method POST \
     repos/Jinn-Network/mono/issues/<N>/labels \
     -f 'labels[]=review:approved'
@@ -58,6 +59,7 @@ Do not approve, do not un-draft, do not merge. Blocking findings still go throug
       repos/Jinn-Network/mono/issues/<N>/labels/review%3Achanges-requested
   fi
   gh pr ready <N> --repo Jinn-Network/mono   # un-draft → enters the merge queue
+  gh pr review <N> --repo Jinn-Network/mono --approve --body "<summary>"
   ```
   Done.
 - **Blocking findings** → post a request-changes review with inline findings + the changes-requested label:

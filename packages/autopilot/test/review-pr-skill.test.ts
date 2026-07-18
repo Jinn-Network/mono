@@ -114,6 +114,30 @@ describe('review-pr review lifecycle commands', () => {
     );
   });
 
+  it('records labels, un-drafts, and only then posts the clean approval', () => {
+    const labelPost = approvedFlow.indexOf(
+      `gh api --method POST \\\n${labelsEndpoint} \\`,
+    );
+    const labelLookup = approvedFlow.indexOf(
+      `gh api repos/Jinn-Network/mono/issues/<N> --jq '.labels[].name'`,
+    );
+    const oppositeDelete = approvedFlow.indexOf(
+      `${labelsEndpoint}/review%3Achanges-requested`,
+    );
+    const ready = approvedFlow.indexOf(
+      'gh pr ready <N> --repo Jinn-Network/mono',
+    );
+    const approve = approvedFlow.indexOf(
+      'gh pr review <N> --repo Jinn-Network/mono --approve',
+    );
+
+    expect(labelPost).toBeGreaterThanOrEqual(0);
+    expect(labelPost).toBeLessThan(labelLookup);
+    expect(labelLookup).toBeLessThan(oppositeDelete);
+    expect(oppositeDelete).toBeLessThan(ready);
+    expect(ready).toBeLessThan(approve);
+  });
+
   it('preserves the request-changes review command', () => {
     expect(changesRequestedFlow).toContain(
       'gh pr review <N> --repo Jinn-Network/mono --request-changes --body "<findings>"',

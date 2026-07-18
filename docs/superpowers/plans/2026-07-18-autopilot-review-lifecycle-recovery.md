@@ -4,7 +4,14 @@
 
 **Goal:** Make review slots release immediately when their detached review processes exit, retain bounded crash recovery, restore reviewer metadata operations with the existing token, and recover issue #1816 without regenerating its implementation.
 
-**Architecture:** The existing injectable `SpawnFn` gains an optional exit callback registered by the production adapter before `ChildProcess.unref()`. `dispatchReview` owns exact-path cleanup for its `pr-<N>` worktree, while `runReviewCycle` retains a two-hour age reaper for callbacks lost across dispatcher crashes or restarts. Review verdict labels move from `gh pr edit` to repository REST calls so the current `repo`-scoped reviewer token is sufficient.
+**Architecture:** The existing injectable `SpawnFn` gains an optional terminal
+callback registered for child `error` and `exit` before
+`ChildProcess.unref()`. `dispatchReview` owns exact-path cleanup for its
+`pr-<N>` worktree and persists a minimal ownership lease. `runReviewCycle`
+allows the two-hour fallback only for a valid canonical lease whose reviewer
+PID is provably dead. Review verdict labels move from `gh pr edit` to
+repository REST calls so the current `repo`-scoped reviewer token is
+sufficient; clean-flow approval is posted last.
 
 **Tech Stack:** TypeScript, Node.js child processes, Vitest, Git worktrees, GitHub CLI/REST, GitHub Actions YAML.
 
@@ -25,7 +32,119 @@
 
 ---
 
-### Task 1: Add process-exit cleanup to the spawn contract
+## Safety amendment: replacement Tasks 1–2
+
+The original Task 1 and Task 2 recipes below are retained only as historical
+context for the commits they described. **Do not execute them.** Final review
+found that directory age alone cannot prove a reviewer has exited, and a
+discovered worktree path must never become a removal target. The following
+replacement tasks are the executable source of truth.
+
+### Replacement Task 1: Add terminal cleanup and persistent review ownership
+
+**Files:**
+- Modify: `packages/autopilot/src/dispatcher/dispatch.ts`
+- Modify: `packages/autopilot/src/dispatcher/review-dispatch.ts`
+- Create: `packages/autopilot/src/dispatcher/review-lease.ts`
+- Modify: `packages/autopilot/src/dispatcher/review-state.ts`
+- Modify: `packages/autopilot/scripts/run-autopilot.ts`
+- Modify: `packages/autopilot/test/dispatcher/review-dispatch.test.ts`
+- Create: `packages/autopilot/test/dispatcher/review-lease.test.ts`
+- Modify: `packages/autopilot/test/dispatcher/review-state.test.ts`
+- Modify: `packages/autopilot/test/run-autopilot-review.test.ts`
+
+**Interfaces:**
+- `SpawnFn` accepts `onExit?: SpawnExitHandler`.
+- `ReviewLeaseStore` records, reads, and releases a versioned lease containing
+  PR number, exact canonical worktree path, reviewer PID, and dispatch time.
+- `reviewWorktreePath(prNumber)` validates a positive safe integer and returns
+  only `join(WORKTREES_BASE, \`pr-${prNumber}\`)`.
+- `deriveReviewInFlight` restores PID and start time only from a valid lease
+  whose recorded path exactly matches the discovered canonical worktree.
+
+- [ ] Write failing tests for exact-path exit cleanup, lease persistence across
+  a new store instance, malformed/forged lease rejection, restart recovery,
+  missing-lease fail-safe behavior, and child `error` followed by `exit`.
+- [ ] Implement atomic, owner-only lease writes under
+  `WORKTREES_BASE/.review-leases`; malformed, missing, or non-canonical leases
+  read as unavailable rather than owned.
+- [ ] Record the lease immediately after a successful reviewer spawn with a
+  PID. On terminal cleanup, remove only the dispatcher-derived canonical
+  worktree and release the lease only after removal succeeds.
+- [ ] In both production spawn adapters, strip the custom callback before
+  calling Node `spawn`, register `error` and `exit` listeners before `unref`,
+  and route both through one idempotent terminal handler. The `error` listener
+  prevents an unhandled `EventEmitter` error; `error` plus later `exit` must
+  invoke cleanup exactly once.
+- [ ] Run:
+
+  ```bash
+  cd packages/autopilot
+  yarn vitest run \
+    test/dispatcher/review-lease.test.ts \
+    test/dispatcher/review-state.test.ts \
+    test/dispatcher/review-dispatch.test.ts \
+    test/run-autopilot-review.test.ts
+  ```
+
+### Replacement Task 2: Add lease-backed, dead-process fallback recovery
+
+**Files:**
+- Modify: `packages/autopilot/src/dispatcher/review-loop.ts`
+- Modify: `packages/autopilot/scripts/run-autopilot.ts`
+- Modify: `packages/autopilot/test/dispatcher/review-loop.test.ts`
+
+**Interfaces:**
+- `REVIEW_REAP_MS = 2 * 60 * 60 * 1000`.
+- `ReviewCycleDeps.isProcessAlive(pid)` supplies the liveness proof.
+- `ReviewCycleDeps.removeWorktree(review)` accepts a review only after the loop
+  has verified canonical ownership and death.
+- Production removal independently reconstructs the canonical path from the
+  validated PR number and rejects any mismatch before invoking Git.
+
+- [ ] Write failing tests proving:
+  - a leased reviewer whose PID is alive is never reaped, regardless of age;
+  - a leased, canonical, older-than-two-hours reviewer whose PID is dead is
+    reaped and frees a slot in the same cycle;
+  - missing/invalid leases, unknown PID/time, liveness-check errors, and
+    arbitrary or suffix-matching paths remain live;
+  - failed worktree removal remains counted against the cap.
+- [ ] Partition `inFlight` into `live` and `reaped` only when all four
+  authorization facts are true:
+
+  ```ts
+  const stale =
+    review.worktreePath === reviewWorktreePath(review.prNumber) &&
+    review.pid != null &&
+    !isProcessAlive(review.pid) &&
+    review.startedAt > 0 &&
+    now() - review.startedAt > REVIEW_REAP_MS;
+  ```
+
+  Validation or liveness errors must fail safe to `live`.
+- [ ] In production, use `process.kill(pid, 0)` only as a liveness probe:
+  `ESRCH` means dead; permission errors and every other result mean possibly
+  alive. Reconstruct the removal target with `reviewWorktreePath(prNumber)`,
+  require exact equality with the discovered path, and release the lease only
+  after successful Git removal.
+- [ ] Document the PID-reuse limitation: if a dead reviewer's PID has been
+  reused by another live process, the probe treats the lease as live. This can
+  delay slot recovery and require manual cleanup, but it fails safely—it
+  cannot authorize deletion of an active review worktree.
+- [ ] Run:
+
+  ```bash
+  cd packages/autopilot
+  yarn vitest run test/dispatcher/review-loop.test.ts
+  yarn typecheck
+  yarn test
+  ```
+
+---
+
+### Historical Task 1: Add process-exit cleanup to the spawn contract — SUPERSEDED
+
+> Historical record only. Do not execute; use Replacement Task 1 above.
 
 **Files:**
 - Modify: `packages/autopilot/src/dispatcher/dispatch.ts`
@@ -185,7 +304,10 @@ git add \
 git commit -m "fix(autopilot): release review worktrees on process exit"
 ```
 
-### Task 2: Add the timeout reaper as crash/restart fallback
+### Historical Task 2: Add the timeout reaper as crash/restart fallback — SUPERSEDED
+
+> Historical record only. This age-only, `pid: null`, caller-supplied-path
+> recipe is unsafe and must not be implemented. Use Replacement Task 2 above.
 
 **Files:**
 - Modify: `packages/autopilot/src/dispatcher/review-loop.ts`
@@ -478,8 +600,11 @@ fi
 ```
 
 Use the symmetric commands for `review:changes-requested`. Advisory mode adds
-`review:needs-human` with the same POST endpoint. Keep `gh pr review` and
-`gh pr ready` unchanged.
+`review:needs-human` with the same POST endpoint. In the clean approve-eligible
+flow, execute all REST label reconciliation first, then `gh pr ready`, and post
+`gh pr review --approve` last. Approval is the terminal success signal: no
+fallible label or draft-state operation may follow it. Preserve the existing
+request-changes and advisory review paths.
 
 - [ ] **Step 4: Run the contract test and verify GREEN**
 
