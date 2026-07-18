@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { runReviewPass } from '../scripts/run-autopilot.js';
 import { DEFAULT_CONFIG } from '../src/dispatcher/types.js';
+import { REVIEW_REAP_MS } from '../src/dispatcher/review-loop.js';
+import { reviewWorktreePath } from '../src/dispatcher/review-lease.js';
 import type { CommandRunner } from '../src/dispatcher/issue-source.js';
 import type { SpawnFn } from '../src/dispatcher/dispatch.js';
 import type { ReviewLeaseStore } from '../src/dispatcher/review-lease.js';
@@ -153,5 +155,57 @@ describe('runReviewPass', () => {
     expect(() => childProcess.getErrorHandler()?.(new Error('spawn failed'))).not.toThrow();
     childProcess.getExitHandler()?.(1, null);
     await vi.waitFor(() => expect(removals).toHaveLength(1));
+  });
+
+  it('uses the same clean-remove-release sequence for fallback reaping', async () => {
+    const processKill = vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw Object.assign(new Error('not found'), { code: 'ESRCH' });
+    });
+    const canonicalPath = reviewWorktreePath(50);
+    const calls: string[][] = [];
+    const released: number[] = [];
+    const leaseStore: ReviewLeaseStore = {
+      record: () => {},
+      read: (prNumber) => prNumber === 50
+        ? {
+            version: 1,
+            prNumber,
+            worktreePath: canonicalPath,
+            pid: 5050,
+            startedAt: Date.now() - REVIEW_REAP_MS - 10_000,
+          }
+        : null,
+      release: (prNumber) => { released.push(prNumber); },
+    };
+    const runner: CommandRunner = async (cmd, args) => {
+      if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'list') return '[]';
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') {
+        return [
+          `worktree ${canonicalPath}`,
+          'HEAD a',
+          'detached',
+          '',
+        ].join('\n');
+      }
+      if (cmd === 'git') {
+        calls.push(args);
+        return '';
+      }
+      throw new Error(`unexpected ${cmd} ${args.join(' ')}`);
+    };
+
+    await runReviewPass(
+      { ...DEFAULT_CONFIG, reviewBotLogin: 'jinn-bot', authorAllowlist: ['jinn-bot'] },
+      runner,
+      undefined,
+      leaseStore,
+    );
+
+    expect(calls).toEqual([
+      ['-C', canonicalPath, 'clean', '-ffdx'],
+      ['worktree', 'remove', '--force', canonicalPath],
+    ]);
+    expect(released).toEqual([50]);
+    processKill.mockRestore();
   });
 });

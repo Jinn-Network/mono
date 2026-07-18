@@ -6,6 +6,7 @@ import type { CommandRunner } from './issue-source.js';
 import type { SpawnFn } from './dispatch.js';
 import { WORKTREES_BASE } from './dispatch.js';
 import type { ReviewLeaseStore } from './review-lease.js';
+import { cleanupReviewWorktree } from './review-cleanup.js';
 import { sessionSpawnEnv } from './identity.js';
 import { parseOwnedPrefixes, touchesCodeOwnedPath } from './code-owned.js';
 import { buildHeadlessPrompt } from '../headless.js';
@@ -127,8 +128,7 @@ export async function dispatchReview(
     ...sessionSpawnEnv(cfg.reviewGhToken),
     onExit: (_code, _signal) => {
       void Promise.resolve()
-        .then(() => runner('git', ['worktree', 'remove', '--force', worktreePath]))
-        .then(() => leaseStore.release(pr.number))
+        .then(() => cleanupReviewWorktree(pr.number, runner, leaseStore))
         .catch((err) => {
           console.error(
             `[autopilot] review #${pr.number} worktree cleanup failed (${worktreePath}):`,

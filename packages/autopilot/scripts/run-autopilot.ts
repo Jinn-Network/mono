@@ -31,6 +31,7 @@ import type { PrLink } from '../src/dispatcher/pr-links.js';
 import { deriveReviewInFlight } from '../src/dispatcher/review-state.js';
 import { dispatchReview } from '../src/dispatcher/review-dispatch.js';
 import { runReviewCycle } from '../src/dispatcher/review-loop.js';
+import { cleanupReviewWorktree } from '../src/dispatcher/review-cleanup.js';
 import {
   makeFileReviewLeaseStore,
   reviewWorktreePath,
@@ -475,13 +476,7 @@ export async function runReviewPass(
           `Refusing non-canonical review worktree cleanup: ${review.worktreePath}`,
         );
       }
-      await runner('git', [
-        'worktree',
-        'remove',
-        '--force',
-        canonicalPath,
-      ]);
-      leaseStore.release(review.prNumber);
+      await cleanupReviewWorktree(review.prNumber, runner, leaseStore);
     },
     dispatchReview: (pr: ReviewablePr) => dispatchReview(
       pr,
