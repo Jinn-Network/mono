@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { runReviewPass } from '../scripts/run-autopilot.js';
 import { DEFAULT_CONFIG } from '../src/dispatcher/types.js';
+import { REVIEW_REAP_MS } from '../src/dispatcher/review-loop.js';
+import { reviewWorktreePath } from '../src/dispatcher/review-lease.js';
 import type { CommandRunner } from '../src/dispatcher/issue-source.js';
 import type { SpawnFn } from '../src/dispatcher/dispatch.js';
 import type { ReviewLeaseStore } from '../src/dispatcher/review-lease.js';
@@ -8,7 +10,7 @@ import type { ReviewLeaseStore } from '../src/dispatcher/review-lease.js';
 const TEST_LEASE_STORE: ReviewLeaseStore = {
   record: () => {},
   read: () => null,
-  release: () => {},
+  releaseIfMatches: () => false,
 };
 
 const childProcess = vi.hoisted(() => {
@@ -128,12 +130,21 @@ describe('runReviewPass', () => {
     childProcess.child.once.mockClear();
     childProcess.child.unref.mockClear();
     const removals: string[][] = [];
+    const canonicalPath = reviewWorktreePath(50);
+    let currentLease: ReturnType<ReviewLeaseStore['read']> = null;
+    let worktreeListCalls = 0;
 
     const runner: CommandRunner = async (cmd, args) => {
       if (args[0] === 'pr' && args[1] === 'list') return PR_LIST;
       if (args[0] === 'pr' && args[1] === 'view') return PR_VIEW;
       if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') {
-        return 'worktree /x\nHEAD a\nbranch refs/heads/next\n';
+        worktreeListCalls += 1;
+        return worktreeListCalls <= 2
+          ? 'worktree /x\nHEAD a\nbranch refs/heads/next\n'
+          : `worktree ${canonicalPath}\nHEAD a\ndetached\n`;
+      }
+      if (cmd === 'git' && args[0] === '-C' && args[2] === 'rev-parse') {
+        return `${canonicalPath}\n`;
       }
       if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
         removals.push(args);
@@ -142,16 +153,109 @@ describe('runReviewPass', () => {
       if (cmd === 'git') return '';
       throw new Error(`unexpected ${cmd} ${args.join(' ')}`);
     };
+    const leaseStore: ReviewLeaseStore = {
+      record: (lease) => { currentLease = lease; },
+      read: () => currentLease,
+      releaseIfMatches: (_prNumber, leaseId) => {
+        if (currentLease?.leaseId !== leaseId) return false;
+        currentLease = null;
+        return true;
+      },
+    };
 
     await runReviewPass(
       { ...DEFAULT_CONFIG, reviewBotLogin: 'jinn-bot', authorAllowlist: ['jinn-bot'] },
       runner,
       undefined,
-      TEST_LEASE_STORE,
+      leaseStore,
+      {
+        filesystem: {
+          lstat: () => ({
+            isDirectory: () => true,
+            isSymbolicLink: () => false,
+          }),
+          realpath: () => canonicalPath,
+          mkdirExclusive: () => {},
+          rename: () => {},
+          removeNoFollow: () => {},
+        },
+      },
     );
 
     expect(() => childProcess.getErrorHandler()?.(new Error('spawn failed'))).not.toThrow();
     childProcess.getExitHandler()?.(1, null);
     await vi.waitFor(() => expect(removals).toHaveLength(1));
+  });
+
+  it('uses the same Git-first remove-release sequence for fallback reaping', async () => {
+    const processKill = vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw Object.assign(new Error('not found'), { code: 'ESRCH' });
+    });
+    const canonicalPath = reviewWorktreePath(50);
+    const startedAt = Date.now() - REVIEW_REAP_MS - 10_000;
+    const calls: string[][] = [];
+    const released: number[] = [];
+    const leaseStore: ReviewLeaseStore = {
+      record: () => {},
+      read: (prNumber) => prNumber === 50
+        ? {
+            version: 2,
+            leaseId: 'lease-50',
+            prNumber,
+            worktreePath: canonicalPath,
+            pid: 5050,
+            startedAt,
+          }
+        : null,
+      releaseIfMatches: (prNumber, leaseId) => {
+        if (leaseId !== 'lease-50') return false;
+        released.push(prNumber);
+        return true;
+      },
+    };
+    const runner: CommandRunner = async (cmd, args) => {
+      if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'list') return '[]';
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') {
+        return [
+          `worktree ${canonicalPath}`,
+          'HEAD a',
+          'detached',
+          '',
+        ].join('\n');
+      }
+      if (cmd === 'git' && args[0] === '-C' && args[2] === 'rev-parse') {
+        return `${canonicalPath}\n`;
+      }
+      if (cmd === 'git') {
+        calls.push(args);
+        return '';
+      }
+      throw new Error(`unexpected ${cmd} ${args.join(' ')}`);
+    };
+
+    await runReviewPass(
+      { ...DEFAULT_CONFIG, reviewBotLogin: 'jinn-bot', authorAllowlist: ['jinn-bot'] },
+      runner,
+      undefined,
+      leaseStore,
+      {
+        filesystem: {
+          lstat: () => ({
+            isDirectory: () => true,
+            isSymbolicLink: () => false,
+          }),
+          realpath: () => canonicalPath,
+          mkdirExclusive: () => {},
+          rename: () => {},
+          removeNoFollow: () => {},
+        },
+      },
+    );
+
+    expect(calls).toEqual([
+      ['worktree', 'remove', '--force', canonicalPath],
+    ]);
+    expect(released).toEqual([50]);
+    processKill.mockRestore();
   });
 });

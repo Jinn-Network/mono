@@ -35,10 +35,11 @@ describe('deriveReviewInFlight', () => {
     const runner: CommandRunner = async () => PORCELAIN;
     const leaseStore: ReviewLeaseStore = {
       record: () => {},
-      release: () => {},
+      releaseIfMatches: () => false,
       read: (prNumber) => prNumber === 42
         ? {
-            version: 1,
+            version: 2,
+            leaseId: 'lease-42',
             prNumber,
             worktreePath: reviewWorktreePath(prNumber),
             pid: 4242,
@@ -49,19 +50,27 @@ describe('deriveReviewInFlight', () => {
 
     const { inFlight } = await deriveReviewInFlight(runner, leaseStore);
 
-    expect(inFlight[0]).toMatchObject({ pid: 4242, startedAt: 123_456 });
+    expect(inFlight[0]).toMatchObject({
+      pid: 4242,
+      startedAt: 123_456,
+      leaseId: 'lease-42',
+    });
   });
 
   it('does not infer ownership or age when no valid dispatcher lease exists', async () => {
     const runner: CommandRunner = async () => PORCELAIN;
     const leaseStore: ReviewLeaseStore = {
       record: () => {},
-      release: () => {},
+      releaseIfMatches: () => false,
       read: () => null,
     };
 
     const { inFlight } = await deriveReviewInFlight(runner, leaseStore);
 
-    expect(inFlight[0]).toMatchObject({ pid: null, startedAt: 0 });
+    expect(inFlight[0]).toMatchObject({
+      pid: null,
+      startedAt: 0,
+      leaseId: null,
+    });
   });
 });

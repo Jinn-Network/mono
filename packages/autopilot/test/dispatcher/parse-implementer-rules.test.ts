@@ -10,6 +10,12 @@ describe('parseImplementerRules', () => {
     expect(parseImplementerRules(undefined)).toEqual([]);
   });
 
+  it('accepts hermes as an implementer (this env var IS the hermes activation switch)', () => {
+    expect(parseImplementerRules('[{"effort":"Low","implementer":"hermes"}]')).toEqual([
+      { effort: 'Low', implementer: 'hermes' },
+    ]);
+  });
+
   it('empty / blank string → []', () => {
     expect(parseImplementerRules('')).toEqual([]);
     expect(parseImplementerRules('   ')).toEqual([]);
