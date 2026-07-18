@@ -21,6 +21,13 @@ export interface PersistedTaskRun {
   taskCid: string;
   onchainCreationTx: string;
   onchainCreationBlock: number;
+  /**
+   * Unix-seconds timestamp of the on-chain creation block (#1827). Resolved
+   * once at claim() time via `publicClient.getBlock`; null when the RPC
+   * lookup failed or hasn't run yet — never backfilled with a guess.
+   * Threaded into `envelope.task.createdAt` by pack().
+   */
+  onchainCreationTimestamp: number | null;
   solverType: string | null;
   /** SolverNet manifest CID this task was posted under; null for legacy rows. */
   solverNetManifestCid: string | null;
