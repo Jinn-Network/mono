@@ -90,8 +90,7 @@ export function harvestGeneratorModel(
  */
 export function deriveDistributionClass(generatorModel: GeneratorModel | undefined): DistributionClass {
   if (!generatorModel) return 'unknown';
-  const { id, provider } = generatorModel;
-  if (provider === 'anthropic' || /^claude-/i.test(id)) return 'restricted-tos';
-  if (provider === 'openai' || /^(gpt-|o[0-9]|codex)/i.test(id)) return 'restricted-tos';
+  const provider = generatorModel.provider ?? inferProvider(generatorModel.id);
+  if (provider === 'anthropic' || provider === 'openai') return 'restricted-tos';
   return 'unknown';
 }

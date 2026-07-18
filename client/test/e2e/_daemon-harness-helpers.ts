@@ -1125,6 +1125,14 @@ export async function startDaemon(
       packagingDeps,
       envelopeDeps,
       deliveryDeps,
+      // #1827: mirrors main.ts's blockTimestamp wiring so this rig covers
+      // envelope.task.createdAt resolution against the Anvil fork.
+      blockTimestamp: {
+        getBlockTimestamp: async (blockNumber: number): Promise<number | undefined> => {
+          const block = await agentClients.publicClient.getBlock({ blockNumber: BigInt(blockNumber) });
+          return Number(block.timestamp);
+        },
+      },
       // joinedSolverNets: omitted — engine falls back to legacy solverType gate.
       // Harness dispatch for non-baseline selectors is driven by
       // implRegistry.config.solverTypeHarnesses (wired in step 4 above).
