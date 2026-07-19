@@ -1164,6 +1164,13 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
         expect.stringContaining('JINN_EVAL_COMPUTE_USD_PER_HOUR'),
       );
     });
+
+    it('clamps to 0 (and still completes) when the clock steps backward mid-grade', async () => {
+      process.env[ENV_KEY] = '0.20';
+      const sol = await runWithStubbedElapsed(-5 * 60_000);
+      expect(costOf(sol)).toBe(0);
+      expect(sol.gating).toMatchObject({ verdict: 'PASS' });
+    });
   });
 });
 

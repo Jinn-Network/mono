@@ -81,7 +81,7 @@
 
     Re-running the command is idempotent. If Docker isn't running or Python is missing, the harness returns `status: 'waiting_for_external_action'` with installation pointers and no disk side effects until both prerequisites are present.
 
-    Per-Task evaluation cost is not yet metered — the verdict's `evaluator_cost_usd` ships as `0` in v1; cost-tracking is a separate workstream.
+    Per-Task evaluation cost is metered as `grade()` wall-time × `JINN_EVAL_COMPUTE_USD_PER_HOUR` (unset → 0.20 USD/hr default; invalid or zero → records `0` with a warning, never blocks the eval) and written to the verdict's `evaluator_cost_usd` (#1828).
 
 ## Lifecycle controls
 

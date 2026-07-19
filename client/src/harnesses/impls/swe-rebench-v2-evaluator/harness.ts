@@ -1359,8 +1359,11 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
       }
       throw err;
     }
+    // Math.max(0, …): Date.now() is not monotonic — a clock step-back mid-grade
+    // would yield a negative cost, which fails the verdict schema's
+    // nonnegative() at envelope assembly and would block the eval.
     const evaluatorCostUsd =
-      ((Date.now() - gradeStartedAtMs) / 3_600_000) * resolveComputeUsdPerHour();
+      (Math.max(0, Date.now() - gradeStartedAtMs) / 3_600_000) * resolveComputeUsdPerHour();
 
     // Pin the test log to IPFS so anyone (evaluator dispute, audit, model
     // training) can fetch it anonymously by CID. The CID is surfaced via the
