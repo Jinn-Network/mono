@@ -438,13 +438,13 @@ export interface TaskEngineOptions {
 
   /**
    * Resolves the on-chain block timestamp for a task's creation block
-   * (#1827). Called once per claimed task from `claim()`. Optional — when
-   * absent, `onchainCreationTimestamp` stays null and `envelope.task.createdAt`
-   * is simply omitted (correct absence, not a fabricated default).
+   * (#1827). Production wires this for every new task. It remains optional so
+   * historical/test callers can parse and exercise pre-field rows without
+   * fabricating a value.
    *
-   * Returns `undefined` (not a thrown error) on a resolvable-but-unknown
-   * block; throwing is also handled (caught, logged, non-fatal) so a
-   * transient RPC failure never blocks the DISCOVERED → CLAIMED transition.
+   * Returns `undefined` on a resolvable-but-unknown block. Undefined values
+   * and thrown transport errors are retried; a new envelope is never signed
+   * without the authoritative timestamp.
    */
   blockTimestamp?: {
     getBlockTimestamp(blockNumber: number): Promise<number | undefined>;
@@ -452,6 +452,8 @@ export interface TaskEngineOptions {
     configuredRpcUrls?: readonly string[];
   };
 }
+
+const TASK_CREATION_TIMESTAMP_LOOKUP_ATTEMPTS = 3;
 
 // ── Recovery report ───────────────────────────────────────────────────────────
 
@@ -933,28 +935,13 @@ export class TaskEngine {
       throw new Error(reason);
     }
 
-    // Resolve the on-chain creation-block timestamp once per claimed task
-    // (#1827). Best-effort and never fatal: an RPC failure must not block
-    // the claim — `onchainCreationTimestamp` simply stays null and
-    // `envelope.task.createdAt` is correctly omitted at pack() time.
-    // Skipped when already persisted: crash-recovery and the event/tick race
-    // both re-enter claim(), and the timestamp of a mined block never changes.
+    // A new envelope must carry the authoritative TaskCreated block timestamp.
+    // Resolve it before leaving DISCOVERED; a transient RPC failure gets a
+    // bounded in-call retry and then remains in-flight through the engine's
+    // existing recoverable-error classifier. Never advance with a missing
+    // value and later fabricate or omit task.createdAt.
     if (this.blockTimestamp && task.onchainCreationTimestamp == null) {
-      try {
-        const timestampSec = await this.blockTimestamp.getBlockTimestamp(task.onchainCreationBlock);
-        if (timestampSec !== undefined) {
-          this.persistence.setOnchainCreationTimestamp(task.requestId, timestampSec);
-        }
-      } catch (err) {
-        const safeError = redactRpcUrls(
-          err,
-          this.blockTimestamp.configuredRpcUrls ?? [],
-        );
-        console.warn(
-          `[harness-engine] ${task.requestId}: onchainCreationTimestamp resolution failed (non-fatal): `
-          + safeError,
-        );
-      }
+      await this.resolveTaskCreationTimestamp(task);
     }
 
     // The event path and tick loop can race on the same DISCOVERED row; if
@@ -971,6 +958,51 @@ export class TaskEngine {
         `[harness-engine] ${task.requestId}: claim completed but state is already ${current.state}; skipping CLAIMED transition`,
       );
     }
+  }
+
+  private async resolveTaskCreationTimestamp(task: PersistedTaskRun): Promise<number> {
+    if (!this.blockTimestamp) {
+      throw new Error(
+        `authoritative task creation timestamp resolver is unavailable for ${task.requestId}`,
+      );
+    }
+
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= TASK_CREATION_TIMESTAMP_LOOKUP_ATTEMPTS; attempt++) {
+      try {
+        const timestampSec = await this.blockTimestamp.getBlockTimestamp(
+          task.onchainCreationBlock,
+        );
+        if (
+          timestampSec !== undefined
+          && Number.isSafeInteger(timestampSec)
+          && timestampSec >= 0
+        ) {
+          this.persistence.setOnchainCreationTimestamp(task.requestId, timestampSec);
+          return timestampSec;
+        }
+        lastError = new Error(
+          `RPC returned no valid timestamp for block ${task.onchainCreationBlock}`,
+        );
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    const safeError = redactRpcUrls(
+      lastError,
+      this.blockTimestamp.configuredRpcUrls ?? [],
+    );
+    console.warn(
+      `[harness-engine] ${task.requestId}: authoritative task creation timestamp unavailable `
+      + `after ${TASK_CREATION_TIMESTAMP_LOOKUP_ATTEMPTS} attempts: ${safeError}`,
+    );
+    const error = new Error(
+      `authoritative task creation timestamp unavailable for ${task.requestId} `
+      + `(block ${task.onchainCreationBlock})`,
+    ) as Error & { cause?: unknown };
+    error.cause = lastError;
+    throw error;
   }
 
   async releaseClaimedNotStarted(): Promise<string[]> {
@@ -2000,6 +2032,14 @@ export class TaskEngine {
       solverNet?.model ?? this.operatorConfig?.claudeModel,
     );
 
+    let taskCreationTimestamp = task.onchainCreationTimestamp ?? undefined;
+    if (taskCreationTimestamp === undefined && this.blockTimestamp) {
+      // Recovery can resume an older CLAIMED/PACKAGING row that never passed
+      // through today's claim-time resolver. Re-resolve before signing so the
+      // new writer still cannot emit a provenance tuple without createdAt.
+      taskCreationTimestamp = await this.resolveTaskCreationTimestamp(task);
+    }
+
     const envelopeInputs: EnvelopeInputs = {
       solverType,
       role,
@@ -2008,9 +2048,10 @@ export class TaskEngine {
         onchainCreationTx: task.onchainCreationTx,
         onchainCreationBlock: task.onchainCreationBlock,
         requestId: task.requestId,
-        // #1827: absent (never "now") when the RPC lookup at claim() time
-        // failed or never ran — see claim() / setOnchainCreationTimestamp.
-        ...(task.onchainCreationTimestamp != null ? { createdAt: task.onchainCreationTimestamp } : {}),
+        // #1827: authoritative TaskCreated block timestamp. Production
+        // resolves or parks/fails before this new envelope is signed; it is
+        // absent only for historical/test callers without the resolver.
+        ...(taskCreationTimestamp !== undefined ? { createdAt: taskCreationTimestamp } : {}),
         ...(specInstanceId ? { instanceId: specInstanceId } : {}),
         ...(specRepo ? { repo: specRepo } : {}),
         ...(specBaseCommit ? { baseCommit: specBaseCommit } : {}),

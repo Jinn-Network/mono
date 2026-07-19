@@ -2179,10 +2179,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       implRegistry,
       solverNetRegistry,
       // #1827: resolves envelope.task.createdAt at claim() time. getBlock
-      // errors propagate deliberately — engine.ts's claim() catches, warns,
-      // and continues, so a transient RPC failure never blocks a claim but
-      // stays visible in the logs (swallowing here would make that warn
-      // unreachable).
+      // errors propagate deliberately — engine.ts retries a bounded number of
+      // times and keeps/fails the task before signing rather than emitting a
+      // provenance tuple without its authoritative creation timestamp.
       blockTimestamp: {
         getBlockTimestamp: async (blockNumber: number): Promise<number | undefined> => {
           const block = await publicClient.getBlock({ blockNumber: BigInt(blockNumber) });

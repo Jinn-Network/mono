@@ -93,6 +93,35 @@ interface PendingEvaluationSolution {
   failedAttempts?: number;
 }
 
+interface CanonicalTaskCreationProvenance {
+  onchainCreationTx: `0x${string}`;
+  onchainCreationBlock: number;
+}
+
+function taskCreationProvenanceFromSolutionEnvelope(
+  value: unknown,
+): CanonicalTaskCreationProvenance | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const task = (value as Record<string, unknown>)['task'];
+  if (typeof task !== 'object' || task === null) return undefined;
+  const record = task as Record<string, unknown>;
+  const tx = record['onchainCreationTx'];
+  const block = record['onchainCreationBlock'];
+  if (
+    typeof tx !== 'string'
+    || !/^0x[0-9a-fA-F]{64}$/.test(tx)
+    || typeof block !== 'number'
+    || !Number.isSafeInteger(block)
+    || block < 0
+  ) {
+    return undefined;
+  }
+  return {
+    onchainCreationTx: tx as `0x${string}`,
+    onchainCreationBlock: block,
+  };
+}
+
 const ROUTER_REQUEST_CURSOR_CONFIG_KEY = 'mech_router_request_block_cursor_v1';
 const PENDING_EVALUATION_SOLUTIONS_CONFIG_KEY = 'mech_pending_evaluation_solutions_v1';
 const DEFAULT_MECH_DELIVER_BACKFILL_LOOKBACK_BLOCKS = 100_000n;
@@ -1036,6 +1065,22 @@ export class MechAdapter implements ExecutionAdapter {
       this.config.ipfsGatewayUrl,
       solutionEnvelopeCid,
     ) as Record<string, unknown>;
+    let creationProvenance = taskCreationProvenanceFromSolutionEnvelope(resultPayload);
+    if (!creationProvenance && typeof resultPayload.data === 'string') {
+      try {
+        creationProvenance = taskCreationProvenanceFromSolutionEnvelope(
+          JSON.parse(resultPayload.data),
+        );
+      } catch {
+        // Legacy non-envelope result payload. The fail-closed check below
+        // keeps it out of the new provenance-bearing writer path.
+      }
+    }
+    if (!creationProvenance) {
+      throw new Error(
+        `evaluation opportunity ${solution.requestId} is missing canonical TaskCreated provenance in its solution envelope`,
+      );
+    }
     const resultData = (resultPayload.data as string) ?? JSON.stringify(resultPayload);
     const evaluationTask = this.buildEvaluationTask({
       task: restoration.task,
@@ -1050,8 +1095,8 @@ export class MechAdapter implements ExecutionAdapter {
       taskId: opportunityId,
       task: evaluationTask,
       taskCid: restoration.taskCid,
-      onchainCreationTx: restoration.onchainCreationTx,
-      onchainCreationBlock: restoration.onchainCreationBlock,
+      onchainCreationTx: creationProvenance.onchainCreationTx,
+      onchainCreationBlock: creationProvenance.onchainCreationBlock,
       onchainOpportunityTx: solution.transactionHash,
       onchainOpportunityBlock: solution.blockNumber,
     };
@@ -1059,8 +1104,8 @@ export class MechAdapter implements ExecutionAdapter {
       taskId: solution.taskId,
       attemptIndex: solution.attemptIndex,
       task: evaluationTask,
-      onchainCreationTx: restoration.onchainCreationTx,
-      onchainCreationBlock: restoration.onchainCreationBlock,
+      onchainCreationTx: creationProvenance.onchainCreationTx,
+      onchainCreationBlock: creationProvenance.onchainCreationBlock,
     });
     this.observedTasks.set(opportunityId, announcement);
     // #645: a successful announcement means the candidate has made progress;

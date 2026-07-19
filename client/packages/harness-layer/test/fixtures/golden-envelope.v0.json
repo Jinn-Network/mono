@@ -41,10 +41,11 @@
       "modelId": "golden-fixture"
     }
   },
+  "distributionClass": "unknown",
   "signature": {
     "algo": "secp256k1",
     "signer": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-    "hash": "0xe0687ef475e7a6b8382ff6007e1645bcc069b64756377cbe9be693f816b0f660",
-    "sig": "0x067d5e42866747c3acdb30f5db66550e5de996cea5988cb53034ba78ce6c2a685d04c7eb8f499cd48ad03ceb7cc1a6ab25a5088e3a0c536bffafceb4b9be77d400"
+    "hash": "0x7f5aad1db6c6bf1a18cd67c5855e9716f731a8d159ddc8677dbf7d1d0141dd91",
+    "sig": "0xcfd81ff25f0c444c17c73488d394b179afd522657e4b1a6a30d59e1626235f25011cc842d80481642269e515c7249ed2ed8ceb8fa83133905d6c969a5a8bf88f00"
   }
 }
