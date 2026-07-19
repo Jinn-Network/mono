@@ -25,6 +25,8 @@ jobs:
         with:
           node-version: 22
       - run: corepack enable
+      - run: yarn --cwd ../plugin install --immutable
+      - run: yarn --cwd ../plugin build
       - run: yarn install --immutable
       - run: yarn build
       - run: yarn typecheck
