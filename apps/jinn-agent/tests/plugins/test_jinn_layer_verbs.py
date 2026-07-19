@@ -24,6 +24,19 @@ def test_contract_uses_the_versioned_json_verb():
     assert runner.calls == [([jinn_layer.binary(), "contract", "--json"], None)]
 
 
+def test_contract_keeps_the_general_default_timeout(monkeypatch):
+    calls = []
+
+    def fake_default_runner(argv, cwd=None, input=None, timeout_s=jinn_layer._TIMEOUT_S):
+        calls.append(timeout_s)
+        return 0, '{"contractVersion":1}', ""
+
+    monkeypatch.setattr(jinn_layer, "_default_runner", fake_default_runner)
+
+    assert jinn_layer.contract()[0] == 0
+    assert calls == [jinn_layer._TIMEOUT_S]
+
+
 def test_session_end_writes_one_complete_request_to_stdin():
     runner = StdinRunner()
     request = {
