@@ -15,25 +15,29 @@ export type GitCommandRunner = (
 export interface GitProtocolPort {
   claimBranch(input: {
     branch: GitRefName;
-    expectedHead: GitOid;
+    candidateParent: GitOid;
+    expectedRemoteHead: GitOid | null;
     claimOid: GitOid;
   }): Promise<ClaimOutcome>;
   publishReviewClaim(input: {
     prNumber: number;
-    expectedRecordOid: GitOid | null;
+    recordParent: GitOid | null;
+    expectedRemoteRecordOid: GitOid | null;
     recordOid: GitOid;
   }): Promise<PublicationOutcome>;
   publishReviewFix(input: {
     branch: GitRefName;
-    expectedHead: GitOid;
+    newHeadParent: GitOid;
+    expectedRemoteHead: GitOid;
     newHead: GitOid;
     prNumber: number;
-    expectedRecordOid: GitOid | null;
+    recordParent: GitOid | null;
+    expectedRemoteRecordOid: GitOid | null;
     recordOid: GitOid;
   }): Promise<PublicationOutcome>;
   publishMergePrep(input: {
     branch: GitRefName;
-    expectedHead: GitOid;
+    expectedRemoteHead: GitOid;
     newHead: GitOid;
   }): Promise<PublicationOutcome>;
 }
@@ -96,39 +100,63 @@ async function assertCandidateParent(
   }
 }
 
-async function publishScalar(
+async function publishLeasedScalar(
   runner: GitCommandRunner,
   remote: string,
   ref: string,
-  expected: GitOid | null,
+  expectedRemoteOid: GitOid | null,
   published: GitOid,
 ): Promise<ClaimOutcome> {
-  await assertCandidateParent(runner, published, expected);
   const before = await readRef(runner, remote, ref);
   if (!before.succeeded) {
-    return { status: 'ambiguous', expected, published, observed: null };
+    return { status: 'ambiguous', expected: expectedRemoteOid, published, observed: null };
   }
-  if (before.oid !== expected) {
-    return { status: 'lost', expected, published, observed: before.oid };
+  if (before.oid === published) {
+    return {
+      status: 'already-applied',
+      expected: expectedRemoteOid,
+      published,
+      observed: published,
+    };
+  }
+  if (before.oid !== expectedRemoteOid) {
+    return { status: 'lost', expected: expectedRemoteOid, published, observed: before.oid };
   }
   try {
     await runner('git', [
       'push',
-      exactLease(ref, expected),
+      exactLease(ref, expectedRemoteOid),
       remote,
       `${published}:${ref}`,
     ]);
-    return { status: 'won', expected, published, observed: published };
+    return { status: 'won', expected: expectedRemoteOid, published, observed: published };
   } catch {
     const readback = await readRef(runner, remote, ref);
     if (!readback.succeeded) {
-      return { status: 'ambiguous', expected, published, observed: null };
+      return { status: 'ambiguous', expected: expectedRemoteOid, published, observed: null };
     }
     if (readback.oid === published) {
-      return { status: 'already-applied', expected, published, observed: published };
+      return {
+        status: 'already-applied',
+        expected: expectedRemoteOid,
+        published,
+        observed: published,
+      };
     }
-    return { status: 'lost', expected, published, observed: readback.oid };
+    return { status: 'lost', expected: expectedRemoteOid, published, observed: readback.oid };
   }
+}
+
+async function publishScalarWithParent(
+  runner: GitCommandRunner,
+  remote: string,
+  ref: string,
+  candidateParent: GitOid | null,
+  expectedRemoteOid: GitOid | null,
+  published: GitOid,
+): Promise<ClaimOutcome> {
+  await assertCandidateParent(runner, published, candidateParent);
+  return publishLeasedScalar(runner, remote, ref, expectedRemoteOid, published);
 }
 
 function assertRemote(remote: string): void {
@@ -146,22 +174,24 @@ export function makeGitProtocolPort(
   return {
     async claimBranch(input) {
       const ref = branchRef(input.branch);
-      return publishScalar(
+      return publishScalarWithParent(
         runner,
         remote,
         ref,
-        input.expectedHead,
+        input.candidateParent,
+        input.expectedRemoteHead,
         input.claimOid,
       );
     },
 
     async publishReviewClaim(input) {
       const ref = reviewClaimRef(input.prNumber);
-      return publishScalar(
+      return publishScalarWithParent(
         runner,
         remote,
         ref,
-        input.expectedRecordOid,
+        input.recordParent,
+        input.expectedRemoteRecordOid,
         input.recordOid,
       );
     },
@@ -170,15 +200,15 @@ export function makeGitProtocolPort(
       const branch = branchRef(input.branch);
       const review = reviewClaimRef(input.prNumber);
       const expected = {
-        branch: input.expectedHead,
-        review: input.expectedRecordOid,
+        branch: input.expectedRemoteHead,
+        review: input.expectedRemoteRecordOid,
       };
       const published = {
         branch: input.newHead,
         review: input.recordOid,
       };
-      await assertCandidateParent(runner, input.newHead, input.expectedHead);
-      await assertCandidateParent(runner, input.recordOid, input.expectedRecordOid);
+      await assertCandidateParent(runner, input.newHead, input.newHeadParent);
+      await assertCandidateParent(runner, input.recordOid, input.recordParent);
       const [branchBefore, reviewBefore] = await Promise.all([
         readRef(runner, remote, branch),
         readRef(runner, remote, review),
@@ -190,6 +220,9 @@ export function makeGitProtocolPort(
       if (!branchBefore.succeeded || !reviewBefore.succeeded) {
         return { status: 'ambiguous', expected, published, observed: before };
       }
+      if (before.branch === published.branch && before.review === published.review) {
+        return { status: 'already-applied', expected, published, observed: before };
+      }
       if (before.branch !== expected.branch || before.review !== expected.review) {
         return { status: 'lost', expected, published, observed: before };
       }
@@ -197,8 +230,8 @@ export function makeGitProtocolPort(
         await runner('git', [
           'push',
           '--atomic',
-          exactLease(branch, input.expectedHead),
-          exactLease(review, input.expectedRecordOid),
+          exactLease(branch, input.expectedRemoteHead),
+          exactLease(review, input.expectedRemoteRecordOid),
           remote,
           `${input.newHead}:${branch}`,
           `${input.recordOid}:${review}`,
@@ -230,11 +263,11 @@ export function makeGitProtocolPort(
 
     async publishMergePrep(input) {
       const ref = branchRef(input.branch);
-      return publishScalar(
+      return publishLeasedScalar(
         runner,
         remote,
         ref,
-        input.expectedHead,
+        input.expectedRemoteHead,
         input.newHead,
       );
     },

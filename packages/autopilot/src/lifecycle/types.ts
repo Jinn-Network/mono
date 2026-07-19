@@ -195,6 +195,7 @@ export interface LifecycleViewItem {
   readonly item: LifecycleItem;
   readonly phase: LifecyclePhase;
   readonly underlyingPhase?: Exclude<LifecyclePhase, 'human'>;
+  readonly humanReason?: HumanReason;
   readonly stale: boolean;
   readonly staleSince?: string;
   readonly staleReason?: 'branch-head-unchanged' | 'review-progress-unchanged';
