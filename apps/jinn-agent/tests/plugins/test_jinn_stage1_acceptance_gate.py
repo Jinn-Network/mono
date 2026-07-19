@@ -51,6 +51,20 @@ def test_stage1_gate_is_blocking_for_every_product_boundary():
     assert "cold-stock-e2e.sh" in rendered_steps
 
 
+def test_jinn_agent_suite_includes_destructive_cleanup_regressions():
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "jinn-agent-ci.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    test_steps = workflow["jobs"]["test"]["steps"]
+    rendered_steps = "\n".join(
+        str(step.get("run", "")) for step in test_steps
+    )
+
+    assert "tests/scripts/test_clean_jinn_test_pollution.py" in rendered_steps
+
+
 def test_acceptance_drivers_are_repo_owned_executables():
     python_driver = AGENT_ROOT / "scripts" / "stage1-stock-product.py"
     daemon_driver = REPO_ROOT / "client" / "scripts" / "stage1-task-creator-acceptance.mjs"

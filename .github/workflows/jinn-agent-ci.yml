@@ -79,7 +79,9 @@ jobs:
         run: |
           FILES=$( { find tests/hermes_cli tests/dehermes -name 'test_*.py' \
             ! -name 'test_main_path_acceptance.py'; \
-            find tests/plugins -maxdepth 1 -name 'test_jinn_*.py'; } | sort | paste -sd: )
+            find tests/plugins -maxdepth 1 -name 'test_jinn_*.py'; \
+            printf '%s\n' tests/scripts/test_clean_jinn_test_pollution.py; \
+          } | sort | paste -sd: )
           ./scripts/run_tests.sh --files "$FILES" -j 4 --file-timeout 1200 -q
 
   cold-stock-e2e:
