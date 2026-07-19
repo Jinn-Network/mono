@@ -123,6 +123,31 @@ describe('lifecycle metadata codecs', () => {
     } as unknown as BranchClaim)).toThrow(/Unknown field/);
   });
 
+  it('requires numeric positive integer issue and PR values when encoding branch claims', () => {
+    const claim: BranchClaim = {
+      kind: 'branch-claim',
+      protocolVersion: 2,
+      phase: 'implement',
+      issueNumber: 42,
+      prNumber: 101,
+      attempt: '11111111-1111-4111-8111-111111111111',
+      runner: 'runner',
+      login: 'login',
+      expectedHead: OID_A,
+      targetBase: gitRefName('next'),
+      claimedAt: '2026-07-20T10:00:00.000Z',
+    };
+
+    expect(() => encodeBranchClaimTrailers({
+      ...claim,
+      issueNumber: '42',
+    } as unknown as BranchClaim)).toThrow(/issue number/);
+    expect(() => encodeBranchClaimTrailers({
+      ...claim,
+      prNumber: '101',
+    } as unknown as BranchClaim)).toThrow(/PR number/);
+  });
+
   it('derives stable refs and round-trips the automated review marker', () => {
     expect(branchNameForIssue(42)).toBe('autopilot/42');
     expect(reviewClaimRef(101)).toBe('refs/jinn-autopilot/review-claims/v1/101');

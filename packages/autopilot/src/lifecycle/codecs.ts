@@ -48,7 +48,7 @@ function positiveInteger(value: unknown, name: string): number {
   throw new Error(`Invalid ${name}`);
 }
 
-function positiveJsonInteger(value: unknown, name: string): number {
+function positiveNumber(value: unknown, name: string): number {
   if (typeof value !== 'number') throw new Error(`Invalid ${name}`);
   return positiveInteger(value, name);
 }
@@ -90,8 +90,8 @@ function validateBranchClaim(claim: BranchClaim): BranchClaim {
   ]);
   if (claim.kind !== 'branch-claim') throw new Error('Invalid branch claim kind');
   if (claim.protocolVersion !== 2) throw new Error('Unsupported protocol version');
-  positiveInteger(claim.issueNumber, 'issue number');
-  if (claim.prNumber !== undefined) positiveInteger(claim.prNumber, 'PR number');
+  positiveNumber(claim.issueNumber, 'issue number');
+  if (claim.prNumber !== undefined) positiveNumber(claim.prNumber, 'PR number');
   if (claim.phase !== 'implement' && claim.phase !== 'merge-prep') throw new Error('Invalid branch claim phase');
   if (claim.phase === 'merge-prep' && claim.prNumber === undefined) {
     throw new Error('Contradictory phase fields: merge-prep requires PR');
@@ -235,7 +235,7 @@ function reviewRecordFromUnknown(value: unknown): ReviewClaimRecord {
   const common = {
     kind: 'review-claim' as const,
     protocolVersion: 2 as const,
-    prNumber: positiveJsonInteger(record.prNumber, 'PR number'),
+    prNumber: positiveNumber(record.prNumber, 'PR number'),
     generation: uuid(record.generation, 'generation'),
     attempt: uuid(record.attempt, 'attempt'),
     reviewer: safeText(record.reviewer, 'reviewer'),

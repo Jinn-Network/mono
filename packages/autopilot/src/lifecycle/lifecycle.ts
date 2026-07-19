@@ -1,20 +1,26 @@
-import type {
-  AutopilotMode,
-  LifecycleItem,
-  LifecyclePhase,
-  LifecycleSnapshot,
-  LifecycleView,
-  LifecycleViewItem,
-  LocalCapacity,
-  PlannedAction,
-  PullRequestLifecycleItem,
-  RecoveryAction,
-  ReviewClaimRecord,
+import {
+  isoTimestamp,
+  type AutopilotMode,
+  type HumanReason,
+  type LifecycleItem,
+  type LifecyclePhase,
+  type LifecycleSnapshot,
+  type LifecycleView,
+  type LifecycleViewItem,
+  type LocalCapacity,
+  type PlannedAction,
+  type PullRequestLifecycleItem,
+  type RecoveryAction,
+  type ReviewClaimRecord,
 } from './types.js';
 
 function timestampMs(value: string): number | null {
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : null;
+  try {
+    isoTimestamp(value);
+    return new Date(value).getTime();
+  } catch {
+    return null;
+  }
 }
 
 function branchClaimMatchesItem(item: PullRequestLifecycleItem): boolean {
@@ -71,21 +77,25 @@ function underlyingPhase(item: LifecycleItem): Exclude<LifecyclePhase, 'human'> 
   return 'awaiting-review';
 }
 
+function hasMatchingVerdict(
+  item: PullRequestLifecycleItem,
+  review: ReviewClaimRecord,
+): boolean {
+  const verdict = item.terminalVerdict;
+  return verdict !== undefined
+    && review.verdict !== undefined
+    && verdict.head === review.head
+    && verdict.marker === review.verdict.marker
+    && verdict.state === review.verdict.state;
+}
+
 function matchingVerdictTime(
   item: PullRequestLifecycleItem,
   review: ReviewClaimRecord,
 ): number | null {
-  const verdict = item.terminalVerdict;
-  if (
-    verdict === undefined
-    || review.verdict === undefined
-    || verdict.head !== review.head
-    || verdict.marker !== review.verdict.marker
-    || verdict.state !== review.verdict.state
-  ) {
-    return null;
-  }
-  return timestampMs(verdict.recordedAt);
+  return hasMatchingVerdict(item, review) && item.terminalVerdict !== undefined
+    ? timestampMs(item.terminalVerdict.recordedAt)
+    : null;
 }
 
 function staleEvidence(
@@ -145,6 +155,64 @@ function deriveItem(item: LifecycleItem, nowMs: number, staleAfterMs: number): L
     && item.reviewClaim.head !== item.head;
   if (underlying === 'merged') {
     return { item, phase: 'merged', stale: false, supersededReview };
+  }
+  let invalidProgressReason: HumanReason | undefined;
+  if (item.kind === 'pull-request') {
+    const headTime = timestampMs(item.headChangedAt);
+    if (underlying === 'implementing' && (headTime === null || headTime > nowMs)) {
+      invalidProgressReason = {
+        phase: 'implementing',
+        code: 'invalid-branch-progress-time',
+        detail: `Invalid branch head progress timestamp: ${item.headChangedAt}`,
+      };
+    } else if (
+      (underlying === 'merge-prep' || underlying === 'merge-ready')
+      && (headTime === null || headTime > nowMs)
+    ) {
+      invalidProgressReason = {
+        phase: underlying,
+        code: 'invalid-merge-progress-time',
+        detail: `Invalid merge progress timestamp: ${item.headChangedAt}`,
+      };
+    } else if (
+      (underlying === 'awaiting-review'
+        || underlying === 'reviewing'
+        || underlying === 'review-fixing')
+      && (headTime === null || headTime > nowMs)
+    ) {
+      invalidProgressReason = {
+        phase: underlying,
+        code: 'invalid-review-progress-time',
+        detail: `Invalid review progress timestamp: ${item.headChangedAt}`,
+      };
+    }
+    const review = correlatedReviewClaim(item);
+    if (
+      invalidProgressReason === undefined
+      && review !== undefined
+      && (underlying === 'reviewing' || underlying === 'review-fixing')
+      && hasMatchingVerdict(item, review)
+      && item.terminalVerdict !== undefined
+    ) {
+      const verdictTime = timestampMs(item.terminalVerdict.recordedAt);
+      if (verdictTime === null || verdictTime > nowMs) {
+        invalidProgressReason = {
+          phase: underlying,
+          code: 'invalid-review-progress-time',
+          detail: `Invalid terminal verdict progress timestamp: ${item.terminalVerdict.recordedAt}`,
+        };
+      }
+    }
+  }
+  if (invalidProgressReason !== undefined) {
+    return {
+      item,
+      phase: 'human',
+      underlyingPhase: underlying,
+      humanReason: invalidProgressReason,
+      stale: false,
+      supersededReview,
+    };
   }
   if (humanOverlay(item)) {
     return {
@@ -280,13 +348,16 @@ export function planCycle(
   }
 
   for (const candidate of view.items) {
+    const reclaimingStaleMergePrep = candidate.item.kind === 'pull-request'
+      && candidate.stale
+      && candidate.item.branchClaim?.phase === 'merge-prep'
+      && candidate.item.branchClaim.phaseComplete !== true;
     if (
       lanes === 0
       || mergePrepSlots === 0
       || candidate.phase !== 'merge-prep'
-      || candidate.stale
       || candidate.item.kind !== 'pull-request'
-      || candidate.item.branchClaim !== undefined
+      || (!reclaimingStaleMergePrep && candidate.item.branchClaim !== undefined)
     ) {
       continue;
     }

@@ -70,6 +70,51 @@ describe('deriveLifecycle', () => {
     expect(legacy?.stale).toBe(false);
   });
 
+  it('fails closed on a non-canonical branch progress timestamp', () => {
+    const [view] = deriveLifecycle(snapshot(implementation({
+      headChangedAt: '2026-07-20T08:00:00Z',
+    })), NOW, STALE_AFTER).items;
+
+    expect(view).toMatchObject({
+      phase: 'human',
+      underlyingPhase: 'implementing',
+      stale: false,
+      humanReason: {
+        phase: 'implementing',
+        code: 'invalid-branch-progress-time',
+      },
+    });
+  });
+
+  it('fails closed on future review progress evidence', () => {
+    const [view] = deriveLifecycle(snapshot(implementation({
+      branchClaim: undefined,
+      isDraft: false,
+      headChangedAt: '2026-07-20T12:00:00.001Z',
+      reviewClaim: {
+        kind: 'review-claim',
+        protocolVersion: 2,
+        prNumber: 101,
+        generation: '22222222-2222-4222-8222-222222222222',
+        attempt: '33333333-3333-4333-8333-333333333333',
+        reviewer: 'reviewer',
+        head: HEAD_A,
+        state: 'active',
+        recordedAt: '2026-07-20T11:00:00.000Z',
+      },
+    })), NOW, STALE_AFTER).items;
+
+    expect(view).toMatchObject({
+      phase: 'human',
+      underlyingPhase: 'reviewing',
+      stale: false,
+      humanReason: {
+        phase: 'reviewing',
+        code: 'invalid-review-progress-time',
+      },
+    });
+  });
+
   it('supersedes review immediately when its claimed head differs from the PR head', () => {
     const item = implementation({
       head: HEAD_B,
@@ -206,6 +251,47 @@ describe('deriveLifecycle', () => {
     const [view] = deriveLifecycle(snapshot(item), NOW, STALE_AFTER).items;
 
     expect(view).toMatchObject({ phase: 'reviewing', stale: false });
+  });
+
+  it('fails closed when matching terminal verdict progress is from the future', () => {
+    const item = implementation({
+      branchClaim: undefined,
+      isDraft: false,
+      headChangedAt: '2026-07-20T06:00:00.000Z',
+      reviewClaim: {
+        kind: 'review-claim',
+        protocolVersion: 2,
+        prNumber: 101,
+        generation: '22222222-2222-4222-8222-222222222222',
+        attempt: '33333333-3333-4333-8333-333333333333',
+        reviewer: 'reviewer',
+        head: HEAD_A,
+        state: 'verdict-intent',
+        recordedAt: '2026-07-20T06:00:00.000Z',
+        verdict: {
+          marker: '44444444-4444-4444-8444-444444444444',
+          state: 'APPROVE',
+        },
+      },
+      terminalVerdict: {
+        head: HEAD_A,
+        state: 'APPROVE',
+        marker: '44444444-4444-4444-8444-444444444444',
+        recordedAt: '2026-07-20T12:00:00.001Z',
+      },
+    });
+
+    const [view] = deriveLifecycle(snapshot(item), NOW, STALE_AFTER).items;
+
+    expect(view).toMatchObject({
+      phase: 'human',
+      underlyingPhase: 'reviewing',
+      stale: false,
+      humanReason: {
+        phase: 'reviewing',
+        code: 'invalid-review-progress-time',
+      },
+    });
   });
 
   it('does not treat a contradictory verdict state as matching progress', () => {
@@ -412,5 +498,60 @@ describe('planCycle', () => {
       head: HEAD_A,
       recoverFixes: true,
     }]);
+  });
+
+  it('reclaims stale v2 merge-prep from the current branch head', () => {
+    const staleMergePrep = implementation({
+      branchClaim: {
+        ...implementation().branchClaim!,
+        phase: 'merge-prep',
+        prNumber: 101,
+      },
+      headChangedAt: '2026-07-20T08:00:00.000Z',
+      approved: true,
+      needsReview: false,
+      mergeState: 'conflict',
+    });
+    const view = deriveLifecycle(snapshot(staleMergePrep), NOW, STALE_AFTER);
+
+    expect(planCycle(view, capacity, 'active')).toEqual([
+      {
+        kind: 'requeue-merge-prep',
+        prNumber: 101,
+        expectedHead: HEAD_A,
+      },
+      {
+        kind: 'claim-merge-prep',
+        issueNumber: 42,
+        prNumber: 101,
+        head: HEAD_A,
+      },
+    ]);
+  });
+
+  it('fails closed on invalid merge-prep progress evidence', () => {
+    const invalidMergePrep = implementation({
+      branchClaim: {
+        ...implementation().branchClaim!,
+        phase: 'merge-prep',
+        prNumber: 101,
+      },
+      headChangedAt: '2026-07-20T08:00:00Z',
+      approved: true,
+      needsReview: false,
+      mergeState: 'conflict',
+    });
+    const [view] = deriveLifecycle(snapshot(invalidMergePrep), NOW, STALE_AFTER).items;
+
+    expect(view).toMatchObject({
+      phase: 'human',
+      underlyingPhase: 'merge-prep',
+      stale: false,
+      humanReason: {
+        phase: 'merge-prep',
+        code: 'invalid-merge-progress-time',
+      },
+    });
+    expect(planCycle({ items: [view!] }, capacity, 'active')).toEqual([]);
   });
 });
