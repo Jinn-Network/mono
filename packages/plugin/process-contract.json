@@ -1,0 +1,8 @@
+{
+  "contractVersion": 1,
+  "processStatuses": [
+    "ok",
+    "degraded",
+    "unavailable"
+  ]
+}

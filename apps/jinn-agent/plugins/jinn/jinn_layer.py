@@ -30,6 +30,7 @@ Runner = Callable[..., Tuple[int, str]]
 
 _TIMEOUT_S = 120
 CONTRACT_VERSION = 1
+PROCESS_STATUSES = ("ok", "degraded", "unavailable")
 
 
 def _default_runner(
@@ -223,7 +224,7 @@ def parse_process_response(raw: str) -> Dict[str, Any]:
         raise ValueError("jinn-layer returned malformed JSON") from exc
     if not isinstance(parsed, dict) or parsed.get("contractVersion") != CONTRACT_VERSION:
         raise ValueError("jinn-layer response contract version mismatch")
-    if parsed.get("status") not in ("ok", "degraded", "unavailable"):
+    if parsed.get("status") not in PROCESS_STATUSES:
         raise ValueError("jinn-layer response has an invalid status")
     return parsed
 
