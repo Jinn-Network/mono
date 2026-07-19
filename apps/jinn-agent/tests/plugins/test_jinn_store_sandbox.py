@@ -32,6 +32,15 @@ def test_guard_green_when_sandboxed():
         assert real_root not in resolved.parents and resolved != real_root
 
 
+def test_guard_rechecks_sandbox_while_test_spoofs_os_name(monkeypatch):
+    """A platform unit test must not break the autouse guard's teardown."""
+    import os
+
+    with monkeypatch.context() as platform:
+        platform.setattr(os, "name", "nt")
+        assert_jinn_store_sandboxed()
+
+
 @pytest.mark.jinn_store_guard_bypass
 def test_guard_red_on_deliberate_violation(monkeypatch):
     # Unset one store var so its resolver falls back to the real default.

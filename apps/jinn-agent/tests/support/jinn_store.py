@@ -18,11 +18,18 @@ The store env vars and their resolvers (see Jinn-Network/mono#1841):
 
 from __future__ import annotations
 
+import os
 from functools import wraps
 from pathlib import Path
 from typing import Callable
 
 from plugins.jinn import distill, session_bridge
+
+# Keep the host's concrete path class. Some platform unit tests temporarily
+# spoof ``os.name``; pathlib's abstract ``Path`` factory then tries to create
+# the other platform's unsupported concrete class during fixture teardown.
+_NATIVE_OS_NAME = os.name
+_NATIVE_PATH = type(Path())
 
 # (env var, resolver) — used by the guard and its own test.
 JINN_STORE_RESOLVERS = (
@@ -37,8 +44,8 @@ def _assert_resolved_store_sandboxed(
     resolver: Callable[[], Path],
     resolved: Path,
 ) -> None:
-    real_root = (Path.home() / ".jinn-client").resolve()
-    resolved = Path(resolved).expanduser().resolve()
+    real_root = (_NATIVE_PATH.home() / ".jinn-client").resolve()
+    resolved = _NATIVE_PATH(resolved).expanduser().resolve()
     if resolved == real_root or real_root in resolved.parents:
         raise AssertionError(
             f"jinn store guard: {resolver.__module__}.{resolver.__name__}() "
@@ -49,6 +56,21 @@ def _assert_resolved_store_sandboxed(
         )
 
 
+def _resolve_for_guard(env_var: str, resolver: Callable[[], Path]) -> Path:
+    try:
+        return resolver()
+    except NotImplementedError:
+        if os.name == _NATIVE_OS_NAME:
+            raise
+        override = os.environ.get(env_var)
+        if override is None:
+            raise AssertionError(
+                f"jinn store guard: {resolver.__module__}.{resolver.__name__}() "
+                f"could not resolve while ${env_var} was unset"
+            ) from None
+        return _NATIVE_PATH(override).expanduser()
+
+
 def assert_jinn_store_sandboxed() -> None:
     """Raise AssertionError if any jinn store resolver points at the real tree.
 
@@ -57,7 +79,11 @@ def assert_jinn_store_sandboxed() -> None:
     fix (redirect it to a tempdir) is obvious.
     """
     for env_var, resolver in JINN_STORE_RESOLVERS:
-        _assert_resolved_store_sandboxed(env_var, resolver, resolver())
+        _assert_resolved_store_sandboxed(
+            env_var,
+            resolver,
+            _resolve_for_guard(env_var, resolver),
+        )
 
 
 def install_jinn_store_resolver_guards(monkeypatch) -> None:
