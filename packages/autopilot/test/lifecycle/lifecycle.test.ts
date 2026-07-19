@@ -142,6 +142,43 @@ describe('deriveLifecycle', () => {
     });
   });
 
+  it('supersedes old-head terminal verdicts before validating their timestamps', () => {
+    const item = implementation({
+      head: HEAD_B,
+      isDraft: false,
+      branchClaim: undefined,
+      reviewClaim: {
+        kind: 'review-claim',
+        protocolVersion: 2,
+        prNumber: 101,
+        generation: '22222222-2222-4222-8222-222222222222',
+        attempt: '33333333-3333-4333-8333-333333333333',
+        reviewer: 'reviewer',
+        head: HEAD_A,
+        state: 'verdict-intent',
+        recordedAt: '2026-07-20T11:00:00.000Z',
+        verdict: {
+          marker: '44444444-4444-4444-8444-444444444444',
+          state: 'APPROVE',
+        },
+      },
+      terminalVerdict: {
+        head: HEAD_A,
+        state: 'APPROVE',
+        marker: '44444444-4444-4444-8444-444444444444',
+        recordedAt: '2026-07-20T12:00:00.001Z',
+      },
+    });
+
+    const [view] = deriveLifecycle(snapshot(item), NOW, STALE_AFTER).items;
+
+    expect(view).toMatchObject({
+      phase: 'awaiting-review',
+      supersededReview: true,
+      stale: false,
+    });
+  });
+
   it('requires both unchanged head and no matching terminal verdict before review is stale', () => {
     const reviewClaim = {
       kind: 'review-claim' as const,
@@ -431,6 +468,66 @@ describe('deriveLifecycle', () => {
       phase: 'human',
       underlyingPhase: 'implementing',
       humanReason,
+      stale: false,
+    });
+  });
+
+  it('preserves explicit Human reasons ahead of generated invalid-time reasons', () => {
+    const implementationReason = {
+      phase: 'implementing' as const,
+      code: 'first-push' as const,
+      detail: 'Waiting for first-push authorization.',
+    };
+    const reviewReason = {
+      phase: 'reviewing' as const,
+      code: 'review-escalation' as const,
+      detail: 'A human must resolve the review.',
+    };
+    const reviewClaim = {
+      kind: 'review-claim' as const,
+      protocolVersion: 2 as const,
+      prNumber: 102,
+      generation: '22222222-2222-4222-8222-222222222222',
+      attempt: '33333333-3333-4333-8333-333333333333',
+      reviewer: 'reviewer',
+      head: HEAD_A,
+      state: 'verdict-intent' as const,
+      recordedAt: '2026-07-20T11:00:00.000Z',
+      verdict: {
+        marker: '44444444-4444-4444-8444-444444444444',
+        state: 'APPROVE' as const,
+      },
+    };
+
+    const [invalidHeadTime, invalidVerdictTime] = deriveLifecycle(snapshot(
+      implementation({
+        humanReason: implementationReason,
+        headChangedAt: '2026-07-20T12:00:00.001Z',
+      }),
+      implementation({
+        issueNumber: 43,
+        prNumber: 102,
+        branchClaim: undefined,
+        isDraft: false,
+        humanReason: reviewReason,
+        reviewClaim,
+        terminalVerdict: {
+          head: HEAD_A,
+          state: 'APPROVE',
+          marker: '44444444-4444-4444-8444-444444444444',
+          recordedAt: '2026-07-20T12:00:00.001Z',
+        },
+      }),
+    ), NOW, STALE_AFTER).items;
+
+    expect(invalidHeadTime).toMatchObject({
+      phase: 'human',
+      humanReason: implementationReason,
+      stale: false,
+    });
+    expect(invalidVerdictTime).toMatchObject({
+      phase: 'human',
+      humanReason: reviewReason,
       stale: false,
     });
   });

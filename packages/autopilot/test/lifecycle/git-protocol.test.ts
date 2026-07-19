@@ -369,6 +369,26 @@ describe('Git protocol port', () => {
     expect(calls).toEqual([]);
   });
 
+  it('rejects a review fix without an existing authoritative review claim', async () => {
+    const calls: string[][] = [];
+    const port = makeGitProtocolPort(async (_command, args) => {
+      calls.push([...args]);
+      return '';
+    });
+
+    await expect(port.publishReviewFix({
+      branch: gitRefName('autopilot/42'),
+      newHeadParent: EXPECTED,
+      expectedRemoteHead: EXPECTED,
+      newHead: PUBLISHED,
+      prNumber: 101,
+      recordParent: null,
+      expectedRemoteRecordOid: null,
+      recordOid: OTHER,
+    })).rejects.toThrow(/existing.*review claim/i);
+    expect(calls).toEqual([]);
+  });
+
   it('reports an idempotent atomic review-fix retry as already applied during preflight', async () => {
     const calls: string[][] = [];
     const runner: GitCommandRunner = async (_command, args) => {

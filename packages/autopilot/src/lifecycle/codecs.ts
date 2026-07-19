@@ -192,7 +192,7 @@ function reviewRecordFromUnknown(
   }
   const record = value as Record<string, unknown>;
   exactKeys(record, [
-    'kind',
+    ...(requireRuntimeDiscriminator ? ['kind'] : []),
     'protocolVersion',
     'prNumber',
     'generation',
@@ -290,12 +290,12 @@ export function decodeReviewClaimPayload(payload: string): ReviewClaimRecord {
 }
 
 export function branchNameForIssue(issueNumber: number): GitRefName {
-  return gitRefName(`autopilot/${positiveInteger(issueNumber, 'issue number')}`);
+  return gitRefName(`autopilot/${positiveNumber(issueNumber, 'issue number')}`);
 }
 
 export function reviewClaimRef(prNumber: number): GitRefName {
   return gitRefName(
-    `refs/jinn-autopilot/review-claims/v1/${positiveInteger(prNumber, 'PR number')}`,
+    `refs/jinn-autopilot/review-claims/v1/${positiveNumber(prNumber, 'PR number')}`,
   );
 }
 

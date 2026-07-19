@@ -193,6 +193,9 @@ function assertReviewFixRelation(input: {
     throw new Error('Review fix new head parent must equal expected remote head');
   }
   assertReviewRecordRelation(input.recordParent, input.expectedRemoteRecordOid);
+  if (input.recordParent === null || input.expectedRemoteRecordOid === null) {
+    throw new Error('Review fix requires an existing authoritative review claim');
+  }
 }
 
 export function makeGitProtocolPort(
