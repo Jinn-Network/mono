@@ -266,7 +266,9 @@ def _build_episode(
         "session": {
             "sessionId": session_id,
             "capturedAt": buf["capturedAt"],
+            "kind": "user",
         },
+        "origin": {"writer": h_name, "build": h_version},
         "task": {
             "summary": buf.get("summary") or "(no summary)",
             "distributionTags": [],

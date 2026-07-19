@@ -35,8 +35,17 @@ function episode(): EpisodeV1 {
   return {
     schemaVersion: 'jinn.episode.v1',
     episodeId: 'episode-host-1',
-    session: { sessionId: 'session-host-1', capturedAt: '2026-07-15T12:00:00.000Z' },
-    task: { summary: 'Fix the session bridge', distributionTags: ['oss'] },
+    session: {
+      sessionId: 'session-host-1',
+      capturedAt: '2026-07-15T12:00:00.000Z',
+      kind: 'user',
+    },
+    origin: { writer: 'hermes', build: '0.18.0' },
+    task: {
+      summary: 'Fix the session bridge',
+      distributionTags: ['oss'],
+      repositorySlug: 'Jinn-Network/mono',
+    },
     trajectory: [{
       spanId: 'turn-1',
       parentSpanId: null,
@@ -65,9 +74,15 @@ function request(overrides: Record<string, unknown> = {}) {
     contractVersion: 1,
     episode: episode(),
     activity: {
+      retrievalFired: true,
+      eligibleRefs: ['knowledge/ref-1'],
+      deliveredRefs: ['knowledge/ref-1'],
+      deliveryMode: 'delivered',
       surfacedRefs: ['knowledge/ref-1'],
       fetchedRefs: ['knowledge/ref-1'],
       installedSkillRefs: [],
+      searchedTerms: ['session bridge'],
+      providedRefs: ['knowledge/ref-1'],
     },
     eligibilityInputs: { acceptedDiff: true },
     contributionCandidate: {
@@ -434,12 +449,12 @@ describe('jinn-layer process contract v1', () => {
             },
           },
           summary: {
-            // The request's activity carries only the pre-rescope legacy
-            // fields (no searchedTerms/providedRefs) — the summary honestly
-            // reports nothing provided in the new-shape sense (rescope §3.6).
-            searchedTerms: [],
-            providedPackets: [],
-            nothingFound: true,
+            searchedTerms: ['session bridge'],
+            providedPackets: [{
+              ref: 'knowledge/ref-1',
+              title: 'knowledge/ref-1',
+            }],
+            nothingFound: false,
           },
         },
       });

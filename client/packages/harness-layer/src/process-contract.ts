@@ -1,10 +1,10 @@
 import { z } from 'zod';
 import {
   ContributionCandidateV1Schema,
-  EpisodeV1Schema,
+  EpisodeV1WriteSchema,
   JINN_PLUGIN_CONTRACT_VERSION,
   PickupConfigSchema,
-  SessionActivityFactsSchema,
+  SessionActivityFactsWriteSchema,
   type FirstTurnPickupResult,
   type ContributionLedgerEntry,
   type JinnPluginDeps,
@@ -33,6 +33,8 @@ const SessionMetaSchema = z.strictObject({
   pickup: PickupConfigSchema.optional(),
   /** Fed into `deriveSearchTerms`'s repo-slug bonus (rescope §3.3). Additive — absent is fine. */
   repositorySlug: z.string().min(1).optional(),
+  kind: z.enum(['user', 'host-internal']).optional(),
+  parentSessionId: z.string().min(1).max(128).optional(),
 });
 
 export const SessionPickupRequestV1Schema = z.strictObject({
@@ -43,8 +45,8 @@ export const SessionPickupRequestV1Schema = z.strictObject({
 
 export const SessionEndRequestV1Schema = z.strictObject({
   contractVersion: z.literal(PROCESS_CONTRACT_VERSION),
-  episode: EpisodeV1Schema,
-  activity: SessionActivityFactsSchema,
+  episode: EpisodeV1WriteSchema,
+  activity: SessionActivityFactsWriteSchema,
   eligibilityInputs: z.strictObject({
     publicRepo: z.boolean().optional(),
     acceptedDiff: z.boolean().optional(),

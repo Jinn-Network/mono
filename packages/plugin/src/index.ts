@@ -2,8 +2,18 @@
 // Public entry — grows incrementally as ports/schemas/factory land (S1-F1).
 export type { PortResult } from './outcome.js';
 export { ok, degraded, unavailable, valueOr, unwrap } from './outcome.js';
-export { EPISODE_SCHEMA_VERSION, EpisodeV1Schema, SessionActivityFactsSchema } from './schemas/episode.js';
-export type { EpisodeV1, SessionActivityFacts } from './schemas/episode.js';
+export {
+  EPISODE_SCHEMA_VERSION,
+  EpisodeV1Schema,
+  EpisodeV1WriteSchema,
+  SessionActivityFactsSchema,
+  SessionActivityFactsWriteSchema,
+} from './schemas/episode.js';
+export type {
+  EpisodeV1,
+  EpisodeV1Write,
+  SessionActivityFacts,
+} from './schemas/episode.js';
 export {
   CONTRIBUTION_CANDIDATE_SCHEMA_VERSION,
   ContributionCandidateV1Schema,

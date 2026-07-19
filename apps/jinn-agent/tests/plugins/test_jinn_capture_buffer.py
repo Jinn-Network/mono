@@ -68,6 +68,11 @@ def test_records_user_and_assistant_turns_in_order():
     ep = capture_buffer.assemble_episode("s", "s", completed=True, interrupted=False)
     capture_buffer.reset()
     assert ep is not None
+    assert ep["session"]["kind"] == "user"
+    assert ep["origin"] == {
+        "writer": ep["environment"]["harness"]["name"],
+        "build": ep["environment"]["harness"]["version"],
+    }
     traj = ep["trajectory"]
     assert [step["kind"] for step in traj] == [
         "jinn.agent_turn",

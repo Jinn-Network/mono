@@ -28,6 +28,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Set
+from tools.skill_provenance import is_background_review
 
 from . import capture_buffer as buf
 from . import consent
@@ -64,6 +65,8 @@ _degraded: Optional[str] = None
 # once at session end.
 _session_state_lock = threading.Lock()
 _session_states: Dict[str, Dict[str, Any]] = {}
+_internal_session_lock = threading.Lock()
+_internal_sessions: Dict[tuple[str, int], str] = {}
 
 
 def _park_contribution_publication() -> None:
@@ -88,6 +91,8 @@ def _park_contribution_publication() -> None:
 def _reset_session_state() -> None:
     with _session_state_lock:
         _session_states.clear()
+    with _internal_session_lock:
+        _internal_sessions.clear()
 
 
 def _user_line(msg: str) -> None:
@@ -161,17 +166,47 @@ def _clear_veto(session_id: str) -> None:
         _vetoed_tasks.discard(session_id)
 
 
-def _empty_activity() -> Dict[str, list]:
+def _empty_activity() -> Dict[str, Any]:
     """Evidence-first pickup facts (searchedTerms/providedRefs, rescope §3.6)
     plus the internal fetch-attempt detail the corpus_search/corpus_fetch
     agent tools still record (surfacedRefs/fetchedRefs). installedSkillRefs
     is gone with the skill adopt/install path pickup no longer has."""
     return {
+        "retrievalFired": False,
+        "eligibleRefs": [],
+        "deliveredRefs": [],
+        "deliveryMode": "disabled",
         "searchedTerms": [],
         "providedRefs": [],
         "surfacedRefs": [],
         "fetchedRefs": [],
+        "installedSkillRefs": [],
     }
+
+
+def _session_identity(session_id: str) -> tuple[str, str, Optional[str]]:
+    """Separate host-internal review evidence from its foreground parent."""
+    parent = session_id or "default"
+    if not is_background_review():
+        return parent, "user", None
+    thread_id = threading.get_ident()
+    key = (parent, thread_id)
+    with _internal_session_lock:
+        logical = _internal_sessions.get(key)
+        if logical is None:
+            suffix = hashlib.sha256(
+                f"{parent}:{thread_id}:{time.time_ns()}".encode("utf-8")
+            ).hexdigest()[:16]
+            logical = f"{parent[:96]}-host-internal-{suffix}"[:128]
+            _internal_sessions[key] = logical
+    return logical, "host-internal", parent[:128]
+
+
+def _release_internal_session(parent_session_id: Optional[str]) -> None:
+    if parent_session_id is None:
+        return
+    with _internal_session_lock:
+        _internal_sessions.pop((parent_session_id, threading.get_ident()), None)
 
 
 def _state_for(session_id: str, cwd: Optional[Path] = None) -> Dict[str, Any]:
@@ -207,12 +242,20 @@ def _peek_state(session_id: str) -> Dict[str, Any]:
         state = _session_states.get(key)
         if state is None:
             return {"activity": _empty_activity()}
+        activity = dict(state.get("activity") or {})
+        for field in (
+            "eligibleRefs",
+            "deliveredRefs",
+            "searchedTerms",
+            "providedRefs",
+            "surfacedRefs",
+            "fetchedRefs",
+            "installedSkillRefs",
+        ):
+            activity[field] = list(activity.get(field) or [])
         return {
             **state,
-            "activity": {
-                field: list(state.get("activity", {}).get(field) or [])
-                for field in ("searchedTerms", "providedRefs", "surfacedRefs", "fetchedRefs")
-            },
+            "activity": activity,
         }
 
 
@@ -280,6 +323,7 @@ def _on_pre_llm_call(
     task_id: str = "",
     **_: Any,
 ) -> Optional[Dict[str, str]]:
+    logical_session_id, session_kind, parent_session_id = _session_identity(session_id)
     # Local capture — UNCONDITIONAL (mono#1714): filling the buffer never
     # leaves the machine; local retention, mining, and distillation happen by
     # default. Not gated on is_first_turn: the buffer is keyed per session and
@@ -287,26 +331,28 @@ def _on_pre_llm_call(
     # recovers the summary/model even when the first-turn signal is unreliable
     # on some provider paths (mono #1404). Only the share step (a task leaving
     # the machine) is gated — see _on_session_end.
-    buf.record_first_turn(task_id, session_id, user_message, model, platform)
+    buf.record_first_turn(task_id, logical_session_id, user_message, model, platform)
     # Ordered user-turn span for the EpisodeV1 trajectory (mono #1662).
     # record_first_turn stores metadata only; this appends the turn span so it
     # precedes this turn's tool calls (post_tool_call) and the assistant turn
     # (post_llm_call). Local capture, so unconditional per mono#1714.
-    buf.record_user_turn(task_id, session_id, user_message)
+    buf.record_user_turn(task_id, logical_session_id, user_message)
     # Consumption side — NEVER consent-gated: evidence-first corpus pickup.
     # Returns {"context": ...} (injected into the user message, cache-safe)
     # or None. Fails open inside pickup().
     if is_first_turn:
-        state = _state_for(session_id)
+        state = _state_for(logical_session_id)
         snapshot = state.get("snapshot")
         repository_slug = snapshot.repository_slug if snapshot is not None else None
         return pickup.pickup(
             user_message,
             runner=_runner,
             activity=state["activity"],
-            session_id=session_id,
+            session_id=logical_session_id,
             model=model,
             repository_slug=repository_slug,
+            session_kind=session_kind,
+            parent_session_id=parent_session_id,
         )
     return None
 
@@ -321,10 +367,13 @@ def _on_post_tool_call(
     duration_ms: Optional[int] = None,
     **_: Any,
 ) -> None:
+    logical_session_id, _, _ = _session_identity(session_id)
     # Local capture — UNCONDITIONAL (mono#1714): recording tool calls never
     # leaves the machine.
-    buf.record_tool_call(task_id, session_id, tool_name, tool_call_id, args, result, duration_ms)
-    state = _state_for(session_id)
+    buf.record_tool_call(
+        task_id, logical_session_id, tool_name, tool_call_id, args, result, duration_ms
+    )
+    state = _state_for(logical_session_id)
     run = session_bridge.test_run_from_tool_call(
         tool_name, args, result, str(time.time_ns())
     )
@@ -346,16 +395,35 @@ def _on_post_llm_call(
     output_tokens: Optional[int] = None,
     **_: Any,
 ) -> None:
+    logical_session_id, _, _ = _session_identity(session_id)
     # Complete the EpisodeV1 turn (mono #1662): the assistant span lands AFTER
     # this turn's tool calls (post_tool_call fires inside the tool loop, which
     # completes before post_llm_call). Local capture is UNCONDITIONAL (mono#1714)
     # — the buffer never leaves the machine; only the share step is gated.
-    buf.record_assistant_turn(task_id, session_id, assistant_response)
+    buf.record_assistant_turn(task_id, logical_session_id, assistant_response)
     # Record tokens only when the host reports meaningful usage. Zero/zero (the
     # getattr default when the agent has no usage) is treated as "no usage" so
     # cost.tokens is OMITTED rather than emitted as {0,0} (AC2, mono #1662).
     if input_tokens or output_tokens:
-        buf.record_tokens(task_id, session_id, input_tokens or 0, output_tokens or 0)
+        buf.record_tokens(task_id, logical_session_id, input_tokens or 0, output_tokens or 0)
+
+
+def _normalized_activity(activity: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = {
+        "retrievalFired": bool(activity.get("retrievalFired")),
+        "eligibleRefs": list(activity.get("eligibleRefs") or []),
+        "deliveredRefs": list(activity.get("deliveredRefs") or []),
+        "deliveryMode": activity.get("deliveryMode") or "disabled",
+        "searchedTerms": list(activity.get("searchedTerms") or []),
+        "providedRefs": list(activity.get("providedRefs") or []),
+        "surfacedRefs": list(activity.get("surfacedRefs") or []),
+        "fetchedRefs": list(activity.get("fetchedRefs") or []),
+        "installedSkillRefs": list(activity.get("installedSkillRefs") or []),
+    }
+    delivered_hash = activity.get("deliveredContentHash")
+    if isinstance(delivered_hash, str) and delivered_hash:
+        normalized["deliveredContentHash"] = delivered_hash
+    return normalized
 
 
 def _delegate_session_end(
@@ -369,12 +437,7 @@ def _delegate_session_end(
     """Return the core result only when it canonically persisted this episode."""
     if _degraded is not None:
         return None
-    normalized_activity = {
-        "searchedTerms": list(activity.get("searchedTerms") or []),
-        "providedRefs": list(activity.get("providedRefs") or []),
-        "surfacedRefs": list(activity.get("surfacedRefs") or []),
-        "fetchedRefs": list(activity.get("fetchedRefs") or []),
-    }
+    normalized_activity = _normalized_activity(activity)
     request: Dict[str, Any] = {
         "contractVersion": jinn_layer.CONTRACT_VERSION,
         "episode": episode,
@@ -435,6 +498,8 @@ def _on_session_end(
     output_tokens: Optional[int] = None,
     **_: Any,
 ) -> None:
+    logical_session_id, session_kind, parent_session_id = _session_identity(session_id)
+    _release_internal_session(parent_session_id)
     # Usage is native local telemetry, so show payoff independently of sharing
     # consent and before any capture-path early return.
     try:
@@ -448,20 +513,20 @@ def _on_session_end(
     publish_enabled = False
     # Record the skills loadout + token fallback (host forward, mono #1662) —
     # local writes, so unconditional per mono#1714, before the popping assembly.
-    buf.record_environment(task_id, session_id, skills_loadout or [])
+    buf.record_environment(task_id, logical_session_id, skills_loadout or [])
     # See _on_post_llm_call — zero/no usage omits cost.tokens (AC2, mono #1662).
     if input_tokens or output_tokens:
-        buf.record_tokens(task_id, session_id, input_tokens or 0, output_tokens or 0)
+        buf.record_tokens(task_id, logical_session_id, input_tokens or 0, output_tokens or 0)
 
     # Pop the buffer ONCE for both shapes (assemble pops — see assemble_both).
     # Stage 2 never prepares a network-facing shape. The same episode remains
     # the local learning source and contribution-candidate raw material.
     task, episode = buf.assemble_both(
-        task_id, session_id, completed, interrupted, publish_consented=publish_enabled
+        task_id, logical_session_id, completed, interrupted, publish_consented=publish_enabled
     )
 
     if episode is None:
-        state = _pop_state(session_id)
+        state = _pop_state(logical_session_id)
         _user_line(session_view.render_complete(
             summary=None,
             activity=state.get("activity") or {},
@@ -483,18 +548,33 @@ def _on_session_end(
         else None
     )
 
-    state = _pop_state(session_id)
+    state = _pop_state(logical_session_id)
     snapshot = state.get("snapshot")
     try:
         accepted = session_bridge.accepted_diff(snapshot) if snapshot is not None else ""
     except Exception:
         accepted = ""
-    vetoed = _session_vetoed(session_id)
-    candidate = session_bridge.build_contribution_candidate(
+    episode["session"]["kind"] = session_kind
+    if parent_session_id:
+        episode["session"]["parentSessionId"] = parent_session_id
+    snapshot_repository = (
+        snapshot.repository_slug if snapshot is not None else None
+    )
+    if snapshot_repository:
+        episode["task"]["repositorySlug"] = snapshot_repository
+    test_runs = _episode_test_runs(episode)
+    episode["outcome"]["acceptedDiff"] = bool(accepted)
+    episode["outcome"]["testRuns"] = {
+        "passed": sum(1 for run in test_runs if run.get("exitCode") == 0),
+        "failed": sum(1 for run in test_runs if run.get("exitCode") != 0),
+    }
+    episode["activity"] = _normalized_activity(state.get("activity") or {})
+    vetoed = _session_vetoed(logical_session_id)
+    candidate = None if session_kind == "host-internal" else session_bridge.build_contribution_candidate(
         episode,
         snapshot,
         accepted=accepted,
-        test_runs=_episode_test_runs(episode),
+        test_runs=test_runs,
         intermediate_failure_diffs=state.get("intermediateFailureDiffs") or [],
         skill_refs=skills_loadout or [],
         publish_consent=publish_enabled,
@@ -539,7 +619,7 @@ def _on_session_end(
             and isinstance(value, dict)
             and value.get("status") == "vetoed"
         ):
-            _clear_veto(session_id)
+            _clear_veto(logical_session_id)
         learning_status = (
             "pending" if tee_path is not None
             else "off" if distill.cached_mode(_runner) == "off"

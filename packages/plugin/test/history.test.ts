@@ -56,6 +56,25 @@ function buildPlugin(
 }
 
 describe('plugin.history / explain (AC3 — reproducible from port reads)', () => {
+  it('excludes host-internal child sessions from the default history fold', async () => {
+    const evidence = new InMemoryEvidencePort();
+    await evidence.put(currentEpisode({ episodeId: 'ep-parent' }));
+    await evidence.put(currentEpisode({
+      episodeId: 'ep-child',
+      session: {
+        sessionId: 'child',
+        capturedAt: '2026-07-14T00:01:00.000Z',
+        kind: 'host-internal',
+        parentSessionId: 'sess-fixture-1',
+      },
+    }));
+
+    const plugin = buildPlugin(evidence);
+    expect((await plugin.history()).entries.map((entry) => entry.sessionId))
+      .toEqual(['sess-fixture-1']);
+    expect((await plugin.explain('child')).found).toBe(true);
+  });
+
   it('is reproducible: two calls over the same port state are deep-equal', async () => {
     const evidence = new InMemoryEvidencePort();
     await evidence.put(currentEpisode({ episodeId: 'ep-1' }));

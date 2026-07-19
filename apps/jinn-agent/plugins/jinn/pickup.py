@@ -18,6 +18,7 @@ Consumption is never consent-gated. Consent gates contributing only.
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import sys
 from pathlib import Path
@@ -117,10 +118,12 @@ def pickup(
     user_message: str,
     runner: Optional[jinn_layer.Runner] = None,
     signal_sink: Optional[SignalSink] = None,
-    activity: Optional[Dict[str, List[str]]] = None,
+    activity: Optional[Dict[str, Any]] = None,
     session_id: str = "",
     model: str = "",
     repository_slug: Optional[str] = None,
+    session_kind: str = "user",
+    parent_session_id: Optional[str] = None,
 ) -> Optional[Dict[str, str]]:
     """First-turn evidence pickup. Returns ``{"context": ...}`` for the
     pre_llm_call hook (rendered verbatim into the injected context; cache-safe,
@@ -144,6 +147,8 @@ def pickup(
             session_id,
             model,
             repository_slug,
+            session_kind,
+            parent_session_id,
         )
     except Exception as exc:
         logger.warning("jinn: pickup failed open: %s", exc)
@@ -154,16 +159,25 @@ def _pickup_inner(
     user_message: str,
     runner: Optional[jinn_layer.Runner],
     signal_sink: SignalSink,
-    activity: Optional[Dict[str, List[str]]],
+    activity: Optional[Dict[str, Any]],
     session_id: str,
     model: str,
     repository_slug: Optional[str],
+    session_kind: str,
+    parent_session_id: Optional[str],
 ) -> Optional[Dict[str, str]]:
     config = load_config()
     if not config.get("enabled", True):
         return None
 
+    if activity is not None:
+        activity["retrievalFired"] = True
+        activity["deliveryMode"] = "degraded"
+
     request = _build_request(user_message, session_id, model, repository_slug)
+    request["meta"]["kind"] = session_kind
+    if parent_session_id:
+        request["meta"]["parentSessionId"] = parent_session_id
     code, out, _err = jinn_layer.session_pickup(request, runner)
     if code != 0:
         return None
@@ -199,10 +213,24 @@ def _pickup_inner(
     if activity is not None:
         activity["searchedTerms"] = searched_terms
         activity["providedRefs"] = provided_refs
+        activity["eligibleRefs"] = [
+            ref for ref in (value.get("eligibleRefs") or [])
+            if isinstance(ref, str) and ref
+        ]
+        activity["deliveredRefs"] = provided_refs
+        mode = value.get("deliveryMode")
+        activity["deliveryMode"] = (
+            mode if mode in ("delivered", "disabled", "degraded", "withheld")
+            else ("degraded" if envelope.get("status") == "degraded" else "delivered")
+        )
 
     context_block = value.get("contextBlock")
     if not isinstance(context_block, str) or not context_block.strip():
         return None
+    if activity is not None:
+        activity["deliveredContentHash"] = (
+            "sha256:" + hashlib.sha256(context_block.encode("utf-8")).hexdigest()
+        )
 
     _emit_evidence_signal(signal_sink, searched_terms, len(provided_refs))
     return {"context": context_block}

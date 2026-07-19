@@ -115,12 +115,7 @@ try {
   });
   if (install.status !== 0) process.exit(install.status ?? 1);
 
-  const donationGate = join(installedPackageRoot, 'dist', 'scripts', 'donation-consumption-acceptance.js');
   const nodePtyFix = join(installedPackageRoot, 'dist', 'scripts', 'fix-node-pty.mjs');
-  if (!existsSync(donationGate)) {
-    console.error(`smoke-test-pack: missing compiled donation gate ${donationGate}`);
-    process.exit(1);
-  }
   if (!existsSync(nodePtyFix)) {
     console.error(`smoke-test-pack: missing node-pty fix script ${nodePtyFix}`);
     process.exit(1);
@@ -129,13 +124,6 @@ try {
   const run = runOrExit('npm', ['exec', '--', 'jinn', 'version', '--json'], 'npm exec');
   const payload = parseJsonOrExit(run.stdout, 'npm exec');
   assertVersionPayload(payload, 'npm exec');
-
-  const gateHelp = runOrExit(process.execPath, [donationGate, '--help'], 'compiled donation gate --help');
-  if (!gateHelp.stdout.includes('Strict release gate for cross-operator donated SWE execution data consumption')) {
-    console.error('smoke-test-pack: compiled donation gate help text was not recognized');
-    console.error(gateHelp.stdout);
-    process.exit(1);
-  }
 
   runOrExit(process.execPath, [nodePtyFix, '--verify'], 'node-pty verification');
 

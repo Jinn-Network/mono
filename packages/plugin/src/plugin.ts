@@ -6,7 +6,7 @@
  */
 
 /// <reference types="node" />
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type {
   ContributionLedgerEntry,
   ContributionPort,
@@ -20,7 +20,9 @@ import type { EligibilityVerdict } from './schemas/eligibility-verdict.js';
 import {
   EPISODE_SCHEMA_VERSION,
   EpisodeV1Schema,
+  EpisodeV1WriteSchema,
   SessionActivityFactsSchema,
+  SessionActivityFactsWriteSchema,
 } from './schemas/episode.js';
 import type { EpisodeV1, SessionActivityFacts } from './schemas/episode.js';
 import {
@@ -57,12 +59,19 @@ export interface SessionMeta {
    *  fed into `deriveSearchTerms`, which derives the repository's name (not
    *  its full slug) as a normal search term (#1790). */
   repositorySlug?: string;
+  kind?: 'user' | 'host-internal';
+  parentSessionId?: string;
 }
 
 export interface FirstTurnPickupResult {
   contextBlock: string | null;
   packets: KnowledgePacket[];
   searchedTerms: string[];
+  retrievalFired: boolean;
+  eligibleRefs: string[];
+  deliveredRefs: string[];
+  deliveryMode: 'delivered' | 'disabled' | 'degraded' | 'withheld';
+  deliveredContentHash?: string;
   degraded?: string;
 }
 
@@ -85,6 +94,7 @@ export interface SessionOutcome {
   retentionPolicy: 'local-private' | 'contribution-eligible';
   publicRepo?: boolean;
   acceptedDiff?: boolean;
+  testRuns?: { passed: number; failed: number };
 }
 
 export interface SessionEndResult {
@@ -217,8 +227,18 @@ async function completeSession(
     },
     capturedEpisode.session.capturedAt,
   );
-  const episode = EpisodeV1Schema.parse({
+  const episode = EpisodeV1WriteSchema.parse({
     ...capturedEpisode,
+    session: {
+      ...capturedEpisode.session,
+      kind: capturedEpisode.session.kind ?? 'user',
+    },
+    origin: capturedEpisode.origin === 'legacy-unstamped'
+      ? {
+          writer: capturedEpisode.environment.harness.name,
+          build: capturedEpisode.environment.harness.version,
+        }
+      : capturedEpisode.origin,
     activity,
     eligibility,
   });
@@ -231,7 +251,9 @@ async function completeSession(
   }
 
   let contribution: PortResult<ContributionCompletionReceipt> | undefined;
-  if (input.contributionCandidate !== undefined) {
+  if (input.contributionCandidate !== undefined && episode.session.kind === 'host-internal') {
+    contribution = unavailable('host-internal sessions cannot create contribution candidates');
+  } else if (input.contributionCandidate !== undefined) {
     const parsedCandidate = ContributionCandidateV1Schema.safeParse(input.contributionCandidate);
     if (!parsedCandidate.success) {
       contribution = unavailable('invalid contribution candidate');
@@ -307,6 +329,10 @@ export class PluginSession {
   private providedRefs: string[] = [];
   private fetchedRefs: string[] = [];
   private packets: KnowledgePacket[] = [];
+  private retrievalFired = false;
+  private eligibleRefs: string[] = [];
+  private deliveryMode: FirstTurnPickupResult['deliveryMode'] = 'disabled';
+  private deliveredContentHash: string | undefined;
   private readonly capturedAt = new Date().toISOString();
 
   constructor(
@@ -316,11 +342,33 @@ export class PluginSession {
 
   async firstTurnPickup(firstMessage: string): Promise<FirstTurnPickupResult> {
     const config = parsePickupConfig(this.meta.pickup);
-    if (!config.enabled) return { contextBlock: null, packets: [], searchedTerms: [] };
+    if (!config.enabled) {
+      return {
+        contextBlock: null,
+        packets: [],
+        searchedTerms: [],
+        retrievalFired: false,
+        eligibleRefs: [],
+        deliveredRefs: [],
+        deliveryMode: 'disabled',
+      };
+    }
 
     const terms = deriveSearchTerms(firstMessage, this.meta.repositorySlug);
     this.searchedTerms = terms;
-    if (terms.length === 0) return { contextBlock: null, packets: [], searchedTerms: terms };
+    this.retrievalFired = true;
+    this.deliveryMode = 'delivered';
+    if (terms.length === 0) {
+      return {
+        contextBlock: null,
+        packets: [],
+        searchedTerms: terms,
+        retrievalFired: true,
+        eligibleRefs: [],
+        deliveredRefs: [],
+        deliveryMode: 'delivered',
+      };
+    }
 
     // Issue all per-term searches concurrently — the searches are
     // independent (mono #1795: sequential awaits serialized ~1.6s/term of
@@ -353,10 +401,15 @@ export class PluginSession {
 
     const ranked = rankKnowledgeHits([...byRef.values()], terms);
     if (ranked.length === 0) {
+      this.deliveryMode = degradedReason === undefined ? 'delivered' : 'degraded';
       return {
         contextBlock: null,
         packets: [],
         searchedTerms: terms,
+        retrievalFired: true,
+        eligibleRefs: [],
+        deliveredRefs: [],
+        deliveryMode: this.deliveryMode,
         ...(degradedReason !== undefined ? { degraded: degradedReason } : {}),
       };
     }
@@ -407,21 +460,35 @@ export class PluginSession {
 
     this.fetchedRefs = fetchedRefs;
     this.providedRefs = packets.map((packet) => packet.ref);
+    this.eligibleRefs = [...this.providedRefs];
     this.packets = packets;
 
     if (packets.length === 0) {
+      this.deliveryMode = degradedReason === undefined ? 'delivered' : 'degraded';
       return {
         contextBlock: null,
         packets: [],
         searchedTerms: terms,
+        retrievalFired: true,
+        eligibleRefs: this.eligibleRefs,
+        deliveredRefs: [],
+        deliveryMode: this.deliveryMode,
         ...(degradedReason !== undefined ? { degraded: degradedReason } : {}),
       };
     }
 
+    const contextBlock = renderKnowledgePackets(packets);
+    this.deliveryMode = degradedReason === undefined ? 'delivered' : 'degraded';
+    this.deliveredContentHash = `sha256:${createHash('sha256').update(contextBlock).digest('hex')}`;
     return {
-      contextBlock: renderKnowledgePackets(packets),
+      contextBlock,
       packets,
       searchedTerms: terms,
+      retrievalFired: true,
+      eligibleRefs: this.eligibleRefs,
+      deliveredRefs: this.providedRefs,
+      deliveryMode: this.deliveryMode,
+      deliveredContentHash: this.deliveredContentHash,
       ...(degradedReason !== undefined ? { degraded: degradedReason } : {}),
     };
   }
@@ -454,13 +521,23 @@ export class PluginSession {
   }
 
   async end(outcome: SessionOutcome): Promise<SessionEndResult> {
-    const episode: EpisodeV1 = EpisodeV1Schema.parse({
+    const episode: EpisodeV1 = EpisodeV1WriteSchema.parse({
       schemaVersion: EPISODE_SCHEMA_VERSION,
       episodeId: randomUUID(),
-      session: { sessionId: this.meta.sessionId, capturedAt: this.capturedAt },
+      session: {
+        sessionId: this.meta.sessionId,
+        capturedAt: this.capturedAt,
+        kind: this.meta.kind ?? 'user',
+        ...(this.meta.parentSessionId ? { parentSessionId: this.meta.parentSessionId } : {}),
+      },
+      origin: {
+        writer: this.meta.harness.name,
+        build: this.meta.harness.version,
+      },
       task: {
         summary: this.meta.taskSummary,
         distributionTags: this.meta.distributionTags ?? [],
+        ...(this.meta.repositorySlug ? { repositorySlug: this.meta.repositorySlug } : {}),
       },
       trajectory: this.trajectory,
       environment: {
@@ -473,6 +550,8 @@ export class PluginSession {
         status: outcome.status,
         verifiabilityTier: outcome.verifiabilityTier,
         ...(outcome.summary !== undefined ? { summary: outcome.summary } : {}),
+        ...(outcome.acceptedDiff !== undefined ? { acceptedDiff: outcome.acceptedDiff } : {}),
+        ...(outcome.testRuns !== undefined ? { testRuns: outcome.testRuns } : {}),
       },
       cost: {
         durationMs: outcome.durationMs,
@@ -490,6 +569,13 @@ export class PluginSession {
         activity: {
           searchedTerms: this.searchedTerms,
           providedRefs: this.providedRefs,
+          retrievalFired: this.retrievalFired,
+          eligibleRefs: this.eligibleRefs,
+          deliveredRefs: this.providedRefs,
+          deliveryMode: this.deliveryMode,
+          ...(this.deliveredContentHash
+            ? { deliveredContentHash: this.deliveredContentHash }
+            : {}),
           surfacedRefs: [],
           fetchedRefs: this.fetchedRefs,
           installedSkillRefs: [],

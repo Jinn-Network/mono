@@ -8,6 +8,7 @@ or automatically drains the retired raw pending-task queue.
 from __future__ import annotations
 
 import importlib
+import hashlib
 import json
 from pathlib import Path
 
@@ -18,6 +19,7 @@ consent = importlib.import_module("plugins.jinn.consent")
 capture_buffer = importlib.import_module("plugins.jinn.capture_buffer")
 session_bridge = importlib.import_module("plugins.jinn.session_bridge")
 jinn_layer = importlib.import_module("plugins.jinn.jinn_layer")
+skill_provenance = importlib.import_module("tools.skill_provenance")
 
 
 class RunnerSpy:
@@ -175,6 +177,8 @@ def test_retained_stage1_share_consent_cannot_authorize_stage2_candidate(
     assert episode["outcome"] == {
         "status": "completed",
         "verifiabilityTier": "user-accepted",
+        "acceptedDiff": True,
+        "testRuns": {"passed": 0, "failed": 0},
     }
     assert episode["task"]["summary"] == "Fix the failing test suite"
     assert episode["environment"]["harness"]["name"] == "jinn-agent"
@@ -229,6 +233,101 @@ def test_summary_and_model_captured_when_not_flagged_first_turn(isolated_home, t
     episode = _session_requests(isolated_home)[0]["episode"]
     assert episode["task"]["summary"] == "Search the web for X"
     assert episode["environment"]["model"] == "step-3.7-flash"
+
+
+def test_background_review_is_linked_isolated_and_never_creates_a_candidate(isolated_home):
+    _start_session(session_id="parent", task_id="parent-task")
+
+    token = skill_provenance.set_current_write_origin(
+        skill_provenance.BACKGROUND_REVIEW
+    )
+    try:
+        _run_session(session_id="parent", task_id="review-task")
+    finally:
+        skill_provenance.reset_current_write_origin(token)
+
+    jinn._on_session_end(
+        session_id="parent",
+        task_id="parent-task",
+        completed=True,
+        interrupted=False,
+    )
+
+    requests = _session_requests(isolated_home)
+    assert len(requests) == 2
+    child = next(
+        request for request in requests
+        if request["episode"]["session"]["kind"] == "host-internal"
+    )
+    parent = next(
+        request for request in requests
+        if request["episode"]["session"]["kind"] == "user"
+    )
+    assert child["episode"]["session"]["parentSessionId"] == "parent"
+    assert child["episode"]["session"]["sessionId"] != parent["episode"]["session"]["sessionId"]
+    assert child["episode"]["episodeId"] != parent["episode"]["episodeId"]
+    assert "contributionCandidate" not in child
+    assert parent["contributionCandidate"]["sourceId"] == parent["episode"]["episodeId"]
+
+
+def test_episode_persists_repository_diff_and_test_run_observables(isolated_home):
+    jinn._on_pre_llm_call(
+        session_id="s1",
+        task_id="t1",
+        user_message="Fix the failing test suite",
+        is_first_turn=False,
+        model="test-model",
+    )
+    for call_id, exit_code in (("passing", 0), ("failing", 1)):
+        jinn._on_post_tool_call(
+            tool_name="terminal",
+            args={"command": "yarn test"},
+            session_id="s1",
+            task_id="t1",
+            tool_call_id=call_id,
+            result={"exit_code": exit_code, "output": "done"},
+            duration_ms=1,
+        )
+    jinn._on_session_end(
+        session_id="s1", task_id="t1", completed=True, interrupted=False
+    )
+
+    episode = _session_requests(isolated_home)[0]["episode"]
+    assert episode["task"]["repositorySlug"] == "Jinn-Network/example"
+    assert episode["outcome"]["acceptedDiff"] is True
+    assert episode["outcome"]["testRuns"] == {"passed": 1, "failed": 1}
+
+
+def test_episode_retains_exact_delivery_hash_and_refs_without_injected_bytes(
+    isolated_home, monkeypatch
+):
+    context = "[jinn corpus] exact private delivery bytes"
+
+    def fake_pickup(_message, **kwargs):
+        activity = kwargs["activity"]
+        activity.update({
+            "retrievalFired": True,
+            "eligibleRefs": ["bafy-eligible"],
+            "deliveredRefs": ["bafy-delivered"],
+            "deliveryMode": "delivered",
+            "deliveredContentHash": (
+                "sha256:" + hashlib.sha256(context.encode("utf-8")).hexdigest()
+            ),
+            "searchedTerms": ["delivery"],
+            "providedRefs": ["bafy-delivered"],
+        })
+        return {"context": context}
+
+    monkeypatch.setattr(jinn.pickup, "pickup", fake_pickup)
+    _run_session()
+
+    request = _session_requests(isolated_home)[0]
+    assert request["episode"]["activity"] == request["activity"]
+    assert request["episode"]["activity"]["deliveredContentHash"] == (
+        "sha256:" + hashlib.sha256(context.encode("utf-8")).hexdigest()
+    )
+    assert request["episode"]["activity"]["deliveredRefs"] == ["bafy-delivered"]
+    assert context not in json.dumps(request)
 
 
 def test_veto_records_locally_and_never_publishes_content(isolated_home, tmp_path):
