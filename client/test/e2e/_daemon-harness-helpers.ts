@@ -87,6 +87,8 @@ export interface PostedPredictionTask {
   taskId: bigint;
   taskCidDigest: `0x${string}`;
   manifestDigest: `0x${string}`;
+  /** Transaction that emitted TaskCreated for this task. */
+  creationTxHash: `0x${string}`;
   /**
    * Block number containing the TaskCreated event. waitForDaemonClaim uses
    * this as the initial scan floor so the claim event cannot be missed by a
@@ -1132,6 +1134,7 @@ export async function startDaemon(
           const block = await agentClients.publicClient.getBlock({ blockNumber: BigInt(blockNumber) });
           return Number(block.timestamp);
         },
+        configuredRpcUrls: [rpcUrl],
       },
       // joinedSolverNets: omitted — engine falls back to legacy solverType gate.
       // Harness dispatch for non-baseline selectors is driven by
@@ -1328,7 +1331,13 @@ async function postSignedTaskOnChain(
   const taskId = BigInt(String(taskCreated['taskId']));
   const createdAtBlock = BigInt(created.receipt.blockNumber ?? 0n);
 
-  return { taskId, taskCidDigest, manifestDigest, createdAtBlock };
+  return {
+    taskId,
+    taskCidDigest,
+    manifestDigest,
+    creationTxHash: created.hash,
+    createdAtBlock,
+  };
 }
 
 /**
@@ -1370,7 +1379,10 @@ export async function postPredictionV1Task(
    *   and can solve + self-evaluate + close the loop solo (the verdict leg is
    *   what credits the solver's activity counter).
    */
-  opts: { disallowSolverSelfEvaluation?: boolean } = {},
+  opts: {
+    disallowSolverSelfEvaluation?: boolean;
+    provenance?: { instanceId: string; repo: string; baseCommit: string };
+  } = {},
 ): Promise<PostedPredictionTask> {
   const now = Date.now();
   const nowSec = Math.floor(now / 1000);
@@ -1433,6 +1445,13 @@ export async function postPredictionV1Task(
         orderbookAgeSeconds: 5,
         selectionReason: 'deterministic daemon-harness e2e Task 4 fixture',
       },
+      ...(opts.provenance
+        ? {
+            instance_id: opts.provenance.instanceId,
+            repo: opts.provenance.repo,
+            base_commit: opts.provenance.baseCommit,
+          }
+        : {}),
     },
     eligibility: {},
     claimPolicy: {

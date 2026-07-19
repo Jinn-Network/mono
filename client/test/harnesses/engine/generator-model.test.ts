@@ -9,13 +9,31 @@ const CLAUDE_CODE_WITH_MODEL_FIXTURE = readFileSync(
   fileURLToPath(new URL('../../../fixtures/transcripts/claude-code/stream-json-with-model.jsonl', import.meta.url)),
   'utf-8',
 );
+const CLAUDE_CODE_INIT_MODEL_FIXTURE = readFileSync(
+  fileURLToPath(new URL('../../../fixtures/transcripts/claude-code/stream-json-example.jsonl', import.meta.url)),
+  'utf-8',
+);
 
 function mkTmp(): string {
   return mkdtempSync(join(tmpdir(), 'generator-model-test-'));
 }
 
 describe('harvestGeneratorModel', () => {
-  it('claude-code: harvests message.model from the transcript with source="stream"', () => {
+  it('claude-code: harvests the authoritative system init model from a real transcript fixture', () => {
+    const workingDir = mkTmp();
+    mkdirSync(join(workingDir, '.claude-code'), { recursive: true });
+    writeFileSync(join(workingDir, '.claude-code', 'stdout.jsonl'), CLAUDE_CODE_INIT_MODEL_FIXTURE);
+
+    const result = harvestGeneratorModel('claude-code', workingDir, 'claude-haiku-4-5-20251001');
+
+    expect(result).toEqual({
+      id: 'claude-opus-4-7',
+      provider: 'anthropic',
+      source: 'stream',
+    });
+  });
+
+  it('claude-code: falls back to assistant.message.model when init omits model', () => {
     const workingDir = mkTmp();
     mkdirSync(join(workingDir, '.claude-code'), { recursive: true });
     writeFileSync(join(workingDir, '.claude-code', 'stdout.jsonl'), CLAUDE_CODE_WITH_MODEL_FIXTURE);

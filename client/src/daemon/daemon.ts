@@ -649,7 +649,9 @@ export class Daemon {
    * For portfolio.v0 tasks, the engine dispatches to claude-mcp-hyperliquid.
    * For portfolio.v0.eval tasks, the engine dispatches to portfolio-v0-evaluator.
    *
-   * On-chain provenance is populated from TaskCreated and TaskAttemptCreated.
+   * Canonical task provenance is populated from TaskCreated. The adapter keeps
+   * the later TaskAttemptCreated/evaluation claim provenance in separate
+   * `onchainClaim*` fields so it cannot overwrite the task creation anchor.
    */
   private async _runEngineWatcherLoop(engine: TaskEngine): Promise<void> {
     const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1_000; // 24 h

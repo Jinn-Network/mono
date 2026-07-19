@@ -301,6 +301,31 @@ describe('TaskEngine.claim — impl gate', () => {
       expect(row.onchainCreationTimestamp).toBeNull();
     });
 
+    it('redacts configured RPC URL and API-key material from lookup failure logs', async () => {
+      const rpcSecret = 'super-secret-rpc-key-123456';
+      const rpcUrl = `https://base.example.test/v2/${rpcSecret}`;
+      const getBlockTimestamp = vi.fn().mockRejectedValue(
+        new Error(`HTTP 401 from ${rpcUrl}; rejected api key ${rpcSecret}`),
+      );
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const engine = new TestEngine({
+        store,
+        paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
+        implRegistry: { findFor: () => stubImpl({ isReady: async () => ({ ready: true }) }) },
+        blockTimestamp: { getBlockTimestamp, configuredRpcUrls: [rpcUrl] },
+      });
+      const input = makeInput('req-createdat-redaction');
+      engine.db.insertDiscovered(input);
+
+      await engine.callClaim(engine.db.getByRequestId(input.requestId)!);
+
+      const warning = warn.mock.calls.flat().join(' ');
+      expect(warning).not.toContain(rpcUrl);
+      expect(warning).not.toContain(rpcSecret);
+      expect(warning).toContain('<rpc-');
+      warn.mockRestore();
+    });
+
     it('leaves onchainCreationTimestamp null when getBlockTimestamp resolves undefined', async () => {
       const getBlockTimestamp = vi.fn().mockResolvedValue(undefined);
       const engine = new TestEngine({

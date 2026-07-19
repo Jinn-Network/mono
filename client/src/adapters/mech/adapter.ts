@@ -236,6 +236,8 @@ export class MechAdapter implements ExecutionAdapter {
     taskId: string;
     attemptIndex: number;
     task: Task;
+    onchainCreationTx?: `0x${string}`;
+    onchainCreationBlock?: number;
   }>();
   private pendingEvaluationSolutions = new Map<string, PendingEvaluationSolution>();
   // Original Tasks keyed by request ID (restoration and evaluation)
@@ -1048,13 +1050,17 @@ export class MechAdapter implements ExecutionAdapter {
       taskId: opportunityId,
       task: evaluationTask,
       taskCid: restoration.taskCid,
-      onchainCreationTx: solution.transactionHash,
-      onchainCreationBlock: solution.blockNumber,
+      onchainCreationTx: restoration.onchainCreationTx,
+      onchainCreationBlock: restoration.onchainCreationBlock,
+      onchainOpportunityTx: solution.transactionHash,
+      onchainOpportunityBlock: solution.blockNumber,
     };
     this.evaluationOpportunities.set(opportunityId, {
       taskId: solution.taskId,
       attemptIndex: solution.attemptIndex,
       task: evaluationTask,
+      onchainCreationTx: restoration.onchainCreationTx,
+      onchainCreationBlock: restoration.onchainCreationBlock,
     });
     this.observedTasks.set(opportunityId, announcement);
     // #645: a successful announcement means the candidate has made progress;
@@ -1202,8 +1208,10 @@ export class MechAdapter implements ExecutionAdapter {
         attemptIndex: claimed.attemptIndex,
         task: evaluationOpportunity.task,
         taskCid: evaluationCid,
-        onchainCreationTx: claimed.txHash,
-        onchainCreationBlock: claimed.blockNumber,
+        onchainCreationTx: evaluationOpportunity.onchainCreationTx,
+        onchainCreationBlock: evaluationOpportunity.onchainCreationBlock,
+        onchainClaimTx: claimed.txHash,
+        onchainClaimBlock: claimed.blockNumber,
       };
     }
 
@@ -1232,8 +1240,10 @@ export class MechAdapter implements ExecutionAdapter {
       attemptIndex: claimed.attemptIndex,
       task,
       taskCid: announcement.taskCid,
-      onchainCreationTx: claimed.txHash,
-      onchainCreationBlock: claimed.blockNumber,
+      onchainCreationTx: announcement.onchainCreationTx,
+      onchainCreationBlock: announcement.onchainCreationBlock,
+      onchainClaimTx: claimed.txHash,
+      onchainClaimBlock: claimed.blockNumber,
     };
   }
 
