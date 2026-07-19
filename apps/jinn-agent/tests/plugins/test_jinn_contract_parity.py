@@ -15,6 +15,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 from plugins.jinn import jinn_layer
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -23,6 +25,61 @@ _TS_PROCESS_CONTRACT = (
     _REPO_ROOT / "client" / "packages" / "harness-layer" / "src" / "process-contract.ts"
 )
 _PY_JINN_LAYER = Path(jinn_layer.__file__).resolve()
+
+
+def _extract_python_statuses(source: str, source_path: Path) -> set[str]:
+    match = re.search(
+        r'^[ \t]*if[ \t]+parsed\.get\("status"\)[ \t]+not[ \t]+in[ \t]+\(([^)]*)\)[ \t]*:',
+        source,
+        re.MULTILINE,
+    )
+    assert match, (
+        f"could not locate the status guard tuple in {source_path} — "
+        "declaration moved?"
+    )
+    body = match.group(1)
+    assert re.fullmatch(
+        r'[ \t\r\n]*"[^"\r\n]+"(?:[ \t\r\n]*,[ \t\r\n]*"[^"\r\n]+")*'
+        r"[ \t\r\n]*,?[ \t\r\n]*",
+        body,
+    ), f"unsupported syntax in status guard tuple in {source_path}: {body!r}"
+    return set(re.findall(r'"([^"]+)"', body))
+
+
+def _extract_ts_statuses(source: str, source_path: Path) -> set[str]:
+    match = re.search(
+        r"^export[ \t]+type[ \t]+ProcessStatus[ \t]*=[ \t]*([^;]+);",
+        source,
+        re.MULTILINE,
+    )
+    assert match, (
+        f"could not locate the ProcessStatus union in {source_path} — "
+        "declaration moved?"
+    )
+    body = match.group(1)
+    assert re.fullmatch(
+        r"[ \t\r\n]*'[^'\r\n]+'(?:[ \t\r\n]*\|[ \t\r\n]*'[^'\r\n]+')*[ \t\r\n]*",
+        body,
+    ), f"unsupported syntax in ProcessStatus union in {source_path}: {body!r}"
+    return set(re.findall(r"'([^']+)'", body))
+
+
+def test_python_status_extraction_rejects_unrecognized_member():
+    source_path = Path("fixture-jinn-layer.py")
+
+    with pytest.raises(AssertionError, match=r"status guard tuple.*fixture-jinn-layer\.py"):
+        _extract_python_statuses(
+            'if parsed.get("status") not in ("ok", EXTRA_STATUS):', source_path
+        )
+
+
+def test_ts_status_extraction_rejects_unrecognized_member():
+    source_path = Path("fixture-process-contract.ts")
+
+    with pytest.raises(AssertionError, match=r"ProcessStatus union.*fixture-process-contract\.ts"):
+        _extract_ts_statuses(
+            "export type ProcessStatus = 'ok' | ExtraStatus;", source_path
+        )
 
 
 def test_contract_version_matches_ts():
@@ -46,28 +103,10 @@ def test_contract_version_matches_ts():
 
 def test_process_status_set_matches_ts():
     py_source = _PY_JINN_LAYER.read_text()
-    py_match = re.search(r'parsed\.get\("status"\) not in \(([^)]+)\)', py_source)
-    assert py_match, (
-        f"could not locate the status guard tuple in {_PY_JINN_LAYER} — "
-        "declaration moved?"
-    )
-    py_statuses = set(re.findall(r'"([^"]+)"', py_match.group(1)))
-    assert py_statuses, (
-        f"extracted zero statuses from the guard tuple in {_PY_JINN_LAYER} — "
-        "quote style changed?"
-    )
+    py_statuses = _extract_python_statuses(py_source, _PY_JINN_LAYER)
 
     ts_source = _TS_PROCESS_CONTRACT.read_text()
-    ts_match = re.search(r"export type ProcessStatus\s*=\s*([^;]+);", ts_source)
-    assert ts_match, (
-        f"could not locate the ProcessStatus union in {_TS_PROCESS_CONTRACT} — "
-        "declaration moved?"
-    )
-    ts_statuses = set(re.findall(r"'([^']+)'", ts_match.group(1)))
-    assert ts_statuses, (
-        f"extracted zero statuses from the ProcessStatus union in "
-        f"{_TS_PROCESS_CONTRACT} — quote style changed?"
-    )
+    ts_statuses = _extract_ts_statuses(ts_source, _TS_PROCESS_CONTRACT)
 
     assert py_statuses == ts_statuses, (
         f"process-status set diverged: Python {sorted(py_statuses)} "
