@@ -318,6 +318,75 @@ test('the external watchdog alerts on a canary run beyond the publish timeout', 
   assert.match(created.args.body, /npm-publish-monitor-run:40/);
 });
 
+test('a scheduled watchdog repairs a dropped completion event without another completion wake-up', async () => {
+  const failed = {
+    id: 45,
+    run_number: 45,
+    workflow_id: 7,
+    event: 'push',
+    status: 'completed',
+    conclusion: 'failure',
+    created_at: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+    head_sha: '0'.repeat(40),
+    html_url: 'https://example.test/runs/45',
+  };
+  const harness = monitorHarness({
+    triggerRun: failed,
+    runs: [failed],
+    jobsByRun: {
+      45: [{ name: 'Publish package', conclusion: 'failure' }],
+    },
+  });
+
+  // GitHub concurrency may replace a pending completion consumer with this
+  // scheduled watchdog. The surviving job must make the completion harmless
+  // to drop, without relying on a later artificial completion event.
+  await runHungMonitor(harness);
+
+  const created = harness.calls.find((call) => call.method === 'create');
+  assert.ok(created, 'the surviving watchdog must reconcile the failed completion');
+  assert.equal(created.args.labels[0], 'automated:npm-publish-canary-failure');
+  assert.match(created.args.body, /npm-publish-monitor-run:45/);
+  assert.doesNotMatch(created.args.body, /appears hung/);
+});
+
+test('a scheduled watchdog closes a stale alert after a dropped successful completion event', async () => {
+  const success = {
+    id: 46,
+    run_number: 46,
+    workflow_id: 7,
+    event: 'push',
+    status: 'completed',
+    conclusion: 'success',
+    created_at: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+    head_sha: '9'.repeat(40),
+    html_url: 'https://example.test/runs/46',
+  };
+  const alert = {
+    number: 46,
+    title: '[npm-publish-canary-failure] previous failure',
+    body: 'previous run',
+    state: 'open',
+    labels: ['automated:npm-publish-canary-failure'],
+  };
+  const harness = monitorHarness({
+    triggerRun: success,
+    runs: [success],
+    jobsByRun: {
+      46: [{ name: 'Publish package', conclusion: 'success' }],
+    },
+    issues: [alert],
+  });
+
+  await runHungMonitor(harness);
+
+  assert.equal(alert.state, 'closed');
+  assert.deepEqual(
+    harness.calls.filter((call) => call.method === 'update').map((call) => call.args.issue_number),
+    [46],
+  );
+});
+
 test('a forced watchdog/completion race leaves one current train alert', async () => {
   let arrivals = 0;
   let release;

@@ -258,6 +258,29 @@ jobs:
               ...repo,
               workflow_id: 'npm-publish.yml',
             });
+            const trainFor = (event) => event === 'push'
+              ? 'canary'
+              : (event === 'release' || event === 'workflow_dispatch' ? 'stable' : null);
+            const train = process.env.TRAIN;
+            if (!['canary', 'stable'].includes(train)) {
+              throw new Error(`Unsupported npm publish train: ${train}`);
+            }
+
+            const jobsByRun = new Map();
+            const jobsFor = async (runId) => {
+              if (!jobsByRun.has(runId)) {
+                jobsByRun.set(runId, await github.paginate(
+                  github.rest.actions.listJobsForWorkflowRun,
+                  { ...repo, run_id: runId, per_page: 100 },
+                ));
+              }
+              return jobsByRun.get(runId);
+            };
+            const publishJobFor = async (candidate) => {
+              const jobs = await jobsFor(candidate.id);
+              return jobs.find((job) => job.name === 'Publish package');
+            };
+
             const statuses = ['in_progress', 'queued', 'waiting', 'requested', 'pending'];
             const active = [];
             for (const status of statuses) {
@@ -272,22 +295,44 @@ jobs:
               ));
             }
 
-            const trainFor = (event) => event === 'push'
-              ? 'canary'
-              : (event === 'release' || event === 'workflow_dispatch' ? 'stable' : null);
-            const train = process.env.TRAIN;
-            if (!['canary', 'stable'].includes(train)) {
-              throw new Error(`Unsupported npm publish train: ${train}`);
+            // GitHub keeps at most one running and one pending job per
+            // concurrency group. A later watchdog can therefore replace a
+            // pending workflow_run consumer. Include completed runs here so
+            // every surviving scheduled job repairs a dropped completion.
+            const events = train === 'canary' ? ['push'] : ['release', 'workflow_dispatch'];
+            const candidates = active.filter((run) => trainFor(run.event) === train);
+            const completedCandidates = [];
+            for (const event of events) {
+              completedCandidates.push(...await github.paginate(
+                github.rest.actions.listWorkflowRuns,
+                {
+                  ...repo,
+                  workflow_id: workflow.data.id,
+                  event,
+                  status: 'completed',
+                  per_page: 100,
+                },
+              ));
             }
-            const latestObserved = active
-              .filter((run) => trainFor(run.event) === train)
+            completedCandidates.sort((a, b) => b.run_number - a.run_number);
+            for (const candidate of completedCandidates) {
+              const job = await publishJobFor(candidate);
+              if (!job || job.conclusion !== 'skipped') {
+                candidates.push(candidate);
+                break;
+              }
+            }
+            const latestObserved = candidates
               .sort((a, b) => b.run_number - a.run_number)[0];
             if (!latestObserved) return;
 
-            const startedAt = Date.parse(
-              latestObserved.run_started_at || latestObserved.created_at,
-            );
-            if (!Number.isFinite(startedAt) || startedAt > cutoff) return;
+            const completed = latestObserved.status === 'completed';
+            if (!completed) {
+              const startedAt = Date.parse(
+                latestObserved.run_started_at || latestObserved.created_at,
+              );
+              if (!Number.isFinite(startedAt) || startedAt > cutoff) return;
+            }
 
             const label = `automated:npm-publish-${train}-failure`;
             const titlePrefix = `[npm-publish-${train}-failure]`;
@@ -300,6 +345,33 @@ jobs:
               .filter((issue) => issue.title.startsWith(titlePrefix))
               .sort((a, b) => a.number - b.number);
 
+            const targetJob = completed ? await publishJobFor(latestObserved) : null;
+            const conclusion = completed
+              ? (targetJob?.conclusion || latestObserved.conclusion || 'unknown')
+              : null;
+            if (completed && conclusion === 'success') {
+              const alerts = await listOpenAlerts();
+              if (alerts.length === 0) {
+                core.info(`${train} publish is healthy; no alert issue is open.`);
+                return;
+              }
+              for (const alert of alerts) {
+                await github.rest.issues.createComment({
+                  ...repo,
+                  issue_number: alert.number,
+                  body: `${train} publish recovered in ${latestObserved.html_url}. Closing.`,
+                });
+                await github.rest.issues.update({
+                  ...repo,
+                  issue_number: alert.number,
+                  state: 'closed',
+                  state_reason: 'completed',
+                });
+                core.notice(`Closed ${train} publish alert #${alert.number}.`);
+              }
+              return;
+            }
+
             try {
               await github.rest.issues.createLabel({
                 ...repo,
@@ -311,23 +383,44 @@ jobs:
               if (error.status !== 422) throw error;
             }
 
-            const body = [
-              `## ${train} npm publish appears hung`,
-              '',
-              `Run ${latestObserved.html_url} has remained \`${latestObserved.status}\` for more than ` +
-                `${process.env.HUNG_AFTER_MINUTES} minutes.`,
-              '',
-              '| | |',
-              '|---|---|',
-              `| Publish commit | \`${latestObserved.head_sha || 'unknown'}\` |`,
-              `| Train | \`${train}\` |`,
-              '',
-              'Inspect environment approval, runner availability, and the publish job.',
-              'A later completion event will update or close this train-specific alert.',
-              '',
-              `<!-- npm-publish-monitor-run:${latestObserved.id} -->`,
-            ].join('\n');
-            const title = `${titlePrefix} publish appears hung`;
+            const sha = latestObserved.head_sha || 'unknown';
+            const body = completed
+              ? [
+                  `## ${train} npm publish failed`,
+                  '',
+                  '| | |',
+                  '|---|---|',
+                  `| Train | \`${train}\` |`,
+                  `| Event | \`${latestObserved.event}\` |`,
+                  `| Conclusion | \`${conclusion}\` |`,
+                  `| Publish commit | \`${sha}\` |`,
+                  `| Workflow run | ${latestObserved.html_url} |`,
+                  '',
+                  'A failed publish leaves operators on a stale package. Inspect the run,',
+                  'fix or re-run it; only a newer successful run on this same train closes',
+                  'this issue.',
+                  '',
+                  `<!-- npm-publish-monitor-run:${latestObserved.id} -->`,
+                ].join('\n')
+              : [
+                  `## ${train} npm publish appears hung`,
+                  '',
+                  `Run ${latestObserved.html_url} has remained \`${latestObserved.status}\` for more than ` +
+                    `${process.env.HUNG_AFTER_MINUTES} minutes.`,
+                  '',
+                  '| | |',
+                  '|---|---|',
+                  `| Publish commit | \`${sha}\` |`,
+                  `| Train | \`${train}\` |`,
+                  '',
+                  'Inspect environment approval, runner availability, and the publish job.',
+                  'A later completion event will update or close this train-specific alert.',
+                  '',
+                  `<!-- npm-publish-monitor-run:${latestObserved.id} -->`,
+                ].join('\n');
+            const title = completed
+              ? `${titlePrefix} ${conclusion} at ${sha.slice(0, 8)}`
+              : `${titlePrefix} publish appears hung`;
 
             let alerts = await listOpenAlerts();
             let created = null;
