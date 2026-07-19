@@ -150,7 +150,7 @@ def test_plugin_build_git_error_fails_with_remedy(git_repo, monkeypatch):
     monkeypatch.setattr(doctor.subprocess, "run", _broken_git)
     check = doctor._check_plugin_build(plugin_dir=git_repo)
     assert check["ok"] is False
-    assert check["remedy"] == "hermes plugins update jinn"
+    assert check["remedy"] == "jinn-agent plugins update jinn"
 
 
 # ── Task 3: layer-available + layer-contract (single shared spawn) ───────────
@@ -179,10 +179,10 @@ def test_layer_unavailable_surfaces_stderr_remediation(monkeypatch):
     available, contract = doctor._check_layer(runner=runner)
     assert available["ok"] is False
     assert available["detail"] == stderr
-    assert available["remedy"] == "hermes plugins update jinn"
+    assert available["remedy"] == "jinn-agent plugins update jinn"
     assert contract["ok"] is False
     assert contract["detail"] == "not checked — layer unavailable"
-    assert contract["remedy"] == "hermes plugins update jinn"
+    assert contract["remedy"] == "jinn-agent plugins update jinn"
 
 
 def test_layer_contract_version_mismatch(monkeypatch):
@@ -193,7 +193,7 @@ def test_layer_contract_version_mismatch(monkeypatch):
     assert contract["ok"] is False
     assert "contract v2" in contract["detail"]
     assert "expected v1" in contract["detail"]
-    assert contract["remedy"] == "hermes plugins update jinn"
+    assert contract["remedy"] == "jinn-agent plugins update jinn"
 
 
 def test_layer_contract_unreadable_reply(monkeypatch):
@@ -203,7 +203,7 @@ def test_layer_contract_unreadable_reply(monkeypatch):
     assert available["ok"] is True
     assert contract["ok"] is False
     assert "unreadable" in contract["detail"]
-    assert contract["remedy"] == "hermes plugins update jinn"
+    assert contract["remedy"] == "jinn-agent plugins update jinn"
 
 
 def test_layer_nonzero_exit_counts_as_unavailable(monkeypatch):
@@ -227,7 +227,7 @@ def test_layer_env_override_reported_and_remedy_adjusted(monkeypatch):
     available, _ = doctor._check_layer(runner=broken)
     assert available["ok"] is False
     assert "JINN_LAYER_BIN" in available["remedy"]
-    assert available["remedy"] != "hermes plugins update jinn"
+    assert available["remedy"] != "jinn-agent plugins update jinn"
 
 
 def test_layer_checks_share_exactly_one_spawn():
@@ -307,7 +307,7 @@ def test_host_provider_is_informational_pointer():
     assert check == {
         "name": "host-provider",
         "ok": True,
-        "detail": "provider/credential sanity is owned by the host — run: hermes doctor",
+        "detail": "provider/credential sanity is owned by the host — run: jinn-agent doctor",
     }
 
 
@@ -413,12 +413,12 @@ def test_banner_all_green_is_three_lines():
 
 def test_banner_with_failure_leads_with_fail_line_and_remedy():
     failing = [
-        {"name": "layer-available", "ok": False, "detail": "not found", "remedy": "hermes plugins update jinn"},
+        {"name": "layer-available", "ok": False, "detail": "not found", "remedy": "jinn-agent plugins update jinn"},
         *_HEALTHY[2:],
     ]
     lines = doctor.first_session_banner(failing)
     assert lines[0] == "[fail] layer-available: not found"
-    assert lines[1] == "       remedy: hermes plugins update jinn"
+    assert lines[1] == "       remedy: jinn-agent plugins update jinn"
     assert lines[-1] == "commands: /jinn · re-check: /jinn doctor"
     assert len(lines) == 4
 
@@ -495,7 +495,7 @@ def test_session_start_non_layer_failure_is_loud_but_keeps_bridge(wired, monkeyp
             "name": "plugin-build",
             "ok": False,
             "detail": "fatal: broken",
-            "remedy": "hermes plugins update jinn",
+            "remedy": "jinn-agent plugins update jinn",
         },
     )
     jinn._runner = ContractRunner()
@@ -525,7 +525,7 @@ def test_session_start_failure_prints_every_time(wired, capsys):
 
     err = capsys.readouterr().err
     assert err.count("[fail] layer-available: jinn-layer: not found") == 2
-    assert err.count("       remedy: hermes plugins update jinn") == 4  # 2 checks x 2 sessions
+    assert err.count("       remedy: jinn-agent plugins update jinn") == 4  # 2 checks x 2 sessions
     assert jinn._degraded == "jinn-layer: not found"
 
 
