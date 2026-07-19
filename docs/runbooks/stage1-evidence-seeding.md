@@ -61,8 +61,12 @@ schema does not publish a scrub-component manifest. See
 4. **Author `synthesis` and `tags`.** `synthesis` is a 3-6 sentence,
    task-linked "how it was solved" — write it yourself; it is never
    generated at retrieval time. `tags` should name the subsystem vocabulary
-   a related task would search on (see the source fixture's
-   `mono, dashboard, vitest, version-status, async, flake`).
+   a related task would search on. Records remain substrate-only by default.
+   A curator may explicitly admit a reviewed record to pickup by adding the
+   reserved `retrieval:visible.v1` tag; do not add it to bulk-derived records.
+   The source fixture is the one admitted fixture:
+   `mono, dashboard, vitest, version-status, async, flake,
+   retrieval:visible.v1`.
 5. **Shape the file** against the seed-episode contract
    (`client/packages/harness-layer/src/seed-import/episode-fetch.ts`,
    `SeedEpisodeSchema`):
@@ -252,8 +256,8 @@ unchanged?".
 
 | File | Kind | Role |
 |---|---|---|
-| `source-dashboard-flake.episode.json` | evidence | The positive match: re-performs the real dashboard `update_available` test flake fix (`163e070d`) at its pre-fix commit. |
-| `distractor-operator-claims.episode.json` | evidence | Same repo, different module (`d682f811`) — proves selection is finer than repository match. |
-| `distractor-sympy-printing.episode.json` | evidence | Different domain entirely (sympy LaTeX printing) — proves domain relevance. Explicitly synthetic (`origin: synthetic-selection-distractor`, `verifiabilityTier: user-accepted`, no source commit), unlike the two commit-verified episodes above. |
-| `distractor-skill-tdd.json` | skill | Skill-shaped seed (existing lane's format) — proves skills are excluded from evidence pickup. |
-| `distractor-skill-tdd-dup.json` | skill | Same `skillMd` content as the above under a distinct identity — proves content-key dedup at the consumer. |
+| `source-dashboard-flake.episode.json` | evidence | The explicitly retrieval-visible positive match: re-performs the real dashboard `update_available` test flake fix (`163e070d`) at its pre-fix commit. |
+| `distractor-operator-claims.episode.json` | evidence | Same repo, different module (`d682f811`), deliberately unmarked and therefore substrate-only. |
+| `distractor-sympy-printing.episode.json` | evidence | Different domain entirely (sympy LaTeX printing), deliberately unmarked and therefore substrate-only. Explicitly synthetic (`origin: synthetic-selection-distractor`, `verifiabilityTier: user-accepted`, no source commit), unlike the two commit-verified episodes above. |
+| `distractor-skill-tdd.json` | skill | Unmarked skill-shaped seed (existing lane's format), fetchable but retired from evidence pickup. |
+| `distractor-skill-tdd-dup.json` | skill | Same `skillMd` content as the above under a distinct identity, also retrieval-retired. |
