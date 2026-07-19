@@ -700,4 +700,3 @@ describe('firstTurnPickup — post-fetch retrieval-visibility content guard (#18
     expect(result.contextBlock).not.toContain('bafyRank2ContentInvisible');
   });
 });
-
