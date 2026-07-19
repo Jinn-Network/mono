@@ -15,8 +15,9 @@ stock Hermes install, unchanged.
 
 The `jinn-layer` CLI on PATH — it arrives with the plugin; refresh it with
 `hermes plugins update jinn` — or `JINN_LAYER_BIN` pointing at a local build.
-All scrubbing, anchoring, and corpus reads happen inside that CLI; this plugin
-is a thin adapter.
+Corpus reads, local capture, scrubbing, and distillation happen behind that
+layer boundary; this plugin is a thin adapter. Retained outbound machinery is
+forced disabled in Stage 2.
 
 ## Install (stock Hermes)
 
