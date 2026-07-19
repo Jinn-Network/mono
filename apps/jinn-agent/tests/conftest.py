@@ -420,7 +420,7 @@ def _isolate_hermes_home(_hermetic_environment):
 
 
 @pytest.fixture(autouse=True)
-def _jinn_store_write_guard(request, _hermetic_environment):
+def _jinn_store_write_guard(request, _hermetic_environment, monkeypatch):
     """Fail loud if any jinn store resolver points at the real store tree.
 
     ``_hermetic_environment`` (step 6) redirects the store env vars to a
@@ -432,9 +432,13 @@ def _jinn_store_write_guard(request, _hermetic_environment):
     if request.node.get_closest_marker("jinn_store_guard_bypass"):
         yield
         return
-    from tests.support.jinn_store import assert_jinn_store_sandboxed
+    from tests.support.jinn_store import (
+        assert_jinn_store_sandboxed,
+        install_jinn_store_resolver_guards,
+    )
 
     assert_jinn_store_sandboxed()
+    install_jinn_store_resolver_guards(monkeypatch)
     yield
     # Tests can mutate or unset the environment after fixture setup. Re-check
     # before monkeypatch restores it so those writes fail the owning test.

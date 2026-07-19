@@ -14,8 +14,10 @@ selected fixture records.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import stat
 import sys
 import tarfile
 import tempfile
@@ -56,12 +58,29 @@ class StorePaths(NamedTuple):
     mineable_store: Path
 
 
+class SelectedFile(NamedTuple):
+    """Identity and content observed when a fixture file was selected."""
+
+    path: Path
+    device: int
+    inode: int
+    mode: int
+    size: int
+    mtime_ns: int
+    sha256: str
+
+
 class CleanupPlan(NamedTuple):
     paths: StorePaths
-    files: tuple[Path, ...]
+    selected_files: tuple[SelectedFile, ...]
     mineable_record_ids: tuple[str, ...]
     mineable_before: str | None
     mineable_after: dict[str, Any] | None
+
+    @property
+    def files(self) -> tuple[Path, ...]:
+        """Paths retained for display and backward-compatible callers."""
+        return tuple(selected.path for selected in self.selected_files)
 
 
 @contextmanager
@@ -160,24 +179,72 @@ def _fixture_episode_ref(value: Any) -> bool:
     )
 
 
-def _fixture_files(directory: Path) -> list[Path]:
+def _read_regular_file(path: Path) -> tuple[SelectedFile, bytes]:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise CleanupDataError(
+            f"selected file changed during inspection: {path}"
+        ) from exc
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise UnsafeCleanupPath(f"refusing non-regular store entry: {path}")
+        with os.fdopen(fd, "rb", closefd=False) as handle:
+            content = handle.read()
+        after = os.fstat(fd)
+    finally:
+        os.close(fd)
+    observed_before = (
+        before.st_dev,
+        before.st_ino,
+        before.st_mode,
+        before.st_size,
+        before.st_mtime_ns,
+    )
+    observed_after = (
+        after.st_dev,
+        after.st_ino,
+        after.st_mode,
+        after.st_size,
+        after.st_mtime_ns,
+    )
+    if observed_before != observed_after or len(content) != after.st_size:
+        raise CleanupDataError(f"selected file changed during inspection: {path}")
+    return (
+        SelectedFile(
+            path=path,
+            device=after.st_dev,
+            inode=after.st_ino,
+            mode=after.st_mode,
+            size=after.st_size,
+            mtime_ns=after.st_mtime_ns,
+            sha256=hashlib.sha256(content).hexdigest(),
+        ),
+        content,
+    )
+
+
+def _fixture_files(directory: Path) -> list[SelectedFile]:
     if not directory.exists():
         return []
     if not directory.is_dir():
         raise UnsafeCleanupPath(f"store path is not a directory: {directory}")
 
-    selected: list[Path] = []
+    selected: list[SelectedFile] = []
     for path in sorted(directory.iterdir()):
         if path.is_symlink():
             raise UnsafeCleanupPath(f"refusing symlink store entry: {path}")
         if not path.is_file() or path.suffix != ".json":
             continue
         try:
-            record = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            evidence, content = _read_regular_file(path)
+            record = json.loads(content.decode("utf-8"))
+        except (OSError, UnicodeError, ValueError):
             continue
         if _fixture_session_id(record) is not None:
-            selected.append(path)
+            selected.append(evidence)
     return selected
 
 
@@ -232,10 +299,11 @@ def _mineable_edit(
 def build_cleanup_plan(paths: StorePaths | None = None) -> CleanupPlan:
     selected_paths = paths if paths is not None else store_paths()
     _validate_paths(selected_paths)
-    files = tuple(
+    selected_files = tuple(
         sorted(
             _fixture_files(selected_paths.captures)
-            + _fixture_files(selected_paths.episodes)
+            + _fixture_files(selected_paths.episodes),
+            key=lambda selected: selected.path,
         )
     )
     record_ids, mineable_before, mineable_after = _mineable_edit(
@@ -243,7 +311,7 @@ def build_cleanup_plan(paths: StorePaths | None = None) -> CleanupPlan:
     )
     return CleanupPlan(
         paths=selected_paths,
-        files=files,
+        selected_files=selected_files,
         mineable_record_ids=record_ids,
         mineable_before=mineable_before,
         mineable_after=mineable_after,
@@ -258,6 +326,15 @@ def _validate_selected_file(path: Path, paths: StorePaths) -> None:
     _reject_symlink_components(lexical)
     if path.is_symlink() or not path.is_file():
         raise UnsafeCleanupPath(f"selected path is not a regular file: {path}")
+
+
+def _validate_selected_snapshot(selected: SelectedFile, paths: StorePaths) -> None:
+    _validate_selected_file(selected.path, paths)
+    current, _content = _read_regular_file(selected.path)
+    if current != selected:
+        raise CleanupDataError(
+            f"selected file changed after inspection: {selected.path}"
+        )
 
 
 def _write_json_atomic(path: Path, value: dict[str, Any]) -> None:
@@ -297,8 +374,10 @@ def apply_cleanup(plan: CleanupPlan, backup: Path) -> None:
         sources.append(plan.paths.mineable_store)
     if not sources:
         return
-    for source in sources:
-        _validate_selected_file(source, plan.paths)
+    for selected in plan.selected_files:
+        _validate_selected_snapshot(selected, plan.paths)
+    if plan.mineable_after is not None:
+        _validate_selected_file(plan.paths.mineable_store, plan.paths)
     if (
         plan.mineable_before is not None
         and plan.paths.mineable_store.read_text(encoding="utf-8")
@@ -318,9 +397,12 @@ def apply_cleanup(plan: CleanupPlan, backup: Path) -> None:
             )
     os.chmod(backup, 0o600)
 
-    for path in plan.files:
-        _validate_selected_file(path, plan.paths)
-        path.unlink()
+    for selected in plan.selected_files:
+        # Recheck identity and bytes immediately before unlinking. A path that
+        # now names legitimate work is retained even if it reused a fixture
+        # filename after the operator inspected the plan.
+        _validate_selected_snapshot(selected, plan.paths)
+        selected.path.unlink()
     if plan.mineable_after is not None:
         _validate_selected_file(plan.paths.mineable_store, plan.paths)
         if (

@@ -159,6 +159,27 @@ def test_cleanup_refuses_contribution_store_changed_after_inspection(tmp_path):
     )["records"]
 
 
+def test_cleanup_refuses_fixture_replaced_with_legitimate_record(tmp_path):
+    home = tmp_path / "home"
+    paths = cleanup.store_paths(home)
+    selected = paths.captures / "s1.json"
+    _write_record(selected, session_id="s1")
+    plan = cleanup.build_cleanup_plan(paths)
+
+    selected.unlink()
+    _write_record(selected, session_id="20260719_ordinary_work")
+
+    with pytest.raises(cleanup.CleanupDataError, match="changed after inspection"):
+        cleanup.apply_cleanup(
+            plan,
+            paths.root / ".pollution-backup-test.tgz",
+        )
+
+    assert json.loads(selected.read_text(encoding="utf-8"))["session"][
+        "sessionId"
+    ] == "20260719_ordinary_work"
+
+
 def test_cleanup_refuses_symlinked_record(tmp_path):
     home = tmp_path / "home"
     paths = cleanup.store_paths(home)

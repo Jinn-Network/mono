@@ -18,7 +18,9 @@ The store env vars and their resolvers (see Jinn-Network/mono#1841):
 
 from __future__ import annotations
 
+from functools import wraps
 from pathlib import Path
+from typing import Callable
 
 from plugins.jinn import distill, session_bridge
 
@@ -30,6 +32,23 @@ JINN_STORE_RESOLVERS = (
 )
 
 
+def _assert_resolved_store_sandboxed(
+    env_var: str,
+    resolver: Callable[[], Path],
+    resolved: Path,
+) -> None:
+    real_root = (Path.home() / ".jinn-client").resolve()
+    resolved = Path(resolved).expanduser().resolve()
+    if resolved == real_root or real_root in resolved.parents:
+        raise AssertionError(
+            f"jinn store guard: {resolver.__module__}.{resolver.__name__}() "
+            f"resolved to {resolved}, which is inside the real store root "
+            f"{real_root}. Set ${env_var} to a per-test tempdir (the "
+            f"_hermetic_environment fixture does this) so the suite never "
+            f"writes to the default store paths."
+        )
+
+
 def assert_jinn_store_sandboxed() -> None:
     """Raise AssertionError if any jinn store resolver points at the real tree.
 
@@ -37,14 +56,24 @@ def assert_jinn_store_sandboxed() -> None:
     inside ``~/.jinn-client``. The error names the offending env var so the
     fix (redirect it to a tempdir) is obvious.
     """
-    real_root = (Path.home() / ".jinn-client").resolve()
     for env_var, resolver in JINN_STORE_RESOLVERS:
-        resolved = Path(resolver()).expanduser().resolve()
-        if resolved == real_root or real_root in resolved.parents:
-            raise AssertionError(
-                f"jinn store guard: {resolver.__module__}.{resolver.__name__}() "
-                f"resolved to {resolved}, which is inside the real store root "
-                f"{real_root}. Set ${env_var} to a per-test tempdir (the "
-                f"_hermetic_environment fixture does this) so the suite never "
-                f"writes to the default store paths."
-            )
+        _assert_resolved_store_sandboxed(env_var, resolver, resolver())
+
+
+def install_jinn_store_resolver_guards(monkeypatch) -> None:
+    """Guard every production resolver call, including transient escapes."""
+    for env_var, resolver in JINN_STORE_RESOLVERS:
+        module = distill if resolver.__module__ == distill.__name__ else session_bridge
+
+        @wraps(resolver)
+        def guarded(
+            *args,
+            _env_var=env_var,
+            _resolver=resolver,
+            **kwargs,
+        ):
+            resolved = _resolver(*args, **kwargs)
+            _assert_resolved_store_sandboxed(_env_var, _resolver, resolved)
+            return resolved
+
+        monkeypatch.setattr(module, resolver.__name__, guarded)
