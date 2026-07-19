@@ -25,7 +25,7 @@ from typing import Optional
 from . import consent
 from . import jinn_layer
 
-_UPDATE_REMEDY = "hermes plugins update jinn"
+_UPDATE_REMEDY = "jinn-agent plugins update jinn"
 
 # Minimum Node.js major for the layer mechanism — the cold-stock gate's own
 # floor (scripts/cold-stock-e2e.sh), stricter than the client's >=20 check.
@@ -221,7 +221,7 @@ def _check_host_provider() -> dict:
     return {
         "name": "host-provider",
         "ok": True,
-        "detail": "provider/credential sanity is owned by the host — run: hermes doctor",
+        "detail": "provider/credential sanity is owned by the host — run: jinn-agent doctor",
     }
 
 
