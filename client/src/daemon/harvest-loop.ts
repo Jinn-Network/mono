@@ -40,7 +40,7 @@ import { recordLoopTick } from './loop-heartbeat.js';
 import { canonicalJson } from '../harnesses/engine/canonical-json.js';
 import { uploadToIpfs } from '../adapters/mech/ipfs.js';
 import { mineSessionEchoes } from '../solver-types/_swe-rebench-v2-session-echo.js';
-import type { MineableTraceStore } from '../solver-types/_swe-rebench-v2-mineable-store.js';
+import type { MineableTraceStorePort } from '../solver-types/_swe-rebench-v2-mineable-store-port.js';
 
 export type HarvestSource = 'commits' | 'sessions';
 
@@ -76,7 +76,7 @@ export interface HarvestLoopConfig {
   /** Mineable-trace store to drain when `sources` includes `'sessions'`.
    *  Always constructed by the daemon (local retention is unconditional per
    *  mono#1714) — see `main.ts`. */
-  mineableStore?: MineableTraceStore;
+  mineableStore?: MineableTraceStorePort;
   /** Recording operator's Safe, stamped into session-echo provenance as
    *  `sourceSolverSafe` so the operator's own claim on their own echo is
    *  refused (spec §7). Same value as `minterSafe` in practice. */
