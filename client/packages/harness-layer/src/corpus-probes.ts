@@ -16,7 +16,7 @@
  * skills never satisfy onboarding, even though they remain valid corpus data.
  */
 
-import { hasRetrievalMark } from '@jinn-network/plugin';
+import { deriveRepositorySearchTerms, hasRetrievalMark } from '@jinn-network/plugin';
 import { createCorpusAdapter } from './adapters/corpus-adapter.js';
 import type { HarnessLayer, CorpusSearchHit } from './consume.js';
 
@@ -74,10 +74,22 @@ export async function corpusProbes({
   repoSlug: string;
   k?: number;
 }): Promise<DoctorCheck[]> {
+  const repoTerms = deriveRepositorySearchTerms(repoSlug);
+  // An empty term set means pickup has no repository vocabulary (for example,
+  // a two-character repo name). Probe the empty query only for reachability;
+  // it must not make arbitrary corpus records count as repo content.
+  const searchTerms = repoTerms.length > 0 ? repoTerms : [''];
   let hits: CorpusSearchHit[];
   try {
-    hits = await layer.corpus.search(repoSlug, {
-      limit: Math.max(CORPUS_PROBE_CANDIDATE_LIMIT, k),
+    const pages = await Promise.all(searchTerms.map((term) =>
+      layer.corpus.search(term, {
+        limit: Math.max(CORPUS_PROBE_CANDIDATE_LIMIT, k),
+      })));
+    const seen = new Set<string>();
+    hits = pages.flat().filter((hit) => {
+      if (seen.has(hit.ref)) return false;
+      seen.add(hit.ref);
+      return true;
     });
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e);
@@ -97,7 +109,7 @@ export async function corpusProbes({
   // Ranking-side visibility gate: this is the same canonical mark helper the
   // corpus adapter uses to set KnowledgeHit.retrievalVisible. Skills are not
   // retrieval evidence, even if a malformed producer tagged one.
-  const markedCandidates = hits.filter(
+  const markedCandidates = (repoTerms.length > 0 ? hits : []).filter(
     (hit) => hit.kind !== 'skill' && hasRetrievalMark(hit.tags ?? []),
   );
 

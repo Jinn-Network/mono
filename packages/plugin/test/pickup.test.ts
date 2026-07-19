@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   classifyPayload,
   dedupeKnowledgeHits,
+  deriveRepositorySearchTerms,
   deriveSearchTerms,
   rankKnowledgeHits,
   scoreKnowledgeHit,
@@ -24,6 +25,13 @@ function hit(overrides: Partial<KnowledgeHit> = {}): KnowledgeHit {
 }
 
 describe('deriveSearchTerms (rescope §3.3)', () => {
+  it('shares the canonical repository-vocabulary query with non-session consumers', () => {
+    expect(deriveRepositorySearchTerms('Jinn-Network/mono')).toEqual(['mono']);
+    expect(deriveSearchTerms('', 'Jinn-Network/mono')).toEqual(
+      deriveRepositorySearchTerms('Jinn-Network/mono'),
+    );
+  });
+
   it('prioritises backticked/quoted tokens over plain words', () => {
     const terms = deriveSearchTerms('please fix `useWidgetState` in the dashboard');
     expect(terms[0]).toBe('usewidgetstate');

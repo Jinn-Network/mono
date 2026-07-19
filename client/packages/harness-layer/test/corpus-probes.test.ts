@@ -96,18 +96,22 @@ function wireRecord(
 
 interface FakeLayerOptions {
   hits?: CorpusSearchHit[];
+  hitsForQuery?: (query: string) => CorpusSearchHit[];
   records?: Map<string, WireCorpusRecord>;
   throwErr?: Error;
   searchOptions?: Array<{ limit?: number; kind?: 'skill' | 'trace'; includeSuperseded?: boolean }>;
+  searchQueries?: string[];
   fetchedRefs?: string[];
 }
 
 /** A layer dep whose corpus search/get paths are deterministic and network-free. */
 function makeFakeLayer({
   hits = [],
+  hitsForQuery,
   records = new Map(hits.map((hit) => [hit.ref, wireRecord(hit.ref)])),
   throwErr,
   searchOptions,
+  searchQueries,
   fetchedRefs,
 }: FakeLayerOptions = {}): HarnessLayer {
   return {
@@ -118,10 +122,11 @@ function makeFakeLayer({
       captureMetaUrl: '',
     },
     corpus: {
-      async search(_query, opts) {
+      async search(query, opts) {
         if (throwErr) throw throwErr;
+        searchQueries?.push(query);
         searchOptions?.push(opts ?? {});
-        return hits.slice(0, opts?.limit);
+        return (hitsForQuery?.(query) ?? hits).slice(0, opts?.limit);
       },
       async get(ref) {
         fetchedRefs?.push(ref);
@@ -232,6 +237,26 @@ describe('corpusProbes', () => {
     });
   });
 
+  it('uses pickup repo vocabulary — mono, not the raw Jinn-Network/mono slug — for the real probe query', async () => {
+    const searchQueries: string[] = [];
+    const markedHits = ['one', 'two', 'three'].map((ref) =>
+      fakeHit({ ref, tags: ['mono', RETRIEVAL_VISIBLE_TAG] }));
+    const records = new Map(markedHits.map((hit) => [hit.ref, wireRecord(hit.ref)]));
+    const layer = makeFakeLayer({
+      hitsForQuery: (query) => query === 'mono' ? markedHits : [],
+      records,
+      searchQueries,
+    });
+
+    const checks = await corpusProbes({
+      layer,
+      repoSlug: 'Jinn-Network/mono',
+    });
+
+    expect(searchQueries).toEqual(['mono']);
+    expect(checkNamed(checks, 'corpus-content').ok).toBe(true);
+  });
+
   it('does not count a search-marked hit when its canonical record content is unmarked', async () => {
     const hit = fakeHit({ ref: 'stale-search-mark', tags: ['mono', RETRIEVAL_VISIBLE_TAG] });
     const records = new Map([
@@ -274,8 +299,14 @@ describe('corpusProbes', () => {
     expect(enoughCorpusForRepo(kExactly)).toBe(true);
 
     // corpus-content.ok is the SAME predicate over the SAME hit counts — one source of truth.
-    const below = await corpusProbes({ layer: makeFakeLayer({ hits: kMinus1 }), repoSlug: 'r' });
-    const atK = await corpusProbes({ layer: makeFakeLayer({ hits: kExactly }), repoSlug: 'r' });
+    const below = await corpusProbes({
+      layer: makeFakeLayer({ hits: kMinus1 }),
+      repoSlug: 'owner/repo',
+    });
+    const atK = await corpusProbes({
+      layer: makeFakeLayer({ hits: kExactly }),
+      repoSlug: 'owner/repo',
+    });
     expect(checkNamed(below, 'corpus-content').ok).toBe(false);
     expect(checkNamed(atK, 'corpus-content').ok).toBe(true);
   });

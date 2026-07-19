@@ -69,6 +69,21 @@ function pathSegments(token: string): string[] {
 }
 
 /**
+ * The repository vocabulary shared by interactive pickup and repo-scoped
+ * corpus probes. A full `owner/repo` slug does not occur in record text; the
+ * repository name is the searchable term (#1790). Keep the minimum length in
+ * this one helper so non-session consumers cannot drift from pickup.
+ */
+export function deriveRepositorySearchTerms(repositorySlug?: string): string[] {
+  if (!repositorySlug || repositorySlug.trim().length === 0) return [];
+  const slug = repositorySlug.trim();
+  const lastSlash = slug.lastIndexOf('/');
+  const repoName = lastSlash >= 0 ? slug.slice(lastSlash + 1) : slug;
+  if (repoName.length < MIN_REPO_NAME_LENGTH) return [];
+  return [repoName.toLowerCase()];
+}
+
+/**
  * Up to `maxTerms` deterministic lowercase search terms, in priority order
  * (rescope §3.3, lexical v2 — #1791/#1790/#1789): backticked/quoted tokens
  * (edge-stripped, near-verbatim); identifier-shaped tokens — a `/`-bearing
@@ -132,11 +147,10 @@ export function deriveSearchTerms(
   //    `repositorySlug` (e.g. `mono` from `Jinn-Network/mono`), not the full
   //    slug: no record's text ever contains the literal `owner/repo` slug,
   //    so the slug itself was dead weight as a search term (#1790).
-  if (terms.length < maxTerms && repositorySlug && repositorySlug.trim().length > 0) {
-    const slug = repositorySlug.trim();
-    const lastSlash = slug.lastIndexOf('/');
-    const repoName = lastSlash >= 0 ? slug.slice(lastSlash + 1) : slug;
-    if (repoName.length >= MIN_REPO_NAME_LENGTH) push(repoName);
+  if (terms.length < maxTerms) {
+    for (const repoTerm of deriveRepositorySearchTerms(repositorySlug)) {
+      push(repoTerm);
+    }
   }
 
   // 4. Remaining non-stopword tokens (>=4 chars), in MESSAGE ORDER (#1791
