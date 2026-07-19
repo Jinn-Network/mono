@@ -63,7 +63,7 @@ describe('ScrubPipeline', () => {
     expect(result.attributes).toEqual({ y: 'keep' });
   });
 
-  test('exposes stage name+version pairs for the provenance manifest', () => {
+  test('exposes stage name+version pairs for local pipeline-profile inspection', () => {
     const pipeline = new ScrubPipeline([upper, dropX]);
     expect(pipeline.components).toEqual([
       { name: 'upper', version: '1' },
