@@ -36,14 +36,14 @@ def test_current_session_renders_searched_and_provided():
             "providedRefs": ["knowledge/ref-a"],
         },
         capture_active=True,
-        share_enabled=False,
     ))
 
     assert "Jinn session" in out
     assert "knowledge searched dashboard, vitest · provided 1 (knowledge/ref-a)" in out
     assert "capture active" in out
     assert "eligibility pending until session end" in out
-    assert "contribution pending until session end · publication OFF" in out
+    assert "contribution parked · nothing leaves this machine" in out
+    assert "publication ON" not in out
     assert "local learning reserves this capture at session end" in out
 
 
@@ -51,17 +51,17 @@ def test_current_session_nothing_found_yet_is_explicit():
     out = _plain(session_view.render_current(
         activity={"searchedTerms": [], "providedRefs": []},
         capture_active=False,
-        share_enabled=True,
     ))
     assert "nothing relevant found yet" in out
     assert "capture waiting for ordinary work" in out
+    assert "contribution parked · nothing leaves this machine" in out
+    assert "publication ON" not in out
 
 
 def test_current_session_searched_but_nothing_provided_is_the_honest_line():
     out = _plain(session_view.render_current(
         activity={"searchedTerms": ["quasar", "unobtainium"], "providedRefs": []},
         capture_active=True,
-        share_enabled=False,
     ))
     assert "knowledge searched · nothing relevant found" in out
     # The honest nothing-found line never lists terms (rescope §3.4).
@@ -174,7 +174,6 @@ def test_boundary_no_installed_skill_state_anywhere_in_session_rendering():
     current = _plain(session_view.render_current(
         activity={"searchedTerms": ["dashboard"], "providedRefs": ["bafyRef1"]},
         capture_active=True,
-        share_enabled=True,
     ))
     for out in (complete, current):
         assert "installed" not in out.lower()

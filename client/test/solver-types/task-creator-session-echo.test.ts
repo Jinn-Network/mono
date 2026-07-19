@@ -13,7 +13,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mineSessionEchoes, type SessionEchoMintDeps } from '../../src/solver-types/_swe-rebench-v2-session-echo.js';
-import { MineableTraceStore, type MineableTraceRecord } from '../../src/solver-types/_swe-rebench-v2-mineable-store.js';
+import {
+  enforceStage2ParkedPublication,
+  MineableTraceStore,
+  type MineableTraceRecord,
+} from '../../src/solver-types/_swe-rebench-v2-mineable-store.js';
 import { ValidatedPoolStore, EVAL_SEMANTICS_VERSION } from '../../src/solver-types/_swe-rebench-v2-validated-pool.js';
 import { MintedPoolStore, loadMintedPoolTasks } from '../../src/solver-types/_swe-rebench-v2-minted-pool.js';
 import { MINTED_DATASET_PLACEHOLDER, sessionEchoInstanceId } from '../../src/solver-types/_swe-rebench-v2-harvest.js';
@@ -219,6 +223,43 @@ describe('mineSessionEchoes', () => {
       const poolTasks = await loadMintedPoolTasks(env.mintedStore, EVAL_SEMANTICS_VERSION);
       expect(poolTasks.map((t) => t.instance_id)).not.toContain(mintedId);
       expect(await env.mineableStore.get(record.sourceId)).toMatchObject({
+        localState: 'minted',
+        publicationState: 'disabled',
+      });
+    } finally {
+      await cleanup(env);
+    }
+  });
+
+  it('stage 2 quarantines an already-queued Stage 1 record but still mints it locally', async () => {
+    const env = await setup();
+    try {
+      const retained = makeRecord({
+        sourceId: 'retained-stage1-share',
+        publishMinedTasksConsent: true,
+      });
+      await env.mineableStore.append(retained);
+      await env.mineableStore.authorize(retained.sourceId, '2026-07-15T12:01:00.000Z');
+      expect(await env.mineableStore.get(retained.sourceId)).toMatchObject({
+        localState: 'recorded',
+        publicationState: 'queued',
+      });
+
+      const publishConsent = await enforceStage2ParkedPublication(env.mineableStore);
+      const isPublic = vi.fn().mockResolvedValue(true);
+      const result = await mineSessionEchoes(baseDeps(
+        env,
+        makeSuccessfulRunner(),
+        // A stale caller-side publish toggle is deliberately true: durable
+        // quarantine state remains the final outbound authority.
+        { publish: true, publicRepoChecker: { isPublic } },
+      ));
+
+      expect(publishConsent).toBe(false);
+      expect(result.admitted).toHaveLength(1);
+      expect(isPublic).not.toHaveBeenCalled();
+      expect(uploadToIpfs).not.toHaveBeenCalled();
+      expect(await env.mineableStore.get(retained.sourceId)).toMatchObject({
         localState: 'minted',
         publicationState: 'disabled',
       });

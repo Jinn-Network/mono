@@ -137,3 +137,15 @@ export class MineableTraceStore extends ContributionStore {
     await this.markMinted(sourceId);
   }
 }
+
+/**
+ * Stage 2 keeps the contribution substrate local while preserving local
+ * candidate mining. Revoke retained Stage 1 queue authorization and return
+ * the only candidate-consent value production may stamp in this stage.
+ */
+export async function enforceStage2ParkedPublication(
+  store: MineableTraceStore,
+): Promise<false> {
+  await store.disableUnpublished();
+  return false;
+}

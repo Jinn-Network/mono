@@ -156,7 +156,7 @@ def test_declined_consent_never_uses_legacy_raw_publication(isolated_home, tmp_p
     ] is False
 
 
-def test_accepted_session_delegates_complete_episode_without_pending_file(
+def test_retained_stage1_share_consent_cannot_authorize_stage2_candidate(
     isolated_home, tmp_path, monkeypatch
 ):
     # Fork behaviour: bin/jinn-agent exports JINN_HARNESS_NAME=jinn-agent.
@@ -165,9 +165,12 @@ def test_accepted_session_delegates_complete_episode_without_pending_file(
     _run_session()
     assert _write_calls(isolated_home) == []
     assert _pending_files(tmp_path) == []
-    episode = _session_requests(isolated_home)[0]["episode"]
+    request = _session_requests(isolated_home)[0]
+    episode = request["episode"]
     assert episode["schemaVersion"] == "jinn.episode.v1"
+    assert episode["retention"]["policy"] == "local-private"
     assert episode["provenance"] == "contributed"
+    assert request["contributionCandidate"]["publishMinedTasksConsent"] is False
     assert episode["outcome"] == {
         "status": "completed",
         "verifiabilityTier": "user-accepted",
@@ -175,6 +178,17 @@ def test_accepted_session_delegates_complete_episode_without_pending_file(
     assert episode["task"]["summary"] == "Fix the failing test suite"
     assert episode["environment"]["harness"]["name"] == "jinn-agent"
     assert episode["trajectory"][1]["name"] == "tool:terminal"
+
+
+def test_session_start_quarantines_existing_publication_state_even_with_retained_consent(
+    isolated_home, tmp_path
+):
+    consent.save_state(True, previewed=True)
+
+    jinn._on_session_start(session_id="s1", platform="cli")
+
+    assert (tmp_path / "mineable" / session_bridge.PUBLICATION_DISABLED_FILE).is_file()
+    assert any(call[1:3] == ["contribution", "disable"] for call in isolated_home.calls)
 
 
 def test_preview_state_does_not_restore_legacy_publish(isolated_home, tmp_path):

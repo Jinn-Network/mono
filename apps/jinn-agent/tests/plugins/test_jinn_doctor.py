@@ -570,7 +570,8 @@ def test_session_start_probes_contract_every_session(wired):
     jinn._on_session_start(session_id="s2")
 
     assert jinn._degraded is None
-    assert len(runner.calls) == 2
+    contract_calls = [call for call in runner.calls if call[1:] == ["contract", "--json"]]
+    assert len(contract_calls) == 2
 
 
 def test_degraded_never_disables_python_pickup_or_local_episode_fallback(wired, monkeypatch):
