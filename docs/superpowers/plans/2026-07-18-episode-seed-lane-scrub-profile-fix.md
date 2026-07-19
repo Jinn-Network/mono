@@ -169,7 +169,7 @@ Change:
 to:
 
 ```ts
-  // Evidence episodes are public, licence-checked prose seeds — like the
+  // Evidence episodes are public, transformed, human-reviewed seeds — like the
   // skill lane, not operator trace data — so they run the seed profile
   // (plan §4.4; spec/2026-07-02-jinn-harness-network.md §7): deterministic
   // key policy, plain-patterns, and secretlint pass-1 only. The strict
@@ -370,7 +370,7 @@ the same `describe('executeEpisodes()', ...)` block:
   ])('accepts a %s under the seed profile (documented residual, #1409/#1784)', async (_label, residualText) => {
     // The seed profile deliberately does not run openredaction or the
     // entropy fallback (build.ts's buildSeedScrubPipeline doc comment,
-    // #1409): seeds are public, licence-checked prose, and those
+    // #1409): seeds are public, transformed, human-reviewed prose, and those
     // probabilistic stages false-positive on ordinary words and hex-looking
     // ids in that content (#1784). Every structured identifier or PII class
     // detected only by openredaction is therefore residual risk — not just
@@ -487,7 +487,8 @@ criteria while recording that the live-corpus criterion remains open.
 - [ ] Run `yarn jinn-layer corpus search "claims" --limit 5` and confirm
   `distractor-operator-claims` is present.
 - [ ] Fetch the returned ref and record its imported provenance,
-  seed-profile scrub manifest, and anchor evidence on #1784.
+  importer/seed markers, and anchor evidence on #1784.
+  The focused local tests, not the fetched envelope, prove the scrub profile.
 
 No mocked `publishArtifact`/`publishEnvelope` call satisfies these checks,
 and this implementation session must not perform the outbound publication.

@@ -8,8 +8,11 @@
  * seed-episode JSON files (each transformed offline from a REAL completed
  * session per the runbook, docs/runbooks/stage1-evidence-seeding.md) and
  * feeds them through the SAME `capture() -> publish()` path the skill lane
- * uses (`episode-execute.ts`), so a seeded evidence record is
- * indistinguishable on the wire from an organically captured one.
+ * uses (`episode-execute.ts`). The resulting envelope remains identifiable
+ * as a seed on the wire through `provenance: 'imported'`, the seed importer
+ * harness/session identity, the `seed-import` tag, and `seed:*` steps. The
+ * selected scrub profile is a local implementation fact proved by code and
+ * tests; `TraceEnvelopeV0` does not publish a scrub-component manifest.
  *
  * Step convention (so a future retrieval-side packet projector — rescope
  * plan §3.2 `projectKnowledgePacket`, R1/#1770 — has an obvious, discoverable

@@ -154,8 +154,8 @@ export async function executeEpisodes(
   }
   const result: EpisodeImportResult = { imported: [], skipped: [], errors: [] };
   const now = deps.now?.() ?? new Date();
-  // Evidence episodes are public, licence-checked prose seeds — like the
-  // skill lane, not operator trace data — so they run the seed profile
+  // Evidence episodes are public, transformed, human-reviewed seeds — like
+  // the skill lane, not operator trace data — so they run the seed profile
   // (plan §4.4; spec/2026-07-02-jinn-harness-network.md §7): deterministic
   // key policy, plain-patterns, and secretlint pass-1 only. The strict
   // trace profile's probabilistic stages (openredaction, entropy fallback)
