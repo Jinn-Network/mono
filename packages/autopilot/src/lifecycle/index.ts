@@ -2,3 +2,8 @@ export * from './types.js';
 export * from './codecs.js';
 export * from './lifecycle.js';
 export * from './git-protocol.js';
+export * from './snapshot.js';
+export * from './github-reader.js';
+export * from './projection.js';
+export * from './reconciler.js';
+export * from './controller.js';
