@@ -51,9 +51,20 @@ def test_autouse_guard_rechecks_after_test_mutates_override(monkeypatch):
     guard = conftest._jinn_store_write_guard.__wrapped__(
         request,
         None,
+        monkeypatch,
     )
     next(guard)
     with monkeypatch.context() as mutation:
         mutation.delenv("JINN_LAYER_EPISODES_DIR", raising=False)
         with pytest.raises(AssertionError, match="JINN_LAYER_EPISODES_DIR"):
             next(guard)
+
+
+def test_guard_rejects_transient_default_resolution(monkeypatch):
+    """Restoring the override before teardown cannot hide a default access."""
+    with monkeypatch.context() as mutation:
+        mutation.delenv("JINN_LAYER_EPISODES_DIR", raising=False)
+        with pytest.raises(AssertionError, match="JINN_LAYER_EPISODES_DIR"):
+            distill.episodes_dir()
+
+    assert_jinn_store_sandboxed()

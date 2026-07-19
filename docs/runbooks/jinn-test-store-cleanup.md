@@ -8,8 +8,9 @@ IDs such as `s1`, `sA`, and `session-1` that can skew later local runs. New
 runs are sandboxed by the autouse
 `_hermetic_environment` fixture (step 6) in
 `apps/jinn-agent/tests/conftest.py` — with a companion
-`_jinn_store_write_guard` that fails loud if a resolver escapes the
-tempdir — but existing local pollution must be cleaned once, by hand.
+`_jinn_store_write_guard` that checks every resolver call and fails loud if
+even a temporary environment change escapes the tempdir — but existing local
+pollution must be cleaned once, by hand.
 
 ## Store dirs
 
@@ -29,7 +30,10 @@ records remain untouched. Before editing, it backs up every selected file and
 the pre-edit contribution store.
 
 The script refuses paths outside the lexical `~/.jinn-client` tree and refuses
-symlinks or symlinked path components.
+symlinks or symlinked path components. The dry-run plan retains each selected
+file's identity, metadata, and content digest. `--yes` rechecks that evidence
+immediately before deletion and stops if a fixture path has since been changed
+or replaced with legitimate work.
 
 ```bash
 cd apps/jinn-agent
