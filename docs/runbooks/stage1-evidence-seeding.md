@@ -252,6 +252,33 @@ that ran `seed execute`**; it is not itself published, and it does not query
 the corpus — it only answers "did *I* already publish this exact seed identity,
 unchanged?".
 
+### Local no-network re-publish rehearsal
+
+Run the #1825 acceptance against a throwaway file-backed seed state and mocked
+publication dependencies:
+
+```bash
+cd client
+yarn vitest run packages/harness-layer/test/seed-import-episodes.test.ts \
+  -t "re-publishes the marked Stage 1 source"
+```
+
+The test publishes the historical unmarked `source-dashboard-flake` shape,
+re-runs the current marked fixture with the same identity, verifies that the
+new envelope carries both `retrieval:visible.v1` and a `supersedes` pointer,
+then re-runs the marked fixture unchanged and verifies that no third
+publication occurs. It makes no IPFS, RPC, or testnet call.
+
+### Post-merge operational gate for #1825
+
+The local rehearsal does not replace the existing shared-corpus record. An
+operator must run sections 2 and 3 from the same machine and seed-state file
+that published the prior unmarked Stage 1 episode. Preserve that state file:
+it supplies the old `envelopeRef` for `supersedes`. Review the fresh plan,
+execute it once, and verify that `source-dashboard-flake` reports the prior
+ref in `supersedes`; an immediate unchanged re-run must report `skipped`.
+This is the only live residual for #1825.
+
 ## Fixture-file reference
 
 | File | Kind | Role |

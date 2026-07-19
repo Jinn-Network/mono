@@ -28,7 +28,10 @@ import {
 import { planEpisodes } from '../src/seed-import/episode-plan.js';
 import { executeEpisodes } from '../src/seed-import/episode-execute.js';
 import { parseEpisodeImportReport, type EpisodeImportReport } from '../src/seed-import/episode-report.js';
-import { createMemorySeedImportState } from '../src/seed-import/state.js';
+import {
+  createFileSeedImportState,
+  createMemorySeedImportState,
+} from '../src/seed-import/state.js';
 import { runJinnLayerCli } from '../src/cli.js';
 
 const TEST_ADDRESS = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266' as const;
@@ -375,6 +378,65 @@ describe('executeEpisodes()', () => {
   });
 
   describe('idempotency + supersedes', () => {
+    it('re-publishes the marked Stage 1 source over its prior unmarked version, then stays idempotent (#1825)', async () => {
+      const markedEpisode = parseSeedEpisode(JSON.parse(readFileSync(
+        join(STAGE1_FIXTURES_DIR, 'source-dashboard-flake.episode.json'),
+        'utf-8',
+      )));
+      expect(markedEpisode.tags).toContain(RETRIEVAL_VISIBLE_TAG);
+
+      const unmarkedEpisode = {
+        ...markedEpisode,
+        tags: markedEpisode.tags.filter((tag) => tag !== RETRIEVAL_VISIBLE_TAG),
+      };
+      const unmarkedSource = mockEpisodeSource([unmarkedEpisode]);
+      const markedSource = mockEpisodeSource([markedEpisode]);
+      const { deps, published } = mockPublishDeps();
+      const statePath = join(
+        mkdtempSync(join(tmpdir(), 'jinn-stage1-republish-')),
+        'seed-import-state.json',
+      );
+
+      const unmarked = await executeEpisodes(
+        await planEpisodes(unmarkedSource),
+        unmarkedSource,
+        deps,
+        { state: createFileSeedImportState(statePath) },
+      );
+      const priorRef = unmarked.imported[0]!.envelopeRef;
+      expect(parseTraceEnvelopeV0(published[0]!.payload).task.distributionTags)
+        .not.toContain(RETRIEVAL_VISIBLE_TAG);
+
+      const markedReport = await planEpisodes(markedSource);
+      const marked = await executeEpisodes(markedReport, markedSource, deps, {
+        state: createFileSeedImportState(statePath),
+      });
+      expect(marked.imported).toEqual([
+        expect.objectContaining({
+          id: 'source-dashboard-flake',
+          supersedes: priorRef,
+        }),
+      ]);
+
+      const markedEnvelope = parseTraceEnvelopeV0(published[1]!.payload);
+      expect(markedEnvelope.task.distributionTags).toContain(RETRIEVAL_VISIBLE_TAG);
+      expect(markedEnvelope.steps.at(-1)?.attributes['seed.attribution']).toMatchObject({
+        supersedes: priorRef,
+      });
+
+      const unchanged = await executeEpisodes(markedReport, markedSource, deps, {
+        state: createFileSeedImportState(statePath),
+      });
+      expect(unchanged.imported).toEqual([]);
+      expect(unchanged.skipped).toEqual([
+        {
+          id: 'source-dashboard-flake',
+          reason: `unchanged since ${marked.imported[0]!.envelopeRef}`,
+        },
+      ]);
+      expect(published).toHaveLength(2);
+    });
+
     it('re-running executeEpisodes() with the same state store over unchanged content publishes nothing new', async () => {
       const source = mockEpisodeSource([episode()]);
       const report = await planEpisodes(source);
