@@ -134,11 +134,12 @@ cd apps/jinn-agent
 scripts/run_tests.sh tests/plugins/test_jinn_session_end_delegate.py::test_no_real_subprocess_is_ever_spawned_by_this_file -v
 ```
 
-Expected: FAIL with `AssertionError: real subprocess.run was invoked — the
-jinn_layer._default_runner seam is not closed (mono#1783 regression)`, and
-the run itself is slow (multi-second, mirroring the flake) because the
-guard fires only after `subprocess.run` is actually called — confirm this
-matches the described root cause before proceeding.
+Expected: FAIL immediately with `AssertionError: real subprocess.run was
+invoked — the jinn_layer._default_runner seam is not closed (mono#1783
+regression)`. The guard replaces `subprocess.run`, so it raises as soon as
+the pre-fix path attempts the spawn; the original unguarded failure mode is
+the slow multi-second run. Confirm that the attempted call matches the
+described root cause before proceeding.
 
 - [ ] **Step 3: Leave the test in place** (no code change yet — this step is
   just confirmation). Move to Task 2 to make it pass.
