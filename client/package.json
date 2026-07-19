@@ -83,6 +83,7 @@
     "skill:check": "tsx scripts/skill-check.ts",
     "prepublishOnly": "yarn typecheck",
     "pack:smoke": "node scripts/smoke-test-pack.mjs",
+    "pack:smoke:private-runtime": "node scripts/smoke-test-pack-private-runtime.mjs",
     "release:client": "node scripts/release-client.mjs",
     "release:operator-gate": "yarn staking && yarn e2e",
     "release:tier-1": "tsx scripts/release/run-tier-1.ts",

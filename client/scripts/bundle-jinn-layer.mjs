@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /**
- * Bundle harness-layer binaries into dist/bin (#1356).
+ * Bundle shipped entry points that reach private workspace packages.
  *
- * The harness-layer workspace package imports client code across the
- * package boundary (`../../../src/...`), which a second tsc pass cannot
- * emit with sane paths — so the shipped bin is an esbuild bundle instead:
- * all repo-relative imports inlined, npm dependencies left external (they
- * ship in the published package's node_modules).
+ * The harness-layer workspace package imports client code across the package
+ * boundary (`../../../src/...`), while the compiled mineable-store facade
+ * imports private @jinn-network/core. Ship those entry points as esbuild
+ * bundles: repo-relative and private workspace imports are inlined, while npm
+ * dependencies remain external (they ship in the published package's
+ * node_modules).
  */
 import { build } from 'esbuild';
 import { chmodSync } from 'node:fs';
@@ -39,8 +40,13 @@ const inlinePrivateCore = {
 };
 
 for (const entry of [
-  { in: 'packages/harness-layer/src/bin/jinn-layer.ts', out: 'dist/bin/jinn-layer.js' },
-  { in: 'packages/harness-layer/src/bin/jinn-distill-mcp.ts', out: 'dist/bin/jinn-distill-mcp.js' },
+  { in: 'packages/harness-layer/src/bin/jinn-layer.ts', out: 'dist/bin/jinn-layer.js', executable: true },
+  { in: 'packages/harness-layer/src/bin/jinn-distill-mcp.ts', out: 'dist/bin/jinn-distill-mcp.js', executable: true },
+  {
+    in: 'src/solver-types/_swe-rebench-v2-mineable-store.ts',
+    out: 'dist/solver-types/_swe-rebench-v2-mineable-store.js',
+    executable: false,
+  },
 ]) {
   await build({
     entryPoints: [entry.in],
@@ -53,6 +59,6 @@ for (const entry of [
     plugins: [inlinePrivatePlugin, inlinePrivateCore],
     logLevel: 'warning',
   });
-  chmodSync(entry.out, 0o755);
+  if (entry.executable) chmodSync(entry.out, 0o755);
   console.log(`[bundle-jinn-layer] ${entry.out} written`);
 }
