@@ -155,6 +155,7 @@ export interface LifecycleItemBase {
   readonly v2Marked: boolean;
   readonly projectStatus: 'Todo' | 'In Progress' | 'Human' | 'In Review' | 'Done' | null;
   readonly labels: readonly string[];
+  readonly humanHold?: boolean;
   readonly humanReason?: HumanReason;
 }
 

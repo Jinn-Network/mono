@@ -44,6 +44,7 @@ function correlatedReviewClaim(item: PullRequestLifecycleItem) {
 
 function humanOverlay(item: LifecycleItem): boolean {
   return item.projectStatus === 'Human'
+    || item.humanHold === true
     || item.labels.includes('review:needs-human')
     || item.humanReason !== undefined
     || (item.kind === 'pull-request'
