@@ -1,98 +1,79 @@
 # jinn-agent
 
-**jinn-agent** is an open coding harness plugged into the Jinn network. It
-reads from a public, on-chain-anchored corpus of task knowledge, and — only
-if you turn it on — contributes scrubbed traces of its own completed tasks
-back to that corpus, so the harness everyone runs keeps getting better.
+**jinn-agent** is an open coding harness with the Jinn plugin built in. It
+brings relevant evidence from Jinn's public, on-chain-anchored corpus into
+ordinary agent work, then captures the resulting session as local evidence for
+reuse and local distillation.
 
-You keep a full agent either way: reading needs no account, no wallet, no
-consent. Contributing is off by default and every safeguard is visible —
-scrubbing is mandatory and fails closed, you preview the exact payload
-before anything is ever sent, and you can veto any task.
+Stage 2 is deliberately local-only on the outbound side. Contribution is
+parked: nothing derived from your work leaves this machine. Old Stage-1 consent
+files may remain for conservative migration, but they do not enable
+publication.
 
 ## Quickstart
 
 ```bash
 git clone https://github.com/Jinn-Network/jinn-agent
 cd jinn-agent
-./setup.sh          # one-time: deps, sandboxing, agent core (repo-local venv)
-bin/jinn-agent setup   # pick a model provider (one-time)
-bin/jinn-agent      # start
+./setup.sh             # one-time: dependencies, sandboxing, repo-local venv
+bin/jinn-agent setup   # choose a model provider
+bin/jinn-agent         # start
 ```
 
-Provider auth: put your model key in `~/.jinn-agent/.env` (e.g.
-`OPENROUTER_API_KEY=…`) and select a model with `bin/jinn-agent setup` —
-without a configured model the first message fails. jinn-agent keeps all
-its state under `~/.jinn-agent/`.
+Provider auth lives in `~/.jinn-agent/.env` (for example,
+`OPENROUTER_API_KEY=…`). `bin/jinn-agent setup` selects the model. All
+jinn-agent state stays under `~/.jinn-agent/`.
 
-## Reading from the network (works immediately)
+## The product loop
 
-- `/corpus <query>` — search the public corpus by content
-  (e.g. `/corpus tdd`).
-- The agent itself has `corpus_search` / `corpus_fetch` tools and consults
-  the corpus mid-task when it decides it needs to.
-- `/jinn skills install <ref>` — install a corpus-published skill into the
-  agent's native skills (hash-verified; `list` / `uninstall` to manage).
-- At task start, jinn-agent looks up the corpus for the kind of task you're
-  running. Anything **verified by network evaluators** is adopted
-  automatically; anything unverified is only suggested — it never
-  self-installs.
+- Start normal work. On the first turn, Jinn searches the public corpus and
+  visibly supplies relevant evidence when it finds any.
+- `/corpus <query>` performs an explicit corpus search. The agent also has
+  `corpus_search` and `corpus_fetch` tools for evidence it needs mid-task.
+- The complete session is captured locally as canonical evidence.
+- Local distillation can turn captured evidence into reusable local knowledge.
+  `/jinn distill` shows or runs that workflow.
+- `/jinn session` shows the active session; `/jinn history` shows finalized
+  sessions; `/jinn status` shows capture, learning, and the parked contribution
+  state.
 
-`/corpus` and `/jinn skills install` shell out to the `jinn-layer` CLI —
-the same install as under Contributing
-(`npm install -g @jinn-network/client@canary`). Reading needs the CLI but
-no account or consent.
+No account or wallet is required for this loop. Corpus failure degrades to
+nothing-found and never blocks the underlying agent.
 
-## Contributing (off until you say so)
+## Contribution is parked
 
+The current product records the complete episode and a reusable contribution
+candidate locally, but performs zero outbound publication. The live status is:
+
+```text
+contribution: parked — nothing leaves this machine
 ```
-/jinn consent
+
+This is independent of any retained consent value. A future contribution era
+will introduce its own designed authorization and disclosure surface; the
+deleted Stage-1 flow is not active.
+
+## Install Jinn into stock Hermes
+
+The same standalone plugin used by the fork installs into an unmodified Hermes:
+
+```bash
+hermes plugins install Jinn-Network/jinn-plugin
+hermes plugins enable jinn
 ```
 
-The flow states plainly what would leave your machine (only traces of tasks
-this harness runs — never your files, shell, or anything outside a task),
-how scrubbing works, and that declining leaves the harness fully functional
-as a reader. If you accept: nothing publishes until you run `/jinn preview`
-once and read the exact outgoing envelope. After that, completed tasks
-publish automatically at session end. `/jinn veto` withholds any single
-task; `/jinn ledger` lists everything that ever left, each with its
-on-chain anchor link.
-
-Contributing needs two things reading doesn't:
-
-1. **The `jinn-layer` CLI** (scrub, publish, anchor, ledger):
-   `npm install -g @jinn-network/client@canary` (Node 22; the jinn-layer
-   CLI ships on the canary tag until the next stable release, >= 0.1.10,
-   carries it). jinn-agent finds it on PATH, or set `JINN_LAYER_BIN`.
-2. **A Jinn testnet identity** to anchor contributions under (an agent id +
-   Safe from the Jinn operator bootstrap — `jinn run` walks you through it,
-   faucet-funded, testnet only). Export it where you launch jinn-agent:
-   `JINN_LAYER_PRIVATE_KEY`, `JINN_LAYER_SAFE_ADDRESS`,
-   `JINN_LAYER_AGENT_ID`. Without these, traces are retained locally and
-   nothing is lost — publish later. A lighter-weight identity path for
-   harness-only users (no operator bootstrap) is on the roadmap.
+The plugin carries its required Jinn layer. If the doctor reports a stale or
+missing layer, refresh the plugin with `hermes plugins update jinn`.
 
 ## Already run the upstream agent?
 
-No conflict: jinn-agent keeps its own state home (`~/.jinn-agent`), installs
-into a repo-local venv, and never touches `~/.hermes` or an existing global
-install. The isolation is carried by the `jinn-agent` entrypoint, which sets
-the state home for everything it spawns — invoking the underlying upstream
-`hermes` binary directly (or from an integration that does not pass that
-environment through) bypasses it and falls back to the upstream default
-(`~/.hermes`). Details and the deliberate-sharing override are in
-[JINN.md](JINN.md).
+There is no state conflict. jinn-agent defaults to `~/.jinn-agent`, installs
+into a repo-local venv, and does not touch `~/.hermes` or an existing global
+install. The `jinn-agent` entrypoint establishes that state home; invoking an
+underlying upstream binary directly bypasses it.
 
-## What this repo is
-
-A thin fork of an upstream agent core
-([NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent),
-MIT) with the whole Jinn layer isolated in one integration surface —
-`plugins/jinn/` plus the entrypoints — so upstream merges stay cheap.
-Architecture, the upstream-merge procedure, and the full behaviour contract
-live in [JINN.md](JINN.md). The wider protocol lives at
+The fork relationship, owned-file boundary, and upstream-merge procedure are
+documented in [JINN.md](JINN.md). The wider protocol lives at
 [Jinn-Network/mono](https://github.com/Jinn-Network/mono).
 
-Testnet only for now. No tokens are involved in using this software;
-verified contributions accrue OLAS-denominated rewards to network operators
-per the protocol's staking mechanics — see the mono repo for how that works.
+Testnet only for now. No tokens are required to use the Stage-2 product.
