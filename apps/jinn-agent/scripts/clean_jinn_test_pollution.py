@@ -358,6 +358,40 @@ def _write_json_atomic(path: Path, value: dict[str, Any]) -> None:
         tmp.unlink(missing_ok=True)
 
 
+@contextmanager
+def _private_exclusive_file(path: Path):
+    """Create ``path`` as an exclusive 0600 file and remove it on failure."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags, 0o600)
+    created = os.fstat(fd)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            fd = -1
+            try:
+                yield handle
+            except BaseException:
+                # Only unlink the inode this helper created. If the path was
+                # replaced concurrently, retain the replacement rather than
+                # deleting an unrelated file.
+                try:
+                    current = os.lstat(path)
+                except FileNotFoundError:
+                    pass
+                else:
+                    if (
+                        stat.S_ISREG(current.st_mode)
+                        and current.st_dev == created.st_dev
+                        and current.st_ino == created.st_ino
+                    ):
+                        path.unlink(missing_ok=True)
+                raise
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
 def apply_cleanup(plan: CleanupPlan, backup: Path) -> None:
     """Back up and apply a previously inspected fixture-only plan."""
     _validate_paths(plan.paths)
@@ -388,14 +422,14 @@ def apply_cleanup(plan: CleanupPlan, backup: Path) -> None:
         )
 
     backup.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with tarfile.open(backup, "x:gz") as archive:
-        for source in sources:
-            archive.add(
-                source,
-                arcname=source.relative_to(plan.paths.home),
-                recursive=False,
-            )
-    os.chmod(backup, 0o600)
+    with _private_exclusive_file(backup) as backup_handle:
+        with tarfile.open(fileobj=backup_handle, mode="w:gz") as archive:
+            for source in sources:
+                archive.add(
+                    source,
+                    arcname=source.relative_to(plan.paths.home),
+                    recursive=False,
+                )
 
     for selected in plan.selected_files:
         # Recheck identity and bytes immediately before unlinking. A path that
