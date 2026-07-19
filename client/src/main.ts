@@ -1638,20 +1638,20 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
 
   // ── Mineable-trace store (task-creator spec §10) ──────────────────────────
   //
-  // ALWAYS constructed (mono#1714): local retention/mining/distillation happen
-  // by default and never leave the machine. Whether a mined task is published
-  // off the box is gated separately by `config.mineableTraces.share`.
-  const { MineableTraceStore, resolveMineableStateDir } = await import('./solver-types/_swe-rebench-v2-mineable-store.js');
+  // ALWAYS constructed: local retention/mining/distillation happen by default
+  // and never leave the machine. Stage 2 parks the outbound lane regardless of
+  // retained Stage 1 config, while keeping local candidate mining live.
+  const {
+    enforceStage2ParkedPublication,
+    MineableTraceStore,
+    resolveMineableStateDir,
+  } = await import('./solver-types/_swe-rebench-v2-mineable-store.js');
   const mineableStore = new MineableTraceStore({
     stateDir: resolveMineableStateDir(),
   });
-  if (config.mineableTraces.share) {
-    await mineableStore.enablePublication();
-  } else {
-    await mineableStore.disableUnpublished();
-  }
+  const mineablePublishConsent = await enforceStage2ParkedPublication(mineableStore);
   console.log(
-    `[main] mineable-trace retention: local (always on) — share=${config.mineableTraces.share}`,
+    '[main] mineable-trace retention: local (always on) — publication=parked',
   );
 
   // ── IdentityPublisher (jinn-mono-3zk) ───────────────────────────────────────
@@ -2178,6 +2178,17 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       deliveryDeps,
       implRegistry,
       solverNetRegistry,
+      // #1827: resolves envelope.task.createdAt at claim() time. getBlock
+      // errors propagate deliberately — engine.ts retries a bounded number of
+      // times and keeps/fails the task before signing rather than emitting a
+      // provenance tuple without its authoritative creation timestamp.
+      blockTimestamp: {
+        getBlockTimestamp: async (blockNumber: number): Promise<number | undefined> => {
+          const block = await publicClient.getBlock({ blockNumber: BigInt(blockNumber) });
+          return Number(block.timestamp);
+        },
+        configuredRpcUrls: config.rpcUrls,
+      },
       // Spec §14, Task 28: per-launch claim eligibility filter. Operators
       // populate `joinedSolverNets[<manifestCid>]` via the SPA's join flow;
       // the engine refuses tasks whose `manifestDigest = keccak256(cid)`
@@ -2207,7 +2218,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // Task-creator spec §10 (D2): absent unless the operator opted into
       // tier-1 local retention above.
       mineableStore,
-      mineablePublishConsent: config.mineableTraces.share,
+      mineablePublishConsent,
     },
     balanceTopup:
       config.balanceTopupIntervalMs > 0

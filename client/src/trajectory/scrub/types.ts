@@ -17,9 +17,9 @@ export interface ScrubResult {
 }
 
 /**
- * A single stage in the seller-side scrub pipeline. `name` + `version` are
- * recorded in the signed provenance manifest so a buyer/auditor can see exactly
- * which components (and versions) produced a published trajectory.
+ * A single stage in the seller-side scrub pipeline. `name` + `version` expose
+ * the active components to local inspection and tests. The current published
+ * trace-envelope schema does not carry this component list.
  */
 export interface ScrubStage {
   readonly name: string;

@@ -2,11 +2,12 @@
 /**
  * jinn-run-stage — CLI shim invoked by the implement-issue coordinator for the
  * depth-needing pipeline stages (Design / Implement / code-review / Independent
- * review). It runs a stage as a fresh `claude -p` ROOT session in the issue
+ * review). It runs a stage as a fresh runtime ROOT session in the issue
  * worktree, so the stage's composed skill can fan out sub-agents at depth-1.
  *
  * Usage:
- *   jinn-run-stage --prompt-file <path> --worktree <path> [--model <m>] [--timeout-ms <n>]
+ *   jinn-run-stage --prompt-file <path> --worktree <path>
+ *     [--model <m>] [--timeout-ms <n>]
  *
  * The coordinator writes the CURATED stage prompt (stage task + issue body/ACs
  * + prior-stage outputs) to <prompt-file> and passes it here. That file must

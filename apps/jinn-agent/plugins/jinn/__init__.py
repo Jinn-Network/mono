@@ -7,8 +7,10 @@ eligibility, contribution recording/veto, and summaries.  A bridge failure
 falls back to one local EpisodeV1 write; the retired raw pending/publication
 queue is never created or drained here.
 
-Sharing remains governed by the single consent bit, and ``/jinn`` exposes
-status, consent, informational preview, ledger, veto, and corpus consumption.
+Outbound contribution is parked for Stage 2. Retained Stage 1 consent state
+is ignored; local capture, candidate recording, mining, and distillation stay
+live. ``/jinn`` exposes status, session, history, veto, distill, and corpus
+consumption.
 
 Upstream-merge procedure: see JINN.md at the repo root.
 """
@@ -30,10 +32,9 @@ from typing import Any, Dict, Optional, Set
 from . import capture_buffer as buf
 from . import consent
 from . import distill
+from . import doctor
 from . import history_view
 from . import jinn_layer
-from . import ledger_view
-from . import onboarding
 from . import pickup
 from . import session_bridge
 from . import session_view
@@ -44,7 +45,6 @@ logger = logging.getLogger(__name__)
 
 _veto_lock = threading.Lock()
 _vetoed_tasks: Set[str] = set()
-_session_hint_shown: Set[str] = set()
 
 # Distilled-skill use counts at session start; the session-end payoff surface
 # reports only skills used during this session.
@@ -53,11 +53,11 @@ _distill_usage_snapshot: Dict[str, int] = {}
 # Test seam: overridable subprocess runner (None = real jinn-layer binary).
 _runner: Optional[jinn_layer.Runner] = None
 
-# Memoized v1 handshake. A reason here disables only the additive session-end
-# process bridge; Python pickup, capture, fallback persistence, and distillation
-# remain live.
+# Per-session v1 handshake, re-checked by the doctor fast path at every
+# session start (mono #1817 — no process-lifetime memoization). A reason here
+# disables only the additive session-end process bridge; Python pickup,
+# capture, fallback persistence, and distillation remain live.
 _contract_lock = threading.Lock()
-_contract_checked = False
 _degraded: Optional[str] = None
 
 # Per-session repo/activity evidence. Populated at session start and consumed
@@ -66,50 +66,28 @@ _session_state_lock = threading.Lock()
 _session_states: Dict[str, Dict[str, Any]] = {}
 
 
-def _reset_contract_state() -> None:
-    global _contract_checked, _degraded
-    _contract_checked = False
-    _degraded = None
+def _park_contribution_publication() -> None:
+    """Quarantine retained Stage 1 authorization at the shared store boundary.
+
+    The direct marker is the fail-closed host fallback. The layer command also
+    rewrites already-previewed or queued records to ``disabled`` under the
+    store's publication lock. Both operations are idempotent; neither affects
+    local evidence, candidate recording, or mining.
+    """
+    session_bridge.set_publication_enabled(False)
+    try:
+        jinn_layer.run(
+            ["contribution", "disable", "--json"],
+            runner=_runner,
+            timeout_s=10,
+        )
+    except Exception:
+        pass
 
 
 def _reset_session_state() -> None:
     with _session_state_lock:
         _session_states.clear()
-
-
-def _check_contract() -> None:
-    """Probe contract v1 once; never raise into the host session."""
-    global _contract_checked, _degraded
-    with _contract_lock:
-        if _contract_checked:
-            return
-        _contract_checked = True
-        try:
-            code, out, _err = jinn_layer.contract(runner=_runner)
-        except Exception:
-            _degraded = "jinn-layer handshake failed"
-            return
-        if code == 127:
-            _degraded = "jinn-layer unavailable"
-            return
-        if code != 0:
-            _degraded = "jinn-layer handshake failed"
-            return
-        try:
-            reply = json.loads(out)
-        except (TypeError, json.JSONDecodeError):
-            _degraded = "jinn-layer contract unreadable"
-            return
-        version = reply.get("contractVersion") if isinstance(reply, dict) else None
-        if version != jinn_layer.CONTRACT_VERSION:
-            _degraded = (
-                f"jinn-layer contract v{version} "
-                f"(expected v{jinn_layer.CONTRACT_VERSION})"
-            )
-
-
-def _pending_dir() -> Path:
-    return consent.get_hermes_home() / "jinn" / "pending"
 
 
 def _user_line(msg: str) -> None:
@@ -131,7 +109,7 @@ def _user_line(msg: str) -> None:
     regardless of ``COLORTERM``/``NO_COLOR``. The fork-precedent plugins this
     channel was modeled on (memory/hindsight) print plain text too — the
     styling here was our deviation. Styled surfaces that never run inside
-    the TUI (the terminal-blocking onboarding CLI) are unaffected.
+    the TUI are unaffected.
     """
     try:
         print(style.strip_ansi(msg), file=sys.stderr, flush=True)
@@ -258,9 +236,30 @@ def _record_activity(session_id: str, field: str, refs: list[str]) -> None:
 # ── Hooks ────────────────────────────────────────────────────────────────────
 
 def _on_session_start(session_id: str = "", platform: str = "", **_: Any) -> None:
+    global _degraded
+    _park_contribution_publication()
     cwd = _.get("cwd") or _.get("working_directory")
     _state_for(session_id, Path(cwd) if isinstance(cwd, str) and cwd else None)
-    _check_contract()
+    # Doctor fast path (mono #1817): re-check per session start — no
+    # process-lifetime memoization. Loud on failure, silent when healthy.
+    # Checks run outside the lock (they spawn subprocesses; the layer probe
+    # alone is bounded at 10s) — the lock guards only the _degraded write,
+    # matching the /jinn doctor branch.
+    checks = doctor.run_checks(full=False, runner=_runner)
+    with _contract_lock:
+        _degraded = doctor.degraded_reason(checks)
+    if not doctor._first_session_done():
+        # First session ever: the banner is the whole verdict (spec §3.2 —
+        # all green, or the first failure with its fix). No separate fail
+        # loop, or the first failure would print twice.
+        for line in doctor.first_session_banner(checks):
+            _user_line(line)
+        doctor._mark_first_session_done()
+    else:
+        for check in checks:
+            if not check["ok"]:
+                for line in doctor.fail_lines(check):
+                    _user_line(line)
     # Pick up a background distillation left over from a previous process:
     # live pid → resume the ambient tail; dead without a run_end → one
     # recovery line + archive (mono #1539). Never blocks, never raises.
@@ -270,16 +269,6 @@ def _on_session_start(session_id: str = "", platform: str = "", **_: Any) -> Non
         pass
     global _distill_usage_snapshot
     _distill_usage_snapshot = distill.snapshot_usage()
-    if consent.consent_decided():
-        return
-    if session_id in _session_hint_shown:
-        return
-    _session_hint_shown.add(session_id)
-    # Never block a session with an interactive flow from inside a hook —
-    # surface the one-line hint; the flow itself runs via /jinn consent.
-    logger.info(
-        "jinn: sharing consent not set — nothing is shared. Run /jinn consent to decide."
-    )
 
 
 def _on_pre_llm_call(
@@ -454,8 +443,9 @@ def _on_session_end(
     except Exception:
         pass
 
-    # Local capture is unconditional (mono#1714); only the share step is gated.
-    share_enabled = consent.share_enabled()
+    # Local capture is unconditional. Stage 2 keeps the contribution substrate
+    # local-only even when a Stage 1 consent file still says shareConsent=true.
+    publish_enabled = False
     # Record the skills loadout + token fallback (host forward, mono #1662) —
     # local writes, so unconditional per mono#1714, before the popping assembly.
     buf.record_environment(task_id, session_id, skills_loadout or [])
@@ -464,10 +454,10 @@ def _on_session_end(
         buf.record_tokens(task_id, session_id, input_tokens or 0, output_tokens or 0)
 
     # Pop the buffer ONCE for both shapes (assemble pops — see assemble_both).
-    # publish_consented mirrors the single share consent (mono#1714): the
-    # network-facing shape is only prepared when the operator has consented.
+    # Stage 2 never prepares a network-facing shape. The same episode remains
+    # the local learning source and contribution-candidate raw material.
     task, episode = buf.assemble_both(
-        task_id, session_id, completed, interrupted, publish_consented=share_enabled
+        task_id, session_id, completed, interrupted, publish_consented=publish_enabled
     )
 
     if episode is None:
@@ -507,7 +497,7 @@ def _on_session_end(
         test_runs=_episode_test_runs(episode),
         intermediate_failure_diffs=state.get("intermediateFailureDiffs") or [],
         skill_refs=skills_loadout or [],
-        publish_consent=share_enabled,
+        publish_consent=publish_enabled,
         created_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     )
     result = _delegate_session_end(
@@ -569,44 +559,33 @@ def _on_session_end(
 
 _JINN_HELP = (
     "/jinn — Jinn layer\n"
-    "  /jinn status    consent + capture state\n"
-    "  /jinn consent   run the consent flow\n"
-    "  /jinn preview   inspect a retained legacy capture, or a labelled example\n"
+    "  /jinn status    capture + distillation state\n"
+    "  /jinn doctor    environment checks — plugin build, layer, prerequisites\n"
     "  /jinn session   current searched/provided, capture, learning, and contribution state\n"
     "  /jinn history   sessions derived from episodes, contributions, and local skills\n"
-    "  /jinn ledger    the contribution ledger — what left this machine\n"
     "  /jinn veto      withhold the current task (recorded locally, never published)\n"
     "  /jinn distill   local distillation — your captures into reusable skills\n"
     "  /jinn distill where local|defer|off   set where distillation runs\n"
 )
 
 
-def _latest_pending() -> Optional[Path]:
-    directory = _pending_dir()
-    if not directory.exists():
-        return None
-    files = sorted(directory.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-    return files[0] if files else None
-
-
 def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = "", **_: Any) -> str:
+    global _degraded
     parts = shlex.split(command_args or "")
     sub = parts[0] if parts else "status"
 
+    if sub == "doctor":
+        checks = doctor.run_checks(full=True, runner=_runner)
+        with _contract_lock:
+            # Refresh the bridge state so a fixed layer recovers mid-process
+            # instead of staying degraded for the process lifetime.
+            _degraded = doctor.degraded_reason(checks)
+        return doctor.render(checks)
+
     if sub == "status":
-        state = consent.load_state()
-        share = bool(state.get("shareConsent"))
-        lines = [f"sharing: {'ON' if share else 'OFF'}"]
-        if share:
-            lines.append(f"previewed: {'yes' if state.get('previewed') else 'no'}")
-            lines.append("share: ON — reproducible tasks from your work may be shared at task end")
-        else:
-            lines.append("share: OFF — nothing derived from your work leaves this machine")
+        lines = []
         if _degraded is not None:
             lines.append(f"bridge: degraded — {_degraded}")
-        pending = _latest_pending()
-        if pending:
-            lines.append(f"pending trace: {pending}")
         d_status = distill.distill_status(_runner)
         if d_status:
             lines.append(
@@ -614,75 +593,14 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
                 f"{d_status.get('uncoveredCount', 0)} capture(s) not yet distilled, "
                 f"{d_status.get('stagedCount', 0)} staged, {d_status.get('installedCount', 0)} installed"
             )
+        lines.append("contribution: parked — nothing leaves this machine")
         return "\n".join(lines)
-
-    if sub == "consent":
-        # TUI-safe: stateless commands, never blocking reads. Same deliberate
-        # two-step as the design's keyboard flow (idle -> confirming -> recorded).
-        action = parts[1] if len(parts) > 1 else ""
-        confirmed = len(parts) > 2 and parts[2] == "confirm"
-        if action == "accept":
-            if not confirmed:
-                return consent.confirm_accept_command()
-            marker_ok = session_bridge.set_publication_enabled(True)
-            message = consent.record_accept()
-            return message if marker_ok else message + "\nwarning: publication preference marker could not be updated"
-        if action == "decline":
-            if not confirmed:
-                return consent.confirm_decline_command()
-            code, out, err = jinn_layer.contribution_disable(runner=_runner)
-            # Let the core serialize revocation with any publication already
-            # crossing its boundary. The direct marker is the fail-closed host
-            # fallback and mirrors the successful core write for old stubs.
-            marker_ok = session_bridge.set_publication_enabled(False)
-            message = consent.record_decline()
-            if code == 0:
-                return message
-            if marker_ok:
-                return message + "\nexisting publication queue is fail-closed locally; jinn-layer cleanup is degraded"
-            return message + f"\nwarning: could not disable the existing publication queue: {err or out}"
-        return consent.render_explainer(consent.COMMANDS_LINE)
-
-    if sub == "preview":
-        code, out, _err = jinn_layer.contribution_preview(acknowledge=True, runner=_runner)
-        if code == 0:
-            try:
-                reply = jinn_layer.parse_process_response(out)
-                value = reply.get("value")
-                if isinstance(value, dict):
-                    consent.mark_previewed()
-                    lines = [
-                        "Jinn public-task preview",
-                        f"repository: {value.get('repositorySlug', 'unavailable')}",
-                        f"base commit: {value.get('baseCommit', 'unavailable')}",
-                        "shared after validation: public task definition and test contract",
-                        "stays local: raw trajectory, source id, accepted diff/gold, failures, skills, and holdouts",
-                        "preview acknowledged — this and later eligible public tasks may queue silently",
-                    ]
-                    if reply.get("status") == "degraded":
-                        lines.append(f"bridge degraded: {reply.get('reason', 'details unavailable')}")
-                    return "\n".join(lines)
-            except (TypeError, ValueError):
-                pass
-        pending = _latest_pending()
-        if pending is None:
-            # Design requirement iv: preview is reachable before any publish.
-            # With no task yet, show the labelled example fixture rather than
-            # an empty screen. Does not mark previewed — the real gate stays
-            # on a real trace.
-            return consent.render_preview_example()
-        code, out, err = jinn_layer.capture_preview(pending, runner=_runner)
-        if code == 0:
-            consent.mark_previewed()
-            return out + "\n\nlegacy preview only — this retained file will not auto-publish."
-        return f"preview failed:\n{err or out}"
 
     if sub == "session":
         state = _peek_state(session_id)
         return session_view.render_current(
             activity=state.get("activity") or {},
             capture_active=buf.has_capture(task_id, session_id),
-            share_enabled=consent.share_enabled(),
         )
 
     if sub == "history":
@@ -707,43 +625,6 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
                 + history_view.safe_text(reply.get("reason"), "details unavailable")
             )
         return rendered
-
-    if sub == "ledger":
-        # Prefer canonical contribution-store rows. A layer that predates the
-        # command falls back to the legacy publication-receipt ledger.
-        ccode, cout, _cerr = jinn_layer.contribution_ledger_json(runner=_runner)
-        if ccode == 0:
-            try:
-                reply = jinn_layer.parse_process_response(cout)
-            except ValueError:
-                reply = None
-            if isinstance(reply, dict):
-                if reply.get("status") == "unavailable":
-                    return f"contribution ledger unavailable:\n{reply.get('reason', 'details unavailable')}"
-                rows = ledger_view.rows_from_json(reply.get("value"))
-                if rows is not None:
-                    rendered = ledger_view.render_ledger(
-                        rows, enabled=consent.share_enabled()
-                    )
-                    if reply.get("status") == "degraded":
-                        rendered += (
-                            "\n\ncontribution state degraded — "
-                            + str(reply.get("reason") or "details unavailable")
-                        )
-                    return rendered
-
-        # Prefer structured legacy rows (design 1b columns + tier chips +
-        # exact empty state), then degrade to the layer's raw text.
-        jcode, jout, _jerr = jinn_layer.ledger_json(runner=_runner)
-        if jcode == 0:
-            try:
-                rows = ledger_view.rows_from_json(json.loads(jout))
-            except json.JSONDecodeError:
-                rows = None
-            if rows is not None:
-                return ledger_view.render_ledger(rows, enabled=consent.share_enabled())
-        code, out, err = jinn_layer.ledger(runner=_runner)
-        return out if code == 0 else f"ledger unavailable:\n{err or out}"
 
     if sub == "distill":
         # Local distillation (mono #1538) — all logic + rendering in distill.py;
@@ -854,6 +735,10 @@ def _tool_corpus_fetch(args: Dict[str, Any], **_kw: Any) -> str:
 # ── Registration ─────────────────────────────────────────────────────────────
 
 def register(ctx) -> None:
+    # Establish the fail-closed boundary as soon as an enabled plugin is
+    # registered, before the first session can create or inspect a candidate.
+    # The first session additionally asks the layer to rewrite queued records.
+    session_bridge.set_publication_enabled(False)
     ctx.register_tool(
         name="corpus_search",
         toolset="jinn",
@@ -876,22 +761,20 @@ def register(ctx) -> None:
     ctx.register_command(
         "jinn",
         handler=_handle_jinn,
-        description="Jinn layer: session, history, consent, and contribution state.",
+        description="Jinn layer: session, history, and corpus state.",
     )
     ctx.register_command(
         "corpus",
         handler=_handle_corpus,
         description="Search the public Jinn corpus.",
     )
-    # `jinn-agent onboarding [--replay]` — the guided first run (mono#1405).
-    # A terminal subcommand (blocking reads), NOT a slash command: the flow
-    # reuses consent.run_consent_flow, whose input() would deadlock a TUI
-    # session. Returning operators (consent recorded + ledger non-empty) get
-    # a no-op; --replay re-renders without re-asking.
+    # `jinn-agent jinn-doctor` — the doctor without a TUI session (mono #1817).
+    # NOT named `doctor`: that collides with the built-in hermes subcommand
+    # and would silently disable discovery of every plugin CLI command.
     ctx.register_cli_command(
-        "onboarding",
-        help="Guided first-run onboarding (consent → publish → signals).",
-        setup_fn=onboarding.setup_parser,
-        handler_fn=onboarding.cli_handler,
-        description="Walk the core loop once, one confirmed step at a time. --replay re-shows it.",
+        "jinn-doctor",
+        help="Jinn environment checks — plugin build, layer, prerequisites.",
+        setup_fn=doctor.setup_parser,
+        handler_fn=doctor.cli_handler,
+        description="Print-only doctor: [ok]/[fail] per check, one copy-paste remedy per failure.",
     )

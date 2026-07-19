@@ -687,3 +687,48 @@ describe('consumedRefsJson (#1393)', () => {
     }
   });
 });
+
+describe('setOnchainCreationTimestamp (#1827)', () => {
+  let store: Store;
+  let p: TaskRunPersistence;
+
+  beforeEach(() => {
+    store = new Store(':memory:');
+    p = new TaskRunPersistence(store.db);
+  });
+
+  afterEach(() => {
+    store.close();
+  });
+
+  it('persists the timestamp and rowToTaskRun reflects it', () => {
+    p.insertDiscovered(makeInput({ requestId: 'req-createdat-1' }));
+    p.setOnchainCreationTimestamp('req-createdat-1', 1752000000);
+    const row = p.getByRequestId('req-createdat-1');
+    expect(row!.onchainCreationTimestamp).toBe(1752000000);
+  });
+
+  it('defaults to null when never set', () => {
+    p.insertDiscovered(makeInput({ requestId: 'req-createdat-2' }));
+    const row = p.getByRequestId('req-createdat-2');
+    expect(row!.onchainCreationTimestamp).toBeNull();
+  });
+
+  it('is idempotent-safe to call twice with the same value', () => {
+    p.insertDiscovered(makeInput({ requestId: 'req-createdat-3' }));
+    p.setOnchainCreationTimestamp('req-createdat-3', 1752000000);
+    p.setOnchainCreationTimestamp('req-createdat-3', 1752000000);
+    const row = p.getByRequestId('req-createdat-3');
+    expect(row!.onchainCreationTimestamp).toBe(1752000000);
+  });
+
+  it('adds the onchain_creation_timestamp column to an older DB via additive migration', () => {
+    const db = new Database(':memory:');
+    db.exec(MINIMAL_TASK_RUNS_DDL);
+    new TaskRunPersistence(db);
+    const columns = (db.pragma('table_info(task_runs)') as Array<{ name: string }>)
+      .map(r => r.name);
+    expect(columns).toContain('onchain_creation_timestamp');
+    db.close();
+  });
+});

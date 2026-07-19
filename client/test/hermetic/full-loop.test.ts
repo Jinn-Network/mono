@@ -65,6 +65,11 @@ if (!SNAPSHOT_PRESENT) {
 // The loop tests the LOOP, not the agent (spec §3.1): the deterministic baseline
 // harness needs no API key, so this gate has zero credential dependencies.
 const HARNESS: HarnessSelector = 'prediction-v1-baseline';
+const PROVENANCE = {
+  instanceId: 'jinn__hermetic-envelope-provenance',
+  repo: 'Jinn-Network/mono',
+  baseCommit: '1'.repeat(40),
+};
 
 describeMaybe('hermetic full daemon loop (spec §3.1 / §6 Home 1)', () => {
   it(
@@ -120,7 +125,14 @@ describeMaybe('hermetic full daemon loop (spec §3.1 / §6 Home 1)', () => {
         // Baseline the activity counter before posting.
         const activityBefore = await readActivityCount(fixture, operator, v3Env);
 
-        const posted = await postPredictionV1Task(fixture, operator, CREATOR_PRIV_KEY, mockIpfs, v3Env);
+        const posted = await postPredictionV1Task(
+          fixture,
+          operator,
+          CREATOR_PRIV_KEY,
+          mockIpfs,
+          v3Env,
+          { provenance: PROVENANCE },
+        );
         expect(posted.taskId, 'task was not posted').toBeGreaterThan(0n);
 
         // Daemon discovers + claims the task (proves the discovery + claim loop).
@@ -133,6 +145,29 @@ describeMaybe('hermetic full daemon loop (spec §3.1 / §6 Home 1)', () => {
         expect(delivered.deliveryTxHash, 'no on-chain delivery tx').toMatch(/^0x[0-9a-fA-F]+$/);
         // The envelope must name the deterministic harness we ran.
         expect(delivered.solverHarnessName).toBe(selectorToHarnessName(HARNESS));
+        const taskCreatedBlock = await fixture.publicClient.getBlock({
+          blockNumber: posted.createdAtBlock,
+        });
+        const claimReceipt = await fixture.publicClient.getTransactionReceipt({
+          hash: claim.txHash,
+        });
+        expect(
+          claimReceipt.blockNumber,
+          'fixture must separate TaskCreated from TaskAttemptCreated',
+        ).not.toBe(posted.createdAtBlock);
+        expect(delivered.envelope.executor.generatorModel).toEqual({
+          id: 'unknown',
+          source: 'config',
+        });
+        expect(delivered.envelope.distributionClass).toBe('unknown');
+        expect(delivered.envelope.task).toMatchObject({
+          onchainCreationTx: posted.creationTxHash,
+          onchainCreationBlock: Number(posted.createdAtBlock),
+          createdAt: Number(taskCreatedBlock.timestamp),
+          instanceId: PROVENANCE.instanceId,
+          repo: PROVENANCE.repo,
+          baseCommit: PROVENANCE.baseCommit,
+        });
 
         // LOAD-BEARING: the settle tx must have incremented the operator's
         // on-chain activity counter (recordSolutionDelivery → activity checker).

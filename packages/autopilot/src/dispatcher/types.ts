@@ -1,3 +1,6 @@
+import { DEFAULT_HERMES_PYTHON } from './hermes-runtime.js';
+import type { AutopilotRuntime } from '../autopilot-runtime.js';
+
 /** The nine work-shape Issue Types (DR-2026-05-20-b). */
 export type IssueShape =
   | 'feat' | 'fix' | 'refactor' | 'spike'
@@ -96,38 +99,15 @@ export interface SessionResult {
   escalationStatus?: 'needs-decision' | 'blocked' | 'stuck';
 }
 
-/** The CLI implementer agents the dispatcher can route work to. */
-export type Implementer = 'claude' | 'codex' | 'cursor';
-
-/**
- * One entry in the ordered implementer-routing policy. A rule matches an issue
- * when *every* specified predicate holds: `effort` (if present) must equal the
- * issue's Effort, and `shape` (if present) must equal the issue's Issue Type. A
- * rule with neither `effort` nor `shape` matches every issue (a catch-all).
- * Resolution is first-match-wins over the ordered `implementerRules` list.
- */
-export interface ImplementerRule {
-  effort?: Effort;
-  shape?: IssueShape;
-  implementer: Implementer;
-}
-
 export interface DispatcherConfig {
+  /** One process-wide runtime for implementation, review, merge-prep, and stages. */
+  runtime: AutopilotRuntime;
   /** Max simultaneous sessions. Default 3; practical ceiling ~5–7. */
   concurrencyCap: number;
   /** Stop pulling new issues when open ready PRs exceed this. */
   openPrBackpressure: number;
   /** Per-session wall-clock ceiling, ms. Generous — hours. */
   wallClockMs: number;
-  /** v1 default implementer; per-issue label can override. */
-  defaultImplementer: Implementer;
-  /**
-   * Ordered implementer-routing policy (#887). Empty (the default) = fall
-   * through to `defaultImplementer` — today's single-implementer behaviour.
-   * First-match-wins; see `ImplementerRule`. Source of truth is
-   * `JINN_DISPATCHER_IMPLEMENTER_RULES` (runner-read JSON array).
-   */
-  implementerRules: ImplementerRule[];
   /**
    * GitHub logins whose issues the dispatcher may pick up (#497). Compared
    * case-insensitively against `PolledIssue.author`. Empty (the default) =
@@ -173,9 +153,29 @@ export interface DispatcherConfig {
   /** Max simultaneous merge-prep sessions. Default 1 (singleton — stuck PRs are
    *  rare, and serializing removes prep-vs-prep races on shared `origin/next`). */
   mergePrepCap: number;
+  /**
+   * Model id for `hermes` coordinator sessions, as `--model` to `hermes chat`.
+   * BARE — never `<org>/<model>`: an org-prefixed id makes hermes infer the
+   * `openrouter` provider and bill an API key instead of the operator's Codex
+   * subscription. Hermes does not validate the id at runtime; only the provider
+   * can reject it. Source: `JINN_DISPATCHER_HERMES_MODEL`.
+   */
+  hermesModel: string;
+  /**
+   * Provider for `hermes` coordinator sessions, passed EXPLICITLY (never
+   * inferred). `openai-codex` = "Codex CLI via ChatGPT subscription or API key"
+   * (models.py ProviderEntry) — it auto-selects the `codex_responses` api_mode
+   * and the Codex base_url, and resolves credentials from hermes' own Codex
+   * token store. Source: `JINN_DISPATCHER_HERMES_PROVIDER`.
+   */
+  hermesProvider: string;
+  /** Python interpreter from the Hermes installation. Source:
+   * `JINN_DISPATCHER_HERMES_PYTHON`. */
+  hermesPythonPath: string;
 }
 
 export const DEFAULT_CONFIG: DispatcherConfig = {
+  runtime: 'claude',
   concurrencyCap: 3,
   // PR backpressure ceiling: pause dispatch when this many open PRs target `next`.
   // 30 is enough headroom for a normal sprint's worth of in-flight + parked work
@@ -183,8 +183,6 @@ export const DEFAULT_CONFIG: DispatcherConfig = {
   // `--backpressure N` on scripts/run-autopilot.ts.
   openPrBackpressure: 30,
   wallClockMs: 4 * 60 * 60 * 1000,
-  defaultImplementer: 'claude',
-  implementerRules: [],
   authorAllowlist: [],
   reviewCap: 3,
   engineReviewLabel: 'engine:review',
@@ -193,6 +191,13 @@ export const DEFAULT_CONFIG: DispatcherConfig = {
   reviewGhToken: '',
   mergePrepEnabled: false,
   mergePrepCap: 1,
+  // Bare id + explicit provider: mirrors the operator's own working codex setup
+  // (~/.codex/config.toml model = "gpt-5.6-sol"; ~/.hermes/config.yaml
+  // provider: openai-codex). An `openai/`-prefixed id would silently route to
+  // OpenRouter instead of the subscription.
+  hermesModel: 'gpt-5.6-sol',
+  hermesProvider: 'openai-codex',
+  hermesPythonPath: DEFAULT_HERMES_PYTHON,
 };
 
 /** A PR as polled from the PR source, with the fields the review loop needs. */
@@ -230,6 +235,8 @@ export interface InFlightReview {
   worktreePath: string;
   pid: number | null;
   startedAt: number;
+  /** Unique persisted ownership generation; null means cleanup is forbidden. */
+  leaseId?: string | null;
 }
 
 /** An in-flight merge-prep session, one per `jinn-mono_worktrees/merge-<N>`

@@ -1,11 +1,20 @@
 ---
 name: implement-issue
-description: Use when asked to implement a specific GitHub issue — e.g. "implement issue #N", "run the pipeline on this issue", "take this issue to a PR". Coordinates the full autonomous superpowers pipeline for exactly one triaged issue — depth-needing stages run as `claude -p` root sessions, lightweight stages as Agent-tool sub-agents — from worktree setup to a reviewed draft PR against `next`.
+description: Use when asked to implement a specific GitHub issue — e.g. "implement issue #N", "run the pipeline on this issue", "take this issue to a PR". Coordinates the full autonomous pipeline for exactly one triaged issue across Claude or Hermes, from worktree setup to a reviewed draft PR against `next`.
 ---
 
 # implement-issue
 
-You are the coordinating agent for exactly one triaged GitHub issue. Your job is to take it from triaged-issue to a reviewed, app-tested **draft PR** against `next`. The depth-needing stages (Design, Implement, `/code-review`, Independent review) run as their **own `claude -p` root sessions** in the shared worktree — invoked via the `stage:run` CLI — so their composed skills can fan out sub-agents at depth-1; the lightweight stages run as Agent-tool sub-agents. You own the finding→fix loop and the escalation decision; you do not implement directly.
+You are the coordinating agent for exactly one triaged GitHub issue. Your job is to take it from triaged-issue to a reviewed, app-tested **draft PR** against `next`. You own the finding→fix loop and the escalation decision; you do not implement directly.
+
+## Runtime adapter
+
+Before Step 1, read the shared
+[`autopilot-runtime`](../autopilot-runtime/SKILL.md) skill completely. It
+selects mechanics from `JINN_AUTOPILOT_RUNTIME=claude|hermes`; unset defaults
+to Claude for an interactive invocation. This file remains authoritative for
+every gate, stage deliverable, retry, escalation, shipping, and cleanup
+decision.
 
 ## Read first
 
@@ -72,19 +81,18 @@ Before any worktree is created and before `Status` is flipped to `In Progress`, 
 
 ### Invoke the CLI
 
-Run the reality-check from the self-contained Autopilot package in the primary checkout
-(not the worktree — the worktree doesn't exist yet). The repository root has no Yarn
-workspace, so invoke the package directly:
+The dispatcher exports `JINN_AUTOPILOT_PACKAGE_DIR` to its installed Autopilot
+package checkout. For an interactive human invocation where that variable is
+unset, use the self-contained package at `<repo-root>/packages/autopilot` in
+the primary checkout (not a worktree, which does not exist yet). Resolve that
+location once, then run and parse the JSON verdict:
 
 ```bash
-(cd "<repo-root>/packages/autopilot" && yarn triage:check <N>)
-# Emits one line of JSON to stdout; non-zero exit on failure.
-```
-
-Parse the JSON verdict:
-
-```bash
-VERDICT_JSON=$(cd "<repo-root>/packages/autopilot" && yarn triage:check <N>)
+AUTOPILOT_PACKAGE_DIR="${JINN_AUTOPILOT_PACKAGE_DIR:-<repo-root>/packages/autopilot}"
+if ! VERDICT_JSON=$(yarn --cwd "$AUTOPILOT_PACKAGE_DIR" triage:check <N>); then
+  echo "Reality-check failed; aborting triage." >&2
+  exit 1
+fi
 CLASSIFICATION=$(echo "$VERDICT_JSON" | jq -r '.classification')
 SUGGESTED_COMMENT=$(echo "$VERDICT_JSON" | jq -r '.suggestedComment')
 SUGGESTED_BLOCKED_ON=$(echo "$VERDICT_JSON" | jq -r '.suggestedBlockedOn')
@@ -195,20 +203,39 @@ Stages scale to **Issue Type + Effort**:
 | `High` any shape | Run all stages fully. |
 | `refactor` (any Effort) | Stage 1 is mandatory and must not be compressed — design upfront is a handbook requirement for this shape. |
 
-**Rule:** Every stage runs in a fresh context — the coordinating agent never implements inline. The dispatch mechanism splits by whether the stage's composed skill needs to fan out its own sub-agents:
+**Rule:** Every stage runs in a fresh context — the coordinating agent never implements inline. The dispatch mechanism splits by whether the stage's method needs depth:
 
-- **Depth-needing stages — 1 (Design), 3 (Implement), 4 (`/code-review`), 5 (Independent review)** run as a fresh **`claude -p` root session** in the worktree, launched via `stage:run` (Step 4). Because these sessions are depth-0, their composed skills (`brainstorming` parallel design-alts, `subagent-driven-development` one-agent-per-task, `code-review` / `requesting-code-review` parallel diff-analysis) can spawn sub-agents at depth-1. Dispatching them as an Agent-tool sub-agent would sit at depth-1, and their inner fan-out — forbidden at depth-2 — would silently no-op.
-- **Lightweight stages — 2 (Plan), 6 (Security review), 7 (Jinn-app test), 8 (Verify + PR)** stay **Agent-tool sub-agents** — they don't fan out, so the extra `claude -p` boot cost buys nothing.
+- **Depth-needing stages — 1 (Design), 3 (Implement), 4 (Code review), 5 (Independent review)** run through the active adapter’s fresh-root mechanism.
+- **Lightweight stages — 2 (Plan), 6 (Security review), 7 (Jinn-app test), 8 (Verify + PR)** run through the active adapter’s lightweight-child mechanism.
 
 See Step 4 for dispatch discipline.
+
+## Canonical stage methodologies
+
+These methodology names are runtime-neutral workflow policy:
+
+| Stage | Method skill |
+|---|---|
+| 1 — Design | `superpowers:brainstorming` |
+| 2 — Plan | `superpowers:writing-plans` |
+| 3 — Implement | `superpowers:test-driven-development` then `superpowers:executing-plans` |
+| 4 — Code review | `/code-review` |
+| 5 — Independent review | `superpowers:requesting-code-review` |
+| 6 — Security review | `/security-review` |
+| 7 — Jinn-app test | `testing-jinn-app` |
+| 8 — Verify + PR | `superpowers:verification-before-completion` |
+
+The active runtime adapter resolves these canonical method names to the closest
+installed runtime skill. If no separately named equivalent exists, the stage
+follows its canonical checklist below without removing or compressing a gate.
 
 ---
 
 ### Stage 1 — Design
 
-**Dispatcher:** run as a `claude -p` root session via `stage:run` (see Step 4).
+**Dispatcher:** run through the active adapter’s fresh-root mechanism.
 
-**Prompt the subagent to:** run `superpowers:brainstorming` headlessly — explore the codebase for relevant code, constraints, and existing patterns; then write a short design note (target: 1–3 paragraphs) that names the chosen approach and the key trade-offs considered.
+**Prompt the stage to:** explore the codebase for relevant code, constraints, and existing patterns; brainstorm alternatives before settling; then write a short design note (target: 1–3 paragraphs) that names the chosen approach and the key trade-offs considered.
 
 **Output the coordinator reads:** the design note. Confirm it is coherent and covers the issue's acceptance criteria before proceeding to Stage 2.
 
@@ -216,9 +243,9 @@ See Step 4 for dispatch discipline.
 
 ### Stage 2 — Plan
 
-**Dispatcher:** dispatch a planning subagent, giving it the design note from Stage 1.
+**Dispatcher:** run through the active adapter’s lightweight-child mechanism, giving it the design note from Stage 1.
 
-**Prompt the subagent to:** run `superpowers:writing-plans` — produce a step-by-step implementation plan with acceptance criteria mapped to specific tasks.
+**Prompt the stage to:** produce a step-by-step implementation plan with acceptance criteria mapped to specific tasks.
 
 **Output the coordinator reads:** the plan. Confirm it is actionable before proceeding to Stage 3.
 
@@ -226,9 +253,9 @@ See Step 4 for dispatch discipline.
 
 ### Stage 3 — Implement
 
-**Dispatcher:** run as a `claude -p` root session via `stage:run` (see Step 4), giving it the design note and the plan. Remember that this is the implementer session — the reviewer (Stage 5) must be a **different**, independent `stage:run` session.
+**Dispatcher:** run through the active adapter’s fresh-root mechanism, giving it the design note and the plan. Remember that this is the implementer session — the reviewer (Stage 5) must be a **different**, independent fresh-root invocation.
 
-**Prompt the subagent to:** run `superpowers:test-driven-development` then `superpowers:executing-plans`. For a `fix` shape: write the regression test first, watch it fail, then implement the fix. For all shapes: tests must be written before or alongside implementation.
+**Prompt the stage to:** follow test-driven development while executing the plan. For a `fix` shape: write the regression test first, watch it fail, then implement the fix. For all shapes: tests must be written before or alongside implementation.
 
 **Zero-commit guard:** after this stage, verify that commits exist before proceeding (use `WORKTREE_PATH` from Step 2, or the absolute path from the dispatcher prompt if the worktree was pre-created):
 
@@ -236,23 +263,25 @@ See Step 4 for dispatch discipline.
 git -C "${WORKTREE_PATH}" log origin/next..HEAD --oneline
 ```
 
-If the log is empty, dispatch a fix subagent before continuing.
+If the log is empty, re-run Stage 3 through the active adapter’s fresh-root
+mechanism with the missing-commit gap named, then re-check the log before
+continuing.
 
 ---
 
 ### Stage 4 — `/code-review`
 
-**Dispatcher:** run as a `claude -p` root session via `stage:run` (see Step 4).
+**Dispatcher:** run through the active adapter’s fresh-root mechanism.
 
-**Prompt the subagent to:** run the `/code-review` skill on the diff — tighten it for reuse, clarity, and minimal surface area, and self-review the change. If the pass reveals a structural problem (not just style), the subagent raises it as a finding (routes back through Stage 5 finding handling).
+**Prompt the stage to:** review the diff — tighten it for reuse, clarity, and minimal surface area, and self-review the change. If the pass reveals a structural problem (not just style), the stage raises it as a finding (routes back through Stage 5 finding handling).
 
 ---
 
 ### Stage 5 — Independent review
 
-**Dispatcher:** run as a **fresh** `claude -p` root session via `stage:run` (see Step 4) that has not seen the Stage 3 implementer's work — independence is free when context is clean. This session must be a **separate** `stage:run` invocation from the Stage 3 implementer.
+**Dispatcher:** run through the active adapter’s fresh-root mechanism in a context that has not seen the Stage 3 implementer's work. This must be a **separate** fresh-root invocation from the Stage 3 implementer.
 
-**Prompt the subagent to:** run `superpowers:requesting-code-review` using the code-reviewer template. The reviewer has **send-back authority** — it may reject changes and enumerate findings. Give it: the diff, the issue body, the acceptance criteria.
+**Prompt the stage to:** use the code-reviewer template. The reviewer has **send-back authority** — it may reject changes and enumerate findings. Give it: the diff, the issue body, the acceptance criteria.
 
 **If findings:** route to finding handling (Step 5 below) before proceeding to Stage 6.
 
@@ -260,9 +289,9 @@ If the log is empty, dispatch a fix subagent before continuing.
 
 ### Stage 6 — Security review
 
-**Dispatcher:** dispatch a security review subagent. Runs on every session, no exceptions.
+**Dispatcher:** run through the active adapter’s lightweight-child mechanism. Runs on every session, no exceptions.
 
-**Prompt the subagent to:** run `/security-review` on the diff. Same finding handling as Stage 5.
+**Prompt the stage to:** perform a security review on the diff. Same finding handling as Stage 5.
 
 ---
 
@@ -270,9 +299,9 @@ If the log is empty, dispatch a fix subagent before continuing.
 
 **Condition:** run this stage only when the change touches an operator-visible surface (the operator dashboard SPA, the daemon API, bootstrap flows, or any surface in `client/src/dashboard/`). For an issue under the **Human-surface gate** (Step 1) this stage is **mandatory** and must not be skipped — its UI walk / screenshot is the **verify artifact** that gate requires, and it is linked in the Stage 8 PR body.
 
-**Dispatcher:** dispatch a test subagent.
+**Dispatcher:** run through the active adapter’s lightweight-child mechanism.
 
-**Prompt the subagent to:** run `testing-jinn-app` for the specific change — walk the affected UI surface and verify the acceptance criteria are met in the running app.
+**Prompt the stage to:** test the specific change in the Jinn app — walk the affected UI surface and verify the acceptance criteria are met in the running app.
 
 **If the change does not touch an operator-visible surface:** skip this stage and note the skip reason in the coordinator's running log.
 
@@ -280,9 +309,9 @@ If the log is empty, dispatch a fix subagent before continuing.
 
 ### Stage 8 — Verify + open PR
 
-**Dispatcher:** dispatch a verification subagent.
+**Dispatcher:** run through the active adapter’s lightweight-child mechanism.
 
-**Prompt the subagent to:** run `superpowers:verification-before-completion` — typecheck, tests, and build must all be green locally in the worktree. Then open the draft PR:
+**Prompt the stage to:** verify before completion — typecheck, tests, and build must all be green locally in the worktree. Then open the draft PR:
 
 ```bash
 gh pr create \
@@ -299,7 +328,7 @@ gh pr create \
 
 Closes #<N>
 
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
+🤖 Generated with Jinn Autopilot
 EOF
 )"
 ```
@@ -310,13 +339,14 @@ The `--label engine:review` opt-in flag enrols this PR in the independent `revie
 
 **Human-surface PR body:** for an issue under the Human-surface gate, the PR body must also include a `## Human-surface` section with (a) the **frontend/UX compliance** attestation (validated against the Frontend + Design-System rules in `CLAUDE.md`) and (b) a link to the **Stage 7 verify artifact** (the `testing-jinn-app` walk / screenshot).
 
-**Zero-commit guard:** after the subagent reports done, verify the PR exists externally before declaring this stage complete:
+**Zero-commit guard:** after the stage reports done, verify the PR exists externally before declaring this stage complete:
 
 ```bash
 gh pr list --head "$BRANCH" --json number,url,isDraft
 ```
 
-If the PR does not exist, dispatch a fix subagent.
+If the PR does not exist, re-run Stage 8 through the active adapter’s
+lightweight-child mechanism with the missing-PR gap named, then re-check.
 
 **Move the issue to `In Review`.** Once the draft PR is confirmed, set the issue's Project `Status` to `In Review` — the pipeline's work is done and the issue now awaits the human's batch-merge. This also removes the issue from the dispatcher's in-flight set (`deriveInFlight` keys on `In Progress`), freeing the concurrency slot; without it a completed session lingers as in-flight. `Status` is single-select — discover the `In Review` option id via `gh project field-list` (Step 2), then `gh project item-edit ... --single-select-option-id <in-review-option-id>`.
 
@@ -381,7 +411,7 @@ git worktree add -B "$BRANCH" "$WORKTREE_PATH" "origin/${BRANCH}"
 
 ### Curated prompt, not forwarded history
 
-Each stage session (whether a `stage:run` root session or an Agent-tool sub-agent) receives a **curated prompt** containing:
+Each stage session receives a **curated prompt** containing:
 - The stage's task, verbatim from the relevant step above
 - The issue body (context, impact, acceptance criteria, file hints)
 - The worktree path and branch name
@@ -389,34 +419,12 @@ Each stage session (whether a `stage:run` root session or an Agent-tool sub-agen
 
 Never forward the coordinator's own conversation history to a stage. Keep each stage's context minimal and task-specific. Bloated context degrades output quality and wastes budget.
 
-### Running a depth-needing stage via `stage:run`
+### Running a depth-needing stage
 
-Stages 1, 3, 4, 5 must run as `claude -p` **root sessions** so their composed skills can fan out sub-agents at depth-1. Launch each one with the `stage:run` CLI, run from the `packages/autopilot` package dir:
-
-```bash
-# 1. Write the curated prompt to a temp file. Include the stage task + issue
-#    body/ACs + worktree path/branch + relevant prior-stage outputs.
-#    Do NOT include canon (CLAUDE.md / handbook) OR the headless-override block —
-#    runStageHeadless prepends BOTH exactly once (embedding either here would
-#    double-inject it). The runner supplies canon, so do not stuff CLAUDE.md
-#    into this file.
-cat > /tmp/stage-<N>-<stage>.md <<'EOF'
-<curated stage prompt>
-EOF
-
-# 2. Run the stage as a root session in the worktree. --model is optional.
-#    packages/autopilot is a self-contained yarn project (no root workspace
-#    registers it), so run stage:run from the package dir, not via
-#    `yarn workspace`. The subshell keeps the coordinator's cwd unchanged.
-(cd "$WORKTREE_PATH/packages/autopilot" && yarn stage:run \
-  --prompt-file /tmp/stage-<N>-<stage>.md \
-  --worktree "$WORKTREE_PATH" \
-  [--model <model>])
-```
-
-The child's stdout is streamed back — read it as the stage report, exactly as you read an Agent-tool sub-agent's report. Because the session runs at depth-0, its composed skill's sub-agents spawn at depth-1 (the depth-2 restriction that silently no-ops an Agent-tool-dispatched stage does not apply). The session runs with `cwd = $WORKTREE_PATH`, so worktree isolation is unchanged. Because a `stage:run` session is its own `claude -p` session — which does not auto-load `CLAUDE.md` — `runStageHeadless` prepends canon (CLAUDE.md + handbook) and the headless-override block itself; the curated prompt-file must include neither.
-
-The lightweight stages (2, 6, 7, 8) stay Agent-tool sub-agents — dispatch them the usual way with the same curated prompt.
+Use the active adapter's fresh-root mechanism. It must launch a fresh depth-0
+operating-system process in `$WORKTREE_PATH`, prepend canon and the
+runtime-specific headless override exactly once, and return captured output as
+the stage report. Never dispatch a depth-needing stage as a lightweight child.
 
 ### Computing the change's diff
 
@@ -430,15 +438,15 @@ git diff $(git merge-base origin/next HEAD)..HEAD
 
 ### Independence invariant
 
-**The Stage 3 implementer and the Stage 5 reviewer must be different sessions.** Both run as `stage:run` root sessions (Step 4) — they are two **separate** `stage:run` invocations, never the same one. Running them as distinct `claude -p` sessions strengthens the "reviewer ≠ implementer" isolation, not weakens it. Re-review after a fix stays with the independent reviewer.
+**The Stage 3 implementer and the Stage 5 reviewer must be different sessions.** Both run through the active adapter's fresh-root mechanism (Step 4) — they are two **separate** invocations, never the same one. Re-review after a fix stays with the independent reviewer.
 
 ### After each stage
 
-The coordinator reads the stage's report (a `stage:run` session's streamed stdout, or an Agent-tool sub-agent's report) and decides: proceed to the next stage, or route to finding handling. The coordinator does not forward-continue until it is satisfied the stage is complete and sound.
+The coordinator reads the stage's report and decides: proceed to the next stage, or route to finding handling. The coordinator does not forward-continue until it is satisfied the stage is complete and sound.
 
 ### Zero-commit guard (repeated rule)
 
-After Stages 3 and 8, the coordinator verifies git/PR state with `git log` and `gh pr list` respectively. **It never trusts a stage's "done" claim.** These guards run in the shared worktree regardless of how the stage session was launched (`stage:run` root session or Agent-tool sub-agent). Agents sometimes report success without committing. The external check is mandatory:
+After Stages 3 and 8, the coordinator verifies git/PR state with `git log` and `gh pr list` respectively. **It never trusts a stage's "done" claim.** These guards run in the shared worktree regardless of how the active adapter launched the stage. Agents sometimes report success without committing. The external check is mandatory:
 
 ```bash
 git -C "$WORKTREE_PATH" log origin/next..HEAD --oneline
@@ -452,7 +460,7 @@ git -C "$WORKTREE_PATH" log origin/next..HEAD --oneline
 
 | Finding kind | Coordinator action |
 |---|---|
-| **Fixable** — wrong logic, missing test, failing CI, failing app-test, review comment about implementation | Dispatch a fix subagent with the findings; the gate re-runs after the fix. |
+| **Fixable** — wrong logic, missing test, failing CI, failing app-test, review comment about implementation | Re-run the stage responsible for the fix through that stage’s prescribed active-adapter mechanism with the findings; the gate re-runs after the fix. |
 | **Scope / design** — the issue is mis-scoped, the approach is fundamentally wrong, a product decision is needed | Immediate escalation — do not loop. |
 
 ### Escalation is judgment-based — no round count
@@ -467,7 +475,7 @@ An arbitrary cap would escalate legitimate multi-round fixes prematurely. Use ju
 
 Stop the pipeline. Write a one-paragraph note:
 
-> **Where I am:** [last stage completed; what the subagent last produced]
+> **Where I am:** [last stage completed; what the stage last produced]
 > **Why I stopped:** [the finding, verbatim; or "findings not converging after N rounds"]
 > **Status:** `needs-decision` | `blocked` | `stuck`
 
@@ -508,13 +516,13 @@ After the first push, **stop** — do not proceed to Stage 3 or open a PR. Write
 
 ## Step 7 — Headless-mode note
 
-When this skill runs in a headless session (dispatched by the Autopilot dispatcher with `-p` / `--print`), the caller injects canon (CLAUDE.md + handbook) followed by the headless-override block from `packages/autopilot/headless-override.md` at the top of the coordinating agent's prompt (`-p` mode does not auto-load `CLAUDE.md`). The coordinator and all subagents then make approval decisions themselves — they do not wait for user input. For the depth-needing stages launched via `stage:run`, `runStageHeadless` prepends both canon and the same override block automatically — so the curated prompt-file you write must **not** include canon OR the override block (see Step 4).
+When this skill runs in a headless session, the Autopilot dispatcher uses the active adapter to inject canon (`CLAUDE.md` + handbook) followed by the runtime-specific headless override at the top of the coordinating agent's prompt. The coordinator and all stage sessions then make approval decisions themselves — they do not wait for user input. For depth-needing stages, the fresh-root mechanism prepends canon and the runtime-specific override exactly once, so the curated prompt-file must include neither (see Step 4).
 
 When run interactively (Phase 1, hand-cranked), the human is present for genuine escalations.
 
 **The skill's behaviour is identical either way.** Only who answers an escalation differs: in headless mode, the coordinator self-judges and pauses; in interactive mode, the human reads the escalation note and steers.
 
-The headless-override block also reminds subagents not to use `--mode plan` / `--permission-mode plan` — leaked plan-posture flags make agents narrate instead of execute.
+The headless override also prevents plan-only posture from leaking into stage execution.
 
 ---
 
@@ -526,9 +534,9 @@ The headless-override block also reminds subagents not to use `--mode plan` / `-
 | `Blocked on` is `Human` or `Another issue` | Fail loud; stop. Do not proceed. |
 | Reality-check CLI fails / `gh` or `git` unavailable | Fail loud; stop. Do not proceed past Step 1.5. |
 | Step 1.5 returns `pr-open` / `fixed-on-trunk` / `fixed-pending-backmerge` / `fixed-direct-commit` | Comment on the issue, set `Blocked on` to the suggested value, do NOT flip `Status`, exit the skill. |
-| Subagent reports "done" but zero commits | Dispatch a fix subagent; re-check git log. |
-| Stage 5 reviewer is same as Stage 3 implementer | Re-dispatch Stage 5 with a genuinely fresh subagent. |
-| PR does not appear after Stage 8 subagent reports success | Dispatch a fix subagent; re-check `gh pr list`. |
+| Stage 3 reports "done" but zero commits | Re-run Stage 3 through the active adapter’s fresh-root mechanism; re-check git log. |
+| Stage 5 reviewer is same as Stage 3 implementer | Re-run Stage 5 through the active adapter’s fresh-root mechanism in a genuinely fresh context. |
+| PR does not appear after Stage 8 reports success | Re-run Stage 8 through the active adapter’s lightweight-child mechanism; re-check `gh pr list`. |
 | Findings not converging across multiple rounds | Escalate with status `stuck`; stop. |
 | Scope/design finding from any gate | Immediate escalation with status `needs-decision`; stop. |
 | `spike` / `incident` / `design` shape passes Stage 2 | Stop — these shapes must not proceed to Stage 3. |
@@ -537,7 +545,7 @@ The headless-override block also reminds subagents not to use `--mode plan` / `-
 
 ## Composition
 
-- Composes with: `superpowers:brainstorming`, `superpowers:writing-plans`, `superpowers:test-driven-development`, `superpowers:executing-plans`, `/code-review`, `superpowers:requesting-code-review`, `/security-review`, `testing-jinn-app`, `superpowers:verification-before-completion`.
+- Composes with: the canonical method skills declared above, resolved through the active runtime adapter; the canonical stage methodologies and deliverables remain authoritative.
 - Downstream of: `file-issue` (which produces the triaged issue this skill consumes).
 - Upstream of: the merge skill (which batch-integrates the draft PRs this skill produces into `next`).
 - Dispatcher integration: the Autopilot dispatcher invokes this skill per issue; the headless-override block is injected by the dispatcher, not this skill.

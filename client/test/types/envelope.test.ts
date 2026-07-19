@@ -188,4 +188,99 @@ describe('SignedEnvelopeSchema', () => {
       expect(parsed.executor.model).not.toBe('');
     });
   });
+
+  describe('generatorModel / distributionClass / task.createdAt / instanceId (#1827)', () => {
+    it('accepts executor.generatorModel with source="stream"', () => {
+      const envelope = {
+        ...baseSigned,
+        executor: {
+          ...baseSigned.executor,
+          generatorModel: {
+            id: 'claude-sonnet-4-6',
+            provider: 'anthropic',
+            source: 'stream' as const,
+          },
+        },
+      };
+      const parsed = SignedEnvelopeSchema.parse(envelope);
+      expect(parsed.executor.generatorModel).toEqual({
+        id: 'claude-sonnet-4-6',
+        provider: 'anthropic',
+        source: 'stream',
+      });
+    });
+
+    it('accepts executor.generatorModel with source="config" and no provider/openWeights', () => {
+      const envelope = {
+        ...baseSigned,
+        executor: {
+          ...baseSigned.executor,
+          generatorModel: { id: 'claude-haiku-4-5-20251001', source: 'config' as const },
+        },
+      };
+      const parsed = SignedEnvelopeSchema.parse(envelope);
+      expect(parsed.executor.generatorModel).toEqual({
+        id: 'claude-haiku-4-5-20251001',
+        source: 'config',
+      });
+    });
+
+    it('rejects executor.generatorModel with an invalid source value', () => {
+      const envelope = {
+        ...baseSigned,
+        executor: {
+          ...baseSigned.executor,
+          generatorModel: { id: 'x', source: 'guess' },
+        },
+      };
+      expect(() => SignedEnvelopeSchema.parse(envelope)).toThrow();
+    });
+
+    it('accepts envelope without executor.generatorModel (back-compat)', () => {
+      const parsed = SignedEnvelopeSchema.parse(baseSigned);
+      expect(parsed.executor.generatorModel).toBeUndefined();
+    });
+
+    it('accepts top-level distributionClass "open" | "restricted-tos" | "unknown"', () => {
+      for (const distributionClass of ['open', 'restricted-tos', 'unknown'] as const) {
+        const parsed = SignedEnvelopeSchema.parse({ ...baseSigned, distributionClass });
+        expect(parsed.distributionClass).toBe(distributionClass);
+      }
+    });
+
+    it('rejects an invalid distributionClass value', () => {
+      expect(() => SignedEnvelopeSchema.parse({ ...baseSigned, distributionClass: 'proprietary' })).toThrow();
+    });
+
+    it('accepts envelope without distributionClass (back-compat)', () => {
+      const parsed = SignedEnvelopeSchema.parse(baseSigned);
+      expect(parsed.distributionClass).toBeUndefined();
+    });
+
+    it('accepts task.createdAt / task.instanceId / task.repo / task.baseCommit', () => {
+      const envelope = {
+        ...baseSigned,
+        task: {
+          ...baseSigned.task,
+          createdAt: 1752000000,
+          instanceId: 'astropy__astropy-12907',
+          repo: 'astropy/astropy',
+          baseCommit: 'abc123def456',
+        },
+      };
+      const parsed = SignedEnvelopeSchema.parse(envelope);
+      expect(parsed.task).toMatchObject({
+        createdAt: 1752000000,
+        instanceId: 'astropy__astropy-12907',
+        repo: 'astropy/astropy',
+        baseCommit: 'abc123def456',
+      });
+    });
+
+    it('accepts envelope without task.createdAt/instanceId/repo/baseCommit (back-compat)', () => {
+      const parsed = SignedEnvelopeSchema.parse(baseSigned);
+      expect(parsed.task?.createdAt).toBeUndefined();
+      expect(parsed.task?.instanceId).toBeUndefined();
+    });
+  });
 });

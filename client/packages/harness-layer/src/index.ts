@@ -18,6 +18,13 @@ export {
 } from './consume.js';
 
 export {
+  corpusProbes,
+  enoughCorpusForRepo,
+  CORPUS_ONBOARDING_K,
+  type DoctorCheck,
+} from './corpus-probes.js';
+
+export {
   capture,
   parseCapturedTask,
   CapturedTaskSchema,
@@ -290,7 +297,7 @@ export {
   type ContributionStoreOptions,
   type ContributionStoreRecordOptions,
   type ContributionStoreRecord,
-} from './contribution-store.js';
+} from '@jinn-network/core';
 
 export {
   PROCESS_CONTRACT_VERSION,
@@ -306,3 +313,10 @@ export {
   contributionLedgerRow,
   type ContributionLedgerRowV1,
 } from './process-contract.js';
+
+export {
+  resolveRetrievalMark,
+  HAND_MARK_POLICY,
+  type AdmissionPolicy,
+  type AdmissionFacts,
+} from './admission-policy.js';

@@ -6,13 +6,12 @@ import type { PrSource } from '../../src/dispatcher/pr-source.js';
 import type { PolledPr, ReviewablePr, InFlightReview, DispatcherConfig } from '../../src/dispatcher/types.js';
 
 const CFG: DispatcherConfig = {
-  concurrencyCap: 3, openPrBackpressure: 30, wallClockMs: 1, defaultImplementer: 'claude',
-  implementerRules: [],
+  runtime: 'claude', concurrencyCap: 3, openPrBackpressure: 30, wallClockMs: 1,
   // 'a' is the default PR author in pr(); allowlisting it lets these cycle
   // tests exercise dispatch (the review-side author gate, DR-2026-06-15, drops
   // non-allowlisted authors — covered directly in review-ready-filter.test.ts).
   authorAllowlist: ['a'], reviewCap: 2, engineReviewLabel: 'engine:review', reviewBotLogin: 'jinn-bot',
-  implGhToken: '', reviewGhToken: '', mergePrepEnabled: false, mergePrepCap: 1,
+  implGhToken: '', reviewGhToken: '', mergePrepEnabled: false, mergePrepCap: 1, hermesModel: 'gpt-5.6-sol', hermesProvider: 'openai-codex', hermesPythonPath: '/opt/hermes/python',
 };
 function pr(n: number, over: Partial<PolledPr> = {}): PolledPr {
   return { number: n, title: `t${n}`, headRefName: `b/${n}`, headRefOid: 's', isDraft: false, author: 'a', hasReviewLabel: true, needsReview: true, ...over };

@@ -92,7 +92,7 @@ HERMES_CADUCEUS = """[#CD7F32]⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⡀⠀⣀⣀�
 # An instant one-paint greeting for the jinn-agent fork: the Vessel sigil
 # (circle · inscribed triangle · horizon · centre point), a lower-case
 # ``jinn`` wordmark under a gold rule, the version, and live status lines
-# (network, corpus, contribution; node is render-supported but omitted by the
+# (network, corpus, parked contribution; node is render-supported but omitted by the
 # fork — it has no local node concept). Design artifact:
 # ``docs/design/artifacts/2026-07-06-corpus-onboarding/1319-terminal-splash.html``.
 #
@@ -174,10 +174,11 @@ def _thousands(n: int) -> str:
 def _status_lines(state: Dict[str, object], pal: Dict[str, str]) -> List[str]:
     """Render the status lines (network, corpus, contribution, node).
 
-    Fixed order. Pre-consent (``contribution`` is ``None``/unset) omits the
-    contribution line entirely; likewise an absent ``node`` key omits the node
-    line (the fork has no node source — see the node block below). Unresolved
-    network/corpus values render ``checking…`` dim.
+    Fixed order. Contribution is unconditionally parked/local-only in Stage 2;
+    retained Stage-1 consent is migration data, never live publication state.
+    An absent ``node`` key omits the node line (the fork has no node source —
+    see the node block below). Unresolved network/corpus values render
+    ``checking…`` dim.
     """
     rst = _RST
     dim, sky, gold, green, red = (
@@ -211,20 +212,15 @@ def _status_lines(state: Dict[str, object], pal: Dict[str, str]) -> List[str]:
     else:
         lines.append(label("corpus") + f"{dim}checking…{rst}")
 
-    # contribution — omitted entirely pre-consent (state == None / 'unset').
-    contrib = state.get("contribution")
-    if contrib == "on":
-        count = state.get("contribution_count")
-        tail = f"{_thousands(int(count))} traces published" if isinstance(count, int) else "traces published"
-        lines.append(label("contribution") + f"{green}on{sep}{tail}{rst}")
-    elif contrib == "off":
-        lines.append(label("contribution") + f"{dim}off{sep}reader only{rst}")
-    # else: unset — line omitted.
+    # Stage 2: the outbound lane is structurally parked. This copy does not
+    # inspect retained consent or ledger state, so old Stage-1 files cannot
+    # resurrect an "on" or "traces published" claim.
+    lines.append(label("contribution") + f"{dim}parked{sep}local only{rst}")
 
     # node — running(green) / not running(dim). Omitted entirely when the
-    # key is absent (same rule as the pre-consent contribution line): the
-    # jinn-agent harness has no local node/vessel concept (node operation is
-    # the separate mono client daemon), so an unresolved node line would show
+    # key is absent: the jinn-agent harness has no local node/vessel concept
+    # (node operation is the separate mono client daemon), so an unresolved
+    # node line would show
     # ``checking…`` forever and can never resolve — misleading. The fork's
     # gather_splash_state never sets ``node``, so the fork never renders this
     # line; the render path is retained for callers that do have a node source.
@@ -294,7 +290,7 @@ def render_jinn_splash(
     ``state`` keys (all optional; missing → ``checking…`` or omitted):
       network: 'testnet' | 'mainnet'
       corpus: 'connected' | 'unreachable'   corpus_count: int
-      contribution: 'on' | 'off'            contribution_count: int
+      contribution: 'parked' (display invariant; legacy values are ignored)
       node: 'running' | 'not_running'       node_vessel: str
       version: 'v0.4.2'  network_label: 'testnet'  update_available: bool
     """
@@ -362,12 +358,12 @@ def gather_splash_state() -> Dict[str, object]:
         Rich banner uses.
       - network / network_label: ``$JINN_NETWORK`` (default ``testnet`` —
         the fork's only sync network source; there is no chain config).
-      - contribution: real consent state — ``unset`` omits the line,
-        ``accepted`` → on, ``declined`` → off.
+      - contribution: always ``parked`` — Stage-1 consent retained on disk is
+        inert migration data and never changes this live Stage-2 state.
 
     Wired via the background prefetch (non-blocking, ``timeout=0.0``):
-      - corpus reachability + count and contribution_count come from
-        ``prefetch_splash_reads()`` (jinn-layer corpus search + ledger). Until
+      - corpus reachability + count come from ``prefetch_splash_reads()``
+        (jinn-layer corpus search). Until
         the prefetch resolves the read yields None and corpus honestly stays
         ``checking…`` — the settle can't shift layout (label-column-fixed).
 
@@ -392,16 +388,11 @@ def gather_splash_state() -> Dict[str, object]:
     except Exception:
         state["update_available"] = False
 
-    # Consent — synchronous, real. Drives the contribution line's presence.
-    try:
-        from plugins.jinn import consent as _consent
-        if _consent.consent_decided():
-            state["contribution"] = "on" if _consent.share_enabled() else "off"
-        # Undecided → key absent → contribution line omitted (pre-consent).
-    except Exception:
-        pass  # No consent module → treat as pre-consent, omit the line.
+    # Publication is structurally parked in Stage 2. Do not consult retained
+    # Stage-1 consent: it is preserved only for conservative migration.
+    state["contribution"] = "parked"
 
-    # Corpus + contribution count — reuse the prefetched reads; never block.
+    # Corpus — reuse the prefetched read; never block.
     # Un-prefetched / not-yet-resolved → None → corpus stays checking… (paint
     # never shifts layout: the status strings are label-column-fixed). node:
     # key never set → line omitted (see _status_lines).
@@ -414,10 +405,6 @@ def gather_splash_state() -> Dict[str, object]:
             state["corpus"] = reads["corpus"]
         if "corpus_count" in reads:
             state["corpus_count"] = reads["corpus_count"]
-        # contribution_count only when contribution is on (renderer degrades to
-        # 'on · traces published' without a count otherwise).
-        if state.get("contribution") == "on" and "contribution_count" in reads:
-            state["contribution_count"] = reads["contribution_count"]
     return state
 
 
@@ -900,33 +887,11 @@ def get_update_result(timeout: float = 0.5) -> Optional[int]:
 
 
 # =========================================================================
-# Non-blocking splash reads (corpus reachability+count, contribution count)
+# Non-blocking splash read (corpus reachability + count)
 # =========================================================================
 
 _splash_result: Optional[Dict[str, object]] = None
 _splash_reads_done = threading.Event()
-
-
-def _read_contribution_count() -> Optional[int]:
-    """Published-trace count via jinn-layer ``ledger --json``, or None.
-
-    Mirrors ``/jinn ledger``'s "N published" (ledger_view.render_ledger) and
-    the ``onboarding.ledger_nonempty`` degrade rule: any layer error /
-    unparseable output / unrecognised shape → None (never a false count, never
-    raise). Stored raw — consent-gating is applied at merge time in
-    ``gather_splash_state``.
-    """
-    try:
-        from plugins.jinn import jinn_layer, ledger_view
-        code, out, _err = jinn_layer.ledger_json()
-        if code != 0:
-            return None
-        rows = ledger_view.rows_from_json(json.loads(out))
-        if rows is None:
-            return None
-        return ledger_view.published_count(rows)
-    except Exception:
-        return None
 
 
 def _read_corpus() -> Dict[str, object]:
@@ -951,15 +916,12 @@ def _read_corpus() -> Dict[str, object]:
 
 
 def prefetch_splash_reads():
-    """Kick both splash subprocess reads in a background daemon thread."""
+    """Kick the corpus splash read in a background daemon thread."""
     def _run():
         global _splash_result
         result: Dict[str, object] = {}
         try:
             result.update(_read_corpus())
-            cc = _read_contribution_count()
-            if cc is not None:
-                result["contribution_count"] = cc
         except Exception:
             pass  # never raise — publish whatever resolved, honest checking… for the rest
         _splash_result = result

@@ -4,11 +4,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { RETRIEVAL_VISIBLE_TAG } from '@jinn-network/plugin';
 import type { HarnessLayer, CorpusSearchHit, CorpusRecord } from '../src/consume.js';
 import { runJinnLayerCli, type DistillRunCliDeps, type DistillCliDeps, type DistillProvider, type DistillPorts } from '../src/cli.js';
 import type { CapturedTask } from '../src/capture.js';
 import { createMemoryLedger, type LedgerEntry } from '../src/ledger.js';
-import type { HarnessPublishDeps } from '../src/publish.js';
+import { TRACE_ENVELOPE_ARTIFACT_TYPE, type HarnessPublishDeps } from '../src/publish.js';
 import type { AttemptRef, BridgeEvidence } from '../src/bridge.js';
 import type { DistillCluster, DistillLLMOutput, MetaDistillLLMOutput } from '../src/distill.js';
 import type { MetaCluster } from '../src/cluster.js';
@@ -100,12 +101,63 @@ function fakeHit(overrides: Partial<CorpusSearchHit> = {}): CorpusSearchHit {
     solverType: 'prediction.v1',
     role: 'solution',
     artifactTypes: ['output.prediction.v1'],
+    kind: 'trace',
     evidenceTier: 'self-signed',
     generatedAt: 1745978400,
     publishedAt: 1745978400,
     operator: { agentId: '7', safeAddress: '0x' + 'a'.repeat(40) },
     task: { cid: 'bafyTask', requestId: '0x' + 'b'.repeat(64) },
     ...overrides,
+  };
+}
+
+function retrievalVisibleTraceRecord(): CorpusRecord {
+  const trace = {
+    schemaVersion: 'jinn.trace-envelope.v0',
+    session: { sessionId: 'seed:doctor-probe', capturedAt: '2026-07-04T00:00:00.000Z' },
+    task: {
+      summary: 'Fix the dashboard version-status flake',
+      distributionTags: ['mono', RETRIEVAL_VISIBLE_TAG],
+    },
+    environment: {
+      harness: { name: 'hermes-agent', version: '0.1.0' },
+      model: 'test-model',
+      tools: ['bash'],
+    },
+    steps: [{
+      spanId: 's1',
+      parentSpanId: null,
+      name: 'run tests',
+      startTimeUnixNano: '1000000000',
+      endTimeUnixNano: '2000000000',
+      attributes: { 'tool.args': 'yarn test', 'tool.exitCode': 0 },
+      redactedKeys: [],
+    }],
+    outcome: {
+      status: 'completed',
+      verifiabilityTier: 'tests-passed',
+      summary: 'The flake is fixed.',
+    },
+    cost: { durationMs: 1000 },
+    consent: { contributionConsent: true, scrubCompleted: true },
+    provenance: 'imported',
+  };
+  const content = Buffer.from(JSON.stringify(trace), 'utf-8');
+  return {
+    ref: 'bafyProbe',
+    envelope: { participant: { safeAddress: '0xparticipant' } } as CorpusRecord['envelope'],
+    provenance: {
+      operator: { agentId: 'agent-77', safeAddress: '0xoperator' },
+      evidenceTier: 'self-signed',
+      publishedAt: 1_751_587_200,
+    },
+    artifacts: [{
+      sha256: createHash('sha256').update(content).digest('hex'),
+      artifactType: TRACE_ENVELOPE_ARTIFACT_TYPE,
+      content,
+      source: 'ipfs',
+      sizeBytes: content.length,
+    }],
   };
 }
 
@@ -194,6 +246,33 @@ describe('jinn-layer CLI', () => {
     const code = await runJinnLayerCli(['bogus'], { layer, writer });
     expect(code).not.toBe(0);
     expect(out()).toContain('Usage');
+  });
+
+  it('corpus probe --json emits the two doctor checks (corpus-reachable + corpus-content)', async () => {
+    const { writer, out } = capture();
+    const layer = fakeLayer({
+      hits: ['one', 'two', 'three'].map((ref) =>
+        fakeHit({ ref, tags: ['mono', RETRIEVAL_VISIBLE_TAG] })),
+      record: retrievalVisibleTraceRecord(),
+    });
+    const code = await runJinnLayerCli(['corpus', 'probe', 'owner/repo', '--json'], { layer, writer });
+    expect(code).toBe(0);
+    const checks = JSON.parse(out());
+    expect(Array.isArray(checks)).toBe(true);
+    expect(checks.map((c: { name: string }) => c.name)).toEqual(['corpus-reachable', 'corpus-content']);
+    expect(checks.every((c: { ok: boolean }) => c.ok)).toBe(true);
+  });
+
+  it('corpus probe --json on a throwing layer does not throw and reports corpus-reachable failure', async () => {
+    const { writer, out } = capture();
+    const layer = fakeLayer({});
+    (layer.corpus.search as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('discovery unreachable'));
+    const code = await runJinnLayerCli(['corpus', 'probe', 'owner/repo', '--json'], { layer, writer });
+    expect(code).toBe(0);
+    const checks = JSON.parse(out());
+    const reachable = checks.find((c: { name: string }) => c.name === 'corpus-reachable');
+    expect(reachable.ok).toBe(false);
+    expect(reachable.remedy).toBeDefined();
   });
 });
 

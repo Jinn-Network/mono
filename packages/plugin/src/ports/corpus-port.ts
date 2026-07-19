@@ -54,6 +54,10 @@ export interface CorpusRecord {
    * record.
    */
   isSkillPayload?: boolean;
+  /** Computed in decodeRecord from the envelope's own distributionTags (issue
+   *  #1824) — content is the truth, hit metadata is only a hint. Post-fetch
+   *  guard in firstTurnPickup drops a record whose content lacks the mark. */
+  retrievalVisible?: boolean;
 }
 
 export interface CorpusPort {

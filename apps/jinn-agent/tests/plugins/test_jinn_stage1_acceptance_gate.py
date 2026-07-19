@@ -51,9 +51,42 @@ def test_stage1_gate_is_blocking_for_every_product_boundary():
     assert "cold-stock-e2e.sh" in rendered_steps
 
 
+def test_jinn_agent_suite_includes_destructive_cleanup_regressions():
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "jinn-agent-ci.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    test_steps = workflow["jobs"]["test"]["steps"]
+    rendered_steps = "\n".join(
+        str(step.get("run", "")) for step in test_steps
+    )
+
+    assert "tests/scripts/test_clean_jinn_test_pollution.py" in rendered_steps
+
+
 def test_acceptance_drivers_are_repo_owned_executables():
     python_driver = AGENT_ROOT / "scripts" / "stage1-stock-product.py"
     daemon_driver = REPO_ROOT / "client" / "scripts" / "stage1-task-creator-acceptance.mjs"
 
     assert python_driver.is_file()
     assert daemon_driver.is_file()
+
+
+def test_acceptance_drivers_enforce_stage2_parked_lifecycle():
+    python_driver = (
+        AGENT_ROOT / "scripts" / "stage1-stock-product.py"
+    ).read_text(encoding="utf-8")
+    daemon_driver = (
+        REPO_ROOT / "client" / "scripts" / "stage1-task-creator-acceptance.mjs"
+    ).read_text(encoding="utf-8")
+
+    assert 'jinn._handle_jinn("preview")' not in python_driver
+    assert "preview acknowledged" not in python_driver
+    assert "expected_publication" not in python_driver
+    assert "jinn.consent.save_state(True, previewed=True)" in python_driver
+    assert '"publication ON" not in current' in python_driver
+    assert "contribution: parked — nothing leaves this machine" in python_driver
+    assert "publish: true" not in daemon_driver
+    assert "publish: false" in daemon_driver
+    assert "assert.equal(uploads.length, 0)" in daemon_driver

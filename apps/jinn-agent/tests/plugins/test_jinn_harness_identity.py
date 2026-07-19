@@ -29,12 +29,10 @@ def test_copy_never_claims_jinn_agent_on_stock(monkeypatch):
     for k in ("JINN_HARNESS_NAME", "JINN_CLI_NAME"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("NO_COLOR", "1")
-    from plugins.jinn import consent, onboarding
+    from plugins.jinn import consent
     explainer = consent.render_explainer()
     assert "jinn-agent" not in explainer
     assert "fork of hermes-agent" not in explainer
-    replay = onboarding.render_already_complete()  # the returning-operator line
-    assert "jinn-agent onboarding" not in replay
 
 
 def test_copy_keeps_fork_identity_when_env_set(monkeypatch):

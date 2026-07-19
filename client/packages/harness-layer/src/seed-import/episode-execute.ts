@@ -14,7 +14,7 @@
  */
 
 import { capture, type CapturedTask } from '../capture.js';
-import { buildScrubPipeline } from '../../../../src/trajectory/scrub/build.js';
+import { buildSeedScrubPipeline } from '../../../../src/trajectory/scrub/build.js';
 import {
   publish,
   PublishLedgerError,
@@ -154,11 +154,14 @@ export async function executeEpisodes(
   }
   const result: EpisodeImportResult = { imported: [], skipped: [], errors: [] };
   const now = deps.now?.() ?? new Date();
-  // Evidence episodes can contain copied command output and must use the
-  // strict deterministic trace profile: structured PII plus entropy-backed
-  // secret detection. The skill lane intentionally keeps its permissive
-  // public-prose profile (#1409).
-  const episodeScrubPipeline = buildScrubPipeline();
+  // Evidence episodes are public, transformed, human-reviewed seeds — like
+  // the skill lane, not operator trace data — so they run the seed profile
+  // (plan §4.4; spec/2026-07-02-jinn-harness-network.md §7): deterministic
+  // key policy, plain-patterns, and secretlint pass-1 only. The strict
+  // trace profile's probabilistic stages (openredaction, entropy fallback)
+  // false-positive on ordinary words and hex-looking SHAs in this content
+  // (#1784) and are not appropriate for a pre-vetted, checked-in corpus.
+  const episodeScrubPipeline = buildSeedScrubPipeline();
   const state = opts.state ?? createMemorySeedImportState();
 
   for (const row of report) {

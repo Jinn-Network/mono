@@ -4,7 +4,8 @@ import type { Attributes, RedactionRecord, ScrubResult, ScrubStage } from './typ
  * Runs scrub stages in order over a span's attributes: each stage's output
  * attributes feed the next, and redaction records accumulate across the whole
  * chain. Stages may be async (e.g. the ML PII stage). The `components` list
- * (stage name + pinned version) is what the signed provenance manifest records.
+ * (stage name + pinned version) is available for local inspection and tests;
+ * the current trace-envelope schema does not publish it.
  *
  * Nested values (#1378): the stages themselves operate on flat string values —
  * a non-string attribute value (e.g. `tool.args` captured as an object) used

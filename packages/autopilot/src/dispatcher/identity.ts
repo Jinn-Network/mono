@@ -2,16 +2,17 @@ import type { CommandRunner } from './issue-source.js';
 import type { DispatcherConfig } from './types.js';
 
 /**
- * Spawn-opts overlay for a dispatched `claude -p` session. Spread into the
- * `spawn` opts; the production spawn lambda forwards `env` to Node's
+ * Spawn-environment overlay for a dispatched coordinator session. The
+ * production spawn lambda forwards `env` to Node's
  * `child_process.spawn`. Always sets an explicit `env` (a copy of
  * `process.env` plus the keys below):
  *
- *  - `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` — print-mode otherwise terminates
- *    a session once its background subagents have run past the 600s default,
+ *  - `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` — Claude print-mode otherwise
+ *    terminates a session once its background subagents pass the 600s default,
  *    which strands committed-but-unpushed work before the push/PR stage. `0` =
- *    wait indefinitely, so a session runs its inner pipeline to completion. The
- *    autopilot wall-clock (hours, pause-not-kill) remains the runaway backstop.
+ *    wait indefinitely, so a Claude session runs its pipeline to completion.
+ *    The autopilot wall-clock remains the runaway backstop; this is inert under
+ *    Hermes.
  *  - `GH_TOKEN` — set only when a per-identity token is configured
  *    (DR-2026-06-15); when empty the ambient `gh` account is inherited via the
  *    copied `process.env`.

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   classifyPayload,
   dedupeKnowledgeHits,
+  deriveRepositorySearchTerms,
   deriveSearchTerms,
   rankKnowledgeHits,
   scoreKnowledgeHit,
@@ -15,11 +16,22 @@ function hit(overrides: Partial<KnowledgeHit> = {}): KnowledgeHit {
     ref: 'bafyEvidence1',
     kind: 'trace',
     tags: [],
+    // Default true so pre-#1824 selection/ranking scenarios keep exercising
+    // their own concern; the retrieval-visibility allowlist block below sets
+    // it explicitly per case.
+    retrievalVisible: true,
     ...overrides,
   };
 }
 
 describe('deriveSearchTerms (rescope §3.3)', () => {
+  it('shares the canonical repository-vocabulary query with non-session consumers', () => {
+    expect(deriveRepositorySearchTerms('Jinn-Network/mono')).toEqual(['mono']);
+    expect(deriveSearchTerms('', 'Jinn-Network/mono')).toEqual(
+      deriveRepositorySearchTerms('Jinn-Network/mono'),
+    );
+  });
+
   it('prioritises backticked/quoted tokens over plain words', () => {
     const terms = deriveSearchTerms('please fix `useWidgetState` in the dashboard');
     expect(terms[0]).toBe('usewidgetstate');
@@ -406,6 +418,49 @@ describe('rankKnowledgeHits (mono #1782)', () => {
     const skill = hit({ ref: 'skill-1', kind: 'skill', snippet: 'dashboard vitest flake', tags: ['dashboard'] });
     const weak = hit({ ref: 'weak', snippet: 'dashboard only', tags: [] });
     expect(rankKnowledgeHits([skill, weak], ['dashboard', 'vitest'])).toEqual([]);
+  });
+});
+
+// Issue #1824 (corpus-supply-design §5 W2): pickup is an allowlist — only
+// records carrying the retrieval-visibility mark may enter the candidate
+// pool. Absence of the field excludes (fail-closed): bulk/legacy records
+// never set it at all, and they must never surface.
+describe('retrieval-visibility allowlist (#1824)', () => {
+  const TERMS = ['dashboard', 'vitest'];
+
+  it('a visible hit with a qualifying score survives ranking', () => {
+    const visible = hit({ ref: 'visible', snippet: 'dashboard vitest flake', retrievalVisible: true });
+    expect(rankKnowledgeHits([visible], TERMS)).toEqual([visible]);
+  });
+
+  it('an explicitly not-visible hit with the same score is excluded', () => {
+    const hidden = hit({ ref: 'hidden', snippet: 'dashboard vitest flake', retrievalVisible: false });
+    expect(rankKnowledgeHits([hidden], TERMS)).toEqual([]);
+  });
+
+  it('a hit with retrievalVisible omitted is excluded — fail-closed (the bulk/legacy case)', () => {
+    const legacy = hit({ ref: 'legacy', snippet: 'dashboard vitest flake', retrievalVisible: undefined });
+    expect(rankKnowledgeHits([legacy], TERMS)).toEqual([]);
+  });
+
+  it('composes with the skill filter: a skill hit stays excluded regardless of retrievalVisible', () => {
+    const markedSkill = hit({
+      ref: 'marked-skill',
+      kind: 'skill',
+      snippet: 'dashboard vitest flake',
+      retrievalVisible: true,
+    });
+    const legacyTrace = hit({ ref: 'legacy-trace', snippet: 'dashboard vitest flake', retrievalVisible: undefined });
+    expect(rankKnowledgeHits([markedSkill, legacyTrace], TERMS)).toEqual([]);
+  });
+
+  it('ordering among visible hits is unchanged by the new filter', () => {
+    const low = hit({ ref: 'low', snippet: 'dashboard vitest', tier: 'user-accepted', publishedAt: 100, origin: 'op-low', retrievalVisible: true });
+    const highTier = hit({ ref: 'high-tier', snippet: 'dashboard vitest flake', tier: 'evaluator-verified', publishedAt: 1, origin: 'op-high-tier', retrievalVisible: true });
+    const midTierRecent = hit({ ref: 'mid-recent', snippet: 'dashboard vitest flake', tier: 'tests-passed', publishedAt: 500, origin: 'op-mid-recent', retrievalVisible: true });
+
+    const ranked = rankKnowledgeHits([low, highTier, midTierRecent], ['dashboard', 'vitest', 'flake']);
+    expect(ranked.map((h) => h.ref)).toEqual(['high-tier', 'mid-recent', 'low']);
   });
 });
 

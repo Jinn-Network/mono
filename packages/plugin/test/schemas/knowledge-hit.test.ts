@@ -57,6 +57,18 @@ describe('KnowledgeHitSchema', () => {
     expect(parsed.publishedAt).toBe(1_752_000_000_000);
   });
 
+  it('parses the optional retrievalVisible allowlist field (#1824)', () => {
+    expect(KnowledgeHitSchema.parse({ ref: 'x', kind: 'trace', retrievalVisible: true }).retrievalVisible).toBe(true);
+    expect(KnowledgeHitSchema.parse({ ref: 'x', kind: 'trace', retrievalVisible: false }).retrievalVisible).toBe(false);
+    expect(KnowledgeHitSchema.parse({ ref: 'x', kind: 'trace' }).retrievalVisible).toBeUndefined();
+  });
+
+  it('rejects a non-boolean retrievalVisible', () => {
+    expect(() =>
+      KnowledgeHitSchema.parse({ ref: 'x', kind: 'trace', retrievalVisible: 'yes' }),
+    ).toThrow();
+  });
+
   it('rejects an empty-string origin', () => {
     expect(() =>
       KnowledgeHitSchema.parse({ ref: 'x', kind: 'trace', origin: '' }),

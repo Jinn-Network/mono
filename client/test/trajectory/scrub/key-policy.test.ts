@@ -73,7 +73,7 @@ describe('keyPolicyStage', () => {
     ]);
   });
 
-  test('stage exposes name + version for the provenance manifest', () => {
+  test('stage exposes name + version for local pipeline-profile inspection', () => {
     const stage = keyPolicyStage(policy);
     expect(stage.name).toBe('key-policy');
     expect(typeof stage.version).toBe('string');

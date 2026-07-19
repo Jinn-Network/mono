@@ -117,7 +117,8 @@ export class GhIssueSource implements IssueSource {
       'issue', 'list',
       '--repo', REPO,
       '--state', 'open',
-      // TODO: `labels` is the hook for per-issue `agent:*` implementer override (Phase 3 stacked dispatch).
+      // `labels` remains part of the issue record; runtime selection is
+      // deliberately process-wide.
       // `author` powers the dispatcher author-allowlist trust boundary (#497).
       '--json', 'number,title,labels,author',
       '--limit', '200',

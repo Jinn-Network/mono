@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { RETRIEVAL_VISIBLE_TAG } from '@jinn-network/plugin';
 import {
   repoFromInstanceId,
   bridgeAttempts,
@@ -73,6 +74,15 @@ describe('toBridgeCapturedTask (both polarities, D10)', () => {
     const t = toBridgeCapturedTask(ref(), ev, NOW); // ev has no stepTrace
     expect(t.steps.map((s) => s.name)).toEqual(['tool:apply_patch', 'evaluator:verdict']);
     expect(t.task.distributionTags).toContain('patch-only');
+  });
+
+  it('never emits the retrieval-visibility mark on a bridged record (#1824 sequencing guard: bulk derivation cannot self-admit into pickup)', () => {
+    for (const polarity of ['pass', 'fail'] as const) {
+      for (const evidence of [ev, { ...ev, stepTrace: '- plan [jinn.phase]' }]) {
+        const t = toBridgeCapturedTask(ref({ polarity }), evidence, NOW);
+        expect(t.task.distributionTags).not.toContain(RETRIEVAL_VISIBLE_TAG);
+      }
+    }
   });
 });
 

@@ -195,8 +195,8 @@ export async function execute(
   const skills = new Map((await source.list()).map((s) => [s.skill, s]));
   const result: ImportResult = { imported: [], skipped: [], errors: [] };
   const now = deps.now?.() ?? new Date();
-  // Seed profile (#1409): deterministic secret detectors only. Seeds are
-  // public licence-checked prose, not operator trace data — the
+  // Seed profile (#1409): deterministic secret detectors only. Skill seeds in
+  // this lane are public, licence-checked prose, not operator trace data — the
   // probabilistic stages false-positive on SKILL.md content and defaced
   // the anchored corpus. Capture stays mandatory and fail-closed.
   const seedScrubPipeline = buildSeedScrubPipeline();

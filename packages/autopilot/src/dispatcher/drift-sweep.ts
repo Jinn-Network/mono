@@ -37,7 +37,7 @@ import { REPO } from './constants.js';
  *
  * 3. STRAND — issue In Progress WITH a worktree, but no open/merged closing
  *    PR and the session is dead (session log idle past `reapIdleMs` — a live
- *    `claude -p` session streams to its log continuously, so a stale log is
+ *    coordinator session streams to its log continuously, so a stale log is
  *    a high-confidence death signal):
  *      · push the branch and open a draft PR (`Closes #N`) labelled
  *        `review:needs-human`, and PARK the issue `Blocked on: Human`. A dead

@@ -103,11 +103,22 @@ def _episode(episode_id: str = "episode-1") -> dict:
 def reset(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     buf.reset()
-    jinn._reset_contract_state()
     jinn._reset_session_state()
-    jinn._contract_checked = True
     jinn._degraded = None
     jinn._runner = None
+
+    def _no_real_subprocess(argv, cwd=None, input=None, timeout_s=None):
+        # mono#1783: with jinn._runner unset, _on_session_end falls through
+        # to distill.cached_mode -> jinn_layer._default_runner, which
+        # genuinely shells out (up to a 120s timeout) to a real jinn-layer
+        # binary on PATH against the operator's actual ~/.jinn-client state.
+        # No test in this file may ever reach a real subprocess; individual
+        # tests that need a specific _default_runner behavior override this
+        # via their own monkeypatch.setattr, which layers on top.
+        return 127, "", "jinn-layer disabled by test fixture"
+
+    monkeypatch.setattr(jinn.jinn_layer, "_default_runner", _no_real_subprocess)
+    jinn.distill.reset()
     yield
     jinn._runner = None
     buf.reset()
@@ -259,6 +270,54 @@ def test_vetoed_hook_sends_candidate_and_clears_marker_only_after_veto_receipt(m
     assert delegated[0]["contribution_candidate"] is candidate
     assert delegated[0]["contribution_vetoed"] is True
     assert jinn._session_vetoed("s1") is False
+
+
+def test_no_real_subprocess_is_ever_spawned_by_this_file(monkeypatch):
+    """mono#1783: `_on_session_end` with `jinn._runner = None` used to fall
+    through to `distill.cached_mode(None)` -> `jinn_layer._default_runner`,
+    which genuinely shells out to an installed `jinn-layer` binary (up to a
+    120s timeout) against the operator's real ~/.jinn-client state. The
+    `reset` fixture now monkeypatches `_default_runner` itself so this path
+    is unreachable; assert that guarantee directly by recording every
+    `subprocess.run` invocation. Fast local `git` calls (session_bridge's
+    repository snapshot) are legitimate; anything else — i.e. a real
+    `jinn-layer` spawn — is the regression. The guard both raises (so the
+    slow binary never actually executes) and records (because
+    `distill.distill_status` swallows runner exceptions, a raise alone would
+    vanish on exactly the path that flakes)."""
+    import subprocess as subprocess_module
+
+    real_run = subprocess_module.run
+    non_git_spawns: list[str] = []
+
+    def guard(argv, *args, **kwargs):
+        cmd = argv[0] if isinstance(argv, (list, tuple)) else argv
+        if Path(str(cmd)).name == "git":
+            return real_run(argv, *args, **kwargs)
+        non_git_spawns.append(str(cmd))
+        raise AssertionError(
+            "real subprocess.run was invoked — the jinn_layer._default_runner "
+            "seam is not closed (mono#1783 regression)"
+        )
+
+    monkeypatch.setattr(subprocess_module, "run", guard)
+
+    candidate = {
+        "schemaVersion": "jinn.contribution-candidate.v1",
+        "sourceId": "filled-by-test",
+    }
+    monkeypatch.setattr(
+        jinn.session_bridge, "build_contribution_candidate", lambda *_a, **_k: candidate
+    )
+    monkeypatch.setattr(jinn.distill, "tee_capture", lambda *_a, **_k: None)
+    jinn._runner = None  # deliberately unset, exercising the real-runner path
+
+    _drive_hook()  # must never reach subprocess.run with a non-git command
+
+    assert non_git_spawns == [], (
+        f"real subprocess(es) spawned: {non_git_spawns} — the "
+        "jinn_layer._default_runner seam is not closed (mono#1783 regression)"
+    )
 
 
 def _drive_hook() -> None:
