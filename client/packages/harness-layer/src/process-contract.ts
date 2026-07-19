@@ -12,7 +12,8 @@ import {
 } from '@jinn-network/plugin';
 
 export const PROCESS_CONTRACT_VERSION = JINN_PLUGIN_CONTRACT_VERSION;
-export type ProcessStatus = 'ok' | 'degraded' | 'unavailable';
+export const PROCESS_STATUSES = ['ok', 'degraded', 'unavailable'] as const;
+export type ProcessStatus = (typeof PROCESS_STATUSES)[number];
 
 export interface ProcessEnvelope<T> {
   contractVersion: typeof PROCESS_CONTRACT_VERSION;
