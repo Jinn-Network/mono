@@ -14,12 +14,20 @@ const PY_JINN_LAYER = fileURLToPath(
 const TS_PROCESS_CONTRACT = fileURLToPath(new URL('../src/process-contract.ts', import.meta.url));
 
 function extractPythonStatuses(source: string, sourcePath: string): string[] {
-  const match = /^[ \t]*if[ \t]+parsed\.get\("status"\)[ \t]+not[ \t]+in[ \t]+\(([^)]*)\)[ \t]*:/m.exec(
-    source,
-  );
-  if (!match) {
+  const matches = [
+    ...source.matchAll(
+      /^[ \t]*if[ \t]+parsed\.get\("status"\)[ \t]+not[ \t]+in[ \t]+\(([^)]*)\)[ \t]*:/gm,
+    ),
+  ];
+  if (matches.length === 0) {
     throw new Error(`could not locate the status guard tuple in ${sourcePath} — declaration moved?`);
   }
+  if (matches.length !== 1) {
+    throw new Error(
+      `expected exactly one status guard tuple in ${sourcePath}, found ${matches.length} declaration-shaped matches`,
+    );
+  }
+  const match = matches[0];
   const body = match[1];
   if (!/^[ \t\r\n]*"[^"\r\n]+"(?:[ \t\r\n]*,[ \t\r\n]*"[^"\r\n]+")*[ \t\r\n]*,?[ \t\r\n]*$/u.test(body)) {
     throw new Error(`unsupported syntax in status guard tuple in ${sourcePath}: ${body}`);
@@ -28,10 +36,20 @@ function extractPythonStatuses(source: string, sourcePath: string): string[] {
 }
 
 function extractTsStatuses(source: string, sourcePath: string): string[] {
-  const match = /^export[ \t]+type[ \t]+ProcessStatus[ \t]*=[ \t]*([^;]+);/m.exec(source);
-  if (!match) {
+  const matches = [
+    ...source.matchAll(
+      /^export[ \t]+type[ \t]+ProcessStatus[ \t]*=[ \t]*([^;]+);/gm,
+    ),
+  ];
+  if (matches.length === 0) {
     throw new Error(`could not locate the ProcessStatus union in ${sourcePath} — declaration moved?`);
   }
+  if (matches.length !== 1) {
+    throw new Error(
+      `expected exactly one ProcessStatus union in ${sourcePath}, found ${matches.length} declaration-shaped matches`,
+    );
+  }
+  const match = matches[0];
   const body = match[1];
   if (!/^[ \t\r\n]*'[^'\r\n]+'(?:[ \t\r\n]*\|[ \t\r\n]*'[^'\r\n]+')*[ \t\r\n]*$/u.test(body)) {
     throw new Error(`unsupported syntax in ProcessStatus union in ${sourcePath}: ${body}`);
@@ -53,6 +71,28 @@ describe('cross-language contract-constant parity (#1822)', () => {
     expect(() =>
       extractTsStatuses("export type ProcessStatus = 'ok' | ExtraStatus;", 'fixture-process-contract.ts'),
     ).toThrow(/ProcessStatus union.*fixture-process-contract\.ts/);
+  });
+
+  it('rejects a Python docstring decoy before the live status guard', () => {
+    const source = `"""
+if parsed.get("status") not in ("ok", "degraded", "unavailable"):
+"""
+if parsed.get("status") not in ("ok", EXTRA_STATUS):`;
+
+    expect(() => extractPythonStatuses(source, 'fixture-jinn-layer.py')).toThrow(
+      /status guard tuple.*fixture-jinn-layer\.py/,
+    );
+  });
+
+  it('rejects a TypeScript block-comment decoy before the live ProcessStatus union', () => {
+    const source = `/*
+export type ProcessStatus = 'ok' | 'degraded' | 'unavailable';
+*/
+export type ProcessStatus = 'ok' | ExtraStatus;`;
+
+    expect(() => extractTsStatuses(source, 'fixture-process-contract.ts')).toThrow(
+      /ProcessStatus union.*fixture-process-contract\.ts/,
+    );
   });
 
   // PROCESS_CONTRACT_VERSION is a re-export of the plugin package's
