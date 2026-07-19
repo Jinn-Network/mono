@@ -32,7 +32,7 @@ _UPDATE_REMEDY = "jinn-agent plugins update jinn"
 _NODE_FLOOR = 22
 
 # A hung child (git index lock, credential helper, broken node shim) must not
-# stall session start; the layer spawn has its own bound (jinn_layer._TIMEOUT_S).
+# stall session start; the layer contract check receives this bound explicitly.
 _SUBPROCESS_TIMEOUT_S = 10
 
 # The bridge gate: only the layer handshake disables the additive session-end
@@ -145,7 +145,10 @@ def _check_layer(runner: Optional[jinn_layer.Runner] = None) -> tuple[dict, dict
         "remedy": remedy,
     }
     try:
-        code, out, err = jinn_layer.contract(runner=runner)
+        code, out, err = jinn_layer.contract(
+            runner=runner,
+            timeout_s=_SUBPROCESS_TIMEOUT_S,
+        )
     except Exception as exc:
         detail = f"jinn-layer handshake failed: {exc}"
         return (

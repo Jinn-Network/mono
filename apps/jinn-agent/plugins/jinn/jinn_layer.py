@@ -85,12 +85,13 @@ def run(
     runner: Optional[Runner] = None,
     cwd: Optional[str] = None,
     input: Optional[str] = None,
+    timeout_s: int = _TIMEOUT_S,
 ) -> Tuple[int, str, str]:
     argv = [binary(), *args]
     if runner is not None:
         result = runner(argv, input=input) if input is not None else runner(argv)
         return _normalize_result(result)
-    return _default_runner(argv, cwd, input)
+    return _default_runner(argv, cwd, input, timeout_s=timeout_s)
 
 
 def spawn(args: List[str], stdout_path: Path, stderr_path: Path) -> int:
@@ -167,9 +168,13 @@ def corpus_search(
     return run(args, runner)
 
 
-def contract(runner: Optional[Runner] = None) -> Tuple[int, str, str]:
+def contract(
+    runner: Optional[Runner] = None,
+    *,
+    timeout_s: int = _TIMEOUT_S,
+) -> Tuple[int, str, str]:
     """Read the layer's versioned host/process contract."""
-    return run(["contract", "--json"], runner)
+    return run(["contract", "--json"], runner, timeout_s=timeout_s)
 
 
 def session_end(request: Dict[str, Any], runner: Optional[Runner] = None) -> Tuple[int, str, str]:

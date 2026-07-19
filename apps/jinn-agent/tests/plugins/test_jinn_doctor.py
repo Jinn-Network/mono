@@ -22,6 +22,7 @@ doctor = importlib.import_module("plugins.jinn.doctor")
 jinn = importlib.import_module("plugins.jinn")
 capture_buffer = importlib.import_module("plugins.jinn.capture_buffer")
 consent = importlib.import_module("plugins.jinn.consent")
+jinn_layer = importlib.import_module("plugins.jinn.jinn_layer")
 
 
 class ContractRunner:
@@ -234,6 +235,36 @@ def test_layer_checks_share_exactly_one_spawn():
     runner = ContractRunner()
     doctor._check_layer(runner=runner)
     assert len(runner.calls) == 1
+
+
+def test_layer_checks_bound_the_real_contract_handshake(monkeypatch):
+    calls: list[tuple[list[str], int]] = []
+
+    def fake_default_runner(
+        argv,
+        cwd=None,
+        input=None,
+        timeout_s=jinn_layer._TIMEOUT_S,
+    ):
+        calls.append((argv, timeout_s))
+        return 124, "", f"{argv[0]}: timed out after {timeout_s}s"
+
+    monkeypatch.setattr(jinn_layer, "_default_runner", fake_default_runner)
+
+    available, contract = doctor._check_layer()
+
+    assert calls == [
+        (
+            [jinn_layer.binary(), "contract", "--json"],
+            doctor._SUBPROCESS_TIMEOUT_S,
+        )
+    ]
+    assert doctor._SUBPROCESS_TIMEOUT_S < jinn_layer._TIMEOUT_S
+    assert available["ok"] is False
+    assert available["detail"] == (
+        f"{jinn_layer.binary()}: timed out after {doctor._SUBPROCESS_TIMEOUT_S}s"
+    )
+    assert contract["detail"] == "not checked — layer unavailable"
 
 
 def test_layer_failure_detail_is_one_bounded_line(monkeypatch):
