@@ -9,7 +9,9 @@ Stage 1 rescope (R5, closes #1774): the corpus fixture serves the R4 seed set
 (client/packages/harness-layer/fixtures/stage1-seeds/) instead of one
 hand-written skill trace — the real built `jinn-layer` performs search, get,
 and evidence-first packet projection against it (no plugin stubs). Scenarios
-follow the rescope plan §4.5.
+follow the rescope plan §4.5. The Stage 2 parked-era amendment keeps local
+capture, candidate recording, and distillation live while exercising no
+consent, preview, or publication surface.
 """
 
 from __future__ import annotations
@@ -756,9 +758,10 @@ def main() -> None:
             f"a non-search POST happened with sharing off: {new_requests!r}"
         )
 
-        # ── Scenario 3: honest no-result, on the sharing-on session that
-        # also carries the mint/preview/history mechanics ──────────────────
-        jinn.consent.save_state(True, previewed=False)
+        # ── Scenario 3: honest no-result. Outbound contribution is parked
+        # through Stage 2, so this second eligible session also stays local.
+        jinn.consent.save_state(False, previewed=False)
+        requests_before_no_result = list(fixture.requests)
         no_result_summary, no_result_context, _no_result_marker, no_result_mid_session = finish_session(
             jinn,
             session_id="stage1-no-result",
@@ -766,7 +769,7 @@ def main() -> None:
             repo=work_repo,
             message=NO_RESULT_MESSAGE,
             expected_pickup=False,
-            expected_publication="ON",
+            expected_publication="OFF",
             mutate="SECRET_ACCEPTED_DIFF_ON = True",
         )
         assert no_result_context is None
@@ -778,30 +781,29 @@ def main() -> None:
             no_result_mid_session
         )
 
-        records_before_preview = read_store_records()
-        share_on = next(
-            row for row in records_before_preview if row["candidate"]["publishMinedTasksConsent"]
-        )
-        assert share_on["publicationState"] == "preview-required"
-        assert "preview-required" in jinn._handle_jinn("history").lower()
-
-        preview = jinn._handle_jinn("preview")
-        assert "preview acknowledged" in preview.lower()
+        parked_records = read_store_records()
+        assert len(parked_records) == 2, parked_records
+        assert all(
+            not row["candidate"]["publishMinedTasksConsent"]
+            for row in parked_records
+        ), parked_records
+        assert all(
+            row["publicationState"] == "disabled"
+            for row in parked_records
+        ), parked_records
         assert all(
             method != "POST" or path == "/graphql"
-            for method, path in fixture.requests
-        ), f"publication happened before the task-creator ran: {fixture.requests!r}"
-        records_after_preview = read_store_records()
-        assert next(
-            row for row in records_after_preview if row["recordId"] == share_on["recordId"]
-        )["publicationState"] == "queued"
-        history_after_preview = jinn._handle_jinn("history")
-        assert "queued" in history_after_preview.lower()
+            for method, path in fixture.requests[len(requests_before_no_result):]
+        ), f"outbound request happened while contribution was parked: {fixture.requests!r}"
+        parked_history = jinn._handle_jinn("history")
+        assert "preview-required" not in parked_history.lower()
+        assert "queued" not in parked_history.lower()
+        assert "published" not in parked_history.lower()
         # Local distillation provenance still shows (a retained, independent
         # concept — rescope plan §2), but no shared/network-skill install copy.
-        assert "stage1-local-pattern" in history_after_preview, history_after_preview
-        assert "jinn-installed skill" not in history_after_preview.lower()
-        assert "skills install" not in history_after_preview.lower()
+        assert "stage1-local-pattern" in parked_history, parked_history
+        assert "jinn-installed skill" not in parked_history.lower()
+        assert "skills install" not in parked_history.lower()
 
         # ── Scenario 4: corpus 503 — session proceeds, degraded, no injection ──
         fixture.unavailable = True
@@ -812,7 +814,7 @@ def main() -> None:
             repo=clean_repo,
             message=UNAVAILABLE_MESSAGE,
             expected_pickup=False,
-            expected_publication="ON",
+            expected_publication="OFF",
         )
         fixture.unavailable = False
         assert unavailable_context is None
@@ -828,7 +830,7 @@ def main() -> None:
             repo=clean_repo,
             message=MISSING_LAYER_MESSAGE,
             expected_pickup=False,
-            expected_publication="ON",
+            expected_publication="OFF",
         )
         assert missing_context is None
         assert "captured locally" in missing_summary.lower()
@@ -853,7 +855,7 @@ def main() -> None:
             repo=clean_repo,
             message=INCOMPATIBLE_LAYER_MESSAGE,
             expected_pickup=False,
-            expected_publication="ON",
+            expected_publication="OFF",
         )
         assert incompatible_context is None
         assert "captured locally" in incompatible_summary.lower()
@@ -874,14 +876,20 @@ def main() -> None:
             assert "skills install" not in rendered.lower()
             assert "adopted automatically" not in rendered.lower()
             assert "jinn-installed skill" not in rendered.lower()
-        # The `/jinn skills` command branch is gone outright — every
-        # subcommand now falls through to the unknown-command help text.
-        for skills_args in (
-            f"skills install {SOURCE_REF}", "skills list", "skills uninstall anything",
+        # Shared-skill and outbound command branches are gone outright —
+        # every subcommand falls through to the unknown-command help text.
+        for removed_args in (
+            f"skills install {SOURCE_REF}",
+            "skills list",
+            "skills uninstall anything",
+            "consent",
+            "preview",
+            "ledger",
         ):
-            reply = jinn._handle_jinn(skills_args, session_id="stage1-boundary-check")
-            assert reply == jinn._JINN_HELP, (skills_args, reply)
+            reply = jinn._handle_jinn(removed_args, session_id="stage1-boundary-check")
+            assert reply == jinn._JINN_HELP, (removed_args, reply)
         status_output = jinn._handle_jinn("status")
+        assert "contribution: parked — nothing leaves this machine" in status_output
         assert "skills install" not in status_output.lower()
         assert "jinn-installed skill" not in status_output.lower()
 
@@ -916,16 +924,16 @@ def main() -> None:
         assert len(records) == 2, records
         episode_ids = {episode["episodeId"] for episode in episodes}
         assert {row["candidate"]["sourceId"] for row in records}.issubset(episode_ids)
-        assert any(not row["candidate"]["publishMinedTasksConsent"] for row in records)
-        assert any(row["candidate"]["publishMinedTasksConsent"] for row in records)
+        assert all(not row["candidate"]["publishMinedTasksConsent"] for row in records)
+        assert all(row["publicationState"] == "disabled" for row in records)
 
         episode_by_id = {episode["episodeId"]: episode for episode in episodes}
-        share_off_row = next(
-            row for row in records if not row["candidate"]["publishMinedTasksConsent"]
-        )
-        share_on_row = next(
-            row for row in records if row["candidate"]["publishMinedTasksConsent"]
-        )
+        records_by_session = {
+            episode_by_id[row["candidate"]["sourceId"]]["session"]["sessionId"]: row
+            for row in records
+        }
+        target_row = records_by_session["stage1-target-task"]
+        no_result_row = records_by_session["stage1-no-result"]
         result = {
             "episodeIds": sorted(episode_ids),
             "sessions": [
@@ -936,17 +944,17 @@ def main() -> None:
                 }
                 for episode in episodes
             ],
-            "shareOffRecordId": share_off_row["recordId"],
-            "shareOnRecordId": share_on_row["recordId"],
+            "targetRecordId": target_row["recordId"],
+            "noResultRecordId": no_result_row["recordId"],
             # Explicit session handoff for the daemon-side .mjs leg (PR #1781
             # review): derived from the store rows via each candidate's
             # sourceId → episode → sessionId, never hard-coded, so renaming a
             # driver session cannot silently break the second leg's lookup.
-            "shareOffSessionId": episode_by_id[
-                share_off_row["candidate"]["sourceId"]
+            "targetSessionId": episode_by_id[
+                target_row["candidate"]["sourceId"]
             ]["session"]["sessionId"],
-            "shareOnSessionId": episode_by_id[
-                share_on_row["candidate"]["sourceId"]
+            "noResultSessionId": episode_by_id[
+                no_result_row["candidate"]["sourceId"]
             ]["session"]["sessionId"],
             "legacyPending": str(legacy),
         }

@@ -565,7 +565,7 @@ def payoff_lines(snapshot: Dict[str, int]) -> List[str]:
 
 UPDATE_LAYER_LINE = (
     "The Jinn layer here doesn't know distillation yet — update it:\n"
-    "  hermes plugins update jinn"
+    "  jinn-agent plugins update jinn"
 )
 
 
