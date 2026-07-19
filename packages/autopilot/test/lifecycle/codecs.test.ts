@@ -9,7 +9,12 @@ import {
   parseAutomatedReviewMarker,
   reviewClaimRef,
 } from '../../src/lifecycle/codecs.js';
-import { gitOid, gitRefName, type BranchClaim } from '../../src/lifecycle/types.js';
+import {
+  gitOid,
+  gitRefName,
+  type BranchClaim,
+  type ReviewClaimRecord,
+} from '../../src/lifecycle/types.js';
 
 const OID_A = gitOid('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
 
@@ -97,6 +102,25 @@ describe('lifecycle metadata codecs', () => {
       state: 'active',
       recordedAt: '2026-07-20T10:05:00.000Z',
     }))).toThrow(/PR number/);
+  });
+
+  it('requires the review-claim discriminator when encoding runtime records', () => {
+    const record: ReviewClaimRecord = {
+      kind: 'review-claim',
+      protocolVersion: 2,
+      prNumber: 101,
+      generation: '22222222-2222-4222-8222-222222222222',
+      attempt: '33333333-3333-4333-8333-333333333333',
+      reviewer: 'reviewer',
+      head: OID_A,
+      state: 'active',
+      recordedAt: '2026-07-20T10:05:00.000Z',
+    };
+
+    expect(() => encodeReviewClaimPayload({
+      ...record,
+      kind: undefined,
+    } as unknown as ReviewClaimRecord)).toThrow(/kind/);
   });
 
   it('strictly validates branch claim objects before encoding', () => {

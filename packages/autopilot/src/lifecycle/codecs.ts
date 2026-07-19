@@ -183,7 +183,10 @@ export function decodeBranchClaimTrailers(value: string): BranchClaim {
   });
 }
 
-function reviewRecordFromUnknown(value: unknown): ReviewClaimRecord {
+function reviewRecordFromUnknown(
+  value: unknown,
+  requireRuntimeDiscriminator: boolean,
+): ReviewClaimRecord {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new Error('Invalid review claim payload');
   }
@@ -200,7 +203,12 @@ function reviewRecordFromUnknown(value: unknown): ReviewClaimRecord {
     'recordedAt',
     'verdict',
   ]);
-  if (record.kind !== undefined && record.kind !== 'review-claim') throw new Error('Invalid review claim kind');
+  if (
+    (requireRuntimeDiscriminator && record.kind !== 'review-claim')
+    || (record.kind !== undefined && record.kind !== 'review-claim')
+  ) {
+    throw new Error('Invalid review claim kind');
+  }
   if (record.protocolVersion !== 2) throw new Error('Unsupported protocol version');
   if (typeof record.state !== 'string' || !REVIEW_STATES.includes(record.state as ReviewClaimState)) {
     throw new Error('Invalid review claim state');
@@ -256,7 +264,7 @@ function reviewRecordFromUnknown(value: unknown): ReviewClaimRecord {
 }
 
 export function encodeReviewClaimPayload(record: ReviewClaimRecord): string {
-  const valid = reviewRecordFromUnknown(record);
+  const valid = reviewRecordFromUnknown(record, true);
   const payload = {
     protocolVersion: valid.protocolVersion,
     prNumber: valid.prNumber,
@@ -278,7 +286,7 @@ export function decodeReviewClaimPayload(payload: string): ReviewClaimRecord {
   } catch {
     throw new Error('Invalid review claim payload JSON');
   }
-  return reviewRecordFromUnknown(parsed);
+  return reviewRecordFromUnknown(parsed, false);
 }
 
 export function branchNameForIssue(issueNumber: number): GitRefName {

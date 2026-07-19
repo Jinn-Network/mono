@@ -149,13 +149,38 @@ function staleEvidence(
 }
 
 function deriveItem(item: LifecycleItem, nowMs: number, staleAfterMs: number): LifecycleViewItem {
-  const underlying = underlyingPhase(item);
   const supersededReview = item.kind === 'pull-request'
     && item.reviewClaim !== undefined
     && item.reviewClaim.head !== item.head;
-  if (underlying === 'merged') {
+  if (item.kind === 'pull-request' && item.merged) {
     return { item, phase: 'merged', stale: false, supersededReview };
   }
+  if (item.kind === 'pull-request') {
+    const review = correlatedReviewClaim(item);
+    if (
+      review !== undefined
+      && hasMatchingVerdict(item, review)
+      && item.terminalVerdict !== undefined
+    ) {
+      const verdictTime = timestampMs(item.terminalVerdict.recordedAt);
+      if (verdictTime === null || verdictTime > nowMs) {
+        const underlying = underlyingPhase(item);
+        return {
+          item,
+          phase: 'human',
+          underlyingPhase: underlying,
+          humanReason: {
+            phase: item.isDraft || review.state === 'fixing' ? 'review-fixing' : 'reviewing',
+            code: 'invalid-review-progress-time',
+            detail: `Invalid terminal verdict progress timestamp: ${item.terminalVerdict.recordedAt}`,
+          },
+          stale: false,
+          supersededReview,
+        };
+      }
+    }
+  }
+  const underlying = underlyingPhase(item);
   let invalidProgressReason: HumanReason | undefined;
   if (item.kind === 'pull-request') {
     const headTime = timestampMs(item.headChangedAt);
@@ -186,23 +211,6 @@ function deriveItem(item: LifecycleItem, nowMs: number, staleAfterMs: number): L
         detail: `Invalid review progress timestamp: ${item.headChangedAt}`,
       };
     }
-    const review = correlatedReviewClaim(item);
-    if (
-      invalidProgressReason === undefined
-      && review !== undefined
-      && (underlying === 'reviewing' || underlying === 'review-fixing')
-      && hasMatchingVerdict(item, review)
-      && item.terminalVerdict !== undefined
-    ) {
-      const verdictTime = timestampMs(item.terminalVerdict.recordedAt);
-      if (verdictTime === null || verdictTime > nowMs) {
-        invalidProgressReason = {
-          phase: underlying,
-          code: 'invalid-review-progress-time',
-          detail: `Invalid terminal verdict progress timestamp: ${item.terminalVerdict.recordedAt}`,
-        };
-      }
-    }
   }
   if (invalidProgressReason !== undefined) {
     return {
@@ -219,6 +227,7 @@ function deriveItem(item: LifecycleItem, nowMs: number, staleAfterMs: number): L
       item,
       phase: 'human',
       underlyingPhase: underlying,
+      humanReason: item.humanReason,
       stale: false,
       supersededReview,
     };

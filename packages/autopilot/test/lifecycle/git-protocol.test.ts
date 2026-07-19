@@ -182,6 +182,38 @@ describe('Git protocol port', () => {
     ]);
   });
 
+  it('rejects contradictory existing-branch claim parents before invoking Git', async () => {
+    const calls: string[][] = [];
+    const port = makeGitProtocolPort(async (_command, args) => {
+      calls.push([...args]);
+      return '';
+    });
+
+    await expect(port.claimBranch({
+      branch: gitRefName('autopilot/42'),
+      candidateParent: OTHER,
+      expectedRemoteHead: EXPECTED,
+      claimOid: PUBLISHED,
+    })).rejects.toThrow(/candidate parent.*expected remote head/i);
+    expect(calls).toEqual([]);
+  });
+
+  it('rejects contradictory review-record parents before invoking Git', async () => {
+    const calls: string[][] = [];
+    const port = makeGitProtocolPort(async (_command, args) => {
+      calls.push([...args]);
+      return '';
+    });
+
+    await expect(port.publishReviewClaim({
+      prNumber: 101,
+      recordParent: null,
+      expectedRemoteRecordOid: EXPECTED,
+      recordOid: PUBLISHED,
+    })).rejects.toThrow(/record parent.*expected remote record/i);
+    expect(calls).toEqual([]);
+  });
+
   it('publishes merge-prep with an exact force-with-lease and never unconditional force', async () => {
     const calls: readonly string[][] = [];
     const runner: GitCommandRunner = async (_command, args) => {
@@ -295,6 +327,46 @@ describe('Git protocol port', () => {
       `${PUBLISHED}:refs/heads/autopilot/42`,
       `${OTHER}:refs/jinn-autopilot/review-claims/v1/101`,
     ]);
+  });
+
+  it('rejects a contradictory review-fix branch parent before invoking Git', async () => {
+    const calls: string[][] = [];
+    const port = makeGitProtocolPort(async (_command, args) => {
+      calls.push([...args]);
+      return '';
+    });
+
+    await expect(port.publishReviewFix({
+      branch: gitRefName('autopilot/42'),
+      newHeadParent: OTHER,
+      expectedRemoteHead: EXPECTED,
+      newHead: PUBLISHED,
+      prNumber: 101,
+      recordParent: EXPECTED,
+      expectedRemoteRecordOid: EXPECTED,
+      recordOid: OTHER,
+    })).rejects.toThrow(/new head parent.*expected remote head/i);
+    expect(calls).toEqual([]);
+  });
+
+  it('rejects a contradictory review-fix record parent before invoking Git', async () => {
+    const calls: string[][] = [];
+    const port = makeGitProtocolPort(async (_command, args) => {
+      calls.push([...args]);
+      return '';
+    });
+
+    await expect(port.publishReviewFix({
+      branch: gitRefName('autopilot/42'),
+      newHeadParent: EXPECTED,
+      expectedRemoteHead: EXPECTED,
+      newHead: PUBLISHED,
+      prNumber: 101,
+      recordParent: null,
+      expectedRemoteRecordOid: EXPECTED,
+      recordOid: OTHER,
+    })).rejects.toThrow(/record parent.*expected remote record/i);
+    expect(calls).toEqual([]);
   });
 
   it('reports an idempotent atomic review-fix retry as already applied during preflight', async () => {

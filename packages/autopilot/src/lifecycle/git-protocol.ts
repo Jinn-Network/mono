@@ -165,6 +165,36 @@ function assertRemote(remote: string): void {
   }
 }
 
+function assertBranchClaimRelation(
+  candidateParent: GitOid,
+  expectedRemoteHead: GitOid | null,
+): void {
+  if (expectedRemoteHead !== null && candidateParent !== expectedRemoteHead) {
+    throw new Error('Branch claim candidate parent must equal expected remote head');
+  }
+}
+
+function assertReviewRecordRelation(
+  recordParent: GitOid | null,
+  expectedRemoteRecordOid: GitOid | null,
+): void {
+  if (recordParent !== expectedRemoteRecordOid) {
+    throw new Error('Review record parent must equal expected remote record OID');
+  }
+}
+
+function assertReviewFixRelation(input: {
+  readonly newHeadParent: GitOid;
+  readonly expectedRemoteHead: GitOid;
+  readonly recordParent: GitOid | null;
+  readonly expectedRemoteRecordOid: GitOid | null;
+}): void {
+  if (input.newHeadParent !== input.expectedRemoteHead) {
+    throw new Error('Review fix new head parent must equal expected remote head');
+  }
+  assertReviewRecordRelation(input.recordParent, input.expectedRemoteRecordOid);
+}
+
 export function makeGitProtocolPort(
   runner: GitCommandRunner,
   options: { readonly remote?: string } = {},
@@ -173,6 +203,7 @@ export function makeGitProtocolPort(
   assertRemote(remote);
   return {
     async claimBranch(input) {
+      assertBranchClaimRelation(input.candidateParent, input.expectedRemoteHead);
       const ref = branchRef(input.branch);
       return publishScalarWithParent(
         runner,
@@ -185,6 +216,7 @@ export function makeGitProtocolPort(
     },
 
     async publishReviewClaim(input) {
+      assertReviewRecordRelation(input.recordParent, input.expectedRemoteRecordOid);
       const ref = reviewClaimRef(input.prNumber);
       return publishScalarWithParent(
         runner,
@@ -197,6 +229,7 @@ export function makeGitProtocolPort(
     },
 
     async publishReviewFix(input) {
+      assertReviewFixRelation(input);
       const branch = branchRef(input.branch);
       const review = reviewClaimRef(input.prNumber);
       const expected = {
