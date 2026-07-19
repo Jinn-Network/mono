@@ -28,14 +28,16 @@ function inferProvider(modelId: string | undefined): string | undefined {
 /**
  * Parse claude-code `--output-format stream-json` output for model provenance.
  *
- * The `system` / `init` record is the CLI's authoritative run configuration.
- * Older streams can omit its model, so retain the first assistant
- * `message.model` as a fallback and return it only after the full stream has
- * been checked for an init model.
+ * The log is append-only across retries and recovered runs. Track the last
+ * relevant system/init or assistant model inside each run, and commit it only
+ * when that run emits a terminal result. This prevents a stale first run (or
+ * an incomplete trailing retry) from being attributed to the final completed
+ * session.
  */
 function harvestClaudeCodeStreamModel(workingDir: string): string | undefined {
   const raw = readFileSync(join(workingDir, '.claude-code', 'stdout.jsonl'), 'utf8');
-  let assistantModel: string | undefined;
+  let activeModel: string | undefined;
+  let completedModel: string | null | undefined;
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -47,15 +49,23 @@ function harvestClaudeCodeStreamModel(workingDir: string): string | undefined {
     }
     if (obj['type'] === 'system' && obj['subtype'] === 'init') {
       const model = obj['model'];
-      if (typeof model === 'string' && model.length > 0) return model;
+      activeModel = typeof model === 'string' && model.length > 0
+        ? model
+        : undefined;
     }
-    if (assistantModel === undefined && obj['type'] === 'assistant') {
+    if (obj['type'] === 'assistant') {
       const message = obj['message'] as Record<string, unknown> | undefined;
       const model = message?.['model'];
-      if (typeof model === 'string' && model.length > 0) assistantModel = model;
+      if (typeof model === 'string' && model.length > 0) activeModel = model;
+    }
+    if (obj['type'] === 'result') {
+      completedModel = activeModel ?? null;
+      activeModel = undefined;
     }
   }
-  return assistantModel;
+  return completedModel !== undefined
+    ? completedModel ?? undefined
+    : activeModel;
 }
 
 /**

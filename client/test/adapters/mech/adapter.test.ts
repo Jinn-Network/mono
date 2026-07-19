@@ -58,6 +58,18 @@ const HOISTED = vi.hoisted(() => {
 
 const { REQUEST_ID, TASK_CID_DIGEST, TASK_CID, MANIFEST_DIGEST, TX_HASH, signedTask } = HOISTED;
 
+function solutionEnvelopeFixture(data = 'solution payload') {
+  return {
+    data,
+    task: {
+      cid: TASK_CID,
+      onchainCreationTx: TX_HASH,
+      onchainCreationBlock: 80,
+      requestId: REQUEST_ID,
+    },
+  };
+}
+
 // MOCK_JUSTIFICATION: src/adapters/mech/contracts.js is the I/O leaf for chain RPC calls; mocking it is mocking the boundary.
 vi.mock('../../../src/adapters/mech/contracts.js', () => ({
   submitTask: vi.fn().mockResolvedValue({
@@ -1092,6 +1104,8 @@ describe('MechAdapter TaskCoordinator flow', () => {
     const { fetchFromIpfs, fetchSignedTaskFromIpfs, uploadToIpfs } = await import('../../../src/adapters/mech/ipfs.js');
     const solverSafe = ('0x' + '66'.repeat(20)) as `0x${string}`;
     const solverMech = ('0x' + '77'.repeat(20)) as `0x${string}`;
+    const taskCreationTx = ('0x' + '34'.repeat(32)) as `0x${string}`;
+    const taskCreationRequestId = ('0x' + '35'.repeat(32)) as `0x${string}`;
 
     vi.mocked(decodeSolutionDeliveryClaimedLogs).mockReturnValueOnce([{
       taskId: '1',
@@ -1102,7 +1116,15 @@ describe('MechAdapter TaskCoordinator flow', () => {
       blockNumber: 333,
     }]);
     vi.mocked(getMarketplaceRequestDeliveryMech).mockResolvedValueOnce(solverMech);
-    vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ data: 'solution payload' });
+    vi.mocked(fetchFromIpfs).mockResolvedValueOnce({
+      data: 'solution payload',
+      task: {
+        cid: TASK_CID,
+        onchainCreationTx: taskCreationTx,
+        onchainCreationBlock: 79,
+        requestId: taskCreationRequestId,
+      },
+    });
     vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'watched-task' }));
 
     const adapter = new MechAdapter(TEST_CONFIG);
@@ -1122,11 +1144,11 @@ describe('MechAdapter TaskCoordinator flow', () => {
         attemptId: REQUEST_ID,
         attemptNumber: 0,
       },
+      onchainCreationTx: taskCreationTx,
+      onchainCreationBlock: 79,
       onchainOpportunityTx: TX_HASH,
       onchainOpportunityBlock: 333,
     });
-    expect(value!.onchainCreationTx).toBeUndefined();
-    expect(value!.onchainCreationBlock).toBeUndefined();
     expect(value!.task.id).toBe('watched-task:evaluation:0');
     expect(value!.task.context).toMatchObject({
       restorationResult: 'solution payload',
@@ -1249,7 +1271,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
       blockNumber: 333,
     }]);
     vi.mocked(getMarketplaceRequestDeliveryMech).mockResolvedValueOnce(solverMech);
-    vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ data: 'solution payload' });
+    vi.mocked(fetchFromIpfs).mockResolvedValueOnce(solutionEnvelopeFixture());
     vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'watched-task' }));
 
     const adapter = new MechAdapter({ ...TEST_CONFIG, evaluatorEnabled: true });
@@ -1583,7 +1605,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
       transactionHash: TX_HASH,
       blockNumber: 125_000,
     }]);
-    vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ data: 'solution payload' });
+    vi.mocked(fetchFromIpfs).mockResolvedValueOnce(solutionEnvelopeFixture());
     vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'watched-task' }));
 
     const adapter = new MechAdapter(TEST_CONFIG);
@@ -1627,7 +1649,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'watched-task' }));
     vi.mocked(fetchFromIpfs)
       .mockRejectedValueOnce(new Error('temporary IPFS outage'))
-      .mockResolvedValueOnce({ data: 'solution payload' });
+      .mockResolvedValueOnce(solutionEnvelopeFixture());
 
     const adapter = new MechAdapter({ ...TEST_CONFIG, pollIntervalMs: 0 });
     await adapter.initialize();
@@ -1968,7 +1990,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
   it('keeps pending evaluation solutions durable until claimTask creates a verdict request', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { claimEvaluation } = await import('../../../src/adapters/mech/contracts.js');
-    const { uploadToIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const { fetchFromIpfs, uploadToIpfs } = await import('../../../src/adapters/mech/ipfs.js');
     const solverSafe = ('0x' + '66'.repeat(20)) as `0x${string}`;
     const store = makeConfigStore({
       mech_pending_evaluation_solutions_v1: JSON.stringify([{
@@ -1986,6 +2008,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
       { ...TEST_CONFIG, pollIntervalMs: 0 },
       store as any,
     );
+    vi.mocked(fetchFromIpfs).mockResolvedValueOnce(solutionEnvelopeFixture());
     await adapter.initialize();
     (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(333n);
 
@@ -2963,7 +2986,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     // so future transient errors don't compound with the pre-recovery count.
     vi.mocked(findLatestDeliveryDataHexForRequest).mockReset();
     vi.mocked(findLatestDeliveryDataHexForRequest).mockResolvedValue(TASK_CID_DIGEST);
-    vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ data: 'solution payload' });
+    vi.mocked(fetchFromIpfs).mockResolvedValueOnce(solutionEnvelopeFixture());
 
     const yielded: unknown[] = [];
     for await (const announcement of (adapter as any).retryPendingEvaluationSolutions()) {

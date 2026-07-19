@@ -895,11 +895,22 @@ export class Daemon {
       if (!request.taskCid) {
         console.warn(`[daemon] task ${request.requestId} missing provenance field taskCid — manifest integrity checks may fail`);
       }
-      if (!request.onchainCreationTx) {
-        console.warn(`[daemon] task ${request.requestId} missing provenance field onchainCreationTx — manifest integrity checks may fail`);
-      }
-      if (request.onchainCreationBlock == null) {
-        console.warn(`[daemon] task ${request.requestId} missing provenance field onchainCreationBlock — manifest integrity checks may fail`);
+      if (!request.onchainCreationTx || request.onchainCreationBlock == null) {
+        const missing = [
+          !request.onchainCreationTx ? 'onchainCreationTx' : null,
+          request.onchainCreationBlock == null ? 'onchainCreationBlock' : null,
+        ].filter((field): field is string => field !== null);
+        const error = new Error(
+          `task ${request.requestId} missing canonical TaskCreated provenance: ${missing.join(', ')}`,
+        );
+        console.error(`[daemon] ${error.message}; refusing to create an engine row`);
+        emitTickErrorOrRaceLost(
+          this.store,
+          error,
+          { requestId: request.requestId, solverType },
+          'daemon',
+        );
+        continue;
       }
 
       try {
@@ -908,8 +919,8 @@ export class Daemon {
           taskId: request.taskId ?? taskAnnouncement.taskId,
           attemptIndex: request.attemptIndex,
           taskCid: request.taskCid ?? '',
-          onchainCreationTx: request.onchainCreationTx ?? (request.requestId as `0x${string}`),
-          onchainCreationBlock: request.onchainCreationBlock ?? 0,
+          onchainCreationTx: request.onchainCreationTx,
+          onchainCreationBlock: request.onchainCreationBlock,
           solverType,
           taskRole: (request.task.role ?? 'restoration') as 'restoration' | 'evaluation',
           windowStartTs,

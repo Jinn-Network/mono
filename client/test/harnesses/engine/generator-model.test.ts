@@ -47,6 +47,33 @@ describe('harvestGeneratorModel', () => {
     });
   });
 
+  it('claude-code: attributes an append-only retry log to the last completed session model', () => {
+    const workingDir = mkTmp();
+    mkdirSync(join(workingDir, '.claude-code'), { recursive: true });
+    writeFileSync(
+      join(workingDir, '.claude-code', 'stdout.jsonl'),
+      [
+        JSON.stringify({ type: 'system', subtype: 'init', model: 'claude-opus-4-7' }),
+        JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-4-7' } }),
+        JSON.stringify({ type: 'result', subtype: 'error_max_turns' }),
+        JSON.stringify({ type: 'system', subtype: 'init', model: 'claude-sonnet-4-6' }),
+        JSON.stringify({ type: 'assistant', message: { model: 'claude-haiku-4-5-20251001' } }),
+        JSON.stringify({ type: 'result', subtype: 'success' }),
+        // A crash can append the beginning of another retry without a terminal
+        // result. It must not replace the last completed session's model.
+        JSON.stringify({ type: 'system', subtype: 'init', model: 'claude-opus-4-7' }),
+      ].join('\n'),
+    );
+
+    const result = harvestGeneratorModel('claude-code', workingDir, 'claude-opus-4-7');
+
+    expect(result).toEqual({
+      id: 'claude-haiku-4-5-20251001',
+      provider: 'anthropic',
+      source: 'stream',
+    });
+  });
+
   it('claude-code: falls back to configModel with source="config" when the transcript file is absent', () => {
     const workingDir = mkTmp();
     const result = harvestGeneratorModel('claude-code', workingDir, 'claude-haiku-4-5-20251001');
