@@ -1,0 +1,307 @@
+name: npm Publish monitor
+
+# Alerting must run outside npm-publish.yml: when that job reaches its
+# timeout-minutes limit, GitHub terminates its remaining steps. A workflow_run
+# consumer still receives the terminal result. The schedule also catches runs
+# stuck in an active state before GitHub emits a completion event.
+on:
+  workflow_run:
+    workflows: ['npm Publish']
+    types: [completed]
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+# This trusted monitor never checks out or executes code from the monitored
+# revision. It only reads Actions metadata and maintains alert issues.
+permissions:
+  actions: read
+  issues: write
+
+jobs:
+  reconcile-completed:
+    name: Reconcile completed publish alert
+    if: github.event_name == 'workflow_run'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: npm-publish-monitor-${{ github.event.workflow_run.event == 'push' && 'canary' || 'stable' }}
+      cancel-in-progress: false
+    steps:
+      - name: Reconcile train-specific alert
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const trainFor = (event) => event === 'push'
+              ? 'canary'
+              : (event === 'release' || event === 'workflow_dispatch' ? 'stable' : null);
+            const train = trainFor(run.event);
+            if (!train) {
+              core.info(`Ignoring unsupported npm-publish event ${run.event}`);
+              return;
+            }
+
+            const repo = context.repo;
+            const jobsByRun = new Map();
+            const jobsFor = async (runId) => {
+              if (!jobsByRun.has(runId)) {
+                jobsByRun.set(runId, await github.paginate(
+                  github.rest.actions.listJobsForWorkflowRun,
+                  { ...repo, run_id: runId, per_page: 100 },
+                ));
+              }
+              return jobsByRun.get(runId);
+            };
+            const publishJobFor = async (candidate) => {
+              const jobs = await jobsFor(candidate.id);
+              return jobs.find((job) => job.name === 'Publish package');
+            };
+
+            // A completion consumer may be delivered out of order. Read both
+            // trains' event-specific run streams and only let the newest
+            // relevant observed run mutate its own train's issue. Active newer
+            // runs also block an older success from erasing a later failure.
+            const events = train === 'canary' ? ['push'] : ['release', 'workflow_dispatch'];
+            const candidates = [];
+            for (const event of events) {
+              candidates.push(...await github.paginate(
+                github.rest.actions.listWorkflowRuns,
+                {
+                  ...repo,
+                  workflow_id: run.workflow_id,
+                  event,
+                  per_page: 100,
+                },
+              ));
+            }
+            candidates.sort((a, b) => b.run_number - a.run_number);
+
+            let latestObserved = null;
+            for (const candidate of candidates) {
+              if (candidate.status !== 'completed') {
+                latestObserved = candidate;
+                break;
+              }
+              const job = await publishJobFor(candidate);
+              if (!job || job.conclusion !== 'skipped') {
+                latestObserved = candidate;
+                break;
+              }
+            }
+            if (!latestObserved) {
+              core.info(`No relevant ${train} publish run found.`);
+              return;
+            }
+            if (latestObserved.status !== 'completed') {
+              core.info(
+                `Deferring ${train} reconciliation while newer run ${latestObserved.id} ` +
+                `is ${latestObserved.status}.`,
+              );
+              return;
+            }
+
+            // Reconcile the newest relevant completed run, not necessarily the
+            // run that woke this monitor. This recovers the preceding result
+            // when a newer unrelated release completed with Publish package
+            // skipped after temporarily blocking an older completion event.
+            const targetRun = latestObserved;
+            const targetJob = await publishJobFor(targetRun);
+            const label = `automated:npm-publish-${train}-failure`;
+            const titlePrefix = `[npm-publish-${train}-failure]`;
+            const runUrl = targetRun.html_url;
+            const sha = targetRun.head_sha || 'unknown';
+            const conclusion = targetJob?.conclusion || targetRun.conclusion || 'unknown';
+            const openIssues = await github.paginate(
+              github.rest.issues.listForRepo,
+              { ...repo, state: 'open', labels: label, per_page: 100 },
+            );
+            const existing = openIssues.find((issue) => issue.title.startsWith(titlePrefix));
+
+            if (conclusion === 'success') {
+              if (!existing) {
+                core.info(`${train} publish is healthy; no alert issue is open.`);
+                return;
+              }
+              await github.rest.issues.createComment({
+                ...repo,
+                issue_number: existing.number,
+                body: `${train} publish recovered in ${runUrl}. Closing.`,
+              });
+              await github.rest.issues.update({
+                ...repo,
+                issue_number: existing.number,
+                state: 'closed',
+                state_reason: 'completed',
+              });
+              core.notice(`Closed ${train} publish alert #${existing.number}.`);
+              return;
+            }
+
+            try {
+              await github.rest.issues.createLabel({
+                ...repo,
+                name: label,
+                color: 'D93F0B',
+                description: `${train} npm publish failure detected by the external monitor`,
+              });
+            } catch (error) {
+              if (error.status !== 422) throw error;
+            }
+
+            const body = [
+              `## ${train} npm publish failed`,
+              '',
+              '| | |',
+              '|---|---|',
+              `| Train | \`${train}\` |`,
+              `| Event | \`${targetRun.event}\` |`,
+              `| Conclusion | \`${conclusion}\` |`,
+              `| Publish commit | \`${sha}\` |`,
+              `| Workflow run | ${runUrl} |`,
+              '',
+              'A failed publish leaves operators on a stale package. Inspect the run,',
+              'fix or re-run it; only a newer successful run on this same train closes',
+              'this issue.',
+              '',
+              `<!-- npm-publish-monitor-run:${targetRun.id} -->`,
+            ].join('\n');
+
+            if (existing) {
+              if (existing.body?.includes(`npm-publish-monitor-run:${targetRun.id}`)) {
+                core.info(`${train} alert already reflects run ${targetRun.id}.`);
+                return;
+              }
+              await github.rest.issues.createComment({
+                ...repo,
+                issue_number: existing.number,
+                body,
+              });
+              await github.rest.issues.update({
+                ...repo,
+                issue_number: existing.number,
+                body,
+              });
+              core.warning(`Updated ${train} publish alert #${existing.number}.`);
+            } else {
+              const shortSha = sha.slice(0, 8);
+              const created = await github.rest.issues.create({
+                ...repo,
+                title: `${titlePrefix} ${conclusion} at ${shortSha}`,
+                body,
+                labels: [label],
+              });
+              core.warning(`Opened ${train} publish alert #${created.data.number}.`);
+            }
+
+  detect-hung:
+    name: Detect hung publish runs
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: npm-publish-monitor-watchdog
+      cancel-in-progress: false
+    env:
+      HUNG_AFTER_MINUTES: '105'
+    steps:
+      - name: Alert on overlong active runs
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const repo = context.repo;
+            const hungAfterMs = Number(process.env.HUNG_AFTER_MINUTES) * 60_000;
+            const cutoff = Date.now() - hungAfterMs;
+            const workflow = await github.rest.actions.getWorkflow({
+              ...repo,
+              workflow_id: 'npm-publish.yml',
+            });
+            const statuses = ['in_progress', 'queued', 'waiting', 'requested', 'pending'];
+            const active = [];
+            for (const status of statuses) {
+              active.push(...await github.paginate(
+                github.rest.actions.listWorkflowRuns,
+                {
+                  ...repo,
+                  workflow_id: workflow.data.id,
+                  status,
+                  per_page: 100,
+                },
+              ));
+            }
+
+            const trainFor = (event) => event === 'push'
+              ? 'canary'
+              : (event === 'release' || event === 'workflow_dispatch' ? 'stable' : null);
+            for (const train of ['canary', 'stable']) {
+              const latestObserved = active
+                .filter((run) => trainFor(run.event) === train)
+                .sort((a, b) => b.run_number - a.run_number)[0];
+              if (!latestObserved) continue;
+
+              const startedAt = Date.parse(
+                latestObserved.run_started_at || latestObserved.created_at,
+              );
+              if (!Number.isFinite(startedAt) || startedAt > cutoff) continue;
+
+              const label = `automated:npm-publish-${train}-failure`;
+              const titlePrefix = `[npm-publish-${train}-failure]`;
+              const openIssues = await github.paginate(
+                github.rest.issues.listForRepo,
+                { ...repo, state: 'open', labels: label, per_page: 100 },
+              );
+              const existing = openIssues.find((issue) => issue.title.startsWith(titlePrefix));
+              const marker = `<!-- npm-publish-monitor-run:${latestObserved.id} -->`;
+              if (existing?.body?.includes(marker)) {
+                core.info(`${train} hung-run alert already tracks ${latestObserved.id}.`);
+                continue;
+              }
+
+              try {
+                await github.rest.issues.createLabel({
+                  ...repo,
+                  name: label,
+                  color: 'D93F0B',
+                  description: `${train} npm publish failure detected by the external monitor`,
+                });
+              } catch (error) {
+                if (error.status !== 422) throw error;
+              }
+
+              const body = [
+                `## ${train} npm publish appears hung`,
+                '',
+                `Run ${latestObserved.html_url} has remained \`${latestObserved.status}\` for more than ` +
+                  `${process.env.HUNG_AFTER_MINUTES} minutes.`,
+                '',
+                '| | |',
+                '|---|---|',
+                `| Publish commit | \`${latestObserved.head_sha || 'unknown'}\` |`,
+                `| Train | \`${train}\` |`,
+                '',
+                'Inspect environment approval, runner availability, and the publish job.',
+                'A later completion event will update or close this train-specific alert.',
+                '',
+                marker,
+              ].join('\n');
+
+              if (existing) {
+                await github.rest.issues.createComment({
+                  ...repo,
+                  issue_number: existing.number,
+                  body,
+                });
+                await github.rest.issues.update({
+                  ...repo,
+                  issue_number: existing.number,
+                  body,
+                });
+                core.warning(`Updated ${train} hung publish alert #${existing.number}.`);
+              } else {
+                const created = await github.rest.issues.create({
+                  ...repo,
+                  title: `${titlePrefix} publish appears hung`,
+                  body,
+                  labels: [label],
+                });
+                core.warning(`Opened ${train} hung publish alert #${created.data.number}.`);
+              }
+            }

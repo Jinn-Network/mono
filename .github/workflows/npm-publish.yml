@@ -37,9 +37,6 @@ permissions:
   # (spec §7, #923). An explicit permissions block defaults every unlisted
   # scope to none, so this must be named for github.rest.checks.listForRef.
   checks: read
-  # issues: write lets the publish-failure alert steps open/comment/close the
-  # [canary-publish-failure] alert issue (#1797).
-  issues: write
 
 defaults:
   run:
@@ -73,7 +70,19 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_sha || github.ref }}
+          # Always resolve the immutable event commit. In a manual recovery the
+          # operator-supplied release_sha is the immutable publish input.
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_sha || github.sha }}
+
+      - name: Verify exact publish commit
+        shell: bash
+        run: |
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          if [ "${ACTUAL_SHA}" != "${JINN_BUILD_COMMIT}" ]; then
+            echo "::error::Checked out ${ACTUAL_SHA}, expected publish commit ${JINN_BUILD_COMMIT}"
+            exit 1
+          fi
+          echo "::notice::Publish source pinned to ${JINN_BUILD_COMMIT}"
 
       - uses: actions/setup-node@v7
         with:
@@ -100,7 +109,7 @@ jobs:
           MANUAL_RELEASE_SHA: ${{ inputs.release_sha }}
         run: |
           PACKAGE_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)")
-          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-8)
+          SHORT_SHA=$(echo "${JINN_BUILD_COMMIT}" | cut -c1-8)
 
           if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
             PUBLISH_VERSION="${PACKAGE_VERSION}-canary.${SHORT_SHA}"
@@ -382,90 +391,3 @@ jobs:
           git tag "${DATE_TAG}" "${SHA}"
           git push origin "${DATE_TAG}"
           echo "::notice::Created date tag ${DATE_TAG} pointing at ${SHA} (alongside ${RELEASE_TAG})"
-
-      # Publish-failure alert (issue #1797) — self-healing open-or-update pattern
-      # mirroring main-next-ancestor-check.yml. A failed or cancelled/timed-out run
-      # of this job (canary or stable — the body records the event + SHA so a human
-      # can tell which) opens or updates a single [canary-publish-failure] issue;
-      # the next successful run auto-closes it. Without this, a failed canary
-      # publish is silent and operators stay on a stale client (run 29539701552
-      # sat unnoticed ~10h). cancelled() is included because a job killed by
-      # timeout-minutes concludes cancelled, not failure — the same silent-staleness
-      # class this alert exists to catch.
-      - name: Alert on publish failure
-        if: failure() || cancelled()
-        working-directory: ${{ github.workspace }}
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-        run: |
-          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          # JINN_BUILD_COMMIT (job env) resolves inputs.release_sha on
-          # workflow_dispatch recovery runs, where GITHUB_SHA is the branch tip,
-          # not the commit being published.
-          SHORT_SHA="${JINN_BUILD_COMMIT:0:8}"
-
-          gh label create "automated:canary-publish-failure" \
-            --color "D93F0B" \
-            --description "Surfaced by the npm-publish failure alert step" \
-            --force \
-            --repo "${REPO}" || true
-
-          EXISTING="$(gh issue list \
-            --repo "${REPO}" \
-            --search '[canary-publish-failure] in:title is:open label:"automated:canary-publish-failure"' \
-            --json number \
-            --jq '.[0].number // empty' 2>/dev/null || true)"
-
-          BODY_FILE="$(mktemp)"
-          cat > "$BODY_FILE" <<BODY_EOF
-          ## npm publish run failed
-
-          | | |
-          |---|---|
-          | Event | \`${GITHUB_EVENT_NAME}\` |
-          | Trigger SHA | \`${JINN_BUILD_COMMIT}\` |
-          | Run | ${RUN_URL} |
-
-          A failed publish leaves operators on a stale \`@jinn-network/client\`.
-          Inspect the run, fix or re-run it; this issue auto-closes on the next
-          successful publish.
-          BODY_EOF
-
-          if [ -n "$EXISTING" ]; then
-            gh issue comment "$EXISTING" \
-              --repo "${REPO}" \
-              --body-file "$BODY_FILE"
-            echo "::warning::Commented on existing publish-failure issue #${EXISTING}"
-          else
-            gh issue create \
-              --repo "${REPO}" \
-              --title "[canary-publish-failure] npm publish failed for ${SHORT_SHA}" \
-              --body-file "$BODY_FILE" \
-              --label "automated:canary-publish-failure"
-            echo "::error::npm publish failed — alert issue opened. See ${RUN_URL}"
-          fi
-
-      - name: Close publish-failure alert on success
-        if: success()
-        working-directory: ${{ github.workspace }}
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-        run: |
-          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          EXISTING="$(gh issue list \
-            --repo "${REPO}" \
-            --search '[canary-publish-failure] in:title is:open label:"automated:canary-publish-failure"' \
-            --json number \
-            --jq '.[0].number // empty' 2>/dev/null || true)"
-          if [ -n "$EXISTING" ]; then
-            gh issue close "$EXISTING" \
-              --repo "${REPO}" \
-              --comment "Publish succeeded as of run ${RUN_URL}. Closing."
-            echo "::notice::Auto-closed publish-failure issue #${EXISTING} — publish healthy again."
-          else
-            echo "::notice::Publish succeeded — no open alert issue to close."
-          fi
