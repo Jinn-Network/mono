@@ -13,7 +13,129 @@ const PY_JINN_LAYER = fileURLToPath(
 );
 const TS_PROCESS_CONTRACT = fileURLToPath(new URL('../src/process-contract.ts', import.meta.url));
 
+function stripPythonNonCode(source: string): string {
+  const chars = [...source];
+  let index = 0;
+  let quote: '"' | "'" | '"""' | "'''" | null = null;
+  while (index < chars.length) {
+    const char = chars[index];
+    const following = chars[index + 1];
+    if (quote !== null) {
+      if (char === '\\') {
+        index += 2;
+        continue;
+      }
+      if (chars.slice(index, index + quote.length).join('') === quote) {
+        index += quote.length;
+        quote = null;
+      } else {
+        index += 1;
+      }
+      continue;
+    }
+    if ((char === '"' || char === "'") && following === char && chars[index + 2] === char) {
+      const delimiter = char.repeat(3) as '"""' | "'''";
+      const lineStart = Math.max(source.lastIndexOf('\n', index - 1), source.lastIndexOf('\r', index - 1)) + 1;
+      const isStandalone = /^[ \t]*(?:[rRuUbB]{1,2})?$/u.test(source.slice(lineStart, index));
+      if (!isStandalone) {
+        quote = delimiter;
+        index += delimiter.length;
+        continue;
+      }
+      for (let count = 0; count < delimiter.length; count += 1) chars[index + count] = ' ';
+      index += 3;
+      while (index < chars.length) {
+        if (chars.slice(index, index + 3).join('') === delimiter) {
+          for (let count = 0; count < delimiter.length; count += 1) chars[index + count] = ' ';
+          index += 3;
+          break;
+        }
+        if (chars[index] !== '\n' && chars[index] !== '\r') chars[index] = ' ';
+        index += 1;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      index += 1;
+      continue;
+    }
+    if (char === '#') {
+      while (index < chars.length && chars[index] !== '\n' && chars[index] !== '\r') {
+        chars[index] = ' ';
+        index += 1;
+      }
+      continue;
+    }
+    index += 1;
+  }
+  return chars.join('');
+}
+
+function stripTsComments(source: string): string {
+  const chars = [...source];
+  let index = 0;
+  let quote: '"' | "'" | '`' | null = null;
+  while (index < chars.length) {
+    const char = chars[index];
+    const following = chars[index + 1];
+    if (quote !== null) {
+      if (char === '\\') {
+        index += 2;
+        continue;
+      }
+      if (char === quote) quote = null;
+      index += 1;
+      continue;
+    }
+    if (char === '"' || char === "'" || char === '`') {
+      quote = char;
+      index += 1;
+      continue;
+    }
+    if (char === '/' && following === '/') {
+      while (index < chars.length && chars[index] !== '\n' && chars[index] !== '\r') {
+        chars[index] = ' ';
+        index += 1;
+      }
+      continue;
+    }
+    if (char === '/' && following === '*') {
+      chars[index] = chars[index + 1] = ' ';
+      index += 2;
+      while (index < chars.length) {
+        if (chars[index] === '*' && chars[index + 1] === '/') {
+          chars[index] = chars[index + 1] = ' ';
+          index += 2;
+          break;
+        }
+        if (chars[index] !== '\n' && chars[index] !== '\r') chars[index] = ' ';
+        index += 1;
+      }
+      continue;
+    }
+    index += 1;
+  }
+  return chars.join('');
+}
+
+function extractPythonVersion(source: string, sourcePath: string): number {
+  const matches = [
+    ...stripPythonNonCode(source).matchAll(/^CONTRACT_VERSION[ \t]*=[ \t]*(\d+)[ \t]*$/gm),
+  ];
+  if (matches.length === 0) {
+    throw new Error(`could not locate CONTRACT_VERSION in ${sourcePath} — declaration moved?`);
+  }
+  if (matches.length !== 1) {
+    throw new Error(
+      `expected exactly one CONTRACT_VERSION in ${sourcePath}, found ${matches.length} declaration-shaped matches`,
+    );
+  }
+  return Number(matches[0][1]);
+}
+
 function extractPythonStatuses(source: string, sourcePath: string): string[] {
+  source = stripPythonNonCode(source);
   const matches = [
     ...source.matchAll(
       /^[ \t]*if[ \t]+parsed\.get\("status"\)[ \t]+not[ \t]+in[ \t]+\(([^)]*)\)[ \t]*:/gm,
@@ -36,6 +158,7 @@ function extractPythonStatuses(source: string, sourcePath: string): string[] {
 }
 
 function extractTsStatuses(source: string, sourcePath: string): string[] {
+  source = stripTsComments(source);
   const matches = [
     ...source.matchAll(
       /^export[ \t]+type[ \t]+ProcessStatus[ \t]*=[ \t]*([^;]+);/gm,
@@ -84,6 +207,30 @@ if parsed.get("status") not in ("ok", EXTRA_STATUS):`;
     );
   });
 
+  it('rejects a sole Python docstring status decoy', () => {
+    const source = `"""
+if parsed.get("status") not in ("ok", "degraded"):
+"""
+allowed_statuses = ("ok", "degraded", "unavailable")
+if parsed.get("status") not in allowed_statuses:
+    pass`;
+
+    expect(() => extractPythonStatuses(source, 'fixture-jinn-layer.py')).toThrow(
+      /status guard tuple.*fixture-jinn-layer\.py/,
+    );
+  });
+
+  it('rejects a sole Python line-comment status decoy', () => {
+    const source = `# if parsed.get("status") not in ("ok", "degraded"):
+allowed_statuses = ("ok", "degraded", "unavailable")
+if parsed.get("status") not in allowed_statuses:
+    pass`;
+
+    expect(() => extractPythonStatuses(source, 'fixture-jinn-layer.py')).toThrow(
+      /status guard tuple.*fixture-jinn-layer\.py/,
+    );
+  });
+
   it('rejects a TypeScript block-comment decoy before the live ProcessStatus union', () => {
     const source = `/*
 export type ProcessStatus = 'ok' | 'degraded' | 'unavailable';
@@ -95,18 +242,56 @@ export type ProcessStatus = 'ok' | ExtraStatus;`;
     );
   });
 
+  it('rejects a sole TypeScript block-comment status decoy', () => {
+    const source = `/*
+export type ProcessStatus = 'ok' | 'degraded';
+*/
+export { type ProcessStatus } from './shared-process-status.js';`;
+
+    expect(() => extractTsStatuses(source, 'fixture-process-contract.ts')).toThrow(
+      /ProcessStatus union.*fixture-process-contract\.ts/,
+    );
+  });
+
+  it('rejects a sole TypeScript line-comment status decoy', () => {
+    const source = `// export type ProcessStatus = 'ok' | 'degraded';
+export { type ProcessStatus } from './shared-process-status.js';`;
+
+    expect(() => extractTsStatuses(source, 'fixture-process-contract.ts')).toThrow(
+      /ProcessStatus union.*fixture-process-contract\.ts/,
+    );
+  });
+
+  it('ignores a Python docstring CONTRACT_VERSION decoy', () => {
+    const source = `"""
+CONTRACT_VERSION = 1
+"""
+# CONTRACT_VERSION = 1
+marker = "# not a comment"
+assigned = '''
+# still not a comment
+'''
+CONTRACT_VERSION = 2`;
+
+    expect(extractPythonVersion(source, 'fixture-jinn-layer.py')).toBe(2);
+  });
+
+  it('rejects multiple live Python CONTRACT_VERSION declarations', () => {
+    const source = `CONTRACT_VERSION = 1
+CONTRACT_VERSION = 2`;
+
+    expect(() => extractPythonVersion(source, 'fixture-jinn-layer.py')).toThrow(
+      /exactly one CONTRACT_VERSION.*fixture-jinn-layer\.py/,
+    );
+  });
+
   // PROCESS_CONTRACT_VERSION is a re-export of the plugin package's
   // JINN_PLUGIN_CONTRACT_VERSION, so this assertion is structurally the same
   // check as packages/plugin/test/contract-parity.test.ts — it exists so the
   // client CI path (plain `yarn test`) also gates the cross-language pin.
   it('Python CONTRACT_VERSION matches PROCESS_CONTRACT_VERSION', () => {
     const source = readFileSync(PY_JINN_LAYER, 'utf8');
-    const match = /^CONTRACT_VERSION = (\d+)$/m.exec(source);
-    expect(
-      match,
-      `could not locate CONTRACT_VERSION in ${PY_JINN_LAYER} — declaration moved?`,
-    ).not.toBeNull();
-    const pyVersion = Number(match![1]);
+    const pyVersion = extractPythonVersion(source, PY_JINN_LAYER);
     expect(
       pyVersion,
       `contract version diverged: Python CONTRACT_VERSION=${pyVersion} (${PY_JINN_LAYER}) != ` +
