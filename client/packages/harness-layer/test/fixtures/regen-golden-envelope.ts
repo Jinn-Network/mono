@@ -49,7 +49,13 @@ const unsigned = UnsignedEnvelopeSchema.parse({
   attestation: null,
   trajectory: null,
   artifacts: [],
-  payload: { golden: true },
+  payload: {
+    prediction: {
+      probability: '0.5',
+      submittedAt: 1750000000,
+      modelId: 'golden-fixture',
+    },
+  },
 });
 
 const signed = await signCanonical(unsigned, ANVIL_KEY_0, account.address);
