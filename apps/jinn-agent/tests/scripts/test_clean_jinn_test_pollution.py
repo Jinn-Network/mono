@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import stat
 import tarfile
 from pathlib import Path
 
@@ -96,6 +97,7 @@ def test_cleanup_removes_only_known_fixture_records_and_is_reversible(tmp_path):
     assert not fixture_episode.exists()
     assert real_capture.exists()
     assert real_episode.exists()
+    assert stat.S_IMODE(backup.stat().st_mode) == 0o600
     mineable = json.loads(paths.mineable_store.read_text(encoding="utf-8"))
     assert list(mineable["records"]) == [
         "20260717_010605_cf1edc-1784243166765569000"
@@ -190,3 +192,29 @@ def test_cleanup_refuses_symlinked_record(tmp_path):
 
     with pytest.raises(cleanup.UnsafeCleanupPath, match="symlink"):
         cleanup.build_cleanup_plan(paths)
+
+
+def test_cleanup_backup_is_private_from_creation_when_archive_fails(
+    tmp_path,
+    monkeypatch,
+):
+    home = tmp_path / "home"
+    paths = cleanup.store_paths(home)
+    fixture_capture = paths.captures / "s1.json"
+    _write_record(fixture_capture, session_id="s1")
+    plan = cleanup.build_cleanup_plan(paths)
+    backup = paths.root / ".pollution-backup-test.tgz"
+    modes_during_archive = []
+
+    def fail_mid_archive(_archive, _source, **_kwargs):
+        modes_during_archive.append(stat.S_IMODE(backup.stat().st_mode))
+        raise tarfile.TarError("forced mid-archive failure")
+
+    monkeypatch.setattr(tarfile.TarFile, "add", fail_mid_archive)
+
+    with pytest.raises(tarfile.TarError, match="forced mid-archive failure"):
+        cleanup.apply_cleanup(plan, backup)
+
+    assert modes_during_archive == [0o600]
+    assert not backup.exists()
+    assert fixture_capture.exists()

@@ -51,7 +51,6 @@ def test_autouse_guard_rechecks_after_test_mutates_override(monkeypatch):
     guard = conftest._jinn_store_write_guard.__wrapped__(
         request,
         None,
-        monkeypatch,
     )
     next(guard)
     with monkeypatch.context() as mutation:
@@ -68,3 +67,19 @@ def test_guard_rejects_transient_default_resolution(monkeypatch):
             distill.episodes_dir()
 
     assert_jinn_store_sandboxed()
+
+
+def test_guard_survives_ordinary_monkeypatch_undo(monkeypatch):
+    """A test cannot dismantle the autouse store sandbox by undoing its patch."""
+    monkeypatch.undo()
+
+    assert_jinn_store_sandboxed()
+    real_root = (Path.home() / ".jinn-client").resolve()
+    for resolver in (
+        distill.captures_dir,
+        distill.episodes_dir,
+        session_bridge.contribution_state_dir,
+    ):
+        resolved = Path(resolver()).resolve()
+        assert resolved != real_root
+        assert real_root not in resolved.parents

@@ -400,15 +400,23 @@ def _hermetic_environment(tmp_path, monkeypatch):
     #    The ``_jinn_store_write_guard`` fixture below fails loud if a
     #    resolver escapes back to ``~/.jinn-client``. See
     #    ``tests/support/jinn_store.py`` and Jinn-Network/mono#1841.
-    jinn_store_root = tmp_path / "jinn-store"
-    for name, sub in (
-        ("JINN_LAYER_CAPTURES_DIR", "captures"),
-        ("JINN_LAYER_EPISODES_DIR", "episodes"),
-        ("JINN_MINEABLE_STATE_DIR", "mineable"),
-    ):
-        target = jinn_store_root / sub
-        target.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setenv(name, str(target))
+    # Use a fixture-owned patcher for these safety-critical redirects. Some
+    # existing tests call the ordinary ``monkeypatch.undo()`` mid-test; that
+    # must not dismantle the Jinn sandbox or its resolver guard.
+    jinn_store_patch = pytest.MonkeyPatch()
+    try:
+        jinn_store_root = tmp_path / "jinn-store"
+        for name, sub in (
+            ("JINN_LAYER_CAPTURES_DIR", "captures"),
+            ("JINN_LAYER_EPISODES_DIR", "episodes"),
+            ("JINN_MINEABLE_STATE_DIR", "mineable"),
+        ):
+            target = jinn_store_root / sub
+            target.mkdir(parents=True, exist_ok=True)
+            jinn_store_patch.setenv(name, str(target))
+        yield
+    finally:
+        jinn_store_patch.undo()
 
 
 # Backward-compat alias — old tests reference this fixture name. Keep it
@@ -420,7 +428,7 @@ def _isolate_hermes_home(_hermetic_environment):
 
 
 @pytest.fixture(autouse=True)
-def _jinn_store_write_guard(request, _hermetic_environment, monkeypatch):
+def _jinn_store_write_guard(request, _hermetic_environment):
     """Fail loud if any jinn store resolver points at the real store tree.
 
     ``_hermetic_environment`` (step 6) redirects the store env vars to a
@@ -437,12 +445,17 @@ def _jinn_store_write_guard(request, _hermetic_environment, monkeypatch):
         install_jinn_store_resolver_guards,
     )
 
-    assert_jinn_store_sandboxed()
-    install_jinn_store_resolver_guards(monkeypatch)
-    yield
-    # Tests can mutate or unset the environment after fixture setup. Re-check
-    # before monkeypatch restores it so those writes fail the owning test.
-    assert_jinn_store_sandboxed()
+    guard_patch = pytest.MonkeyPatch()
+    try:
+        assert_jinn_store_sandboxed()
+        install_jinn_store_resolver_guards(guard_patch)
+        yield
+        # Tests can mutate or unset the environment after fixture setup.
+        # Re-check before their patcher restores it so those writes fail the
+        # owning test.
+        assert_jinn_store_sandboxed()
+    finally:
+        guard_patch.undo()
 
 
 # ── Module-level state reset — replaced by per-file process isolation ──────
