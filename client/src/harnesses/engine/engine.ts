@@ -107,6 +107,28 @@ export class NotImplementedError extends Error {
   }
 }
 
+/**
+ * A task cannot leave DISCOVERED until its canonical TaskCreated block has a
+ * valid timestamp. Exhausting the bounded lookup is recoverable: a later
+ * engine pass can query a healthy/caught-up RPC and continue the same row.
+ */
+export class TaskCreationTimestampUnavailableError extends Error {
+  readonly requestId: string;
+  readonly blockNumber: number;
+  readonly cause: unknown;
+
+  constructor(requestId: string, blockNumber: number, cause: unknown) {
+    super(
+      `authoritative task creation timestamp unavailable for ${requestId} `
+      + `(block ${blockNumber})`,
+    );
+    this.name = 'TaskCreationTimestampUnavailableError';
+    this.requestId = requestId;
+    this.blockNumber = blockNumber;
+    this.cause = cause;
+  }
+}
+
 // ── Registry types ────────────────────────────────────────────────────────────
 
 /**
@@ -997,12 +1019,11 @@ export class TaskEngine {
       `[harness-engine] ${task.requestId}: authoritative task creation timestamp unavailable `
       + `after ${TASK_CREATION_TIMESTAMP_LOOKUP_ATTEMPTS} attempts: ${safeError}`,
     );
-    const error = new Error(
-      `authoritative task creation timestamp unavailable for ${task.requestId} `
-      + `(block ${task.onchainCreationBlock})`,
-    ) as Error & { cause?: unknown };
-    error.cause = lastError;
-    throw error;
+    throw new TaskCreationTimestampUnavailableError(
+      task.requestId,
+      task.onchainCreationBlock,
+      lastError,
+    );
   }
 
   async releaseClaimedNotStarted(): Promise<string[]> {
@@ -2673,13 +2694,20 @@ export class TaskEngine {
     // IS the retry; there is no per-task attempt counter. Skip this only once
     // the delivery window has closed, so we never churn on work that can no
     // longer settle on-chain.
-    if (task.windowEndTs > Date.now() && isRecoverableTransactionError(err)) {
+    const recoverablePrerequisite =
+      err instanceof TaskCreationTimestampUnavailableError;
+    if (
+      task.windowEndTs > Date.now()
+      && (recoverablePrerequisite || isRecoverableTransactionError(err))
+    ) {
       emitEvent(this.store, {
         kind: 'tick_error',
         requestId: task.requestId,
         solverType: task.solverType ?? undefined,
         outcome: 'warn',
-        detail: `transient RPC failure in ${contextLabel}; left ${task.state} for retry: ${reason}`,
+        detail:
+          `${recoverablePrerequisite ? 'recoverable prerequisite failure' : 'transient RPC failure'} `
+          + `in ${contextLabel}; left ${task.state} for retry: ${reason}`,
       }, 'harness-engine');
       return 'transient';
     }

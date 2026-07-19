@@ -325,6 +325,38 @@ describe('TaskEngine.claim — impl gate', () => {
       expect(row.onchainCreationTimestamp).toBeNull();
     });
 
+    it('parks an invalid lookup result and re-resolves it successfully on the next process pass', async () => {
+      const getBlockTimestamp = vi.fn()
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(1752000002);
+      const engine = new TestEngine({
+        store,
+        paths: { workingDirRoot: '/tmp', implStateDirRoot: '/tmp' },
+        implRegistry: { findFor: () => stubImpl({ isReady: async () => ({ ready: true }) }) },
+        blockTimestamp: { getBlockTimestamp },
+      });
+      const input = makeInput('req-createdat-invalid-park-retry');
+      engine.db.insertDiscovered(input);
+
+      await expect(engine.process(input.requestId)).rejects.toMatchObject({
+        name: 'TaskCreationTimestampUnavailableError',
+      });
+      expect(engine.db.getByRequestId(input.requestId)).toMatchObject({
+        state: TaskRunState.DISCOVERED,
+        onchainCreationTimestamp: null,
+      });
+
+      await engine.process(input.requestId);
+
+      expect(getBlockTimestamp).toHaveBeenCalledTimes(4);
+      expect(engine.db.getByRequestId(input.requestId)).toMatchObject({
+        state: TaskRunState.CLAIMED,
+        onchainCreationTimestamp: 1752000002,
+      });
+    });
+
     it('redacts configured RPC URL and API-key material from lookup failure logs', async () => {
       const rpcSecret = 'super-secret-rpc-key-123456';
       const rpcUrl = `https://base.example.test/v2/${rpcSecret}`;

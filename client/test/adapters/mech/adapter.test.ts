@@ -70,6 +70,24 @@ function solutionEnvelopeFixture(data = 'solution payload') {
   };
 }
 
+function seedCanonicalTaskCreation(
+  adapter: unknown,
+  {
+    taskId = '1',
+    transactionHash = TX_HASH,
+    blockNumber = 80,
+  }: {
+    taskId?: string;
+    transactionHash?: `0x${string}`;
+    blockNumber?: number;
+  } = {},
+): void {
+  (adapter as any).canonicalTaskCreationProvenance.set(taskId, {
+    onchainCreationTx: transactionHash,
+    onchainCreationBlock: blockNumber,
+  });
+}
+
 // MOCK_JUSTIFICATION: src/adapters/mech/contracts.js is the I/O leaf for chain RPC calls; mocking it is mocking the boundary.
 vi.mock('../../../src/adapters/mech/contracts.js', () => ({
   submitTask: vi.fn().mockResolvedValue({
@@ -1096,6 +1114,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     const {
       canClaimEvaluation,
       claimEvaluation,
+      decodeTaskCreatedLogs,
       decodeSolutionDeliveryClaimedLogs,
       findLatestDeliveryDataHexForRequest,
       getMarketplaceRequestDeliveryMech,
@@ -1115,6 +1134,18 @@ describe('MechAdapter TaskCoordinator flow', () => {
       transactionHash: TX_HASH,
       blockNumber: 333,
     }]);
+    vi.mocked(decodeTaskCreatedLogs)
+      // The normal poll decode has no TaskCreated event in this batch.
+      .mockReturnValueOnce([])
+      // The evaluator's bounded canonical lookup resolves the earlier event.
+      .mockReturnValueOnce([{
+        taskId: '1',
+        taskCidDigest: TASK_CID_DIGEST,
+        manifestDigest: MANIFEST_DIGEST,
+        creator: TEST_CONFIG.safeAddress,
+        transactionHash: taskCreationTx,
+        blockNumber: 79,
+      }]);
     vi.mocked(getMarketplaceRequestDeliveryMech).mockResolvedValueOnce(solverMech);
     vi.mocked(fetchFromIpfs).mockResolvedValueOnce({
       data: 'solution payload',
@@ -1212,6 +1243,53 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
+  it('parks an evaluation opportunity whose solver envelope contradicts canonical TaskCreated provenance', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { decodeTaskCreatedLogs } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const canonicalCreationTx = ('0x' + '34'.repeat(32)) as `0x${string}`;
+    const solverClaimedTx = ('0x' + '99'.repeat(32)) as `0x${string}`;
+    const solution = {
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: ('0x' + '66'.repeat(20)) as `0x${string}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    };
+
+    vi.mocked(decodeTaskCreatedLogs).mockReturnValueOnce([{
+      taskId: '1',
+      taskCidDigest: TASK_CID_DIGEST,
+      manifestDigest: MANIFEST_DIGEST,
+      creator: TEST_CONFIG.safeAddress,
+      transactionHash: canonicalCreationTx,
+      blockNumber: 79,
+    }]);
+    vi.mocked(fetchFromIpfs).mockResolvedValueOnce({
+      data: 'solver-controlled payload',
+      task: {
+        cid: TASK_CID,
+        onchainCreationTx: solverClaimedTx,
+        onchainCreationBlock: 123,
+        requestId: REQUEST_ID,
+      },
+    });
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(333n);
+    (adapter as any).publicClient.getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
+    (adapter as any).pendingEvaluationSolutions.set(REQUEST_ID, solution);
+
+    await expect(
+      (adapter as any).evaluationAnnouncementForSolution(solution),
+    ).rejects.toThrow(/does not match canonical TaskCreated provenance/);
+    expect((adapter as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(true);
+
+    await adapter.stop();
+  });
+
   it('does not scan evaluation opportunities when the operator is not an evaluator (#547)', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { canClaimEvaluation, decodeSolutionDeliveryClaimedLogs } = await import('../../../src/adapters/mech/contracts.js');
@@ -1276,6 +1354,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
 
     const adapter = new MechAdapter({ ...TEST_CONFIG, evaluatorEnabled: true });
     await adapter.initialize();
+    seedCanonicalTaskCreation(adapter);
     (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(101n);
     (adapter as any).publicClient.getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
     (adapter as any).requestBlockCursor = 100n;
@@ -1610,6 +1689,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
 
     const adapter = new MechAdapter(TEST_CONFIG);
     await adapter.initialize();
+    seedCanonicalTaskCreation(adapter);
     (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(125_001n);
     (adapter as any).publicClient.getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
     (adapter as any).requestBlockCursor = 124_999n;
@@ -1653,6 +1733,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
 
     const adapter = new MechAdapter({ ...TEST_CONFIG, pollIntervalMs: 0 });
     await adapter.initialize();
+    seedCanonicalTaskCreation(adapter);
     (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(101n);
     (adapter as any).publicClient.getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
     (adapter as any).requestBlockCursor = 100n;
@@ -2010,6 +2091,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     );
     vi.mocked(fetchFromIpfs).mockResolvedValueOnce(solutionEnvelopeFixture());
     await adapter.initialize();
+    seedCanonicalTaskCreation(adapter);
     (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(333n);
 
     const gen = adapter.watchForTasks()[Symbol.asyncIterator]();
@@ -2962,6 +3044,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     const store = makeConfigStore();
     const adapter = new MechAdapter(TEST_CONFIG, store as never);
     await adapter.initialize();
+    seedCanonicalTaskCreation(adapter);
     const solution = {
       taskId: '1',
       attemptIndex: 0,
