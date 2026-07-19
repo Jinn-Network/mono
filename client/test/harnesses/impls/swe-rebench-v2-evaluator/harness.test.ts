@@ -5,6 +5,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 import {
   SweRebenchV2EvaluatorHarness,
@@ -1093,12 +1094,11 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
       vi.restoreAllMocks();
     });
 
-    // Stub Date.now with a controllable clock that only the fake runner
-    // advances — the measured grade() wall-time is exactly `elapsedMs`, no
-    // matter how many other Date.now calls happen inside run().
+    // Stub the monotonic clock with a controllable value that only the fake
+    // runner advances, making grade() elapsed time deterministic.
     async function runWithStubbedElapsed(elapsedMs: number) {
       let now = 1_000_000;
-      vi.spyOn(Date, 'now').mockImplementation(() => now);
+      vi.spyOn(performance, 'now').mockImplementation(() => now);
       const runner = {
         runEval: vi.fn().mockImplementation(async () => {
           now += elapsedMs;
@@ -1155,7 +1155,8 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
     });
 
     it('records 0 with a warning (and still completes) when the env is not a number', async () => {
-      process.env[ENV_KEY] = 'abc';
+      const invalidRate = 'sensitive-invalid-rate';
+      process.env[ENV_KEY] = invalidRate;
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const sol = await runWithStubbedElapsed(30 * 60_000);
       expect(costOf(sol)).toBe(0);
@@ -1163,13 +1164,43 @@ describe('SweRebenchV2EvaluatorHarness — run', () => {
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining('JINN_EVAL_COMPUTE_USD_PER_HOUR'),
       );
+      expect(warn).not.toHaveBeenCalledWith(expect.stringContaining(invalidRate));
     });
 
-    it('clamps to 0 (and still completes) when the clock steps backward mid-grade', async () => {
+    it('uses monotonic elapsed time when the wall clock steps backward mid-grade', async () => {
+      process.env[ENV_KEY] = '0.20';
+      let wallNow = 1_000_000;
+      vi.spyOn(Date, 'now').mockImplementation(() => wallNow);
+      const run = runWithStubbedElapsed(30 * 60_000);
+      wallNow -= 5 * 60_000;
+      const sol = await run;
+      expect(costOf(sol)).toBe(0.1);
+      expect(sol.gating).toMatchObject({ verdict: 'PASS' });
+    });
+
+    it('defensively clamps a negative monotonic elapsed time to 0', async () => {
       process.env[ENV_KEY] = '0.20';
       const sol = await runWithStubbedElapsed(-5 * 60_000);
       expect(costOf(sol)).toBe(0);
       expect(sol.gating).toMatchObject({ verdict: 'PASS' });
+    });
+
+    it('records 0 with a warning when a finite rate overflows the final cost', async () => {
+      process.env[ENV_KEY] = String(Number.MAX_VALUE);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const sol = await runWithStubbedElapsed(2 * 3_600_000);
+      expect(costOf(sol)).toBe(0);
+      expect(sol.gating).toMatchObject({ verdict: 'PASS' });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('evaluator_cost_usd=0'));
+    });
+
+    it('records 0 with a warning when elapsed-time computation is non-finite', async () => {
+      process.env[ENV_KEY] = '0.20';
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const sol = await runWithStubbedElapsed(Number.POSITIVE_INFINITY);
+      expect(costOf(sol)).toBe(0);
+      expect(sol.gating).toMatchObject({ verdict: 'PASS' });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('evaluator_cost_usd=0'));
     });
   });
 });
