@@ -10,6 +10,7 @@ These prove the lint/guard behaviour:
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -38,3 +39,21 @@ def test_guard_red_on_deliberate_violation(monkeypatch):
 
     with pytest.raises(AssertionError, match="JINN_LAYER_EPISODES_DIR"):
         assert_jinn_store_sandboxed()
+
+
+def test_autouse_guard_rechecks_after_test_mutates_override(monkeypatch):
+    """Exercise the fixture's teardown half without leaving this test unsafe."""
+    from tests import conftest
+
+    request = SimpleNamespace(
+        node=SimpleNamespace(get_closest_marker=lambda _name: None)
+    )
+    guard = conftest._jinn_store_write_guard.__wrapped__(
+        request,
+        None,
+    )
+    next(guard)
+    with monkeypatch.context() as mutation:
+        mutation.delenv("JINN_LAYER_EPISODES_DIR", raising=False)
+        with pytest.raises(AssertionError, match="JINN_LAYER_EPISODES_DIR"):
+            next(guard)

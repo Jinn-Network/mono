@@ -430,9 +430,14 @@ def _jinn_store_write_guard(request, _hermetic_environment):
     deliberately probe the un-sandboxed resolvers.
     """
     if request.node.get_closest_marker("jinn_store_guard_bypass"):
+        yield
         return
     from tests.support.jinn_store import assert_jinn_store_sandboxed
 
+    assert_jinn_store_sandboxed()
+    yield
+    # Tests can mutate or unset the environment after fixture setup. Re-check
+    # before monkeypatch restores it so those writes fail the owning test.
     assert_jinn_store_sandboxed()
 
 
