@@ -34,6 +34,10 @@ import {
   createJinnPlugin,
   type JinnPluginDeps,
 } from '@jinn-network/plugin';
+import {
+  defaultEvidenceIndexPath,
+  reindexEvidenceStore,
+} from '@jinn-network/core';
 import { buildDefaultLayer } from './layer-default.js';
 import { buildPluginDepsFromEnv } from './plugin-wiring.js';
 import {
@@ -99,6 +103,7 @@ import {
 import {
   DEFAULT_CAPTURES_DIR,
   DEFAULT_DISTILL_CAPTURE_LIMIT,
+  DEFAULT_EPISODES_DIR,
   DEFAULT_SKILLS_INSTALL_DIR,
   coveredSessionIds,
   loadRecentCaptures,
@@ -153,6 +158,10 @@ import { resolveCliPassword } from '../../../src/cli/password.js';
 const USAGE = `Usage: jinn-layer <command> [args]
 
 Commands:
+  reindex [--repair] [--json] [--episodes-dir <dir>] [--index-path <file>]
+                                                 Rebuild the machine-local derived evidence index.
+                                                 --repair also normalizes the known null quartet
+                                                 and rescues misnamed episode files.
   contract --json                                 Print process contract version 1
   session pickup                                  Read a v1 pickup request on stdin
   session end                                     Read a complete EpisodeV1 request on stdin
@@ -1056,9 +1065,67 @@ export async function runJinnLayerCli(
   const isContributionPreview = verb === 'contribution' && subverb === 'preview';
   const isContributionLedger = verb === 'contribution' && subverb === 'ledger';
   const isContributionDisable = verb === 'contribution' && subverb === 'disable';
-  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed && !isSkillsInstall && !isDistillRun && !isDistillEvalPrep && !isDistillModels && !isDistill && !isDeriveEnv && !isContract && !isSessionPickup && !isSessionEnd && !isHistory && !isContributionPreview && !isContributionLedger && !isContributionDisable) {
+  const isReindex = verb === 'reindex';
+  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed && !isSkillsInstall && !isDistillRun && !isDistillEvalPrep && !isDistillModels && !isDistill && !isDeriveEnv && !isContract && !isSessionPickup && !isSessionEnd && !isHistory && !isContributionPreview && !isContributionLedger && !isContributionDisable && !isReindex) {
     writer.write(USAGE);
     return verb === undefined || verb === 'help' || verb === '--help' ? 0 : 2;
+  }
+
+  if (isReindex) {
+    let parsed;
+    try {
+      parsed = parseArgs({
+        args: subverb === undefined ? rest : [subverb, ...rest],
+        options: {
+          repair: { type: 'boolean', default: false },
+          json: { type: 'boolean', default: false },
+          'episodes-dir': { type: 'string' },
+          'index-path': { type: 'string' },
+        },
+        strict: true,
+        allowPositionals: false,
+      });
+    } catch (error) {
+      writer.write(`error: invalid reindex command: ${error instanceof Error ? error.message : String(error)}\n\n${USAGE}`);
+      return 2;
+    }
+    const episodesDir = parsed.values['episodes-dir']
+      ?? process.env['JINN_LAYER_EPISODES_DIR']
+      ?? DEFAULT_EPISODES_DIR;
+    const indexPath = parsed.values['index-path']
+      ?? process.env['JINN_LAYER_EVIDENCE_INDEX_PATH']
+      ?? defaultEvidenceIndexPath(episodesDir);
+    try {
+      const report = reindexEvidenceStore({
+        episodesDir,
+        indexPath,
+        repair: parsed.values.repair,
+      });
+      const status = report.unreadableFiles > 0 ? 'degraded' : 'ok';
+      if (parsed.values.json) {
+        writer.write(`${JSON.stringify({
+          status,
+          episodesDir,
+          indexPath,
+          repair: parsed.values.repair,
+          report,
+        })}\n`);
+      } else {
+        writer.write([
+          `Evidence reindex ${status}: ${report.indexedEpisodes}/${report.scannedFiles} files indexed`,
+          `Index: ${indexPath}`,
+          `Repairs: ${report.nullFieldsRemoved} null fields removed; ${report.renamedFiles} files renamed`,
+          `Legacy unstamped: ${report.legacyUnstampedFiles}`,
+          `Unreadable: ${report.unreadableFiles}`,
+          ...report.unreadable.map((row) => `  ${row.path}: ${row.reason}`),
+          '',
+        ].join('\n'));
+      }
+      return report.unreadableFiles > 0 ? 1 : 0;
+    } catch (error) {
+      writer.write(`error: evidence reindex failed: ${error instanceof Error ? error.message : String(error)}\n`);
+      return 1;
+    }
   }
 
   if (isContract) {

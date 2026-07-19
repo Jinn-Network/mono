@@ -40,6 +40,13 @@ import { parseCapturedTask, type CapturedTask } from './captured-task.js';
 const DEFAULT_RETENTION: EvidenceRetentionPolicy = { policy: 'local-private', maxEpisodes: 200 };
 const EPISODE_SUFFIX = '.episode.json';
 
+export function episodeFileName(id: string): string {
+  const stem = /^[A-Za-z0-9._-]+$/.test(id) && id !== '.' && id !== '..'
+    ? id
+    : `episode-${createHash('sha256').update(id).digest('hex')}`;
+  return `${stem}${EPISODE_SUFFIX}`;
+}
+
 function nodeErrorCode(error: unknown): string | undefined {
   return error && typeof error === 'object' && 'code' in error
     ? String((error as { code?: unknown }).code)
@@ -117,10 +124,7 @@ export function createEvidenceAdapter(deps: EvidenceAdapterDeps): EvidencePort {
     // EpisodeV1 intentionally permits opaque host ids. Safe ids retain the
     // original filename; path-shaped or platform-unsafe ids use a stable hash
     // that the Python fallback mirrors exactly.
-    const stem = /^[A-Za-z0-9._-]+$/.test(id) && id !== '.' && id !== '..'
-      ? id
-      : `episode-${createHash('sha256').update(id).digest('hex')}`;
-    const path = join(capturesDir, `${stem}${EPISODE_SUFFIX}`);
+    const path = join(capturesDir, episodeFileName(id));
     const base = resolve(capturesDir);
     if (!resolve(path).startsWith(base + sep)) {
       throw new Error(`unsafe episodeId (escapes captures dir): ${JSON.stringify(id)}`);

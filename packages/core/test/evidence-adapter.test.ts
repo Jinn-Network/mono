@@ -314,6 +314,23 @@ describe('EvidenceAdapter — AC2 legacy read', () => {
 });
 
 describe('EvidenceAdapter — AC2 byte-exact round-trip', () => {
+  it('keeps current writes strict when an optional field is literal null', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-strict-write-'));
+    const adapter = createEvidenceAdapter({ capturesDir });
+    const invalid = {
+      ...makeSampleEpisode({ episodeId: 'strict-null' }),
+      outcome: {
+        ...makeSampleEpisode().outcome,
+        summary: null,
+      },
+    } as unknown as EpisodeV1;
+
+    const result = await adapter.put(invalid);
+
+    expect(result.status).toBe('unavailable');
+    expect(existsSync(join(capturesDir, 'strict-null.episode.json'))).toBe(false);
+  });
+
   it('put(episode) then get(id) deep-equals the put episode', async () => {
     const capturesDir = mkdtempSync(join(tmpdir(), 'ev-rt-'));
     const adapter = createEvidenceAdapter({ capturesDir });
