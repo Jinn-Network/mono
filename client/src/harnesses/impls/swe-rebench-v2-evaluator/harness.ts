@@ -22,6 +22,7 @@ import { spawn, spawnSync, type SpawnOptions } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 import {
   SweRebenchV2TaskSchema,
@@ -124,8 +125,8 @@ function resolveComputeUsdPerHour(): number {
   const parsed = Number(envRaw);
   if (Number.isFinite(parsed) && parsed > 0) return parsed;
   console.warn(
-    `[swe-rebench-v2] JINN_EVAL_COMPUTE_USD_PER_HOUR=${JSON.stringify(envRaw)} is not a positive ` +
-      'number — recording evaluator_cost_usd=0',
+    '[swe-rebench-v2] JINN_EVAL_COMPUTE_USD_PER_HOUR is not a positive number — ' +
+      'recording evaluator_cost_usd=0',
   );
   return 0;
 }
@@ -1342,7 +1343,7 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
     // Meter real evaluator cost as grade() wall-time × compute rate (#1828).
     // Only the grade() call is timed — not the IPFS upload or the substrate
     // recheck above.
-    const gradeStartedAtMs = Date.now();
+    const gradeStartedAtMs = performance.now();
     let graded: Awaited<ReturnType<SweRebenchV2Evaluator['grade']>>;
     try {
       graded = await evaluator.grade({ task, solutionPayload, row: recheckRow });
@@ -1359,11 +1360,16 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
       }
       throw err;
     }
-    // Math.max(0, …): Date.now() is not monotonic — a clock step-back mid-grade
-    // would yield a negative cost, which fails the verdict schema's
-    // nonnegative() at envelope assembly and would block the eval.
-    const evaluatorCostUsd =
-      (Math.max(0, Date.now() - gradeStartedAtMs) / 3_600_000) * resolveComputeUsdPerHour();
+    const computedEvaluatorCostUsd =
+      (Math.max(0, performance.now() - gradeStartedAtMs) / 3_600_000) * resolveComputeUsdPerHour();
+    let evaluatorCostUsd = computedEvaluatorCostUsd;
+    if (!Number.isFinite(computedEvaluatorCostUsd) || computedEvaluatorCostUsd < 0) {
+      console.warn(
+        '[swe-rebench-v2] evaluator cost computation was not finite and nonnegative — ' +
+          'recording evaluator_cost_usd=0',
+      );
+      evaluatorCostUsd = 0;
+    }
 
     // Pin the test log to IPFS so anyone (evaluator dispute, audit, model
     // training) can fetch it anonymously by CID. The CID is surfaced via the
