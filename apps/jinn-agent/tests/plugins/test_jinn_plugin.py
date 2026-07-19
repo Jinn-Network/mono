@@ -381,11 +381,11 @@ def test_removed_surfaces_fall_through_to_help(isolated_home):
 
 def test_jinn_layer_not_found_points_at_plugin_update():
     """The jinn-layer bin arrives with the plugin; a missing bin names the
-    `hermes plugins update jinn` refresh (mono#1818) and the JINN_LAYER_BIN
+    `jinn-agent plugins update jinn` refresh (mono#1818) and the JINN_LAYER_BIN
     override. The diagnostic lives on stderr (stdout/stderr reported
     separately)."""
     code, out, err = jinn_layer._default_runner(["definitely-not-a-real-binary-xyz"])
     assert code == 127
     assert out == ""
-    assert "hermes plugins update jinn" in err
+    assert "jinn-agent plugins update jinn" in err
     assert "JINN_LAYER_BIN" in err

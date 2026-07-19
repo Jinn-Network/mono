@@ -54,7 +54,7 @@ def _default_runner(
         # (or set JINN_LAYER_BIN to point at a local build).
         return 127, "", (
             f"{argv[0]}: not found. Update the Jinn layer "
-            "(hermes plugins update jinn) or set JINN_LAYER_BIN."
+            "(jinn-agent plugins update jinn) or set JINN_LAYER_BIN."
         )
     except subprocess.TimeoutExpired:
         return 124, "", f"{argv[0]}: timed out after {timeout_s}s"
