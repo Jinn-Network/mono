@@ -73,10 +73,13 @@ function assembleScrubStages(policy: KeyPolicy, piiDetector?: PiiDetector) {
  * prefix shapes secretlint pass-1 does not cover), and secretlint's pass-1
  * preset rules (AWS secret-key assignments, GitHub / Slack / npm token
  * shapes, GCP service-account JSON). Accepted residual: JWTs and unprefixed
- * high-entropy blobs (trace profile catches them via the entropy fallback)
- * and structured PII with dedicated openredaction patterns — payment cards,
- * phone numbers, SSNs — pass unredacted; acceptable for public,
- * licence-checked seed content.
+ * high-entropy blobs (trace profile catches them via the entropy fallback),
+ * plus every structured identifier or PII class detected only by the omitted
+ * openredaction stage, pass unredacted. The latter is a 570+ pattern surface;
+ * payment cards, phone numbers, SSNs, medical or health-plan identifiers,
+ * government identity documents, and financial account references are
+ * examples, not an exhaustive allowlist. This is acceptable only for public,
+ * licence-checked seed content that a curator has reviewed for those classes.
  * The reduced stage list is reported via the pipeline's `components` surface
  * (what the signed provenance manifest is specified to record — see
  * pipeline.ts), so the profile is inspectable per pipeline.

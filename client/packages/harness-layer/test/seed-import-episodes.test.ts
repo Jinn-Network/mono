@@ -328,18 +328,22 @@ describe('executeEpisodes()', () => {
     ],
     ['unprefixed high-entropy blob', 'Credential: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'],
     ['SSN-shaped string', 'Reporter SSN on file: 123-45-6789.'],
+    ['medical-record identifier', 'Medical record MRN: MED123456.'],
+    ['government-identity identifier', 'Passport: A1234567.'],
+    ['financial-account identifier', 'Bank account: 1234 5678.'],
   ])('accepts a %s under the seed profile (documented residual, #1409/#1784)', async (_label, residualText) => {
     // The seed profile deliberately does not run openredaction or the
     // entropy fallback (build.ts's buildSeedScrubPipeline doc comment,
     // #1409): seeds are public, licence-checked prose, and those
     // probabilistic stages false-positive on ordinary words and hex-looking
-    // ids in that content (#1784). Shapes only those stages detect —
-    // structured PII (payment cards, phone numbers, SSNs) via
-    // openredaction, JWTs and unprefixed high-entropy blobs via the entropy
-    // fallback — are accepted residual risk for this lane; the trace
-    // profile (buildScrubPipeline, used for operator capture) still catches
-    // them. This test pins that trade-off as intentional, not a gap that
-    // was missed.
+    // ids in that content (#1784). Every structured identifier or PII class
+    // detected only by openredaction is therefore residual risk — not just
+    // the representative payment, contact, government identity, medical,
+    // and financial cases sampled here. JWTs and unprefixed high-entropy
+    // blobs are likewise residuals from the omitted entropy fallback. The
+    // trace profile still catches these classes; seed curators must catch
+    // them by review. This test pins that trade-off as intentional, not a
+    // complete enumeration of openredaction's 570+ pattern surface.
     const source = mockEpisodeSource([
       episode({
         steps: [{ label: 'note', title: 'residual fixture', text: residualText }],

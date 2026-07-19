@@ -15,11 +15,12 @@ least once.
 ## Why episodes, not raw traces
 
 A seed-episode JSON file is a *transformed*, human-reviewed artifact, not a
-raw capture. It is published through the exact same `capture() -> publish()`
-path a real contribution uses (seed-profile scrub, `provenance: 'imported'`,
-excluded from the demand signal and emissions eligibility), so a seeded
-evidence record is indistinguishable on the wire from an organically
-captured one — see `client/packages/harness-layer/src/seed-import/episode-execute.ts`.
+raw capture. It uses the same trace-envelope schema and `capture() ->
+publish()` anchor path as an organic contribution. It remains deliberately
+distinguishable: `provenance: 'imported'` and the signed scrub-component
+manifest disclose the seed-profile path, and imported records are excluded
+from the demand signal and emissions eligibility. See
+`client/packages/harness-layer/src/seed-import/episode-execute.ts`.
 
 ## 1. Record → transform → author
 
@@ -43,10 +44,17 @@ captured one — see `client/packages/harness-layer/src/seed-import/episode-exec
    ID, tags, summary, steps, outcome, synthesis, and attribution. It is still
    fail-closed: the lane refuses to publish when a redaction fires. Authored
    content should already be clean; the scrub is a backstop, not a substitute
-   for review. Accepted residual risk under this profile — payment-card
-   numbers, phone numbers, SSN-shaped strings, JWTs, and unprefixed
-   high-entropy blobs — is not caught automatically; catching these is the
-   curator's job during step 1's read-through, not the scrub's.
+   for review. Because the entire openredaction stage is absent, **every**
+   structured identifier or PII class detected only by its 570+ pattern
+   surface is residual risk. Payment cards, phone numbers, SSNs,
+   medical/health-plan or patient identifiers, passport/government identity
+   numbers, and bank/investment/financial account references are examples,
+   not a complete list. JWTs and unprefixed high-entropy blobs are additional
+   residuals from the omitted entropy fallback. The curator must inspect all
+   fields for the full range of personal, medical, identity, contact, and
+   financial data and remove or replace any such value before approving the
+   report. Public source material is not evidence that a copied identifier is
+   safe to republish.
 4. **Author `synthesis` and `tags`.** `synthesis` is a 3-6 sentence,
    task-linked "how it was solved" — write it yourself; it is never
    generated at retrieval time. `tags` should name the subsystem vocabulary
@@ -166,6 +174,27 @@ yarn jinn-layer corpus get <ref> --json
 Confirm `provenance: 'imported'`, the `seed:step:*` steps carrying
 `seed.step.label`/`seed.step.title`/`seed.step.text`, and the final
 `seed:synthesis` step carrying `seed.synthesis` + `seed.attribution`.
+
+### Post-merge operational gate for #1784
+
+Local tests use mocked publication dependencies. They prove that the
+checked-in fixtures pass the lane and that the lane constructs the expected
+envelopes; they do **not** prove that a record was published to or is
+retrievable from the live testnet corpus.
+
+After the scrub-profile fix has merged, an operator must run sections 2 and
+3 against the real configured testnet, then verify the previously blocked
+same-repository distractor explicitly:
+
+```bash
+yarn jinn-layer corpus search "claims" --limit 5
+yarn jinn-layer corpus get <distractor-operator-claims-ref> --json
+```
+
+Do not close #1784 until `distractor-operator-claims` appears in the search
+results and the fetched envelope has the expected `provenance: 'imported'`,
+seed-profile scrub manifest, and anchor reference. Record the command output
+or equivalent testnet evidence on the issue.
 
 ## 5. Idempotency and `supersedes`
 
