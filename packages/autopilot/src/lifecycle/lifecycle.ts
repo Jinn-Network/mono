@@ -17,18 +17,40 @@ function timestampMs(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function branchClaimMatchesItem(item: PullRequestLifecycleItem): boolean {
+  const claim = item.branchClaim;
+  return claim === undefined
+    || (claim.issueNumber === item.issueNumber
+      && (claim.prNumber === undefined || claim.prNumber === item.prNumber));
+}
+
+function reviewClaimMatchesItem(item: PullRequestLifecycleItem): boolean {
+  return item.reviewClaim === undefined || item.reviewClaim.prNumber === item.prNumber;
+}
+
+function correlatedBranchClaim(item: PullRequestLifecycleItem) {
+  return branchClaimMatchesItem(item) ? item.branchClaim : undefined;
+}
+
+function correlatedReviewClaim(item: PullRequestLifecycleItem) {
+  return reviewClaimMatchesItem(item) ? item.reviewClaim : undefined;
+}
+
 function humanOverlay(item: LifecycleItem): boolean {
   return item.projectStatus === 'Human'
     || item.labels.includes('review:needs-human')
     || item.humanReason !== undefined
-    || (item.kind === 'pull-request' && item.reviewClaim?.state === 'human');
+    || (item.kind === 'pull-request'
+      && (!branchClaimMatchesItem(item)
+        || !reviewClaimMatchesItem(item)
+        || item.reviewClaim?.state === 'human'));
 }
 
 function underlyingPhase(item: LifecycleItem): Exclude<LifecyclePhase, 'human'> {
   if (item.kind === 'issue') return 'eligible';
   if (item.merged) return 'merged';
 
-  const branchClaim = item.branchClaim;
+  const branchClaim = correlatedBranchClaim(item);
   if (branchClaim?.phase === 'implement' && branchClaim.phaseComplete !== true) {
     return 'implementing';
   }
@@ -36,7 +58,7 @@ function underlyingPhase(item: LifecycleItem): Exclude<LifecyclePhase, 'human'> 
     return 'merge-prep';
   }
 
-  const review = item.reviewClaim;
+  const review = correlatedReviewClaim(item);
   const currentReview = review !== undefined && review.head === item.head;
   if (currentReview && !['stale', 'terminal-approved', 'human'].includes(review.state)) {
     return item.isDraft || review.state === 'fixing' ? 'review-fixing' : 'reviewing';
@@ -78,8 +100,8 @@ function staleEvidence(
 
   if (
     (phase === 'implementing' || phase === 'merge-prep')
-    && item.branchClaim !== undefined
-    && item.branchClaim.phaseComplete !== true
+    && correlatedBranchClaim(item) !== undefined
+    && correlatedBranchClaim(item)?.phaseComplete !== true
   ) {
     const headTime = timestampMs(item.headChangedAt);
     if (headTime === null || headTime > nowMs || nowMs - headTime < staleAfterMs) {
@@ -92,25 +114,23 @@ function staleEvidence(
     };
   }
 
-  const review = item.reviewClaim;
+  const review = correlatedReviewClaim(item);
   if (
     (phase === 'reviewing' || phase === 'review-fixing')
     && review !== undefined
     && review.head === item.head
     && !['stale', 'terminal-approved', 'human'].includes(review.state)
   ) {
-    const claimTime = timestampMs(review.recordedAt);
     const headTime = timestampMs(item.headChangedAt);
     const verdictTime = matchingVerdictTime(item, review);
     if (verdictTime !== null) return { stale: false };
-    if (claimTime === null || headTime === null) return { stale: false };
-    const lastRealProgress = Math.max(claimTime, headTime);
-    if (lastRealProgress > nowMs || nowMs - lastRealProgress < staleAfterMs) {
+    if (headTime === null) return { stale: false };
+    if (headTime > nowMs || nowMs - headTime < staleAfterMs) {
       return { stale: false };
     }
     return {
       stale: true,
-      staleSince: new Date(lastRealProgress + staleAfterMs).toISOString(),
+      staleSince: new Date(headTime + staleAfterMs).toISOString(),
       staleReason: 'review-progress-unchanged',
     };
   }
@@ -200,6 +220,11 @@ function nonNegativeSlots(value: number): number {
   return Number.isSafeInteger(value) && value > 0 ? value : 0;
 }
 
+function reviewEnrollmentEligible(item: PullRequestLifecycleItem): boolean {
+  if (!item.isDraft) return item.needsReview && !item.approved;
+  return item.reviewClaim?.state === 'stale' && item.reviewClaim.head === item.head;
+}
+
 export function planCycle(
   view: LifecycleView,
   localCapacity: LocalCapacity,
@@ -239,6 +264,7 @@ export function planCycle(
       || candidate.phase !== 'awaiting-review'
       || candidate.stale
       || candidate.item.kind !== 'pull-request'
+      || !reviewEnrollmentEligible(candidate.item)
     ) {
       continue;
     }

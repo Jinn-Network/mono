@@ -9,7 +9,7 @@ import {
   parseAutomatedReviewMarker,
   reviewClaimRef,
 } from '../../src/lifecycle/codecs.js';
-import { gitOid, gitRefName } from '../../src/lifecycle/types.js';
+import { gitOid, gitRefName, type BranchClaim } from '../../src/lifecycle/types.js';
 
 const OID_A = gitOid('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
 
@@ -84,6 +84,43 @@ describe('lifecycle metadata codecs', () => {
       state: 'released',
       recordedAt: '2026-07-20T10:05:00.000Z',
     }))).toThrow(/state/);
+  });
+
+  it('rejects string PR numbers in review claim JSON', () => {
+    expect(() => decodeReviewClaimPayload(JSON.stringify({
+      protocolVersion: 2,
+      prNumber: '101',
+      generation: '22222222-2222-4222-8222-222222222222',
+      attempt: '33333333-3333-4333-8333-333333333333',
+      reviewer: 'reviewer',
+      head: OID_A,
+      state: 'active',
+      recordedAt: '2026-07-20T10:05:00.000Z',
+    }))).toThrow(/PR number/);
+  });
+
+  it('strictly validates branch claim objects before encoding', () => {
+    const claim: BranchClaim = {
+      kind: 'branch-claim',
+      protocolVersion: 2,
+      phase: 'implement',
+      issueNumber: 42,
+      attempt: '11111111-1111-4111-8111-111111111111',
+      runner: 'runner',
+      login: 'login',
+      expectedHead: OID_A,
+      targetBase: gitRefName('next'),
+      claimedAt: '2026-07-20T10:00:00.000Z',
+    };
+
+    expect(() => encodeBranchClaimTrailers({
+      ...claim,
+      kind: 'other',
+    } as unknown as BranchClaim)).toThrow(/kind/);
+    expect(() => encodeBranchClaimTrailers({
+      ...claim,
+      unexpected: true,
+    } as unknown as BranchClaim)).toThrow(/Unknown field/);
   });
 
   it('derives stable refs and round-trips the automated review marker', () => {

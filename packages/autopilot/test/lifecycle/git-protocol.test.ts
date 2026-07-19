@@ -11,6 +11,10 @@ describe('Git protocol port', () => {
     const calls: Array<{ command: string; args: readonly string[] }> = [];
     const runner: GitCommandRunner = async (command, args) => {
       calls.push({ command, args });
+      if (args[0] === 'rev-list') return `${PUBLISHED} ${EXPECTED}\n`;
+      if (args[0] === 'ls-remote') {
+        return `${EXPECTED}\trefs/heads/autopilot/42\n`;
+      }
       return '';
     };
     const port = makeGitProtocolPort(runner);
@@ -25,16 +29,35 @@ describe('Git protocol port', () => {
       published: PUBLISHED,
       observed: PUBLISHED,
     });
-    expect(calls).toEqual([{
-      command: 'git',
-      args: ['push', 'origin', `${PUBLISHED}:refs/heads/autopilot/42`],
-    }]);
+    expect(calls).toEqual([
+      {
+        command: 'git',
+        args: ['rev-list', '--parents', '-n', '1', PUBLISHED],
+      },
+      {
+        command: 'git',
+        args: ['ls-remote', 'origin', 'refs/heads/autopilot/42'],
+      },
+      {
+        command: 'git',
+        args: [
+          'push',
+          `--force-with-lease=refs/heads/autopilot/42:${EXPECTED}`,
+          'origin',
+          `${PUBLISHED}:refs/heads/autopilot/42`,
+        ],
+      },
+    ]);
   });
 
   it('publishes review claims append-only with a normal fast-forward push', async () => {
     const calls: readonly string[][] = [];
     const runner: GitCommandRunner = async (_command, args) => {
       (calls as string[][]).push([...args]);
+      if (args[0] === 'rev-list') return `${PUBLISHED} ${EXPECTED}\n`;
+      if (args[0] === 'ls-remote') {
+        return `${EXPECTED}\trefs/jinn-autopilot/review-claims/v1/101\n`;
+      }
       return '';
     };
     const port = makeGitProtocolPort(runner, { remote: 'upstream' });
@@ -44,17 +67,69 @@ describe('Git protocol port', () => {
       expectedRecordOid: EXPECTED,
       recordOid: PUBLISHED,
     })).resolves.toMatchObject({ status: 'won', observed: PUBLISHED });
-    expect(calls).toEqual([[
-      'push',
-      'upstream',
-      `${PUBLISHED}:refs/jinn-autopilot/review-claims/v1/101`,
-    ]]);
+    expect(calls).toEqual([
+      ['rev-list', '--parents', '-n', '1', PUBLISHED],
+      ['ls-remote', 'upstream', 'refs/jinn-autopilot/review-claims/v1/101'],
+      [
+        'push',
+        `--force-with-lease=refs/jinn-autopilot/review-claims/v1/101:${EXPECTED}`,
+        'upstream',
+        `${PUBLISHED}:refs/jinn-autopilot/review-claims/v1/101`,
+      ],
+    ]);
+  });
+
+  it('fences creation of an absent review ref with an empty exact lease', async () => {
+    const calls: string[][] = [];
+    const runner: GitCommandRunner = async (_command, args) => {
+      calls.push([...args]);
+      if (args[0] === 'rev-list') return `${PUBLISHED}\n`;
+      return '';
+    };
+    const port = makeGitProtocolPort(runner);
+
+    await expect(port.publishReviewClaim({
+      prNumber: 101,
+      expectedRecordOid: null,
+      recordOid: PUBLISHED,
+    })).resolves.toMatchObject({ status: 'won', observed: PUBLISHED });
+    expect(calls).toEqual([
+      ['rev-list', '--parents', '-n', '1', PUBLISHED],
+      ['ls-remote', 'origin', 'refs/jinn-autopilot/review-claims/v1/101'],
+      [
+        'push',
+        '--force-with-lease=refs/jinn-autopilot/review-claims/v1/101:',
+        'origin',
+        `${PUBLISHED}:refs/jinn-autopilot/review-claims/v1/101`,
+      ],
+    ]);
+  });
+
+  it('rejects a candidate whose Git parent is not the supplied expected OID', async () => {
+    const calls: string[][] = [];
+    const port = makeGitProtocolPort(async (_command, args) => {
+      calls.push([...args]);
+      return `${PUBLISHED} ${OTHER}\n`;
+    });
+
+    await expect(port.claimBranch({
+      branch: gitRefName('autopilot/42'),
+      expectedHead: EXPECTED,
+      claimOid: PUBLISHED,
+    })).rejects.toThrow(/expected parent/i);
+    expect(calls).toEqual([
+      ['rev-list', '--parents', '-n', '1', PUBLISHED],
+    ]);
   });
 
   it('publishes merge-prep with an exact force-with-lease and never unconditional force', async () => {
     const calls: readonly string[][] = [];
     const runner: GitCommandRunner = async (_command, args) => {
       (calls as string[][]).push([...args]);
+      if (args[0] === 'rev-list') return `${PUBLISHED} ${EXPECTED}\n`;
+      if (args[0] === 'ls-remote') {
+        return `${EXPECTED}\trefs/heads/autopilot/42\n`;
+      }
       return '';
     };
     const port = makeGitProtocolPort(runner);
@@ -65,12 +140,16 @@ describe('Git protocol port', () => {
       newHead: PUBLISHED,
     });
 
-    expect(calls).toEqual([[
-      'push',
-      'origin',
-      `--force-with-lease=autopilot/42:${EXPECTED}`,
-      `${PUBLISHED}:refs/heads/autopilot/42`,
-    ]]);
+    expect(calls).toEqual([
+      ['rev-list', '--parents', '-n', '1', PUBLISHED],
+      ['ls-remote', 'origin', 'refs/heads/autopilot/42'],
+      [
+        'push',
+        `--force-with-lease=refs/heads/autopilot/42:${EXPECTED}`,
+        'origin',
+        `${PUBLISHED}:refs/heads/autopilot/42`,
+      ],
+    ]);
     expect(calls.flat()).not.toContain('--force');
   });
 
@@ -78,6 +157,17 @@ describe('Git protocol port', () => {
     const calls: string[][] = [];
     const runner: GitCommandRunner = async (_command, args) => {
       calls.push([...args]);
+      if (args[0] === 'rev-list') {
+        return args.at(-1) === PUBLISHED
+          ? `${PUBLISHED} ${EXPECTED}\n`
+          : `${OTHER} ${EXPECTED}\n`;
+      }
+      if (args[0] === 'ls-remote') {
+        const ref = args.at(-1);
+        return ref === 'refs/heads/autopilot/42'
+          ? `${EXPECTED}\t${ref}\n`
+          : `${EXPECTED}\t${ref}\n`;
+      }
       return '';
     };
     const port = makeGitProtocolPort(runner);
@@ -91,21 +181,34 @@ describe('Git protocol port', () => {
       recordOid: OTHER,
     });
 
-    expect(calls).toEqual([[
-      'push',
-      '--atomic',
-      'origin',
-      `${PUBLISHED}:refs/heads/autopilot/42`,
-      `${OTHER}:refs/jinn-autopilot/review-claims/v1/101`,
-    ]]);
+    expect(calls).toEqual([
+      ['rev-list', '--parents', '-n', '1', PUBLISHED],
+      ['rev-list', '--parents', '-n', '1', OTHER],
+      ['ls-remote', 'origin', 'refs/heads/autopilot/42'],
+      ['ls-remote', 'origin', 'refs/jinn-autopilot/review-claims/v1/101'],
+      [
+        'push',
+        '--atomic',
+        `--force-with-lease=refs/heads/autopilot/42:${EXPECTED}`,
+        `--force-with-lease=refs/jinn-autopilot/review-claims/v1/101:${EXPECTED}`,
+        'origin',
+        `${PUBLISHED}:refs/heads/autopilot/42`,
+        `${OTHER}:refs/jinn-autopilot/review-claims/v1/101`,
+      ],
+    ]);
   });
 
   it('resolves ambiguous command failure by exact ls-remote readback', async () => {
     const calls: readonly string[][] = [];
+    let pushed = false;
     const runner: GitCommandRunner = async (_command, args) => {
       (calls as string[][]).push([...args]);
-      if (args[0] === 'push') throw new Error('connection closed after send');
-      return `${PUBLISHED}\trefs/heads/autopilot/42\n`;
+      if (args[0] === 'rev-list') return `${PUBLISHED} ${EXPECTED}\n`;
+      if (args[0] === 'push') {
+        pushed = true;
+        throw new Error('connection closed after send');
+      }
+      return `${pushed ? PUBLISHED : EXPECTED}\trefs/heads/autopilot/42\n`;
     };
     const port = makeGitProtocolPort(runner);
 
@@ -127,9 +230,15 @@ describe('Git protocol port', () => {
   });
 
   it('reports lost or ambiguous with the observed and expected OIDs', async () => {
+    let lostPortPushStarted = false;
     const lostPort = makeGitProtocolPort(async (_command, args) => {
-      if (args[0] === 'push') throw new Error('rejected');
-      return `${OTHER}\trefs/heads/autopilot/42\n`;
+      if (args[0] === 'rev-list') return `${PUBLISHED} ${EXPECTED}\n`;
+      if (args[0] === 'push') {
+        lostPortPushStarted = true;
+        throw new Error('rejected');
+      }
+      const oid = args[0] === 'ls-remote' && lostPortPushStarted ? OTHER : EXPECTED;
+      return `${oid}\trefs/heads/autopilot/42\n`;
     });
     await expect(lostPort.claimBranch({
       branch: gitRefName('autopilot/42'),
@@ -142,7 +251,8 @@ describe('Git protocol port', () => {
       observed: OTHER,
     });
 
-    const ambiguousPort = makeGitProtocolPort(async () => {
+    const ambiguousPort = makeGitProtocolPort(async (_command, args) => {
+      if (args[0] === 'rev-list') return `${PUBLISHED} ${EXPECTED}\n`;
       throw new Error('network unavailable');
     });
     await expect(ambiguousPort.claimBranch({
