@@ -48,6 +48,10 @@ def test_process_status_set_matches_ts():
         "declaration moved?"
     )
     py_statuses = set(re.findall(r'"([^"]+)"', py_match.group(1)))
+    assert py_statuses, (
+        f"extracted zero statuses from the guard tuple in {_PY_JINN_LAYER} — "
+        "quote style changed?"
+    )
 
     ts_source = _TS_PROCESS_CONTRACT.read_text()
     ts_match = re.search(r"export type ProcessStatus\s*=\s*([^;]+);", ts_source)
@@ -56,6 +60,10 @@ def test_process_status_set_matches_ts():
         "declaration moved?"
     )
     ts_statuses = set(re.findall(r"'([^']+)'", ts_match.group(1)))
+    assert ts_statuses, (
+        f"extracted zero statuses from the ProcessStatus union in "
+        f"{_TS_PROCESS_CONTRACT} — quote style changed?"
+    )
 
     assert py_statuses == ts_statuses, (
         f"process-status set diverged: Python {sorted(py_statuses)} "
