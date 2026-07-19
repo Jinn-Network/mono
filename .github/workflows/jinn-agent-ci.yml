@@ -113,6 +113,7 @@ jobs:
           yarn vitest run
           packages/harness-layer/test/contribution-store.test.ts
           packages/harness-layer/test/process-contract.test.ts
+          packages/harness-layer/test/contract-parity.test.ts
           test/solver-types/task-creator-session-echo.test.ts
       - name: Pinned stock-Hermes Stage 1 product journey
         env:
