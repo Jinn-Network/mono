@@ -2,25 +2,22 @@
  * Layer-side corpus doctor probes — the single shared implementation of the
  * two "does the operator have corpus" checks the doctor renders.
  *
- * Two checks come out of one round-trip against the corpus consume path:
+ * Two checks come out of one search against the corpus consume path:
  *   - `corpus-reachable` — is the corpus read path answering at all?
- *   - `corpus-content`   — did the repo-slug query find enough records to matter?
+ *   - `corpus-content`   — did the repo-slug query find enough evidence that
+ *                         interactive pickup can actually serve?
  *
  * Both are shared so the Python doctor (apps/jinn-agent/plugins/jinn/doctor.py)
  * and the layer CLI (`jinn-layer corpus probe`) render identical semantics.
  *
- * Logged assumptions (both are single-predicate swaps inside this module):
- *  1. No retrieval-mark / evidence-tier filter is shipped yet. The probe queries
- *     the plain repo-slug corpus-search path. Mark-gating (the W2 flip) is a
- *     future one-predicate swap inside `corpusProbes` — it does not change the
- *     probe's shape.
- *  2. `corpus-content` counts `hits.length` because
- *     `layer.corpus.search(repoSlug, { limit: k })` already substring-matches
- *     the query against solverType / role / ref / task cid, so the vocabulary
- *     intersection between the repo slug and each record is implicit in the hit
- *     set — a returned hit is a matching record.
+ * The content check deliberately mirrors pickup's two-layer, fail-closed
+ * retrieval allowlist (#1824): the search hit must carry the canonical mark,
+ * then the fetched trace content must carry it too. Unmarked substrate and
+ * skills never satisfy onboarding, even though they remain valid corpus data.
  */
 
+import { hasRetrievalMark } from '@jinn-network/plugin';
+import { createCorpusAdapter } from './adapters/corpus-adapter.js';
 import type { HarnessLayer, CorpusSearchHit } from './consume.js';
 
 /**
@@ -30,6 +27,13 @@ import type { HarnessLayer, CorpusSearchHit } from './consume.js';
  * `corpus-content.ok` field below.
  */
 export const CORPUS_ONBOARDING_K = 3;
+
+/**
+ * The consume path has no pagination cursor. Ask for a page comfortably wider
+ * than K so unmarked substrate at the front cannot hide the curated records
+ * behind it. The doctor is a full/manual check, not a session-start hot path.
+ */
+const CORPUS_PROBE_CANDIDATE_LIMIT = 50;
 
 /**
  * One doctor check result. Mirrors the Python doctor contract in
@@ -42,40 +46,39 @@ export const CORPUS_ONBOARDING_K = 3;
 export type DoctorCheck = { name: string; ok: boolean; detail: string; remedy?: string };
 
 /**
- * Minimal structural dependency: anything exposing the corpus `search` method.
- * Accepts a real `HarnessLayer` or a test fake.
- */
-type LayerDep = { corpus: { search: HarnessLayer['corpus']['search'] } };
-
-/**
  * B's "enough corpus" guarantee: a repo has enough corpus when at least `k`
- * matching records were found. The single source of truth for the K threshold —
- * `corpusProbes`' `corpus-content.ok` MUST call this over the same hits so the
- * threshold cannot drift between the two.
+ * retrieval-visible matching records survived both of pickup's visibility
+ * guards. The single source of truth for the K threshold —
+ * `corpusProbes`' `corpus-content.ok` MUST call this over the same admitted hits
+ * so the threshold cannot drift between the two.
  */
 export function enoughCorpusForRepo(hits: CorpusSearchHit[], k = CORPUS_ONBOARDING_K): boolean {
   return hits.length >= k;
 }
 
 /**
- * Run the two corpus doctor probes off a single corpus-search round-trip.
+ * Run the two corpus doctor probes off one corpus search plus bounded fetches
+ * for search-marked candidates.
  *
- * One round-trip, never re-thrown: a search failure is caught and reported as a
+ * Search failures are never re-thrown: they are reported as a
  * failing `corpus-reachable` check plus an informational (remedy-free)
- * `corpus-content` that says it was not checked.
+ * `corpus-content` that says it was not checked. Individual candidate fetch or
+ * decode failures simply fail closed for content counting.
  */
 export async function corpusProbes({
   layer,
   repoSlug,
   k = CORPUS_ONBOARDING_K,
 }: {
-  layer: LayerDep;
+  layer: HarnessLayer;
   repoSlug: string;
   k?: number;
 }): Promise<DoctorCheck[]> {
   let hits: CorpusSearchHit[];
   try {
-    hits = await layer.corpus.search(repoSlug, { limit: k });
+    hits = await layer.corpus.search(repoSlug, {
+      limit: Math.max(CORPUS_PROBE_CANDIDATE_LIMIT, k),
+    });
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e);
     return [
@@ -91,7 +94,28 @@ export async function corpusProbes({
     ];
   }
 
-  const contentOk = enoughCorpusForRepo(hits, k);
+  // Ranking-side visibility gate: this is the same canonical mark helper the
+  // corpus adapter uses to set KnowledgeHit.retrievalVisible. Skills are not
+  // retrieval evidence, even if a malformed producer tagged one.
+  const markedCandidates = hits.filter(
+    (hit) => hit.kind !== 'skill' && hasRetrievalMark(hit.tags ?? []),
+  );
+
+  // Content-side visibility gate: createCorpusAdapter is the exact decoder the
+  // plugin pickup wiring uses. It verifies the trace artifact and computes
+  // retrievalVisible from the canonical envelope distributionTags, so the
+  // doctor cannot drift into a parallel admission policy.
+  const corpus = createCorpusAdapter({ layer });
+  const admittedHits: CorpusSearchHit[] = [];
+  for (const hit of markedCandidates) {
+    if (admittedHits.length >= k) break;
+    const result = await corpus.get(hit.ref);
+    if (result.status !== 'ok' || result.value === null) continue;
+    if (result.value.isSkillPayload === true || result.value.retrievalVisible !== true) continue;
+    admittedHits.push(hit);
+  }
+
+  const contentOk = enoughCorpusForRepo(admittedHits, k);
   return [
     // Reachable is about the read path answering; 0 records is still reachable
     // (empty is non-blocking nothing-found, not an error).
@@ -102,7 +126,7 @@ export async function corpusProbes({
       name: 'corpus-content',
       ok: contentOk,
       detail: contentOk
-        ? `${hits.length} matching record(s)`
+        ? `${admittedHits.length} retrieval-visible matching record(s)`
         : 'no matching content yet; Jinn stays quiet until it exists',
     },
   ];
