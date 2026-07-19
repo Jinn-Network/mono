@@ -29,7 +29,9 @@ describe('cross-language contract-constant parity (#1822)', () => {
     expect(
       pyVersion,
       `contract version diverged: Python CONTRACT_VERSION=${pyVersion} (${PY_JINN_LAYER}) != ` +
-        `TS PROCESS_CONTRACT_VERSION=${PROCESS_CONTRACT_VERSION} (${TS_PROCESS_CONTRACT})`,
+        `TS PROCESS_CONTRACT_VERSION=${PROCESS_CONTRACT_VERSION} (re-exported from ` +
+        `packages/plugin/src/plugin.ts, where the TS literal lives; ${TS_PROCESS_CONTRACT} ` +
+        `just re-exports it)`,
     ).toBe(PROCESS_CONTRACT_VERSION);
   });
 

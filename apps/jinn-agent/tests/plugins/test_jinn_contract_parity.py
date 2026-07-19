@@ -27,7 +27,11 @@ _PY_JINN_LAYER = Path(jinn_layer.__file__).resolve()
 
 def test_contract_version_matches_ts():
     source = _TS_PLUGIN.read_text()
-    match = re.search(r"JINN_PLUGIN_CONTRACT_VERSION\s*=\s*(\d+)\s+as const", source)
+    match = re.search(
+        r"^export const JINN_PLUGIN_CONTRACT_VERSION\s*=\s*(\d+)\s+as const",
+        source,
+        re.MULTILINE,
+    )
     assert match, (
         f"could not locate JINN_PLUGIN_CONTRACT_VERSION in {_TS_PLUGIN} — "
         "declaration moved?"
