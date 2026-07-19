@@ -25,9 +25,17 @@ function inferProvider(modelId: string | undefined): string | undefined {
   return undefined;
 }
 
-/** Parse claude-code `--output-format stream-json` output for the first assistant message.model. */
+/**
+ * Parse claude-code `--output-format stream-json` output for model provenance.
+ *
+ * The `system` / `init` record is the CLI's authoritative run configuration.
+ * Older streams can omit its model, so retain the first assistant
+ * `message.model` as a fallback and return it only after the full stream has
+ * been checked for an init model.
+ */
 function harvestClaudeCodeStreamModel(workingDir: string): string | undefined {
   const raw = readFileSync(join(workingDir, '.claude-code', 'stdout.jsonl'), 'utf8');
+  let assistantModel: string | undefined;
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -37,13 +45,17 @@ function harvestClaudeCodeStreamModel(workingDir: string): string | undefined {
     } catch {
       continue;
     }
-    if (obj['type'] === 'assistant') {
-      const message = obj['message'] as Record<string, unknown> | undefined;
-      const model = message?.['model'];
+    if (obj['type'] === 'system' && obj['subtype'] === 'init') {
+      const model = obj['model'];
       if (typeof model === 'string' && model.length > 0) return model;
     }
+    if (assistantModel === undefined && obj['type'] === 'assistant') {
+      const message = obj['message'] as Record<string, unknown> | undefined;
+      const model = message?.['model'];
+      if (typeof model === 'string' && model.length > 0) assistantModel = model;
+    }
   }
-  return undefined;
+  return assistantModel;
 }
 
 /**

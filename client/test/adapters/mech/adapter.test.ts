@@ -364,7 +364,16 @@ describe('MechAdapter TaskCoordinator flow', () => {
       task: { id: 'discovery-task' },
     });
 
-    await adapter.claimTask(value!.taskId);
+    const creationTx = TX_HASH;
+    const claimTx = ('0x' + '34'.repeat(32)) as `0x${string}`;
+    vi.mocked(claimTask).mockResolvedValueOnce({
+      taskId: '42',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      txHash: claimTx,
+      blockNumber: 81,
+    });
+    const request = await adapter.claimTask(value!.taskId);
     expect(claimTask).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
@@ -374,6 +383,12 @@ describe('MechAdapter TaskCoordinator flow', () => {
       TEST_CONFIG.mechContractAddress,
       undefined,
     );
+    expect(request).toMatchObject({
+      onchainCreationTx: creationTx,
+      onchainCreationBlock: 80,
+      onchainClaimTx: claimTx,
+      onchainClaimBlock: 81,
+    });
 
     await adapter.stop();
   });
@@ -1107,9 +1122,11 @@ describe('MechAdapter TaskCoordinator flow', () => {
         attemptId: REQUEST_ID,
         attemptNumber: 0,
       },
-      onchainCreationTx: TX_HASH,
-      onchainCreationBlock: 333,
+      onchainOpportunityTx: TX_HASH,
+      onchainOpportunityBlock: 333,
     });
+    expect(value!.onchainCreationTx).toBeUndefined();
+    expect(value!.onchainCreationBlock).toBeUndefined();
     expect(value!.task.id).toBe('watched-task:evaluation:0');
     expect(value!.task.context).toMatchObject({
       restorationResult: 'solution payload',

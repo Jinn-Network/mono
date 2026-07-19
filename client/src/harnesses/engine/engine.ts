@@ -40,6 +40,7 @@ import { harvestGeneratorModel } from './generator-model.js';
 import type { CorpusKnowledgeRecordRef } from './corpus-knowledge.js';
 import { projectEnvelope } from '../../corpus/envelope-projection.js';
 import type { ReadOnlyCorpus } from '../../mcp/search-records.js';
+import { redactRpcUrls } from '../../util/redact-rpc-urls.js';
 import {
   assembleAndSignEnvelope,
   type EnvelopeAssemblyDeps,
@@ -447,6 +448,8 @@ export interface TaskEngineOptions {
    */
   blockTimestamp?: {
     getBlockTimestamp(blockNumber: number): Promise<number | undefined>;
+    /** Configured URLs let the redactor also strip detached API-key material. */
+    configuredRpcUrls?: readonly string[];
   };
 }
 
@@ -943,9 +946,13 @@ export class TaskEngine {
           this.persistence.setOnchainCreationTimestamp(task.requestId, timestampSec);
         }
       } catch (err) {
+        const safeError = redactRpcUrls(
+          err,
+          this.blockTimestamp.configuredRpcUrls ?? [],
+        );
         console.warn(
           `[harness-engine] ${task.requestId}: onchainCreationTimestamp resolution failed (non-fatal): `
-          + `${err instanceof Error ? err.message : String(err)}`,
+          + safeError,
         );
       }
     }

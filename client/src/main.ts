@@ -2188,6 +2188,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           const block = await publicClient.getBlock({ blockNumber: BigInt(blockNumber) });
           return Number(block.timestamp);
         },
+        configuredRpcUrls: config.rpcUrls,
       },
       // Spec §14, Task 28: per-launch claim eligibility filter. Operators
       // populate `joinedSolverNets[<manifestCid>]` via the SPA's join flow;
