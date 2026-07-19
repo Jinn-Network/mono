@@ -111,29 +111,35 @@ jobs:
             const runUrl = targetRun.html_url;
             const sha = targetRun.head_sha || 'unknown';
             const conclusion = targetJob?.conclusion || targetRun.conclusion || 'unknown';
-            const openIssues = await github.paginate(
-              github.rest.issues.listForRepo,
-              { ...repo, state: 'open', labels: label, per_page: 100 },
-            );
-            const existing = openIssues.find((issue) => issue.title.startsWith(titlePrefix));
+            const listOpenAlerts = async () => (
+              await github.paginate(
+                github.rest.issues.listForRepo,
+                { ...repo, state: 'open', labels: label, per_page: 100 },
+              )
+            )
+              .filter((issue) => issue.title.startsWith(titlePrefix))
+              .sort((a, b) => a.number - b.number);
 
             if (conclusion === 'success') {
-              if (!existing) {
+              const alerts = await listOpenAlerts();
+              if (alerts.length === 0) {
                 core.info(`${train} publish is healthy; no alert issue is open.`);
                 return;
               }
-              await github.rest.issues.createComment({
-                ...repo,
-                issue_number: existing.number,
-                body: `${train} publish recovered in ${runUrl}. Closing.`,
-              });
-              await github.rest.issues.update({
-                ...repo,
-                issue_number: existing.number,
-                state: 'closed',
-                state_reason: 'completed',
-              });
-              core.notice(`Closed ${train} publish alert #${existing.number}.`);
+              for (const alert of alerts) {
+                await github.rest.issues.createComment({
+                  ...repo,
+                  issue_number: alert.number,
+                  body: `${train} publish recovered in ${runUrl}. Closing.`,
+                });
+                await github.rest.issues.update({
+                  ...repo,
+                  issue_number: alert.number,
+                  state: 'closed',
+                  state_reason: 'completed',
+                });
+                core.notice(`Closed ${train} publish alert #${alert.number}.`);
+              }
               return;
             }
 
@@ -165,43 +171,81 @@ jobs:
               '',
               `<!-- npm-publish-monitor-run:${targetRun.id} -->`,
             ].join('\n');
+            const shortSha = sha.slice(0, 8);
+            const title = `${titlePrefix} ${conclusion} at ${shortSha}`;
+            let alerts = await listOpenAlerts();
+            let created = null;
+            if (alerts.length === 0) {
+              created = (await github.rest.issues.create({
+                ...repo,
+                title,
+                body,
+                labels: [label],
+              })).data;
+              core.warning(`Opened ${train} publish alert #${created.number}.`);
+            }
 
-            if (existing) {
-              if (existing.body?.includes(`npm-publish-monitor-run:${targetRun.id}`)) {
-                core.info(`${train} alert already reflects run ${targetRun.id}.`);
-                return;
+            // The shared train concurrency group prevents monitor races. This
+            // deterministic post-write consolidation also repairs duplicates
+            // left by older workflow revisions or an interrupted migration.
+            alerts = await listOpenAlerts();
+            if (created && !alerts.some((issue) => issue.number === created.number)) {
+              alerts.push(created);
+              alerts.sort((a, b) => a.number - b.number);
+            }
+            const canonical = alerts[0];
+            if (!canonical) throw new Error(`Failed to establish ${train} publish alert`);
+            if (canonical.body !== body || canonical.title !== title) {
+              if (canonical.body !== body) {
+                await github.rest.issues.createComment({
+                  ...repo,
+                  issue_number: canonical.number,
+                  body,
+                });
               }
+              await github.rest.issues.update({
+                ...repo,
+                issue_number: canonical.number,
+                title,
+                body,
+              });
+              core.warning(`Updated ${train} publish alert #${canonical.number}.`);
+            } else {
+              core.info(`${train} alert already reflects run ${targetRun.id}.`);
+            }
+            for (const duplicate of alerts.slice(1)) {
               await github.rest.issues.createComment({
                 ...repo,
-                issue_number: existing.number,
-                body,
+                issue_number: duplicate.number,
+                body: `Duplicate ${train} publish alert; consolidated into #${canonical.number}.`,
               });
               await github.rest.issues.update({
                 ...repo,
-                issue_number: existing.number,
-                body,
+                issue_number: duplicate.number,
+                state: 'closed',
+                state_reason: 'not_planned',
               });
-              core.warning(`Updated ${train} publish alert #${existing.number}.`);
-            } else {
-              const shortSha = sha.slice(0, 8);
-              const created = await github.rest.issues.create({
-                ...repo,
-                title: `${titlePrefix} ${conclusion} at ${shortSha}`,
-                body,
-                labels: [label],
-              });
-              core.warning(`Opened ${train} publish alert #${created.data.number}.`);
+              core.notice(
+                `Closed duplicate ${train} publish alert #${duplicate.number}.`,
+              );
             }
 
   detect-hung:
     name: Detect hung publish runs
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        train: [canary, stable]
     concurrency:
-      group: npm-publish-monitor-watchdog
+      # Match reconcile-completed's train-specific group so watchdog and
+      # completion mutations for one alert can never overlap.
+      group: npm-publish-monitor-${{ matrix.train }}
       cancel-in-progress: false
     env:
       HUNG_AFTER_MINUTES: '105'
+      TRAIN: ${{ matrix.train }}
     steps:
       - name: Alert on overlong active runs
         uses: actions/github-script@v9
@@ -231,77 +275,111 @@ jobs:
             const trainFor = (event) => event === 'push'
               ? 'canary'
               : (event === 'release' || event === 'workflow_dispatch' ? 'stable' : null);
-            for (const train of ['canary', 'stable']) {
-              const latestObserved = active
-                .filter((run) => trainFor(run.event) === train)
-                .sort((a, b) => b.run_number - a.run_number)[0];
-              if (!latestObserved) continue;
+            const train = process.env.TRAIN;
+            if (!['canary', 'stable'].includes(train)) {
+              throw new Error(`Unsupported npm publish train: ${train}`);
+            }
+            const latestObserved = active
+              .filter((run) => trainFor(run.event) === train)
+              .sort((a, b) => b.run_number - a.run_number)[0];
+            if (!latestObserved) return;
 
-              const startedAt = Date.parse(
-                latestObserved.run_started_at || latestObserved.created_at,
-              );
-              if (!Number.isFinite(startedAt) || startedAt > cutoff) continue;
+            const startedAt = Date.parse(
+              latestObserved.run_started_at || latestObserved.created_at,
+            );
+            if (!Number.isFinite(startedAt) || startedAt > cutoff) return;
 
-              const label = `automated:npm-publish-${train}-failure`;
-              const titlePrefix = `[npm-publish-${train}-failure]`;
-              const openIssues = await github.paginate(
+            const label = `automated:npm-publish-${train}-failure`;
+            const titlePrefix = `[npm-publish-${train}-failure]`;
+            const listOpenAlerts = async () => (
+              await github.paginate(
                 github.rest.issues.listForRepo,
                 { ...repo, state: 'open', labels: label, per_page: 100 },
-              );
-              const existing = openIssues.find((issue) => issue.title.startsWith(titlePrefix));
-              const marker = `<!-- npm-publish-monitor-run:${latestObserved.id} -->`;
-              if (existing?.body?.includes(marker)) {
-                core.info(`${train} hung-run alert already tracks ${latestObserved.id}.`);
-                continue;
-              }
+              )
+            )
+              .filter((issue) => issue.title.startsWith(titlePrefix))
+              .sort((a, b) => a.number - b.number);
 
-              try {
-                await github.rest.issues.createLabel({
-                  ...repo,
-                  name: label,
-                  color: 'D93F0B',
-                  description: `${train} npm publish failure detected by the external monitor`,
-                });
-              } catch (error) {
-                if (error.status !== 422) throw error;
-              }
+            try {
+              await github.rest.issues.createLabel({
+                ...repo,
+                name: label,
+                color: 'D93F0B',
+                description: `${train} npm publish failure detected by the external monitor`,
+              });
+            } catch (error) {
+              if (error.status !== 422) throw error;
+            }
 
-              const body = [
-                `## ${train} npm publish appears hung`,
-                '',
-                `Run ${latestObserved.html_url} has remained \`${latestObserved.status}\` for more than ` +
-                  `${process.env.HUNG_AFTER_MINUTES} minutes.`,
-                '',
-                '| | |',
-                '|---|---|',
-                `| Publish commit | \`${latestObserved.head_sha || 'unknown'}\` |`,
-                `| Train | \`${train}\` |`,
-                '',
-                'Inspect environment approval, runner availability, and the publish job.',
-                'A later completion event will update or close this train-specific alert.',
-                '',
-                marker,
-              ].join('\n');
+            const body = [
+              `## ${train} npm publish appears hung`,
+              '',
+              `Run ${latestObserved.html_url} has remained \`${latestObserved.status}\` for more than ` +
+                `${process.env.HUNG_AFTER_MINUTES} minutes.`,
+              '',
+              '| | |',
+              '|---|---|',
+              `| Publish commit | \`${latestObserved.head_sha || 'unknown'}\` |`,
+              `| Train | \`${train}\` |`,
+              '',
+              'Inspect environment approval, runner availability, and the publish job.',
+              'A later completion event will update or close this train-specific alert.',
+              '',
+              `<!-- npm-publish-monitor-run:${latestObserved.id} -->`,
+            ].join('\n');
+            const title = `${titlePrefix} publish appears hung`;
 
-              if (existing) {
+            let alerts = await listOpenAlerts();
+            let created = null;
+            if (alerts.length === 0) {
+              created = (await github.rest.issues.create({
+                ...repo,
+                title,
+                body,
+                labels: [label],
+              })).data;
+              core.warning(`Opened ${train} hung publish alert #${created.number}.`);
+            }
+            alerts = await listOpenAlerts();
+            if (created && !alerts.some((issue) => issue.number === created.number)) {
+              alerts.push(created);
+              alerts.sort((a, b) => a.number - b.number);
+            }
+            const canonical = alerts[0];
+            if (!canonical) throw new Error(`Failed to establish ${train} hung-run alert`);
+            if (canonical.body !== body || canonical.title !== title) {
+              if (canonical.body !== body) {
                 await github.rest.issues.createComment({
                   ...repo,
-                  issue_number: existing.number,
+                  issue_number: canonical.number,
                   body,
                 });
-                await github.rest.issues.update({
-                  ...repo,
-                  issue_number: existing.number,
-                  body,
-                });
-                core.warning(`Updated ${train} hung publish alert #${existing.number}.`);
               } else {
-                const created = await github.rest.issues.create({
-                  ...repo,
-                  title: `${titlePrefix} publish appears hung`,
-                  body,
-                  labels: [label],
-                });
-                core.warning(`Opened ${train} hung publish alert #${created.data.number}.`);
+                core.info(`${train} hung-run alert already tracks ${latestObserved.id}.`);
               }
+              await github.rest.issues.update({
+                ...repo,
+                issue_number: canonical.number,
+                title,
+                body,
+              });
+              core.warning(`Updated ${train} hung publish alert #${canonical.number}.`);
+            } else {
+              core.info(`${train} hung-run alert already tracks ${latestObserved.id}.`);
+            }
+            for (const duplicate of alerts.slice(1)) {
+              await github.rest.issues.createComment({
+                ...repo,
+                issue_number: duplicate.number,
+                body: `Duplicate ${train} publish alert; consolidated into #${canonical.number}.`,
+              });
+              await github.rest.issues.update({
+                ...repo,
+                issue_number: duplicate.number,
+                state: 'closed',
+                state_reason: 'not_planned',
+              });
+              core.notice(
+                `Closed duplicate ${train} publish alert #${duplicate.number}.`,
+              );
             }
