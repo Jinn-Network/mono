@@ -35,12 +35,16 @@
   "trajectory": null,
   "artifacts": [],
   "payload": {
-    "golden": true
+    "prediction": {
+      "probability": "0.5",
+      "submittedAt": 1750000000,
+      "modelId": "golden-fixture"
+    }
   },
   "signature": {
     "algo": "secp256k1",
     "signer": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-    "hash": "0x9c83258ef48d545033de50f277847e7cc47980afa3c7e7108f3179e504f81b81",
-    "sig": "0xfab2696c626bf7ab63a792a34caf5e2d70b57aa2a60462234511f7cb53f26de40488c50cd4dee57b74bb21bf80d9232b0ebf18096a78328b79679e7a8e2c3bc900"
+    "hash": "0xe0687ef475e7a6b8382ff6007e1645bcc069b64756377cbe9be693f816b0f660",
+    "sig": "0x067d5e42866747c3acdb30f5db66550e5de996cea5988cb53034ba78ce6c2a685d04c7eb8f499cd48ad03ceb7cc1a6ab25a5088e3a0c536bffafceb4b9be77d400"
   }
 }
