@@ -48,6 +48,11 @@ function positiveInteger(value: unknown, name: string): number {
   throw new Error(`Invalid ${name}`);
 }
 
+function positiveJsonInteger(value: unknown, name: string): number {
+  if (typeof value !== 'number') throw new Error(`Invalid ${name}`);
+  return positiveInteger(value, name);
+}
+
 function uuid(value: unknown, name: string): string {
   if (typeof value !== 'string' || !UUID_PATTERN.test(value)) {
     throw new Error(`Invalid ${name}`);
@@ -69,6 +74,21 @@ function exactKeys(record: Record<string, unknown>, allowed: readonly string[]):
 }
 
 function validateBranchClaim(claim: BranchClaim): BranchClaim {
+  exactKeys(claim as unknown as Record<string, unknown>, [
+    'kind',
+    'protocolVersion',
+    'phase',
+    'issueNumber',
+    'prNumber',
+    'attempt',
+    'runner',
+    'login',
+    'expectedHead',
+    'targetBase',
+    'claimedAt',
+    'phaseComplete',
+  ]);
+  if (claim.kind !== 'branch-claim') throw new Error('Invalid branch claim kind');
   if (claim.protocolVersion !== 2) throw new Error('Unsupported protocol version');
   positiveInteger(claim.issueNumber, 'issue number');
   if (claim.prNumber !== undefined) positiveInteger(claim.prNumber, 'PR number');
@@ -215,7 +235,7 @@ function reviewRecordFromUnknown(value: unknown): ReviewClaimRecord {
   const common = {
     kind: 'review-claim' as const,
     protocolVersion: 2 as const,
-    prNumber: positiveInteger(record.prNumber, 'PR number'),
+    prNumber: positiveJsonInteger(record.prNumber, 'PR number'),
     generation: uuid(record.generation, 'generation'),
     attempt: uuid(record.attempt, 'attempt'),
     reviewer: safeText(record.reviewer, 'reviewer'),

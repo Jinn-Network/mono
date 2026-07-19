@@ -147,6 +147,34 @@ describe('deriveLifecycle', () => {
     expect(verdictProgress).toMatchObject({ phase: 'reviewing', stale: false });
   });
 
+  it('does not extend review liveness from an ordinary claim record', () => {
+    const item = implementation({
+      branchClaim: undefined,
+      isDraft: false,
+      headChangedAt: '2026-07-20T08:00:00.000Z',
+      reviewClaim: {
+        kind: 'review-claim',
+        protocolVersion: 2,
+        prNumber: 101,
+        generation: '22222222-2222-4222-8222-222222222222',
+        attempt: '33333333-3333-4333-8333-333333333333',
+        reviewer: 'reviewer',
+        head: HEAD_A,
+        state: 'active',
+        recordedAt: '2026-07-20T11:59:00.000Z',
+      },
+    });
+
+    const [view] = deriveLifecycle(snapshot(item), NOW, STALE_AFTER).items;
+
+    expect(view).toMatchObject({
+      phase: 'reviewing',
+      stale: true,
+      staleSince: '2026-07-20T10:00:00.000Z',
+      staleReason: 'review-progress-unchanged',
+    });
+  });
+
   it('never reaps a review that already has a matching terminal verdict', () => {
     const item = implementation({
       branchClaim: undefined,
@@ -236,6 +264,59 @@ describe('deriveLifecycle', () => {
 
     expect(view).toMatchObject({ phase: 'merged', stale: false });
   });
+
+  it('fails closed when claim metadata does not match its lifecycle item', () => {
+    const branchIssueMismatch = implementation({
+      branchClaim: {
+        ...implementation().branchClaim!,
+        issueNumber: 43,
+      },
+    });
+    const branchPrMismatch = implementation({
+      issueNumber: 43,
+      prNumber: 102,
+      branchClaim: {
+        ...implementation().branchClaim!,
+        issueNumber: 43,
+        prNumber: 999,
+      },
+    });
+    const reviewPrMismatch = implementation({
+      issueNumber: 44,
+      prNumber: 103,
+      branchClaim: undefined,
+      isDraft: false,
+      reviewClaim: {
+        kind: 'review-claim',
+        protocolVersion: 2,
+        prNumber: 999,
+        generation: '22222222-2222-4222-8222-222222222222',
+        attempt: '33333333-3333-4333-8333-333333333333',
+        reviewer: 'reviewer',
+        head: HEAD_A,
+        state: 'active',
+        recordedAt: '2026-07-20T11:00:00.000Z',
+      },
+    });
+
+    const view = deriveLifecycle(
+      snapshot(branchIssueMismatch, branchPrMismatch, reviewPrMismatch),
+      NOW,
+      STALE_AFTER,
+    );
+
+    expect(view.items).toEqual([
+      expect.objectContaining({ phase: 'human', underlyingPhase: 'awaiting-review', stale: false }),
+      expect.objectContaining({ phase: 'human', underlyingPhase: 'awaiting-review', stale: false }),
+      expect.objectContaining({ phase: 'human', underlyingPhase: 'awaiting-review', stale: false }),
+    ]);
+    expect(planCycle(view, {
+      implementationSlots: 3,
+      reviewSlots: 3,
+      mergePrepSlots: 3,
+      usableCredentialLanes: 3,
+    }, 'active')).toEqual([]);
+  });
 });
 
 describe('planCycle', () => {
@@ -278,6 +359,58 @@ describe('planCycle', () => {
     expect(planCycle(view, capacity, 'active')).toEqual([{
       kind: 'claim-implementation',
       issueNumber: 7,
+    }]);
+  });
+
+  it('claims only normally reviewable PRs or stale draft review-fix recoveries', () => {
+    const approvedWaitingForCi = implementation({
+      issueNumber: 9,
+      prNumber: 109,
+      branchClaim: undefined,
+      isDraft: false,
+      needsReview: false,
+      approved: true,
+      mergeState: 'blocked',
+    });
+    const unrelatedDraft = implementation({
+      issueNumber: 10,
+      prNumber: 110,
+      branchClaim: undefined,
+      isDraft: true,
+    });
+    const staleReviewFix = implementation({
+      issueNumber: 11,
+      prNumber: 111,
+      branchClaim: undefined,
+      isDraft: true,
+      reviewClaim: {
+        kind: 'review-claim',
+        protocolVersion: 2,
+        prNumber: 111,
+        generation: '22222222-2222-4222-8222-222222222222',
+        attempt: '33333333-3333-4333-8333-333333333333',
+        reviewer: 'reviewer',
+        head: HEAD_A,
+        state: 'stale',
+        recordedAt: '2026-07-20T08:00:00.000Z',
+      },
+    });
+    const view = deriveLifecycle(
+      snapshot(approvedWaitingForCi, unrelatedDraft, staleReviewFix),
+      NOW,
+      STALE_AFTER,
+    );
+
+    expect(planCycle(view, {
+      ...capacity,
+      reviewSlots: 3,
+      usableCredentialLanes: 3,
+    }, 'active')).toEqual([{
+      kind: 'claim-review',
+      issueNumber: 11,
+      prNumber: 111,
+      head: HEAD_A,
+      recoverFixes: true,
     }]);
   });
 });

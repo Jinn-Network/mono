@@ -48,8 +48,18 @@ describe('Git protocol integration', () => {
     await git(local, ['commit', '--allow-empty', '-m', 'claim two']);
     const claimTwo = oid(await git(local, ['rev-parse', 'HEAD']));
 
+    let atomicCompetitor: { readonly oid: string; readonly ref: string } | undefined;
+    let atomicPushAttempted = false;
     const runner: GitCommandRunner = async (command, args) => {
       expect(command).toBe('git');
+      if (args[0] === 'push' && args.includes('--atomic') && atomicCompetitor !== undefined) {
+        atomicPushAttempted = true;
+        await git(local, [
+          'push',
+          'origin',
+          `${atomicCompetitor.oid}:${atomicCompetitor.ref}`,
+        ]);
+      }
       return git(local, args);
     };
     const port = makeGitProtocolPort(runner);
@@ -80,7 +90,7 @@ describe('Git protocol integration', () => {
     await git(local, ['reset', '--hard', reviewBase]);
     await git(local, ['commit', '--allow-empty', '-m', 'competing review metadata']);
     const competingReview = oid(await git(local, ['rev-parse', 'HEAD']));
-    await git(local, ['push', 'origin', `${competingReview}:${reviewRef}`]);
+    atomicCompetitor = { oid: competingReview, ref: reviewRef };
 
     const rejected = await port.publishReviewFix({
       branch,
@@ -97,6 +107,7 @@ describe('Git protocol integration', () => {
       published: { branch: fixHead, review: pairedReview },
       observed: { branch: claimOne, review: competingReview },
     });
+    expect(atomicPushAttempted).toBe(true);
     expect(oid(await git(local, ['ls-remote', remote, 'refs/heads/autopilot/42']))).toBe(claimOne);
     expect(oid(await git(local, ['ls-remote', remote, reviewRef]))).toBe(competingReview);
   });
