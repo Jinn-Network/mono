@@ -1,0 +1,299 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
+const workflowsDir = path.resolve(scriptsDir, '..', 'workflows');
+const publish = readFileSync(path.join(workflowsDir, 'npm-publish.yml'), 'utf8');
+const monitorPath = path.join(workflowsDir, 'npm-publish-monitor.yml');
+const monitor = readFileSync(monitorPath, 'utf8');
+
+function githubScriptForStep(workflow, stepName) {
+  const lines = workflow.split('\n');
+  const stepAt = lines.findIndex((line) => line.includes(`name: ${stepName}`));
+  assert.notEqual(stepAt, -1, `step "${stepName}" must exist`);
+  const scriptAt = lines.findIndex(
+    (line, index) => index > stepAt && /^\s+script: \|$/.test(line),
+  );
+  assert.notEqual(scriptAt, -1, `step "${stepName}" must have a block script`);
+  const firstCodeAt = lines.findIndex(
+    (line, index) => index > scriptAt && line.trim().length > 0,
+  );
+  const indent = lines[firstCodeAt].match(/^\s*/)[0].length;
+  const code = [];
+  for (let index = firstCodeAt; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.trim() && line.match(/^\s*/)[0].length < indent) break;
+    code.push(line.slice(Math.min(indent, line.length)));
+  }
+  return code.join('\n');
+}
+
+function monitorHarness({ triggerRun, runs, jobsByRun, issues = [] }) {
+  const calls = [];
+  const actions = {
+    listWorkflowRuns: async (args) => runs.filter(
+      (run) => (!args.event || run.event === args.event) && (!args.status || run.status === args.status),
+    ),
+    listJobsForWorkflowRun: async (args) => jobsByRun[args.run_id] ?? [],
+    getWorkflow: async () => ({ data: { id: 7 } }),
+  };
+  const issuesApi = {
+    listForRepo: async (args) => issues.filter(
+      (issue) => issue.state === args.state && issue.labels.includes(args.labels),
+    ),
+    createLabel: async (args) => calls.push({ method: 'createLabel', args }),
+    createComment: async (args) => calls.push({ method: 'createComment', args }),
+    update: async (args) => {
+      calls.push({ method: 'update', args });
+      const issue = issues.find((candidate) => candidate.number === args.issue_number);
+      if (issue) Object.assign(issue, args);
+      return { data: issue };
+    },
+    create: async (args) => {
+      calls.push({ method: 'create', args });
+      const issue = {
+        number: 100 + calls.length,
+        title: args.title,
+        body: args.body,
+        state: 'open',
+        labels: args.labels,
+      };
+      issues.push(issue);
+      return { data: issue };
+    },
+  };
+  const github = {
+    rest: { actions, issues: issuesApi },
+    paginate: async (fn, args) => fn(args),
+  };
+  const context = {
+    payload: { workflow_run: triggerRun },
+    repo: { owner: 'Jinn-Network', repo: 'mono' },
+  };
+  const core = new Proxy({}, { get: () => () => {} });
+  return { github, context, core, calls, issues };
+}
+
+async function runCompletedMonitor(harness) {
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const script = githubScriptForStep(monitor, 'Reconcile train-specific alert');
+  await new AsyncFunction('github', 'context', 'core', script)(
+    harness.github,
+    harness.context,
+    harness.core,
+  );
+}
+
+async function runHungMonitor(harness) {
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const script = githubScriptForStep(monitor, 'Alert on overlong active runs');
+  await new AsyncFunction('github', 'context', 'core', 'process', script)(
+    harness.github,
+    harness.context,
+    harness.core,
+    { env: { HUNG_AFTER_MINUTES: '105' } },
+  );
+}
+
+test('publish checks out and verifies the exact build commit before packaging', () => {
+  assert.match(
+    publish,
+    /ref: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.release_sha \|\| github\.sha \}\}/,
+  );
+
+  const verifyAt = publish.indexOf('name: Verify exact publish commit');
+  const installAt = publish.indexOf('run: yarn install --immutable');
+  const packageAt = publish.indexOf('name: Publish canary');
+  assert.ok(verifyAt >= 0, 'exact-commit verification step must exist');
+  assert.ok(verifyAt < installAt, 'exact-commit verification must precede dependency installation');
+  assert.ok(verifyAt < packageAt, 'exact-commit verification must precede publishing');
+
+  const verification = publish.slice(verifyAt, installAt);
+  assert.match(verification, /git rev-parse HEAD/);
+  assert.match(verification, /JINN_BUILD_COMMIT/);
+  assert.match(verification, /exit 1/);
+});
+
+test('publish alerts are handled outside the publish job', () => {
+  assert.doesNotMatch(publish, /name: Alert on publish failure/);
+  assert.doesNotMatch(publish, /name: Close publish-failure alert on success/);
+
+  assert.match(monitor, /workflow_run:/);
+  assert.match(monitor, /workflows: \['npm Publish'\]/);
+  assert.match(monitor, /types: \[completed\]/);
+  assert.match(monitor, /schedule:/);
+  assert.match(monitor, /actions: read/);
+  assert.match(monitor, /issues: write/);
+  assert.doesNotMatch(monitor, /actions\/checkout/);
+  assert.doesNotMatch(monitor, /contents: write/);
+  assert.doesNotMatch(monitor, /id-token: write/);
+});
+
+test('monitor state is train-specific and rejects stale completion events', () => {
+  assert.match(monitor, /npm-publish-\$\{train\}-failure/);
+  assert.match(monitor, /latestObserved\.status !== 'completed'/);
+  assert.match(monitor, /const targetRun = latestObserved/);
+  assert.match(monitor, /job\.conclusion !== 'skipped'/);
+  assert.match(monitor, /cancel-in-progress: false/);
+  assert.match(monitor, /github\.event\.workflow_run\.event == 'push' && 'canary' \|\| 'stable'/);
+});
+
+test('monitor detects runs that outlive the bounded publish timeout', () => {
+  assert.match(monitor, /HUNG_AFTER_MINUTES: '105'/);
+  assert.match(
+    monitor,
+    /const statuses = \['in_progress', 'queued', 'waiting', 'requested', 'pending'\]/,
+  );
+  assert.match(monitor, /publish appears hung/i);
+});
+
+test('a canary recovery closes only the canary alert', async () => {
+  const run = {
+    id: 11,
+    run_number: 11,
+    workflow_id: 7,
+    event: 'push',
+    status: 'completed',
+    conclusion: 'success',
+    head_sha: 'a'.repeat(40),
+    html_url: 'https://example.test/runs/11',
+  };
+  const canary = {
+    number: 41,
+    title: '[npm-publish-canary-failure] failure',
+    body: 'old canary failure',
+    state: 'open',
+    labels: ['automated:npm-publish-canary-failure'],
+  };
+  const stable = {
+    number: 42,
+    title: '[npm-publish-stable-failure] failure',
+    body: 'stable failure',
+    state: 'open',
+    labels: ['automated:npm-publish-stable-failure'],
+  };
+  const harness = monitorHarness({
+    triggerRun: run,
+    runs: [run],
+    jobsByRun: { 11: [{ name: 'Publish package', conclusion: 'success' }] },
+    issues: [canary, stable],
+  });
+
+  await runCompletedMonitor(harness);
+
+  assert.equal(canary.state, 'closed');
+  assert.equal(stable.state, 'open');
+  assert.deepEqual(
+    harness.calls.filter((call) => call.method === 'update').map((call) => call.args.issue_number),
+    [41],
+  );
+});
+
+test('an older success cannot close a newer failed run on the same train', async () => {
+  const olderSuccess = {
+    id: 20,
+    run_number: 20,
+    workflow_id: 7,
+    event: 'push',
+    status: 'completed',
+    conclusion: 'success',
+    head_sha: 'b'.repeat(40),
+    html_url: 'https://example.test/runs/20',
+  };
+  const newerFailure = {
+    ...olderSuccess,
+    id: 21,
+    run_number: 21,
+    conclusion: 'failure',
+    head_sha: 'c'.repeat(40),
+    html_url: 'https://example.test/runs/21',
+  };
+  const alert = {
+    number: 43,
+    title: '[npm-publish-canary-failure] previous failure',
+    body: 'previous run',
+    state: 'open',
+    labels: ['automated:npm-publish-canary-failure'],
+  };
+  const harness = monitorHarness({
+    triggerRun: olderSuccess,
+    runs: [olderSuccess, newerFailure],
+    jobsByRun: {
+      20: [{ name: 'Publish package', conclusion: 'success' }],
+      21: [{ name: 'Publish package', conclusion: 'failure' }],
+    },
+    issues: [alert],
+  });
+
+  await runCompletedMonitor(harness);
+
+  assert.equal(alert.state, 'open');
+  assert.match(alert.body, /npm-publish-monitor-run:21/);
+  assert.ok(!harness.calls.some(
+    (call) => call.method === 'update' && call.args.state === 'closed',
+  ));
+});
+
+test('a skipped newer release wakes reconciliation of the previous real stable failure', async () => {
+  const failed = {
+    id: 30,
+    run_number: 30,
+    workflow_id: 7,
+    event: 'release',
+    status: 'completed',
+    conclusion: 'failure',
+    head_sha: 'd'.repeat(40),
+    html_url: 'https://example.test/runs/30',
+  };
+  const skipped = {
+    ...failed,
+    id: 31,
+    run_number: 31,
+    conclusion: 'success',
+    head_sha: 'e'.repeat(40),
+    html_url: 'https://example.test/runs/31',
+  };
+  const harness = monitorHarness({
+    triggerRun: skipped,
+    runs: [failed, skipped],
+    jobsByRun: {
+      30: [{ name: 'Publish package', conclusion: 'failure' }],
+      31: [{ name: 'Publish package', conclusion: 'skipped' }],
+    },
+  });
+
+  await runCompletedMonitor(harness);
+
+  const created = harness.calls.find((call) => call.method === 'create');
+  assert.equal(created.args.labels[0], 'automated:npm-publish-stable-failure');
+  assert.match(created.args.body, /npm-publish-monitor-run:30/);
+});
+
+test('the external watchdog alerts on a canary run beyond the publish timeout', async () => {
+  const hung = {
+    id: 40,
+    run_number: 40,
+    workflow_id: 7,
+    event: 'push',
+    status: 'in_progress',
+    conclusion: null,
+    created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+    head_sha: 'f'.repeat(40),
+    html_url: 'https://example.test/runs/40',
+  };
+  const harness = monitorHarness({
+    triggerRun: hung,
+    runs: [hung],
+    jobsByRun: {},
+  });
+
+  await runHungMonitor(harness);
+
+  const created = harness.calls.find((call) => call.method === 'create');
+  assert.equal(created.args.labels[0], 'automated:npm-publish-canary-failure');
+  assert.match(created.args.body, /appears hung/);
+  assert.match(created.args.body, /npm-publish-monitor-run:40/);
+});
