@@ -12,6 +12,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { RETRIEVAL_VISIBLE_TAG } from '@jinn-network/plugin';
 import type { SignedEnvelope } from '../../../src/types/envelope.js';
 import { parseTraceEnvelopeV0 } from '../src/envelope.js';
 import { createMemoryLedger } from '../src/ledger.js';
@@ -175,6 +176,21 @@ describe('planEpisodes()', () => {
 });
 
 describe('executeEpisodes()', () => {
+  it('preserves an explicit retrieval mark without admitting an unmarked episode (#1824)', async () => {
+    const source = mockEpisodeSource([
+      episode({ id: 'marked', tags: ['dashboard', RETRIEVAL_VISIBLE_TAG] }),
+      episode({ id: 'unmarked', tags: ['dashboard'] }),
+    ]);
+    const { deps, published } = mockPublishDeps();
+
+    const result = await executeEpisodes(await planEpisodes(source), source, deps);
+
+    expect(result.imported).toHaveLength(2);
+    const [marked, unmarked] = published.map((item) => parseTraceEnvelopeV0(item.payload));
+    expect(marked?.task.distributionTags).toContain(RETRIEVAL_VISIBLE_TAG);
+    expect(unmarked?.task.distributionTags).not.toContain(RETRIEVAL_VISIBLE_TAG);
+  });
+
   it('publishes only verdict=import rows with provenance imported + the step convention', async () => {
     const source = mockEpisodeSource([episode()]);
     const report = await planEpisodes(source);
