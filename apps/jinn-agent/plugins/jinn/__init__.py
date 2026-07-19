@@ -7,8 +7,10 @@ eligibility, contribution recording/veto, and summaries.  A bridge failure
 falls back to one local EpisodeV1 write; the retired raw pending/publication
 queue is never created or drained here.
 
-Sharing remains governed by the single consent bit, and ``/jinn`` exposes
-status, session, history, veto, distill, and corpus consumption.
+Outbound contribution is parked for Stage 2. Retained Stage 1 consent state
+is ignored; local capture, candidate recording, mining, and distillation stay
+live. ``/jinn`` exposes status, session, history, veto, distill, and corpus
+consumption.
 
 Upstream-merge procedure: see JINN.md at the repo root.
 """
@@ -62,6 +64,25 @@ _degraded: Optional[str] = None
 # once at session end.
 _session_state_lock = threading.Lock()
 _session_states: Dict[str, Dict[str, Any]] = {}
+
+
+def _park_contribution_publication() -> None:
+    """Quarantine retained Stage 1 authorization at the shared store boundary.
+
+    The direct marker is the fail-closed host fallback. The layer command also
+    rewrites already-previewed or queued records to ``disabled`` under the
+    store's publication lock. Both operations are idempotent; neither affects
+    local evidence, candidate recording, or mining.
+    """
+    session_bridge.set_publication_enabled(False)
+    try:
+        jinn_layer.run(
+            ["contribution", "disable", "--json"],
+            runner=_runner,
+            timeout_s=10,
+        )
+    except Exception:
+        pass
 
 
 def _reset_session_state() -> None:
@@ -216,6 +237,7 @@ def _record_activity(session_id: str, field: str, refs: list[str]) -> None:
 
 def _on_session_start(session_id: str = "", platform: str = "", **_: Any) -> None:
     global _degraded
+    _park_contribution_publication()
     cwd = _.get("cwd") or _.get("working_directory")
     _state_for(session_id, Path(cwd) if isinstance(cwd, str) and cwd else None)
     # Doctor fast path (mono #1817): re-check per session start — no
@@ -421,8 +443,9 @@ def _on_session_end(
     except Exception:
         pass
 
-    # Local capture is unconditional (mono#1714); only the share step is gated.
-    share_enabled = consent.share_enabled()
+    # Local capture is unconditional. Stage 2 keeps the contribution substrate
+    # local-only even when a Stage 1 consent file still says shareConsent=true.
+    publish_enabled = False
     # Record the skills loadout + token fallback (host forward, mono #1662) —
     # local writes, so unconditional per mono#1714, before the popping assembly.
     buf.record_environment(task_id, session_id, skills_loadout or [])
@@ -431,10 +454,10 @@ def _on_session_end(
         buf.record_tokens(task_id, session_id, input_tokens or 0, output_tokens or 0)
 
     # Pop the buffer ONCE for both shapes (assemble pops — see assemble_both).
-    # publish_consented mirrors the single share consent (mono#1714): the
-    # network-facing shape is only prepared when the operator has consented.
+    # Stage 2 never prepares a network-facing shape. The same episode remains
+    # the local learning source and contribution-candidate raw material.
     task, episode = buf.assemble_both(
-        task_id, session_id, completed, interrupted, publish_consented=share_enabled
+        task_id, session_id, completed, interrupted, publish_consented=publish_enabled
     )
 
     if episode is None:
@@ -474,7 +497,7 @@ def _on_session_end(
         test_runs=_episode_test_runs(episode),
         intermediate_failure_diffs=state.get("intermediateFailureDiffs") or [],
         skill_refs=skills_loadout or [],
-        publish_consent=share_enabled,
+        publish_consent=publish_enabled,
         created_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     )
     result = _delegate_session_end(
@@ -578,7 +601,6 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
         return session_view.render_current(
             activity=state.get("activity") or {},
             capture_active=buf.has_capture(task_id, session_id),
-            share_enabled=consent.share_enabled(),
         )
 
     if sub == "history":
@@ -713,6 +735,10 @@ def _tool_corpus_fetch(args: Dict[str, Any], **_kw: Any) -> str:
 # ── Registration ─────────────────────────────────────────────────────────────
 
 def register(ctx) -> None:
+    # Establish the fail-closed boundary as soon as an enabled plugin is
+    # registered, before the first session can create or inspect a candidate.
+    # The first session additionally asks the layer to rewrite queued records.
+    session_bridge.set_publication_enabled(False)
     ctx.register_tool(
         name="corpus_search",
         toolset="jinn",

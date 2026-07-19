@@ -83,7 +83,9 @@ def test_acceptance_drivers_enforce_stage2_parked_lifecycle():
 
     assert 'jinn._handle_jinn("preview")' not in python_driver
     assert "preview acknowledged" not in python_driver
-    assert 'expected_publication="ON"' not in python_driver
+    assert "expected_publication" not in python_driver
+    assert "jinn.consent.save_state(True, previewed=True)" in python_driver
+    assert '"publication ON" not in current' in python_driver
     assert "contribution: parked — nothing leaves this machine" in python_driver
     assert "publish: true" not in daemon_driver
     assert "publish: false" in daemon_driver

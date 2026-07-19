@@ -48,7 +48,7 @@ def _render(title: str, lines: Iterable[str]) -> str:
 
 
 def render_current(
-    *, activity: Dict[str, Any], capture_active: bool, share_enabled: bool
+    *, activity: Dict[str, Any], capture_active: bool
 ) -> str:
     """Render live state only; eligibility/contribution are end-of-session facts."""
     searched_terms = _terms(activity.get("searchedTerms"))
@@ -63,8 +63,7 @@ def render_current(
         "capture active" if capture_active else "capture waiting for ordinary work",
         "local learning reserves this capture at session end",
         "eligibility pending until session end",
-        "contribution pending until session end · publication "
-        + ("ON" if share_enabled else "OFF"),
+        "contribution parked · nothing leaves this machine",
     ])
 
 

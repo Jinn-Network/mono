@@ -545,7 +545,6 @@ def finish_session(
     repo: Path,
     message: str,
     expected_pickup: bool,
-    expected_publication: str,
     mutate: str | None = None,
 ) -> tuple[str, str | None, str, str]:
     """Drive one complete session lifecycle.
@@ -577,7 +576,8 @@ def finish_session(
 
     current = jinn._handle_jinn("session", session_id=session_id, task_id=task_id)
     assert "capture active" in current.lower(), current
-    assert f"publication {expected_publication}" in current, current
+    assert "contribution parked · nothing leaves this machine" in current, current
+    assert "publication ON" not in current, current
 
     if mutate:
         target = repo / "widget.py"
@@ -711,18 +711,18 @@ def main() -> None:
     clean_repo = make_repo(WORK / "oss-clean")
     try:
         # ── Scenario 1/2/5/7: target-task session, evidence provided, most
-        # relevant wins, attribution visible, sharing off stays local ──────
+        # relevant wins, attribution visible, retained Stage 1 sharing state
+        # is ignored and the Stage 2 contribution lane stays local ─────────
         reset_session_runtime(jinn)
-        jinn.consent.save_state(False, previewed=False)
+        jinn.consent.save_state(True, previewed=True)
         requests_before_target = list(fixture.requests)
-        share_off_summary, target_context, target_marker, target_mid_session = finish_session(
+        parked_summary, target_context, target_marker, target_mid_session = finish_session(
             jinn,
             session_id="stage1-target-task",
             task_id="task-target-task",
             repo=work_repo,
             message=TARGET_TASK_MESSAGE,
             expected_pickup=True,
-            expected_publication="OFF",
             mutate="SECRET_ACCEPTED_DIFF_OFF = True",
         )
         assert target_context is not None
@@ -746,9 +746,9 @@ def main() -> None:
         # mid-session text finish_session captured while the state was live
         # (session end pops it; a re-query here would read empty state).
         assert SOURCE_REF in target_mid_session, target_mid_session
-        assert "captured" in share_off_summary.lower()
-        assert "contribution recorded" in share_off_summary.lower(), share_off_summary
-        assert SOURCE_REF in share_off_summary, share_off_summary
+        assert "captured" in parked_summary.lower()
+        assert "contribution recorded" in parked_summary.lower(), parked_summary
+        assert SOURCE_REF in parked_summary, parked_summary
         assert list(CAPTURES_DIR.glob("*.json")), "local distillation tee missing"
         write_local_skill_provenance("stage1-target-task")
         # (7) Sharing off: only /graphql search traffic (never a publish-
@@ -759,8 +759,8 @@ def main() -> None:
         )
 
         # ── Scenario 3: honest no-result. Outbound contribution is parked
-        # through Stage 2, so this second eligible session also stays local.
-        jinn.consent.save_state(False, previewed=False)
+        # through Stage 2, so this second eligible session also stays local
+        # despite the retained shareConsent=true file above.
         requests_before_no_result = list(fixture.requests)
         no_result_summary, no_result_context, _no_result_marker, no_result_mid_session = finish_session(
             jinn,
@@ -769,7 +769,6 @@ def main() -> None:
             repo=work_repo,
             message=NO_RESULT_MESSAGE,
             expected_pickup=False,
-            expected_publication="OFF",
             mutate="SECRET_ACCEPTED_DIFF_ON = True",
         )
         assert no_result_context is None
@@ -814,7 +813,6 @@ def main() -> None:
             repo=clean_repo,
             message=UNAVAILABLE_MESSAGE,
             expected_pickup=False,
-            expected_publication="OFF",
         )
         fixture.unavailable = False
         assert unavailable_context is None
@@ -830,7 +828,6 @@ def main() -> None:
             repo=clean_repo,
             message=MISSING_LAYER_MESSAGE,
             expected_pickup=False,
-            expected_publication="OFF",
         )
         assert missing_context is None
         assert "captured locally" in missing_summary.lower()
@@ -855,7 +852,6 @@ def main() -> None:
             repo=clean_repo,
             message=INCOMPATIBLE_LAYER_MESSAGE,
             expected_pickup=False,
-            expected_publication="OFF",
         )
         assert incompatible_context is None
         assert "captured locally" in incompatible_summary.lower()
@@ -869,7 +865,7 @@ def main() -> None:
         # the boundary is the removed shared-skill command surface and its
         # copy, not the bare word "installed".
         for rendered in (
-            share_off_summary, no_result_summary, unavailable_summary,
+            parked_summary, no_result_summary, unavailable_summary,
             missing_summary, incompatible_summary,
             target_mid_session, no_result_mid_session,
         ):
