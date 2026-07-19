@@ -1,27 +1,28 @@
 #!/usr/bin/env python3
-"""Reversibly clean local jinn test-store pollution (Jinn-Network/mono#1841).
+"""Reversibly remove known Jinn test fixtures from the local stores.
 
-Before the store-path sandbox landed, suites exercising jinn session/layer
-persistence wrote into the real store dirs under ``~/.jinn-client/*``. This
-script backs those dirs up to a timestamped tarball, then (only with
-``--yes``) removes them so a subsequent run starts clean.
+Before the store-path sandbox landed, Jinn plugin tests wrote records with
+short, hard-coded session IDs into the operator store. This script targets
+only those known fixture IDs. It never removes a store directory or an
+unrecognized record.
 
-Dry-run by default: prints what it would back up and remove, changes nothing.
-Undo = untar the backup (see docs/runbooks/jinn-test-store-cleanup.md).
-
-Stdlib only — no network, no external deps.
+Dry-run by default. ``--yes`` writes a timestamped tarball containing the
+selected files (and the pre-edit contribution store), then removes only the
+selected fixture records.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
-import shutil
 import sys
 import tarfile
+import tempfile
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, NamedTuple
 
 # Make ``plugins.jinn`` importable — the script lives under
 # apps/jinn-agent/scripts/, so its parent is the apps/jinn-agent root that
@@ -30,6 +31,37 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from plugins.jinn.distill import captures_dir, episodes_dir  # noqa: E402
 from plugins.jinn.session_bridge import contribution_state_dir  # noqa: E402
+
+
+# These IDs are hard-coded by the Jinn plugin persistence tests that caused
+# the observed pollution. Real Hermes sessions use timestamp/random IDs.
+KNOWN_FIXTURE_SESSION_IDS = frozenset(
+    {"s1", "s2", "sA", "sA1", "sA2", "sB", "session-1"}
+)
+
+
+class UnsafeCleanupPath(RuntimeError):
+    """A cleanup path escaped the expected tree or traversed a symlink."""
+
+
+class CleanupDataError(RuntimeError):
+    """A shared store cannot be edited without risking unrelated records."""
+
+
+class StorePaths(NamedTuple):
+    home: Path
+    root: Path
+    captures: Path
+    episodes: Path
+    mineable_store: Path
+
+
+class CleanupPlan(NamedTuple):
+    paths: StorePaths
+    files: tuple[Path, ...]
+    mineable_record_ids: tuple[str, ...]
+    mineable_before: str | None
+    mineable_after: dict[str, Any] | None
 
 
 @contextmanager
@@ -44,18 +76,262 @@ def _env_unset(name: str):
 
 
 def _default_dir(resolver, env_var: str) -> Path:
-    """Resolve a store dir's real default by ignoring its env override."""
+    """Resolve a canonical default without honoring a test override."""
     with _env_unset(env_var):
-        return resolver().resolve()
+        return Path(resolver()).expanduser()
 
 
-# The three store dirs, derived from the canonical plugin resolvers (not
-# re-hardcoded) so this script can never drift from what the plugin writes.
-STORE_DIRS = (
-    _default_dir(captures_dir, "JINN_LAYER_CAPTURES_DIR"),
-    _default_dir(episodes_dir, "JINN_LAYER_EPISODES_DIR"),
-    _default_dir(contribution_state_dir, "JINN_MINEABLE_STATE_DIR"),
-)
+def _lexical(path: Path) -> Path:
+    """Return an absolute lexical path without following symlinks."""
+    return Path(os.path.abspath(os.fspath(path.expanduser())))
+
+
+def store_paths(home: Path | None = None) -> StorePaths:
+    """Return the canonical stores beneath ``~/.jinn-client``.
+
+    The production path uses the plugin's own resolvers so the cleanup cannot
+    silently drift from the writer. ``home`` exists for hermetic tests.
+    """
+    selected_home = _lexical(home if home is not None else Path.home())
+    root = selected_home / ".jinn-client"
+    if home is None:
+        captures = _default_dir(captures_dir, "JINN_LAYER_CAPTURES_DIR")
+        episodes = _default_dir(episodes_dir, "JINN_LAYER_EPISODES_DIR")
+        mineable = (
+            _default_dir(contribution_state_dir, "JINN_MINEABLE_STATE_DIR")
+            / "mineable-traces.json"
+        )
+    else:
+        captures = root / "harness-layer" / "captures"
+        episodes = root / "harness-layer" / "episodes"
+        mineable = root / "mineable" / "mineable-traces.json"
+    return StorePaths(
+        home=selected_home,
+        root=root,
+        captures=_lexical(captures),
+        episodes=_lexical(episodes),
+        mineable_store=_lexical(mineable),
+    )
+
+
+def _reject_symlink_components(path: Path) -> None:
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current /= part
+        if current.is_symlink():
+            raise UnsafeCleanupPath(f"refusing symlink path component: {current}")
+
+
+def _validate_paths(paths: StorePaths) -> None:
+    expected_root = _lexical(paths.home / ".jinn-client")
+    root = _lexical(paths.root)
+    if root != expected_root:
+        raise UnsafeCleanupPath(
+            f"cleanup root {root} is not the expected {expected_root}"
+        )
+    _reject_symlink_components(root)
+    for path in (paths.captures, paths.episodes, paths.mineable_store):
+        lexical = _lexical(path)
+        if lexical == root or root not in lexical.parents:
+            raise UnsafeCleanupPath(
+                f"cleanup path {lexical} is outside expected root {root}"
+            )
+        _reject_symlink_components(lexical)
+
+
+def _fixture_session_id(record: Any) -> str | None:
+    if not isinstance(record, dict):
+        return None
+    session = record.get("session")
+    if not isinstance(session, dict):
+        return None
+    session_id = session.get("sessionId")
+    if isinstance(session_id, str) and session_id in KNOWN_FIXTURE_SESSION_IDS:
+        return session_id
+    return None
+
+
+def _fixture_episode_ref(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    return any(
+        value == session_id or value.startswith(f"{session_id}-")
+        for session_id in KNOWN_FIXTURE_SESSION_IDS
+    )
+
+
+def _fixture_files(directory: Path) -> list[Path]:
+    if not directory.exists():
+        return []
+    if not directory.is_dir():
+        raise UnsafeCleanupPath(f"store path is not a directory: {directory}")
+
+    selected: list[Path] = []
+    for path in sorted(directory.iterdir()):
+        if path.is_symlink():
+            raise UnsafeCleanupPath(f"refusing symlink store entry: {path}")
+        if not path.is_file() or path.suffix != ".json":
+            continue
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if _fixture_session_id(record) is not None:
+            selected.append(path)
+    return selected
+
+
+def _mineable_edit(
+    path: Path,
+) -> tuple[tuple[str, ...], str | None, dict[str, Any] | None]:
+    if not path.exists():
+        return (), None, None
+    if path.is_symlink() or not path.is_file():
+        raise UnsafeCleanupPath(f"refusing non-regular contribution store: {path}")
+    try:
+        before = path.read_text(encoding="utf-8")
+        store = json.loads(before)
+    except (OSError, ValueError) as exc:
+        raise CleanupDataError(f"cannot safely parse contribution store {path}") from exc
+    if (
+        not isinstance(store, dict)
+        or store.get("schemaVersion") != "jinn.contribution-store.v2"
+        or not isinstance(store.get("records"), dict)
+    ):
+        raise CleanupDataError(
+            f"unsupported contribution store shape at {path}; left unchanged"
+        )
+
+    records = store["records"]
+    selected = tuple(
+        sorted(
+            record_id
+            for record_id, record in records.items()
+            if _fixture_episode_ref(record_id)
+            or (
+                isinstance(record, dict)
+                and _fixture_episode_ref(
+                    (record.get("candidate") or {}).get("sourceId")
+                    if isinstance(record.get("candidate"), dict)
+                    else None
+                )
+            )
+        )
+    )
+    if not selected:
+        return (), None, None
+    updated = dict(store)
+    updated["records"] = {
+        record_id: record
+        for record_id, record in records.items()
+        if record_id not in selected
+    }
+    return selected, before, updated
+
+
+def build_cleanup_plan(paths: StorePaths | None = None) -> CleanupPlan:
+    selected_paths = paths if paths is not None else store_paths()
+    _validate_paths(selected_paths)
+    files = tuple(
+        sorted(
+            _fixture_files(selected_paths.captures)
+            + _fixture_files(selected_paths.episodes)
+        )
+    )
+    record_ids, mineable_before, mineable_after = _mineable_edit(
+        selected_paths.mineable_store
+    )
+    return CleanupPlan(
+        paths=selected_paths,
+        files=files,
+        mineable_record_ids=record_ids,
+        mineable_before=mineable_before,
+        mineable_after=mineable_after,
+    )
+
+
+def _validate_selected_file(path: Path, paths: StorePaths) -> None:
+    lexical = _lexical(path)
+    root = _lexical(paths.root)
+    if root not in lexical.parents:
+        raise UnsafeCleanupPath(f"selected file escaped cleanup root: {lexical}")
+    _reject_symlink_components(lexical)
+    if path.is_symlink() or not path.is_file():
+        raise UnsafeCleanupPath(f"selected path is not a regular file: {path}")
+
+
+def _write_json_atomic(path: Path, value: dict[str, Any]) -> None:
+    serialized = json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        indent=2,
+        sort_keys=True,
+    ) + "\n"
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(serialized)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def apply_cleanup(plan: CleanupPlan, backup: Path) -> None:
+    """Back up and apply a previously inspected fixture-only plan."""
+    _validate_paths(plan.paths)
+    backup = _lexical(backup)
+    root = _lexical(plan.paths.root)
+    if root not in backup.parents:
+        raise UnsafeCleanupPath(f"backup path {backup} is outside {root}")
+    _reject_symlink_components(backup.parent)
+    if os.path.lexists(backup):
+        raise UnsafeCleanupPath(f"backup path already exists: {backup}")
+
+    sources = list(plan.files)
+    if plan.mineable_after is not None:
+        sources.append(plan.paths.mineable_store)
+    if not sources:
+        return
+    for source in sources:
+        _validate_selected_file(source, plan.paths)
+    if (
+        plan.mineable_before is not None
+        and plan.paths.mineable_store.read_text(encoding="utf-8")
+        != plan.mineable_before
+    ):
+        raise CleanupDataError(
+            "contribution store changed after inspection; rebuild the cleanup plan"
+        )
+
+    backup.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with tarfile.open(backup, "x:gz") as archive:
+        for source in sources:
+            archive.add(
+                source,
+                arcname=source.relative_to(plan.paths.home),
+                recursive=False,
+            )
+    os.chmod(backup, 0o600)
+
+    for path in plan.files:
+        _validate_selected_file(path, plan.paths)
+        path.unlink()
+    if plan.mineable_after is not None:
+        _validate_selected_file(plan.paths.mineable_store, plan.paths)
+        if (
+            plan.mineable_before is None
+            or plan.paths.mineable_store.read_text(encoding="utf-8")
+            != plan.mineable_before
+        ):
+            raise CleanupDataError(
+                "contribution store changed during cleanup; left it unchanged"
+            )
+        _write_json_atomic(plan.paths.mineable_store, plan.mineable_after)
 
 
 def main() -> int:
@@ -63,36 +339,43 @@ def main() -> int:
     parser.add_argument(
         "--yes",
         action="store_true",
-        help="actually back up and remove the store dirs (default: dry-run).",
+        help="back up and remove only recognized fixture records (default: dry-run)",
     )
     args = parser.parse_args()
 
-    present = [d for d in STORE_DIRS if d.exists()]
-    if not present:
-        print("No jinn store dirs present — nothing to clean.")
+    try:
+        plan = build_cleanup_plan()
+    except (CleanupDataError, UnsafeCleanupPath) as exc:
+        print(f"Refusing cleanup: {exc}", file=sys.stderr)
+        return 2
+
+    if not plan.files and not plan.mineable_record_ids:
+        print("No known Jinn test fixture records found — nothing to clean.")
         return 0
 
-    print("Jinn store dirs found:")
-    for d in present:
-        print(f"  {d}")
+    print("Known Jinn test fixture records found:")
+    for path in plan.files:
+        print(f"  file: {path}")
+    for record_id in plan.mineable_record_ids:
+        print(f"  contribution record: {record_id}")
 
     if not args.yes:
-        print("\nDry-run (no --yes): nothing changed. Re-run with --yes to")
-        print("back up to a timestamped tarball and remove these dirs.")
+        print("\nDry-run (no --yes): nothing changed.")
+        print("Re-run with --yes to back up and remove only the records above.")
         return 0
 
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    backup = Path.home() / ".jinn-client" / f".pollution-backup-{ts}.tgz"
-    with tarfile.open(backup, "w:gz") as tar:
-        for d in present:
-            tar.add(d, arcname=d.relative_to(Path.home()))
-    print(f"\nBacked up to {backup}")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    backup = plan.paths.root / f".pollution-backup-{timestamp}.tgz"
+    try:
+        apply_cleanup(plan, backup)
+    except (CleanupDataError, UnsafeCleanupPath, OSError, tarfile.TarError) as exc:
+        print(f"Cleanup failed safely: {exc}", file=sys.stderr)
+        return 2
 
-    for d in present:
-        shutil.rmtree(d)
-        print(f"Removed {d}")
-
-    print(f"\nUndo: tar -xzf {backup} -C {Path.home()}")
+    print(f"\nBacked up selected records to {backup}")
+    print(f"Removed {len(plan.files)} fixture file(s)")
+    print(f"Removed {len(plan.mineable_record_ids)} fixture contribution record(s)")
+    print(f"Undo immediately with: tar -xzf {backup} -C {plan.paths.home}")
     return 0
 
 
