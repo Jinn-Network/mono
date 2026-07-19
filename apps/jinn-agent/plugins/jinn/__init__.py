@@ -228,7 +228,7 @@ def _on_session_start(session_id: str = "", platform: str = "", **_: Any) -> Non
     # Doctor fast path (mono #1817): re-check per session start — no
     # process-lifetime memoization. Loud on failure, silent when healthy.
     # Checks run outside the lock (they spawn subprocesses; the layer probe
-    # alone is bounded at 120s) — the lock guards only the _degraded write,
+    # alone is bounded at 10s) — the lock guards only the _degraded write,
     # matching the /jinn doctor branch.
     checks = doctor.run_checks(full=False, runner=_runner)
     with _contract_lock:
