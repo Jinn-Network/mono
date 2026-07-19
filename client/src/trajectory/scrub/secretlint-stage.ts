@@ -230,16 +230,17 @@ const TOKEN_WRAPPING = /^([("'`[{,;:]*)([\s\S]*?)([)"'`\]},;:.]*)$/;
 export interface SecretlintStageOptions {
   /**
    * Gate for the pass-2 Shannon-entropy fallback (#1409). Default true (trace
-   * profile, unchanged). The seed-import profile sets false: SKILL.md bodies
-   * are public licence-checked prose where the probabilistic sweep demonstrably
-   * false-positives (env-var assignments with dated slugs, ≥20-char camelCase
-   * identifiers) — pass-1 deterministic rules still run unconditionally. With
-   * the fallback off, bare AWS key IDs (AKIA…), `AIza…` GCP API keys, JWTs,
-   * and generic high-entropy blobs pass this stage unredacted (pass-1 catches
-   * AWS secret-key assignments and GCP service-account JSON only). The seed
-   * profile covers the AWS/GCP key-ID shapes upstream in plain-patterns
-   * (#1415); the JWT / high-entropy residual is accepted for public,
-   * licence-checked seed content.
+   * profile, unchanged). The seed-import profile sets false for public,
+   * transformed, or otherwise human-curated evidence where the probabilistic
+   * sweep demonstrably false-positives (env-var assignments with dated slugs,
+   * ≥20-char camelCase identifiers) — pass-1 deterministic rules still run
+   * unconditionally. With the fallback off, bare AWS key IDs (AKIA…),
+   * `AIza…` GCP API keys, JWTs, and generic high-entropy blobs pass this stage
+   * unredacted (pass-1 catches AWS secret-key assignments and GCP
+   * service-account JSON only). The seed profile covers the AWS/GCP key-ID
+   * shapes upstream in plain-patterns (#1415). JWTs and other high-entropy
+   * residuals remain the local curator's responsibility; using this profile
+   * does not itself establish that an input is safe to publish.
    */
   entropyFallback?: boolean;
 }
