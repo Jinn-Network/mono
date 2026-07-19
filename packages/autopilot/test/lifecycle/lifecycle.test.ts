@@ -294,6 +294,82 @@ describe('deriveLifecycle', () => {
     });
   });
 
+  it('validates matching terminal verdict time before merge-ready planning', () => {
+    const reviewClaim = {
+      kind: 'review-claim' as const,
+      protocolVersion: 2 as const,
+      prNumber: 101,
+      generation: '22222222-2222-4222-8222-222222222222',
+      attempt: '33333333-3333-4333-8333-333333333333',
+      reviewer: 'reviewer',
+      head: HEAD_A,
+      state: 'terminal-approved' as const,
+      recordedAt: '2026-07-20T11:00:00.000Z',
+      verdict: {
+        marker: '44444444-4444-4444-8444-444444444444',
+        state: 'APPROVE' as const,
+      },
+    };
+    const mergeReady = implementation({
+      branchClaim: undefined,
+      isDraft: false,
+      needsReview: false,
+      approved: true,
+      mergeState: 'clean',
+      reviewClaim,
+    });
+    const view = deriveLifecycle(snapshot(
+      {
+        ...mergeReady,
+        terminalVerdict: {
+          head: HEAD_A,
+          state: 'APPROVE',
+          marker: '44444444-4444-4444-8444-444444444444',
+          recordedAt: '2026-07-20T12:00:00.001Z',
+        },
+      },
+      {
+        ...mergeReady,
+        issueNumber: 43,
+        prNumber: 102,
+        reviewClaim: { ...reviewClaim, prNumber: 102 },
+        terminalVerdict: {
+          head: HEAD_A,
+          state: 'APPROVE',
+          marker: '44444444-4444-4444-8444-444444444444',
+          recordedAt: '2026-07-20T11:30:00Z',
+        },
+      },
+    ), NOW, STALE_AFTER);
+
+    expect(view.items).toEqual([
+      expect.objectContaining({
+        phase: 'human',
+        underlyingPhase: 'merge-ready',
+        stale: false,
+        humanReason: expect.objectContaining({
+          phase: 'reviewing',
+          code: 'invalid-review-progress-time',
+        }),
+      }),
+      expect.objectContaining({
+        phase: 'human',
+        underlyingPhase: 'merge-ready',
+        stale: false,
+        humanReason: expect.objectContaining({
+          phase: 'reviewing',
+          code: 'invalid-review-progress-time',
+        }),
+      }),
+    ]);
+    expect(planCycle(view, {
+      implementationSlots: 0,
+      reviewSlots: 0,
+      mergePrepSlots: 0,
+      usableCredentialLanes: 0,
+    }, 'active')).toEqual([]);
+  });
+
   it('does not treat a contradictory verdict state as matching progress', () => {
     const item = implementation({
       branchClaim: undefined,
@@ -339,6 +415,24 @@ describe('deriveLifecycle', () => {
       stale: false,
     });
     expect(deriveRecovery(view!.item, NOW, STALE_AFTER)).toEqual([]);
+  });
+
+  it('preserves an ordinary structured Human reason in the derived view', () => {
+    const humanReason = {
+      phase: 'implementing' as const,
+      code: 'first-push' as const,
+      detail: 'Waiting for a human to authorize the first push.',
+    };
+    const [view] = deriveLifecycle(snapshot(implementation({
+      humanReason,
+    })), NOW, STALE_AFTER).items;
+
+    expect(view).toMatchObject({
+      phase: 'human',
+      underlyingPhase: 'implementing',
+      humanReason,
+      stale: false,
+    });
   });
 
   it('keeps authoritative merged state terminal even when Human projection lags', () => {
