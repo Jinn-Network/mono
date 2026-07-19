@@ -4,7 +4,7 @@
 
 **Goal:** Make the evidence-episode seed lane (`client/packages/harness-layer/src/seed-import/episode-execute.ts`) scrub at the seed profile (`buildSeedScrubPipeline()`) instead of the strict trace profile (`buildScrubPipeline()`), matching plan §4.4 / `spec/2026-07-02-jinn-harness-network.md` §7, so the checked-in `distractor-operator-claims.episode.json` fixture stops false-positive-blocking on the word "claims" and hex SHAs, while real secret patterns are still refused.
 
-**Architecture:** One-line pipeline swap in `episode-execute.ts` (the single `episodeScrubPipeline` variable already feeds both scrub sites: the pre-publish check over `episodePrivacyAttributes()` and the `capture()` call), a rewritten adjacent comment citing the correct rationale, a new fixture-set regression test that must fail before the fix and pass after, and a rework of the existing sensitive-canary tests in `seed-import-episodes.test.ts` so they exercise detectors the seed profile actually runs (deterministic key policy + plain-patterns + secretlint pass-1), per TDD ordering (regression test before the fix, `fix` shape SOP: `systematic-debugging` → `executing-plans` → `verification-before-completion` → `receiving-code-review`).
+**Architecture:** One-line pipeline swap in `episode-execute.ts` (the single `episodeScrubPipeline` variable already feeds both scrub sites: the pre-publish check over `episodePrivacyAttributes()` and the `capture()` call), a rewritten adjacent comment citing the correct rationale, a new fixture-set regression test that must fail before the fix and pass after, and a rework of the existing sensitive-canary tests in `seed-import-episodes.test.ts` so they exercise detectors the seed profile actually runs (deterministic key policy + plain-patterns + secretlint pass-1). The test and operator documentation also make the privacy trade-off explicit: every structured identifier or PII class detected only by the omitted 570+ pattern openredaction stage becomes curator-review residual, while listed medical, identity, financial, payment, and contact cases are representative rather than exhaustive. This follows TDD ordering (regression test before the fix, `fix` shape SOP: `systematic-debugging` → `executing-plans` → `verification-before-completion` → `receiving-code-review`).
 
 **Tech Stack:** TypeScript, Vitest, the existing `client/src/trajectory/scrub/*` pipeline stages.
 
@@ -229,7 +229,7 @@ git commit -m "fix(harness-layer): run the episode seed lane at the seed scrub p
 - Consumes: `episode()` factory (already defined in this file, `episode(overrides: Partial<SeedEpisode> = {})`); `planEpisodes`, `executeEpisodes`, `mockPublishDeps` (already imported/defined).
 - Produces: nothing consumed by later tasks — this is the last task.
 
-The seed profile (`buildSeedScrubPipeline()`, `client/src/trajectory/scrub/build.ts:82-88`) runs exactly three stages: `keyPolicyStage(policy)`, `plainPatternsStage(policy, { credentialIds: true })`, `secretlintStage(policy, { entropyFallback: false })`. It does **not** run `openredactionStage` or `secretlintStage`'s entropy fallback. The existing canaries that relied on those two stages need replacing with canaries the surviving three stages actually catch. Per the design note, the `ghp_...` token canary already survives (secretlint pass-1 GitHub-token shape) — leave it as-is. The accepted-residual class (JWTs, unprefixed high-entropy blobs) gets converted into an explicit "this is a known, documented trade-off" test rather than deleted silently, so a future reader sees the gap was chosen, not missed.
+The seed profile (`buildSeedScrubPipeline()`, `client/src/trajectory/scrub/build.ts:82-88`) runs exactly three stages: `keyPolicyStage(policy)`, `plainPatternsStage(policy, { credentialIds: true })`, `secretlintStage(policy, { entropyFallback: false })`. It does **not** run `openredactionStage` or secretlint's entropy fallback. The existing canaries that relied on those two stages need replacing with canaries the surviving three stages actually catch. Per the design note, the `ghp_...` token canary already survives (secretlint pass-1 GitHub-token shape) — leave it as-is. The accepted-residual test must state the full trade-off: every structured identifier or PII class detected only by openredaction's 570+ pattern surface is now curator-review residual. Payment/contact, government-identity, medical, and financial examples sample that surface; they are not an exhaustive allowlist. JWTs and unprefixed high-entropy blobs are separate residuals from the omitted entropy fallback. A future reader must see that these gaps were chosen, not missed.
 
 - [ ] **Step 1: Replace the first `it.each` block's canaries (openredaction-only detections)**
 
@@ -355,19 +355,31 @@ Add a new test immediately after the two reworked `it.each` blocks, inside
 the same `describe('executeEpisodes()', ...)` block:
 
 ```ts
-  it('accepts a payment-card-shaped string under the seed profile (documented residual, #1409/#1784)', async () => {
+  it.each([
+    ['payment-card-shaped string', 'Customer card: 4111 1111 1111 1111.'],
+    ['phone-shaped string', 'Call the customer at +1 (415) 555-2671.'],
+    ['SSN-shaped string', 'Reporter SSN on file: 123-45-6789.'],
+    [
+      'JWT-shaped string',
+      'Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.c2lnbmF0dXJl',
+    ],
+    ['unprefixed high-entropy blob', 'Credential: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'],
+    ['medical-record identifier', 'Medical record MRN: MED123456.'],
+    ['government-identity identifier', 'Passport: A1234567.'],
+    ['financial-account identifier', 'Bank account: 1234 5678.'],
+  ])('accepts a %s under the seed profile (documented residual, #1409/#1784)', async (_label, residualText) => {
     // The seed profile deliberately does not run openredaction or the
     // entropy fallback (build.ts's buildSeedScrubPipeline doc comment,
     // #1409): seeds are public, licence-checked prose, and those
     // probabilistic stages false-positive on ordinary words and hex-looking
-    // ids in that content (#1784). A structured-PII shape like a payment
-    // card number is accepted residual risk for this lane — the trace
-    // profile (buildScrubPipeline, used for operator capture) still catches
-    // it. This test pins that trade-off as intentional, not a gap that was
-    // missed.
+    // ids in that content (#1784). Every structured identifier or PII class
+    // detected only by openredaction is therefore residual risk — not just
+    // the representative payment, contact, government identity, medical,
+    // and financial cases sampled here. Seed curators must catch them by
+    // review. This test pins the trade-off, not an exhaustive allowlist.
     const source = mockEpisodeSource([
       episode({
-        steps: [{ label: 'note', title: 'residual fixture', text: 'Customer card: 4111 1111 1111 1111.' }],
+        steps: [{ label: 'note', title: 'residual fixture', text: residualText }],
       }),
     ]);
     const { deps, published } = mockPublishDeps();
@@ -443,13 +455,13 @@ Expected: zero errors.
    secret patterns retained)" — satisfied by Task 2 (pipeline swap) plus
    Task 3's canary tests proving the surviving deterministic stages (key
    policy, plain-patterns, secretlint pass-1) still refuse-on-detection.
-2. "`distractor-operator-claims` publishes cleanly (live-corpus step is a
-   runbook re-run, not code)" — satisfied by Task 1's regression test, which
-   proves `executeEpisodes()` now imports the fixture with zero errors. The
-   actual live-corpus publish against testnet is out of scope for this code
-   change; it is the operator-run step documented in
-   `docs/runbooks/stage1-evidence-seeding.md` and happens after this fix
-   merges — note this explicitly when closing out the issue.
+2. "`distractor-operator-claims` publishes cleanly; live-corpus D1 present" —
+   **not satisfied by this PR's mocked tests**. Task 1 proves only that
+   `executeEpisodes()` accepts the fixture and constructs a publication with
+   test doubles. The real testnet publish and `corpus search "claims"`
+   verification remain an explicit post-merge operational gate in
+   `docs/runbooks/stage1-evidence-seeding.md`. Keep #1784 open until an
+   operator records that evidence.
 3. "A regression test pins that the fixture set passes the lane's scrub" —
    satisfied by Task 1's test, which loads all three checked-in fixtures via
    `createLocalEpisodeSeedSource` and drives them through the real
@@ -465,17 +477,31 @@ profile (e.g. a doc comment elsewhere, or `docs/runbooks/stage1-evidence-seeding
 flag it for a follow-up — do not expand this fix's scope to rewrite
 unrelated docs unless the plan's acceptance criteria require it.
 
-No commit in this task — it is verification-only, confirming the commits
-already made in Tasks 1-3 collectively satisfy the issue.
+No commit in this task — it is verification-only, confirming the code-side
+criteria while recording that the live-corpus criterion remains open.
+
+### Post-merge operational acceptance gate (intentionally not run by this PR)
+
+- [ ] Re-run `seed plan` and `seed execute` for the checked-in episode
+  fixtures with real configured testnet services and operator identity.
+- [ ] Run `yarn jinn-layer corpus search "claims" --limit 5` and confirm
+  `distractor-operator-claims` is present.
+- [ ] Fetch the returned ref and record its imported provenance,
+  seed-profile scrub manifest, and anchor evidence on #1784.
+
+No mocked `publishArtifact`/`publishEnvelope` call satisfies these checks,
+and this implementation session must not perform the outbound publication.
 
 ---
 
 ## Self-Review Notes (for the plan author, not a task)
 
-- **Spec coverage:** All three acceptance criteria map to tasks (AC1 → Task
-  2, AC2 → Task 1 + Task 4 Step 3, AC3 → Task 1). The design note's two test
-  asks (fixture-set regression test; canary rework/accepted-residual test)
-  map to Task 1 and Task 3 respectively.
+- **Spec coverage:** All three acceptance criteria map to work (AC1 → Task
+  2, AC2 → Task 1's local prerequisite plus the post-merge operational gate,
+  AC3 → Task 1). The design note's two test asks (fixture-set regression
+  test; canary rework/accepted-residual test) map to Task 1 and Task 3
+  respectively. AC2 remains intentionally open until the testnet evidence
+  exists.
 - **Placeholder scan:** no TBD/TODO; every step shows the actual diff or
   command.
 - **Type consistency:** `EpisodeImportResult`, `executeEpisodes()`'s
