@@ -52,6 +52,7 @@ export type {
 export { PickupConfigSchema, DEFAULT_PICKUP_CONFIG, parsePickupConfig, TIER_ORDER } from './schemas/pickup-config.js';
 export type { PickupConfig, Tier } from './schemas/pickup-config.js';
 export {
+  deriveRepositorySearchTerms,
   deriveSearchTerms,
   classifyPayload,
   dedupeKnowledgeHits,
@@ -73,6 +74,7 @@ export type {
   KnowledgePacketExcerpt,
   KnowledgePacketBudget,
 } from './schemas/knowledge-packet.js';
+export { RETRIEVAL_VISIBLE_TAG, hasRetrievalMark } from './visibility.js';
 export { deriveEligibility } from './eligibility.js';
 export type { EligibilityInputs } from './eligibility.js';
 export { foldHistory, foldExplain } from './history.js';

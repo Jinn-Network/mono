@@ -1,9 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 import { EventEmitter } from 'node:events';
 import {
   runStageHeadless,
   type StageSpawnFn,
 } from '../../src/dispatcher/run-stage.js';
+import { HERMES_STATELESS_LAUNCHER } from '../../src/dispatcher/hermes-runtime.js';
 
 // ---------------------------------------------------------------------------
 // Fake stage-spawn. Mirrors the fake-SpawnFn style in dispatch.test.ts, but
@@ -76,6 +77,33 @@ const BASE_OPTS = {
   worktreePath: '/tmp/jinn-mono_worktrees/657',
 };
 
+const HERMES_ENV_KEYS = [
+  'JINN_AUTOPILOT_RUNTIME',
+  'JINN_DISPATCHER_HERMES_PYTHON',
+  'JINN_DISPATCHER_HERMES_MODEL',
+  'JINN_DISPATCHER_HERMES_PROVIDER',
+] as const;
+
+const originalHermesEnv = new Map(
+  HERMES_ENV_KEYS.map((key) => [key, process.env[key]]),
+);
+
+function clearHermesEnv(): void {
+  for (const key of HERMES_ENV_KEYS) delete process.env[key];
+}
+
+function restoreHermesEnv(): void {
+  for (const [key, value] of originalHermesEnv) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+}
+
+beforeEach(() => {
+  delete process.env.JINN_AUTOPILOT_RUNTIME;
+});
+afterEach(restoreHermesEnv);
+
 describe('runStageHeadless', () => {
   it('(a) spawns a ROOT `claude -p` session, not an Agent-tool dispatch', async () => {
     const { spawn, calls } = makeSpawn('close-0', 'ok');
@@ -142,6 +170,101 @@ describe('runStageHeadless', () => {
     await runStageHeadless(BASE_OPTS, spawn);
 
     expect(calls[0].args).not.toContain('--model');
+  });
+
+  it('spawns a fresh stateless Hermes root with the subscription billing guard', async () => {
+    process.env.JINN_DISPATCHER_HERMES_PYTHON = '/wrong/python';
+    process.env.JINN_DISPATCHER_HERMES_MODEL = 'wrong-model';
+    process.env.JINN_DISPATCHER_HERMES_PROVIDER = 'wrong-provider';
+    process.env.JINN_AUTOPILOT_RUNTIME = 'hermes';
+    const { spawn, calls } = makeSpawn('close-0', 'ok');
+
+    await runStageHeadless({
+      ...BASE_OPTS,
+      hermesPythonPath: '/opt/hermes/python',
+      model: 'gpt-5.6-sol',
+      provider: 'openai-codex',
+    }, spawn);
+
+    expect(calls[0].cmd).toBe('/opt/hermes/python');
+    expect(calls[0].args[0]).toBe(HERMES_STATELESS_LAUNCHER);
+    expect(calls[0].args).toContain('chat');
+    expect(calls[0].args).toContain('-q');
+    expect(calls[0].args[calls[0].args.indexOf('--model') + 1])
+      .toBe('gpt-5.6-sol');
+    expect(calls[0].args[calls[0].args.indexOf('--provider') + 1])
+      .toBe('openai-codex');
+  });
+
+  it('resolves Hermes Python, model, and provider from named environment variables', async () => {
+    process.env.JINN_DISPATCHER_HERMES_PYTHON = '/env/hermes/python';
+    process.env.JINN_DISPATCHER_HERMES_MODEL = 'gpt-5.6-sol';
+    process.env.JINN_DISPATCHER_HERMES_PROVIDER = 'openai-codex';
+    process.env.JINN_AUTOPILOT_RUNTIME = 'hermes';
+    const { spawn, calls } = makeSpawn('close-0', 'ok');
+
+    await runStageHeadless(BASE_OPTS, spawn);
+
+    expect(calls[0].cmd).toBe('/env/hermes/python');
+    expect(calls[0].args[calls[0].args.indexOf('--model') + 1])
+      .toBe('gpt-5.6-sol');
+    expect(calls[0].args[calls[0].args.indexOf('--provider') + 1])
+      .toBe('openai-codex');
+  });
+
+  it('revalidates Hermes billing before an inherited or explicit stage spawn', () => {
+    process.env.JINN_AUTOPILOT_RUNTIME = 'hermes';
+    const { spawn, calls } = makeSpawn('close-0', 'ok');
+
+    expect(() => runStageHeadless({
+      ...BASE_OPTS,
+      hermesPythonPath: '/opt/hermes/python',
+      model: 'openai/gpt-5.6-sol',
+      provider: 'openai-codex',
+    }, spawn)).toThrow(/bare model id/i);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('reframes the root-stage headless block for Hermes', async () => {
+    process.env.JINN_AUTOPILOT_RUNTIME = 'hermes';
+    const { spawn, calls } = makeSpawn('close-0', 'ok');
+
+    await runStageHeadless({
+      ...BASE_OPTS,
+      hermesPythonPath: '/opt/hermes/python',
+      model: 'gpt-5.6-sol',
+      provider: 'openai-codex',
+    }, spawn);
+
+    const qIdx = calls[0].args.indexOf('-q');
+    const prompt = calls[0].args[qIdx + 1];
+    expect(prompt).toContain('hermes chat -q');
+    expect(prompt).not.toContain('`claude -p` / `--print`');
+  });
+
+  it.each([
+    ['JINN_DISPATCHER_HERMES_PYTHON', { model: 'gpt-5.6-sol', provider: 'openai-codex' }],
+    ['JINN_DISPATCHER_HERMES_MODEL', { hermesPythonPath: '/opt/hermes/python', provider: 'openai-codex' }],
+    ['JINN_DISPATCHER_HERMES_PROVIDER', { hermesPythonPath: '/opt/hermes/python', model: 'gpt-5.6-sol' }],
+  ] as const)('fails loudly when %s is missing', (missingName, supplied) => {
+    clearHermesEnv();
+    process.env.JINN_AUTOPILOT_RUNTIME = 'hermes';
+    const { spawn, calls } = makeSpawn('close-0', 'ok');
+
+    expect(() => runStageHeadless({
+      ...BASE_OPTS,
+      ...supplied,
+    }, spawn)).toThrow(missingName);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('fails before spawn when the inherited global runtime is invalid', () => {
+    process.env.JINN_AUTOPILOT_RUNTIME = 'codex';
+    const { spawn, calls } = makeSpawn('close-0', 'ok');
+
+    expect(() => runStageHeadless(BASE_OPTS, spawn))
+      .toThrow(/JINN_AUTOPILOT_RUNTIME.*claude.*hermes/i);
+    expect(calls).toHaveLength(0);
   });
 
   it('(e) resolves { exitCode:0, stdout, timedOut:false } on clean close', async () => {

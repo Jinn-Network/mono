@@ -62,22 +62,28 @@ function assembleScrubStages(policy: KeyPolicy, piiDetector?: PiiDetector) {
 }
 
 /**
- * Seed-profile scrub pipeline (#1409). Seeds are public, licence-checked
- * SKILL.md content — not operator trace data — so the probabilistic stages
- * (openredaction, secretlint's pass-2 entropy fallback, ML PII) that exist to
- * catch unknown-shape PII/secrets in private traces are dropped: on prose they
- * false-positive (trigger words, dated env-var slugs, long camelCase
- * identifiers) and deface the corpus. The deterministic detectors stay:
+ * Seed-profile scrub pipeline (#1409). Seeds are public, transformed or
+ * otherwise human-curated content — not operator trace data — so the
+ * probabilistic stages (openredaction, secretlint's pass-2 entropy fallback,
+ * ML PII) that exist to catch unknown-shape PII/secrets in private traces are
+ * dropped: on prose they false-positive (trigger words, dated env-var slugs,
+ * long camelCase identifiers) and deface the corpus. The deterministic
+ * detectors stay:
  * structural key policy, plain-patterns (emails, home paths, and — seed-only,
  * #1415 — bare AWS access-key IDs and GCP `AIza…` API keys, deterministic
  * prefix shapes secretlint pass-1 does not cover), and secretlint's pass-1
  * preset rules (AWS secret-key assignments, GitHub / Slack / npm token
  * shapes, GCP service-account JSON). Accepted residual: JWTs and unprefixed
- * high-entropy blobs pass unredacted — acceptable for public, licence-checked
- * seed content; the trace profile still catches them via the entropy fallback.
- * The reduced stage list is reported via the pipeline's `components` surface
- * (what the signed provenance manifest is specified to record — see
- * pipeline.ts), so the profile is inspectable per pipeline.
+ * high-entropy blobs (trace profile catches them via the entropy fallback),
+ * plus every structured identifier or PII class detected only by the omitted
+ * openredaction stage, pass unredacted. The latter is a 570+ pattern surface;
+ * payment cards, phone numbers, SSNs, medical or health-plan identifiers,
+ * government identity documents, and financial account references are
+ * examples, not an exhaustive allowlist. This is acceptable only for public
+ * seed material that a curator has transformed and reviewed for those classes.
+ * The reduced stage list is inspectable locally through the pipeline's
+ * `components` surface. `TraceEnvelopeV0` does not publish that list, so a
+ * fetched envelope cannot by itself prove which scrub profile ran.
  */
 export function buildSeedScrubPipeline(policy: KeyPolicy = DEFAULT_KEY_POLICY): ScrubPipeline {
   return new ScrubPipeline([

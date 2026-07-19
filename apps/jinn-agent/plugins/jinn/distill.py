@@ -559,13 +559,13 @@ def payoff_lines(snapshot: Dict[str, int]) -> List[str]:
 #
 # All handlers return stateless strings (input() would deadlock the TUI; the
 # two-step pattern from /jinn consent covers anything that needs confirming).
-# First-run detection is facts-over-flags (onboarding.py precedent): the FACT
+# First-run detection is facts-over-flags: the FACT
 # is `mode == "unset"` from the layer's status read; the only stored flag is
 # that the splash was shown.
 
 UPDATE_LAYER_LINE = (
     "The Jinn layer here doesn't know distillation yet — update it:\n"
-    "  npm install -g @jinn-network/client@canary"
+    "  jinn-agent plugins update jinn"
 )
 
 

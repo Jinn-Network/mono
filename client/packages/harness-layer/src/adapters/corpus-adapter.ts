@@ -10,7 +10,7 @@
  */
 import { createHash } from 'node:crypto';
 import type { CorpusPort, CorpusRecord, KnowledgeHit, PortResult } from '@jinn-network/plugin';
-import { degraded, ok } from '@jinn-network/plugin';
+import { degraded, ok, hasRetrievalMark, RETRIEVAL_VISIBLE_TAG } from '@jinn-network/plugin';
 import {
   createHarnessLayer,
   type CorpusRecord as WireCorpusRecord,
@@ -39,14 +39,21 @@ function isLayerDeps(deps: CorpusAdapterDeps | HarnessLayerConfig): deps is Corp
  */
 function toKnowledgeHit(hit: CorpusSearchHit): KnowledgeHit {
   const origin = hit.operator.agentId || hit.ref;
+  const tags = hit.tags ?? [];
+  // #1824: compute the ranking-visible fact from the wire tags, then strip
+  // the mark tag so it never enters the scoring haystack (haystackFor scores
+  // tags — an unstripped mark would inflate scores via substring matches) or
+  // the rendered packet.
+  const retrievalVisible = hasRetrievalMark(tags);
   return {
     ref: hit.ref,
     kind: hit.kind === 'skill' ? 'skill' : 'trace',
     ...(hit.title ? { title: hit.title } : {}),
     ...(hit.summary ? { snippet: hit.summary } : {}),
-    tags: hit.tags ?? [],
+    tags: tags.filter((tag) => tag !== RETRIEVAL_VISIBLE_TAG),
     ...(origin ? { origin } : {}),
     publishedAt: hit.publishedAt,
+    retrievalVisible,
   };
 }
 
@@ -129,13 +136,22 @@ function decodeRecord(record: WireCorpusRecord): CorpusRecord | null {
     isSkillPayload = false;
   }
 
+  // #1824: computed from the envelope's own distributionTags — content is
+  // the truth, the search hit's retrievalVisible is only a hint. Always a
+  // defined boolean here, unlike the optional isSkillPayload/synthesis.
+  const retrievalVisible = hasRetrievalMark(envelope.task.distributionTags);
+
   return {
     ref: record.ref,
     task: { summary: envelope.task.summary },
     outcome: { status: envelope.outcome.status, verifiabilityTier: envelope.outcome.verifiabilityTier },
     ...(synthesis ? { synthesis } : {}),
     steps: envelope.steps.map((step) => ({ name: step.name, attributes: step.attributes })),
+    // Deliberately un-stripped (unlike the search-hit path): CorpusRecord.tags
+    // is provenance-adjacent display data on the fetched packet, never fed to
+    // the scoring haystack — hiding the mark here would hide provenance.
     tags: envelope.task.distributionTags,
+    retrievalVisible,
     provenance: envelope.provenance,
     origin,
     capturedAt: envelope.session.capturedAt,

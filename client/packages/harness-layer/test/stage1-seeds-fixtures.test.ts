@@ -17,6 +17,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { RETRIEVAL_VISIBLE_TAG } from '@jinn-network/plugin';
 import { SeedEpisodeSchema } from '../src/seed-import/episode-fetch.js';
 import { SeedSkillSchema } from '../src/seed-import/fetch.js';
 import { hashSeedContent } from '../src/seed-import/state.js';
@@ -222,6 +223,15 @@ describe('stage1-seeds fixture set (issue #1771)', () => {
   describe('source episode (source-dashboard-flake.episode.json)', () => {
     const source = () => SeedEpisodeSchema.parse(parseJson('source-dashboard-flake.episode.json'));
 
+    it('is explicitly hand-marked for retrieval while every distractor remains substrate-only (#1824)', () => {
+      expect(source().tags).toContain(RETRIEVAL_VISIBLE_TAG);
+
+      for (const file of EPISODE_FILES.filter((file) => file !== 'source-dashboard-flake.episode.json')) {
+        const distractor = SeedEpisodeSchema.parse(parseJson(file));
+        expect(distractor.tags, file).not.toContain(RETRIEVAL_VISIBLE_TAG);
+      }
+    });
+
     it('has at least one failure step and its fix (issue #1771 AC)', () => {
       const labels = source().steps.map((s) => s.label);
       expect(labels).toContain('failure');
@@ -236,7 +246,15 @@ describe('stage1-seeds fixture set (issue #1771)', () => {
     });
 
     it('carries the exact tag set named in the issue', () => {
-      expect(source().tags).toEqual(['mono', 'dashboard', 'vitest', 'version-status', 'async', 'flake']);
+      expect(source().tags).toEqual([
+        'mono',
+        'dashboard',
+        'vitest',
+        'version-status',
+        'async',
+        'flake',
+        RETRIEVAL_VISIBLE_TAG,
+      ]);
     });
 
     it('outcome is completed / tests-passed', () => {

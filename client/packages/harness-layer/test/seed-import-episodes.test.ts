@@ -11,6 +11,8 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { RETRIEVAL_VISIBLE_TAG } from '@jinn-network/plugin';
 import type { SignedEnvelope } from '../../../src/types/envelope.js';
 import { parseTraceEnvelopeV0 } from '../src/envelope.js';
 import { createMemoryLedger } from '../src/ledger.js';
@@ -33,6 +35,10 @@ const TEST_ADDRESS = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266' as const;
 const TEST_PRIVATE_KEY =
   '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as const;
 const TEST_SAFE = '0x1111111111111111111111111111111111111111' as const;
+
+const STAGE1_FIXTURES_DIR = fileURLToPath(
+  new URL('../fixtures/stage1-seeds', import.meta.url),
+);
 
 function episode(overrides: Partial<SeedEpisode> = {}): SeedEpisode {
   return {
@@ -170,6 +176,21 @@ describe('planEpisodes()', () => {
 });
 
 describe('executeEpisodes()', () => {
+  it('preserves an explicit retrieval mark without admitting an unmarked episode (#1824)', async () => {
+    const source = mockEpisodeSource([
+      episode({ id: 'marked', tags: ['dashboard', RETRIEVAL_VISIBLE_TAG] }),
+      episode({ id: 'unmarked', tags: ['dashboard'] }),
+    ]);
+    const { deps, published } = mockPublishDeps();
+
+    const result = await executeEpisodes(await planEpisodes(source), source, deps);
+
+    expect(result.imported).toHaveLength(2);
+    const [marked, unmarked] = published.map((item) => parseTraceEnvelopeV0(item.payload));
+    expect(marked?.task.distributionTags).toContain(RETRIEVAL_VISIBLE_TAG);
+    expect(unmarked?.task.distributionTags).not.toContain(RETRIEVAL_VISIBLE_TAG);
+  });
+
   it('publishes only verdict=import rows with provenance imported + the step convention', async () => {
     const source = mockEpisodeSource([episode()]);
     const report = await planEpisodes(source);
@@ -273,13 +294,9 @@ describe('executeEpisodes()', () => {
   });
 
   it.each([
-    ['payment card', 'Customer card: 4111 1111 1111 1111.'],
-    ['phone-like PII', 'Call the customer at +1 (415) 555-2671.'],
-    [
-      'JWT',
-      'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IlN5bnRoZXRpYyJ9.c2lnbmF0dXJlU3ludGhldGljVmFsdWU',
-    ],
-    ['high-entropy credential', 'Credential: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'],
+    ['email address', 'Contact the reporter at jane.doe@example.com for repro steps.'],
+    ['home-dir path', 'Logs were written to /Users/jdoe/project/output.log.'],
+    ['AWS access-key id', 'Found a stray credential: AKIAIOSFODNN7EXAMPLE in the diff.'],
   ])('rejects %s before any publish call', async (_label, sensitiveText) => {
     const source = mockEpisodeSource([
       episode({
@@ -302,7 +319,7 @@ describe('executeEpisodes()', () => {
 
   it.each([
     ['id/sessionId', { id: 'ghp_016C7e0aBcDeFgHiJkLmNoPqRsTuVwXyZ012' }],
-    ['tag/distributionTag', { tags: ['acme', '4111 1111 1111 1111'] }],
+    ['tag/distributionTag', { tags: ['acme', 'contact-jane.doe@example.com'] }],
   ])('rejects sensitive %s before any publish call', async (_label, overrides) => {
     const source = mockEpisodeSource([episode(overrides)]);
     const { deps, published } = mockPublishDeps();
@@ -316,6 +333,45 @@ describe('executeEpisodes()', () => {
         error: expect.stringMatching(/sensitive.*refusing to publish/i),
       }),
     ]);
+  });
+
+  it.each([
+    ['payment-card-shaped string', 'Customer card: 4111 1111 1111 1111.'],
+    ['phone-shaped string', 'Call the customer at +1 (415) 555-2671.'],
+    [
+      'JWT-shaped string',
+      'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IlN5bnRoZXRpYyJ9.c2lnbmF0dXJlU3ludGhldGljVmFsdWU',
+    ],
+    ['unprefixed high-entropy blob', 'Credential: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'],
+    ['SSN-shaped string', 'Reporter SSN on file: 123-45-6789.'],
+    ['medical-record identifier', 'Medical record MRN: MED123456.'],
+    ['government-identity identifier', 'Passport: A1234567.'],
+    ['financial-account identifier', 'Bank account: 1234 5678.'],
+  ])('accepts a %s under the seed profile (documented residual, #1409/#1784)', async (_label, residualText) => {
+    // The seed profile deliberately does not run openredaction or the
+    // entropy fallback (build.ts's buildSeedScrubPipeline doc comment,
+    // #1409): seeds are public, transformed, human-reviewed prose, and those
+    // probabilistic stages false-positive on ordinary words and hex-looking
+    // ids in that content (#1784). Every structured identifier or PII class
+    // detected only by openredaction is therefore residual risk — not just
+    // the representative payment, contact, government identity, medical,
+    // and financial cases sampled here. JWTs and unprefixed high-entropy
+    // blobs are likewise residuals from the omitted entropy fallback. The
+    // trace profile still catches these classes; seed curators must catch
+    // them by review. This test pins that trade-off as intentional, not a
+    // complete enumeration of openredaction's 570+ pattern surface.
+    const source = mockEpisodeSource([
+      episode({
+        steps: [{ label: 'note', title: 'residual fixture', text: residualText }],
+      }),
+    ]);
+    const { deps, published } = mockPublishDeps();
+
+    const result = await executeEpisodes(await planEpisodes(source), source, deps);
+
+    expect(result.errors).toEqual([]);
+    expect(result.imported).toHaveLength(1);
+    expect(published).toHaveLength(1);
   });
 
   describe('idempotency + supersedes', () => {
@@ -480,6 +536,26 @@ describe('executeEpisodes()', () => {
         error: expect.stringMatching(/publication outcome unknown; do not auto-retry/i),
       }),
     ]);
+  });
+});
+
+describe('executeEpisodes() against the checked-in stage1-seeds fixture set (issue #1784)', () => {
+  it('imports all three fixture episodes cleanly under the seed-lane scrub profile', async () => {
+    const source = createLocalEpisodeSeedSource(STAGE1_FIXTURES_DIR);
+    const report = await planEpisodes(source);
+    expect(report.every((row) => row.verdict === 'import')).toBe(true);
+
+    const { deps, published } = mockPublishDeps();
+    const result = await executeEpisodes(report, source, deps);
+
+    expect(result.errors).toEqual([]);
+    expect(result.imported.map((r) => r.id).sort()).toEqual([
+      'distractor-operator-claims',
+      'distractor-sympy-printing',
+      'source-dashboard-flake',
+    ]);
+    expect(result.skipped).toEqual([]);
+    expect(published).toHaveLength(3);
   });
 });
 

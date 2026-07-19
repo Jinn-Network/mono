@@ -31,6 +31,15 @@ import type { PrLink } from '../src/dispatcher/pr-links.js';
 import { deriveReviewInFlight } from '../src/dispatcher/review-state.js';
 import { dispatchReview } from '../src/dispatcher/review-dispatch.js';
 import { runReviewCycle } from '../src/dispatcher/review-loop.js';
+import {
+  cleanupReviewWorktree,
+  type ReviewCleanupOptions,
+} from '../src/dispatcher/review-cleanup.js';
+import {
+  makeFileReviewLeaseStore,
+  reviewWorktreePath,
+  type ReviewLeaseStore,
+} from '../src/dispatcher/review-lease.js';
 import { assertReviewIdentities, assertMergePrepArming } from '../src/dispatcher/identity.js';
 import type { SpawnFn } from '../src/dispatcher/dispatch.js';
 import type { ReviewablePr } from '../src/dispatcher/types.js';
@@ -51,11 +60,19 @@ import { classifyRateLimitError } from '../src/dispatcher/rate-limit-error.js';
 import { GhPrSink } from '../src/dispatcher/delivery-sink.js';
 import type { DeliverySink } from '../src/dispatcher/delivery-sink.js';
 import { DEFAULT_CONFIG } from '../src/dispatcher/types.js';
-import type { DispatcherConfig, ReadyIssue, InFlightSession, SessionResult, ImplementerRule } from '../src/dispatcher/types.js';
+import type { DispatcherConfig, ReadyIssue, InFlightSession, SessionResult } from '../src/dispatcher/types.js';
+import {
+  AUTOPILOT_RUNTIME_ENV,
+  parseAutopilotRuntime,
+} from '../src/autopilot-runtime.js';
+import {
+  assertHermesBillingRoute,
+  assertHermesRuntimeReady,
+} from '../src/dispatcher/hermes-runtime.js';
 import { WallClock } from '../src/dispatcher/wall-clock.js';
 import { shouldRouteToSessions } from '../src/cli/routing.js';
 import { spawn } from 'node:child_process';
-import type { SpawnOptions } from 'node:child_process';
+import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { mkdirSync, openSync, closeSync, writeSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
@@ -93,30 +110,36 @@ const REVIEW_GH_TOKEN_ENV = 'JINN_REVIEW_GH_TOKEN';
 const MERGE_PREP_ENV = 'JINN_MERGE_PREP';
 
 /**
- * Env var carrying the JSON implementer-routing policy (#887). Unset / blank /
- * malformed degrades to [] (fall through to defaultImplementer) with a warning.
+ * Model / provider / Python interpreter for Hermes coordinator sessions.
+ * Hermes is active only when JINN_AUTOPILOT_RUNTIME=hermes. Defaults mirror
+ * the operator's own Codex setup (bare `gpt-5.6-sol` + `openai-codex`), which
+ * runs on the ChatGPT/Codex subscription — NOT OpenRouter.
  */
-const IMPLEMENTER_RULES_ENV = 'JINN_DISPATCHER_IMPLEMENTER_RULES';
+const HERMES_MODEL_ENV = 'JINN_DISPATCHER_HERMES_MODEL';
+const HERMES_PROVIDER_ENV = 'JINN_DISPATCHER_HERMES_PROVIDER';
+const HERMES_PYTHON_ENV = 'JINN_DISPATCHER_HERMES_PYTHON';
 
-/** Valid `implementer` values (mirrors the `Implementer` union in types.ts). */
-const IMPLEMENTERS = ['claude', 'codex', 'cursor'] as const;
-/** Valid `effort` values (mirrors the `Effort` union in types.ts). */
-const EFFORTS = ['Low', 'Medium', 'High'] as const;
-/** Valid `shape` values (mirrors the `IssueShape` union in types.ts). */
-const SHAPES = [
-  'feat', 'fix', 'refactor', 'spike',
-  'chore', 'docs', 'test', 'incident', 'design',
-] as const;
-
-/** The optional predicate fields on an implementer rule and their allowed values. */
-const OPTIONAL_RULE_FIELDS = [
-  { key: 'effort', valid: EFFORTS },
-  { key: 'shape', valid: SHAPES },
-] as const;
-
-/** Whether `v` is one of the recognised literal values in `valid`. */
-const isMember = (valid: readonly string[], v: unknown): v is string =>
-  typeof v === 'string' && valid.includes(v);
+function attachTerminalCleanup(
+  child: ChildProcess,
+  onExit: Parameters<SpawnFn>[2]['onExit'],
+): void {
+  if (onExit == null) return;
+  let handled = false;
+  const finish = (
+    code: number | null,
+    signal: NodeJS.Signals | null,
+  ): void => {
+    if (handled) return;
+    handled = true;
+    try {
+      onExit(code, signal);
+    } catch (err) {
+      console.error('[autopilot] detached child terminal cleanup failed:', err);
+    }
+  };
+  child.once('error', () => finish(null, null));
+  child.once('exit', finish);
+}
 
 /**
  * Build the production logging `SpawnFn` (#533): open the per-session log in
@@ -146,7 +169,9 @@ function makeLoggingSpawn(): SpawnFn {
     if (typeof opts.startedAtMarkerPath === 'string') {
       writeFileSync(opts.startedAtMarkerPath, `${new Date().toISOString()}\n`, { mode: 0o600 });
     }
-    const child = spawn(cmd, args, { ...opts, stdio } as SpawnOptions);
+    const { onExit, ...spawnOpts } = opts;
+    const child = spawn(cmd, args, { ...spawnOpts, stdio } as SpawnOptions);
+    attachTerminalCleanup(child, onExit);
     if (child.pid != null) child.unref();
     // Close the parent's dup of the fd; the detached child kept its own.
     if (fd != null) closeSync(fd);
@@ -161,62 +186,6 @@ function parseAuthorAllowlist(raw: string | undefined): string[] {
     .split(',')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
-}
-
-/**
- * Parse the implementer-routing policy env var (#887) into a validated
- * `ImplementerRule[]`. Any input that is null/blank, not valid JSON, or not a
- * JSON array degrades to `[]` (fall through to `defaultImplementer`) with a
- * `console.warn`. Within a valid array, each entry is validated independently:
- * an entry whose `implementer` is missing/unknown, or whose *present* `effort`
- * or `shape` is not a recognised value, is dropped (with a warning naming the
- * bad rule); surviving entries keep only `{ effort?, shape?, implementer }`.
- */
-export function parseImplementerRules(raw: string | undefined): ImplementerRule[] {
-  if (raw == null || raw.trim().length === 0) return [];
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    console.warn(
-      `[autopilot] WARNING: ${IMPLEMENTER_RULES_ENV} is not valid JSON — ignoring (0 rules).`,
-    );
-    return [];
-  }
-
-  if (!Array.isArray(parsed)) {
-    console.warn(
-      `[autopilot] WARNING: ${IMPLEMENTER_RULES_ENV} must be a JSON array — ignoring (0 rules).`,
-    );
-    return [];
-  }
-
-  const out: ImplementerRule[] = [];
-  for (const entry of parsed) {
-    const e = entry as Record<string, unknown>;
-    if (!isMember(IMPLEMENTERS, e?.implementer)) {
-      console.warn(
-        `[autopilot] WARNING: dropping implementer rule with missing/unknown implementer: ${JSON.stringify(entry)}`,
-      );
-      continue;
-    }
-    const bad = OPTIONAL_RULE_FIELDS.find(
-      ({ key, valid }) => e[key] !== undefined && !isMember(valid, e[key]),
-    );
-    if (bad) {
-      console.warn(
-        `[autopilot] WARNING: dropping implementer rule with invalid ${bad.key}: ${JSON.stringify(entry)}`,
-      );
-      continue;
-    }
-    const rule: ImplementerRule = { implementer: e.implementer as ImplementerRule['implementer'] };
-    for (const { key } of OPTIONAL_RULE_FIELDS) {
-      if (e[key] !== undefined) rule[key] = e[key] as never;
-    }
-    out.push(rule);
-  }
-  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -402,16 +371,21 @@ export async function runReviewPass(
   cfg: DispatcherConfig,
   runner: CommandRunner = realRunner,
   spawnFn?: SpawnFn,
+  reviewLeaseStore?: ReviewLeaseStore,
+  cleanupOptions?: ReviewCleanupOptions,
 ): Promise<void> {
   if (cfg.reviewBotLogin.length === 0) return; // disabled — fail-safe
   const spawnImpl: SpawnFn =
     spawnFn ??
     ((cmd, args, opts) => {
-      const child = spawn(cmd, args, opts as SpawnOptions);
+      const { onExit, ...spawnOpts } = opts;
+      const child = spawn(cmd, args, spawnOpts as SpawnOptions);
+      attachTerminalCleanup(child, onExit);
       if (child.pid != null) child.unref();
       return { pid: child.pid };
     });
   const prSource = new GhPrSource(runner, cfg.engineReviewLabel, cfg.reviewBotLogin);
+  const leaseStore = reviewLeaseStore ?? makeFileReviewLeaseStore();
   // Exclude PRs with a live merge-prep session from review dispatch (symmetric
   // to the prep loop's reviewInFlight guard) so the two never push to the same
   // branch at once. Only relevant when merge-prep is armed.
@@ -421,12 +395,55 @@ export async function runReviewPass(
   const report = await runReviewCycle({
     prSource,
     cfg,
-    deriveReviewInFlight: () => deriveReviewInFlight(runner),
-    dispatchReview: (pr: ReviewablePr) => dispatchReview(pr, cfg, { runner, spawn: spawnImpl }),
+    deriveReviewInFlight: () => deriveReviewInFlight(runner, leaseStore),
+    isProcessAlive: (pid) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch (err) {
+        return !(
+          typeof err === 'object' &&
+          err != null &&
+          'code' in err &&
+          err.code === 'ESRCH'
+        );
+      }
+    },
+    removeWorktree: async (review) => {
+      const canonicalPath = reviewWorktreePath(review.prNumber);
+      if (review.worktreePath !== canonicalPath) {
+        throw new Error(
+          `Refusing non-canonical review worktree cleanup: ${review.worktreePath}`,
+        );
+      }
+      if (review.leaseId == null || review.pid == null) {
+        throw new Error(
+          `Refusing review cleanup without persisted ownership generation: PR #${review.prNumber}`,
+        );
+      }
+      await cleanupReviewWorktree({
+        version: 2,
+        leaseId: review.leaseId,
+        prNumber: review.prNumber,
+        worktreePath: canonicalPath,
+        pid: review.pid,
+        startedAt: review.startedAt,
+      }, runner, leaseStore, cleanupOptions);
+    },
+    dispatchReview: (pr: ReviewablePr) => dispatchReview(
+      pr,
+      cfg,
+      { runner, spawn: spawnImpl, leaseStore, cleanupOptions },
+    ),
     busyPrNumbers,
   });
   if (report.dispatched.length > 0) {
     console.log(`[autopilot] review-pr dispatched: PR #${report.dispatched.join(', #')}`);
+  }
+  if (report.reaped.length > 0) {
+    console.log(
+      `[autopilot] review reaped stale worktree → PR #${report.reaped.join(', #')}`,
+    );
   }
 }
 
@@ -562,15 +579,22 @@ async function main(): Promise<void> {
   const bpOk = Number.isInteger(bpOverride) && bpOverride > 0;
   const cfg: DispatcherConfig = {
     ...DEFAULT_CONFIG,
+    runtime: parseAutopilotRuntime(process.env[AUTOPILOT_RUNTIME_ENV]),
     ...(capOk ? { concurrencyCap: capOverride } : {}),
     ...(bpOk ? { openPrBackpressure: bpOverride } : {}),
     authorAllowlist,
-    implementerRules: parseImplementerRules(process.env[IMPLEMENTER_RULES_ENV]),
     reviewBotLogin: process.env[REVIEW_BOT_LOGIN_ENV] ?? '',
     implGhToken: process.env[IMPL_GH_TOKEN_ENV] ?? '',
     reviewGhToken: process.env[REVIEW_GH_TOKEN_ENV] ?? '',
     mergePrepEnabled: (process.env[MERGE_PREP_ENV] ?? '') === '1',
+    ...(process.env[HERMES_MODEL_ENV] ? { hermesModel: process.env[HERMES_MODEL_ENV] } : {}),
+    ...(process.env[HERMES_PROVIDER_ENV] ? { hermesProvider: process.env[HERMES_PROVIDER_ENV] } : {}),
+    ...(process.env[HERMES_PYTHON_ENV]
+      ? { hermesPythonPath: process.env[HERMES_PYTHON_ENV] }
+      : {}),
   };
+
+  console.log(`[autopilot] runtime=${cfg.runtime}`);
 
   if (cfg.authorAllowlist.length === 0) {
     // Fail-safe per spec 2026-05-23-author-allowlist-design.md: empty
@@ -607,6 +631,17 @@ async function main(): Promise<void> {
   assertMergePrepArming(cfg);
   if (cfg.mergePrepEnabled) {
     console.log(`[autopilot] merge-prep enabled (cap=${cfg.mergePrepCap}) — stuck PRs are prepped, not just escalated`);
+  }
+
+  // Hermes is a process-wide runtime. Refuse to boot unless its interpreter,
+  // imports, bare model, and subscription provider are all valid.
+  if (cfg.runtime === 'hermes') {
+    assertHermesBillingRoute(cfg.hermesModel, cfg.hermesProvider);
+    assertHermesRuntimeReady(cfg.hermesPythonPath);
+    console.log(
+      `[autopilot] hermes runtime ready (model=${cfg.hermesModel}, provider=${cfg.hermesProvider}, ` +
+        `python=${cfg.hermesPythonPath})`,
+    );
   }
 
   const source = new GhIssueSource(realRunner);

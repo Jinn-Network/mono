@@ -36,9 +36,11 @@ import {
 } from './packaging.js';
 import { DONATION_ARTIFACT_ENCODING } from './artifact-scrub.js';
 import { loadCorpusKnowledge, buildCorpusKnowledgePayload } from './corpus-knowledge.js';
+import { harvestGeneratorModel } from './generator-model.js';
 import type { CorpusKnowledgeRecordRef } from './corpus-knowledge.js';
 import { projectEnvelope } from '../../corpus/envelope-projection.js';
 import type { ReadOnlyCorpus } from '../../mcp/search-records.js';
+import { redactRpcUrls } from '../../util/redact-rpc-urls.js';
 import {
   assembleAndSignEnvelope,
   type EnvelopeAssemblyDeps,
@@ -102,6 +104,28 @@ export class NotImplementedError extends Error {
     super(`[NotImplemented] ${transitionName} — fill in via subsequent task`);
     this.name = 'NotImplementedError';
     this.transitionName = transitionName;
+  }
+}
+
+/**
+ * A task cannot leave DISCOVERED until its canonical TaskCreated block has a
+ * valid timestamp. Exhausting the bounded lookup is recoverable: a later
+ * engine pass can query a healthy/caught-up RPC and continue the same row.
+ */
+export class TaskCreationTimestampUnavailableError extends Error {
+  readonly requestId: string;
+  readonly blockNumber: number;
+  readonly cause: unknown;
+
+  constructor(requestId: string, blockNumber: number, cause: unknown) {
+    super(
+      `authoritative task creation timestamp unavailable for ${requestId} `
+      + `(block ${blockNumber})`,
+    );
+    this.name = 'TaskCreationTimestampUnavailableError';
+    this.requestId = requestId;
+    this.blockNumber = blockNumber;
+    this.cause = cause;
   }
 }
 
@@ -433,7 +457,25 @@ export interface TaskEngineOptions {
    * error-swallowing (loadCorpusKnowledge never throws).
    */
   knowledge?: { corpus?: ReadOnlyCorpus | null; enabled?: boolean };
+
+  /**
+   * Resolves the on-chain block timestamp for a task's creation block
+   * (#1827). Production wires this for every new task. It remains optional so
+   * historical/test callers can parse and exercise pre-field rows without
+   * fabricating a value.
+   *
+   * Returns `undefined` on a resolvable-but-unknown block. Undefined values
+   * and thrown transport errors are retried; a new envelope is never signed
+   * without the authoritative timestamp.
+   */
+  blockTimestamp?: {
+    getBlockTimestamp(blockNumber: number): Promise<number | undefined>;
+    /** Configured URLs let the redactor also strip detached API-key material. */
+    configuredRpcUrls?: readonly string[];
+  };
 }
+
+const TASK_CREATION_TIMESTAMP_LOOKUP_ATTEMPTS = 3;
 
 // ── Recovery report ───────────────────────────────────────────────────────────
 
@@ -476,6 +518,7 @@ export class TaskEngine {
   protected readonly joinedSolverNets: TaskEngineOptions['joinedSolverNets'];
   protected readonly operatorSafeAddress: TaskEngineOptions['operatorSafeAddress'];
   protected readonly manifestResolver: TaskEngineOptions['manifestResolver'];
+  protected readonly blockTimestamp: TaskEngineOptions['blockTimestamp'];
   protected readonly identityPublisher: TaskEngineOptions['identityPublisher'];
   protected readonly reputationFeedback: TaskEngineOptions['reputationFeedback'];
   protected readonly operatorConfig: TaskEngineOptions['operatorConfig'];
@@ -554,6 +597,7 @@ export class TaskEngine {
     this.joinedSolverNets = opts.joinedSolverNets;
     this.operatorSafeAddress = opts.operatorSafeAddress;
     this.manifestResolver = opts.manifestResolver;
+    this.blockTimestamp = opts.blockTimestamp;
     this.identityPublisher = opts.identityPublisher;
     this.reputationFeedback = opts.reputationFeedback;
     this.operatorConfig = opts.operatorConfig;
@@ -913,6 +957,15 @@ export class TaskEngine {
       throw new Error(reason);
     }
 
+    // A new envelope must carry the authoritative TaskCreated block timestamp.
+    // Resolve it before leaving DISCOVERED; a transient RPC failure gets a
+    // bounded in-call retry and then remains in-flight through the engine's
+    // existing recoverable-error classifier. Never advance with a missing
+    // value and later fabricate or omit task.createdAt.
+    if (this.blockTimestamp && task.onchainCreationTimestamp == null) {
+      await this.resolveTaskCreationTimestamp(task);
+    }
+
     // The event path and tick loop can race on the same DISCOVERED row; if
     // another caller already advanced it, treat this as idempotent.
     const current = this.persistence.getByRequestId(task.requestId);
@@ -927,6 +980,50 @@ export class TaskEngine {
         `[harness-engine] ${task.requestId}: claim completed but state is already ${current.state}; skipping CLAIMED transition`,
       );
     }
+  }
+
+  private async resolveTaskCreationTimestamp(task: PersistedTaskRun): Promise<number> {
+    if (!this.blockTimestamp) {
+      throw new Error(
+        `authoritative task creation timestamp resolver is unavailable for ${task.requestId}`,
+      );
+    }
+
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= TASK_CREATION_TIMESTAMP_LOOKUP_ATTEMPTS; attempt++) {
+      try {
+        const timestampSec = await this.blockTimestamp.getBlockTimestamp(
+          task.onchainCreationBlock,
+        );
+        if (
+          timestampSec !== undefined
+          && Number.isSafeInteger(timestampSec)
+          && timestampSec >= 0
+        ) {
+          this.persistence.setOnchainCreationTimestamp(task.requestId, timestampSec);
+          return timestampSec;
+        }
+        lastError = new Error(
+          `RPC returned no valid timestamp for block ${task.onchainCreationBlock}`,
+        );
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    const safeError = redactRpcUrls(
+      lastError,
+      this.blockTimestamp.configuredRpcUrls ?? [],
+    );
+    console.warn(
+      `[harness-engine] ${task.requestId}: authoritative task creation timestamp unavailable `
+      + `after ${TASK_CREATION_TIMESTAMP_LOOKUP_ATTEMPTS} attempts: ${safeError}`,
+    );
+    throw new TaskCreationTimestampUnavailableError(
+      task.requestId,
+      task.onchainCreationBlock,
+      lastError,
+    );
   }
 
   async releaseClaimedNotStarted(): Promise<string[]> {
@@ -1815,6 +1912,15 @@ export class TaskEngine {
       };
     }
 
+    // Task-doc repo identity (spec §10 / #1827), read once for both the
+    // mineable-trace record below and the envelope's task provenance fields.
+    // Correctly absent for solver types without repo identity (e.g.
+    // prediction.*) — not a fabricated default.
+    const taskSpec = task.task?.spec as Record<string, unknown> | undefined;
+    const specRepo = typeof taskSpec?.['repo'] === 'string' ? taskSpec['repo'] : undefined;
+    const specBaseCommit = typeof taskSpec?.['base_commit'] === 'string' ? taskSpec['base_commit'] : undefined;
+    const specInstanceId = typeof taskSpec?.['instance_id'] === 'string' ? taskSpec['instance_id'] : undefined;
+
     // 3b. Mineable-trace record (task-creator spec §10, D2 tier-1). Best-effort
     // and never fatal — a store failure must not fail the task. Only records
     // for restoration tasks whose spec carries repo identity (repo +
@@ -1831,10 +1937,6 @@ export class TaskEngine {
         const synthetic = task.task?.eligibility?.['syntheticProvenance'] as
           | SyntheticTaskProvenance
           | undefined;
-        const spec = task.task?.spec as Record<string, unknown> | undefined;
-        const repo = typeof spec?.['repo'] === 'string' ? spec['repo'] : undefined;
-        const baseCommit = typeof spec?.['base_commit'] === 'string' ? spec['base_commit'] : undefined;
-        const sourceInstanceId = typeof spec?.['instance_id'] === 'string' ? spec['instance_id'] : undefined;
         const acceptedDiff =
           typeof implOutput?.solutionPayload?.['patch'] === 'string'
             ? (implOutput.solutionPayload['patch'] as string)
@@ -1843,15 +1945,15 @@ export class TaskEngine {
           console.debug(
             `[harness-engine] ${task.requestId}: mineable-trace record skipped — task is a synthetic mint (no second-generation echoes)`,
           );
-        } else if (repo && baseCommit && acceptedDiff) {
+        } else if (specRepo && specBaseCommit && acceptedDiff) {
           const record = buildMineableRecord({
             sourceId: task.requestId,
             kind: 'solvernet-execution',
-            repo,
-            baseCommit,
+            repo: specRepo,
+            baseCommit: specBaseCommit,
             acceptedDiff,
             intermediateFailureDiffs: [],
-            ...(sourceInstanceId !== undefined ? { sourceInstanceId } : {}),
+            ...(specInstanceId !== undefined ? { sourceInstanceId: specInstanceId } : {}),
             publishMinedTasksConsent: this.mineablePublishConsent,
             now: () => new Date().toISOString(),
           });
@@ -1941,6 +2043,24 @@ export class TaskEngine {
     const executorMode = this.modesByRequest.get(task.requestId) ?? 'train';
     const fenceCodeDigest = this.codeDigestsByRequest.get(task.requestId) ?? buildInfo.codeDigest;
 
+    // #1827: generatorModel — harvested from the harness's own transcript
+    // when possible (source: 'stream'), else falls back to the same
+    // SolverNet/daemon-config model string used for executor.model below
+    // (source: 'config'). Never throws.
+    const generatorModelForEnvelope = harvestGeneratorModel(
+      implNameForEnvelope,
+      workingDir,
+      solverNet?.model ?? this.operatorConfig?.claudeModel,
+    );
+
+    let taskCreationTimestamp = task.onchainCreationTimestamp ?? undefined;
+    if (taskCreationTimestamp === undefined && this.blockTimestamp) {
+      // Recovery can resume an older CLAIMED/PACKAGING row that never passed
+      // through today's claim-time resolver. Re-resolve before signing so the
+      // new writer still cannot emit a provenance tuple without createdAt.
+      taskCreationTimestamp = await this.resolveTaskCreationTimestamp(task);
+    }
+
     const envelopeInputs: EnvelopeInputs = {
       solverType,
       role,
@@ -1949,6 +2069,13 @@ export class TaskEngine {
         onchainCreationTx: task.onchainCreationTx,
         onchainCreationBlock: task.onchainCreationBlock,
         requestId: task.requestId,
+        // #1827: authoritative TaskCreated block timestamp. Production
+        // resolves or parks/fails before this new envelope is signed; it is
+        // absent only for historical/test callers without the resolver.
+        ...(taskCreationTimestamp !== undefined ? { createdAt: taskCreationTimestamp } : {}),
+        ...(specInstanceId ? { instanceId: specInstanceId } : {}),
+        ...(specRepo ? { repo: specRepo } : {}),
+        ...(specBaseCommit ? { baseCommit: specBaseCommit } : {}),
       },
       participant: { safeAddress, agentEoa },
       window: { startTs: task.windowStartTs, endTs: task.windowEndTs },
@@ -1970,6 +2097,10 @@ export class TaskEngine {
         // default from operatorConfig.claudeModel (jinn-mono-gbut, gh#191).
         // Left undefined when neither is set — the field is optional in the schema.
         model: solverNet?.model ?? this.operatorConfig?.claudeModel,
+        // #1827: structured, honesty-flagged model provenance alongside the
+        // existing plain `model` string (which stays untouched for the
+        // indexer's composition.byModel facet).
+        generatorModel: generatorModelForEnvelope,
       },
       evidenceTier,
       trajectory: envelopeTrajectory,
@@ -2563,13 +2694,20 @@ export class TaskEngine {
     // IS the retry; there is no per-task attempt counter. Skip this only once
     // the delivery window has closed, so we never churn on work that can no
     // longer settle on-chain.
-    if (task.windowEndTs > Date.now() && isRecoverableTransactionError(err)) {
+    const recoverablePrerequisite =
+      err instanceof TaskCreationTimestampUnavailableError;
+    if (
+      task.windowEndTs > Date.now()
+      && (recoverablePrerequisite || isRecoverableTransactionError(err))
+    ) {
       emitEvent(this.store, {
         kind: 'tick_error',
         requestId: task.requestId,
         solverType: task.solverType ?? undefined,
         outcome: 'warn',
-        detail: `transient RPC failure in ${contextLabel}; left ${task.state} for retry: ${reason}`,
+        detail:
+          `${recoverablePrerequisite ? 'recoverable prerequisite failure' : 'transient RPC failure'} `
+          + `in ${contextLabel}; left ${task.state} for retry: ${reason}`,
       }, 'harness-engine');
       return 'transient';
     }

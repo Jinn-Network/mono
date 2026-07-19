@@ -2,6 +2,19 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Correction / supersession (2026-07-19, #1784):** This historical plan
+> repeatedly says `ScrubPipeline.components` is published in a provenance or
+> scrub-component manifest. The implemented `TraceEnvelopeV0` contract does not
+> carry that list or otherwise prove the selected scrub profile.
+> `ScrubPipeline.components` is a local diagnostics-and-test contract. Imported
+> provenance, importer identity, the `seed-import` tag, and `seed:*` steps
+> disclose seed origin on the wire, not the profile that ran. The seed profile
+> is also used for public, transformed, human-curated evidence episodes, not
+> only licence-checked `SKILL.md` inputs; reviewing residual classes omitted by
+> the reduced profile remains the local curator's responsibility. Those
+> corrections supersede the contrary claims below without rewriting the
+> execution record.
+
 **Goal:** Seeded corpus SKILL.md content publishes byte-identical prose (no false-positive `[SECRET:…]` placeholders) while genuine secrets in seeds still redact.
 
 **Architecture:** Add a seed-profile scrub pipeline (`buildSeedScrubPipeline()`) that keeps the deterministic detectors (key policy, plain-patterns email/home-path regexes, secretlint preset rules) and drops the two probabilistic stages (openredaction, secretlint pass-2 entropy fallback). The entropy fallback is gated by a new additive `{ entropyFallback?: boolean }` option on `secretlintStage` (default `true` — trace-side behaviour byte-identical). Seed import (`execute()`) passes the seed pipeline via the pre-existing `CaptureOptions.pipeline` injection point; capture stays mandatory and fail-closed, `publish()` untouched, provenance manifest records the reduced stage list via `ScrubPipeline.components`.

@@ -374,7 +374,7 @@ def render_recorded_styled(on: bool) -> str:
             "",
             dim("  " + RECORDED_ON),
             "",
-            dim("  Manage:  ") + sky("/jinn consent") + dim("  |  ") + sky("/jinn veto") + dim("  |  ") + sky("/jinn ledger"),
+            dim("  Manage:  ") + sky("/jinn veto"),
         ]
     else:
         body = [

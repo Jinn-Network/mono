@@ -15,11 +15,15 @@ least once.
 ## Why episodes, not raw traces
 
 A seed-episode JSON file is a *transformed*, human-reviewed artifact, not a
-raw capture. It is published through the exact same `capture() -> publish()`
-path a real contribution uses (strict trace scrub, `provenance: 'imported'`,
-excluded from the demand signal and emissions eligibility), so a seeded
-evidence record is indistinguishable on the wire from an organically
-captured one — see `client/packages/harness-layer/src/seed-import/episode-execute.ts`.
+raw capture. It uses the same trace-envelope schema and `capture() ->
+publish()` anchor path as an organic contribution. It remains deliberately
+distinguishable on the wire: `provenance: 'imported'`, the
+`jinn-layer-seed-episode-import` importer, the `seed-import` tag, and
+`seed:*` steps identify the seed path, and imported records are excluded from
+the demand signal and emissions eligibility. The selected scrub profile is a
+local implementation fact proved by code and tests; the current envelope
+schema does not publish a scrub-component manifest. See
+`client/packages/harness-layer/src/seed-import/episode-execute.ts`.
 
 ## 1. Record → transform → author
 
@@ -34,18 +38,35 @@ captured one — see `client/packages/harness-layer/src/seed-import/episode-exec
    machine/user identifiers from command output (hostnames, local
    usernames, absolute paths in stack traces).
 3. **Scrub.** Read the episode once, end to end, for anything that
-   shouldn't leave the machine — tokens, keys, private URLs. The strict trace
-   scrub (`buildScrubPipeline()`: structured PII plus entropy-backed secret
-   detection) runs automatically at `seed execute` time as a second,
-   mandatory net over every episode-originated string, including the ID,
-   tags, summary, steps, outcome, synthesis, and attribution. Authored content
-   should already be clean; the scrub is a backstop, not a substitute for
-   review.
+   shouldn't leave the machine — tokens, keys, private URLs. The seed-profile
+   scrub (`buildSeedScrubPipeline()`: deterministic key policy, plain-patterns,
+   and secretlint pass-1 — no openredaction/entropy stages, since those
+   probabilistic detectors false-positive on ordinary words and hex-looking
+   SHAs in this pre-vetted prose) runs automatically at `seed execute` time as
+   a second, mandatory net over every episode-originated string, including the
+   ID, tags, summary, steps, outcome, synthesis, and attribution. It is still
+   fail-closed: the lane refuses to publish when a redaction fires. Authored
+   content should already be clean; the scrub is a backstop, not a substitute
+   for review. Because the entire openredaction stage is absent, **every**
+   structured identifier or PII class detected only by its 570+ pattern
+   surface is residual risk. Payment cards, phone numbers, SSNs,
+   medical/health-plan or patient identifiers, passport/government identity
+   numbers, and bank/investment/financial account references are examples,
+   not a complete list. JWTs and unprefixed high-entropy blobs are additional
+   residuals from the omitted entropy fallback. The curator must inspect all
+   fields for the full range of personal, medical, identity, contact, and
+   financial data and remove or replace any such value before approving the
+   report. Public source material is not evidence that a copied identifier is
+   safe to republish.
 4. **Author `synthesis` and `tags`.** `synthesis` is a 3-6 sentence,
    task-linked "how it was solved" — write it yourself; it is never
    generated at retrieval time. `tags` should name the subsystem vocabulary
-   a related task would search on (see the source fixture's
-   `mono, dashboard, vitest, version-status, async, flake`).
+   a related task would search on. Records remain substrate-only by default.
+   A curator may explicitly admit a reviewed record to pickup by adding the
+   reserved `retrieval:visible.v1` tag; do not add it to bulk-derived records.
+   The source fixture is the one admitted fixture:
+   `mono, dashboard, vitest, version-status, async, flake,
+   retrieval:visible.v1`.
 5. **Shape the file** against the seed-episode contract
    (`client/packages/harness-layer/src/seed-import/episode-fetch.ts`,
    `SeedEpisodeSchema`):
@@ -138,7 +159,7 @@ yarn jinn-layer seed execute /tmp/stage1-episode-report.json \
   --episodes-dir packages/harness-layer/fixtures/stage1-seeds
 ```
 
-Each `import`-verdict row runs through `capture()` (strict trace scrub) then
+Each `import`-verdict row runs through `capture()` (seed-profile scrub) then
 `publish()` (the same anchor path a real contribution uses) and prints the
 published `envelopeRef` (the corpus ref) plus the anchor tx. `--json`
 emits the machine-readable `EpisodeImportResult` instead of the table.
@@ -160,6 +181,29 @@ yarn jinn-layer corpus get <ref> --json
 Confirm `provenance: 'imported'`, the `seed:step:*` steps carrying
 `seed.step.label`/`seed.step.title`/`seed.step.text`, and the final
 `seed:synthesis` step carrying `seed.synthesis` + `seed.attribution`.
+
+### Post-merge operational gate for #1784
+
+Local tests use mocked publication dependencies. They prove that the
+checked-in fixtures pass the lane and that the lane constructs the expected
+envelopes; they do **not** prove that a record was published to or is
+retrievable from the live testnet corpus.
+
+After the scrub-profile fix has merged, an operator must run sections 2 and
+3 against the real configured testnet, then verify the previously blocked
+same-repository distractor explicitly:
+
+```bash
+yarn jinn-layer corpus search "claims" --limit 5
+yarn jinn-layer corpus get <distractor-operator-claims-ref> --json
+```
+
+Keep #1784 open until `distractor-operator-claims` appears in the search
+results and the fetched envelope has the expected `provenance: 'imported'`,
+`jinn-layer-seed-episode-import` importer, `seed-import` tag, `seed:*` steps,
+and anchor reference. The focused local tests, rather than the fetched
+envelope, prove that the seed scrub profile ran. Record the command output or
+equivalent testnet evidence on the issue.
 
 ## 5. Idempotency and `supersedes`
 
@@ -212,8 +256,8 @@ unchanged?".
 
 | File | Kind | Role |
 |---|---|---|
-| `source-dashboard-flake.episode.json` | evidence | The positive match: re-performs the real dashboard `update_available` test flake fix (`163e070d`) at its pre-fix commit. |
-| `distractor-operator-claims.episode.json` | evidence | Same repo, different module (`d682f811`) — proves selection is finer than repository match. |
-| `distractor-sympy-printing.episode.json` | evidence | Different domain entirely (sympy LaTeX printing) — proves domain relevance. Explicitly synthetic (`origin: synthetic-selection-distractor`, `verifiabilityTier: user-accepted`, no source commit), unlike the two commit-verified episodes above. |
-| `distractor-skill-tdd.json` | skill | Skill-shaped seed (existing lane's format) — proves skills are excluded from evidence pickup. |
-| `distractor-skill-tdd-dup.json` | skill | Same `skillMd` content as the above under a distinct identity — proves content-key dedup at the consumer. |
+| `source-dashboard-flake.episode.json` | evidence | The explicitly retrieval-visible positive match: re-performs the real dashboard `update_available` test flake fix (`163e070d`) at its pre-fix commit. |
+| `distractor-operator-claims.episode.json` | evidence | Same repo, different module (`d682f811`), deliberately unmarked and therefore substrate-only. |
+| `distractor-sympy-printing.episode.json` | evidence | Different domain entirely (sympy LaTeX printing), deliberately unmarked and therefore substrate-only. Explicitly synthetic (`origin: synthetic-selection-distractor`, `verifiabilityTier: user-accepted`, no source commit), unlike the two commit-verified episodes above. |
+| `distractor-skill-tdd.json` | skill | Unmarked skill-shaped seed (existing lane's format), fetchable but retired from evidence pickup. |
+| `distractor-skill-tdd-dup.json` | skill | Same `skillMd` content as the above under a distinct identity, also retrieval-retired. |

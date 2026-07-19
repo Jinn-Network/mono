@@ -9,7 +9,8 @@
     "vitest",
     "version-status",
     "async",
-    "flake"
+    "flake",
+    "retrieval:visible.v1"
   ],
   "steps": [
     {

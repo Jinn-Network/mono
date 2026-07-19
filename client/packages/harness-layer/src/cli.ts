@@ -28,6 +28,7 @@ import {
   type CorpusSearchHit,
   type HarnessLayer,
 } from './consume.js';
+import { corpusProbes, CORPUS_ONBOARDING_K } from './corpus-probes.js';
 import {
   createJinnPlugin,
   type JinnPluginDeps,
@@ -155,6 +156,9 @@ Commands:
                                                  solverType / role / artifactType / refs)
   corpus get <ref> [--json] [--out <dir>]        Fetch a record by ref (manifest CID from a
                                                  search result), including artifact content
+  corpus probe "<slug>" [--json]                 Run the corpus doctor probes for a repo slug
+                                                 (corpus-reachable + corpus-content) in one
+                                                 round-trip
   skills install <ref> [--out <dir>] [--json]    Install the skill carried by a corpus record
                                                  (jinn.skill.v1 artifact, or the legacy seeded
                                                  trace shape): writes SKILL.md + companion files
@@ -876,7 +880,7 @@ export async function runJinnLayerCli(
   const reader = opts.reader ?? readStdinToEnd;
   const [verb, subverb, ...rest] = argv;
 
-  const isCorpus = verb === 'corpus' && (subverb === 'search' || subverb === 'get');
+  const isCorpus = verb === 'corpus' && (subverb === 'search' || subverb === 'get' || subverb === 'probe');
   const isCapturePreview = verb === 'capture' && subverb === 'preview';
   const isLedger = verb === 'ledger';
   const isPublish = verb === 'publish';
@@ -2165,6 +2169,26 @@ export async function runJinnLayerCli(
         ...(p.seed ? [`  seed        ${p.seed.skill} — ${p.seed.source} (${p.seed.licence ?? 'no licence'})`] : []),
         '',
       ].join('\n'));
+    }
+    return 0;
+  }
+
+  if (subverb === 'probe') {
+    const slug = parsed.positionals[0];
+    if (slug === undefined) {
+      writer.write(`error: corpus probe requires a <slug> argument (e.g. "owner/repo")\n\n${USAGE}`);
+      return 2;
+    }
+    const checks = await corpusProbes({ layer, repoSlug: slug, k: CORPUS_ONBOARDING_K });
+    if (parsed.values.json) {
+      writer.write(JSON.stringify(checks) + '\n');
+    } else {
+      const lines: string[] = [];
+      for (const check of checks) {
+        lines.push(`[${check.ok ? 'ok  ' : 'fail'}] ${check.name}: ${check.detail}`);
+        if (check.remedy) lines.push(`       remedy: ${check.remedy}`);
+      }
+      writer.write(lines.join('\n') + '\n');
     }
     return 0;
   }

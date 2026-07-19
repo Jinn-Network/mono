@@ -1,7 +1,6 @@
-import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { basename, dirname, join } from 'node:path';
-import type { ReadyIssue, DispatcherConfig, InFlightSession, Effort } from './types.js';
+import type { ReadyIssue, DispatcherConfig, InFlightSession } from './types.js';
 import type { CommandRunner } from './issue-source.js';
 import { sessionSpawnEnv } from './identity.js';
 import {
@@ -10,9 +9,21 @@ import {
   resetFieldCache,
   type FieldCache,
 } from './field-cache.js';
-import { buildHeadlessPrompt } from '../headless.js';
 import { sessionLogPath, sessionStartedAtPath } from './session-log.js';
-import { resolveImplementer } from './implementer-policy.js';
+import {
+  spawnCoordinatorSession,
+  type SpawnFn,
+} from './coordinator-session.js';
+
+export {
+  effortFlag,
+  loadCanon,
+} from './coordinator-session.js';
+export type {
+  SpawnExitHandler,
+  SpawnFn,
+  SpawnResult,
+} from './coordinator-session.js';
 
 // ---------------------------------------------------------------------------
 // Repo root + canonical worktree base
@@ -21,6 +32,7 @@ import { resolveImplementer } from './implementer-policy.js';
 const HERE = dirname(fileURLToPath(import.meta.url));
 // src/dispatcher → src → packages/autopilot → packages → repo root
 const REPO_ROOT = join(HERE, '..', '..', '..', '..');
+const AUTOPILOT_PACKAGE_DIR = join(REPO_ROOT, 'packages', 'autopilot');
 
 /**
  * Per CLAUDE.md AI rule #1, multi-agent worktrees live in
@@ -53,43 +65,6 @@ export const WORKTREES_BASE = computeWorktreesBase(REPO_ROOT);
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// SpawnFn — injectable spawn so tests create no real processes
-// ---------------------------------------------------------------------------
-
-/**
- * The result of spawning a process — at minimum a pid.
- * (Mirrors the subset of ChildProcess that dispatch.ts needs.)
- */
-export interface SpawnResult {
-  pid: number | undefined;
-}
-
-/**
- * Injectable spawn function. In production this wraps Node's `spawn`;
- * in tests it is a fake that records calls and returns a fake pid.
- */
-export type SpawnFn = (
-  cmd: string,
-  args: string[],
-  opts: {
-    cwd: string;
-    detached: boolean;
-    // `number` allows file descriptors (the log fd) as stdio targets;
-    // `'ignore'` is retained for the fallback / review path. (#533)
-    stdio: 'ignore' | Array<string | number | null>;
-    /**
-     * Absolute path to the per-session log file (#533). The production
-     * lambda opens this in append mode and wires it to stdout+stderr;
-     * the fake spawn in tests just records it.
-     */
-    logPath?: string;
-    /** Absolute path to the dispatch-time marker file. The production lambda rewrites it (truncate) at every dispatch so its mtime is the session's startedAt for crash recovery; the fake spawn in tests just records it. */
-    startedAtMarkerPath?: string;
-    [key: string]: unknown;
-  },
-) => SpawnResult;
-
-// ---------------------------------------------------------------------------
 // Branch-slug derivation
 // ---------------------------------------------------------------------------
 
@@ -116,44 +91,6 @@ function titleSlug(title: string): string {
 // Both have been replaced by snapshot + cache reads.
 
 // ---------------------------------------------------------------------------
-// Canon loading
-// ---------------------------------------------------------------------------
-
-/**
- * Load the canon files (CLAUDE.md + engineering handbook) from the repo root.
- * These are always prepended to the session prompt because `-p` mode does not
- * auto-load CLAUDE.md (spec Appendix).
- */
-export function loadCanon(): string {
-  const claudeMd = readFileSync(join(REPO_ROOT, 'CLAUDE.md'), 'utf8').trim();
-  const handbook = readFileSync(
-    join(REPO_ROOT, 'docs', 'engineering', 'handbook.md'),
-    'utf8',
-  ).trim();
-  return [
-    '# CLAUDE.md (canonical)\n',
-    claudeMd,
-    '',
-    '# Engineering handbook (canonical)\n',
-    handbook,
-  ].join('\n');
-}
-
-// ---------------------------------------------------------------------------
-// Effort → --effort flag
-// ---------------------------------------------------------------------------
-
-/**
- * Map a board Effort value to the `claude` CLI `--effort` flag args (#1673).
- * Unset (null) → [] so the CLI default applies. Board casing lowercases to the
- * exact CLI tier: Low→low, Medium→medium, High→high, XHigh→xhigh, Max→max — a
- * single `.toLowerCase()` covers all five (no lookup table needed).
- */
-export function effortFlag(effort: Effort | null): string[] {
-  return effort == null ? [] : ['--effort', effort.toLowerCase()];
-}
-
-// ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
 
@@ -171,7 +108,7 @@ export function effortFlag(effort: Effort | null): string[] {
  *    then crashed before spawning).
  * 4. Assemble the coordinating-session prompt:
  *    canon (CLAUDE.md + handbook) + headless-override block + implement-issue task
- * 5. Spawn `claude -p <prompt>` in the worktree, detached, no plan-posture flags
+ * 5. Spawn the process-wide coordinator runtime in the worktree, detached
  * 6. Return the InFlightSession
  */
 export async function dispatchIssue(
@@ -288,14 +225,12 @@ export async function dispatchIssue(
   }
 
   // 4. Assemble the prompt.
-  //    Canon is prepended because -p mode does not auto-load CLAUDE.md (spec Appendix).
+  //    Canon is prepended because headless runtimes do not load it reliably.
   //    The scenario explicitly tells the session that the worktree is pre-created
   //    so the implement-issue skill's Step 2 skips worktree creation.
-  const canon = loadCanon();
-  const implementer = resolveImplementer(issue, cfg);
   const scenario = [
     `Use the implement-issue skill on issue #${number}.`,
-    `The default implementer for the inner pipeline is: ${implementer}.`,
+    `Global Autopilot runtime: ${cfg.runtime}. Follow the shared \`autopilot-runtime\` skill mechanics for every child or fresh-root stage.`,
     `Issue: #${number} — ${title}`,
     `A git worktree for this issue already exists at \`${worktreePath}\` on branch \`${branch}\` — use it; do not create a new worktree.`,
     ...(stackBase != null
@@ -304,8 +239,6 @@ export async function dispatchIssue(
         ]
       : []),
   ].join('\n');
-  const headlessPart = buildHeadlessPrompt('implement-issue', scenario);
-  const fullPrompt = [canon, '', headlessPart].join('\n');
 
   // 5. Spawn — NO plan-posture flags (spec Appendix).
   //    Per #533 we capture the session's stdout+stderr to a per-session log
@@ -319,21 +252,40 @@ export async function dispatchIssue(
   //    inherit for 1/2 as a safe default the lambda replaces.
   const logPath = sessionLogPath(number);
   const startedAtMarkerPath = sessionStartedAtPath(number);
-  const result = spawn('claude', ['-p', ...effortFlag(issue.effort), fullPrompt], {
-    cwd: worktreePath,
-    detached: true,
-    stdio: ['ignore', 'inherit', 'inherit'],
-    logPath,
-    startedAtMarkerPath,
-    // Author this PR as the implementer identity (DR-2026-06-15); inherits the
-    // ambient gh account when no token is configured. Also disables the
-    // print-mode background-wait ceiling so the session reaches its PR stage.
-    ...sessionSpawnEnv(cfg.implGhToken),
-  });
+  // Author this PR as the implementer identity (DR-2026-06-15); inherits the
+  // ambient gh account when no token is configured. Also disables the
+  // Claude print-mode background-wait ceiling so a Claude session reaches its
+  // PR stage (inert for Hermes, which has its own lifetime model).
+  const identityEnv = sessionSpawnEnv(cfg.implGhToken).env;
+  const result = spawnCoordinatorSession(
+    {
+      kind: 'implement',
+      number,
+      skill: 'implement-issue',
+      scenario,
+      worktreePath,
+      effort: issue.effort,
+      env: {
+        ...identityEnv,
+        JINN_AUTOPILOT_PACKAGE_DIR: AUTOPILOT_PACKAGE_DIR,
+      },
+      spawnOptions: {
+      detached: true,
+      stdio: ['ignore', 'inherit', 'inherit'],
+      logPath,
+      startedAtMarkerPath,
+      },
+    },
+    cfg,
+    { spawn },
+  );
 
   // AC#2: surface pid + log path on the dispatch log line so an operator can
   // tail the session straight from the cycle output.
-  console.log(`[dispatch] #${number} impl=${implementer} pid=${result.pid ?? 'unknown'} log=${logPath}`);
+  console.log(
+    `[dispatch] #${number} runtime=${cfg.runtime} ` +
+      `pid=${result.pid ?? 'unknown'} log=${logPath}`,
+  );
 
   // 6. Return InFlightSession (logPath surfaced for downstream visibility).
   return {

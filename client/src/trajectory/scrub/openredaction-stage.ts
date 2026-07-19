@@ -247,7 +247,9 @@ export function buildDefaultDetector(): OpenRedaction {
  * checksum validation, e.g. Luhn for cards). Runs only on `content`-classified
  * string attributes; `safe` and non-string values pass through untouched. Each
  * detection is replaced inline (openredaction's placeholder substitution) and
- * recorded as a `pii` redaction for the provenance manifest.
+ * returned as a `pii` redaction in the local `ScrubResult` diagnostics. A
+ * downstream redaction manifest may report the touched key, but it does not
+ * carry this stage/type detail or prove which scrub profile ran.
  *
  * The detector is constructed once at factory time and reused across spans
  * (pattern compilation is not free).
