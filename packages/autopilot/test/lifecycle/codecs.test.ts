@@ -56,8 +56,9 @@ describe('lifecycle metadata codecs', () => {
     };
 
     expect(decodeReviewClaimPayload(encodeReviewClaimPayload(record))).toEqual(record);
+    const wireRecord = JSON.parse(encodeReviewClaimPayload(record)) as Record<string, unknown>;
     expect(() => decodeReviewClaimPayload(JSON.stringify({
-      ...record,
+      ...wireRecord,
       verdict: { ...record.verdict, state: 'REQUEST_CHANGES' },
     }))).toThrow(/terminal-approved.*APPROVE/);
   });
@@ -121,6 +122,20 @@ describe('lifecycle metadata codecs', () => {
       ...record,
       kind: undefined,
     } as unknown as ReviewClaimRecord)).toThrow(/kind/);
+  });
+
+  it('rejects a runtime discriminator in the review wire payload', () => {
+    expect(() => decodeReviewClaimPayload(JSON.stringify({
+      kind: 'review-claim',
+      protocolVersion: 2,
+      prNumber: 101,
+      generation: '22222222-2222-4222-8222-222222222222',
+      attempt: '33333333-3333-4333-8333-333333333333',
+      reviewer: 'reviewer',
+      head: OID_A,
+      state: 'active',
+      recordedAt: '2026-07-20T10:05:00.000Z',
+    }))).toThrow(/Unknown field: kind/);
   });
 
   it('strictly validates branch claim objects before encoding', () => {
@@ -194,5 +209,10 @@ describe('lifecycle metadata codecs', () => {
       verdict: 'REQUEST_CHANGES',
     });
     expect(() => parseAutomatedReviewMarker(`${marker} trailing`)).toThrow(/review marker/);
+  });
+
+  it('rejects string numerics in runtime ref-name helpers', () => {
+    expect(() => branchNameForIssue('42' as unknown as number)).toThrow(/issue number/);
+    expect(() => reviewClaimRef('101' as unknown as number)).toThrow(/PR number/);
   });
 });

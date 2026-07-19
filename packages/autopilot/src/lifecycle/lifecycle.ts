@@ -84,6 +84,7 @@ function hasMatchingVerdict(
   const verdict = item.terminalVerdict;
   return verdict !== undefined
     && review.verdict !== undefined
+    && review.head === item.head
     && verdict.head === review.head
     && verdict.marker === review.verdict.marker
     && verdict.state === review.verdict.state;
@@ -154,6 +155,16 @@ function deriveItem(item: LifecycleItem, nowMs: number, staleAfterMs: number): L
     && item.reviewClaim.head !== item.head;
   if (item.kind === 'pull-request' && item.merged) {
     return { item, phase: 'merged', stale: false, supersededReview };
+  }
+  if (item.humanReason !== undefined) {
+    return {
+      item,
+      phase: 'human',
+      underlyingPhase: underlyingPhase(item),
+      humanReason: item.humanReason,
+      stale: false,
+      supersededReview,
+    };
   }
   if (item.kind === 'pull-request') {
     const review = correlatedReviewClaim(item);
