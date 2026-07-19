@@ -17,9 +17,12 @@ least once.
 A seed-episode JSON file is a *transformed*, human-reviewed artifact, not a
 raw capture. It uses the same trace-envelope schema and `capture() ->
 publish()` anchor path as an organic contribution. It remains deliberately
-distinguishable: `provenance: 'imported'` and the signed scrub-component
-manifest disclose the seed-profile path, and imported records are excluded
-from the demand signal and emissions eligibility. See
+distinguishable on the wire: `provenance: 'imported'`, the
+`jinn-layer-seed-episode-import` importer, the `seed-import` tag, and
+`seed:*` steps identify the seed path, and imported records are excluded from
+the demand signal and emissions eligibility. The selected scrub profile is a
+local implementation fact proved by code and tests; the current envelope
+schema does not publish a scrub-component manifest. See
 `client/packages/harness-layer/src/seed-import/episode-execute.ts`.
 
 ## 1. Record → transform → author
@@ -191,10 +194,12 @@ yarn jinn-layer corpus search "claims" --limit 5
 yarn jinn-layer corpus get <distractor-operator-claims-ref> --json
 ```
 
-Do not close #1784 until `distractor-operator-claims` appears in the search
+Keep #1784 open until `distractor-operator-claims` appears in the search
 results and the fetched envelope has the expected `provenance: 'imported'`,
-seed-profile scrub manifest, and anchor reference. Record the command output
-or equivalent testnet evidence on the issue.
+`jinn-layer-seed-episode-import` importer, `seed-import` tag, `seed:*` steps,
+and anchor reference. The focused local tests, rather than the fetched
+envelope, prove that the seed scrub profile ran. Record the command output or
+equivalent testnet evidence on the issue.
 
 ## 5. Idempotency and `supersedes`
 

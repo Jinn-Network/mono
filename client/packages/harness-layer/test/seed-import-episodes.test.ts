@@ -334,7 +334,7 @@ describe('executeEpisodes()', () => {
   ])('accepts a %s under the seed profile (documented residual, #1409/#1784)', async (_label, residualText) => {
     // The seed profile deliberately does not run openredaction or the
     // entropy fallback (build.ts's buildSeedScrubPipeline doc comment,
-    // #1409): seeds are public, licence-checked prose, and those
+    // #1409): seeds are public, transformed, human-reviewed prose, and those
     // probabilistic stages false-positive on ordinary words and hex-looking
     // ids in that content (#1784). Every structured identifier or PII class
     // detected only by openredaction is therefore residual risk — not just
