@@ -100,6 +100,14 @@ test('layer CI is paths-filtered and rehearses the npm-shaped package', () => {
   assert.match(ci, /yarn build/);
 });
 
+test('layer workflows use the repository-compatible checkout credential mode', () => {
+  // actions/checkout@v7 removes non-persisted credentials by enumerating every
+  // gitlink. This repository intentionally retains legacy gitlinks that are not
+  // present in .gitmodules, so that cleanup path aborts before any job command.
+  assert.doesNotMatch(ci, /persist-credentials:\s*false/);
+  assert.doesNotMatch(workflow, /persist-credentials:\s*false/);
+});
+
 test('canary publication is dependency ordered and restricted to next', () => {
   assert.match(workflow, /branches: \[next\]/);
   assert.match(workflow, /plugin-canary:/);
