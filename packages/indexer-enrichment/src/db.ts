@@ -163,6 +163,8 @@ export class EnrichmentStore {
       FROM ${this.q('envelope')} e
       LEFT JOIN ${this.q('verdict_envelope_meta')} v
         ON v."manifest_cid" = e."manifest_cid"
+       AND v."publisher_agent_id" = e."agent_id"
+       AND v."chain_id" = e."chain_id"
       LEFT JOIN ${this.q('enrichment_attempt')} a
         ON a."manifest_cid" = e."manifest_cid" AND a."chain_id" = e."chain_id"
       WHERE e."kind" = 'evaluation'
@@ -238,9 +240,11 @@ export class EnrichmentStore {
   }
 
   /**
-   * Upsert a fully-enriched verdict row keyed (request_id, chain_id), guarded by
-   * enriched_at_block most-recent-wins — mirrors the handler's onConflictDoUpdate
-   * (handlers.ts). On a newer/equal block the row is overwritten with
+   * Upsert a fully-enriched verdict candidate keyed by
+   * (request_id, publisher_agent_id, manifest_cid, chain_id), guarded by
+   * enriched_at_block most-recent-wins — mirrors the handler's
+   * onConflictDoUpdate (handlers.ts). Competing publisher/CID anchors remain
+   * separate rows. On a newer block the exact candidate is updated with
    * enrichment_status='ok' and retry bookkeeping cleared; on an older or equal
    * block it is a no-op (AC6).
    */
@@ -254,13 +258,11 @@ export class EnrichmentStore {
         ${args.passedCount}, ${args.totalCount}, ${args.instanceId}, ${args.solverNetManifestCid}, ${args.solutionRequestId}, ${args.evaluatorVerdict},
         'ok', 0, NULL, ${args.enrichedAtBlock}, ${args.chainId}
       )
-      ON CONFLICT ("request_id","chain_id") DO UPDATE SET
+      ON CONFLICT ("request_id","publisher_agent_id","manifest_cid","chain_id") DO UPDATE SET
         "verdict_index" = EXCLUDED."verdict_index",
         "attempt_index" = EXCLUDED."attempt_index",
         "task_id" = EXCLUDED."task_id",
         "evaluator" = EXCLUDED."evaluator",
-        "manifest_cid" = EXCLUDED."manifest_cid",
-        "publisher_agent_id" = EXCLUDED."publisher_agent_id",
         "manifest_hash" = EXCLUDED."manifest_hash",
         "solver_type" = EXCLUDED."solver_type",
         "evidence_tier" = EXCLUDED."evidence_tier",

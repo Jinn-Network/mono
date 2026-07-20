@@ -22,6 +22,7 @@ import {
 const fetchHfRawRow = createBoundedRawHfRowFetcher();
 const resolvePublisherSafe = createPublisherSafeResolver({
   rpcUrl: process.env['JINN_RPC_URL'] ?? DEFAULT_TESTNET_RPC_URL,
+  fallbackRpcUrls: ['https://sepolia.base.org'],
   expectedChainId: 84532,
   identityRegistry:
     process.env['JINN_LAYER_IDENTITY_REGISTRY']

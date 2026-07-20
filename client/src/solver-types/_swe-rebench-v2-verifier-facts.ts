@@ -47,7 +47,30 @@ export interface SweRebenchV2VerifierFacts {
     repo: string;
     baseCommit: string;
     createdAt: number;
+    /** Present only after the production resolver authenticates TaskCreated lineage. */
+    originalTaskCid?: string;
+    /** TaskCreated.creator, authenticated against the original signed task. */
+    creatorSafe?: string;
+    /** TaskCreated.manifestDigest, authenticated against solverNetManifestCid. */
+    manifestDigest?: string;
+    /** Creator-authored task description; never copied from the evaluation wrapper. */
+    description?: string;
   };
+}
+
+/**
+ * Chain-authoritative bindings for the evaluation-wrapper → original-task hop.
+ *
+ * This stays structural so the harness layer can supply its GraphQL/on-chain
+ * result without importing client implementation types.
+ */
+export interface SweRebenchV2AuthoritativeTaskBinding {
+  taskCidDigest: string;
+  manifestDigest: string;
+  creatorSafe: string;
+  evaluatorSafe: string;
+  taskId?: string;
+  chainId?: number;
 }
 
 export interface SweRebenchV2VerifierFactPorts {
@@ -484,6 +507,170 @@ async function authenticateSignedTask(
   }
 }
 
+function exactHex(
+  value: unknown,
+  bytes: number,
+  sourceName: string,
+): string {
+  const pattern = new RegExp(`^0x[0-9a-fA-F]{${bytes * 2}}$`, 'u');
+  if (typeof value !== 'string' || !pattern.test(value)) {
+    throw new Error(`${sourceName} must be an exact ${bytes}-byte hex value`);
+  }
+  return value;
+}
+
+function exactSafe(value: unknown, sourceName: string): string {
+  return exactHex(value, 20, sourceName);
+}
+
+function exactDigest(value: unknown, sourceName: string): string {
+  return exactHex(value, 32, sourceName);
+}
+
+function sameHex(left: string, right: string): boolean {
+  return left.toLowerCase() === right.toLowerCase();
+}
+
+async function authenticateAuthoritativeOriginalTask(args: {
+  rawEvaluationWrapper: unknown;
+  authority: SweRebenchV2AuthoritativeTaskBinding;
+  ports: SweRebenchV2VerifierFactPorts;
+}): Promise<{
+  rawOriginalTask: unknown;
+  provenance: Required<Pick<
+    SweRebenchV2VerifierFacts['task'],
+    'originalTaskCid' | 'creatorSafe' | 'manifestDigest' | 'description'
+  >>;
+}> {
+  let evaluationWrapper: ReturnType<typeof SignedTaskV1Schema.parse>;
+  try {
+    evaluationWrapper = SignedTaskV1Schema.parse(args.rawEvaluationWrapper);
+    await authenticateSignedTask(args.rawEvaluationWrapper, evaluationWrapper);
+  } catch (error) {
+    throw new Error(
+      `evaluation wrapper authentication failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  if (evaluationWrapper.role !== 'evaluation') {
+    throw new Error('evaluation wrapper must have role=evaluation');
+  }
+
+  const evaluatorSafe = exactSafe(
+    args.authority.evaluatorSafe,
+    'authoritative evaluator Safe',
+  );
+  const wrapperCreatorSafe = exactSafe(
+    evaluationWrapper.creator.safeAddress,
+    'evaluation wrapper creator Safe',
+  );
+  if (!sameHex(wrapperCreatorSafe, evaluatorSafe)) {
+    throw new Error(
+      'evaluation wrapper creator Safe does not match the on-chain evaluator',
+    );
+  }
+
+  const rawWrapper =
+    args.rawEvaluationWrapper !== null
+    && typeof args.rawEvaluationWrapper === 'object'
+    && !Array.isArray(args.rawEvaluationWrapper)
+      ? args.rawEvaluationWrapper as Record<string, unknown>
+      : undefined;
+  const rawContext =
+    rawWrapper?.['context'] !== null
+    && typeof rawWrapper?.['context'] === 'object'
+    && !Array.isArray(rawWrapper?.['context'])
+      ? rawWrapper['context'] as Record<string, unknown>
+      : undefined;
+  const originalTaskCid = rawContext?.['solutionTaskCid'];
+  if (typeof originalTaskCid !== 'string' || originalTaskCid.length === 0) {
+    throw new Error(
+      'authenticated evaluation wrapper context.solutionTaskCid must be nonempty',
+    );
+  }
+
+  const authoritativeTaskCidDigest = exactDigest(
+    args.authority.taskCidDigest,
+    'authoritative TaskCreated.taskCidDigest',
+  );
+  let actualTaskCidDigest: string;
+  try {
+    actualTaskCidDigest = exactDigest(
+      cidToDigestHex(originalTaskCid),
+      'evaluation wrapper solutionTaskCid digest',
+    );
+  } catch (error) {
+    throw new Error(
+      `evaluation wrapper solutionTaskCid is not a canonical content CID: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  if (!sameHex(actualTaskCidDigest, authoritativeTaskCidDigest)) {
+    throw new Error(
+      'evaluation wrapper original task CID digest does not match '
+      + 'TaskCreated.taskCidDigest',
+    );
+  }
+
+  const rawOriginalTask = await args.ports.fetchIpfsJson({
+    cid: originalTaskCid,
+    maxBytes: SWE_REBENCH_V2_VERIFIER_FACT_MAX_BYTES,
+  });
+  let originalTask: ReturnType<typeof SignedTaskV1Schema.parse>;
+  try {
+    originalTask = SignedTaskV1Schema.parse(rawOriginalTask);
+    await authenticateSignedTask(rawOriginalTask, originalTask);
+  } catch (error) {
+    throw new Error(
+      `original task authentication failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  if (originalTask.role !== 'restoration') {
+    throw new Error('authenticated original task must have role=restoration');
+  }
+
+  const authoritativeCreatorSafe = exactSafe(
+    args.authority.creatorSafe,
+    'authoritative TaskCreated creator Safe',
+  );
+  const originalCreatorSafe = exactSafe(
+    originalTask.creator.safeAddress,
+    'original task creator Safe',
+  );
+  if (!sameHex(originalCreatorSafe, authoritativeCreatorSafe)) {
+    throw new Error(
+      'original task creator Safe does not match TaskCreated creator',
+    );
+  }
+
+  const authoritativeManifestDigest = exactDigest(
+    args.authority.manifestDigest,
+    'authoritative TaskCreated.manifestDigest',
+  );
+  const actualManifestDigest = keccak256(
+    toBytes(originalTask.solverNetManifestCid),
+  );
+  if (!sameHex(actualManifestDigest, authoritativeManifestDigest)) {
+    throw new Error(
+      'original task manifest does not match TaskCreated manifestDigest',
+    );
+  }
+
+  return {
+    rawOriginalTask,
+    provenance: {
+      originalTaskCid,
+      creatorSafe: originalCreatorSafe,
+      manifestDigest: actualManifestDigest,
+      description: originalTask.description,
+    },
+  };
+}
+
 export async function resolveSweRebenchV2VerifierFacts(args: {
   signedTask: unknown;
   expectedInstanceId: string;
@@ -620,18 +807,49 @@ export function createSweRebenchV2VerifierFactsResolver(
 ): (
   taskDocument: unknown,
   expectedInstanceId: string,
+  authority?: SweRebenchV2AuthoritativeTaskBinding,
 ) => Promise<SweRebenchV2VerifierFacts> {
-  return (taskDocument, expectedInstanceId) => {
+  return async (taskDocument, expectedInstanceId, authority) => {
     const wrapped =
       taskDocument !== null
       && typeof taskDocument === 'object'
       && !Array.isArray(taskDocument)
         ? (taskDocument as Record<string, unknown>)['signedTask']
         : undefined;
-    return resolveSweRebenchV2VerifierFacts({
-      signedTask: wrapped ?? taskDocument,
-      expectedInstanceId,
+    const rawEvaluationOrTask = wrapped ?? taskDocument;
+    if (!authority) {
+      return resolveSweRebenchV2VerifierFacts({
+        signedTask: rawEvaluationOrTask,
+        expectedInstanceId,
+        ports,
+      });
+    }
+
+    const authoritative = await authenticateAuthoritativeOriginalTask({
+      rawEvaluationWrapper: rawEvaluationOrTask,
+      authority,
       ports,
     });
+    const authoritativeOriginal = SignedTaskV1Schema.parse(
+      authoritative.rawOriginalTask,
+    );
+    const authoritativeSpec = SweRebenchV2TaskSchema.parse(
+      authoritativeOriginal.spec,
+    );
+    const resolved = await resolveSweRebenchV2VerifierFacts({
+      signedTask: authoritative.rawOriginalTask,
+      // Indexer enrichment projections are discovery hints, not authority.
+      // Once TaskCreated lineage is supplied, derive instance identity from
+      // the authenticated original restoration task itself.
+      expectedInstanceId: authoritativeSpec.instance_id,
+      ports,
+    });
+    return {
+      ...resolved,
+      task: {
+        ...resolved.task,
+        ...authoritative.provenance,
+      },
+    };
   };
 }

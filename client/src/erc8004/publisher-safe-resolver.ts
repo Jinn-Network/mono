@@ -16,7 +16,7 @@ import {
 import { getIdentityRegistryAddress } from '../contracts/addresses.js';
 import { IDENTITY_REGISTRY_GET_AGENT_WALLET_ABI } from './abis.js';
 
-interface RegistryReadClient {
+export interface RegistryReadClient {
   getChainId: () => Promise<number>;
   readContract: (args: {
     address: Address;
@@ -33,6 +33,10 @@ export interface PublisherSafeResolverOptions {
   identityRegistry?: string;
   /** Structural injection seam for hermetic tests. */
   client?: RegistryReadClient;
+  /** Additional injected clients, tried sequentially after `client`. */
+  fallbackClients?: readonly RegistryReadClient[];
+  /** Additional RPC URLs, tried sequentially after `rpcUrl`. */
+  fallbackRpcUrls?: readonly string[];
 }
 
 export function createPublisherSafeResolver(
@@ -42,11 +46,21 @@ export function createPublisherSafeResolver(
   publisherAgentId: string,
   publishedAtBlock: bigint,
 ) => Promise<string> {
-  const client: RegistryReadClient =
+  const primaryClient: RegistryReadClient =
     options.client
     ?? createPublicClient({ transport: http(options.rpcUrl) }) as RegistryReadClient;
+  const fallbackUrls = (options.fallbackRpcUrls ?? []).filter(
+    (url) => url !== options.rpcUrl,
+  );
+  const clients: readonly RegistryReadClient[] = [
+    primaryClient,
+    ...(options.fallbackClients ?? []),
+    ...fallbackUrls.map(
+      (url) => createPublicClient({ transport: http(url) }) as RegistryReadClient,
+    ),
+  ];
   const cache = new Map<string, Promise<string>>();
-  let rpcChain: Promise<number> | undefined;
+  const rpcChains = new Map<RegistryReadClient, Promise<number>>();
 
   return async (chainId, publisherAgentId, publishedAtBlock) => {
     if (!Number.isSafeInteger(chainId) || chainId <= 0) {
@@ -69,12 +83,6 @@ export function createPublisherSafeResolver(
       );
     }
 
-    rpcChain ??= client.getChainId();
-    const actualChainId = await rpcChain;
-    if (actualChainId !== chainId) {
-      throw new Error(`publisher Safe RPC chain ${actualChainId} does not match expected ${chainId}`);
-    }
-
     const registryCandidate =
       options.identityRegistry ?? getIdentityRegistryAddress(chainId);
     if (!registryCandidate) {
@@ -91,32 +99,59 @@ export function createPublisherSafeResolver(
     let pending = cache.get(key);
     if (!pending) {
       pending = (async () => {
-        const raw = await client.readContract({
-          address: registry,
-          abi: IDENTITY_REGISTRY_GET_AGENT_WALLET_ABI,
-          functionName: 'getAgentWallet',
-          args: [BigInt(publisherAgentId)],
-          blockNumber: publishedAtBlock,
-        });
-        if (typeof raw !== 'string') {
-          throw new Error(
-            `IdentityRegistry getAgentWallet(${publisherAgentId}) returned a non-address`,
-          );
+        const failures: string[] = [];
+        for (const [index, candidate] of clients.entries()) {
+          try {
+            let rpcChain = rpcChains.get(candidate);
+            if (!rpcChain) {
+              rpcChain = candidate.getChainId();
+              rpcChains.set(candidate, rpcChain);
+            }
+            const actualChainId = await rpcChain;
+            if (actualChainId !== chainId) {
+              throw new Error(
+                `publisher Safe RPC chain ${actualChainId} does not match expected ${chainId}`,
+              );
+            }
+
+            const raw = await candidate.readContract({
+              address: registry,
+              abi: IDENTITY_REGISTRY_GET_AGENT_WALLET_ABI,
+              functionName: 'getAgentWallet',
+              args: [BigInt(publisherAgentId)],
+              blockNumber: publishedAtBlock,
+            });
+            if (typeof raw !== 'string') {
+              throw new Error(
+                `IdentityRegistry getAgentWallet(${publisherAgentId}) returned a non-address`,
+              );
+            }
+            let wallet: Address;
+            try {
+              wallet = getAddress(raw);
+            } catch {
+              throw new Error(
+                `IdentityRegistry getAgentWallet(${publisherAgentId}) returned an invalid address`,
+              );
+            }
+            if (wallet.toLowerCase() === zeroAddress) {
+              throw new Error(`publisher agent ${publisherAgentId} is not bound to a Safe`);
+            }
+            return wallet;
+          } catch (error) {
+            failures.push(
+              `provider ${index + 1}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
         }
-        let wallet: Address;
-        try {
-          wallet = getAddress(raw);
-        } catch {
-          throw new Error(
-            `IdentityRegistry getAgentWallet(${publisherAgentId}) returned an invalid address`,
-          );
-        }
-        if (wallet.toLowerCase() === zeroAddress) {
-          throw new Error(`publisher agent ${publisherAgentId} is not bound to a Safe`);
-        }
-        return wallet;
+        throw new Error(
+          `publisher Safe resolution failed on all RPC providers: ${failures.join('; ')}`,
+        );
       })();
       cache.set(key, pending);
+      void pending.catch(() => {
+        if (cache.get(key) === pending) cache.delete(key);
+      });
     }
     return pending;
   };

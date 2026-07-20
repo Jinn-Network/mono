@@ -166,6 +166,7 @@ export function createVerdictSource(opts: VerdictSourceOptions): VerdictSource {
     // Page verdict rows (both polarities), dropping non-PASS/FAIL and any row
     // missing its verdict `manifestCid` (no join entry point → nothing to bridge).
     const refs: AttemptRef[] = [];
+    const seenRequestPolarities = new Set<string>();
     let cursor: string | null = null;
     for (let page = 0; page < MAX_PAGES; page++) {
       const data: VerdictsPage = await postGql<VerdictsPage>(url, fetchImpl, VERDICTS_QUERY, {
@@ -176,6 +177,10 @@ export function createVerdictSource(opts: VerdictSourceOptions): VerdictSource {
         const polarity = polarityOf(row);
         if (polarity === null) continue; // INVALID/INDETERMINATE/UNKNOWN — dropped.
         if (!row.manifestCid) continue; // no verdict envelope CID → no join entry point.
+        const candidateKey =
+          `${row.chainId}:${row.requestId.toLowerCase()}:${polarity}`;
+        if (seenRequestPolarities.has(candidateKey)) continue;
+        seenRequestPolarities.add(candidateKey);
         refs.push({
           requestId: row.requestId,
           chainId: row.chainId,

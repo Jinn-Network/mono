@@ -32,5 +32,6 @@ describe('jinn-layer production composition root', () => {
     expect(rootSource).toContain('authenticateExecutionEnvelope');
     expect(rootSource).toContain('createPublisherSafeResolver');
     expect(rootSource).toContain('resolvePublisherSafe');
+    expect(rootSource).toContain("fallbackRpcUrls: ['https://sepolia.base.org']");
   });
 });

@@ -74,8 +74,8 @@ const PKS: PkMap = new Map<unknown, string[]>([
   [pluginPublication, ['id']],
   [verdict, ['taskId', 'attemptIndex', 'verdictIndex', 'chainId']],
   [harnessCheckpoint, ['agentId', 'cid', 'chainId']],
-  [attemptEnvelopeMeta, ['requestId', 'chainId']],
-  [verdictEnvelopeMeta, ['requestId', 'chainId']],
+  [attemptEnvelopeMeta, ['requestId', 'publisherAgentId', 'manifestCid', 'chainId']],
+  [verdictEnvelopeMeta, ['requestId', 'publisherAgentId', 'manifestCid', 'chainId']],
   [rewardDistribution, ['chainId', 'serviceId', 'claimedAtBlock', 'logIndex']],
   [stakingService, ['chainId', 'stakingProxy', 'serviceId']],
   [stakingRewardCheckpoint, ['chainId', 'stakingProxy', 'epoch', 'serviceId', 'checkpointAtBlock', 'logIndex']],
@@ -1085,7 +1085,12 @@ describe('MetadataSet envelope: enrichment → attemptEnvelopeMeta', () => {
     });
 
     // attemptEnvelopeMeta row must be written
-    const metaRow = db.get(attemptEnvelopeMeta, { requestId: ENVELOPE_REQUEST_ID, chainId: CHAIN_ID });
+    const metaRow = db.get(attemptEnvelopeMeta, {
+      requestId: ENVELOPE_REQUEST_ID,
+      publisherAgentId: '9',
+      manifestCid: ENRICH_ENVELOPE_CID,
+      chainId: CHAIN_ID,
+    });
     expect(metaRow).toBeDefined();
     expect(metaRow).toMatchObject({
       requestId: ENVELOPE_REQUEST_ID,
@@ -1150,7 +1155,12 @@ describe('MetadataSet envelope: enrichment → attemptEnvelopeMeta', () => {
       fetchImpl: stubFetch,
     });
 
-    const metaRow = db.get(attemptEnvelopeMeta, { requestId: ENVELOPE_REQUEST_ID, chainId: CHAIN_ID });
+    const metaRow = db.get(attemptEnvelopeMeta, {
+      requestId: ENVELOPE_REQUEST_ID,
+      publisherAgentId: '9',
+      manifestCid: ENRICH_ENVELOPE_CID,
+      chainId: CHAIN_ID,
+    });
     expect(metaRow).toBeDefined();
     // Verbatim round-trip, order-preserving (the indexer does not sort).
     expect(JSON.parse(metaRow!.pluginsJson as string)).toEqual([
@@ -1255,7 +1265,12 @@ describe('MetadataSet envelope: enrichment → attemptEnvelopeMeta', () => {
       fetchImpl: stubFetch,
     });
 
-    const metaRow = db.get(attemptEnvelopeMeta, { requestId: ENVELOPE_REQUEST_ID, chainId: CHAIN_ID });
+    const metaRow = db.get(attemptEnvelopeMeta, {
+      requestId: ENVELOPE_REQUEST_ID,
+      publisherAgentId: '9',
+      manifestCid: ENRICH_ENVELOPE_CID,
+      chainId: CHAIN_ID,
+    });
     expect(metaRow).toBeDefined();
     expect(metaRow?.language).toBe('python');
   });
@@ -1291,6 +1306,71 @@ describe('MetadataSet envelope: enrichment → attemptEnvelopeMeta', () => {
 
     expect(db.count(attemptEnvelopeMeta)).toBe(0);
     expect(db.count(envelope)).toBeGreaterThan(0);
+  });
+
+  it('retains a later untrusted publisher/CID candidate without replacing the legitimate attempt anchor', async () => {
+    const attackerCid = 'bafyattackerattempt';
+    const stubFetch: FetchLike = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => SYNTHETIC_ENVELOPE,
+    });
+
+    for (const candidate of [
+      {
+        agentId: 9n,
+        cid: ENRICH_ENVELOPE_CID,
+        hash: MANIFEST_HASH,
+        block: 41_200_020n,
+      },
+      {
+        agentId: 666n,
+        cid: attackerCid,
+        hash: MANIFEST_HASH_2,
+        block: 41_200_021n,
+      },
+    ]) {
+      await handleMetadataSet({
+        event: metadataSetEvent(
+          {
+            agentId: candidate.agentId,
+            metadataKey: `envelope:${candidate.cid}`,
+            metadataValue: envelopePayloadV2({ tier: 1, manifestHash: candidate.hash }),
+          },
+          { block: candidate.block, logIndex: 0 },
+        ),
+        context,
+        solverNetManifest,
+        envelope,
+        harnessCheckpoint,
+        attemptEnvelopeMeta,
+        enrichEnvelopes: true,
+        ipfsGateway: 'https://stub',
+        fetchImpl: stubFetch,
+      });
+    }
+
+    expect(db.count(attemptEnvelopeMeta)).toBe(2);
+    expect(db.get(attemptEnvelopeMeta, {
+      requestId: ENVELOPE_REQUEST_ID,
+      publisherAgentId: '9',
+      manifestCid: ENRICH_ENVELOPE_CID,
+      chainId: CHAIN_ID,
+    })).toMatchObject({
+      publisherAgentId: '9',
+      manifestCid: ENRICH_ENVELOPE_CID,
+      manifestHash: MANIFEST_HASH,
+    });
+    expect(db.get(attemptEnvelopeMeta, {
+      requestId: ENVELOPE_REQUEST_ID,
+      publisherAgentId: '666',
+      manifestCid: attackerCid,
+      chainId: CHAIN_ID,
+    })).toMatchObject({
+      publisherAgentId: '666',
+      manifestCid: attackerCid,
+      manifestHash: MANIFEST_HASH_2,
+    });
   });
 });
 
@@ -1878,7 +1958,12 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
       ipfsGateway: 'https://stub',
       fetchImpl: stubFetch,
     });
-    const row = db.get(verdictEnvelopeMeta, { requestId: REQUEST_ID, chainId: CHAIN_ID });
+    const row = db.get(verdictEnvelopeMeta, {
+      requestId: REQUEST_ID,
+      publisherAgentId: '5',
+      manifestCid: EVAL_CID,
+      chainId: CHAIN_ID,
+    });
     expect(row).toBeDefined();
     expect(row).toMatchObject({
       requestId: REQUEST_ID,
@@ -2078,7 +2163,12 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
     });
 
     expect(db.count(verdictEnvelopeMeta)).toBe(1);
-    expect(db.get(verdictEnvelopeMeta, { requestId: REQUEST_ID, chainId: CHAIN_ID })).toMatchObject({
+    expect(db.get(verdictEnvelopeMeta, {
+      requestId: REQUEST_ID,
+      publisherAgentId: '5',
+      manifestCid: EVAL_CID,
+      chainId: CHAIN_ID,
+    })).toMatchObject({
       requestId: REQUEST_ID,
       verdictIndex: 2,
       actualPassed: true,
@@ -2129,7 +2219,12 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
       ipfsGateway: 'https://stub',
       fetchImpl: stubFetch,
     });
-    const row = db.get(verdictEnvelopeMeta, { requestId: REQUEST_ID, chainId: CHAIN_ID });
+    const row = db.get(verdictEnvelopeMeta, {
+      requestId: REQUEST_ID,
+      publisherAgentId: '5',
+      manifestCid: EVAL_CID,
+      chainId: CHAIN_ID,
+    });
     expect(row).toMatchObject({
       instanceId: 'sympy__sympy-27510',
       solverNetManifestCid: SOLVER_NET_MANIFEST_CID,
@@ -2167,7 +2262,12 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
       ipfsGateway: 'https://stub',
       fetchImpl: stubFetch,
     });
-    const row = db.get(verdictEnvelopeMeta, { requestId: REQUEST_ID, chainId: CHAIN_ID });
+    const row = db.get(verdictEnvelopeMeta, {
+      requestId: REQUEST_ID,
+      publisherAgentId: '5',
+      manifestCid: EVAL_CID,
+      chainId: CHAIN_ID,
+    });
     expect(row?.instanceId).toBe('');
     // solverNetManifestCid comes from the same task body fetch as instanceId;
     // an unfetchable task body leaves both empty (#669 Finding 2).
@@ -2197,6 +2297,8 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
       .values({
         requestId: SOLVE_REQUEST_ID,
         manifestCid: 'bafy-solution-envelope',
+        publisherAgentId: '',
+        manifestHash: '0x',
         solverType: 'swe-rebench-v2.v1',
         implName: 'claude-code-learner',
         implVersion: '1.2.3',
@@ -2253,17 +2355,81 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
       fetchImpl: stubFetch,
     });
 
-    const verdictRow = db.get(verdictEnvelopeMeta, { requestId: EVAL_REQUEST_ID, chainId: CHAIN_ID });
+    const verdictRow = db.get(verdictEnvelopeMeta, {
+      requestId: EVAL_REQUEST_ID,
+      publisherAgentId: '5',
+      manifestCid: EVAL_CID,
+      chainId: CHAIN_ID,
+    });
     expect(verdictRow?.solutionRequestId).toBe(SOLVE_REQUEST_ID);
     // The join resolves: the verdict's solutionRequestId equals the solution
     // attempt's requestId, and that attemptEnvelopeMeta row is retrievable.
     const attemptRow = db.get(attemptEnvelopeMeta, {
       requestId: verdictRow!.solutionRequestId as `0x${string}`,
+      publisherAgentId: '',
+      manifestCid: 'bafy-solution-envelope',
       chainId: CHAIN_ID,
     });
     expect(attemptRow).toBeDefined();
     expect(attemptRow?.requestId).toBe(verdictRow?.solutionRequestId);
     expect(attemptRow?.manifestCid).toBe('bafy-solution-envelope');
+  });
+
+  it('retains a later untrusted publisher/CID candidate without replacing the legitimate verdict anchor', async () => {
+    const attackerCid = 'bafyattackerverdict';
+    const stubFetch: FetchLike = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => SWE_REBENCH_FAIL_BODY,
+    });
+
+    for (const candidate of [
+      { agentId: 5n, cid: EVAL_CID, hash: MANIFEST_HASH, block: 41_500_010n },
+      { agentId: 666n, cid: attackerCid, hash: MANIFEST_HASH_2, block: 41_500_011n },
+    ]) {
+      await handleMetadataSet({
+        event: metadataSetEvent(
+          {
+            agentId: candidate.agentId,
+            metadataKey: `evaluation:${candidate.cid}`,
+            metadataValue: envelopePayloadV2({ manifestHash: candidate.hash, tier: 1 }),
+          },
+          { block: candidate.block, logIndex: 0 },
+        ),
+        context,
+        solverNetManifest,
+        envelope,
+        harnessCheckpoint,
+        attemptEnvelopeMeta,
+        verdictEnvelopeMeta,
+        enrichEnvelopes: true,
+        enrichVerdicts: true,
+        ipfsGateway: 'https://stub',
+        fetchImpl: stubFetch,
+      });
+    }
+
+    expect(db.count(verdictEnvelopeMeta)).toBe(2);
+    expect(db.get(verdictEnvelopeMeta, {
+      requestId: REQUEST_ID,
+      publisherAgentId: '5',
+      manifestCid: EVAL_CID,
+      chainId: CHAIN_ID,
+    })).toMatchObject({
+      publisherAgentId: '5',
+      manifestCid: EVAL_CID,
+      manifestHash: MANIFEST_HASH,
+    });
+    expect(db.get(verdictEnvelopeMeta, {
+      requestId: REQUEST_ID,
+      publisherAgentId: '666',
+      manifestCid: attackerCid,
+      chainId: CHAIN_ID,
+    })).toMatchObject({
+      publisherAgentId: '666',
+      manifestCid: attackerCid,
+      manifestHash: MANIFEST_HASH_2,
+    });
   });
 });
 
@@ -2325,7 +2491,12 @@ describe('AC5: verdict cutover reversibility (enrichVerdicts)', () => {
     if (enrichVerdicts) {
       // Rollback path: in-handler enrichment runs, verdict row written.
       expect(called).toBe(true);
-      const row = db.get(verdictEnvelopeMeta, { requestId: REQUEST_ID, chainId: CHAIN_ID });
+      const row = db.get(verdictEnvelopeMeta, {
+        requestId: REQUEST_ID,
+        publisherAgentId: '5',
+        manifestCid: EVAL_CID,
+        chainId: CHAIN_ID,
+      });
       expect(row).toBeDefined();
       expect(row?.enrichmentStatus).toBe('ok');
       expect(row?.evaluatorVerdict).toBe('FAIL');

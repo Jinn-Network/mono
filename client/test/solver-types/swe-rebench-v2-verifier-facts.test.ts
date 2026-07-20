@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
+import { keccak256, toBytes } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
+import { cidToDigestHex } from '../../src/adapters/mech/ipfs.js';
 import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
 import { computeMintedPoolRowV2Hash, type MintedPoolRowV2 } from '../../src/solver-types/_swe-rebench-v2-minted-pool.js';
 import { computeRowHash } from '../../src/solver-types/_swe-rebench-v2-substrate.js';
@@ -16,6 +18,7 @@ import {
   createBoundedRawHfRowFetcher,
   createSweRebenchV2VerifierFactsResolver,
   resolveSweRebenchV2VerifierFacts,
+  type SweRebenchV2AuthoritativeTaskBinding,
   type SweRebenchV2VerifierFactPorts,
 } from '../../src/solver-types/_swe-rebench-v2-verifier-facts.js';
 
@@ -31,8 +34,12 @@ const F2P = ['tests/test_widget.py::test_regression'];
 const P2P = ['tests/test_widget.py::test_existing'];
 const CREATOR_PRIVATE_KEY = `0x${'1'.repeat(64)}` as `0x${string}`;
 const FORGER_PRIVATE_KEY = `0x${'2'.repeat(64)}` as `0x${string}`;
+const EVALUATOR_PRIVATE_KEY = `0x${'3'.repeat(64)}` as `0x${string}`;
 const CREATOR = privateKeyToAccount(CREATOR_PRIVATE_KEY);
 const FORGER = privateKeyToAccount(FORGER_PRIVATE_KEY);
+const EVALUATOR = privateKeyToAccount(EVALUATOR_PRIVATE_KEY);
+const CREATOR_SAFE = `0x${'1'.repeat(40)}`;
+const EVALUATOR_SAFE = `0x${'3'.repeat(40)}`;
 
 async function signedTask(over: {
   hfDataset?: string;
@@ -41,6 +48,12 @@ async function signedTask(over: {
   repo?: string;
   baseCommit?: string;
   eligibility?: Record<string, unknown>;
+  role?: 'restoration' | 'evaluation';
+  description?: string;
+  manifestCid?: string;
+  creatorSafe?: string;
+  creatorAgentEoa?: string;
+  context?: Record<string, unknown>;
 } = {}, privateKey = CREATOR_PRIVATE_KEY) {
   const hfDataset = over.hfDataset ?? HF_DATASET;
   const hfSplit = over.hfSplit ?? HF_SPLIT;
@@ -51,11 +64,11 @@ async function signedTask(over: {
     schemaVersion: 'task.v1',
     id: 'task-1',
     solverType: 'swe-rebench-v2.v1',
-    solverNetManifestCid: MANIFEST_CID,
+    solverNetManifestCid: over.manifestCid ?? MANIFEST_CID,
     contractId: 'swe-rebench-v2',
     contractVersion: 'v1',
-    role: 'restoration',
-    description: 'repair the widget',
+    role: over.role ?? 'restoration',
+    description: over.description ?? 'repair the widget',
     window: { startTs: 1_752_000_000_000, endTs: 1_752_003_600_000 },
     spec: {
       schemaVersion: 'swe-rebench-v2.v1',
@@ -82,10 +95,11 @@ async function signedTask(over: {
       claimLeaseTtlSeconds: 1800,
     },
     creator: {
-      safeAddress: `0x${'1'.repeat(40)}`,
-      agentEoa: CREATOR.address,
+      safeAddress: over.creatorSafe ?? CREATOR_SAFE,
+      agentEoa: over.creatorAgentEoa ?? CREATOR.address,
     },
     createdAt: 1_752_000_000_000,
+    ...(over.context ? { context: over.context } : {}),
   };
   return signTaskV1(task, privateKey);
 }
@@ -185,10 +199,12 @@ function ports(args: {
   vetted: unknown;
   minted?: unknown;
   hf?: unknown;
+  task?: { cid: string; document: unknown };
 }): SweRebenchV2VerifierFactPorts {
   return {
     fetchIpfsJson: vi.fn(async ({ cid }) => {
       if (cid === VETTED_CID) return args.vetted;
+      if (args.task?.cid === cid) return args.task.document;
       if (args.minted !== undefined) return args.minted;
       throw new Error(`unexpected IPFS CID ${cid}`);
     }),
@@ -196,6 +212,44 @@ function ports(args: {
       if (args.hf === undefined) throw new Error('unexpected HF fetch');
       return args.hf;
     }),
+  };
+}
+
+async function evaluationWrapper(
+  solutionTaskCid: string,
+  over: {
+    creatorSafe?: string;
+    description?: string;
+    context?: Record<string, unknown>;
+    instanceId?: string;
+    repo?: string;
+    baseCommit?: string;
+  } = {},
+) {
+  return signedTask({
+    role: 'evaluation',
+    creatorSafe: over.creatorSafe ?? EVALUATOR_SAFE,
+    creatorAgentEoa: EVALUATOR.address,
+    description: over.description ?? 'evaluator-controlled wrapper description',
+    context: over.context ?? { solutionTaskCid },
+    instanceId: over.instanceId,
+    repo: over.repo,
+    baseCommit: over.baseCommit,
+  }, EVALUATOR_PRIVATE_KEY);
+}
+
+function authoritativeTaskBinding(
+  originalTaskCid: string,
+  over: Partial<SweRebenchV2AuthoritativeTaskBinding> = {},
+): SweRebenchV2AuthoritativeTaskBinding {
+  return {
+    taskCidDigest: cidToDigestHex(originalTaskCid),
+    manifestDigest: keccak256(toBytes(MANIFEST_CID)),
+    creatorSafe: CREATOR_SAFE,
+    evaluatorSafe: EVALUATOR_SAFE,
+    taskId: '42',
+    chainId: 84_532,
+    ...over,
   };
 }
 
@@ -524,6 +578,149 @@ describe('resolveSweRebenchV2VerifierFacts — Hugging Face proof', () => {
         createdAt: 1_752_000_000_000,
       },
     });
+  });
+});
+
+describe('createSweRebenchV2VerifierFactsResolver — authoritative task lineage', () => {
+  async function fixture(originalOverrides: Parameters<typeof signedTask>[0] = {}) {
+    const row = hfRow();
+    const artifact = vettedArtifact(baseEntry({ rowHash: hfRowHash(row) }));
+    const originalTask = await withRef(
+      signedTask(originalOverrides),
+      vettedRef(artifact),
+    );
+    const originalTaskCid = canonicalRawCid(originalTask);
+    return {
+      artifact,
+      originalTask,
+      originalTaskCid,
+      row,
+      deps: ports({
+        vetted: artifact,
+        hf: row,
+        task: { cid: originalTaskCid, document: originalTask },
+      }),
+    };
+  }
+
+  it('authenticates a production evaluation wrapper and derives every task fact from the original restoration task', async () => {
+    const f = await fixture();
+    const wrapper = await evaluationWrapper(f.originalTaskCid, {
+      description: 'forged evaluator summary',
+      instanceId: 'attacker__wrapper-9',
+      repo: 'attacker/wrapper',
+      baseCommit: 'f'.repeat(40),
+    });
+    const resolve = createSweRebenchV2VerifierFactsResolver(f.deps);
+
+    await expect(resolve(
+      {
+        signedTask: wrapper,
+        description: 'mutable outer wrapper summary',
+        spec: { problem_statement: 'mutable outer wrapper problem' },
+      },
+      'attacker__metadata-9',
+      authoritativeTaskBinding(f.originalTaskCid),
+    )).resolves.toEqual({
+      failToPass: F2P,
+      passToPass: P2P,
+      evalSemanticsVersion: SEMANTICS,
+      task: {
+        solverType: 'swe-rebench-v2.v1',
+        instanceId: INSTANCE_ID,
+        repo: REPO,
+        baseCommit: BASE_COMMIT,
+        createdAt: 1_752_000_000_000,
+        originalTaskCid: f.originalTaskCid,
+        creatorSafe: CREATOR_SAFE,
+        manifestDigest: keccak256(toBytes(MANIFEST_CID)),
+        description: 'repair the widget',
+      },
+    });
+    expect(f.deps.fetchIpfsJson).toHaveBeenCalledWith({
+      cid: f.originalTaskCid,
+      maxBytes: 2_000_000,
+    });
+  });
+
+  it('rejects a forged solutionTaskCid added after the evaluator signed the wrapper', async () => {
+    const f = await fixture();
+    const wrapper = await evaluationWrapper(f.originalTaskCid);
+    const forgedTaskCid = canonicalRawCid({ forged: true });
+
+    await expect(createSweRebenchV2VerifierFactsResolver(f.deps)(
+      {
+        signedTask: {
+          ...wrapper,
+          context: { solutionTaskCid: forgedTaskCid },
+        },
+      },
+      INSTANCE_ID,
+      authoritativeTaskBinding(f.originalTaskCid),
+    )).rejects.toThrow(/evaluation wrapper.*signature\.hash|canonical unsigned task/i);
+  });
+
+  it('rejects a signed wrapper whose original task CID digest is not TaskCreated.taskCidDigest', async () => {
+    const f = await fixture();
+    const wrapper = await evaluationWrapper(f.originalTaskCid);
+
+    await expect(createSweRebenchV2VerifierFactsResolver(f.deps)(
+      { signedTask: wrapper },
+      INSTANCE_ID,
+      authoritativeTaskBinding(f.originalTaskCid, {
+        taskCidDigest: `0x${'f'.repeat(64)}`,
+      }),
+    )).rejects.toThrow(/task CID digest.*TaskCreated/i);
+    expect(f.deps.fetchIpfsJson).not.toHaveBeenCalledWith({
+      cid: f.originalTaskCid,
+      maxBytes: 2_000_000,
+    });
+  });
+
+  it('rejects an evaluator-signed wrapper whose creator Safe is not the on-chain evaluator', async () => {
+    const f = await fixture();
+    const wrapper = await evaluationWrapper(f.originalTaskCid, {
+      creatorSafe: `0x${'9'.repeat(40)}`,
+    });
+
+    await expect(createSweRebenchV2VerifierFactsResolver(f.deps)(
+      { signedTask: wrapper },
+      INSTANCE_ID,
+      authoritativeTaskBinding(f.originalTaskCid),
+    )).rejects.toThrow(/evaluation wrapper creator.*on-chain evaluator/i);
+  });
+
+  it('rejects an authenticated original task whose creator Safe is not TaskCreated.creator', async () => {
+    const f = await fixture({ creatorSafe: `0x${'9'.repeat(40)}` });
+    const wrapper = await evaluationWrapper(f.originalTaskCid);
+
+    await expect(createSweRebenchV2VerifierFactsResolver(f.deps)(
+      { signedTask: wrapper },
+      INSTANCE_ID,
+      authoritativeTaskBinding(f.originalTaskCid),
+    )).rejects.toThrow(/original task creator.*TaskCreated creator/i);
+  });
+
+  it('rejects an authenticated original task whose manifest does not match TaskCreated.manifestDigest', async () => {
+    const f = await fixture({ manifestCid: 'bafy-other-solvernet-manifest' });
+    const wrapper = await evaluationWrapper(f.originalTaskCid);
+
+    await expect(createSweRebenchV2VerifierFactsResolver(f.deps)(
+      { signedTask: wrapper },
+      INSTANCE_ID,
+      authoritativeTaskBinding(f.originalTaskCid),
+    )).rejects.toThrow(/original task manifest.*TaskCreated manifestDigest/i);
+  });
+
+  it('rejects an authenticated original task that is not a restoration task', async () => {
+    const f = await fixture({ role: 'evaluation' });
+    const wrapper = await evaluationWrapper(f.originalTaskCid);
+
+    await expect(createSweRebenchV2VerifierFactsResolver(f.deps)(
+      { signedTask: wrapper },
+      INSTANCE_ID,
+      authoritativeTaskBinding(f.originalTaskCid),
+    )).rejects.toThrow(/original task.*role=restoration/i);
   });
 });
 

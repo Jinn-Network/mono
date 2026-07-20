@@ -24,6 +24,58 @@ describe('createPublisherSafeResolver', () => {
     }));
   });
 
+  it('falls back after an archive read failure and caches the historical binding', async () => {
+    const primaryRead = vi.fn(async () => {
+      throw new Error('historical state requires an archive token');
+    });
+    const fallbackRead = vi.fn(async () => SAFE);
+    const resolve = createPublisherSafeResolver({
+      rpcUrl: 'http://unused-primary.test',
+      expectedChainId: 84532,
+      client: {
+        getChainId: vi.fn(async () => 84532),
+        readContract: primaryRead,
+      },
+      fallbackClients: [{
+        getChainId: vi.fn(async () => 84532),
+        readContract: fallbackRead,
+      }],
+    });
+
+    await expect(resolve(84532, '101', 123n)).resolves.toBe(SAFE);
+    await expect(resolve(84532, '101', 123n)).resolves.toBe(SAFE);
+    expect(primaryRead).toHaveBeenCalledTimes(1);
+    expect(fallbackRead).toHaveBeenCalledTimes(1);
+    expect(fallbackRead).toHaveBeenCalledWith(expect.objectContaining({
+      functionName: 'getAgentWallet',
+      args: [101n],
+      blockNumber: 123n,
+    }));
+  });
+
+  it('rejects when every provider fails or is on the wrong chain', async () => {
+    const wrongChainRead = vi.fn(async () => SAFE);
+    const resolve = createPublisherSafeResolver({
+      rpcUrl: 'http://unused-primary.test',
+      expectedChainId: 84532,
+      client: {
+        getChainId: async () => 84532,
+        readContract: async () => {
+          throw new Error('archive state unavailable');
+        },
+      },
+      fallbackClients: [{
+        getChainId: async () => 8453,
+        readContract: wrongChainRead,
+      }],
+    });
+
+    await expect(resolve(84532, '101', 123n)).rejects.toThrow(
+      /all RPC providers.*archive state unavailable.*RPC chain 8453.*expected 84532/,
+    );
+    expect(wrongChainRead).not.toHaveBeenCalled();
+  });
+
   it('rejects chain drift and an unbound zero address', async () => {
     const resolveWrongChain = createPublisherSafeResolver({
       rpcUrl: 'http://unused.test',
