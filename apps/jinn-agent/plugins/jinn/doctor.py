@@ -223,8 +223,9 @@ def _check_prerequisites() -> dict:
     return {"name": name, "ok": True, "detail": version}
 
 
-def _check_host_provider() -> dict:
+def _check_host_provider(runner: Optional[jinn_layer.Runner] = None) -> dict:
     """Informational pointer — provider/credential sanity is the host's."""
+    del runner
     return {
         "name": "host-provider",
         "ok": True,
@@ -235,9 +236,157 @@ def _check_host_provider() -> dict:
     }
 
 
+def _check_evidence_store(runner: Optional[jinn_layer.Runner] = None) -> dict:
+    """Read-only episode count/readability signal from core's shared scanner."""
+    name = "evidence-readable"
+    update_remedy = _update_remedy()
+    try:
+        code, out, err = jinn_layer.evidence_inspect_json(runner=runner)
+        try:
+            reply = json.loads(out)
+        except (TypeError, json.JSONDecodeError):
+            reply = None
+        report = reply.get("report") if isinstance(reply, dict) else None
+        mode = reply.get("mode") if isinstance(reply, dict) else None
+        status = reply.get("status") if isinstance(reply, dict) else None
+        index_path = reply.get("indexPath") if isinstance(reply, dict) else object()
+        repair = reply.get("repair") if isinstance(reply, dict) else None
+        indexed = report.get("indexedEpisodes") if isinstance(report, dict) else None
+        excluded = (
+            report.get("syntheticExcludedFiles")
+            if isinstance(report, dict)
+            else None
+        )
+        excluded_rows = (
+            report.get("syntheticExcluded") if isinstance(report, dict) else None
+        )
+        unreadable = report.get("unreadableFiles") if isinstance(report, dict) else None
+        rows = report.get("unreadable") if isinstance(report, dict) else None
+        index_updated = report.get("indexUpdated") if isinstance(report, dict) else None
+        mutations = report.get("mutations") if isinstance(report, dict) else None
+        if not (
+            mode == "inspect"
+            and status in {"ok", "degraded"}
+            and isinstance(reply, dict)
+            and "indexPath" in reply
+            and index_path is None
+            and repair is False
+            and index_updated is False
+            and mutations == []
+            and isinstance(indexed, int)
+            and not isinstance(indexed, bool)
+            and indexed >= 0
+            and isinstance(excluded, int)
+            and not isinstance(excluded, bool)
+            and excluded >= 0
+            and isinstance(excluded_rows, list)
+            and len(excluded_rows) == excluded
+            and all(
+                isinstance(row, dict)
+                and isinstance(row.get("path"), str)
+                and bool(row["path"])
+                and isinstance(row.get("episodeId"), str)
+                and bool(row["episodeId"])
+                and isinstance(row.get("rule"), str)
+                and bool(row["rule"])
+                and isinstance(row.get("reason"), str)
+                and bool(row["reason"])
+                for row in excluded_rows
+            )
+            and isinstance(unreadable, int)
+            and not isinstance(unreadable, bool)
+            and unreadable >= 0
+            and isinstance(rows, list)
+            and len(rows) == unreadable
+            and all(
+                isinstance(row, dict)
+                and isinstance(row.get("path"), str)
+                and bool(row["path"])
+                and isinstance(row.get("reason"), str)
+                and bool(row["reason"])
+                for row in rows
+            )
+            and status == ("ok" if unreadable == 0 else "degraded")
+            and (code == 0) == (status == "ok")
+        ):
+            detail = (
+                _one_line(err or out)
+                if code != 0 and (err or out)
+                else "evidence readability reply unreadable"
+            )
+            return {
+                "name": name,
+                "ok": False,
+                "detail": detail,
+                "remedy": update_remedy,
+            }
+        detail = (
+            f"{indexed} indexed episode(s); "
+            f"{excluded} synthetic fixture(s) excluded; "
+            f"{unreadable} unreadable"
+        )
+        if unreadable > 0 or code != 0:
+            reasons = [
+                str(row.get("reason", "")).lower()
+                for row in rows
+                if isinstance(row, dict)
+            ] if isinstance(rows, list) else []
+            actions: list[str] = []
+            if any("permission" in reason or "eacces" in reason for reason in reasons):
+                actions.append("restore owner read access")
+            if any(
+                "hardlink" in reason
+                or "owned by uid" in reason
+                or "ownership" in reason
+                for reason in reasons
+            ):
+                actions.append("replace hardlinked or foreign-owned sources")
+            if any("symlink" in reason or "regular file" in reason for reason in reasons):
+                actions.append("replace unsafe symlink/non-regular sources")
+            if any("duplicate episodeid" in reason for reason in reasons):
+                actions.append("resolve duplicate episode IDs")
+            interrupted_repair = any(
+                "interrupted evidence repair" in reason for reason in reasons
+            )
+            if interrupted_repair:
+                actions.append("recover interrupted evidence repair")
+            classified = (
+                "permission",
+                "eacces",
+                "hardlink",
+                "owned by uid",
+                "ownership",
+                "symlink",
+                "regular file",
+                "duplicate episodeid",
+                "interrupted evidence repair",
+            )
+            if not reasons or any(not any(token in reason for token in classified) for reason in reasons):
+                actions.append("fix or remove malformed/schema-invalid sources")
+            remedy = "; ".join(actions)
+            repair_arg = " --repair" if interrupted_repair else ""
+            return {
+                "name": name,
+                "ok": False,
+                "detail": detail,
+                "remedy": (
+                    f"{remedy}, then run: {jinn_layer.binary()} "
+                    f"reindex{repair_arg} --json"
+                ),
+            }
+        return {"name": name, "ok": True, "detail": detail}
+    except Exception as exc:
+        return {
+            "name": name,
+            "ok": False,
+            "detail": f"evidence readability check failed: {exc}",
+            "remedy": update_remedy,
+        }
+
+
 # Full-run-only checks. A5's layer-side corpus probes (corpus-reachable /
-# corpus-content) append here — the extension seam, nothing more.
-_FULL_ONLY = [_check_host_provider]
+# corpus-content) append here.
+_FULL_ONLY = [_check_host_provider, _check_evidence_store]
 
 
 def run_checks(full: bool, runner: Optional[jinn_layer.Runner] = None) -> list[dict]:
@@ -247,7 +396,7 @@ def run_checks(full: bool, runner: Optional[jinn_layer.Runner] = None) -> list[d
         _check_prerequisites(),
     ]
     if full:
-        checks.extend(fn() for fn in _FULL_ONLY)
+        checks.extend(fn(runner=runner) for fn in _FULL_ONLY)
     return checks
 
 

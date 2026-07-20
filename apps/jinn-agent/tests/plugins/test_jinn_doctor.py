@@ -1,6 +1,6 @@
 """Plugin doctor — checks, output contract, session-start loudness (mono #1817).
 
-Covers the doctor module (renderer, the five plugin-side checks, the
+Covers the doctor module (renderer, the plugin-side checks, the
 full/fast split, the first-session marker + banner) and the ``__init__.py``
 wiring (session-start fast path, ``/jinn doctor``, the ``jinn-doctor`` CLI
 verb, memoization drop). Layer-side probes (``corpus-reachable`` /
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import json
 import os
 import re
 import subprocess
@@ -42,6 +43,25 @@ class ContractRunner:
 
     def __call__(self, argv: list[str], **_: object) -> tuple[int, str, str]:
         self.calls.append(argv)
+        if (
+            argv[1:] == ["reindex", "--dry-run", "--json"]
+            and self.output == '{"contractVersion":1}'
+        ):
+            return 0, json.dumps({
+                "status": "ok",
+                "mode": "inspect",
+                "indexPath": None,
+                "repair": False,
+                "report": {
+                    "indexedEpisodes": 3,
+                    "syntheticExcludedFiles": 0,
+                    "syntheticExcluded": [],
+                    "unreadableFiles": 0,
+                    "unreadable": [],
+                    "indexUpdated": False,
+                    "mutations": [],
+                },
+            }), ""
         return self.code, self.output, self.err
 
 
@@ -348,6 +368,260 @@ def test_host_provider_is_informational_pointer():
     }
 
 
+def test_evidence_store_check_reports_indexed_and_unreadable_counts():
+    healthy = doctor._check_evidence_store(ContractRunner())
+    assert healthy == {
+        "name": "evidence-readable",
+        "ok": True,
+        "detail": "3 indexed episode(s); 0 synthetic fixture(s) excluded; 0 unreadable",
+    }
+
+    runner = ContractRunner(
+        code=1,
+        output=json.dumps({
+            "status": "degraded",
+            "mode": "inspect",
+            "indexPath": None,
+            "repair": False,
+            "report": {
+                "indexedEpisodes": 2,
+                "syntheticExcludedFiles": 0,
+                "syntheticExcluded": [],
+                "unreadableFiles": 4,
+                "unreadable": [
+                    {"path": "/episodes/broken.json", "reason": "Unexpected token"},
+                    {"path": "/episodes/schema.json", "reason": "invalid schema"},
+                    {"path": "/episodes/link.json", "reason": "must be a regular file, not a symlink"},
+                    {"path": "/episodes/dupe.json", "reason": "duplicate episodeId: same"},
+                ],
+                "indexUpdated": False,
+                "mutations": [],
+            },
+        }),
+    )
+    broken = doctor._check_evidence_store(runner)
+    assert broken == {
+        "name": "evidence-readable",
+        "ok": False,
+        "detail": "2 indexed episode(s); 0 synthetic fixture(s) excluded; 4 unreadable",
+        "remedy": (
+            "replace unsafe symlink/non-regular sources; resolve duplicate episode IDs; "
+            "fix or remove malformed/schema-invalid sources, then run: jinn-layer reindex --json"
+        ),
+    }
+
+
+def test_evidence_store_check_reports_intentional_synthetic_exclusions():
+    runner = ContractRunner(
+        output=json.dumps({
+            "status": "ok",
+            "mode": "inspect",
+            "indexPath": None,
+            "repair": False,
+            "report": {
+                "indexedEpisodes": 23,
+                "syntheticExcludedFiles": 1,
+                "syntheticExcluded": [{
+                    "path": "/episodes/s1.episode.json",
+                    "episodeId": "s1-1784122564637021000",
+                    "rule": "legacy-short-session-placeholder-model-v1",
+                    "reason": "legacy synthetic fixture excluded by a versioned rule",
+                }],
+                "unreadableFiles": 0,
+                "unreadable": [],
+                "indexUpdated": False,
+                "mutations": [],
+            },
+        }),
+    )
+
+    check = doctor._check_evidence_store(runner)
+
+    assert check == {
+        "name": "evidence-readable",
+        "ok": True,
+        "detail": "23 indexed episode(s); 1 synthetic fixture(s) excluded; 0 unreadable",
+    }
+
+
+def test_evidence_store_check_gives_permission_specific_remediation():
+    runner = ContractRunner(
+        code=1,
+        output=json.dumps({
+            "status": "degraded",
+            "mode": "inspect",
+            "indexPath": None,
+            "repair": False,
+            "report": {
+                "indexedEpisodes": 0,
+                "syntheticExcludedFiles": 0,
+                "syntheticExcluded": [],
+                "unreadableFiles": 1,
+                "unreadable": [{
+                    "path": "/episodes/private.json",
+                    "reason": "EACCES: permission denied",
+                }],
+                "indexUpdated": False,
+                "mutations": [],
+            },
+        }),
+    )
+
+    check = doctor._check_evidence_store(runner)
+
+    assert check["remedy"] == (
+        "restore owner read access, then run: jinn-layer reindex --json"
+    )
+
+
+def test_evidence_store_check_repairs_interrupted_mutation_state():
+    runner = ContractRunner(
+        code=1,
+        output=json.dumps({
+            "status": "degraded",
+            "mode": "inspect",
+            "indexPath": None,
+            "repair": False,
+            "report": {
+                "indexedEpisodes": 2,
+                "syntheticExcludedFiles": 0,
+                "syntheticExcluded": [],
+                "unreadableFiles": 1,
+                "unreadable": [{
+                    "path": "/episodes/.jinn-rescue-example.txn",
+                    "reason": (
+                        "interrupted evidence repair state requires "
+                        "jinn-layer reindex --repair --json"
+                    ),
+                }],
+                "indexUpdated": False,
+                "mutations": [],
+            },
+        }),
+    )
+
+    check = doctor._check_evidence_store(runner)
+
+    assert check["remedy"] == (
+        "recover interrupted evidence repair, then run: "
+        "jinn-layer reindex --repair --json"
+    )
+
+
+def test_evidence_store_check_surfaces_an_unreadable_reply():
+    runner = ContractRunner(code=0, output="not-json")
+    check = doctor._check_evidence_store(runner)
+    assert check["name"] == "evidence-readable"
+    assert check["ok"] is False
+    assert check["detail"] == "evidence readability reply unreadable"
+    assert check["remedy"] == "jinn-agent plugins update jinn"
+
+
+def test_evidence_store_check_rejects_a_non_inspect_or_inconsistent_envelope():
+    replies = [
+        {
+            "status": "ok",
+            "mode": "reindex",
+            "indexPath": None,
+            "repair": False,
+            "report": {
+                "indexedEpisodes": 3,
+                "syntheticExcludedFiles": 0,
+                "syntheticExcluded": [],
+                "unreadableFiles": 0,
+                "unreadable": [],
+                "indexUpdated": False,
+                "mutations": [],
+            },
+        },
+        {
+            "status": "ok",
+            "mode": "inspect",
+            "indexPath": None,
+            "repair": False,
+            "report": {
+                "indexedEpisodes": 2,
+                "syntheticExcludedFiles": 0,
+                "syntheticExcluded": [],
+                "unreadableFiles": 1,
+                "unreadable": [],
+                "indexUpdated": False,
+                "mutations": [],
+            },
+        },
+        {
+            "status": "ok",
+            "mode": "inspect",
+            "indexPath": "/tmp/written.sqlite",
+            "repair": False,
+            "report": {
+                "indexedEpisodes": 3,
+                "syntheticExcludedFiles": 0,
+                "syntheticExcluded": [],
+                "unreadableFiles": 0,
+                "unreadable": [],
+                "indexUpdated": False,
+                "mutations": [],
+            },
+        },
+        {
+            "status": "ok",
+            "mode": "inspect",
+            "repair": False,
+            "report": {
+                "indexedEpisodes": 3,
+                "syntheticExcludedFiles": 0,
+                "syntheticExcluded": [],
+                "unreadableFiles": 0,
+                "unreadable": [],
+                "indexUpdated": False,
+                "mutations": [],
+            },
+        },
+        {
+            "status": "ok",
+            "mode": "inspect",
+            "indexPath": None,
+            "repair": True,
+            "report": {
+                "indexedEpisodes": 3,
+                "syntheticExcludedFiles": 0,
+                "syntheticExcluded": [],
+                "unreadableFiles": 0,
+                "unreadable": [],
+                "indexUpdated": True,
+                "mutations": [{"kind": "normalized-json"}],
+            },
+        },
+        {
+            "status": "ok",
+            "mode": "inspect",
+            "indexPath": None,
+            "repair": False,
+            "report": {
+                "indexedEpisodes": 3,
+                "syntheticExcludedFiles": 1,
+                "syntheticExcluded": [],
+                "unreadableFiles": 0,
+                "unreadable": [],
+                "indexUpdated": False,
+                "mutations": [],
+            },
+        },
+    ]
+
+    for reply in replies:
+        check = doctor._check_evidence_store(
+            ContractRunner(code=0, output=json.dumps(reply))
+        )
+        assert check == {
+            "name": "evidence-readable",
+            "ok": False,
+            "detail": "evidence readability reply unreadable",
+            "remedy": "jinn-agent plugins update jinn",
+        }
+
+
 # ── Task 6: run_checks aggregator + full/fast split ──────────────────────────
 
 
@@ -384,6 +658,7 @@ def test_run_checks_full_appends_host_provider(healthy_environment):
         "layer-contract",
         "prerequisites",
         "host-provider",
+        "evidence-readable",
     ]
 
 
@@ -392,6 +667,7 @@ def test_full_only_is_the_a5_extension_seam():
     # append here; the seam is a plain module-level list, not inlined.
     assert isinstance(doctor._FULL_ONLY, list)
     assert doctor._check_host_provider in doctor._FULL_ONLY
+    assert doctor._check_evidence_store in doctor._FULL_ONLY
 
 
 # ── Task 7: first-session marker + banner ────────────────────────────────────

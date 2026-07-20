@@ -55,9 +55,10 @@ Out of scope:
   registry, and similar). Report vulnerabilities in those to the
   relevant upstream.
 - Issues that require already-compromised operator keys, root on the
-  operator's machine, or a malicious browser extension. We will read
-  these but they will generally not be treated as security issues
-  against Jinn.
+  operator's machine, a malicious process already executing as the
+  operator's OS account with write access to Jinn's private runtime
+  directories, or a malicious browser extension. We will read these but
+  they will generally not be treated as security issues against Jinn.
 - Findings against historical contract deployments that have been
   superseded by a documented migration. Check `spec/` and
   `log/decisions/` first.

@@ -6,7 +6,9 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  linkSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -15,7 +17,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { describeEvidencePortContract } from '@jinn-network/plugin/testing';
 import { EPISODE_SCHEMA_VERSION, EpisodeV1Schema, type EpisodeV1 } from '@jinn-network/plugin';
 import type { CapturedTask } from '../src/captured-task.js';
-import { capturedTaskToEpisode, createEvidenceAdapter } from '../src/evidence-adapter.js';
+import {
+  capturedTaskToEpisode,
+  createEvidenceAdapter,
+  episodeFileName,
+} from '../src/evidence-adapter.js';
 
 /** A sample EpisodeV1 the byte-exact round-trip is checked against. */
 function makeSampleEpisode(overrides: Partial<EpisodeV1> = {}): EpisodeV1 {
@@ -314,6 +320,46 @@ describe('EvidenceAdapter — AC2 legacy read', () => {
 });
 
 describe('EvidenceAdapter — AC2 byte-exact round-trip', () => {
+  it('keeps literal and hashed filename namespaces disjoint and within NAME_MAX', () => {
+    const unsafeId = '../evil';
+    const unsafeName = episodeFileName(unsafeId);
+    const oldCollisionId = unsafeName.slice(0, -'.episode.json'.length);
+
+    expect(episodeFileName(oldCollisionId)).not.toBe(unsafeName);
+    expect(Buffer.byteLength(episodeFileName('x'.repeat(300)), 'utf8')).toBeLessThanOrEqual(255);
+  });
+
+  it('keeps the canonical write available when index refresh fails', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-index-failure-'));
+    const onStoreChanged = vi.fn(() => {
+      throw new Error('index unavailable');
+    });
+    const adapter = createEvidenceAdapter({ capturesDir, onStoreChanged });
+
+    const result = await adapter.put(makeSampleEpisode({ episodeId: 'index-failure' }));
+
+    expect(result.status).toBe('ok');
+    expect(onStoreChanged).toHaveBeenCalledOnce();
+    expect(existsSync(join(capturesDir, 'index-failure.episode.json'))).toBe(true);
+  });
+
+  it('keeps current writes strict when an optional field is literal null', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-strict-write-'));
+    const adapter = createEvidenceAdapter({ capturesDir });
+    const invalid = {
+      ...makeSampleEpisode({ episodeId: 'strict-null' }),
+      outcome: {
+        ...makeSampleEpisode().outcome,
+        summary: null,
+      },
+    } as unknown as EpisodeV1;
+
+    const result = await adapter.put(invalid);
+
+    expect(result.status).toBe('unavailable');
+    expect(existsSync(join(capturesDir, 'strict-null.episode.json'))).toBe(false);
+  });
+
   it('put(episode) then get(id) deep-equals the put episode', async () => {
     const capturesDir = mkdtempSync(join(tmpdir(), 'ev-rt-'));
     const adapter = createEvidenceAdapter({ capturesDir });
@@ -403,6 +449,74 @@ describe('EvidenceAdapter — AC2 byte-exact round-trip', () => {
     expect(result).toEqual({ status: 'ok', value: { episodeId: 'same-episode' } });
     expect(readFileSync(path, 'utf8')).toBe(preexistingBytes);
     if (process.platform !== 'win32') expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  it.skipIf(process.platform === 'win32')('rejects a symlinked evidence directory before writing', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ev-symlinked-store-'));
+    const realDir = join(root, 'real');
+    const capturesDir = join(root, 'linked');
+    mkdirSync(realDir);
+    symlinkSync(realDir, capturesDir);
+
+    const result = await createEvidenceAdapter({ capturesDir }).put(
+      makeSampleEpisode({ episodeId: 'must-not-write' }),
+    );
+
+    expect(result.status).toBe('unavailable');
+    if (result.status === 'unavailable') expect(result.reason).toMatch(/directory|symlink/i);
+    expect(existsSync(join(realDir, 'must-not-write.episode.json'))).toBe(false);
+  });
+
+  it.skipIf(process.platform === 'win32')('rejects a hardlinked existing episode without chmodding its alias', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-hardlinked-existing-'));
+    const episode = makeSampleEpisode({ episodeId: 'hardlinked' });
+    const path = join(capturesDir, 'hardlinked.episode.json');
+    const aliasPath = join(capturesDir, 'hardlinked-alias');
+    writeFileSync(path, JSON.stringify(episode), { mode: 0o644 });
+    linkSync(path, aliasPath);
+    chmodSync(path, 0o644);
+
+    const result = await createEvidenceAdapter({ capturesDir }).put(episode);
+
+    expect(result.status).toBe('unavailable');
+    if (result.status === 'unavailable') expect(result.reason).toMatch(/hardlink|collision/i);
+    expect(statSync(path).mode & 0o777).toBe(0o644);
+    expect(statSync(aliasPath).mode & 0o777).toBe(0o644);
+  });
+
+  it.skipIf(process.platform === 'win32')('recovers a writer temp alias left after canonical publication', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-publication-recovery-'));
+    const episode = makeSampleEpisode({ episodeId: 'recovered-write' });
+    const path = join(capturesDir, 'recovered-write.episode.json');
+    const orphan = join(
+      capturesDir,
+      '.recovered-write.episode.json.123.00000000-0000-4000-8000-000000000000.tmp',
+    );
+    writeFileSync(orphan, JSON.stringify(episode), { mode: 0o600 });
+    linkSync(orphan, path);
+
+    const result = await createEvidenceAdapter({ capturesDir }).put(episode);
+
+    expect(result).toEqual({ status: 'ok', value: { episodeId: 'recovered-write' } });
+    expect(existsSync(orphan)).toBe(false);
+    expect(statSync(path).nlink).toBe(1);
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(episode);
+  });
+
+  it('removes a private writer temp abandoned before canonical publication', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-prepublication-recovery-'));
+    const orphan = join(
+      capturesDir,
+      '.abandoned.episode.json.123.00000000-0000-4000-8000-000000000000.tmp',
+    );
+    writeFileSync(orphan, '{"partial":true}', { mode: 0o600 });
+    const episode = makeSampleEpisode({ episodeId: 'fresh-after-crash' });
+
+    const result = await createEvidenceAdapter({ capturesDir }).put(episode);
+
+    expect(result).toEqual({ status: 'ok', value: { episodeId: 'fresh-after-crash' } });
+    expect(existsSync(orphan)).toBe(false);
+    expect(existsSync(join(capturesDir, 'fresh-after-crash.episode.json'))).toBe(true);
   });
 
   it('rejects an episodeId collision without changing the first episode', async () => {

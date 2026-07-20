@@ -7,10 +7,10 @@ on:
   push:
     branches: [next]
     # Invariant: every path bundled into the published client — audit against
-    # client/scripts/bundle-jinn-layer.mjs (packages/plugin) and
+    # client/scripts/vendor-private-packages.mjs (packages/core + packages/plugin),
     # client/scripts/vendor-sdk.mjs (packages/sdk) + client portal deps when
     # adding a bundled package (#1797).
-    paths: ['client/**', 'packages/plugin/**', 'packages/sdk/**']
+    paths: ['client/**', 'packages/core/**', 'packages/plugin/**', 'packages/sdk/**']
   release:
     types: [published]
   workflow_dispatch:
@@ -192,6 +192,7 @@ jobs:
       - run: yarn typecheck
       - run: yarn build
       - run: yarn test
+      - run: yarn pack:smoke
 
       - name: Publish canary
         if: steps.meta.outputs.dist_tag == 'canary'

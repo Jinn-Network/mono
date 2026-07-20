@@ -8,7 +8,7 @@
  * Expects cwd to be client/ (see package.json pack:smoke).
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -125,6 +125,20 @@ try {
   const payload = parseJsonOrExit(run.stdout, 'npm exec');
   assertVersionPayload(payload, 'npm exec');
 
+  runOrExit('npm', ['exec', '--', 'jinn', '--help'], 'packed jinn --help');
+  const doctor = spawnSync('npm', ['exec', '--', 'jinn', 'doctor', '--json'], {
+    cwd: smokeDir,
+    encoding: 'utf8',
+    env: smokeEnv,
+    timeout: 60_000,
+  });
+  if (doctor.error || doctor.status === 50) {
+    console.error('smoke-test-pack: packed jinn doctor crashed');
+    console.error(doctor.error ?? doctor.stderr ?? doctor.stdout);
+    process.exit(doctor.status ?? 1);
+  }
+  parseJsonOrExit(doctor.stdout, 'packed jinn doctor');
+
   runOrExit(process.execPath, [nodePtyFix, '--verify'], 'node-pty verification');
 
   // jinn-layer bin (#1356): usage must print from the packed tarball's bin.
@@ -132,6 +146,37 @@ try {
   if (!layerUsage.stdout.includes('Usage: jinn-layer')) {
     console.error('smoke-test-pack: jinn-layer bin did not print usage');
     console.error(layerUsage.stdout);
+    process.exit(1);
+  }
+
+  // C4: prove the installed tarball can load the vendored core plus native
+  // better-sqlite3 and create the derived evidence index.
+  const episodesDir = join(smokeDir, 'episodes');
+  const evidenceIndex = join(smokeDir, 'evidence-index.sqlite');
+  mkdirSync(episodesDir);
+  const reindex = runOrExit(
+    'npm',
+    [
+      'exec',
+      '--',
+      'jinn-layer',
+      'reindex',
+      '--json',
+      '--episodes-dir',
+      episodesDir,
+      '--index-path',
+      evidenceIndex,
+    ],
+    'jinn-layer reindex',
+  );
+  const reindexPayload = parseJsonOrExit(reindex.stdout, 'jinn-layer reindex');
+  if (
+    reindexPayload.status !== 'ok'
+    || reindexPayload.report?.indexedEpisodes !== 0
+    || !existsSync(evidenceIndex)
+  ) {
+    console.error('smoke-test-pack: jinn-layer reindex did not create an empty SQLite index');
+    console.error(reindex.stdout);
     process.exit(1);
   }
 

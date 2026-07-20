@@ -34,6 +34,11 @@ import {
   createJinnPlugin,
   type JinnPluginDeps,
 } from '@jinn-network/plugin';
+import {
+  defaultEvidenceIndexPath,
+  inspectEvidenceStore,
+  reindexEvidenceStore,
+} from '@jinn-network/core';
 import { buildDefaultLayer } from './layer-default.js';
 import { buildPluginDepsFromEnv } from './plugin-wiring.js';
 import {
@@ -99,6 +104,7 @@ import {
 import {
   DEFAULT_CAPTURES_DIR,
   DEFAULT_DISTILL_CAPTURE_LIMIT,
+  DEFAULT_EPISODES_DIR,
   DEFAULT_SKILLS_INSTALL_DIR,
   coveredSessionIds,
   loadRecentCaptures,
@@ -153,6 +159,11 @@ import { resolveCliPassword } from '../../../src/cli/password.js';
 const USAGE = `Usage: jinn-layer <command> [args]
 
 Commands:
+  reindex [--repair|--dry-run] [--json] [--episodes-dir <dir>] [--index-path <file>]
+                                                 Rebuild the machine-local derived evidence index.
+                                                 --repair also normalizes the known null quartet
+                                                 and rescues misnamed episode files.
+                                                 --dry-run only reports readability; it writes nothing.
   contract --json                                 Print process contract version 1
   session pickup                                  Read a v1 pickup request on stdin
   session end                                     Read a complete EpisodeV1 request on stdin
@@ -1056,9 +1067,124 @@ export async function runJinnLayerCli(
   const isContributionPreview = verb === 'contribution' && subverb === 'preview';
   const isContributionLedger = verb === 'contribution' && subverb === 'ledger';
   const isContributionDisable = verb === 'contribution' && subverb === 'disable';
-  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed && !isSkillsInstall && !isDistillRun && !isDistillEvalPrep && !isDistillModels && !isDistill && !isDeriveEnv && !isContract && !isSessionPickup && !isSessionEnd && !isHistory && !isContributionPreview && !isContributionLedger && !isContributionDisable) {
+  const isReindex = verb === 'reindex';
+  if (!isCorpus && !isCapturePreview && !isLedger && !isPublish && !isSeed && !isSkillsInstall && !isDistillRun && !isDistillEvalPrep && !isDistillModels && !isDistill && !isDeriveEnv && !isContract && !isSessionPickup && !isSessionEnd && !isHistory && !isContributionPreview && !isContributionLedger && !isContributionDisable && !isReindex) {
     writer.write(USAGE);
     return verb === undefined || verb === 'help' || verb === '--help' ? 0 : 2;
+  }
+
+  if (isReindex) {
+    const reindexArgs = subverb === undefined ? rest : [subverb, ...rest];
+    const requestedJson = reindexArgs.includes('--json');
+    let parsed;
+    try {
+      parsed = parseArgs({
+        args: reindexArgs,
+        options: {
+          repair: { type: 'boolean', default: false },
+          'dry-run': { type: 'boolean', default: false },
+          json: { type: 'boolean', default: false },
+          'episodes-dir': { type: 'string' },
+          'index-path': { type: 'string' },
+        },
+        strict: true,
+        allowPositionals: false,
+      });
+    } catch (error) {
+      const message = `invalid reindex command: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+      writer.write(requestedJson
+        ? `${JSON.stringify({
+          status: 'error',
+          mode: 'reindex',
+          repair: reindexArgs.includes('--repair'),
+          error: message,
+        })}\n`
+        : `error: ${message}\n\n${USAGE}`);
+      return 2;
+    }
+    if (parsed.values.repair && parsed.values['dry-run']) {
+      const episodesDir = parsed.values['episodes-dir']
+        ?? process.env['JINN_LAYER_EPISODES_DIR']
+        ?? DEFAULT_EPISODES_DIR;
+      const indexPath = parsed.values['index-path']
+        ?? process.env['JINN_LAYER_EVIDENCE_INDEX_PATH']
+        ?? defaultEvidenceIndexPath(episodesDir);
+      const message = 'invalid reindex command: --repair and --dry-run are mutually exclusive';
+      writer.write(parsed.values.json
+        ? `${JSON.stringify({
+          status: 'error',
+          mode: 'reindex',
+          episodesDir,
+          indexPath,
+          repair: true,
+          error: message,
+        })}\n`
+        : `error: ${message}\n\n${USAGE}`);
+      return 2;
+    }
+    const episodesDir = parsed.values['episodes-dir']
+      ?? process.env['JINN_LAYER_EPISODES_DIR']
+      ?? DEFAULT_EPISODES_DIR;
+    const configuredIndexPath = parsed.values['index-path']
+      ?? process.env['JINN_LAYER_EVIDENCE_INDEX_PATH']
+      ?? defaultEvidenceIndexPath(episodesDir);
+    const dryRun = parsed.values['dry-run'];
+    const indexPath = dryRun ? null : configuredIndexPath;
+    try {
+      const report = dryRun
+        ? inspectEvidenceStore({ episodesDir })
+        : reindexEvidenceStore({
+          episodesDir,
+          indexPath: configuredIndexPath,
+          repair: parsed.values.repair,
+        });
+      const publicationFailed = !dryRun && !report.indexUpdated;
+      const status = report.unreadableFiles > 0 || publicationFailed ? 'degraded' : 'ok';
+      if (parsed.values.json) {
+        writer.write(`${JSON.stringify({
+          status,
+          mode: dryRun ? 'inspect' : 'reindex',
+          episodesDir,
+          indexPath,
+          repair: parsed.values.repair,
+          report,
+        })}\n`);
+      } else {
+        writer.write([
+          `Evidence ${dryRun ? 'inspection' : 'reindex'} ${status}: ${report.indexedEpisodes}/${report.scannedFiles} files indexed`,
+          `Index: ${indexPath === null
+            ? 'not rebuilt (--dry-run)'
+            : report.indexUpdated
+              ? indexPath
+              : `not updated (${report.indexError ?? 'unknown publication failure'})`}`,
+          `Repairs: ${report.nullFieldsRemoved} null fields removed; ${report.renamedFiles} files renamed`,
+          `Legacy unstamped: ${report.legacyUnstampedFiles}`,
+          `Synthetic fixtures excluded: ${report.syntheticExcludedFiles}`,
+          ...report.syntheticExcluded.map((row) => `  ${row.path}: ${row.reason}`),
+          `Unreadable: ${report.unreadableFiles}`,
+          ...report.unreadable.map((row) => `  ${row.path}: ${row.reason}`),
+          '',
+        ].join('\n'));
+      }
+      return report.unreadableFiles > 0 || publicationFailed ? 1 : 0;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (parsed.values.json) {
+        writer.write(`${JSON.stringify({
+          status: 'error',
+          mode: dryRun ? 'inspect' : 'reindex',
+          episodesDir,
+          indexPath,
+          repair: parsed.values.repair,
+          error: message,
+        })}\n`);
+      } else {
+        writer.write(`error: evidence reindex failed: ${message}\n`);
+      }
+      return 1;
+    }
   }
 
   if (isContract) {
