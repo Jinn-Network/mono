@@ -545,6 +545,12 @@ CREATE TABLE IF NOT EXISTS erc8004_anchors (
 CREATE INDEX IF NOT EXISTS idx_erc8004_anchors_envelope_cid ON erc8004_anchors(envelope_cid);
 CREATE INDEX IF NOT EXISTS idx_erc8004_anchors_envelope_id ON erc8004_anchors(envelope_id);
 
+CREATE TABLE IF NOT EXISTS manifest_batch_journal (
+  batch_key TEXT PRIMARY KEY,
+  state_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS task_post_locks (
   creator_safe_address TEXT NOT NULL,
   source_key TEXT NOT NULL,
@@ -637,6 +643,7 @@ export class Store {
     this.ensureRewardClaimsTxIndex();
     this.ensureNetworkArtifactsPeerCatalogId();
     this.ensureErc8004AnchorGasColumns();
+    this.ensureErc8004AnchorFinalizationIndex();
     this.ensureTaskPostsTaskCoordinatorColumns();
     this.ensureEnvelopeProjectionColumns();
     this.ensureActivityEventCostColumns();
@@ -694,6 +701,29 @@ export class Store {
     if (!names.has('fee_wei')) {
       this.db.exec(`ALTER TABLE erc8004_anchors ADD COLUMN fee_wei TEXT`);
     }
+  }
+
+  /**
+   * Exact anchor finalization is idempotent across process crashes. Older
+   * databases may contain duplicates from the pre-journal path, so retain the
+   * first local receipt before adding the durable key.
+   */
+  private ensureErc8004AnchorFinalizationIndex(): void {
+    this.db.exec(`
+      DELETE FROM erc8004_anchors
+       WHERE id NOT IN (
+         SELECT MIN(id)
+           FROM erc8004_anchors
+          GROUP BY chain_id, identity_registry_address, metadata_key, tx_hash
+       );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_erc8004_anchors_finalization
+        ON erc8004_anchors (
+          chain_id,
+          identity_registry_address,
+          metadata_key,
+          tx_hash
+        );
+    `);
   }
 
   /** Fresh v1 state is Task-first; older local DBs get additive columns only. */
@@ -2943,7 +2973,7 @@ export class Store {
 
   saveErc8004Anchor(input: Erc8004AnchorInput): void {
     this.db.prepare(
-      `INSERT INTO erc8004_anchors
+      `INSERT OR IGNORE INTO erc8004_anchors
          (envelope_id, envelope_cid, content_kind, metadata_key, agent_id,
           chain_id, identity_registry_address, tx_hash, block_number,
           payload_hex, anchored_at, gas_used, fee_wei)
@@ -2966,6 +2996,25 @@ export class Store {
       gasUsed: input.gasUsed ?? null,
       feeWei: input.feeWei ?? null,
     });
+  }
+
+  loadManifestBatchJournal(batchKey: string): string | null {
+    const row = this.db.prepare(
+      `SELECT state_json
+         FROM manifest_batch_journal
+        WHERE batch_key = ?`,
+    ).get(batchKey) as { state_json: string } | undefined;
+    return row?.state_json ?? null;
+  }
+
+  saveManifestBatchJournal(batchKey: string, stateJson: string): void {
+    this.db.prepare(
+      `INSERT INTO manifest_batch_journal (batch_key, state_json, updated_at)
+       VALUES (@batchKey, @stateJson, datetime('now'))
+       ON CONFLICT(batch_key) DO UPDATE SET
+         state_json = excluded.state_json,
+         updated_at = excluded.updated_at`,
+    ).run({ batchKey, stateJson });
   }
 
   listErc8004AnchorsByEnvelopeCids(envelopeCids: readonly string[]): Erc8004AnchorRow[] {

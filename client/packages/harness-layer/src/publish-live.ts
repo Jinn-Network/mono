@@ -51,6 +51,8 @@ export interface ManifestAnchorStore {
     gasUsed?: string | null;
     feeWei?: string | null;
   }): void;
+  loadManifestBatchJournal(batchKey: string): string | null;
+  saveManifestBatchJournal(batchKey: string, stateJson: string): void;
 }
 
 export interface LivePublishConfig {
@@ -120,6 +122,8 @@ export function createLivePublishDeps(config: LivePublishConfig): ManifestBatchP
       envelopeHash,
       envelope,
       requireSuccessfulReceipt,
+      onBroadcast,
+      onPrepared,
     }) => {
       const payload: ExecutionPayloadV2 = {
         version: 2,
@@ -133,20 +137,29 @@ export function createLivePublishDeps(config: LivePublishConfig): ManifestBatchP
       };
       const contentKind = contentKindForAnchor(metadataKey, envelopeCid);
       const payloadHex = encodeExecutionPayloadV2(payload);
+      onPrepared?.(payloadHex);
       const { txHash, blockNumber, gasUsed, feeWei } =
         await identityPublisher.publishContentV2({
           kind: contentKind,
           cid: envelopeCid,
           payload,
           requireSuccessfulReceipt,
+          onBroadcast,
         });
       return { txHash, blockNumber, gasUsed, feeWei, payloadHex };
     },
-    anchorManifest: async ({ manifestCid, payload }) => {
+    anchorManifest: async ({ manifestCid, payload, onBroadcast }) => {
       const { txHash, blockNumber, gasUsed, feeWei } =
-        await identityPublisher.publishManifest({ manifestCid, payload });
+        await identityPublisher.publishManifest({
+          manifestCid,
+          payload,
+          onBroadcast,
+        });
       return { txHash, blockNumber, gasUsed, feeWei };
     },
+    manifestJournal: config.store,
+    reconcileAnchor: (txHash) =>
+      identityPublisher.reconcileTransaction(txHash),
     recordManifestAnchor: (anchor) => {
       if (!config.store) {
         throw new Error(

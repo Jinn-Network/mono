@@ -6,6 +6,7 @@ import { capture, type CapturedTask, type PendingEnvelope } from '../src/capture
 import { MAX_RAW_IPFS_BLOCK_BYTES } from '../src/ipfs-cid.js';
 import {
   ManifestBatchAnchorError,
+  ManifestBatchPreparationError,
   ManifestBatchRecordingError,
   ManifestBatchSetError,
   publishManifestBatch,
@@ -25,6 +26,20 @@ const TEST_ADDRESS = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266' as const;
 const TEST_SAFE = '0x1111111111111111111111111111111111111111' as const;
 const TEST_TX = `0x${'ab'.repeat(32)}` as const;
 const CONTROL_TX = `0x${'cd'.repeat(32)}` as const;
+const SECOND_TX = `0x${'ef'.repeat(32)}` as const;
+
+function memoryJournal() {
+  const states = new Map<string, string>();
+  return {
+    store: {
+      loadManifestBatchJournal: (batchKey: string) => states.get(batchKey) ?? null,
+      saveManifestBatchJournal: (batchKey: string, stateJson: string) => {
+        states.set(batchKey, stateJson);
+      },
+    },
+    states,
+  };
+}
 
 function task(index: number): CapturedTask {
   return {
@@ -187,6 +202,9 @@ describe('publishManifestBatch', () => {
       'bafy-envelope-2',
       'bafy-envelope-3',
     ]);
+    expect(result.publishedMembers.map((member) => member.envelopeRef)).toEqual(
+      result.memberRefs,
+    );
     expect(result.batches).toHaveLength(1);
     expect(result.batches[0]).toMatchObject({
       manifestCid: calls.manifestCids[0],
@@ -374,6 +392,26 @@ describe('publishManifestBatch', () => {
     expect(calls.anchorManifest).toHaveLength(0);
   });
 
+  it('rejects a non-canonical manifest CID before broadcasting an anchor', async () => {
+    const { publishDeps, calls } = deps();
+    publishDeps.publishManifestBody = async (body) => {
+      const digest = createHash('sha256')
+        .update(canonicalJson(body))
+        .digest('hex');
+      return { cid: `f8100551220${digest}` };
+    };
+
+    await expect(
+      publishManifestBatch(
+        [{ pending: await pending(1), polarity: 'pass', instanceId: 'mono-1' }],
+        publishDeps,
+        { batchKind: 'bridge' },
+      ),
+    ).rejects.toThrow(/minimal|canonical|varint/i);
+
+    expect(calls.anchorManifest).toHaveLength(0);
+  });
+
   it('retains every uploaded ref when the first split manifest needs recovery', async () => {
     const { publishDeps } = deps();
     publishDeps.maxManifestBodyBytes = 400;
@@ -396,5 +434,202 @@ describe('publishManifestBatch', () => {
       memberRefs: ['bafy-envelope-1', 'bafy-envelope-2'],
       failed: expect.any(ManifestBatchRecordingError),
     });
+  });
+
+  it('retains partial member refs when a later envelope upload fails', async () => {
+    const { publishDeps } = deps();
+    let uploads = 0;
+    publishDeps.publishEnvelope = async () => {
+      uploads += 1;
+      if (uploads === 2) throw new Error('second envelope upload failed');
+      return { cid: 'bafy-envelope-first', sha256: '1'.repeat(64) };
+    };
+
+    const error = await publishManifestBatch(
+      [
+        { pending: await pending(1), sourceId: 'request-1' },
+        { pending: await pending(2), sourceId: 'request-2' },
+      ],
+      publishDeps,
+      { batchKind: 'bridge' },
+    ).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ManifestBatchPreparationError);
+    expect(error).toMatchObject({
+      memberRefs: ['bafy-envelope-first'],
+      stage: 'member-upload',
+    });
+  });
+
+  it('resumes only unfinished partitions and never re-anchors a confirmed partition', async () => {
+    const { publishDeps, calls, ledger } = deps();
+    const { store } = memoryJournal();
+    publishDeps.manifestJournal = store;
+    publishDeps.maxManifestBodyBytes = 400;
+    let anchorCall = 0;
+    publishDeps.anchorManifest = async ({ onBroadcast }) => {
+      anchorCall += 1;
+      const txHash = anchorCall === 1 ? TEST_TX : SECOND_TX;
+      onBroadcast?.(txHash);
+      if (anchorCall === 2) throw Object.assign(new Error('temporary send failure'), { txHash });
+      return {
+        txHash,
+        blockNumber: 11 + anchorCall,
+        gasUsed: 123_456n,
+        feeWei: 987_648n,
+      };
+    };
+    publishDeps.reconcileAnchor = async () => ({ status: 'reverted', txHash: SECOND_TX });
+    const members = [
+      { pending: await pending(1), instanceId: 'mono-1', sourceId: 'request-1' },
+      { pending: await pending(2), instanceId: 'mono-2', sourceId: 'request-2' },
+    ];
+
+    const first = await publishManifestBatch(
+      members,
+      publishDeps,
+      { batchKind: 'bridge' },
+    ).catch((caught: unknown) => caught);
+    expect(first).toBeInstanceOf(ManifestBatchSetError);
+    expect(first).toMatchObject({ completed: [expect.objectContaining({ anchorTx: TEST_TX })] });
+
+    const resumed = await publishManifestBatch(
+      members,
+      publishDeps,
+      { batchKind: 'bridge' },
+    );
+
+    expect(anchorCall).toBe(3);
+    expect(resumed.batches.map((batch) => batch.anchorTx)).toEqual([TEST_TX, SECOND_TX]);
+    expect(calls.publishEnvelope).toHaveLength(2);
+    expect(ledger.list()).toHaveLength(2);
+  });
+
+  it('fails closed on an unresolved broadcast instead of retrying it', async () => {
+    const { publishDeps } = deps();
+    const { store } = memoryJournal();
+    publishDeps.manifestJournal = store;
+    let anchorCalls = 0;
+    publishDeps.anchorManifest = async ({ onBroadcast }) => {
+      anchorCalls += 1;
+      onBroadcast?.(TEST_TX);
+      throw Object.assign(new Error('receipt unavailable'), { txHash: TEST_TX });
+    };
+    publishDeps.reconcileAnchor = async () => ({ status: 'pending', txHash: TEST_TX });
+    const members = [
+      { pending: await pending(1), instanceId: 'mono-1', sourceId: 'request-1' },
+    ];
+
+    await expect(
+      publishManifestBatch(members, publishDeps, { batchKind: 'bridge' }),
+    ).rejects.toBeInstanceOf(ManifestBatchAnchorError);
+    await expect(
+      publishManifestBatch(members, publishDeps, { batchKind: 'bridge' }),
+    ).rejects.toThrow(/pending|unconfirmed|reconcile/i);
+
+    expect(anchorCalls).toBe(1);
+  });
+
+  it('rejects a journal whose frozen partition plan was changed', async () => {
+    const { publishDeps } = deps();
+    const journal = memoryJournal();
+    publishDeps.manifestJournal = journal.store;
+    const members = [
+      { pending: await pending(1), instanceId: 'mono-1', sourceId: 'request-1' },
+    ];
+    await publishManifestBatch(members, publishDeps, { batchKind: 'bridge' });
+    const [[batchKey, stateJson]] = [...journal.states.entries()];
+    const state = JSON.parse(stateJson!) as {
+      partitions: Array<{ body: { batchKind: string } }>;
+    };
+    state.partitions[0]!.body.batchKind = 'tampered';
+    journal.states.set(batchKey!, JSON.stringify(state));
+
+    await expect(
+      publishManifestBatch(members, publishDeps, { batchKind: 'bridge' }),
+    ).rejects.toThrow(/journal.*conflict|frozen.*plan/i);
+  });
+
+  it('does not duplicate a ledger row after append succeeds but finalization throws', async () => {
+    const { publishDeps, ledger } = deps();
+    const { store } = memoryJournal();
+    publishDeps.manifestJournal = store;
+    let anchorCalls = 0;
+    publishDeps.anchorManifest = async ({ onBroadcast }) => {
+      anchorCalls += 1;
+      onBroadcast?.(TEST_TX);
+      return {
+        txHash: TEST_TX,
+        blockNumber: 11,
+        gasUsed: 123_456n,
+        feeWei: 987_648n,
+      };
+    };
+    let failAfterAppend = true;
+    publishDeps.ledger = {
+      list: ledger.list,
+      append: (entry) => {
+        ledger.append(entry);
+        if (failAfterAppend) {
+          failAfterAppend = false;
+          throw new Error('crash after append');
+        }
+      },
+    };
+    const members = [
+      { pending: await pending(1), instanceId: 'mono-1', sourceId: 'request-1' },
+    ];
+
+    await expect(
+      publishManifestBatch(members, publishDeps, { batchKind: 'bridge' }),
+    ).rejects.toBeInstanceOf(ManifestBatchRecordingError);
+    await publishManifestBatch(members, publishDeps, { batchKind: 'bridge' });
+
+    expect(anchorCalls).toBe(1);
+    expect(ledger.list()).toHaveLength(1);
+  });
+
+  it('reconciles an uncertain control anchor without broadcasting it twice', async () => {
+    const { publishDeps, calls } = deps();
+    const { store } = memoryJournal();
+    publishDeps.manifestJournal = store;
+    let controlCalls = 0;
+    const payloadHex = `0x${'ef'.repeat(32)}` as const;
+    publishDeps.anchorEnvelope = async (input) => {
+      controlCalls += 1;
+      input.onPrepared?.(payloadHex);
+      input.onBroadcast?.(CONTROL_TX);
+      throw Object.assign(new Error('control receipt unavailable'), {
+        txHash: CONTROL_TX,
+      });
+    };
+    publishDeps.reconcileAnchor = async (txHash) => ({
+      status: 'confirmed',
+      txHash,
+      blockNumber: 10,
+      gasUsed: 45_000n,
+      feeWei: 90_000n,
+    });
+    const members = [
+      { pending: await pending(1), instanceId: 'mono-1', sourceId: 'request-1' },
+    ];
+
+    await expect(
+      publishManifestBatch(
+        members,
+        publishDeps,
+        { batchKind: 'bridge', measurePerRecordControl: true },
+      ),
+    ).rejects.toBeInstanceOf(ManifestBatchRecordingError);
+    await publishManifestBatch(
+      members,
+      publishDeps,
+      { batchKind: 'bridge', measurePerRecordControl: true },
+    );
+
+    expect(controlCalls).toBe(1);
+    expect(calls.controlRecords).toEqual([
+      expect.objectContaining({ txHash: CONTROL_TX, payloadHex }),
+    ]);
   });
 });

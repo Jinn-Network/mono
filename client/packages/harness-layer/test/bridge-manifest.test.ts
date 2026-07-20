@@ -4,7 +4,10 @@ import {
   type AttemptRef,
   type BridgeDeps,
 } from '../src/bridge.js';
-import { ManifestBatchRecordingError } from '../src/publish.js';
+import {
+  ManifestBatchPreparationError,
+  ManifestBatchRecordingError,
+} from '../src/publish.js';
 
 const NOW = new Date('2026-07-20T00:00:00.000Z');
 const TX = `0x${'ab'.repeat(32)}` as const;
@@ -171,6 +174,24 @@ describe('bridgeAttempts manifest mode', () => {
     expect(result.manifestMemberRefs).toEqual(memberRefs);
     expect(result.manifestCid).toBe('bafy-manifest');
     expect(result.anchorTx).toBe(TX);
+    expect(result.errors).toHaveLength(2);
+  });
+
+  it('surfaces member refs retained before a later upload failure', async () => {
+    const { value } = deps({
+      publishManifestBatch: vi.fn().mockRejectedValue(
+        new ManifestBatchPreparationError(
+          'member-upload',
+          ['bafy-member-1'],
+          new Error('second upload failed'),
+          'batch-key',
+        ),
+      ),
+    });
+
+    const result = await bridgeAttempts([ref(1), ref(2)], value);
+
+    expect(result.manifestMemberRefs).toEqual(['bafy-member-1']);
     expect(result.errors).toHaveLength(2);
   });
 

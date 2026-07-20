@@ -101,6 +101,16 @@ export interface ManifestAnchorResult {
   feeWei: bigint | null;
 }
 
+export type ManifestAnchorReconciliation =
+  | ({ status: 'confirmed' } & ManifestAnchorResult)
+  | { status: 'reverted'; txHash: `0x${string}` }
+  | { status: 'pending'; txHash: `0x${string}` };
+
+export interface ManifestBatchJournalStore {
+  loadManifestBatchJournal(batchKey: string): string | null;
+  saveManifestBatchJournal(batchKey: string, stateJson: string): void;
+}
+
 export interface ManifestAnchorRecord {
   manifestCid: string;
   contentKind: 'manifest';
@@ -130,7 +140,14 @@ export interface ManifestBatchPublishDeps extends HarnessPublishDeps {
   anchorManifest(input: {
     manifestCid: string;
     payload: ManifestPayload;
+    onBroadcast?: (txHash: `0x${string}`) => void;
   }): Promise<ManifestAnchorResult>;
+  /** Durable live-only recovery journal. */
+  manifestJournal?: ManifestBatchJournalStore;
+  /** Read-only reconciliation for a previously journaled transaction. */
+  reconcileAnchor?(
+    txHash: `0x${string}`,
+  ): Promise<ManifestAnchorReconciliation>;
   recordManifestAnchor(input: ManifestAnchorRecord): void;
   /** Required only by the explicit paired gas-measurement control. */
   recordControlAnchor?(input: PerRecordControlAnchorRecord): void;
@@ -146,6 +163,8 @@ export interface ManifestBatchMemberInput {
   pending: PendingEnvelope;
   polarity?: 'pass' | 'fail';
   instanceId?: string;
+  /** Immutable upstream identity used to key durable recovery. */
+  sourceId?: string;
 }
 
 export interface ManifestBatchOptions {
@@ -182,6 +201,8 @@ export interface ManifestBatchSetResult {
   batches: ManifestBatchResult[];
   /** Every uploaded member ref, including refs in a later failed partition. */
   memberRefs: string[];
+  /** Exact frozen member envelopes, including journal-resumed publications. */
+  publishedMembers: PublishedMemberEnvelope[];
 }
 
 export interface PublishOptions {
@@ -255,6 +276,25 @@ export class ManifestBatchSetError extends Error {
     const detail = failed instanceof Error ? failed.message : String(failed);
     super(
       `manifest partition failed after ${completed.length} completed partition(s): ${detail}`,
+    );
+  }
+}
+
+export class ManifestBatchPreparationError extends Error {
+  override readonly name = 'ManifestBatchPreparationError';
+
+  constructor(
+    readonly stage: 'member-upload' | 'partition',
+    readonly memberRefs: string[],
+    readonly preparationError: unknown,
+    readonly batchKey: string | null,
+  ) {
+    const detail =
+      preparationError instanceof Error
+        ? preparationError.message
+        : String(preparationError);
+    super(
+      `manifest ${stage} failed after ${memberRefs.length} member upload(s): ${detail}`,
     );
   }
 }
@@ -539,6 +579,171 @@ export async function publish(
 
 type PreparedManifestMember = PublishedMemberEnvelope & ManifestBatchMemberInput;
 
+interface JournalMemberInput {
+  pending: PendingEnvelope;
+  polarity?: 'pass' | 'fail';
+  instanceId?: string;
+  sourceId: string;
+}
+
+interface JournalTransaction {
+  status: 'broadcast' | 'confirmed';
+  txHash: `0x${string}`;
+  blockNumber?: number | null;
+  gasUsed?: string | null;
+  feeWei?: string | null;
+  payloadHex?: `0x${string}`;
+}
+
+interface JournalPartition {
+  body: ManifestV0;
+  manifestCid: string | null;
+  transaction: JournalTransaction | null;
+  anchorRecorded: boolean;
+  controlTransaction?: JournalTransaction | null;
+  controlPayloadHex?: `0x${string}`;
+  controlRecorded?: boolean;
+}
+
+interface ManifestBatchJournalState {
+  version: 1;
+  batchKey: string;
+  batchKind: string;
+  sourceIds: string[];
+  nowIso: string;
+  maxBodyBytes: number;
+  measurePerRecordControl: boolean;
+  members: JournalMemberInput[];
+  published: PreparedManifestMember[];
+  partitions: JournalPartition[] | null;
+}
+
+interface ActiveManifestJournal {
+  batchKey: string | null;
+  state: ManifestBatchJournalState;
+  save(): void;
+}
+
+function safeJournalMember(member: ManifestBatchMemberInput): JournalMemberInput {
+  return {
+    pending: {
+      kind: member.pending.kind,
+      draft: member.pending.draft,
+      // Redaction `before` values are display-only secrets and must never be
+      // persisted. The draft is already scrubbed and is all publication needs.
+      redactions: [],
+    },
+    ...(member.polarity === undefined ? {} : { polarity: member.polarity }),
+    ...(member.instanceId === undefined ? {} : { instanceId: member.instanceId }),
+    sourceId: member.sourceId!,
+  };
+}
+
+function manifestBatchKey(batchKind: string, sourceIds: string[]): string {
+  return sha256Hex(
+    canonicalJson({
+      schemaVersion: 'jinn.manifest-batch-recovery.v1',
+      batchKind,
+      sourceIds,
+    }),
+  );
+}
+
+function parseJournalState(raw: string): ManifestBatchJournalState {
+  const parsed = JSON.parse(raw) as Partial<ManifestBatchJournalState>;
+  if (
+    parsed.version !== 1 ||
+    typeof parsed.batchKey !== 'string' ||
+    typeof parsed.batchKind !== 'string' ||
+    !Array.isArray(parsed.sourceIds) ||
+    !parsed.sourceIds.every((value) => typeof value === 'string') ||
+    typeof parsed.nowIso !== 'string' ||
+    !Number.isInteger(parsed.maxBodyBytes) ||
+    typeof parsed.measurePerRecordControl !== 'boolean' ||
+    !Array.isArray(parsed.members) ||
+    !Array.isArray(parsed.published) ||
+    (parsed.partitions !== null && !Array.isArray(parsed.partitions))
+  ) {
+    throw new Error('manifest journal conflict: invalid persisted state');
+  }
+  return parsed as ManifestBatchJournalState;
+}
+
+function openManifestJournal(
+  members: ManifestBatchMemberInput[],
+  deps: ManifestBatchPublishDeps,
+  opts: ManifestBatchOptions,
+  now: Date,
+  maxBodyBytes: number,
+): ActiveManifestJournal {
+  const journal = deps.manifestJournal;
+  if (!journal) {
+    const sourceIds = members.map((member, index) => member.sourceId ?? `ephemeral:${index}`);
+    return {
+      batchKey: null,
+      state: {
+        version: 1,
+        batchKey: '',
+        batchKind: opts.batchKind,
+        sourceIds,
+        nowIso: now.toISOString(),
+        maxBodyBytes,
+        measurePerRecordControl: Boolean(opts.measurePerRecordControl),
+        members: members.map((member, index) =>
+          safeJournalMember({ ...member, sourceId: sourceIds[index]! })),
+        published: [],
+        partitions: null,
+      },
+      save: () => undefined,
+    };
+  }
+
+  if (
+    members.some(
+      (member) =>
+        typeof member.sourceId !== 'string' || member.sourceId.length === 0,
+    )
+  ) {
+    throw new Error(
+      'durable manifest recovery requires a non-empty immutable sourceId for every member',
+    );
+  }
+  const sourceIds = members.map((member) => member.sourceId!);
+  const batchKey = manifestBatchKey(opts.batchKind, sourceIds);
+  const persisted = journal.loadManifestBatchJournal(batchKey);
+  const state = persisted === null
+    ? {
+        version: 1 as const,
+        batchKey,
+        batchKind: opts.batchKind,
+        sourceIds,
+        nowIso: now.toISOString(),
+        maxBodyBytes,
+        measurePerRecordControl: Boolean(opts.measurePerRecordControl),
+        members: members.map(safeJournalMember),
+        published: [],
+        partitions: null,
+      }
+    : parseJournalState(persisted);
+  if (
+    state.batchKey !== batchKey ||
+    state.batchKind !== opts.batchKind ||
+    canonicalJson(state.sourceIds) !== canonicalJson(sourceIds) ||
+    state.maxBodyBytes !== maxBodyBytes ||
+    state.measurePerRecordControl !== Boolean(opts.measurePerRecordControl)
+  ) {
+    throw new Error('manifest journal conflict: invocation does not match frozen plan');
+  }
+  const active = {
+    batchKey,
+    state,
+    save: () =>
+      journal.saveManifestBatchJournal(batchKey, JSON.stringify(state)),
+  };
+  if (persisted === null) active.save();
+  return active;
+}
+
 function manifestMember(member: PreparedManifestMember) {
   return {
     cid: member.envelopeRef,
@@ -626,6 +831,8 @@ async function publishPreparedManifest(
     now: Date;
     measurePerRecordControl: boolean;
     maxBodyBytes: number;
+    partition?: JournalPartition;
+    journal?: ActiveManifestJournal;
   },
 ): Promise<ManifestBatchResult> {
   const body = buildManifestBody(published, args.batchKind, args.createdAt);
@@ -635,9 +842,25 @@ async function publishPreparedManifest(
       `manifest body is ${bodyBytes.byteLength} bytes, exceeding the ${args.maxBodyBytes}-byte raw IPFS block limit`,
     );
   }
-  const manifestBlob = await deps.publishManifestBody(body);
-  assertRawSha256CidMatches(manifestBlob.cid, bodyBytes);
-  const manifestCid = manifestBlob.cid;
+  const partition = args.partition ?? {
+    body,
+    manifestCid: null,
+    transaction: null,
+    anchorRecorded: false,
+  };
+  if (canonicalJson(partition.body) !== canonicalJson(body)) {
+    throw new Error('manifest journal conflict: frozen partition plan changed');
+  }
+  const saveJournal = (): void => args.journal?.save();
+  if (partition.manifestCid === null) {
+    const manifestBlob = await deps.publishManifestBody(body);
+    assertRawSha256CidMatches(manifestBlob.cid, bodyBytes);
+    partition.manifestCid = manifestBlob.cid;
+    saveJournal();
+  } else {
+    assertRawSha256CidMatches(partition.manifestCid, bodyBytes);
+  }
+  const manifestCid = partition.manifestCid;
   const root = body.merkleRoot as `0x${string}`;
   const payload: ManifestPayload = {
     version: 0,
@@ -645,16 +868,93 @@ async function publishPreparedManifest(
     memberCount: published.length,
     createdAt: args.createdAt,
   };
-  let anchor: ManifestAnchorResult;
-  try {
-    anchor = await deps.anchorManifest({ manifestCid, payload });
-  } catch (error) {
-    throw new ManifestBatchAnchorError(
-      manifestCid,
-      published.map((member) => member.envelopeRef),
-      root,
-      error,
-    );
+
+  const reconcile = async (
+    transaction: JournalTransaction,
+  ): Promise<ManifestAnchorResult | null> => {
+    if (transaction.status === 'confirmed') {
+      return {
+        txHash: transaction.txHash,
+        blockNumber: transaction.blockNumber ?? null,
+        gasUsed:
+          transaction.gasUsed === null || transaction.gasUsed === undefined
+            ? null
+            : BigInt(transaction.gasUsed),
+        feeWei:
+          transaction.feeWei === null || transaction.feeWei === undefined
+            ? null
+            : BigInt(transaction.feeWei),
+      };
+    }
+    if (!deps.reconcileAnchor) {
+      throw Object.assign(
+        new Error(`manifest transaction ${transaction.txHash} is unconfirmed; reconciliation is unavailable`),
+        { txHash: transaction.txHash },
+      );
+    }
+    const reconciled = await deps.reconcileAnchor(transaction.txHash);
+    if (reconciled.status === 'pending') {
+      throw Object.assign(
+        new Error(`manifest transaction ${transaction.txHash} is pending; reconcile before retrying`),
+        { txHash: transaction.txHash },
+      );
+    }
+    if (reconciled.status === 'reverted') return null;
+    return reconciled;
+  };
+
+  let anchor: ManifestAnchorResult | null = null;
+  if (partition.transaction !== null) {
+    try {
+      anchor = await reconcile(partition.transaction);
+    } catch (error) {
+      throw new ManifestBatchAnchorError(
+        manifestCid,
+        published.map((member) => member.envelopeRef),
+        root,
+        error,
+      );
+    }
+    if (anchor === null) {
+      partition.transaction = null;
+      saveJournal();
+    } else if (partition.transaction.status !== 'confirmed') {
+      partition.transaction = {
+        status: 'confirmed',
+        txHash: anchor.txHash,
+        blockNumber: anchor.blockNumber,
+        gasUsed: anchor.gasUsed?.toString() ?? null,
+        feeWei: anchor.feeWei?.toString() ?? null,
+      };
+      saveJournal();
+    }
+  }
+  if (anchor === null) {
+    try {
+      anchor = await deps.anchorManifest({
+        manifestCid,
+        payload,
+        onBroadcast: (txHash) => {
+          partition.transaction = { status: 'broadcast', txHash };
+          saveJournal();
+        },
+      });
+    } catch (error) {
+      throw new ManifestBatchAnchorError(
+        manifestCid,
+        published.map((member) => member.envelopeRef),
+        root,
+        error,
+      );
+    }
+    partition.transaction = {
+      status: 'confirmed',
+      txHash: anchor.txHash,
+      blockNumber: anchor.blockNumber,
+      gasUsed: anchor.gasUsed?.toString() ?? null,
+      feeWei: anchor.feeWei?.toString() ?? null,
+    };
+    saveJournal();
   }
   const result: ManifestBatchResult = {
     manifestCid,
@@ -666,29 +966,72 @@ async function publishPreparedManifest(
   };
 
   try {
-    deps.recordManifestAnchor({
-      manifestCid,
-      contentKind: 'manifest',
-      metadataKey: buildManifestMetadataKey(manifestCid),
-      payloadHex: encodeManifestPayload(payload),
-      txHash: anchor.txHash,
-      blockNumber: anchor.blockNumber,
-      gasUsed: anchor.gasUsed,
-      feeWei: anchor.feeWei,
-      anchoredAt: args.createdAt,
-    });
+    if (!partition.anchorRecorded) {
+      deps.recordManifestAnchor({
+        manifestCid,
+        contentKind: 'manifest',
+        metadataKey: buildManifestMetadataKey(manifestCid),
+        payloadHex: encodeManifestPayload(payload),
+        txHash: anchor.txHash,
+        blockNumber: anchor.blockNumber,
+        gasUsed: anchor.gasUsed,
+        feeWei: anchor.feeWei,
+        anchoredAt: args.createdAt,
+      });
+      partition.anchorRecorded = true;
+      saveJournal();
+    }
     if (args.measurePerRecordControl) {
       const controlMember = published[0]!;
       const metadataKey = `capture:${controlMember.envelopeRef}`;
-      const controlAnchor = await deps.anchorEnvelope({
-        metadataKey,
-        envelopeCid: controlMember.envelopeRef,
-        envelopeHash: controlMember.envelope.signature.hash as `0x${string}`,
-        envelope: controlMember.envelope,
-        requireSuccessfulReceipt: true,
-      });
-      if (!controlAnchor.txHash) {
-        throw new Error('per-record control anchor returned no transaction hash');
+      let controlAnchor: ManifestAnchorResult | null =
+        partition.controlTransaction
+          ? await reconcile(partition.controlTransaction)
+          : null;
+      let controlPayloadHex =
+        partition.controlPayloadHex ?? partition.controlTransaction?.payloadHex;
+      if (controlAnchor === null && partition.controlTransaction) {
+        partition.controlTransaction = null;
+        saveJournal();
+      }
+      if (controlAnchor === null) {
+        const publishedControl = await deps.anchorEnvelope({
+          metadataKey,
+          envelopeCid: controlMember.envelopeRef,
+          envelopeHash: controlMember.envelope.signature.hash as `0x${string}`,
+          envelope: controlMember.envelope,
+          requireSuccessfulReceipt: true,
+          onPrepared: (payloadHex) => {
+            partition.controlPayloadHex = payloadHex;
+            controlPayloadHex = payloadHex;
+            saveJournal();
+          },
+          onBroadcast: (txHash) => {
+            partition.controlTransaction = { status: 'broadcast', txHash };
+            saveJournal();
+          },
+        });
+        if (!publishedControl.txHash) {
+          throw new Error('per-record control anchor returned no transaction hash');
+        }
+        controlAnchor = {
+          txHash: publishedControl.txHash,
+          blockNumber: publishedControl.blockNumber ?? null,
+          gasUsed: publishedControl.gasUsed ?? null,
+          feeWei: publishedControl.feeWei ?? null,
+        };
+        partition.controlTransaction = {
+          status: 'confirmed',
+          txHash: controlAnchor.txHash,
+          blockNumber: controlAnchor.blockNumber,
+          gasUsed: controlAnchor.gasUsed?.toString() ?? null,
+          feeWei: controlAnchor.feeWei?.toString() ?? null,
+          ...(publishedControl.payloadHex
+            ? { payloadHex: publishedControl.payloadHex }
+            : {}),
+        };
+        controlPayloadHex = publishedControl.payloadHex;
+        saveJournal();
       }
       result.control = {
         memberRef: controlMember.envelopeRef,
@@ -702,32 +1045,43 @@ async function publishPreparedManifest(
           `per-record control receipt telemetry unavailable for ${controlAnchor.txHash}`,
         );
       }
-      if (!controlAnchor.payloadHex) {
+      if (!controlPayloadHex) {
         throw new Error(
           `per-record control payload unavailable for ${controlAnchor.txHash}`,
         );
       }
-      deps.recordControlAnchor!({
-        envelopeRef: controlMember.envelopeRef,
-        contentKind: 'capture',
-        metadataKey,
-        payloadHex: controlAnchor.payloadHex,
-        txHash: controlAnchor.txHash,
-        blockNumber: result.control.blockNumber,
-        gasUsed: result.control.gasUsed,
-        feeWei: result.control.feeWei,
-        anchoredAt: args.createdAt,
-      });
+      if (!partition.controlRecorded) {
+        deps.recordControlAnchor!({
+          envelopeRef: controlMember.envelopeRef,
+          contentKind: 'capture',
+          metadataKey,
+          payloadHex: controlPayloadHex,
+          txHash: controlAnchor.txHash,
+          blockNumber: result.control.blockNumber,
+          gasUsed: result.control.gasUsed,
+          feeWei: result.control.feeWei,
+          anchoredAt: args.createdAt,
+        });
+        partition.controlRecorded = true;
+        saveJournal();
+      }
     }
     for (const member of published) {
-      deps.ledger.append({
+      const ledgerEntry = {
         ts: args.now.toISOString(),
         taskSummary: member.episode.task.summary,
         envelopeRef: member.envelopeRef,
         anchorTx: anchor.txHash,
         verifiabilityTier: member.episode.outcome.verificationStrength,
         status: 'published',
-      });
+      } as const;
+      const alreadyRecorded = deps.ledger.list().some(
+        (entry) =>
+          entry.status === 'published' &&
+          entry.envelopeRef === ledgerEntry.envelopeRef &&
+          entry.anchorTx === ledgerEntry.anchorTx,
+      );
+      if (!alreadyRecorded) deps.ledger.append(ledgerEntry);
     }
   } catch (error) {
     throw new ManifestBatchRecordingError(result, error);
@@ -773,19 +1127,74 @@ export async function publishManifestBatch(
     throw new Error('maxManifestBodyBytes must be a positive integer');
   }
   const maxBodyBytes = Math.min(requestedMax, MAX_RAW_IPFS_BLOCK_BYTES);
-  const now = deps.now?.() ?? new Date();
-  const createdAt = Math.floor(now.getTime() / 1000);
-  const published: PreparedManifestMember[] = [];
-  for (const member of members) {
-    const uploaded = await publishMemberEnvelope(member.pending, deps, { now });
-    published.push({ ...member, ...uploaded });
-  }
-  const partitions = partitionManifestMembers(
-    published,
-    opts.batchKind,
-    createdAt,
+  const requestedNow = deps.now?.() ?? new Date();
+  const journal = openManifestJournal(
+    members,
+    deps,
+    opts,
+    requestedNow,
     maxBodyBytes,
   );
+  const now = new Date(journal.state.nowIso);
+  if (Number.isNaN(now.getTime())) {
+    throw new Error('manifest journal conflict: invalid frozen publication time');
+  }
+  const createdAt = Math.floor(now.getTime() / 1000);
+  const published = journal.state.published;
+  try {
+    for (
+      let index = published.length;
+      index < journal.state.members.length;
+      index += 1
+    ) {
+      const member = journal.state.members[index]!;
+      const uploaded = await publishMemberEnvelope(member.pending, deps, { now });
+      published.push({ ...member, ...uploaded });
+      journal.save();
+    }
+  } catch (error) {
+    throw new ManifestBatchPreparationError(
+      'member-upload',
+      published.map((member) => member.envelopeRef),
+      error,
+      journal.batchKey,
+    );
+  }
+  let partitions: PreparedManifestMember[][];
+  try {
+    partitions = partitionManifestMembers(
+      published,
+      opts.batchKind,
+      createdAt,
+      maxBodyBytes,
+    );
+  } catch (error) {
+    throw new ManifestBatchPreparationError(
+      'partition',
+      published.map((member) => member.envelopeRef),
+      error,
+      journal.batchKey,
+    );
+  }
+  const frozenBodies = partitions.map((partition) =>
+    buildManifestBody(partition, opts.batchKind, createdAt));
+  if (journal.state.partitions === null) {
+    journal.state.partitions = frozenBodies.map((body) => ({
+      body,
+      manifestCid: null,
+      transaction: null,
+      anchorRecorded: false,
+    }));
+    journal.save();
+  } else if (
+    journal.state.partitions.length !== frozenBodies.length ||
+    journal.state.partitions.some(
+      (partition, index) =>
+        canonicalJson(partition.body) !== canonicalJson(frozenBodies[index]!),
+    )
+  ) {
+    throw new Error('manifest journal conflict: frozen partition plan changed');
+  }
   const batches: ManifestBatchResult[] = [];
   try {
     for (let index = 0; index < partitions.length; index += 1) {
@@ -797,6 +1206,8 @@ export async function publishManifestBatch(
           measurePerRecordControl:
             Boolean(opts.measurePerRecordControl) && index === 0,
           maxBodyBytes,
+          partition: journal.state.partitions[index]!,
+          journal,
         }),
       );
     }
@@ -813,6 +1224,14 @@ export async function publishManifestBatch(
   return {
     batches,
     memberRefs: published.map((member) => member.envelopeRef),
+    publishedMembers: published.map(
+      ({ envelopeRef, sha256, envelope, trace }) => ({
+        envelopeRef,
+        sha256,
+        envelope,
+        trace,
+      }),
+    ),
   };
 }
 

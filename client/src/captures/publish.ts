@@ -75,6 +75,10 @@ export interface CaptureEnvelopeAnchorInput {
   envelope: SignedEnvelope;
   /** Measurement controls require a mined successful receipt, not best effort. */
   requireSuccessfulReceipt?: boolean;
+  /** Persist an irreversible broadcast before receipt confirmation begins. */
+  onBroadcast?: (txHash: `0x${string}`) => void;
+  /** Persist the deterministic payload before its transaction is sent. */
+  onPrepared?: (payloadHex: `0x${string}`) => void;
 }
 
 export interface CaptureEnvelopeAnchorResult {

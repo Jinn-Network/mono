@@ -380,7 +380,8 @@ one covering `saveErc8004Anchor`; add a case, or a new `client/test/store-manife
 - Add `--anchor-mode <per-record|manifest>` to the `distill run` / `distill` arg parser
   (`parseArgs` options block, ~line 1030). Default `per-record`.
 - Add `--measure-per-record-control`, valid only with live `--anchor-mode manifest`. It adds one
-  receipt-bound `capture:` control for member 0 without changing ordinary manifest N→1 behavior.
+  receipt-bound `capture:` control for member 0 without changing ordinary manifest
+  N→one-anchor-per-raw-block-partition behavior.
 - When `manifest`, pass `anchorMode:'manifest'` + the `publishManifestBatch` wiring
   (`buildBridgeManifestPublisher(createLivePublishDeps(...))`) into the bridge deps.
 - On completion, if the bridge ran in manifest mode and `result.manifestCid` is set, print the
@@ -434,7 +435,7 @@ distinct deliverables. **This PR ships only the first.**
      (`jinn-layer distill run --anchor-mode manifest --measure-per-record-control`), which anchors
      one real `manifest:` record and — from the same run — one per-record `capture:` anchor for the
      per-anchor-vs-per-manifest comparison the corpus-supply spec §9 asks for. Ordinary manifest
-     runs omit the control flag and spend one anchor transaction.
+     runs omit the control flag and spend one anchor transaction per raw-block-sized partition.
    - The measured numbers are then recorded as a **follow-up doc edit** into
      `docs/superpowers/specs/2026-07-17-corpus-supply-design.md` §9 and/or issue #1829.
    - **NO gas constant is asserted anywhere in code, docs, or tests before that run produces it.**
