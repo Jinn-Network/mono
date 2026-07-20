@@ -68,11 +68,13 @@ jobs:
       - run: yarn build
 
       # Exercise the npm-shaped artifact and its vendored private runtime,
-      # including a native-SQLite reindex from an isolated install.
-      - run: yarn pack:smoke
+      # including client-only public imports and a native-SQLite reindex from
+      # an isolated install, then retain that exact smoke-validated archive.
+      - run: node scripts/smoke-test-pack.mjs --output jinn-client.tgz
 
-      # Keep one tarball for the explicit archive-content assertions below.
-      - run: yarn pack -o jinn-client.tgz
+      # Exercise the installed declaration graph and startup-reachable private
+      # runtime seam independently.
+      - run: yarn pack:smoke:private-runtime
 
       # Verify tarball contents — only expected files shipped
       - name: Verify tarball contents
