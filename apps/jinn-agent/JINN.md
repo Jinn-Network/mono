@@ -54,8 +54,10 @@ forked per harness and its Stage-2 outbound lane remains parked in either host.
 
 ```bash
 hermes plugins install Jinn-Network/jinn-plugin
-hermes plugins enable jinn
 ```
+
+Answer `y` at Hermes's enable prompt, then verify the install with
+`hermes jinn-doctor`.
 
 The plugin feature-detects its host (never fork-detects): it imports nothing
 fork-only, writes only under `$HERMES_HOME`, and resolves its harness identity
@@ -64,7 +66,8 @@ host) it honestly reports `hermes-agent`. Corpus access, local capture,
 scrubbing, and distillation stay behind the Jinn layer boundary; the plugin is
 a thin adapter. The plugin install carries that layer and
 `hermes plugins update jinn` refreshes both. Details:
-[`plugins/jinn/README.md`](plugins/jinn/README.md).
+[`plugins/jinn/README.md`](plugins/jinn/README.md), including disable, removal,
+backup, and full local-state purge.
 
 ## What the Jinn layer adds — one integration surface
 
