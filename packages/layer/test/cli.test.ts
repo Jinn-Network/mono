@@ -1603,9 +1603,10 @@ describe('jinn-layer distill run', () => {
       distill: async (cluster: DistillCluster): Promise<DistillLLMOutput> => {
         active += 1;
         peak = Math.max(peak, active);
-        await new Promise((resolve) => setTimeout(resolve, 15));
+        await Promise.resolve();
         active -= 1;
-        return validEvalOutput(`${model}-${cluster.clusterId}`);
+        // Concurrency is the contract here; avoid coupling this fixture to the valid-output/publish path.
+        return { name: `${model}-${cluster.clusterId}`, description: '', body: '' };
       },
       metaDistill: async () => META_OUT,
     });
