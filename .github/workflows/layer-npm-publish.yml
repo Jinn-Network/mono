@@ -1,0 +1,137 @@
+name: Layer Packages npm Publish
+
+on:
+  push:
+    branches: [next]
+    paths:
+      - 'packages/plugin/**'
+      - 'packages/core/**'
+      - 'packages/layer/**'
+      - '.github/workflows/layer-npm-publish.yml'
+
+# Trusted publishing (OIDC): register all three package/job combinations on
+# npmjs. No long-lived npm token is accepted by this workflow.
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: layer-packages-canary-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plugin-canary:
+    name: Publish plugin canary
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    defaults:
+      run:
+        working-directory: packages/plugin
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: npm install -g npm@11.5.1
+      - run: corepack enable
+      - run: yarn install --immutable
+      - run: yarn typecheck
+      - run: yarn test
+      - run: yarn build
+      - name: Patch canary version
+        shell: bash
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-8)
+          PUBLISH_VERSION="${PACKAGE_VERSION}-canary.${SHORT_SHA}"
+          npm pkg set "version=${PUBLISH_VERSION}"
+      - run: npm pack --dry-run
+      - name: Publish plugin canary
+        run: |
+          unset NODE_AUTH_TOKEN
+          npm publish --access public --tag canary
+
+  core-canary:
+    name: Publish core canary
+    needs: plugin-canary
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    defaults:
+      run:
+        working-directory: packages/core
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: npm install -g npm@11.5.1
+      - run: corepack enable
+      - run: yarn --cwd ../plugin install --immutable
+      - run: yarn --cwd ../plugin build
+      - run: yarn install --immutable
+      - run: yarn typecheck
+      - run: yarn test
+      - run: yarn build
+      - name: Patch canary version and dependency
+        shell: bash
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          PLUGIN_VERSION=$(node -p "require('../plugin/package.json').version")
+          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-8)
+          PUBLISH_VERSION="${PACKAGE_VERSION}-canary.${SHORT_SHA}"
+          npm pkg set \
+            "version=${PUBLISH_VERSION}" \
+            "dependencies.@jinn-network/plugin=${PLUGIN_VERSION}-canary.${SHORT_SHA}"
+      - run: npm pack --dry-run
+      - name: Publish core canary
+        run: |
+          unset NODE_AUTH_TOKEN
+          npm publish --access public --tag canary
+
+  layer-canary:
+    name: Publish layer canary
+    needs: core-canary
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    defaults:
+      run:
+        working-directory: packages/layer
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: npm install -g npm@11.5.1
+      - run: corepack enable
+      - run: yarn --cwd ../plugin install --immutable
+      - run: yarn --cwd ../plugin build
+      - run: yarn --cwd ../core install --immutable
+      - run: yarn --cwd ../core build
+      - run: yarn install --immutable
+      - run: yarn typecheck
+      - run: yarn test
+      - run: yarn build
+      - run: yarn pack:smoke
+      - name: Patch canary version and dependencies
+        shell: bash
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          PLUGIN_VERSION=$(node -p "require('../plugin/package.json').version")
+          CORE_VERSION=$(node -p "require('../core/package.json').version")
+          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-8)
+          PUBLISH_VERSION="${PACKAGE_VERSION}-canary.${SHORT_SHA}"
+          npm pkg set \
+            "version=${PUBLISH_VERSION}" \
+            "dependencies.@jinn-network/plugin=${PLUGIN_VERSION}-canary.${SHORT_SHA}" \
+            "dependencies.@jinn-network/core=${CORE_VERSION}-canary.${SHORT_SHA}"
+      - run: npm pack --dry-run
+      - name: Publish layer canary
+        run: |
+          unset NODE_AUTH_TOKEN
+          npm publish --access public --tag canary

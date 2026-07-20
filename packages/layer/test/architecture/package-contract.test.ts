@@ -22,6 +22,8 @@ describe('@jinn-network/jinn-layer package contract', () => {
     });
     expect(pkg.files).toEqual(['dist/']);
     expect(pkg.publishConfig).toEqual({ access: 'public' });
+    expect((pkg.scripts as Record<string, string>)['pack:smoke'])
+      .toBe('node scripts/pack-smoke.mjs');
   });
 
   it('pins the plugin-local runtime contract to this exact package version', () => {
@@ -35,5 +37,18 @@ describe('@jinn-network/jinn-layer package contract', () => {
     expect(runtime.package).toBe(pkg.name);
     expect(runtime.version).toBe(pkg.version);
     expect(runtime.bin).toBe('runtime/node_modules/.bin/jinn-layer');
+  });
+
+  it('has publicly installable direct package dependencies', () => {
+    const core = JSON.parse(
+      readFileSync(resolve(repoRoot, 'packages/core/package.json'), 'utf8'),
+    ) as Record<string, unknown>;
+    const plugin = JSON.parse(
+      readFileSync(resolve(repoRoot, 'packages/plugin/package.json'), 'utf8'),
+    ) as Record<string, unknown>;
+    for (const dependency of [core, plugin]) {
+      expect(dependency.private).not.toBe(true);
+      expect(dependency.publishConfig).toEqual({ access: 'public' });
+    }
   });
 });

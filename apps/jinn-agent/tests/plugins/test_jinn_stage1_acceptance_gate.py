@@ -18,7 +18,8 @@ def test_cold_stock_script_uses_built_products_and_both_lifecycle_drivers():
 
     assert "9df5f879b4a5925c0f8f947e7e16ed8e845932c3" in script
     assert "pip wheel" in script
-    assert "dist/bin/jinn-layer.js" in script
+    assert 'LAYER="$REPO_ROOT/packages/layer"' in script
+    assert 'JINN_LAYER_BIN="$LAYER/dist/bin/jinn-layer.js"' in script
     assert "scripts/fixtures/jinn-layer-stub" not in script
     assert "stage1-stock-product.py" in script
     assert "stage1-task-creator-acceptance.mjs" in script
@@ -36,16 +37,20 @@ def test_stage1_gate_is_blocking_for_every_product_boundary():
 
     assert "apps/jinn-agent/**" in pull_request_paths
     assert "packages/plugin/**" in pull_request_paths
-    assert "client/packages/harness-layer/**" in pull_request_paths
+    assert "packages/core/**" in pull_request_paths
+    assert "packages/layer/**" in pull_request_paths
     assert gate["name"] == "Cold-stock Stage 1 product gate"
     assert gate.get("continue-on-error") is not True
     assert "pull_request" in gate["if"]
     assert "push" in gate["if"]
     rendered_steps = "\n".join(
-        str(step.get("run", "")) for step in gate["steps"]
+        f"{step.get('working-directory', '')} {step.get('run', '')}"
+        for step in gate["steps"]
     )
+    assert "packages/layer" in rendered_steps
     assert "yarn build" in rendered_steps
     assert "packages/plugin" in rendered_steps
+    assert "contribution-store.test.ts" in rendered_steps
     assert "process-contract.test.ts" in rendered_steps
     assert "task-creator-session-echo.test.ts" in rendered_steps
     assert "cold-stock-e2e.sh" in rendered_steps

@@ -9,8 +9,8 @@ on:
     # Invariant: every path bundled into the published client — audit against
     # client/scripts/vendor-private-packages.mjs and
     # client/scripts/materialize-bundled-workspaces.mjs (packages/core +
-    # packages/plugin), client/scripts/bundle-jinn-layer.mjs, and
-    # client/scripts/vendor-sdk.mjs (packages/sdk) + client portal deps when
+    # packages/plugin), and client/scripts/vendor-sdk.mjs (packages/sdk) +
+    # client portal deps when
     # adding a bundled package (#1797).
     paths: ['client/**', 'packages/core/**', 'packages/plugin/**', 'packages/sdk/**']
   release:

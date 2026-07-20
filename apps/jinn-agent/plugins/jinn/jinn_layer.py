@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import sys
@@ -31,8 +32,10 @@ logger = logging.getLogger(__name__)
 # 3-tuple; `run()`/`session_pickup()` normalize either shape to the 3-tuple
 # every caller now sees (mono #1787).
 Runner = Callable[..., Tuple[int, str]]
+RuntimeInstaller = Callable[[List[str], Path], Tuple[int, str, str]]
 
 _TIMEOUT_S = 120
+_INSTALL_TIMEOUT_S = 300
 CONTRACT_VERSION = 1
 PROCESS_STATUSES = ("ok", "degraded", "unavailable")
 _LAYER_PACKAGE = "@jinn-network/jinn-layer"
@@ -91,6 +94,28 @@ def resolve_binary(plugin_dir: Optional[Path] = None) -> LayerResolution:
             raise LayerResolutionError(
                 f"plugin-local layer artifact is not executable: {local_bin}"
             )
+        installed_manifest = (
+            local_bin.parent.parent
+            / "@jinn-network"
+            / "jinn-layer"
+            / "package.json"
+        )
+        try:
+            installed = json.loads(installed_manifest.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise LayerResolutionError(
+                f"plugin-local layer package manifest is unreadable: "
+                f"{installed_manifest}"
+            ) from exc
+        if (
+            not isinstance(installed, dict)
+            or installed.get("name") != package
+            or installed.get("version") != version
+        ):
+            raise LayerResolutionError(
+                f"plugin-local layer version mismatch: expected "
+                f"{package}@{version} in {installed_manifest}"
+            )
         return LayerResolution(
             argv=(str(local_bin),),
             source="plugin-local",
@@ -114,6 +139,96 @@ def resolve_binary(plugin_dir: Optional[Path] = None) -> LayerResolution:
         package=package,
         version=version,
     )
+
+
+def _default_runtime_installer(
+    argv: List[str],
+    cwd: Path,
+) -> Tuple[int, str, str]:
+    try:
+        proc = subprocess.run(
+            argv,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=_INSTALL_TIMEOUT_S,
+            check=False,
+        )
+        return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+    except FileNotFoundError:
+        return 127, "", f"{argv[0]}: not found"
+    except subprocess.TimeoutExpired:
+        return 124, "", f"{argv[0]}: timed out after {_INSTALL_TIMEOUT_S}s"
+
+
+def ensure_plugin_runtime(
+    plugin_dir: Optional[Path] = None,
+    installer: RuntimeInstaller = _default_runtime_installer,
+) -> LayerResolution:
+    """Acquire the exact published layer for an installed slim plugin.
+
+    An existing product artifact is validated first. Development overrides
+    remain second and third in the resolution order and suppress acquisition
+    when the plugin-local artifact is absent.
+    """
+    directory = plugin_dir if plugin_dir is not None else Path(__file__).resolve().parent
+    package, version, bin_path = _runtime_contract(directory)
+    local_bin = directory / bin_path
+    if local_bin.exists():
+        try:
+            return resolve_binary(directory)
+        except LayerResolutionError:
+            # A plugin update may advance the exact pin. npm repairs the
+            # plugin-owned prefix; direct resolution still fails closed.
+            pass
+
+    if (os.environ.get("JINN_LAYER_BIN") or "").strip():
+        return resolve_binary(directory)
+    if shutil.which("jinn-layer"):
+        return resolve_binary(directory)
+
+    npm = shutil.which("npm")
+    if npm is None:
+        raise LayerResolutionError(
+            f"cannot install {package}@{version}: npm is not on PATH"
+        )
+    runtime_dir = directory / "runtime"
+    if runtime_dir.is_symlink():
+        raise LayerResolutionError(
+            f"refusing plugin runtime symlink: {runtime_dir}"
+        )
+    argv = [
+        npm,
+        "install",
+        "--prefix",
+        str(runtime_dir),
+        "--save-exact",
+        "--omit=dev",
+        "--no-audit",
+        "--no-fund",
+        f"{package}@{version}",
+    ]
+    code, out, err = installer(argv, directory)
+    if code != 0:
+        detail = (err or out or f"npm exited {code}").splitlines()[0]
+        raise LayerResolutionError(
+            f"failed to install {package}@{version}: {detail}"
+        )
+    return resolve_binary(directory)
+
+
+def prepare_installed_plugin_runtime() -> Optional[LayerResolution]:
+    """Bootstrap only a user-installed plugin checkout, never the mono tree."""
+    directory = Path(__file__).resolve().parent
+    hermes_home = Path(
+        os.environ.get("HERMES_HOME") or (Path.home() / ".hermes")
+    )
+    plugins_root = (hermes_home / "plugins").resolve()
+    try:
+        directory.resolve().relative_to(plugins_root)
+    except ValueError:
+        return None
+    return ensure_plugin_runtime(directory)
 
 
 def _default_runner(
@@ -219,7 +334,7 @@ def ledger_json(runner: Optional[Runner] = None) -> Tuple[int, str, str]:
     """Structured ledger rows from the harness layer (residual outbound verb;
     the fork-side ledger surface was removed in mono#1818).
 
-    Depends on ``jinn-layer ledger --json`` (harness-layer). When the layer
+    Depends on ``jinn-layer ledger --json``. When the layer
     predates that flag it errors and the caller falls back to plain ``ledger``.
     """
     return run(["ledger", "--json"], runner)
@@ -234,7 +349,7 @@ def corpus_search(
 ) -> Tuple[int, str, str]:
     """Corpus search. The CLI owns clamping ([1,500]) and ``""`` = all records.
 
-    ``as_json`` emits ``--json`` (harness-layer prints ``JSON.stringify(hits)``,
+    ``as_json`` emits ``--json`` (the layer prints ``JSON.stringify(hits)``,
     a JSON array); ``limit`` emits ``--limit N``. Keyword-only past ``query`` so
     the one production caller (``plugins/jinn/__init__.py``) that already passes
     ``runner=`` by keyword stays backward-compatible.

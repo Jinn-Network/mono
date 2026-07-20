@@ -1,6 +1,6 @@
 /**
  * EpisodeV1 — the complete-trajectory evidence record (architecture spec §5).
- * Superset of `client/packages/harness-layer/src/capture.ts`'s CapturedTask:
+ * Superset of `packages/core/src/captured-task.ts`'s CapturedTask:
  * the full trajectory as one ordered `kind`-discriminated span sequence, a
  * skills loadout, token + USD cost, a per-record retention field, and optional
  * lineage hooks. Strict at every level (unknown fields rejected), following the

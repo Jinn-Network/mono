@@ -17,8 +17,8 @@
 # overwritten on the next promote.
 #
 # CHARTER DECISION 3 (BINDING): NO layer artifact rides the split. The plugin
-# dir is published verbatim; the published plugin references the future
-# @jinn-network/jinn-layer (C6). Nothing here packages npm / layer artifacts.
+# dir is published verbatim; the published plugin references the independently
+# published @jinn-network/jinn-layer. Nothing here packages npm / layer artifacts.
 #
 # SECRET — JINN_PLUGIN_PUSH_TOKEN: a PAT / fine-grained token with
 # `contents: write` on Jinn-Network/jinn-plugin (this is "the A2 push secret").

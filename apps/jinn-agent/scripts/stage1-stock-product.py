@@ -6,7 +6,7 @@ owns the user-visible lifecycle and a local HTTP stand-in for external corpus
 services; the plugin and ``jinn-layer`` process bridge are the real builds.
 
 Stage 1 rescope (R5, closes #1774): the corpus fixture serves the R4 seed set
-(client/packages/harness-layer/fixtures/stage1-seeds/) instead of one
+(packages/layer/fixtures/stage1-seeds/) instead of one
 hand-written skill trace — the real built `jinn-layer` performs search, get,
 and evidence-first packet projection against it (no plugin stubs). Scenarios
 follow the rescope plan §4.5. The Stage 2 parked-era amendment keeps local
@@ -37,7 +37,7 @@ import yaml
 PINNED_HERMES = "9df5f879b4a5925c0f8f947e7e16ed8e845932c3"
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SEED_FIXTURES_DIR = REPO_ROOT / "client" / "packages" / "harness-layer" / "fixtures" / "stage1-seeds"
+SEED_FIXTURES_DIR = REPO_ROOT / "packages" / "layer" / "fixtures" / "stage1-seeds"
 
 # The five curated Stage 1 seed fixtures (rescope R4, #1771 / PR #1779),
 # identified by filename stem. Refs below are this driver's own stand-in
@@ -62,7 +62,7 @@ DISTRACTOR_SKILL_REF = _to_ref(DISTRACTOR_SKILL)
 DISTRACTOR_SKILL_DUP_REF = _to_ref(DISTRACTOR_SKILL_DUP)
 
 # A distinctive, verbatim excerpt line from the source fixture's "fix" step
-# (client/packages/harness-layer/fixtures/stage1-seeds/source-dashboard-flake.episode.json)
+# (packages/layer/fixtures/stage1-seeds/source-dashboard-flake.episode.json)
 # that is NOT one of the scenario-1 message's derived search terms — proves
 # the injection carries real content, not metadata (rescope plan §4.5 item 1).
 SOURCE_DISTINCTIVE_CONTENT = "apiMocks.getStatus"
@@ -158,7 +158,7 @@ def make_repo(path: Path) -> Path:
 # ── Seed fixture loading (rescope R4 seed set → wire shapes) ─────────────────
 #
 # Mirrors the SAME wire shapes the real seed-import lane produces
-# (client/packages/harness-layer/src/seed-import/{episode-execute,execute}.ts)
+# (packages/layer/src/seed-import/{episode-execute,execute}.ts)
 # so the real built jinn-layer performs search/get/packet-projection exactly
 # as it would against a seeded testnet corpus. No bespoke fixture format.
 

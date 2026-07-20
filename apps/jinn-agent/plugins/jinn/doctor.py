@@ -135,7 +135,7 @@ def _layer_resolution() -> tuple[str, str]:
     if resolution.source == "env":
         return (
             f"via {resolution.detail}",
-            "export JINN_LAYER_BIN=<path-to-client>/dist/bin/jinn-layer.js",
+            "export JINN_LAYER_BIN=<path-to-mono>/packages/layer/dist/bin/jinn-layer.js",
         )
     return resolution.detail, _update_remedy()
 

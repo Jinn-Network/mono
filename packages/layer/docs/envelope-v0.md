@@ -2,7 +2,7 @@
 
 - **Status:** v0 — FROZEN on operator sign-off (spec Q1). Any change after
   sign-off is a spec amendment to `spec/2026-07-02-jinn-harness-network.md`.
-- **Schema:** `client/packages/harness-layer/src/envelope.ts` (`TraceEnvelopeV0Schema`)
+- **Schema:** `packages/core/src/envelope.ts` (`TraceEnvelopeV0Schema`)
 - **Spec:** `spec/2026-07-02-jinn-harness-network.md` §5 (the deal), §6.1 (earn),
   §7 (seeding)
 - **Plan:** `docs/superpowers/plans/2026-07-02-jinn-harness-network-v0-plan.md` Task 2

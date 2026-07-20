@@ -72,7 +72,7 @@ A solution carries two:
 
 ## Reading it in code
 
-`client/packages/harness-layer/src/snapshot-transcript.ts` — donation unwrap
+`packages/layer/src/snapshot-transcript.ts` — donation unwrap
 (sha256-verified) + bomb-guarded gunzip + ustar reader +
 `findSolveTranscript`. `parseSolveTranscript` feeds the transcript bytes to
 the canonical Claude/Codex stdout parsers exported by

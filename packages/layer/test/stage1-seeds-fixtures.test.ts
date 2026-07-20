@@ -1,7 +1,7 @@
 /**
  * Stage 1 seed fixture lint (issue #1771).
  *
- * `client/packages/harness-layer/fixtures/stage1-seeds/` is the curated
+ * `packages/layer/fixtures/stage1-seeds/` is the curated
  * evidence-episode + skill-shaped seed set the rescope plan's R5 acceptance
  * gate (docs/superpowers/plans/2026-07-16-jinn-plugin-stage-1-rescope-plan.md
  * §4.3-§4.4) and the manual testnet seeding runbook

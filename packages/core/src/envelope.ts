@@ -11,7 +11,7 @@
  * depended on by consumers, without a spec amendment.
  *
  * Field-by-field rationale, reader map, and three validated examples:
- * `client/packages/harness-layer/docs/envelope-v0.md` (the examples in that
+ * `packages/layer/docs/envelope-v0.md` (the examples in that
  * doc are parsed against this schema in `test/envelope.test.ts`).
  *
  * Step shape mirrors the capture-span shape (`SpanRow`,

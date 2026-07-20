@@ -7,13 +7,14 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 CLIENT="$REPO_ROOT/client"
+LAYER="$REPO_ROOT/packages/layer"
 HERMES_UPSTREAM_SHA="9df5f879b4a5925c0f8f947e7e16ed8e845932c3"
 WORK="$(mktemp -d)"
 export JINN_STAGE1_WORK="$WORK"
 export HOME="$WORK/home"
 export HERMES_HOME="$HOME"
 export NO_COLOR=1
-export JINN_LAYER_BIN="$CLIENT/dist/bin/jinn-layer.js"
+export JINN_LAYER_BIN="$LAYER/dist/bin/jinn-layer.js"
 export JINN_LAYER_EPISODES_DIR="$WORK/state/episodes"
 export JINN_LAYER_CAPTURES_DIR="$WORK/state/captures"
 export JINN_LAYER_SKILLS_INSTALL_DIR="$HERMES_HOME/skills"
@@ -30,6 +31,24 @@ if (( NODE_MAJOR < 22 )); then
 fi
 
 if [[ "${JINN_STAGE1_SKIP_CLIENT_BUILD:-0}" != "1" ]]; then
+  (
+    cd "$REPO_ROOT/packages/plugin"
+    corepack enable
+    yarn install --immutable
+    yarn build
+  )
+  (
+    cd "$REPO_ROOT/packages/core"
+    corepack enable
+    yarn install --immutable
+    yarn build
+  )
+  (
+    cd "$LAYER"
+    corepack enable
+    yarn install --immutable
+    yarn build
+  )
   (
     cd "$CLIENT"
     corepack enable

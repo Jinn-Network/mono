@@ -1,0 +1,87 @@
+name: Layer CI
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - 'packages/layer/**'
+      - 'packages/core/**'
+      - 'packages/plugin/**'
+      - 'client/**'
+      - '.github/workflows/layer-ci.yml'
+  push:
+    branches: [main, next]
+    paths:
+      - 'packages/layer/**'
+      - 'packages/core/**'
+      - 'packages/plugin/**'
+      - 'client/**'
+      - '.github/workflows/layer-ci.yml'
+
+jobs:
+  check:
+    name: Typecheck, Test, Build & Pack Smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: yarn install --immutable
+        working-directory: packages/plugin
+      - run: yarn build
+        working-directory: packages/plugin
+      - run: yarn install --immutable
+        working-directory: packages/core
+      - run: yarn build
+        working-directory: packages/core
+      - run: yarn install --immutable
+        working-directory: packages/layer
+      - run: yarn typecheck
+        working-directory: packages/layer
+      - run: yarn test
+        working-directory: packages/layer
+      - run: yarn build
+        working-directory: packages/layer
+      - run: yarn pack:smoke
+        working-directory: packages/layer
+      - name: Test layer workflow contracts
+        run: node --test .github/scripts/layer-publish-workflow.test.mjs
+
+  client-compat:
+    name: Client Compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: yarn install --immutable
+        working-directory: client
+      - run: yarn build:plugin
+        working-directory: client
+      - run: yarn build:core
+        working-directory: client
+      - run: yarn build:layer
+        working-directory: client
+      - run: yarn typecheck
+        working-directory: client
+      - name: Test extracted-boundary consumers
+        working-directory: client
+        run: |
+          yarn vitest run \
+            test/architecture/golden-envelope.test.ts \
+            test/bin/jinn-layer-composition.test.ts \
+            test/captures/distil-export.test.ts \
+            test/conformance/execution-envelope-authenticator.test.ts \
+            test/scripts/pack-workflows.test.ts \
+            test/solver-types/swe-rebench-v2-verifier-facts.test.ts \
+            test/solver-types/task-creator-mineable-store.test.ts

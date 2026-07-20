@@ -261,15 +261,15 @@ describe('auditCuratedSeedBatch', () => {
     await expect(createLocalEpisodeSeedSource(TEMPLATE_DIR).list()).resolves.toEqual([]);
   });
 
-  it('documents fail-closed credential derivation and pipeline exit handling', () => {
+  it('documents the standalone package publication boundary as parked', () => {
     const runbook = readFileSync(RUNBOOK_PATH, 'utf8');
+    expect(runbook).toContain('## 6. Publication is intentionally parked');
     expect(runbook).toContain(
-      'unset JINN_LAYER_PRIVATE_KEY JINN_LAYER_SAFE_ADDRESS JINN_LAYER_AGENT_ID',
+      'Its CLI rejects `derive-env` and live\n`seed execute`',
     );
-    expect(runbook).toContain(
-      'derived_env="$(corepack yarn jinn-layer derive-env)" || {',
-    );
-    expect(runbook.match(/set -o pipefail/g)).toHaveLength(3);
+    expect(runbook).toContain('stop there in the parked\nstate');
+    expect(runbook).not.toContain('unset JINN_LAYER_PRIVATE_KEY');
+    expect(runbook.match(/set -o pipefail/g)).toHaveLength(2);
   });
 
   it('reports the checked-in Stage 1 fixtures as the real one-of-three starting point, not a completed B3 batch', async () => {

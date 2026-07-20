@@ -157,10 +157,10 @@ function runComfySkillLeak(): InMemoryCorpusSeed {
     capturedAt: '2026-07-02T00:00:00.000Z',
     tier: 'user-accepted',
     // Content-level fact the corpus adapter derives from the skill.md step
-    // attribute (client/packages/harness-layer/src/adapters/corpus-adapter.ts)
+    // attribute (packages/layer/src/adapters/corpus-adapter.ts)
     // — hand-set here because the plugin package never decodes trace
     // envelopes itself; that derivation is covered by
-    // client/packages/harness-layer/test/adapters/corpus-adapter.test.ts.
+    // packages/layer/test/adapters/corpus-adapter.test.ts.
     isSkillPayload: true,
   };
 }

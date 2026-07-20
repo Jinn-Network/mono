@@ -13,8 +13,12 @@ stock Hermes install, unchanged.
 
 ## Requires
 
-The `jinn-layer` CLI on PATH — it arrives with the plugin; refresh it with
-`hermes plugins update jinn` — or `JINN_LAYER_BIN` pointing at a local build.
+The exact `@jinn-network/jinn-layer` version pinned in `layer-runtime.json`.
+On first registration after install or update, the plugin acquires that exact
+published version into its npm-shaped
+`runtime/node_modules/.bin/jinn-layer` prefix; refresh it with
+`hermes plugins update jinn`. `JINN_LAYER_BIN` and a `jinn-layer` executable
+on `PATH` are development overrides, in that order, and suppress acquisition.
 Corpus reads, local capture, scrubbing, and distillation happen behind that
 layer boundary; this plugin is a thin adapter. Retained outbound machinery is
 forced disabled in Stage 2.

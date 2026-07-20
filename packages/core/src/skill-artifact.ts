@@ -10,15 +10,15 @@ import { z } from 'zod/v3';
  * (never instead of it); **distilled** skills have no trace of their own —
  * their evidence is the referenced layer-1 envelopes in `sourceEnvelopeCids` —
  * so they publish as a skill-only wrapper (`publishSkill()`,
- * client/packages/harness-layer/src/publish-skill.ts, DR-2026-07-06).
+ * packages/layer/src/publish-skill.ts, DR-2026-07-06).
  * Access/pricing come from the enclosing Artifact
  * entry (client/src/types/envelope.ts ArtifactSchema: sha256,
  * access.endpoint, access.priceUsdc, metadata.tags).
  *
  * Frozen-caps review (AC3, additive): this schema is a NEW artifact payload
  * type. It does not touch the frozen layer-1 evidence envelope
- * (jinn.trace-envelope.v0 — client/packages/harness-layer/src/envelope.ts,
- * caps in client/packages/harness-layer/docs/envelope-v0.md) and requires no
+ * (jinn.trace-envelope.v0 — packages/core/src/envelope.ts,
+ * caps in packages/layer/docs/envelope-v0.md) and requires no
  * change to the jinn.execution.v1 wrapper, whose artifacts[] already accepts
  * any artifactType string. Companion-file content lives here, free of the
  * trace envelope's 16 KiB step-attribute cap, under its own 1 MiB total cap.
@@ -77,7 +77,7 @@ export const SkillProvenanceSchema = z.object({
     })
     .optional(),
   // --- distilled-skill fields (DR-2026-07-06, additive; producer is
-  // publishSkill() in client/packages/harness-layer/src/publish-skill.ts) ---
+  // publishSkill() in packages/layer/src/publish-skill.ts) ---
   /**
    * Success→strategic-pattern, failure→lesson, both-polarity→contrastive
    * (spec §7, D10 + v0.5), or cross-instance corroboration→cross-instance
@@ -115,7 +115,7 @@ export const SkillProvenanceSchema = z.object({
    * identity space as `sourceEnvelopeCids` and a search-hit `ref`. Honored at
    * read time ONLY when this record's operator matches the superseded record's
    * operator (cross-operator supersedes are ignored); see the read-path head
-   * resolver in client/packages/harness-layer/src/consume.ts.
+   * resolver in packages/layer/src/consume.ts.
    */
   supersedes: z.string().min(1).optional(),
   /**

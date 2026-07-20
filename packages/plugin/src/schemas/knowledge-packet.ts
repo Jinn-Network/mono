@@ -90,7 +90,7 @@ const EXCERPT_LABELS = new Set<KnowledgePacketExcerpt['label']>([
 ]);
 
 /**
- * Seed-authored evidence (`client/packages/harness-layer/src/seed-import/
+ * Seed-authored evidence (`packages/layer/src/seed-import/
  * episode-execute.ts`) carries its own excerpt directly on the step —
  * `seed.step.label` (one of this schema's five excerpt labels) and
  * `seed.step.text` (the excerpt content, already selected by the seed

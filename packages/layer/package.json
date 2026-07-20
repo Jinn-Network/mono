@@ -33,6 +33,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
   },

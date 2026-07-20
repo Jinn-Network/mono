@@ -18,15 +18,15 @@
  * Publishes nothing; the output is INPUT to `seed plan`, and the human
  * approval gate on `seed execute` is unchanged.
  *
- * Run: cd client && GITHUB_TOKEN=$(gh auth token) \
- *   yarn tsx packages/harness-layer/scripts/scan-skills-registry.ts [--out <dir>]
+ * Run: cd packages/layer && yarn build && GITHUB_TOKEN=$(gh auth token) \
+ *   node dist/scripts/scan-skills-registry.js [--out <dir>]
  */
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { checkLicence } from '../src/seed-import/licence.js';
+import { checkLicence } from '../seed-import/licence.js';
 
 const SITEMAP_INDEX = 'https://www.skills.sh/sitemap.xml';
 const GITHUB_API = 'https://api.github.com';

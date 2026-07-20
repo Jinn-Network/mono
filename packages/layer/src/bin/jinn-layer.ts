@@ -2,7 +2,7 @@
 /**
  * jinn-layer CLI entry. Delegates to cli.ts.
  *
- * Run from the client workspace: `yarn jinn-layer corpus search "<query>"`.
+ * Run from an installed package: `jinn-layer corpus search "<query>"`.
  */
 
 import { runJinnLayerCli } from '../cli.js';
