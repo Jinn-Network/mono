@@ -34,6 +34,7 @@ import type { SessionSummary } from './schemas/session-summary.js';
 import { projectKnowledgePacket, type KnowledgePacket } from './schemas/knowledge-packet.js';
 import {
   deriveSearchTerms,
+  discriminatingTerms,
   rankKnowledgeCandidates,
   rankScoredKnowledgeHits,
   scoreKnowledgeRecord,
@@ -363,6 +364,10 @@ export class PluginSession {
     }
 
     const terms = deriveSearchTerms(firstMessage, this.meta.repositorySlug);
+    // Search with every term; score with the discriminating ones only — the
+    // repository name tags every record in an in-repo corpus, so counting it
+    // halved the effective relevance floor (#1886).
+    const scoringTerms = discriminatingTerms(terms, this.meta.repositorySlug);
     this.searchedTerms = terms;
     this.retrievalFired = true;
     this.deliveryMode = 'delivered';
@@ -408,7 +413,7 @@ export class PluginSession {
       }
     }
 
-    const candidates = rankKnowledgeCandidates([...byRef.values()], terms);
+    const candidates = rankKnowledgeCandidates([...byRef.values()], scoringTerms);
     if (candidates.length === 0) {
       this.deliveryMode = degradedReason === undefined ? 'withheld' : 'degraded';
       return {
@@ -459,7 +464,7 @@ export class PluginSession {
       if (record === null) continue;
       if (record.isSkillPayload === true) continue;
       if (record.retrievalVisible !== true) continue;
-      const score = scoreKnowledgeRecord(candidate.hit, record, terms);
+      const score = scoreKnowledgeRecord(candidate.hit, record, scoringTerms);
       if (score >= RELEVANCE_FLOOR) promotedCandidates.push({ hit: candidate.hit, score });
     }
 
