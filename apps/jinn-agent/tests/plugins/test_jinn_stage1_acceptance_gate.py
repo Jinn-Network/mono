@@ -56,6 +56,33 @@ def test_stage1_gate_is_blocking_for_every_product_boundary():
     assert "cold-stock-e2e.sh" in rendered_steps
 
 
+def test_cold_stock_package_steps_build_before_testing_built_exports():
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "jinn-agent-ci.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    steps = workflow["jobs"]["cold-stock-e2e"]["steps"]
+    test_commands = {
+        "packages/plugin": "yarn test",
+        "packages/core": "yarn vitest run test/contribution-store.test.ts",
+        "packages/layer": (
+            "yarn vitest run test/process-contract.test.ts "
+            "test/contract-parity.test.ts"
+        ),
+    }
+
+    for working_directory, test_command in test_commands.items():
+        step = next(
+            step
+            for step in steps
+            if step.get("working-directory") == working_directory
+        )
+        command = step["run"]
+
+        assert command.index("yarn build") < command.index(test_command)
+
+
 def test_jinn_agent_suite_includes_destructive_cleanup_regressions():
     workflow = yaml.safe_load(
         (REPO_ROOT / ".github" / "workflows" / "jinn-agent-ci.yml").read_text(

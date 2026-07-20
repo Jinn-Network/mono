@@ -105,23 +105,23 @@ jobs:
         run: yarn install --immutable
       - name: Plugin package boundary, schema, type, test, and build gates
         working-directory: packages/plugin
-        run: yarn install --immutable && yarn typecheck && yarn test && yarn build
+        run: yarn install --immutable && yarn typecheck && yarn build && yarn test
       - name: Core package and contribution-store gates
         working-directory: packages/core
         run: >-
           yarn install --immutable &&
           yarn typecheck &&
-          yarn vitest run test/contribution-store.test.ts &&
-          yarn build
+          yarn build &&
+          yarn vitest run test/contribution-store.test.ts
       - name: Layer package, process-contract, and build gates
         working-directory: packages/layer
         run: >-
           yarn install --immutable &&
           yarn typecheck &&
+          yarn build &&
           yarn vitest run
           test/process-contract.test.ts
-          test/contract-parity.test.ts &&
-          yarn build
+          test/contract-parity.test.ts
       - name: Build the daemon and run task-creator privacy gate
         working-directory: client
         run: >-
