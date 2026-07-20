@@ -211,12 +211,28 @@ function staleEvidence(
     const verdictTime = matchingVerdictTime(item, review);
     if (verdictTime !== null) return { stale: false };
     if (headTime === null) return { stale: false };
-    if (headTime > nowMs || nowMs - headTime < staleAfterMs) {
+    if (headTime > nowMs) return { stale: false };
+
+    // Winning a review claim generation is the one permitted progress event for
+    // review (mirrors the branch claim commit for implement/merge-prep): it
+    // initializes the clock even when the PR head is already old. Later
+    // metadata-only transitions within the same generation (verdict-intent,
+    // fixing, ...) do not carry their own recordedAt forward as a reset, so
+    // they cannot re-extend it.
+    let progressTime = headTime;
+    if (review.state === 'active') {
+      const acquisitionTime = timestampMs(review.recordedAt);
+      if (acquisitionTime !== null && acquisitionTime > progressTime) {
+        progressTime = acquisitionTime;
+      }
+    }
+
+    if (nowMs - progressTime < staleAfterMs) {
       return { stale: false };
     }
     return {
       stale: true,
-      staleSince: new Date(headTime + staleAfterMs).toISOString(),
+      staleSince: new Date(progressTime + staleAfterMs).toISOString(),
       staleReason: 'review-progress-unchanged',
     };
   }
@@ -296,6 +312,18 @@ function deriveItem(item: LifecycleItem, nowMs: number, staleAfterMs: number): L
         code: 'invalid-review-progress-time',
         detail: `Invalid review progress timestamp: ${item.headChangedAt}`,
       };
+    } else if (underlying === 'reviewing' || underlying === 'review-fixing') {
+      const review = correlatedReviewClaim(item);
+      if (review !== undefined && review.head === item.head && review.state === 'active') {
+        const acquisitionTime = timestampMs(review.recordedAt);
+        if (acquisitionTime === null || acquisitionTime > nowMs) {
+          invalidProgressReason = {
+            phase: underlying,
+            code: 'invalid-review-progress-time',
+            detail: `Invalid review claim acquisition timestamp: ${review.recordedAt}`,
+          };
+        }
+      }
     }
   }
   if (invalidProgressReason !== undefined) {

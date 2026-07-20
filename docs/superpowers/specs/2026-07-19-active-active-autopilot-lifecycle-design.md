@@ -768,10 +768,14 @@ Review becomes stale after two hours with neither:
 - a terminal review verdict for the claimed head.
 
 CI, comments, Project edits, and intent-only metadata transitions do not reset
-the clock. Only a changed PR head or a confirmed native verdict for the
-claimed head updates `lastRealProgressAt`. The reaper conditionally advances
-the exact old review claim to a stale generation. A replacement then appends
-an ordinary active claim generation.
+the clock. Winning a review claim generation initializes `lastRealProgressAt`
+for that generation — election is the one permitted review progress event,
+exactly as the initial claim commit is for branch phases (§8.2 Staleness) —
+after which only a changed PR head or a confirmed native verdict for the
+claimed head updates it further. The reaper conditionally advances the exact
+old review claim to a stale generation. A replacement then appends an
+ordinary active claim generation, which starts its own fresh window from its
+own election.
 
 A stale draft PR from an interrupted review-fix loop remains draft and
 review-fix-recoverable. It does not return to implementation or `Todo`.

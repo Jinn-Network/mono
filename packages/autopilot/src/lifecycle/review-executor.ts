@@ -233,14 +233,32 @@ export async function executeReviewAction(
     };
   }
   const headChangedAt = Date.parse(candidate.headChangedAt);
-  if (!Number.isFinite(headChangedAt) || headChangedAt > deps.now().getTime()) {
+  const nowMs = deps.now().getTime();
+  if (!Number.isFinite(headChangedAt) || headChangedAt > nowMs) {
     return {
       status: 'ineligible',
       prNumber: candidate.number,
       detail: 'Review progress timestamp is invalid.',
     };
   }
-  const stale = deps.now().getTime() - headChangedAt >= deps.staleAfterMs;
+  // Winning a review claim generation initializes its own progress clock (the
+  // one permitted progress event for review, mirroring the branch claim commit
+  // for implement/merge-prep) — see staleEvidence in lifecycle.ts, the
+  // canonical definition this mirrors. Later metadata-only transitions
+  // (verdict-intent, fixing, ...) do not get their own fresh window.
+  let progressTime = headChangedAt;
+  if (currentHeadClaim?.state === 'active') {
+    const acquisitionTime = Date.parse(currentHeadClaim.recordedAt);
+    if (!Number.isFinite(acquisitionTime) || acquisitionTime > nowMs) {
+      return {
+        status: 'ineligible',
+        prNumber: candidate.number,
+        detail: 'Review claim acquisition timestamp is invalid.',
+      };
+    }
+    if (acquisitionTime > progressTime) progressTime = acquisitionTime;
+  }
+  const stale = nowMs - progressTime >= deps.staleAfterMs;
   if (
     currentHeadClaim !== undefined
     && currentHeadClaim.state !== 'stale'
