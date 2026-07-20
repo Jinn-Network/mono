@@ -1,7 +1,7 @@
 import type { CommandRunner } from '../dispatcher/issue-source.js';
 import { defaultRunner } from '../dispatcher/issue-source.js';
 import { REPO } from '../dispatcher/constants.js';
-import { fetchFieldIds } from '../dispatcher/field-cache.js';
+import { ensureFieldIds } from '../dispatcher/field-cache.js';
 import { fetchProjectSnapshot } from '../dispatcher/project-snapshot.js';
 import {
   advanceAttemptExpectedHead,
@@ -375,7 +375,7 @@ export function makeProductionImplementationSessionPort(
         candidate.contentType === 'Issue' && candidate.number === issueNumber);
       if (item === undefined) throw new Error('Implementation issue is missing from Project');
       if (item.status === status) return;
-      const fields = await fetchFieldIds(secureRunner);
+      const fields = await ensureFieldIds(secureRunner);
       if (status === 'In Review') {
         await requireNoHumanHold(
           manifest,

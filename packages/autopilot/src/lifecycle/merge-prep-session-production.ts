@@ -2,7 +2,7 @@ import type { CommandRunner } from '../dispatcher/issue-source.js';
 import { defaultRunner } from '../dispatcher/issue-source.js';
 import { parseOwnedPrefixes, touchesCodeOwnedPath } from '../dispatcher/code-owned.js';
 import { REPO } from '../dispatcher/constants.js';
-import { fetchFieldIds } from '../dispatcher/field-cache.js';
+import { ensureFieldIds } from '../dispatcher/field-cache.js';
 import { fetchProjectSnapshot } from '../dispatcher/project-snapshot.js';
 import {
   advanceAttemptExpectedHead,
@@ -353,7 +353,7 @@ export function makeProductionMergePrepSessionPort(
         entry.contentType === 'Issue' && entry.number === issueNumber);
       if (item === undefined) throw new Error('Merge-prep issue is missing from Project');
       if (item.status === status) return;
-      const fields = await fetchFieldIds(secure);
+      const fields = await ensureFieldIds(secure);
       await mutateReadback(
         () => run(manifest, 'gh', [
           'project', 'item-edit',

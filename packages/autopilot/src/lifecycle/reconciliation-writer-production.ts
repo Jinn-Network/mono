@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import type { CommandRunner } from '../dispatcher/issue-source.js';
 import { defaultRunner } from '../dispatcher/issue-source.js';
 import { REPO } from '../dispatcher/constants.js';
-import { fetchFieldIds } from '../dispatcher/field-cache.js';
+import { ensureFieldIds } from '../dispatcher/field-cache.js';
 import { NEEDS_HUMAN_LABEL } from '../dispatcher/merge-sweep.js';
 import type { BlockedOn, ProjectStatus } from '../dispatcher/types.js';
 import {
@@ -476,7 +476,7 @@ export function makeProductionReconciliationWriter(
       if (item.status === status) return;
       await selected(async ({ run }) => {
         const secureRunner: CommandRunner = (command, args) => run(command, args);
-        const fields = await fetchFieldIds(secureRunner);
+        const fields = await ensureFieldIds(secureRunner);
         await mutateWithExactReadback(
           () => run('gh', [
             'project', 'item-edit',

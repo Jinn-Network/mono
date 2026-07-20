@@ -1,7 +1,7 @@
 import type { CommandRunner } from '../dispatcher/issue-source.js';
 import { defaultRunner } from '../dispatcher/issue-source.js';
 import { REPO } from '../dispatcher/constants.js';
-import { fetchFieldIds } from '../dispatcher/field-cache.js';
+import { ensureFieldIds } from '../dispatcher/field-cache.js';
 import { selectReady } from '../dispatcher/ready-filter.js';
 import { resolveStackReady } from '../dispatcher/stack-readiness.js';
 import type { PrLink } from '../dispatcher/pr-links.js';
@@ -361,7 +361,7 @@ export function makeProductionImplementationActionPort(
           throw new Error('Implementation Project mutation lost exact-head authority');
         }
         const secureRunner: CommandRunner = (command, args) => run(command, args);
-        const fields = await fetchFieldIds(secureRunner);
+        const fields = await ensureFieldIds(secureRunner);
         await mutateWithExactReadback(
           () => run('gh', [
             'project', 'item-edit',
@@ -409,7 +409,7 @@ export function makeProductionImplementationActionPort(
           candidate.contentType === 'Issue' && candidate.number === issueNumber);
         if (item === undefined) throw new Error('Escalated issue is missing from Project');
         const secureRunner: CommandRunner = (command, args) => run(command, args);
-        const fields = await fetchFieldIds(secureRunner);
+        const fields = await ensureFieldIds(secureRunner);
         if (item.status !== 'Human') {
           await mutateWithExactReadback(
             () => run('gh', [
