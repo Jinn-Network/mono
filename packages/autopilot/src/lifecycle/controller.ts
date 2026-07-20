@@ -80,6 +80,16 @@ export interface LifecycleControllerDeps {
       readonly implementationPreferredLogin: string;
     };
     readonly implementationBackpressureThreshold: number;
+    /**
+     * jinn-mono#1883: canary safety knob (`JINN_AUTOPILOT_ONLY_ISSUES`).
+     * `undefined` means unrestricted — exactly current behavior. When set,
+     * `runLifecycleCycle` restricts NEW-WORK claim scheduling (implement,
+     * review, merge-prep, merge candidates) to issue numbers in this set.
+     * It does not affect reconciliation/projection of existing items,
+     * Human-overlay handling, the board-archive sweep, or observe/recover
+     * output — those all run unfiltered before this is consulted.
+     */
+    readonly onlyIssues?: ReadonlySet<number>;
     executeAction(
       action: NewWorkAction,
     ): Promise<{ readonly outcome: string; readonly reason?: string }>;
@@ -603,6 +613,22 @@ function blockedIssueNumbers(
   return blocked;
 }
 
+// jinn-mono#1883: `onlyIssues === undefined` is the unrestricted (default)
+// state — matches unset/empty `JINN_AUTOPILOT_ONLY_ISSUES`. When it is set,
+// a candidate is admitted only if its issue number is a member. Every
+// `ActiveCandidate` variant carries a required `issueNumber` sourced from an
+// already-resolved lifecycle item (ambiguous PR-to-issue mappings are
+// diverted to diagnostics upstream and never reach `activeCandidates`), so
+// `issueNumber` here is typed loosely (`number | undefined`) only to fail
+// closed defensively if that invariant is ever broken.
+export function matchesOnlyIssuesAllowlist(
+  issueNumber: number | undefined,
+  onlyIssues: ReadonlySet<number> | undefined,
+): boolean {
+  if (onlyIssues === undefined) return true;
+  return issueNumber !== undefined && onlyIssues.has(issueNumber);
+}
+
 export async function runLifecycleCycle(
   mode: AutopilotMode,
   deps: LifecycleControllerDeps,
@@ -736,6 +762,7 @@ export async function runLifecycleCycle(
     const scheduling = scheduleActiveActions({
       candidates: activeCandidates(snapshot, view).filter((candidate) => (
         !blockedIssues.has(candidate.issueNumber)
+        && matchesOnlyIssuesAllowlist(candidate.issueNumber, deps.active!.onlyIssues)
       )),
       remaining: local.remaining,
       availableLogins: local.availableLogins,
