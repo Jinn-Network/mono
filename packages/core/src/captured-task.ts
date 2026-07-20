@@ -8,7 +8,11 @@
  * capture orchestration in the layer.
  */
 import { z } from 'zod';
-import { OutcomeStatusSchema, VerifiabilityTierSchema } from './envelope.js';
+import {
+  EvidenceProvenanceSchema,
+  OutcomeStatusSchema,
+  VerifiabilityTierSchema,
+} from './envelope.js';
 
 /** Unix-nanosecond timestamp string (OTel span convention). */
 const UnixNanoSchema = z.string().regex(/^\d+$/, 'unix-nanosecond digit string');
@@ -103,7 +107,7 @@ export const CapturedTaskSchema = z.strictObject({
     nPass: z.number().int().nonnegative().optional(),
     nFail: z.number().int().nonnegative().optional(),
   }).optional(),
-  provenance: z.enum(['contributed', 'imported']).default('contributed'),
+  provenance: EvidenceProvenanceSchema.default('contributed'),
 });
 export type CapturedTask = z.infer<typeof CapturedTaskSchema>;
 

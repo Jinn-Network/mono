@@ -30,7 +30,7 @@ export const KnowledgePacketSchema = z.strictObject({
   synthesis: z.string().min(1).optional(),
   excerpts: z.array(KnowledgePacketExcerptSchema),
   attribution: z.strictObject({
-    provenance: z.enum(['imported', 'contributed']),
+    provenance: z.enum(['imported', 'contributed', 'derived-from-history']),
     capturedAt: z.iso.datetime(),
     origin: z.string().min(1),
   }),

@@ -34,6 +34,15 @@ function capturedTaskWithVerifier(verifier: unknown) {
 }
 
 describe('CapturedTaskSchema verifier evidence', () => {
+  it('preserves derived historical provenance', () => {
+    const parsed = CapturedTaskSchema.parse({
+      ...capturedTaskWithVerifier({ type: 'none' }),
+      provenance: 'derived-from-history',
+    });
+
+    expect(parsed.provenance).toBe('derived-from-history');
+  });
+
   it.each([
     { type: 'f2p-p2p' },
     {

@@ -117,7 +117,7 @@ interface DecodedEvidencePayload {
     summary?: string;
   };
   steps: EvidenceStep[];
-  provenance: 'imported' | 'contributed';
+  provenance: 'imported' | 'contributed' | 'derived-from-history';
   capturedAt: string;
 }
 

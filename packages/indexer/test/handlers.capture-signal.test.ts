@@ -366,6 +366,15 @@ describe('parseCaptureWrapperLite', () => {
 });
 
 describe('parseTraceEnvelopeSignalLite', () => {
+  it('preserves derived historical provenance without collapsing it', () => {
+    expect(
+      parseTraceEnvelopeSignalLite(
+        episode({ provenance: 'derived-from-history', retrievalVisible: false }),
+        'jinn.episode.v1',
+      )?.provenance,
+    ).toBe('derived-from-history');
+  });
+
   it('reads canonical episode fields without dropping repository, W2, or synthesis metadata', () => {
     const lite = parseTraceEnvelopeSignalLite(episode(), 'jinn.episode.v1');
     expect(lite).toMatchObject({

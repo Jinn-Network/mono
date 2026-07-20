@@ -34,7 +34,7 @@ export interface CorpusRecord {
   synthesis?: string;
   steps: CorpusRecordStep[];
   tags: string[];
-  provenance: 'imported' | 'contributed';
+  provenance: 'imported' | 'contributed' | 'derived-from-history';
   /** Display attribution for the rendered packet. The adapter may fall back
    *  to safeAddress here because cross-record dedup already happened on the
    *  search hit's trustworthy `origin`. */

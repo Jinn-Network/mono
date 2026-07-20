@@ -16,6 +16,12 @@ import { z } from 'zod';
 import { EligibilityVerdictSchema } from './eligibility-verdict.js';
 
 export const EPISODE_SCHEMA_VERSION = 'jinn.episode.v1' as const;
+export const EPISODE_PROVENANCES = [
+  'contributed',
+  'imported',
+  'derived-from-history',
+] as const;
+export const EpisodeProvenanceSchema = z.enum(EPISODE_PROVENANCES);
 
 const UnixNanoSchema = z.string().regex(/^\d+$/, 'unix-nanosecond digit string');
 
@@ -270,7 +276,7 @@ export const EpisodeV1WriteSchema = z.strictObject({
   outcome: OutcomeWriteSchema,
   cost: z.strictObject(CostShape),
   retention: z.strictObject(RetentionShape),
-  provenance: z.enum(['contributed', 'imported']).default('contributed'),
+  provenance: EpisodeProvenanceSchema.default('contributed'),
   lineage: z.strictObject(LineageShape).optional(),
   attemptGroup: AttemptGroupWriteSchema.optional(),
   activity: SessionActivityFactsWriteSchema.optional(),
@@ -460,7 +466,7 @@ const EpisodeV1ReadObjectSchema = z.looseObject({
     }).optional(),
   }),
   retention: z.looseObject(RetentionShape),
-  provenance: z.enum(['contributed', 'imported']).default('contributed'),
+  provenance: EpisodeProvenanceSchema.default('contributed'),
   lineage: z.looseObject(LineageShape).optional(),
   attemptGroup: AttemptGroupReadSchema.optional(),
   activity: SessionActivityFactsReadSchema.optional(),

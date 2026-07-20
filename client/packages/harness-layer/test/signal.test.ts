@@ -60,6 +60,21 @@ describe('computeSignal', () => {
     expect(computeSignal(input, { includeSeeds: true })[0]!.envelopeCount).toBe(2);
   });
 
+  it('keeps derived history distinct and counts it as non-seed evidence', () => {
+    const rows = computeSignal([
+      entry({ provenance: 'derived-from-history', tags: ['historical', 'verified'] }),
+    ]);
+
+    expect(rows).toEqual([
+      {
+        cluster: 'historical',
+        envelopeCount: 1,
+        contributorCount: 1,
+        topTags: ['verified'],
+      },
+    ]);
+  });
+
   it('empty corpus yields an empty signal (the caller renders the empty state)', () => {
     expect(computeSignal([])).toEqual([]);
   });

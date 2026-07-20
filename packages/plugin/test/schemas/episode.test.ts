@@ -9,6 +9,17 @@ import { makeSampleEpisode } from '../_fixtures/episode.js';
 const valid = makeSampleEpisode({ episodeId: 'ep-1' });
 
 describe('EpisodeV1Schema', () => {
+  it('preserves derived historical provenance on strict writes and tolerant reads', () => {
+    const historical = { ...valid, provenance: 'derived-from-history' as const };
+
+    expect(EpisodeV1WriteSchema.parse(historical).provenance).toBe(
+      'derived-from-history',
+    );
+    expect(EpisodeV1Schema.parse(historical).provenance).toBe(
+      'derived-from-history',
+    );
+  });
+
   it('parses a valid episode', () => {
     const parsed = EpisodeV1Schema.parse(valid);
     expect(parsed.episodeId).toBe('ep-1');
