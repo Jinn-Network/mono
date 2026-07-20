@@ -372,3 +372,166 @@ all-history fallback was added.
   read-only live schema introspection, but not against a disposable repository
   populated with every ambiguity and Human-comment case. That remains part of
   the approved live-shadow/canary gate; active mode is still rejected.
+
+## Second-review fix addendum — 2026-07-20
+
+### Findings addressed
+
+- `engine:review` is now a permanent v2 management/query-scope projection.
+  Draft implementation, Human, review, merge-prep, and merged phases never
+  remove it.
+- Stable and adopted branch ancestry is searched through bounded 100-commit
+  REST pages when the GraphQL tail is incomplete. Search selects the latest
+  strictly decoded claim/completion marker matching the candidate issue/PR,
+  ignores foreign merge-ancestry markers, fails closed at the safety limit,
+  caches only retryable/successful results, and retries transient failures on
+  later cycles.
+- Issue-scoped closing-PR reads provide a bounded label-independent recovery
+  path for an adopted v2 PR whose management-label projection is already
+  missing. Full lifecycle fields are fetched only for the discovered open
+  candidate; merged outcome rows remain terminal-only.
+- Orphan recovery that finds a concurrently created PR now repairs its draft
+  and `engine:review` projections instead of treating existence as completion.
+  The separately planned Project projection remains idempotent and converges
+  after partial failures.
+- Merged rows carry bounded v2 evidence from the management label, exact
+  stable branch identity, or a protocol body marker, allowing genuine v2
+  merge-before-`Done` recovery without reinterpreting unrelated legacy rows.
+- A stable `autopilot/<issue>` implementation claim and a different adopted
+  PR are now one connected ambiguity component. Normal recovery and orphan
+  repair are suppressed; all connected issues/PRs receive Human diagnostics
+  and projections.
+- Snapshot construction applies the existing rate floor immediately after the
+  single lean Project read. Low budget stops issue, PR, ref, and ancestry reads;
+  the v2 controller renders the typed result as `rate-limited`.
+- Ambiguity reconciliation events report phase `human`.
+- Structured Human comment evidence retains its optional issue number.
+  A mismatch against the resolved mapping expands the connected ambiguity and
+  parks every affected issue/PR in Human.
+- Observe remains zero-write, recover remains projection/recovery-only, and
+  active still rejects before any read or writer access. The existing
+  production `yarn autopilot` entrypoint is unchanged.
+
+### Second-review RED / GREEN evidence
+
+Initial focused RED:
+
+```text
+yarn vitest run test/lifecycle/projection.test.ts \
+  test/lifecycle/reconciler.test.ts \
+  test/lifecycle/github-reader.test.ts \
+  test/lifecycle/snapshot.test.ts \
+  test/lifecycle/controller.test.ts
+```
+
+Result: 5 files failed with 9 expected behavioral failures:
+
+- draft implementation attempted to remove `engine:review`;
+- a discovered orphan PR stopped at `already-applied`;
+- stable and adopted ancestry did not paginate to page two;
+- low Project budget still performed all lifecycle reads;
+- merged management evidence did not mark a row as v2;
+- stable/adopted contradictions remained normal lifecycle items;
+- Human marker issue mismatches remained normal lifecycle items;
+- ambiguity reconciliation events used `eligible`.
+
+Additional review-driven RED:
+
+```text
+yarn vitest run test/lifecycle/github-reader.test.ts \
+  -t 'transient ancestry|rediscovers|foreign protocol'
+```
+
+Result: the transient failure remained cached, an unlabeled adopted v2 PR was
+invisible, and a foreign merge-ancestry protocol marker was selected before
+the candidate branch claim.
+
+Focused GREEN:
+
+```text
+yarn vitest run test/lifecycle/projection.test.ts \
+  test/lifecycle/reconciler.test.ts \
+  test/lifecycle/github-reader.test.ts \
+  test/lifecycle/snapshot.test.ts \
+  test/lifecycle/controller.test.ts
+```
+
+Result: 5 files passed, 45 tests passed.
+
+### Second-review files
+
+Production:
+
+- `packages/autopilot/scripts/run-autopilot-v2.ts`
+- `packages/autopilot/src/lifecycle/controller.ts`
+- `packages/autopilot/src/lifecycle/github-reader.ts`
+- `packages/autopilot/src/lifecycle/projection.ts`
+- `packages/autopilot/src/lifecycle/reconciler.ts`
+- `packages/autopilot/src/lifecycle/snapshot.ts`
+
+Tests:
+
+- `packages/autopilot/test/lifecycle/controller.test.ts`
+- `packages/autopilot/test/lifecycle/github-reader.test.ts`
+- `packages/autopilot/test/lifecycle/projection.test.ts`
+- `packages/autopilot/test/lifecycle/reconciler.test.ts`
+- `packages/autopilot/test/lifecycle/snapshot.test.ts`
+
+Evidence:
+
+- `.superpowers/sdd/task-2-report.md`
+
+### Second-review commit lineage
+
+- Design/spec baseline: `91ec7468b`
+- Task 2 implementation: `3471725db`
+- First-review Task 2 fix: `504dbeb0b`
+- Second-review fix base: `504dbeb0b6a67c22361bac3c4f30d5c12e46a44a`
+- Final second-review fix SHA: recorded in the task handoff because a commit
+  cannot contain its own SHA.
+
+### Second-review verification
+
+Exact final command:
+
+```text
+yarn vitest run test/lifecycle && yarn typecheck && yarn test
+```
+
+Result:
+
+- Lifecycle: 9 files passed, 97 tests passed.
+- Typecheck: exit 0, no diagnostics.
+- Full Autopilot suite: 80 files passed, 801 tests passed.
+- Expected resilience-test stderr was present; zero tests failed.
+
+### Second-review self-review
+
+- Confirmed the existing production `autopilot` package script and
+  `scripts/run-autopilot.ts` were not changed.
+- Confirmed the Project snapshot is fetched once and the rate floor is applied
+  before issue polling, open/merged PR reads, review refs, stable refs, or
+  ancestry.
+- Confirmed ordinary open PR discovery remains `engine:review` scoped.
+  Missing-label adopted recovery uses only the already-bounded non-Done
+  issue-to-closing-PR batches and performs a full PR-by-number read only for an
+  open unlabeled candidate; there is no all-open-PR fallback.
+- Confirmed merged issue batches still omit reviews, comments, checks, and
+  review refs.
+- Confirmed ancestry pagination selects a matching issue/PR marker, retries a
+  transient failure, and never silently truncates after the safety cap.
+- Confirmed stable/adopted and Human-marker contradictions suppress normal
+  lifecycle and orphan recovery for the full connected component.
+- Confirmed a discovered orphan PR rechecks the exact head before repairing
+  draft and management-label projections.
+- Confirmed observe has zero writer calls, recover has no claim/child/merge
+  authority, and active rejects before any read.
+- Confirmed `git diff --check` is clean.
+
+### Second-review concerns
+
+- The bounded issue-linked missing-label recovery and paginated REST ancestry
+  shapes are covered by injected-reader unit tests but have not been exercised
+  against a disposable live repository containing a long adopted branch with
+  merge ancestry. The approved live-shadow/canary gate remains required;
+  active mode is deliberately unwired.

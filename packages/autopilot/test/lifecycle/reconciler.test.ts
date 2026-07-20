@@ -63,11 +63,18 @@ function writer(
       fail('ensureHumanComment');
       state.comments.add(marker);
     },
-    findOpenPullRequest: async () => state.prExists ? { head: state.head, draft: true } : null,
+    findOpenPullRequest: async () => state.prExists ? {
+      number: 101,
+      head: state.head,
+      draft: state.draft,
+      labels: [...state.labels],
+    } : null,
     ensureDraftPullRequest: async () => {
       calls.push('ensureDraftPullRequest');
       fail('ensureDraftPullRequest');
       state.prExists = true;
+      state.draft = true;
+      state.labels.add('engine:review');
     },
     readReviewRef: async () => state.review,
     markReviewStale: async () => {
@@ -289,6 +296,42 @@ describe('executeProjectionPlan', () => {
       'already-applied',
     ]);
     expect(calls).toEqual(['ensureDraftPullRequest', 'markReviewStale']);
+  });
+
+  it('repairs a concurrently discovered orphan PR instead of stopping at existence', async () => {
+    const state = initial();
+    state.prExists = true;
+    state.status = 'Todo';
+    state.draft = false;
+    const calls: string[] = [];
+
+    const report = await executeProjectionPlan({
+      actions: [
+        {
+          kind: 'set-project-status',
+          issueNumber: 42,
+          expectedHead: HEAD,
+          status: 'In Progress',
+        },
+        {
+          kind: 'ensure-draft-pr',
+          issueNumber: 42,
+          expectedHead: HEAD,
+          headRefName: 'autopilot/42',
+          baseRefName: 'next',
+        },
+      ],
+    }, writer(state, calls));
+
+    expect(report.results.map((result) => result.outcome)).toEqual(['applied', 'applied']);
+    expect(calls).toEqual([
+      'setProjectStatus',
+      'setPullRequestDraft',
+      'setPullRequestLabel',
+    ]);
+    expect(state.status).toBe('In Progress');
+    expect(state.draft).toBe(true);
+    expect(state.labels.has('engine:review')).toBe(true);
   });
 
   it('does not write synthetic progress for stale merge-prep exposure', async () => {

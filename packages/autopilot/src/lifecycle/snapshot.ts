@@ -1,6 +1,7 @@
 import type { PolledIssue } from '../dispatcher/types.js';
 import type { ProjectSnapshot } from '../dispatcher/project-snapshot.js';
 import { toIssueBoardState } from '../dispatcher/project-snapshot.js';
+import { DEFAULT_FLOOR } from '../dispatcher/rate-limit-guard.js';
 import type { PrLink } from '../dispatcher/pr-links.js';
 import { resolveStackReady } from '../dispatcher/stack-readiness.js';
 import { selectReady } from '../dispatcher/ready-filter.js';
@@ -84,6 +85,7 @@ export interface PullRequestSnapshot {
   readonly reviews: readonly NativeReviewSnapshot[];
   readonly branchClaim?: BranchClaim;
   readonly reviewClaim?: ReviewClaimSnapshot;
+  readonly humanIssueNumber?: number;
   readonly humanReason?: HumanReason;
   readonly mergedAt?: string;
   readonly mergeCommitOid?: GitOid;
@@ -116,6 +118,7 @@ export interface RawPullRequest {
   readonly reviews: readonly RawNativeReview[];
   readonly branchClaimTrailers: string | null;
   readonly reviewClaim: { readonly oid: string; readonly payload: string } | null;
+  readonly humanIssueNumber?: number | null;
   readonly humanReason: HumanReason | null;
   readonly mergedAt: string | null;
   readonly mergeCommitOid: string | null;
@@ -176,6 +179,13 @@ export class SnapshotDecodeError extends Error {
   }
 }
 
+export class LifecycleRateLimitError extends Error {
+  constructor(readonly remaining: number) {
+    super(`GitHub rate-limit budget low: ${remaining} remaining`);
+    this.name = 'LifecycleRateLimitError';
+  }
+}
+
 function errorMessage(value: unknown): string {
   return value instanceof Error ? value.message : String(value);
 }
@@ -208,6 +218,9 @@ function parsePullRequest(raw: RawPullRequest): PullRequestSnapshot {
           record: decodeReviewClaimPayload(raw.reviewClaim.payload),
         };
     if (raw.mergedAt !== null) isoTimestamp(raw.mergedAt);
+    if (raw.humanIssueNumber !== undefined && raw.humanIssueNumber !== null) {
+      assertPositiveInteger(raw.humanIssueNumber, 'Human marker issue number');
+    }
     return {
       number: raw.number,
       title: raw.title,
@@ -227,6 +240,9 @@ function parsePullRequest(raw: RawPullRequest): PullRequestSnapshot {
       reviews,
       ...(branchClaim === undefined ? {} : { branchClaim }),
       ...(reviewClaim === undefined ? {} : { reviewClaim }),
+      ...(raw.humanIssueNumber === undefined || raw.humanIssueNumber === null
+        ? {}
+        : { humanIssueNumber: raw.humanIssueNumber }),
       ...(raw.humanReason === null ? {} : { humanReason: raw.humanReason }),
       ...(raw.mergedAt === null ? {} : { mergedAt: raw.mergedAt }),
       ...(raw.mergeCommitOid === null ? {} : { mergeCommitOid: gitOid(raw.mergeCommitOid) }),
@@ -321,7 +337,13 @@ function lifecyclePr(
     kind: 'pull-request',
     issueNumber: issue.number,
     prNumber: pr.number,
-    v2Marked: pr.branchClaim !== undefined || reviewClaim !== undefined,
+    v2Marked: pr.branchClaim !== undefined
+      || reviewClaim !== undefined
+      || (pr.state === 'MERGED' && (
+        pr.labels.includes('engine:review')
+        || stableBranchIssue(pr.headRefName) === issue.number
+        || /<!-- jinn-autopilot-[a-z-]+:v2\b/.test(pr.body)
+      )),
     projectStatus: issue.status,
     labels: [...pr.labels],
     ...(issue.blockedOn === 'Human' ? { humanHold: true } : {}),
@@ -348,6 +370,7 @@ function stableBranchIssue(headRefName: string): number | undefined {
 
 function resolveMappings(
   prs: readonly PullRequestSnapshot[],
+  branches: readonly BranchClaimSnapshot[],
   byIssue: ReadonlyMap<number, PolledIssue>,
 ): {
   readonly issueByPr: ReadonlyMap<number, number>;
@@ -357,6 +380,16 @@ function resolveMappings(
   const candidatesByPr = new Map<number, Set<number>>();
   const prsByIssue = new Map<number, Set<number>>();
   const intrinsicallyAmbiguous = new Set<number>();
+  const intrinsicDetails = new Map<number, string[]>();
+  const diagnosticExtraIssues = new Map<number, Set<number>>();
+  const stableClaims = new Map(
+    branches
+      .filter((branch) => (
+        branch.claim.phase === 'implement'
+        && branch.headRefName === `autopilot/${branch.issueNumber}`
+      ))
+      .map((branch) => [branch.issueNumber, branch]),
+  );
   for (const pr of prs) {
     const candidates = new Set<number>();
     for (const issueNumber of pr.closingIssueNumbers) {
@@ -371,6 +404,28 @@ function resolveMappings(
       prsByIssue.set(issueNumber, issuePrs);
     }
     const closing = new Set(pr.closingIssueNumbers);
+    const details: string[] = [];
+    if (
+      pr.humanIssueNumber !== undefined
+      && (candidates.size !== 1 || !candidates.has(pr.humanIssueNumber))
+    ) {
+      intrinsicallyAmbiguous.add(pr.number);
+      details.push(
+        `structured Human marker issue #${pr.humanIssueNumber} contradicts the resolved PR mapping`,
+      );
+      if (byIssue.has(pr.humanIssueNumber)) {
+        diagnosticExtraIssues.set(pr.number, new Set([pr.humanIssueNumber]));
+      }
+    }
+    const mappedIssue = candidates.size === 1 ? [...candidates][0] : undefined;
+    const stableClaim = mappedIssue === undefined ? undefined : stableClaims.get(mappedIssue);
+    if (stableClaim !== undefined && pr.headRefName !== stableClaim.headRefName) {
+      intrinsicallyAmbiguous.add(pr.number);
+      details.push(
+        `stable branch ${stableClaim.headRefName} claim contradicts adopted PR #${pr.number} branch ${pr.headRefName}`,
+      );
+    }
+    if (details.length > 0) intrinsicDetails.set(pr.number, details);
     if (
       candidates.size !== 1
       || closing.size > 1
@@ -402,8 +457,13 @@ function resolveMappings(
       const prNumber = pendingPrs.pop()!;
       if (componentPrs.has(prNumber)) continue;
       componentPrs.add(prNumber);
+      ambiguousPrs.add(prNumber);
       seenPrs.add(prNumber);
-      for (const issueNumber of candidatesByPr.get(prNumber) ?? []) {
+      const connectedIssues = new Set([
+        ...(candidatesByPr.get(prNumber) ?? []),
+        ...(diagnosticExtraIssues.get(prNumber) ?? []),
+      ]);
+      for (const issueNumber of connectedIssues) {
         if (componentIssues.has(issueNumber)) continue;
         componentIssues.add(issueNumber);
         for (const linkedPr of prsByIssue.get(issueNumber) ?? []) {
@@ -417,11 +477,16 @@ function resolveMappings(
       .sort((left, right) => left.number - right.number);
     const issueNumbers = [...componentIssues].sort((left, right) => left - right);
     const prNumbers = diagnosticPrs.map((pr) => pr.number);
+    const details = [...new Set(diagnosticPrs.flatMap((pr) => (
+      intrinsicDetails.get(pr.number) ?? []
+    )))];
     diagnostics.push({
       code: 'branch-mapping-ambiguous',
       detail: `Ambiguous lifecycle mapping between issue(s) ${
         issueNumbers.length === 0 ? 'none' : issueNumbers.map((number) => `#${number}`).join(', ')
-      } and PR(s) ${prNumbers.map((number) => `#${number}`).join(', ')}`,
+      } and PR(s) ${prNumbers.map((number) => `#${number}`).join(', ')}${
+        details.length === 0 ? '' : `: ${details.join('; ')}`
+      }`,
       issueNumbers,
       issues: issueNumbers.map((number) => ({
         number,
@@ -480,6 +545,7 @@ function eligibilityEvidence(
 function lifecycleItems(
   issues: readonly PolledIssue[],
   prs: readonly PullRequestSnapshot[],
+  branches: readonly BranchClaimSnapshot[],
   authorAllowlist: ReadonlySet<string>,
   project: ProjectSnapshot,
 ): {
@@ -505,7 +571,7 @@ function lifecycleItems(
         && entry.sprintIterationId === project.currentSprintIterationId,
     });
   }
-  const mappings = resolveMappings(prs, byIssue);
+  const mappings = resolveMappings(prs, branches, byIssue);
   const links = prLinksByIssue(prs, mappings.issueByPr);
   const stackReady = resolveStackReady([...issues], links, authorAllowlist);
   const issuesWithPr = new Set([
@@ -576,9 +642,13 @@ export async function buildGitHubLifecycleSnapshot(
     readonly authorAllowlist: ReadonlySet<string>;
     readonly now?: () => Date;
     readonly maxPages?: number;
+    readonly rateLimitFloor?: number;
   },
 ): Promise<GitHubLifecycleSnapshot> {
   const project = await reader.readProjectSnapshot();
+  if (project.rateLimit.remaining < (options.rateLimitFloor ?? DEFAULT_FLOOR)) {
+    throw new LifecycleRateLimitError(project.rateLimit.remaining);
+  }
   const issues = await reader.readIssues(toIssueBoardState(project));
   const nonDoneIssueNumbers = project.items
     .filter((item) => item.contentType === 'Issue' && item.status !== 'Done')
@@ -603,7 +673,13 @@ export async function buildGitHubLifecycleSnapshot(
   const branches = (await reader.readBranchClaims?.() ?? []).map(parseBranchClaim);
   const now = (options.now ?? (() => new Date()))();
   isoTimestamp(now.toISOString());
-  const lifecycle = lifecycleItems(issues, pullRequests, options.authorAllowlist, project);
+  const lifecycle = lifecycleItems(
+    issues,
+    pullRequests,
+    branches,
+    options.authorAllowlist,
+    project,
+  );
   const snapshot: GitHubLifecycleSnapshot = {
     project,
     issues: [...issues],

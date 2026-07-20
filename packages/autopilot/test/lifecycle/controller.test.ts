@@ -27,7 +27,7 @@ function implementation(
     prNumber: 101,
     v2Marked: true,
     projectStatus: 'Todo',
-    labels: [],
+    labels: ['engine:review'],
     head: HEAD,
     headChangedAt: '2026-07-20T11:00:00.000Z',
     isDraft: false,
@@ -400,5 +400,57 @@ describe('lifecycle controller', () => {
     }]);
     expect(JSON.stringify(report)).not.toContain('ensure-draft-pr');
     expect(calls).toEqual([]);
+  });
+
+  it('emits Human phase for ambiguity reconciliation events', async () => {
+    const calls: string[] = [];
+    let status: 'Todo' | 'Human' = 'Todo';
+    let draft = false;
+    const labels = new Set(['engine:review']);
+    const comments = new Set<string>();
+    const writer: ReconciliationWriter = {
+      ...throwingWriter(calls),
+      readProjectStatus: async () => status,
+      setProjectStatus: async (_issue, desired) => {
+        status = desired as typeof status;
+      },
+      readPullRequest: async () => ({ head: HEAD, draft, labels: [...labels] }),
+      setPullRequestDraft: async (_pr, desired) => {
+        draft = desired;
+      },
+      setPullRequestLabel: async (_pr, label, present) => {
+        if (present) labels.add(label);
+        else labels.delete(label);
+      },
+      hasHumanComment: async (_pr, marker) => comments.has(marker),
+      ensureHumanComment: async (_pr, marker) => {
+        comments.add(marker);
+      },
+    };
+    const ambiguousSnapshot: GitHubLifecycleSnapshot = {
+      ...snapshot(implementation()),
+      lifecycle: { items: [] },
+      diagnostics: [{
+        code: 'branch-mapping-ambiguous',
+        detail: 'Stable branch claim contradicts adopted PR #101',
+        issueNumbers: [42],
+        issues: [{ number: 42, projectStatus: 'Todo' }],
+        pullRequests: [{
+          number: 101,
+          head: HEAD,
+          draft: false,
+          labels: ['engine:review'],
+        }],
+      }],
+    };
+
+    const report = await runLifecycleCycle('recover', {
+      ...deps(implementation(), calls, writer),
+      readSnapshot: async () => ambiguousSnapshot,
+    });
+
+    expect(report.status).toBe('ok');
+    expect(report.events).not.toHaveLength(0);
+    expect(report.events.every((event) => event.phase === 'human')).toBe(true);
   });
 });

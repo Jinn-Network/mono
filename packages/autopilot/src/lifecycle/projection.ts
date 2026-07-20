@@ -195,9 +195,7 @@ function planItem(
           : { requiresReviewState: completedReviewState }),
       });
     }
-    const wantsReviewLabel = view.phase === 'human'
-      ? item.labels.includes(labels.review)
-      : !['implementing', 'merged'].includes(view.phase);
+    const wantsReviewLabel = true;
     if (item.labels.includes(labels.review) !== wantsReviewLabel) {
       actions.push({
         kind: 'set-pr-label',
