@@ -58,12 +58,43 @@ Commit: recorded in the Task 4 handoff after commit creation.
 - Production identity RED covered SSH rejection, selected HTTPS askpass/token,
   exact remote lease, session-bound manifest reads, and malformed newer
   lifecycle evidence failing closed.
+- Final-review remediation RED:
+  - the first focused run produced the expected 14 failures across 66 tests:
+    brand-new executor claims could not authorize their bound PR session,
+    ordinary ineligibility flattened branch ambiguity, completion recovery
+    continued after failed prerequisites, marker retry and Human paths lacked
+    complete PR authority, Human did not dominate completion, retries trusted
+    changed summary input, and summary metadata parsing collided with
+    metadata-looking summary lines;
+  - an additional exact-order RED proved ambiguous marker retry read the
+    durable summary after its last PR validation;
+  - an additional Human-order RED proved a base change between redraft and
+    later Human mutations was not detected.
+- Final-review remediation GREEN:
+  - an omitted PR number is accepted only on the manifest's exact original
+    implementation claim; the bound draft PR still must match exact issue,
+    number, head, branch, base, and lifecycle marker;
+  - ambiguity is evaluated after issue existence/open checks and the canonical
+    reality check, but before ordinary eligibility;
+  - completion repair actions form an explicit previous-success chain, so a
+    failed summary/label/Project prerequisite prevents ready;
+  - ambiguous completion retry re-reads durable summary and then exact active
+    PR authority immediately before its lease publication;
+  - `review:needs-human` or Project `Human` stops completion before a marker,
+    `In Review`, or ready mutation, with repeat checks during projection;
+  - Human revalidates complete PR authority initially and between ordered
+    mutations;
+  - phase-complete retries reject summary-file drift and use the exact
+    completion commit's durable summary;
+  - lifecycle metadata is parsed only from the terminal contiguous trailer
+    block, leaving `Jinn-Autopilot-*` summary lines unambiguous.
 
 ## Files
 
 - `packages/autopilot/src/lifecycle/implementation-executor.ts`
 - `packages/autopilot/src/lifecycle/implementation-session.ts`
 - `packages/autopilot/src/lifecycle/implementation-session-production.ts`
+- `packages/autopilot/src/lifecycle/codecs.ts`
 - `packages/autopilot/src/lifecycle/attempt-workspace.ts`
 - `packages/autopilot/src/lifecycle/github-reader.ts`
 - `packages/autopilot/src/lifecycle/snapshot.ts`
@@ -77,12 +108,9 @@ Commit: recorded in the Task 4 handoff after commit creation.
 ## Verification
 
 - `yarn vitest run test/lifecycle test/dispatcher/coordinator-session.test.ts`
-  — 15 files, 176 tests passed.
+  — 15 files, 191 tests passed.
 - `yarn typecheck` — passed.
-- `yarn test` — 86 files, 903 tests passed.
-- One preceding full-suite run hit a macOS Git worktree concurrency error in
-  the existing two-process test. The isolated test passed immediately and the
-  unchanged full suite passed on rerun.
+- `yarn test` — 86 files, 918 tests passed.
 - `git diff --check` — passed.
 
 ## Self-review
@@ -92,8 +120,15 @@ Commit: recorded in the Task 4 handoff after commit creation.
 - Claim losers and unresolved ambiguity perform no downstream mutation.
 - Checkpoints cannot publish from a stale manifest/claim or changed PR.
 - Completion evidence is durable before recoverable projections, and ready is
-  last in both the session and Task 2 recovery plan.
-- Human never readies or deletes work.
+- Completion projection prerequisites stop in order after failure rather than
+  allowing Project or ready to overtake durable summary repair.
+- Human is dominant in both direct session completion and recovery; Human
+  never readies or deletes work.
+- New-branch claims intentionally omit the not-yet-created PR number, while
+  session authority permits that omission only for the exact original claim
+  bound by the manifest and exact PR readback.
+- Completion summaries are recovered from the exact phase-complete commit and
+  terminal trailer parsing cannot consume metadata-looking summary content.
 - Production session Git/GitHub calls use the selected token/askpass and reject
   SSH/non-canonical publication remotes.
 - No global active-controller, review writer, merge-prep writer, or merge

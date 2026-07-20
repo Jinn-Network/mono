@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { AttemptManifest } from '../../src/lifecycle/attempt-workspace.js';
 import { CredentialPool } from '../../src/lifecycle/credentials.js';
 import {
   executeImplementationAction,
@@ -7,12 +8,23 @@ import {
   type ImplementationIssue,
   type ImplementationPullRequest,
 } from '../../src/lifecycle/implementation-executor.js';
-import { gitOid, gitRefName, type ClaimOutcome, type GitOid } from '../../src/lifecycle/types.js';
+import {
+  makeImplementationSessionProtocol,
+  type ImplementationSessionPort,
+} from '../../src/lifecycle/implementation-session.js';
+import {
+  gitOid,
+  gitRefName,
+  type BranchClaim,
+  type ClaimOutcome,
+  type GitOid,
+} from '../../src/lifecycle/types.js';
 
 const BASE = gitOid('1'.repeat(40));
 const CLAIM_A = gitOid('2'.repeat(40));
 const CLAIM_B = gitOid('3'.repeat(40));
 const ADOPTED_HEAD = gitOid('4'.repeat(40));
+const WORK = gitOid('5'.repeat(40));
 const ATTEMPT_A = '11111111-1111-4111-8111-111111111111';
 const ATTEMPT_B = '22222222-2222-4222-8222-222222222222';
 const HTTPS_REMOTE = 'https://github.com/Jinn-Network/mono.git';
@@ -229,6 +241,118 @@ describe('implementation action executor', () => {
     expect(events).toEqual(['claim', 'pr', 'project', 'attempt', 'spawn', 'track']);
   });
 
+  it('carries a brand-new executor claim into an authoritative session checkpoint', async () => {
+    let initialClaim: BranchClaim | undefined;
+    let createdAttempt: Parameters<ImplementationExecutorDeps['createAttempt']>[0] | undefined;
+    const { deps } = harness({
+      createClaimCommit: async ({ claim }) => {
+        initialClaim = claim;
+        return CLAIM_A;
+      },
+      createAttempt: async (input) => {
+        createdAttempt = input;
+        return {
+          attemptId: input.attemptId,
+          paths: {
+            worktree: '/tmp/new-branch/worktree',
+            manifest: '/tmp/new-branch/manifest.json',
+            log: '/tmp/new-branch/session.log',
+            ghConfigDir: '/tmp/new-branch/gh-config',
+            askpass: '/tmp/new-branch/askpass',
+          },
+        };
+      },
+      spawnCoordinator: () => ({ pid: 4242 }),
+    });
+    await expect(executeImplementationAction({ issueNumber: 42 }, deps))
+      .resolves.toMatchObject({ status: 'spawned', prNumber: 84 });
+    expect(initialClaim).not.toHaveProperty('prNumber');
+
+    const manifest: AttemptManifest = {
+      version: 2,
+      attemptId: createdAttempt!.attemptId,
+      runnerId: 'runner-a',
+      host: 'host-a',
+      phase: 'implement',
+      subject: 'issue-42',
+      issueNumber: 42,
+      prNumber: createdAttempt!.prNumber,
+      branch: createdAttempt!.branch,
+      targetBase: createdAttempt!.targetBase,
+      expectedHead: CLAIM_A,
+      claimOid: CLAIM_A,
+      selectedLogin: createdAttempt!.selectedLogin,
+      repository: {
+        root: '/repo',
+        gitCommonDir: '/repo/.git',
+        remoteName: 'jinn-autopilot-v2',
+        remoteUrlHash: 'a'.repeat(64),
+      },
+      processState: 'running',
+      pid: 4242,
+      paths: {
+        attemptDir: '/tmp/new-branch',
+        worktree: '/tmp/new-branch/worktree',
+        manifest: '/tmp/new-branch/manifest.json',
+        log: '/tmp/new-branch/session.log',
+        ghConfigDir: '/tmp/new-branch/gh-config',
+        askpass: '/tmp/new-branch/askpass',
+      },
+      timestamps: {
+        createdAt: '2026-07-20T12:00:00.000Z',
+        updatedAt: '2026-07-20T12:01:00.000Z',
+        childStartedAt: '2026-07-20T12:01:00.000Z',
+      },
+    };
+    let progressiveHead = CLAIM_A;
+    const port: ImplementationSessionPort = {
+      readManifest: () => ({ ...manifest, expectedHead: progressiveHead }),
+      readAuthority: async () => ({
+        remoteHead: CLAIM_A,
+        latestClaimOid: CLAIM_A,
+        latestClaim: initialClaim!,
+      }),
+      readLocalHead: async () => WORK,
+      readBranchClaim: async () => null,
+      readCompletionSummary: async () => null,
+      isAncestor: async (_manifest, ancestor, descendant) =>
+        ancestor === descendant || (ancestor === CLAIM_A && descendant === WORK),
+      treesDiffer: async () => true,
+      publishBranch: async ({ expectedRemoteHead, newHead }) => ({
+        status: 'won',
+        expected: expectedRemoteHead,
+        published: newHead,
+        observed: newHead,
+      }),
+      advanceManifestHead: (_path, _expected, next) => {
+        progressiveHead = next;
+        return { ...manifest, expectedHead: next };
+      },
+      createCompletionCommit: async () => {
+        throw new Error('not used');
+      },
+      readPullRequest: async () => ({
+        number: 84,
+        head: CLAIM_A,
+        headRefName: 'autopilot/42',
+        baseRefName: 'next',
+        draft: true,
+        labels: ['engine:review'],
+        body: 'Closes #42\n\n<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
+      }),
+      ensureCompletionSummary: async () => {},
+      setPullRequestLabel: async () => {},
+      setProjectStatus: async () => {},
+      readProjectStatus: async () => 'In Progress',
+      setPullRequestDraft: async () => {},
+      hasHumanComment: async () => false,
+      ensureHumanComment: async () => {},
+    };
+
+    await expect(makeImplementationSessionProtocol(port).checkpoint(manifest))
+      .resolves.toEqual({ status: 'published', head: WORK });
+  });
+
   it('adopts one unambiguous open PR branch unchanged', async () => {
     const adopted = pr();
     const { deps, claims } = harness({
@@ -315,6 +439,32 @@ describe('implementation action executor', () => {
 
     await expect(executeImplementationAction({ issueNumber: 42 }, deps))
       .resolves.toMatchObject({ status: 'human', code: 'branch-mapping-ambiguous' });
+    expect(claims).toEqual([]);
+    expect(human).toHaveLength(1);
+  });
+
+  it('preserves structural PR ambiguity as Human before ordinary eligibility', async () => {
+    let realityChecks = 0;
+    const { deps, claims, human } = harness({
+      readIssue: async () => issue({ eligible: false }),
+      runRealityCheck: async () => {
+        realityChecks += 1;
+        return {
+          classification: 'fixed-on-trunk',
+          evidence: { sha: BASE, branch: 'next' },
+          suggestedBlockedOn: 'Human',
+          suggestedComment: 'Already fixed.',
+        };
+      },
+      listOpenPullRequests: async () => [
+        pr(),
+        pr({ number: 85, headRefName: gitRefName('other/issue-42') }),
+      ],
+    });
+
+    await expect(executeImplementationAction({ issueNumber: 42 }, deps))
+      .resolves.toMatchObject({ status: 'human', code: 'branch-mapping-ambiguous' });
+    expect(realityChecks).toBe(1);
     expect(claims).toEqual([]);
     expect(human).toHaveLength(1);
   });

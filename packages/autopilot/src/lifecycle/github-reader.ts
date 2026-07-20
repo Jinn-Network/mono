@@ -18,8 +18,11 @@ import type {
 } from './snapshot.js';
 import {
   decodeBranchClaimTrailers,
+  extractImplementationCompletionSummary,
   parseHumanCommentEvidence,
+  terminalBranchClaimTrailers,
 } from './codecs.js';
+export { extractImplementationCompletionSummary } from './codecs.js';
 
 export const REVIEW_CLAIM_PAYLOAD_FILE = 'jinn-autopilot-review.json';
 const PR_PAGE_SIZE = 50;
@@ -257,12 +260,7 @@ interface MergedOutcomesResponse {
 }
 
 function branchTrailers(message: string): string | null {
-  const lines = message
-    .split('\n')
-    .filter((line) => line.startsWith('Jinn-Autopilot-'));
-  return lines.some((line) => line === 'Jinn-Autopilot-Protocol: 2')
-    ? lines.join('\n')
-    : null;
+  return terminalBranchClaimTrailers(message);
 }
 
 function matchingBranchTrailers(
@@ -282,20 +280,6 @@ function matchingBranchTrailers(
     return null;
   }
   return trailers;
-}
-
-export function extractImplementationCompletionSummary(
-  message: string,
-  trailers: string,
-): string | null {
-  const claim = decodeBranchClaimTrailers(trailers);
-  if (claim.phase !== 'implement' || claim.phaseComplete !== true) return null;
-  const prefix = 'Autopilot implementation phase complete\n\n';
-  const suffix = `\n\n${trailers}`;
-  if (!message.startsWith(prefix) || !message.endsWith(suffix)) {
-    throw new Error('Implementation completion commit is missing its durable summary envelope');
-  }
-  return message.slice(prefix.length, -suffix.length);
 }
 
 function assertCompletePrNode(pr: GraphQlPr): void {

@@ -51,18 +51,21 @@ export type ProjectionAction =
       readonly kind: 'set-project-status';
       readonly issueNumber: number;
       readonly status: ProjectStatus;
+      readonly requiresPreviousSuccess?: true;
     } & Partial<HeadPinned>)
   | ({
       readonly kind: 'set-pr-draft';
       readonly prNumber: number;
       readonly draft: boolean;
       readonly requiresReviewState?: 'fixing' | 'terminal-approved';
+      readonly requiresPreviousSuccess?: true;
     } & HeadPinned)
   | ({
       readonly kind: 'set-pr-label';
       readonly prNumber: number;
       readonly label: string;
       readonly present: boolean;
+      readonly requiresPreviousSuccess?: true;
     } & HeadPinned)
   | ({
       readonly kind: 'ensure-human-comment';
@@ -226,7 +229,10 @@ function planItem(
       });
     }
     const wantsReviewLabel = true;
-    if (item.labels.includes(labels.review) !== wantsReviewLabel) {
+    if (
+      !implementationComplete
+      && item.labels.includes(labels.review) !== wantsReviewLabel
+    ) {
       actions.push({
         kind: 'set-pr-label',
         prNumber: item.prNumber,
@@ -259,12 +265,26 @@ function planItem(
   }
 
   if (implementationComplete) {
+    const requiresPreviousSuccess = view.phase === 'human'
+      ? {}
+      : { requiresPreviousSuccess: true as const };
+    if (!item.labels.includes(labels.review)) {
+      actions.push({
+        kind: 'set-pr-label',
+        prNumber: item.prNumber,
+        expectedHead: item.head,
+        label: labels.review,
+        present: true,
+        ...requiresPreviousSuccess,
+      });
+    }
     if (item.projectStatus !== desired) {
       actions.push({
         kind: 'set-project-status',
         issueNumber: item.issueNumber,
         expectedHead: item.head,
         status: desired,
+        ...requiresPreviousSuccess,
       });
     }
     const draft = activeMutation(view);
@@ -274,6 +294,7 @@ function planItem(
         prNumber: item.prNumber,
         expectedHead: item.head,
         draft,
+        ...requiresPreviousSuccess,
       });
     }
   }

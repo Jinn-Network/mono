@@ -140,6 +140,58 @@ describe('executeProjectionPlan', () => {
     expect(calls).toEqual(['ensureImplementationSummary', 'setPullRequestDraft']);
   });
 
+  it('stops a completion prerequisite chain after the first failed repair', async () => {
+    const state = initial();
+    state.status = 'Todo';
+    state.draft = true;
+    const calls: string[] = [];
+    const actions: ProjectionAction[] = [
+      {
+        kind: 'ensure-implementation-summary',
+        prNumber: 101,
+        expectedHead: HEAD,
+        summary: 'Durable summary',
+      },
+      {
+        kind: 'set-pr-label',
+        prNumber: 101,
+        expectedHead: HEAD,
+        label: 'engine:review',
+        present: true,
+        requiresPreviousSuccess: true,
+      },
+      {
+        kind: 'set-project-status',
+        issueNumber: 42,
+        expectedHead: HEAD,
+        status: 'In Review',
+        requiresPreviousSuccess: true,
+      },
+      {
+        kind: 'set-pr-draft',
+        prNumber: 101,
+        expectedHead: HEAD,
+        draft: false,
+        requiresPreviousSuccess: true,
+      },
+    ];
+
+    const report = await executeProjectionPlan(
+      { actions },
+      writer(state, calls, new Set(['ensureImplementationSummary'])),
+    );
+
+    expect(report.results.map((result) => result.outcome)).toEqual([
+      'failed',
+      'awaiting-prerequisite',
+      'awaiting-prerequisite',
+      'awaiting-prerequisite',
+    ]);
+    expect(calls).toEqual(['ensureImplementationSummary']);
+    expect(state.status).toBe('Todo');
+    expect(state.draft).toBe(true);
+  });
+
   it('re-reads and rejects every head-pinned correction after the head changes', async () => {
     const state = initial();
     state.head = CHANGED;

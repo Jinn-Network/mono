@@ -129,6 +129,35 @@ export function encodeBranchClaimTrailers(claim: BranchClaim): string {
   return lines.join('\n');
 }
 
+export function terminalBranchClaimTrailers(message: string): string | null {
+  const lines = message.replace(/\r\n/g, '\n').split('\n');
+  while (lines.at(-1) === '') lines.pop();
+  let start = lines.length;
+  while (start > 0 && lines[start - 1]!.startsWith('Jinn-Autopilot-')) {
+    start -= 1;
+  }
+  if (start === lines.length) return null;
+  const trailers = lines.slice(start).join('\n');
+  return trailers.includes(`${BRANCH_TRAILERS.protocolVersion}: 2`)
+    ? trailers
+    : null;
+}
+
+export function extractImplementationCompletionSummary(
+  message: string,
+  trailers: string,
+): string | null {
+  const claim = decodeBranchClaimTrailers(trailers);
+  if (claim.phase !== 'implement' || claim.phaseComplete !== true) return null;
+  const normalized = message.replace(/\r\n/g, '\n').replace(/\n+$/, '');
+  const prefix = 'Autopilot implementation phase complete\n\n';
+  const suffix = `\n\n${trailers}`;
+  if (!normalized.startsWith(prefix) || !normalized.endsWith(suffix)) {
+    throw new Error('Implementation completion commit is missing its durable summary envelope');
+  }
+  return normalized.slice(prefix.length, -suffix.length);
+}
+
 export function decodeBranchClaimTrailers(value: string): BranchClaim {
   const fields = new Map<string, string>();
   for (const line of value.split('\n')) {

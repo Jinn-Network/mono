@@ -92,6 +92,73 @@ function graphQlPr(input: {
 }
 
 describe('GhLifecycleReader', () => {
+  it('parses lifecycle metadata only from the terminal trailer block', async () => {
+    const trailers = [
+      'Jinn-Autopilot-Protocol: 2',
+      'Jinn-Autopilot-Phase: implement',
+      'Jinn-Autopilot-Issue: 42',
+      'Jinn-Autopilot-PR: 101',
+      'Jinn-Autopilot-Attempt: 11111111-1111-4111-8111-111111111111',
+      'Jinn-Autopilot-Runner: runner-a',
+      'Jinn-Autopilot-Login: implementer',
+      `Jinn-Autopilot-Expected-Head: ${OPEN_HEAD}`,
+      'Jinn-Autopilot-Target-Base: next',
+      'Jinn-Autopilot-Claimed-At: 2026-07-20T12:00:00.000Z',
+      'Jinn-Autopilot-Phase-Complete: true',
+    ].join('\n');
+    const summary = [
+      'Implemented lifecycle recovery.',
+      'Jinn-Autopilot-Login: this line is summary content',
+      'Preserved exact authority.',
+    ].join('\n');
+    const message = [
+      'Autopilot implementation phase complete',
+      '',
+      summary,
+      '',
+      trailers,
+    ].join('\n');
+    const run: CommandRunner = async (_command, args) => {
+      const query = args.find((arg) => arg.startsWith('query=')) ?? '';
+      if (query.includes('closedByPullRequestsReferences')) {
+        return JSON.stringify({
+          data: {
+            repository: {
+              issue42: {
+                closedByPullRequestsReferences: {
+                  pageInfo: { hasNextPage: false },
+                  nodes: [],
+                },
+              },
+            },
+          },
+        });
+      }
+      if (query.includes('ref(qualifiedName')) {
+        return JSON.stringify({ data: { repository: { ref: null } } });
+      }
+      return JSON.stringify({
+        data: {
+          repository: {
+            pullRequests: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: [graphQlPr({
+                number: 101,
+                state: 'OPEN',
+                head: OPEN_HEAD,
+                message,
+              })],
+            },
+          },
+        },
+      });
+    };
+
+    const page = await new GhLifecycleReader(run).readPullRequests(null, [42]);
+
+    expect(page.nodes[0]?.implementationCompletionSummary).toBe(summary);
+  });
+
   it('scopes open reads, batches merged outcomes, reads refs only for open PRs, and parses Human evidence', async () => {
     const calls: string[][] = [];
     const humanComment = '<!-- jinn-autopilot-human:v2 issue=42 pr=101 '
