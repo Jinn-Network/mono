@@ -119,6 +119,8 @@ function fakeHit(overrides: Partial<CorpusSearchHit> = {}): CorpusSearchHit {
 }
 
 describe('bounded IPFS JSON fetcher', () => {
+  const VALID_CID = 'QmYwAPJzv5CZsnAzt8auVZRn4xPjgVAc6zP8s8vF5hY8pN';
+
   it('passes a caller-supplied cap through to the streamed body reader', async () => {
     const payload = JSON.stringify({ authenticated: true });
     const fetchIpfs = createBoundedIpfsJsonFetcher({
@@ -126,9 +128,9 @@ describe('bounded IPFS JSON fetcher', () => {
       fetchImpl: vi.fn(async () => new Response(payload)),
     });
 
-    await expect(fetchIpfs('bafy-proof', Buffer.byteLength(payload)))
+    await expect(fetchIpfs(VALID_CID, Buffer.byteLength(payload)))
       .resolves.toEqual({ authenticated: true });
-    await expect(fetchIpfs('bafy-proof', Buffer.byteLength(payload) - 1))
+    await expect(fetchIpfs(VALID_CID, Buffer.byteLength(payload) - 1))
       .rejects.toThrow(/fetch ceiling/);
   });
 
@@ -153,10 +155,10 @@ describe('bounded IPFS JSON fetcher', () => {
       timeoutMs: 5_000,
     });
 
-    await expect(fetchIpfs('bafy-proof', 10)).rejects.toThrow(/fetch ceiling/);
+    await expect(fetchIpfs(VALID_CID, 10)).rejects.toThrow(/fetch ceiling/);
     expect(cancelled).toBe(true);
     expect(fetchImpl).toHaveBeenCalledWith(
-      'https://gateway.example/ipfs/bafy-proof',
+      `https://gateway.example/ipfs/${VALID_CID}`,
       expect.objectContaining({
         redirect: 'error',
         signal: expect.any(AbortSignal),
@@ -177,7 +179,7 @@ describe('bounded IPFS JSON fetcher', () => {
       fetchImpl,
     });
 
-    await expect(fetchIpfs('bafy-proof')).rejects.toThrow(/HTTP 302|redirect/i);
+    await expect(fetchIpfs(VALID_CID)).rejects.toThrow(/HTTP 302|redirect/i);
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
@@ -191,7 +193,43 @@ describe('bounded IPFS JSON fetcher', () => {
       fetchImpl: vi.fn(async () => redirected),
     });
 
-    await expect(fetchIpfs('bafy-proof')).rejects.toThrow(/redirect/i);
+    await expect(fetchIpfs(VALID_CID)).rejects.toThrow(/redirect/i);
+  });
+
+  it('keeps the timeout active while a response body is stalled after headers', async () => {
+    const fetchIpfs = createBoundedIpfsJsonFetcher({
+      gateway: 'https://gateway.example',
+      timeoutMs: 20,
+      fetchImpl: vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+        const signal = init?.signal;
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            signal?.addEventListener('abort', () => {
+              controller.error(signal.reason);
+            }, { once: true });
+          },
+        });
+        return new Response(body);
+      }),
+    });
+
+    await expect(fetchIpfs(VALID_CID)).rejects.toThrow();
+  });
+
+  it.each([
+    '../../api/v0/id',
+    '%2e%2e/%2e%2e/api/v0/id',
+    'bafy-not-a-real-cid',
+    'Qm' + 'a'.repeat(10_000),
+  ])('rejects a non-CID path segment before contacting the gateway: %s', async (cid) => {
+    const fetchImpl = vi.fn();
+    const fetchIpfs = createBoundedIpfsJsonFetcher({
+      gateway: 'https://gateway.example',
+      fetchImpl,
+    });
+
+    await expect(fetchIpfs(cid)).rejects.toThrow(/valid IPFS CID/);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
 

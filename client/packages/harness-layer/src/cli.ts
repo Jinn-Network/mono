@@ -65,6 +65,7 @@ import { parseEpisodeImportReport, renderEpisodeImportReport } from './seed-impo
 import { createFileSeedImportState, type SeedImportStateStore } from './seed-import/state.js';
 import { extractSkill } from './skill.js';
 import { isInsidePackageDir } from '../../../src/util/path-safety.js';
+import { isIpfsCid } from '../../../src/task-creator/proofs/ipfs-cid.js';
 import { runDistillationPipeline } from './pipeline.js';
 import { modelLabel, runEvalPrep } from './eval-prep.js';
 import { createVerdictSource, type VerdictSource } from './bridge-verdict-source.js';
@@ -472,7 +473,12 @@ export function createBoundedIpfsJsonFetcher(
     if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
       throw new Error('IPFS fetch ceiling must be a positive safe integer');
     }
-    const requestUrl = new URL(`${gateway}/ipfs/${cid}`).href;
+    // Bound length before the structural decoder: CIDv0 base58 decoding is
+    // intentionally dependency-free but superlinear for enormous strings.
+    if (cid.length > 256 || !isIpfsCid(cid)) {
+      throw new Error(`ipfs ${JSON.stringify(cid)}: expected a valid IPFS CID`);
+    }
+    const requestUrl = new URL(`${gateway}/ipfs/${encodeURIComponent(cid)}`).href;
     const response = await fetchImpl(requestUrl, {
       redirect: 'error',
       signal: AbortSignal.timeout(timeoutMs),
@@ -1944,11 +1950,11 @@ export async function runJinnLayerCli(
         return createEvidenceFetcher({
           ipfs,
           ...(resolveVerifierFacts ? { resolveVerifierFacts } : {}),
-          gql: async (query: string) => {
+          gql: async (query: string, variables?: Record<string, unknown>) => {
             const res = await fetch(graphqlUrl, {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ query }),
+              body: JSON.stringify({ query, variables }),
             });
             const body = (await res.json()) as { data?: unknown; errors?: unknown };
             if (body.errors) throw new Error(`gql: ${JSON.stringify(body.errors)}`);

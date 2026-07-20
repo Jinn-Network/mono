@@ -172,11 +172,8 @@ def write_episode_fallback(episode: Dict[str, Any]) -> Optional[Path]:
     retries are idempotent while different content for the same id fails closed.
     """
     try:
-        if episode.get("schemaVersion") != "jinn.episode.v1":
-            return None
-        episode_id = episode.get("episodeId")
-        if not isinstance(episode_id, str) or not episode_id:
-            return None
+        canonical_episode = skills_install._validate_episode_write(episode)
+        episode_id = canonical_episode["episodeId"]
         safe = re.fullmatch(r"[A-Za-z0-9._-]+", episode_id) and episode_id not in (".", "..")
         stem = (
             episode_id
@@ -184,7 +181,7 @@ def write_episode_fallback(episode: Dict[str, Any]) -> Optional[Path]:
             else f"episode-{hashlib.sha256(episode_id.encode('utf-8')).hexdigest()}"
         )
         serialized = json.dumps(
-            episode,
+            canonical_episode,
             ensure_ascii=False,
             allow_nan=False,
             sort_keys=True,
