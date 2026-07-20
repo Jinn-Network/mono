@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  matchesOnlyIssuesAllowlist,
   runLifecycleCycle,
   type LifecycleControllerDeps,
 } from '../../src/lifecycle/controller.js';
@@ -493,5 +494,275 @@ describe('active lifecycle controller', () => {
     const second = await runLifecycleCycle('active', controller);
     expect(actions).toEqual([{ kind: 'claim-implementation', issueNumber: 42 }]);
     expect(second.status).toBe('ok');
+  });
+});
+
+// jinn-mono#1883: `JINN_AUTOPILOT_ONLY_ISSUES` canary safety knob. Restricts
+// active-mode NEW-WORK claim scheduling to a fixed set of issue numbers so a
+// single disposable canary issue can run safely alongside another agent's
+// live work on the same board (runbook §8). Must not restrict reconciliation
+// of existing items.
+describe('active lifecycle controller — JINN_AUTOPILOT_ONLY_ISSUES allowlist (#1883)', () => {
+  // Both issues already sit at their reconciler-desired project status
+  // ('Todo' for an eligible issue), so this cycle plans zero reconciliation
+  // actions for either — the per-item "reconcile before claim" guarantee
+  // (`blockedIssueNumbers` in controller.ts) can't confound the assertions
+  // below with an unrelated block.
+  function twoEligibleIssuesSnapshot(): GitHubLifecycleSnapshot {
+    return {
+      project: {
+        items: [],
+        rateLimit: { remaining: 4_000, used: 1_000, resetAt: '2026-07-20T13:00:00.000Z' },
+        currentSprintIterationId: null,
+      },
+      issues: [],
+      pullRequests: [],
+      branches: [],
+      diagnostics: [],
+      lifecycle: {
+        items: [
+          {
+            kind: 'issue',
+            issueNumber: 42,
+            v2Marked: true,
+            projectStatus: 'Todo',
+            labels: [],
+            eligible: true,
+            eligibilityReason: 'eligible',
+          },
+          {
+            kind: 'issue',
+            issueNumber: 99,
+            v2Marked: true,
+            projectStatus: 'Todo',
+            labels: [],
+            eligible: true,
+            eligibilityReason: 'eligible',
+          },
+        ],
+      },
+      capturedAt: NOW.toISOString(),
+    };
+  }
+
+  function twoSlotActive(
+    onlyIssues?: ReadonlySet<number>,
+  ): NonNullable<LifecycleControllerDeps['active']> {
+    return {
+      preflight: async () => ({ ok: true }),
+      readLocalState: () => ({
+        remaining: { implementation: 2, review: 2, mergePrep: 2 },
+        availableLogins: ['implementation-bot', 'implementation-bot-2'],
+        implementationPreferredLogin: 'implementation-bot',
+      }),
+      implementationBackpressureThreshold: 10,
+      executeAction: async () => ({ outcome: 'spawned' }),
+      ...(onlyIssues === undefined ? {} : { onlyIssues }),
+    };
+  }
+
+  it('excludes an eligible issue outside the allowlist from claim-implementation scheduling', async () => {
+    const actions: unknown[] = [];
+    const controller = deps({
+      readSnapshot: async () => twoEligibleIssuesSnapshot(),
+      active: twoSlotActive(new Set([42])),
+    });
+    controller.active!.executeAction = async (action) => {
+      actions.push(action);
+      return { outcome: 'spawned' };
+    };
+    const report = await runLifecycleCycle('active', controller);
+    expect(actions).toEqual([{ kind: 'claim-implementation', issueNumber: 42 }]);
+    expect(report.status).toBe('ok');
+  });
+
+  it('schedules both issues when the allowlist is unset (pure no-op)', async () => {
+    const actions: unknown[] = [];
+    const controller = deps({
+      readSnapshot: async () => twoEligibleIssuesSnapshot(),
+      active: twoSlotActive(),
+    });
+    controller.active!.executeAction = async (action) => {
+      actions.push(action);
+      return { outcome: 'spawned' };
+    };
+    await runLifecycleCycle('active', controller);
+    expect(actions).toEqual([
+      { kind: 'claim-implementation', issueNumber: 42 },
+      { kind: 'claim-implementation', issueNumber: 99 },
+    ]);
+  });
+
+  // #99 deliberately has no project status yet, so reconciliation has a
+  // `set-project-status` action to run for it every cycle regardless of
+  // whether the allowlist below excludes it from claiming. The filter must
+  // be scoped to NEW-WORK claim scheduling only, so this action — and its
+  // outcome — must be identical whether or not the allowlist is set.
+  function needsReconciliationSnapshot(): GitHubLifecycleSnapshot {
+    const base = twoEligibleIssuesSnapshot();
+    return {
+      ...base,
+      lifecycle: {
+        items: base.lifecycle.items.map((item) => (
+          item.kind === 'issue' && item.issueNumber === 99
+            ? { ...item, projectStatus: null }
+            : item
+        )),
+      },
+    };
+  }
+
+  it('still reconciles a non-allowlisted issue exactly the same as when unrestricted', async () => {
+    const restricted = deps({
+      readSnapshot: async () => needsReconciliationSnapshot(),
+      active: twoSlotActive(new Set([42])),
+    });
+    const unrestricted = deps({
+      readSnapshot: async () => needsReconciliationSnapshot(),
+      active: twoSlotActive(),
+    });
+    const restrictedReport = await runLifecycleCycle('active', restricted);
+    const unrestrictedReport = await runLifecycleCycle('active', unrestricted);
+    if (restrictedReport.status !== 'ok' || unrestrictedReport.status !== 'ok') {
+      throw new Error('expected active reports');
+    }
+    const issue99Action = expect.objectContaining({
+      action: expect.objectContaining({ kind: 'set-project-status', issueNumber: 99 }),
+    });
+    expect(restrictedReport.reconciliation?.results).toContainEqual(issue99Action);
+    expect(restrictedReport.reconciliation?.results).toEqual(
+      unrestrictedReport.reconciliation?.results,
+    );
+  });
+
+  function reviewCandidateSnapshot(): GitHubLifecycleSnapshot {
+    const headA = gitOid('6'.repeat(40));
+    const headB = gitOid('7'.repeat(40));
+    // Both the PR's native labels and the lifecycle item's `labels` carry
+    // 'engine:review' already, and `projectStatus` is already 'In Review' —
+    // `planItem` wants both for the 'awaiting-review' phase, so a mismatch
+    // in either would generate a correcting reconciliation action, which
+    // the per-item "reconcile before claim" guarantee (see
+    // `blockedIssueNumbers` in controller.ts) would defer the claim behind,
+    // confounding this test with an unrelated block.
+    const prBase = {
+      title: 'implementation',
+      author: 'implementation-bot',
+      baseRefName: 'next',
+      isDraft: false,
+      state: 'OPEN' as const,
+      labels: ['engine:review'],
+      mergeability: 'MERGEABLE' as const,
+      mergeStateStatus: 'CLEAN',
+      checks: [],
+      reviews: [],
+    };
+    const lifecycleBase = {
+      kind: 'pull-request' as const,
+      v2Marked: true,
+      projectStatus: 'In Review' as const,
+      labels: ['engine:review'],
+      isDraft: false,
+      merged: false,
+      needsReview: true,
+      approved: false,
+      mergeState: 'clean' as const,
+    };
+    return {
+      project: {
+        items: [],
+        rateLimit: { remaining: 4_000, used: 1_000, resetAt: '2026-07-20T13:00:00.000Z' },
+        currentSprintIterationId: null,
+      },
+      issues: [],
+      branches: [],
+      diagnostics: [],
+      pullRequests: [
+        {
+          ...prBase,
+          number: 84,
+          body: 'Closes #42',
+          headRefName: 'autopilot/42',
+          headOid: headA,
+          headCommittedAt: '2026-07-20T08:00:00.000Z',
+          closingIssueNumbers: [42],
+        },
+        {
+          ...prBase,
+          number: 85,
+          body: 'Closes #43',
+          headRefName: 'autopilot/43',
+          headOid: headB,
+          headCommittedAt: '2026-07-20T08:00:00.000Z',
+          closingIssueNumbers: [43],
+        },
+      ],
+      lifecycle: {
+        items: [
+          {
+            ...lifecycleBase,
+            issueNumber: 42,
+            prNumber: 84,
+            head: headA,
+            headChangedAt: '2026-07-20T08:00:00.000Z',
+          },
+          {
+            ...lifecycleBase,
+            issueNumber: 43,
+            prNumber: 85,
+            head: headB,
+            headChangedAt: '2026-07-20T08:00:00.000Z',
+          },
+        ],
+      },
+      capturedAt: NOW.toISOString(),
+    };
+  }
+
+  it('excludes a review candidate whose issue is outside the allowlist; admits one inside it', async () => {
+    const actions: unknown[] = [];
+    const controller = deps({
+      readSnapshot: async () => reviewCandidateSnapshot(),
+      active: {
+        preflight: async () => ({ ok: true }),
+        readLocalState: () => ({
+          remaining: { implementation: 2, review: 2, mergePrep: 2 },
+          availableLogins: ['review-bot-1', 'review-bot-2'],
+          implementationPreferredLogin: 'review-bot-1',
+        }),
+        implementationBackpressureThreshold: 10,
+        executeAction: async () => ({ outcome: 'spawned' }),
+        onlyIssues: new Set([42]),
+      },
+    });
+    controller.active!.executeAction = async (action) => {
+      actions.push(action);
+      return { outcome: 'spawned' };
+    };
+    await runLifecycleCycle('active', controller);
+    expect(actions).toEqual([{
+      kind: 'claim-review',
+      issueNumber: 42,
+      prNumber: 84,
+      head: gitOid('6'.repeat(40)),
+      recoverFixes: false,
+    }]);
+  });
+
+  // Every `ActiveCandidate` variant carries a required `issueNumber` sourced
+  // from an already-resolved lifecycle item — an ambiguous PR-to-issue
+  // mapping never reaches `activeCandidates` (it is diverted to diagnostics
+  // upstream in `resolveMappings`), so this scenario cannot occur via the
+  // real snapshot pipeline today. `matchesOnlyIssuesAllowlist` fails closed
+  // on it anyway, matching the fail-closed contract even if that upstream
+  // invariant is ever weakened.
+  it('excludes a candidate with an undeterminable issue number when the allowlist is set (fail closed)', () => {
+    expect(matchesOnlyIssuesAllowlist(undefined, new Set([1896]))).toBe(false);
+    expect(matchesOnlyIssuesAllowlist(1896, new Set([1896]))).toBe(true);
+    expect(matchesOnlyIssuesAllowlist(1902, new Set([1896]))).toBe(false);
+  });
+
+  it('does not fail closed on an undeterminable issue number when the allowlist is unset', () => {
+    expect(matchesOnlyIssuesAllowlist(undefined, undefined)).toBe(true);
   });
 });

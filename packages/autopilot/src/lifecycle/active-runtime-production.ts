@@ -62,6 +62,12 @@ export interface ProductionActiveRuntimeOptions {
     readonly mergePrep: number;
   };
   readonly implementationBackpressureThreshold: number;
+  /**
+   * jinn-mono#1883: canary safety knob (`JINN_AUTOPILOT_ONLY_ISSUES`),
+   * parsed in scripts/run-autopilot-v2.ts and threaded through unchanged.
+   * `undefined` is unrestricted — see active-runtime.ts.
+   */
+  readonly onlyIssues?: ReadonlySet<number>;
   readonly staleAfterMs: number;
   readonly runner?: CommandRunner;
   readonly environment?: NodeJS.ProcessEnv;
@@ -314,6 +320,7 @@ export function makeProductionActiveRuntime(
     implementationPreferredLogin,
     implementationBackpressureThreshold:
       options.implementationBackpressureThreshold,
+    ...(options.onlyIssues === undefined ? {} : { onlyIssues: options.onlyIssues }),
     readLocalAttempts: () => listRunnerLiveAttempts(
       join(options.worktreeBase, 'v2'),
       options.runnerId,

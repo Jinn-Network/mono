@@ -38,6 +38,13 @@ export interface ActiveRuntimeOptions {
   };
   readonly implementationPreferredLogin: string;
   readonly implementationBackpressureThreshold: number;
+  /**
+   * jinn-mono#1883: canary safety knob (`JINN_AUTOPILOT_ONLY_ISSUES`).
+   * `undefined` means unrestricted — the pre-existing behavior. When set,
+   * new-work claim scheduling in the controller is restricted to issue
+   * numbers in this set; reconciliation of existing items is unaffected.
+   */
+  readonly onlyIssues?: ReadonlySet<number>;
   readonly readLocalAttempts: () => readonly AttemptManifest[];
   readonly preflight: () => Promise<{
     readonly ok: boolean;
@@ -101,6 +108,7 @@ export function makeActiveRuntime(
         options.implementationBackpressureThreshold,
         'implementation backpressure threshold',
       ),
+    ...(options.onlyIssues === undefined ? {} : { onlyIssues: options.onlyIssues }),
     async executeAction(action) {
       const local = readLocalState();
       const phase = action.kind === 'claim-implementation'

@@ -60,6 +60,31 @@ function authorAllowlist(raw: string | undefined): ReadonlySet<string> {
   );
 }
 
+// jinn-mono#1883: canary safety knob. `JINN_AUTOPILOT_ONLY_ISSUES` unset or
+// empty (including an explicitly-set empty string) is unrestricted — a pure
+// no-op matching current behavior. Set to a comma-separated list of positive
+// issue numbers to restrict active-mode NEW-WORK claim scheduling to those
+// issues only (see the `onlyIssues` threading through active-runtime.ts /
+// active-runtime-production.ts / controller.ts). Malformed input fails loud,
+// matching the other JINN_AUTOPILOT_* env knobs in this file.
+export function parseOnlyIssuesAllowlist(
+  raw: string | undefined,
+): ReadonlySet<number> | undefined {
+  const segments = (raw ?? '')
+    .split(',')
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+  if (segments.length === 0) return undefined;
+  return new Set(segments.map((segment) => {
+    if (!/^[1-9][0-9]*$/.test(segment) || !Number.isSafeInteger(Number(segment))) {
+      throw new Error(
+        'JINN_AUTOPILOT_ONLY_ISSUES must be a comma-separated list of positive issue numbers',
+      );
+    }
+    return Number(segment);
+  }));
+}
+
 function positiveEnvironmentInteger(
   raw: string | undefined,
   fallback: number,
@@ -177,6 +202,7 @@ async function main(): Promise<void> {
 
   const options = parseLifecycleCli(argv.slice(2));
   const allowlist = authorAllowlist(env.JINN_DISPATCHER_AUTHOR_ALLOWLIST);
+  const onlyIssues = parseOnlyIssuesAllowlist(env.JINN_AUTOPILOT_ONLY_ISSUES);
   const config = dispatcherConfig(allowlist);
   const runnerId = defaultRunnerId({
     configured: env.JINN_AUTOPILOT_RUNNER_ID,
@@ -290,6 +316,7 @@ async function main(): Promise<void> {
           config.openPrBackpressure,
           'JINN_AUTOPILOT_BACKPRESSURE',
         ),
+        onlyIssues,
         staleAfterMs: STALE_AFTER_MS,
         runner,
         environment: env,
