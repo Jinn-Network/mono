@@ -282,22 +282,70 @@ function matchingBranchTrailers(
   return trailers;
 }
 
+/**
+ * Raised for evidence that is scoped to a single PR node and whose validity
+ * depends on content any GitHub user can post (comments) or on a page-size
+ * cap being exceeded (pagination truncation). Callers isolate this error to
+ * the one PR it concerns instead of failing the whole snapshot read — see
+ * `readPullRequests` / `readMergedOutcomes`.
+ */
+export class PrEvidenceInconsistentError extends Error {
+  constructor(readonly prNumber: number, message: string) {
+    super(message);
+    this.name = 'PrEvidenceInconsistentError';
+  }
+}
+
+function toErrorMessage(value: unknown): string {
+  return value instanceof Error ? value.message : String(value);
+}
+
 function assertCompletePrNode(pr: GraphQlPr): void {
   if (pr.labels.pageInfo.hasNextPage) {
-    throw new Error(`PR #${pr.number} labels were truncated`);
+    throw new PrEvidenceInconsistentError(pr.number, `PR #${pr.number} labels were truncated`);
   }
   if (pr.closingIssuesReferences.pageInfo.hasNextPage) {
-    throw new Error(`PR #${pr.number} closing issue references were truncated`);
+    throw new PrEvidenceInconsistentError(
+      pr.number,
+      `PR #${pr.number} closing issue references were truncated`,
+    );
   }
   if (pr.reviews.pageInfo.hasNextPage) {
-    throw new Error(`PR #${pr.number} reviews were truncated`);
+    throw new PrEvidenceInconsistentError(pr.number, `PR #${pr.number} reviews were truncated`);
   }
   if (pr.comments.pageInfo.hasPreviousPage) {
-    throw new Error(`PR #${pr.number} comments were truncated`);
+    throw new PrEvidenceInconsistentError(pr.number, `PR #${pr.number} comments were truncated`);
   }
   if (pr.statusCheckRollup?.contexts.pageInfo.hasNextPage === true) {
-    throw new Error(`PR #${pr.number} checks were truncated`);
+    throw new PrEvidenceInconsistentError(pr.number, `PR #${pr.number} checks were truncated`);
   }
+}
+
+function inconsistentPullRequest(pr: GraphQlPr, detail: string): RawPullRequest {
+  return {
+    number: pr.number,
+    title: pr.title,
+    body: pr.body,
+    author: pr.author?.login ?? '',
+    baseRefName: pr.baseRefName,
+    headRefName: pr.headRefName,
+    headOid: pr.headRefOid,
+    headCommittedAt: pr.commits.nodes.at(-1)?.commit.committedDate ?? new Date(0).toISOString(),
+    isDraft: pr.isDraft,
+    state: 'OPEN',
+    labels: pr.labels.nodes.map((label) => label.name),
+    closingIssueNumbers: pr.closingIssuesReferences.nodes.map((issue) => issue.number),
+    mergeability: pr.mergeable,
+    mergeStateStatus: pr.mergeStateStatus,
+    checks: [],
+    reviews: [],
+    branchClaimTrailers: null,
+    reviewClaim: null,
+    humanIssueNumber: null,
+    humanReason: { phase: 'awaiting-review', code: 'review-escalation', detail },
+    mergedAt: pr.mergedAt,
+    mergeCommitOid: pr.mergeCommit?.oid ?? null,
+  };
 }
 
 function checks(pr: GraphQlPr): RawPullRequest['checks'] {
@@ -495,12 +543,23 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
         submittedAt: review.submittedAt,
       };
     });
-    const humanEvidence = [...pr.comments.nodes]
-      .reverse()
-      .map((comment) => parseHumanCommentEvidence(comment.body))
-      .find((evidence) => evidence !== null);
+    let humanEvidence: ReturnType<typeof parseHumanCommentEvidence> | undefined;
+    try {
+      humanEvidence = [...pr.comments.nodes]
+        .reverse()
+        .map((comment) => parseHumanCommentEvidence(comment.body))
+        .find((evidence) => evidence !== null);
+    } catch (cause) {
+      throw new PrEvidenceInconsistentError(
+        pr.number,
+        `PR #${pr.number} has undecodable structured Human evidence: ${toErrorMessage(cause)}`,
+      );
+    }
     if (humanEvidence !== undefined && humanEvidence.prNumber !== pr.number) {
-      throw new Error(`PR #${pr.number} has contradictory structured Human evidence`);
+      throw new PrEvidenceInconsistentError(
+        pr.number,
+        `PR #${pr.number} has contradictory structured Human evidence`,
+      );
     }
     return {
       number: pr.number,
@@ -554,7 +613,12 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
             if (pr.labels.nodes.some((label) => label.name === 'engine:review')) continue;
             const full = await this.readPullRequestByNumber(pr.number);
             if (full.state !== 'OPEN') continue;
-            merged.push(await this.rawPullRequest(full, true));
+            merged.push(
+              await this.rawPullRequest(full, true).catch((error: unknown) => {
+                if (!(error instanceof PrEvidenceInconsistentError)) throw error;
+                return inconsistentPullRequest(full, error.message);
+              }),
+            );
             continue;
           }
           if (pr.state === 'CLOSED') continue;
@@ -620,7 +684,10 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
     const response = JSON.parse(raw) as GraphQlPage;
     const connection = response.data.repository.pullRequests;
     const openNodes = await Promise.all(connection.nodes.map((pr) => (
-      this.rawPullRequest(pr, true)
+      this.rawPullRequest(pr, true).catch((error: unknown) => {
+        if (!(error instanceof PrEvidenceInconsistentError)) throw error;
+        return inconsistentPullRequest(pr, error.message);
+      })
     )));
     const mergedNodes = cursor === null
       ? await this.readMergedOutcomes(nonDoneIssueNumbers)
