@@ -22,6 +22,13 @@ const MANIFEST: AttemptManifest = {
   reviewGeneration: '22222222-2222-4222-8222-222222222222',
   reviewRefOid: 'c'.repeat(40),
   selectedLogin: 'reviewer',
+  repository: {
+    root: '/repository',
+    gitCommonDir: '/repository/.git',
+    remoteName: 'origin',
+    remoteUrlHash: 'd'.repeat(64),
+  },
+  processState: 'running',
   pid: 123,
   paths: {
     attemptDir: '/attempt',
@@ -34,6 +41,7 @@ const MANIFEST: AttemptManifest = {
   timestamps: {
     createdAt: '2026-07-20T00:00:00.000Z',
     updatedAt: '2026-07-20T00:00:00.000Z',
+    childStartedAt: '2026-07-20T00:00:00.000Z',
   },
 };
 

@@ -1,8 +1,12 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import {
+  existsSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -16,15 +20,18 @@ import {
   countRunnerLiveAttempts,
   createAttemptWorkspace,
   defaultRunnerId,
+  markAttemptExited,
+  markAttemptRunning,
   readAttemptManifest,
   sweepDeadAttempts,
-  updateAttemptManifest,
+  trackAttemptChild,
   type AttemptManifest,
   type CreateAttemptOptions,
 } from '../../src/lifecycle/attempt-workspace.js';
 
 const UUID_A = '11111111-1111-4111-8111-111111111111';
 const UUID_B = '22222222-2222-4222-8222-222222222222';
+const UUID_C = '33333333-3333-4333-8333-333333333333';
 const NOW = '2026-07-20T00:00:00.000Z';
 const roots: string[] = [];
 
@@ -83,6 +90,13 @@ function options(
   };
 }
 
+function terminalAttempt(manifest: AttemptManifest): AttemptManifest {
+  markAttemptRunning(manifest.paths.manifest, 4242, () =>
+    new Date('2026-07-20T00:01:00.000Z'));
+  return markAttemptExited(manifest.paths.manifest, () =>
+    new Date('2026-07-20T00:02:00.000Z'));
+}
+
 describe('attempt workspace and manifest', () => {
   it('gives two processes unique detached attempts in one Git common directory', async () => {
     const fixture = repositoryFixture();
@@ -111,6 +125,64 @@ describe('attempt workspace and manifest', () => {
     expect(readdirSync(one.paths.ghConfigDir)).toEqual([]);
   });
 
+  it('binds the strict manifest to the canonical repository and remote identity', async () => {
+    const fixture = repositoryFixture();
+    const manifest = await createAttemptWorkspace(options(fixture), defaultRunner);
+
+    expect(manifest.repository).toEqual({
+      root: realpathSync(fixture.repo),
+      gitCommonDir: realpathSync(git(fixture.repo, [
+        'rev-parse',
+        '--path-format=absolute',
+        '--git-common-dir',
+      ])),
+      remoteName: 'origin',
+      remoteUrlHash: createHash('sha256').update(fixture.remote).digest('hex'),
+    });
+
+    const raw = JSON.parse(readFileSync(manifest.paths.manifest, 'utf8')) as Record<string, unknown>;
+    raw.repository = {
+      ...(raw.repository as Record<string, unknown>),
+      unexpected: true,
+    };
+    writeFileSync(manifest.paths.manifest, JSON.stringify(raw));
+    expect(() => readAttemptManifest(manifest.paths.manifest)).toThrow(
+      /Unknown field: unexpected/,
+    );
+  });
+
+  it('validates the complete manifest before side effects and exactly rolls back Git add failure', async () => {
+    const invalidFixture = repositoryFixture();
+    await expect(createAttemptWorkspace(options(invalidFixture, {
+      expectedHead: 'not-an-oid',
+    }), defaultRunner)).rejects.toThrow(/OID/);
+    expect(existsSync(invalidFixture.base)).toBe(false);
+
+    const failureFixture = repositoryFixture();
+    const attemptDir = join(
+      failureFixture.base,
+      'v2',
+      'host-100-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      'implement',
+      `issue-42-${UUID_A}`,
+    );
+    const failingRunner: CommandRunner = async (cmd, args, opts) => {
+      const result = await defaultRunner(cmd, args, opts);
+      if (cmd === 'git' && args.includes('add') && args.includes('--detach')) {
+        throw new Error('injected failure after worktree registration');
+      }
+      return result;
+    };
+
+    await expect(createAttemptWorkspace(
+      options(failureFixture),
+      failingRunner,
+    )).rejects.toThrow(/injected failure/);
+    expect(existsSync(attemptDir)).toBe(false);
+    expect(git(failureFixture.repo, ['worktree', 'list', '--porcelain']))
+      .not.toContain(join(attemptDir, 'worktree'));
+  });
+
   it('builds a collision-resistant filesystem-safe default runner id', () => {
     const id = defaultRunnerId({
       configured: undefined,
@@ -133,10 +205,11 @@ describe('attempt workspace and manifest', () => {
     })).toBe('configured-runner');
   });
 
-  it('strictly decodes manifests and atomically updates timestamps/PID', async () => {
+  it('strictly decodes manifests and atomically tracks preparing, running, and exited', async () => {
     const fixture = repositoryFixture();
     const manifest = await createAttemptWorkspace(options(fixture), defaultRunner);
 
+    expect(manifest.processState).toBe('preparing');
     expect(readAttemptManifest(manifest.paths.manifest)).toEqual(manifest);
     const raw = JSON.parse(readFileSync(manifest.paths.manifest, 'utf8')) as Record<string, unknown>;
     raw.token = 'must-not-be-accepted';
@@ -145,17 +218,19 @@ describe('attempt workspace and manifest', () => {
     delete raw.token;
     writeFileSync(manifest.paths.manifest, JSON.stringify(raw));
 
-    const updated = updateAttemptManifest(manifest.paths.manifest, (current) => ({
-      ...current,
-      pid: 4242,
-      timestamps: {
-        ...current.timestamps,
-        updatedAt: '2026-07-20T00:01:00.000Z',
-        childStartedAt: '2026-07-20T00:01:00.000Z',
-      },
-    }));
-    expect(updated.pid).toBe(4242);
-    expect(readAttemptManifest(manifest.paths.manifest)).toEqual(updated);
+    const running = markAttemptRunning(manifest.paths.manifest, 4242, () =>
+      new Date('2026-07-20T00:01:00.000Z'));
+    expect(running).toMatchObject({ processState: 'running', pid: 4242 });
+
+    const child = Object.assign(new EventEmitter(), { pid: 4242 });
+    trackAttemptChild(manifest.paths.manifest, child, {
+      alreadyRunning: true,
+      now: () => new Date('2026-07-20T00:02:00.000Z'),
+    });
+    child.emit('exit', 0);
+    const updated = readAttemptManifest(manifest.paths.manifest);
+    expect(updated).toMatchObject({ processState: 'exited', pid: 4242 });
+    expect(updated.timestamps.childExitedAt).toBe('2026-07-20T00:02:00.000Z');
     expect(readdirSync(manifest.paths.attemptDir).filter((name) => name.includes('.tmp-')))
       .toEqual([]);
     expect(JSON.stringify(updated)).not.toMatch(/must-not-be-accepted|token/i);
@@ -171,19 +246,41 @@ describe('attempt workspace and manifest', () => {
       attemptId: UUID_B,
       pid: 200,
     }), defaultRunner);
+    await createAttemptWorkspace(options(fixture, {
+      attemptId: UUID_C,
+    }), defaultRunner);
 
     expect(countRunnerLiveAttempts(
       join(fixture.base, 'v2'),
       one.runnerId,
       (pid) => pid === 100 || pid === 200,
-    )).toBe(1);
+    )).toBe(2);
   });
 });
 
 describe('safe attempt cleanup', () => {
+  it('retains an attempt when its creating repository identity no longer matches', async () => {
+    const fixture = repositoryFixture();
+    const manifest = terminalAttempt(
+      await createAttemptWorkspace(options(fixture), defaultRunner),
+    );
+    git(fixture.repo, ['remote', 'set-url', 'origin', join(fixture.root, 'other.git')]);
+
+    await expect(cleanupAttempt(manifest.paths.manifest, defaultRunner, {
+      v2Base: join(fixture.base, 'v2'),
+      isPidAlive: () => false,
+    })).resolves.toMatchObject({
+      status: 'retained',
+      reason: { code: 'ambiguous' },
+    });
+    expect(readFileSync(manifest.paths.manifest, 'utf8')).toContain(UUID_A);
+  });
+
   it('removes a clean attempt whose HEAD is reachable from the fetched publication ref', async () => {
     const fixture = repositoryFixture();
-    const manifest = await createAttemptWorkspace(options(fixture), defaultRunner);
+    const manifest = terminalAttempt(
+      await createAttemptWorkspace(options(fixture), defaultRunner),
+    );
 
     const result = await cleanupAttempt(manifest.paths.manifest, defaultRunner, {
       v2Base: join(fixture.base, 'v2'),
@@ -195,7 +292,9 @@ describe('safe attempt cleanup', () => {
 
   it('treats an already-removed exact worktree as redundant cleanup', async () => {
     const fixture = repositoryFixture();
-    const manifest = await createAttemptWorkspace(options(fixture), defaultRunner);
+    const manifest = terminalAttempt(
+      await createAttemptWorkspace(options(fixture), defaultRunner),
+    );
     git(fixture.repo, ['worktree', 'remove', manifest.paths.worktree]);
 
     await expect(cleanupAttempt(manifest.paths.manifest, defaultRunner, {
@@ -204,9 +303,68 @@ describe('safe attempt cleanup', () => {
     })).resolves.toEqual({ status: 'removed', attemptId: UUID_A });
   });
 
+  it('requires registry absence and remote reachability before removing missing-worktree metadata', async () => {
+    const registeredFixture = repositoryFixture();
+    const registered = terminalAttempt(
+      await createAttemptWorkspace(options(registeredFixture), defaultRunner),
+    );
+    rmSync(registered.paths.worktree, { recursive: true });
+
+    await expect(cleanupAttempt(registered.paths.manifest, defaultRunner, {
+      v2Base: join(registeredFixture.base, 'v2'),
+      isPidAlive: () => false,
+    })).resolves.toMatchObject({
+      status: 'retained',
+      reason: { code: 'ambiguous' },
+    });
+    expect(git(registeredFixture.repo, ['worktree', 'list', '--porcelain']))
+      .toContain(registered.paths.worktree);
+
+    const unreachableFixture = repositoryFixture();
+    const unreachable = terminalAttempt(
+      await createAttemptWorkspace(options(unreachableFixture), defaultRunner),
+    );
+    git(unreachableFixture.repo, ['worktree', 'remove', unreachable.paths.worktree]);
+    execFileSync('git', [
+      `--git-dir=${unreachableFixture.remote}`,
+      'update-ref',
+      '-d',
+      'refs/heads/main',
+    ]);
+
+    await expect(cleanupAttempt(unreachable.paths.manifest, defaultRunner, {
+      v2Base: join(unreachableFixture.base, 'v2'),
+      isPidAlive: () => false,
+    })).resolves.toMatchObject({ status: 'retained' });
+    expect(readFileSync(unreachable.paths.manifest, 'utf8')).toContain(UUID_A);
+  });
+
+  it('performs missing-worktree cleanup with local Git reads/fetch only', async () => {
+    const fixture = repositoryFixture();
+    const manifest = terminalAttempt(
+      await createAttemptWorkspace(options(fixture), defaultRunner),
+    );
+    git(fixture.repo, ['worktree', 'remove', manifest.paths.worktree]);
+    const calls: Array<{ cmd: string; args: string[] }> = [];
+    const observingRunner: CommandRunner = async (cmd, args, opts) => {
+      calls.push({ cmd, args });
+      return defaultRunner(cmd, args, opts);
+    };
+
+    await expect(cleanupAttempt(manifest.paths.manifest, observingRunner, {
+      v2Base: join(fixture.base, 'v2'),
+      isPidAlive: () => false,
+    })).resolves.toEqual({ status: 'removed', attemptId: UUID_A });
+    expect(calls.every(({ cmd }) => cmd === 'git')).toBe(true);
+    expect(calls.some(({ args }) =>
+      args.includes('push') || args.includes('update-ref'))).toBe(false);
+  });
+
   it('retains dirty, ahead, and live attempts with structured reasons', async () => {
     const dirtyFixture = repositoryFixture();
-    const dirty = await createAttemptWorkspace(options(dirtyFixture), defaultRunner);
+    const dirty = terminalAttempt(
+      await createAttemptWorkspace(options(dirtyFixture), defaultRunner),
+    );
     writeFileSync(join(dirty.paths.worktree, 'dirty.txt'), 'dirty\n');
     await expect(cleanupAttempt(dirty.paths.manifest, defaultRunner, {
       v2Base: join(dirtyFixture.base, 'v2'),
@@ -214,7 +372,9 @@ describe('safe attempt cleanup', () => {
     })).resolves.toMatchObject({ status: 'retained', reason: { code: 'dirty' } });
 
     const aheadFixture = repositoryFixture();
-    const ahead = await createAttemptWorkspace(options(aheadFixture), defaultRunner);
+    const ahead = terminalAttempt(
+      await createAttemptWorkspace(options(aheadFixture), defaultRunner),
+    );
     writeFileSync(join(ahead.paths.worktree, 'ahead.txt'), 'ahead\n');
     git(ahead.paths.worktree, ['add', 'ahead.txt']);
     git(ahead.paths.worktree, ['commit', '-m', 'ahead']);
@@ -231,9 +391,25 @@ describe('safe attempt cleanup', () => {
     })).resolves.toMatchObject({ status: 'retained', reason: { code: 'live' } });
   });
 
+  it('retains preparing attempts because they have no positive terminal evidence', async () => {
+    const fixture = repositoryFixture();
+    const preparing = await createAttemptWorkspace(options(fixture), defaultRunner);
+
+    await expect(cleanupAttempt(preparing.paths.manifest, defaultRunner, {
+      v2Base: join(fixture.base, 'v2'),
+      isPidAlive: () => false,
+    })).resolves.toMatchObject({
+      status: 'retained',
+      reason: { code: 'ambiguous' },
+    });
+    expect(readAttemptManifest(preparing.paths.manifest).processState).toBe('preparing');
+  });
+
   it('retains authentication failure, missing objects, malformed manifests, and escaped paths', async () => {
     const authFixture = repositoryFixture();
-    const auth = await createAttemptWorkspace(options(authFixture), defaultRunner);
+    const auth = terminalAttempt(
+      await createAttemptWorkspace(options(authFixture), defaultRunner),
+    );
     const authRunner: CommandRunner = async (cmd, args, opts) => {
       if (cmd === 'git' && args.includes('fetch')) {
         throw new Error('authentication failed and selected-secret appeared here');
@@ -251,7 +427,9 @@ describe('safe attempt cleanup', () => {
     expect(JSON.stringify(authResult)).not.toContain('selected-secret');
 
     const missingFixture = repositoryFixture();
-    const missing = await createAttemptWorkspace(options(missingFixture), defaultRunner);
+    const missing = terminalAttempt(
+      await createAttemptWorkspace(options(missingFixture), defaultRunner),
+    );
     const missingRunner: CommandRunner = async (cmd, args, opts) => {
       if (cmd === 'git' && args.includes('rev-parse') && args.some((arg) => arg.includes('HEAD'))) {
         throw new Error('missing');
@@ -264,7 +442,9 @@ describe('safe attempt cleanup', () => {
     })).resolves.toMatchObject({ status: 'retained', reason: { code: 'missing-object' } });
 
     const malformedFixture = repositoryFixture();
-    const malformed = await createAttemptWorkspace(options(malformedFixture), defaultRunner);
+    const malformed = terminalAttempt(
+      await createAttemptWorkspace(options(malformedFixture), defaultRunner),
+    );
     writeFileSync(malformed.paths.manifest, '{"version":2,"oops":true}');
     await expect(cleanupAttempt(malformed.paths.manifest, defaultRunner, {
       v2Base: join(malformedFixture.base, 'v2'),
@@ -272,7 +452,9 @@ describe('safe attempt cleanup', () => {
     })).resolves.toMatchObject({ status: 'retained', reason: { code: 'malformed' } });
 
     const escapedFixture = repositoryFixture();
-    const escaped = await createAttemptWorkspace(options(escapedFixture), defaultRunner);
+    const escaped = terminalAttempt(
+      await createAttemptWorkspace(options(escapedFixture), defaultRunner),
+    );
     const escapedRaw = JSON.parse(readFileSync(escaped.paths.manifest, 'utf8')) as AttemptManifest;
     writeFileSync(escaped.paths.manifest, JSON.stringify({
       ...escapedRaw,
@@ -284,7 +466,9 @@ describe('safe attempt cleanup', () => {
     })).resolves.toMatchObject({ status: 'retained', reason: { code: 'escaped-path' } });
 
     const symlinkFixture = repositoryFixture();
-    const symlinked = await createAttemptWorkspace(options(symlinkFixture), defaultRunner);
+    const symlinked = terminalAttempt(
+      await createAttemptWorkspace(options(symlinkFixture), defaultRunner),
+    );
     git(symlinkFixture.repo, ['worktree', 'remove', symlinked.paths.worktree]);
     symlinkSync(symlinkFixture.repo, symlinked.paths.worktree, 'dir');
     await expect(cleanupAttempt(symlinked.paths.manifest, defaultRunner, {
@@ -296,7 +480,9 @@ describe('safe attempt cleanup', () => {
 
   it('retains ambiguous Git inspection errors instead of forcing removal', async () => {
     const fixture = repositoryFixture();
-    const manifest = await createAttemptWorkspace(options(fixture), defaultRunner);
+    const manifest = terminalAttempt(
+      await createAttemptWorkspace(options(fixture), defaultRunner),
+    );
     const runner: CommandRunner = async (cmd, args, opts) => {
       if (cmd === 'git' && args.includes('status')) throw new Error('unexpected git failure');
       return defaultRunner(cmd, args, opts);
@@ -311,7 +497,9 @@ describe('safe attempt cleanup', () => {
   it('sanitizes ambient credentials for the exact askpass fetch', async () => {
     vi.stubEnv('GITHUB_TOKEN', 'ambient-secret');
     const fixture = repositoryFixture();
-    const manifest = await createAttemptWorkspace(options(fixture), defaultRunner);
+    const manifest = terminalAttempt(
+      await createAttemptWorkspace(options(fixture), defaultRunner),
+    );
     let fetchSeen = false;
     const runner: CommandRunner = async (cmd, args, opts) => {
       if (cmd === 'git' && args.includes('fetch')) {
