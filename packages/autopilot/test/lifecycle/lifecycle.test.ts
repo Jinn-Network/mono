@@ -229,7 +229,11 @@ describe('deriveLifecycle', () => {
     expect(verdictProgress).toMatchObject({ phase: 'reviewing', stale: false });
   });
 
-  it('does not extend review liveness from an ordinary claim record', () => {
+  it('gives a freshly won active review claim generation its own full staleness window', () => {
+    // Election is the one permitted review progress event, exactly like the
+    // branch claim commit for implement/merge-prep: a reviewer that wins a
+    // claim on a backlogged (already >2h-old) PR head must not be immediately
+    // reap-eligible.
     const item = implementation({
       branchClaim: undefined,
       isDraft: false,
@@ -251,9 +255,101 @@ describe('deriveLifecycle', () => {
 
     expect(view).toMatchObject({
       phase: 'reviewing',
+      stale: false,
+    });
+  });
+
+  it('a replacement claim on a >2h-old head gets its own full staleness window (no livelock)', () => {
+    // Regression for the reaper livelock: every backlogged-PR review claim
+    // generation -- not just the first one on a given head -- must start its
+    // own fresh window when it wins election, however old the head is.
+    const veryOldHead = '2026-07-20T02:00:00.000Z';
+    const item = implementation({
+      branchClaim: undefined,
+      isDraft: false,
+      headChangedAt: veryOldHead,
+      reviewClaim: {
+        kind: 'review-claim',
+        protocolVersion: 2,
+        prNumber: 101,
+        generation: '66666666-6666-4666-8666-666666666666',
+        attempt: '77777777-7777-4777-8777-777777777777',
+        reviewer: 'replacement-reviewer',
+        head: HEAD_A,
+        state: 'active',
+        recordedAt: '2026-07-20T11:55:00.000Z',
+      },
+    });
+
+    const [view] = deriveLifecycle(snapshot(item), NOW, STALE_AFTER).items;
+
+    expect(view).toMatchObject({ phase: 'reviewing', stale: false });
+  });
+
+  it('does not extend review liveness from a metadata-only transition within the same generation', () => {
+    // verdict-intent is an intent-only metadata transition, not a permitted
+    // progress event: it must not reset the clock the way winning the claim
+    // does, so this is stale from the original (old) head time, not from the
+    // recent recordedAt on this later record.
+    const item = implementation({
+      branchClaim: undefined,
+      isDraft: false,
+      headChangedAt: '2026-07-20T08:00:00.000Z',
+      reviewClaim: {
+        kind: 'review-claim',
+        protocolVersion: 2,
+        prNumber: 101,
+        generation: '22222222-2222-4222-8222-222222222222',
+        attempt: '33333333-3333-4333-8333-333333333333',
+        reviewer: 'reviewer',
+        head: HEAD_A,
+        state: 'verdict-intent',
+        recordedAt: '2026-07-20T11:59:00.000Z',
+        verdict: {
+          marker: '44444444-4444-4444-8444-444444444444',
+          state: 'REQUEST_CHANGES',
+        },
+      },
+    });
+
+    const [view] = deriveLifecycle(snapshot(item), NOW, STALE_AFTER).items;
+
+    expect(view).toMatchObject({
+      phase: 'reviewing',
       stale: true,
       staleSince: '2026-07-20T10:00:00.000Z',
       staleReason: 'review-progress-unchanged',
+    });
+  });
+
+  it('fails closed on an invalid (future) review claim acquisition timestamp', () => {
+    const item = implementation({
+      branchClaim: undefined,
+      isDraft: false,
+      headChangedAt: '2026-07-20T08:00:00.000Z',
+      reviewClaim: {
+        kind: 'review-claim',
+        protocolVersion: 2,
+        prNumber: 101,
+        generation: '22222222-2222-4222-8222-222222222222',
+        attempt: '33333333-3333-4333-8333-333333333333',
+        reviewer: 'reviewer',
+        head: HEAD_A,
+        state: 'active',
+        recordedAt: '2026-07-20T12:00:00.001Z',
+      },
+    });
+
+    const [view] = deriveLifecycle(snapshot(item), NOW, STALE_AFTER).items;
+
+    expect(view).toMatchObject({
+      phase: 'human',
+      underlyingPhase: 'reviewing',
+      stale: false,
+      humanReason: {
+        phase: 'reviewing',
+        code: 'invalid-review-progress-time',
+      },
     });
   });
 

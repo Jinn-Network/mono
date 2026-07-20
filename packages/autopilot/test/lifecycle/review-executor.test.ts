@@ -258,6 +258,45 @@ describe('review action executor', () => {
     expect(h.events).toEqual([]);
   });
 
+  it('does not reclaim a freshly won active generation just because the PR head is old', async () => {
+    // Same livelock this executor must not reintroduce: a claim's own
+    // acquisition time -- not just the PR head time -- must gate whether it
+    // still holds an active generation, aligned with staleEvidence in
+    // lifecycle.ts.
+    const h = harness({
+      readCandidate: async () => candidate({
+        headChangedAt: '2026-07-20T08:00:00.000Z',
+        reviewRef: {
+          oid: OLD_RECORD,
+          record: claim({ recordedAt: '2026-07-20T11:59:00.000Z' }),
+        },
+      }),
+    });
+
+    await expect(executeReviewAction({ prNumber: 84 }, h.deps))
+      .resolves.toMatchObject({ status: 'ineligible', detail: expect.stringMatching(/active/i) });
+    expect(h.events).toEqual([]);
+  });
+
+  it('fails closed when a current active claim carries a future acquisition timestamp', async () => {
+    const h = harness({
+      readCandidate: async () => candidate({
+        headChangedAt: '2026-07-20T08:00:00.000Z',
+        reviewRef: {
+          oid: OLD_RECORD,
+          record: claim({ recordedAt: '2026-07-20T12:00:00.001Z' }),
+        },
+      }),
+    });
+
+    await expect(executeReviewAction({ prNumber: 84 }, h.deps))
+      .resolves.toMatchObject({
+        status: 'ineligible',
+        detail: expect.stringMatching(/acquisition timestamp/i),
+      });
+    expect(h.events).toEqual([]);
+  });
+
   it('repairs a current-head Human record and never reaps or reclaims it', async () => {
     const h = harness({
       readCandidate: async () => candidate({
