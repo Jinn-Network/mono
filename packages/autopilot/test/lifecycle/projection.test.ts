@@ -128,18 +128,21 @@ describe('planProjection', () => {
         expectedHead: HEAD,
         label: 'engine:review',
         present: true,
+        requiresPreviousSuccess: true,
       },
       {
         kind: 'set-project-status',
         issueNumber: 42,
         expectedHead: HEAD,
         status: 'In Review',
+        requiresPreviousSuccess: true,
       },
       {
         kind: 'set-pr-draft',
         prNumber: 101,
         expectedHead: HEAD,
         draft: false,
+        requiresPreviousSuccess: true,
       },
     ]);
   });

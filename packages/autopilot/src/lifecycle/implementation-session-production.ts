@@ -11,6 +11,8 @@ import {
 import {
   decodeBranchClaimTrailers,
   encodeBranchClaimTrailers,
+  extractImplementationCompletionSummary,
+  terminalBranchClaimTrailers,
 } from './codecs.js';
 import {
   gitPublicationArgs,
@@ -92,10 +94,7 @@ function exactRemoteLine(raw: string, ref: string): GitOid {
 }
 
 function claimTrailers(message: string): string | null {
-  const lines = message
-    .split(/\r?\n/)
-    .filter((line) => line.startsWith('Jinn-Autopilot-'));
-  return lines.length === 0 ? null : lines.join('\n');
+  return terminalBranchClaimTrailers(message);
 }
 
 function completionBody(body: string, summary: string): string {
@@ -239,6 +238,15 @@ export function makeProductionImplementationSessionPort(
     },
 
     readBranchClaim,
+
+    async readCompletionSummary(manifest, oid) {
+      const message = await runGit(manifest, [
+        'show', '-s', '--format=%B', oid,
+      ]);
+      const trailers = claimTrailers(message);
+      if (trailers === null) return null;
+      return extractImplementationCompletionSummary(message, trailers);
+    },
 
     async isAncestor(manifest, ancestor, descendant) {
       try {

@@ -298,7 +298,7 @@ export async function executeImplementationAction(
 ): Promise<ImplementationExecutionResult> {
   const issueNumber = positiveIssueNumber(action.issueNumber);
   const issue = await deps.readIssue(issueNumber);
-  if (issue === null || issue.number !== issueNumber || !issue.open || !issue.eligible) {
+  if (issue === null || issue.number !== issueNumber || !issue.open) {
     return {
       status: 'ineligible',
       issueNumber,
@@ -319,11 +319,13 @@ export async function executeImplementationAction(
     await deps.escalateHuman({ issueNumber, reason });
     return { status: 'human', issueNumber, code: 'branch-mapping-ambiguous' };
   }
-  if (!realityPermitsImplementation(reality, openPullRequests)) {
+  if (!issue.eligible || !realityPermitsImplementation(reality, openPullRequests)) {
     return {
       status: 'ineligible',
       issueNumber,
-      detail: `Canonical reality check classified the issue as ${reality.classification}.`,
+      detail: !issue.eligible
+        ? 'Issue is not currently eligible.'
+        : `Canonical reality check classified the issue as ${reality.classification}.`,
     };
   }
 

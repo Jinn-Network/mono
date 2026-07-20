@@ -105,6 +105,8 @@ function harness(options: {
         : oid === CLAIM
           ? claim()
           : null,
+    readCompletionSummary: async (_manifest, oid) =>
+      oid === COMPLETE ? 'Implementation summary' : null,
     isAncestor: async (_manifest, ancestor, descendant) =>
       ancestor === descendant
       || (ancestor === CLAIM && [WORK, OTHER, COMPLETE].includes(descendant))
@@ -217,6 +219,7 @@ function harness(options: {
     get project() { return project; },
     get labels() { return labels; },
     get comments() { return comments; },
+    get body() { return body; },
   };
 }
 
@@ -277,6 +280,22 @@ describe('implementation session protocol', () => {
 
     await expect(h.protocol.checkpoint(h.manifest)).rejects.toThrow(/pull request/i);
     expect(h.events).toEqual([]);
+  });
+
+  it('revalidates exact Human authority between ordered PR mutations', async () => {
+    const h = harness({ localHead: CLAIM, realTreeChange: false, draft: false });
+    h.labels.delete('engine:review');
+    const read = h.port.readPullRequest;
+    h.port.readPullRequest = async (...args) => ({
+      ...await read(...args),
+      ...(h.events.includes('draft:true') ? { baseRefName: 'release/next' } : {}),
+    });
+
+    await expect(
+      h.protocol.human(h.manifest, 'A semantic decision is required.'),
+    ).rejects.toThrow(/pull request authority/i);
+    expect(h.events).toEqual(['draft:true']);
+    expect(h.project).toBe('In Progress');
   });
 
   it('retains the progressive manifest head when push readback remains ambiguous', async () => {
@@ -466,6 +485,120 @@ describe('implementation session protocol', () => {
     expect(h.manifest.expectedHead).toBe(COMPLETE);
   });
 
+  it('revalidates exact PR authority immediately before retrying an ambiguous marker', async () => {
+    const h = harness({ localHead: WORK, remoteHead: WORK, expectedHead: WORK });
+    let ambiguous = true;
+    let markerPushes = 0;
+    const publish = h.port.publishBranch;
+    h.port.publishBranch = async (input) => {
+      if (input.newHead === COMPLETE) markerPushes += 1;
+      if (input.newHead === COMPLETE && ambiguous) {
+        ambiguous = false;
+        return {
+          status: 'ambiguous',
+          expected: input.expectedRemoteHead,
+          published: input.newHead,
+          observed: null,
+        };
+      }
+      return publish(input);
+    };
+
+    await expect(
+      h.protocol.implementationComplete(h.manifest, 'Implementation summary'),
+    ).resolves.toMatchObject({ status: 'partial', pending: 'marker' });
+    const read = h.port.readPullRequest;
+    h.port.readPullRequest = async (...args) => ({
+      ...await read(...args),
+      baseRefName: 'release/next',
+    });
+
+    await expect(
+      h.protocol.implementationComplete(h.manifest, 'Implementation summary'),
+    ).rejects.toThrow(/pull request authority/i);
+    expect(markerPushes).toBe(1);
+  });
+
+  it('places exact PR revalidation after durable-summary recovery on marker retry', async () => {
+    const h = harness({ localHead: WORK, remoteHead: WORK, expectedHead: WORK });
+    const publish = h.port.publishBranch;
+    let ambiguous = true;
+    h.port.publishBranch = async (input) => {
+      if (input.newHead === COMPLETE && ambiguous) {
+        ambiguous = false;
+        return {
+          status: 'ambiguous',
+          expected: input.expectedRemoteHead,
+          published: input.newHead,
+          observed: null,
+        };
+      }
+      return publish(input);
+    };
+    await h.protocol.implementationComplete(h.manifest, 'Implementation summary');
+
+    const audit: string[] = [];
+    let beforeRetryPush: string[] = [];
+    const readPullRequest = h.port.readPullRequest;
+    h.port.readPullRequest = async (...args) => {
+      audit.push('pr');
+      return readPullRequest(...args);
+    };
+    const readCompletionSummary = h.port.readCompletionSummary;
+    h.port.readCompletionSummary = async (...args) => {
+      audit.push('summary');
+      return readCompletionSummary(...args);
+    };
+    h.port.publishBranch = async (input) => {
+      if (input.newHead === COMPLETE) beforeRetryPush = [...audit, 'push'];
+      return publish(input);
+    };
+
+    await h.protocol.implementationComplete(h.manifest, 'Implementation summary');
+
+    expect(beforeRetryPush.slice(-3)).toEqual(['summary', 'pr', 'push']);
+  });
+
+  it.each([
+    ['Human Project status', true],
+    ['review:needs-human label', false],
+  ])('treats %s as dominant over implementation completion', async (_name, projectHuman) => {
+    const h = harness({
+      localHead: CLAIM,
+      realTreeChange: false,
+      ...(projectHuman ? { project: 'Human' } : {}),
+    });
+    if (!projectHuman) h.labels.add('review:needs-human');
+
+    await expect(
+      h.protocol.implementationComplete(h.manifest, 'Implementation summary'),
+    ).resolves.toEqual({ status: 'partial', head: CLAIM, pending: 'project' });
+    expect(h.completeCommits).toBe(0);
+    expect(h.project).toBe(projectHuman ? 'Human' : 'In Progress');
+    expect(h.draft).toBe(true);
+    expect(h.events).not.toContain('project:In Review');
+    expect(h.events).not.toContain('draft:false');
+  });
+
+  it('uses the exact completion commit summary on retry instead of changed file contents', async () => {
+    const h = harness({
+      expectedHead: COMPLETE,
+      localHead: COMPLETE,
+      remoteHead: COMPLETE,
+      latestClaimOid: COMPLETE,
+      latestClaim: claim({ expectedHead: WORK, phaseComplete: true }),
+      realTreeChange: false,
+    });
+    Object.assign(h.port, {
+      readCompletionSummary: async () => 'Implementation summary',
+    });
+
+    await expect(
+      h.protocol.implementationComplete(h.manifest, 'Changed retry summary'),
+    ).rejects.toThrow(/durable summary/i);
+    expect(h.body).not.toContain('Changed retry summary');
+  });
+
   it('persists one structured Human hold idempotently and remains draft', async () => {
     const h = harness({ localHead: CLAIM, realTreeChange: false });
 
@@ -481,6 +614,26 @@ describe('implementation session protocol', () => {
     expect(h.labels).toContain('review:needs-human');
     expect(h.comments.size).toBe(1);
     expect(h.events).not.toContain('draft:false');
+  });
+
+  it.each([
+    ['PR number', { number: 85 }],
+    ['head', { head: OTHER }],
+    ['branch', { headRefName: 'other/42' }],
+    ['base', { baseRefName: 'release/next' }],
+    ['lifecycle marker', { body: 'Closes #42' }],
+  ])('rejects a Human hold when exact %s authority changed', async (_name, override) => {
+    const h = harness({ localHead: CLAIM, realTreeChange: false });
+    const read = h.port.readPullRequest;
+    h.port.readPullRequest = async (...args) => ({
+      ...await read(...args),
+      ...override,
+    });
+
+    await expect(
+      h.protocol.human(h.manifest, 'A semantic decision is required.'),
+    ).rejects.toThrow(/pull request authority/i);
+    expect(h.events).toEqual([]);
   });
 
   it('keeps review and merge-prep operations unwired', async () => {

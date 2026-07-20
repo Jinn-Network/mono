@@ -32,6 +32,10 @@ export interface ImplementationSessionPort {
     manifest: AttemptManifest,
     oid: GitOid,
   ): Promise<BranchClaim | null>;
+  readCompletionSummary(
+    manifest: AttemptManifest,
+    oid: GitOid,
+  ): Promise<string | null>;
   isAncestor(
     manifest: AttemptManifest,
     ancestor: GitOid,
@@ -179,7 +183,11 @@ async function requireAuthority(
     latest.phase !== 'implement'
     || latest.attempt !== manifest.attemptId
     || latest.issueNumber !== manifest.issueNumber
-    || latest.prNumber !== manifest.prNumber
+    || (
+      latest.prNumber === undefined
+        ? authority.latestClaimOid !== manifest.claimOid
+        : latest.prNumber !== manifest.prNumber
+    )
     || latest.runner !== manifest.runnerId
     || latest.login.toLowerCase() !== manifest.selectedLogin.toLowerCase()
     || latest.targetBase !== manifest.targetBase
@@ -191,25 +199,54 @@ async function requireAuthority(
   return authority;
 }
 
+function validImplementationPullRequest(
+  manifest: AttemptManifest,
+  pullRequest: ImplementationSessionPullRequest,
+  expectedHead: GitOid,
+  requireDraft: boolean,
+): boolean {
+  const marker =
+    `<!-- jinn-autopilot:v2 issue=${manifest.issueNumber} branch=${manifest.branch} -->`;
+  return pullRequest.number === manifest.prNumber
+    && pullRequest.head === expectedHead
+    && pullRequest.headRefName === manifest.branch
+    && pullRequest.baseRefName === manifest.targetBase
+    && (!requireDraft || pullRequest.draft)
+    && pullRequest.body.includes(marker);
+}
+
+async function requireImplementationPullRequestAuthority(
+  manifest: AttemptManifest,
+  authority: ImplementationAuthority,
+  port: ImplementationSessionPort,
+  requireDraft: boolean,
+): Promise<ImplementationSessionPullRequest> {
+  const pullRequest = await port.readPullRequest(manifest.prNumber!, authority.remoteHead);
+  if (!validImplementationPullRequest(
+    manifest,
+    pullRequest,
+    authority.remoteHead,
+    requireDraft,
+  )) {
+    throw new Error('Implementation pull request authority changed or is invalid');
+  }
+  return pullRequest;
+}
+
 async function requireActiveImplementationPullRequest(
   manifest: AttemptManifest,
   authority: ImplementationAuthority,
   port: ImplementationSessionPort,
 ): Promise<ImplementationSessionPullRequest> {
-  const pullRequest = await port.readPullRequest(manifest.prNumber!, authority.remoteHead);
-  const marker =
-    `<!-- jinn-autopilot:v2 issue=${manifest.issueNumber} branch=${manifest.branch} -->`;
-  if (
-    pullRequest.number !== manifest.prNumber
-    || pullRequest.head !== authority.remoteHead
-    || pullRequest.headRefName !== manifest.branch
-    || pullRequest.baseRefName !== manifest.targetBase
-    || !pullRequest.draft
-    || !pullRequest.body.includes(marker)
-  ) {
-    throw new Error('Implementation pull request authority changed or is invalid');
-  }
-  return pullRequest;
+  return requireImplementationPullRequestAuthority(manifest, authority, port, true);
+}
+
+function hasHumanHold(
+  pullRequest: ImplementationSessionPullRequest,
+  projectStatus: Awaited<ReturnType<ImplementationSessionPort['readProjectStatus']>>,
+): boolean {
+  return projectStatus === 'Human'
+    || pullRequest.labels.includes('review:needs-human');
 }
 
 function branchOutcome(
@@ -329,11 +366,11 @@ async function ensureCompletionProjection(
     pullRequest = await port.readPullRequest(prNumber, head);
     const projectStatus = await port.readProjectStatus(manifest.issueNumber, head);
     if (
-      pullRequest.number !== prNumber
-      || pullRequest.head !== head
-      || pullRequest.headRefName !== manifest.branch
-      || pullRequest.baseRefName !== manifest.targetBase
+      !validImplementationPullRequest(manifest, pullRequest, head, false)
     ) {
+      return { status: 'partial', head, pending: 'project' };
+    }
+    if (hasHumanHold(pullRequest, projectStatus)) {
       return { status: 'partial', head, pending: 'project' };
     }
     if (
@@ -359,7 +396,11 @@ async function ensureCompletionProjection(
 
   try {
     pullRequest = await port.readPullRequest(prNumber, head);
-    if (pullRequest.head !== head) {
+    const projectStatus = await port.readProjectStatus(manifest.issueNumber, head);
+    if (
+      !validImplementationPullRequest(manifest, pullRequest, head, true)
+      || hasHumanHold(pullRequest, projectStatus)
+    ) {
       return { status: 'partial', head, pending: 'project' };
     }
     if (!pullRequest.labels.includes('engine:review')) {
@@ -372,7 +413,11 @@ async function ensureCompletionProjection(
 
   try {
     pullRequest = await port.readPullRequest(prNumber, head);
-    if (pullRequest.head !== head) {
+    const projectStatus = await port.readProjectStatus(manifest.issueNumber, head);
+    if (
+      !validImplementationPullRequest(manifest, pullRequest, head, true)
+      || hasHumanHold(pullRequest, projectStatus)
+    ) {
       return { status: 'partial', head, pending: 'ready' };
     }
     if (pullRequest.draft) {
@@ -391,6 +436,19 @@ async function implementationComplete(
 ): Promise<ImplementationCompleteResult> {
   let manifest = requireImplementationManifest(supplied, port);
   let authority = await requireAuthority(manifest, port);
+  let pullRequest = await requireImplementationPullRequestAuthority(
+    manifest,
+    authority,
+    port,
+    false,
+  );
+  let projectStatus = await port.readProjectStatus(
+    manifest.issueNumber,
+    authority.remoteHead,
+  );
+  if (hasHumanHold(pullRequest, projectStatus)) {
+    return { status: 'partial', head: authority.remoteHead, pending: 'project' };
+  }
   let localHead = await port.readLocalHead(manifest);
 
   if (authority.latestClaim.phaseComplete === true) {
@@ -408,7 +466,19 @@ async function implementationComplete(
         authority.remoteHead,
       );
     }
-    return ensureCompletionProjection(manifest, authority.remoteHead, summary, port);
+    const durableSummary = await port.readCompletionSummary(
+      manifest,
+      authority.latestClaimOid,
+    );
+    if (durableSummary === null || durableSummary.trim() !== summary.trim()) {
+      throw new Error('Retry summary does not match the durable summary');
+    }
+    return ensureCompletionProjection(
+      manifest,
+      authority.remoteHead,
+      durableSummary,
+      port,
+    );
   }
 
   if (localHead !== manifest.expectedHead) {
@@ -420,6 +490,11 @@ async function implementationComplete(
         manifest.expectedHead as GitOid,
       )
     ) {
+      const durableSummary = await port.readCompletionSummary(manifest, localHead);
+      if (durableSummary === null || durableSummary.trim() !== summary.trim()) {
+        throw new Error('Retry summary does not match the durable summary');
+      }
+      await requireActiveImplementationPullRequest(manifest, authority, port);
       const retry = await port.publishBranch({
         manifest,
         expectedRemoteHead: manifest.expectedHead as GitOid,
@@ -431,7 +506,7 @@ async function implementationComplete(
           manifest.expectedHead as GitOid,
           localHead,
         );
-        return ensureCompletionProjection(manifest, localHead, summary, port);
+        return ensureCompletionProjection(manifest, localHead, durableSummary, port);
       }
       return { status: 'partial', head: localHead, pending: 'marker' };
     }
@@ -456,7 +531,11 @@ async function implementationComplete(
   ) {
     return { status: 'partial', head: authority.remoteHead, pending: 'checkpoint' };
   }
-  await requireActiveImplementationPullRequest(manifest, authority, port);
+  pullRequest = await requireActiveImplementationPullRequest(manifest, authority, port);
+  projectStatus = await port.readProjectStatus(manifest.issueNumber, authority.remoteHead);
+  if (hasHumanHold(pullRequest, projectStatus)) {
+    return { status: 'partial', head: authority.remoteHead, pending: 'project' };
+  }
 
   const markerClaim = completionClaim(manifest, authority.remoteHead);
   const marker = await port.createCompletionCommit({
@@ -507,12 +586,20 @@ async function human(
     reason,
   });
   const body = `${marker}\n\nAutopilot parked this item for Human review.\n\n${detail}`;
-  let pullRequest = await port.readPullRequest(prNumber, authority.remoteHead);
-  if (pullRequest.head !== authority.remoteHead) {
-    throw new Error('Implementation PR head changed while applying a Human hold');
-  }
+  let pullRequest = await requireImplementationPullRequestAuthority(
+    manifest,
+    authority,
+    port,
+    false,
+  );
   if (!pullRequest.draft) {
     await port.setPullRequestDraft(prNumber, authority.remoteHead, true);
+    pullRequest = await requireImplementationPullRequestAuthority(
+      manifest,
+      authority,
+      port,
+      false,
+    );
   }
   if (!pullRequest.labels.includes('engine:review')) {
     await port.setPullRequestLabel(
@@ -520,6 +607,12 @@ async function human(
       authority.remoteHead,
       'engine:review',
       true,
+    );
+    pullRequest = await requireImplementationPullRequestAuthority(
+      manifest,
+      authority,
+      port,
+      false,
     );
   }
   if (!pullRequest.labels.includes('review:needs-human')) {
@@ -529,10 +622,28 @@ async function human(
       'review:needs-human',
       true,
     );
+    pullRequest = await requireImplementationPullRequestAuthority(
+      manifest,
+      authority,
+      port,
+      false,
+    );
   }
   if (!await port.hasHumanComment(prNumber, authority.remoteHead, marker)) {
+    await requireImplementationPullRequestAuthority(
+      manifest,
+      authority,
+      port,
+      false,
+    );
     await port.ensureHumanComment(prNumber, authority.remoteHead, marker, body);
   }
+  await requireImplementationPullRequestAuthority(
+    manifest,
+    authority,
+    port,
+    false,
+  );
   await port.setProjectStatus(manifest.issueNumber, authority.remoteHead, 'Human');
   pullRequest = await port.readPullRequest(prNumber, authority.remoteHead);
   if (pullRequest.head !== authority.remoteHead || !pullRequest.draft) {

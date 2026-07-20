@@ -384,11 +384,24 @@ export async function executeProjectionPlan(
   writer: ReconciliationWriter,
 ): Promise<ReconciliationReport> {
   const results: ReconciliationResult[] = [];
+  let previousSucceeded = true;
   for (const action of plan.actions) {
+    if (
+      'requiresPreviousSuccess' in action
+      && action.requiresPreviousSuccess === true
+      && !previousSucceeded
+    ) {
+      results.push({ action, outcome: 'awaiting-prerequisite' });
+      continue;
+    }
     try {
-      results.push(await executeOne(action, writer));
+      const result = await executeOne(action, writer);
+      results.push(result);
+      previousSucceeded = result.outcome === 'applied'
+        || result.outcome === 'already-applied';
     } catch (error) {
       results.push({ action, outcome: 'failed', detail: message(error) });
+      previousSucceeded = false;
     }
   }
   return { results };
