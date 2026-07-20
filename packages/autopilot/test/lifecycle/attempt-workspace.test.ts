@@ -376,6 +376,51 @@ describe('attempt workspace and manifest', () => {
     }
   });
 
+  it('rejects in-place nested static repository and path mutations', async () => {
+    const fixture = repositoryFixture();
+    const manifest = await createAttemptWorkspace(options(fixture), defaultRunner);
+    const original = readFileSync(manifest.paths.manifest, 'utf8');
+    const mutations: Array<readonly [
+      string,
+      (current: AttemptManifest) => AttemptManifest,
+    ]> = [
+      ['repository root', (current) => {
+        (current.repository as { root: string }).root = join(fixture.root, 'other-root');
+        return current;
+      }],
+      ['Git common directory', (current) => {
+        (current.repository as { gitCommonDir: string }).gitCommonDir = join(
+          fixture.root,
+          'other-common-dir',
+        );
+        return current;
+      }],
+      ['remote URL hash', (current) => {
+        (current.repository as { remoteUrlHash: string }).remoteUrlHash = 'b'.repeat(64);
+        return current;
+      }],
+      ['worktree path', (current) => {
+        (current.paths as { worktree: string }).worktree = join(fixture.root, 'other-worktree');
+        return current;
+      }],
+      ['log path', (current) => {
+        (current.paths as { log: string }).log = join(fixture.root, 'other.log');
+        return current;
+      }],
+      ['manifest path', (current) => {
+        (current.paths as { manifest: string }).manifest = join(fixture.root, 'other-manifest.json');
+        return current;
+      }],
+    ];
+
+    for (const [name, mutate] of mutations) {
+      expect(() => updateAttemptManifest(manifest.paths.manifest, mutate), name).toThrow(
+        /static attempt fields/,
+      );
+      expect(readFileSync(manifest.paths.manifest, 'utf8')).toBe(original);
+    }
+  });
+
   it('counts only this runner’s live manifests for local capacity', async () => {
     const fixture = repositoryFixture();
     const one = await createAttemptWorkspace(options(fixture, {
