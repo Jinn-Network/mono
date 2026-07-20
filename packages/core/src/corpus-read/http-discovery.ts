@@ -72,7 +72,7 @@ export function createHttpCorpusDiscovery(
       }
     }
     throw new DiscoveryUnavailableError(
-      `Ponder HTTP network error: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
+      `Ponder GraphQL network error: ${String(lastError)}`,
       lastError,
     );
   }
@@ -85,7 +85,19 @@ export function createHttpCorpusDiscovery(
       }
       return;
     }
-    const response = await request(readyUrl, { method: 'GET' });
+    let response: Response;
+    try {
+      response = await request(readyUrl, { method: 'GET' });
+    } catch (error) {
+      readyCache = { checkedAt: now, ok: false, status: 0 };
+      const cause = error instanceof DiscoveryUnavailableError
+        ? (error.cause ?? error)
+        : error;
+      throw new DiscoveryUnavailableError(
+        `indexer /ready probe failed: ${String(cause)}`,
+        cause,
+      );
+    }
     readyCache = { checkedAt: now, ok: response.ok, status: response.status };
     if (!response.ok) {
       throw new DiscoveryUnavailableError(`indexer not ready: ${response.status}`);
@@ -114,7 +126,7 @@ export function createHttpCorpusDiscovery(
           `Ponder GraphQL HTTP ${response.status} ${response.statusText}`,
         );
       }
-      const body = await response.json() as {
+      let body: {
         data?: {
           envelopes?: {
             items?: Array<{
@@ -128,6 +140,14 @@ export function createHttpCorpusDiscovery(
         };
         errors?: Array<{ message?: string }>;
       };
+      try {
+        body = await response.json() as typeof body;
+      } catch (error) {
+        throw new DiscoveryUnavailableError(
+          `Ponder GraphQL response parse error: ${String(error)}`,
+          error,
+        );
+      }
       if (body.errors?.length) {
         throw new DiscoveryUnavailableError(
           `Ponder GraphQL error: ${body.errors.map((error) => error.message ?? 'unknown').join('; ')}`,

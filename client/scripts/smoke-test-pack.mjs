@@ -2,21 +2,20 @@
 /**
  * Validates the tarball shape produced by npm, matching `npm publish`.
  * Installs the pack with npm (same shape as consumers) then validates:
- * 1) local bin execution via `npm exec jinn ...`
- * 2) no-install package execution via package-name bin alias (`npm exec --package <tarball> -- client ...`)
- * 3) legacy `npx -p <tarball> jinn ...`
+ * 1) private runtime packages are bundled and their public modules import
+ * 2) local bin execution via `npm exec jinn ...`
+ * 3) no-install package execution via package-name bin alias (`npm exec --package <tarball> -- client ...`)
+ * 4) legacy `npx -p <tarball> jinn ...`
  * Expects cwd to be client/ (see package.json pack:smoke).
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const clientRoot = join(__dirname, '..');
-const coreRoot = join(clientRoot, '..', 'packages', 'core');
-const pluginRoot = join(clientRoot, '..', 'packages', 'plugin');
 const smokeDir = mkdtempSync(join(tmpdir(), 'jinn-pack-smoke-'));
 const smokeEnv = { ...process.env, HOME: smokeDir, NO_COLOR: '1' };
 const installedPackageRoot = join(smokeDir, 'node_modules', '@jinn-network', 'client');
@@ -36,44 +35,6 @@ try {
 } catch {
   console.error('smoke-test-pack: npm pack did not return JSON');
   console.error(pack.stdout);
-  process.exit(1);
-}
-
-const corePack = spawnSync('npm', ['pack', '--json', '--pack-destination', smokeDir], {
-  cwd: coreRoot,
-  encoding: 'utf8',
-});
-if (corePack.status !== 0) {
-  console.error('smoke-test-pack: core npm pack failed');
-  console.error(corePack.stderr || corePack.stdout);
-  process.exit(corePack.status ?? 1);
-}
-let coreTarball;
-try {
-  const packed = JSON.parse(corePack.stdout)[0];
-  coreTarball = join(smokeDir, packed.filename);
-} catch {
-  console.error('smoke-test-pack: core npm pack did not return JSON');
-  console.error(corePack.stdout);
-  process.exit(1);
-}
-
-const pluginPack = spawnSync('npm', ['pack', '--json', '--pack-destination', smokeDir], {
-  cwd: pluginRoot,
-  encoding: 'utf8',
-});
-if (pluginPack.status !== 0) {
-  console.error('smoke-test-pack: plugin npm pack failed');
-  console.error(pluginPack.stderr || pluginPack.stdout);
-  process.exit(pluginPack.status ?? 1);
-}
-let pluginTarball;
-try {
-  const packed = JSON.parse(pluginPack.stdout)[0];
-  pluginTarball = join(smokeDir, packed.filename);
-} catch {
-  console.error('smoke-test-pack: plugin npm pack did not return JSON');
-  console.error(pluginPack.stdout);
   process.exit(1);
 }
 
@@ -98,7 +59,7 @@ function assertVersionPayload(payload, context) {
   }
 }
 
-function assertTarballClean() {
+function assertTarballCleanAndComplete() {
   const result = spawnSync('tar', ['-tzf', tarball], {
     cwd: smokeDir,
     encoding: 'utf8',
@@ -121,6 +82,15 @@ function assertTarballClean() {
     console.error(forbidden.slice(0, 20).join('\n'));
     process.exit(1);
   }
+  for (const required of [
+    'package/node_modules/@jinn-network/core/dist/corpus-read/index.js',
+    'package/node_modules/@jinn-network/plugin/dist/index.js',
+  ]) {
+    if (!result.stdout.split('\n').includes(required)) {
+      console.error(`smoke-test-pack: tarball is missing bundled runtime ${required}`);
+      process.exit(1);
+    }
+  }
 }
 
 function runOrExit(command, args, context, options = {}) {
@@ -139,7 +109,7 @@ function runOrExit(command, args, context, options = {}) {
 }
 
 try {
-  assertTarballClean();
+  assertTarballCleanAndComplete();
 
   const init = spawnSync('npm', ['init', '-y'], {
     cwd: smokeDir,
@@ -148,85 +118,107 @@ try {
   });
   if (init.status !== 0) process.exit(init.status ?? 1);
 
-  const install = spawnSync('npm', ['install', pluginTarball, coreTarball, tarball], {
+  const install = spawnSync('npm', ['install', '--loglevel=error', tarball], {
     cwd: smokeDir,
     stdio: 'inherit',
     encoding: 'utf8',
   });
   if (install.status !== 0) process.exit(install.status ?? 1);
 
-  const nodePtyFix = join(installedPackageRoot, 'dist', 'scripts', 'fix-node-pty.mjs');
-  if (!existsSync(nodePtyFix)) {
-    console.error(`smoke-test-pack: missing node-pty fix script ${nodePtyFix}`);
-    process.exit(1);
-  }
-
-  const run = runOrExit('npm', ['exec', '--', 'jinn', 'version', '--json'], 'npm exec');
-  const payload = parseJsonOrExit(run.stdout, 'npm exec');
-  assertVersionPayload(payload, 'npm exec');
-
-  runOrExit('npm', ['exec', '--', 'jinn', '--help'], 'packed jinn --help');
-  const doctor = spawnSync('npm', ['exec', '--', 'jinn', 'doctor', '--json'], {
-    cwd: smokeDir,
-    encoding: 'utf8',
-    env: smokeEnv,
-    timeout: 60_000,
-  });
-  if (doctor.error || doctor.status === 50) {
-    console.error('smoke-test-pack: packed jinn doctor crashed');
-    console.error(doctor.error ?? doctor.stderr ?? doctor.stdout);
-    process.exit(doctor.status ?? 1);
-  }
-  parseJsonOrExit(doctor.stdout, 'packed jinn doctor');
-
-  runOrExit(process.execPath, [nodePtyFix, '--verify'], 'node-pty verification');
-
-  // jinn-layer bin (#1356): usage must print from the packed tarball's bin.
-  const layerUsage = runOrExit('npm', ['exec', '--', 'jinn-layer'], 'jinn-layer usage');
-  if (!layerUsage.stdout.includes('Usage: jinn-layer')) {
-    console.error('smoke-test-pack: jinn-layer bin did not print usage');
-    console.error(layerUsage.stdout);
-    process.exit(1);
-  }
-
-  // C4: prove the installed tarball can load the vendored core plus native
-  // better-sqlite3 and create the derived evidence index.
-  const episodesDir = join(smokeDir, 'episodes');
-  const evidenceIndex = join(smokeDir, 'evidence-index.sqlite');
-  mkdirSync(episodesDir);
-  const reindex = runOrExit(
-    'npm',
+  runOrExit(
+    process.execPath,
     [
-      'exec',
-      '--',
-      'jinn-layer',
-      'reindex',
-      '--json',
-      '--episodes-dir',
-      episodesDir,
-      '--index-path',
-      evidenceIndex,
+      '--input-type=module',
+      '--eval',
+      [
+        "const trajectory = await import('@jinn-network/client/dist/trajectory/schema.js');",
+        "const corpus = await import('@jinn-network/client/dist/corpus/index.js');",
+        `const plugin = await import(${JSON.stringify(pathToFileURL(
+          join(installedPackageRoot, 'node_modules', '@jinn-network', 'plugin', 'dist', 'index.js'),
+        ).href)});`,
+        "if (typeof trajectory.JinnTrajectoryV1Schema?.safeParse !== 'function') throw new Error('trajectory shim unavailable');",
+        "if (typeof corpus.createCorpus !== 'function') throw new Error('corpus shim unavailable');",
+        "if (typeof plugin.createJinnPlugin !== 'function') throw new Error('bundled plugin unavailable');",
+      ].join('\n'),
     ],
-    'jinn-layer reindex',
+    'client core-backed public imports',
   );
-  const reindexPayload = parseJsonOrExit(reindex.stdout, 'jinn-layer reindex');
-  if (
-    reindexPayload.status !== 'ok'
-    || reindexPayload.report?.indexedEpisodes !== 0
-    || !existsSync(evidenceIndex)
-  ) {
-    console.error('smoke-test-pack: jinn-layer reindex did not create an empty SQLite index');
-    console.error(reindex.stdout);
-    process.exit(1);
+  console.log('smoke-test-pack: client-only install and core-backed imports ok');
+
+  if (!process.argv.includes('--client-only')) {
+    const nodePtyFix = join(installedPackageRoot, 'dist', 'scripts', 'fix-node-pty.mjs');
+    if (!existsSync(nodePtyFix)) {
+      console.error(`smoke-test-pack: missing node-pty fix script ${nodePtyFix}`);
+      process.exit(1);
+    }
+
+    const run = runOrExit('npm', ['exec', '--', 'jinn', 'version', '--json'], 'npm exec');
+    const payload = parseJsonOrExit(run.stdout, 'npm exec');
+    assertVersionPayload(payload, 'npm exec');
+
+    runOrExit('npm', ['exec', '--', 'jinn', '--help'], 'packed jinn --help');
+    const doctor = spawnSync('npm', ['exec', '--', 'jinn', 'doctor', '--json'], {
+      cwd: smokeDir,
+      encoding: 'utf8',
+      env: smokeEnv,
+      timeout: 60_000,
+    });
+    if (doctor.error || doctor.status === 50) {
+      console.error('smoke-test-pack: packed jinn doctor crashed');
+      console.error(doctor.error ?? doctor.stderr ?? doctor.stdout);
+      process.exit(doctor.status ?? 1);
+    }
+    parseJsonOrExit(doctor.stdout, 'packed jinn doctor');
+
+    runOrExit(process.execPath, [nodePtyFix, '--verify'], 'node-pty verification');
+
+    // jinn-layer bin (#1356): usage must print from the packed tarball's bin.
+    const layerUsage = runOrExit('npm', ['exec', '--', 'jinn-layer'], 'jinn-layer usage');
+    if (!layerUsage.stdout.includes('Usage: jinn-layer')) {
+      console.error('smoke-test-pack: jinn-layer bin did not print usage');
+      console.error(layerUsage.stdout);
+      process.exit(1);
+    }
+
+    // C4: prove the installed tarball can load the vendored core plus native
+    // better-sqlite3 and create the derived evidence index.
+    const episodesDir = join(smokeDir, 'episodes');
+    const evidenceIndex = join(smokeDir, 'evidence-index.sqlite');
+    mkdirSync(episodesDir);
+    const reindex = runOrExit(
+      'npm',
+      [
+        'exec',
+        '--',
+        'jinn-layer',
+        'reindex',
+        '--json',
+        '--episodes-dir',
+        episodesDir,
+        '--index-path',
+        evidenceIndex,
+      ],
+      'jinn-layer reindex',
+    );
+    const reindexPayload = parseJsonOrExit(reindex.stdout, 'jinn-layer reindex');
+    if (
+      reindexPayload.status !== 'ok'
+      || reindexPayload.report?.indexedEpisodes !== 0
+      || !existsSync(evidenceIndex)
+    ) {
+      console.error('smoke-test-pack: jinn-layer reindex did not create an empty SQLite index');
+      console.error(reindex.stdout);
+      process.exit(1);
+    }
+
+    const npxDirect = runOrExit('npm', ['exec', '--yes', '--package', tarball, '--', 'client', 'version', '--json'], 'npx direct');
+    assertVersionPayload(parseJsonOrExit(npxDirect.stdout, 'npx direct'), 'npx direct');
+
+    const npxLegacy = runOrExit('npx', ['-p', tarball, 'jinn', 'version', '--json'], 'npx -p');
+    assertVersionPayload(parseJsonOrExit(npxLegacy.stdout, 'npx -p'), 'npx -p');
+
+    console.log('smoke-test-pack: ok', payload.client.version);
   }
-
-  const npxDirect = runOrExit('npm', ['exec', '--yes', '--package', tarball, '--', 'client', 'version', '--json'], 'npx direct');
-  assertVersionPayload(parseJsonOrExit(npxDirect.stdout, 'npx direct'), 'npx direct');
-
-  const npxLegacy = runOrExit('npx', ['-p', tarball, 'jinn', 'version', '--json'], 'npx -p');
-  assertVersionPayload(parseJsonOrExit(npxLegacy.stdout, 'npx -p'), 'npx -p');
-
-  console.log('smoke-test-pack: ok', payload.client.version);
 } finally {
   rmSync(smokeDir, { recursive: true, force: true });
 }

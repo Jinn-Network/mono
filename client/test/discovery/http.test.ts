@@ -1138,12 +1138,34 @@ describe('queryEnvelopes', () => {
       url: BASE_URL,
       fetchImpl: networkErrorFetch() as unknown as typeof fetch,
     });
-    await expect(client.queryEnvelopes({})).rejects.toThrow(DiscoveryUnavailableError);
+    let caught: unknown;
+    await client.queryEnvelopes({}).catch((error) => { caught = error; });
+    expect(caught).toBeInstanceOf(DiscoveryUnavailableError);
+    expect((caught as DiscoveryUnavailableError).message).toBe(
+      'indexer /ready probe failed: TypeError: fetch failed: connection refused',
+    );
   });
 
   it('throws DiscoveryUnavailableError when response has no data field', async () => {
     const { impl } = mockFetch({});
     const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+    await expect(client.queryEnvelopes({})).rejects.toThrow(DiscoveryUnavailableError);
+  });
+
+  it('preserves the client error contract for a malformed GraphQL response', async () => {
+    const impl = vi.fn(async (url: string) => {
+      if (isReadyProbe(url)) return new Response(null, { status: 200 });
+      return new Response('{not-json', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    const client = createHttpDiscoveryAPI({
+      url: BASE_URL,
+      fetchImpl: impl as unknown as typeof fetch,
+      retryDelaysMs: [],
+    });
+
     await expect(client.queryEnvelopes({})).rejects.toThrow(DiscoveryUnavailableError);
   });
 });
@@ -1717,6 +1739,9 @@ describe('transparent retry on 502/503/network errors (#782)', () => {
     let caught: unknown;
     await client.queryEnvelopes({}).catch((e) => { caught = e; });
     expect(caught).toBeInstanceOf(DiscoveryUnavailableError);
+    expect((caught as DiscoveryUnavailableError).message).toBe(
+      'Ponder GraphQL network error: TypeError: fetch failed: ECONNRESET',
+    );
     // Original error preserved as the cause.
     expect((caught as DiscoveryUnavailableError).cause).toBe(cause);
     // 1 initial + 2 retries.

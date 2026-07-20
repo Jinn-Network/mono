@@ -8,6 +8,10 @@
   "private": true,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": [
+    "dist/",
+    "process-contract.json"
+  ],
   "exports": {
     ".": {
       "import": "./dist/index.js",
