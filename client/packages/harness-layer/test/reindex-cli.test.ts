@@ -26,7 +26,13 @@ function episode(id: string): EpisodeV1 {
   return {
     schemaVersion: EPISODE_SCHEMA_VERSION,
     episodeId: id,
-    session: { sessionId: `session-${id}`, capturedAt: '2026-07-20T00:00:00.000Z' },
+    retrievalVisible: false,
+    session: {
+      sessionId: `session-${id}`,
+      capturedAt: '2026-07-20T00:00:00.000Z',
+      kind: 'user',
+    },
+    origin: { writer: 'reindex-cli-test', build: '1.0.0' },
     task: { summary: 'Reindex fixture', distributionTags: [] },
     trajectory: [{
       spanId: 'span-1',
@@ -44,7 +50,7 @@ function episode(id: string): EpisodeV1 {
       tools: [],
       skillsLoadout: [],
     },
-    outcome: { status: 'completed', verifiabilityTier: 'user-accepted' },
+    outcome: { status: 'completed', verificationStrength: 'user-accepted' },
     cost: { durationMs: 1 },
     retention: { policy: 'local-private' },
     provenance: 'contributed',
@@ -62,11 +68,13 @@ describe('jinn-layer reindex', () => {
       outcome: { summary: null };
       cost: { tokens: null; usdEstimate: null };
       lineage: null;
+      origin?: unknown;
     };
     raw.outcome.summary = null;
     raw.cost.tokens = null;
     raw.cost.usdEstimate = null;
     raw.lineage = null;
+    delete raw.origin;
     writeFileSync(join(episodesDir, 'misnamed.json'), JSON.stringify(raw));
     let output = '';
 
@@ -124,6 +132,32 @@ describe('jinn-layer reindex', () => {
     expect(result.report.unreadable[0]).toMatchObject({
       path: join(episodesDir, 'broken.episode.json'),
     });
+  });
+
+  it('supports a read-only doctor scan without creating the derived index', async () => {
+    const { episodesDir, indexPath } = fixture();
+    writeFileSync(join(episodesDir, 'valid.episode.json'), JSON.stringify(episode('valid')));
+    let output = '';
+
+    const code = await runJinnLayerCli([
+      'reindex',
+      '--dry-run',
+      '--json',
+      '--episodes-dir',
+      episodesDir,
+      '--index-path',
+      indexPath,
+    ], { writer: { write: (value) => { output += value; return true; } } });
+
+    expect(code).toBe(0);
+    expect(JSON.parse(output)).toMatchObject({
+      status: 'ok',
+      mode: 'inspect',
+      episodesDir,
+      indexPath: null,
+      report: { scannedFiles: 1, indexedEpisodes: 1, unreadableFiles: 0 },
+    });
+    expect(existsSync(indexPath)).toBe(false);
   });
 
   it('rejects unknown flags without touching the store', async () => {

@@ -37,6 +37,15 @@ def test_contract_keeps_the_general_default_timeout(monkeypatch):
     assert calls == [jinn_layer._TIMEOUT_S]
 
 
+def test_evidence_inspect_uses_read_only_json_reindex_mode():
+    runner = StdinRunner()
+
+    assert jinn_layer.evidence_inspect_json(runner=runner)[0] == 0
+    assert runner.calls == [
+        ([jinn_layer.binary(), "reindex", "--dry-run", "--json"], None)
+    ]
+
+
 def test_session_end_writes_one_complete_request_to_stdin():
     runner = StdinRunner()
     request = {

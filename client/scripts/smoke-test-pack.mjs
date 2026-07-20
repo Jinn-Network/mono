@@ -8,7 +8,7 @@
  * Expects cwd to be client/ (see package.json pack:smoke).
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -132,6 +132,37 @@ try {
   if (!layerUsage.stdout.includes('Usage: jinn-layer')) {
     console.error('smoke-test-pack: jinn-layer bin did not print usage');
     console.error(layerUsage.stdout);
+    process.exit(1);
+  }
+
+  // C4: prove the installed tarball can load the vendored core plus native
+  // better-sqlite3 and create the derived evidence index.
+  const episodesDir = join(smokeDir, 'episodes');
+  const evidenceIndex = join(smokeDir, 'evidence-index.sqlite');
+  mkdirSync(episodesDir);
+  const reindex = runOrExit(
+    'npm',
+    [
+      'exec',
+      '--',
+      'jinn-layer',
+      'reindex',
+      '--json',
+      '--episodes-dir',
+      episodesDir,
+      '--index-path',
+      evidenceIndex,
+    ],
+    'jinn-layer reindex',
+  );
+  const reindexPayload = parseJsonOrExit(reindex.stdout, 'jinn-layer reindex');
+  if (
+    reindexPayload.status !== 'ok'
+    || reindexPayload.report?.indexedEpisodes !== 0
+    || !existsSync(evidenceIndex)
+  ) {
+    console.error('smoke-test-pack: jinn-layer reindex did not create an empty SQLite index');
+    console.error(reindex.stdout);
     process.exit(1);
   }
 

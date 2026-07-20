@@ -172,6 +172,11 @@ def contract(
     return run(["contract", "--json"], runner, timeout_s=timeout_s)
 
 
+def evidence_inspect_json(runner: Optional[Runner] = None) -> Tuple[int, str, str]:
+    """Read-only episode readability/count report for the full doctor."""
+    return run(["reindex", "--dry-run", "--json"], runner)
+
+
 def session_end(request: Dict[str, Any], runner: Optional[Runner] = None) -> Tuple[int, str, str]:
     """Delegate one already-assembled EpisodeV1 through stdin."""
     payload = json.dumps(request, separators=(",", ":"))

@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   EvidenceIndex,
+  inspectEvidenceStore,
   reindexEvidenceStore,
   type ReindexReport,
 } from '../src/evidence-index.js';
@@ -34,7 +35,9 @@ function makeEpisode(id: string, capturedAt = '2026-07-19T00:00:00.000Z'): Episo
   return {
     schemaVersion: EPISODE_SCHEMA_VERSION,
     episodeId: id,
-    session: { sessionId: `session-${id}`, capturedAt },
+    retrievalVisible: false,
+    session: { sessionId: `session-${id}`, capturedAt, kind: 'user' },
+    origin: { writer: 'core-test', build: '1.0.0' },
     task: { summary: `Task ${id}`, distributionTags: ['coding'] },
     trajectory: [{
       spanId: `span-${id}`,
@@ -54,7 +57,7 @@ function makeEpisode(id: string, capturedAt = '2026-07-19T00:00:00.000Z'): Episo
     },
     outcome: {
       status: 'completed',
-      verifiabilityTier: 'tests-passed',
+      verificationStrength: 'tests-passed',
       summary: 'complete',
     },
     cost: {
@@ -105,7 +108,7 @@ describe('machine-local evidence index', () => {
       scannedFiles: 2,
       indexedEpisodes: 2,
       unreadableFiles: 0,
-      legacyUnstampedFiles: 2,
+      legacyUnstampedFiles: 0,
     });
 
     const index = new EvidenceIndex({ dbPath: indexPath });
@@ -113,8 +116,9 @@ describe('machine-local evidence index', () => {
     expect(index.listEpisodes().map((row) => row.episodeId)).toEqual(['first', 'second']);
     expect(index.listEpisodes()[0]).toMatchObject({
       sourceKind: 'canonical-episode',
-      originKind: 'legacy-unstamped',
+      originKind: 'stamped',
       outcomeStatus: 'completed',
+      verificationStrength: 'tests-passed',
     });
     expect(index.listUnreadable()).toEqual([]);
     index.close();
@@ -134,11 +138,13 @@ describe('machine-local evidence index', () => {
       outcome: { summary: string | null };
       cost: { tokens: unknown; usdEstimate: string | null };
       lineage: unknown;
+      origin?: unknown;
     };
     raw.outcome.summary = null;
     raw.cost.tokens = null;
     raw.cost.usdEstimate = null;
     raw.lineage = null;
+    delete raw.origin;
     const misnamedPath = join(episodesDir, 'rescued.json');
     writeJson(misnamedPath, raw);
     writeFileSync(join(episodesDir, 'broken.episode.json'), '{not json');
@@ -209,6 +215,32 @@ describe('machine-local evidence index', () => {
     const index = new EvidenceIndex({ dbPath: indexPath });
     expect(index.listEpisodes()[0]?.sourceKind).toBe('misnamed-episode');
     index.close();
+  });
+
+  it('inspects readability without creating an index or repairing source files', () => {
+    const { episodesDir, indexPath } = makeStore();
+    const raw = structuredClone(makeEpisode('inspect-only')) as unknown as {
+      outcome: { summary: string | null };
+    };
+    raw.outcome.summary = null;
+    const sourcePath = join(episodesDir, 'inspect-only.json');
+    writeJson(sourcePath, raw);
+    writeFileSync(join(episodesDir, 'broken.episode.json'), '{not json');
+    const before = readFileSync(sourcePath, 'utf8');
+
+    const report = inspectEvidenceStore({ episodesDir });
+
+    expect(report).toMatchObject({
+      scannedFiles: 2,
+      indexedEpisodes: 1,
+      unreadableFiles: 1,
+      nullToleratedFiles: 1,
+      nullFieldsRemoved: 0,
+      misnamedEpisodes: 1,
+      renamedFiles: 0,
+    });
+    expect(readFileSync(sourcePath, 'utf8')).toBe(before);
+    expect(existsSync(indexPath)).toBe(false);
   });
 
   it('rebuilds deterministically and a second repair is a no-op', () => {

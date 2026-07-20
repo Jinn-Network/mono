@@ -36,6 +36,7 @@ import {
 } from '@jinn-network/plugin';
 import {
   defaultEvidenceIndexPath,
+  inspectEvidenceStore,
   reindexEvidenceStore,
 } from '@jinn-network/core';
 import { buildDefaultLayer } from './layer-default.js';
@@ -158,10 +159,11 @@ import { resolveCliPassword } from '../../../src/cli/password.js';
 const USAGE = `Usage: jinn-layer <command> [args]
 
 Commands:
-  reindex [--repair] [--json] [--episodes-dir <dir>] [--index-path <file>]
+  reindex [--repair|--dry-run] [--json] [--episodes-dir <dir>] [--index-path <file>]
                                                  Rebuild the machine-local derived evidence index.
                                                  --repair also normalizes the known null quartet
                                                  and rescues misnamed episode files.
+                                                 --dry-run only reports readability; it writes nothing.
   contract --json                                 Print process contract version 1
   session pickup                                  Read a v1 pickup request on stdin
   session end                                     Read a complete EpisodeV1 request on stdin
@@ -1078,6 +1080,7 @@ export async function runJinnLayerCli(
         args: subverb === undefined ? rest : [subverb, ...rest],
         options: {
           repair: { type: 'boolean', default: false },
+          'dry-run': { type: 'boolean', default: false },
           json: { type: 'boolean', default: false },
           'episodes-dir': { type: 'string' },
           'index-path': { type: 'string' },
@@ -1089,22 +1092,31 @@ export async function runJinnLayerCli(
       writer.write(`error: invalid reindex command: ${error instanceof Error ? error.message : String(error)}\n\n${USAGE}`);
       return 2;
     }
+    if (parsed.values.repair && parsed.values['dry-run']) {
+      writer.write(`error: invalid reindex command: --repair and --dry-run are mutually exclusive\n\n${USAGE}`);
+      return 2;
+    }
     const episodesDir = parsed.values['episodes-dir']
       ?? process.env['JINN_LAYER_EPISODES_DIR']
       ?? DEFAULT_EPISODES_DIR;
-    const indexPath = parsed.values['index-path']
+    const configuredIndexPath = parsed.values['index-path']
       ?? process.env['JINN_LAYER_EVIDENCE_INDEX_PATH']
       ?? defaultEvidenceIndexPath(episodesDir);
+    const dryRun = parsed.values['dry-run'];
+    const indexPath = dryRun ? null : configuredIndexPath;
     try {
-      const report = reindexEvidenceStore({
-        episodesDir,
-        indexPath,
-        repair: parsed.values.repair,
-      });
+      const report = dryRun
+        ? inspectEvidenceStore({ episodesDir })
+        : reindexEvidenceStore({
+          episodesDir,
+          indexPath: configuredIndexPath,
+          repair: parsed.values.repair,
+        });
       const status = report.unreadableFiles > 0 ? 'degraded' : 'ok';
       if (parsed.values.json) {
         writer.write(`${JSON.stringify({
           status,
+          mode: dryRun ? 'inspect' : 'reindex',
           episodesDir,
           indexPath,
           repair: parsed.values.repair,
@@ -1112,8 +1124,8 @@ export async function runJinnLayerCli(
         })}\n`);
       } else {
         writer.write([
-          `Evidence reindex ${status}: ${report.indexedEpisodes}/${report.scannedFiles} files indexed`,
-          `Index: ${indexPath}`,
+          `Evidence ${dryRun ? 'inspection' : 'reindex'} ${status}: ${report.indexedEpisodes}/${report.scannedFiles} files readable`,
+          `Index: ${indexPath ?? 'not rebuilt (--dry-run)'}`,
           `Repairs: ${report.nullFieldsRemoved} null fields removed; ${report.renamedFiles} files renamed`,
           `Legacy unstamped: ${report.legacyUnstampedFiles}`,
           `Unreadable: ${report.unreadableFiles}`,

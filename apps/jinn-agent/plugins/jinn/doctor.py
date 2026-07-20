@@ -223,8 +223,9 @@ def _check_prerequisites() -> dict:
     return {"name": name, "ok": True, "detail": version}
 
 
-def _check_host_provider() -> dict:
+def _check_host_provider(runner: Optional[jinn_layer.Runner] = None) -> dict:
     """Informational pointer — provider/credential sanity is the host's."""
+    del runner
     return {
         "name": "host-provider",
         "ok": True,
@@ -235,9 +236,59 @@ def _check_host_provider() -> dict:
     }
 
 
+def _check_evidence_store(runner: Optional[jinn_layer.Runner] = None) -> dict:
+    """Read-only episode count/readability signal from core's shared scanner."""
+    name = "evidence-readable"
+    update_remedy = _update_remedy()
+    try:
+        code, out, err = jinn_layer.evidence_inspect_json(runner=runner)
+        try:
+            reply = json.loads(out)
+        except (TypeError, json.JSONDecodeError):
+            reply = None
+        report = reply.get("report") if isinstance(reply, dict) else None
+        readable = report.get("indexedEpisodes") if isinstance(report, dict) else None
+        unreadable = report.get("unreadableFiles") if isinstance(report, dict) else None
+        if not (
+            isinstance(readable, int)
+            and not isinstance(readable, bool)
+            and readable >= 0
+            and isinstance(unreadable, int)
+            and not isinstance(unreadable, bool)
+            and unreadable >= 0
+        ):
+            detail = (
+                _one_line(err or out)
+                if code != 0 and (err or out)
+                else "evidence readability reply unreadable"
+            )
+            return {
+                "name": name,
+                "ok": False,
+                "detail": detail,
+                "remedy": update_remedy,
+            }
+        detail = f"{readable} readable episode(s); {unreadable} unreadable"
+        if unreadable > 0 or code != 0:
+            return {
+                "name": name,
+                "ok": False,
+                "detail": detail,
+                "remedy": f"{jinn_layer.binary()} reindex --repair --json",
+            }
+        return {"name": name, "ok": True, "detail": detail}
+    except Exception as exc:
+        return {
+            "name": name,
+            "ok": False,
+            "detail": f"evidence readability check failed: {exc}",
+            "remedy": update_remedy,
+        }
+
+
 # Full-run-only checks. A5's layer-side corpus probes (corpus-reachable /
-# corpus-content) append here — the extension seam, nothing more.
-_FULL_ONLY = [_check_host_provider]
+# corpus-content) append here.
+_FULL_ONLY = [_check_host_provider, _check_evidence_store]
 
 
 def run_checks(full: bool, runner: Optional[jinn_layer.Runner] = None) -> list[dict]:
@@ -247,7 +298,7 @@ def run_checks(full: bool, runner: Optional[jinn_layer.Runner] = None) -> list[d
         _check_prerequisites(),
     ]
     if full:
-        checks.extend(fn() for fn in _FULL_ONLY)
+        checks.extend(fn(runner=runner) for fn in _FULL_ONLY)
     return checks
 
 

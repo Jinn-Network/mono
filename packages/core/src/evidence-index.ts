@@ -32,7 +32,7 @@ export interface IndexedEpisode {
   originWriter?: string;
   originBuild?: string;
   outcomeStatus: EpisodeV1['outcome']['status'];
-  verifiabilityTier: EpisodeV1['outcome']['verifiabilityTier'];
+  verificationStrength: EpisodeV1['outcome']['verificationStrength'];
   durationMs: number;
   activity: EpisodeV1['activity'] | null;
   episode: EpisodeV1;
@@ -60,6 +60,10 @@ export interface ReindexEvidenceStoreOptions {
   episodesDir: string;
   indexPath: string;
   repair?: boolean;
+}
+
+export interface InspectEvidenceStoreOptions {
+  episodesDir: string;
 }
 
 export function defaultEvidenceIndexPath(episodesDir: string): string {
@@ -196,7 +200,7 @@ export class EvidenceIndex {
         origin_writer TEXT,
         origin_build TEXT,
         outcome_status TEXT NOT NULL,
-        verifiability_tier TEXT NOT NULL,
+        verification_strength TEXT NOT NULL,
         duration_ms INTEGER NOT NULL,
         activity_json TEXT,
         episode_json TEXT NOT NULL,
@@ -225,12 +229,12 @@ export class EvidenceIndex {
       INSERT INTO episodes (
         episode_id, session_id, captured_at, source_path, source_kind,
         origin_kind, origin_writer, origin_build, outcome_status,
-        verifiability_tier, duration_ms, activity_json, episode_json,
+        verification_strength, duration_ms, activity_json, episode_json,
         content_sha256
       ) VALUES (
         @episodeId, @sessionId, @capturedAt, @sourcePath, @sourceKind,
         @originKind, @originWriter, @originBuild, @outcomeStatus,
-        @verifiabilityTier, @durationMs, @activityJson, @episodeJson,
+        @verificationStrength, @durationMs, @activityJson, @episodeJson,
         @contentSha256
       )
     `);
@@ -266,7 +270,7 @@ export class EvidenceIndex {
         origin_writer AS originWriter,
         origin_build AS originBuild,
         outcome_status AS outcomeStatus,
-        verifiability_tier AS verifiabilityTier,
+        verification_strength AS verificationStrength,
         duration_ms AS durationMs,
         activity_json AS activityJson,
         episode_json AS episodeJson,
@@ -284,7 +288,7 @@ export class EvidenceIndex {
       ...(row['originWriter'] === null ? {} : { originWriter: String(row['originWriter']) }),
       ...(row['originBuild'] === null ? {} : { originBuild: String(row['originBuild']) }),
       outcomeStatus: row['outcomeStatus'] as EpisodeV1['outcome']['status'],
-      verifiabilityTier: row['verifiabilityTier'] as EpisodeV1['outcome']['verifiabilityTier'],
+      verificationStrength: row['verificationStrength'] as EpisodeV1['outcome']['verificationStrength'],
       durationMs: Number(row['durationMs']),
       activity: row['activityJson'] === null
         ? null
@@ -307,10 +311,14 @@ export class EvidenceIndex {
   }
 }
 
-export function reindexEvidenceStore(options: ReindexEvidenceStoreOptions): ReindexReport {
-  const episodesDir = resolve(options.episodesDir);
-  const indexPath = resolve(options.indexPath);
-  const repair = options.repair ?? false;
+interface EvidenceScanResult {
+  indexed: IndexedEpisode[];
+  unreadable: UnreadableEvidence[];
+  report: ReindexReport;
+}
+
+function scanEvidenceStore(episodesDirInput: string, repair: boolean): EvidenceScanResult {
+  const episodesDir = resolve(episodesDirInput);
   const unreadable: UnreadableEvidence[] = [];
   const indexed = new Map<string, IndexedEpisode>();
   let scannedFiles = 0;
@@ -372,7 +380,7 @@ export function reindexEvidenceStore(options: ReindexEvidenceStoreOptions): Rein
         ...(parsed.originWriter ? { originWriter: parsed.originWriter } : {}),
         ...(parsed.originBuild ? { originBuild: parsed.originBuild } : {}),
         outcomeStatus: parsed.episode.outcome.status,
-        verifiabilityTier: parsed.episode.outcome.verifiabilityTier,
+        verificationStrength: parsed.episode.outcome.verificationStrength,
         durationMs: parsed.episode.cost.durationMs,
         activity: parsed.episode.activity ?? null,
         episode: parsed.episode,
@@ -383,24 +391,39 @@ export function reindexEvidenceStore(options: ReindexEvidenceStoreOptions): Rein
     }
   }
 
+  return {
+    indexed: [...indexed.values()].sort((a, b) => a.episodeId.localeCompare(b.episodeId)),
+    unreadable,
+    report: {
+      scannedFiles,
+      indexedEpisodes: indexed.size,
+      unreadableFiles: unreadable.length,
+      unreadable: unreadable.map((row) => ({ path: row.sourcePath, reason: row.reason })),
+      nullToleratedFiles,
+      nullFieldsRemoved,
+      misnamedEpisodes,
+      renamedFiles,
+      legacyUnstampedFiles,
+    },
+  };
+}
+
+/**
+ * Read-only store inspection for doctor/status surfaces. It deliberately
+ * shares the reindex scanner while neither opening SQLite nor repairing files.
+ */
+export function inspectEvidenceStore(options: InspectEvidenceStoreOptions): ReindexReport {
+  return scanEvidenceStore(options.episodesDir, false).report;
+}
+
+export function reindexEvidenceStore(options: ReindexEvidenceStoreOptions): ReindexReport {
+  const scan = scanEvidenceStore(options.episodesDir, options.repair ?? false);
+  const indexPath = resolve(options.indexPath);
   const index = new EvidenceIndex({ dbPath: indexPath });
   try {
-    index.replace(
-      [...indexed.values()].sort((a, b) => a.episodeId.localeCompare(b.episodeId)),
-      unreadable,
-    );
+    index.replace(scan.indexed, scan.unreadable);
   } finally {
     index.close();
   }
-  return {
-    scannedFiles,
-    indexedEpisodes: indexed.size,
-    unreadableFiles: unreadable.length,
-    unreadable: unreadable.map((row) => ({ path: row.sourcePath, reason: row.reason })),
-    nullToleratedFiles,
-    nullFieldsRemoved,
-    misnamedEpisodes,
-    renamedFiles,
-    legacyUnstampedFiles,
-  };
+  return scan.report;
 }
