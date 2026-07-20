@@ -125,6 +125,20 @@ try {
   const payload = parseJsonOrExit(run.stdout, 'npm exec');
   assertVersionPayload(payload, 'npm exec');
 
+  runOrExit('npm', ['exec', '--', 'jinn', '--help'], 'packed jinn --help');
+  const doctor = spawnSync('npm', ['exec', '--', 'jinn', 'doctor', '--json'], {
+    cwd: smokeDir,
+    encoding: 'utf8',
+    env: smokeEnv,
+    timeout: 60_000,
+  });
+  if (doctor.error || doctor.status === 50) {
+    console.error('smoke-test-pack: packed jinn doctor crashed');
+    console.error(doctor.error ?? doctor.stderr ?? doctor.stdout);
+    process.exit(doctor.status ?? 1);
+  }
+  parseJsonOrExit(doctor.stdout, 'packed jinn doctor');
+
   runOrExit(process.execPath, [nodePtyFix, '--verify'], 'node-pty verification');
 
   // jinn-layer bin (#1356): usage must print from the packed tarball's bin.

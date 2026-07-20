@@ -50,7 +50,11 @@ class ContractRunner:
             return 0, json.dumps({
                 "status": "ok",
                 "mode": "inspect",
-                "report": {"indexedEpisodes": 3, "unreadableFiles": 0},
+                "report": {
+                    "indexedEpisodes": 3,
+                    "unreadableFiles": 0,
+                    "unreadable": [],
+                },
             }), ""
         return self.code, self.output, self.err
 
@@ -371,7 +375,16 @@ def test_evidence_store_check_reports_readable_and_unreadable_counts():
         output=json.dumps({
             "status": "degraded",
             "mode": "inspect",
-            "report": {"indexedEpisodes": 2, "unreadableFiles": 4},
+            "report": {
+                "indexedEpisodes": 2,
+                "unreadableFiles": 4,
+                "unreadable": [
+                    {"path": "/episodes/broken.json", "reason": "Unexpected token"},
+                    {"path": "/episodes/schema.json", "reason": "invalid schema"},
+                    {"path": "/episodes/link.json", "reason": "must be a regular file, not a symlink"},
+                    {"path": "/episodes/dupe.json", "reason": "duplicate episodeId: same"},
+                ],
+            },
         }),
     )
     broken = doctor._check_evidence_store(runner)
@@ -379,8 +392,35 @@ def test_evidence_store_check_reports_readable_and_unreadable_counts():
         "name": "evidence-readable",
         "ok": False,
         "detail": "2 readable episode(s); 4 unreadable",
-        "remedy": "jinn-layer reindex --repair --json",
+        "remedy": (
+            "replace unsafe symlink/non-regular sources; resolve duplicate episode IDs; "
+            "fix or remove malformed/schema-invalid sources, then run: jinn-layer reindex --json"
+        ),
     }
+
+
+def test_evidence_store_check_gives_permission_specific_remediation():
+    runner = ContractRunner(
+        code=1,
+        output=json.dumps({
+            "status": "degraded",
+            "mode": "inspect",
+            "report": {
+                "indexedEpisodes": 0,
+                "unreadableFiles": 1,
+                "unreadable": [{
+                    "path": "/episodes/private.json",
+                    "reason": "EACCES: permission denied",
+                }],
+            },
+        }),
+    )
+
+    check = doctor._check_evidence_store(runner)
+
+    assert check["remedy"] == (
+        "restore owner read access, then run: jinn-layer reindex --json"
+    )
 
 
 def test_evidence_store_check_surfaces_an_unreadable_reply():
@@ -390,6 +430,40 @@ def test_evidence_store_check_surfaces_an_unreadable_reply():
     assert check["ok"] is False
     assert check["detail"] == "evidence readability reply unreadable"
     assert check["remedy"] == "jinn-agent plugins update jinn"
+
+
+def test_evidence_store_check_rejects_a_non_inspect_or_inconsistent_envelope():
+    replies = [
+        {
+            "status": "ok",
+            "mode": "reindex",
+            "report": {
+                "indexedEpisodes": 3,
+                "unreadableFiles": 0,
+                "unreadable": [],
+            },
+        },
+        {
+            "status": "ok",
+            "mode": "inspect",
+            "report": {
+                "indexedEpisodes": 2,
+                "unreadableFiles": 1,
+                "unreadable": [],
+            },
+        },
+    ]
+
+    for reply in replies:
+        check = doctor._check_evidence_store(
+            ContractRunner(code=0, output=json.dumps(reply))
+        )
+        assert check == {
+            "name": "evidence-readable",
+            "ok": False,
+            "detail": "evidence readability reply unreadable",
+            "remedy": "jinn-agent plugins update jinn",
+        }
 
 
 # ── Task 6: run_checks aggregator + full/fast split ──────────────────────────

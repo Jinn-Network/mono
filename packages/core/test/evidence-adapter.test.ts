@@ -314,6 +314,20 @@ describe('EvidenceAdapter — AC2 legacy read', () => {
 });
 
 describe('EvidenceAdapter — AC2 byte-exact round-trip', () => {
+  it('keeps the canonical write available when index refresh fails', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-index-failure-'));
+    const onStoreChanged = vi.fn(() => {
+      throw new Error('index unavailable');
+    });
+    const adapter = createEvidenceAdapter({ capturesDir, onStoreChanged });
+
+    const result = await adapter.put(makeSampleEpisode({ episodeId: 'index-failure' }));
+
+    expect(result.status).toBe('ok');
+    expect(onStoreChanged).toHaveBeenCalledOnce();
+    expect(existsSync(join(capturesDir, 'index-failure.episode.json'))).toBe(true);
+  });
+
   it('keeps current writes strict when an optional field is literal null', async () => {
     const capturesDir = mkdtempSync(join(tmpdir(), 'ev-strict-write-'));
     const adapter = createEvidenceAdapter({ capturesDir });

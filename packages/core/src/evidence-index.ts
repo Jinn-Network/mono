@@ -1,14 +1,22 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
-  chmodSync,
+  closeSync,
+  constants,
   existsSync,
+  fchmodSync,
+  fstatSync,
+  fsyncSync,
+  linkSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   renameSync,
   rmSync,
+  unlinkSync,
   writeFileSync,
+  type Stats,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
@@ -44,6 +52,11 @@ export interface UnreadableEvidence {
   reason: string;
 }
 
+export type ReindexMutation =
+  | { kind: 'normalized-json'; sourcePath: string; nullFieldsRemoved: number }
+  | { kind: 'rescued-misnamed-episode'; sourcePath: string; targetPath: string }
+  | { kind: 'rescue-target-published'; sourcePath: string; targetPath: string };
+
 export interface ReindexReport {
   scannedFiles: number;
   indexedEpisodes: number;
@@ -54,6 +67,11 @@ export interface ReindexReport {
   misnamedEpisodes: number;
   renamedFiles: number;
   legacyUnstampedFiles: number;
+  mutations: ReindexMutation[];
+  /** False for inspection and for a failed derived-index publication. */
+  indexUpdated: boolean;
+  /** Present only when source scanning/repair completed but publication failed. */
+  indexError?: string;
 }
 
 export interface ReindexEvidenceStoreOptions {
@@ -84,8 +102,34 @@ interface ParsedEvidence {
   originBuild?: string;
 }
 
-const RETENTION = { policy: 'local-private' as const, maxEpisodes: 200 };
+interface FileIdentity {
+  dev: number;
+  ino: number;
+  uid: number;
+  nlink: number;
+}
 
+interface EvidenceCandidate {
+  sourcePath: string;
+  parsed: ParsedEvidence;
+  identity: FileIdentity;
+  contentSha256: string;
+}
+
+const RETENTION = { policy: 'local-private' as const, maxEpisodes: 200 };
+const EVIDENCE_INDEX_APPLICATION_ID = 0x4a494e4e;
+const EVIDENCE_INDEX_SCHEMA_VERSION = '1';
+
+class EvidenceMutationCommittedError extends Error {
+  constructor(
+    message: string,
+    readonly mutation: ReindexMutation,
+    readonly cause: unknown,
+  ) {
+    super(message);
+    this.name = 'EvidenceMutationCommittedError';
+  }
+}
 function asObject(value: unknown): MutableJson | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as MutableJson
@@ -156,67 +200,386 @@ function parseFile(raw: unknown, canonicalName: boolean): ParsedEvidence {
   };
 }
 
-function repairJson(path: string, value: unknown): void {
-  const tmp = join(dirname(path), `.${randomUUID()}.repair.tmp`);
-  try {
-    writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
-    if (process.platform !== 'win32') chmodSync(tmp, 0o600);
-    renameSync(tmp, path);
-    if (process.platform !== 'win32') chmodSync(path, 0o600);
-  } finally {
-    rmSync(tmp, { force: true });
-  }
-}
-
 function readableReason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function nodeErrorCode(error: unknown): string | undefined {
+  return error && typeof error === 'object' && 'code' in error
+    ? String((error as { code?: unknown }).code)
+    : undefined;
+}
+
+function identityFrom(stat: Stats): FileIdentity {
+  return {
+    dev: stat.dev,
+    ino: stat.ino,
+    uid: stat.uid,
+    nlink: stat.nlink,
+  };
+}
+
+function sameIdentity(left: FileIdentity, right: FileIdentity): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function assertSafeOwner(stat: Stats, path: string, label: string): void {
+  const uid = process.platform === 'win32' ? undefined : process.getuid?.();
+  if (uid !== undefined && stat.uid !== uid) {
+    throw new Error(`${label} must be owned by uid ${uid}: ${path}`);
+  }
+}
+
+function assertRegularStat(stat: Stats, path: string, label: string): void {
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new Error(`${label} must be a regular file, not a symlink or other file type: ${path}`);
+  }
+  if (stat.nlink !== 1) {
+    throw new Error(`${label} must not be hardlinked: ${path}`);
+  }
+  assertSafeOwner(stat, path, label);
+}
+
+function inspectRegularPath(path: string, label: string): FileIdentity | undefined {
+  try {
+    const stat = lstatSync(path);
+    assertRegularStat(stat, path, label);
+    return identityFrom(stat);
+  } catch (error) {
+    if (nodeErrorCode(error) === 'ENOENT') return undefined;
+    throw error;
+  }
+}
+
+function openVerifiedRegular(
+  path: string,
+  label: string,
+  expected?: FileIdentity,
+): { fd: number; identity: FileIdentity } {
+  const before = inspectRegularPath(path, label);
+  if (!before) throw new Error(`${label} disappeared before it could be opened: ${path}`);
+  if (expected && !sameIdentity(before, expected)) {
+    throw new Error(`${label} changed while it was being processed: ${path}`);
+  }
+
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  const fd = openSync(path, constants.O_RDONLY | noFollow);
+  try {
+    const opened = fstatSync(fd);
+    assertRegularStat(opened, path, label);
+    const identity = identityFrom(opened);
+    if (!sameIdentity(identity, before) || (expected && !sameIdentity(identity, expected))) {
+      throw new Error(`${label} changed while it was being opened: ${path}`);
+    }
+    return { fd, identity };
+  } catch (error) {
+    closeSync(fd);
+    throw error;
+  }
+}
+
+function secureRegularPath(path: string, label: string, expected?: FileIdentity): FileIdentity {
+  const opened = openVerifiedRegular(path, label, expected);
+  try {
+    if (process.platform !== 'win32') fchmodSync(opened.fd, 0o600);
+    return opened.identity;
+  } finally {
+    closeSync(opened.fd);
+  }
+}
+
+function validateDirectory(path: string, label: string, secure: boolean): void {
+  const stat = lstatSync(path);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    throw new Error(`${label} must be a regular directory, not a symlink: ${path}`);
+  }
+  assertSafeOwner(stat, path, label);
+  if (!secure || process.platform === 'win32') return;
+
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  const directoryOnly = constants.O_DIRECTORY ?? 0;
+  const fd = openSync(path, constants.O_RDONLY | noFollow | directoryOnly);
+  try {
+    const opened = fstatSync(fd);
+    if (!opened.isDirectory() || opened.isSymbolicLink()) {
+      throw new Error(`${label} changed while it was being opened: ${path}`);
+    }
+    assertSafeOwner(opened, path, label);
+    fchmodSync(fd, 0o700);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function fsyncDirectory(path: string): void {
+  if (process.platform === 'win32') return;
+  const fd = openSync(path, constants.O_RDONLY | (constants.O_DIRECTORY ?? 0));
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function readVerifiedJson(path: string): { raw: unknown; identity: FileIdentity } {
+  const opened = openVerifiedRegular(path, 'evidence source');
+  try {
+    return {
+      raw: JSON.parse(readFileSync(opened.fd, 'utf8')) as unknown,
+      identity: opened.identity,
+    };
+  } finally {
+    closeSync(opened.fd);
+  }
+}
+
+function repairJson(
+  path: string,
+  value: unknown,
+  expected: FileIdentity,
+  mutation: ReindexMutation,
+): FileIdentity {
+  const directory = dirname(path);
+  const tmp = join(directory, `.${randomUUID()}.repair.tmp`);
+  let fd: number | undefined;
+  let replacementIdentity: FileIdentity | undefined;
+  try {
+    fd = openSync(
+      tmp,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
+      0o600,
+    );
+    writeFileSync(fd, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    if (process.platform !== 'win32') fchmodSync(fd, 0o600);
+    fsyncSync(fd);
+    replacementIdentity = identityFrom(fstatSync(fd));
+    closeSync(fd);
+    fd = undefined;
+
+    const verified = openVerifiedRegular(path, 'evidence source', expected);
+    closeSync(verified.fd);
+    renameSync(tmp, path);
+    try {
+      fsyncDirectory(directory);
+    } catch (error) {
+      throw new EvidenceMutationCommittedError(
+        `evidence JSON was repaired but directory sync failed: ${path}: ${readableReason(error)}`,
+        mutation,
+        error,
+      );
+    }
+    return replacementIdentity;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+    rmSync(tmp, { force: true });
+  }
+}
+
+function publishNoClobber(
+  sourcePath: string,
+  targetPath: string,
+  expected: FileIdentity,
+  mutation: ReindexMutation,
+): FileIdentity {
+  const secured = secureRegularPath(sourcePath, 'evidence source', expected);
+  try {
+    linkSync(sourcePath, targetPath);
+  } catch (error) {
+    if (nodeErrorCode(error) === 'EEXIST') {
+      throw new Error(`cannot rescue misnamed episode: target already exists: ${targetPath}`);
+    }
+    throw error;
+  }
+
+  const sourceAfterLink = lstatSync(sourcePath);
+  const targetAfterLink = lstatSync(targetPath);
+  if (
+    !sourceAfterLink.isFile()
+    || sourceAfterLink.isSymbolicLink()
+    || !targetAfterLink.isFile()
+    || targetAfterLink.isSymbolicLink()
+    || !sameIdentity(identityFrom(sourceAfterLink), secured)
+    || !sameIdentity(identityFrom(targetAfterLink), secured)
+  ) {
+    throw new EvidenceMutationCommittedError(
+      `rescue target was published but source identity changed before unlink: ${sourcePath}`,
+      { kind: 'rescue-target-published', sourcePath, targetPath },
+      undefined,
+    );
+  }
+  assertSafeOwner(sourceAfterLink, sourcePath, 'evidence source');
+  assertSafeOwner(targetAfterLink, targetPath, 'rescue target');
+
+  try {
+    unlinkSync(sourcePath);
+  } catch (error) {
+    throw new EvidenceMutationCommittedError(
+      `rescue target was published but source could not be removed: ${sourcePath}: ${readableReason(error)}`,
+      { kind: 'rescue-target-published', sourcePath, targetPath },
+      error,
+    );
+  }
+  try {
+    fsyncDirectory(dirname(sourcePath));
+  } catch (error) {
+    throw new EvidenceMutationCommittedError(
+      `misnamed evidence was rescued but directory sync failed: ${targetPath}: ${readableReason(error)}`,
+      mutation,
+      error,
+    );
+  }
+  return secured;
+}
+
+interface PreparedIndexDestination {
+  created: boolean;
+  identity: FileIdentity;
+}
+
+function prepareIndexDestination(dbPath: string, secureParent: boolean): PreparedIndexDestination {
+  const parent = dirname(dbPath);
+  let createdParent = false;
+  try {
+    validateDirectory(parent, 'evidence index parent', secureParent);
+  } catch (error) {
+    if (nodeErrorCode(error) !== 'ENOENT') throw error;
+    mkdirSync(parent, { recursive: true, mode: 0o700 });
+    createdParent = true;
+    validateDirectory(parent, 'evidence index parent', true);
+  }
+  if (createdParent) fsyncDirectory(dirname(parent));
+
+  const existing = inspectRegularPath(dbPath, 'evidence index destination');
+  const wal = inspectRegularPath(`${dbPath}-wal`, 'evidence index sidecar');
+  const shm = inspectRegularPath(`${dbPath}-shm`, 'evidence index sidecar');
+  if (!existing && (wal || shm)) {
+    throw new Error(`refusing orphaned evidence index sidecars without a database: ${dbPath}`);
+  }
+  if (existing) return { created: false, identity: existing };
+
+  const fd = openSync(
+    dbPath,
+    constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
+    0o600,
+  );
+  try {
+    if (process.platform !== 'win32') fchmodSync(fd, 0o600);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  fsyncDirectory(parent);
+  const identity = inspectRegularPath(dbPath, 'evidence index destination');
+  if (!identity) throw new Error(`evidence index destination disappeared: ${dbPath}`);
+  return { created: true, identity };
+}
+
+function secureIndexFiles(dbPath: string, expectedMain?: FileIdentity): void {
+  for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+    if (inspectRegularPath(path, 'evidence index file')) {
+      secureRegularPath(
+        path,
+        'evidence index file',
+        path === dbPath ? expectedMain : undefined,
+      );
+    }
+  }
+}
+
 export interface EvidenceIndexOptions {
   dbPath: string;
+  /** Only the default dedicated state parent is safe to normalize to 0700. */
+  secureParent?: boolean;
 }
 
 export class EvidenceIndex {
   private readonly db: Database.Database;
+  private readonly dbPath: string;
+  private readonly dbIdentity: FileIdentity;
 
   constructor(options: EvidenceIndexOptions) {
     const dbPath = resolve(options.dbPath);
-    mkdirSync(dirname(dbPath), { recursive: true, mode: 0o700 });
-    this.db = new Database(dbPath);
-    this.db.pragma('journal_mode = WAL');
-    this.db.pragma('synchronous = FULL');
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS evidence_index_meta (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS episodes (
-        episode_id TEXT PRIMARY KEY,
-        session_id TEXT NOT NULL,
-        captured_at TEXT NOT NULL,
-        source_path TEXT NOT NULL,
-        source_kind TEXT NOT NULL,
-        origin_kind TEXT NOT NULL,
-        origin_writer TEXT,
-        origin_build TEXT,
-        outcome_status TEXT NOT NULL,
-        verification_strength TEXT NOT NULL,
-        duration_ms INTEGER NOT NULL,
-        activity_json TEXT,
-        episode_json TEXT NOT NULL,
-        content_sha256 TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS episodes_captured_at
-        ON episodes(captured_at DESC, episode_id ASC);
-      CREATE TABLE IF NOT EXISTS unreadable_records (
-        source_path TEXT PRIMARY KEY,
-        reason TEXT NOT NULL
-      );
-    `);
-    this.db.prepare(`
-      INSERT INTO evidence_index_meta(key, value) VALUES ('schema_version', '1')
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value
-    `).run();
+    this.dbPath = dbPath;
+    const prepared = prepareIndexDestination(dbPath, options.secureParent ?? false);
+    const db = new Database(dbPath);
+    this.db = db;
+    try {
+      const afterOpen = inspectRegularPath(dbPath, 'evidence index destination');
+      if (!afterOpen || !sameIdentity(afterOpen, prepared.identity)) {
+        throw new Error(`evidence index destination changed while opening: ${dbPath}`);
+      }
+      this.dbIdentity = afterOpen;
+
+      const applicationId = Number(db.pragma('application_id', { simple: true }));
+      if (prepared.created) {
+        if (applicationId !== 0) {
+          throw new Error(`new evidence index has an unexpected application id: ${applicationId}`);
+        }
+        db.pragma(`application_id = ${EVIDENCE_INDEX_APPLICATION_ID}`);
+        db.exec(`
+          CREATE TABLE evidence_index_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+          );
+          CREATE TABLE episodes (
+            episode_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            captured_at TEXT NOT NULL,
+            source_path TEXT NOT NULL,
+            source_kind TEXT NOT NULL,
+            origin_kind TEXT NOT NULL,
+            origin_writer TEXT,
+            origin_build TEXT,
+            outcome_status TEXT NOT NULL,
+            verification_strength TEXT NOT NULL,
+            duration_ms INTEGER NOT NULL,
+            activity_json TEXT,
+            episode_json TEXT NOT NULL,
+            content_sha256 TEXT NOT NULL
+          );
+          CREATE INDEX episodes_captured_at
+            ON episodes(captured_at DESC, episode_id ASC);
+          CREATE TABLE unreadable_records (
+            source_path TEXT PRIMARY KEY,
+            reason TEXT NOT NULL
+          );
+          INSERT INTO evidence_index_meta(key, value)
+          VALUES ('schema_version', '${EVIDENCE_INDEX_SCHEMA_VERSION}');
+        `);
+      } else {
+        if (applicationId !== EVIDENCE_INDEX_APPLICATION_ID) {
+          throw new Error(
+            `refusing database that is not a Jinn evidence index (application id missing): ${dbPath}`,
+          );
+        }
+        const tables = db.prepare(`
+          SELECT name FROM sqlite_master
+          WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+          ORDER BY name ASC
+        `).all() as Array<{ name: string }>;
+        const tableNames = tables.map((row) => row.name);
+        if (JSON.stringify(tableNames) !== JSON.stringify([
+          'episodes',
+          'evidence_index_meta',
+          'unreadable_records',
+        ].sort())) {
+          throw new Error(`refusing database with an unexpected Jinn evidence index schema: ${dbPath}`);
+        }
+        const version = db.prepare(
+          "SELECT value FROM evidence_index_meta WHERE key = 'schema_version'",
+        ).get() as { value?: unknown } | undefined;
+        if (version?.value !== EVIDENCE_INDEX_SCHEMA_VERSION) {
+          throw new Error(`unsupported Jinn evidence index schema version: ${String(version?.value)}`);
+        }
+      }
+
+      db.pragma('journal_mode = WAL');
+      db.pragma('synchronous = FULL');
+      secureIndexFiles(dbPath, this.dbIdentity);
+    } catch (error) {
+      db.close();
+      throw error;
+    }
   }
 
   journalMode(): string {
@@ -256,6 +619,7 @@ export class EvidenceIndex {
       }
       for (const row of unreadable) insertUnreadable.run(row);
     })();
+    secureIndexFiles(this.dbPath, this.dbIdentity);
   }
 
   listEpisodes(): IndexedEpisode[] {
@@ -307,7 +671,23 @@ export class EvidenceIndex {
   }
 
   close(): void {
-    this.db.close();
+    let failure: unknown;
+    try {
+      secureIndexFiles(this.dbPath, this.dbIdentity);
+    } catch (error) {
+      failure = error;
+    }
+    try {
+      this.db.close();
+    } catch (error) {
+      failure ??= error;
+    }
+    try {
+      secureIndexFiles(this.dbPath, this.dbIdentity);
+    } catch (error) {
+      failure ??= error;
+    }
+    if (failure !== undefined) throw failure;
   }
 }
 
@@ -320,7 +700,9 @@ interface EvidenceScanResult {
 function scanEvidenceStore(episodesDirInput: string, repair: boolean): EvidenceScanResult {
   const episodesDir = resolve(episodesDirInput);
   const unreadable: UnreadableEvidence[] = [];
-  const indexed = new Map<string, IndexedEpisode>();
+  const candidates = new Map<string, EvidenceCandidate[]>();
+  const indexed: IndexedEpisode[] = [];
+  const mutations: ReindexMutation[] = [];
   let scannedFiles = 0;
   let nullToleratedFiles = 0;
   let nullFieldsRemoved = 0;
@@ -328,48 +710,83 @@ function scanEvidenceStore(episodesDirInput: string, repair: boolean): EvidenceS
   let renamedFiles = 0;
   let legacyUnstampedFiles = 0;
 
-  const files = existsSync(episodesDir)
-    ? readdirSync(episodesDir).filter((name) => name.endsWith('.json')).sort()
-    : [];
+  let files: string[] = [];
+  if (existsSync(episodesDir)) {
+    validateDirectory(episodesDir, 'evidence store', repair);
+    files = readdirSync(episodesDir).filter((name) => name.endsWith('.json')).sort();
+  }
+
   for (const name of files) {
     scannedFiles += 1;
     const sourcePath = join(episodesDir, name);
     try {
-      const stat = lstatSync(sourcePath);
-      if (!stat.isFile() || stat.isSymbolicLink()) {
-        throw new Error('evidence source must be a regular file, not a symlink');
-      }
-      const raw = JSON.parse(readFileSync(sourcePath, 'utf8')) as unknown;
-      const canonicalName = name.endsWith('.episode.json');
-      const parsed = parseFile(raw, canonicalName);
+      const { raw, identity } = readVerifiedJson(sourcePath);
+      const parsed = parseFile(raw, name.endsWith('.episode.json'));
       if (parsed.nullCount > 0) nullToleratedFiles += 1;
       if (parsed.sourceKind === 'misnamed-episode') misnamedEpisodes += 1;
-      if (indexed.has(parsed.episode.episodeId)) {
-        throw new Error(`duplicate episodeId: ${parsed.episode.episodeId}`);
+      const episodeJson = JSON.stringify(parsed.episode);
+      const episodeCandidates = candidates.get(parsed.episode.episodeId) ?? [];
+      episodeCandidates.push({
+        sourcePath,
+        parsed,
+        identity,
+        contentSha256: createHash('sha256').update(episodeJson).digest('hex'),
+      });
+      candidates.set(parsed.episode.episodeId, episodeCandidates);
+    } catch (error) {
+      unreadable.push({ sourcePath, reason: readableReason(error) });
+    }
+  }
+
+  for (const [episodeId, episodeCandidates] of [...candidates.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))) {
+    if (episodeCandidates.length > 1) {
+      const conflicts = episodeCandidates
+        .map((candidate) => `${candidate.sourcePath} sha256=${candidate.contentSha256}`)
+        .join(', ');
+      for (const candidate of episodeCandidates) {
+        unreadable.push({
+          sourcePath: candidate.sourcePath,
+          reason: `duplicate episodeId: ${episodeId}; conflicting sources: ${conflicts}`,
+        });
+      }
+      continue;
+    }
+
+    const candidate = episodeCandidates[0]!;
+    const { sourcePath, parsed } = candidate;
+    let identity = candidate.identity;
+    let finalPath = sourcePath;
+    try {
+      if (repair && parsed.nullCount > 0) {
+        const mutation: ReindexMutation = {
+          kind: 'normalized-json',
+          sourcePath,
+          nullFieldsRemoved: parsed.nullCount,
+        };
+        identity = repairJson(sourcePath, parsed.normalizedRaw, identity, mutation);
+        nullFieldsRemoved += parsed.nullCount;
+        mutations.push(mutation);
+      } else if (repair) {
+        identity = secureRegularPath(sourcePath, 'evidence source', identity);
       }
 
-      let finalPath = sourcePath;
-      const rescueTarget = parsed.sourceKind === 'misnamed-episode'
-        ? join(episodesDir, episodeFileName(parsed.episode.episodeId))
-        : sourcePath;
-      if (repair && rescueTarget !== sourcePath && existsSync(rescueTarget)) {
-        throw new Error(`cannot rescue misnamed episode: target already exists: ${rescueTarget}`);
-      }
-      if (repair && parsed.nullCount > 0) {
-        repairJson(sourcePath, parsed.normalizedRaw);
-        nullFieldsRemoved += parsed.nullCount;
-      }
-      if (repair && rescueTarget !== sourcePath) {
-        renameSync(sourcePath, rescueTarget);
-        if (process.platform !== 'win32') chmodSync(rescueTarget, 0o600);
-        finalPath = rescueTarget;
+      if (repair && parsed.sourceKind === 'misnamed-episode') {
+        const targetPath = join(episodesDir, episodeFileName(episodeId));
+        const mutation: ReindexMutation = {
+          kind: 'rescued-misnamed-episode',
+          sourcePath,
+          targetPath,
+        };
+        identity = publishNoClobber(sourcePath, targetPath, identity, mutation);
+        finalPath = targetPath;
         renamedFiles += 1;
+        mutations.push(mutation);
       }
 
       if (parsed.originKind === 'legacy-unstamped') legacyUnstampedFiles += 1;
-      const episodeJson = JSON.stringify(parsed.episode);
-      indexed.set(parsed.episode.episodeId, {
-        episodeId: parsed.episode.episodeId,
+      indexed.push({
+        episodeId,
         sessionId: parsed.episode.session.sessionId,
         capturedAt: parsed.episode.session.capturedAt,
         sourcePath: finalPath,
@@ -384,19 +801,30 @@ function scanEvidenceStore(episodesDirInput: string, repair: boolean): EvidenceS
         durationMs: parsed.episode.cost.durationMs,
         activity: parsed.episode.activity ?? null,
         episode: parsed.episode,
-        contentSha256: createHash('sha256').update(episodeJson).digest('hex'),
+        contentSha256: candidate.contentSha256,
       });
     } catch (error) {
+      if (error instanceof EvidenceMutationCommittedError) {
+        mutations.push(error.mutation);
+        if (error.mutation.kind === 'normalized-json') {
+          nullFieldsRemoved += error.mutation.nullFieldsRemoved;
+        } else if (error.mutation.kind === 'rescued-misnamed-episode') {
+          renamedFiles += 1;
+        }
+      }
       unreadable.push({ sourcePath, reason: readableReason(error) });
     }
   }
 
+  unreadable.sort((left, right) => left.sourcePath.localeCompare(right.sourcePath));
+  indexed.sort((left, right) => left.episodeId.localeCompare(right.episodeId));
+
   return {
-    indexed: [...indexed.values()].sort((a, b) => a.episodeId.localeCompare(b.episodeId)),
+    indexed,
     unreadable,
     report: {
       scannedFiles,
-      indexedEpisodes: indexed.size,
+      indexedEpisodes: indexed.length,
       unreadableFiles: unreadable.length,
       unreadable: unreadable.map((row) => ({ path: row.sourcePath, reason: row.reason })),
       nullToleratedFiles,
@@ -404,6 +832,8 @@ function scanEvidenceStore(episodesDirInput: string, repair: boolean): EvidenceS
       misnamedEpisodes,
       renamedFiles,
       legacyUnstampedFiles,
+      mutations,
+      indexUpdated: false,
     },
   };
 }
@@ -417,13 +847,40 @@ export function inspectEvidenceStore(options: InspectEvidenceStoreOptions): Rein
 }
 
 export function reindexEvidenceStore(options: ReindexEvidenceStoreOptions): ReindexReport {
-  const scan = scanEvidenceStore(options.episodesDir, options.repair ?? false);
+  const episodesDir = resolve(options.episodesDir);
   const indexPath = resolve(options.indexPath);
-  const index = new EvidenceIndex({ dbPath: indexPath });
+  const index = new EvidenceIndex({
+    dbPath: indexPath,
+    secureParent: indexPath === resolve(defaultEvidenceIndexPath(episodesDir)),
+  });
+
+  let scan: EvidenceScanResult;
+  try {
+    scan = scanEvidenceStore(episodesDir, options.repair ?? false);
+  } catch (error) {
+    try {
+      index.close();
+    } catch {
+      // Preserve the source-validation error; no source mutation occurred.
+    }
+    throw error;
+  }
+
   try {
     index.replace(scan.indexed, scan.unreadable);
-  } finally {
+    scan.report.indexUpdated = true;
+  } catch (error) {
+    scan.report.indexUpdated = false;
+    scan.report.indexError = readableReason(error);
+  }
+
+  try {
     index.close();
+  } catch (error) {
+    scan.report.indexUpdated = false;
+    scan.report.indexError = scan.report.indexError
+      ? `${scan.report.indexError}; close failed: ${readableReason(error)}`
+      : `close failed: ${readableReason(error)}`;
   }
   return scan.report;
 }

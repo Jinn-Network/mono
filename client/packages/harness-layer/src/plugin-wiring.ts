@@ -6,7 +6,12 @@ import {
   createLocalLearningAdapter,
   createSkillsAdapter,
 } from './adapters/index.js';
-import { ContributionStore, resolveContributionStateDir } from '@jinn-network/core';
+import {
+  ContributionStore,
+  defaultEvidenceIndexPath,
+  reindexEvidenceStore,
+  resolveContributionStateDir,
+} from '@jinn-network/core';
 import {
   DEFAULT_EPISODES_DIR,
   DEFAULT_SKILLS_INSTALL_DIR,
@@ -26,7 +31,26 @@ function skillsInstallDir(): string {
 /** Assemble the real port set used by versioned process hosts. */
 export function buildPluginDepsFromEnv(overrides: Partial<JinnPluginDeps> = {}): JinnPluginDeps {
   const corpus = overrides.corpus ?? createCorpusAdapter({ layer: buildDefaultLayer() });
-  const evidence = overrides.evidence ?? createEvidenceAdapter({ capturesDir: episodesDir() });
+  const evidenceDir = episodesDir();
+  const evidenceIndexPath = process.env['JINN_LAYER_EVIDENCE_INDEX_PATH']
+    ?? defaultEvidenceIndexPath(evidenceDir);
+  let refreshIndex = Promise.resolve();
+  const evidence = overrides.evidence ?? createEvidenceAdapter({
+    capturesDir: evidenceDir,
+    onStoreChanged: () => {
+      const refresh = () => {
+        const report = reindexEvidenceStore({
+          episodesDir: evidenceDir,
+          indexPath: evidenceIndexPath,
+        });
+        if (!report.indexUpdated) {
+          throw new Error(report.indexError ?? 'derived evidence index was not updated');
+        }
+      };
+      refreshIndex = refreshIndex.then(refresh, refresh);
+      return refreshIndex;
+    },
+  });
   const contribution = overrides.contribution ?? createContributionAdapter({
     statusStore: new ContributionStore({ stateDir: resolveContributionStateDir() }),
   });

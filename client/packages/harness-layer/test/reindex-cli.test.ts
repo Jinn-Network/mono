@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { EPISODE_SCHEMA_VERSION, type EpisodeV1 } from '@jinn-network/plugin';
 import { EvidenceIndex } from '@jinn-network/core';
+import Database from 'better-sqlite3';
 import { runJinnLayerCli } from '../src/cli.js';
 
 const tempDirs: string[] = [];
@@ -158,6 +159,53 @@ describe('jinn-layer reindex', () => {
       report: { scannedFiles: 1, indexedEpisodes: 1, unreadableFiles: 0 },
     });
     expect(existsSync(indexPath)).toBe(false);
+  });
+
+  it('returns a degraded JSON report when index publication fails after repair', async () => {
+    const { episodesDir, indexPath } = fixture();
+    const raw = structuredClone(episode('partial')) as unknown as {
+      outcome: { summary: null };
+    };
+    raw.outcome.summary = null;
+    writeFileSync(join(episodesDir, 'partial.json'), JSON.stringify(raw));
+    const initialized = new EvidenceIndex({ dbPath: indexPath });
+    initialized.close();
+    const sabotaged = new Database(indexPath);
+    sabotaged.exec(`
+      CREATE TRIGGER reject_episode_insert
+      BEFORE INSERT ON episodes
+      BEGIN
+        SELECT RAISE(ABORT, 'forced publication failure');
+      END;
+    `);
+    sabotaged.close();
+    let output = '';
+
+    const code = await runJinnLayerCli([
+      'reindex',
+      '--repair',
+      '--json',
+      '--episodes-dir',
+      episodesDir,
+      '--index-path',
+      indexPath,
+    ], { writer: { write: (value) => { output += value; return true; } } });
+
+    expect(code).toBe(1);
+    expect(JSON.parse(output)).toMatchObject({
+      status: 'degraded',
+      mode: 'reindex',
+      report: {
+        indexUpdated: false,
+        indexError: expect.stringMatching(/forced publication failure/i),
+        nullFieldsRemoved: 1,
+        renamedFiles: 1,
+        mutations: [
+          { kind: 'normalized-json', nullFieldsRemoved: 1 },
+          { kind: 'rescued-misnamed-episode' },
+        ],
+      },
+    });
   });
 
   it('rejects unknown flags without touching the store', async () => {

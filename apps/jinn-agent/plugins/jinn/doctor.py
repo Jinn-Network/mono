@@ -247,15 +247,32 @@ def _check_evidence_store(runner: Optional[jinn_layer.Runner] = None) -> dict:
         except (TypeError, json.JSONDecodeError):
             reply = None
         report = reply.get("report") if isinstance(reply, dict) else None
+        mode = reply.get("mode") if isinstance(reply, dict) else None
+        status = reply.get("status") if isinstance(reply, dict) else None
         readable = report.get("indexedEpisodes") if isinstance(report, dict) else None
         unreadable = report.get("unreadableFiles") if isinstance(report, dict) else None
+        rows = report.get("unreadable") if isinstance(report, dict) else None
         if not (
-            isinstance(readable, int)
+            mode == "inspect"
+            and status in {"ok", "degraded"}
+            and isinstance(readable, int)
             and not isinstance(readable, bool)
             and readable >= 0
             and isinstance(unreadable, int)
             and not isinstance(unreadable, bool)
             and unreadable >= 0
+            and isinstance(rows, list)
+            and len(rows) == unreadable
+            and all(
+                isinstance(row, dict)
+                and isinstance(row.get("path"), str)
+                and bool(row["path"])
+                and isinstance(row.get("reason"), str)
+                and bool(row["reason"])
+                for row in rows
+            )
+            and status == ("ok" if unreadable == 0 else "degraded")
+            and (code == 0) == (status == "ok")
         ):
             detail = (
                 _one_line(err or out)
@@ -270,11 +287,27 @@ def _check_evidence_store(runner: Optional[jinn_layer.Runner] = None) -> dict:
             }
         detail = f"{readable} readable episode(s); {unreadable} unreadable"
         if unreadable > 0 or code != 0:
+            reasons = [
+                str(row.get("reason", "")).lower()
+                for row in rows
+                if isinstance(row, dict)
+            ] if isinstance(rows, list) else []
+            actions: list[str] = []
+            if any("permission" in reason or "eacces" in reason for reason in reasons):
+                actions.append("restore owner read access")
+            if any("symlink" in reason or "regular file" in reason for reason in reasons):
+                actions.append("replace unsafe symlink/non-regular sources")
+            if any("duplicate episodeid" in reason for reason in reasons):
+                actions.append("resolve duplicate episode IDs")
+            classified = ("permission", "eacces", "symlink", "regular file", "duplicate episodeid")
+            if not reasons or any(not any(token in reason for token in classified) for reason in reasons):
+                actions.append("fix or remove malformed/schema-invalid sources")
+            remedy = "; ".join(actions)
             return {
                 "name": name,
                 "ok": False,
                 "detail": detail,
-                "remedy": f"{jinn_layer.binary()} reindex --repair --json",
+                "remedy": f"{remedy}, then run: {jinn_layer.binary()} reindex --json",
             }
         return {"name": name, "ok": True, "detail": detail}
     except Exception as exc:

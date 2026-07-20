@@ -58,6 +58,12 @@ export interface EvidenceAdapterDeps {
   capturesDir: string;
   /** Retention policy surfaced by `retention()` and used as the up-map default. */
   retention?: EvidenceRetentionPolicy;
+  /**
+   * Best-effort notification after a successful write and retention pass.
+   * Derived views may refresh here, but their failure never invalidates the
+   * canonical episode write.
+   */
+  onStoreChanged?: () => void | Promise<void>;
 }
 
 /**
@@ -245,7 +251,14 @@ export function createEvidenceAdapter(deps: EvidenceAdapterDeps): EvidencePort {
       try {
         const parsed = EpisodeV1WriteSchema.parse(episode);
         const result = await persistEpisode(parsed);
-        if (result.status === 'ok') await pruneOldEpisodes();
+        if (result.status === 'ok') {
+          await pruneOldEpisodes();
+          try {
+            await deps.onStoreChanged?.();
+          } catch (error) {
+            console.warn(`[evidence] derived index refresh failed: ${String(error)}`);
+          }
+        }
         return result;
       } catch (e) {
         return unavailable(`evidence store put failed: ${String(e)}`);

@@ -39,4 +39,14 @@ describe('packed client workflow coverage', () => {
     expect(smoke).toBeGreaterThan(-1);
     expect(publishCanary).toBeGreaterThan(smoke);
   });
+
+  it('keeps packed CLI help and doctor no-crash coverage alongside native reindex', () => {
+    const smoke = workflow('client/scripts/smoke-test-pack.mjs');
+
+    expect(smoke).toContain("'jinn', '--help'");
+    expect(smoke).toContain("'jinn', 'doctor', '--json'");
+    expect(smoke).toContain('doctor.status === 50');
+    expect(smoke).toContain("'jinn-layer',");
+    expect(smoke).toContain("'reindex',");
+  });
 });

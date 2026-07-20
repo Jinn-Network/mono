@@ -19,7 +19,7 @@ import {
   type KnowledgeHit,
 } from '@jinn-network/plugin';
 import { runJinnLayerCli } from '../src/cli.js';
-import { ContributionStore } from '@jinn-network/core';
+import { ContributionStore, EvidenceIndex, defaultEvidenceIndexPath } from '@jinn-network/core';
 import { buildSkillMarkdown } from '../src/skill-package.js';
 import {
   MineableTraceStore,
@@ -553,6 +553,12 @@ describe('jinn-layer process contract v1', () => {
       expect(persisted.episodeId).toBe('episode-host-1');
       expect(persisted.session).toEqual(episode().session);
       expect(persisted.trajectory).toEqual(episode().trajectory);
+      const evidenceIndex = new EvidenceIndex({
+        dbPath: defaultEvidenceIndexPath(episodes),
+      });
+      expect(evidenceIndex.listEpisodes().map((row) => row.episodeId))
+        .toEqual(['episode-host-1']);
+      evidenceIndex.close();
 
       expect(resolveMineableStateDir()).toBe(mineable);
       const daemonStore = new MineableTraceStore({ stateDir: resolveMineableStateDir() });

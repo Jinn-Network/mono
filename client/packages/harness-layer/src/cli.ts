@@ -1112,7 +1112,8 @@ export async function runJinnLayerCli(
           indexPath: configuredIndexPath,
           repair: parsed.values.repair,
         });
-      const status = report.unreadableFiles > 0 ? 'degraded' : 'ok';
+      const publicationFailed = !dryRun && !report.indexUpdated;
+      const status = report.unreadableFiles > 0 || publicationFailed ? 'degraded' : 'ok';
       if (parsed.values.json) {
         writer.write(`${JSON.stringify({
           status,
@@ -1125,7 +1126,11 @@ export async function runJinnLayerCli(
       } else {
         writer.write([
           `Evidence ${dryRun ? 'inspection' : 'reindex'} ${status}: ${report.indexedEpisodes}/${report.scannedFiles} files readable`,
-          `Index: ${indexPath ?? 'not rebuilt (--dry-run)'}`,
+          `Index: ${indexPath === null
+            ? 'not rebuilt (--dry-run)'
+            : report.indexUpdated
+              ? indexPath
+              : `not updated (${report.indexError ?? 'unknown publication failure'})`}`,
           `Repairs: ${report.nullFieldsRemoved} null fields removed; ${report.renamedFiles} files renamed`,
           `Legacy unstamped: ${report.legacyUnstampedFiles}`,
           `Unreadable: ${report.unreadableFiles}`,
@@ -1133,7 +1138,7 @@ export async function runJinnLayerCli(
           '',
         ].join('\n'));
       }
-      return report.unreadableFiles > 0 ? 1 : 0;
+      return report.unreadableFiles > 0 || publicationFailed ? 1 : 0;
     } catch (error) {
       writer.write(`error: evidence reindex failed: ${error instanceof Error ? error.message : String(error)}\n`);
       return 1;
