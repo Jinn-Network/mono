@@ -3,6 +3,7 @@ import {
   explainIssue,
   explainPullRequest,
   parseLifecycleCli,
+  renderLifecycleHuman,
   renderLifecycleJson,
   runLifecycleCycle,
   type LifecycleControllerDeps,
@@ -767,5 +768,78 @@ describe('lifecycle controller', () => {
     expect(report.events).not.toHaveLength(0);
     expect(report.events.every((event) => event.phase === 'human')).toBe(true);
     expect([...labels].sort()).toEqual(['engine:review', 'review:needs-human']);
+  });
+});
+
+describe('board-archive sweep wiring (jinn-mono#1883)', () => {
+  it('never invokes the sweep in observe mode', async () => {
+    const calls: string[] = [];
+    let invoked = 0;
+    const report = await runLifecycleCycle('observe', {
+      ...deps(implementation(), calls),
+      boardArchiveSweep: async () => {
+        invoked += 1;
+        return { status: 'archived', archived: 1, capped: false };
+      },
+    });
+
+    expect(invoked).toBe(0);
+    expect(report.status).toBe('ok');
+    if (report.status === 'ok') expect(report.boardArchive).toBeUndefined();
+    expect(renderLifecycleJson(report)).not.toContain('boardArchive');
+  });
+
+  it('invokes the sweep after reconciliation in recover mode and surfaces the result', async () => {
+    const calls: string[] = [];
+    let status: 'Todo' | 'In Progress' = 'Todo';
+    let draft = false;
+    const writer: ReconciliationWriter = {
+      ...throwingWriter(calls),
+      readIssueHead: async () => HEAD,
+      readProjectStatus: async () => status,
+      setProjectStatus: async (_issue, desired) => {
+        status = desired as typeof status;
+      },
+      readPullRequest: async () => ({ head: HEAD, draft, labels: [] }),
+      setPullRequestDraft: async (_pr, desired) => {
+        draft = desired;
+      },
+    };
+    let invokedWithSnapshotAndNow: readonly [unknown, Date] | undefined;
+
+    const report = await runLifecycleCycle('recover', {
+      ...deps(implementation(), calls, writer),
+      boardArchiveSweep: async (snapshotArg, now) => {
+        invokedWithSnapshotAndNow = [snapshotArg, now];
+        return { status: 'archived', archived: 3, capped: false };
+      },
+    });
+
+    expect(invokedWithSnapshotAndNow?.[1]).toEqual(NOW);
+    expect(report.status).toBe('ok');
+    if (report.status === 'ok') {
+      expect(report.boardArchive).toEqual({ status: 'archived', archived: 3, capped: false });
+    }
+    expect(renderLifecycleHuman(report)).toContain('Board archive sweep: archived 3.');
+  });
+
+  it('renders capped / throttled / failed sweep summaries', () => {
+    const base = {
+      status: 'ok' as const,
+      mode: 'recover' as const,
+      cycleId: 'cycle-1',
+      runnerId: 'runner-a',
+      capturedAt: NOW.toISOString(),
+      items: [],
+      orphanBranchClaims: [],
+      diagnostics: [],
+      events: [],
+    };
+    expect(renderLifecycleHuman({ ...base, boardArchive: { status: 'archived', archived: 50, capped: true } }))
+      .toContain('Board archive sweep: archived 50 (capped).');
+    expect(renderLifecycleHuman({ ...base, boardArchive: { status: 'skipped-throttled' } }))
+      .toContain('Board archive sweep: skipped (throttled).');
+    expect(renderLifecycleHuman({ ...base, boardArchive: { status: 'failed', reason: 'boom' } }))
+      .toContain('Board archive sweep: failed (boom).');
   });
 });

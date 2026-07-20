@@ -29,6 +29,7 @@ import {
   explainPullRequest,
   GhLifecycleReader,
   makeProductionActiveRuntime,
+  makeProductionBoardArchiveSweep,
   makeProductionReconciliationWriter,
   parseLifecycleCli,
   renderLifecycleHuman,
@@ -220,6 +221,18 @@ async function main(): Promise<void> {
     });
     return dominanceSnapshotCache;
   };
+  // jinn-mono#1883: board-archive sweep uses the same implementer credential
+  // as the reconciliation writer's maintenance calls (`maintenanceCredential`
+  // above) — only defined when the mode actually needs write credentials
+  // (`observe` never does), matching the sweep's own `recover`/`active`-only
+  // gate in `runLifecycleCycle`.
+  const boardArchiveSweep = maintenanceCredential === undefined
+    ? undefined
+    : makeProductionBoardArchiveSweep({
+        credential: maintenanceCredential,
+        runner,
+        environment: env,
+      });
   const worktreeBase = env.JINN_AUTOPILOT_WORKTREE_BASE ?? DEFAULT_WORKTREE_BASE;
   const cleanupEnabled = options.mode === 'active'
     && explicitEnvironmentFlag(
@@ -310,6 +323,7 @@ async function main(): Promise<void> {
       readSnapshot,
       ...(writer === undefined ? {} : { writer }),
       ...(active === undefined ? {} : { active }),
+      ...(boardArchiveSweep === undefined ? {} : { boardArchiveSweep }),
       now: () => new Date(),
       staleAfterMs: STALE_AFTER_MS,
       runnerId,
