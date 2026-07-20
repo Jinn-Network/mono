@@ -164,6 +164,7 @@ describe('bridgeAttempts manifest mode', () => {
             feeWei: 987_648n,
           },
           new Error('sqlite disk full'),
+          'batch-key',
         ),
       ),
     });
@@ -172,6 +173,7 @@ describe('bridgeAttempts manifest mode', () => {
 
     expect(result.bridged).toEqual([]);
     expect(result.manifestMemberRefs).toEqual(memberRefs);
+    expect(result.manifestBatchKey).toBe('batch-key');
     expect(result.manifestCid).toBe('bafy-manifest');
     expect(result.anchorTx).toBe(TX);
     expect(result.errors).toHaveLength(2);

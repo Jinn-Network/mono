@@ -184,6 +184,8 @@ export interface PublishedMemberEnvelope {
 }
 
 export interface ManifestBatchResult {
+  /** Durable recovery identity, present when a journal is active. */
+  batchKey?: string;
   manifestCid: string;
   anchorTx: `0x${string}`;
   memberRefs: string[];
@@ -253,6 +255,7 @@ export class ManifestBatchRecordingError extends Error {
   constructor(
     readonly result: ManifestBatchResult,
     readonly recordingError: unknown,
+    readonly batchKey: string | null,
   ) {
     const detail =
       recordingError instanceof Error ? recordingError.message : String(recordingError);
@@ -260,7 +263,10 @@ export class ManifestBatchRecordingError extends Error {
       `manifest ${result.manifestCid} anchored at ${result.anchorTx}, ` +
         `but local recording failed: ${detail}`,
     );
+    this.memberRefs = [...result.memberRefs];
   }
+
+  readonly memberRefs: string[];
 }
 
 /**
@@ -1067,6 +1073,9 @@ async function publishPreparedManifest(
     saveJournal();
   }
   const result: ManifestBatchResult = {
+    ...(args.journal?.batchKey
+      ? { batchKey: args.journal.batchKey }
+      : {}),
     manifestCid,
     anchorTx: anchor.txHash,
     memberRefs: published.map((member) => member.envelopeRef),
@@ -1194,7 +1203,18 @@ async function publishPreparedManifest(
       if (!alreadyRecorded) deps.ledger.append(ledgerEntry);
     }
   } catch (error) {
-    throw new ManifestBatchRecordingError(result, error);
+    if (
+      error instanceof ManifestBatchPreparationError ||
+      error instanceof ManifestBatchAnchorError ||
+      error instanceof ManifestBatchRecordingError
+    ) {
+      throw error;
+    }
+    throw new ManifestBatchRecordingError(
+      result,
+      error,
+      args.journal?.batchKey ?? null,
+    );
   }
 
   deps.log?.(
@@ -1241,12 +1261,17 @@ export async function publishManifestBatch(
     requestedNow,
     maxBodyBytes,
   );
+  const published = journal.state.published;
   const now = new Date(journal.state.nowIso);
   if (Number.isNaN(now.getTime())) {
-    throw new Error('manifest journal conflict: invalid frozen publication time');
+    throw new ManifestBatchPreparationError(
+      'partition',
+      published.map((member) => member.envelopeRef),
+      new Error('manifest journal conflict: invalid frozen publication time'),
+      journal.batchKey,
+    );
   }
   const createdAt = Math.floor(now.getTime() / 1000);
-  const published = journal.state.published;
   try {
     for (
       let index = published.length;
@@ -1259,6 +1284,13 @@ export async function publishManifestBatch(
       journal.save();
     }
   } catch (error) {
+    if (
+      error instanceof ManifestBatchPreparationError ||
+      error instanceof ManifestBatchAnchorError ||
+      error instanceof ManifestBatchRecordingError
+    ) {
+      throw error;
+    }
     throw new ManifestBatchPreparationError(
       'member-upload',
       published.map((member) => member.envelopeRef),
@@ -1267,6 +1299,7 @@ export async function publishManifestBatch(
     );
   }
   let partitions: PreparedManifestMember[][];
+  let frozenBodies: ManifestV0[];
   try {
     partitions = partitionManifestMembers(
       published,
@@ -1274,7 +1307,16 @@ export async function publishManifestBatch(
       createdAt,
       maxBodyBytes,
     );
+    frozenBodies = partitions.map((partition) =>
+      buildManifestBody(partition, opts.batchKind, createdAt));
   } catch (error) {
+    if (
+      error instanceof ManifestBatchPreparationError ||
+      error instanceof ManifestBatchAnchorError ||
+      error instanceof ManifestBatchRecordingError
+    ) {
+      throw error;
+    }
     throw new ManifestBatchPreparationError(
       'partition',
       published.map((member) => member.envelopeRef),
@@ -1282,8 +1324,6 @@ export async function publishManifestBatch(
       journal.batchKey,
     );
   }
-  const frozenBodies = partitions.map((partition) =>
-    buildManifestBody(partition, opts.batchKind, createdAt));
   if (journal.state.partitions === null) {
     journal.state.partitions = frozenBodies.map((body) => ({
       body,
@@ -1291,7 +1331,23 @@ export async function publishManifestBatch(
       transaction: null,
       anchorRecorded: false,
     }));
-    journal.save();
+    try {
+      journal.save();
+    } catch (error) {
+      if (
+        error instanceof ManifestBatchPreparationError ||
+        error instanceof ManifestBatchAnchorError ||
+        error instanceof ManifestBatchRecordingError
+      ) {
+        throw error;
+      }
+      throw new ManifestBatchPreparationError(
+        'partition',
+        published.map((member) => member.envelopeRef),
+        error,
+        journal.batchKey,
+      );
+    }
   } else if (
     journal.state.partitions.length !== frozenBodies.length ||
     journal.state.partitions.some(
