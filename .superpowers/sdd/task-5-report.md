@@ -2,9 +2,12 @@
 
 ## Status
 
-DONE
+DONE — independent review findings resolved
 
 Commit: recorded in the Task 5 handoff after commit creation.
+
+Independent review: `.superpowers/sdd/task-5-review.md` is included with this
+fix commit.
 
 ## Delivered scope
 
@@ -30,6 +33,25 @@ Commit: recorded in the Task 5 handoff after commit creation.
     rejection;
   - CODEOWNER/human-surface enforcement as a session authority rule;
   - Human dominance immediately before inverse mutations and ready.
+- Closed every Critical and Important finding from the independent review:
+  - canonical native review markers now bind the exact verdict-intent UUID and
+    selected reviewer login; snapshot and session recovery require exact
+    login, commit, state, intent, and marker;
+  - verdict and fix-publication boundaries freshly rederive the unique open
+    PR↔issue↔branch mapping and current-head CODEOWNER policy instead of
+    trusting the manifest;
+  - Human review records publish and win exact-parent authority before draft,
+    labels, comments, or Project projections; current-head Human records are
+    authoritative, repairable, and non-reapable;
+  - effective native requested-changes state is evaluated per reviewer without
+    substring exemptions, including unresolved older-head blockers, and is
+    reread after approval, immediately before terminal publication, and
+    immediately before ready;
+  - acquisition rereads Human after projection and performs a final exact
+    ref/head/Human/current-claim fence before spawn;
+  - production labels, Project status, draft, ready, Human comments, and
+    acquisition projections recover accepted-response errors only after exact
+    desired-state readback.
 - Added review-owned fix publication and re-review:
   - exact fixing/draft/no-Human authority and clean rooted changed-tree checks;
   - one append-only active record for the new head;
@@ -75,6 +97,38 @@ Commit: recorded in the Task 5 handoff after commit creation.
   - fixing recovery repairs labels and draft state;
   - a matching same-generation/attempt/reviewer active pair, exact remote PR
     head, and preserved local fix advance the manifest without republishing.
+- Independent-review Critical marker/login RED:
+  - 2 failures proved the native marker omitted the intent UUID/login and
+    snapshot terminal recovery could not validate the corrected exact marker.
+  - GREEN: codecs, snapshot, and session recovery require the exact intent UUID
+    and selected login; wrong-login marker copying does not complete intent.
+- Independent-review authority/Human/blocker/acquisition RED:
+  - 13 failures covered substring blocker exemption, effective-review
+    supersession, post-approval/pre-terminal/pre-ready blocker races,
+    Human-record ordering and lost-record races, closed/remapped/policy-drift
+    boundaries, current-head Human reclaim, and missing final acquisition
+    fences.
+  - 1 additional failure proved unresolved older-head native requested changes
+    could be ignored when no later decisive review superseded them.
+  - 1 additional failure proved acquisition returned early when the snapshot
+    already exposed a Human hold instead of repairing its projection.
+  - GREEN: 40 of 40 review-session and review-executor tests.
+- Independent-review production authority RED:
+  - 2 failures proved session boundaries trusted manifest issue/CODEOWNER
+    authority.
+  - GREEN: fresh unique open mapping and exact-head CODEOWNER policy readback.
+- Independent-review accepted-response RED:
+  - 7 failures proved successful-but-lost label, Project, draft, ready,
+    comment, and acquisition projection mutations propagated transport errors.
+  - 1 negative failure proved a copied Human marker in a different comment body
+    could satisfy readback.
+  - GREEN: 16 of 16 production review session/acquisition tests, including
+    exact-body comment readback.
+- Independent-review Human snapshot RED:
+  - 1 failure proved a current-head Human review record was not independently
+    authoritative before its projections existed.
+  - GREEN: lifecycle snapshots synthesize the durable Human hold directly from
+    the exact current review record.
 
 ## Files
 
@@ -91,9 +145,9 @@ Commit: recorded in the Task 5 handoff after commit creation.
 ## Verification
 
 - `yarn vitest run test/lifecycle test/dispatcher/coordinator-session.test.ts`
-  — 19 files, 230 tests passed.
+  — 19 files, 257 tests passed.
 - `yarn typecheck` — passed.
-- `yarn test` — 90 files, 956 tests passed.
+- `yarn test` — 90 files, 983 tests passed.
 - `git diff --check` — passed.
 
 ## Self-review
@@ -107,7 +161,10 @@ Commit: recorded in the Task 5 handoff after commit creation.
 - Native verdicts are not authoritative until exact selected login, head,
   state, and canonical marker readback matches current intent.
 - Native requested changes from stale or other authorities remain blockers;
-  stale approvals never authorize terminal state.
+  exact prior-round selected-reviewer requests may be superseded only by a new
+  exact-head approval in the same generation, while unresolved stale/other
+  requested changes remain blockers and stale approvals never authorize
+  terminal state.
 - Human/CODEOWNER state cannot be cleared or bypassed, and ready is always the
   last mutation.
 - Review fixes cannot publish dirty, unchanged, unrelated, one-sided, or
@@ -122,6 +179,9 @@ Commit: recorded in the Task 5 handoff after commit creation.
 - No live GitHub mutation/canary was run, as required by the task boundary.
   Production command construction is covered with injected runners and the
   atomic ref protocol is covered against local bare remotes.
+- Unique open PR mapping is rederived through the production GitHub CLI read
+  surface and CODEOWNER policy from the exact head object; no live GitHub
+  pagination/canary was exercised in this task.
 - Task 5 provides production review capabilities but deliberately does not
   connect them to the global `active` dispatcher. That activation belongs to a
   later task.

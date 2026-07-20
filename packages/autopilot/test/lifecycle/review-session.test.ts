@@ -108,6 +108,8 @@ function nativeBody(state: ReviewVerdictState, head: GitOid = HEAD): string {
   return formatAutomatedReviewMarker({
     generation: GENERATION,
     attempt: ATTEMPT,
+    intent: MARKER,
+    reviewer: 'review-bot',
     head,
     verdict: state,
   });
@@ -164,6 +166,7 @@ function harness(options: {
     readPullRequest: async () => ({
       number: 84,
       issueNumber: 42,
+      open: true,
       head: currentManifest.expectedHead as GitOid,
       headRefName: 'autopilot/42',
       baseRefName: 'next',
@@ -171,6 +174,7 @@ function harness(options: {
       author: 'implementation-bot',
       labels: [...labels],
       body: 'Closes #42\n\n<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
+      approvalPolicy: options.policy ?? 'approve-eligible',
     }),
     readNativeReviews: async () => native,
     hasHumanHold: async () => humanChecks.shift() ?? project === 'Human',
@@ -308,6 +312,26 @@ describe('review session protocol', () => {
     expect(h.events).toContain('claim:fixing');
   });
 
+  it('does not complete an exact intent from a copied marker with the wrong login', async () => {
+    const h = harness({
+      state: 'verdict-intent',
+      verdictState: 'REQUEST_CHANGES',
+    });
+    h.native.push({
+      reviewer: 'marker-copying-bot',
+      state: 'CHANGES_REQUESTED',
+      commitId: HEAD,
+      body: nativeBody('REQUEST_CHANGES'),
+      submittedAt: '2026-07-20T12:01:00.000Z',
+    });
+
+    await h.protocol.reviewVerdict(h.manifest, 'REQUEST_CHANGES', 'Retry body');
+
+    expect(h.events.filter((event) => event.startsWith('native:'))).toEqual([
+      `native:REQUEST_CHANGES:${HEAD}`,
+    ]);
+  });
+
   it('repairs labels and draft state after a crash that already reached fixing authority', async () => {
     const h = harness({
       state: 'fixing',
@@ -378,6 +402,112 @@ describe('review session protocol', () => {
     expect(h.draft).toBe(true);
   });
 
+  it('keeps an effective requested-changes review on an older head as a blocker', async () => {
+    const h = harness({ draft: true });
+    h.native.push({
+      reviewer: 'stale-head-reviewer',
+      state: 'CHANGES_REQUESTED',
+      commitId: FIX_ONE,
+      body: 'Still unresolved.',
+      submittedAt: '2026-07-20T12:00:30.000Z',
+    });
+
+    await expect(h.protocol.reviewVerdict(h.manifest, 'APPROVE', 'Clean.'))
+      .rejects.toThrow(/requested changes.*block/i);
+    expect(h.events).not.toContain(`native:APPROVE:${HEAD}`);
+  });
+
+  it('does not exempt a current requested-changes blocker by matching marker substrings', async () => {
+    const h = harness({ draft: true });
+    h.native.push({
+      reviewer: 'review-bot',
+      state: 'CHANGES_REQUESTED',
+      commitId: HEAD,
+      body: `generation=${GENERATION} attempt=${ATTEMPT}`,
+      submittedAt: '2026-07-20T12:00:30.000Z',
+    });
+
+    await expect(h.protocol.reviewVerdict(h.manifest, 'APPROVE', 'Clean.'))
+      .rejects.toThrow(/requested changes.*block/i);
+    expect(h.events).not.toContain(`native:APPROVE:${HEAD}`);
+  });
+
+  it('uses each reviewer login latest decisive current-head review as the effective blocker', async () => {
+    const h = harness({ draft: true });
+    h.native.push(
+      {
+        reviewer: 'human-reviewer',
+        state: 'CHANGES_REQUESTED',
+        commitId: HEAD,
+        body: 'Old blocker.',
+        submittedAt: '2026-07-20T12:00:10.000Z',
+      },
+      {
+        reviewer: 'human-reviewer',
+        state: 'APPROVED',
+        commitId: HEAD,
+        body: 'Resolved.',
+        submittedAt: '2026-07-20T12:00:20.000Z',
+      },
+    );
+
+    await expect(h.protocol.reviewVerdict(h.manifest, 'APPROVE', 'Clean.'))
+      .resolves.toMatchObject({ status: 'approved' });
+  });
+
+  it('rechecks native blockers after approval readback before terminal publication', async () => {
+    const h = harness({ draft: true });
+    const read = h.port.readNativeReviews;
+    let reads = 0;
+    h.port.readNativeReviews = async (...args) => {
+      reads += 1;
+      const reviews = [...await read(...args)];
+      if (reads >= 4) {
+        reviews.push({
+          reviewer: 'late-human-reviewer',
+          state: 'CHANGES_REQUESTED',
+          commitId: HEAD,
+          body: 'Arrived after approval.',
+          submittedAt: '2026-07-20T12:01:30.000Z',
+        });
+      }
+      return reviews;
+    };
+
+    await expect(h.protocol.reviewVerdict(h.manifest, 'APPROVE', 'Clean.'))
+      .rejects.toThrow(/requested changes.*block/i);
+    expect(h.events).not.toContain('claim:terminal-approved');
+  });
+
+  it('rechecks native blockers immediately before ready', async () => {
+    const h = harness({
+      state: 'terminal-approved',
+      verdictState: 'APPROVE',
+      nativeExists: true,
+      draft: true,
+    });
+    const read = h.port.readNativeReviews;
+    let reads = 0;
+    h.port.readNativeReviews = async (...args) => {
+      reads += 1;
+      const reviews = [...await read(...args)];
+      if (reads >= 4) {
+        reviews.push({
+          reviewer: 'late-human-reviewer',
+          state: 'CHANGES_REQUESTED',
+          commitId: HEAD,
+          body: 'Arrived before ready.',
+          submittedAt: '2026-07-20T12:02:00.000Z',
+        });
+      }
+      return reviews;
+    };
+
+    await expect(h.protocol.reviewVerdict(h.manifest, 'APPROVE', 'Clean.'))
+      .rejects.toThrow(/requested changes.*block/i);
+    expect(h.events).not.toContain('draft:false');
+  });
+
   it('stops when Human arrives immediately before an inverse mutation or ready', async () => {
     const beforeLabelRemoval = harness({
       draft: true,
@@ -426,6 +556,7 @@ describe('review session protocol', () => {
     h.port.readPullRequest = async (_pr, expectedHead) => ({
       number: 84,
       issueNumber: 42,
+      open: true,
       head: expectedHead,
       headRefName: 'autopilot/42',
       baseRefName: 'next',
@@ -433,6 +564,7 @@ describe('review session protocol', () => {
       author: 'implementation-bot',
       labels: ['engine:review', 'review:changes-requested'],
       body: 'Closes #42\n\n<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
+      approvalPolicy: 'approve-eligible',
     });
 
     await expect(h.protocol.reviewFixPublish(h.manifest)).resolves.toEqual({
@@ -497,8 +629,71 @@ describe('review session protocol', () => {
     const h = harness({ state: 'fixing', draft: true });
     await expect(h.protocol.human(h.manifest, 'Needs architectural judgment.'))
       .resolves.toMatchObject({ status: 'human', head: HEAD });
+    expect(h.events.slice(0, 2)).toEqual(['record:human', 'claim:human']);
     expect(h.events).toContain('human-comment');
     expect(h.events).toContain('project:Human');
     expect(h.events).not.toContain('draft:false');
+  });
+
+  it('does not project Human until the exact-parent Human review record wins', async () => {
+    const h = harness({ state: 'fixing', draft: false });
+    h.port.publishReviewClaim = async ({ recordOid, expectedRemoteRecordOid }) => ({
+      status: 'lost',
+      expected: expectedRemoteRecordOid,
+      published: recordOid,
+      observed: TERMINAL,
+    });
+
+    await expect(h.protocol.human(h.manifest, 'Needs judgment.'))
+      .rejects.toThrow(/Human.*record|authority/i);
+    expect(h.events).toEqual(['record:human']);
+  });
+
+  it.each([
+    {
+      name: 'closed PR',
+      mutate: (pullRequest: Awaited<ReturnType<ReviewSessionPort['readPullRequest']>>) => ({
+        ...pullRequest,
+        open: false,
+      }),
+    },
+    {
+      name: 'changed issue mapping',
+      mutate: (pullRequest: Awaited<ReturnType<ReviewSessionPort['readPullRequest']>>) => ({
+        ...pullRequest,
+        issueNumber: 43,
+        mappingProblem: 'PR now maps to issue #43.',
+      }),
+    },
+    {
+      name: 'changed CODEOWNER policy',
+      mutate: (pullRequest: Awaited<ReturnType<ReviewSessionPort['readPullRequest']>>) => ({
+        ...pullRequest,
+        approvalPolicy: 'human-codeowner' as const,
+      }),
+    },
+  ])('enters durable Human when verdict authority sees a $name', async ({ mutate }) => {
+    const h = harness({ draft: true });
+    const read = h.port.readPullRequest;
+    h.port.readPullRequest = async (...args) => mutate(await read(...args));
+
+    await expect(h.protocol.reviewVerdict(h.manifest, 'APPROVE', 'Clean.'))
+      .resolves.toMatchObject({ status: 'human' });
+    expect(h.authority.record.state).toBe('human');
+    expect(h.events).not.toContain(`native:APPROVE:${HEAD}`);
+  });
+
+  it('enters durable Human when fix publication sees changed mapping or policy', async () => {
+    const h = harness({ state: 'fixing', draft: true });
+    const read = h.port.readPullRequest;
+    h.port.readPullRequest = async (...args) => ({
+      ...await read(...args),
+      approvalPolicy: 'human-codeowner',
+    });
+
+    await expect(h.protocol.reviewFixPublish(h.manifest))
+      .resolves.toMatchObject({ status: 'human' });
+    expect(h.authority.record.state).toBe('human');
+    expect(h.events).not.toContain(`atomic:${HEAD}->${FIX_ONE}`);
   });
 });

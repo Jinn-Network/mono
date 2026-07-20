@@ -2,6 +2,7 @@ import type { AttemptManifest } from './attempt-workspace.js';
 import {
   formatAutomatedReviewMarker,
   formatHumanCommentMarker,
+  parseAutomatedReviewMarker,
 } from './codecs.js';
 import type { ReviewNativeReview } from './review-executor.js';
 import type {
@@ -9,6 +10,7 @@ import type {
   HumanReason,
   PublicationOutcome,
   ReviewClaimRecord,
+  ReviewVerdict,
   ReviewVerdictState,
 } from './types.js';
 
@@ -20,6 +22,7 @@ export interface ReviewSessionAuthority {
 export interface ReviewSessionPullRequest {
   readonly number: number;
   readonly issueNumber: number;
+  readonly open: boolean;
   readonly head: GitOid;
   readonly headRefName: string;
   readonly baseRefName: string;
@@ -27,6 +30,8 @@ export interface ReviewSessionPullRequest {
   readonly author: string;
   readonly labels: readonly string[];
   readonly body: string;
+  readonly approvalPolicy: 'approve-eligible' | 'human-codeowner';
+  readonly mappingProblem?: string;
 }
 
 export interface ReviewSessionPort {
@@ -129,6 +134,7 @@ export type ReviewFixPublishResult =
       readonly head: GitOid;
       readonly reviewRefOid: GitOid;
     }
+  | { readonly status: 'human'; readonly head: GitOid }
   | { readonly status: 'stale' | 'ambiguous'; readonly head: GitOid };
 
 export interface ReviewSessionProtocol {
@@ -188,23 +194,50 @@ function authorityMatchesManifest(
     && record.head === manifest.expectedHead;
 }
 
-async function requirePullRequest(
+function pullRequestAuthorityProblem(
+  manifest: AttemptManifest,
+  pullRequest: ReviewSessionPullRequest,
+): string | undefined {
+  const marker =
+    `<!-- jinn-autopilot:v2 issue=${manifest.issueNumber} branch=${manifest.branch} -->`;
+  if (!pullRequest.open) return 'The review pull request is no longer open.';
+  if (pullRequest.mappingProblem !== undefined) return pullRequest.mappingProblem;
+  if (
+    pullRequest.issueNumber !== manifest.issueNumber
+    || pullRequest.headRefName !== manifest.branch
+    || pullRequest.baseRefName !== manifest.targetBase
+    || !pullRequest.body.includes(marker)
+  ) {
+    return 'The unique PR, issue, branch, base, or lifecycle-marker mapping changed.';
+  }
+  if (pullRequest.approvalPolicy !== manifest.reviewApprovalPolicy) {
+    return 'The current-head CODEOWNER approval policy changed.';
+  }
+  return undefined;
+}
+
+async function readExactPullRequest(
   manifest: AttemptManifest,
   port: ReviewSessionPort,
 ): Promise<ReviewSessionPullRequest> {
   const head = manifest.expectedHead as GitOid;
   const pullRequest = await port.readPullRequest(manifest.prNumber!, head);
-  const marker =
-    `<!-- jinn-autopilot:v2 issue=${manifest.issueNumber} branch=${manifest.branch} -->`;
   if (
     pullRequest.number !== manifest.prNumber
-    || pullRequest.issueNumber !== manifest.issueNumber
     || pullRequest.head !== head
-    || pullRequest.headRefName !== manifest.branch
-    || pullRequest.baseRefName !== manifest.targetBase
     || pullRequest.author.toLowerCase() === manifest.selectedLogin.toLowerCase()
-    || !pullRequest.body.includes(marker)
   ) {
+    throw new Error('Review pull request authority changed or is invalid');
+  }
+  return pullRequest;
+}
+
+async function requirePullRequest(
+  manifest: AttemptManifest,
+  port: ReviewSessionPort,
+): Promise<ReviewSessionPullRequest> {
+  const pullRequest = await readExactPullRequest(manifest, port);
+  if (pullRequestAuthorityProblem(manifest, pullRequest) !== undefined) {
     throw new Error('Review pull request authority changed or is invalid');
   }
   return pullRequest;
@@ -277,29 +310,31 @@ function nativeState(state: ReviewVerdictState): ReviewNativeReview['state'] {
 
 function canonicalMarker(
   manifest: AttemptManifest,
-  state: ReviewVerdictState,
+  verdict: ReviewVerdict,
 ): string {
   return formatAutomatedReviewMarker({
     generation: manifest.reviewGeneration!,
     attempt: manifest.attemptId,
+    intent: verdict.marker,
+    reviewer: manifest.selectedLogin,
     head: manifest.expectedHead as GitOid,
-    verdict: state,
+    verdict: verdict.state,
   });
 }
 
 async function matchingNativeReview(
   manifest: AttemptManifest,
-  state: ReviewVerdictState,
+  verdict: ReviewVerdict,
   port: ReviewSessionPort,
 ): Promise<ReviewNativeReview | undefined> {
-  const marker = canonicalMarker(manifest, state);
+  const marker = canonicalMarker(manifest, verdict);
   return (await port.readNativeReviews(
     manifest.prNumber!,
     manifest.expectedHead as GitOid,
   )).find((review) => (
     review.reviewer.toLowerCase() === manifest.selectedLogin.toLowerCase()
     && review.commitId === manifest.expectedHead
-    && review.state === nativeState(state)
+    && review.state === nativeState(verdict.state)
     && review.body.includes(marker)
   ));
 }
@@ -319,6 +354,7 @@ async function enterHuman(
   supplied: AttemptManifest,
   detail: string,
   port: ReviewSessionPort,
+  observedPullRequest?: ReviewSessionPullRequest,
 ): Promise<{ readonly status: 'human'; readonly head: GitOid }> {
   let manifest = requireReviewManifest(supplied, port);
   let authority = await requireAuthority(manifest, port);
@@ -328,13 +364,22 @@ async function enterHuman(
     code: 'review-escalation',
     detail,
   };
+  if (authority.record.state !== 'human') {
+    const humanRecord = nextRecord(manifest, 'human', port.now());
+    const published = await publishRecord(manifest, authority, humanRecord, port);
+    if (published.status !== 'published') {
+      throw new Error('Human review record did not win exact-parent authority');
+    }
+    manifest = requireReviewManifest(manifest, port);
+    authority = await requireAuthority(manifest, port);
+  }
   const marker = formatHumanCommentMarker({
     issueNumber: manifest.issueNumber,
     prNumber: manifest.prNumber!,
     reason,
   });
-  const pullRequest = await requirePullRequest(manifest, port);
-  if (!pullRequest.draft) {
+  const pullRequest = observedPullRequest ?? await readExactPullRequest(manifest, port);
+  if (pullRequest.open && !pullRequest.draft) {
     await port.setPullRequestDraft(manifest.prNumber!, head, true);
   }
   if (!pullRequest.labels.includes('engine:review')) {
@@ -351,16 +396,68 @@ async function enterHuman(
       `${marker}\n\nAutopilot parked this review for Human judgment.\n\n${detail}`,
     );
   }
-  if (authority.record.state !== 'human') {
-    const humanRecord = nextRecord(manifest, 'human', port.now());
-    const published = await publishRecord(manifest, authority, humanRecord, port);
-    if (published.status === 'published') {
-      manifest = requireReviewManifest(manifest, port);
-      authority = await requireAuthority(manifest, port);
-    }
+  if (pullRequest.issueNumber === manifest.issueNumber) {
+    await port.setProjectStatus(manifest.issueNumber, head, 'Human');
   }
-  await port.setProjectStatus(manifest.issueNumber, head, 'Human');
   return { status: 'human', head };
+}
+
+function effectiveNativeReviews(
+  reviews: readonly ReviewNativeReview[],
+): readonly ReviewNativeReview[] {
+  const latest = new Map<string, ReviewNativeReview>();
+  for (const review of [...reviews].sort((left, right) =>
+    left.submittedAt.localeCompare(right.submittedAt))) {
+    if (
+      !['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(review.state)
+    ) {
+      continue;
+    }
+    latest.set(review.reviewer.toLowerCase(), review);
+  }
+  return [...latest.values()];
+}
+
+async function requireNoNativeChangeRequests(
+  manifest: AttemptManifest,
+  port: ReviewSessionPort,
+  allowOwnedPriorRequest = false,
+): Promise<void> {
+  const head = manifest.expectedHead as GitOid;
+  const blocking = effectiveNativeReviews(
+    await port.readNativeReviews(manifest.prNumber!, head),
+  ).find((review) => {
+    if (review.state !== 'CHANGES_REQUESTED') return false;
+    if (
+      allowOwnedPriorRequest
+      && review.commitId !== head
+      && review.reviewer.toLowerCase() === manifest.selectedLogin.toLowerCase()
+    ) {
+      const markerText = review.body.match(/<!-- jinn-autopilot-review:v2\b[^>]* -->/)?.[0];
+      if (markerText !== undefined) {
+        try {
+          const marker = parseAutomatedReviewMarker(markerText);
+          if (
+            marker.generation === manifest.reviewGeneration
+            && marker.attempt === manifest.attemptId
+            && marker.reviewer.toLowerCase() === manifest.selectedLogin.toLowerCase()
+            && marker.head === review.commitId
+            && marker.verdict === 'REQUEST_CHANGES'
+          ) {
+            return false;
+          }
+        } catch {
+          // A malformed or copied marker never exempts a native blocker.
+        }
+      }
+    }
+    return true;
+  });
+  if (blocking !== undefined) {
+    throw new Error(
+      `Native requested changes by ${blocking.reviewer} block automated approval`,
+    );
+  }
 }
 
 async function reconcileFixingProjection(
@@ -395,28 +492,18 @@ async function reviewVerdict(
 ): Promise<ReviewVerdictResult> {
   let manifest = requireReviewManifest(supplied, port);
   let authority = await requireAuthority(manifest, port);
-  let pullRequest = await requirePullRequest(manifest, port);
+  let pullRequest = await readExactPullRequest(manifest, port);
   const head = manifest.expectedHead as GitOid;
+  const authorityProblem = pullRequestAuthorityProblem(manifest, pullRequest);
+  if (authorityProblem !== undefined) {
+    return enterHuman(manifest, authorityProblem, port, pullRequest);
+  }
   if (await humanIsActive(manifest, port)) return { status: 'human', head };
   if (state === 'APPROVE' && manifest.reviewApprovalPolicy === 'human-codeowner') {
     return enterHuman(manifest, 'Human CODEOWNER approval is required.', port);
   }
   if (state === 'APPROVE') {
-    const reviews = await port.readNativeReviews(manifest.prNumber!, head);
-    const ownedGeneration =
-      `generation=${manifest.reviewGeneration} attempt=${manifest.attemptId}`;
-    const blocking = reviews.find((review) => (
-      review.state === 'CHANGES_REQUESTED'
-      && (
-        review.reviewer.toLowerCase() !== manifest.selectedLogin.toLowerCase()
-        || !review.body.includes(ownedGeneration)
-      )
-    ));
-    if (blocking !== undefined) {
-      throw new Error(
-        `Native requested changes by ${blocking.reviewer} block automated approval`,
-      );
-    }
+    await requireNoNativeChangeRequests(manifest, port, true);
   }
 
   let intent: Extract<ReviewClaimRecord, { readonly state: 'verdict-intent' }>;
@@ -453,9 +540,9 @@ async function reviewVerdict(
     throw new Error(`Review verdict is invalid from ${authority.record.state} authority`);
   }
 
-  let confirmed = await matchingNativeReview(manifest, state, port);
+  let confirmed = await matchingNativeReview(manifest, intent.verdict, port);
   if (confirmed === undefined) {
-    const marker = canonicalMarker(manifest, state);
+    const marker = canonicalMarker(manifest, intent.verdict);
     let submissionError: unknown;
     try {
       await port.submitNativeReview({
@@ -469,7 +556,7 @@ async function reviewVerdict(
     } catch (error) {
       submissionError = error;
     }
-    confirmed = await matchingNativeReview(manifest, state, port);
+    confirmed = await matchingNativeReview(manifest, intent.verdict, port);
     if (confirmed === undefined && submissionError !== undefined) {
       throw submissionError;
     }
@@ -490,7 +577,9 @@ async function reviewVerdict(
     return reconcileFixingProjection(manifest, pullRequest, port);
   }
 
+  await requireNoNativeChangeRequests(manifest, port);
   if (authority.record.state !== 'terminal-approved') {
+    await requireNoNativeChangeRequests(manifest, port);
     const terminal = nextRecord(
       manifest,
       'terminal-approved',
@@ -518,6 +607,7 @@ async function reviewVerdict(
   if (await humanIsActive(manifest, port)) return { status: 'human', head };
   await port.setProjectStatus(manifest.issueNumber, head, 'In Review');
   if (await humanIsActive(manifest, port)) return { status: 'human', head };
+  await requireNoNativeChangeRequests(manifest, port);
   pullRequest = await requirePullRequest(manifest, port);
   if (pullRequest.draft) {
     await port.setPullRequestDraft(manifest.prNumber!, head, false);
@@ -584,7 +674,11 @@ async function reviewFixPublish(
   if (authority.record.state !== 'fixing') {
     throw new Error('Review fix publication requires exact fixing authority');
   }
-  const pullRequest = await requirePullRequest(manifest, port);
+  const pullRequest = await readExactPullRequest(manifest, port);
+  const authorityProblem = pullRequestAuthorityProblem(manifest, pullRequest);
+  if (authorityProblem !== undefined) {
+    return enterHuman(manifest, authorityProblem, port, pullRequest);
+  }
   if (!pullRequest.draft) throw new Error('Review fixes require a draft PR');
   if (await humanIsActive(manifest, port)) {
     throw new Error('Review fix publication stopped because a Human hold is active');

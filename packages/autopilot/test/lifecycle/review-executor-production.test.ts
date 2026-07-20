@@ -82,6 +82,67 @@ function pool(): CredentialPool {
   }]);
 }
 
+function projectSnapshot(status: 'Todo' | 'In Review' | 'Human'): string {
+  return JSON.stringify({
+    data: {
+      rateLimit: {
+        remaining: 4999,
+        used: 1,
+        resetAt: '2026-07-20T13:00:00.000Z',
+      },
+      organization: {
+        projectV2: {
+          sprintField: null,
+          items: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [{
+              id: 'PVTI_issue_42',
+              content: {
+                __typename: 'Issue',
+                number: 42,
+                issueType: { name: 'feat' },
+                blockedBy: { nodes: [] },
+              },
+              status: { name: status },
+              priority: { name: 'P1' },
+              effort: { name: 'High' },
+              blockedOn: { name: 'Nothing' },
+              sprint: null,
+            }],
+          },
+        },
+      },
+    },
+  });
+}
+
+function projectFields(): string {
+  return JSON.stringify({
+    fields: [
+      {
+        id: 'status-field',
+        name: 'Status',
+        options: [
+          { id: 'todo', name: 'Todo' },
+          { id: 'in-progress', name: 'In Progress' },
+          { id: 'human', name: 'Human' },
+          { id: 'in-review', name: 'In Review' },
+          { id: 'done', name: 'Done' },
+        ],
+      },
+      {
+        id: 'blocked-field',
+        name: 'Blocked on',
+        options: [
+          { id: 'nothing', name: 'Nothing' },
+          { id: 'human-blocked', name: 'Human' },
+          { id: 'another-issue', name: 'Another issue' },
+        ],
+      },
+    ],
+  });
+}
+
 describe('production review acquisition port', () => {
   it('re-reads exact GitHub lifecycle evidence and derives CODEOWNER policy', async () => {
     const port = makeProductionReviewActionPort({
@@ -196,4 +257,61 @@ describe('production review acquisition port', () => {
       reviewApprovalPolicy: 'approve-eligible',
     })]);
   });
+
+  it.each(['label', 'Project'] as const)(
+    'accepts a lost acquisition %s response only after exact projection readback',
+    async (mutation) => {
+      let labels = mutation === 'label' ? [] : ['engine:review'];
+      let status: 'Todo' | 'In Review' | 'Human' =
+        mutation === 'Project' ? 'Todo' : 'In Review';
+      const port = makeProductionReviewActionPort({
+        repositoryPath: '/repo',
+        worktreeBase: '/worktrees',
+        runnerId: 'runner-a',
+        readSnapshot: async () => snapshot(),
+        changedFiles: async () => [],
+        codeownersText: () => '',
+        runner: async (cmd, args) => {
+          if (cmd === 'git' && args.includes('ls-remote')) {
+            return `${REVIEW}\trefs/jinn-autopilot/review-claims/v1/84\n`;
+          }
+          if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+            return JSON.stringify({
+              headRefOid: HEAD,
+              labels: labels.map((name) => ({ name })),
+              isDraft: false,
+            });
+          }
+          if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'edit') {
+            labels = [...labels, 'engine:review'];
+            throw new Error('accepted acquisition label response lost');
+          }
+          if (cmd === 'gh' && args[0] === 'api' && args[1] === 'graphql') {
+            return projectSnapshot(status);
+          }
+          if (cmd === 'gh' && args[0] === 'project' && args[1] === 'field-list') {
+            return projectFields();
+          }
+          if (cmd === 'gh' && args[0] === 'project' && args[1] === 'item-edit') {
+            status = 'In Review';
+            throw new Error('accepted acquisition Project response lost');
+          }
+          throw new Error(`unexpected ${cmd} ${args.join(' ')}`);
+        },
+      });
+      const selection = pool().select({
+        phase: 'review',
+        prAuthor: 'implementation-bot',
+      });
+      if (selection.status !== 'selected') throw new Error('fixture selection failed');
+      const candidate = await port.readCandidate(84);
+      if (candidate === null) throw new Error('fixture candidate missing');
+
+      await expect(port.repairProjection({
+        candidate,
+        expectedReviewRefOid: REVIEW,
+        credential: selection.credential,
+      })).resolves.toBeUndefined();
+    },
+  );
 });

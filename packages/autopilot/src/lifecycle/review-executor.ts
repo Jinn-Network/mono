@@ -61,6 +61,11 @@ export interface ReviewAttemptBinding {
 
 export interface ReviewExecutorDeps {
   readCandidate(prNumber: number): Promise<ReviewActionCandidate | null>;
+  confirmAcquisition(input: {
+    readonly prNumber: number;
+    readonly expectedHead: GitOid;
+    readonly expectedReviewRefOid: GitOid;
+  }): Promise<ReviewActionCandidate | null>;
   readonly credentials: CredentialPool;
   createReviewRecord(input: {
     readonly record: ReviewClaimRecord;
@@ -175,10 +180,16 @@ export async function executeReviewAction(
     };
   }
   if (candidate.humanHold) {
+    const reason: HumanReason = {
+      phase: 'reviewing',
+      code: 'review-escalation',
+      detail: 'Human authority is active; repair its durable projection before stopping.',
+    };
+    await deps.escalateHuman({ candidate, reason });
     return {
-      status: 'ineligible',
+      status: 'human',
       prNumber: candidate.number,
-      detail: 'A Human hold is active.',
+      code: 'review-escalation',
     };
   }
   const current = candidate.reviewRef;
@@ -197,6 +208,19 @@ export async function executeReviewAction(
   const currentHeadClaim = current?.record.head === candidate.head
     ? current.record
     : undefined;
+  if (currentHeadClaim?.state === 'human') {
+    const reason: HumanReason = {
+      phase: 'reviewing',
+      code: 'review-escalation',
+      detail: 'The exact current review generation is held for Human judgment.',
+    };
+    await deps.escalateHuman({ candidate, reason });
+    return {
+      status: 'human',
+      prNumber: candidate.number,
+      code: 'review-escalation',
+    };
+  }
   const headChangedAt = Date.parse(candidate.headChangedAt);
   if (!Number.isFinite(headChangedAt) || headChangedAt > deps.now().getTime()) {
     return {
@@ -320,6 +344,69 @@ export async function executeReviewAction(
     expectedReviewRefOid: recordOid,
     credential: selection.credential,
   });
+  const confirmed = await deps.confirmAcquisition({
+    prNumber: candidate.number,
+    expectedHead: candidate.head,
+    expectedReviewRefOid: recordOid,
+  });
+  if (confirmed?.humanHold) {
+    const reason: HumanReason = {
+      phase: recoverFixes ? 'review-fixing' : 'reviewing',
+      code: 'review-escalation',
+      detail: 'A Human hold arrived during review acquisition.',
+    };
+    await deps.escalateHuman({ candidate: confirmed, reason });
+    return {
+      status: 'human',
+      prNumber: candidate.number,
+      code: 'review-escalation',
+    };
+  }
+  if (
+    confirmed === null
+    || !confirmed.open
+    || confirmed.number !== candidate.number
+    || confirmed.head !== candidate.head
+    || confirmed.issueNumber !== candidate.issueNumber
+    || confirmed.headRefName !== candidate.headRefName
+    || confirmed.baseRefName !== candidate.baseRefName
+    || confirmed.mappingProblem !== undefined
+    || confirmed.approvalPolicy !== candidate.approvalPolicy
+  ) {
+    if (
+      confirmed !== null
+      && (
+        confirmed.mappingProblem !== undefined
+        || confirmed.approvalPolicy !== candidate.approvalPolicy
+      )
+    ) {
+      const reason: HumanReason = {
+        phase: recoverFixes ? 'review-fixing' : 'reviewing',
+        code: 'review-escalation',
+        detail: confirmed.mappingProblem
+          ?? 'The current-head CODEOWNER approval policy changed during acquisition.',
+      };
+      await deps.escalateHuman({ candidate: confirmed, reason });
+      return {
+        status: 'human',
+        prNumber: candidate.number,
+        code: 'review-escalation',
+      };
+    }
+    return { status: 'lost', prNumber: candidate.number };
+  }
+  const confirmedClaim = confirmed.reviewRef;
+  if (
+    confirmedClaim?.oid !== recordOid
+    || confirmedClaim.record.prNumber !== candidate.number
+    || confirmedClaim.record.generation !== generation
+    || confirmedClaim.record.attempt !== attemptId
+    || confirmedClaim.record.reviewer.toLowerCase() !== selection.login.toLowerCase()
+    || confirmedClaim.record.head !== candidate.head
+    || confirmedClaim.record.state !== 'active'
+  ) {
+    return { status: 'lost', prNumber: candidate.number };
+  }
   const environment = buildSanitizedChildEnv(
     deps.ambientEnvironment,
     selection.credential,
@@ -331,7 +418,7 @@ export async function executeReviewAction(
   );
   const child = deps.spawnCoordinator({
     attemptId,
-    candidate,
+    candidate: confirmed,
     recoverFixes,
     environment,
     worktreePath: attempt.paths.worktree,
