@@ -55,6 +55,21 @@ const NON_APPLYING_PATCH = [
   '',
 ].join('\n');
 
+// A patch that applies cleanly but touches only a new file OUTSIDE the
+// fixture package (`app/`, the sole entry in `packages: [FIXTURE_PACKAGE]`
+// passed to `grade()` below) — e.g. a repo-root doc/config file. Regression
+// coverage for issue #1891 Finding 1: this must NOT be a vacuous PASS.
+const OUTSIDE_GATED_SCOPE_PATCH = [
+  'diff --git a/NOTES.md b/NOTES.md',
+  'new file mode 100644',
+  'index 0000000..1111111',
+  '--- /dev/null',
+  '+++ b/NOTES.md',
+  '@@ -0,0 +1 @@',
+  '+not under any gated package',
+  '',
+].join('\n');
+
 describe.runIf(RUN)('runJinnRepoLiveEval (local file:// fixture repo)', () => {
   let repoDir: string;
   let baseCommit: string;
@@ -106,6 +121,17 @@ describe.runIf(RUN)('runJinnRepoLiveEval (local file:// fixture repo)', () => {
     expect(result.tests).toBe(false);
     expect(result.passed).toBe(false);
   }, 120_000);
+
+  it('unscorable — a non-empty patch touching no gated package is never a vacuous PASS (issue #1891 Finding 1)', async () => {
+    const result = await grade(OUTSIDE_GATED_SCOPE_PATCH);
+    expect(result.unscorable).toBe(true);
+    expect(result.passed).toBe(false);
+    expect(result.applies).toBe(false);
+    expect(result.typecheck).toBe(false);
+    expect(result.tests).toBe(false);
+    expect(result.logExcerpt).toMatch(/no-gated-package-touched/);
+    expect(result.logExcerpt).toMatch(/NOTES\.md/);
+  }, 60_000);
 
   it('typecheck:false — a type error fails the typecheck gate; tests never run', async () => {
     const patch = await patchFromMutation(

@@ -76,6 +76,23 @@ function buildLiveEvaluationTask(
   };
 }
 
+/**
+ * A live-issue evaluation task whose spec has `source: 'live-issue'` (the
+ * raw routing signal) but a field defect — here, a missing `issue_number` —
+ * so the full `JinnRepoTaskSchema` parse fails. Regression fixture for issue
+ * #1891 Finding 2: this must be recognized as a malformed live-issue task,
+ * never silently misrouted to the merged-pr pool-lookup path.
+ */
+function buildMalformedLiveEvaluationTask(
+  restorationEnvelopeJson: string,
+  instanceId = LIVE_INSTANCE_ID,
+): Task {
+  const task = buildLiveEvaluationTask(restorationEnvelopeJson, instanceId);
+  const spec = { ...(task.spec as Record<string, unknown>) };
+  delete spec['issue_number'];
+  return { ...task, spec };
+}
+
 function buildSolverEnvelope(overrides: Record<string, unknown> = {}): string {
   const base = {
     schemaVersion: 'jinn.execution.v1',
@@ -336,6 +353,29 @@ describe('JinnRepoEvaluatorHarness — run (live-issue, issue #1891)', () => {
     await h.run(buildHarnessContext(buildLiveEvaluationTask(buildSolverEnvelope()), dir));
     expect(loadPool).not.toHaveBeenCalled();
   });
+
+  // Issue #1891 Finding 2: a live-issue spec with a field defect (raw
+  // `source: 'live-issue'` but a missing/invalid field, e.g. `issue_number`)
+  // must throw a loud, specific error and NEVER fall through to the
+  // merged-pr pool-lookup path — a fall-through there would surface a
+  // misleading `instance_not_in_pool` SkippableError and be re-attempted
+  // forever, since the raw source is never actually a merged-pr task.
+  it('throws a specific error for a malformed live-issue spec and never touches the pool', async () => {
+    const loadPool = vi.fn(() => [poolItem()]);
+    const grade = vi.fn();
+    const gradeLive = vi.fn();
+    const h = new JinnRepoEvaluatorHarness({ loadPool, grade, gradeLive });
+    const ctx = buildHarnessContext(
+      buildMalformedLiveEvaluationTask(buildSolverEnvelope()),
+      dir,
+    );
+
+    await expect(h.run(ctx)).rejects.toThrow(/malformed live-issue task spec/);
+    await expect(h.run(ctx)).rejects.toThrow(/issue_number/);
+    expect(loadPool).not.toHaveBeenCalled();
+    expect(grade).not.toHaveBeenCalled();
+    expect(gradeLive).not.toHaveBeenCalled();
+  });
 });
 
 describe('JinnRepoEvaluatorHarness — canAttempt', () => {
@@ -357,6 +397,20 @@ describe('JinnRepoEvaluatorHarness — canAttempt', () => {
     const h = new JinnRepoEvaluatorHarness();
     const verdict = await h.canAttempt(buildLiveEvaluationTask(buildSolverEnvelope()));
     expect(verdict).toEqual({ ok: true });
+  });
+
+  // Issue #1891 Finding 2: a spec with raw `source: 'live-issue'` but a field
+  // defect (here, a missing `issue_number`) must be rejected here with a
+  // specific reason — not accepted blind and re-attempted forever once it
+  // throws deep inside `run()`.
+  it('rejects a malformed live-issue evaluation task spec (missing issue_number)', async () => {
+    const h = new JinnRepoEvaluatorHarness();
+    const verdict = await h.canAttempt(buildMalformedLiveEvaluationTask(buildSolverEnvelope()));
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) {
+      expect(verdict.reason).toMatch(/^malformed live-issue task spec:/);
+      expect(verdict.reason).toMatch(/issue_number/);
+    }
   });
 
   it('rejects a live-issue evaluation task with no restorationResult', async () => {

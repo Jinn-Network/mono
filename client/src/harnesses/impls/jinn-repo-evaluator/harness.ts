@@ -22,6 +22,7 @@
 
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { ZodError } from 'zod';
 import {
   JinnRepoSolutionPayloadSchema,
   type JinnRepoVerdictPayload,
@@ -61,6 +62,33 @@ type LiveGradeFn = (args: {
 }) => Promise<JinnRepoLiveEvalResult>;
 
 const DEFAULT_MONO_REPO_URL = 'https://github.com/Jinn-Network/mono.git';
+
+/**
+ * The raw `source` field straight off an unparsed task spec — issue #1891
+ * Finding 2's primary discriminator. Deliberately does NOT go through
+ * `JinnRepoTaskSchema`: a full-schema parse can fail for two entirely
+ * different reasons that must be routed differently —
+ *   1. a merged-pr evaluation task's spec is the leak-controlled
+ *      solverView() projection (see `_jinn-repo-pool.ts`), which omits
+ *      required union fields and so never parses (raw `source` is absent, or
+ *      `'merged-pr'`) — the existing pool-lookup path, unchanged.
+ *   2. a live-issue spec with a field defect (missing `issue_number`, a
+ *      malformed `base_commit`, etc.) also fails the full parse, but its raw
+ *      `source` is unambiguously `'live-issue'` — that must be a loud,
+ *      specific error, never a silent fall-through to #1's pool-lookup path
+ *      (where it would surface a misleading `instance_not_in_pool` and be
+ *      re-attempted forever).
+ * Reading the raw field first makes the two cases distinguishable before any
+ * validation happens.
+ */
+function rawTaskSpecSource(spec: Record<string, unknown> | undefined): unknown {
+  return spec?.['source'];
+}
+
+/** Short, single-line summary of a ZodError for error messages / rejection reasons. */
+function summarizeZodError(error: ZodError): string {
+  return error.issues.map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`).join('; ');
+}
 
 export interface JinnRepoEvaluatorHarnessOptions {
   /** Marks a stub registry — `isReady()` reports requires-live-daemon. */
@@ -126,10 +154,24 @@ export class JinnRepoEvaluatorHarness implements Harness {
     if (task.role !== 'evaluation') {
       return { ok: false, reason: 'role is not evaluation' };
     }
+    // A live-issue spec with a field defect (missing `issue_number`, a
+    // malformed `base_commit`, etc.) is rejected here with a specific reason
+    // — issue #1891 Finding 2 — rather than accepted blind and left to throw
+    // deep inside `run()` on every daemon re-attempt.
+    if (rawTaskSpecSource(task.spec) === 'live-issue') {
+      const parsedSpec = JinnRepoTaskSchema.safeParse(task.spec);
+      if (!parsedSpec.success) {
+        return {
+          ok: false,
+          reason: `malformed live-issue task spec: ${summarizeZodError(parsedSpec.error)}`,
+        };
+      }
+    }
     // Both branches are gradeable (issue #1891): merged-pr against gold
     // FAIL_TO_PASS tests, live-issue against the mechanical evaluator
-    // (applies/typecheck/tests). `run()` routes on the same parsed-spec
-    // check used here.
+    // (applies/typecheck/tests). `run()` routes on the raw `source` field
+    // (same primary-discriminator check as above), never on parse-success
+    // alone.
     if (typeof task.context?.['restorationResult'] !== 'string') {
       return { ok: false, reason: 'context.restorationResult required' };
     }
@@ -174,17 +216,29 @@ export class JinnRepoEvaluatorHarness implements Harness {
     }
     const solutionPayload = JinnRepoSolutionPayloadSchema.parse(envelope.payload);
 
-    // Route on `source`. A live-issue evaluation task's spec is the FULL
-    // JinnRepoLiveIssueTask (nothing to leak-protect, so no separate
-    // solverView()/pool-item split exists for it — unlike merged-pr). A
-    // merged-pr evaluation task's spec is the leak-controlled solverView()
-    // projection (see `_jinn-repo-pool.ts`), which omits required union
-    // fields (e.g. `language`) and therefore never parses as either union
-    // branch — that parse failure is itself the routing signal to the
-    // (unchanged) merged-pr/gold path below. Mirrors the same check
-    // `canAttempt` used before #1891 to reject live-issue tasks outright.
-    const parsedSpec = JinnRepoTaskSchema.safeParse(ctx.task.spec);
-    if (parsedSpec.success && isLiveIssueTask(parsedSpec.data)) {
+    // Route on the RAW `source` field, not full-parse success (issue #1891
+    // Finding 2). A merged-pr evaluation task's spec is the leak-controlled
+    // solverView() projection (see `_jinn-repo-pool.ts`), which has no raw
+    // `source` field at all (legacy) or `source: 'merged-pr'` — either way it
+    // falls through to the (unchanged) pool-lookup path below. A live-issue
+    // evaluation task's spec is the FULL JinnRepoLiveIssueTask (nothing to
+    // leak-protect, so no separate solverView()/pool-item split exists for
+    // it). Discriminating on the RAW field first — before the full schema
+    // parse — means a live-issue spec with a field defect (missing
+    // `issue_number`, a malformed `base_commit`, etc.) is recognized as a
+    // live-issue task that failed validation and throws a loud, specific
+    // error here, rather than silently falling through to the pool-lookup
+    // path below (where it would surface a misleading `instance_not_in_pool`
+    // SkippableError and be re-attempted forever).
+    const rawSource = rawTaskSpecSource(ctx.task.spec);
+    if (rawSource === 'live-issue') {
+      const parsedSpec = JinnRepoTaskSchema.safeParse(ctx.task.spec);
+      if (!parsedSpec.success || !isLiveIssueTask(parsedSpec.data)) {
+        const detail = parsedSpec.success
+          ? 'parsed as a non-live-issue task despite source: live-issue (unexpected)'
+          : summarizeZodError(parsedSpec.error);
+        throw new Error(`jinn-repo-evaluator: malformed live-issue task spec: ${detail}`);
+      }
       return this.runLive(ctx, parsedSpec.data, instanceId, solutionPayload.patch);
     }
 
