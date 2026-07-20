@@ -44,6 +44,10 @@ Commit: recorded in the Task 4 handoff after commit creation.
     Project state at their mutation boundary and stop on either Human signal;
   - contradictory canonical `pr-open` evidence and the sole bounded PR mapping
     now produce structured Human ambiguity before any claim.
+- Closed the final acceptance addendum: canonical `pr-open` evidence naming PR
+  A while the bounded issue-to-PR mapping returns no PR now produces structured
+  Human `branch-mapping-ambiguous` instead of ordinary ineligibility, before
+  any claim or implementation-side mutation.
 - Kept review, review-fix, merge-prep, merge, and the global v2 `active`
   controller unwired. Production active mode remains explicitly rejected.
 
@@ -112,6 +116,15 @@ Commit: recorded in the Task 4 handoff after commit creation.
     `gh project item-edit` or `gh pr ready` call;
   - canonical PR A versus sole mapping PR B escalates with a structured
     `branch-mapping-ambiguous` reason and no claim.
+- Final acceptance addendum RED:
+  - `yarn vitest run test/lifecycle/implementation-executor.test.ts` produced
+    the expected 1 failure across 13 tests: canonical `pr-open` PR #84 with an
+    empty bounded PR mapping returned ordinary `ineligible` instead of Human.
+- Final acceptance addendum GREEN:
+  - the same focused command passed 1 file and 13 tests;
+  - the zero-mapping contradiction now emits the structured
+    `branch-mapping-ambiguous` reason and performs no claim, PR, Project,
+    attempt, spawn, or child-tracking mutation.
 
 ## Files
 
@@ -132,9 +145,9 @@ Commit: recorded in the Task 4 handoff after commit creation.
 ## Verification
 
 - `yarn vitest run test/lifecycle test/dispatcher/coordinator-session.test.ts`
-  — 15 files, 197 tests passed.
+  — 15 files, 198 tests passed.
 - `yarn typecheck` — passed.
-- `yarn test` — 86 files, 924 tests passed.
+- `yarn test` — 86 files, 925 tests passed.
 - `git diff --check` — passed.
 
 ## Self-review
@@ -155,7 +168,8 @@ Commit: recorded in the Task 4 handoff after commit creation.
   Human-label, and Human-Project re-read rather than relying only on the
   session-level check.
 - Canonical reality evidence and the bounded PR mapping must name the same sole
-  open PR; disagreement is structured Human ambiguity.
+  open PR; a different or missing bounded mapping is structured Human
+  ambiguity.
 - New-branch claims intentionally omit the not-yet-created PR number, while
   session authority permits that omission only for the exact original claim
   bound by the manifest and exact PR readback.

@@ -213,6 +213,15 @@ function humanBranchAmbiguity(
   pullRequests: readonly ImplementationPullRequest[],
   realityPrNumber?: number,
 ): HumanReason {
+  if (realityPrNumber !== undefined && pullRequests.length === 0) {
+    return {
+      phase: 'eligible',
+      code: 'branch-mapping-ambiguous',
+      detail:
+        `Canonical reality-check evidence names open PR #${realityPrNumber} for issue ` +
+        `#${issueNumber}, but the bounded issue-to-PR mapping names no open PR.`,
+    };
+  }
   if (
     realityPrNumber !== undefined
     && pullRequests.length === 1
@@ -335,8 +344,10 @@ export async function executeImplementationAction(
     )
     || (
       realityPrNumber !== undefined
-      && openPullRequests.length === 1
-      && openPullRequests[0]!.number !== realityPrNumber
+      && (
+        openPullRequests.length !== 1
+        || openPullRequests[0]!.number !== realityPrNumber
+      )
     )
   ) {
     const reason = humanBranchAmbiguity(
