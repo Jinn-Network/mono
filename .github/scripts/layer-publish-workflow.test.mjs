@@ -73,6 +73,17 @@ function verifyStableVersion(fixture, version) {
   );
 }
 
+function jobBlock(job) {
+  const start = workflow.indexOf(`  ${job}:`);
+  assert.notEqual(start, -1, `missing ${job}`);
+  const remainder = workflow.slice(start + 1);
+  const nextHeader = remainder.match(/\n  [a-z0-9_-]+:\n/u);
+  const next = nextHeader?.index === undefined
+    ? -1
+    : start + 1 + nextHeader.index;
+  return workflow.slice(start, next === -1 ? undefined : next);
+}
+
 test('layer CI is paths-filtered and rehearses the npm-shaped package', () => {
   assert.match(ci, /'packages\/layer\/\*\*'/);
   assert.match(ci, /yarn pack:smoke/);
@@ -94,32 +105,45 @@ test('canary publication is dependency ordered and restricted to next', () => {
   assert.doesNotMatch(workflow, /NODE_AUTH_TOKEN:\s*\$\{\{\s*secrets\./);
 });
 
-test('stable publication is human-gated, exact-ref gated, and uses the same trusted workflow', () => {
-  assert.match(workflow, /release:\n\s+types: \[published\]/);
+test('stable publication is manual-only from exact next and uses its protected environment', () => {
+  assert.doesNotMatch(workflow, /\n  release:\n\s+types: \[published\]/);
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /release_tag:/);
   assert.match(workflow, /release_sha:/);
-  assert.match(workflow, /stable-publish:/);
-  assert.match(workflow, /environment: npm-publish/);
-  assert.match(workflow, /startsWith\(github\.event\.release\.tag_name, 'layer-v'\)/);
-  assert.match(workflow, /verify-layer-stable-version\.mjs/);
-  assert.match(workflow, /npm publish .*--tag latest/s);
-  assert.match(workflow, /git ls-remote origin "refs\/tags\/\$\{RELEASE_TAG\}"/);
-  assert.match(workflow, /TAG_SHA.*RELEASE_SHA/s);
+  const stable = jobBlock('stable-publish');
+  assert.match(stable, /if: github\.event_name == 'workflow_dispatch' && github\.ref == 'refs\/heads\/next'/);
+  assert.match(stable, /environment: npm-stable-publish/);
+  assert.match(stable, /RELEASE_TAG: \$\{\{ inputs\.release_tag \}\}/);
+  assert.match(stable, /RELEASE_SHA: \$\{\{ inputs\.release_sha \}\}/);
+  assert.match(stable, /ref: \$\{\{ inputs\.release_sha \}\}/);
+  assert.match(stable, /verify-layer-stable-version\.mjs/);
+  assert.match(stable, /git ls-remote origin "refs\/tags\/\$\{RELEASE_TAG\}"/);
+  assert.match(stable, /TAG_SHA.*RELEASE_SHA/s);
+  assert.doesNotMatch(stable, /github\.event\.release/);
+});
+
+test('stable publication builds the complete set before the retry-safe publisher runs', () => {
+  const stable = jobBlock('stable-publish');
+  const pluginBuild = stable.indexOf('yarn --cwd packages/plugin build');
+  const coreBuild = stable.indexOf('yarn --cwd packages/core build');
+  const layerBuild = stable.indexOf('yarn --cwd packages/layer build');
+  const publish = stable.indexOf('publish-layer-stable.mjs');
+  assert.ok(pluginBuild >= 0);
+  assert.ok(coreBuild > pluginBuild);
+  assert.ok(layerBuild > coreBuild);
+  assert.ok(publish > layerBuild);
+  assert.doesNotMatch(stable, /npm publish/);
+  assert.doesNotMatch(stable, /^\s+(?:-\s+)?(?:run:\s*)?npm dist-tag/m);
+  assert.match(stable, /PUBLISH_VERSION=.*GITHUB_ENV/s);
+  assert.match(stable, /OIDC.*does not authenticate.*dist-tag/s);
+  assert.match(stable, /protected manual environment.*transient partial-release window/s);
 });
 
 test('OIDC is job-scoped to publish jobs and actions are immutable', () => {
   const globalPermissions = workflow.slice(0, workflow.indexOf('jobs:'));
   assert.doesNotMatch(globalPermissions, /id-token: write/);
   for (const job of ['plugin-canary', 'core-canary', 'layer-canary', 'stable-publish']) {
-    const start = workflow.indexOf(`  ${job}:`);
-    assert.notEqual(start, -1, `missing ${job}`);
-    const remainder = workflow.slice(start + 1);
-    const nextHeader = remainder.match(/\n  [a-z0-9_-]+:\n/u);
-    const next = nextHeader?.index === undefined
-      ? -1
-      : start + 1 + nextHeader.index;
-    const block = workflow.slice(start, next === -1 ? undefined : next);
+    const block = jobBlock(job);
     assert.match(block, /permissions:\n\s+contents: read\n\s+id-token: write/);
   }
   for (const action of ['checkout', 'setup-node']) {

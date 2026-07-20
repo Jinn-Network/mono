@@ -26,6 +26,7 @@ type SpawnFn = typeof spawn;
 export interface DistillMcpDeps {
   spawn?: SpawnFn;
   env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
 }
 
 const traceReadModes = ['summary', 'events', 'tool_calls', 'transcript_excerpt', 'full_transcript'] as const satisfies readonly TraceReadMode[];
@@ -201,7 +202,7 @@ export interface LocalDistillRunArgs {
 }
 
 export async function runLocalDistill(args: LocalDistillRunArgs, deps: DistillMcpDeps = {}): Promise<McpToolResponse> {
-  const resolved = resolveJinnLayerCommand(deps.env);
+  const resolved = resolveJinnLayerCommand(deps.env, deps.platform);
   const selected = materializeSelectedCaptures(args, deps.env);
   if (selected.error) return errorResponse(selected.error);
   const argv = [
@@ -263,9 +264,18 @@ function findCapture(
   return captures.find((capture) => capture.session.sessionId === sessionId);
 }
 
-function resolveJinnLayerCommand(env: NodeJS.ProcessEnv = process.env): { command: string; prefixArgs: string[] } {
-  if (env['JINN_LAYER_BIN']) return { command: env['JINN_LAYER_BIN'], prefixArgs: [] };
+function resolveJinnLayerCommand(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): { command: string; prefixArgs: string[] } {
   const sibling = fileURLToPath(new URL('./bin/jinn-layer.js', import.meta.url));
+  if (platform === 'win32') {
+    if (!existsSync(sibling)) {
+      throw new Error(`co-installed jinn-layer CLI is missing on Windows: ${sibling}`);
+    }
+    return { command: process.execPath, prefixArgs: [sibling] };
+  }
+  if (env['JINN_LAYER_BIN']) return { command: env['JINN_LAYER_BIN'], prefixArgs: [] };
   if (existsSync(sibling)) return { command: process.execPath, prefixArgs: [sibling] };
   return { command: 'jinn-layer', prefixArgs: [] };
 }

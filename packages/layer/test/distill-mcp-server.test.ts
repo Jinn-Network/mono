@@ -73,4 +73,26 @@ describe('local distill MCP server', () => {
     expect(body.stderr).toBe('note\n');
     expect(result.isError).toBeUndefined();
   });
+
+  it.each([
+    {
+      name: 'environment override',
+      env: { JINN_LAYER_BIN: 'C:\\untrusted\\jinn-layer.cmd' },
+    },
+    {
+      name: 'bare PATH fallback',
+      env: {},
+    },
+  ])('fails closed instead of using a Windows $name when the co-installed CLI is absent', async ({ env }) => {
+    const spawn = vi.fn(() => {
+      throw new Error('spawn must not be called');
+    });
+
+    await expect(runLocalDistill(
+      { capturesDir: 'C:\\captures' },
+      { spawn, env, platform: 'win32' },
+    )).rejects.toThrow(/co-installed.*jinn-layer/i);
+
+    expect(spawn).not.toHaveBeenCalled();
+  });
 });

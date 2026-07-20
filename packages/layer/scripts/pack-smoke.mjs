@@ -135,7 +135,8 @@ try {
         const result = runLocalDistill(
           { capturesDir: '/captures', out: '/out' },
           {
-            env: { PATH: '' },
+            env: { PATH: '', JINN_LAYER_BIN: ${JSON.stringify('C:\\untrusted\\jinn-layer.cmd')} },
+            platform: 'win32',
             spawn(command, args) {
               spawned = { command, args };
               queueMicrotask(() => {

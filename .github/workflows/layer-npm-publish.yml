@@ -8,8 +8,6 @@ on:
       - 'packages/core/**'
       - 'packages/layer/**'
       - '.github/workflows/layer-npm-publish.yml'
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       release_tag:
@@ -21,8 +19,9 @@ on:
         required: true
         type: string
 
-# Trusted publishing (OIDC): register this workflow and the npm-publish
-# environment for all three packages. No long-lived npm token is accepted.
+# Trusted publishing (OIDC): automatic canaries use npm-publish. Stable
+# publication uses the separately configured npm-stable-publish environment.
+# No long-lived npm token is accepted by either path.
 permissions:
   contents: read
 
@@ -161,22 +160,19 @@ jobs:
 
   stable-publish:
     name: Publish exact stable package set
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'release' &&
-      startsWith(github.event.release.tag_name, 'layer-v'))
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/next'
     permissions:
       contents: read
       id-token: write
     runs-on: ubuntu-latest
-    environment: npm-publish
+    environment: npm-stable-publish
     env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.event.release.tag_name }}
-      RELEASE_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.release_sha || github.sha }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      RELEASE_SHA: ${{ inputs.release_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_sha || github.event.release.tag_name }}
+          ref: ${{ inputs.release_sha }}
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
@@ -184,6 +180,10 @@ jobs:
       - name: Verify immutable release and exact stable pins
         shell: bash
         run: |
+          if [ "${GITHUB_REF}" != "refs/heads/next" ]; then
+            echo "::error::Stable layer publication must be dispatched from refs/heads/next"
+            exit 1
+          fi
           ACTUAL_SHA="$(git rev-parse HEAD)"
           if [ "${ACTUAL_SHA}" != "${RELEASE_SHA}" ]; then
             echo "::error::Checked out ${ACTUAL_SHA}, expected ${RELEASE_SHA}"
@@ -204,39 +204,28 @@ jobs:
           node .github/scripts/verify-layer-stable-version.mjs \
             --root . \
             --version "${PUBLISH_VERSION}"
+          echo "PUBLISH_VERSION=${PUBLISH_VERSION}" >> "${GITHUB_ENV}"
       - run: npm install -g npm@11.16.0
       - run: corepack enable
       - run: yarn --cwd packages/plugin install --immutable
       - run: yarn --cwd packages/plugin typecheck
       - run: yarn --cwd packages/plugin test
       - run: yarn --cwd packages/plugin build
-      - run: npm pack --dry-run
-        working-directory: packages/plugin
       - run: yarn --cwd packages/core install --immutable
       - run: yarn --cwd packages/core typecheck
       - run: yarn --cwd packages/core test
       - run: yarn --cwd packages/core build
-      - run: npm pack --dry-run
-        working-directory: packages/core
       - run: yarn --cwd packages/layer install --immutable
       - run: yarn --cwd packages/layer typecheck
       - run: yarn --cwd packages/layer test
       - run: yarn --cwd packages/layer build
       - run: yarn --cwd packages/layer pack:smoke
-      - run: npm pack --dry-run
-        working-directory: packages/layer
-      - name: Publish plugin stable
-        working-directory: packages/plugin
-        run: |
-          unset NODE_AUTH_TOKEN
-          npm publish --access public --tag latest
-      - name: Publish core stable
-        working-directory: packages/core
-        run: |
-          unset NODE_AUTH_TOKEN
-          npm publish --access public --tag latest
-      - name: Publish layer stable
-        working-directory: packages/layer
-        run: |
-          unset NODE_AUTH_TOKEN
-          npm publish --access public --tag latest
+      # npm OIDC trusted publishing does not authenticate npm dist-tag, so a
+      # cross-package atomic latest promotion is unavailable without adding a
+      # long-lived token. The protected manual environment bounds the
+      # transient partial-release window; the publisher resumes by exact SRI.
+      - name: Publish coherent stable package set
+        run: >-
+          node .github/scripts/publish-layer-stable.mjs
+          --root .
+          --version "${PUBLISH_VERSION}"
