@@ -69,6 +69,7 @@ import {
 import { signCanonical } from '../../src/harnesses/engine/signing.js';
 import { startApiServer } from '../../src/api/server.js';
 import type { SolverNetRegistry } from '../../src/solver-nets/registry.js';
+import type { Harness } from '../../src/harnesses/types.js';
 export { compileContracts, ANVIL_PRIVATE_KEYS };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -880,6 +881,18 @@ export async function startDaemon(
    * Defaults to undefined → no behavioural change.
    */
   solverNetRegistry?: SolverNetRegistry,
+  /**
+   * Extra raw Harness instances registered directly into the HarnessRegistry
+   * alongside `harnessList` (in addition to, not instead of, the named
+   * harnesses `buildHarnesses` constructs). Used by the jinn-repo live-issue
+   * loop driver to inject a deterministic, no-LLM synthetic restoration
+   * harness for `jinn-repo.v1` (mirrors `PredictionV1BaselineImpl`'s
+   * zero-credential pattern) — the mechanical evaluator under test needs a
+   * candidate patch delivered on-chain through the real claim → execute →
+   * deliver pipeline, not an actual solve leg. Defaults to `[]` → no
+   * behavioural change for existing consumers.
+   */
+  extraHarnesses?: Harness[],
 ): Promise<RunningDaemon> {
   const rpcUrl = fixture.anvil.rpcUrl;
   const chainCfg = getChainConfig('base');
@@ -992,6 +1005,9 @@ export async function startDaemon(
     solverTypeHarnesses,
   });
   for (const impl of harnessList) {
+    implRegistry.register(impl);
+  }
+  for (const impl of extraHarnesses ?? []) {
     implRegistry.register(impl);
   }
 

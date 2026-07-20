@@ -15,8 +15,10 @@ export type {
 export {
   JinnRepoSolutionPayloadSchema,
   JinnRepoVerdictPayloadSchema,
+  JinnRepoVerdictV2PayloadSchema,
 } from '../payloads/jinn-repo.js';
 export type {
   JinnRepoSolutionPayload,
   JinnRepoVerdictPayload,
+  JinnRepoVerdictV2Payload,
 } from '../payloads/jinn-repo.js';
