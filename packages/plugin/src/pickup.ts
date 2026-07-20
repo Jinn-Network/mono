@@ -267,7 +267,12 @@ export function scoreKnowledgeRecord(
   const metadataHaystack = haystackFor(hit);
   const contentHaystack = [
     record.synthesis ?? '',
-    ...record.steps.map((step) => step.name),
+    ...record.steps.flatMap((step) => {
+      const authoredTitle = step.attributes['seed.step.title'];
+      return typeof authoredTitle === 'string'
+        ? [step.name, authoredTitle]
+        : [step.name];
+    }),
   ].join(' ').toLowerCase();
   let score = 0;
   for (const term of terms) {

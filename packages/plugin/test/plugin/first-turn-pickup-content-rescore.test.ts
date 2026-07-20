@@ -100,8 +100,9 @@ describe('firstTurnPickup — bounded content rescore escalation (#1792)', () =>
       ok(record(ref, {
         synthesis: undefined,
         steps: [{
-          name: 'diagnose beta race',
+          name: 'seed:step:fix',
           attributes: {
+            'seed.step.title': 'diagnose beta race',
             'tool.args': 'yarn test beta-race',
             'tool.result': 'the race reproduced',
             'tool.exitCode': 1,
