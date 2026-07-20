@@ -5,6 +5,7 @@ import {
 } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { CANONICAL_GITHUB_HTTPS_REMOTE } from './implementation-executor.js';
+import { isoTimestamp } from './types.js';
 
 export const CAPABILITY_ATTESTATION_ENV =
   'JINN_AUTOPILOT_CAPABILITY_ATTESTATION';
@@ -59,8 +60,9 @@ function exactTrue(value: unknown, label: string): true {
 
 function timestamp(value: unknown, label: string): string {
   const raw = string(value, label);
-  const parsed = Date.parse(raw);
-  if (!Number.isFinite(parsed) || new Date(parsed).toISOString() !== raw) {
+  try {
+    isoTimestamp(raw);
+  } catch {
     throw new Error(`Capability attestation ${label} is invalid`);
   }
   return raw;
