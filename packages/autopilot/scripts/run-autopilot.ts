@@ -23,7 +23,9 @@ import { escalateStuckPrs, escalateStuckPr } from '../src/dispatcher/stuck-escal
 import { deriveMergePrepInFlight } from '../src/dispatcher/merge-prep-state.js';
 import { dispatchMergePrep } from '../src/dispatcher/merge-prep-dispatch.js';
 import { runMergePrepCycle, type PrepAttempt } from '../src/dispatcher/merge-prep-loop.js';
-import { dispatchIssue } from '../src/dispatcher/dispatch.js';
+import { dispatchIssue, REPO_ROOT, WORKTREES_BASE } from '../src/dispatcher/dispatch.js';
+import { runDeliveryBridge } from '../src/dispatcher/delivery-pr-bridge.js';
+import { HttpDeliveryReader } from '../src/dispatcher/delivery-reader.js';
 import { SESSIONS_LOG_DIR } from '../src/dispatcher/session-log.js';
 import { GhPrSource } from '../src/dispatcher/pr-source.js';
 import { fetchIssuePrMap } from '../src/dispatcher/pr-links.js';
@@ -108,6 +110,12 @@ const IMPL_GH_TOKEN_ENV = 'JINN_IMPL_GH_TOKEN';
 const REVIEW_GH_TOKEN_ENV = 'JINN_REVIEW_GH_TOKEN';
 /** Arm the merge-prep session loop (DR-2026-07-16). '1' = on. Default off. */
 const MERGE_PREP_ENV = 'JINN_MERGE_PREP';
+/** Arm the delivery→PR bridge (issue #1892). '1' = on. Default off. */
+const MARKETPLACE_BRIDGE_ENV = 'JINN_MARKETPLACE_BRIDGE';
+/** Indexer base URL the delivery→PR bridge queries. Empty disables it regardless of the flag above. */
+const MARKETPLACE_INDEXER_URL_ENV = 'JINN_MARKETPLACE_INDEXER_URL';
+/** IPFS gateway base URL for the delivery→PR bridge. */
+const MARKETPLACE_IPFS_GATEWAY_ENV = 'JINN_MARKETPLACE_IPFS_GATEWAY_URL';
 
 /**
  * Model / provider / Python interpreter for Hermes coordinator sessions.
@@ -587,6 +595,11 @@ async function main(): Promise<void> {
     implGhToken: process.env[IMPL_GH_TOKEN_ENV] ?? '',
     reviewGhToken: process.env[REVIEW_GH_TOKEN_ENV] ?? '',
     mergePrepEnabled: (process.env[MERGE_PREP_ENV] ?? '') === '1',
+    marketplaceBridgeEnabled: (process.env[MARKETPLACE_BRIDGE_ENV] ?? '') === '1',
+    marketplaceIndexerUrl: process.env[MARKETPLACE_INDEXER_URL_ENV] ?? '',
+    ...(process.env[MARKETPLACE_IPFS_GATEWAY_ENV]
+      ? { marketplaceIpfsGatewayUrl: process.env[MARKETPLACE_IPFS_GATEWAY_ENV] }
+      : {}),
     ...(process.env[HERMES_MODEL_ENV] ? { hermesModel: process.env[HERMES_MODEL_ENV] } : {}),
     ...(process.env[HERMES_PROVIDER_ENV] ? { hermesProvider: process.env[HERMES_PROVIDER_ENV] } : {}),
     ...(process.env[HERMES_PYTHON_ENV]
@@ -642,6 +655,24 @@ async function main(): Promise<void> {
       `[autopilot] hermes runtime ready (model=${cfg.hermesModel}, provider=${cfg.hermesProvider}, ` +
         `python=${cfg.hermesPythonPath})`,
     );
+  }
+
+  // Delivery→PR bridge (issue #1892): both the flag AND the indexer URL must
+  // be set — an empty URL disables the bridge even if the flag is on
+  // (fail-safe, mirrors the reviewBotLogin/authorAllowlist convention).
+  const deliveryReader = cfg.marketplaceBridgeEnabled && cfg.marketplaceIndexerUrl !== ''
+    ? new HttpDeliveryReader({
+        indexerUrl: cfg.marketplaceIndexerUrl,
+        ipfsGatewayUrl: cfg.marketplaceIpfsGatewayUrl,
+      })
+    : null;
+  if (cfg.marketplaceBridgeEnabled && deliveryReader == null) {
+    console.warn(
+      `[autopilot] WARNING: ${MARKETPLACE_BRIDGE_ENV}=1 but ${MARKETPLACE_INDEXER_URL_ENV} is unset — ` +
+        'the delivery→PR bridge is disabled this run.',
+    );
+  } else if (deliveryReader != null) {
+    console.log(`[autopilot] delivery-pr-bridge enabled (indexer=${cfg.marketplaceIndexerUrl})`);
   }
 
   const source = new GhIssueSource(realRunner);
@@ -882,6 +913,33 @@ async function main(): Promise<void> {
           }
         } catch (err) {
           console.error('[autopilot] merge sweep error (cycle unaffected):', err);
+        }
+      }
+
+      // Delivery→PR bridge (issue #1892): marketplace-delivered jinn-repo.v1
+      // solution envelopes become draft PRs. Best-effort — a failure here
+      // never affects the rest of the cycle. No-op when disabled or
+      // unconfigured (deliveryReader is null).
+      if (deliveryReader != null) {
+        try {
+          const br = await runDeliveryBridge(deliveryReader, realRunner, {
+            enabled: cfg.marketplaceBridgeEnabled,
+            repoRoot: REPO_ROOT,
+            worktreesBase: WORKTREES_BASE,
+            ipfsGatewayUrl: cfg.marketplaceIpfsGatewayUrl,
+            reviewLabel: cfg.engineReviewLabel,
+          });
+          for (const o of br.opened) {
+            console.log(`[autopilot] delivery-bridge: opened PR #${o.prNumber ?? '?'} for #${o.issueNumber} (${o.branch})`);
+          }
+          for (const s of br.stalled) {
+            console.log(`[autopilot] delivery-bridge: stalled #${s.issueNumber} — ${s.reason}`);
+          }
+          for (const sk of br.skipped) {
+            console.log(`[autopilot] delivery-bridge: ${sk}`);
+          }
+        } catch (err) {
+          console.error('[autopilot] delivery-bridge error (cycle unaffected):', err);
         }
       }
 

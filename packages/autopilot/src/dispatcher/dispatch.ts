@@ -31,7 +31,10 @@ export type {
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // src/dispatcher → src → packages/autopilot → packages → repo root
-const REPO_ROOT = join(HERE, '..', '..', '..', '..');
+// Exported so other modules that shell out `git -C <repoRoot> …` (e.g. the
+// delivery-pr-bridge worktree add/remove, issue #1892) share this single
+// computation rather than re-deriving it.
+export const REPO_ROOT = join(HERE, '..', '..', '..', '..');
 const AUTOPILOT_PACKAGE_DIR = join(REPO_ROOT, 'packages', 'autopilot');
 
 /**
