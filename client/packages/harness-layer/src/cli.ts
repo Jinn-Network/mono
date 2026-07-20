@@ -953,6 +953,7 @@ function buildLivePublishDepsFromEnv(opts: { recordManifest?: boolean } = {}): H
       ? { identityRegistry: process.env['JINN_LAYER_IDENTITY_REGISTRY'] as `0x${string}` }
       : {}),
     ...(process.env['JINN_IPFS_REGISTRY_URL'] ? { ipfsRegistryUrl: process.env['JINN_IPFS_REGISTRY_URL'] } : {}),
+    ...(process.env['JINN_IPFS_GATEWAY_URL'] ? { ipfsGatewayUrl: process.env['JINN_IPFS_GATEWAY_URL'] } : {}),
     ...(process.env['JINN_LAYER_ENDPOINT'] ? { endpoint: process.env['JINN_LAYER_ENDPOINT'] } : {}),
     ...(process.env['JINN_LAYER_LEDGER_PATH'] ? { ledgerPath: process.env['JINN_LAYER_LEDGER_PATH'] } : {}),
     ...(opts.recordManifest

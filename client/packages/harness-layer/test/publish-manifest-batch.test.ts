@@ -484,6 +484,165 @@ describe('publishManifestBatch', () => {
     expect(calls.anchorManifest).toHaveLength(0);
   });
 
+  it('persists a manifest upload intent before calling the external publisher', async () => {
+    const { publishDeps, calls } = deps();
+    const states = new Map<string, string>();
+    publishDeps.manifestJournal = {
+      loadManifestBatchJournal: (batchKey) => states.get(batchKey) ?? null,
+      saveManifestBatchJournal: (batchKey, stateJson) => {
+        const state = JSON.parse(stateJson) as {
+          partitions?: Array<{ manifestUpload?: { status?: string } }>;
+        };
+        if (state.partitions?.[0]?.manifestUpload?.status === 'intent') {
+          throw new Error('manifest upload intent journal write failed');
+        }
+        states.set(batchKey, stateJson);
+      },
+    };
+
+    const error = await publishManifestBatch(
+      [{ pending: await pending(1), sourceId: 'request-1' }],
+      publishDeps,
+      { batchKind: 'bridge' },
+    ).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ManifestBatchPreparationError);
+    expect(error).toMatchObject({
+      stage: 'manifest-upload',
+      memberRefs: ['bafy-envelope-1'],
+      batchKey: expect.any(String),
+    });
+    expect(String(error)).toContain('manifest upload intent journal write failed');
+    expect(calls.manifestBodies).toHaveLength(0);
+    expect(calls.anchorManifest).toHaveLength(0);
+  });
+
+  it('reconciles an uploaded manifest after its completion journal write fails', async () => {
+    const { publishDeps, calls } = deps();
+    const states = new Map<string, string>();
+    let failUploadedSave = true;
+    publishDeps.manifestJournal = {
+      loadManifestBatchJournal: (batchKey) => states.get(batchKey) ?? null,
+      saveManifestBatchJournal: (batchKey, stateJson) => {
+        const state = JSON.parse(stateJson) as {
+          partitions?: Array<{ manifestUpload?: { status?: string } }>;
+        };
+        if (
+          failUploadedSave &&
+          state.partitions?.[0]?.manifestUpload?.status === 'uploaded'
+        ) {
+          failUploadedSave = false;
+          throw new Error('manifest completion journal write failed');
+        }
+        states.set(batchKey, stateJson);
+      },
+    };
+    const reconcileManifestBody = vi.fn(async () => ({ status: 'present' as const }));
+    publishDeps.reconcileManifestBody = reconcileManifestBody;
+    const members = [
+      { pending: await pending(1), sourceId: 'request-1' },
+    ];
+
+    const first = await publishManifestBatch(
+      members,
+      publishDeps,
+      { batchKind: 'bridge' },
+    ).catch((caught: unknown) => caught);
+    expect(first).toBeInstanceOf(ManifestBatchPreparationError);
+    expect(first).toMatchObject({
+      stage: 'manifest-upload',
+      memberRefs: ['bafy-envelope-1'],
+      batchKey: expect.any(String),
+    });
+
+    await publishManifestBatch(members, publishDeps, { batchKind: 'bridge' });
+
+    expect(calls.manifestBodies).toHaveLength(1);
+    expect(reconcileManifestBody).toHaveBeenCalledOnce();
+    expect(reconcileManifestBody).toHaveBeenCalledWith(
+      calls.manifestCids[0],
+      expect.any(Uint8Array),
+    );
+    expect(calls.anchorManifest).toHaveLength(1);
+  });
+
+  it('fails closed when a manifest upload intent cannot be authoritatively reconciled', async () => {
+    const { publishDeps, calls } = deps();
+    const states = new Map<string, string>();
+    let failUploadedSave = true;
+    publishDeps.manifestJournal = {
+      loadManifestBatchJournal: (batchKey) => states.get(batchKey) ?? null,
+      saveManifestBatchJournal: (batchKey, stateJson) => {
+        const state = JSON.parse(stateJson) as {
+          partitions?: Array<{ manifestUpload?: { status?: string } }>;
+        };
+        if (
+          failUploadedSave &&
+          state.partitions?.[0]?.manifestUpload?.status === 'uploaded'
+        ) {
+          failUploadedSave = false;
+          throw new Error('manifest completion journal write failed');
+        }
+        states.set(batchKey, stateJson);
+      },
+    };
+    const members = [
+      { pending: await pending(1), sourceId: 'request-1' },
+    ];
+
+    await expect(
+      publishManifestBatch(members, publishDeps, { batchKind: 'bridge' }),
+    ).rejects.toBeInstanceOf(ManifestBatchPreparationError);
+    publishDeps.reconcileManifestBody = async () => ({
+      status: 'unknown',
+      reason: 'gateway reads cannot prove absence',
+    });
+
+    await expect(
+      publishManifestBatch(members, publishDeps, { batchKind: 'bridge' }),
+    ).rejects.toThrow(/unknown|cannot prove absence|reconcil/i);
+
+    expect(calls.manifestBodies).toHaveLength(1);
+    expect(calls.anchorManifest).toHaveLength(0);
+  });
+
+  it('uploads a journaled manifest only after authoritative reconciliation proves absence', async () => {
+    const { publishDeps, calls } = deps();
+    const states = new Map<string, string>();
+    let failBeforeUpload = true;
+    publishDeps.manifestJournal = {
+      loadManifestBatchJournal: (batchKey) => states.get(batchKey) ?? null,
+      saveManifestBatchJournal: (batchKey, stateJson) => {
+        const state = JSON.parse(stateJson) as {
+          partitions?: Array<{ manifestUpload?: { status?: string } }>;
+        };
+        if (
+          failBeforeUpload &&
+          state.partitions?.[0]?.manifestUpload?.status === 'intent'
+        ) {
+          failBeforeUpload = false;
+          states.set(batchKey, stateJson);
+          throw new Error('crash after durable manifest intent');
+        }
+        states.set(batchKey, stateJson);
+      },
+    };
+    const members = [
+      { pending: await pending(1), sourceId: 'request-1' },
+    ];
+
+    await expect(
+      publishManifestBatch(members, publishDeps, { batchKind: 'bridge' }),
+    ).rejects.toBeInstanceOf(ManifestBatchPreparationError);
+    expect(calls.manifestBodies).toHaveLength(0);
+    publishDeps.reconcileManifestBody = async () => ({ status: 'absent' });
+
+    await publishManifestBatch(members, publishDeps, { batchKind: 'bridge' });
+
+    expect(calls.manifestBodies).toHaveLength(1);
+    expect(calls.anchorManifest).toHaveLength(1);
+  });
+
   it('retains every uploaded ref when the first split manifest needs recovery', async () => {
     const { publishDeps } = deps();
     const largeInstanceId = 'x'.repeat(140_000);
@@ -607,6 +766,104 @@ describe('publishManifestBatch', () => {
       publishManifestBatch(members, publishDeps, { batchKind: 'bridge' }),
     ).rejects.toThrow(/pending|unconfirmed|reconcile/i);
 
+    expect(anchorCalls).toBe(1);
+  });
+
+  it('persists an anchor intent before broadcasting the manifest transaction', async () => {
+    const { publishDeps, calls } = deps();
+    const states = new Map<string, string>();
+    publishDeps.manifestJournal = {
+      loadManifestBatchJournal: (batchKey) => states.get(batchKey) ?? null,
+      saveManifestBatchJournal: (batchKey, stateJson) => {
+        const state = JSON.parse(stateJson) as {
+          partitions?: Array<{ transaction?: { status?: string } }>;
+        };
+        if (state.partitions?.[0]?.transaction?.status === 'intent') {
+          throw new Error('anchor intent journal write failed');
+        }
+        states.set(batchKey, stateJson);
+      },
+    };
+
+    const error = await publishManifestBatch(
+      [{ pending: await pending(1), sourceId: 'request-1' }],
+      publishDeps,
+      { batchKind: 'bridge' },
+    ).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ManifestBatchAnchorError);
+    expect(error).toMatchObject({
+      manifestCid: calls.manifestCids[0],
+      txHash: null,
+      memberRefs: ['bafy-envelope-1'],
+      batchKey: expect.any(String),
+    });
+    expect(String(error)).toContain('anchor intent journal write failed');
+    expect(calls.anchorManifest).toHaveLength(0);
+  });
+
+  it('keeps the callback hash in the error and never re-broadcasts a hashless intent', async () => {
+    const { publishDeps, calls } = deps();
+    const states = new Map<string, string>();
+    let failBroadcastSave = true;
+    publishDeps.manifestJournal = {
+      loadManifestBatchJournal: (batchKey) => states.get(batchKey) ?? null,
+      saveManifestBatchJournal: (batchKey, stateJson) => {
+        const state = JSON.parse(stateJson) as {
+          partitions?: Array<{ transaction?: { status?: string } }>;
+        };
+        if (
+          failBroadcastSave &&
+          state.partitions?.[0]?.transaction?.status === 'broadcast'
+        ) {
+          failBroadcastSave = false;
+          throw new Error('broadcast hash journal write failed');
+        }
+        states.set(batchKey, stateJson);
+      },
+    };
+    let anchorCalls = 0;
+    publishDeps.anchorManifest = async ({ onBroadcast }) => {
+      anchorCalls += 1;
+      onBroadcast?.(TEST_TX);
+      return {
+        txHash: TEST_TX,
+        blockNumber: 11,
+        gasUsed: 123_456n,
+        feeWei: 987_648n,
+      };
+    };
+    const members = [
+      { pending: await pending(1), sourceId: 'request-1' },
+    ];
+
+    const first = await publishManifestBatch(
+      members,
+      publishDeps,
+      { batchKind: 'bridge' },
+    ).catch((caught: unknown) => caught);
+    const [batchKey] = states.keys();
+    expect(first).toBeInstanceOf(ManifestBatchAnchorError);
+    expect(first).toMatchObject({
+      manifestCid: calls.manifestCids[0],
+      txHash: TEST_TX,
+      memberRefs: ['bafy-envelope-1'],
+      batchKey,
+    });
+
+    const resumed = await publishManifestBatch(
+      members,
+      publishDeps,
+      { batchKind: 'bridge' },
+    ).catch((caught: unknown) => caught);
+    expect(resumed).toBeInstanceOf(ManifestBatchAnchorError);
+    expect(resumed).toMatchObject({
+      manifestCid: calls.manifestCids[0],
+      txHash: null,
+      memberRefs: ['bafy-envelope-1'],
+      batchKey,
+    });
+    expect(String(resumed)).toMatch(/intent|reconcil|cannot safely retry/i);
     expect(anchorCalls).toBe(1);
   });
 
@@ -769,6 +1026,27 @@ describe('publishManifestBatch', () => {
     ).rejects.toThrow(/journal.*conflict|frozen.*plan/i);
   });
 
+  it('rejects legacy v2 journal rows because they lack write-ahead intents', async () => {
+    const { publishDeps, calls } = deps();
+    const journal = memoryJournal();
+    publishDeps.manifestJournal = journal.store;
+    const members = [
+      { pending: await pending(1), sourceId: 'request-1' },
+    ];
+    await publishManifestBatch(members, publishDeps, { batchKind: 'bridge' });
+    const [[batchKey, stateJson]] = [...journal.states.entries()];
+    const state = JSON.parse(stateJson!) as { version: number };
+    state.version = 2;
+    journal.states.set(batchKey!, JSON.stringify(state));
+
+    await expect(
+      publishManifestBatch(members, publishDeps, { batchKind: 'bridge' }),
+    ).rejects.toThrow(/legacy v2|write-ahead|cannot.*recover/i);
+
+    expect(calls.manifestBodies).toHaveLength(1);
+    expect(calls.anchorManifest).toHaveLength(1);
+  });
+
   it('retains exact recovery facts when persisting the frozen plan fails', async () => {
     const { publishDeps, calls } = deps();
     const states = new Map<string, string>();
@@ -905,5 +1183,102 @@ describe('publishManifestBatch', () => {
     expect(calls.controlRecords).toEqual([
       expect.objectContaining({ txHash: CONTROL_TX, payloadHex }),
     ]);
+  });
+
+  it('persists a control anchor intent before calling the external anchor', async () => {
+    const { publishDeps, calls } = deps();
+    const states = new Map<string, string>();
+    publishDeps.manifestJournal = {
+      loadManifestBatchJournal: (batchKey) => states.get(batchKey) ?? null,
+      saveManifestBatchJournal: (batchKey, stateJson) => {
+        const state = JSON.parse(stateJson) as {
+          partitions?: Array<{ controlTransaction?: { status?: string } }>;
+        };
+        if (state.partitions?.[0]?.controlTransaction?.status === 'intent') {
+          throw new Error('control intent journal write failed');
+        }
+        states.set(batchKey, stateJson);
+      },
+    };
+
+    const error = await publishManifestBatch(
+      [{ pending: await pending(1), sourceId: 'request-1' }],
+      publishDeps,
+      { batchKind: 'bridge', measurePerRecordControl: true },
+    ).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ManifestBatchRecordingError);
+    expect(error).toMatchObject({
+      memberRefs: ['bafy-envelope-1'],
+      batchKey: expect.any(String),
+    });
+    expect(String(error)).toContain('control intent journal write failed');
+    expect(calls.anchorEnvelope).toHaveLength(0);
+  });
+
+  it('never re-broadcasts a control transaction when its callback hash save fails', async () => {
+    const { publishDeps } = deps();
+    const states = new Map<string, string>();
+    let failBroadcastSave = true;
+    publishDeps.manifestJournal = {
+      loadManifestBatchJournal: (batchKey) => states.get(batchKey) ?? null,
+      saveManifestBatchJournal: (batchKey, stateJson) => {
+        const state = JSON.parse(stateJson) as {
+          partitions?: Array<{ controlTransaction?: { status?: string } }>;
+        };
+        if (
+          failBroadcastSave &&
+          state.partitions?.[0]?.controlTransaction?.status === 'broadcast'
+        ) {
+          failBroadcastSave = false;
+          throw new Error('control hash journal write failed');
+        }
+        states.set(batchKey, stateJson);
+      },
+    };
+    let controlCalls = 0;
+    const payloadHex = `0x${'ef'.repeat(32)}` as const;
+    publishDeps.anchorEnvelope = async (input) => {
+      controlCalls += 1;
+      input.onPrepared?.(payloadHex);
+      input.onBroadcast?.(CONTROL_TX);
+      return {
+        txHash: CONTROL_TX,
+        blockNumber: 10,
+        gasUsed: 45_000n,
+        feeWei: 90_000n,
+        payloadHex,
+      };
+    };
+    const members = [
+      { pending: await pending(1), sourceId: 'request-1' },
+    ];
+
+    const first = await publishManifestBatch(
+      members,
+      publishDeps,
+      { batchKind: 'bridge', measurePerRecordControl: true },
+    ).catch((caught: unknown) => caught);
+    const [batchKey] = states.keys();
+    expect(first).toBeInstanceOf(ManifestBatchRecordingError);
+    expect(first).toMatchObject({
+      txHash: CONTROL_TX,
+      memberRefs: ['bafy-envelope-1'],
+      batchKey,
+    });
+
+    const resumed = await publishManifestBatch(
+      members,
+      publishDeps,
+      { batchKind: 'bridge', measurePerRecordControl: true },
+    ).catch((caught: unknown) => caught);
+    expect(resumed).toBeInstanceOf(ManifestBatchRecordingError);
+    expect(resumed).toMatchObject({
+      txHash: null,
+      memberRefs: ['bafy-envelope-1'],
+      batchKey,
+    });
+    expect(String(resumed)).toMatch(/intent|reconcil|cannot safely retry/i);
+    expect(controlCalls).toBe(1);
   });
 });
