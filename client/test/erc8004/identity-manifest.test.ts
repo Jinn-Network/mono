@@ -30,6 +30,7 @@ function makePublisher(
         blockNumber: bigint;
         gasUsed: bigint;
         effectiveGasPrice?: bigint;
+        status?: 'success' | 'reverted';
       }
     | Error,
 ) {
@@ -74,6 +75,7 @@ describe('IdentityPublisher.publishManifest', () => {
       blockNumber: 123n,
       gasUsed: 21_000n,
       effectiveGasPrice: 2n,
+      status: 'success',
     });
 
     const result = await publisher.publishManifest({
@@ -100,7 +102,7 @@ describe('IdentityPublisher.publishManifest', () => {
     ]);
   });
 
-  it('keeps the tx hash and returns null receipt facts when receipt lookup fails', async () => {
+  it('fails closed when the manifest receipt cannot be confirmed', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const { publisher } = makePublisher(new Error('receipt RPC unavailable'));
 
@@ -109,18 +111,14 @@ describe('IdentityPublisher.publishManifest', () => {
         manifestCid: 'bafy-manifest',
         payload: PAYLOAD,
       }),
-    ).resolves.toEqual({
-      txHash: TX_HASH,
-      blockNumber: null,
-      gasUsed: null,
-      feeWei: null,
-    });
+    ).rejects.toThrow(/receipt.*0xfefefe/i);
   });
 
   it('preserves gasUsed but reports a null fee when effectiveGasPrice is absent', async () => {
     const { publisher } = makePublisher({
       blockNumber: 124n,
       gasUsed: 22_000n,
+      status: 'success',
     });
 
     await expect(
@@ -133,5 +131,21 @@ describe('IdentityPublisher.publishManifest', () => {
       gasUsed: 22_000n,
       feeWei: null,
     });
+  });
+
+  it('rejects a reverted manifest transaction instead of reporting it as anchored', async () => {
+    const { publisher } = makePublisher({
+      blockNumber: 125n,
+      gasUsed: 23_000n,
+      effectiveGasPrice: 2n,
+      status: 'reverted',
+    });
+
+    await expect(
+      publisher.publishManifest({
+        manifestCid: 'bafy-manifest',
+        payload: PAYLOAD,
+      }),
+    ).rejects.toThrow(/reverted.*0xfefefe/i);
   });
 });

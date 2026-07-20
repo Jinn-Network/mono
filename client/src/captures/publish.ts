@@ -73,11 +73,17 @@ export interface CaptureEnvelopeAnchorInput {
   envelopeCid: string;
   envelopeHash: `0x${string}`;
   envelope: SignedEnvelope;
+  /** Measurement controls require a mined successful receipt, not best effort. */
+  requireSuccessfulReceipt?: boolean;
 }
 
 export interface CaptureEnvelopeAnchorResult {
   txHash?: `0x${string}`;
   blockNumber?: number | null;
+  gasUsed?: bigint | null;
+  feeWei?: bigint | null;
+  /** Exact ABI payload written on chain, for durable control-row recording. */
+  payloadHex?: `0x${string}`;
 }
 
 export interface PublishCaptureResult {

@@ -211,6 +211,7 @@ Commands:
   distill run [--limit N] [--out <dir>] [--meta]
               [--distiller claude|codex] [--local-only]
               [--anchor-mode per-record|manifest]
+              [--measure-per-record-control]
                                                  Run the distillation pipeline over the
                                                  swe-rebench-v2 verdict ledger: verdict→solution
                                                  join → distill → local SKILL.md packages.
@@ -222,6 +223,8 @@ Commands:
                                                  anchors, using in-memory publish deps.
                                                  --anchor-mode manifest anchors the surviving
                                                  bridge batch once and records receipt gas.
+                                                 --measure-per-record-control adds one live
+                                                 receipt-bound capture anchor for comparison.
   distill [--where local|defer|off] [--install all|<name>|none] [--resume]
          [--captures <dir>] [--limit N] [--out <dir>]
          [--distiller claude|codex] [--distiller-model <model>] [--json]
@@ -1196,6 +1199,7 @@ export async function runJinnLayerCli(
         captures: { type: 'string' },
         'local-only': { type: 'boolean', default: false },
         'anchor-mode': { type: 'string', default: 'per-record' },
+        'measure-per-record-control': { type: 'boolean', default: false },
         where: { type: 'string' },
         resume: { type: 'boolean', default: false },
         install: { type: 'string' },
@@ -1943,12 +1947,22 @@ export async function runJinnLayerCli(
     mkdirSync(outDir, { recursive: true });
     const localOnly = parsed.values['local-only'] as boolean;
     const anchorMode = parsed.values['anchor-mode'] as string;
+    const measurePerRecordControl =
+      parsed.values['measure-per-record-control'] as boolean;
     if (anchorMode !== 'per-record' && anchorMode !== 'manifest') {
       writer.write(`error: --anchor-mode must be "per-record" or "manifest" (got ${JSON.stringify(anchorMode)})\n\n${USAGE}`);
       return 2;
     }
     if (localOnly && anchorMode === 'manifest') {
       writer.write(`error: --anchor-mode manifest requires live publish deps and cannot be combined with --local-only\n\n${USAGE}`);
+      return 2;
+    }
+    if (measurePerRecordControl && anchorMode !== 'manifest') {
+      writer.write(`error: --measure-per-record-control requires --anchor-mode manifest\n\n${USAGE}`);
+      return 2;
+    }
+    if (measurePerRecordControl && localOnly) {
+      writer.write(`error: --measure-per-record-control requires live publish deps and cannot be combined with --local-only\n\n${USAGE}`);
       return 2;
     }
 
@@ -2142,6 +2156,7 @@ export async function runJinnLayerCli(
       distribution: 'coding',
       distillModel,
       anchorMode,
+      ...(measurePerRecordControl ? { measurePerRecordControl: true } : {}),
       ...(metaEnabled ? { meta: true, metaDistill: metaDistillPort } : {}),
       ...(limit !== undefined ? { limit } : {}),
     });
@@ -2162,13 +2177,30 @@ export async function runJinnLayerCli(
         lines.push(`warning: verdict fetch hit the ${limit}-row limit — attempt groups may be PARTIAL; raise --limit to cover the corpus (#1478)`);
       }
       if (result.bridge.manifestCid) {
+        if (result.bridge.manifestConfirmed === false) {
+          lines.push(
+            `manifest anchor unconfirmed ${result.bridge.manifestCid} at ` +
+            `${result.bridge.anchorTx ?? 'unknown'} — reconcile before retrying`,
+          );
+        } else {
+          lines.push(
+            `manifest anchored ${result.bridge.manifestCid} at ${result.bridge.anchorTx ?? 'unknown'} — ` +
+            `${result.bridge.bridged.length} members, ` +
+            `gasUsed=${result.bridge.gasUsed?.toString() ?? 'unknown'}, ` +
+            `feeWei=${result.bridge.feeWei?.toString() ?? 'unknown'}`,
+          );
+        }
+      }
+      if (result.bridge.control) {
         lines.push(
-          `manifest anchored ${result.bridge.manifestCid} — ${result.bridge.bridged.length} members, ` +
-          `gasUsed=${result.bridge.gasUsed?.toString() ?? 'unknown'}, ` +
-          `feeWei=${result.bridge.feeWei?.toString() ?? 'unknown'}`,
+          `per-record control anchored ${result.bridge.control.memberRef} at ` +
+          `${result.bridge.control.anchorTx} — ` +
+          `gasUsed=${result.bridge.control.gasUsed?.toString() ?? 'unknown'}, ` +
+          `feeWei=${result.bridge.control.feeWei?.toString() ?? 'unknown'}`,
         );
       }
       for (const p of result.distilled.published) lines.push(`  PUBLISHED ${p.skillKind} ${p.envelopeRef} (${p.clusterId})`);
+      for (const e of result.bridge.errors) lines.push(`  BRIDGE-ERROR ${e.requestId} — ${e.error}`);
       for (const r of result.distilled.rejected) lines.push(`  rejected  ${r.clusterId} — ${r.reason}`);
       for (const e of result.distilled.errors) lines.push(`  ERROR     ${e.clusterId} — ${e.error}`);
       if (result.metaDistilled) {
@@ -2182,7 +2214,11 @@ export async function runJinnLayerCli(
       lines.push('', `skills written under: ${outDir}`);
       writer.write(lines.join('\n') + '\n');
     }
-    return result.distilled.errors.length > 0 || (result.metaDistilled?.errors.length ?? 0) > 0 ? 1 : 0;
+    return (
+      (anchorMode === 'manifest' && result.bridge.errors.length > 0) ||
+      result.distilled.errors.length > 0 ||
+      (result.metaDistilled?.errors.length ?? 0) > 0
+    ) ? 1 : 0;
   }
 
   if (isDeriveEnv) {

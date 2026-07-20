@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ScrubPipeline } from '../../../src/trajectory/scrub/pipeline.js';
 import { capture, type CapturedTask, type PendingEnvelope } from '../src/capture.js';
 import {
+  ManifestBatchAnchorError,
   publishManifestBatch,
   publishMemberEnvelope,
   type ManifestBatchPublishDeps,
@@ -18,6 +19,7 @@ const TEST_PRIVATE_KEY =
 const TEST_ADDRESS = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266' as const;
 const TEST_SAFE = '0x1111111111111111111111111111111111111111' as const;
 const TEST_TX = `0x${'ab'.repeat(32)}` as const;
+const CONTROL_TX = `0x${'cd'.repeat(32)}` as const;
 
 function task(index: number): CapturedTask {
   return {
@@ -63,6 +65,7 @@ function deps() {
     anchorManifest: [] as unknown[],
     manifestBodies: [] as ManifestV0[],
     anchorRecords: [] as unknown[],
+    controlRecords: [] as unknown[],
     logs: [] as string[],
   };
   const publishDeps: ManifestBatchPublishDeps = {
@@ -83,7 +86,13 @@ function deps() {
     },
     anchorEnvelope: async (input) => {
       calls.anchorEnvelope.push(input);
-      return { txHash: TEST_TX, blockNumber: 10 };
+      return {
+        txHash: CONTROL_TX,
+        blockNumber: 10,
+        gasUsed: 45_000n,
+        feeWei: 90_000n,
+        payloadHex: `0x${'ef'.repeat(32)}` as const,
+      };
     },
     publishManifestBody: async (body) => {
       calls.manifestBodies.push(parseManifestV0(body));
@@ -100,6 +109,9 @@ function deps() {
     },
     recordManifestAnchor: (input) => {
       calls.anchorRecords.push(input);
+    },
+    recordControlAnchor: (input) => {
+      calls.controlRecords.push(input);
     },
     log: (line) => calls.logs.push(line),
   };
@@ -194,5 +206,87 @@ describe('publishManifestBatch', () => {
     ).rejects.toThrow(/at least one member/);
     expect(calls.publishEnvelope).toHaveLength(0);
     expect(calls.anchorManifest).toHaveLength(0);
+  });
+
+  it('adds one persisted control anchor without re-uploading or duplicating ledger rows', async () => {
+    const { publishDeps, calls, ledger } = deps();
+    const result = await publishManifestBatch(
+      [
+        { pending: await pending(1), polarity: 'pass', instanceId: 'mono-1' },
+        { pending: await pending(2), polarity: 'fail', instanceId: 'mono-2' },
+        { pending: await pending(3), polarity: 'pass', instanceId: 'mono-3' },
+      ],
+      publishDeps,
+      { batchKind: 'bridge', measurePerRecordControl: true },
+    );
+
+    expect(calls.publishEnvelope).toHaveLength(3);
+    expect(calls.anchorManifest).toHaveLength(1);
+    expect(calls.anchorEnvelope).toHaveLength(1);
+    expect(calls.anchorEnvelope[0]).toMatchObject({
+      metadataKey: 'capture:bafy-envelope-1',
+      envelopeCid: 'bafy-envelope-1',
+      requireSuccessfulReceipt: true,
+    });
+    expect(calls.anchorRecords).toHaveLength(1);
+    expect(calls.controlRecords).toHaveLength(1);
+    expect(calls.controlRecords[0]).toMatchObject({
+      envelopeRef: 'bafy-envelope-1',
+      contentKind: 'capture',
+      metadataKey: 'capture:bafy-envelope-1',
+      txHash: CONTROL_TX,
+      blockNumber: 10,
+      gasUsed: 45_000n,
+      feeWei: 90_000n,
+    });
+    expect(result.control).toEqual({
+      memberRef: 'bafy-envelope-1',
+      anchorTx: CONTROL_TX,
+      blockNumber: 10,
+      gasUsed: 45_000n,
+      feeWei: 90_000n,
+    });
+    expect(ledger.list()).toHaveLength(3);
+    expect(ledger.list().every((entry) => entry.anchorTx === TEST_TX)).toBe(true);
+  });
+
+  it('fails the measurement when control receipt telemetry is unavailable', async () => {
+    const { publishDeps } = deps();
+    publishDeps.anchorEnvelope = async () => ({
+      txHash: CONTROL_TX,
+      blockNumber: 10,
+      gasUsed: null,
+      feeWei: null,
+      payloadHex: `0x${'ef'.repeat(32)}`,
+    });
+
+    await expect(
+      publishManifestBatch(
+        [{ pending: await pending(1), polarity: 'pass', instanceId: 'mono-1' }],
+        publishDeps,
+        { batchKind: 'bridge', measurePerRecordControl: true },
+      ),
+    ).rejects.toThrow(/control.*telemetry/i);
+  });
+
+  it('retains the manifest CID and broadcast tx when confirmation fails', async () => {
+    const { publishDeps } = deps();
+    publishDeps.anchorManifest = async () => {
+      throw Object.assign(new Error('receipt reverted'), { txHash: TEST_TX });
+    };
+
+    const error = await publishManifestBatch(
+      [{ pending: await pending(1), polarity: 'pass', instanceId: 'mono-1' }],
+      publishDeps,
+      { batchKind: 'bridge' },
+    ).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ManifestBatchAnchorError);
+    expect(error).toMatchObject({
+      manifestCid: 'bafy-manifest',
+      txHash: TEST_TX,
+      memberRefs: ['bafy-envelope-1'],
+    });
+    expect(String(error)).toContain('receipt reverted');
   });
 });

@@ -27,6 +27,7 @@ export {
 // ── IdentityRegistry (publisher + agent resolver) ──────────────────────────────
 export {
   IdentityPublisher,
+  ManifestReceiptConfirmationError,
   PayloadValidationError,
   buildMetadataKey,
   parseMetadataKey,
@@ -72,6 +73,7 @@ export {
 } from './manifest-registry.js';
 export {
   ManifestAnchorNotFoundError,
+  ManifestContentAddressMismatchError,
   ManifestRootMismatchError,
   readManifestAnchor,
   fetchManifest,

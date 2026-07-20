@@ -184,11 +184,24 @@ async function fetchJsonFromUrl(url: string, signal: AbortSignal): Promise<unkno
  * Upload: serialise to JCS canonical bytes (RFC 8785) so the CID and sha256
  * fields are reproducible by any third party with a standard JCS library.
  */
-export async function uploadToIpfs(registryUrl: string, data: unknown): Promise<string> {
+export interface UploadToIpfsOptions {
+  /**
+   * Ask Kubo to address the payload bytes directly. Manifest consumers verify
+   * canonical body bytes against the CID multihash, so manifests must opt in.
+   */
+  rawLeaves?: boolean;
+}
+
+export async function uploadToIpfs(
+  registryUrl: string,
+  data: unknown,
+  options: UploadToIpfsOptions = {},
+): Promise<string> {
   const url = new URL(normalizeIpfsRegistryAddUrl(registryUrl));
   url.searchParams.set('pin', 'true');
   url.searchParams.set('cid-version', '1');
   url.searchParams.set('wrap-with-directory', 'false');
+  if (options.rawLeaves) url.searchParams.set('raw-leaves', 'true');
 
   const jcsBytes = new TextEncoder().encode(canonicalJson(data));
   const formData = new FormData();

@@ -862,7 +862,13 @@ describe('jinn-layer distill run', () => {
 
   function fakeManifestPublishDeps() {
     const base = fakePublishDeps();
-    const anchorEnvelope = vi.fn(base.anchorEnvelope);
+    const anchorEnvelope = vi.fn(async () => ({
+      txHash: `0x${'e'.repeat(64)}` as const,
+      blockNumber: 8,
+      gasUsed: 45_000n,
+      feeWei: 90_000n,
+      payloadHex: `0x${'f'.repeat(64)}` as const,
+    }));
     const anchorManifest = vi.fn(async () => ({
       txHash: `0x${'d'.repeat(64)}` as const,
       blockNumber: 7,
@@ -878,6 +884,7 @@ describe('jinn-layer distill run', () => {
       }),
       anchorManifest,
       recordManifestAnchor: vi.fn(),
+      recordControlAnchor: vi.fn(),
     };
     return { deps, anchorEnvelope, anchorManifest };
   }
@@ -1033,8 +1040,144 @@ describe('jinn-layer distill run', () => {
     expect(manifest.anchorManifest).toHaveBeenCalledTimes(1);
     expect(manifest.anchorEnvelope).not.toHaveBeenCalled();
     expect(out()).toContain(
-      'manifest anchored bafyManifest — 2 members, gasUsed=123456, feeWei=789012',
+      `manifest anchored bafyManifest at 0x${'d'.repeat(64)} — 2 members, gasUsed=123456, feeWei=789012`,
     );
+  });
+
+  it('--measure-per-record-control prints a separately persisted paired measurement', async () => {
+    const { writer, out } = capture();
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-cli-'));
+    const manifest = fakeManifestPublishDeps();
+    const code = await runJinnLayerCli(
+      [
+        'distill',
+        'run',
+        '--anchor-mode',
+        'manifest',
+        '--measure-per-record-control',
+        '--out',
+        outDir,
+      ],
+      {
+        writer,
+        distillRunDeps: stubDeps({ publishDeps: manifest.deps }),
+      },
+    );
+
+    expect(code).toBe(0);
+    expect(manifest.anchorManifest).toHaveBeenCalledTimes(1);
+    expect(manifest.anchorEnvelope).toHaveBeenCalledTimes(1);
+    expect(manifest.deps.recordManifestAnchor).toHaveBeenCalledTimes(1);
+    expect(manifest.deps.recordControlAnchor).toHaveBeenCalledTimes(1);
+    expect(out()).toContain(
+      `per-record control anchored bafyEnv2 at 0x${'e'.repeat(64)} — gasUsed=45000, feeWei=90000`,
+    );
+  });
+
+  it('rejects the measurement control outside live manifest mode', async () => {
+    const first = capture();
+    await expect(
+      runJinnLayerCli(
+        ['distill', 'run', '--measure-per-record-control'],
+        { writer: first.writer, distillRunDeps: stubDeps() },
+      ),
+    ).resolves.toBe(2);
+    expect(first.out()).toContain('requires --anchor-mode manifest');
+
+    const second = capture();
+    await expect(
+      runJinnLayerCli(
+        [
+          'distill',
+          'run',
+          '--anchor-mode',
+          'manifest',
+          '--measure-per-record-control',
+          '--local-only',
+        ],
+        { writer: second.writer, distillRunDeps: stubDeps() },
+      ),
+    ).resolves.toBe(2);
+    expect(second.out()).toContain('cannot be combined with --local-only');
+  });
+
+  it('exits nonzero and preserves both tx facts when control recording fails', async () => {
+    const { writer, out } = capture();
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-cli-'));
+    const manifest = fakeManifestPublishDeps();
+    manifest.deps.recordControlAnchor = () => {
+      throw new Error('control telemetry disk full');
+    };
+
+    const code = await runJinnLayerCli(
+      [
+        'distill',
+        'run',
+        '--anchor-mode',
+        'manifest',
+        '--measure-per-record-control',
+        '--out',
+        outDir,
+      ],
+      {
+        writer,
+        distillRunDeps: stubDeps({ publishDeps: manifest.deps }),
+      },
+    );
+
+    expect(code).toBe(1);
+    expect(out()).toContain(`manifest anchored bafyManifest at 0x${'d'.repeat(64)}`);
+    expect(out()).toContain(`per-record control anchored bafyEnv2 at 0x${'e'.repeat(64)}`);
+    expect(out()).toContain('control telemetry disk full');
+  });
+
+  it('--anchor-mode manifest exits nonzero and surfaces recovery facts when local recording fails', async () => {
+    const { writer, out } = capture();
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-cli-'));
+    const manifest = fakeManifestPublishDeps();
+    manifest.deps.recordManifestAnchor = () => {
+      throw new Error('sqlite disk full');
+    };
+
+    const code = await runJinnLayerCli(
+      ['distill', 'run', '--anchor-mode', 'manifest', '--out', outDir],
+      {
+        writer,
+        distillRunDeps: stubDeps({ publishDeps: manifest.deps }),
+      },
+    );
+
+    expect(code).toBe(1);
+    expect(manifest.anchorManifest).toHaveBeenCalledTimes(1);
+    expect(out()).toContain('manifest anchored bafyManifest');
+    expect(out()).toContain('anchored at');
+    expect(out()).toContain('sqlite disk full');
+  });
+
+  it('--anchor-mode manifest labels a broadcast-but-unconfirmed anchor without claiming success', async () => {
+    const { writer, out } = capture();
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-cli-'));
+    const manifest = fakeManifestPublishDeps();
+    manifest.deps.anchorManifest = async () => {
+      throw Object.assign(new Error('receipt reverted'), {
+        txHash: `0x${'d'.repeat(64)}`,
+      });
+    };
+
+    const code = await runJinnLayerCli(
+      ['distill', 'run', '--anchor-mode', 'manifest', '--out', outDir],
+      {
+        writer,
+        distillRunDeps: stubDeps({ publishDeps: manifest.deps }),
+      },
+    );
+
+    expect(code).toBe(1);
+    expect(out()).toContain(
+      `manifest anchor unconfirmed bafyManifest at 0x${'d'.repeat(64)}`,
+    );
+    expect(out()).not.toContain('manifest anchored bafyManifest');
+    expect(out()).toContain('receipt reverted');
   });
 
   it('--json emits the pipeline result with the out dir', async () => {

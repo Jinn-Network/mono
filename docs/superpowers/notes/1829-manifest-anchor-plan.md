@@ -271,7 +271,8 @@ root" (verified against the **on-chain** root, cross-checked in `fetchManifest`)
      injected `recordAnchor` dep so `publish.ts` stays store-free (matches its current no-store
      design — the store call is wired at the daemon/live edge).
   6. Log one line: `[manifest] batch anchored cid=<…> members=<N> gasUsed=<…> feeWei=<…>`.
-  - Return `ManifestBatchResult { manifestCid; anchorTx; memberRefs: string[]; root; gasUsed; feeWei }`.
+  - Return `ManifestBatchResult { manifestCid; anchorTx; memberRefs: string[]; root; gasUsed; feeWei;
+    control? }`.
 
 **Test (write first):** `client/packages/harness-layer/test/publish-manifest-batch.test.ts` with
 in-memory stubs for `publishArtifact`/`publishEnvelope`/`publishManifestBody`/`anchorManifest`/
@@ -287,6 +288,9 @@ in-memory stubs for `publishArtifact`/`publishEnvelope`/`publishManifestBody`/`a
    receipt.
 6. `publishMemberEnvelope` alone does NOT anchor and does NOT append a ledger row (guards the
    refactor).
+7. With `measurePerRecordControl`, reuse member 0 without re-uploading it, make one confirmed
+   `capture:` anchor, persist its exact payload/tx/block/gas/fee separately, retain exactly N ledger
+   rows bound to the manifest tx, and fail with recovery facts if telemetry/recording is unavailable.
 
 **AC satisfied:** "consumer enumeration" (the body it emits) + "a member is verifiable" + the CODE
 half of "gas measured and recorded".
@@ -370,16 +374,19 @@ one covering `saveErc8004Anchor`; add a case, or a new `client/test/store-manife
 
 ---
 
-## Step 11 — `cli.ts`: `--anchor-mode manifest` + print the gas line · [wiring / snapshot]
+## Step 11 — `cli.ts`: manifest mode + explicit paired measurement · [wiring / snapshot]
 
 **Build:** `client/packages/harness-layer/src/cli.ts`:
 - Add `--anchor-mode <per-record|manifest>` to the `distill run` / `distill` arg parser
   (`parseArgs` options block, ~line 1030). Default `per-record`.
+- Add `--measure-per-record-control`, valid only with live `--anchor-mode manifest`. It adds one
+  receipt-bound `capture:` control for member 0 without changing ordinary manifest N→1 behavior.
 - When `manifest`, pass `anchorMode:'manifest'` + the `publishManifestBatch` wiring
   (`buildBridgeManifestPublisher(createLivePublishDeps(...))`) into the bridge deps.
 - On completion, if the bridge ran in manifest mode and `result.manifestCid` is set, print the
-  measured line: `manifest anchored <cid> — <N> members, gasUsed=<…>, feeWei=<…>` (feeds the "first
-  batch = the measurement" operator surface). Keep the existing per-record summary otherwise.
+  measured line: `manifest anchored <cid> at <tx> — <N> members, gasUsed=<…>, feeWei=<…>`. When the
+  control flag is present, also print `per-record control anchored <memberCid> at <tx> —
+  gasUsed=<…>, feeWei=<…>`. Keep the existing per-record summary otherwise.
 
 **Test (write first):** extend the existing CLI test file that covers `distill run` (find via
 `grep -rn "distill run" client/packages/harness-layer/test`) with an injected `distillRunDeps` /
@@ -389,6 +396,8 @@ bridge stub:
 2. When the (stubbed) result carries `manifestCid`+`gasUsed`, the CLI writer output contains the
    `manifest anchored … gasUsed=` line.
 3. Default invocation (no flag) does not print the manifest line and uses per-record.
+4. The control flag is rejected outside live manifest mode; its run prints both tx-bound
+   measurements and any recording/confirmation failure exits nonzero with recovery facts.
 
 **AC satisfied:** operator surface for running the first real batch (which produces the gas number).
 
@@ -412,18 +421,20 @@ The AC "gas measured and recorded (first real batch doubles as the measurement)"
 distinct deliverables. **This PR ships only the first.**
 
 1. **CODE capability (ships in this PR, fully test-covered with a MOCKED receipt):**
-   - `IdentityPublisher._writeMetadata` surfaces `gasUsed`/`feeWei` from the existing receipt (Step 4).
+   - `IdentityPublisher._writeMetadata` requires a successful manifest/measurement receipt and
+     surfaces `gasUsed`/`feeWei` from it (Step 4).
    - `publishManifestBatch` / `bridgeAttempts(manifest)` log + return them (Steps 7–8).
    - `store.saveErc8004Anchor` persists them (Step 10).
-   - The CLI prints them (Step 11).
+   - The CLI's explicit control run persists and prints both receipts (Step 11).
    - Tests assert the plumbing with a **stubbed receipt** — they assert the number *flows through and
      is recorded*, NOT any specific gas value.
 
 2. **The actual live testnet gas NUMBER (follow-up, NOT this PR's code):**
    - Produced by the **first real bridge batch** run by an operator on Base Sepolia
-     (`jinn-layer distill run --anchor-mode manifest`), which anchors one real `manifest:` record and
-     — from the same run — one per-record `capture:` anchor for the per-anchor-vs-per-manifest
-     comparison the corpus-supply spec §9 asks for.
+     (`jinn-layer distill run --anchor-mode manifest --measure-per-record-control`), which anchors
+     one real `manifest:` record and — from the same run — one per-record `capture:` anchor for the
+     per-anchor-vs-per-manifest comparison the corpus-supply spec §9 asks for. Ordinary manifest
+     runs omit the control flag and spend one anchor transaction.
    - The measured numbers are then recorded as a **follow-up doc edit** into
      `docs/superpowers/specs/2026-07-17-corpus-supply-design.md` §9 and/or issue #1829.
    - **NO gas constant is asserted anywhere in code, docs, or tests before that run produces it.**
