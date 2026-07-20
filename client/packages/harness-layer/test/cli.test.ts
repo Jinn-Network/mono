@@ -1127,6 +1127,7 @@ describe('jinn-layer distill run', () => {
 
     expect(code).toBe(1);
     expect(out()).toContain(`manifest anchored bafyManifest at 0x${'d'.repeat(64)}`);
+    expect(out()).toContain('— 2 members');
     expect(out()).toContain(`per-record control anchored bafyEnv2 at 0x${'e'.repeat(64)}`);
     expect(out()).toContain('control telemetry disk full');
   });
@@ -1150,6 +1151,7 @@ describe('jinn-layer distill run', () => {
     expect(code).toBe(1);
     expect(manifest.anchorManifest).toHaveBeenCalledTimes(1);
     expect(out()).toContain('manifest anchored bafyManifest');
+    expect(out()).toContain('— 2 members');
     expect(out()).toContain('anchored at');
     expect(out()).toContain('sqlite disk full');
   });

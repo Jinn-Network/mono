@@ -2185,7 +2185,7 @@ export async function runJinnLayerCli(
         } else {
           lines.push(
             `manifest anchored ${result.bridge.manifestCid} at ${result.bridge.anchorTx ?? 'unknown'} — ` +
-            `${result.bridge.bridged.length} members, ` +
+            `${result.bridge.manifestMemberRefs?.length ?? result.bridge.bridged.length} members, ` +
             `gasUsed=${result.bridge.gasUsed?.toString() ?? 'unknown'}, ` +
             `feeWei=${result.bridge.feeWei?.toString() ?? 'unknown'}`,
           );
