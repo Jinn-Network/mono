@@ -9,6 +9,19 @@ Commit: recorded in the Task 5 handoff after commit creation.
 Independent review: `.superpowers/sdd/task-5-review.md` is included with this
 fix commit.
 
+## Re-review addendum closure
+
+- The production ready boundary now independently revalidates the current
+  exact terminal review-ref authority, durable/projected Human evidence, and
+  effective native requested-changes blockers immediately before invoking
+  `gh pr ready`. A late Human record, Human Project/label projection, or
+  effective blocker fails closed without issuing the ready mutation.
+- Native review reads now use `gh api --paginate --slurp`, require the slurped
+  page-array shape, and flatten every page exactly before decoding reviews.
+- Human-comment idempotency now compares the complete canonical comment body.
+  A different comment that contains the marker or canonical body as a
+  substring cannot suppress the required Human comment.
+
 ## Delivered scope
 
 - Added an injected review action executor and production Git/GitHub port:
@@ -129,6 +142,15 @@ fix commit.
     authoritative before its projections existed.
   - GREEN: lifecycle snapshots synthesize the durable Human hold directly from
     the exact current review record.
+- Re-review addendum RED:
+  - 3 failures proved the production ready operation itself did not reject a
+    durable Human record, projected Human hold, or native blocker arriving
+    after session-level checks;
+  - 1 failure proved native review pagination neither requested `--slurp` nor
+    decoded multiple pages;
+  - 1 failure proved initial Human-comment idempotency accepted a substring
+    match instead of complete canonical-body equality.
+  - GREEN: 43 of 43 focused review session and production adapter tests.
 
 ## Files
 
@@ -145,9 +167,9 @@ fix commit.
 ## Verification
 
 - `yarn vitest run test/lifecycle test/dispatcher/coordinator-session.test.ts`
-  — 19 files, 257 tests passed.
+  — 19 files, 262 tests passed.
 - `yarn typecheck` — passed.
-- `yarn test` — 90 files, 983 tests passed.
+- `yarn test` — 90 files, 988 tests passed.
 - `git diff --check` — passed.
 
 ## Self-review
