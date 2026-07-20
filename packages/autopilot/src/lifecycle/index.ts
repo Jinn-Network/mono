@@ -7,3 +7,5 @@ export * from './github-reader.js';
 export * from './projection.js';
 export * from './reconciler.js';
 export * from './controller.js';
+export * from './credentials.js';
+export * from './attempt-workspace.js';
