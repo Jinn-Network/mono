@@ -66,6 +66,9 @@ const CFG: DispatcherConfig = {
   hermesModel: 'gpt-5.6-sol',
   hermesProvider: 'openai-codex',
   hermesPythonPath: '/opt/hermes/python',
+  marketplaceBridgeEnabled: false,
+  marketplaceIndexerUrl: '',
+  marketplaceIpfsGatewayUrl: 'https://gateway.autonolas.tech',
 };
 
 /**
