@@ -23,9 +23,13 @@ from pathlib import Path
 from typing import Optional
 
 from . import consent
+from . import harness
 from . import jinn_layer
 
-_UPDATE_REMEDY = "jinn-agent plugins update jinn"
+
+def _update_remedy() -> str:
+    """Host-native plugin refresh command for stock Hermes or the fork."""
+    return f"{harness.cli_name()} plugins update jinn"
 
 # Minimum Node.js major for the layer mechanism — the cold-stock gate's own
 # floor (scripts/cold-stock-e2e.sh), stricter than the client's >=20 check.
@@ -114,11 +118,11 @@ def _check_plugin_build(plugin_dir: Optional[Path] = None) -> dict:
         )
         if head.returncode != 0 or status.returncode != 0:
             detail = _one_line(head.stderr or status.stderr or "git error")
-            return {"name": name, "ok": False, "detail": detail, "remedy": _UPDATE_REMEDY}
+            return {"name": name, "ok": False, "detail": detail, "remedy": _update_remedy()}
         state = "dirty" if status.stdout.strip() else "clean"
         return {"name": name, "ok": True, "detail": f"git {head.stdout.strip()} ({state})"}
     except Exception as exc:
-        return {"name": name, "ok": False, "detail": str(exc), "remedy": _UPDATE_REMEDY}
+        return {"name": name, "ok": False, "detail": str(exc), "remedy": _update_remedy()}
 
 
 def _layer_resolution() -> tuple[str, str]:
@@ -132,7 +136,7 @@ def _layer_resolution() -> tuple[str, str]:
             f"via JINN_LAYER_BIN={override}",
             "export JINN_LAYER_BIN=<path-to-client>/dist/bin/jinn-layer.js",
         )
-    return "jinn-layer on PATH", _UPDATE_REMEDY
+    return "jinn-layer on PATH", _update_remedy()
 
 
 def _check_layer(runner: Optional[jinn_layer.Runner] = None) -> tuple[dict, dict]:
@@ -224,7 +228,10 @@ def _check_host_provider() -> dict:
     return {
         "name": "host-provider",
         "ok": True,
-        "detail": "provider/credential sanity is owned by the host — run: jinn-agent doctor",
+        "detail": (
+            "provider/credential sanity is owned by the host — "
+            f"run: {harness.cli_name()} doctor"
+        ),
     }
 
 

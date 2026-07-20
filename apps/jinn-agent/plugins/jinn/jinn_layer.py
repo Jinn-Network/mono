@@ -19,6 +19,8 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from . import harness
+
 logger = logging.getLogger(__name__)
 
 # The injected/test-double contract: a mock has no real OS-level stdout vs
@@ -55,7 +57,7 @@ def _default_runner(
         # (or set JINN_LAYER_BIN to point at a local build).
         return 127, "", (
             f"{argv[0]}: not found. Update the Jinn layer "
-            "(jinn-agent plugins update jinn) or set JINN_LAYER_BIN."
+            f"({harness.cli_name()} plugins update jinn) or set JINN_LAYER_BIN."
         )
     except subprocess.TimeoutExpired:
         return 124, "", f"{argv[0]}: timed out after {timeout_s}s"
