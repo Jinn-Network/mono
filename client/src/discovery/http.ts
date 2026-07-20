@@ -31,6 +31,10 @@ import type {
 } from './types.js';
 import { DiscoveryUnavailableError, TASK_POST_WINDOW_BLOCKS, bucketTaskPostCounts } from './types.js';
 import { manifestDigestForCid } from '../adapters/mech/digest.js';
+import {
+  createHttpCorpusDiscovery,
+  DiscoveryUnavailableError as CoreDiscoveryUnavailableError,
+} from '@jinn-network/core/corpus-read';
 
 // ── GraphQL query strings ─────────────────────────────────────────────────────
 
@@ -451,25 +455,6 @@ query MostRecentTask($manifestDigest: String!) {
 }
 `;
 
-const QUERY_ENVELOPES_QUERY = `
-query QueryEnvelopes($where: envelopeFilter, $limit: Int!) {
-  envelopes(
-    where: $where,
-    limit: $limit,
-    orderBy: "publishedAtBlock",
-    orderDirection: "desc"
-  ) {
-    items {
-      agentId
-      manifestCid
-      manifestHash
-      evidenceTier
-      publishedAtBlock
-    }
-  }
-}
-`;
-
 // ── GraphQL response types ────────────────────────────────────────────────────
 
 interface GqlResponse<T> {
@@ -550,18 +535,6 @@ interface SolverNetSingle {
     anchorBlock: string | number;
     manifestHash?: string | null;
   } | null;
-}
-
-interface EnvelopeRow {
-  agentId: string;
-  manifestCid: string;
-  manifestHash: string;
-  evidenceTier: string;
-  publishedAtBlock: string | number;
-}
-
-interface EnvelopePage {
-  envelopes: { items: EnvelopeRow[] };
 }
 
 // ── Operator-count query response types (issue #351) ─────────────────────────
@@ -989,6 +962,13 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
   const timeoutFetch: typeof fetch = (input, init) =>
     baseFetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(fetchTimeoutMs) });
   const fetchImpl: typeof fetch = fetchWithRetry(timeoutFetch, retryDelaysMs);
+  const corpusDiscovery = createHttpCorpusDiscovery({
+    url: opts.url,
+    fetchImpl: baseFetch,
+    readyProbeTtlMs: readyTtlMs,
+    retryDelaysMs,
+    fetchTimeoutMs,
+  });
 
   // ── /ready probe (memoized with a short TTL) ──────────────────────────────
   // Ponder serves GraphQL with 200 + stale/empty data while still catching up;
@@ -1343,43 +1323,16 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
   // ── queryEnvelopes ────────────────────────────────────────────────────────
 
   async function queryEnvelopes(query: CorpusQuery): Promise<EnvelopeRef[]> {
-    await ensureReady();
-
-    const limit = Math.min(500, Math.max(1, query.limit ?? 50));
-
-    // Build the where object dynamically — only include filters that are set.
-    // A null filter value means "IS NULL" in Ponder, not "skip the filter".
-    // `kind` is not part of CorpusQuery (we return all envelope kinds).
-    // `query.solverType` is intentionally ignored: solverType lives in the IPFS
-    // manifest body, not in the on-chain envelope payload, so the indexer has no
-    // column for it. Callers must filter by solverType client-side after fetching
-    // the IPFS manifests. See packages/indexer/README.md §Known limitations.
-    const where: Record<string, unknown> = {};
-    if (query.evidenceTier) where['evidenceTier'] = query.evidenceTier;
-    if (query.manifestHash) where['manifestHash'] = query.manifestHash;
-
-    const data = await postGql<EnvelopePage>(
-      gqlUrl,
-      fetchImpl,
-      QUERY_ENVELOPES_QUERY,
-      { where, limit },
-    );
-
-    const items = data.envelopes?.items ?? [];
-
-    // Map to EnvelopeRef. The indexer does not store safeAddress (not in the
-    // IdentityRegistry event); leave it empty. The corpus library enriches it
-    // on retrieval via the IPFS manifest fetch.
-    return items.map((row): EnvelopeRef => ({
-      manifestCid: row.manifestCid,
-      manifestHash: row.manifestHash,
-      operator: {
-        agentId: row.agentId,
-        safeAddress: '',
-      },
-      evidenceTier: (row.evidenceTier as EnvelopeRef['evidenceTier']) ?? 'unknown',
-      publishedAt: Number(row.publishedAtBlock),
-    }));
+    try {
+      return await corpusDiscovery.queryEnvelopes(query);
+    } catch (error) {
+      // Preserve the public client error identity used by withFallback and by
+      // daemon/MCP callers while core owns the HTTP request implementation.
+      if (error instanceof CoreDiscoveryUnavailableError) {
+        throw new DiscoveryUnavailableError(error.message, error.cause);
+      }
+      throw error;
+    }
   }
 
   // ── listPluginPublications (attd) ─────────────────────────────────────────
