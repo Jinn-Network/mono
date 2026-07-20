@@ -109,7 +109,12 @@ describe('createHarnessLayer', () => {
       throw new Error('unknown CID');
     });
 
-    const layer = createHarnessLayer({ store, discovery, fetchFromIpfs });
+    const layer = createHarnessLayer({
+      store,
+      discovery,
+      fetchFromIpfs,
+      captureMetaUrl: '',
+    });
     const hits = await layer.corpus.search('prediction');
 
     expect(hits).toHaveLength(1);
@@ -158,7 +163,13 @@ describe('createHarnessLayer', () => {
     });
     const acquireFn = vi.fn(async (_endpoint: string, sha: string) => (sha === realSha ? realBytes : null));
 
-    const layer = createHarnessLayer({ store, discovery, fetchFromIpfs, acquireFn });
+    const layer = createHarnessLayer({
+      store,
+      discovery,
+      fetchFromIpfs,
+      acquireFn,
+      captureMetaUrl: '',
+    });
     const hits = await layer.corpus.search('prediction');
     expect(hits).toHaveLength(1);
 
