@@ -7,14 +7,9 @@
  */
 
 import { z } from 'zod';
-import {
-  concat,
-  decodeAbiParameters,
-  encodeAbiParameters,
-  keccak256,
-  toBytes,
-  type Hex,
-} from 'viem';
+import { keccak_256 } from '@noble/hashes/sha3.js';
+
+export type Hex = `0x${string}`;
 
 export const MANIFEST_SCHEMA_VERSION = 'jinn.manifest.v0' as const;
 
@@ -49,11 +44,30 @@ export interface MerkleProof {
 }
 
 export function hashLeaf(cid: string): Hex {
-  return keccak256(toBytes(cid));
+  return bytesToHex(keccak_256(new TextEncoder().encode(cid)));
 }
 
 function hashPair(left: Hex, right: Hex): Hex {
-  return keccak256(concat([left, right]));
+  const leftBytes = hexToBytes(left);
+  const rightBytes = hexToBytes(right);
+  const combined = new Uint8Array(leftBytes.length + rightBytes.length);
+  combined.set(leftBytes);
+  combined.set(rightBytes, leftBytes.length);
+  return bytesToHex(keccak_256(combined));
+}
+
+function bytesToHex(bytes: Uint8Array): Hex {
+  return `0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+}
+
+function hexToBytes(hex: Hex): Uint8Array {
+  const raw = hex.slice(2);
+  if (raw.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(raw)) {
+    throw new Error('invalid hex');
+  }
+  return Uint8Array.from(
+    raw.match(/.{2}/g)?.map((byte) => Number.parseInt(byte, 16)) ?? [],
+  );
 }
 
 export function merkleRoot(leaves: Hex[]): Hex {
@@ -195,26 +209,30 @@ export function validateManifestPayload(
 
 export function encodeManifestPayload(payload: ManifestPayload): Hex {
   validateManifestPayload(payload);
-  return encodeAbiParameters(MANIFEST_PAYLOAD_TUPLE, [
-    payload.version,
-    payload.merkleRoot,
-    payload.memberCount,
-    BigInt(payload.createdAt),
-  ]);
+  const word = (value: bigint) => value.toString(16).padStart(64, '0');
+  return `0x${word(BigInt(payload.version))}${payload.merkleRoot.slice(2)}${word(
+    BigInt(payload.memberCount),
+  )}${word(BigInt(payload.createdAt))}`;
 }
 
 export function decodeManifestPayload(hex: Hex): ManifestPayload {
-  const [version, merkleRoot, memberCount, createdAt] = decodeAbiParameters(
-    MANIFEST_PAYLOAD_TUPLE,
-    hex,
-  );
+  if (!/^0x[0-9a-fA-F]{256}$/.test(hex)) {
+    throw new ManifestPayloadValidationError(
+      'encoded payload must be four 32-byte ABI words',
+    );
+  }
+  const raw = hex.slice(2);
+  const version = BigInt(`0x${raw.slice(0, 64)}`);
+  const merkleRoot = `0x${raw.slice(64, 128)}` as Hex;
+  const memberCount = BigInt(`0x${raw.slice(128, 192)}`);
+  const createdAt = BigInt(`0x${raw.slice(192, 256)}`);
   if (createdAt > MAX_SAFE_INTEGER_BIGINT) {
     throw new ManifestPayloadValidationError(
       `createdAt cannot be represented exactly as a JavaScript number; got ${createdAt}`,
     );
   }
   return validateManifestPayload({
-    version: version as 0,
+    version: Number(version) as 0,
     merkleRoot,
     memberCount: Number(memberCount),
     createdAt: Number(createdAt),

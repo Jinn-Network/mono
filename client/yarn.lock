@@ -1074,6 +1074,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/core@portal:../../../packages/core::locator=%40jinn-network%2Fharness-layer%40workspace%3Apackages%2Fharness-layer"
   dependencies:
+    "@noble/hashes": "npm:^2.2.0"
     zod: "npm:^4.4.3"
   peerDependencies:
     "@jinn-network/plugin": "*"
@@ -1088,6 +1089,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/core@portal:../packages/core::locator=%40jinn-network%2Fclient%40workspace%3A."
   dependencies:
+    "@noble/hashes": "npm:^2.2.0"
     zod: "npm:^4.4.3"
   peerDependencies:
     "@jinn-network/plugin": "*"
