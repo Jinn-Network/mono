@@ -39,13 +39,16 @@ export function isolatedGitCommandOverlay(
     GIT_CONFIG_GLOBAL: '/dev/null',
     GIT_CONFIG_SYSTEM: '/dev/null',
     GIT_CONFIG_NOSYSTEM: '1',
-    GIT_CONFIG_COUNT: '3',
+    // credential.interactive=never must NOT appear here: git treats the
+    // askpass helper as interactive prompting, so it turns every HTTPS auth
+    // into "fatal: unable to get password from user" (proven live by the
+    // first capability probe). GIT_TERMINAL_PROMPT=0 already prevents any
+    // real terminal prompt; the askpass script answers from GH_TOKEN.
+    GIT_CONFIG_COUNT: '2',
     GIT_CONFIG_KEY_0: 'credential.helper',
     GIT_CONFIG_VALUE_0: '',
-    GIT_CONFIG_KEY_1: 'credential.interactive',
-    GIT_CONFIG_VALUE_1: 'never',
-    GIT_CONFIG_KEY_2: 'core.askPass',
-    GIT_CONFIG_VALUE_2: askpassPath,
+    GIT_CONFIG_KEY_1: 'core.askPass',
+    GIT_CONFIG_VALUE_1: askpassPath,
     GIT_TERMINAL_PROMPT: '0',
     GIT_ASKPASS: askpassPath,
     SSH_ASKPASS: askpassPath,
@@ -384,9 +387,9 @@ export function gitPublicationArgs(
   askpassPath: string,
   args: readonly string[],
 ): string[] {
+  // No credential.interactive=never here — see isolatedGitCommandOverlay.
   return [
     '-c', 'credential.helper=',
-    '-c', 'credential.interactive=never',
     '-c', `core.askPass=${askpassPath}`,
     ...args,
   ];

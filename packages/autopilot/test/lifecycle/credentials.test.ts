@@ -219,13 +219,11 @@ describe('sanitized child authentication', () => {
       GIT_CONFIG_GLOBAL: '/dev/null',
       GIT_CONFIG_SYSTEM: '/dev/null',
       GIT_CONFIG_NOSYSTEM: '1',
-      GIT_CONFIG_COUNT: '3',
+      GIT_CONFIG_COUNT: '2',
       GIT_CONFIG_KEY_0: 'credential.helper',
       GIT_CONFIG_VALUE_0: '',
-      GIT_CONFIG_KEY_1: 'credential.interactive',
-      GIT_CONFIG_VALUE_1: 'never',
-      GIT_CONFIG_KEY_2: 'core.askPass',
-      GIT_CONFIG_VALUE_2: '/attempt/askpass',
+      GIT_CONFIG_KEY_1: 'core.askPass',
+      GIT_CONFIG_VALUE_1: '/attempt/askpass',
       GIT_SSH_COMMAND: 'false',
     });
     expect(env.SSH_AUTH_SOCK).toBeUndefined();
@@ -243,10 +241,13 @@ describe('sanitized child authentication', () => {
   });
 
   it('pins git publication to the attempt askpass and disables credential helpers', () => {
+    // credential.interactive=never is deliberately absent: git counts the
+    // askpass helper as interactive prompting, so that flag turns every
+    // HTTPS auth into "unable to get password from user" (found live by the
+    // capability probe).
     expect(gitPublicationArgs('/attempt/askpass', ['push', 'origin', 'HEAD:refs/heads/topic']))
       .toEqual([
         '-c', 'credential.helper=',
-        '-c', 'credential.interactive=never',
         '-c', 'core.askPass=/attempt/askpass',
         'push', 'origin', 'HEAD:refs/heads/topic',
       ]);
