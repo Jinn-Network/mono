@@ -1,0 +1,48 @@
+{
+  "id": "<stable-kebab-case-id>",
+  "repo": "Jinn-Network/mono",
+  "baseCommit": "<full-40-character-pre-fix-commit>",
+  "taskSummary": "<specific verified mono task>",
+  "tags": [
+    "mono",
+    "<subsystem>",
+    "<failure-vocabulary>",
+    "retrieval:visible.v1"
+  ],
+  "steps": [
+    {
+      "label": "failure",
+      "title": "<what failed>",
+      "text": "<repo-relative command and real failing output>"
+    },
+    {
+      "label": "note",
+      "title": "<diagnosis>",
+      "text": "<bounded evidence-backed diagnosis>"
+    },
+    {
+      "label": "fix",
+      "title": "<bounded fix>",
+      "text": "<what changed and why>"
+    },
+    {
+      "label": "diff",
+      "title": "<relevant diff excerpt>",
+      "text": "<small repo-relative diff>"
+    },
+    {
+      "label": "command",
+      "title": "<verification>",
+      "text": "<repo-relative command and real passing output>"
+    }
+  ],
+  "outcome": {
+    "status": "completed",
+    "verifiabilityTier": "tests-passed"
+  },
+  "synthesis": "<three to six authored sentences explaining the failure, fix, evidence, and reusable lesson>",
+  "attribution": {
+    "origin": "operator-recorded-session",
+    "sourceUrl": "https://github.com/Jinn-Network/mono/commit/<full-40-character-fix-commit>"
+  }
+}
