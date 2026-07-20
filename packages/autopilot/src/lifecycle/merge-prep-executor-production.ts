@@ -3,7 +3,7 @@ import type { CommandRunner } from '../dispatcher/issue-source.js';
 import { defaultRunner } from '../dispatcher/issue-source.js';
 import { parseOwnedPrefixes, touchesCodeOwnedPath } from '../dispatcher/code-owned.js';
 import { REPO } from '../dispatcher/constants.js';
-import { fetchFieldIds } from '../dispatcher/field-cache.js';
+import { ensureFieldIds } from '../dispatcher/field-cache.js';
 import { fetchProjectSnapshot } from '../dispatcher/project-snapshot.js';
 import type { CreateAttemptOptions } from './attempt-workspace.js';
 import { createAttemptWorkspace } from './attempt-workspace.js';
@@ -225,7 +225,7 @@ export function makeProductionMergePrepActionPort(
           throw new Error('Merge-prep Project authority is missing or Human-held');
         }
         if (item.status !== 'In Review') {
-          const fields = await fetchFieldIds(run);
+          const fields = await ensureFieldIds(run);
           await mutateReadback(
             () => run('gh', [
               'project', 'item-edit',

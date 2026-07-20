@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { resetFieldCache } from '../../src/dispatcher/field-cache.js';
 import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
 import type { AttemptManifest } from '../../src/lifecycle/attempt-workspace.js';
 import { encodeBranchClaimTrailers } from '../../src/lifecycle/codecs.js';
@@ -143,6 +144,10 @@ function pullRequest(
 }
 
 describe('production implementation session port', () => {
+  // The Human-arrives-mid-mutation tests hook their status flip on the
+  // field-list call; a cache populated by an earlier test would skip that
+  // call and remove the injection point.
+  beforeEach(() => resetFieldCache());
   it('reads winning claim ancestry through only the canonical HTTPS remote and selected identity', async () => {
     const calls: Array<{ cmd: string; args: string[]; env?: Record<string, string> }> = [];
     const runner: CommandRunner = async (cmd, args, options) => {

@@ -2,7 +2,7 @@ import type { CommandRunner } from '../dispatcher/issue-source.js';
 import { defaultRunner } from '../dispatcher/issue-source.js';
 import { parseOwnedPrefixes, touchesCodeOwnedPath } from '../dispatcher/code-owned.js';
 import { REPO } from '../dispatcher/constants.js';
-import { fetchFieldIds } from '../dispatcher/field-cache.js';
+import { ensureFieldIds } from '../dispatcher/field-cache.js';
 import { fetchProjectSnapshot } from '../dispatcher/project-snapshot.js';
 import type { SelectedCredential } from './credentials.js';
 import type {
@@ -176,7 +176,7 @@ export function makeProductionMergeActionPort(
           entry.contentType === 'Issue' && entry.number === issueNumber);
         if (item === undefined) throw new Error('Merged issue is missing from Project');
         if (item.status !== 'Done') {
-          const fields = await fetchFieldIds(run);
+          const fields = await ensureFieldIds(run);
           let mutationError: unknown;
           try {
             await run('gh', [

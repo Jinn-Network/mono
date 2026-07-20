@@ -13,7 +13,7 @@ import {
   touchesCodeOwnedPath,
 } from '../dispatcher/code-owned.js';
 import { REPO } from '../dispatcher/constants.js';
-import { fetchFieldIds } from '../dispatcher/field-cache.js';
+import { ensureFieldIds } from '../dispatcher/field-cache.js';
 import { fetchProjectSnapshot } from '../dispatcher/project-snapshot.js';
 import type {
   CreateAttemptOptions,
@@ -373,7 +373,7 @@ export function makeProductionReviewActionPort(
           throw new Error('Review projection stopped because Human is dominant');
         }
         if (item.status !== 'In Review') {
-          const fields = await fetchFieldIds(gh);
+          const fields = await ensureFieldIds(gh);
           await mutateWithExactReadback(
             () => gh('gh', [
               'project', 'item-edit',

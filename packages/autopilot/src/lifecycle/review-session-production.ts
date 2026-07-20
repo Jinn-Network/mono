@@ -11,7 +11,7 @@ import {
   parseOwnedPrefixes,
   touchesCodeOwnedPath,
 } from '../dispatcher/code-owned.js';
-import { fetchFieldIds } from '../dispatcher/field-cache.js';
+import { ensureFieldIds } from '../dispatcher/field-cache.js';
 import { fetchProjectSnapshot } from '../dispatcher/project-snapshot.js';
 import type { AttemptManifest } from './attempt-workspace.js';
 import {
@@ -635,7 +635,7 @@ export function makeProductionReviewSessionPort(
       ) {
         throw new Error('Review Project mutation stopped because Human is dominant');
       }
-      const fields = await fetchFieldIds(secureRunner);
+      const fields = await ensureFieldIds(secureRunner);
       await mutateWithExactReadback(
         () => run(manifest, 'gh', [
           'project', 'item-edit',

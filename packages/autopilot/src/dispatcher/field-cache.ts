@@ -162,6 +162,19 @@ export function getFieldCache(): FieldCache | null {
   return cached;
 }
 
+/**
+ * Cached read-through: serve the module-level cache when populated, fetch
+ * exactly once otherwise. The field-list response is constant for the life
+ * of a process (measured at 102 GraphQL points per call — per-action
+ * refetching burned ~1,300 points in one reconcile cycle), so every v2
+ * lifecycle call site goes through this instead of {@link fetchFieldIds};
+ * the stale-id retry path keeps calling `resetFieldCache` + `fetchFieldIds`
+ * for its deliberate refresh.
+ */
+export async function ensureFieldIds(runner: CommandRunner): Promise<FieldCache> {
+  return cached ?? fetchFieldIds(runner);
+}
+
 /** Drop the cached value. The next read returns `null` until the next fetch. */
 export function resetFieldCache(): void {
   cached = null;
