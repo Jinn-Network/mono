@@ -54,7 +54,7 @@ const MAX_TAGS = 16;
  * "how did this land in the corpus" signal) plus the episode's own declared
  * tags, deduped and capped. Mirrors `seedTags()` in execute.ts.
  */
-function episodeTags(episode: SeedEpisode): string[] {
+export function publishedEpisodeTags(episode: SeedEpisode): string[] {
   const tags: string[] = [];
   for (const candidate of ['seed-import', ...episode.tags]) {
     const tag = candidate.trim().slice(0, MAX_TAG_CHARS);
@@ -103,7 +103,7 @@ function toCapturedTask(episode: SeedEpisode, now: Date, supersedes: string | un
 
   return {
     session: { sessionId: `seed-episode:${episode.id}`, capturedAt: now.toISOString() },
-    task: { summary: episode.taskSummary, distributionTags: episodeTags(episode) },
+    task: { summary: episode.taskSummary, distributionTags: publishedEpisodeTags(episode) },
     environment: {
       harness: { name: 'jinn-layer-seed-episode-import', version: '0.1.0' },
       model: 'none',
@@ -140,6 +140,14 @@ function episodePrivacyAttributes(episode: SeedEpisode): Attributes {
     attributes[`episode.steps[${index}].text`] = step.text;
   });
   return attributes;
+}
+
+/** Read-only privacy preflight shared by execute and curated-batch auditing. */
+export async function seedEpisodePrivacyRedactionCount(
+  episode: SeedEpisode,
+): Promise<number> {
+  const scrub = await buildSeedScrubPipeline().run(episodePrivacyAttributes(episode));
+  return scrub.redactions.length;
 }
 
 export async function executeEpisodes(

@@ -64,6 +64,7 @@
     "task-creator:proof:unjs-destr": "yarn task-creator:mint-preflight:unjs-destr",
     "jinn": "tsx src/bin/jinn.ts",
     "jinn-layer": "tsx packages/harness-layer/src/bin/jinn-layer.ts",
+    "stage2:validate-curated-seeds": "tsx scripts/validate-curated-seed-batch.ts",
     "typecheck:harness-layer": "tsc --noEmit -p packages/harness-layer/tsconfig.json",
     "dev": "yarn build && node dist/bin/jinn.js",
     "build:sdk": "yarn --cwd ../packages/sdk install --immutable && yarn --cwd ../packages/sdk build",

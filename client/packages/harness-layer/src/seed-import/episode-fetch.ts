@@ -29,7 +29,7 @@
  * existing `seed:skill-md` skill-seed step already uses.
  */
 
-import { readFileSync, readdirSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { OutcomeStatusSchema, VerifiabilityTierSchema } from '../envelope.js';
@@ -114,6 +114,12 @@ export interface EpisodeSource {
   list(): Promise<SeedEpisode[]>;
 }
 
+export interface LocalEpisodeSeedSourceOptions {
+  maxFiles?: number;
+  maxFileBytes?: number;
+  rejectSymlinks?: boolean;
+}
+
 /**
  * Local directory seed source: every `*.episode.json` file in `dir`,
  * validated against `SeedEpisodeSchema`. Sorted by filename for
@@ -122,14 +128,40 @@ export interface EpisodeSource {
  * suffix (e.g. the skill-shaped distractor fixtures) are ignored by
  * construction — episodes and skills are separate lanes.
  */
-export function createLocalEpisodeSeedSource(dir: string): EpisodeSource {
+export function createLocalEpisodeSeedSource(
+  dir: string,
+  options: LocalEpisodeSeedSourceOptions = {},
+): EpisodeSource {
   return {
     name: `local-episodes:${dir}`,
     async list(): Promise<SeedEpisode[]> {
       const files = readdirSync(dir)
-        .filter((f) => f.endsWith('.episode.json'))
+        .filter((file) => file.endsWith('.episode.json'))
         .sort();
-      return files.map((f) => parseSeedEpisode(JSON.parse(readFileSync(join(dir, f), 'utf-8'))));
+      if (options.maxFiles !== undefined && files.length > options.maxFiles) {
+        throw new Error(
+          `episode directory contains ${files.length} candidate files; maximum is ${options.maxFiles}`,
+        );
+      }
+      return files.map((file) => {
+        const path = join(dir, file);
+        const stats = lstatSync(path);
+        if (options.rejectSymlinks && stats.isSymbolicLink()) {
+          throw new Error(`episode candidate must not be a symbolic link: ${file}`);
+        }
+        if (options.rejectSymlinks && !stats.isFile()) {
+          throw new Error(`episode candidate must be a regular file: ${file}`);
+        }
+        if (
+          options.maxFileBytes !== undefined &&
+          stats.size > options.maxFileBytes
+        ) {
+          throw new Error(
+            `episode candidate ${file} exceeds ${options.maxFileBytes} byte limit`,
+          );
+        }
+        return parseSeedEpisode(JSON.parse(readFileSync(path, 'utf-8')));
+      });
     },
   };
 }
