@@ -25,6 +25,7 @@ import {
 
 export type AttemptPhase = 'implement' | 'review' | 'merge-prep';
 export type AttemptProcessState = 'preparing' | 'running' | 'exited';
+export type ReviewApprovalPolicy = 'approve-eligible' | 'human-codeowner';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SAFE_COMPONENT_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
@@ -68,6 +69,7 @@ export interface AttemptManifest {
   readonly claimOid: string;
   readonly reviewGeneration?: string;
   readonly reviewRefOid?: string;
+  readonly reviewApprovalPolicy?: ReviewApprovalPolicy;
   readonly selectedLogin: string;
   readonly repository: AttemptRepositoryIdentity;
   readonly processState: AttemptProcessState;
@@ -91,6 +93,7 @@ export interface CreateAttemptOptions {
   readonly claimOid: string;
   readonly reviewGeneration?: string;
   readonly reviewRefOid?: string;
+  readonly reviewApprovalPolicy?: ReviewApprovalPolicy;
   readonly selectedLogin: string;
   readonly remoteName?: string;
   readonly pid?: number | null;
@@ -163,7 +166,15 @@ function exactKeys(
   const unknown = Object.keys(record).find((key) => !allowedSet.has(key));
   if (unknown !== undefined) throw new Error(`Unknown field: ${unknown}`);
   const missing = allowed.find((key) => !Object.hasOwn(record, key)
-    && !['prNumber', 'reviewGeneration', 'reviewRefOid', 'terminalHead', 'childStartedAt', 'childExitedAt'].includes(key));
+    && ![
+      'prNumber',
+      'reviewGeneration',
+      'reviewRefOid',
+      'reviewApprovalPolicy',
+      'terminalHead',
+      'childStartedAt',
+      'childExitedAt',
+    ].includes(key));
   if (missing !== undefined) throw new Error(`Missing ${name} field: ${missing}`);
 }
 
@@ -275,6 +286,7 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
     'claimOid',
     'reviewGeneration',
     'reviewRefOid',
+    'reviewApprovalPolicy',
     'selectedLogin',
     'repository',
     'processState',
@@ -309,10 +321,31 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
   const reviewRefOid = manifest.reviewRefOid === undefined
     ? undefined
     : gitOid(stringField(manifest.reviewRefOid, 'review ref OID'));
+  const reviewApprovalPolicy = manifest.reviewApprovalPolicy;
+  if (
+    reviewApprovalPolicy !== undefined
+    && reviewApprovalPolicy !== 'approve-eligible'
+    && reviewApprovalPolicy !== 'human-codeowner'
+  ) {
+    throw new Error('Invalid review approval policy');
+  }
   if ((reviewGeneration === undefined) !== (reviewRefOid === undefined)) {
     throw new Error('Review generation and ref OID must appear together');
   }
-  if (phase !== 'review' && reviewGeneration !== undefined) {
+  if (
+    phase === 'review'
+    && (
+      reviewGeneration === undefined
+      || reviewRefOid === undefined
+      || reviewApprovalPolicy === undefined
+    )
+  ) {
+    throw new Error('Review attempts require generation, ref OID, and approval policy');
+  }
+  if (
+    phase !== 'review'
+    && (reviewGeneration !== undefined || reviewApprovalPolicy !== undefined)
+  ) {
     throw new Error('Review generation metadata is valid only for review attempts');
   }
   const decodedProcessState = processState(manifest.processState);
@@ -355,7 +388,11 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
     claimOid,
     ...(reviewGeneration === undefined
       ? {}
-      : { reviewGeneration, reviewRefOid: reviewRefOid! }),
+      : {
+          reviewGeneration,
+          reviewRefOid: reviewRefOid!,
+          reviewApprovalPolicy: reviewApprovalPolicy!,
+        }),
     selectedLogin: stringField(manifest.selectedLogin, 'selected login'),
     repository: decodeRepositoryIdentity(manifest.repository),
     processState: decodedProcessState,
@@ -470,6 +507,43 @@ export function advanceAttemptExpectedHead(
     timestamps: {
       ...previous.timestamps,
       updatedAt: timestamp,
+    },
+  });
+  writeManifestAtomic(path, advanced);
+  return advanced;
+}
+
+/**
+ * Review fix publication advances one exact branch/review-ref authority pair.
+ * Both expectations are checked before the single atomic manifest rewrite.
+ */
+export function advanceAttemptReviewPair(
+  path: string,
+  expectedHead: string,
+  expectedReviewRefOid: string,
+  nextHead: string,
+  nextReviewRefOid: string,
+  now: () => Date = () => new Date(),
+): AttemptManifest {
+  const previous = readAttemptManifest(path);
+  const expectedBranch = gitOid(expectedHead);
+  const expectedReview = gitOid(expectedReviewRefOid);
+  const nextBranch = gitOid(nextHead);
+  const nextReview = gitOid(nextReviewRefOid);
+  if (
+    previous.phase !== 'review'
+    || previous.expectedHead !== expectedBranch
+    || previous.reviewRefOid !== expectedReview
+  ) {
+    throw new Error('Review attempt manifest authority pair changed before progressive update');
+  }
+  const advanced = decodeAttemptManifest({
+    ...previous,
+    expectedHead: nextBranch,
+    reviewRefOid: nextReview,
+    timestamps: {
+      ...previous.timestamps,
+      updatedAt: transitionTimestamp(now),
     },
   });
   writeManifestAtomic(path, advanced);
@@ -655,6 +729,19 @@ export async function createAttemptWorkspace(
   if ((options.reviewGeneration === undefined) !== (options.reviewRefOid === undefined)) {
     throw new Error('Review generation and ref OID must appear together');
   }
+  if (
+    options.phase === 'review'
+    && (
+      options.reviewGeneration === undefined
+      || options.reviewRefOid === undefined
+      || options.reviewApprovalPolicy === undefined
+    )
+  ) {
+    throw new Error('Review attempts require generation, ref OID, and approval policy');
+  }
+  if (options.phase !== 'review' && options.reviewApprovalPolicy !== undefined) {
+    throw new Error('Review approval policy is valid only for review attempts');
+  }
   if (!isAbsolute(options.repositoryPath) || !isAbsolute(options.worktreeBase)) {
     throw new Error('Attempt repository and worktree base must be absolute');
   }
@@ -698,6 +785,7 @@ export async function createAttemptWorkspace(
       : {
           reviewGeneration: options.reviewGeneration,
           reviewRefOid: options.reviewRefOid,
+          reviewApprovalPolicy: options.reviewApprovalPolicy,
         }),
     selectedLogin: options.selectedLogin,
     repository,
