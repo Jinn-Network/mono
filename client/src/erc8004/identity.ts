@@ -135,6 +135,8 @@ export interface PublishContentV2Args {
   /** Textual CID embedded in the metadataKey (`<kind>:<cid>`). */
   cid: string;
   payload: ExecutionPayloadV2;
+  /** Fail unless the transaction receipt is mined with status=success. */
+  requireSuccessfulReceipt?: boolean;
 }
 
 export interface ManifestPublishArgs {
@@ -167,6 +169,23 @@ export class PayloadValidationError extends Error {
     this.name = 'PayloadValidationError';
     this.tier = tier;
     this.reason = reason;
+  }
+}
+
+/**
+ * A manifest write was broadcast, but its receipt did not prove a successful
+ * on-chain anchor. The tx hash is retained so operators can reconcile the
+ * irreversible broadcast without blindly retrying it.
+ */
+export class ManifestReceiptConfirmationError extends Error {
+  override readonly name = 'ManifestReceiptConfirmationError';
+
+  constructor(
+    readonly txHash: Hex,
+    reason: string,
+    options?: ErrorOptions,
+  ) {
+    super(`manifest receipt ${reason} for ${txHash}`, options);
   }
 }
 
@@ -543,7 +562,11 @@ export class IdentityPublisher {
   async publishContentV2(args: PublishContentV2Args): Promise<PublishContentResult> {
     const metadataKey = buildMetadataKey(args.kind, args.cid);
     const metadataValue = encodeExecutionPayloadV2(args.payload);
-    return this._writeMetadata(metadataKey, metadataValue);
+    return this._writeMetadata(
+      metadataKey,
+      metadataValue,
+      args.requireSuccessfulReceipt ?? false,
+    );
   }
 
   /**
@@ -553,12 +576,13 @@ export class IdentityPublisher {
   async publishManifest(args: ManifestPublishArgs): Promise<PublishContentResult> {
     const metadataKey = buildManifestMetadataKey(args.manifestCid);
     const metadataValue = encodeManifestPayload(args.payload);
-    return this._writeMetadata(metadataKey, metadataValue);
+    return this._writeMetadata(metadataKey, metadataValue, true);
   }
 
   private async _writeMetadata(
     metadataKey: string,
     metadataValue: Hex,
+    requireSuccessfulReceipt = false,
   ): Promise<PublishContentResult> {
     const account = this.walletClient.account;
     if (!account) {
@@ -604,6 +628,9 @@ export class IdentityPublisher {
     let feeWei: bigint | null = null;
     try {
       const receipt = await this.publicClient.waitForTransactionReceipt({ hash: txHash });
+      if (requireSuccessfulReceipt && receipt.status !== 'success') {
+        throw new ManifestReceiptConfirmationError(txHash, 'reverted');
+      }
       blockNumber =
         typeof receipt.blockNumber === 'bigint' ? Number(receipt.blockNumber) : null;
       gasUsed = typeof receipt.gasUsed === 'bigint' ? receipt.gasUsed : null;
@@ -612,6 +639,14 @@ export class IdentityPublisher {
           ? gasUsed * receipt.effectiveGasPrice
           : null;
     } catch (err) {
+      if (requireSuccessfulReceipt) {
+        if (err instanceof ManifestReceiptConfirmationError) throw err;
+        throw new ManifestReceiptConfirmationError(
+          txHash,
+          `confirmation failed: ${err instanceof Error ? err.message : String(err)}`,
+          { cause: err },
+        );
+      }
       console.warn(
         `[erc8004] receipt fetch failed for ${txHash} (anchor will be recorded with null block): ${err instanceof Error ? err.message : err}`,
       );

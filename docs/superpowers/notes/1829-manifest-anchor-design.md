@@ -97,7 +97,8 @@ discovery hints. The body is uploaded via the existing `publishArtifact`/`upload
    couples upload+anchor; factor the upload+build into a reusable `publishMemberEnvelope()` that
    returns `{ envelopeRef, sha256, envelope }` and skips `anchorEnvelope`).
 2. Collect member CIDs → build leaves → `merkleRoot`.
-3. Build + upload the `jinn.manifest.v0` body → `manifestCid`.
+3. Build + upload the `jinn.manifest.v0` body with IPFS raw leaves → `manifestCid` (the CID
+   multihash therefore commits directly to the canonical body bytes).
 4. `identityPublisher.publishManifest({ manifestCid, payload: { version, merkleRoot, memberCount, createdAt } })`
    → **one** `setMetadata` tx.
 5. Record the anchor (reuse `store.saveErc8004Anchor` with `contentKind: 'manifest'`, `metadataKey:
@@ -111,9 +112,10 @@ without changing the contributed-record path.
 **Consumer enumeration + inclusion proof (read side).** New `client/src/erc8004/manifest-consumer.ts`
 (pure, client-side; no indexer dependency):
 - `fetchManifest(manifestCid, ipfsGet)` → parse + validate `jinn.manifest.v0` (Zod schema in a new
-  `client/src/types/manifest.ts`), **re-derive the merkle root from `members[]` and assert it equals
-  the anchored root** (fetched via `readManifestAnchor(manifestCid)` — a `getMetadata`/indexer read)
-  before trusting the body. Root mismatch → throw (tamper-evident).
+  `client/src/types/manifest.ts`), verify the canonical body digest against the manifest CID, then
+  **re-derive the merkle root from `members[]` and assert it equals the anchored root** (fetched via
+  `readManifestAnchor(manifestCid)` — a `getMetadata`/indexer read) before trusting the body. CID or
+  root mismatch → throw (tamper-evident).
 - `enumerateMembers(manifest)` → the member list (CIDs are then fetch-by-CID as today).
 - `proveMember(manifest, memberCid)` → `{ proof, root }`; `verifyMember(memberCid, proof, anchoredRoot)`
   → boolean (delegates to `merkle.ts` `verifyMerkleProof`). This is the "a member is verifiable
@@ -127,9 +129,11 @@ receipt, and have the batch publish flow log + record them:
 - Persist to the anchor row (add nullable `gasUsed` / `feeWei` columns to the `erc8004_anchors` store
   insert, or record in the ledger row) so the first real bridge batch's per-manifest cost is captured
   and, alongside a single per-record anchor from the same run, gives the per-anchor-vs-per-manifest
-  comparison §9 asks for. **Assert no gas figure in docs until this run produces it** — record the
-  measured numbers back into §9 / the issue as the measurement deliverable (a follow-up doc edit, not
-  a fabricated constant).
+  comparison §9 asks for. The extra control is explicit
+  (`--measure-per-record-control`) and reuses the first already-uploaded signed member; ordinary
+  manifest runs remain exactly N uploads → one anchor transaction. **Assert no gas figure in docs
+  until this run produces it** — record the measured numbers back into §9 / the issue as the
+  measurement deliverable (a follow-up doc edit, not a fabricated constant).
 
 ## Key trade-offs
 
@@ -199,6 +203,6 @@ Modify:
   `manifest-consumer.ts` `proveMember`/`verifyMember`, verified against the **on-chain** root
   (`fetchManifest` cross-checks body root == anchored root).
 - **Gas measured and recorded (first batch = the measurement)** → `IdentityPublisher` surfaces
-  `gasUsed`/`feeWei` from the receipt; batch flow logs + persists per-manifest (and one per-record for
-  comparison); numbers recorded back into §9 / the issue after the first real bridge batch — none
-  asserted before measurement.
+  `gasUsed`/`feeWei` from confirmed successful receipts; batch flow logs + persists per-manifest and
+  the explicit first-member per-record control in separate rows; numbers recorded back into §9 / the
+  issue after the first real bridge batch — none asserted before measurement.

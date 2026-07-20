@@ -1,4 +1,7 @@
+import { createHash } from 'node:crypto';
 import type { Hex } from 'viem';
+import { cidToDigestHex } from '../adapters/mech/ipfs.js';
+import { canonicalJson } from '../harnesses/engine/canonical-json.js';
 import {
   decodeManifestPayload,
   buildManifestMetadataKey,
@@ -45,6 +48,13 @@ export class ManifestAnchorNotFoundError extends Error {
   }
 }
 
+export class ManifestContentAddressMismatchError extends Error {
+  constructor(reason: string) {
+    super(`manifest content address mismatch: ${reason}`);
+    this.name = 'ManifestContentAddressMismatchError';
+  }
+}
+
 function parseIpfsJson(input: unknown): unknown {
   if (typeof input === 'string') return JSON.parse(input);
   if (input instanceof Uint8Array) {
@@ -75,6 +85,22 @@ export async function fetchManifest(
   deps: ManifestFetchDeps,
 ): Promise<ManifestV0> {
   const manifest = parseManifestV0(parseIpfsJson(await deps.ipfsGet(manifestCid)));
+  const actualDigest = `0x${createHash('sha256')
+    .update(canonicalJson(manifest))
+    .digest('hex')}`.toLowerCase();
+  let addressedDigest: string;
+  try {
+    addressedDigest = cidToDigestHex(manifestCid).toLowerCase();
+  } catch (error) {
+    throw new ManifestContentAddressMismatchError(
+      `cannot decode CID ${manifestCid}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (actualDigest !== addressedDigest) {
+    throw new ManifestContentAddressMismatchError(
+      `CID digest ${addressedDigest} does not match canonical body digest ${actualDigest}`,
+    );
+  }
   const derivedRoot = merkleRoot(manifest.members.map((member) => hashLeaf(member.cid)));
   if (derivedRoot.toLowerCase() !== manifest.merkleRoot.toLowerCase()) {
     throw new ManifestRootMismatchError(

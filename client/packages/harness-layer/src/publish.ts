@@ -109,6 +109,18 @@ export interface ManifestAnchorRecord {
   anchoredAt: number;
 }
 
+export interface PerRecordControlAnchorRecord {
+  envelopeRef: string;
+  contentKind: 'capture';
+  metadataKey: string;
+  payloadHex: `0x${string}`;
+  txHash: `0x${string}`;
+  blockNumber: number | null;
+  gasUsed: bigint;
+  feeWei: bigint;
+  anchoredAt: number;
+}
+
 export interface ManifestBatchPublishDeps extends HarnessPublishDeps {
   publishManifestBody(body: ManifestV0): Promise<CapturePublishedBlob>;
   anchorManifest(input: {
@@ -116,6 +128,8 @@ export interface ManifestBatchPublishDeps extends HarnessPublishDeps {
     payload: ManifestPayload;
   }): Promise<ManifestAnchorResult>;
   recordManifestAnchor(input: ManifestAnchorRecord): void;
+  /** Required only by the explicit paired gas-measurement control. */
+  recordControlAnchor?(input: PerRecordControlAnchorRecord): void;
   log?: (line: string) => void;
 }
 
@@ -127,6 +141,8 @@ export interface ManifestBatchMemberInput {
 
 export interface ManifestBatchOptions {
   batchKind: string;
+  /** Add one receipt-bound per-record control tx for the first uploaded member. */
+  measurePerRecordControl?: boolean;
 }
 
 export interface PublishedMemberEnvelope {
@@ -143,6 +159,13 @@ export interface ManifestBatchResult {
   root: `0x${string}`;
   gasUsed: bigint | null;
   feeWei: bigint | null;
+  control?: {
+    memberRef: string;
+    anchorTx: `0x${string}`;
+    blockNumber: number | null;
+    gasUsed: bigint | null;
+    feeWei: bigint | null;
+  };
 }
 
 export interface PublishOptions {
@@ -197,6 +220,36 @@ export class ManifestBatchRecordingError extends Error {
       `manifest ${result.manifestCid} anchored at ${result.anchorTx}, ` +
         `but local recording failed: ${detail}`,
     );
+  }
+}
+
+/**
+ * The manifest body is already content-addressed and the transaction was
+ * broadcast, but the anchor could not be confirmed successful. Keep both
+ * identifiers so an operator can reconcile before retrying.
+ */
+export class ManifestBatchAnchorError extends Error {
+  override readonly name = 'ManifestBatchAnchorError';
+  readonly txHash: `0x${string}` | null;
+
+  constructor(
+    readonly manifestCid: string,
+    readonly memberRefs: string[],
+    readonly root: `0x${string}`,
+    readonly anchorError: unknown,
+  ) {
+    const candidate = (anchorError as { txHash?: unknown } | null)?.txHash;
+    const txHash =
+      typeof candidate === 'string' && /^0x[0-9a-fA-F]{64}$/.test(candidate)
+        ? candidate as `0x${string}`
+        : null;
+    const detail =
+      anchorError instanceof Error ? anchorError.message : String(anchorError);
+    super(
+      `manifest ${manifestCid} anchor confirmation failed` +
+        `${txHash ? ` for ${txHash}` : ''}: ${detail}`,
+    );
+    this.txHash = txHash;
   }
 }
 
@@ -450,7 +503,9 @@ export async function publish(
 
 /**
  * Upload a batch of substrate members and anchor one enumerable manifest over
- * their CIDs. No member receives a per-record `capture:` anchor.
+ * their CIDs. Ordinary runs give no member a per-record `capture:` anchor; the
+ * explicit measurement option reuses member 0 for one separately recorded
+ * control transaction.
  */
 export async function publishManifestBatch(
   members: ManifestBatchMemberInput[],
@@ -462,6 +517,11 @@ export async function publishManifestBatch(
   }
   if (typeof opts.batchKind !== 'string' || opts.batchKind.length === 0) {
     throw new Error('publishManifestBatch requires a non-empty batchKind');
+  }
+  if (opts.measurePerRecordControl && !deps.recordControlAnchor) {
+    throw new Error(
+      'per-record measurement control requires recordControlAnchor persistence',
+    );
   }
 
   const now = deps.now?.() ?? new Date();
@@ -493,7 +553,17 @@ export async function publishManifestBatch(
     memberCount: published.length,
     createdAt,
   };
-  const anchor = await deps.anchorManifest({ manifestCid, payload });
+  let anchor: ManifestAnchorResult;
+  try {
+    anchor = await deps.anchorManifest({ manifestCid, payload });
+  } catch (error) {
+    throw new ManifestBatchAnchorError(
+      manifestCid,
+      published.map((member) => member.envelopeRef),
+      root,
+      error,
+    );
+  }
   const result: ManifestBatchResult = {
     manifestCid,
     anchorTx: anchor.txHash,
@@ -515,6 +585,48 @@ export async function publishManifestBatch(
       feeWei: anchor.feeWei,
       anchoredAt: createdAt,
     });
+    if (opts.measurePerRecordControl) {
+      const controlMember = published[0]!;
+      const metadataKey = `capture:${controlMember.envelopeRef}`;
+      const controlAnchor = await deps.anchorEnvelope({
+        metadataKey,
+        envelopeCid: controlMember.envelopeRef,
+        envelopeHash: controlMember.envelope.signature.hash as `0x${string}`,
+        envelope: controlMember.envelope,
+        requireSuccessfulReceipt: true,
+      });
+      if (!controlAnchor.txHash) {
+        throw new Error('per-record control anchor returned no transaction hash');
+      }
+      result.control = {
+        memberRef: controlMember.envelopeRef,
+        anchorTx: controlAnchor.txHash,
+        blockNumber: controlAnchor.blockNumber ?? null,
+        gasUsed: controlAnchor.gasUsed ?? null,
+        feeWei: controlAnchor.feeWei ?? null,
+      };
+      if (result.control.gasUsed === null || result.control.feeWei === null) {
+        throw new Error(
+          `per-record control receipt telemetry unavailable for ${controlAnchor.txHash}`,
+        );
+      }
+      if (!controlAnchor.payloadHex) {
+        throw new Error(
+          `per-record control payload unavailable for ${controlAnchor.txHash}`,
+        );
+      }
+      deps.recordControlAnchor!({
+        envelopeRef: controlMember.envelopeRef,
+        contentKind: 'capture',
+        metadataKey,
+        payloadHex: controlAnchor.payloadHex,
+        txHash: controlAnchor.txHash,
+        blockNumber: result.control.blockNumber,
+        gasUsed: result.control.gasUsed,
+        feeWei: result.control.feeWei,
+        anchoredAt: createdAt,
+      });
+    }
     for (const member of published) {
       deps.ledger.append({
         ts: now.toISOString(),
@@ -534,6 +646,13 @@ export async function publishManifestBatch(
       `gasUsed=${anchor.gasUsed?.toString() ?? 'null'} ` +
       `feeWei=${anchor.feeWei?.toString() ?? 'null'}`,
   );
+  if (result.control) {
+    deps.log?.(
+      `[manifest] per-record control anchored cid=${result.control.memberRef} ` +
+        `tx=${result.control.anchorTx} gasUsed=${result.control.gasUsed?.toString() ?? 'null'} ` +
+        `feeWei=${result.control.feeWei?.toString() ?? 'null'}`,
+    );
+  }
   return result;
 }
 

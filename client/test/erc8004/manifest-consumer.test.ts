@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { type Hex } from 'viem';
 import {
   ManifestAnchorNotFoundError,
+  ManifestContentAddressMismatchError,
   ManifestRootMismatchError,
   enumerateMembers,
   fetchManifest,
@@ -14,6 +16,7 @@ import {
   type ManifestPayload,
 } from '../../src/erc8004/manifest-registry.js';
 import { hashLeaf, merkleRoot } from '../../src/erc8004/merkle.js';
+import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
 import type { ManifestV0 } from '../../src/types/manifest.js';
 
 const CIDS = ['bafy-member-a', 'bafy-member-b', 'bafy-member-c'];
@@ -45,6 +48,11 @@ function anchor(overrides: Partial<ManifestPayload> = {}): Hex {
   });
 }
 
+function cidFor(body: unknown): string {
+  const digest = createHash('sha256').update(canonicalJson(body)).digest('hex');
+  return `f01551220${digest}`;
+}
+
 function deps(body: unknown = manifest(), anchored: Hex | null = anchor()) {
   return {
     agentId: 42n,
@@ -55,14 +63,16 @@ function deps(body: unknown = manifest(), anchored: Hex | null = anchor()) {
 
 describe('manifest consumer', () => {
   it('fetches, validates against the on-chain commitment, and enumerates in order', async () => {
-    const ports = deps();
-    const fetched = await fetchManifest('bafy-manifest', ports);
+    const body = manifest();
+    const manifestCid = cidFor(body);
+    const ports = deps(body);
+    const fetched = await fetchManifest(manifestCid, ports);
 
-    expect(fetched).toEqual(manifest());
+    expect(fetched).toEqual(body);
     expect(enumerateMembers(fetched).map((member) => member.cid)).toEqual(CIDS);
     expect(ports.getMetadata).toHaveBeenCalledWith(
       42n,
-      'manifest:bafy-manifest',
+      `manifest:${manifestCid}`,
     );
   });
 
@@ -79,8 +89,9 @@ describe('manifest consumer', () => {
 
   it('rejects an anchored root that differs from the body and derived roots', async () => {
     const otherRoot = merkleRoot([hashLeaf('other')]);
+    const body = manifest();
     await expect(
-      fetchManifest('bafy-manifest', deps(manifest(), anchor({ merkleRoot: otherRoot }))),
+      fetchManifest(cidFor(body), deps(body, anchor({ merkleRoot: otherRoot }))),
     ).rejects.toBeInstanceOf(ManifestRootMismatchError);
   });
 
@@ -92,32 +103,52 @@ describe('manifest consumer', () => {
       ],
     });
     await expect(
-      fetchManifest('bafy-manifest', deps(tampered)),
+      fetchManifest(cidFor(tampered), deps(tampered)),
     ).rejects.toBeInstanceOf(ManifestRootMismatchError);
   });
 
   it('rejects an anchored member count that differs from the body', async () => {
+    const body = manifest();
     await expect(
-      fetchManifest('bafy-manifest', deps(manifest(), anchor({ memberCount: 4 }))),
+      fetchManifest(cidFor(body), deps(body, anchor({ memberCount: 4 }))),
     ).rejects.toThrow(/member count/);
   });
 
   it('rejects an anchored creation time that differs from the body', async () => {
+    const body = manifest();
     await expect(
       fetchManifest(
-        'bafy-manifest',
-        deps(manifest(), anchor({ createdAt: CREATED_AT + 1 })),
+        cidFor(body),
+        deps(body, anchor({ createdAt: CREATED_AT + 1 })),
       ),
     ).rejects.toThrow(/createdAt/);
   });
 
   it('returns null for a missing anchor and fetch fails closed', async () => {
-    const ports = deps(manifest(), null);
+    const body = manifest();
+    const manifestCid = cidFor(body);
+    const ports = deps(body, null);
     await expect(
-      readManifestAnchor('bafy-manifest', ports),
+      readManifestAnchor(manifestCid, ports),
     ).resolves.toBeNull();
     await expect(
-      fetchManifest('bafy-manifest', ports),
+      fetchManifest(manifestCid, ports),
     ).rejects.toBeInstanceOf(ManifestAnchorNotFoundError);
+  });
+
+  it('rejects substituted manifest fields even when the member root is unchanged', async () => {
+    const original = manifest();
+    const substituted = manifest({
+      batchKind: 'substituted',
+      members: original.members.map((member, index) =>
+        index === 0
+          ? { ...member, sha256: 'f'.repeat(64), polarity: 'fail' as const }
+          : member,
+      ),
+    });
+
+    await expect(
+      fetchManifest(cidFor(original), deps(substituted)),
+    ).rejects.toBeInstanceOf(ManifestContentAddressMismatchError);
   });
 });

@@ -17,6 +17,7 @@ import { canonicalJson } from '../../../src/harnesses/engine/canonical-json.js';
 import {
   codeDigestSha256ToBytes32,
   contentKindForAnchor,
+  encodeExecutionPayloadV2,
   IdentityPublisher,
   modeStringToFlag,
   type ExecutionPayloadV2,
@@ -110,10 +111,16 @@ export function createLivePublishDeps(config: LivePublishConfig): ManifestBatchP
       return { cid, sha256: sha256Hex(canonicalJson(envelope)), endpoint, priceUsdc: '0' };
     },
     publishManifestBody: async (body) => {
-      const cid = await uploadToIpfs(ipfsRegistryUrl, body);
+      const cid = await uploadToIpfs(ipfsRegistryUrl, body, { rawLeaves: true });
       return { cid, sha256: sha256Hex(canonicalJson(body)), endpoint, priceUsdc: '0' };
     },
-    anchorEnvelope: async ({ metadataKey, envelopeCid, envelopeHash, envelope }) => {
+    anchorEnvelope: async ({
+      metadataKey,
+      envelopeCid,
+      envelopeHash,
+      envelope,
+      requireSuccessfulReceipt,
+    }) => {
       const payload: ExecutionPayloadV2 = {
         version: 2,
         tier: 0,
@@ -125,12 +132,15 @@ export function createLivePublishDeps(config: LivePublishConfig): ManifestBatchP
         modeFlag: modeStringToFlag(envelope.executor.mode ?? 'train'),
       };
       const contentKind = contentKindForAnchor(metadataKey, envelopeCid);
-      const { txHash, blockNumber } = await identityPublisher.publishContentV2({
-        kind: contentKind,
-        cid: envelopeCid,
-        payload,
-      });
-      return { txHash, blockNumber };
+      const payloadHex = encodeExecutionPayloadV2(payload);
+      const { txHash, blockNumber, gasUsed, feeWei } =
+        await identityPublisher.publishContentV2({
+          kind: contentKind,
+          cid: envelopeCid,
+          payload,
+          requireSuccessfulReceipt,
+        });
+      return { txHash, blockNumber, gasUsed, feeWei, payloadHex };
     },
     anchorManifest: async ({ manifestCid, payload }) => {
       const { txHash, blockNumber, gasUsed, feeWei } =
@@ -157,6 +167,28 @@ export function createLivePublishDeps(config: LivePublishConfig): ManifestBatchP
         anchoredAt: anchor.anchoredAt,
         gasUsed: anchor.gasUsed?.toString() ?? null,
         feeWei: anchor.feeWei?.toString() ?? null,
+      });
+    },
+    recordControlAnchor: (anchor) => {
+      if (!config.store) {
+        throw new Error(
+          'per-record control recording requires a Store (configure LivePublishConfig.store)',
+        );
+      }
+      config.store.saveErc8004Anchor({
+        envelopeId: anchor.envelopeRef,
+        envelopeCid: anchor.envelopeRef,
+        contentKind: anchor.contentKind,
+        metadataKey: anchor.metadataKey,
+        agentId: identityPublisher.agent.toString(),
+        chainId: identityPublisher.chainId,
+        identityRegistryAddress: identityPublisher.registry,
+        txHash: anchor.txHash,
+        blockNumber: anchor.blockNumber,
+        payloadHex: anchor.payloadHex,
+        anchoredAt: anchor.anchoredAt,
+        gasUsed: anchor.gasUsed.toString(),
+        feeWei: anchor.feeWei.toString(),
       });
     },
     log: (line) => console.log(line),

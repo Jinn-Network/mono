@@ -43,6 +43,8 @@ export interface PipelineDeps {
   publishDeps: HarnessPublishDeps;
   /** Bulk bridge records opt into a single manifest anchor; default stays per-record. */
   anchorMode?: 'per-record' | 'manifest';
+  /** Add one explicit per-record control tx to a live manifest measurement run. */
+  measurePerRecordControl?: boolean;
   /** The LLM distill port (jinn-skill-distill-prompt-v1 over a cluster). */
   distill: (cluster: DistillCluster) => Promise<DistillLLMOutput>;
   /** Publish a layer-2 skill package (Plan A publishSkill). */
@@ -94,7 +96,7 @@ export interface PreparedDistillationEvidence {
 export async function prepareDistillationEvidence(
   deps: Pick<
     PipelineDeps,
-    'verdictSource' | 'fetchEvidence' | 'publishDeps' | 'anchorMode' | 'slate' | 'groupCap' | 'limit' | 'now'
+    'verdictSource' | 'fetchEvidence' | 'publishDeps' | 'anchorMode' | 'measurePerRecordControl' | 'slate' | 'groupCap' | 'limit' | 'now'
   >,
 ): Promise<PreparedDistillationEvidence> {
   const layer2 = buildLayer2ScrubPipeline();
@@ -133,6 +135,7 @@ export async function prepareDistillationEvidence(
     const captured: Array<{ instanceId: string; env: TraceEnvelopeV0 }> = [];
     const publisher = buildBridgeManifestPublisher(manifestDeps, {
       pipeline: layer2,
+      ...(deps.measurePerRecordControl ? { measurePerRecordControl: true } : {}),
       onCaptured: (pending, { ref }) => {
         captured.push({
           instanceId: ref.instanceId,

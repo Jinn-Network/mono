@@ -21,6 +21,8 @@
 
 import { capture, type CapturedTask, type PendingEnvelope } from './capture.js';
 import {
+  ManifestBatchAnchorError,
+  ManifestBatchRecordingError,
   publish,
   publishManifestBatch as publishPendingManifestBatch,
   type HarnessPublishDeps,
@@ -158,6 +160,9 @@ export interface BridgeResult {
   anchorTx?: string | null;
   gasUsed?: bigint | null;
   feeWei?: bigint | null;
+  control?: ManifestBatchResult['control'];
+  /** False means a tx was broadcast but not confirmed successful. */
+  manifestConfirmed?: boolean;
 }
 
 /**
@@ -460,6 +465,8 @@ export async function bridgeAttempts(refs: AttemptRef[], deps: BridgeDeps): Prom
       result.anchorTx = batch.anchorTx;
       result.gasUsed = batch.gasUsed;
       result.feeWei = batch.feeWei;
+      result.control = batch.control;
+      result.manifestConfirmed = true;
       for (let index = 0; index < manifestCandidates.length; index += 1) {
         const candidate = manifestCandidates[index]!;
         result.bridged.push({
@@ -470,6 +477,18 @@ export async function bridgeAttempts(refs: AttemptRef[], deps: BridgeDeps): Prom
         });
       }
     } catch (error) {
+      if (error instanceof ManifestBatchRecordingError) {
+        result.manifestCid = error.result.manifestCid;
+        result.anchorTx = error.result.anchorTx;
+        result.gasUsed = error.result.gasUsed;
+        result.feeWei = error.result.feeWei;
+        result.control = error.result.control;
+        result.manifestConfirmed = true;
+      } else if (error instanceof ManifestBatchAnchorError) {
+        result.manifestCid = error.manifestCid;
+        result.anchorTx = error.txHash;
+        result.manifestConfirmed = false;
+      }
       const message = error instanceof Error ? error.message : String(error);
       for (const { ref } of manifestCandidates) {
         result.errors.push({ requestId: ref.requestId, error: message });
@@ -507,6 +526,7 @@ export function buildBridgeManifestPublisher(
   deps: ManifestBatchPublishDeps,
   opts: {
     pipeline?: ScrubPipeline;
+    measurePerRecordControl?: boolean;
     onCaptured?: (
       pending: PendingEnvelope,
       candidate: { task: CapturedTask; ref: AttemptRef },
@@ -527,6 +547,9 @@ export function buildBridgeManifestPublisher(
         instanceId: ref.instanceId,
       });
     }
-    return publishPendingManifestBatch(members, deps, { batchKind: 'bridge' });
+    return publishPendingManifestBatch(members, deps, {
+      batchKind: 'bridge',
+      ...(opts.measurePerRecordControl ? { measurePerRecordControl: true } : {}),
+    });
   };
 }
