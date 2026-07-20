@@ -32,24 +32,22 @@ if (outputArgIndex !== -1 && (!outputArg || outputArg.startsWith('--'))) {
   process.exit(1);
 }
 const outputPath = outputArg ? resolve(clientRoot, outputArg) : undefined;
-const pack = spawnSync('npm', ['pack', '--json', '--pack-destination', smokeDir], {
+const pack = spawnSync('npm', ['pack', '--silent', '--pack-destination', smokeDir], {
   cwd: clientRoot,
   encoding: 'utf8',
 });
 if (pack.status !== 0) {
   console.error('smoke-test-pack: npm pack failed');
-  console.error(pack.stderr || pack.stdout);
+  console.error(pack.error?.message || pack.stderr || pack.stdout);
   process.exit(pack.status ?? 1);
 }
-let tarball;
-try {
-  const packed = JSON.parse(pack.stdout)[0];
-  tarball = join(smokeDir, packed.filename);
-} catch {
-  console.error('smoke-test-pack: npm pack did not return JSON');
+const packedFilename = pack.stdout.trim();
+if (!packedFilename || packedFilename.includes('\n')) {
+  console.error('smoke-test-pack: npm pack did not return one archive filename');
   console.error(pack.stdout);
   process.exit(1);
 }
+const tarball = join(smokeDir, packedFilename);
 
 function parseJsonOrExit(stdout, context) {
   try {
