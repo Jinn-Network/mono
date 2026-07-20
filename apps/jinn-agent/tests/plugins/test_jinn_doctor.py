@@ -50,10 +50,14 @@ class ContractRunner:
             return 0, json.dumps({
                 "status": "ok",
                 "mode": "inspect",
+                "indexPath": None,
+                "repair": False,
                 "report": {
                     "indexedEpisodes": 3,
                     "unreadableFiles": 0,
                     "unreadable": [],
+                    "indexUpdated": False,
+                    "mutations": [],
                 },
             }), ""
         return self.code, self.output, self.err
@@ -375,6 +379,8 @@ def test_evidence_store_check_reports_readable_and_unreadable_counts():
         output=json.dumps({
             "status": "degraded",
             "mode": "inspect",
+            "indexPath": None,
+            "repair": False,
             "report": {
                 "indexedEpisodes": 2,
                 "unreadableFiles": 4,
@@ -384,6 +390,8 @@ def test_evidence_store_check_reports_readable_and_unreadable_counts():
                     {"path": "/episodes/link.json", "reason": "must be a regular file, not a symlink"},
                     {"path": "/episodes/dupe.json", "reason": "duplicate episodeId: same"},
                 ],
+                "indexUpdated": False,
+                "mutations": [],
             },
         }),
     )
@@ -405,6 +413,8 @@ def test_evidence_store_check_gives_permission_specific_remediation():
         output=json.dumps({
             "status": "degraded",
             "mode": "inspect",
+            "indexPath": None,
+            "repair": False,
             "report": {
                 "indexedEpisodes": 0,
                 "unreadableFiles": 1,
@@ -412,6 +422,8 @@ def test_evidence_store_check_gives_permission_specific_remediation():
                     "path": "/episodes/private.json",
                     "reason": "EACCES: permission denied",
                 }],
+                "indexUpdated": False,
+                "mutations": [],
             },
         }),
     )
@@ -437,19 +449,65 @@ def test_evidence_store_check_rejects_a_non_inspect_or_inconsistent_envelope():
         {
             "status": "ok",
             "mode": "reindex",
+            "indexPath": None,
+            "repair": False,
             "report": {
                 "indexedEpisodes": 3,
                 "unreadableFiles": 0,
                 "unreadable": [],
+                "indexUpdated": False,
+                "mutations": [],
             },
         },
         {
             "status": "ok",
             "mode": "inspect",
+            "indexPath": None,
+            "repair": False,
             "report": {
                 "indexedEpisodes": 2,
                 "unreadableFiles": 1,
                 "unreadable": [],
+                "indexUpdated": False,
+                "mutations": [],
+            },
+        },
+        {
+            "status": "ok",
+            "mode": "inspect",
+            "indexPath": "/tmp/written.sqlite",
+            "repair": False,
+            "report": {
+                "indexedEpisodes": 3,
+                "unreadableFiles": 0,
+                "unreadable": [],
+                "indexUpdated": False,
+                "mutations": [],
+            },
+        },
+        {
+            "status": "ok",
+            "mode": "inspect",
+            "repair": False,
+            "report": {
+                "indexedEpisodes": 3,
+                "unreadableFiles": 0,
+                "unreadable": [],
+                "indexUpdated": False,
+                "mutations": [],
+            },
+        },
+        {
+            "status": "ok",
+            "mode": "inspect",
+            "indexPath": None,
+            "repair": True,
+            "report": {
+                "indexedEpisodes": 3,
+                "unreadableFiles": 0,
+                "unreadable": [],
+                "indexUpdated": True,
+                "mutations": [{"kind": "normalized-json"}],
             },
         },
     ]

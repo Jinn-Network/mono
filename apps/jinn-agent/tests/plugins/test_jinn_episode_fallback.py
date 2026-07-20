@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import sqlite3
 import stat
 
 from plugins.jinn import distill
@@ -66,6 +68,11 @@ def test_fallback_preserves_the_complete_episode_and_writes_once(tmp_path, monke
     assert stat.S_IMODE(episodes_dir.stat().st_mode) == 0o700
     assert stat.S_IMODE(first.stat().st_mode) == 0o600
     assert list(episodes_dir.glob("*.tmp")) == []
+    with sqlite3.connect(episodes_dir / ".jinn-evidence-store-lock.sqlite") as lock:
+        assert lock.execute("PRAGMA application_id").fetchone()[0] == 0x4A4C4F43
+        assert lock.execute(
+            "SELECT value FROM evidence_store_lock_meta WHERE key = 'schema_version'"
+        ).fetchone()[0] == "1"
 
 
 def test_fallback_rejects_non_episode_data_without_writing(tmp_path, monkeypatch):
@@ -172,6 +179,56 @@ def test_fallback_file_names_cannot_alias_after_sanitizing(tmp_path, monkeypatch
 
     assert first_path != second_path
     assert len(list(tmp_path.glob("*.json"))) == 2
+
+
+def test_fallback_keeps_hashed_namespace_disjoint_and_within_name_max(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("JINN_LAYER_EPISODES_DIR", str(tmp_path))
+    unsafe = _episode()
+    unsafe["episodeId"] = "../evil"
+    old_collision = _episode()
+    digest = hashlib.sha256(b"../evil").hexdigest()
+    old_collision["episodeId"] = f"episode-{digest}"
+    long_id = _episode()
+    long_id["episodeId"] = "x" * 300
+
+    paths = [
+        distill.write_episode_fallback(unsafe),
+        distill.write_episode_fallback(old_collision),
+        distill.write_episode_fallback(long_id),
+    ]
+
+    assert len(set(paths)) == 3
+    assert all(len(path.name.encode("utf-8")) <= 255 for path in paths)
+
+
+def test_fallback_rejects_a_symlinked_evidence_directory(tmp_path, monkeypatch):
+    real = tmp_path / "real"
+    linked = tmp_path / "linked"
+    real.mkdir()
+    linked.symlink_to(real, target_is_directory=True)
+    monkeypatch.setenv("JINN_LAYER_EPISODES_DIR", str(linked))
+
+    assert distill.write_episode_fallback(_episode()) is None
+    assert list(real.glob("*.episode.json")) == []
+
+
+def test_fallback_rejects_a_hardlinked_existing_episode_without_chmod(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("JINN_LAYER_EPISODES_DIR", str(tmp_path))
+    episode = _episode()
+    episode["episodeId"] = "hardlinked"
+    path = tmp_path / "hardlinked.episode.json"
+    path.write_text(json.dumps(episode), encoding="utf-8")
+    alias = tmp_path / "alias"
+    os.link(path, alias)
+    path.chmod(0o644)
+
+    assert distill.write_episode_fallback(episode) is None
+    assert stat.S_IMODE(path.stat().st_mode) == 0o644
+    assert stat.S_IMODE(alias.stat().st_mode) == 0o644
 
 
 def test_fallback_rejects_same_id_with_different_content_without_overwrite(

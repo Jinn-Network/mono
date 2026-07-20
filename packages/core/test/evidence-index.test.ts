@@ -10,8 +10,11 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { once } from 'node:events';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import Database from 'better-sqlite3';
 import {
@@ -97,6 +100,21 @@ function runReindex(
   return reindexEvidenceStore({ episodesDir, indexPath, repair });
 }
 
+async function waitForPath(path: string, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!existsSync(path)) {
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${path}`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+async function waitForChild(child: ChildProcess): Promise<void> {
+  const [code, signal] = await once(child, 'exit') as [number | null, NodeJS.Signals | null];
+  if (code !== 0) {
+    throw new Error(`reindex worker exited with code ${String(code)} signal ${String(signal)}`);
+  }
+}
+
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
@@ -117,6 +135,14 @@ describe('machine-local evidence index', () => {
         expect(existsSync(path), path).toBe(true);
         expect(lstatSync(path).mode & 0o777, path).toBe(0o600);
       }
+      const lockPath = join(episodesDir, '.jinn-evidence-store-lock.sqlite');
+      expect(lstatSync(lockPath).mode & 0o777).toBe(0o600);
+      const lock = new Database(lockPath, { readonly: true });
+      expect(lock.pragma('application_id', { simple: true })).toBe(0x4a4c4f43);
+      expect(lock.prepare(
+        "SELECT value FROM evidence_store_lock_meta WHERE key = 'schema_version'",
+      ).pluck().get()).toBe('1');
+      lock.close();
       expect(lstatSync(root).mode & 0o777).toBe(0o700);
       index.close();
     } finally {
@@ -416,6 +442,23 @@ describe('machine-local evidence index', () => {
     expect(() => runReindex(episodesDir, indexPath, false)).toThrow(/hardlink/i);
   });
 
+  it.skipIf(process.platform === 'win32')('rejects a hardlinked or unrelated store lock', () => {
+    const first = makeStore();
+    runReindex(first.episodesDir, first.indexPath, false);
+    const firstLock = join(first.episodesDir, '.jinn-evidence-store-lock.sqlite');
+    linkSync(firstLock, join(first.episodesDir, 'lock-alias'));
+    expect(() => runReindex(first.episodesDir, first.indexPath, false)).toThrow(/hardlink/i);
+
+    const second = makeStore();
+    const secondLock = join(second.episodesDir, '.jinn-evidence-store-lock.sqlite');
+    const unrelated = new Database(secondLock);
+    unrelated.exec('CREATE TABLE unrelated (value TEXT)');
+    unrelated.close();
+    expect(() => runReindex(second.episodesDir, second.indexPath, false))
+      .toThrow(/not a Jinn evidence store lock/i);
+    expect(existsSync(second.indexPath)).toBe(false);
+  });
+
   it('repairs accepted source permissions to private mode', () => {
     if (process.platform === 'win32') return;
     const { episodesDir, indexPath } = makeStore();
@@ -428,6 +471,25 @@ describe('machine-local evidence index', () => {
     expect(report).toMatchObject({ indexedEpisodes: 1, unreadableFiles: 0 });
     expect(lstatSync(sourcePath).mode & 0o777).toBe(0o600);
     expect(lstatSync(episodesDir).mode & 0o777).toBe(0o700);
+  });
+
+  it('secures malformed and duplicate regular sources during repair', () => {
+    if (process.platform === 'win32') return;
+    const { episodesDir, indexPath } = makeStore();
+    const malformedPath = join(episodesDir, 'malformed.episode.json');
+    const canonicalPath = join(episodesDir, 'duplicate.episode.json');
+    const duplicatePath = join(episodesDir, 'duplicate.json');
+    writeFileSync(malformedPath, '{broken', { mode: 0o644 });
+    writeJson(canonicalPath, makeEpisode('duplicate'));
+    writeJson(duplicatePath, makeEpisode('duplicate'));
+    for (const path of [malformedPath, canonicalPath, duplicatePath]) chmodSync(path, 0o644);
+
+    const report = runReindex(episodesDir, indexPath, true);
+
+    expect(report).toMatchObject({ indexedEpisodes: 0, unreadableFiles: 3 });
+    for (const path of [malformedPath, canonicalPath, duplicatePath]) {
+      expect(lstatSync(path).mode & 0o777, path).toBe(0o600);
+    }
   });
 
   it('refuses to adopt an unrelated SQLite database', () => {
@@ -547,6 +609,68 @@ describe('machine-local evidence index', () => {
     expect(index.listEpisodes().map((row) => row.episodeId)).toEqual(['live-write']);
     index.close();
   });
+
+  it('serializes same-process writes through their post-write refresh', async () => {
+    const { episodesDir, indexPath } = makeStore();
+    runReindex(episodesDir, indexPath, false);
+    const adapter = createEvidenceAdapter({
+      capturesDir: episodesDir,
+      onStoreChanged: () => {
+        const report = runReindex(episodesDir, indexPath, false);
+        if (!report.indexUpdated) throw new Error(report.indexError);
+      },
+    });
+
+    const results = await Promise.all(Array.from({ length: 8 }, (_, index) => {
+      const episode = structuredClone(makeEpisode(`live-${index}`));
+      delete episode.activity;
+      return adapter.put(episode);
+    }));
+
+    expect(results.every((result) => result.status === 'ok')).toBe(true);
+    const index = new EvidenceIndex({ dbPath: indexPath });
+    expect(index.listEpisodes().map((row) => row.episodeId)).toEqual(
+      Array.from({ length: 8 }, (_, item) => `live-${item}`),
+    );
+    index.close();
+  }, 10_000);
+
+  it('serializes scan-through-publication across processes so an older snapshot cannot win', async () => {
+    const { root, episodesDir, indexPath } = makeStore();
+    const enteredPath = join(root, 'older-scan-complete');
+    const releasePath = join(root, 'release-older-scan');
+    const workerPath = join(
+      dirname(fileURLToPath(import.meta.url)),
+      'fixtures',
+      'reindex-worker.mjs',
+    );
+    writeJson(join(episodesDir, 'first.episode.json'), makeEpisode('first'));
+
+    const older = spawn(process.execPath, [
+      workerPath,
+      episodesDir,
+      indexPath,
+      enteredPath,
+      releasePath,
+    ], { stdio: 'inherit' });
+    await waitForPath(enteredPath);
+
+    writeJson(join(episodesDir, 'second.episode.json'), makeEpisode('second'));
+    const newer = spawn(process.execPath, [
+      workerPath,
+      episodesDir,
+      indexPath,
+    ], { stdio: 'inherit' });
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(newer.exitCode).toBeNull();
+    writeFileSync(releasePath, 'release');
+
+    await Promise.all([waitForChild(older), waitForChild(newer)]);
+    const index = new EvidenceIndex({ dbPath: indexPath });
+    expect(index.listEpisodes().map((row) => row.episodeId)).toEqual(['first', 'second']);
+    index.close();
+  }, 15_000);
 
   it('rebuilds deterministically and a second repair is a no-op', () => {
     const { episodesDir, indexPath } = makeStore();

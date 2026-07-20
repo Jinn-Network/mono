@@ -32,11 +32,14 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
 import tempfile
 import signal
+import stat
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -49,6 +52,9 @@ Runner = Callable[[List[str]], Tuple[int, str]]
 # Retention: the layer reads only the newest 50 captures and `--resume` skips
 # already-distilled ones, so a count cap is sufficient — no age logic.
 KEEP_CAPTURES = 200
+_EVIDENCE_LOCK_FILE = ".jinn-evidence-store-lock.sqlite"
+_EVIDENCE_LOCK_APPLICATION_ID = 0x4A4C4F43
+_EVIDENCE_LOCK_SCHEMA_VERSION = "1"
 
 _cached_mode: Optional[str] = None
 
@@ -78,6 +84,106 @@ def episodes_dir() -> Path:
     if env:
         return Path(env).expanduser()
     return Path.home() / ".jinn-client" / "harness-layer" / "episodes"
+
+
+def _assert_private_evidence_dir(directory: Path) -> None:
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    info = directory.lstat()
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        raise OSError(f"evidence store must be a regular directory: {directory}")
+    if hasattr(os, "getuid") and info.st_uid != os.getuid():
+        raise OSError(f"evidence store must be owned by uid {os.getuid()}: {directory}")
+    os.chmod(directory, 0o700)
+
+
+def _verified_regular_identity(path: Path) -> tuple[int, int]:
+    info = path.lstat()
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        raise OSError(f"evidence file must be a regular file: {path}")
+    if info.st_nlink != 1:
+        raise OSError(f"evidence file must not be hardlinked: {path}")
+    if hasattr(os, "getuid") and info.st_uid != os.getuid():
+        raise OSError(f"evidence file must be owned by uid {os.getuid()}: {path}")
+    return info.st_dev, info.st_ino
+
+
+@contextmanager
+def _evidence_store_lock(directory: Path):
+    """Crash-recoverable mutex shared with core's scan-through-publish lock."""
+    _assert_private_evidence_dir(directory)
+    lock_path = directory / _EVIDENCE_LOCK_FILE
+    flags = os.O_RDWR | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(lock_path, flags, 0o600)
+    except FileExistsError:
+        fd = -1
+    if fd >= 0:
+        try:
+            os.fchmod(fd, 0o600)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+    identity = _verified_regular_identity(lock_path)
+    connection = sqlite3.connect(lock_path, timeout=30, isolation_level=None)
+    try:
+        if _verified_regular_identity(lock_path) != identity:
+            raise OSError(f"evidence store lock changed while opening: {lock_path}")
+        connection.execute("PRAGMA busy_timeout = 30000")
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            application_id = connection.execute("PRAGMA application_id").fetchone()[0]
+            tables = [
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+                )
+            ]
+            if application_id == 0 and tables == []:
+                connection.execute(
+                    f"PRAGMA application_id = {_EVIDENCE_LOCK_APPLICATION_ID}"
+                )
+                connection.execute(
+                    "CREATE TABLE evidence_store_lock_meta "
+                    "(key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+                )
+                connection.execute(
+                    "INSERT INTO evidence_store_lock_meta(key, value) VALUES (?, ?)",
+                    ("schema_version", _EVIDENCE_LOCK_SCHEMA_VERSION),
+                )
+            else:
+                if application_id != _EVIDENCE_LOCK_APPLICATION_ID:
+                    raise OSError(f"not a Jinn evidence store lock: {lock_path}")
+                if tables != ["evidence_store_lock_meta"]:
+                    raise OSError(f"unexpected evidence store lock schema: {lock_path}")
+                row = connection.execute(
+                    "SELECT value FROM evidence_store_lock_meta WHERE key = ?",
+                    ("schema_version",),
+                ).fetchone()
+                if row is None or row[0] != _EVIDENCE_LOCK_SCHEMA_VERSION:
+                    raise OSError(f"unsupported evidence store lock schema: {lock_path}")
+            connection.execute("COMMIT")
+        except Exception:
+            if connection.in_transaction:
+                connection.execute("ROLLBACK")
+            raise
+
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            yield
+            connection.execute("COMMIT")
+        except Exception:
+            if connection.in_transaction:
+                connection.execute("ROLLBACK")
+            raise
+    finally:
+        connection.close()
+        if _verified_regular_identity(lock_path) != identity:
+            raise OSError(f"evidence store lock changed while closing: {lock_path}")
+        os.chmod(lock_path, 0o600)
 
 
 def distill_status(runner: Optional[Runner] = None) -> Optional[Dict[str, Any]]:
@@ -174,7 +280,13 @@ def write_episode_fallback(episode: Dict[str, Any]) -> Optional[Path]:
     try:
         canonical_episode = skills_install._validate_episode_write(episode)
         episode_id = canonical_episode["episodeId"]
-        safe = re.fullmatch(r"[A-Za-z0-9._-]+", episode_id) and episode_id not in (".", "..")
+        suffix = ".episode.json"
+        safe = (
+            re.fullmatch(r"[A-Za-z0-9._-]+", episode_id)
+            and episode_id not in (".", "..")
+            and not re.fullmatch(r"episode-[a-f0-9]{64}", episode_id)
+            and len(f"{episode_id}{suffix}".encode("utf-8")) <= 255
+        )
         stem = (
             episode_id
             if safe
@@ -189,60 +301,99 @@ def write_episode_fallback(episode: Dict[str, Any]) -> Optional[Path]:
         ) + "\n"
         canonical_episode = json.loads(serialized)
         directory = episodes_dir()
-        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(directory, 0o700)
-        path = directory / f"{stem}.episode.json"
+        path = directory / f"{stem}{suffix}"
 
-        def existing_is_identical() -> bool:
-            try:
-                if path.is_symlink() or not path.is_file():
-                    return False
-                os.chmod(path, 0o600)
-                existing = json.loads(path.read_text(encoding="utf-8"))
-                return existing == canonical_episode
-            except (OSError, ValueError, TypeError):
-                return False
-
-        if os.path.lexists(path):
-            if not existing_is_identical():
-                return None
-            os.chmod(path, 0o600)
-            return path
-
-        fd = -1
-        tmp_path: Optional[Path] = None
-        try:
-            fd, tmp_name = tempfile.mkstemp(
-                prefix=f".{stem}.", suffix=".tmp", dir=directory
-            )
-            tmp_path = Path(tmp_name)
-            os.fchmod(fd, 0o600)
-            handle = os.fdopen(fd, "w", encoding="utf-8", newline="")
+        def existing_state() -> str:
             fd = -1
-            with handle:
-                handle.write(serialized)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.chmod(tmp_path, 0o600)
             try:
-                # Unlike rename/replace, link never overwrites a concurrent
-                # winner. The destination appears only after the temp is whole.
-                os.link(tmp_path, path)
-            except FileExistsError:
-                if not existing_is_identical():
-                    return None
-                os.chmod(path, 0o600)
+                expected = _verified_regular_identity(path)
+                flags = os.O_RDONLY
+                if hasattr(os, "O_NOFOLLOW"):
+                    flags |= os.O_NOFOLLOW
+                fd = os.open(path, flags)
+                opened = os.fstat(fd)
+                if (
+                    not stat.S_ISREG(opened.st_mode)
+                    or opened.st_nlink != 1
+                    or (opened.st_dev, opened.st_ino) != expected
+                    or (
+                        hasattr(os, "getuid")
+                        and opened.st_uid != os.getuid()
+                    )
+                ):
+                    return "collision"
+                os.fchmod(fd, 0o600)
+                with os.fdopen(fd, "r", encoding="utf-8") as handle:
+                    fd = -1
+                    existing = json.load(handle)
+                return "identical" if existing == canonical_episode else "collision"
+            except FileNotFoundError:
+                return "missing"
+            except (OSError, ValueError, TypeError):
+                return "collision"
+            finally:
+                if fd >= 0:
+                    os.close(fd)
+
+        def write_locked() -> Optional[Path]:
+            state = existing_state()
+            if state == "identical":
                 return path
-            os.chmod(path, 0o600)
-            return path
-        finally:
-            if fd >= 0:
-                os.close(fd)
-            if tmp_path is not None:
+            if state == "collision":
+                return None
+
+            fd = -1
+            tmp_path: Optional[Path] = None
+            try:
+                fd, tmp_name = tempfile.mkstemp(
+                    prefix=f".{stem}.", suffix=".tmp", dir=directory
+                )
+                tmp_path = Path(tmp_name)
+                os.fchmod(fd, 0o600)
+                handle = os.fdopen(fd, "w", encoding="utf-8", newline="")
+                fd = -1
+                with handle:
+                    handle.write(serialized)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                expected = _verified_regular_identity(tmp_path)
                 try:
-                    tmp_path.unlink()
-                except FileNotFoundError:
-                    pass
+                    # Unlike rename/replace, link never overwrites a concurrent
+                    # winner. The destination appears only after the temp is whole.
+                    os.link(tmp_path, path)
+                except FileExistsError:
+                    return path if existing_state() == "identical" else None
+                source_info = tmp_path.lstat()
+                target_info = path.lstat()
+                if (
+                    not stat.S_ISREG(source_info.st_mode)
+                    or not stat.S_ISREG(target_info.st_mode)
+                    or (source_info.st_dev, source_info.st_ino) != expected
+                    or (target_info.st_dev, target_info.st_ino) != expected
+                ):
+                    raise OSError(f"evidence episode changed while publishing: {path}")
+                directory_fd = os.open(
+                    directory,
+                    os.O_RDONLY
+                    | getattr(os, "O_DIRECTORY", 0)
+                    | getattr(os, "O_NOFOLLOW", 0),
+                )
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+                return path
+            finally:
+                if fd >= 0:
+                    os.close(fd)
+                if tmp_path is not None:
+                    try:
+                        tmp_path.unlink()
+                    except FileNotFoundError:
+                        pass
+
+        with _evidence_store_lock(directory):
+            return write_locked()
     except Exception:
         return None
 

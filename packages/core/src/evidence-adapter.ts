@@ -15,14 +15,16 @@
  * back only as episodes and legacy `.json` files only as captures.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import {
-  chmod,
+  closeSync,
+  fchmodSync,
+  readFileSync,
+  readdirSync,
+} from 'node:fs';
+import {
   link,
   lstat,
-  mkdir,
   open,
-  readFile,
   rm,
 } from 'node:fs/promises';
 import { basename, join, resolve, sep } from 'node:path';
@@ -36,21 +38,37 @@ import type {
 import { EpisodeV1Schema, EpisodeV1WriteSchema, type EpisodeV1 } from '@jinn-network/plugin';
 import { degraded, ok, unavailable } from '@jinn-network/plugin';
 import { parseCapturedTask, type CapturedTask } from './captured-task.js';
+import {
+  assertSafeOwner,
+  fsyncDirectory,
+  identityFrom,
+  inspectRegularPath,
+  nodeErrorCode,
+  openVerifiedRegular,
+  prepareEvidenceDirectory,
+  readVerifiedText,
+  sameIdentity,
+  secureRegularPath,
+  validateDirectory,
+  type FileIdentity,
+} from './evidence-filesystem.js';
+import { withEvidenceStoreLock } from './evidence-store-lock.js';
 
 const DEFAULT_RETENTION: EvidenceRetentionPolicy = { policy: 'local-private', maxEpisodes: 200 };
 const EPISODE_SUFFIX = '.episode.json';
+const MAX_PORTABLE_FILENAME_BYTES = 255;
+const HASHED_EPISODE_STEM = /^episode-[a-f0-9]{64}$/;
 
 export function episodeFileName(id: string): string {
-  const stem = /^[A-Za-z0-9._-]+$/.test(id) && id !== '.' && id !== '..'
+  const literalStemIsSafe = /^[A-Za-z0-9._-]+$/.test(id)
+    && id !== '.'
+    && id !== '..'
+    && !HASHED_EPISODE_STEM.test(id)
+    && Buffer.byteLength(`${id}${EPISODE_SUFFIX}`, 'utf8') <= MAX_PORTABLE_FILENAME_BYTES;
+  const stem = literalStemIsSafe
     ? id
     : `episode-${createHash('sha256').update(id).digest('hex')}`;
   return `${stem}${EPISODE_SUFFIX}`;
-}
-
-function nodeErrorCode(error: unknown): string | undefined {
-  return error && typeof error === 'object' && 'code' in error
-    ? String((error as { code?: unknown }).code)
-    : undefined;
 }
 
 export interface EvidenceAdapterDeps {
@@ -143,19 +161,25 @@ export function createEvidenceAdapter(deps: EvidenceAdapterDeps): EvidencePort {
     episode: EpisodeV1,
   ): Promise<'missing' | 'identical' | 'collision'> {
     try {
-      const stat = await lstat(path);
-      if (!stat.isFile() || stat.isSymbolicLink()) return 'collision';
-      if (process.platform !== 'win32') await chmod(path, 0o600);
-      const existing = EpisodeV1Schema.parse(JSON.parse(await readFile(path, 'utf8')));
-      return isDeepStrictEqual(existing, episode) ? 'identical' : 'collision';
+      const identity = inspectRegularPath(path, 'evidence episode');
+      if (!identity) return 'missing';
+      const opened = openVerifiedRegular(path, 'evidence episode', identity);
+      try {
+        if (process.platform !== 'win32') fchmodSync(opened.fd, 0o600);
+        const existing = EpisodeV1Schema.parse(
+          JSON.parse(readFileSync(opened.fd, 'utf8')),
+        );
+        return isDeepStrictEqual(existing, episode) ? 'identical' : 'collision';
+      } finally {
+        closeSync(opened.fd);
+      }
     } catch (error) {
       return nodeErrorCode(error) === 'ENOENT' ? 'missing' : 'collision';
     }
   }
 
   async function prepareEvidenceDir(): Promise<void> {
-    await mkdir(capturesDir, { recursive: true, mode: 0o700 });
-    if (process.platform !== 'win32') await chmod(capturesDir, 0o700);
+    prepareEvidenceDirectory(capturesDir, 'evidence store', true);
   }
 
   /**
@@ -178,13 +202,17 @@ export function createEvidenceAdapter(deps: EvidenceAdapterDeps): EvidencePort {
 
     const byRecency = files
       .map((file) => {
+        const path = join(capturesDir, file);
+        let identity: FileIdentity | undefined;
         try {
-          const episode = EpisodeV1Schema.parse(JSON.parse(readFileSync(join(capturesDir, file), 'utf-8')));
-          return { file, capturedAt: episode.session.capturedAt };
+          const verified = readVerifiedText(path, 'evidence episode');
+          identity = verified.identity;
+          const episode = EpisodeV1Schema.parse(JSON.parse(verified.text));
+          return { file, capturedAt: episode.session.capturedAt, identity };
         } catch {
           // An unparseable file sorts oldest — never preferentially retained
           // over a valid, dated episode.
-          return { file, capturedAt: '' };
+          return { file, capturedAt: '', identity };
         }
       })
       .sort((a, b) =>
@@ -192,9 +220,15 @@ export function createEvidenceAdapter(deps: EvidenceAdapterDeps): EvidencePort {
         || a.file.localeCompare(b.file),
       );
 
-    for (const { file } of byRecency.slice(retention.maxEpisodes)) {
+    for (const { file, identity } of byRecency.slice(retention.maxEpisodes)) {
       try {
-        await rm(join(capturesDir, file), { force: true });
+        if (!identity) {
+          throw new Error('refusing to prune a source that did not pass descriptor validation');
+        }
+        const path = join(capturesDir, file);
+        secureRegularPath(path, 'evidence episode', identity);
+        await rm(path, { force: true });
+        fsyncDirectory(capturesDir);
       } catch (err) {
         console.warn(`[evidence] failed to prune old episode ${file}: ${String(err)}`);
       }
@@ -202,11 +236,9 @@ export function createEvidenceAdapter(deps: EvidenceAdapterDeps): EvidencePort {
   }
 
   async function persistEpisode(episode: EpisodeV1): Promise<PortResult<{ episodeId: string }>> {
-    await prepareEvidenceDir();
     const path = episodePath(episode.episodeId);
     const existing = await classifyExisting(path, episode);
     if (existing === 'identical') {
-      if (process.platform !== 'win32') await chmod(path, 0o600);
       return ok({ episodeId: episode.episodeId });
     }
     if (existing === 'collision') {
@@ -221,21 +253,34 @@ export function createEvidenceAdapter(deps: EvidenceAdapterDeps): EvidencePort {
     try {
       handle = await open(tmp, 'wx', 0o600);
       await handle.writeFile(JSON.stringify(episode), 'utf8');
+      if (process.platform !== 'win32') await handle.chmod(0o600);
       await handle.sync();
-      await handle.close();
-      handle = undefined;
-      if (process.platform !== 'win32') await chmod(tmp, 0o600);
+      const expected = identityFrom(await handle.stat());
+      assertSafeOwner(await handle.stat(), tmp, 'evidence temp file');
 
       try {
         // A hard link atomically publishes the complete temp file without
         // overwriting a concurrent winner at the canonical destination.
         await link(tmp, path);
+        const [tempAfterLink, published] = await Promise.all([lstat(tmp), lstat(path)]);
+        if (
+          !tempAfterLink.isFile()
+          || tempAfterLink.isSymbolicLink()
+          || !published.isFile()
+          || published.isSymbolicLink()
+          || !sameIdentity(identityFrom(tempAfterLink), expected)
+          || !sameIdentity(identityFrom(published), expected)
+        ) {
+          throw new Error(`evidence episode changed while it was being published: ${path}`);
+        }
+        assertSafeOwner(tempAfterLink, tmp, 'evidence temp file');
+        assertSafeOwner(published, path, 'evidence episode');
+        fsyncDirectory(capturesDir);
         return ok({ episodeId: episode.episodeId });
       } catch (error) {
         if (nodeErrorCode(error) !== 'EEXIST') throw error;
         const raced = await classifyExisting(path, episode);
         if (raced === 'identical') {
-          if (process.platform !== 'win32') await chmod(path, 0o600);
           return ok({ episodeId: episode.episodeId });
         }
         return unavailable(`evidence episodeId collision: ${episode.episodeId}`);
@@ -243,6 +288,7 @@ export function createEvidenceAdapter(deps: EvidenceAdapterDeps): EvidencePort {
     } finally {
       if (handle !== undefined) await handle.close().catch(() => undefined);
       await rm(tmp, { force: true });
+      fsyncDirectory(capturesDir);
     }
   }
 
@@ -250,15 +296,19 @@ export function createEvidenceAdapter(deps: EvidenceAdapterDeps): EvidencePort {
     async put(episode: EpisodeV1): Promise<PortResult<{ episodeId: string }>> {
       try {
         const parsed = EpisodeV1WriteSchema.parse(episode);
-        const result = await persistEpisode(parsed);
-        if (result.status === 'ok') {
-          await pruneOldEpisodes();
+        const result = await withEvidenceStoreLock(capturesDir, async () => {
+          await prepareEvidenceDir();
+          const persisted = await persistEpisode(parsed);
+          if (persisted.status === 'ok') await pruneOldEpisodes();
+          return persisted;
+        }, async (persisted) => {
+          if (persisted.status !== 'ok') return;
           try {
             await deps.onStoreChanged?.();
           } catch (error) {
             console.warn(`[evidence] derived index refresh failed: ${String(error)}`);
           }
-        }
+        });
         return result;
       } catch (e) {
         return unavailable(`evidence store put failed: ${String(e)}`);
@@ -268,8 +318,10 @@ export function createEvidenceAdapter(deps: EvidenceAdapterDeps): EvidencePort {
     async get(episodeId: string): Promise<PortResult<EpisodeV1 | null>> {
       try {
         const path = episodePath(episodeId);
-        if (!existsSync(path)) return ok(null);
-        return ok(EpisodeV1Schema.parse(JSON.parse(readFileSync(path, 'utf-8'))));
+        if (!inspectRegularPath(path, 'evidence episode')) return ok(null);
+        return ok(EpisodeV1Schema.parse(JSON.parse(
+          readVerifiedText(path, 'evidence episode').text,
+        )));
       } catch (e) {
         return unavailable(`evidence store get failed: ${String(e)}`);
       }
@@ -277,14 +329,21 @@ export function createEvidenceAdapter(deps: EvidenceAdapterDeps): EvidencePort {
 
     async list(query: EvidenceListQuery = {}): Promise<PortResult<EpisodeV1[]>> {
       try {
-        if (!existsSync(capturesDir)) return ok([]);
+        try {
+          validateDirectory(capturesDir, 'evidence store', false);
+        } catch (error) {
+          if (nodeErrorCode(error) === 'ENOENT') return ok([]);
+          throw error;
+        }
         const episodes: EpisodeV1[] = [];
         let unreadable = 0;
         for (const file of readdirSync(capturesDir)) {
           const path = join(capturesDir, file);
           if (file.endsWith(EPISODE_SUFFIX)) {
             try {
-              episodes.push(EpisodeV1Schema.parse(JSON.parse(readFileSync(path, 'utf-8'))));
+              episodes.push(EpisodeV1Schema.parse(JSON.parse(
+                readVerifiedText(path, 'evidence episode').text,
+              )));
             } catch (err) {
               unreadable += 1;
               console.warn(`[evidence] skipping malformed episode file ${file}: ${String(err)}`);
@@ -293,7 +352,9 @@ export function createEvidenceAdapter(deps: EvidenceAdapterDeps): EvidencePort {
             // A legacy CapturedTask capture — up-map it. A capture that fails
             // to parse or up-map is skipped (warn), never throws.
             try {
-              const task = parseCapturedTask(JSON.parse(readFileSync(path, 'utf-8')));
+              const task = parseCapturedTask(JSON.parse(
+                readVerifiedText(path, 'legacy evidence capture').text,
+              ));
               episodes.push(capturedTaskToEpisode(task, retention));
             } catch (err) {
               unreadable += 1;

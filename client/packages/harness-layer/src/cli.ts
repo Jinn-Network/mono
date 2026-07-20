@@ -1140,7 +1140,19 @@ export async function runJinnLayerCli(
       }
       return report.unreadableFiles > 0 || publicationFailed ? 1 : 0;
     } catch (error) {
-      writer.write(`error: evidence reindex failed: ${error instanceof Error ? error.message : String(error)}\n`);
+      const message = error instanceof Error ? error.message : String(error);
+      if (parsed.values.json) {
+        writer.write(`${JSON.stringify({
+          status: 'error',
+          mode: dryRun ? 'inspect' : 'reindex',
+          episodesDir,
+          indexPath,
+          repair: parsed.values.repair,
+          error: message,
+        })}\n`);
+      } else {
+        writer.write(`error: evidence reindex failed: ${message}\n`);
+      }
       return 1;
     }
   }

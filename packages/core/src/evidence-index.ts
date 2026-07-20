@@ -16,13 +16,26 @@ import {
   rmSync,
   unlinkSync,
   writeFileSync,
-  type Stats,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { EpisodeV1Schema, type EpisodeV1 } from '@jinn-network/plugin';
 import { capturedTaskToEpisode, episodeFileName } from './evidence-adapter.js';
 import { parseCapturedTask } from './captured-task.js';
+import {
+  assertRegularStat,
+  assertSafeOwner,
+  fsyncDirectory,
+  identityFrom,
+  inspectRegularPath,
+  nodeErrorCode,
+  openVerifiedRegular,
+  sameIdentity,
+  secureRegularPath,
+  validateDirectory,
+  type FileIdentity,
+} from './evidence-filesystem.js';
+import { withEvidenceStoreLockSync } from './evidence-store-lock.js';
 
 export type EvidenceSourceKind =
   | 'canonical-episode'
@@ -78,6 +91,8 @@ export interface ReindexEvidenceStoreOptions {
   episodesDir: string;
   indexPath: string;
   repair?: boolean;
+  /** @internal Deterministic concurrency-test seam; called while the store lock is held. */
+  onScanComplete?: () => void;
 }
 
 export interface InspectEvidenceStoreOptions {
@@ -100,13 +115,6 @@ interface ParsedEvidence {
   originKind: EvidenceOriginKind;
   originWriter?: string;
   originBuild?: string;
-}
-
-interface FileIdentity {
-  dev: number;
-  ino: number;
-  uid: number;
-  nlink: number;
 }
 
 interface EvidenceCandidate {
@@ -204,123 +212,6 @@ function readableReason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function nodeErrorCode(error: unknown): string | undefined {
-  return error && typeof error === 'object' && 'code' in error
-    ? String((error as { code?: unknown }).code)
-    : undefined;
-}
-
-function identityFrom(stat: Stats): FileIdentity {
-  return {
-    dev: stat.dev,
-    ino: stat.ino,
-    uid: stat.uid,
-    nlink: stat.nlink,
-  };
-}
-
-function sameIdentity(left: FileIdentity, right: FileIdentity): boolean {
-  return left.dev === right.dev && left.ino === right.ino;
-}
-
-function assertSafeOwner(stat: Stats, path: string, label: string): void {
-  const uid = process.platform === 'win32' ? undefined : process.getuid?.();
-  if (uid !== undefined && stat.uid !== uid) {
-    throw new Error(`${label} must be owned by uid ${uid}: ${path}`);
-  }
-}
-
-function assertRegularStat(stat: Stats, path: string, label: string): void {
-  if (!stat.isFile() || stat.isSymbolicLink()) {
-    throw new Error(`${label} must be a regular file, not a symlink or other file type: ${path}`);
-  }
-  if (stat.nlink !== 1) {
-    throw new Error(`${label} must not be hardlinked: ${path}`);
-  }
-  assertSafeOwner(stat, path, label);
-}
-
-function inspectRegularPath(path: string, label: string): FileIdentity | undefined {
-  try {
-    const stat = lstatSync(path);
-    assertRegularStat(stat, path, label);
-    return identityFrom(stat);
-  } catch (error) {
-    if (nodeErrorCode(error) === 'ENOENT') return undefined;
-    throw error;
-  }
-}
-
-function openVerifiedRegular(
-  path: string,
-  label: string,
-  expected?: FileIdentity,
-): { fd: number; identity: FileIdentity } {
-  const before = inspectRegularPath(path, label);
-  if (!before) throw new Error(`${label} disappeared before it could be opened: ${path}`);
-  if (expected && !sameIdentity(before, expected)) {
-    throw new Error(`${label} changed while it was being processed: ${path}`);
-  }
-
-  const noFollow = constants.O_NOFOLLOW ?? 0;
-  const fd = openSync(path, constants.O_RDONLY | noFollow);
-  try {
-    const opened = fstatSync(fd);
-    assertRegularStat(opened, path, label);
-    const identity = identityFrom(opened);
-    if (!sameIdentity(identity, before) || (expected && !sameIdentity(identity, expected))) {
-      throw new Error(`${label} changed while it was being opened: ${path}`);
-    }
-    return { fd, identity };
-  } catch (error) {
-    closeSync(fd);
-    throw error;
-  }
-}
-
-function secureRegularPath(path: string, label: string, expected?: FileIdentity): FileIdentity {
-  const opened = openVerifiedRegular(path, label, expected);
-  try {
-    if (process.platform !== 'win32') fchmodSync(opened.fd, 0o600);
-    return opened.identity;
-  } finally {
-    closeSync(opened.fd);
-  }
-}
-
-function validateDirectory(path: string, label: string, secure: boolean): void {
-  const stat = lstatSync(path);
-  if (!stat.isDirectory() || stat.isSymbolicLink()) {
-    throw new Error(`${label} must be a regular directory, not a symlink: ${path}`);
-  }
-  assertSafeOwner(stat, path, label);
-  if (!secure || process.platform === 'win32') return;
-
-  const noFollow = constants.O_NOFOLLOW ?? 0;
-  const directoryOnly = constants.O_DIRECTORY ?? 0;
-  const fd = openSync(path, constants.O_RDONLY | noFollow | directoryOnly);
-  try {
-    const opened = fstatSync(fd);
-    if (!opened.isDirectory() || opened.isSymbolicLink()) {
-      throw new Error(`${label} changed while it was being opened: ${path}`);
-    }
-    assertSafeOwner(opened, path, label);
-    fchmodSync(fd, 0o700);
-  } finally {
-    closeSync(fd);
-  }
-}
-
-function fsyncDirectory(path: string): void {
-  if (process.platform === 'win32') return;
-  const fd = openSync(path, constants.O_RDONLY | (constants.O_DIRECTORY ?? 0));
-  try {
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-}
-
 function readVerifiedJson(path: string): { raw: unknown; identity: FileIdentity } {
   const opened = openVerifiedRegular(path, 'evidence source');
   try {
@@ -343,6 +234,7 @@ function repairJson(
   const tmp = join(directory, `.${randomUUID()}.repair.tmp`);
   let fd: number | undefined;
   let replacementIdentity: FileIdentity | undefined;
+  let committed = false;
   try {
     fd = openSync(
       tmp,
@@ -356,14 +248,32 @@ function repairJson(
     closeSync(fd);
     fd = undefined;
 
-    const verified = openVerifiedRegular(path, 'evidence source', expected);
-    closeSync(verified.fd);
-    renameSync(tmp, path);
     try {
+      const verified = openVerifiedRegular(path, 'evidence source', expected);
+      try {
+        const sourceAtCommit = lstatSync(path);
+        assertRegularStat(sourceAtCommit, path, 'evidence source');
+        if (!sameIdentity(identityFrom(sourceAtCommit), verified.identity)) {
+          throw new Error(`evidence source changed before normalization: ${path}`);
+        }
+        renameSync(tmp, path);
+        committed = true;
+      } finally {
+        closeSync(verified.fd);
+      }
+      if (!replacementIdentity) {
+        throw new Error(`normalized evidence replacement identity is unavailable: ${path}`);
+      }
+      replacementIdentity = secureRegularPath(
+        path,
+        'normalized evidence source',
+        replacementIdentity,
+      );
       fsyncDirectory(directory);
     } catch (error) {
+      if (!committed) throw error;
       throw new EvidenceMutationCommittedError(
-        `evidence JSON was repaired but directory sync failed: ${path}: ${readableReason(error)}`,
+        `evidence JSON was repaired but post-commit validation failed: ${path}: ${readableReason(error)}`,
         mutation,
         error,
       );
@@ -381,54 +291,100 @@ function publishNoClobber(
   expected: FileIdentity,
   mutation: ReindexMutation,
 ): FileIdentity {
-  const secured = secureRegularPath(sourcePath, 'evidence source', expected);
+  const opened = openVerifiedRegular(sourcePath, 'evidence source', expected);
+  if (process.platform !== 'win32') fchmodSync(opened.fd, 0o600);
+  const secured = opened.identity;
+  let targetPublished = false;
+  let sourceRemoved = false;
   try {
-    linkSync(sourcePath, targetPath);
-  } catch (error) {
-    if (nodeErrorCode(error) === 'EEXIST') {
-      throw new Error(`cannot rescue misnamed episode: target already exists: ${targetPath}`);
+    try {
+      linkSync(sourcePath, targetPath);
+      targetPublished = true;
+    } catch (error) {
+      if (nodeErrorCode(error) === 'EEXIST') {
+        throw new Error(`cannot rescue misnamed episode: target already exists: ${targetPath}`);
+      }
+      throw error;
     }
-    throw error;
-  }
 
-  const sourceAfterLink = lstatSync(sourcePath);
-  const targetAfterLink = lstatSync(targetPath);
-  if (
-    !sourceAfterLink.isFile()
-    || sourceAfterLink.isSymbolicLink()
-    || !targetAfterLink.isFile()
-    || targetAfterLink.isSymbolicLink()
-    || !sameIdentity(identityFrom(sourceAfterLink), secured)
-    || !sameIdentity(identityFrom(targetAfterLink), secured)
-  ) {
-    throw new EvidenceMutationCommittedError(
-      `rescue target was published but source identity changed before unlink: ${sourcePath}`,
-      { kind: 'rescue-target-published', sourcePath, targetPath },
-      undefined,
-    );
-  }
-  assertSafeOwner(sourceAfterLink, sourcePath, 'evidence source');
-  assertSafeOwner(targetAfterLink, targetPath, 'rescue target');
+    const sourceAfterLink = lstatSync(sourcePath);
+    const targetAfterLink = lstatSync(targetPath);
+    const sourceIdentity = identityFrom(sourceAfterLink);
+    const targetIdentity = identityFrom(targetAfterLink);
+    if (
+      !sourceAfterLink.isFile()
+      || sourceAfterLink.isSymbolicLink()
+      || !targetAfterLink.isFile()
+      || targetAfterLink.isSymbolicLink()
+      || !sameIdentity(sourceIdentity, secured)
+      || !sameIdentity(targetIdentity, secured)
+    ) {
+      throw new Error(`evidence source changed while rescue was being published: ${sourcePath}`);
+    }
+    assertSafeOwner(sourceAfterLink, sourcePath, 'evidence source');
+    assertSafeOwner(targetAfterLink, targetPath, 'rescue target');
 
-  try {
-    unlinkSync(sourcePath);
+    try {
+      const sourceAtUnlink = lstatSync(sourcePath);
+      if (!sameIdentity(identityFrom(sourceAtUnlink), secured)) {
+        throw new Error(`evidence source changed before rescue unlink: ${sourcePath}`);
+      }
+      unlinkSync(sourcePath);
+      sourceRemoved = true;
+      const targetAfterUnlink = lstatSync(targetPath);
+      assertRegularStat(targetAfterUnlink, targetPath, 'rescue target');
+      if (!sameIdentity(identityFrom(targetAfterUnlink), secured)) {
+        throw new Error(`rescue target changed after source unlink: ${targetPath}`);
+      }
+      fsyncDirectory(dirname(sourcePath));
+    } catch (error) {
+      if (!sourceRemoved) throw error;
+      throw new EvidenceMutationCommittedError(
+        `rescue target was published but source finalization failed: ${sourcePath}: ${readableReason(error)}`,
+        { kind: 'rescue-target-published', sourcePath, targetPath },
+        error,
+      );
+    }
+    return secured;
   } catch (error) {
+    if (!targetPublished || error instanceof EvidenceMutationCommittedError) throw error;
+    if (!sourceRemoved) {
+      try {
+        const target = lstatSync(targetPath);
+        const source = lstatSync(sourcePath);
+        const targetIdentity = identityFrom(target);
+        const sourceIdentity = identityFrom(source);
+        const canProveCreatedLink = target.isFile()
+          && !target.isSymbolicLink()
+          && (
+            sameIdentity(targetIdentity, secured)
+            || (
+              source.isFile()
+              && !source.isSymbolicLink()
+              && sameIdentity(targetIdentity, sourceIdentity)
+              && target.nlink >= 2
+            )
+          );
+        if (canProveCreatedLink) {
+          const targetAtCleanup = lstatSync(targetPath);
+          if (sameIdentity(identityFrom(targetAtCleanup), targetIdentity)) {
+            unlinkSync(targetPath);
+            fsyncDirectory(dirname(targetPath));
+            throw error;
+          }
+        }
+      } catch (cleanupError) {
+        if (cleanupError === error) throw error;
+      }
+    }
     throw new EvidenceMutationCommittedError(
-      `rescue target was published but source could not be removed: ${sourcePath}: ${readableReason(error)}`,
+      `rescue target was published but could not be safely rolled back: ${targetPath}: ${readableReason(error)}`,
       { kind: 'rescue-target-published', sourcePath, targetPath },
       error,
     );
+  } finally {
+    closeSync(opened.fd);
   }
-  try {
-    fsyncDirectory(dirname(sourcePath));
-  } catch (error) {
-    throw new EvidenceMutationCommittedError(
-      `misnamed evidence was rescued but directory sync failed: ${targetPath}: ${readableReason(error)}`,
-      mutation,
-      error,
-    );
-  }
-  return secured;
 }
 
 interface PreparedIndexDestination {
@@ -484,6 +440,19 @@ function secureIndexFiles(dbPath: string, expectedMain?: FileIdentity): void {
       );
     }
   }
+}
+
+function removeNewIndexAfterInitializationFailure(
+  dbPath: string,
+  expectedMain: FileIdentity,
+): void {
+  const current = inspectRegularPath(dbPath, 'failed evidence index');
+  if (!current || !sameIdentity(current, expectedMain)) return;
+  for (const path of [`${dbPath}-wal`, `${dbPath}-shm`]) {
+    if (inspectRegularPath(path, 'failed evidence index sidecar')) unlinkSync(path);
+  }
+  unlinkSync(dbPath);
+  fsyncDirectory(dirname(dbPath));
 }
 
 export interface EvidenceIndexOptions {
@@ -577,7 +546,18 @@ export class EvidenceIndex {
       db.pragma('synchronous = FULL');
       secureIndexFiles(dbPath, this.dbIdentity);
     } catch (error) {
-      db.close();
+      try {
+        db.close();
+      } catch {
+        // Preserve the initialization failure.
+      }
+      if (prepared.created) {
+        try {
+          removeNewIndexAfterInitializationFailure(dbPath, prepared.identity);
+        } catch {
+          // Remove only fully verified files; otherwise preserve them for diagnosis.
+        }
+      }
       throw error;
     }
   }
@@ -720,6 +700,7 @@ function scanEvidenceStore(episodesDirInput: string, repair: boolean): EvidenceS
     scannedFiles += 1;
     const sourcePath = join(episodesDir, name);
     try {
+      if (repair) secureRegularPath(sourcePath, 'evidence source');
       const { raw, identity } = readVerifiedJson(sourcePath);
       const parsed = parseFile(raw, name.endsWith('.episode.json'));
       if (parsed.nullCount > 0) nullToleratedFiles += 1;
@@ -849,38 +830,41 @@ export function inspectEvidenceStore(options: InspectEvidenceStoreOptions): Rein
 export function reindexEvidenceStore(options: ReindexEvidenceStoreOptions): ReindexReport {
   const episodesDir = resolve(options.episodesDir);
   const indexPath = resolve(options.indexPath);
-  const index = new EvidenceIndex({
-    dbPath: indexPath,
-    secureParent: indexPath === resolve(defaultEvidenceIndexPath(episodesDir)),
-  });
+  return withEvidenceStoreLockSync(episodesDir, () => {
+    const index = new EvidenceIndex({
+      dbPath: indexPath,
+      secureParent: indexPath === resolve(defaultEvidenceIndexPath(episodesDir)),
+    });
 
-  let scan: EvidenceScanResult;
-  try {
-    scan = scanEvidenceStore(episodesDir, options.repair ?? false);
-  } catch (error) {
+    let scan: EvidenceScanResult;
+    try {
+      scan = scanEvidenceStore(episodesDir, options.repair ?? false);
+      options.onScanComplete?.();
+    } catch (error) {
+      try {
+        index.close();
+      } catch {
+        // Preserve the source-validation error; no source mutation occurred.
+      }
+      throw error;
+    }
+
+    try {
+      index.replace(scan.indexed, scan.unreadable);
+      scan.report.indexUpdated = true;
+    } catch (error) {
+      scan.report.indexUpdated = false;
+      scan.report.indexError = readableReason(error);
+    }
+
     try {
       index.close();
-    } catch {
-      // Preserve the source-validation error; no source mutation occurred.
+    } catch (error) {
+      scan.report.indexUpdated = false;
+      scan.report.indexError = scan.report.indexError
+        ? `${scan.report.indexError}; close failed: ${readableReason(error)}`
+        : `close failed: ${readableReason(error)}`;
     }
-    throw error;
-  }
-
-  try {
-    index.replace(scan.indexed, scan.unreadable);
-    scan.report.indexUpdated = true;
-  } catch (error) {
-    scan.report.indexUpdated = false;
-    scan.report.indexError = readableReason(error);
-  }
-
-  try {
-    index.close();
-  } catch (error) {
-    scan.report.indexUpdated = false;
-    scan.report.indexError = scan.report.indexError
-      ? `${scan.report.indexError}; close failed: ${readableReason(error)}`
-      : `close failed: ${readableReason(error)}`;
-  }
-  return scan.report;
+    return scan.report;
+  });
 }

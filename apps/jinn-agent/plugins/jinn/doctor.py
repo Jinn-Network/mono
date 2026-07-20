@@ -249,12 +249,22 @@ def _check_evidence_store(runner: Optional[jinn_layer.Runner] = None) -> dict:
         report = reply.get("report") if isinstance(reply, dict) else None
         mode = reply.get("mode") if isinstance(reply, dict) else None
         status = reply.get("status") if isinstance(reply, dict) else None
+        index_path = reply.get("indexPath") if isinstance(reply, dict) else object()
+        repair = reply.get("repair") if isinstance(reply, dict) else None
         readable = report.get("indexedEpisodes") if isinstance(report, dict) else None
         unreadable = report.get("unreadableFiles") if isinstance(report, dict) else None
         rows = report.get("unreadable") if isinstance(report, dict) else None
+        index_updated = report.get("indexUpdated") if isinstance(report, dict) else None
+        mutations = report.get("mutations") if isinstance(report, dict) else None
         if not (
             mode == "inspect"
             and status in {"ok", "degraded"}
+            and isinstance(reply, dict)
+            and "indexPath" in reply
+            and index_path is None
+            and repair is False
+            and index_updated is False
+            and mutations == []
             and isinstance(readable, int)
             and not isinstance(readable, bool)
             and readable >= 0
@@ -295,11 +305,27 @@ def _check_evidence_store(runner: Optional[jinn_layer.Runner] = None) -> dict:
             actions: list[str] = []
             if any("permission" in reason or "eacces" in reason for reason in reasons):
                 actions.append("restore owner read access")
+            if any(
+                "hardlink" in reason
+                or "owned by uid" in reason
+                or "ownership" in reason
+                for reason in reasons
+            ):
+                actions.append("replace hardlinked or foreign-owned sources")
             if any("symlink" in reason or "regular file" in reason for reason in reasons):
                 actions.append("replace unsafe symlink/non-regular sources")
             if any("duplicate episodeid" in reason for reason in reasons):
                 actions.append("resolve duplicate episode IDs")
-            classified = ("permission", "eacces", "symlink", "regular file", "duplicate episodeid")
+            classified = (
+                "permission",
+                "eacces",
+                "hardlink",
+                "owned by uid",
+                "ownership",
+                "symlink",
+                "regular file",
+                "duplicate episodeid",
+            )
             if not reasons or any(not any(token in reason for token in classified) for reason in reasons):
                 actions.append("fix or remove malformed/schema-invalid sources")
             remedy = "; ".join(actions)

@@ -225,4 +225,31 @@ describe('jinn-layer reindex', () => {
     expect(output).toContain('invalid reindex command');
     expect(existsSync(indexPath)).toBe(false);
   });
+
+  it('honors --json when an unsafe index destination fails preflight', async () => {
+    const { episodesDir, indexPath } = fixture();
+    const unrelated = new Database(indexPath);
+    unrelated.exec('CREATE TABLE unrelated (value TEXT)');
+    unrelated.close();
+    let output = '';
+
+    const code = await runJinnLayerCli([
+      'reindex',
+      '--json',
+      '--episodes-dir',
+      episodesDir,
+      '--index-path',
+      indexPath,
+    ], { writer: { write: (value) => { output += value; return true; } } });
+
+    expect(code).toBe(1);
+    expect(JSON.parse(output)).toMatchObject({
+      status: 'error',
+      mode: 'reindex',
+      episodesDir,
+      indexPath,
+      repair: false,
+      error: expect.stringMatching(/not a Jinn evidence index/i),
+    });
+  });
 });
