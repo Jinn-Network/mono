@@ -10,10 +10,13 @@ import {
   InMemorySkillsPort,
 } from '@jinn-network/plugin/testing';
 import {
+  ok,
   unavailable,
+  type CorpusRecord,
   type ContributionCandidateV1,
   type EpisodeV1,
   type JinnPluginDeps,
+  type KnowledgeHit,
 } from '@jinn-network/plugin';
 import { runJinnLayerCli } from '../src/cli.js';
 import { ContributionStore } from '@jinn-network/core';
@@ -262,6 +265,92 @@ describe('jinn-layer process contract v1', () => {
     expect(reply.value.contextBlock).toContain('[jinn corpus] Prior evidence relevant to this task:');
     expect(reply.value.contextBlock).toContain('FAIL version-status');
     expect(reply.value.searchedTerms.length).toBeGreaterThan(0);
+  });
+
+  it('keeps successful content-rescore packets consumable when one near-miss get is unavailable (#1792)', async () => {
+    const hits: KnowledgeHit[] = [
+      {
+        ref: 'rank-3',
+        kind: 'trace',
+        snippet: 'alpha',
+        tags: [],
+        tier: 'tests-passed',
+        origin: 'seed:rank-3',
+        publishedAt: 1,
+        retrievalVisible: true,
+      },
+      {
+        ref: 'rank-1-fails',
+        kind: 'trace',
+        snippet: 'alpha',
+        tags: [],
+        tier: 'tests-passed',
+        origin: 'seed:rank-1-fails',
+        publishedAt: 3,
+        retrievalVisible: true,
+      },
+      {
+        ref: 'rank-2',
+        kind: 'trace',
+        snippet: 'alpha',
+        tags: [],
+        tier: 'tests-passed',
+        origin: 'seed:rank-2',
+        publishedAt: 2,
+        retrievalVisible: true,
+      },
+    ];
+    const corpus: JinnPluginDeps['corpus'] = {
+      async search() {
+        return ok(hits);
+      },
+      async get(ref) {
+        if (ref === 'rank-1-fails') return unavailable('rank-1 unavailable');
+        const record: CorpusRecord = {
+          ref,
+          task: { summary: 'alpha metadata candidate' },
+          outcome: { status: 'completed', verifiabilityTier: 'tests-passed' },
+          synthesis: 'beta evidence from the fetched record',
+          steps: [],
+          tags: [],
+          provenance: 'imported',
+          origin: `seed:${ref}`,
+          capturedAt: '2026-07-20T00:00:00.000Z',
+          retrievalVisible: true,
+        };
+        return ok(record);
+      },
+    };
+    const out = capture();
+
+    expect(await runJinnLayerCli(['session', 'pickup'], {
+      writer: out.writer,
+      reader: async () => JSON.stringify({
+        contractVersion: 1,
+        meta: {
+          sessionId: 'pickup-content-rescore-partial',
+          taskSummary: 'ordinary OSS work',
+          harness: { name: 'host', version: '1' },
+          model: 'test',
+          tools: [],
+        },
+        firstMessage: 'alpha beta',
+      }),
+      pluginOverrides: memoryDeps({ corpus }),
+    })).toBe(0);
+
+    const reply = JSON.parse(out.output());
+    expect(reply).toMatchObject({
+      contractVersion: 1,
+      status: 'degraded',
+      reason: 'rank-1 unavailable',
+    });
+    expect(reply.value.packets.map((packet: { ref: string }) => packet.ref)).toEqual([
+      'rank-2',
+      'rank-3',
+    ]);
+    expect(reply.value.contextBlock).toContain('source: rank-2');
+    expect(reply.value.contextBlock).toContain('source: rank-3');
   });
 
   it('acknowledges the first sanitized contribution preview through a production command', async () => {

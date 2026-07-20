@@ -100,6 +100,19 @@ def test_pickup_renders_the_context_block_verbatim():
     assert result == {"context": CONTEXT_BLOCK}
 
 
+def test_pickup_consumes_successful_packets_from_a_degraded_partial_response():
+    response = json.loads(ok_response())
+    response["status"] = "degraded"
+    response["reason"] = "one near-miss unavailable"
+    runner = PickupRunner(out=json.dumps(response))
+    activity: dict = {}
+
+    result = pickup.pickup(MSG, runner=runner, activity=activity)
+
+    assert result == {"context": CONTEXT_BLOCK}
+    assert activity["providedRefs"] == ["bafySourceEpisode"]
+
+
 def test_pickup_returns_none_when_nothing_is_provided():
     runner = PickupRunner(out=ok_response(contextBlock=None, packets=[]))
     activity: dict = {}

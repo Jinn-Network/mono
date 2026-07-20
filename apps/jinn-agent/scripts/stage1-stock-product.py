@@ -91,6 +91,12 @@ TARGET_TASK_MESSAGE = (
     "confirm the fix holds. Report back once the suite is green."
 )
 
+# Mono #1792 acceptance: only ``dashboard`` occurs in the source record's
+# searchable summary/tags (metadata score 1). ``apiMocks.getStatus`` occurs
+# only in its fetched synthesis, so the source can clear the relevance floor
+# only through the bounded content-rescore escalation.
+CONTENT_RESCORE_MESSAGE = "Investigate dashboard `apiMocks.getStatus` behavior."
+
 # Scenario 3: shares no vocabulary with any of the five fixtures.
 NO_RESULT_MESSAGE = (
     "Investigate why the OLAS staking reward-claim loop occasionally "
@@ -757,6 +763,43 @@ def main() -> None:
         assert all(method != "POST" or path == "/graphql" for method, path in new_requests), (
             f"a non-search POST happened with sharing off: {new_requests!r}"
         )
+
+        # ── Scenario 2b: content re-score near-miss (#1792). Drive the real
+        # stock host hook and fixture-backed corpus bridge, but do not finish
+        # this probe session: it is a retrieval acceptance check, not another
+        # contribution/capture scenario. Resetting below discards its
+        # in-memory session buffer before Scenario 3.
+        reset_session_runtime(jinn)
+        jinn._on_session_start(
+            session_id="stage1-content-rescore",
+            cwd=str(work_repo),
+            platform="cli",
+        )
+        content_rescore_pickup = jinn._on_pre_llm_call(
+            session_id="stage1-content-rescore",
+            task_id="task-content-rescore",
+            user_message=CONTENT_RESCORE_MESSAGE,
+            is_first_turn=True,
+            model="stage1-model",
+            platform="cli",
+        )
+        assert content_rescore_pickup is not None, (
+            "metadata score-1 source did not clear the floor after content re-score"
+        )
+        content_rescore_context = content_rescore_pickup["context"]
+        assert SOURCE_DISTINCTIVE_CONTENT in content_rescore_context, content_rescore_context
+        assert f"source: {SOURCE_REF}" in content_rescore_context, content_rescore_context
+        for absent_ref in (
+            DISTRACTOR_SAME_REPO_REF,
+            DISTRACTOR_OTHER_DOMAIN_REF,
+            DISTRACTOR_SKILL_REF,
+            DISTRACTOR_SKILL_DUP_REF,
+        ):
+            assert absent_ref not in content_rescore_context, (
+                absent_ref,
+                content_rescore_context,
+            )
+        reset_session_runtime(jinn)
 
         # ── Scenario 3: honest no-result. Outbound contribution is parked
         # through Stage 2, so this second eligible session also stays local
