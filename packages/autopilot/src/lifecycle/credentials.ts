@@ -22,6 +22,10 @@ function isGitConfigOverrideEnvironmentKey(key: string): boolean {
   return /^GIT_CONFIG(?:_|$)/i.test(key);
 }
 
+function isAmbientSshCredentialKey(key: string): boolean {
+  return /^(?:SSH_AUTH_SOCK|SSH_AGENT_PID|GIT_SSH|GIT_SSH_COMMAND)$/i.test(key);
+}
+
 export function isolatedGitCommandOverlay(
   ambient: NodeJS.ProcessEnv,
   askpassPath: string,
@@ -45,6 +49,7 @@ export function isolatedGitCommandOverlay(
     GIT_TERMINAL_PROMPT: '0',
     GIT_ASKPASS: askpassPath,
     SSH_ASKPASS: askpassPath,
+    GIT_SSH_COMMAND: 'false',
   };
 }
 
@@ -356,6 +361,7 @@ export function buildSanitizedChildEnv(
     if (
       !isGitHubSecretEnvironmentKey(key)
       && !isGitConfigOverrideEnvironmentKey(key)
+      && !isAmbientSshCredentialKey(key)
     ) {
       env[key] = value;
     }

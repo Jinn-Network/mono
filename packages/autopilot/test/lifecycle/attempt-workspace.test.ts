@@ -93,8 +93,11 @@ function options(
 function terminalAttempt(manifest: AttemptManifest): AttemptManifest {
   markAttemptRunning(manifest.paths.manifest, 4242, () =>
     new Date('2026-07-20T00:01:00.000Z'));
-  return markAttemptExited(manifest.paths.manifest, () =>
-    new Date('2026-07-20T00:02:00.000Z'));
+  return markAttemptExited(
+    manifest.paths.manifest,
+    () => new Date('2026-07-20T00:02:00.000Z'),
+    manifest.expectedHead,
+  );
 }
 
 describe('attempt workspace and manifest', () => {
@@ -181,6 +184,16 @@ describe('attempt workspace and manifest', () => {
     expect(existsSync(attemptDir)).toBe(false);
     expect(git(failureFixture.repo, ['worktree', 'list', '--porcelain']))
       .not.toContain(join(attemptDir, 'worktree'));
+
+    const collisionFixture = repositoryFixture();
+    const collision = await createAttemptWorkspace(options(collisionFixture), defaultRunner);
+    rmSync(collision.paths.attemptDir, { recursive: true });
+    await expect(createAttemptWorkspace(
+      options(collisionFixture),
+      defaultRunner,
+    )).rejects.toThrow(/already registered/);
+    expect(git(collisionFixture.repo, ['worktree', 'list', '--porcelain']))
+      .toContain(`issue-42-${UUID_A}/worktree`);
   });
 
   it('builds a collision-resistant filesystem-safe default runner id', () => {
@@ -231,6 +244,16 @@ describe('attempt workspace and manifest', () => {
     const updated = readAttemptManifest(manifest.paths.manifest);
     expect(updated).toMatchObject({ processState: 'exited', pid: 4242 });
     expect(updated.timestamps.childExitedAt).toBe('2026-07-20T00:02:00.000Z');
+
+    const second = await createAttemptWorkspace(options(fixture, {
+      attemptId: UUID_B,
+    }), defaultRunner);
+    const alreadyExited = Object.assign(new EventEmitter(), { pid: 5252, exitCode: 0 });
+    trackAttemptChild(second.paths.manifest, alreadyExited, {
+      now: () => new Date('2026-07-20T00:03:00.000Z'),
+      terminalHead: second.expectedHead,
+    });
+    expect(readAttemptManifest(second.paths.manifest).processState).toBe('exited');
     expect(readdirSync(manifest.paths.attemptDir).filter((name) => name.includes('.tmp-')))
       .toEqual([]);
     expect(JSON.stringify(updated)).not.toMatch(/must-not-be-accepted|token/i);
@@ -304,6 +327,19 @@ describe('safe attempt cleanup', () => {
   });
 
   it('requires registry absence and remote reachability before removing missing-worktree metadata', async () => {
+    const unrecordedFixture = repositoryFixture();
+    const unrecorded = await createAttemptWorkspace(options(unrecordedFixture), defaultRunner);
+    markAttemptRunning(unrecorded.paths.manifest, 3131);
+    markAttemptExited(unrecorded.paths.manifest);
+    git(unrecordedFixture.repo, ['worktree', 'remove', unrecorded.paths.worktree]);
+    await expect(cleanupAttempt(unrecorded.paths.manifest, defaultRunner, {
+      v2Base: join(unrecordedFixture.base, 'v2'),
+      isPidAlive: () => false,
+    })).resolves.toMatchObject({
+      status: 'retained',
+      reason: { code: 'ambiguous' },
+    });
+
     const registeredFixture = repositoryFixture();
     const registered = terminalAttempt(
       await createAttemptWorkspace(options(registeredFixture), defaultRunner),

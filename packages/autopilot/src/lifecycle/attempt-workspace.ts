@@ -71,6 +71,7 @@ export interface AttemptManifest {
   readonly repository: AttemptRepositoryIdentity;
   readonly processState: AttemptProcessState;
   readonly pid: number | null;
+  readonly terminalHead?: string;
   readonly paths: AttemptPaths;
   readonly timestamps: AttemptTimestamps;
 }
@@ -161,7 +162,7 @@ function exactKeys(
   const unknown = Object.keys(record).find((key) => !allowedSet.has(key));
   if (unknown !== undefined) throw new Error(`Unknown field: ${unknown}`);
   const missing = allowed.find((key) => !Object.hasOwn(record, key)
-    && !['prNumber', 'reviewGeneration', 'reviewRefOid', 'childStartedAt', 'childExitedAt'].includes(key));
+    && !['prNumber', 'reviewGeneration', 'reviewRefOid', 'terminalHead', 'childStartedAt', 'childExitedAt'].includes(key));
   if (missing !== undefined) throw new Error(`Missing ${name} field: ${missing}`);
 }
 
@@ -277,6 +278,7 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
     'repository',
     'processState',
     'pid',
+    'terminalHead',
     'paths',
     'timestamps',
   ], 'attempt manifest');
@@ -314,6 +316,9 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
   }
   const decodedProcessState = processState(manifest.processState);
   const pid = nullablePid(manifest.pid);
+  const terminalHead = manifest.terminalHead === undefined
+    ? undefined
+    : gitOid(stringField(manifest.terminalHead, 'terminal head'));
   const timestamps = decodeTimestamps(manifest.timestamps);
   if (
     (decodedProcessState === 'preparing'
@@ -330,6 +335,9 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
         || timestamps.childExitedAt === undefined))
   ) {
     throw new Error('Attempt process state, PID, and timestamps disagree');
+  }
+  if (decodedProcessState !== 'exited' && terminalHead !== undefined) {
+    throw new Error('Terminal head is valid only for an exited attempt');
   }
   return {
     version: 2,
@@ -351,6 +359,7 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
     repository: decodeRepositoryIdentity(manifest.repository),
     processState: decodedProcessState,
     pid,
+    ...(terminalHead === undefined ? {} : { terminalHead }),
     paths: decodePaths(manifest.paths),
     timestamps,
   };
@@ -455,8 +464,10 @@ export function markAttemptRunning(
 export function markAttemptExited(
   manifestPath: string,
   now: () => Date = () => new Date(),
+  terminalHead?: string,
 ): AttemptManifest {
   const timestamp = transitionTimestamp(now);
+  const validTerminalHead = terminalHead === undefined ? undefined : gitOid(terminalHead);
   return updateAttemptManifest(manifestPath, (current) => {
     if (current.processState !== 'running') {
       throw new Error('Only a running attempt may transition to exited');
@@ -464,6 +475,7 @@ export function markAttemptExited(
     return {
       ...current,
       processState: 'exited',
+      ...(validTerminalHead === undefined ? {} : { terminalHead: validTerminalHead }),
       timestamps: {
         ...current.timestamps,
         updatedAt: timestamp,
@@ -475,12 +487,14 @@ export function markAttemptExited(
 
 export interface TrackableAttemptChild {
   readonly pid?: number;
+  readonly exitCode?: number | null;
   once(event: 'exit', listener: (...args: unknown[]) => void): unknown;
 }
 
 export interface TrackAttemptChildOptions {
   readonly alreadyRunning?: boolean;
   readonly now?: () => Date;
+  readonly terminalHead?: string;
 }
 
 /**
@@ -493,16 +507,26 @@ export function trackAttemptChild(
   options: TrackAttemptChildOptions = {},
 ): AttemptManifest {
   const pid = positiveInteger(child.pid, 'child PID');
+  let exitObserved = child.exitCode !== undefined && child.exitCode !== null;
+  let runningRecorded = false;
+  let exitedRecorded = false;
+  const recordExit = (): void => {
+    exitObserved = true;
+    if (runningRecorded && !exitedRecorded) {
+      markAttemptExited(manifestPath, options.now, options.terminalHead);
+      exitedRecorded = true;
+    }
+  };
+  child.once('exit', recordExit);
   const running = options.alreadyRunning === true
     ? readAttemptManifest(manifestPath)
     : markAttemptRunning(manifestPath, pid, options.now);
   if (running.processState !== 'running' || running.pid !== pid) {
     throw new Error('Tracked child does not match the running attempt');
   }
-  child.once('exit', () => {
-    markAttemptExited(manifestPath, options.now);
-  });
-  return running;
+  runningRecorded = true;
+  if (exitObserved) recordExit();
+  return exitedRecorded ? readAttemptManifest(manifestPath) : running;
 }
 
 const ASKPASS = `#!/bin/sh
@@ -643,6 +667,14 @@ export async function createAttemptWorkspace(
         : { childStartedAt: timestamp }),
     },
   });
+  const registeredBefore = (await registeredWorktreePaths(
+    repository.gitCommonDir,
+    runner,
+  )).some((path) =>
+    canonicalProspectivePath(path) === canonicalProspectivePath(paths.worktree));
+  if (registeredBefore) {
+    throw new Error('Attempt worktree path is already registered');
+  }
   mkdirSync(phaseDir, { recursive: true, mode: 0o700 });
   mkdirSync(attemptDir, { mode: 0o700 });
   mkdirSync(paths.ghConfigDir, { mode: 0o700 });
@@ -982,6 +1014,13 @@ export async function cleanupAttempt(
     }
   }
   if (!existsSync(manifest.paths.worktree)) {
+    if (manifest.terminalHead === undefined) {
+      return retained(
+        'ambiguous',
+        'Missing worktree has no recorded terminal HEAD.',
+        manifest.attemptId,
+      );
+    }
     let registered: boolean;
     try {
       registered = (await registeredWorktreePaths(
@@ -1008,7 +1047,7 @@ export async function cleanupAttempt(
       runner,
       options,
       [`--git-dir=${manifest.repository.gitCommonDir}`],
-      manifest.expectedHead,
+      manifest.terminalHead,
     );
     if (proofFailure !== null) return proofFailure;
     rmSync(manifest.paths.attemptDir, { recursive: true });
