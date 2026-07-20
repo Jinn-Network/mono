@@ -21,7 +21,7 @@ const ACTIVITY = {
   retrievalFired: true,
   eligibleRefs: ['knowledge/fetched-1'] as string[],
   deliveredRefs: [] as string[],
-  deliveryMode: 'delivered' as const,
+  deliveryMode: 'withheld' as const,
   searchedTerms: [] as string[],
   providedRefs: [] as string[],
   surfacedRefs: ['knowledge/surfaced-1'],

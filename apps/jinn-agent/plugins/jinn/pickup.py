@@ -212,22 +212,33 @@ def _pickup_inner(
 
     if activity is not None:
         activity["searchedTerms"] = searched_terms
-        activity["providedRefs"] = provided_refs
         activity["eligibleRefs"] = [
             ref for ref in (value.get("eligibleRefs") or [])
             if isinstance(ref, str) and ref
         ]
-        activity["deliveredRefs"] = provided_refs
-        mode = value.get("deliveryMode")
-        activity["deliveryMode"] = (
-            mode if mode in ("delivered", "disabled", "degraded", "withheld")
-            else ("degraded" if envelope.get("status") == "degraded" else "delivered")
-        )
 
     context_block = value.get("contextBlock")
     if not isinstance(context_block, str) or not context_block.strip():
+        if activity is not None:
+            activity["providedRefs"] = []
+            activity["deliveredRefs"] = []
+            activity["deliveryMode"] = (
+                "degraded"
+                if envelope.get("status") == "degraded"
+                or value.get("deliveryMode") == "degraded"
+                else "withheld"
+            )
+            activity.pop("deliveredContentHash", None)
         return None
     if activity is not None:
+        activity["providedRefs"] = provided_refs
+        activity["deliveredRefs"] = provided_refs
+        activity["deliveryMode"] = (
+            "degraded"
+            if envelope.get("status") == "degraded"
+            or value.get("deliveryMode") == "degraded"
+            else "delivered"
+        )
         activity["deliveredContentHash"] = (
             "sha256:" + hashlib.sha256(context_block.encode("utf-8")).hexdigest()
         )

@@ -11,7 +11,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { describeEvidencePortContract } from '@jinn-network/plugin/testing';
 import { EPISODE_SCHEMA_VERSION, EpisodeV1Schema, type EpisodeV1 } from '@jinn-network/plugin';
 import type { CapturedTask } from '../src/captured-task.js';
@@ -157,6 +157,36 @@ describe('EvidenceAdapter — AC2 legacy read', () => {
       reason: 'evidence list skipped 2 unreadable record(s)',
       value: [episode],
     });
+  });
+
+  it('counts and identifies an episode whose present activity facts are malformed', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-malformed-activity-'));
+    const adapter = createEvidenceAdapter({ capturesDir });
+    const episode = makeSampleEpisode({ episodeId: 'readable' });
+    expect((await adapter.put(episode)).status).toBe('ok');
+    writeFileSync(
+      join(capturesDir, 'malformed-activity.episode.json'),
+      JSON.stringify({
+        ...makeSampleEpisode({ episodeId: 'malformed-activity' }),
+        activity: { searchedTerms: { wrong: 'container' } },
+      }),
+    );
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    try {
+      const result = await adapter.list();
+
+      expect(result).toEqual({
+        status: 'degraded',
+        reason: 'evidence list skipped 1 unreadable record(s)',
+        value: [episode],
+      });
+      expect(warning).toHaveBeenCalledWith(
+        expect.stringContaining('malformed-activity.episode.json'),
+      );
+    } finally {
+      warning.mockRestore();
+    }
   });
 
   it('rejects unstamped legacy-shaped values on put while retaining tolerant reads', async () => {

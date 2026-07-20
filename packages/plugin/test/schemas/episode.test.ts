@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   EpisodeV1Schema,
   EpisodeV1WriteSchema,
+  SessionActivityFactsWriteSchema,
 } from '../../src/schemas/episode.js';
 import { makeSampleEpisode } from '../_fixtures/episode.js';
 
@@ -69,6 +70,37 @@ describe('EpisodeV1Schema', () => {
     expect(parsed.futureAdditiveField).toEqual({ preserved: true });
   });
 
+  it('rejects a present activity field with the wrong container instead of defaulting it', () => {
+    expect(() => EpisodeV1Schema.parse({
+      ...valid,
+      activity: {
+        searchedTerms: 'dashboard',
+      },
+    })).toThrow();
+  });
+
+  it('rejects wrong-typed activity array members instead of filtering them out', () => {
+    expect(() => EpisodeV1Schema.parse({
+      ...valid,
+      activity: {
+        providedRefs: ['bafy-valid', 42],
+      },
+    })).toThrow();
+  });
+
+  it('rejects null for required legacy facts while retaining documented optional nulls', () => {
+    expect(() => EpisodeV1Schema.parse({
+      ...valid,
+      origin: null,
+    })).toThrow();
+    expect(() => EpisodeV1Schema.parse({
+      ...valid,
+      activity: {
+        providedRefs: null,
+      },
+    })).toThrow();
+  });
+
   it('requires explicit writer and v1.1 session/delivery facts on strict writes', () => {
     const next = {
       ...valid,
@@ -104,6 +136,53 @@ describe('EpisodeV1Schema', () => {
       task: { ...next.task, repositorySlug: null },
     })).toThrow();
   });
+
+  it.each([
+    {
+      name: 'deliveryMode=delivered with no refs',
+      activity: {
+        retrievalFired: true,
+        eligibleRefs: [],
+        deliveredRefs: [],
+        deliveryMode: 'delivered' as const,
+      },
+    },
+    {
+      name: 'nonempty deliveredRefs in a degraded delivery',
+      activity: {
+        retrievalFired: true,
+        eligibleRefs: ['bafy-delivered'],
+        deliveredRefs: ['bafy-delivered'],
+        deliveryMode: 'degraded' as const,
+      },
+    },
+  ])('requires deliveredContentHash for a strict write with $name', ({ activity }) => {
+    expect(() => SessionActivityFactsWriteSchema.parse({
+      ...activity,
+      searchedTerms: [],
+      providedRefs: activity.deliveredRefs,
+      surfacedRefs: [],
+      fetchedRefs: [],
+      installedSkillRefs: [],
+    })).toThrow();
+  });
+
+  it.each(['disabled', 'withheld', 'degraded'] as const)(
+    'allows a genuine %s no-delivery write to omit deliveredContentHash',
+    (deliveryMode) => {
+      expect(() => SessionActivityFactsWriteSchema.parse({
+        retrievalFired: deliveryMode !== 'disabled',
+        eligibleRefs: [],
+        deliveredRefs: [],
+        deliveryMode,
+        searchedTerms: [],
+        providedRefs: [],
+        surfacedRefs: [],
+        fetchedRefs: [],
+        installedSkillRefs: [],
+      })).not.toThrow();
+    },
+  );
 
   it('rejects an empty trajectory', () => {
     expect(() => EpisodeV1Schema.parse({ ...valid, trajectory: [] })).toThrow();

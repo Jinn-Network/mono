@@ -102,12 +102,20 @@ def test_pickup_renders_the_context_block_verbatim():
 
 def test_pickup_returns_none_when_nothing_is_provided():
     runner = PickupRunner(out=ok_response(contextBlock=None, packets=[]))
-    assert pickup.pickup(MSG, runner=runner) is None
+    activity: dict = {}
+    assert pickup.pickup(MSG, runner=runner, activity=activity) is None
+    assert activity["deliveredRefs"] == []
+    assert activity["deliveryMode"] == "withheld"
+    assert "deliveredContentHash" not in activity
 
 
 def test_pickup_returns_none_when_context_block_is_blank():
     runner = PickupRunner(out=ok_response(contextBlock="   "))
-    assert pickup.pickup(MSG, runner=runner) is None
+    activity: dict = {}
+    assert pickup.pickup(MSG, runner=runner, activity=activity) is None
+    assert activity["deliveredRefs"] == []
+    assert activity["deliveryMode"] == "withheld"
+    assert "deliveredContentHash" not in activity
 
 
 # ── Activity recording (rescope §3.6) ───────────────────────────────────────

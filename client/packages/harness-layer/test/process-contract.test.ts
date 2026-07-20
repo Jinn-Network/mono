@@ -78,6 +78,7 @@ function request(overrides: Record<string, unknown> = {}) {
       eligibleRefs: ['knowledge/ref-1'],
       deliveredRefs: ['knowledge/ref-1'],
       deliveryMode: 'delivered',
+      deliveredContentHash: `sha256:${'a'.repeat(64)}`,
       surfacedRefs: ['knowledge/ref-1'],
       fetchedRefs: ['knowledge/ref-1'],
       installedSkillRefs: [],

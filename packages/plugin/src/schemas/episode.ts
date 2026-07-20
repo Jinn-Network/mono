@@ -69,6 +69,17 @@ const DeliveryActivityShape = {
 export const SessionActivityFactsWriteSchema = z.strictObject({
   ...LegacyActivityShape,
   ...DeliveryActivityShape,
+}).superRefine((activity, context) => {
+  if (
+    (activity.deliveryMode === 'delivered' || activity.deliveredRefs.length > 0)
+    && activity.deliveredContentHash === undefined
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['deliveredContentHash'],
+      message: 'delivered evidence requires the exact sha256 content hash',
+    });
+  }
 });
 
 const SessionShape = {
@@ -162,12 +173,6 @@ function withoutNulls(value: unknown, optionalKeys: readonly string[]): unknown 
   return normalized;
 }
 
-function stringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === 'string' && item.length > 0)
-    : [];
-}
-
 /** Additive v1 reader normalization. Writers never use this path. */
 function normalizeEpisodeRead(value: unknown): unknown {
   const raw = asRecord(value);
@@ -177,7 +182,7 @@ function normalizeEpisodeRead(value: unknown): unknown {
   const session = asRecord(withoutNulls(raw['session'], ['parentSessionId']));
   if (session) normalized['session'] = { kind: 'user', ...session };
 
-  if (raw['origin'] === undefined || raw['origin'] === null) {
+  if (raw['origin'] === undefined) {
     normalized['origin'] = 'legacy-unstamped';
   }
 
@@ -191,28 +196,33 @@ function normalizeEpisodeRead(value: unknown): unknown {
   const activity = asRecord(normalized['activity']);
   if (activity) {
     const clean = asRecord(withoutNulls(activity, ['deliveredContentHash'])) ?? {};
-    const searchedTerms = stringArray(clean['searchedTerms']);
-    const legacyProvided = stringArray(clean['providedRefs']);
+    const searchedTerms = clean['searchedTerms'] === undefined ? [] : clean['searchedTerms'];
+    const legacyProvided = clean['providedRefs'];
     const deliveredRefs = clean['deliveredRefs'] === undefined
-      ? legacyProvided
-      : stringArray(clean['deliveredRefs']);
+      ? legacyProvided === undefined ? [] : legacyProvided
+      : clean['deliveredRefs'];
     const eligibleRefs = clean['eligibleRefs'] === undefined
       ? deliveredRefs
-      : stringArray(clean['eligibleRefs']);
-    const retrievalFired = typeof clean['retrievalFired'] === 'boolean'
+      : clean['eligibleRefs'];
+    const retrievalFired = clean['retrievalFired'] !== undefined
       ? clean['retrievalFired']
-      : searchedTerms.length > 0 || deliveredRefs.length > 0;
+      : (Array.isArray(searchedTerms) && searchedTerms.length > 0)
+        || (Array.isArray(deliveredRefs) && deliveredRefs.length > 0);
     normalized['activity'] = {
       ...clean,
       searchedTerms,
-      providedRefs: clean['providedRefs'] === undefined ? deliveredRefs : legacyProvided,
-      surfacedRefs: stringArray(clean['surfacedRefs']),
-      fetchedRefs: stringArray(clean['fetchedRefs']),
-      installedSkillRefs: stringArray(clean['installedSkillRefs']),
+      providedRefs: legacyProvided === undefined ? deliveredRefs : legacyProvided,
+      surfacedRefs: clean['surfacedRefs'] === undefined ? [] : clean['surfacedRefs'],
+      fetchedRefs: clean['fetchedRefs'] === undefined ? [] : clean['fetchedRefs'],
+      installedSkillRefs: clean['installedSkillRefs'] === undefined
+        ? []
+        : clean['installedSkillRefs'],
       retrievalFired,
       eligibleRefs,
       deliveredRefs,
-      deliveryMode: clean['deliveryMode'] ?? (retrievalFired ? 'delivered' : 'disabled'),
+      deliveryMode: clean['deliveryMode'] === undefined
+        ? (retrievalFired === true ? 'delivered' : 'disabled')
+        : clean['deliveryMode'],
     };
   }
 

@@ -443,6 +443,8 @@ describe('firstTurnPickup over ports — evidence-first pickup (rescope §3/§4.
 
     expect(result.packets).toEqual([]);
     expect(result.contextBlock).toBeNull();
+    expect(result.deliveryMode).toBe('withheld');
+    expect(result).not.toHaveProperty('deliveredContentHash');
   });
 
   it('scenario 4: retrieval unavailable proceeds honestly with a degraded reason, no injection', async () => {
@@ -585,6 +587,8 @@ describe('firstTurnPickup over ports — evidence-first pickup (rescope §3/§4.
     expect(result.packets).toEqual([]);
     expect(result.contextBlock).toBeNull();
     expect(result.searchedTerms).toEqual([]);
+    expect(result.deliveryMode).toBe('withheld');
+    expect(result).not.toHaveProperty('deliveredContentHash');
   });
 
   it('is a no-op when config disables pickup', async () => {

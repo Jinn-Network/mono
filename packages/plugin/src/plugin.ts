@@ -359,6 +359,7 @@ export class PluginSession {
     this.retrievalFired = true;
     this.deliveryMode = 'delivered';
     if (terms.length === 0) {
+      this.deliveryMode = 'withheld';
       return {
         contextBlock: null,
         packets: [],
@@ -366,7 +367,7 @@ export class PluginSession {
         retrievalFired: true,
         eligibleRefs: [],
         deliveredRefs: [],
-        deliveryMode: 'delivered',
+        deliveryMode: this.deliveryMode,
       };
     }
 
@@ -401,7 +402,7 @@ export class PluginSession {
 
     const ranked = rankKnowledgeHits([...byRef.values()], terms);
     if (ranked.length === 0) {
-      this.deliveryMode = degradedReason === undefined ? 'delivered' : 'degraded';
+      this.deliveryMode = degradedReason === undefined ? 'withheld' : 'degraded';
       return {
         contextBlock: null,
         packets: [],
@@ -464,7 +465,7 @@ export class PluginSession {
     this.packets = packets;
 
     if (packets.length === 0) {
-      this.deliveryMode = degradedReason === undefined ? 'delivered' : 'degraded';
+      this.deliveryMode = degradedReason === undefined ? 'withheld' : 'degraded';
       return {
         contextBlock: null,
         packets: [],
