@@ -211,7 +211,23 @@ function bodyFor(issueNumber: number, branch: GitRefName): string {
 function humanBranchAmbiguity(
   issueNumber: number,
   pullRequests: readonly ImplementationPullRequest[],
+  realityPrNumber?: number,
 ): HumanReason {
+  if (
+    realityPrNumber !== undefined
+    && pullRequests.length === 1
+    && pullRequests[0]!.number !== realityPrNumber
+  ) {
+    return {
+      phase: 'eligible',
+      code: 'branch-mapping-ambiguous',
+      detail:
+        `Canonical reality-check evidence names open PR #${realityPrNumber} for issue ` +
+        `#${issueNumber}, but the bounded issue-to-PR mapping names sole PR ` +
+        `#${pullRequests[0]!.number} (${pullRequests[0]!.headRefName} → ` +
+        `${pullRequests[0]!.baseRefName}).`,
+    };
+  }
   return {
     phase: 'eligible',
     code: 'branch-mapping-ambiguous',
@@ -308,14 +324,26 @@ export async function executeImplementationAction(
 
   const reality = await deps.runRealityCheck(issueNumber);
   const openPullRequests = await deps.listOpenPullRequests(issueNumber);
+  const realityPrNumber = reality.classification === 'pr-open'
+    ? reality.evidence.prNumber
+    : undefined;
   if (
     openPullRequests.length > 1
     || (
       openPullRequests.length === 1
       && openPullRequests[0]!.baseRefName !== issue.targetBase
     )
+    || (
+      realityPrNumber !== undefined
+      && openPullRequests.length === 1
+      && openPullRequests[0]!.number !== realityPrNumber
+    )
   ) {
-    const reason = humanBranchAmbiguity(issueNumber, openPullRequests);
+    const reason = humanBranchAmbiguity(
+      issueNumber,
+      openPullRequests,
+      realityPrNumber,
+    );
     await deps.escalateHuman({ issueNumber, reason });
     return { status: 'human', issueNumber, code: 'branch-mapping-ambiguous' };
   }
