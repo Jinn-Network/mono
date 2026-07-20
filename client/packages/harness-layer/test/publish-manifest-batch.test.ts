@@ -1,8 +1,13 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { ScrubPipeline } from '../../../src/trajectory/scrub/pipeline.js';
+import { canonicalJson } from '../../../src/harnesses/engine/canonical-json.js';
 import { capture, type CapturedTask, type PendingEnvelope } from '../src/capture.js';
+import { MAX_RAW_IPFS_BLOCK_BYTES } from '../src/ipfs-cid.js';
 import {
   ManifestBatchAnchorError,
+  ManifestBatchRecordingError,
+  ManifestBatchSetError,
   publishManifestBatch,
   publishMemberEnvelope,
   type ManifestBatchPublishDeps,
@@ -64,6 +69,7 @@ function deps() {
     anchorEnvelope: [] as unknown[],
     anchorManifest: [] as unknown[],
     manifestBodies: [] as ManifestV0[],
+    manifestCids: [] as string[],
     anchorRecords: [] as unknown[],
     controlRecords: [] as unknown[],
     logs: [] as string[],
@@ -95,8 +101,14 @@ function deps() {
       };
     },
     publishManifestBody: async (body) => {
-      calls.manifestBodies.push(parseManifestV0(body));
-      return { cid: 'bafy-manifest', sha256: 'f'.repeat(64) };
+      const parsed = parseManifestV0(body);
+      calls.manifestBodies.push(parsed);
+      const sha256 = createHash('sha256')
+        .update(canonicalJson(parsed))
+        .digest('hex');
+      const cid = `f01551220${sha256}`;
+      calls.manifestCids.push(cid);
+      return { cid, sha256 };
     },
     anchorManifest: async (input) => {
       calls.anchorManifest.push(input);
@@ -167,11 +179,17 @@ describe('publishManifestBatch', () => {
     ]);
     for (const member of body.members) {
       const { proof } = proveMember(body, member.cid);
-      expect(verifyMember(member.cid, proof, result.root)).toBe(true);
+      expect(verifyMember(member.cid, proof, result.batches[0]!.root)).toBe(true);
     }
 
-    expect(result).toMatchObject({
-      manifestCid: 'bafy-manifest',
+    expect(result.memberRefs).toEqual([
+      'bafy-envelope-1',
+      'bafy-envelope-2',
+      'bafy-envelope-3',
+    ]);
+    expect(result.batches).toHaveLength(1);
+    expect(result.batches[0]).toMatchObject({
+      manifestCid: calls.manifestCids[0],
       anchorTx: TEST_TX,
       memberRefs: ['bafy-envelope-1', 'bafy-envelope-2', 'bafy-envelope-3'],
       gasUsed: 123_456n,
@@ -185,16 +203,18 @@ describe('publishManifestBatch', () => {
     ]);
     expect(calls.anchorRecords).toHaveLength(1);
     expect(calls.anchorRecords[0]).toMatchObject({
-      manifestCid: 'bafy-manifest',
+      manifestCid: calls.manifestCids[0],
       contentKind: 'manifest',
-      metadataKey: 'manifest:bafy-manifest',
+      metadataKey: `manifest:${calls.manifestCids[0]}`,
       txHash: TEST_TX,
       gasUsed: 123_456n,
       feeWei: 987_648n,
     });
     expect(calls.logs).toEqual([
       expect.stringMatching(
-        /^\[manifest] batch anchored cid=bafy-manifest members=3 gasUsed=123456 feeWei=987648$/,
+        new RegExp(
+          `^\\[manifest] batch anchored cid=${calls.manifestCids[0]} members=3 gasUsed=123456 feeWei=987648$`,
+        ),
       ),
     ]);
   });
@@ -239,7 +259,7 @@ describe('publishManifestBatch', () => {
       gasUsed: 45_000n,
       feeWei: 90_000n,
     });
-    expect(result.control).toEqual({
+    expect(result.batches[0]?.control).toEqual({
       memberRef: 'bafy-envelope-1',
       anchorTx: CONTROL_TX,
       blockNumber: 10,
@@ -270,7 +290,7 @@ describe('publishManifestBatch', () => {
   });
 
   it('retains the manifest CID and broadcast tx when confirmation fails', async () => {
-    const { publishDeps } = deps();
+    const { publishDeps, calls } = deps();
     publishDeps.anchorManifest = async () => {
       throw Object.assign(new Error('receipt reverted'), { txHash: TEST_TX });
     };
@@ -283,10 +303,98 @@ describe('publishManifestBatch', () => {
 
     expect(error).toBeInstanceOf(ManifestBatchAnchorError);
     expect(error).toMatchObject({
-      manifestCid: 'bafy-manifest',
+      manifestCid: calls.manifestCids[0],
       txHash: TEST_TX,
       memberRefs: ['bafy-envelope-1'],
     });
     expect(String(error)).toContain('receipt reverted');
+  });
+
+  it('splits before upload when the canonical body would exceed one raw IPFS block', async () => {
+    const { publishDeps, calls, ledger } = deps();
+    const largeInstanceId = 'x'.repeat(140_000);
+
+    const result = await publishManifestBatch(
+      [
+        {
+          pending: await pending(1),
+          polarity: 'pass',
+          instanceId: `${largeInstanceId}1`,
+        },
+        {
+          pending: await pending(2),
+          polarity: 'fail',
+          instanceId: `${largeInstanceId}2`,
+        },
+      ],
+      publishDeps,
+      { batchKind: 'bridge' },
+    );
+
+    expect(calls.manifestBodies).toHaveLength(2);
+    expect(calls.anchorManifest).toHaveLength(2);
+    expect(result.batches).toHaveLength(2);
+    expect(result.memberRefs).toEqual([
+      'bafy-envelope-1',
+      'bafy-envelope-2',
+    ]);
+    expect(ledger.list()).toHaveLength(2);
+    for (const body of calls.manifestBodies) {
+      expect(Buffer.byteLength(canonicalJson(body), 'utf8')).toBeLessThanOrEqual(
+        MAX_RAW_IPFS_BLOCK_BYTES,
+      );
+    }
+    const unsplitBody = {
+      ...calls.manifestBodies[0],
+      merkleRoot: calls.manifestBodies[0]!.merkleRoot,
+      members: calls.manifestBodies.flatMap((body) => body.members),
+    };
+    expect(Buffer.byteLength(canonicalJson(unsplitBody), 'utf8')).toBeGreaterThan(
+      MAX_RAW_IPFS_BLOCK_BYTES,
+    );
+  });
+
+  it('rejects a non-raw manifest CID before broadcasting an anchor', async () => {
+    const { publishDeps, calls } = deps();
+    publishDeps.publishManifestBody = async (body) => {
+      const digest = createHash('sha256')
+        .update(canonicalJson(body))
+        .digest('hex');
+      return { cid: `f01701220${digest}` };
+    };
+
+    await expect(
+      publishManifestBatch(
+        [{ pending: await pending(1), polarity: 'pass', instanceId: 'mono-1' }],
+        publishDeps,
+        { batchKind: 'bridge' },
+      ),
+    ).rejects.toThrow(/raw codec/i);
+
+    expect(calls.anchorManifest).toHaveLength(0);
+  });
+
+  it('retains every uploaded ref when the first split manifest needs recovery', async () => {
+    const { publishDeps } = deps();
+    publishDeps.maxManifestBodyBytes = 400;
+    publishDeps.recordManifestAnchor = () => {
+      throw new Error('receipt store unavailable');
+    };
+
+    const error = await publishManifestBatch(
+      [
+        { pending: await pending(1), instanceId: 'mono-1' },
+        { pending: await pending(2), instanceId: 'mono-2' },
+      ],
+      publishDeps,
+      { batchKind: 'bridge' },
+    ).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ManifestBatchSetError);
+    expect(error).toMatchObject({
+      completed: [],
+      memberRefs: ['bafy-envelope-1', 'bafy-envelope-2'],
+      failed: expect.any(ManifestBatchRecordingError),
+    });
   });
 });

@@ -25,6 +25,7 @@ import type { AttemptRef, BridgeEvidence } from '../src/bridge.js';
 import type { DistillCluster, DistillLLMOutput, MetaDistillLLMOutput } from '../src/distill.js';
 import type { MetaCluster } from '../src/cluster.js';
 import { parseSkillMarkdown } from '../src/skill-package.js';
+import { canonicalJson } from '../../../src/harnesses/engine/canonical-json.js';
 import {
   readDistillDefaults,
   readDistillMode,
@@ -860,7 +861,7 @@ describe('jinn-layer distill run', () => {
     };
   }
 
-  function fakeManifestPublishDeps() {
+  function fakeManifestPublishDeps(maxManifestBodyBytes?: number) {
     const base = fakePublishDeps();
     const anchorEnvelope = vi.fn(async () => ({
       txHash: `0x${'e'.repeat(64)}` as const,
@@ -878,10 +879,18 @@ describe('jinn-layer distill run', () => {
     const deps: ManifestBatchPublishDeps = {
       ...base,
       anchorEnvelope,
-      publishManifestBody: async () => ({
-        cid: 'bafyManifest',
-        sha256: 'c'.repeat(64),
-      }),
+      ...(maxManifestBodyBytes === undefined
+        ? {}
+        : { maxManifestBodyBytes }),
+      publishManifestBody: async (body) => {
+        const sha256 = createHash('sha256')
+          .update(canonicalJson(body))
+          .digest('hex');
+        return {
+          cid: `f01551220${sha256}`,
+          sha256,
+        };
+      },
       anchorManifest,
       recordManifestAnchor: vi.fn(),
       recordControlAnchor: vi.fn(),
@@ -1039,8 +1048,10 @@ describe('jinn-layer distill run', () => {
     expect(code).toBe(0);
     expect(manifest.anchorManifest).toHaveBeenCalledTimes(1);
     expect(manifest.anchorEnvelope).not.toHaveBeenCalled();
-    expect(out()).toContain(
-      `manifest anchored bafyManifest at 0x${'d'.repeat(64)} — 2 members, gasUsed=123456, feeWei=789012`,
+    expect(out()).toMatch(
+      new RegExp(
+        `manifest anchored f01551220[0-9a-f]{64} at 0x${'d'.repeat(64)} — 2 members, gasUsed=123456, feeWei=789012`,
+      ),
     );
   });
 
@@ -1126,7 +1137,9 @@ describe('jinn-layer distill run', () => {
     );
 
     expect(code).toBe(1);
-    expect(out()).toContain(`manifest anchored bafyManifest at 0x${'d'.repeat(64)}`);
+    expect(out()).toMatch(
+      new RegExp(`manifest anchored f01551220[0-9a-f]{64} at 0x${'d'.repeat(64)}`),
+    );
     expect(out()).toContain('— 2 members');
     expect(out()).toContain(`per-record control anchored bafyEnv2 at 0x${'e'.repeat(64)}`);
     expect(out()).toContain('control telemetry disk full');
@@ -1150,10 +1163,52 @@ describe('jinn-layer distill run', () => {
 
     expect(code).toBe(1);
     expect(manifest.anchorManifest).toHaveBeenCalledTimes(1);
-    expect(out()).toContain('manifest anchored bafyManifest');
+    expect(out()).toContain('manifest anchored f01551220');
     expect(out()).toContain('— 2 members');
     expect(out()).toContain('anchored at');
     expect(out()).toContain('sqlite disk full');
+  });
+
+  it('--json retains completed and failed manifest facts when a split batch stops on recording', async () => {
+    const { writer, out } = capture();
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-cli-'));
+    const manifest = fakeManifestPublishDeps(400);
+    let recordCalls = 0;
+    manifest.deps.recordManifestAnchor = () => {
+      recordCalls += 1;
+      if (recordCalls === 2) throw new Error('second manifest disk full');
+    };
+
+    const code = await runJinnLayerCli(
+      [
+        'distill',
+        'run',
+        '--anchor-mode',
+        'manifest',
+        '--out',
+        outDir,
+        '--json',
+      ],
+      {
+        writer,
+        distillRunDeps: stubDeps({ publishDeps: manifest.deps }),
+      },
+    );
+
+    expect(code).toBe(1);
+    const result = JSON.parse(out());
+    expect(result.bridge.manifestBatches).toHaveLength(2);
+    expect(result.bridge.manifestBatches).toEqual([
+      expect.objectContaining({ confirmed: true, memberRefs: ['bafyEnv2'] }),
+      expect.objectContaining({ confirmed: true, memberRefs: ['bafyEnv4'] }),
+    ]);
+    expect(result.bridge.manifestMemberRefs).toEqual(['bafyEnv2', 'bafyEnv4']);
+    expect(result.bridge.bridged).toEqual([
+      expect.objectContaining({ envelopeRef: 'bafyEnv2' }),
+    ]);
+    expect(result.bridge.errors).toEqual([
+      expect.objectContaining({ error: expect.stringContaining('second manifest disk full') }),
+    ]);
   });
 
   it('--anchor-mode manifest labels a broadcast-but-unconfirmed anchor without claiming success', async () => {
@@ -1175,10 +1230,12 @@ describe('jinn-layer distill run', () => {
     );
 
     expect(code).toBe(1);
-    expect(out()).toContain(
-      `manifest anchor unconfirmed bafyManifest at 0x${'d'.repeat(64)}`,
+    expect(out()).toMatch(
+      new RegExp(
+        `manifest anchor unconfirmed f01551220[0-9a-f]{64} at 0x${'d'.repeat(64)}`,
+      ),
     );
-    expect(out()).not.toContain('manifest anchored bafyManifest');
+    expect(out()).not.toContain('manifest anchored f01551220');
     expect(out()).toContain('receipt reverted');
   });
 
