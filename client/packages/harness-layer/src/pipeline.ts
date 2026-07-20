@@ -132,34 +132,24 @@ export async function prepareDistillationEvidence(
       throw new Error('manifest anchor mode requires manifest-capable publish deps');
     }
     const manifestDeps = deps.publishDeps as ManifestBatchPublishDeps;
-    const captured: Array<{ instanceId: string; env: TraceEnvelopeV0 }> = [];
     const publisher = buildBridgeManifestPublisher(manifestDeps, {
       pipeline: layer2,
       ...(deps.measurePerRecordControl ? { measurePerRecordControl: true } : {}),
-      onCaptured: (pending, { ref }) => {
-        captured.push({
-          instanceId: ref.instanceId,
-          env: parseTraceEnvelopeV0({
-            ...pending.draft,
-            consent: { contributionConsent: true, scrubCompleted: true },
-          }),
-        });
-      },
     });
     publishManifestBatch = async (candidates) => {
-      captured.length = 0;
       const result = await publisher(candidates);
-      if (captured.length !== result.memberRefs.length) {
+      if (result.publishedMembers.length !== result.memberRefs.length) {
         throw new Error(
-          `manifest publisher captured ${captured.length} envelopes for ${result.memberRefs.length} refs`,
+          `manifest publisher returned ${result.publishedMembers.length} envelopes for ${result.memberRefs.length} refs`,
         );
       }
-      for (let index = 0; index < captured.length; index += 1) {
-        const item = captured[index]!;
+      for (let index = 0; index < result.publishedMembers.length; index += 1) {
+        const member = result.publishedMembers[index]!;
+        const candidate = candidates[index]!;
         collected.push({
           ref: result.memberRefs[index]!,
-          instanceId: item.instanceId,
-          env: item.env,
+          instanceId: candidate.ref.instanceId,
+          env: member.trace,
         });
       }
       return result;

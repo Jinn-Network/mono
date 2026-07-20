@@ -46,6 +46,7 @@ function makePublisher(
   } as unknown as WalletClient;
   const publicClient = {
     waitForTransactionReceipt,
+    getTransactionReceipt: vi.fn(),
     getChainId: vi.fn().mockResolvedValue(8453),
     getTransactionCount: vi.fn().mockResolvedValue(0),
     estimateFeesPerGas: vi.fn().mockResolvedValue({
@@ -62,6 +63,8 @@ function makePublisher(
       publicClient,
     }),
     sendTransaction,
+    waitForTransactionReceipt,
+    getTransactionReceipt: publicClient.getTransactionReceipt,
   };
 }
 
@@ -147,5 +150,74 @@ describe('IdentityPublisher.publishManifest', () => {
         payload: PAYLOAD,
       }),
     ).rejects.toThrow(/reverted.*0xfefefe/i);
+  });
+
+  it('records the broadcast hash before waiting for the receipt', async () => {
+    const onBroadcast = vi.fn();
+    const { publisher, waitForTransactionReceipt } = makePublisher({
+      blockNumber: 126n,
+      gasUsed: 24_000n,
+      effectiveGasPrice: 2n,
+      status: 'success',
+    });
+    waitForTransactionReceipt.mockImplementationOnce(async () => {
+      expect(onBroadcast).toHaveBeenCalledWith(TX_HASH);
+      return {
+        blockNumber: 126n,
+        gasUsed: 24_000n,
+        effectiveGasPrice: 2n,
+        status: 'success',
+      };
+    });
+
+    await publisher.publishManifest({
+      manifestCid: 'bafy-manifest',
+      payload: PAYLOAD,
+      onBroadcast,
+    });
+
+    expect(onBroadcast).toHaveBeenCalledTimes(1);
+  });
+
+  it('reconciles confirmed, reverted, and unavailable receipts without broadcasting', async () => {
+    const confirmed = makePublisher({
+      blockNumber: 127n,
+      gasUsed: 25_000n,
+      effectiveGasPrice: 3n,
+      status: 'success',
+    });
+    confirmed.getTransactionReceipt.mockResolvedValueOnce({
+      blockNumber: 127n,
+      gasUsed: 25_000n,
+      effectiveGasPrice: 3n,
+      status: 'success',
+    });
+    await expect(
+      confirmed.publisher.reconcileTransaction(TX_HASH),
+    ).resolves.toEqual({
+      status: 'confirmed',
+      txHash: TX_HASH,
+      blockNumber: 127,
+      gasUsed: 25_000n,
+      feeWei: 75_000n,
+    });
+    expect(confirmed.sendTransaction).not.toHaveBeenCalled();
+
+    const reverted = makePublisher(new Error('unused'));
+    reverted.getTransactionReceipt.mockResolvedValueOnce({
+      blockNumber: 128n,
+      gasUsed: 26_000n,
+      effectiveGasPrice: 3n,
+      status: 'reverted',
+    });
+    await expect(
+      reverted.publisher.reconcileTransaction(TX_HASH),
+    ).resolves.toEqual({ status: 'reverted', txHash: TX_HASH });
+
+    const pending = makePublisher(new Error('unused'));
+    pending.getTransactionReceipt.mockRejectedValueOnce(new Error('not found'));
+    await expect(
+      pending.publisher.reconcileTransaction(TX_HASH),
+    ).resolves.toEqual({ status: 'pending', txHash: TX_HASH });
   });
 });

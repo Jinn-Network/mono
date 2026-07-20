@@ -97,6 +97,45 @@ describe('Store.erc8004_anchors', () => {
     expect(store.listErc8004AnchorsByEnvelopeCids(['nonexistent'])).toEqual([]);
     expect(store.listErc8004AnchorsByEnvelopeCids([])).toEqual([]);
   });
+
+  it('suppresses an exact duplicate anchor finalization', () => {
+    const anchor = {
+      envelopeId: 'manifest-1',
+      envelopeCid: 'bafy-manifest',
+      contentKind: 'manifest',
+      metadataKey: 'manifest:bafy-manifest',
+      agentId: '42',
+      chainId: 84532,
+      identityRegistryAddress: '0xreg',
+      txHash: '0xtx-manifest',
+      blockNumber: 300,
+      payloadHex: '0xbeef',
+      anchoredAt: 4000,
+      gasUsed: '70000',
+      feeWei: '140000',
+    };
+
+    store.saveErc8004Anchor(anchor);
+    store.saveErc8004Anchor(anchor);
+
+    expect(store.listErc8004AnchorsByEnvelopeCids(['bafy-manifest'])).toHaveLength(1);
+  });
+});
+
+describe('Store.manifest_batch_journal', () => {
+  let store: Store;
+  beforeEach(() => { store = new Store(':memory:'); });
+  afterEach(() => { store.close(); });
+
+  it('round-trips and atomically replaces one batch state', () => {
+    expect(store.loadManifestBatchJournal('batch-1')).toBeNull();
+
+    store.saveManifestBatchJournal('batch-1', '{"stage":"members"}');
+    expect(store.loadManifestBatchJournal('batch-1')).toBe('{"stage":"members"}');
+
+    store.saveManifestBatchJournal('batch-1', '{"stage":"partitions"}');
+    expect(store.loadManifestBatchJournal('batch-1')).toBe('{"stage":"partitions"}');
+  });
 });
 
 describe('Store.erc8004_anchors migration', () => {
@@ -138,6 +177,47 @@ describe('Store.erc8004_anchors migration', () => {
         gasUsed: null,
         feeWei: null,
       });
+    } finally {
+      migratedStore.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('deduplicates legacy anchor finalizations before adding the unique key', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-erc8004-anchor-dedup-migration-'));
+    const dbPath = join(dir, 'jinn.db');
+    const legacyDb = new Database(dbPath);
+    legacyDb.exec(`
+      CREATE TABLE erc8004_anchors (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        envelope_id TEXT NOT NULL,
+        envelope_cid TEXT NOT NULL,
+        content_kind TEXT NOT NULL,
+        metadata_key TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        chain_id INTEGER NOT NULL,
+        identity_registry_address TEXT NOT NULL,
+        tx_hash TEXT NOT NULL,
+        block_number INTEGER,
+        payload_hex TEXT NOT NULL,
+        anchored_at INTEGER NOT NULL
+      );
+      INSERT INTO erc8004_anchors (
+        envelope_id, envelope_cid, content_kind, metadata_key, agent_id,
+        chain_id, identity_registry_address, tx_hash, block_number,
+        payload_hex, anchored_at
+      ) VALUES
+        ('env-1', 'bafy-dup', 'manifest', 'manifest:bafy-dup', '42',
+         84532, '0xreg', '0xtx', 99, '0xdead', 1000),
+        ('env-1', 'bafy-dup', 'manifest', 'manifest:bafy-dup', '42',
+         84532, '0xreg', '0xtx', 99, '0xdead', 1000);
+    `);
+    legacyDb.close();
+
+    const migratedStore = new Store(dbPath);
+    try {
+      expect(migratedStore.listErc8004AnchorsByEnvelopeCids(['bafy-dup'])).toHaveLength(1);
+      expect(migratedStore.loadManifestBatchJournal('missing')).toBeNull();
     } finally {
       migratedStore.close();
       rmSync(dir, { recursive: true, force: true });

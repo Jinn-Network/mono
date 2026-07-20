@@ -137,11 +137,15 @@ export interface PublishContentV2Args {
   payload: ExecutionPayloadV2;
   /** Fail unless the transaction receipt is mined with status=success. */
   requireSuccessfulReceipt?: boolean;
+  /** Called immediately after send and before receipt confirmation. */
+  onBroadcast?: (txHash: Hex) => void;
 }
 
 export interface ManifestPublishArgs {
   manifestCid: string;
   payload: ManifestPayload;
+  /** Called immediately after send and before receipt confirmation. */
+  onBroadcast?: (txHash: Hex) => void;
 }
 
 /**
@@ -157,6 +161,11 @@ export interface PublishContentResult {
   gasUsed: bigint | null;
   feeWei: bigint | null;
 }
+
+export type TransactionReconciliation =
+  | ({ status: 'confirmed' } & PublishContentResult)
+  | { status: 'reverted'; txHash: Hex }
+  | { status: 'pending'; txHash: Hex };
 
 // ── Errors ───────────────────────────────────────────────────────────────────
 
@@ -566,6 +575,7 @@ export class IdentityPublisher {
       metadataKey,
       metadataValue,
       args.requireSuccessfulReceipt ?? false,
+      args.onBroadcast,
     );
   }
 
@@ -576,13 +586,48 @@ export class IdentityPublisher {
   async publishManifest(args: ManifestPublishArgs): Promise<PublishContentResult> {
     const metadataKey = buildManifestMetadataKey(args.manifestCid);
     const metadataValue = encodeManifestPayload(args.payload);
-    return this._writeMetadata(metadataKey, metadataValue, true);
+    return this._writeMetadata(
+      metadataKey,
+      metadataValue,
+      true,
+      args.onBroadcast,
+    );
+  }
+
+  /**
+   * Read an already-broadcast transaction without sending another one.
+   * Missing/unavailable receipts remain pending so callers fail closed.
+   */
+  async reconcileTransaction(txHash: Hex): Promise<TransactionReconciliation> {
+    let receipt: Awaited<ReturnType<PublicClient['getTransactionReceipt']>>;
+    try {
+      receipt = await this.publicClient.getTransactionReceipt({ hash: txHash });
+    } catch {
+      return { status: 'pending', txHash };
+    }
+    if (receipt.status !== 'success') {
+      return { status: 'reverted', txHash };
+    }
+    const gasUsed =
+      typeof receipt.gasUsed === 'bigint' ? receipt.gasUsed : null;
+    return {
+      status: 'confirmed',
+      txHash,
+      blockNumber:
+        typeof receipt.blockNumber === 'bigint' ? Number(receipt.blockNumber) : null,
+      gasUsed,
+      feeWei:
+        gasUsed !== null && typeof receipt.effectiveGasPrice === 'bigint'
+          ? gasUsed * receipt.effectiveGasPrice
+          : null,
+    };
   }
 
   private async _writeMetadata(
     metadataKey: string,
     metadataValue: Hex,
     requireSuccessfulReceipt = false,
+    onBroadcast?: (txHash: Hex) => void,
   ): Promise<PublishContentResult> {
     const account = this.walletClient.account;
     if (!account) {
@@ -617,6 +662,15 @@ export class IdentityPublisher {
       },
       { logicalTx: 'erc8004.setMetadata' },
     );
+    try {
+      onBroadcast?.(txHash);
+    } catch (error) {
+      throw new ManifestReceiptConfirmationError(
+        txHash,
+        `broadcast journaling failed: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    }
 
     // Best-effort confirmation. We surface the blockNumber so callers can
     // record a verifiable on-chain reference; if the receipt query fails

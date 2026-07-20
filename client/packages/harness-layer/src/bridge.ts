@@ -22,6 +22,7 @@
 import { capture, type CapturedTask, type PendingEnvelope } from './capture.js';
 import {
   ManifestBatchAnchorError,
+  ManifestBatchPreparationError,
   ManifestBatchRecordingError,
   ManifestBatchSetError,
   publish,
@@ -554,6 +555,8 @@ export async function bridgeAttempts(refs: AttemptRef[], deps: BridgeDeps): Prom
       } else if (error instanceof ManifestBatchAnchorError) {
         memberRefs = [...error.memberRefs];
         addFailedObservation(error);
+      } else if (error instanceof ManifestBatchPreparationError) {
+        memberRefs = [...error.memberRefs];
       }
       if (memberRefs.length > 0) finishManifestFacts(memberRefs);
       const message = failed instanceof Error ? failed.message : String(failed);
@@ -612,6 +615,7 @@ export function buildBridgeManifestPublisher(
         pending,
         polarity: ref.polarity,
         instanceId: ref.instanceId,
+        sourceId: ref.requestId,
       });
     }
     return publishPendingManifestBatch(members, deps, {

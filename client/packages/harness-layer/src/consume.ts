@@ -212,6 +212,10 @@ export function createManifestAnchorStore(dbPath: string): ManifestAnchorStore {
   const store = new Store(dbPath);
   return {
     saveErc8004Anchor: (input) => store.saveErc8004Anchor(input),
+    loadManifestBatchJournal: (batchKey) =>
+      store.loadManifestBatchJournal(batchKey),
+    saveManifestBatchJournal: (batchKey, stateJson) =>
+      store.saveManifestBatchJournal(batchKey, stateJson),
   };
 }
 

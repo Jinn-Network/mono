@@ -221,8 +221,8 @@ Commands:
                                                  meta-distill over the stage-1 skills.
                                                  --local-only avoids chain writes and evidence
                                                  anchors, using in-memory publish deps.
-                                                 --anchor-mode manifest anchors the surviving
-                                                 bridge batch once and records receipt gas.
+                                                 --anchor-mode manifest creates one anchor per raw-block-sized partition,
+                                                 records receipt gas, and safely resumes its durable journal.
                                                  --measure-per-record-control adds one live
                                                  receipt-bound capture anchor for comparison.
   distill [--where local|defer|off] [--install all|<name>|none] [--resume]

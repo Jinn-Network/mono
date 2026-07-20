@@ -6,8 +6,8 @@ Version: 0.1 · Date: 2026-07-17 · Shape: feat (Medium) · Author: DESIGN subag
 
 Per `docs/superpowers/specs/2026-07-17-corpus-supply-design.md` §9 and DR-2026-07-17 Decision 5,
 bulk substrate batches (bridge output; reference-record batches) get **one manifest record per
-batch** instead of one anchor per member. Per-record anchors stay for retrieval-tier + genuinely
-contributed evidence. No new contract — still `IdentityRegistry.setMetadata`, one tx per batch, in
+raw-block-sized partition** instead of one anchor per member. Per-record anchors stay for retrieval-tier + genuinely
+contributed evidence. No new contract — still `IdentityRegistry.setMetadata`, one tx per partition, in
 its own `manifest:` namespace (out of `capture:`). Members stay content-addressed on IPFS and
 fetch-by-CID as today; discovery sees the manifest; consumers enumerate members from its body; any
 single member is provable against a merkle root anchored in the record. First bridge batch doubles
@@ -78,7 +78,7 @@ discovery hints. The body is uploaded via the existing `publishArtifact`/`upload
 - **Verify** = `verifyMerkleProof(leafCid, proof, root)` → recomputes leaf, folds siblings by
   index-parity, compares to root. Pure function, no chain read.
 
-**On-chain anchor (one setMetadata per batch).** New `client/src/erc8004/manifest-registry.ts`
+**On-chain anchor (one setMetadata per raw-block-sized partition).** New `client/src/erc8004/manifest-registry.ts`
 (template: `plugin-registry.ts`):
 - `MANIFEST_METADATA_KEY_PREFIX = 'manifest:'`; `buildManifestMetadataKey(manifestCid)` → `manifest:<cid>`.
 - Payload ABI tuple `MANIFEST_PAYLOAD_TUPLE = (uint16 version, bytes32 merkleRoot, uint32 memberCount, uint64 createdAt)`;
@@ -131,7 +131,7 @@ receipt, and have the batch publish flow log + record them:
   and, alongside a single per-record anchor from the same run, gives the per-anchor-vs-per-manifest
   comparison §9 asks for. The extra control is explicit
   (`--measure-per-record-control`) and reuses the first already-uploaded signed member; ordinary
-  manifest runs remain exactly N uploads → one anchor transaction. **Assert no gas figure in docs
+  manifest runs remain exactly N uploads → one anchor transaction per raw-block-sized partition. **Assert no gas figure in docs
   until this run produces it** — record the measured numbers back into §9 / the issue as the
   measurement deliverable (a follow-up doc edit, not a fabricated constant).
 

@@ -30,4 +30,29 @@ describe('assertRawSha256CidMatches', () => {
       assertRawSha256CidMatches(`f01551220${'0'.repeat(64)}`, body),
     ).toThrow(/digest/i);
   });
+
+  it('rejects non-canonical base32 encodings instead of discarding input bits', () => {
+    const empty = new Uint8Array();
+    const cid =
+      'bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku';
+
+    expect(() => assertRawSha256CidMatches(`${cid}a`, empty)).toThrow(
+      /canonical|encoding|length/i,
+    );
+    expect(() =>
+      assertRawSha256CidMatches(`${cid.slice(0, -1)}v`, empty),
+    ).toThrow(/canonical|encoding|padding/i);
+  });
+
+  it('rejects non-minimal CID varints', () => {
+    const body = new TextEncoder().encode('canonical manifest bytes');
+    const digest = createHash('sha256').update(body).digest('hex');
+
+    expect(() =>
+      assertRawSha256CidMatches(`f8100551220${digest}`, body),
+    ).toThrow(/minimal|canonical|varint/i);
+    expect(() =>
+      assertRawSha256CidMatches(`f01d5001220${digest}`, body),
+    ).toThrow(/minimal|canonical|varint/i);
+  });
 });

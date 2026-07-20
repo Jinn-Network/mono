@@ -442,6 +442,8 @@ describe('jinn-layer CLI', () => {
     const code = await runJinnLayerCli(['bogus'], { layer, writer });
     expect(code).not.toBe(0);
     expect(out()).toContain('Usage');
+    expect(out()).toContain('one anchor per raw-block-sized partition');
+    expect(out()).not.toContain('bridge batch once');
   });
 
   it('corpus probe --json emits the two doctor checks (corpus-reachable + corpus-content)', async () => {
@@ -1033,7 +1035,7 @@ describe('jinn-layer distill run', () => {
     }
   });
 
-  it('--anchor-mode manifest batches bridge records into one anchor and prints measured gas', async () => {
+  it('--anchor-mode manifest anchors each raw-block partition and prints measured gas', async () => {
     const { writer, out } = capture();
     const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-cli-'));
     const manifest = fakeManifestPublishDeps();
