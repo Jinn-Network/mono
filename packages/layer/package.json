@@ -1,0 +1,57 @@
+{
+  "name": "@jinn-network/jinn-layer",
+  "version": "0.1.0",
+  "description": "Standalone Jinn plugin process layer: host contract, local evidence, corpus reads, distillation, and seed import.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/layer"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "jinn-distill-mcp": "./dist/bin/jinn-distill-mcp.js",
+    "jinn-layer": "./dist/bin/jinn-layer.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist/"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@jinn-network/core": "0.1.0",
+    "@jinn-network/plugin": "0.1.0",
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "canonicalize": "^3.0.0",
+    "viem": "^2.0.0",
+    "yaml": "^2.8.4",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "typescript": "^5.4.0",
+    "vitest": "^4.1.8"
+  },
+  "resolutions": {
+    "@jinn-network/core": "portal:../core",
+    "@jinn-network/plugin": "portal:../plugin"
+  }
+}
