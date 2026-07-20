@@ -2,10 +2,9 @@
  * Skill recognition (#1394): the shared install-path helper.
  *
  * `extractSkill(record)` prefers a first-class `jinn.skill.v1` artifact and
- * falls back to the seeded shape (trace-envelope artifact -> `seed:skill-md`
- * step -> `skill.md` attribute + `seed.attribution`), synthesising an
- * equivalent provenance block from the legacy fields — backwards-compatible
- * with every seed published before the first-class type existed.
+ * falls back to the seeded shape (episode/legacy trace artifact ->
+ * `seed:skill-md` step -> `skill.md` attribute + `seed.attribution`),
+ * synthesising an equivalent provenance block from the embedded fields.
  */
 
 import { z } from 'zod/v3';
@@ -14,15 +13,19 @@ import {
   SkillArtifactV1Schema,
   type SkillArtifactV1,
 } from '../../../src/types/skill-artifact.js';
+import { EpisodeV1Schema } from '@jinn-network/plugin';
 import type { CorpusRecord } from './consume.js';
-import { TRACE_ENVELOPE_ARTIFACT_TYPE } from './publish.js';
+import {
+  EPISODE_ARTIFACT_TYPE,
+  TRACE_ENVELOPE_ARTIFACT_TYPE,
+} from './publish.js';
 import { parseTraceEnvelopeV0 } from './envelope.js';
 import { frontmatterName, skillSlug } from './seed-import/execute.js';
 
 export interface ExtractedSkill {
   skill: SkillArtifactV1;
   /** Which carrier the skill came from. */
-  shape: 'jinn.skill.v1' | 'seeded-trace';
+  shape: 'jinn.skill.v1' | 'seeded-episode' | 'seeded-trace';
 }
 
 const SeedAttributionSchema = z.object({
@@ -49,18 +52,24 @@ export function extractSkill(record: CorpusRecord): ExtractedSkill | null {
     };
   }
 
-  // Legacy seeded shape (pre-#1394 seed imports).
-  const traceArtifact = record.artifacts.find(
-    (a) => a.artifactType === TRACE_ENVELOPE_ARTIFACT_TYPE,
+  const episodeArtifact = record.artifacts.find(
+    (a) => a.artifactType === EPISODE_ARTIFACT_TYPE,
   );
-  if (!traceArtifact) return null;
-  let trace;
+  const traceArtifact = episodeArtifact
+    ? undefined
+    : record.artifacts.find((a) => a.artifactType === TRACE_ENVELOPE_ARTIFACT_TYPE);
+  const carrier = episodeArtifact ?? traceArtifact;
+  if (!carrier) return null;
+
+  let steps;
   try {
-    trace = parseTraceEnvelopeV0(parseJson(traceArtifact.content));
+    steps = episodeArtifact
+      ? EpisodeV1Schema.parse(parseJson(carrier.content)).trajectory
+      : parseTraceEnvelopeV0(parseJson(carrier.content)).steps;
   } catch {
-    return null; // not a valid trace envelope — no skill here
+    return null; // malformed evidence carrier — do not silently use a second shape
   }
-  const step = trace.steps.find((s) => s.name === 'seed:skill-md');
+  const step = steps.find((candidate) => candidate.name === 'seed:skill-md');
   const skillMd = step?.attributes['skill.md'];
   if (typeof skillMd !== 'string' || skillMd.length === 0) return null;
   const attribution = SeedAttributionSchema.safeParse(step!.attributes['seed.attribution']);
@@ -82,6 +91,6 @@ export function extractSkill(record: CorpusRecord): ExtractedSkill | null {
         ...(seed ? { seed } : {}),
       },
     },
-    shape: 'seeded-trace',
+    shape: episodeArtifact ? 'seeded-episode' : 'seeded-trace',
   };
 }

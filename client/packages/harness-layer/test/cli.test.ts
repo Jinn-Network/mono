@@ -427,7 +427,7 @@ describe('jinn-layer capture preview', () => {
     const code = await runJinnLayerCli(['capture', 'preview', fixturePath, '--json'], { writer });
     expect(code).toBe(0);
     const report = JSON.parse(out());
-    expect(report.envelope.schemaVersion).toBe('jinn.trace-envelope.v0');
+    expect(report.envelope.schemaVersion).toBe('jinn.episode.v1');
     expect(report.redactions.length).toBeGreaterThan(0);
     for (const r of report.redactions) {
       expect(r).not.toHaveProperty('before');

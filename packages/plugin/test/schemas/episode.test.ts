@@ -29,6 +29,7 @@ describe('EpisodeV1Schema', () => {
   it('normalizes legacy optional nulls and delivery aliases on tolerant reads', () => {
     const parsed = EpisodeV1Schema.parse({
       ...valid,
+      origin: undefined,
       session: { ...valid.session, parentSessionId: null },
       task: { ...valid.task, repositorySlug: null },
       outcome: {
@@ -130,11 +131,132 @@ describe('EpisodeV1Schema', () => {
       },
     };
 
-    expect(EpisodeV1WriteSchema.parse(next)).toEqual(next);
+    expect(EpisodeV1WriteSchema.parse(next)).toEqual({
+      ...next,
+      retrievalVisible: false,
+      outcome: {
+        status: next.outcome.status,
+        verificationStrength: next.outcome.verificationStrength,
+        acceptedDiff: next.outcome.acceptedDiff,
+        testRuns: next.outcome.testRuns,
+      },
+    });
     expect(() => EpisodeV1WriteSchema.parse({
       ...next,
       task: { ...next.task, repositorySlug: null },
     })).toThrow();
+  });
+
+  it('writes one canonical verification-strength axis and normalizes the legacy tier name', () => {
+    const canonical = {
+      ...valid,
+      session: { ...valid.session, kind: 'user' as const },
+      origin: { writer: 'jinn-agent', build: '0.18.0' },
+      outcome: {
+        status: valid.outcome.status,
+        verificationStrength: 'tests-passed' as const,
+      },
+    };
+    const legacy = {
+      ...canonical,
+      outcome: {
+        status: valid.outcome.status,
+        verifiabilityTier: 'tests-passed' as const,
+      },
+    };
+
+    expect(EpisodeV1WriteSchema.parse(canonical).outcome).toEqual({
+      status: 'completed',
+      verificationStrength: 'tests-passed',
+    });
+    expect(EpisodeV1WriteSchema.parse(legacy).outcome).toEqual({
+      status: 'completed',
+      verificationStrength: 'tests-passed',
+    });
+    expect(EpisodeV1Schema.parse(legacy).outcome).not.toHaveProperty('verifiabilityTier');
+  });
+
+  it('rejects conflicting legacy and canonical verification strengths', () => {
+    expect(() => EpisodeV1WriteSchema.parse({
+      ...valid,
+      session: { ...valid.session, kind: 'user' },
+      origin: { writer: 'jinn-agent', build: '0.18.0' },
+      outcome: {
+        status: 'completed',
+        verificationStrength: 'evaluator-verified',
+        verifiabilityTier: 'user-accepted',
+      },
+    })).toThrow();
+  });
+
+  it('carries every post-training-readiness delta on the shared episode contract', () => {
+    const ready = {
+      ...valid,
+      session: { ...valid.session, kind: 'user' as const },
+      origin: { writer: 'jinn-execution-ledger-bridge', build: '0.1.0' },
+      task: {
+        ...valid.task,
+        repositorySlug: 'django/django',
+        baseCommit: 'a'.repeat(40),
+        createdAt: 1_752_000_000,
+        instanceId: 'django__django-12345',
+      },
+      environment: {
+        ...valid.environment,
+        generatorModel: {
+          id: 'claude-sonnet-4-6',
+          provider: 'anthropic',
+          openWeights: false,
+          source: 'stream' as const,
+        },
+        distributionClass: 'restricted-tos' as const,
+        verifier: {
+          type: 'f2p-p2p' as const,
+          failToPass: ['tests/test_fix.py::test_regression'],
+          passToPass: ['tests/test_existing.py::test_stable'],
+          evalSemanticsVersion: 'swe-rebench-v2.1',
+        },
+      },
+      attemptGroup: {
+        groupId: 'django__django-12345',
+        attemptId: '0xattempt',
+        relatedAttemptRefs: ['bafy-pass', 'bafy-fail'],
+        groupSize: 2,
+        nPass: 1,
+        nFail: 1,
+      },
+      outcome: {
+        status: 'completed' as const,
+        verificationStrength: 'evaluator-verified' as const,
+      },
+      retrievalVisible: true,
+    };
+
+    expect(EpisodeV1WriteSchema.parse(ready)).toMatchObject({
+      task: {
+        baseCommit: 'a'.repeat(40),
+        createdAt: 1_752_000_000,
+        instanceId: 'django__django-12345',
+      },
+      environment: {
+        generatorModel: { id: 'claude-sonnet-4-6', source: 'stream' },
+        distributionClass: 'restricted-tos',
+        verifier: {
+          type: 'f2p-p2p',
+          failToPass: ['tests/test_fix.py::test_regression'],
+          passToPass: ['tests/test_existing.py::test_stable'],
+        },
+      },
+      attemptGroup: {
+        groupId: 'django__django-12345',
+        attemptId: '0xattempt',
+        groupSize: 2,
+        nPass: 1,
+        nFail: 1,
+      },
+      outcome: { verificationStrength: 'evaluator-verified' },
+      retrievalVisible: true,
+    });
   });
 
   it.each([

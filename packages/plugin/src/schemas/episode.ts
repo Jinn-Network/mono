@@ -34,6 +34,8 @@ const StepShape = {
   endTimeUnixNano: UnixNanoSchema,
   attributes: z.record(z.string(), z.unknown()),
   redactedKeys: z.array(z.string().min(1)).default([]),
+  /** Public scrub projection receipt; absent on ordinary local episodes. */
+  truncatedKeys: z.array(z.string().min(1)).optional(),
 };
 
 const StepWriteSchema = z.strictObject(StepShape);
@@ -93,11 +95,26 @@ const TaskShape = {
   summary: z.string().min(1),
   distributionTags: z.array(z.string().min(1)).default([]),
   repositorySlug: z.string().min(1).optional(),
+  /** Post-training tuple join/freshness fields (#1827/#1842). */
+  baseCommit: z.string().min(1).optional(),
+  createdAt: z.number().int().nonnegative().optional(),
+  instanceId: z.string().min(1).optional(),
 };
+
+export const VERIFICATION_STRENGTHS = [
+  'user-accepted',
+  'tests-passed',
+  'evaluator-verified',
+] as const;
+export const VerificationStrengthSchema = z.enum(VERIFICATION_STRENGTHS);
 
 const OutcomeShape = {
   status: z.enum(['completed', 'failed', 'abandoned']),
-  verifiabilityTier: z.enum(['user-accepted', 'tests-passed', 'evaluator-verified']),
+  /** The one outcome-verification axis used by new local and public records.
+   * `verifiabilityTier` is normalized into this field on compatible reads and
+   * writes; the outer execution envelope's evidenceTier remains transport /
+   * attestation assurance and is not misrepresented as outcome correctness. */
+  verificationStrength: VerificationStrengthSchema,
   summary: z.string().min(1).optional(),
   acceptedDiff: z.boolean().optional(),
   testRuns: z.strictObject({
@@ -105,6 +122,65 @@ const OutcomeShape = {
     failed: z.number().int().nonnegative(),
   }).optional(),
 };
+
+function normalizeOutcomeCompatibility(value: unknown): unknown {
+  const raw = asRecord(value);
+  if (!raw) return value;
+  const normalized: UnknownRecord = { ...raw };
+  const legacy = normalized['verifiabilityTier'];
+  const canonical = normalized['verificationStrength'];
+  if (legacy !== undefined) {
+    // A disagreement is made deliberately unparseable instead of silently
+    // choosing one axis.
+    normalized['verificationStrength'] =
+      canonical !== undefined && canonical !== legacy
+        ? [canonical, legacy]
+        : legacy;
+    delete normalized['verifiabilityTier'];
+  }
+  return normalized;
+}
+
+const OutcomeWriteSchema = z.preprocess(
+  normalizeOutcomeCompatibility,
+  z.strictObject(OutcomeShape),
+);
+
+const GeneratorModelSchema = z.strictObject({
+  id: z.string().min(1),
+  provider: z.string().min(1).optional(),
+  openWeights: z.boolean().optional(),
+  source: z.enum(['stream', 'config']),
+});
+
+const VerifierSchema = z.strictObject({
+  type: z.enum(['f2p-p2p', 'command', 'none']),
+  failToPass: z.array(z.string().min(1)).default([]),
+  passToPass: z.array(z.string().min(1)).default([]),
+  evalSemanticsVersion: z.string().min(1).optional(),
+});
+
+const AttemptGroupSchema = z.strictObject({
+  groupId: z.string().min(1),
+  attemptId: z.string().min(1),
+  relatedAttemptRefs: z.array(z.string().min(1)).default([]),
+  groupSize: z.number().int().positive().optional(),
+  nPass: z.number().int().nonnegative().optional(),
+  nFail: z.number().int().nonnegative().optional(),
+}).superRefine((group, context) => {
+  if (
+    group.groupSize !== undefined
+    && group.nPass !== undefined
+    && group.nFail !== undefined
+    && group.groupSize !== group.nPass + group.nFail
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['groupSize'],
+      message: 'groupSize must equal nPass + nFail when all counts are materialized',
+    });
+  }
+});
 
 const CostShape = {
   durationMs: z.number().int().nonnegative(),
@@ -136,6 +212,9 @@ const LineageShape = {
 export const EpisodeV1WriteSchema = z.strictObject({
   schemaVersion: z.literal(EPISODE_SCHEMA_VERSION),
   episodeId: z.string().min(1),
+  /** W2 allowlist decision recorded in canonical content. The legacy
+   * `retrieval:visible.v1` distribution tag remains read-compatible. */
+  retrievalVisible: z.boolean().default(false),
   session: z.strictObject(SessionShape),
   origin: OriginStampSchema,
   task: z.strictObject(TaskShape),
@@ -145,12 +224,16 @@ export const EpisodeV1WriteSchema = z.strictObject({
     model: z.string().min(1),
     tools: z.array(z.string().min(1)),
     skillsLoadout: z.array(z.string().min(1)),
+    generatorModel: GeneratorModelSchema.optional(),
+    distributionClass: z.enum(['open', 'restricted-tos', 'unknown']).optional(),
+    verifier: VerifierSchema.optional(),
   }),
-  outcome: z.strictObject(OutcomeShape),
+  outcome: OutcomeWriteSchema,
   cost: z.strictObject(CostShape),
   retention: z.strictObject(RetentionShape),
   provenance: z.enum(['contributed', 'imported']).default('contributed'),
   lineage: z.strictObject(LineageShape).optional(),
+  attemptGroup: AttemptGroupSchema.optional(),
   activity: SessionActivityFactsWriteSchema.optional(),
   eligibility: EligibilityVerdictSchema.optional(),
 });
@@ -187,7 +270,9 @@ function normalizeEpisodeRead(value: unknown): unknown {
   }
 
   normalized['task'] = withoutNulls(raw['task'], ['repositorySlug']);
-  normalized['outcome'] = withoutNulls(raw['outcome'], ['summary', 'acceptedDiff', 'testRuns']);
+  normalized['outcome'] = normalizeOutcomeCompatibility(
+    withoutNulls(raw['outcome'], ['summary', 'acceptedDiff', 'testRuns']),
+  );
   normalized['cost'] = withoutNulls(raw['cost'], ['tokens', 'usdEstimate']);
   for (const key of ['lineage', 'activity', 'eligibility'] as const) {
     if (normalized[key] === null) delete normalized[key];
@@ -257,7 +342,7 @@ export const SessionActivityFactsSchema = z.preprocess(
         tools: [],
         skillsLoadout: [],
       },
-      outcome: { status: 'completed', verifiabilityTier: 'user-accepted' },
+      outcome: { status: 'completed', verificationStrength: 'user-accepted' },
       cost: { durationMs: 0 },
       retention: { policy: 'local-private' },
       activity: value,
@@ -270,6 +355,7 @@ export const SessionActivityFactsSchema = z.preprocess(
 const EpisodeV1ReadObjectSchema = z.looseObject({
   schemaVersion: z.literal(EPISODE_SCHEMA_VERSION),
   episodeId: z.string().min(1),
+  retrievalVisible: z.boolean().default(false),
   session: z.looseObject(SessionShape),
   origin: z.union([OriginStampReadSchema, z.literal('legacy-unstamped')]),
   task: z.looseObject(TaskShape),
@@ -279,6 +365,9 @@ const EpisodeV1ReadObjectSchema = z.looseObject({
     model: z.string().min(1),
     tools: z.array(z.string().min(1)),
     skillsLoadout: z.array(z.string().min(1)),
+    generatorModel: GeneratorModelSchema.optional(),
+    distributionClass: z.enum(['open', 'restricted-tos', 'unknown']).optional(),
+    verifier: VerifierSchema.optional(),
   }),
   outcome: z.looseObject({
     ...OutcomeShape,
@@ -297,6 +386,7 @@ const EpisodeV1ReadObjectSchema = z.looseObject({
   retention: z.looseObject(RetentionShape),
   provenance: z.enum(['contributed', 'imported']).default('contributed'),
   lineage: z.looseObject(LineageShape).optional(),
+  attemptGroup: AttemptGroupSchema.optional(),
   activity: SessionActivityFactsReadSchema.optional(),
   eligibility: z.looseObject({
     eligible: z.boolean(),
@@ -310,3 +400,4 @@ export const EpisodeV1Schema = z.preprocess(normalizeEpisodeRead, EpisodeV1ReadO
 export type EpisodeV1 = z.infer<typeof EpisodeV1Schema>;
 export type SessionActivityFacts = z.infer<typeof SessionActivityFactsSchema>;
 export type EpisodeV1Write = z.infer<typeof EpisodeV1WriteSchema>;
+export type VerificationStrength = z.infer<typeof VerificationStrengthSchema>;

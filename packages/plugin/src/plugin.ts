@@ -228,7 +228,7 @@ async function completeSession(
   const eligibility = deriveEligibility(
     {
       status: capturedEpisode.outcome.status,
-      verifiabilityTier: capturedEpisode.outcome.verifiabilityTier,
+      verifiabilityTier: capturedEpisode.outcome.verificationStrength,
       retentionPolicy: capturedEpisode.retention.policy,
       publicRepo: input.eligibilityInputs.publicRepo,
       acceptedDiff: input.eligibilityInputs.acceptedDiff,
@@ -620,7 +620,7 @@ export class PluginSession {
       },
       outcome: {
         status: outcome.status,
-        verifiabilityTier: outcome.verifiabilityTier,
+        verificationStrength: outcome.verifiabilityTier,
         ...(outcome.summary !== undefined ? { summary: outcome.summary } : {}),
         ...(outcome.acceptedDiff !== undefined ? { acceptedDiff: outcome.acceptedDiff } : {}),
         ...(outcome.testRuns !== undefined ? { testRuns: outcome.testRuns } : {}),

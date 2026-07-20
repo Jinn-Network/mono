@@ -19,10 +19,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SignedEnvelope } from '../../../src/types/envelope.js';
 import { SKILL_ARTIFACT_TYPE, SkillArtifactV1Schema } from '../../../src/types/skill-artifact.js';
-import { parseTraceEnvelopeV0 } from '../src/envelope.js';
+import { EpisodeV1WriteSchema } from '@jinn-network/plugin';
 import { createMemoryLedger } from '../src/ledger.js';
 import type { HarnessPublishDeps } from '../src/publish.js';
-import { TRACE_ENVELOPE_ARTIFACT_TYPE } from '../src/publish.js';
+import { EPISODE_ARTIFACT_TYPE } from '../src/publish.js';
 import { checkLicence, IMPORT_LICENCE_ALLOWLIST } from '../src/seed-import/licence.js';
 import {
   parseImportReport,
@@ -156,12 +156,12 @@ describe('execute()', () => {
     const result = await execute(report, source, deps);
 
     expect(published.map((p) => p.artifactType)).toEqual([
-      TRACE_ENVELOPE_ARTIFACT_TYPE,
+      EPISODE_ARTIFACT_TYPE,
       SKILL_ARTIFACT_TYPE,
     ]);
-    const envelope = parseTraceEnvelopeV0(published[0]!.payload);
+    const envelope = EpisodeV1WriteSchema.parse(published[0]!.payload);
     expect(envelope.provenance).toBe('imported');
-    const attrs = envelope.steps[0]!.attributes as Record<string, unknown>;
+    const attrs = envelope.trajectory[0]!.attributes as Record<string, unknown>;
     expect(attrs['seed.attribution']).toMatchObject({
       source: 'https://github.com/acme/skills',
       licence: 'MIT',
@@ -204,7 +204,7 @@ describe('execute()', () => {
     const source = mockSource([skill({ skill: 'acme/skills/write-tests' })]);
     const { deps, published } = mockPublishDeps();
     await execute(await plan(source), source, deps);
-    const envelope = parseTraceEnvelopeV0(published[0]!.payload);
+    const envelope = EpisodeV1WriteSchema.parse(published[0]!.payload);
     expect(envelope.task.distributionTags).toContain('write-tests');
     expect(envelope.task.distributionTags).toContain('seed-import');
     expect(envelope.task.distributionTags).toContain('skills');
@@ -219,7 +219,7 @@ describe('execute()', () => {
     ]);
     const { deps, published } = mockPublishDeps();
     await execute(await plan(source), source, deps);
-    const envelope = parseTraceEnvelopeV0(published[0]!.payload);
+    const envelope = EpisodeV1WriteSchema.parse(published[0]!.payload);
     expect(envelope.task.distributionTags).toContain('test-driven-development');
     expect(envelope.task.distributionTags).toContain('tdd-dir');
   });
@@ -233,7 +233,7 @@ describe('execute()', () => {
     ]);
     const { deps, published } = mockPublishDeps();
     await execute(await plan(source), source, deps);
-    const envelope = parseTraceEnvelopeV0(published[0]!.payload);
+    const envelope = EpisodeV1WriteSchema.parse(published[0]!.payload);
     const tags = envelope.task.distributionTags;
     expect(tags.filter((t) => t === 'tdd')).toHaveLength(1);
   });
@@ -248,7 +248,7 @@ describe('execute()', () => {
     ]);
     const { deps, published } = mockPublishDeps();
     await execute(await plan(source), source, deps);
-    const envelope = parseTraceEnvelopeV0(published[0]!.payload);
+    const envelope = EpisodeV1WriteSchema.parse(published[0]!.payload);
     for (const tag of envelope.task.distributionTags) {
       expect(tag.length).toBeLessThanOrEqual(64);
     }
@@ -264,7 +264,7 @@ describe('execute()', () => {
 
     expect(envelopes).toHaveLength(1);
     expect(envelopes[0]!.artifacts.map((a) => a.artifactType)).toEqual([
-      TRACE_ENVELOPE_ARTIFACT_TYPE,
+      EPISODE_ARTIFACT_TYPE,
       SKILL_ARTIFACT_TYPE,
     ]);
 
@@ -538,7 +538,7 @@ describe('jinn-layer seed CLI', () => {
     });
     expect(code).toBe(0);
     expect(published.map((p) => p.artifactType)).toEqual([
-      TRACE_ENVELOPE_ARTIFACT_TYPE,
+      EPISODE_ARTIFACT_TYPE,
       SKILL_ARTIFACT_TYPE,
     ]);
     expect(sink.output()).toContain('bafy-envelope');
@@ -619,8 +619,8 @@ describe('execute() seed-profile scrub (#1409)', () => {
 
     expect(result.errors).toEqual([]);
     expect(result.imported).toHaveLength(1);
-    const envelope = parseTraceEnvelopeV0(published[0]!.payload);
-    const attrs = envelope.steps[0]!.attributes as Record<string, unknown>;
+    const envelope = EpisodeV1WriteSchema.parse(published[0]!.payload);
+    const attrs = envelope.trajectory[0]!.attributes as Record<string, unknown>;
     expect(attrs['skill.md']).toBe(SEED_SKILL_MD);
   });
 
@@ -641,8 +641,8 @@ describe('execute() seed-profile scrub (#1409)', () => {
     const result = await execute(leakyReport, source, deps);
 
     expect(result.errors).toEqual([]);
-    const envelope = parseTraceEnvelopeV0(published[0]!.payload);
-    const text = String((envelope.steps[0]!.attributes as Record<string, unknown>)['skill.md']);
+    const envelope = EpisodeV1WriteSchema.parse(published[0]!.payload);
+    const text = String((envelope.trajectory[0]!.attributes as Record<string, unknown>)['skill.md']);
     expect(text).not.toContain(pat);
     expect(text).not.toContain('alice@example.com');
     expect(text).toContain('[SECRET:');

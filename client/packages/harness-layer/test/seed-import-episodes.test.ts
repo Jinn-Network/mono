@@ -12,12 +12,11 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { RETRIEVAL_VISIBLE_TAG } from '@jinn-network/plugin';
+import { EpisodeV1WriteSchema, RETRIEVAL_VISIBLE_TAG } from '@jinn-network/plugin';
 import type { SignedEnvelope } from '../../../src/types/envelope.js';
-import { parseTraceEnvelopeV0 } from '../src/envelope.js';
 import { createMemoryLedger } from '../src/ledger.js';
 import type { HarnessPublishDeps } from '../src/publish.js';
-import { TRACE_ENVELOPE_ARTIFACT_TYPE } from '../src/publish.js';
+import { EPISODE_ARTIFACT_TYPE } from '../src/publish.js';
 import {
   createLocalEpisodeSeedSource,
   parseSeedEpisode,
@@ -189,7 +188,8 @@ describe('executeEpisodes()', () => {
     const result = await executeEpisodes(await planEpisodes(source), source, deps);
 
     expect(result.imported).toHaveLength(2);
-    const [marked, unmarked] = published.map((item) => parseTraceEnvelopeV0(item.payload));
+    const [marked, unmarked] = published.map((item) =>
+      EpisodeV1WriteSchema.parse(item.payload));
     expect(marked?.task.distributionTags).toContain(RETRIEVAL_VISIBLE_TAG);
     expect(unmarked?.task.distributionTags).not.toContain(RETRIEVAL_VISIBLE_TAG);
   });
@@ -200,25 +200,26 @@ describe('executeEpisodes()', () => {
     const { deps, published } = mockPublishDeps();
     const result = await executeEpisodes(report, source, deps);
 
-    expect(published.map((p) => p.artifactType)).toEqual([TRACE_ENVELOPE_ARTIFACT_TYPE]);
-    const envelope = parseTraceEnvelopeV0(published[0]!.payload);
+    expect(published.map((p) => p.artifactType)).toEqual([EPISODE_ARTIFACT_TYPE]);
+    const envelope = EpisodeV1WriteSchema.parse(published[0]!.payload);
     expect(envelope.provenance).toBe('imported');
+    expect(envelope.task.repositorySlug).toBe('acme/widgets');
     expect(envelope.task.summary).toBe(episode().taskSummary);
     expect(envelope.task.distributionTags).toEqual(
       expect.arrayContaining(['seed-import', 'acme', 'widgets', 'flake']),
     );
 
     // Content steps carry the label/title/text convention.
-    expect(envelope.steps).toHaveLength(5); // 4 content steps + 1 synthesis/attribution step
-    const failureStep = envelope.steps.find((s) => s.name === 'seed:step:failure')!;
+    expect(envelope.trajectory).toHaveLength(5); // 4 content steps + 1 synthesis/attribution step
+    const failureStep = envelope.trajectory.find((s) => s.name === 'seed:step:failure')!;
     expect(failureStep.attributes['seed.step.label']).toBe('failure');
     expect(failureStep.attributes['seed.step.title']).toBe('run failing test');
     expect(String(failureStep.attributes['seed.step.text'])).toContain('FAIL widget.test.ts');
-    const fixStep = envelope.steps.find((s) => s.name === 'seed:step:fix')!;
+    const fixStep = envelope.trajectory.find((s) => s.name === 'seed:step:fix')!;
     expect(fixStep.attributes['seed.step.label']).toBe('fix');
 
     // Final step carries synthesis + attribution.
-    const metaStep = envelope.steps[envelope.steps.length - 1]!;
+    const metaStep = envelope.trajectory[envelope.trajectory.length - 1]!;
     expect(metaStep.name).toBe('seed:synthesis');
     expect(metaStep.attributes['seed.synthesis']).toContain('general pattern');
     expect(metaStep.attributes['seed.attribution']).toMatchObject({
@@ -250,7 +251,7 @@ describe('executeEpisodes()', () => {
     const { deps, published } = mockPublishDeps();
     const result = await executeEpisodes(report, source, deps);
     expect(published).toHaveLength(1); // only the first "dup" publishes
-    expect(parseTraceEnvelopeV0(published[0]!.payload).task.summary).toBe('first occurrence');
+    expect(EpisodeV1WriteSchema.parse(published[0]!.payload).task.summary).toBe('first occurrence');
     expect(result.imported).toHaveLength(1);
     expect(result.skipped).toHaveLength(1);
     expect(result.skipped[0]!.reason).toContain('duplicate id');
@@ -404,7 +405,7 @@ describe('executeEpisodes()', () => {
         { state: createFileSeedImportState(statePath) },
       );
       const priorRef = unmarked.imported[0]!.envelopeRef;
-      expect(parseTraceEnvelopeV0(published[0]!.payload).task.distributionTags)
+      expect(EpisodeV1WriteSchema.parse(published[0]!.payload).task.distributionTags)
         .not.toContain(RETRIEVAL_VISIBLE_TAG);
 
       const markedReport = await planEpisodes(markedSource);
@@ -418,9 +419,9 @@ describe('executeEpisodes()', () => {
         }),
       ]);
 
-      const markedEnvelope = parseTraceEnvelopeV0(published[1]!.payload);
+      const markedEnvelope = EpisodeV1WriteSchema.parse(published[1]!.payload);
       expect(markedEnvelope.task.distributionTags).toContain(RETRIEVAL_VISIBLE_TAG);
-      expect(markedEnvelope.steps.at(-1)?.attributes['seed.attribution']).toMatchObject({
+      expect(markedEnvelope.trajectory.at(-1)?.attributes['seed.attribution']).toMatchObject({
         supersedes: priorRef,
       });
 
@@ -468,8 +469,8 @@ describe('executeEpisodes()', () => {
       expect(second.imported[0]!.envelopeRef).not.toBe(firstRef);
       expect(second.imported[0]!.supersedes).toBe(firstRef);
 
-      const secondEnvelope = parseTraceEnvelopeV0(published[1]!.payload);
-      const metaStep = secondEnvelope.steps[secondEnvelope.steps.length - 1]!;
+      const secondEnvelope = EpisodeV1WriteSchema.parse(published[1]!.payload);
+      const metaStep = secondEnvelope.trajectory[secondEnvelope.trajectory.length - 1]!;
       expect((metaStep.attributes['seed.attribution'] as Record<string, unknown>)['supersedes']).toBe(firstRef);
     });
 

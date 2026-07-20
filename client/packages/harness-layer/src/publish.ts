@@ -1,9 +1,9 @@
 /**
  * Harness-layer publish path (plan Task 4, issue #1311).
  *
- * `publish(pending)` performs the consent conversion (PendingEnvelope →
- * TraceEnvelopeV0 — calling publish after preview IS the consent action),
- * publishes the trace envelope as an artifact, wraps it in the same signed
+ * `publish(pending)` performs the consent conversion (calling publish after
+ * preview IS the consent action), projects the scrubbed pending capture into
+ * a canonical EpisodeV1 artifact, and wraps it in the same signed
  * `jinn.execution.v1` envelope the daemon capture path publishes (reusing
  * `buildUnsignedCaptureEnvelope`), and anchors it via ERC-8004. Publishing
  * through that wrapper is what makes the returned ref resolvable with
@@ -40,12 +40,20 @@ import {
 import { canonicalJson } from '../../../src/harnesses/engine/canonical-json.js';
 import { signCanonical } from '../../../src/harnesses/engine/signing.js';
 import { EMPTY_BUNDLE_SHA256 } from '../../../src/trajectory/schema.js';
+import {
+  EPISODE_SCHEMA_VERSION,
+  EpisodeV1WriteSchema,
+  hasRetrievalMark,
+  type EpisodeV1Write,
+} from '@jinn-network/plugin';
 import { PENDING_ENVELOPE_KIND, type PendingEnvelope } from './capture.js';
 import { parseTraceEnvelopeV0, type TraceEnvelopeV0 } from './envelope.js';
 import type { LedgerStore } from './ledger.js';
 
-/** artifactType of the published layer-1 trace envelope. */
+/** Read-compat only: no new capture publication emits this payload. */
 export const TRACE_ENVELOPE_ARTIFACT_TYPE = 'jinn.trace-envelope.v0' as const;
+/** Canonical local/public evidence payload emitted by new publications. */
+export const EPISODE_ARTIFACT_TYPE = EPISODE_SCHEMA_VERSION;
 
 const DONATION_ARTIFACT_ENCODING = 'jinn.artifact.donation.v1' as const;
 const DEFAULT_PRICE_USDC = '0';
@@ -54,7 +62,7 @@ export interface HarnessPublishDeps {
   participant: { safeAddress: `0x${string}`; agentEoa: `0x${string}` };
   signer: { address: `0x${string}`; privateKey?: `0x${string}` };
   clientGitSha: string;
-  /** Upload a payload (the trace envelope) as an artifact blob. */
+  /** Upload an evidence or companion payload as an artifact blob. */
   publishArtifact: (input: {
     artifactType: string;
     payload: unknown;
@@ -78,7 +86,7 @@ export interface PublishOptions {
   /**
    * First-class skill artifact (#1394): validated against
    * SkillArtifactV1Schema and published as a second artifact on the SAME
-   * wrapper envelope, alongside (never instead of) the trace envelope.
+   * wrapper envelope, alongside (never instead of) the canonical episode.
    */
   skill?: SkillArtifactV1;
 }
@@ -137,13 +145,81 @@ export function toTraceEnvelope(pending: PendingEnvelope): TraceEnvelopeV0 {
   });
 }
 
+function publishedStepKind(
+  step: TraceEnvelopeV0['steps'][number],
+  declaredKind: EpisodeV1Write['trajectory'][number]['kind'] | undefined,
+): EpisodeV1Write['trajectory'][number]['kind'] {
+  if (declaredKind) return declaredKind;
+  const role = step.attributes['role'];
+  return role === 'user' || role === 'assistant' || step.name.startsWith('turn:')
+    ? 'jinn.agent_turn'
+    : 'jinn.tool_call';
+}
+
+/**
+ * Project the scrubbed pending capture into the same canonical contract the
+ * local evidence store uses. Consent remains the publish action and is not a
+ * second payload field; trace-envelope.v0 remains available only to legacy
+ * readers.
+ */
+export function toPublishedEpisode(pending: PendingEnvelope): EpisodeV1Write {
+  const trace = toTraceEnvelope(pending);
+  return EpisodeV1WriteSchema.parse({
+    schemaVersion: EPISODE_SCHEMA_VERSION,
+    episodeId: trace.session.sessionId,
+    retrievalVisible: hasRetrievalMark(trace.task.distributionTags),
+    session: {
+      ...trace.session,
+      kind: pending.episodeFacts.session.kind ?? 'user',
+      ...(pending.episodeFacts.session.parentSessionId
+        ? { parentSessionId: pending.episodeFacts.session.parentSessionId }
+        : {}),
+    },
+    origin: {
+      writer: trace.environment.harness.name,
+      build: trace.environment.harness.version,
+    },
+    task: {
+      ...trace.task,
+      ...pending.episodeFacts.task,
+    },
+    trajectory: trace.steps.map((step, index) => ({
+      spanId: step.spanId,
+      parentSpanId: step.parentSpanId,
+      kind: publishedStepKind(step, pending.episodeFacts.trajectoryKinds[index]),
+      name: step.name,
+      startTimeUnixNano: step.startTimeUnixNano,
+      endTimeUnixNano: step.endTimeUnixNano,
+      attributes: step.attributes,
+      redactedKeys: step.redactedKeys,
+      ...(step.truncatedKeys ? { truncatedKeys: step.truncatedKeys } : {}),
+    })),
+    environment: {
+      ...trace.environment,
+      ...pending.episodeFacts.environment,
+      skillsLoadout: pending.episodeFacts.environment.skillsLoadout ?? [],
+    },
+    outcome: {
+      status: trace.outcome.status,
+      verificationStrength: trace.outcome.verifiabilityTier,
+      ...(trace.outcome.summary ? { summary: trace.outcome.summary } : {}),
+    },
+    cost: trace.cost,
+    retention: { policy: 'contribution-eligible' },
+    provenance: trace.provenance,
+    ...(pending.episodeFacts.attemptGroup
+      ? { attemptGroup: pending.episodeFacts.attemptGroup }
+      : {}),
+  });
+}
+
 /**
  * Synthesise the capture row `buildUnsignedCaptureEnvelope` reads. The
  * harness layer has no CapturesStore — the pending envelope carries all the
  * session facts. capturePath 'A' = native harness instrumentation (the
  * four-path ingest taxonomy in spec/2026-05-07-telemetry-collector §4.2).
  */
-function toCaptureRow(envelope: TraceEnvelopeV0): PendingCaptureRow {
+function toCaptureRow(envelope: EpisodeV1Write): PendingCaptureRow {
   return {
     sessionId: envelope.session.sessionId,
     capturedAt: envelope.session.capturedAt,
@@ -153,8 +229,8 @@ function toCaptureRow(envelope: TraceEnvelopeV0): PendingCaptureRow {
     },
     capturePath: 'A',
     status: 'pending',
-    spanCount: envelope.steps.length,
-    redactedSpanCount: envelope.steps.filter(
+    spanCount: envelope.trajectory.length,
+    redactedSpanCount: envelope.trajectory.filter(
       (s) => s.redactedKeys.length > 0 || (s.truncatedKeys?.length ?? 0) > 0,
     ).length,
     durationMs: envelope.cost.durationMs,
@@ -211,25 +287,26 @@ export async function publish(
     return { vetoed: true };
   }
 
-  const trace = toTraceEnvelope(pending);
+  const episode = toPublishedEpisode(pending);
   const skill = opts.skill === undefined ? undefined : SkillArtifactV1Schema.parse(opts.skill);
 
   const artifacts: Artifact[] = [
-    await publishAsArtifact(deps, TRACE_ENVELOPE_ARTIFACT_TYPE, trace, {
-      description: 'Layer-1 harness trace envelope (scrubbed, consented)',
+    await publishAsArtifact(deps, EPISODE_ARTIFACT_TYPE, episode, {
+      description: 'Layer-1 canonical evidence episode (scrubbed)',
+      tags: episode.task.distributionTags,
     }),
   ];
   if (skill) {
     artifacts.push(
       await publishAsArtifact(deps, SKILL_ARTIFACT_TYPE, skill, {
         description: `Skill: ${skill.skill.name}`,
-        tags: trace.task.distributionTags,
+        tags: episode.task.distributionTags,
       }),
     );
   }
 
   const unsigned = buildUnsignedCaptureEnvelope({
-    capture: toCaptureRow(trace),
+    capture: toCaptureRow(episode),
     now,
     participant: deps.participant,
     signerAddress: deps.signer.address,
@@ -256,10 +333,10 @@ export async function publish(
   try {
     deps.ledger.append({
       ts: now.toISOString(),
-      taskSummary: trace.task.summary,
+      taskSummary: episode.task.summary,
       envelopeRef,
       anchorTx,
-      verifiabilityTier: trace.outcome.verifiabilityTier,
+      verifiabilityTier: episode.outcome.verificationStrength,
       status: 'published',
     });
   } catch (err) {

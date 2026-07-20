@@ -5,7 +5,13 @@ export function makeSampleEpisode(overrides: Partial<EpisodeV1> = {}): EpisodeV1
   return {
     schemaVersion: EPISODE_SCHEMA_VERSION,
     episodeId: 'episode-fixture-1',
-    session: { sessionId: 'sess-fixture-1', capturedAt: '2026-07-14T00:00:00.000Z' },
+    retrievalVisible: false,
+    session: {
+      sessionId: 'sess-fixture-1',
+      capturedAt: '2026-07-14T00:00:00.000Z',
+      kind: 'user',
+    },
+    origin: { writer: 'hermes', build: '0.1.0' },
     task: { summary: 'Fix a failing test', distributionTags: [] },
     trajectory: [
       {
@@ -45,7 +51,7 @@ export function makeSampleEpisode(overrides: Partial<EpisodeV1> = {}): EpisodeV1
       tools: ['bash'],
       skillsLoadout: [],
     },
-    outcome: { status: 'completed', verifiabilityTier: 'user-accepted' },
+    outcome: { status: 'completed', verificationStrength: 'user-accepted' },
     cost: { durationMs: 1000 },
     retention: { policy: 'local-private' },
     provenance: 'contributed',

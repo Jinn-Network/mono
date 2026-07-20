@@ -2,8 +2,8 @@
  * The bridge — SolverNet execution ledger → layer-1 evidence
  * (spec/2026-07-06-distillation-v1.md §8, D5/D10).
  *
- * Turns swe-rebench attempts into layer-1 `jinn.trace-envelope.v0` evidence via
- * the existing frozen `capture()`→`publish()` pipe, scrubbed at the **layer-2
+ * Turns swe-rebench attempts into canonical `jinn.episode.v1` evidence via
+ * the existing `capture()`→`publish()` pipe, scrubbed at the **layer-2
  * (secret-only) altitude** (D6 — a verified swe-rebench solve is public-repo
  * work, not raw private-machine activity). It sources **both polarities** (D10):
  * verified passes → pattern-eligible evidence; evaluator-confirmed failures →
@@ -57,6 +57,15 @@ export interface BridgeEvidence {
   patch: string;
   /** `owner/repo` when known (tag + audit); defaults from the instance id. */
   repo?: string;
+  /** First-class native tuple facts copied from the signed solution/task. */
+  baseCommit?: string;
+  taskCreatedAt?: number;
+  instanceId?: string;
+  generatorModel?: CapturedTask['environment']['generatorModel'];
+  distributionClass?: CapturedTask['environment']['distributionClass'];
+  failToPass?: string[];
+  passToPass?: string[];
+  evalSemanticsVersion?: string;
   /**
    * The solver's own compressed decision-path outline, derived from the raw
    * harness transcript inside the solution's `system_snapshot` artifact
@@ -157,16 +166,37 @@ export function toBridgeCapturedTask(ref: AttemptRef, ev: BridgeEvidence, now: D
         ...(repo ? [repo.slice(0, 64)] : []),
         ...(enriched ? [] : ['patch-only']),
       ],
+      ...(repo ? { repositorySlug: repo } : {}),
+      ...(ev.baseCommit ? { baseCommit: ev.baseCommit } : {}),
+      ...(ev.taskCreatedAt !== undefined ? { createdAt: ev.taskCreatedAt } : {}),
+      instanceId: ev.instanceId ?? ref.instanceId,
     },
     environment: {
       harness: { name: 'jinn-execution-ledger-bridge', version: '0.1.0' },
       model: ref.model || 'unknown',
       tools: [],
+      ...(ev.generatorModel ? { generatorModel: ev.generatorModel } : {}),
+      ...(ev.distributionClass ? { distributionClass: ev.distributionClass } : {}),
+      ...(ev.failToPass !== undefined
+        || ev.passToPass !== undefined
+        || ev.evalSemanticsVersion !== undefined
+        ? {
+            verifier: {
+              type: 'f2p-p2p' as const,
+              failToPass: ev.failToPass ?? [],
+              passToPass: ev.passToPass ?? [],
+              ...(ev.evalSemanticsVersion
+                ? { evalSemanticsVersion: ev.evalSemanticsVersion }
+                : {}),
+            },
+          }
+        : {}),
     },
     steps: [
       {
         spanId: 'patch',
         parentSpanId: null,
+        kind: 'jinn.tool_call' as const,
         name: 'tool:apply_patch',
         startTimeUnixNano: nano,
         endTimeUnixNano: nano,
@@ -178,6 +208,7 @@ export function toBridgeCapturedTask(ref: AttemptRef, ev: BridgeEvidence, now: D
             {
               spanId: 'trace',
               parentSpanId: null,
+              kind: 'jinn.tool_call' as const,
               name: 'solver:trajectory',
               startTimeUnixNano: nano,
               endTimeUnixNano: nano,
@@ -189,6 +220,7 @@ export function toBridgeCapturedTask(ref: AttemptRef, ev: BridgeEvidence, now: D
       {
         spanId: 'verdict',
         parentSpanId: null,
+        kind: 'jinn.tool_call' as const,
         name: 'evaluator:verdict',
         startTimeUnixNano: nano,
         endTimeUnixNano: nano,
@@ -204,6 +236,11 @@ export function toBridgeCapturedTask(ref: AttemptRef, ev: BridgeEvidence, now: D
           summary: 'evaluator-confirmed failure (lesson-eligible)',
         },
     cost: { durationMs: 0 },
+    attemptGroup: {
+      groupId: ev.instanceId ?? ref.instanceId,
+      attemptId: ref.requestId,
+      relatedAttemptRefs: [],
+    },
     provenance: 'contributed',
   };
 }
@@ -278,7 +315,7 @@ export async function bridgeAttempts(refs: AttemptRef[], deps: BridgeDeps): Prom
 /**
  * The production `publishEvidence`: run the CapturedTask through `capture()`
  * with the **layer-2 (secret-only) pipeline** injected (D6), then `publish()` —
- * emitting a `jinn.trace-envelope.v0` artifact. Reuses the frozen pipe; the only
+ * emitting a canonical `jinn.episode.v1` artifact. Reuses the scrubbed pipe; the only
  * departure from a native capture is the scrub altitude.
  */
 export function buildBridgeEvidencePublisher(

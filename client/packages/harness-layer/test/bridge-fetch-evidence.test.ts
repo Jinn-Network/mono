@@ -64,6 +64,56 @@ describe('createEvidenceFetcher', () => {
     expect(ev.repo).toBe('django/django');
   });
 
+  it('carries native task, model, distribution, and verifier facts into bridge evidence', async () => {
+    const fetch = createEvidenceFetcher(ports({
+      task: {
+        description: 'Fix the widget factory',
+        restorationRequestId: SOLVE_REQ,
+        spec: {
+          instance_id: 'django__django-11333',
+          repo: 'django/django',
+          base_commit: 'a'.repeat(40),
+          fail_to_pass: ['tests/test_widget.py::test_regression'],
+          pass_to_pass: ['tests/test_widget.py::test_existing'],
+          evalSemanticsVersion: '4',
+        },
+      },
+      solution: {
+        task: {
+          instanceId: 'django__django-11333',
+          repo: 'django/django',
+          baseCommit: 'a'.repeat(40),
+          createdAt: 1_752_000_000,
+        },
+        executor: {
+          generatorModel: {
+            id: 'claude-sonnet-4-6',
+            provider: 'anthropic',
+            source: 'stream',
+          },
+        },
+        distributionClass: 'restricted-tos',
+        payload: { patch: PATCH },
+      },
+    }));
+
+    await expect(fetch(ref())).resolves.toMatchObject({
+      instanceId: 'django__django-11333',
+      repo: 'django/django',
+      baseCommit: 'a'.repeat(40),
+      taskCreatedAt: 1_752_000_000,
+      generatorModel: {
+        id: 'claude-sonnet-4-6',
+        provider: 'anthropic',
+        source: 'stream',
+      },
+      distributionClass: 'restricted-tos',
+      failToPass: ['tests/test_widget.py::test_regression'],
+      passToPass: ['tests/test_widget.py::test_existing'],
+      evalSemanticsVersion: '4',
+    });
+  });
+
   it('falls back to spec.problem_statement when there is no description', async () => {
     const fetch = createEvidenceFetcher(
       ports({ task: { spec: { problem_statement: 'Repair the flux' }, restorationRequestId: SOLVE_REQ } }),

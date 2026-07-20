@@ -108,7 +108,7 @@ describe('capture() on the seeded-secrets fixture', () => {
   it('records the union of redacted keys on each step (the visible receipt)', async () => {
     const pending = await capture(loadFixture());
     const report = preview(pending);
-    const step2 = report.envelope.steps.find((s) => s.spanId === 's-002');
+    const step2 = report.envelope.trajectory.find((s) => s.spanId === 's-002');
     expect(step2).toBeDefined();
     expect(step2!.redactedKeys).toContain('env.OPENAI_API_KEY');
     expect(step2!.redactedKeys).toContain('http.request.header.authorization');
@@ -117,13 +117,13 @@ describe('capture() on the seeded-secrets fixture', () => {
     expect(step2!.attributes).not.toHaveProperty('http.request.header.authorization');
   });
 
-  it('produces a schema-valid envelope with consent flags asserted only in the preview', async () => {
+  it('previews the schema-valid canonical episode that would publish', async () => {
     const pending = await capture(loadFixture());
     // The pending (pre-consent) state is not a TraceEnvelopeV0: no consent block.
     expect(pending.draft).not.toHaveProperty('consent');
     const report = preview(pending);
-    expect(report.envelope.consent).toEqual({ contributionConsent: true, scrubCompleted: true });
-    expect(report.envelope.schemaVersion).toBe('jinn.trace-envelope.v0');
+    expect(report.envelope).not.toHaveProperty('consent');
+    expect(report.envelope.schemaVersion).toBe('jinn.episode.v1');
   });
 });
 
@@ -146,7 +146,7 @@ describe('capture() nested step attributes (#1378)', () => {
     const pending = await capture(task);
     const report = preview(pending);
 
-    const step = report.envelope.steps[0]!;
+    const step = report.envelope.trajectory[0]!;
     expect(String(step.attributes['tool.result']), 'tool.result leaked the username').not.toContain('janedoe');
     expect(JSON.stringify(step.attributes['tool.args']), 'tool.args leaked the username').not.toContain('janedoe');
     expect(JSON.stringify(report.envelope), 'published envelope leaked the username').not.toContain('janedoe');
@@ -210,7 +210,7 @@ describe('capture() fitting rule (envelope-v0.md)', () => {
     const pending = await capture(task);
     const report = preview(pending);
 
-    const step = report.envelope.steps[0]!;
+    const step = report.envelope.trajectory[0]!;
     const serialised = Buffer.byteLength(JSON.stringify(step.attributes), 'utf8');
     expect(serialised).toBeLessThanOrEqual(MAX_STEP_ATTRIBUTES_BYTES);
     expect(step.truncatedKeys).toContain('command.output');
@@ -234,10 +234,10 @@ describe('capture() fitting rule (envelope-v0.md)', () => {
     }));
     const pending = await capture(validTask({ steps }));
     const report = preview(pending);
-    expect(report.envelope.steps).toHaveLength(MAX_STEPS);
+    expect(report.envelope.trajectory).toHaveLength(MAX_STEPS);
     // Head and tail survive; the middle is what gets sampled out.
-    expect(report.envelope.steps[0]!.spanId).toBe('s-0000');
-    expect(report.envelope.steps.at(-1)!.spanId).toBe(`s-${String(MAX_STEPS + 88 - 1).padStart(4, '0')}`);
+    expect(report.envelope.trajectory[0]!.spanId).toBe('s-0000');
+    expect(report.envelope.trajectory.at(-1)!.spanId).toBe(`s-${String(MAX_STEPS + 88 - 1).padStart(4, '0')}`);
     const sampleEntry = report.redactions.find((r) => r.stage === 'fit' && r.field === 'steps');
     expect(sampleEntry).toBeDefined();
   });

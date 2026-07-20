@@ -21,10 +21,12 @@ import { ScrubPipeline } from '../../../src/trajectory/scrub/pipeline.js';
 import { SignedEnvelopeSchema } from '../../../src/types/envelope.js';
 import { capture, type CapturedTask, type PendingEnvelope } from '../src/capture.js';
 import { parseTraceEnvelopeV0 } from '../src/envelope.js';
+import { EpisodeV1WriteSchema, RETRIEVAL_VISIBLE_TAG } from '@jinn-network/plugin';
 import {
+  EPISODE_ARTIFACT_TYPE,
   publish,
+  toPublishedEpisode,
   toTraceEnvelope,
-  TRACE_ENVELOPE_ARTIFACT_TYPE,
   type HarnessPublishDeps,
 } from '../src/publish.js';
 import {
@@ -137,6 +139,125 @@ describe('toTraceEnvelope', () => {
   });
 });
 
+describe('toPublishedEpisode', () => {
+  it('projects the scrubbed capture into the shared canonical episode contract', async () => {
+    const episode = toPublishedEpisode(await pendingFixture());
+
+    expect(EpisodeV1WriteSchema.parse(episode)).toEqual(episode);
+    expect(episode).toMatchObject({
+      schemaVersion: 'jinn.episode.v1',
+      episodeId: '9f2c1e4a-7b3d-4e8f-a1c2-d5e6f7a8b9c0',
+      retrievalVisible: false,
+      session: {
+        sessionId: '9f2c1e4a-7b3d-4e8f-a1c2-d5e6f7a8b9c0',
+        kind: 'user',
+      },
+      origin: { writer: 'jinn-test-harness', build: '0.0.1' },
+      outcome: { status: 'completed', verificationStrength: 'tests-passed' },
+      retention: { policy: 'contribution-eligible' },
+    });
+    expect(episode.trajectory[0]?.kind).toBe('jinn.tool_call');
+    expect(episode.outcome).not.toHaveProperty('verifiabilityTier');
+    expect(episode).not.toHaveProperty('consent');
+    expect(episode).not.toHaveProperty('steps');
+  });
+
+  it('materializes the W2 retrieval decision as a named canonical field', async () => {
+    const task = validTask({
+      task: {
+        summary: 'Marked curated evidence',
+        distributionTags: ['curated', RETRIEVAL_VISIBLE_TAG],
+      },
+    });
+    const episode = toPublishedEpisode(await capture(task, {
+      pipeline: new ScrubPipeline([]),
+    }));
+
+    expect(episode.retrievalVisible).toBe(true);
+    expect(episode.task.distributionTags).toContain(RETRIEVAL_VISIBLE_TAG);
+  });
+
+  it('preserves Episode-only training facts across the frozen scrub draft', async () => {
+    const task = validTask({
+      session: {
+        sessionId: '9f2c1e4a-7b3d-4e8f-a1c2-d5e6f7a8b9c0',
+        capturedAt: '2026-07-02T10:41:22.000Z',
+        kind: 'host-internal',
+        parentSessionId: 'parent-session',
+      },
+      task: {
+        summary: 'Fix a verified regression',
+        distributionTags: ['training'],
+        repositorySlug: 'Jinn-Network/mono',
+        baseCommit: 'a'.repeat(40),
+        createdAt: 1_752_000_000,
+        instanceId: 'Jinn-Network__mono-1842',
+      },
+      environment: {
+        harness: { name: 'jinn-test-harness', version: '0.0.1' },
+        model: 'claude-sonnet-4-6',
+        tools: ['run_command'],
+        skillsLoadout: ['tdd'],
+        generatorModel: {
+          id: 'claude-sonnet-4-6',
+          provider: 'anthropic',
+          source: 'stream',
+        },
+        distributionClass: 'restricted-tos',
+        verifier: {
+          type: 'f2p-p2p',
+          failToPass: ['test/regression.test.ts'],
+          passToPass: ['test/existing.test.ts'],
+          evalSemanticsVersion: '4',
+        },
+      },
+      steps: [{
+        spanId: 'span-1',
+        parentSpanId: null,
+        kind: 'jinn.agent_turn',
+        name: 'solver:trajectory',
+        startTimeUnixNano: '1751450482000000000',
+        endTimeUnixNano: '1751450483000000000',
+        attributes: { role: 'assistant', text: 'fixed' },
+        redactedKeys: [],
+      }],
+      attemptGroup: {
+        groupId: 'Jinn-Network__mono-1842',
+        attemptId: 'attempt-1',
+        relatedAttemptRefs: ['bafy-sibling'],
+      },
+    });
+
+    const episode = toPublishedEpisode(await capture(task, {
+      pipeline: new ScrubPipeline([]),
+    }));
+
+    expect(episode).toMatchObject({
+      session: { kind: 'host-internal', parentSessionId: 'parent-session' },
+      task: {
+        repositorySlug: 'Jinn-Network/mono',
+        baseCommit: 'a'.repeat(40),
+        createdAt: 1_752_000_000,
+        instanceId: 'Jinn-Network__mono-1842',
+      },
+      environment: {
+        skillsLoadout: ['tdd'],
+        generatorModel: { id: 'claude-sonnet-4-6', source: 'stream' },
+        distributionClass: 'restricted-tos',
+        verifier: {
+          failToPass: ['test/regression.test.ts'],
+          passToPass: ['test/existing.test.ts'],
+        },
+      },
+      attemptGroup: {
+        groupId: 'Jinn-Network__mono-1842',
+        attemptId: 'attempt-1',
+      },
+    });
+    expect(episode.trajectory[0]?.kind).toBe('jinn.agent_turn');
+  });
+});
+
 describe('publish', () => {
   it('no-bypass: a raw (non-PendingEnvelope) value is rejected before any dep call', async () => {
     const { deps, calls } = mockDeps();
@@ -148,22 +269,23 @@ describe('publish', () => {
     expect(calls.anchorEnvelope).toHaveLength(0);
   });
 
-  it('publishes the TraceEnvelopeV0 artifact, a signed wrapper envelope, and anchors', async () => {
+  it('publishes the EpisodeV1 artifact, a signed wrapper envelope, and anchors', async () => {
     const { deps, calls } = mockDeps();
     const pending = await pendingFixture();
     const result = await publish(pending, deps);
 
-    // The published artifact is the consented, schema-valid trace envelope.
+    // New publications carry the same canonical episode contract as local
+    // evidence; trace-envelope.v0 is read-compat only.
     expect(calls.publishArtifact).toHaveLength(1);
-    expect(calls.publishArtifact[0]!.artifactType).toBe(TRACE_ENVELOPE_ARTIFACT_TYPE);
-    const trace = parseTraceEnvelopeV0(calls.publishArtifact[0]!.payload);
-    expect(trace.consent).toEqual({ contributionConsent: true, scrubCompleted: true });
+    expect(calls.publishArtifact[0]!.artifactType).toBe(EPISODE_ARTIFACT_TYPE);
+    const episode = EpisodeV1WriteSchema.parse(calls.publishArtifact[0]!.payload);
+    expect(episode.outcome.verificationStrength).toBe('tests-passed');
 
-    // The wrapper is a valid SignedEnvelope carrying the trace artifact —
+    // The wrapper is a valid SignedEnvelope carrying the episode artifact —
     // this is what makes the ref resolvable via `corpus get`.
     expect(calls.publishEnvelope).toHaveLength(1);
     const signed = SignedEnvelopeSchema.parse(calls.publishEnvelope[0]);
-    expect(signed.artifacts.map((a) => a.artifactType)).toContain(TRACE_ENVELOPE_ARTIFACT_TYPE);
+    expect(signed.artifacts.map((a) => a.artifactType)).toEqual([EPISODE_ARTIFACT_TYPE]);
     expect(signed.participant.safeAddress).toBe(TEST_SAFE);
 
     // Anchored under the published envelope CID; anchor recorded in the result.

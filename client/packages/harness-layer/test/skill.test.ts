@@ -11,8 +11,10 @@ import {
 } from '../../../src/types/skill-artifact.js';
 import { capture, type CapturedTask } from '../src/capture.js';
 import {
+  EPISODE_ARTIFACT_TYPE,
   publish,
   TRACE_ENVELOPE_ARTIFACT_TYPE,
+  toTraceEnvelope,
   type HarnessPublishDeps,
 } from '../src/publish.js';
 import { createMemoryLedger } from '../src/ledger.js';
@@ -106,14 +108,14 @@ function mockPublishDeps(): {
 }
 
 describe('publish() with opts.skill (dual-carriage)', () => {
-  it('publishes the trace AND the skill artifact on the same wrapper envelope', async () => {
+  it('publishes the episode AND the skill artifact on the same wrapper envelope', async () => {
     const { deps, published, envelopes } = mockPublishDeps();
     const pending = await capture(capturedTask());
     const result = await publish(pending, deps, { skill: skillArtifact() });
     if (result.vetoed) throw new Error('unexpected veto');
 
     expect(published.map((p) => p.artifactType)).toEqual([
-      TRACE_ENVELOPE_ARTIFACT_TYPE,
+      EPISODE_ARTIFACT_TYPE,
       SKILL_ARTIFACT_TYPE,
     ]);
     expect(SkillArtifactV1Schema.parse(published[1]!.payload).skill.name).toBe('write-tests');
@@ -121,7 +123,7 @@ describe('publish() with opts.skill (dual-carriage)', () => {
     expect(envelopes).toHaveLength(1);
     const artifacts = envelopes[0]!.artifacts;
     expect(artifacts.map((a) => a.artifactType)).toEqual([
-      TRACE_ENVELOPE_ARTIFACT_TYPE,
+      EPISODE_ARTIFACT_TYPE,
       SKILL_ARTIFACT_TYPE,
     ]);
     const skillEntry = artifacts[1]!;
@@ -130,7 +132,7 @@ describe('publish() with opts.skill (dual-carriage)', () => {
     expect(skillEntry.access.priceUsdc).toBe('0');
     expect(skillEntry.sha256).toMatch(/^[0-9a-f]{64}$/);
     expect(skillEntry.sources?.[0]?.cid).toBe('bafy-artifact-2');
-    // metadata.tags mirror the trace's distribution tags.
+    // metadata.tags mirror the episode's distribution tags.
     expect(skillEntry.metadata?.tags).toEqual(['skills', 'tdd']);
   });
 
@@ -148,7 +150,7 @@ describe('publish() with opts.skill (dual-carriage)', () => {
     const result = await publish(pending, deps);
     if (result.vetoed) throw new Error('unexpected veto');
     expect(envelopes[0]!.artifacts.map((a) => a.artifactType)).toEqual([
-      TRACE_ENVELOPE_ARTIFACT_TYPE,
+      EPISODE_ARTIFACT_TYPE,
     ]);
   });
 
@@ -236,7 +238,7 @@ describe('extractSkill()', () => {
     expect(extracted!.skill).toEqual(input);
   });
 
-  it('recognises the legacy seeded shape and synthesises equivalent provenance', async () => {
+  it('recognises the canonical seeded episode and synthesises equivalent provenance', async () => {
     const { deps, published, envelopes } = mockPublishDeps();
     const result = await publish(await capture(legacySeededTask()), deps); // no opts.skill
     if (result.vetoed) throw new Error('unexpected veto');
@@ -244,7 +246,7 @@ describe('extractSkill()', () => {
     const record = toRecord(envelopes[0]!, published, result.envelopeRef);
     const extracted = extractSkill(record);
     expect(extracted).not.toBeNull();
-    expect(extracted!.shape).toBe('seeded-trace');
+    expect(extracted!.shape).toBe('seeded-episode');
     expect(extracted!.skill.skill.name).toBe('write-tests');
     expect(extracted!.skill.skill.skillMd).toContain('failing test first');
     expect(extracted!.skill.files).toEqual([]);
@@ -260,6 +262,31 @@ describe('extractSkill()', () => {
         licence: 'MIT',
       },
     });
+  });
+
+  it('retains frozen read compatibility for the legacy seeded trace shape', async () => {
+    const pending = await capture(legacySeededTask());
+    const { deps, published, envelopes } = mockPublishDeps();
+    const result = await publish(pending, deps);
+    if (result.vetoed) throw new Error('unexpected veto');
+
+    const canonical = toRecord(envelopes[0]!, published, result.envelopeRef);
+    const legacyPayload = toTraceEnvelope(pending);
+    const legacyContent = Buffer.from(JSON.stringify(legacyPayload), 'utf-8');
+    const record: CorpusRecord = {
+      ...canonical,
+      artifacts: [{
+        sha256: 'a'.repeat(64),
+        artifactType: TRACE_ENVELOPE_ARTIFACT_TYPE,
+        content: legacyContent,
+        source: 'origin',
+        sizeBytes: legacyContent.length,
+      }],
+    };
+
+    const extracted = extractSkill(record);
+    expect(extracted?.shape).toBe('seeded-trace');
+    expect(extracted?.skill.skill.name).toBe('write-tests');
   });
 
   it('prefers the jinn.skill.v1 artifact when both shapes are present', async () => {
