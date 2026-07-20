@@ -1090,6 +1090,8 @@ describe('MetadataSet envelope: enrichment → attemptEnvelopeMeta', () => {
     expect(metaRow).toMatchObject({
       requestId: ENVELOPE_REQUEST_ID,
       manifestCid: ENRICH_ENVELOPE_CID,
+      publisherAgentId: '9',
+      manifestHash: MANIFEST_HASH,
       solverType: 'swe-rebench-v2.v1',
       implName: 'claude-code-learner',
       implVersion: '1.2.3',
@@ -1885,6 +1887,8 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
       taskId: '42',
       evaluator: EVALUATOR,
       manifestCid: EVAL_CID,
+      publisherAgentId: '5',
+      manifestHash: MANIFEST_HASH,
       solverType: 'swe-rebench-v2.v1',
       evidenceTier: 'committed',
       actualPassed: false,

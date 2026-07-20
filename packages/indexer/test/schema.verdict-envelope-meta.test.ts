@@ -56,4 +56,10 @@ describe('verdictEnvelopeMeta schema (#779 retry columns)', () => {
       'solutionRequestIdIdx: index().on(table.solutionRequestId)',
     );
   });
+
+  it('retains the MetadataSet publisher identity and anchored manifest hash', () => {
+    const block = verdictEnvelopeMetaBlock();
+    expect(block).toContain("publisherAgentId: t.text().notNull().default('')");
+    expect(block).toContain("manifestHash: t.hex().notNull().default('0x')");
+  });
 });

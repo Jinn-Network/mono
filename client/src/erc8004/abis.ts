@@ -116,6 +116,17 @@ export const IDENTITY_REGISTRY_SET_METADATA_ABI = [
   },
 ] as const;
 
+/** ERC-8004 IdentityRegistry — publisher-agent Safe binding read. */
+export const IDENTITY_REGISTRY_GET_AGENT_WALLET_ABI = [
+  {
+    type: 'function',
+    name: 'getAgentWallet',
+    stateMutability: 'view',
+    inputs: [{ name: 'agentId', type: 'uint256' }],
+    outputs: [{ name: '', type: 'address' }],
+  },
+] as const;
+
 // ── ReputationRegistry ────────────────────────────────────────────────────────
 //
 // `giveFeedback` takes `value: int128, valueDecimals: uint8` (signed

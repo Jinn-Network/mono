@@ -65,13 +65,15 @@ import { parseEpisodeImportReport, renderEpisodeImportReport } from './seed-impo
 import { createFileSeedImportState, type SeedImportStateStore } from './seed-import/state.js';
 import { extractSkill } from './skill.js';
 import { isInsidePackageDir } from '../../../src/util/path-safety.js';
-import { isIpfsCid } from '../../../src/task-creator/proofs/ipfs-cid.js';
+import { isIpfsCid } from './ipfs-cid.js';
 import { runDistillationPipeline } from './pipeline.js';
 import { modelLabel, runEvalPrep } from './eval-prep.js';
 import { createVerdictSource, type VerdictSource } from './bridge-verdict-source.js';
 import {
   createEvidenceFetcher,
   type EvidenceFetcherPorts,
+  type ExecutionEnvelopeAuthenticator,
+  type PublisherSafeResolver,
   type VerifierFactsResolver,
 } from './bridge-fetch-evidence.js';
 import {
@@ -342,6 +344,10 @@ export interface DistillRunCliDeps {
   verifierFactsResolverFactory?: (
     ipfs: EvidenceFetcherPorts['ipfs'],
   ) => VerifierFactsResolver;
+  /** Production composition hook for raw execution-envelope authentication. */
+  authenticateEnvelope?: ExecutionEnvelopeAuthenticator;
+  /** Production composition hook for ERC-8004 publisher → Safe resolution. */
+  resolvePublisherSafe?: PublisherSafeResolver;
   /** The LLM distill port. Default: createClaudeDistiller. */
   distill?: (cluster: DistillCluster) => Promise<DistillLLMOutput>;
   /** The stage-2 meta LLM port. Default: createClaudeMetaDistiller. */
@@ -1947,8 +1953,16 @@ export async function runJinnLayerCli(
         const graphqlUrl = base.endsWith('/graphql') ? base : `${base}/graphql`;
         const ipfs = createBoundedIpfsJsonFetcher({ gateway });
         const resolveVerifierFacts = dd.verifierFactsResolverFactory?.(ipfs);
+        if (!dd.authenticateEnvelope || !dd.resolvePublisherSafe) {
+          throw new Error(
+            'live evidence fetching requires execution-envelope authentication '
+            + 'and ERC-8004 publisher Safe resolution from the production composition root',
+          );
+        }
         return createEvidenceFetcher({
           ipfs,
+          authenticateEnvelope: dd.authenticateEnvelope,
+          resolvePublisherSafe: dd.resolvePublisherSafe,
           ...(resolveVerifierFacts ? { resolveVerifierFacts } : {}),
           gql: async (query: string, variables?: Record<string, unknown>) => {
             const res = await fetch(graphqlUrl, {

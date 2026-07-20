@@ -9,14 +9,29 @@
 
 import { runJinnLayerCli } from '../packages/harness-layer/src/cli.js';
 import {
+  DEFAULT_TESTNET_IDENTITY_REGISTRY,
+  DEFAULT_TESTNET_RPC_URL,
+} from '../packages/harness-layer/src/publish-live.js';
+import { authenticateExecutionEnvelope } from '../src/conformance/execution-envelope-authenticator.js';
+import { createPublisherSafeResolver } from '../src/erc8004/publisher-safe-resolver.js';
+import {
   createBoundedRawHfRowFetcher,
   createSweRebenchV2VerifierFactsResolver,
 } from '../src/solver-types/_swe-rebench-v2-verifier-facts.js';
 
 const fetchHfRawRow = createBoundedRawHfRowFetcher();
+const resolvePublisherSafe = createPublisherSafeResolver({
+  rpcUrl: process.env['JINN_RPC_URL'] ?? DEFAULT_TESTNET_RPC_URL,
+  expectedChainId: 84532,
+  identityRegistry:
+    process.env['JINN_LAYER_IDENTITY_REGISTRY']
+    ?? DEFAULT_TESTNET_IDENTITY_REGISTRY,
+});
 
 runJinnLayerCli(process.argv.slice(2), {
   distillRunDeps: {
+    authenticateEnvelope: authenticateExecutionEnvelope,
+    resolvePublisherSafe,
     verifierFactsResolverFactory: (ipfs) =>
       createSweRebenchV2VerifierFactsResolver({
         fetchIpfsJson: ({ cid, maxBytes }) => ipfs(cid, maxBytes),
