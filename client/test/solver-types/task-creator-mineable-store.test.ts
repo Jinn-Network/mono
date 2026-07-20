@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import {
   createContributionAdapter,
   createContributionStatusStore,
-} from '../../packages/harness-layer/src/adapters/contribution-adapter.js';
+} from '@jinn-network/jinn-layer';
 import {
   MineableTraceStore,
   buildMineableRecord,

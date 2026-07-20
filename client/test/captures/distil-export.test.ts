@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseCapturedTask } from '../../packages/harness-layer/src/capture.js';
+import { parseCapturedTask } from '@jinn-network/core';
 import type { PendingCaptureRow, SpanRow } from '../../src/store/captures.js';
 import {
   capturedTaskFromStoredCapture,

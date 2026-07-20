@@ -9,7 +9,7 @@ import {
 } from '../../scripts/validate-curated-seed-batch.js';
 
 const STAGE1_FIXTURES_DIR = fileURLToPath(
-  new URL('../../packages/harness-layer/fixtures/stage1-seeds', import.meta.url),
+  new URL('../../../packages/layer/fixtures/stage1-seeds', import.meta.url),
 );
 
 function validEpisode(index: number): Record<string, unknown> {

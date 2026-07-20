@@ -8,7 +8,7 @@ import { computeMintedPoolRowV2Hash, type MintedPoolRowV2 } from '../../src/solv
 import { computeRowHash } from '../../src/solver-types/_swe-rebench-v2-substrate.js';
 import { signTaskV1 } from '../../src/tasks/signing.js';
 import type { TaskV1 } from '../../src/types/task-document.js';
-import { createBoundedIpfsJsonFetcher } from '../../packages/harness-layer/src/cli.js';
+import { createBoundedIpfsJsonFetcher } from '@jinn-network/jinn-layer';
 import {
   hashVettedPoolArtifact,
   type SolverNetArtifactRef,

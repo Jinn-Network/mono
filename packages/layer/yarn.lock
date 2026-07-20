@@ -349,7 +349,9 @@ __metadata:
     "@jinn-network/core": "npm:0.1.0"
     "@jinn-network/plugin": "npm:0.1.0"
     "@modelcontextprotocol/sdk": "npm:^1.27.1"
+    "@types/better-sqlite3": "npm:^7.6.0"
     "@types/node": "npm:^26.1.0"
+    better-sqlite3: "npm:^12.10.0"
     canonicalize: "npm:^3.0.0"
     typescript: "npm:^5.4.0"
     viem: "npm:^2.0.0"
@@ -731,6 +733,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@types/better-sqlite3@npm:^7.6.0":
+  version: 7.6.13
+  resolution: "@types/better-sqlite3@npm:7.6.13"
+  dependencies:
+    "@types/node": "npm:*"
+  checksum: 10c0/c4336e7b92343eb0e988ded007c53fa9887b98a38d61175226e86124a1a2c28b1a4e3892873c5041e350b7bfa2901f85c82db1542c4f0eed1d3a899682c92106
+  languageName: node
+  linkType: hard
+
 "@types/chai@npm:^5.2.2":
   version: 5.2.3
   resolution: "@types/chai@npm:5.2.3"
@@ -755,7 +766,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/node@npm:>=13.7.0, @types/node@npm:^26.1.0":
+"@types/node@npm:*, @types/node@npm:>=13.7.0, @types/node@npm:^26.1.0":
   version: 26.1.1
   resolution: "@types/node@npm:26.1.1"
   dependencies:

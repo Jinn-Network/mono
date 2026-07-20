@@ -40,12 +40,14 @@
     "@jinn-network/core": "0.1.0",
     "@jinn-network/plugin": "0.1.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
+    "better-sqlite3": "^12.10.0",
     "canonicalize": "^3.0.0",
     "viem": "^2.0.0",
     "yaml": "^2.8.4",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^26.1.0",
     "typescript": "^5.4.0",
     "vitest": "^4.1.8"

@@ -1,8 +1,12 @@
 #!/usr/bin/env node
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { createDistillMcpServer } from '../distill-mcp-server.js';
 
-/**
- * The distillation MCP implementation moves into this package with the C6
- * source-extraction slice. Keeping the bin in the package contract here makes
- * the plain-tsc scaffold independently packable before that mechanical move.
- */
-export {};
+const server = createDistillMcpServer();
+const transport = new StdioServerTransport();
+
+server.connect(transport).catch((err) => {
+  console.error('[jinn-distill-mcp] failed to start');
+  console.error(err);
+  process.exit(1);
+});
