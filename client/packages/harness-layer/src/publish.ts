@@ -39,7 +39,7 @@ import {
 } from '../../../src/types/skill-artifact.js';
 import { canonicalJson } from '../../../src/harnesses/engine/canonical-json.js';
 import { signCanonical } from '../../../src/harnesses/engine/signing.js';
-import { EMPTY_BUNDLE_SHA256 } from '../../../src/trajectory/schema.js';
+import { EMPTY_BUNDLE_SHA256 } from '@jinn-network/core/trajectory';
 import { PENDING_ENVELOPE_KIND, type PendingEnvelope } from './capture.js';
 import { parseTraceEnvelopeV0, type TraceEnvelopeV0 } from './envelope.js';
 import type { LedgerStore } from './ledger.js';

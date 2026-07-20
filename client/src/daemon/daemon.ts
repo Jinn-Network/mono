@@ -8,7 +8,7 @@ import { startApiServer, type ApiServer } from '../api/server.js';
 import type { StatusGatherConfig } from '../api/gather-status.js';
 import { PeerSync } from './peer-sync.js';
 import type { EthHttpSigner } from '../auth/erc8128.js';
-import type { Corpus } from '../corpus/index.js';
+import type { Corpus as CoreCorpus } from '@jinn-network/core/corpus-read';
 import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop.js';
 import { TaskEngine, type TaskEngineOptions } from '../harnesses/engine/engine.js';
 import { BalanceTopupLoop, type BalanceTopupLoopConfig } from './balance-topup-loop.js';
@@ -26,6 +26,7 @@ import {
 } from '../adapters/mech/safe-revert.js';
 import { StaticConfiguredTaskSource, type TaskSource } from '../tasks/sources.js';
 import type { Task } from '../types/index.js';
+import type { SignedEnvelope } from '../types/envelope.js';
 import type { HarnessReadinessRegistry } from '../harnesses/readiness-registry.js';
 import { gateClaimByReadiness } from './readiness-gate.js';
 import { gateClaimBySpendCap } from './spend-cap-gate.js';
@@ -34,6 +35,8 @@ import { gateClaimByAiUnits } from './ai-units-gate.js';
 import type { AiUnitsDaemonConfig } from '../spend/ai-units-config.js';
 import { blockIdUtc } from '../spend/ai-units.js';
 import { SkipLogDeduper } from './skip-log-dedup.js';
+
+type Corpus = CoreCorpus<SignedEnvelope>;
 
 const DEFAULT_API_PORT = 7331;
 

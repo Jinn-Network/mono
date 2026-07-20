@@ -25,8 +25,10 @@
  * clusters of eligible evidence.
  */
 
-import { buildLayer2ScrubPipeline } from '../../../src/trajectory/scrub/layer2.js';
-import type { ScrubPipeline } from '../../../src/trajectory/scrub/pipeline.js';
+import {
+  buildLayer2ScrubPipeline,
+  type ScrubPipeline,
+} from '@jinn-network/core/scrub';
 import {
   assertConformantName,
   type SkillPackage,

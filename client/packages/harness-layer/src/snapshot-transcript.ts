@@ -12,7 +12,7 @@
  * tracks fixing that at solve time).
  *
  * `unwrapDonation` mirrors the module-private `decodeDonationArtifact`
- * (`client/src/corpus/acquire.ts`) and additionally verifies the decoded
+ * (`@jinn-network/core/corpus-read`) and additionally verifies the decoded
  * bytes hash to the declared sha256 (tamper check). The ustar reader mirrors
  * the writer: regular files only, names ≤100 chars, no PAX/GNU extensions —
  * a malformed header ends iteration rather than throwing. Decompression is

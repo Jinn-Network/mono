@@ -15,6 +15,8 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const clientRoot = join(__dirname, '..');
+const coreRoot = join(clientRoot, '..', 'packages', 'core');
+const pluginRoot = join(clientRoot, '..', 'packages', 'plugin');
 const smokeDir = mkdtempSync(join(tmpdir(), 'jinn-pack-smoke-'));
 const smokeEnv = { ...process.env, HOME: smokeDir, NO_COLOR: '1' };
 const installedPackageRoot = join(smokeDir, 'node_modules', '@jinn-network', 'client');
@@ -34,6 +36,44 @@ try {
 } catch {
   console.error('smoke-test-pack: npm pack did not return JSON');
   console.error(pack.stdout);
+  process.exit(1);
+}
+
+const corePack = spawnSync('npm', ['pack', '--json', '--pack-destination', smokeDir], {
+  cwd: coreRoot,
+  encoding: 'utf8',
+});
+if (corePack.status !== 0) {
+  console.error('smoke-test-pack: core npm pack failed');
+  console.error(corePack.stderr || corePack.stdout);
+  process.exit(corePack.status ?? 1);
+}
+let coreTarball;
+try {
+  const packed = JSON.parse(corePack.stdout)[0];
+  coreTarball = join(smokeDir, packed.filename);
+} catch {
+  console.error('smoke-test-pack: core npm pack did not return JSON');
+  console.error(corePack.stdout);
+  process.exit(1);
+}
+
+const pluginPack = spawnSync('npm', ['pack', '--json', '--pack-destination', smokeDir], {
+  cwd: pluginRoot,
+  encoding: 'utf8',
+});
+if (pluginPack.status !== 0) {
+  console.error('smoke-test-pack: plugin npm pack failed');
+  console.error(pluginPack.stderr || pluginPack.stdout);
+  process.exit(pluginPack.status ?? 1);
+}
+let pluginTarball;
+try {
+  const packed = JSON.parse(pluginPack.stdout)[0];
+  pluginTarball = join(smokeDir, packed.filename);
+} catch {
+  console.error('smoke-test-pack: plugin npm pack did not return JSON');
+  console.error(pluginPack.stdout);
   process.exit(1);
 }
 
@@ -108,7 +148,7 @@ try {
   });
   if (init.status !== 0) process.exit(init.status ?? 1);
 
-  const install = spawnSync('npm', ['install', tarball], {
+  const install = spawnSync('npm', ['install', pluginTarball, coreTarball, tarball], {
     cwd: smokeDir,
     stdio: 'inherit',
     encoding: 'utf8',

@@ -1,21 +1,19 @@
 import { describe, expect, test, vi, beforeEach } from 'vitest';
 
-// Force the Transformers.js detector's model load to fail, so we exercise the
-// fail-closed posture without downloading a real model.
 const initMock = vi.fn();
-vi.mock('../../../src/trajectory/scrub/transformers-detector.js', () => ({
-  DEFAULT_NER_MODEL: 'Xenova/bert-base-NER',
-  TransformersPiiDetector: class {
-    init() {
-      return initMock();
-    }
-    async detect() {
-      return [];
-    }
-  },
-}));
 
 import { maybeBuildPiiDetector } from '../../../src/trajectory/scrub/pii-build.js';
+
+const factory = {
+  create() {
+    return {
+      init: initMock,
+      async detect() {
+        return [];
+      },
+    };
+  },
+};
 
 describe('maybeBuildPiiDetector', () => {
   beforeEach(() => {
@@ -24,7 +22,9 @@ describe('maybeBuildPiiDetector', () => {
 
   test('returns undefined (no throw) when disabled, even if the model would fail', async () => {
     initMock.mockRejectedValue(new Error('model download failed'));
-    await expect(maybeBuildPiiDetector({ enabled: false }, () => {})).resolves.toBeUndefined();
+    await expect(
+      maybeBuildPiiDetector({ enabled: false }, () => {}, factory),
+    ).resolves.toBeUndefined();
     // disabled means the detector is never even constructed/loaded
     expect(initMock).not.toHaveBeenCalled();
   });
@@ -37,7 +37,11 @@ describe('maybeBuildPiiDetector', () => {
   test('does not throw at construction when enabled and the model fails to load (boot survives)', async () => {
     initMock.mockRejectedValue(new Error('model download failed'));
     const logs: string[] = [];
-    const detector = await maybeBuildPiiDetector({ enabled: true }, (m) => logs.push(m));
+    const detector = await maybeBuildPiiDetector(
+      { enabled: true },
+      (m) => logs.push(m),
+      factory,
+    );
     // construction resolved with a detector rather than throwing
     expect(detector).toBeDefined();
     // loud, visible boot warning naming the fail-closed posture
@@ -47,7 +51,11 @@ describe('maybeBuildPiiDetector', () => {
 
   test('returned fail-closed detector hard-throws on every scrub call (per-publish abort)', async () => {
     initMock.mockRejectedValue(new Error('model download failed'));
-    const detector = await maybeBuildPiiDetector({ enabled: true }, () => {});
+    const detector = await maybeBuildPiiDetector(
+      { enabled: true },
+      () => {},
+      factory,
+    );
     // each detect() call rejects with a clear, non-silent error
     await expect(detector!.detect('any text')).rejects.toThrow(/failing closed/i);
     await expect(detector!.detect('more text')).rejects.toThrow(/NOT published/);
@@ -55,7 +63,11 @@ describe('maybeBuildPiiDetector', () => {
 
   test('returns the real detector when enabled and the model loads', async () => {
     initMock.mockResolvedValue(undefined);
-    const detector = await maybeBuildPiiDetector({ enabled: true }, () => {});
+    const detector = await maybeBuildPiiDetector(
+      { enabled: true },
+      () => {},
+      factory,
+    );
     expect(detector).toBeDefined();
     expect(initMock).toHaveBeenCalledOnce();
   });

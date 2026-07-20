@@ -5,10 +5,9 @@ import { fileURLToPath } from 'node:url';
 import { SPECIFIER, tsFiles } from './import-scan.js';
 
 /**
- * Core forbidden-import boundary (#1833, spec §4.3.2). Core is a pure domain
- * package: stores + schemas. It MUST NOT reach for wallet/chain-write or MCP
- * surfaces. Any `viem`, wallet, `@modelcontextprotocol/sdk`, or chain-write
- * specifier in `core/src` is a boundary violation.
+ * Core forbidden-import boundary (#1833/#1836, spec §4.3.2). Core owns
+ * read-side domain mechanics, but MUST NOT reach for the client package,
+ * wallet/chain-write, or MCP surfaces.
  */
 const pkgRoot = fileURLToPath(new URL('../../', import.meta.url));
 const srcDir = join(pkgRoot, 'src');
@@ -16,7 +15,9 @@ const srcDir = join(pkgRoot, 'src');
 /** Bare/relative specifiers matching a forbidden package or surface. */
 const FORBIDDEN = [
   /^viem($|\/)/,
+  /^@jinn-network\/client($|\/)/,
   /^@modelcontextprotocol\/sdk($|\/)/,
+  /client\/src/,
   /wallet/i,
 ];
 
@@ -25,7 +26,7 @@ function posix(p: string): string {
 }
 
 describe('core forbidden imports (#1833)', () => {
-  it('no viem / wallet / MCP-sdk / chain-write import appears in core/src', () => {
+  it('has no client / viem / wallet / MCP-sdk / chain-write imports', () => {
     const offenders: string[] = [];
     for (const file of tsFiles(srcDir)) {
       const source = readFileSync(file, 'utf-8');

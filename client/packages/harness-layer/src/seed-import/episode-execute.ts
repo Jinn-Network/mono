@@ -14,14 +14,14 @@
  */
 
 import { capture, type CapturedTask } from '../capture.js';
-import { buildSeedScrubPipeline } from '../../../../src/trajectory/scrub/build.js';
+import { buildSeedScrubPipeline } from '@jinn-network/core/scrub';
 import {
   publish,
   PublishLedgerError,
   type HarnessPublishDeps,
   type PublishResult,
 } from '../publish.js';
-import type { Attributes } from '../../../../src/trajectory/scrub/types.js';
+import type { Attributes } from '@jinn-network/core/scrub';
 import { episodeContentDigest, type EpisodeSource, type SeedEpisode } from './episode-fetch.js';
 import type { EpisodeImportReport } from './episode-report.js';
 import {
