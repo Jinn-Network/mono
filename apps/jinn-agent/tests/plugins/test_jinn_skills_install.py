@@ -19,6 +19,7 @@ command surface.
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import importlib
 import json
@@ -87,6 +88,47 @@ def _artifact(artifact_type, payload, *, sha256=None):
     }
 
 
+def _valid_episode():
+    return {
+        "schemaVersion": "jinn.episode.v1",
+        "episodeId": "episode:canonical",
+        "retrievalVisible": True,
+        "session": {
+            "sessionId": "session:canonical",
+            "capturedAt": "2026-07-20T00:00:00.000Z",
+            "kind": "user",
+        },
+        "origin": {"writer": "jinn-agent", "build": "0.18.0"},
+        "task": {
+            "summary": "canonical",
+            "distributionTags": ["canonical"],
+        },
+        "trajectory": [{
+            "spanId": "canonical-step",
+            "parentSpanId": None,
+            "kind": "jinn.tool_call",
+            "name": "seed:skill-md",
+            "startTimeUnixNano": "1000000000",
+            "endTimeUnixNano": "1000000000",
+            "attributes": {"skill.md": "# canonical"},
+            "redactedKeys": [],
+        }],
+        "environment": {
+            "harness": {"name": "hermes-agent", "version": "0.1.0"},
+            "model": "test-model",
+            "tools": [],
+            "skillsLoadout": [],
+        },
+        "outcome": {
+            "status": "completed",
+            "verificationStrength": "tests-passed",
+        },
+        "cost": {"durationMs": 0},
+        "retention": {"policy": "contribution-eligible"},
+        "provenance": "imported",
+    }
+
+
 def test_extract_trace_prefers_hash_verified_episode_and_projects_legacy_read_shape():
     legacy = {
         "schemaVersion": "jinn.trace-envelope.v0",
@@ -94,12 +136,7 @@ def test_extract_trace_prefers_hash_verified_episode_and_projects_legacy_read_sh
         "steps": [],
         "outcome": {"status": "completed", "verifiabilityTier": "user-accepted"},
     }
-    episode = {
-        "schemaVersion": "jinn.episode.v1",
-        "task": {"summary": "canonical", "distributionTags": ["canonical"]},
-        "trajectory": [{"spanId": "canonical-step", "attributes": {"skill.md": "# canonical"}}],
-        "outcome": {"status": "completed", "verificationStrength": "tests-passed"},
-    }
+    episode = _valid_episode()
 
     projected, digest = skills_install._extract_trace({
         "artifacts": [
@@ -121,18 +158,77 @@ def test_extract_trace_does_not_fall_back_when_preferred_episode_hash_mismatches
         "steps": [],
         "outcome": {"status": "completed", "verifiabilityTier": "user-accepted"},
     }
-    episode = {
-        "schemaVersion": "jinn.episode.v1",
-        "task": {"summary": "canonical", "distributionTags": ["canonical"]},
-        "trajectory": [],
-        "outcome": {"status": "completed", "verificationStrength": "tests-passed"},
-    }
+    episode = _valid_episode()
 
     with pytest.raises(ValueError, match="sha256 mismatch"):
         skills_install._extract_trace({
             "artifacts": [
                 _artifact("jinn.trace-envelope.v0", legacy),
                 _artifact("jinn.episode.v1", episode, sha256="0" * 64),
+            ],
+        })
+
+
+def test_extract_trace_accepts_episode_reader_defaults_and_legacy_outcome_axis():
+    episode = copy.deepcopy(_valid_episode())
+    episode["session"].pop("kind")
+    episode.pop("origin")
+    episode["task"].pop("distributionTags")
+    episode["trajectory"][0].pop("redactedKeys")
+    episode["outcome"]["verifiabilityTier"] = (
+        episode["outcome"].pop("verificationStrength")
+    )
+    episode.pop("provenance")
+    episode["futureTopLevelField"] = {"preserved": True}
+    episode["trajectory"][0]["futureStepField"] = "preserved"
+
+    projected, _digest = skills_install._extract_trace({
+        "artifacts": [_artifact("jinn.episode.v1", episode)],
+    })
+
+    assert projected["outcome"]["verifiabilityTier"] == "tests-passed"
+    assert projected["futureTopLevelField"] == {"preserved": True}
+    assert projected["steps"][0]["futureStepField"] == "preserved"
+
+
+@pytest.mark.parametrize(
+    ("field_path", "mutate"),
+    [
+        ("environment", lambda episode: episode.pop("environment")),
+        ("trajectory", lambda episode: episode.update({"trajectory": []})),
+        (
+            "trajectory[0].attributes",
+            lambda episode: episode["trajectory"][0].update({"attributes": []}),
+        ),
+        (
+            "trajectory[0].parentSpanId",
+            lambda episode: episode["trajectory"][0].pop("parentSpanId"),
+        ),
+        (
+            "outcome.verificationStrength",
+            lambda episode: episode["outcome"].update(
+                {"verificationStrength": "strong"}
+            ),
+        ),
+    ],
+)
+def test_extract_trace_rejects_malformed_preferred_episode_without_legacy_fallback(
+    field_path, mutate
+):
+    legacy = {
+        "schemaVersion": "jinn.trace-envelope.v0",
+        "task": {"summary": "legacy", "distributionTags": ["legacy"]},
+        "steps": [],
+        "outcome": {"status": "completed", "verifiabilityTier": "user-accepted"},
+    }
+    episode = copy.deepcopy(_valid_episode())
+    mutate(episode)
+
+    with pytest.raises(ValueError, match=field_path.replace("[", r"\[")):
+        skills_install._extract_trace({
+            "artifacts": [
+                _artifact("jinn.trace-envelope.v0", legacy),
+                _artifact("jinn.episode.v1", episode),
             ],
         })
 

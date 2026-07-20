@@ -36,6 +36,8 @@ EPISODE_ARTIFACT_TYPE = "jinn.episode.v1"
 MARKER_FILE = ".jinn-ref"
 
 _SLUG_RE = re.compile(r"[^a-zA-Z0-9._-]+")
+_UNIX_NANO_RE = re.compile(r"^\d+$")
+_USD_ESTIMATE_RE = re.compile(r"^\d+(\.\d+)?$")
 
 
 def skills_dir() -> Path:
@@ -55,6 +57,174 @@ def _sanitise_slug(raw: str) -> str:
 # longer gate any install write (install() defers to the layer). Fully removing
 # them needs an interpreted `jinn-layer corpus get` projection — a harness-layer
 # follow-up, tracked separately.
+def _episode_error(path: str, expected: str) -> None:
+    raise ValueError(f"jinn.episode.v1 field {path} must be {expected}")
+
+
+def _episode_object(value: Any, path: str) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        _episode_error(path, "an object")
+    return value
+
+
+def _episode_string(value: Any, path: str) -> str:
+    if not isinstance(value, str) or not value:
+        _episode_error(path, "a nonempty string")
+    return value
+
+
+def _episode_enum(value: Any, path: str, choices: Tuple[str, ...]) -> None:
+    if value not in choices:
+        _episode_error(path, f"one of {', '.join(choices)}")
+
+
+def _episode_string_list(value: Any, path: str) -> None:
+    if not isinstance(value, list):
+        _episode_error(path, "an array of nonempty strings")
+    for index, item in enumerate(value):
+        _episode_string(item, f"{path}[{index}]")
+
+
+def _episode_nonnegative_int(value: Any, path: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        _episode_error(path, "a nonnegative integer")
+
+
+def _episode_verification_strength(outcome: Dict[str, Any]) -> str:
+    canonical = outcome.get("verificationStrength")
+    if "verifiabilityTier" in outcome:
+        legacy = outcome["verifiabilityTier"]
+        if canonical is not None and canonical != legacy:
+            _episode_error(
+                "outcome.verificationStrength",
+                "equal to outcome.verifiabilityTier when both are present",
+            )
+        canonical = legacy
+    _episode_enum(
+        canonical,
+        "outcome.verificationStrength",
+        ("user-accepted", "tests-passed", "evaluator-verified"),
+    )
+    return str(canonical)
+
+
+def _validate_episode(parsed: Dict[str, Any]) -> None:
+    """Validate the dependency-light canonical shape this read path projects."""
+    _episode_string(parsed.get("episodeId"), "episodeId")
+    if "retrievalVisible" in parsed and not isinstance(
+        parsed["retrievalVisible"], bool
+    ):
+        _episode_error("retrievalVisible", "a boolean")
+
+    session = _episode_object(parsed.get("session"), "session")
+    _episode_string(session.get("sessionId"), "session.sessionId")
+    _episode_string(session.get("capturedAt"), "session.capturedAt")
+    _episode_enum(
+        session.get("kind", "user"),
+        "session.kind",
+        ("user", "host-internal"),
+    )
+    if session.get("parentSessionId") is not None:
+        _episode_string(session["parentSessionId"], "session.parentSessionId")
+
+    origin = parsed.get("origin", "legacy-unstamped")
+    if origin != "legacy-unstamped":
+        origin_obj = _episode_object(origin, "origin")
+        _episode_string(origin_obj.get("writer"), "origin.writer")
+        _episode_string(origin_obj.get("build"), "origin.build")
+
+    task = _episode_object(parsed.get("task"), "task")
+    _episode_string(task.get("summary"), "task.summary")
+    _episode_string_list(
+        task.get("distributionTags", []), "task.distributionTags"
+    )
+    for key in ("repositorySlug", "baseCommit", "instanceId"):
+        if task.get(key) is not None:
+            _episode_string(task[key], f"task.{key}")
+    if task.get("createdAt") is not None:
+        _episode_nonnegative_int(task["createdAt"], "task.createdAt")
+
+    trajectory = parsed.get("trajectory")
+    if not isinstance(trajectory, list) or not trajectory:
+        _episode_error("trajectory", "a nonempty array")
+    for index, raw_step in enumerate(trajectory):
+        path = f"trajectory[{index}]"
+        step = _episode_object(raw_step, path)
+        _episode_string(step.get("spanId"), f"{path}.spanId")
+        if "parentSpanId" not in step:
+            _episode_error(f"{path}.parentSpanId", "a nonempty string or null")
+        parent_span_id = step.get("parentSpanId")
+        if parent_span_id is not None:
+            _episode_string(parent_span_id, f"{path}.parentSpanId")
+        _episode_enum(
+            step.get("kind"),
+            f"{path}.kind",
+            ("jinn.agent_turn", "jinn.tool_call"),
+        )
+        _episode_string(step.get("name"), f"{path}.name")
+        for key in ("startTimeUnixNano", "endTimeUnixNano"):
+            timing = _episode_string(step.get(key), f"{path}.{key}")
+            if not _UNIX_NANO_RE.fullmatch(timing):
+                _episode_error(f"{path}.{key}", "a unix-nanosecond digit string")
+        _episode_object(step.get("attributes"), f"{path}.attributes")
+        _episode_string_list(
+            step.get("redactedKeys", []), f"{path}.redactedKeys"
+        )
+        if step.get("truncatedKeys") is not None:
+            _episode_string_list(step["truncatedKeys"], f"{path}.truncatedKeys")
+
+    environment = _episode_object(parsed.get("environment"), "environment")
+    harness = _episode_object(environment.get("harness"), "environment.harness")
+    _episode_string(harness.get("name"), "environment.harness.name")
+    _episode_string(harness.get("version"), "environment.harness.version")
+    _episode_string(environment.get("model"), "environment.model")
+    _episode_string_list(environment.get("tools"), "environment.tools")
+    _episode_string_list(
+        environment.get("skillsLoadout"), "environment.skillsLoadout"
+    )
+
+    outcome = _episode_object(parsed.get("outcome"), "outcome")
+    _episode_enum(
+        outcome.get("status"),
+        "outcome.status",
+        ("completed", "failed", "abandoned"),
+    )
+    _episode_verification_strength(outcome)
+    if outcome.get("summary") is not None:
+        _episode_string(outcome["summary"], "outcome.summary")
+    if outcome.get("acceptedDiff") is not None and not isinstance(
+        outcome["acceptedDiff"], bool
+    ):
+        _episode_error("outcome.acceptedDiff", "a boolean")
+    if outcome.get("testRuns") is not None:
+        test_runs = _episode_object(outcome["testRuns"], "outcome.testRuns")
+        _episode_nonnegative_int(test_runs.get("passed"), "outcome.testRuns.passed")
+        _episode_nonnegative_int(test_runs.get("failed"), "outcome.testRuns.failed")
+
+    cost = _episode_object(parsed.get("cost"), "cost")
+    _episode_nonnegative_int(cost.get("durationMs"), "cost.durationMs")
+    if cost.get("tokens") is not None:
+        tokens = _episode_object(cost["tokens"], "cost.tokens")
+        _episode_nonnegative_int(tokens.get("input"), "cost.tokens.input")
+        _episode_nonnegative_int(tokens.get("output"), "cost.tokens.output")
+    if cost.get("usdEstimate") is not None:
+        estimate = _episode_string(cost["usdEstimate"], "cost.usdEstimate")
+        if not _USD_ESTIMATE_RE.fullmatch(estimate):
+            _episode_error("cost.usdEstimate", "a nonnegative decimal string")
+
+    retention = _episode_object(parsed.get("retention"), "retention")
+    _episode_enum(
+        retention.get("policy"),
+        "retention.policy",
+        ("local-private", "contribution-eligible"),
+    )
+    _episode_enum(
+        parsed.get("provenance", "contributed"),
+        "provenance",
+        ("contributed", "imported"),
+    )
+
+
 def _extract_trace(record: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:
     """Return (legacy-compatible evidence projection, verified sha256).
 
@@ -102,11 +272,12 @@ def _extract_trace(record: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:
     if artifact_type == TRACE_ENVELOPE_ARTIFACT_TYPE:
         return parsed, expected
 
+    _validate_episode(parsed)
     trajectory = parsed.get("trajectory")
     outcome = parsed.get("outcome")
     projected_outcome = dict(outcome) if isinstance(outcome, dict) else {}
-    projected_outcome["verifiabilityTier"] = projected_outcome.get(
-        "verificationStrength"
+    projected_outcome["verifiabilityTier"] = _episode_verification_strength(
+        projected_outcome
     )
     return {
         **parsed,

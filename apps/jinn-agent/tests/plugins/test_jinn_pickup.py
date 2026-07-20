@@ -399,22 +399,43 @@ def test_corpus_fetch_tool_reads_canonical_episode_content(tmp_path):
     ref = "bafyCanonicalEpisode"
     episode = {
         "schemaVersion": "jinn.episode.v1",
+        "episodeId": "episode:canonical",
+        "retrievalVisible": True,
+        "session": {
+            "sessionId": "session:canonical",
+            "capturedAt": "2026-07-20T00:00:00.000Z",
+            "kind": "user",
+        },
+        "origin": {"writer": "jinn-agent", "build": "0.18.0"},
         "task": {
             "summary": "Seed import: acme/skills/tdd",
             "distributionTags": ["seed-import", "tdd"],
         },
         "trajectory": [{
             "spanId": "s1",
+            "parentSpanId": None,
+            "kind": "jinn.tool_call",
             "name": "seed:skill-md",
+            "startTimeUnixNano": "1000000000",
+            "endTimeUnixNano": "1000000000",
             "attributes": {
                 "skill.md": "# canonical tdd\n\nRed, green, project.",
                 "seed.attribution": {"skill": "acme/skills/tdd"},
             },
+            "redactedKeys": [],
         }],
+        "environment": {
+            "harness": {"name": "hermes-agent", "version": "0.1.0"},
+            "model": "test-model",
+            "tools": [],
+            "skillsLoadout": [],
+        },
         "outcome": {
             "status": "completed",
             "verificationStrength": "tests-passed",
         },
+        "cost": {"durationMs": 0},
+        "retention": {"policy": "contribution-eligible"},
         "provenance": "imported",
     }
     content = json.dumps(episode).encode("utf-8")

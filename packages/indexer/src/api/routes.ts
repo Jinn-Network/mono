@@ -286,6 +286,12 @@ export interface CaptureEnvelopeMetaRow {
   taskSummary: string;
   /** JSON.stringify(task.distributionTags) — first tag is the primary (v0 cluster key). */
   tagsJson: string;
+  /** task.repositorySlug — named capture metadata. Optional for legacy rows. */
+  repositorySlug?: string;
+  /** Authored outcome/seed synthesis. Optional for legacy rows. */
+  synthesis?: string;
+  /** Canonical W2 allowlist decision. Optional for legacy rows. */
+  retrievalVisible?: boolean;
   provenance: string;
   verifiabilityTier: string;
   /** environment.harness "<name> <version>" — corpus detail (#1406). Optional for back-compat. */
@@ -401,6 +407,9 @@ export interface CaptureMetaSearchHit {
   taskSummary: string;
   /** Parsed distribution tags ([] when tagsJson is malformed). */
   tags: string[];
+  repositorySlug?: string;
+  synthesis?: string;
+  retrievalVisible?: boolean;
   provenance: string;
   verifiabilityTier: string;
 }
@@ -439,6 +448,13 @@ export function searchCaptureMeta(
       contributor: meta.contributor,
       taskSummary: meta.taskSummary,
       tags,
+      ...(meta.repositorySlug !== undefined
+        ? { repositorySlug: meta.repositorySlug }
+        : {}),
+      ...(meta.synthesis !== undefined ? { synthesis: meta.synthesis } : {}),
+      ...(meta.retrievalVisible !== undefined
+        ? { retrievalVisible: meta.retrievalVisible }
+        : {}),
       provenance: meta.provenance,
       verifiabilityTier: meta.verifiabilityTier,
     });

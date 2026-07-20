@@ -404,6 +404,15 @@ describe('parseTraceEnvelopeSignalLite', () => {
     ).toBe(true);
   });
 
+  it('keeps an explicit canonical false authoritative over a stale legacy tag', () => {
+    expect(
+      parseTraceEnvelopeSignalLite(
+        episode({ retrievalVisible: false }),
+        'jinn.episode.v1',
+      )?.retrievalVisible,
+    ).toBe(false);
+  });
+
   it('falls back to the seeded synthesis trajectory attribute', () => {
     const lite = parseTraceEnvelopeSignalLite(
       episode({

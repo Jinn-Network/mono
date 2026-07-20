@@ -49,11 +49,9 @@ function isLayerDeps(deps: CorpusAdapterDeps | HarnessLayerConfig): deps is Corp
 function toKnowledgeHit(hit: CorpusSearchHit): KnowledgeHit {
   const origin = hit.operator.agentId || hit.ref;
   const tags = hit.tags ?? [];
-  // #1824: compute the ranking-visible fact from the wire tags, then strip
-  // the mark tag so it never enters the scoring haystack (haystackFor scores
-  // tags — an unstripped mark would inflate scores via substring matches) or
-  // the rendered packet.
-  const retrievalVisible = hasRetrievalMark(tags);
+  // Named indexed metadata is authoritative when present. The legacy mark is
+  // only a fallback for rows indexed before that field existed.
+  const retrievalVisible = hit.retrievalVisible ?? hasRetrievalMark(tags);
   return {
     ref: hit.ref,
     kind: hit.kind === 'skill' ? 'skill' : 'trace',
@@ -112,7 +110,7 @@ function detectSkillPayload(record: WireCorpusRecord, steps: readonly EvidenceSt
 
 interface DecodedEvidencePayload {
   task: { summary: string; distributionTags: string[]; repositorySlug?: string };
-  retrievalVisible: boolean;
+  retrievalVisible?: boolean;
   outcome: {
     status: 'completed' | 'failed' | 'abandoned';
     verificationStrength: 'user-accepted' | 'tests-passed' | 'evaluator-verified';
@@ -129,10 +127,16 @@ function decodeEvidencePayload(
 ): DecodedEvidencePayload {
   const body: unknown = JSON.parse(content.toString('utf-8'));
   if (artifactType === EPISODE_ARTIFACT_TYPE) {
+    const declaresRetrievalVisible =
+      body !== null
+      && typeof body === 'object'
+      && Object.prototype.hasOwnProperty.call(body, 'retrievalVisible');
     const episode = EpisodeV1Schema.parse(body);
     return {
       task: episode.task,
-      retrievalVisible: episode.retrievalVisible,
+      ...(declaresRetrievalVisible
+        ? { retrievalVisible: episode.retrievalVisible }
+        : {}),
       outcome: episode.outcome,
       steps: episode.trajectory,
       provenance: episode.provenance,
@@ -195,11 +199,11 @@ function decodeRecord(record: WireCorpusRecord): CorpusRecord | null {
     isSkillPayload = false;
   }
 
-  // #1824: computed from the envelope's own distributionTags — content is
-  // the truth, the search hit's retrievalVisible is only a hint. Always a
-  // defined boolean here, unlike the optional isSkillPayload/synthesis.
+  // Content remains the guard: a named canonical boolean is authoritative
+  // when the raw body declared it, and only legacy absence falls back to the
+  // compatibility mark.
   const retrievalVisible =
-    evidence.retrievalVisible || hasRetrievalMark(evidence.task.distributionTags);
+    evidence.retrievalVisible ?? hasRetrievalMark(evidence.task.distributionTags);
 
   return {
     ref: record.ref,
