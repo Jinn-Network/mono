@@ -37,9 +37,12 @@ export function gitRefName(value: string): GitRefName {
   return value as GitRefName;
 }
 
+const ISO_TIMESTAMP_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+
 export function isoTimestamp(value: string): IsoTimestamp {
   const time = Date.parse(value);
-  if (!Number.isFinite(time) || new Date(time).toISOString() !== value) {
+  if (!ISO_TIMESTAMP_PATTERN.test(value) || !Number.isFinite(time)) {
     throw new Error(`Invalid timestamp: ${value}`);
   }
   return value as IsoTimestamp;

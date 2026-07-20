@@ -587,7 +587,7 @@ describe('lifecycle controller', () => {
     };
 
     for (const headCommittedAt of [
-      '2026-07-20T11:00:00Z',
+      '2026-07-20 11:00:00',
       '2026-07-20T12:00:00.001Z',
     ]) {
       const calls: string[] = [];

@@ -72,7 +72,7 @@ describe('deriveLifecycle', () => {
 
   it('fails closed on a non-canonical branch progress timestamp', () => {
     const [view] = deriveLifecycle(snapshot(implementation({
-      headChangedAt: '2026-07-20T08:00:00Z',
+      headChangedAt: '2026-07-20 08:00:00',
     })), NOW, STALE_AFTER).items;
 
     expect(view).toMatchObject({
@@ -374,7 +374,7 @@ describe('deriveLifecycle', () => {
           head: HEAD_A,
           state: 'APPROVE',
           marker: '44444444-4444-4444-8444-444444444444',
-          recordedAt: '2026-07-20T11:30:00Z',
+          recordedAt: '2026-07-20 11:30:00',
         },
       },
     ), NOW, STALE_AFTER);
@@ -728,7 +728,7 @@ describe('planCycle', () => {
         phase: 'merge-prep',
         prNumber: 101,
       },
-      headChangedAt: '2026-07-20T08:00:00Z',
+      headChangedAt: '2026-07-20 08:00:00',
       approved: true,
       needsReview: false,
       mergeState: 'conflict',

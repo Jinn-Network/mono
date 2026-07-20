@@ -14,7 +14,7 @@ import {
   type ReviewClaimRecord,
 } from './types.js';
 
-function timestampMs(value: string): number | null {
+export function timestampMs(value: string): number | null {
   try {
     isoTimestamp(value);
     return new Date(value).getTime();
