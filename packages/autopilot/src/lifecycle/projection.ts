@@ -131,6 +131,14 @@ function activeMutation(view: LifecycleViewItem): boolean {
     return true;
   }
   const item = view.item;
+  if (
+    item.kind === 'pull-request'
+    && item.isDraft
+    && item.reviewClaim?.head === item.head
+    && item.reviewClaim.state === 'stale'
+  ) {
+    return true;
+  }
   return item.kind === 'pull-request'
     && item.reviewClaim?.state === 'verdict-intent'
     && item.reviewClaim.verdict.state === 'REQUEST_CHANGES';
@@ -300,7 +308,11 @@ function planItem(
   }
 
   if (view.phase === 'human' || !item.v2Marked) return actions;
-  if (view.stale && view.phase === 'implementing') {
+  if (
+    view.stale
+    && view.phase === 'implementing'
+    && item.projectStatus !== 'Todo'
+  ) {
     actions.push({
       kind: 'requeue-implementation',
       issueNumber: item.issueNumber,
@@ -401,7 +413,7 @@ export function planProjection(
       headRefName: claim.headRefName,
       baseRefName: claim.baseRefName,
     });
-    if (claim.stale) {
+    if (claim.stale && claim.projectStatus !== 'Todo') {
       actions.push({
         kind: 'requeue-implementation',
         issueNumber: claim.issueNumber,

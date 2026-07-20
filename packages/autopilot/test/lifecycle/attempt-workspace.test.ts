@@ -22,6 +22,7 @@ import {
   countRunnerLiveAttempts,
   createAttemptWorkspace,
   defaultRunnerId,
+  listRunnerLiveAttempts,
   markAttemptExited,
   markAttemptRunning,
   readAttemptManifest,
@@ -509,6 +510,11 @@ describe('attempt workspace and manifest', () => {
       one.runnerId,
       (pid) => pid === 100 || pid === 200,
     )).toBe(2);
+    expect(listRunnerLiveAttempts(
+      join(fixture.base, 'v2'),
+      one.runnerId,
+      (pid) => pid === 100 || pid === 200,
+    ).map((attempt) => attempt.attemptId).sort()).toEqual([UUID_A, UUID_C]);
   });
 });
 

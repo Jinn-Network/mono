@@ -141,6 +141,20 @@ describe('credential pool', () => {
     expect(JSON.stringify(selected)).not.toContain('never-serialize-me');
   });
 
+  it('restricts action selection to locally free identity lanes', async () => {
+    const pool = await resolveCredentialPool({
+      JINN_IMPL_GH_TOKEN: 'i',
+      JINN_REVIEW_GH_TOKEN: 'r',
+    }, loginRunner({ i: 'impl', r: 'review' }));
+
+    const free = pool.restrictedTo(['review']);
+    expect(free.logins()).toEqual(['review']);
+    expect(selectCredential(free, { phase: 'implement' })).toMatchObject({
+      status: 'selected',
+      login: 'review',
+    });
+  });
+
   it('redacts credential-resolution failures that contain a secret', async () => {
     const secret = 'resolution-secret';
     const runner: CommandRunner = async () => {

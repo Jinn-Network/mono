@@ -121,7 +121,7 @@ describe('session CLI grammar', () => {
     },
     {
       argv: ['merge-prep-complete', '--summary-file', '/summary'],
-      manifest: { ...MANIFEST, phase: 'merge-prep' as const, reviewGeneration: undefined, reviewRefOid: undefined, reviewApprovalPolicy: undefined },
+      manifest: { ...MANIFEST, phase: 'merge-prep' as const, targetBaseOid: 'e'.repeat(40), reviewGeneration: undefined, reviewRefOid: undefined, reviewApprovalPolicy: undefined },
       expected: { operation: 'merge-prep-complete', payload: 'summary text\n' },
     },
     {
@@ -251,13 +251,15 @@ describe('bounded UTF-8 session input', () => {
 });
 
 describe('production session protocol', () => {
-  it('delegates implementation and review handlers while keeping later phases unwired', async () => {
+  it('delegates implementation, review, and merge-prep handlers', async () => {
     const implementation = protocol();
     const review = protocol();
+    const mergePrep = protocol();
     const production = makeProductionSessionProtocol(
       {},
       () => implementation,
       () => review,
+      () => mergePrep,
     );
     const implementationManifest = {
       ...MANIFEST,
@@ -285,8 +287,20 @@ describe('production session protocol', () => {
       { operation: 'review-fix-publish' },
       { operation: 'human', payload: 'review reason' },
     ]);
-    await expect(production.mergePrepComplete(MANIFEST, 'summary'))
-      .rejects.toThrow(/operation not wired/i);
+    const mergeManifest = {
+      ...MANIFEST,
+      phase: 'merge-prep' as const,
+      targetBaseOid: 'e'.repeat(40),
+      reviewGeneration: undefined,
+      reviewRefOid: undefined,
+      reviewApprovalPolicy: undefined,
+    };
+    await production.mergePrepComplete(mergeManifest, 'summary');
+    await production.human(mergeManifest, 'merge reason');
+    expect(mergePrep.calls).toEqual([
+      { operation: 'merge-prep-complete', payload: 'summary' },
+      { operation: 'human', payload: 'merge reason' },
+    ]);
   });
 
 });

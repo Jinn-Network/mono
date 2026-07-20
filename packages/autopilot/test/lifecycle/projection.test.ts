@@ -179,7 +179,14 @@ describe('planProjection', () => {
   });
 
   it('requeues only stale v2 implementation and exposes stale merge-prep without a write', () => {
-    const staleImplementation = item({ headChangedAt: '2026-07-20T08:00:00.000Z' });
+    const staleImplementation = item({
+      headChangedAt: '2026-07-20T08:00:00.000Z',
+      projectStatus: 'In Progress',
+    });
+    const reapedImplementation = item({
+      headChangedAt: '2026-07-20T08:00:00.000Z',
+      projectStatus: 'Todo',
+    });
     const stalePrep = item({
       headChangedAt: '2026-07-20T08:00:00.000Z',
       branchClaim: {
@@ -194,6 +201,9 @@ describe('planProjection', () => {
       issueNumber: 42,
       expectedHead: HEAD,
     });
+    expect(planProjection(context(reapedImplementation)).actions).not.toContainEqual(
+      expect.objectContaining({ kind: 'requeue-implementation' }),
+    );
     expect(planProjection(context(stalePrep)).actions).toContainEqual({
       kind: 'expose-merge-prep',
       prNumber: 101,
@@ -223,6 +233,28 @@ describe('planProjection', () => {
       prNumber: 101,
       expectedHead: HEAD,
       expectedReviewRefOid: REVIEW_OID,
+    });
+
+    const releasedFixLoop = item({
+      branchClaim: undefined,
+      isDraft: true,
+      reviewClaim: {
+        kind: 'review-claim',
+        protocolVersion: 2,
+        prNumber: 101,
+        generation: '22222222-2222-4222-8222-222222222222',
+        attempt: '33333333-3333-4333-8333-333333333333',
+        reviewer: 'reviewer',
+        head: HEAD,
+        state: 'stale',
+        recordedAt: '2026-07-20T08:00:00.000Z',
+      },
+    });
+    expect(planProjection(context(releasedFixLoop, REVIEW_OID)).actions).not.toContainEqual({
+      kind: 'set-pr-draft',
+      prNumber: 101,
+      expectedHead: HEAD,
+      draft: false,
     });
 
     const intent = item({

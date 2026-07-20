@@ -141,6 +141,20 @@ function harness(overrides: Partial<ReviewExecutorDeps> = {}) {
 }
 
 describe('review action executor', () => {
+  it('fails closed when the scheduled exact head changes before acquisition', async () => {
+    const { deps, events } = harness();
+
+    await expect(executeReviewAction({
+      prNumber: 84,
+      expectedHead: gitOid('9'.repeat(40)),
+      recoverFixes: false,
+    }, deps)).resolves.toMatchObject({
+      status: 'ineligible',
+      detail: 'Pull request head changed after scheduling.',
+    });
+    expect(events).toEqual([]);
+  });
+
   it('elects exactly one absent-ref contender and starts only the exact read-back winner', async () => {
     const h = harness();
     let current: GitOid | null = null;
