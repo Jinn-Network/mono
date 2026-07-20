@@ -46,6 +46,16 @@ import {
   hasRetrievalMark,
   type EpisodeV1Write,
 } from '@jinn-network/plugin';
+import {
+  buildManifestMetadataKey,
+  encodeManifestPayload,
+  hashLeaf,
+  MANIFEST_SCHEMA_VERSION,
+  merkleRoot,
+  parseManifestV0,
+  type ManifestV0,
+  type ManifestPayload,
+} from '@jinn-network/core';
 import { PENDING_ENVELOPE_KIND, type PendingEnvelope } from './capture.js';
 import { parseTraceEnvelopeV0, type TraceEnvelopeV0 } from './envelope.js';
 import type { LedgerStore } from './ledger.js';
@@ -78,6 +88,61 @@ export interface HarnessPublishDeps {
   /** Access endpoint recorded on the artifact when the blob has none. */
   defaultArtifactEndpoint?: string;
   now?: () => Date;
+}
+
+export interface ManifestAnchorResult {
+  txHash: `0x${string}`;
+  blockNumber: number | null;
+  gasUsed: bigint | null;
+  feeWei: bigint | null;
+}
+
+export interface ManifestAnchorRecord {
+  manifestCid: string;
+  contentKind: 'manifest';
+  metadataKey: string;
+  payloadHex: `0x${string}`;
+  txHash: `0x${string}`;
+  blockNumber: number | null;
+  gasUsed: bigint | null;
+  feeWei: bigint | null;
+  anchoredAt: number;
+}
+
+export interface ManifestBatchPublishDeps extends HarnessPublishDeps {
+  publishManifestBody(body: ManifestV0): Promise<CapturePublishedBlob>;
+  anchorManifest(input: {
+    manifestCid: string;
+    payload: ManifestPayload;
+  }): Promise<ManifestAnchorResult>;
+  recordManifestAnchor(input: ManifestAnchorRecord): void;
+  log?: (line: string) => void;
+}
+
+export interface ManifestBatchMemberInput {
+  pending: PendingEnvelope;
+  polarity?: 'pass' | 'fail';
+  instanceId?: string;
+}
+
+export interface ManifestBatchOptions {
+  batchKind: string;
+}
+
+export interface PublishedMemberEnvelope {
+  envelopeRef: string;
+  sha256: string;
+  envelope: SignedEnvelope;
+  episode: EpisodeV1Write;
+}
+
+export interface ManifestBatchResult {
+  manifestCid: string;
+  anchorTx: `0x${string}`;
+  memberRefs: string[];
+  root: `0x${string}`;
+  gasUsed: bigint | null;
+  feeWei: bigint | null;
 }
 
 export interface PublishOptions {
@@ -115,6 +180,22 @@ export class PublishLedgerError extends Error {
     super(
       `anchored ${result.envelopeRef}${result.anchorTx ? ` at ${result.anchorTx}` : ''}, ` +
         `but local ledger append failed: ${detail}`,
+    );
+  }
+}
+
+export class ManifestBatchRecordingError extends Error {
+  override readonly name = 'ManifestBatchRecordingError';
+
+  constructor(
+    readonly result: ManifestBatchResult,
+    readonly recordingError: unknown,
+  ) {
+    const detail =
+      recordingError instanceof Error ? recordingError.message : String(recordingError);
+    super(
+      `manifest ${result.manifestCid} anchored at ${result.anchorTx}, ` +
+        `but local recording failed: ${detail}`,
     );
   }
 }
@@ -263,30 +344,17 @@ async function publishAsArtifact(
 }
 
 /**
- * Publish a pending envelope: consent conversion → artifact upload → signed
- * wrapper envelope → ERC-8004 anchor → ledger entry. Returns the corpus ref
- * (the wrapper envelope's CID) and the anchor tx.
+ * Consent, upload, and sign one pending member without anchoring or writing the
+ * contribution ledger. Both the per-record and manifest paths share this exact
+ * byte-producing step so batch mode cannot drift into a second envelope format.
  */
-export async function publish(
+export async function publishMemberEnvelope(
   pending: PendingEnvelope,
   deps: HarnessPublishDeps,
-  opts: PublishOptions = {},
-): Promise<PublishResult> {
+  opts: Pick<PublishOptions, 'skill'> & { now?: Date } = {},
+): Promise<PublishedMemberEnvelope> {
   assertPending(pending);
-  const now = deps.now?.() ?? new Date();
-
-  if (opts.veto) {
-    deps.ledger.append({
-      ts: now.toISOString(),
-      taskSummary: pending.draft.task.summary,
-      envelopeRef: null,
-      anchorTx: null,
-      verifiabilityTier: pending.draft.outcome.verifiabilityTier,
-      status: 'vetoed (local only)',
-    });
-    return { vetoed: true };
-  }
-
+  const now = opts.now ?? deps.now?.() ?? new Date();
   const episode = toPublishedEpisode(pending);
   const skill = opts.skill === undefined ? undefined : SkillArtifactV1Schema.parse(opts.skill);
 
@@ -321,6 +389,40 @@ export async function publish(
 
   const envelopeBlob = await deps.publishEnvelope(envelope);
   const envelopeRef = envelopeBlob.cid;
+  const sha256 = envelopeBlob.sha256 ?? sha256Hex(canonicalJson(envelope));
+  return { envelopeRef, sha256, envelope, episode };
+}
+
+/**
+ * Publish a pending envelope: consent conversion → artifact upload → signed
+ * wrapper envelope → ERC-8004 anchor → ledger entry. Returns the corpus ref
+ * (the wrapper envelope's CID) and the anchor tx.
+ */
+export async function publish(
+  pending: PendingEnvelope,
+  deps: HarnessPublishDeps,
+  opts: PublishOptions = {},
+): Promise<PublishResult> {
+  assertPending(pending);
+  const now = deps.now?.() ?? new Date();
+
+  if (opts.veto) {
+    deps.ledger.append({
+      ts: now.toISOString(),
+      taskSummary: pending.draft.task.summary,
+      envelopeRef: null,
+      anchorTx: null,
+      verifiabilityTier: pending.draft.outcome.verifiabilityTier,
+      status: 'vetoed (local only)',
+    });
+    return { vetoed: true };
+  }
+
+  const member = await publishMemberEnvelope(pending, deps, {
+    ...(opts.skill === undefined ? {} : { skill: opts.skill }),
+    now,
+  });
+  const { envelopeRef, envelope, episode } = member;
   const anchor = await deps.anchorEnvelope({
     metadataKey: `capture:${envelopeRef}`,
     envelopeCid: envelopeRef,
@@ -343,6 +445,95 @@ export async function publish(
     throw new PublishLedgerError(result, err);
   }
 
+  return result;
+}
+
+/**
+ * Upload a batch of substrate members and anchor one enumerable manifest over
+ * their CIDs. No member receives a per-record `capture:` anchor.
+ */
+export async function publishManifestBatch(
+  members: ManifestBatchMemberInput[],
+  deps: ManifestBatchPublishDeps,
+  opts: ManifestBatchOptions,
+): Promise<ManifestBatchResult> {
+  if (members.length === 0) {
+    throw new Error('publishManifestBatch requires at least one member');
+  }
+  if (typeof opts.batchKind !== 'string' || opts.batchKind.length === 0) {
+    throw new Error('publishManifestBatch requires a non-empty batchKind');
+  }
+
+  const now = deps.now?.() ?? new Date();
+  const published: Array<PublishedMemberEnvelope & ManifestBatchMemberInput> = [];
+  for (const member of members) {
+    const uploaded = await publishMemberEnvelope(member.pending, deps, { now });
+    published.push({ ...member, ...uploaded });
+  }
+
+  const root = merkleRoot(published.map((member) => hashLeaf(member.envelopeRef)));
+  const createdAt = Math.floor(now.getTime() / 1000);
+  const body = parseManifestV0({
+    schemaVersion: MANIFEST_SCHEMA_VERSION,
+    batchKind: opts.batchKind,
+    createdAt,
+    merkleRoot: root,
+    members: published.map((member) => ({
+      cid: member.envelopeRef,
+      sha256: member.sha256,
+      ...(member.polarity === undefined ? {} : { polarity: member.polarity }),
+      ...(member.instanceId === undefined ? {} : { instanceId: member.instanceId }),
+    })),
+  });
+  const manifestBlob = await deps.publishManifestBody(body);
+  const manifestCid = manifestBlob.cid;
+  const payload: ManifestPayload = {
+    version: 0,
+    merkleRoot: root,
+    memberCount: published.length,
+    createdAt,
+  };
+  const anchor = await deps.anchorManifest({ manifestCid, payload });
+  const result: ManifestBatchResult = {
+    manifestCid,
+    anchorTx: anchor.txHash,
+    memberRefs: published.map((member) => member.envelopeRef),
+    root,
+    gasUsed: anchor.gasUsed,
+    feeWei: anchor.feeWei,
+  };
+
+  try {
+    deps.recordManifestAnchor({
+      manifestCid,
+      contentKind: 'manifest',
+      metadataKey: buildManifestMetadataKey(manifestCid),
+      payloadHex: encodeManifestPayload(payload),
+      txHash: anchor.txHash,
+      blockNumber: anchor.blockNumber,
+      gasUsed: anchor.gasUsed,
+      feeWei: anchor.feeWei,
+      anchoredAt: createdAt,
+    });
+    for (const member of published) {
+      deps.ledger.append({
+        ts: now.toISOString(),
+        taskSummary: member.episode.task.summary,
+        envelopeRef: member.envelopeRef,
+        anchorTx: anchor.txHash,
+        verifiabilityTier: member.episode.outcome.verificationStrength,
+        status: 'published',
+      });
+    }
+  } catch (error) {
+    throw new ManifestBatchRecordingError(result, error);
+  }
+
+  deps.log?.(
+    `[manifest] batch anchored cid=${manifestCid} members=${published.length} ` +
+      `gasUsed=${anchor.gasUsed?.toString() ?? 'null'} ` +
+      `feeWei=${anchor.feeWei?.toString() ?? 'null'}`,
+  );
   return result;
 }
 

@@ -67,6 +67,11 @@ import {
   PAYLOAD_TUPLE,
   PAYLOAD_TUPLE_V2,
 } from './abis.js';
+import {
+  buildManifestMetadataKey,
+  encodeManifestPayload,
+  type ManifestPayload,
+} from './manifest-registry.js';
 
 // Re-export ABI / payload tuple so callers that import them from the identity
 // module continue to work without depending on `./abis.js` directly.
@@ -132,6 +137,11 @@ export interface PublishContentV2Args {
   payload: ExecutionPayloadV2;
 }
 
+export interface ManifestPublishArgs {
+  manifestCid: string;
+  payload: ManifestPayload;
+}
+
 /**
  * Return value from `publishContent` / `publishContentV2`.
  *
@@ -142,6 +152,8 @@ export interface PublishContentV2Args {
 export interface PublishContentResult {
   txHash: Hex;
   blockNumber: number | null;
+  gasUsed: bigint | null;
+  feeWei: bigint | null;
 }
 
 // ── Errors ───────────────────────────────────────────────────────────────────
@@ -534,6 +546,16 @@ export class IdentityPublisher {
     return this._writeMetadata(metadataKey, metadataValue);
   }
 
+  /**
+   * Anchor one enumerable bulk manifest under the same agent EOA and
+   * transaction-serialization path used by per-record commitments.
+   */
+  async publishManifest(args: ManifestPublishArgs): Promise<PublishContentResult> {
+    const metadataKey = buildManifestMetadataKey(args.manifestCid);
+    const metadataValue = encodeManifestPayload(args.payload);
+    return this._writeMetadata(metadataKey, metadataValue);
+  }
+
   private async _writeMetadata(
     metadataKey: string,
     metadataValue: Hex,
@@ -578,15 +600,23 @@ export class IdentityPublisher {
     // anchor row gets written. The engine treats publish failures as
     // non-fatal regardless.
     let blockNumber: number | null = null;
+    let gasUsed: bigint | null = null;
+    let feeWei: bigint | null = null;
     try {
       const receipt = await this.publicClient.waitForTransactionReceipt({ hash: txHash });
-      blockNumber = Number(receipt.blockNumber);
+      blockNumber =
+        typeof receipt.blockNumber === 'bigint' ? Number(receipt.blockNumber) : null;
+      gasUsed = typeof receipt.gasUsed === 'bigint' ? receipt.gasUsed : null;
+      feeWei =
+        gasUsed !== null && typeof receipt.effectiveGasPrice === 'bigint'
+          ? gasUsed * receipt.effectiveGasPrice
+          : null;
     } catch (err) {
       console.warn(
         `[erc8004] receipt fetch failed for ${txHash} (anchor will be recorded with null block): ${err instanceof Error ? err.message : err}`,
       );
     }
-    return { txHash, blockNumber };
+    return { txHash, blockNumber, gasUsed, feeWei };
   }
 }
 

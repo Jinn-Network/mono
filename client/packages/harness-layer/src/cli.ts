@@ -23,6 +23,7 @@ import { createInterface } from 'node:readline';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
+  createManifestAnchorStore,
   DEFAULT_IPFS_GATEWAY_URL,
   type CorpusRecord,
   type CorpusSearchHit,
@@ -135,7 +136,7 @@ import {
   type DistillRunRecord,
 } from './distill-runs.js';
 import type { MetaCluster } from './cluster.js';
-import { DEFAULT_TESTNET_DISCOVERY_URL } from '../../../src/config.js';
+import { DEFAULT_TESTNET_DISCOVERY_URL, loadConfig } from '../../../src/config.js';
 import {
   loadActiveHeldOutSlateIds,
   ACTIVE_HELD_OUT_SLATE_VERSIONS,
@@ -209,6 +210,7 @@ Commands:
                                                  same as the skill lane above)
   distill run [--limit N] [--out <dir>] [--meta]
               [--distiller claude|codex] [--local-only]
+              [--anchor-mode per-record|manifest]
                                                  Run the distillation pipeline over the
                                                  swe-rebench-v2 verdict ledger: verdict→solution
                                                  join → distill → local SKILL.md packages.
@@ -218,6 +220,8 @@ Commands:
                                                  meta-distill over the stage-1 skills.
                                                  --local-only avoids chain writes and evidence
                                                  anchors, using in-memory publish deps.
+                                                 --anchor-mode manifest anchors the surviving
+                                                 bridge batch once and records receipt gas.
   distill [--where local|defer|off] [--install all|<name>|none] [--resume]
          [--captures <dir>] [--limit N] [--out <dir>]
          [--distiller claude|codex] [--distiller-model <model>] [--json]
@@ -307,6 +311,7 @@ Environment (publish — testnet anchor identity):
   JINN_IPFS_REGISTRY_URL        IPFS registry for uploads (default: https://registry.autonolas.tech)
   JINN_LAYER_ENDPOINT           Artifact access endpoint recorded on publish (default: http://127.0.0.1:7331)
   JINN_LAYER_LEDGER_PATH        Ledger file (default: ~/.jinn-client/harness-layer/ledger.jsonl)
+  JINN_DB_PATH                  SQLite anchor telemetry store (manifest mode)
 
 Environment (distill — reads the testnet ledger + spends model solves):
   JINN_DISCOVERY_URL       Ponder indexer base (default: testnet jinn-indexer)
@@ -935,7 +940,7 @@ function requireEnv(name: string): string {
 }
 
 /** Live testnet publish deps from JINN_LAYER_* env (see USAGE). */
-function buildLivePublishDepsFromEnv(): HarnessPublishDeps {
+function buildLivePublishDepsFromEnv(opts: { recordManifest?: boolean } = {}): HarnessPublishDeps {
   return createLivePublishDeps({
     privateKey: requireEnv('JINN_LAYER_PRIVATE_KEY') as `0x${string}`,
     safeAddress: requireEnv('JINN_LAYER_SAFE_ADDRESS') as `0x${string}`,
@@ -947,6 +952,9 @@ function buildLivePublishDepsFromEnv(): HarnessPublishDeps {
     ...(process.env['JINN_IPFS_REGISTRY_URL'] ? { ipfsRegistryUrl: process.env['JINN_IPFS_REGISTRY_URL'] } : {}),
     ...(process.env['JINN_LAYER_ENDPOINT'] ? { endpoint: process.env['JINN_LAYER_ENDPOINT'] } : {}),
     ...(process.env['JINN_LAYER_LEDGER_PATH'] ? { ledgerPath: process.env['JINN_LAYER_LEDGER_PATH'] } : {}),
+    ...(opts.recordManifest
+      ? { store: createManifestAnchorStore(loadConfig().dbPath) }
+      : {}),
   });
 }
 
@@ -1187,6 +1195,7 @@ export async function runJinnLayerCli(
         'set-distiller-model': { type: 'string' },
         captures: { type: 'string' },
         'local-only': { type: 'boolean', default: false },
+        'anchor-mode': { type: 'string', default: 'per-record' },
         where: { type: 'string' },
         resume: { type: 'boolean', default: false },
         install: { type: 'string' },
@@ -1933,6 +1942,15 @@ export async function runJinnLayerCli(
     const outDir = (parsed.values.out as string | undefined) ?? mkdtempSync(join(tmpdir(), 'jinn-distill-'));
     mkdirSync(outDir, { recursive: true });
     const localOnly = parsed.values['local-only'] as boolean;
+    const anchorMode = parsed.values['anchor-mode'] as string;
+    if (anchorMode !== 'per-record' && anchorMode !== 'manifest') {
+      writer.write(`error: --anchor-mode must be "per-record" or "manifest" (got ${JSON.stringify(anchorMode)})\n\n${USAGE}`);
+      return 2;
+    }
+    if (localOnly && anchorMode === 'manifest') {
+      writer.write(`error: --anchor-mode manifest requires live publish deps and cannot be combined with --local-only\n\n${USAGE}`);
+      return 2;
+    }
 
     const rawProvider = (parsed.values.distiller as string | undefined) ?? process.env['JINN_DISTILL_PROVIDER'] ??
       (isDistillEvalPrep ? 'codex' : 'claude');
@@ -2107,7 +2125,9 @@ export async function runJinnLayerCli(
     const distill = dd.distill ?? distillPorts!.distill;
     const metaEnabled = parsed.values.meta as boolean;
     const metaDistillPort = dd.metaDistill ?? distillPorts!.metaDistill;
-    const publishDeps = localOnly ? buildLocalOnlyPublishDeps() : (dd.publishDeps ?? buildLivePublishDepsFromEnv());
+    const publishDeps = localOnly
+      ? buildLocalOnlyPublishDeps()
+      : (dd.publishDeps ?? buildLivePublishDepsFromEnv({ recordManifest: anchorMode === 'manifest' }));
 
     // Local-fs publishSkill: write <out>/<name>/SKILL.md (shared with LocalDistiller).
     const publishSkill = createLocalSkillSink(outDir);
@@ -2121,12 +2141,16 @@ export async function runJinnLayerCli(
       slate: { instanceIds: slateInstanceIds },
       distribution: 'coding',
       distillModel,
+      anchorMode,
       ...(metaEnabled ? { meta: true, metaDistill: metaDistillPort } : {}),
       ...(limit !== undefined ? { limit } : {}),
     });
 
     if (parsed.values.json) {
-      writer.write(JSON.stringify({ ...result, outDir }) + '\n');
+      writer.write(JSON.stringify(
+        { ...result, outDir },
+        (_key, value) => typeof value === 'bigint' ? value.toString() : value,
+      ) + '\n');
     } else {
       const lines = [
         `distilled: published ${result.distilled.published.length}, rejected ${result.distilled.rejected.length}, errors ${result.distilled.errors.length}`,
@@ -2136,6 +2160,13 @@ export async function runJinnLayerCli(
       if (localOnly) lines.push('mode: local-only (no chain publishes or anchors)');
       if (result.verdictsTruncated) {
         lines.push(`warning: verdict fetch hit the ${limit}-row limit — attempt groups may be PARTIAL; raise --limit to cover the corpus (#1478)`);
+      }
+      if (result.bridge.manifestCid) {
+        lines.push(
+          `manifest anchored ${result.bridge.manifestCid} — ${result.bridge.bridged.length} members, ` +
+          `gasUsed=${result.bridge.gasUsed?.toString() ?? 'unknown'}, ` +
+          `feeWei=${result.bridge.feeWei?.toString() ?? 'unknown'}`,
+        );
       }
       for (const p of result.distilled.published) lines.push(`  PUBLISHED ${p.skillKind} ${p.envelopeRef} (${p.clusterId})`);
       for (const r of result.distilled.rejected) lines.push(`  rejected  ${r.clusterId} — ${r.reason}`);

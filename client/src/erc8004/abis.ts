@@ -101,31 +101,8 @@ export const REVOCATION_PAYLOAD_TUPLE = [
   { name: 'reason', type: 'string' },
 ] as const;
 
-/**
- * Manifest anchor payload tuple (#1829).
- *
- * A bulk substrate batch (bridge output; reference-record batches) anchors ONE
- * `manifest:<manifestCid>` record on the existing `IdentityRegistry.setMetadata`
- * surface — no new contract. The payload commits the merkle root over the batch
- * member CIDs so any single member is provable against the on-chain root:
- *
- *   abi.encode(
- *       uint16  version,      // on-chain tuple version (= 0)
- *       bytes32 merkleRoot,   // root over member-CID leaves (see merkle.ts rules)
- *       uint32  memberCount,  // number of members in the batch (≥1)
- *       uint64  createdAt     // unix seconds
- *   )
- *
- * The on-chain `version` is distinct from the `jinn.manifest.v0` IPFS-body
- * `schemaVersion` string — the body carries the enumerable member list; this
- * tuple carries only the trust anchor.
- */
-export const MANIFEST_PAYLOAD_TUPLE = [
-  { name: 'version', type: 'uint16' },
-  { name: 'merkleRoot', type: 'bytes32' },
-  { name: 'memberCount', type: 'uint32' },
-  { name: 'createdAt', type: 'uint64' },
-] as const;
+/** Shared client-independent manifest tuple; re-exported for API compatibility. */
+export { MANIFEST_PAYLOAD_TUPLE } from '@jinn-network/core';
 
 /** ERC-8004 IdentityRegistry — only the function the publisher calls. */
 export const IDENTITY_REGISTRY_SET_METADATA_ABI = [
