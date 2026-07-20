@@ -32,8 +32,13 @@ const inlinePrivatePlugin = {
 const inlinePrivateCore = {
   name: 'inline-private-jinn-core',
   setup(buildApi) {
-    buildApi.onResolve({ filter: /^@jinn-network\/core$/ }, () => ({
-      path: resolve('../packages/core/src/index.ts'),
+    buildApi.onResolve({ filter: /^@jinn-network\/core(?:\/.+)?$/ }, (args) => ({
+      path: resolve(
+        '../packages/core/src',
+        args.path === '@jinn-network/core'
+          ? 'index.ts'
+          : `${args.path.slice('@jinn-network/core/'.length)}/index.ts`,
+      ),
     }));
   },
 };

@@ -23,7 +23,7 @@ import {
 } from './bridge.js';
 import { capture } from './capture.js';
 import { publish, type HarnessPublishDeps } from './publish.js';
-import { buildLayer2ScrubPipeline } from '../../../src/trajectory/scrub/layer2.js';
+import { buildLayer2ScrubPipeline } from '@jinn-network/core/scrub';
 import { parseTraceEnvelopeV0, type TraceEnvelopeV0 } from './envelope.js';
 import { clusterEvidence, buildMetaClusters, type MetaCluster, type Stage1PublishedSkill } from './cluster.js';
 import { distillClusters, metaDistill, type DistillCluster, type DistillLLMOutput, type DistillResult, type MetaDistillLLMOutput, type MetaDistillResult } from './distill.js';

@@ -136,6 +136,7 @@
     "e2e:donation": "vitest run test/smoke/donation-mode-smoke.test.ts test/smoke/donation-ipfs-http-smoke.test.ts"
   },
   "resolutions": {
+    "@jinn-network/core": "portal:../packages/core",
     "axios": "^1.15.2",
     "fast-uri": "^3.1.2",
     "protobufjs": "^8.0.3"
@@ -145,6 +146,7 @@
     "@grpc/grpc-js": "^1.14.3",
     "@hono/node-server": "^2.0.5",
     "@huggingface/transformers": "^4.2.0",
+    "@jinn-network/core": "0.1.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@msgpack/msgpack": "^3.0.0",
     "@noble/ed25519": "^3.1.0",
@@ -190,7 +192,6 @@
     "@coinbase/cdp-sdk": "^1.48.2"
   },
   "devDependencies": {
-    "@jinn-network/core": "portal:../packages/core",
     "@jinn-network/plugin": "portal:../packages/plugin",
     "@jinn-network/sdk": "portal:../packages/sdk",
     "@playwright/test": "^1.59.1",

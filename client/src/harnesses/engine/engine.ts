@@ -80,8 +80,10 @@ import type { ArtifactSource, Role } from '../../types/envelope.js';
 import type { Task } from '../../types/task.js';
 import { TrajectoryCollector, emitTrajectory } from '../../trajectory/index.js';
 import { addTranscriptSpans } from '../../trajectory/transcript-to-spans/index.js';
-import { buildScrubPipeline } from '../../trajectory/scrub/build.js';
-import type { ScrubPipeline } from '../../trajectory/scrub/pipeline.js';
+import {
+  buildScrubPipeline,
+  type ScrubPipeline,
+} from '@jinn-network/core/scrub';
 import { uploadToIpfs } from '../../adapters/mech/ipfs.js';
 import { VerdictCode } from '../../adapters/mech/verdict-code.js';
 import { buildInfo } from '../../build-info.js';

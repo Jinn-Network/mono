@@ -12,7 +12,7 @@
  * envelope, no partial output, never a silent pass.
  *
  * Scrub pipeline: reuses the seller-side pipeline from
- * `client/src/trajectory/scrub/build.ts` (key-policy → openredaction →
+ * `@jinn-network/core/scrub` (key-policy → openredaction →
  * plain-patterns → secretlint → optional ML PII) via `scrubCaptureSpans()`.
  * The email/home-path gap-closers this file originally carried graduated
  * into the shared plain-patterns stage (#1330), so the daemon publish path
@@ -28,17 +28,21 @@
  * Task 3 (issue #1310).
  */
 
-import { buildScrubPipeline, DEFAULT_KEY_POLICY } from '../../../src/trajectory/scrub/build.js';
-import { ScrubPipeline } from '../../../src/trajectory/scrub/pipeline.js';
-import { scrubCaptureSpans } from '../../../src/trajectory/scrub/emit-scrub.js';
-import { classifyKey, type KeyPolicy } from '../../../src/trajectory/scrub/key-policy.js';
-import type { PiiDetector } from '../../../src/trajectory/scrub/ml-pii-stage.js';
+import {
+  buildScrubPipeline,
+  DEFAULT_KEY_POLICY,
+  ScrubPipeline,
+  scrubCaptureSpans,
+  classifyKey,
+  type KeyPolicy,
+  type PiiDetector,
+} from '@jinn-network/core/scrub';
 import type {
   Attributes,
   RedactionRecord,
   ScrubResult,
   ScrubStage,
-} from '../../../src/trajectory/scrub/types.js';
+} from '@jinn-network/core/scrub';
 import {
   MAX_STEPS,
   MAX_STEP_ATTRIBUTES_BYTES,

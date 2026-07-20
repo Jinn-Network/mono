@@ -1,13 +1,13 @@
 /**
  * Harness-layer consume path — the embeddable corpus surface.
  *
- * Thin wrapper over `createCorpus()` (client/src/corpus/) and the configured
- * DiscoveryAPI (client/src/discovery/factory.ts). No new query logic lives
- * here: `search` delegates ref discovery to the DiscoveryAPI and manifest
+ * Thin wrapper over core's `createCorpus()` and the configured corpus
+ * discovery port. No new query logic lives
+ * here: `search` delegates ref discovery to the discovery port and manifest
  * retrieval to the corpus, then applies a client-side substring match
  * (solverType lives in the IPFS manifest body, not in the on-chain envelope
  * payload, so the indexer cannot filter on it — see
- * client/src/discovery/http.ts `queryEnvelopes`). `get` is
+ * core's HTTP discovery `queryEnvelopes`). `get` is
  * fetchManifest + acquire.
  *
  * Plan: docs/superpowers/plans/2026-07-02-jinn-harness-network-v0-plan.md
@@ -16,14 +16,23 @@
 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { createCorpus, type Corpus } from '../../../src/corpus/index.js';
-import type { ArtifactContent, EnvelopeRef } from '../../../src/corpus/types.js';
-import type { SignedEnvelope } from '../../../src/types/envelope.js';
+import {
+  createCorpus,
+  createHttpCorpusDiscovery,
+  queryCaptureMeta as queryCaptureMetaCore,
+  type AcquireResult,
+  type ArtifactContent,
+  type CaptureMetaHit,
+  type Corpus,
+  type CorpusDiscoveryPort,
+  type EnvelopeRef,
+} from '@jinn-network/core/corpus-read';
+import {
+  SignedEnvelopeSchema,
+  type SignedEnvelope,
+} from '../../../src/types/envelope.js';
 import { Store } from '../../../src/store/store.js';
-import { createDiscoveryAPI } from '../../../src/discovery/factory.js';
-import type { DiscoveryAPI } from '../../../src/discovery/types.js';
 import { DEFAULT_TESTNET_DISCOVERY_URL } from '../../../src/config.js';
-import type { AcquireResult } from '../../../src/corpus/fetch-artifact.js';
 import { SKILL_ARTIFACT_TYPE } from '../../../src/types/skill-artifact.js';
 import { extractSkill } from './skill.js';
 
@@ -32,9 +41,6 @@ import { extractSkill } from './skill.js';
  * client/src/config.ts (inline schema default; not exported as a constant).
  */
 export const DEFAULT_IPFS_GATEWAY_URL = 'https://gateway.autonolas.tech';
-
-/** Base Sepolia — the testnet the default discovery indexer serves. */
-const TESTNET_CHAIN_ID = 84532;
 
 export interface HarnessLayerConfig {
   /** Discovery indexer URL. Default: the testnet Ponder indexer. */
@@ -52,7 +58,7 @@ export interface HarnessLayerConfig {
   /** Injectable HTTP fetch for the capture-meta fast path (tests). */
   fetchImpl?: typeof fetch;
   /** Injectable DiscoveryAPI (tests). Overrides discoveryUrl. */
-  discovery?: DiscoveryAPI;
+  discovery?: CorpusDiscoveryPort;
   /** Injectable Store (tests). Overrides dbPath. */
   store?: Store;
   /** Injectable IPFS fetch (tests). */
@@ -96,15 +102,6 @@ export interface CorpusSearchHit {
   tags?: string[];
   /** Scrubbed task summary, when the hit came via the capture-meta fast path. */
   summary?: string;
-}
-
-/** Shape served by the indexer's GET /capture-meta (#1344). */
-interface CaptureMetaHit {
-  manifestCid: string;
-  taskSummary: string;
-  tags: string[];
-  provenance: string;
-  verifiabilityTier: string;
 }
 
 export interface CorpusArtifact {
@@ -208,22 +205,25 @@ export function createHarnessLayer(config: HarnessLayerConfig = {}): HarnessLaye
   const fetchImpl = config.fetchImpl ?? globalThis.fetch;
 
   const store = config.store ?? new Store(resolved.dbPath);
-  const discovery = config.discovery ?? createDiscoveryAPI(
-    { mode: 'http', url: resolved.discoveryUrl },
-    { chainId: TESTNET_CHAIN_ID, fetchImpl: globalThis.fetch },
-  );
+  const discovery = config.discovery ?? createHttpCorpusDiscovery({
+    url: resolved.discoveryUrl,
+    fetchImpl: globalThis.fetch,
+  });
 
   // `signer.privateKey` and `selfSafeAddress` are required by CorpusOptions
   // but unused by the read paths this layer exposes (query / fetchManifest /
   // ipfs-and-origin acquire). Placeholders, same as the read-only corpus in
   // client/src/mcp/server.ts.
-  const corpus: Corpus = createCorpus(
+  const corpus: Corpus<SignedEnvelope> = createCorpus(
     {
       discovery,
       ipfsGatewayUrl: resolved.ipfsGatewayUrl,
       store,
       signer: { privateKey: '0x0' },
       selfSafeAddress: '0x0000000000000000000000000000000000000000',
+      parseEnvelope(input) {
+        return SignedEnvelopeSchema.parse(input);
+      },
     },
     {
       ...(config.fetchFromIpfs ? { fetchFromIpfs: config.fetchFromIpfs } : {}),
@@ -239,20 +239,12 @@ export function createHarnessLayer(config: HarnessLayerConfig = {}): HarnessLaye
    * always the floor.
    */
   async function queryCaptureMeta(query: string, limit: number): Promise<CaptureMetaHit[]> {
-    if (!resolved.captureMetaUrl || query === '') return [];
-    try {
-      const url = `${resolved.captureMetaUrl}?q=${encodeURIComponent(query)}&limit=${limit}`;
-      const res = await fetchImpl(url);
-      if (!res.ok) return [];
-      const body = (await res.json()) as unknown;
-      if (!Array.isArray(body)) return [];
-      return body.filter(
-        (h): h is CaptureMetaHit =>
-          h !== null && typeof h === 'object' && typeof (h as CaptureMetaHit).manifestCid === 'string',
-      );
-    } catch {
-      return [];
-    }
+    return queryCaptureMetaCore({
+      url: resolved.captureMetaUrl,
+      query,
+      limit,
+      fetchImpl,
+    });
   }
 
   /**

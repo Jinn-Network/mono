@@ -21,8 +21,10 @@
 
 import { capture, type CapturedTask } from './capture.js';
 import { publish, type HarnessPublishDeps } from './publish.js';
-import { buildLayer2ScrubPipeline } from '../../../src/trajectory/scrub/layer2.js';
-import type { ScrubPipeline } from '../../../src/trajectory/scrub/pipeline.js';
+import {
+  buildLayer2ScrubPipeline,
+  type ScrubPipeline,
+} from '@jinn-network/core/scrub';
 
 /** A verdict row from the execution ledger, one polarity. */
 export interface AttemptRef {
