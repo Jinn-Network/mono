@@ -1,6 +1,8 @@
 # Marketplace-Backed Autopilot Execution
 
-- **Version:** 0.1
+- **Version:** 0.2 — no new SolverType: live tasks are a variant of the existing `jinn-repo`
+  type, whose solve-side shape (and solver harness) they share exactly; the only true delta is
+  the grading oracle.
 - **Date:** 2026-07-20
 - **Author:** Jinn contributor (Ritsu) with Claude
 - **Status:** Proposed (design sketch — no implementation; issues to be filed per stage after
@@ -30,10 +32,13 @@ for verified completed-loop work; mono engineering becomes precisely that work.
    delegated roots receive no lifecycle manifest, attestation, GitHub credential, or Git/SSH
    publication authority — describes a marketplace solver exactly. Solvers produce artifacts;
    the Autopilot host keeps every GitHub authority.
-3. **The harness exists in prototype form.** `swe-rebench-v2` is "clone a repo at a pinned SHA,
-   solve an issue, produce a patch, evaluate against tests" as a benchmark SolverType;
-   `yarn e2e:daemon-harness` proves the full daemon + real-harness + settlement loop. The eng
-   harness is that machinery retargeted from benchmark instances to live mono issues.
+3. **The solve side already exists — entirely.** `jinn-repo.v1`
+   (client/src/solver-types/jinn-repo.ts) is already "solve a coding task on Jinn-Network/mono
+   at a pinned `base_commit` from a `problem_statement`" — today its instances are mined
+   retrospectively from merged PRs. The learner harness's `supports()` accepts any
+   non-evaluation SolverType, so live-issue tasks need **zero solver-harness changes**, and the
+   mono environment provisioning is proven by the pilot-rig runs. `yarn e2e:daemon-harness`
+   proves the full daemon + real-harness + settlement loop.
 
 ## Architecture
 
@@ -56,21 +61,33 @@ migrates: it needs push authority by definition.
 Marketplace-side: claim, execution, delivery, evaluation. Solvers hold no GitHub credentials at
 any stage.
 
-### `eng-issue.v0` SolverType
+### No new SolverType: a live variant of `jinn-repo`
 
-Typed spec is a pointer, not a payload:
+Live issues have the same solve-side shape as the existing `jinn-repo.v1` tasks (`instance_id`,
+`repo: 'Jinn-Network/mono'`, `base_commit`, `problem_statement`, `language`). The only true
+delta is the **grading oracle**: `jinn-repo.v1` is retrospective — mined from merged PRs, so
+gold tests exist (`merged_pr`, `test_files` as the FAIL_TO_PASS gold, `test_cmd`). A live issue
+is prospective — no merged PR, no gold tests, by definition.
 
-```
-{ repo, issueNumber, baseSha, issueSnapshotCid, effort }
-```
+So the change is a schema variant, not a new type: a discriminated union
+(`source: 'merged-pr' | 'live-issue'`) where the live branch replaces the oracle fields with
+`issue_number` + an issue-body snapshot reference, plus `effort` (the board's Effort field as
+the reasoning-depth signal, replacing the coordinator session's `effortFlag`).
 
 - **Issues are mutable; tasks are not.** Task creation snapshots the issue body (context +
-  impact + acceptance criteria — the handbook's ratified spec shape), pins it to IPFS, and the
-  task references the snapshot CID. Material issue edits → cancel and re-post.
-- `baseSha` pins `origin/next` at post time for reproducibility; solver and evaluator both work
-  against it.
-- `effort` carries the board's Effort field as the reasoning-depth signal, replacing the
-  coordinator session's `effortFlag`.
+  impact + acceptance criteria — the handbook's ratified spec shape); material issue edits →
+  cancel and re-post. `base_commit` pins `origin/next` at post time.
+- **Corpus continuity is the payoff of staying in the type family.** `knowledgeAutoload` keys on
+  the task's solverType, so knowledge mined from the repo's merged-PR history auto-loads into
+  live solves on the same repo — the retrospective type becomes training data for the
+  prospective one. (Whether the live variant shares the exact solverType string or bumps a
+  version is an implementation decision; corpus keying is the constraint to preserve.)
+- **Evaluator pairing follows the oracle split.** `jinn-repo-evaluator` (exact-match on
+  `jinn-repo.v1` + gold `test_files`) grades retrospective tasks. The live variant needs its own
+  grading: Stage 1 ships a thin mechanical evaluator adapted from it — patch applies, typecheck,
+  policy-scoped tests pass; no gold needed — so the on-chain loop (solution → verdict) completes
+  and activity counters increment while human-equivalent review stays host-side. Judgment-shaped
+  verdicts are Stage 2.
 
 ### Generator
 
@@ -82,11 +99,12 @@ launcher escrow exactly as any SolverNet task does.
 
 ### Solver harness
 
-Packages the implement-issue behavior as a harness: checkout mono at `baseSha`, run the
-implement flow, run the touched test suites, emit patch + evidence envelope (transcript, test
-output). Built by retargeting the swe-rebench machinery. This is the largest and riskiest
-component: mono builds are heavy (install, typecheck, vitest), so per-task compute and
-wall-clock budgets are real constraints on operator hardware.
+Already exists. The learner harness `supports()` any non-evaluation SolverType and the mono
+environment story (checkout at `base_commit`, install, run tests) is proven by the jinn-repo
+pilot-rig runs. Remaining solver-side work is shaping, not construction: prompt/context
+adaptation for live issues (the implement-issue skill chain's discipline — regression-test-first
+for fixes, TDD for features — expressed as harness context), and per-task compute/wall-clock
+budgets, since mono builds are heavy for casual operator hardware.
 
 ### Delivery → PR bridge (host-side)
 
@@ -113,11 +131,11 @@ second layer; they retire (or demote to spot-checks) once verdict quality is pro
 
 ## Sequencing
 
-1. **Stage 1 — implement only, closed fleet.** New SolverType + generator + delivery bridge;
-   harness retargeted from swe-rebench; review stays local (review-pr as today).
-   **Kill-test:** prove the harness produces mergeable PRs on a handful of `Low`-effort issues
-   at acceptable cost before building further. If it cannot, the rest is plumbing around a
-   hollow core.
+1. **Stage 1 — implement only, closed fleet.** jinn-repo live-variant schema + generator +
+   delivery bridge + thin mechanical evaluator; solver harness unchanged; review stays local
+   (review-pr as today). **Kill-test:** prove the existing harness produces mergeable PRs on a
+   handful of `Low`-effort live issues at acceptable cost before building further. If it
+   cannot, the rest is plumbing around a hollow core.
 2. **Stage 2 — review through verdicts.** Evaluator role activated; verdict bridge drives the
    review step; local review-pr retires.
 3. **Stage 3 — open the fleet.** Community operators join. (This is where the
@@ -138,8 +156,9 @@ second layer; they retire (or demote to spot-checks) once verdict quality is pro
 
 ## Risks
 
-- **Harness feasibility (dominant risk).** Mergeable-PR rate on real issues at real cost is
-  unproven; hence the Stage 1 kill-test.
+- **Solve quality (dominant risk).** The harness exists, but its mergeable-PR rate on live
+  issues at real cost is unproven — retrospective jinn-repo instances carry gold tests that
+  live issues lack; hence the Stage 1 kill-test.
 - **Compute weight.** Mono checkouts and test runs may exceed what casual operator hardware
   sustains; may force minimum operator specs or a slimmer verification profile in the harness.
 - **Issue text is untrusted model input.** Lower-stakes while the fleet is closed and the repo
