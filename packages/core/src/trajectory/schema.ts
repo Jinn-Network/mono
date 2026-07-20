@@ -84,14 +84,6 @@ export const JinnTrajectoryV1Schema = z.object({
   schemaVersion: z.literal('jinn.trajectory.v1'),
   runId: z.string().min(1),
   parentEnvelopeCid: z.string().nullable(),
-  /**
-   * Source envelope CID (or snapshot sha256) this trajectory was derived from,
-   * for records the backfill materializes from historical `system_snapshot`
-   * transcripts (#1672). Optional so every live-path trajectory — which omits
-   * it — validates unchanged. Distinct from `parentEnvelopeCid` (verdict→
-   * restoration parenting), which must not be overloaded.
-   */
-  derivedFrom: z.string().nullable().optional(),
   spans: z.array(SpanSchema),
   redactionManifest: RedactionManifestSchema,
   signature: SignatureSchema,
