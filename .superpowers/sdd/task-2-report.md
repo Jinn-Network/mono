@@ -230,3 +230,145 @@ Result:
   a live canary repository in this task. That belongs to the design's later
   live-shadow/canary activation gate; active mode remains deliberately
   unwired until then.
+
+## Review-fix addendum — 2026-07-20
+
+### Findings addressed
+
+- Orphan implementation claims now carry Project `Blocked on: Human`, Human
+  status, retained issue labels, and a structured Human reason into projection
+  planning. A held orphan is projected to `Human` only; recovery does not
+  project `In Progress` or create/reuse a draft PR.
+- No-PR issue status preserves `eligible`, a structured eligibility reason,
+  and source-derived detail. Explanations distinguish ordinary eligibility,
+  unresolved dependencies, author disallowance, and other Project/taxonomy
+  admission failures.
+- Issue↔PR resolution now fails closed. Multiple PRs for one issue, one PR for
+  multiple issues, stable-branch contradictions, and PRs with no resolvable
+  issue become connected Human diagnostics. Affected normal lifecycle items
+  are suppressed; every resolvable issue and PR receives an idempotent Human
+  projection.
+- Production reads now paginate only open `engine:review` PRs. Merged outcomes
+  are fetched with lean aliased `closedByPullRequestsReferences` batches for
+  non-Done Project issues, unioned, and deduplicated. Review refs and structured
+  Human comments are read only for the open Autopilot PR set; merged outcome
+  reads do not fetch reviews, comments, refs, or checks.
+- Structured v2 Human comment markers and reasons are strictly parsed and
+  combined with Project and label evidence. Reconciliation events continue to
+  exclude comment bodies and credentials.
+- Progress age now uses the later matching exact-head terminal-verdict time
+  when valid; otherwise it uses GitHub's branch-head commit time.
+- `status`, `sessions`, and `explain` reject trailing positional arguments.
+- Observe remains zero-write, recover remains projection/recovery-only, and
+  active still rejects before snapshot or writer access.
+
+### Review-fix RED / GREEN evidence
+
+Initial focused RED:
+
+```text
+yarn vitest run test/lifecycle/projection.test.ts \
+  test/lifecycle/snapshot.test.ts \
+  test/lifecycle/controller.test.ts \
+  test/lifecycle/github-reader.test.ts
+```
+
+Result: 4 files failed with 8 expected behavioral failures:
+
+- held orphan repair created a draft PR instead of retaining Human;
+- ambiguous mappings emitted ordinary PR items and no diagnostics;
+- eligibility metadata/explanations were absent;
+- the reader returned no batched merged outcome and no structured Human
+  evidence;
+- progress age ignored a later matching terminal verdict;
+- trailing status arguments were accepted.
+
+The reader-scope refinement also had its own focused RED:
+
+```text
+yarn vitest run test/lifecycle/github-reader.test.ts
+```
+
+Result: 1 expected failure because the merged-outcome batch still overfetched
+reviews, comments, and status checks.
+
+Focused GREEN:
+
+```text
+yarn vitest run test/lifecycle/projection.test.ts \
+  test/lifecycle/snapshot.test.ts \
+  test/lifecycle/controller.test.ts \
+  test/lifecycle/github-reader.test.ts
+```
+
+Result: 4 files passed, 24 tests passed. A later controller integration
+regression increased the lifecycle total by one test.
+
+### Review-fix files
+
+Production:
+
+- `packages/autopilot/src/dispatcher/issue-source.ts`
+- `packages/autopilot/src/dispatcher/types.ts`
+- `packages/autopilot/src/lifecycle/codecs.ts`
+- `packages/autopilot/src/lifecycle/controller.ts`
+- `packages/autopilot/src/lifecycle/github-reader.ts`
+- `packages/autopilot/src/lifecycle/projection.ts`
+- `packages/autopilot/src/lifecycle/snapshot.ts`
+- `packages/autopilot/src/lifecycle/types.ts`
+
+Tests:
+
+- `packages/autopilot/test/lifecycle/controller.test.ts`
+- `packages/autopilot/test/lifecycle/github-reader.test.ts`
+- `packages/autopilot/test/lifecycle/projection.test.ts`
+- `packages/autopilot/test/lifecycle/snapshot.test.ts`
+
+Evidence:
+
+- `.superpowers/sdd/task-2-report.md`
+
+### Fresh required verification
+
+Exact final command:
+
+```text
+yarn vitest run test/lifecycle && yarn typecheck && yarn test
+```
+
+Result:
+
+- Lifecycle: 9 files passed, 85 tests passed.
+- Typecheck: exit 0, no diagnostics.
+- Full Autopilot suite: 80 files passed, 789 tests passed.
+- Expected resilience-test stderr was present; zero tests failed.
+
+Additional live read-only schema proof:
+
+```text
+gh api graphql <Repository/Issue field introspection>
+```
+
+Confirmed that `Repository.pullRequests` supports the `labels` argument and
+`Issue.closedByPullRequestsReferences` supports batched connection reads. No
+all-history fallback was added.
+
+### Review-fix self-review
+
+- Confirmed ambiguous mapping diagnostics remain visible and preserve the
+  existing `engine:review` label while the PR is drafted and Human-held.
+- Confirmed merged outcome reads use terminal-only fields and never request
+  review refs.
+- Confirmed Project snapshots are still read once per cycle and their existing
+  rate-limit guard remains authoritative.
+- Confirmed diagnostic projections are idempotent and do not create authority.
+- Confirmed no claim, child process, worktree, review submission, merge-prep,
+  merge, or cleanup code was added.
+- Confirmed `git diff --check` is clean.
+
+### Review-fix concerns
+
+- The new scoped GraphQL query shapes were validated by unit tests and
+  read-only live schema introspection, but not against a disposable repository
+  populated with every ambiguity and Human-comment case. That remains part of
+  the approved live-shadow/canary gate; active mode is still rejected.

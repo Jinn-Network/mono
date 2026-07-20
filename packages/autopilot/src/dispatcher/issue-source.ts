@@ -141,6 +141,9 @@ export class GhIssueSource implements IssueSource {
       return {
         number: ghIssue.number,
         title: ghIssue.title,
+        labels: ghIssue.labels.map((label) => (
+          typeof label === 'string' ? label : label.name
+        )),
         shape: entry?.issueType ?? null,
         blockedOn: entry?.blockedOn ?? null,
         blockedByIssues: entry?.blockedByIssues ?? [],

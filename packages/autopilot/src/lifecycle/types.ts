@@ -150,6 +150,12 @@ export type HumanReason =
       readonly detail: string;
     };
 
+export type IssueEligibilityReason =
+  | 'eligible'
+  | 'dependency-blocked'
+  | 'author-disallowed'
+  | 'not-selected';
+
 export interface LifecycleItemBase {
   readonly issueNumber: number;
   readonly v2Marked: boolean;
@@ -162,6 +168,8 @@ export interface LifecycleItemBase {
 export interface IssueLifecycleItem extends LifecycleItemBase {
   readonly kind: 'issue';
   readonly eligible: boolean;
+  readonly eligibilityReason?: IssueEligibilityReason;
+  readonly eligibilityDetail?: string;
 }
 
 export interface TerminalVerdictEvidence {
@@ -190,6 +198,22 @@ export type LifecycleItem = IssueLifecycleItem | PullRequestLifecycleItem;
 
 export interface LifecycleSnapshot {
   readonly items: readonly LifecycleItem[];
+}
+
+export interface LifecycleMappingDiagnostic {
+  readonly code: 'branch-mapping-ambiguous';
+  readonly detail: string;
+  readonly issueNumbers: readonly number[];
+  readonly issues: readonly {
+    readonly number: number;
+    readonly projectStatus: LifecycleItemBase['projectStatus'];
+  }[];
+  readonly pullRequests: readonly {
+    readonly number: number;
+    readonly head: GitOid;
+    readonly draft: boolean;
+    readonly labels: readonly string[];
+  }[];
 }
 
 export interface LifecycleViewItem {
