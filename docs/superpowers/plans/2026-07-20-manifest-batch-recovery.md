@@ -4,7 +4,7 @@
 
 **Goal:** Make manifest CID validation canonical and split-manifest publication durably resumable without duplicate chain or local records.
 
-**Architecture:** A SQLite JSON journal is keyed by the ordered immutable bridge request IDs and freezes the original pending members, creation time, exact partition bodies, and transaction states. Publication records each broadcast before waiting, reconciles uncertain receipts on resume, skips confirmed partitions, and finalizes anchor and ledger records idempotently.
+**Architecture:** A SQLite JSON journal is keyed by publication scope plus the ordered immutable bridge request IDs and freezes a digest of the sanitized pending members, creation time, exact partition bodies, and transaction states. Publication records each broadcast before nonce-ledger bookkeeping or receipt waiting, reconciles uncertain receipts on resume, skips confirmed partitions, and finalizes anchor and ledger records idempotently.
 
 **Tech Stack:** TypeScript, Vitest, viem, better-sqlite3, canonical JSON, Node crypto.
 
@@ -62,7 +62,7 @@
 - Modify: `client/packages/harness-layer/src/publish-live.ts`
 
 **Interfaces:**
-- Produces: optional `onBroadcast(txHash)` on manifest and receipt-bound control publication.
+- Produces: optional non-retryable `onBroadcast(txHash)` immediately after the wallet send and before awaited nonce-ledger bookkeeping on manifest and receipt-bound control publication.
 - Produces: `IdentityPublisher.reconcileTransaction(txHash)` returning confirmed telemetry, reverted, or pending.
 - Produces: live `reconcileAnchor(txHash)` dependency used by the journal resume path.
 
@@ -81,12 +81,13 @@
 - Modify: `client/packages/harness-layer/test/bridge-manifest.test.ts`
 
 **Interfaces:**
-- Adds: stable `sourceId` to manifest member inputs; the bridge supplies `AttemptRef.requestId`.
+- Adds: stable, unique `sourceId` to manifest member inputs; the bridge supplies `AttemptRef.requestId`.
+- Adds: live chain/registry/agent publication scope and a canonical sanitized-member digest to the recovery identity.
 - Adds: `ManifestBatchRecoveryError` with durable partial `memberRefs`.
 - Consumes: journal load/save, broadcast callbacks, and `reconcileAnchor`.
 - Produces: frozen plan resumption that skips confirmed partitions and uses read-before-append `(envelopeRef, anchorTx)` ledger identity.
 
-- [ ] Add failing tests for partial upload facts, plan collision rejection, confirmed-partition skipping, pending receipt fail-closed behavior, reverted receipt retry, and crash-safe anchor/ledger finalization.
+- [ ] Add failing tests for partial upload facts, single-partition manifest preparation facts, scope/member-digest and plan collision rejection, confirmed-partition skipping, pending receipt fail-closed behavior, reverted receipt retry, and crash-safe anchor/ledger finalization.
 - [ ] Run focused publisher/bridge tests and verify each new test fails for the intended missing behavior.
 - [ ] Implement stable batch-key derivation and journal serialization, freezing all original pending inputs before the first upload.
 - [ ] Journal every member upload and exact partition body, recording manifest/control broadcasts at callback time.
