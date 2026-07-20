@@ -1,6 +1,7 @@
 import type { ProjectStatus } from '../dispatcher/types.js';
 import { DEFAULT_CONFIG } from '../dispatcher/types.js';
 import type { ProjectionAction, ProjectionPlan } from './projection.js';
+import { LifecycleRateLimitError } from './snapshot.js';
 import type { GitOid } from './types.js';
 
 export interface ReconciliationPullRequestState {
@@ -82,7 +83,12 @@ export type ReconciliationOutcome =
   | 'lost-race'
   | 'awaiting-prerequisite'
   | 'failed'
-  | 'eligible';
+  | 'eligible'
+  // The GitHub rate-limit budget was exhausted mid-plan (see
+  // `LifecycleRateLimitError`); this action was never attempted so it never
+  // spent any more of the budget. Distinct from `awaiting-prerequisite`,
+  // which is a plan-internal ordering wait, not a budget floor.
+  | 'budget-deferred';
 
 export interface ReconciliationResult {
   readonly action: ProjectionAction;
@@ -422,7 +428,8 @@ export async function executeProjectionPlan(
   const results: ReconciliationResult[] = [];
   let previousSucceeded = true;
   let implementationCompletionSucceeded: boolean | undefined;
-  for (const action of plan.actions) {
+  for (let index = 0; index < plan.actions.length; index += 1) {
+    const action = plan.actions[index]!;
     if (
       'requiresPreviousSuccess' in action
       && action.requiresPreviousSuccess === true
@@ -448,6 +455,15 @@ export async function executeProjectionPlan(
       }
     } catch (error) {
       results.push({ action, outcome: 'failed', detail: message(error) });
+      if (error instanceof LifecycleRateLimitError) {
+        // The budget floor is hit; every remaining action would immediately
+        // fail the same way after spending more of it on a doomed read. Stop
+        // spending and mark the rest deferred rather than failed-and-retried.
+        for (let rest = index + 1; rest < plan.actions.length; rest += 1) {
+          results.push({ action: plan.actions[rest]!, outcome: 'budget-deferred' });
+        }
+        return { results };
+      }
       previousSucceeded = false;
       if (
         action.kind === 'ensure-implementation-summary'

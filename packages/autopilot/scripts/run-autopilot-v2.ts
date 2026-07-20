@@ -204,6 +204,22 @@ async function main(): Promise<void> {
     authorAllowlist: allowlist,
     ...(rateLimitFloor === undefined ? {} : { rateLimitFloor }),
   });
+  // jinn-mono#1883: the writer's Human-dominance safety check needs
+  // Project/lifecycle context a single-PR read can't supply, so it falls
+  // back to a full world snapshot — but memoized for one reconciliation
+  // cycle instead of fetched fresh per action. The projection plan a cycle
+  // executes is itself derived from a `readSnapshot()` call made moments
+  // earlier in that same cycle, so reusing it here adds no staleness beyond
+  // what planning already assumed. Invalidated once per `runOnce` below so
+  // the next cycle gets a fresh read.
+  let dominanceSnapshotCache: ReturnType<typeof readSnapshot> | undefined;
+  const readDominanceSnapshot = (): ReturnType<typeof readSnapshot> => {
+    dominanceSnapshotCache ??= readSnapshot().catch((error: unknown) => {
+      dominanceSnapshotCache = undefined;
+      throw error;
+    });
+    return dominanceSnapshotCache;
+  };
   const worktreeBase = env.JINN_AUTOPILOT_WORKTREE_BASE ?? DEFAULT_WORKTREE_BASE;
   const cleanupEnabled = options.mode === 'active'
     && explicitEnvironmentFlag(
@@ -219,6 +235,10 @@ async function main(): Promise<void> {
         return makeProductionReconciliationWriter({
           repositoryPath,
           readSnapshot,
+          readPullRequestByNumber: (prNumber) => reader.readPullRequestForReconciliation(prNumber),
+          readProjectItemForReconciliation: (issueNumber) =>
+            reader.readProjectItemForReconciliation(issueNumber),
+          readDominanceSnapshot,
           credential: selection.credential,
           runner,
           environment: env,
@@ -263,6 +283,9 @@ async function main(): Promise<void> {
       });
 
   const runOnce = async (): Promise<void> => {
+    // Fresh cycle: drop any dominance snapshot memoized during the previous
+    // one so this cycle's writer calls see a new read, not stale state.
+    dominanceSnapshotCache = undefined;
     if (
       options.mode === 'active'
       && cleanupEnabled

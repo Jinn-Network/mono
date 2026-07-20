@@ -10,12 +10,13 @@ import { defaultRunner } from '../dispatcher/issue-source.js';
 import { REPO } from '../dispatcher/constants.js';
 import { fetchFieldIds } from '../dispatcher/field-cache.js';
 import { NEEDS_HUMAN_LABEL } from '../dispatcher/merge-sweep.js';
-import type { ProjectStatus } from '../dispatcher/types.js';
+import type { BlockedOn, ProjectStatus } from '../dispatcher/types.js';
 import {
   IMPLEMENTATION_SUMMARY_END,
   IMPLEMENTATION_SUMMARY_START,
 } from './implementation-session.js';
 import {
+  decodeReviewClaimPayload,
   encodeReviewClaimPayload,
 } from './codecs.js';
 import {
@@ -37,9 +38,87 @@ import {
   type ReviewClaimRecord,
 } from './types.js';
 
+/**
+ * Minimal per-PR node shape the writer's exact-state pre-checks and
+ * read-backs need. `RawPullRequest` (the shape github-reader.ts's
+ * `readPullRequestForReconciliation` returns) satisfies this structurally,
+ * so callers can wire that method straight in as `readPullRequestByNumber`.
+ */
+export interface ReconciliationPullRequestNode {
+  readonly state: 'OPEN' | 'MERGED';
+  readonly headOid: string;
+  readonly isDraft: boolean;
+  readonly labels: readonly string[];
+  readonly body: string;
+  readonly reviewClaim: { readonly oid: string; readonly payload: string } | null;
+}
+
+/**
+ * Minimal per-issue Project item shape the writer's `readProjectStatus` /
+ * `setProjectStatus` need. `github-reader.ts`'s
+ * `readProjectItemForReconciliation` satisfies this structurally.
+ */
+export interface ReconciliationProjectItemNode {
+  readonly id: string;
+  readonly status: ProjectStatus | null;
+  readonly blockedOn: BlockedOn | null;
+}
+
 export interface ProductionReconciliationWriterOptions {
   readonly repositoryPath: string;
+  /**
+   * Full world snapshot, always fetched fresh. Backs only the optional
+   * fallbacks below (`readPullRequestByNumber` / `readProjectItemForReconciliation`,
+   * when a caller omits them). No writer method should call this directly —
+   * see `readPullRequestByNumber` / `readProjectItemForReconciliation` /
+   * `readDominanceSnapshot` below (jinn-mono#1883: a full snapshot per PR or
+   * per project-status check burned the hourly GitHub GraphQL budget in a
+   * single reconciliation cycle — one measured cycle made ~12 full
+   * snapshots, ~4,700 points).
+   */
   readonly readSnapshot: () => Promise<GitHubLifecycleSnapshot>;
+  /**
+   * Cheap, always-fresh single-PR read (~7-8 GraphQL points, versus ~390 for
+   * a full `readSnapshot`) backing every exact-state PR pre-check and
+   * post-mutation read-back in this writer. Returns `null` when the PR is
+   * not open or merged. Optional for backward compatibility: omitting it
+   * falls back to plucking the PR out of a full `readSnapshot()` call, i.e.
+   * the pre-fix behavior — every production caller should wire this.
+   */
+  readonly readPullRequestByNumber?: (
+    prNumber: number,
+  ) => Promise<ReconciliationPullRequestNode | null>;
+  /**
+   * Cheap, always-fresh single-issue Project-item read (a targeted
+   * `Issue.projectItems` lookup, not a full board paginate) backing
+   * `readProjectStatus` and `setProjectStatus`'s exact-state pre-check and
+   * post-mutation read-back. Optional for backward compatibility: omitting
+   * it falls back to plucking the item out of a full `readSnapshot()` call,
+   * i.e. the pre-fix behavior — every production caller should wire this.
+   */
+  readonly readProjectItemForReconciliation?: (
+    issueNumber: number,
+  ) => Promise<ReconciliationProjectItemNode | null>;
+  /**
+   * Full world snapshot backing every writer pre-check that needs
+   * Project/lifecycle context no single-object read can supply: the
+   * Human-dominance safety check (`humanDominatesPullRequest`, in
+   * `setPullRequestDraft` / `setPullRequestLabel` / `updateReviewRef`),
+   * `readIssueHead` / `readBranchHead`, the `issueHead` half of
+   * `setProjectStatus`'s pre-check and read-back, and `ensureDraftPullRequest`'s
+   * issue-existence + Project-item pre-check. The caller may (and in
+   * production does) memoize this for the lifetime of one reconciliation
+   * cycle: the projection plan being executed was itself derived from that
+   * same snapshot, so reusing it here adds no staleness beyond what planning
+   * already assumed, and bounds the worst case to one cycle. This must NOT
+   * be reused for the specific field a write just changed — e.g.
+   * `setProjectStatus`'s `status` read-back — those need a fresh
+   * per-mutation read, which a memoized snapshot cannot provide (it would
+   * make every such check trivially match the plan it was memoized from).
+   * Optional: defaults to `readSnapshot` (an unmemoized full fetch per
+   * call), i.e. the pre-fix behavior.
+   */
+  readonly readDominanceSnapshot?: () => Promise<GitHubLifecycleSnapshot>;
   readonly credential: SelectedCredential;
   readonly runner?: CommandRunner;
   readonly environment?: NodeJS.ProcessEnv;
@@ -83,30 +162,62 @@ async function mutateWithExactReadback(
   throw new Error(ambiguityMessage);
 }
 
-function pullRequestState(
-  snapshot: GitHubLifecycleSnapshot,
-  prNumber: number,
+// The helpers below all read a single already-fetched PR node — no world
+// snapshot involved (jinn-mono#1883). `raw` comes from the writer's cheap
+// `readPullRequestByNumber` per-PR read.
+
+function pullRequestStateFromRaw(
+  raw: ReconciliationPullRequestNode | null,
 ): ReconciliationPullRequestState | null {
-  const pr = snapshot.pullRequests.find((candidate) =>
-    candidate.number === prNumber && candidate.state === 'OPEN');
-  return pr === undefined ? null : {
-    head: pr.headOid,
-    draft: pr.isDraft,
-    labels: [...pr.labels],
+  if (raw === null || raw.state !== 'OPEN') return null;
+  return {
+    head: gitOid(raw.headOid),
+    draft: raw.isDraft,
+    labels: [...raw.labels],
   };
 }
 
-function reviewRefState(
-  snapshot: GitHubLifecycleSnapshot,
-  prNumber: number,
+function reviewRefStateFromRaw(
+  raw: ReconciliationPullRequestNode | null,
 ): ReconciliationReviewRefState | null {
-  const pr = snapshot.pullRequests.find((candidate) => candidate.number === prNumber);
-  const claim = pr?.reviewClaim;
-  return claim === undefined ? null : {
-    oid: claim.oid,
-    head: claim.record.head,
-    state: claim.record.state,
+  const claim = raw?.reviewClaim;
+  if (claim === undefined || claim === null) return null;
+  const record = decodeReviewClaimPayload(claim.payload);
+  return {
+    oid: gitOid(claim.oid),
+    head: record.head,
+    state: record.state,
   };
+}
+
+// Fallback for `readPullRequestByNumber` when a caller doesn't wire in the
+// cheap reader-backed version (jinn-mono#1883) — reproduces the pre-fix
+// behavior exactly by plucking the PR out of a full `readSnapshot()` call.
+function nodeFromSnapshotPr(
+  pr: GitHubLifecycleSnapshot['pullRequests'][number] | undefined,
+): ReconciliationPullRequestNode | null {
+  if (pr === undefined) return null;
+  return {
+    state: pr.state,
+    headOid: pr.headOid,
+    isDraft: pr.isDraft,
+    labels: pr.labels,
+    body: pr.body,
+    reviewClaim: pr.reviewClaim === undefined
+      ? null
+      : { oid: pr.reviewClaim.oid, payload: encodeReviewClaimPayload(pr.reviewClaim.record) },
+  };
+}
+
+// Fallback for `readProjectItemForReconciliation` when a caller doesn't wire
+// in the cheap reader-backed version (jinn-mono#1883) — reproduces the
+// pre-fix behavior exactly by plucking the item out of a full
+// `readSnapshot()` call.
+function nodeFromSnapshotProjectItem(
+  item: GitHubLifecycleSnapshot['project']['items'][number] | undefined,
+): ReconciliationProjectItemNode | null {
+  if (item === undefined) return null;
+  return { id: item.id, status: item.status, blockedOn: item.blockedOn };
 }
 
 function issueHead(
@@ -178,6 +289,16 @@ export function makeProductionReconciliationWriter(
   const ambient = options.environment ?? process.env;
   const now = options.now ?? (() => new Date());
   const snapshot = options.readSnapshot;
+  const readRawPr = options.readPullRequestByNumber
+    ?? (async (prNumber: number) => nodeFromSnapshotPr(
+      (await snapshot()).pullRequests.find((pr) => pr.number === prNumber),
+    ));
+  const readProjectItem = options.readProjectItemForReconciliation
+    ?? (async (issueNumber: number) => nodeFromSnapshotProjectItem(
+      (await snapshot()).project.items.find((item) =>
+        item.contentType === 'Issue' && item.number === issueNumber),
+    ));
+  const dominanceSnapshot = options.readDominanceSnapshot ?? snapshot;
   const selected = <Value>(
     operation: Parameters<typeof withSelectedCredential<Value>>[2],
   ): Promise<Value> => withSelectedCredential(
@@ -187,17 +308,31 @@ export function makeProductionReconciliationWriter(
     runner,
   );
   const readPr = async (prNumber: number) =>
-    pullRequestState(await snapshot(), prNumber);
+    pullRequestStateFromRaw(await readRawPr(prNumber));
   const readReview = async (prNumber: number) =>
-    reviewRefState(await snapshot(), prNumber);
+    reviewRefStateFromRaw(await readRawPr(prNumber));
   const findOpenPullRequest = async (headRefName: string) => {
-    const pr = (await snapshot()).pullRequests.find((candidate) =>
-      candidate.state === 'OPEN' && candidate.headRefName === headRefName);
+    // Cheap, headRefName-scoped lookup (not a `readPullRequestByNumber`
+    // shape, since the PR's number isn't known yet) — a small `gh pr list`
+    // filter, not the full world snapshot (jinn-mono#1883).
+    const raw = await runner('gh', [
+      'pr', 'list', '--repo', REPO,
+      '--head', headRefName,
+      '--state', 'open',
+      '--json', 'number,headRefOid,isDraft,labels',
+    ]);
+    const parsed = JSON.parse(raw) as ReadonlyArray<{
+      readonly number: number;
+      readonly headRefOid: string;
+      readonly isDraft: boolean;
+      readonly labels: ReadonlyArray<{ readonly name: string }>;
+    }>;
+    const pr = parsed[0];
     return pr === undefined ? null : {
       number: pr.number,
-      head: pr.headOid,
+      head: gitOid(pr.headRefOid),
       draft: pr.isDraft,
-      labels: [...pr.labels],
+      labels: pr.labels.map((label) => label.name),
     };
   };
 
@@ -206,24 +341,30 @@ export function makeProductionReconciliationWriter(
     expectedReviewRefOid: GitOid,
     desired: 'fixing' | 'terminal-approved' | 'stale',
   ): Promise<void> => {
-    const beforeSnapshot = await snapshot();
-    const beforePr = beforeSnapshot.pullRequests.find((candidate) =>
-      candidate.number === prNumber);
-    const before = beforePr?.reviewClaim;
-    if (before === undefined || before.oid !== expectedReviewRefOid) {
+    const beforeRaw = await readRawPr(prNumber);
+    const beforeClaim = beforeRaw?.reviewClaim;
+    if (
+      beforeClaim === undefined
+      || beforeClaim === null
+      || gitOid(beforeClaim.oid) !== expectedReviewRefOid
+    ) {
       throw new Error('Review-ref authority changed before reconciliation');
     }
-    if (humanDominatesPullRequest(beforeSnapshot, prNumber)) {
+    const beforeRecord = decodeReviewClaimPayload(beforeClaim.payload);
+    // Dominance needs Project/lifecycle context a single-PR read can't
+    // supply, so it comes from the (per-cycle-memoized) dominance snapshot
+    // rather than another full fetch here — see `readDominanceSnapshot`.
+    if (humanDominatesPullRequest(await dominanceSnapshot(), prNumber)) {
       throw new Error('Human is dominant over review-ref reconciliation');
     }
     if (
       desired !== 'stale'
-      && beforePr?.headOid !== before.record.head
+      && (beforeRaw === null || gitOid(beforeRaw.headOid) !== beforeRecord.head)
     ) {
       throw new Error('Review-ref reconciliation lost exact-head authority');
     }
     const record = nextReviewRecord(
-      before.record,
+      beforeRecord,
       desired,
       now().toISOString(),
     );
@@ -298,12 +439,14 @@ export function makeProductionReconciliationWriter(
 
   return {
     async readIssueHead(issueNumber) {
-      const current = await snapshot();
-      return issueHead(current, issueNumber);
+      // Pre-check-only read (never a post-mutation confirmation — see
+      // `readDominanceSnapshot`'s doc comment) so the per-cycle-memoized
+      // snapshot is safe here.
+      return issueHead(await dominanceSnapshot(), issueNumber);
     },
 
     async readBranchHead(headRefName) {
-      const current = await snapshot();
+      const current = await dominanceSnapshot();
       return current.branches.find((branch) =>
         branch.headRefName === headRefName)?.headOid
         ?? current.pullRequests.find((pr) =>
@@ -312,16 +455,12 @@ export function makeProductionReconciliationWriter(
     },
 
     async readProjectStatus(issueNumber) {
-      const current = await snapshot();
-      return current.project.items.find((item) =>
-        item.contentType === 'Issue' && item.number === issueNumber)?.status ?? null;
+      return (await readProjectItem(issueNumber))?.status ?? null;
     },
 
     async setProjectStatus(issueNumber, status: ProjectStatus, expectedHead) {
-      const current = await snapshot();
-      const item = current.project.items.find((candidate) =>
-        candidate.contentType === 'Issue' && candidate.number === issueNumber);
-      if (item === undefined) throw new Error('Issue is missing from Project');
+      const item = await readProjectItem(issueNumber);
+      if (item === null) throw new Error('Issue is missing from Project');
       if (
         status !== 'Human'
         && (item.status === 'Human' || item.blockedOn === 'Human')
@@ -330,7 +469,7 @@ export function makeProductionReconciliationWriter(
       }
       if (
         expectedHead !== undefined
-        && issueHead(current, issueNumber) !== expectedHead
+        && issueHead(await dominanceSnapshot(), issueNumber) !== expectedHead
       ) {
         throw new Error('Project reconciliation lost exact-head authority');
       }
@@ -347,10 +486,7 @@ export function makeProductionReconciliationWriter(
             '--single-select-option-id', fields.status.options[status],
           ]),
           async () => {
-            const after = await snapshot();
-            const afterItem = after.project.items.find((candidate) =>
-              candidate.contentType === 'Issue'
-              && candidate.number === issueNumber);
+            const afterItem = await readProjectItem(issueNumber);
             return afterItem?.status === status
               && (
                 status === 'Human'
@@ -358,7 +494,7 @@ export function makeProductionReconciliationWriter(
               )
               && (
                 expectedHead === undefined
-                || issueHead(after, issueNumber) === expectedHead
+                || issueHead(await dominanceSnapshot(), issueNumber) === expectedHead
               );
           },
           'Project status reconciliation was ambiguous',
@@ -369,12 +505,11 @@ export function makeProductionReconciliationWriter(
     readPullRequest: readPr,
 
     async setPullRequestDraft(prNumber, draft, expectedHead) {
-      const before = await snapshot();
-      const beforePr = pullRequestState(before, prNumber);
+      const beforePr = await readPr(prNumber);
       if (expectedHead !== undefined && beforePr?.head !== expectedHead) {
         throw new Error('Pull-request draft reconciliation lost exact-head authority');
       }
-      if (!draft && humanDominatesPullRequest(before, prNumber)) {
+      if (!draft && humanDominatesPullRequest(await dominanceSnapshot(), prNumber)) {
         throw new Error('Human is dominant over pull-request draft reconciliation');
       }
       await selected(({ run }) => mutateWithExactReadback(
@@ -392,13 +527,12 @@ export function makeProductionReconciliationWriter(
     },
 
     async setPullRequestLabel(prNumber, label, present, expectedHead) {
-      const before = await snapshot();
-      const beforePr = pullRequestState(before, prNumber);
+      const beforePr = await readPr(prNumber);
       if (expectedHead !== undefined && beforePr?.head !== expectedHead) {
         throw new Error('Pull-request label reconciliation lost exact-head authority');
       }
       if (
-        humanDominatesPullRequest(before, prNumber)
+        humanDominatesPullRequest(await dominanceSnapshot(), prNumber)
         && !(label === NEEDS_HUMAN_LABEL && present)
       ) {
         throw new Error('Human is dominant over pull-request label reconciliation');
@@ -458,10 +592,8 @@ export function makeProductionReconciliationWriter(
     },
 
     async ensureImplementationSummary(prNumber, expectedHead, summary) {
-      const current = await snapshot();
-      const pr = current.pullRequests.find((candidate) =>
-        candidate.number === prNumber && candidate.state === 'OPEN');
-      if (pr === undefined || pr.headOid !== expectedHead) {
+      const pr = await readRawPr(prNumber);
+      if (pr === null || pr.state !== 'OPEN' || gitOid(pr.headOid) !== expectedHead) {
         throw new Error('Implementation summary head changed');
       }
       const desired = completionBody(pr.body, summary);
@@ -471,9 +603,11 @@ export function makeProductionReconciliationWriter(
           'pr', 'edit', String(prNumber), '--repo', REPO, '--body', desired,
         ]),
         async () => {
-          const after = (await snapshot()).pullRequests.find((candidate) =>
-            candidate.number === prNumber && candidate.state === 'OPEN');
-          return after?.headOid === expectedHead && after.body === desired;
+          const after = await readRawPr(prNumber);
+          return after !== null
+            && after.state === 'OPEN'
+            && gitOid(after.headOid) === expectedHead
+            && after.body === desired;
         },
         'Implementation summary reconciliation was ambiguous',
       ));
@@ -482,7 +616,12 @@ export function makeProductionReconciliationWriter(
     findOpenPullRequest,
 
     async ensureDraftPullRequest(input) {
-      const current = await snapshot();
+      // Pure pre-check (the read-back below uses `findOpenPullRequest`,
+      // already cheap) needing issue existence/title + Project context no
+      // single-object read can supply — the memoized dominance snapshot is
+      // safe here for the same reason it's safe for the Human-dominance
+      // check (see `readDominanceSnapshot`'s doc comment).
+      const current = await dominanceSnapshot();
       const issue = current.issues.find((candidate) =>
         candidate.number === input.issueNumber);
       if (issue === undefined) throw new Error('Issue is absent from the lifecycle snapshot');
