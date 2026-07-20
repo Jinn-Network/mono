@@ -213,17 +213,19 @@ test('(e) buildCommitMessage produces the canonical string from the mono SHA', (
 
 // --- (f) provenance file content ---------------------------------------------
 
-test('(f) writeProvenance emits .jinn-split-source at ROOT with sha/path/do-not-edit', () => {
+test('(f) writeProvenance emits the exact two-line source/generator contract at ROOT', () => {
   const slim = makeSlimRepo();
   try {
     writeProvenance(slim, PROV);
     const provPath = path.join(slim, '.jinn-split-source');
     assert.ok(existsSync(provPath), '.jinn-split-source at slim ROOT');
     const content = readFileSync(provPath, 'utf8');
-    assert.match(content, new RegExp(PROV.monoSha), 'contains the mono SHA');
-    assert.doesNotMatch(content, /release:/, 'no release: line (tag axis dropped)');
-    assert.match(content, /\.github\/workflows\/jinn-plugin-split\.yml/, 'contains the workflow path');
-    assert.match(content, /do not edit here/i, 'contains a do-not-edit line');
+    assert.equal(
+      content,
+      `source: Jinn-Network/mono@${PROV.monoSha}\n` +
+        `generated-by: ${PROV.workflowPath}\n`,
+      'provenance is exactly the source and generator contract',
+    );
   } finally {
     cleanup(slim);
   }

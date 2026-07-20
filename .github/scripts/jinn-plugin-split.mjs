@@ -149,7 +149,6 @@ export function writeProvenance(slimCheckout, { monoSha, workflowPath }) {
   const content = [
     `source: Jinn-Network/mono@${monoSha}`,
     `generated-by: ${workflowPath}`,
-    'DO NOT EDIT HERE — edit apps/jinn-agent/plugins/jinn/ in Jinn-Network/mono.',
     '',
   ].join('\n');
   writeFileSync(path.join(slimCheckout, PROVENANCE_FILE), content);
