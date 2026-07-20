@@ -668,3 +668,53 @@ Retained concerns are unchanged: live private/enterprise authentication,
 cross-platform null-device handling, and the crash/canary campaign still need
 coverage before lifecycle writer activation. Later phase adapters must treat
 both `removed` and `already-removed` as successful local cleanup outcomes.
+
+---
+
+## Nested static-update immutability closure — 2026-07-20
+
+### Finding and fix
+
+`updateAttemptManifest` previously captured the static baseline with a shallow
+object projection. The nested `repository` and `paths` values therefore shared
+references with the updater callback input, allowing an in-place mutation to
+change both the candidate and baseline before comparison.
+
+The static baseline is now deep-cloned with `structuredClone` before the
+updater runs. The existing strict decode and deep equality comparison therefore
+reject every nested static mutation before `writeManifestAtomic` can write it.
+
+### RED / GREEN evidence
+
+All commands ran from `packages/autopilot`.
+
+RED:
+
+```text
+yarn test test/lifecycle/attempt-workspace.test.ts
+```
+
+Result: 1 of 22 tests failed as expected. An in-place mutation of
+`repository.root` completed without throwing, demonstrating the shallow
+snapshot bypass.
+
+GREEN:
+
+```text
+yarn test test/lifecycle/attempt-workspace.test.ts
+```
+
+Result: 1 file passed, 22 tests passed, 0 failures. The focused regression
+covers in-place mutation of repository root, Git common directory, remote URL
+hash, and worktree, log, and manifest paths; each is rejected and leaves the
+on-disk manifest byte-for-byte unchanged.
+
+### Verification
+
+- `yarn vitest run test/lifecycle test/dispatcher/identity.test.ts`: 12 files
+  passed, 148 tests passed, 0 failures.
+- `yarn typecheck`: exit 0, no diagnostics.
+- `yarn test`: 83 files passed, 863 tests passed, 0 failures.
+- `git diff --check`: exit 0.
+
+No new concerns beyond the retained Task 3 concerns above.

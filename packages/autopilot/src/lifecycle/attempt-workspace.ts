@@ -437,7 +437,7 @@ export function updateAttemptManifest(
         .filter(([key]) => !progressiveTimestampFields.has(key)),
     ),
   });
-  const previousStaticFields = staticFields(previous);
+  const previousStaticFields = structuredClone(staticFields(previous));
   const next = decodeAttemptManifest(update(previous));
   if (!isDeepStrictEqual(staticFields(next), previousStaticFields)) {
     throw new Error('Atomic manifest update cannot change static attempt fields');
