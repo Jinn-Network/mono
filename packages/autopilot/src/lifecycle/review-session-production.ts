@@ -128,6 +128,7 @@ export function makeProductionReviewSessionPort(
       || typeof record.headRefOid !== 'string'
       || typeof record.headRefName !== 'string'
       || typeof record.baseRefName !== 'string'
+      || typeof record.baseRefOid !== 'string'
       || typeof record.isDraft !== 'boolean'
       || typeof record.body !== 'string'
       || typeof record.author !== 'object'
@@ -171,6 +172,7 @@ export function makeProductionReviewSessionPort(
     return {
       number: record.number,
       head: gitOid(record.headRefOid),
+      base: gitOid(record.baseRefOid),
       headRefName: record.headRefName,
       baseRefName: record.baseRefName,
       open: record.state === 'OPEN',
@@ -233,7 +235,7 @@ export function makeProductionReviewSessionPort(
       'pr', 'view', String(prNumber),
       '--repo', REPO,
       '--json',
-      'number,state,headRefName,baseRefName,headRefOid,isDraft,labels,body,author,closingIssues,files',
+      'number,state,headRefName,baseRefName,headRefOid,baseRefOid,isDraft,labels,body,author,closingIssues,files',
     ]));
     const markerMatches = [...pullRequest.body.matchAll(
       /<!-- jinn-autopilot:v2 issue=([1-9][0-9]*) branch=([^ >]+) -->/g,
@@ -269,7 +271,7 @@ export function makeProductionReviewSessionPort(
       ? 'The current PR does not have a unique open PR, issue, and branch mapping.'
       : undefined;
     const treePaths = (await runGit(manifest, [
-      'ls-tree', '-r', '--name-only', pullRequest.head,
+      'ls-tree', '-r', '--name-only', pullRequest.base,
     ])).trim().split('\n').filter(Boolean);
     const codeownersPath = [
       '.github/CODEOWNERS',
@@ -278,7 +280,7 @@ export function makeProductionReviewSessionPort(
     ].find((path) => treePaths.includes(path));
     const codeownersText = codeownersPath === undefined
       ? ''
-      : await runGit(manifest, ['show', `${pullRequest.head}:${codeownersPath}`]);
+      : await runGit(manifest, ['show', `${pullRequest.base}:${codeownersPath}`]);
     const approvalPolicy = touchesCodeOwnedPath(
       [...pullRequest.files],
       parseOwnedPrefixes(codeownersText),

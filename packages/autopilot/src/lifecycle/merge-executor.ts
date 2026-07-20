@@ -29,6 +29,7 @@ export interface MergeCandidate {
   readonly authorAllowed: boolean;
   readonly uniqueIssueMapping: boolean;
   readonly terminalApprovalMatches: boolean;
+  readonly terminalApprovalReviewer?: string;
   readonly effectiveReviews: readonly MergeEffectiveReview[];
   readonly checks: readonly {
     readonly name: string;
@@ -60,6 +61,12 @@ export function evaluateMergeGate(candidate: MergeCandidate): MergeGateResult {
   if (!candidate.uniqueIssueMapping) reasons.push('mapping');
   if (candidate.baseRefName !== candidate.expectedBaseRefName) reasons.push('base');
   if (!candidate.terminalApprovalMatches) reasons.push('terminal-approval');
+  if (
+    candidate.terminalApprovalReviewer !== undefined
+    && candidate.terminalApprovalReviewer.toLowerCase() === candidate.author.toLowerCase()
+  ) {
+    reasons.push('self-review');
+  }
   if (candidate.effectiveReviews.some((review) => (
     review.commitId === candidate.head && review.state === 'CHANGES_REQUESTED'
   ))) {

@@ -194,8 +194,7 @@ export function makeProductionReviewActionPort(
       && lifecycle.reviewClaim?.state === 'terminal-approved'
       && lifecycle.reviewClaim.head === pr.headOid
       && lifecycle.terminalVerdict?.head === pr.headOid
-      && lifecycle.terminalVerdict.state === 'APPROVE'
-      && lifecycle.terminalVerdict.marker === lifecycle.reviewClaim.verdict.marker;
+      && lifecycle.terminalVerdict.state === 'APPROVE';
     return {
       issueNumber,
       number: pr.number,

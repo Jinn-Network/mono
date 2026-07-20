@@ -76,8 +76,7 @@ export function makeProductionMergeActionPort(
     const terminalApprovalMatches = lifecycle.reviewClaim?.state === 'terminal-approved'
       && lifecycle.reviewClaim.head === pr.headOid
       && lifecycle.terminalVerdict?.head === pr.headOid
-      && lifecycle.terminalVerdict.state === 'APPROVE'
-      && lifecycle.terminalVerdict.marker === lifecycle.reviewClaim.verdict.marker;
+      && lifecycle.terminalVerdict.state === 'APPROVE';
     return {
       issueNumber: lifecycle.issueNumber,
       prNumber: pr.number,
@@ -95,6 +94,9 @@ export function makeProductionMergeActionPort(
       authorAllowed: options.authorAllowlist.has(pr.author.toLowerCase()),
       uniqueIssueMapping: diagnostic === undefined,
       terminalApprovalMatches,
+      ...(lifecycle.reviewClaim?.reviewer === undefined
+        ? {}
+        : { terminalApprovalReviewer: lifecycle.reviewClaim.reviewer }),
       effectiveReviews: pr.reviews
         .filter((review) => review.commitId === pr.headOid)
         .map((review) => ({
