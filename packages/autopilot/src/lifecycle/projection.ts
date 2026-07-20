@@ -1,8 +1,11 @@
 import type { ProjectStatus } from '../dispatcher/types.js';
 import { DEFAULT_CONFIG } from '../dispatcher/types.js';
 import { NEEDS_HUMAN_LABEL } from '../dispatcher/merge-sweep.js';
+import { formatHumanCommentMarker } from './codecs.js';
 import type {
   GitOid,
+  HumanReason,
+  LifecycleMappingDiagnostic,
   LifecyclePhase,
   LifecycleView,
   LifecycleViewItem,
@@ -19,12 +22,15 @@ export interface OrphanBranchClaim {
   readonly headRefName: string;
   readonly baseRefName: string;
   readonly projectStatus: ProjectStatus | null;
+  readonly humanHold?: boolean;
+  readonly humanReason?: HumanReason;
 }
 
 export interface ProjectionContext {
   readonly view: LifecycleView;
   readonly pullRequests: readonly ProjectionPullRequest[];
   readonly orphanBranchClaims: readonly OrphanBranchClaim[];
+  readonly mappingDiagnostics?: readonly LifecycleMappingDiagnostic[];
 }
 
 interface HeadPinned {
@@ -51,7 +57,7 @@ export type ProjectionAction =
     } & HeadPinned)
   | ({
       readonly kind: 'ensure-human-comment';
-      readonly issueNumber: number;
+      readonly issueNumber?: number;
       readonly prNumber: number;
       readonly marker: string;
       readonly body: string;
@@ -122,8 +128,11 @@ function humanMarker(view: LifecycleViewItem): { marker: string; body: string } 
     return null;
   }
   const reason = view.humanReason;
-  const marker = `<!-- jinn-autopilot-human:v2 issue=${view.item.issueNumber} `
-    + `pr=${view.item.prNumber} phase=${reason.phase} code=${reason.code} -->`;
+  const marker = formatHumanCommentMarker({
+    issueNumber: view.item.issueNumber,
+    prNumber: view.item.prNumber,
+    reason,
+  });
   return {
     marker,
     body: `${marker}\n\nAutopilot parked this item for Human review.\n\n${reason.detail}`,
@@ -186,8 +195,9 @@ function planItem(
           : { requiresReviewState: completedReviewState }),
       });
     }
-    const wantsReviewLabel = view.phase !== 'human'
-      && !['implementing', 'merged'].includes(view.phase);
+    const wantsReviewLabel = view.phase === 'human'
+      ? item.labels.includes(labels.review)
+      : !['implementing', 'merged'].includes(view.phase);
     if (item.labels.includes(labels.review) !== wantsReviewLabel) {
       actions.push({
         kind: 'set-pr-label',
@@ -273,6 +283,26 @@ export function planProjection(
   );
   for (const claim of context.orphanBranchClaims) {
     if (existingPrIssues.has(claim.issueNumber)) continue;
+    if (
+      claim.humanHold === true
+      || claim.humanReason !== undefined
+      || claim.projectStatus === 'Human'
+    ) {
+      const alreadyProjectsHuman = actions.some((action) => (
+        action.kind === 'set-project-status'
+        && action.issueNumber === claim.issueNumber
+        && action.status === 'Human'
+      ));
+      if (claim.projectStatus !== 'Human' && !alreadyProjectsHuman) {
+        actions.push({
+          kind: 'set-project-status',
+          issueNumber: claim.issueNumber,
+          expectedHead: claim.head,
+          status: 'Human',
+        });
+      }
+      continue;
+    }
     if (claim.projectStatus !== 'In Progress') {
       actions.push({
         kind: 'set-project-status',
@@ -288,6 +318,48 @@ export function planProjection(
       headRefName: claim.headRefName,
       baseRefName: claim.baseRefName,
     });
+  }
+  for (const diagnostic of context.mappingDiagnostics ?? []) {
+    const reason: HumanReason = {
+      phase: 'implementing',
+      code: 'branch-mapping-ambiguous',
+      detail: diagnostic.detail,
+    };
+    for (const issue of diagnostic.issues) {
+      if (issue.projectStatus === 'Human') continue;
+      actions.push({
+        kind: 'set-project-status',
+        issueNumber: issue.number,
+        status: 'Human',
+      });
+    }
+    for (const pr of diagnostic.pullRequests) {
+      if (!pr.draft) {
+        actions.push({
+          kind: 'set-pr-draft',
+          prNumber: pr.number,
+          expectedHead: pr.head,
+          draft: true,
+        });
+      }
+      if (!pr.labels.includes(labels.human)) {
+        actions.push({
+          kind: 'set-pr-label',
+          prNumber: pr.number,
+          expectedHead: pr.head,
+          label: labels.human,
+          present: true,
+        });
+      }
+      const marker = formatHumanCommentMarker({ prNumber: pr.number, reason });
+      actions.push({
+        kind: 'ensure-human-comment',
+        prNumber: pr.number,
+        expectedHead: pr.head,
+        marker,
+        body: `${marker}\n\nAutopilot parked this item for Human review.\n\n${reason.detail}`,
+      });
+    }
   }
   return { actions };
 }

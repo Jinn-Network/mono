@@ -15,7 +15,9 @@ import {
   type BranchClaim,
   type GitOid,
   type HumanReason,
+  type IssueEligibilityReason,
   type LifecycleItem,
+  type LifecycleMappingDiagnostic,
   type LifecycleSnapshot,
   type ReviewClaimRecord,
   type ReviewVerdictState,
@@ -130,7 +132,10 @@ export interface PullRequestPage {
 export interface GitHubLifecycleReader {
   readProjectSnapshot(): Promise<ProjectSnapshot>;
   readIssues(board: ReturnType<typeof toIssueBoardState>): Promise<readonly PolledIssue[]>;
-  readPullRequests(cursor: string | null): Promise<PullRequestPage>;
+  readPullRequests(
+    cursor: string | null,
+    nonDoneIssueNumbers?: readonly number[],
+  ): Promise<PullRequestPage>;
   readBranchClaims?(): Promise<readonly RawBranchClaim[]>;
 }
 
@@ -139,6 +144,7 @@ export interface GitHubLifecycleSnapshot {
   readonly issues: readonly PolledIssue[];
   readonly pullRequests: readonly PullRequestSnapshot[];
   readonly branches: readonly BranchClaimSnapshot[];
+  readonly diagnostics: readonly LifecycleMappingDiagnostic[];
   readonly lifecycle: LifecycleSnapshot;
   readonly capturedAt: string;
 }
@@ -230,7 +236,10 @@ function parsePullRequest(raw: RawPullRequest): PullRequestSnapshot {
   }
 }
 
-function prLinksByIssue(prs: readonly PullRequestSnapshot[]): Map<number, PrLink[]> {
+function prLinksByIssue(
+  prs: readonly PullRequestSnapshot[],
+  issueByPr: ReadonlyMap<number, number>,
+): Map<number, PrLink[]> {
   const out = new Map<number, PrLink[]>();
   for (const pr of prs) {
     const link: PrLink = {
@@ -242,11 +251,11 @@ function prLinksByIssue(prs: readonly PullRequestSnapshot[]): Map<number, PrLink
       author: pr.author,
       labels: [...pr.labels],
     };
-    for (const issueNumber of pr.closingIssueNumbers) {
-      const links = out.get(issueNumber) ?? [];
-      links.push(link);
-      out.set(issueNumber, links);
-    }
+    const issueNumber = issueByPr.get(pr.number);
+    if (issueNumber === undefined) continue;
+    const links = out.get(issueNumber) ?? [];
+    links.push(link);
+    out.set(issueNumber, links);
   }
   return out;
 }
@@ -330,12 +339,153 @@ function lifecyclePr(
   };
 }
 
+function stableBranchIssue(headRefName: string): number | undefined {
+  const match = /^autopilot\/([1-9][0-9]*)$/.exec(headRefName);
+  if (match === null) return undefined;
+  const number = Number(match[1]);
+  return Number.isSafeInteger(number) ? number : undefined;
+}
+
+function resolveMappings(
+  prs: readonly PullRequestSnapshot[],
+  byIssue: ReadonlyMap<number, PolledIssue>,
+): {
+  readonly issueByPr: ReadonlyMap<number, number>;
+  readonly diagnostics: readonly LifecycleMappingDiagnostic[];
+  readonly affectedIssues: ReadonlySet<number>;
+} {
+  const candidatesByPr = new Map<number, Set<number>>();
+  const prsByIssue = new Map<number, Set<number>>();
+  const intrinsicallyAmbiguous = new Set<number>();
+  for (const pr of prs) {
+    const candidates = new Set<number>();
+    for (const issueNumber of pr.closingIssueNumbers) {
+      if (byIssue.has(issueNumber)) candidates.add(issueNumber);
+    }
+    const stableIssue = stableBranchIssue(pr.headRefName);
+    if (stableIssue !== undefined && byIssue.has(stableIssue)) candidates.add(stableIssue);
+    candidatesByPr.set(pr.number, candidates);
+    for (const issueNumber of candidates) {
+      const issuePrs = prsByIssue.get(issueNumber) ?? new Set<number>();
+      issuePrs.add(pr.number);
+      prsByIssue.set(issueNumber, issuePrs);
+    }
+    const closing = new Set(pr.closingIssueNumbers);
+    if (
+      candidates.size !== 1
+      || closing.size > 1
+      || (stableIssue !== undefined && closing.size > 0 && !closing.has(stableIssue))
+      || (pr.closingIssueNumbers.length > 0
+        && !pr.closingIssueNumbers.some((number) => byIssue.has(number)))
+    ) {
+      intrinsicallyAmbiguous.add(pr.number);
+    }
+  }
+
+  const ambiguousPrs = new Set(intrinsicallyAmbiguous);
+  for (const issuePrs of prsByIssue.values()) {
+    if (issuePrs.size > 1) {
+      for (const prNumber of issuePrs) ambiguousPrs.add(prNumber);
+    }
+  }
+
+  const prByNumber = new Map(prs.map((pr) => [pr.number, pr]));
+  const seenPrs = new Set<number>();
+  const diagnostics: LifecycleMappingDiagnostic[] = [];
+  const affectedIssues = new Set<number>();
+  for (const seed of [...ambiguousPrs].sort((left, right) => left - right)) {
+    if (seenPrs.has(seed)) continue;
+    const componentPrs = new Set<number>();
+    const componentIssues = new Set<number>();
+    const pendingPrs = [seed];
+    while (pendingPrs.length > 0) {
+      const prNumber = pendingPrs.pop()!;
+      if (componentPrs.has(prNumber)) continue;
+      componentPrs.add(prNumber);
+      seenPrs.add(prNumber);
+      for (const issueNumber of candidatesByPr.get(prNumber) ?? []) {
+        if (componentIssues.has(issueNumber)) continue;
+        componentIssues.add(issueNumber);
+        for (const linkedPr of prsByIssue.get(issueNumber) ?? []) {
+          if (!componentPrs.has(linkedPr)) pendingPrs.push(linkedPr);
+        }
+      }
+    }
+    for (const issueNumber of componentIssues) affectedIssues.add(issueNumber);
+    const diagnosticPrs = [...componentPrs]
+      .map((number) => prByNumber.get(number)!)
+      .sort((left, right) => left.number - right.number);
+    const issueNumbers = [...componentIssues].sort((left, right) => left - right);
+    const prNumbers = diagnosticPrs.map((pr) => pr.number);
+    diagnostics.push({
+      code: 'branch-mapping-ambiguous',
+      detail: `Ambiguous lifecycle mapping between issue(s) ${
+        issueNumbers.length === 0 ? 'none' : issueNumbers.map((number) => `#${number}`).join(', ')
+      } and PR(s) ${prNumbers.map((number) => `#${number}`).join(', ')}`,
+      issueNumbers,
+      issues: issueNumbers.map((number) => ({
+        number,
+        projectStatus: byIssue.get(number)?.status ?? null,
+      })),
+      pullRequests: diagnosticPrs.map((pr) => ({
+        number: pr.number,
+        head: pr.headOid,
+        draft: pr.isDraft,
+        labels: [...pr.labels],
+      })),
+    });
+  }
+
+  const issueByPr = new Map<number, number>();
+  for (const pr of prs) {
+    if (ambiguousPrs.has(pr.number)) continue;
+    const candidates = candidatesByPr.get(pr.number);
+    if (candidates?.size === 1) issueByPr.set(pr.number, [...candidates][0]!);
+  }
+  return { issueByPr, diagnostics, affectedIssues };
+}
+
+function eligibilityEvidence(
+  issue: PolledIssue,
+  eligible: boolean,
+  authorDisallowed: boolean,
+  stackReady: ReadonlyMap<number, unknown>,
+): { readonly reason: IssueEligibilityReason; readonly detail: string } {
+  if (eligible) return { reason: 'eligible', detail: 'All implementation admission gates pass' };
+  if (issue.blockedOn === 'Another issue' && !stackReady.has(issue.number)) {
+    const blockers = issue.blockedByIssues.map((number) => `#${number}`).join(', ');
+    return {
+      reason: 'dependency-blocked',
+      detail: blockers.length === 0
+        ? 'Blocked by an unresolved issue dependency'
+        : `Blocked by unresolved issue ${blockers}`,
+    };
+  }
+  if (authorDisallowed) {
+    return {
+      reason: 'author-disallowed',
+      detail: `Issue author ${issue.author || '(missing)'} is not selected by the author allowlist`,
+    };
+  }
+  const sourceReason =
+    issue.shape === null ? 'Issue Type is not set'
+      : issue.priority === null ? 'Priority is not set'
+        : !issue.onBoard || issue.projectItemId === null ? 'Issue is not on the Project'
+          : issue.status !== 'Todo' ? `Project status is ${issue.status ?? 'unset'}, not Todo`
+            : issue.blockedOn === 'Human' ? 'Project Blocked on is Human'
+              : `Project Blocked on is ${issue.blockedOn ?? 'unset'}`;
+  return { reason: 'not-selected', detail: sourceReason };
+}
+
 function lifecycleItems(
   issues: readonly PolledIssue[],
   prs: readonly PullRequestSnapshot[],
   authorAllowlist: ReadonlySet<string>,
   project: ProjectSnapshot,
-): readonly LifecycleItem[] {
+): {
+  readonly items: readonly LifecycleItem[];
+  readonly diagnostics: readonly LifecycleMappingDiagnostic[];
+} {
   const byIssue = new Map(issues.map((issue) => [issue.number, issue]));
   for (const entry of project.items) {
     if (entry.contentType !== 'Issue' || byIssue.has(entry.number)) continue;
@@ -355,36 +505,60 @@ function lifecycleItems(
         && entry.sprintIterationId === project.currentSprintIterationId,
     });
   }
-  const links = prLinksByIssue(prs);
+  const mappings = resolveMappings(prs, byIssue);
+  const links = prLinksByIssue(prs, mappings.issueByPr);
   const stackReady = resolveStackReady([...issues], links, authorAllowlist);
-  const issuesWithPr = new Set(prs.flatMap((pr) => pr.closingIssueNumbers));
-  const ready = new Set(
-    selectReady(
-      [...issues],
-      issuesWithPr,
-      authorAllowlist,
-      stackReady,
-    ).ready.map((issue) => issue.number),
-  );
+  const issuesWithPr = new Set([
+    ...mappings.issueByPr.values(),
+    ...mappings.affectedIssues,
+  ]);
+  const selected = selectReady([...issues], issuesWithPr, authorAllowlist, stackReady);
+  const ready = new Set(selected.ready.map((issue) => issue.number));
+  const skippedForAuthor = new Set(selected.skippedForAuthor.map((issue) => issue.number));
   const out: LifecycleItem[] = [];
   for (const issue of issues) {
-    if (issuesWithPr.has(issue.number)) continue;
+    if (issuesWithPr.has(issue.number) || mappings.affectedIssues.has(issue.number)) continue;
+    const eligibility = eligibilityEvidence(
+      issue,
+      ready.has(issue.number),
+      skippedForAuthor.has(issue.number),
+      stackReady,
+    );
+    const issueLabels = [...(issue.labels ?? [])];
+    const sourceHumanHold = issue.blockedOn === 'Human'
+      || issue.status === 'Human'
+      || issueLabels.includes('review:needs-human');
+    const sourceHumanReason: HumanReason | undefined = sourceHumanHold
+      ? {
+          phase: 'eligible',
+          code: 'implementation-escalation',
+          detail: issue.blockedOn === 'Human'
+            ? 'Project Blocked on is Human'
+            : issueLabels.includes('review:needs-human')
+              ? 'Issue carries review:needs-human'
+              : 'Project status is Human',
+        }
+      : undefined;
     out.push({
       kind: 'issue',
       issueNumber: issue.number,
       v2Marked: false,
       projectStatus: issue.status,
-      labels: [],
-      ...(issue.blockedOn === 'Human' ? { humanHold: true } : {}),
+      labels: issueLabels,
+      ...(sourceHumanHold ? { humanHold: true } : {}),
+      ...(sourceHumanReason === undefined ? {} : { humanReason: sourceHumanReason }),
       eligible: ready.has(issue.number),
+      eligibilityReason: eligibility.reason,
+      eligibilityDetail: eligibility.detail,
     });
   }
   for (const pr of prs) {
-    if (pr.closingIssueNumbers.length !== 1) continue;
-    const issue = byIssue.get(pr.closingIssueNumbers[0]!);
+    const issueNumber = mappings.issueByPr.get(pr.number);
+    if (issueNumber === undefined) continue;
+    const issue = byIssue.get(issueNumber);
     if (issue !== undefined) out.push(lifecyclePr(pr, issue));
   }
-  return out;
+  return { items: out, diagnostics: mappings.diagnostics };
 }
 
 function deepFreeze<Value>(value: Value): Value {
@@ -406,13 +580,16 @@ export async function buildGitHubLifecycleSnapshot(
 ): Promise<GitHubLifecycleSnapshot> {
   const project = await reader.readProjectSnapshot();
   const issues = await reader.readIssues(toIssueBoardState(project));
+  const nonDoneIssueNumbers = project.items
+    .filter((item) => item.contentType === 'Issue' && item.status !== 'Done')
+    .map((item) => item.number);
   const rawPrs: RawPullRequest[] = [];
   const maxPages = options.maxPages ?? 100;
   let cursor: string | null = null;
   const seen = new Set<string>();
   for (let pageNumber = 1; ; pageNumber += 1) {
     if (pageNumber > maxPages) throw new Error('PR pagination exceeded safety limit');
-    const page = await reader.readPullRequests(cursor);
+    const page = await reader.readPullRequests(cursor, nonDoneIssueNumbers);
     rawPrs.push(...page.nodes);
     if (!page.pageInfo.hasNextPage) break;
     const next = page.pageInfo.endCursor;
@@ -426,13 +603,15 @@ export async function buildGitHubLifecycleSnapshot(
   const branches = (await reader.readBranchClaims?.() ?? []).map(parseBranchClaim);
   const now = (options.now ?? (() => new Date()))();
   isoTimestamp(now.toISOString());
+  const lifecycle = lifecycleItems(issues, pullRequests, options.authorAllowlist, project);
   const snapshot: GitHubLifecycleSnapshot = {
     project,
     issues: [...issues],
     pullRequests,
     branches,
+    diagnostics: lifecycle.diagnostics,
     lifecycle: {
-      items: lifecycleItems(issues, pullRequests, options.authorAllowlist, project),
+      items: lifecycle.items,
     },
     capturedAt: now.toISOString(),
   };

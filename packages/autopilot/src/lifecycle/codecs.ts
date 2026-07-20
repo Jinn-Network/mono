@@ -5,6 +5,7 @@ import {
   type BranchClaim,
   type GitOid,
   type GitRefName,
+  type HumanReason,
   type ReviewClaimRecord,
   type ReviewClaimState,
   type ReviewVerdictState,
@@ -333,5 +334,82 @@ export function parseAutomatedReviewMarker(marker: string): AutomatedReviewMarke
     attempt: uuid(attempt, 'attempt'),
     head: gitOid(head),
     verdict: verdict as ReviewVerdictState,
+  };
+}
+
+export interface HumanCommentEvidence {
+  readonly issueNumber?: number;
+  readonly prNumber: number;
+  readonly reason: HumanReason;
+}
+
+const HUMAN_MARKER_PATTERN =
+  /^<!-- jinn-autopilot-human:v2(?: issue=([1-9][0-9]*))? pr=([1-9][0-9]*) phase=([a-z-]+) code=([a-z-]+) -->$/;
+
+function humanReason(phase: string, code: string, detail: string): HumanReason {
+  if (
+    (phase === 'eligible' || phase === 'implementing')
+    && [
+      'first-push',
+      'implementation-escalation',
+      'branch-mapping-ambiguous',
+      'invalid-branch-progress-time',
+    ].includes(code)
+  ) {
+    return { phase, code: code as Extract<HumanReason, { phase: typeof phase }>['code'], detail };
+  }
+  if (
+    (phase === 'awaiting-review' || phase === 'reviewing' || phase === 'review-fixing')
+    && [
+      'review-escalation',
+      'reviewer-identity-unavailable',
+      'invalid-review-progress-time',
+    ].includes(code)
+  ) {
+    return { phase, code: code as Extract<HumanReason, { phase: typeof phase }>['code'], detail };
+  }
+  if (
+    (phase === 'merge-prep' || phase === 'merge-ready')
+    && [
+      'semantic-conflict',
+      'codeowner-sensitive-conflict',
+      'invalid-merge-progress-time',
+    ].includes(code)
+  ) {
+    return { phase, code: code as Extract<HumanReason, { phase: typeof phase }>['code'], detail };
+  }
+  throw new Error('Invalid Human reason phase/code');
+}
+
+export function formatHumanCommentMarker(input: {
+  readonly issueNumber?: number;
+  readonly prNumber: number;
+  readonly reason: HumanReason;
+}): string {
+  if (input.issueNumber !== undefined) positiveNumber(input.issueNumber, 'issue number');
+  positiveNumber(input.prNumber, 'PR number');
+  humanReason(input.reason.phase, input.reason.code, input.reason.detail);
+  return `<!-- jinn-autopilot-human:v2`
+    + (input.issueNumber === undefined ? '' : ` issue=${input.issueNumber}`)
+    + ` pr=${input.prNumber} phase=${input.reason.phase} code=${input.reason.code} -->`;
+}
+
+export function parseHumanCommentEvidence(body: string): HumanCommentEvidence | null {
+  const [marker, ...paragraphs] = body.split('\n\n');
+  if (marker === undefined) return null;
+  const match = HUMAN_MARKER_PATTERN.exec(marker);
+  if (match === null) return null;
+  const [, issueRaw, prRaw, phase, code] = match;
+  if (prRaw === undefined || phase === undefined || code === undefined) return null;
+  const detail = paragraphs.at(-1)?.trim() ?? '';
+  if (detail.length === 0 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(detail)) {
+    throw new Error('Invalid Human reason detail');
+  }
+  return {
+    ...(issueRaw === undefined
+      ? {}
+      : { issueNumber: positiveInteger(issueRaw, 'issue number') }),
+    prNumber: positiveInteger(prRaw, 'PR number'),
+    reason: humanReason(phase, code, detail),
   };
 }

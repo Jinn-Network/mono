@@ -16,6 +16,8 @@ import type {
   AutopilotMode,
   GitOid,
   HumanReason,
+  IssueEligibilityReason,
+  LifecycleMappingDiagnostic,
   LifecyclePhase,
   LifecycleViewItem,
 } from './types.js';
@@ -53,6 +55,14 @@ export interface LifecycleStatusItem {
   readonly stale: boolean;
   readonly legacy: boolean;
   readonly humanReason?: HumanReason;
+  readonly eligible?: boolean;
+  readonly eligibilityReason?: IssueEligibilityReason;
+  readonly eligibilityDetail?: string;
+  readonly desiredActions: readonly ProjectionAction[];
+}
+
+export interface LifecycleStatusDiagnostic extends LifecycleMappingDiagnostic {
+  readonly phase: 'human';
   readonly desiredActions: readonly ProjectionAction[];
 }
 
@@ -73,6 +83,7 @@ export type LifecycleCycleReport =
       readonly mode: AutopilotMode;
       readonly message: string;
       readonly items: readonly [];
+      readonly diagnostics: readonly [];
       readonly events: readonly [];
     }
   | {
@@ -80,6 +91,7 @@ export type LifecycleCycleReport =
       readonly mode: 'observe' | 'recover';
       readonly message: string;
       readonly items: readonly [];
+      readonly diagnostics: readonly [];
       readonly events: readonly [];
     }
   | {
@@ -89,6 +101,7 @@ export type LifecycleCycleReport =
       readonly runnerId: string;
       readonly capturedAt: string;
       readonly items: readonly LifecycleStatusItem[];
+      readonly diagnostics: readonly LifecycleStatusDiagnostic[];
       readonly events: readonly LifecycleLogEvent[];
       readonly reconciliation?: ReconciliationReport;
     };
@@ -132,7 +145,9 @@ export function parseLifecycleCli(args: readonly string[]): LifecycleCliOptions 
     once = true;
   }
   let command: LifecycleCliCommand = { kind: 'status' };
-  if (positional.length > 0 && positional[0] !== 'status' && positional[0] !== 'sessions') {
+  if (positional.length === 1 && (positional[0] === 'status' || positional[0] === 'sessions')) {
+    // Both names intentionally render the same GitHub-derived lifecycle view.
+  } else if (positional.length > 0) {
     if (positional[0] !== 'explain' || positional.length !== 3) {
       throw new Error('Expected status, sessions, explain issue <N>, or explain pr <N>');
     }
@@ -157,15 +172,34 @@ function projectionContext(
       branch.claim.phase === 'implement'
       && !prBranches.has(branch.headRefName)
     ))
-    .map((branch) => ({
-      issueNumber: branch.issueNumber,
-      head: branch.headOid,
-      headRefName: branch.headRefName,
-      baseRefName: branch.claim.targetBase,
-      projectStatus: snapshot.project.items.find((item) => (
+    .map((branch) => {
+      const projectIssue = snapshot.project.items.find((item) => (
         item.contentType === 'Issue' && item.number === branch.issueNumber
-      ))?.status ?? null,
-    }));
+      ));
+      const lifecycleIssue = snapshot.lifecycle.items.find((item) => (
+        item.kind === 'issue' && item.issueNumber === branch.issueNumber
+      ));
+      const humanHold = projectIssue?.blockedOn === 'Human'
+        || projectIssue?.status === 'Human'
+        || lifecycleIssue?.humanHold === true
+        || lifecycleIssue?.labels.includes('review:needs-human') === true;
+      const humanReason = lifecycleIssue?.humanReason ?? (humanHold
+        ? {
+            phase: 'implementing' as const,
+            code: 'implementation-escalation' as const,
+            detail: 'Project lifecycle is explicitly held for Human intervention',
+          }
+        : undefined);
+      return {
+        issueNumber: branch.issueNumber,
+        head: branch.headOid,
+        headRefName: branch.headRefName,
+        baseRefName: branch.claim.targetBase,
+        projectStatus: projectIssue?.status ?? null,
+        ...(humanHold ? { humanHold: true } : {}),
+        ...(humanReason === undefined ? {} : { humanReason }),
+      };
+    });
   return {
     view,
     pullRequests: snapshot.pullRequests.map((pr) => ({
@@ -173,6 +207,7 @@ function projectionContext(
       ...(pr.reviewClaim === undefined ? {} : { reviewRefOid: pr.reviewClaim.oid }),
     })),
     orphanBranchClaims,
+    mappingDiagnostics: snapshot.diagnostics,
   };
 }
 
@@ -185,8 +220,26 @@ function actionMatchesView(action: ProjectionAction, view: LifecycleViewItem): b
 
 function progressAge(view: LifecycleViewItem, now: Date): number | undefined {
   if (view.item.kind !== 'pull-request') return undefined;
-  const changedAt = Date.parse(view.item.headChangedAt);
-  return Number.isFinite(changedAt) ? Math.max(0, now.getTime() - changedAt) : undefined;
+  const item = view.item;
+  const headAt = Date.parse(item.headChangedAt);
+  if (!Number.isFinite(headAt)) return undefined;
+  let progressAt = headAt;
+  const claim = item.reviewClaim;
+  const verdict = item.terminalVerdict;
+  if (
+    claim?.verdict !== undefined
+    && claim.head === item.head
+    && verdict !== undefined
+    && verdict.head === item.head
+    && verdict.marker === claim.verdict.marker
+    && verdict.state === claim.verdict.state
+  ) {
+    const verdictAt = Date.parse(verdict.recordedAt);
+    if (Number.isFinite(verdictAt) && verdictAt <= now.getTime() && verdictAt > progressAt) {
+      progressAt = verdictAt;
+    }
+  }
+  return Math.max(0, now.getTime() - progressAt);
 }
 
 function statusItems(
@@ -212,6 +265,17 @@ function statusItems(
       stale: entry.stale,
       legacy: !item.v2Marked,
       ...(entry.humanReason === undefined ? {} : { humanReason: entry.humanReason }),
+      ...(item.kind === 'issue'
+        ? {
+            eligible: item.eligible,
+            ...(item.eligibilityReason === undefined
+              ? {}
+              : { eligibilityReason: item.eligibilityReason }),
+            ...(item.eligibilityDetail === undefined
+              ? {}
+              : { eligibilityDetail: item.eligibilityDetail }),
+          }
+        : {}),
       desiredActions: actions.filter((action) => actionMatchesView(action, entry)),
     };
   });
@@ -255,6 +319,7 @@ export async function runLifecycleCycle(
       mode,
       message: 'active writer not wired yet',
       items: [],
+      diagnostics: [],
       events: [],
     };
   }
@@ -264,6 +329,7 @@ export async function runLifecycleCycle(
       mode,
       message: 'recover writer not configured',
       items: [],
+      diagnostics: [],
       events: [],
     };
   }
@@ -274,6 +340,7 @@ export async function runLifecycleCycle(
       mode,
       message: `GitHub rate-limit budget low: ${snapshot.project.rateLimit.remaining} remaining`,
       items: [],
+      diagnostics: [],
       events: [],
     };
   }
@@ -282,6 +349,17 @@ export async function runLifecycleCycle(
   const plan = planProjection(projectionContext(snapshot, view));
   const cycleId = deps.cycleId();
   const items = statusItems(view, plan.actions, now);
+  const diagnostics: LifecycleStatusDiagnostic[] = snapshot.diagnostics.map((diagnostic) => ({
+    ...diagnostic,
+    phase: 'human',
+    desiredActions: plan.actions.filter((action) => (
+      ('prNumber' in action
+        && diagnostic.pullRequests.some((pr) => pr.number === action.prNumber))
+      || ('issueNumber' in action
+        && action.issueNumber !== undefined
+        && diagnostic.issueNumbers.includes(action.issueNumber))
+    )),
+  }));
   if (mode === 'observe') {
     return {
       status: 'ok',
@@ -290,6 +368,7 @@ export async function runLifecycleCycle(
       runnerId: deps.runnerId,
       capturedAt: snapshot.capturedAt,
       items,
+      diagnostics,
       events: [],
     };
   }
@@ -301,6 +380,7 @@ export async function runLifecycleCycle(
     runnerId: deps.runnerId,
     capturedAt: snapshot.capturedAt,
     items,
+    diagnostics,
     events: reconciliation.results.map((result) => (
       eventFor(result, items, cycleId, deps.runnerId)
     )),
@@ -322,7 +402,12 @@ function explanation(item: LifecycleStatusItem): string {
   if (item.stale) {
     return `${identity} is stale in ${item.phase}; recovery is awaiting an exact-head correction.`;
   }
-  if (item.phase === 'eligible') return `${identity} is eligible for an ordinary claim.`;
+  if (item.phase === 'eligible') {
+    if (item.eligible === true) return `${identity} is eligible for an ordinary claim.`;
+    return `${identity} is not eligible for an ordinary claim: ${
+      item.eligibilityDetail ?? item.eligibilityReason ?? 'source admission gates did not select it'
+    }.`;
+  }
   if (item.phase === 'implementing') {
     return `${identity} is implementing and awaiting durable phase completion before review.`;
   }
@@ -337,21 +422,37 @@ function explanation(item: LifecycleStatusItem): string {
 export function explainIssue(report: LifecycleCycleReport, issueNumber: number): string {
   if (report.status !== 'ok') return report.message;
   const items = report.items.filter((item) => item.issueNumber === issueNumber);
-  return items.length === 0
-    ? `Issue #${issueNumber} is not present in the complete lifecycle snapshot.`
-    : items.map(explanation).join('\n');
+  const diagnostics = report.diagnostics.filter((diagnostic) => (
+    diagnostic.issueNumbers.includes(issueNumber)
+  ));
+  if (items.length === 0 && diagnostics.length === 0) {
+    return `Issue #${issueNumber} is not present in the complete lifecycle snapshot.`;
+  }
+  return [
+    ...items.map(explanation),
+    ...diagnostics.map((diagnostic) => `Issue #${issueNumber} is blocked in Human: ${diagnostic.detail}.`),
+  ].join('\n');
 }
 
 export function explainPullRequest(report: LifecycleCycleReport, prNumber: number): string {
   if (report.status !== 'ok') return report.message;
   const item = report.items.find((candidate) => candidate.prNumber === prNumber);
+  const diagnostic = report.diagnostics.find((candidate) => (
+    candidate.pullRequests.some((pr) => pr.number === prNumber)
+  ));
+  if (item === undefined && diagnostic === undefined) {
+    return `PR #${prNumber} is not present in the complete lifecycle snapshot.`;
+  }
   return item === undefined
-    ? `PR #${prNumber} is not present in the complete lifecycle snapshot.`
+    ? `PR #${prNumber} is blocked in Human: ${diagnostic!.detail}.`
     : explanation(item);
 }
 
 export function renderLifecycleHuman(report: LifecycleCycleReport): string {
   if (report.status !== 'ok') return report.message;
-  if (report.items.length === 0) return 'No lifecycle items.';
-  return report.items.map(explanation).join('\n');
+  if (report.items.length === 0 && report.diagnostics.length === 0) return 'No lifecycle items.';
+  return [
+    ...report.items.map(explanation),
+    ...report.diagnostics.map((diagnostic) => `Human diagnostic: ${diagnostic.detail}.`),
+  ].join('\n');
 }

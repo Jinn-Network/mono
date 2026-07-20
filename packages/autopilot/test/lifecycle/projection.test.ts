@@ -261,4 +261,86 @@ describe('planProjection', () => {
       },
     ]);
   });
+
+  it('preserves a Human hold instead of creating a PR for an orphan implementation claim', () => {
+    const humanReason = {
+      phase: 'implementing' as const,
+      code: 'implementation-escalation' as const,
+      detail: 'Waiting for an operator decision',
+    };
+    const orphanContext: ProjectionContext = {
+      view: { items: [] },
+      pullRequests: [],
+      mappingDiagnostics: [],
+      orphanBranchClaims: [{
+        issueNumber: 43,
+        head: HEAD,
+        headRefName: 'autopilot/43',
+        baseRefName: 'next',
+        projectStatus: 'In Progress',
+        humanHold: true,
+        humanReason,
+      }],
+    };
+
+    expect(planProjection(orphanContext).actions).toEqual([{
+      kind: 'set-project-status',
+      issueNumber: 43,
+      expectedHead: HEAD,
+      status: 'Human',
+    }]);
+  });
+
+  it('projects every resolvable side of an ambiguous issue-to-PR mapping to Human', () => {
+    const ambiguous: ProjectionContext = {
+      view: { items: [] },
+      pullRequests: [],
+      orphanBranchClaims: [],
+      mappingDiagnostics: [{
+        code: 'branch-mapping-ambiguous',
+        detail: 'PR #101 resolves issues #42 and #43',
+        issueNumbers: [42, 43],
+        issues: [
+          { number: 42, projectStatus: 'Todo' },
+          { number: 43, projectStatus: 'Human' },
+        ],
+        pullRequests: [{
+          number: 101,
+          head: HEAD,
+          draft: false,
+          labels: ['engine:review'],
+        }],
+      }],
+    };
+
+    expect(planProjection(ambiguous).actions).toEqual(expect.arrayContaining([
+      {
+        kind: 'set-project-status',
+        issueNumber: 42,
+        status: 'Human',
+      },
+      {
+        kind: 'set-pr-draft',
+        prNumber: 101,
+        expectedHead: HEAD,
+        draft: true,
+      },
+      {
+        kind: 'set-pr-label',
+        prNumber: 101,
+        expectedHead: HEAD,
+        label: 'review:needs-human',
+        present: true,
+      },
+      expect.objectContaining({
+        kind: 'ensure-human-comment',
+        prNumber: 101,
+        expectedHead: HEAD,
+        body: expect.stringContaining('PR #101 resolves issues #42 and #43'),
+      }),
+    ]));
+    expect(planProjection(ambiguous).actions).not.toContainEqual(
+      expect.objectContaining({ issueNumber: 43, kind: 'set-project-status' }),
+    );
+  });
 });

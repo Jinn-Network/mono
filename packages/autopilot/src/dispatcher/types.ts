@@ -19,6 +19,8 @@ export type ProjectStatus = 'Todo' | 'In Progress' | 'Human' | 'In Review' | 'Do
 export interface PolledIssue {
   number: number;
   title: string;
+  /** Native GitHub labels retained for lifecycle Human-overlay evidence. */
+  labels?: string[];
   /** null = Issue Type not set — the issue is not triage-complete. */
   shape: IssueShape | null;
   blockedOn: BlockedOn | null;

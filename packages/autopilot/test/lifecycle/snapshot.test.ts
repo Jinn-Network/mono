@@ -177,4 +177,119 @@ describe('buildGitHubLifecycleSnapshot', () => {
       authorAllowlist: new Set(['trusted']),
     })).rejects.toThrow(/pagination/i);
   });
+
+  it('preserves source eligibility reasons for no-PR issues', async () => {
+    const dependencyBlocked = {
+      ...issue(),
+      number: 43,
+      status: 'Todo' as const,
+      blockedOn: 'Another issue' as const,
+      blockedByIssues: [41],
+    };
+    const disallowed = {
+      ...issue(),
+      number: 44,
+      status: 'Todo' as const,
+      author: 'untrusted',
+    };
+    const source = reader({
+      readIssues: async () => [
+        { ...issue(), status: 'Todo' },
+        dependencyBlocked,
+        disallowed,
+      ],
+      readPullRequests: async () => ({
+        nodes: [],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      }),
+    });
+
+    const snapshot = await buildGitHubLifecycleSnapshot(source, {
+      authorAllowlist: new Set(['trusted']),
+    });
+
+    expect(snapshot.lifecycle.items).toEqual([
+      expect.objectContaining({
+        issueNumber: 42,
+        eligible: true,
+        eligibilityReason: 'eligible',
+      }),
+      expect.objectContaining({
+        issueNumber: 43,
+        eligible: false,
+        eligibilityReason: 'dependency-blocked',
+      }),
+      expect.objectContaining({
+        issueNumber: 44,
+        eligible: false,
+        eligibilityReason: 'author-disallowed',
+      }),
+    ]);
+  });
+
+  it('fails ambiguous issue-to-PR mappings into structured Human diagnostics', async () => {
+    const second = {
+      ...page('page-2').nodes[0]!,
+      number: 102,
+      headRefName: 'feature/also-42',
+      headOid: 'cccccccccccccccccccccccccccccccccccccccc',
+      reviews: [],
+      reviewClaim: null,
+    };
+    const multiIssue = {
+      ...page('page-2').nodes[0]!,
+      number: 103,
+      headRefName: 'autopilot/43',
+      headOid: 'dddddddddddddddddddddddddddddddddddddddd',
+      closingIssueNumbers: [43, 44],
+      reviews: [],
+      reviewClaim: null,
+    };
+    const unlinked = {
+      ...page('page-2').nodes[0]!,
+      number: 104,
+      headRefName: 'feature/unlinked',
+      headOid: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+      closingIssueNumbers: [],
+      reviews: [],
+      reviewClaim: null,
+    };
+    const source = reader({
+      readIssues: async () => [
+        issue(),
+        { ...issue(), number: 43 },
+        { ...issue(), number: 44 },
+      ],
+      readPullRequests: async () => ({
+        nodes: [page('page-2').nodes[0]!, second, multiIssue, unlinked],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      }),
+    });
+
+    const snapshot = await buildGitHubLifecycleSnapshot(source, {
+      authorAllowlist: new Set(['trusted']),
+    });
+
+    expect(snapshot.lifecycle.items).toEqual([]);
+    expect(snapshot.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'branch-mapping-ambiguous',
+        issueNumbers: [42],
+        pullRequests: expect.arrayContaining([
+          expect.objectContaining({ number: 101 }),
+          expect.objectContaining({ number: 102 }),
+        ]),
+      }),
+      expect.objectContaining({
+        code: 'branch-mapping-ambiguous',
+        issueNumbers: [43, 44],
+        pullRequests: [expect.objectContaining({ number: 103 })],
+      }),
+      expect.objectContaining({
+        code: 'branch-mapping-ambiguous',
+        issueNumbers: [],
+        pullRequests: [expect.objectContaining({ number: 104 })],
+      }),
+    ]));
+  });
 });

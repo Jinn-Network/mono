@@ -86,6 +86,7 @@ function snapshot(item: LifecycleItem): GitHubLifecycleSnapshot {
         }]
       : [],
     branches: [],
+    diagnostics: [],
     lifecycle: { items: [item] },
     capturedAt: NOW.toISOString(),
   };
@@ -275,5 +276,129 @@ describe('lifecycle controller', () => {
     });
     expect(explainIssue(report, 42)).toContain('implementing');
     expect(explainPullRequest(report, 101)).toContain('awaiting');
+  });
+
+  it('rejects trailing positional arguments for every operator command', () => {
+    expect(() => parseLifecycleCli(['status', 'extra'])).toThrow(/Expected status/);
+    expect(() => parseLifecycleCli(['sessions', 'extra'])).toThrow(/Expected status/);
+    expect(() => parseLifecycleCli(['explain', 'issue', '42', 'extra'])).toThrow(
+      /Expected status/,
+    );
+  });
+
+  it('does not describe an ineligible no-PR issue as claim eligible', async () => {
+    const calls: string[] = [];
+    const blocked: LifecycleItem = {
+      kind: 'issue',
+      issueNumber: 42,
+      v2Marked: false,
+      projectStatus: 'Todo',
+      labels: [],
+      eligible: false,
+      eligibilityReason: 'dependency-blocked',
+      eligibilityDetail: 'Blocked by unresolved issue #41',
+    };
+
+    const report = await runLifecycleCycle('observe', deps(blocked, calls));
+
+    expect(report.items[0]).toMatchObject({
+      issueNumber: 42,
+      eligible: false,
+      eligibilityReason: 'dependency-blocked',
+    });
+    expect(explainIssue(report, 42)).toContain('not eligible');
+    expect(explainIssue(report, 42)).toContain('Blocked by unresolved issue #41');
+  });
+
+  it('uses a later matching terminal verdict as the progress age', async () => {
+    const calls: string[] = [];
+    const reviewed = implementation({
+      branchClaim: undefined,
+      headChangedAt: '2026-07-20T08:00:00.000Z',
+      reviewClaim: {
+        kind: 'review-claim',
+        protocolVersion: 2,
+        prNumber: 101,
+        generation: '22222222-2222-4222-8222-222222222222',
+        attempt: '33333333-3333-4333-8333-333333333333',
+        reviewer: 'reviewer',
+        head: HEAD,
+        state: 'verdict-intent',
+        recordedAt: '2026-07-20T08:00:00.000Z',
+        verdict: {
+          marker: '44444444-4444-4444-8444-444444444444',
+          state: 'REQUEST_CHANGES',
+        },
+      },
+      terminalVerdict: {
+        head: HEAD,
+        marker: '44444444-4444-4444-8444-444444444444',
+        state: 'REQUEST_CHANGES',
+        recordedAt: '2026-07-20T11:30:00.000Z',
+      },
+    });
+
+    const report = await runLifecycleCycle('observe', deps(reviewed, calls));
+
+    expect(report.items[0]?.progressAgeMs).toBe(30 * 60 * 1000);
+  });
+
+  it('carries Project Human evidence through orphan-claim recovery planning', async () => {
+    const calls: string[] = [];
+    const heldIssue: LifecycleItem = {
+      kind: 'issue',
+      issueNumber: 42,
+      v2Marked: false,
+      projectStatus: 'In Progress',
+      labels: ['review:needs-human'],
+      humanHold: true,
+      humanReason: {
+        phase: 'eligible',
+        code: 'implementation-escalation',
+        detail: 'Project Blocked on is Human',
+      },
+      eligible: false,
+      eligibilityReason: 'not-selected',
+      eligibilityDetail: 'Project Blocked on is Human',
+    };
+    const heldSnapshot: GitHubLifecycleSnapshot = {
+      ...snapshot(heldIssue),
+      project: {
+        ...snapshot(heldIssue).project,
+        items: [{
+          id: 'PVTI_42',
+          number: 42,
+          contentType: 'Issue',
+          status: 'In Progress',
+          priority: 'P1',
+          effort: 'Medium',
+          blockedOn: 'Human',
+          issueType: 'feat',
+          blockedByIssues: [],
+          sprintIterationId: null,
+        }],
+      },
+      branches: [{
+        issueNumber: 42,
+        headRefName: 'autopilot/42',
+        headOid: HEAD,
+        headCommittedAt: '2026-07-20T11:00:00.000Z',
+        claim: implementation().branchClaim!,
+      }],
+    };
+
+    const report = await runLifecycleCycle('observe', {
+      ...deps(heldIssue, calls),
+      readSnapshot: async () => heldSnapshot,
+    });
+
+    expect(report.items[0]?.humanReason?.detail).toBe('Project Blocked on is Human');
+    expect(report.items[0]?.desiredActions).toEqual([{
+      kind: 'set-project-status',
+      issueNumber: 42,
+      status: 'Human',
+    }]);
+    expect(JSON.stringify(report)).not.toContain('ensure-draft-pr');
+    expect(calls).toEqual([]);
   });
 });
