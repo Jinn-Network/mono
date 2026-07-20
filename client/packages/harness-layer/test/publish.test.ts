@@ -177,6 +177,21 @@ describe('toPublishedEpisode', () => {
     expect(episode.task.distributionTags).toContain(RETRIEVAL_VISIBLE_TAG);
   });
 
+  it('fails closed when a derived episode reaches the final payload with any retrieval mark', async () => {
+    const task = validTask({
+      task: {
+        summary: 'Bulk derived evidence',
+        distributionTags: ['training', RETRIEVAL_VISIBLE_TAG],
+      },
+      provenance: 'derived-from-history',
+    });
+    const pending = await capture(task, { pipeline: new ScrubPipeline([]) });
+
+    expect(() => toPublishedEpisode(pending)).toThrow(
+      /derived-from-history.*retrieval-visible/i,
+    );
+  });
+
   it('preserves Episode-only training facts across the frozen scrub draft', async () => {
     const task = validTask({
       session: {
@@ -226,6 +241,7 @@ describe('toPublishedEpisode', () => {
         attemptId: 'attempt-1',
         relatedAttemptRefs: ['bafy-sibling'],
       },
+      lineage: { episodeId: 'bafy-source-solution' },
     });
 
     const episode = toPublishedEpisode(await capture(task, {
@@ -253,6 +269,7 @@ describe('toPublishedEpisode', () => {
         groupId: 'Jinn-Network__mono-1842',
         attemptId: 'attempt-1',
       },
+      lineage: { episodeId: 'bafy-source-solution' },
     });
     expect(episode.trajectory[0]?.kind).toBe('jinn.agent_turn');
   });

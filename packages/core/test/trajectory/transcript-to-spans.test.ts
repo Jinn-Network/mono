@@ -132,6 +132,10 @@ describe.each([
 });
 
 describe('Codex direct exec stream', () => {
+  it('advertises the materially changed direct-exec lifecycle parser version', () => {
+    expect(new CodexExecJsonParser().parserVersion).toBe('1.1.0');
+  });
+
   it('degrades a completed-only command into a paired call and result', () => {
     const transcript = JSON.stringify({
       type: 'item.completed',

@@ -418,6 +418,14 @@ function publishedStepKind(
  */
 export function toPublishedEpisode(pending: PendingEnvelope): EpisodeV1Write {
   const trace = toTraceEnvelope(pending);
+  if (
+    trace.provenance === 'derived-from-history'
+    && hasRetrievalMark(trace.task.distributionTags)
+  ) {
+    throw new Error(
+      'derived-from-history evidence must not carry the retrieval-visible mark',
+    );
+  }
   return EpisodeV1WriteSchema.parse({
     schemaVersion: EPISODE_SCHEMA_VERSION,
     episodeId: trace.session.sessionId,
@@ -447,6 +455,7 @@ export function toPublishedEpisode(pending: PendingEnvelope): EpisodeV1Write {
       attributes: step.attributes,
       redactedKeys: step.redactedKeys,
       ...(step.truncatedKeys ? { truncatedKeys: step.truncatedKeys } : {}),
+      ...pending.episodeFacts.trajectoryObservations?.[index],
     })),
     environment: {
       ...trace.environment,
@@ -463,6 +472,9 @@ export function toPublishedEpisode(pending: PendingEnvelope): EpisodeV1Write {
     provenance: trace.provenance,
     ...(pending.episodeFacts.attemptGroup
       ? { attemptGroup: pending.episodeFacts.attemptGroup }
+      : {}),
+    ...(pending.episodeFacts.lineage
+      ? { lineage: pending.episodeFacts.lineage }
       : {}),
   });
 }

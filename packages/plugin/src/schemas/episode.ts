@@ -42,6 +42,16 @@ const StepShape = {
   redactedKeys: z.array(z.string().min(1)).default([]),
   /** Public scrub projection receipt; absent on ordinary local episodes. */
   truncatedKeys: z.array(z.string().min(1)).optional(),
+  /** Canonical OTLP observations are additive for read compatibility. */
+  events: z.array(z.strictObject({
+    timeUnixNano: UnixNanoSchema,
+    name: z.string().min(1),
+    attributes: z.record(z.string(), z.unknown()).optional(),
+  })).optional(),
+  status: z.strictObject({
+    code: z.enum(['UNSET', 'OK', 'ERROR']),
+    message: z.string().min(1).optional(),
+  }).optional(),
 };
 
 const StepWriteSchema = z.strictObject(StepShape);

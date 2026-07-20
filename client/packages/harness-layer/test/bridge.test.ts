@@ -132,8 +132,15 @@ describe('toBridgeCapturedTask (both polarities, D10)', () => {
             'jinn.transcript.parser': 'claude-code-stream-json',
             'jinn.transcript.parserVersion': '1.0.0',
           },
-          events: [],
-          status: { code: 'OK' },
+          events: [{
+            timeUnixNano: '103',
+            name: 'tool_result',
+            attributes: {
+              'tool.result': 'edit failed',
+              'tool.result.is_error': true,
+            },
+          }],
+          status: { code: 'ERROR', message: 'write rejected' },
         },
       ],
     }, NOW);
@@ -156,6 +163,15 @@ describe('toBridgeCapturedTask (both polarities, D10)', () => {
       expect.objectContaining({
         spanId: 'history-000002',
         kind: 'jinn.tool_call',
+        events: [{
+          timeUnixNano: '103',
+          name: 'tool_result',
+          attributes: {
+            'tool.result': 'edit failed',
+            'tool.result.is_error': true,
+          },
+        }],
+        status: { code: 'ERROR', message: 'write rejected' },
       }),
     ]);
     expect(t.task.distributionTags).not.toContain('patch-only');
@@ -192,6 +208,17 @@ describe('toBridgeCapturedTask (both polarities, D10)', () => {
     }
   });
 
+  it('namespaces an authenticated repository that equals the reserved retrieval mark', () => {
+    const task = toBridgeCapturedTask(ref(), {
+      ...ev,
+      repo: RETRIEVAL_VISIBLE_TAG,
+    }, NOW);
+
+    expect(task.task.repositorySlug).toBe(RETRIEVAL_VISIBLE_TAG);
+    expect(task.task.distributionTags).not.toContain(RETRIEVAL_VISIBLE_TAG);
+    expect(task.task.distributionTags).toContain(`repo:${RETRIEVAL_VISIBLE_TAG}`);
+  });
+
   it('projects every available post-training tuple fact into the captured task', () => {
     const t = toBridgeCapturedTask(ref(), {
       ...ev,
@@ -209,6 +236,9 @@ describe('toBridgeCapturedTask (both polarities, D10)', () => {
         passToPass: ['tests/test_widget.py::test_existing'],
         evalSemanticsVersion: '4',
       },
+      verdictEnvelopeCid: 'bafyVerdictEnvelope',
+      solutionEnvelopeCid: 'bafySolutionEnvelope',
+      rawSnapshotRef: 'bafyRawSnapshot',
     }, NOW);
 
     expect(t.task).toMatchObject({
@@ -233,8 +263,13 @@ describe('toBridgeCapturedTask (both polarities, D10)', () => {
     expect(t.attemptGroup).toEqual({
       groupId: 'django__django-11333',
       attemptId: ref().requestId,
-      relatedAttemptRefs: [],
+      relatedAttemptRefs: [
+        'bafyVerdictEnvelope',
+        'bafySolutionEnvelope',
+        'bafyRawSnapshot',
+      ],
     });
+    expect(t.lineage).toEqual({ episodeId: 'bafySolutionEnvelope' });
     expect(t.steps.every((step) => step.kind === 'jinn.tool_call')).toBe(true);
   });
 });
@@ -505,8 +540,15 @@ describe('buildBridgeEvidencePublisher (reuses capture→publish at layer-2 alti
             'jinn.transcript.parser': 'claude-code-stream-json',
             'jinn.transcript.parserVersion': '1.0.0',
           },
-          events: [],
-          status: { code: 'OK' },
+          events: [{
+            timeUnixNano: '101',
+            name: 'tool_result',
+            attributes: {
+              'tool.result': 'failed with wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+              'tool.result.is_error': true,
+            },
+          }],
+          status: { code: 'ERROR', message: 'command failed' },
         }],
       },
       NOW,
@@ -520,6 +562,17 @@ describe('buildBridgeEvidencePublisher (reuses capture→publish at layer-2 alti
       'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
     );
     expect(historyStep.attributes['jinn.transcript.parserVersion']).toBe('1.0.0');
+    expect(historyStep.events).toEqual([{
+      timeUnixNano: '101',
+      name: 'tool_result',
+      attributes: {
+        'tool.result': expect.not.stringContaining(
+          'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+        ),
+        'tool.result.is_error': true,
+      },
+    }]);
+    expect(historyStep.status).toEqual({ code: 'ERROR', message: 'command failed' });
     expect(env.provenance).toBe('derived-from-history');
     expect(env.retrievalVisible).toBe(false);
     expect(env.task.distributionTags).not.toContain(RETRIEVAL_VISIBLE_TAG);

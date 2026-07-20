@@ -103,6 +103,10 @@ export interface BridgeEvidence {
     passToPass: string[];
     evalSemanticsVersion: string;
   };
+  /** Authenticated source artifacts retained for audit and lineage. */
+  verdictEnvelopeCid?: string;
+  solutionEnvelopeCid?: string;
+  rawSnapshotRef?: string;
   /**
    * The solver's canonical typed decision-path spans, derived from the raw
    * harness transcript inside the solution's `system_snapshot` artifact
@@ -275,6 +279,8 @@ export function toBridgeCapturedTask(ref: AttemptRef, ev: BridgeEvidence, now: D
         endTimeUnixNano: span.endTimeUnixNano,
         attributes: span.attributes,
         redactedKeys: [],
+        ...(span.events.length > 0 ? { events: span.events } : {}),
+        ...(span.status ? { status: span.status } : {}),
       }];
     },
   );
@@ -289,7 +295,7 @@ export function toBridgeCapturedTask(ref: AttemptRef, ev: BridgeEvidence, now: D
       distributionTags: [
         'coding',
         'swe-rebench',
-        repo.slice(0, 64),
+        `repo:${repo}`.slice(0, 64),
         ...(enriched ? [] : ['patch-only']),
       ],
       repositorySlug: repo,
@@ -344,8 +350,15 @@ export function toBridgeCapturedTask(ref: AttemptRef, ev: BridgeEvidence, now: D
     attemptGroup: {
       groupId: instanceId,
       attemptId: ref.requestId,
-      relatedAttemptRefs: [],
+      relatedAttemptRefs: [
+        ev.verdictEnvelopeCid,
+        ev.solutionEnvelopeCid,
+        ev.rawSnapshotRef,
+      ].filter((value): value is string => value !== undefined),
     },
+    ...(ev.solutionEnvelopeCid
+      ? { lineage: { episodeId: ev.solutionEnvelopeCid } }
+      : {}),
     provenance: 'derived-from-history',
   };
 }

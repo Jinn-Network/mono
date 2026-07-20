@@ -36,6 +36,17 @@ const CapturedVerifierSchema = z.discriminatedUnion('type', [
   OtherVerifierSchema,
 ]);
 
+const CapturedStepEventSchema = z.strictObject({
+  timeUnixNano: UnixNanoSchema,
+  name: z.string().min(1),
+  attributes: z.record(z.string(), z.unknown()).optional(),
+});
+
+const CapturedStepStatusSchema = z.strictObject({
+  code: z.enum(['UNSET', 'OK', 'ERROR']),
+  message: z.string().min(1).optional(),
+});
+
 /**
  * A captured task — the raw, pre-scrub input to `capture()`. Mirrors the
  * envelope shape minus `consent` (which does not exist pre-consent) with
@@ -85,6 +96,9 @@ export const CapturedTaskSchema = z.strictObject({
     attributes: z.record(z.string(), z.unknown()),
     /** Keys already redacted at ingest, if the capture recorded any. */
     redactedKeys: z.array(z.string().min(1)).default([]),
+    /** Optional canonical OTLP observations retained by richer transcript parsers. */
+    events: z.array(CapturedStepEventSchema).optional(),
+    status: CapturedStepStatusSchema.optional(),
   })).min(1),
   outcome: z.strictObject({
     status: OutcomeStatusSchema,
@@ -106,6 +120,10 @@ export const CapturedTaskSchema = z.strictObject({
     groupSize: z.number().int().positive().optional(),
     nPass: z.number().int().nonnegative().optional(),
     nFail: z.number().int().nonnegative().optional(),
+  }).optional(),
+  lineage: z.strictObject({
+    episodeId: z.string().min(1),
+    mintRef: z.string().min(1).optional(),
   }).optional(),
   provenance: EvidenceProvenanceSchema.default('contributed'),
 });

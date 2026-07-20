@@ -104,7 +104,12 @@ export interface PendingEnvelope {
       'skillsLoadout' | 'generatorModel' | 'distributionClass' | 'verifier'
     >;
     trajectoryKinds: Array<CapturedTask['steps'][number]['kind']>;
+    trajectoryObservations?: Array<Pick<
+      CapturedTask['steps'][number],
+      'events' | 'status'
+    >>;
     attemptGroup?: CapturedTask['attemptGroup'];
+    lineage?: CapturedTask['lineage'];
   };
   /** The redaction diff for the local preview. NEVER persisted. */
   redactions: ScrubRedaction[];
@@ -252,6 +257,94 @@ function fieldRef(stepIndex: number, key: string): string {
   return `steps[${stepIndex}].attributes[${JSON.stringify(key)}]`;
 }
 
+async function scrubStepObservations(
+  steps: CapturedTask['steps'],
+  pipeline: ScrubPipeline,
+): Promise<{
+  observations: NonNullable<PendingEnvelope['episodeFacts']['trajectoryObservations']>;
+  redactions: ScrubRedaction[];
+}> {
+  const observations: NonNullable<
+    PendingEnvelope['episodeFacts']['trajectoryObservations']
+  > = [];
+  const redactions: ScrubRedaction[] = [];
+  for (const [stepIndex, step] of steps.entries()) {
+    const events: NonNullable<CapturedTask['steps'][number]['events']> = [];
+    for (const [eventIndex, event] of (step.events ?? []).entries()) {
+      const originalAttributes = event.attributes ?? {};
+      const result = await pipeline.run(originalAttributes);
+      const fitted = fitAttributes(result.attributes);
+      for (const record of result.redactions) {
+        redactions.push({
+          field:
+            `steps[${stepIndex}].events[${eventIndex}].attributes`
+            + `[${JSON.stringify(record.key)}]`,
+          stage: record.stage,
+          ...(record.detail ? { detail: record.detail } : {}),
+          before: originalAttributes[record.key],
+          after: fitted.attributes[record.key],
+        });
+      }
+      for (const cut of fitted.cuts) {
+        redactions.push({
+          field:
+            `steps[${stepIndex}].events[${eventIndex}].attributes`
+            + `[${JSON.stringify(cut.key)}]`,
+          stage: 'fit',
+          detail: `truncated to fit ${MAX_STEP_ATTRIBUTES_BYTES} bytes`,
+          before: cut.before,
+          after: cut.after,
+        });
+      }
+      events.push({
+        timeUnixNano: event.timeUnixNano,
+        name: event.name,
+        ...(event.attributes !== undefined
+          ? { attributes: fitted.attributes }
+          : {}),
+      });
+    }
+
+    let status = step.status;
+    if (status?.message !== undefined) {
+      const before = { 'status.message': status.message };
+      const result = await pipeline.run(before);
+      const fitted = fitAttributes(result.attributes);
+      const after = fitted.attributes['status.message'];
+      for (const record of result.redactions) {
+        redactions.push({
+          field: `steps[${stepIndex}].status.message`,
+          stage: record.stage,
+          ...(record.detail ? { detail: record.detail } : {}),
+          before: status.message,
+          after,
+        });
+      }
+      for (const cut of fitted.cuts) {
+        redactions.push({
+          field: `steps[${stepIndex}].status.message`,
+          stage: 'fit',
+          detail: `truncated to fit ${MAX_STEP_ATTRIBUTES_BYTES} bytes`,
+          before: cut.before,
+          after: cut.after,
+        });
+      }
+      status = {
+        code: status.code,
+        ...(typeof after === 'string' && after.length > 0
+          ? { message: after }
+          : {}),
+      };
+    }
+
+    observations.push({
+      ...(step.events !== undefined ? { events } : {}),
+      ...(status !== undefined ? { status } : {}),
+    });
+  }
+  return { observations, redactions };
+}
+
 function episodeFactBag(task: CapturedTask): Attributes {
   return {
     ...(task.session.kind !== undefined
@@ -330,6 +423,14 @@ function episodeFactBag(task: CapturedTask): Attributes {
           : {}),
         ...(task.attemptGroup.nFail !== undefined
           ? { 'episodeFacts.attemptGroup.nFail': task.attemptGroup.nFail }
+          : {}),
+      }
+      : {}),
+    ...(task.lineage !== undefined
+      ? {
+        'episodeFacts.lineage.episodeId': task.lineage.episodeId,
+        ...(task.lineage.mintRef !== undefined
+          ? { 'episodeFacts.lineage.mintRef': task.lineage.mintRef }
           : {}),
       }
       : {}),
@@ -437,6 +538,16 @@ function taskWithScrubbedEpisodeFacts(
         },
       }
       : {}),
+    ...(task.lineage !== undefined
+      ? {
+        lineage: {
+          episodeId: fact('lineage.episodeId'),
+          ...(fact('lineage.mintRef') !== undefined
+            ? { mintRef: fact('lineage.mintRef') }
+            : {}),
+        },
+      }
+      : {}),
   });
 }
 
@@ -463,6 +574,10 @@ export async function capture(
   let summaryRun: ScrubResult;
   let factRun: ScrubResult;
   let scrubbedFactTask: CapturedTask;
+  let scrubbedObservations: NonNullable<
+    PendingEnvelope['episodeFacts']['trajectoryObservations']
+  >;
+  let observationRedactions: ScrubRedaction[];
   const summaryBag: Attributes = {
     'task.summary': task.task.summary,
     ...(task.outcome.summary !== undefined ? { 'outcome.summary': task.outcome.summary } : {}),
@@ -470,6 +585,9 @@ export async function capture(
   const factBag = episodeFactBag(task);
   try {
     scrubbedSteps = await scrubCaptureSpans(task.steps, recorder);
+    const observationResult = await scrubStepObservations(task.steps, base);
+    scrubbedObservations = observationResult.observations;
+    observationRedactions = observationResult.redactions;
     // The envelope calls `task.summary` a "scrubbed one-line descriptor" —
     // capture is where that becomes true. Same pipeline, pseudo-attribute bag.
     summaryRun = await recorder.run(summaryBag);
@@ -486,10 +604,11 @@ export async function capture(
     step,
     run: recorder.runs[i]!,
     kind: scrubbedFactTask.steps[i]!.kind,
+    observation: scrubbedObservations[i]!,
   }));
   const { steps: retained, sampledOut } = sampleSteps(paired);
 
-  const redactions: ScrubRedaction[] = [];
+  const redactions: ScrubRedaction[] = [...observationRedactions];
   if (sampledOut > 0) {
     redactions.push({
       field: 'steps',
@@ -633,8 +752,12 @@ export async function capture(
           : {}),
       },
       trajectoryKinds: retained.map(({ kind }) => kind),
+      trajectoryObservations: retained.map(({ observation }) => observation),
       ...(scrubbedFactTask.attemptGroup
         ? { attemptGroup: scrubbedFactTask.attemptGroup }
+        : {}),
+      ...(scrubbedFactTask.lineage
+        ? { lineage: scrubbedFactTask.lineage }
         : {}),
     },
     redactions,

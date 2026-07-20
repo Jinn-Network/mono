@@ -169,7 +169,7 @@ describe('parseSolveTranscript', () => {
       spans.every(
         (span) =>
           span.attributes['jinn.transcript.parser'] === 'codex-exec-json' &&
-          span.attributes['jinn.transcript.parserVersion'] === '1.0.0',
+          span.attributes['jinn.transcript.parserVersion'] === '1.1.0',
       ),
     ).toBe(true);
   });

@@ -6,7 +6,7 @@ import type { TranscriptSpanInput, TranscriptSpanParser } from './types.js';
 
 const SOURCE_FORMAT = 'codex-exec-json';
 const PARSER_NAME = 'codex-exec-json';
-const PARSER_VERSION = '1.0.0';
+const PARSER_VERSION = '1.1.0';
 
 interface DirectExecItem {
   id?: unknown;

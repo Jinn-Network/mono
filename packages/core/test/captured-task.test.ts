@@ -90,4 +90,41 @@ describe('CapturedTaskSchema verifier evidence', () => {
       passToPass: [],
     });
   });
+
+  it('preserves optional typed observations, span status, and source lineage', () => {
+    const parsed = CapturedTaskSchema.parse({
+      ...capturedTaskWithVerifier({ type: 'none' }),
+      steps: [{
+        spanId: 'span-1',
+        parentSpanId: null,
+        kind: 'jinn.tool_call',
+        name: 'tool_call.command_execution',
+        startTimeUnixNano: '1',
+        endTimeUnixNano: '2',
+        attributes: { 'tool.args': { command: 'false' } },
+        events: [{
+          timeUnixNano: '2',
+          name: 'tool_result',
+          attributes: {
+            'tool.result': 'command failed',
+            'tool.result.is_error': true,
+          },
+        }],
+        status: { code: 'ERROR', message: 'exit 1' },
+      }],
+      lineage: { episodeId: 'bafySolutionEnvelope' },
+    });
+
+    expect(parsed.steps[0]).toMatchObject({
+      events: [{
+        name: 'tool_result',
+        attributes: {
+          'tool.result': 'command failed',
+          'tool.result.is_error': true,
+        },
+      }],
+      status: { code: 'ERROR', message: 'exit 1' },
+    });
+    expect(parsed.lineage).toEqual({ episodeId: 'bafySolutionEnvelope' });
+  });
 });
