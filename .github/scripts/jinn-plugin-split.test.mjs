@@ -294,6 +294,64 @@ test('(h) identical plugin content at a new mono SHA preserves provenance and cr
   }
 });
 
+test('(h2) identical plugin content repairs a legacy three-line provenance marker once', () => {
+  const pluginDir = makePluginDir();
+  const slim = makeSlimRepo();
+  try {
+    run({ ...PROV, pluginDir, slimDir: slim });
+    const legacy = [
+      `source: Jinn-Network/mono@${PROV.monoSha}`,
+      `generated-by: ${PROV.workflowPath}`,
+      'DO NOT EDIT HERE — edit apps/jinn-agent/plugins/jinn/ in Jinn-Network/mono.',
+      '',
+    ].join('\n');
+    writeFileSync(path.join(slim, '.jinn-split-source'), legacy);
+    git(slim, ['add', '-A']);
+    git(slim, ['commit', '-q', '-m', 'legacy provenance fixture']);
+    const beforeRepair = commitCount(slim);
+
+    const repair = run({ ...NEXT_PROV, pluginDir, slimDir: slim });
+
+    assert.equal(repair.changed, true, 'legacy provenance must produce one repair commit');
+    assert.equal(commitCount(slim), String(Number(beforeRepair) + 1));
+    assert.equal(
+      readFileSync(path.join(slim, '.jinn-split-source'), 'utf8'),
+      `source: Jinn-Network/mono@${PROV.monoSha}\n` +
+        `generated-by: ${PROV.workflowPath}\n`,
+      'repair preserves the last valid source SHA while normalizing the contract',
+    );
+
+    const idempotent = run({ ...NEXT_PROV, pluginDir, slimDir: slim });
+    assert.equal(idempotent.changed, false, 'canonical repaired provenance must then no-op');
+  } finally {
+    cleanup(pluginDir, slim);
+  }
+});
+
+test('(h3) identical plugin content recreates missing provenance from the current mono SHA', () => {
+  const pluginDir = makePluginDir();
+  const slim = makeSlimRepo();
+  try {
+    run({ ...PROV, pluginDir, slimDir: slim });
+    rmSync(path.join(slim, '.jinn-split-source'));
+    git(slim, ['add', '-A']);
+    git(slim, ['commit', '-q', '-m', 'missing provenance fixture']);
+    const beforeRepair = commitCount(slim);
+
+    const repair = run({ ...NEXT_PROV, pluginDir, slimDir: slim });
+
+    assert.equal(repair.changed, true, 'missing provenance must produce one repair commit');
+    assert.equal(commitCount(slim), String(Number(beforeRepair) + 1));
+    assert.equal(
+      readFileSync(path.join(slim, '.jinn-split-source'), 'utf8'),
+      `source: Jinn-Network/mono@${NEXT_PROV.monoSha}\n` +
+        `generated-by: ${NEXT_PROV.workflowPath}\n`,
+    );
+  } finally {
+    cleanup(pluginDir, slim);
+  }
+});
+
 test('(i) validateMirrorDestination requires the destination to be a Git worktree root', () => {
   const pluginDir = makePluginDir();
   const plainDir = mkdtempSync(path.join(tmpdir(), 'jinn-plugin-not-git-'));
