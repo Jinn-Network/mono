@@ -18,4 +18,4 @@ package-dir = {"jinn_plugin" = "."}
 packages = ["jinn_plugin"]
 
 [tool.setuptools.package-data]
-jinn_plugin = ["plugin.yaml", "skin/*.yaml", "soul/*.md"]
+jinn_plugin = ["plugin.yaml", "layer-runtime.json", "skin/*.yaml", "soul/*.md"]

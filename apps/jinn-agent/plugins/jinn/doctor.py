@@ -128,15 +128,16 @@ def _check_plugin_build(plugin_dir: Optional[Path] = None) -> dict:
 def _layer_resolution() -> tuple[str, str]:
     """(detail suffix, failure remedy) for the layer resolution in effect.
 
-    Resolution order itself is untouched (issue C6) — this only reports it.
+    The plugin-local pinned artifact is the product path. Environment and PATH
+    branches are development overrides.
     """
-    override = (os.environ.get("JINN_LAYER_BIN") or "").strip()
-    if override:
+    resolution = jinn_layer.resolve_binary()
+    if resolution.source == "env":
         return (
-            f"via JINN_LAYER_BIN={override}",
+            f"via {resolution.detail}",
             "export JINN_LAYER_BIN=<path-to-client>/dist/bin/jinn-layer.js",
         )
-    return "jinn-layer on PATH", _update_remedy()
+    return resolution.detail, _update_remedy()
 
 
 def _check_layer(runner: Optional[jinn_layer.Runner] = None) -> tuple[dict, dict]:

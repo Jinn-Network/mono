@@ -1,9 +1,10 @@
-"""Subprocess wrapper around the ``jinn-layer`` CLI (@jinn-network/harness-layer).
+"""Subprocess wrapper around the ``jinn-layer`` CLI.
 
 The Jinn layer is a package, not fork code (thin-fork discipline): scrubbing,
 consent conversion, publishing, anchoring, the ledger and corpus reads all
 live in ``jinn-layer``; this module only shells out to it. Resolve order:
-``JINN_LAYER_BIN`` env, then ``jinn-layer`` on PATH.
+the version-pinned plugin-local npm artifact, ``JINN_LAYER_BIN``, then
+``jinn-layer`` on PATH. The last two are development overrides.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import re
 import subprocess
 import tempfile
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -33,6 +35,85 @@ Runner = Callable[..., Tuple[int, str]]
 _TIMEOUT_S = 120
 CONTRACT_VERSION = 1
 PROCESS_STATUSES = ("ok", "degraded", "unavailable")
+_LAYER_PACKAGE = "@jinn-network/jinn-layer"
+_SEMVER_PIN = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
+
+
+class LayerResolutionError(RuntimeError):
+    """The committed plugin-local layer contract is malformed or unusable."""
+
+
+@dataclass(frozen=True)
+class LayerResolution:
+    argv: tuple[str, ...]
+    source: str
+    detail: str
+    package: str
+    version: str
+
+
+def _runtime_contract(plugin_dir: Path) -> tuple[str, str, str]:
+    path = plugin_dir / "layer-runtime.json"
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LayerResolutionError(
+            f"invalid layer runtime contract at {path}: {exc}"
+        ) from exc
+    package = value.get("package") if isinstance(value, dict) else None
+    version = value.get("version") if isinstance(value, dict) else None
+    bin_path = value.get("bin") if isinstance(value, dict) else None
+    if (
+        package != _LAYER_PACKAGE
+        or not isinstance(version, str)
+        or _SEMVER_PIN.fullmatch(version) is None
+        or not isinstance(bin_path, str)
+        or not bin_path
+    ):
+        raise LayerResolutionError(f"invalid layer runtime contract at {path}")
+    relative = Path(bin_path)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise LayerResolutionError(f"invalid layer runtime bin path at {path}")
+    return package, version, bin_path
+
+
+def resolve_binary(plugin_dir: Optional[Path] = None) -> LayerResolution:
+    """Resolve the layer command and report which contract branch won."""
+    directory = plugin_dir if plugin_dir is not None else Path(__file__).resolve().parent
+    package, version, bin_path = _runtime_contract(directory)
+    local_bin = directory / bin_path
+    if local_bin.exists():
+        if not local_bin.is_file():
+            raise LayerResolutionError(
+                f"plugin-local layer artifact is not a file: {local_bin}"
+            )
+        if os.name != "nt" and not os.access(local_bin, os.X_OK):
+            raise LayerResolutionError(
+                f"plugin-local layer artifact is not executable: {local_bin}"
+            )
+        return LayerResolution(
+            argv=(str(local_bin),),
+            source="plugin-local",
+            detail=f"plugin-local {package}@{version} ({local_bin})",
+            package=package,
+            version=version,
+        )
+    override = (os.environ.get("JINN_LAYER_BIN") or "").strip()
+    if override:
+        return LayerResolution(
+            argv=(override,),
+            source="env",
+            detail=f"JINN_LAYER_BIN={override} (development override)",
+            package=package,
+            version=version,
+        )
+    return LayerResolution(
+        argv=("jinn-layer",),
+        source="path",
+        detail="jinn-layer on PATH (development override)",
+        package=package,
+        version=version,
+    )
 
 
 def _default_runner(
@@ -64,7 +145,8 @@ def _default_runner(
 
 
 def binary() -> str:
-    return (os.environ.get("JINN_LAYER_BIN") or "").strip() or "jinn-layer"
+    """Compatibility display value for the current single-executable command."""
+    return resolve_binary().argv[0]
 
 
 def _normalize_result(result: Tuple[int, str] | Tuple[int, str, str]) -> Tuple[int, str, str]:
@@ -88,7 +170,7 @@ def run(
     input: Optional[str] = None,
     timeout_s: int = _TIMEOUT_S,
 ) -> Tuple[int, str, str]:
-    argv = [binary(), *args]
+    argv = [*resolve_binary().argv, *args]
     if runner is not None:
         result = runner(argv, input=input) if input is not None else runner(argv)
         return _normalize_result(result)
@@ -111,7 +193,7 @@ def spawn(args: List[str], stdout_path: Path, stderr_path: Path) -> int:
         kwargs["start_new_session"] = True
     with open(stdout_path, "ab") as out_f, open(stderr_path, "ab") as err_f:
         proc = subprocess.Popen(
-            [binary(), *args],
+            [*resolve_binary().argv, *args],
             stdout=out_f,
             stderr=err_f,
             stdin=subprocess.DEVNULL,
@@ -195,7 +277,7 @@ def session_pickup(request: Dict[str, Any], runner: Optional[Runner] = None) -> 
     (Stage 1 rescope R3) — the ``session end`` stdin-JSON pattern, applied
     to the sibling verb."""
     payload = json.dumps(request, separators=(",", ":"))
-    argv = [binary(), "session", "pickup"]
+    argv = [*resolve_binary().argv, "session", "pickup"]
     if runner is not None:
         return _normalize_result(runner(argv, input=payload))
     return _default_runner(argv, input=payload, timeout_s=_SESSION_PICKUP_TIMEOUT_S)
