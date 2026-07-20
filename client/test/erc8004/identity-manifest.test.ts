@@ -13,6 +13,10 @@ import {
   encodeManifestPayload,
   type ManifestPayload,
 } from '../../src/erc8004/manifest-registry.js';
+import {
+  getDefaultTxSubmissionLedger,
+  setDefaultTxSubmissionLedger,
+} from '../../src/tx-retry.js';
 
 const REGISTRY = '0x8004800480048004800480048004800480048004' as Hex;
 const TX_HASH = `0x${'fe'.repeat(32)}` as Hex;
@@ -177,6 +181,40 @@ describe('IdentityPublisher.publishManifest', () => {
     });
 
     expect(onBroadcast).toHaveBeenCalledTimes(1);
+  });
+
+  it('journals the exact hash once when nonce-ledger recording fails after send', async () => {
+    const originalLedger = getDefaultTxSubmissionLedger();
+    const onBroadcast = vi.fn();
+    const { publisher, sendTransaction, waitForTransactionReceipt } = makePublisher({
+      blockNumber: 126n,
+      gasUsed: 24_000n,
+      effectiveGasPrice: 2n,
+      status: 'success',
+    });
+    setDefaultTxSubmissionLedger({
+      getTxSubmission: () => null,
+      recordTxSubmission: () => {
+        throw new Error('nonce ledger disk unavailable');
+      },
+      markTxSubmissionResolved: () => undefined,
+    });
+
+    try {
+      const error = await publisher.publishManifest({
+        manifestCid: 'bafy-manifest',
+        payload: PAYLOAD,
+        onBroadcast,
+      }).catch((caught: unknown) => caught);
+
+      expect(error).toMatchObject({ txHash: TX_HASH });
+      expect(onBroadcast).toHaveBeenCalledOnce();
+      expect(onBroadcast).toHaveBeenCalledWith(TX_HASH);
+      expect(sendTransaction).toHaveBeenCalledOnce();
+      expect(waitForTransactionReceipt).not.toHaveBeenCalled();
+    } finally {
+      setDefaultTxSubmissionLedger(originalLedger);
+    }
   });
 
   it('reconciles confirmed, reverted, and unavailable receipts without broadcasting', async () => {

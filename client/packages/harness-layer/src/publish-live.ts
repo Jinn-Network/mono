@@ -158,6 +158,11 @@ export function createLivePublishDeps(config: LivePublishConfig): ManifestBatchP
       return { txHash, blockNumber, gasUsed, feeWei };
     },
     manifestJournal: config.store,
+    manifestPublicationScope: {
+      chainId: identityPublisher.chainId,
+      identityRegistryAddress: identityPublisher.registry,
+      agentId: identityPublisher.agent.toString(),
+    },
     reconcileAnchor: (txHash) =>
       identityPublisher.reconcileTransaction(txHash),
     recordManifestAnchor: (anchor) => {

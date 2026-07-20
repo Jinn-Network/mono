@@ -27,6 +27,11 @@ const TEST_SAFE = '0x1111111111111111111111111111111111111111' as const;
 const TEST_TX = `0x${'ab'.repeat(32)}` as const;
 const CONTROL_TX = `0x${'cd'.repeat(32)}` as const;
 const SECOND_TX = `0x${'ef'.repeat(32)}` as const;
+const PUBLICATION_SCOPE = {
+  chainId: 84532,
+  identityRegistryAddress: '0x8004800480048004800480048004800480048004',
+  agentId: '42',
+} as const;
 
 function memoryJournal() {
   const states = new Map<string, string>();
@@ -140,6 +145,7 @@ function deps() {
     recordControlAnchor: (input) => {
       calls.controlRecords.push(input);
     },
+    manifestPublicationScope: PUBLICATION_SCOPE,
     log: (line) => calls.logs.push(line),
   };
   return { publishDeps, calls, ledger };
@@ -309,12 +315,19 @@ describe('publishManifestBatch', () => {
 
   it('retains the manifest CID and broadcast tx when confirmation fails', async () => {
     const { publishDeps, calls } = deps();
+    const { store } = memoryJournal();
+    publishDeps.manifestJournal = store;
     publishDeps.anchorManifest = async () => {
       throw Object.assign(new Error('receipt reverted'), { txHash: TEST_TX });
     };
 
     const error = await publishManifestBatch(
-      [{ pending: await pending(1), polarity: 'pass', instanceId: 'mono-1' }],
+      [{
+        pending: await pending(1),
+        polarity: 'pass',
+        instanceId: 'mono-1',
+        sourceId: 'request-1',
+      }],
       publishDeps,
       { batchKind: 'bridge' },
     ).catch((caught: unknown) => caught);
@@ -324,6 +337,7 @@ describe('publishManifestBatch', () => {
       manifestCid: calls.manifestCids[0],
       txHash: TEST_TX,
       memberRefs: ['bafy-envelope-1'],
+      batchKey: expect.any(String),
     });
     expect(String(error)).toContain('receipt reverted');
   });
@@ -372,6 +386,25 @@ describe('publishManifestBatch', () => {
     );
   });
 
+  it('always uses the production raw-block ceiling even if a legacy test limit is injected', async () => {
+    const { publishDeps, calls } = deps();
+    const legacyDeps = Object.assign(publishDeps, {
+      maxManifestBodyBytes: 400,
+    }) as ManifestBatchPublishDeps;
+
+    const result = await publishManifestBatch(
+      [
+        { pending: await pending(1), instanceId: 'mono-1' },
+        { pending: await pending(2), instanceId: 'mono-2' },
+      ],
+      legacyDeps,
+      { batchKind: 'bridge' },
+    );
+
+    expect(result.batches).toHaveLength(1);
+    expect(calls.manifestBodies).toHaveLength(1);
+  });
+
   it('rejects a non-raw manifest CID before broadcasting an anchor', async () => {
     const { publishDeps, calls } = deps();
     publishDeps.publishManifestBody = async (body) => {
@@ -392,8 +425,10 @@ describe('publishManifestBatch', () => {
     expect(calls.anchorManifest).toHaveLength(0);
   });
 
-  it('rejects a non-canonical manifest CID before broadcasting an anchor', async () => {
+  it('retains one-member recovery facts for a non-canonical manifest CID', async () => {
     const { publishDeps, calls } = deps();
+    const { store } = memoryJournal();
+    publishDeps.manifestJournal = store;
     publishDeps.publishManifestBody = async (body) => {
       const digest = createHash('sha256')
         .update(canonicalJson(body))
@@ -401,28 +436,65 @@ describe('publishManifestBatch', () => {
       return { cid: `f8100551220${digest}` };
     };
 
-    await expect(
-      publishManifestBatch(
-        [{ pending: await pending(1), polarity: 'pass', instanceId: 'mono-1' }],
-        publishDeps,
-        { batchKind: 'bridge' },
-      ),
-    ).rejects.toThrow(/minimal|canonical|varint/i);
+    const error = await publishManifestBatch(
+      [{
+        pending: await pending(1),
+        polarity: 'pass',
+        instanceId: 'mono-1',
+        sourceId: 'request-1',
+      }],
+      publishDeps,
+      { batchKind: 'bridge' },
+    ).catch((caught: unknown) => caught);
 
+    expect(error).toBeInstanceOf(ManifestBatchPreparationError);
+    expect(error).toMatchObject({
+      stage: 'manifest-validation',
+      memberRefs: ['bafy-envelope-1'],
+      batchKey: expect.any(String),
+    });
+    expect(String(error)).toMatch(/minimal|canonical|varint/i);
+    expect(calls.anchorManifest).toHaveLength(0);
+  });
+
+  it('retains one-member recovery facts when manifest upload fails', async () => {
+    const { publishDeps, calls } = deps();
+    const { store } = memoryJournal();
+    publishDeps.manifestJournal = store;
+    publishDeps.publishManifestBody = async () => {
+      throw new Error('manifest upload unavailable');
+    };
+
+    const error = await publishManifestBatch(
+      [{
+        pending: await pending(1),
+        sourceId: 'request-1',
+      }],
+      publishDeps,
+      { batchKind: 'bridge' },
+    ).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ManifestBatchPreparationError);
+    expect(error).toMatchObject({
+      stage: 'manifest-upload',
+      memberRefs: ['bafy-envelope-1'],
+      batchKey: expect.any(String),
+    });
+    expect(String(error)).toContain('manifest upload unavailable');
     expect(calls.anchorManifest).toHaveLength(0);
   });
 
   it('retains every uploaded ref when the first split manifest needs recovery', async () => {
     const { publishDeps } = deps();
-    publishDeps.maxManifestBodyBytes = 400;
+    const largeInstanceId = 'x'.repeat(140_000);
     publishDeps.recordManifestAnchor = () => {
       throw new Error('receipt store unavailable');
     };
 
     const error = await publishManifestBatch(
       [
-        { pending: await pending(1), instanceId: 'mono-1' },
-        { pending: await pending(2), instanceId: 'mono-2' },
+        { pending: await pending(1), instanceId: `${largeInstanceId}1` },
+        { pending: await pending(2), instanceId: `${largeInstanceId}2` },
       ],
       publishDeps,
       { batchKind: 'bridge' },
@@ -465,7 +537,7 @@ describe('publishManifestBatch', () => {
     const { publishDeps, calls, ledger } = deps();
     const { store } = memoryJournal();
     publishDeps.manifestJournal = store;
-    publishDeps.maxManifestBodyBytes = 400;
+    const largeInstanceId = 'x'.repeat(140_000);
     let anchorCall = 0;
     publishDeps.anchorManifest = async ({ onBroadcast }) => {
       anchorCall += 1;
@@ -481,8 +553,16 @@ describe('publishManifestBatch', () => {
     };
     publishDeps.reconcileAnchor = async () => ({ status: 'reverted', txHash: SECOND_TX });
     const members = [
-      { pending: await pending(1), instanceId: 'mono-1', sourceId: 'request-1' },
-      { pending: await pending(2), instanceId: 'mono-2', sourceId: 'request-2' },
+      {
+        pending: await pending(1),
+        instanceId: `${largeInstanceId}1`,
+        sourceId: 'request-1',
+      },
+      {
+        pending: await pending(2),
+        instanceId: `${largeInstanceId}2`,
+        sourceId: 'request-2',
+      },
     ];
 
     const first = await publishManifestBatch(
@@ -528,6 +608,145 @@ describe('publishManifestBatch', () => {
     ).rejects.toThrow(/pending|unconfirmed|reconcile/i);
 
     expect(anchorCalls).toBe(1);
+  });
+
+  it('rejects duplicate durable source IDs before publishing anything', async () => {
+    const { publishDeps, calls } = deps();
+    const journal = memoryJournal();
+    publishDeps.manifestJournal = journal.store;
+
+    await expect(
+      publishManifestBatch(
+        [
+          { pending: await pending(1), sourceId: 'request-1' },
+          { pending: await pending(2), sourceId: 'request-1' },
+        ],
+        publishDeps,
+        { batchKind: 'bridge' },
+      ),
+    ).rejects.toThrow(/duplicate.*sourceId/i);
+
+    expect(calls.publishEnvelope).toHaveLength(0);
+    expect(calls.anchorManifest).toHaveLength(0);
+    expect(journal.states).toHaveProperty('size', 0);
+  });
+
+  it('fails closed when sanitized member inputs change under the same source IDs', async () => {
+    const { publishDeps, calls } = deps();
+    const journal = memoryJournal();
+    publishDeps.manifestJournal = journal.store;
+    const originalPending = await pending(1);
+    const original = {
+      pending: originalPending,
+      sourceId: 'request-1',
+      polarity: 'pass' as const,
+      instanceId: 'mono-1',
+    };
+    await publishManifestBatch([original], publishDeps, { batchKind: 'bridge' });
+
+    const changedInputs = [
+      { ...original, pending: await pending(2) },
+      { ...original, polarity: 'fail' as const },
+      { ...original, instanceId: 'mono-2' },
+    ];
+    for (const changed of changedInputs) {
+      await expect(
+        publishManifestBatch([changed], publishDeps, { batchKind: 'bridge' }),
+      ).rejects.toThrow(/journal.*conflict|frozen.*input/i);
+    }
+
+    expect(calls.publishEnvelope).toHaveLength(1);
+    expect(calls.anchorManifest).toHaveLength(1);
+  });
+
+  it('freezes non-secret redaction facts without persisting redaction.before', async () => {
+    const { publishDeps, calls } = deps();
+    const journal = memoryJournal();
+    publishDeps.manifestJournal = journal.store;
+    const captured = await pending(1);
+    const member = {
+      pending: {
+        ...captured,
+        redactions: [{
+          field: 'task.summary',
+          stage: 'secretlint',
+          detail: 'token',
+          before: 'SECRET_A',
+          after: '[REDACTED]',
+        }],
+      },
+      sourceId: 'request-1',
+    };
+
+    await publishManifestBatch([member], publishDeps, { batchKind: 'bridge' });
+    const [stateJson] = journal.states.values();
+    expect(stateJson).not.toContain('SECRET_A');
+    expect(stateJson).toContain('secretlint');
+    expect(stateJson).toContain('task.summary');
+
+    await publishManifestBatch(
+      [{
+        ...member,
+        pending: {
+          ...member.pending,
+          redactions: [{
+            ...member.pending.redactions[0]!,
+            before: 'SECRET_B',
+          }],
+        },
+      }],
+      publishDeps,
+      { batchKind: 'bridge' },
+    );
+
+    expect(calls.publishEnvelope).toHaveLength(1);
+    expect(calls.anchorManifest).toHaveLength(1);
+    expect([...journal.states.values()].join('')).not.toContain('SECRET_B');
+  });
+
+  it('uses a distinct recovery identity for the same inputs on another anchor scope', async () => {
+    const { publishDeps, calls } = deps();
+    const journal = memoryJournal();
+    publishDeps.manifestJournal = journal.store;
+    const members = [
+      { pending: await pending(1), sourceId: 'request-1' },
+    ];
+
+    await publishManifestBatch(members, publishDeps, { batchKind: 'bridge' });
+    publishDeps.manifestPublicationScope = {
+      ...PUBLICATION_SCOPE,
+      chainId: 8453,
+    };
+    await publishManifestBatch(members, publishDeps, { batchKind: 'bridge' });
+
+    expect(journal.states).toHaveProperty('size', 2);
+    expect(calls.publishEnvelope).toHaveLength(2);
+    expect(calls.anchorManifest).toHaveLength(2);
+  });
+
+  it('rejects a persisted journal whose frozen scope or member digest was tampered', async () => {
+    const { publishDeps } = deps();
+    const journal = memoryJournal();
+    publishDeps.manifestJournal = journal.store;
+    const members = [
+      { pending: await pending(1), sourceId: 'request-1' },
+    ];
+    await publishManifestBatch(members, publishDeps, { batchKind: 'bridge' });
+    const [[batchKey, stateJson]] = [...journal.states.entries()];
+    const state = JSON.parse(stateJson!) as {
+      publicationScope: { agentId: string };
+      memberInputsDigest: string;
+    };
+    state.publicationScope = {
+      ...PUBLICATION_SCOPE,
+      agentId: '999',
+    };
+    state.memberInputsDigest = '0'.repeat(64);
+    journal.states.set(batchKey!, JSON.stringify(state));
+
+    await expect(
+      publishManifestBatch(members, publishDeps, { batchKind: 'bridge' }),
+    ).rejects.toThrow(/journal.*conflict|scope|digest/i);
   });
 
   it('rejects a journal whose frozen partition plan was changed', async () => {

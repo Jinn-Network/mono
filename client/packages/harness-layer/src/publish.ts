@@ -111,6 +111,12 @@ export interface ManifestBatchJournalStore {
   saveManifestBatchJournal(batchKey: string, stateJson: string): void;
 }
 
+export interface ManifestPublicationScope {
+  chainId: number;
+  identityRegistryAddress: `0x${string}`;
+  agentId: string;
+}
+
 export interface ManifestAnchorRecord {
   manifestCid: string;
   contentKind: 'manifest';
@@ -144,6 +150,8 @@ export interface ManifestBatchPublishDeps extends HarnessPublishDeps {
   }): Promise<ManifestAnchorResult>;
   /** Durable live-only recovery journal. */
   manifestJournal?: ManifestBatchJournalStore;
+  /** Exact on-chain identity targeted by a durable recovery journal. */
+  manifestPublicationScope?: ManifestPublicationScope;
   /** Read-only reconciliation for a previously journaled transaction. */
   reconcileAnchor?(
     txHash: `0x${string}`,
@@ -151,11 +159,6 @@ export interface ManifestBatchPublishDeps extends HarnessPublishDeps {
   recordManifestAnchor(input: ManifestAnchorRecord): void;
   /** Required only by the explicit paired gas-measurement control. */
   recordControlAnchor?(input: PerRecordControlAnchorRecord): void;
-  /**
-   * Test seam for exercising partition behavior with small fixtures. Values
-   * above Kubo's real raw-block ceiling are clamped to the production limit.
-   */
-  maxManifestBodyBytes?: number;
   log?: (line: string) => void;
 }
 
@@ -272,6 +275,7 @@ export class ManifestBatchSetError extends Error {
     readonly completed: ManifestBatchResult[],
     readonly failed: unknown,
     readonly memberRefs: string[],
+    readonly batchKey: string | null,
   ) {
     const detail = failed instanceof Error ? failed.message : String(failed);
     super(
@@ -284,7 +288,12 @@ export class ManifestBatchPreparationError extends Error {
   override readonly name = 'ManifestBatchPreparationError';
 
   constructor(
-    readonly stage: 'member-upload' | 'partition',
+    readonly stage:
+      | 'member-upload'
+      | 'partition'
+      | 'manifest-upload'
+      | 'manifest-validation'
+      | 'manifest-preparation',
     readonly memberRefs: string[],
     readonly preparationError: unknown,
     readonly batchKey: string | null,
@@ -313,6 +322,7 @@ export class ManifestBatchAnchorError extends Error {
     readonly memberRefs: string[],
     readonly root: `0x${string}`,
     readonly anchorError: unknown,
+    readonly batchKey: string | null,
   ) {
     const candidate = (anchorError as { txHash?: unknown } | null)?.txHash;
     const txHash =
@@ -606,10 +616,12 @@ interface JournalPartition {
 }
 
 interface ManifestBatchJournalState {
-  version: 1;
+  version: 2;
   batchKey: string;
   batchKind: string;
   sourceIds: string[];
+  publicationScope: ManifestPublicationScope | null;
+  memberInputsDigest: string;
   nowIso: string;
   maxBodyBytes: number;
   measurePerRecordControl: boolean;
@@ -630,8 +642,10 @@ function safeJournalMember(member: ManifestBatchMemberInput): JournalMemberInput
       kind: member.pending.kind,
       draft: member.pending.draft,
       // Redaction `before` values are display-only secrets and must never be
-      // persisted. The draft is already scrubbed and is all publication needs.
-      redactions: [],
+      // persisted. Retain the non-secret redaction receipt as frozen input.
+      redactions: member.pending.redactions.map(
+        ({ before: _before, ...redaction }) => redaction,
+      ),
     },
     ...(member.polarity === undefined ? {} : { polarity: member.polarity }),
     ...(member.instanceId === undefined ? {} : { instanceId: member.instanceId }),
@@ -639,24 +653,56 @@ function safeJournalMember(member: ManifestBatchMemberInput): JournalMemberInput
   };
 }
 
-function manifestBatchKey(batchKind: string, sourceIds: string[]): string {
+function normalizePublicationScope(
+  scope: ManifestPublicationScope,
+): ManifestPublicationScope {
+  if (!Number.isSafeInteger(scope.chainId) || scope.chainId < 1) {
+    throw new Error('manifest publication scope requires a positive integer chainId');
+  }
+  if (!/^0x[0-9a-fA-F]{40}$/.test(scope.identityRegistryAddress)) {
+    throw new Error('manifest publication scope requires an identity registry address');
+  }
+  if (typeof scope.agentId !== 'string' || scope.agentId.length === 0) {
+    throw new Error('manifest publication scope requires an agent identity');
+  }
+  return {
+    chainId: scope.chainId,
+    identityRegistryAddress:
+      scope.identityRegistryAddress.toLowerCase() as `0x${string}`,
+    agentId: scope.agentId,
+  };
+}
+
+function manifestBatchKey(
+  batchKind: string,
+  sourceIds: string[],
+  publicationScope: ManifestPublicationScope,
+): string {
   return sha256Hex(
     canonicalJson({
-      schemaVersion: 'jinn.manifest-batch-recovery.v1',
+      schemaVersion: 'jinn.manifest-batch-recovery.v2',
       batchKind,
       sourceIds,
+      publicationScope,
     }),
   );
+}
+
+function memberInputsDigest(members: JournalMemberInput[]): string {
+  return sha256Hex(canonicalJson(members));
 }
 
 function parseJournalState(raw: string): ManifestBatchJournalState {
   const parsed = JSON.parse(raw) as Partial<ManifestBatchJournalState>;
   if (
-    parsed.version !== 1 ||
+    parsed.version !== 2 ||
     typeof parsed.batchKey !== 'string' ||
     typeof parsed.batchKind !== 'string' ||
     !Array.isArray(parsed.sourceIds) ||
     !parsed.sourceIds.every((value) => typeof value === 'string') ||
+    parsed.publicationScope === null ||
+    typeof parsed.publicationScope !== 'object' ||
+    typeof parsed.memberInputsDigest !== 'string' ||
     typeof parsed.nowIso !== 'string' ||
     !Number.isInteger(parsed.maxBodyBytes) ||
     typeof parsed.measurePerRecordControl !== 'boolean' ||
@@ -677,20 +723,34 @@ function openManifestJournal(
   maxBodyBytes: number,
 ): ActiveManifestJournal {
   const journal = deps.manifestJournal;
+  const suppliedSourceIds = members
+    .map((member) => member.sourceId)
+    .filter((sourceId): sourceId is string => sourceId !== undefined);
+  const duplicateSourceId = suppliedSourceIds.find(
+    (sourceId, index) => suppliedSourceIds.indexOf(sourceId) !== index,
+  );
+  if (duplicateSourceId !== undefined) {
+    throw new Error(`duplicate manifest sourceId: ${duplicateSourceId}`);
+  }
   if (!journal) {
     const sourceIds = members.map((member, index) => member.sourceId ?? `ephemeral:${index}`);
+    const frozenMembers = members.map((member, index) =>
+      safeJournalMember({ ...member, sourceId: sourceIds[index]! }));
     return {
       batchKey: null,
       state: {
-        version: 1,
+        version: 2,
         batchKey: '',
         batchKind: opts.batchKind,
         sourceIds,
+        publicationScope: deps.manifestPublicationScope
+          ? normalizePublicationScope(deps.manifestPublicationScope)
+          : null,
+        memberInputsDigest: memberInputsDigest(frozenMembers),
         nowIso: now.toISOString(),
         maxBodyBytes,
         measurePerRecordControl: Boolean(opts.measurePerRecordControl),
-        members: members.map((member, index) =>
-          safeJournalMember({ ...member, sourceId: sourceIds[index]! })),
+        members: frozenMembers,
         published: [],
         partitions: null,
       },
@@ -708,19 +768,35 @@ function openManifestJournal(
       'durable manifest recovery requires a non-empty immutable sourceId for every member',
     );
   }
+  if (!deps.manifestPublicationScope) {
+    throw new Error(
+      'durable manifest recovery requires an immutable publication scope',
+    );
+  }
   const sourceIds = members.map((member) => member.sourceId!);
-  const batchKey = manifestBatchKey(opts.batchKind, sourceIds);
+  const publicationScope = normalizePublicationScope(
+    deps.manifestPublicationScope,
+  );
+  const frozenMembers = members.map(safeJournalMember);
+  const frozenMemberInputsDigest = memberInputsDigest(frozenMembers);
+  const batchKey = manifestBatchKey(
+    opts.batchKind,
+    sourceIds,
+    publicationScope,
+  );
   const persisted = journal.loadManifestBatchJournal(batchKey);
   const state = persisted === null
     ? {
-        version: 1 as const,
+        version: 2 as const,
         batchKey,
         batchKind: opts.batchKind,
         sourceIds,
+        publicationScope,
+        memberInputsDigest: frozenMemberInputsDigest,
         nowIso: now.toISOString(),
         maxBodyBytes,
         measurePerRecordControl: Boolean(opts.measurePerRecordControl),
-        members: members.map(safeJournalMember),
+        members: frozenMembers,
         published: [],
         partitions: null,
       }
@@ -729,6 +805,10 @@ function openManifestJournal(
     state.batchKey !== batchKey ||
     state.batchKind !== opts.batchKind ||
     canonicalJson(state.sourceIds) !== canonicalJson(sourceIds) ||
+    canonicalJson(state.publicationScope) !== canonicalJson(publicationScope) ||
+    state.memberInputsDigest !== frozenMemberInputsDigest ||
+    state.memberInputsDigest !== memberInputsDigest(state.members) ||
+    canonicalJson(state.members) !== canonicalJson(frozenMembers) ||
     state.maxBodyBytes !== maxBodyBytes ||
     state.measurePerRecordControl !== Boolean(opts.measurePerRecordControl)
   ) {
@@ -853,12 +933,40 @@ async function publishPreparedManifest(
   }
   const saveJournal = (): void => args.journal?.save();
   if (partition.manifestCid === null) {
-    const manifestBlob = await deps.publishManifestBody(body);
-    assertRawSha256CidMatches(manifestBlob.cid, bodyBytes);
+    let manifestBlob: CapturePublishedBlob;
+    try {
+      manifestBlob = await deps.publishManifestBody(body);
+    } catch (error) {
+      throw new ManifestBatchPreparationError(
+        'manifest-upload',
+        published.map((member) => member.envelopeRef),
+        error,
+        args.journal?.batchKey ?? null,
+      );
+    }
+    try {
+      assertRawSha256CidMatches(manifestBlob.cid, bodyBytes);
+    } catch (error) {
+      throw new ManifestBatchPreparationError(
+        'manifest-validation',
+        published.map((member) => member.envelopeRef),
+        error,
+        args.journal?.batchKey ?? null,
+      );
+    }
     partition.manifestCid = manifestBlob.cid;
     saveJournal();
   } else {
-    assertRawSha256CidMatches(partition.manifestCid, bodyBytes);
+    try {
+      assertRawSha256CidMatches(partition.manifestCid, bodyBytes);
+    } catch (error) {
+      throw new ManifestBatchPreparationError(
+        'manifest-validation',
+        published.map((member) => member.envelopeRef),
+        error,
+        args.journal?.batchKey ?? null,
+      );
+    }
   }
   const manifestCid = partition.manifestCid;
   const root = body.merkleRoot as `0x${string}`;
@@ -913,6 +1021,7 @@ async function publishPreparedManifest(
         published.map((member) => member.envelopeRef),
         root,
         error,
+        args.journal?.batchKey ?? null,
       );
     }
     if (anchor === null) {
@@ -945,6 +1054,7 @@ async function publishPreparedManifest(
         published.map((member) => member.envelopeRef),
         root,
         error,
+        args.journal?.batchKey ?? null,
       );
     }
     partition.transaction = {
@@ -1122,11 +1232,7 @@ export async function publishManifestBatch(
       'per-record measurement control requires recordControlAnchor persistence',
     );
   }
-  const requestedMax = deps.maxManifestBodyBytes ?? MAX_RAW_IPFS_BLOCK_BYTES;
-  if (!Number.isInteger(requestedMax) || requestedMax < 1) {
-    throw new Error('maxManifestBodyBytes must be a positive integer');
-  }
-  const maxBodyBytes = Math.min(requestedMax, MAX_RAW_IPFS_BLOCK_BYTES);
+  const maxBodyBytes = MAX_RAW_IPFS_BLOCK_BYTES;
   const requestedNow = deps.now?.() ?? new Date();
   const journal = openManifestJournal(
     members,
@@ -1193,7 +1299,12 @@ export async function publishManifestBatch(
         canonicalJson(partition.body) !== canonicalJson(frozenBodies[index]!),
     )
   ) {
-    throw new Error('manifest journal conflict: frozen partition plan changed');
+    throw new ManifestBatchPreparationError(
+      'partition',
+      published.map((member) => member.envelopeRef),
+      new Error('manifest journal conflict: frozen partition plan changed'),
+      journal.batchKey,
+    );
   }
   const batches: ManifestBatchResult[] = [];
   try {
@@ -1212,14 +1323,26 @@ export async function publishManifestBatch(
       );
     }
   } catch (error) {
+    const failed =
+      error instanceof ManifestBatchPreparationError ||
+      error instanceof ManifestBatchAnchorError ||
+      error instanceof ManifestBatchRecordingError
+        ? error
+        : new ManifestBatchPreparationError(
+            'manifest-preparation',
+            published.map((member) => member.envelopeRef),
+            error,
+            journal.batchKey,
+          );
     if (batches.length > 0 || partitions.length > 1) {
       throw new ManifestBatchSetError(
         batches,
-        error,
+        failed,
         published.map((member) => member.envelopeRef),
+        journal.batchKey,
       );
     }
-    throw error;
+    throw failed;
   }
   return {
     batches,

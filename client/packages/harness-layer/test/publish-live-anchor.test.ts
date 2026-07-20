@@ -9,6 +9,10 @@ import { describe, it, expect, vi } from 'vitest';
 import type { CaptureEnvelopeAnchorInput } from '../../../src/captures/publish.js';
 import { contentKindForAnchor } from '../../../src/erc8004/index.js';
 import type { HarnessPublishDeps } from '../src/publish.js';
+import {
+  createLivePublishDeps,
+  DEFAULT_TESTNET_IDENTITY_REGISTRY,
+} from '../src/publish-live.js';
 
 const TEST_TX = `0x${'ab'.repeat(32)}` as const;
 const TEST_ADDRESS = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266' as const;
@@ -51,5 +55,20 @@ describe('publish-live anchor metadataKey wiring', () => {
     expect(publishContentV2).toHaveBeenCalledWith(
       expect.objectContaining({ kind: 'skill', cid: envelopeCid }),
     );
+  });
+
+  it('binds durable manifest recovery to the live chain, registry, and agent', () => {
+    const deps = createLivePublishDeps({
+      privateKey:
+        '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
+      safeAddress: TEST_SAFE,
+      agentId: 42n,
+    });
+
+    expect(deps.manifestPublicationScope).toEqual({
+      chainId: 84532,
+      identityRegistryAddress: DEFAULT_TESTNET_IDENTITY_REGISTRY,
+      agentId: '42',
+    });
   });
 });

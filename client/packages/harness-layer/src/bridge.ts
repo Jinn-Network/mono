@@ -175,6 +175,8 @@ export interface BridgeResult {
   manifestBatches?: BridgeManifestBatch[];
   /** Uploaded member refs, retained even when post-anchor local finalization fails. */
   manifestMemberRefs?: string[];
+  /** Durable recovery identity for the manifest batch, when journaling is active. */
+  manifestBatchKey?: string;
   anchorTx?: string | null;
   gasUsed?: bigint | null;
   feeWei?: bigint | null;
@@ -548,15 +550,18 @@ export async function bridgeAttempts(refs: AttemptRef[], deps: BridgeDeps): Prom
         completedCount = addCompleted(error.completed, 0);
         failed = error.failed;
         memberRefs = [...error.memberRefs];
+        if (error.batchKey) result.manifestBatchKey = error.batchKey;
         addFailedObservation(failed);
       } else if (error instanceof ManifestBatchRecordingError) {
         memberRefs = [...error.result.memberRefs];
         addFailedObservation(error);
       } else if (error instanceof ManifestBatchAnchorError) {
         memberRefs = [...error.memberRefs];
+        if (error.batchKey) result.manifestBatchKey = error.batchKey;
         addFailedObservation(error);
       } else if (error instanceof ManifestBatchPreparationError) {
         memberRefs = [...error.memberRefs];
+        if (error.batchKey) result.manifestBatchKey = error.batchKey;
       }
       if (memberRefs.length > 0) finishManifestFacts(memberRefs);
       const message = failed instanceof Error ? failed.message : String(failed);

@@ -863,7 +863,7 @@ describe('jinn-layer distill run', () => {
     };
   }
 
-  function fakeManifestPublishDeps(maxManifestBodyBytes?: number) {
+  function fakeManifestPublishDeps(largeMemberRefs = false) {
     const base = fakePublishDeps();
     const anchorEnvelope = vi.fn(async () => ({
       txHash: `0x${'e'.repeat(64)}` as const,
@@ -881,9 +881,12 @@ describe('jinn-layer distill run', () => {
     const deps: ManifestBatchPublishDeps = {
       ...base,
       anchorEnvelope,
-      ...(maxManifestBodyBytes === undefined
-        ? {}
-        : { maxManifestBodyBytes }),
+      publishEnvelope: largeMemberRefs
+        ? async (envelope) => {
+            const blob = await base.publishEnvelope(envelope);
+            return { ...blob, cid: `${blob.cid}${'x'.repeat(140_000)}` };
+          }
+        : base.publishEnvelope,
       publishManifestBody: async (body) => {
         const sha256 = createHash('sha256')
           .update(canonicalJson(body))
@@ -1174,7 +1177,7 @@ describe('jinn-layer distill run', () => {
   it('--json retains completed and failed manifest facts when a split batch stops on recording', async () => {
     const { writer, out } = capture();
     const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-cli-'));
-    const manifest = fakeManifestPublishDeps(400);
+    const manifest = fakeManifestPublishDeps(true);
     let recordCalls = 0;
     manifest.deps.recordManifestAnchor = () => {
       recordCalls += 1;
@@ -1201,12 +1204,21 @@ describe('jinn-layer distill run', () => {
     const result = JSON.parse(out());
     expect(result.bridge.manifestBatches).toHaveLength(2);
     expect(result.bridge.manifestBatches).toEqual([
-      expect.objectContaining({ confirmed: true, memberRefs: ['bafyEnv2'] }),
-      expect.objectContaining({ confirmed: true, memberRefs: ['bafyEnv4'] }),
+      expect.objectContaining({
+        confirmed: true,
+        memberRefs: [expect.stringMatching(/^bafyEnv2x/)],
+      }),
+      expect.objectContaining({
+        confirmed: true,
+        memberRefs: [expect.stringMatching(/^bafyEnv4x/)],
+      }),
     ]);
-    expect(result.bridge.manifestMemberRefs).toEqual(['bafyEnv2', 'bafyEnv4']);
+    expect(result.bridge.manifestMemberRefs).toEqual([
+      expect.stringMatching(/^bafyEnv2x/),
+      expect.stringMatching(/^bafyEnv4x/),
+    ]);
     expect(result.bridge.bridged).toEqual([
-      expect.objectContaining({ envelopeRef: 'bafyEnv2' }),
+      expect.objectContaining({ envelopeRef: expect.stringMatching(/^bafyEnv2x/) }),
     ]);
     expect(result.bridge.errors).toEqual([
       expect.objectContaining({ error: expect.stringContaining('second manifest disk full') }),

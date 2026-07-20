@@ -195,6 +195,30 @@ describe('bridgeAttempts manifest mode', () => {
     expect(result.errors).toHaveLength(2);
   });
 
+  it('propagates one-member manifest validation recovery facts and batch identity', async () => {
+    const { value } = deps({
+      publishManifestBatch: vi.fn().mockRejectedValue(
+        new ManifestBatchPreparationError(
+          'manifest-validation',
+          ['bafy-member-1'],
+          new Error('manifest CID is not canonical'),
+          'batch-key',
+        ),
+      ),
+    });
+
+    const result = await bridgeAttempts([ref(1)], value);
+
+    expect(result.manifestMemberRefs).toEqual(['bafy-member-1']);
+    expect(result.manifestBatchKey).toBe('batch-key');
+    expect(result.errors).toEqual([
+      expect.objectContaining({
+        requestId: ref(1).requestId,
+        error: expect.stringContaining('manifest CID is not canonical'),
+      }),
+    ]);
+  });
+
   it('maps split manifest anchors to the matching candidate ranges', async () => {
     const firstTx = `0x${'11'.repeat(32)}` as const;
     const secondTx = `0x${'22'.repeat(32)}` as const;

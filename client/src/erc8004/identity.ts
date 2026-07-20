@@ -651,6 +651,19 @@ export class IdentityPublisher {
       functionName: 'setMetadata',
       args: [this.agentId, metadataKey, metadataValue],
     });
+    const journalBroadcast = onBroadcast
+      ? (txHash: Hex): void => {
+          try {
+            onBroadcast(txHash);
+          } catch (error) {
+            throw new ManifestReceiptConfirmationError(
+              txHash,
+              `broadcast journaling failed: ${error instanceof Error ? error.message : String(error)}`,
+              { cause: error },
+            );
+          }
+        }
+      : undefined;
     const txHash = await viemSendTransactionWithRetry(
       this.walletClient as unknown as TxRetryWalletClient,
       this.publicClient,
@@ -660,17 +673,11 @@ export class IdentityPublisher {
         data,
         value: 0n,
       },
-      { logicalTx: 'erc8004.setMetadata' },
+      {
+        logicalTx: 'erc8004.setMetadata',
+        ...(journalBroadcast ? { onBroadcast: journalBroadcast } : {}),
+      },
     );
-    try {
-      onBroadcast?.(txHash);
-    } catch (error) {
-      throw new ManifestReceiptConfirmationError(
-        txHash,
-        `broadcast journaling failed: ${error instanceof Error ? error.message : String(error)}`,
-        { cause: error },
-      );
-    }
 
     // Best-effort confirmation. We surface the blockNumber so callers can
     // record a verifiable on-chain reference; if the receipt query fails
