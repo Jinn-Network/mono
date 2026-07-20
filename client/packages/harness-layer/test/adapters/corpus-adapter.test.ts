@@ -120,7 +120,37 @@ describe('CorpusAdapter mapping', () => {
   // unstripped mark would inflate scores via substring matches) or the
   // rendered packet.
   describe('retrieval-visibility mark mapping (#1824)', () => {
-    it('maps a marked wire hit to retrievalVisible: true and strips the mark tag from tags', async () => {
+    it('uses canonical retrievalVisible: true without requiring the legacy mark', async () => {
+      const layer = makeFakeLayer();
+      layer.corpus.search = async () => [
+        makeHit({ ref: 'bafyNamed', tags: ['dashboard'], retrievalVisible: true }),
+      ];
+      const adapter = createCorpusAdapter({ layer });
+      const result = await adapter.search('anything');
+      expect(result.status).toBe('ok');
+      if (result.status !== 'ok') return;
+      expect(result.value[0]?.retrievalVisible).toBe(true);
+      expect(result.value[0]?.tags).toEqual(['dashboard']);
+    });
+
+    it('keeps canonical retrievalVisible: false authoritative over a stale mark', async () => {
+      const layer = makeFakeLayer();
+      layer.corpus.search = async () => [
+        makeHit({
+          ref: 'bafyNamedFalse',
+          tags: ['dashboard', RETRIEVAL_VISIBLE_TAG],
+          retrievalVisible: false,
+        }),
+      ];
+      const adapter = createCorpusAdapter({ layer });
+      const result = await adapter.search('anything');
+      expect(result.status).toBe('ok');
+      if (result.status !== 'ok') return;
+      expect(result.value[0]?.retrievalVisible).toBe(false);
+      expect(result.value[0]?.tags).toEqual(['dashboard']);
+    });
+
+    it('falls back to a marked legacy wire hit and strips the mark tag from tags', async () => {
       const layer = makeFakeLayer();
       layer.corpus.search = async () => [
         makeHit({ ref: 'bafyMarked', tags: ['dashboard', RETRIEVAL_VISIBLE_TAG, 'vitest'] }),
@@ -223,6 +253,7 @@ function wireRecordWithTrace(overrides: Partial<TraceEnvelopeV0> = {}, ref = 'ba
 function wireRecordWithEpisode(
   overrides: Partial<EpisodeV1Write> = {},
   ref = 'bafyCanonicalEpisode',
+  omitRetrievalVisible = false,
 ): WireCorpusRecord {
   const episode: EpisodeV1Write = {
     schemaVersion: 'jinn.episode.v1',
@@ -267,7 +298,9 @@ function wireRecordWithEpisode(
     provenance: 'imported',
     ...overrides,
   };
-  const content = Buffer.from(JSON.stringify(episode), 'utf-8');
+  const body = { ...episode } as Partial<EpisodeV1Write>;
+  if (omitRetrievalVisible) delete body.retrievalVisible;
+  const content = Buffer.from(JSON.stringify(body), 'utf-8');
   const sha256 = createHash('sha256').update(content).digest('hex');
   return {
     ref,
@@ -337,6 +370,42 @@ describe('CorpusAdapter.get() — content-bearing decode (rescope R2, #1772)', (
     if (result.status !== 'ok' || result.value === null) throw new Error('expected a decoded record');
     expect(result.value.retrievalVisible).toBe(true);
     expect(result.value.tags).toEqual(['mono']);
+  });
+
+  it('keeps canonical retrievalVisible: false authoritative over a stale legacy mark', async () => {
+    const layer = makeFakeLayer();
+    layer.corpus.get = async () => wireRecordWithEpisode({
+      retrievalVisible: false,
+      task: {
+        summary: 'Named visibility denial',
+        distributionTags: ['mono', RETRIEVAL_VISIBLE_TAG],
+        repositorySlug: 'Jinn-Network/mono',
+      },
+    });
+    const adapter = createCorpusAdapter({ layer });
+
+    const result = await adapter.get('bafyCanonicalEpisode');
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok' || result.value === null) throw new Error('expected a decoded record');
+    expect(result.value.retrievalVisible).toBe(false);
+    expect(result.value.tags).toContain(RETRIEVAL_VISIBLE_TAG);
+  });
+
+  it('falls back to the legacy mark when a canonical Episode omits retrievalVisible', async () => {
+    const layer = makeFakeLayer();
+    layer.corpus.get = async () => wireRecordWithEpisode({
+      task: {
+        summary: 'Legacy visibility mark',
+        distributionTags: ['mono', RETRIEVAL_VISIBLE_TAG],
+        repositorySlug: 'Jinn-Network/mono',
+      },
+    }, 'bafyLegacyEpisode', true);
+    const adapter = createCorpusAdapter({ layer });
+
+    const result = await adapter.get('bafyLegacyEpisode');
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok' || result.value === null) throw new Error('expected a decoded record');
+    expect(result.value.retrievalVisible).toBe(true);
   });
 
   it('returns the full decoded content (task summary, steps, outcome, tags, provenance, capturedAt) — not metadata', async () => {

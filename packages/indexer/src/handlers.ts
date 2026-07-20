@@ -1075,9 +1075,9 @@ export function parseTraceEnvelopeSignalLite(
       if (synthesis) break;
     }
   }
-  const retrievalVisible =
-    evidence['retrievalVisible'] === true
-    || distributionTags.includes(RETRIEVAL_VISIBLE_TAG);
+  const retrievalVisible = Object.prototype.hasOwnProperty.call(evidence, 'retrievalVisible')
+    ? evidence['retrievalVisible'] === true
+    : distributionTags.includes(RETRIEVAL_VISIBLE_TAG);
 
   // ── Detail-view fields (#1406): environment fingerprint + step count. ──
   const environment = evidence['environment'];

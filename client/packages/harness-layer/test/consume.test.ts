@@ -209,6 +209,9 @@ describe('content-aware search via capture meta (#1344)', () => {
         manifestCid: seedCid,
         taskSummary: 'Seed import: obra/superpowers/skills/test-driven-development',
         tags: ['seed-import', 'superpowers', 'test-driven-development', 'tdd'],
+        repositorySlug: 'obra/superpowers',
+        synthesis: 'Use a red-green-refactor loop.',
+        retrievalVisible: true,
         provenance: 'imported',
         verifiabilityTier: 'user-accepted',
       }]),
@@ -218,6 +221,9 @@ describe('content-aware search via capture meta (#1344)', () => {
     expect(hits[0]!.ref).toBe(seedCid);
     expect(hits[0]!.tags).toContain('tdd');
     expect(hits[0]!.summary).toContain('test-driven-development');
+    expect(hits[0]!.repositorySlug).toBe('obra/superpowers');
+    expect(hits[0]!.synthesis).toBe('Use a red-green-refactor loop.');
+    expect(hits[0]!.retrievalVisible).toBe(true);
     expect(acquireFn).not.toHaveBeenCalled();
   });
 

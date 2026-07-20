@@ -96,6 +96,12 @@ export interface CorpusSearchHit {
   tags?: string[];
   /** Scrubbed task summary, when the hit came via the capture-meta fast path. */
   summary?: string;
+  /** Repository identity from indexed canonical capture metadata. */
+  repositorySlug?: string;
+  /** Authored outcome/seed synthesis from indexed canonical capture metadata. */
+  synthesis?: string;
+  /** Named W2 allowlist decision; absent on legacy index rows. */
+  retrievalVisible?: boolean;
 }
 
 /** Shape served by the indexer's GET /capture-meta (#1344). */
@@ -103,6 +109,9 @@ interface CaptureMetaHit {
   manifestCid: string;
   taskSummary: string;
   tags: string[];
+  repositorySlug?: string;
+  synthesis?: string;
+  retrievalVisible?: boolean;
   provenance: string;
   verifiabilityTier: string;
 }
@@ -338,6 +347,15 @@ export function createHarnessLayer(config: HarnessLayerConfig = {}): HarnessLaye
           ...hit,
           tags: Array.isArray(metaHit.tags) ? metaHit.tags : [],
           summary: metaHit.taskSummary,
+          ...(typeof metaHit.repositorySlug === 'string'
+            ? { repositorySlug: metaHit.repositorySlug }
+            : {}),
+          ...(typeof metaHit.synthesis === 'string'
+            ? { synthesis: metaHit.synthesis }
+            : {}),
+          ...(typeof metaHit.retrievalVisible === 'boolean'
+            ? { retrievalVisible: metaHit.retrievalVisible }
+            : {}),
         });
         seen.add(metaHit.manifestCid);
       } catch (err) {
