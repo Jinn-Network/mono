@@ -15,6 +15,7 @@ import errno
 import io
 import os
 import pty
+import re
 import select
 import shutil
 import subprocess
@@ -22,6 +23,9 @@ import time
 from pathlib import Path
 
 import yaml
+
+
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 def require_path(name: str) -> Path:
@@ -105,7 +109,7 @@ def install_through_enable_prompt() -> str:
     finally:
         os.close(master_fd)
 
-    rendered = output.decode(errors="replace").replace("\r", "")
+    rendered = ANSI_ESCAPE.sub("", output.decode(errors="replace")).replace("\r", "")
     assert return_code == 0, f"Hermes plugin install failed ({return_code}):\n{rendered}"
     assert answered and prompt.decode() in rendered, rendered
     assert "Plugin jinn enabled." in rendered, rendered

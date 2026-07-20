@@ -42,6 +42,7 @@ def test_cold_stock_exercises_real_local_install_doctor_and_remove_lifecycle():
     assert '"plugins",' in driver
     assert '"install",' in driver
     assert "Enable 'jinn' now? [y/N]:" in driver
+    assert "ANSI_ESCAPE.sub" in driver
     assert '"jinn-doctor"' in driver
     assert '"plugins", "remove", "jinn"' in driver
     assert "jinn ready — 4 checks passed" in driver
