@@ -95,6 +95,7 @@ function manifest(
       log: '/attempt/session.log',
       ghConfigDir: '/attempt/gh',
       askpass: '/attempt/askpass',
+      tokenFile: '/attempt/gh-token',
     },
     timestamps: {
       createdAt: '2026-07-20T12:00:00.000Z',

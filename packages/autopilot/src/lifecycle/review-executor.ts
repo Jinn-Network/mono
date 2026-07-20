@@ -91,6 +91,7 @@ export interface ReviewExecutorDeps {
     readonly reviewRefOid: GitOid;
     readonly approvalPolicy: ReviewApprovalPolicy;
     readonly selectedLogin: string;
+    readonly credential: SelectedCredential;
   }): Promise<ReviewAttemptBinding>;
   repairProjection(input: {
     readonly candidate: ReviewActionCandidate;
@@ -374,6 +375,7 @@ export async function executeReviewAction(
     reviewRefOid: recordOid,
     approvalPolicy: candidate.approvalPolicy,
     selectedLogin: selection.login,
+    credential: selection.credential,
   });
   if (attempt.attemptId !== attemptId) {
     throw new Error('Detached review attempt does not match its claim');

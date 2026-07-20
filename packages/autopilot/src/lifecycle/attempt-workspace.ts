@@ -21,6 +21,7 @@ import {
   gitPublicationArgs,
   isolatedGitCommandOverlay,
   sanitizedGitHubCommandOverlay,
+  type SelectedCredential,
 } from './credentials.js';
 
 export type AttemptPhase = 'implement' | 'review' | 'merge-prep';
@@ -38,6 +39,15 @@ export interface AttemptPaths {
   readonly log: string;
   readonly ghConfigDir: string;
   readonly askpass: string;
+  /**
+   * A 0o600 file holding the attempt's raw GH token, sibling to the manifest.
+   * The runtime-independent handoff seam (#1883): env-based `GH_TOKEN` is
+   * scrubbed by some coordinator runtimes (Hermes strips secret-shaped env
+   * vars from spawned shell tools) before the coordinator session or its
+   * `autopilot session` subcommands ever see it. This file survives any
+   * runtime because it is read directly off disk, never through env.
+   */
+  readonly tokenFile: string;
 }
 
 export interface AttemptTimestamps {
@@ -97,6 +107,14 @@ export interface CreateAttemptOptions {
   readonly reviewRefOid?: string;
   readonly reviewApprovalPolicy?: ReviewApprovalPolicy;
   readonly selectedLogin: string;
+  /**
+   * The winning credential for this attempt. Written into the attempt-scoped
+   * `gh-config/hosts.yml` and `gh-token` file at creation time (#1883) so the
+   * coordinator session — and its `autopilot session` subcommands, which may
+   * run under a different, credential-scrubbing runtime — can authenticate
+   * without depending on any inherited environment variable.
+   */
+  readonly credential: SelectedCredential;
   readonly remoteName?: string;
   readonly pid?: number | null;
   readonly attemptId?: string;
@@ -210,6 +228,7 @@ function decodePaths(value: unknown): AttemptPaths {
     'log',
     'ghConfigDir',
     'askpass',
+    'tokenFile',
   ], 'attempt paths');
   return {
     attemptDir: absolutePath(paths.attemptDir, 'attempt directory'),
@@ -218,6 +237,7 @@ function decodePaths(value: unknown): AttemptPaths {
     log: absolutePath(paths.log, 'log path'),
     ghConfigDir: absolutePath(paths.ghConfigDir, 'GH config path'),
     askpass: absolutePath(paths.askpass, 'askpass path'),
+    tokenFile: absolutePath(paths.tokenFile, 'token file path'),
   };
 }
 
@@ -661,13 +681,48 @@ export function trackAttemptChild(
   return exitedRecorded ? readAttemptManifest(manifestPath) : running;
 }
 
-const ASKPASS = `#!/bin/sh
+/**
+ * The askpass helper used to read `$GH_TOKEN` from the environment. Replaced
+ * (#1883) because some coordinator runtimes (Hermes) scrub secret-shaped env
+ * vars from spawned shell tools before running them, so `git`'s askpass
+ * invocation saw an empty `$GH_TOKEN` even though the parent process set it.
+ * `buildAskpassScript` below bakes in the absolute path to the attempt's
+ * token file instead — a filesystem read survives any runtime's env scrub.
+ */
+function buildAskpassScript(tokenFilePath: string): string {
+  return `#!/bin/sh
 case "$1" in
   *Username*) printf '%s\\n' 'x-access-token' ;;
-  *Password*) printf '%s\\n' "$GH_TOKEN" ;;
+  *Password*) cat "${tokenFilePath}" ;;
   *) exit 1 ;;
 esac
 `;
+}
+
+const CONTROL_CHARACTER_PATTERN = new RegExp(
+  '[' + String.fromCharCode(0) + '-' + String.fromCharCode(31)
+    + String.fromCharCode(127) + ']',
+);
+
+function assertNoControlCharacters(value: string, name: string): string {
+  if (CONTROL_CHARACTER_PATTERN.test(value)) {
+    throw new Error(`${name} must not contain control characters`);
+  }
+  return value;
+}
+
+/**
+ * gh CLI's own config-directory auth file (`$GH_CONFIG_DIR/hosts.yml`). Once
+ * this exists, `gh` authenticates from `GH_CONFIG_DIR` alone — no `GH_TOKEN`
+ * env var required — which is the other half of the runtime-independent
+ * handoff (#1883): `gh` subcommands run by the coordinator (including
+ * `autopilot session ...`) authenticate even when the runtime scrubbed env.
+ */
+function buildGhHostsYaml(login: string, token: string): string {
+  assertNoControlCharacters(login, 'GitHub login');
+  assertNoControlCharacters(token, 'GitHub token');
+  return `github.com:\n    oauth_token: ${token}\n    user: ${login}\n    git_protocol: https\n`;
+}
 
 function canonicalDirectory(path: string, name: string): string {
   if (!isAbsolute(path)) throw new Error(`Invalid ${name}`);
@@ -780,6 +835,7 @@ export async function createAttemptWorkspace(
     log: join(attemptDir, 'session.log'),
     ghConfigDir: join(attemptDir, 'gh-config'),
     askpass: join(attemptDir, 'askpass'),
+    tokenFile: join(attemptDir, 'gh-token'),
   };
   const manifest = decodeAttemptManifest({
     version: 2,
@@ -829,7 +885,28 @@ export async function createAttemptWorkspace(
   mkdirSync(attemptDir, { mode: 0o700 });
   mkdirSync(paths.ghConfigDir, { mode: 0o700 });
   writeFileSync(paths.log, '', { mode: 0o600, flag: 'wx' });
-  writeFileSync(paths.askpass, ASKPASS, { mode: 0o700, flag: 'wx' });
+  writeFileSync(paths.askpass, buildAskpassScript(paths.tokenFile), {
+    mode: 0o700,
+    flag: 'wx',
+  });
+  // Security note: this file (and gh-config/hosts.yml below) hold the raw
+  // GH token in plaintext at rest. Any process running as this same OS user
+  // could read it — an equivalent exposure to passing the token via
+  // environment variables on this platform, not a regression. The
+  // delegated-stage environment (run-stage.ts's
+  // `buildUnprivilegedStageEnvironment`) deliberately keeps stage roots
+  // pointed at a bogus `GH_CONFIG_DIR` and never forwards
+  // `JINN_AUTOPILOT_SESSION_MANIFEST`, so stage children spawned by the
+  // coordinator are not handed this file's location.
+  writeFileSync(paths.tokenFile, `${options.credential.secret()}\n`, {
+    mode: 0o600,
+    flag: 'wx',
+  });
+  writeFileSync(
+    join(paths.ghConfigDir, 'hosts.yml'),
+    buildGhHostsYaml(manifest.selectedLogin, options.credential.secret()),
+    { mode: 0o600, flag: 'wx' },
+  );
   writeManifestAtomic(paths.manifest, manifest);
   try {
     await runner('git', [
@@ -989,6 +1066,7 @@ function expectedPaths(v2Base: string, manifest: AttemptManifest): AttemptPaths 
     log: join(attemptDir, 'session.log'),
     ghConfigDir: join(attemptDir, 'gh-config'),
     askpass: join(attemptDir, 'askpass'),
+    tokenFile: join(attemptDir, 'gh-token'),
   };
 }
 
@@ -1011,7 +1089,12 @@ function pathsAgree(
     ) {
       return false;
     }
-    for (const file of [expected.manifest, expected.log, expected.askpass]) {
+    for (const file of [
+      expected.manifest,
+      expected.log,
+      expected.askpass,
+      expected.tokenFile,
+    ]) {
       const info = lstatSync(file);
       if (info.isSymbolicLink() || !info.isFile()) return false;
       if (!isBelow(realAttemptDir, realpathSync(file))) return false;

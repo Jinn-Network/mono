@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CredentialPool } from '../../src/lifecycle/credentials.js';
+import { CredentialPool, SelectedCredential } from '../../src/lifecycle/credentials.js';
 import {
   makeProductionReviewActionPort,
 } from '../../src/lifecycle/review-executor-production.js';
@@ -329,6 +329,7 @@ describe('production review acquisition port', () => {
       reviewRefOid: RECORD,
       approvalPolicy: 'approve-eligible',
       selectedLogin: 'review-bot',
+      credential: new SelectedCredential('review-bot', 'review', 'selected-secret'),
     });
 
     expect(creates).toEqual([expect.objectContaining({

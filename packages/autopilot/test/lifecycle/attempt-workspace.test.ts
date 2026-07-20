@@ -8,6 +8,7 @@ import {
   readdirSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -15,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { defaultRunner, type CommandRunner } from '../../src/dispatcher/issue-source.js';
+import { SelectedCredential } from '../../src/lifecycle/credentials.js';
 import {
   advanceAttemptExpectedHead,
   advanceAttemptReviewPair,
@@ -88,6 +90,7 @@ function options(
     expectedHead: fixture.oid,
     claimOid: fixture.oid,
     selectedLogin: 'impl-bot',
+    credential: new SelectedCredential('impl-bot', 'implementation', 'selected-secret'),
     attemptId: UUID_A,
     now: () => new Date(NOW),
     ...overrides,
@@ -129,7 +132,35 @@ describe('attempt workspace and manifest', () => {
     expect(git(one.paths.worktree, ['rev-parse', 'HEAD'])).toBe(fixture.oid);
     expect(git(two.paths.worktree, ['rev-parse', 'HEAD'])).toBe(fixture.oid);
     expect(readFileSync(one.paths.askpass, 'utf8')).not.toContain('selected-secret');
-    expect(readdirSync(one.paths.ghConfigDir)).toEqual([]);
+    expect(readdirSync(one.paths.ghConfigDir)).toEqual(['hosts.yml']);
+  });
+
+  it('writes the runtime-independent gh-config hosts.yml and token file at creation, and points the askpass helper at the file instead of $GH_TOKEN (#1883)', async () => {
+    const fixture = repositoryFixture();
+    const manifest = await createAttemptWorkspace(options(fixture, {
+      selectedLogin: 'impl-bot',
+      credential: new SelectedCredential('impl-bot', 'implementation', 'the-raw-token'),
+    }), defaultRunner);
+
+    // Token file: sibling to the manifest, 0o600, holds exactly the raw token.
+    expect(manifest.paths.tokenFile).toBe(join(manifest.paths.attemptDir, 'gh-token'));
+    expect(readFileSync(manifest.paths.tokenFile, 'utf8').trim()).toBe('the-raw-token');
+    expect(statSync(manifest.paths.tokenFile).mode & 0o777).toBe(0o600);
+
+    // gh CLI's own hosts.yml: 0o600, in the (already 0o700) gh-config dir.
+    const hostsYamlPath = join(manifest.paths.ghConfigDir, 'hosts.yml');
+    const hostsYaml = readFileSync(hostsYamlPath, 'utf8');
+    expect(hostsYaml).toBe(
+      'github.com:\n    oauth_token: the-raw-token\n    user: impl-bot\n    git_protocol: https\n',
+    );
+    expect(statSync(hostsYamlPath).mode & 0o777).toBe(0o600);
+    expect(statSync(manifest.paths.ghConfigDir).mode & 0o777).toBe(0o700);
+
+    // Askpass no longer echoes an env var; it reads the token file by path.
+    const askpass = readFileSync(manifest.paths.askpass, 'utf8');
+    expect(askpass).not.toContain('GH_TOKEN');
+    expect(askpass).not.toContain('the-raw-token');
+    expect(askpass).toContain(`cat "${manifest.paths.tokenFile}"`);
   });
 
   it('binds the strict manifest to the canonical repository and remote identity', async () => {
@@ -278,7 +309,12 @@ describe('attempt workspace and manifest', () => {
     expect(readAttemptManifest(second.paths.manifest).processState).toBe('exited');
     expect(readdirSync(manifest.paths.attemptDir).filter((name) => name.includes('.tmp-')))
       .toEqual([]);
-    expect(JSON.stringify(updated)).not.toMatch(/must-not-be-accepted|token/i);
+    // The earlier injected garbage `token` field (rejected above) must not
+    // have been silently re-accepted; the legitimate `paths.tokenFile` field
+    // is expected here and is not what this assertion is guarding against.
+    expect(JSON.stringify(updated)).not.toMatch(/must-not-be-accepted/i);
+    expect(Object.keys(JSON.parse(JSON.stringify(updated)) as Record<string, unknown>))
+      .not.toContain('token');
   });
 
   it('locks every static manifest authority, identity, and path field across updates', async () => {

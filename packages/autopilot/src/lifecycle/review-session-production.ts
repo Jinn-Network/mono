@@ -25,6 +25,7 @@ import {
 import {
   gitPublicationArgs,
   isolatedGitCommandOverlay,
+  readAttemptTokenFile,
   sanitizedGitHubCommandOverlay,
 } from './credentials.js';
 import { makeGitProtocolPort } from './git-protocol.js';
@@ -51,17 +52,32 @@ export function makeProductionReviewSessionPort(
 ): ReviewSessionPort {
   const runner = options.runner ?? defaultRunner;
   const ambient = options.environment ?? process.env;
-  const token = ambient.GH_TOKEN;
-  if (token === undefined || token.length === 0) {
-    throw new Error('Review session requires its selected GH_TOKEN');
-  }
+  const readManifest = options.readManifest ?? readAttemptManifest;
   const manifestPath = ambient.JINN_AUTOPILOT_SESSION_MANIFEST;
   const currentManifest = (): AttemptManifest => {
     if (manifestPath === undefined || manifestPath.length === 0) {
       throw new Error('Review session manifest path is unavailable');
     }
-    return (options.readManifest ?? readAttemptManifest)(manifestPath);
+    return readManifest(manifestPath);
   };
+  // Resolution order (#1883): ambient `GH_TOKEN` first, else the
+  // attempt-scoped token file located through the (non-secret-shaped)
+  // manifest path — see implementation-session-production.ts for the full
+  // rationale. Only once neither resolves does this fail closed.
+  const token = ((): string => {
+    if (ambient.GH_TOKEN !== undefined && ambient.GH_TOKEN.length > 0) {
+      return ambient.GH_TOKEN;
+    }
+    if (manifestPath !== undefined && manifestPath.length > 0) {
+      try {
+        const fromFile = readAttemptTokenFile(readManifest(manifestPath).paths.tokenFile);
+        if (fromFile !== undefined) return fromFile;
+      } catch {
+        // Fall through to the closed failure below.
+      }
+    }
+    throw new Error('Review session requires its selected GH_TOKEN');
+  })();
   const environmentFor = (
     manifest: AttemptManifest,
     extra: Record<string, string> = {},
