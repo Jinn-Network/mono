@@ -553,3 +553,118 @@ an SSH remote. Before active phase adapters are wired, publication must use a
 validated HTTPS GitHub remote so the selected token and exact askpass are the
 only usable principal. This is fail-closed in the current inactive Task 3
 infrastructure, not an ambient-auth fallback.
+
+---
+
+## Final review closure — 2026-07-20
+
+Reviewed and completed Task 3 history:
+
+- initial implementation:
+  `a59e753ea3b2bfa81773173461166e0f3564702b`;
+- review hardening:
+  `25c7235ab2016b6efa6b79a3350baf2d26f5e87a`;
+- independent-review closure:
+  `47bbd2c5bf8151bd8cc997618f33b57906cc9d47`;
+- prior evidence/report:
+  `2cc1f6af4f67f21ec4a4807f9139e60b5f9d6150`;
+- final review code and tests:
+  `bfc970a1de2a74c9331cffe62375643a4ad71009`.
+
+### Findings closed
+
+1. Atomic manifest updates now define the progressive allowlist explicitly:
+   `processState`, `pid`, `terminalHead`, `updatedAt`, `childStartedAt`, and
+   `childExitedAt`. Every other decoded field is static by default, including
+   host, issue/PR identity, selected login, branch/base/head/claim authority,
+   review generation/ref authority, repository/common-dir/remote identity,
+   exact paths, and creation time. The static snapshot is captured before
+   invoking the updater, so an in-place mutation cannot evade the fence.
+2. Exact metadata removal is inside the cleanup result boundary. Successful
+   deletion returns `removed`, an `ENOENT` race returns `already-removed`, and
+   every other deletion failure returns structured `retained/ambiguous`.
+   Worktree-present and missing-worktree paths use the same helper. Sweeping
+   also catches each attempt independently, so one unexpected local cleanup
+   failure cannot abort later attempts.
+3. Create input with only one of `reviewGeneration` or `reviewRefOid` now fails
+   before repository inspection, directory creation, manifest/auth/log writes,
+   or worktree registration.
+
+### Final review RED / GREEN evidence
+
+All commands ran from `packages/autopilot`.
+
+Initial RED:
+
+```text
+yarn vitest run test/lifecycle/attempt-workspace.test.ts
+```
+
+- 4 of 21 tests failed:
+  - lone `reviewRefOid` resolved successfully and created an attempt;
+  - static host/issue/login/branch/base/head/claim/review authority updates
+    were written;
+  - concurrent missing-metadata deletion threw `ENOENT`;
+  - a cleanup exception aborted the sweep.
+
+Updater-mutation hardening RED:
+
+```text
+yarn vitest run test/lifecycle/attempt-workspace.test.ts \
+  -t 'locks every static manifest'
+```
+
+- 1 failed, 20 skipped: mutating the callback input in place bypassed a
+  post-callback comparison.
+
+Final focused GREEN:
+
+```text
+yarn vitest run test/lifecycle/attempt-workspace.test.ts
+```
+
+- 1 file passed;
+- 21 tests passed;
+- 0 failures.
+
+### Required final verification
+
+```text
+yarn vitest run test/lifecycle test/dispatcher/identity.test.ts
+```
+
+- 12 files passed;
+- 147 tests passed;
+- 0 failures.
+
+```text
+yarn typecheck
+```
+
+- exit 0;
+- no diagnostics.
+
+```text
+yarn test
+```
+
+- 83 files passed;
+- 862 tests passed;
+- 0 failures.
+
+Expected resilience-test stderr remained limited to injected failure paths.
+`git diff --check` exited 0 before the code/test commit.
+
+### Final self-review and concerns
+
+- Re-read the final review findings, Task 3 brief, current report, and approved
+  active-active cleanup/identity boundaries.
+- Confirmed no lifecycle claim, GitHub mutation, dispatcher activation, branch
+  publication, PR/review action, merge-prep action, or merge was introduced.
+- Confirmed cleanup outcomes remain local-only and secret-free.
+- Confirmed no cleanup path uses `git worktree remove --force`.
+
+Retained concerns are unchanged: live private/enterprise authentication,
+cross-platform null-device handling, and the crash/canary campaign still need
+coverage before lifecycle writer activation. Later phase adapters must treat
+both `removed` and `already-removed` as successful local cleanup outcomes.
