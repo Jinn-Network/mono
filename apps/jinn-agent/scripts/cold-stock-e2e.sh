@@ -18,6 +18,7 @@ export JINN_LAYER_EPISODES_DIR="$WORK/state/episodes"
 export JINN_LAYER_CAPTURES_DIR="$WORK/state/captures"
 export JINN_LAYER_SKILLS_INSTALL_DIR="$HERMES_HOME/skills"
 export JINN_MINEABLE_STATE_DIR="$WORK/state/mineable"
+export JINN_PLUGIN_CHANNEL="$WORK/jinn-plugin-channel"
 mkdir -p "$HOME" "$WORK/state" "$WORK/wheels"
 
 cleanup() { rm -rf "$WORK"; }
@@ -46,6 +47,17 @@ python3 -m pip wheel --no-deps --wheel-dir "$WORK/wheels" "$HERE/plugins/jinn"
 WHEEL="$(find "$WORK/wheels" -maxdepth 1 -name 'jinn_plugin-*.whl' -print -quit)"
 test -n "$WHEEL"
 
+# Reproduce the root layout produced by the slim-repo release channel. Stock
+# Hermes owns the clone, enable prompt, config write, discovery, and removal;
+# this temporary file:// source never mutates a live plugin installation.
+mkdir -p "$JINN_PLUGIN_CHANNEL"
+cp -R "$HERE/plugins/jinn/." "$JINN_PLUGIN_CHANNEL/"
+git -C "$JINN_PLUGIN_CHANNEL" init -q
+git -C "$JINN_PLUGIN_CHANNEL" config user.email "cold-stock@example.invalid"
+git -C "$JINN_PLUGIN_CHANNEL" config user.name "Cold stock"
+git -C "$JINN_PLUGIN_CHANNEL" add .
+git -C "$JINN_PLUGIN_CHANNEL" commit -qm "cold-stock plugin channel"
+
 git init -q "$WORK/upstream"
 git -C "$WORK/upstream" remote add origin https://github.com/NousResearch/hermes-agent
 git -C "$WORK/upstream" fetch -q --depth 1 origin "$HERMES_UPSTREAM_SHA"
@@ -54,6 +66,12 @@ test "$(git -C "$WORK/upstream" rev-parse HEAD)" = "$HERMES_UPSTREAM_SHA"
 
 python3 -m venv "$WORK/venv"
 "$WORK/venv/bin/pip" install -q "$WORK/upstream"
+export JINN_HERMES_BIN="$WORK/venv/bin/hermes"
+"$WORK/venv/bin/python" "$HERE/scripts/cold-stock-onboarding.py"
+
+# Preserve the existing Stage 1 wheel boundary after the real git-plugin
+# lifecycle has removed its directory source. Installing both concurrently
+# would let entry-point precedence hide which product Hermes actually loaded.
 "$WORK/venv/bin/pip" install -q "$WHEEL"
 
 (

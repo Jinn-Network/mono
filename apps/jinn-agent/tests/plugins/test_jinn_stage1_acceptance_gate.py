@@ -24,6 +24,41 @@ def test_cold_stock_script_uses_built_products_and_both_lifecycle_drivers():
     assert "stage1-task-creator-acceptance.mjs" in script
 
 
+def test_cold_stock_exercises_real_local_install_doctor_and_remove_lifecycle():
+    script = (AGENT_ROOT / "scripts" / "cold-stock-e2e.sh").read_text(
+        encoding="utf-8"
+    )
+    driver = (AGENT_ROOT / "scripts" / "cold-stock-onboarding.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "JINN_PLUGIN_CHANNEL" in script
+    assert "git init" in script
+    assert "cold-stock-onboarding.py" in script
+    assert script.index("cold-stock-onboarding.py") < script.index(
+        '"$WORK/venv/bin/pip" install -q "$WHEEL"'
+    )
+
+    assert '"plugins",' in driver
+    assert '"install",' in driver
+    assert "Enable 'jinn' now? [y/N]:" in driver
+    assert '"jinn-doctor"' in driver
+    assert '"plugins", "remove", "jinn"' in driver
+    assert "jinn ready — 4 checks passed" in driver
+    assert "silence means nothing relevant yet" in driver
+    stage1_driver = (
+        AGENT_ROOT / "scripts" / "stage1-stock-product.py"
+    ).read_text(encoding="utf-8")
+    assert "knowledge searched · nothing relevant found" in stage1_driver
+    for check_name in (
+        "plugin-build",
+        "layer-available",
+        "layer-contract",
+        "prerequisites",
+    ):
+        assert check_name in driver
+
+
 def test_stage1_gate_is_blocking_for_every_product_boundary():
     workflow = yaml.safe_load(
         (REPO_ROOT / ".github" / "workflows" / "jinn-agent-ci.yml").read_text(
