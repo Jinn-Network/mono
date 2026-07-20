@@ -93,14 +93,19 @@ interface VerdictsPage {
 const PAGE_LIMIT = 1000;
 /** Bound on pages walked — 20 × 1000 rows is far beyond any realistic slate. */
 const MAX_PAGES = 20;
-/** Default cap on returned refs when the caller does not pass `limit`. */
-const DEFAULT_LIMIT = 500;
 /**
  * A MetadataSet publisher can project arbitrary enrichment identity. Retain a
  * finite number of projections for one authoritative request tuple so an
  * attacker-first row cannot suppress the genuine candidate.
  */
 const MAX_IDENTITY_CANDIDATES_PER_ATTEMPT = 32;
+
+export class IncompleteVerdictWalkError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'IncompleteVerdictWalkError';
+  }
+}
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
 
@@ -166,7 +171,7 @@ export function createVerdictSource(opts: VerdictSourceOptions): VerdictSource {
   }
 
   async function list(args: { limit?: number } = {}): Promise<AttemptRef[]> {
-    const limit = Math.max(1, args.limit ?? DEFAULT_LIMIT);
+    const limit = args.limit === undefined ? Number.POSITIVE_INFINITY : Math.max(1, args.limit);
 
     // Page verdict rows (both polarities), dropping non-PASS/FAIL and any row
     // missing its verdict `manifestCid` (no join entry point → nothing to bridge).
@@ -219,10 +224,17 @@ export function createVerdictSource(opts: VerdictSourceOptions): VerdictSource {
         refs.push(attempt);
       }
       const pageInfo: VerdictsPage['verdictEnvelopeMetas']['pageInfo'] = data.verdictEnvelopeMetas?.pageInfo;
-      if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
+      if (!pageInfo?.hasNextPage) return refs;
+      if (!pageInfo.endCursor) {
+        throw new IncompleteVerdictWalkError(
+          'incomplete verdict walk: indexer advertised another page without an end cursor',
+        );
+      }
       cursor = pageInfo.endCursor;
     }
-    return refs;
+    throw new IncompleteVerdictWalkError(
+      `incomplete verdict walk: indexer still advertised rows after ${MAX_PAGES} pages`,
+    );
   }
 
   return { list };

@@ -62,9 +62,9 @@ export interface PipelineDeps {
    * Attempts retained per `(instance_id, polarity)` — the per-instance attempt
    * group the distiller reasons over for group-relative distillation (#1478).
    * Default 8. NOTE: for a group to be complete, `verdictSource.list` must
-   * return every attempt of the instance — set `limit` high enough to cover the
-   * corpus (the source pages up to 20k rows; a tight `limit` truncates in
-   * enrichment order and can split a group).
+   * return every attempt of the instance. Its no-limit default walks the full
+   * paged corpus; an explicit tight `limit` truncates in enrichment order and
+   * can split a group.
    */
   groupCap?: number;
   limit?: number;

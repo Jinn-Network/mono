@@ -1012,11 +1012,17 @@ describe('jinn-layer distill run', () => {
   it('runs the pipeline under stubs and writes SKILL.md packages', async () => {
     const { writer, out } = capture();
     const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-cli-'));
+    const list = vi.fn(async () => [
+      dref('flask__flask-1', 'pass'),
+      dref('pytest__pytest-2', 'fail'),
+      dref('django__django-99999', 'pass'),
+    ]);
     const code = await runJinnLayerCli(['distill', 'run', '--out', outDir], {
       writer,
-      distillRunDeps: stubDeps(),
+      distillRunDeps: stubDeps({ verdictSource: { list } }),
     });
     expect(code).toBe(0);
+    expect(list).toHaveBeenCalledWith({});
 
     const text = out();
     expect(text).toContain('distilled: published 2');
@@ -1036,6 +1042,24 @@ describe('jinn-layer distill run', () => {
       // The held-out instance never surfaces in a distilled body.
       expect(md).not.toContain('django__django-99999');
     }
+  });
+
+  it('passes an explicit bridge limit through as the bounded dry-run control', async () => {
+    const list = vi.fn(async () => [dref('flask__flask-1', 'pass')]);
+    const code = await runJinnLayerCli([
+      'distill',
+      'run',
+      '--limit',
+      '1',
+      '--out',
+      mkdtempSync(join(tmpdir(), 'jinn-distill-cli-')),
+    ], {
+      writer: capture().writer,
+      distillRunDeps: stubDeps({ verdictSource: { list } }),
+    });
+
+    expect(code).toBe(0);
+    expect(list).toHaveBeenCalledWith({ limit: 1 });
   });
 
   it('--anchor-mode manifest anchors each raw-block partition and prints measured gas', async () => {
