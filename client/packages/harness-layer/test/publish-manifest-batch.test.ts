@@ -769,10 +769,51 @@ describe('publishManifestBatch', () => {
     ).rejects.toThrow(/journal.*conflict|frozen.*plan/i);
   });
 
+  it('retains exact recovery facts when persisting the frozen plan fails', async () => {
+    const { publishDeps, calls } = deps();
+    const states = new Map<string, string>();
+    let saveCalls = 0;
+    publishDeps.manifestJournal = {
+      loadManifestBatchJournal: (batchKey) => states.get(batchKey) ?? null,
+      saveManifestBatchJournal: (batchKey, stateJson) => {
+        saveCalls += 1;
+        if (saveCalls === 3) {
+          throw new Error('frozen plan journal write failed');
+        }
+        states.set(batchKey, stateJson);
+      },
+    };
+    const members = [
+      { pending: await pending(1), sourceId: 'request-1' },
+    ];
+
+    const error = await publishManifestBatch(
+      members,
+      publishDeps,
+      { batchKind: 'bridge' },
+    ).catch((caught: unknown) => caught);
+    const [batchKey] = states.keys();
+
+    expect(error).toBeInstanceOf(ManifestBatchPreparationError);
+    expect(error).toMatchObject({
+      stage: 'partition',
+      memberRefs: ['bafy-envelope-1'],
+      batchKey,
+    });
+    expect(String(error)).toContain('frozen plan journal write failed');
+    expect(calls.publishEnvelope).toHaveLength(1);
+    expect(calls.anchorManifest).toHaveLength(0);
+
+    await publishManifestBatch(members, publishDeps, { batchKind: 'bridge' });
+
+    expect(calls.publishEnvelope).toHaveLength(1);
+    expect(calls.anchorManifest).toHaveLength(1);
+  });
+
   it('does not duplicate a ledger row after append succeeds but finalization throws', async () => {
-    const { publishDeps, ledger } = deps();
-    const { store } = memoryJournal();
-    publishDeps.manifestJournal = store;
+    const { publishDeps, calls, ledger } = deps();
+    const journal = memoryJournal();
+    publishDeps.manifestJournal = journal.store;
     let anchorCalls = 0;
     publishDeps.anchorManifest = async ({ onBroadcast }) => {
       anchorCalls += 1;
@@ -799,11 +840,25 @@ describe('publishManifestBatch', () => {
       { pending: await pending(1), instanceId: 'mono-1', sourceId: 'request-1' },
     ];
 
-    await expect(
-      publishManifestBatch(members, publishDeps, { batchKind: 'bridge' }),
-    ).rejects.toBeInstanceOf(ManifestBatchRecordingError);
+    const error = await publishManifestBatch(
+      members,
+      publishDeps,
+      { batchKind: 'bridge' },
+    ).catch((caught: unknown) => caught);
+    const [batchKey] = journal.states.keys();
+
+    expect(error).toBeInstanceOf(ManifestBatchRecordingError);
+    expect(error).toMatchObject({
+      memberRefs: ['bafy-envelope-1'],
+      batchKey,
+      result: {
+        batchKey,
+        memberRefs: ['bafy-envelope-1'],
+      },
+    });
     await publishManifestBatch(members, publishDeps, { batchKind: 'bridge' });
 
+    expect(calls.publishEnvelope).toHaveLength(1);
     expect(anchorCalls).toBe(1);
     expect(ledger.list()).toHaveLength(1);
   });

@@ -144,6 +144,7 @@ export interface BridgeDeps {
 }
 
 export interface BridgeManifestBatch {
+  batchKey?: string;
   manifestCid: string;
   memberRefs: string[];
   root: `0x${string}`;
@@ -514,6 +515,8 @@ export async function bridgeAttempts(refs: AttemptRef[], deps: BridgeDeps): Prom
       result.manifestMemberRefs = [...memberRefs];
       if (observations.length > 0) {
         result.manifestBatches = observations;
+        const batchKey = observations.find((batch) => batch.batchKey)?.batchKey;
+        if (batchKey) result.manifestBatchKey = batchKey;
         result.control = observations.find((batch) => batch.control)?.control;
       }
       if (observations.length === 1) {
@@ -554,6 +557,7 @@ export async function bridgeAttempts(refs: AttemptRef[], deps: BridgeDeps): Prom
         addFailedObservation(failed);
       } else if (error instanceof ManifestBatchRecordingError) {
         memberRefs = [...error.result.memberRefs];
+        if (error.batchKey) result.manifestBatchKey = error.batchKey;
         addFailedObservation(error);
       } else if (error instanceof ManifestBatchAnchorError) {
         memberRefs = [...error.memberRefs];

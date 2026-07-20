@@ -86,8 +86,9 @@
 - Adds: `ManifestBatchRecoveryError` with durable partial `memberRefs`.
 - Consumes: journal load/save, broadcast callbacks, and `reconcileAnchor`.
 - Produces: frozen plan resumption that skips confirmed partitions and uses read-before-append `(envelopeRef, anchorTx)` ledger identity.
+- Produces: typed post-upload journal/finalization failures carrying exact member refs and the durable batch key through the bridge result.
 
-- [ ] Add failing tests for partial upload facts, single-partition manifest preparation facts, scope/member-digest and plan collision rejection, confirmed-partition skipping, pending receipt fail-closed behavior, reverted receipt retry, and crash-safe anchor/ledger finalization.
+- [ ] Add failing tests for partial upload facts, single-partition manifest preparation/finalization facts, frozen-plan save recovery, scope/member-digest and plan collision rejection, confirmed-partition skipping, pending receipt fail-closed behavior, reverted receipt retry, and crash-safe anchor/ledger finalization.
 - [ ] Run focused publisher/bridge tests and verify each new test fails for the intended missing behavior.
 - [ ] Implement stable batch-key derivation and journal serialization, freezing all original pending inputs before the first upload.
 - [ ] Journal every member upload and exact partition body, recording manifest/control broadcasts at callback time.
