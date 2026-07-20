@@ -282,7 +282,7 @@ def _build_episode(
         },
         "outcome": {
             "status": status,
-            "verifiabilityTier": "user-accepted",
+            "verificationStrength": "user-accepted",
         },
         "cost": cost,
         "retention": {
