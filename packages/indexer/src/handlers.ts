@@ -944,7 +944,7 @@ export function parseEnvelopeLite(body: unknown): EnvelopeLite | null {
 const EPISODE_ARTIFACT_TYPE = 'jinn.episode.v1' as const;
 const TRACE_ENVELOPE_ARTIFACT_TYPE = 'jinn.trace-envelope.v0' as const;
 const RETRIEVAL_VISIBLE_TAG = 'retrieval:visible.v1' as const;
-type EvidenceArtifactType =
+export type EvidenceArtifactType =
   | typeof EPISODE_ARTIFACT_TYPE
   | typeof TRACE_ENVELOPE_ARTIFACT_TYPE;
 
@@ -1010,7 +1010,10 @@ export interface TraceEnvelopeSignalLite {
   stepCount: number;
 }
 
-export function parseTraceEnvelopeSignalLite(body: unknown): TraceEnvelopeSignalLite | null {
+export function parseTraceEnvelopeSignalLite(
+  body: unknown,
+  expectedArtifactType: EvidenceArtifactType,
+): TraceEnvelopeSignalLite | null {
   if (body === null || typeof body !== 'object') return null;
   const b = body as Record<string, unknown>;
 
@@ -1019,6 +1022,7 @@ export function parseTraceEnvelopeSignalLite(body: unknown): TraceEnvelopeSignal
   let evidence: Record<string, unknown> = b;
   const data = b['data'];
   if (typeof data === 'string' && data) {
+    if (b['artifactType'] !== expectedArtifactType) return null;
     try {
       evidence = JSON.parse(
         Buffer.from(data, 'base64').toString('utf-8'),
@@ -1028,7 +1032,8 @@ export function parseTraceEnvelopeSignalLite(body: unknown): TraceEnvelopeSignal
     }
   }
   if (evidence === null || typeof evidence !== 'object') return null;
-  const isEpisode = evidence['schemaVersion'] === EPISODE_ARTIFACT_TYPE;
+  if (evidence['schemaVersion'] !== expectedArtifactType) return null;
+  const isEpisode = expectedArtifactType === EPISODE_ARTIFACT_TYPE;
 
   const task = evidence['task'];
   const taskObj: Record<string, unknown> =
@@ -1671,7 +1676,10 @@ export async function handleMetadataSet({
             timeoutMs: 5000,
             fetchImpl,
           });
-          const signalMeta = parseTraceEnvelopeSignalLite(artifactBody);
+          const signalMeta = parseTraceEnvelopeSignalLite(
+            artifactBody,
+            wrapper.artifactType,
+          );
           if (signalMeta) {
             // Anchor identity (#1406): the MetadataSet tx hash is the on-chain
             // anchor link; the block timestamp is the corpus item's createdAt.

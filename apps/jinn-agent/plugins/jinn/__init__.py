@@ -794,7 +794,7 @@ def _tool_corpus_fetch(args: Dict[str, Any], **_kw: Any) -> str:
         record = json.loads(out)
         trace, _sha = skills_install._extract_trace(record)
     except Exception as exc:
-        return f"record is not readable as a trace envelope: {exc}"
+        return f"record is not readable as an evidence envelope: {exc}"
     _record_activity(str(_kw.get("session_id") or ""), "fetchedRefs", [ref])
     tier = str(((trace.get("outcome") or {}).get("verifiabilityTier")) or "unknown")
     summary = str(((trace.get("task") or {}).get("summary")) or "")

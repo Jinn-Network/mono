@@ -53,8 +53,8 @@ import {
 // here (C5's move).
 export { CapturedTaskSchema, parseCapturedTask, type CapturedTask } from '@jinn-network/core';
 // A re-export does not create a local binding, and capture() below references
-// CapturedTask as a type — import it locally too.
-import type { CapturedTask } from '@jinn-network/core';
+// CapturedTask and parseCapturedTask below — import them locally too.
+import { parseCapturedTask, type CapturedTask } from '@jinn-network/core';
 
 /**
  * One entry in the redaction diff. `before` is the original (sensitive)
@@ -248,6 +248,194 @@ function fieldRef(stepIndex: number, key: string): string {
   return `steps[${stepIndex}].attributes[${JSON.stringify(key)}]`;
 }
 
+function episodeFactBag(task: CapturedTask): Attributes {
+  return {
+    ...(task.session.kind !== undefined
+      ? { 'episodeFacts.session.kind': task.session.kind }
+      : {}),
+    ...(task.session.parentSessionId !== undefined
+      ? { 'episodeFacts.session.parentSessionId': task.session.parentSessionId }
+      : {}),
+    ...(task.task.repositorySlug !== undefined
+      ? { 'episodeFacts.task.repositorySlug': task.task.repositorySlug }
+      : {}),
+    ...(task.task.baseCommit !== undefined
+      ? { 'episodeFacts.task.baseCommit': task.task.baseCommit }
+      : {}),
+    ...(task.task.createdAt !== undefined
+      ? { 'episodeFacts.task.createdAt': task.task.createdAt }
+      : {}),
+    ...(task.task.instanceId !== undefined
+      ? { 'episodeFacts.task.instanceId': task.task.instanceId }
+      : {}),
+    ...(task.environment.skillsLoadout !== undefined
+      ? { 'episodeFacts.environment.skillsLoadout': task.environment.skillsLoadout }
+      : {}),
+    ...(task.environment.generatorModel !== undefined
+      ? {
+        'episodeFacts.environment.generatorModel.id': task.environment.generatorModel.id,
+        ...(task.environment.generatorModel.provider !== undefined
+          ? {
+            'episodeFacts.environment.generatorModel.provider':
+              task.environment.generatorModel.provider,
+          }
+          : {}),
+        ...(task.environment.generatorModel.openWeights !== undefined
+          ? {
+            'episodeFacts.environment.generatorModel.openWeights':
+              task.environment.generatorModel.openWeights,
+          }
+          : {}),
+        'episodeFacts.environment.generatorModel.source':
+          task.environment.generatorModel.source,
+      }
+      : {}),
+    ...(task.environment.distributionClass !== undefined
+      ? {
+        'episodeFacts.environment.distributionClass':
+          task.environment.distributionClass,
+      }
+      : {}),
+    ...(task.environment.verifier !== undefined
+      ? {
+        'episodeFacts.environment.verifier.type': task.environment.verifier.type,
+        'episodeFacts.environment.verifier.failToPass':
+          task.environment.verifier.failToPass,
+        'episodeFacts.environment.verifier.passToPass':
+          task.environment.verifier.passToPass,
+        ...(task.environment.verifier.evalSemanticsVersion !== undefined
+          ? {
+            'episodeFacts.environment.verifier.evalSemanticsVersion':
+              task.environment.verifier.evalSemanticsVersion,
+          }
+          : {}),
+      }
+      : {}),
+    'episodeFacts.trajectoryKinds': task.steps.map((step) => step.kind),
+    ...(task.attemptGroup !== undefined
+      ? {
+        'episodeFacts.attemptGroup.groupId': task.attemptGroup.groupId,
+        'episodeFacts.attemptGroup.attemptId': task.attemptGroup.attemptId,
+        'episodeFacts.attemptGroup.relatedAttemptRefs':
+          task.attemptGroup.relatedAttemptRefs,
+        ...(task.attemptGroup.groupSize !== undefined
+          ? { 'episodeFacts.attemptGroup.groupSize': task.attemptGroup.groupSize }
+          : {}),
+        ...(task.attemptGroup.nPass !== undefined
+          ? { 'episodeFacts.attemptGroup.nPass': task.attemptGroup.nPass }
+          : {}),
+        ...(task.attemptGroup.nFail !== undefined
+          ? { 'episodeFacts.attemptGroup.nFail': task.attemptGroup.nFail }
+          : {}),
+      }
+      : {}),
+  };
+}
+
+/**
+ * Rebuild a CapturedTask using only scrubbed Episode-only values. Parsing the
+ * result keeps this boundary fail-closed if a scrub stage changes a structural
+ * enum/type or removes a required member of a present nested block.
+ */
+function taskWithScrubbedEpisodeFacts(
+  task: CapturedTask,
+  attributes: Attributes,
+): CapturedTask {
+  const fact = (key: string): unknown => attributes[`episodeFacts.${key}`];
+  const kinds = fact('trajectoryKinds');
+  return parseCapturedTask({
+    ...task,
+    session: {
+      sessionId: task.session.sessionId,
+      capturedAt: task.session.capturedAt,
+      ...(fact('session.kind') !== undefined ? { kind: fact('session.kind') } : {}),
+      ...(fact('session.parentSessionId') !== undefined
+        ? { parentSessionId: fact('session.parentSessionId') }
+        : {}),
+    },
+    task: {
+      summary: task.task.summary,
+      distributionTags: task.task.distributionTags,
+      ...(fact('task.repositorySlug') !== undefined
+        ? { repositorySlug: fact('task.repositorySlug') }
+        : {}),
+      ...(fact('task.baseCommit') !== undefined
+        ? { baseCommit: fact('task.baseCommit') }
+        : {}),
+      ...(fact('task.createdAt') !== undefined
+        ? { createdAt: fact('task.createdAt') }
+        : {}),
+      ...(fact('task.instanceId') !== undefined
+        ? { instanceId: fact('task.instanceId') }
+        : {}),
+    },
+    environment: {
+      harness: task.environment.harness,
+      model: task.environment.model,
+      tools: task.environment.tools,
+      ...(fact('environment.skillsLoadout') !== undefined
+        ? { skillsLoadout: fact('environment.skillsLoadout') }
+        : {}),
+      ...(task.environment.generatorModel !== undefined
+        ? {
+          generatorModel: {
+            id: fact('environment.generatorModel.id'),
+            ...(fact('environment.generatorModel.provider') !== undefined
+              ? { provider: fact('environment.generatorModel.provider') }
+              : {}),
+            ...(fact('environment.generatorModel.openWeights') !== undefined
+              ? { openWeights: fact('environment.generatorModel.openWeights') }
+              : {}),
+            source: fact('environment.generatorModel.source'),
+          },
+        }
+        : {}),
+      ...(fact('environment.distributionClass') !== undefined
+        ? { distributionClass: fact('environment.distributionClass') }
+        : {}),
+      ...(task.environment.verifier !== undefined
+        ? {
+          verifier: {
+            type: fact('environment.verifier.type'),
+            failToPass: fact('environment.verifier.failToPass'),
+            passToPass: fact('environment.verifier.passToPass'),
+            ...(fact('environment.verifier.evalSemanticsVersion') !== undefined
+              ? {
+                evalSemanticsVersion:
+                  fact('environment.verifier.evalSemanticsVersion'),
+              }
+              : {}),
+          },
+        }
+        : {}),
+    },
+    steps: task.steps.map((step, index) => ({
+      ...step,
+      ...(Array.isArray(kinds) && kinds[index] !== undefined
+        ? { kind: kinds[index] }
+        : { kind: undefined }),
+    })),
+    ...(task.attemptGroup !== undefined
+      ? {
+        attemptGroup: {
+          groupId: fact('attemptGroup.groupId'),
+          attemptId: fact('attemptGroup.attemptId'),
+          relatedAttemptRefs: fact('attemptGroup.relatedAttemptRefs'),
+          ...(fact('attemptGroup.groupSize') !== undefined
+            ? { groupSize: fact('attemptGroup.groupSize') }
+            : {}),
+          ...(fact('attemptGroup.nPass') !== undefined
+            ? { nPass: fact('attemptGroup.nPass') }
+            : {}),
+          ...(fact('attemptGroup.nFail') !== undefined
+            ? { nFail: fact('attemptGroup.nFail') }
+            : {}),
+        },
+      }
+      : {}),
+  });
+}
+
 /**
  * Run the captured task through the scrub pipeline and the fitting rule and
  * return the pending (pre-consent) envelope plus its redaction diff.
@@ -269,15 +457,20 @@ export async function capture(
 
   let scrubbedSteps;
   let summaryRun: ScrubResult;
+  let factRun: ScrubResult;
+  let scrubbedFactTask: CapturedTask;
   const summaryBag: Attributes = {
     'task.summary': task.task.summary,
     ...(task.outcome.summary !== undefined ? { 'outcome.summary': task.outcome.summary } : {}),
   };
+  const factBag = episodeFactBag(task);
   try {
     scrubbedSteps = await scrubCaptureSpans(task.steps, recorder);
     // The envelope calls `task.summary` a "scrubbed one-line descriptor" —
     // capture is where that becomes true. Same pipeline, pseudo-attribute bag.
     summaryRun = await recorder.run(summaryBag);
+    factRun = await recorder.run(factBag);
+    scrubbedFactTask = taskWithScrubbedEpisodeFacts(task, factRun.attributes);
   } catch (err) {
     throw new CaptureScrubError(err);
   }
@@ -285,7 +478,11 @@ export async function capture(
   // Pair each scrubbed step with its pipeline run (one run per span, in
   // order), then head/tail-sample. Redactions are reported only for retained
   // steps: sampled-out steps never publish, so their diff is moot.
-  const paired = scrubbedSteps.map((step, i) => ({ step, run: recorder.runs[i]! }));
+  const paired = scrubbedSteps.map((step, i) => ({
+    step,
+    run: recorder.runs[i]!,
+    kind: scrubbedFactTask.steps[i]!.kind,
+  }));
   const { steps: retained, sampledOut } = sampleSteps(paired);
 
   const redactions: ScrubRedaction[] = [];
@@ -339,6 +536,15 @@ export async function capture(
       after: summaryRun.attributes[record.key],
     });
   }
+  for (const record of factRun.redactions) {
+    redactions.push({
+      field: record.key,
+      stage: record.stage,
+      ...(record.detail ? { detail: record.detail } : {}),
+      before: factBag[record.key],
+      after: factRun.attributes[record.key],
+    });
+  }
   // Summaries are content keys the policy never drops; assert the invariant
   // rather than publish an envelope with a silently-missing summary.
   const scrubbedTaskSummary = summaryRun.attributes['task.summary'];
@@ -387,35 +593,45 @@ export async function capture(
     draft,
     episodeFacts: {
       session: {
-        ...(task.session.kind ? { kind: task.session.kind } : {}),
-        ...(task.session.parentSessionId
-          ? { parentSessionId: task.session.parentSessionId }
+        ...(scrubbedFactTask.session.kind
+          ? { kind: scrubbedFactTask.session.kind }
+          : {}),
+        ...(scrubbedFactTask.session.parentSessionId
+          ? { parentSessionId: scrubbedFactTask.session.parentSessionId }
           : {}),
       },
       task: {
-        ...(task.task.repositorySlug
-          ? { repositorySlug: task.task.repositorySlug }
+        ...(scrubbedFactTask.task.repositorySlug
+          ? { repositorySlug: scrubbedFactTask.task.repositorySlug }
           : {}),
-        ...(task.task.baseCommit ? { baseCommit: task.task.baseCommit } : {}),
-        ...(task.task.createdAt !== undefined ? { createdAt: task.task.createdAt } : {}),
-        ...(task.task.instanceId ? { instanceId: task.task.instanceId } : {}),
+        ...(scrubbedFactTask.task.baseCommit
+          ? { baseCommit: scrubbedFactTask.task.baseCommit }
+          : {}),
+        ...(scrubbedFactTask.task.createdAt !== undefined
+          ? { createdAt: scrubbedFactTask.task.createdAt }
+          : {}),
+        ...(scrubbedFactTask.task.instanceId
+          ? { instanceId: scrubbedFactTask.task.instanceId }
+          : {}),
       },
       environment: {
-        ...(task.environment.skillsLoadout
-          ? { skillsLoadout: task.environment.skillsLoadout }
+        ...(scrubbedFactTask.environment.skillsLoadout
+          ? { skillsLoadout: scrubbedFactTask.environment.skillsLoadout }
           : {}),
-        ...(task.environment.generatorModel
-          ? { generatorModel: task.environment.generatorModel }
+        ...(scrubbedFactTask.environment.generatorModel
+          ? { generatorModel: scrubbedFactTask.environment.generatorModel }
           : {}),
-        ...(task.environment.distributionClass
-          ? { distributionClass: task.environment.distributionClass }
+        ...(scrubbedFactTask.environment.distributionClass
+          ? { distributionClass: scrubbedFactTask.environment.distributionClass }
           : {}),
-        ...(task.environment.verifier
-          ? { verifier: task.environment.verifier }
+        ...(scrubbedFactTask.environment.verifier
+          ? { verifier: scrubbedFactTask.environment.verifier }
           : {}),
       },
-      trajectoryKinds: retained.map(({ step }) => step.kind),
-      ...(task.attemptGroup ? { attemptGroup: task.attemptGroup } : {}),
+      trajectoryKinds: retained.map(({ kind }) => kind),
+      ...(scrubbedFactTask.attemptGroup
+        ? { attemptGroup: scrubbedFactTask.attemptGroup }
+        : {}),
     },
     redactions,
   };

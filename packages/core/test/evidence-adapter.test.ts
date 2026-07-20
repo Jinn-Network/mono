@@ -15,7 +15,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { describeEvidencePortContract } from '@jinn-network/plugin/testing';
 import { EPISODE_SCHEMA_VERSION, EpisodeV1Schema, type EpisodeV1 } from '@jinn-network/plugin';
 import type { CapturedTask } from '../src/captured-task.js';
-import { createEvidenceAdapter } from '../src/evidence-adapter.js';
+import { capturedTaskToEpisode, createEvidenceAdapter } from '../src/evidence-adapter.js';
 
 /** A sample EpisodeV1 the byte-exact round-trip is checked against. */
 function makeSampleEpisode(overrides: Partial<EpisodeV1> = {}): EpisodeV1 {
@@ -141,6 +141,105 @@ describe('EvidenceAdapter — AC2 legacy read', () => {
     expect(episode.task.distributionTags).toEqual(['coding', 'python']);
     // Each step carries a valid discriminated `kind`.
     expect(episode.trajectory.map((s) => s.kind)).toEqual(['jinn.agent_turn', 'jinn.tool_call']);
+  });
+
+  it('preserves canonical tuple, environment, grouping, and explicit step-kind facts', () => {
+    const legacy = makeLegacyCapturedTask({
+      session: {
+        sessionId: 'legacy-sess-enriched',
+        capturedAt: '2026-07-13T00:00:00.000Z',
+        kind: 'host-internal',
+        parentSessionId: 'parent-session',
+      },
+      task: {
+        summary: 'An enriched captured task',
+        distributionTags: ['coding'],
+        repositorySlug: 'django/django',
+        baseCommit: 'a'.repeat(40),
+        createdAt: 1_752_000_000,
+        instanceId: 'django__django-12345',
+      },
+      environment: {
+        harness: { name: 'execution-ledger', version: '0.1.0' },
+        model: 'claude-sonnet-4-6',
+        tools: ['bash'],
+        skillsLoadout: ['tdd'],
+        generatorModel: {
+          id: 'claude-sonnet-4-6',
+          provider: 'anthropic',
+          openWeights: false,
+          source: 'stream',
+        },
+        distributionClass: 'restricted-tos',
+        verifier: {
+          type: 'f2p-p2p',
+          failToPass: ['tests/test_fix.py::test_regression'],
+          passToPass: ['tests/test_existing.py::test_stable'],
+          evalSemanticsVersion: 'swe-rebench-v2.1',
+        },
+      },
+      steps: [{
+        spanId: 'explicit-kind',
+        parentSpanId: null,
+        name: 'bash',
+        kind: 'jinn.agent_turn',
+        startTimeUnixNano: '1000000000',
+        endTimeUnixNano: '1500000000',
+        attributes: {},
+        redactedKeys: [],
+      }],
+      attemptGroup: {
+        groupId: 'django__django-12345',
+        attemptId: '0xattempt',
+        relatedAttemptRefs: ['bafy-pass', 'bafy-fail'],
+        groupSize: 2,
+        nPass: 1,
+        nFail: 1,
+      },
+    });
+
+    const episode = capturedTaskToEpisode(legacy, {
+      policy: 'contribution-eligible',
+      maxEpisodes: 200,
+    });
+
+    expect(episode).toMatchObject({
+      session: {
+        kind: 'host-internal',
+        parentSessionId: 'parent-session',
+      },
+      task: {
+        repositorySlug: 'django/django',
+        baseCommit: 'a'.repeat(40),
+        createdAt: 1_752_000_000,
+        instanceId: 'django__django-12345',
+      },
+      trajectory: [{ kind: 'jinn.agent_turn' }],
+      environment: {
+        skillsLoadout: ['tdd'],
+        generatorModel: {
+          id: 'claude-sonnet-4-6',
+          provider: 'anthropic',
+          openWeights: false,
+          source: 'stream',
+        },
+        distributionClass: 'restricted-tos',
+        verifier: {
+          type: 'f2p-p2p',
+          failToPass: ['tests/test_fix.py::test_regression'],
+          passToPass: ['tests/test_existing.py::test_stable'],
+          evalSemanticsVersion: 'swe-rebench-v2.1',
+        },
+      },
+      attemptGroup: {
+        groupId: 'django__django-12345',
+        attemptId: '0xattempt',
+        relatedAttemptRefs: ['bafy-pass', 'bafy-fail'],
+        groupSize: 2,
+        nPass: 1,
+        nFail: 1,
+      },
+    });
   });
 
   it('returns valid records with an explicit degraded count when files are unreadable', async () => {

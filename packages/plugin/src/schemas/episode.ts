@@ -269,13 +269,50 @@ function normalizeEpisodeRead(value: unknown): unknown {
     normalized['origin'] = 'legacy-unstamped';
   }
 
-  normalized['task'] = withoutNulls(raw['task'], ['repositorySlug']);
+  normalized['task'] = withoutNulls(
+    raw['task'],
+    ['repositorySlug', 'baseCommit', 'createdAt', 'instanceId'],
+  );
+  if (Array.isArray(raw['trajectory'])) {
+    normalized['trajectory'] = raw['trajectory'].map(
+      (step) => withoutNulls(step, ['truncatedKeys']),
+    );
+  }
+  const environment = asRecord(withoutNulls(
+    raw['environment'],
+    ['generatorModel', 'distributionClass', 'verifier'],
+  ));
+  if (environment) {
+    const cleanEnvironment: UnknownRecord = { ...environment };
+    const generatorModel = asRecord(withoutNulls(
+      environment['generatorModel'],
+      ['provider', 'openWeights'],
+    ));
+    if (generatorModel) cleanEnvironment['generatorModel'] = generatorModel;
+    const verifier = asRecord(withoutNulls(
+      environment['verifier'],
+      ['evalSemanticsVersion'],
+    ));
+    if (verifier) cleanEnvironment['verifier'] = verifier;
+    normalized['environment'] = cleanEnvironment;
+  }
   normalized['outcome'] = normalizeOutcomeCompatibility(
     withoutNulls(raw['outcome'], ['summary', 'acceptedDiff', 'testRuns']),
   );
   normalized['cost'] = withoutNulls(raw['cost'], ['tokens', 'usdEstimate']);
-  for (const key of ['lineage', 'activity', 'eligibility'] as const) {
+  for (const key of ['lineage', 'attemptGroup', 'activity', 'eligibility'] as const) {
     if (normalized[key] === null) delete normalized[key];
+  }
+
+  const lineage = asRecord(normalized['lineage']);
+  if (lineage) normalized['lineage'] = withoutNulls(lineage, ['mintRef']);
+
+  const attemptGroup = asRecord(normalized['attemptGroup']);
+  if (attemptGroup) {
+    normalized['attemptGroup'] = withoutNulls(
+      attemptGroup,
+      ['groupSize', 'nPass', 'nFail'],
+    );
   }
 
   const activity = asRecord(normalized['activity']);

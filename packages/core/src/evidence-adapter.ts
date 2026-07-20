@@ -69,14 +69,11 @@ export function capturedTaskToEpisode(
     schemaVersion: 'jinn.episode.v1' as const,
     episodeId: task.session.sessionId,
     session: task.session,
-    task: {
-      summary: task.task.summary,
-      distributionTags: task.task.distributionTags,
-    },
+    task: task.task,
     trajectory: task.steps.map((step) => ({
       spanId: step.spanId,
       parentSpanId: step.parentSpanId,
-      kind: stepKind(step),
+      kind: step.kind ?? stepKind(step),
       name: step.name,
       startTimeUnixNano: step.startTimeUnixNano,
       endTimeUnixNano: step.endTimeUnixNano,
@@ -84,15 +81,14 @@ export function capturedTaskToEpisode(
       redactedKeys: step.redactedKeys,
     })),
     environment: {
-      harness: task.environment.harness,
-      model: task.environment.model,
-      tools: task.environment.tools,
-      skillsLoadout: [] as string[],
+      ...task.environment,
+      skillsLoadout: task.environment.skillsLoadout ?? [],
     },
     outcome: task.outcome,
     cost: task.cost,
     retention: { policy: retention.policy },
     provenance: task.provenance,
+    ...(task.attemptGroup ? { attemptGroup: task.attemptGroup } : {}),
   };
   return EpisodeV1Schema.parse(built);
 }
