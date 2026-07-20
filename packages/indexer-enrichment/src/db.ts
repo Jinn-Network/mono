@@ -27,6 +27,8 @@ export interface DrizzleLike {
 /** A due anchor: an evaluation envelope with no `ok` verdict row (or a due retry). */
 export interface DueAnchor {
   manifestCid: string;
+  publisherAgentId: string;
+  manifestHash: string;
   publishedAtBlock: bigint;
   chainId: number;
 }
@@ -38,6 +40,8 @@ export interface UpsertVerdictArgs {
   taskId: string;
   evaluator: string;
   manifestCid: string;
+  publisherAgentId: string;
+  manifestHash: string;
   solverType: string;
   evidenceTier: string;
   actualPassed: boolean;
@@ -152,6 +156,8 @@ export class EnrichmentStore {
     const nowMs = BigInt(now);
     const res = await exec.execute(sql`
       SELECT e."manifest_cid" AS manifest_cid,
+             e."agent_id" AS publisher_agent_id,
+             e."manifest_hash" AS manifest_hash,
              e."published_at_block" AS published_at_block,
              e."chain_id" AS chain_id
       FROM ${this.q('envelope')} e
@@ -180,6 +186,8 @@ export class EnrichmentStore {
     `);
     return res.rows.map((r) => ({
       manifestCid: String(r.manifest_cid),
+      publisherAgentId: String(r.publisher_agent_id),
+      manifestHash: String(r.manifest_hash),
       publishedAtBlock: BigInt(String(r.published_at_block)),
       chainId: Number(r.chain_id),
     }));
@@ -239,10 +247,10 @@ export class EnrichmentStore {
   async upsertVerdict(args: UpsertVerdictArgs): Promise<void> {
     await this.db.execute(sql`
       INSERT INTO ${this.q('verdict_envelope_meta')}
-        ("request_id","verdict_index","attempt_index","task_id","evaluator","manifest_cid","solver_type","evidence_tier","actual_passed","actual_score","passed_count","total_count","instance_id","solver_net_manifest_cid","solution_request_id","evaluator_verdict","enrichment_status","retry_count","next_attempt_at","enriched_at_block","chain_id")
+        ("request_id","verdict_index","attempt_index","task_id","evaluator","manifest_cid","publisher_agent_id","manifest_hash","solver_type","evidence_tier","actual_passed","actual_score","passed_count","total_count","instance_id","solver_net_manifest_cid","solution_request_id","evaluator_verdict","enrichment_status","retry_count","next_attempt_at","enriched_at_block","chain_id")
       VALUES (
         ${args.requestId}, ${args.verdictIndex}, ${args.attemptIndex}, ${args.taskId}, ${args.evaluator},
-        ${args.manifestCid}, ${args.solverType}, ${args.evidenceTier}, ${args.actualPassed}, ${args.actualScore},
+        ${args.manifestCid}, ${args.publisherAgentId}, ${args.manifestHash}, ${args.solverType}, ${args.evidenceTier}, ${args.actualPassed}, ${args.actualScore},
         ${args.passedCount}, ${args.totalCount}, ${args.instanceId}, ${args.solverNetManifestCid}, ${args.solutionRequestId}, ${args.evaluatorVerdict},
         'ok', 0, NULL, ${args.enrichedAtBlock}, ${args.chainId}
       )
@@ -252,6 +260,8 @@ export class EnrichmentStore {
         "task_id" = EXCLUDED."task_id",
         "evaluator" = EXCLUDED."evaluator",
         "manifest_cid" = EXCLUDED."manifest_cid",
+        "publisher_agent_id" = EXCLUDED."publisher_agent_id",
+        "manifest_hash" = EXCLUDED."manifest_hash",
         "solver_type" = EXCLUDED."solver_type",
         "evidence_tier" = EXCLUDED."evidence_tier",
         "actual_passed" = EXCLUDED."actual_passed",

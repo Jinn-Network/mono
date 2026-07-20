@@ -1467,6 +1467,8 @@ export async function handleMetadataSet({
             .values({
               requestId: meta.requestId as `0x${string}`,
               manifestCid: envelopeKey.cid,
+              publisherAgentId: agentId,
+              manifestHash,
               solverType: meta.solverType,
               implName: meta.implName,
               implVersion: meta.implVersion,
@@ -1487,6 +1489,8 @@ export async function handleMetadataSet({
               if (blockNumber >= row.enrichedAtBlock) {
                 return {
                   manifestCid: envelopeKey.cid,
+                  publisherAgentId: agentId,
+                  manifestHash,
                   solverType: meta.solverType,
                   implName: meta.implName,
                   implVersion: meta.implVersion,
@@ -1505,6 +1509,8 @@ export async function handleMetadataSet({
               // No-op: return existing row fields so Drizzle generates valid SQL.
               return {
                 manifestCid: row.manifestCid,
+                publisherAgentId: row.publisherAgentId,
+                manifestHash: row.manifestHash,
                 solverType: row.solverType,
                 implName: row.implName,
                 implVersion: row.implVersion,
@@ -1592,6 +1598,8 @@ export async function handleMetadataSet({
               taskId: meta.taskId,
               evaluator: meta.evaluator as `0x${string}`,
               manifestCid: envelopeKey.cid,
+              publisherAgentId: agentId,
+              manifestHash,
               solverType: meta.solverType,
               evidenceTier: meta.evidenceTier,
               actualPassed: meta.actualPassed,
@@ -1615,6 +1623,8 @@ export async function handleMetadataSet({
                   taskId: meta.taskId,
                   evaluator: meta.evaluator as `0x${string}`,
                   manifestCid: envelopeKey.cid,
+                  publisherAgentId: agentId,
+                  manifestHash,
                   solverType: meta.solverType,
                   evidenceTier: meta.evidenceTier,
                   actualPassed: meta.actualPassed,
@@ -1637,6 +1647,8 @@ export async function handleMetadataSet({
                 taskId: row.taskId,
                 evaluator: row.evaluator,
                 manifestCid: row.manifestCid,
+                publisherAgentId: row.publisherAgentId,
+                manifestHash: row.manifestHash,
                 solverType: row.solverType,
                 evidenceTier: row.evidenceTier,
                 actualPassed: row.actualPassed,

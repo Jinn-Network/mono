@@ -60,6 +60,8 @@ describe('schema parity', () => {
     const cols = tableColumnNames(verdictEnvelopeMeta);
     for (const required of [
       'request_id',
+      'publisher_agent_id',
+      'manifest_hash',
       'instance_id',
       'solver_net_manifest_cid',
       'solution_request_id',
@@ -111,6 +113,8 @@ describe('discoverDue', () => {
     expect(due).toHaveLength(1);
     expect(due[0]?.manifestCid).toBe('cidA');
     expect(due[0]?.publishedAtBlock).toBe(99n);
+    expect(due[0]?.publisherAgentId).toBe('1');
+    expect(due[0]?.manifestHash).toBe('0x');
   });
 
   it('honours the batch size', async () => {
@@ -197,6 +201,8 @@ describe('upsertVerdict', () => {
     taskId: '42',
     evaluator: '0xbb',
     manifestCid: 'cidA',
+    publisherAgentId: '1',
+    manifestHash: '0x',
     solverType: 'swe-rebench-v2.v1',
     evidenceTier: 'committed',
     actualPassed: true,

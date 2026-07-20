@@ -83,6 +83,8 @@ describe('enrichBatch', () => {
     const row = await readVerdict(REQUEST_ID);
     expect(row).toMatchObject({
       request_id: REQUEST_ID,
+      publisher_agent_id: '1',
+      manifest_hash: '0x',
       instance_id: 'sympy__sympy-27510',
       solver_net_manifest_cid: 'bafyManifestSweA',
       solution_request_id: SOLVE_REQUEST_ID,
@@ -261,6 +263,8 @@ describe('idempotency (AC6)', () => {
       taskId: '42',
       evaluator: `0x${'bb'.repeat(20)}`,
       manifestCid: EVAL_CID,
+      publisherAgentId: '1',
+      manifestHash: '0x',
       solverType: 'swe-rebench-v2.v1',
       evidenceTier: 'committed',
       actualPassed: true,

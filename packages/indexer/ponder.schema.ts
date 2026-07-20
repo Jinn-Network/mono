@@ -621,6 +621,10 @@ export const attemptEnvelopeMeta = onchainTable(
     requestId: t.hex().notNull(),
     /** The envelope CID this metadata came from. */
     manifestCid: t.text().notNull(),
+    /** ERC-8004 agentId whose MetadataSet event published this envelope. */
+    publisherAgentId: t.text().notNull().default(''),
+    /** Manifest hash committed in that MetadataSet event. */
+    manifestHash: t.hex().notNull().default('0x'),
     /** solverType from the envelope. */
     solverType: t.text().notNull().default(''),
     /** executor.implName (harness). */
@@ -704,6 +708,10 @@ export const verdictEnvelopeMeta = onchainTable(
     evaluator: t.hex().notNull().default('0x'),
     /** The envelope IPFS CID (from the metadata key `evaluation:<cid>`). */
     manifestCid: t.text().notNull(),
+    /** ERC-8004 agentId whose MetadataSet event published this envelope. */
+    publisherAgentId: t.text().notNull().default(''),
+    /** Manifest hash committed in that MetadataSet event. */
+    manifestHash: t.hex().notNull().default('0x'),
     /** solverType from the envelope. */
     solverType: t.text().notNull().default(''),
     /** evidenceTier from the envelope. */

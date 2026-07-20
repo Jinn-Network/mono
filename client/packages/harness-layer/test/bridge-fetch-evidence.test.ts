@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createEvidenceFetcher } from '../src/bridge-fetch-evidence.js';
+import {
+  createEvidenceFetcher,
+  type AuthenticatedExecutionEnvelope,
+} from '../src/bridge-fetch-evidence.js';
 import type { AttemptRef } from '../src/bridge.js';
 import { makeTarGz, wrapDonation } from './tar-fixture.js';
 
@@ -25,6 +28,13 @@ const SNAPSHOT_CID = 'bafySnapshot';
 const EVALUATION_REQ = '0x' + 'a'.repeat(64);
 const SOLVE_REQ = '0x' + 'b'.repeat(64);
 const TASK_ID = '42';
+const EVALUATOR_SAFE = '0x' + '1'.repeat(40);
+const SOLVER_SAFE = '0x' + '2'.repeat(40);
+const ATTACKER_SAFE = '0x' + '3'.repeat(40);
+const EVALUATOR_AGENT_ID = '101';
+const SOLVER_AGENT_ID = '202';
+const VERDICT_HASH = '0x' + '6'.repeat(64);
+const SOLUTION_HASH = '0x' + '7'.repeat(64);
 
 const AUTHENTICATED_TASK = {
   solverType: 'swe-rebench-v2.v1',
@@ -32,6 +42,15 @@ const AUTHENTICATED_TASK = {
   repo: 'django/django',
   baseCommit: 'a'.repeat(40),
   createdAt: 1_752_000_000_000,
+};
+
+// Mirrors the real jinn.execution.v1 TaskProvenanceSchema. solverType belongs
+// to the outer envelope, not this nested task provenance object.
+const AUTHENTICATED_ENVELOPE_TASK = {
+  instanceId: AUTHENTICATED_TASK.instanceId,
+  repo: AUTHENTICATED_TASK.repo,
+  baseCommit: AUTHENTICATED_TASK.baseCommit,
+  createdAt: 1_752_000_000,
 };
 
 function authenticatedVerifier(over: Record<string, unknown> = {}) {
@@ -44,15 +63,51 @@ function authenticatedVerifier(over: Record<string, unknown> = {}) {
   };
 }
 
-function boundSolution(over: Record<string, unknown> = {}) {
+function signature(hash: string, signer: string) {
+  return {
+    algo: 'secp256k1',
+    signer,
+    hash,
+    sig: '0x' + '8'.repeat(130),
+  };
+}
+
+function boundVerdict(over: Record<string, unknown> = {}) {
+  const agentEoa = '0x' + '5'.repeat(40);
   return {
     solverType: AUTHENTICATED_TASK.solverType,
+    role: 'verdict',
+    participant: {
+      safeAddress: EVALUATOR_SAFE,
+      agentEoa,
+    },
+    task: {
+      cid: TASK_CID,
+      requestId: EVALUATION_REQ,
+      ...AUTHENTICATED_ENVELOPE_TASK,
+    },
+    payload: { passed_match: true },
+    signature: signature(VERDICT_HASH, agentEoa),
+    ...over,
+  };
+}
+
+function boundSolution(over: Record<string, unknown> = {}) {
+  const agentEoa = '0x' + '4'.repeat(40);
+  return {
+    solverType: AUTHENTICATED_TASK.solverType,
+    role: 'solution',
+    participant: {
+      safeAddress: SOLVER_SAFE,
+      agentEoa,
+    },
     task: {
       cid: 'bafyOriginalTask',
       requestId: SOLVE_REQ,
-      ...AUTHENTICATED_TASK,
+      ...AUTHENTICATED_ENVELOPE_TASK,
     },
     payload: { patch: PATCH },
+    signature: signature(SOLUTION_HASH, agentEoa),
     ...over,
   };
 }
@@ -86,20 +141,14 @@ function ports(over: {
   verdict?: unknown;
   task?: unknown;
   verdictRows?: unknown[];
+  verdictMetas?: unknown[];
   attemptRows?: unknown[];
   attemptMetas?: unknown[];
   solution?: unknown;
   snapshot?: unknown;
 } = {}) {
   const ipfsStore: Record<string, unknown> = {
-    [VERDICT_CID]: over.verdict ?? {
-      solverType: AUTHENTICATED_TASK.solverType,
-      task: {
-        cid: TASK_CID,
-        requestId: EVALUATION_REQ,
-        ...AUTHENTICATED_TASK,
-      },
-    },
+    [VERDICT_CID]: over.verdict ?? boundVerdict(),
     [TASK_CID]: over.task ?? { description: 'Fix the widget factory', restorationRequestId: SOLVE_REQ },
     [SOLUTION_CID]: over.solution ?? boundSolution(),
   };
@@ -110,6 +159,21 @@ function ports(over: {
       return ipfsStore[cid];
     },
     gql: async (query: string, variables?: Record<string, unknown>) => {
+      if (query.includes('AuthoritativeVerdictEnvelopeMeta')) {
+        expect(variables).toEqual({ requestId: EVALUATION_REQ, chainId: 84532 });
+        return {
+          verdictEnvelopeMetas: {
+            items: over.verdictMetas ?? [{
+              requestId: EVALUATION_REQ,
+              chainId: 84532,
+              manifestCid: VERDICT_CID,
+              publisherAgentId: EVALUATOR_AGENT_ID,
+              manifestHash: VERDICT_HASH,
+              enrichedAtBlock: '1000',
+            }],
+          },
+        };
+      }
       if (query.includes('AuthoritativeVerdict')) {
         expect(variables).toEqual({ requestId: EVALUATION_REQ, chainId: 84532 });
         return {
@@ -119,6 +183,7 @@ function ports(over: {
               chainId: 84532,
               taskId: TASK_ID,
               attemptIndex: 0,
+              evaluator: EVALUATOR_SAFE,
             }],
           },
         };
@@ -132,6 +197,7 @@ function ports(over: {
               chainId: 84532,
               taskId: TASK_ID,
               attemptIndex: 0,
+              operator: SOLVER_SAFE,
             }],
           },
         };
@@ -144,11 +210,36 @@ function ports(over: {
               requestId: SOLVE_REQ,
               chainId: 84532,
               manifestCid: SOLUTION_CID,
+              publisherAgentId: SOLVER_AGENT_ID,
+              manifestHash: SOLUTION_HASH,
+              enrichedAtBlock: '2000',
             }],
           },
         };
       }
       throw new Error(`unexpected GraphQL query: ${query}`);
+    },
+    resolvePublisherSafe: async (
+      _chainId: number,
+      agentId: string,
+      _publishedAtBlock: bigint,
+    ) => {
+      if (agentId === EVALUATOR_AGENT_ID) return EVALUATOR_SAFE;
+      if (agentId === SOLVER_AGENT_ID) return SOLVER_SAFE;
+      return ATTACKER_SAFE;
+    },
+    authenticateEnvelope: async (value: unknown, sourceName: string) => {
+      const signature = value && typeof value === 'object'
+        ? (value as Record<string, unknown>)['signature']
+        : undefined;
+      if (
+        signature
+        && typeof signature === 'object'
+        && (signature as Record<string, unknown>)['hash'] === '0x' + '0'.repeat(64)
+      ) {
+        throw new Error(`${sourceName} signature hash mismatch`);
+      }
+      return value as AuthenticatedExecutionEnvelope;
     },
   };
 }
@@ -183,6 +274,28 @@ describe('createEvidenceFetcher', () => {
     expect(resolveVerifierFacts).toHaveBeenCalledWith(task, ref().instanceId);
   });
 
+  it('requires solverType on the outer envelope even if a nested task copy claims it', async () => {
+    const fetch = createEvidenceFetcher({
+      ...ports({
+        task: producerTask(),
+        verdict: boundVerdict({
+          solverType: undefined,
+          task: {
+            cid: TASK_CID,
+            requestId: EVALUATION_REQ,
+            solverType: AUTHENTICATED_TASK.solverType,
+            ...AUTHENTICATED_ENVELOPE_TASK,
+          },
+        }),
+      }),
+      resolveVerifierFacts: async () => authenticatedVerifier(),
+    });
+
+    await expect(fetch(ref())).rejects.toThrow(
+      /verdictEnvelope\.solverType requires exact authenticated task provenance/,
+    );
+  });
+
   it('recognizes the signed-task wrapper while deriving the solution join from authoritative chain rows', async () => {
     const signedTask = producerTask();
     delete signedTask['restorationRequestId'];
@@ -203,6 +316,148 @@ describe('createEvidenceFetcher', () => {
       taskSummary: 'Fix the widget factory',
     });
     expect(resolveVerifierFacts).toHaveBeenCalledWith(task, ref().instanceId);
+  });
+
+  it('rejects a signed inner restorationRequestId masked by an agreeing outer wrapper', async () => {
+    const task = {
+      restorationRequestId: SOLVE_REQ,
+      signedTask: producerTask({
+        restorationRequestId: '0x' + 'c'.repeat(64),
+      }),
+    };
+    const fetch = createEvidenceFetcher({
+      ...ports({ task }),
+      resolveVerifierFacts: async () => authenticatedVerifier(),
+    });
+
+    await expect(fetch(ref())).rejects.toThrow(
+      /signed task restorationRequestId.*authoritative solution requestId/,
+    );
+  });
+
+  it('rejects a verdict envelope whose signed polarity disagrees with the indexed candidate', async () => {
+    const fetch = createEvidenceFetcher({
+      ...ports({
+        task: producerTask(),
+        verdict: boundVerdict({
+          task: {
+            cid: TASK_CID,
+            requestId: EVALUATION_REQ,
+            ...AUTHENTICATED_ENVELOPE_TASK,
+          },
+          payload: { passed_match: false },
+        }),
+      }),
+      resolveVerifierFacts: async () => authenticatedVerifier(),
+    });
+
+    await expect(fetch(ref({ polarity: 'pass' }))).rejects.toThrow(
+      /signed verdict polarity.*indexed candidate/,
+    );
+  });
+
+  it('rejects a verdict metadata publisher not bound to the on-chain evaluator', async () => {
+    const fetch = createEvidenceFetcher({
+      ...ports({
+        task: producerTask(),
+        verdictMetas: [{
+          requestId: EVALUATION_REQ,
+          chainId: 84532,
+          manifestCid: VERDICT_CID,
+          publisherAgentId: '999',
+          manifestHash: VERDICT_HASH,
+          enrichedAtBlock: '1000',
+        }],
+      }),
+      resolveVerifierFacts: async () => authenticatedVerifier(),
+    });
+
+    await expect(fetch(ref())).rejects.toThrow(
+      /verdict envelope publisher.*on-chain evaluator/,
+    );
+  });
+
+  it('rejects a solution metadata publisher not bound to the on-chain operator', async () => {
+    const fetch = createEvidenceFetcher({
+      ...ports({
+        task: producerTask(),
+        attemptMetas: [{
+          requestId: SOLVE_REQ,
+          chainId: 84532,
+          manifestCid: SOLUTION_CID,
+          publisherAgentId: '999',
+          manifestHash: SOLUTION_HASH,
+          enrichedAtBlock: '2000',
+        }],
+      }),
+      resolveVerifierFacts: async () => authenticatedVerifier(),
+    });
+
+    await expect(fetch(ref())).rejects.toThrow(
+      /solution envelope publisher.*on-chain operator/,
+    );
+  });
+
+  it('rejects a verdict whose signed hash is not the MetadataSet commitment', async () => {
+    const fetch = createEvidenceFetcher(ports({
+      verdictMetas: [{
+        requestId: EVALUATION_REQ,
+        chainId: 84532,
+        manifestCid: VERDICT_CID,
+        publisherAgentId: EVALUATOR_AGENT_ID,
+        manifestHash: '0x' + '9'.repeat(64),
+        enrichedAtBlock: '1000',
+      }],
+    }));
+
+    await expect(fetch(ref())).rejects.toThrow(
+      /verdict envelope signature hash.*MetadataSet manifest hash/,
+    );
+  });
+
+  it('rejects a solution participant Safe relabelled onto the on-chain operator', async () => {
+    const fetch = createEvidenceFetcher(ports({
+      solution: boundSolution({
+        participant: {
+          safeAddress: ATTACKER_SAFE,
+          agentEoa: '0x' + '4'.repeat(40),
+        },
+      }),
+    }));
+
+    await expect(fetch(ref())).rejects.toThrow(
+      /solution envelope participant Safe.*on-chain operator/,
+    );
+  });
+
+  it('rejects a legacy restoration role at the exact solution boundary', async () => {
+    const fetch = createEvidenceFetcher(ports({
+      solution: boundSolution({ role: 'restoration' }),
+    }));
+
+    await expect(fetch(ref())).rejects.toThrow(
+      /solutionEnvelope\.role must be exactly solution/,
+    );
+  });
+
+  it('rejects a tampered verdict envelope before trusting its payload', async () => {
+    const fetch = createEvidenceFetcher({
+      ...ports({
+        task: producerTask(),
+        verdict: boundVerdict({
+          task: {
+            cid: TASK_CID,
+            requestId: EVALUATION_REQ,
+            ...AUTHENTICATED_ENVELOPE_TASK,
+          },
+          payload: { passed_match: true },
+          signature: signature('0x' + '0'.repeat(64), '0x' + '5'.repeat(40)),
+        }),
+      }),
+      resolveVerifierFacts: async () => authenticatedVerifier(),
+    });
+
+    await expect(fetch(ref())).rejects.toThrow(/verdictEnvelope.*signature/i);
   });
 
   it('rejects a mutable outer restorationRequestId that disagrees with the authoritative attempt', async () => {
@@ -253,15 +508,13 @@ describe('createEvidenceFetcher', () => {
             base_commit: taskB.baseCommit,
           },
         }),
-        verdict: {
-          solverType: AUTHENTICATED_TASK.solverType,
+        verdict: boundVerdict({
           task: { cid: TASK_CID, requestId: EVALUATION_REQ, ...taskB },
-        },
-        solution: {
-          solverType: AUTHENTICATED_TASK.solverType,
+        }),
+        solution: boundSolution({
           task: { cid: 'bafyOriginalTask', requestId: SOLVE_REQ, ...taskB },
           payload: { patch: PATCH },
-        },
+        }),
       }),
       resolveVerifierFacts: async () => authenticatedVerifier(),
     });
@@ -273,7 +526,6 @@ describe('createEvidenceFetcher', () => {
 
   it('publishes signed-task createdAt and never lets chain-event envelope timestamps override it', async () => {
     const envelopeTask = {
-      solverType: AUTHENTICATED_TASK.solverType,
       instanceId: AUTHENTICATED_TASK.instanceId,
       repo: AUTHENTICATED_TASK.repo,
       baseCommit: AUTHENTICATED_TASK.baseCommit,
@@ -284,15 +536,13 @@ describe('createEvidenceFetcher', () => {
     const fetch = createEvidenceFetcher({
       ...ports({
         task: producerTask(),
-        verdict: {
-          solverType: AUTHENTICATED_TASK.solverType,
+        verdict: boundVerdict({
           task: { cid: TASK_CID, requestId: EVALUATION_REQ, ...envelopeTask },
-        },
-        solution: {
-          solverType: AUTHENTICATED_TASK.solverType,
+        }),
+        solution: boundSolution({
           task: { cid: 'bafyOriginalTask', requestId: SOLVE_REQ, ...envelopeTask },
           payload: { patch: PATCH },
-        },
+        }),
       }),
       resolveVerifierFacts: async () => authenticatedVerifier(),
     });
@@ -410,11 +660,16 @@ describe('createEvidenceFetcher', () => {
     );
     expect(gql).toHaveBeenNthCalledWith(
       2,
+      expect.stringContaining('AuthoritativeVerdictEnvelopeMeta'),
+      { requestId: EVALUATION_REQ, chainId: 84532 },
+    );
+    expect(gql).toHaveBeenNthCalledWith(
+      3,
       expect.stringContaining('AuthoritativeAttempt'),
       { taskId: TASK_ID, attemptIndex: 0, chainId: 84532 },
     );
     expect(gql).toHaveBeenNthCalledWith(
-      3,
+      4,
       expect.stringContaining('SolutionEnvelopeMeta'),
       { requestId: SOLVE_REQ, chainId: 84532 },
     );
@@ -432,7 +687,7 @@ describe('createEvidenceFetcher', () => {
   });
 
   it('throws when the verdict envelope has no task.cid', async () => {
-    const fetch = createEvidenceFetcher(ports({ verdict: { task: {} } }));
+    const fetch = createEvidenceFetcher(ports({ verdict: boundVerdict({ task: {} }) }));
     await expect(fetch(ref())).rejects.toThrow(/no task\.cid/);
   });
 
@@ -443,6 +698,7 @@ describe('createEvidenceFetcher', () => {
 
   it.each([
     ['verdict', { verdictRows: [] }, /exactly one authoritative verdict/],
+    ['verdict envelope', { verdictMetas: [] }, /exactly one verdict envelope metadata row/],
     ['attempt', { attemptRows: [] }, /exactly one authoritative attempt/],
     ['solution envelope', { attemptMetas: [] }, /exactly one solution envelope metadata row/],
   ])('fails closed when the %s chain join is missing', async (_name, over, error) => {
@@ -468,15 +724,14 @@ describe('createEvidenceFetcher', () => {
 
   it('throws when the solution envelope has no payload.patch', async () => {
     const fetch = createEvidenceFetcher(ports({
-      solution: {
-        solverType: AUTHENTICATED_TASK.solverType,
+      solution: boundSolution({
         task: {
           cid: 'bafyOriginalTask',
           requestId: SOLVE_REQ,
-          ...AUTHENTICATED_TASK,
+          ...AUTHENTICATED_ENVELOPE_TASK,
         },
         payload: {},
-      },
+      }),
     }));
     await expect(fetch(ref())).rejects.toThrow(/no payload\.patch/);
   });
@@ -485,11 +740,10 @@ describe('createEvidenceFetcher', () => {
     const fetch = createEvidenceFetcher({
       ...ports({
         task: producerTask(),
-        solution: {
-          solverType: AUTHENTICATED_TASK.solverType,
+        solution: boundSolution({
           task: { cid: 'bafyOriginalTask', requestId: SOLVE_REQ },
           payload: { patch: PATCH },
-        },
+        }),
       }),
       resolveVerifierFacts: async () => authenticatedVerifier(),
     });

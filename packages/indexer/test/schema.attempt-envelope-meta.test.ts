@@ -22,6 +22,14 @@ describe('attemptEnvelopeMeta schema (#763)', () => {
       'codeDigestIdx: index().on(table.codeDigest)',
     );
   });
+
+  it('retains the MetadataSet publisher identity and anchored manifest hash', () => {
+    const start = ponderSchemaSource.indexOf('export const attemptEnvelopeMeta');
+    const end = ponderSchemaSource.indexOf('export const verdictEnvelopeMeta', start);
+    const block = ponderSchemaSource.slice(start, end);
+    expect(block).toContain("publisherAgentId: t.text().notNull().default('')");
+    expect(block).toContain("manifestHash: t.hex().notNull().default('0x')");
+  });
 });
 
 /**
