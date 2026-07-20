@@ -47,6 +47,8 @@
   ],
   "scripts": {
     "postinstall": "node dist/scripts/fix-node-pty.mjs 2>/dev/null || node scripts/fix-node-pty.mjs 2>/dev/null || true",
+    "prepack": "node scripts/materialize-bundled-workspaces.mjs prepare",
+    "postpack": "node scripts/materialize-bundled-workspaces.mjs restore",
     "e2e:cold-start-builder": "vitest run --config vitest.acceptance.config.ts",
     "e2e:full-cycle": "yarn build:sdk && tsx test/e2e/learner-full-cycle.ts",
     "e2e:full-cycle-swe-rebench-v2": "yarn build:sdk && tsx test/e2e/learner-full-cycle-swe-rebench-v2.ts",

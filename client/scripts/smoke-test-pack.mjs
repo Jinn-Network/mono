@@ -13,6 +13,7 @@ import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { assertSafeTarballEntries } from './lib/bundled-workspaces.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const clientRoot = join(__dirname, '..');
@@ -74,8 +75,14 @@ function assertTarballCleanAndComplete() {
     console.error(result.stderr || result.stdout);
     process.exit(result.status ?? 1);
   }
-  const forbidden = result.stdout
-    .split('\n')
+  const entries = result.stdout.split('\n');
+  try {
+    assertSafeTarballEntries(entries);
+  } catch (error) {
+    console.error(`smoke-test-pack: ${error?.message ?? String(error)}`);
+    process.exit(1);
+  }
+  const forbidden = entries
     .filter((entry) => (
       entry.startsWith('package/.acceptance/') ||
       entry.startsWith('package/acceptance-runs/') ||
@@ -91,7 +98,7 @@ function assertTarballCleanAndComplete() {
     'package/node_modules/@jinn-network/core/dist/corpus-read/index.js',
     'package/node_modules/@jinn-network/plugin/dist/index.js',
   ]) {
-    if (!result.stdout.split('\n').includes(required)) {
+    if (!entries.includes(required)) {
       console.error(`smoke-test-pack: tarball is missing bundled runtime ${required}`);
       process.exit(1);
     }
