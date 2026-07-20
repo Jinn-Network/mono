@@ -22,7 +22,6 @@
 
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ZodError } from 'zod';
 import {
   JinnRepoSolutionPayloadSchema,
   type JinnRepoVerdictPayload,
@@ -85,8 +84,15 @@ function rawTaskSpecSource(spec: Record<string, unknown> | undefined): unknown {
   return spec?.['source'];
 }
 
-/** Short, single-line summary of a ZodError for error messages / rejection reasons. */
-function summarizeZodError(error: ZodError): string {
+/**
+ * Short, single-line summary of a ZodError for error messages / rejection
+ * reasons. Structurally typed (not zod's ZodError) so it accepts errors from
+ * both zod majors — `JinnRepoTaskSchema` is authored in the SDK against
+ * zod/v3, while this package's own `zod` is v4.
+ */
+function summarizeZodError(error: {
+  issues: ReadonlyArray<{ path: ReadonlyArray<string | number>; message: string }>;
+}): string {
   return error.issues.map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`).join('; ');
 }
 
