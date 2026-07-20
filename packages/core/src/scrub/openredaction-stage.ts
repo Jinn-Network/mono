@@ -5,6 +5,19 @@ import type { Attributes, RedactionRecord, ScrubResult, ScrubStage } from './typ
 const VERSION = '0.4.0'; // 0.4.0: #1391 full-corpus denylist extensions (42-seed characterisation)
 
 /**
+ * The narrow detector contract core exposes. Keeping the public signature
+ * structural prevents openredaction's unrelated Express server declarations
+ * from leaking into every installed client's declaration graph.
+ */
+export interface OpenRedactionDetector {
+  detect(text: string): Promise<{
+    redacted: string;
+    detections: Array<{ type: string }>;
+  }>;
+  getPatterns(): Array<{ type: string; regex: RegExp }>;
+}
+
+/**
  * Patterns excluded from the default detector (#1331). All three ship with a
  * bare-word regex (`\b[a-zA-Z0-9._]{3,30}\b` or equivalent) that matches
  * nearly every token of ordinary technical prose — "Update the staging
@@ -233,7 +246,7 @@ export const PROSE_TRIGGER_PATTERN_DENYLIST: readonly string[] = [
  * library has no exclude option), so a version bump that renames patterns
  * fails loudly in the tuning tests rather than silently re-enabling junk.
  */
-export function buildDefaultDetector(): OpenRedaction {
+export function buildDefaultDetector(): OpenRedactionDetector {
   const allTypes = [...new Set(new OpenRedaction().getPatterns().map((p) => p.type))];
   return new OpenRedaction({
     patterns: allTypes.filter(
@@ -256,7 +269,7 @@ export function buildDefaultDetector(): OpenRedaction {
  */
 export function openredactionStage(
   policy: KeyPolicy,
-  detector: OpenRedaction = buildDefaultDetector(),
+  detector: OpenRedactionDetector = buildDefaultDetector(),
 ): ScrubStage {
   return {
     name: 'openredaction',
