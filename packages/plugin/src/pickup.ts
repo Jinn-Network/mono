@@ -2,6 +2,7 @@
  *  selection — #1791, #1790, #1789). No I/O: term derivation + selection
  *  only. Orchestration (search/get over ports, packet projection, rendering)
  *  lives in plugin.ts. */
+import type { CorpusRecord } from './ports/corpus-port.js';
 import type { KnowledgeHit } from './schemas/knowledge-hit.js';
 import { TIER_ORDER } from './schemas/pickup-config.js';
 
@@ -212,8 +213,14 @@ export function dedupeKnowledgeHits(hits: KnowledgeHit[]): KnowledgeHit[] {
   return out;
 }
 
-const RELEVANCE_FLOOR = 2;
+export const RELEVANCE_FLOOR = 2;
 export const MAX_SELECTED_PACKETS = 2;
+export const MAX_CONTENT_RESCORE_CANDIDATES = 3;
+
+export interface ScoredKnowledgeHit {
+  hit: KnowledgeHit;
+  score: number;
+}
 
 function haystackFor(hit: KnowledgeHit): string {
   return `${hit.snippet ?? hit.title ?? ''} ${hit.tags.join(' ')}`.toLowerCase();
@@ -245,9 +252,71 @@ export function scoreKnowledgeHit(hit: KnowledgeHit, terms: string[]): number {
   return score;
 }
 
+/**
+ * Re-score an already plausible metadata candidate against the two concise,
+ * human-authored content fields available after `CorpusPort.get`: synthesis
+ * and step titles. Each original normalized term contributes at most one
+ * point across metadata + content, so repeating the same match in synthesis
+ * cannot manufacture relevance.
+ */
+export function scoreKnowledgeRecord(
+  hit: KnowledgeHit,
+  record: CorpusRecord,
+  terms: string[],
+): number {
+  const metadataHaystack = haystackFor(hit);
+  const contentHaystack = [
+    record.synthesis ?? '',
+    ...record.steps.flatMap((step) => {
+      const authoredTitle = step.attributes['seed.step.title'];
+      return typeof authoredTitle === 'string'
+        ? [step.name, authoredTitle]
+        : [step.name];
+    }),
+  ].join(' ').toLowerCase();
+  let score = 0;
+  for (const term of terms) {
+    if (term.length === 0) continue;
+    if (termMatches(metadataHaystack, term) || termMatches(contentHaystack, term)) score += 1;
+  }
+  return score;
+}
+
 function tierRank(tier: string | undefined): number {
   if (tier === undefined) return -1;
   return (TIER_ORDER as readonly string[]).indexOf(tier);
+}
+
+function compareScoredKnowledgeHits(a: ScoredKnowledgeHit, b: ScoredKnowledgeHit): number {
+  if (b.score !== a.score) return b.score - a.score;
+  const tierDiff = tierRank(b.hit.tier) - tierRank(a.hit.tier);
+  if (tierDiff !== 0) return tierDiff;
+  return (b.hit.publishedAt ?? 0) - (a.hit.publishedAt ?? 0);
+}
+
+/** Return a copied, deterministically ranked scored-candidate list. */
+export function rankScoredKnowledgeHits(
+  candidates: ScoredKnowledgeHit[],
+): ScoredKnowledgeHit[] {
+  return [...candidates].sort(compareScoredKnowledgeHits);
+}
+
+/**
+ * Eligible, deduplicated candidates that have at least one metadata match.
+ * Score-1 results are intentionally retained here for the bounded content
+ * escalation; `rankKnowledgeHits` remains the honest floor-enforcing API.
+ */
+export function rankKnowledgeCandidates(
+  hits: KnowledgeHit[],
+  terms: string[],
+): ScoredKnowledgeHit[] {
+  const evidence = hits.filter((hit) => !isSkillHit(hit) && hit.retrievalVisible === true);
+  const deduped = dedupeKnowledgeHits(evidence);
+  return rankScoredKnowledgeHits(
+    deduped
+      .map((hit) => ({ hit, score: scoreKnowledgeHit(hit, terms) }))
+      .filter((scoredHit) => scoredHit.score >= 1),
+  );
 }
 
 /**
@@ -273,20 +342,9 @@ export function rankKnowledgeHits(
   hits: KnowledgeHit[],
   terms: string[],
 ): KnowledgeHit[] {
-  const evidence = hits.filter((hit) => !isSkillHit(hit) && hit.retrievalVisible === true);
-  const deduped = dedupeKnowledgeHits(evidence);
-  const scored = deduped
-    .map((hit) => ({ hit, score: scoreKnowledgeHit(hit, terms) }))
-    .filter((scoredHit) => scoredHit.score >= RELEVANCE_FLOOR);
-
-  scored.sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score;
-    const tierDiff = tierRank(b.hit.tier) - tierRank(a.hit.tier);
-    if (tierDiff !== 0) return tierDiff;
-    return (b.hit.publishedAt ?? 0) - (a.hit.publishedAt ?? 0);
-  });
-
-  return scored.map((scoredHit) => scoredHit.hit);
+  return rankKnowledgeCandidates(hits, terms)
+    .filter((candidate) => candidate.score >= RELEVANCE_FLOOR)
+    .map((candidate) => candidate.hit);
 }
 
 /**

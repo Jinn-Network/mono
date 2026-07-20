@@ -41,6 +41,7 @@ import {
   SessionPickupRequestV1Schema,
   envelope as processEnvelope,
   contributionLedgerRow,
+  sessionPickupEnvelope,
   sessionEndEnvelope,
   trackingCorpus,
 } from './process-contract.js';
@@ -931,7 +932,11 @@ export async function runJinnLayerCli(
         const result = await createJinnPlugin(tracked.deps)
           .session(request.meta)
           .firstTurnPickup(request.firstMessage);
-        writer.write(`${JSON.stringify(processEnvelope(tracked.status(), result, tracked.reason()))}\n`);
+        writer.write(`${JSON.stringify(sessionPickupEnvelope(
+          result,
+          tracked.status(),
+          tracked.reason(),
+        ))}\n`);
       } else {
         const request = SessionEndRequestV1Schema.parse(raw);
         const result = await createJinnPlugin(deps).completeSession(request);

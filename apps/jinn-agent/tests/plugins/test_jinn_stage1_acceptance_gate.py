@@ -73,6 +73,17 @@ def test_acceptance_drivers_are_repo_owned_executables():
     assert daemon_driver.is_file()
 
 
+def test_stock_fixture_acceptance_pins_content_rescore_near_miss():
+    python_driver = (
+        AGENT_ROOT / "scripts" / "stage1-stock-product.py"
+    ).read_text(encoding="utf-8")
+
+    assert "CONTENT_RESCORE_MESSAGE" in python_driver
+    assert "apiMocks.getStatus" in python_driver
+    assert 'session_id="stage1-content-rescore"' in python_driver
+    assert "metadata score-1 source did not clear the floor after content re-score" in python_driver
+
+
 def test_acceptance_drivers_enforce_stage2_parked_lifecycle():
     python_driver = (
         AGENT_ROOT / "scripts" / "stage1-stock-product.py"

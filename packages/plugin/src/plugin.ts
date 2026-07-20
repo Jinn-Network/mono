@@ -32,7 +32,15 @@ import {
 import type { KnowledgeHit } from './schemas/knowledge-hit.js';
 import type { SessionSummary } from './schemas/session-summary.js';
 import { projectKnowledgePacket, type KnowledgePacket } from './schemas/knowledge-packet.js';
-import { deriveSearchTerms, rankKnowledgeHits, MAX_SELECTED_PACKETS } from './pickup.js';
+import {
+  deriveSearchTerms,
+  rankKnowledgeCandidates,
+  rankScoredKnowledgeHits,
+  scoreKnowledgeRecord,
+  MAX_CONTENT_RESCORE_CANDIDATES,
+  MAX_SELECTED_PACKETS,
+  RELEVANCE_FLOOR,
+} from './pickup.js';
 import { degraded, ok, unavailable, valueOr, type PortResult } from './outcome.js';
 import { parsePickupConfig, type PickupConfig } from './schemas/pickup-config.js';
 import { deriveEligibility } from './eligibility.js';
@@ -400,8 +408,67 @@ export class PluginSession {
       }
     }
 
-    const ranked = rankKnowledgeHits([...byRef.values()], terms);
+    const candidates = rankKnowledgeCandidates([...byRef.values()], terms);
+    if (candidates.length === 0) {
+      this.deliveryMode = degradedReason === undefined ? 'withheld' : 'degraded';
+      return {
+        contextBlock: null,
+        packets: [],
+        searchedTerms: terms,
+        retrievalFired: true,
+        eligibleRefs: [],
+        deliveredRefs: [],
+        deliveryMode: this.deliveryMode,
+        ...(degradedReason !== undefined ? { degraded: degradedReason } : {}),
+      };
+    }
+
+    // Metadata score-1 candidates are plausible enough to inspect but not
+    // relevant enough to inject. Fetch only the deterministic top K and
+    // re-score the original normalized terms against concise authored
+    // content (synthesis + step titles). Gets run concurrently inside the
+    // same host deadline as search; Promise.all preserves candidate order.
+    // Reuse successful fetched records below so escalation never causes a
+    // duplicate corpus/cache read. Any individual failure stays below the
+    // floor and records an honest degraded reason (fail open).
+    const fetchedRefs: string[] = [];
+    const prefetchedByRef = new Map<string, PortResult<CorpusRecord | null>>();
+    const directCandidates = candidates.filter((candidate) => candidate.score >= RELEVANCE_FLOOR);
+    const nearMisses = candidates
+      .filter((candidate) => candidate.score < RELEVANCE_FLOOR)
+      .slice(0, MAX_CONTENT_RESCORE_CANDIDATES);
+    const nearMissResults = await Promise.all(
+      nearMisses.map(({ hit }) => {
+        fetchedRefs.push(hit.ref);
+        return this.deps.corpus.get(hit.ref).catch((error: unknown) =>
+          degraded<CorpusRecord | null>(`corpus get rejected for ${hit.ref}: ${errorReason(error)}`),
+        );
+      }),
+    );
+
+    const promotedCandidates: typeof candidates = [];
+    for (let index = 0; index < nearMisses.length; index += 1) {
+      const candidate = nearMisses[index]!;
+      const result = nearMissResults[index]!;
+      prefetchedByRef.set(candidate.hit.ref, result);
+      if (result.status !== 'ok') {
+        if (degradedReason === undefined) degradedReason = result.reason;
+        continue;
+      }
+      const record = result.value;
+      if (record === null) continue;
+      if (record.isSkillPayload === true) continue;
+      if (record.retrievalVisible !== true) continue;
+      const score = scoreKnowledgeRecord(candidate.hit, record, terms);
+      if (score >= RELEVANCE_FLOOR) promotedCandidates.push({ hit: candidate.hit, score });
+    }
+
+    const ranked = rankScoredKnowledgeHits([
+      ...directCandidates,
+      ...promotedCandidates,
+    ]).map((candidate) => candidate.hit);
     if (ranked.length === 0) {
+      this.fetchedRefs = fetchedRefs;
       this.deliveryMode = degradedReason === undefined ? 'withheld' : 'degraded';
       return {
         contextBlock: null,
@@ -428,12 +495,16 @@ export class PluginSession {
     // projection with zero excerpts and no synthesis is not evidence. A
     // projection failure degrades that one ref to nothing-found rather than
     // throwing into the caller (§3.5).
-    const fetchedRefs: string[] = [];
     const packets: KnowledgePacket[] = [];
     for (const hit of ranked) {
       if (packets.length >= MAX_SELECTED_PACKETS) break;
-      fetchedRefs.push(hit.ref);
-      const result = await this.deps.corpus.get(hit.ref);
+      let result = prefetchedByRef.get(hit.ref);
+      if (result === undefined) {
+        fetchedRefs.push(hit.ref);
+        result = await this.deps.corpus.get(hit.ref).catch((error: unknown) =>
+          degraded<CorpusRecord | null>(`corpus get rejected for ${hit.ref}: ${errorReason(error)}`),
+        );
+      }
       if (result.status !== 'ok') {
         if (degradedReason === undefined) degradedReason = result.reason;
         continue;

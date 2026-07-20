@@ -114,6 +114,27 @@ export function trackingCorpus(deps: JinnPluginDeps): {
 
 export type SessionPickupEnvelope = ProcessEnvelope<FirstTurnPickupResult>;
 
+/**
+ * Preserve useful pickup evidence when one candidate-local corpus read is
+ * unavailable. A wholly unavailable corpus with no packets remains
+ * `unavailable`; partial success is `degraded` so hosts still consume the
+ * returned packets. Core-caught promise rejections also surface through the
+ * result's degraded reason even when the tracking wrapper observed no
+ * PortResult.
+ */
+export function sessionPickupEnvelope(
+  result: FirstTurnPickupResult,
+  observedStatus: ProcessStatus,
+  observedReason?: string,
+): SessionPickupEnvelope {
+  const reason = result.degraded ?? observedReason;
+  if (observedStatus === 'unavailable' && result.packets.length === 0) {
+    return envelope('unavailable', result, reason);
+  }
+  const status = observedStatus === 'ok' && reason === undefined ? 'ok' : 'degraded';
+  return envelope(status, result, reason);
+}
+
 export interface ContributionLedgerRowV1 {
   time: string;
   task: string;
