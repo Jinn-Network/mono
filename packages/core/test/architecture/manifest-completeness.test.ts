@@ -10,10 +10,9 @@ import { SPECIFIER, tsFiles } from './import-scan.js';
  *
  * Every bare (non-relative) import specifier in `packages/core/src/` must be
  * declared in `packages/core/package.json` — core's dependency manifest.
- * Node builtins (`node:*` and un-prefixed builtin names) are exempt. The
- * declared runtime set for C2 is `@jinn-network/plugin` + `zod`; an
- * undeclared driver (e.g. a SQLite driver sneaking in early — that's C4)
- * fails this test loudly.
+ * Node builtins (`node:*` and un-prefixed builtin names) are exempt. C5 adds
+ * the scrub/parser dependencies (including the read-only transcript SQLite
+ * driver); any undeclared runtime dependency still fails loudly.
  */
 const pkgRoot = fileURLToPath(new URL('../../', import.meta.url));
 const srcDir = join(pkgRoot, 'src');
@@ -57,5 +56,15 @@ describe('core dependency manifest (#1833)', () => {
       offenders,
       `bare imports missing from packages/core/package.json:\n${offenders.join('\n')}`,
     ).toEqual([]);
+  });
+
+  it('publishes stable domain subpaths for the C5 extraction', () => {
+    const pkg = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf-8'));
+    expect(Object.keys(pkg.exports ?? {}).sort()).toEqual([
+      '.',
+      './corpus-read',
+      './scrub',
+      './trajectory',
+    ]);
   });
 });

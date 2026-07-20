@@ -50,7 +50,7 @@ import {
 } from '../../../src/types/skill-artifact.js';
 import { signCanonical } from '../../../src/harnesses/engine/signing.js';
 import { canonicalJson } from '../../../src/harnesses/engine/canonical-json.js';
-import { EMPTY_BUNDLE_SHA256 } from '../../../src/trajectory/schema.js';
+import { EMPTY_BUNDLE_SHA256 } from '@jinn-network/core/trajectory';
 import { buildSkillMarkdown, type SkillPackage } from './skill-package.js';
 
 const DONATION_ARTIFACT_ENCODING = 'jinn.artifact.donation.v1' as const;

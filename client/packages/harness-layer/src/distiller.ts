@@ -25,8 +25,10 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { buildLayer2ScrubPipeline } from '../../../src/trajectory/scrub/layer2.js';
-import type { ScrubPipeline } from '../../../src/trajectory/scrub/pipeline.js';
+import {
+  buildLayer2ScrubPipeline,
+  type ScrubPipeline,
+} from '@jinn-network/core/scrub';
 import { capture, type CapturedTask } from './capture.js';
 import { parseTraceEnvelopeV0 } from './envelope.js';
 import { clusterEvidence, type ClusterItem } from './cluster.js';
