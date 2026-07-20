@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { shouldRouteToSessions } from '../../src/cli/routing.js';
+import {
+  shouldRouteToSession,
+  shouldRouteToSessions,
+} from '../../src/cli/routing.js';
 
 describe('shouldRouteToSessions', () => {
   it('routes when argv[2] is "sessions"', () => {
@@ -16,5 +19,16 @@ describe('shouldRouteToSessions', () => {
 
   it('does not route on length-1 argv (defensive against odd invocations)', () => {
     expect(shouldRouteToSessions(['node'])).toBe(false);
+  });
+});
+
+describe('shouldRouteToSession', () => {
+  it('routes only the singular internal session subcommand', () => {
+    expect(shouldRouteToSession(['node', 'run-autopilot.ts', 'session', 'checkpoint']))
+      .toBe(true);
+    expect(shouldRouteToSession(['node', 'run-autopilot.ts', 'sessions']))
+      .toBe(false);
+    expect(shouldRouteToSession(['node', 'run-autopilot.ts', '--once']))
+      .toBe(false);
   });
 });

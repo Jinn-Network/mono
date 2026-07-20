@@ -72,7 +72,10 @@ import {
   assertHermesRuntimeReady,
 } from '../src/dispatcher/hermes-runtime.js';
 import { WallClock } from '../src/dispatcher/wall-clock.js';
-import { shouldRouteToSessions } from '../src/cli/routing.js';
+import {
+  shouldRouteToSession,
+  shouldRouteToSessions,
+} from '../src/cli/routing.js';
 import { spawn } from 'node:child_process';
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { mkdirSync, openSync, closeSync, writeSync, writeFileSync } from 'node:fs';
@@ -563,6 +566,11 @@ export function makeCollectCompletions(
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
+  if (shouldRouteToSession(process.argv)) {
+    const { runSessionCli } = await import('../src/cli/session.js');
+    await runSessionCli(process.argv.slice(3));
+    return;
+  }
   if (shouldRouteToSessions(process.argv)) {
     const { runSessionsCli } = await import('../src/cli/sessions.js');
     await runSessionsCli(process.argv.slice(3));
