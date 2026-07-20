@@ -6,6 +6,8 @@ import {
 } from '../lifecycle/attempt-workspace.js';
 import { makeImplementationSessionProtocol } from '../lifecycle/implementation-session.js';
 import { makeProductionImplementationSessionPort } from '../lifecycle/implementation-session-production.js';
+import { makeReviewSessionProtocol } from '../lifecycle/review-session.js';
+import { makeProductionReviewSessionPort } from '../lifecycle/review-session-production.js';
 import type { ReviewVerdictState } from '../lifecycle/types.js';
 
 export interface SessionProtocol {
@@ -188,20 +190,34 @@ export function makeProductionSessionProtocol(
     makeImplementationSessionProtocol(
       makeProductionImplementationSessionPort({ environment }),
     ),
+  makeReview: () => Pick<
+  SessionProtocol,
+  'reviewVerdict' | 'reviewFixPublish' | 'human'
+  > = () => makeReviewSessionProtocol(
+    makeProductionReviewSessionPort({ environment }),
+  ),
 ): SessionProtocol {
   let implementation: SessionProtocol | undefined;
+  let review: ReturnType<typeof makeReview> | undefined;
   const implementationProtocol = (): SessionProtocol => {
     implementation ??= makeImplementation();
     return implementation;
+  };
+  const reviewProtocol = (): ReturnType<typeof makeReview> => {
+    review ??= makeReview();
+    return review;
   };
   return {
     checkpoint: (manifest) => implementationProtocol().checkpoint(manifest),
     implementationComplete: (manifest, summary) =>
       implementationProtocol().implementationComplete(manifest, summary),
-    reviewVerdict: async () => operationNotWired('review-verdict'),
-    reviewFixPublish: async () => operationNotWired('review-fix-publish'),
+    reviewVerdict: (manifest, state, body) =>
+      reviewProtocol().reviewVerdict(manifest, state, body),
+    reviewFixPublish: (manifest) => reviewProtocol().reviewFixPublish(manifest),
     mergePrepComplete: async () => operationNotWired('merge-prep-complete'),
-    human: (manifest, reason) => implementationProtocol().human(manifest, reason),
+    human: (manifest, reason) => manifest.phase === 'review'
+      ? reviewProtocol().human(manifest, reason)
+      : implementationProtocol().human(manifest, reason),
   };
 }
 
@@ -257,7 +273,9 @@ export async function runSessionCli(
       );
       return;
     case 'human':
-      requiredPhase(manifest, command.operation, 'implement');
+      if (manifest.phase !== 'implement' && manifest.phase !== 'review') {
+        throw new Error(`${command.operation} is not valid for ${manifest.phase} attempts`);
+      }
       await protocol.human(manifest, boundedText(readText(command.reasonFile)));
   }
 }

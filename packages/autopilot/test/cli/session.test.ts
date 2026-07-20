@@ -26,6 +26,7 @@ const MANIFEST: AttemptManifest = {
   claimOid: 'b'.repeat(40),
   reviewGeneration: '22222222-2222-4222-8222-222222222222',
   reviewRefOid: 'c'.repeat(40),
+  reviewApprovalPolicy: 'approve-eligible',
   selectedLogin: 'reviewer',
   repository: {
     root: '/repository',
@@ -95,12 +96,12 @@ describe('session CLI grammar', () => {
   it.each([
     {
       argv: ['checkpoint'],
-      manifest: { ...MANIFEST, phase: 'implement' as const, subject: 'issue-8', prNumber: 9, reviewGeneration: undefined, reviewRefOid: undefined },
+      manifest: { ...MANIFEST, phase: 'implement' as const, subject: 'issue-8', prNumber: 9, reviewGeneration: undefined, reviewRefOid: undefined, reviewApprovalPolicy: undefined },
       expected: { operation: 'checkpoint' },
     },
     {
       argv: ['implementation-complete', '--summary-file', '/summary'],
-      manifest: { ...MANIFEST, phase: 'implement' as const, subject: 'issue-8', prNumber: undefined, reviewGeneration: undefined, reviewRefOid: undefined },
+      manifest: { ...MANIFEST, phase: 'implement' as const, subject: 'issue-8', prNumber: undefined, reviewGeneration: undefined, reviewRefOid: undefined, reviewApprovalPolicy: undefined },
       expected: { operation: 'implementation-complete', payload: 'summary text\n' },
     },
     {
@@ -120,12 +121,12 @@ describe('session CLI grammar', () => {
     },
     {
       argv: ['merge-prep-complete', '--summary-file', '/summary'],
-      manifest: { ...MANIFEST, phase: 'merge-prep' as const, reviewGeneration: undefined, reviewRefOid: undefined },
+      manifest: { ...MANIFEST, phase: 'merge-prep' as const, reviewGeneration: undefined, reviewRefOid: undefined, reviewApprovalPolicy: undefined },
       expected: { operation: 'merge-prep-complete', payload: 'summary text\n' },
     },
     {
       argv: ['human', '--reason-file', '/reason'],
-      manifest: { ...MANIFEST, phase: 'implement' as const, subject: 'issue-8', prNumber: 9, reviewGeneration: undefined, reviewRefOid: undefined },
+      manifest: { ...MANIFEST, phase: 'implement' as const, subject: 'issue-8', prNumber: 9, reviewGeneration: undefined, reviewRefOid: undefined, reviewApprovalPolicy: undefined },
       expected: { operation: 'human', payload: 'human reason\n' },
     },
   ])('parses and delegates $argv.0 after manifest validation', async ({
@@ -186,13 +187,13 @@ describe('session CLI grammar', () => {
     expect(handler.calls).toEqual([]);
   });
 
-  it('wires Human holds only for implementation manifests in this task', async () => {
+  it('wires Human holds for review manifests', async () => {
     const handler = protocol();
     const injected = deps(MANIFEST, handler);
-    await expect(runSessionCli([
-      'human', '--reason-file', '/reason',
-    ], injected)).rejects.toThrow(/not valid for review/);
-    expect(handler.calls).toEqual([]);
+    await runSessionCli(['human', '--reason-file', '/reason'], injected);
+    expect(handler.calls).toEqual([
+      { operation: 'human', payload: 'human reason\n' },
+    ]);
   });
 
   it('wires checkpoints only for implementation manifests in this task', async () => {
@@ -211,6 +212,7 @@ describe('session CLI grammar', () => {
       prNumber: 9,
       reviewGeneration: undefined,
       reviewRefOid: undefined,
+      reviewApprovalPolicy: undefined,
     };
     for (const argv of [
       ['implementation-complete', '--summary-file', '/summary'],
@@ -249,11 +251,13 @@ describe('bounded UTF-8 session input', () => {
 });
 
 describe('production session protocol', () => {
-  it('delegates implementation handlers while keeping later phase operations unwired', async () => {
+  it('delegates implementation and review handlers while keeping later phases unwired', async () => {
     const implementation = protocol();
+    const review = protocol();
     const production = makeProductionSessionProtocol(
       {},
       () => implementation,
+      () => review,
     );
     const implementationManifest = {
       ...MANIFEST,
@@ -262,6 +266,7 @@ describe('production session protocol', () => {
       prNumber: 9,
       reviewGeneration: undefined,
       reviewRefOid: undefined,
+      reviewApprovalPolicy: undefined,
     };
 
     await production.checkpoint(implementationManifest);
@@ -272,23 +277,16 @@ describe('production session protocol', () => {
       { operation: 'implementation-complete', payload: 'summary' },
       { operation: 'human', payload: 'reason' },
     ]);
-    await expect(production.reviewVerdict(MANIFEST, 'APPROVE', 'body'))
-      .rejects.toThrow(/operation not wired/i);
-    await expect(production.reviewFixPublish(MANIFEST))
-      .rejects.toThrow(/operation not wired/i);
+    await production.reviewVerdict(MANIFEST, 'APPROVE', 'body');
+    await production.reviewFixPublish(MANIFEST);
+    await production.human(MANIFEST, 'review reason');
+    expect(review.calls).toEqual([
+      { operation: 'review-verdict', payload: { state: 'APPROVE', body: 'body' } },
+      { operation: 'review-fix-publish' },
+      { operation: 'human', payload: 'review reason' },
+    ]);
     await expect(production.mergePrepComplete(MANIFEST, 'summary'))
       .rejects.toThrow(/operation not wired/i);
   });
 
-  it('fails closed for the default unwired review operation after manifest validation', async () => {
-    const injected = deps(MANIFEST);
-    await expect(runSessionCli([
-      'review-verdict', '--state', 'APPROVE', '--body-file', '/body',
-    ], {
-      env: injected.env,
-      readManifest: injected.readManifest,
-      readTextFile: injected.readTextFile,
-    })).rejects.toThrow(/operation not wired/i);
-    expect(injected.readManifest).toHaveBeenCalledTimes(1);
-  });
 });

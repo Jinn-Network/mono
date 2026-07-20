@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { defaultRunner, type CommandRunner } from '../../src/dispatcher/issue-source.js';
 import {
   advanceAttemptExpectedHead,
+  advanceAttemptReviewPair,
   cleanupAttempt,
   countRunnerLiveAttempts,
   createAttemptWorkspace,
@@ -287,6 +288,7 @@ describe('attempt workspace and manifest', () => {
       prNumber: 7,
       reviewGeneration: UUID_C,
       reviewRefOid: fixture.oid,
+      reviewApprovalPolicy: 'approve-eligible',
     }), defaultRunner);
     const original = readFileSync(manifest.paths.manifest, 'utf8');
     const otherOid = 'a'.repeat(40);
@@ -302,6 +304,7 @@ describe('attempt workspace and manifest', () => {
         const {
           reviewGeneration: _reviewGeneration,
           reviewRefOid: _reviewRefOid,
+          reviewApprovalPolicy: _reviewApprovalPolicy,
           ...withoutReview
         } = current;
         return { ...withoutReview, phase: 'merge-prep' };
@@ -375,6 +378,47 @@ describe('attempt workspace and manifest', () => {
       ).toBe(original);
       writeFileSync(manifest.paths.manifest, original);
     }
+  });
+
+  it('advances review head and ref together through one exact manifest CAS', async () => {
+    const fixture = repositoryFixture();
+    const manifest = await createAttemptWorkspace(options(fixture, {
+      phase: 'review',
+      subject: 'pr-7',
+      prNumber: 7,
+      reviewGeneration: UUID_C,
+      reviewRefOid: fixture.oid,
+      reviewApprovalPolicy: 'approve-eligible',
+    }), defaultRunner);
+    const nextHead = 'a'.repeat(40);
+    const nextReview = 'b'.repeat(40);
+
+    const advanced = advanceAttemptReviewPair(
+      manifest.paths.manifest,
+      manifest.expectedHead,
+      manifest.reviewRefOid!,
+      nextHead,
+      nextReview,
+      () => new Date('2026-07-20T00:01:00.000Z'),
+    );
+
+    expect(advanced).toMatchObject({
+      expectedHead: nextHead,
+      reviewRefOid: nextReview,
+      reviewGeneration: UUID_C,
+      reviewApprovalPolicy: 'approve-eligible',
+    });
+    expect(() => advanceAttemptReviewPair(
+      manifest.paths.manifest,
+      manifest.expectedHead,
+      manifest.reviewRefOid!,
+      'c'.repeat(40),
+      'd'.repeat(40),
+    )).toThrow(/authority pair changed/i);
+    expect(readAttemptManifest(manifest.paths.manifest)).toMatchObject({
+      expectedHead: nextHead,
+      reviewRefOid: nextReview,
+    });
   });
 
   it('advances only the progressive expected head through an exact manifest CAS', async () => {
