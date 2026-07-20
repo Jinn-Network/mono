@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { privateKeyToAccount } from 'viem/accounts';
 
+import { VerdictCode } from '../../src/adapters/mech/verdict-code.js';
 import type { AttributionVerdictProof } from '../../src/eval/attribution-verdict-evidence.js';
 import { signCanonical } from '../../src/harnesses/engine/signing.js';
 
@@ -121,6 +122,7 @@ export async function createAttributionVerdictProof(args: {
         verdictIndex: 0,
         requestId: verdictRequest,
         evaluator: ATTRIBUTION_EVALUATOR_SAFE,
+        verdictCode: args.acceptedDiff ? VerdictCode.Pass : VerdictCode.Fail,
         evidenceHash: verdictEnvelope.signature.hash,
       },
     },

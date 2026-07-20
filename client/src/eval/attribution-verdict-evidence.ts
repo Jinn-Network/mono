@@ -3,8 +3,8 @@
  *
  * Canonical signed envelopes are the outcome authority. The embedded
  * marketplace rows are retained only to constrain the exact
- * attempt/verdict tuple and evidence-hash join; a row or ref alone never
- * authenticates or determines `acceptedDiff`.
+ * attempt/verdict tuple, evidence-hash join, and verdict-code agreement; a
+ * row or ref alone never authenticates or determines `acceptedDiff`.
  */
 
 import {
@@ -13,12 +13,17 @@ import {
 } from '@jinn-network/sdk/solvernets/swe-rebench-v2';
 import { z } from 'zod';
 
+import { VerdictCode } from '../adapters/mech/verdict-code.js';
 import { authenticateExecutionEnvelope } from '../conformance/execution-envelope-authenticator.js';
 
 const Bytes32Schema = z.string().regex(/^0x[0-9a-fA-F]{64}$/);
 const AddressSchema = z.string().regex(/^0x[0-9a-fA-F]{40}$/);
 const PositiveDecimalSchema = z.string().regex(/^[1-9][0-9]*$/);
 const RequestIdSchema = Bytes32Schema;
+const MarketplaceVerdictCodeSchema = z.union([
+  z.literal(VerdictCode.Pass),
+  z.literal(VerdictCode.Fail),
+]);
 
 const MarketplaceAttemptSchema = z.object({
   chainId: z.number().int().positive(),
@@ -36,6 +41,7 @@ const MarketplaceVerdictSchema = z.object({
   verdictIndex: z.number().int().nonnegative(),
   requestId: RequestIdSchema,
   evaluator: AddressSchema,
+  verdictCode: MarketplaceVerdictCodeSchema,
   evidenceHash: Bytes32Schema,
 }).strict();
 
@@ -151,6 +157,12 @@ export async function verifyAttributionVerdictProof(
 
   SweRebenchV2SolutionPayloadSchema.parse(solution.payload);
   const signedVerdict = SweRebenchV2VerdictPayloadSchema.parse(verdict.payload);
+  const expectedVerdictCode = signedVerdict.passed_match
+    ? VerdictCode.Pass
+    : VerdictCode.Fail;
+  if (verdictRow.verdictCode !== expectedVerdictCode) {
+    throw new Error('marketplace verdict code contradicts signed verdict passed_match');
+  }
   if (signedVerdict.score !== (signedVerdict.passed_match ? 1 : 0)) {
     throw new Error('signed verdict score contradicts passed_match');
   }

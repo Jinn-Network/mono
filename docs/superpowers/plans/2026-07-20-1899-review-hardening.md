@@ -4,7 +4,7 @@
 
 **Goal:** Make the offline attribution analyzer derive outcomes from authenticated canonical verdict envelopes joined exactly to marketplace attempt/verdict evidence, while hardening preregistration order, anchor immutability, and evidence resource bounds.
 
-**Architecture:** The existing attribution receipt remains the experiment metadata carrier, but its outcome becomes a derived value from two authenticated `jinn.execution.v1` envelopes. Embedded marketplace rows constrain the immutable tuple and evidence hashes only; they never independently authenticate or determine the outcome. File loading uses bounded descriptor reads and an aggregate budget, and preregistration/runbook validation becomes deterministic and edit-aware.
+**Architecture:** The existing attribution receipt remains the experiment metadata carrier, but its outcome becomes a derived value from two authenticated `jinn.execution.v1` envelopes. Embedded marketplace rows constrain the immutable tuple, evidence hashes, and verdict-code consistency only; they never independently authenticate or determine the outcome. File loading uses bounded descriptor reads and an aggregate budget, and preregistration/runbook validation becomes deterministic and edit-aware.
 
 **Tech Stack:** TypeScript 6, Zod v3/v4 compatibility, viem secp256k1 recovery through the existing execution-envelope authenticator, Vitest, Bash runbook checks.
 
@@ -77,6 +77,7 @@ marketplace: {
   },
   verdict: {
     chainId, taskId, attemptIndex, verdictIndex, requestId, evaluator,
+    verdictCode: acceptedDiff ? VerdictCode.Pass : VerdictCode.Fail,
     evidenceHash: verdictEnvelope.signature.hash,
   },
 },
@@ -85,8 +86,9 @@ verdictEnvelope,
 ```
 
 Add failures for arbitrary request refs, mismatched tuple members, mismatched
-evidence hashes, participant Safe drift, signed payload/outcome tampering, and
-signed score/`passed_match` disagreement.
+evidence hashes, participant Safe drift, signed payload/outcome tampering,
+marketplace verdict-code disagreement, and signed score/`passed_match`
+disagreement.
 
 - [ ] **Step 2: Run focused tests and observe the current false acceptance**
 
@@ -109,12 +111,15 @@ attempt.(chainId, taskId, attemptIndex)
   === verdictRow.(chainId, taskId, attemptIndex)
 attempt.evidenceHash === solution.signature.hash
 verdictRow.evidenceHash === verdict.signature.hash
+verdictRow.verdictCode
+  === (signedVerdict.passed_match ? VerdictCode.Pass : VerdictCode.Fail)
 ```
 
 Parse `verdict.payload` with `SweRebenchV2VerdictPayloadSchema`, require its
-signed binary score to agree with `passed_match`, and return `passed_match` as
-the only `acceptedDiff` source. Remove the operator-entered `acceptedDiff`
-field.
+signed binary score and the embedded marketplace verdict code to agree with
+`passed_match`, and return `passed_match` as the only `acceptedDiff` source.
+The embedded row is only a consistency constraint, not an independent trust
+root. Remove the operator-entered `acceptedDiff` field.
 
 - [ ] **Step 4: Make exporter/analyzer CLIs await validation**
 

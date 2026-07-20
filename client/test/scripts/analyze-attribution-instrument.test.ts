@@ -326,5 +326,7 @@ describe('daemon attribution CLI', () => {
     expect(runbook).toContain('DERIVED_CELL_ORDER');
     expect(runbook).toContain('executionOrderSeed');
     expect(runbook).toContain('createHash("sha256")');
+    expect(runbook).toContain('"verdictCode": 1');
+    expect(runbook).toMatch(/Pass\s*=\s*1[\s\S]*Fail\s*=\s*2/);
   });
 });

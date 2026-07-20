@@ -28,7 +28,9 @@ execution-envelope authenticator. It then requires one exact join:
 3. both marketplace rows share `(chainId, taskId, attemptIndex)`;
 4. the receipt instance matches the signed solution and verdict task identity;
 5. each marketplace evidence hash matches its signed envelope hash;
-6. the authenticated SWE-rebench verdict score agrees with its signed
+6. the embedded marketplace verdict code (`Pass = 1`, `Fail = 2`) agrees with
+   the authenticated signed `passed_match`;
+7. the authenticated SWE-rebench verdict score agrees with its signed
    `passed_match` payload.
 
 `acceptedDiff` is derived from that authenticated verdict payload. It is not a
@@ -58,7 +60,8 @@ run.
 
 Tests first demonstrate:
 
-- an out-of-contract/fabricated outcome or reference fails;
+- an out-of-contract/fabricated outcome, reference, or marketplace verdict
+  code fails;
 - a valid signed solution/verdict plus an exact embedded attempt/verdict join
   passes;
 - aggregate evidence overflow, initial oversize, and post-stat growth fail;

@@ -269,6 +269,7 @@ must never be hand-filled:
         "verdictIndex": 0,
         "requestId": "0x2222222222222222222222222222222222222222222222222222222222222222",
         "evaluator": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "verdictCode": 1,
         "evidenceHash": "0x4444444444444444444444444444444444444444444444444444444444444444"
       }
     },
@@ -390,10 +391,12 @@ must never be hand-filled:
 Stop and file separate receipt-wiring work if the daemon cannot export these
 facts. Do not hand-fill them. The analyzer authenticates both canonical
 envelopes and requires exact request, participant Safe, instance, tuple, and
-evidence-hash joins. The signed verdict payload is the sole authority for
-`acceptedDiff`; the embedded marketplace rows only constrain that join and
-never independently authenticate or determine the outcome. Off-cell receipts
-must have no delivered refs. Cost is the attempt's recorded nonnegative
+evidence-hash joins. The marketplace convention is `Pass = 1` and `Fail = 2`;
+the embedded `verdictCode` must agree with the authenticated signed
+`passed_match`. This is a consistency constraint: the signed verdict payload
+remains the sole authority for `acceptedDiff`, and the embedded marketplace
+rows never independently authenticate or determine the outcome. Off-cell
+receipts must have no delivered refs. Cost is the attempt's recorded nonnegative
 input/output token usage and USD-micro total; mark the USD value estimated when
 the daemon has no final actual-cost row.
 

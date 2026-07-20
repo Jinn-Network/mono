@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { VerdictCode } from '../../src/adapters/mech/verdict-code.js';
 import {
   verifyAttributionVerdictProof,
 } from '../../src/eval/attribution-verdict-evidence.js';
@@ -22,6 +23,16 @@ describe('attribution marketplace verdict proof', () => {
       verdictRef:
         `verdict:84532:42:0:0:${valid.marketplace.verdict.requestId}`,
     });
+    expect(valid.marketplace.verdict.verdictCode).toBe(VerdictCode.Pass);
+  });
+
+  it('rejects a marketplace verdict code that contradicts signed passed_match', async () => {
+    const mismatch = await proof();
+    mismatch.marketplace.verdict.verdictCode = VerdictCode.Fail;
+
+    await expect(
+      verifyAttributionVerdictProof(mismatch, INSTANCE_ID),
+    ).rejects.toThrow(/verdict code.*signed.*passed_match/i);
   });
 
   it('rejects arbitrary refs and evidence hashes even when the embedded rows agree', async () => {
