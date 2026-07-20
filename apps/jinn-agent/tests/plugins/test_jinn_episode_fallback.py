@@ -33,7 +33,7 @@ def _episode() -> dict:
             "tools": [],
             "skillsLoadout": [],
         },
-        "outcome": {"status": "completed", "verifiabilityTier": "user-accepted"},
+        "outcome": {"status": "completed", "verificationStrength": "user-accepted"},
         "cost": {"durationMs": 1},
         "retention": {"policy": "local-private"},
         "provenance": "contributed",
@@ -53,6 +53,8 @@ def test_fallback_preserves_the_complete_episode_and_writes_once(tmp_path, monke
     assert len(list(episodes_dir.glob("*.json"))) == 1
     assert first.read_bytes() == original_bytes
     assert json.loads(original_bytes) == episode
+    assert json.loads(original_bytes)["outcome"]["verificationStrength"] == "user-accepted"
+    assert "verifiabilityTier" not in json.loads(original_bytes)["outcome"]
     digest = hashlib.sha256(episode["episodeId"].encode("utf-8")).hexdigest()
     assert first.name == f"episode-{digest}.episode.json"
     assert stat.S_IMODE(episodes_dir.stat().st_mode) == 0o700

@@ -92,7 +92,7 @@ def _episode(episode_id: str = "episode-1") -> dict:
             "tools": [],
             "skillsLoadout": [],
         },
-        "outcome": {"status": "completed", "verifiabilityTier": "user-accepted"},
+        "outcome": {"status": "completed", "verificationStrength": "user-accepted"},
         "cost": {"durationMs": 1},
         "retention": {"policy": "contribution-eligible"},
         "provenance": "contributed",
@@ -175,6 +175,8 @@ def test_delegate_posts_the_complete_episode_activity_eligibility_and_candidate(
         "contributionVetoed": False,
     }
     assert request["episode"] == episode
+    assert request["episode"]["outcome"]["verificationStrength"] == "user-accepted"
+    assert "verifiabilityTier" not in request["episode"]["outcome"]
 
 
 def test_delegate_parses_normally_when_stderr_carries_a_warning(monkeypatch):
@@ -352,6 +354,8 @@ def test_hook_falls_back_once_on_process_failure_and_preserves_episode(monkeypat
     assert len(local) == 1
     assert local[0]["episodeId"]
     assert local[0]["provenance"] == "contributed"
+    assert local[0]["outcome"]["verificationStrength"] == "user-accepted"
+    assert "verifiabilityTier" not in local[0]["outcome"]
     assert [s["kind"] for s in local[0]["trajectory"]] == ["jinn.agent_turn", "jinn.tool_call"]
 
 

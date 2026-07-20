@@ -176,7 +176,7 @@ def test_retained_stage1_share_consent_cannot_authorize_stage2_candidate(
     assert request["contributionCandidate"]["publishMinedTasksConsent"] is False
     assert episode["outcome"] == {
         "status": "completed",
-        "verifiabilityTier": "user-accepted",
+        "verificationStrength": "user-accepted",
         "acceptedDiff": True,
         "testRuns": {"passed": 0, "failed": 0},
     }

@@ -76,7 +76,8 @@ def test_assemble_episode_shape():
     assert ep["cost"]["tokens"] == {"input": 100, "output": 50}
 
     assert ep["outcome"]["status"] == "completed"
-    assert ep["outcome"]["verifiabilityTier"] == "user-accepted"
+    assert ep["outcome"]["verificationStrength"] == "user-accepted"
+    assert "verifiabilityTier" not in ep["outcome"]
 
     assert ep["retention"]["policy"] == "local-private"
     assert ep["provenance"] == "contributed"
