@@ -39,6 +39,8 @@ export interface ProductionImplementationSessionPortOptions {
   readonly readManifest?: (path: string) => AttemptManifest;
 }
 
+const NEEDS_HUMAN_LABEL = 'review:needs-human';
+
 function parsePullRequest(raw: string): ImplementationSessionPullRequest {
   let value: unknown;
   try {
@@ -201,6 +203,31 @@ export function makeProductionImplementationSessionPort(
       throw new Error('Branch ancestry contains malformed lifecycle metadata');
     }
   };
+  const requireNoHumanHold = async (
+    manifest: AttemptManifest,
+    issueNumber: number,
+    prNumber: number,
+    expectedHead: GitOid,
+  ): Promise<void> => {
+    const pullRequest = await requirePullRequestHead(
+      manifest,
+      prNumber,
+      expectedHead,
+    );
+    const secureRunner: CommandRunner = (cmd, args) => run(manifest, cmd, args);
+    const snapshot = await fetchProjectSnapshot(secureRunner);
+    const item = snapshot.items.find((candidate) =>
+      candidate.contentType === 'Issue' && candidate.number === issueNumber);
+    if (item === undefined) {
+      throw new Error('Implementation issue is missing from Project');
+    }
+    if (
+      pullRequest.labels.includes(NEEDS_HUMAN_LABEL)
+      || item.status === 'Human'
+    ) {
+      throw new Error('Implementation mutation stopped because a Human hold is active');
+    }
+  };
 
   return {
     readManifest: readAttemptManifest,
@@ -349,6 +376,14 @@ export function makeProductionImplementationSessionPort(
       if (item === undefined) throw new Error('Implementation issue is missing from Project');
       if (item.status === status) return;
       const fields = await fetchFieldIds(secureRunner);
+      if (status === 'In Review') {
+        await requireNoHumanHold(
+          manifest,
+          issueNumber,
+          manifest.prNumber!,
+          expectedHead,
+        );
+      }
       await run(manifest, 'gh', [
         'project', 'item-edit',
         '--id', item.id,
@@ -378,6 +413,14 @@ export function makeProductionImplementationSessionPort(
       const manifest = currentManifest();
       const before = await requirePullRequestHead(manifest, prNumber, expectedHead);
       if (before.draft === draft) return;
+      if (!draft) {
+        await requireNoHumanHold(
+          manifest,
+          manifest.issueNumber!,
+          prNumber,
+          expectedHead,
+        );
+      }
       await run(manifest, 'gh', [
         'pr', 'ready', String(prNumber),
         '--repo', REPO,

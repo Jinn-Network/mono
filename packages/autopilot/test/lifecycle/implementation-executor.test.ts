@@ -443,6 +443,31 @@ describe('implementation action executor', () => {
     expect(human).toHaveLength(1);
   });
 
+  it('escalates a sole mapped PR that contradicts canonical pr-open reality evidence', async () => {
+    const mapped = pr({ number: 85 });
+    const { deps, claims, human } = harness({
+      listOpenPullRequests: async () => [mapped],
+      runRealityCheck: async () => ({
+        classification: 'pr-open',
+        evidence: { prNumber: 84 },
+        suggestedBlockedOn: 'Another issue',
+        suggestedComment: 'Canonical reality evidence names PR #84.',
+      }),
+    });
+
+    await expect(executeImplementationAction({ issueNumber: 42 }, deps))
+      .resolves.toMatchObject({ status: 'human', code: 'branch-mapping-ambiguous' });
+    expect(claims).toEqual([]);
+    expect(human).toEqual([expect.objectContaining({
+      issueNumber: 42,
+      reason: expect.objectContaining({
+        phase: 'eligible',
+        code: 'branch-mapping-ambiguous',
+        detail: expect.stringMatching(/PR #84.*PR #85/),
+      }),
+    })]);
+  });
+
   it('preserves structural PR ambiguity as Human before ordinary eligibility', async () => {
     let realityChecks = 0;
     const { deps, claims, human } = harness({

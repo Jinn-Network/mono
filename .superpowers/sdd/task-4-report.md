@@ -36,6 +36,14 @@ Commit: recorded in the Task 4 handoff after commit creation.
   - the reconciler exposes an exact-head summary writer contract.
 - Added the narrow progressive expected-head manifest updater required by
   successful checkpoints.
+- Closed the re-review concurrency addendum:
+  - a failed durable-summary repair remains the scoped prerequisite for later
+    implementation-completion actions even when an unrelated verdict-intent
+    repair is interleaved;
+  - production `In Review` and ready mutations re-read both the exact PR and
+    Project state at their mutation boundary and stop on either Human signal;
+  - contradictory canonical `pr-open` evidence and the sole bounded PR mapping
+    now produce structured Human ambiguity before any claim.
 - Kept review, review-fix, merge-prep, merge, and the global v2 `active`
   controller unwired. Production active mode remains explicitly rejected.
 
@@ -88,6 +96,22 @@ Commit: recorded in the Task 4 handoff after commit creation.
     completion commit's durable summary;
   - lifecycle metadata is parsed only from the terminal contiguous trailer
     block, leaving `Jinn-Autopilot-*` summary lines unambiguous.
+- Re-review addendum RED:
+  - `yarn vitest run test/lifecycle/reconciler.test.ts
+    test/lifecycle/implementation-executor.test.ts
+    test/lifecycle/implementation-session-production.test.ts`
+    produced the expected 6 failures across 33 tests: the summary failure was
+    cleared by interleaved verdict-intent success, the sole PR contradiction
+    returned ordinary ineligible, and all four Project/ready × Human
+    label/status mutation-boundary races wrote instead of stopping.
+- Re-review addendum GREEN:
+  - the same focused command passed 3 files and 33 tests;
+  - completion prerequisite state is tracked independently from unrelated
+    reconciliation outcomes;
+  - production mutation-boundary guards reject both Human signals before the
+    `gh project item-edit` or `gh pr ready` call;
+  - canonical PR A versus sole mapping PR B escalates with a structured
+    `branch-mapping-ambiguous` reason and no claim.
 
 ## Files
 
@@ -108,9 +132,9 @@ Commit: recorded in the Task 4 handoff after commit creation.
 ## Verification
 
 - `yarn vitest run test/lifecycle test/dispatcher/coordinator-session.test.ts`
-  — 15 files, 191 tests passed.
+  — 15 files, 197 tests passed.
 - `yarn typecheck` — passed.
-- `yarn test` — 86 files, 918 tests passed.
+- `yarn test` — 86 files, 924 tests passed.
 - `git diff --check` — passed.
 
 ## Self-review
@@ -120,10 +144,18 @@ Commit: recorded in the Task 4 handoff after commit creation.
 - Claim losers and unresolved ambiguity perform no downstream mutation.
 - Checkpoints cannot publish from a stale manifest/claim or changed PR.
 - Completion evidence is durable before recoverable projections, and ready is
+  the final mutation.
 - Completion projection prerequisites stop in order after failure rather than
   allowing Project or ready to overtake durable summary repair.
+- Completion projection dependencies remain scoped across unrelated
+  verdict-intent actions instead of inheriting the most recent global result.
 - Human is dominant in both direct session completion and recovery; Human
   never readies or deletes work.
+- Production `In Review` and ready writers perform their own final exact-head,
+  Human-label, and Human-Project re-read rather than relying only on the
+  session-level check.
+- Canonical reality evidence and the bounded PR mapping must name the same sole
+  open PR; disagreement is structured Human ambiguity.
 - New-branch claims intentionally omit the not-yet-created PR number, while
   session authority permits that omission only for the exact original claim
   bound by the manifest and exact PR readback.

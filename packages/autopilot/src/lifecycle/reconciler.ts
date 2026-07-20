@@ -385,13 +385,15 @@ export async function executeProjectionPlan(
 ): Promise<ReconciliationReport> {
   const results: ReconciliationResult[] = [];
   let previousSucceeded = true;
+  let implementationCompletionSucceeded: boolean | undefined;
   for (const action of plan.actions) {
     if (
       'requiresPreviousSuccess' in action
       && action.requiresPreviousSuccess === true
-      && !previousSucceeded
+      && !(implementationCompletionSucceeded ?? previousSucceeded)
     ) {
       results.push({ action, outcome: 'awaiting-prerequisite' });
+      implementationCompletionSucceeded = false;
       continue;
     }
     try {
@@ -399,9 +401,27 @@ export async function executeProjectionPlan(
       results.push(result);
       previousSucceeded = result.outcome === 'applied'
         || result.outcome === 'already-applied';
+      if (
+        action.kind === 'ensure-implementation-summary'
+        || (
+          'requiresPreviousSuccess' in action
+          && action.requiresPreviousSuccess === true
+        )
+      ) {
+        implementationCompletionSucceeded = previousSucceeded;
+      }
     } catch (error) {
       results.push({ action, outcome: 'failed', detail: message(error) });
       previousSucceeded = false;
+      if (
+        action.kind === 'ensure-implementation-summary'
+        || (
+          'requiresPreviousSuccess' in action
+          && action.requiresPreviousSuccess === true
+        )
+      ) {
+        implementationCompletionSucceeded = false;
+      }
     }
   }
   return { results };
