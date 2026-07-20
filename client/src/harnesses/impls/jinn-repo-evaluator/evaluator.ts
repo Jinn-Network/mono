@@ -1,8 +1,9 @@
 import { runJinnRepoEval, type JinnRepoEvalResult } from './eval-runner.js';
-import type { JinnRepoTask } from '../../../solver-types/jinn-repo.js';
+// Retrospective-only: this evaluator grades against merged-PR gold tests.
+import type { JinnRepoMergedPrTask } from '../../../solver-types/jinn-repo.js';
 import type { JinnRepoPoolItem } from '../../../solver-types/_jinn-repo-pool.js';
 
-type RunFn = (args: { task: JinnRepoTask; patch: string; monoRepoUrl: string; goldTests: Record<string, string> }) => Promise<JinnRepoEvalResult>;
+type RunFn = (args: { task: JinnRepoMergedPrTask; patch: string; monoRepoUrl: string; goldTests: Record<string, string> }) => Promise<JinnRepoEvalResult>;
 
 export class JinnRepoEvaluator {
   private readonly run: RunFn;
