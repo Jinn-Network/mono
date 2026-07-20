@@ -1,10 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { JinnRepoTaskSchema } from './jinn-repo.js';
+import { JinnRepoMergedPrTaskSchema } from './jinn-repo.js';
 
+// Pool items are mined exclusively from merged PRs (see jinn-repo-extract.ts) —
+// gold tests and a reference solution only exist retrospectively, so the pool
+// item extends the merged-pr branch, never the live-issue branch.
 // Pool item = the solver-visible task + evaluator-side secrets (gold tests, reference solution).
-export const JinnRepoPoolItemSchema = JinnRepoTaskSchema.extend({
+export const JinnRepoPoolItemSchema = JinnRepoMergedPrTaskSchema.extend({
   gold_tests: z.record(z.string(), z.string()),  // relpath -> file contents (evaluator-side)
   solution_patch: z.string(),                     // reference fix (admission only; never shown to solver)
 });

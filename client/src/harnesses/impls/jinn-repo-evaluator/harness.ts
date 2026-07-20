@@ -17,6 +17,7 @@ import {
   JinnRepoSolutionPayloadSchema,
   type JinnRepoVerdictPayload,
 } from '@jinn-network/sdk/solvernets/jinn-repo';
+import { JinnRepoTaskSchema, isLiveIssueTask } from '../../../solver-types/jinn-repo.js';
 import type { Harness, HarnessContext, ReadyStatus, Solution } from '../../types.js';
 import { REQUIRES_LIVE_DAEMON_READINESS, SkippableError } from '../../types.js';
 import type { Task } from '../../../types/task.js';
@@ -85,6 +86,16 @@ export class JinnRepoEvaluatorHarness implements Harness {
     }
     if (task.role !== 'evaluation') {
       return { ok: false, reason: 'role is not evaluation' };
+    }
+    // Retrospective-only: this evaluator grades against merged-PR gold tests.
+    // A live-issue task carries no gold — reject explicitly rather than fail
+    // downstream with a confusing "not in pool" error.
+    const parsedSpec = JinnRepoTaskSchema.safeParse(task.spec);
+    if (parsedSpec.success && isLiveIssueTask(parsedSpec.data)) {
+      return {
+        ok: false,
+        reason: 'jinn-repo-evaluator grades merged-pr tasks only (live-issue tasks have no gold tests)',
+      };
     }
     if (typeof task.context?.['restorationResult'] !== 'string') {
       return { ok: false, reason: 'context.restorationResult required' };

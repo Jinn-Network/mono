@@ -13,6 +13,7 @@ const INSTANCE_ID = 'jinn-mono-1234';
 function poolItem(): JinnRepoPoolItem {
   return {
     schemaVersion: 'jinn-repo.v1',
+    source: 'merged-pr',
     instance_id: INSTANCE_ID,
     repo: 'Jinn-Network/mono',
     base_commit: 'a'.repeat(40),
@@ -177,6 +178,56 @@ describe('JinnRepoEvaluatorHarness — run', () => {
       dir,
     );
     await expect(h.run(ctx)).rejects.toThrow(/expected jinn-repo\.v1\/solution/);
+  });
+});
+
+describe('JinnRepoEvaluatorHarness — canAttempt', () => {
+  it('accepts a merged-pr evaluation task with a restorationResult', async () => {
+    const h = new JinnRepoEvaluatorHarness();
+    const verdict = await h.canAttempt(buildEvaluationTask(buildSolverEnvelope()));
+    expect(verdict).toEqual({ ok: true });
+  });
+
+  it('accepts a legacy evaluation task whose spec has no `source` field (defaults merged-pr)', async () => {
+    // buildEvaluationTask's spec already omits `source` — this is the
+    // pre-union shape every jinn-repo evaluation task carried historically.
+    const h = new JinnRepoEvaluatorHarness();
+    const verdict = await h.canAttempt(buildEvaluationTask(buildSolverEnvelope()));
+    expect(verdict.ok).toBe(true);
+  });
+
+  it('rejects a live-issue evaluation task — no gold tests to grade against', async () => {
+    const h = new JinnRepoEvaluatorHarness();
+    const task: Task = {
+      id: 'eval-task-live-1',
+      description: 'evaluate jinn-repo live issue',
+      solverType: 'jinn-repo.v1',
+      role: 'evaluation',
+      spec: {
+        schemaVersion: 'jinn-repo.v1',
+        source: 'live-issue',
+        instance_id: 'Jinn-Network__mono-1889',
+        repo: 'Jinn-Network/mono',
+        base_commit: 'a'.repeat(40),
+        language: 'typescript',
+        problem_statement: 'fix the thing',
+        issue_number: 1889,
+      },
+      context: { restorationResult: buildSolverEnvelope() },
+    };
+    const verdict = await h.canAttempt(task);
+    expect(verdict).toEqual({
+      ok: false,
+      reason: 'jinn-repo-evaluator grades merged-pr tasks only (live-issue tasks have no gold tests)',
+    });
+  });
+
+  it('rejects wrong solverType before role/spec checks', async () => {
+    const h = new JinnRepoEvaluatorHarness();
+    const verdict = await h.canAttempt({
+      id: 't', description: 'd', solverType: 'swe-rebench-v2.v1', role: 'evaluation',
+    });
+    expect(verdict).toEqual({ ok: false, reason: 'solverType is not jinn-repo.v1' });
   });
 });
 
