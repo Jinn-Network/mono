@@ -12,7 +12,7 @@ import { makeTar, makeTarGz, wrapDonation as wrap } from './tar-fixture.js';
 
 const CLAUDE_JSONL = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'fix the bug' }] } }) + '\n';
 const CODEX_JSONL = readFileSync(
-  new URL('./fixtures/codex-stdout.fixture.jsonl', import.meta.url),
+  new URL('../../core/test/fixtures/codex-stdout.fixture.jsonl', import.meta.url),
   'utf8',
 );
 

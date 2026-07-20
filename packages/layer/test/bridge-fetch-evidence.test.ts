@@ -22,7 +22,7 @@ function ref(over: Partial<AttemptRef> = {}): AttemptRef {
 
 const PATCH = 'diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-old\n+new\n';
 const CODEX_JSONL = readFileSync(
-  new URL('./fixtures/codex-stdout.fixture.jsonl', import.meta.url),
+  new URL('../../core/test/fixtures/codex-stdout.fixture.jsonl', import.meta.url),
   'utf8',
 );
 
