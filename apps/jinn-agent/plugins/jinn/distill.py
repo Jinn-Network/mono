@@ -41,7 +41,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import consent, jinn_layer
+from . import consent, harness, jinn_layer
 from . import skills_install
 
 Runner = Callable[[List[str]], Tuple[int, str]]
@@ -563,10 +563,12 @@ def payoff_lines(snapshot: Dict[str, int]) -> List[str]:
 # is `mode == "unset"` from the layer's status read; the only stored flag is
 # that the splash was shown.
 
-UPDATE_LAYER_LINE = (
-    "The Jinn layer here doesn't know distillation yet — update it:\n"
-    "  jinn-agent plugins update jinn"
-)
+def _update_layer_line() -> str:
+    """Host-native layer refresh copy shared by stock Hermes and the fork."""
+    return (
+        "The Jinn layer here doesn't know distillation yet — update it:\n"
+        f"  {harness.cli_name()} plugins update jinn"
+    )
 
 
 def ux_flags_path() -> Path:
@@ -661,7 +663,7 @@ def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
             return "a distillation is already running — /jinn distill stop to end it"
         status = distill_status(runner)
         if status is None:
-            return UPDATE_LAYER_LINE
+            return _update_layer_line()
         uncovered = status.get("uncoveredCount", 0)
         if not uncovered:
             return "nothing to distill yet — captures accrue as you work; check back after a few tasks"
@@ -674,7 +676,7 @@ def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
                 # read the persisted mode and silently run nothing.
                 code, out, err = jinn_layer.run(["distill", "--where", "local", "--json"], runner)
                 if code != 0:
-                    return (err or out).strip() or UPDATE_LAYER_LINE
+                    return (err or out).strip() or _update_layer_line()
                 cached_mode(runner, refresh=True)
             ok, msg = start_run()
             return msg
@@ -699,11 +701,11 @@ def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
             ["distill", "staged", "--json", "--out", str(skills_install.skills_dir())], runner
         )
         if code != 0:
-            return (err or out).strip() or UPDATE_LAYER_LINE
+            return (err or out).strip() or _update_layer_line()
         try:
             staged = json.loads(out)
         except ValueError:
-            return UPDATE_LAYER_LINE
+            return _update_layer_line()
         if not staged:
             return "nothing staged — /jinn distill start runs a distillation over your captures"
         lines = ["◇ distilled skills — staged, waiting for your choice", ""]
@@ -740,11 +742,11 @@ def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
             ["distill", "install", *selector, "--json", "--out", str(skills_dir)], runner
         )
         if code != 0:
-            return (err or out).strip() or UPDATE_LAYER_LINE
+            return (err or out).strip() or _update_layer_line()
         try:
             result = json.loads(out)
         except ValueError:
-            return UPDATE_LAYER_LINE
+            return _update_layer_line()
         installed = result.get("installed") or []
         if not installed:
             return "nothing staged — /jinn distill start runs a distillation over your captures"
@@ -806,7 +808,7 @@ def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
             return "usage: /jinn distill where local|defer|off"
         code, out, err = jinn_layer.run(["distill", "--where", mode, "--json"], runner)
         if code != 0:
-            return (err or out).strip() or UPDATE_LAYER_LINE
+            return (err or out).strip() or _update_layer_line()
         cached_mode(runner, refresh=True)
         behaviour = {
             "local": "runs happen here when you start them",
@@ -818,7 +820,7 @@ def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
     if action == "":
         status = distill_status(runner)
         if status is None:
-            return UPDATE_LAYER_LINE
+            return _update_layer_line()
         cached_mode(runner, refresh=True)
         if status.get("mode") == "unset" and not load_ux_flags()["splash_shown"]:
             mark_ux_flag("splash_shown")

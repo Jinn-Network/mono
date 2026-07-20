@@ -25,6 +25,12 @@ consent = importlib.import_module("plugins.jinn.consent")
 jinn_layer = importlib.import_module("plugins.jinn.jinn_layer")
 
 
+@pytest.fixture(autouse=True)
+def fork_cli_name(monkeypatch):
+    """This suite exercises the bundled jinn-agent host unless stated otherwise."""
+    monkeypatch.setenv("JINN_CLI_NAME", "jinn-agent")
+
+
 class ContractRunner:
     """Fake ``jinn_layer.Runner`` returning a full 3-tuple (code, out, err)."""
 

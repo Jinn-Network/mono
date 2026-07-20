@@ -41,3 +41,40 @@ def test_copy_keeps_fork_identity_when_env_set(monkeypatch):
     monkeypatch.setenv("NO_COLOR", "1")
     from plugins.jinn import consent
     assert "jinn-agent" in consent.render_explainer()
+
+
+def test_stock_plugin_remedies_use_the_host_cli_and_never_fork_only_commands(monkeypatch):
+    monkeypatch.delenv("JINN_HARNESS_NAME", raising=False)
+    monkeypatch.setenv("JINN_CLI_NAME", "hermes")
+
+    from plugins.jinn import distill, doctor, jinn_layer
+
+    assert doctor._update_remedy() == "hermes plugins update jinn"
+    assert doctor._check_host_provider()["detail"].endswith("run: hermes doctor")
+    assert "hermes plugins update jinn" in distill._update_layer_line()
+
+    code, out, err = jinn_layer._default_runner(["definitely-not-a-real-binary-xyz"])
+    assert (code, out) == (127, "")
+    assert "hermes plugins update jinn" in err
+
+    for text in (
+        doctor._update_remedy(),
+        doctor._check_host_provider()["detail"],
+        distill._update_layer_line(),
+        err,
+    ):
+        assert "jinn-agent" not in text
+
+
+def test_fork_plugin_remedies_keep_the_fork_cli_name(monkeypatch):
+    monkeypatch.setenv("JINN_HARNESS_NAME", "jinn-agent")
+    monkeypatch.setenv("JINN_CLI_NAME", "jinn-agent")
+
+    from plugins.jinn import distill, doctor, jinn_layer
+
+    assert doctor._update_remedy() == "jinn-agent plugins update jinn"
+    assert doctor._check_host_provider()["detail"].endswith("run: jinn-agent doctor")
+    assert "jinn-agent plugins update jinn" in distill._update_layer_line()
+    assert "jinn-agent plugins update jinn" in jinn_layer._default_runner(
+        ["definitely-not-a-real-binary-xyz"],
+    )[2]
