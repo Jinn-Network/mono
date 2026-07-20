@@ -392,8 +392,26 @@ describe('lifecycle controller', () => {
       readSnapshot: async () => heldSnapshot,
     });
 
-    expect(report.items[0]?.humanReason?.detail).toBe('Project Blocked on is Human');
-    expect(report.items[0]?.desiredActions).toEqual([{
+    expect(report.items).toEqual([]);
+    expect(report.orphanBranchClaims[0]).toMatchObject({
+      kind: 'orphan-branch-claim',
+      phase: 'human',
+      issueNumber: 42,
+      head: HEAD,
+      headRefName: 'autopilot/42',
+      claimAttempt: implementation().branchClaim!.attempt,
+      claimRunner: 'runner-a',
+      claimGeneration: implementation().branchClaim!.attempt,
+      progressAgeMs: 60 * 60 * 1000,
+      stale: false,
+      v2Marked: true,
+      humanHold: true,
+      humanReason: {
+        phase: 'implementing',
+        detail: 'Project Blocked on is Human',
+      },
+    });
+    expect(report.orphanBranchClaims[0]?.desiredActions).toEqual([{
       kind: 'set-project-status',
       issueNumber: 42,
       status: 'Human',
@@ -402,11 +420,76 @@ describe('lifecycle controller', () => {
     expect(calls).toEqual([]);
   });
 
+  it('reports an orphan branch claim as active v2 implementation state with repair actions', async () => {
+    const calls: string[] = [];
+    const orphanIssue: LifecycleItem = {
+      kind: 'issue',
+      issueNumber: 42,
+      v2Marked: false,
+      projectStatus: 'Todo',
+      labels: [],
+      eligible: true,
+      eligibilityReason: 'eligible',
+      eligibilityDetail: 'All implementation admission gates pass',
+    };
+    const orphanSnapshot: GitHubLifecycleSnapshot = {
+      ...snapshot(orphanIssue),
+      branches: [{
+        issueNumber: 42,
+        headRefName: 'autopilot/42',
+        headOid: HEAD,
+        headCommittedAt: '2026-07-20T11:00:00.000Z',
+        claim: implementation().branchClaim!,
+      }],
+    };
+
+    const report = await runLifecycleCycle('observe', {
+      ...deps(orphanIssue, calls),
+      readSnapshot: async () => orphanSnapshot,
+    });
+
+    expect(report.items).toEqual([]);
+    expect(report.orphanBranchClaims).toEqual([expect.objectContaining({
+      kind: 'orphan-branch-claim',
+      phase: 'implementing',
+      issueNumber: 42,
+      head: HEAD,
+      headRefName: 'autopilot/42',
+      claimAttempt: implementation().branchClaim!.attempt,
+      claimRunner: 'runner-a',
+      claimGeneration: implementation().branchClaim!.attempt,
+      progressAgeMs: 60 * 60 * 1000,
+      stale: false,
+      v2Marked: true,
+      humanHold: false,
+      desiredActions: [
+        {
+          kind: 'set-project-status',
+          issueNumber: 42,
+          expectedHead: HEAD,
+          status: 'In Progress',
+        },
+        {
+          kind: 'ensure-draft-pr',
+          issueNumber: 42,
+          expectedHead: HEAD,
+          headRefName: 'autopilot/42',
+          baseRefName: 'next',
+        },
+      ],
+    })]);
+    expect(explainIssue(report, 42)).toContain('implementing');
+    const json = JSON.parse(renderLifecycleJson(report));
+    expect(json.items).toEqual([]);
+    expect(json.orphanBranchClaims[0]).not.toHaveProperty('prNumber');
+    expect(calls).toEqual([]);
+  });
+
   it('emits Human phase for ambiguity reconciliation events', async () => {
     const calls: string[] = [];
     let status: 'Todo' | 'Human' = 'Todo';
     let draft = false;
-    const labels = new Set(['engine:review']);
+    const labels = new Set<string>();
     const comments = new Set<string>();
     const writer: ReconciliationWriter = {
       ...throwingWriter(calls),
@@ -439,7 +522,7 @@ describe('lifecycle controller', () => {
           number: 101,
           head: HEAD,
           draft: false,
-          labels: ['engine:review'],
+          labels: [],
         }],
       }],
     };
@@ -452,5 +535,6 @@ describe('lifecycle controller', () => {
     expect(report.status).toBe('ok');
     expect(report.events).not.toHaveLength(0);
     expect(report.events.every((event) => event.phase === 'human')).toBe(true);
+    expect([...labels].sort()).toEqual(['engine:review', 'review:needs-human']);
   });
 });

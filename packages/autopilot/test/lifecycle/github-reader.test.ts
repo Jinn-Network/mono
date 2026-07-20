@@ -7,7 +7,7 @@ const MERGED_HEAD = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 
 function graphQlPr(input: {
   readonly number: number;
-  readonly state: 'OPEN' | 'MERGED';
+  readonly state: 'OPEN' | 'MERGED' | 'CLOSED';
   readonly head: string;
   readonly comments?: readonly string[];
   readonly headRefName?: string;
@@ -82,6 +82,10 @@ describe('GhLifecycleReader', () => {
                     number: 99,
                     state: 'MERGED',
                     head: MERGED_HEAD,
+                  }), graphQlPr({
+                    number: 98,
+                    state: 'CLOSED',
+                    head: 'cccccccccccccccccccccccccccccccccccccccc',
                   })],
                 },
               },
@@ -123,10 +127,17 @@ describe('GhLifecycleReader', () => {
     expect(queries[0]).toContain('labels: ["engine:review"]');
     const mergedQuery = queries.find((query) => query.includes('closedByPullRequestsReferences'));
     expect(mergedQuery).toContain('issue42: issue(number: 42)');
+    expect(mergedQuery).toContain(
+      'closedByPullRequestsReferences(first: 100, includeClosedPrs: true)',
+    );
     expect(mergedQuery).not.toContain('reviews(');
     expect(mergedQuery).not.toContain('comments(');
     expect(mergedQuery).not.toContain('statusCheckRollup');
     expect(queries.filter((query) => query.includes('ref(qualifiedName'))).toHaveLength(1);
+    expect(page.nodes.map((pr) => [pr.number, pr.state])).toEqual([
+      [101, 'OPEN'],
+      [99, 'MERGED'],
+    ]);
   });
 
   it('paginates adopted-branch ancestry until it finds the latest v2 marker', async () => {

@@ -333,6 +333,38 @@ function lifecyclePr(
 ): Extract<LifecycleItem, { kind: 'pull-request' }> {
   const decisive = latestDecisiveReview(pr);
   const reviewClaim = pr.reviewClaim?.record;
+  const issueLabels = [...(issue.labels ?? [])];
+  const humanSource = issue.blockedOn === 'Human'
+    ? 'Project Blocked on: Human'
+    : issue.status === 'Human'
+      ? 'Project status: Human'
+      : pr.labels.includes('review:needs-human')
+        ? 'PR label: review:needs-human'
+        : issueLabels.includes('review:needs-human')
+          ? 'Issue label: review:needs-human'
+          : undefined;
+  const implementationActive = pr.branchClaim?.phase === 'implement'
+    && pr.branchClaim.phaseComplete !== true;
+  const reviewPhase = reviewClaim?.state === 'fixing'
+    ? 'review-fixing' as const
+    : reviewClaim !== undefined && reviewClaim.head === pr.headOid
+      ? 'reviewing' as const
+      : 'awaiting-review' as const;
+  const synthesizedHumanReason: HumanReason | undefined = humanSource === undefined
+    ? undefined
+    : implementationActive
+      ? {
+          phase: 'implementing',
+          code: 'implementation-escalation',
+          detail: humanSource,
+        }
+      : {
+          phase: reviewPhase,
+          code: 'review-escalation',
+          detail: humanSource,
+        };
+  const humanReason = pr.humanReason ?? synthesizedHumanReason;
+  const humanHold = humanReason !== undefined;
   return {
     kind: 'pull-request',
     issueNumber: issue.number,
@@ -346,8 +378,8 @@ function lifecyclePr(
       )),
     projectStatus: issue.status,
     labels: [...pr.labels],
-    ...(issue.blockedOn === 'Human' ? { humanHold: true } : {}),
-    ...(pr.humanReason === undefined ? {} : { humanReason: pr.humanReason }),
+    ...(humanHold ? { humanHold: true } : {}),
+    ...(humanReason === undefined ? {} : { humanReason }),
     head: pr.headOid,
     headChangedAt: pr.headCommittedAt,
     isDraft: pr.isDraft,

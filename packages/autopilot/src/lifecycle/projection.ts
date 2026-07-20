@@ -20,7 +20,10 @@ export interface OrphanBranchClaim {
   readonly issueNumber: number;
   readonly head: GitOid;
   readonly headRefName: string;
+  readonly headChangedAt: string;
   readonly baseRefName: string;
+  readonly claimAttempt: string;
+  readonly claimRunner: string;
   readonly projectStatus: ProjectStatus | null;
   readonly humanHold?: boolean;
   readonly humanReason?: HumanReason;
@@ -332,6 +335,15 @@ export function planProjection(
       });
     }
     for (const pr of diagnostic.pullRequests) {
+      if (!pr.labels.includes(labels.review)) {
+        actions.push({
+          kind: 'set-pr-label',
+          prNumber: pr.number,
+          expectedHead: pr.head,
+          label: labels.review,
+          present: true,
+        });
+      }
       if (!pr.draft) {
         actions.push({
           kind: 'set-pr-draft',

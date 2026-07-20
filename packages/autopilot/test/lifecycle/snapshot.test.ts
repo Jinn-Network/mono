@@ -356,6 +356,81 @@ describe('buildGitHubLifecycleSnapshot', () => {
     });
   });
 
+  it.each([
+    {
+      name: 'Project Blocked on: Human',
+      issue: { blockedOn: 'Human' as const },
+      labels: ['engine:review'],
+      expectedDetail: 'Project Blocked on: Human',
+    },
+    {
+      name: 'Project Human status',
+      issue: { status: 'Human' as const },
+      labels: ['engine:review'],
+      expectedDetail: 'Project status: Human',
+    },
+    {
+      name: 'review:needs-human label',
+      issue: {},
+      labels: ['engine:review', 'review:needs-human'],
+      expectedDetail: 'PR label: review:needs-human',
+    },
+  ])('synthesizes a structured review reason from $name', async ({
+    issue: issueOverride,
+    labels,
+    expectedDetail,
+  }) => {
+    const source = reader({
+      readIssues: async () => [{ ...issue(), ...issueOverride }],
+      readPullRequests: async () => ({
+        nodes: [{ ...page('page-2').nodes[0]!, labels }],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      }),
+    });
+
+    const snapshot = await buildGitHubLifecycleSnapshot(source, {
+      authorAllowlist: new Set(['trusted']),
+    });
+
+    expect(snapshot.lifecycle.items[0]).toMatchObject({
+      kind: 'pull-request',
+      humanHold: true,
+      humanReason: {
+        phase: 'reviewing',
+        code: 'review-escalation',
+        detail: expectedDetail,
+      },
+    });
+  });
+
+  it('preserves an explicit structured Human marker ahead of synthesized sources', async () => {
+    const explicit = {
+      phase: 'review-fixing' as const,
+      code: 'review-escalation' as const,
+      detail: 'A human must decide whether the requested API change is acceptable',
+    };
+    const source = reader({
+      readIssues: async () => [{ ...issue(), blockedOn: 'Human', status: 'Human' }],
+      readPullRequests: async () => ({
+        nodes: [{
+          ...page('page-2').nodes[0]!,
+          labels: ['engine:review', 'review:needs-human'],
+          humanReason: explicit,
+        }],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      }),
+    });
+
+    const snapshot = await buildGitHubLifecycleSnapshot(source, {
+      authorAllowlist: new Set(['trusted']),
+    });
+
+    expect(snapshot.lifecycle.items[0]).toMatchObject({
+      humanHold: true,
+      humanReason: explicit,
+    });
+  });
+
   it('diagnoses a stable claim that contradicts an adopted PR for the same issue', async () => {
     const adopted = {
       ...page('page-2').nodes[0]!,

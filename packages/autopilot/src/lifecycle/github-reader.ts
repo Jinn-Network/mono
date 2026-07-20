@@ -94,7 +94,7 @@ const PR_BY_NUMBER_QUERY = `query($number: Int!) {
 function mergedOutcomesQuery(issueNumbers: readonly number[]): string {
   const issues = issueNumbers.map((number) => `
     issue${number}: issue(number: ${number}) {
-      closedByPullRequestsReferences(first: 100) {
+      closedByPullRequestsReferences(first: 100, includeClosedPrs: true) {
         pageInfo { hasNextPage }
         nodes { ${MERGED_PR_FIELDS} }
       }
@@ -154,7 +154,7 @@ interface GraphQlPr {
   headRefName: string;
   headRefOid: string;
   isDraft: boolean;
-  state: 'OPEN' | 'MERGED';
+  state: 'OPEN' | 'MERGED' | 'CLOSED';
   labels: {
     pageInfo: { hasNextPage: boolean };
     nodes: Array<{ name: string }>;
@@ -209,7 +209,7 @@ interface GraphQlMergedPr {
   headRefName: string;
   headRefOid: string;
   isDraft: boolean;
-  state: 'OPEN' | 'MERGED';
+  state: 'OPEN' | 'MERGED' | 'CLOSED';
   labels: {
     pageInfo: { hasNextPage: boolean };
     nodes: Array<{ name: string }>;
@@ -430,6 +430,9 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
     pr: GraphQlPr,
     includeReviewClaim: boolean,
   ): Promise<RawPullRequest> {
+    if (pr.state === 'CLOSED') {
+      throw new Error(`Closed-unmerged PR #${pr.number} is not an active lifecycle item`);
+    }
     assertCompletePrNode(pr);
     const latest = pr.commits.nodes.at(-1)?.commit;
     if (latest === undefined || latest.oid !== pr.headRefOid) {
@@ -517,9 +520,11 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
           if (pr.state === 'OPEN') {
             if (pr.labels.nodes.some((label) => label.name === 'engine:review')) continue;
             const full = await this.readPullRequestByNumber(pr.number);
+            if (full.state !== 'OPEN') continue;
             merged.push(await this.rawPullRequest(full, true));
             continue;
           }
+          if (pr.state === 'CLOSED') continue;
           if (pr.labels.pageInfo.hasNextPage) {
             throw new Error(`PR #${pr.number} labels were truncated`);
           }
