@@ -484,6 +484,25 @@ describe('EvidenceAdapter — AC2 byte-exact round-trip', () => {
     expect(statSync(aliasPath).mode & 0o777).toBe(0o644);
   });
 
+  it.skipIf(process.platform === 'win32')('recovers a writer temp alias left after canonical publication', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-publication-recovery-'));
+    const episode = makeSampleEpisode({ episodeId: 'recovered-write' });
+    const path = join(capturesDir, 'recovered-write.episode.json');
+    const orphan = join(
+      capturesDir,
+      '.recovered-write.episode.json.123.00000000-0000-4000-8000-000000000000.tmp',
+    );
+    writeFileSync(orphan, JSON.stringify(episode), { mode: 0o600 });
+    linkSync(orphan, path);
+
+    const result = await createEvidenceAdapter({ capturesDir }).put(episode);
+
+    expect(result).toEqual({ status: 'ok', value: { episodeId: 'recovered-write' } });
+    expect(existsSync(orphan)).toBe(false);
+    expect(statSync(path).nlink).toBe(1);
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(episode);
+  });
+
   it('rejects an episodeId collision without changing the first episode', async () => {
     const capturesDir = mkdtempSync(join(tmpdir(), 'ev-collision-'));
     const adapter = createEvidenceAdapter({ capturesDir });

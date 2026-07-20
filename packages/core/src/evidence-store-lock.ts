@@ -5,6 +5,7 @@ import {
   inspectRegularPath,
   nodeErrorCode,
   prepareEvidenceDirectory,
+  recoverWriterPublicationAliases,
   secureRegularPath,
   type FileIdentity,
 } from './evidence-filesystem.js';
@@ -21,10 +22,11 @@ interface StoreLock {
 }
 
 const asyncTails = new Map<string, Promise<void>>();
+const activeAsyncKeys = new Set<string>();
 
 function prepareLockFile(episodesDir: string): { path: string; identity: FileIdentity } {
   const directory = resolve(episodesDir);
-  prepareEvidenceDirectory(directory, 'evidence store', false);
+  prepareEvidenceDirectory(directory, 'evidence store', true);
   const path = join(directory, LOCK_FILE);
   let identity = inspectRegularPath(path, 'evidence store lock');
   if (!identity) {
@@ -55,6 +57,9 @@ function openStoreLock(episodesDir: string): StoreLock {
   const prepared = prepareLockFile(episodesDir);
   const db = new Database(prepared.path);
   try {
+    // Fail before even a writable pragma or schema transaction if the prepared
+    // pathname changed between creation/inspection and SQLite open.
+    secureRegularPath(prepared.path, 'evidence store lock', prepared.identity);
     db.pragma(`busy_timeout = ${LOCK_BUSY_TIMEOUT_MS}`);
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -119,6 +124,7 @@ function closeStoreLock(lock: StoreLock): void {
 }
 
 function beginStoreLock(lock: StoreLock): void {
+  secureRegularPath(lock.path, 'evidence store lock', lock.identity);
   lock.db.exec('BEGIN IMMEDIATE');
 }
 
@@ -130,10 +136,18 @@ export function withEvidenceStoreLockSync<T>(
   episodesDir: string,
   operation: () => T,
 ): T {
+  const key = resolve(episodesDir);
+  if (activeAsyncKeys.has(key)) {
+    throw new Error(
+      `cannot synchronously acquire an evidence store lock while an async `
+        + `operation is active in this process: ${key}`,
+    );
+  }
   const lock = openStoreLock(episodesDir);
   try {
     beginStoreLock(lock);
     try {
+      recoverWriterPublicationAliases(resolve(episodesDir));
       const result = operation();
       finishStoreLock(lock, true);
       return result;
@@ -160,13 +174,22 @@ export async function withEvidenceStoreLock<T>(
   const tail = previous.catch(() => undefined).then(() => turn);
   asyncTails.set(key, tail);
   await previous.catch(() => undefined);
+  let released = false;
+  const releaseTurn = (): void => {
+    if (released) return;
+    released = true;
+    release();
+    if (asyncTails.get(key) === tail) asyncTails.delete(key);
+  };
 
   try {
     let result: T;
+    activeAsyncKeys.add(key);
     const lock = openStoreLock(episodesDir);
     try {
       beginStoreLock(lock);
       try {
+        recoverWriterPublicationAliases(resolve(episodesDir));
         result = await operation();
         finishStoreLock(lock, true);
       } catch (error) {
@@ -175,11 +198,16 @@ export async function withEvidenceStoreLock<T>(
       }
     } finally {
       closeStoreLock(lock);
+      activeAsyncKeys.delete(key);
     }
+    // The cross-process SQLite lock now orders both writes and rebuilds. Let a
+    // refresh callback re-enter the same store without waiting on its own
+    // process-local queue turn.
+    releaseTurn();
     await afterUnlock?.(result);
     return result;
   } finally {
-    release();
-    if (asyncTails.get(key) === tail) asyncTails.delete(key);
+    activeAsyncKeys.delete(key);
+    releaseTurn();
   }
 }

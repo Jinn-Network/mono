@@ -107,6 +107,117 @@ def _verified_regular_identity(path: Path) -> tuple[int, int]:
     return info.st_dev, info.st_ino
 
 
+def _writer_temp_alias(name: str, canonical_name: str) -> bool:
+    suffix = ".episode.json"
+    if not canonical_name.endswith(suffix):
+        return False
+    stem = canonical_name[: -len(suffix)]
+    return bool(
+        re.fullmatch(
+            rf"\.{re.escape(canonical_name)}\.\d+\."
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp",
+            name,
+            re.IGNORECASE,
+        )
+        or re.fullmatch(
+            rf"\.{re.escape(stem)}\.[A-Za-z0-9_-]{{6,}}\.tmp",
+            name,
+        )
+    )
+
+
+def _assert_linked_publication(info: os.stat_result, path: Path, label: str) -> None:
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        raise OSError(f"{label} must be a regular file: {path}")
+    if hasattr(os, "getuid") and info.st_uid != os.getuid():
+        raise OSError(f"{label} must be owned by uid {os.getuid()}: {path}")
+
+
+def _recover_writer_publication_aliases(directory: Path) -> None:
+    """Remove a proven writer temp alias left by a crash after link(2)."""
+    names = sorted(path.name for path in directory.iterdir())
+    for canonical_name in (
+        name for name in names if name.endswith(".episode.json")
+    ):
+        canonical_path = directory / canonical_name
+        canonical = canonical_path.lstat()
+        if canonical.st_nlink == 1:
+            continue
+        _assert_linked_publication(
+            canonical, canonical_path, "published evidence episode"
+        )
+        if canonical.st_nlink != 2:
+            continue
+        identity = (canonical.st_dev, canonical.st_ino)
+        aliases = []
+        for name in names:
+            if not _writer_temp_alias(name, canonical_name):
+                continue
+            alias = (directory / name).lstat()
+            if (alias.st_dev, alias.st_ino) == identity:
+                aliases.append(name)
+        if len(aliases) != 1:
+            continue
+
+        alias_path = directory / aliases[0]
+        alias = alias_path.lstat()
+        _assert_linked_publication(
+            alias, alias_path, "evidence publication temp alias"
+        )
+        if alias.st_nlink != 2 or (alias.st_dev, alias.st_ino) != identity:
+            continue
+
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        canonical_fd = os.open(canonical_path, flags)
+        alias_fd = os.open(alias_path, flags)
+        try:
+            opened_canonical = os.fstat(canonical_fd)
+            opened_alias = os.fstat(alias_fd)
+            _assert_linked_publication(
+                opened_canonical, canonical_path, "published evidence episode"
+            )
+            _assert_linked_publication(
+                opened_alias, alias_path, "evidence publication temp alias"
+            )
+            if (
+                opened_canonical.st_nlink != 2
+                or opened_alias.st_nlink != 2
+                or (opened_canonical.st_dev, opened_canonical.st_ino) != identity
+                or (opened_alias.st_dev, opened_alias.st_ino) != identity
+            ):
+                raise OSError(
+                    f"evidence publication aliases changed during recovery: "
+                    f"{canonical_path}"
+                )
+            alias_at_commit = alias_path.lstat()
+            canonical_at_commit = canonical_path.lstat()
+            if (
+                (alias_at_commit.st_dev, alias_at_commit.st_ino) != identity
+                or (canonical_at_commit.st_dev, canonical_at_commit.st_ino)
+                != identity
+            ):
+                raise OSError(
+                    f"evidence publication aliases changed before recovery: "
+                    f"{canonical_path}"
+                )
+            alias_path.unlink()
+            directory_fd = os.open(
+                directory,
+                os.O_RDONLY
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+            )
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        finally:
+            os.close(alias_fd)
+            os.close(canonical_fd)
+        _verified_regular_identity(canonical_path)
+
+
 @contextmanager
 def _evidence_store_lock(directory: Path):
     """Crash-recoverable mutex shared with core's scan-through-publish lock."""
@@ -173,6 +284,7 @@ def _evidence_store_lock(directory: Path):
 
         connection.execute("BEGIN IMMEDIATE")
         try:
+            _recover_writer_publication_aliases(directory)
             yield
             connection.execute("COMMIT")
         except Exception:
@@ -393,7 +505,16 @@ def write_episode_fallback(episode: Dict[str, Any]) -> Optional[Path]:
                         pass
 
         with _evidence_store_lock(directory):
-            return write_locked()
+            result = write_locked()
+        if result is not None:
+            try:
+                # Reindex uses the same store mutex, so refresh only after the
+                # fallback transaction has fully released it. The episode is
+                # primary evidence; a derived-view failure never rolls it back.
+                jinn_layer.run(["reindex", "--json"], timeout_s=30)
+            except Exception:
+                pass
+        return result
     except Exception:
         return None
 

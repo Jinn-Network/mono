@@ -1074,10 +1074,12 @@ export async function runJinnLayerCli(
   }
 
   if (isReindex) {
+    const reindexArgs = subverb === undefined ? rest : [subverb, ...rest];
+    const requestedJson = reindexArgs.includes('--json');
     let parsed;
     try {
       parsed = parseArgs({
-        args: subverb === undefined ? rest : [subverb, ...rest],
+        args: reindexArgs,
         options: {
           repair: { type: 'boolean', default: false },
           'dry-run': { type: 'boolean', default: false },
@@ -1089,11 +1091,37 @@ export async function runJinnLayerCli(
         allowPositionals: false,
       });
     } catch (error) {
-      writer.write(`error: invalid reindex command: ${error instanceof Error ? error.message : String(error)}\n\n${USAGE}`);
+      const message = `invalid reindex command: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+      writer.write(requestedJson
+        ? `${JSON.stringify({
+          status: 'error',
+          mode: 'reindex',
+          repair: reindexArgs.includes('--repair'),
+          error: message,
+        })}\n`
+        : `error: ${message}\n\n${USAGE}`);
       return 2;
     }
     if (parsed.values.repair && parsed.values['dry-run']) {
-      writer.write(`error: invalid reindex command: --repair and --dry-run are mutually exclusive\n\n${USAGE}`);
+      const episodesDir = parsed.values['episodes-dir']
+        ?? process.env['JINN_LAYER_EPISODES_DIR']
+        ?? DEFAULT_EPISODES_DIR;
+      const indexPath = parsed.values['index-path']
+        ?? process.env['JINN_LAYER_EVIDENCE_INDEX_PATH']
+        ?? defaultEvidenceIndexPath(episodesDir);
+      const message = 'invalid reindex command: --repair and --dry-run are mutually exclusive';
+      writer.write(parsed.values.json
+        ? `${JSON.stringify({
+          status: 'error',
+          mode: 'reindex',
+          episodesDir,
+          indexPath,
+          repair: true,
+          error: message,
+        })}\n`
+        : `error: ${message}\n\n${USAGE}`);
       return 2;
     }
     const episodesDir = parsed.values['episodes-dir']

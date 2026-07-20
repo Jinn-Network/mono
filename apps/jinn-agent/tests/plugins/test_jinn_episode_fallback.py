@@ -75,6 +75,28 @@ def test_fallback_preserves_the_complete_episode_and_writes_once(tmp_path, monke
         ).fetchone()[0] == "1"
 
 
+def test_fallback_refreshes_the_derived_index_after_releasing_the_store_lock(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("JINN_LAYER_EPISODES_DIR", str(tmp_path))
+    calls = []
+
+    def run(args, **kwargs):
+        lock_path = tmp_path / ".jinn-evidence-store-lock.sqlite"
+        with sqlite3.connect(lock_path, timeout=0, isolation_level=None) as lock:
+            lock.execute("BEGIN IMMEDIATE")
+            lock.execute("ROLLBACK")
+        calls.append((args, kwargs))
+        return 0, "{}", ""
+
+    monkeypatch.setattr(distill.jinn_layer, "run", run)
+
+    result = distill.write_episode_fallback(_episode())
+
+    assert result is not None
+    assert calls == [(["reindex", "--json"], {"timeout_s": 30})]
+
+
 def test_fallback_rejects_non_episode_data_without_writing(tmp_path, monkeypatch):
     monkeypatch.setenv("JINN_LAYER_EPISODES_DIR", str(tmp_path))
 
@@ -229,6 +251,25 @@ def test_fallback_rejects_a_hardlinked_existing_episode_without_chmod(
     assert distill.write_episode_fallback(episode) is None
     assert stat.S_IMODE(path.stat().st_mode) == 0o644
     assert stat.S_IMODE(alias.stat().st_mode) == 0o644
+
+
+def test_fallback_recovers_a_temp_alias_left_after_canonical_publication(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("JINN_LAYER_EPISODES_DIR", str(tmp_path))
+    episode = _episode()
+    episode["episodeId"] = "recovered-write"
+    path = tmp_path / "recovered-write.episode.json"
+    orphan = tmp_path / ".recovered-write.abcdef12.tmp"
+    orphan.write_text(json.dumps(episode), encoding="utf-8")
+    os.link(orphan, path)
+
+    result = distill.write_episode_fallback(episode)
+
+    assert result == path
+    assert not orphan.exists()
+    assert path.stat().st_nlink == 1
+    assert json.loads(path.read_text(encoding="utf-8")) == episode
 
 
 def test_fallback_rejects_same_id_with_different_content_without_overwrite(

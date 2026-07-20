@@ -226,6 +226,33 @@ describe('jinn-layer reindex', () => {
     expect(existsSync(indexPath)).toBe(false);
   });
 
+  it('honors --json for mutually exclusive repair arguments', async () => {
+    const { episodesDir, indexPath } = fixture();
+    let output = '';
+
+    const code = await runJinnLayerCli([
+      'reindex',
+      '--repair',
+      '--dry-run',
+      '--json',
+      '--episodes-dir',
+      episodesDir,
+      '--index-path',
+      indexPath,
+    ], { writer: { write: (value) => { output += value; return true; } } });
+
+    expect(code).toBe(2);
+    expect(JSON.parse(output)).toMatchObject({
+      status: 'error',
+      mode: 'reindex',
+      episodesDir,
+      indexPath,
+      repair: true,
+      error: expect.stringMatching(/mutually exclusive/i),
+    });
+    expect(existsSync(indexPath)).toBe(false);
+  });
+
   it('honors --json when an unsafe index destination fails preflight', async () => {
     const { episodesDir, indexPath } = fixture();
     const unrelated = new Database(indexPath);

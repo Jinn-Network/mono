@@ -5,6 +5,7 @@ import {
   existsSync,
   fchmodSync,
   fstatSync,
+  ftruncateSync,
   fsyncSync,
   linkSync,
   lstatSync,
@@ -16,8 +17,9 @@ import {
   rmSync,
   unlinkSync,
   writeFileSync,
+  writeSync,
 } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { EpisodeV1Schema, type EpisodeV1 } from '@jinn-network/plugin';
 import { capturedTaskToEpisode, episodeFileName } from './evidence-adapter.js';
@@ -30,6 +32,8 @@ import {
   inspectRegularPath,
   nodeErrorCode,
   openVerifiedRegular,
+  openVerifiedRegularForUpdate,
+  readVerifiedText,
   sameIdentity,
   secureRegularPath,
   validateDirectory,
@@ -67,6 +71,7 @@ export interface UnreadableEvidence {
 
 export type ReindexMutation =
   | { kind: 'normalized-json'; sourcePath: string; nullFieldsRemoved: number }
+  | { kind: 'normalization-recovery-retained'; sourcePath: string; journalPath: string }
   | { kind: 'rescued-misnamed-episode'; sourcePath: string; targetPath: string }
   | { kind: 'rescue-target-published'; sourcePath: string; targetPath: string };
 
@@ -93,6 +98,11 @@ export interface ReindexEvidenceStoreOptions {
   repair?: boolean;
   /** @internal Deterministic concurrency-test seam; called while the store lock is held. */
   onScanComplete?: () => void;
+  /** @internal Race-regression seam; called after a source descriptor is pinned. */
+  onBeforeSourceMutation?: (
+    kind: 'normalize' | 'rescue-remove',
+    sourcePath: string,
+  ) => void;
 }
 
 export interface InspectEvidenceStoreOptions {
@@ -119,6 +129,7 @@ interface ParsedEvidence {
 
 interface EvidenceCandidate {
   sourcePath: string;
+  sourceText: string;
   parsed: ParsedEvidence;
   identity: FileIdentity;
   contentSha256: string;
@@ -212,11 +223,17 @@ function readableReason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function readVerifiedJson(path: string): { raw: unknown; identity: FileIdentity } {
+function readVerifiedJson(path: string): {
+  raw: unknown;
+  text: string;
+  identity: FileIdentity;
+} {
   const opened = openVerifiedRegular(path, 'evidence source');
   try {
+    const text = readFileSync(opened.fd, 'utf8');
     return {
-      raw: JSON.parse(readFileSync(opened.fd, 'utf8')) as unknown,
+      raw: JSON.parse(text) as unknown,
+      text,
       identity: opened.identity,
     };
   } finally {
@@ -224,64 +241,135 @@ function readVerifiedJson(path: string): { raw: unknown; identity: FileIdentity 
   }
 }
 
+interface NormalizeJournal {
+  version: 1;
+  sourceName: string;
+  dev: number;
+  ino: number;
+  originalText: string;
+  normalizedText: string;
+  mutation: Extract<ReindexMutation, { kind: 'normalized-json' }>;
+}
+
+interface RescueJournal {
+  version: 1;
+  sourceName: string;
+  targetName: string;
+  quarantineName: string;
+  dev: number;
+  ino: number;
+}
+
+function writeRepairJournal(
+  directory: string,
+  prefix: string,
+  payload: NormalizeJournal | RescueJournal,
+  transactionId = randomUUID(),
+): string {
+  const path = join(directory, `${prefix}${transactionId}.txn`);
+  let fd: number | undefined;
+  try {
+    fd = openSync(
+      path,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
+      0o600,
+    );
+    writeFileSync(fd, `${JSON.stringify(payload)}\n`, 'utf8');
+    if (process.platform !== 'win32') fchmodSync(fd, 0o600);
+    fsyncSync(fd);
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+  fsyncDirectory(directory);
+  return path;
+}
+
+function removeRepairJournal(path: string): void {
+  rmSync(path, { force: true });
+  fsyncDirectory(dirname(path));
+}
+
+function writeUtf8AtStart(fd: number, value: string): void {
+  const bytes = Buffer.from(value, 'utf8');
+  let offset = 0;
+  while (offset < bytes.length) {
+    const written = writeSync(fd, bytes, offset, bytes.length - offset, offset);
+    if (written <= 0) throw new Error('evidence file write made no progress');
+    offset += written;
+  }
+}
+
 function repairJson(
   path: string,
   value: unknown,
   expected: FileIdentity,
+  originalText: string,
   mutation: ReindexMutation,
+  onBeforeSourceMutation?: ReindexEvidenceStoreOptions['onBeforeSourceMutation'],
 ): FileIdentity {
   const directory = dirname(path);
-  const tmp = join(directory, `.${randomUUID()}.repair.tmp`);
+  const normalizedText = `${JSON.stringify(value, null, 2)}\n`;
+  const journalPath = writeRepairJournal(directory, '.jinn-normalize-', {
+    version: 1,
+    sourceName: basename(path),
+    dev: expected.dev,
+    ino: expected.ino,
+    originalText,
+    normalizedText,
+    mutation: mutation as Extract<ReindexMutation, { kind: 'normalized-json' }>,
+  });
   let fd: number | undefined;
-  let replacementIdentity: FileIdentity | undefined;
-  let committed = false;
+  let writeStarted = false;
   try {
-    fd = openSync(
-      tmp,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
-      0o600,
-    );
-    writeFileSync(fd, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    const verified = openVerifiedRegularForUpdate(path, 'evidence source', expected);
+    fd = verified.fd;
+    onBeforeSourceMutation?.('normalize', path);
+    writeStarted = true;
+    ftruncateSync(fd, 0);
+    writeUtf8AtStart(fd, normalizedText);
     if (process.platform !== 'win32') fchmodSync(fd, 0o600);
     fsyncSync(fd);
-    replacementIdentity = identityFrom(fstatSync(fd));
-    closeSync(fd);
-    fd = undefined;
-
-    try {
-      const verified = openVerifiedRegular(path, 'evidence source', expected);
-      try {
-        const sourceAtCommit = lstatSync(path);
-        assertRegularStat(sourceAtCommit, path, 'evidence source');
-        if (!sameIdentity(identityFrom(sourceAtCommit), verified.identity)) {
-          throw new Error(`evidence source changed before normalization: ${path}`);
-        }
-        renameSync(tmp, path);
-        committed = true;
-      } finally {
-        closeSync(verified.fd);
-      }
-      if (!replacementIdentity) {
-        throw new Error(`normalized evidence replacement identity is unavailable: ${path}`);
-      }
-      replacementIdentity = secureRegularPath(
-        path,
-        'normalized evidence source',
-        replacementIdentity,
-      );
-      fsyncDirectory(directory);
-    } catch (error) {
-      if (!committed) throw error;
+    const written = fstatSync(fd);
+    assertRegularStat(written, path, 'normalized evidence source');
+    if (!sameIdentity(identityFrom(written), expected)) {
+      throw new Error(`evidence source descriptor changed during normalization: ${path}`);
+    }
+    const sourceAtCommit = lstatSync(path);
+    assertRegularStat(sourceAtCommit, path, 'normalized evidence source');
+    if (!sameIdentity(identityFrom(sourceAtCommit), expected)) {
       throw new EvidenceMutationCommittedError(
-        `evidence JSON was repaired but post-commit validation failed: ${path}: ${readableReason(error)}`,
-        mutation,
+        `evidence source changed while its pinned descriptor was normalized: ${path}`,
+        { kind: 'normalization-recovery-retained', sourcePath: path, journalPath },
+        new Error(`pathname identity changed during normalization: ${path}`),
+      );
+    }
+    removeRepairJournal(journalPath);
+    return identityFrom(written);
+  } catch (error) {
+    if (!writeStarted || error instanceof EvidenceMutationCommittedError) throw error;
+    try {
+      if (fd === undefined) throw new Error('normalization descriptor is unavailable');
+      ftruncateSync(fd, 0);
+      writeUtf8AtStart(fd, originalText);
+      fsyncSync(fd);
+      const restoredPath = lstatSync(path);
+      if (!sameIdentity(identityFrom(restoredPath), expected)) {
+        throw new Error(`evidence source path changed before normalization rollback: ${path}`);
+      }
+      removeRepairJournal(journalPath);
+      throw error;
+    } catch (rollbackError) {
+      if (rollbackError === error) throw error;
+      throw new EvidenceMutationCommittedError(
+        `evidence normalization was interrupted and its recovery journal was retained: `
+          + `${journalPath}: ${readableReason(error)}; rollback failed: `
+          + readableReason(rollbackError),
+        { kind: 'normalization-recovery-retained', sourcePath: path, journalPath },
         error,
       );
     }
-    return replacementIdentity;
   } finally {
     if (fd !== undefined) closeSync(fd);
-    rmSync(tmp, { force: true });
   }
 }
 
@@ -290,18 +378,30 @@ function publishNoClobber(
   targetPath: string,
   expected: FileIdentity,
   mutation: ReindexMutation,
+  onBeforeSourceMutation?: ReindexEvidenceStoreOptions['onBeforeSourceMutation'],
 ): FileIdentity {
   const opened = openVerifiedRegular(sourcePath, 'evidence source', expected);
   if (process.platform !== 'win32') fchmodSync(opened.fd, 0o600);
   const secured = opened.identity;
+  const directory = dirname(sourcePath);
+  const transactionId = randomUUID();
+  const quarantineName = `.jinn-rescue-source-${transactionId}.hold`;
+  const journalPath = writeRepairJournal(directory, '.jinn-rescue-', {
+    version: 1,
+    sourceName: basename(sourcePath),
+    targetName: basename(targetPath),
+    quarantineName,
+    dev: secured.dev,
+    ino: secured.ino,
+  }, transactionId);
   let targetPublished = false;
-  let sourceRemoved = false;
   try {
     try {
       linkSync(sourcePath, targetPath);
       targetPublished = true;
     } catch (error) {
       if (nodeErrorCode(error) === 'EEXIST') {
+        removeRepairJournal(journalPath);
         throw new Error(`cannot rescue misnamed episode: target already exists: ${targetPath}`);
       }
       throw error;
@@ -323,68 +423,314 @@ function publishNoClobber(
     }
     assertSafeOwner(sourceAfterLink, sourcePath, 'evidence source');
     assertSafeOwner(targetAfterLink, targetPath, 'rescue target');
+    fsyncDirectory(directory);
 
-    try {
-      const sourceAtUnlink = lstatSync(sourcePath);
-      if (!sameIdentity(identityFrom(sourceAtUnlink), secured)) {
-        throw new Error(`evidence source changed before rescue unlink: ${sourcePath}`);
+    onBeforeSourceMutation?.('rescue-remove', sourcePath);
+    const quarantinePath = join(directory, quarantineName);
+    renameSync(sourcePath, quarantinePath);
+    const moved = lstatSync(quarantinePath);
+    if (!moved.isFile() || moved.isSymbolicLink()) {
+      throw new Error(`evidence source changed to an unsafe type before rescue: ${sourcePath}`);
+    }
+    assertSafeOwner(moved, quarantinePath, 'moved rescue source');
+    const movedIdentity = identityFrom(moved);
+    if (!sameIdentity(movedIdentity, secured)) {
+      // The source pathname was replaced after its descriptor was pinned.
+      // Restore that replacement with no-clobber link publication, then remove
+      // only the proven random quarantine alias. The canonical rescue target
+      // remains the original, descriptor-verified evidence.
+      try {
+        linkSync(quarantinePath, sourcePath);
+        const restored = lstatSync(sourcePath);
+        const quarantined = lstatSync(quarantinePath);
+        if (
+          !sameIdentity(identityFrom(restored), movedIdentity)
+          || !sameIdentity(identityFrom(quarantined), movedIdentity)
+        ) {
+          throw new Error(`pathname replacement changed while being restored: ${sourcePath}`);
+        }
+        unlinkSync(quarantinePath);
+        fsyncDirectory(directory);
+        secureRegularPath(sourcePath, 'restored pathname replacement', movedIdentity);
+        removeRepairJournal(journalPath);
+      } catch (restoreError) {
+        throw new EvidenceMutationCommittedError(
+          `rescue target was published; a concurrent pathname replacement is retained at `
+            + `${quarantinePath}: ${readableReason(restoreError)}`,
+          { kind: 'rescue-target-published', sourcePath, targetPath },
+          restoreError,
+        );
       }
-      unlinkSync(sourcePath);
-      sourceRemoved = true;
-      const targetAfterUnlink = lstatSync(targetPath);
-      assertRegularStat(targetAfterUnlink, targetPath, 'rescue target');
-      if (!sameIdentity(identityFrom(targetAfterUnlink), secured)) {
-        throw new Error(`rescue target changed after source unlink: ${targetPath}`);
-      }
-      fsyncDirectory(dirname(sourcePath));
-    } catch (error) {
-      if (!sourceRemoved) throw error;
       throw new EvidenceMutationCommittedError(
-        `rescue target was published but source finalization failed: ${sourcePath}: ${readableReason(error)}`,
+        `rescue target was published without deleting a concurrent pathname replacement: `
+          + sourcePath,
         { kind: 'rescue-target-published', sourcePath, targetPath },
-        error,
+        new Error(`evidence source changed before rescue finalization: ${sourcePath}`),
       );
     }
+
+    unlinkSync(quarantinePath);
+    const targetAfterUnlink = lstatSync(targetPath);
+    assertRegularStat(targetAfterUnlink, targetPath, 'rescue target');
+    if (!sameIdentity(identityFrom(targetAfterUnlink), secured)) {
+      throw new Error(`rescue target changed after source finalization: ${targetPath}`);
+    }
+    fsyncDirectory(directory);
+    removeRepairJournal(journalPath);
     return secured;
   } catch (error) {
-    if (!targetPublished || error instanceof EvidenceMutationCommittedError) throw error;
-    if (!sourceRemoved) {
-      try {
-        const target = lstatSync(targetPath);
-        const source = lstatSync(sourcePath);
-        const targetIdentity = identityFrom(target);
-        const sourceIdentity = identityFrom(source);
-        const canProveCreatedLink = target.isFile()
-          && !target.isSymbolicLink()
-          && (
-            sameIdentity(targetIdentity, secured)
-            || (
-              source.isFile()
-              && !source.isSymbolicLink()
-              && sameIdentity(targetIdentity, sourceIdentity)
-              && target.nlink >= 2
-            )
-          );
-        if (canProveCreatedLink) {
-          const targetAtCleanup = lstatSync(targetPath);
-          if (sameIdentity(identityFrom(targetAtCleanup), targetIdentity)) {
-            unlinkSync(targetPath);
-            fsyncDirectory(dirname(targetPath));
-            throw error;
-          }
-        }
-      } catch (cleanupError) {
-        if (cleanupError === error) throw error;
-      }
+    if (!targetPublished) {
+      removeRepairJournal(journalPath);
+      throw error;
     }
+    if (error instanceof EvidenceMutationCommittedError) throw error;
     throw new EvidenceMutationCommittedError(
-      `rescue target was published but could not be safely rolled back: ${targetPath}: ${readableReason(error)}`,
+      `rescue target was published and its recovery journal was retained: `
+        + `${journalPath}: ${readableReason(error)}`,
       { kind: 'rescue-target-published', sourcePath, targetPath },
       error,
     );
   } finally {
     closeSync(opened.fd);
   }
+}
+
+function safeJournalEntryName(value: unknown): value is string {
+  return typeof value === 'string'
+    && value.length > 0
+    && value !== '.'
+    && value !== '..'
+    && basename(value) === value;
+}
+
+function readJournal(path: string): unknown {
+  return JSON.parse(readVerifiedText(path, 'evidence repair journal').text) as unknown;
+}
+
+function asNormalizeJournal(value: unknown): NormalizeJournal | undefined {
+  const object = asObject(value);
+  const mutation = asObject(object?.['mutation']);
+  if (
+    object?.['version'] !== 1
+    || !safeJournalEntryName(object['sourceName'])
+    || typeof object['dev'] !== 'number'
+    || typeof object['ino'] !== 'number'
+    || typeof object['originalText'] !== 'string'
+    || typeof object['normalizedText'] !== 'string'
+    || mutation?.['kind'] !== 'normalized-json'
+    || typeof mutation['sourcePath'] !== 'string'
+    || typeof mutation['nullFieldsRemoved'] !== 'number'
+  ) {
+    return undefined;
+  }
+  return object as unknown as NormalizeJournal;
+}
+
+function asRescueJournal(value: unknown): RescueJournal | undefined {
+  const object = asObject(value);
+  if (
+    object?.['version'] !== 1
+    || !safeJournalEntryName(object['sourceName'])
+    || !safeJournalEntryName(object['targetName'])
+    || !safeJournalEntryName(object['quarantineName'])
+    || typeof object['dev'] !== 'number'
+    || typeof object['ino'] !== 'number'
+  ) {
+    return undefined;
+  }
+  return object as unknown as RescueJournal;
+}
+
+function rawOwnedRegularIdentity(path: string, label: string): FileIdentity | undefined {
+  try {
+    const info = lstatSync(path);
+    if (!info.isFile() || info.isSymbolicLink()) {
+      throw new Error(`${label} must be a regular file: ${path}`);
+    }
+    assertSafeOwner(info, path, label);
+    return identityFrom(info);
+  } catch (error) {
+    if (nodeErrorCode(error) === 'ENOENT') return undefined;
+    throw error;
+  }
+}
+
+function recoverInterruptedRepairs(directory: string): {
+  mutations: ReindexMutation[];
+  unreadable: UnreadableEvidence[];
+} {
+  const mutations: ReindexMutation[] = [];
+  const unreadable: UnreadableEvidence[] = [];
+  const names = readdirSync(directory).sort();
+
+  for (const name of names.filter((entry) =>
+    /^\.jinn-normalize-[0-9a-f-]{36}\.txn$/i.test(entry))) {
+    const journalPath = join(directory, name);
+    try {
+      const journal = asNormalizeJournal(readJournal(journalPath));
+      if (!journal) throw new Error(`invalid evidence normalization journal: ${journalPath}`);
+      const sourcePath = join(directory, journal.sourceName);
+      if (
+        resolve(journal.mutation.sourcePath) !== resolve(sourcePath)
+        || !Number.isSafeInteger(journal.dev)
+        || !Number.isSafeInteger(journal.ino)
+        || !Number.isSafeInteger(journal.mutation.nullFieldsRemoved)
+        || journal.mutation.nullFieldsRemoved < 1
+      ) {
+        throw new Error(`inconsistent evidence normalization journal: ${journalPath}`);
+      }
+      const expected: FileIdentity = {
+        dev: journal.dev,
+        ino: journal.ino,
+        uid: process.platform === 'win32' ? 0 : process.getuid?.() ?? 0,
+        nlink: 1,
+      };
+      const current = inspectRegularPath(sourcePath, 'journaled evidence source');
+      if (!current || !sameIdentity(current, expected)) {
+        throw new Error(
+          `journaled evidence source changed; recovery retained for inspection: ${sourcePath}`,
+        );
+      }
+      const opened = openVerifiedRegularForUpdate(
+        sourcePath,
+        'journaled evidence source',
+        expected,
+      );
+      try {
+        const text = readFileSync(opened.fd, 'utf8');
+        if (text === journal.normalizedText) {
+          mutations.push(journal.mutation);
+        } else if (text !== journal.originalText) {
+          ftruncateSync(opened.fd, 0);
+          writeUtf8AtStart(opened.fd, journal.originalText);
+          fsyncSync(opened.fd);
+        }
+      } finally {
+        closeSync(opened.fd);
+      }
+      secureRegularPath(sourcePath, 'recovered evidence source', expected);
+      removeRepairJournal(journalPath);
+    } catch (error) {
+      unreadable.push({ sourcePath: journalPath, reason: readableReason(error) });
+    }
+  }
+
+  for (const name of names.filter((entry) =>
+    /^\.jinn-rescue-[0-9a-f-]{36}\.txn$/i.test(entry))) {
+    const journalPath = join(directory, name);
+    try {
+      const journal = asRescueJournal(readJournal(journalPath));
+      if (!journal) throw new Error(`invalid evidence rescue journal: ${journalPath}`);
+      const transactionId = name.slice(
+        '.jinn-rescue-'.length,
+        -'.txn'.length,
+      );
+      if (
+        !journal.sourceName.endsWith('.json')
+        || journal.sourceName.endsWith('.episode.json')
+        || !journal.targetName.endsWith('.episode.json')
+        || journal.quarantineName !== `.jinn-rescue-source-${transactionId}.hold`
+        || !Number.isSafeInteger(journal.dev)
+        || !Number.isSafeInteger(journal.ino)
+      ) {
+        throw new Error(`inconsistent evidence rescue journal: ${journalPath}`);
+      }
+      const sourcePath = join(directory, journal.sourceName);
+      const targetPath = join(directory, journal.targetName);
+      const quarantinePath = join(directory, journal.quarantineName);
+      const expected: FileIdentity = {
+        dev: journal.dev,
+        ino: journal.ino,
+        uid: process.platform === 'win32' ? 0 : process.getuid?.() ?? 0,
+        nlink: 1,
+      };
+      let source = rawOwnedRegularIdentity(sourcePath, 'journaled rescue source');
+      let target = rawOwnedRegularIdentity(targetPath, 'journaled rescue target');
+      let quarantine = rawOwnedRegularIdentity(
+        quarantinePath,
+        'journaled rescue quarantine',
+      );
+      let sourceMatches = source !== undefined && sameIdentity(source, expected);
+      const targetMatches = target !== undefined && sameIdentity(target, expected);
+
+      if (!target && sourceMatches && source?.nlink === 1 && !quarantine) {
+        removeRepairJournal(journalPath);
+        continue;
+      }
+      if (!targetMatches) {
+        throw new Error(
+          `journaled rescue target changed; recovery retained for inspection: ${targetPath}`,
+        );
+      }
+      if (quarantine) {
+        if (sameIdentity(quarantine, expected)) {
+          if (target?.nlink !== 2) {
+            throw new Error(`journaled rescue quarantine has an unsafe link count: ${targetPath}`);
+          }
+          unlinkSync(quarantinePath);
+          fsyncDirectory(directory);
+        } else {
+          if (target?.nlink !== 1) {
+            throw new Error(
+              `journaled pathname replacement has an unsafe target link count: ${targetPath}`,
+            );
+          }
+          if (!source) {
+            linkSync(quarantinePath, sourcePath);
+            source = rawOwnedRegularIdentity(sourcePath, 'restored pathname replacement');
+          }
+          if (
+            !source
+            || !sameIdentity(source, quarantine)
+            || source.nlink !== 2
+            || quarantine.nlink !== 2
+          ) {
+            throw new Error(
+              `journaled pathname replacement could not be safely restored: ${sourcePath}`,
+            );
+          }
+          unlinkSync(quarantinePath);
+          fsyncDirectory(directory);
+          secureRegularPath(sourcePath, 'restored pathname replacement', source);
+        }
+        source = rawOwnedRegularIdentity(sourcePath, 'journaled rescue source');
+        target = rawOwnedRegularIdentity(targetPath, 'journaled rescue target');
+        quarantine = rawOwnedRegularIdentity(
+          quarantinePath,
+          'journaled rescue quarantine',
+        );
+        sourceMatches = source !== undefined && sameIdentity(source, expected);
+        if (quarantine) {
+          throw new Error(`journaled rescue quarantine was not removed: ${quarantinePath}`);
+        }
+      }
+      if (sourceMatches) {
+        if (source?.nlink !== 2 || target?.nlink !== 2) {
+          throw new Error(`journaled rescue link count is inconsistent: ${targetPath}`);
+        }
+        renameSync(sourcePath, quarantinePath);
+        const moved = rawOwnedRegularIdentity(quarantinePath, 'journaled rescue source');
+        if (!moved || !sameIdentity(moved, expected)) {
+          throw new Error(`journaled rescue source changed during recovery: ${sourcePath}`);
+        }
+        unlinkSync(quarantinePath);
+        fsyncDirectory(directory);
+      } else if (target?.nlink !== 1) {
+        throw new Error(`journaled rescue target has an unsafe link count: ${targetPath}`);
+      }
+      secureRegularPath(targetPath, 'recovered rescue target', expected);
+      removeRepairJournal(journalPath);
+      mutations.push({
+        kind: 'rescued-misnamed-episode',
+        sourcePath,
+        targetPath,
+      });
+    } catch (error) {
+      unreadable.push({ sourcePath: journalPath, reason: readableReason(error) });
+    }
+  }
+
+  return { mutations, unreadable };
 }
 
 interface PreparedIndexDestination {
@@ -677,7 +1023,11 @@ interface EvidenceScanResult {
   report: ReindexReport;
 }
 
-function scanEvidenceStore(episodesDirInput: string, repair: boolean): EvidenceScanResult {
+function scanEvidenceStore(
+  episodesDirInput: string,
+  repair: boolean,
+  onBeforeSourceMutation?: ReindexEvidenceStoreOptions['onBeforeSourceMutation'],
+): EvidenceScanResult {
   const episodesDir = resolve(episodesDirInput);
   const unreadable: UnreadableEvidence[] = [];
   const candidates = new Map<string, EvidenceCandidate[]>();
@@ -693,6 +1043,21 @@ function scanEvidenceStore(episodesDirInput: string, repair: boolean): EvidenceS
   let files: string[] = [];
   if (existsSync(episodesDir)) {
     validateDirectory(episodesDir, 'evidence store', repair);
+    if (repair) {
+      const recovered = recoverInterruptedRepairs(episodesDir);
+      mutations.push(...recovered.mutations);
+      unreadable.push(...recovered.unreadable);
+      scannedFiles += recovered.unreadable.length;
+      for (const mutation of recovered.mutations) {
+        if (mutation.kind === 'normalized-json') {
+          nullToleratedFiles += 1;
+          nullFieldsRemoved += mutation.nullFieldsRemoved;
+        } else if (mutation.kind === 'rescued-misnamed-episode') {
+          misnamedEpisodes += 1;
+          renamedFiles += 1;
+        }
+      }
+    }
     files = readdirSync(episodesDir).filter((name) => name.endsWith('.json')).sort();
   }
 
@@ -701,7 +1066,7 @@ function scanEvidenceStore(episodesDirInput: string, repair: boolean): EvidenceS
     const sourcePath = join(episodesDir, name);
     try {
       if (repair) secureRegularPath(sourcePath, 'evidence source');
-      const { raw, identity } = readVerifiedJson(sourcePath);
+      const { raw, text, identity } = readVerifiedJson(sourcePath);
       const parsed = parseFile(raw, name.endsWith('.episode.json'));
       if (parsed.nullCount > 0) nullToleratedFiles += 1;
       if (parsed.sourceKind === 'misnamed-episode') misnamedEpisodes += 1;
@@ -709,6 +1074,7 @@ function scanEvidenceStore(episodesDirInput: string, repair: boolean): EvidenceS
       const episodeCandidates = candidates.get(parsed.episode.episodeId) ?? [];
       episodeCandidates.push({
         sourcePath,
+        sourceText: text,
         parsed,
         identity,
         contentSha256: createHash('sha256').update(episodeJson).digest('hex'),
@@ -735,7 +1101,7 @@ function scanEvidenceStore(episodesDirInput: string, repair: boolean): EvidenceS
     }
 
     const candidate = episodeCandidates[0]!;
-    const { sourcePath, parsed } = candidate;
+    const { sourcePath, sourceText, parsed } = candidate;
     let identity = candidate.identity;
     let finalPath = sourcePath;
     try {
@@ -745,7 +1111,14 @@ function scanEvidenceStore(episodesDirInput: string, repair: boolean): EvidenceS
           sourcePath,
           nullFieldsRemoved: parsed.nullCount,
         };
-        identity = repairJson(sourcePath, parsed.normalizedRaw, identity, mutation);
+        identity = repairJson(
+          sourcePath,
+          parsed.normalizedRaw,
+          identity,
+          sourceText,
+          mutation,
+          onBeforeSourceMutation,
+        );
         nullFieldsRemoved += parsed.nullCount;
         mutations.push(mutation);
       } else if (repair) {
@@ -759,7 +1132,13 @@ function scanEvidenceStore(episodesDirInput: string, repair: boolean): EvidenceS
           sourcePath,
           targetPath,
         };
-        identity = publishNoClobber(sourcePath, targetPath, identity, mutation);
+        identity = publishNoClobber(
+          sourcePath,
+          targetPath,
+          identity,
+          mutation,
+          onBeforeSourceMutation,
+        );
         finalPath = targetPath;
         renamedFiles += 1;
         mutations.push(mutation);
@@ -838,7 +1217,11 @@ export function reindexEvidenceStore(options: ReindexEvidenceStoreOptions): Rein
 
     let scan: EvidenceScanResult;
     try {
-      scan = scanEvidenceStore(episodesDir, options.repair ?? false);
+      scan = scanEvidenceStore(
+        episodesDir,
+        options.repair ?? false,
+        options.onBeforeSourceMutation,
+      );
       options.onScanComplete?.();
     } catch (error) {
       try {

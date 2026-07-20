@@ -7,6 +7,8 @@ import {
   mkdirSync,
   readFileSync,
   rmSync,
+  renameSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -25,6 +27,7 @@ import {
   type ReindexReport,
 } from '../src/evidence-index.js';
 import { createEvidenceAdapter } from '../src/evidence-adapter.js';
+import { withEvidenceStoreLock } from '../src/evidence-store-lock.js';
 import { EPISODE_SCHEMA_VERSION, EpisodeV1Schema, type EpisodeV1 } from '@jinn-network/plugin';
 
 const tempDirs: string[] = [];
@@ -109,6 +112,15 @@ async function waitForPath(path: string, timeoutMs = 5_000): Promise<void> {
 }
 
 async function waitForChild(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null) {
+    if (child.exitCode !== 0) {
+      throw new Error(`reindex worker exited with code ${String(child.exitCode)}`);
+    }
+    return;
+  }
+  if (child.signalCode !== null) {
+    throw new Error(`reindex worker exited with signal ${String(child.signalCode)}`);
+  }
   const [code, signal] = await once(child, 'exit') as [number | null, NodeJS.Signals | null];
   if (code !== 0) {
     throw new Error(`reindex worker exited with code ${String(code)} signal ${String(signal)}`);
@@ -303,6 +315,173 @@ describe('machine-local evidence index', () => {
       reason: expect.stringMatching(/JSON|parse|Unexpected/i),
     }]);
     index.close();
+  });
+
+  it('does not overwrite a pathname replacement inserted before normalization', () => {
+    const { episodesDir, indexPath } = makeStore();
+    const sourcePath = join(episodesDir, 'normalize-race.episode.json');
+    const original = structuredClone(makeEpisode('normalize-race')) as unknown as {
+      outcome: { summary: null };
+    };
+    original.outcome.summary = null;
+    const replacement = makeEpisode('replacement');
+    writeJson(sourcePath, original);
+
+    const report = reindexEvidenceStore({
+      episodesDir,
+      indexPath,
+      repair: true,
+      onBeforeSourceMutation: (kind, path) => {
+        if (kind !== 'normalize' || path !== sourcePath) return;
+        rmSync(sourcePath);
+        writeJson(sourcePath, replacement);
+      },
+    });
+
+    expect(JSON.parse(readFileSync(sourcePath, 'utf8'))).toEqual(replacement);
+    expect(report).toMatchObject({ indexedEpisodes: 0, unreadableFiles: 1 });
+    expect(report.unreadable[0]?.reason).toMatch(/changed.*normalization|normalization.*changed/i);
+  });
+
+  it('recovers an interrupted in-place normalization from its durable journal', () => {
+    const { episodesDir, indexPath } = makeStore();
+    const sourcePath = join(episodesDir, 'interrupted-normalize.episode.json');
+    const original = structuredClone(makeEpisode('interrupted-normalize')) as unknown as {
+      outcome: { summary: null };
+    };
+    original.outcome.summary = null;
+    const originalText = `${JSON.stringify(original, null, 2)}\n`;
+    const normalized = structuredClone(original) as unknown as {
+      outcome: { summary?: null };
+    };
+    delete normalized.outcome.summary;
+    const normalizedText = `${JSON.stringify(normalized, null, 2)}\n`;
+    writeFileSync(sourcePath, '{"partial');
+    const identity = statSync(sourcePath);
+    const journalPath = join(
+      episodesDir,
+      '.jinn-normalize-00000000-0000-4000-8000-000000000000.txn',
+    );
+    writeJson(journalPath, {
+      version: 1,
+      sourceName: 'interrupted-normalize.episode.json',
+      dev: identity.dev,
+      ino: identity.ino,
+      originalText,
+      normalizedText,
+      mutation: {
+        kind: 'normalized-json',
+        sourcePath,
+        nullFieldsRemoved: 1,
+      },
+    });
+
+    const report = runReindex(episodesDir, indexPath, true);
+
+    expect(existsSync(journalPath)).toBe(false);
+    expect(JSON.parse(readFileSync(sourcePath, 'utf8'))).toEqual(normalized);
+    expect(report).toMatchObject({
+      indexedEpisodes: 1,
+      unreadableFiles: 0,
+      nullFieldsRemoved: 1,
+      mutations: [{
+        kind: 'normalized-json',
+        sourcePath,
+        nullFieldsRemoved: 1,
+      }],
+    });
+  });
+
+  it('does not delete a pathname replacement inserted before rescue finalization', () => {
+    const { episodesDir, indexPath } = makeStore();
+    const sourcePath = join(episodesDir, 'rescue-race.json');
+    const replacement = makeEpisode('replacement');
+    writeJson(sourcePath, makeEpisode('rescue-race'));
+
+    const report = reindexEvidenceStore({
+      episodesDir,
+      indexPath,
+      repair: true,
+      onBeforeSourceMutation: (kind, path) => {
+        if (kind !== 'rescue-remove' || path !== sourcePath) return;
+        rmSync(sourcePath);
+        writeJson(sourcePath, replacement);
+      },
+    });
+
+    expect(existsSync(sourcePath)).toBe(true);
+    expect(JSON.parse(readFileSync(sourcePath, 'utf8'))).toEqual(replacement);
+    expect(report).toMatchObject({ indexedEpisodes: 0, unreadableFiles: 1 });
+  });
+
+  it.skipIf(process.platform === 'win32')('recovers a journaled rescue interrupted after target publication', () => {
+    const { episodesDir, indexPath } = makeStore();
+    const sourcePath = join(episodesDir, 'interrupted.json');
+    const targetPath = join(episodesDir, 'interrupted.episode.json');
+    writeJson(sourcePath, makeEpisode('interrupted'));
+    linkSync(sourcePath, targetPath);
+    const identity = statSync(sourcePath);
+    writeJson(join(
+      episodesDir,
+      '.jinn-rescue-00000000-0000-4000-8000-000000000000.txn',
+    ), {
+      version: 1,
+      sourceName: 'interrupted.json',
+      targetName: 'interrupted.episode.json',
+      quarantineName:
+        '.jinn-rescue-source-00000000-0000-4000-8000-000000000000.hold',
+      dev: identity.dev,
+      ino: identity.ino,
+    });
+
+    const report = runReindex(episodesDir, indexPath, true);
+
+    expect(existsSync(sourcePath)).toBe(false);
+    expect(statSync(targetPath).nlink).toBe(1);
+    expect(report).toMatchObject({
+      indexedEpisodes: 1,
+      unreadableFiles: 0,
+      renamedFiles: 1,
+      mutations: [{
+        kind: 'rescued-misnamed-episode',
+        sourcePath,
+        targetPath,
+      }],
+    });
+  });
+
+  it.skipIf(process.platform === 'win32')('recovers a journaled rescue interrupted after source quarantine', () => {
+    const { episodesDir, indexPath } = makeStore();
+    const transactionId = '00000000-0000-4000-8000-000000000001';
+    const sourcePath = join(episodesDir, 'quarantined.json');
+    const targetPath = join(episodesDir, 'quarantined.episode.json');
+    const quarantinePath = join(
+      episodesDir,
+      `.jinn-rescue-source-${transactionId}.hold`,
+    );
+    writeJson(sourcePath, makeEpisode('quarantined'));
+    linkSync(sourcePath, targetPath);
+    const identity = statSync(sourcePath);
+    renameSync(sourcePath, quarantinePath);
+    writeJson(join(episodesDir, `.jinn-rescue-${transactionId}.txn`), {
+      version: 1,
+      sourceName: 'quarantined.json',
+      targetName: 'quarantined.episode.json',
+      quarantineName: `.jinn-rescue-source-${transactionId}.hold`,
+      dev: identity.dev,
+      ino: identity.ino,
+    });
+
+    const report = runReindex(episodesDir, indexPath, true);
+
+    expect(existsSync(sourcePath)).toBe(false);
+    expect(existsSync(quarantinePath)).toBe(false);
+    expect(statSync(targetPath).nlink).toBe(1);
+    expect(report).toMatchObject({
+      indexedEpisodes: 1,
+      unreadableFiles: 0,
+      renamedFiles: 1,
+    });
   });
 
   it('indexes tolerantly without mutating files when repair is disabled', () => {
@@ -604,7 +783,7 @@ describe('machine-local evidence index', () => {
     delete episode.activity;
     const result = await adapter.put(episode);
 
-    expect(result.status).toBe('ok');
+    expect(result).toEqual({ status: 'ok', value: { episodeId: 'live-write' } });
     const index = new EvidenceIndex({ dbPath: indexPath });
     expect(index.listEpisodes().map((row) => row.episodeId)).toEqual(['live-write']);
     index.close();
@@ -635,10 +814,53 @@ describe('machine-local evidence index', () => {
     index.close();
   }, 10_000);
 
+  it('allows a post-write refresh callback to await another same-store write', async () => {
+    const { episodesDir, indexPath } = makeStore();
+    runReindex(episodesDir, indexPath, false);
+    let nested = false;
+    let adapter: ReturnType<typeof createEvidenceAdapter>;
+    const nestedEpisode = makeEpisode('nested-write');
+    const outerEpisode = makeEpisode('outer-write');
+    delete nestedEpisode.activity;
+    delete outerEpisode.activity;
+    adapter = createEvidenceAdapter({
+      capturesDir: episodesDir,
+      onStoreChanged: async () => {
+        runReindex(episodesDir, indexPath, false);
+        if (nested) return;
+        nested = true;
+        const result = await adapter.put(nestedEpisode);
+        if (result.status !== 'ok') throw new Error(result.reason);
+      },
+    });
+
+    const result = await adapter.put(outerEpisode);
+
+    expect(result).toEqual({ status: 'ok', value: { episodeId: 'outer-write' } });
+    const index = new EvidenceIndex({ dbPath: indexPath });
+    expect(index.listEpisodes().map((row) => row.episodeId)).toEqual([
+      'nested-write',
+      'outer-write',
+    ]);
+    index.close();
+  }, 5_000);
+
+  it('fails fast instead of blocking the event loop on mixed async and sync acquisition', async () => {
+    const { episodesDir, indexPath } = makeStore();
+
+    await withEvidenceStoreLock(episodesDir, async () => {
+      expect(() => runReindex(episodesDir, indexPath, false))
+        .toThrow(/synchronously acquire.*async operation/i);
+    });
+
+    expect(existsSync(indexPath)).toBe(false);
+  });
+
   it('serializes scan-through-publication across processes so an older snapshot cannot win', async () => {
     const { root, episodesDir, indexPath } = makeStore();
     const enteredPath = join(root, 'older-scan-complete');
     const releasePath = join(root, 'release-older-scan');
+    const newerAttemptedPath = join(root, 'newer-reindex-attempted');
     const workerPath = join(
       dirname(fileURLToPath(import.meta.url)),
       'fixtures',
@@ -660,9 +882,13 @@ describe('machine-local evidence index', () => {
       workerPath,
       episodesDir,
       indexPath,
+      '',
+      '',
+      newerAttemptedPath,
     ], { stdio: 'inherit' });
 
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await waitForPath(newerAttemptedPath);
+    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(newer.exitCode).toBeNull();
     writeFileSync(releasePath, 'release');
 
