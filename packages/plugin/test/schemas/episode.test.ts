@@ -31,7 +31,32 @@ describe('EpisodeV1Schema', () => {
       ...valid,
       origin: undefined,
       session: { ...valid.session, parentSessionId: null },
-      task: { ...valid.task, repositorySlug: null },
+      task: {
+        ...valid.task,
+        repositorySlug: null,
+        baseCommit: null,
+        createdAt: null,
+        instanceId: null,
+      },
+      trajectory: valid.trajectory.map((step, index) => (
+        index === 0 ? { ...step, truncatedKeys: null } : step
+      )),
+      environment: {
+        ...valid.environment,
+        generatorModel: {
+          id: 'model',
+          provider: null,
+          openWeights: null,
+          source: 'config',
+        },
+        distributionClass: null,
+        verifier: {
+          type: 'none',
+          failToPass: [],
+          passToPass: [],
+          evalSemanticsVersion: null,
+        },
+      },
       outcome: {
         ...valid.outcome,
         summary: null,
@@ -44,8 +69,16 @@ describe('EpisodeV1Schema', () => {
         providedRefs: ['bafy-delivered'],
         deliveredContentHash: null,
       },
+      attemptGroup: {
+        groupId: 'group',
+        attemptId: 'attempt',
+        relatedAttemptRefs: [],
+        groupSize: null,
+        nPass: null,
+        nFail: null,
+      },
       eligibility: null,
-      lineage: null,
+      lineage: { episodeId: 'ep-0', mintRef: null },
       futureAdditiveField: { preserved: true },
     });
 
@@ -53,6 +86,14 @@ describe('EpisodeV1Schema', () => {
     expect(parsed.session).not.toHaveProperty('parentSessionId');
     expect(parsed.origin).toBe('legacy-unstamped');
     expect(parsed.task).not.toHaveProperty('repositorySlug');
+    expect(parsed.task).not.toHaveProperty('baseCommit');
+    expect(parsed.task).not.toHaveProperty('createdAt');
+    expect(parsed.task).not.toHaveProperty('instanceId');
+    expect(parsed.trajectory[0]).not.toHaveProperty('truncatedKeys');
+    expect(parsed.environment.generatorModel).not.toHaveProperty('provider');
+    expect(parsed.environment.generatorModel).not.toHaveProperty('openWeights');
+    expect(parsed.environment).not.toHaveProperty('distributionClass');
+    expect(parsed.environment.verifier).not.toHaveProperty('evalSemanticsVersion');
     expect(parsed.outcome).not.toHaveProperty('summary');
     expect(parsed.outcome).not.toHaveProperty('acceptedDiff');
     expect(parsed.outcome).not.toHaveProperty('testRuns');
@@ -66,9 +107,34 @@ describe('EpisodeV1Schema', () => {
       providedRefs: ['bafy-delivered'],
     });
     expect(parsed.activity).not.toHaveProperty('deliveredContentHash');
+    expect(parsed.attemptGroup).not.toHaveProperty('groupSize');
+    expect(parsed.attemptGroup).not.toHaveProperty('nPass');
+    expect(parsed.attemptGroup).not.toHaveProperty('nFail');
     expect(parsed).not.toHaveProperty('eligibility');
-    expect(parsed).not.toHaveProperty('lineage');
+    expect(parsed.lineage).not.toHaveProperty('mintRef');
     expect(parsed.futureAdditiveField).toEqual({ preserved: true });
+  });
+
+  it.each([
+    ['environment.generatorModel', {
+      ...valid,
+      environment: { ...valid.environment, generatorModel: null },
+    }],
+    ['environment.verifier', {
+      ...valid,
+      environment: { ...valid.environment, verifier: null },
+    }],
+    ['attemptGroup', { ...valid, attemptGroup: null }],
+    ['lineage', { ...valid, lineage: null }],
+  ])('normalizes a read-only null at %s to absence', (_path, input) => {
+    const parsed = EpisodeV1Schema.parse(input);
+    if (_path === 'environment.generatorModel') {
+      expect(parsed.environment).not.toHaveProperty('generatorModel');
+    } else if (_path === 'environment.verifier') {
+      expect(parsed.environment).not.toHaveProperty('verifier');
+    } else {
+      expect(parsed).not.toHaveProperty(_path);
+    }
   });
 
   it('rejects a present activity field with the wrong container instead of defaulting it', () => {
@@ -145,6 +211,59 @@ describe('EpisodeV1Schema', () => {
       ...next,
       task: { ...next.task, repositorySlug: null },
     })).toThrow();
+  });
+
+  it.each([
+    ['session.parentSessionId', {
+      ...valid,
+      session: { ...valid.session, parentSessionId: null },
+    }],
+    ['task.baseCommit', {
+      ...valid,
+      task: { ...valid.task, baseCommit: null },
+    }],
+    ['trajectory.truncatedKeys', {
+      ...valid,
+      trajectory: [{ ...valid.trajectory[0], truncatedKeys: null }, ...valid.trajectory.slice(1)],
+    }],
+    ['environment.generatorModel', {
+      ...valid,
+      environment: { ...valid.environment, generatorModel: null },
+    }],
+    ['environment.generatorModel.provider', {
+      ...valid,
+      environment: {
+        ...valid.environment,
+        generatorModel: { id: 'model', provider: null, source: 'config' },
+      },
+    }],
+    ['environment.verifier.evalSemanticsVersion', {
+      ...valid,
+      environment: {
+        ...valid.environment,
+        verifier: {
+          type: 'none',
+          failToPass: [],
+          passToPass: [],
+          evalSemanticsVersion: null,
+        },
+      },
+    }],
+    ['attemptGroup.nPass', {
+      ...valid,
+      attemptGroup: {
+        groupId: 'group',
+        attemptId: 'attempt',
+        relatedAttemptRefs: [],
+        nPass: null,
+      },
+    }],
+    ['lineage.mintRef', {
+      ...valid,
+      lineage: { episodeId: 'ep-0', mintRef: null },
+    }],
+  ])('strict writers reject null at %s', (_path, input) => {
+    expect(() => EpisodeV1WriteSchema.parse(input)).toThrow();
   });
 
   it('writes one canonical verification-strength axis and normalizes the legacy tier name', () => {

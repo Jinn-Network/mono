@@ -166,6 +166,87 @@ describe('capture() nested step attributes (#1378)', () => {
   });
 });
 
+describe('capture() canonical Episode-only facts', () => {
+  it('scrubs every outbound fact before it enters pending state and records receipts', async () => {
+    const secret = 'jane.doe@example-corp.com';
+    const task = validTask();
+    task.session = {
+      ...task.session,
+      kind: 'host-internal',
+      parentSessionId: `parent-${secret}`,
+    };
+    task.task = {
+      ...task.task,
+      repositorySlug: `acme/${secret}`,
+      baseCommit: `commit-${secret}`,
+      createdAt: 1_752_000_000,
+      instanceId: `instance-${secret}`,
+    };
+    task.environment = {
+      ...task.environment,
+      skillsLoadout: [`skill-${secret}`],
+      generatorModel: {
+        id: `model-${secret}`,
+        provider: `provider-${secret}`,
+        openWeights: false,
+        source: 'stream',
+      },
+      distributionClass: 'restricted-tos',
+      verifier: {
+        type: 'f2p-p2p',
+        failToPass: [`f2p-${secret}`],
+        passToPass: [`p2p-${secret}`],
+        evalSemanticsVersion: `eval-${secret}`,
+      },
+    };
+    task.steps[0]!.kind = 'jinn.agent_turn';
+    task.attemptGroup = {
+      groupId: `group-${secret}`,
+      attemptId: `attempt-${secret}`,
+      relatedAttemptRefs: [`related-${secret}`],
+      groupSize: 2,
+      nPass: 1,
+      nFail: 1,
+    };
+
+    const pending = await capture(task);
+    const report = preview(pending);
+
+    expect(JSON.stringify(pending.episodeFacts)).not.toContain(secret);
+    expect(JSON.stringify(report.envelope)).not.toContain(secret);
+    expect(report.envelope).toMatchObject({
+      session: { kind: 'host-internal' },
+      task: { createdAt: 1_752_000_000 },
+      trajectory: [{ kind: 'jinn.agent_turn' }],
+      environment: {
+        generatorModel: { openWeights: false, source: 'stream' },
+        distributionClass: 'restricted-tos',
+        verifier: { type: 'f2p-p2p' },
+      },
+      attemptGroup: { groupSize: 2, nPass: 1, nFail: 1 },
+    });
+
+    const fields = report.redactions.map((entry) => entry.field);
+    for (const expectedField of [
+      'episodeFacts.session.parentSessionId',
+      'episodeFacts.task.repositorySlug',
+      'episodeFacts.task.baseCommit',
+      'episodeFacts.task.instanceId',
+      'episodeFacts.environment.skillsLoadout',
+      'episodeFacts.environment.generatorModel.id',
+      'episodeFacts.environment.generatorModel.provider',
+      'episodeFacts.environment.verifier.failToPass',
+      'episodeFacts.environment.verifier.passToPass',
+      'episodeFacts.environment.verifier.evalSemanticsVersion',
+      'episodeFacts.attemptGroup.groupId',
+      'episodeFacts.attemptGroup.attemptId',
+      'episodeFacts.attemptGroup.relatedAttemptRefs',
+    ]) {
+      expect(fields).toContain(expectedField);
+    }
+  });
+});
+
 describe('capture() slug-like task summaries (#1348)', () => {
   it('keeps a seed-import slug summary verbatim — paths are not secrets', async () => {
     const summary = 'Seed import: obra/superpowers/skills/test-driven-development';

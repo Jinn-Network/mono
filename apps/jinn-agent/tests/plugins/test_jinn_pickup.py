@@ -390,3 +390,53 @@ def test_corpus_fetch_tool_returns_skill_content_and_records_fetched_ref(tmp_pat
     assert "[user-accepted]" in out
     assert "Red, green, refactor." in out
     assert jinn._state_for("s1")["activity"]["fetchedRefs"] == [ref]
+
+
+def test_corpus_fetch_tool_reads_canonical_episode_content(tmp_path):
+    import base64
+    import hashlib
+
+    ref = "bafyCanonicalEpisode"
+    episode = {
+        "schemaVersion": "jinn.episode.v1",
+        "task": {
+            "summary": "Seed import: acme/skills/tdd",
+            "distributionTags": ["seed-import", "tdd"],
+        },
+        "trajectory": [{
+            "spanId": "s1",
+            "name": "seed:skill-md",
+            "attributes": {
+                "skill.md": "# canonical tdd\n\nRed, green, project.",
+                "seed.attribution": {"skill": "acme/skills/tdd"},
+            },
+        }],
+        "outcome": {
+            "status": "completed",
+            "verificationStrength": "tests-passed",
+        },
+        "provenance": "imported",
+    }
+    content = json.dumps(episode).encode("utf-8")
+    record = {
+        "ref": ref,
+        "artifacts": [{
+            "artifactType": "jinn.episode.v1",
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "contentBase64": base64.b64encode(content).decode("ascii"),
+        }],
+    }
+
+    def runner(argv):
+        if argv[1] == "corpus" and argv[2] == "get":
+            return 0, json.dumps(record)
+        return 1, f"unexpected: {argv}"
+
+    jinn._runner = runner
+    try:
+        out = jinn._tool_corpus_fetch({"ref": ref}, session_id="s1")
+    finally:
+        jinn._runner = None
+    assert "[tests-passed]" in out
+    assert "Red, green, project." in out
+    assert jinn._state_for("s1")["activity"]["fetchedRefs"] == [ref]

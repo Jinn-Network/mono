@@ -18,6 +18,8 @@ command surface.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import importlib
 import json
 from pathlib import Path
@@ -74,6 +76,65 @@ def test_install_raises_on_unreadable_result(tmp_path):
 
     with pytest.raises(ValueError, match="unreadable skills install result"):
         skills_install.install(REF, runner=fake_runner)
+
+
+def _artifact(artifact_type, payload, *, sha256=None):
+    content = json.dumps(payload).encode("utf-8")
+    return {
+        "artifactType": artifact_type,
+        "sha256": sha256 or hashlib.sha256(content).hexdigest(),
+        "contentBase64": base64.b64encode(content).decode("ascii"),
+    }
+
+
+def test_extract_trace_prefers_hash_verified_episode_and_projects_legacy_read_shape():
+    legacy = {
+        "schemaVersion": "jinn.trace-envelope.v0",
+        "task": {"summary": "legacy", "distributionTags": ["legacy"]},
+        "steps": [],
+        "outcome": {"status": "completed", "verifiabilityTier": "user-accepted"},
+    }
+    episode = {
+        "schemaVersion": "jinn.episode.v1",
+        "task": {"summary": "canonical", "distributionTags": ["canonical"]},
+        "trajectory": [{"spanId": "canonical-step", "attributes": {"skill.md": "# canonical"}}],
+        "outcome": {"status": "completed", "verificationStrength": "tests-passed"},
+    }
+
+    projected, digest = skills_install._extract_trace({
+        "artifacts": [
+            _artifact("jinn.trace-envelope.v0", legacy),
+            _artifact("jinn.episode.v1", episode),
+        ],
+    })
+
+    assert projected["schemaVersion"] == "jinn.episode.v1"
+    assert projected["steps"] == episode["trajectory"]
+    assert projected["outcome"]["verifiabilityTier"] == "tests-passed"
+    assert digest == hashlib.sha256(json.dumps(episode).encode("utf-8")).hexdigest()
+
+
+def test_extract_trace_does_not_fall_back_when_preferred_episode_hash_mismatches():
+    legacy = {
+        "schemaVersion": "jinn.trace-envelope.v0",
+        "task": {"summary": "legacy", "distributionTags": ["legacy"]},
+        "steps": [],
+        "outcome": {"status": "completed", "verifiabilityTier": "user-accepted"},
+    }
+    episode = {
+        "schemaVersion": "jinn.episode.v1",
+        "task": {"summary": "canonical", "distributionTags": ["canonical"]},
+        "trajectory": [],
+        "outcome": {"status": "completed", "verificationStrength": "tests-passed"},
+    }
+
+    with pytest.raises(ValueError, match="sha256 mismatch"):
+        skills_install._extract_trace({
+            "artifacts": [
+                _artifact("jinn.trace-envelope.v0", legacy),
+                _artifact("jinn.episode.v1", episode, sha256="0" * 64),
+            ],
+        })
 
 
 def test_uninstall_refuses_unmarked(tmp_path, monkeypatch):

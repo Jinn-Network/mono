@@ -32,6 +32,7 @@ from .consent import get_hermes_home
 logger = logging.getLogger(__name__)
 
 TRACE_ENVELOPE_ARTIFACT_TYPE = "jinn.trace-envelope.v0"
+EPISODE_ARTIFACT_TYPE = "jinn.episode.v1"
 MARKER_FILE = ".jinn-ref"
 
 _SLUG_RE = re.compile(r"[^a-zA-Z0-9._-]+")
@@ -55,31 +56,63 @@ def _sanitise_slug(raw: str) -> str:
 # them needs an interpreted `jinn-layer corpus get` projection — a harness-layer
 # follow-up, tracked separately.
 def _extract_trace(record: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:
-    """Return (trace envelope, verified sha256) from a corpus-get record.
+    """Return (legacy-compatible evidence projection, verified sha256).
 
-    Verifies the artifact bytes against the record's sha256 BEFORE parsing —
-    a mismatch refuses the install outright.
+    Canonical Episode is preferred when both carriers are present. The selected
+    artifact's bytes are verified BEFORE parsing and a malformed preferred
+    carrier never falls back to legacy trace content.
     """
     artifacts = record.get("artifacts")
     if not isinstance(artifacts, list):
         raise ValueError("corpus record has no artifacts")
-    for artifact in artifacts:
-        if not isinstance(artifact, dict):
-            continue
-        if artifact.get("artifactType") != TRACE_ENVELOPE_ARTIFACT_TYPE:
-            continue
-        content_b64 = artifact.get("contentBase64")
-        expected = str(artifact.get("sha256") or "")
-        if not isinstance(content_b64, str) or not expected:
-            raise ValueError("trace artifact is missing content or sha256")
-        content = base64.b64decode(content_b64)
-        actual = hashlib.sha256(content).hexdigest()
-        if actual != expected:
-            raise ValueError(
-                f"sha256 mismatch — refusing to install (expected {expected[:12]}…, got {actual[:12]}…)"
+    artifact = next(
+        (
+            candidate
+            for artifact_type in (
+                EPISODE_ARTIFACT_TYPE,
+                TRACE_ENVELOPE_ARTIFACT_TYPE,
             )
-        return json.loads(content.decode("utf-8")), expected
-    raise ValueError(f"no {TRACE_ENVELOPE_ARTIFACT_TYPE} artifact in this record")
+            for candidate in artifacts
+            if isinstance(candidate, dict)
+            and candidate.get("artifactType") == artifact_type
+        ),
+        None,
+    )
+    if artifact is None:
+        raise ValueError(
+            "no jinn.episode.v1 or jinn.trace-envelope.v0 artifact in this record"
+        )
+
+    artifact_type = str(artifact["artifactType"])
+    content_b64 = artifact.get("contentBase64")
+    expected = str(artifact.get("sha256") or "")
+    if not isinstance(content_b64, str) or not expected:
+        raise ValueError(f"{artifact_type} artifact is missing content or sha256")
+    content = base64.b64decode(content_b64)
+    actual = hashlib.sha256(content).hexdigest()
+    if actual != expected:
+        raise ValueError(
+            f"sha256 mismatch — refusing to read (expected {expected[:12]}…, got {actual[:12]}…)"
+        )
+    parsed = json.loads(content.decode("utf-8"))
+    if not isinstance(parsed, dict) or parsed.get("schemaVersion") != artifact_type:
+        raise ValueError(
+            f"{artifact_type} artifact body has a mismatched schemaVersion"
+        )
+    if artifact_type == TRACE_ENVELOPE_ARTIFACT_TYPE:
+        return parsed, expected
+
+    trajectory = parsed.get("trajectory")
+    outcome = parsed.get("outcome")
+    projected_outcome = dict(outcome) if isinstance(outcome, dict) else {}
+    projected_outcome["verifiabilityTier"] = projected_outcome.get(
+        "verificationStrength"
+    )
+    return {
+        **parsed,
+        "steps": trajectory,
+        "outcome": projected_outcome,
+    }, expected
 
 
 def _skill_md_and_slug(trace: Dict[str, Any], ref: str) -> Tuple[str, str]:
