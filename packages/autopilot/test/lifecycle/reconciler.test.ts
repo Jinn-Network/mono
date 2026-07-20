@@ -16,6 +16,7 @@ interface MutableState {
   draft: boolean;
   labels: Set<string>;
   comments: Set<string>;
+  summary: string | null;
   prExists: boolean;
   review: {
     oid: typeof REVIEW;
@@ -63,6 +64,12 @@ function writer(
       fail('ensureHumanComment');
       state.comments.add(marker);
     },
+    ensureImplementationSummary: async (_pr, expectedHead, summary) => {
+      calls.push('ensureImplementationSummary');
+      expect(expectedHead).toBe(state.head);
+      fail('ensureImplementationSummary');
+      state.summary = summary;
+    },
     findOpenPullRequest: async () => state.prExists ? {
       number: 101,
       head: state.head,
@@ -97,12 +104,42 @@ function initial(): MutableState {
     draft: false,
     labels: new Set(),
     comments: new Set(),
+    summary: null,
     prExists: false,
     review: { oid: REVIEW, head: HEAD, state: 'active' },
   };
 }
 
 describe('executeProjectionPlan', () => {
+  it('recovers a durable implementation summary before making the PR ready', async () => {
+    const state = initial();
+    state.status = 'In Review';
+    state.labels.add('engine:review');
+    state.draft = true;
+    const calls: string[] = [];
+    const actions: ProjectionAction[] = [
+      {
+        kind: 'ensure-implementation-summary',
+        prNumber: 101,
+        expectedHead: HEAD,
+        summary: 'Durable summary',
+      },
+      {
+        kind: 'set-pr-draft',
+        prNumber: 101,
+        expectedHead: HEAD,
+        draft: false,
+      },
+    ];
+
+    const report = await executeProjectionPlan({ actions }, writer(state, calls));
+
+    expect(report.results.map((result) => result.outcome)).toEqual(['applied', 'applied']);
+    expect(state.summary).toBe('Durable summary');
+    expect(state.draft).toBe(false);
+    expect(calls).toEqual(['ensureImplementationSummary', 'setPullRequestDraft']);
+  });
+
   it('re-reads and rejects every head-pinned correction after the head changes', async () => {
     const state = initial();
     state.head = CHANGED;

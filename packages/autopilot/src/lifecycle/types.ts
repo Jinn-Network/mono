@@ -190,6 +190,7 @@ export interface PullRequestLifecycleItem extends LifecycleItemBase {
   readonly approved: boolean;
   readonly mergeState: 'clean' | 'behind' | 'conflict' | 'blocked';
   readonly branchClaim?: BranchClaim;
+  readonly implementationSummary?: string;
   readonly reviewClaim?: ReviewClaimRecord;
   readonly terminalVerdict?: TerminalVerdictEvidence;
 }

@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { defaultRunner, type CommandRunner } from '../../src/dispatcher/issue-source.js';
 import {
+  advanceAttemptExpectedHead,
   cleanupAttempt,
   countRunnerLiveAttempts,
   createAttemptWorkspace,
@@ -374,6 +375,30 @@ describe('attempt workspace and manifest', () => {
       ).toBe(original);
       writeFileSync(manifest.paths.manifest, original);
     }
+  });
+
+  it('advances only the progressive expected head through an exact manifest CAS', async () => {
+    const fixture = repositoryFixture();
+    const current = await createAttemptWorkspace(options(fixture), defaultRunner);
+    const nextHead = 'a'.repeat(40);
+
+    const advanced = advanceAttemptExpectedHead(
+      current.paths.manifest,
+      current.expectedHead,
+      nextHead,
+      () => new Date('2026-07-20T00:05:00.000Z'),
+    );
+
+    expect(advanced.expectedHead).toBe(nextHead);
+    expect(advanced.claimOid).toBe(current.claimOid);
+    expect(advanced.paths).toEqual(current.paths);
+    expect(advanced.timestamps.updatedAt).toBe('2026-07-20T00:05:00.000Z');
+    expect(() => advanceAttemptExpectedHead(
+      current.paths.manifest,
+      current.expectedHead,
+      'b'.repeat(40),
+    )).toThrow(/expected head changed/i);
+    expect(readAttemptManifest(current.paths.manifest).expectedHead).toBe(nextHead);
   });
 
   it('rejects in-place nested static repository and path mutations', async () => {

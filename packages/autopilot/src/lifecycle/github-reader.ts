@@ -284,6 +284,20 @@ function matchingBranchTrailers(
   return trailers;
 }
 
+export function extractImplementationCompletionSummary(
+  message: string,
+  trailers: string,
+): string | null {
+  const claim = decodeBranchClaimTrailers(trailers);
+  if (claim.phase !== 'implement' || claim.phaseComplete !== true) return null;
+  const prefix = 'Autopilot implementation phase complete\n\n';
+  const suffix = `\n\n${trailers}`;
+  if (!message.startsWith(prefix) || !message.endsWith(suffix)) {
+    throw new Error('Implementation completion commit is missing its durable summary envelope');
+  }
+  return message.slice(prefix.length, -suffix.length);
+}
+
 function assertCompletePrNode(pr: GraphQlPr): void {
   if (pr.labels.pageInfo.hasNextPage) {
     throw new Error(`PR #${pr.number} labels were truncated`);
@@ -323,6 +337,7 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
   private readonly ancestryByCandidate = new Map<string, Promise<{
     readonly headCommittedAt: string;
     readonly claimTrailers: string | null;
+    readonly completionSummary: string | null;
   }>>();
 
   constructor(private readonly run: CommandRunner = defaultRunner) {
@@ -370,6 +385,7 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
   ): Promise<{
     readonly headCommittedAt: string;
     readonly claimTrailers: string | null;
+    readonly completionSummary: string | null;
   }> {
     const cacheKey = `${headOid}:${issueNumber ?? '*'}:${prNumber ?? '*'}`;
     const cached = this.ancestryByCandidate.get(cacheKey);
@@ -390,6 +406,7 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
   ): Promise<{
     readonly headCommittedAt: string;
     readonly claimTrailers: string | null;
+    readonly completionSummary: string | null;
   }> {
     let headCommittedAt: string | undefined;
     for (let page = 1; page <= MAX_COMMIT_HISTORY_PAGES; page += 1) {
@@ -411,16 +428,28 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
           throw new Error(`Branch ${headOid} is missing its GitHub commit time`);
         }
       }
-      const claimTrailers = commits
-        .map((commit) => matchingBranchTrailers(
-          commit.commit?.message ?? '',
-          issueNumber,
-          prNumber,
-        ))
-        .find((trailers) => trailers !== null) ?? null;
-      if (claimTrailers !== null) return { headCommittedAt: headCommittedAt!, claimTrailers };
+      const evidence = commits
+        .map((commit) => {
+          const message = commit.commit?.message ?? '';
+          const claimTrailers = matchingBranchTrailers(message, issueNumber, prNumber);
+          return claimTrailers === null
+            ? null
+            : {
+                claimTrailers,
+                completionSummary: extractImplementationCompletionSummary(
+                  message,
+                  claimTrailers,
+                ),
+              };
+        })
+        .find((candidate) => candidate !== null) ?? null;
+      if (evidence !== null) return { headCommittedAt: headCommittedAt!, ...evidence };
       if (commits.length < COMMIT_HISTORY_PAGE_SIZE) {
-        return { headCommittedAt: headCommittedAt!, claimTrailers: null };
+        return {
+          headCommittedAt: headCommittedAt!,
+          claimTrailers: null,
+          completionSummary: null,
+        };
       }
     }
     throw new Error(`Branch ${headOid} ancestry pagination exceeded safety limit`);
@@ -442,14 +471,33 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
     const stableMatch = /^autopilot\/([1-9][0-9]*)$/.exec(pr.headRefName);
     if (stableMatch !== null) branchIssues.add(Number(stableMatch[1]));
     const branchIssue = branchIssues.size === 1 ? [...branchIssues][0] : undefined;
-    let claimTrailers = [...pr.commits.nodes]
+    let claimEvidence = [...pr.commits.nodes]
       .reverse()
-      .map((node) => matchingBranchTrailers(node.commit.message, branchIssue, pr.number))
-      .find((trailers) => trailers !== null) ?? null;
-    if (claimTrailers === null && includeReviewClaim && pr.commits.pageInfo.hasPreviousPage) {
-      claimTrailers = (
-        await this.branchAncestry(pr.headRefOid, branchIssue, pr.number)
-      ).claimTrailers;
+      .map((node) => {
+        const claimTrailers = matchingBranchTrailers(
+          node.commit.message,
+          branchIssue,
+          pr.number,
+        );
+        return claimTrailers === null
+          ? null
+          : {
+              claimTrailers,
+              completionSummary: extractImplementationCompletionSummary(
+                node.commit.message,
+                claimTrailers,
+              ),
+            };
+      })
+      .find((candidate) => candidate !== null) ?? null;
+    if (claimEvidence === null && includeReviewClaim && pr.commits.pageInfo.hasPreviousPage) {
+      const ancestry = await this.branchAncestry(pr.headRefOid, branchIssue, pr.number);
+      if (ancestry.claimTrailers !== null) {
+        claimEvidence = {
+          claimTrailers: ancestry.claimTrailers,
+          completionSummary: ancestry.completionSummary,
+        };
+      }
     }
     const reviews: RawNativeReview[] = pr.reviews.nodes.map((review) => {
       if (review.commit === null) {
@@ -487,7 +535,8 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
       mergeStateStatus: pr.mergeStateStatus,
       checks: checks(pr),
       reviews,
-      branchClaimTrailers: claimTrailers,
+      branchClaimTrailers: claimEvidence?.claimTrailers ?? null,
+      implementationCompletionSummary: claimEvidence?.completionSummary ?? null,
       reviewClaim: includeReviewClaim ? await this.reviewClaim(pr.number) : null,
       humanIssueNumber: humanEvidence?.issueNumber ?? null,
       humanReason: humanEvidence?.reason ?? null,
@@ -628,6 +677,7 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
         headOid: oid,
         headCommittedAt: ancestry.headCommittedAt,
         claimTrailers: trailers,
+        implementationCompletionSummary: ancestry.completionSummary,
       });
     }
     return claims;

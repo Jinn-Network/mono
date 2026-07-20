@@ -56,6 +56,7 @@ export interface BranchClaimSnapshot {
   readonly headOid: GitOid;
   readonly headCommittedAt: string;
   readonly claim: BranchClaim;
+  readonly implementationCompletionSummary?: string;
 }
 
 export interface RawBranchClaim {
@@ -64,6 +65,7 @@ export interface RawBranchClaim {
   readonly headOid: string;
   readonly headCommittedAt: string;
   readonly claimTrailers: string;
+  readonly implementationCompletionSummary?: string | null;
 }
 
 export interface PullRequestSnapshot {
@@ -84,6 +86,7 @@ export interface PullRequestSnapshot {
   readonly checks: readonly CheckSummary[];
   readonly reviews: readonly NativeReviewSnapshot[];
   readonly branchClaim?: BranchClaim;
+  readonly implementationCompletionSummary?: string;
   readonly reviewClaim?: ReviewClaimSnapshot;
   readonly humanIssueNumber?: number;
   readonly humanReason?: HumanReason;
@@ -117,6 +120,7 @@ export interface RawPullRequest {
   readonly checks: readonly CheckSummary[];
   readonly reviews: readonly RawNativeReview[];
   readonly branchClaimTrailers: string | null;
+  readonly implementationCompletionSummary?: string | null;
   readonly reviewClaim: { readonly oid: string; readonly payload: string } | null;
   readonly humanIssueNumber?: number | null;
   readonly humanReason: HumanReason | null;
@@ -166,6 +170,10 @@ function parseBranchClaim(raw: RawBranchClaim): BranchClaimSnapshot {
       headOid: gitOid(raw.headOid),
       headCommittedAt: raw.headCommittedAt,
       claim,
+      ...(raw.implementationCompletionSummary === undefined
+        || raw.implementationCompletionSummary === null
+        ? {}
+        : { implementationCompletionSummary: raw.implementationCompletionSummary }),
     };
   } catch (cause) {
     throw new SnapshotDecodeError(`branch ${raw.headRefName}`, cause);
@@ -239,6 +247,10 @@ function parsePullRequest(raw: RawPullRequest): PullRequestSnapshot {
       checks: raw.checks.map((check) => ({ ...check })),
       reviews,
       ...(branchClaim === undefined ? {} : { branchClaim }),
+      ...(raw.implementationCompletionSummary === undefined
+        || raw.implementationCompletionSummary === null
+        ? {}
+        : { implementationCompletionSummary: raw.implementationCompletionSummary }),
       ...(reviewClaim === undefined ? {} : { reviewClaim }),
       ...(raw.humanIssueNumber === undefined || raw.humanIssueNumber === null
         ? {}
@@ -388,6 +400,9 @@ function lifecyclePr(
     approved: decisive?.state === 'APPROVED',
     mergeState: mergeState(pr),
     ...(pr.branchClaim === undefined ? {} : { branchClaim: pr.branchClaim }),
+    ...(pr.implementationCompletionSummary === undefined
+      ? {}
+      : { implementationSummary: pr.implementationCompletionSummary }),
     ...(reviewClaim === undefined ? {} : { reviewClaim }),
     ...(terminalVerdict(pr) === undefined ? {} : { terminalVerdict: terminalVerdict(pr) }),
   };

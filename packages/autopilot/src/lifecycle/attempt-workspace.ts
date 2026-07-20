@@ -446,6 +446,36 @@ export function updateAttemptManifest(
   return next;
 }
 
+/**
+ * Checkpoint-only manifest transition. The original claim/identity/path
+ * binding remains immutable; only the exact progressive publication head and
+ * its update timestamp may advance.
+ */
+export function advanceAttemptExpectedHead(
+  path: string,
+  expectedHead: string,
+  nextHead: string,
+  now: () => Date = () => new Date(),
+): AttemptManifest {
+  const previous = readAttemptManifest(path);
+  const expected = gitOid(expectedHead);
+  const next = gitOid(nextHead);
+  if (previous.expectedHead !== expected) {
+    throw new Error('Attempt manifest expected head changed before progressive update');
+  }
+  const timestamp = transitionTimestamp(now);
+  const advanced = decodeAttemptManifest({
+    ...previous,
+    expectedHead: next,
+    timestamps: {
+      ...previous.timestamps,
+      updatedAt: timestamp,
+    },
+  });
+  writeManifestAtomic(path, advanced);
+  return advanced;
+}
+
 function transitionTimestamp(now: () => Date): string {
   const timestamp = now().toISOString();
   return isoTimestamp(timestamp);
