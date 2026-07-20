@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resetFieldCache } from '../../src/dispatcher/field-cache.js';
 import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
 import type { AttemptManifest } from '../../src/lifecycle/attempt-workspace.js';
@@ -58,6 +61,7 @@ function manifest(): AttemptManifest {
       log: '/attempt/session.log',
       ghConfigDir: '/attempt/gh-config',
       askpass: '/attempt/askpass',
+      tokenFile: '/attempt/gh-token',
     },
     timestamps: {
       createdAt: '2026-07-20T12:00:00.000Z',
@@ -148,6 +152,67 @@ describe('production implementation session port', () => {
   // field-list call; a cache populated by an earlier test would skip that
   // call and remove the injection point.
   beforeEach(() => resetFieldCache());
+
+  const roots: string[] = [];
+  afterEach(() => {
+    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  });
+
+  function tokenFileFixture(token: string): { manifestBound: AttemptManifest; tokenFile: string } {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-impl-session-token-'));
+    roots.push(dir);
+    const tokenFile = join(dir, 'gh-token');
+    writeFileSync(tokenFile, `${token}\n`, { mode: 0o600 });
+    const bound = { ...manifest(), paths: { ...manifest().paths, tokenFile } };
+    return { manifestBound: bound, tokenFile };
+  }
+
+  it('regression (#1883): resolves the GH token from the attempt token file when the coordinator runtime scrubbed GH_TOKEN from ambient env', async () => {
+    const { manifestBound } = tokenFileFixture('file-secret');
+    const calls: Array<{ env?: Record<string, string> }> = [];
+    const runner: CommandRunner = async (_cmd, _args, options) => {
+      calls.push({ env: options?.env });
+      return `${WORK}\n`;
+    };
+    const port = makeProductionImplementationSessionPort({
+      runner,
+      // No GH_TOKEN at all — only the non-secret-shaped manifest path, as a
+      // scrubbing runtime would leave it.
+      environment: { JINN_AUTOPILOT_SESSION_MANIFEST: manifestBound.paths.manifest },
+      readManifest: () => manifestBound,
+    });
+
+    await expect(port.readLocalHead(manifestBound)).resolves.toBe(WORK);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.env?.GH_TOKEN).toBe('file-secret');
+  });
+
+  it('prefers ambient GH_TOKEN over the token file when both are available', async () => {
+    const { manifestBound } = tokenFileFixture('file-secret');
+    const calls: Array<{ env?: Record<string, string> }> = [];
+    const runner: CommandRunner = async (_cmd, _args, options) => {
+      calls.push({ env: options?.env });
+      return `${WORK}\n`;
+    };
+    const port = makeProductionImplementationSessionPort({
+      runner,
+      environment: {
+        GH_TOKEN: 'env-secret',
+        JINN_AUTOPILOT_SESSION_MANIFEST: manifestBound.paths.manifest,
+      },
+      readManifest: () => manifestBound,
+    });
+
+    await expect(port.readLocalHead(manifestBound)).resolves.toBe(WORK);
+    expect(calls[0]?.env?.GH_TOKEN).toBe('env-secret');
+  });
+
+  it('throws closed when neither ambient GH_TOKEN nor a readable token file is available', () => {
+    expect(() => makeProductionImplementationSessionPort({
+      environment: { JINN_AUTOPILOT_SESSION_MANIFEST: '/attempt/manifest.json' },
+      readManifest: () => manifest(),
+    })).toThrow(/requires its selected GH_TOKEN/);
+  });
   it('reads winning claim ancestry through only the canonical HTTPS remote and selected identity', async () => {
     const calls: Array<{ cmd: string; args: string[]; env?: Record<string, string> }> = [];
     const runner: CommandRunner = async (cmd, args, options) => {

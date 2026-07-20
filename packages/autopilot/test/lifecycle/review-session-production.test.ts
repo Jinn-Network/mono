@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { AttemptManifest } from '../../src/lifecycle/attempt-workspace.js';
 import { encodeReviewClaimPayload } from '../../src/lifecycle/codecs.js';
 import {
@@ -83,6 +86,7 @@ function manifest(): AttemptManifest {
       log: '/attempt/log',
       ghConfigDir: '/attempt/gh',
       askpass: '/attempt/askpass',
+      tokenFile: '/attempt/gh-token',
     },
     timestamps: {
       createdAt: '2026-07-20T12:00:00.000Z',
@@ -154,6 +158,82 @@ function projectFields(): string {
 }
 
 describe('production review session port', () => {
+  const roots: string[] = [];
+  afterEach(() => {
+    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  });
+
+  function tokenFileFixture(token: string): AttemptManifest {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-review-session-token-'));
+    roots.push(dir);
+    const tokenFile = join(dir, 'gh-token');
+    writeFileSync(tokenFile, `${token}\n`, { mode: 0o600 });
+    return { ...manifest(), paths: { ...manifest().paths, tokenFile } };
+  }
+
+  it('regression (#1883): resolves the GH token from the attempt token file when the coordinator runtime scrubbed GH_TOKEN from ambient env', async () => {
+    const bound = tokenFileFixture('file-secret');
+    const calls: Array<{ env?: Record<string, string> }> = [];
+    const port = makeProductionReviewSessionPort({
+      environment: { JINN_AUTOPILOT_SESSION_MANIFEST: bound.paths.manifest },
+      readManifest: () => bound,
+      runner: async (cmd, args, options) => {
+        calls.push({ env: options?.env });
+        if (cmd === 'gh') return 'review-bot\n';
+        if (args.includes('get-url')) return 'https://github.com/Jinn-Network/mono.git\n';
+        if (args.includes('ls-remote')) {
+          return `${REVIEW}\trefs/jinn-autopilot/review-claims/v1/84\n`;
+        }
+        if (args.includes('fetch')) return '';
+        if (args.includes('show')) return `${encodeReviewClaimPayload(claim())}\n`;
+        throw new Error(`unexpected ${cmd} ${args.join(' ')}`);
+      },
+    });
+
+    await expect(port.readAuthority(bound)).resolves.toEqual({
+      reviewRefOid: REVIEW,
+      record: claim(),
+    });
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls.every((call) => call.env?.GH_TOKEN === 'file-secret')).toBe(true);
+  });
+
+  it('prefers ambient GH_TOKEN over the token file when both are available', async () => {
+    const bound = tokenFileFixture('file-secret');
+    const calls: Array<{ env?: Record<string, string> }> = [];
+    const port = makeProductionReviewSessionPort({
+      environment: {
+        GH_TOKEN: 'env-secret',
+        JINN_AUTOPILOT_SESSION_MANIFEST: bound.paths.manifest,
+      },
+      readManifest: () => bound,
+      runner: async (cmd, args, options) => {
+        calls.push({ env: options?.env });
+        if (cmd === 'gh') return 'review-bot\n';
+        if (args.includes('get-url')) return 'https://github.com/Jinn-Network/mono.git\n';
+        if (args.includes('ls-remote')) {
+          return `${REVIEW}\trefs/jinn-autopilot/review-claims/v1/84\n`;
+        }
+        if (args.includes('fetch')) return '';
+        if (args.includes('show')) return `${encodeReviewClaimPayload(claim())}\n`;
+        throw new Error(`unexpected ${cmd} ${args.join(' ')}`);
+      },
+    });
+
+    await expect(port.readAuthority(bound)).resolves.toEqual({
+      reviewRefOid: REVIEW,
+      record: claim(),
+    });
+    expect(calls.every((call) => call.env?.GH_TOKEN === 'env-secret')).toBe(true);
+  });
+
+  it('throws closed when neither ambient GH_TOKEN nor a readable token file is available', () => {
+    expect(() => makeProductionReviewSessionPort({
+      environment: { JINN_AUTOPILOT_SESSION_MANIFEST: '/attempt/manifest.json' },
+      readManifest: () => manifest(),
+    })).toThrow(/requires its selected GH_TOKEN/);
+  });
+
   it('freshly rederives the unique open issue/branch mapping and pinned-base CODEOWNER policy', async () => {
     const port = makeProductionReviewSessionPort({
       environment: {

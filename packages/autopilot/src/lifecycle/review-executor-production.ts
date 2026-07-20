@@ -309,6 +309,7 @@ export function makeProductionReviewActionPort(
         reviewRefOid: input.reviewRefOid,
         reviewApprovalPolicy: input.approvalPolicy,
         selectedLogin: input.selectedLogin,
+        credential: input.credential,
         attemptId: input.attemptId,
         remoteName: options.remoteName ?? 'jinn-autopilot-v2',
       }, runner);

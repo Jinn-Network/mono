@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { AttemptManifest } from '../../src/lifecycle/attempt-workspace.js';
 import {
   makeProductionMergePrepSessionPort,
@@ -13,6 +16,70 @@ const BASE = gitOid('3'.repeat(40));
 const ATTEMPT = '11111111-1111-4111-8111-111111111111';
 
 describe('production merge-prep session port', () => {
+  const roots: string[] = [];
+  afterEach(() => {
+    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  });
+
+  function tokenFileFixture(token: string): AttemptManifest {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-merge-prep-session-token-'));
+    roots.push(dir);
+    const tokenFile = join(dir, 'gh-token');
+    writeFileSync(tokenFile, `${token}\n`, { mode: 0o600 });
+    return {
+      paths: {
+        askpass: '/attempt/askpass',
+        worktree: '/attempt/worktree',
+        tokenFile,
+      },
+    } as unknown as AttemptManifest;
+  }
+
+  it('regression (#1883): resolves the GH token from the attempt token file when the coordinator runtime scrubbed GH_TOKEN from ambient env', async () => {
+    const bound = tokenFileFixture('file-secret');
+    const calls: Array<{ env?: Record<string, string> }> = [];
+    const port = makeProductionMergePrepSessionPort({
+      environment: { JINN_AUTOPILOT_SESSION_MANIFEST: '/attempt/manifest.json' },
+      readManifest: () => bound,
+      runner: async (_command, _args, options) => {
+        calls.push({ env: options?.env });
+        return '';
+      },
+    });
+
+    await expect(port.readLocalStatusClean(bound)).resolves.toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.env?.GH_TOKEN).toBe('file-secret');
+  });
+
+  it('prefers ambient GH_TOKEN over the token file when both are available', async () => {
+    const bound = tokenFileFixture('file-secret');
+    const calls: Array<{ env?: Record<string, string> }> = [];
+    const port = makeProductionMergePrepSessionPort({
+      environment: {
+        GH_TOKEN: 'env-secret',
+        JINN_AUTOPILOT_SESSION_MANIFEST: '/attempt/manifest.json',
+      },
+      readManifest: () => bound,
+      runner: async (_command, _args, options) => {
+        calls.push({ env: options?.env });
+        return '';
+      },
+    });
+
+    await expect(port.readLocalStatusClean(bound)).resolves.toBe(true);
+    expect(calls[0]?.env?.GH_TOKEN).toBe('env-secret');
+  });
+
+  it('throws closed when neither ambient GH_TOKEN nor a readable token file is available', () => {
+    expect(() => makeProductionMergePrepSessionPort({
+      environment: { JINN_AUTOPILOT_SESSION_MANIFEST: '/attempt/manifest.json' },
+      readManifest: () => ({
+        paths: { tokenFile: '/attempt/gh-token' },
+      } as unknown as AttemptManifest),
+    })).toThrow(/requires its selected GH_TOKEN/);
+  });
+
   it('classifies only a complete patch-equivalent range-diff as mechanical', () => {
     expect(rangeDiffProvesMechanical([
       '1:  aaaaaaa = 1:  bbbbbbb Preserve the first patch',

@@ -97,6 +97,7 @@ interface CreateAttemptInput {
   readonly claimOid: GitOid;
   readonly prNumber: number;
   readonly selectedLogin: string;
+  readonly credential: SelectedCredential;
 }
 
 interface SpawnImplementationInput {
@@ -461,6 +462,7 @@ export async function executeImplementationAction(
     claimOid,
     prNumber: pullRequest.number,
     selectedLogin: selection.login,
+    credential: selection.credential,
   });
   if (attempt.attemptId !== attemptId) {
     throw new Error('Detached implementation attempt does not match its claim');

@@ -297,6 +297,7 @@ describe('implementation action executor', () => {
         log: '/tmp/new-branch/session.log',
         ghConfigDir: '/tmp/new-branch/gh-config',
         askpass: '/tmp/new-branch/askpass',
+        tokenFile: '/tmp/new-branch/gh-token',
       },
       timestamps: {
         createdAt: '2026-07-20T12:00:00.000Z',

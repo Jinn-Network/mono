@@ -262,6 +262,7 @@ export function makeProductionMergePrepActionPort(
         expectedHead: input.expectedHead,
         claimOid: input.claimOid,
         selectedLogin: input.selectedLogin,
+        credential: input.credential,
         attemptId: input.attemptId ?? randomUUID(),
         remoteName: options.remoteName ?? 'jinn-autopilot-v2',
       }, runner);

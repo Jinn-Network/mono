@@ -79,6 +79,7 @@ export interface MergePrepExecutorDeps {
     readonly expectedHead: GitOid;
     readonly claimOid: GitOid;
     readonly selectedLogin: string;
+    readonly credential: SelectedCredential;
   }): Promise<MergePrepAttemptBinding>;
   spawnCoordinator(input: {
     readonly attemptId: string;
@@ -293,6 +294,7 @@ export async function executeMergePrepAction(
     expectedHead: claimOid,
     claimOid,
     selectedLogin: selection.login,
+    credential: selection.credential,
   });
   if (attempt.attemptId !== attemptId) {
     throw new Error('Detached merge-prep attempt does not match its claim');

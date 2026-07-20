@@ -55,6 +55,7 @@ const MANIFEST: AttemptManifest = {
     log: '/attempt/session.log',
     ghConfigDir: '/attempt/gh-config',
     askpass: '/attempt/askpass',
+    tokenFile: '/attempt/gh-token',
   },
   timestamps: {
     createdAt: '2026-07-20T00:00:00.000Z',
@@ -516,4 +517,34 @@ describe('production session protocol', () => {
     ]);
   });
 
+  it('regression (#1883): an implement-phase operation succeeds with a reviewer login configured but no reviewer token, and never constructs the review or merge-prep session ports', async () => {
+    const implementation = protocol();
+    const production = makeProductionSessionProtocol(
+      // Realistic misconfiguration-shaped env: a reviewer login is
+      // configured (JINN_REVIEW_BOT_LOGIN) but its token is not (as it would
+      // be if a coordinator runtime scrubbed the secret-shaped
+      // JINN_REVIEW_GH_TOKEN while leaving the non-secret-shaped login
+      // through). An implement-phase operation must not demand it — only
+      // the credential the operation's own phase actually needs.
+      { JINN_REVIEW_BOT_LOGIN: 'review-bot', GH_TOKEN: 'impl-secret' },
+      () => implementation,
+      () => { throw new Error('review session port must not be constructed for an implement-phase operation'); },
+      () => { throw new Error('merge-prep session port must not be constructed for an implement-phase operation'); },
+    );
+    const implementationManifest = {
+      ...MANIFEST,
+      phase: 'implement' as const,
+      subject: 'issue-8',
+      prNumber: 9,
+      reviewGeneration: undefined,
+      reviewRefOid: undefined,
+      reviewApprovalPolicy: undefined,
+    };
+
+    await expect(production.checkpoint(implementationManifest)).resolves.toEqual({
+      status: 'published',
+      head: SUCCESS_HEAD,
+    });
+    expect(implementation.calls).toEqual([{ operation: 'checkpoint' }]);
+  });
 });

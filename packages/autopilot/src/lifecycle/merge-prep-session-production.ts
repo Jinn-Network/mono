@@ -18,6 +18,7 @@ import {
 import {
   gitPublicationArgs,
   isolatedGitCommandOverlay,
+  readAttemptTokenFile,
   sanitizedGitHubCommandOverlay,
 } from './credentials.js';
 import { makeGitProtocolPort } from './git-protocol.js';
@@ -80,13 +81,28 @@ export function makeProductionMergePrepSessionPort(
 ): MergePrepSessionPort {
   const runner = options.runner ?? defaultRunner;
   const ambient = options.environment ?? process.env;
-  const token = ambient.GH_TOKEN;
-  if (!token) throw new Error('Merge-prep session requires its selected GH_TOKEN');
+  const readManifest = options.readManifest ?? readAttemptManifest;
   const manifestPath = ambient.JINN_AUTOPILOT_SESSION_MANIFEST;
   const currentManifest = () => {
     if (!manifestPath) throw new Error('Merge-prep session manifest path is unavailable');
-    return (options.readManifest ?? readAttemptManifest)(manifestPath);
+    return readManifest(manifestPath);
   };
+  // Resolution order (#1883): ambient `GH_TOKEN` first, else the
+  // attempt-scoped token file located through the (non-secret-shaped)
+  // manifest path — see implementation-session-production.ts for the full
+  // rationale. Only once neither resolves does this fail closed.
+  const token = ((): string => {
+    if (ambient.GH_TOKEN) return ambient.GH_TOKEN;
+    if (manifestPath) {
+      try {
+        const fromFile = readAttemptTokenFile(readManifest(manifestPath).paths.tokenFile);
+        if (fromFile !== undefined) return fromFile;
+      } catch {
+        // Fall through to the closed failure below.
+      }
+    }
+    throw new Error('Merge-prep session requires its selected GH_TOKEN');
+  })();
   const envFor = (manifest: AttemptManifest) => ({
     ...sanitizedGitHubCommandOverlay(ambient, { GH_TOKEN: token }),
     ...isolatedGitCommandOverlay(ambient, manifest.paths.askpass),

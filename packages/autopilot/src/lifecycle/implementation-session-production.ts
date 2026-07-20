@@ -17,6 +17,7 @@ import {
 import {
   gitPublicationArgs,
   isolatedGitCommandOverlay,
+  readAttemptTokenFile,
   sanitizedGitHubCommandOverlay,
 } from './credentials.js';
 import { validateCanonicalGitHubHttpsRemote } from './implementation-executor.js';
@@ -118,17 +119,33 @@ export function makeProductionImplementationSessionPort(
 ): ImplementationSessionPort {
   const runner = options.runner ?? defaultRunner;
   const ambient = options.environment ?? process.env;
-  const token = ambient.GH_TOKEN;
-  if (token === undefined || token.length === 0) {
-    throw new Error('Implementation session requires its selected GH_TOKEN');
-  }
+  const readManifest = options.readManifest ?? readAttemptManifest;
   const manifestPath = ambient.JINN_AUTOPILOT_SESSION_MANIFEST;
   const currentManifest = (): AttemptManifest => {
     if (manifestPath === undefined || manifestPath.length === 0) {
       throw new Error('Implementation session manifest path is unavailable');
     }
-    return (options.readManifest ?? readAttemptManifest)(manifestPath);
+    return readManifest(manifestPath);
   };
+  // Resolution order (#1883): the ambient `GH_TOKEN` first (the historical,
+  // still-preferred path); otherwise the attempt-scoped token file, located
+  // through the manifest path (which is NOT secret-shaped and so survives a
+  // runtime's env scrub even when `GH_TOKEN` itself does not). Only once
+  // neither resolves does this fail closed.
+  const token = ((): string => {
+    if (ambient.GH_TOKEN !== undefined && ambient.GH_TOKEN.length > 0) {
+      return ambient.GH_TOKEN;
+    }
+    if (manifestPath !== undefined && manifestPath.length > 0) {
+      try {
+        const fromFile = readAttemptTokenFile(readManifest(manifestPath).paths.tokenFile);
+        if (fromFile !== undefined) return fromFile;
+      } catch {
+        // Fall through to the closed failure below.
+      }
+    }
+    throw new Error('Implementation session requires its selected GH_TOKEN');
+  })();
 
   const environmentFor = (manifest: AttemptManifest): Record<string, string> => ({
     ...sanitizedGitHubCommandOverlay(ambient, { GH_TOKEN: token }),

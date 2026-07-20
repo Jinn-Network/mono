@@ -1,7 +1,29 @@
+import { readFileSync } from 'node:fs';
 import type { CommandRunner } from '../dispatcher/issue-source.js';
 
 export type CredentialPhase = 'implement' | 'review' | 'merge-prep' | 'merge';
 export type CredentialPreference = 'implementation' | 'review';
+
+/**
+ * The runtime-independent fallback read for the attempt-scoped GH token file
+ * (#1883). Some coordinator runtimes scrub secret-shaped env vars (like
+ * `GH_TOKEN`) from spawned shell tools, so a production session port cannot
+ * rely on inheriting it through the environment alone. The token file at
+ * `manifest.paths.tokenFile` is written once at attempt creation
+ * (`createAttemptWorkspace`) and read directly off disk here — a path
+ * survives any runtime's env scrub because it travels through the
+ * non-secret-shaped `JINN_AUTOPILOT_SESSION_MANIFEST` env var instead.
+ * Returns `undefined` (never throws) so callers can fall through to their
+ * own closed failure.
+ */
+export function readAttemptTokenFile(path: string): string | undefined {
+  try {
+    const raw = readFileSync(path, 'utf8').trim();
+    return raw.length > 0 ? raw : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 const EXPLICIT_GITHUB_SECRET_ENV = new Set([
   'GH_TOKEN',
