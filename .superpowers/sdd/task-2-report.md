@@ -535,3 +535,158 @@ Result:
   against a disposable live repository containing a long adopted branch with
   merge ancestry. The approved live-shadow/canary gate remains required;
   active mode is deliberately unwired.
+
+## Third-review fix addendum — 2026-07-20
+
+### Findings addressed
+
+- Issue-scoped closing-PR reads now request
+  `closedByPullRequestsReferences(first: 100, includeClosedPrs: true)` and
+  classify every returned node explicitly:
+  - `OPEN` is the bounded adopted/missing-management-label discovery path;
+  - `MERGED` is terminal merged-outcome evidence;
+  - `CLOSED` without merge is ignored and cannot complete an issue.
+- Ambiguity-suppressed v2 PRs now restore and permanently retain both
+  `engine:review` and `review:needs-human` while drafted and Human-held.
+- Every listed Human source produces structured reason evidence:
+  - Project `Blocked on: Human`;
+  - Project `Human` status;
+  - `review:needs-human` on the issue or PR;
+  - a valid structured Human marker.
+  Explicit marker reasons win. Otherwise the snapshot synthesizes an
+  implementation- or review-phase escalation reason that names the source.
+- Orphan implementation claims are no longer rendered as legacy eligible issue
+  rows. Operator JSON exposes a separate `orphanBranchClaims` collection with
+  the issue, exact branch/head, attempt, runner, generation-equivalent attempt,
+  progress age, Human hold/reason, and pending projection/repair actions. The
+  orphan type has no PR number and no synthetic PR identity.
+- `explain issue`, human status rendering, and recover events understand the
+  separate orphan state. Observe remains read-only, recover remains limited to
+  projection/recovery writes, and active remains rejected.
+
+### Third-review RED / GREEN evidence
+
+Initial focused RED:
+
+```text
+yarn vitest run test/lifecycle/github-reader.test.ts \
+  test/lifecycle/projection.test.ts \
+  test/lifecycle/snapshot.test.ts \
+  test/lifecycle/controller.test.ts
+```
+
+Result: 4 files failed with 7 expected behavioral failures:
+
+- the command shape omitted `includeClosedPrs: true`;
+- a production-shaped CLOSED-unmerged row appeared beside OPEN/MERGED rows;
+- ambiguity projection omitted `engine:review`;
+- Project `Blocked on: Human`, Project Human status, and
+  `review:needs-human` produced no structured PR reason;
+- orphan claims rendered as legacy eligible issue rows without branch, claim,
+  runner, progress, or explicit v2 operator identity.
+
+Focused GREEN:
+
+```text
+yarn vitest run test/lifecycle/github-reader.test.ts \
+  test/lifecycle/projection.test.ts \
+  test/lifecycle/snapshot.test.ts \
+  test/lifecycle/controller.test.ts
+```
+
+Result: 4 files passed, 41 tests passed.
+
+The separate orphan-model refinement had its own RED:
+
+```text
+yarn vitest run test/lifecycle/controller.test.ts
+```
+
+Result: 2 expected failures because orphan claims still occupied ordinary
+lifecycle rows.
+
+GREEN:
+
+```text
+yarn vitest run test/lifecycle/controller.test.ts
+```
+
+Result: 1 file passed, 13 tests passed. A final focused RED/GREEN normalized
+Project-derived orphan Human reasons from `eligible` to `implementing`.
+
+### Third-review files
+
+Production:
+
+- `packages/autopilot/src/lifecycle/controller.ts`
+- `packages/autopilot/src/lifecycle/github-reader.ts`
+- `packages/autopilot/src/lifecycle/projection.ts`
+- `packages/autopilot/src/lifecycle/snapshot.ts`
+
+Tests:
+
+- `packages/autopilot/test/lifecycle/controller.test.ts`
+- `packages/autopilot/test/lifecycle/github-reader.test.ts`
+- `packages/autopilot/test/lifecycle/projection.test.ts`
+- `packages/autopilot/test/lifecycle/snapshot.test.ts`
+
+Evidence:
+
+- `.superpowers/sdd/task-2-report.md`
+
+### Complete Task 2 commit lineage
+
+- Design/spec baseline:
+  `91ec7468bd33d93283c8aa21021fa334d53beda6`
+- Task 2 implementation:
+  `3471725db7c4baf37ec7c468d12555677a7d3746`
+- First-review fix:
+  `504dbeb0b6a67c22361bac3c4f30d5c12e46a44a`
+- Second-review fix:
+  `39abf153d2424956aef954b2fd4860a90ea3462b`
+- Third-review fix base:
+  `39abf153d2424956aef954b2fd4860a90ea3462b`
+- Final third-review fix SHA: recorded in the task handoff because a commit
+  cannot contain its own SHA.
+
+### Third-review final verification
+
+Exact final command:
+
+```text
+yarn vitest run test/lifecycle && yarn typecheck && yarn test
+```
+
+Result:
+
+- Lifecycle: 9 files passed, 102 tests passed.
+- Typecheck: exit 0, no diagnostics.
+- Full Autopilot suite: 80 files passed, 806 tests passed.
+- Expected resilience-test stderr was present; zero tests failed.
+
+### Third-review self-review
+
+- Confirmed the Project snapshot remains the first and only Project read in a
+  cycle, and its existing rate-floor guard still stops all later lifecycle
+  reads.
+- Confirmed merged-outcome reads still avoid reviews, comments, checks, and
+  review refs; only OPEN missing-label candidates receive a full exact read.
+- Confirmed CLOSED-unmerged rows cannot become lifecycle or merged evidence.
+- Confirmed Human marker reasons take precedence over synthesized Project/label
+  reasons and that all synthesized reasons name their source.
+- Confirmed ambiguity projection restores the permanent management label and
+  remains idempotent and head-fenced.
+- Confirmed orphan operator data is separate from ordinary issue/PR lifecycle
+  rows and contains no invented PR number.
+- Confirmed observe performs no writer calls, recover adds no claiming,
+  spawning, review, merge-prep execution, or merge authority, and active still
+  rejects before reads.
+- Confirmed `git diff --check` is clean.
+
+### Third-review concerns
+
+- The GraphQL command shape and production-shaped OPEN/MERGED/CLOSED parsing
+  are covered through the injected command runner, but this change was not
+  exercised against a disposable live repository containing all three states
+  and every Human-source combination. The approved live-shadow/canary gate
+  remains required; active mode is deliberately unwired.
