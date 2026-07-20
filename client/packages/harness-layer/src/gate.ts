@@ -5,10 +5,11 @@
  * Tiered eligibility: a `completed` + `evaluator-verified` trace is
  * **pattern-eligible** (→ strategic pattern); a `failed` + `evaluator-verified`
  * trace is **lesson-eligible** (→ failure lesson). Both require
- * `provenance: 'contributed'`, not-held-out, and a passing redaction-health
- * check. Noise (`INVALID`/`INDETERMINATE`/`abandoned`, `user-accepted` failures)
- * is not distillable — the bridge (§8) already drops non-definitive verdicts, and
- * this gate is the second, evidence-level guard.
+ * raw-evidence provenance (contributed or derived), not-held-out, and a
+ * passing redaction-health check. Noise (`INVALID`/`INDETERMINATE`/
+ * `abandoned`, `user-accepted` failures) is not distillable — the bridge (§8)
+ * already drops non-definitive verdicts, and this gate is the second,
+ * evidence-level guard.
  *
  * The redaction-health guard (the #1409 defence, corrected per the adversarial
  * review): measure **intra-value placeholder density** (placeholder chars ÷
@@ -97,8 +98,8 @@ export function evaluateEligibility(
   const reasons: string[] = [];
   const rh = redactionHealth(env, maxDensity);
 
-  if (env.provenance !== 'contributed') {
-    reasons.push('not contributed (imported seeds are already-distilled layer-2, not raw evidence)');
+  if (env.provenance === 'imported') {
+    reasons.push('imported seeds are already-distilled layer-2, not raw evidence');
   }
   if (opts.heldOut) {
     reasons.push('in the held-out cap-v0 slate');

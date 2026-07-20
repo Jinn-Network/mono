@@ -1,14 +1,20 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import {
   unwrapDonation,
   untarGz,
   findSolveTranscript,
   extractSnapshotTranscript,
+  parseSolveTranscript,
 } from '../src/snapshot-transcript.js';
 import { makeTar, makeTarGz, wrapDonation as wrap } from './tar-fixture.js';
 
 const CLAUDE_JSONL = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'fix the bug' }] } }) + '\n';
+const CODEX_JSONL = readFileSync(
+  new URL('./fixtures/codex-stdout.fixture.jsonl', import.meta.url),
+  'utf8',
+);
 
 describe('unwrapDonation', () => {
   it('decodes base64 data when the declared and computed sha256 match', () => {
@@ -93,5 +99,78 @@ describe('extractSnapshotTranscript (end-to-end helper)', () => {
     const gz = makeTarGz({ 'task.json': '{}' });
     const { wrapper, sha256 } = wrap(gz);
     expect(extractSnapshotTranscript(wrapper, sha256)).toBeNull();
+  });
+});
+
+describe('parseSolveTranscript', () => {
+  it('uses the canonical Claude parser and preserves typed-span provenance', () => {
+    const spans = parseSolveTranscript({
+      harness: 'claude-code',
+      jsonl: [
+        JSON.stringify({
+          type: 'user',
+          message: { role: 'user', content: 'Fix the failing test.' },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'text', text: 'I will inspect it.' },
+              { type: 'tool_use', id: 'tool-1', name: 'Read', input: { path: 'test.ts' } },
+            ],
+          },
+        }),
+      ].join('\n'),
+    });
+
+    expect(spans.map((span) => span.attributes['jinn.span.kind'])).toEqual(
+      expect.arrayContaining(['jinn.agent_turn', 'jinn.tool_call']),
+    );
+    expect(
+      spans.every(
+        (span) =>
+          span.attributes['jinn.transcript.parser'] === 'claude-code-stream-json' &&
+          span.attributes['jinn.transcript.parserVersion'] === '1.0.0',
+      ),
+    ).toBe(true);
+  });
+
+  it('uses the canonical Codex parser', () => {
+    const spans = parseSolveTranscript({
+      harness: 'codex',
+      jsonl: CODEX_JSONL,
+    });
+
+    expect(spans).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          attributes: expect.objectContaining({
+            'jinn.span.kind': 'jinn.agent_turn',
+            'message.content': expect.stringContaining('learn loop'),
+          }),
+        }),
+        expect.objectContaining({
+          attributes: expect.objectContaining({
+            'jinn.span.kind': 'jinn.tool_call',
+            'tool.name': 'command_execution',
+          }),
+          events: [
+            expect.objectContaining({
+              attributes: expect.objectContaining({
+                'tool.result': expect.stringContaining('class CodeGenerator'),
+              }),
+            }),
+          ],
+        }),
+      ]),
+    );
+    expect(
+      spans.every(
+        (span) =>
+          span.attributes['jinn.transcript.parser'] === 'codex-exec-json' &&
+          span.attributes['jinn.transcript.parserVersion'] === '1.1.0',
+      ),
+    ).toBe(true);
   });
 });

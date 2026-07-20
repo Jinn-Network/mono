@@ -9,12 +9,47 @@ import { makeSampleEpisode } from '../_fixtures/episode.js';
 const valid = makeSampleEpisode({ episodeId: 'ep-1' });
 
 describe('EpisodeV1Schema', () => {
+  it('preserves derived historical provenance on strict writes and tolerant reads', () => {
+    const historical = { ...valid, provenance: 'derived-from-history' as const };
+
+    expect(EpisodeV1WriteSchema.parse(historical).provenance).toBe(
+      'derived-from-history',
+    );
+    expect(EpisodeV1Schema.parse(historical).provenance).toBe(
+      'derived-from-history',
+    );
+  });
+
   it('parses a valid episode', () => {
     const parsed = EpisodeV1Schema.parse(valid);
     expect(parsed.episodeId).toBe('ep-1');
     expect(parsed.trajectory).toHaveLength(3);
     expect(parsed.trajectory.filter((s) => s.kind === 'jinn.agent_turn')).toHaveLength(2);
     expect(parsed.trajectory.filter((s) => s.kind === 'jinn.tool_call')).toHaveLength(1);
+  });
+
+  it('round-trips optional typed tool observations and status on strict and tolerant reads', () => {
+    const observation = {
+      events: [{
+        timeUnixNano: '12',
+        name: 'tool_result',
+        attributes: {
+          'tool.result': 'tests failed',
+          'tool.result.is_error': true,
+        },
+      }],
+      status: { code: 'ERROR' as const, message: 'exit 1' },
+    };
+    const episode = {
+      ...valid,
+      session: { ...valid.session, kind: 'user' as const },
+      origin: { writer: 'test-writer', build: 'test-build' },
+      trajectory: valid.trajectory.map((step, index) =>
+        index === 1 ? { ...step, ...observation } : step),
+    };
+
+    expect(EpisodeV1WriteSchema.parse(episode).trajectory[1]).toMatchObject(observation);
+    expect(EpisodeV1Schema.parse(episode).trajectory[1]).toMatchObject(observation);
   });
 
   it.each([

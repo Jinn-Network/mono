@@ -26,6 +26,14 @@ import { z } from 'zod';
 
 export const TRACE_ENVELOPE_SCHEMA_VERSION = 'jinn.trace-envelope.v0' as const;
 
+export const EVIDENCE_PROVENANCES = [
+  'contributed',
+  'imported',
+  'derived-from-history',
+] as const;
+export const EvidenceProvenanceSchema = z.enum(EVIDENCE_PROVENANCES);
+export type EvidenceProvenance = z.infer<typeof EvidenceProvenanceSchema>;
+
 /** Max steps per envelope — keeps envelopes anchorable and cheap to fetch. */
 export const MAX_STEPS = 512;
 
@@ -167,10 +175,11 @@ export const TraceEnvelopeV0Schema = z.strictObject({
   }),
 
   /**
-   * `contributed` = real user trace; `imported` = seed (spec §7).
-   * The distribution signal excludes `imported`.
+   * `contributed` = real user trace; `imported` = seed (spec §7);
+   * `derived-from-history` = a same-schema projection of immutable ledger
+   * history. The distribution signal excludes `imported`.
    */
-  provenance: z.enum(['contributed', 'imported']),
+  provenance: EvidenceProvenanceSchema,
 });
 export type TraceEnvelopeV0 = z.infer<typeof TraceEnvelopeV0Schema>;
 

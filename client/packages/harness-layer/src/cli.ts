@@ -449,14 +449,6 @@ export interface RunJinnLayerCliOptions {
 
 const DEFAULT_CLI_SEARCH_LIMIT = 20;
 /**
- * `distill run` fetches the whole verdict corpus so per-instance attempt groups
- * are complete (#1478) — the 20-row search default would silently truncate
- * groups. Only an EXPLICIT `--limit` overrides this; the verdict source pages up
- * to 20k rows, so this covers the current corpus with headroom.
- */
-const DEFAULT_DISTILL_LIMIT = 2000;
-
-/**
  * Byte ceiling on any single IPFS object fetched by the distill pipeline
  * (PR #1476 security review): envelopes are KBs; donation-wrapped
  * system_snapshots observed live are ≤ ~400 KB. 64 MiB leaves generous
@@ -2067,8 +2059,20 @@ export async function runJinnLayerCli(
     // attempt groups stay complete (#1478) rather than inheriting the 20-row
     // search default (which silently truncates groups mid-instance).
     const userSetLimit = rest.some((a) => a === '--limit' || a.startsWith('--limit='));
-    const n = Number.parseInt(parsed.values.limit as string, 10);
-    const limit = userSetLimit && Number.isFinite(n) && n > 0 ? n : DEFAULT_DISTILL_LIMIT;
+    const rawLimit = parsed.values.limit as string;
+    const parsedLimit = Number(rawLimit);
+    if (
+      userSetLimit
+      && (
+        !/^[0-9]+$/.test(rawLimit)
+        || !Number.isSafeInteger(parsedLimit)
+        || parsedLimit <= 0
+      )
+    ) {
+      writer.write(`error: --limit must be a positive safe integer (got ${JSON.stringify(rawLimit)})\n\n${USAGE}`);
+      return 2;
+    }
+    const limit = userSetLimit ? parsedLimit : undefined;
 
     const outDir = (parsed.values.out as string | undefined) ?? mkdtempSync(join(tmpdir(), 'jinn-distill-'));
     mkdirSync(outDir, { recursive: true });

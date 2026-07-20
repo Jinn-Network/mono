@@ -21,6 +21,11 @@
 
 import { createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
+import {
+  ClaudeCodeStreamJsonParser,
+  CodexExecJsonParser,
+  type TranscriptSpanInput,
+} from '@jinn-network/core/trajectory';
 
 const DONATION_ENCODING = 'jinn.artifact.donation.v1';
 
@@ -123,4 +128,14 @@ export function extractSnapshotTranscript(
 ): SolveTranscript | null {
   const bytes = unwrapDonation(wrapper, expectedSha256);
   return findSolveTranscript(untarGz(bytes));
+}
+
+/** Parse snapshot stdout with the same canonical typed-span parser as the live path. */
+export function parseSolveTranscript(
+  transcript: SolveTranscript,
+): TranscriptSpanInput[] {
+  const parser = transcript.harness === 'claude-code'
+    ? new ClaudeCodeStreamJsonParser()
+    : new CodexExecJsonParser();
+  return parser.parseText(transcript.jsonl);
 }

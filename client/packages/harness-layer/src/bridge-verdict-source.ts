@@ -83,7 +83,7 @@ interface VerdictRow {
 interface VerdictsPage {
   verdictEnvelopeMetas: {
     items: VerdictRow[];
-    pageInfo?: { hasNextPage: boolean; endCursor: string | null };
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
   };
 }
 
@@ -93,14 +93,19 @@ interface VerdictsPage {
 const PAGE_LIMIT = 1000;
 /** Bound on pages walked — 20 × 1000 rows is far beyond any realistic slate. */
 const MAX_PAGES = 20;
-/** Default cap on returned refs when the caller does not pass `limit`. */
-const DEFAULT_LIMIT = 500;
 /**
  * A MetadataSet publisher can project arbitrary enrichment identity. Retain a
  * finite number of projections for one authoritative request tuple so an
  * attacker-first row cannot suppress the genuine candidate.
  */
 const MAX_IDENTITY_CANDIDATES_PER_ATTEMPT = 32;
+
+export class IncompleteVerdictWalkError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'IncompleteVerdictWalkError';
+  }
+}
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
 
@@ -140,6 +145,46 @@ function polarityOf(row: VerdictRow): 'pass' | 'fail' | null {
   return null;
 }
 
+function requireVerdictsPage(data: unknown): VerdictsPage['verdictEnvelopeMetas'] {
+  if (typeof data !== 'object' || data === null) {
+    throw new IncompleteVerdictWalkError(
+      'incomplete verdict walk: malformed GraphQL data payload',
+    );
+  }
+  const verdictEnvelopeMetas = (data as Record<string, unknown>)['verdictEnvelopeMetas'];
+  if (typeof verdictEnvelopeMetas !== 'object' || verdictEnvelopeMetas === null) {
+    throw new IncompleteVerdictWalkError(
+      'incomplete verdict walk: missing or malformed verdictEnvelopeMetas',
+    );
+  }
+  const items = (verdictEnvelopeMetas as Record<string, unknown>)['items'];
+  if (!Array.isArray(items)) {
+    throw new IncompleteVerdictWalkError(
+      'incomplete verdict walk: verdictEnvelopeMetas.items is not an array',
+    );
+  }
+  const pageInfo = (verdictEnvelopeMetas as Record<string, unknown>)['pageInfo'];
+  if (typeof pageInfo !== 'object' || pageInfo === null) {
+    throw new IncompleteVerdictWalkError(
+      'incomplete verdict walk: missing or malformed verdictEnvelopeMetas.pageInfo',
+    );
+  }
+  const hasNextPage = (pageInfo as Record<string, unknown>)['hasNextPage'];
+  const endCursor = (pageInfo as Record<string, unknown>)['endCursor'];
+  if (
+    typeof hasNextPage !== 'boolean'
+    || (endCursor !== null && typeof endCursor !== 'string')
+  ) {
+    throw new IncompleteVerdictWalkError(
+      'incomplete verdict walk: malformed verdictEnvelopeMetas.pageInfo fields',
+    );
+  }
+  return {
+    items: items as VerdictRow[],
+    pageInfo: { hasNextPage, endCursor },
+  };
+}
+
 // ── Factory ───────────────────────────────────────────────────────────────────
 
 export interface VerdictSourceOptions {
@@ -166,7 +211,13 @@ export function createVerdictSource(opts: VerdictSourceOptions): VerdictSource {
   }
 
   async function list(args: { limit?: number } = {}): Promise<AttemptRef[]> {
-    const limit = Math.max(1, args.limit ?? DEFAULT_LIMIT);
+    if (
+      args.limit !== undefined
+      && (!Number.isSafeInteger(args.limit) || args.limit <= 0)
+    ) {
+      throw new RangeError('verdict-source limit must be a positive safe integer');
+    }
+    const limit = args.limit ?? Number.POSITIVE_INFINITY;
 
     // Page verdict rows (both polarities), dropping non-PASS/FAIL and any row
     // missing its verdict `manifestCid` (no join entry point → nothing to bridge).
@@ -174,11 +225,12 @@ export function createVerdictSource(opts: VerdictSourceOptions): VerdictSource {
     const refsByRequestPolarity = new Map<string, AttemptRef>();
     let cursor: string | null = null;
     for (let page = 0; page < MAX_PAGES; page++) {
-      const data: VerdictsPage = await postGql<VerdictsPage>(url, fetchImpl, VERDICTS_QUERY, {
+      const data = await postGql<unknown>(url, fetchImpl, VERDICTS_QUERY, {
         limit: PAGE_LIMIT,
         after: cursor,
       });
-      for (const row of data.verdictEnvelopeMetas?.items ?? []) {
+      const verdictsPage = requireVerdictsPage(data);
+      for (const row of verdictsPage.items) {
         const polarity = polarityOf(row);
         if (polarity === null) continue; // INVALID/INDETERMINATE/UNKNOWN — dropped.
         if (!row.manifestCid) continue; // no verdict envelope CID → no join entry point.
@@ -218,11 +270,18 @@ export function createVerdictSource(opts: VerdictSourceOptions): VerdictSource {
         refsByRequestPolarity.set(candidateKey, attempt);
         refs.push(attempt);
       }
-      const pageInfo: VerdictsPage['verdictEnvelopeMetas']['pageInfo'] = data.verdictEnvelopeMetas?.pageInfo;
-      if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
+      const pageInfo = verdictsPage.pageInfo;
+      if (!pageInfo.hasNextPage) return refs;
+      if (!pageInfo.endCursor) {
+        throw new IncompleteVerdictWalkError(
+          'incomplete verdict walk: indexer advertised another page without an end cursor',
+        );
+      }
       cursor = pageInfo.endCursor;
     }
-    return refs;
+    throw new IncompleteVerdictWalkError(
+      `incomplete verdict walk: indexer still advertised rows after ${MAX_PAGES} pages`,
+    );
   }
 
   return { list };

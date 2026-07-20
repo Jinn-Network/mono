@@ -15,9 +15,9 @@
  *     → bounded attemptEnvelopeMeta candidates → publisher + signed-hash binding
  *     → authenticated solution envelope (IPFS) → .payload.patch (the coding diff)
  *   problem statement = authenticated original task description
- *   step trace (hop 4, best-effort, #1472) = the solution's system_snapshot
+ *   typed history (hop 4, best-effort, #1472/#1473) = the solution's system_snapshot
  *     artifact → donation unwrap → gunzip+untar → the harness stdout
- *     transcript → outline (snapshot-transcript.ts + transcript-outline.ts)
+ *     transcript → canonical core stream parser → typed trajectory spans
  *
  * The predecessor selected the solution with the task document's mutable
  * `restorationRequestId`. That allowed an otherwise-valid signed task to be
@@ -33,15 +33,14 @@
  */
 
 import { type AttemptRef, type BridgeEvidence } from './bridge.js';
-import { extractSnapshotTranscript } from './snapshot-transcript.js';
-import { outlineTranscript } from './transcript-outline.js';
+import {
+  extractSnapshotTranscript,
+  parseSolveTranscript,
+} from './snapshot-transcript.js';
 
 /** Cap the fetched patch / problem so one huge diff does not blow the prompt. */
 const MAX_PATCH_CHARS = 6000;
 const MAX_PROBLEM_CHARS = 1500;
-/** Cap the compressed solver trace (§8, #1472) so a long run does not blow the prompt. */
-const MAX_TRACE_CHARS = 4000;
-
 function nonEmptyString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
@@ -363,18 +362,45 @@ function exactItems(
   return record(items[0])!;
 }
 
-function candidateItems(
-  value: unknown,
+const MAX_METADATA_PAGES = 20;
+
+async function* walkMetadataCandidatePages(
   label: string,
-): Record<string, unknown>[] {
-  const items = record(value)?.['items'];
-  if (!Array.isArray(items) || items.length === 0) {
-    throw new Error(`expected at least one ${label} row; found 0`);
+  fetchPage: (after: string | null) => Promise<unknown>,
+): AsyncGenerator<Record<string, unknown>[]> {
+  let candidateCount = 0;
+  let after: string | null = null;
+  for (let page = 0; page < MAX_METADATA_PAGES; page += 1) {
+    const value = record(await fetchPage(after));
+    const items = value?.['items'];
+    if (!Array.isArray(items)) {
+      throw new Error(`${label} page ${page + 1} has no items array`);
+    }
+    const candidates = items.flatMap((item) => {
+      const parsed = record(item);
+      return parsed ? [parsed] : [];
+    });
+    const pageInfo = record(value?.['pageInfo']);
+    if (!pageInfo || typeof pageInfo['hasNextPage'] !== 'boolean') {
+      throw new Error(`${label} page ${page + 1} has malformed pageInfo`);
+    }
+    candidateCount += candidates.length;
+    yield candidates;
+    if (pageInfo['hasNextPage'] === false) {
+      if (candidateCount === 0) {
+        throw new Error(`expected at least one ${label} row; found 0`);
+      }
+      return;
+    }
+    const endCursor = pageInfo['endCursor'];
+    if (typeof endCursor !== 'string' || endCursor.length === 0) {
+      throw new Error(`${label} page ${page + 1} has no continuation cursor`);
+    }
+    after = endCursor;
   }
-  return items.flatMap((item) => {
-    const parsed = record(item);
-    return parsed ? [parsed] : [];
-  });
+  throw new Error(
+    `incomplete ${label} walk after ${MAX_METADATA_PAGES} pages`,
+  );
 }
 
 const AUTHORITATIVE_VERDICT_QUERY = `
@@ -400,15 +426,25 @@ query AuthoritativeTask($taskId: String!, $chainId: Int!) {
 `;
 
 const VERDICT_ENVELOPE_META_CANDIDATES_QUERY = `
-query AuthoritativeVerdictEnvelopeMetaCandidates($requestId: String!, $chainId: Int!) {
+query AuthoritativeVerdictEnvelopeMetaCandidates(
+  $requestId: String!
+  $chainId: Int!
+  $manifestCid: String!
+  $after: String
+) {
   verdictEnvelopeMetas(
-    where: { requestId: $requestId, chainId: $chainId },
+    where: {
+      requestId: $requestId
+      chainId: $chainId
+      manifestCid: $manifestCid
+    },
     orderBy: "enrichedAtBlock"
     orderDirection: "desc"
     limit: 1000
+    after: $after
   ) {
     items { requestId chainId manifestCid publisherAgentId manifestHash enrichedAtBlock }
-    pageInfo { hasNextPage }
+    pageInfo { hasNextPage endCursor }
   }
 }
 `;
@@ -425,15 +461,16 @@ query AuthoritativeAttempt($taskId: String!, $attemptIndex: Int!, $chainId: Int!
 `;
 
 const SOLUTION_ENVELOPE_META_CANDIDATES_QUERY = `
-query SolutionEnvelopeMetaCandidates($requestId: String!, $chainId: Int!) {
+query SolutionEnvelopeMetaCandidates($requestId: String!, $chainId: Int!, $after: String) {
   attemptEnvelopeMetas(
     where: { requestId: $requestId, chainId: $chainId },
     orderBy: "enrichedAtBlock"
     orderDirection: "desc"
     limit: 1000
+    after: $after
   ) {
     items { requestId chainId manifestCid publisherAgentId manifestHash enrichedAtBlock }
-    pageInfo { hasNextPage }
+    pageInfo { hasNextPage endCursor }
   }
 }
 `;
@@ -455,25 +492,25 @@ export interface EvidenceFetcherPorts {
 }
 
 /**
- * Fetch + outline the solver's reasoning for one solution envelope (§8, #1472).
+ * Fetch + parse the solver's reasoning for one solution envelope (§8, #1472).
  *
  * The decision path does NOT live in `jinn.trajectory.v1` (that carries only
  * the packaging step's 2 `jinn.artifact.emit` spans — #1473 tracks making it
  * truthful at solve time). It lives in the `system_snapshot` artifact: a
  * donation-wrapped gzipped tar of the solve working dir containing the
  * harness's raw stdout transcript. Resolve that artifact, unwrap (sha256-
- * verified), decompress (bomb-guarded), locate the transcript, and outline it
- * for the distiller.
+ * verified), decompress (bomb-guarded), locate the transcript, and parse it
+ * with the same canonical typed-span implementation as the live path.
  *
  * Best-effort: ANY failure (no snapshot, unresolvable CID, sha mismatch,
  * corrupt bytes, no transcript — e.g. hermes) degrades to `undefined` — the
  * trace is enrichment, never a gate on the evidence fetch. Absence is later
  * recorded as a `patch-only` tag.
  */
-async function fetchStepTrace(
+async function fetchTrajectorySpans(
   ipfs: (cid: string) => Promise<any>,
   solutionEnv: any,
-): Promise<string | undefined> {
+): Promise<BridgeEvidence['trajectorySpans']> {
   try {
     const arts = solutionEnv?.artifacts;
     if (!Array.isArray(arts)) return undefined;
@@ -484,11 +521,20 @@ async function fetchStepTrace(
     const wrapper = await ipfs(cid); // the donation wrapper is itself JSON
     const transcript = extractSnapshotTranscript(wrapper, sha256);
     if (!transcript) return undefined;
-    const outline = outlineTranscript(transcript.harness, transcript.jsonl);
-    return outline?.slice(0, MAX_TRACE_CHARS);
+    const spans = parseSolveTranscript(transcript);
+    return spans.length > 0 ? spans : undefined;
   } catch {
     return undefined;
   }
+}
+
+function rawSnapshotRef(solutionEnv: AuthenticatedExecutionEnvelope): string | undefined {
+  const snapshot = solutionEnv.artifacts?.find((artifact) =>
+    record(artifact)?.['artifactType'] === 'system_snapshot');
+  const sources = record(snapshot)?.['sources'];
+  return Array.isArray(sources)
+    ? nonEmptyString(record(sources[0])?.['cid'])
+    : undefined;
 }
 
 /**
@@ -499,6 +545,27 @@ async function fetchStepTrace(
 export function createEvidenceFetcher(
   ports: EvidenceFetcherPorts,
 ): (ref: AttemptRef) => Promise<BridgeEvidence> {
+  type SelectedSolutionCandidate = {
+    envelope: AuthenticatedExecutionEnvelope;
+    patch: string;
+    manifestCid: string;
+  };
+  const authoritativeVerdicts = new Map<string, Promise<unknown>>();
+  const authoritativeTasks = new Map<string, Promise<unknown>>();
+  const authoritativeAttempts = new Map<string, Promise<unknown>>();
+  const selectedSolutions = new Map<string, Promise<SelectedSolutionCandidate>>();
+  const cachedAuthority = (
+    cache: Map<string, Promise<unknown>>,
+    key: string,
+    query: string,
+    variables: Record<string, unknown>,
+  ): Promise<unknown> => {
+    const existing = cache.get(key);
+    if (existing) return existing;
+    const pending = ports.gql(query, variables);
+    cache.set(key, pending);
+    return pending;
+  };
   return async (ref: AttemptRef): Promise<BridgeEvidence> => {
     if (!ref.verdictManifestCid) {
       throw new Error(`AttemptRef ${ref.instanceId} has no verdictManifestCid (join entry point)`);
@@ -509,10 +576,15 @@ export function createEvidenceFetcher(
 
     // Hop 1a: the on-chain verdict row authoritatively identifies the task
     // attempt. A metadata envelope cannot choose a different task tuple.
-    const verdictData = await ports.gql(AUTHORITATIVE_VERDICT_QUERY, {
-      requestId: ref.requestId,
-      chainId: ref.chainId,
-    });
+    const verdictData = await cachedAuthority(
+      authoritativeVerdicts,
+      `${ref.chainId}:${ref.requestId.toLowerCase()}`,
+      AUTHORITATIVE_VERDICT_QUERY,
+      {
+        requestId: ref.requestId,
+        chainId: ref.chainId,
+      },
+    );
     const verdictRow = exactItems(
       record(verdictData)?.['verdicts'],
       'authoritative verdict',
@@ -539,10 +611,15 @@ export function createEvidenceFetcher(
     // Hop 1b: retain the immutable TaskCreated commitments that the
     // authenticated evaluation wrapper and original restoration task must
     // prove. The evaluator-supplied task description is never authoritative.
-    const taskData = await ports.gql(AUTHORITATIVE_TASK_QUERY, {
-      taskId,
-      chainId: ref.chainId,
-    });
+    const taskData = await cachedAuthority(
+      authoritativeTasks,
+      `${ref.chainId}:${taskId}`,
+      AUTHORITATIVE_TASK_QUERY,
+      {
+        taskId,
+        chainId: ref.chainId,
+      },
+    );
     const taskRow = exactItems(
       record(taskData)?.['tasks'],
       'authoritative task',
@@ -576,93 +653,100 @@ export function createEvidenceFetcher(
     // only a cryptographically authenticated envelope whose historical
     // publisher, participant, committed hash, request, and polarity all bind
     // to the authoritative verdict. The ref CID is only a discovery seed.
-    const verdictMetaData = await ports.gql(
-      VERDICT_ENVELOPE_META_CANDIDATES_QUERY,
-      {
-        requestId: ref.requestId,
-        chainId: ref.chainId,
-      },
-    );
-    const verdictMetaRows = candidateItems(
-      record(verdictMetaData)?.['verdictEnvelopeMetas'],
+    const verdictMetaPages = walkMetadataCandidatePages(
       'verdict envelope metadata',
+      async (after) => record(await ports.gql(
+        VERDICT_ENVELOPE_META_CANDIDATES_QUERY,
+        {
+          requestId: ref.requestId,
+          chainId: ref.chainId,
+          manifestCid: ref.verdictManifestCid!,
+          after,
+        },
+      ))?.['verdictEnvelopeMetas'],
     );
     let selectedVerdict:
       | {
           envelope: AuthenticatedExecutionEnvelope;
           evaluationTaskCid: string;
+          manifestCid: string;
         }
       | undefined;
     let lastVerdictCandidateError: unknown;
-    for (const metaRow of verdictMetaRows) {
-      try {
-        const cid = nonEmptyString(metaRow['manifestCid']);
-        const publisherAgentId = exactAgentId(
-          metaRow['publisherAgentId'],
-          'verdict envelope publisherAgentId',
-        );
-        const candidateManifestHash = exactHash(
-          metaRow['manifestHash'],
-          'verdict envelope manifestHash',
-        );
-        const publishedAtBlock = exactBlockNumber(
-          metaRow['enrichedAtBlock'],
-          'verdict envelope enrichedAtBlock',
-        );
-        if (
-          !cid
-          || nonEmptyString(metaRow['requestId'])?.toLowerCase()
-            !== ref.requestId.toLowerCase()
-          || metaRow['chainId'] !== ref.chainId
-        ) {
-          throw new Error('verdict envelope metadata row does not match the requested chain tuple');
-        }
-        const publisherSafe = exactAddress(
-          await ports.resolvePublisherSafe(
-            ref.chainId,
+    for await (const verdictMetaRows of verdictMetaPages) {
+      for (const metaRow of verdictMetaRows) {
+        try {
+          const cid = nonEmptyString(metaRow['manifestCid']);
+          const publisherAgentId = exactAgentId(
+            metaRow['publisherAgentId'],
+            'verdict envelope publisherAgentId',
+          );
+          const candidateManifestHash = exactHash(
+            metaRow['manifestHash'],
+            'verdict envelope manifestHash',
+          );
+          const publishedAtBlock = exactBlockNumber(
+            metaRow['enrichedAtBlock'],
+            'verdict envelope enrichedAtBlock',
+          );
+          if (
+            !cid
+            || nonEmptyString(metaRow['requestId'])?.toLowerCase()
+              !== ref.requestId.toLowerCase()
+            || metaRow['chainId'] !== ref.chainId
+          ) {
+            throw new Error(
+              'verdict envelope metadata row does not match the requested chain tuple',
+            );
+          }
+          const publisherSafe = exactAddress(
+            await ports.resolvePublisherSafe(
+              ref.chainId,
+              publisherAgentId,
+              publishedAtBlock,
+            ),
+            'verdict envelope publisher Safe',
+          );
+          if (publisherSafe !== evaluator) {
+            throw new Error(
+              'verdict envelope publisher does not match on-chain evaluator',
+            );
+          }
+          const envelope = await ports.authenticateEnvelope(
+            await ports.ipfs(cid),
+            'verdictEnvelope',
+          );
+          assertAuthenticatedEnvelopeKind(envelope, 'verdictEnvelope', 'verdict');
+          const evaluationTaskCid = nonEmptyString(record(envelope['task'])?.['cid']);
+          if (!evaluationTaskCid) {
+            throw new Error(`no task.cid on verdict envelope ${cid}`);
+          }
+          await assertEnvelopeAuthority({
+            envelope,
+            sourceName: 'verdict envelope',
+            expectedSafe: evaluator,
             publisherAgentId,
             publishedAtBlock,
-          ),
-          'verdict envelope publisher Safe',
-        );
-        if (publisherSafe !== evaluator) {
-          throw new Error(
-            'verdict envelope publisher does not match on-chain evaluator',
-          );
+            manifestHash: candidateManifestHash,
+            chainId: ref.chainId,
+            resolvePublisherSafe: ports.resolvePublisherSafe,
+            onchainRole: 'evaluator',
+          });
+          assertEnvelopeRequestId('verdictEnvelope', envelope, ref.requestId);
+          const signedPassed = record(envelope['payload'])?.['passed_match'];
+          if (typeof signedPassed !== 'boolean') {
+            throw new Error('verdictEnvelope.payload.passed_match must be an exact boolean');
+          }
+          if ((signedPassed ? 'pass' : 'fail') !== ref.polarity) {
+            throw new Error('signed verdict polarity does not match the indexed candidate');
+          }
+          selectedVerdict = { envelope, evaluationTaskCid, manifestCid: cid };
+          break;
+        } catch (error) {
+          lastVerdictCandidateError = error;
         }
-        const envelope = await ports.authenticateEnvelope(
-          await ports.ipfs(cid),
-          'verdictEnvelope',
-        );
-        assertAuthenticatedEnvelopeKind(envelope, 'verdictEnvelope', 'verdict');
-        const evaluationTaskCid = nonEmptyString(record(envelope['task'])?.['cid']);
-        if (!evaluationTaskCid) {
-          throw new Error(`no task.cid on verdict envelope ${cid}`);
-        }
-        await assertEnvelopeAuthority({
-          envelope,
-          sourceName: 'verdict envelope',
-          expectedSafe: evaluator,
-          publisherAgentId,
-          publishedAtBlock,
-          manifestHash: candidateManifestHash,
-          chainId: ref.chainId,
-          resolvePublisherSafe: ports.resolvePublisherSafe,
-          onchainRole: 'evaluator',
-        });
-        assertEnvelopeRequestId('verdictEnvelope', envelope, ref.requestId);
-        const signedPassed = record(envelope['payload'])?.['passed_match'];
-        if (typeof signedPassed !== 'boolean') {
-          throw new Error('verdictEnvelope.payload.passed_match must be an exact boolean');
-        }
-        if ((signedPassed ? 'pass' : 'fail') !== ref.polarity) {
-          throw new Error('signed verdict polarity does not match the indexed candidate');
-        }
-        selectedVerdict = { envelope, evaluationTaskCid };
-        break;
-      } catch (error) {
-        lastVerdictCandidateError = error;
       }
+      if (selectedVerdict) break;
     }
     if (!selectedVerdict) {
       const reason = lastVerdictCandidateError instanceof Error
@@ -676,11 +760,16 @@ export function createEvidenceFetcher(
 
     // Hop 2a: the chain attempt row supplies the SOLVE request id. This is the
     // only value allowed to select a solution envelope.
-    const attemptData = await ports.gql(AUTHORITATIVE_ATTEMPT_QUERY, {
-      taskId,
-      attemptIndex,
-      chainId: ref.chainId,
-    });
+    const attemptData = await cachedAuthority(
+      authoritativeAttempts,
+      `${ref.chainId}:${taskId}:${String(attemptIndex)}`,
+      AUTHORITATIVE_ATTEMPT_QUERY,
+      {
+        taskId,
+        attemptIndex,
+        chainId: ref.chainId,
+      },
+    );
     const attemptRow = exactItems(
       record(attemptData)?.['attempts'],
       'authoritative attempt',
@@ -721,99 +810,105 @@ export function createEvidenceFetcher(
 
     // Hop 2c: authenticate the retained solution candidates in the same
     // bounded way, selecting only the one bound to the historical operator.
-    const metaData = await ports.gql(SOLUTION_ENVELOPE_META_CANDIDATES_QUERY, {
-      requestId: solveReq,
-      chainId: ref.chainId,
-    });
-    const metaRows = candidateItems(
-      record(metaData)?.['attemptEnvelopeMetas'],
-      'solution envelope metadata',
-    );
-    let selectedSolution:
-      | {
-          envelope: AuthenticatedExecutionEnvelope;
-          patch: string;
+    const solutionMetadataKey = `${ref.chainId}:${solveReq.toLowerCase()}`;
+    let selectedSolutionPromise = selectedSolutions.get(solutionMetadataKey);
+    if (!selectedSolutionPromise) {
+      selectedSolutionPromise = (async (): Promise<SelectedSolutionCandidate> => {
+        let lastSolutionCandidateError: unknown;
+        const metaPages = walkMetadataCandidatePages(
+          'solution envelope metadata',
+          async (after) => record(await ports.gql(
+            SOLUTION_ENVELOPE_META_CANDIDATES_QUERY,
+            {
+              requestId: solveReq,
+              chainId: ref.chainId,
+              after,
+            },
+          ))?.['attemptEnvelopeMetas'],
+        );
+        for await (const metaRows of metaPages) {
+          for (const metaRow of metaRows) {
+            try {
+              const cid = nonEmptyString(metaRow['manifestCid']);
+              const publisherAgentId = exactAgentId(
+                metaRow['publisherAgentId'],
+                'solution envelope publisherAgentId',
+              );
+              const candidateManifestHash = exactHash(
+                metaRow['manifestHash'],
+                'solution envelope manifestHash',
+              );
+              const publishedAtBlock = exactBlockNumber(
+                metaRow['enrichedAtBlock'],
+                'solution envelope enrichedAtBlock',
+              );
+              if (
+                !cid
+                || nonEmptyString(metaRow['requestId'])?.toLowerCase()
+                  !== solveReq.toLowerCase()
+                || metaRow['chainId'] !== ref.chainId
+              ) {
+                throw new Error(
+                  'solution envelope metadata row does not match the authoritative attempt',
+                );
+              }
+              const publisherSafe = exactAddress(
+                await ports.resolvePublisherSafe(
+                  ref.chainId,
+                  publisherAgentId,
+                  publishedAtBlock,
+                ),
+                'solution envelope publisher Safe',
+              );
+              if (publisherSafe !== operator) {
+                throw new Error(
+                  'solution envelope publisher does not match on-chain operator',
+                );
+              }
+              const envelope = await ports.authenticateEnvelope(
+                await ports.ipfs(cid),
+                'solutionEnvelope',
+              );
+              assertAuthenticatedEnvelopeKind(envelope, 'solutionEnvelope', 'solution');
+              await assertEnvelopeAuthority({
+                envelope,
+                sourceName: 'solution envelope',
+                expectedSafe: operator,
+                publisherAgentId,
+                publishedAtBlock,
+                manifestHash: candidateManifestHash,
+                chainId: ref.chainId,
+                resolvePublisherSafe: ports.resolvePublisherSafe,
+                onchainRole: 'operator',
+              });
+              assertEnvelopeRequestId('solutionEnvelope', envelope, solveReq);
+              const candidatePatch = record(envelope['payload'])?.['patch'];
+              if (!candidatePatch || typeof candidatePatch !== 'string') {
+                throw new Error(`no payload.patch on solution envelope ${cid}`);
+              }
+              return { envelope, patch: candidatePatch, manifestCid: cid };
+            } catch (error) {
+              lastSolutionCandidateError = error;
+            }
+          }
         }
-      | undefined;
-    let lastSolutionCandidateError: unknown;
-    for (const metaRow of metaRows) {
-      try {
-        const cid = nonEmptyString(metaRow['manifestCid']);
-        const publisherAgentId = exactAgentId(
-          metaRow['publisherAgentId'],
-          'solution envelope publisherAgentId',
+        const reason = lastSolutionCandidateError instanceof Error
+          ? `: ${lastSolutionCandidateError.message}`
+          : '';
+        throw new Error(
+          `no authenticated solution envelope metadata candidate matched the on-chain operator${reason}`,
         );
-        const candidateManifestHash = exactHash(
-          metaRow['manifestHash'],
-          'solution envelope manifestHash',
-        );
-        const publishedAtBlock = exactBlockNumber(
-          metaRow['enrichedAtBlock'],
-          'solution envelope enrichedAtBlock',
-        );
-        if (
-          !cid
-          || nonEmptyString(metaRow['requestId'])?.toLowerCase() !== solveReq.toLowerCase()
-          || metaRow['chainId'] !== ref.chainId
-        ) {
-          throw new Error(
-            'solution envelope metadata row does not match the authoritative attempt',
-          );
-        }
-        const publisherSafe = exactAddress(
-          await ports.resolvePublisherSafe(
-            ref.chainId,
-            publisherAgentId,
-            publishedAtBlock,
-          ),
-          'solution envelope publisher Safe',
-        );
-        if (publisherSafe !== operator) {
-          throw new Error(
-            'solution envelope publisher does not match on-chain operator',
-          );
-        }
-        const envelope = await ports.authenticateEnvelope(
-          await ports.ipfs(cid),
-          'solutionEnvelope',
-        );
-        assertAuthenticatedEnvelopeKind(envelope, 'solutionEnvelope', 'solution');
-        await assertEnvelopeAuthority({
-          envelope,
-          sourceName: 'solution envelope',
-          expectedSafe: operator,
-          publisherAgentId,
-          publishedAtBlock,
-          manifestHash: candidateManifestHash,
-          chainId: ref.chainId,
-          resolvePublisherSafe: ports.resolvePublisherSafe,
-          onchainRole: 'operator',
-        });
-        assertEnvelopeRequestId('solutionEnvelope', envelope, solveReq);
-        const candidatePatch = record(envelope['payload'])?.['patch'];
-        if (!candidatePatch || typeof candidatePatch !== 'string') {
-          throw new Error(`no payload.patch on solution envelope ${cid}`);
-        }
-        selectedSolution = { envelope, patch: candidatePatch };
-        break;
-      } catch (error) {
-        lastSolutionCandidateError = error;
-      }
+      })();
+      selectedSolutions.set(solutionMetadataKey, selectedSolutionPromise);
     }
-    if (!selectedSolution) {
-      const reason = lastSolutionCandidateError instanceof Error
-        ? `: ${lastSolutionCandidateError.message}`
-        : '';
-      throw new Error(
-        `no authenticated solution envelope metadata candidate matched the on-chain operator${reason}`,
-      );
-    }
+    const selectedSolution = await selectedSolutionPromise;
     const solutionEnv = selectedSolution.envelope;
     const patch = selectedSolution.patch;
 
     // Hop 3 (best-effort, §8 v0.5): the solver's own trajectory off the SAME
     // solution envelope. Never throws — absence is recorded as `patch-only`.
-    const stepTrace = await fetchStepTrace(ports.ipfs, solutionEnv);
+    const trajectorySpans = await fetchTrajectorySpans(ports.ipfs, solutionEnv);
+    const snapshotRef = rawSnapshotRef(solutionEnv);
 
     const outerTaskDocument = record(taskDoc) ?? {};
     const signedTaskDocument =
@@ -902,7 +997,10 @@ export function createEvidenceFetcher(
             },
           }
         : {}),
-      ...(stepTrace ? { stepTrace } : {}),
+      verdictEnvelopeCid: selectedVerdict.manifestCid,
+      solutionEnvelopeCid: selectedSolution.manifestCid,
+      ...(snapshotRef ? { rawSnapshotRef: snapshotRef } : {}),
+      ...(trajectorySpans ? { trajectorySpans } : {}),
     };
   };
 }

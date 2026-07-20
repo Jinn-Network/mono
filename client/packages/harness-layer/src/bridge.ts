@@ -36,6 +36,7 @@ import {
   buildLayer2ScrubPipeline,
   type ScrubPipeline,
 } from '@jinn-network/core/scrub';
+import type { TranscriptSpanInput } from '@jinn-network/core/trajectory';
 
 /** A verdict row from the execution ledger, one polarity. */
 export interface AttemptRef {
@@ -102,18 +103,22 @@ export interface BridgeEvidence {
     passToPass: string[];
     evalSemanticsVersion: string;
   };
+  /** Authenticated source artifacts retained for audit and lineage. */
+  verdictEnvelopeCid?: string;
+  solutionEnvelopeCid?: string;
+  rawSnapshotRef?: string;
   /**
-   * The solver's own compressed decision-path outline, derived from the raw
+   * The solver's canonical typed decision-path spans, derived from the raw
    * harness transcript inside the solution's `system_snapshot` artifact
    * (`.claude-code/stdout.jsonl` / `.codex-code/stdout.jsonl` — §8, #1472;
-   * `jinn.trajectory.v1` carries no reasoning until #1473). A patch shows
-   * *what* changed, not the decision path; pattern-mode under-feeds without
-   * it. When absent (hermes, missing/corrupt snapshot), the layer-1 record is
+   * `jinn.trajectory.v1` carries no reasoning until #1473). The bridge uses the
+   * same parser implementation as the live path. When absent (Hermes,
+   * missing/corrupt snapshot), the layer-1 record is
    * tagged `patch-only` (see `toBridgeCapturedTask`) so measurement can
    * stratify by evidence richness. Rides a step attribute → scrubbed by the
    * same layer-2 pipeline as every other attribute; it does not bypass scrub.
    */
-  stepTrace?: string;
+  trajectorySpans?: TranscriptSpanInput[];
 }
 
 export interface BridgeDeps {
@@ -249,11 +254,9 @@ function assertAuthenticatedBridgeEvidence(
  * re-implemented here). Real SWE-bench patches can exceed 16 KiB; the truncation
  * is recorded in the envelope's step receipt, not silent.
  *
- * Evidence-richness (§8, v0.5): when `ev.stepTrace` is present, a
- * `solver:trajectory` step is inserted between the patch and verdict steps (its
- * content is a plain step attribute → scrubbed like the patch). When absent, a
- * `patch-only` tag is appended to `distributionTags` so the three-arm
- * measurement (§11) can stratify distillation quality by evidence richness.
+ * Evidence-richness (§8): canonical typed transcript spans are inserted
+ * between the patch and verdict steps. When no usable spans exist, a
+ * `patch-only` tag is appended to `distributionTags`.
  */
 export function toBridgeCapturedTask(ref: AttemptRef, ev: BridgeEvidence, now: Date): CapturedTask {
   assertAuthenticatedBridgeEvidence(ref, ev);
@@ -261,7 +264,27 @@ export function toBridgeCapturedTask(ref: AttemptRef, ev: BridgeEvidence, now: D
   const isPass = ref.polarity === 'pass';
   const repo = ev.repo;
   const instanceId = ev.instanceId;
-  const enriched = typeof ev.stepTrace === 'string' && ev.stepTrace.length > 0;
+  const historySteps: CapturedTask['steps'] = (ev.trajectorySpans ?? []).flatMap(
+    (span, index) => {
+      const spanKind = span.attributes['jinn.span.kind'];
+      if (spanKind !== 'jinn.agent_turn' && spanKind !== 'jinn.tool_call') {
+        return [];
+      }
+      return [{
+        spanId: `history-${String(index + 1).padStart(6, '0')}`,
+        parentSpanId: null,
+        kind: spanKind,
+        name: span.name,
+        startTimeUnixNano: span.startTimeUnixNano,
+        endTimeUnixNano: span.endTimeUnixNano,
+        attributes: span.attributes,
+        redactedKeys: [],
+        ...(span.events.length > 0 ? { events: span.events } : {}),
+        ...(span.status ? { status: span.status } : {}),
+      }];
+    },
+  );
+  const enriched = historySteps.length > 0;
   return {
     session: {
       sessionId: `bridge:${instanceId}:${ref.polarity}:${ref.requestId}`,
@@ -272,7 +295,7 @@ export function toBridgeCapturedTask(ref: AttemptRef, ev: BridgeEvidence, now: D
       distributionTags: [
         'coding',
         'swe-rebench',
-        repo.slice(0, 64),
+        `repo:${repo}`.slice(0, 64),
         ...(enriched ? [] : ['patch-only']),
       ],
       repositorySlug: repo,
@@ -304,20 +327,7 @@ export function toBridgeCapturedTask(ref: AttemptRef, ev: BridgeEvidence, now: D
         attributes: { patch: ev.patch },
         redactedKeys: [],
       },
-      ...(enriched
-        ? [
-            {
-              spanId: 'trace',
-              parentSpanId: null,
-              kind: 'jinn.tool_call' as const,
-              name: 'solver:trajectory',
-              startTimeUnixNano: nano,
-              endTimeUnixNano: nano,
-              attributes: { trace: ev.stepTrace as string },
-              redactedKeys: [],
-            },
-          ]
-        : []),
+      ...historySteps,
       {
         spanId: 'verdict',
         parentSpanId: null,
@@ -340,9 +350,16 @@ export function toBridgeCapturedTask(ref: AttemptRef, ev: BridgeEvidence, now: D
     attemptGroup: {
       groupId: instanceId,
       attemptId: ref.requestId,
-      relatedAttemptRefs: [],
+      relatedAttemptRefs: [
+        ev.verdictEnvelopeCid,
+        ev.solutionEnvelopeCid,
+        ev.rawSnapshotRef,
+      ].filter((value): value is string => value !== undefined),
     },
-    provenance: 'contributed',
+    ...(ev.solutionEnvelopeCid
+      ? { lineage: { episodeId: ev.solutionEnvelopeCid } }
+      : {}),
+    provenance: 'derived-from-history',
   };
 }
 

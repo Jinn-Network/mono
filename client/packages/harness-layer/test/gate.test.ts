@@ -6,7 +6,7 @@ import { parseTraceEnvelopeV0, type TraceEnvelopeV0 } from '../src/envelope.js';
 function env(over: {
   status?: 'completed' | 'failed' | 'abandoned';
   tier?: 'user-accepted' | 'tests-passed' | 'evaluator-verified';
-  provenance?: 'contributed' | 'imported';
+  provenance?: 'contributed' | 'imported' | 'derived-from-history';
   patch?: string;
   summary?: string;
   outcomeSummary?: string;
@@ -66,6 +66,12 @@ describe('evaluateEligibility (tiered — pattern / lesson, §6/D10)', () => {
     const r = evaluateEligibility(env({ provenance: 'imported' }));
     expect(r.eligible).toBe(false);
     expect(r.reasons.join(' ')).toMatch(/contributed|imported/);
+  });
+
+  it('derived history remains eligible raw evidence', () => {
+    const r = evaluateEligibility(env({ provenance: 'derived-from-history' }));
+    expect(r.eligible).toBe(true);
+    expect(r.tier).toBe('pattern');
   });
 
   it('held-out → ineligible', () => {

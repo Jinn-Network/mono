@@ -17,7 +17,7 @@
 export interface SignalInput {
   /** distributionTags from the trace envelope (first tag = primary). */
   tags: string[];
-  provenance: 'contributed' | 'imported';
+  provenance: 'contributed' | 'imported' | 'derived-from-history';
   /** Contributor identity (operator Safe address). */
   contributor: string;
 }

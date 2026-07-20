@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createVerdictSource } from '../src/bridge-verdict-source.js';
+import {
+  createVerdictSource,
+  IncompleteVerdictWalkError,
+} from '../src/bridge-verdict-source.js';
 import { bridgeAttempts, type BridgeEvidence } from '../src/bridge.js';
 
 const GQL_URL = 'https://indexer.example/graphql';
@@ -35,6 +38,147 @@ function mockFetch(verdicts: VerdictItem[]): typeof fetch {
 const RID = (n: number): string => '0x' + String(n).repeat(64).slice(0, 64);
 
 describe('createVerdictSource', () => {
+  it.each([
+    ['missing verdictEnvelopeMetas', {}],
+    ['null verdictEnvelopeMetas', { verdictEnvelopeMetas: null }],
+    ['missing items', {
+      verdictEnvelopeMetas: {
+        pageInfo: { hasNextPage: false, endCursor: null },
+      },
+    }],
+    ['non-array items', {
+      verdictEnvelopeMetas: {
+        items: {},
+        pageInfo: { hasNextPage: false, endCursor: null },
+      },
+    }],
+    ['missing pageInfo', { verdictEnvelopeMetas: { items: [] } }],
+    ['null pageInfo', { verdictEnvelopeMetas: { items: [], pageInfo: null } }],
+    ['missing hasNextPage', {
+      verdictEnvelopeMetas: {
+        items: [],
+        pageInfo: { endCursor: null },
+      },
+    }],
+    ['non-boolean hasNextPage', {
+      verdictEnvelopeMetas: {
+        items: [],
+        pageInfo: { hasNextPage: 'false', endCursor: 'cursor' },
+      },
+    }],
+    ['missing endCursor', {
+      verdictEnvelopeMetas: {
+        items: [],
+        pageInfo: { hasNextPage: false },
+      },
+    }],
+    ['non-string, non-null endCursor', {
+      verdictEnvelopeMetas: {
+        items: [],
+        pageInfo: { hasNextPage: false, endCursor: 42 },
+      },
+    }],
+  ])('fails closed on a malformed page envelope: %s', async (_case, data) => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ data }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })) as unknown as typeof fetch;
+    const source = createVerdictSource({ graphqlUrl: GQL_URL, fetchImpl });
+
+    await expect(source.list()).rejects.toBeInstanceOf(IncompleteVerdictWalkError);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    0,
+    -1,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    1.5,
+    Number.MAX_SAFE_INTEGER + 1,
+  ])('rejects an invalid explicit attempt limit before fetching: %s', async (limit) => {
+    const fetchImpl = mockFetch([]);
+    const source = createVerdictSource({ graphqlUrl: GQL_URL, fetchImpl });
+
+    await expect(source.list({ limit })).rejects.toThrow(/positive safe integer/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('walks every page by default instead of truncating the immutable ledger', async () => {
+    const firstPage = Array.from({ length: 1_000 }, (_, index) => ({
+      requestId: `0x${index.toString(16).padStart(64, '0')}`,
+      chainId: 84532,
+      instanceId: `repo__project-${index}`,
+      actualPassed: true,
+      evaluatorVerdict: 'PASS',
+      manifestCid: `bafyVerdict${index}`,
+    }));
+    const secondPage = [1_000, 1_001].map((index) => ({
+      requestId: `0x${index.toString(16).padStart(64, '0')}`,
+      chainId: 84532,
+      instanceId: `repo__project-${index}`,
+      actualPassed: false,
+      evaluatorVerdict: 'FAIL',
+      manifestCid: `bafyVerdict${index}`,
+    }));
+    const requests: Array<Record<string, unknown>> = [];
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        variables: Record<string, unknown>;
+      };
+      requests.push(body.variables);
+      const isFirstPage = body.variables.after === null;
+      return new Response(JSON.stringify({
+        data: {
+          verdictEnvelopeMetas: {
+            items: isFirstPage ? firstPage : secondPage,
+            pageInfo: isFirstPage
+              ? { hasNextPage: true, endCursor: 'cursor-page-1' }
+              : { hasNextPage: false, endCursor: null },
+          },
+        },
+      }));
+    }) as unknown as typeof fetch;
+
+    const source = createVerdictSource({ graphqlUrl: GQL_URL, fetchImpl });
+    const refs = await source.list();
+
+    expect(refs).toHaveLength(1_002);
+    expect(requests).toEqual([
+      { limit: 1_000, after: null },
+      { limit: 1_000, after: 'cursor-page-1' },
+    ]);
+  });
+
+  it('fails closed when the final safety-ceiling page advertises more rows', async () => {
+    let page = 0;
+    const fetchImpl = vi.fn(async () => {
+      const index = page++;
+      return new Response(JSON.stringify({
+        data: {
+          verdictEnvelopeMetas: {
+            items: [{
+              requestId: `0x${index.toString(16).padStart(64, '0')}`,
+              chainId: 84532,
+              instanceId: `repo__project-${index}`,
+              actualPassed: true,
+              evaluatorVerdict: 'PASS',
+              manifestCid: `bafyVerdict${index}`,
+            }],
+            pageInfo: {
+              hasNextPage: true,
+              endCursor: `cursor-page-${index + 1}`,
+            },
+          },
+        },
+      }));
+    }) as unknown as typeof fetch;
+
+    const source = createVerdictSource({ graphqlUrl: GQL_URL, fetchImpl });
+    await expect(source.list()).rejects.toBeInstanceOf(IncompleteVerdictWalkError);
+    expect(fetchImpl).toHaveBeenCalledTimes(20);
+  });
+
   it('returns pass + fail refs carrying verdictManifestCid, drops INVALID', async () => {
     const verdicts: VerdictItem[] = [
       // A verified pass → polarity 'pass'.

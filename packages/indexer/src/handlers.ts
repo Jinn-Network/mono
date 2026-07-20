@@ -997,7 +997,7 @@ export interface TraceEnvelopeSignalLite {
   synthesis: string;
   /** Canonical named W2 projection; legacy traces derive it from their tag. */
   retrievalVisible: boolean;
-  provenance: 'contributed' | 'imported';
+  provenance: 'contributed' | 'imported' | 'derived-from-history';
   /** Compatibility projection of Episode verificationStrength / trace verifiabilityTier. */
   verifiabilityTier: string;
   /** environment.harness as "<name> <version>", '' when absent. Corpus detail (#1406). */
@@ -1054,7 +1054,11 @@ export function parseTraceEnvelopeSignalLite(
     }
   }
 
-  const provenance = evidence['provenance'] === 'imported' ? 'imported' : 'contributed';
+  const provenance =
+    evidence['provenance'] === 'imported' ||
+    evidence['provenance'] === 'derived-from-history'
+      ? evidence['provenance']
+      : 'contributed';
 
   const outcome = evidence['outcome'];
   const outcomeObj: Record<string, unknown> =

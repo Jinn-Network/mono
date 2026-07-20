@@ -1,9 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
   createEvidenceFetcher,
   type AuthenticatedExecutionEnvelope,
 } from '../src/bridge-fetch-evidence.js';
-import type { AttemptRef } from '../src/bridge.js';
+import { bridgeAttempts, type AttemptRef } from '../src/bridge.js';
 import { makeTarGz, wrapDonation } from './tar-fixture.js';
 
 function ref(over: Partial<AttemptRef> = {}): AttemptRef {
@@ -20,6 +21,10 @@ function ref(over: Partial<AttemptRef> = {}): AttemptRef {
 }
 
 const PATCH = 'diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-old\n+new\n';
+const CODEX_JSONL = readFileSync(
+  new URL('./fixtures/codex-stdout.fixture.jsonl', import.meta.url),
+  'utf8',
+);
 
 const VERDICT_CID = 'bafyVerdict';
 const TASK_CID = 'bafyTask';
@@ -151,8 +156,16 @@ function ports(over: {
   verdictRows?: unknown[];
   taskRows?: unknown[];
   verdictMetas?: unknown[];
+  verdictMetaPages?: Array<{
+    items: unknown[];
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+  }>;
   attemptRows?: unknown[];
   attemptMetas?: unknown[];
+  attemptMetaPages?: Array<{
+    items: unknown[];
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+  }>;
   solution?: unknown;
   snapshot?: unknown;
 } = {}) {
@@ -169,17 +182,37 @@ function ports(over: {
     },
     gql: async (query: string, variables?: Record<string, unknown>) => {
       if (query.includes('AuthoritativeVerdictEnvelopeMeta')) {
-        expect(variables).toEqual({ requestId: EVALUATION_REQ, chainId: 84532 });
+        expect(variables).toMatchObject({
+          requestId: EVALUATION_REQ,
+          chainId: 84532,
+          manifestCid: expect.any(String),
+        });
+        expect(variables).toHaveProperty('after');
+        const requestedCid = variables?.['manifestCid'];
+        const after = variables?.['after'];
+        const pageIndex = after === null
+          ? 0
+          : Number(String(after).replace('verdict-page-', ''));
+        if (over.verdictMetaPages) {
+          return {
+            verdictEnvelopeMetas: over.verdictMetaPages[pageIndex],
+          };
+        }
+        const rows = over.verdictMetas ?? [{
+          requestId: EVALUATION_REQ,
+          chainId: 84532,
+          manifestCid: VERDICT_CID,
+          publisherAgentId: EVALUATOR_AGENT_ID,
+          manifestHash: VERDICT_HASH,
+          enrichedAtBlock: '1000',
+        }];
         return {
           verdictEnvelopeMetas: {
-            items: over.verdictMetas ?? [{
-              requestId: EVALUATION_REQ,
-              chainId: 84532,
-              manifestCid: VERDICT_CID,
-              publisherAgentId: EVALUATOR_AGENT_ID,
-              manifestHash: VERDICT_HASH,
-              enrichedAtBlock: '1000',
-            }],
+            items: rows.filter((row) =>
+              typeof row === 'object'
+              && row !== null
+              && (row as Record<string, unknown>)['manifestCid'] === requestedCid),
+            pageInfo: { hasNextPage: false, endCursor: null },
           },
         };
       }
@@ -226,7 +259,20 @@ function ports(over: {
         };
       }
       if (query.includes('SolutionEnvelopeMeta')) {
-        expect(variables).toEqual({ requestId: SOLVE_REQ, chainId: 84532 });
+        expect(variables).toMatchObject({
+          requestId: SOLVE_REQ,
+          chainId: 84532,
+        });
+        expect(variables).toHaveProperty('after');
+        const after = variables?.['after'];
+        const pageIndex = after === null
+          ? 0
+          : Number(String(after).replace('solution-page-', ''));
+        if (over.attemptMetaPages) {
+          return {
+            attemptEnvelopeMetas: over.attemptMetaPages[pageIndex],
+          };
+        }
         return {
           attemptEnvelopeMetas: {
             items: over.attemptMetas ?? [{
@@ -237,6 +283,7 @@ function ports(over: {
               manifestHash: SOLUTION_HASH,
               enrichedAtBlock: '2000',
             }],
+            pageInfo: { hasNextPage: false, endCursor: null },
           },
         };
       }
@@ -274,6 +321,8 @@ describe('createEvidenceFetcher', () => {
     expect(ev.patch).toBe(PATCH);
     expect(ev.taskSummary).toBe('Fix the widget factory');
     expect(ev.repo).toBeUndefined();
+    expect(ev.verdictEnvelopeCid).toBe(VERDICT_CID);
+    expect(ev.solutionEnvelopeCid).toBe(SOLUTION_CID);
   });
 
   it('resolves one atomic verifier tuple from the exact producer-shaped SWE task document', async () => {
@@ -440,7 +489,7 @@ describe('createEvidenceFetcher', () => {
     );
   });
 
-  it('recovers the legitimate verdict candidate after an attacker publishes the same request id', async () => {
+  it('authenticates the exact verdict CID instead of rescanning request-wide metadata', async () => {
     const fetch = createEvidenceFetcher(ports({
       verdictMetas: [
         {
@@ -464,7 +513,7 @@ describe('createEvidenceFetcher', () => {
 
     await expect(fetch(ref({
       verdictManifestCid: 'bafyAttackerVerdict',
-    }))).resolves.toMatchObject({ patch: PATCH });
+    }))).rejects.toThrow(/publisher.*on-chain evaluator/);
   });
 
   it('does not let an untrusted enrichment instance projection relabel authenticated task facts', async () => {
@@ -504,6 +553,161 @@ describe('createEvidenceFetcher', () => {
     }));
 
     await expect(fetch(ref())).resolves.toMatchObject({ patch: PATCH });
+  });
+
+  it('walks permissionless solution metadata past 1000 poisoned rows to the genuine candidate', async () => {
+    const poison = Array.from({ length: 1000 }, (_, index) => ({
+      requestId: SOLVE_REQ,
+      chainId: 84532,
+      manifestCid: `bafyPoison${index}`,
+      publisherAgentId: '999',
+      manifestHash: '0x' + '9'.repeat(64),
+      enrichedAtBlock: String(4000 + index),
+    }));
+    const fetch = createEvidenceFetcher(ports({
+      attemptMetaPages: [
+        {
+          items: poison,
+          pageInfo: { hasNextPage: true, endCursor: 'solution-page-1' },
+        },
+        {
+          items: [{
+            requestId: SOLVE_REQ,
+            chainId: 84532,
+            manifestCid: SOLUTION_CID,
+            publisherAgentId: SOLVER_AGENT_ID,
+            manifestHash: SOLUTION_HASH,
+            enrichedAtBlock: '2000',
+          }],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      ],
+    }));
+
+    await expect(fetch(ref())).resolves.toMatchObject({ patch: PATCH });
+  });
+
+  it('authenticates a genuine solution on the current page without consuming a poisoned tail', async () => {
+    const fetch = createEvidenceFetcher(ports({
+      attemptMetaPages: [{
+        items: [{
+          requestId: SOLVE_REQ,
+          chainId: 84532,
+          manifestCid: SOLUTION_CID,
+          publisherAgentId: SOLVER_AGENT_ID,
+          manifestHash: SOLUTION_HASH,
+          enrichedAtBlock: '2000',
+        }],
+        pageInfo: { hasNextPage: true, endCursor: 'solution-page-1' },
+      }],
+    }));
+
+    await expect(fetch(ref())).resolves.toMatchObject({ patch: PATCH });
+  });
+
+  it('authenticates the exact verdict CID without consuming a poisoned tail', async () => {
+    const fetch = createEvidenceFetcher(ports({
+      verdictMetaPages: [{
+        items: [{
+          requestId: EVALUATION_REQ,
+          chainId: 84532,
+          manifestCid: VERDICT_CID,
+          publisherAgentId: EVALUATOR_AGENT_ID,
+          manifestHash: VERDICT_HASH,
+          enrichedAtBlock: '1000',
+        }],
+        pageInfo: { hasNextPage: true, endCursor: 'verdict-page-1' },
+      }],
+    }));
+
+    await expect(fetch(ref())).resolves.toMatchObject({ patch: PATCH });
+  });
+
+  it('rejects malformed pagination metadata instead of treating it as completion', async () => {
+    const fetch = createEvidenceFetcher(ports({
+      attemptMetaPages: [{
+        items: [{
+          requestId: SOLVE_REQ,
+          chainId: 84532,
+          manifestCid: SOLUTION_CID,
+          publisherAgentId: SOLVER_AGENT_ID,
+          manifestHash: SOLUTION_HASH,
+          enrichedAtBlock: '2000',
+        }],
+        pageInfo: {} as {
+          hasNextPage: boolean;
+          endCursor: string | null;
+        },
+      }],
+    }));
+
+    await expect(fetch(ref())).rejects.toThrow(/malformed pageInfo/i);
+  });
+
+  it('fails loudly when a metadata candidate walk remains incomplete at its page cap', async () => {
+    const endlessPages = Array.from({ length: 20 }, (_, index) => ({
+      items: [{
+        requestId: SOLVE_REQ,
+        chainId: 84532,
+        manifestCid: `bafyPoison${index}`,
+        publisherAgentId: '999',
+        manifestHash: '0x' + '9'.repeat(64),
+        enrichedAtBlock: String(4000 + index),
+      }],
+      pageInfo: {
+        hasNextPage: true,
+        endCursor: `solution-page-${index + 1}`,
+      },
+    }));
+    const fetch = createEvidenceFetcher(ports({ attemptMetaPages: endlessPages }));
+
+    await expect(fetch(ref())).rejects.toThrow(
+      /incomplete solution envelope metadata walk.*20 pages/i,
+    );
+  });
+
+  it('does not repeat request-wide scans across the 32 bounded discovery candidates', async () => {
+    const candidates = Array.from({ length: 32 }, (_, index) => ({
+      instanceId: AUTHENTICATED_TASK.instanceId,
+      verdictManifestCid: index === 31 ? VERDICT_CID : `bafyPoisonVerdict${index}`,
+    }));
+    const verdictMetas = candidates.map((candidate, index) => ({
+      requestId: EVALUATION_REQ,
+      chainId: 84532,
+      manifestCid: candidate.verdictManifestCid,
+      publisherAgentId: index === 31 ? EVALUATOR_AGENT_ID : '999',
+      manifestHash: index === 31 ? VERDICT_HASH : '0x' + '9'.repeat(64),
+      enrichedAtBlock: String(3000 + index),
+    }));
+    const basePorts = ports({
+      task: producerTask(),
+      verdictMetas,
+    });
+    const gql = vi.fn(basePorts.gql);
+    const fetchEvidence = createEvidenceFetcher({
+      ...basePorts,
+      gql,
+      resolveVerifierFacts: async () => authenticatedVerifier(),
+    });
+
+    const result = await bridgeAttempts([
+      ref({ discoveryCandidates: candidates }),
+    ], {
+      slateInstanceIds: new Set(),
+      fetchEvidence,
+      publishEvidence: async () => ({ envelopeRef: 'bafyDerived', anchorTx: null }),
+    });
+
+    expect(result.bridged).toHaveLength(1);
+    expect(gql.mock.calls.filter(([query]) =>
+      String(query).includes('AuthoritativeVerdict('))).toHaveLength(1);
+    expect(gql.mock.calls.filter(([query]) =>
+      String(query).includes('AuthoritativeTask('))).toHaveLength(1);
+    const candidateCalls = gql.mock.calls.filter(([query]) =>
+      String(query).includes('AuthoritativeVerdictEnvelopeMetaCandidates'));
+    expect(candidateCalls).toHaveLength(32);
+    expect(new Set(candidateCalls.map(([, variables]) =>
+      (variables as Record<string, unknown>)['manifestCid'])).size).toBe(32);
   });
 
   it('rejects a verdict whose signed hash is not the MetadataSet commitment', async () => {
@@ -794,7 +998,12 @@ describe('createEvidenceFetcher', () => {
     expect(gql).toHaveBeenNthCalledWith(
       3,
       expect.stringContaining('AuthoritativeVerdictEnvelopeMeta'),
-      { requestId: EVALUATION_REQ, chainId: 84532 },
+      {
+        requestId: EVALUATION_REQ,
+        chainId: 84532,
+        manifestCid: VERDICT_CID,
+        after: null,
+      },
     );
     expect(gql).toHaveBeenNthCalledWith(
       4,
@@ -804,7 +1013,7 @@ describe('createEvidenceFetcher', () => {
     expect(gql).toHaveBeenNthCalledWith(
       5,
       expect.stringContaining('SolutionEnvelopeMeta'),
-      { requestId: SOLVE_REQ, chainId: 84532 },
+      { requestId: SOLVE_REQ, chainId: 84532, after: null },
     );
   });
 
@@ -907,46 +1116,76 @@ describe('createEvidenceFetcher — snapshot-transcript enrichment (§8, #1472)'
     };
   }
 
-  it('derives the step trace from the claude-code transcript inside system_snapshot', async () => {
+  it('derives canonical typed spans from the claude-code transcript inside system_snapshot', async () => {
     const fetch = createEvidenceFetcher(ports(solutionWithSnapshot({ '.claude-code/stdout.jsonl': CLAUDE_JSONL, 'task.json': '{}' })));
     const ev = await fetch(ref());
-    expect(ev.stepTrace).toBeDefined();
-    expect(ev.stepTrace).toContain('plan the certificate fix');
-    expect(ev.stepTrace).toMatch(/- tool Edit:/);
+    expect(ev.trajectorySpans).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        attributes: expect.objectContaining({
+          'jinn.span.kind': 'jinn.agent_turn',
+          'jinn.transcript.parser': 'claude-code-stream-json',
+          'jinn.transcript.parserVersion': '1.0.0',
+        }),
+      }),
+      expect.objectContaining({
+        attributes: expect.objectContaining({
+          'jinn.span.kind': 'jinn.tool_call',
+          'jinn.transcript.parser': 'claude-code-stream-json',
+          'jinn.transcript.parserVersion': '1.0.0',
+        }),
+      }),
+    ]));
+    expect(ev.rawSnapshotRef).toBe(SNAPSHOT_CID);
     expect(ev.patch).toBe(PATCH); // enrichment never displaces the patch
   });
 
-  it('derives the step trace from the codex transcript inside system_snapshot', async () => {
-    const codexJsonl = JSON.stringify({ type: 'item.completed', item: { type: 'command_execution', command: 'pytest -x', exit_code: 0 } });
-    const fetch = createEvidenceFetcher(ports(solutionWithSnapshot({ '.codex-code/stdout.jsonl': codexJsonl })));
+  it('derives canonical typed spans from the codex transcript inside system_snapshot', async () => {
+    const fetch = createEvidenceFetcher(ports(solutionWithSnapshot({
+      '.codex-code/stdout.jsonl': CODEX_JSONL,
+    })));
     const ev = await fetch(ref());
-    expect(ev.stepTrace).toContain('- cmd: pytest -x');
+    expect(ev.trajectorySpans).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        attributes: expect.objectContaining({
+          'jinn.span.kind': 'jinn.agent_turn',
+          'message.content': expect.stringContaining('learn loop'),
+          'jinn.transcript.parser': 'codex-exec-json',
+          'jinn.transcript.parserVersion': '1.1.0',
+        }),
+      }),
+      expect.objectContaining({
+        attributes: expect.objectContaining({
+          'jinn.span.kind': 'jinn.tool_call',
+          'tool.name': 'command_execution',
+          'jinn.transcript.parser': 'codex-exec-json',
+          'jinn.transcript.parserVersion': '1.1.0',
+        }),
+        events: [
+          expect.objectContaining({
+            attributes: expect.objectContaining({
+              'tool.result': expect.stringContaining('class CodeGenerator'),
+            }),
+          }),
+        ],
+      }),
+    ]));
   });
 
-  it('caps the step trace at MAX_TRACE_CHARS (4000)', async () => {
-    const many = Array.from({ length: 300 }, (_, i) =>
-      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: `step number ${i} does a thing in detail` }] } }),
-    ).join('\n');
-    const fetch = createEvidenceFetcher(ports(solutionWithSnapshot({ '.claude-code/stdout.jsonl': many })));
-    const ev = await fetch(ref());
-    expect(ev.stepTrace!.length).toBeLessThanOrEqual(4000);
-  });
-
-  it('degrades to no step trace for a hermes-style snapshot (plain-text log, no decision path)', async () => {
+  it('degrades to no typed spans for a hermes-style snapshot (plain-text log, no decision path)', async () => {
     const fetch = createEvidenceFetcher(ports(solutionWithSnapshot({ '.hermes-agent/stdout.log': 'started\ndone\n' })));
     const ev = await fetch(ref());
-    expect(ev.stepTrace).toBeUndefined();
+    expect(ev.trajectorySpans).toBeUndefined();
     expect(ev.patch).toBe(PATCH);
   });
 
-  it('degrades to no step trace when the solution has no system_snapshot artifact', async () => {
+  it('degrades to no typed spans when the solution has no system_snapshot artifact', async () => {
     const fetch = createEvidenceFetcher(ports()); // default solution carries no artifacts
     const ev = await fetch(ref());
-    expect(ev.stepTrace).toBeUndefined();
+    expect(ev.trajectorySpans).toBeUndefined();
     expect(ev.patch).toBe(PATCH);
   });
 
-  it('degrades to no step trace when the snapshot fetch throws (never fails the whole evidence fetch)', async () => {
+  it('degrades to no typed spans when the snapshot fetch throws (never fails the whole evidence fetch)', async () => {
     const fetch = createEvidenceFetcher(
       ports({
         solution: boundSolution({
@@ -956,11 +1195,11 @@ describe('createEvidenceFetcher — snapshot-transcript enrichment (§8, #1472)'
       }),
     );
     const ev = await fetch(ref());
-    expect(ev.stepTrace).toBeUndefined();
+    expect(ev.trajectorySpans).toBeUndefined();
     expect(ev.patch).toBe(PATCH);
   });
 
-  it('degrades to no step trace on a sha256 mismatch (tampered snapshot)', async () => {
+  it('degrades to no typed spans on a sha256 mismatch (tampered snapshot)', async () => {
     const { wrapper } = wrapDonation(makeTarGz({ '.claude-code/stdout.jsonl': CLAUDE_JSONL }));
     const fetch = createEvidenceFetcher(
       ports({
@@ -971,11 +1210,11 @@ describe('createEvidenceFetcher — snapshot-transcript enrichment (§8, #1472)'
       }),
     );
     const ev = await fetch(ref());
-    expect(ev.stepTrace).toBeUndefined();
+    expect(ev.trajectorySpans).toBeUndefined();
     expect(ev.patch).toBe(PATCH);
   });
 
-  it('degrades to no step trace on corrupt snapshot bytes', async () => {
+  it('degrades to no typed spans on corrupt snapshot bytes', async () => {
     const bogus = Buffer.from('definitely not a tarball');
     const { wrapper, sha256 } = wrapDonation(bogus);
     const fetch = createEvidenceFetcher(
@@ -987,7 +1226,7 @@ describe('createEvidenceFetcher — snapshot-transcript enrichment (§8, #1472)'
       }),
     );
     const ev = await fetch(ref());
-    expect(ev.stepTrace).toBeUndefined();
+    expect(ev.trajectorySpans).toBeUndefined();
     expect(ev.patch).toBe(PATCH);
   });
 });

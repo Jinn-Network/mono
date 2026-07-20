@@ -16,6 +16,12 @@ import { z } from 'zod';
 import { EligibilityVerdictSchema } from './eligibility-verdict.js';
 
 export const EPISODE_SCHEMA_VERSION = 'jinn.episode.v1' as const;
+export const EPISODE_PROVENANCES = [
+  'contributed',
+  'imported',
+  'derived-from-history',
+] as const;
+export const EpisodeProvenanceSchema = z.enum(EPISODE_PROVENANCES);
 
 const UnixNanoSchema = z.string().regex(/^\d+$/, 'unix-nanosecond digit string');
 
@@ -36,6 +42,16 @@ const StepShape = {
   redactedKeys: z.array(z.string().min(1)).default([]),
   /** Public scrub projection receipt; absent on ordinary local episodes. */
   truncatedKeys: z.array(z.string().min(1)).optional(),
+  /** Canonical OTLP observations are additive for read compatibility. */
+  events: z.array(z.strictObject({
+    timeUnixNano: UnixNanoSchema,
+    name: z.string().min(1),
+    attributes: z.record(z.string(), z.unknown()).optional(),
+  })).optional(),
+  status: z.strictObject({
+    code: z.enum(['UNSET', 'OK', 'ERROR']),
+    message: z.string().min(1).optional(),
+  }).optional(),
 };
 
 const StepWriteSchema = z.strictObject(StepShape);
@@ -270,7 +286,7 @@ export const EpisodeV1WriteSchema = z.strictObject({
   outcome: OutcomeWriteSchema,
   cost: z.strictObject(CostShape),
   retention: z.strictObject(RetentionShape),
-  provenance: z.enum(['contributed', 'imported']).default('contributed'),
+  provenance: EpisodeProvenanceSchema.default('contributed'),
   lineage: z.strictObject(LineageShape).optional(),
   attemptGroup: AttemptGroupWriteSchema.optional(),
   activity: SessionActivityFactsWriteSchema.optional(),
@@ -460,7 +476,7 @@ const EpisodeV1ReadObjectSchema = z.looseObject({
     }).optional(),
   }),
   retention: z.looseObject(RetentionShape),
-  provenance: z.enum(['contributed', 'imported']).default('contributed'),
+  provenance: EpisodeProvenanceSchema.default('contributed'),
   lineage: z.looseObject(LineageShape).optional(),
   attemptGroup: AttemptGroupReadSchema.optional(),
   activity: SessionActivityFactsReadSchema.optional(),
