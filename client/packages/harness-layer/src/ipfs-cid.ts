@@ -19,6 +19,12 @@ export const MAX_RAW_IPFS_BLOCK_BYTES = 256 * 1024;
 export const IPFS_RAW_CODEC = 0x55;
 export const IPFS_DAG_PB_CODEC = 0x70;
 
+/** Deterministic CIDv1 base16 identity for one exact raw sha2-256 block. */
+export function rawSha256Cid(bodyBytes: Uint8Array): string {
+  const digest = createHash('sha256').update(bodyBytes).digest('hex');
+  return `f01551220${digest}`;
+}
+
 export interface ParsedIpfsCid {
   version: 0 | 1;
   codec: typeof IPFS_RAW_CODEC | typeof IPFS_DAG_PB_CODEC;

@@ -61,6 +61,7 @@ import { parseTraceEnvelopeV0, type TraceEnvelopeV0 } from './envelope.js';
 import {
   assertRawSha256CidMatches,
   MAX_RAW_IPFS_BLOCK_BYTES,
+  rawSha256Cid,
 } from './ipfs-cid.js';
 import type { LedgerStore } from './ledger.js';
 
@@ -143,6 +144,19 @@ export interface PerRecordControlAnchorRecord {
 
 export interface ManifestBatchPublishDeps extends HarnessPublishDeps {
   publishManifestBody(body: ManifestV0): Promise<CapturePublishedBlob>;
+  /**
+   * Read-only recovery check for a durably journaled upload intent. `absent`
+   * is safe only when the backing store can authoritatively prove absence;
+   * gateway/read failures must return `unknown`.
+   */
+  reconcileManifestBody?(
+    expectedCid: string,
+    bodyBytes: Uint8Array,
+  ): Promise<
+    | { status: 'present' }
+    | { status: 'absent' }
+    | { status: 'unknown'; reason?: string }
+  >;
   anchorManifest(input: {
     manifestCid: string;
     payload: ManifestPayload;
@@ -251,6 +265,7 @@ export class PublishLedgerError extends Error {
 
 export class ManifestBatchRecordingError extends Error {
   override readonly name = 'ManifestBatchRecordingError';
+  readonly txHash: `0x${string}` | null;
 
   constructor(
     readonly result: ManifestBatchResult,
@@ -264,6 +279,11 @@ export class ManifestBatchRecordingError extends Error {
         `but local recording failed: ${detail}`,
     );
     this.memberRefs = [...result.memberRefs];
+    const candidate = (recordingError as { txHash?: unknown } | null)?.txHash;
+    this.txHash =
+      typeof candidate === 'string' && /^0x[0-9a-fA-F]{64}$/.test(candidate)
+        ? candidate as `0x${string}`
+        : null;
   }
 
   readonly memberRefs: string[];
@@ -315,9 +335,9 @@ export class ManifestBatchPreparationError extends Error {
 }
 
 /**
- * The manifest body is already content-addressed and the transaction was
- * broadcast, but the anchor could not be confirmed successful. Keep both
- * identifiers so an operator can reconcile before retrying.
+ * The manifest body is already content-addressed, but the durable anchor
+ * state could not advance safely. A callback hash is retained when known;
+ * a hashless write-ahead intent deliberately remains closed to retry.
  */
 export class ManifestBatchAnchorError extends Error {
   override readonly name = 'ManifestBatchAnchorError';
@@ -602,18 +622,27 @@ interface JournalMemberInput {
   sourceId: string;
 }
 
-interface JournalTransaction {
-  status: 'broadcast' | 'confirmed';
-  txHash: `0x${string}`;
-  blockNumber?: number | null;
-  gasUsed?: string | null;
-  feeWei?: string | null;
-  payloadHex?: `0x${string}`;
+interface JournalManifestUpload {
+  status: 'intent' | 'uploaded';
+  expectedCid: string;
 }
+
+type JournalTransaction =
+  | {
+      status: 'intent';
+    }
+  | {
+      status: 'broadcast' | 'confirmed';
+      txHash: `0x${string}`;
+      blockNumber?: number | null;
+      gasUsed?: string | null;
+      feeWei?: string | null;
+      payloadHex?: `0x${string}`;
+    };
 
 interface JournalPartition {
   body: ManifestV0;
-  manifestCid: string | null;
+  manifestUpload: JournalManifestUpload | null;
   transaction: JournalTransaction | null;
   anchorRecorded: boolean;
   controlTransaction?: JournalTransaction | null;
@@ -622,7 +651,7 @@ interface JournalPartition {
 }
 
 interface ManifestBatchJournalState {
-  version: 2;
+  version: 3;
   batchKey: string;
   batchKind: string;
   sourceIds: string[];
@@ -698,10 +727,56 @@ function memberInputsDigest(members: JournalMemberInput[]): string {
   return sha256Hex(canonicalJson(members));
 }
 
+function isJournalTransaction(value: unknown): value is JournalTransaction {
+  if (value === null || typeof value !== 'object') return false;
+  const transaction = value as Record<string, unknown>;
+  if (transaction.status === 'intent') {
+    return transaction.txHash === undefined;
+  }
+  return (
+    (transaction.status === 'broadcast' || transaction.status === 'confirmed') &&
+    typeof transaction.txHash === 'string' &&
+    /^0x[0-9a-fA-F]{64}$/.test(transaction.txHash)
+  );
+}
+
+function isJournalManifestUpload(
+  value: unknown,
+): value is JournalManifestUpload {
+  if (value === null || typeof value !== 'object') return false;
+  const upload = value as Record<string, unknown>;
+  return (
+    (upload.status === 'intent' || upload.status === 'uploaded') &&
+    typeof upload.expectedCid === 'string'
+  );
+}
+
+function isJournalPartition(value: unknown): value is JournalPartition {
+  if (value === null || typeof value !== 'object') return false;
+  const partition = value as Record<string, unknown>;
+  return (
+    partition.body !== null &&
+    typeof partition.body === 'object' &&
+    (partition.manifestUpload === null ||
+      isJournalManifestUpload(partition.manifestUpload)) &&
+    (partition.transaction === null ||
+      isJournalTransaction(partition.transaction)) &&
+    typeof partition.anchorRecorded === 'boolean' &&
+    (partition.controlTransaction === undefined ||
+      partition.controlTransaction === null ||
+      isJournalTransaction(partition.controlTransaction))
+  );
+}
+
 function parseJournalState(raw: string): ManifestBatchJournalState {
-  const parsed = JSON.parse(raw) as Partial<ManifestBatchJournalState>;
+  const parsed = JSON.parse(raw) as Record<string, unknown>;
+  if (parsed.version === 2) {
+    throw new Error(
+      'manifest journal conflict: legacy v2 state lacks write-ahead intents and cannot be recovered safely',
+    );
+  }
   if (
-    parsed.version !== 2 ||
+    parsed.version !== 3 ||
     typeof parsed.batchKey !== 'string' ||
     typeof parsed.batchKind !== 'string' ||
     !Array.isArray(parsed.sourceIds) ||
@@ -714,11 +789,13 @@ function parseJournalState(raw: string): ManifestBatchJournalState {
     typeof parsed.measurePerRecordControl !== 'boolean' ||
     !Array.isArray(parsed.members) ||
     !Array.isArray(parsed.published) ||
-    (parsed.partitions !== null && !Array.isArray(parsed.partitions))
+    (parsed.partitions !== null &&
+      (!Array.isArray(parsed.partitions) ||
+        !parsed.partitions.every(isJournalPartition)))
   ) {
     throw new Error('manifest journal conflict: invalid persisted state');
   }
-  return parsed as ManifestBatchJournalState;
+  return parsed as unknown as ManifestBatchJournalState;
 }
 
 function openManifestJournal(
@@ -745,7 +822,7 @@ function openManifestJournal(
     return {
       batchKey: null,
       state: {
-        version: 2,
+        version: 3,
         batchKey: '',
         batchKind: opts.batchKind,
         sourceIds,
@@ -793,7 +870,7 @@ function openManifestJournal(
   const persisted = journal.loadManifestBatchJournal(batchKey);
   const state = persisted === null
     ? {
-        version: 2 as const,
+        version: 3 as const,
         batchKey,
         batchKind: opts.batchKind,
         sourceIds,
@@ -908,6 +985,18 @@ function partitionManifestMembers(
   return partitions;
 }
 
+function errorWithTransactionHash(
+  error: unknown,
+  txHash: `0x${string}`,
+  context: string,
+): Error & { txHash: `0x${string}` } {
+  const detail = error instanceof Error ? error.message : String(error);
+  return Object.assign(new Error(`${context}: ${detail}`), {
+    cause: error,
+    txHash,
+  });
+}
+
 async function publishPreparedManifest(
   published: PreparedManifestMember[],
   deps: ManifestBatchPublishDeps,
@@ -930,7 +1019,7 @@ async function publishPreparedManifest(
   }
   const partition = args.partition ?? {
     body,
-    manifestCid: null,
+    manifestUpload: null,
     transaction: null,
     anchorRecorded: false,
   };
@@ -938,43 +1027,93 @@ async function publishPreparedManifest(
     throw new Error('manifest journal conflict: frozen partition plan changed');
   }
   const saveJournal = (): void => args.journal?.save();
-  if (partition.manifestCid === null) {
+  const durable = args.journal?.batchKey !== null &&
+    args.journal?.batchKey !== undefined;
+  const memberRefs = published.map((member) => member.envelopeRef);
+  const manifestPreparationError = (
+    stage: 'manifest-upload' | 'manifest-validation',
+    error: unknown,
+  ): ManifestBatchPreparationError =>
+    new ManifestBatchPreparationError(
+      stage,
+      memberRefs,
+      error,
+      args.journal?.batchKey ?? null,
+    );
+  const saveManifestUpload = (): void => {
+    try {
+      saveJournal();
+    } catch (error) {
+      throw manifestPreparationError('manifest-upload', error);
+    }
+  };
+  const expectedCid = rawSha256Cid(bodyBytes);
+  let createdUploadIntent = false;
+  if (partition.manifestUpload === null) {
+    partition.manifestUpload = { status: 'intent', expectedCid };
+    if (durable) saveManifestUpload();
+    createdUploadIntent = true;
+  }
+  if (partition.manifestUpload.expectedCid !== expectedCid) {
+    throw manifestPreparationError(
+      'manifest-validation',
+      new Error(
+        `manifest journal conflict: upload intent CID ${partition.manifestUpload.expectedCid} does not match canonical body ${expectedCid}`,
+      ),
+    );
+  }
+  if (
+    partition.manifestUpload.status === 'intent' &&
+    durable &&
+    !createdUploadIntent
+  ) {
+    if (!deps.reconcileManifestBody) {
+      throw manifestPreparationError(
+        'manifest-upload',
+        new Error(
+          `manifest upload intent ${expectedCid} is unresolved; read-only reconciliation is unavailable`,
+        ),
+      );
+    }
+    let reconciliation:
+      | { status: 'present' }
+      | { status: 'absent' }
+      | { status: 'unknown'; reason?: string };
+    try {
+      reconciliation = await deps.reconcileManifestBody(expectedCid, bodyBytes);
+    } catch (error) {
+      throw manifestPreparationError('manifest-upload', error);
+    }
+    if (reconciliation.status === 'unknown') {
+      throw manifestPreparationError(
+        'manifest-upload',
+        new Error(
+          `manifest upload intent ${expectedCid} is unknown and cannot be retried safely` +
+            `${reconciliation.reason ? `: ${reconciliation.reason}` : ''}`,
+        ),
+      );
+    }
+    if (reconciliation.status === 'present') {
+      partition.manifestUpload = { status: 'uploaded', expectedCid };
+      saveManifestUpload();
+    }
+  }
+  if (partition.manifestUpload.status === 'intent') {
     let manifestBlob: CapturePublishedBlob;
     try {
       manifestBlob = await deps.publishManifestBody(body);
     } catch (error) {
-      throw new ManifestBatchPreparationError(
-        'manifest-upload',
-        published.map((member) => member.envelopeRef),
-        error,
-        args.journal?.batchKey ?? null,
-      );
+      throw manifestPreparationError('manifest-upload', error);
     }
     try {
       assertRawSha256CidMatches(manifestBlob.cid, bodyBytes);
     } catch (error) {
-      throw new ManifestBatchPreparationError(
-        'manifest-validation',
-        published.map((member) => member.envelopeRef),
-        error,
-        args.journal?.batchKey ?? null,
-      );
+      throw manifestPreparationError('manifest-validation', error);
     }
-    partition.manifestCid = manifestBlob.cid;
-    saveJournal();
-  } else {
-    try {
-      assertRawSha256CidMatches(partition.manifestCid, bodyBytes);
-    } catch (error) {
-      throw new ManifestBatchPreparationError(
-        'manifest-validation',
-        published.map((member) => member.envelopeRef),
-        error,
-        args.journal?.batchKey ?? null,
-      );
-    }
+    partition.manifestUpload = { status: 'uploaded', expectedCid };
+    saveManifestUpload();
   }
-  const manifestCid = partition.manifestCid;
+  const manifestCid = expectedCid;
   const root = body.merkleRoot as `0x${string}`;
   const payload: ManifestPayload = {
     version: 0,
@@ -985,7 +1124,13 @@ async function publishPreparedManifest(
 
   const reconcile = async (
     transaction: JournalTransaction,
+    label = 'manifest',
   ): Promise<ManifestAnchorResult | null> => {
+    if (transaction.status === 'intent') {
+      throw new Error(
+        `${label} anchor has a hashless write-ahead intent; it cannot be safely retried or transaction-reconciled`,
+      );
+    }
     if (transaction.status === 'confirmed') {
       return {
         txHash: transaction.txHash,
@@ -1002,14 +1147,14 @@ async function publishPreparedManifest(
     }
     if (!deps.reconcileAnchor) {
       throw Object.assign(
-        new Error(`manifest transaction ${transaction.txHash} is unconfirmed; reconciliation is unavailable`),
+        new Error(`${label} transaction ${transaction.txHash} is unconfirmed; reconciliation is unavailable`),
         { txHash: transaction.txHash },
       );
     }
     const reconciled = await deps.reconcileAnchor(transaction.txHash);
     if (reconciled.status === 'pending') {
       throw Object.assign(
-        new Error(`manifest transaction ${transaction.txHash} is pending; reconcile before retrying`),
+        new Error(`${label} transaction ${transaction.txHash} is pending; reconcile before retrying`),
         { txHash: transaction.txHash },
       );
     }
@@ -1019,12 +1164,13 @@ async function publishPreparedManifest(
 
   let anchor: ManifestAnchorResult | null = null;
   if (partition.transaction !== null) {
+    const journaledTransaction = partition.transaction;
     try {
-      anchor = await reconcile(partition.transaction);
+      anchor = await reconcile(journaledTransaction);
     } catch (error) {
       throw new ManifestBatchAnchorError(
         manifestCid,
-        published.map((member) => member.envelopeRef),
+        memberRefs,
         root,
         error,
         args.journal?.batchKey ?? null,
@@ -1032,8 +1178,25 @@ async function publishPreparedManifest(
     }
     if (anchor === null) {
       partition.transaction = null;
-      saveJournal();
-    } else if (partition.transaction.status !== 'confirmed') {
+      try {
+        saveJournal();
+      } catch (error) {
+        const withHash = journaledTransaction.status === 'intent'
+          ? error
+          : errorWithTransactionHash(
+              error,
+              journaledTransaction.txHash,
+              'failed to persist reverted manifest transaction',
+            );
+        throw new ManifestBatchAnchorError(
+          manifestCid,
+          memberRefs,
+          root,
+          withHash,
+          args.journal?.batchKey ?? null,
+        );
+      }
+    } else if (journaledTransaction.status !== 'confirmed') {
       partition.transaction = {
         status: 'confirmed',
         txHash: anchor.txHash,
@@ -1041,36 +1204,80 @@ async function publishPreparedManifest(
         gasUsed: anchor.gasUsed?.toString() ?? null,
         feeWei: anchor.feeWei?.toString() ?? null,
       };
-      saveJournal();
+      try {
+        saveJournal();
+      } catch (error) {
+        throw new ManifestBatchAnchorError(
+          manifestCid,
+          memberRefs,
+          root,
+          errorWithTransactionHash(
+            error,
+            anchor.txHash,
+            'failed to persist confirmed manifest transaction',
+          ),
+          args.journal?.batchKey ?? null,
+        );
+      }
     }
   }
   if (anchor === null) {
+    if (durable) {
+      partition.transaction = { status: 'intent' };
+      try {
+        saveJournal();
+      } catch (error) {
+        throw new ManifestBatchAnchorError(
+          manifestCid,
+          memberRefs,
+          root,
+          error,
+          args.journal?.batchKey ?? null,
+        );
+      }
+    }
     try {
       anchor = await deps.anchorManifest({
         manifestCid,
         payload,
         onBroadcast: (txHash) => {
           partition.transaction = { status: 'broadcast', txHash };
-          saveJournal();
+          try {
+            saveJournal();
+          } catch (error) {
+            throw errorWithTransactionHash(
+              error,
+              txHash,
+              'failed to persist manifest broadcast hash',
+            );
+          }
         },
       });
+      partition.transaction = {
+        status: 'confirmed',
+        txHash: anchor.txHash,
+        blockNumber: anchor.blockNumber,
+        gasUsed: anchor.gasUsed?.toString() ?? null,
+        feeWei: anchor.feeWei?.toString() ?? null,
+      };
+      try {
+        saveJournal();
+      } catch (error) {
+        throw errorWithTransactionHash(
+          error,
+          anchor.txHash,
+          'failed to persist confirmed manifest transaction',
+        );
+      }
     } catch (error) {
       throw new ManifestBatchAnchorError(
         manifestCid,
-        published.map((member) => member.envelopeRef),
+        memberRefs,
         root,
         error,
         args.journal?.batchKey ?? null,
       );
     }
-    partition.transaction = {
-      status: 'confirmed',
-      txHash: anchor.txHash,
-      blockNumber: anchor.blockNumber,
-      gasUsed: anchor.gasUsed?.toString() ?? null,
-      feeWei: anchor.feeWei?.toString() ?? null,
-    };
-    saveJournal();
   }
   const result: ManifestBatchResult = {
     ...(args.journal?.batchKey
@@ -1103,17 +1310,36 @@ async function publishPreparedManifest(
     if (args.measurePerRecordControl) {
       const controlMember = published[0]!;
       const metadataKey = `capture:${controlMember.envelopeRef}`;
+      const journaledControlTransaction =
+        partition.controlTransaction ?? null;
       let controlAnchor: ManifestAnchorResult | null =
-        partition.controlTransaction
-          ? await reconcile(partition.controlTransaction)
+        journaledControlTransaction
+          ? await reconcile(journaledControlTransaction, 'control')
           : null;
       let controlPayloadHex =
-        partition.controlPayloadHex ?? partition.controlTransaction?.payloadHex;
-      if (controlAnchor === null && partition.controlTransaction) {
+        partition.controlPayloadHex ??
+        (partition.controlTransaction?.status === 'intent'
+          ? undefined
+          : partition.controlTransaction?.payloadHex);
+      if (controlAnchor === null && journaledControlTransaction) {
         partition.controlTransaction = null;
-        saveJournal();
+        try {
+          saveJournal();
+        } catch (error) {
+          throw journaledControlTransaction.status === 'intent'
+            ? error
+            : errorWithTransactionHash(
+                error,
+                journaledControlTransaction.txHash,
+                'failed to persist reverted control transaction',
+              );
+        }
       }
       if (controlAnchor === null) {
+        if (durable) {
+          partition.controlTransaction = { status: 'intent' };
+          saveJournal();
+        }
         const publishedControl = await deps.anchorEnvelope({
           metadataKey,
           envelopeCid: controlMember.envelopeRef,
@@ -1127,7 +1353,15 @@ async function publishPreparedManifest(
           },
           onBroadcast: (txHash) => {
             partition.controlTransaction = { status: 'broadcast', txHash };
-            saveJournal();
+            try {
+              saveJournal();
+            } catch (error) {
+              throw errorWithTransactionHash(
+                error,
+                txHash,
+                'failed to persist control broadcast hash',
+              );
+            }
           },
         });
         if (!publishedControl.txHash) {
@@ -1150,7 +1384,15 @@ async function publishPreparedManifest(
             : {}),
         };
         controlPayloadHex = publishedControl.payloadHex;
-        saveJournal();
+        try {
+          saveJournal();
+        } catch (error) {
+          throw errorWithTransactionHash(
+            error,
+            controlAnchor.txHash,
+            'failed to persist confirmed control transaction',
+          );
+        }
       }
       result.control = {
         memberRef: controlMember.envelopeRef,
@@ -1327,7 +1569,7 @@ export async function publishManifestBatch(
   if (journal.state.partitions === null) {
     journal.state.partitions = frozenBodies.map((body) => ({
       body,
-      manifestCid: null,
+      manifestUpload: null,
       transaction: null,
       anchorRecorded: false,
     }));

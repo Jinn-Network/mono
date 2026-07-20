@@ -12,7 +12,10 @@ import { Buffer } from 'node:buffer';
 import type { Hex } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import { createClients } from '../../../src/adapters/mech/safe.js';
-import { uploadToIpfs } from '../../../src/adapters/mech/ipfs.js';
+import {
+  fetchRawBytesFromIpfs,
+  uploadToIpfs,
+} from '../../../src/adapters/mech/ipfs.js';
 import { canonicalJson } from '../../../src/harnesses/engine/canonical-json.js';
 import {
   codeDigestSha256ToBytes32,
@@ -34,6 +37,7 @@ export const DEFAULT_TESTNET_RPC_URL = 'https://base-sepolia-rpc.publicnode.com'
 export const DEFAULT_TESTNET_IDENTITY_REGISTRY =
   '0x8004A818BFB912233c491871b3d84c89A494BD9e' as const;
 export const DEFAULT_IPFS_REGISTRY_URL = 'https://registry.autonolas.tech';
+const DEFAULT_IPFS_GATEWAY_URL = 'https://gateway.autonolas.tech';
 
 export interface ManifestAnchorStore {
   saveErc8004Anchor(input: {
@@ -65,6 +69,8 @@ export interface LivePublishConfig {
   rpcUrl?: string;
   identityRegistry?: `0x${string}`;
   ipfsRegistryUrl?: string;
+  /** Read-only gateway used to reconcile a durable manifest upload intent. */
+  ipfsGatewayUrl?: string;
   /** Access endpoint recorded on the published artifact. */
   endpoint?: string;
   ledgerPath?: string;
@@ -77,6 +83,7 @@ export interface LivePublishConfig {
 export function createLivePublishDeps(config: LivePublishConfig): ManifestBatchPublishDeps {
   const rpcUrl = config.rpcUrl ?? DEFAULT_TESTNET_RPC_URL;
   const ipfsRegistryUrl = config.ipfsRegistryUrl ?? DEFAULT_IPFS_REGISTRY_URL;
+  const ipfsGatewayUrl = config.ipfsGatewayUrl ?? DEFAULT_IPFS_GATEWAY_URL;
   const endpoint = config.endpoint ?? 'http://127.0.0.1:7331';
   const { publicClient, walletClient, account } = createClients(
     rpcUrl,
@@ -115,6 +122,30 @@ export function createLivePublishDeps(config: LivePublishConfig): ManifestBatchP
     publishManifestBody: async (body) => {
       const cid = await uploadToIpfs(ipfsRegistryUrl, body, { rawLeaves: true });
       return { cid, sha256: sha256Hex(canonicalJson(body)), endpoint, priceUsdc: '0' };
+    },
+    reconcileManifestBody: async (expectedCid, bodyBytes) => {
+      try {
+        const fetched = await fetchRawBytesFromIpfs(
+          ipfsGatewayUrl,
+          expectedCid,
+        );
+        if (!Buffer.from(fetched).equals(Buffer.from(bodyBytes))) {
+          return {
+            status: 'unknown',
+            reason:
+              `gateway returned bytes that do not exactly match ${expectedCid}`,
+          };
+        }
+        return { status: 'present' };
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        // A gateway miss/outage is not authoritative absence from the upload
+        // backing store. Live recovery therefore remains read-only/fail-closed.
+        return {
+          status: 'unknown',
+          reason: `gateway fetch could not prove ${expectedCid} present or absent: ${detail}`,
+        };
+      }
     },
     anchorEnvelope: async ({
       metadataKey,

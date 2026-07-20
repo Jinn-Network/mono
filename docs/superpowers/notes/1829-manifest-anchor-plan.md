@@ -1,6 +1,6 @@
 # Implementation plan — `manifest:` anchor record type + consumer enumeration + gas measurement (#1829)
 
-Version: 1.0 · Date: 2026-07-17 · Shape: feat (Medium) · Author: PLANNING subagent (#1829)
+Version: 1.1 · Date: 2026-07-20 · Shape: feat (Medium) · Author: PLANNING subagent (#1829)
 
 Turns the ratified design note (`docs/superpowers/notes/1829-manifest-anchor-design.md`) into an
 ordered, test-first (TDD) implementation plan. Every step is small and independently verifiable.
@@ -445,6 +445,34 @@ distinct deliverables. **This PR ships only the first.**
 The issue's "Verification: testnet batch anchor + inclusion-proof check" is thus an
 operator-run acceptance step layered on top of the merged code, not a CI gate — it is what closes the
 measurement half of the AC after merge.
+
+## Durability amendment — journal v3 write-ahead boundaries
+
+The durable manifest path does not claim atomicity or exactly-once effects across SQLite, IPFS, and
+the chain. Journal v3 instead persists an intent before each irreversible operation and chooses
+safety over automatic liveness when the post-effect journal write is ambiguous:
+
+| Crash/failure boundary | Persisted v3 fact | Resume behavior |
+| --- | --- | --- |
+| Before manifest upload | `manifestUpload:{status:"intent",expectedCid}` | Read-only reconcile the exact canonical bytes at `expectedCid`. Mark uploaded when present; upload only when a backing-store port authoritatively proves absence; fail closed on gateway errors, 404s, mismatch, or other ambiguity. |
+| After upload, before `uploaded` save | Same upload intent | Same read-only reconciliation; never blindly upload again. |
+| Before manifest anchor broadcast | `transaction:{status:"intent"}` | A fresh invocation has no tx hash to reconcile, so it fails closed and never broadcasts. Operator/read-only investigation is required. |
+| After broadcast callback, before hash save | Same hashless transaction intent; the current thrown error retains the callback tx hash | A fresh invocation still fails closed. It does not infer or rediscover a hash and does not rebroadcast. |
+| After broadcast hash save, before confirmation | `transaction:{status:"broadcast",txHash}` | Use read-only receipt reconciliation. Pending stays closed, confirmed advances, and only an authoritatively reverted tx may receive a new write-ahead intent and retry. |
+| Equivalent control-anchor boundaries | `controlTransaction` uses the same intent/broadcast/confirmed states | Same fail-closed rules; callback errors retain the control tx hash. |
+
+The production IPFS registry exposes no authoritative absence read. Its live recovery port can prove
+only exact presence through a gateway byte comparison; a miss or outage is `unknown`, not `absent`.
+An injected backing-store-specific port may return `absent` only when its store contract can prove
+that fact. This constraint can strand an ambiguous intent until the object becomes readable or an
+operator reconciles it, which is the deliberate liveness cost of avoiding a duplicate external
+effect.
+
+The journal JSON version changes from 2 to 3, but the recovery-key derivation deliberately retains
+`jinn.manifest-batch-recovery.v2`. That makes existing v2 rows visible at their original key so they
+can be rejected explicitly as unsafe; changing the key would hide them and risk replaying their
+effects. No SQLite schema migration is needed because the journal payload is opaque JSON. V2 rows
+are not auto-upgraded: they lack the write-ahead facts needed to distinguish the ambiguous cases.
 
 ## Ordering rationale
 
