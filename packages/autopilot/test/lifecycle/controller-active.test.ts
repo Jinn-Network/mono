@@ -414,4 +414,84 @@ describe('active lifecycle controller', () => {
     if (report.status !== 'ok') throw new Error('expected active report');
     expect(report.reconciliation?.results).toEqual([]);
   });
+
+  it('does not let a permanently-failing reconciliation action for one issue block claim scheduling for an unrelated issue', async () => {
+    // Issue 99 has a stuck project-status write (e.g. an archived project item) that
+    // will fail every cycle forever. Issue 42 is an unrelated, otherwise-eligible issue
+    // with nothing to reconcile. A poisoned item must not starve the whole fleet.
+    const poisoned: GitHubLifecycleSnapshot = {
+      project: {
+        items: [],
+        rateLimit: {
+          remaining: 4_000,
+          used: 1_000,
+          resetAt: '2026-07-20T13:00:00.000Z',
+        },
+        currentSprintIterationId: null,
+      },
+      issues: [],
+      branches: [],
+      diagnostics: [],
+      pullRequests: [],
+      lifecycle: {
+        items: [
+          {
+            kind: 'issue',
+            issueNumber: 42,
+            v2Marked: true,
+            projectStatus: 'Todo',
+            labels: [],
+            eligible: true,
+            eligibilityReason: 'eligible',
+          },
+          {
+            kind: 'issue',
+            issueNumber: 99,
+            v2Marked: true,
+            projectStatus: null,
+            labels: [],
+            eligible: true,
+            eligibilityReason: 'eligible',
+          },
+        ],
+      },
+      capturedAt: NOW.toISOString(),
+    };
+    const failingWriter: ReconciliationWriter = new Proxy({} as ReconciliationWriter, {
+      get(_target, prop) {
+        if (prop === 'setProjectStatus') {
+          return async (issueNumber: number) => {
+            if (issueNumber === 99) throw new Error('project item is archived');
+          };
+        }
+        return async () => null;
+      },
+    });
+    const actions: unknown[] = [];
+    const controller = deps({
+      readSnapshot: async () => poisoned,
+      writer: failingWriter,
+    });
+    controller.active!.executeAction = async (action) => {
+      actions.push(action);
+      return { outcome: 'spawned' };
+    };
+
+    const first = await runLifecycleCycle('active', controller);
+    expect(actions).toEqual([{ kind: 'claim-implementation', issueNumber: 42 }]);
+    if (first.status !== 'ok') throw new Error('expected active report');
+    expect(first.reconciliation?.results).toEqual([
+      expect.objectContaining({
+        outcome: 'failed',
+        action: expect.objectContaining({ issueNumber: 99 }),
+      }),
+    ]);
+
+    // The poisoned action re-plans and re-fails every cycle; issue 42 must keep
+    // being claimable in later cycles too, not just the first.
+    actions.length = 0;
+    const second = await runLifecycleCycle('active', controller);
+    expect(actions).toEqual([{ kind: 'claim-implementation', issueNumber: 42 }]);
+    expect(second.status).toBe('ok');
+  });
 });
