@@ -33,6 +33,15 @@
  * result — it is `unscorable`, mirroring `./eval-runner.ts` and the
  * swe-rebench-v2 evaluator's `EvalCouldNotGradeError` convention. The engine
  * records a skip (no verdict) rather than a bogus FAIL.
+ *
+ * A patch that changes files but touches NO gated package (e.g. only
+ * `contracts/`, `docs/`, or root config — anything outside `client/` and
+ * `packages/sdk/`) is likewise never coerced into a vacuous PASS: this
+ * evaluator has no applicable gate for it, which is a capability limit of the
+ * grader, not a verified solution — so it is `unscorable` too (see the
+ * `scopes.length === 0` check below). Contrast the true empty-patch case
+ * documented on `getChangedFiles`, where the empty changed-file list itself
+ * is the (by-design) vacuous case.
  */
 
 import { access } from 'node:fs/promises';
@@ -57,7 +66,11 @@ export interface JinnRepoLiveEvalResult {
   tests: boolean;
   /** AND of the three gates above. */
   passed: boolean;
-  /** True only for grader-infra failure (clone/install/spawn) — see module doc. */
+  /**
+   * True for grader-infra failure (clone/install/spawn) OR a patch that
+   * touches no gated package (no applicable gate exists) — see module doc.
+   * Never true alongside `passed: true`.
+   */
   unscorable: boolean;
   logExcerpt: string;
 }
@@ -84,6 +97,12 @@ async function pathExists(path: string): Promise<boolean> {
  * no-op — `prepareRepro` skips `git apply` entirely for it) yields an empty
  * changed-file list, so every gate below is vacuously satisfied for it — a
  * known, documented limit of a mechanical (non-goal-aware) grader.
+ *
+ * Distinct from that: a NON-empty changed-file list that maps to zero gated
+ * packages (every changed file falls outside `client/` and `packages/sdk/`)
+ * must NOT also be vacuously satisfied — the caller checks
+ * `scopes.length === 0` against a non-empty `changedFiles` and treats it as
+ * `unscorable` (no applicable gate exists for this patch), never `passed`.
  */
 async function getChangedFiles(repoDir: string): Promise<string[]> {
   const { stdout } = await sh('git', ['-C', repoDir, 'diff', '--name-only', 'HEAD']);
@@ -151,6 +170,22 @@ export async function runJinnRepoLiveEval(args: {
   try {
     const changedFiles = await getChangedFiles(repro.dir);
     const scopes = scopeTestsForChangedFiles(changedFiles, args.packages ?? KNOWN_LIVE_EVAL_PACKAGES);
+
+    // A non-empty patch whose changed files all fall outside every gated
+    // package (e.g. only `contracts/`, `docs/`, or root config) has no
+    // applicable gate here — that is a capability limit of this mechanical
+    // grader, not a verified solution. NEVER return a vacuous PASS for it;
+    // mirror the infra-failure convention (unscorable, no verdict emitted).
+    // Contrast the true empty-patch case (changedFiles.length === 0), which
+    // stays vacuously satisfied by design — see getChangedFiles' doc above.
+    if (scopes.length === 0 && changedFiles.length > 0) {
+      return unscorable(
+        `no-gated-package-touched: changed files outside every gated package (${(args.packages ?? KNOWN_LIVE_EVAL_PACKAGES).map((p) => p.root).join(', ')}): ${changedFiles.join(', ')}`.slice(
+          0,
+          LOG_LIMIT,
+        ),
+      );
+    }
 
     // ── Gate 2: typecheck — full, per touched package, AND-gated ───────────
     let typecheckFailLog = '';
