@@ -30,8 +30,9 @@ describe('packed client workflow coverage', () => {
     const ci = workflow('.github/workflows/ci.yml');
     const publish = workflow('.github/workflows/npm-publish.yml');
 
-    expect(ci).toContain('- run: yarn pack:smoke');
-    expect(ci).toContain('- run: yarn pack -o jinn-client.tgz');
+    expect(ci).toContain('- run: node scripts/smoke-test-pack.mjs --output jinn-client.tgz');
+    expect(ci).toContain('- run: yarn pack:smoke:private-runtime');
+    expect(ci).not.toContain('- run: yarn pack -o jinn-client.tgz');
     expect(ci).not.toContain('working-directory: /tmp');
 
     const smoke = publish.indexOf('- run: yarn pack:smoke');
