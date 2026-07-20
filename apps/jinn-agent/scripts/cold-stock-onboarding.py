@@ -238,6 +238,20 @@ def remove_and_assert_stock_silence() -> None:
     assert "Plugin jinn removed" in removed, removed
     assert not (HERMES_HOME / "plugins" / "jinn").exists()
 
+    config = (
+        yaml.safe_load((HERMES_HOME / "config.yaml").read_text(encoding="utf-8"))
+        or {}
+    )
+    plugins = config.get("plugins") or {}
+    for state_name in ("enabled", "disabled"):
+        assert "jinn" not in (plugins.get(state_name) or []), (
+            f"removed plugin remains in plugins.{state_name}: {plugins}"
+        )
+    entries = plugins.get("entries") or {}
+    assert "jinn" not in entries, (
+        f"removed plugin remains in plugins.entries: {plugins}"
+    )
+
     listed = run_cli("plugins", "list", "--user", "--plain")
     assert listed == "", f"removed plugin still appears in user plugin list:\n{listed}"
 

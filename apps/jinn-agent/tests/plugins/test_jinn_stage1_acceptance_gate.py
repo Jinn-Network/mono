@@ -59,6 +59,36 @@ def test_cold_stock_exercises_real_local_install_doctor_and_remove_lifecycle():
         assert check_name in driver
 
 
+def test_cold_stock_channel_contains_only_tracked_slim_source():
+    script = (AGENT_ROOT / "scripts" / "cold-stock-e2e.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert (
+        'git -C "$REPO_ROOT" archive --format=tar '
+        "HEAD:apps/jinn-agent/plugins/jinn"
+    ) in script
+    assert 'cp -R "$HERE/plugins/jinn/."' not in script
+    assert '"$JINN_PLUGIN_CHANNEL/build"' in script
+    assert "'*.egg-info'" in script
+
+
+def test_remove_clears_plugin_state_before_a_fresh_wheel_leg():
+    script = (AGENT_ROOT / "scripts" / "cold-stock-e2e.sh").read_text(
+        encoding="utf-8"
+    )
+    driver = (AGENT_ROOT / "scripts" / "cold-stock-onboarding.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'for state_name in ("enabled", "disabled")' in driver
+    assert 'plugins.get("entries")' in driver
+    assert 'export HOME="$WORK/wheel-home"' in script
+    assert script.index('export HOME="$WORK/wheel-home"') < script.index(
+        '"$WORK/venv/bin/pip" install -q "$WHEEL"'
+    )
+
+
 def test_stage1_gate_is_blocking_for_every_product_boundary():
     workflow = yaml.safe_load(
         (REPO_ROOT / ".github" / "workflows" / "jinn-agent-ci.yml").read_text(

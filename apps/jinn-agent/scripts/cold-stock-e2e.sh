@@ -51,7 +51,14 @@ test -n "$WHEEL"
 # Hermes owns the clone, enable prompt, config write, discovery, and removal;
 # this temporary file:// source never mutates a live plugin installation.
 mkdir -p "$JINN_PLUGIN_CHANNEL"
-cp -R "$HERE/plugins/jinn/." "$JINN_PLUGIN_CHANNEL/"
+git -C "$REPO_ROOT" archive --format=tar HEAD:apps/jinn-agent/plugins/jinn \
+  | tar -x -C "$JINN_PLUGIN_CHANNEL"
+if [[ -d "$JINN_PLUGIN_CHANNEL/build" ]] \
+  || find "$JINN_PLUGIN_CHANNEL" -maxdepth 1 -name '*.egg-info' -print -quit \
+    | grep -q .; then
+  echo "Tracked-only plugin channel contains generated build artifacts." >&2
+  exit 1
+fi
 git -C "$JINN_PLUGIN_CHANNEL" init -q
 git -C "$JINN_PLUGIN_CHANNEL" config user.email "cold-stock@example.invalid"
 git -C "$JINN_PLUGIN_CHANNEL" config user.name "Cold stock"
@@ -72,6 +79,10 @@ export JINN_HERMES_BIN="$WORK/venv/bin/hermes"
 # Preserve the existing Stage 1 wheel boundary after the real git-plugin
 # lifecycle has removed its directory source. Installing both concurrently
 # would let entry-point precedence hide which product Hermes actually loaded.
+export HOME="$WORK/wheel-home"
+export HERMES_HOME="$HOME"
+export JINN_LAYER_SKILLS_INSTALL_DIR="$HERMES_HOME/skills"
+mkdir -p "$HOME"
 "$WORK/venv/bin/pip" install -q "$WHEEL"
 
 (
