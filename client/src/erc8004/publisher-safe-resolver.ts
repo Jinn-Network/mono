@@ -60,7 +60,7 @@ export function createPublisherSafeResolver(
     ),
   ];
   const cache = new Map<string, Promise<string>>();
-  const rpcChains = new Map<RegistryReadClient, Promise<number>>();
+  const rpcChains = new Map<RegistryReadClient, number>();
 
   return async (chainId, publisherAgentId, publishedAtBlock) => {
     if (!Number.isSafeInteger(chainId) || chainId <= 0) {
@@ -102,12 +102,13 @@ export function createPublisherSafeResolver(
         const failures: string[] = [];
         for (const [index, candidate] of clients.entries()) {
           try {
-            let rpcChain = rpcChains.get(candidate);
-            if (!rpcChain) {
-              rpcChain = candidate.getChainId();
-              rpcChains.set(candidate, rpcChain);
+            let actualChainId = rpcChains.get(candidate);
+            if (actualChainId === undefined) {
+              actualChainId = await candidate.getChainId();
+              // Cache only fulfilled probes. A transient rejected probe must
+              // remain retryable just like a failed historical read.
+              rpcChains.set(candidate, actualChainId);
             }
-            const actualChainId = await rpcChain;
             if (actualChainId !== chainId) {
               throw new Error(
                 `publisher Safe RPC chain ${actualChainId} does not match expected ${chainId}`,

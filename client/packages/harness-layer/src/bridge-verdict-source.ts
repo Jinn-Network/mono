@@ -7,7 +7,7 @@
  * `AttemptRef[]` for `bridgeAttempts()`.
  *
  * A single paged GraphQL query over `verdictEnvelopeMetas`:
- *   - filtered to swe-rebench-v2 / enriched-ok / non-empty instanceId;
+ *   - filtered to swe-rebench-v2 / enriched-ok;
  *   - keep only PASS and FAIL polarities (INVALID / INDETERMINATE / UNKNOWN are
  *     noise, not lessons — dropped, as is any actualPassed/verdict disagreement);
  *   - carry each verdict row's own `manifestCid` as `verdictManifestCid` — the
@@ -41,8 +41,7 @@ query BridgeVerdicts($limit: Int!, $after: String) {
   verdictEnvelopeMetas(
     where: {
       solverType_starts_with: "swe-rebench-v2",
-      enrichmentStatus: "ok",
-      instanceId_not: ""
+      enrichmentStatus: "ok"
     },
     limit: $limit,
     after: $after,
@@ -96,6 +95,12 @@ const PAGE_LIMIT = 1000;
 const MAX_PAGES = 20;
 /** Default cap on returned refs when the caller does not pass `limit`. */
 const DEFAULT_LIMIT = 500;
+/**
+ * A MetadataSet publisher can project arbitrary enrichment identity. Retain a
+ * finite number of projections for one authoritative request tuple so an
+ * attacker-first row cannot suppress the genuine candidate.
+ */
+const MAX_IDENTITY_CANDIDATES_PER_ATTEMPT = 32;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
 
@@ -166,7 +171,7 @@ export function createVerdictSource(opts: VerdictSourceOptions): VerdictSource {
     // Page verdict rows (both polarities), dropping non-PASS/FAIL and any row
     // missing its verdict `manifestCid` (no join entry point → nothing to bridge).
     const refs: AttemptRef[] = [];
-    const seenRequestPolarities = new Set<string>();
+    const refsByRequestPolarity = new Map<string, AttemptRef>();
     let cursor: string | null = null;
     for (let page = 0; page < MAX_PAGES; page++) {
       const data: VerdictsPage = await postGql<VerdictsPage>(url, fetchImpl, VERDICTS_QUERY, {
@@ -179,12 +184,28 @@ export function createVerdictSource(opts: VerdictSourceOptions): VerdictSource {
         if (!row.manifestCid) continue; // no verdict envelope CID → no join entry point.
         const candidateKey =
           `${row.chainId}:${row.requestId.toLowerCase()}:${polarity}`;
-        if (seenRequestPolarities.has(candidateKey)) continue;
-        seenRequestPolarities.add(candidateKey);
-        refs.push({
+        const discoveryCandidate = {
+          instanceId: typeof row.instanceId === 'string' ? row.instanceId : '',
+          verdictManifestCid: row.manifestCid,
+        };
+        const existing = refsByRequestPolarity.get(candidateKey);
+        if (existing) {
+          if (
+            existing.discoveryCandidates
+            && existing.discoveryCandidates.length < MAX_IDENTITY_CANDIDATES_PER_ATTEMPT
+          ) {
+            existing.discoveryCandidates.push(discoveryCandidate);
+          }
+          continue;
+        }
+        // `limit` bounds authoritative attempt tuples, not permissionless
+        // candidate rows. Continue walking the bounded result set after the
+        // tuple cap so later candidates for selected tuples survive.
+        if (refs.length >= limit) continue;
+        const attempt: AttemptRef = {
           requestId: row.requestId,
           chainId: row.chainId,
-          instanceId: row.instanceId,
+          instanceId: discoveryCandidate.instanceId,
           // The attempt-join that once supplied the model is gone; the bridge
           // falls back to 'unknown' when model is empty.
           model: '',
@@ -192,10 +213,11 @@ export function createVerdictSource(opts: VerdictSourceOptions): VerdictSource {
           manifestCid: '',
           polarity,
           verdictManifestCid: row.manifestCid,
-        });
-        if (refs.length >= limit) break;
+          discoveryCandidates: [discoveryCandidate],
+        };
+        refsByRequestPolarity.set(candidateKey, attempt);
+        refs.push(attempt);
       }
-      if (refs.length >= limit) break;
       const pageInfo: VerdictsPage['verdictEnvelopeMetas']['pageInfo'] = data.verdictEnvelopeMetas?.pageInfo;
       if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
       cursor = pageInfo.endCursor;

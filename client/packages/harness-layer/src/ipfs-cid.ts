@@ -3,28 +3,74 @@
 /**
  * CID validation for harness-layer network boundaries. Keep this package-local:
  * the harness-layer ↔ client/src architecture seam is shrink-only.
+ *
+ * The live Autonolas registry emits CIDv1 raw objects, including the historical
+ * base16 form `f01551220<sha256>`. We deliberately support only the two codecs
+ * used by the Jinn/IPFS paths (raw and dag-pb) and only sha2-256 multihashes.
  */
 const BASE58BTC = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 const BASE32 = 'abcdefghijklmnopqrstuvwxyz234567';
 
-export function isIpfsCid(value: string): boolean {
+export const IPFS_RAW_CODEC = 0x55;
+export const IPFS_DAG_PB_CODEC = 0x70;
+
+export interface ParsedIpfsCid {
+  version: 0 | 1;
+  codec: typeof IPFS_RAW_CODEC | typeof IPFS_DAG_PB_CODEC;
+  sha256Digest: Uint8Array;
+}
+
+export function parseIpfsCid(value: string): ParsedIpfsCid | null {
   if (value.startsWith('Qm')) {
     const bytes = decodeBase58(value);
-    // CIDv0 is specifically a sha2-256 multihash: code 0x12, length 0x20.
-    return bytes?.length === 34 && bytes[0] === 0x12 && bytes[1] === 0x20;
+    // CIDv0 is specifically a dag-pb sha2-256 multihash.
+    if (
+      bytes?.length !== 34
+      || bytes[0] !== 0x12
+      || bytes[1] !== 0x20
+    ) {
+      return null;
+    }
+    return {
+      version: 0,
+      codec: IPFS_DAG_PB_CODEC,
+      sha256Digest: bytes.slice(2),
+    };
   }
-  if (!value.startsWith('b')) return false;
-  const bytes = decodeBase32(value.slice(1));
-  if (!bytes) return false;
-  const version = readVarint(bytes, 0);
-  if (!version || version.value !== 1) return false;
-  const codec = readVarint(bytes, version.next);
-  if (!codec) return false;
-  const hashCode = readVarint(bytes, codec.next);
-  if (!hashCode) return false;
-  const hashLength = readVarint(bytes, hashCode.next);
-  if (!hashLength || hashLength.value <= 0) return false;
-  return hashLength.next + hashLength.value === bytes.length;
+
+  let bytes: Uint8Array | null;
+  if (value.startsWith('b')) {
+    bytes = decodeBase32(value.slice(1));
+  } else if (value.startsWith('f')) {
+    const body = value.slice(1);
+    bytes = /^[0-9a-f]+$/u.test(body) ? decodeBase16(body) : null;
+  } else if (value.startsWith('F')) {
+    const body = value.slice(1);
+    bytes = /^[0-9A-F]+$/u.test(body) ? decodeBase16(body) : null;
+  } else {
+    return null;
+  }
+
+  // Supported CIDv1 values are exactly:
+  // version(01) + codec(raw=55|dag-pb=70) + sha2-256(12 20 <32 bytes>).
+  if (
+    bytes?.length !== 36
+    || bytes[0] !== 0x01
+    || (bytes[1] !== IPFS_RAW_CODEC && bytes[1] !== IPFS_DAG_PB_CODEC)
+    || bytes[2] !== 0x12
+    || bytes[3] !== 0x20
+  ) {
+    return null;
+  }
+  return {
+    version: 1,
+    codec: bytes[1],
+    sha256Digest: bytes.slice(4),
+  };
+}
+
+export function isIpfsCid(value: string): boolean {
+  return parseIpfsCid(value) !== null;
 }
 
 function decodeBase58(value: string): Uint8Array | null {
@@ -68,13 +114,13 @@ function decodeBase32(value: string): Uint8Array | null {
   return Uint8Array.from(bytes);
 }
 
-function readVarint(bytes: Uint8Array, start: number): { value: number; next: number } | null {
-  let value = 0;
-  let shift = 0;
-  for (let index = start; index < bytes.length && shift <= 28; index += 1, shift += 7) {
-    const byte = bytes[index]!;
-    value |= (byte & 0x7f) << shift;
-    if ((byte & 0x80) === 0) return { value, next: index + 1 };
+function decodeBase16(value: string): Uint8Array | null {
+  if (value.length === 0 || value.length % 2 !== 0) return null;
+  const bytes = new Uint8Array(value.length / 2);
+  for (let index = 0; index < value.length; index += 2) {
+    const byte = Number.parseInt(value.slice(index, index + 2), 16);
+    if (!Number.isInteger(byte)) return null;
+    bytes[index / 2] = byte;
   }
-  return null;
+  return bytes;
 }

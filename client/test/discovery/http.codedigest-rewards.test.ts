@@ -60,6 +60,36 @@ describe('getCodeDigestRewards', () => {
     expect(a.avgScore).toBeCloseTo((1.0 + 0.0 + 0.5) / 3);
   });
 
+  it('fails closed when competing attempt candidates disagree on codeDigest', async () => {
+    const { impl } = routedFetch({
+      attemptMeta: { data: { attemptEnvelopeMetas: { items: [
+        { requestId: '0x1', chainId: 8453, codeDigest: 'sha256:A' },
+        { requestId: '0x1', chainId: 8453, codeDigest: 'sha256:B' },
+      ], pageInfo: { hasNextPage: false, endCursor: null } } } },
+      verdictMeta: { data: { verdictEnvelopeMetas: { items: [
+        { requestId: '0x1', chainId: 8453, actualPassed: true, actualScore: '1.0' },
+      ], pageInfo: { hasNextPage: false, endCursor: null } } } },
+    });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+
+    expect(await client.getCodeDigestRewards({ codeDigests: ['sha256:A', 'sha256:B'] })).toEqual([]);
+  });
+
+  it('fails closed when competing verdict candidates disagree on outcome', async () => {
+    const { impl } = routedFetch({
+      attemptMeta: { data: { attemptEnvelopeMetas: { items: [
+        { requestId: '0x1', chainId: 8453, codeDigest: 'sha256:A' },
+      ], pageInfo: { hasNextPage: false, endCursor: null } } } },
+      verdictMeta: { data: { verdictEnvelopeMetas: { items: [
+        { requestId: '0x1', chainId: 8453, actualPassed: true, actualScore: '1.0' },
+        { requestId: '0x1', chainId: 8453, actualPassed: false, actualScore: '0.0' },
+      ], pageInfo: { hasNextPage: false, endCursor: null } } } },
+    });
+    const client = createHttpDiscoveryAPI({ url: BASE_URL, fetchImpl: impl as unknown as typeof fetch });
+
+    expect(await client.getCodeDigestRewards({ codeDigests: ['sha256:A'] })).toEqual([]);
+  });
+
   it('omits a requested codeDigest that has no indexed attempts', async () => {
     const { impl } = routedFetch({
       attemptMeta: { data: { attemptEnvelopeMetas: { items: [], pageInfo: { hasNextPage: false, endCursor: null } } } },

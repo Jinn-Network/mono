@@ -65,7 +65,7 @@ import { parseEpisodeImportReport, renderEpisodeImportReport } from './seed-impo
 import { createFileSeedImportState, type SeedImportStateStore } from './seed-import/state.js';
 import { extractSkill } from './skill.js';
 import { isInsidePackageDir } from '../../../src/util/path-safety.js';
-import { isIpfsCid } from './ipfs-cid.js';
+import { IPFS_RAW_CODEC, parseIpfsCid } from './ipfs-cid.js';
 import { runDistillationPipeline } from './pipeline.js';
 import { modelLabel, runEvalPrep } from './eval-prep.js';
 import { createVerdictSource, type VerdictSource } from './bridge-verdict-source.js';
@@ -481,7 +481,8 @@ export function createBoundedIpfsJsonFetcher(
     }
     // Bound length before the structural decoder: CIDv0 base58 decoding is
     // intentionally dependency-free but superlinear for enormous strings.
-    if (cid.length > 256 || !isIpfsCid(cid)) {
+    const parsedCid = cid.length <= 256 ? parseIpfsCid(cid) : null;
+    if (!parsedCid) {
       throw new Error(`ipfs ${JSON.stringify(cid)}: expected a valid IPFS CID`);
     }
     const requestUrl = new URL(`${gateway}/ipfs/${encodeURIComponent(cid)}`).href;
@@ -543,6 +544,14 @@ export function createBoundedIpfsJsonFetcher(
     for (const chunk of chunks) {
       bytes.set(chunk, offset);
       offset += chunk.byteLength;
+    }
+    if (parsedCid.codec === IPFS_RAW_CODEC) {
+      const actualDigest = createHash('sha256').update(bytes).digest();
+      if (!actualDigest.equals(Buffer.from(parsedCid.sha256Digest))) {
+        throw new Error(
+          `ipfs ${cid}: fetched content digest does not match requested CID`,
+        );
+      }
     }
     let text: string;
     try {

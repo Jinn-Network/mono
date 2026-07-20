@@ -8,7 +8,7 @@
  */
 
 import { z } from 'zod/v3';
-import { keccak256, recoverAddress, toBytes, type Hex } from 'viem';
+import { keccak256, recoverAddress, sha256, toBytes, type Hex } from 'viem';
 import { SweRebenchV2TaskSchema } from '@jinn-network/sdk/solvernets/swe-rebench-v2';
 import { cidToDigestHex } from '../adapters/mech/ipfs.js';
 import { canonicalJson } from '../harnesses/engine/canonical-json.js';
@@ -76,8 +76,9 @@ export interface SweRebenchV2AuthoritativeTaskBinding {
 export interface SweRebenchV2VerifierFactPorts {
   /**
    * Fetch and JSON-decode an IPFS object under the supplied response-size cap.
-   * The injected implementation owns timeout, redirect, and byte-limit
-   * enforcement; this module always supplies a finite cap.
+   * The injected implementation owns timeout, redirect, byte-limit, and
+   * requested-CID content-digest enforcement before JSON parsing; this module
+   * always supplies a finite cap.
    */
   fetchIpfsJson(args: { cid: string; maxBytes: number }): Promise<unknown>;
   /**
@@ -618,6 +619,22 @@ async function authenticateAuthoritativeOriginalTask(args: {
     cid: originalTaskCid,
     maxBytes: SWE_REBENCH_V2_VERIFIER_FACT_MAX_BYTES,
   });
+  // Production task publications are raw CIDv1 objects whose digest is the
+  // sha2-256 of the exact RFC 8785 bytes uploaded by uploadToIpfs. The bounded
+  // live port checks the fetched bytes before parsing; repeat the binding over
+  // canonical JSON here so alternate/injected ports cannot substitute another
+  // otherwise-valid signed task under the authoritative CID.
+  if (
+    /^(?:f0155|F0155|bafk)/u.test(originalTaskCid)
+    && !sameHex(
+      sha256(toBytes(canonicalJson(rawOriginalTask))),
+      actualTaskCidDigest,
+    )
+  ) {
+    throw new Error(
+      'original task canonical content digest does not match its authenticated CID',
+    );
+  }
   let originalTask: ReturnType<typeof SignedTaskV1Schema.parse>;
   try {
     originalTask = SignedTaskV1Schema.parse(rawOriginalTask);

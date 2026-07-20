@@ -1312,6 +1312,46 @@ describe('HttpDiscoveryAPI.getInstanceSuccessCounts (#669)', () => {
     expect(counts.size).toBe(2);
   });
 
+  it('fails closed when competing candidates for one request disagree', async () => {
+    const page = {
+      data: {
+        verdictEnvelopeMetas: {
+          items: [
+            {
+              requestId: '0xambiguous',
+              chainId: 84532,
+              instanceId: 'sympy__sympy-27510',
+              actualPassed: true,
+              enrichmentStatus: 'ok',
+              solverNetManifestCid: 'bafymanifest',
+            },
+            {
+              requestId: '0xambiguous',
+              chainId: 84532,
+              instanceId: 'django__django-100',
+              actualPassed: true,
+              enrichmentStatus: 'ok',
+              solverNetManifestCid: 'bafymanifest',
+            },
+          ],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    };
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (isReadyProbe(url)) return new Response('ok', { status: 200 });
+      return new Response(JSON.stringify(page), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    const api = createHttpDiscoveryAPI({ url: 'http://stub/graphql', fetchImpl });
+    const counts = await api.getInstanceSuccessCounts({ manifestCid: 'bafymanifest' });
+
+    expect(counts.size).toBe(0);
+  });
+
   it('scopes the GraphQL filter by solverNetManifestCid so multi-SolverNet operators don\'t cross-tenant over-count (#669 Finding 2)', async () => {
     const MANIFEST = 'bafyManifestSolverNetA';
     const requestBodies: unknown[] = [];

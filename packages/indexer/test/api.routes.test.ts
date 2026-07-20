@@ -267,6 +267,28 @@ describe('getPluginScores', () => {
     expect(result[0]!.forkSuspected).toBe(true);
   });
 
+  it('fails closed when retained candidates disagree for one request and chain', () => {
+    const legitimate = makeEnvelopeMeta({
+      requestId: '0xreq2' as `0x${string}`,
+      pluginCid: 'bafypluginA',
+    });
+    const competing = makeEnvelopeMeta({
+      requestId: '0xreq2' as `0x${string}`,
+      pluginCid: 'bafypluginA',
+      sha256: FORK_SHA,
+    });
+    const verdict = makeVerdict({ requestId: '0xreq2' as `0x${string}` });
+
+    const result = getPluginScores({
+      publications: [pub],
+      pluginCid: 'bafypluginA',
+      attemptEnvelopeMetas: [legitimate, competing],
+      verdicts: [verdict],
+    });
+
+    expect(result).toEqual([]);
+  });
+
   it('returns empty when the requested cid has no matching publication', () => {
     const result = getPluginScores({
       publications: [],

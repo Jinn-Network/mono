@@ -8,6 +8,7 @@ import { computeMintedPoolRowV2Hash, type MintedPoolRowV2 } from '../../src/solv
 import { computeRowHash } from '../../src/solver-types/_swe-rebench-v2-substrate.js';
 import { signTaskV1 } from '../../src/tasks/signing.js';
 import type { TaskV1 } from '../../src/types/task-document.js';
+import { createBoundedIpfsJsonFetcher } from '../../packages/harness-layer/src/cli.js';
 import {
   hashVettedPoolArtifact,
   type SolverNetArtifactRef,
@@ -273,6 +274,11 @@ function base32(bytes: Uint8Array): string {
 function canonicalRawCid(value: unknown): string {
   const digest = createHash('sha256').update(canonicalJson(value)).digest();
   return `b${base32(new Uint8Array([0x01, 0x55, 0x12, 0x20, ...digest]))}`;
+}
+
+function canonicalRawHexCid(value: unknown): string {
+  const digest = createHash('sha256').update(canonicalJson(value)).digest('hex');
+  return `f01551220${digest}`;
 }
 
 function v1Artifact() {
@@ -641,6 +647,76 @@ describe('createSweRebenchV2VerifierFactsResolver — authoritative task lineage
       cid: f.originalTaskCid,
       maxBytes: 2_000_000,
     });
+  });
+
+  it('resolves the full authoritative path with the deployed f01551220 task CID shape', async () => {
+    const row = hfRow();
+    const artifact = vettedArtifact(baseEntry({ rowHash: hfRowHash(row) }));
+    const artifactCid = canonicalRawCid(artifact);
+    const artifactRef = { ...vettedRef(artifact), artifactCid };
+    const originalTask = await withRef(signedTask(), artifactRef);
+    const originalTaskCid = canonicalRawHexCid(originalTask);
+    const wrapper = await evaluationWrapper(originalTaskCid);
+    const wrapperCid = canonicalRawHexCid(wrapper);
+    const uploadedJcs = new Map([
+      [wrapperCid, canonicalJson(wrapper)],
+      [originalTaskCid, canonicalJson(originalTask)],
+      [artifactCid, canonicalJson(artifact)],
+    ]);
+    const fetchIpfs = createBoundedIpfsJsonFetcher({
+      gateway: 'https://gateway.example',
+      fetchImpl: vi.fn(async (input) => {
+        const cid = decodeURIComponent(new URL(String(input)).pathname.split('/').at(-1)!);
+        const bytes = uploadedJcs.get(cid);
+        if (bytes === undefined) return new Response('not found', { status: 404 });
+        return new Response(bytes);
+      }),
+    });
+    const deps: SweRebenchV2VerifierFactPorts = {
+      fetchIpfsJson: ({ cid, maxBytes }) => fetchIpfs(cid, maxBytes),
+      fetchHfRawRow: vi.fn(async () => row),
+    };
+    const fetchedWrapper = await fetchIpfs(wrapperCid);
+
+    await expect(createSweRebenchV2VerifierFactsResolver(deps)(
+      fetchedWrapper,
+      INSTANCE_ID,
+      authoritativeTaskBinding(originalTaskCid),
+    )).resolves.toMatchObject({
+      failToPass: F2P,
+      passToPass: P2P,
+      task: {
+        originalTaskCid,
+        instanceId: INSTANCE_ID,
+        creatorSafe: CREATOR_SAFE,
+      },
+    });
+  });
+
+  it('rejects requested task CID A when the IPFS port returns valid signed task B', async () => {
+    const row = hfRow();
+    const artifact = vettedArtifact(baseEntry({ rowHash: hfRowHash(row) }));
+    const taskA = await withRef(
+      signedTask({ description: 'creator-authored task A' }),
+      vettedRef(artifact),
+    );
+    const taskB = await withRef(
+      signedTask({ description: 'creator-authored task B' }),
+      vettedRef(artifact),
+    );
+    const taskACid = canonicalRawHexCid(taskA);
+    const deps = ports({
+      vetted: artifact,
+      hf: row,
+      task: { cid: taskACid, document: taskB },
+    });
+    const wrapper = await evaluationWrapper(taskACid);
+
+    await expect(createSweRebenchV2VerifierFactsResolver(deps)(
+      { signedTask: wrapper },
+      INSTANCE_ID,
+      authoritativeTaskBinding(taskACid),
+    )).rejects.toThrow(/original task.*content digest.*CID/i);
   });
 
   it('rejects a forged solutionTaskCid added after the evaluator signed the wrapper', async () => {

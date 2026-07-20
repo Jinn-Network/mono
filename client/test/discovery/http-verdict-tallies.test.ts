@@ -113,6 +113,32 @@ describe('HttpDiscoveryAPI.getVerdictTallies (#502)', () => {
     expect(tallies.get('300')).toEqual({ pass: 1, fail: 0 });
   });
 
+  it('fails closed when competing candidates disagree on the verdict pole', async () => {
+    const page = {
+      data: {
+        verdictEnvelopeMetas: {
+          items: [
+            { taskId: '300', evaluatorVerdict: 'PASS', chainId: 84532, requestId: '0x21' },
+            { taskId: '300', evaluatorVerdict: 'FAIL', chainId: 84532, requestId: '0x21' },
+          ],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    };
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (isReadyProbe(url)) return new Response('ok', { status: 200 });
+      return new Response(JSON.stringify(page), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+    const api = createHttpDiscoveryAPI({ url: 'http://stub/graphql', fetchImpl });
+
+    const tallies = await api.getVerdictTallies({ taskIds: ['300'] });
+
+    expect(tallies.size).toBe(0);
+  });
+
   it('returns an empty Map and issues no query for an empty taskIds array', async () => {
     const fetchImpl = vi.fn(async (url: string) => {
       if (isReadyProbe(url)) return new Response('ok', { status: 200 });

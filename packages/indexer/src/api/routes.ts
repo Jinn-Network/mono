@@ -148,8 +148,27 @@ function buildScoreRows(
   const verdictByReq = new Map<string, VerdictRow>();
   for (const v of verdicts) verdictByReq.set(v.requestId.toLowerCase(), v);
 
-  const out: PluginScoreHistoryOutput[] = [];
+  // Composite retention may yield more than one envelope candidate for a
+  // request. Collapse byte-equivalent projections, but fail closed when the
+  // plugin list differs; array order must never decide builder attribution.
+  const metaStates = new Map<
+    string,
+    { row: AttemptEnvelopeMetaRow; pluginsJson: string; ambiguous: boolean }
+  >();
   for (const meta of attemptEnvelopeMetas) {
+    const key = `${meta.requestId.toLowerCase()}|${meta.chainId}`;
+    const state = metaStates.get(key);
+    if (!state) {
+      metaStates.set(key, { row: meta, pluginsJson: meta.pluginsJson, ambiguous: false });
+    } else if (state.pluginsJson !== meta.pluginsJson) {
+      state.ambiguous = true;
+    }
+  }
+
+  const out: PluginScoreHistoryOutput[] = [];
+  for (const state of metaStates.values()) {
+    if (state.ambiguous) continue;
+    const meta = state.row;
     let plugins: EnvelopePluginEntry[] = [];
     try {
       plugins = JSON.parse(meta.pluginsJson) as EnvelopePluginEntry[];
