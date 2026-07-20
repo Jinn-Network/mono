@@ -30,6 +30,7 @@ import type {
   IssueEligibilityReason,
   LifecycleMappingDiagnostic,
   LifecyclePhase,
+  LifecycleView,
   LifecycleViewItem,
   NewWorkAction,
 } from './types.js';
@@ -554,6 +555,40 @@ function phaseForSchedulingSkip(
   return 'merge-ready';
 }
 
+// Reconcile-before-claim is a per-item guarantee, not a whole-cycle gate: a
+// projection action pending for issue/PR X (e.g. a correcting project-status
+// write just attempted this cycle, or a permanently-unappliable action like
+// a comment on a locked conversation) must defer a new claim for X, but must
+// never suppress claim scheduling for an unrelated issue/PR Y. Derived from
+// the plan (same "any action other than expose-merge-prep still pending"
+// signal as before) so an item whose reconciliation was just corrected this
+// cycle still waits for a fresh snapshot next cycle before claiming — only
+// the *scope* narrows from the whole cycle to the specific item.
+function blockedIssueNumbers(
+  actions: readonly ProjectionAction[],
+  view: LifecycleView,
+): ReadonlySet<number> {
+  const issueByPr = new Map<number, number>();
+  for (const entry of view.items) {
+    if (entry.item.kind === 'pull-request') {
+      issueByPr.set(entry.item.prNumber, entry.item.issueNumber);
+    }
+  }
+  const blocked = new Set<number>();
+  for (const action of actions) {
+    if (action.kind === 'expose-merge-prep') continue;
+    if ('issueNumber' in action && action.issueNumber !== undefined) {
+      blocked.add(action.issueNumber);
+      continue;
+    }
+    if ('prNumber' in action) {
+      const issueNumber = issueByPr.get(action.prNumber);
+      if (issueNumber !== undefined) blocked.add(issueNumber);
+    }
+  }
+  return blocked;
+}
+
 export async function runLifecycleCycle(
   mode: AutopilotMode,
   deps: LifecycleControllerDeps,
@@ -673,59 +708,58 @@ export async function runLifecycleCycle(
   ));
   if (mode === 'active') {
     const actionEvents: LifecycleLogEvent[] = [];
-    const reconciliationBlocksClaims = plan.actions.some((action) =>
-      action.kind !== 'expose-merge-prep');
-    if (!reconciliationBlocksClaims) {
-      const local = deps.active!.readLocalState();
-      const openPipelineBacklog = snapshot.pullRequests.filter((pr) => (
-        pr.state === 'OPEN' && pr.labels.includes('engine:review')
-      )).length;
-      const scheduling = scheduleActiveActions({
-        candidates: activeCandidates(snapshot, view),
-        remaining: local.remaining,
-        availableLogins: local.availableLogins,
-        implementationPreferredLogin: local.implementationPreferredLogin,
-        openPipelineBacklog,
-        implementationBackpressureThreshold:
-          deps.active!.implementationBackpressureThreshold,
-      });
-      actionEvents.push(...scheduling.skips.map((skip): LifecycleLogEvent => ({
-        cycleId,
-        runnerId: deps.runnerId,
-        mode: 'active',
-        phase: phaseForSchedulingSkip(skip),
-        subject: skip.subject,
-        action: 'schedule',
-        outcome: 'skipped',
-        reason: skip.reason,
-      })));
-      for (const action of scheduling.actions) {
-        try {
-          const result = await deps.active!.executeAction(action);
-          actionEvents.push({
-            cycleId,
-            runnerId: deps.runnerId,
-            mode: 'active',
-            phase: phaseForAction(action),
-            subject: subjectForAction(action),
-            ...('head' in action ? { head: action.head } : {}),
-            action: action.kind,
-            outcome: result.outcome,
-            ...(result.reason === undefined ? {} : { reason: result.reason }),
-          });
-        } catch (error) {
-          actionEvents.push({
-            cycleId,
-            runnerId: deps.runnerId,
-            mode: 'active',
-            phase: phaseForAction(action),
-            subject: subjectForAction(action),
-            ...('head' in action ? { head: action.head } : {}),
-            action: action.kind,
-            outcome: 'failed',
-            reason: error instanceof Error ? error.message : String(error),
-          });
-        }
+    const blockedIssues = blockedIssueNumbers(plan.actions, view);
+    const local = deps.active!.readLocalState();
+    const openPipelineBacklog = snapshot.pullRequests.filter((pr) => (
+      pr.state === 'OPEN' && pr.labels.includes('engine:review')
+    )).length;
+    const scheduling = scheduleActiveActions({
+      candidates: activeCandidates(snapshot, view).filter((candidate) => (
+        !blockedIssues.has(candidate.issueNumber)
+      )),
+      remaining: local.remaining,
+      availableLogins: local.availableLogins,
+      implementationPreferredLogin: local.implementationPreferredLogin,
+      openPipelineBacklog,
+      implementationBackpressureThreshold:
+        deps.active!.implementationBackpressureThreshold,
+    });
+    actionEvents.push(...scheduling.skips.map((skip): LifecycleLogEvent => ({
+      cycleId,
+      runnerId: deps.runnerId,
+      mode: 'active',
+      phase: phaseForSchedulingSkip(skip),
+      subject: skip.subject,
+      action: 'schedule',
+      outcome: 'skipped',
+      reason: skip.reason,
+    })));
+    for (const action of scheduling.actions) {
+      try {
+        const result = await deps.active!.executeAction(action);
+        actionEvents.push({
+          cycleId,
+          runnerId: deps.runnerId,
+          mode: 'active',
+          phase: phaseForAction(action),
+          subject: subjectForAction(action),
+          ...('head' in action ? { head: action.head } : {}),
+          action: action.kind,
+          outcome: result.outcome,
+          ...(result.reason === undefined ? {} : { reason: result.reason }),
+        });
+      } catch (error) {
+        actionEvents.push({
+          cycleId,
+          runnerId: deps.runnerId,
+          mode: 'active',
+          phase: phaseForAction(action),
+          subject: subjectForAction(action),
+          ...('head' in action ? { head: action.head } : {}),
+          action: action.kind,
+          outcome: 'failed',
+          reason: error instanceof Error ? error.message : String(error),
+        });
       }
     }
     return {
