@@ -1269,7 +1269,35 @@ describe('/ready readiness probe', () => {
 });
 
 describe('HttpDiscoveryAPI.getInstanceSuccessCounts (#669)', () => {
-  it('aggregates pass counts per instance_id across pages, deduping by (requestId, chainId)', async () => {
+  it('fails closed for a sole permissionless metadata projection', async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (isReadyProbe(url)) return new Response('ok', { status: 200 });
+      return new Response(JSON.stringify({
+        data: {
+          verdictEnvelopeMetas: {
+            items: [{
+              requestId: '0xforged',
+              chainId: 84532,
+              instanceId: 'target-instance',
+              actualPassed: true,
+              enrichmentStatus: 'ok',
+              solverNetManifestCid: 'bafymanifest',
+            }],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    const api = createHttpDiscoveryAPI({ url: 'http://stub/graphql', fetchImpl });
+    expect(await api.getInstanceSuccessCounts({ manifestCid: 'bafymanifest' }))
+      .toEqual(new Map());
+  });
+
+  it('does not aggregate even apparently unambiguous projection rows', async () => {
     const page1 = {
       data: {
         verdictEnvelopeMetas: {
@@ -1307,9 +1335,8 @@ describe('HttpDiscoveryAPI.getInstanceSuccessCounts (#669)', () => {
     const api = createHttpDiscoveryAPI({ url: 'http://stub/graphql', fetchImpl });
     const counts = await api.getInstanceSuccessCounts({ manifestCid: 'bafymanifest' });
 
-    expect(counts.get('sympy__sympy-27510')).toBe(3);   // 3 distinct, 1 dedup'd
-    expect(counts.get('django__django-100')).toBe(1);
-    expect(counts.size).toBe(2);
+    expect(counts).toEqual(new Map());
+    expect(call).toBe(0);
   });
 
   it('fails closed when competing candidates for one request disagree', async () => {
@@ -1352,7 +1379,7 @@ describe('HttpDiscoveryAPI.getInstanceSuccessCounts (#669)', () => {
     expect(counts.size).toBe(0);
   });
 
-  it('scopes the GraphQL filter by solverNetManifestCid so multi-SolverNet operators don\'t cross-tenant over-count (#669 Finding 2)', async () => {
+  it('does not apply attacker-controlled projection filters before authentication', async () => {
     const MANIFEST = 'bafyManifestSolverNetA';
     const requestBodies: unknown[] = [];
     const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
@@ -1376,13 +1403,10 @@ describe('HttpDiscoveryAPI.getInstanceSuccessCounts (#669)', () => {
     const api = createHttpDiscoveryAPI({ url: 'http://stub/graphql', fetchImpl });
     await api.getInstanceSuccessCounts({ manifestCid: MANIFEST });
 
-    expect(requestBodies.length).toBeGreaterThan(0);
-    const body = requestBodies[0] as { query: string; variables: Record<string, unknown> };
-    expect(body.query).toContain('solverNetManifestCid: $solverNetManifestCid');
-    expect(body.variables.solverNetManifestCid).toBe(MANIFEST);
+    expect(requestBodies).toEqual([]);
   });
 
-  it('throws DiscoveryUnavailableError when GraphQL returns errors', async () => {
+  it('does not contact GraphQL for a metric with no authenticated projection', async () => {
     const fetchImpl = vi.fn(async (url: string) => {
       if (isReadyProbe(url)) return new Response('ok', { status: 200 });
       return new Response(
@@ -1392,9 +1416,9 @@ describe('HttpDiscoveryAPI.getInstanceSuccessCounts (#669)', () => {
     }) as unknown as typeof fetch;
 
     const api = createHttpDiscoveryAPI({ url: 'http://stub/graphql', fetchImpl });
-    await expect(api.getInstanceSuccessCounts({ manifestCid: 'bafymanifest' })).rejects.toBeInstanceOf(
-      DiscoveryUnavailableError,
-    );
+    await expect(api.getInstanceSuccessCounts({ manifestCid: 'bafymanifest' }))
+      .resolves.toEqual(new Map());
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
 

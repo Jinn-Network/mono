@@ -398,9 +398,10 @@ export interface DiscoveryAPI {
    * are flagged with `forkSuspected: true` and excluded from builder-credit
    * aggregations per spec §5.3.
    *
-   * Today this surface requires the `attemptEnvelopeMeta` indexer enrichment
-   * shipped under `jinn-mono-ebu7`. When that enrichment is not present in the
-   * deployed indexer, this method returns an empty array.
+   * The HTTP implementation currently returns an empty array. The available
+   * `attemptEnvelopeMeta` rows are permissionless shape projections, not
+   * authenticated score evidence; this surface stays fail-closed until the
+   * indexer materializes publisher-Safe/signature/hash-bound canonical rows.
    */
   getPluginScores(args: {
     pluginCid: string;
@@ -419,61 +420,23 @@ export interface DiscoveryAPI {
   }): Promise<PublishedArtifact[]>;
 
   /**
-   * Returns network-truth pass counts per swe-rebench-v2 instance_id for a
-   * given SolverNet manifest. Keyed by `instance_id`; the value is the count
-   * of distinct (requestId, chainId) verdictEnvelopeMeta rows where
-   * `solverNetManifestCid` equals `args.manifestCid`, `actualPassed = true`,
-   * `solverType` starts with `swe-rebench-v2`, and `instanceId` is non-empty.
-   *
-   * Per-SolverNet scoping (#669 Finding 2): the indexer enrichment pass reads
-   * the task body's top-level `solverNetManifestCid` (task.v1 schema; see
-   * `client/src/types/task-document.ts`) on the same IPFS round-trip that
-   * resolves `instance_id`, and writes it to `verdictEnvelopeMeta`. The
-   * GraphQL filter pins to that column, so multi-SolverNet operators with
-   * overlapping instance_id pools do NOT cross-tenant over-count — successes
-   * on SolverNet-B can no longer prematurely saturate SolverNet-A's launcher.
-   *
-   * Backed by `verdictEnvelopeMeta` in the indexer. Throws
-   * `DiscoveryUnavailableError` when the backing is unreachable — callers
-   * MUST NOT silently fall through to local-only counts (#669 acceptance
-   * criterion: behave as if the on-chain count is the truth). The
-   * `withFallback` wrapper enforces this by never routing
-   * `getInstanceSuccessCounts` to the floor.
-   *
-   * The on-chain floor implementation (`OnchainDiscoveryAPI`) returns an
-   * empty Map, since the underlying data comes from IPFS enrichment that the
-   * floor cannot reconstruct. The floor's empty Map is therefore not the
-   * runtime path — `withFallback` propagates the error instead.
+   * Returns authenticated network pass counts per swe-rebench-v2 instance.
+   * The HTTP and on-chain implementations currently return an empty Map:
+   * permissionless verdict projections cannot safely raise launcher saturation.
+   * A future non-empty implementation must bind the historical publisher Safe,
+   * envelope signature/hash, authoritative verdict tuple, and original task
+   * before applying SolverNet or instance filters.
    */
   getInstanceSuccessCounts(args: {
     manifestCid: string;
   }): Promise<Map<string, number>>;
 
   /**
-   * Returns per-codeDigest reward aggregates (#764) for the given codeDigests,
-   * scoped to mode='train'. Joins attemptEnvelopeMeta (codeDigest) to
-   * verdictEnvelopeMeta (actualPassed, actualScore) on (requestId, chainId).
-   * When `operator` is provided, further restricts to attempts the operator
-   * claimed (via the `attempt` table, joined on requestId). When
-   * `solverNetManifestCid` is provided, scopes the aggregate to a single
-   * SolverNet via `verdictEnvelopeMeta.solverNetManifestCid` (the only table in
-   * this join carrying the column) — attempts whose verdicts belong to other
-   * SolverNets are excluded. Omitted → unscoped across all SolverNets (#764).
-   *
-   * Like getInstanceSuccessCounts (#669), this throws DiscoveryUnavailableError
-   * on a degraded backing and MUST NOT silently fall through to the on-chain
-   * floor (substrate-incident policy) — the floor returns an empty array and
-   * withFallback never routes this method to it. A codeDigest with zero indexed
-   * attempts is simply absent from the result (callers treat absence as
-   * "insufficient samples", not pass-rate zero).
-   *
-   * Rides PR #783's attemptEnvelopeMeta.codeDigest index.
-   *
-   * `window` (#764 C1) caps each codeDigest's aggregate to its most-recent
-   * `window` attempts (by enrichedAtBlock desc). Because Ponder's GraphQL
-   * `limit` is global across all requested codeDigests, the cap is applied
-   * client-side per-digest, not as a query limit. Omitted → no cap (aggregate
-   * over the full paginated history, byte-identical to the prior behaviour).
+   * Returns authenticated per-codeDigest reward aggregates. The HTTP and
+   * on-chain implementations currently return an empty array, which callers
+   * classify as insufficient evidence. A request/chain join is not enough:
+   * future non-empty rows must have the same bridge-grade publisher Safe,
+   * signature/hash, authoritative attempt/verdict, and original-task binding.
    */
   getCodeDigestRewards(args: {
     codeDigests: string[];
@@ -602,9 +565,10 @@ export interface DiscoveryAPI {
    * absent taskId / floor-empty to `'awaiting'` and MUST NEVER guess a wrong
    * `'fail'`.
    *
-   * Backed by `verdictEnvelopeMeta` in the indexer, keyed by the on-chain
-   * `taskId` (decimal string). An empty `taskIds` array returns an empty Map
-   * without a network call.
+   * The HTTP implementation currently returns an empty Map without consulting
+   * permissionless `verdictEnvelopeMeta` projections. The on-chain floor is
+   * likewise empty; authenticated canonical verdict projections can restore
+   * the richer poles later without permitting fabricated activity.
    */
   getVerdictTallies(args: { taskIds: string[] }): Promise<Map<string, VerdictTallyResult>>;
 }

@@ -332,29 +332,11 @@ type VerdictTruthRow = {
 };
 
 function verdictEnvelopeJoinCondition() {
-  return and(
-    eq(schema.verdictEnvelopeMeta.requestId, schema.verdict.requestId),
-    eq(schema.verdictEnvelopeMeta.chainId, schema.verdict.chainId),
-    // Bind the enriched projection back to the authoritative delivery row.
-    // A MetadataSet publisher can claim an arbitrary requestId in an envelope;
-    // those rows must not become explorer truth merely because requestId matches.
-    eq(schema.verdictEnvelopeMeta.evaluator, schema.verdict.evaluator),
-    eq(schema.verdictEnvelopeMeta.taskId, schema.verdict.taskId),
-    eq(schema.verdictEnvelopeMeta.attemptIndex, schema.verdict.attemptIndex),
-    // Composite retention intentionally permits competing candidates. Keep the
-    // LEFT JOIN one-to-one only when exactly one candidate survives the
-    // authoritative linkage above. A second linked candidate fails closed
-    // instead of multiplying counts or making query order select the outcome.
-    sql`(
-      SELECT count(*)
-      FROM "verdict_envelope_meta" AS "verdict_candidate"
-      WHERE "verdict_candidate"."request_id" = ${schema.verdict.requestId}
-        AND "verdict_candidate"."chain_id" = ${schema.verdict.chainId}
-        AND "verdict_candidate"."evaluator" = ${schema.verdict.evaluator}
-        AND "verdict_candidate"."task_id" = ${schema.verdict.taskId}
-        AND "verdict_candidate"."attempt_index" = ${schema.verdict.attemptIndex}
-    ) = 1`,
-  );
+  // verdictEnvelopeMeta is permissionless and shape-parsed. Even a sole row
+  // can copy every public authoritative tuple field, so an exact-one join is
+  // not authentication. Keep explorer truth on-chain-only until a canonical
+  // projection binds historical publisher Safe, signature/hash, and task facts.
+  return sql`false`;
 }
 
 /**
@@ -367,20 +349,9 @@ function verdictEnvelopeJoinCondition() {
  * two or more candidates leave it unenriched.
  */
 function attemptEnvelopeJoinCondition() {
-  return and(
-    eq(schema.attemptEnvelopeMeta.requestId, schema.attempt.requestId),
-    eq(schema.attemptEnvelopeMeta.chainId, schema.attempt.chainId),
-    uniqueAttemptEnvelopeCandidateCondition(),
-  );
-}
-
-function uniqueAttemptEnvelopeCandidateCondition() {
-  return sql`(
-    SELECT count(*)
-    FROM "attempt_envelope_meta" AS "attempt_candidate"
-    WHERE "attempt_candidate"."request_id" = ${schema.attemptEnvelopeMeta.requestId}
-      AND "attempt_candidate"."chain_id" = ${schema.attemptEnvelopeMeta.chainId}
-  ) = 1`;
+  // As above, request/chain uniqueness cannot prove that the on-chain operator
+  // published or signed this projection.
+  return sql`false`;
 }
 
 /**

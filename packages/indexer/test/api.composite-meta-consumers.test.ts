@@ -31,15 +31,21 @@ describe('composite metadata consumers', () => {
     expect(batch).toContain('verdictEnvelopeJoinCondition()');
   });
 
-  it('the shared verdict join binds chain linkage and rejects competing linked candidates', () => {
+  it('fails closed instead of treating an exact-one verdict projection as authenticated', () => {
     const join = section(
       'function verdictEnvelopeJoinCondition()',
       '/**\n * Canonical attempt-envelope join.',
     );
-    expect(join).toContain('schema.verdictEnvelopeMeta.evaluator');
-    expect(join).toContain('schema.verdictEnvelopeMeta.taskId');
-    expect(join).toContain('schema.verdictEnvelopeMeta.attemptIndex');
-    expect(join).toContain('SELECT count(*)');
-    expect(join).toContain(') = 1');
+    expect(join).toContain('return sql`false`');
+    expect(join).toContain('exact-one join is');
+    expect(join).toContain('not authentication');
+  });
+
+  it('fails closed instead of treating a unique attempt projection as authenticated', () => {
+    const join = section(
+      'function attemptEnvelopeJoinCondition()',
+      '/**\n * Computes the "truth" of a verdict row.',
+    );
+    expect(join).toContain('return sql`false`');
   });
 });
