@@ -1,6 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { z } from 'zod';
+// zod/v3, not zod: `JinnRepoMergedPrTaskSchema` is re-exported from the SDK's
+// zod/v3-authored schema (see ./jinn-repo.ts), and `.extend()` needs its shape
+// values to be zod/v3 ZodType instances to interop correctly with the base
+// schema's zod/v3 ZodObject.
+import { z } from 'zod/v3';
 import { JinnRepoMergedPrTaskSchema } from './jinn-repo.js';
 
 // Pool items are mined exclusively from merged PRs (see jinn-repo-extract.ts) —
