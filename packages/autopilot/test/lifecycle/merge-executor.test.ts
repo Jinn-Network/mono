@@ -26,6 +26,7 @@ function candidate(overrides: Partial<MergeCandidate> = {}): MergeCandidate {
     authorAllowed: true,
     uniqueIssueMapping: true,
     terminalApprovalMatches: true,
+    terminalApprovalReviewer: 'review-bot',
     effectiveReviews: [{
       reviewer: 'review-bot',
       state: 'APPROVED',
@@ -75,6 +76,7 @@ describe('head-pinned merge executor', () => {
     ['author', { authorAllowed: false }],
     ['mapping', { uniqueIssueMapping: false }],
     ['marker', { terminalApprovalMatches: false }],
+    ['self-review', { terminalApprovalReviewer: 'implementation-bot' }],
     ['requested changes', {
       effectiveReviews: [{ reviewer: 'other', state: 'CHANGES_REQUESTED' as const, commitId: HEAD }],
     }],

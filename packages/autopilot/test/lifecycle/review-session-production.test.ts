@@ -10,6 +10,7 @@ import {
 } from '../../src/lifecycle/types.js';
 
 const HEAD = gitOid('1'.repeat(40));
+const BASE = gitOid('6'.repeat(40));
 const REVIEW = gitOid('2'.repeat(40));
 const RECORD = gitOid('3'.repeat(40));
 const TREE = gitOid('4'.repeat(40));
@@ -153,7 +154,7 @@ function projectFields(): string {
 }
 
 describe('production review session port', () => {
-  it('freshly rederives the unique open issue/branch mapping and current-head CODEOWNER policy', async () => {
+  it('freshly rederives the unique open issue/branch mapping and pinned-base CODEOWNER policy', async () => {
     const port = makeProductionReviewSessionPort({
       environment: {
         GH_TOKEN: 'selected-secret',
@@ -168,6 +169,7 @@ describe('production review session port', () => {
             headRefOid: HEAD,
             headRefName: 'autopilot/42',
             baseRefName: 'next',
+            baseRefOid: BASE,
             isDraft: true,
             body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
             author: { login: 'implementation-bot' },
@@ -184,9 +186,12 @@ describe('production review session port', () => {
             closingIssues: [{ number: 42 }],
           }]);
         }
-        if (cmd === 'git' && args.includes('ls-tree')) return '.github/CODEOWNERS\n';
+        if (cmd === 'git' && args.includes('ls-tree')) {
+          if (args.at(-1) === BASE) return '.github/CODEOWNERS\n';
+          throw new Error('unexpected tree ref');
+        }
         if (cmd === 'git' && args.includes('show')) {
-          if (args.at(-1) === `${HEAD}:.github/CODEOWNERS`) {
+          if (args.at(-1) === `${BASE}:.github/CODEOWNERS`) {
             return '/client/src/dashboard/spa/src/pages/ @Jinn-Network/codeowners\n';
           }
           throw new Error('path does not exist');
@@ -205,6 +210,56 @@ describe('production review session port', () => {
     expect(pullRequest).not.toHaveProperty('mappingProblem');
   });
 
+  it('ignores a CODEOWNERS edit that only exists in the PR head tree', async () => {
+    const port = makeProductionReviewSessionPort({
+      environment: {
+        GH_TOKEN: 'selected-secret',
+        JINN_AUTOPILOT_SESSION_MANIFEST: '/attempt/manifest.json',
+      },
+      readManifest: () => manifest(),
+      runner: async (cmd, args) => {
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+          return JSON.stringify({
+            number: 84,
+            state: 'OPEN',
+            headRefOid: HEAD,
+            headRefName: 'autopilot/42',
+            baseRefName: 'next',
+            baseRefOid: BASE,
+            isDraft: true,
+            body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
+            author: { login: 'implementation-bot' },
+            labels: [{ name: 'engine:review' }],
+            closingIssues: [{ number: 42 }],
+            files: [{ path: 'client/src/dashboard/spa/src/pages/Home.tsx' }],
+          });
+        }
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'list') {
+          return JSON.stringify([{
+            number: 84,
+            headRefOid: HEAD,
+            headRefName: 'autopilot/42',
+            closingIssues: [{ number: 42 }],
+          }]);
+        }
+        if (cmd === 'git' && args.includes('ls-tree')) {
+          if (args.at(-1) === BASE) return '.github/CODEOWNERS\n';
+          throw new Error('An attacker-controlled head tree must never be read');
+        }
+        if (cmd === 'git' && args.includes('show')) {
+          if (args.at(-1) === `${BASE}:.github/CODEOWNERS`) {
+            return '/client/src/dashboard/spa/src/pages/ @Jinn-Network/codeowners\n';
+          }
+          throw new Error('An attacker-controlled head tree must never be read');
+        }
+        throw new Error(`unexpected ${cmd} ${args.join(' ')}`);
+      },
+    });
+
+    const pullRequest = await port.readPullRequest(84, HEAD);
+    expect(pullRequest.approvalPolicy).toBe('human-codeowner');
+  });
+
   it('reports duplicate open issue or branch mappings instead of trusting the manifest', async () => {
     const port = makeProductionReviewSessionPort({
       environment: {
@@ -220,6 +275,7 @@ describe('production review session port', () => {
             headRefOid: HEAD,
             headRefName: 'autopilot/42',
             baseRefName: 'next',
+            baseRefOid: BASE,
             isDraft: true,
             body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
             author: { login: 'implementation-bot' },
@@ -280,6 +336,7 @@ describe('production review session port', () => {
             headRefOid: HEAD,
             headRefName: 'autopilot/42',
             baseRefName: 'next',
+            baseRefOid: BASE,
             isDraft: false,
             body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
             author: { login: 'implementation-bot' },
@@ -412,6 +469,7 @@ describe('production review session port', () => {
               headRefOid: HEAD,
               headRefName: 'autopilot/42',
               baseRefName: 'next',
+              baseRefOid: BASE,
               isDraft: draft,
               body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
               author: { login: 'implementation-bot' },
@@ -510,6 +568,7 @@ describe('production review session port', () => {
             headRefOid: HEAD,
             headRefName: 'autopilot/42',
             baseRefName: 'next',
+            baseRefOid: BASE,
             isDraft: true,
             body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
             author: { login: 'implementation-bot' },
@@ -560,6 +619,7 @@ describe('production review session port', () => {
             headRefOid: HEAD,
             headRefName: 'autopilot/42',
             baseRefName: 'next',
+            baseRefOid: BASE,
             isDraft: true,
             body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
             author: { login: 'implementation-bot' },
@@ -648,6 +708,7 @@ describe('production review session port', () => {
             headRefOid: HEAD,
             headRefName: 'autopilot/42',
             baseRefName: 'next',
+            baseRefOid: BASE,
             isDraft: draft,
             body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
             author: { login: 'implementation-bot' },
@@ -726,6 +787,7 @@ describe('production review session port', () => {
             headRefOid: HEAD,
             headRefName: 'autopilot/42',
             baseRefName: 'next',
+            baseRefOid: BASE,
             isDraft: true,
             body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
             author: { login: 'implementation-bot' },
@@ -781,6 +843,7 @@ describe('production review session port', () => {
             headRefOid: HEAD,
             headRefName: 'autopilot/42',
             baseRefName: 'next',
+            baseRefOid: BASE,
             isDraft: true,
             body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
             author: { login: 'implementation-bot' },
