@@ -59,6 +59,22 @@ function context(
 }
 
 describe('planProjection', () => {
+  it('keeps engine:review on a draft v2 implementation PR', () => {
+    const plan = planProjection(context(item({
+      projectStatus: 'In Progress',
+      labels: ['engine:review'],
+      isDraft: true,
+    })));
+
+    expect(plan.actions).not.toContainEqual({
+      kind: 'set-pr-label',
+      prNumber: 101,
+      expectedHead: HEAD,
+      label: 'engine:review',
+      present: false,
+    });
+  });
+
   it('repairs an implementation PR to In Progress and draft', () => {
     const plan = planProjection(context(item({
       projectStatus: 'Todo',
@@ -77,6 +93,13 @@ describe('planProjection', () => {
         prNumber: 101,
         expectedHead: HEAD,
         draft: true,
+      },
+      {
+        kind: 'set-pr-label',
+        prNumber: 101,
+        expectedHead: HEAD,
+        label: 'engine:review',
+        present: true,
       },
     ]);
   });

@@ -28,8 +28,9 @@ async function main(): Promise<void> {
   const options = parseLifecycleCli(argv.slice(2));
   const reader = new GhLifecycleReader();
   const runnerId = env.JINN_AUTOPILOT_RUNNER_ID ?? `${hostname()}:${pid}`;
-  const readSnapshot = () => buildGitHubLifecycleSnapshot(reader, {
+  const readSnapshot = (rateLimitFloor?: number) => buildGitHubLifecycleSnapshot(reader, {
     authorAllowlist: authorAllowlist(env.JINN_DISPATCHER_AUTHOR_ALLOWLIST),
+    ...(rateLimitFloor === undefined ? {} : { rateLimitFloor }),
   });
 
   const runOnce = async (): Promise<void> => {

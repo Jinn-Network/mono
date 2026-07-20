@@ -11,7 +11,10 @@ import {
   type ReconciliationReport,
   type ReconciliationWriter,
 } from './reconciler.js';
-import type { GitHubLifecycleSnapshot } from './snapshot.js';
+import {
+  LifecycleRateLimitError,
+  type GitHubLifecycleSnapshot,
+} from './snapshot.js';
 import type {
   AutopilotMode,
   GitOid,
@@ -35,7 +38,7 @@ export interface LifecycleCliOptions {
 }
 
 export interface LifecycleControllerDeps {
-  readSnapshot(): Promise<GitHubLifecycleSnapshot>;
+  readSnapshot(rateLimitFloor?: number): Promise<GitHubLifecycleSnapshot>;
   readonly writer?: ReconciliationWriter;
   readonly now: () => Date;
   readonly staleAfterMs: number;
@@ -167,10 +170,14 @@ function projectionContext(
   view: ReturnType<typeof deriveLifecycle>,
 ): ProjectionContext {
   const prBranches = new Set(snapshot.pullRequests.map((pr) => pr.headRefName));
+  const ambiguousIssues = new Set(snapshot.diagnostics.flatMap((diagnostic) => (
+    diagnostic.issueNumbers
+  )));
   const orphanBranchClaims: OrphanBranchClaim[] = snapshot.branches
     .filter((branch) => (
       branch.claim.phase === 'implement'
       && !prBranches.has(branch.headRefName)
+      && !ambiguousIssues.has(branch.issueNumber)
     ))
     .map((branch) => {
       const projectIssue = snapshot.project.items.find((item) => (
@@ -284,6 +291,7 @@ function statusItems(
 function eventFor(
   result: ReconciliationReport['results'][number],
   items: readonly LifecycleStatusItem[],
+  diagnostics: readonly LifecycleStatusDiagnostic[],
   cycleId: string,
   runnerId: string,
 ): LifecycleLogEvent {
@@ -294,11 +302,15 @@ function eventFor(
   ));
   const issue = 'issueNumber' in action ? action.issueNumber : item?.issueNumber;
   const pr = 'prNumber' in action ? action.prNumber : item?.prNumber;
+  const diagnostic = diagnostics.find((candidate) => (
+    (issue !== undefined && candidate.issueNumbers.includes(issue))
+    || (pr !== undefined && candidate.pullRequests.some((candidatePr) => candidatePr.number === pr))
+  ));
   return {
     cycleId,
     runnerId,
     mode: 'recover',
-    phase: item?.phase ?? 'eligible',
+    phase: item?.phase ?? diagnostic?.phase ?? 'eligible',
     subject: [
       issue === undefined ? null : `issue:${issue}`,
       pr === undefined ? null : `pr:${pr}`,
@@ -333,8 +345,24 @@ export async function runLifecycleCycle(
       events: [],
     };
   }
-  const snapshot = await deps.readSnapshot();
-  if (snapshot.project.rateLimit.remaining < (deps.rateLimitFloor ?? DEFAULT_FLOOR)) {
+  const rateLimitFloor = deps.rateLimitFloor ?? DEFAULT_FLOOR;
+  let snapshot: GitHubLifecycleSnapshot;
+  try {
+    snapshot = await deps.readSnapshot(rateLimitFloor);
+  } catch (error) {
+    if (error instanceof LifecycleRateLimitError) {
+      return {
+        status: 'rate-limited',
+        mode,
+        message: error.message,
+        items: [],
+        diagnostics: [],
+        events: [],
+      };
+    }
+    throw error;
+  }
+  if (snapshot.project.rateLimit.remaining < rateLimitFloor) {
     return {
       status: 'rate-limited',
       mode,
@@ -382,7 +410,7 @@ export async function runLifecycleCycle(
     items,
     diagnostics,
     events: reconciliation.results.map((result) => (
-      eventFor(result, items, cycleId, deps.runnerId)
+      eventFor(result, items, diagnostics, cycleId, deps.runnerId)
     )),
     reconciliation,
   };

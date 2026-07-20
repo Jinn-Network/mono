@@ -16,11 +16,16 @@ import type {
   RawNativeReview,
   RawPullRequest,
 } from './snapshot.js';
-import { parseHumanCommentEvidence } from './codecs.js';
+import {
+  decodeBranchClaimTrailers,
+  parseHumanCommentEvidence,
+} from './codecs.js';
 
 export const REVIEW_CLAIM_PAYLOAD_FILE = 'jinn-autopilot-review.json';
 const PR_PAGE_SIZE = 50;
 const MERGED_ISSUE_BATCH_SIZE = 20;
+const COMMIT_HISTORY_PAGE_SIZE = 100;
+const MAX_COMMIT_HISTORY_PAGES = 100;
 
 const PR_FIELDS = `
         number title body baseRefName headRefName headRefOid isDraft state
@@ -78,6 +83,14 @@ const PR_QUERY = `query($cursor: String) {
   }
 }`;
 
+const PR_BY_NUMBER_QUERY = `query($number: Int!) {
+  repository(owner: "Jinn-Network", name: "mono") {
+    pullRequest(number: $number) {
+      ${PR_FIELDS}
+    }
+  }
+}`;
+
 function mergedOutcomesQuery(issueNumbers: readonly number[]): string {
   const issues = issueNumbers.map((number) => `
     issue${number}: issue(number: ${number}) {
@@ -120,6 +133,14 @@ interface GraphQlPage {
         pageInfo: { hasNextPage: boolean; endCursor: string | null };
         nodes: GraphQlPr[];
       };
+    };
+  };
+}
+
+interface GraphQlPrResponse {
+  data: {
+    repository: {
+      pullRequest: GraphQlPr | null;
     };
   };
 }
@@ -244,6 +265,25 @@ function branchTrailers(message: string): string | null {
     : null;
 }
 
+function matchingBranchTrailers(
+  message: string,
+  issueNumber?: number,
+  prNumber?: number,
+): string | null {
+  const trailers = branchTrailers(message);
+  if (trailers === null) return null;
+  const claim = decodeBranchClaimTrailers(trailers);
+  if (issueNumber !== undefined && claim.issueNumber !== issueNumber) return null;
+  if (
+    prNumber !== undefined
+    && claim.prNumber !== undefined
+    && claim.prNumber !== prNumber
+  ) {
+    return null;
+  }
+  return trailers;
+}
+
 function assertCompletePrNode(pr: GraphQlPr): void {
   if (pr.labels.pageInfo.hasNextPage) {
     throw new Error(`PR #${pr.number} labels were truncated`);
@@ -280,6 +320,10 @@ function checks(pr: GraphQlPr): RawPullRequest['checks'] {
 
 export class GhLifecycleReader implements GitHubLifecycleReader {
   private readonly issues: GhIssueSource;
+  private readonly ancestryByCandidate = new Map<string, Promise<{
+    readonly headCommittedAt: string;
+    readonly claimTrailers: string | null;
+  }>>();
 
   constructor(private readonly run: CommandRunner = defaultRunner) {
     this.issues = new GhIssueSource(run);
@@ -319,6 +363,69 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
     return { oid: target.oid, payload };
   }
 
+  private branchAncestry(
+    headOid: string,
+    issueNumber?: number,
+    prNumber?: number,
+  ): Promise<{
+    readonly headCommittedAt: string;
+    readonly claimTrailers: string | null;
+  }> {
+    const cacheKey = `${headOid}:${issueNumber ?? '*'}:${prNumber ?? '*'}`;
+    const cached = this.ancestryByCandidate.get(cacheKey);
+    if (cached !== undefined) return cached;
+    const pending = this.readBranchAncestry(headOid, issueNumber, prNumber)
+      .catch((error: unknown) => {
+        this.ancestryByCandidate.delete(cacheKey);
+        throw error;
+      });
+    this.ancestryByCandidate.set(cacheKey, pending);
+    return pending;
+  }
+
+  private async readBranchAncestry(
+    headOid: string,
+    issueNumber?: number,
+    prNumber?: number,
+  ): Promise<{
+    readonly headCommittedAt: string;
+    readonly claimTrailers: string | null;
+  }> {
+    let headCommittedAt: string | undefined;
+    for (let page = 1; page <= MAX_COMMIT_HISTORY_PAGES; page += 1) {
+      const endpoint = `repos/${REPO}/commits?sha=${encodeURIComponent(headOid)}`
+        + `&per_page=${COMMIT_HISTORY_PAGE_SIZE}&page=${page}`;
+      const raw = await this.run('gh', ['api', endpoint]);
+      const commits = JSON.parse(raw) as Array<{
+        sha?: string;
+        commit?: { message?: string; committer?: { date?: string } };
+      }>;
+      if (!Array.isArray(commits)) throw new Error(`Branch ${headOid} ancestry is malformed`);
+      if (page === 1) {
+        const head = commits[0];
+        if (head?.sha !== headOid) {
+          throw new Error(`Branch ${headOid} ancestry is missing its exact head`);
+        }
+        headCommittedAt = head.commit?.committer?.date;
+        if (typeof headCommittedAt !== 'string') {
+          throw new Error(`Branch ${headOid} is missing its GitHub commit time`);
+        }
+      }
+      const claimTrailers = commits
+        .map((commit) => matchingBranchTrailers(
+          commit.commit?.message ?? '',
+          issueNumber,
+          prNumber,
+        ))
+        .find((trailers) => trailers !== null) ?? null;
+      if (claimTrailers !== null) return { headCommittedAt: headCommittedAt!, claimTrailers };
+      if (commits.length < COMMIT_HISTORY_PAGE_SIZE) {
+        return { headCommittedAt: headCommittedAt!, claimTrailers: null };
+      }
+    }
+    throw new Error(`Branch ${headOid} ancestry pagination exceeded safety limit`);
+  }
+
   private async rawPullRequest(
     pr: GraphQlPr,
     includeReviewClaim: boolean,
@@ -328,17 +435,18 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
     if (latest === undefined || latest.oid !== pr.headRefOid) {
       throw new Error(`PR #${pr.number} is missing its exact current head commit`);
     }
-    const claimTrailers = [...pr.commits.nodes]
+    const branchIssues = new Set(pr.closingIssuesReferences.nodes.map((issue) => issue.number));
+    const stableMatch = /^autopilot\/([1-9][0-9]*)$/.exec(pr.headRefName);
+    if (stableMatch !== null) branchIssues.add(Number(stableMatch[1]));
+    const branchIssue = branchIssues.size === 1 ? [...branchIssues][0] : undefined;
+    let claimTrailers = [...pr.commits.nodes]
       .reverse()
-      .map((node) => branchTrailers(node.commit.message))
+      .map((node) => matchingBranchTrailers(node.commit.message, branchIssue, pr.number))
       .find((trailers) => trailers !== null) ?? null;
-    if (
-      claimTrailers === null
-      && includeReviewClaim
-      && pr.commits.pageInfo.hasPreviousPage
-      && /^autopilot\/[1-9][0-9]*$/.test(pr.headRefName)
-    ) {
-      throw new Error(`PR #${pr.number} history was truncated before its v2 branch claim`);
+    if (claimTrailers === null && includeReviewClaim && pr.commits.pageInfo.hasPreviousPage) {
+      claimTrailers = (
+        await this.branchAncestry(pr.headRefOid, branchIssue, pr.number)
+      ).claimTrailers;
     }
     const reviews: RawNativeReview[] = pr.reviews.nodes.map((review) => {
       if (review.commit === null) {
@@ -378,6 +486,7 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
       reviews,
       branchClaimTrailers: claimTrailers,
       reviewClaim: includeReviewClaim ? await this.reviewClaim(pr.number) : null,
+      humanIssueNumber: humanEvidence?.issueNumber ?? null,
       humanReason: humanEvidence?.reason ?? null,
       mergedAt: pr.mergedAt,
       mergeCommitOid: pr.mergeCommit?.oid ?? null,
@@ -405,7 +514,12 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
           throw new Error(`Issue #${number} closing PR outcomes were truncated`);
         }
         for (const pr of connection.nodes) {
-          if (pr.state !== 'MERGED') continue;
+          if (pr.state === 'OPEN') {
+            if (pr.labels.nodes.some((label) => label.name === 'engine:review')) continue;
+            const full = await this.readPullRequestByNumber(pr.number);
+            merged.push(await this.rawPullRequest(full, true));
+            continue;
+          }
           if (pr.labels.pageInfo.hasNextPage) {
             throw new Error(`PR #${pr.number} labels were truncated`);
           }
@@ -435,6 +549,7 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
             reviews: [],
             branchClaimTrailers: null,
             reviewClaim: null,
+            humanIssueNumber: null,
             humanReason: null,
             mergedAt: pr.mergedAt,
             mergeCommitOid: pr.mergeCommit?.oid ?? null,
@@ -443,6 +558,18 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
       }
     }
     return merged;
+  }
+
+  private async readPullRequestByNumber(prNumber: number): Promise<GraphQlPr> {
+    const raw = await this.run('gh', [
+      'api', 'graphql',
+      '-f', `query=${PR_BY_NUMBER_QUERY}`,
+      '-F', `number=${prNumber}`,
+    ]);
+    const response = JSON.parse(raw) as GraphQlPrResponse;
+    const pr = response.data.repository.pullRequest;
+    if (pr === null) throw new Error(`PR #${prNumber} disappeared during lifecycle read`);
+    return pr;
   }
 
   async readPullRequests(
@@ -486,17 +613,15 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
       const oid = ref.object?.sha;
       const match = /^refs\/heads\/autopilot\/([1-9][0-9]*)$/.exec(name ?? '');
       if (match === null || oid === undefined) continue;
-      const commitRaw = await this.run('gh', ['api', `repos/${REPO}/commits/${oid}`]);
-      const commit = JSON.parse(commitRaw) as {
-        commit?: { message?: string; committer?: { date?: string } };
-      };
-      const trailers = branchTrailers(commit.commit?.message ?? '');
+      const issueNumber = Number(match[1]);
+      const ancestry = await this.branchAncestry(oid, issueNumber);
+      const trailers = ancestry.claimTrailers;
       if (trailers === null) continue;
       claims.push({
-        issueNumber: Number(match[1]),
+        issueNumber,
         headRefName: `autopilot/${match[1]}`,
         headOid: oid,
-        headCommittedAt: commit.commit?.committer?.date ?? '',
+        headCommittedAt: ancestry.headCommittedAt,
         claimTrailers: trailers,
       });
     }

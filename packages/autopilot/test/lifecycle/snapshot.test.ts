@@ -178,6 +178,40 @@ describe('buildGitHubLifecycleSnapshot', () => {
     })).rejects.toThrow(/pagination/i);
   });
 
+  it('stops after the lean Project read when the rate-limit guard trips', async () => {
+    const calls: string[] = [];
+    const source = reader({
+      readProjectSnapshot: async () => {
+        calls.push('project');
+        return {
+          ...(await reader().readProjectSnapshot()),
+          rateLimit: {
+            remaining: 499,
+            used: 4_501,
+            resetAt: '2026-07-20T13:00:00.000Z',
+          },
+        };
+      },
+      readIssues: async () => {
+        calls.push('issues');
+        return [issue()];
+      },
+      readPullRequests: async () => {
+        calls.push('prs');
+        return { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } };
+      },
+      readBranchClaims: async () => {
+        calls.push('branches');
+        return [];
+      },
+    });
+
+    await expect(buildGitHubLifecycleSnapshot(source, {
+      authorAllowlist: new Set(['trusted']),
+    })).rejects.toThrow(/rate-limit/i);
+    expect(calls).toEqual(['project']);
+  });
+
   it('preserves source eligibility reasons for no-PR issues', async () => {
     const dependencyBlocked = {
       ...issue(),
@@ -291,5 +325,124 @@ describe('buildGitHubLifecycleSnapshot', () => {
         pullRequests: [expect.objectContaining({ number: 104 })],
       }),
     ]));
+  });
+
+  it('carries bounded merged v2 evidence so merge-before-Done can recover', async () => {
+    const merged = {
+      ...page('page-2').nodes[0]!,
+      state: 'MERGED' as const,
+      mergedAt: '2026-07-20T10:00:00.000Z',
+      mergeCommitOid: HEAD,
+      branchClaimTrailers: null,
+      reviewClaim: null,
+      labels: ['engine:review'],
+    };
+    const source = reader({
+      readPullRequests: async () => ({
+        nodes: [merged],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      }),
+    });
+
+    const snapshot = await buildGitHubLifecycleSnapshot(source, {
+      authorAllowlist: new Set(['trusted']),
+    });
+
+    expect(snapshot.lifecycle.items[0]).toMatchObject({
+      kind: 'pull-request',
+      merged: true,
+      v2Marked: true,
+      projectStatus: 'In Review',
+    });
+  });
+
+  it('diagnoses a stable claim that contradicts an adopted PR for the same issue', async () => {
+    const adopted = {
+      ...page('page-2').nodes[0]!,
+      headRefName: 'feature/adopted-42',
+    };
+    const source = reader({
+      readPullRequests: async () => ({
+        nodes: [adopted],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      }),
+      readBranchClaims: async () => [{
+        issueNumber: 42,
+        headRefName: 'autopilot/42',
+        headOid: 'cccccccccccccccccccccccccccccccccccccccc',
+        headCommittedAt: '2026-07-20T08:00:00.000Z',
+        claimTrailers: [
+          'Jinn-Autopilot-Protocol: 2',
+          'Jinn-Autopilot-Phase: implement',
+          'Jinn-Autopilot-Issue: 42',
+          'Jinn-Autopilot-Attempt: 11111111-1111-4111-8111-111111111111',
+          'Jinn-Autopilot-Runner: runner-a',
+          'Jinn-Autopilot-Login: trusted',
+          `Jinn-Autopilot-Expected-Head: ${HEAD}`,
+          'Jinn-Autopilot-Target-Base: next',
+          'Jinn-Autopilot-Claimed-At: 2026-07-20T08:00:00.000Z',
+        ].join('\n'),
+      }],
+    });
+
+    const snapshot = await buildGitHubLifecycleSnapshot(source, {
+      authorAllowlist: new Set(['trusted']),
+    });
+
+    expect(snapshot.lifecycle.items).toEqual([]);
+    expect(snapshot.diagnostics).toEqual([
+      expect.objectContaining({
+        code: 'branch-mapping-ambiguous',
+        issueNumbers: [42],
+        detail: expect.stringContaining('stable branch'),
+        pullRequests: [expect.objectContaining({ number: 101 })],
+      }),
+    ]);
+  });
+
+  it('diagnoses a Human marker whose issue contradicts the resolved PR mapping', async () => {
+    const contradictory = {
+      ...page('page-2').nodes[0]!,
+      humanIssueNumber: 43,
+      humanReason: {
+        phase: 'implementing' as const,
+        code: 'implementation-escalation' as const,
+        detail: 'Needs product judgment',
+      },
+    };
+    const actualIssue43Pr = {
+      ...page('page-2').nodes[0]!,
+      number: 102,
+      headRefName: 'autopilot/43',
+      headOid: 'cccccccccccccccccccccccccccccccccccccccc',
+      closingIssueNumbers: [43],
+      reviews: [],
+      reviewClaim: null,
+      humanReason: null,
+    };
+    const source = reader({
+      readIssues: async () => [issue(), { ...issue(), number: 43 }],
+      readPullRequests: async () => ({
+        nodes: [contradictory, actualIssue43Pr],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      }),
+    });
+
+    const snapshot = await buildGitHubLifecycleSnapshot(source, {
+      authorAllowlist: new Set(['trusted']),
+    });
+
+    expect(snapshot.lifecycle.items).toEqual([]);
+    expect(snapshot.diagnostics).toEqual([
+      expect.objectContaining({
+        code: 'branch-mapping-ambiguous',
+        issueNumbers: [42, 43],
+        detail: expect.stringContaining('Human marker issue #43'),
+        pullRequests: [
+          expect.objectContaining({ number: 101 }),
+          expect.objectContaining({ number: 102 }),
+        ],
+      }),
+    ]);
   });
 });

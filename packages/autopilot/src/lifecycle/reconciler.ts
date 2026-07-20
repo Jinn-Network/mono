@@ -1,4 +1,5 @@
 import type { ProjectStatus } from '../dispatcher/types.js';
+import { DEFAULT_CONFIG } from '../dispatcher/types.js';
 import type { ProjectionAction, ProjectionPlan } from './projection.js';
 import type { GitOid } from './types.js';
 
@@ -31,8 +32,10 @@ export interface ReconciliationWriter {
   hasHumanComment(prNumber: number, marker: string): Promise<boolean>;
   ensureHumanComment(prNumber: number, marker: string, body: string): Promise<void>;
   findOpenPullRequest(headRefName: string): Promise<{
+    readonly number: number;
     readonly head: GitOid;
     readonly draft: boolean;
+    readonly labels: readonly string[];
   } | null>;
   ensureDraftPullRequest(input: {
     readonly issueNumber: number;
@@ -223,9 +226,44 @@ async function ensureDraftPr(
   }
   const before = await writer.findOpenPullRequest(action.headRefName);
   if (before !== null) {
-    return before.head === action.expectedHead
-      ? { action, outcome: 'already-applied' }
-      : { action, outcome: 'changed-head' };
+    if (before.head !== action.expectedHead) return { action, outcome: 'changed-head' };
+    let applied = false;
+    if (!before.draft) {
+      const result = await setDraft({
+        kind: 'set-pr-draft',
+        prNumber: before.number,
+        expectedHead: action.expectedHead,
+        draft: true,
+      }, writer);
+      if (result.outcome !== 'applied' && result.outcome !== 'already-applied') {
+        return {
+          action,
+          outcome: result.outcome,
+          ...(result.detail === undefined ? {} : { detail: result.detail }),
+        };
+      }
+      applied ||= result.outcome === 'applied';
+    }
+    const current = await writer.readPullRequest(before.number);
+    if (current?.head !== action.expectedHead) return { action, outcome: 'changed-head' };
+    if (!current.labels.includes(DEFAULT_CONFIG.engineReviewLabel)) {
+      const result = await setLabel({
+        kind: 'set-pr-label',
+        prNumber: before.number,
+        expectedHead: action.expectedHead,
+        label: DEFAULT_CONFIG.engineReviewLabel,
+        present: true,
+      }, writer);
+      if (result.outcome !== 'applied' && result.outcome !== 'already-applied') {
+        return {
+          action,
+          outcome: result.outcome,
+          ...(result.detail === undefined ? {} : { detail: result.detail }),
+        };
+      }
+      applied ||= result.outcome === 'applied';
+    }
+    return { action, outcome: applied ? 'applied' : 'already-applied' };
   }
   if (await writer.readBranchHead(action.headRefName) !== action.expectedHead) {
     return { action, outcome: 'changed-head' };
