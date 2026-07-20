@@ -191,11 +191,217 @@ def test_extract_trace_accepts_episode_reader_defaults_and_legacy_outcome_axis()
     assert projected["steps"][0]["futureStepField"] == "preserved"
 
 
+def test_extract_trace_accepts_fully_populated_additive_episode_reader_shape():
+    episode = copy.deepcopy(_valid_episode())
+    episode.update({
+        "futureTopLevelField": {"nested": ["preserved"]},
+        "session": {
+            **episode["session"],
+            "parentSessionId": "session:parent",
+            "futureSessionField": {"preserved": True},
+        },
+        "origin": {
+            **episode["origin"],
+            "futureOriginField": ["preserved"],
+        },
+        "task": {
+            **episode["task"],
+            "repositorySlug": "Jinn-Network/jinn-mono",
+            "baseCommit": "a" * 40,
+            "createdAt": 1_752_000_000,
+            "instanceId": "django__django-12345",
+            "futureTaskField": {"preserved": True},
+        },
+        "environment": {
+            **episode["environment"],
+            "harness": {
+                **episode["environment"]["harness"],
+                "futureHarnessField": "preserved",
+            },
+            "generatorModel": {
+                "id": "test-model",
+                "provider": "test-provider",
+                "openWeights": False,
+                "source": "stream",
+                "futureGeneratorField": {"preserved": True},
+            },
+            "distributionClass": "restricted-tos",
+            "verifier": {
+                "type": "f2p-p2p",
+                "failToPass": ["tests/test_fix.py::test_regression"],
+                "passToPass": ["tests/test_existing.py::test_stable"],
+                "evalSemanticsVersion": "swe-rebench-v2.1",
+                "futureVerifierField": {"preserved": True},
+            },
+            "futureEnvironmentField": {"preserved": True},
+        },
+        "outcome": {
+            **episode["outcome"],
+            "summary": "all checks passed",
+            "acceptedDiff": True,
+            "testRuns": {
+                "passed": 2,
+                "failed": 0,
+                "futureTestRunsField": {"preserved": True},
+            },
+            "futureOutcomeField": {"preserved": True},
+        },
+        "cost": {
+            "durationMs": 42,
+            "tokens": {
+                "input": 10,
+                "output": 4,
+                "futureTokensField": {"preserved": True},
+            },
+            "usdEstimate": "0.42",
+            "futureCostField": {"preserved": True},
+        },
+        "retention": {
+            **episode["retention"],
+            "futureRetentionField": {"preserved": True},
+        },
+        "lineage": {
+            "episodeId": "episode:parent",
+            "mintRef": "bafy-parent",
+            "futureLineageField": {"preserved": True},
+        },
+        "attemptGroup": {
+            "groupId": "group",
+            "attemptId": "attempt",
+            "relatedAttemptRefs": ["bafy-pass", "bafy-fail"],
+            "groupSize": 2,
+            "nPass": 1,
+            "nFail": 1,
+            "futureAttemptField": {"preserved": True},
+        },
+        "activity": {
+            "searchedTerms": ["dashboard"],
+            "providedRefs": ["bafy-delivered"],
+            "surfacedRefs": ["bafy-delivered"],
+            "fetchedRefs": ["bafy-delivered"],
+            "installedSkillRefs": ["skills/testing@1"],
+            "retrievalFired": True,
+            "eligibleRefs": ["bafy-delivered"],
+            "deliveredRefs": ["bafy-delivered"],
+            "deliveryMode": "delivered",
+            "deliveredContentHash": f"sha256:{'a' * 64}",
+            "futureActivityField": {"preserved": True},
+        },
+        "eligibility": {
+            "eligible": True,
+            "reason": "accepted diff on a public repository",
+            "checkedAt": "2026-07-20T00:00:00.123456789Z",
+            "futureEligibilityField": {"preserved": True},
+        },
+    })
+    episode["trajectory"][0].update({
+        "truncatedKeys": ["attributes.private"],
+        "futureStepField": {"preserved": True},
+    })
+
+    projected, _digest = skills_install._extract_trace({
+        "artifacts": [_artifact("jinn.episode.v1", episode)],
+    })
+
+    assert projected["futureTopLevelField"] == {"nested": ["preserved"]}
+    assert projected["environment"]["generatorModel"]["futureGeneratorField"] == {
+        "preserved": True
+    }
+    assert projected["activity"]["futureActivityField"] == {"preserved": True}
+    assert projected["eligibility"]["futureEligibilityField"] == {
+        "preserved": True
+    }
+
+
+def test_extract_trace_accepts_reader_null_normalization_and_activity_defaults():
+    episode = copy.deepcopy(_valid_episode())
+    episode["session"]["parentSessionId"] = None
+    episode["task"].update({
+        "repositorySlug": None,
+        "baseCommit": None,
+        "createdAt": None,
+        "instanceId": None,
+    })
+    episode["trajectory"][0]["truncatedKeys"] = None
+    episode["environment"].update({
+        "generatorModel": {
+            "id": "test-model",
+            "provider": None,
+            "openWeights": None,
+            "source": "config",
+        },
+        "distributionClass": None,
+        "verifier": {
+            "type": "none",
+            "evalSemanticsVersion": None,
+        },
+    })
+    episode["outcome"].update({
+        "summary": None,
+        "acceptedDiff": None,
+        "testRuns": None,
+    })
+    episode["cost"].update({"tokens": None, "usdEstimate": None})
+    episode["lineage"] = {"episodeId": "episode:parent", "mintRef": None}
+    episode["attemptGroup"] = {
+        "groupId": "group",
+        "attemptId": "attempt",
+        "groupSize": None,
+        "nPass": None,
+        "nFail": None,
+    }
+    episode["activity"] = {
+        "searchedTerms": ["dashboard"],
+        "providedRefs": ["bafy-delivered"],
+        "deliveredContentHash": None,
+    }
+    episode["eligibility"] = None
+
+    projected, _digest = skills_install._extract_trace({
+        "artifacts": [_artifact("jinn.episode.v1", episode)],
+    })
+
+    assert projected["steps"][0]["truncatedKeys"] is None
+    assert projected["activity"]["providedRefs"] == ["bafy-delivered"]
+
+
+def test_extract_trace_reader_does_not_require_write_only_delivered_hash():
+    episode = copy.deepcopy(_valid_episode())
+    episode["activity"] = {
+        "retrievalFired": True,
+        "eligibleRefs": ["bafy-delivered"],
+        "deliveredRefs": ["bafy-delivered"],
+        "deliveryMode": "delivered",
+    }
+
+    projected, _digest = skills_install._extract_trace({
+        "artifacts": [_artifact("jinn.episode.v1", episode)],
+    })
+
+    assert projected["activity"]["deliveryMode"] == "delivered"
+
+
 @pytest.mark.parametrize(
     ("field_path", "mutate"),
     [
         ("environment", lambda episode: episode.pop("environment")),
         ("trajectory", lambda episode: episode.update({"trajectory": []})),
+        (
+            "session.capturedAt",
+            lambda episode: episode["session"].update(
+                {"capturedAt": "not-a-date"}
+            ),
+        ),
+        (
+            "session.sessionId",
+            lambda episode: episode["session"].update({"sessionId": "s" * 129}),
+        ),
+        (
+            "session.parentSessionId",
+            lambda episode: episode["session"].update(
+                {"parentSessionId": "s" * 129}
+            ),
+        ),
         (
             "trajectory[0].attributes",
             lambda episode: episode["trajectory"][0].update({"attributes": []}),
@@ -209,6 +415,223 @@ def test_extract_trace_accepts_episode_reader_defaults_and_legacy_outcome_axis()
             lambda episode: episode["outcome"].update(
                 {"verificationStrength": "strong"}
             ),
+        ),
+        (
+            "outcome.verificationStrength",
+            lambda episode: episode["outcome"].update({
+                "verificationStrength": None,
+                "verifiabilityTier": "tests-passed",
+            }),
+        ),
+        (
+            "outcome.testRuns.passed",
+            lambda episode: episode["outcome"].update({
+                "testRuns": {"passed": True, "failed": 0},
+            }),
+        ),
+        (
+            "cost.tokens.output",
+            lambda episode: episode["cost"].update({
+                "tokens": {"input": 0, "output": -1},
+            }),
+        ),
+        (
+            "environment.generatorModel",
+            lambda episode: episode["environment"].update(
+                {"generatorModel": []}
+            ),
+        ),
+        (
+            "environment.generatorModel.id",
+            lambda episode: episode["environment"].update({
+                "generatorModel": {"id": "", "source": "config"},
+            }),
+        ),
+        (
+            "environment.generatorModel.provider",
+            lambda episode: episode["environment"].update({
+                "generatorModel": {
+                    "id": "model",
+                    "provider": "",
+                    "source": "config",
+                },
+            }),
+        ),
+        (
+            "environment.generatorModel.openWeights",
+            lambda episode: episode["environment"].update({
+                "generatorModel": {
+                    "id": "model",
+                    "openWeights": "yes",
+                    "source": "config",
+                },
+            }),
+        ),
+        (
+            "environment.generatorModel.source",
+            lambda episode: episode["environment"].update({
+                "generatorModel": {"id": "model", "source": "future"},
+            }),
+        ),
+        (
+            "environment.distributionClass",
+            lambda episode: episode["environment"].update(
+                {"distributionClass": "private"}
+            ),
+        ),
+        (
+            "environment.verifier",
+            lambda episode: episode["environment"].update({"verifier": []}),
+        ),
+        (
+            "environment.verifier.type",
+            lambda episode: episode["environment"].update({
+                "verifier": {"type": "future"},
+            }),
+        ),
+        (
+            "environment.verifier.failToPass[0]",
+            lambda episode: episode["environment"].update({
+                "verifier": {"type": "none", "failToPass": [""]},
+            }),
+        ),
+        (
+            "environment.verifier.evalSemanticsVersion",
+            lambda episode: episode["environment"].update({
+                "verifier": {"type": "none", "evalSemanticsVersion": ""},
+            }),
+        ),
+        (
+            "lineage",
+            lambda episode: episode.update({"lineage": []}),
+        ),
+        (
+            "lineage.episodeId",
+            lambda episode: episode.update({
+                "lineage": {"episodeId": "", "mintRef": "bafy-parent"},
+            }),
+        ),
+        (
+            "lineage.mintRef",
+            lambda episode: episode.update({
+                "lineage": {"episodeId": "episode:parent", "mintRef": ""},
+            }),
+        ),
+        (
+            "attemptGroup.groupSize",
+            lambda episode: episode.update({
+                "attemptGroup": {
+                    "groupId": "group",
+                    "attemptId": "attempt",
+                    "groupSize": 0,
+                },
+            }),
+        ),
+        (
+            "attemptGroup.nPass",
+            lambda episode: episode.update({
+                "attemptGroup": {
+                    "groupId": "group",
+                    "attemptId": "attempt",
+                    "nPass": -1,
+                },
+            }),
+        ),
+        (
+            "attemptGroup.relatedAttemptRefs[0]",
+            lambda episode: episode.update({
+                "attemptGroup": {
+                    "groupId": "group",
+                    "attemptId": "attempt",
+                    "relatedAttemptRefs": [""],
+                },
+            }),
+        ),
+        (
+            "attemptGroup.groupSize",
+            lambda episode: episode.update({
+                "attemptGroup": {
+                    "groupId": "group",
+                    "attemptId": "attempt",
+                    "groupSize": 3,
+                    "nPass": 1,
+                    "nFail": 1,
+                },
+            }),
+        ),
+        (
+            "activity",
+            lambda episode: episode.update({"activity": []}),
+        ),
+        (
+            "activity.searchedTerms",
+            lambda episode: episode.update({
+                "activity": {"searchedTerms": "dashboard"},
+            }),
+        ),
+        (
+            "activity.providedRefs",
+            lambda episode: episode.update({
+                "activity": {"providedRefs": None},
+            }),
+        ),
+        (
+            "activity.retrievalFired",
+            lambda episode: episode.update({
+                "activity": {"retrievalFired": "yes"},
+            }),
+        ),
+        (
+            "activity.eligibleRefs[0]",
+            lambda episode: episode.update({
+                "activity": {"eligibleRefs": [""]},
+            }),
+        ),
+        (
+            "activity.deliveryMode",
+            lambda episode: episode.update({
+                "activity": {"deliveryMode": "future"},
+            }),
+        ),
+        (
+            "activity.deliveredContentHash",
+            lambda episode: episode.update({
+                "activity": {"deliveredContentHash": "sha256:ABC"},
+            }),
+        ),
+        (
+            "eligibility",
+            lambda episode: episode.update({"eligibility": []}),
+        ),
+        (
+            "eligibility.eligible",
+            lambda episode: episode.update({
+                "eligibility": {
+                    "eligible": "yes",
+                    "reason": "eligible",
+                    "checkedAt": "2026-07-20T00:00:00Z",
+                },
+            }),
+        ),
+        (
+            "eligibility.reason",
+            lambda episode: episode.update({
+                "eligibility": {
+                    "eligible": True,
+                    "reason": "",
+                    "checkedAt": "2026-07-20T00:00:00Z",
+                },
+            }),
+        ),
+        (
+            "eligibility.checkedAt",
+            lambda episode: episode.update({
+                "eligibility": {
+                    "eligible": True,
+                    "reason": "eligible",
+                    "checkedAt": "not-a-date",
+                },
+            }),
         ),
     ],
 )

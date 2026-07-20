@@ -63,9 +63,12 @@ export interface BridgeEvidence {
   instanceId?: string;
   generatorModel?: CapturedTask['environment']['generatorModel'];
   distributionClass?: CapturedTask['environment']['distributionClass'];
-  failToPass?: string[];
-  passToPass?: string[];
-  evalSemanticsVersion?: string;
+  /** Authenticated verifier facts are all-or-nothing; partial facts are never published. */
+  verifier?: {
+    failToPass: string[];
+    passToPass: string[];
+    evalSemanticsVersion: string;
+  };
   /**
    * The solver's own compressed decision-path outline, derived from the raw
    * harness transcript inside the solution's `system_snapshot` artifact
@@ -177,17 +180,13 @@ export function toBridgeCapturedTask(ref: AttemptRef, ev: BridgeEvidence, now: D
       tools: [],
       ...(ev.generatorModel ? { generatorModel: ev.generatorModel } : {}),
       ...(ev.distributionClass ? { distributionClass: ev.distributionClass } : {}),
-      ...(ev.failToPass !== undefined
-        || ev.passToPass !== undefined
-        || ev.evalSemanticsVersion !== undefined
+      ...(ev.verifier
         ? {
             verifier: {
               type: 'f2p-p2p' as const,
-              failToPass: ev.failToPass ?? [],
-              passToPass: ev.passToPass ?? [],
-              ...(ev.evalSemanticsVersion
-                ? { evalSemanticsVersion: ev.evalSemanticsVersion }
-                : {}),
+              failToPass: ev.verifier.failToPass,
+              passToPass: ev.verifier.passToPass,
+              evalSemanticsVersion: ev.verifier.evalSemanticsVersion,
             },
           }
         : {}),

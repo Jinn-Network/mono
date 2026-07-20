@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createEvidenceFetcher } from '../src/bridge-fetch-evidence.js';
 import type { AttemptRef } from '../src/bridge.js';
 import { makeTarGz, wrapDonation } from './tar-fixture.js';
@@ -23,6 +23,24 @@ const TASK_CID = 'bafyTask';
 const SOLUTION_CID = 'bafySolution';
 const SNAPSHOT_CID = 'bafySnapshot';
 const SOLVE_REQ = '0x' + 'b'.repeat(64);
+
+function producerTask(over: Record<string, unknown> = {}) {
+  return {
+    description: 'Fix the widget factory',
+    restorationRequestId: SOLVE_REQ,
+    solverType: 'swe-rebench-v2.v1',
+    spec: {
+      schemaVersion: 'swe-rebench-v2.v1',
+      hf_dataset: 'nebius/SWE-rebench-leaderboard',
+      hf_split: '2025_01',
+      instance_id: 'django__django-11333',
+      repo: 'django/django',
+      base_commit: 'a'.repeat(40),
+      problem_statement: 'Fix the widget factory',
+    },
+    ...over,
+  };
+}
 
 /**
  * Canned ports for the VERIFIED 3-hop join:
@@ -64,40 +82,86 @@ describe('createEvidenceFetcher', () => {
     expect(ev.repo).toBe('django/django');
   });
 
-  it('carries native task, model, distribution, and verifier facts into bridge evidence', async () => {
-    const fetch = createEvidenceFetcher(ports({
-      task: {
-        description: 'Fix the widget factory',
-        restorationRequestId: SOLVE_REQ,
-        spec: {
-          instance_id: 'django__django-11333',
-          repo: 'django/django',
-          base_commit: 'a'.repeat(40),
-          fail_to_pass: ['tests/test_widget.py::test_regression'],
-          pass_to_pass: ['tests/test_widget.py::test_existing'],
-          evalSemanticsVersion: '4',
-        },
-      },
-      solution: {
-        task: {
-          instanceId: 'django__django-11333',
-          repo: 'django/django',
-          baseCommit: 'a'.repeat(40),
-          createdAt: 1_752_000_000,
-        },
-        executor: {
-          generatorModel: {
-            id: 'claude-sonnet-4-6',
-            provider: 'anthropic',
-            source: 'stream',
-          },
-        },
-        distributionClass: 'restricted-tos',
-        payload: { patch: PATCH },
-      },
-    }));
+  it('resolves one atomic verifier tuple from the exact producer-shaped SWE task document', async () => {
+    const task = producerTask();
+    const verifier = {
+      failToPass: ['tests/test_widget.py::test_regression'],
+      passToPass: ['tests/test_widget.py::test_existing'],
+      evalSemanticsVersion: '4',
+    };
+    const resolveVerifierFacts = vi.fn(async () => verifier);
+    const fetch = createEvidenceFetcher({
+      ...ports({ task }),
+      resolveVerifierFacts,
+    });
 
     await expect(fetch(ref())).resolves.toMatchObject({
+      verifier,
+    });
+    expect(resolveVerifierFacts).toHaveBeenCalledTimes(1);
+    expect(resolveVerifierFacts).toHaveBeenCalledWith(task, ref().instanceId);
+  });
+
+  it('recognizes the signed-task wrapper and passes the complete outer document to the resolver', async () => {
+    const signedTask = producerTask();
+    delete signedTask['restorationRequestId'];
+    const task = {
+      restorationRequestId: SOLVE_REQ,
+      signedTask,
+    };
+    const resolveVerifierFacts = vi.fn(async () => ({
+      failToPass: [],
+      passToPass: ['tests/test_widget.py::test_existing'],
+      evalSemanticsVersion: '4',
+    }));
+    const fetch = createEvidenceFetcher({
+      ...ports({ task }),
+      resolveVerifierFacts,
+    });
+
+    await fetch(ref());
+    expect(resolveVerifierFacts).toHaveBeenCalledWith(task, ref().instanceId);
+  });
+
+  it('does not project unauthenticated legacy verifier fields or call the resolver for non-SWE tasks', async () => {
+    const resolveVerifierFacts = vi.fn();
+    const fetch = createEvidenceFetcher({
+      ...ports({
+        task: {
+          description: 'Fix the widget factory',
+          restorationRequestId: SOLVE_REQ,
+          spec: {
+            instance_id: 'django__django-11333',
+            repo: 'django/django',
+            base_commit: 'a'.repeat(40),
+            fail_to_pass: ['tests/test_widget.py::test_regression'],
+            pass_to_pass: ['tests/test_widget.py::test_existing'],
+            evalSemanticsVersion: '4',
+          },
+        },
+        solution: {
+          task: {
+            instanceId: 'django__django-11333',
+            repo: 'django/django',
+            baseCommit: 'a'.repeat(40),
+            createdAt: 1_752_000_000,
+          },
+          executor: {
+            generatorModel: {
+              id: 'claude-sonnet-4-6',
+              provider: 'anthropic',
+              source: 'stream',
+            },
+          },
+          distributionClass: 'restricted-tos',
+          payload: { patch: PATCH },
+        },
+      }),
+      resolveVerifierFacts,
+    });
+
+    const evidence = await fetch(ref());
+    expect(evidence).toMatchObject({
       instanceId: 'django__django-11333',
       repo: 'django/django',
       baseCommit: 'a'.repeat(40),
@@ -108,10 +172,86 @@ describe('createEvidenceFetcher', () => {
         source: 'stream',
       },
       distributionClass: 'restricted-tos',
-      failToPass: ['tests/test_widget.py::test_regression'],
-      passToPass: ['tests/test_widget.py::test_existing'],
-      evalSemanticsVersion: '4',
     });
+    expect(evidence.verifier).toBeUndefined();
+    expect(resolveVerifierFacts).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: 'identified task has no verifier resolver',
+      task: producerTask(),
+      resolveVerifierFacts: undefined,
+      error: /requires authenticated verifier facts/,
+    },
+    {
+      name: 'resolver rejects its proof',
+      task: producerTask(),
+      resolveVerifierFacts: async () => {
+        throw new Error('artifact digest mismatch');
+      },
+      error: /artifact digest mismatch/,
+    },
+    {
+      name: 'resolver returns no tuple',
+      task: producerTask(),
+      resolveVerifierFacts: async () => undefined,
+      error: /must be an object/,
+    },
+    {
+      name: 'resolver omits fail-to-pass',
+      task: producerTask(),
+      resolveVerifierFacts: async () => ({
+        passToPass: ['tests/test_widget.py::test_existing'],
+        evalSemanticsVersion: '4',
+      }),
+      error: /require exact failToPass, passToPass, and evalSemanticsVersion/,
+    },
+    {
+      name: 'resolver omits pass-to-pass',
+      task: producerTask(),
+      resolveVerifierFacts: async () => ({
+        failToPass: ['tests/test_widget.py::test_regression'],
+        evalSemanticsVersion: '4',
+      }),
+      error: /require exact failToPass, passToPass, and evalSemanticsVersion/,
+    },
+    {
+      name: 'resolver omits semantics version',
+      task: producerTask(),
+      resolveVerifierFacts: async () => ({
+        failToPass: ['tests/test_widget.py::test_regression'],
+        passToPass: ['tests/test_widget.py::test_existing'],
+      }),
+      error: /require exact failToPass, passToPass, and evalSemanticsVersion/,
+    },
+    {
+      name: 'resolver returns a non-string array member',
+      task: producerTask(),
+      resolveVerifierFacts: async () => ({
+        failToPass: ['tests/test_widget.py::test_regression', 7],
+        passToPass: ['tests/test_widget.py::test_existing'],
+        evalSemanticsVersion: '4',
+      }),
+      error: /require exact failToPass, passToPass, and evalSemanticsVersion/,
+    },
+    {
+      name: 'resolver returns a blank semantics version',
+      task: producerTask(),
+      resolveVerifierFacts: async () => ({
+        failToPass: ['tests/test_widget.py::test_regression'],
+        passToPass: ['tests/test_widget.py::test_existing'],
+        evalSemanticsVersion: '',
+      }),
+      error: /require exact failToPass, passToPass, and evalSemanticsVersion/,
+    },
+  ])('fails loud when $name', async ({ task, resolveVerifierFacts, error }) => {
+    const fetch = createEvidenceFetcher({
+      ...ports({ task }),
+      ...(resolveVerifierFacts ? { resolveVerifierFacts } : {}),
+    });
+
+    await expect(fetch(ref())).rejects.toThrow(error);
   });
 
   it('falls back to spec.problem_statement when there is no description', async () => {

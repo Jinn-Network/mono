@@ -64,11 +64,59 @@ function generatorModel(value: unknown): BridgeEvidence['generatorModel'] {
   };
 }
 
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function isIdentifiedSweTask(taskDoc: unknown): boolean {
+  const outer = record(taskDoc);
+  const task = record(outer?.['signedTask']) ?? outer;
+  return task?.['solverType'] === 'swe-rebench-v2.v1'
+    || (
+      task?.['contractId'] === 'swe-rebench-v2'
+      && task?.['contractVersion'] === 'v1'
+    );
+}
+
+export interface VerifierFacts {
+  failToPass: string[];
+  passToPass: string[];
+  evalSemanticsVersion: string;
+}
+
+export type VerifierFactsResolver = (
+  taskDoc: unknown,
+  expectedInstanceId: string,
+) => Promise<VerifierFacts>;
+
+function validateVerifierFacts(value: unknown, instanceId: string): VerifierFacts {
+  const facts = record(value);
+  if (!facts) {
+    throw new Error(`authenticated verifier facts for ${instanceId} must be an object`);
+  }
+  const failToPass = stringArray(facts['failToPass']);
+  const passToPass = stringArray(facts['passToPass']);
+  const evalSemanticsVersion = nonEmptyString(facts['evalSemanticsVersion']);
+  if (!failToPass || !passToPass || !evalSemanticsVersion) {
+    throw new Error(
+      `authenticated verifier facts for ${instanceId} require exact failToPass, passToPass, and evalSemanticsVersion`,
+    );
+  }
+  return { failToPass, passToPass, evalSemanticsVersion };
+}
+
 export interface EvidenceFetcherPorts {
-  /** Fetch + JSON-parse an IPFS object by CID (autonolas gateway in production). */
-  ipfs: (cid: string) => Promise<any>;
+  /**
+   * Fetch + JSON-parse an IPFS object by CID (autonolas gateway in production).
+   * Callers that authenticate smaller artifacts may request a tighter ceiling.
+   */
+  ipfs: (cid: string, maxBytes?: number) => Promise<any>;
   /** Run a GraphQL query string against the Ponder indexer, returning `data`. */
   gql: (query: string) => Promise<any>;
+  /** Resolve one atomic, authenticated verifier proof for an identified SWE task. */
+  resolveVerifierFacts?: VerifierFactsResolver;
 }
 
 /**
@@ -160,7 +208,20 @@ export function createEvidenceFetcher(
       .trim()
       .slice(0, MAX_PROBLEM_CHARS);
     const taskProvenance = solutionEnv?.task ?? verdictEnv?.task ?? {};
-    const spec = taskDoc?.spec ?? {};
+    const spec = record(taskDoc?.spec) ?? {};
+    let verifier: VerifierFacts | undefined;
+    if (isIdentifiedSweTask(taskDoc)) {
+      if (!ports.resolveVerifierFacts) {
+        throw new Error(
+          `identified SWE task ${ref.instanceId} requires authenticated verifier facts`,
+        );
+      }
+      verifier = validateVerifierFacts(
+        await ports.resolveVerifierFacts(taskDoc, ref.instanceId),
+        ref.instanceId,
+      );
+    }
+
     const instanceId =
       nonEmptyString(taskProvenance?.instanceId)
       ?? nonEmptyString(spec?.instance_id)
@@ -184,15 +245,6 @@ export function createEvidenceFetcher(
       || solutionEnv?.distributionClass === 'unknown'
         ? solutionEnv.distributionClass
         : undefined;
-    const failToPass =
-      stringArray(spec?.fail_to_pass)
-      ?? stringArray(spec?.FAIL_TO_PASS);
-    const passToPass =
-      stringArray(spec?.pass_to_pass)
-      ?? stringArray(spec?.PASS_TO_PASS);
-    const evalSemanticsVersion =
-      nonEmptyString(spec?.evalSemanticsVersion)
-      ?? nonEmptyString(spec?.eval_semantics_version);
     return {
       taskSummary: problem || ref.instanceId,
       patch: patch.slice(0, MAX_PATCH_CHARS),
@@ -202,9 +254,7 @@ export function createEvidenceFetcher(
       ...(instanceId ? { instanceId } : {}),
       ...(model ? { generatorModel: model } : {}),
       ...(distributionClass ? { distributionClass } : {}),
-      ...(failToPass !== undefined ? { failToPass } : {}),
-      ...(passToPass !== undefined ? { passToPass } : {}),
-      ...(evalSemanticsVersion ? { evalSemanticsVersion } : {}),
+      ...(verifier ? { verifier } : {}),
       ...(stepTrace ? { stepTrace } : {}),
     };
   };

@@ -40,7 +40,7 @@ const inlinePrivateCore = {
 };
 
 for (const entry of [
-  { in: 'packages/harness-layer/src/bin/jinn-layer.ts', out: 'dist/bin/jinn-layer.js', executable: true },
+  { in: 'scripts/jinn-layer-entry.ts', out: 'dist/bin/jinn-layer.js', executable: true },
   { in: 'packages/harness-layer/src/bin/jinn-distill-mcp.ts', out: 'dist/bin/jinn-distill-mcp.js', executable: true },
   {
     in: 'src/solver-types/_swe-rebench-v2-mineable-store.ts',
