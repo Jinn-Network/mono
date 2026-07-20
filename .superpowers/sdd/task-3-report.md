@@ -338,3 +338,218 @@ Repository checks:
   does not activate dispatch.
 - Live active-active canary, crash campaign, and migration cutover remain
   required by the approved design before enabling any lifecycle writer.
+
+---
+
+## Review-fix pass — 2026-07-20
+
+Reviewed implementation:
+
+- Task 3 implementation baseline:
+  `a59e753ea3b2bfa81773173461166e0f3564702b`
+- Review-fix code and tests:
+  `25c7235ab2016b6efa6b79a3350baf2d26f5e87a`
+- Independent-review closure:
+  `47bbd2c5bf8151bd8cc997618f33b57906cc9d47`
+
+### Findings closed
+
+1. Added strict `preparing | running | exited` process state. Process state,
+   PID, and child timestamps must agree. Preparing manifests count against
+   their runner's capacity and are retained because they contain no positive
+   terminal evidence. Sweeping proceeds only for an explicit `exited` state or
+   a `running` state whose recorded PID is positively observed dead.
+   `trackAttemptChild` installs a parent-side exit handler which records
+   `exited` through an atomic manifest update.
+2. Review recovery with native requested changes now returns
+   `identity-unavailable` when the previous reviewer login is missing, empty,
+   self-reviewing, or unavailable. It never substitutes an arbitrary reviewer.
+3. Child Git authentication now strips inherited `GIT_CONFIG_*` overrides,
+   disables system/global configuration, installs command-scope
+   `credential.helper=`, disables credential interaction, and binds
+   `core.askPass`, `GIT_ASKPASS`, and `SSH_ASKPASS` to the attempt askpass.
+   Cleanup fetches use the same environment-level boundary in addition to
+   publication command arguments.
+4. The strict manifest now records the canonical repository root, canonical
+   Git common directory, remote name, and a SHA-256 remote URL identity. Atomic
+   updates cannot change this identity. Cleanup re-reads the creating
+   repository and the attempt worktree common directory and retains any
+   mismatch as ambiguous before fetch or removal.
+5. Workspace creation constructs and strictly decodes the complete prospective
+   manifest before creating the v2 directories, auth files, log, manifest, or
+   registered worktree. If `git worktree add` fails after registration, exact
+   non-forced removal and registry read-back run. Exact attempt artifacts are
+   deleted only after registry absence is proven; otherwise the strict
+   manifest is retained so no registered worktree is manifestless.
+6. A missing worktree directory is no longer sufficient cleanup proof.
+   Cleanup proves that the exact canonicalized path is absent from
+   `git worktree list --porcelain -z`, fetches the recorded remote publication
+   ref with isolated authentication, and proves the recorded head reachable
+   before deleting sibling metadata.
+
+Cleanup and sweeping still have no GitHub API, lifecycle projection, branch
+publication, or shared recovery mutation path. The missing-worktree integration
+test records all cleanup commands and proves they are local Git
+read/fetch operations only, with no `gh`, `git push`, or `git update-ref`.
+
+### Review-fix RED / GREEN evidence
+
+All commands ran from `packages/autopilot`.
+
+Credential recovery and child Git environment:
+
+```text
+yarn vitest run test/lifecycle/credentials.test.ts
+```
+
+- RED: 2 failed, 6 passed. Missing previous reviewer selected an arbitrary
+  reviewer; inherited Git config/helper values remained usable.
+- GREEN: 1 file passed, 8 tests passed.
+
+Process state and positive terminal evidence:
+
+```text
+yarn vitest run test/lifecycle/attempt-workspace.test.ts
+```
+
+- RED: 8 failed, 4 passed. `processState` and atomic transition helpers were
+  absent, and a preparing attempt was removed.
+- GREEN: 1 file passed, 12 tests passed after the state machine, parent exit
+  binding, and cleanup gate were added.
+
+Canonical repository identity, prevalidation, and rollback:
+
+```text
+yarn vitest run test/lifecycle/attempt-workspace.test.ts
+```
+
+- RED: 3 failed, 12 passed. Repository identity was absent, invalid input
+  created v2 artifacts, an injected post-registration Git failure leaked a
+  registered worktree, and remote identity drift reached authentication
+  handling instead of failing closed as ambiguous.
+- GREEN: 1 file passed, 15 tests passed.
+
+Missing-worktree proof:
+
+```text
+yarn vitest run test/lifecycle/attempt-workspace.test.ts
+```
+
+- RED: 1 failed, 16 passed. A physically missing but still-registered worktree
+  was removed.
+- The first registry implementation exposed a macOS `/var` versus
+  `/private/var` canonical-path mismatch. After canonicalizing both registry
+  and prospective missing paths through the nearest existing ancestor,
+  targeted GREEN was 1 passed, 16 skipped.
+- Final attempt suite: 1 file passed, 17 tests passed, including registry
+  absence, remote reachability, and local-only cleanup assertions.
+
+Runner-local preparing capacity:
+
+```text
+yarn vitest run test/lifecycle/attempt-workspace.test.ts \
+  -t 'counts only this runner'
+```
+
+- RED: expected 2 live local manifests, received 1.
+- GREEN: 1 passed, 16 skipped. Same-runner preparing manifests count locally;
+  other-runner and terminal manifests do not.
+
+### Review-fix verification
+
+Focused lifecycle and identity verification:
+
+```text
+yarn vitest run test/lifecycle test/dispatcher/identity.test.ts
+```
+
+Result:
+
+- 12 files passed;
+- 143 tests passed;
+- 0 failures.
+
+Typecheck:
+
+```text
+yarn typecheck
+```
+
+Result: exit 0, no diagnostics.
+
+Full package suite:
+
+```text
+yarn test
+```
+
+Result:
+
+- 83 files passed;
+- 858 tests passed;
+- 0 failures.
+
+Expected resilience-test stderr was present only for injected failure paths.
+`git diff --check` also exited 0.
+
+### Review-fix self-review and concerns
+
+- Re-read all six review findings, the Task 3 brief, and the approved identity,
+  local isolation, cleanup, and implementation-boundary contracts.
+- Confirmed strict decoding rejects missing/unknown process or repository
+  identity fields and contradictory process/PID/timestamp combinations.
+- Confirmed no recoverable cleanup path uses `--force`, broad deletion, or
+  local absence as shared abandonment evidence.
+- Confirmed a remote URL is not stored directly; only its SHA-256 identity is
+  recorded, and no token-bearing environment value enters the manifest.
+- Confirmed the session CLI remains fail-closed and the legacy dispatcher,
+  Hermes/runtime adapters, claims, projection, and GitHub mutation paths remain
+  unchanged.
+
+Retained concerns:
+
+- `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_SYSTEM=/dev/null` are a
+  deliberate POSIX runtime assumption. The Autopilot package currently runs
+  under a POSIX shell, but a future native Windows port must replace this with
+  a platform-specific null path while preserving the same isolation invariant.
+- Repository identity uses a SHA-256 digest of the exact configured remote URL.
+  Harmless textual changes to an equivalent URL intentionally retain the
+  attempt as ambiguous instead of weakening identity matching.
+- Private/enterprise GitHub authentication and the crash campaign still need
+  live canary coverage before lifecycle writer activation.
+
+### Independent completion-review closure
+
+An independent read-only review of
+`a59e753ea3b2bfa81773173461166e0f3564702b..25c7235ab2016b6efa6b79a3350baf2d26f5e87a`
+identified four additional fail-closed gaps. Each was reproduced before the
+closure commit:
+
+- RED child-environment coverage showed ambient `SSH_AUTH_SOCK`,
+  `SSH_AGENT_PID`, `GIT_SSH`, and `GIT_SSH_COMMAND` survived. GREEN strips
+  those inputs and pins `GIT_SSH_COMMAND=false`, so an SSH remote cannot bypass
+  the selected `GH_TOKEN`/askpass identity.
+- RED process coverage showed an already-exited child remained `running`.
+  GREEN binds exit observation before the atomic running transition and
+  reconciles `exitCode` immediately afterward.
+- RED missing-worktree coverage showed metadata could be removed without a
+  recorded terminal head. GREEN adds optional strict `terminalHead`, records it
+  atomically with `exited`, and retains a missing worktree unless that exact
+  terminal OID is reachable from the refreshed publication ref.
+- RED rollback coverage showed a pre-existing missing registry entry was
+  unregistered by a colliding create call. GREEN proves registry absence before
+  filesystem side effects, so rollback can remove only a registration
+  introduced after that call's clean baseline.
+
+Fresh verification after these closure changes repeated the required commands:
+
+- focused lifecycle/identity: 12 files, 143 tests, 0 failures;
+- `yarn typecheck`: exit 0;
+- full package: 83 files, 858 tests, 0 failures;
+- `git diff --check`: exit 0.
+
+Additional retained concern: the hardened child deliberately cannot publish to
+an SSH remote. Before active phase adapters are wired, publication must use a
+validated HTTPS GitHub remote so the selected token and exact askpass are the
+only usable principal. This is fail-closed in the current inactive Task 3
+infrastructure, not an ambient-auth fallback.
