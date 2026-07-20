@@ -157,6 +157,7 @@ describe('production review acquisition port', () => {
         calls.push(args);
         if (args.some((arg) => arg.endsWith('/pulls/84'))) {
           return JSON.stringify({
+            changed_files: 1,
             head: { sha: HEAD },
             base: { ref: 'next', sha: '4'.repeat(40) },
           });
@@ -198,7 +199,17 @@ describe('production review acquisition port', () => {
       changedFiles: async () => ['client/src/dashboard/spa/src/pages/Home.tsx'],
       codeownersText: () =>
         '/client/src/dashboard/spa/src/pages/ @Jinn-Network/codeowners\n',
-      runner: async () => '',
+      runner: async (command, args) => {
+        expect(command).toBe('gh');
+        if (args.some((arg) => arg.endsWith('/pulls/84'))) {
+          return JSON.stringify({
+            changed_files: 1,
+            head: { sha: HEAD },
+            base: { ref: 'next', sha: '4'.repeat(40) },
+          });
+        }
+        throw new Error(`unexpected ${args.join(' ')}`);
+      },
     });
 
     await expect(port.readCandidate(84)).resolves.toMatchObject({
@@ -210,6 +221,32 @@ describe('production review acquisition port', () => {
       author: 'implementation-bot',
       approvalPolicy: 'human-codeowner',
       reviewRef: { oid: REVIEW },
+    });
+  });
+
+  it('forces Human approval policy when REST total disproves file completeness', async () => {
+    const port = makeProductionReviewActionPort({
+      repositoryPath: '/repo',
+      worktreeBase: '/worktrees',
+      runnerId: 'runner-a',
+      readSnapshot: async () => snapshot(),
+      changedFiles: async () => ['src/visible.ts'],
+      codeownersText: () => '',
+      runner: async (command, args) => {
+        expect(command).toBe('gh');
+        if (args.some((arg) => arg.endsWith('/pulls/84'))) {
+          return JSON.stringify({
+            changed_files: 2,
+            head: { sha: HEAD },
+            base: { ref: 'next', sha: '4'.repeat(40) },
+          });
+        }
+        throw new Error(`unexpected ${args.join(' ')}`);
+      },
+    });
+
+    await expect(port.readCandidate(84)).resolves.toMatchObject({
+      approvalPolicy: 'human-codeowner',
     });
   });
 
@@ -317,6 +354,17 @@ describe('production review acquisition port', () => {
         changedFiles: async () => [],
         codeownersText: () => '',
         runner: async (cmd, args) => {
+          if (
+            cmd === 'gh'
+            && args[0] === 'api'
+            && args.some((arg) => arg.endsWith('/pulls/84'))
+          ) {
+            return JSON.stringify({
+              changed_files: 0,
+              head: { sha: HEAD },
+              base: { ref: 'next', sha: '4'.repeat(40) },
+            });
+          }
           if (cmd === 'git' && args.includes('ls-remote')) {
             return `${REVIEW}\trefs/jinn-autopilot/review-claims/v1/84\n`;
           }

@@ -13,6 +13,7 @@ import {
   type SelectedCredential,
 } from './credentials.js';
 import { makeGitProtocolPort } from './git-protocol.js';
+import { readExactChangedFiles } from './github-changed-files.js';
 import { CANONICAL_GITHUB_HTTPS_REMOTE } from './implementation-executor.js';
 import type {
   MergePrepCandidate,
@@ -72,31 +73,25 @@ export function makeProductionMergePrepActionPort(
       entry.pullRequests.some((candidatePr) => candidatePr.number === prNumber));
     if (lifecycle?.kind !== 'pull-request' || diagnostic !== undefined) return null;
     const readPolicy = async (run: CommandRunner) => {
-      const base = JSON.parse(await run('gh', [
-        'api', `repos/${REPO}/git/ref/heads/${encodeURIComponent(pr.baseRefName)}`,
-      ])) as { object?: { sha?: string } };
-      const baseOid = gitOid(base.object?.sha ?? '');
-      const rawFiles = JSON.parse(await run('gh', [
-        'api', `repos/${REPO}/pulls/${pr.number}/files?per_page=100`,
-        '--paginate', '--slurp',
-      ])) as unknown;
-      if (!Array.isArray(rawFiles)) throw new Error('Merge-prep changed files were incomplete');
-      const pages = rawFiles as Array<Array<{ filename?: unknown }>>;
-      const files = pages.flat().map((file) => {
-        if (typeof file.filename !== 'string') throw new Error('Malformed changed file');
-        return file.filename;
+      const changedFiles = await readExactChangedFiles({
+        run,
+        prNumber: pr.number,
+        expectedHead: pr.headOid,
+        expectedBaseRefName: pr.baseRefName,
+        context: 'Merge-prep',
       });
       const content = JSON.parse(await run('gh', [
         'api',
-        `repos/${REPO}/contents/.github/CODEOWNERS?ref=${baseOid}`,
+        `repos/${REPO}/contents/.github/CODEOWNERS?ref=${changedFiles.baseOid}`,
       ])) as { content?: unknown };
       if (typeof content.content !== 'string') {
         throw new Error('Target-base CODEOWNERS read was incomplete');
       }
       return {
-        baseOid,
+        baseOid: changedFiles.baseOid,
+        changedFilesComplete: changedFiles.complete,
         codeownerSensitive: touchesCodeOwnedPath(
-          files,
+          [...changedFiles.files],
           parseOwnedPrefixes(decodeBase64(content.content)),
         ),
       };
@@ -129,7 +124,7 @@ export function makeProductionMergePrepActionPort(
       terminalApprovalMatches,
       mergeState: lifecycle.mergeState,
       codeownerSensitive: policy.codeownerSensitive,
-      changedFilesComplete: true,
+      changedFilesComplete: policy.changedFilesComplete,
       ...(pr.branchClaim === undefined ? {} : { branchClaim: pr.branchClaim }),
     };
   };

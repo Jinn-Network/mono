@@ -67,18 +67,24 @@ describe('shared Autopilot runtime skill contract', () => {
     }
   });
 
-  it('makes Hermes review fan-out synchronous and fixes fresh depth-0 roots', () => {
+  it('makes review fan-out a synchronous batch of sanitized depth-0 roots', () => {
+    const claude = read(claudeReferencePath);
     const hermes = read(hermesReferencePath);
     const review = read(join(skillsRoot, 'review-pr', 'SKILL.md'));
 
-    expect(hermes).toMatch(/synchronous[\s\S]*parallel[\s\S]*delegate_task/i);
+    for (const reference of [claude, hermes]) {
+      expect(reference).toMatch(
+        /synchronous[\s\S]*parallel[\s\S]*separate `stage:run`/i,
+      );
+      expect(reference).toContain('yarn stage:run');
+      expect(reference).not.toContain('delegate_task');
+    }
     expect(hermes).toMatch(/new\s+depth-0 Hermes process/);
-    expect(hermes).toContain('yarn stage:run');
     expect(hermes).not.toContain('--runtime');
-    expect(review).toContain('synchronous-parallel-child mechanism');
+    expect(review).toContain('synchronous-parallel-root mechanism');
     expect(review).toContain('fresh-root mechanism');
     expect(review).toMatch(
-      /review fix pass[\s\S]*fresh-root mechanism[\s\S]*fan out internally/i,
+      /fresh-root fixer[\s\S]*review-fix-publish/i,
     );
   });
 
@@ -89,5 +95,22 @@ describe('shared Autopilot runtime skill contract', () => {
       expect(reference).toContain('yarn stage:run');
       expect(reference).not.toContain('--runtime');
     }
+  });
+
+  it('preserves v2 attempt context without acquiring lifecycle authority', () => {
+    const runtimeSkill = read(runtimeSkillPath);
+    expect(runtimeSkill).toContain('JINN_AUTOPILOT_SESSION_MANIFEST');
+    expect(runtimeSkill).toContain('supplied detached attempt worktree');
+    expect(runtimeSkill).toContain('workflow-specific authority capsule');
+    expect(runtimeSkill).toMatch(
+      /stage process[\s\S]*must not inherit[\s\S]*`GH_TOKEN`/,
+    );
+    expect(runtimeSkill).toMatch(
+      /stage process[\s\S]*must not inherit[\s\S]*`JINN_AUTOPILOT_SESSION_MANIFEST`/,
+    );
+    expect(runtimeSkill).toMatch(
+      /does not read, advance, or replace\s+lifecycle authority/,
+    );
+    expect(runtimeSkill).toContain('No upstream Hermes change is required');
   });
 });

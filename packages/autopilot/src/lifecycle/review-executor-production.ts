@@ -26,6 +26,7 @@ import {
   sanitizedGitHubCommandOverlay,
 } from './credentials.js';
 import { makeGitProtocolPort } from './git-protocol.js';
+import { readExactChangedFiles } from './github-changed-files.js';
 import { CANONICAL_GITHUB_HTTPS_REMOTE } from './implementation-executor.js';
 import type {
   ReviewActionCandidate,
@@ -45,11 +46,12 @@ export interface ProductionReviewActionPortOptions {
   readonly runnerId: string;
   readonly remoteName?: string;
   readonly readSnapshot: () => Promise<GitHubLifecycleSnapshot>;
-  readonly changedFiles: (prNumber: number) => Promise<readonly string[]>;
+  readonly changedFiles?: (prNumber: number) => Promise<readonly string[]>;
   readonly codeownersText?: (input: {
     readonly prNumber: number;
     readonly expectedHead: GitOid;
     readonly baseRefName: string;
+    readonly baseOid: GitOid;
   }) => string | Promise<string>;
   readonly runner?: CommandRunner;
   readonly environment?: NodeJS.ProcessEnv;
@@ -133,28 +135,15 @@ export function makeProductionReviewActionPort(
     readonly prNumber: number;
     readonly expectedHead: GitOid;
     readonly baseRefName: string;
+    readonly baseOid: GitOid;
   }): Promise<string> => {
     if (options.codeownersText !== undefined) {
       return options.codeownersText(input);
     }
-    const pullRequest = JSON.parse(await runner('gh', [
-      'api', `repos/${REPO}/pulls/${input.prNumber}`,
-    ])) as {
-      head?: { sha?: unknown };
-      base?: { ref?: unknown; sha?: unknown };
-    };
-    if (
-      pullRequest.head?.sha !== input.expectedHead
-      || pullRequest.base?.ref !== input.baseRefName
-      || typeof pullRequest.base.sha !== 'string'
-    ) {
-      throw new Error('Review CODEOWNERS read lost exact PR authority');
-    }
-    const baseOid = gitOid(pullRequest.base.sha);
     const contents = JSON.parse(await runner('gh', [
       'api', `repos/${REPO}/contents/.github/CODEOWNERS`,
       '--method', 'GET',
-      '-f', `ref=${baseOid}`,
+      '-f', `ref=${input.baseOid}`,
     ])) as {
       encoding?: unknown;
       content?: unknown;
@@ -181,13 +170,23 @@ export function makeProductionReviewActionPort(
       ?? diagnostic?.issueNumbers[0]
       ?? (marker === null ? undefined : Number(marker[1]));
     if (issueNumber === undefined) return null;
-    const files = await options.changedFiles(prNumber);
-    const humanSurface = touchesCodeOwnedPath(
-      [...files],
+    const changedFiles = await readExactChangedFiles({
+      run: runner,
+      prNumber,
+      expectedHead: pr.headOid,
+      expectedBaseRefName: pr.baseRefName,
+      context: 'Review',
+      ...(options.changedFiles === undefined
+        ? {}
+        : { readFiles: options.changedFiles }),
+    });
+    const humanSurface = !changedFiles.complete || touchesCodeOwnedPath(
+      [...changedFiles.files],
       parseOwnedPrefixes(await readCodeownersText({
         prNumber,
         expectedHead: pr.headOid,
         baseRefName: pr.baseRefName,
+        baseOid: changedFiles.baseOid,
       })),
     );
     const reviewClaim = pr.reviewClaim;

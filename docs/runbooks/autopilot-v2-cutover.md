@@ -1,0 +1,329 @@
+# Autopilot v2 cutover
+
+This runbook moves an operator from the legacy single-runner dispatcher to the
+GitHub-native active-active lifecycle. It is a preserve-first protocol cutover,
+not a data migration and not a deployment script.
+
+Do not run legacy and v2 dispatch concurrently. Legacy processes do not
+understand early draft PRs, v2 branch claims, append-only review refs, or
+attempt-scoped cleanup.
+
+## Commands and modes
+
+From `packages/autopilot`:
+
+```bash
+yarn autopilot --mode observe --once status
+yarn autopilot --mode recover --once status
+yarn autopilot --mode active --once status
+```
+
+`yarn autopilot` is the v2 entry point and defaults to `observe`, which is
+zero-write. `autopilot:v2` remains an explicit alias.
+`yarn autopilot:legacy` is retained only for rollback before the first v2
+claim; it is not safe to run beside v2.
+
+Modes:
+
+- **observe** — derive and explain lifecycle state; no mutation.
+- **recover** — reconcile projections and stale v2 work; make no new claims.
+- **active** — recover, claim, execute, review, merge-prep, and merge within
+  this process’s local caps.
+
+No command in this runbook should be executed merely because the code was
+installed. Activation is an explicit operator decision.
+
+## 1. Preflight the release
+
+Before touching a supervisor:
+
+```bash
+cd packages/autopilot
+yarn typecheck
+yarn test
+yarn autopilot --mode observe --once --json status
+```
+
+Configure a dedicated canonical HTTPS publication remote without changing the
+operator’s ordinary `origin`:
+
+```bash
+git remote add jinn-autopilot-v2 https://github.com/Jinn-Network/mono.git
+git remote get-url jinn-autopilot-v2
+```
+
+If the remote already exists, require its URL to be exactly
+`https://github.com/Jinn-Network/mono.git`. Do not place a token in a URL or
+rewrite a contradictory remote automatically.
+
+Required active/recover configuration:
+
+- `JINN_IMPL_GH_TOKEN`
+- `JINN_DISPATCHER_AUTHOR_ALLOWLIST`
+- stable, unique `JINN_AUTOPILOT_RUNNER_ID` per process
+
+Active mode additionally requires
+`JINN_AUTOPILOT_CAPABILITY_ATTESTATION`, created by the live probe in section
+7. Recover and observe do not require it.
+
+Optional second identity:
+
+- `JINN_REVIEW_GH_TOKEN`
+- `JINN_REVIEW_BOT_LOGIN`
+
+The implementer and reviewer GitHub identities must remain distinct for a PR.
+With only one credential, the process prioritizes implementation and may
+review only PRs authored by a different identity.
+
+Runtime selection is process-wide:
+
+```bash
+export JINN_AUTOPILOT_RUNTIME=hermes   # or claude
+```
+
+When Hermes is configured, keep it selected for the coordinator and every
+stage. Use the existing stateless Hermes launcher and configured model/provider;
+no upstream Hermes change is part of this cutover.
+
+## 2. Quiesce legacy dispatch
+
+1. Disable every legacy supervisor’s ability to dispatch new sessions.
+2. Let active legacy sessions reach a remote branch/PR checkpoint where
+   practical.
+3. Stop remaining legacy parent and child processes.
+4. Do not remove worktrees, branches, refs, PRs, logs, or session directories.
+5. Confirm no host can automatically restart `autopilot:legacy`.
+
+Record the stop time, hosts, supervisor names, and last observed child PIDs.
+Process exit is not proof that work was published.
+
+## 3. Inventory every legacy host independently
+
+On each host, collect without cleanup:
+
+```bash
+git worktree list --porcelain
+git branch -vv
+git status --short
+gh pr list --repo Jinn-Network/mono --state open \
+  --json number,headRefName,headRefOid,isDraft,body
+```
+
+For every legacy worktree/session, record:
+
+- clean or dirty worktrees, including untracked files;
+- local branches and detached heads;
+- ahead commits not reachable from the remote branch;
+- remote branches without PRs;
+- implementation, review, and merge-prep sessions;
+- draft and ready PRs;
+- the selected identity when known.
+
+Publish a clean committed head to its existing branch and draft PR only when
+its mapping and authority are unambiguous. Preserve dirty worktrees, ahead
+commits, ambiguous mappings, and authority-sensitive work under an explicit
+Human hold. Never infer abandonment from another host’s missing local
+artifact.
+
+This inventory is a one-time migration aid. Local inventories do not become
+shared lifecycle state.
+
+## 4. Normalize GitHub without rewriting history
+
+Use this table:
+
+| Existing state | Cutover treatment |
+|---|---|
+| Todo issue, no PR | Leave eligible |
+| In Progress with one draft PR | Preserve branch/PR; grandfather for GitHub-head staleness |
+| In Progress without PR | Human reconciliation; do not infer abandonment |
+| Ready In Review PR | Eligible for a new exact-head review claim |
+| Draft review-fix PR | Preserve/finish the legacy reviewer or park Human before v2 recovery |
+| Human-held draft | Preserve and exclude |
+| Current-head native approval | Preserve the native gate |
+| Conflicting approved PR | Eligible for v2 merge-prep after cutover |
+| Merged PR | Reconcile Done; local cleanup remains disabled |
+
+Do not rename existing branches, synthesize historical review refs, rewrite
+commits, or close/reopen PRs merely to look v2-native. New implementations use
+`autopilot/<issue-number>`; an existing unambiguous PR keeps its branch.
+
+## 5. Shadow in observe
+
+Run at least two observers, preferably with different runner IDs and local
+worktree bases:
+
+```bash
+JINN_AUTOPILOT_RUNNER_ID=observer-a \
+  yarn autopilot --mode observe --once --json status > observer-a.json
+
+JINN_AUTOPILOT_RUNNER_ID=observer-b \
+  JINN_AUTOPILOT_WORKTREE_BASE=/different/local/base \
+  yarn autopilot --mode observe --once --json status > observer-b.json
+```
+
+Compare GitHub-derived conclusions, not local path text. They must agree on:
+
+- eligible issues;
+- active/stale implementation and review;
+- Human holds;
+- merge-prep/merge candidates;
+- native gate blockers;
+- proposed recovery.
+
+A missing local worktree on either observer must not change those conclusions.
+Resolve every contradictory mapping diagnostic before active mode.
+
+## 6. Reconcile in recover
+
+Run one bounded recovery cycle:
+
+```bash
+yarn autopilot --mode recover --once --json status
+```
+
+Review every applied/failed/no-op reconciliation. `recover` may repair Project,
+draft/label/comment projections and re-enable ordinary claims after proven v2
+staleness; it must not create new work.
+
+The initial stale threshold is two hours without real branch-head or
+marker-bound verdict progress. Comments, CI, Project edits, logs, and process
+heartbeats are not progress.
+
+## 7. Prove live GitHub ref capabilities
+
+This is a blocking capability gate before the same-host canary and before review activation.
+Unit tests and a local bare remote are necessary but do not prove that the
+production GitHub transport honors the review protocol.
+
+Choose an owner-only local destination outside the repository and run the
+executable probe:
+
+```bash
+CAPABILITY_DIR="$HOME/.jinn-client/autopilot"
+mkdir -p "$CAPABILITY_DIR"
+chmod 700 "$CAPABILITY_DIR"
+CAPABILITY_ATTESTATION="$(mktemp "$CAPABILITY_DIR/capability-attestation.json.XXXXXX")"
+rm -f -- "$CAPABILITY_ATTESTATION"
+unset JINN_AUTOPILOT_CAPABILITY_ATTESTATION
+if yarn autopilot:capability-probe --output "$CAPABILITY_ATTESTATION"; then
+  chmod 600 "$CAPABILITY_ATTESTATION"
+  export JINN_AUTOPILOT_CAPABILITY_ATTESTATION="$CAPABILITY_ATTESTATION"
+else
+  unset JINN_AUTOPILOT_CAPABILITY_ATTESTATION
+  rm -f -- "$CAPABILITY_ATTESTATION"
+  false
+fi
+```
+
+The probe uses only unique disposable canary refs and the configured v2
+publication transport. Each run uses a fresh owner-only destination, refuses
+to overwrite an existing path, unsets the prior environment binding before
+probing, and exports the new artifact only after success. It verifies and
+records:
+
+1. **absent-ref creation** — create a disposable review ref only with the
+   protocol's zero/absent expectation; a competing create must be rejected.
+2. **expected-parent advance** — advance that ref from its exact observed OID;
+   repeat with the stale expected parent and prove rejection leaves the ref
+   unchanged.
+3. **atomic two-ref success** — from known exact parents, atomically advance a
+   disposable branch and review ref in one publication.
+4. **atomic two-ref rejection** — race or deliberately stale one expected
+   parent and prove the publication is rejected with **both refs unchanged**.
+5. **ambiguous read-back** — interrupt or obscure one response and prove the
+   adapter classifies the result only by reading both exact refs.
+
+It uses no production PR branch and no existing review ref. It writes the
+owner-only attestation only after exact cleanup succeeds. If any outcome or
+cleanup is ambiguous it writes no attestation and retains remaining disposable
+refs for inspection instead of guessing.
+
+Production active preflight reads and validates the configured attestation,
+including repository, remote, authenticated implementer identity, every proof,
+and its 30-day validity window. Active mode fails closed when the artifact is
+missing, malformed, expired, broadly readable, or for another identity/remote.
+Re-run the live probe after expiry. Do not enable review or run an active canary
+unless every proof passes against GitHub. A failure is a release blocker; it is
+not permission to fall back to a non-atomic fix publication or to change
+upstream Hermes.
+
+## 8. Same-host canary
+
+Create or select one disposable, fully triaged canary issue. Start two active
+processes on the same host with independent runner IDs, worktree bases, and
+capacity one:
+
+```bash
+JINN_AUTOPILOT_RUNNER_ID=canary-a \
+JINN_AUTOPILOT_WORKTREE_BASE=/safe/exact/path/canary-a \
+JINN_AUTOPILOT_IMPLEMENTATION_CAP=1 \
+JINN_AUTOPILOT_REVIEW_CAP=1 \
+JINN_AUTOPILOT_MERGE_PREP_CAP=1 \
+yarn autopilot --mode active --once --json status
+
+JINN_AUTOPILOT_RUNNER_ID=canary-b \
+JINN_AUTOPILOT_WORKTREE_BASE=/safe/exact/path/canary-b \
+JINN_AUTOPILOT_IMPLEMENTATION_CAP=1 \
+JINN_AUTOPILOT_REVIEW_CAP=1 \
+JINN_AUTOPILOT_MERGE_PREP_CAP=1 \
+yarn autopilot --mode active --once --json status
+```
+
+Launch the two commands concurrently. Verify:
+
+- both discovered the same issue;
+- exactly one implementation claim became branch head;
+- only the winner started substantive work;
+- exactly one early draft PR exists;
+- detached attempt paths do not collide;
+- the loser reports the race without shared cleanup.
+
+Repeat the race for review and merge-prep.
+
+## 9. Cross-host canary
+
+Repeat with one process per host. Hide or omit each host’s local artifacts from
+the other and verify the GitHub-derived decision remains identical. Exercise a
+hard crash after a published checkpoint and confirm another process resumes
+from GitHub without deleting the first host’s recoverable local work.
+
+At least one disposable canary should remain unchanged for the full two-hour
+threshold before takeover is tested.
+
+## 10. Progressive activation
+
+Enable in this order:
+
+1. one production implementation slot;
+2. a second independent implementation process;
+3. review with distinct identities;
+4. merge-prep;
+5. higher per-process caps after backlog/rate-limit health is demonstrated;
+6. cleanup last.
+
+During initial rollout, cleanup remains disabled:
+
+```bash
+unset JINN_AUTOPILOT_CLEANUP_ENABLED
+```
+
+Enable it only after the crash campaign proves that clean, GitHub-reachable
+attempts are removed and dirty, ahead, missing, unknown, or ambiguous attempts
+are retained. Cleanup is host-local and exact-path only.
+
+## 11. Rollback
+
+Before the first v2 claim, stop v2 and re-enable legacy if necessary.
+
+After any v2 claim exists:
+
+1. stop new v2 active processes everywhere;
+2. leave existing branches, refs, PRs, Project state, worktrees, and manifests
+   intact;
+3. run only `observe` or `recover`;
+4. repair the defect;
+5. roll forward with a v2-compatible build.
+
+Do not restart legacy after v2 has published a claim. Stopping a process must
+not destroy GitHub-visible progress, and rollback is never a cleanup event.

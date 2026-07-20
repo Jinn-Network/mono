@@ -10,6 +10,7 @@ import type {
   MergeExecutorDeps,
   ExactMergeOutcome,
 } from './merge-executor.js';
+import { readExactChangedFiles } from './github-changed-files.js';
 import { withSelectedCredential } from './production-auth.js';
 import type { GitHubLifecycleSnapshot } from './snapshot.js';
 import { gitOid, gitRefName } from './types.js';
@@ -50,19 +51,14 @@ export function makeProductionMergeActionPort(
     const diagnostic = snapshot.diagnostics.find((entry) =>
       entry.pullRequests.some((candidate) => candidate.number === prNumber));
     if (lifecycle?.kind !== 'pull-request') return null;
-    const base = JSON.parse(await runner('gh', [
-      'api', `repos/${REPO}/git/ref/heads/${encodeURIComponent(pr.baseRefName)}`,
-    ])) as { object?: { sha?: string } };
-    const baseOid = gitOid(base.object?.sha ?? '');
-    const filesRaw = JSON.parse(await runner('gh', [
-      'api', `repos/${REPO}/pulls/${pr.number}/files?per_page=100`,
-      '--paginate', '--slurp',
-    ])) as unknown;
-    if (!Array.isArray(filesRaw)) throw new Error('Merge changed-file read was incomplete');
-    const files = (filesRaw as Array<Array<{ filename?: unknown }>>).flat().map((file) => {
-      if (typeof file.filename !== 'string') throw new Error('Malformed merge changed file');
-      return file.filename;
+    const changedFiles = await readExactChangedFiles({
+      run: runner,
+      prNumber: pr.number,
+      expectedHead: pr.headOid,
+      expectedBaseRefName: pr.baseRefName,
+      context: 'Merge',
     });
+    const { baseOid, files } = changedFiles;
     const codeownersRaw = JSON.parse(await runner('gh', [
       'api', `repos/${REPO}/contents/.github/CODEOWNERS?ref=${baseOid}`,
     ])) as { content?: unknown };
@@ -110,10 +106,10 @@ export function makeProductionMergeActionPort(
       mergeable: pr.mergeability,
       mergeStateStatus: pr.mergeStateStatus,
       compareStatus,
-      changedFilesComplete: true,
+      changedFilesComplete: changedFiles.complete,
       codeownersComplete: true,
       codeownerSensitive: touchesCodeOwnedPath(
-        files,
+        [...files],
         parseOwnedPrefixes(decodeBase64(codeownersRaw.content)),
       ),
     };

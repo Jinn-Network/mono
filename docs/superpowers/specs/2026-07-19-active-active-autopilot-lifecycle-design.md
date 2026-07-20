@@ -5,8 +5,8 @@
 - **Date:** 2026-07-19
 - **Work shape:** `design`
 - **Conversation status:** approved section by section
-- **Document status:** written specification awaiting final user review
-- **Implementation status:** not started
+- **Document status:** approved
+- **Implementation status:** implemented on the feature branch; live activation has not occurred
 
 This document redesigns the Jinn Autopilot lifecycle so two or more independent
 Autopilot processes can operate concurrently on the same host or different
@@ -1681,5 +1681,6 @@ Adopt the hybrid Git-native architecture:
   both remain intact.
 - Hermes remains the configured global runtime without upstream changes.
 
-No implementation or deployment begins until this written specification has
-been reviewed and approved.
+This implementation followed approval of the written specification. Deployment,
+live GitHub capability proofs, migration, and activation remain explicit
+operator actions under the preserve-first cutover runbook.
