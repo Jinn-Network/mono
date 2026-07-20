@@ -3,8 +3,9 @@
  *
  * Extracted from `client/packages/harness-layer/src/capture.ts` in C2 (#1833):
  * the parse half of capture.ts has no scrub / `client/src` dependency (only
- * zod + the two envelope enums), so it moves into `@jinn-network/core`. The
- * scrub half (`capture()`, redaction pipeline) stays in harness-layer (C5).
+ * zod + the two envelope enums), so it moved into `@jinn-network/core`.
+ * C5 subsequently moved the scrub implementation alongside it while leaving
+ * capture orchestration in the layer.
  */
 import { z } from 'zod';
 import { OutcomeStatusSchema, VerifiabilityTierSchema } from './envelope.js';

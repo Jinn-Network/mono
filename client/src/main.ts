@@ -100,8 +100,10 @@ import { CredentialScrubProcessor } from './trajectory/processors/credential-scr
 import { TranscriptContentScrubProcessor } from './trajectory/processors/transcript-content-scrub.js';
 import { IdentityScrubProcessor } from './trajectory/processors/identity-scrub.js';
 import { PathScrubProcessor } from './trajectory/processors/path-scrub.js';
-import { buildScrubPipeline } from './trajectory/scrub/build.js';
-import { maybeBuildPiiDetector } from './trajectory/scrub/pii-build.js';
+import {
+  buildScrubPipeline,
+  maybeBuildPiiDetector,
+} from '@jinn-network/core/scrub';
 import { SqliteExporterProcessor } from './trajectory/processors/sqlite-exporter.js';
 import {
   startTranscriptWatcher,

@@ -29,7 +29,7 @@
 import type { SkillArtifactV1 } from '../../../../src/types/skill-artifact.js';
 import { capture } from '../capture.js';
 import type { CapturedTask } from '../capture.js';
-import { buildSeedScrubPipeline } from '../../../../src/trajectory/scrub/build.js';
+import { buildSeedScrubPipeline } from '@jinn-network/core/scrub';
 import {
   publish,
   PublishLedgerError,

@@ -1006,7 +1006,7 @@ __metadata:
     "@grpc/grpc-js": "npm:^1.14.3"
     "@hono/node-server": "npm:^2.0.5"
     "@huggingface/transformers": "npm:^4.2.0"
-    "@jinn-network/core": "portal:../packages/core"
+    "@jinn-network/core": "npm:0.1.0"
     "@jinn-network/plugin": "portal:../packages/plugin"
     "@jinn-network/sdk": "portal:../packages/sdk"
     "@modelcontextprotocol/sdk": "npm:^1.27.1"
@@ -1070,28 +1070,17 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@jinn-network/core@portal:../../../packages/core::locator=%40jinn-network%2Fharness-layer%40workspace%3Apackages%2Fharness-layer":
-  version: 0.0.0-use.local
-  resolution: "@jinn-network/core@portal:../../../packages/core::locator=%40jinn-network%2Fharness-layer%40workspace%3Apackages%2Fharness-layer"
-  dependencies:
-    "@noble/hashes": "npm:^2.2.0"
-    better-sqlite3: "npm:^12.10.0"
-    zod: "npm:^4.4.3"
-  peerDependencies:
-    "@jinn-network/plugin": "*"
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
-  languageName: node
-  linkType: soft
-
 "@jinn-network/core@portal:../packages/core::locator=%40jinn-network%2Fclient%40workspace%3A.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/core@portal:../packages/core::locator=%40jinn-network%2Fclient%40workspace%3A."
   dependencies:
+    "@huggingface/transformers": "npm:^4.2.0"
     "@noble/hashes": "npm:^2.2.0"
+    "@secretlint/core": "npm:^13.0.2"
+    "@secretlint/secretlint-rule-preset-recommend": "npm:^13.0.2"
     better-sqlite3: "npm:^12.10.0"
+    canonicalize: "npm:^3.0.0"
+    openredaction: "npm:^1.1.2"
     zod: "npm:^4.4.3"
   peerDependencies:
     "@jinn-network/plugin": "*"
