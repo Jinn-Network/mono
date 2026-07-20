@@ -25,6 +25,7 @@ import {
   readAttemptManifest,
   sweepDeadAttempts,
   trackAttemptChild,
+  updateAttemptManifest,
   type AttemptManifest,
   type CreateAttemptOptions,
 } from '../../src/lifecycle/attempt-workspace.js';
@@ -196,6 +197,24 @@ describe('attempt workspace and manifest', () => {
       .toContain(`issue-42-${UUID_A}/worktree`);
   });
 
+  it('rejects review ref metadata without a generation before any side effect', async () => {
+    const fixture = repositoryFixture();
+    let commandCalls = 0;
+    const observingRunner: CommandRunner = async (cmd, args, runnerOptions) => {
+      commandCalls++;
+      return defaultRunner(cmd, args, runnerOptions);
+    };
+
+    await expect(createAttemptWorkspace(options(fixture, {
+      phase: 'review',
+      subject: 'pr-7',
+      prNumber: 7,
+      reviewRefOid: fixture.oid,
+    }), observingRunner)).rejects.toThrow(/generation.*ref OID|ref OID.*generation/i);
+    expect(commandCalls).toBe(0);
+    expect(existsSync(fixture.base)).toBe(false);
+  });
+
   it('builds a collision-resistant filesystem-safe default runner id', () => {
     const id = defaultRunnerId({
       configured: undefined,
@@ -257,6 +276,104 @@ describe('attempt workspace and manifest', () => {
     expect(readdirSync(manifest.paths.attemptDir).filter((name) => name.includes('.tmp-')))
       .toEqual([]);
     expect(JSON.stringify(updated)).not.toMatch(/must-not-be-accepted|token/i);
+  });
+
+  it('locks every static manifest authority, identity, and path field across updates', async () => {
+    const fixture = repositoryFixture();
+    const manifest = await createAttemptWorkspace(options(fixture, {
+      phase: 'review',
+      subject: 'pr-7',
+      prNumber: 7,
+      reviewGeneration: UUID_C,
+      reviewRefOid: fixture.oid,
+    }), defaultRunner);
+    const original = readFileSync(manifest.paths.manifest, 'utf8');
+    const otherOid = 'a'.repeat(40);
+    const mutations: Array<readonly [
+      string,
+      (current: AttemptManifest) => AttemptManifest,
+    ]> = [
+      ['version', (current) => ({ ...current, version: 3 as 2 })],
+      ['attempt ID', (current) => ({ ...current, attemptId: UUID_B })],
+      ['runner ID', (current) => ({ ...current, runnerId: 'other-runner' })],
+      ['host', (current) => ({ ...current, host: 'other-host' })],
+      ['phase', (current) => {
+        const {
+          reviewGeneration: _reviewGeneration,
+          reviewRefOid: _reviewRefOid,
+          ...withoutReview
+        } = current;
+        return { ...withoutReview, phase: 'merge-prep' };
+      }],
+      ['subject and PR identity', (current) => ({
+        ...current,
+        subject: 'pr-8',
+        prNumber: 8,
+      })],
+      ['issue identity', (current) => ({ ...current, issueNumber: 43 })],
+      ['selected login', (current) => ({ ...current, selectedLogin: 'other-bot' })],
+      ['branch', (current) => ({ ...current, branch: 'feature/other' })],
+      ['in-place branch mutation', (current) => {
+        (current as { branch: string }).branch = 'feature/in-place';
+        return current;
+      }],
+      ['target base', (current) => ({ ...current, targetBase: 'next' })],
+      ['expected head', (current) => ({ ...current, expectedHead: otherOid })],
+      ['claim OID', (current) => ({ ...current, claimOid: otherOid })],
+      ['review authority', (current) => ({
+        ...current,
+        reviewGeneration: UUID_B,
+        reviewRefOid: otherOid,
+      })],
+      ['repository root', (current) => ({
+        ...current,
+        repository: { ...current.repository, root: join(fixture.root, 'other-root') },
+      })],
+      ['Git common directory', (current) => ({
+        ...current,
+        repository: {
+          ...current.repository,
+          gitCommonDir: join(fixture.root, 'other-common-dir'),
+        },
+      })],
+      ['remote identity', (current) => ({
+        ...current,
+        repository: {
+          ...current.repository,
+          remoteName: 'upstream',
+          remoteUrlHash: 'b'.repeat(64),
+        },
+      })],
+      ['exact paths', (current) => ({
+        ...current,
+        paths: {
+          ...current.paths,
+          log: join(current.paths.attemptDir, 'other.log'),
+        },
+      })],
+      ['creation timestamp', (current) => ({
+        ...current,
+        timestamps: {
+          ...current.timestamps,
+          createdAt: '2026-07-19T23:59:00.000Z',
+        },
+      })],
+    ];
+
+    for (const [name, mutate] of mutations) {
+      let error: unknown;
+      try {
+        updateAttemptManifest(manifest.paths.manifest, mutate);
+      } catch (caught) {
+        error = caught;
+      }
+      expect.soft(error, `${name} must be rejected`).toBeInstanceOf(Error);
+      expect.soft(
+        readFileSync(manifest.paths.manifest, 'utf8'),
+        `${name} must be rejected before writing`,
+      ).toBe(original);
+      writeFileSync(manifest.paths.manifest, original);
+    }
   });
 
   it('counts only this runner’s live manifests for local capacity', async () => {
@@ -394,6 +511,31 @@ describe('safe attempt cleanup', () => {
     expect(calls.every(({ cmd }) => cmd === 'git')).toBe(true);
     expect(calls.some(({ args }) =>
       args.includes('push') || args.includes('update-ref'))).toBe(false);
+  });
+
+  it('contains a concurrent missing-worktree metadata removal race', async () => {
+    const fixture = repositoryFixture();
+    const manifest = terminalAttempt(
+      await createAttemptWorkspace(options(fixture), defaultRunner),
+    );
+    git(fixture.repo, ['worktree', 'remove', manifest.paths.worktree]);
+    let raced = false;
+    const racingRunner: CommandRunner = async (cmd, args, runnerOptions) => {
+      const output = await defaultRunner(cmd, args, runnerOptions);
+      if (!raced && cmd === 'git' && args.includes('merge-base')) {
+        raced = true;
+        rmSync(manifest.paths.attemptDir, { recursive: true });
+      }
+      return output;
+    };
+
+    await expect(cleanupAttempt(manifest.paths.manifest, racingRunner, {
+      v2Base: join(fixture.base, 'v2'),
+      isPidAlive: () => false,
+    })).resolves.toEqual({
+      status: 'already-removed',
+      attemptId: manifest.attemptId,
+    });
   });
 
   it('retains dirty, ahead, and live attempts with structured reasons', async () => {
@@ -590,5 +732,43 @@ describe('safe attempt cleanup', () => {
     ]));
     expect(() => readFileSync(dead.paths.manifest)).toThrow();
     expect(readFileSync(live.paths.manifest, 'utf8')).toContain(live.attemptId);
+  });
+
+  it('isolates cleanup failures so one attempt cannot abort the remaining sweep', async () => {
+    const fixture = repositoryFixture();
+    const failing = await createAttemptWorkspace(options(fixture, {
+      pid: 100,
+      host: 'same-host',
+    }), defaultRunner);
+    const removable = terminalAttempt(
+      await createAttemptWorkspace(options(fixture, {
+        runnerId: 'same-host-200-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        attemptId: UUID_B,
+        host: 'same-host',
+      }), defaultRunner),
+    );
+
+    const results = await sweepDeadAttempts(defaultRunner, {
+      v2Base: join(fixture.base, 'v2'),
+      host: 'same-host',
+      isPidAlive: (pid) => {
+        if (pid === 100) throw new Error('injected process inspection failure');
+        return false;
+      },
+    });
+
+    expect(results).toEqual(expect.arrayContaining([
+      {
+        status: 'retained',
+        attemptId: failing.attemptId,
+        reason: {
+          code: 'ambiguous',
+          detail: 'Attempt cleanup failed unexpectedly and was isolated.',
+        },
+      },
+      { status: 'removed', attemptId: removable.attemptId },
+    ]));
+    expect(readFileSync(failing.paths.manifest, 'utf8')).toContain(failing.attemptId);
+    expect(() => readFileSync(removable.paths.manifest)).toThrow();
   });
 });
