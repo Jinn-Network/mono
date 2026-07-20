@@ -1,0 +1,29 @@
+{
+  "manifestCid": "bafkreisolutionfixturemergedxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "envelope": {
+    "schemaVersion": "jinn.execution.v1",
+    "solverType": "jinn-repo.v1",
+    "role": "solution",
+    "generatedAt": 1753027300,
+    "task": {
+      "cid": "bafkreitaskfixturemergedxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "onchainCreationTx": "0x2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "payload": {
+      "schemaVersion": "jinn-repo-solution.v1",
+      "patch": "--- a/RETRO.md\n+++ b/RETRO.md\n@@ -1 +1 @@\n-old\n+new\n"
+    }
+  },
+  "task": {
+    "schemaVersion": "jinn-repo.v1",
+    "instance_id": "jinn-mono-fixture-merged",
+    "repo": "Jinn-Network/mono",
+    "base_commit": "0000000000000000000000000000000000000000",
+    "language": "typescript",
+    "problem_statement": "Fixture: retrospective task mined from a merged PR",
+    "source": "merged-pr",
+    "merged_pr": 1700,
+    "test_files": ["test/example.test.ts"],
+    "test_cmd": "yarn test example"
+  }
+}

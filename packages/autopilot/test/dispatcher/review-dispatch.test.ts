@@ -21,6 +21,7 @@ const CFG: DispatcherConfig = {
   runtime: 'claude', concurrencyCap: 3, openPrBackpressure: 30, wallClockMs: 1,
   authorAllowlist: [], reviewCap: 3, engineReviewLabel: 'engine:review', reviewBotLogin: 'jinn-bot',
   implGhToken: '', reviewGhToken: '', mergePrepEnabled: false, mergePrepCap: 1, hermesModel: 'gpt-5.6-sol', hermesProvider: 'openai-codex', hermesPythonPath: '/opt/hermes/python',
+  marketplaceBridgeEnabled: false, marketplaceIndexerUrl: '', marketplaceIpfsGatewayUrl: 'https://gateway.autonolas.tech',
 };
 const EXPECTED_WT = join(WORKTREES_BASE, 'pr-42');
 const TEST_LEASE_STORE: ReviewLeaseStore = {

@@ -172,6 +172,27 @@ export interface DispatcherConfig {
   /** Python interpreter from the Hermes installation. Source:
    * `JINN_DISPATCHER_HERMES_PYTHON`. */
   hermesPythonPath: string;
+  /**
+   * Arm the delivery→PR bridge (issue #1892, spec
+   * 2026-07-20-autopilot-marketplace-execution.md §"Delivery → PR bridge
+   * (host-side)"): poll the marketplace indexer for delivered `jinn-repo.v1`
+   * solution envelopes and turn each into a draft PR. Default false —
+   * fail-safe, mirrors `mergePrepEnabled`. Source: `JINN_MARKETPLACE_BRIDGE`
+   * (=== '1').
+   */
+  marketplaceBridgeEnabled: boolean;
+  /**
+   * Indexer base URL the bridge's `DeliveryReader` queries for solution
+   * envelopes (GraphQL). Empty (the default) disables the bridge regardless
+   * of `marketplaceBridgeEnabled` — no reader is constructed without it.
+   * Source: `JINN_MARKETPLACE_INDEXER_URL`.
+   */
+  marketplaceIndexerUrl: string;
+  /**
+   * IPFS gateway base URL the bridge reads envelope/task documents from and
+   * links in PR evidence sections. Source: `JINN_MARKETPLACE_IPFS_GATEWAY_URL`.
+   */
+  marketplaceIpfsGatewayUrl: string;
 }
 
 export const DEFAULT_CONFIG: DispatcherConfig = {
@@ -198,6 +219,9 @@ export const DEFAULT_CONFIG: DispatcherConfig = {
   hermesModel: 'gpt-5.6-sol',
   hermesProvider: 'openai-codex',
   hermesPythonPath: DEFAULT_HERMES_PYTHON,
+  marketplaceBridgeEnabled: false,
+  marketplaceIndexerUrl: '',
+  marketplaceIpfsGatewayUrl: 'https://gateway.autonolas.tech',
 };
 
 /** A PR as polled from the PR source, with the fields the review loop needs. */

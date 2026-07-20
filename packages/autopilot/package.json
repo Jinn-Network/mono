@@ -18,6 +18,9 @@
     "stage:run": "tsx bin/jinn-run-stage.ts",
     "triage:check": "tsx bin/jinn-triage-check.ts"
   },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
   "devDependencies": {
     "@types/node": "^22",
     "tsx": "^4.23.1",
