@@ -1,8 +1,8 @@
 # Bridge Derivation Run v0 Design
 
-**Date:** 2026-07-20  
-**Issue:** [#1830](https://github.com/Jinn-Network/mono/issues/1830)  
-**Shape:** `feat`  
+**Date:** 2026-07-20
+**Issue:** [#1830](https://github.com/Jinn-Network/mono/issues/1830)
+**Shape:** `feat`
 **Base:** `origin/next` at `03dd6f75ae73898864021021aa03c46bd90bfb4e`
 
 ## Scope
@@ -216,4 +216,3 @@ security review.
 - C6 may relocate harness-layer after this base. Keeping the new reusable parser
   API in core and the bridge changes local to its package minimizes the
   eventual mechanical move.
-
