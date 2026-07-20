@@ -91,7 +91,10 @@ try {
   const contract = JSON.parse(
     invokeLayer(['contract', '--json']).stdout.trim(),
   );
-  if (contract.contractVersion !== 1 || contract.packageVersion !== '0.1.0') {
+  if (
+    contract.contractVersion !== 1
+    || Object.keys(contract).length !== 1
+  ) {
     throw new Error(`unexpected contract payload: ${JSON.stringify(contract)}`);
   }
 

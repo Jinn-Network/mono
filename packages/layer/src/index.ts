@@ -351,7 +351,6 @@ export {
 } from './adapters/index.js';
 
 export { SqliteCorpusStore } from './corpus-store.js';
-export { LAYER_PACKAGE_VERSION } from './version.js';
 
 export {
   extractSnapshotTranscript,

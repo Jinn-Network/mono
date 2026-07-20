@@ -141,7 +141,6 @@ import {
   type DistillRunRecord,
 } from './distill-runs.js';
 import type { MetaCluster } from './cluster.js';
-import { LAYER_PACKAGE_VERSION } from './version.js';
 
 const USAGE = `Usage: jinn-layer <command> [args]
 
@@ -1150,7 +1149,6 @@ export async function runJinnLayerCli(
     }
     writer.write(`${JSON.stringify({
       contractVersion: PROCESS_CONTRACT_VERSION,
-      packageVersion: LAYER_PACKAGE_VERSION,
     })}\n`);
     return 0;
   }

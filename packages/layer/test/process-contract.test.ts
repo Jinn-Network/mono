@@ -117,10 +117,7 @@ describe('jinn-layer process contract v1', () => {
   it('publishes the exact contract version without initializing product ports', async () => {
     const out = capture();
     expect(await runJinnLayerCli(['contract', '--json'], { writer: out.writer })).toBe(0);
-    expect(JSON.parse(out.output())).toEqual({
-      contractVersion: 1,
-      packageVersion: '0.1.0',
-    });
+    expect(JSON.parse(out.output())).toEqual({ contractVersion: 1 });
   });
 
   it.each([
