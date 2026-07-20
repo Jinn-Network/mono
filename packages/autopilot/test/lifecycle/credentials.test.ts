@@ -181,6 +181,10 @@ describe('sanitized child authentication', () => {
       GIT_CONFIG_COUNT: '1',
       GIT_CONFIG_KEY_0: 'credential.helper',
       GIT_CONFIG_VALUE_0: 'ambient-helper',
+      SSH_AUTH_SOCK: '/ambient/agent.sock',
+      SSH_AGENT_PID: '999',
+      GIT_SSH: '/ambient/git-ssh',
+      GIT_SSH_COMMAND: 'ambient-ssh-command',
     }, selected.credential, {
       ghConfigDir: '/attempt/gh-config',
       askpassPath: '/attempt/askpass',
@@ -208,7 +212,11 @@ describe('sanitized child authentication', () => {
       GIT_CONFIG_VALUE_1: 'never',
       GIT_CONFIG_KEY_2: 'core.askPass',
       GIT_CONFIG_VALUE_2: '/attempt/askpass',
+      GIT_SSH_COMMAND: 'false',
     });
+    expect(env.SSH_AUTH_SOCK).toBeUndefined();
+    expect(env.SSH_AGENT_PID).toBeUndefined();
+    expect(env.GIT_SSH).toBeUndefined();
     expect(env.GITHUB_TOKEN).toBeUndefined();
     expect(env.JINN_IMPL_GH_TOKEN).toBeUndefined();
     expect(env.JINN_REVIEW_GH_TOKEN).toBeUndefined();
