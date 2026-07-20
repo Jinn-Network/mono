@@ -1,8 +1,8 @@
 # Marketplace-Backed Autopilot Execution
 
-- **Version:** 0.2 — no new SolverType: live tasks are a variant of the existing `jinn-repo`
-  type, whose solve-side shape (and solver harness) they share exactly; the only true delta is
-  the grading oracle.
+- **Version:** 0.3 — v0.2: no new SolverType (live variant of `jinn-repo`; the only true delta
+  is the grading oracle). v0.3: evaluators never push fixes; review repair decomposes into
+  verdict / revision round / mechanical-only host fixes.
 - **Date:** 2026-07-20
 - **Author:** Jinn contributor (Ritsu) with Claude
 - **Status:** Proposed (design sketch — no implementation; issues to be filed per stage after
@@ -120,6 +120,26 @@ posts approve / request-changes derived from the verdict, preserving the existin
 implementer/reviewer credential split. During transition, local review-pr sessions may run as a
 second layer; they retire (or demote to spot-checks) once verdict quality is proven.
 
+**Review repair decomposes — evaluators never push fixes.** Today's review-pr sessions review
+*and repair* (push fixes to the PR branch, then approve). A marketplace evaluator can do
+neither: it holds no GitHub credentials, and — deeper — the verdict attests an immutable
+artifact the evaluator did not author; an evaluator that edits then passes its own edits is
+self-evaluation by the back door. (Today's fix-then-approve holds the implementer ≠ reviewer
+line by convention; the marketplace holds it by contract.) The behavior splits three ways:
+
+- **Judgment** — the verdict, with structured feedback; it may carry a suggested patch *as
+  data* (propose, never apply — GitHub's own suggested-changes model).
+- **Semantic repair** — a revision round: a failed-but-fixable verdict re-posts the task
+  referencing the prior attempt + feedback; a solver delivers a revision, which is re-evaluated.
+  This is the real cost vs. inline fixing: one marketplace round-trip per repair.
+- **Mechanical repair** — host-side, under merge-prep's existing charter (mechanical only,
+  semantic escalates): formatting/lint-class fixes may be applied without a re-verdict, never
+  semantic ones.
+
+Side effect worth naming: revision rounds produce (failed attempt, feedback, passing revision)
+chains as corpus records — the group-relative shape the distillation pipeline already consumes.
+Inline reviewer fixes are invisible to the corpus; marketplace repair is training signal.
+
 ## Fleet permissioning
 
 - **Day one: closed SolverNet.** `openRoles` restricted; operators are the project's own fleet
@@ -152,7 +172,12 @@ second layer; they retire (or demote to spot-checks) once verdict quality is pro
 - **Which issues route to the marketplace.** All ready issues, or an opt-in subset (e.g. by
   Effort tier) during Stage 1.
 - **Verdict → review fidelity.** Whether a verdict envelope carries enough structure to render a
-  genuine line-level review, or Stage 2 needs an enriched verdict payload schema.
+  genuine line-level review, or Stage 2 needs an enriched verdict payload schema. Now
+  double-duty: the same feedback must be actionable enough to drive a revision round (and
+  optionally carry a suggested patch as data).
+- **Revision-round budgeting.** Whether a failed-but-fixable verdict re-posts against fresh
+  escrow or the original task's budget covers N revision rounds; and when to give up and route
+  to a human.
 
 ## Risks
 
