@@ -9,9 +9,9 @@
  * Expects cwd to be client/ (see package.json pack:smoke).
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -19,6 +19,13 @@ const clientRoot = join(__dirname, '..');
 const smokeDir = mkdtempSync(join(tmpdir(), 'jinn-pack-smoke-'));
 const smokeEnv = { ...process.env, HOME: smokeDir, NO_COLOR: '1' };
 const installedPackageRoot = join(smokeDir, 'node_modules', '@jinn-network', 'client');
+const outputArgIndex = process.argv.indexOf('--output');
+const outputArg = outputArgIndex === -1 ? undefined : process.argv[outputArgIndex + 1];
+if (outputArgIndex !== -1 && (!outputArg || outputArg.startsWith('--'))) {
+  console.error('smoke-test-pack: --output requires a path');
+  process.exit(1);
+}
+const outputPath = outputArg ? resolve(clientRoot, outputArg) : undefined;
 const pack = spawnSync('npm', ['pack', '--json', '--pack-destination', smokeDir], {
   cwd: clientRoot,
   encoding: 'utf8',
@@ -185,6 +192,11 @@ try {
     assertVersionPayload(parseJsonOrExit(npxLegacy.stdout, 'npx -p'), 'npx -p');
 
     console.log('smoke-test-pack: ok', payload.client.version);
+  }
+
+  if (outputPath) {
+    copyFileSync(tarball, outputPath);
+    console.log(`smoke-test-pack: artifact written to ${outputPath}`);
   }
 } finally {
   rmSync(smokeDir, { recursive: true, force: true });

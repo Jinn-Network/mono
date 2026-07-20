@@ -61,8 +61,9 @@ jobs:
       - run: yarn install --immutable
       - run: yarn build
 
-      # Pack the artifact exactly as it would be published
-      - run: yarn pack -o jinn-client.tgz
+      # Pack with npm's publish semantics so bundled private runtime packages
+      # are present, then retain the smoke-validated archive.
+      - run: node scripts/smoke-test-pack.mjs --client-only --output jinn-client.tgz
 
       # Install the packed tarball in a clean temp dir and run smoke tests
       # against the packaged artifact, NOT the source tree
