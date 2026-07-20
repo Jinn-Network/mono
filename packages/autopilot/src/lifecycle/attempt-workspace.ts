@@ -14,6 +14,7 @@ import {
 } from 'node:fs';
 import { hostname as systemHostname } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import type { CommandRunner } from '../dispatcher/issue-source.js';
 import { gitOid, gitRefName, isoTimestamp } from './types.js';
 import {
@@ -415,18 +416,31 @@ export function updateAttemptManifest(
   update: (manifest: AttemptManifest) => AttemptManifest,
 ): AttemptManifest {
   const previous = readAttemptManifest(path);
+  const progressiveManifestFields = new Set([
+    'processState',
+    'pid',
+    'terminalHead',
+    'timestamps',
+  ]);
+  const progressiveTimestampFields = new Set([
+    'updatedAt',
+    'childStartedAt',
+    'childExitedAt',
+  ]);
+  const staticFields = (manifest: AttemptManifest): Record<string, unknown> => ({
+    ...Object.fromEntries(
+      Object.entries(manifest)
+        .filter(([key]) => !progressiveManifestFields.has(key)),
+    ),
+    timestamps: Object.fromEntries(
+      Object.entries(manifest.timestamps)
+        .filter(([key]) => !progressiveTimestampFields.has(key)),
+    ),
+  });
+  const previousStaticFields = staticFields(previous);
   const next = decodeAttemptManifest(update(previous));
-  if (
-    next.version !== previous.version
-    || next.attemptId !== previous.attemptId
-    || next.runnerId !== previous.runnerId
-    || next.phase !== previous.phase
-    || next.subject !== previous.subject
-    || !sameRepositoryIdentity(next.repository, previous.repository)
-    || !samePaths(next.paths, previous.paths)
-    || next.timestamps.createdAt !== previous.timestamps.createdAt
-  ) {
-    throw new Error('Atomic manifest update cannot change attempt identity');
+  if (!isDeepStrictEqual(staticFields(next), previousStaticFields)) {
+    throw new Error('Atomic manifest update cannot change static attempt fields');
   }
   writeManifestAtomic(path, next);
   return next;
@@ -608,6 +622,9 @@ export async function createAttemptWorkspace(
   options: CreateAttemptOptions,
   runner: CommandRunner,
 ): Promise<AttemptManifest> {
+  if ((options.reviewGeneration === undefined) !== (options.reviewRefOid === undefined)) {
+    throw new Error('Review generation and ref OID must appear together');
+  }
   if (!isAbsolute(options.repositoryPath) || !isAbsolute(options.worktreeBase)) {
     throw new Error('Attempt repository and worktree base must be absolute');
   }
@@ -767,6 +784,7 @@ export type CleanupReasonCode =
 
 export type AttemptCleanupResult =
   | { readonly status: 'removed'; readonly attemptId: string }
+  | { readonly status: 'already-removed'; readonly attemptId: string }
   | {
       readonly status: 'retained';
       readonly attemptId?: string;
@@ -792,6 +810,22 @@ function retained(
     ...(attemptId === undefined ? {} : { attemptId }),
     reason: { code, detail },
   };
+}
+
+function removeAttemptMetadata(manifest: AttemptManifest): AttemptCleanupResult {
+  try {
+    rmSync(manifest.paths.attemptDir, { recursive: true });
+    return { status: 'removed', attemptId: manifest.attemptId };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { status: 'already-removed', attemptId: manifest.attemptId };
+    }
+    return retained(
+      'ambiguous',
+      'Exact attempt metadata removal failed.',
+      manifest.attemptId,
+    );
+  }
 }
 
 function isBelow(base: string, target: string): boolean {
@@ -1050,8 +1084,7 @@ export async function cleanupAttempt(
       manifest.terminalHead,
     );
     if (proofFailure !== null) return proofFailure;
-    rmSync(manifest.paths.attemptDir, { recursive: true });
-    return { status: 'removed', attemptId: manifest.attemptId };
+    return removeAttemptMetadata(manifest);
   }
 
   try {
@@ -1080,11 +1113,10 @@ export async function cleanupAttempt(
       `--git-dir=${manifest.repository.gitCommonDir}`,
       'worktree', 'remove', manifest.paths.worktree,
     ]);
-    rmSync(manifest.paths.attemptDir, { recursive: true });
-    return { status: 'removed', attemptId: manifest.attemptId };
   } catch {
     return retained('ambiguous', 'Exact worktree removal failed.', manifest.attemptId);
   }
+  return removeAttemptMetadata(manifest);
 }
 
 export interface SweepDeadAttemptsOptions extends CleanupAttemptOptions {
@@ -1101,14 +1133,23 @@ export async function sweepDeadAttempts(
     for (const phaseDir of directories(runnerDir)) {
       for (const attemptDir of directories(phaseDir)) {
         const manifestPath = join(attemptDir, 'manifest.json');
+        let manifest: AttemptManifest;
         try {
-          const manifest = readAttemptManifest(manifestPath);
+          manifest = readAttemptManifest(manifestPath);
           if (manifest.host !== host) continue;
         } catch {
           results.push(retained('malformed', 'Attempt manifest could not be strictly decoded.'));
           continue;
         }
-        results.push(await cleanupAttempt(manifestPath, runner, options));
+        try {
+          results.push(await cleanupAttempt(manifestPath, runner, options));
+        } catch {
+          results.push(retained(
+            'ambiguous',
+            'Attempt cleanup failed unexpectedly and was isolated.',
+            manifest.attemptId,
+          ));
+        }
       }
     }
   }
