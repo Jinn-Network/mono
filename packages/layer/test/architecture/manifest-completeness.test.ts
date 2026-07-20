@@ -29,11 +29,11 @@ describe('layer dependency manifest', () => {
       readFileSync(resolve(layerRoot, 'package.json'), 'utf8'),
     ) as {
       dependencies?: Record<string, string>;
-      devDependencies?: Record<string, string>;
+      peerDependencies?: Record<string, string>;
     };
     const declared = new Set([
       ...Object.keys(pkg.dependencies ?? {}),
-      ...Object.keys(pkg.devDependencies ?? {}),
+      ...Object.keys(pkg.peerDependencies ?? {}),
     ]);
     const builtins = new Set(builtinModules);
     const offenders: string[] = [];

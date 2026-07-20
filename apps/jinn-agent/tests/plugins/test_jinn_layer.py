@@ -101,6 +101,27 @@ def test_plugin_local_pinned_artifact_wins_over_environment_and_path(
     )
 
 
+def test_windows_plugin_local_cmd_artifact_wins_with_the_exact_pin(
+    tmp_path, monkeypatch
+):
+    _runtime_spec(tmp_path)
+    local_bin = _executable(
+        tmp_path / "runtime" / "node_modules" / ".bin" / "jinn-layer.cmd"
+    )
+    monkeypatch.setattr(jinn_layer.sys, "platform", "win32")
+    monkeypatch.setenv("JINN_LAYER_BIN", r"C:\developer\jinn-layer.cmd")
+
+    resolution = jinn_layer.resolve_binary(plugin_dir=tmp_path)
+
+    assert resolution.argv == (str(local_bin),)
+    assert resolution.source == "plugin-local"
+    assert resolution.package == "@jinn-network/jinn-layer"
+    assert resolution.version == "0.1.0"
+    assert resolution.detail == (
+        f"plugin-local @jinn-network/jinn-layer@0.1.0 ({local_bin})"
+    )
+
+
 def test_environment_override_is_second_when_plugin_artifact_is_absent(
     tmp_path, monkeypatch
 ):

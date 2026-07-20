@@ -1090,19 +1090,6 @@ __metadata:
   languageName: node
   linkType: soft
 
-"@jinn-network/harness-layer@workspace:packages/harness-layer":
-  version: 0.0.0-use.local
-  resolution: "@jinn-network/harness-layer@workspace:packages/harness-layer"
-  dependencies:
-    "@jinn-network/core": "portal:../../../packages/core"
-    "@jinn-network/plugin": "portal:../../../packages/plugin"
-    "@modelcontextprotocol/sdk": "npm:^1.27.1"
-    viem: "npm:^2.0.0"
-    yaml: "npm:^2.8.4"
-    zod: "npm:^4.4.3"
-  languageName: unknown
-  linkType: soft
-
 "@jinn-network/jinn-layer@portal:../packages/layer::locator=%40jinn-network%2Fclient%40workspace%3A.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/jinn-layer@portal:../packages/layer::locator=%40jinn-network%2Fclient%40workspace%3A."

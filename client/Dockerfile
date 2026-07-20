@@ -54,7 +54,7 @@ COPY client/docs/ ./client/docs/
 COPY client/plugins/ ./client/plugins/
 COPY client/scripts/ ./client/scripts/
 COPY client/templates/ ./client/templates/
-COPY client/tsconfig.json client/tsconfig.jinn-layer-entry.json ./client/
+COPY client/tsconfig.json ./client/
 
 # Build TypeScript
 WORKDIR /app/client

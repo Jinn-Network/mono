@@ -142,7 +142,25 @@ def _layer_resolution() -> tuple[str, str]:
 
 def _check_layer(runner: Optional[jinn_layer.Runner] = None) -> tuple[dict, dict]:
     """One ``contract --json`` spawn answering both layer checks."""
-    resolution, remedy = _layer_resolution()
+    try:
+        resolution, remedy = _layer_resolution()
+    except jinn_layer.LayerResolutionError as exc:
+        remedy = _update_remedy()
+        detail = f"jinn-layer resolution failed: {_one_line(str(exc))}"
+        return (
+            {
+                "name": "layer-available",
+                "ok": False,
+                "detail": detail,
+                "remedy": remedy,
+            },
+            {
+                "name": "layer-contract",
+                "ok": False,
+                "detail": "not checked — layer unavailable",
+                "remedy": remedy,
+            },
+        )
     not_checked = {
         "name": "layer-contract",
         "ok": False,

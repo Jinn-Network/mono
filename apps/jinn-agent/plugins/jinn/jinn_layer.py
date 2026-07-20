@@ -80,11 +80,21 @@ def _runtime_contract(plugin_dir: Path) -> tuple[str, str, str]:
     return package, version, bin_path
 
 
+def _plugin_local_bin(plugin_dir: Path, bin_path: str) -> Path:
+    """Resolve npm's platform-specific shim for the committed bin contract."""
+    local_bin = plugin_dir / bin_path
+    if sys.platform == "win32":
+        cmd_bin = Path(f"{local_bin}.cmd")
+        if cmd_bin.exists():
+            return cmd_bin
+    return local_bin
+
+
 def resolve_binary(plugin_dir: Optional[Path] = None) -> LayerResolution:
     """Resolve the layer command and report which contract branch won."""
     directory = plugin_dir if plugin_dir is not None else Path(__file__).resolve().parent
     package, version, bin_path = _runtime_contract(directory)
-    local_bin = directory / bin_path
+    local_bin = _plugin_local_bin(directory, bin_path)
     if local_bin.exists():
         if not local_bin.is_file():
             raise LayerResolutionError(
@@ -173,7 +183,7 @@ def ensure_plugin_runtime(
     """
     directory = plugin_dir if plugin_dir is not None else Path(__file__).resolve().parent
     package, version, bin_path = _runtime_contract(directory)
-    local_bin = directory / bin_path
+    local_bin = _plugin_local_bin(directory, bin_path)
     if local_bin.exists():
         try:
             return resolve_binary(directory)

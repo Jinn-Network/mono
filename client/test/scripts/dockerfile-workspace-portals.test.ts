@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 const clientRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const repoRoot = resolve(clientRoot, '..');
 const dockerfile = readFileSync(resolve(clientRoot, 'Dockerfile'), 'utf8');
+const clientLockfile = readFileSync(resolve(clientRoot, 'yarn.lock'), 'utf8');
 const clientPackage = JSON.parse(
   readFileSync(resolve(clientRoot, 'package.json'), 'utf8'),
 ) as {
@@ -50,6 +51,47 @@ function copiedSources(dockerfilePrefix: string): string[] {
     .flatMap((line) => line.trim().split(/\s+/).slice(1, -1));
 }
 
+function buildContextCopySources(): string[] {
+  const instructions: string[] = [];
+  let continued = '';
+
+  for (const rawLine of dockerfile.split('\n')) {
+    const line = rawLine.trim();
+    if (continued === '' && (line === '' || line.startsWith('#'))) continue;
+    const hasContinuation = line.endsWith('\\');
+    continued += `${continued === '' ? '' : ' '}${
+      hasContinuation ? line.slice(0, -1).trimEnd() : line
+    }`;
+    if (!hasContinuation) {
+      instructions.push(continued);
+      continued = '';
+    }
+  }
+
+  return instructions.flatMap((instruction) => {
+    if (!/^COPY\s/iu.test(instruction)) return [];
+    let args = instruction.replace(/^COPY\s+/iu, '');
+    const options: string[] = [];
+    while (args.startsWith('--')) {
+      const option = args.match(/^--[^\s]+\s*/u);
+      if (option === null) break;
+      options.push(option[0].trim());
+      args = args.slice(option[0].length);
+    }
+    if (options.some((option) => option.startsWith('--from='))) {
+      return [];
+    }
+
+    if (args.startsWith('[')) {
+      const paths = JSON.parse(args) as string[];
+      return paths.slice(0, -1);
+    }
+
+    const paths = args.match(/"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|[^\s]+/gu) ?? [];
+    return paths.slice(0, -1).map((path) => path.replace(/^(['"])(.*)\1$/u, '$2'));
+  });
+}
+
 function sourceIsCopied(source: string, copied: string[]): boolean {
   const normalizedSource = source.replace(/\/+$/, '');
   return copied.some((candidate) => {
@@ -83,6 +125,33 @@ function buildScriptClosure(): string[] {
 }
 
 describe('client Docker build context', () => {
+  it('does not retain the extracted harness-layer workspace', () => {
+    expect(
+      clientLockfile.includes(
+        '@jinn-network/harness-layer@workspace:packages/harness-layer',
+      ),
+    ).toBe(false);
+  });
+
+  it('does not lock deleted client workspaces', () => {
+    const missing = [...clientLockfile.matchAll(/resolution: "[^"]+@workspace:([^"]+)"/gu)]
+      .map((match) => match[1]!)
+      .filter((workspace) => !existsSync(resolve(clientRoot, workspace, 'package.json')));
+
+    expect(missing).toEqual([]);
+  });
+
+  it('references only existing repository build-context sources', () => {
+    const missing = buildContextCopySources()
+      .filter((source) => !source.includes('$'))
+      .filter((source) => {
+        const repoPath = source.replace(/^\/+/u, '').replace(/\/+$/u, '');
+        return !existsSync(resolve(repoRoot, repoPath));
+      });
+
+    expect(missing).toEqual([]);
+  });
+
   it('covers every external portal package before install and build', () => {
     expect(externalPortalPackages.length).toBeGreaterThan(0);
 
