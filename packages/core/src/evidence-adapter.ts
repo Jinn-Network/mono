@@ -33,8 +33,8 @@ import type {
   EvidenceRetentionPolicy,
   PortResult,
 } from '@jinn-network/plugin';
-import { EpisodeV1Schema, type EpisodeV1 } from '@jinn-network/plugin';
-import { ok, unavailable } from '@jinn-network/plugin';
+import { EpisodeV1Schema, EpisodeV1WriteSchema, type EpisodeV1 } from '@jinn-network/plugin';
+import { degraded, ok, unavailable } from '@jinn-network/plugin';
 import { parseCapturedTask, type CapturedTask } from './captured-task.js';
 
 const DEFAULT_RETENTION: EvidenceRetentionPolicy = { policy: 'local-private', maxEpisodes: 200 };
@@ -243,7 +243,7 @@ export function createEvidenceAdapter(deps: EvidenceAdapterDeps): EvidencePort {
   return {
     async put(episode: EpisodeV1): Promise<PortResult<{ episodeId: string }>> {
       try {
-        const parsed = EpisodeV1Schema.parse(episode);
+        const parsed = EpisodeV1WriteSchema.parse(episode);
         const result = await persistEpisode(parsed);
         if (result.status === 'ok') await pruneOldEpisodes();
         return result;
@@ -266,12 +266,14 @@ export function createEvidenceAdapter(deps: EvidenceAdapterDeps): EvidencePort {
       try {
         if (!existsSync(capturesDir)) return ok([]);
         const episodes: EpisodeV1[] = [];
+        let unreadable = 0;
         for (const file of readdirSync(capturesDir)) {
           const path = join(capturesDir, file);
           if (file.endsWith(EPISODE_SUFFIX)) {
             try {
               episodes.push(EpisodeV1Schema.parse(JSON.parse(readFileSync(path, 'utf-8'))));
             } catch (err) {
+              unreadable += 1;
               console.warn(`[evidence] skipping malformed episode file ${file}: ${String(err)}`);
             }
           } else if (file.endsWith('.json')) {
@@ -281,11 +283,15 @@ export function createEvidenceAdapter(deps: EvidenceAdapterDeps): EvidencePort {
               const task = parseCapturedTask(JSON.parse(readFileSync(path, 'utf-8')));
               episodes.push(capturedTaskToEpisode(task, retention));
             } catch (err) {
+              unreadable += 1;
               console.warn(`[evidence] skipping malformed legacy capture ${file}: ${String(err)}`);
             }
           }
         }
-        return ok(query.limit ? episodes.slice(0, query.limit) : episodes);
+        const value = query.limit ? episodes.slice(0, query.limit) : episodes;
+        return unreadable > 0
+          ? degraded(`evidence list skipped ${unreadable} unreadable record(s)`, value)
+          : ok(value);
       } catch (e) {
         return unavailable(`evidence store list failed: ${String(e)}`);
       }

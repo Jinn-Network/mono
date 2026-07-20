@@ -140,6 +140,7 @@ export async function foldHistory(deps: HistoryDeps): Promise<HistoryResult> {
   const skillsAvailable = skillsResult.status !== 'unavailable';
 
   const entries: HistoryEntry[] = [...episodes]
+    .filter((ep) => ep.session.kind !== 'host-internal')
     .sort((a, b) => b.session.capturedAt.localeCompare(a.session.capturedAt))
     .map((ep) => {
       const counts = knowledgeCounts(ep.activity);

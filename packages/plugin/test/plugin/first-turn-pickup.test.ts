@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import { createJinnPlugin } from '../../src/index.js';
 import {
   InMemoryContributionPort,
@@ -412,6 +413,13 @@ describe('firstTurnPickup over ports — evidence-first pickup (rescope §3/§4.
     expect(result.contextBlock).toContain('await fetchVersionStatus()');
     expect(result.contextBlock).toContain('source: bafySourceEpisode');
     expect(result.contextBlock).toContain('corpus_fetch bafySourceEpisode');
+    expect(result.retrievalFired).toBe(true);
+    expect(result.eligibleRefs).toContain('bafySourceEpisode');
+    expect(result.deliveredRefs).toEqual(['bafySourceEpisode']);
+    expect(result.deliveryMode).toBe('delivered');
+    expect(result.deliveredContentHash).toBe(
+      `sha256:${createHash('sha256').update(result.contextBlock ?? '').digest('hex')}`,
+    );
   });
 
   it('scenario 2: the most relevant record wins; distractors are excluded', async () => {
@@ -435,6 +443,8 @@ describe('firstTurnPickup over ports — evidence-first pickup (rescope §3/§4.
 
     expect(result.packets).toEqual([]);
     expect(result.contextBlock).toBeNull();
+    expect(result.deliveryMode).toBe('withheld');
+    expect(result).not.toHaveProperty('deliveredContentHash');
   });
 
   it('scenario 4: retrieval unavailable proceeds honestly with a degraded reason, no injection', async () => {
@@ -577,6 +587,8 @@ describe('firstTurnPickup over ports — evidence-first pickup (rescope §3/§4.
     expect(result.packets).toEqual([]);
     expect(result.contextBlock).toBeNull();
     expect(result.searchedTerms).toEqual([]);
+    expect(result.deliveryMode).toBe('withheld');
+    expect(result).not.toHaveProperty('deliveredContentHash');
   });
 
   it('is a no-op when config disables pickup', async () => {

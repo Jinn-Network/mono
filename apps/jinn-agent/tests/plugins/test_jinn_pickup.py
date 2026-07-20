@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import importlib
+import hashlib
 
 import pytest
 
@@ -35,6 +36,9 @@ def ok_response(**value_overrides) -> str:
         "contextBlock": CONTEXT_BLOCK,
         "packets": [{"ref": "bafySourceEpisode"}],
         "searchedTerms": ["dashboard", "vitest", "update_available"],
+        "eligibleRefs": ["bafySourceEpisode"],
+        "deliveredRefs": ["bafySourceEpisode"],
+        "deliveryMode": "delivered",
         **value_overrides,
     }
     return json.dumps({"contractVersion": 1, "status": "ok", "value": value})
@@ -98,12 +102,20 @@ def test_pickup_renders_the_context_block_verbatim():
 
 def test_pickup_returns_none_when_nothing_is_provided():
     runner = PickupRunner(out=ok_response(contextBlock=None, packets=[]))
-    assert pickup.pickup(MSG, runner=runner) is None
+    activity: dict = {}
+    assert pickup.pickup(MSG, runner=runner, activity=activity) is None
+    assert activity["deliveredRefs"] == []
+    assert activity["deliveryMode"] == "withheld"
+    assert "deliveredContentHash" not in activity
 
 
 def test_pickup_returns_none_when_context_block_is_blank():
     runner = PickupRunner(out=ok_response(contextBlock="   "))
-    assert pickup.pickup(MSG, runner=runner) is None
+    activity: dict = {}
+    assert pickup.pickup(MSG, runner=runner, activity=activity) is None
+    assert activity["deliveredRefs"] == []
+    assert activity["deliveryMode"] == "withheld"
+    assert "deliveredContentHash" not in activity
 
 
 # ── Activity recording (rescope §3.6) ───────────────────────────────────────
@@ -116,6 +128,13 @@ def test_pickup_records_searched_terms_and_provided_refs():
 
     assert activity["searchedTerms"] == ["dashboard", "vitest", "update_available"]
     assert activity["providedRefs"] == ["bafySourceEpisode"]
+    assert activity["retrievalFired"] is True
+    assert activity["eligibleRefs"] == ["bafySourceEpisode"]
+    assert activity["deliveredRefs"] == ["bafySourceEpisode"]
+    assert activity["deliveryMode"] == "delivered"
+    assert activity["deliveredContentHash"] == (
+        "sha256:" + hashlib.sha256(CONTEXT_BLOCK.encode("utf-8")).hexdigest()
+    )
     # Internal fetch-attempt fields are untouched by pickup itself.
     assert activity["surfacedRefs"] == []
     assert activity["fetchedRefs"] == []
@@ -134,13 +153,18 @@ def test_pickup_records_searched_terms_even_when_nothing_is_provided():
     assert activity["providedRefs"] == []
 
 
-def test_pickup_does_not_touch_activity_when_the_call_fails():
+def test_pickup_surfaces_a_fired_but_degraded_retrieval_when_the_call_fails():
     runner = PickupRunner(code=1, out="boom")
     activity = {"searchedTerms": ["stale"], "providedRefs": ["stale-ref"]}
 
     pickup.pickup(MSG, runner=runner, activity=activity)
 
-    assert activity == {"searchedTerms": ["stale"], "providedRefs": ["stale-ref"]}
+    assert activity == {
+        "searchedTerms": ["stale"],
+        "providedRefs": ["stale-ref"],
+        "retrievalFired": True,
+        "deliveryMode": "degraded",
+    }
 
 
 # ── The evidence signal line (rescope §3.4) ─────────────────────────────────
@@ -257,7 +281,7 @@ def test_stale_layer_response_without_packets_is_treated_as_degraded_nothing():
     result = pickup.pickup(MSG, runner=runner, activity=activity)
 
     assert result is None
-    assert activity == {}
+    assert activity == {"retrievalFired": True, "deliveryMode": "degraded"}
 
 
 def test_disabled_config_is_a_no_op(tmp_path):

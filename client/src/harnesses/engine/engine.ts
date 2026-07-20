@@ -20,8 +20,8 @@ import {
 } from '../../solver-types/_swe-rebench-v2-synthetic-claim.js';
 import {
   buildMineableRecord,
-  type MineableTraceStore,
 } from '../../solver-types/_swe-rebench-v2-mineable-store.js';
+import type { MineableTraceStorePort } from '../../solver-types/_swe-rebench-v2-mineable-store-port.js';
 import {
   reapWorkDirs,
   DEFAULT_ORPHAN_MAX_AGE_MS,
@@ -291,7 +291,7 @@ export interface TaskEngineOptions {
    * constructs the store (local retention is unconditional). Store errors are
    * logged and never fail the task.
    */
-  mineableStore?: MineableTraceStore;
+  mineableStore?: MineableTraceStorePort;
   /**
    * The single `share` consent, stamped onto every record this engine appends
    * via `mineableStore` as `publishMinedTasksConsent` — governs whether a

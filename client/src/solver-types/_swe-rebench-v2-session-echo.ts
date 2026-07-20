@@ -12,8 +12,8 @@
 
 import {
   mineableTraceRecordFromStored,
-  type MineableTraceStore,
 } from './_swe-rebench-v2-mineable-store.js';
+import type { MineableTraceStorePort } from './_swe-rebench-v2-mineable-store-port.js';
 import type { PoolTask } from './_swe-rebench-v2-pool.js';
 import type { HarvestTickResult } from '../daemon/harvest-loop.js';
 
@@ -46,7 +46,7 @@ import { uploadToIpfs } from '../adapters/mech/ipfs.js';
 import { EVAL_SEMANTICS_VERSION } from './_swe-rebench-v2-validated-pool.js';
 
 export interface SessionEchoMintDeps extends HarvestMintDeps {
-  mineableStore: MineableTraceStore;
+  mineableStore: MineableTraceStorePort;
   /** Recording operator's Safe — stamped into provenance as `sourceSolverSafe`
    *  so `syntheticClaimBlocked` refuses that operator's own claim (§7). */
   operatorSafe?: string;

@@ -8,37 +8,25 @@ import {
   CONTRIBUTION_STORE_SCHEMA_VERSION,
   ContributionStore,
   resolveContributionStateDir,
-  type ContributionStoreRecord,
 } from '@jinn-network/core';
+import type {
+  MineableSkillEvent,
+  MineableTestRun,
+  MineableTraceRecord,
+  MineableTraceStorePort,
+  StoredMineableTraceRecord,
+} from './_swe-rebench-v2-mineable-store-port.js';
+
+export type {
+  MineableSkillEvent,
+  MineableTestRun,
+  MineableTraceRecord,
+  MineableTraceStorePort,
+  StoredMineableTraceRecord,
+} from './_swe-rebench-v2-mineable-store-port.js';
 
 export const MINEABLE_TRACE_STORE_SCHEMA_VERSION = CONTRIBUTION_STORE_SCHEMA_VERSION;
 export const resolveMineableStateDir = resolveContributionStateDir;
-
-export interface MineableTestRun {
-  cmd: string;
-  exitCode: number;
-  at: string;
-}
-
-export interface MineableSkillEvent {
-  skill: string;
-  action: 'loaded' | 'invoked';
-}
-
-/** Legacy task-creator view. Persisted v2 candidates use the canonical names. */
-export interface MineableTraceRecord {
-  sourceId: string;
-  kind: 'solvernet-execution' | 'harness-session';
-  repo: string;
-  baseCommit: string;
-  acceptedDiff: string;
-  testRuns: MineableTestRun[];
-  intermediateFailureDiffs: string[];
-  skillEvents: MineableSkillEvent[];
-  sourceInstanceId?: string;
-  publishMinedTasksConsent: boolean;
-  createdAt: string;
-}
 
 function toCandidate(record: MineableTraceRecord): ContributionCandidateV1 {
   return {
@@ -62,7 +50,7 @@ function toCandidate(record: MineableTraceRecord): ContributionCandidateV1 {
   };
 }
 
-export function mineableTraceRecordFromStored(record: ContributionStoreRecord): MineableTraceRecord {
+export function mineableTraceRecordFromStored(record: StoredMineableTraceRecord): MineableTraceRecord {
   const candidate = record.candidate;
   return {
     sourceId: candidate.sourceId,
@@ -116,7 +104,7 @@ export function buildMineableRecord(ctx: {
   };
 }
 
-export class MineableTraceStore extends ContributionStore {
+export class MineableTraceStore extends ContributionStore implements MineableTraceStorePort {
   constructor(options: { stateDir: string }) {
     super(options);
   }

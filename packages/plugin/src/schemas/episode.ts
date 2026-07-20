@@ -25,7 +25,7 @@ const UnixNanoSchema = z.string().regex(/^\d+$/, 'unix-nanosecond digit string')
  * Re-declared inline (rather than imported) because #1473 is still open and arch
  * §6 forbids the plugin package importing from `client/src/**`.
  */
-const StepSchema = z.strictObject({
+const StepShape = {
   spanId: z.string().min(1),
   parentSpanId: z.string().min(1).nullable(),
   kind: z.enum(['jinn.agent_turn', 'jinn.tool_call']),
@@ -34,7 +34,10 @@ const StepSchema = z.strictObject({
   endTimeUnixNano: UnixNanoSchema,
   attributes: z.record(z.string(), z.unknown()),
   redactedKeys: z.array(z.string().min(1)).default([]),
-});
+};
+
+const StepWriteSchema = z.strictObject(StepShape);
+const StepReadSchema = z.looseObject(StepShape);
 
 /**
  * Rescope (2026-07-16): `searchedTerms`/`providedRefs` are the current
@@ -43,7 +46,7 @@ const StepSchema = z.strictObject({
  * local episode files (and hosts that have not yet migrated) still parse —
  * but is no longer the primary signal a new pickup writes.
  */
-export const SessionActivityFactsSchema = z.strictObject({
+const LegacyActivityShape = {
   searchedTerms: z.array(z.string().min(1)).default([]),
   providedRefs: z.array(z.string().min(1)).default([]),
   /** @deprecated rescope — retained for read-compat with pre-rescope episode files. */
@@ -53,50 +56,257 @@ export const SessionActivityFactsSchema = z.strictObject({
   fetchedRefs: z.array(z.string().min(1)).default([]),
   /** @deprecated rescope — the skill adopt/install path no longer exists in pickup. */
   installedSkillRefs: z.array(z.string().min(1)).default([]),
+};
+
+const DeliveryActivityShape = {
+  retrievalFired: z.boolean(),
+  eligibleRefs: z.array(z.string().min(1)),
+  deliveredRefs: z.array(z.string().min(1)),
+  deliveryMode: z.enum(['delivered', 'disabled', 'degraded', 'withheld']),
+  deliveredContentHash: z.string().regex(/^sha256:[0-9a-f]{64}$/).optional(),
+};
+
+export const SessionActivityFactsWriteSchema = z.strictObject({
+  ...LegacyActivityShape,
+  ...DeliveryActivityShape,
+}).superRefine((activity, context) => {
+  if (
+    (activity.deliveryMode === 'delivered' || activity.deliveredRefs.length > 0)
+    && activity.deliveredContentHash === undefined
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['deliveredContentHash'],
+      message: 'delivered evidence requires the exact sha256 content hash',
+    });
+  }
 });
 
-export const EpisodeV1Schema = z.strictObject({
+const SessionShape = {
+  sessionId: z.string().min(1).max(128),
+  capturedAt: z.iso.datetime(),
+  kind: z.enum(['user', 'host-internal']),
+  parentSessionId: z.string().min(1).max(128).optional(),
+};
+
+const TaskShape = {
+  summary: z.string().min(1),
+  distributionTags: z.array(z.string().min(1)).default([]),
+  repositorySlug: z.string().min(1).optional(),
+};
+
+const OutcomeShape = {
+  status: z.enum(['completed', 'failed', 'abandoned']),
+  verifiabilityTier: z.enum(['user-accepted', 'tests-passed', 'evaluator-verified']),
+  summary: z.string().min(1).optional(),
+  acceptedDiff: z.boolean().optional(),
+  testRuns: z.strictObject({
+    passed: z.number().int().nonnegative(),
+    failed: z.number().int().nonnegative(),
+  }).optional(),
+};
+
+const CostShape = {
+  durationMs: z.number().int().nonnegative(),
+  tokens: z.strictObject({
+    input: z.number().int().nonnegative(),
+    output: z.number().int().nonnegative(),
+  }).optional(),
+  usdEstimate: z.string().regex(/^\d+(\.\d+)?$/).optional(),
+};
+
+const OriginStampSchema = z.strictObject({
+  writer: z.string().min(1),
+  build: z.string().min(1),
+});
+const OriginStampReadSchema = z.looseObject({
+  writer: z.string().min(1),
+  build: z.string().min(1),
+});
+
+const RetentionShape = {
+  policy: z.enum(['local-private', 'contribution-eligible']),
+};
+
+const LineageShape = {
+  episodeId: z.string().min(1),
+  mintRef: z.string().min(1).optional(),
+};
+
+export const EpisodeV1WriteSchema = z.strictObject({
   schemaVersion: z.literal(EPISODE_SCHEMA_VERSION),
   episodeId: z.string().min(1),
-  session: z.strictObject({
-    sessionId: z.string().min(1).max(128),
-    capturedAt: z.iso.datetime(),
-  }),
-  task: z.strictObject({
-    summary: z.string().min(1),
-    distributionTags: z.array(z.string().min(1)).default([]),
-  }),
-  trajectory: z.array(StepSchema).min(1),
+  session: z.strictObject(SessionShape),
+  origin: OriginStampSchema,
+  task: z.strictObject(TaskShape),
+  trajectory: z.array(StepWriteSchema).min(1),
   environment: z.strictObject({
     harness: z.strictObject({ name: z.string().min(1), version: z.string().min(1) }),
     model: z.string().min(1),
     tools: z.array(z.string().min(1)),
     skillsLoadout: z.array(z.string().min(1)),
   }),
-  outcome: z.strictObject({
-    status: z.enum(['completed', 'failed', 'abandoned']),
-    verifiabilityTier: z.enum(['user-accepted', 'tests-passed', 'evaluator-verified']),
-    summary: z.string().min(1).optional(),
-  }),
-  cost: z.strictObject({
-    durationMs: z.number().int().nonnegative(),
-    tokens: z.strictObject({
-      input: z.number().int().nonnegative(),
-      output: z.number().int().nonnegative(),
-    }).optional(),
-    usdEstimate: z.string().regex(/^\d+(\.\d+)?$/).optional(),
-  }),
-  retention: z.strictObject({
-    policy: z.enum(['local-private', 'contribution-eligible']),
-  }),
+  outcome: z.strictObject(OutcomeShape),
+  cost: z.strictObject(CostShape),
+  retention: z.strictObject(RetentionShape),
   provenance: z.enum(['contributed', 'imported']).default('contributed'),
-  lineage: z.strictObject({
-    episodeId: z.string().min(1),
-    mintRef: z.string().min(1).optional(),
-  }).optional(),
-  activity: SessionActivityFactsSchema.optional(),
+  lineage: z.strictObject(LineageShape).optional(),
+  activity: SessionActivityFactsWriteSchema.optional(),
   eligibility: EligibilityVerdictSchema.optional(),
 });
 
+type UnknownRecord = Record<string, unknown>;
+
+function asRecord(value: unknown): UnknownRecord | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as UnknownRecord
+    : undefined;
+}
+
+function withoutNulls(value: unknown, optionalKeys: readonly string[]): unknown {
+  const record = asRecord(value);
+  if (!record) return value;
+  const normalized = { ...record };
+  for (const key of optionalKeys) {
+    if (normalized[key] === null) delete normalized[key];
+  }
+  return normalized;
+}
+
+/** Additive v1 reader normalization. Writers never use this path. */
+function normalizeEpisodeRead(value: unknown): unknown {
+  const raw = asRecord(value);
+  if (!raw) return value;
+  const normalized: UnknownRecord = { ...raw };
+
+  const session = asRecord(withoutNulls(raw['session'], ['parentSessionId']));
+  if (session) normalized['session'] = { kind: 'user', ...session };
+
+  if (raw['origin'] === undefined) {
+    normalized['origin'] = 'legacy-unstamped';
+  }
+
+  normalized['task'] = withoutNulls(raw['task'], ['repositorySlug']);
+  normalized['outcome'] = withoutNulls(raw['outcome'], ['summary', 'acceptedDiff', 'testRuns']);
+  normalized['cost'] = withoutNulls(raw['cost'], ['tokens', 'usdEstimate']);
+  for (const key of ['lineage', 'activity', 'eligibility'] as const) {
+    if (normalized[key] === null) delete normalized[key];
+  }
+
+  const activity = asRecord(normalized['activity']);
+  if (activity) {
+    const clean = asRecord(withoutNulls(activity, ['deliveredContentHash'])) ?? {};
+    const searchedTerms = clean['searchedTerms'] === undefined ? [] : clean['searchedTerms'];
+    const legacyProvided = clean['providedRefs'];
+    const deliveredRefs = clean['deliveredRefs'] === undefined
+      ? legacyProvided === undefined ? [] : legacyProvided
+      : clean['deliveredRefs'];
+    const eligibleRefs = clean['eligibleRefs'] === undefined
+      ? deliveredRefs
+      : clean['eligibleRefs'];
+    const retrievalFired = clean['retrievalFired'] !== undefined
+      ? clean['retrievalFired']
+      : (Array.isArray(searchedTerms) && searchedTerms.length > 0)
+        || (Array.isArray(deliveredRefs) && deliveredRefs.length > 0);
+    normalized['activity'] = {
+      ...clean,
+      searchedTerms,
+      providedRefs: legacyProvided === undefined ? deliveredRefs : legacyProvided,
+      surfacedRefs: clean['surfacedRefs'] === undefined ? [] : clean['surfacedRefs'],
+      fetchedRefs: clean['fetchedRefs'] === undefined ? [] : clean['fetchedRefs'],
+      installedSkillRefs: clean['installedSkillRefs'] === undefined
+        ? []
+        : clean['installedSkillRefs'],
+      retrievalFired,
+      eligibleRefs,
+      deliveredRefs,
+      deliveryMode: clean['deliveryMode'] === undefined
+        ? (retrievalFired === true ? 'delivered' : 'disabled')
+        : clean['deliveryMode'],
+    };
+  }
+
+  return normalized;
+}
+
+const SessionActivityFactsReadSchema = z.looseObject({
+  ...LegacyActivityShape,
+  ...DeliveryActivityShape,
+});
+
+export const SessionActivityFactsSchema = z.preprocess(
+  (value) => {
+    const wrapper = normalizeEpisodeRead({
+      schemaVersion: EPISODE_SCHEMA_VERSION,
+      episodeId: 'activity-reader',
+      session: { sessionId: 'activity-reader', capturedAt: '1970-01-01T00:00:00.000Z' },
+      task: { summary: 'activity reader', distributionTags: [] },
+      trajectory: [{
+        spanId: 'activity-reader',
+        parentSpanId: null,
+        kind: 'jinn.agent_turn',
+        name: 'activity-reader',
+        startTimeUnixNano: '0',
+        endTimeUnixNano: '0',
+        attributes: {},
+        redactedKeys: [],
+      }],
+      environment: {
+        harness: { name: 'activity-reader', version: '1' },
+        model: 'activity-reader',
+        tools: [],
+        skillsLoadout: [],
+      },
+      outcome: { status: 'completed', verifiabilityTier: 'user-accepted' },
+      cost: { durationMs: 0 },
+      retention: { policy: 'local-private' },
+      activity: value,
+    }) as UnknownRecord;
+    return wrapper['activity'];
+  },
+  SessionActivityFactsReadSchema,
+);
+
+const EpisodeV1ReadObjectSchema = z.looseObject({
+  schemaVersion: z.literal(EPISODE_SCHEMA_VERSION),
+  episodeId: z.string().min(1),
+  session: z.looseObject(SessionShape),
+  origin: z.union([OriginStampReadSchema, z.literal('legacy-unstamped')]),
+  task: z.looseObject(TaskShape),
+  trajectory: z.array(StepReadSchema).min(1),
+  environment: z.looseObject({
+    harness: z.looseObject({ name: z.string().min(1), version: z.string().min(1) }),
+    model: z.string().min(1),
+    tools: z.array(z.string().min(1)),
+    skillsLoadout: z.array(z.string().min(1)),
+  }),
+  outcome: z.looseObject({
+    ...OutcomeShape,
+    testRuns: z.looseObject({
+      passed: z.number().int().nonnegative(),
+      failed: z.number().int().nonnegative(),
+    }).optional(),
+  }),
+  cost: z.looseObject({
+    ...CostShape,
+    tokens: z.looseObject({
+      input: z.number().int().nonnegative(),
+      output: z.number().int().nonnegative(),
+    }).optional(),
+  }),
+  retention: z.looseObject(RetentionShape),
+  provenance: z.enum(['contributed', 'imported']).default('contributed'),
+  lineage: z.looseObject(LineageShape).optional(),
+  activity: SessionActivityFactsReadSchema.optional(),
+  eligibility: z.looseObject({
+    eligible: z.boolean(),
+    reason: z.string().min(1),
+    checkedAt: z.iso.datetime(),
+  }).optional(),
+});
+
+export const EpisodeV1Schema = z.preprocess(normalizeEpisodeRead, EpisodeV1ReadObjectSchema);
+
 export type EpisodeV1 = z.infer<typeof EpisodeV1Schema>;
 export type SessionActivityFacts = z.infer<typeof SessionActivityFactsSchema>;
+export type EpisodeV1Write = z.infer<typeof EpisodeV1WriteSchema>;

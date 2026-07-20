@@ -18,6 +18,10 @@ import {
 import { makeSampleEpisode } from '../_fixtures/episode.js';
 
 const ACTIVITY = {
+  retrievalFired: true,
+  eligibleRefs: ['knowledge/fetched-1'] as string[],
+  deliveredRefs: [] as string[],
+  deliveryMode: 'withheld' as const,
   searchedTerms: [] as string[],
   providedRefs: [] as string[],
   surfacedRefs: ['knowledge/surfaced-1'],
@@ -63,6 +67,36 @@ async function invoke(plugin: JinnPlugin, input: CompleteSessionInput) {
 }
 
 describe('JinnPlugin.completeSession()', () => {
+  it('persists host-internal evidence but rejects its contribution candidate', async () => {
+    const evidence = new InMemoryEvidencePort();
+    const contribution = new InMemoryContributionPort();
+    const episode = makeSampleEpisode({
+      episodeId: 'episode-complete',
+      session: {
+        sessionId: 'child-session',
+        capturedAt: '2026-07-15T11:59:00.000Z',
+        kind: 'host-internal',
+        parentSessionId: 'parent-session',
+      },
+      origin: { writer: 'hermes', build: '0.1.0' },
+    });
+
+    const result = await invoke(pluginWith(evidence, contribution), {
+      contractVersion: 1,
+      episode,
+      activity: ACTIVITY,
+      eligibilityInputs: { publicRepo: true, acceptedDiff: true },
+      contributionCandidate: candidate(),
+    });
+
+    expect(result?.persistence.status).toBe('ok');
+    expect(result?.contribution).toEqual({
+      status: 'unavailable',
+      reason: 'host-internal sessions cannot create contribution candidates',
+    });
+    expect((await contribution.ledger())).toEqual({ status: 'ok', value: [] });
+  });
+
   it('augments an already-captured episode without changing captured identity or provenance', async () => {
     const episode = makeSampleEpisode({
       episodeId: 'episode-complete',
@@ -98,7 +132,11 @@ describe('JinnPlugin.completeSession()', () => {
     expect(stored.status).toBe('ok');
     if (stored.status !== 'ok' || !stored.value) return;
     expect(stored.value.episodeId).toBe(original.episodeId);
-    expect(stored.value.session).toEqual(original.session);
+    expect(stored.value.session).toEqual({ ...original.session, kind: 'user' });
+    expect(stored.value.origin).toEqual({
+      writer: original.environment.harness.name,
+      build: original.environment.harness.version,
+    });
     expect(stored.value.trajectory).toEqual(original.trajectory);
     expect(stored.value.provenance).toBe(original.provenance);
     expect(stored.value.activity).toEqual(ACTIVITY);

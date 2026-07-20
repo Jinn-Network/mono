@@ -1,5 +1,8 @@
 name: Core CI
 
+permissions:
+  contents: read
+
 on:
   pull_request:
     paths:
@@ -20,7 +23,16 @@ jobs:
     name: Typecheck, Test & Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout without credentials
+        working-directory: ${{ github.workspace }}
+        env:
+          REPOSITORY: ${{ github.repository }}
+          REF: ${{ github.ref }}
+        run: |
+          git init .
+          git remote add origin "https://github.com/${REPOSITORY}.git"
+          git -c protocol.version=2 fetch --no-tags --depth=1 origin "${REF}"
+          git checkout --detach FETCH_HEAD
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -39,7 +51,16 @@ jobs:
       run:
         working-directory: client
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout without credentials
+        working-directory: ${{ github.workspace }}
+        env:
+          REPOSITORY: ${{ github.repository }}
+          REF: ${{ github.ref }}
+        run: |
+          git init .
+          git remote add origin "https://github.com/${REPOSITORY}.git"
+          git -c protocol.version=2 fetch --no-tags --depth=1 origin "${REF}"
+          git checkout --detach FETCH_HEAD
       - uses: actions/setup-node@v7
         with:
           node-version: 22

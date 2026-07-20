@@ -11,7 +11,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { describeEvidencePortContract } from '@jinn-network/plugin/testing';
 import { EPISODE_SCHEMA_VERSION, EpisodeV1Schema, type EpisodeV1 } from '@jinn-network/plugin';
 import type { CapturedTask } from '../src/captured-task.js';
@@ -22,7 +22,13 @@ function makeSampleEpisode(overrides: Partial<EpisodeV1> = {}): EpisodeV1 {
   return {
     schemaVersion: EPISODE_SCHEMA_VERSION,
     episodeId: 'episode-fixture-1',
-    session: { sessionId: 'sess-fixture-1', capturedAt: '2026-07-14T00:00:00.000Z' },
+    session: {
+      sessionId: 'sess-fixture-1',
+      capturedAt: '2026-07-14T00:00:00.000Z',
+      kind: 'user',
+      ...overrides.session,
+    },
+    origin: { writer: 'hermes', build: '0.1.0' },
     task: { summary: 'Fix a failing test', distributionTags: ['coding'] },
     trajectory: [
       {
@@ -57,6 +63,13 @@ function makeSampleEpisode(overrides: Partial<EpisodeV1> = {}): EpisodeV1 {
     retention: { policy: 'local-private' },
     provenance: 'contributed',
     ...overrides,
+    session: {
+      sessionId: 'sess-fixture-1',
+      capturedAt: '2026-07-14T00:00:00.000Z',
+      kind: 'user',
+      ...overrides.session,
+    },
+    origin: overrides.origin ?? { writer: 'hermes', build: '0.1.0' },
   };
 }
 
@@ -127,6 +140,76 @@ describe('EvidenceAdapter — AC2 legacy read', () => {
     expect(episode.task.distributionTags).toEqual(['coding', 'python']);
     // Each step carries a valid discriminated `kind`.
     expect(episode.trajectory.map((s) => s.kind)).toEqual(['jinn.agent_turn', 'jinn.tool_call']);
+  });
+
+  it('returns valid records with an explicit degraded count when files are unreadable', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-unreadable-'));
+    const adapter = createEvidenceAdapter({ capturesDir });
+    const episode = makeSampleEpisode({ episodeId: 'readable' });
+    expect((await adapter.put(episode)).status).toBe('ok');
+    writeFileSync(join(capturesDir, 'broken.episode.json'), '{"privatePrompt":');
+    writeFileSync(join(capturesDir, 'broken-legacy.json'), '{}');
+
+    const result = await adapter.list();
+
+    expect(result).toEqual({
+      status: 'degraded',
+      reason: 'evidence list skipped 2 unreadable record(s)',
+      value: [episode],
+    });
+  });
+
+  it('counts and identifies an episode whose present activity facts are malformed', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-malformed-activity-'));
+    const adapter = createEvidenceAdapter({ capturesDir });
+    const episode = makeSampleEpisode({ episodeId: 'readable' });
+    expect((await adapter.put(episode)).status).toBe('ok');
+    writeFileSync(
+      join(capturesDir, 'malformed-activity.episode.json'),
+      JSON.stringify({
+        ...makeSampleEpisode({ episodeId: 'malformed-activity' }),
+        activity: { searchedTerms: { wrong: 'container' } },
+      }),
+    );
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    try {
+      const result = await adapter.list();
+
+      expect(result).toEqual({
+        status: 'degraded',
+        reason: 'evidence list skipped 1 unreadable record(s)',
+        value: [episode],
+      });
+      expect(warning).toHaveBeenCalledWith(
+        expect.stringContaining('malformed-activity.episode.json'),
+      );
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  it('rejects unstamped legacy-shaped values on put while retaining tolerant reads', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-writer-stamp-'));
+    const adapter = createEvidenceAdapter({ capturesDir });
+    const episode = makeSampleEpisode({ episodeId: 'unstamped' });
+    const unstamped = {
+      ...episode,
+      session: {
+        sessionId: episode.session.sessionId,
+        capturedAt: episode.session.capturedAt,
+      },
+      origin: undefined,
+    } as unknown as EpisodeV1;
+
+    expect((await adapter.put(unstamped)).status).toBe('unavailable');
+    writeFileSync(join(capturesDir, 'legacy-on-disk.episode.json'), JSON.stringify(unstamped));
+    const listed = await adapter.list();
+    expect(listed.status).toBe('ok');
+    if (listed.status === 'ok') {
+      expect(listed.value[0]?.session.kind).toBe('user');
+      expect(listed.value[0]?.origin).toBe('legacy-unstamped');
+    }
   });
 });
 
