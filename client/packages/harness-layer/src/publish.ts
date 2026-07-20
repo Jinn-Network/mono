@@ -194,6 +194,9 @@ export interface PublishedMemberEnvelope {
   envelopeRef: string;
   sha256: string;
   envelope: SignedEnvelope;
+  /** Frozen read-compatible projection used by the in-process distillation pipeline. */
+  trace: TraceEnvelopeV0;
+  /** Canonical payload actually uploaded and signed for new publications. */
   episode: EpisodeV1Write;
 }
 
@@ -520,6 +523,7 @@ export async function publishMemberEnvelope(
 ): Promise<PublishedMemberEnvelope> {
   assertPending(pending);
   const now = opts.now ?? deps.now?.() ?? new Date();
+  const trace = toTraceEnvelope(pending);
   const episode = toPublishedEpisode(pending);
   const skill = opts.skill === undefined ? undefined : SkillArtifactV1Schema.parse(opts.skill);
 
@@ -555,7 +559,7 @@ export async function publishMemberEnvelope(
   const envelopeBlob = await deps.publishEnvelope(envelope);
   const envelopeRef = envelopeBlob.cid;
   const sha256 = envelopeBlob.sha256 ?? sha256Hex(canonicalJson(envelope));
-  return { envelopeRef, sha256, envelope, episode };
+  return { envelopeRef, sha256, envelope, trace, episode };
 }
 
 /**
@@ -676,6 +680,7 @@ function safeJournalMember(member: ManifestBatchMemberInput): JournalMemberInput
     pending: {
       kind: member.pending.kind,
       draft: member.pending.draft,
+      episodeFacts: member.pending.episodeFacts,
       // Redaction `before` values are display-only secrets and must never be
       // persisted. Retain the non-secret redaction receipt as frozen input.
       redactions: member.pending.redactions.map(
@@ -1646,11 +1651,12 @@ export async function publishManifestBatch(
     batches,
     memberRefs: published.map((member) => member.envelopeRef),
     publishedMembers: published.map(
-      ({ envelopeRef, sha256, envelope, trace }) => ({
+      ({ envelopeRef, sha256, envelope, trace, episode }) => ({
         envelopeRef,
         sha256,
         envelope,
         trace,
+        episode,
       }),
     ),
   };
