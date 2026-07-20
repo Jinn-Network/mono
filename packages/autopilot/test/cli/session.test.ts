@@ -1,6 +1,11 @@
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { AttemptManifest } from '../../src/lifecycle/attempt-workspace.js';
 import {
+  makeProductionSessionProtocol,
+  readBoundedUtf8File,
   runSessionCli,
   type SessionProtocol,
 } from '../../src/cli/session.js';
@@ -77,7 +82,7 @@ function deps(
     protocol: handler,
     env: { JINN_AUTOPILOT_SESSION_MANIFEST: MANIFEST_PATH },
     readManifest,
-    readTextFile: vi.fn((path: string) => {
+    readTextFile: vi.fn((path: string): string => {
       if (path === '/summary') return 'summary text\n';
       if (path === '/body') return 'review body\n';
       if (path === '/reason') return 'human reason\n';
@@ -90,7 +95,7 @@ describe('session CLI grammar', () => {
   it.each([
     {
       argv: ['checkpoint'],
-      manifest: MANIFEST,
+      manifest: { ...MANIFEST, phase: 'implement' as const, subject: 'issue-8', prNumber: 9, reviewGeneration: undefined, reviewRefOid: undefined },
       expected: { operation: 'checkpoint' },
     },
     {
@@ -120,7 +125,7 @@ describe('session CLI grammar', () => {
     },
     {
       argv: ['human', '--reason-file', '/reason'],
-      manifest: MANIFEST,
+      manifest: { ...MANIFEST, phase: 'implement' as const, subject: 'issue-8', prNumber: 9, reviewGeneration: undefined, reviewRefOid: undefined },
       expected: { operation: 'human', payload: 'human reason\n' },
     },
   ])('parses and delegates $argv.0 after manifest validation', async ({
@@ -181,6 +186,44 @@ describe('session CLI grammar', () => {
     expect(handler.calls).toEqual([]);
   });
 
+  it('wires Human holds only for implementation manifests in this task', async () => {
+    const handler = protocol();
+    const injected = deps(MANIFEST, handler);
+    await expect(runSessionCli([
+      'human', '--reason-file', '/reason',
+    ], injected)).rejects.toThrow(/not valid for review/);
+    expect(handler.calls).toEqual([]);
+  });
+
+  it('wires checkpoints only for implementation manifests in this task', async () => {
+    const handler = protocol();
+    const injected = deps(MANIFEST, handler);
+    await expect(runSessionCli(['checkpoint'], injected))
+      .rejects.toThrow(/not valid for review/);
+    expect(handler.calls).toEqual([]);
+  });
+
+  it('rejects unbounded injected summary and reason text before delegation', async () => {
+    const implementation = {
+      ...MANIFEST,
+      phase: 'implement' as const,
+      subject: 'issue-8',
+      prNumber: 9,
+      reviewGeneration: undefined,
+      reviewRefOid: undefined,
+    };
+    for (const argv of [
+      ['implementation-complete', '--summary-file', '/summary'],
+      ['human', '--reason-file', '/reason'],
+    ]) {
+      const handler = protocol();
+      const injected = deps(implementation, handler);
+      injected.readTextFile.mockReturnValue('x'.repeat(65_537));
+      await expect(runSessionCli(argv, injected)).rejects.toThrow(/65,536 bytes/i);
+      expect(handler.calls).toEqual([]);
+    }
+  });
+
   it('re-reads and strictly validates the manifest before delegation', async () => {
     const handler = protocol();
     const injected = deps(MANIFEST, handler);
@@ -192,10 +235,56 @@ describe('session CLI grammar', () => {
   });
 });
 
+describe('bounded UTF-8 session input', () => {
+  it('rejects malformed UTF-8 and files larger than 65,536 bytes', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-session-input-'));
+    const malformed = join(dir, 'malformed');
+    const oversized = join(dir, 'oversized');
+    writeFileSync(malformed, Buffer.from([0xc3, 0x28]));
+    writeFileSync(oversized, Buffer.alloc(65_537, 0x61));
+
+    expect(() => readBoundedUtf8File(malformed)).toThrow(/UTF-8/i);
+    expect(() => readBoundedUtf8File(oversized)).toThrow(/65,536 bytes/i);
+  });
+});
+
 describe('production session protocol', () => {
-  it('fails closed with operation not wired after validating the manifest', async () => {
+  it('delegates implementation handlers while keeping later phase operations unwired', async () => {
+    const implementation = protocol();
+    const production = makeProductionSessionProtocol(
+      {},
+      () => implementation,
+    );
+    const implementationManifest = {
+      ...MANIFEST,
+      phase: 'implement' as const,
+      subject: 'issue-8',
+      prNumber: 9,
+      reviewGeneration: undefined,
+      reviewRefOid: undefined,
+    };
+
+    await production.checkpoint(implementationManifest);
+    await production.implementationComplete(implementationManifest, 'summary');
+    await production.human(implementationManifest, 'reason');
+    expect(implementation.calls).toEqual([
+      { operation: 'checkpoint' },
+      { operation: 'implementation-complete', payload: 'summary' },
+      { operation: 'human', payload: 'reason' },
+    ]);
+    await expect(production.reviewVerdict(MANIFEST, 'APPROVE', 'body'))
+      .rejects.toThrow(/operation not wired/i);
+    await expect(production.reviewFixPublish(MANIFEST))
+      .rejects.toThrow(/operation not wired/i);
+    await expect(production.mergePrepComplete(MANIFEST, 'summary'))
+      .rejects.toThrow(/operation not wired/i);
+  });
+
+  it('fails closed for the default unwired review operation after manifest validation', async () => {
     const injected = deps(MANIFEST);
-    await expect(runSessionCli(['checkpoint'], {
+    await expect(runSessionCli([
+      'review-verdict', '--state', 'APPROVE', '--body-file', '/body',
+    ], {
       env: injected.env,
       readManifest: injected.readManifest,
       readTextFile: injected.readTextFile,

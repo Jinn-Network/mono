@@ -1,28 +1,30 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import {
   decodeAttemptManifest,
   readAttemptManifest,
   type AttemptManifest,
 } from '../lifecycle/attempt-workspace.js';
+import { makeImplementationSessionProtocol } from '../lifecycle/implementation-session.js';
+import { makeProductionImplementationSessionPort } from '../lifecycle/implementation-session-production.js';
 import type { ReviewVerdictState } from '../lifecycle/types.js';
 
 export interface SessionProtocol {
-  checkpoint(manifest: AttemptManifest): Promise<void>;
+  checkpoint(manifest: AttemptManifest): Promise<unknown>;
   implementationComplete(
     manifest: AttemptManifest,
     summary: string,
-  ): Promise<void>;
+  ): Promise<unknown>;
   reviewVerdict(
     manifest: AttemptManifest,
     state: ReviewVerdictState,
     body: string,
-  ): Promise<void>;
-  reviewFixPublish(manifest: AttemptManifest): Promise<void>;
+  ): Promise<unknown>;
+  reviewFixPublish(manifest: AttemptManifest): Promise<unknown>;
   mergePrepComplete(
     manifest: AttemptManifest,
     summary: string,
-  ): Promise<void>;
-  human(manifest: AttemptManifest, reason: string): Promise<void>;
+  ): Promise<unknown>;
+  human(manifest: AttemptManifest, reason: string): Promise<unknown>;
 }
 
 export interface SessionCliDeps {
@@ -59,6 +61,30 @@ const USAGE =
   'review-verdict --state <APPROVE|REQUEST_CHANGES> --body-file <path> | ' +
   'review-fix-publish | merge-prep-complete --summary-file <path> | ' +
   'human --reason-file <path>';
+const MAX_SESSION_TEXT_BYTES = 65_536;
+
+function boundedText(value: string): string {
+  if (Buffer.byteLength(value, 'utf8') > MAX_SESSION_TEXT_BYTES) {
+    throw new Error('Session text file exceeds the 65,536 bytes limit');
+  }
+  return value;
+}
+
+export function readBoundedUtf8File(path: string): string {
+  const size = statSync(path).size;
+  if (size > MAX_SESSION_TEXT_BYTES) {
+    throw new Error('Session text file exceeds the 65,536 bytes limit');
+  }
+  const bytes = readFileSync(path);
+  try {
+    return boundedText(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw new Error('Session text file must contain valid UTF-8');
+    }
+    throw error;
+  }
+}
 
 function requiredPath(value: string | undefined, option: string): string {
   if (value === undefined || value.length === 0 || value.startsWith('--')) {
@@ -156,6 +182,29 @@ export const unwiredSessionProtocol: SessionProtocol = {
   human: async () => operationNotWired('human'),
 };
 
+export function makeProductionSessionProtocol(
+  environment: NodeJS.ProcessEnv,
+  makeImplementation: () => SessionProtocol = () =>
+    makeImplementationSessionProtocol(
+      makeProductionImplementationSessionPort({ environment }),
+    ),
+): SessionProtocol {
+  let implementation: SessionProtocol | undefined;
+  const implementationProtocol = (): SessionProtocol => {
+    implementation ??= makeImplementation();
+    return implementation;
+  };
+  return {
+    checkpoint: (manifest) => implementationProtocol().checkpoint(manifest),
+    implementationComplete: (manifest, summary) =>
+      implementationProtocol().implementationComplete(manifest, summary),
+    reviewVerdict: async () => operationNotWired('review-verdict'),
+    reviewFixPublish: async () => operationNotWired('review-fix-publish'),
+    mergePrepComplete: async () => operationNotWired('merge-prep-complete'),
+    human: (manifest, reason) => implementationProtocol().human(manifest, reason),
+  };
+}
+
 export async function runSessionCli(
   argv: readonly string[],
   deps: SessionCliDeps = {},
@@ -173,18 +222,19 @@ export async function runSessionCli(
   const manifest = decodeAttemptManifest(
     (deps.readManifest ?? readAttemptManifest)(manifestPath),
   );
-  const readText = deps.readTextFile ?? ((path: string) => readFileSync(path, 'utf8'));
-  const protocol = deps.protocol ?? unwiredSessionProtocol;
+  const readText = deps.readTextFile ?? readBoundedUtf8File;
+  const protocol = deps.protocol ?? makeProductionSessionProtocol(env);
 
   switch (command.operation) {
     case 'checkpoint':
+      requiredPhase(manifest, command.operation, 'implement');
       await protocol.checkpoint(manifest);
       return;
     case 'implementation-complete':
       requiredPhase(manifest, command.operation, 'implement');
       await protocol.implementationComplete(
         manifest,
-        readText(command.summaryFile),
+        boundedText(readText(command.summaryFile)),
       );
       return;
     case 'review-verdict':
@@ -192,7 +242,7 @@ export async function runSessionCli(
       await protocol.reviewVerdict(
         manifest,
         command.state,
-        readText(command.bodyFile),
+        boundedText(readText(command.bodyFile)),
       );
       return;
     case 'review-fix-publish':
@@ -203,10 +253,11 @@ export async function runSessionCli(
       requiredPhase(manifest, command.operation, 'merge-prep');
       await protocol.mergePrepComplete(
         manifest,
-        readText(command.summaryFile),
+        boundedText(readText(command.summaryFile)),
       );
       return;
     case 'human':
-      await protocol.human(manifest, readText(command.reasonFile));
+      requiredPhase(manifest, command.operation, 'implement');
+      await protocol.human(manifest, boundedText(readText(command.reasonFile)));
   }
 }

@@ -72,6 +72,11 @@ export type ProjectionAction =
       readonly body: string;
     } & HeadPinned)
   | ({
+      readonly kind: 'ensure-implementation-summary';
+      readonly prNumber: number;
+      readonly summary: string;
+    } & HeadPinned)
+  | ({
       readonly kind: 'requeue-implementation';
       readonly issueNumber: number;
     } & HeadPinned)
@@ -157,7 +162,14 @@ function planItem(
   if (!item.v2Marked && view.phase !== 'human') return [];
   const desired = desiredStatus(view);
   const actions: ProjectionAction[] = [];
-  if (item.projectStatus !== desired && !(view.stale && view.phase === 'implementing')) {
+  const implementationComplete = item.kind === 'pull-request'
+    && item.branchClaim?.phase === 'implement'
+    && item.branchClaim.phaseComplete === true;
+  if (
+    !implementationComplete
+    && item.projectStatus !== desired
+    && !(view.stale && view.phase === 'implementing')
+  ) {
     actions.push({
       kind: 'set-project-status',
       issueNumber: item.issueNumber,
@@ -166,6 +178,15 @@ function planItem(
     });
   }
   if (item.kind !== 'pull-request') return actions;
+
+  if (implementationComplete && item.implementationSummary !== undefined) {
+    actions.push({
+      kind: 'ensure-implementation-summary',
+      prNumber: item.prNumber,
+      expectedHead: item.head,
+      summary: item.implementationSummary,
+    });
+  }
 
   let completedReviewState: 'fixing' | 'terminal-approved' | undefined;
   if (
@@ -193,7 +214,7 @@ function planItem(
 
   if (item.v2Marked) {
     const draft = activeMutation(view);
-    if (item.isDraft !== draft) {
+    if (!implementationComplete && item.isDraft !== draft) {
       actions.push({
         kind: 'set-pr-draft',
         prNumber: item.prNumber,
@@ -235,6 +256,26 @@ function planItem(
       expectedHead: item.head,
       ...comment,
     });
+  }
+
+  if (implementationComplete) {
+    if (item.projectStatus !== desired) {
+      actions.push({
+        kind: 'set-project-status',
+        issueNumber: item.issueNumber,
+        expectedHead: item.head,
+        status: desired,
+      });
+    }
+    const draft = activeMutation(view);
+    if (item.isDraft !== draft) {
+      actions.push({
+        kind: 'set-pr-draft',
+        prNumber: item.prNumber,
+        expectedHead: item.head,
+        draft,
+      });
+    }
   }
 
   if (view.phase === 'human' || !item.v2Marked) return actions;

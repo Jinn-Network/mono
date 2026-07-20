@@ -1,9 +1,38 @@
 import { describe, expect, it } from 'vitest';
 import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
-import { GhLifecycleReader } from '../../src/lifecycle/github-reader.js';
+import {
+  extractImplementationCompletionSummary,
+  GhLifecycleReader,
+} from '../../src/lifecycle/github-reader.js';
 
 const OPEN_HEAD = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const MERGED_HEAD = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+
+it('extracts the durable summary from an exact phase-complete commit envelope', () => {
+  const trailers = [
+    'Jinn-Autopilot-Protocol: 2',
+    'Jinn-Autopilot-Phase: implement',
+    'Jinn-Autopilot-Issue: 42',
+    'Jinn-Autopilot-PR: 101',
+    'Jinn-Autopilot-Attempt: 11111111-1111-4111-8111-111111111111',
+    'Jinn-Autopilot-Runner: runner-a',
+    'Jinn-Autopilot-Login: implementer',
+    `Jinn-Autopilot-Expected-Head: ${OPEN_HEAD}`,
+    'Jinn-Autopilot-Target-Base: next',
+    'Jinn-Autopilot-Claimed-At: 2026-07-20T12:00:00.000Z',
+    'Jinn-Autopilot-Phase-Complete: true',
+  ].join('\n');
+  const message = [
+    'Autopilot implementation phase complete',
+    '',
+    'Implemented exact lifecycle ownership.',
+    '',
+    trailers,
+  ].join('\n');
+
+  expect(extractImplementationCompletionSummary(message, trailers))
+    .toBe('Implemented exact lifecycle ownership.');
+});
 
 function graphQlPr(input: {
   readonly number: number;

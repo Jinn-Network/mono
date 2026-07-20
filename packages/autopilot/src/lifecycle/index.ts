@@ -9,3 +9,6 @@ export * from './reconciler.js';
 export * from './controller.js';
 export * from './credentials.js';
 export * from './attempt-workspace.js';
+export * from './implementation-executor.js';
+export * from './implementation-session.js';
+export * from './implementation-session-production.js';

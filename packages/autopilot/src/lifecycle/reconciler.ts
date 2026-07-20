@@ -31,6 +31,11 @@ export interface ReconciliationWriter {
   setPullRequestLabel(prNumber: number, label: string, present: boolean): Promise<void>;
   hasHumanComment(prNumber: number, marker: string): Promise<boolean>;
   ensureHumanComment(prNumber: number, marker: string, body: string): Promise<void>;
+  ensureImplementationSummary(
+    prNumber: number,
+    expectedHead: GitOid,
+    summary: string,
+  ): Promise<void>;
   findOpenPullRequest(headRefName: string): Promise<{
     readonly number: number;
     readonly head: GitOid;
@@ -217,6 +222,28 @@ async function ensureComment(
   }
 }
 
+async function ensureImplementationSummary(
+  action: Extract<ProjectionAction, { kind: 'ensure-implementation-summary' }>,
+  writer: ReconciliationWriter,
+): Promise<ReconciliationResult> {
+  if (!await prHeadMatches(writer, action.prNumber, action.expectedHead)) {
+    return { action, outcome: 'changed-head' };
+  }
+  try {
+    await writer.ensureImplementationSummary(
+      action.prNumber,
+      action.expectedHead,
+      action.summary,
+    );
+    if (!await prHeadMatches(writer, action.prNumber, action.expectedHead)) {
+      return { action, outcome: 'changed-head' };
+    }
+    return { action, outcome: 'applied' };
+  } catch (error) {
+    return { action, outcome: 'failed', detail: message(error) };
+  }
+}
+
 async function ensureDraftPr(
   action: Extract<ProjectionAction, { kind: 'ensure-draft-pr' }>,
   writer: ReconciliationWriter,
@@ -340,6 +367,8 @@ async function executeOne(
       return setLabel(action, writer);
     case 'ensure-human-comment':
       return ensureComment(action, writer);
+    case 'ensure-implementation-summary':
+      return ensureImplementationSummary(action, writer);
     case 'ensure-draft-pr':
       return ensureDraftPr(action, writer);
     case 'mark-review-stale':

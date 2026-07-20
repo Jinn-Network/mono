@@ -106,6 +106,7 @@ describe('planProjection', () => {
 
   it('repairs a phase-complete draft last and enrolls it for review', () => {
     const complete = item({
+      implementationSummary: 'Implemented exact lifecycle ownership.',
       branchClaim: {
         ...item().branchClaim!,
         phaseComplete: true,
@@ -115,6 +116,19 @@ describe('planProjection', () => {
     const plan = planProjection(context(complete));
 
     expect(plan.actions).toEqual([
+      {
+        kind: 'ensure-implementation-summary',
+        prNumber: 101,
+        expectedHead: HEAD,
+        summary: 'Implemented exact lifecycle ownership.',
+      },
+      {
+        kind: 'set-pr-label',
+        prNumber: 101,
+        expectedHead: HEAD,
+        label: 'engine:review',
+        present: true,
+      },
       {
         kind: 'set-project-status',
         issueNumber: 42,
@@ -126,13 +140,6 @@ describe('planProjection', () => {
         prNumber: 101,
         expectedHead: HEAD,
         draft: false,
-      },
-      {
-        kind: 'set-pr-label',
-        prNumber: 101,
-        expectedHead: HEAD,
-        label: 'engine:review',
-        present: true,
       },
     ]);
   });
