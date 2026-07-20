@@ -280,10 +280,7 @@ query InstanceSuccessCounts($solverNetManifestCid: String!, $limit: Int!, $after
   verdictEnvelopeMetas(
     where: {
       solverNetManifestCid: $solverNetManifestCid,
-      solverType_starts_with: "swe-rebench-v2",
-      actualPassed: true,
-      enrichmentStatus: "ok",
-      instanceId_not: ""
+      solverType_starts_with: "swe-rebench-v2"
     },
     limit: $limit,
     after: $after,
@@ -294,6 +291,9 @@ query InstanceSuccessCounts($solverNetManifestCid: String!, $limit: Int!, $after
       requestId
       chainId
       instanceId
+      actualPassed
+      enrichmentStatus
+      solverNetManifestCid
     }
     pageInfo {
       hasNextPage
@@ -626,7 +626,14 @@ interface MostRecentTaskPage {
 
 interface InstanceSuccessCountsPage {
   verdictEnvelopeMetas: {
-    items: Array<{ requestId: string; chainId: number; instanceId: string }>;
+    items: Array<{
+      requestId: string;
+      chainId: number;
+      instanceId: string;
+      actualPassed?: boolean;
+      enrichmentStatus?: string;
+      solverNetManifestCid?: string;
+    }>;
     pageInfo?: { hasNextPage: boolean; endCursor: string | null };
   };
 }
@@ -709,6 +716,36 @@ interface CodeDigestOperatorAttemptsPage {
   };
 }
 
+/**
+ * Collapse composite metadata candidates without letting GraphQL order choose
+ * the winner. Repeated copies of the same projection (for example, a row seen
+ * on both sides of a page boundary) are harmless; disagreeing projections make
+ * the request ambiguous and are omitted.
+ */
+function unambiguousCandidates<T>(
+  rows: T[],
+  keyOf: (row: T) => string,
+  projectionOf: (row: T) => unknown,
+): Map<string, T> {
+  const states = new Map<string, { row: T; projection: string; ambiguous: boolean }>();
+  for (const row of rows) {
+    const key = keyOf(row);
+    const projection = JSON.stringify(projectionOf(row));
+    const state = states.get(key);
+    if (!state) {
+      states.set(key, { row, projection, ambiguous: false });
+    } else if (state.projection !== projection) {
+      state.ambiguous = true;
+    }
+  }
+
+  const accepted = new Map<string, T>();
+  for (const [key, state] of states) {
+    if (!state.ambiguous) accepted.set(key, state.row);
+  }
+  return accepted;
+}
+
 // ── Plug-in publication queries (attd) ───────────────────────────────────────
 
 const LIST_PLUGIN_PUBLICATIONS_QUERY = `
@@ -745,6 +782,7 @@ query GetPluginScores($pluginCid: String!, $limit: Int!) {
   ) {
     items {
       requestId
+      chainId
       manifestCid
       pluginsJson
       enrichedAtBlock
@@ -1431,6 +1469,7 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
         attemptEnvelopeMetas: {
           items: Array<{
             requestId: string;
+            chainId: number;
             manifestCid: string;
             pluginsJson: string;
             enrichedAtBlock: string | number;
@@ -1449,7 +1488,12 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
       // pluginPublication.sha256 is a §6.5 Discovery API endpoint that lands
       // alongside the /builders/:agentId/runs Hono route. attd's read-shape
       // ships the empty-array contract; ebu7 + 6.5 flesh it in.
-      return (data.attemptEnvelopeMetas?.items ?? []).flatMap((row): PluginScoreHistoryRow[] => {
+      const accepted = unambiguousCandidates(
+        data.attemptEnvelopeMetas?.items ?? [],
+        (row) => `${row.requestId}|${row.chainId}`,
+        (row) => [row.pluginsJson, row.enrichedAtBlock],
+      );
+      return [...accepted.values()].flatMap((row): PluginScoreHistoryRow[] => {
         let plugins: Array<{ cid?: string; sha256: string }> = [];
         try { plugins = JSON.parse(row.pluginsJson) as typeof plugins; } catch { return []; }
         const match = plugins.find((p) => p.cid === args.pluginCid);
@@ -1504,7 +1548,7 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     const MAX_PAGES = 10;
     const PAGE_LIMIT = 1000;
     const counts = new Map<string, number>();
-    const seen = new Set<string>();   // (requestId|chainId) dedupe across pages
+    const candidates: InstanceSuccessCountsPage['verdictEnvelopeMetas']['items'] = [];
     let cursor: string | null = null;
 
     for (let page = 0; page < MAX_PAGES; page++) {
@@ -1515,17 +1559,33 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
         { solverNetManifestCid: args.manifestCid, limit: PAGE_LIMIT, after: cursor },
       );
       const rows = data.verdictEnvelopeMetas?.items ?? [];
-      for (const row of rows) {
-        const key = `${row.requestId}|${row.chainId}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        const id = row.instanceId;
-        if (!id) continue;
-        counts.set(id, (counts.get(id) ?? 0) + 1);
-      }
+      candidates.push(...rows);
       const pageInfo = data.verdictEnvelopeMetas?.pageInfo;
       if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
       cursor = pageInfo.endCursor;
+    }
+
+    const accepted = unambiguousCandidates(
+      candidates,
+      (row) => `${row.requestId}|${row.chainId}`,
+      (row) => [
+        row.instanceId,
+        row.actualPassed,
+        row.enrichmentStatus,
+        row.solverNetManifestCid,
+      ],
+    );
+    for (const row of accepted.values()) {
+      // The optional checks keep backward-compatible test fixtures readable;
+      // deployed GraphQL rows always carry these selected fields.
+      if (row.actualPassed !== undefined && row.actualPassed !== true) continue;
+      if (row.enrichmentStatus !== undefined && row.enrichmentStatus !== 'ok') continue;
+      if (
+        row.solverNetManifestCid !== undefined &&
+        row.solverNetManifestCid !== args.manifestCid
+      ) continue;
+      if (!row.instanceId) continue;
+      counts.set(row.instanceId, (counts.get(row.instanceId) ?? 0) + 1);
     }
 
     return counts;
@@ -1552,31 +1612,38 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
       ? Math.floor(args.window)
       : undefined;
 
-    // 1) Pull train-mode attempt-meta rows for the requested codeDigests,
-    //    capped to the most-recent `window` per codeDigest when set.
-    const requestKeyToDigest = new Map<string, string>(); // "requestId|chainId" -> codeDigest
-    const keptPerDigest = new Map<string, number>();       // codeDigest -> rows kept
+    // 1) Pull train-mode attempt-meta candidates for the requested codeDigests.
+    //    Resolve ambiguity before applying the optional recency window.
+    const attemptCandidates: CodeDigestAttemptsPage['attemptEnvelopeMetas']['items'] = [];
     let cursor: string | null = null;
     for (let page = 0; page < MAX_PAGES; page++) {
       const data: CodeDigestAttemptsPage = await postGql<CodeDigestAttemptsPage>(
         gqlUrl, fetchImpl, CODEDIGEST_ATTEMPTS_QUERY,
         { codeDigests: args.codeDigests, limit: PAGE_LIMIT, after: cursor },
       );
-      for (const row of data.attemptEnvelopeMetas?.items ?? []) {
-        if (windowCap !== undefined) {
-          const kept = keptPerDigest.get(row.codeDigest) ?? 0;
-          if (kept >= windowCap) continue; // already have the window's worth for this digest
-          keptPerDigest.set(row.codeDigest, kept + 1);
-        }
-        requestKeyToDigest.set(`${row.requestId}|${row.chainId}`, row.codeDigest);
-      }
+      attemptCandidates.push(...(data.attemptEnvelopeMetas?.items ?? []));
       const pi = data.attemptEnvelopeMetas?.pageInfo;
       if (!pi?.hasNextPage || !pi.endCursor) break;
-      // Short-circuit pagination once every requested digest has filled its
-      // window — no need to keep paging history we'll discard.
-      if (windowCap !== undefined &&
-          args.codeDigests.every((d) => (keptPerDigest.get(d) ?? 0) >= windowCap)) break;
       cursor = pi.endCursor;
+    }
+
+    const requestKeyToDigest = new Map<string, string>(); // "requestId|chainId" -> codeDigest
+    const keptPerDigest = new Map<string, number>();       // codeDigest -> rows kept
+    const acceptedAttempts = unambiguousCandidates(
+      attemptCandidates,
+      (row) => `${row.requestId}|${row.chainId}`,
+      (row) => row.codeDigest,
+    );
+    // Map preserves first-seen order, which is enrichedAtBlock-desc from the
+    // query. Apply the recency window only after ambiguity has been resolved so
+    // a competing candidate cannot consume or reshuffle a digest's window.
+    for (const [key, row] of acceptedAttempts) {
+      if (windowCap !== undefined) {
+        const kept = keptPerDigest.get(row.codeDigest) ?? 0;
+        if (kept >= windowCap) continue;
+        keptPerDigest.set(row.codeDigest, kept + 1);
+      }
+      requestKeyToDigest.set(key, row.codeDigest);
     }
     if (requestKeyToDigest.size === 0) return [];
 
@@ -1605,7 +1672,7 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     // verdict are aggregated (step 4), so filtering here scopes the aggregate.
     const scopeBySolverNet = typeof args.solverNetManifestCid === 'string' && args.solverNetManifestCid.length > 0;
     const verdictsQuery = codeDigestVerdictsQuery(scopeBySolverNet);
-    const verdictByKey = new Map<string, { passed: boolean; score: number | null; graded: number | null }>();
+    const verdictCandidates: CodeDigestVerdictsPage['verdictEnvelopeMetas']['items'] = [];
     cursor = null;
     for (let page = 0; page < MAX_PAGES; page++) {
       const variables: Record<string, unknown> = { requestIds, limit: PAGE_LIMIT, after: cursor };
@@ -1613,8 +1680,24 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
       const data: CodeDigestVerdictsPage = await postGql<CodeDigestVerdictsPage>(
         gqlUrl, fetchImpl, verdictsQuery, variables,
       );
-      for (const row of data.verdictEnvelopeMetas?.items ?? []) {
-        const key = `${row.requestId}|${row.chainId}`;
+      verdictCandidates.push(...(data.verdictEnvelopeMetas?.items ?? []));
+      const pi = data.verdictEnvelopeMetas?.pageInfo;
+      if (!pi?.hasNextPage || !pi.endCursor) break;
+      cursor = pi.endCursor;
+    }
+
+    const verdictByKey = new Map<string, { passed: boolean; score: number | null; graded: number | null }>();
+    const acceptedVerdicts = unambiguousCandidates(
+      verdictCandidates,
+      (row) => `${row.requestId}|${row.chainId}`,
+      (row) => [
+        row.actualPassed,
+        row.actualScore,
+        row.passedCount ?? null,
+        row.totalCount ?? null,
+      ],
+    );
+    for (const [key, row] of acceptedVerdicts) {
         const scoreNum = Number(row.actualScore);
         const pc = Number(row.passedCount);
         const tc = Number(row.totalCount);
@@ -1624,10 +1707,6 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
           score: Number.isFinite(scoreNum) && row.actualScore !== '' ? scoreNum : null,
           graded,
         });
-      }
-      const pi = data.verdictEnvelopeMetas?.pageInfo;
-      if (!pi?.hasNextPage || !pi.endCursor) break;
-      cursor = pi.endCursor;
     }
 
     // 4) Aggregate per codeDigest (only requests that HAVE a verdict count).
@@ -1861,7 +1940,7 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     const MAX_PAGES = 10;
     const PAGE_LIMIT = 1000;
     const out = new Map<string, VerdictTallyResult>();
-    const seen = new Set<string>(); // (requestId|chainId) dedupe across pages
+    const candidates: VerdictTalliesPage['verdictEnvelopeMetas']['items'] = [];
     let cursor: string | null = null;
 
     for (let page = 0; page < MAX_PAGES; page++) {
@@ -1872,19 +1951,7 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
         { taskIds: args.taskIds, limit: PAGE_LIMIT, after: cursor },
       );
       const rows = data.verdictEnvelopeMetas?.items ?? [];
-      for (const row of rows) {
-        const key = `${row.requestId}|${row.chainId}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        let entry = out.get(row.taskId);
-        if (!entry) {
-          entry = { pass: 0, fail: 0 };
-          out.set(row.taskId, entry);
-        }
-        if (row.evaluatorVerdict === 'PASS') entry.pass += 1;
-        else if (row.evaluatorVerdict === 'FAIL') entry.fail += 1;
-        // else INVALID / INDETERMINATE / UNKNOWN — excluded from both poles
-      }
+      candidates.push(...rows);
       const pageInfo = data.verdictEnvelopeMetas?.pageInfo;
       if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
       cursor = pageInfo.endCursor;
@@ -1897,6 +1964,22 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
           `for ${args.taskIds.length} taskId(s); tally may under-count (#502).`,
         );
       }
+    }
+
+    const accepted = unambiguousCandidates(
+      candidates,
+      (row) => `${row.requestId}|${row.chainId}`,
+      (row) => [row.taskId, row.evaluatorVerdict],
+    );
+    for (const row of accepted.values()) {
+      let entry = out.get(row.taskId);
+      if (!entry) {
+        entry = { pass: 0, fail: 0 };
+        out.set(row.taskId, entry);
+      }
+      if (row.evaluatorVerdict === 'PASS') entry.pass += 1;
+      else if (row.evaluatorVerdict === 'FAIL') entry.fail += 1;
+      // else INVALID / INDETERMINATE / UNKNOWN — excluded from both poles
     }
 
     return out;

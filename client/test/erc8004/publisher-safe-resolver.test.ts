@@ -76,6 +76,37 @@ describe('createPublisherSafeResolver', () => {
     expect(wrongChainRead).not.toHaveBeenCalled();
   });
 
+  it('retries provider chain identification after a transient all-provider failure', async () => {
+    const primaryGetChainId = vi.fn()
+      .mockRejectedValueOnce(new Error('primary chain probe timed out'))
+      .mockResolvedValue(84532);
+    const primaryRead = vi.fn(async () => SAFE);
+    const fallbackGetChainId = vi.fn()
+      .mockRejectedValueOnce(new Error('fallback chain probe timed out'))
+      .mockResolvedValue(84532);
+    const fallbackRead = vi.fn(async () => SAFE);
+    const resolve = createPublisherSafeResolver({
+      rpcUrl: 'http://unused-primary.test',
+      expectedChainId: 84532,
+      client: {
+        getChainId: primaryGetChainId,
+        readContract: primaryRead,
+      },
+      fallbackClients: [{
+        getChainId: fallbackGetChainId,
+        readContract: fallbackRead,
+      }],
+    });
+
+    await expect(resolve(84532, '101', 123n)).rejects.toThrow(
+      /all RPC providers.*primary chain probe timed out.*fallback chain probe timed out/,
+    );
+    await expect(resolve(84532, '101', 123n)).resolves.toBe(SAFE);
+    expect(primaryGetChainId).toHaveBeenCalledTimes(2);
+    expect(primaryRead).toHaveBeenCalledTimes(1);
+    expect(fallbackRead).not.toHaveBeenCalled();
+  });
+
   it('rejects chain drift and an unbound zero address', async () => {
     const resolveWrongChain = createPublisherSafeResolver({
       rpcUrl: 'http://unused.test',

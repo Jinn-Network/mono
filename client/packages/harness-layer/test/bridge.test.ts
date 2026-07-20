@@ -18,6 +18,7 @@ import { createMemoryLedger } from '../src/ledger.js';
 import type { HarnessPublishDeps } from '../src/publish.js';
 
 const NOW = new Date('2026-07-06T00:00:00.000Z');
+const RID_FOR_TEST = (n: number): string => `0x${String(n).repeat(64).slice(0, 64)}`;
 
 function ref(over: Partial<AttemptRef> = {}): AttemptRef {
   return {
@@ -261,6 +262,61 @@ describe('bridgeAttempts', () => {
     expect(res.excludedHeldOut.map((e) => e.reason).sort()).toEqual(['instance_id', 'repo']);
   });
 
+  it('uses authenticated evidence identity for held-out exclusion, not the projected ref identity', async () => {
+    const projectedHeldOut = 'django__django-99999';
+    const authenticatedClean = 'flask__flask-4200';
+    const deps = coreDeps({
+      slateInstanceIds: new Set([projectedHeldOut]),
+      fetchEvidence: async () => verifiedEvidence(ref({ instanceId: authenticatedClean })),
+    });
+
+    const res = await bridgeAttempts([ref({ instanceId: projectedHeldOut })], deps);
+
+    expect(res.bridged.map((row) => row.instanceId)).toEqual([authenticatedClean]);
+    expect(res.excludedHeldOut).toEqual([]);
+    expect(deps.published.map((row) => row.instanceId)).toEqual([authenticatedClean]);
+  });
+
+  it('applies weak-suite and lookup exclusions to authenticated evidence identity', async () => {
+    const weak = 'flask__flask-4200';
+    const lookup = 'sympy__sympy-27510';
+    const refs = [
+      ref({ requestId: RID_FOR_TEST(1), instanceId: 'projection__clean-1' }),
+      ref({ requestId: RID_FOR_TEST(2), instanceId: 'projection__clean-2' }),
+    ];
+    const deps = coreDeps({
+      weakSuiteInstanceIds: new Set([weak]),
+      lookupFlaggedInstanceIds: new Set([lookup]),
+      fetchEvidence: async (candidate) => verifiedEvidence(
+        ref({
+          instanceId: candidate.requestId === RID_FOR_TEST(1) ? weak : lookup,
+        }),
+      ),
+    });
+
+    const res = await bridgeAttempts(refs, deps);
+
+    expect(res.bridged).toEqual([]);
+    expect(res.excludedHeldOut).toEqual([{ instanceId: weak, reason: 'instance_id' }]);
+    expect(res.deduped).toEqual([{ instanceId: lookup, polarity: 'pass' }]);
+  });
+
+  it('groups and caps by authenticated evidence identity', async () => {
+    const authenticated = 'flask__flask-4200';
+    const deps = coreDeps({
+      fetchEvidence: async () => verifiedEvidence(ref({ instanceId: authenticated })),
+    });
+    const res = await bridgeAttempts([
+      ref({ requestId: RID_FOR_TEST(3), instanceId: 'attacker__one-1' }),
+      ref({ requestId: RID_FOR_TEST(4), instanceId: 'attacker__two-2' }),
+    ], deps);
+
+    expect(res.bridged).toHaveLength(1);
+    expect(res.bridged[0]?.instanceId).toBe(authenticated);
+    expect(res.deduped).toEqual([{ instanceId: authenticated, polarity: 'pass' }]);
+    expect(deps.published).toHaveLength(1);
+  });
+
   it('records an error without sinking the batch', async () => {
     const deps = coreDeps({
       fetchEvidence: async (r) => {
@@ -271,6 +327,37 @@ describe('bridgeAttempts', () => {
     const res = await bridgeAttempts([ref({ instanceId: 'boom__boom-1' }), ref({ instanceId: 'flask__flask-4200' })], deps);
     expect(res.errors).toHaveLength(1);
     expect(res.bridged).toHaveLength(1);
+  });
+
+  it('never retries a failed publication through another discovery projection', async () => {
+    let fetchCalls = 0;
+    let publishCalls = 0;
+    const deps = coreDeps({
+      fetchEvidence: async (candidate) => {
+        fetchCalls += 1;
+        return verifiedEvidence(candidate);
+      },
+      publishEvidence: async () => {
+        publishCalls += 1;
+        throw new Error('anchor receipt unavailable after submission');
+      },
+    });
+    const attempt = ref({
+      discoveryCandidates: [
+        { instanceId: 'django__django-11333', verdictManifestCid: 'bafyFirst' },
+        { instanceId: 'django__django-11333', verdictManifestCid: 'bafySecond' },
+      ],
+    });
+
+    const res = await bridgeAttempts([attempt], deps);
+
+    expect(res.bridged).toEqual([]);
+    expect(res.errors).toEqual([{
+      requestId: attempt.requestId,
+      error: 'anchor receipt unavailable after submission',
+    }]);
+    expect(fetchCalls).toBe(1);
+    expect(publishCalls).toBe(1);
   });
 
   it('surfaces a slate instance_id whose repo cannot be derived (repo-exclusion incomplete, not silent)', async () => {

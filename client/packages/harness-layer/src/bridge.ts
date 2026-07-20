@@ -28,7 +28,10 @@ import type { ScrubPipeline } from '../../../src/trajectory/scrub/pipeline.js';
 export interface AttemptRef {
   requestId: string;
   chainId: number;
-  /** swe-rebench `instance_id` (owner__repo-N). */
+  /**
+   * Enrichment-projected swe-rebench `instance_id` (owner__repo-N). This is a
+   * discovery hint, never authoritative task identity.
+   */
   instanceId: string;
   /** Model the attempt ran under (from `attemptEnvelopeMeta.model`). */
   model: string;
@@ -45,6 +48,16 @@ export interface AttemptRef {
    * `manifestCid` (e.g. the corpus fetcher) do not need it.
    */
   verdictManifestCid?: string;
+  /**
+   * Bounded, permissionless enrichment projections retained for one
+   * `(requestId, chainId, polarity)` tuple. The bridge tries them only to let
+   * the evidence fetcher reach signed task facts; none may drive exclusion,
+   * grouping, or publication identity.
+   */
+  discoveryCandidates?: Array<{
+    instanceId: string;
+    verdictManifestCid: string;
+  }>;
   /** Echo/lineage key — instances sharing a key are not independent corroboration. */
   sourceLineageKey?: string;
   lookupFlagged?: boolean;
@@ -179,18 +192,6 @@ function assertAuthenticatedBridgeEvidence(
       `bridge evidence for ${ref.instanceId} requires an authenticated task provenance tuple`,
     );
   }
-  for (const [field, candidate, authenticated] of [
-    ['instanceId', ref.instanceId, ev.instanceId],
-    ['repo', ref.repo, ev.repo],
-    ['baseCommit', ref.baseCommit, ev.baseCommit],
-  ] as const) {
-    if (candidate !== undefined && candidate !== authenticated) {
-      throw new Error(
-        `authenticated task provenance mismatch at attemptRef.${field}: `
-        + `expected ${JSON.stringify(authenticated)}, got ${JSON.stringify(candidate)}`,
-      );
-    }
-  }
 }
 
 /**
@@ -301,8 +302,9 @@ export function toBridgeCapturedTask(ref: AttemptRef, ev: BridgeEvidence, now: D
 }
 
 /**
- * Bridge a batch of ledger verdict rows into layer-1 evidence. Exclusion
- * (instance_id + derived repo) and dedup happen before any fetch/publish.
+ * Bridge a batch of ledger verdict rows into layer-1 evidence. Permissionless
+ * enrichment projections are used only to discover authenticated evidence.
+ * Exclusion and dedup use the signed task identity returned by `fetchEvidence`.
  */
 export async function bridgeAttempts(refs: AttemptRef[], deps: BridgeDeps): Promise<BridgeResult> {
   const now = deps.now?.() ?? new Date();
@@ -324,44 +326,99 @@ export async function bridgeAttempts(refs: AttemptRef[], deps: BridgeDeps): Prom
   const kept = new Map<string, number>();
 
   for (const ref of refs) {
-    if (deps.weakSuiteInstanceIds?.has(ref.instanceId)) {
-      result.excludedHeldOut.push({ instanceId: ref.instanceId, reason: 'instance_id' });
+    const candidates = ref.discoveryCandidates?.length
+      ? ref.discoveryCandidates
+      : [{
+          instanceId: ref.instanceId,
+          verdictManifestCid: ref.verdictManifestCid ?? '',
+        }];
+    let selected:
+      | {
+          ref: AttemptRef;
+          evidence: BridgeEvidence & Required<Pick<
+            BridgeEvidence,
+            'repo' | 'baseCommit' | 'taskCreatedAt' | 'instanceId' | 'verifier'
+          >>;
+        }
+      | undefined;
+    let lastError: unknown;
+
+    for (const candidate of candidates) {
+      const candidateRef: AttemptRef = {
+        ...ref,
+        instanceId: candidate.instanceId,
+        verdictManifestCid: candidate.verdictManifestCid,
+        discoveryCandidates: undefined,
+      };
+      try {
+        const ev = await deps.fetchEvidence(candidateRef);
+        assertAuthenticatedBridgeEvidence(candidateRef, ev);
+        selected = { ref: candidateRef, evidence: ev };
+        break;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    // Candidate-level misses are intentionally suppressed when a later
+    // projection reaches the authenticated task. Surface one error only when
+    // the entire bounded candidate set fails.
+    if (!selected) {
+      result.errors.push({
+        requestId: ref.requestId,
+        error: lastError instanceof Error ? lastError.message : String(lastError),
+      });
       continue;
     }
-    if (deps.lookupFlaggedInstanceIds?.has(ref.instanceId)) {
-      result.deduped.push({ instanceId: ref.instanceId, polarity: ref.polarity });
+
+    const ev = selected.evidence;
+    const instanceId = ev.instanceId;
+    const canonicalRef: AttemptRef = {
+      ...selected.ref,
+      instanceId,
+      repo: ev.repo,
+      baseCommit: ev.baseCommit,
+    };
+    if (deps.weakSuiteInstanceIds?.has(instanceId)) {
+      result.excludedHeldOut.push({ instanceId, reason: 'instance_id' });
       continue;
     }
-    if (deps.slateInstanceIds.has(ref.instanceId)) {
-      result.excludedHeldOut.push({ instanceId: ref.instanceId, reason: 'instance_id' });
+    if (deps.lookupFlaggedInstanceIds?.has(instanceId)) {
+      result.deduped.push({ instanceId, polarity: ref.polarity });
       continue;
     }
-    const repo = repoFromInstanceId(ref.instanceId);
-    if (repo && slateRepos.has(repo)) {
-      result.excludedHeldOut.push({ instanceId: ref.instanceId, reason: 'repo' });
+    if (deps.slateInstanceIds.has(instanceId)) {
+      result.excludedHeldOut.push({ instanceId, reason: 'instance_id' });
       continue;
     }
-    const key = `${ref.instanceId}:${ref.polarity}`;
+    if (slateRepos.has(ev.repo)) {
+      result.excludedHeldOut.push({ instanceId, reason: 'repo' });
+      continue;
+    }
+    const key = `${instanceId}:${ref.polarity}`;
     if ((kept.get(key) ?? 0) >= groupCap) {
-      result.deduped.push({ instanceId: ref.instanceId, polarity: ref.polarity });
+      result.deduped.push({ instanceId, polarity: ref.polarity });
       continue;
     }
+
     try {
-      const ev = await deps.fetchEvidence(ref);
-      const task = toBridgeCapturedTask(ref, ev, now);
-      const pub = await deps.publishEvidence(task, ref);
-      // Count only SUCCESSFUL bridges toward the cap — the evidence fetch is a
-      // fragile multi-hop join (bridge-fetch-evidence.ts); a miss must not spend
-      // a group slot, so a later candidate for the same key can still backfill.
+      const task = toBridgeCapturedTask(canonicalRef, ev, now);
+      const pub = await deps.publishEvidence(task, canonicalRef);
+      // Count only SUCCESSFUL bridges toward the cap. Publication failures are
+      // surfaced once and never retried through another discovery projection:
+      // a failed publish may already have external side effects.
       kept.set(key, (kept.get(key) ?? 0) + 1);
       result.bridged.push({
-        instanceId: ref.instanceId,
+        instanceId,
         polarity: ref.polarity,
         envelopeRef: pub.envelopeRef,
         anchorTx: pub.anchorTx,
       });
     } catch (err) {
-      result.errors.push({ requestId: ref.requestId, error: err instanceof Error ? err.message : String(err) });
+      result.errors.push({
+        requestId: ref.requestId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
   return result;

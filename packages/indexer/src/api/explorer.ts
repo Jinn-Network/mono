@@ -335,7 +335,52 @@ function verdictEnvelopeJoinCondition() {
   return and(
     eq(schema.verdictEnvelopeMeta.requestId, schema.verdict.requestId),
     eq(schema.verdictEnvelopeMeta.chainId, schema.verdict.chainId),
+    // Bind the enriched projection back to the authoritative delivery row.
+    // A MetadataSet publisher can claim an arbitrary requestId in an envelope;
+    // those rows must not become explorer truth merely because requestId matches.
+    eq(schema.verdictEnvelopeMeta.evaluator, schema.verdict.evaluator),
+    eq(schema.verdictEnvelopeMeta.taskId, schema.verdict.taskId),
+    eq(schema.verdictEnvelopeMeta.attemptIndex, schema.verdict.attemptIndex),
+    // Composite retention intentionally permits competing candidates. Keep the
+    // LEFT JOIN one-to-one only when exactly one candidate survives the
+    // authoritative linkage above. A second linked candidate fails closed
+    // instead of multiplying counts or making query order select the outcome.
+    sql`(
+      SELECT count(*)
+      FROM "verdict_envelope_meta" AS "verdict_candidate"
+      WHERE "verdict_candidate"."request_id" = ${schema.verdict.requestId}
+        AND "verdict_candidate"."chain_id" = ${schema.verdict.chainId}
+        AND "verdict_candidate"."evaluator" = ${schema.verdict.evaluator}
+        AND "verdict_candidate"."task_id" = ${schema.verdict.taskId}
+        AND "verdict_candidate"."attempt_index" = ${schema.verdict.attemptIndex}
+    ) = 1`,
   );
+}
+
+/**
+ * Canonical attempt-envelope join.
+ *
+ * Unlike verdict metadata, AttemptEnvelopeMeta currently has no projected Safe
+ * address that can be compared with attempt.operator. Until an authenticated
+ * canonical projection exists, the only non-order-dependent policy is
+ * fail-closed: one request+chain candidate may enrich an authoritative attempt;
+ * two or more candidates leave it unenriched.
+ */
+function attemptEnvelopeJoinCondition() {
+  return and(
+    eq(schema.attemptEnvelopeMeta.requestId, schema.attempt.requestId),
+    eq(schema.attemptEnvelopeMeta.chainId, schema.attempt.chainId),
+    uniqueAttemptEnvelopeCandidateCondition(),
+  );
+}
+
+function uniqueAttemptEnvelopeCandidateCondition() {
+  return sql`(
+    SELECT count(*)
+    FROM "attempt_envelope_meta" AS "attempt_candidate"
+    WHERE "attempt_candidate"."request_id" = ${schema.attemptEnvelopeMeta.requestId}
+      AND "attempt_candidate"."chain_id" = ${schema.attemptEnvelopeMeta.chainId}
+  ) = 1`;
 }
 
 /**
@@ -594,7 +639,8 @@ app.get('/network', async (c) => {
           pluginsJson: schema.attemptEnvelopeMeta.pluginsJson,
         })
         .from(schema.attemptEnvelopeMeta)
-        .where(eq(schema.attemptEnvelopeMeta.chainId, EXPLORER_CHAIN_ID)),
+        .innerJoin(schema.attempt, attemptEnvelopeJoinCondition())
+        .where(eq(schema.attempt.chainId, EXPLORER_CHAIN_ID)),
 
       // Total attempt count for enrichmentCoverage.share denominator — scoped to EXPLORER_CHAIN_ID.
       db
@@ -917,10 +963,7 @@ app.get('/solvernet/:cid', async (c) => {
             .from(schema.attemptEnvelopeMeta)
             .innerJoin(
               schema.attempt,
-              and(
-                eq(schema.attemptEnvelopeMeta.requestId, schema.attempt.requestId),
-                eq(schema.attempt.chainId, EXPLORER_CHAIN_ID),
-              ),
+              attemptEnvelopeJoinCondition(),
             )
             .where(
               and(
@@ -1020,10 +1063,7 @@ app.get('/solvernet/:cid', async (c) => {
               .from(schema.attemptEnvelopeMeta)
               .innerJoin(
                 schema.attempt,
-                and(
-                  eq(schema.attemptEnvelopeMeta.requestId, schema.attempt.requestId),
-                  eq(schema.attempt.chainId, EXPLORER_CHAIN_ID),
-                ),
+                attemptEnvelopeJoinCondition(),
               )
               .where(
                 and(
@@ -1455,10 +1495,11 @@ app.get('/operator/:addr', async (c) => {
             solverType: schema.attemptEnvelopeMeta.solverType,
           })
           .from(schema.attemptEnvelopeMeta)
+          .innerJoin(schema.attempt, attemptEnvelopeJoinCondition())
           .where(
             and(
               inArray(schema.attemptEnvelopeMeta.requestId, requestIds),
-              eq(schema.attemptEnvelopeMeta.chainId, EXPLORER_CHAIN_ID),
+              eq(schema.attempt.chainId, EXPLORER_CHAIN_ID),
             ),
           )
       : [];
@@ -1682,10 +1723,7 @@ app.get('/slice', async (c) => {
     )
     .leftJoin(
       schema.attemptEnvelopeMeta,
-      and(
-        eq(schema.attemptEnvelopeMeta.requestId, schema.attempt.requestId),
-        eq(schema.attemptEnvelopeMeta.chainId, schema.attempt.chainId),
-      ),
+      attemptEnvelopeJoinCondition(),
     )
     .where(
       and(
@@ -2196,8 +2234,7 @@ async function buildLeaderboardRows(
       .innerJoin(
         schema.attemptEnvelopeMeta,
         and(
-          eq(schema.attempt.requestId, schema.attemptEnvelopeMeta.requestId),
-          eq(schema.attemptEnvelopeMeta.chainId, EXPLORER_CHAIN_ID),
+          attemptEnvelopeJoinCondition(),
           eq(schema.attemptEnvelopeMeta.mode, mode),
         ),
       )
@@ -2325,10 +2362,7 @@ async function getDominantModeAndHarness(
     .from(schema.attempt)
     .innerJoin(
       schema.attemptEnvelopeMeta,
-      and(
-        eq(schema.attempt.requestId, schema.attemptEnvelopeMeta.requestId),
-        eq(schema.attemptEnvelopeMeta.chainId, EXPLORER_CHAIN_ID),
-      ),
+      attemptEnvelopeJoinCondition(),
     )
     .where(
       and(
@@ -2393,8 +2427,7 @@ async function buildLeaderboardRowsWithHarnessFilter(
 ): Promise<LeaderboardRow[]> {
   // Build the envelope filter conditions
   const envelopeConditions = [
-    eq(schema.attempt.requestId, schema.attemptEnvelopeMeta.requestId),
-    eq(schema.attemptEnvelopeMeta.chainId, EXPLORER_CHAIN_ID),
+    attemptEnvelopeJoinCondition(),
     eq(schema.attemptEnvelopeMeta.implName, harnessFilter),
     ...(modeFilter !== undefined ? [eq(schema.attemptEnvelopeMeta.mode, modeFilter)] : []),
   ];

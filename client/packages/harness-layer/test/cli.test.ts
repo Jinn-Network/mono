@@ -121,6 +121,58 @@ function fakeHit(overrides: Partial<CorpusSearchHit> = {}): CorpusSearchHit {
 describe('bounded IPFS JSON fetcher', () => {
   const VALID_CID = 'QmYwAPJzv5CZsnAzt8auVZRn4xPjgVAc6zP8s8vF5hY8pN';
 
+  function rawBase16Cid(bytes: string, uppercase = false): string {
+    const digest = createHash('sha256').update(bytes).digest('hex');
+    const body = `01551220${digest}`;
+    return uppercase ? `F${body.toUpperCase()}` : `f${body}`;
+  }
+
+  function rawBase32Cid(bytes: string): string {
+    const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
+    const digest = createHash('sha256').update(bytes).digest();
+    const cidBytes = new Uint8Array([0x01, 0x55, 0x12, 0x20, ...digest]);
+    let accumulator = 0;
+    let bits = 0;
+    let encoded = '';
+    for (const byte of cidBytes) {
+      accumulator = (accumulator << 8) | byte;
+      bits += 8;
+      while (bits >= 5) {
+        bits -= 5;
+        encoded += alphabet[(accumulator >>> bits) & 31];
+      }
+    }
+    if (bits > 0) encoded += alphabet[(accumulator << (5 - bits)) & 31];
+    return `b${encoded}`;
+  }
+
+  it.each([
+    ['deployed lowercase base16', (payload: string) => rawBase16Cid(payload)],
+    ['uppercase base16 multibase', (payload: string) => rawBase16Cid(payload, true)],
+    ['base32', (payload: string) => rawBase32Cid(payload)],
+  ])('accepts and content-binds a raw CIDv1 in %s form', async (_label, cidFor) => {
+    const payload = '{"authenticated":true}';
+    const cid = cidFor(payload);
+    const fetchIpfs = createBoundedIpfsJsonFetcher({
+      gateway: 'https://gateway.example',
+      fetchImpl: vi.fn(async () => new Response(payload)),
+    });
+
+    await expect(fetchIpfs(cid)).resolves.toEqual({ authenticated: true });
+  });
+
+  it('rejects requested raw CID A when the gateway returns valid JSON object B', async () => {
+    const requestedBytes = '{"task":"A"}';
+    const returnedBytes = '{"task":"B"}';
+    const cid = rawBase16Cid(requestedBytes);
+    const fetchIpfs = createBoundedIpfsJsonFetcher({
+      gateway: 'https://gateway.example',
+      fetchImpl: vi.fn(async () => new Response(returnedBytes)),
+    });
+
+    await expect(fetchIpfs(cid)).rejects.toThrow(/content digest.*requested CID/i);
+  });
+
   it('passes a caller-supplied cap through to the streamed body reader', async () => {
     const payload = JSON.stringify({ authenticated: true });
     const fetchIpfs = createBoundedIpfsJsonFetcher({
@@ -220,6 +272,11 @@ describe('bounded IPFS JSON fetcher', () => {
     '../../api/v0/id',
     '%2e%2e/%2e%2e/api/v0/id',
     'bafy-not-a-real-cid',
+    `f01551220${'a'.repeat(63)}`,
+    `f01551220${'a'.repeat(65)}`,
+    `f01551320${'a'.repeat(64)}`,
+    `f01551220${'A'.repeat(64)}`,
+    `F01551220${'a'.repeat(64)}`,
     'Qm' + 'a'.repeat(10_000),
   ])('rejects a non-CID path segment before contacting the gateway: %s', async (cid) => {
     const fetchImpl = vi.fn();
