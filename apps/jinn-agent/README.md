@@ -59,11 +59,13 @@ The same standalone plugin used by the fork installs into an unmodified Hermes:
 
 ```bash
 hermes plugins install Jinn-Network/jinn-plugin
-hermes plugins enable jinn
 ```
 
-The plugin carries its required Jinn layer. If the doctor reports a stale or
-missing layer, refresh the plugin with `hermes plugins update jinn`.
+Answer `y` at Hermes's enable prompt. The plugin carries its required Jinn
+layer; verify it with `hermes jinn-doctor`. If the doctor reports a stale or
+missing layer, refresh the plugin with `hermes plugins update jinn`. The
+canonical install, update, disable, and state-purge instructions live in the
+[plugin README](plugins/jinn/README.md).
 
 ## Already run the upstream agent?
 

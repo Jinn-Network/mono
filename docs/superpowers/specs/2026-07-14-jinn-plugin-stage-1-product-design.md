@@ -47,6 +47,15 @@ users (the epic's usefulness bar). No benchmark workflow, no Jinn-specific task 
 ## 4. The product experience
 
 ### 4.1 Install and onboarding
+
+> **Stage 2 amendment (2026-07-17):** this Stage 1 sequence is a historical
+> record, not the current user path. The ratified path is one command, total:
+> `hermes plugins install Jinn-Network/jinn-plugin`; answer the native enable
+> prompt, then verify with `hermes jinn-doctor`. There is no npm or pip step in
+> the user path and no sharing-consent question while outbound contribution is
+> parked. See the [Stage 2 onboarding design §3.1–§3.3](./2026-07-17-jinn-plugin-onboarding-design.md#31-install-story-one-command-total)
+> and the [charter's ratified letter amendments](../../../log/decisions/2026-07-17-stage2-charter.md#ratified-letter-amendments).
+
 `pip install` the plugin (repo subdirectory today; PyPI later) → `hermes plugins enable jinn`
 → `npm i -g @jinn-network/client` (the `jinn-layer` CLI). First session: onboarding asks
 exactly one sharing consent (default decline) — whether a reproducible task derived from your
@@ -127,6 +136,17 @@ public episodes share one semantic evidence contract; storage,
 retention, scrubbing, and permitted derived views differ.
 
 ### 4.8 Disable and rollback
+
+> **Stage 2 amendment (2026-07-17):** disabling remains
+> `hermes plugins disable jinn` and must restore stock behavior. Removal is
+> `hermes plugins remove jinn`; it intentionally preserves retained local
+> state. A full purge must handle both `$HERMES_HOME/jinn/` and
+> `~/.jinn-client/` after stopping writers, using the backup-first procedure in
+> the [plugin README](../../../apps/jinn-agent/plugins/jinn/README.md#disable-remove-or-purge).
+> Consent is not a Stage 2 rollback surface because outbound publication is
+> structurally parked. See the [onboarding deletion/rollback contract §3.5](./2026-07-17-jinn-plugin-onboarding-design.md#35-deletions-surface-reduction)
+> and the [Stage 2 charter](../../../log/decisions/2026-07-17-stage2-charter.md).
+
 As shipped: `hermes plugins disable jinn`, `pip uninstall jinn-plugin`, `HERMES_SAFE_MODE=1`;
 disabled means zero Jinn hooks, output, subprocesses, or state writes. Share-consent off still
 captures, distills, and records candidates locally, but performs zero outbound publication.
