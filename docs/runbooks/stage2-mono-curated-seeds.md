@@ -76,6 +76,7 @@ For each record, the operator must review facts the script cannot establish:
 ## 3. Mechanical audit (read-only)
 
 ```bash
+set -o pipefail
 corepack yarn stage2:validate-curated-seeds --episodes-dir \
   /tmp/jinn-stage2-mono-candidates --repo Jinn-Network/mono --json \
   | tee /tmp/stage2-mono-curated-audit.json
@@ -142,7 +143,16 @@ review requires a fresh audit and plan.
 Only the authorized operator performs this section:
 
 ```bash
-eval "$(corepack yarn jinn-layer derive-env)"
+unset JINN_LAYER_PRIVATE_KEY JINN_LAYER_SAFE_ADDRESS JINN_LAYER_AGENT_ID
+derived_env="$(corepack yarn jinn-layer derive-env)" || {
+  printf '%s\n' 'derive-env failed; nothing was published' >&2
+  exit 1
+}
+eval "$derived_env"
+: "${JINN_LAYER_PRIVATE_KEY:?derive-env omitted private key}"
+: "${JINN_LAYER_SAFE_ADDRESS:?derive-env omitted Safe address}"
+: "${JINN_LAYER_AGENT_ID:?derive-env omitted agent id}"
+set -o pipefail
 corepack yarn jinn-layer seed execute /tmp/stage2-mono-curated-plan.json \
   --episodes-dir /tmp/jinn-stage2-mono-candidates --json \
   | tee /tmp/stage2-mono-curated-publish.json
@@ -160,6 +170,7 @@ preserved local state supplies the prior envelope ref for `supersedes`.
 ## 7. Run the shared live probe
 
 ```bash
+set -o pipefail
 corepack yarn jinn-layer corpus probe "Jinn-Network/mono" --json \
   | tee /tmp/stage2-mono-corpus-probe.json
 ```

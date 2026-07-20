@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 import { RETRIEVAL_VISIBLE_TAG } from '@jinn-network/plugin';
 import {
   auditCuratedSeedBatch,
@@ -13,6 +14,12 @@ import {
 const REPO = 'Jinn-Network/mono';
 const FIXTURES_DIR = fileURLToPath(
   new URL('../fixtures/stage1-seeds', import.meta.url),
+);
+const TEMPLATE_DIR = fileURLToPath(
+  new URL('../fixtures/curated-mono-candidates', import.meta.url),
+);
+const RUNBOOK_PATH = fileURLToPath(
+  new URL('../../../../docs/runbooks/stage2-mono-curated-seeds.md', import.meta.url),
 );
 
 function episode(index: number, overrides: Partial<SeedEpisode> = {}): SeedEpisode {
@@ -125,7 +132,7 @@ describe('auditCuratedSeedBatch', () => {
     [
       'missing retrieval mark',
       episode(1, { tags: ['mono', 'regression'] }),
-      'missing retrieval visibility mark',
+      'published tags missing retrieval visibility mark',
     ],
     [
       'wrong repository',
@@ -135,7 +142,7 @@ describe('auditCuratedSeedBatch', () => {
     [
       'missing shared probe vocabulary',
       episode(1, { tags: ['dashboard', RETRIEVAL_VISIBLE_TAG] }),
-      'tags must include a shared probe term: mono',
+      'published tags must include a shared probe term: mono',
     ],
     [
       'weak verification',
@@ -219,6 +226,50 @@ describe('auditCuratedSeedBatch', () => {
     expect(report.automatedStatus).toBe('fail');
     expect(report.records[0]?.errors.join('\n')).toMatch(/seed scrub rejected content/);
     expect(report.eligibleRecordCount).toBe(2);
+  });
+
+  it('audits the canonical published tag projection, including the 16-tag cap', async () => {
+    const report = await auditCuratedSeedBatch({
+      repoSlug: REPO,
+      episodes: [
+        episode(1, {
+          tags: [
+            ...Array.from({ length: 15 }, (_, index) => `junk-${index}`),
+            'mono',
+            RETRIEVAL_VISIBLE_TAG,
+          ],
+        }),
+        episode(2),
+        episode(3),
+      ],
+    });
+
+    expect(report.automatedStatus).toBe('fail');
+    expect(report.records[0]?.errors).toEqual(
+      expect.arrayContaining([
+        'published tags missing retrieval visibility mark',
+        'published tags must include a shared probe term: mono',
+      ]),
+    );
+  });
+
+  it('keeps the checked-in candidate template non-loadable and unmarked', async () => {
+    const template = JSON.parse(
+      readFileSync(`${TEMPLATE_DIR}/episode.template.json`, 'utf8'),
+    ) as { tags?: unknown[] };
+    expect(template.tags).not.toContain(RETRIEVAL_VISIBLE_TAG);
+    await expect(createLocalEpisodeSeedSource(TEMPLATE_DIR).list()).resolves.toEqual([]);
+  });
+
+  it('documents fail-closed credential derivation and pipeline exit handling', () => {
+    const runbook = readFileSync(RUNBOOK_PATH, 'utf8');
+    expect(runbook).toContain(
+      'unset JINN_LAYER_PRIVATE_KEY JINN_LAYER_SAFE_ADDRESS JINN_LAYER_AGENT_ID',
+    );
+    expect(runbook).toContain(
+      'derived_env="$(corepack yarn jinn-layer derive-env)" || {',
+    );
+    expect(runbook.match(/set -o pipefail/g)).toHaveLength(3);
   });
 
   it('reports the checked-in Stage 1 fixtures as the real one-of-three starting point, not a completed B3 batch', async () => {

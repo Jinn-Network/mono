@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -111,6 +111,61 @@ describe('validate-curated-seed-batch CLI', () => {
         publishAuthorized: false,
         liveProbe: { status: 'not-run' },
       });
+    } finally {
+      rmSync(episodesDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects symlinked candidate files instead of reading outside the directory', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jinn-curated-symlink-'));
+    const episodesDir = join(root, 'episodes');
+    const outside = join(root, 'outside.json');
+    try {
+      writeFileSync(outside, `${JSON.stringify(validEpisode(1))}\n`);
+      mkdirSync(episodesDir);
+      symlinkSync(outside, join(episodesDir, 'linked.episode.json'));
+
+      await expect(
+        runCuratedSeedBatchValidator(
+          ['--episodes-dir', episodesDir, '--json'],
+          { stdout: vi.fn(), stderr: vi.fn() },
+        ),
+      ).rejects.toThrow(/symbolic link|regular file/i);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects oversized candidate files before parsing them', async () => {
+    const episodesDir = mkdtempSync(join(tmpdir(), 'jinn-curated-oversized-'));
+    try {
+      writeFileSync(
+        join(episodesDir, 'oversized.episode.json'),
+        ' '.repeat(1_048_577),
+      );
+      await expect(
+        runCuratedSeedBatchValidator(
+          ['--episodes-dir', episodesDir, '--json'],
+          { stdout: vi.fn(), stderr: vi.fn() },
+        ),
+      ).rejects.toThrow(/exceeds.*byte/i);
+    } finally {
+      rmSync(episodesDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects candidate directories over the bounded file-count ceiling', async () => {
+    const episodesDir = mkdtempSync(join(tmpdir(), 'jinn-curated-too-many-'));
+    try {
+      for (let index = 0; index < 101; index += 1) {
+        writeFileSync(join(episodesDir, `${index}.episode.json`), '{}');
+      }
+      await expect(
+        runCuratedSeedBatchValidator(
+          ['--episodes-dir', episodesDir, '--json'],
+          { stdout: vi.fn(), stderr: vi.fn() },
+        ),
+      ).rejects.toThrow(/101 candidate files; maximum is 100/);
     } finally {
       rmSync(episodesDir, { recursive: true, force: true });
     }

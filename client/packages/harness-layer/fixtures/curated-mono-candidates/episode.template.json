@@ -6,8 +6,7 @@
   "tags": [
     "mono",
     "<subsystem>",
-    "<failure-vocabulary>",
-    "retrieval:visible.v1"
+    "<failure-vocabulary>"
   ],
   "steps": [
     {

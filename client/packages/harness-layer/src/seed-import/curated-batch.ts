@@ -1,6 +1,9 @@
 import { deriveRepositorySearchTerms, hasRetrievalMark } from '@jinn-network/plugin';
-import { buildSeedScrubPipeline } from '../../../../src/trajectory/scrub/build.js';
 import { CORPUS_ONBOARDING_K } from '../corpus-probes.js';
+import {
+  publishedEpisodeTags,
+  seedEpisodePrivacyRedactionCount,
+} from './episode-execute.js';
 import type { SeedEpisode } from './episode-fetch.js';
 
 export const CURATED_SEED_AUDIT_SCHEMA_VERSION = 'jinn.curated-seed-audit.v1' as const;
@@ -51,12 +54,12 @@ export async function auditCuratedSeedBatch({
   const probeTerms = deriveRepositorySearchTerms(repoSlug);
   const seenIds = new Set<string>();
   const seenSourceUrls = new Set<string>();
-  const scrubPipeline = buildSeedScrubPipeline();
   const commitUrlPrefix = `https://github.com/${repoSlug}/commit/`;
 
   const records: CuratedSeedRecordAudit[] = [];
   for (const episode of episodes) {
     const errors: string[] = [];
+    const publishedTags = publishedEpisodeTags(episode);
 
     if (episode.repo !== repoSlug) {
       errors.push(`repo must be ${repoSlug}`);
@@ -64,11 +67,11 @@ export async function auditCuratedSeedBatch({
     if (!episode.baseCommit) {
       errors.push('baseCommit must name a full commit');
     }
-    if (!hasRetrievalMark(episode.tags)) {
-      errors.push('missing retrieval visibility mark');
+    if (!hasRetrievalMark(publishedTags)) {
+      errors.push('published tags missing retrieval visibility mark');
     }
-    if (!probeTerms.some((term) => episode.tags.includes(term))) {
-      errors.push(`tags must include a shared probe term: ${probeTerms.join(', ')}`);
+    if (!probeTerms.some((term) => publishedTags.includes(term))) {
+      errors.push(`published tags must include a shared probe term: ${probeTerms.join(', ')}`);
     }
     if (
       episode.outcome.status !== 'completed' ||
@@ -107,10 +110,10 @@ export async function auditCuratedSeedBatch({
       }
     }
 
-    const scrub = await scrubPipeline.run({ 'seed.episode': episode });
-    if (scrub.redactions.length > 0) {
+    const redactionCount = await seedEpisodePrivacyRedactionCount(episode);
+    if (redactionCount > 0) {
       errors.push(
-        `seed scrub rejected content: ${scrub.redactions.length} redaction(s) would be required`,
+        `seed scrub rejected content: ${redactionCount} redaction(s) would be required`,
       );
     }
 

@@ -7,6 +7,8 @@ import {
 import { createLocalEpisodeSeedSource } from '../packages/harness-layer/src/seed-import/episode-fetch.js';
 
 const DEFAULT_REPO_SLUG = 'Jinn-Network/mono';
+const MAX_CURATED_EPISODE_FILES = 100;
+const MAX_CURATED_EPISODE_BYTES = 1_048_576;
 
 export interface CuratedSeedBatchCliArgs {
   episodesDir: string;
@@ -87,7 +89,11 @@ export async function runCuratedSeedBatchValidator(
   },
 ): Promise<number> {
   const args = parseCuratedSeedBatchArgs(argv);
-  const source = createLocalEpisodeSeedSource(resolve(args.episodesDir));
+  const source = createLocalEpisodeSeedSource(resolve(args.episodesDir), {
+    maxFiles: MAX_CURATED_EPISODE_FILES,
+    maxFileBytes: MAX_CURATED_EPISODE_BYTES,
+    rejectSymlinks: true,
+  });
   const report = await auditCuratedSeedBatch({
     repoSlug: args.repoSlug,
     episodes: await source.list(),
