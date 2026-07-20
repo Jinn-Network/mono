@@ -122,6 +122,47 @@ describe('runStageHeadless', () => {
     expect(calls[0].opts.cwd).toBe(BASE_OPTS.worktreePath);
   });
 
+  it('removes lifecycle authority and publication credentials from the stage environment', async () => {
+    const { spawn, calls } = makeSpawn('close-0', 'ok');
+    await runStageHeadless({
+      ...BASE_OPTS,
+      environment: {
+        PATH: '/bin',
+        HOME: '/home/runner',
+        JINN_AUTOPILOT_RUNTIME: 'claude',
+        JINN_AUTOPILOT_SESSION_MANIFEST: '/attempt/manifest.json',
+        JINN_AUTOPILOT_CAPABILITY_ATTESTATION: '/attempt/attestation.json',
+        GH_TOKEN: 'selected-secret',
+        GITHUB_TOKEN: 'ambient-secret',
+        JINN_IMPL_GH_TOKEN: 'implementation-secret',
+        JINN_REVIEW_GH_TOKEN: 'review-secret',
+        GH_CONFIG_DIR: '/attempt/gh-config',
+        GIT_ASKPASS: '/attempt/askpass',
+        SSH_ASKPASS: '/attempt/askpass',
+        SSH_AUTH_SOCK: '/tmp/agent.sock',
+        GIT_SSH_COMMAND: 'ambient-ssh',
+      },
+    }, spawn);
+
+    expect(calls[0].opts).toHaveProperty('env');
+    const environment = calls[0].opts.env as NodeJS.ProcessEnv;
+    expect(environment.PATH).toBe('/bin');
+    expect(environment.HOME).toBe('/home/runner');
+    expect(environment.JINN_AUTOPILOT_RUNTIME).toBe('claude');
+    expect(environment.JINN_AUTOPILOT_SESSION_MANIFEST).toBeUndefined();
+    expect(environment.JINN_AUTOPILOT_CAPABILITY_ATTESTATION).toBeUndefined();
+    expect(environment.GH_TOKEN).toBeUndefined();
+    expect(environment.GITHUB_TOKEN).toBeUndefined();
+    expect(environment.JINN_IMPL_GH_TOKEN).toBeUndefined();
+    expect(environment.JINN_REVIEW_GH_TOKEN).toBeUndefined();
+    expect(environment.GH_CONFIG_DIR).not.toBe('/attempt/gh-config');
+    expect(environment.GIT_TERMINAL_PROMPT).toBe('0');
+    expect(environment.GIT_ASKPASS).toBe('false');
+    expect(environment.SSH_ASKPASS).toBe('false');
+    expect(environment.SSH_AUTH_SOCK).toBeUndefined();
+    expect(environment.GIT_SSH_COMMAND).toBe('false');
+  });
+
   it('(c) prepends the headless-override block to the stage prompt', async () => {
     const { spawn, calls } = makeSpawn('close-0', 'ok');
     await runStageHeadless(BASE_OPTS, spawn);

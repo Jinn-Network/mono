@@ -16,30 +16,44 @@ concurrently, but all results return in the current turn.
 
 ## Fresh-root sessions
 
-Write the curated prompt to `/tmp/stage-<N>-<stage>.md`, then run:
+Create every curated prompt as an owner-only unique file inside the current
+attempt's reports directory, then run:
 
 ```bash
+SESSION_REPORT_DIR="$(dirname -- "$JINN_AUTOPILOT_SESSION_MANIFEST")/reports"
+STAGE_PROMPT="$(mktemp "$SESSION_REPORT_DIR/stage-${STAGE_NUMBER}-${STAGE_NAME}.md.XXXXXX")"
+chmod 600 "$STAGE_PROMPT"
+# Write only this stage's curated prompt to "$STAGE_PROMPT".
 (cd "$WORKTREE_PATH/packages/autopilot" && yarn stage:run \
-  --prompt-file /tmp/stage-<N>-<stage>.md \
+  --prompt-file "$STAGE_PROMPT" \
   --worktree "$WORKTREE_PATH")
+rm -f -- "$STAGE_PROMPT"
 ```
+
+Install an exact-file cleanup trap before launch so interruption also removes
+only `"$STAGE_PROMPT"`. Never reuse or predict a prompt path. Parallel roots
+each receive their own `mktemp` result.
 
 Each invocation is a new depth-0 Hermes process, so the stage may use its own
 depth-1 fan-out internally. Do not raise Hermes's default spawn depth to
 compensate for launching depth-needing work as a child.
+`stage:run` removes the coordinator's GitHub credentials, Git/SSH publication
+paths, and session manifest before spawning the root while retaining the
+configured Hermes runtime/model/provider. Do not launch a fresh root directly
+in a way that bypasses that environment boundary.
 
-## Synchronous parallel children
+## Synchronous parallel roots
 
-For synchronous parallel fan-out, issue all independent `delegate_task` calls
-in one turn. Wait for Hermes to aggregate every child result before
-continuing. Each child receives a separate curated prompt and cannot be reused
-as a later fixer.
+For synchronous parallel work, launch a separate `stage:run` invocation for
+each curated prompt concurrently. Wait for every root result and aggregate
+them before continuing. Each root receives the stripped stage environment and
+cannot be reused as a later fixer.
 
-## Lightweight children
+## Single roots
 
-Use one fresh synchronous `delegate_task` child and wait for its result in the
-current turn. Never use a lightweight child when the workflow prescribes a
-fresh root.
+Use one `stage:run` invocation and wait for its result in the current turn.
+Do not replace it with an in-process delegation that inherits the
+coordinator's GitHub credentials or session manifest.
 
 ## Skill loading
 

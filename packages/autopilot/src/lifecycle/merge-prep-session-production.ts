@@ -21,6 +21,7 @@ import {
   sanitizedGitHubCommandOverlay,
 } from './credentials.js';
 import { makeGitProtocolPort } from './git-protocol.js';
+import { readExactChangedFiles } from './github-changed-files.js';
 import { validateCanonicalGitHubHttpsRemote } from './implementation-executor.js';
 import type {
   MergePrepAuthority,
@@ -122,20 +123,22 @@ export function makeProductionMergePrepSessionPort(
     const item = project.items.find((entry) =>
       entry.contentType === 'Issue' && entry.number === manifest.issueNumber);
     if (item === undefined) throw new Error('Merge-prep issue is missing from Project');
-    const filePages = JSON.parse(await run(manifest, 'gh', [
-      'api', `repos/${REPO}/pulls/${manifest.prNumber}/files?per_page=100`,
-      '--paginate', '--slurp',
-    ])) as Array<Array<{ filename?: unknown }>>;
-    if (!Array.isArray(filePages) || filePages.some((page) => !Array.isArray(page))) {
-      throw new Error('Merge-prep changed files were incomplete');
-    }
-    const files = filePages.flat().map((file) => {
-      if (typeof file.filename !== 'string') throw new Error('Malformed changed file');
-      return file.filename;
+    const changedFiles = await readExactChangedFiles({
+      run: secureRunner(manifest),
+      prNumber: manifest.prNumber as number,
+      expectedHead: gitOid(parsed.headRefOid),
+      expectedBaseRefName: parsed.baseRefName,
+      context: 'Merge-prep',
     });
-    const baseOid = manifest.targetBaseOid as GitOid;
+    if (
+      manifest.targetBaseOid === undefined
+      || changedFiles.baseOid !== manifest.targetBaseOid
+    ) {
+      throw new Error('Merge-prep target base changed');
+    }
     const content = JSON.parse(await run(manifest, 'gh', [
-      'api', `repos/${REPO}/contents/.github/CODEOWNERS?ref=${baseOid}`,
+      'api',
+      `repos/${REPO}/contents/.github/CODEOWNERS?ref=${changedFiles.baseOid}`,
     ])) as { content?: unknown };
     if (typeof content.content !== 'string') throw new Error('CODEOWNERS read was incomplete');
     const codeowners = Buffer.from(content.content.replace(/\n/g, ''), 'base64').toString('utf8');
@@ -152,8 +155,11 @@ export function makeProductionMergePrepSessionPort(
       humanHold: item.status === 'Human'
         || item.blockedOn === 'Human'
         || labels.includes('review:needs-human'),
-      codeownerSensitive: touchesCodeOwnedPath(files, parseOwnedPrefixes(codeowners)),
-      changedFilesComplete: true,
+      codeownerSensitive: touchesCodeOwnedPath(
+        [...changedFiles.files],
+        parseOwnedPrefixes(codeowners),
+      ),
+      changedFilesComplete: changedFiles.complete,
     };
   };
   const mutateReadback = async (

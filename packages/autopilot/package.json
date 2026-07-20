@@ -13,8 +13,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "pressure": "tsx scripts/run-pressure-suite.ts",
-    "autopilot": "tsx scripts/run-autopilot.ts",
+    "autopilot": "tsx scripts/run-autopilot-v2.ts",
     "autopilot:v2": "tsx scripts/run-autopilot-v2.ts",
+    "autopilot:legacy": "tsx scripts/run-autopilot.ts",
+    "autopilot:capability-probe": "tsx scripts/probe-autopilot-v2-capabilities.ts",
     "merge:batch": "tsx bin/jinn-merge-batch.ts",
     "stage:run": "tsx bin/jinn-run-stage.ts",
     "triage:check": "tsx bin/jinn-triage-check.ts"

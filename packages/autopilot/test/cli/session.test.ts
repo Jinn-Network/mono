@@ -1,8 +1,14 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { AttemptManifest } from '../../src/lifecycle/attempt-workspace.js';
+import { gitOid } from '../../src/lifecycle/types.js';
 import {
   makeProductionSessionProtocol,
   readBoundedUtf8File,
@@ -11,6 +17,12 @@ import {
 } from '../../src/cli/session.js';
 
 const MANIFEST_PATH = '/attempt/manifest.json';
+const SUMMARY_PATH = '/attempt/reports/summary.md';
+const BODY_PATH = '/attempt/reports/body.md';
+const REASON_PATH = '/attempt/reports/reason.md';
+const SUCCESS_HEAD = gitOid('a'.repeat(40));
+const NONTERMINAL_HEAD = gitOid('d'.repeat(40));
+const REVIEW_REF = gitOid('c'.repeat(40));
 const MANIFEST: AttemptManifest = {
   version: 2,
   attemptId: '11111111-1111-4111-8111-111111111111',
@@ -57,19 +69,35 @@ function protocol(): SessionProtocol & {
   const calls: Array<{ operation: string; payload?: unknown }> = [];
   return {
     calls,
-    checkpoint: async () => { calls.push({ operation: 'checkpoint' }); },
+    checkpoint: async () => {
+      calls.push({ operation: 'checkpoint' });
+      return { status: 'published', head: SUCCESS_HEAD };
+    },
     implementationComplete: async (_manifest, summary) => {
       calls.push({ operation: 'implementation-complete', payload: summary });
+      return { status: 'complete', head: SUCCESS_HEAD };
     },
     reviewVerdict: async (_manifest, state, body) => {
       calls.push({ operation: 'review-verdict', payload: { state, body } });
+      return state === 'APPROVE'
+        ? { status: 'approved', head: SUCCESS_HEAD }
+        : { status: 'fixing', head: SUCCESS_HEAD };
     },
-    reviewFixPublish: async () => { calls.push({ operation: 'review-fix-publish' }); },
+    reviewFixPublish: async () => {
+      calls.push({ operation: 'review-fix-publish' });
+      return {
+        status: 'published',
+        head: SUCCESS_HEAD,
+        reviewRefOid: REVIEW_REF,
+      };
+    },
     mergePrepComplete: async (_manifest, summary) => {
       calls.push({ operation: 'merge-prep-complete', payload: summary });
+      return { status: 'complete', head: SUCCESS_HEAD };
     },
     human: async (_manifest, reason) => {
       calls.push({ operation: 'human', payload: reason });
+      return { status: 'human', head: SUCCESS_HEAD };
     },
   };
 }
@@ -83,10 +111,14 @@ function deps(
     protocol: handler,
     env: { JINN_AUTOPILOT_SESSION_MANIFEST: MANIFEST_PATH },
     readManifest,
+    validateReportFile: (_reportsDirectory: string, candidate: string) =>
+      candidate,
+    writeOutput: vi.fn(),
+    setExitCode: vi.fn(),
     readTextFile: vi.fn((path: string): string => {
-      if (path === '/summary') return 'summary text\n';
-      if (path === '/body') return 'review body\n';
-      if (path === '/reason') return 'human reason\n';
+      if (path === SUMMARY_PATH) return 'summary text\n';
+      if (path === BODY_PATH) return 'review body\n';
+      if (path === REASON_PATH) return 'human reason\n';
       throw new Error('unexpected file');
     }),
   };
@@ -100,17 +132,17 @@ describe('session CLI grammar', () => {
       expected: { operation: 'checkpoint' },
     },
     {
-      argv: ['implementation-complete', '--summary-file', '/summary'],
+      argv: ['implementation-complete', '--summary-file', SUMMARY_PATH],
       manifest: { ...MANIFEST, phase: 'implement' as const, subject: 'issue-8', prNumber: undefined, reviewGeneration: undefined, reviewRefOid: undefined, reviewApprovalPolicy: undefined },
       expected: { operation: 'implementation-complete', payload: 'summary text\n' },
     },
     {
-      argv: ['review-verdict', '--state', 'APPROVE', '--body-file', '/body'],
+      argv: ['review-verdict', '--state', 'APPROVE', '--body-file', BODY_PATH],
       manifest: MANIFEST,
       expected: { operation: 'review-verdict', payload: { state: 'APPROVE', body: 'review body\n' } },
     },
     {
-      argv: ['review-verdict', '--state', 'REQUEST_CHANGES', '--body-file', '/body'],
+      argv: ['review-verdict', '--state', 'REQUEST_CHANGES', '--body-file', BODY_PATH],
       manifest: MANIFEST,
       expected: { operation: 'review-verdict', payload: { state: 'REQUEST_CHANGES', body: 'review body\n' } },
     },
@@ -120,12 +152,12 @@ describe('session CLI grammar', () => {
       expected: { operation: 'review-fix-publish' },
     },
     {
-      argv: ['merge-prep-complete', '--summary-file', '/summary'],
+      argv: ['merge-prep-complete', '--summary-file', SUMMARY_PATH],
       manifest: { ...MANIFEST, phase: 'merge-prep' as const, targetBaseOid: 'e'.repeat(40), reviewGeneration: undefined, reviewRefOid: undefined, reviewApprovalPolicy: undefined },
       expected: { operation: 'merge-prep-complete', payload: 'summary text\n' },
     },
     {
-      argv: ['human', '--reason-file', '/reason'],
+      argv: ['human', '--reason-file', REASON_PATH],
       manifest: { ...MANIFEST, phase: 'implement' as const, subject: 'issue-8', prNumber: 9, reviewGeneration: undefined, reviewRefOid: undefined, reviewApprovalPolicy: undefined },
       expected: { operation: 'human', payload: 'human reason\n' },
     },
@@ -150,13 +182,13 @@ describe('session CLI grammar', () => {
     { argv: ['checkpoint', 'trailing'] },
     { argv: ['implementation-complete'] },
     { argv: ['implementation-complete', '--summary-file'] },
-    { argv: ['implementation-complete', '--wrong', '/summary'] },
-    { argv: ['review-verdict', '--state', 'COMMENT', '--body-file', '/body'] },
+    { argv: ['implementation-complete', '--wrong', SUMMARY_PATH] },
+    { argv: ['review-verdict', '--state', 'COMMENT', '--body-file', BODY_PATH] },
     { argv: ['review-verdict', '--state', 'APPROVE'] },
-    { argv: ['review-verdict', '--body-file', '/body', '--state', 'APPROVE'] },
+    { argv: ['review-verdict', '--body-file', BODY_PATH, '--state', 'APPROVE'] },
     { argv: ['review-fix-publish', '--extra'] },
-    { argv: ['merge-prep-complete', '--summary-file', '/summary', 'trailing'] },
-    { argv: ['human', '--reason-file', '/reason', '--extra'] },
+    { argv: ['merge-prep-complete', '--summary-file', SUMMARY_PATH, 'trailing'] },
+    { argv: ['human', '--reason-file', REASON_PATH, '--extra'] },
   ])('rejects unknown, trailing, missing, or malformed input: $argv', async ({ argv }) => {
     const handler = protocol();
     const injected = deps(MANIFEST, handler);
@@ -182,7 +214,7 @@ describe('session CLI grammar', () => {
     const handler = protocol();
     const injected = deps(MANIFEST, handler);
     await expect(runSessionCli([
-      'implementation-complete', '--summary-file', '/summary',
+      'implementation-complete', '--summary-file', SUMMARY_PATH,
     ], injected)).rejects.toThrow(/not valid for review/);
     expect(handler.calls).toEqual([]);
   });
@@ -190,7 +222,7 @@ describe('session CLI grammar', () => {
   it('wires Human holds for review manifests', async () => {
     const handler = protocol();
     const injected = deps(MANIFEST, handler);
-    await runSessionCli(['human', '--reason-file', '/reason'], injected);
+    await runSessionCli(['human', '--reason-file', REASON_PATH], injected);
     expect(handler.calls).toEqual([
       { operation: 'human', payload: 'human reason\n' },
     ]);
@@ -204,6 +236,187 @@ describe('session CLI grammar', () => {
     expect(handler.calls).toEqual([]);
   });
 
+  it.each([
+    'relative-summary.md',
+    '/attempt/worktree/summary.md',
+    '/attempt/reports',
+    '/attempt/reports/../manifest.json',
+  ])('rejects session payload outside the attempt reports directory: %s', async (path) => {
+    const handler = protocol();
+    const implementation = {
+      ...MANIFEST,
+      phase: 'implement' as const,
+      subject: 'issue-8',
+      prNumber: 9,
+      reviewGeneration: undefined,
+      reviewRefOid: undefined,
+      reviewApprovalPolicy: undefined,
+    };
+    const injected = deps(implementation, handler);
+
+    await expect(runSessionCli([
+      'implementation-complete', '--summary-file', path,
+    ], injected)).rejects.toThrow(/attempt reports directory/i);
+    expect(handler.calls).toEqual([]);
+    expect(injected.readTextFile).not.toHaveBeenCalled();
+  });
+
+  it.each(['symlink', 'directory'])(
+    'rejects a %s payload even when its lexical path is report-scoped',
+    async (kind) => {
+      const root = mkdtempSync(join(tmpdir(), 'jinn-session-report-'));
+      const reports = join(root, 'reports');
+      const payload = join(reports, 'payload.md');
+      mkdirSync(reports);
+      if (kind === 'symlink') {
+        const outside = join(root, 'outside.md');
+        writeFileSync(outside, 'outside');
+        symlinkSync(outside, payload);
+      } else {
+        mkdirSync(payload);
+      }
+      const manifest: AttemptManifest = {
+        ...MANIFEST,
+        phase: 'implement',
+        subject: 'issue-8',
+        reviewGeneration: undefined,
+        reviewRefOid: undefined,
+        reviewApprovalPolicy: undefined,
+        paths: {
+          ...MANIFEST.paths,
+          manifest: join(root, 'manifest.json'),
+          worktree: join(root, 'worktree'),
+        },
+      };
+      const injected = deps(manifest);
+      delete (injected as Partial<typeof injected>).validateReportFile;
+      injected.env.JINN_AUTOPILOT_SESSION_MANIFEST = manifest.paths.manifest;
+
+      await expect(runSessionCli([
+        'implementation-complete',
+        '--summary-file',
+        payload,
+      ], injected)).rejects.toThrow(/regular non-symbolic file/i);
+      expect(injected.readTextFile).not.toHaveBeenCalled();
+    },
+  );
+
+  it('emits a structured successful outcome and leaves the exit code clear', async () => {
+    const handler = protocol();
+    const implementation = {
+      ...MANIFEST,
+      phase: 'implement' as const,
+      subject: 'issue-8',
+      prNumber: 9,
+      reviewGeneration: undefined,
+      reviewRefOid: undefined,
+      reviewApprovalPolicy: undefined,
+    };
+    const injected = deps(implementation, handler);
+
+    const result = await runSessionCli(['checkpoint'], injected);
+
+    expect(result).toEqual({
+      operation: 'checkpoint',
+      outcome: { status: 'published', head: SUCCESS_HEAD },
+      exitCode: 0,
+    });
+    expect(injected.writeOutput).toHaveBeenCalledWith(
+      `${JSON.stringify(result)}\n`,
+    );
+    expect(injected.setExitCode).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: 'stale checkpoint',
+      argv: ['checkpoint'],
+      manifest: {
+        ...MANIFEST,
+        phase: 'implement' as const,
+        subject: 'issue-8',
+        prNumber: 9,
+        reviewGeneration: undefined,
+        reviewRefOid: undefined,
+        reviewApprovalPolicy: undefined,
+      },
+      method: 'checkpoint' as const,
+      outcome: { status: 'stale' as const, head: NONTERMINAL_HEAD },
+    },
+    {
+      name: 'partial implementation completion',
+      argv: ['implementation-complete', '--summary-file', SUMMARY_PATH],
+      manifest: {
+        ...MANIFEST,
+        phase: 'implement' as const,
+        subject: 'issue-8',
+        prNumber: 9,
+        reviewGeneration: undefined,
+        reviewRefOid: undefined,
+        reviewApprovalPolicy: undefined,
+      },
+      method: 'implementationComplete' as const,
+      outcome: {
+        status: 'partial' as const,
+        head: NONTERMINAL_HEAD,
+        pending: 'ready' as const,
+      },
+    },
+    {
+      name: 'ambiguous review verdict',
+      argv: ['review-verdict', '--state', 'APPROVE', '--body-file', BODY_PATH],
+      manifest: MANIFEST,
+      method: 'reviewVerdict' as const,
+      outcome: { status: 'ambiguous' as const, head: NONTERMINAL_HEAD },
+    },
+    {
+      name: 'stale review fix publication',
+      argv: ['review-fix-publish'],
+      manifest: MANIFEST,
+      method: 'reviewFixPublish' as const,
+      outcome: { status: 'stale' as const, head: NONTERMINAL_HEAD },
+    },
+    {
+      name: 'partial merge preparation',
+      argv: ['merge-prep-complete', '--summary-file', SUMMARY_PATH],
+      manifest: {
+        ...MANIFEST,
+        phase: 'merge-prep' as const,
+        targetBaseOid: 'e'.repeat(40),
+        reviewGeneration: undefined,
+        reviewRefOid: undefined,
+        reviewApprovalPolicy: undefined,
+      },
+      method: 'mergePrepComplete' as const,
+      outcome: {
+        status: 'partial' as const,
+        head: NONTERMINAL_HEAD,
+        pending: 'publication' as const,
+      },
+    },
+  ])('emits $name and exits nonzero', async ({
+    argv,
+    manifest,
+    method,
+    outcome,
+  }) => {
+    const handler = protocol();
+    handler[method] = vi.fn(async () => outcome) as never;
+    const injected = deps(manifest, handler);
+
+    const result = await runSessionCli(argv, injected);
+
+    expect(result).toEqual({
+      operation: argv[0],
+      outcome,
+      exitCode: 2,
+    });
+    expect(injected.writeOutput).toHaveBeenCalledWith(
+      `${JSON.stringify(result)}\n`,
+    );
+    expect(injected.setExitCode).toHaveBeenCalledWith(2);
+  });
+
   it('rejects unbounded injected summary and reason text before delegation', async () => {
     const implementation = {
       ...MANIFEST,
@@ -215,8 +428,8 @@ describe('session CLI grammar', () => {
       reviewApprovalPolicy: undefined,
     };
     for (const argv of [
-      ['implementation-complete', '--summary-file', '/summary'],
-      ['human', '--reason-file', '/reason'],
+      ['implementation-complete', '--summary-file', SUMMARY_PATH],
+      ['human', '--reason-file', REASON_PATH],
     ]) {
       const handler = protocol();
       const injected = deps(implementation, handler);

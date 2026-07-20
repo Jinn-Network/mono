@@ -1,242 +1,203 @@
 ---
 name: review-pr
-description: Use when asked to review a specific GitHub PR through Autopilot — e.g. "review PR #N", "run review-pr on this PR". The coordinating agent for one open PR carrying the `engine:review` label: dispatches independent review passes (code-review + security + app-test), then owns the review→fix→re-review loop on the PR branch until the PR is approved or escalated. Mirrors implement-issue.
+description: Use when Autopilot v2 dispatches an exact-head PR review attempt. Coordinates independent review, fixes, and re-review in one session while delegating all publication, verdict, draft/ready, identity, and recovery authority to the v2 session protocol.
 ---
 
 # review-pr
 
-You are the coordinating agent for exactly one open GitHub PR that carries the `engine:review` label. Your job: run an independent review, and if there are blocking findings, drive fixes on the PR branch until the PR is clean (approve + un-draft) or a human is needed (escalate). You never review or fix directly. This mirrors implement-issue — the review→fix loop is the same machinery, re-rooted on a PR.
+You are the review coordinator for one Autopilot v2 exact-head attempt. The
+same coordinator session owns the full review → fix → re-review loop. You do
+not own shared lifecycle state.
 
 ## Runtime adapter
 
-Before Step 1, read the shared
-[`autopilot-runtime`](../autopilot-runtime/SKILL.md) skill completely. It
-selects mechanics from `JINN_AUTOPILOT_RUNTIME=claude|hermes`; unset defaults
-to Claude for an interactive invocation. This file remains authoritative for
-review policy, identity, verdicts, fixes, escalation, and deliverables.
+Before doing work, read
+[`autopilot-runtime`](../autopilot-runtime/SKILL.md) completely. It selects the
+mechanics for the one process-wide
+`JINN_AUTOPILOT_RUNTIME=claude|hermes` setting. Never switch runtime within the
+attempt.
 
-## Read first
-- `docs/engineering/handbook.md`, `CLAUDE.md`
-- `docs/superpowers/specs/2026-05-29-pr-review-loop-design.md` — this skill's design.
-- `.claude/skills/implement-issue/SKILL.md` §Step 4 (subagent-dispatch discipline) and §Step 5 (finding handling) — reused verbatim here.
+Also read:
 
-## Reviewer credential invariant
-The review identity is part of the product contract, not ambient shell state.
-Run this preflight before reading or mutating the PR:
+- [`CLAUDE.md`](../../../CLAUDE.md)
+- [`docs/engineering/handbook.md`](../../../docs/engineering/handbook.md)
+- [`active-active lifecycle design`](../../../docs/superpowers/specs/2026-07-19-active-active-autopilot-lifecycle-design.md)
+
+## Input contract
+
+Autopilot v2 has already won the exact-head review claim, selected a reviewer
+identity that is distinct from the PR author, and created a detached attempt
+worktree at the claimed head. The prompt supplies the PR, linked issue, exact
+head, target base, approval policy, worktree, and attempt. The environment
+contains `JINN_AUTOPILOT_SESSION_MANIFEST`.
+
+Fail closed if that context is missing or contradictory. Do not rediscover or
+replace it. In particular, do not:
+
+- claim or release review authority;
+- select, inspect, export, or replace credentials;
+- create, adopt, or remove worktrees;
+- check out the logical branch;
+- publish branch changes yourself;
+- submit native verdicts or mutate labels, Project state, comments, or PR
+  draft state yourself.
+
+The session protocol re-reads the manifest and GitHub state at each boundary.
+It binds verdicts to the claimed head, publishes fixes atomically with review
+authority advancement, and rejects stale sessions.
+
+Resolve the package command once:
+
 ```bash
-: "${JINN_REVIEW_GH_TOKEN:?JINN_REVIEW_GH_TOKEN is required for review-pr}"
-: "${JINN_REVIEW_BOT_LOGIN:?JINN_REVIEW_BOT_LOGIN is required for review-pr}"
-: "${JINN_REVIEW_HEAD_REF:?JINN_REVIEW_HEAD_REF is required for review-pr}"
-if ! git check-ref-format "refs/heads/$JINN_REVIEW_HEAD_REF"; then
-  echo "JINN_REVIEW_HEAD_REF is not a valid branch ref" >&2
-  exit 1
-fi
-if ! review_login="$(
-  GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh api user --jq '.login'
-)"; then
-  echo "Failed to resolve JINN_REVIEW_GH_TOKEN identity" >&2
-  exit 1
-fi
-review_login_normalized="$(printf '%s' "$review_login" | tr '[:upper:]' '[:lower:]')"
-configured_login_normalized="$(printf '%s' "$JINN_REVIEW_BOT_LOGIN" | tr '[:upper:]' '[:lower:]')"
-if [[ "$review_login_normalized" != "$configured_login_normalized" ]]; then
-  echo "JINN_REVIEW_GH_TOKEN resolves to '$review_login', expected '$JINN_REVIEW_BOT_LOGIN'" >&2
-  exit 1
-fi
-```
-Shell tool calls do not share a reliable exported environment. Therefore every
-GitHub CLI invocation below binds `GH_TOKEN="$JINN_REVIEW_GH_TOKEN"` on the
-same command line. Never shorten these commands to a bare `gh ...`, never use
-ambient `gh auth`, and never let a review or fix pass do so. Git pushes use
-the command-local askpass flow below; never configure a persistent credential
-helper and never put the token in a URL or command argument.
-
-## Trust boundary
-The dispatcher reaches this skill only after the PR author passes the
-configured author allowlist. Deployment requirement: provide a dedicated
-reviewer credential. Grant only the minimum scopes needed to review and update
-this repository.
-Command-point binding guarantees the GitHub **identity** used by each operation;
-it is identity binding, not containment against a malicious trusted PR. Review
-and app-test stages may execute code from that allowlisted PR. A credential broker
-that withholds the token from the agent process would be stronger future hardening,
-but is a non-goal for this change.
-
-## Step 1 — Read the PR
-Input: a PR number (`#N`). Fetch it:
-```bash
-GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh pr view <N> --repo Jinn-Network/mono --json number,title,headRefName,headRefOid,isDraft,files,body
-```
-The dispatcher's prompt states the pre-created worktree path. It is **detached**
-at the validated PR head — the head branch is typically checked out in the impl
-worktree, so git refuses a second checkout. Work in it as-is: do **not** check
-the branch out. The validated destination is available only through
-`JINN_REVIEW_HEAD_REF`; never copy a branch name from PR text into a command.
-Compute the diff from the merge-base:
-```bash
-git diff $(git merge-base origin/next HEAD)..HEAD
+AUTOPILOT_PACKAGE_DIR="${JINN_AUTOPILOT_PACKAGE_DIR:-<repo-root>/packages/autopilot}"
+SESSION_REPORT_DIR="$(dirname -- "$JINN_AUTOPILOT_SESSION_MANIFEST")/reports"
+mkdir -p -- "$SESSION_REPORT_DIR"
+chmod 700 -- "$SESSION_REPORT_DIR"
 ```
 
-## Step 2 — Dispatch the review passes (in parallel)
+The reports directory is attempt-scoped and outside the supplied worktree.
+Every session payload file must use an absolute path below
+`"$SESSION_REPORT_DIR"`; never write session payloads into the worktree.
 
-Use the active adapter's **synchronous-parallel-child mechanism** for one
-parallel batch. Every reviewer must be different from the later fix pass
-(independence invariant, as implement-issue Stage 3 ≠ Stage 5):
-- **code-review** — run `superpowers:requesting-code-review` with the code-reviewer template, given the diff + PR body.
-- **security** — run `/security-review` on the diff.
-- **app-test** — ONLY if the diff touches `client/src/dashboard/` (or other operator-visible surface): run `testing-jinn-app`.
+Shared mutations are restricted to:
 
-Collect findings; classify each **blocking** vs **advisory/nit** (reuse implement-issue's two-finding-kind table).
-
-## Step 3 — Verdict + loop
-
-**First, check the dispatcher's verdict directive in the prompt.** If it marks this PR **HUMAN-SURFACE / ADVISORY MODE** (it touches code-owned paths per `.github/CODEOWNERS`), you **must not** `--approve` and **must not** `gh pr ready` — per DR-2026-06-03 an agent's approval never satisfies the code-owner gate. Still run the full review and drive fixes for blocking findings as below; but when the review is clean *from the engine's view*, finish with a **COMMENT** review and hand off to a human code owner instead of approving:
 ```bash
-GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh pr review <N> --repo Jinn-Network/mono --comment --body "<engine review summary — human code-owner approval required (human-surface)>"
-GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh api --method POST \
-  repos/Jinn-Network/mono/issues/<N>/labels \
-  -f 'labels[]=review:needs-human'
+yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session review-verdict --state REQUEST_CHANGES --body-file "$SESSION_REPORT_DIR/review-verdict.md"
+yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session review-fix-publish
+yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session review-verdict --state APPROVE --body-file "$SESSION_REPORT_DIR/review-verdict.md"
+yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session human --reason-file "$SESSION_REPORT_DIR/human-reason.md"
 ```
-Do not approve, do not un-draft, do not merge. Blocking findings still go through the request-changes + fix loop below first. If the prompt marks the PR **APPROVE-ELIGIBLE**, use the standard verdict flow:
 
-- **No blocking findings** → reconcile verdict labels, post a fresh approval,
-  then un-draft **last**. Ready is the terminal publication step. If it fails,
-   the dispatcher treats the approved draft as incomplete and redispatches it
-   for reconciliation:
-  ```bash
-  GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh api --method POST \
-    repos/Jinn-Network/mono/issues/<N>/labels \
-    -f 'labels[]=review:approved'
-  if ! current_labels="$(
-    GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh api repos/Jinn-Network/mono/issues/<N> --jq '.labels[].name'
-  )"; then
-    echo "Failed to read current PR labels" >&2
-    exit 1
-  fi
-  if grep -Fxq 'review:changes-requested' <<<"$current_labels"; then
-    GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh api --method DELETE \
-      repos/Jinn-Network/mono/issues/<N>/labels/review%3Achanges-requested
-  fi
-  GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh pr review <N> --repo Jinn-Network/mono --approve --body "<summary>"
-  GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh pr ready <N> --repo Jinn-Network/mono   # un-draft → enters the merge queue
-  ```
-  Done.
-- **Blocking findings** → post a request-changes review with inline findings + the changes-requested label:
-  ```bash
-  GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh pr review <N> --repo Jinn-Network/mono --request-changes --body "<findings>"
-  GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh api --method POST \
-    repos/Jinn-Network/mono/issues/<N>/labels \
-    -f 'labels[]=review:changes-requested'
-  if ! current_labels="$(
-    GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh api repos/Jinn-Network/mono/issues/<N> --jq '.labels[].name'
-  )"; then
-    echo "Failed to read current PR labels" >&2
-    exit 1
-  fi
-  if grep -Fxq 'review:approved' <<<"$current_labels"; then
-    GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh api --method DELETE \
-      repos/Jinn-Network/mono/issues/<N>/labels/review%3Aapproved
-  fi
-  ```
-  Record the current commit before delegating:
-  ```bash
-  if ! before_fix_marker="$(git rev-parse --git-path jinn-review-before-fix)"; then
-    echo "Failed to locate pre-fix marker" >&2
-    exit 1
-  fi
-  if ! before_fix_head="$(git rev-parse --verify HEAD)"; then
-    echo "Failed to capture pre-fix HEAD" >&2
-    exit 1
-  fi
-  if ! printf '%s\n' "$before_fix_head" >"$before_fix_marker"; then
-    echo "Failed to persist pre-fix HEAD" >&2
-    exit 1
-  fi
-  ```
-  Dispatch a **review fix pass** (different from the reviewers) through the
-  active adapter's **fresh-root mechanism**, seeded with the findings. A fresh
-  depth-0 process is required so the fix pass can fan out internally. It
-  implements and commits fixes locally. After it returns, require a genuinely
-  new commit:
-  ```bash
-  if ! before_fix_marker="$(git rev-parse --git-path jinn-review-before-fix)"; then
-    echo "Failed to locate pre-fix marker" >&2
-    exit 1
-  fi
-  if ! IFS= read -r before_fix_head <"$before_fix_marker"; then
-    echo "Failed to read pre-fix HEAD" >&2
-    exit 1
-  fi
-  if ! after_fix_head="$(git rev-parse --verify HEAD)"; then
-    echo "Failed to capture post-fix HEAD" >&2
-    exit 1
-  fi
-  if [[ "$after_fix_head" == "$before_fix_head" ]]; then
-    echo "Review fix pass produced no new commit" >&2
-    exit 1
-  fi
-  ```
-  Only then push the verified new head:
-  ```bash
-  if ! review_askpass="$(mktemp)"; then
-    echo "Failed to create reviewer askpass helper" >&2
-    exit 1
-  fi
-  trap 'rm -f "$review_askpass"' EXIT
-  if ! chmod 700 "$review_askpass"; then
-    echo "Failed to secure reviewer askpass helper" >&2
-    exit 1
-  fi
-  if ! printf '%s\n' \
-    '#!/bin/sh' \
-    'case "$1" in' \
-    "  *Username*) printf '%s\\n' 'x-access-token' ;;" \
-    "  *Password*) printf '%s\\n' \"\$JINN_REVIEW_GH_TOKEN\" ;;" \
-    '  *) exit 1 ;;' \
-    'esac' >"$review_askpass"; then
-    echo "Failed to write reviewer askpass helper" >&2
-    exit 1
-  fi
-  if ! GIT_ASKPASS="$review_askpass" \
-    GIT_TERMINAL_PROMPT=0 \
-    LC_ALL=C \
-    JINN_REVIEW_GH_TOKEN="$JINN_REVIEW_GH_TOKEN" \
-    git -c credential.helper= push "https://github.com/Jinn-Network/mono.git" \
-      "HEAD:refs/heads/$JINN_REVIEW_HEAD_REF"; then
-    echo "Failed to push reviewer fix" >&2
-    exit 1
-  fi
-  rm -f "$review_askpass"
-  trap - EXIT
-  before_fix_marker="$(git rev-parse --git-path jinn-review-before-fix)"
-  rm -f "$before_fix_marker"
-  ```
-  Then **re-run Step 2** on the new diff. Loop. There is **no round-count bound** — escalate on judgment (see Step 4).
+The draft/ready ordering, review refs, credentials, and cleanup remain
+v2-owned. Do not redraft or ready the PR yourself.
 
-## Step 4 — Finding handling & escalation
-Reuse implement-issue §Step 5's decision rules: fixable findings → fresh-root
-fix pass + re-run; scope/design findings, non-converging findings, or an unpushable
-branch → escalate. Do not copy its ambient-auth command examples. Bind the
-reviewer token on both the PR comment and Project mutation:
+## Review pass
+
+Dispatch these independent checks through the
+**synchronous-parallel-root mechanism** in one batch:
+
+1. **Code review** — use `superpowers:requesting-code-review` and the
+   code-reviewer template with the PR context, acceptance criteria, and exact
+   diff.
+2. **Security review** — use `/security-review` on every PR.
+3. **Jinn-app test** — use `testing-jinn-app` when the change touches an
+   operator-visible surface, daemon API, bootstrap flow, dashboard, or app
+   domain model.
+
+Compute the change from the supplied target-base merge-base. Do not use a
+moving two-dot range. Collect every result before deciding. Classify findings:
+
+- **blocking** — correctness, security, missing coverage, failed acceptance
+  criteria, or a failing required test;
+- **advisory** — useful improvement that does not block the change;
+- **scope/design** — requires product or architectural judgment.
+
+## No blocking findings
+
+If the attempt policy is `approve-eligible`, write a bounded UTF-8 verdict
+body to `"$SESSION_REPORT_DIR/review-verdict.md"` that summarizes the checks
+and advisory findings, then invoke:
+
 ```bash
-GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh pr comment <N> --repo Jinn-Network/mono --body "$ESCALATION_NOTE"
-GH_TOKEN="$JINN_REVIEW_GH_TOKEN" gh project item-edit --id <item-id> --project-id <project-id> \
-  --field-id <blocked-on-field-id> \
-  --single-select-option-id <human-option-id>
+yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session review-verdict --state APPROVE --body-file "$SESSION_REPORT_DIR/review-verdict.md"
 ```
-For a PR with no linked issue, post the note and stop (the request-changes
-review stands as advisory). Never force-merge.
 
-## Step 5 — Dispatch discipline & headless mode
-Identical to implement-issue §Step 4 and §Step 7: curated prompts (never forward coordinator history), the independence invariant (reviewer ≠ fixer), the headless-override block injected by the dispatcher, no plan-posture flags. Use the shared runtime skill for every parallel reviewer and fresh-root fix pass.
+The command verifies exact authority and identity, publishes a marker-bound
+native approval, projects state, and makes the PR ready last. Stop after it
+succeeds.
 
-## Failure modes
-| Failure | Action |
-|---|---|
-| PR lacks the `engine:review` label | Stop — not in scope (the dispatcher should not have spawned this). |
-| Cannot push to the PR branch (fork) | Post advisory review; escalate `Blocked on: Human`. |
-| Review fix pass reports done but no new commit | Re-dispatch through the fresh-root mechanism; compare the captured pre-fix and post-fix `HEAD` values. |
-| Findings not converging | Escalate `stuck`. |
+If the policy is `human-codeowner`, never attempt automated approval. Write a
+reason to `"$SESSION_REPORT_DIR/human-reason.md"` explaining that the engine
+review is clean but Human CODEOWNER approval is required, then invoke:
 
-## Composition
-Composes: `autopilot-runtime`, `superpowers:requesting-code-review` + code-reviewer template, `/security-review`, `testing-jinn-app`. Downstream of: the engine's draft PR (or any human PR labelled `engine:review`). Upstream of: the merge skill (consumes `review:approved`). Dispatched by: Autopilot's review pass (the headless-override block is injected by the dispatcher).
+```bash
+yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session human --reason-file "$SESSION_REPORT_DIR/human-reason.md"
+```
+
+Human review and CI remain authoritative. The PR may remain draft while held
+for Human judgment.
+
+## Blocking findings: fix and re-review
+
+Write bounded UTF-8 findings to `"$SESSION_REPORT_DIR/review-verdict.md"` with
+actionable, file-specific blocking findings and any advisory findings. First
+invoke:
+
+```bash
+yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session review-verdict --state REQUEST_CHANGES --body-file "$SESSION_REPORT_DIR/review-verdict.md"
+```
+
+This marker-bound transition records requested changes and makes the PR draft
+before mutation. If it does not return fixing authority, stop.
+
+Dispatch a fresh-root fixer through the **fresh-root mechanism** with the exact
+findings and PR context. The
+reviewer and fixer must be different fresh contexts. The fixer implements,
+tests, and commits the fixes locally; it does not publish them. Verify that the
+worktree is clean and has a genuinely new commit rooted at the supplied old
+head.
+
+Publish only through:
+
+```bash
+yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session review-fix-publish
+```
+
+The command atomically advances the PR branch and append-only review ref under
+exact expected heads, then advances the manifest. An ambiguous or stale result
+is not permission to publish another way.
+
+Now re-run the full review pass against the new manifest head. Re-review uses a
+fresh reviewer context after every published fix. Continue inside this same
+coordinator session until clean or escalated.
+
+There is no round-count budget. Continue converging implementation fixes;
+escalate immediately for scope/design findings or when the loop is genuinely
+not converging.
+
+## Escalation
+
+Write a bounded UTF-8 reason to `"$SESSION_REPORT_DIR/human-reason.md"`
+containing:
+
+- the exact current head and last completed review pass;
+- the blocking finding or ambiguity;
+- status: `needs-decision`, `blocked`, or `stuck`;
+- whether any local commit has not been published.
+
+Then invoke:
+
+```bash
+yarn --cwd "$AUTOPILOT_PACKAGE_DIR" autopilot session human --reason-file "$SESSION_REPORT_DIR/human-reason.md"
+```
+
+Do not make any later shared mutation. v2 records the Human review authority,
+keeps a draft recovery surface, and preserves local artifacts.
+
+## Dispatch discipline
+
+- Reviewer and fixer contexts receive curated prompts with the authority
+  capsule below, never coordinator history.
+- Every delegated-root prompt must state that the exact-head review claim and canonical
+  PR already exist; the worktree must remain detached; direct GitHub, remote
+  Git, credential, branch, draft/ready, review, Project, cleanup, and
+  `autopilot session` operations are prohibited. Reviewers return findings
+  only. A fixer may create tested local commits only, for coordinator
+  publication. Contradictory attempt context must stop and be reported without
+  a shared mutation.
+- Reviewer and fixer must be different fresh contexts.
+- Every re-review is fresh and sees the exact new head.
+- Stage reports are evidence to evaluate, not proof of completion.
+- Do not run code from a PR whose author failed the dispatcher allowlist.
+- If a session command rejects authority, stop without fallback.
+
+## Invariants on return
+
+Downstream may rely on exactly one of:
+
+1. a marker-bound approval exists for the exact current head and v2 readied
+   the approve-eligible PR last;
+2. requested changes were followed by an atomic fix publication and a fresh
+   re-review in this coordinator session;
+3. v2 recorded a Human hold and retained the draft recovery surface; or
+4. the attempt lost/failed authority and performed no later shared mutation.

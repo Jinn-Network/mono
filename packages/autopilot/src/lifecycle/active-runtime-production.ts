@@ -24,6 +24,10 @@ import {
   type CredentialPool,
 } from './credentials.js';
 import {
+  CAPABILITY_ATTESTATION_ENV,
+  readCapabilityAttestation,
+} from './capability-attestation.js';
+import {
   CANONICAL_GITHUB_HTTPS_REMOTE,
   executeImplementationAction,
   makeCanonicalImplementationSpawner,
@@ -61,6 +65,7 @@ export interface ProductionActiveRuntimeOptions {
   readonly staleAfterMs: number;
   readonly runner?: CommandRunner;
   readonly environment?: NodeJS.ProcessEnv;
+  readonly readCapabilityAttestation?: typeof readCapabilityAttestation;
   readonly now?: () => Date;
   readonly nextId?: () => string;
   readonly isPidAlive?: (pid: number) => boolean;
@@ -122,14 +127,23 @@ function mergePrepScenario(input: {
 export function makeProductionCapabilityPreflight(
   options: Pick<
   ProductionActiveRuntimeOptions,
-  'repositoryPath' | 'credentials' | 'config' | 'runner' | 'remoteName'
+  | 'repositoryPath'
+  | 'credentials'
+  | 'config'
+  | 'runner'
+  | 'remoteName'
+  | 'environment'
+  | 'now'
+  | 'readCapabilityAttestation'
   >,
 ): () => Promise<{ readonly ok: boolean; readonly detail?: string }> {
   const runner = options.runner ?? defaultRunner;
   const remoteName = options.remoteName ?? AUTOPILOT_V2_REMOTE;
-  let accepted: { readonly ok: true } | undefined;
+  const ambient = options.environment ?? process.env;
+  const now = options.now ?? (() => new Date());
+  const readAttestation =
+    options.readCapabilityAttestation ?? readCapabilityAttestation;
   return async () => {
-    if (accepted !== undefined) return accepted;
     try {
       if (options.credentials.logins().length === 0) {
         throw new Error('no configured GitHub credential is available');
@@ -143,6 +157,17 @@ export function makeProductionCapabilityPreflight(
           `${remoteName} must be the canonical HTTPS GitHub remote`,
         );
       }
+      const attestationPath = ambient[CAPABILITY_ATTESTATION_ENV];
+      if (attestationPath === undefined || attestationPath.length === 0) {
+        throw new Error(
+          `${CAPABILITY_ATTESTATION_ENV} must name a fresh live capability attestation`,
+        );
+      }
+      readAttestation(attestationPath, {
+        remoteName,
+        configuredLogins: options.credentials.logins(),
+        now: now(),
+      });
       if (options.config.runtime === 'hermes') {
         assertHermesBillingRoute(
           options.config.hermesModel,
@@ -150,8 +175,7 @@ export function makeProductionCapabilityPreflight(
         );
         assertHermesRuntimeReady(options.config.hermesPythonPath);
       }
-      accepted = { ok: true };
-      return accepted;
+      return { ok: true };
     } catch (error) {
       return {
         ok: false,
@@ -329,18 +353,6 @@ export function makeProductionActiveRuntime(
           runnerId: options.runnerId,
           remoteName,
           readSnapshot: options.readSnapshot,
-          changedFiles: async (prNumber) => {
-            const raw = JSON.parse(await runner('gh', [
-              'api', `repos/Jinn-Network/mono/pulls/${prNumber}/files?per_page=100`,
-              '--paginate', '--slurp',
-            ])) as Array<Array<{ filename?: unknown }>>;
-            return raw.flat().map((file) => {
-              if (typeof file.filename !== 'string') {
-                throw new Error('Review changed-file read was incomplete');
-              }
-              return file.filename;
-            });
-          },
           runner,
           environment: ambient,
         });

@@ -1,4 +1,6 @@
 import { spawn as nodeSpawn } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   headlessOverrideFor,
 } from '../headless.js';
@@ -7,6 +9,9 @@ import {
   parseAutopilotRuntime,
   type AutopilotRuntime,
 } from '../autopilot-runtime.js';
+import {
+  isGitHubSecretEnvironmentKey,
+} from '../lifecycle/credentials.js';
 import { loadCanon } from './coordinator-session.js';
 import {
   assertHermesBillingRoute,
@@ -35,7 +40,11 @@ export interface StageChild {
 export type StageSpawnFn = (
   cmd: string,
   args: string[],
-  opts: { cwd: string; stdio: Array<'ignore' | 'pipe'> },
+  opts: {
+    cwd: string;
+    env: NodeJS.ProcessEnv;
+    stdio: Array<'ignore' | 'pipe'>;
+  },
 ) => StageChild;
 
 /** Result of a stage session — same shape as SkillRunResult. */
@@ -65,6 +74,8 @@ export interface StageRunOpts {
   provider?: string;
   /** Wall-clock ceiling; default 10 minutes (pressure-suite starting value). */
   timeoutMs?: number;
+  /** Coordinator environment to reduce to a non-authoritative stage view. */
+  environment?: NodeJS.ProcessEnv;
 }
 
 const DEFAULT_TIMEOUT_MS = 600_000;
@@ -116,6 +127,61 @@ function requireHermesValue(
   return value;
 }
 
+function isGitConfigEnvironmentKey(key: string): boolean {
+  return /^GIT_CONFIG(?:_|$)/i.test(key);
+}
+
+function isSshCredentialEnvironmentKey(key: string): boolean {
+  return /^(?:SSH_AUTH_SOCK|SSH_AGENT_PID|GIT_SSH|GIT_SSH_COMMAND)$/i.test(key);
+}
+
+const STAGE_AUTHORITY_ENVIRONMENT_KEYS = new Set([
+  'GH_CONFIG_DIR',
+  'GIT_ASKPASS',
+  'SSH_ASKPASS',
+  'GIT_TERMINAL_PROMPT',
+  'JINN_AUTOPILOT_SESSION_MANIFEST',
+  'JINN_AUTOPILOT_CAPABILITY_ATTESTATION',
+]);
+
+/**
+ * Stage roots need model/runtime configuration, but never the coordinator's
+ * GitHub identity or manifest-bound lifecycle authority.
+ */
+export function buildUnprivilegedStageEnvironment(
+  ambient: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(ambient)) {
+    if (
+      !isGitHubSecretEnvironmentKey(key)
+      && !isGitConfigEnvironmentKey(key)
+      && !isSshCredentialEnvironmentKey(key)
+      && !STAGE_AUTHORITY_ENVIRONMENT_KEYS.has(key.toUpperCase())
+    ) {
+      environment[key] = value;
+    }
+  }
+  return {
+    ...environment,
+    GH_CONFIG_DIR: join(
+      tmpdir(),
+      `jinn-autopilot-stage-no-auth-${process.pid}`,
+    ),
+    GIT_CONFIG_COUNT: '3',
+    GIT_CONFIG_KEY_0: 'credential.helper',
+    GIT_CONFIG_VALUE_0: '',
+    GIT_CONFIG_KEY_1: 'credential.interactive',
+    GIT_CONFIG_VALUE_1: 'never',
+    GIT_CONFIG_KEY_2: 'core.askPass',
+    GIT_CONFIG_VALUE_2: 'false',
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_ASKPASS: 'false',
+    SSH_ASKPASS: 'false',
+    GIT_SSH_COMMAND: 'false',
+  };
+}
+
 /**
  * Run a pipeline stage as a fresh root session in the issue worktree.
  * Depth-0 lets the stage's composed skill fan out sub-agents at depth-1.
@@ -124,21 +190,22 @@ export function runStageHeadless(
   opts: StageRunOpts,
   spawn: StageSpawnFn = defaultStageSpawn,
 ): Promise<StageRunResult> {
-  const runtime = parseAutopilotRuntime(process.env[AUTOPILOT_RUNTIME_ENV]);
+  const ambient = opts.environment ?? process.env;
+  const runtime = parseAutopilotRuntime(ambient[AUTOPILOT_RUNTIME_ENV]);
   const prompt = buildStagePrompt(opts, runtime);
   let cmd: string;
   let args: string[];
   if (runtime === 'hermes') {
     const pythonPath = requireHermesValue(
-      opts.hermesPythonPath ?? process.env.JINN_DISPATCHER_HERMES_PYTHON,
+      opts.hermesPythonPath ?? ambient.JINN_DISPATCHER_HERMES_PYTHON,
       'JINN_DISPATCHER_HERMES_PYTHON',
     );
     const model = requireHermesValue(
-      opts.model ?? process.env.JINN_DISPATCHER_HERMES_MODEL,
+      opts.model ?? ambient.JINN_DISPATCHER_HERMES_MODEL,
       'JINN_DISPATCHER_HERMES_MODEL',
     );
     const provider = requireHermesValue(
-      opts.provider ?? process.env.JINN_DISPATCHER_HERMES_PROVIDER,
+      opts.provider ?? ambient.JINN_DISPATCHER_HERMES_PROVIDER,
       'JINN_DISPATCHER_HERMES_PROVIDER',
     );
     assertHermesBillingRoute(model, provider);
@@ -153,6 +220,7 @@ export function runStageHeadless(
   return new Promise((resolve) => {
     const proc = spawn(cmd, args, {
       cwd: opts.worktreePath,
+      env: buildUnprivilegedStageEnvironment(ambient),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';
