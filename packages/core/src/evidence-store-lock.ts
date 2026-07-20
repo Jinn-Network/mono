@@ -182,9 +182,17 @@ export async function withEvidenceStoreLock<T>(
     if (asyncTails.get(key) === tail) asyncTails.delete(key);
   };
 
+  let ownsActiveMarker = false;
+  const clearActiveMarker = (): void => {
+    if (!ownsActiveMarker) return;
+    ownsActiveMarker = false;
+    activeAsyncKeys.delete(key);
+  };
+
   try {
     let result: T;
     activeAsyncKeys.add(key);
+    ownsActiveMarker = true;
     const lock = openStoreLock(episodesDir);
     try {
       beginStoreLock(lock);
@@ -197,8 +205,11 @@ export async function withEvidenceStoreLock<T>(
         throw error;
       }
     } finally {
-      closeStoreLock(lock);
-      activeAsyncKeys.delete(key);
+      try {
+        closeStoreLock(lock);
+      } finally {
+        clearActiveMarker();
+      }
     }
     // The cross-process SQLite lock now orders both writes and rebuilds. Let a
     // refresh callback re-enter the same store without waiting on its own
@@ -207,7 +218,7 @@ export async function withEvidenceStoreLock<T>(
     await afterUnlock?.(result);
     return result;
   } finally {
-    activeAsyncKeys.delete(key);
+    clearActiveMarker();
     releaseTurn();
   }
 }

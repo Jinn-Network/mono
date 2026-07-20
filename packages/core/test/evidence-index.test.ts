@@ -127,6 +127,14 @@ async function waitForChild(child: ChildProcess): Promise<void> {
   }
 }
 
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
@@ -375,6 +383,17 @@ describe('machine-local evidence index', () => {
         nullFieldsRemoved: 1,
       },
     });
+
+    const inspection = inspectEvidenceStore({ episodesDir });
+    expect(inspection.indexUpdated).toBe(false);
+    expect(inspection.unreadableFiles).toBe(2);
+    expect(inspection.mutations).toEqual([]);
+    expect(inspection.unreadable.find((row) => row.path === journalPath)).toEqual({
+      path: journalPath,
+      reason: expect.stringMatching(/interrupted evidence repair.*--repair/i),
+    });
+    expect(existsSync(journalPath)).toBe(true);
+    expect(readFileSync(sourcePath, 'utf8')).toBe('{"partial');
 
     const report = runReindex(episodesDir, indexPath, true);
 
@@ -853,6 +872,41 @@ describe('machine-local evidence index', () => {
         .toThrow(/synchronously acquire.*async operation/i);
     });
 
+    expect(existsSync(indexPath)).toBe(false);
+  });
+
+  it('keeps the async-active guard owned by an overlapping queued writer', async () => {
+    const { episodesDir, indexPath } = makeStore();
+    const firstRefreshEntered = deferred();
+    const releaseFirstRefresh = deferred();
+    const secondOperationEntered = deferred();
+    const releaseSecondOperation = deferred();
+    const first = withEvidenceStoreLock(
+      episodesDir,
+      async () => 'first',
+      async () => {
+        firstRefreshEntered.resolve();
+        await releaseFirstRefresh.promise;
+      },
+    );
+    await firstRefreshEntered.promise;
+
+    const second = withEvidenceStoreLock(episodesDir, async () => {
+      secondOperationEntered.resolve();
+      await releaseSecondOperation.promise;
+      return 'second';
+    });
+    await secondOperationEntered.promise;
+
+    releaseFirstRefresh.resolve();
+    await first;
+    try {
+      expect(() => runReindex(episodesDir, indexPath, false))
+        .toThrow(/synchronously acquire.*async operation/i);
+    } finally {
+      releaseSecondOperation.resolve();
+      await second;
+    }
     expect(existsSync(indexPath)).toBe(false);
   });
 

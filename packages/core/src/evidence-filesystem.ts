@@ -172,23 +172,16 @@ export function prepareEvidenceDirectory(
   }
 }
 
-function regexEscape(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function writerTempCanonicalName(name: string): string | undefined {
+  const coreWriter = /^\.(.+\.episode\.json)\.\d+\.([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.tmp$/i
+    .exec(name);
+  if (coreWriter) return coreWriter[1];
+  const pythonWriter = /^\.(.+)\.([A-Za-z0-9_-]{8})\.tmp$/.exec(name);
+  return pythonWriter ? `${pythonWriter[1]}.episode.json` : undefined;
 }
 
 function isWriterTempAlias(name: string, canonicalName: string): boolean {
-  const suffix = '.episode.json';
-  if (!canonicalName.endsWith(suffix)) return false;
-  const stem = canonicalName.slice(0, -suffix.length);
-  const coreWriter = new RegExp(
-    `^\\.${regexEscape(canonicalName)}\\.\\d+\\.[0-9a-f]{8}-[0-9a-f]{4}-`
-      + '[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\.tmp$',
-    'i',
-  );
-  const pythonWriter = new RegExp(
-    `^\\.${regexEscape(stem)}\\.[A-Za-z0-9_-]{6,}\\.tmp$`,
-  );
-  return coreWriter.test(name) || pythonWriter.test(name);
+  return writerTempCanonicalName(name) === canonicalName;
 }
 
 function assertLinkedPublicationStat(stat: Stats, path: string, label: string): void {
@@ -275,6 +268,38 @@ export function recoverWriterPublicationAliases(directory: string): void {
       closeSync(canonicalFd);
     }
     secureRegularPath(canonicalPath, 'recovered evidence episode', canonicalIdentity);
+  }
+
+  // A crash before link(2) leaves only the complete nlink=1 temp. Because
+  // temp creation also happens under this store lock, no cooperating writer
+  // can still be using it while recovery holds the lock.
+  for (const name of names) {
+    if (!writerTempCanonicalName(name)) continue;
+    const path = join(directory, name);
+    let identity: FileIdentity | undefined;
+    try {
+      identity = inspectRegularPath(path, 'abandoned evidence publication temp');
+    } catch (error) {
+      if (nodeErrorCode(error) === 'ENOENT') continue;
+      throw error;
+    }
+    if (!identity) continue;
+    const opened = openVerifiedRegular(
+      path,
+      'abandoned evidence publication temp',
+      identity,
+    );
+    try {
+      const atCommit = lstatSync(path);
+      assertRegularStat(atCommit, path, 'abandoned evidence publication temp');
+      if (!sameIdentity(identityFrom(atCommit), opened.identity)) {
+        throw new Error(`evidence publication temp changed before cleanup: ${path}`);
+      }
+      unlinkSync(path);
+      fsyncDirectory(directory);
+    } finally {
+      closeSync(opened.fd);
+    }
   }
 }
 

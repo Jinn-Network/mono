@@ -316,6 +316,11 @@ def _check_evidence_store(runner: Optional[jinn_layer.Runner] = None) -> dict:
                 actions.append("replace unsafe symlink/non-regular sources")
             if any("duplicate episodeid" in reason for reason in reasons):
                 actions.append("resolve duplicate episode IDs")
+            interrupted_repair = any(
+                "interrupted evidence repair" in reason for reason in reasons
+            )
+            if interrupted_repair:
+                actions.append("recover interrupted evidence repair")
             classified = (
                 "permission",
                 "eacces",
@@ -325,15 +330,20 @@ def _check_evidence_store(runner: Optional[jinn_layer.Runner] = None) -> dict:
                 "symlink",
                 "regular file",
                 "duplicate episodeid",
+                "interrupted evidence repair",
             )
             if not reasons or any(not any(token in reason for token in classified) for reason in reasons):
                 actions.append("fix or remove malformed/schema-invalid sources")
             remedy = "; ".join(actions)
+            repair_arg = " --repair" if interrupted_repair else ""
             return {
                 "name": name,
                 "ok": False,
                 "detail": detail,
-                "remedy": f"{remedy}, then run: {jinn_layer.binary()} reindex --json",
+                "remedy": (
+                    f"{remedy}, then run: {jinn_layer.binary()} "
+                    f"reindex{repair_arg} --json"
+                ),
             }
         return {"name": name, "ok": True, "detail": detail}
     except Exception as exc:

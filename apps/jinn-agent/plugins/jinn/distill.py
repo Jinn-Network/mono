@@ -107,24 +107,18 @@ def _verified_regular_identity(path: Path) -> tuple[int, int]:
     return info.st_dev, info.st_ino
 
 
-def _writer_temp_alias(name: str, canonical_name: str) -> bool:
-    suffix = ".episode.json"
-    if not canonical_name.endswith(suffix):
-        return False
-    stem = canonical_name[: -len(suffix)]
-    return bool(
-        re.fullmatch(
-            rf"\.{re.escape(canonical_name)}\.\d+\."
-            r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
-            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp",
-            name,
-            re.IGNORECASE,
-        )
-        or re.fullmatch(
-            rf"\.{re.escape(stem)}\.[A-Za-z0-9_-]{{6,}}\.tmp",
-            name,
-        )
+def _writer_temp_canonical_name(name: str) -> Optional[str]:
+    core = re.fullmatch(
+        r"\.(.+\.episode\.json)\.\d+\."
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+        r"[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp",
+        name,
+        re.IGNORECASE,
     )
+    if core:
+        return core.group(1)
+    python = re.fullmatch(r"\.(.+)\.([A-Za-z0-9_-]{8})\.tmp", name)
+    return f"{python.group(1)}.episode.json" if python else None
 
 
 def _assert_linked_publication(info: os.stat_result, path: Path, label: str) -> None:
@@ -152,7 +146,7 @@ def _recover_writer_publication_aliases(directory: Path) -> None:
         identity = (canonical.st_dev, canonical.st_ino)
         aliases = []
         for name in names:
-            if not _writer_temp_alias(name, canonical_name):
+            if _writer_temp_canonical_name(name) != canonical_name:
                 continue
             alias = (directory / name).lstat()
             if (alias.st_dev, alias.st_ino) == identity:
@@ -216,6 +210,53 @@ def _recover_writer_publication_aliases(directory: Path) -> None:
             os.close(alias_fd)
             os.close(canonical_fd)
         _verified_regular_identity(canonical_path)
+
+    for name in names:
+        if _writer_temp_canonical_name(name) is None:
+            continue
+        path = directory / name
+        try:
+            identity = _verified_regular_identity(path)
+        except FileNotFoundError:
+            continue
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(path, flags)
+        try:
+            opened = os.fstat(fd)
+            _assert_linked_publication(
+                opened, path, "abandoned evidence publication temp"
+            )
+            if (
+                opened.st_nlink != 1
+                or (opened.st_dev, opened.st_ino) != identity
+            ):
+                raise OSError(
+                    f"abandoned evidence publication temp changed while opening: {path}"
+                )
+            at_commit = path.lstat()
+            _assert_linked_publication(
+                at_commit, path, "abandoned evidence publication temp"
+            )
+            if (
+                at_commit.st_nlink != 1
+                or (at_commit.st_dev, at_commit.st_ino) != identity
+            ):
+                raise OSError(
+                    f"abandoned evidence publication temp changed before cleanup: {path}"
+                )
+            path.unlink()
+            directory_fd = os.open(
+                directory,
+                os.O_RDONLY
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+            )
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        finally:
+            os.close(fd)
 
 
 @contextmanager

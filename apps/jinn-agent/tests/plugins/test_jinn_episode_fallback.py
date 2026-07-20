@@ -272,6 +272,19 @@ def test_fallback_recovers_a_temp_alias_left_after_canonical_publication(
     assert json.loads(path.read_text(encoding="utf-8")) == episode
 
 
+def test_fallback_removes_a_temp_abandoned_before_canonical_publication(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("JINN_LAYER_EPISODES_DIR", str(tmp_path))
+    orphan = tmp_path / ".abandoned.abcdef12.tmp"
+    orphan.write_text('{"partial":true}', encoding="utf-8")
+
+    result = distill.write_episode_fallback(_episode())
+
+    assert result is not None
+    assert not orphan.exists()
+
+
 def test_fallback_rejects_same_id_with_different_content_without_overwrite(
     tmp_path, monkeypatch
 ):

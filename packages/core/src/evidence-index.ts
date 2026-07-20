@@ -733,6 +733,11 @@ function recoverInterruptedRepairs(directory: string): {
   return { mutations, unreadable };
 }
 
+function isInterruptedRepairArtifact(name: string): boolean {
+  return /^\.jinn-(?:normalize|rescue)-[0-9a-f-]{36}\.txn$/i.test(name)
+    || /^\.jinn-rescue-source-[0-9a-f-]{36}\.hold$/i.test(name);
+}
+
 interface PreparedIndexDestination {
   created: boolean;
   identity: FileIdentity;
@@ -1058,7 +1063,18 @@ function scanEvidenceStore(
         }
       }
     }
-    files = readdirSync(episodesDir).filter((name) => name.endsWith('.json')).sort();
+    const entries = readdirSync(episodesDir).sort();
+    const reported = new Set(unreadable.map((row) => resolve(row.sourcePath)));
+    for (const name of entries.filter(isInterruptedRepairArtifact)) {
+      const artifactPath = join(episodesDir, name);
+      if (reported.has(resolve(artifactPath))) continue;
+      unreadable.push({
+        sourcePath: artifactPath,
+        reason: 'interrupted evidence repair state requires reindex --repair --json',
+      });
+      scannedFiles += 1;
+    }
+    files = entries.filter((name) => name.endsWith('.json'));
   }
 
   for (const name of files) {

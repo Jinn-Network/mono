@@ -435,6 +435,38 @@ def test_evidence_store_check_gives_permission_specific_remediation():
     )
 
 
+def test_evidence_store_check_repairs_interrupted_mutation_state():
+    runner = ContractRunner(
+        code=1,
+        output=json.dumps({
+            "status": "degraded",
+            "mode": "inspect",
+            "indexPath": None,
+            "repair": False,
+            "report": {
+                "indexedEpisodes": 2,
+                "unreadableFiles": 1,
+                "unreadable": [{
+                    "path": "/episodes/.jinn-rescue-example.txn",
+                    "reason": (
+                        "interrupted evidence repair state requires "
+                        "jinn-layer reindex --repair --json"
+                    ),
+                }],
+                "indexUpdated": False,
+                "mutations": [],
+            },
+        }),
+    )
+
+    check = doctor._check_evidence_store(runner)
+
+    assert check["remedy"] == (
+        "recover interrupted evidence repair, then run: "
+        "jinn-layer reindex --repair --json"
+    )
+
+
 def test_evidence_store_check_surfaces_an_unreadable_reply():
     runner = ContractRunner(code=0, output="not-json")
     check = doctor._check_evidence_store(runner)

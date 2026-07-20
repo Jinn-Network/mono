@@ -503,6 +503,22 @@ describe('EvidenceAdapter — AC2 byte-exact round-trip', () => {
     expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(episode);
   });
 
+  it('removes a private writer temp abandoned before canonical publication', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'ev-prepublication-recovery-'));
+    const orphan = join(
+      capturesDir,
+      '.abandoned.episode.json.123.00000000-0000-4000-8000-000000000000.tmp',
+    );
+    writeFileSync(orphan, '{"partial":true}', { mode: 0o600 });
+    const episode = makeSampleEpisode({ episodeId: 'fresh-after-crash' });
+
+    const result = await createEvidenceAdapter({ capturesDir }).put(episode);
+
+    expect(result).toEqual({ status: 'ok', value: { episodeId: 'fresh-after-crash' } });
+    expect(existsSync(orphan)).toBe(false);
+    expect(existsSync(join(capturesDir, 'fresh-after-crash.episode.json'))).toBe(true);
+  });
+
   it('rejects an episodeId collision without changing the first episode', async () => {
     const capturesDir = mkdtempSync(join(tmpdir(), 'ev-collision-'));
     const adapter = createEvidenceAdapter({ capturesDir });
