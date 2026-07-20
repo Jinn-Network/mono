@@ -242,7 +242,7 @@ describe('lifecycle controller', () => {
 
     expect(report).toMatchObject({
       status: 'rejected',
-      message: 'active writer not wired yet',
+      message: 'active executor not configured',
     });
     expect(calls).toEqual([]);
   });

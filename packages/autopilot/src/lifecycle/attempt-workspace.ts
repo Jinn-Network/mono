@@ -65,6 +65,7 @@ export interface AttemptManifest {
   readonly prNumber?: number;
   readonly branch: string;
   readonly targetBase: string;
+  readonly targetBaseOid?: string;
   readonly expectedHead: string;
   readonly claimOid: string;
   readonly reviewGeneration?: string;
@@ -89,6 +90,7 @@ export interface CreateAttemptOptions {
   readonly prNumber?: number;
   readonly branch: string;
   readonly targetBase: string;
+  readonly targetBaseOid?: string;
   readonly expectedHead: string;
   readonly claimOid: string;
   readonly reviewGeneration?: string;
@@ -171,6 +173,7 @@ function exactKeys(
       'reviewGeneration',
       'reviewRefOid',
       'reviewApprovalPolicy',
+      'targetBaseOid',
       'terminalHead',
       'childStartedAt',
       'childExitedAt',
@@ -282,6 +285,7 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
     'prNumber',
     'branch',
     'targetBase',
+    'targetBaseOid',
     'expectedHead',
     'claimOid',
     'reviewGeneration',
@@ -314,6 +318,15 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
   const expectedSubject = phase === 'implement' ? `issue-${issueNumber}` : `pr-${prNumber}`;
   if (subject !== expectedSubject) throw new Error('Attempt subject does not match phase identity');
   const expectedHead = gitOid(stringField(manifest.expectedHead, 'expected head'));
+  const targetBaseOid = manifest.targetBaseOid === undefined
+    ? undefined
+    : gitOid(stringField(manifest.targetBaseOid, 'target base OID'));
+  if (phase === 'merge-prep' && targetBaseOid === undefined) {
+    throw new Error('Merge-prep attempts require an exact target base OID');
+  }
+  if (phase !== 'merge-prep' && targetBaseOid !== undefined) {
+    throw new Error('Target base OID is valid only for merge-prep attempts');
+  }
   const claimOid = gitOid(stringField(manifest.claimOid, 'claim OID'));
   const reviewGeneration = manifest.reviewGeneration === undefined
     ? undefined
@@ -384,6 +397,7 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
     ...(prNumber === undefined ? {} : { prNumber }),
     branch: gitRefName(stringField(manifest.branch, 'branch')),
     targetBase: gitRefName(stringField(manifest.targetBase, 'target base')),
+    ...(targetBaseOid === undefined ? {} : { targetBaseOid }),
     expectedHead,
     claimOid,
     ...(reviewGeneration === undefined
@@ -778,6 +792,7 @@ export async function createAttemptWorkspace(
     ...(options.prNumber === undefined ? {} : { prNumber: options.prNumber }),
     branch: options.branch,
     targetBase: options.targetBase,
+    ...(options.targetBaseOid === undefined ? {} : { targetBaseOid: options.targetBaseOid }),
     expectedHead: options.expectedHead,
     claimOid: options.claimOid,
     ...(options.reviewGeneration === undefined
@@ -860,9 +875,17 @@ export function countRunnerLiveAttempts(
   runnerId: string,
   isPidAlive: (pid: number) => boolean,
 ): number {
+  return listRunnerLiveAttempts(v2Base, runnerId, isPidAlive).length;
+}
+
+export function listRunnerLiveAttempts(
+  v2Base: string,
+  runnerId: string,
+  isPidAlive: (pid: number) => boolean,
+): AttemptManifest[] {
   safeComponent(runnerId, 'runner ID');
   const runnerDir = join(v2Base, runnerId);
-  let count = 0;
+  const attempts: AttemptManifest[] = [];
   for (const phaseDir of directories(runnerDir)) {
     for (const attemptDir of directories(phaseDir)) {
       const manifestPath = join(attemptDir, 'manifest.json');
@@ -879,7 +902,7 @@ export function countRunnerLiveAttempts(
             )
           )
         ) {
-          count++;
+          attempts.push(manifest);
         }
       } catch {
         // A malformed manifest cannot prove a live child and never affects
@@ -887,7 +910,7 @@ export function countRunnerLiveAttempts(
       }
     }
   }
-  return count;
+  return attempts;
 }
 
 export type CleanupReasonCode =

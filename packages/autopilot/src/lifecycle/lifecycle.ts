@@ -461,6 +461,7 @@ export function planCycle(
       issueNumber: candidate.item.issueNumber,
       prNumber: candidate.item.prNumber,
       head: candidate.item.head,
+      recoverStale: reclaimingStaleMergePrep,
     });
     lanes -= 1;
     mergePrepSlots -= 1;

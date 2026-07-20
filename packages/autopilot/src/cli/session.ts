@@ -8,6 +8,8 @@ import { makeImplementationSessionProtocol } from '../lifecycle/implementation-s
 import { makeProductionImplementationSessionPort } from '../lifecycle/implementation-session-production.js';
 import { makeReviewSessionProtocol } from '../lifecycle/review-session.js';
 import { makeProductionReviewSessionPort } from '../lifecycle/review-session-production.js';
+import { makeMergePrepSessionProtocol } from '../lifecycle/merge-prep-session.js';
+import { makeProductionMergePrepSessionPort } from '../lifecycle/merge-prep-session-production.js';
 import type { ReviewVerdictState } from '../lifecycle/types.js';
 
 export interface SessionProtocol {
@@ -196,9 +198,16 @@ export function makeProductionSessionProtocol(
   > = () => makeReviewSessionProtocol(
     makeProductionReviewSessionPort({ environment }),
   ),
+  makeMergePrep: () => Pick<
+  SessionProtocol,
+  'mergePrepComplete' | 'human'
+  > = () => makeMergePrepSessionProtocol(
+    makeProductionMergePrepSessionPort({ environment }),
+  ),
 ): SessionProtocol {
   let implementation: SessionProtocol | undefined;
   let review: ReturnType<typeof makeReview> | undefined;
+  let mergePrep: ReturnType<typeof makeMergePrep> | undefined;
   const implementationProtocol = (): SessionProtocol => {
     implementation ??= makeImplementation();
     return implementation;
@@ -207,6 +216,10 @@ export function makeProductionSessionProtocol(
     review ??= makeReview();
     return review;
   };
+  const mergePrepProtocol = (): ReturnType<typeof makeMergePrep> => {
+    mergePrep ??= makeMergePrep();
+    return mergePrep;
+  };
   return {
     checkpoint: (manifest) => implementationProtocol().checkpoint(manifest),
     implementationComplete: (manifest, summary) =>
@@ -214,9 +227,12 @@ export function makeProductionSessionProtocol(
     reviewVerdict: (manifest, state, body) =>
       reviewProtocol().reviewVerdict(manifest, state, body),
     reviewFixPublish: (manifest) => reviewProtocol().reviewFixPublish(manifest),
-    mergePrepComplete: async () => operationNotWired('merge-prep-complete'),
+    mergePrepComplete: (manifest, summary) =>
+      mergePrepProtocol().mergePrepComplete(manifest, summary),
     human: (manifest, reason) => manifest.phase === 'review'
       ? reviewProtocol().human(manifest, reason)
+      : manifest.phase === 'merge-prep'
+        ? mergePrepProtocol().human(manifest, reason)
       : implementationProtocol().human(manifest, reason),
   };
 }
@@ -273,7 +289,11 @@ export async function runSessionCli(
       );
       return;
     case 'human':
-      if (manifest.phase !== 'implement' && manifest.phase !== 'review') {
+      if (
+        manifest.phase !== 'implement'
+        && manifest.phase !== 'review'
+        && manifest.phase !== 'merge-prep'
+      ) {
         throw new Error(`${command.operation} is not valid for ${manifest.phase} attempts`);
       }
       await protocol.human(manifest, boundedText(readText(command.reasonFile)));

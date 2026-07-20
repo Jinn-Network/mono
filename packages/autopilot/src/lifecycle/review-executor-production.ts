@@ -43,9 +43,14 @@ export interface ProductionReviewActionPortOptions {
   readonly repositoryPath: string;
   readonly worktreeBase: string;
   readonly runnerId: string;
+  readonly remoteName?: string;
   readonly readSnapshot: () => Promise<GitHubLifecycleSnapshot>;
   readonly changedFiles: (prNumber: number) => Promise<readonly string[]>;
-  readonly codeownersText: () => string;
+  readonly codeownersText?: (input: {
+    readonly prNumber: number;
+    readonly expectedHead: GitOid;
+    readonly baseRefName: string;
+  }) => string | Promise<string>;
   readonly runner?: CommandRunner;
   readonly environment?: NodeJS.ProcessEnv;
   readonly createWorkspace?: (
@@ -124,6 +129,42 @@ export function makeProductionReviewActionPort(
     if (mutationError !== undefined) throw mutationError;
     throw new Error(ambiguityMessage);
   };
+  const readCodeownersText = async (input: {
+    readonly prNumber: number;
+    readonly expectedHead: GitOid;
+    readonly baseRefName: string;
+  }): Promise<string> => {
+    if (options.codeownersText !== undefined) {
+      return options.codeownersText(input);
+    }
+    const pullRequest = JSON.parse(await runner('gh', [
+      'api', `repos/${REPO}/pulls/${input.prNumber}`,
+    ])) as {
+      head?: { sha?: unknown };
+      base?: { ref?: unknown; sha?: unknown };
+    };
+    if (
+      pullRequest.head?.sha !== input.expectedHead
+      || pullRequest.base?.ref !== input.baseRefName
+      || typeof pullRequest.base.sha !== 'string'
+    ) {
+      throw new Error('Review CODEOWNERS read lost exact PR authority');
+    }
+    const baseOid = gitOid(pullRequest.base.sha);
+    const contents = JSON.parse(await runner('gh', [
+      'api', `repos/${REPO}/contents/.github/CODEOWNERS`,
+      '--method', 'GET',
+      '-f', `ref=${baseOid}`,
+    ])) as {
+      encoding?: unknown;
+      content?: unknown;
+    };
+    if (contents.encoding !== 'base64' || typeof contents.content !== 'string') {
+      throw new Error('Review CODEOWNERS response was incomplete');
+    }
+    return Buffer.from(contents.content.replaceAll('\n', ''), 'base64')
+      .toString('utf8');
+  };
   const candidateFromSnapshot = async (
     snapshot: GitHubLifecycleSnapshot,
     prNumber: number,
@@ -143,7 +184,11 @@ export function makeProductionReviewActionPort(
     const files = await options.changedFiles(prNumber);
     const humanSurface = touchesCodeOwnedPath(
       [...files],
-      parseOwnedPrefixes(options.codeownersText()),
+      parseOwnedPrefixes(await readCodeownersText({
+        prNumber,
+        expectedHead: pr.headOid,
+        baseRefName: pr.baseRefName,
+      })),
     );
     const reviewClaim = pr.reviewClaim;
     const terminalApprovalMatches = lifecycle?.kind === 'pull-request'
@@ -267,6 +312,7 @@ export function makeProductionReviewActionPort(
         reviewApprovalPolicy: input.approvalPolicy,
         selectedLogin: input.selectedLogin,
         attemptId: input.attemptId,
+        remoteName: options.remoteName ?? 'jinn-autopilot-v2',
       }, runner);
     },
 

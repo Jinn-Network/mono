@@ -1,0 +1,107 @@
+import { describe, expect, it } from 'vitest';
+import {
+  scheduleActiveActions,
+  type ActiveSchedulingInput,
+} from '../../src/lifecycle/active-scheduler.js';
+import { gitOid } from '../../src/lifecycle/types.js';
+
+const HEAD = gitOid('1'.repeat(40));
+
+function input(overrides: Partial<ActiveSchedulingInput> = {}): ActiveSchedulingInput {
+  return {
+    candidates: [
+      { phase: 'implementation', issueNumber: 1 },
+      { phase: 'implementation', issueNumber: 2 },
+      { phase: 'review', issueNumber: 3, prNumber: 30, head: HEAD, author: 'other' },
+      { phase: 'merge-prep', issueNumber: 4, prNumber: 40, head: HEAD },
+      { phase: 'merge', issueNumber: 5, prNumber: 50, head: HEAD },
+    ],
+    remaining: { implementation: 1, review: 1, mergePrep: 1 },
+    availableLogins: [
+      'implementation-bot',
+      'review-bot',
+      'prep-bot',
+      'merge-bot',
+    ],
+    implementationPreferredLogin: 'implementation-bot',
+    openPipelineBacklog: 0,
+    implementationBackpressureThreshold: 10,
+    ...overrides,
+  };
+}
+
+describe('active local scheduler', () => {
+  it('enforces independent per-phase local caps and keeps merge claimless', () => {
+    const plan = scheduleActiveActions(input());
+    expect(plan.actions.map((action) => action.kind)).toEqual([
+      'claim-implementation',
+      'claim-review',
+      'claim-merge-prep',
+      'merge',
+    ]);
+  });
+
+  it('suppresses only implementation at the GitHub backlog threshold', () => {
+    const plan = scheduleActiveActions(input({ openPipelineBacklog: 10 }));
+    expect(plan.actions.map((action) => action.kind)).toEqual([
+      'claim-review',
+      'claim-merge-prep',
+      'merge',
+    ]);
+    expect(plan.skips).toContainEqual({
+      phase: 'implementation',
+      subject: 'issue:1',
+      reason: 'backpressure',
+    });
+  });
+
+  it('preserves implementation priority when only one credential lane is usable', () => {
+    const plan = scheduleActiveActions(input({
+      availableLogins: ['implementation-bot'],
+      remaining: { implementation: 1, review: 1, mergePrep: 1 },
+    }));
+    expect(plan.actions.map((action) => action.kind)).toEqual([
+      'claim-implementation',
+    ]);
+  });
+
+  it('uses the one login to review another author when no implementation is selected', () => {
+    const plan = scheduleActiveActions(input({
+      candidates: [
+        { phase: 'review', issueNumber: 3, prNumber: 30, head: HEAD, author: 'other' },
+      ],
+      availableLogins: ['implementation-bot'],
+    }));
+    expect(plan.actions).toEqual([{
+      kind: 'claim-review',
+      issueNumber: 3,
+      prNumber: 30,
+      head: HEAD,
+      recoverFixes: false,
+    }]);
+  });
+
+  it('never schedules a reviewer against its own authored PR', () => {
+    const plan = scheduleActiveActions(input({
+      candidates: [
+        {
+          phase: 'review',
+          issueNumber: 3,
+          prNumber: 30,
+          head: HEAD,
+          author: 'implementation-bot',
+        },
+      ],
+      availableLogins: ['implementation-bot'],
+    }));
+    expect(plan.actions).toEqual([]);
+  });
+
+  it('derives no global or other-runner capacity signal', () => {
+    expect(Object.keys(input().remaining).sort()).toEqual([
+      'implementation',
+      'mergePrep',
+      'review',
+    ]);
+  });
+});

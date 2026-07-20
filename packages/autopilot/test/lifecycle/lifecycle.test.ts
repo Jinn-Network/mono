@@ -716,6 +716,7 @@ describe('planCycle', () => {
         issueNumber: 42,
         prNumber: 101,
         head: HEAD_A,
+        recoverStale: true,
       },
     ]);
   });

@@ -144,6 +144,51 @@ function projectFields(): string {
 }
 
 describe('production review acquisition port', () => {
+  it('reads CODEOWNERS from the exact current GitHub base commit', async () => {
+    const calls: string[][] = [];
+    const port = makeProductionReviewActionPort({
+      repositoryPath: '/repo',
+      worktreeBase: '/worktrees',
+      runnerId: 'runner-a',
+      readSnapshot: async () => snapshot(),
+      changedFiles: async () => ['client/src/dashboard/spa/src/pages/Home.tsx'],
+      runner: async (command, args) => {
+        expect(command).toBe('gh');
+        calls.push(args);
+        if (args.some((arg) => arg.endsWith('/pulls/84'))) {
+          return JSON.stringify({
+            head: { sha: HEAD },
+            base: { ref: 'next', sha: '4'.repeat(40) },
+          });
+        }
+        if (args.some((arg) => arg.endsWith('/contents/.github/CODEOWNERS'))) {
+          return JSON.stringify({
+            encoding: 'base64',
+            content: Buffer.from(
+              '/client/src/dashboard/spa/src/pages/ @Jinn-Network/codeowners\n',
+            ).toString('base64'),
+          });
+        }
+        throw new Error(`unexpected ${args.join(' ')}`);
+      },
+    });
+
+    await expect(port.readCandidate(84)).resolves.toMatchObject({
+      approvalPolicy: 'human-codeowner',
+    });
+    expect(calls).toEqual([
+      ['api', 'repos/Jinn-Network/mono/pulls/84'],
+      [
+        'api',
+        'repos/Jinn-Network/mono/contents/.github/CODEOWNERS',
+        '--method',
+        'GET',
+        '-f',
+        `ref=${'4'.repeat(40)}`,
+      ],
+    ]);
+  });
+
   it('re-reads exact GitHub lifecycle evidence and derives CODEOWNER policy', async () => {
     const port = makeProductionReviewActionPort({
       repositoryPath: '/repo',

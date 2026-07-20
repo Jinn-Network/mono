@@ -136,7 +136,11 @@ export type ReviewExecutionResult =
   | { readonly status: 'lost' | 'ambiguous'; readonly prNumber: number };
 
 export async function executeReviewAction(
-  action: { readonly prNumber: number },
+  action: {
+    readonly prNumber: number;
+    readonly expectedHead?: GitOid;
+    readonly recoverFixes?: boolean;
+  },
   deps: ReviewExecutorDeps,
 ): Promise<ReviewExecutionResult> {
   if (!Number.isSafeInteger(action.prNumber) || action.prNumber <= 0) {
@@ -152,6 +156,13 @@ export async function executeReviewAction(
       status: 'ineligible',
       prNumber: action.prNumber,
       detail: candidate === null ? 'Pull request is missing.' : 'Pull request is not open.',
+    };
+  }
+  if (action.expectedHead !== undefined && candidate.head !== action.expectedHead) {
+    return {
+      status: 'ineligible',
+      prNumber: candidate.number,
+      detail: 'Pull request head changed after scheduling.',
     };
   }
   const lifecycleMarker =
@@ -246,6 +257,16 @@ export async function executeReviewAction(
     && currentHeadClaim !== undefined
     && ['fixing', 'stale', 'verdict-intent'].includes(currentHeadClaim.state)
     && stale;
+  if (
+    action.recoverFixes !== undefined
+    && action.recoverFixes !== recoverFixes
+  ) {
+    return {
+      status: 'ineligible',
+      prNumber: candidate.number,
+      detail: 'Review recovery mode changed after scheduling.',
+    };
+  }
   if (candidate.draft && !recoverFixes) {
     return {
       status: 'ineligible',

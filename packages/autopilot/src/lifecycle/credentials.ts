@@ -128,6 +128,13 @@ export class CredentialPool {
     return this.#entries.map((entry) => entry.login);
   }
 
+  restrictedTo(logins: readonly string[]): CredentialPool {
+    const allowed = new Set(logins.map(normalizeLogin));
+    return new CredentialPool(
+      this.#entries.filter((entry) => allowed.has(entry.normalizedLogin)),
+    );
+  }
+
   select(request: CredentialSelectionRequest): CredentialSelection {
     return selectFromEntries(this.#entries, request);
   }

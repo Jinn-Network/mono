@@ -34,6 +34,7 @@ const BRANCH_TRAILERS = {
   login: 'Jinn-Autopilot-Login',
   expectedHead: 'Jinn-Autopilot-Expected-Head',
   targetBase: 'Jinn-Autopilot-Target-Base',
+  targetBaseOid: 'Jinn-Autopilot-Target-Base-Oid',
   claimedAt: 'Jinn-Autopilot-Claimed-At',
   phaseComplete: 'Jinn-Autopilot-Phase-Complete',
 } as const;
@@ -86,6 +87,7 @@ function validateBranchClaim(claim: BranchClaim): BranchClaim {
     'login',
     'expectedHead',
     'targetBase',
+    'targetBaseOid',
     'claimedAt',
     'phaseComplete',
   ]);
@@ -102,6 +104,14 @@ function validateBranchClaim(claim: BranchClaim): BranchClaim {
   safeText(claim.login, 'login');
   gitOid(claim.expectedHead);
   gitRefName(claim.targetBase);
+  if (claim.phase === 'merge-prep') {
+    if (claim.targetBaseOid === undefined) {
+      throw new Error('Contradictory phase fields: merge-prep requires target base OID');
+    }
+    gitOid(claim.targetBaseOid);
+  } else if ('targetBaseOid' in claim && claim.targetBaseOid !== undefined) {
+    throw new Error('Contradictory phase fields: implementation cannot bind target base OID');
+  }
   isoTimestamp(claim.claimedAt);
   if (claim.phaseComplete !== undefined && claim.phaseComplete !== true) {
     throw new Error('Invalid phase-complete marker');
@@ -123,6 +133,9 @@ export function encodeBranchClaimTrailers(claim: BranchClaim): string {
     `${BRANCH_TRAILERS.login}: ${claim.login}`,
     `${BRANCH_TRAILERS.expectedHead}: ${claim.expectedHead}`,
     `${BRANCH_TRAILERS.targetBase}: ${claim.targetBase}`,
+    ...(claim.phase === 'merge-prep'
+      ? [`${BRANCH_TRAILERS.targetBaseOid}: ${claim.targetBaseOid}`]
+      : []),
     `${BRANCH_TRAILERS.claimedAt}: ${claim.claimedAt}`,
   );
   if (claim.phaseComplete === true) lines.push(`${BRANCH_TRAILERS.phaseComplete}: true`);
@@ -154,6 +167,21 @@ export function extractImplementationCompletionSummary(
   const suffix = `\n\n${trailers}`;
   if (!normalized.startsWith(prefix) || !normalized.endsWith(suffix)) {
     throw new Error('Implementation completion commit is missing its durable summary envelope');
+  }
+  return normalized.slice(prefix.length, -suffix.length);
+}
+
+export function extractMergePrepCompletionSummary(
+  message: string,
+  trailers: string,
+): string | null {
+  const claim = decodeBranchClaimTrailers(trailers);
+  if (claim.phase !== 'merge-prep' || claim.phaseComplete !== true) return null;
+  const normalized = message.replace(/\r\n/g, '\n').replace(/\n+$/, '');
+  const prefix = 'Autopilot merge-prep phase complete\n\n';
+  const suffix = `\n\n${trailers}`;
+  if (!normalized.startsWith(prefix) || !normalized.endsWith(suffix)) {
+    throw new Error('Merge-prep completion commit is missing its durable summary envelope');
   }
   return normalized.slice(prefix.length, -suffix.length);
 }
@@ -204,6 +232,7 @@ export function decodeBranchClaimTrailers(value: string): BranchClaim {
       ...common,
       phase,
       prNumber: positiveInteger(prRaw, 'PR number'),
+      targetBaseOid: gitOid(required(BRANCH_TRAILERS.targetBaseOid)),
     });
   }
   return validateBranchClaim({

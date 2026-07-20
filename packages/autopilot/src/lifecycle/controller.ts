@@ -18,6 +18,11 @@ import {
   LifecycleRateLimitError,
   type GitHubLifecycleSnapshot,
 } from './snapshot.js';
+import {
+  scheduleActiveActions,
+  type ActiveCandidate,
+  type ActiveSchedulingSkip,
+} from './active-scheduler.js';
 import type {
   AutopilotMode,
   GitOid,
@@ -26,6 +31,7 @@ import type {
   LifecycleMappingDiagnostic,
   LifecyclePhase,
   LifecycleViewItem,
+  NewWorkAction,
 } from './types.js';
 
 export type LifecycleCliCommand =
@@ -48,6 +54,22 @@ export interface LifecycleControllerDeps {
   readonly runnerId: string;
   readonly cycleId: () => string;
   readonly rateLimitFloor?: number;
+  readonly active?: {
+    preflight(): Promise<{ readonly ok: boolean; readonly detail?: string }>;
+    readLocalState(): {
+      readonly remaining: {
+        readonly implementation: number;
+        readonly review: number;
+        readonly mergePrep: number;
+      };
+      readonly availableLogins: readonly string[];
+      readonly implementationPreferredLogin: string;
+    };
+    readonly implementationBackpressureThreshold: number;
+    executeAction(
+      action: NewWorkAction,
+    ): Promise<{ readonly outcome: string; readonly reason?: string }>;
+  };
 }
 
 export interface LifecycleStatusItem {
@@ -101,6 +123,7 @@ export interface LifecycleLogEvent {
   readonly head?: GitOid;
   readonly action: string;
   readonly outcome: string;
+  readonly reason?: string;
 }
 
 export type LifecycleCycleReport =
@@ -115,7 +138,7 @@ export type LifecycleCycleReport =
     }
   | {
       readonly status: 'rate-limited';
-      readonly mode: 'observe' | 'recover';
+      readonly mode: AutopilotMode;
       readonly message: string;
       readonly items: readonly [];
       readonly orphanBranchClaims: readonly [];
@@ -124,7 +147,7 @@ export type LifecycleCycleReport =
     }
   | {
       readonly status: 'ok';
-      readonly mode: 'observe' | 'recover';
+      readonly mode: AutopilotMode;
       readonly cycleId: string;
       readonly runnerId: string;
       readonly capturedAt: string;
@@ -388,6 +411,7 @@ function eventFor(
   diagnostics: readonly LifecycleStatusDiagnostic[],
   cycleId: string,
   runnerId: string,
+  mode: 'recover' | 'active',
 ): LifecycleLogEvent {
   const action = result.action;
   const item = items.find((candidate) => (
@@ -408,7 +432,7 @@ function eventFor(
   return {
     cycleId,
     runnerId,
-    mode: 'recover',
+    mode,
     phase: item?.phase ?? orphan?.phase ?? diagnostic?.phase ?? 'eligible',
     subject: [
       issue === undefined ? null : `issue:${issue}`,
@@ -420,22 +444,132 @@ function eventFor(
   };
 }
 
+function activeCandidates(
+  snapshot: GitHubLifecycleSnapshot,
+  view: ReturnType<typeof deriveLifecycle>,
+): ActiveCandidate[] {
+  const byPr = new Map(snapshot.pullRequests.map((pr) => [pr.number, pr]));
+  const candidates: ActiveCandidate[] = [];
+  for (const entry of view.items) {
+    const item = entry.item;
+    if (
+      entry.phase === 'eligible'
+      && item.kind === 'issue'
+      && item.eligible
+      && !item.humanHold
+    ) {
+      candidates.push({ phase: 'implementation', issueNumber: item.issueNumber });
+      continue;
+    }
+    if (item.kind !== 'pull-request' || item.humanHold || item.merged) continue;
+    const pr = byPr.get(item.prNumber);
+    if (pr === undefined) continue;
+    if (
+      entry.phase === 'implementing'
+      && entry.stale
+      && item.projectStatus === 'Todo'
+      && item.isDraft
+    ) {
+      candidates.push({
+        phase: 'implementation',
+        issueNumber: item.issueNumber,
+      });
+    } else if (
+      entry.phase === 'awaiting-review'
+      && item.isDraft
+      && item.reviewClaim?.head === item.head
+      && item.reviewClaim.state === 'stale'
+    ) {
+      candidates.push({
+        phase: 'review',
+        issueNumber: item.issueNumber,
+        prNumber: item.prNumber,
+        head: item.head,
+        author: pr.author,
+        recoverFixes: true,
+      });
+    } else if (entry.phase === 'awaiting-review') {
+      candidates.push({
+        phase: 'review',
+        issueNumber: item.issueNumber,
+        prNumber: item.prNumber,
+        head: item.head,
+        author: pr.author,
+      });
+    } else if (entry.phase === 'review-fixing' && entry.stale) {
+      candidates.push({
+        phase: 'review',
+        issueNumber: item.issueNumber,
+        prNumber: item.prNumber,
+        head: item.head,
+        author: pr.author,
+        recoverFixes: true,
+      });
+    } else if (
+      entry.phase === 'merge-prep'
+      && (
+        item.branchClaim?.phase !== 'merge-prep'
+        || item.branchClaim.phaseComplete === true
+        || entry.stale
+      )
+    ) {
+      candidates.push({
+        phase: 'merge-prep',
+        issueNumber: item.issueNumber,
+        prNumber: item.prNumber,
+        head: item.head,
+        recoverStale: entry.stale,
+      });
+    } else if (entry.phase === 'merge-ready') {
+      candidates.push({
+        phase: 'merge',
+        issueNumber: item.issueNumber,
+        prNumber: item.prNumber,
+        head: item.head,
+      });
+    }
+  }
+  return candidates;
+}
+
+function phaseForAction(action: NewWorkAction): LifecyclePhase {
+  if (action.kind === 'claim-implementation') return 'eligible';
+  if (action.kind === 'claim-review') return action.recoverFixes ? 'review-fixing' : 'awaiting-review';
+  if (action.kind === 'claim-merge-prep') return 'merge-prep';
+  return 'merge-ready';
+}
+
+function subjectForAction(action: NewWorkAction): string {
+  return action.kind === 'claim-implementation'
+    ? `issue:${action.issueNumber}`
+    : `issue:${action.issueNumber}/pr:${action.prNumber}`;
+}
+
+function phaseForSchedulingSkip(
+  skip: ActiveSchedulingSkip,
+): LifecyclePhase {
+  if (skip.phase === 'implementation') return 'eligible';
+  if (skip.phase === 'review') return 'awaiting-review';
+  if (skip.phase === 'merge-prep') return 'merge-prep';
+  return 'merge-ready';
+}
+
 export async function runLifecycleCycle(
   mode: AutopilotMode,
   deps: LifecycleControllerDeps,
 ): Promise<LifecycleCycleReport> {
-  if (mode === 'active') {
+  if (mode === 'active' && deps.active === undefined) {
     return {
       status: 'rejected',
       mode,
-      message: 'active writer not wired yet',
+      message: 'active executor not configured',
       items: [],
       orphanBranchClaims: [],
       diagnostics: [],
       events: [],
     };
   }
-  if (mode === 'recover' && deps.writer === undefined) {
+  if ((mode === 'recover' || mode === 'active') && deps.writer === undefined) {
     return {
       status: 'rejected',
       mode,
@@ -445,6 +579,22 @@ export async function runLifecycleCycle(
       diagnostics: [],
       events: [],
     };
+  }
+  if (mode === 'active') {
+    const preflight = await deps.active!.preflight();
+    if (!preflight.ok) {
+      return {
+        status: 'rejected',
+        mode,
+        message: `active capability preflight failed: ${
+          preflight.detail ?? 'required capability is unverified'
+        }`,
+        items: [],
+        orphanBranchClaims: [],
+        diagnostics: [],
+        events: [],
+      };
+    }
   }
   const rateLimitFloor = deps.rateLimitFloor ?? DEFAULT_FLOOR;
   let snapshot: GitHubLifecycleSnapshot;
@@ -510,6 +660,87 @@ export async function runLifecycleCycle(
     };
   }
   const reconciliation = await executeProjectionPlan(plan, deps.writer!);
+  const reconciliationEvents = reconciliation.results.map((result) => (
+    eventFor(
+      result,
+      items,
+      orphanBranchClaims,
+      diagnostics,
+      cycleId,
+      deps.runnerId,
+      mode === 'active' ? 'active' : 'recover',
+    )
+  ));
+  if (mode === 'active') {
+    const actionEvents: LifecycleLogEvent[] = [];
+    const reconciliationBlocksClaims = plan.actions.some((action) =>
+      action.kind !== 'expose-merge-prep');
+    if (!reconciliationBlocksClaims) {
+      const local = deps.active!.readLocalState();
+      const openPipelineBacklog = snapshot.pullRequests.filter((pr) => (
+        pr.state === 'OPEN' && pr.labels.includes('engine:review')
+      )).length;
+      const scheduling = scheduleActiveActions({
+        candidates: activeCandidates(snapshot, view),
+        remaining: local.remaining,
+        availableLogins: local.availableLogins,
+        implementationPreferredLogin: local.implementationPreferredLogin,
+        openPipelineBacklog,
+        implementationBackpressureThreshold:
+          deps.active!.implementationBackpressureThreshold,
+      });
+      actionEvents.push(...scheduling.skips.map((skip): LifecycleLogEvent => ({
+        cycleId,
+        runnerId: deps.runnerId,
+        mode: 'active',
+        phase: phaseForSchedulingSkip(skip),
+        subject: skip.subject,
+        action: 'schedule',
+        outcome: 'skipped',
+        reason: skip.reason,
+      })));
+      for (const action of scheduling.actions) {
+        try {
+          const result = await deps.active!.executeAction(action);
+          actionEvents.push({
+            cycleId,
+            runnerId: deps.runnerId,
+            mode: 'active',
+            phase: phaseForAction(action),
+            subject: subjectForAction(action),
+            ...('head' in action ? { head: action.head } : {}),
+            action: action.kind,
+            outcome: result.outcome,
+            ...(result.reason === undefined ? {} : { reason: result.reason }),
+          });
+        } catch (error) {
+          actionEvents.push({
+            cycleId,
+            runnerId: deps.runnerId,
+            mode: 'active',
+            phase: phaseForAction(action),
+            subject: subjectForAction(action),
+            ...('head' in action ? { head: action.head } : {}),
+            action: action.kind,
+            outcome: 'failed',
+            reason: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }
+    return {
+      status: 'ok',
+      mode,
+      cycleId,
+      runnerId: deps.runnerId,
+      capturedAt: snapshot.capturedAt,
+      items,
+      orphanBranchClaims,
+      diagnostics,
+      events: [...reconciliationEvents, ...actionEvents],
+      reconciliation,
+    };
+  }
   return {
     status: 'ok',
     mode,
@@ -519,9 +750,7 @@ export async function runLifecycleCycle(
     items,
     orphanBranchClaims,
     diagnostics,
-    events: reconciliation.results.map((result) => (
-      eventFor(result, items, orphanBranchClaims, diagnostics, cycleId, deps.runnerId)
-    )),
+    events: reconciliationEvents,
     reconciliation,
   };
 }
@@ -617,5 +846,9 @@ export function renderLifecycleHuman(report: LifecycleCycleReport): string {
     ...report.items.map(explanation),
     ...report.orphanBranchClaims.map(orphanExplanation),
     ...report.diagnostics.map((diagnostic) => `Human diagnostic: ${diagnostic.detail}.`),
+    ...report.events.map((event) =>
+      `${event.action} ${event.subject}: ${event.outcome}${
+        event.reason === undefined ? '' : ` (${event.reason})`
+      }.`),
   ].join('\n');
 }

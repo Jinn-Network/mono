@@ -81,6 +81,7 @@ export type BranchClaim =
   | (BranchClaimBase & {
       readonly phase: 'merge-prep';
       readonly prNumber: number;
+      readonly targetBaseOid?: GitOid;
     });
 
 export type ReviewClaimState =
@@ -253,6 +254,7 @@ export type NewWorkAction =
       readonly issueNumber: number;
       readonly prNumber: number;
       readonly head: GitOid;
+      readonly recoverStale: boolean;
     }
   | {
       readonly kind: 'merge';

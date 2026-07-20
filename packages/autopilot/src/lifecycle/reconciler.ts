@@ -25,12 +25,30 @@ export interface ReconciliationWriter {
   readIssueHead(issueNumber: number): Promise<GitOid | null>;
   readBranchHead(headRefName: string): Promise<GitOid | null>;
   readProjectStatus(issueNumber: number): Promise<ProjectStatus | null>;
-  setProjectStatus(issueNumber: number, status: ProjectStatus): Promise<void>;
+  setProjectStatus(
+    issueNumber: number,
+    status: ProjectStatus,
+    expectedHead?: GitOid,
+  ): Promise<void>;
   readPullRequest(prNumber: number): Promise<ReconciliationPullRequestState | null>;
-  setPullRequestDraft(prNumber: number, draft: boolean): Promise<void>;
-  setPullRequestLabel(prNumber: number, label: string, present: boolean): Promise<void>;
+  setPullRequestDraft(
+    prNumber: number,
+    draft: boolean,
+    expectedHead?: GitOid,
+  ): Promise<void>;
+  setPullRequestLabel(
+    prNumber: number,
+    label: string,
+    present: boolean,
+    expectedHead?: GitOid,
+  ): Promise<void>;
   hasHumanComment(prNumber: number, marker: string): Promise<boolean>;
-  ensureHumanComment(prNumber: number, marker: string, body: string): Promise<void>;
+  ensureHumanComment(
+    prNumber: number,
+    marker: string,
+    body: string,
+    expectedHead?: GitOid,
+  ): Promise<void>;
   ensureImplementationSummary(
     prNumber: number,
     expectedHead: GitOid,
@@ -117,7 +135,11 @@ async function setProjectStatus(
     return { action, outcome: 'changed-head' };
   }
   try {
-    await writer.setProjectStatus(action.issueNumber, desired);
+    await writer.setProjectStatus(
+      action.issueNumber,
+      desired,
+      action.expectedHead,
+    );
     return { action, outcome: 'applied' };
   } catch (error) {
     try {
@@ -151,7 +173,11 @@ async function setDraft(
     }
   }
   try {
-    await writer.setPullRequestDraft(action.prNumber, action.draft);
+    await writer.setPullRequestDraft(
+      action.prNumber,
+      action.draft,
+      action.expectedHead,
+    );
     return { action, outcome: 'applied' };
   } catch (error) {
     try {
@@ -176,7 +202,12 @@ async function setLabel(
     return { action, outcome: 'already-applied' };
   }
   try {
-    await writer.setPullRequestLabel(action.prNumber, action.label, action.present);
+    await writer.setPullRequestLabel(
+      action.prNumber,
+      action.label,
+      action.present,
+      action.expectedHead,
+    );
     return { action, outcome: 'applied' };
   } catch (error) {
     try {
@@ -208,7 +239,12 @@ async function ensureComment(
     return { action, outcome: 'changed-head' };
   }
   try {
-    await writer.ensureHumanComment(action.prNumber, action.marker, action.body);
+    await writer.ensureHumanComment(
+      action.prNumber,
+      action.marker,
+      action.body,
+      action.expectedHead,
+    );
     return { action, outcome: 'applied' };
   } catch (error) {
     try {
