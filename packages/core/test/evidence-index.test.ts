@@ -644,6 +644,22 @@ describe('machine-local evidence index', () => {
       indexUpdated: true,
     });
     expect(readFileSync(sourcePath, 'utf8')).toBe(sourceBefore);
+
+    const reclassified = JSON.parse(sourceBefore) as EpisodeV1;
+    reclassified.origin = { writer: 'post-migration-writer', build: '2.0.0' };
+    writeJson(sourcePath, reclassified);
+    const third = runReindex(episodesDir, indexPath, false);
+    expect(third).toMatchObject({
+      indexedEpisodes: 1,
+      syntheticExcludedFiles: 0,
+      syntheticExcluded: [],
+      indexUpdated: true,
+    });
+    const reclassifiedIndex = new EvidenceIndex({ dbPath: indexPath });
+    expect(reclassifiedIndex.listExcluded()).toEqual([]);
+    expect(reclassifiedIndex.listEpisodes().map((row) => row.episodeId))
+      .toEqual([synthetic.episodeId]);
+    reclassifiedIndex.close();
   });
 
   it('excludes the known smoke payload even when it names a production model', () => {

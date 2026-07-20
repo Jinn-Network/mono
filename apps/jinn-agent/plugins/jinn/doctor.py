@@ -251,7 +251,15 @@ def _check_evidence_store(runner: Optional[jinn_layer.Runner] = None) -> dict:
         status = reply.get("status") if isinstance(reply, dict) else None
         index_path = reply.get("indexPath") if isinstance(reply, dict) else object()
         repair = reply.get("repair") if isinstance(reply, dict) else None
-        readable = report.get("indexedEpisodes") if isinstance(report, dict) else None
+        indexed = report.get("indexedEpisodes") if isinstance(report, dict) else None
+        excluded = (
+            report.get("syntheticExcludedFiles")
+            if isinstance(report, dict)
+            else None
+        )
+        excluded_rows = (
+            report.get("syntheticExcluded") if isinstance(report, dict) else None
+        )
         unreadable = report.get("unreadableFiles") if isinstance(report, dict) else None
         rows = report.get("unreadable") if isinstance(report, dict) else None
         index_updated = report.get("indexUpdated") if isinstance(report, dict) else None
@@ -265,9 +273,26 @@ def _check_evidence_store(runner: Optional[jinn_layer.Runner] = None) -> dict:
             and repair is False
             and index_updated is False
             and mutations == []
-            and isinstance(readable, int)
-            and not isinstance(readable, bool)
-            and readable >= 0
+            and isinstance(indexed, int)
+            and not isinstance(indexed, bool)
+            and indexed >= 0
+            and isinstance(excluded, int)
+            and not isinstance(excluded, bool)
+            and excluded >= 0
+            and isinstance(excluded_rows, list)
+            and len(excluded_rows) == excluded
+            and all(
+                isinstance(row, dict)
+                and isinstance(row.get("path"), str)
+                and bool(row["path"])
+                and isinstance(row.get("episodeId"), str)
+                and bool(row["episodeId"])
+                and isinstance(row.get("rule"), str)
+                and bool(row["rule"])
+                and isinstance(row.get("reason"), str)
+                and bool(row["reason"])
+                for row in excluded_rows
+            )
             and isinstance(unreadable, int)
             and not isinstance(unreadable, bool)
             and unreadable >= 0
@@ -295,7 +320,11 @@ def _check_evidence_store(runner: Optional[jinn_layer.Runner] = None) -> dict:
                 "detail": detail,
                 "remedy": update_remedy,
             }
-        detail = f"{readable} readable episode(s); {unreadable} unreadable"
+        detail = (
+            f"{indexed} indexed episode(s); "
+            f"{excluded} synthetic fixture(s) excluded; "
+            f"{unreadable} unreadable"
+        )
         if unreadable > 0 or code != 0:
             reasons = [
                 str(row.get("reason", "")).lower()

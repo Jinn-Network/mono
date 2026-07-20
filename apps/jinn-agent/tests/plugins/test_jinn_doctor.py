@@ -54,6 +54,8 @@ class ContractRunner:
                 "repair": False,
                 "report": {
                     "indexedEpisodes": 3,
+                    "syntheticExcludedFiles": 0,
+                    "syntheticExcluded": [],
                     "unreadableFiles": 0,
                     "unreadable": [],
                     "indexUpdated": False,
@@ -366,12 +368,12 @@ def test_host_provider_is_informational_pointer():
     }
 
 
-def test_evidence_store_check_reports_readable_and_unreadable_counts():
+def test_evidence_store_check_reports_indexed_and_unreadable_counts():
     healthy = doctor._check_evidence_store(ContractRunner())
     assert healthy == {
         "name": "evidence-readable",
         "ok": True,
-        "detail": "3 readable episode(s); 0 unreadable",
+        "detail": "3 indexed episode(s); 0 synthetic fixture(s) excluded; 0 unreadable",
     }
 
     runner = ContractRunner(
@@ -383,6 +385,8 @@ def test_evidence_store_check_reports_readable_and_unreadable_counts():
             "repair": False,
             "report": {
                 "indexedEpisodes": 2,
+                "syntheticExcludedFiles": 0,
+                "syntheticExcluded": [],
                 "unreadableFiles": 4,
                 "unreadable": [
                     {"path": "/episodes/broken.json", "reason": "Unexpected token"},
@@ -399,11 +403,44 @@ def test_evidence_store_check_reports_readable_and_unreadable_counts():
     assert broken == {
         "name": "evidence-readable",
         "ok": False,
-        "detail": "2 readable episode(s); 4 unreadable",
+        "detail": "2 indexed episode(s); 0 synthetic fixture(s) excluded; 4 unreadable",
         "remedy": (
             "replace unsafe symlink/non-regular sources; resolve duplicate episode IDs; "
             "fix or remove malformed/schema-invalid sources, then run: jinn-layer reindex --json"
         ),
+    }
+
+
+def test_evidence_store_check_reports_intentional_synthetic_exclusions():
+    runner = ContractRunner(
+        output=json.dumps({
+            "status": "ok",
+            "mode": "inspect",
+            "indexPath": None,
+            "repair": False,
+            "report": {
+                "indexedEpisodes": 23,
+                "syntheticExcludedFiles": 1,
+                "syntheticExcluded": [{
+                    "path": "/episodes/s1.episode.json",
+                    "episodeId": "s1-1784122564637021000",
+                    "rule": "legacy-short-session-placeholder-model-v1",
+                    "reason": "legacy synthetic fixture excluded by a versioned rule",
+                }],
+                "unreadableFiles": 0,
+                "unreadable": [],
+                "indexUpdated": False,
+                "mutations": [],
+            },
+        }),
+    )
+
+    check = doctor._check_evidence_store(runner)
+
+    assert check == {
+        "name": "evidence-readable",
+        "ok": True,
+        "detail": "23 indexed episode(s); 1 synthetic fixture(s) excluded; 0 unreadable",
     }
 
 
@@ -417,6 +454,8 @@ def test_evidence_store_check_gives_permission_specific_remediation():
             "repair": False,
             "report": {
                 "indexedEpisodes": 0,
+                "syntheticExcludedFiles": 0,
+                "syntheticExcluded": [],
                 "unreadableFiles": 1,
                 "unreadable": [{
                     "path": "/episodes/private.json",
@@ -445,6 +484,8 @@ def test_evidence_store_check_repairs_interrupted_mutation_state():
             "repair": False,
             "report": {
                 "indexedEpisodes": 2,
+                "syntheticExcludedFiles": 0,
+                "syntheticExcluded": [],
                 "unreadableFiles": 1,
                 "unreadable": [{
                     "path": "/episodes/.jinn-rescue-example.txn",
@@ -485,6 +526,8 @@ def test_evidence_store_check_rejects_a_non_inspect_or_inconsistent_envelope():
             "repair": False,
             "report": {
                 "indexedEpisodes": 3,
+                "syntheticExcludedFiles": 0,
+                "syntheticExcluded": [],
                 "unreadableFiles": 0,
                 "unreadable": [],
                 "indexUpdated": False,
@@ -498,6 +541,8 @@ def test_evidence_store_check_rejects_a_non_inspect_or_inconsistent_envelope():
             "repair": False,
             "report": {
                 "indexedEpisodes": 2,
+                "syntheticExcludedFiles": 0,
+                "syntheticExcluded": [],
                 "unreadableFiles": 1,
                 "unreadable": [],
                 "indexUpdated": False,
@@ -511,6 +556,8 @@ def test_evidence_store_check_rejects_a_non_inspect_or_inconsistent_envelope():
             "repair": False,
             "report": {
                 "indexedEpisodes": 3,
+                "syntheticExcludedFiles": 0,
+                "syntheticExcluded": [],
                 "unreadableFiles": 0,
                 "unreadable": [],
                 "indexUpdated": False,
@@ -523,6 +570,8 @@ def test_evidence_store_check_rejects_a_non_inspect_or_inconsistent_envelope():
             "repair": False,
             "report": {
                 "indexedEpisodes": 3,
+                "syntheticExcludedFiles": 0,
+                "syntheticExcluded": [],
                 "unreadableFiles": 0,
                 "unreadable": [],
                 "indexUpdated": False,
@@ -536,10 +585,27 @@ def test_evidence_store_check_rejects_a_non_inspect_or_inconsistent_envelope():
             "repair": True,
             "report": {
                 "indexedEpisodes": 3,
+                "syntheticExcludedFiles": 0,
+                "syntheticExcluded": [],
                 "unreadableFiles": 0,
                 "unreadable": [],
                 "indexUpdated": True,
                 "mutations": [{"kind": "normalized-json"}],
+            },
+        },
+        {
+            "status": "ok",
+            "mode": "inspect",
+            "indexPath": None,
+            "repair": False,
+            "report": {
+                "indexedEpisodes": 3,
+                "syntheticExcludedFiles": 1,
+                "syntheticExcluded": [],
+                "unreadableFiles": 0,
+                "unreadable": [],
+                "indexUpdated": False,
+                "mutations": [],
             },
         },
     ]
