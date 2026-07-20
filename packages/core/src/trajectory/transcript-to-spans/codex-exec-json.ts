@@ -23,6 +23,10 @@ interface DirectExecRecord {
   item?: unknown;
 }
 
+type CorrelatedTranscriptEvent = TranscriptEvent & {
+  correlationId?: string;
+};
+
 class TimestampCursor {
   private lastGoodNs = 0n;
 
@@ -48,8 +52,8 @@ function provenanceAttrs(): Record<string, unknown> {
  * stream to the same events consumed below; returning no events preserves the
  * home-session compatibility fallback.
  */
-function parseDirectExecEvents(rawText: string): TranscriptEvent[] {
-  const events: TranscriptEvent[] = [];
+function parseDirectExecEvents(rawText: string): CorrelatedTranscriptEvent[] {
+  const events: CorrelatedTranscriptEvent[] = [];
   const pendingCommandIds = new Set<string>();
   let syntheticTimestampMs = 0;
   const nextTimestamp = (): string =>
@@ -98,6 +102,7 @@ function parseDirectExecEvents(rawText: string): TranscriptEvent[] {
         timestamp: nextTimestamp(),
         name: 'command_execution',
         args: { command: item.command },
+        ...(itemId !== null ? { correlationId: itemId } : {}),
       });
       if (itemId !== null) pendingCommandIds.add(itemId);
       continue;
@@ -110,6 +115,7 @@ function parseDirectExecEvents(rawText: string): TranscriptEvent[] {
         timestamp: nextTimestamp(),
         name: 'command_execution',
         args: { command: item.command },
+        ...(itemId !== null ? { correlationId: itemId } : {}),
       });
     }
     if (itemId !== null) pendingCommandIds.delete(itemId);
@@ -125,6 +131,7 @@ function parseDirectExecEvents(rawText: string): TranscriptEvent[] {
       name: 'command_execution',
       content: output,
       isError,
+      ...(itemId !== null ? { correlationId: itemId } : {}),
     });
   }
 
@@ -175,7 +182,7 @@ export class CodexExecJsonParser implements TranscriptSpanParser {
   }
 
   parseText(rawText: string): TranscriptSpanInput[] {
-    let events = parseDirectExecEvents(rawText);
+    let events: CorrelatedTranscriptEvent[] = parseDirectExecEvents(rawText);
     if (events.length === 0) {
       try {
         const normalized = rawText.endsWith('\n') ? rawText : `${rawText}\n`;
@@ -190,6 +197,7 @@ export class CodexExecJsonParser implements TranscriptSpanParser {
 
     const spans: TranscriptSpanInput[] = [];
     const pendingByName = new Map<string, TranscriptSpanInput[]>();
+    const pendingByCorrelationId = new Map<string, TranscriptSpanInput>();
     const agentTurns: TranscriptSpanInput[] = [];
     const cursor = new TimestampCursor();
 
@@ -233,14 +241,24 @@ export class CodexExecJsonParser implements TranscriptSpanParser {
             status: { code: 'UNSET' },
           };
           spans.push(call);
-          const queue = pendingByName.get(event.name) ?? [];
-          queue.push(call);
-          pendingByName.set(event.name, queue);
+          if (event.correlationId) {
+            pendingByCorrelationId.set(event.correlationId, call);
+          } else {
+            const queue = pendingByName.get(event.name) ?? [];
+            queue.push(call);
+            pendingByName.set(event.name, queue);
+          }
           break;
         }
         case 'tool-result': {
-          const queue = pendingByName.get(event.name);
-          const call = queue?.shift();
+          let call: TranscriptSpanInput | undefined;
+          if (event.correlationId) {
+            call = pendingByCorrelationId.get(event.correlationId);
+            pendingByCorrelationId.delete(event.correlationId);
+          } else {
+            const queue = pendingByName.get(event.name);
+            call = queue?.shift();
+          }
           if (!call) break;
           const timestamp = cursor.next(event.timestamp);
           call.endTimeUnixNano = timestamp;

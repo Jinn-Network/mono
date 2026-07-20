@@ -132,6 +132,86 @@ describe.each([
 });
 
 describe('Codex direct exec stream', () => {
+  it('degrades a completed-only command into a paired call and result', () => {
+    const transcript = JSON.stringify({
+      type: 'item.completed',
+      item: {
+        id: 'completed-only',
+        type: 'command_execution',
+        command: 'echo complete',
+        aggregated_output: 'complete',
+        exit_code: 0,
+        status: 'completed',
+      },
+    });
+
+    const toolCalls = new CodexExecJsonParser()
+      .parseText(transcript)
+      .filter((span) => span.attributes['jinn.span.kind'] === 'jinn.tool_call');
+
+    expect(toolCalls).toHaveLength(1);
+    expect(toolCalls[0]?.attributes['tool.args']).toEqual({ command: 'echo complete' });
+    expect(toolCalls[0]?.events[0]?.attributes?.['tool.result']).toBe('complete');
+    expect(toolCalls[0]?.status).toEqual({ code: 'OK' });
+  });
+
+  it('retains response_item home-session fallback pairing', () => {
+    const toolCalls = new CodexExecJsonParser()
+      .parseText(codexTranscript)
+      .filter((span) => span.attributes['jinn.span.kind'] === 'jinn.tool_call');
+
+    expect(toolCalls).toHaveLength(1);
+    expect(toolCalls[0]?.attributes['tool.name']).toBe('shell');
+    expect(toolCalls[0]?.attributes['tool.args']).toEqual({ command: 'yarn test' });
+    expect(toolCalls[0]?.events[0]?.attributes?.['tool.result']).toBe('all green');
+    expect(toolCalls[0]?.status).toEqual({ code: 'OK' });
+  });
+
+  it('pairs interleaved command completions with their item ids', () => {
+    const transcript = [
+      JSON.stringify({
+        type: 'item.started',
+        item: { id: 'command-a', type: 'command_execution', command: 'echo A' },
+      }),
+      JSON.stringify({
+        type: 'item.started',
+        item: { id: 'command-b', type: 'command_execution', command: 'echo B' },
+      }),
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          id: 'command-b',
+          type: 'command_execution',
+          command: 'echo B',
+          aggregated_output: 'output B',
+          exit_code: 0,
+          status: 'completed',
+        },
+      }),
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          id: 'command-a',
+          type: 'command_execution',
+          command: 'echo A',
+          aggregated_output: 'output A',
+          exit_code: 0,
+          status: 'completed',
+        },
+      }),
+    ].join('\n');
+
+    const toolCalls = new CodexExecJsonParser()
+      .parseText(transcript)
+      .filter((span) => span.attributes['jinn.span.kind'] === 'jinn.tool_call');
+
+    expect(toolCalls).toHaveLength(2);
+    expect(toolCalls[0]?.attributes['tool.args']).toEqual({ command: 'echo A' });
+    expect(toolCalls[0]?.events[0]?.attributes?.['tool.result']).toBe('output A');
+    expect(toolCalls[1]?.attributes['tool.args']).toEqual({ command: 'echo B' });
+    expect(toolCalls[1]?.events[0]?.attributes?.['tool.result']).toBe('output B');
+  });
+
   it('parses the captured item stream into turns, paired commands, and terminal usage', async () => {
     const parser = new CodexExecJsonParser();
     const spans = await parser.parse(directCodexExecFixturePath);
