@@ -907,46 +907,78 @@ describe('createEvidenceFetcher — snapshot-transcript enrichment (§8, #1472)'
     };
   }
 
-  it('derives the step trace from the claude-code transcript inside system_snapshot', async () => {
+  it('derives canonical typed spans from the claude-code transcript inside system_snapshot', async () => {
     const fetch = createEvidenceFetcher(ports(solutionWithSnapshot({ '.claude-code/stdout.jsonl': CLAUDE_JSONL, 'task.json': '{}' })));
     const ev = await fetch(ref());
-    expect(ev.stepTrace).toBeDefined();
-    expect(ev.stepTrace).toContain('plan the certificate fix');
-    expect(ev.stepTrace).toMatch(/- tool Edit:/);
+    expect(ev.trajectorySpans).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        attributes: expect.objectContaining({
+          'jinn.span.kind': 'jinn.agent_turn',
+          'jinn.transcript.parser': 'claude-code-stream-json',
+          'jinn.transcript.parserVersion': '1.0.0',
+        }),
+      }),
+      expect.objectContaining({
+        attributes: expect.objectContaining({
+          'jinn.span.kind': 'jinn.tool_call',
+          'jinn.transcript.parser': 'claude-code-stream-json',
+          'jinn.transcript.parserVersion': '1.0.0',
+        }),
+      }),
+    ]));
     expect(ev.patch).toBe(PATCH); // enrichment never displaces the patch
   });
 
-  it('derives the step trace from the codex transcript inside system_snapshot', async () => {
-    const codexJsonl = JSON.stringify({ type: 'item.completed', item: { type: 'command_execution', command: 'pytest -x', exit_code: 0 } });
+  it('derives canonical typed spans from the codex transcript inside system_snapshot', async () => {
+    const codexJsonl = [
+      JSON.stringify({
+        timestamp: '2026-07-20T12:00:00.000Z',
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'Run the tests.' }],
+        },
+      }),
+      JSON.stringify({
+        timestamp: '2026-07-20T12:00:01.000Z',
+        type: 'response_item',
+        payload: {
+          type: 'function_call',
+          name: 'shell',
+          arguments: '{"command":"pytest -x"}',
+          call_id: 'call-1',
+        },
+      }),
+    ].join('\n');
     const fetch = createEvidenceFetcher(ports(solutionWithSnapshot({ '.codex-code/stdout.jsonl': codexJsonl })));
     const ev = await fetch(ref());
-    expect(ev.stepTrace).toContain('- cmd: pytest -x');
+    expect(ev.trajectorySpans).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        attributes: expect.objectContaining({
+          'jinn.span.kind': 'jinn.tool_call',
+          'jinn.transcript.parser': 'codex-exec-json',
+          'jinn.transcript.parserVersion': '1.0.0',
+        }),
+      }),
+    ]));
   });
 
-  it('caps the step trace at MAX_TRACE_CHARS (4000)', async () => {
-    const many = Array.from({ length: 300 }, (_, i) =>
-      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: `step number ${i} does a thing in detail` }] } }),
-    ).join('\n');
-    const fetch = createEvidenceFetcher(ports(solutionWithSnapshot({ '.claude-code/stdout.jsonl': many })));
-    const ev = await fetch(ref());
-    expect(ev.stepTrace!.length).toBeLessThanOrEqual(4000);
-  });
-
-  it('degrades to no step trace for a hermes-style snapshot (plain-text log, no decision path)', async () => {
+  it('degrades to no typed spans for a hermes-style snapshot (plain-text log, no decision path)', async () => {
     const fetch = createEvidenceFetcher(ports(solutionWithSnapshot({ '.hermes-agent/stdout.log': 'started\ndone\n' })));
     const ev = await fetch(ref());
-    expect(ev.stepTrace).toBeUndefined();
+    expect(ev.trajectorySpans).toBeUndefined();
     expect(ev.patch).toBe(PATCH);
   });
 
-  it('degrades to no step trace when the solution has no system_snapshot artifact', async () => {
+  it('degrades to no typed spans when the solution has no system_snapshot artifact', async () => {
     const fetch = createEvidenceFetcher(ports()); // default solution carries no artifacts
     const ev = await fetch(ref());
-    expect(ev.stepTrace).toBeUndefined();
+    expect(ev.trajectorySpans).toBeUndefined();
     expect(ev.patch).toBe(PATCH);
   });
 
-  it('degrades to no step trace when the snapshot fetch throws (never fails the whole evidence fetch)', async () => {
+  it('degrades to no typed spans when the snapshot fetch throws (never fails the whole evidence fetch)', async () => {
     const fetch = createEvidenceFetcher(
       ports({
         solution: boundSolution({
@@ -956,11 +988,11 @@ describe('createEvidenceFetcher — snapshot-transcript enrichment (§8, #1472)'
       }),
     );
     const ev = await fetch(ref());
-    expect(ev.stepTrace).toBeUndefined();
+    expect(ev.trajectorySpans).toBeUndefined();
     expect(ev.patch).toBe(PATCH);
   });
 
-  it('degrades to no step trace on a sha256 mismatch (tampered snapshot)', async () => {
+  it('degrades to no typed spans on a sha256 mismatch (tampered snapshot)', async () => {
     const { wrapper } = wrapDonation(makeTarGz({ '.claude-code/stdout.jsonl': CLAUDE_JSONL }));
     const fetch = createEvidenceFetcher(
       ports({
@@ -971,11 +1003,11 @@ describe('createEvidenceFetcher — snapshot-transcript enrichment (§8, #1472)'
       }),
     );
     const ev = await fetch(ref());
-    expect(ev.stepTrace).toBeUndefined();
+    expect(ev.trajectorySpans).toBeUndefined();
     expect(ev.patch).toBe(PATCH);
   });
 
-  it('degrades to no step trace on corrupt snapshot bytes', async () => {
+  it('degrades to no typed spans on corrupt snapshot bytes', async () => {
     const bogus = Buffer.from('definitely not a tarball');
     const { wrapper, sha256 } = wrapDonation(bogus);
     const fetch = createEvidenceFetcher(
@@ -987,7 +1019,7 @@ describe('createEvidenceFetcher — snapshot-transcript enrichment (§8, #1472)'
       }),
     );
     const ev = await fetch(ref());
-    expect(ev.stepTrace).toBeUndefined();
+    expect(ev.trajectorySpans).toBeUndefined();
     expect(ev.patch).toBe(PATCH);
   });
 });

@@ -82,7 +82,7 @@ describe('toBridgeCapturedTask (both polarities, D10)', () => {
     expect(t.outcome.status).toBe('completed');
     expect(t.outcome.verifiabilityTier).toBe('evaluator-verified');
     expect(t.environment.harness.name).toBe('jinn-execution-ledger-bridge');
-    expect(t.provenance).toBe('contributed');
+    expect(t.provenance).toBe('derived-from-history');
     expect(t.task.distributionTags).toContain('coding');
     expect(t.steps.some((s) => s.name === 'tool:apply_patch')).toBe(true);
     expect(t.environment.verifier).toMatchObject({
@@ -99,25 +99,93 @@ describe('toBridgeCapturedTask (both polarities, D10)', () => {
     expect(verdictStep?.attributes.actualPassed).toBe(false);
   });
 
-  it('inserts a solver:trajectory step between patch and verdict when enriched (§8, v0.5)', () => {
-    const t = toBridgeCapturedTask(ref(), { ...ev, stepTrace: '- plan [jinn.phase]\n- edit [jinn.mcp_call]' }, NOW);
+  it('inserts canonical typed spans between patch and verdict when enriched', () => {
+    const t = toBridgeCapturedTask(ref(), {
+      ...ev,
+      trajectorySpans: [
+        {
+          name: 'agent_turn.assistant',
+          kind: 'INTERNAL',
+          startTimeUnixNano: '100',
+          endTimeUnixNano: '101',
+          attributes: {
+            'jinn.span.kind': 'jinn.agent_turn',
+            'jinn.turn.role': 'assistant',
+            'message.content': 'plan the fix',
+            'jinn.transcript.sourceFormat': 'claude-code-stream-json',
+            'jinn.transcript.parser': 'claude-code-stream-json',
+            'jinn.transcript.parserVersion': '1.0.0',
+          },
+          events: [],
+          status: { code: 'OK' },
+        },
+        {
+          name: 'tool_call.Edit',
+          kind: 'INTERNAL',
+          startTimeUnixNano: '102',
+          endTimeUnixNano: '103',
+          attributes: {
+            'jinn.span.kind': 'jinn.tool_call',
+            'tool.name': 'Edit',
+            'tool.args': { path: 'x.ts' },
+            'jinn.transcript.sourceFormat': 'claude-code-stream-json',
+            'jinn.transcript.parser': 'claude-code-stream-json',
+            'jinn.transcript.parserVersion': '1.0.0',
+          },
+          events: [],
+          status: { code: 'OK' },
+        },
+      ],
+    }, NOW);
     const names = t.steps.map((s) => s.name);
-    expect(names).toEqual(['tool:apply_patch', 'solver:trajectory', 'evaluator:verdict']);
-    const traceStep = t.steps.find((s) => s.name === 'solver:trajectory');
-    expect(String(traceStep!.attributes.trace)).toContain('plan');
-    // enriched evidence is NOT tagged patch-only
+    expect(names).toEqual([
+      'tool:apply_patch',
+      'agent_turn.assistant',
+      'tool_call.Edit',
+      'evaluator:verdict',
+    ]);
+    expect(t.steps.slice(1, 3)).toEqual([
+      expect.objectContaining({
+        spanId: 'history-000001',
+        kind: 'jinn.agent_turn',
+        attributes: expect.objectContaining({
+          'jinn.transcript.parser': 'claude-code-stream-json',
+          'jinn.transcript.parserVersion': '1.0.0',
+        }),
+      }),
+      expect.objectContaining({
+        spanId: 'history-000002',
+        kind: 'jinn.tool_call',
+      }),
+    ]);
     expect(t.task.distributionTags).not.toContain('patch-only');
   });
 
-  it('tags patch-only and inserts no trace step when the trajectory is unavailable (§8, v0.5)', () => {
-    const t = toBridgeCapturedTask(ref(), ev, NOW); // ev has no stepTrace
+  it('tags patch-only and inserts no history steps when the trajectory is unavailable', () => {
+    const t = toBridgeCapturedTask(ref(), ev, NOW);
     expect(t.steps.map((s) => s.name)).toEqual(['tool:apply_patch', 'evaluator:verdict']);
     expect(t.task.distributionTags).toContain('patch-only');
   });
 
   it('never emits the retrieval-visibility mark on a bridged record (#1824 sequencing guard: bulk derivation cannot self-admit into pickup)', () => {
     for (const polarity of ['pass', 'fail'] as const) {
-      for (const evidence of [ev, { ...ev, stepTrace: '- plan [jinn.phase]' }]) {
+      for (const evidence of [ev, {
+        ...ev,
+        trajectorySpans: [{
+          name: 'agent_turn.assistant',
+          kind: 'INTERNAL' as const,
+          startTimeUnixNano: '100',
+          endTimeUnixNano: '101',
+          attributes: {
+            'jinn.span.kind': 'jinn.agent_turn',
+            'jinn.transcript.sourceFormat': 'claude-code-stream-json',
+            'jinn.transcript.parser': 'claude-code-stream-json',
+            'jinn.transcript.parserVersion': '1.0.0',
+          },
+          events: [],
+          status: { code: 'OK' as const },
+        }],
+      }]) {
         const t = toBridgeCapturedTask(ref({ polarity }), evidence, NOW);
         expect(t.task.distributionTags).not.toContain(RETRIEVAL_VISIBLE_TAG);
       }
@@ -416,7 +484,7 @@ describe('buildBridgeEvidencePublisher (reuses capture→publish at layer-2 alti
     expect(patchVal).toContain('use this token'); // ordinary prose preserved (layer-2 altitude)
   });
 
-  it('scrubs the solver-trajectory step at layer-2 too (a planted secret in the trace is redacted)', async () => {
+  it('publishes typed history spans as derived and retrieval-invisible', async () => {
     const { deps, artifacts } = publishDeps();
     const publisher = buildBridgeEvidencePublisher(deps);
     const task = toBridgeCapturedTask(
@@ -425,7 +493,21 @@ describe('buildBridgeEvidencePublisher (reuses capture→publish at layer-2 alti
         ...verifiedEvidence(),
         taskSummary: 'Fix the bug',
         patch: 'diff --git a/x b/x',
-        stepTrace: '- read config using wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY [jinn.venue_io]\n- edit models.py [jinn.mcp_call]',
+        trajectorySpans: [{
+          name: 'agent_turn.assistant',
+          kind: 'INTERNAL',
+          startTimeUnixNano: '100',
+          endTimeUnixNano: '101',
+          attributes: {
+            'jinn.span.kind': 'jinn.agent_turn',
+            'message.content': 'read config using wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+            'jinn.transcript.sourceFormat': 'claude-code-stream-json',
+            'jinn.transcript.parser': 'claude-code-stream-json',
+            'jinn.transcript.parserVersion': '1.0.0',
+          },
+          events: [],
+          status: { code: 'OK' },
+        }],
       },
       NOW,
     );
@@ -433,10 +515,14 @@ describe('buildBridgeEvidencePublisher (reuses capture→publish at layer-2 alti
 
     const episodeUpload = artifacts.find((a) => a.artifactType === EPISODE_SCHEMA_VERSION);
     const env = EpisodeV1WriteSchema.parse(episodeUpload!.payload);
-    const traceStep = env.trajectory.find((s) => s.name === 'solver:trajectory')!;
-    const traceVal = String(traceStep.attributes.trace);
-    expect(traceVal).not.toContain('wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'); // secret redacted
-    expect(traceVal).toContain('edit models.py'); // ordinary prose preserved (layer-2 altitude)
+    const historyStep = env.trajectory.find((s) => s.name === 'agent_turn.assistant')!;
+    expect(String(historyStep.attributes['message.content'])).not.toContain(
+      'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+    );
+    expect(historyStep.attributes['jinn.transcript.parserVersion']).toBe('1.0.0');
+    expect(env.provenance).toBe('derived-from-history');
+    expect(env.retrievalVisible).toBe(false);
+    expect(env.task.distributionTags).not.toContain(RETRIEVAL_VISIBLE_TAG);
   });
 
   it('bridges a patch larger than the 16 KiB step-attribute cap with a receipted truncation (not a crash, not silent)', async () => {

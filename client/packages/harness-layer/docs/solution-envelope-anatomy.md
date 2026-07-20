@@ -48,7 +48,7 @@ A solution carries two:
    | Entry | Content |
    |---|---|
    | `.claude-code/stdout.jsonl` | **The full claude-code session** — `--output-format stream-json` records (assistant text + tool_use + tool_result), the solve's actual decision path (~100KB+) |
-   | `.codex-code/stdout.jsonl` | **The full codex session** — `codex exec --json` records (`item.completed`: agent_message / command_execution) |
+   | `.codex-code/stdout.jsonl` | **The full codex session** — `codex exec --json` records (`response_item`: message / function_call / function_call_output) |
    | `.hermes-agent/stdout.log` | Hermes: ~1KB plain text — no decision path |
    | `.execute/solution-payload.json`, `task.json` | The payload + the task the agent was given |
    | (codex runs) `.agents/`, `plugins/` | Installed skills/plugins present in the workdir |
@@ -61,12 +61,14 @@ A solution carries two:
 
 `client/packages/harness-layer/src/snapshot-transcript.ts` — donation unwrap
 (sha256-verified) + bomb-guarded gunzip + ustar reader +
-`findSolveTranscript`. `transcript-outline.ts` turns the stream transcript
-into a compact decision-path outline. The bridge's evidence fetcher
-(`bridge-fetch-evidence.ts`, hop 4) wires them together; evidence with no
-usable transcript is tagged `patch-only`.
+`findSolveTranscript`. `parseSolveTranscript` feeds the transcript bytes to
+the canonical Claude/Codex stdout parsers exported by
+`@jinn-network/core/trajectory`, producing the same typed
+`jinn.agent_turn` / `jinn.tool_call` spans used by the live path. The bridge's
+evidence fetcher (`bridge-fetch-evidence.ts`, hop 4) wires them together;
+evidence with no usable transcript is tagged `patch-only`.
 
-Note the format trap: the shipped transcript parsers
-(`client/src/trajectory/transcript-parsers/`) target the tools' **home-dir**
-session formats, not these stdout streams — `ClaudeCodeJsonlParser` drops
-records lacking a top-level `timestamp`, which stream-json records don't have.
+Note the format trap: the older parsers under
+`@jinn-network/core/trajectory`'s `transcript-parsers/` directory target the
+tools' **home-dir** session formats. The sibling `transcript-to-spans/`
+parsers target these captured stdout streams.

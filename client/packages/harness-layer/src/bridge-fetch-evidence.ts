@@ -15,9 +15,9 @@
  *     → bounded attemptEnvelopeMeta candidates → publisher + signed-hash binding
  *     → authenticated solution envelope (IPFS) → .payload.patch (the coding diff)
  *   problem statement = authenticated original task description
- *   step trace (hop 4, best-effort, #1472) = the solution's system_snapshot
+ *   typed history (hop 4, best-effort, #1472/#1473) = the solution's system_snapshot
  *     artifact → donation unwrap → gunzip+untar → the harness stdout
- *     transcript → outline (snapshot-transcript.ts + transcript-outline.ts)
+ *     transcript → canonical core stream parser → typed trajectory spans
  *
  * The predecessor selected the solution with the task document's mutable
  * `restorationRequestId`. That allowed an otherwise-valid signed task to be
@@ -33,15 +33,14 @@
  */
 
 import { type AttemptRef, type BridgeEvidence } from './bridge.js';
-import { extractSnapshotTranscript } from './snapshot-transcript.js';
-import { outlineTranscript } from './transcript-outline.js';
+import {
+  extractSnapshotTranscript,
+  parseSolveTranscript,
+} from './snapshot-transcript.js';
 
 /** Cap the fetched patch / problem so one huge diff does not blow the prompt. */
 const MAX_PATCH_CHARS = 6000;
 const MAX_PROBLEM_CHARS = 1500;
-/** Cap the compressed solver trace (§8, #1472) so a long run does not blow the prompt. */
-const MAX_TRACE_CHARS = 4000;
-
 function nonEmptyString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
@@ -455,25 +454,25 @@ export interface EvidenceFetcherPorts {
 }
 
 /**
- * Fetch + outline the solver's reasoning for one solution envelope (§8, #1472).
+ * Fetch + parse the solver's reasoning for one solution envelope (§8, #1472).
  *
  * The decision path does NOT live in `jinn.trajectory.v1` (that carries only
  * the packaging step's 2 `jinn.artifact.emit` spans — #1473 tracks making it
  * truthful at solve time). It lives in the `system_snapshot` artifact: a
  * donation-wrapped gzipped tar of the solve working dir containing the
  * harness's raw stdout transcript. Resolve that artifact, unwrap (sha256-
- * verified), decompress (bomb-guarded), locate the transcript, and outline it
- * for the distiller.
+ * verified), decompress (bomb-guarded), locate the transcript, and parse it
+ * with the same canonical typed-span implementation as the live path.
  *
  * Best-effort: ANY failure (no snapshot, unresolvable CID, sha mismatch,
  * corrupt bytes, no transcript — e.g. hermes) degrades to `undefined` — the
  * trace is enrichment, never a gate on the evidence fetch. Absence is later
  * recorded as a `patch-only` tag.
  */
-async function fetchStepTrace(
+async function fetchTrajectorySpans(
   ipfs: (cid: string) => Promise<any>,
   solutionEnv: any,
-): Promise<string | undefined> {
+): Promise<BridgeEvidence['trajectorySpans']> {
   try {
     const arts = solutionEnv?.artifacts;
     if (!Array.isArray(arts)) return undefined;
@@ -484,8 +483,8 @@ async function fetchStepTrace(
     const wrapper = await ipfs(cid); // the donation wrapper is itself JSON
     const transcript = extractSnapshotTranscript(wrapper, sha256);
     if (!transcript) return undefined;
-    const outline = outlineTranscript(transcript.harness, transcript.jsonl);
-    return outline?.slice(0, MAX_TRACE_CHARS);
+    const spans = parseSolveTranscript(transcript);
+    return spans.length > 0 ? spans : undefined;
   } catch {
     return undefined;
   }
@@ -813,7 +812,7 @@ export function createEvidenceFetcher(
 
     // Hop 3 (best-effort, §8 v0.5): the solver's own trajectory off the SAME
     // solution envelope. Never throws — absence is recorded as `patch-only`.
-    const stepTrace = await fetchStepTrace(ports.ipfs, solutionEnv);
+    const trajectorySpans = await fetchTrajectorySpans(ports.ipfs, solutionEnv);
 
     const outerTaskDocument = record(taskDoc) ?? {};
     const signedTaskDocument =
@@ -902,7 +901,7 @@ export function createEvidenceFetcher(
             },
           }
         : {}),
-      ...(stepTrace ? { stepTrace } : {}),
+      ...(trajectorySpans ? { trajectorySpans } : {}),
     };
   };
 }
