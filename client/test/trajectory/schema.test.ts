@@ -110,16 +110,8 @@ describe('JinnTrajectoryV1Schema', () => {
     ).toThrow();
   });
 
-  // #1672: `derivedFrom` is a new optional field. A live-path blob that omits
-  // it must still validate (additive/non-breaking — AC2); a backfill blob that
-  // carries it must round-trip.
-  it('accepts a live-path blob that omits derivedFrom', () => {
-    const parsed = JinnTrajectoryV1Schema.parse(valid);
-    expect(parsed.derivedFrom).toBeUndefined();
-  });
-
-  it('accepts and round-trips a derived blob carrying derivedFrom', () => {
+  it('strips the retired backfill-only derivedFrom field', () => {
     const parsed = JinnTrajectoryV1Schema.parse({ ...valid, derivedFrom: 'bafy-source-cid' });
-    expect(parsed.derivedFrom).toBe('bafy-source-cid');
+    expect('derivedFrom' in parsed).toBe(false);
   });
 });

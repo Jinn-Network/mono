@@ -113,7 +113,6 @@
     "attribution:analyze": "tsx scripts/analyze-attribution-instrument.ts",
     "attribution:export-facts": "tsx scripts/export-attribution-facts.ts",
     "audit:failures": "tsx scripts/audit-task-run-failures.ts",
-    "backfill:trajectories": "tsx scripts/backfill-derived-trajectories.ts",
     "net-liveness": "tsx scripts/net-liveness-probe.ts",
     "cleanup:engine-work": "tsx scripts/cleanup-engine-work.ts",
     "e2e": "tsx test/e2e/validate.ts",

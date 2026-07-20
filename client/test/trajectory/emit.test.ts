@@ -73,35 +73,6 @@ describe('emitTrajectory', () => {
     expect(result.signed.signature.hash).toBe(keccak256(toBytes(canonicalJson(unsigned))));
   });
 
-  // #1672: emit threads an optional `derivedFrom` into the unsigned blob so the
-  // provenance rides the signed content (and the signature covers it).
-  it('threads derivedFrom into the signed blob and the signature covers it', async () => {
-    const c = new TrajectoryCollector({ taskCid: 'bafy-task', runId: 'run-df' });
-    c.addSpan({
-      name: 'x',
-      kind: 'INTERNAL',
-      startTimeUnixNano: '1',
-      endTimeUnixNano: '2',
-      attributes: { 'jinn.span.kind': 'jinn.phase', 'jinn.phase.name': 'p' },
-      events: [],
-      status: { code: 'OK' },
-    });
-    const pk = generatePrivateKey();
-    const account = privateKeyToAccount(pk);
-    const result = await emitTrajectory({
-      collector: c,
-      runId: 'run-df',
-      derivedFrom: 'bafy-source-cid',
-      signerPrivateKey: pk,
-      signerAddress: account.address,
-      ipfsRegistryUrl: 'http://stub',
-    });
-    expect(result.signed.derivedFrom).toBe('bafy-source-cid');
-    expect(() => JinnTrajectoryV1Schema.parse(result.signed)).not.toThrow();
-    const { signature: _s, ...unsigned } = result.signed;
-    expect(result.signed.signature.hash).toBe(keccak256(toBytes(canonicalJson(unsigned))));
-  });
-
   it('scrubs identity, local paths, and credential-looking values before signing and pinning', async () => {
     const c = new TrajectoryCollector({ taskCid: 'bafy-task', runId: 'run-scrub' });
     c.addSpan({
