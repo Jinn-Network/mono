@@ -719,6 +719,22 @@ describe('createSweRebenchV2VerifierFactsResolver — authoritative task lineage
     )).rejects.toThrow(/original task.*content digest.*CID/i);
   });
 
+  it('rejects a dag-pb CID for the authoritative original-task hop', async () => {
+    const f = await fixture();
+    const dagPbCid = 'bafybeigdyrzt5sfp7udm7hu76ylb7d7zquc6c6j3f2r5t7yqf3w5m4rj3u';
+    const wrapper = await evaluationWrapper(dagPbCid);
+
+    await expect(createSweRebenchV2VerifierFactsResolver(f.deps)(
+      { signedTask: wrapper },
+      INSTANCE_ID,
+      authoritativeTaskBinding(dagPbCid),
+    )).rejects.toThrow(/original task CID.*raw CIDv1/i);
+    expect(f.deps.fetchIpfsJson).not.toHaveBeenCalledWith({
+      cid: dagPbCid,
+      maxBytes: 2_000_000,
+    });
+  });
+
   it('rejects a forged solutionTaskCid added after the evaluator signed the wrapper', async () => {
     const f = await fixture();
     const wrapper = await evaluationWrapper(f.originalTaskCid);

@@ -40,6 +40,10 @@ export function parseIpfsCid(value: string): ParsedIpfsCid | null {
 
   let bytes: Uint8Array | null;
   if (value.startsWith('b')) {
+    // The supported 36-byte CIDv1 shape has one canonical 58-symbol base32
+    // encoding. Reject zero-extended textual aliases before decoding so CID
+    // strings remain safe cache/deduplication and metadata-key identities.
+    if (value.length !== 59) return null;
     bytes = decodeBase32(value.slice(1));
   } else if (value.startsWith('f')) {
     const body = value.slice(1);

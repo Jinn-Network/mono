@@ -503,7 +503,7 @@ describe('GET /explorer/slice — route integration', () => {
     ).toBeUndefined();
   });
 
-  it('adds fail-closed exact-one candidate predicates to both composite metadata joins', async () => {
+  it('disables both permissionless metadata joins until canonical authentication exists', async () => {
     const res = await explorerApp.request(
       `/slice?manifestDigest=${MANIFEST_CID}&group=operator`,
     );
@@ -519,9 +519,9 @@ describe('GET /explorer/slice — route integration', () => {
         sqlNodes.some((node) =>
           [...((node.strings as string[] | undefined) ?? []), String(node.raw ?? '')]
             .join(' ')
-            .includes('count(*)'),
+            .includes('false'),
         ),
-        `${tableName} must fail closed unless one linked candidate remains`,
+        `${tableName} must fail closed instead of trusting an exact-one projection`,
       ).toBe(true);
     }
   });

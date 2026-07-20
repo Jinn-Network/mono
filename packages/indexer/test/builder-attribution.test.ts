@@ -49,32 +49,22 @@ function verdict(opts: { requestId: `0x${string}`; verdict: string; score?: numb
 }
 
 describe('attributeRuns (attd join)', () => {
-  it('matches an envelope plug-in by cid + sha256 to a publication row', () => {
+  it('does not attribute an unauthenticated envelope projection', () => {
     const out = attributeRuns({
       publications: [pub],
       attemptEnvelopeMetas: [meta({ requestId: '0xreq1' as `0x${string}`, pluginCid: 'bafycid', sha256: PUB_SHA.slice(2) })],
       verdicts: [verdict({ requestId: '0xreq1' as `0x${string}`, verdict: 'Pass', score: 100 })],
     });
-    expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({
-      builderAgentId: '42',
-      pluginCid: 'bafycid',
-      pluginName: '@builder/swe-skill',
-      taskId: '7',
-      verdict: 'Pass',
-      score: 100,
-      forkSuspected: false,
-    });
+    expect(out).toEqual([]);
   });
 
-  it('flags forkSuspected=true when sha256 mismatches the publication', () => {
+  it('does not expose an unauthenticated fork signal', () => {
     const out = attributeRuns({
       publications: [pub],
       attemptEnvelopeMetas: [meta({ requestId: '0xreq1' as `0x${string}`, pluginCid: 'bafycid', sha256: FORK_SHA.slice(2) })],
       verdicts: [verdict({ requestId: '0xreq1' as `0x${string}`, verdict: 'Pass' })],
     });
-    expect(out).toHaveLength(1);
-    expect(out[0].forkSuspected).toBe(true);
+    expect(out).toEqual([]);
   });
 
   it('returns no row when there is no matching publication (operator-only attribution)', () => {
@@ -95,7 +85,7 @@ describe('attributeRuns (attd join)', () => {
     expect(out).toHaveLength(0);
   });
 
-  it('aggregates score history per (builderAgentId, pluginCid)', () => {
+  it('does not aggregate unauthenticated score history', () => {
     const out = attributeRuns({
       publications: [pub],
       attemptEnvelopeMetas: [
@@ -109,10 +99,6 @@ describe('attributeRuns (attd join)', () => {
         verdict({ requestId: '0xreqC' as `0x${string}`, verdict: 'Pass', score: 100, ts: 3 }),
       ],
     });
-    expect(out).toHaveLength(3);
-    expect(out.map((r) => r.forkSuspected)).toEqual([false, false, true]);
-    // Builder-credit aggregate excludes fork-suspected rows.
-    const credited = out.filter((r) => !r.forkSuspected);
-    expect(credited).toHaveLength(2);
+    expect(out).toEqual([]);
   });
 });

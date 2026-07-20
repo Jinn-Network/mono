@@ -590,6 +590,21 @@ async function authenticateAuthoritativeOriginalTask(args: {
       'authenticated evaluation wrapper context.solutionTaskCid must be nonempty',
     );
   }
+  if (
+    !(
+      /^f01551220[0-9a-f]{64}$/u.test(originalTaskCid)
+      || /^F01551220[0-9A-F]{64}$/u.test(originalTaskCid)
+      || (
+        originalTaskCid.length === 59
+        && originalTaskCid.startsWith('bafk')
+        && isIpfsCid(originalTaskCid)
+      )
+    )
+  ) {
+    throw new Error(
+      'authenticated original task CID must be a canonical raw CIDv1',
+    );
+  }
 
   const authoritativeTaskCidDigest = exactDigest(
     args.authority.taskCidDigest,
@@ -625,8 +640,7 @@ async function authenticateAuthoritativeOriginalTask(args: {
   // canonical JSON here so alternate/injected ports cannot substitute another
   // otherwise-valid signed task under the authoritative CID.
   if (
-    /^(?:f0155|F0155|bafk)/u.test(originalTaskCid)
-    && !sameHex(
+    !sameHex(
       sha256(toBytes(canonicalJson(rawOriginalTask))),
       actualTaskCidDigest,
     )

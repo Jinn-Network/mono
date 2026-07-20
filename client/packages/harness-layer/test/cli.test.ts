@@ -161,6 +161,18 @@ describe('bounded IPFS JSON fetcher', () => {
     await expect(fetchIpfs(cid)).resolves.toEqual({ authenticated: true });
   });
 
+  it('rejects a noncanonical base32 alias with an extra zero symbol', async () => {
+    const canonical = rawBase32Cid('{"authenticated":true}');
+    const fetchImpl = vi.fn();
+    const fetchIpfs = createBoundedIpfsJsonFetcher({
+      gateway: 'https://gateway.example',
+      fetchImpl,
+    });
+
+    await expect(fetchIpfs(`${canonical}a`)).rejects.toThrow(/valid IPFS CID/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('rejects requested raw CID A when the gateway returns valid JSON object B', async () => {
     const requestedBytes = '{"task":"A"}';
     const returnedBytes = '{"task":"B"}';

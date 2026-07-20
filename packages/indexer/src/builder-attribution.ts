@@ -19,13 +19,11 @@
  * true` per spec §5.3 — the row is still emitted (for visibility) but is
  * filtered out of builder-credit aggregations downstream.
  *
- * ebu7 dependency: this module references `AttemptEnvelopeMetaRow` and
- * `VerdictRow` types that are populated by the ebu7 enrichment bead. Until
- * ebu7 merges and the `attemptEnvelopeMeta` / `verdict` entities exist in the
- * deployed indexer schema, the `/builders/:agentId/runs` Hono route in
- * `src/api/index.ts` passes empty arrays for both, making `attributeRuns`
- * return `[]`. The pure-function join is exercised independently in tests via
- * pre-seeded fixture rows.
+ * Trust boundary: `attemptEnvelopeMeta` is a permissionless, shape-parsed
+ * projection. This module therefore returns `[]` until a canonical projection
+ * binds the historical publisher Safe, envelope signature/hash, authoritative
+ * attempt, and original task. A matching requestId or singleton candidate is
+ * not sufficient builder attribution.
  */
 
 export interface PluginPublicationRow {
@@ -78,65 +76,15 @@ export interface BuilderAttributedRunRow {
   ts: number;
 }
 
-interface EnvelopePluginEntry {
-  name: string;
-  version: string;
-  cid?: string;
-  sha256: string;
-}
-
-/**
- * Normalises the publication's sha256 (`0x` + 64 hex) and the envelope plugin
- * entry's sha256 (64 hex, no `0x`) to lower-case 64-hex and compares.
- */
-function sha256Matches(pubSha: string, envSha: string): boolean {
-  const a = pubSha.replace(/^0x/i, '').toLowerCase();
-  const b = envSha.replace(/^0x/i, '').toLowerCase();
-  return a.length === 64 && b.length === 64 && a === b;
-}
-
 export function attributeRuns(args: {
   publications: PluginPublicationRow[];
   attemptEnvelopeMetas: AttemptEnvelopeMetaRow[];
   verdicts: VerdictRow[];
 }): BuilderAttributedRunRow[] {
-  const pubByCid = new Map<string, PluginPublicationRow>();
-  for (const p of args.publications) pubByCid.set(p.pluginCid, p);
-
-  const verdictByReq = new Map<string, VerdictRow>();
-  for (const v of args.verdicts) verdictByReq.set(v.requestId.toLowerCase(), v);
-
-  const out: BuilderAttributedRunRow[] = [];
-  for (const meta of args.attemptEnvelopeMetas) {
-    let plugins: EnvelopePluginEntry[] = [];
-    try {
-      plugins = JSON.parse(meta.pluginsJson) as EnvelopePluginEntry[];
-    } catch {
-      continue;
-    }
-    const verdict = verdictByReq.get(meta.requestId.toLowerCase());
-    if (!verdict) continue;
-
-    for (const entry of plugins) {
-      if (!entry.cid) continue;
-      const pub = pubByCid.get(entry.cid);
-      if (!pub) continue;
-      const forkSuspected = !sha256Matches(pub.pluginSha256, entry.sha256);
-      const row: BuilderAttributedRunRow = {
-        builderAgentId: pub.builderAgentId,
-        pluginCid: pub.pluginCid,
-        pluginName: pub.pluginName,
-        pluginVersion: pub.pluginVersion,
-        taskId: verdict.taskId,
-        attemptRequestId: meta.requestId,
-        operatorAgentId: verdict.operatorAgentId,
-        verdict: verdict.verdict,
-        ts: verdict.ts,
-        forkSuspected,
-      };
-      if (typeof verdict.score === 'number') row.score = verdict.score;
-      out.push(row);
-    }
-  }
-  return out;
+  void args;
+  // Stored attempt metadata is a permissionless shape projection. Do not
+  // attribute runs or credit builders until a canonical projection proves the
+  // historical publisher Safe, envelope signature/hash, authoritative attempt,
+  // and original task.
+  return [];
 }

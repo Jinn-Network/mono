@@ -265,45 +265,6 @@ query OperatorCountAttempts($taskIds: [String!]!, $chainId: Int!, $limit: Int!, 
 `;
 
 /**
- * Paginated read of verdictEnvelopeMeta rows for swe-rebench-v2 successes,
- * scoped to a single SolverNet via `solverNetManifestCid` so multi-SolverNet
- * operators with overlapping instance_id pools don't cross-tenant over-count
- * (#669 Finding 2).
- *
- * Ponder's auto-GraphQL does not expose GROUP BY / count aggregations, so
- * getInstanceSuccessCounts pages this query with the `after` cursor and
- * groups client-side. Capped at 1000 per page (Ponder's upper bound on
- * plural-query `limit`).
- */
-const INSTANCE_SUCCESS_COUNTS_QUERY = `
-query InstanceSuccessCounts($solverNetManifestCid: String!, $limit: Int!, $after: String) {
-  verdictEnvelopeMetas(
-    where: {
-      solverNetManifestCid: $solverNetManifestCid,
-      solverType_starts_with: "swe-rebench-v2"
-    },
-    limit: $limit,
-    after: $after,
-    orderBy: "enrichedAtBlock",
-    orderDirection: "asc"
-  ) {
-    items {
-      requestId
-      chainId
-      instanceId
-      actualPassed
-      enrichmentStatus
-      solverNetManifestCid
-    }
-    pageInfo {
-      hasNextPage
-      endCursor
-    }
-  }
-}
-`;
-
-/**
  * Leg 1 of getInstanceClaimCounts (#802): page every task id + maxClaims for a
  * SolverNet's manifestDigest. Leg 2 reuses ATTEMPTS_FOR_TASKS_QUERY to count
  * attempts (= consumed slots) per task. Same two-leg shape as
@@ -351,40 +312,6 @@ query TaskStatuses($manifestDigest: String!, $limit: Int!, $after: String) {
       finalized
       refunded
       claimWindowEnd
-    }
-    pageInfo {
-      hasNextPage
-      endCursor
-    }
-  }
-}
-`;
-
-/**
- * Resolved verdict tallies per task (#502). Pages `verdictEnvelopeMeta` rows
- * for a batch of taskIds, grouping client-side into PASS/FAIL poles. Backs the
- * operator Activity table's task-relative Outcome column — a DISPLAY signal.
- *
- * The `taskId_in` filter relies on Ponder auto-generating an `_in` operator for
- * the indexed `verdictEnvelopeMeta.taskId` column (see packages/indexer
- * ponder.schema.ts — taskId is indexed). If a live indexer ever rejects
- * `taskId_in`, the portable fallback is `solverNetManifestCid_in` + a
- * client-side taskId filter (as TASK_POST_COUNTS_QUERY does with manifestDigest).
- */
-const VERDICT_TALLIES_QUERY = `
-query VerdictTallies($taskIds: [String!]!, $limit: Int!, $after: String) {
-  verdictEnvelopeMetas(
-    where: { taskId_in: $taskIds, enrichmentStatus: "ok" },
-    limit: $limit,
-    after: $after,
-    orderBy: "enrichedAtBlock",
-    orderDirection: "asc"
-  ) {
-    items {
-      taskId
-      evaluatorVerdict
-      chainId
-      requestId
     }
     pageInfo {
       hasNextPage
@@ -599,18 +526,6 @@ interface TaskStatusesPage {
   };
 }
 
-interface VerdictTalliesPage {
-  verdictEnvelopeMetas: {
-    items: Array<{
-      taskId: string;
-      evaluatorVerdict: string;
-      chainId: number;
-      requestId: string;
-    }>;
-    pageInfo?: { hasNextPage: boolean; endCursor: string | null };
-  };
-}
-
 interface TaskPostCountsPage {
   tasks: {
     items: Array<{ id: string; manifestDigest: string; createdAtBlock: string | number }>;
@@ -622,128 +537,6 @@ interface MostRecentTaskPage {
   tasks: {
     items: Array<{ id: string; taskCidDigest: string }>;
   };
-}
-
-interface InstanceSuccessCountsPage {
-  verdictEnvelopeMetas: {
-    items: Array<{
-      requestId: string;
-      chainId: number;
-      instanceId: string;
-      actualPassed?: boolean;
-      enrichmentStatus?: string;
-      solverNetManifestCid?: string;
-    }>;
-    pageInfo?: { hasNextPage: boolean; endCursor: string | null };
-  };
-}
-
-// ── Per-codeDigest reward aggregates (#764) ──────────────────────────────────
-
-const CODEDIGEST_ATTEMPTS_QUERY = `
-query CodeDigestAttempts($codeDigests: [String!]!, $limit: Int!, $after: String) {
-  attemptEnvelopeMetas(
-    where: { codeDigest_in: $codeDigests, mode: "train", enrichmentStatus: "ok" },
-    limit: $limit,
-    after: $after,
-    orderBy: "enrichedAtBlock",
-    orderDirection: "desc"
-  ) {
-    items { requestId chainId codeDigest }
-    pageInfo { hasNextPage endCursor }
-  }
-}
-`;
-
-// The verdict leg is the only place per-SolverNet scoping is queryable: of the
-// tables this method touches, only `verdictEnvelopeMeta` carries
-// `solverNetManifestCid` (ponder.schema.ts:657 — written by the same IPFS
-// task-body enrichment that resolves instanceId). `attemptEnvelopeMeta` has no
-// SolverNet column. Aggregation (step 4) only counts requests that HAVE a
-// verdict, so filtering the verdict leg correctly scopes the whole aggregate to
-// the given SolverNet. The filter is emitted only when scoping is requested —
-// Ponder treats a `null` `where` value as "IS NULL", not "skip the filter", so
-// an unscoped call must omit the field entirely (#764).
-function codeDigestVerdictsQuery(scopeBySolverNet: boolean): string {
-  return `
-query CodeDigestVerdicts($requestIds: [String!]!, $limit: Int!, $after: String${scopeBySolverNet ? ', $solverNetManifestCid: String!' : ''}) {
-  verdictEnvelopeMetas(
-    where: { requestId_in: $requestIds${scopeBySolverNet ? ', solverNetManifestCid: $solverNetManifestCid' : ''} },
-    limit: $limit,
-    after: $after,
-    orderBy: "requestId",
-    orderDirection: "asc"
-  ) {
-    items { requestId chainId actualPassed actualScore passedCount totalCount }
-    pageInfo { hasNextPage endCursor }
-  }
-}
-`;
-}
-
-// Optional operator scoping: restrict attempts to those the operator claimed.
-const CODEDIGEST_OPERATOR_ATTEMPTS_QUERY = `
-query CodeDigestOperatorAttempts($requestIds: [String!]!, $operator: String!, $limit: Int!, $after: String) {
-  attempts(
-    where: { requestId_in: $requestIds, operator: $operator },
-    limit: $limit,
-    after: $after,
-    orderBy: "createdAtBlock",
-    orderDirection: "asc"
-  ) {
-    items { requestId chainId }
-    pageInfo { hasNextPage endCursor }
-  }
-}
-`;
-
-interface CodeDigestAttemptsPage {
-  attemptEnvelopeMetas: {
-    items: Array<{ requestId: string; chainId: number; codeDigest: string }>;
-    pageInfo?: { hasNextPage: boolean; endCursor: string | null };
-  };
-}
-interface CodeDigestVerdictsPage {
-  verdictEnvelopeMetas: {
-    items: Array<{ requestId: string; chainId: number; actualPassed: boolean; actualScore: string; passedCount?: string | number | null; totalCount?: string | number | null }>;
-    pageInfo?: { hasNextPage: boolean; endCursor: string | null };
-  };
-}
-interface CodeDigestOperatorAttemptsPage {
-  attempts: {
-    items: Array<{ requestId: string; chainId: number }>;
-    pageInfo?: { hasNextPage: boolean; endCursor: string | null };
-  };
-}
-
-/**
- * Collapse composite metadata candidates without letting GraphQL order choose
- * the winner. Repeated copies of the same projection (for example, a row seen
- * on both sides of a page boundary) are harmless; disagreeing projections make
- * the request ambiguous and are omitted.
- */
-function unambiguousCandidates<T>(
-  rows: T[],
-  keyOf: (row: T) => string,
-  projectionOf: (row: T) => unknown,
-): Map<string, T> {
-  const states = new Map<string, { row: T; projection: string; ambiguous: boolean }>();
-  for (const row of rows) {
-    const key = keyOf(row);
-    const projection = JSON.stringify(projectionOf(row));
-    const state = states.get(key);
-    if (!state) {
-      states.set(key, { row, projection, ambiguous: false });
-    } else if (state.projection !== projection) {
-      state.ambiguous = true;
-    }
-  }
-
-  const accepted = new Map<string, T>();
-  for (const [key, state] of states) {
-    if (!state.ambiguous) accepted.set(key, state.row);
-  }
-  return accepted;
 }
 
 // ── Plug-in publication queries (attd) ───────────────────────────────────────
@@ -767,25 +560,6 @@ query ListPluginPublications($where: pluginPublicationFilter, $limit: Int!) {
       publishedAt
       revoked
       revokedReason
-    }
-  }
-}
-`;
-
-const GET_PLUGIN_SCORES_QUERY = `
-query GetPluginScores($pluginCid: String!, $limit: Int!) {
-  attemptEnvelopeMetas(
-    where: { pluginsContains: $pluginCid },
-    limit: $limit,
-    orderBy: "enrichedAtBlock",
-    orderDirection: "desc"
-  ) {
-    items {
-      requestId
-      chainId
-      manifestCid
-      pluginsJson
-      enrichedAtBlock
     }
   }
 }
@@ -1462,58 +1236,12 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     pluginCid: string;
     limit?: number;
   }): Promise<PluginScoreHistoryRow[]> {
-    await ensureReady();
-    const limit = Math.min(500, Math.max(1, args.limit ?? 100));
-    try {
-      const data = await postGql<{
-        attemptEnvelopeMetas: {
-          items: Array<{
-            requestId: string;
-            chainId: number;
-            manifestCid: string;
-            pluginsJson: string;
-            enrichedAtBlock: string | number;
-          }>;
-        };
-      }>(
-        gqlUrl,
-        fetchImpl,
-        GET_PLUGIN_SCORES_QUERY,
-        { pluginCid: args.pluginCid, limit },
-      );
-      // ebu7's AttemptEnvelopeMeta carries `pluginsJson` — JSON.stringify of
-      // executor.plugins[]. Parse it and emit one row per matching entry; flag
-      // forkSuspected when the sha256 doesn't match the publication.
-      // For now, return whatever the server returns; full join with verdict +
-      // pluginPublication.sha256 is a §6.5 Discovery API endpoint that lands
-      // alongside the /builders/:agentId/runs Hono route. attd's read-shape
-      // ships the empty-array contract; ebu7 + 6.5 flesh it in.
-      const accepted = unambiguousCandidates(
-        data.attemptEnvelopeMetas?.items ?? [],
-        (row) => `${row.requestId}|${row.chainId}`,
-        (row) => [row.pluginsJson, row.enrichedAtBlock],
-      );
-      return [...accepted.values()].flatMap((row): PluginScoreHistoryRow[] => {
-        let plugins: Array<{ cid?: string; sha256: string }> = [];
-        try { plugins = JSON.parse(row.pluginsJson) as typeof plugins; } catch { return []; }
-        const match = plugins.find((p) => p.cid === args.pluginCid);
-        if (!match) return [];
-        return [{
-          pluginCid: args.pluginCid,
-          taskId: '',
-          operatorAgentId: '',
-          verdict: 'Unknown',
-          ts: Number(row.enrichedAtBlock),
-          forkSuspected: false,
-        }];
-      });
-    } catch (err) {
-      // attemptEnvelopeMeta entity not present (ebu7 not deployed yet) → empty.
-      if (err instanceof Error && /attemptEnvelopeMetas|Unknown type|Cannot query/.test(err.message)) {
-        return [];
-      }
-      throw err;
-    }
+    void args;
+    // attemptEnvelopeMeta is a permissionless, shape-parsed projection. Until
+    // the indexer exposes a canonical row authenticated with the historical
+    // publisher Safe, envelope signature/hash, and authoritative attempt,
+    // plugin attribution cannot be treated as verified score history.
+    return [];
   }
 
   // ── listBuilderArtifacts (attd) ────────────────────────────────────────────
@@ -1541,54 +1269,12 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
   async function getInstanceSuccessCounts(args: {
     manifestCid: string;
   }): Promise<Map<string, number>> {
-    await ensureReady();
-
-    // Defensive cap: 10 × 1000 rows. Expected ~125 successes per SolverNet
-    // (25 candidates × N_target_successes), so two orders of magnitude head.
-    const MAX_PAGES = 10;
-    const PAGE_LIMIT = 1000;
-    const counts = new Map<string, number>();
-    const candidates: InstanceSuccessCountsPage['verdictEnvelopeMetas']['items'] = [];
-    let cursor: string | null = null;
-
-    for (let page = 0; page < MAX_PAGES; page++) {
-      const data: InstanceSuccessCountsPage = await postGql<InstanceSuccessCountsPage>(
-        gqlUrl,
-        fetchImpl,
-        INSTANCE_SUCCESS_COUNTS_QUERY,
-        { solverNetManifestCid: args.manifestCid, limit: PAGE_LIMIT, after: cursor },
-      );
-      const rows = data.verdictEnvelopeMetas?.items ?? [];
-      candidates.push(...rows);
-      const pageInfo = data.verdictEnvelopeMetas?.pageInfo;
-      if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
-      cursor = pageInfo.endCursor;
-    }
-
-    const accepted = unambiguousCandidates(
-      candidates,
-      (row) => `${row.requestId}|${row.chainId}`,
-      (row) => [
-        row.instanceId,
-        row.actualPassed,
-        row.enrichmentStatus,
-        row.solverNetManifestCid,
-      ],
-    );
-    for (const row of accepted.values()) {
-      // The optional checks keep backward-compatible test fixtures readable;
-      // deployed GraphQL rows always carry these selected fields.
-      if (row.actualPassed !== undefined && row.actualPassed !== true) continue;
-      if (row.enrichmentStatus !== undefined && row.enrichmentStatus !== 'ok') continue;
-      if (
-        row.solverNetManifestCid !== undefined &&
-        row.solverNetManifestCid !== args.manifestCid
-      ) continue;
-      if (!row.instanceId) continue;
-      counts.set(row.instanceId, (counts.get(row.instanceId) ?? 0) + 1);
-    }
-
-    return counts;
+    void args;
+    // A unique verdictEnvelopeMeta row is not evidence: any ERC-8004 publisher
+    // can project a fresh requestId, victim instance, and passing outcome. Keep
+    // the launcher on its local counters until canonical bridge-grade verdict
+    // authentication is materialized by the indexer.
+    return new Map();
   }
 
   async function getCodeDigestRewards(args: {
@@ -1598,143 +1284,11 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     window?: number;
   }): Promise<CodeDigestRewardRow[]> {
     if (args.codeDigests.length === 0) return [];
-    await ensureReady();
-
-    const MAX_PAGES = 20;
-    const PAGE_LIMIT = 1000;
-    // Per-digest recency cap (#764 C1). CODEDIGEST_ATTEMPTS_QUERY orders by
-    // enrichedAtBlock desc, so attempt rows arrive newest-first. Ponder's
-    // GraphQL `limit` is global across all requested codeDigests, so the window
-    // MUST be enforced client-side per-digest — we keep only the first `window`
-    // rows seen for each codeDigest (i.e. the most recent). When undefined, no
-    // cap is applied (behaviour identical to before this change).
-    const windowCap = typeof args.window === 'number' && Number.isFinite(args.window) && args.window > 0
-      ? Math.floor(args.window)
-      : undefined;
-
-    // 1) Pull train-mode attempt-meta candidates for the requested codeDigests.
-    //    Resolve ambiguity before applying the optional recency window.
-    const attemptCandidates: CodeDigestAttemptsPage['attemptEnvelopeMetas']['items'] = [];
-    let cursor: string | null = null;
-    for (let page = 0; page < MAX_PAGES; page++) {
-      const data: CodeDigestAttemptsPage = await postGql<CodeDigestAttemptsPage>(
-        gqlUrl, fetchImpl, CODEDIGEST_ATTEMPTS_QUERY,
-        { codeDigests: args.codeDigests, limit: PAGE_LIMIT, after: cursor },
-      );
-      attemptCandidates.push(...(data.attemptEnvelopeMetas?.items ?? []));
-      const pi = data.attemptEnvelopeMetas?.pageInfo;
-      if (!pi?.hasNextPage || !pi.endCursor) break;
-      cursor = pi.endCursor;
-    }
-
-    const requestKeyToDigest = new Map<string, string>(); // "requestId|chainId" -> codeDigest
-    const keptPerDigest = new Map<string, number>();       // codeDigest -> rows kept
-    const acceptedAttempts = unambiguousCandidates(
-      attemptCandidates,
-      (row) => `${row.requestId}|${row.chainId}`,
-      (row) => row.codeDigest,
-    );
-    // Map preserves first-seen order, which is enrichedAtBlock-desc from the
-    // query. Apply the recency window only after ambiguity has been resolved so
-    // a competing candidate cannot consume or reshuffle a digest's window.
-    for (const [key, row] of acceptedAttempts) {
-      if (windowCap !== undefined) {
-        const kept = keptPerDigest.get(row.codeDigest) ?? 0;
-        if (kept >= windowCap) continue;
-        keptPerDigest.set(row.codeDigest, kept + 1);
-      }
-      requestKeyToDigest.set(key, row.codeDigest);
-    }
-    if (requestKeyToDigest.size === 0) return [];
-
-    const requestIds = [...new Set([...requestKeyToDigest.keys()].map((k) => k.split('|')[0]!))];
-
-    // 2) Optional operator scoping: keep only requests the operator claimed.
-    let allowedKeys: Set<string> | null = null;
-    if (args.operator) {
-      allowedKeys = new Set<string>();
-      cursor = null;
-      for (let page = 0; page < MAX_PAGES; page++) {
-        const data: CodeDigestOperatorAttemptsPage = await postGql<CodeDigestOperatorAttemptsPage>(
-          gqlUrl, fetchImpl, CODEDIGEST_OPERATOR_ATTEMPTS_QUERY,
-          { requestIds, operator: args.operator, limit: PAGE_LIMIT, after: cursor },
-        );
-        for (const row of data.attempts?.items ?? []) allowedKeys.add(`${row.requestId}|${row.chainId}`);
-        const pi = data.attempts?.pageInfo;
-        if (!pi?.hasNextPage || !pi.endCursor) break;
-        cursor = pi.endCursor;
-      }
-    }
-
-    // 3) Pull verdict-meta rows for those requestIds (actualPassed/actualScore).
-    // Optionally scope to a single SolverNet: verdictEnvelopeMeta is the only
-    // queryable table carrying solverNetManifestCid, and only requests with a
-    // verdict are aggregated (step 4), so filtering here scopes the aggregate.
-    const scopeBySolverNet = typeof args.solverNetManifestCid === 'string' && args.solverNetManifestCid.length > 0;
-    const verdictsQuery = codeDigestVerdictsQuery(scopeBySolverNet);
-    const verdictCandidates: CodeDigestVerdictsPage['verdictEnvelopeMetas']['items'] = [];
-    cursor = null;
-    for (let page = 0; page < MAX_PAGES; page++) {
-      const variables: Record<string, unknown> = { requestIds, limit: PAGE_LIMIT, after: cursor };
-      if (scopeBySolverNet) variables.solverNetManifestCid = args.solverNetManifestCid;
-      const data: CodeDigestVerdictsPage = await postGql<CodeDigestVerdictsPage>(
-        gqlUrl, fetchImpl, verdictsQuery, variables,
-      );
-      verdictCandidates.push(...(data.verdictEnvelopeMetas?.items ?? []));
-      const pi = data.verdictEnvelopeMetas?.pageInfo;
-      if (!pi?.hasNextPage || !pi.endCursor) break;
-      cursor = pi.endCursor;
-    }
-
-    const verdictByKey = new Map<string, { passed: boolean; score: number | null; graded: number | null }>();
-    const acceptedVerdicts = unambiguousCandidates(
-      verdictCandidates,
-      (row) => `${row.requestId}|${row.chainId}`,
-      (row) => [
-        row.actualPassed,
-        row.actualScore,
-        row.passedCount ?? null,
-        row.totalCount ?? null,
-      ],
-    );
-    for (const [key, row] of acceptedVerdicts) {
-        const scoreNum = Number(row.actualScore);
-        const pc = Number(row.passedCount);
-        const tc = Number(row.totalCount);
-        const graded = Number.isFinite(tc) && tc > 0 ? pc / tc : null;
-        verdictByKey.set(key, {
-          passed: Boolean(row.actualPassed),
-          score: Number.isFinite(scoreNum) && row.actualScore !== '' ? scoreNum : null,
-          graded,
-        });
-    }
-
-    // 4) Aggregate per codeDigest (only requests that HAVE a verdict count).
-    const agg = new Map<string, { attempts: number; passes: number; scoreSum: number; scoreN: number; gradedScores: number[] }>();
-    for (const [key, digest] of requestKeyToDigest) {
-      if (allowedKeys && !allowedKeys.has(key)) continue;
-      const v = verdictByKey.get(key);
-      if (!v) continue; // no verdict yet — not a completed attempt
-      const cur = agg.get(digest) ?? { attempts: 0, passes: 0, scoreSum: 0, scoreN: 0, gradedScores: [] };
-      cur.attempts += 1;
-      if (v.passed) cur.passes += 1;
-      if (v.score !== null) { cur.scoreSum += v.score; cur.scoreN += 1; }
-      if (v.graded !== null) cur.gradedScores.push(v.graded);
-      agg.set(digest, cur);
-    }
-
-    const rows: CodeDigestRewardRow[] = [];
-    for (const [codeDigest, a] of agg) {
-      rows.push({
-        codeDigest,
-        attempts: a.attempts,
-        passes: a.passes,
-        passRate: a.attempts > 0 ? a.passes / a.attempts : 0,
-        avgScore: a.scoreN > 0 ? a.scoreSum / a.scoreN : 0,
-        gradedScores: a.gradedScores,
-      });
-    }
-    return rows;
+    // Shape-parsed attempt/verdict projections are not authenticated reward
+    // evidence. Returning no verified rows keeps the learner and revert gate
+    // conservative; a future canonical route must bind publisher Safe,
+    // signature/hash, authoritative chain tuple, and original task facts.
+    return [];
   }
 
   // ── getInstanceClaimCounts (#802) ──────────────────────────────────────────
@@ -1934,55 +1488,10 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
   async function getVerdictTallies(args: {
     taskIds: string[];
   }): Promise<Map<string, VerdictTallyResult>> {
-    if (args.taskIds.length === 0) return new Map();
-    await ensureReady();
-
-    const MAX_PAGES = 10;
-    const PAGE_LIMIT = 1000;
-    const out = new Map<string, VerdictTallyResult>();
-    const candidates: VerdictTalliesPage['verdictEnvelopeMetas']['items'] = [];
-    let cursor: string | null = null;
-
-    for (let page = 0; page < MAX_PAGES; page++) {
-      const data: VerdictTalliesPage = await postGql<VerdictTalliesPage>(
-        gqlUrl,
-        fetchImpl,
-        VERDICT_TALLIES_QUERY,
-        { taskIds: args.taskIds, limit: PAGE_LIMIT, after: cursor },
-      );
-      const rows = data.verdictEnvelopeMetas?.items ?? [];
-      candidates.push(...rows);
-      const pageInfo = data.verdictEnvelopeMetas?.pageInfo;
-      if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
-      cursor = pageInfo.endCursor;
-      // Cap hit with rows still remaining: the tally truncates silently. Warn
-      // once (never per page) so the dropped-rows skew is visible in logs — the
-      // Outcome column is a display signal, so we degrade rather than throw.
-      if (page === MAX_PAGES - 1) {
-        console.warn(
-          `[discovery] getVerdictTallies truncated at page cap (${MAX_PAGES} × ${PAGE_LIMIT} rows) ` +
-          `for ${args.taskIds.length} taskId(s); tally may under-count (#502).`,
-        );
-      }
-    }
-
-    const accepted = unambiguousCandidates(
-      candidates,
-      (row) => `${row.requestId}|${row.chainId}`,
-      (row) => [row.taskId, row.evaluatorVerdict],
-    );
-    for (const row of accepted.values()) {
-      let entry = out.get(row.taskId);
-      if (!entry) {
-        entry = { pass: 0, fail: 0 };
-        out.set(row.taskId, entry);
-      }
-      if (row.evaluatorVerdict === 'PASS') entry.pass += 1;
-      else if (row.evaluatorVerdict === 'FAIL') entry.fail += 1;
-      // else INVALID / INDETERMINATE / UNKNOWN — excluded from both poles
-    }
-
-    return out;
+    void args;
+    // The on-chain fallback still exposes authoritative delivery state. Do not
+    // decorate it with unauthenticated off-chain polarity projections.
+    return new Map();
   }
 
   return {
