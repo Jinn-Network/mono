@@ -690,3 +690,132 @@ Result:
   exercised against a disposable live repository containing all three states
   and every Human-source combination. The approved live-shadow/canary gate
   remains required; active mode is deliberately unwired.
+
+## Fourth-review fix addendum — 2026-07-20
+
+### Findings addressed
+
+- A retained stable implementation ref is excluded from orphan recovery when
+  its Project issue is already `Done`, a resolved lifecycle item is merged, or
+  the bounded snapshot otherwise contains a merged PR closing that issue.
+  Terminal work remains terminal: no `Done` → `In Progress`, draft-PR repair,
+  or implementation requeue is planned merely because the branch still exists.
+- Orphan implementation state now uses a focused lifecycle derivation instead
+  of controller-local defaults:
+  - the exact GitHub head commit time must be canonical and no later than the
+    controller's derivation time;
+  - missing/non-canonical/future progress becomes structured Human
+    `invalid-branch-progress-time` without a clamped zero age;
+  - an incomplete claim becomes stale at `staleAfterMs`, exposes its exact
+    stale timestamp/reason, ensures the durable draft PR first, then requeues
+    the issue;
+  - `phaseComplete` is `awaiting-review`, never active or stale
+    implementation, and repairs the durable draft PR before projecting
+    `In Review`;
+  - explicit Human evidence remains dominant and valid Human-held head times
+    continue to expose progress age.
+- Orphan operator JSON and human explanations now distinguish active,
+  stale/recoverable, phase-complete/awaiting-review, and Human states.
+
+### Fourth-review RED / GREEN evidence
+
+Focused RED:
+
+```text
+yarn vitest run test/lifecycle/controller.test.ts
+```
+
+Result: 1 file failed, 3 expected regression tests failed:
+
+- retained `Done` work was rendered as an orphan and planned
+  `In Progress` plus draft-PR creation;
+- non-canonical/future head times remained active and were clamped to an age;
+- old and phase-complete orphan claims both reported active with
+  `stale: false`.
+
+Focused GREEN:
+
+```text
+yarn vitest run test/lifecycle/projection.test.ts \
+  test/lifecycle/controller.test.ts
+```
+
+Result: 2 files passed, 25 tests passed.
+
+### Fourth-review files
+
+Production:
+
+- `packages/autopilot/src/lifecycle/controller.ts`
+- `packages/autopilot/src/lifecycle/lifecycle.ts`
+- `packages/autopilot/src/lifecycle/projection.ts`
+
+Tests:
+
+- `packages/autopilot/test/lifecycle/controller.test.ts`
+- `packages/autopilot/test/lifecycle/projection.test.ts`
+
+Evidence:
+
+- `.superpowers/sdd/task-2-report.md`
+
+### Complete Task 2 commit lineage
+
+- Design/spec baseline:
+  `91ec7468bd33d93283c8aa21021fa334d53beda6`
+- Task 2 implementation:
+  `3471725db7c4baf37ec7c468d12555677a7d3746`
+- First-review fix:
+  `504dbeb0b6a67c22361bac3c4f30d5c12e46a44a`
+- Second-review fix:
+  `39abf153d2424956aef954b2fd4860a90ea3462b`
+- Third-review fix:
+  `7b9d9ba27ed6ec3906ec23c4feba18e19ccf91dd`
+- Fourth-review fix base:
+  `7b9d9ba27ed6ec3906ec23c4feba18e19ccf91dd`
+- Final fourth-review fix SHA: recorded in the task handoff because a commit
+  cannot contain its own SHA.
+
+### Fourth-review final verification
+
+Exact final command:
+
+```text
+yarn vitest run test/lifecycle && yarn typecheck && yarn test
+```
+
+Result:
+
+- Lifecycle: 9 files passed, 105 tests passed.
+- Typecheck: exit 0, no diagnostics.
+- Full Autopilot suite: 80 files passed, 809 tests passed.
+- Expected resilience-test stderr was present; zero tests failed.
+- `git diff --check`: exit 0.
+
+### Fourth-review self-review
+
+- Confirmed terminal filtering occurs before orphan rows can suppress ordinary
+  merged lifecycle output.
+- Confirmed Project `Done` alone is sufficient terminal evidence and a merged
+  lifecycle/closing-PR outcome is also sufficient.
+- Confirmed stale comparison uses the configured `staleAfterMs`, including the
+  exact threshold, and uses only the canonical branch-head commit time.
+- Confirmed invalid/future time emits Human evidence and no `progressAgeMs`;
+  there is no `Math.max(0, ...)` orphan clamp.
+- Confirmed stale recovery action order is exact-head draft repair followed by
+  implementation requeue.
+- Confirmed phase-complete recovery action order is exact-head draft repair
+  followed by `In Review` projection; ready repair remains a later PR-backed
+  reconciliation step.
+- Confirmed Human-held orphan claims never receive autonomous PR repair or
+  requeue.
+- Confirmed observe remains zero-write, recover remains projection/recovery
+  only, and active remains rejected.
+
+### Fourth-review concerns
+
+- The retained-ref terminal and orphan timing matrix is covered at the
+  controller/projection boundary with production-shaped immutable snapshots,
+  but it has not been exercised against a disposable live repository. The
+  approved live-shadow/canary gate remains required; active mode is still
+  deliberately unwired.

@@ -23,6 +23,80 @@ function timestampMs(value: string): number | null {
   }
 }
 
+export interface OrphanImplementationStateInput {
+  readonly headChangedAt: string;
+  readonly phaseComplete: boolean;
+  readonly humanHold: boolean;
+  readonly humanReason?: HumanReason;
+}
+
+export interface OrphanImplementationState {
+  readonly phase: 'implementing' | 'awaiting-review' | 'human';
+  readonly underlyingPhase?: 'implementing' | 'awaiting-review';
+  readonly progressAgeMs?: number;
+  readonly stale: boolean;
+  readonly staleSince?: string;
+  readonly staleReason?: 'branch-head-unchanged';
+  readonly humanReason?: HumanReason;
+}
+
+export function deriveOrphanImplementationState(
+  input: OrphanImplementationStateInput,
+  now: Date,
+  staleAfterMs: number,
+): OrphanImplementationState {
+  const nowMs = now.getTime();
+  if (!Number.isFinite(nowMs)) throw new Error('Invalid lifecycle derivation time');
+  if (!Number.isFinite(staleAfterMs) || staleAfterMs < 0) {
+    throw new Error('staleAfterMs must be a non-negative finite number');
+  }
+  const underlyingPhase = input.phaseComplete ? 'awaiting-review' : 'implementing';
+  const headTime = timestampMs(input.headChangedAt);
+  if (input.humanHold || input.humanReason !== undefined) {
+    return {
+      phase: 'human',
+      underlyingPhase,
+      ...(headTime === null || headTime > nowMs ? {} : { progressAgeMs: nowMs - headTime }),
+      stale: false,
+      ...(input.humanReason === undefined ? {} : { humanReason: input.humanReason }),
+    };
+  }
+  if (headTime === null || headTime > nowMs) {
+    return {
+      phase: 'human',
+      underlyingPhase,
+      stale: false,
+      humanReason: {
+        phase: 'implementing',
+        code: 'invalid-branch-progress-time',
+        detail: `Invalid branch head progress timestamp: ${input.headChangedAt}`,
+      },
+    };
+  }
+  const progressAgeMs = nowMs - headTime;
+  if (input.phaseComplete) {
+    return {
+      phase: 'awaiting-review',
+      progressAgeMs,
+      stale: false,
+    };
+  }
+  if (progressAgeMs >= staleAfterMs) {
+    return {
+      phase: 'implementing',
+      progressAgeMs,
+      stale: true,
+      staleSince: new Date(headTime + staleAfterMs).toISOString(),
+      staleReason: 'branch-head-unchanged',
+    };
+  }
+  return {
+    phase: 'implementing',
+    progressAgeMs,
+    stale: false,
+  };
+}
+
 function branchClaimMatchesItem(item: PullRequestLifecycleItem): boolean {
   const claim = item.branchClaim;
   return claim === undefined

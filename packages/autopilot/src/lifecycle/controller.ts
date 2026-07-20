@@ -1,5 +1,8 @@
 import { DEFAULT_FLOOR } from '../dispatcher/rate-limit-guard.js';
-import { deriveLifecycle } from './lifecycle.js';
+import {
+  deriveLifecycle,
+  deriveOrphanImplementationState,
+} from './lifecycle.js';
 import {
   planProjection,
   type OrphanBranchClaim,
@@ -66,15 +69,18 @@ export interface LifecycleStatusItem {
 
 export interface LifecycleOrphanBranchClaimStatus {
   readonly kind: 'orphan-branch-claim';
-  readonly phase: 'implementing' | 'human';
+  readonly phase: 'implementing' | 'awaiting-review' | 'human';
+  readonly underlyingPhase?: 'implementing' | 'awaiting-review';
   readonly issueNumber: number;
   readonly head: GitOid;
   readonly headRefName: string;
   readonly claimGeneration: string;
   readonly claimAttempt: string;
   readonly claimRunner: string;
-  readonly progressAgeMs: number;
-  readonly stale: false;
+  readonly progressAgeMs?: number;
+  readonly stale: boolean;
+  readonly staleSince?: string;
+  readonly staleReason?: 'branch-head-unchanged';
   readonly v2Marked: true;
   readonly humanHold: boolean;
   readonly humanReason?: HumanReason;
@@ -188,16 +194,30 @@ export function parseLifecycleCli(args: readonly string[]): LifecycleCliOptions 
 function projectionContext(
   snapshot: GitHubLifecycleSnapshot,
   view: ReturnType<typeof deriveLifecycle>,
+  now: Date,
+  staleAfterMs: number,
 ): ProjectionContext {
   const prBranches = new Set(snapshot.pullRequests.map((pr) => pr.headRefName));
   const ambiguousIssues = new Set(snapshot.diagnostics.flatMap((diagnostic) => (
     diagnostic.issueNumbers
   )));
+  const terminalIssues = new Set<number>([
+    ...snapshot.project.items
+      .filter((item) => item.contentType === 'Issue' && item.status === 'Done')
+      .map((item) => item.number),
+    ...view.items
+      .filter((item) => item.item.kind === 'pull-request' && item.phase === 'merged')
+      .map((item) => item.item.issueNumber),
+    ...snapshot.pullRequests
+      .filter((pr) => pr.state === 'MERGED')
+      .flatMap((pr) => pr.closingIssueNumbers),
+  ]);
   const orphanBranchClaims: OrphanBranchClaim[] = snapshot.branches
     .filter((branch) => (
       branch.claim.phase === 'implement'
       && !prBranches.has(branch.headRefName)
       && !ambiguousIssues.has(branch.issueNumber)
+      && !terminalIssues.has(branch.issueNumber)
     ))
     .map((branch) => {
       const projectIssue = snapshot.project.items.find((item) => (
@@ -226,6 +246,12 @@ function projectionContext(
                   : 'Issue label: review:needs-human',
             }
           : undefined;
+      const state = deriveOrphanImplementationState({
+        headChangedAt: branch.headCommittedAt,
+        phaseComplete: branch.claim.phaseComplete === true,
+        humanHold,
+        ...(humanReason === undefined ? {} : { humanReason }),
+      }, now, staleAfterMs);
       return {
         issueNumber: branch.issueNumber,
         head: branch.headOid,
@@ -235,8 +261,8 @@ function projectionContext(
         claimAttempt: branch.claim.attempt,
         claimRunner: branch.claim.runner,
         projectStatus: projectIssue?.status ?? null,
+        ...state,
         ...(humanHold ? { humanHold: true } : {}),
-        ...(humanReason === undefined ? {} : { humanReason }),
       };
     });
   return {
@@ -327,27 +353,26 @@ function statusItems(
 function orphanStatusItems(
   claims: readonly OrphanBranchClaim[],
   actions: readonly ProjectionAction[],
-  now: Date,
 ): LifecycleOrphanBranchClaimStatus[] {
   return claims.map((claim): LifecycleOrphanBranchClaimStatus => {
-    const headAt = Date.parse(claim.headChangedAt);
-    const progressAgeMs = Math.max(0, now.getTime() - headAt);
-    const human = claim.humanHold === true
-      || claim.humanReason !== undefined
-      || claim.projectStatus === 'Human';
     return {
       kind: 'orphan-branch-claim',
-      phase: human ? 'human' : 'implementing',
+      phase: claim.phase,
+      ...(claim.underlyingPhase === undefined
+        ? {}
+        : { underlyingPhase: claim.underlyingPhase }),
       issueNumber: claim.issueNumber,
       head: claim.head,
       headRefName: claim.headRefName,
       claimGeneration: claim.claimAttempt,
       claimAttempt: claim.claimAttempt,
       claimRunner: claim.claimRunner,
-      progressAgeMs,
-      stale: false,
+      ...(claim.progressAgeMs === undefined ? {} : { progressAgeMs: claim.progressAgeMs }),
+      stale: claim.stale,
+      ...(claim.staleSince === undefined ? {} : { staleSince: claim.staleSince }),
+      ...(claim.staleReason === undefined ? {} : { staleReason: claim.staleReason }),
       v2Marked: true,
-      humanHold: human,
+      humanHold: claim.phase === 'human',
       ...(claim.humanReason === undefined ? {} : { humanReason: claim.humanReason }),
       desiredActions: actions.filter((action) => (
         'issueNumber' in action && action.issueNumber === claim.issueNumber
@@ -452,14 +477,13 @@ export async function runLifecycleCycle(
   }
   const now = deps.now();
   const view = deriveLifecycle(snapshot.lifecycle, now, deps.staleAfterMs);
-  const context = projectionContext(snapshot, view);
+  const context = projectionContext(snapshot, view, now, deps.staleAfterMs);
   const plan = planProjection(context);
   const cycleId = deps.cycleId();
   const items = statusItems(view, plan.actions, now, context.orphanBranchClaims);
   const orphanBranchClaims = orphanStatusItems(
     context.orphanBranchClaims,
     plan.actions,
-    now,
   );
   const diagnostics: LifecycleStatusDiagnostic[] = snapshot.diagnostics.map((diagnostic) => ({
     ...diagnostic,
@@ -539,6 +563,12 @@ function orphanExplanation(item: LifecycleOrphanBranchClaimStatus): string {
     return `${identity} is blocked in Human: ${
       item.humanReason?.detail ?? 'explicit Human hold'
     }.`;
+  }
+  if (item.stale) {
+    return `${identity} is stale in implementation and awaiting exact-head draft repair and requeue.`;
+  }
+  if (item.phase === 'awaiting-review') {
+    return `${identity} completed implementation and is awaiting draft PR review recovery.`;
   }
   return `${identity} is implementing and awaiting draft PR repair.`;
 }

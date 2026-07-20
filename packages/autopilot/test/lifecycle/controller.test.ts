@@ -485,6 +485,237 @@ describe('lifecycle controller', () => {
     expect(calls).toEqual([]);
   });
 
+  it('never reopens Done or otherwise merged work because its stable ref was retained', async () => {
+    const calls: string[] = [];
+    const doneIssue: LifecycleItem = {
+      kind: 'issue',
+      issueNumber: 42,
+      v2Marked: false,
+      projectStatus: 'Done',
+      labels: [],
+      eligible: false,
+      eligibilityReason: 'not-selected',
+      eligibilityDetail: 'Project status is Done',
+    };
+    const doneSnapshot: GitHubLifecycleSnapshot = {
+      ...snapshot(doneIssue),
+      project: {
+        ...snapshot(doneIssue).project,
+        items: [{
+          id: 'PVTI_42',
+          number: 42,
+          contentType: 'Issue',
+          status: 'Done',
+          priority: 'P1',
+          effort: 'Medium',
+          blockedOn: null,
+          issueType: 'feat',
+          blockedByIssues: [],
+          sprintIterationId: null,
+        }],
+      },
+      branches: [{
+        issueNumber: 42,
+        headRefName: 'autopilot/42',
+        headOid: HEAD,
+        headCommittedAt: '2026-07-20T08:00:00.000Z',
+        claim: implementation().branchClaim!,
+      }],
+    };
+    const doneReport = await runLifecycleCycle('observe', {
+      ...deps(doneIssue, calls),
+      readSnapshot: async () => doneSnapshot,
+    });
+
+    expect(doneReport.orphanBranchClaims).toEqual([]);
+    expect(doneReport.items.flatMap((entry) => entry.desiredActions)).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'set-project-status', status: 'In Progress' }),
+        expect.objectContaining({ kind: 'ensure-draft-pr' }),
+        expect.objectContaining({ kind: 'requeue-implementation' }),
+      ]),
+    );
+
+    const merged = implementation({
+      projectStatus: 'In Review',
+      branchClaim: undefined,
+      merged: true,
+      isDraft: false,
+    });
+    const mergedSnapshot: GitHubLifecycleSnapshot = {
+      ...snapshot(merged),
+      pullRequests: [{
+        ...snapshot(merged).pullRequests[0]!,
+        headRefName: 'adopted/42',
+      }],
+      branches: [{
+        issueNumber: 42,
+        headRefName: 'autopilot/42',
+        headOid: HEAD,
+        headCommittedAt: '2026-07-20T08:00:00.000Z',
+        claim: implementation().branchClaim!,
+      }],
+    };
+    const mergedReport = await runLifecycleCycle('observe', {
+      ...deps(merged, calls),
+      readSnapshot: async () => mergedSnapshot,
+    });
+
+    expect(mergedReport.orphanBranchClaims).toEqual([]);
+    expect(mergedReport.items).toEqual([
+      expect.objectContaining({
+        phase: 'merged',
+        issueNumber: 42,
+        desiredActions: [expect.objectContaining({
+          kind: 'set-project-status',
+          status: 'Done',
+        })],
+      }),
+    ]);
+  });
+
+  it('fails orphan branch claims closed when canonical head progress time is invalid', async () => {
+    const orphanIssue: LifecycleItem = {
+      kind: 'issue',
+      issueNumber: 42,
+      v2Marked: false,
+      projectStatus: 'In Progress',
+      labels: [],
+      eligible: false,
+      eligibilityReason: 'not-selected',
+      eligibilityDetail: 'Project status is In Progress',
+    };
+
+    for (const headCommittedAt of [
+      '2026-07-20T11:00:00Z',
+      '2026-07-20T12:00:00.001Z',
+    ]) {
+      const calls: string[] = [];
+      const orphanSnapshot: GitHubLifecycleSnapshot = {
+        ...snapshot(orphanIssue),
+        branches: [{
+          issueNumber: 42,
+          headRefName: 'autopilot/42',
+          headOid: HEAD,
+          headCommittedAt,
+          claim: implementation().branchClaim!,
+        }],
+      };
+
+      const report = await runLifecycleCycle('observe', {
+        ...deps(orphanIssue, calls),
+        readSnapshot: async () => orphanSnapshot,
+      });
+
+      expect(report.orphanBranchClaims).toEqual([expect.objectContaining({
+        phase: 'human',
+        underlyingPhase: 'implementing',
+        issueNumber: 42,
+        stale: false,
+        humanReason: {
+          phase: 'implementing',
+          code: 'invalid-branch-progress-time',
+          detail: `Invalid branch head progress timestamp: ${headCommittedAt}`,
+        },
+      })]);
+      expect(report.orphanBranchClaims[0]).not.toHaveProperty('progressAgeMs');
+      expect(report.orphanBranchClaims[0]?.desiredActions).toEqual([{
+        kind: 'set-project-status',
+        issueNumber: 42,
+        expectedHead: HEAD,
+        status: 'Human',
+      }]);
+      expect(calls).toEqual([]);
+    }
+  });
+
+  it('reports stale and phase-complete orphan claims with their distinct recovery actions', async () => {
+    const orphanIssue: LifecycleItem = {
+      kind: 'issue',
+      issueNumber: 42,
+      v2Marked: false,
+      projectStatus: 'In Progress',
+      labels: [],
+      eligible: false,
+      eligibilityReason: 'not-selected',
+      eligibilityDetail: 'Project status is In Progress',
+    };
+    const staleSnapshot: GitHubLifecycleSnapshot = {
+      ...snapshot(orphanIssue),
+      branches: [{
+        issueNumber: 42,
+        headRefName: 'autopilot/42',
+        headOid: HEAD,
+        headCommittedAt: '2026-07-20T08:00:00.000Z',
+        claim: implementation().branchClaim!,
+      }],
+    };
+    const staleReport = await runLifecycleCycle('observe', {
+      ...deps(orphanIssue, []),
+      readSnapshot: async () => staleSnapshot,
+    });
+
+    expect(staleReport.orphanBranchClaims).toEqual([expect.objectContaining({
+      phase: 'implementing',
+      issueNumber: 42,
+      progressAgeMs: 4 * 60 * 60 * 1000,
+      stale: true,
+      staleSince: '2026-07-20T10:00:00.000Z',
+      staleReason: 'branch-head-unchanged',
+      desiredActions: [
+        {
+          kind: 'ensure-draft-pr',
+          issueNumber: 42,
+          expectedHead: HEAD,
+          headRefName: 'autopilot/42',
+          baseRefName: 'next',
+        },
+        {
+          kind: 'requeue-implementation',
+          issueNumber: 42,
+          expectedHead: HEAD,
+        },
+      ],
+    })]);
+
+    const completeSnapshot: GitHubLifecycleSnapshot = {
+      ...staleSnapshot,
+      branches: [{
+        ...staleSnapshot.branches[0]!,
+        claim: {
+          ...staleSnapshot.branches[0]!.claim,
+          phaseComplete: true,
+        },
+      }],
+    };
+    const completeReport = await runLifecycleCycle('observe', {
+      ...deps(orphanIssue, []),
+      readSnapshot: async () => completeSnapshot,
+    });
+
+    expect(completeReport.orphanBranchClaims).toEqual([expect.objectContaining({
+      phase: 'awaiting-review',
+      issueNumber: 42,
+      progressAgeMs: 4 * 60 * 60 * 1000,
+      stale: false,
+      desiredActions: [
+        {
+          kind: 'ensure-draft-pr',
+          issueNumber: 42,
+          expectedHead: HEAD,
+          headRefName: 'autopilot/42',
+          baseRefName: 'next',
+        },
+        {
+          kind: 'set-project-status',
+          issueNumber: 42,
+          expectedHead: HEAD,
+          status: 'In Review',
+        },
+      ],
+    })]);
+  });
+
   it('emits Human phase for ambiguity reconciliation events', async () => {
     const calls: string[] = [];
     let status: 'Todo' | 'Human' = 'Todo';

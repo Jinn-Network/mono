@@ -269,6 +269,9 @@ describe('planProjection', () => {
         claimAttempt: '11111111-1111-4111-8111-111111111111',
         claimRunner: 'runner-a',
         projectStatus: 'Todo',
+        phase: 'implementing',
+        progressAgeMs: 60 * 60 * 1000,
+        stale: false,
       }],
     };
     expect(planProjection(orphanContext).actions).toEqual([
@@ -307,6 +310,10 @@ describe('planProjection', () => {
         claimAttempt: '11111111-1111-4111-8111-111111111111',
         claimRunner: 'runner-a',
         projectStatus: 'In Progress',
+        phase: 'human',
+        underlyingPhase: 'implementing',
+        progressAgeMs: 60 * 60 * 1000,
+        stale: false,
         humanHold: true,
         humanReason,
       }],

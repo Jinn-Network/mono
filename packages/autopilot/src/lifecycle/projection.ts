@@ -25,6 +25,12 @@ export interface OrphanBranchClaim {
   readonly claimAttempt: string;
   readonly claimRunner: string;
   readonly projectStatus: ProjectStatus | null;
+  readonly phase: 'implementing' | 'awaiting-review' | 'human';
+  readonly underlyingPhase?: 'implementing' | 'awaiting-review';
+  readonly progressAgeMs?: number;
+  readonly stale: boolean;
+  readonly staleSince?: string;
+  readonly staleReason?: 'branch-head-unchanged';
   readonly humanHold?: boolean;
   readonly humanReason?: HumanReason;
 }
@@ -284,11 +290,7 @@ export function planProjection(
   );
   for (const claim of context.orphanBranchClaims) {
     if (existingPrIssues.has(claim.issueNumber)) continue;
-    if (
-      claim.humanHold === true
-      || claim.humanReason !== undefined
-      || claim.projectStatus === 'Human'
-    ) {
+    if (claim.phase === 'human') {
       const alreadyProjectsHuman = actions.some((action) => (
         action.kind === 'set-project-status'
         && action.issueNumber === claim.issueNumber
@@ -304,7 +306,25 @@ export function planProjection(
       }
       continue;
     }
-    if (claim.projectStatus !== 'In Progress') {
+    if (claim.phase === 'awaiting-review') {
+      actions.push({
+        kind: 'ensure-draft-pr',
+        issueNumber: claim.issueNumber,
+        expectedHead: claim.head,
+        headRefName: claim.headRefName,
+        baseRefName: claim.baseRefName,
+      });
+      if (claim.projectStatus !== 'In Review') {
+        actions.push({
+          kind: 'set-project-status',
+          issueNumber: claim.issueNumber,
+          expectedHead: claim.head,
+          status: 'In Review',
+        });
+      }
+      continue;
+    }
+    if (!claim.stale && claim.projectStatus !== 'In Progress') {
       actions.push({
         kind: 'set-project-status',
         issueNumber: claim.issueNumber,
@@ -319,6 +339,13 @@ export function planProjection(
       headRefName: claim.headRefName,
       baseRefName: claim.baseRefName,
     });
+    if (claim.stale) {
+      actions.push({
+        kind: 'requeue-implementation',
+        issueNumber: claim.issueNumber,
+        expectedHead: claim.head,
+      });
+    }
   }
   for (const diagnostic of context.mappingDiagnostics ?? []) {
     const reason: HumanReason = {
