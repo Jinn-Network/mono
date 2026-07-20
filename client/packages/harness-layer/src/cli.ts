@@ -2059,8 +2059,20 @@ export async function runJinnLayerCli(
     // attempt groups stay complete (#1478) rather than inheriting the 20-row
     // search default (which silently truncates groups mid-instance).
     const userSetLimit = rest.some((a) => a === '--limit' || a.startsWith('--limit='));
-    const n = Number.parseInt(parsed.values.limit as string, 10);
-    const limit = userSetLimit && Number.isFinite(n) && n > 0 ? n : undefined;
+    const rawLimit = parsed.values.limit as string;
+    const parsedLimit = Number(rawLimit);
+    if (
+      userSetLimit
+      && (
+        !/^[0-9]+$/.test(rawLimit)
+        || !Number.isSafeInteger(parsedLimit)
+        || parsedLimit <= 0
+      )
+    ) {
+      writer.write(`error: --limit must be a positive safe integer (got ${JSON.stringify(rawLimit)})\n\n${USAGE}`);
+      return 2;
+    }
+    const limit = userSetLimit ? parsedLimit : undefined;
 
     const outDir = (parsed.values.out as string | undefined) ?? mkdtempSync(join(tmpdir(), 'jinn-distill-'));
     mkdirSync(outDir, { recursive: true });

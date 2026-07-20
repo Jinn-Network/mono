@@ -1062,6 +1062,32 @@ describe('jinn-layer distill run', () => {
     expect(list).toHaveBeenCalledWith({ limit: 1 });
   });
 
+  it.each([
+    ['0'],
+    ['abc'],
+    ['-1'],
+    ['1.5'],
+    ['1e2'],
+    [String(Number.MAX_SAFE_INTEGER + 1)],
+  ])('rejects an invalid explicit bridge limit before verdict I/O: %s', async (rawLimit) => {
+    const { writer, out } = capture();
+    const list = vi.fn(async () => []);
+    const code = await runJinnLayerCli([
+      'distill',
+      'run',
+      `--limit=${rawLimit}`,
+      '--out',
+      mkdtempSync(join(tmpdir(), 'jinn-distill-cli-')),
+    ], {
+      writer,
+      distillRunDeps: stubDeps({ verdictSource: { list } }),
+    });
+
+    expect(code).toBe(2);
+    expect(out()).toContain('error: --limit must be a positive safe integer');
+    expect(list).not.toHaveBeenCalled();
+  });
+
   it('--anchor-mode manifest anchors each raw-block partition and prints measured gas', async () => {
     const { writer, out } = capture();
     const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-cli-'));

@@ -38,6 +38,72 @@ function mockFetch(verdicts: VerdictItem[]): typeof fetch {
 const RID = (n: number): string => '0x' + String(n).repeat(64).slice(0, 64);
 
 describe('createVerdictSource', () => {
+  it.each([
+    ['missing verdictEnvelopeMetas', {}],
+    ['null verdictEnvelopeMetas', { verdictEnvelopeMetas: null }],
+    ['missing items', {
+      verdictEnvelopeMetas: {
+        pageInfo: { hasNextPage: false, endCursor: null },
+      },
+    }],
+    ['non-array items', {
+      verdictEnvelopeMetas: {
+        items: {},
+        pageInfo: { hasNextPage: false, endCursor: null },
+      },
+    }],
+    ['missing pageInfo', { verdictEnvelopeMetas: { items: [] } }],
+    ['null pageInfo', { verdictEnvelopeMetas: { items: [], pageInfo: null } }],
+    ['missing hasNextPage', {
+      verdictEnvelopeMetas: {
+        items: [],
+        pageInfo: { endCursor: null },
+      },
+    }],
+    ['non-boolean hasNextPage', {
+      verdictEnvelopeMetas: {
+        items: [],
+        pageInfo: { hasNextPage: 'false', endCursor: 'cursor' },
+      },
+    }],
+    ['missing endCursor', {
+      verdictEnvelopeMetas: {
+        items: [],
+        pageInfo: { hasNextPage: false },
+      },
+    }],
+    ['non-string, non-null endCursor', {
+      verdictEnvelopeMetas: {
+        items: [],
+        pageInfo: { hasNextPage: false, endCursor: 42 },
+      },
+    }],
+  ])('fails closed on a malformed page envelope: %s', async (_case, data) => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ data }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })) as unknown as typeof fetch;
+    const source = createVerdictSource({ graphqlUrl: GQL_URL, fetchImpl });
+
+    await expect(source.list()).rejects.toBeInstanceOf(IncompleteVerdictWalkError);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    0,
+    -1,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    1.5,
+    Number.MAX_SAFE_INTEGER + 1,
+  ])('rejects an invalid explicit attempt limit before fetching: %s', async (limit) => {
+    const fetchImpl = mockFetch([]);
+    const source = createVerdictSource({ graphqlUrl: GQL_URL, fetchImpl });
+
+    await expect(source.list({ limit })).rejects.toThrow(/positive safe integer/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('walks every page by default instead of truncating the immutable ledger', async () => {
     const firstPage = Array.from({ length: 1_000 }, (_, index) => ({
       requestId: `0x${index.toString(16).padStart(64, '0')}`,
