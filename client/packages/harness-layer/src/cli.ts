@@ -68,7 +68,11 @@ import { isInsidePackageDir } from '../../../src/util/path-safety.js';
 import { runDistillationPipeline } from './pipeline.js';
 import { modelLabel, runEvalPrep } from './eval-prep.js';
 import { createVerdictSource, type VerdictSource } from './bridge-verdict-source.js';
-import { createEvidenceFetcher } from './bridge-fetch-evidence.js';
+import {
+  createEvidenceFetcher,
+  type EvidenceFetcherPorts,
+  type VerifierFactsResolver,
+} from './bridge-fetch-evidence.js';
 import {
   createClaudeDistiller,
   createClaudeMetaDistiller,
@@ -329,6 +333,14 @@ export interface DistillRunCliDeps {
   verdictSource?: VerdictSource;
   /** Fetch the patch + problem statement for an attempt. Default: live gateway + indexer. */
   fetchEvidence?: (ref: AttemptRef) => Promise<BridgeEvidence>;
+  /**
+   * Production composition hook for authenticated SWE verifier facts. Receives
+   * the CLI's bounded IPFS reader so solver-specific proof resolution cannot
+   * introduce an unbounded duplicate gateway path.
+   */
+  verifierFactsResolverFactory?: (
+    ipfs: EvidenceFetcherPorts['ipfs'],
+  ) => VerifierFactsResolver;
   /** The LLM distill port. Default: createClaudeDistiller. */
   distill?: (cluster: DistillCluster) => Promise<DistillLLMOutput>;
   /** The stage-2 meta LLM port. Default: createClaudeMetaDistiller. */
@@ -425,6 +437,110 @@ const DEFAULT_DISTILL_LIMIT = 2000;
  * headroom while preventing a malicious multi-GB wrapper from OOMing the run.
  */
 const MAX_IPFS_FETCH_BYTES = 64 * 1024 * 1024;
+
+export interface BoundedIpfsJsonFetcherOptions {
+  gateway: string;
+  /** Default ceiling for ordinary evidence hops. Defaults to 64 MiB. */
+  defaultMaxBytes?: number;
+  /** One deadline covers response headers and streaming body reads. */
+  timeoutMs?: number;
+  fetchImpl?: typeof fetch;
+}
+
+/**
+ * Build the live IPFS JSON port with a caller-selectable finite byte ceiling.
+ *
+ * The stream is cancelled on the first over-limit chunk, so hostile evidence
+ * is never fully buffered before the cap is enforced. The verifier resolver
+ * uses the second argument for its tighter authenticated-artifact ceiling.
+ */
+export function createBoundedIpfsJsonFetcher(
+  options: BoundedIpfsJsonFetcherOptions,
+): EvidenceFetcherPorts['ipfs'] {
+  const gateway = options.gateway.replace(/\/$/, '');
+  const defaultMaxBytes = options.defaultMaxBytes ?? MAX_IPFS_FETCH_BYTES;
+  const timeoutMs = options.timeoutMs ?? 30_000;
+  const fetchImpl = options.fetchImpl ?? fetch.bind(globalThis);
+  if (!Number.isSafeInteger(defaultMaxBytes) || defaultMaxBytes <= 0) {
+    throw new Error('IPFS default fetch ceiling must be a positive safe integer');
+  }
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new Error('IPFS fetch timeout must be a positive safe integer');
+  }
+
+  return async (cid: string, maxBytes = defaultMaxBytes): Promise<unknown> => {
+    if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+      throw new Error('IPFS fetch ceiling must be a positive safe integer');
+    }
+    const response = await fetchImpl(`${gateway}/ipfs/${cid}`, {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!response.ok) throw new Error(`ipfs ${cid}: HTTP ${response.status}`);
+
+    const rawLength = response.headers.get('content-length');
+    if (rawLength !== null) {
+      const declaredLength = Number(rawLength);
+      if (
+        Number.isSafeInteger(declaredLength)
+        && declaredLength >= 0
+        && declaredLength > maxBytes
+      ) {
+        throw new Error(
+          `ipfs ${cid}: ${declaredLength} bytes exceeds the ${maxBytes}-byte fetch ceiling`,
+        );
+      }
+    }
+    if (!response.body) {
+      throw new Error(`ipfs ${cid}: response has no body`);
+    }
+
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    try {
+      while (true) {
+        const next = await reader.read();
+        if (next.done) break;
+        length += next.value.byteLength;
+        if (length > maxBytes) {
+          try {
+            await reader.cancel('IPFS response exceeded fetch ceiling');
+          } catch {
+            // Preserve the deterministic ceiling error if cancellation races.
+          }
+          throw new Error(
+            `ipfs ${cid}: ${length} bytes exceeds the ${maxBytes}-byte fetch ceiling`,
+          );
+        }
+        chunks.push(next.value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    const bytes = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    let text: string;
+    try {
+      text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    } catch (error) {
+      throw new Error(
+        `ipfs ${cid}: invalid UTF-8: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    try {
+      return JSON.parse(text) as unknown;
+    } catch (error) {
+      throw new Error(
+        `ipfs ${cid}: invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  };
+}
 
 /**
  * Default install directory name for `skills install`: a safe slug of the
@@ -1815,18 +1931,11 @@ export async function runJinnLayerCli(
         const gateway = (process.env['JINN_IPFS_GATEWAY_URL'] ?? DEFAULT_IPFS_GATEWAY_URL).replace(/\/$/, '');
         const base = (process.env['JINN_DISCOVERY_URL'] ?? DEFAULT_TESTNET_DISCOVERY_URL).replace(/\/$/, '');
         const graphqlUrl = base.endsWith('/graphql') ? base : `${base}/graphql`;
+        const ipfs = createBoundedIpfsJsonFetcher({ gateway });
+        const resolveVerifierFacts = dd.verifierFactsResolverFactory?.(ipfs);
         return createEvidenceFetcher({
-          ipfs: async (cid: string) => {
-            const res = await fetch(`${gateway}/ipfs/${cid}`, { signal: AbortSignal.timeout(30_000) });
-            if (!res.ok) throw new Error(`ipfs ${cid}: HTTP ${res.status}`);
-            // Byte ceiling on attacker-published IPFS objects (system_snapshot
-            // wrappers are the large hop): res.json() would buffer unboundedly.
-            const buf = await res.arrayBuffer();
-            if (buf.byteLength > MAX_IPFS_FETCH_BYTES) {
-              throw new Error(`ipfs ${cid}: ${buf.byteLength} bytes exceeds the ${MAX_IPFS_FETCH_BYTES}-byte fetch ceiling`);
-            }
-            return JSON.parse(Buffer.from(buf).toString('utf8'));
-          },
+          ipfs,
+          ...(resolveVerifierFacts ? { resolveVerifierFacts } : {}),
           gql: async (query: string) => {
             const res = await fetch(graphqlUrl, {
               method: 'POST',

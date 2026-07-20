@@ -54,6 +54,7 @@ describe('toBridgeCapturedTask (both polarities, D10)', () => {
     expect(t.provenance).toBe('contributed');
     expect(t.task.distributionTags).toContain('coding');
     expect(t.steps.some((s) => s.name === 'tool:apply_patch')).toBe(true);
+    expect(t.environment.verifier).toBeUndefined();
   });
 
   it('a fail becomes a failed, evaluator-verified lesson-eligible trace', () => {
@@ -101,9 +102,11 @@ describe('toBridgeCapturedTask (both polarities, D10)', () => {
         source: 'stream',
       },
       distributionClass: 'restricted-tos',
-      failToPass: ['tests/test_widget.py::test_regression'],
-      passToPass: ['tests/test_widget.py::test_existing'],
-      evalSemanticsVersion: '4',
+      verifier: {
+        failToPass: ['tests/test_widget.py::test_regression'],
+        passToPass: ['tests/test_widget.py::test_existing'],
+        evalSemanticsVersion: '4',
+      },
     }, NOW);
 
     expect(t.task).toMatchObject({

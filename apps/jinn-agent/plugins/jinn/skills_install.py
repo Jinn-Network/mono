@@ -21,6 +21,7 @@ import base64
 import hashlib
 import json
 import logging
+import math
 import re
 import shutil
 from pathlib import Path
@@ -36,8 +37,20 @@ EPISODE_ARTIFACT_TYPE = "jinn.episode.v1"
 MARKER_FILE = ".jinn-ref"
 
 _SLUG_RE = re.compile(r"[^a-zA-Z0-9._-]+")
-_UNIX_NANO_RE = re.compile(r"^\d+$")
-_USD_ESTIMATE_RE = re.compile(r"^\d+(\.\d+)?$")
+_UNIX_NANO_RE = re.compile(r"^[0-9]+$")
+_USD_ESTIMATE_RE = re.compile(r"^[0-9]+(\.[0-9]+)?$")
+_DELIVERED_CONTENT_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_ISO_DATETIME_RE = re.compile(
+    r"^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|"
+    r"[02468][048]00|[13579][26]00)-02-29|"
+    r"\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|"
+    r"(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|"
+    r"(?:02)-(?:0[1-9]|1\d|2[0-8])))"
+    r"T(?:[01]\d|2[0-3]):[0-5]\d"
+    r"(?::[0-5]\d(?:\.\d+)?)?Z$",
+    re.ASCII,
+)
+_MAX_SAFE_INTEGER = 9_007_199_254_740_991
 
 
 def skills_dir() -> Path:
@@ -67,9 +80,23 @@ def _episode_object(value: Any, path: str) -> Dict[str, Any]:
     return value
 
 
-def _episode_string(value: Any, path: str) -> str:
+def _episode_string(
+    value: Any,
+    path: str,
+    *,
+    max_length: Optional[int] = None,
+) -> str:
     if not isinstance(value, str) or not value:
         _episode_error(path, "a nonempty string")
+    if (
+        max_length is not None
+        and len(value.encode("utf-16-le", errors="surrogatepass")) // 2
+        > max_length
+    ):
+        _episode_error(
+            path,
+            f"a nonempty string of at most {max_length} characters",
+        )
     return value
 
 
@@ -85,16 +112,40 @@ def _episode_string_list(value: Any, path: str) -> None:
         _episode_string(item, f"{path}[{index}]")
 
 
+def _episode_boolean(value: Any, path: str) -> None:
+    if not isinstance(value, bool):
+        _episode_error(path, "a boolean")
+
+
 def _episode_nonnegative_int(value: Any, path: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or not float(value).is_integer()
+        or abs(value) > _MAX_SAFE_INTEGER
+        or value < 0
+    ):
         _episode_error(path, "a nonnegative integer")
+
+
+def _episode_positive_int(value: Any, path: str) -> None:
+    _episode_nonnegative_int(value, path)
+    if value <= 0:
+        _episode_error(path, "a positive integer")
+
+
+def _episode_iso_datetime(value: Any, path: str) -> None:
+    timestamp = _episode_string(value, path)
+    if not _ISO_DATETIME_RE.fullmatch(timestamp):
+        _episode_error(path, "a canonical ISO datetime")
 
 
 def _episode_verification_strength(outcome: Dict[str, Any]) -> str:
     canonical = outcome.get("verificationStrength")
     if "verifiabilityTier" in outcome:
         legacy = outcome["verifiabilityTier"]
-        if canonical is not None and canonical != legacy:
+        if "verificationStrength" in outcome and canonical != legacy:
             _episode_error(
                 "outcome.verificationStrength",
                 "equal to outcome.verifiabilityTier when both are present",
@@ -109,23 +160,34 @@ def _episode_verification_strength(outcome: Dict[str, Any]) -> str:
 
 
 def _validate_episode(parsed: Dict[str, Any]) -> None:
-    """Validate the dependency-light canonical shape this read path projects."""
+    """Mirror EpisodeV1Schema's additive, dependency-light read contract."""
+    _episode_enum(
+        parsed.get("schemaVersion"),
+        "schemaVersion",
+        (EPISODE_ARTIFACT_TYPE,),
+    )
     _episode_string(parsed.get("episodeId"), "episodeId")
-    if "retrievalVisible" in parsed and not isinstance(
-        parsed["retrievalVisible"], bool
-    ):
-        _episode_error("retrievalVisible", "a boolean")
+    if "retrievalVisible" in parsed:
+        _episode_boolean(parsed["retrievalVisible"], "retrievalVisible")
 
     session = _episode_object(parsed.get("session"), "session")
-    _episode_string(session.get("sessionId"), "session.sessionId")
-    _episode_string(session.get("capturedAt"), "session.capturedAt")
+    _episode_string(
+        session.get("sessionId"),
+        "session.sessionId",
+        max_length=128,
+    )
+    _episode_iso_datetime(session.get("capturedAt"), "session.capturedAt")
     _episode_enum(
         session.get("kind", "user"),
         "session.kind",
         ("user", "host-internal"),
     )
     if session.get("parentSessionId") is not None:
-        _episode_string(session["parentSessionId"], "session.parentSessionId")
+        _episode_string(
+            session["parentSessionId"],
+            "session.parentSessionId",
+            max_length=128,
+        )
 
     origin = parsed.get("origin", "legacy-unstamped")
     if origin != "legacy-unstamped":
@@ -182,6 +244,59 @@ def _validate_episode(parsed: Dict[str, Any]) -> None:
     _episode_string_list(
         environment.get("skillsLoadout"), "environment.skillsLoadout"
     )
+    if environment.get("generatorModel") is not None:
+        generator_model = _episode_object(
+            environment["generatorModel"],
+            "environment.generatorModel",
+        )
+        _episode_string(
+            generator_model.get("id"),
+            "environment.generatorModel.id",
+        )
+        if generator_model.get("provider") is not None:
+            _episode_string(
+                generator_model["provider"],
+                "environment.generatorModel.provider",
+            )
+        if generator_model.get("openWeights") is not None:
+            _episode_boolean(
+                generator_model["openWeights"],
+                "environment.generatorModel.openWeights",
+            )
+        _episode_enum(
+            generator_model.get("source"),
+            "environment.generatorModel.source",
+            ("stream", "config"),
+        )
+    if environment.get("distributionClass") is not None:
+        _episode_enum(
+            environment["distributionClass"],
+            "environment.distributionClass",
+            ("open", "restricted-tos", "unknown"),
+        )
+    if environment.get("verifier") is not None:
+        verifier = _episode_object(
+            environment["verifier"],
+            "environment.verifier",
+        )
+        _episode_enum(
+            verifier.get("type"),
+            "environment.verifier.type",
+            ("f2p-p2p", "command", "none"),
+        )
+        _episode_string_list(
+            verifier.get("failToPass", []),
+            "environment.verifier.failToPass",
+        )
+        _episode_string_list(
+            verifier.get("passToPass", []),
+            "environment.verifier.passToPass",
+        )
+        if verifier.get("evalSemanticsVersion") is not None:
+            _episode_string(
+                verifier["evalSemanticsVersion"],
+                "environment.verifier.evalSemanticsVersion",
+            )
 
     outcome = _episode_object(parsed.get("outcome"), "outcome")
     _episode_enum(
@@ -192,10 +307,8 @@ def _validate_episode(parsed: Dict[str, Any]) -> None:
     _episode_verification_strength(outcome)
     if outcome.get("summary") is not None:
         _episode_string(outcome["summary"], "outcome.summary")
-    if outcome.get("acceptedDiff") is not None and not isinstance(
-        outcome["acceptedDiff"], bool
-    ):
-        _episode_error("outcome.acceptedDiff", "a boolean")
+    if outcome.get("acceptedDiff") is not None:
+        _episode_boolean(outcome["acceptedDiff"], "outcome.acceptedDiff")
     if outcome.get("testRuns") is not None:
         test_runs = _episode_object(outcome["testRuns"], "outcome.testRuns")
         _episode_nonnegative_int(test_runs.get("passed"), "outcome.testRuns.passed")
@@ -223,6 +336,129 @@ def _validate_episode(parsed: Dict[str, Any]) -> None:
         "provenance",
         ("contributed", "imported"),
     )
+
+    if parsed.get("lineage") is not None:
+        lineage = _episode_object(parsed["lineage"], "lineage")
+        _episode_string(lineage.get("episodeId"), "lineage.episodeId")
+        if lineage.get("mintRef") is not None:
+            _episode_string(lineage["mintRef"], "lineage.mintRef")
+
+    if parsed.get("attemptGroup") is not None:
+        attempt_group = _episode_object(
+            parsed["attemptGroup"],
+            "attemptGroup",
+        )
+        _episode_string(
+            attempt_group.get("groupId"),
+            "attemptGroup.groupId",
+        )
+        _episode_string(
+            attempt_group.get("attemptId"),
+            "attemptGroup.attemptId",
+        )
+        _episode_string_list(
+            attempt_group.get("relatedAttemptRefs", []),
+            "attemptGroup.relatedAttemptRefs",
+        )
+        if attempt_group.get("groupSize") is not None:
+            _episode_positive_int(
+                attempt_group["groupSize"],
+                "attemptGroup.groupSize",
+            )
+        for key in ("nPass", "nFail"):
+            if attempt_group.get(key) is not None:
+                _episode_nonnegative_int(
+                    attempt_group[key],
+                    f"attemptGroup.{key}",
+                )
+        if all(
+            attempt_group.get(key) is not None
+            for key in ("groupSize", "nPass", "nFail")
+        ) and (
+            attempt_group["groupSize"]
+            != attempt_group["nPass"] + attempt_group["nFail"]
+        ):
+            _episode_error(
+                "attemptGroup.groupSize",
+                "equal to attemptGroup.nPass + attemptGroup.nFail "
+                "when all counts are present",
+            )
+
+    if parsed.get("activity") is not None:
+        activity = _episode_object(parsed["activity"], "activity")
+        searched_terms = activity.get("searchedTerms", [])
+        missing = object()
+        legacy_provided = activity.get("providedRefs", missing)
+        delivered_refs = activity.get(
+            "deliveredRefs",
+            [] if legacy_provided is missing else legacy_provided,
+        )
+        eligible_refs = activity.get("eligibleRefs", delivered_refs)
+        retrieval_fired = activity.get(
+            "retrievalFired",
+            (
+                isinstance(searched_terms, list)
+                and len(searched_terms) > 0
+            )
+            or (
+                isinstance(delivered_refs, list)
+                and len(delivered_refs) > 0
+            ),
+        )
+        provided_refs = (
+            delivered_refs
+            if legacy_provided is missing
+            else legacy_provided
+        )
+        delivery_mode = activity.get(
+            "deliveryMode",
+            "delivered" if retrieval_fired is True else "disabled",
+        )
+
+        _episode_string_list(searched_terms, "activity.searchedTerms")
+        _episode_string_list(provided_refs, "activity.providedRefs")
+        _episode_string_list(
+            activity.get("surfacedRefs", []),
+            "activity.surfacedRefs",
+        )
+        _episode_string_list(
+            activity.get("fetchedRefs", []),
+            "activity.fetchedRefs",
+        )
+        _episode_string_list(
+            activity.get("installedSkillRefs", []),
+            "activity.installedSkillRefs",
+        )
+        _episode_boolean(retrieval_fired, "activity.retrievalFired")
+        _episode_string_list(eligible_refs, "activity.eligibleRefs")
+        _episode_string_list(delivered_refs, "activity.deliveredRefs")
+        _episode_enum(
+            delivery_mode,
+            "activity.deliveryMode",
+            ("delivered", "disabled", "degraded", "withheld"),
+        )
+        if activity.get("deliveredContentHash") is not None:
+            delivered_hash = _episode_string(
+                activity["deliveredContentHash"],
+                "activity.deliveredContentHash",
+            )
+            if not _DELIVERED_CONTENT_HASH_RE.fullmatch(delivered_hash):
+                _episode_error(
+                    "activity.deliveredContentHash",
+                    "a lowercase sha256 content hash",
+                )
+
+    if parsed.get("eligibility") is not None:
+        eligibility = _episode_object(parsed["eligibility"], "eligibility")
+        _episode_boolean(
+            eligibility.get("eligible"),
+            "eligibility.eligible",
+        )
+        _episode_string(eligibility.get("reason"), "eligibility.reason")
+        _episode_iso_datetime(
+            eligibility.get("checkedAt"),
+            "eligibility.checkedAt",
+        )
 
 
 def _extract_trace(record: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:

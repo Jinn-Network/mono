@@ -6,7 +6,14 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { RETRIEVAL_VISIBLE_TAG } from '@jinn-network/plugin';
 import type { HarnessLayer, CorpusSearchHit, CorpusRecord } from '../src/consume.js';
-import { runJinnLayerCli, type DistillRunCliDeps, type DistillCliDeps, type DistillProvider, type DistillPorts } from '../src/cli.js';
+import {
+  createBoundedIpfsJsonFetcher,
+  runJinnLayerCli,
+  type DistillRunCliDeps,
+  type DistillCliDeps,
+  type DistillProvider,
+  type DistillPorts,
+} from '../src/cli.js';
 import type { CapturedTask } from '../src/capture.js';
 import { createMemoryLedger, type LedgerEntry } from '../src/ledger.js';
 import { TRACE_ENVELOPE_ARTIFACT_TYPE, type HarnessPublishDeps } from '../src/publish.js';
@@ -110,6 +117,50 @@ function fakeHit(overrides: Partial<CorpusSearchHit> = {}): CorpusSearchHit {
     ...overrides,
   };
 }
+
+describe('bounded IPFS JSON fetcher', () => {
+  it('passes a caller-supplied cap through to the streamed body reader', async () => {
+    const payload = JSON.stringify({ authenticated: true });
+    const fetchIpfs = createBoundedIpfsJsonFetcher({
+      gateway: 'https://gateway.example',
+      fetchImpl: vi.fn(async () => new Response(payload)),
+    });
+
+    await expect(fetchIpfs('bafy-proof', Buffer.byteLength(payload)))
+      .resolves.toEqual({ authenticated: true });
+    await expect(fetchIpfs('bafy-proof', Buffer.byteLength(payload) - 1))
+      .rejects.toThrow(/fetch ceiling/);
+  });
+
+  it('cancels a streamed response as soon as it crosses the cap', async () => {
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"proof":'));
+        controller.enqueue(new TextEncoder().encode('"too large"}'));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
+      return new Response(stream);
+    });
+    const fetchIpfs = createBoundedIpfsJsonFetcher({
+      gateway: 'https://gateway.example/',
+      fetchImpl,
+      timeoutMs: 5_000,
+    });
+
+    await expect(fetchIpfs('bafy-proof', 10)).rejects.toThrow(/fetch ceiling/);
+    expect(cancelled).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://gateway.example/ipfs/bafy-proof',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+});
 
 function retrievalVisibleTraceRecord(): CorpusRecord {
   const trace = {
