@@ -580,6 +580,116 @@ describe('machine-local evidence index', () => {
     index.close();
   });
 
+  it('records and reversibly excludes conservative legacy synthetic fixtures', () => {
+    const { episodesDir, indexPath } = makeStore();
+    const synthetic = structuredClone(makeEpisode('s1-1784122564637021000')) as unknown as {
+      origin?: unknown;
+      outcome: { summary: string | null };
+    } & EpisodeV1;
+    synthetic.session.sessionId = 's1';
+    synthetic.environment.model = 'test-model';
+    synthetic.task.distributionTags = [];
+    synthetic.trajectory.push({
+      ...synthetic.trajectory[0]!,
+      spanId: 'span-synthetic-tool',
+      kind: 'jinn.tool_call',
+      name: 'tool:terminal',
+    });
+    synthetic.outcome.summary = null;
+    delete synthetic.origin;
+    const sourcePath = join(episodesDir, 's1-fixture.json');
+    writeJson(sourcePath, synthetic);
+    const sourceBefore = readFileSync(sourcePath, 'utf8');
+
+    const first = runReindex(episodesDir, indexPath, true);
+
+    expect(first).toMatchObject({
+      scannedFiles: 1,
+      indexedEpisodes: 0,
+      unreadableFiles: 0,
+      nullToleratedFiles: 1,
+      nullFieldsRemoved: 0,
+      misnamedEpisodes: 1,
+      renamedFiles: 0,
+      legacyUnstampedFiles: 1,
+      syntheticExcludedFiles: 1,
+      syntheticExcluded: [{
+        path: sourcePath,
+        episodeId: synthetic.episodeId,
+        rule: 'legacy-short-session-placeholder-model-v1',
+        reason: expect.stringMatching(/legacy synthetic fixture/i),
+      }],
+      indexUpdated: true,
+    });
+    expect(readFileSync(sourcePath, 'utf8')).toBe(sourceBefore);
+    expect(existsSync(join(episodesDir, `${synthetic.episodeId}.episode.json`))).toBe(false);
+
+    const index = new EvidenceIndex({ dbPath: indexPath });
+    expect(index.listEpisodes()).toEqual([]);
+    expect(index.listExcluded()).toEqual([{
+      sourcePath,
+      episodeId: synthetic.episodeId,
+      rule: 'legacy-short-session-placeholder-model-v1',
+      reason: expect.stringMatching(/legacy synthetic fixture/i),
+      contentSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+    }]);
+    index.close();
+
+    const second = runReindex(episodesDir, indexPath, true);
+    expect(second).toMatchObject({
+      indexedEpisodes: 0,
+      syntheticExcludedFiles: 1,
+      syntheticExcluded: first.syntheticExcluded,
+      mutations: [],
+      indexUpdated: true,
+    });
+    expect(readFileSync(sourcePath, 'utf8')).toBe(sourceBefore);
+  });
+
+  it('excludes the known smoke payload even when it names a production model', () => {
+    const { episodesDir, indexPath } = makeStore();
+    const synthetic = structuredClone(makeEpisode('s1-1784122566816575000'));
+    synthetic.session.sessionId = 's1';
+    synthetic.environment.model = 'step-3.7-flash';
+    synthetic.task = {
+      summary: 'Search the web for X',
+      distributionTags: [],
+    };
+    synthetic.trajectory[0]!.attributes = {
+      role: 'user',
+      'turn.text': 'Search the web for X',
+    };
+    synthetic.trajectory.push({
+      ...synthetic.trajectory[0]!,
+      spanId: 'span-smoke-tool',
+      kind: 'jinn.tool_call',
+      name: 'tool:terminal',
+      attributes: {
+        'tool.args': { command: 'ls' },
+        'tool.result': '{"output": "ok"}',
+      },
+    });
+    delete synthetic.origin;
+    const sourcePath = join(episodesDir, 'known-smoke.episode.json');
+    writeJson(sourcePath, synthetic);
+
+    const report = runReindex(episodesDir, indexPath, false);
+
+    expect(report).toMatchObject({
+      indexedEpisodes: 0,
+      syntheticExcludedFiles: 1,
+      syntheticExcluded: [{
+        path: sourcePath,
+        episodeId: synthetic.episodeId,
+        rule: 'legacy-known-smoke-payload-v1',
+      }],
+    });
+    const index = new EvidenceIndex({ dbPath: indexPath });
+    expect(index.listEpisodes()).toEqual([]);
+    expect(index.listExcluded()[0]?.rule).toBe('legacy-known-smoke-payload-v1');
+    index.close();
+  });
+
   it('does not clobber a rescue target that is already occupied', () => {
     if (process.platform === 'win32') return;
     const { episodesDir, indexPath } = makeStore();

@@ -69,6 +69,16 @@ export interface UnreadableEvidence {
   reason: string;
 }
 
+export interface ExcludedEvidence {
+  sourcePath: string;
+  episodeId: string;
+  rule:
+    | 'legacy-short-session-placeholder-model-v1'
+    | 'legacy-known-smoke-payload-v1';
+  reason: string;
+  contentSha256: string;
+}
+
 export type ReindexMutation =
   | { kind: 'normalized-json'; sourcePath: string; nullFieldsRemoved: number }
   | { kind: 'normalization-recovery-retained'; sourcePath: string; journalPath: string }
@@ -85,6 +95,13 @@ export interface ReindexReport {
   misnamedEpisodes: number;
   renamedFiles: number;
   legacyUnstampedFiles: number;
+  syntheticExcludedFiles: number;
+  syntheticExcluded: Array<{
+    path: string;
+    episodeId: string;
+    rule: ExcludedEvidence['rule'];
+    reason: string;
+  }>;
   mutations: ReindexMutation[];
   /** False for inspection and for a failed derived-index publication. */
   indexUpdated: boolean;
@@ -138,6 +155,10 @@ interface EvidenceCandidate {
 const RETENTION = { policy: 'local-private' as const, maxEpisodes: 200 };
 const EVIDENCE_INDEX_APPLICATION_ID = 0x4a494e4e;
 const EVIDENCE_INDEX_SCHEMA_VERSION = '1';
+const LEGACY_SYNTHETIC_FIXTURE_RULE =
+  'legacy-short-session-placeholder-model-v1' as const;
+const LEGACY_KNOWN_SMOKE_PAYLOAD_RULE =
+  'legacy-known-smoke-payload-v1' as const;
 
 class EvidenceMutationCommittedError extends Error {
   constructor(
@@ -193,6 +214,51 @@ function originFrom(raw: unknown): Pick<
   return writer && build
     ? { originKind: 'stamped', originWriter: writer, originBuild: build }
     : { originKind: 'legacy-unstamped' };
+}
+
+function classifyLegacySyntheticFixture(
+  parsed: ParsedEvidence,
+): Pick<ExcludedEvidence, 'rule' | 'reason'> | undefined {
+  if (parsed.originKind !== 'legacy-unstamped') return undefined;
+  const { episodeId, session, environment, trajectory, task } = parsed.episode;
+  if (!/^s(?:\d+|[A-Z]\d*)$/.test(session.sessionId)) return undefined;
+  if (
+    !episodeId.startsWith(`${session.sessionId}-`)
+    || !/^\d{19}$/.test(episodeId.slice(session.sessionId.length + 1))
+  ) {
+    return undefined;
+  }
+  if (trajectory.length !== 2 || task.distributionTags.length !== 0) return undefined;
+  if (['m', 'test-model'].includes(environment.model)) {
+    return {
+      rule: LEGACY_SYNTHETIC_FIXTURE_RULE,
+      reason:
+        `legacy synthetic fixture excluded by ${LEGACY_SYNTHETIC_FIXTURE_RULE}: `
+        + 'short fixture session, generated episode id, placeholder model, '
+        + 'two-span trace, and no distribution tags',
+    };
+  }
+  const first = trajectory[0]!;
+  const second = trajectory[1]!;
+  const toolArgs = asObject(second.attributes['tool.args']);
+  if (
+    task.summary === 'Search the web for X'
+    && first.kind === 'jinn.agent_turn'
+    && first.attributes['role'] === 'user'
+    && first.attributes['turn.text'] === task.summary
+    && second.kind === 'jinn.tool_call'
+    && second.name === 'tool:terminal'
+    && toolArgs?.['command'] === 'ls'
+    && second.attributes['tool.result'] === '{"output": "ok"}'
+  ) {
+    return {
+      rule: LEGACY_KNOWN_SMOKE_PAYLOAD_RULE,
+      reason:
+        `legacy synthetic fixture excluded by ${LEGACY_KNOWN_SMOKE_PAYLOAD_RULE}: `
+        + 'short fixture session and exact historical smoke-task payload',
+    };
+  }
+  return undefined;
 }
 
 function parseFile(raw: unknown, canonicalName: boolean): ParsedEvidence {
@@ -863,6 +929,13 @@ export class EvidenceIndex {
             source_path TEXT PRIMARY KEY,
             reason TEXT NOT NULL
           );
+          CREATE TABLE excluded_records (
+            source_path TEXT PRIMARY KEY,
+            episode_id TEXT NOT NULL,
+            rule TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            content_sha256 TEXT NOT NULL
+          );
           INSERT INTO evidence_index_meta(key, value)
           VALUES ('schema_version', '${EVIDENCE_INDEX_SCHEMA_VERSION}');
         `);
@@ -879,6 +952,7 @@ export class EvidenceIndex {
         `).all() as Array<{ name: string }>;
         const tableNames = tables.map((row) => row.name);
         if (JSON.stringify(tableNames) !== JSON.stringify([
+          'excluded_records',
           'episodes',
           'evidence_index_meta',
           'unreadable_records',
@@ -918,7 +992,11 @@ export class EvidenceIndex {
     return String(row).toLowerCase();
   }
 
-  replace(rows: IndexedEpisode[], unreadable: UnreadableEvidence[]): void {
+  replace(
+    rows: IndexedEpisode[],
+    unreadable: UnreadableEvidence[],
+    excluded: ExcludedEvidence[],
+  ): void {
     const insertEpisode = this.db.prepare(`
       INSERT INTO episodes (
         episode_id, session_id, captured_at, source_path, source_kind,
@@ -936,9 +1014,17 @@ export class EvidenceIndex {
       INSERT INTO unreadable_records(source_path, reason)
       VALUES (@sourcePath, @reason)
     `);
+    const insertExcluded = this.db.prepare(`
+      INSERT INTO excluded_records(
+        source_path, episode_id, rule, reason, content_sha256
+      ) VALUES (
+        @sourcePath, @episodeId, @rule, @reason, @contentSha256
+      )
+    `);
     this.db.transaction(() => {
       this.db.prepare('DELETE FROM episodes').run();
       this.db.prepare('DELETE FROM unreadable_records').run();
+      this.db.prepare('DELETE FROM excluded_records').run();
       for (const row of rows) {
         insertEpisode.run({
           ...row,
@@ -949,6 +1035,7 @@ export class EvidenceIndex {
         });
       }
       for (const row of unreadable) insertUnreadable.run(row);
+      for (const row of excluded) insertExcluded.run(row);
     })();
     secureIndexFiles(this.dbPath, this.dbIdentity);
   }
@@ -1001,6 +1088,19 @@ export class EvidenceIndex {
     `).all() as UnreadableEvidence[];
   }
 
+  listExcluded(): ExcludedEvidence[] {
+    return this.db.prepare(`
+      SELECT
+        source_path AS sourcePath,
+        episode_id AS episodeId,
+        rule,
+        reason,
+        content_sha256 AS contentSha256
+      FROM excluded_records
+      ORDER BY source_path ASC
+    `).all() as ExcludedEvidence[];
+  }
+
   close(): void {
     let failure: unknown;
     try {
@@ -1025,6 +1125,7 @@ export class EvidenceIndex {
 interface EvidenceScanResult {
   indexed: IndexedEpisode[];
   unreadable: UnreadableEvidence[];
+  excluded: ExcludedEvidence[];
   report: ReindexReport;
 }
 
@@ -1035,6 +1136,7 @@ function scanEvidenceStore(
 ): EvidenceScanResult {
   const episodesDir = resolve(episodesDirInput);
   const unreadable: UnreadableEvidence[] = [];
+  const excluded: ExcludedEvidence[] = [];
   const candidates = new Map<string, EvidenceCandidate[]>();
   const indexed: IndexedEpisode[] = [];
   const mutations: ReindexMutation[] = [];
@@ -1118,6 +1220,17 @@ function scanEvidenceStore(
 
     const candidate = episodeCandidates[0]!;
     const { sourcePath, sourceText, parsed } = candidate;
+    if (parsed.originKind === 'legacy-unstamped') legacyUnstampedFiles += 1;
+    const syntheticFixture = classifyLegacySyntheticFixture(parsed);
+    if (syntheticFixture) {
+      excluded.push({
+        sourcePath,
+        episodeId,
+        ...syntheticFixture,
+        contentSha256: candidate.contentSha256,
+      });
+      continue;
+    }
     let identity = candidate.identity;
     let finalPath = sourcePath;
     try {
@@ -1160,7 +1273,6 @@ function scanEvidenceStore(
         mutations.push(mutation);
       }
 
-      if (parsed.originKind === 'legacy-unstamped') legacyUnstampedFiles += 1;
       indexed.push({
         episodeId,
         sessionId: parsed.episode.session.sessionId,
@@ -1193,11 +1305,13 @@ function scanEvidenceStore(
   }
 
   unreadable.sort((left, right) => left.sourcePath.localeCompare(right.sourcePath));
+  excluded.sort((left, right) => left.sourcePath.localeCompare(right.sourcePath));
   indexed.sort((left, right) => left.episodeId.localeCompare(right.episodeId));
 
   return {
     indexed,
     unreadable,
+    excluded,
     report: {
       scannedFiles,
       indexedEpisodes: indexed.length,
@@ -1208,6 +1322,13 @@ function scanEvidenceStore(
       misnamedEpisodes,
       renamedFiles,
       legacyUnstampedFiles,
+      syntheticExcludedFiles: excluded.length,
+      syntheticExcluded: excluded.map(({ sourcePath, episodeId, rule, reason }) => ({
+        path: sourcePath,
+        episodeId,
+        rule,
+        reason,
+      })),
       mutations,
       indexUpdated: false,
     },
@@ -1249,7 +1370,7 @@ export function reindexEvidenceStore(options: ReindexEvidenceStoreOptions): Rein
     }
 
     try {
-      index.replace(scan.indexed, scan.unreadable);
+      index.replace(scan.indexed, scan.unreadable, scan.excluded);
       scan.report.indexUpdated = true;
     } catch (error) {
       scan.report.indexUpdated = false;

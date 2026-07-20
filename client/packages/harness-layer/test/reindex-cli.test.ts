@@ -161,6 +161,36 @@ describe('jinn-layer reindex', () => {
     expect(existsSync(indexPath)).toBe(false);
   });
 
+  it('reports excluded legacy synthetic fixtures without degrading the command', async () => {
+    const { episodesDir, indexPath } = fixture();
+    const synthetic = structuredClone(episode('sA-1784122567760469000'));
+    synthetic.session.sessionId = 'sA';
+    synthetic.environment.model = 'test-model';
+    synthetic.task.distributionTags = [];
+    synthetic.trajectory.push({
+      ...synthetic.trajectory[0]!,
+      spanId: 'span-2',
+      kind: 'jinn.tool_call',
+      name: 'tool:terminal',
+    });
+    delete synthetic.origin;
+    const sourcePath = join(episodesDir, 'synthetic.episode.json');
+    writeFileSync(sourcePath, JSON.stringify(synthetic));
+    let output = '';
+
+    const code = await runJinnLayerCli([
+      'reindex',
+      '--episodes-dir',
+      episodesDir,
+      '--index-path',
+      indexPath,
+    ], { writer: { write: (value) => { output += value; return true; } } });
+
+    expect(code).toBe(0);
+    expect(output).toContain('Synthetic fixtures excluded: 1');
+    expect(output).toContain(`${sourcePath}: legacy synthetic fixture excluded`);
+  });
+
   it('returns a degraded JSON report when index publication fails after repair', async () => {
     const { episodesDir, indexPath } = fixture();
     const raw = structuredClone(episode('partial')) as unknown as {

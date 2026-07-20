@@ -1153,7 +1153,7 @@ export async function runJinnLayerCli(
         })}\n`);
       } else {
         writer.write([
-          `Evidence ${dryRun ? 'inspection' : 'reindex'} ${status}: ${report.indexedEpisodes}/${report.scannedFiles} files readable`,
+          `Evidence ${dryRun ? 'inspection' : 'reindex'} ${status}: ${report.indexedEpisodes}/${report.scannedFiles} files indexed`,
           `Index: ${indexPath === null
             ? 'not rebuilt (--dry-run)'
             : report.indexUpdated
@@ -1161,6 +1161,8 @@ export async function runJinnLayerCli(
               : `not updated (${report.indexError ?? 'unknown publication failure'})`}`,
           `Repairs: ${report.nullFieldsRemoved} null fields removed; ${report.renamedFiles} files renamed`,
           `Legacy unstamped: ${report.legacyUnstampedFiles}`,
+          `Synthetic fixtures excluded: ${report.syntheticExcludedFiles}`,
+          ...report.syntheticExcluded.map((row) => `  ${row.path}: ${row.reason}`),
           `Unreadable: ${report.unreadableFiles}`,
           ...report.unreadable.map((row) => `  ${row.path}: ${row.reason}`),
           '',
