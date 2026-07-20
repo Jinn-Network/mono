@@ -39,6 +39,7 @@ _INSTALL_TIMEOUT_S = 300
 CONTRACT_VERSION = 1
 PROCESS_STATUSES = ("ok", "degraded", "unavailable")
 _LAYER_PACKAGE = "@jinn-network/jinn-layer"
+_LAYER_JS_ENTRYPOINT = "./dist/bin/jinn-layer.js"
 _SEMVER_PIN = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
 
 
@@ -81,7 +82,7 @@ def _runtime_contract(plugin_dir: Path) -> tuple[str, str, str]:
 
 
 def _plugin_local_bin(plugin_dir: Path, bin_path: str) -> Path:
-    """Resolve npm's platform-specific shim for the committed bin contract."""
+    """Locate npm's platform-specific shim for the committed bin contract."""
     local_bin = plugin_dir / bin_path
     if sys.platform == "win32":
         cmd_bin = Path(f"{local_bin}.cmd")
@@ -90,57 +91,103 @@ def _plugin_local_bin(plugin_dir: Path, bin_path: str) -> Path:
     return local_bin
 
 
+def _plugin_local_resolution(
+    local_bin: Path,
+    package: str,
+    version: str,
+) -> LayerResolution:
+    if not local_bin.is_file():
+        raise LayerResolutionError(
+            f"plugin-local layer artifact is not a file: {local_bin}"
+        )
+    if os.name != "nt" and sys.platform != "win32" and not os.access(local_bin, os.X_OK):
+        raise LayerResolutionError(
+            f"plugin-local layer artifact is not executable: {local_bin}"
+        )
+    installed_manifest = (
+        local_bin.parent.parent
+        / "@jinn-network"
+        / "jinn-layer"
+        / "package.json"
+    )
+    try:
+        installed = json.loads(installed_manifest.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LayerResolutionError(
+            f"plugin-local layer package manifest is unreadable: "
+            f"{installed_manifest}"
+        ) from exc
+    if (
+        not isinstance(installed, dict)
+        or installed.get("name") != package
+        or installed.get("version") != version
+    ):
+        raise LayerResolutionError(
+            f"plugin-local layer version mismatch: expected "
+            f"{package}@{version} in {installed_manifest}"
+        )
+
+    if sys.platform == "win32":
+        installed_bins = installed.get("bin")
+        if (
+            not isinstance(installed_bins, dict)
+            or installed_bins.get("jinn-layer") != _LAYER_JS_ENTRYPOINT
+        ):
+            raise LayerResolutionError(
+                f"plugin-local layer entrypoint mismatch in {installed_manifest}"
+            )
+        entrypoint = installed_manifest.parent / "dist" / "bin" / "jinn-layer.js"
+        if not entrypoint.is_file():
+            raise LayerResolutionError(
+                f"plugin-local layer entrypoint is not a file: {entrypoint}"
+            )
+        node = shutil.which("node.exe")
+        if node is None or not node.lower().endswith(".exe"):
+            raise LayerResolutionError(
+                "plugin-local layer requires node.exe on Windows"
+            )
+        return LayerResolution(
+            argv=(node, str(entrypoint)),
+            source="plugin-local",
+            detail=f"plugin-local {package}@{version} ({entrypoint})",
+            package=package,
+            version=version,
+        )
+
+    return LayerResolution(
+        argv=(str(local_bin),),
+        source="plugin-local",
+        detail=f"plugin-local {package}@{version} ({local_bin})",
+        package=package,
+        version=version,
+    )
+
+
 def resolve_binary(plugin_dir: Optional[Path] = None) -> LayerResolution:
     """Resolve the layer command and report which contract branch won."""
     directory = plugin_dir if plugin_dir is not None else Path(__file__).resolve().parent
     package, version, bin_path = _runtime_contract(directory)
     local_bin = _plugin_local_bin(directory, bin_path)
     if local_bin.exists():
-        if not local_bin.is_file():
-            raise LayerResolutionError(
-                f"plugin-local layer artifact is not a file: {local_bin}"
-            )
-        if os.name != "nt" and not os.access(local_bin, os.X_OK):
-            raise LayerResolutionError(
-                f"plugin-local layer artifact is not executable: {local_bin}"
-            )
-        installed_manifest = (
-            local_bin.parent.parent
-            / "@jinn-network"
-            / "jinn-layer"
-            / "package.json"
-        )
-        try:
-            installed = json.loads(installed_manifest.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise LayerResolutionError(
-                f"plugin-local layer package manifest is unreadable: "
-                f"{installed_manifest}"
-            ) from exc
-        if (
-            not isinstance(installed, dict)
-            or installed.get("name") != package
-            or installed.get("version") != version
-        ):
-            raise LayerResolutionError(
-                f"plugin-local layer version mismatch: expected "
-                f"{package}@{version} in {installed_manifest}"
-            )
-        return LayerResolution(
-            argv=(str(local_bin),),
-            source="plugin-local",
-            detail=f"plugin-local {package}@{version} ({local_bin})",
-            package=package,
-            version=version,
-        )
+        return _plugin_local_resolution(local_bin, package, version)
     override = (os.environ.get("JINN_LAYER_BIN") or "").strip()
     if override:
+        if sys.platform == "win32" and not override.lower().endswith(".exe"):
+            raise LayerResolutionError(
+                "unsafe Windows JINN_LAYER_BIN override: use a native .exe, "
+                "not a command shim"
+            )
         return LayerResolution(
             argv=(override,),
             source="env",
             detail=f"JINN_LAYER_BIN={override} (development override)",
             package=package,
             version=version,
+        )
+    if sys.platform == "win32":
+        raise LayerResolutionError(
+            "plugin-local layer is unavailable on Windows; install the exact "
+            "pinned runtime instead of invoking a PATH command shim"
         )
     return LayerResolution(
         argv=("jinn-layer",),
@@ -194,7 +241,7 @@ def ensure_plugin_runtime(
 
     if (os.environ.get("JINN_LAYER_BIN") or "").strip():
         return resolve_binary(directory)
-    if shutil.which("jinn-layer"):
+    if sys.platform != "win32" and shutil.which("jinn-layer"):
         return resolve_binary(directory)
 
     npm = shutil.which("npm")

@@ -75,9 +75,18 @@ def _executable(path: Path) -> Path:
     package = path.parents[1] / "@jinn-network" / "jinn-layer" / "package.json"
     package.parent.mkdir(parents=True, exist_ok=True)
     package.write_text(
-        json.dumps({"name": "@jinn-network/jinn-layer", "version": "0.1.0"}),
+        json.dumps(
+            {
+                "name": "@jinn-network/jinn-layer",
+                "version": "0.1.0",
+                "bin": {"jinn-layer": "./dist/bin/jinn-layer.js"},
+            }
+        ),
         encoding="utf-8",
     )
+    entrypoint = package.parent / "dist" / "bin" / "jinn-layer.js"
+    entrypoint.parent.mkdir(parents=True, exist_ok=True)
+    entrypoint.write_text("process.exit(0);\n", encoding="utf-8")
     return path
 
 
@@ -110,16 +119,119 @@ def test_windows_plugin_local_cmd_artifact_wins_with_the_exact_pin(
     )
     monkeypatch.setattr(jinn_layer.sys, "platform", "win32")
     monkeypatch.setenv("JINN_LAYER_BIN", r"C:\developer\jinn-layer.cmd")
+    node = r"C:\Program Files\nodejs\node.exe"
+    monkeypatch.setattr(
+        jinn_layer.shutil,
+        "which",
+        lambda name: node if name == "node.exe" else None,
+    )
 
     resolution = jinn_layer.resolve_binary(plugin_dir=tmp_path)
 
-    assert resolution.argv == (str(local_bin),)
+    entrypoint = (
+        local_bin.parents[1]
+        / "@jinn-network"
+        / "jinn-layer"
+        / "dist"
+        / "bin"
+        / "jinn-layer.js"
+    )
+    assert resolution.argv == (node, str(entrypoint))
     assert resolution.source == "plugin-local"
     assert resolution.package == "@jinn-network/jinn-layer"
     assert resolution.version == "0.1.0"
     assert resolution.detail == (
-        f"plugin-local @jinn-network/jinn-layer@0.1.0 ({local_bin})"
+        f"plugin-local @jinn-network/jinn-layer@0.1.0 ({entrypoint})"
     )
+
+
+def test_windows_metacharacter_query_stays_an_argv_element(tmp_path, monkeypatch):
+    _runtime_spec(tmp_path)
+    local_bin = _executable(
+        tmp_path / "runtime" / "node_modules" / ".bin" / "jinn-layer.cmd"
+    )
+    node = r"C:\Program Files\nodejs\node.exe"
+    monkeypatch.setattr(jinn_layer.sys, "platform", "win32")
+    monkeypatch.setattr(
+        jinn_layer.shutil,
+        "which",
+        lambda name: node if name == "node.exe" else None,
+    )
+    resolution = jinn_layer.resolve_binary(plugin_dir=tmp_path)
+    monkeypatch.setattr(jinn_layer, "resolve_binary", lambda: resolution)
+    captured = []
+
+    jinn_layer.corpus_search(
+        r'needle & echo PWNED | more < input > output',
+        runner=lambda argv: (captured.append(argv) or (0, "[]")),
+    )
+
+    assert captured == [[
+        node,
+        str(
+            local_bin.parents[1]
+            / "@jinn-network"
+            / "jinn-layer"
+            / "dist"
+            / "bin"
+            / "jinn-layer.js"
+        ),
+        "corpus",
+        "search",
+        r'needle & echo PWNED | more < input > output',
+        "--limit",
+        "500",
+        "--json",
+    ]]
+
+
+def test_windows_rejects_cmd_development_override(tmp_path, monkeypatch):
+    _runtime_spec(tmp_path)
+    monkeypatch.setattr(jinn_layer.sys, "platform", "win32")
+    monkeypatch.setenv("JINN_LAYER_BIN", r"C:\developer\jinn-layer.cmd")
+
+    with pytest.raises(jinn_layer.LayerResolutionError, match="unsafe Windows"):
+        jinn_layer.resolve_binary(plugin_dir=tmp_path)
+
+
+def test_windows_never_falls_back_to_a_path_shim(tmp_path, monkeypatch):
+    _runtime_spec(tmp_path)
+    monkeypatch.setattr(jinn_layer.sys, "platform", "win32")
+    monkeypatch.delenv("JINN_LAYER_BIN", raising=False)
+
+    with pytest.raises(jinn_layer.LayerResolutionError, match="plugin-local"):
+        jinn_layer.resolve_binary(plugin_dir=tmp_path)
+
+
+def test_windows_installed_manifest_must_name_the_exact_js_entrypoint(
+    tmp_path, monkeypatch
+):
+    _runtime_spec(tmp_path)
+    local_bin = _executable(
+        tmp_path / "runtime" / "node_modules" / ".bin" / "jinn-layer.cmd"
+    )
+    package = local_bin.parents[1] / "@jinn-network" / "jinn-layer" / "package.json"
+    package.write_text(
+        json.dumps(
+            {
+                "name": "@jinn-network/jinn-layer",
+                "version": "0.1.0",
+                "bin": {"jinn-layer": "./dist/bin/not-the-layer.js"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(jinn_layer.sys, "platform", "win32")
+    monkeypatch.setattr(
+        jinn_layer.shutil,
+        "which",
+        lambda name: r"C:\Program Files\nodejs\node.exe"
+        if name == "node.exe"
+        else None,
+    )
+
+    with pytest.raises(jinn_layer.LayerResolutionError, match="entrypoint mismatch"):
+        jinn_layer.resolve_binary(plugin_dir=tmp_path)
 
 
 def test_environment_override_is_second_when_plugin_artifact_is_absent(

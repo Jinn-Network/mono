@@ -8,12 +8,23 @@ on:
       - 'packages/core/**'
       - 'packages/layer/**'
       - '.github/workflows/layer-npm-publish.yml'
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Published layer release tag, for example layer-v0.1.0'
+        required: true
+        type: string
+      release_sha:
+        description: 'Exact commit SHA referenced by the published release tag'
+        required: true
+        type: string
 
-# Trusted publishing (OIDC): register all three package/job combinations on
-# npmjs. No long-lived npm token is accepted by this workflow.
+# Trusted publishing (OIDC): register this workflow and the npm-publish
+# environment for all three packages. No long-lived npm token is accepted.
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: layer-packages-canary-${{ github.ref }}
@@ -22,16 +33,20 @@ concurrency:
 jobs:
   plugin-canary:
     name: Publish plugin canary
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      id-token: write
     runs-on: ubuntu-latest
     environment: npm-publish
     defaults:
       run:
         working-directory: packages/plugin
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
       - run: npm install -g npm@11.5.1
@@ -55,17 +70,21 @@ jobs:
 
   core-canary:
     name: Publish core canary
+    if: github.event_name == 'push'
     needs: plugin-canary
+    permissions:
+      contents: read
+      id-token: write
     runs-on: ubuntu-latest
     environment: npm-publish
     defaults:
       run:
         working-directory: packages/core
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
       - run: npm install -g npm@11.5.1
@@ -94,17 +113,21 @@ jobs:
 
   layer-canary:
     name: Publish layer canary
+    if: github.event_name == 'push'
     needs: core-canary
+    permissions:
+      contents: read
+      id-token: write
     runs-on: ubuntu-latest
     environment: npm-publish
     defaults:
       run:
         working-directory: packages/layer
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
       - run: npm install -g npm@11.5.1
@@ -135,3 +158,85 @@ jobs:
         run: |
           unset NODE_AUTH_TOKEN
           npm publish --access public --tag canary
+
+  stable-publish:
+    name: Publish exact stable package set
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'release' &&
+      startsWith(github.event.release.tag_name, 'layer-v'))
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.event.release.tag_name }}
+      RELEASE_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.release_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_sha || github.event.release.tag_name }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - name: Verify immutable release and exact stable pins
+        shell: bash
+        run: |
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          if [ "${ACTUAL_SHA}" != "${RELEASE_SHA}" ]; then
+            echo "::error::Checked out ${ACTUAL_SHA}, expected ${RELEASE_SHA}"
+            exit 1
+          fi
+          case "${RELEASE_TAG}" in
+            layer-v*) PUBLISH_VERSION="${RELEASE_TAG#layer-v}" ;;
+            *)
+              echo "::error::Stable layer releases require layer-v<semver>"
+              exit 1
+              ;;
+          esac
+          TAG_SHA="$(git ls-remote origin "refs/tags/${RELEASE_TAG}" "refs/tags/${RELEASE_TAG}^{}" | awk '$2 ~ /\^\{\}$/ { peeled=$1 } $2 !~ /\^\{\}$/ { direct=$1 } END { print peeled ? peeled : direct }')"
+          if [ -z "${TAG_SHA}" ] || [ "${TAG_SHA}" != "${RELEASE_SHA}" ]; then
+            echo "::error::Tag ${RELEASE_TAG} points at ${TAG_SHA:-<missing>}, expected ${RELEASE_SHA}"
+            exit 1
+          fi
+          node .github/scripts/verify-layer-stable-version.mjs \
+            --root . \
+            --version "${PUBLISH_VERSION}"
+      - run: npm install -g npm@11.16.0
+      - run: corepack enable
+      - run: yarn --cwd packages/plugin install --immutable
+      - run: yarn --cwd packages/plugin typecheck
+      - run: yarn --cwd packages/plugin test
+      - run: yarn --cwd packages/plugin build
+      - run: npm pack --dry-run
+        working-directory: packages/plugin
+      - run: yarn --cwd packages/core install --immutable
+      - run: yarn --cwd packages/core typecheck
+      - run: yarn --cwd packages/core test
+      - run: yarn --cwd packages/core build
+      - run: npm pack --dry-run
+        working-directory: packages/core
+      - run: yarn --cwd packages/layer install --immutable
+      - run: yarn --cwd packages/layer typecheck
+      - run: yarn --cwd packages/layer test
+      - run: yarn --cwd packages/layer build
+      - run: yarn --cwd packages/layer pack:smoke
+      - run: npm pack --dry-run
+        working-directory: packages/layer
+      - name: Publish plugin stable
+        working-directory: packages/plugin
+        run: |
+          unset NODE_AUTH_TOKEN
+          npm publish --access public --tag latest
+      - name: Publish core stable
+        working-directory: packages/core
+        run: |
+          unset NODE_AUTH_TOKEN
+          npm publish --access public --tag latest
+      - name: Publish layer stable
+        working-directory: packages/layer
+        run: |
+          unset NODE_AUTH_TOKEN
+          npm publish --access public --tag latest

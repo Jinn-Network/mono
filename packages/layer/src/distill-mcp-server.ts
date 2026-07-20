@@ -265,7 +265,7 @@ function findCapture(
 
 function resolveJinnLayerCommand(env: NodeJS.ProcessEnv = process.env): { command: string; prefixArgs: string[] } {
   if (env['JINN_LAYER_BIN']) return { command: env['JINN_LAYER_BIN'], prefixArgs: [] };
-  const sibling = fileURLToPath(new URL('./jinn-layer.js', import.meta.url));
+  const sibling = fileURLToPath(new URL('./bin/jinn-layer.js', import.meta.url));
   if (existsSync(sibling)) return { command: process.execPath, prefixArgs: [sibling] };
   return { command: 'jinn-layer', prefixArgs: [] };
 }

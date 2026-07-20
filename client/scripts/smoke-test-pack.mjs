@@ -96,6 +96,7 @@ function assertTarballCleanAndComplete() {
       entry.includes('/.env')
       || entry === 'package/dist/bin/jinn-layer.js'
       || entry === 'package/dist/bin/jinn-distill-mcp.js'
+      || entry.startsWith('package/plugins/local-trace-distiller')
     ));
   if (forbidden.length > 0) {
     console.error('smoke-test-pack: tarball includes local acceptance or secret-bearing state');

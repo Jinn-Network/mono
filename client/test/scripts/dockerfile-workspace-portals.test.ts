@@ -245,4 +245,33 @@ describe('client Docker build context', () => {
       }
     }
   });
+
+  it('prunes every non-runtime portal before relocating node_modules', () => {
+    const runtimeNames = new Set([
+      ...Object.keys(clientPackage.dependencies ?? {}),
+      ...Object.keys(clientPackage.optionalDependencies ?? {}),
+    ]);
+    const nonRuntimePortals = externalPortalPackages.filter(
+      ({ name }) => !runtimeNames.has(name),
+    );
+    expect(nonRuntimePortals.length).toBeGreaterThan(0);
+
+    const buildIndex = dockerfile.indexOf('RUN yarn build');
+    const pruneIndex = dockerfile.indexOf(
+      'RUN yarn workspaces focus @jinn-network/client --production',
+    );
+    const materializeIndex = dockerfile.indexOf(
+      'RUN node scripts/materialize-bundled-workspaces.mjs prepare',
+    );
+    const runtimeCopyIndex = dockerfile.indexOf(
+      'COPY --from=build /app/client/node_modules node_modules/',
+    );
+
+    expect(pruneIndex).toBeGreaterThan(buildIndex);
+    expect(materializeIndex).toBeGreaterThan(pruneIndex);
+    expect(runtimeCopyIndex).toBeGreaterThan(materializeIndex);
+    for (const { name } of nonRuntimePortals) {
+      expect(clientPackage.bundledDependencies ?? []).not.toContain(name);
+    }
+  });
 });

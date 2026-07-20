@@ -5,11 +5,12 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const layerRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = resolve(layerRoot, '../..');
@@ -97,6 +98,68 @@ try {
   ) {
     throw new Error(`unexpected contract payload: ${JSON.stringify(contract)}`);
   }
+
+  const installedServer = join(
+    runtimeDir,
+    'node_modules',
+    '@jinn-network',
+    'jinn-layer',
+    'dist',
+    'distill-mcp-server.js',
+  );
+  const installedCli = join(
+    runtimeDir,
+    'node_modules',
+    '@jinn-network',
+    'jinn-layer',
+    'dist',
+    'bin',
+    'jinn-layer.js',
+  );
+  run(
+    process.execPath,
+    [
+      '--input-type=module',
+      '--eval',
+      `
+        import { EventEmitter } from 'node:events';
+        import { runLocalDistill } from ${JSON.stringify(pathToFileURL(installedServer).href)};
+
+        class FakeChild extends EventEmitter {
+          stdout = new EventEmitter();
+          stderr = new EventEmitter();
+        }
+
+        const child = new FakeChild();
+        let spawned;
+        const result = runLocalDistill(
+          { capturesDir: '/captures', out: '/out' },
+          {
+            env: { PATH: '' },
+            spawn(command, args) {
+              spawned = { command, args };
+              queueMicrotask(() => {
+                child.stdout.emit('data', '{"distilled":true}\\n');
+                child.emit('close', 0);
+              });
+              return child;
+            },
+          },
+        );
+        await result;
+        if (spawned?.command !== process.execPath) {
+          throw new Error('installed MCP did not invoke Node directly: ' + JSON.stringify(spawned));
+        }
+        if (spawned?.args?.[0] !== ${JSON.stringify(realpathSync(installedCli))}) {
+          throw new Error('installed MCP did not resolve its co-installed CLI: ' + JSON.stringify(spawned));
+        }
+      `,
+    ],
+    {
+      cwd: runtimeDir,
+      env: { ...process.env, PATH: '' },
+    },
+  );
 
   const pickup = JSON.parse(
     invokeLayer(

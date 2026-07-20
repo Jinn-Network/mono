@@ -60,9 +60,13 @@ COPY client/tsconfig.json ./client/
 WORKDIR /app/client
 RUN yarn build
 
-# Portal links are valid only in the repository layout. Replace the bundled
-# core/plugin links with their publish-shaped runtime directories before
-# node_modules crosses into the final image.
+# Remove development-only portals (including the extracted layer) and their
+# generated .bin shims before node_modules leaves the repository layout.
+RUN yarn workspaces focus @jinn-network/client --production
+
+# Replace the remaining production core/plugin portals with their
+# publish-shaped runtime directories before node_modules crosses into the
+# final image.
 RUN node scripts/materialize-bundled-workspaces.mjs prepare
 
 # ── Runtime stage ────────────────────────────────────────────────────────────

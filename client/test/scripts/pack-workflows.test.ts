@@ -49,6 +49,9 @@ describe('packed client workflow coverage', () => {
     expect(smoke).toContain('doctor.status === 50');
     expect(smoke).toContain("entry === 'package/dist/bin/jinn-layer.js'");
     expect(smoke).toContain("entry === 'package/dist/bin/jinn-distill-mcp.js'");
+    expect(smoke).toContain(
+      "entry.startsWith('package/plugins/local-trace-distiller')",
+    );
     expect(smoke).not.toContain("'jinn-layer',");
   });
 });
