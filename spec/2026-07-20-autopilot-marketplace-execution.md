@@ -1,8 +1,10 @@
 # Marketplace-Backed Autopilot Execution
 
-- **Version:** 0.3 — v0.2: no new SolverType (live variant of `jinn-repo`; the only true delta
+- **Version:** 0.4 — v0.2: no new SolverType (live variant of `jinn-repo`; the only true delta
   is the grading oracle). v0.3: evaluators never push fixes; review repair decomposes into
-  verdict / revision round / mechanical-only host fixes.
+  verdict / revision round / mechanical-only host fixes. v0.4: Stage 1 decomposed into five
+  independently-landable parts along artifact boundaries; kill-test spike ordered before all
+  automation.
 - **Date:** 2026-07-20
 - **Author:** Jinn contributor (Ritsu) with Claude
 - **Status:** Proposed (design sketch — no implementation; issues to be filed per stage after
@@ -156,6 +158,25 @@ Inline reviewer fixes are invisible to the corpus; marketplace repair is trainin
    (review-pr as today). **Kill-test:** prove the existing harness produces mergeable PRs on a
    handful of `Low`-effort live issues at acceptable cost before building further. If it
    cannot, the rest is plumbing around a hollow core.
+
+   ### Stage 1 work decomposition
+
+   Each part boundary is an artifact boundary (task doc → solution envelope → verdict envelope
+   → PR), so every part builds and validates against fixtures of its neighbors. Ordered by
+   information value, not pipeline order — creation automation comes last because
+   `jinn tasks submit --spec-file` already covers creation manually:
+
+   | Part | Deliverable | Shape | Depends | Validation |
+   |---|---|---|---|---|
+   | 0 — Spec plumbing | `jinn-repo` discriminated union (`merged-pr \| live-issue`), SDK payloads, registry wiring | `feat` (Small) | — | hand-written live-variant spec posts via CLI, claimable on Anvil |
+   | 1 — Implementation kill-test | solver context shaping + ~5 real `Low`-effort issues hand-submitted; measure patch quality and cost | `spike` | 0 | N/5 mergeable-quality envelopes at acceptable cost → go; else stop |
+   | 2 — Evaluation | thin mechanical live-evaluator (applies, typecheck, policy-scoped tests; no gold) | `feat` (Moderate) | 0 | Anvil e2e: task → solution → verdict → counters increment |
+   | 3 — Delivery→PR bridge | envelope → apply → push → draft PR + `engine:review` + evidence; stall-on-conflict | `feat` (Moderate) | 0 | synthetic envelope → real draft PR |
+   | 4 — Creation automation | ready-filter → `TaskSource`, execution-mode switch, snapshot / cancel / re-post, launch + escrow ops | `feat` (Moderate) | 0; gated on 1–3 | labeled ready issue → task; unlabel/edit → cancel + re-post |
+
+   Parts 2 and 3 are parallel. After Part 1, the total spend is one small schema PR plus one
+   spike — and the go/no-go answer for the whole proposal is in hand; everything expensive sits
+   behind the finding.
 2. **Stage 2 — review through verdicts.** Evaluator role activated; verdict bridge drives the
    review step; local review-pr retires.
 3. **Stage 3 — open the fleet.** Community operators join. (This is where the
