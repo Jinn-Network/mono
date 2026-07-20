@@ -35,6 +35,35 @@ const MAX_PROBLEM_CHARS = 1500;
 /** Cap the compressed solver trace (§8, #1472) so a long run does not blow the prompt. */
 const MAX_TRACE_CHARS = 4000;
 
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function stringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const strings = value.filter((item): item is string =>
+    typeof item === 'string' && item.length > 0);
+  return strings.length === value.length ? strings : undefined;
+}
+
+function generatorModel(value: unknown): BridgeEvidence['generatorModel'] {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const id = nonEmptyString(raw['id']);
+  const source = raw['source'];
+  if (!id || (source !== 'stream' && source !== 'config')) return undefined;
+  const provider = nonEmptyString(raw['provider']);
+  const openWeights = typeof raw['openWeights'] === 'boolean'
+    ? raw['openWeights']
+    : undefined;
+  return {
+    id,
+    source,
+    ...(provider ? { provider } : {}),
+    ...(openWeights !== undefined ? { openWeights } : {}),
+  };
+}
+
 export interface EvidenceFetcherPorts {
   /** Fetch + JSON-parse an IPFS object by CID (autonolas gateway in production). */
   ipfs: (cid: string) => Promise<any>;
@@ -130,11 +159,52 @@ export function createEvidenceFetcher(
       .replace(/\s+/g, ' ')
       .trim()
       .slice(0, MAX_PROBLEM_CHARS);
-    const repo = repoFromInstanceId(ref.instanceId) ?? undefined;
+    const taskProvenance = solutionEnv?.task ?? verdictEnv?.task ?? {};
+    const spec = taskDoc?.spec ?? {};
+    const instanceId =
+      nonEmptyString(taskProvenance?.instanceId)
+      ?? nonEmptyString(spec?.instance_id)
+      ?? ref.instanceId;
+    const repo =
+      nonEmptyString(taskProvenance?.repo)
+      ?? nonEmptyString(spec?.repo)
+      ?? repoFromInstanceId(instanceId)
+      ?? undefined;
+    const baseCommit =
+      nonEmptyString(taskProvenance?.baseCommit)
+      ?? nonEmptyString(spec?.base_commit);
+    const taskCreatedAt =
+      Number.isInteger(taskProvenance?.createdAt) && taskProvenance.createdAt >= 0
+        ? taskProvenance.createdAt as number
+        : undefined;
+    const model = generatorModel(solutionEnv?.executor?.generatorModel);
+    const distributionClass =
+      solutionEnv?.distributionClass === 'open'
+      || solutionEnv?.distributionClass === 'restricted-tos'
+      || solutionEnv?.distributionClass === 'unknown'
+        ? solutionEnv.distributionClass
+        : undefined;
+    const failToPass =
+      stringArray(spec?.fail_to_pass)
+      ?? stringArray(spec?.FAIL_TO_PASS);
+    const passToPass =
+      stringArray(spec?.pass_to_pass)
+      ?? stringArray(spec?.PASS_TO_PASS);
+    const evalSemanticsVersion =
+      nonEmptyString(spec?.evalSemanticsVersion)
+      ?? nonEmptyString(spec?.eval_semantics_version);
     return {
       taskSummary: problem || ref.instanceId,
       patch: patch.slice(0, MAX_PATCH_CHARS),
       ...(repo ? { repo } : {}),
+      ...(baseCommit ? { baseCommit } : {}),
+      ...(taskCreatedAt !== undefined ? { taskCreatedAt } : {}),
+      ...(instanceId ? { instanceId } : {}),
+      ...(model ? { generatorModel: model } : {}),
+      ...(distributionClass ? { distributionClass } : {}),
+      ...(failToPass !== undefined ? { failToPass } : {}),
+      ...(passToPass !== undefined ? { passToPass } : {}),
+      ...(evalSemanticsVersion ? { evalSemanticsVersion } : {}),
       ...(stepTrace ? { stepTrace } : {}),
     };
   };

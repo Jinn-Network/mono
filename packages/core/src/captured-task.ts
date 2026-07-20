@@ -23,10 +23,16 @@ export const CapturedTaskSchema = z.strictObject({
   session: z.strictObject({
     sessionId: z.string().min(1).max(128),
     capturedAt: z.iso.datetime(),
+    kind: z.enum(['user', 'host-internal']).optional(),
+    parentSessionId: z.string().min(1).max(128).optional(),
   }),
   task: z.strictObject({
     summary: z.string().min(1),
     distributionTags: z.array(z.string().min(1)).min(1),
+    repositorySlug: z.string().min(1).optional(),
+    baseCommit: z.string().min(1).optional(),
+    createdAt: z.number().int().nonnegative().optional(),
+    instanceId: z.string().min(1).optional(),
   }),
   environment: z.strictObject({
     harness: z.strictObject({
@@ -35,11 +41,26 @@ export const CapturedTaskSchema = z.strictObject({
     }),
     model: z.string().min(1),
     tools: z.array(z.string().min(1)),
+    skillsLoadout: z.array(z.string().min(1)).optional(),
+    generatorModel: z.strictObject({
+      id: z.string().min(1),
+      provider: z.string().min(1).optional(),
+      openWeights: z.boolean().optional(),
+      source: z.enum(['stream', 'config']),
+    }).optional(),
+    distributionClass: z.enum(['open', 'restricted-tos', 'unknown']).optional(),
+    verifier: z.strictObject({
+      type: z.enum(['f2p-p2p', 'command', 'none']),
+      failToPass: z.array(z.string().min(1)).default([]),
+      passToPass: z.array(z.string().min(1)).default([]),
+      evalSemanticsVersion: z.string().min(1).optional(),
+    }).optional(),
   }),
   steps: z.array(z.strictObject({
     spanId: z.string().min(1),
     parentSpanId: z.string().min(1).nullable(),
     name: z.string().min(1),
+    kind: z.enum(['jinn.agent_turn', 'jinn.tool_call']).optional(),
     startTimeUnixNano: UnixNanoSchema,
     endTimeUnixNano: UnixNanoSchema,
     attributes: z.record(z.string(), z.unknown()),
@@ -59,6 +80,14 @@ export const CapturedTaskSchema = z.strictObject({
     }).optional(),
     usdEstimate: z.string().regex(/^\d+(\.\d+)?$/).optional(),
   }),
+  attemptGroup: z.strictObject({
+    groupId: z.string().min(1),
+    attemptId: z.string().min(1),
+    relatedAttemptRefs: z.array(z.string().min(1)).default([]),
+    groupSize: z.number().int().positive().optional(),
+    nPass: z.number().int().nonnegative().optional(),
+    nFail: z.number().int().nonnegative().optional(),
+  }).optional(),
   provenance: z.enum(['contributed', 'imported']).default('contributed'),
 });
 export type CapturedTask = z.infer<typeof CapturedTaskSchema>;

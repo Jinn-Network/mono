@@ -708,7 +708,7 @@ function renderRedactionsByField(redactions: ScrubRedaction[]): string[] {
 
 function renderScrubReport(report: ScrubReport, full: boolean): string {
   const env = report.envelope;
-  const truncated = env.steps.reduce((n, s) => n + (s.truncatedKeys?.length ?? 0), 0);
+  const truncated = env.trajectory.reduce((n, s) => n + (s.truncatedKeys?.length ?? 0), 0);
   const distinctFields = new Set(report.redactions.map((r) => r.field)).size;
 
   const lines = [
@@ -717,8 +717,8 @@ function renderScrubReport(report: ScrubReport, full: boolean): string {
     `  tags     ${env.task.distributionTags.join(', ')}`,
     `  harness  ${env.environment.harness.name}@${env.environment.harness.version}`,
     `  model    ${env.environment.model}`,
-    `  outcome  ${env.outcome.status} / tier ${env.outcome.verifiabilityTier}`,
-    `  steps    ${env.steps.length}`,
+    `  outcome  ${env.outcome.status} / strength ${env.outcome.verificationStrength}`,
+    `  steps    ${env.trajectory.length}`,
     `  tools    ${env.environment.tools.length > 0 ? env.environment.tools.join(', ') : '(none)'}`,
     '',
   ];
@@ -745,7 +745,7 @@ function renderScrubReport(report: ScrubReport, full: boolean): string {
 
   // One short line per step — no attributes dump.
   lines.push('', 'steps:');
-  env.steps.forEach((s, i) => {
+  env.trajectory.forEach((s, i) => {
     const parts = [`${s.redactedKeys.length} redacted`];
     const tk = s.truncatedKeys?.length ?? 0;
     if (tk > 0) parts.push(`${tk} truncated`);

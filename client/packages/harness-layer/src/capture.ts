@@ -88,6 +88,20 @@ export interface PendingEnvelope {
   kind: typeof PENDING_ENVELOPE_KIND;
   /** Every TraceEnvelopeV0 field except `consent`, scrubbed and fitted. */
   draft: Omit<TraceEnvelopeV0, 'consent'>;
+  /** Canonical Episode-only facts that the frozen trace draft cannot carry. */
+  episodeFacts: {
+    session: Pick<CapturedTask['session'], 'kind' | 'parentSessionId'>;
+    task: Pick<
+      CapturedTask['task'],
+      'repositorySlug' | 'baseCommit' | 'createdAt' | 'instanceId'
+    >;
+    environment: Pick<
+      CapturedTask['environment'],
+      'skillsLoadout' | 'generatorModel' | 'distributionClass' | 'verifier'
+    >;
+    trajectoryKinds: Array<CapturedTask['steps'][number]['kind']>;
+    attemptGroup?: CapturedTask['attemptGroup'];
+  };
   /** The redaction diff for the local preview. NEVER persisted. */
   redactions: ScrubRedaction[];
 }
@@ -338,9 +352,19 @@ export async function capture(
 
   const draft: PendingEnvelope['draft'] = {
     schemaVersion: TRACE_ENVELOPE_SCHEMA_VERSION,
-    session: task.session,
-    task: { ...task.task, summary: scrubbedTaskSummary.trim() },
-    environment: task.environment,
+    session: {
+      sessionId: task.session.sessionId,
+      capturedAt: task.session.capturedAt,
+    },
+    task: {
+      summary: scrubbedTaskSummary.trim(),
+      distributionTags: task.task.distributionTags,
+    },
+    environment: {
+      harness: task.environment.harness,
+      model: task.environment.model,
+      tools: task.environment.tools,
+    },
     steps: draftSteps,
     outcome: {
       ...task.outcome,
@@ -358,5 +382,41 @@ export async function capture(
     consent: { contributionConsent: true, scrubCompleted: true },
   });
 
-  return { kind: PENDING_ENVELOPE_KIND, draft, redactions };
+  return {
+    kind: PENDING_ENVELOPE_KIND,
+    draft,
+    episodeFacts: {
+      session: {
+        ...(task.session.kind ? { kind: task.session.kind } : {}),
+        ...(task.session.parentSessionId
+          ? { parentSessionId: task.session.parentSessionId }
+          : {}),
+      },
+      task: {
+        ...(task.task.repositorySlug
+          ? { repositorySlug: task.task.repositorySlug }
+          : {}),
+        ...(task.task.baseCommit ? { baseCommit: task.task.baseCommit } : {}),
+        ...(task.task.createdAt !== undefined ? { createdAt: task.task.createdAt } : {}),
+        ...(task.task.instanceId ? { instanceId: task.task.instanceId } : {}),
+      },
+      environment: {
+        ...(task.environment.skillsLoadout
+          ? { skillsLoadout: task.environment.skillsLoadout }
+          : {}),
+        ...(task.environment.generatorModel
+          ? { generatorModel: task.environment.generatorModel }
+          : {}),
+        ...(task.environment.distributionClass
+          ? { distributionClass: task.environment.distributionClass }
+          : {}),
+        ...(task.environment.verifier
+          ? { verifier: task.environment.verifier }
+          : {}),
+      },
+      trajectoryKinds: retained.map(({ step }) => step.kind),
+      ...(task.attemptGroup ? { attemptGroup: task.attemptGroup } : {}),
+    },
+    redactions,
+  };
 }

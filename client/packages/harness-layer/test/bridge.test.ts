@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { RETRIEVAL_VISIBLE_TAG } from '@jinn-network/plugin';
+import {
+  EPISODE_SCHEMA_VERSION,
+  EpisodeV1WriteSchema,
+  RETRIEVAL_VISIBLE_TAG,
+} from '@jinn-network/plugin';
 import {
   repoFromInstanceId,
   bridgeAttempts,
@@ -83,6 +87,50 @@ describe('toBridgeCapturedTask (both polarities, D10)', () => {
         expect(t.task.distributionTags).not.toContain(RETRIEVAL_VISIBLE_TAG);
       }
     }
+  });
+
+  it('projects every available post-training tuple fact into the captured task', () => {
+    const t = toBridgeCapturedTask(ref(), {
+      ...ev,
+      baseCommit: 'a'.repeat(40),
+      taskCreatedAt: 1_752_000_000,
+      instanceId: 'django__django-11333',
+      generatorModel: {
+        id: 'claude-sonnet-4-6',
+        provider: 'anthropic',
+        source: 'stream',
+      },
+      distributionClass: 'restricted-tos',
+      failToPass: ['tests/test_widget.py::test_regression'],
+      passToPass: ['tests/test_widget.py::test_existing'],
+      evalSemanticsVersion: '4',
+    }, NOW);
+
+    expect(t.task).toMatchObject({
+      repositorySlug: 'django/django',
+      baseCommit: 'a'.repeat(40),
+      createdAt: 1_752_000_000,
+      instanceId: 'django__django-11333',
+    });
+    expect(t.environment).toMatchObject({
+      generatorModel: {
+        id: 'claude-sonnet-4-6',
+        source: 'stream',
+      },
+      distributionClass: 'restricted-tos',
+      verifier: {
+        type: 'f2p-p2p',
+        failToPass: ['tests/test_widget.py::test_regression'],
+        passToPass: ['tests/test_widget.py::test_existing'],
+        evalSemanticsVersion: '4',
+      },
+    });
+    expect(t.attemptGroup).toEqual({
+      groupId: 'django__django-11333',
+      attemptId: ref().requestId,
+      relatedAttemptRefs: [],
+    });
+    expect(t.steps.every((step) => step.kind === 'jinn.tool_call')).toBe(true);
   });
 });
 
@@ -216,7 +264,7 @@ describe('buildBridgeEvidencePublisher (reuses capture→publish at layer-2 alti
     return { deps, artifacts };
   }
 
-  it('publishes a jinn.trace-envelope.v0 with the patch scrubbed at layer-2 (secret gone, prose kept)', async () => {
+  it('publishes a canonical jinn.episode.v1 with the patch scrubbed at layer-2 (secret gone, prose kept)', async () => {
     const { deps, artifacts } = publishDeps();
     const publisher = buildBridgeEvidencePublisher(deps);
     const task = toBridgeCapturedTask(
@@ -227,10 +275,10 @@ describe('buildBridgeEvidencePublisher (reuses capture→publish at layer-2 alti
     const out = await publisher(task, ref());
     expect(out.envelopeRef).toBe('bafyEnv');
 
-    const traceUpload = artifacts.find((a) => a.artifactType === 'jinn.trace-envelope.v0');
-    expect(traceUpload).toBeTruthy();
-    const env = parseTraceEnvelopeV0(traceUpload!.payload);
-    const patchStep = env.steps.find((s) => s.name === 'tool:apply_patch');
+    const episodeUpload = artifacts.find((a) => a.artifactType === EPISODE_SCHEMA_VERSION);
+    expect(episodeUpload).toBeTruthy();
+    const env = EpisodeV1WriteSchema.parse(episodeUpload!.payload);
+    const patchStep = env.trajectory.find((s) => s.name === 'tool:apply_patch');
     const patchVal = String(patchStep!.attributes.patch);
     expect(patchVal).not.toContain('wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'); // secret redacted
     expect(patchVal).toContain('use this token'); // ordinary prose preserved (layer-2 altitude)
@@ -250,9 +298,9 @@ describe('buildBridgeEvidencePublisher (reuses capture→publish at layer-2 alti
     );
     await publisher(task, ref());
 
-    const traceUpload = artifacts.find((a) => a.artifactType === 'jinn.trace-envelope.v0');
-    const env = parseTraceEnvelopeV0(traceUpload!.payload);
-    const traceStep = env.steps.find((s) => s.name === 'solver:trajectory')!;
+    const episodeUpload = artifacts.find((a) => a.artifactType === EPISODE_SCHEMA_VERSION);
+    const env = EpisodeV1WriteSchema.parse(episodeUpload!.payload);
+    const traceStep = env.trajectory.find((s) => s.name === 'solver:trajectory')!;
     const traceVal = String(traceStep.attributes.trace);
     expect(traceVal).not.toContain('wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'); // secret redacted
     expect(traceVal).toContain('edit models.py'); // ordinary prose preserved (layer-2 altitude)
@@ -266,9 +314,9 @@ describe('buildBridgeEvidencePublisher (reuses capture→publish at layer-2 alti
     const out = await publisher(task, ref());
     expect(out.envelopeRef).toBe('bafyEnv');
 
-    const traceUpload = artifacts.find((a) => a.artifactType === 'jinn.trace-envelope.v0');
-    const env = parseTraceEnvelopeV0(traceUpload!.payload);
-    const patchStep = env.steps.find((s) => s.name === 'tool:apply_patch')!;
+    const episodeUpload = artifacts.find((a) => a.artifactType === EPISODE_SCHEMA_VERSION);
+    const env = EpisodeV1WriteSchema.parse(episodeUpload!.payload);
+    const patchStep = env.trajectory.find((s) => s.name === 'tool:apply_patch')!;
     const stored = String(patchStep.attributes.patch);
     expect(stored.length).toBeLessThan(bigPatch.length); // truncated to fit the cap
     expect(patchStep.truncatedKeys ?? []).toContain('patch'); // receipted, never silent

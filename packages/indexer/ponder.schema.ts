@@ -833,11 +833,11 @@ export const verdictEnvelopeMeta = onchainTable(
 
 // ── CaptureEnvelopeMeta ──────────────────────────────────────────────────────
 /**
- * Envelope-sourced metadata for a published capture (harness trace), populated
+ * Envelope-sourced metadata for a published capture, populated
  * by the IPFS enrichment pass (issue #1314): for each indexed `capture:<cid>`
- * MetadataSet event, fetch the wrapper envelope body, then the
- * `jinn.trace-envelope.v0` artifact it carries, and project the fields the
- * distribution signal reads: distribution tags, provenance, contributor.
+ * MetadataSet event, fetch the wrapper envelope body, then its canonical
+ * `jinn.episode.v1` artifact (or frozen `jinn.trace-envelope.v0` compatibility
+ * artifact), and project the fields the distribution signal and corpus read.
  *
  * Seeds (`provenance: 'imported'`) are stored but EXCLUDED from the signal's
  * default counts — the API filters on this column (spec §7).
@@ -859,13 +859,19 @@ export const captureEnvelopeMeta = onchainTable(
     agentId: t.text().notNull(),
     /** Contributor identity: participant.safeAddress from the wrapper envelope. */
     contributor: t.text().notNull().default(''),
-    /** Scrubbed one-line task summary from the trace envelope. */
+    /** Scrubbed one-line task summary from the evidence payload. */
     taskSummary: t.text().notNull().default(''),
     /** JSON.stringify(task.distributionTags) — first tag is the primary (v0 cluster key). */
     tagsJson: t.text().notNull().default('[]'),
+    /** task.repositorySlug — retained for tuple joins and corpus attribution (#1842). */
+    repositorySlug: t.text().notNull().default(''),
+    /** Authored outcome/seed synthesis retained as record metadata (#1842). */
+    synthesis: t.text().notNull().default(''),
+    /** Named W2 retrieval-visibility projection; false for substrate-only records. */
+    retrievalVisible: t.boolean().notNull().default(false),
     /** 'contributed' | 'imported' — the signal's seed-exclusion filter column. */
     provenance: t.text().notNull().default('contributed'),
-    /** outcome.verifiabilityTier from the trace envelope. */
+    /** Compatibility column: Episode verificationStrength or trace verifiabilityTier. */
     verifiabilityTier: t.text().notNull().default(''),
     /** environment.harness — "<name> <version>", empty when absent. Corpus detail (#1406). */
     harness: t.text().notNull().default(''),
@@ -873,7 +879,7 @@ export const captureEnvelopeMeta = onchainTable(
     model: t.text().notNull().default(''),
     /** JSON.stringify(environment.tools) — tool names only. Corpus detail (#1406). */
     toolsJson: t.text().notNull().default('[]'),
-    /** steps.length — the trace's step count. Corpus index + detail (#1406). */
+    /** trajectory.length / legacy steps.length. Corpus index + detail (#1406). */
     stepCount: t.integer().notNull().default(0),
     /** Transaction hash of the MetadataSet anchor event — the on-chain anchor link (#1406). */
     anchorTx: t.hex().notNull().default('0x'),

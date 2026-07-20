@@ -935,17 +935,26 @@ export function parseEnvelopeLite(body: unknown): EnvelopeLite | null {
 // standalone enrichment worker shares one definition with this handler and they
 // cannot drift. They are imported + re-exported at the top of this file.
 
-// ── Capture-envelope signal parsers (#1314) ──────────────────────────────────
-// Dep-free defensive parsers for the two-hop capture enrichment: the wrapper
-// envelope (capture:<cid>) carries a `jinn.trace-envelope.v0` artifact whose
-// IPFS body (donation encoding, base64 `data`) is the trace envelope holding
-// the fields the distribution signal reads.
+// ── Capture-envelope signal parsers (#1314, #1842) ───────────────────────────
+// Dep-free defensive parsers for the two-hop capture enrichment. New wrappers
+// carry canonical `jinn.episode.v1` evidence; `jinn.trace-envelope.v0` remains
+// frozen read compatibility. Artifact IPFS bodies may use the donation
+// encoding (base64 `data`) or expose the evidence payload directly.
+
+const EPISODE_ARTIFACT_TYPE = 'jinn.episode.v1' as const;
+const TRACE_ENVELOPE_ARTIFACT_TYPE = 'jinn.trace-envelope.v0' as const;
+const RETRIEVAL_VISIBLE_TAG = 'retrieval:visible.v1' as const;
+type EvidenceArtifactType =
+  | typeof EPISODE_ARTIFACT_TYPE
+  | typeof TRACE_ENVELOPE_ARTIFACT_TYPE;
 
 export interface CaptureWrapperLite {
   /** participant.safeAddress — the contributor identity. */
   contributor: string;
-  /** IPFS cid of the jinn.trace-envelope.v0 artifact. */
-  traceArtifactCid: string;
+  /** Canonical episode for new publications; trace-envelope for read compatibility. */
+  artifactType: EvidenceArtifactType;
+  /** IPFS cid of the evidence artifact. */
+  evidenceArtifactCid: string;
 }
 
 export function parseCaptureWrapperLite(body: unknown): CaptureWrapperLite | null {
@@ -960,15 +969,19 @@ export function parseCaptureWrapperLite(body: unknown): CaptureWrapperLite | nul
   const contributor = safeStr(participantObj['safeAddress']);
 
   if (!Array.isArray(b['artifacts'])) return null;
-  for (const artifact of b['artifacts'] as unknown[]) {
-    if (artifact === null || typeof artifact !== 'object') continue;
-    const a = artifact as Record<string, unknown>;
-    if (a['artifactType'] !== 'jinn.trace-envelope.v0') continue;
-    if (!Array.isArray(a['sources'])) continue;
-    for (const source of a['sources'] as unknown[]) {
-      if (source === null || typeof source !== 'object') continue;
-      const cid = safeStr((source as Record<string, unknown>)['cid']);
-      if (cid) return { contributor, traceArtifactCid: cid };
+  const artifacts = b['artifacts'] as unknown[];
+  // Prefer the canonical payload even when a transitional wrapper carries
+  // both types and happens to list the legacy trace first.
+  for (const artifactType of [EPISODE_ARTIFACT_TYPE, TRACE_ENVELOPE_ARTIFACT_TYPE]) {
+    for (const artifact of artifacts) {
+      if (artifact === null || typeof artifact !== 'object') continue;
+      const a = artifact as Record<string, unknown>;
+      if (a['artifactType'] !== artifactType || !Array.isArray(a['sources'])) continue;
+      for (const source of a['sources'] as unknown[]) {
+        if (source === null || typeof source !== 'object') continue;
+        const cid = safeStr((source as Record<string, unknown>)['cid']);
+        if (cid) return { contributor, artifactType, evidenceArtifactCid: cid };
+      }
     }
   }
   return null;
@@ -978,7 +991,14 @@ export interface TraceEnvelopeSignalLite {
   taskSummary: string;
   /** JSON.stringify(task.distributionTags) — '[]' when absent. */
   tagsJson: string;
+  /** task.repositorySlug — '' when absent. */
+  repositorySlug: string;
+  /** Authored outcome/seed synthesis — '' when absent. */
+  synthesis: string;
+  /** Canonical named W2 projection; legacy traces derive it from their tag. */
+  retrievalVisible: boolean;
   provenance: 'contributed' | 'imported';
+  /** Compatibility projection of Episode verificationStrength / trace verifiabilityTier. */
   verifiabilityTier: string;
   /** environment.harness as "<name> <version>", '' when absent. Corpus detail (#1406). */
   harness: string;
@@ -994,44 +1014,68 @@ export function parseTraceEnvelopeSignalLite(body: unknown): TraceEnvelopeSignal
   if (body === null || typeof body !== 'object') return null;
   const b = body as Record<string, unknown>;
 
-  // The artifact body is the donation encoding: { data: base64(trace JSON) }.
-  // Tolerate a raw trace-envelope body too (direct gateway reads).
-  let trace: Record<string, unknown> = b;
+  // The artifact body may be the donation encoding:
+  // { data: base64(evidence JSON) }. Tolerate a raw evidence body too.
+  let evidence: Record<string, unknown> = b;
   const data = b['data'];
   if (typeof data === 'string' && data) {
     try {
-      trace = JSON.parse(Buffer.from(data, 'base64').toString('utf-8')) as Record<string, unknown>;
+      evidence = JSON.parse(
+        Buffer.from(data, 'base64').toString('utf-8'),
+      ) as Record<string, unknown>;
     } catch {
       return null;
     }
   }
-  if (trace === null || typeof trace !== 'object') return null;
+  if (evidence === null || typeof evidence !== 'object') return null;
+  const isEpisode = evidence['schemaVersion'] === EPISODE_ARTIFACT_TYPE;
 
-  const task = trace['task'];
+  const task = evidence['task'];
   const taskObj: Record<string, unknown> =
     task !== null && typeof task === 'object' ? (task as Record<string, unknown>) : {};
   const taskSummary = safeStr(taskObj['summary']);
+  const repositorySlug = safeStr(taskObj['repositorySlug']);
 
   let tagsJson = '[]';
+  let distributionTags: string[] = [];
   if (Array.isArray(taskObj['distributionTags'])) {
     try {
-      tagsJson = JSON.stringify(
-        (taskObj['distributionTags'] as unknown[]).filter((t) => typeof t === 'string'),
-      );
+      distributionTags = (taskObj['distributionTags'] as unknown[])
+        .filter((t): t is string => typeof t === 'string');
+      tagsJson = JSON.stringify(distributionTags);
     } catch {
       tagsJson = '[]';
+      distributionTags = [];
     }
   }
 
-  const provenance = trace['provenance'] === 'imported' ? 'imported' : 'contributed';
+  const provenance = evidence['provenance'] === 'imported' ? 'imported' : 'contributed';
 
-  const outcome = trace['outcome'];
+  const outcome = evidence['outcome'];
   const outcomeObj: Record<string, unknown> =
     outcome !== null && typeof outcome === 'object' ? (outcome as Record<string, unknown>) : {};
-  const verifiabilityTier = safeStr(outcomeObj['verifiabilityTier']);
+  const verifiabilityTier = safeStr(
+    outcomeObj[isEpisode ? 'verificationStrength' : 'verifiabilityTier'],
+  );
+
+  const stepsRaw = evidence[isEpisode ? 'trajectory' : 'steps'];
+  const steps = Array.isArray(stepsRaw) ? stepsRaw : [];
+  let synthesis = safeStr(outcomeObj['summary']);
+  if (!synthesis) {
+    for (const step of steps) {
+      if (step === null || typeof step !== 'object') continue;
+      const attributes = (step as Record<string, unknown>)['attributes'];
+      if (attributes === null || typeof attributes !== 'object') continue;
+      synthesis = safeStr((attributes as Record<string, unknown>)['seed.synthesis']);
+      if (synthesis) break;
+    }
+  }
+  const retrievalVisible =
+    evidence['retrievalVisible'] === true
+    || distributionTags.includes(RETRIEVAL_VISIBLE_TAG);
 
   // ── Detail-view fields (#1406): environment fingerprint + step count. ──
-  const environment = trace['environment'];
+  const environment = evidence['environment'];
   const envObj: Record<string, unknown> =
     environment !== null && typeof environment === 'object'
       ? (environment as Record<string, unknown>)
@@ -1059,9 +1103,21 @@ export function parseTraceEnvelopeSignalLite(body: unknown): TraceEnvelopeSignal
     }
   }
 
-  const stepCount = Array.isArray(trace['steps']) ? (trace['steps'] as unknown[]).length : 0;
+  const stepCount = steps.length;
 
-  return { taskSummary, tagsJson, provenance, verifiabilityTier, harness, model, toolsJson, stepCount };
+  return {
+    taskSummary,
+    tagsJson,
+    repositorySlug,
+    synthesis,
+    retrievalVisible,
+    provenance,
+    verifiabilityTier,
+    harness,
+    model,
+    toolsJson,
+    stepCount,
+  };
 }
 
 // ── IdentityRegistry: MetadataSet ────────────────────────────────────────────
@@ -1600,9 +1656,9 @@ export async function handleMetadataSet({
 
     // ── Capture envelope enrichment → captureEnvelopeMeta (#1314) ──────────
     // Only for capture envelopes (kind === 'capture'). Two-hop: the wrapper
-    // envelope body names the jinn.trace-envelope.v0 artifact; the artifact
-    // body carries the distribution tags / provenance / summary the signal
-    // reads. captureEnvelopeMeta is optional for backward compat.
+    // envelope body names the canonical jinn.episode.v1 artifact (or a frozen
+    // trace-envelope.v0 compatibility artifact); its body carries the signal
+    // and corpus metadata. captureEnvelopeMeta is optional for backward compat.
     if (envelopeKey.kind === 'capture' && enrichCaptures && captureEnvelopeMeta) {
       try {
         const wrapperBody = await fetchIpfsJson(ipfsGateway, envelopeKey.cid, {
@@ -1611,7 +1667,7 @@ export async function handleMetadataSet({
         });
         const wrapper = parseCaptureWrapperLite(wrapperBody);
         if (wrapper) {
-          const artifactBody = await fetchIpfsJson(ipfsGateway, wrapper.traceArtifactCid, {
+          const artifactBody = await fetchIpfsJson(ipfsGateway, wrapper.evidenceArtifactCid, {
             timeoutMs: 5000,
             fetchImpl,
           });
@@ -1630,6 +1686,9 @@ export async function handleMetadataSet({
                 contributor: wrapper.contributor,
                 taskSummary: signalMeta.taskSummary,
                 tagsJson: signalMeta.tagsJson,
+                repositorySlug: signalMeta.repositorySlug,
+                synthesis: signalMeta.synthesis,
+                retrievalVisible: signalMeta.retrievalVisible,
                 provenance: signalMeta.provenance,
                 verifiabilityTier: signalMeta.verifiabilityTier,
                 harness: signalMeta.harness,
@@ -1649,6 +1708,9 @@ export async function handleMetadataSet({
                     contributor: wrapper.contributor,
                     taskSummary: signalMeta.taskSummary,
                     tagsJson: signalMeta.tagsJson,
+                    repositorySlug: signalMeta.repositorySlug,
+                    synthesis: signalMeta.synthesis,
+                    retrievalVisible: signalMeta.retrievalVisible,
                     provenance: signalMeta.provenance,
                     verifiabilityTier: signalMeta.verifiabilityTier,
                     harness: signalMeta.harness,
@@ -1667,6 +1729,9 @@ export async function handleMetadataSet({
                   contributor: row.contributor,
                   taskSummary: row.taskSummary,
                   tagsJson: row.tagsJson,
+                  repositorySlug: row.repositorySlug,
+                  synthesis: row.synthesis,
+                  retrievalVisible: row.retrievalVisible,
                   provenance: row.provenance,
                   verifiabilityTier: row.verifiabilityTier,
                   harness: row.harness,

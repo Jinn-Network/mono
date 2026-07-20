@@ -2,7 +2,7 @@
  * @jinn-network/harness-layer — embeddable harness-layer surface.
  *
  * v0 exposes the corpus consume path (search/get), the frozen layer-1 trace
- * envelope schema, the capture path (scrub + preview), and the publish path
+ * envelope read-compat schema, the capture path (scrub + preview), and the publish path
  * (consent conversion + anchor + contribution ledger).
  */
 
@@ -52,7 +52,9 @@ export {
 export {
   publish,
   PublishLedgerError,
+  toPublishedEpisode,
   toTraceEnvelope,
+  EPISODE_ARTIFACT_TYPE,
   TRACE_ENVELOPE_ARTIFACT_TYPE,
   type HarnessPublishDeps,
   type PublishedResult,

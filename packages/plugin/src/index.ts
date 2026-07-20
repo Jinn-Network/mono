@@ -8,11 +8,14 @@ export {
   EpisodeV1WriteSchema,
   SessionActivityFactsSchema,
   SessionActivityFactsWriteSchema,
+  VERIFICATION_STRENGTHS,
+  VerificationStrengthSchema,
 } from './schemas/episode.js';
 export type {
   EpisodeV1,
   EpisodeV1Write,
   SessionActivityFacts,
+  VerificationStrength,
 } from './schemas/episode.js';
 export {
   CONTRIBUTION_CANDIDATE_SCHEMA_VERSION,

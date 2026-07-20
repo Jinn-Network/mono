@@ -103,7 +103,12 @@ function toCapturedTask(episode: SeedEpisode, now: Date, supersedes: string | un
 
   return {
     session: { sessionId: `seed-episode:${episode.id}`, capturedAt: now.toISOString() },
-    task: { summary: episode.taskSummary, distributionTags: publishedEpisodeTags(episode) },
+    task: {
+      summary: episode.taskSummary,
+      distributionTags: publishedEpisodeTags(episode),
+      repositorySlug: episode.repo,
+      ...(episode.baseCommit ? { baseCommit: episode.baseCommit } : {}),
+    },
     environment: {
       harness: { name: 'jinn-layer-seed-episode-import', version: '0.1.0' },
       model: 'none',

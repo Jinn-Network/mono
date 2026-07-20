@@ -1,10 +1,17 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { dedupeKnowledgeHits, RETRIEVAL_VISIBLE_TAG } from '@jinn-network/plugin';
+import {
+  dedupeKnowledgeHits,
+  RETRIEVAL_VISIBLE_TAG,
+  type EpisodeV1Write,
+} from '@jinn-network/plugin';
 import { describeCorpusPortContract } from '@jinn-network/plugin/testing';
 import type { HarnessLayer, CorpusSearchHit, CorpusRecord as WireCorpusRecord } from '../../src/consume.js';
 import { createCorpusAdapter } from '../../src/adapters/corpus-adapter.js';
-import { TRACE_ENVELOPE_ARTIFACT_TYPE } from '../../src/publish.js';
+import {
+  EPISODE_ARTIFACT_TYPE,
+  TRACE_ENVELOPE_ARTIFACT_TYPE,
+} from '../../src/publish.js';
 import type { TraceEnvelopeV0, TraceStep } from '../../src/envelope.js';
 import { SKILL_ARTIFACT_TYPE } from '../../../../src/types/skill-artifact.js';
 
@@ -213,7 +220,125 @@ function wireRecordWithTrace(overrides: Partial<TraceEnvelopeV0> = {}, ref = 'ba
   };
 }
 
+function wireRecordWithEpisode(
+  overrides: Partial<EpisodeV1Write> = {},
+  ref = 'bafyCanonicalEpisode',
+): WireCorpusRecord {
+  const episode: EpisodeV1Write = {
+    schemaVersion: 'jinn.episode.v1',
+    episodeId: 'episode:canonical',
+    retrievalVisible: true,
+    session: {
+      sessionId: 'session:canonical',
+      capturedAt: '2026-07-20T00:00:00.000Z',
+      kind: 'user',
+    },
+    origin: { writer: 'jinn-agent', build: '0.18.0' },
+    task: {
+      summary: 'Fix the canonical episode decoder',
+      distributionTags: ['mono', RETRIEVAL_VISIBLE_TAG],
+      repositorySlug: 'Jinn-Network/mono',
+    },
+    trajectory: [{
+      spanId: 'episode-step',
+      parentSpanId: null,
+      kind: 'jinn.tool_call',
+      name: 'seed:step:fix',
+      startTimeUnixNano: '1000000000',
+      endTimeUnixNano: '1000000000',
+      attributes: {
+        'seed.step.title': 'repair the canonical decoder',
+        'seed.synthesis': 'Decoded the shared episode payload without a legacy rewrite.',
+      },
+      redactedKeys: [],
+    }],
+    environment: {
+      harness: { name: 'jinn-layer', version: '0.1.0' },
+      model: 'none',
+      tools: [],
+      skillsLoadout: [],
+    },
+    outcome: {
+      status: 'completed',
+      verificationStrength: 'evaluator-verified',
+    },
+    cost: { durationMs: 0 },
+    retention: { policy: 'contribution-eligible' },
+    provenance: 'imported',
+    ...overrides,
+  };
+  const content = Buffer.from(JSON.stringify(episode), 'utf-8');
+  const sha256 = createHash('sha256').update(content).digest('hex');
+  return {
+    ref,
+    envelope: { participant: { safeAddress: '0xparticipant' } } as WireCorpusRecord['envelope'],
+    provenance: {
+      operator: { agentId: 'agent-episode', safeAddress: '0xoperator' },
+      evidenceTier: 'self-signed',
+      publishedAt: 1_752_969_600,
+    },
+    artifacts: [{
+      sha256,
+      artifactType: EPISODE_ARTIFACT_TYPE,
+      content,
+      source: 'ipfs',
+      sizeBytes: content.length,
+    }],
+  };
+}
+
 describe('CorpusAdapter.get() — content-bearing decode (rescope R2, #1772)', () => {
+  it('decodes the canonical jinn.episode.v1 payload while retaining trace-envelope.v0 read compatibility', async () => {
+    const layer = makeFakeLayer();
+    layer.corpus.get = async () => wireRecordWithEpisode();
+    const adapter = createCorpusAdapter({ layer });
+
+    const result = await adapter.get('bafyCanonicalEpisode');
+
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok' || result.value === null) throw new Error('expected a decoded record');
+    expect(result.value).toMatchObject({
+      ref: 'bafyCanonicalEpisode',
+      task: {
+        summary: 'Fix the canonical episode decoder',
+        repositorySlug: 'Jinn-Network/mono',
+      },
+      outcome: { status: 'completed', verifiabilityTier: 'evaluator-verified' },
+      synthesis: 'Decoded the shared episode payload without a legacy rewrite.',
+      tags: ['mono', RETRIEVAL_VISIBLE_TAG],
+      retrievalVisible: true,
+      provenance: 'imported',
+      origin: 'agent-episode',
+      capturedAt: '2026-07-20T00:00:00.000Z',
+    });
+    expect(result.value.steps).toEqual([{
+      name: 'seed:step:fix',
+      attributes: {
+        'seed.step.title': 'repair the canonical decoder',
+        'seed.synthesis': 'Decoded the shared episode payload without a legacy rewrite.',
+      },
+    }]);
+  });
+
+  it('uses the canonical named retrieval field even when no legacy mark tag is present', async () => {
+    const layer = makeFakeLayer();
+    layer.corpus.get = async () => wireRecordWithEpisode({
+      retrievalVisible: true,
+      task: {
+        summary: 'Named visibility',
+        distributionTags: ['mono'],
+        repositorySlug: 'Jinn-Network/mono',
+      },
+    });
+    const adapter = createCorpusAdapter({ layer });
+
+    const result = await adapter.get('bafyCanonicalEpisode');
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok' || result.value === null) throw new Error('expected a decoded record');
+    expect(result.value.retrievalVisible).toBe(true);
+    expect(result.value.tags).toEqual(['mono']);
+  });
+
   it('returns the full decoded content (task summary, steps, outcome, tags, provenance, capturedAt) — not metadata', async () => {
     const layer = makeFakeLayer();
     const wireRecord = wireRecordWithTrace();
