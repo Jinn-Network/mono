@@ -124,7 +124,12 @@ function registryIntegrity(spec) {
 }
 
 function registryLatest(name) {
-  const result = runNpm(['view', name, 'dist-tags.latest', '--json'], root);
+  const result = runNpm(
+    ['view', name, 'dist-tags.latest', '--json'],
+    root,
+    { allowNotFound: true },
+  );
+  if (result === null) return null;
   try {
     const latest = JSON.parse(result.stdout);
     if (typeof latest !== 'string') {
@@ -146,6 +151,16 @@ function requireMatchingIntegrity(artifact, actual, phase) {
   }
 }
 
+function requireMatchingLatest(artifact, actual, phase) {
+  if (actual !== version) {
+    fail(
+      `${phase} latest tag mismatch for ${artifact.name}: `
+      + `expected ${version}, got ${actual ?? '<missing>'}; `
+      + 'OIDC cannot repair an immutable version via npm dist-tag, refusing further publication',
+    );
+  }
+}
+
 try {
   if (typeof version !== 'string' || !stableSemver.test(version)) {
     fail(`--version must be a stable semver, got ${version ?? '<missing>'}`);
@@ -162,6 +177,11 @@ try {
       missing.push(artifact);
     } else {
       requireMatchingIntegrity(artifact, actual, 'preflight');
+      requireMatchingLatest(
+        artifact,
+        registryLatest(artifact.name),
+        'preflight',
+      );
       console.log(`already published with matching integrity: ${artifact.spec}`);
     }
   }
@@ -176,6 +196,11 @@ try {
       registryIntegrity(artifact.spec),
       'post-publish',
     );
+    requireMatchingLatest(
+      artifact,
+      registryLatest(artifact.name),
+      'post-publish',
+    );
   }
 
   // npm trusted publishing authenticates `npm publish`, but not `npm dist-tag`.
@@ -188,12 +213,7 @@ try {
       registryIntegrity(artifact.spec),
       'final',
     );
-    const latest = registryLatest(artifact.name);
-    if (latest !== version) {
-      fail(
-        `latest tag mismatch for ${artifact.name}: expected ${version}, got ${latest}`,
-      );
-    }
+    requireMatchingLatest(artifact, registryLatest(artifact.name), 'final');
   }
 
   console.log(`published and verified coherent layer package set ${version} at latest`);

@@ -22,6 +22,7 @@ on:
 # Trusted publishing (OIDC): automatic canaries use npm-publish. Stable
 # publication uses the separately configured npm-stable-publish environment.
 # No long-lived npm token is accepted by either path.
+# Operator configuration and diagnosis: docs/runbooks/layer-npm-publishing.md
 permissions:
   contents: read
 

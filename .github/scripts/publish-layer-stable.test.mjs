@@ -80,7 +80,13 @@ if (args[0] === 'pack') {
   } else if (field === 'dist.integrity' && Object.hasOwn(state.registry, target)) {
     process.stdout.write(JSON.stringify(state.registry[target]) + '\\n');
   } else if (field === 'dist-tags.latest' && Object.hasOwn(state.tags, target)) {
-    process.stdout.write(JSON.stringify(state.tags[target]) + '\\n');
+    state.latestViews ??= {};
+    state.latestViews[target] = (state.latestViews[target] ?? 0) + 1;
+    const latest = state.corruptLatestOnFinal === target && state.latestViews[target] > 1
+      ? '0.0.9'
+      : state.tags[target];
+    save();
+    process.stdout.write(JSON.stringify(latest) + '\\n');
   } else {
     process.stderr.write(JSON.stringify({ error: { code: 'E404', summary: 'not found' } }) + '\\n');
     process.exitCode = 1;
@@ -147,7 +153,7 @@ test('packs and preflights every package before publishing missing versions dire
     const views = calls.filter(({ args }) => args[0] === 'view');
     assert.equal(packs.length, 3);
     assert.equal(publishes.length, 3);
-    assert.equal(views.length, 12);
+    assert.equal(views.length, 15);
     assert.ok(calls.lastIndexOf(packs.at(-1)) < calls.indexOf(publishes[0]));
     for (const [index, publish] of publishes.entries()) {
       assert.deepEqual(publish.args.slice(2), ['--access', 'public', '--tag', 'latest']);
@@ -156,6 +162,11 @@ test('packs and preflights every package before publishing missing versions dire
         'view',
         `${packages[index].name}@${version}`,
         'dist.integrity',
+      ]);
+      assert.deepEqual(calls[publishAt + 2].args.slice(0, 3), [
+        'view',
+        packages[index].name,
+        'dist-tags.latest',
       ]);
     }
     assert.ok(!calls.some(({ args }) => args[0] === 'dist-tag'));
@@ -244,12 +255,35 @@ test('stops before the next package when post-publish integrity does not match',
   }
 });
 
+for (const [index, corrupted] of packages.slice(0, 2).entries()) {
+  test(`stops before downstream publish when ${corrupted.name} latest is wrong`, () => {
+    const context = createFixture({
+      registry: {},
+      tags: {},
+      corruptLatest: `${corrupted.name}@${version}`,
+    });
+    try {
+      const result = runPublisher(context);
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /post-publish latest tag mismatch/i);
+      const publishes = callsFor(context).filter(({ args }) => args[0] === 'publish');
+      assert.equal(publishes.length, index + 1);
+      assert.deepEqual(
+        publishes.map(({ args }) => basename(args[1])),
+        packages.slice(0, index + 1).map(({ name }) => tarballName(name)),
+      );
+    } finally {
+      cleanup(context);
+    }
+  });
+}
+
 test('fails final verification when any latest tag does not select the exact version', () => {
   const layer = packages[2].name;
   const context = createFixture({
     registry: {},
     tags: {},
-    corruptLatest: `${layer}@${version}`,
+    corruptLatestOnFinal: layer,
   });
   try {
     const result = runPublisher(context);
@@ -258,12 +292,33 @@ test('fails final verification when any latest tag does not select the exact ver
     const latestViews = callsFor(context).filter(
       ({ args }) => args[0] === 'view' && args[2] === 'dist-tags.latest',
     );
-    assert.equal(latestViews.length, 3);
+    assert.equal(latestViews.length, 6);
     assert.ok(!callsFor(context).some(({ args }) => args[0] === 'dist-tag'));
   } finally {
     cleanup(context);
   }
 });
+
+for (const { name, tags } of [
+  { name: 'missing', tags: {} },
+  { name: 'wrong', tags: { [packages[0].name]: '0.0.9' } },
+]) {
+  test(`fails before mutation when an existing matching version has a ${name} latest tag`, () => {
+    const plugin = packages[0].name;
+    const context = createFixture({
+      registry: { [`${plugin}@${version}`]: integrityFor(plugin) },
+      tags,
+    });
+    try {
+      const result = runPublisher(context);
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /preflight latest tag mismatch/i);
+      assert.ok(!callsFor(context).some(({ args }) => args[0] === 'publish'));
+    } finally {
+      cleanup(context);
+    }
+  });
+}
 
 test('skips an existing version only when its exact local tarball integrity matches', () => {
   const plugin = packages[0].name;

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -24,6 +25,13 @@ const stableVersionVerifier = resolve(
   root,
   '.github/scripts/verify-layer-stable-version.mjs',
 );
+const publisherRunbookPath = resolve(
+  root,
+  'docs/runbooks/layer-npm-publishing.md',
+);
+const publisherRunbook = existsSync(publisherRunbookPath)
+  ? readFileSync(publisherRunbookPath, 'utf8')
+  : '';
 
 function writeJson(path, value) {
   mkdirSync(resolve(path, '..'), { recursive: true });
@@ -137,6 +145,31 @@ test('stable publication builds the complete set before the retry-safe publisher
   assert.match(stable, /PUBLISH_VERSION=.*GITHUB_ENV/s);
   assert.match(stable, /OIDC.*does not authenticate.*dist-tag/s);
   assert.match(stable, /protected manual environment.*transient partial-release window/s);
+});
+
+test('operator runbook defines the one-publisher configuration and diagnosis path', () => {
+  assert.match(workflow, /docs\/runbooks\/layer-npm-publishing\.md/);
+  for (const packageName of [
+    '@jinn-network/plugin',
+    '@jinn-network/core',
+    '@jinn-network/jinn-layer',
+  ]) {
+    assert.match(publisherRunbook, new RegExp(packageName.replace('/', '\\/')));
+  }
+  assert.match(publisherRunbook, /GitHub Actions/);
+  assert.match(publisherRunbook, /Jinn-Network\/mono/);
+  assert.match(publisherRunbook, /workflow filename.*layer-npm-publish\.yml/i);
+  assert.match(publisherRunbook, /allowed action.*npm publish/i);
+  assert.match(publisherRunbook, /one trusted publisher/i);
+  assert.match(publisherRunbook, /optional.*Environment.*blank/is);
+  assert.match(publisherRunbook, /npm-publish/);
+  assert.match(publisherRunbook, /npm-stable-publish/);
+  assert.match(publisherRunbook, /required reviewer/i);
+  assert.match(publisherRunbook, /branch policy.*next/i);
+  assert.match(publisherRunbook, /dist\.integrity/);
+  assert.match(publisherRunbook, /dist-tags\.latest/);
+  assert.match(publisherRunbook, /E404|ENEEDAUTH|403/);
+  assert.match(publisherRunbook, /https:\/\/docs\.npmjs\.com\/trusted-publishers\//);
 });
 
 test('OIDC is job-scoped to publish jobs and actions are immutable', () => {
