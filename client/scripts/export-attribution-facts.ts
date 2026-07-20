@@ -50,14 +50,14 @@ function parseArgs(argv: string[]): CliArgs {
   return { preregPath, evidenceManifestPath, completedAt };
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const registration = JSON.parse(readBoundedRegularFile(
     args.preregPath,
     MAX_PREREGISTRATION_BYTES,
     'preregistration',
   ).toString('utf8')) as unknown;
-  const facts = buildAttributionFacts(
+  const facts = await buildAttributionFacts(
     registration,
     args.completedAt,
     readAttributionEvidenceBundle(args.evidenceManifestPath),
@@ -65,11 +65,9 @@ function main(): void {
   process.stdout.write(`${JSON.stringify(facts, null, 2)}\n`);
 }
 
-try {
-  main();
-} catch (error) {
+void main().catch((error: unknown) => {
   process.stderr.write(
     `[attribution-facts] ${error instanceof Error ? error.message : String(error)}\n`,
   );
   process.exitCode = 1;
-}
+});

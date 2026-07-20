@@ -77,7 +77,7 @@ marketplace: {
   },
   verdict: {
     chainId, taskId, attemptIndex, verdictIndex, requestId, evaluator,
-    verdictCode, evidenceHash: verdictEnvelope.signature.hash,
+    evidenceHash: verdictEnvelope.signature.hash,
   },
 },
 solutionEnvelope,
@@ -86,7 +86,7 @@ verdictEnvelope,
 
 Add failures for arbitrary request refs, mismatched tuple members, mismatched
 evidence hashes, participant Safe drift, signed payload/outcome tampering, and
-on-chain verdict-code disagreement.
+signed score/`passed_match` disagreement.
 
 - [ ] **Step 2: Run focused tests and observe the current false acceptance**
 
@@ -111,9 +111,10 @@ attempt.evidenceHash === solution.signature.hash
 verdictRow.evidenceHash === verdict.signature.hash
 ```
 
-Parse `verdict.payload` with `SweRebenchV2VerdictPayloadSchema`, require
-`verdictCode === (passed_match ? 1 : 2)`, and return `passed_match` as the only
-`acceptedDiff` source. Remove the operator-entered `acceptedDiff` field.
+Parse `verdict.payload` with `SweRebenchV2VerdictPayloadSchema`, require its
+signed binary score to agree with `passed_match`, and return `passed_match` as
+the only `acceptedDiff` source. Remove the operator-entered `acceptedDiff`
+field.
 
 - [ ] **Step 4: Make exporter/analyzer CLIs await validation**
 

@@ -96,7 +96,7 @@ function readJson(
   }
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const preregistration = readJson(
     'preregistration',
@@ -105,7 +105,7 @@ function main(): void {
   );
   const facts = readJson('facts', args.factsPath, MAX_FACTS_BYTES);
   const evidence = readAttributionEvidenceBundle(args.evidenceManifestPath);
-  const readout = analyzeAttributionInstrument(preregistration.value, facts.value, {
+  const readout = await analyzeAttributionInstrument(preregistration.value, facts.value, {
     evidence,
     sourceBytes: {
       preregistration: preregistration.bytes,
@@ -118,11 +118,9 @@ function main(): void {
   process.stdout.write(`${output}\n`);
 }
 
-try {
-  main();
-} catch (error) {
+void main().catch((error: unknown) => {
   process.stderr.write(
     `[attribution-instrument] ${error instanceof Error ? error.message : String(error)}\n`,
   );
   process.exitCode = 1;
-}
+});

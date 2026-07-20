@@ -12,7 +12,8 @@ Each observation receipt is a runner export, not an operator-authored outcome.
 It carries:
 
 - the canonical signed solution and verdict `jinn.execution.v1` envelopes;
-- the authoritative marketplace attempt and verdict rows;
+- the embedded runner-exported marketplace attempt and verdict rows, used
+  only as join constraints;
 - the immutable solution and verdict evidence hashes claimed by the runner;
 - experiment-only runtime, isolation, timing, delivered-reference, and cost
   metadata.
@@ -27,7 +28,7 @@ execution-envelope authenticator. It then requires one exact join:
 3. both marketplace rows share `(chainId, taskId, attemptIndex)`;
 4. the receipt instance matches the signed solution and verdict task identity;
 5. each marketplace evidence hash matches its signed envelope hash;
-6. the on-chain verdict code agrees with the authenticated SWE-rebench
+6. the authenticated SWE-rebench verdict score agrees with its signed
    `passed_match` payload.
 
 `acceptedDiff` is derived from that authenticated verdict payload. It is not a
@@ -58,7 +59,8 @@ run.
 Tests first demonstrate:
 
 - an out-of-contract/fabricated outcome or reference fails;
-- a valid signed solution/verdict plus authoritative attempt/verdict join passes;
+- a valid signed solution/verdict plus an exact embedded attempt/verdict join
+  passes;
 - aggregate evidence overflow, initial oversize, and post-stat growth fail;
 - seed/order drift fails and both deterministic seed branches are covered;
 - every runbook anchor verification includes the edited-state assertion.

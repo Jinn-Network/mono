@@ -73,11 +73,32 @@ values:
 }
 ```
 
-The order of `cells` is the frozen execution order. The same snapshot must be
-used in both cells; the treatment-config digests must differ. Select the real
-population, reachable matched/discordant bar, runtime revisions, window, and
-order before the first attempt. The exact analyzer supports at most 1023
-instances.
+The execution order is derived from `sha256(executionOrderSeed)`: an even low
+bit means `off,on`; an odd low bit means `on,off`. Order the `cells` array to
+match that derivation. The same snapshot must be used in both cells; the
+treatment-config digests must differ. Select the real population,
+reachable matched/discordant bar, runtime revisions, window, and seed before
+the first attempt. The exact analyzer supports at most 1023 instances.
+
+Before freezing, derive the order independently and require the JSON array to
+match:
+
+```bash
+set -euo pipefail
+PREREG="$RUN_DIR/preregistration.json"
+DERIVED_CELL_ORDER="$(
+  node -e \
+    'const {createHash}=require("crypto");const p=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const odd=createHash("sha256").update(p.executionOrderSeed,"utf8").digest()[0]&1;process.stdout.write((odd?["on","off"]:["off","on"]).join(","))' \
+    "$PREREG"
+)"
+RECORDED_CELL_ORDER="$(
+  node -e \
+    'const p=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(p.cells.map((cell)=>cell.autoload).join(","))' \
+    "$PREREG"
+)"
+test "$DERIVED_CELL_ORDER" = "$RECORDED_CELL_ORDER"
+printf 'Frozen cell order: %s\n' "$DERIVED_CELL_ORDER"
+```
 
 Freeze the bytes:
 
@@ -152,6 +173,11 @@ ANCHOR_CREATED_AT="$(
   gh api "repos/Jinn-Network/mono/issues/comments/$ANCHOR_COMMENT_ID" \
     --jq '.created_at'
 )"
+ANCHOR_UPDATED_AT="$(
+  gh api "repos/Jinn-Network/mono/issues/comments/$ANCHOR_COMMENT_ID" \
+    --jq '.updated_at'
+)"
+test "$ANCHOR_CREATED_AT" = "$ANCHOR_UPDATED_AT"
 WINDOW_STARTS_AT="$(
   node -e \
     'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).window.startsAt)' \
@@ -166,6 +192,7 @@ BODY_HEX="$(shasum -a 256 "$ANCHOR_BODY" | awk '{print $1}')"
 {
   printf 'comment_url=%s\n' "$ANCHOR_URL"
   printf 'comment_created_at=%s\n' "$ANCHOR_CREATED_AT"
+  printf 'comment_updated_at=%s\n' "$ANCHOR_UPDATED_AT"
   printf 'preregistration_sha256=sha256:%s\n' "$PREREG_HEX"
   printf 'comment_body_sha256=sha256:%s\n' "$BODY_HEX"
 } > "$RECORD_TMP"
@@ -193,7 +220,10 @@ frozen order:
 6. retain one immutable receipt per observation under `cells/off` or
    `cells/on`.
 
-Each receipt must be JSON with the following exact fields:
+Each receipt must be JSON with the following outer fields. Both envelope
+objects must be complete canonical signed `jinn.execution.v1` exports from the
+runner; the placeholder hexadecimal values below illustrate the joins and
+must never be hand-filled:
 
 ```json
 {
@@ -221,9 +251,132 @@ Each receipt must be JSON with the following exact fields:
   "completedAt": "2026-07-21T08:15:00.000Z",
   "sessionKind": "user",
   "origin": "marketplace",
-  "verdictRef": "verdict:task-1:attempt-0:index-0",
-  "acceptedDiff": true,
-  "unscorable": false,
+  "verdictProof": {
+    "schema": "jinn.attribution-marketplace-verdict-proof.v1",
+    "marketplace": {
+      "attempt": {
+        "chainId": 84532,
+        "taskId": "123",
+        "attemptIndex": 0,
+        "requestId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "operator": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "evidenceHash": "0x3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "verdict": {
+        "chainId": 84532,
+        "taskId": "123",
+        "attemptIndex": 0,
+        "verdictIndex": 0,
+        "requestId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+        "evaluator": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "evidenceHash": "0x4444444444444444444444444444444444444444444444444444444444444444"
+      }
+    },
+    "solutionEnvelope": {
+      "schemaVersion": "jinn.execution.v1",
+      "solverType": "swe-rebench-v2.v1",
+      "role": "solution",
+      "generatedAt": 1753088400000,
+      "task": {
+        "cid": "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3pt5gnxjywjd5dpgzud42n5by",
+        "onchainCreationTx": "0x5555555555555555555555555555555555555555555555555555555555555555",
+        "onchainCreationBlock": 123,
+        "requestId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "instanceId": "task-1",
+        "repo": "owner/repository",
+        "baseCommit": "git-commit-used-by-both-cells"
+      },
+      "participant": {
+        "safeAddress": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "agentEoa": "0xcccccccccccccccccccccccccccccccccccccccc"
+      },
+      "window": {
+        "startTs": 1753088000000,
+        "endTs": 1753095200000
+      },
+      "executor": {
+        "implName": "codex",
+        "implVersion": "immutable-version",
+        "clientGitSha": "git-commit-used-by-both-cells",
+        "codeDigest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+        "runtimeBundleDigest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+        "plugins": [],
+        "signingKey": {
+          "kind": "agent-eoa",
+          "pubkey": "0xcccccccccccccccccccccccccccccccccccccccc"
+        },
+        "mode": "frozen"
+      },
+      "evidenceTier": "committed",
+      "attestation": null,
+      "trajectory": null,
+      "artifacts": [],
+      "payload": {
+        "schemaVersion": "swe-rebench-v2-solution.v1",
+        "patch": "complete accepted-diff candidate"
+      },
+      "distributionClass": "restricted-tos",
+      "signature": {
+        "algo": "secp256k1",
+        "signer": "0xcccccccccccccccccccccccccccccccccccccccc",
+        "hash": "0x3333333333333333333333333333333333333333333333333333333333333333",
+        "sig": "0xcomplete-canonical-signature-from-runner"
+      }
+    },
+    "verdictEnvelope": {
+      "schemaVersion": "jinn.execution.v1",
+      "solverType": "swe-rebench-v2.v1",
+      "role": "verdict",
+      "generatedAt": 1753088500000,
+      "task": {
+        "cid": "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3pt5gnxjywjd5dpgzud42n5by",
+        "onchainCreationTx": "0x5555555555555555555555555555555555555555555555555555555555555555",
+        "onchainCreationBlock": 123,
+        "requestId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+        "instanceId": "task-1",
+        "repo": "owner/repository",
+        "baseCommit": "git-commit-used-by-both-cells"
+      },
+      "participant": {
+        "safeAddress": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "agentEoa": "0xdddddddddddddddddddddddddddddddddddddddd"
+      },
+      "window": {
+        "startTs": 1753088000000,
+        "endTs": 1753095200000
+      },
+      "executor": {
+        "implName": "swe-rebench-v2-evaluator",
+        "implVersion": "immutable-version",
+        "clientGitSha": "git-commit-used-by-both-cells",
+        "codeDigest": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+        "runtimeBundleDigest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+        "plugins": [],
+        "signingKey": {
+          "kind": "agent-eoa",
+          "pubkey": "0xdddddddddddddddddddddddddddddddddddddddd"
+        },
+        "mode": "frozen"
+      },
+      "evidenceTier": "committed",
+      "attestation": null,
+      "trajectory": null,
+      "artifacts": [],
+      "payload": {
+        "schemaVersion": "swe-rebench-v2-verdict.v1",
+        "score": 1,
+        "passed_match": true,
+        "evaluator_cost_usd": 0.01
+      },
+      "distributionClass": "restricted-tos",
+      "signature": {
+        "algo": "secp256k1",
+        "signer": "0xdddddddddddddddddddddddddddddddddddddddd",
+        "hash": "0x4444444444444444444444444444444444444444444444444444444444444444",
+        "sig": "0xcomplete-canonical-signature-from-runner"
+      }
+    }
+  },
   "deliveredRefs": [],
   "cost": {
     "inputTokens": 12345,
@@ -235,8 +388,12 @@ Each receipt must be JSON with the following exact fields:
 ```
 
 Stop and file separate receipt-wiring work if the daemon cannot export these
-facts. Do not hand-fill them. Receipts must name unique verdict refs; off-cell
-receipts must have no delivered refs. Cost is the attempt's recorded nonnegative
+facts. Do not hand-fill them. The analyzer authenticates both canonical
+envelopes and requires exact request, participant Safe, instance, tuple, and
+evidence-hash joins. The signed verdict payload is the sole authority for
+`acceptedDiff`; the embedded marketplace rows only constrain that join and
+never independently authenticate or determine the outcome. Off-cell receipts
+must have no delivered refs. Cost is the attempt's recorded nonnegative
 input/output token usage and USD-micro total; mark the USD value estimated when
 the daemon has no final actual-cost row.
 
@@ -307,11 +464,13 @@ trap - EXIT
 ```
 
 The exporter validates every manifest-listed receipt and writes two cells in
-frozen order. Each cell repeats treatment, runtime, isolation, cell timing, and
-the full preregistered population. Each observation repeats the receipt facts
-and adds `verdictEvidenceDigest`, the SHA-256 of the exact receipt bytes; the
-top level binds `evidenceManifestDigest`. It exits nonzero with empty stdout on
-any receipt or drift error. Do not edit facts to repair a mismatch.
+the seed-derived frozen order. Each cell repeats treatment, runtime, isolation,
+cell timing, and the full preregistered population. Each observation records
+the outcome derived from the authenticated signed verdict and the immutable
+verdict reference derived from the exact proof join, plus
+`verdictEvidenceDigest`, the SHA-256 of the exact receipt bytes; the top level
+binds `evidenceManifestDigest`. It exits nonzero with empty stdout on any
+receipt or drift error. Do not edit facts to repair a mismatch.
 
 ## 5. Analyze and preserve the deterministic readout
 
@@ -362,11 +521,20 @@ verify() {
   RECORDED_ANCHOR_CREATED_AT="$(
     sed -n 's/^comment_created_at=//p' "$ANCHOR_RECORD"
   )"
+  RECORDED_ANCHOR_UPDATED_AT="$(
+    sed -n 's/^comment_updated_at=//p' "$ANCHOR_RECORD"
+  )"
   REMOTE_ANCHOR_CREATED_AT="$(
     gh api "repos/Jinn-Network/mono/issues/comments/$VERIFIED_COMMENT_ID" \
       --jq '.created_at'
   )"
+  REMOTE_ANCHOR_UPDATED_AT="$(
+    gh api "repos/Jinn-Network/mono/issues/comments/$VERIFIED_COMMENT_ID" \
+      --jq '.updated_at'
+  )"
   test "$RECORDED_ANCHOR_CREATED_AT" = "$REMOTE_ANCHOR_CREATED_AT"
+  test "$RECORDED_ANCHOR_UPDATED_AT" = "$REMOTE_ANCHOR_UPDATED_AT"
+  test "$REMOTE_ANCHOR_CREATED_AT" = "$REMOTE_ANCHOR_UPDATED_AT"
   WINDOW_STARTS_AT="$(
     node -e \
       'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).window.startsAt)' \
@@ -435,11 +603,20 @@ verify() {
   RECORDED_ANCHOR_CREATED_AT="$(
     sed -n 's/^comment_created_at=//p' "$ANCHOR_RECORD"
   )"
+  RECORDED_ANCHOR_UPDATED_AT="$(
+    sed -n 's/^comment_updated_at=//p' "$ANCHOR_RECORD"
+  )"
   REMOTE_ANCHOR_CREATED_AT="$(
     gh api "repos/Jinn-Network/mono/issues/comments/$VERIFIED_COMMENT_ID" \
       --jq '.created_at'
   )"
+  REMOTE_ANCHOR_UPDATED_AT="$(
+    gh api "repos/Jinn-Network/mono/issues/comments/$VERIFIED_COMMENT_ID" \
+      --jq '.updated_at'
+  )"
   test "$RECORDED_ANCHOR_CREATED_AT" = "$REMOTE_ANCHOR_CREATED_AT"
+  test "$RECORDED_ANCHOR_UPDATED_AT" = "$REMOTE_ANCHOR_UPDATED_AT"
+  test "$REMOTE_ANCHOR_CREATED_AT" = "$REMOTE_ANCHOR_UPDATED_AT"
   WINDOW_STARTS_AT="$(
     node -e \
       'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).window.startsAt)' \
@@ -503,11 +680,20 @@ verify() {
   RECORDED_ANCHOR_CREATED_AT="$(
     sed -n 's/^comment_created_at=//p' "$ANCHOR_RECORD"
   )"
+  RECORDED_ANCHOR_UPDATED_AT="$(
+    sed -n 's/^comment_updated_at=//p' "$ANCHOR_RECORD"
+  )"
   REMOTE_ANCHOR_CREATED_AT="$(
     gh api "repos/Jinn-Network/mono/issues/comments/$VERIFIED_COMMENT_ID" \
       --jq '.created_at'
   )"
+  REMOTE_ANCHOR_UPDATED_AT="$(
+    gh api "repos/Jinn-Network/mono/issues/comments/$VERIFIED_COMMENT_ID" \
+      --jq '.updated_at'
+  )"
   test "$RECORDED_ANCHOR_CREATED_AT" = "$REMOTE_ANCHOR_CREATED_AT"
+  test "$RECORDED_ANCHOR_UPDATED_AT" = "$REMOTE_ANCHOR_UPDATED_AT"
+  test "$REMOTE_ANCHOR_CREATED_AT" = "$REMOTE_ANCHOR_UPDATED_AT"
   WINDOW_STARTS_AT="$(
     node -e \
       'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).window.startsAt)' \
@@ -572,11 +758,20 @@ verify() {
   RECORDED_ANCHOR_CREATED_AT="$(
     sed -n 's/^comment_created_at=//p' "$ANCHOR_RECORD"
   )"
+  RECORDED_ANCHOR_UPDATED_AT="$(
+    sed -n 's/^comment_updated_at=//p' "$ANCHOR_RECORD"
+  )"
   REMOTE_ANCHOR_CREATED_AT="$(
     gh api "repos/Jinn-Network/mono/issues/comments/$VERIFIED_COMMENT_ID" \
       --jq '.created_at'
   )"
+  REMOTE_ANCHOR_UPDATED_AT="$(
+    gh api "repos/Jinn-Network/mono/issues/comments/$VERIFIED_COMMENT_ID" \
+      --jq '.updated_at'
+  )"
   test "$RECORDED_ANCHOR_CREATED_AT" = "$REMOTE_ANCHOR_CREATED_AT"
+  test "$RECORDED_ANCHOR_UPDATED_AT" = "$REMOTE_ANCHOR_UPDATED_AT"
+  test "$REMOTE_ANCHOR_CREATED_AT" = "$REMOTE_ANCHOR_UPDATED_AT"
   WINDOW_STARTS_AT="$(
     node -e \
       'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).window.startsAt)' \
@@ -640,11 +835,20 @@ verify() {
   RECORDED_ANCHOR_CREATED_AT="$(
     sed -n 's/^comment_created_at=//p' "$ANCHOR_RECORD"
   )"
+  RECORDED_ANCHOR_UPDATED_AT="$(
+    sed -n 's/^comment_updated_at=//p' "$ANCHOR_RECORD"
+  )"
   REMOTE_ANCHOR_CREATED_AT="$(
     gh api "repos/Jinn-Network/mono/issues/comments/$VERIFIED_COMMENT_ID" \
       --jq '.created_at'
   )"
+  REMOTE_ANCHOR_UPDATED_AT="$(
+    gh api "repos/Jinn-Network/mono/issues/comments/$VERIFIED_COMMENT_ID" \
+      --jq '.updated_at'
+  )"
   test "$RECORDED_ANCHOR_CREATED_AT" = "$REMOTE_ANCHOR_CREATED_AT"
+  test "$RECORDED_ANCHOR_UPDATED_AT" = "$REMOTE_ANCHOR_UPDATED_AT"
+  test "$REMOTE_ANCHOR_CREATED_AT" = "$REMOTE_ANCHOR_UPDATED_AT"
   WINDOW_STARTS_AT="$(
     node -e \
       'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).window.startsAt)' \
@@ -703,5 +907,6 @@ Runtime, isolation, timing, population, treatment, receipt, origin, verdict,
 or delivery drift requires a new Human decision on #1843; it is never repaired
 by relabeling facts.
 
-The CLI reads only the three named inputs and manifest-listed files, prints
-only after complete validation, and exits nonzero with empty stdout on failure.
+The CLI reads only the named inputs and manifest-listed files, applies both
+per-file and aggregate evidence byte bounds, prints only after complete
+validation, and exits nonzero with empty stdout on failure.

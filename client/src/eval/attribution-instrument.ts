@@ -11,6 +11,10 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 
 import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import {
+  AttributionVerdictProofSchema,
+  verifyAttributionVerdictProof,
+} from './attribution-verdict-evidence.js';
 import { comparePaired, mcnemarExact } from './paired.js';
 import { wilsonInterval, type Interval } from './wilson.js';
 
@@ -41,6 +45,13 @@ const VerdictRefSchema = SingleLineSchema.regex(
   /^verdict:[A-Za-z0-9._:/-]+$/,
   'must be an immutable verdict reference',
 );
+
+export function deriveAttributionCellOrder(
+  seed: string,
+): readonly (typeof AUTOLOAD_STATES)[number][] {
+  const lowBit = createHash('sha256').update(seed, 'utf8').digest()[0]! & 1;
+  return lowBit === 0 ? ['off', 'on'] : ['on', 'off'];
+}
 
 const AttributionRuntimeSchema = z.object({
   modelRef: SingleLineSchema,
@@ -144,6 +155,19 @@ export const AttributionPreregistrationSchema = z.object({
         + `at alpha=${registration.alpha}; minimum is ${minimumSignificantDiscordant}`,
     });
   }
+  const derivedOrder = deriveAttributionCellOrder(registration.executionOrderSeed);
+  if (
+    registration.cells.map((cell) => cell.autoload).join(',')
+    !== derivedOrder.join(',')
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['cells'],
+      message:
+        'cell order does not match the order derived from the execution order seed '
+        + `(${derivedOrder.join(',')})`,
+    });
+  }
   const cells = new Map(registration.cells.map((cell) => [cell.autoload, cell]));
   if (!cells.has('off') || !cells.has('on')) {
     ctx.addIssue({
@@ -233,9 +257,7 @@ const AttributionVerdictReceiptSchema = z.object({
   completedAt: IsoDateTimeSchema,
   sessionKind: z.enum(['user', 'host-internal']),
   origin: z.literal('marketplace'),
-  verdictRef: VerdictRefSchema,
-  acceptedDiff: z.boolean().nullable(),
-  unscorable: z.boolean(),
+  verdictProof: AttributionVerdictProofSchema,
   deliveredRefs: DeliveredRefsSchema,
   cost: AttributionCostSchema,
 }).strict();
@@ -439,7 +461,7 @@ function expectedReceipt(
   facts: AttributionFacts,
   cell: AttributionFacts['cells'][number],
   result: AttributionFacts['cells'][number]['results'][number],
-): z.infer<typeof AttributionVerdictReceiptSchema> {
+): Omit<z.infer<typeof AttributionVerdictReceiptSchema>, 'verdictProof'> {
   return {
     schema: 'jinn.attribution-verdict-receipt.v1',
     instrumentId: facts.instrumentId,
@@ -455,18 +477,15 @@ function expectedReceipt(
     completedAt: result.completedAt,
     sessionKind: result.sessionKind,
     origin: 'marketplace',
-    verdictRef: result.verdictRef,
-    acceptedDiff: result.passed,
-    unscorable: result.unscorable,
     deliveredRefs: result.deliveredRefs,
     cost: result.cost,
   };
 }
 
-function verifyVerdictReceipts(
+async function verifyVerdictReceipts(
   facts: AttributionFacts,
   evidence: Map<string, AttributionEvidenceFile>,
-): void {
+): Promise<void> {
   const usedDigests = new Set<string>();
   for (const cell of facts.cells) {
     for (const result of cell.results) {
@@ -486,9 +505,26 @@ function verifyVerdictReceipts(
       }
       usedDigests.add(result.verdictEvidenceDigest);
       const receipt = decodeReceipt(file);
-      if (canonicalJson(receipt) !== canonicalJson(expectedReceipt(facts, cell, result))) {
+      const { verdictProof, ...receiptMetadata } = receipt;
+      if (
+        canonicalJson(receiptMetadata)
+        !== canonicalJson(expectedReceipt(facts, cell, result))
+      ) {
         throw new Error(
           `${cell.autoload}/${result.instanceId} facts do not match the verified verdict receipt`,
+        );
+      }
+      const signedOutcome = await verifyAttributionVerdictProof(
+        verdictProof,
+        result.instanceId,
+      );
+      if (
+        signedOutcome.acceptedDiff !== result.passed
+        || signedOutcome.unscorable !== result.unscorable
+        || signedOutcome.verdictRef !== result.verdictRef
+      ) {
+        throw new Error(
+          `${cell.autoload}/${result.instanceId} facts do not match the authenticated verdict`,
         );
       }
     }
@@ -498,22 +534,31 @@ function verifyVerdictReceipts(
   }
 }
 
-export function buildAttributionFacts(
+export async function buildAttributionFacts(
   registrationInput: unknown,
   completedAtInput: unknown,
   evidenceBundle: AttributionEvidenceBundle,
-): AttributionFacts {
+): Promise<AttributionFacts> {
   const registration = AttributionPreregistrationSchema.parse(registrationInput);
   const completedAt = IsoDateTimeSchema.parse(completedAtInput);
   if (Date.parse(completedAt) < Date.parse(registration.window.endsAt)) {
     throw new Error('facts export must run at or after the preregistered window end');
   }
   const evidence = verifyEvidenceBundle(evidenceBundle);
-  const receipts = [...evidence.entries()].map(([digestValue, file]) => ({
-    digest: digestValue,
-    file,
-    receipt: decodeReceipt(file),
-  }));
+  const receipts = await Promise.all(
+    [...evidence.entries()].map(async ([digestValue, file]) => {
+      const receipt = decodeReceipt(file);
+      return {
+        digest: digestValue,
+        file,
+        receipt,
+        outcome: await verifyAttributionVerdictProof(
+          receipt.verdictProof,
+          receipt.instanceId,
+        ),
+      };
+    }),
+  );
   const cells = registration.cells.map((definition) => {
     const cellReceipts = receipts.filter(({ receipt }) => receipt.autoload === definition.autoload);
     if (cellReceipts.length !== registration.population.instanceIds.length) {
@@ -564,15 +609,15 @@ export function buildAttributionFacts(
       isolation: first.isolation,
       startedAt: first.cellStartedAt,
       completedAt: first.cellCompletedAt,
-      results: ordered.map(({ digest: verdictEvidenceDigest, receipt }) => ({
+      results: ordered.map(({ digest: verdictEvidenceDigest, outcome, receipt }) => ({
         instanceId: receipt.instanceId,
         startedAt: receipt.startedAt,
         completedAt: receipt.completedAt,
-        passed: receipt.acceptedDiff,
-        unscorable: receipt.unscorable,
+        passed: outcome.acceptedDiff,
+        unscorable: outcome.unscorable,
         sessionKind: receipt.sessionKind,
         origin: receipt.origin,
-        verdictRef: receipt.verdictRef,
+        verdictRef: outcome.verdictRef,
         verdictEvidenceDigest,
         deliveredRefs: receipt.deliveredRefs,
         cost: receipt.cost,
@@ -587,7 +632,7 @@ export function buildAttributionFacts(
     cells,
   });
   validateFacts(registration, facts);
-  verifyVerdictReceipts(facts, evidence);
+  await verifyVerdictReceipts(facts, evidence);
   return facts;
 }
 
@@ -777,7 +822,7 @@ function compare(
   };
 }
 
-export function analyzeAttributionInstrument(
+export async function analyzeAttributionInstrument(
   registrationInput: unknown,
   factsInput: unknown,
   opts: {
@@ -785,7 +830,7 @@ export function analyzeAttributionInstrument(
     evidence: AttributionEvidenceBundle;
     sourceBytes: { preregistration: Uint8Array; facts: Uint8Array };
   },
-): AttributionReadout {
+): Promise<AttributionReadout> {
   const registration = AttributionPreregistrationSchema.parse(registrationInput);
   const facts = AttributionFactsSchema.parse(factsInput);
   const preregistrationDigest = verifySourceBytes(
@@ -804,7 +849,7 @@ export function analyzeAttributionInstrument(
 
   const cells = validateFacts(registration, facts);
   const evidence = verifyEvidenceBundle(opts.evidence, facts.evidenceManifestDigest);
-  verifyVerdictReceipts(facts, evidence);
+  await verifyVerdictReceipts(facts, evidence);
   return {
     schema: 'jinn.attribution-readout.v1',
     instrumentId: registration.instrumentId,

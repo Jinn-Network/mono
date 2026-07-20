@@ -4,13 +4,16 @@ import { describe, expect, it } from 'vitest';
 
 import {
   analyzeAttributionInstrument,
+  AttributionPreregistrationSchema,
   buildAttributionFacts,
+  deriveAttributionCellOrder,
   renderAttributionReadoutMarkdown,
   type AttributionEvidenceBundle,
   type AttributionFacts,
   type AttributionPreregistration,
 } from '../../src/eval/attribution-instrument.js';
 import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
+import { createAttributionVerdictProof } from './attribution-verdict-fixture.js';
 
 const digest = (value: string | Uint8Array): string =>
   `sha256:${createHash('sha256').update(value).digest('hex')}`;
@@ -86,14 +89,26 @@ function facts(offPass = 0, onPass = 10): AttributionFacts {
       })),
     })),
   };
-  evidenceFor(recorded);
   return recorded;
 }
 
-function evidenceFor(recorded: AttributionFacts): AttributionEvidenceBundle {
+async function evidenceFor(recorded: AttributionFacts): Promise<AttributionEvidenceBundle> {
   const files: AttributionEvidenceBundle['files'] = [];
-  for (const cell of recorded.cells) {
-    for (const result of cell.results) {
+  for (let cellIndex = 0; cellIndex < recorded.cells.length; cellIndex++) {
+    const cell = recorded.cells[cellIndex]!;
+    for (let resultIndex = 0; resultIndex < cell.results.length; resultIndex++) {
+      const result = cell.results[resultIndex]!;
+      const verdictProof = await createAttributionVerdictProof({
+        instanceId: result.instanceId,
+        acceptedDiff: result.passed === true,
+        nonce: cellIndex * 1_000 + resultIndex,
+      });
+      result.verdictRef =
+        `verdict:${verdictProof.marketplace.verdict.chainId}:`
+        + `${verdictProof.marketplace.verdict.taskId}:`
+        + `${verdictProof.marketplace.verdict.attemptIndex}:`
+        + `${verdictProof.marketplace.verdict.verdictIndex}:`
+        + verdictProof.marketplace.verdict.requestId;
       const receipt = {
         schema: 'jinn.attribution-verdict-receipt.v1',
         instrumentId: recorded.instrumentId,
@@ -109,9 +124,7 @@ function evidenceFor(recorded: AttributionFacts): AttributionEvidenceBundle {
         completedAt: result.completedAt,
         sessionKind: result.sessionKind,
         origin: 'marketplace',
-        verdictRef: result.verdictRef,
-        acceptedDiff: result.passed,
-        unscorable: result.unscorable,
+        verdictProof,
         deliveredRefs: result.deliveredRefs,
         cost: result.cost,
       };
@@ -147,9 +160,9 @@ function options(
   };
 }
 
-function analyze(recorded: AttributionFacts, registration = prereg()) {
-  const evidence = evidenceFor(recorded);
-  return analyzeAttributionInstrument(
+async function analyze(recorded: AttributionFacts, registration = prereg()) {
+  const evidence = await evidenceFor(recorded);
+  return await analyzeAttributionInstrument(
     registration,
     recorded,
     options(registration, recorded, evidence),
@@ -157,21 +170,56 @@ function analyze(recorded: AttributionFacts, registration = prereg()) {
 }
 
 describe('daemon autoload attribution analyzer', () => {
-  it('deterministically exports analyzer-ready facts from frozen receipts', () => {
-    const registration = prereg();
-    const recorded = facts();
-    const evidence = evidenceFor(recorded);
-    const exported = buildAttributionFacts(registration, recorded.completedAt, evidence);
+  it('derives and enforces the two-cell order from the preregistered seed', () => {
+    expect(deriveAttributionCellOrder('2')).toEqual(['off', 'on']);
+    expect(deriveAttributionCellOrder('1')).toEqual(['on', 'off']);
 
-    expect(exported).toEqual(recorded);
-    expect(buildAttributionFacts(registration, recorded.completedAt, evidence)).toEqual(exported);
+    const registration = prereg();
+    registration.cells.reverse();
+    expect(() => AttributionPreregistrationSchema.parse(registration)).toThrow(
+      /execution order seed/i,
+    );
   });
 
-  it('renders deterministic helped JSON and Markdown with paired/Wilson facts', () => {
+  it('deterministically exports analyzer-ready facts from frozen receipts', async () => {
     const registration = prereg();
     const recorded = facts();
-    const first = analyze(recorded, registration);
-    const second = analyze(recorded, registration);
+    const evidence = await evidenceFor(recorded);
+    const exported = await buildAttributionFacts(registration, recorded.completedAt, evidence);
+
+    expect(exported).toEqual(recorded);
+    await expect(
+      buildAttributionFacts(registration, recorded.completedAt, evidence),
+    ).resolves.toEqual(exported);
+  });
+
+  it('rejects operator-authored outcome fields even when their receipt is rehashed', async () => {
+    const registration = prereg();
+    const recorded = facts();
+    const evidence = await evidenceFor(recorded);
+    const firstFile = evidence.files[0]!;
+    const receipt = JSON.parse(
+      new TextDecoder().decode(firstFile.content),
+    ) as Record<string, unknown>;
+    receipt['acceptedDiff'] = false;
+    receipt['unscorable'] = false;
+    receipt['verdictRef'] = 'verdict:operator-authored';
+    firstFile.content = Buffer.from(`${canonicalJson(receipt)}\n`);
+    evidence.manifest = `${evidence.files
+      .map((file) => `${digest(file.content).slice(7)}  ${file.path}`)
+      .sort((left, right) => left < right ? -1 : 1)
+      .join('\n')}\n`;
+
+    await expect(
+      buildAttributionFacts(registration, recorded.completedAt, evidence),
+    ).rejects.toThrow(/unrecognized key/i);
+  });
+
+  it('renders deterministic helped JSON and Markdown with paired/Wilson facts', async () => {
+    const registration = prereg();
+    const recorded = facts();
+    const first = await analyze(recorded, registration);
+    const second = await analyze(recorded, registration);
 
     expect(first.design).toBe('matched-daemon-autoload-1x2');
     expect(first.comparison).toMatchObject({
@@ -207,44 +255,44 @@ describe('daemon autoload attribution analyzer', () => {
   it.each([
     { off: 10, on: 0, signal: 'harmed' },
     { off: 0, on: 0, signal: 'inconclusive' },
-  ])('classifies $signal', ({ off, on, signal }) => {
-    expect(analyze(facts(off, on)).comparison.signal).toBe(signal);
+  ])('classifies $signal', async ({ off, on, signal }) => {
+    expect((await analyze(facts(off, on))).comparison.signal).toBe(signal);
   });
 
-  it('classifies a powered balanced result as no-difference-detected', () => {
+  it('classifies a powered balanced result as no-difference-detected', async () => {
     const recorded = facts();
     const off = recorded.cells.find((cell) => cell.autoload === 'off')!;
     const on = recorded.cells.find((cell) => cell.autoload === 'on')!;
     off.results.forEach((row, index) => { row.passed = index < 3; });
     on.results.forEach((row, index) => { row.passed = index >= 3 && index < 6; });
-    expect(analyze(recorded).comparison).toMatchObject({
+    expect((await analyze(recorded)).comparison).toMatchObject({
       signal: 'no-difference-detected',
       improved: 3,
       regressed: 3,
     });
   });
 
-  it('rejects invalid bars and populations too large for exact arithmetic', () => {
+  it('rejects invalid bars and populations too large for exact arithmetic', async () => {
     const recorded = facts();
     const invalidBar = { ...prereg(), minimumDiscordantPairs: 5 };
-    const invalidBarEvidence = evidenceFor(recorded);
-    expect(() => analyzeAttributionInstrument(
+    const invalidBarEvidence = await evidenceFor(recorded);
+    await expect(analyzeAttributionInstrument(
       invalidBar,
       recorded,
       options(invalidBar, recorded, invalidBarEvidence),
-    )).toThrow(/cannot reach significance/i);
+    )).rejects.toThrow(/cannot reach significance/i);
     const oversized = {
       ...prereg(),
       population: {
         instanceIds: Array.from({ length: 1024 }, (_, index) => `task-${index}`),
       },
     };
-    const oversizedEvidence = evidenceFor(recorded);
-    expect(() => analyzeAttributionInstrument(
+    const oversizedEvidence = await evidenceFor(recorded);
+    await expect(analyzeAttributionInstrument(
       oversized,
       recorded,
       options(oversized, recorded, oversizedEvidence),
-    )).toThrow(/at most 1023/i);
+    )).rejects.toThrow(/at most 1023/i);
   });
 
   it.each([
@@ -254,6 +302,9 @@ describe('daemon autoload attribution analyzer', () => {
     ['host internal', (data: AttributionFacts) => { data.cells[0]!.results[0]!.sessionKind = 'host-internal'; }],
     ['synthetic', (data: AttributionFacts) => { data.cells[0]!.results[0]!.origin = 'synthetic'; }],
     ['off delivery', (data: AttributionFacts) => { data.cells[0]!.results[0]!.deliveredRefs = [ref('9')]; }],
+    ['outcome contradiction', (data: AttributionFacts) => {
+      data.cells[0]!.results[0]!.passed = !data.cells[0]!.results[0]!.passed;
+    }],
     ['cost contradiction', (data: AttributionFacts) => { data.cells[0]!.results[0]!.cost.usdMicros++; }],
     ['excessive delivery refs', (data: AttributionFacts) => {
       data.cells[1]!.results[0]!.deliveredRefs =
@@ -265,53 +316,53 @@ describe('daemon autoload attribution analyzer', () => {
     ['reused isolation', (data: AttributionFacts) => {
       data.cells[1]!.isolation.storeDigest = data.cells[0]!.isolation.storeDigest;
     }],
-  ])('fails closed on %s', (_name, mutate) => {
+  ])('fails closed on %s', async (_name, mutate) => {
     const recorded = facts();
-    const evidence = evidenceFor(recorded);
+    const evidence = await evidenceFor(recorded);
     mutate(recorded);
     const registration = prereg();
-    expect(() => analyzeAttributionInstrument(
+    await expect(analyzeAttributionInstrument(
       registration,
       recorded,
       options(registration, recorded, evidence),
-    )).toThrow();
+    )).rejects.toThrow();
   });
 
-  it('rejects manifest tampering, receipt tampering, and facts/receipt contradiction', () => {
+  it('rejects manifest tampering, receipt tampering, and facts/receipt contradiction', async () => {
     const changedManifest = facts();
-    const changedManifestEvidence = evidenceFor(changedManifest);
+    const changedManifestEvidence = await evidenceFor(changedManifest);
     changedManifestEvidence.manifest += '\n';
     const registration = prereg();
-    expect(() => analyzeAttributionInstrument(
+    await expect(analyzeAttributionInstrument(
       registration,
       changedManifest,
       options(registration, changedManifest, changedManifestEvidence),
-    )).toThrow(/manifest digest/i);
+    )).rejects.toThrow(/manifest digest/i);
 
     const changedReceipt = facts();
-    const changedReceiptEvidence = evidenceFor(changedReceipt);
+    const changedReceiptEvidence = await evidenceFor(changedReceipt);
     changedReceiptEvidence.files[0]!.content = Buffer.from('tampered');
-    expect(() => analyzeAttributionInstrument(
+    await expect(analyzeAttributionInstrument(
       registration,
       changedReceipt,
       options(registration, changedReceipt, changedReceiptEvidence),
-    )).toThrow(/evidence digest/i);
+    )).rejects.toThrow(/evidence digest/i);
 
     const contradiction = facts();
-    const contradictionEvidence = evidenceFor(contradiction);
+    const contradictionEvidence = await evidenceFor(contradiction);
     contradiction.cells[1]!.results[0]!.deliveredRefs = [ref('9')];
-    expect(() => analyzeAttributionInstrument(
+    await expect(analyzeAttributionInstrument(
       registration,
       contradiction,
       options(registration, contradiction, contradictionEvidence),
-    )).toThrow(/facts do not match/i);
+    )).rejects.toThrow(/facts do not match/i);
   });
 
-  it('rejects open-window analysis and multiline Markdown fields', () => {
+  it('rejects open-window analysis and multiline Markdown fields', async () => {
     const recorded = facts();
     const registration = prereg();
-    const evidence = evidenceFor(recorded);
-    expect(() => analyzeAttributionInstrument(
+    const evidence = await evidenceFor(recorded);
+    await expect(analyzeAttributionInstrument(
       registration,
       recorded,
       options(
@@ -320,12 +371,12 @@ describe('daemon autoload attribution analyzer', () => {
         evidence,
         new Date('2026-07-22T07:59:59.000Z'),
       ),
-    )).toThrow(/window has not closed/i);
+    )).rejects.toThrow(/window has not closed/i);
     const multiline = { ...prereg(), instrumentId: 'safe\nMechanical signal: helped' };
-    expect(() => analyzeAttributionInstrument(
+    await expect(analyzeAttributionInstrument(
       multiline,
       recorded,
-      options(multiline, recorded, evidenceFor(recorded)),
-    )).toThrow(/single-line/i);
+      options(multiline, recorded, await evidenceFor(recorded)),
+    )).rejects.toThrow(/single-line/i);
   });
 });

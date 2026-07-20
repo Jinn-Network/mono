@@ -1,8 +1,13 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
+  appendFileSync,
+  closeSync,
+  constants,
+  fstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   readdirSync,
   symlinkSync,
@@ -12,6 +17,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
+
+import {
+  readAttributionEvidenceBundle,
+  readBoundedRegularFile,
+  readBoundedRegularFileDescriptor,
+} from '../../scripts/attribution-files.js';
+import { createAttributionVerdictProof } from '../eval/attribution-verdict-fixture.js';
 
 const SCRIPT = 'scripts/analyze-attribution-instrument.ts';
 const EXPORTER = 'scripts/export-attribution-facts.ts';
@@ -43,7 +55,7 @@ function fixture() {
     alpha: 0.05,
     minimumMatchedPairs: 6,
     minimumDiscordantPairs: 6,
-    executionOrderSeed: 'frozen-order-seed',
+    executionOrderSeed: '2',
     runtime,
     population: { instanceIds },
     cells,
@@ -86,10 +98,23 @@ function fixture() {
   return { preregistration, facts };
 }
 
-function materialize(dir: string, data = fixture()) {
+async function materialize(dir: string, data = fixture()) {
   const files: Array<{ path: string; content: string; digest: string }> = [];
-  for (const cell of data.facts.cells) {
-    for (const result of cell.results) {
+  for (let cellIndex = 0; cellIndex < data.facts.cells.length; cellIndex++) {
+    const cell = data.facts.cells[cellIndex]!;
+    for (let resultIndex = 0; resultIndex < cell.results.length; resultIndex++) {
+      const result = cell.results[resultIndex]!;
+      const verdictProof = await createAttributionVerdictProof({
+        instanceId: result.instanceId,
+        acceptedDiff: result.passed === true,
+        nonce: cellIndex * 1_000 + resultIndex,
+      });
+      result.verdictRef =
+        `verdict:${verdictProof.marketplace.verdict.chainId}:`
+        + `${verdictProof.marketplace.verdict.taskId}:`
+        + `${verdictProof.marketplace.verdict.attemptIndex}:`
+        + `${verdictProof.marketplace.verdict.verdictIndex}:`
+        + verdictProof.marketplace.verdict.requestId;
       const receipt = {
         schema: 'jinn.attribution-verdict-receipt.v1',
         instrumentId: data.facts.instrumentId,
@@ -105,9 +130,7 @@ function materialize(dir: string, data = fixture()) {
         completedAt: result.completedAt,
         sessionKind: result.sessionKind,
         origin: 'marketplace',
-        verdictRef: result.verdictRef,
-        acceptedDiff: result.passed,
-        unscorable: result.unscorable,
+        verdictProof,
         deliveredRefs: result.deliveredRefs,
         cost: result.cost,
       };
@@ -137,7 +160,7 @@ function materialize(dir: string, data = fixture()) {
   return { preregPath, factsPath, evidencePath, files, data };
 }
 
-function run(paths: ReturnType<typeof materialize>, format = 'json') {
+function run(paths: Awaited<ReturnType<typeof materialize>>, format = 'json') {
   return spawnSync(TSX, [
     SCRIPT,
     '--prereg', paths.preregPath,
@@ -147,7 +170,7 @@ function run(paths: ReturnType<typeof materialize>, format = 'json') {
   ], { cwd: process.cwd(), encoding: 'utf8' });
 }
 
-function runExporter(paths: ReturnType<typeof materialize>) {
+function runExporter(paths: Awaited<ReturnType<typeof materialize>>) {
   return spawnSync(TSX, [
     EXPORTER,
     '--prereg', paths.preregPath,
@@ -157,9 +180,9 @@ function runExporter(paths: ReturnType<typeof materialize>) {
 }
 
 describe('daemon attribution CLI', () => {
-  it('exports deterministic analyzer-ready facts from receipts', () => {
+  it('exports deterministic analyzer-ready facts from receipts', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-attribution-cli-'));
-    const paths = materialize(dir);
+    const paths = await materialize(dir);
     const first = runExporter(paths);
     const second = runExporter(paths);
 
@@ -169,9 +192,9 @@ describe('daemon attribution CLI', () => {
     expect(JSON.parse(first.stdout)).toEqual(paths.data.facts);
   });
 
-  it('prints byte-stable JSON and Markdown and writes no files', () => {
+  it('prints byte-stable JSON and Markdown and writes no files', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-attribution-cli-'));
-    const paths = materialize(dir);
+    const paths = await materialize(dir);
     const before = readdirSync(dir).sort();
     const jsonFirst = run(paths);
     const jsonSecond = run(paths);
@@ -197,10 +220,10 @@ describe('daemon attribution CLI', () => {
     ['host internal', (data: ReturnType<typeof fixture>) => { data.facts.cells[0]!.results[0]!.sessionKind = 'host-internal'; }],
     ['synthetic', (data: ReturnType<typeof fixture>) => { data.facts.cells[0]!.results[0]!.origin = 'synthetic'; }],
     ['off delivery', (data: ReturnType<typeof fixture>) => { data.facts.cells[0]!.results[0]!.deliveredRefs = [ref('9')]; }],
-  ])('exits nonzero without stdout on %s', (_name, mutate) => {
+  ])('exits nonzero without stdout on %s', async (_name, mutate) => {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-attribution-cli-'));
     const data = fixture();
-    const paths = materialize(dir, data);
+    const paths = await materialize(dir, data);
     mutate(data);
     writeFileSync(paths.factsPath, JSON.stringify(data.facts));
     const result = run(paths);
@@ -208,14 +231,14 @@ describe('daemon attribution CLI', () => {
     expect(result.stdout).toBe('');
   });
 
-  it('rejects receipt tampering and facts/receipt contradiction', () => {
+  it('rejects receipt tampering and facts/receipt contradiction', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-attribution-cli-'));
-    const paths = materialize(dir);
+    const paths = await materialize(dir);
     writeFileSync(join(dir, paths.files[0]!.path), 'tampered');
     expect(run(paths)).toMatchObject({ status: 1, stdout: '' });
 
     const dir2 = mkdtempSync(join(tmpdir(), 'jinn-attribution-cli-'));
-    const paths2 = materialize(dir2);
+    const paths2 = await materialize(dir2);
     paths2.data.facts.cells[1]!.results[0]!.deliveredRefs = [ref('9')];
     writeFileSync(paths2.factsPath, JSON.stringify(paths2.data.facts));
     const contradicted = run(paths2);
@@ -224,14 +247,14 @@ describe('daemon attribution CLI', () => {
     expect(contradicted.stderr).toMatch(/facts do not match/i);
   });
 
-  it('rejects unsafe and symlink-escaping evidence paths', () => {
+  it('rejects unsafe and symlink-escaping evidence paths', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-attribution-cli-'));
-    const paths = materialize(dir);
+    const paths = await materialize(dir);
     writeFileSync(paths.evidencePath, `${'a'.repeat(64)}  cells/../outside\n`);
     expect(run(paths)).toMatchObject({ status: 1, stdout: '' });
 
     const dir2 = mkdtempSync(join(tmpdir(), 'jinn-attribution-cli-'));
-    const paths2 = materialize(dir2);
+    const paths2 = await materialize(dir2);
     const outsideDir = mkdtempSync(join(tmpdir(), 'jinn-attribution-outside-'));
     const outside = join(outsideDir, 'receipt');
     writeFileSync(outside, '{}');
@@ -241,6 +264,43 @@ describe('daemon attribution CLI', () => {
     paths2.data.facts.evidenceManifestDigest = hash(`${contentHash}  cells/escape\n`);
     writeFileSync(paths2.factsPath, JSON.stringify(paths2.data.facts));
     expect(run(paths2)).toMatchObject({ status: 1, stdout: '' });
+  });
+
+  it('bounds individual, aggregate, and growing evidence reads', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-attribution-bounds-'));
+    const oversizedPath = join(dir, 'oversized');
+    writeFileSync(oversizedPath, 'ab');
+    expect(() => readBoundedRegularFile(oversizedPath, 1, 'oversized')).toThrow(
+      /maximum byte size/i,
+    );
+
+    const growingPath = join(dir, 'growing');
+    writeFileSync(growingPath, 'a');
+    const fd = openSync(growingPath, constants.O_RDONLY);
+    try {
+      const initialSize = fstatSync(fd).size;
+      appendFileSync(growingPath, 'b');
+      expect(() =>
+        readBoundedRegularFileDescriptor(fd, initialSize, 8, 'growing'),
+      ).toThrow(/grew/i);
+    } finally {
+      closeSync(fd);
+    }
+
+    const cells = join(dir, 'cells');
+    mkdirSync(cells);
+    const files = [
+      { path: 'cells/a', content: 'abc' },
+      { path: 'cells/b', content: 'def' },
+    ];
+    for (const file of files) writeFileSync(join(dir, file.path), file.content);
+    const manifest = `${files.map((file) =>
+      `${hash(file.content).slice(7)}  ${file.path}`).join('\n')}\n`;
+    const manifestPath = join(dir, 'evidence.sha256');
+    writeFileSync(manifestPath, manifest);
+    expect(() => readAttributionEvidenceBundle(manifestPath, 5)).toThrow(
+      /aggregate evidence.*maximum/i,
+    );
   });
 
   it('keeps runbook Bash parseable and every analyzer call evidence-bound', () => {
@@ -256,5 +316,15 @@ describe('daemon attribution CLI', () => {
       runbook.match(/--evidence-manifest/g)?.length,
     );
     expect(runbook.match(/attribution:export-facts/g)?.length).toBe(2);
+    const createdAtFetches = runbook.match(/--jq '\.created_at'/g)?.length ?? 0;
+    expect(runbook.match(/--jq '\.updated_at'/g)?.length ?? 0).toBe(createdAtFetches);
+    expect(
+      runbook.match(
+        /test "\$(?:REMOTE_)?ANCHOR_CREATED_AT" = "\$(?:REMOTE_)?ANCHOR_UPDATED_AT"/g,
+      )?.length ?? 0,
+    ).toBe(createdAtFetches);
+    expect(runbook).toContain('DERIVED_CELL_ORDER');
+    expect(runbook).toContain('executionOrderSeed');
+    expect(runbook).toContain('createHash("sha256")');
   });
 });
