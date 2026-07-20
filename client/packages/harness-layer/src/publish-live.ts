@@ -57,6 +57,11 @@ export interface ManifestAnchorStore {
   }): void;
   loadManifestBatchJournal(batchKey: string): string | null;
   saveManifestBatchJournal(batchKey: string, stateJson: string): void;
+  compareAndSwapManifestBatchJournal(
+    batchKey: string,
+    expectedStateJson: string | null,
+    nextStateJson: string,
+  ): boolean;
 }
 
 export interface LivePublishConfig {

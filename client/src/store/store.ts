@@ -3017,6 +3017,29 @@ export class Store {
     ).run({ batchKey, stateJson });
   }
 
+  compareAndSwapManifestBatchJournal(
+    batchKey: string,
+    expectedStateJson: string | null,
+    nextStateJson: string,
+  ): boolean {
+    if (expectedStateJson === null) {
+      const result = this.db.prepare(
+        `INSERT INTO manifest_batch_journal (batch_key, state_json, updated_at)
+         VALUES (@batchKey, @nextStateJson, datetime('now'))
+         ON CONFLICT(batch_key) DO NOTHING`,
+      ).run({ batchKey, nextStateJson });
+      return result.changes === 1;
+    }
+    const result = this.db.prepare(
+      `UPDATE manifest_batch_journal
+          SET state_json = @nextStateJson,
+              updated_at = datetime('now')
+        WHERE batch_key = @batchKey
+          AND state_json = @expectedStateJson`,
+    ).run({ batchKey, expectedStateJson, nextStateJson });
+    return result.changes === 1;
+  }
+
   listErc8004AnchorsByEnvelopeCids(envelopeCids: readonly string[]): Erc8004AnchorRow[] {
     if (envelopeCids.length === 0) return [];
     const placeholders = envelopeCids.map((_, i) => `@cid${i}`).join(', ');

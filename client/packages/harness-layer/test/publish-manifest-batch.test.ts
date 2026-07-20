@@ -11,6 +11,7 @@ import {
   ManifestBatchSetError,
   publishManifestBatch,
   publishMemberEnvelope,
+  type ManifestBatchJournalStore,
   type ManifestBatchPublishDeps,
 } from '../src/publish.js';
 import { createMemoryLedger } from '../src/ledger.js';
@@ -33,17 +34,30 @@ const PUBLICATION_SCOPE = {
   agentId: '42',
 } as const;
 
+function journalStore(
+  states: Map<string, string>,
+  save: (batchKey: string, stateJson: string) => void =
+    (batchKey, stateJson) => states.set(batchKey, stateJson),
+): ManifestBatchJournalStore {
+  return {
+    loadManifestBatchJournal: (batchKey) => states.get(batchKey) ?? null,
+    saveManifestBatchJournal: save,
+    compareAndSwapManifestBatchJournal: (
+      batchKey,
+      expectedStateJson,
+      nextStateJson,
+    ) => {
+      const current = states.get(batchKey) ?? null;
+      if (current !== expectedStateJson) return false;
+      save(batchKey, nextStateJson);
+      return true;
+    },
+  };
+}
+
 function memoryJournal() {
   const states = new Map<string, string>();
-  return {
-    store: {
-      loadManifestBatchJournal: (batchKey: string) => states.get(batchKey) ?? null,
-      saveManifestBatchJournal: (batchKey: string, stateJson: string) => {
-        states.set(batchKey, stateJson);
-      },
-    },
-    states,
-  };
+  return { store: journalStore(states), states };
 }
 
 function task(index: number): CapturedTask {
@@ -487,9 +501,9 @@ describe('publishManifestBatch', () => {
   it('persists a manifest upload intent before calling the external publisher', async () => {
     const { publishDeps, calls } = deps();
     const states = new Map<string, string>();
-    publishDeps.manifestJournal = {
-      loadManifestBatchJournal: (batchKey) => states.get(batchKey) ?? null,
-      saveManifestBatchJournal: (batchKey, stateJson) => {
+    publishDeps.manifestJournal = journalStore(
+      states,
+      (batchKey, stateJson) => {
         const state = JSON.parse(stateJson) as {
           partitions?: Array<{ manifestUpload?: { status?: string } }>;
         };
@@ -498,7 +512,7 @@ describe('publishManifestBatch', () => {
         }
         states.set(batchKey, stateJson);
       },
-    };
+    );
 
     const error = await publishManifestBatch(
       [{ pending: await pending(1), sourceId: 'request-1' }],
@@ -521,9 +535,9 @@ describe('publishManifestBatch', () => {
     const { publishDeps, calls } = deps();
     const states = new Map<string, string>();
     let failUploadedSave = true;
-    publishDeps.manifestJournal = {
-      loadManifestBatchJournal: (batchKey) => states.get(batchKey) ?? null,
-      saveManifestBatchJournal: (batchKey, stateJson) => {
+    publishDeps.manifestJournal = journalStore(
+      states,
+      (batchKey, stateJson) => {
         const state = JSON.parse(stateJson) as {
           partitions?: Array<{ manifestUpload?: { status?: string } }>;
         };
@@ -536,7 +550,7 @@ describe('publishManifestBatch', () => {
         }
         states.set(batchKey, stateJson);
       },
-    };
+    );
     const reconcileManifestBody = vi.fn(async () => ({ status: 'present' as const }));
     publishDeps.reconcileManifestBody = reconcileManifestBody;
     const members = [
@@ -570,9 +584,9 @@ describe('publishManifestBatch', () => {
     const { publishDeps, calls } = deps();
     const states = new Map<string, string>();
     let failUploadedSave = true;
-    publishDeps.manifestJournal = {
-      loadManifestBatchJournal: (batchKey) => states.get(batchKey) ?? null,
-      saveManifestBatchJournal: (batchKey, stateJson) => {
+    publishDeps.manifestJournal = journalStore(
+      states,
+      (batchKey, stateJson) => {
         const state = JSON.parse(stateJson) as {
           partitions?: Array<{ manifestUpload?: { status?: string } }>;
         };
@@ -585,7 +599,7 @@ describe('publishManifestBatch', () => {
         }
         states.set(batchKey, stateJson);
       },
-    };
+    );
     const members = [
       { pending: await pending(1), sourceId: 'request-1' },
     ];
@@ -610,9 +624,9 @@ describe('publishManifestBatch', () => {
     const { publishDeps, calls } = deps();
     const states = new Map<string, string>();
     let failBeforeUpload = true;
-    publishDeps.manifestJournal = {
-      loadManifestBatchJournal: (batchKey) => states.get(batchKey) ?? null,
-      saveManifestBatchJournal: (batchKey, stateJson) => {
+    publishDeps.manifestJournal = journalStore(
+      states,
+      (batchKey, stateJson) => {
         const state = JSON.parse(stateJson) as {
           partitions?: Array<{ manifestUpload?: { status?: string } }>;
         };
@@ -626,7 +640,7 @@ describe('publishManifestBatch', () => {
         }
         states.set(batchKey, stateJson);
       },
-    };
+    );
     const members = [
       { pending: await pending(1), sourceId: 'request-1' },
     ];
@@ -772,9 +786,9 @@ describe('publishManifestBatch', () => {
   it('persists an anchor intent before broadcasting the manifest transaction', async () => {
     const { publishDeps, calls } = deps();
     const states = new Map<string, string>();
-    publishDeps.manifestJournal = {
-      loadManifestBatchJournal: (batchKey) => states.get(batchKey) ?? null,
-      saveManifestBatchJournal: (batchKey, stateJson) => {
+    publishDeps.manifestJournal = journalStore(
+      states,
+      (batchKey, stateJson) => {
         const state = JSON.parse(stateJson) as {
           partitions?: Array<{ transaction?: { status?: string } }>;
         };
@@ -783,7 +797,7 @@ describe('publishManifestBatch', () => {
         }
         states.set(batchKey, stateJson);
       },
-    };
+    );
 
     const error = await publishManifestBatch(
       [{ pending: await pending(1), sourceId: 'request-1' }],
@@ -806,9 +820,9 @@ describe('publishManifestBatch', () => {
     const { publishDeps, calls } = deps();
     const states = new Map<string, string>();
     let failBroadcastSave = true;
-    publishDeps.manifestJournal = {
-      loadManifestBatchJournal: (batchKey) => states.get(batchKey) ?? null,
-      saveManifestBatchJournal: (batchKey, stateJson) => {
+    publishDeps.manifestJournal = journalStore(
+      states,
+      (batchKey, stateJson) => {
         const state = JSON.parse(stateJson) as {
           partitions?: Array<{ transaction?: { status?: string } }>;
         };
@@ -821,7 +835,7 @@ describe('publishManifestBatch', () => {
         }
         states.set(batchKey, stateJson);
       },
-    };
+    );
     let anchorCalls = 0;
     publishDeps.anchorManifest = async ({ onBroadcast }) => {
       anchorCalls += 1;
@@ -886,6 +900,69 @@ describe('publishManifestBatch', () => {
     expect(calls.publishEnvelope).toHaveLength(0);
     expect(calls.anchorManifest).toHaveLength(0);
     expect(journal.states).toHaveProperty('size', 0);
+  });
+
+  it('allows only one concurrent writer to anchor the same durable batch', async () => {
+    const { publishDeps, calls, ledger } = deps();
+    const journal = memoryJournal();
+    publishDeps.manifestJournal = journal.store;
+    let releaseEnvelopeUploads: (() => void) | undefined;
+    const bothEnvelopeUploadsStarted = new Promise<void>((resolve) => {
+      releaseEnvelopeUploads = resolve;
+    });
+    let envelopeUploadCount = 0;
+    publishDeps.publishEnvelope = async () => {
+      envelopeUploadCount += 1;
+      if (envelopeUploadCount === 2) releaseEnvelopeUploads?.();
+      await bothEnvelopeUploadsStarted;
+      return {
+        cid: 'bafy-envelope-shared',
+        sha256: 'a'.repeat(64),
+      };
+    };
+    let anchorCalls = 0;
+    publishDeps.anchorManifest = async ({ onBroadcast }) => {
+      anchorCalls += 1;
+      const txHash = `0x${String(anchorCalls).padStart(64, '0')}` as const;
+      onBroadcast?.(txHash);
+      return {
+        txHash,
+        blockNumber: anchorCalls,
+        gasUsed: 123_456n,
+        feeWei: 987_648n,
+      };
+    };
+    const members = [
+      { pending: await pending(1), sourceId: 'request-1' },
+    ];
+
+    const outcomes = await Promise.allSettled([
+      publishManifestBatch(members, publishDeps, { batchKind: 'bridge' }),
+      publishManifestBatch(members, publishDeps, { batchKind: 'bridge' }),
+    ]);
+
+    expect(outcomes.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
+    const [rejected] = outcomes.filter(
+      (outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected',
+    );
+    expect(String(rejected?.reason)).toMatch(
+      /manifest journal conflict: concurrent writer advanced batch/,
+    );
+    expect(anchorCalls).toBe(1);
+    expect(calls.anchorRecords).toHaveLength(1);
+    expect(ledger.list()).toHaveLength(1);
+    const [persisted] = journal.states.values();
+    const journalState = JSON.parse(persisted!) as {
+      partitions: Array<{
+        transaction: { status: string; txHash: string };
+      }>;
+    };
+    expect(journalState.partitions[0]?.transaction).toEqual(
+      expect.objectContaining({
+        status: 'confirmed',
+        txHash: `0x${'0'.repeat(63)}1`,
+      }),
+    );
   });
 
   it('fails closed when sanitized member inputs change under the same source IDs', async () => {
@@ -1051,16 +1128,16 @@ describe('publishManifestBatch', () => {
     const { publishDeps, calls } = deps();
     const states = new Map<string, string>();
     let saveCalls = 0;
-    publishDeps.manifestJournal = {
-      loadManifestBatchJournal: (batchKey) => states.get(batchKey) ?? null,
-      saveManifestBatchJournal: (batchKey, stateJson) => {
+    publishDeps.manifestJournal = journalStore(
+      states,
+      (batchKey, stateJson) => {
         saveCalls += 1;
         if (saveCalls === 3) {
           throw new Error('frozen plan journal write failed');
         }
         states.set(batchKey, stateJson);
       },
-    };
+    );
     const members = [
       { pending: await pending(1), sourceId: 'request-1' },
     ];
@@ -1188,9 +1265,9 @@ describe('publishManifestBatch', () => {
   it('persists a control anchor intent before calling the external anchor', async () => {
     const { publishDeps, calls } = deps();
     const states = new Map<string, string>();
-    publishDeps.manifestJournal = {
-      loadManifestBatchJournal: (batchKey) => states.get(batchKey) ?? null,
-      saveManifestBatchJournal: (batchKey, stateJson) => {
+    publishDeps.manifestJournal = journalStore(
+      states,
+      (batchKey, stateJson) => {
         const state = JSON.parse(stateJson) as {
           partitions?: Array<{ controlTransaction?: { status?: string } }>;
         };
@@ -1199,7 +1276,7 @@ describe('publishManifestBatch', () => {
         }
         states.set(batchKey, stateJson);
       },
-    };
+    );
 
     const error = await publishManifestBatch(
       [{ pending: await pending(1), sourceId: 'request-1' }],
@@ -1220,9 +1297,9 @@ describe('publishManifestBatch', () => {
     const { publishDeps } = deps();
     const states = new Map<string, string>();
     let failBroadcastSave = true;
-    publishDeps.manifestJournal = {
-      loadManifestBatchJournal: (batchKey) => states.get(batchKey) ?? null,
-      saveManifestBatchJournal: (batchKey, stateJson) => {
+    publishDeps.manifestJournal = journalStore(
+      states,
+      (batchKey, stateJson) => {
         const state = JSON.parse(stateJson) as {
           partitions?: Array<{ controlTransaction?: { status?: string } }>;
         };
@@ -1235,7 +1312,7 @@ describe('publishManifestBatch', () => {
         }
         states.set(batchKey, stateJson);
       },
-    };
+    );
     let controlCalls = 0;
     const payloadHex = `0x${'ef'.repeat(32)}` as const;
     publishDeps.anchorEnvelope = async (input) => {

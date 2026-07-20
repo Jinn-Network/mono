@@ -53,6 +53,26 @@ function cidFor(body: unknown): string {
   return `f01551220${digest}`;
 }
 
+function cidV0AliasFor(body: unknown): string {
+  const digest = createHash('sha256').update(canonicalJson(body)).digest();
+  const multihash = Uint8Array.from([0x12, 0x20, ...digest]);
+  const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  const digits = [0];
+  for (const byte of multihash) {
+    let carry = byte;
+    for (let index = 0; index < digits.length; index += 1) {
+      carry += digits[index]! << 8;
+      digits[index] = carry % 58;
+      carry = Math.floor(carry / 58);
+    }
+    while (carry > 0) {
+      digits.push(carry % 58);
+      carry = Math.floor(carry / 58);
+    }
+  }
+  return digits.reverse().map((digit) => alphabet[digit]).join('');
+}
+
 function deps(body: unknown = manifest(), anchored: Hex | null = anchor()) {
   return {
     agentId: 42n,
@@ -150,5 +170,16 @@ describe('manifest consumer', () => {
     await expect(
       fetchManifest(cidFor(original), deps(substituted)),
     ).rejects.toBeInstanceOf(ManifestContentAddressMismatchError);
+  });
+
+  it('rejects a CIDv0 digest alias before trusting its metadata namespace', async () => {
+    const body = manifest();
+    const ports = deps(body);
+
+    await expect(
+      fetchManifest(cidV0AliasFor(body), ports),
+    ).rejects.toBeInstanceOf(ManifestContentAddressMismatchError);
+    expect(ports.ipfsGet).not.toHaveBeenCalled();
+    expect(ports.getMetadata).not.toHaveBeenCalled();
   });
 });
