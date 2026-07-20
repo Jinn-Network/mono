@@ -6,34 +6,14 @@ import { describe, expect, it } from 'vitest';
 const clientRoot = fileURLToPath(new URL('../../', import.meta.url));
 
 describe('jinn-layer production composition root', () => {
-  it('routes development and the shipped bundle through authenticated verifier wiring', () => {
+  it('leaves both layer binaries out of the client release lane', () => {
     const packageJson = JSON.parse(
       readFileSync(join(clientRoot, 'package.json'), 'utf8'),
-    ) as { scripts: Record<string, string> };
-    const bundleSource = readFileSync(
-      join(clientRoot, 'scripts/bundle-jinn-layer.mjs'),
-      'utf8',
-    );
-    const rootSource = readFileSync(
-      join(clientRoot, 'scripts/jinn-layer-entry.ts'),
-      'utf8',
-    );
+    ) as { scripts: Record<string, string>; bin: Record<string, string> };
 
-    expect(packageJson.scripts['jinn-layer']).toBe(
-      'tsx scripts/jinn-layer-entry.ts',
-    );
-    expect(bundleSource).toContain(
-      "{ in: 'scripts/jinn-layer-entry.ts', out: 'dist/bin/jinn-layer.js'",
-    );
-    expect(rootSource).toContain('runJinnLayerCli');
-    expect(rootSource).toContain('createBoundedRawHfRowFetcher');
-    expect(rootSource).toContain('createSweRebenchV2VerifierFactsResolver');
-    expect(rootSource).toContain('verifierFactsResolverFactory');
-    expect(rootSource).toContain('authenticateExecutionEnvelope');
-    expect(rootSource).toContain('createPublisherSafeResolver');
-    expect(rootSource).toContain('resolvePublisherSafe');
-    expect(rootSource).toContain('parseRpcUrls');
-    expect(rootSource).toContain('rpcUrls.slice(1)');
-    expect(rootSource).toContain("'https://sepolia.base.org'");
+    expect(packageJson.bin).not.toHaveProperty('jinn-layer');
+    expect(packageJson.bin).not.toHaveProperty('jinn-distill-mcp');
+    expect(packageJson.scripts).not.toHaveProperty('jinn-layer');
+    expect(packageJson.scripts.build).not.toContain('bundle-jinn-layer');
   });
 });

@@ -41,13 +41,14 @@ describe('packed client workflow coverage', () => {
     expect(publishCanary).toBeGreaterThan(smoke);
   });
 
-  it('keeps packed CLI help and doctor no-crash coverage alongside native reindex', () => {
+  it('keeps client CLI coverage and rejects layer binaries in the client tarball', () => {
     const smoke = workflow('client/scripts/smoke-test-pack.mjs');
 
     expect(smoke).toContain("'jinn', '--help'");
     expect(smoke).toContain("'jinn', 'doctor', '--json'");
     expect(smoke).toContain('doctor.status === 50');
-    expect(smoke).toContain("'jinn-layer',");
-    expect(smoke).toContain("'reindex',");
+    expect(smoke).toContain("entry === 'package/dist/bin/jinn-layer.js'");
+    expect(smoke).toContain("entry === 'package/dist/bin/jinn-distill-mcp.js'");
+    expect(smoke).not.toContain("'jinn-layer',");
   });
 });

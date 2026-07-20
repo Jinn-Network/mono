@@ -20,8 +20,6 @@
   "bin": {
     "client": "./dist/bin/jinn.js",
     "jinn": "./dist/bin/jinn.js",
-    "jinn-distill-mcp": "./dist/bin/jinn-distill-mcp.js",
-    "jinn-layer": "./dist/bin/jinn-layer.js",
     "jinn-stop-hook": "./dist/bin/jinn-stop-hook.js"
   },
   "main": "./dist/index.js",
@@ -69,18 +67,16 @@
     "task-creator:proof:jinn-mono": "yarn task-creator:mint-preflight:jinn-mono",
     "task-creator:proof:unjs-destr": "yarn task-creator:mint-preflight:unjs-destr",
     "jinn": "tsx src/bin/jinn.ts",
-    "jinn-layer": "tsx scripts/jinn-layer-entry.ts",
-    "stage2:validate-curated-seeds": "tsx scripts/validate-curated-seed-batch.ts",
-    "typecheck:harness-layer": "tsc --noEmit -p packages/harness-layer/tsconfig.json",
-    "typecheck:jinn-layer-entry": "tsc --noEmit -p tsconfig.jinn-layer-entry.json",
+    "stage2:validate-curated-seeds": "yarn build:layer && tsx scripts/validate-curated-seed-batch.ts",
     "dev": "yarn build && node dist/bin/jinn.js",
     "build:sdk": "yarn --cwd ../packages/sdk install --immutable && yarn --cwd ../packages/sdk build",
     "build:plugin": "yarn --cwd ../packages/plugin install --immutable && yarn --cwd ../packages/plugin build",
     "build:core": "yarn --cwd ../packages/core install --immutable && yarn --cwd ../packages/core build",
-    "build": "yarn build:sdk && yarn build:plugin && yarn build:core && yarn build:spa && tsc && chmod +x dist/bin/jinn.js && node scripts/bundle-jinn-layer.mjs && rm -rf dist/dashboard && mkdir -p dist/dashboard && cp -R src/dashboard/spa/dist/. dist/dashboard/ && rm -rf dist/templates && cp -R templates dist/templates && rm -rf dist/plugins/learner dist/plugins/local-trace-distiller && mkdir -p dist/plugins && cp -R plugins/learner dist/plugins/learner && cp -R plugins/local-trace-distiller dist/plugins/local-trace-distiller && mkdir -p dist/scripts && cp scripts/fix-node-pty.mjs scripts/swe-rebench-v2-seed-pool.json scripts/swe-rebench-v2-known-bad.json scripts/swe-rebench-v2-pytest-missing.json scripts/swe-rebench-v2-evaluator.bundle.v1.patch dist/scripts/ && mkdir -p dist/solver-types/slates && cp src/solver-types/slates/*.json dist/solver-types/slates/ && mkdir -p dist/harnesses/impls/swe-rebench-v2-evaluator/upstream-patches && cp src/harnesses/impls/swe-rebench-v2-evaluator/upstream-patches/*.patch dist/harnesses/impls/swe-rebench-v2-evaluator/upstream-patches/ && node scripts/vendor-private-packages.mjs && node scripts/vendor-sdk.mjs && node scripts/write-dist-build-meta.mjs && yarn typecheck:harness-layer && yarn typecheck:jinn-layer-entry",
-    "typecheck": "yarn build:sdk && yarn build:plugin && yarn build:core && tsc --noEmit && yarn typecheck:harness-layer && yarn typecheck:jinn-layer-entry",
+    "build:layer": "yarn --cwd ../packages/layer install --immutable && yarn --cwd ../packages/layer build",
+    "build": "yarn build:sdk && yarn build:plugin && yarn build:core && yarn build:spa && tsc && chmod +x dist/bin/jinn.js && rm -rf dist/dashboard && mkdir -p dist/dashboard && cp -R src/dashboard/spa/dist/. dist/dashboard/ && rm -rf dist/templates && cp -R templates dist/templates && rm -rf dist/plugins/learner dist/plugins/local-trace-distiller && mkdir -p dist/plugins && cp -R plugins/learner dist/plugins/learner && cp -R plugins/local-trace-distiller dist/plugins/local-trace-distiller && mkdir -p dist/scripts && cp scripts/fix-node-pty.mjs scripts/swe-rebench-v2-seed-pool.json scripts/swe-rebench-v2-known-bad.json scripts/swe-rebench-v2-pytest-missing.json scripts/swe-rebench-v2-evaluator.bundle.v1.patch dist/scripts/ && mkdir -p dist/solver-types/slates && cp src/solver-types/slates/*.json dist/solver-types/slates/ && mkdir -p dist/harnesses/impls/swe-rebench-v2-evaluator/upstream-patches && cp src/harnesses/impls/swe-rebench-v2-evaluator/upstream-patches/*.patch dist/harnesses/impls/swe-rebench-v2-evaluator/upstream-patches/ && node scripts/vendor-private-packages.mjs && node scripts/vendor-sdk.mjs && node scripts/write-dist-build-meta.mjs",
+    "typecheck": "yarn build:sdk && yarn build:plugin && yarn build:core && tsc --noEmit",
     "lint:no-late-mount": "node scripts/check-no-late-route-mount.mjs",
-    "test": "yarn build:sdk && yarn build:plugin && yarn build:core && vitest run",
+    "test": "yarn build:sdk && yarn build:plugin && yarn build:core && yarn build:layer && vitest run",
     "test:hermetic": "yarn build:sdk && yarn build:plugin && yarn build:core && vitest run --config vitest.hermetic.config.ts",
     "smoke:build-anvil-snapshot": "vitest run test/scripts/build-anvil-snapshot-entrypoint.test.ts",
     "test:watch": "vitest",
@@ -147,6 +143,7 @@
   },
   "resolutions": {
     "@jinn-network/core": "portal:../packages/core",
+    "@jinn-network/jinn-layer": "portal:../packages/layer",
     "@jinn-network/plugin": "portal:../packages/plugin",
     "axios": "^1.15.2",
     "fast-uri": "^3.1.2",
@@ -204,6 +201,7 @@
     "@coinbase/cdp-sdk": "^1.48.2"
   },
   "devDependencies": {
+    "@jinn-network/jinn-layer": "portal:../packages/layer",
     "@jinn-network/sdk": "portal:../packages/sdk",
     "@playwright/test": "^1.59.1",
     "@types/better-sqlite3": "^7.6.0",
