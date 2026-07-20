@@ -4,6 +4,7 @@ import {
   type ReconciliationWriter,
 } from '../../src/lifecycle/reconciler.js';
 import type { ProjectionAction } from '../../src/lifecycle/projection.js';
+import { LifecycleRateLimitError } from '../../src/lifecycle/snapshot.js';
 import { gitOid } from '../../src/lifecycle/types.js';
 
 const HEAD = gitOid('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
@@ -500,6 +501,52 @@ describe('executeProjectionPlan', () => {
 
     expect(calls).toEqual([]);
     expect(report.results[0]?.outcome).toBe('eligible');
+  });
+
+  it('defers every remaining action once the GitHub rate-limit budget is hit', async () => {
+    const state = initial();
+    const calls: string[] = [];
+    const base = writer(state, calls);
+    // Simulates the exact failure mode from jinn-mono#1883: the pre-check
+    // read (not the mutation itself) is what trips the exhausted budget, so
+    // the error surfaces before any inner mutate/readback catch can swallow
+    // it — exactly like a real `LifecycleRateLimitError` from a snapshot read.
+    const rateLimited: ReconciliationWriter = {
+      ...base,
+      readPullRequest: async () => {
+        throw new LifecycleRateLimitError(42);
+      },
+    };
+    const actions: ProjectionAction[] = [
+      { kind: 'set-pr-draft', prNumber: 101, expectedHead: HEAD, draft: true },
+      {
+        kind: 'set-pr-label',
+        prNumber: 101,
+        expectedHead: HEAD,
+        label: 'engine:review',
+        present: true,
+      },
+      {
+        kind: 'ensure-human-comment',
+        issueNumber: 42,
+        prNumber: 101,
+        expectedHead: HEAD,
+        marker: '<!-- marker -->',
+        body: '<!-- marker -->\nbody',
+      },
+    ];
+
+    const report = await executeProjectionPlan({ actions }, rateLimited);
+
+    // No mutation for any action ever ran — the budget-exhausted failure on
+    // action 1's pre-check short-circuits the loop before 2 and 3 are tried.
+    expect(calls).toEqual([]);
+    expect(report.results.map((result) => result.outcome)).toEqual([
+      'failed',
+      'budget-deferred',
+      'budget-deferred',
+    ]);
+    expect(report.results[0]?.detail).toContain('rate-limit');
   });
 
   it('does not make a verdict-intent PR ready before the terminal ref transition', async () => {

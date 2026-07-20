@@ -8,7 +8,8 @@ import {
   type ProjectSnapshot,
 } from '../dispatcher/project-snapshot.js';
 import type { IssueBoardState } from '../dispatcher/issue-source.js';
-import { REPO } from '../dispatcher/constants.js';
+import { PROJECT_NUMBER, REPO } from '../dispatcher/constants.js';
+import type { BlockedOn, ProjectStatus } from '../dispatcher/types.js';
 import type {
   GitHubLifecycleReader,
   PullRequestPage,
@@ -128,6 +129,58 @@ const REVIEW_REF_QUERY = `query($ref: String!) {
     }
   }
 }`;
+
+/**
+ * Single-issue targeted read of its Project item's `Status` / `Blocked on`
+ * fields (jinn-mono#1883 cost defect): the same `fieldValueByName` shape the
+ * world Project-board snapshot (`fetchProjectSnapshot`) reads for every
+ * item, scoped to one issue via `Issue.projectItems` instead of paginating
+ * the whole board (~91 pages measured on the live board).
+ */
+const PROJECT_ITEM_BY_ISSUE_QUERY = `query($number: Int!) {
+  repository(owner: "Jinn-Network", name: "mono") {
+    issue(number: $number) {
+      projectItems(first: 10) {
+        nodes {
+          id
+          project { number }
+          status:    fieldValueByName(name: "Status")     { ... on ProjectV2ItemFieldSingleSelectValue { name } }
+          blockedOn: fieldValueByName(name: "Blocked on") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
+        }
+      }
+    }
+  }
+}`;
+
+interface ProjectItemByIssueResponse {
+  data: {
+    repository: {
+      issue: {
+        projectItems: {
+          nodes: Array<{
+            id: string;
+            project: { number: number };
+            status: { name: string } | null;
+            blockedOn: { name: string } | null;
+          }>;
+        };
+      } | null;
+    };
+  };
+}
+
+const VALID_PROJECT_STATUS = new Set<string>([
+  'Todo', 'In Progress', 'Human', 'In Review', 'Done',
+]);
+const VALID_BLOCKED_ON = new Set<string>(['Nothing', 'Human', 'Another issue']);
+
+function parseProjectStatus(name: string | undefined): ProjectStatus | null {
+  return name !== undefined && VALID_PROJECT_STATUS.has(name) ? (name as ProjectStatus) : null;
+}
+
+function parseBlockedOn(name: string | undefined): BlockedOn | null {
+  return name !== undefined && VALID_BLOCKED_ON.has(name) ? (name as BlockedOn) : null;
+}
 
 interface GraphQlPage {
   data: {
@@ -672,6 +725,52 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
     const pr = response.data.repository.pullRequest;
     if (pr === null) throw new Error(`PR #${prNumber} disappeared during lifecycle read`);
     return pr;
+  }
+
+  /**
+   * Single-PR read for reconciliation exact-state pre-checks/read-backs
+   * (jinn-mono#1883 cost defect): the same per-node GraphQL shape and
+   * review-claim ref read (`readPullRequestByNumber` / `reviewClaim`) the
+   * world snapshot uses for each PR, without walking the whole open-PR +
+   * Project graph to inspect one. ~7-8 GraphQL points versus ~390 for a full
+   * `buildGitHubLifecycleSnapshot` call. Returns `null` for a PR that is not
+   * open or merged (closed-unmerged is not an active lifecycle item, matching
+   * how the world snapshot already excludes it).
+   */
+  async readPullRequestForReconciliation(prNumber: number): Promise<RawPullRequest | null> {
+    const raw = await this.readPullRequestByNumber(prNumber);
+    if (raw.state === 'CLOSED') return null;
+    return this.rawPullRequest(raw, true).catch((error: unknown) => {
+      if (!(error instanceof PrEvidenceInconsistentError)) throw error;
+      return inconsistentPullRequest(raw, error.message);
+    });
+  }
+
+  /**
+   * Single-issue read of its Project item's `id` / `Status` / `Blocked on`
+   * (jinn-mono#1883 cost defect): a targeted `Issue.projectItems` lookup
+   * instead of paginating the whole Project board to find one item.
+   * Returns `null` when the issue has no item on this Project.
+   */
+  async readProjectItemForReconciliation(issueNumber: number): Promise<{
+    readonly id: string;
+    readonly status: ProjectStatus | null;
+    readonly blockedOn: BlockedOn | null;
+  } | null> {
+    const raw = await this.run('gh', [
+      'api', 'graphql',
+      '-f', `query=${PROJECT_ITEM_BY_ISSUE_QUERY}`,
+      '-F', `number=${issueNumber}`,
+    ]);
+    const response = JSON.parse(raw) as ProjectItemByIssueResponse;
+    const nodes = response.data.repository.issue?.projectItems.nodes ?? [];
+    const node = nodes.find((candidate) => candidate.project.number === PROJECT_NUMBER);
+    if (node === undefined) return null;
+    return {
+      id: node.id,
+      status: parseProjectStatus(node.status?.name),
+      blockedOn: parseBlockedOn(node.blockedOn?.name),
+    };
   }
 
   async readPullRequests(
