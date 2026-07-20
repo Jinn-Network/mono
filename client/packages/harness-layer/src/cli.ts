@@ -2176,19 +2176,22 @@ export async function runJinnLayerCli(
       if (result.verdictsTruncated) {
         lines.push(`warning: verdict fetch hit the ${limit}-row limit — attempt groups may be PARTIAL; raise --limit to cover the corpus (#1478)`);
       }
-      if (result.bridge.manifestCid) {
-        if (result.bridge.manifestConfirmed === false) {
-          lines.push(
-            `manifest anchor unconfirmed ${result.bridge.manifestCid} at ` +
-            `${result.bridge.anchorTx ?? 'unknown'} — reconcile before retrying`,
-          );
-        } else {
-          lines.push(
-            `manifest anchored ${result.bridge.manifestCid} at ${result.bridge.anchorTx ?? 'unknown'} — ` +
-            `${result.bridge.manifestMemberRefs?.length ?? result.bridge.bridged.length} members, ` +
-            `gasUsed=${result.bridge.gasUsed?.toString() ?? 'unknown'}, ` +
-            `feeWei=${result.bridge.feeWei?.toString() ?? 'unknown'}`,
-          );
+      if (result.bridge.manifestBatches?.length) {
+        for (const batch of result.bridge.manifestBatches) {
+          if (!batch.confirmed) {
+            lines.push(
+              `manifest anchor unconfirmed ${batch.manifestCid} at ` +
+              `${batch.anchorTx ?? 'unknown'} — ${batch.memberRefs.length} members uploaded; ` +
+              'reconcile before retrying',
+            );
+          } else {
+            lines.push(
+              `manifest anchored ${batch.manifestCid} at ${batch.anchorTx ?? 'unknown'} — ` +
+              `${batch.memberRefs.length} members, ` +
+              `gasUsed=${batch.gasUsed?.toString() ?? 'unknown'}, ` +
+              `feeWei=${batch.feeWei?.toString() ?? 'unknown'}`,
+            );
+          }
         }
       }
       if (result.bridge.control) {

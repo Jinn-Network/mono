@@ -23,11 +23,13 @@ import { capture, type CapturedTask, type PendingEnvelope } from './capture.js';
 import {
   ManifestBatchAnchorError,
   ManifestBatchRecordingError,
+  ManifestBatchSetError,
   publish,
   publishManifestBatch as publishPendingManifestBatch,
   type HarnessPublishDeps,
   type ManifestBatchPublishDeps,
   type ManifestBatchResult,
+  type ManifestBatchSetResult,
 } from './publish.js';
 import { buildLayer2ScrubPipeline } from '../../../src/trajectory/scrub/layer2.js';
 import type { ScrubPipeline } from '../../../src/trajectory/scrub/pipeline.js';
@@ -123,7 +125,7 @@ export interface BridgeDeps {
   /** One shared manifest publication for every surviving task (manifest mode only). */
   publishManifestBatch?: (
     candidates: Array<{ task: CapturedTask; ref: AttemptRef }>,
-  ) => Promise<ManifestBatchResult>;
+  ) => Promise<ManifestBatchSetResult>;
   /** Weak-suite instance ids (discrimination fail) — excluded from bridge input. */
   weakSuiteInstanceIds?: Set<string>;
   /** Lookup-flagged instance ids — excluded from distillation input. */
@@ -138,6 +140,17 @@ export interface BridgeDeps {
    */
   groupCap?: number;
   now?: () => Date;
+}
+
+export interface BridgeManifestBatch {
+  manifestCid: string;
+  memberRefs: string[];
+  root: `0x${string}`;
+  anchorTx: `0x${string}` | null;
+  gasUsed: bigint | null;
+  feeWei: bigint | null;
+  control?: ManifestBatchResult['control'];
+  confirmed: boolean;
 }
 
 export interface BridgeResult {
@@ -157,6 +170,8 @@ export interface BridgeResult {
   unresolvedSlateIds: string[];
   /** Shared batch facts, populated only in manifest mode. */
   manifestCid?: string;
+  /** One observation per manifest partition, including recovery-only anchors. */
+  manifestBatches?: BridgeManifestBatch[];
   /** Uploaded member refs, retained even when post-anchor local finalization fails. */
   manifestMemberRefs?: string[];
   anchorTx?: string | null;
@@ -453,49 +468,96 @@ export async function bridgeAttempts(refs: AttemptRef[], deps: BridgeDeps): Prom
   }
 
   if (deps.anchorMode === 'manifest' && manifestCandidates.length > 0) {
+    const observations: BridgeManifestBatch[] = [];
+    const addCompleted = (
+      batches: ManifestBatchResult[],
+      candidateOffset: number,
+    ): number => {
+      let cursor = candidateOffset;
+      for (const batch of batches) {
+        observations.push({ ...batch, confirmed: true });
+        for (const memberRef of batch.memberRefs) {
+          const candidate = manifestCandidates[cursor];
+          if (!candidate) {
+            throw new Error('manifest publisher returned more member refs than candidates');
+          }
+          result.bridged.push({
+            instanceId: candidate.ref.instanceId,
+            polarity: candidate.ref.polarity,
+            envelopeRef: memberRef,
+            anchorTx: batch.anchorTx,
+          });
+          cursor += 1;
+        }
+      }
+      return cursor;
+    };
+    const addFailedObservation = (error: unknown): void => {
+      if (error instanceof ManifestBatchRecordingError) {
+        observations.push({ ...error.result, confirmed: true });
+      } else if (error instanceof ManifestBatchAnchorError) {
+        observations.push({
+          manifestCid: error.manifestCid,
+          memberRefs: [...error.memberRefs],
+          root: error.root,
+          anchorTx: error.txHash,
+          gasUsed: null,
+          feeWei: null,
+          confirmed: false,
+        });
+      }
+    };
+    const finishManifestFacts = (memberRefs: string[]): void => {
+      result.manifestMemberRefs = [...memberRefs];
+      if (observations.length > 0) {
+        result.manifestBatches = observations;
+        result.control = observations.find((batch) => batch.control)?.control;
+      }
+      if (observations.length === 1) {
+        const only = observations[0]!;
+        result.manifestCid = only.manifestCid;
+        result.anchorTx = only.anchorTx;
+        result.gasUsed = only.gasUsed;
+        result.feeWei = only.feeWei;
+        result.manifestConfirmed = only.confirmed;
+      }
+    };
     try {
       if (!deps.publishManifestBatch) {
         throw new Error('manifest anchor mode requires publishManifestBatch');
       }
-      const batch = await deps.publishManifestBatch(manifestCandidates);
-      if (batch.memberRefs.length !== manifestCandidates.length) {
+      const publication = await deps.publishManifestBatch(manifestCandidates);
+      const flattened = publication.batches.flatMap((batch) => batch.memberRefs);
+      if (
+        publication.memberRefs.length !== manifestCandidates.length ||
+        flattened.length !== publication.memberRefs.length ||
+        flattened.some((ref, index) => ref !== publication.memberRefs[index])
+      ) {
         throw new Error(
-          `manifest publisher returned ${batch.memberRefs.length} member refs for ${manifestCandidates.length} candidates`,
+          `manifest publisher returned an inconsistent ${publication.memberRefs.length}-member partition set for ${manifestCandidates.length} candidates`,
         );
       }
-      result.manifestCid = batch.manifestCid;
-      result.manifestMemberRefs = [...batch.memberRefs];
-      result.anchorTx = batch.anchorTx;
-      result.gasUsed = batch.gasUsed;
-      result.feeWei = batch.feeWei;
-      result.control = batch.control;
-      result.manifestConfirmed = true;
-      for (let index = 0; index < manifestCandidates.length; index += 1) {
-        const candidate = manifestCandidates[index]!;
-        result.bridged.push({
-          instanceId: candidate.ref.instanceId,
-          polarity: candidate.ref.polarity,
-          envelopeRef: batch.memberRefs[index]!,
-          anchorTx: batch.anchorTx,
-        });
-      }
+      addCompleted(publication.batches, 0);
+      finishManifestFacts(publication.memberRefs);
     } catch (error) {
-      if (error instanceof ManifestBatchRecordingError) {
-        result.manifestCid = error.result.manifestCid;
-        result.manifestMemberRefs = [...error.result.memberRefs];
-        result.anchorTx = error.result.anchorTx;
-        result.gasUsed = error.result.gasUsed;
-        result.feeWei = error.result.feeWei;
-        result.control = error.result.control;
-        result.manifestConfirmed = true;
+      let completedCount = 0;
+      let failed = error;
+      let memberRefs: string[] = [];
+      if (error instanceof ManifestBatchSetError) {
+        completedCount = addCompleted(error.completed, 0);
+        failed = error.failed;
+        memberRefs = [...error.memberRefs];
+        addFailedObservation(failed);
+      } else if (error instanceof ManifestBatchRecordingError) {
+        memberRefs = [...error.result.memberRefs];
+        addFailedObservation(error);
       } else if (error instanceof ManifestBatchAnchorError) {
-        result.manifestCid = error.manifestCid;
-        result.manifestMemberRefs = [...error.memberRefs];
-        result.anchorTx = error.txHash;
-        result.manifestConfirmed = false;
+        memberRefs = [...error.memberRefs];
+        addFailedObservation(error);
       }
-      const message = error instanceof Error ? error.message : String(error);
-      for (const { ref } of manifestCandidates) {
+      if (memberRefs.length > 0) finishManifestFacts(memberRefs);
+      const message = failed instanceof Error ? failed.message : String(failed);
+      for (const { ref } of manifestCandidates.slice(completedCount)) {
         result.errors.push({ requestId: ref.requestId, error: message });
       }
     }
@@ -539,7 +601,7 @@ export function buildBridgeManifestPublisher(
   } = {},
 ): (
   candidates: Array<{ task: CapturedTask; ref: AttemptRef }>,
-) => Promise<ManifestBatchResult> {
+) => Promise<ManifestBatchSetResult> {
   const pipeline = opts.pipeline ?? buildLayer2ScrubPipeline();
   return async (candidates) => {
     const members = [];

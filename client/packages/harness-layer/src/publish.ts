@@ -58,6 +58,10 @@ import {
 } from '@jinn-network/core';
 import { PENDING_ENVELOPE_KIND, type PendingEnvelope } from './capture.js';
 import { parseTraceEnvelopeV0, type TraceEnvelopeV0 } from './envelope.js';
+import {
+  assertRawSha256CidMatches,
+  MAX_RAW_IPFS_BLOCK_BYTES,
+} from './ipfs-cid.js';
 import type { LedgerStore } from './ledger.js';
 
 /** Read-compat only: no new capture publication emits this payload. */
@@ -130,6 +134,11 @@ export interface ManifestBatchPublishDeps extends HarnessPublishDeps {
   recordManifestAnchor(input: ManifestAnchorRecord): void;
   /** Required only by the explicit paired gas-measurement control. */
   recordControlAnchor?(input: PerRecordControlAnchorRecord): void;
+  /**
+   * Test seam for exercising partition behavior with small fixtures. Values
+   * above Kubo's real raw-block ceiling are clamped to the production limit.
+   */
+  maxManifestBodyBytes?: number;
   log?: (line: string) => void;
 }
 
@@ -166,6 +175,13 @@ export interface ManifestBatchResult {
     gasUsed: bigint | null;
     feeWei: bigint | null;
   };
+}
+
+export interface ManifestBatchSetResult {
+  /** One entry per raw-block-sized manifest, in member order. */
+  batches: ManifestBatchResult[];
+  /** Every uploaded member ref, including refs in a later failed partition. */
+  memberRefs: string[];
 }
 
 export interface PublishOptions {
@@ -219,6 +235,26 @@ export class ManifestBatchRecordingError extends Error {
     super(
       `manifest ${result.manifestCid} anchored at ${result.anchorTx}, ` +
         `but local recording failed: ${detail}`,
+    );
+  }
+}
+
+/**
+ * A partitioned manifest publish failed. Retain both any completed irreversible
+ * anchors and every uploaded member ref so the caller can reconcile without
+ * retrying successful work.
+ */
+export class ManifestBatchSetError extends Error {
+  override readonly name = 'ManifestBatchSetError';
+
+  constructor(
+    readonly completed: ManifestBatchResult[],
+    readonly failed: unknown,
+    readonly memberRefs: string[],
+  ) {
+    const detail = failed instanceof Error ? failed.message : String(failed);
+    super(
+      `manifest partition failed after ${completed.length} completed partition(s): ${detail}`,
     );
   }
 }
@@ -501,57 +537,113 @@ export async function publish(
   return result;
 }
 
-/**
- * Upload a batch of substrate members and anchor one enumerable manifest over
- * their CIDs. Ordinary runs give no member a per-record `capture:` anchor; the
- * explicit measurement option reuses member 0 for one separately recorded
- * control transaction.
- */
-export async function publishManifestBatch(
-  members: ManifestBatchMemberInput[],
-  deps: ManifestBatchPublishDeps,
-  opts: ManifestBatchOptions,
-): Promise<ManifestBatchResult> {
-  if (members.length === 0) {
-    throw new Error('publishManifestBatch requires at least one member');
-  }
-  if (typeof opts.batchKind !== 'string' || opts.batchKind.length === 0) {
-    throw new Error('publishManifestBatch requires a non-empty batchKind');
-  }
-  if (opts.measurePerRecordControl && !deps.recordControlAnchor) {
-    throw new Error(
-      'per-record measurement control requires recordControlAnchor persistence',
-    );
-  }
+type PreparedManifestMember = PublishedMemberEnvelope & ManifestBatchMemberInput;
 
-  const now = deps.now?.() ?? new Date();
-  const published: Array<PublishedMemberEnvelope & ManifestBatchMemberInput> = [];
-  for (const member of members) {
-    const uploaded = await publishMemberEnvelope(member.pending, deps, { now });
-    published.push({ ...member, ...uploaded });
-  }
+function manifestMember(member: PreparedManifestMember) {
+  return {
+    cid: member.envelopeRef,
+    sha256: member.sha256,
+    ...(member.polarity === undefined ? {} : { polarity: member.polarity }),
+    ...(member.instanceId === undefined ? {} : { instanceId: member.instanceId }),
+  };
+}
 
-  const root = merkleRoot(published.map((member) => hashLeaf(member.envelopeRef)));
-  const createdAt = Math.floor(now.getTime() / 1000);
-  const body = parseManifestV0({
+function buildManifestBody(
+  published: PreparedManifestMember[],
+  batchKind: string,
+  createdAt: number,
+): ManifestV0 {
+  const root = merkleRoot(
+    published.map((member) => hashLeaf(member.envelopeRef)),
+  );
+  return parseManifestV0({
     schemaVersion: MANIFEST_SCHEMA_VERSION,
-    batchKind: opts.batchKind,
+    batchKind,
     createdAt,
     merkleRoot: root,
-    members: published.map((member) => ({
-      cid: member.envelopeRef,
-      sha256: member.sha256,
-      ...(member.polarity === undefined ? {} : { polarity: member.polarity }),
-      ...(member.instanceId === undefined ? {} : { instanceId: member.instanceId }),
-    })),
+    members: published.map(manifestMember),
   });
+}
+
+function manifestBodyByteLength(
+  published: PreparedManifestMember[],
+  batchKind: string,
+  createdAt: number,
+): number {
+  // The real root is always the same 0x + 64-character width as this
+  // placeholder, so this is the exact canonical byte length without
+  // rebuilding an O(n log n) tree for every partition probe.
+  return new TextEncoder().encode(
+    canonicalJson({
+      schemaVersion: MANIFEST_SCHEMA_VERSION,
+      batchKind,
+      createdAt,
+      merkleRoot: `0x${'0'.repeat(64)}`,
+      members: published.map(manifestMember),
+    }),
+  ).byteLength;
+}
+
+function partitionManifestMembers(
+  published: PreparedManifestMember[],
+  batchKind: string,
+  createdAt: number,
+  maxBodyBytes: number,
+): PreparedManifestMember[][] {
+  const partitions: PreparedManifestMember[][] = [];
+  let current: PreparedManifestMember[] = [];
+  for (const member of published) {
+    const candidate = [...current, member];
+    if (
+      manifestBodyByteLength(candidate, batchKind, createdAt) <= maxBodyBytes
+    ) {
+      current = candidate;
+      continue;
+    }
+    if (current.length === 0) {
+      throw new Error(
+        `manifest member ${member.envelopeRef} cannot fit in one ${maxBodyBytes}-byte raw IPFS block`,
+      );
+    }
+    partitions.push(current);
+    current = [member];
+    if (manifestBodyByteLength(current, batchKind, createdAt) > maxBodyBytes) {
+      throw new Error(
+        `manifest member ${member.envelopeRef} cannot fit in one ${maxBodyBytes}-byte raw IPFS block`,
+      );
+    }
+  }
+  if (current.length > 0) partitions.push(current);
+  return partitions;
+}
+
+async function publishPreparedManifest(
+  published: PreparedManifestMember[],
+  deps: ManifestBatchPublishDeps,
+  args: {
+    batchKind: string;
+    createdAt: number;
+    now: Date;
+    measurePerRecordControl: boolean;
+    maxBodyBytes: number;
+  },
+): Promise<ManifestBatchResult> {
+  const body = buildManifestBody(published, args.batchKind, args.createdAt);
+  const bodyBytes = new TextEncoder().encode(canonicalJson(body));
+  if (bodyBytes.byteLength > args.maxBodyBytes) {
+    throw new Error(
+      `manifest body is ${bodyBytes.byteLength} bytes, exceeding the ${args.maxBodyBytes}-byte raw IPFS block limit`,
+    );
+  }
   const manifestBlob = await deps.publishManifestBody(body);
+  assertRawSha256CidMatches(manifestBlob.cid, bodyBytes);
   const manifestCid = manifestBlob.cid;
+  const root = body.merkleRoot as `0x${string}`;
   const payload: ManifestPayload = {
     version: 0,
     merkleRoot: root,
     memberCount: published.length,
-    createdAt,
+    createdAt: args.createdAt,
   };
   let anchor: ManifestAnchorResult;
   try {
@@ -583,9 +675,9 @@ export async function publishManifestBatch(
       blockNumber: anchor.blockNumber,
       gasUsed: anchor.gasUsed,
       feeWei: anchor.feeWei,
-      anchoredAt: createdAt,
+      anchoredAt: args.createdAt,
     });
-    if (opts.measurePerRecordControl) {
+    if (args.measurePerRecordControl) {
       const controlMember = published[0]!;
       const metadataKey = `capture:${controlMember.envelopeRef}`;
       const controlAnchor = await deps.anchorEnvelope({
@@ -624,12 +716,12 @@ export async function publishManifestBatch(
         blockNumber: result.control.blockNumber,
         gasUsed: result.control.gasUsed,
         feeWei: result.control.feeWei,
-        anchoredAt: createdAt,
+        anchoredAt: args.createdAt,
       });
     }
     for (const member of published) {
       deps.ledger.append({
-        ts: now.toISOString(),
+        ts: args.now.toISOString(),
         taskSummary: member.episode.task.summary,
         envelopeRef: member.envelopeRef,
         anchorTx: anchor.txHash,
@@ -654,6 +746,74 @@ export async function publishManifestBatch(
     );
   }
   return result;
+}
+
+/**
+ * Upload substrate members once, partition their manifest bodies at Kubo's
+ * raw-block boundary, and anchor exactly once per resulting manifest.
+ */
+export async function publishManifestBatch(
+  members: ManifestBatchMemberInput[],
+  deps: ManifestBatchPublishDeps,
+  opts: ManifestBatchOptions,
+): Promise<ManifestBatchSetResult> {
+  if (members.length === 0) {
+    throw new Error('publishManifestBatch requires at least one member');
+  }
+  if (typeof opts.batchKind !== 'string' || opts.batchKind.length === 0) {
+    throw new Error('publishManifestBatch requires a non-empty batchKind');
+  }
+  if (opts.measurePerRecordControl && !deps.recordControlAnchor) {
+    throw new Error(
+      'per-record measurement control requires recordControlAnchor persistence',
+    );
+  }
+  const requestedMax = deps.maxManifestBodyBytes ?? MAX_RAW_IPFS_BLOCK_BYTES;
+  if (!Number.isInteger(requestedMax) || requestedMax < 1) {
+    throw new Error('maxManifestBodyBytes must be a positive integer');
+  }
+  const maxBodyBytes = Math.min(requestedMax, MAX_RAW_IPFS_BLOCK_BYTES);
+  const now = deps.now?.() ?? new Date();
+  const createdAt = Math.floor(now.getTime() / 1000);
+  const published: PreparedManifestMember[] = [];
+  for (const member of members) {
+    const uploaded = await publishMemberEnvelope(member.pending, deps, { now });
+    published.push({ ...member, ...uploaded });
+  }
+  const partitions = partitionManifestMembers(
+    published,
+    opts.batchKind,
+    createdAt,
+    maxBodyBytes,
+  );
+  const batches: ManifestBatchResult[] = [];
+  try {
+    for (let index = 0; index < partitions.length; index += 1) {
+      batches.push(
+        await publishPreparedManifest(partitions[index]!, deps, {
+          batchKind: opts.batchKind,
+          createdAt,
+          now,
+          measurePerRecordControl:
+            Boolean(opts.measurePerRecordControl) && index === 0,
+          maxBodyBytes,
+        }),
+      );
+    }
+  } catch (error) {
+    if (batches.length > 0 || partitions.length > 1) {
+      throw new ManifestBatchSetError(
+        batches,
+        error,
+        published.map((member) => member.envelopeRef),
+      );
+    }
+    throw error;
+  }
+  return {
+    batches,
+    memberRefs: published.map((member) => member.envelopeRef),
+  };
 }
 
 async function signWithPrivateKey(

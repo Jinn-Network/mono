@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { createHash } from 'node:crypto';
+
 /**
  * CID validation for harness-layer network boundaries. Keep this package-local:
  * the harness-layer ↔ client/src architecture seam is shrink-only.
@@ -10,6 +12,9 @@
  */
 const BASE58BTC = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 const BASE32 = 'abcdefghijklmnopqrstuvwxyz234567';
+
+/** Kubo's default fixed chunk size and largest single raw-leaf block. */
+export const MAX_RAW_IPFS_BLOCK_BYTES = 256 * 1024;
 
 export const IPFS_RAW_CODEC = 0x55;
 export const IPFS_DAG_PB_CODEC = 0x70;
@@ -75,6 +80,34 @@ export function parseIpfsCid(value: string): ParsedIpfsCid | null {
 
 export function isIpfsCid(value: string): boolean {
   return parseIpfsCid(value) !== null;
+}
+
+/**
+ * Assert the manifest boundary's strict address/content invariant before an
+ * irreversible anchor: canonical CIDv1 raw + sha2-256 over the exact bytes.
+ */
+export function assertRawSha256CidMatches(
+  cid: string,
+  bodyBytes: Uint8Array,
+): void {
+  const parsed = parseIpfsCid(cid);
+  if (!parsed) {
+    throw new Error(
+      'manifest CID must be a canonical CIDv1 raw value with a 32-byte sha2-256 multihash',
+    );
+  }
+  if (parsed.version !== 1) {
+    throw new Error(`manifest CID must use CIDv1, got version ${parsed.version}`);
+  }
+  if (parsed.codec !== IPFS_RAW_CODEC) {
+    throw new Error(
+      `manifest CID must use the raw codec (0x55), got 0x${parsed.codec.toString(16)}`,
+    );
+  }
+  const expected = createHash('sha256').update(bodyBytes).digest();
+  if (!Buffer.from(parsed.sha256Digest).equals(expected)) {
+    throw new Error('manifest CID digest does not match the canonical body digest');
+  }
 }
 
 function decodeBase58(value: string): Uint8Array | null {

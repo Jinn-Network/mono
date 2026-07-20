@@ -27,14 +27,22 @@ function deps(overrides: Partial<BridgeDeps> = {}) {
     new Error('per-record publisher must not run in manifest mode'),
   );
   const publishManifestBatch = vi.fn().mockImplementation(
-    async (candidates: Array<{ ref: AttemptRef }>) => ({
-      manifestCid: 'bafy-manifest',
-      anchorTx: TX,
-      memberRefs: candidates.map(({ ref: candidate }) => `bafy-member-${candidate.requestId.slice(2, 3)}`),
-      root: ROOT,
-      gasUsed: 123_456n,
-      feeWei: 987_648n,
-    }),
+    async (candidates: Array<{ ref: AttemptRef }>) => {
+      const memberRefs = candidates.map(
+        ({ ref: candidate }) => `bafy-member-${candidate.requestId.slice(2, 3)}`,
+      );
+      return {
+        memberRefs,
+        batches: [{
+          manifestCid: 'bafy-manifest',
+          anchorTx: TX,
+          memberRefs,
+          root: ROOT,
+          gasUsed: 123_456n,
+          feeWei: 987_648n,
+        }],
+      };
+    },
   );
   const value: BridgeDeps = {
     slateInstanceIds: new Set(),
@@ -94,6 +102,13 @@ describe('bridgeAttempts manifest mode', () => {
       gasUsed: 123_456n,
       feeWei: 987_648n,
     });
+    expect(result.manifestBatches).toEqual([
+      expect.objectContaining({
+        manifestCid: 'bafy-manifest',
+        memberRefs: ['bafy-member-1', 'bafy-member-2'],
+        confirmed: true,
+      }),
+    ]);
     expect(result.deduped).toHaveLength(1);
     expect(result.excludedHeldOut).toHaveLength(1);
   });
@@ -157,5 +172,47 @@ describe('bridgeAttempts manifest mode', () => {
     expect(result.manifestCid).toBe('bafy-manifest');
     expect(result.anchorTx).toBe(TX);
     expect(result.errors).toHaveLength(2);
+  });
+
+  it('maps split manifest anchors to the matching candidate ranges', async () => {
+    const firstTx = `0x${'11'.repeat(32)}` as const;
+    const secondTx = `0x${'22'.repeat(32)}` as const;
+    const { value } = deps({
+      publishManifestBatch: vi.fn().mockResolvedValue({
+        memberRefs: ['bafy-member-1', 'bafy-member-2'],
+        batches: [
+          {
+            manifestCid: 'bafy-manifest-1',
+            anchorTx: firstTx,
+            memberRefs: ['bafy-member-1'],
+            root: ROOT,
+            gasUsed: 100n,
+            feeWei: 200n,
+          },
+          {
+            manifestCid: 'bafy-manifest-2',
+            anchorTx: secondTx,
+            memberRefs: ['bafy-member-2'],
+            root: ROOT,
+            gasUsed: 110n,
+            feeWei: 220n,
+          },
+        ],
+      }),
+    });
+
+    const result = await bridgeAttempts([ref(1), ref(2)], value);
+
+    expect(result.bridged.map((row) => row.anchorTx)).toEqual([
+      firstTx,
+      secondTx,
+    ]);
+    expect(result.manifestMemberRefs).toEqual([
+      'bafy-member-1',
+      'bafy-member-2',
+    ]);
+    expect(result.manifestBatches).toHaveLength(2);
+    expect(result.manifestCid).toBeUndefined();
+    expect(result.anchorTx).toBeUndefined();
   });
 });
