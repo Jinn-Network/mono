@@ -216,6 +216,16 @@ export function createManifestAnchorStore(dbPath: string): ManifestAnchorStore {
       store.loadManifestBatchJournal(batchKey),
     saveManifestBatchJournal: (batchKey, stateJson) =>
       store.saveManifestBatchJournal(batchKey, stateJson),
+    compareAndSwapManifestBatchJournal: (
+      batchKey,
+      expectedStateJson,
+      nextStateJson,
+    ) =>
+      store.compareAndSwapManifestBatchJournal(
+        batchKey,
+        expectedStateJson,
+        nextStateJson,
+      ),
   };
 }
 

@@ -110,6 +110,11 @@ export type ManifestAnchorReconciliation =
 export interface ManifestBatchJournalStore {
   loadManifestBatchJournal(batchKey: string): string | null;
   saveManifestBatchJournal(batchKey: string, stateJson: string): void;
+  compareAndSwapManifestBatchJournal(
+    batchKey: string,
+    expectedStateJson: string | null,
+    nextStateJson: string,
+  ): boolean;
 }
 
 export interface ManifestPublicationScope {
@@ -902,11 +907,24 @@ function openManifestJournal(
   ) {
     throw new Error('manifest journal conflict: invocation does not match frozen plan');
   }
+  let lastPersisted = persisted;
   const active = {
     batchKey,
     state,
-    save: () =>
-      journal.saveManifestBatchJournal(batchKey, JSON.stringify(state)),
+    save: () => {
+      const nextStateJson = JSON.stringify(state);
+      const saved = journal.compareAndSwapManifestBatchJournal(
+        batchKey,
+        lastPersisted,
+        nextStateJson,
+      );
+      if (!saved) {
+        throw new Error(
+          `manifest journal conflict: concurrent writer advanced batch ${batchKey}`,
+        );
+      }
+      lastPersisted = nextStateJson;
+    },
   };
   if (persisted === null) active.save();
   return active;

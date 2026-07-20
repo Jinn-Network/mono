@@ -325,6 +325,55 @@ export function cidToDigestHex(cid: string): Hex {
 }
 
 /**
+ * Decode only the canonical CID forms accepted at a manifest boundary:
+ * CIDv1, raw codec, sha2-256, encoded as canonical base16 or base32.
+ */
+export function rawSha256CidToDigestHex(cid: string): Hex {
+  let bytes: Uint8Array;
+  if (
+    cid.length === 73
+    && cid.startsWith('f')
+    && /^[0-9a-f]{72}$/u.test(cid.slice(1))
+  ) {
+    bytes = Uint8Array.from(
+      cid.slice(1).match(/.{2}/gu)!.map((byte) => Number.parseInt(byte, 16)),
+    );
+  } else if (
+    cid.length === 73
+    && cid.startsWith('F')
+    && /^[0-9A-F]{72}$/u.test(cid.slice(1))
+  ) {
+    bytes = Uint8Array.from(
+      cid.slice(1).match(/.{2}/gu)!.map((byte) => Number.parseInt(byte, 16)),
+    );
+  } else if (
+    cid.length === 59
+    && cid.startsWith('b')
+    && /^[a-z2-7]{58}$/u.test(cid.slice(1))
+    && (BASE32_ALPHABET.indexOf(cid.at(-1)!) & 0x03) === 0
+  ) {
+    bytes = base32Decode(cid.slice(1));
+  } else {
+    throw new Error(
+      'manifest CID must use canonical CIDv1 base16 or base32 encoding',
+    );
+  }
+
+  if (
+    bytes.length !== 36
+    || bytes[0] !== 0x01
+    || bytes[1] !== 0x55
+    || bytes[2] !== 0x12
+    || bytes[3] !== 0x20
+  ) {
+    throw new Error(
+      'manifest CID must use the raw codec and a 32-byte sha2-256 multihash',
+    );
+  }
+  return `0x${Buffer.from(bytes.slice(4)).toString('hex')}` as Hex;
+}
+
+/**
  * Construct an Autonolas IPFS gateway URL from a raw SHA256 digest hex string.
  */
 export function digestHexToGatewayUrl(digestHex: string): string {

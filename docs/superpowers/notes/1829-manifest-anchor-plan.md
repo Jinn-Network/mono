@@ -99,6 +99,13 @@ These are fixed by the design and are the single source of truth for `merkle.ts`
 
 **AC satisfied:** foundation for "a member is verifiable against the anchored root".
 
+**Landed dependency note:** the shared manifest/Merkle implementation was ultimately extracted into
+`@jinn-network/core`, which is intentionally chain-independent and does not depend on viem. It uses
+the already-audited `@noble/hashes` Keccak primitive instead; client conformance tests independently
+derive the expected leaves and roots with viem. This is a deliberate deviation from the original
+client-local “viem-only / no new dependency” implementation note, not a change to the pinned byte
+or tree semantics.
+
 ---
 
 ## Step 2 — `abis.ts` + `manifest-registry.ts` (namespace module) · [pure]
@@ -451,6 +458,13 @@ measurement half of the AC after merge.
 The durable manifest path does not claim atomicity or exactly-once effects across SQLite, IPFS, and
 the chain. Journal v3 instead persists an intent before each irreversible operation and chooses
 safety over automatic liveness when the post-effect journal write is ambiguous:
+
+Every journal transition uses an atomic SQLite compare-and-swap on `(batch_key, state_json)`.
+Initial creation is an insert-if-absent. A concurrent or stale writer therefore fails visibly when
+another invocation has advanced the batch; in particular, only the CAS winner can persist the
+write-ahead transaction intent and reach an anchor broadcast. The publisher has no unconditional
+UPSERT fallback, and the regression suite exercises both independent SQLite connections and two
+concurrent same-batch publishers.
 
 | Crash/failure boundary | Persisted v3 fact | Resume behavior |
 | --- | --- | --- |

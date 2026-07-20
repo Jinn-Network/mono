@@ -136,6 +136,61 @@ describe('Store.manifest_batch_journal', () => {
     store.saveManifestBatchJournal('batch-1', '{"stage":"partitions"}');
     expect(store.loadManifestBatchJournal('batch-1')).toBe('{"stage":"partitions"}');
   });
+
+  it('compare-and-swaps one batch without overwriting a concurrent winner', () => {
+    const members = '{"stage":"members"}';
+    const partitions = '{"stage":"partitions"}';
+    const staleWriter = '{"stage":"stale-writer"}';
+
+    expect(
+      store.compareAndSwapManifestBatchJournal('batch-1', null, members),
+    ).toBe(true);
+    expect(
+      store.compareAndSwapManifestBatchJournal('batch-1', null, staleWriter),
+    ).toBe(false);
+    expect(
+      store.compareAndSwapManifestBatchJournal('batch-1', members, partitions),
+    ).toBe(true);
+    expect(
+      store.compareAndSwapManifestBatchJournal('batch-1', members, staleWriter),
+    ).toBe(false);
+    expect(store.loadManifestBatchJournal('batch-1')).toBe(partitions);
+  });
+
+  it('rejects a stale compare-and-swap from another database connection', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-manifest-journal-cas-'));
+    const dbPath = join(dir, 'jinn.db');
+    const first = new Store(dbPath);
+    const second = new Store(dbPath);
+    try {
+      const initial = '{"stage":"members"}';
+      expect(
+        first.compareAndSwapManifestBatchJournal('batch-1', null, initial),
+      ).toBe(true);
+      expect(first.loadManifestBatchJournal('batch-1')).toBe(initial);
+      expect(second.loadManifestBatchJournal('batch-1')).toBe(initial);
+
+      expect(
+        first.compareAndSwapManifestBatchJournal(
+          'batch-1',
+          initial,
+          '{"stage":"first"}',
+        ),
+      ).toBe(true);
+      expect(
+        second.compareAndSwapManifestBatchJournal(
+          'batch-1',
+          initial,
+          '{"stage":"second"}',
+        ),
+      ).toBe(false);
+      expect(second.loadManifestBatchJournal('batch-1')).toBe('{"stage":"first"}');
+    } finally {
+      second.close();
+      first.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('Store.erc8004_anchors migration', () => {

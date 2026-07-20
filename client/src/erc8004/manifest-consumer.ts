@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Hex } from 'viem';
-import { cidToDigestHex } from '../adapters/mech/ipfs.js';
+import { rawSha256CidToDigestHex } from '../adapters/mech/ipfs.js';
 import { canonicalJson } from '../harnesses/engine/canonical-json.js';
 import {
   decodeManifestPayload,
@@ -84,18 +84,18 @@ export async function fetchManifest(
   manifestCid: string,
   deps: ManifestFetchDeps,
 ): Promise<ManifestV0> {
-  const manifest = parseManifestV0(parseIpfsJson(await deps.ipfsGet(manifestCid)));
-  const actualDigest = `0x${createHash('sha256')
-    .update(canonicalJson(manifest))
-    .digest('hex')}`.toLowerCase();
   let addressedDigest: string;
   try {
-    addressedDigest = cidToDigestHex(manifestCid).toLowerCase();
+    addressedDigest = rawSha256CidToDigestHex(manifestCid).toLowerCase();
   } catch (error) {
     throw new ManifestContentAddressMismatchError(
       `cannot decode CID ${manifestCid}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+  const manifest = parseManifestV0(parseIpfsJson(await deps.ipfsGet(manifestCid)));
+  const actualDigest = `0x${createHash('sha256')
+    .update(canonicalJson(manifest))
+    .digest('hex')}`.toLowerCase();
   if (actualDigest !== addressedDigest) {
     throw new ManifestContentAddressMismatchError(
       `CID digest ${addressedDigest} does not match canonical body digest ${actualDigest}`,
