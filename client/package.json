@@ -110,6 +110,8 @@
     "release:testnet-acceptance:docker": "node scripts/testnet-acceptance-docker.mjs",
     "release:testnet-acceptance:host": "node scripts/testnet-acceptance.mjs",
     "status": "tsx scripts/status.ts",
+    "attribution:analyze": "tsx scripts/analyze-attribution-instrument.ts",
+    "attribution:export-facts": "tsx scripts/export-attribution-facts.ts",
     "audit:failures": "tsx scripts/audit-task-run-failures.ts",
     "backfill:trajectories": "tsx scripts/backfill-derived-trajectories.ts",
     "net-liveness": "tsx scripts/net-liveness-probe.ts",
