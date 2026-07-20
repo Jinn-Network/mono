@@ -18,6 +18,36 @@ export function isGitHubSecretEnvironmentKey(key: string): boolean {
     || /(?:^|_)(?:GH|GITHUB).*?(?:TOKEN|PAT)(?:_|$)/.test(upper);
 }
 
+function isGitConfigOverrideEnvironmentKey(key: string): boolean {
+  return /^GIT_CONFIG(?:_|$)/i.test(key);
+}
+
+export function isolatedGitCommandOverlay(
+  ambient: NodeJS.ProcessEnv,
+  askpassPath: string,
+): Record<string, string> {
+  const overlay: Record<string, string> = {};
+  for (const key of Object.keys(ambient)) {
+    if (isGitConfigOverrideEnvironmentKey(key)) overlay[key] = '';
+  }
+  return {
+    ...overlay,
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_SYSTEM: '/dev/null',
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_COUNT: '3',
+    GIT_CONFIG_KEY_0: 'credential.helper',
+    GIT_CONFIG_VALUE_0: '',
+    GIT_CONFIG_KEY_1: 'credential.interactive',
+    GIT_CONFIG_VALUE_1: 'never',
+    GIT_CONFIG_KEY_2: 'core.askPass',
+    GIT_CONFIG_VALUE_2: askpassPath,
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_ASKPASS: askpassPath,
+    SSH_ASKPASS: askpassPath,
+  };
+}
+
 /**
  * Overlay for a command runner that itself merges over process.env. Every
  * ambient/equivalent GitHub secret is explicitly blanked; only the selected
@@ -256,6 +286,17 @@ function selectFromEntries(
   }
   const normalizedAuthor = normalizeLogin(author);
   const previous = request.previousReviewerLogin?.trim();
+  if (
+    request.nativeRequestedChanges === true
+    && (previous === undefined || previous === '')
+  ) {
+    return {
+      status: 'identity-unavailable',
+      code: 'identity-unavailable',
+      detail:
+        'Previous reviewer identity is unavailable; native requested changes make reviewer recovery unsafe.',
+    };
+  }
   if (previous !== undefined && previous !== '') {
     const priorEntry = entries.find(
       (entry) => entry.normalizedLogin === normalizeLogin(previous),
@@ -312,13 +353,16 @@ export function buildSanitizedChildEnv(
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(ambient)) {
-    if (!isGitHubSecretEnvironmentKey(key)) env[key] = value;
+    if (
+      !isGitHubSecretEnvironmentKey(key)
+      && !isGitConfigOverrideEnvironmentKey(key)
+    ) {
+      env[key] = value;
+    }
   }
   env.GH_TOKEN = credential.secret();
   env.GH_CONFIG_DIR = paths.ghConfigDir;
-  env.GIT_TERMINAL_PROMPT = '0';
-  env.GIT_ASKPASS = paths.askpassPath;
-  env.SSH_ASKPASS = paths.askpassPath;
+  Object.assign(env, isolatedGitCommandOverlay(ambient, paths.askpassPath));
   env.JINN_AUTOPILOT_SESSION_MANIFEST = paths.manifestPath;
   return env;
 }

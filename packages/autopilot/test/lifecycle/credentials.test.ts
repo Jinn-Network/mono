@@ -100,6 +100,16 @@ describe('credential pool', () => {
       code: 'identity-unavailable',
       detail: 'Previous reviewer missing-reviewer is unavailable; native requested changes make switching reviewer unsafe.',
     });
+
+    expect(selectCredential(pool, {
+      phase: 'review',
+      prAuthor: 'author',
+      nativeRequestedChanges: true,
+    })).toEqual({
+      status: 'identity-unavailable',
+      code: 'identity-unavailable',
+      detail: 'Previous reviewer identity is unavailable; native requested changes make reviewer recovery unsafe.',
+    });
   });
 
   it('fails a mismatched optional review-login assertion without exposing secrets', async () => {
@@ -166,6 +176,11 @@ describe('sanitized child authentication', () => {
       GH_ENTERPRISE_TOKEN: 'ambient-enterprise',
       GITHUB_PAT: 'ambient-pat',
       MY_GITHUB_API_TOKEN: 'ambient-equivalent',
+      GIT_CONFIG_GLOBAL: '/home/runner/.gitconfig',
+      GIT_CONFIG_SYSTEM: '/etc/gitconfig',
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'credential.helper',
+      GIT_CONFIG_VALUE_0: 'ambient-helper',
     }, selected.credential, {
       ghConfigDir: '/attempt/gh-config',
       askpassPath: '/attempt/askpass',
@@ -183,6 +198,16 @@ describe('sanitized child authentication', () => {
       GIT_ASKPASS: '/attempt/askpass',
       SSH_ASKPASS: '/attempt/askpass',
       JINN_AUTOPILOT_SESSION_MANIFEST: '/attempt/manifest.json',
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CONFIG_SYSTEM: '/dev/null',
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_COUNT: '3',
+      GIT_CONFIG_KEY_0: 'credential.helper',
+      GIT_CONFIG_VALUE_0: '',
+      GIT_CONFIG_KEY_1: 'credential.interactive',
+      GIT_CONFIG_VALUE_1: 'never',
+      GIT_CONFIG_KEY_2: 'core.askPass',
+      GIT_CONFIG_VALUE_2: '/attempt/askpass',
     });
     expect(env.GITHUB_TOKEN).toBeUndefined();
     expect(env.JINN_IMPL_GH_TOKEN).toBeUndefined();

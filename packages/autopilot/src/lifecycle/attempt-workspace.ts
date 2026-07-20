@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
@@ -18,10 +18,12 @@ import type { CommandRunner } from '../dispatcher/issue-source.js';
 import { gitOid, gitRefName, isoTimestamp } from './types.js';
 import {
   gitPublicationArgs,
+  isolatedGitCommandOverlay,
   sanitizedGitHubCommandOverlay,
 } from './credentials.js';
 
 export type AttemptPhase = 'implement' | 'review' | 'merge-prep';
+export type AttemptProcessState = 'preparing' | 'running' | 'exited';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SAFE_COMPONENT_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
@@ -43,6 +45,13 @@ export interface AttemptTimestamps {
   readonly childExitedAt?: string;
 }
 
+export interface AttemptRepositoryIdentity {
+  readonly root: string;
+  readonly gitCommonDir: string;
+  readonly remoteName: string;
+  readonly remoteUrlHash: string;
+}
+
 export interface AttemptManifest {
   readonly version: 2;
   readonly attemptId: string;
@@ -59,6 +68,8 @@ export interface AttemptManifest {
   readonly reviewGeneration?: string;
   readonly reviewRefOid?: string;
   readonly selectedLogin: string;
+  readonly repository: AttemptRepositoryIdentity;
+  readonly processState: AttemptProcessState;
   readonly pid: number | null;
   readonly paths: AttemptPaths;
   readonly timestamps: AttemptTimestamps;
@@ -79,6 +90,7 @@ export interface CreateAttemptOptions {
   readonly reviewGeneration?: string;
   readonly reviewRefOid?: string;
   readonly selectedLogin: string;
+  readonly remoteName?: string;
   readonly pid?: number | null;
   readonly attemptId?: string;
   readonly host?: string;
@@ -217,6 +229,33 @@ function decodeTimestamps(value: unknown): AttemptTimestamps {
   };
 }
 
+function decodeRepositoryIdentity(value: unknown): AttemptRepositoryIdentity {
+  const repository = record(value, 'attempt repository identity');
+  exactKeys(repository, [
+    'root',
+    'gitCommonDir',
+    'remoteName',
+    'remoteUrlHash',
+  ], 'attempt repository identity');
+  const remoteUrlHash = stringField(repository.remoteUrlHash, 'remote URL hash');
+  if (!/^[0-9a-f]{64}$/.test(remoteUrlHash)) {
+    throw new Error('Invalid remote URL hash');
+  }
+  return {
+    root: absolutePath(repository.root, 'canonical repository root'),
+    gitCommonDir: absolutePath(repository.gitCommonDir, 'Git common directory'),
+    remoteName: gitRefName(stringField(repository.remoteName, 'remote name')),
+    remoteUrlHash,
+  };
+}
+
+function processState(value: unknown): AttemptProcessState {
+  if (value !== 'preparing' && value !== 'running' && value !== 'exited') {
+    throw new Error('Invalid attempt process state');
+  }
+  return value;
+}
+
 export function decodeAttemptManifest(value: unknown): AttemptManifest {
   const manifest = record(value, 'attempt manifest');
   exactKeys(manifest, [
@@ -235,6 +274,8 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
     'reviewGeneration',
     'reviewRefOid',
     'selectedLogin',
+    'repository',
+    'processState',
     'pid',
     'paths',
     'timestamps',
@@ -271,6 +312,25 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
   if (phase !== 'review' && reviewGeneration !== undefined) {
     throw new Error('Review generation metadata is valid only for review attempts');
   }
+  const decodedProcessState = processState(manifest.processState);
+  const pid = nullablePid(manifest.pid);
+  const timestamps = decodeTimestamps(manifest.timestamps);
+  if (
+    (decodedProcessState === 'preparing'
+      && (pid !== null
+        || timestamps.childStartedAt !== undefined
+        || timestamps.childExitedAt !== undefined))
+    || (decodedProcessState === 'running'
+      && (pid === null
+        || timestamps.childStartedAt === undefined
+        || timestamps.childExitedAt !== undefined))
+    || (decodedProcessState === 'exited'
+      && (pid === null
+        || timestamps.childStartedAt === undefined
+        || timestamps.childExitedAt === undefined))
+  ) {
+    throw new Error('Attempt process state, PID, and timestamps disagree');
+  }
   return {
     version: 2,
     attemptId,
@@ -288,9 +348,11 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
       ? {}
       : { reviewGeneration, reviewRefOid: reviewRefOid! }),
     selectedLogin: stringField(manifest.selectedLogin, 'selected login'),
-    pid: nullablePid(manifest.pid),
+    repository: decodeRepositoryIdentity(manifest.repository),
+    processState: decodedProcessState,
+    pid,
     paths: decodePaths(manifest.paths),
-    timestamps: decodeTimestamps(manifest.timestamps),
+    timestamps,
   };
 }
 
@@ -329,6 +391,16 @@ function samePaths(left: AttemptPaths, right: AttemptPaths): boolean {
   );
 }
 
+function sameRepositoryIdentity(
+  left: AttemptRepositoryIdentity,
+  right: AttemptRepositoryIdentity,
+): boolean {
+  return left.root === right.root
+    && left.gitCommonDir === right.gitCommonDir
+    && left.remoteName === right.remoteName
+    && left.remoteUrlHash === right.remoteUrlHash;
+}
+
 export function updateAttemptManifest(
   path: string,
   update: (manifest: AttemptManifest) => AttemptManifest,
@@ -341,6 +413,7 @@ export function updateAttemptManifest(
     || next.runnerId !== previous.runnerId
     || next.phase !== previous.phase
     || next.subject !== previous.subject
+    || !sameRepositoryIdentity(next.repository, previous.repository)
     || !samePaths(next.paths, previous.paths)
     || next.timestamps.createdAt !== previous.timestamps.createdAt
   ) {
@@ -350,6 +423,88 @@ export function updateAttemptManifest(
   return next;
 }
 
+function transitionTimestamp(now: () => Date): string {
+  const timestamp = now().toISOString();
+  return isoTimestamp(timestamp);
+}
+
+export function markAttemptRunning(
+  manifestPath: string,
+  pid: number,
+  now: () => Date = () => new Date(),
+): AttemptManifest {
+  const validPid = positiveInteger(pid, 'PID');
+  const timestamp = transitionTimestamp(now);
+  return updateAttemptManifest(manifestPath, (current) => {
+    if (current.processState !== 'preparing') {
+      throw new Error('Only a preparing attempt may transition to running');
+    }
+    return {
+      ...current,
+      processState: 'running',
+      pid: validPid,
+      timestamps: {
+        ...current.timestamps,
+        updatedAt: timestamp,
+        childStartedAt: timestamp,
+      },
+    };
+  });
+}
+
+export function markAttemptExited(
+  manifestPath: string,
+  now: () => Date = () => new Date(),
+): AttemptManifest {
+  const timestamp = transitionTimestamp(now);
+  return updateAttemptManifest(manifestPath, (current) => {
+    if (current.processState !== 'running') {
+      throw new Error('Only a running attempt may transition to exited');
+    }
+    return {
+      ...current,
+      processState: 'exited',
+      timestamps: {
+        ...current.timestamps,
+        updatedAt: timestamp,
+        childExitedAt: timestamp,
+      },
+    };
+  });
+}
+
+export interface TrackableAttemptChild {
+  readonly pid?: number;
+  once(event: 'exit', listener: (...args: unknown[]) => void): unknown;
+}
+
+export interface TrackAttemptChildOptions {
+  readonly alreadyRunning?: boolean;
+  readonly now?: () => Date;
+}
+
+/**
+ * Parent-side lifecycle binding. The exit listener records positive terminal
+ * evidence through the same atomic manifest update used by direct callers.
+ */
+export function trackAttemptChild(
+  manifestPath: string,
+  child: TrackableAttemptChild,
+  options: TrackAttemptChildOptions = {},
+): AttemptManifest {
+  const pid = positiveInteger(child.pid, 'child PID');
+  const running = options.alreadyRunning === true
+    ? readAttemptManifest(manifestPath)
+    : markAttemptRunning(manifestPath, pid, options.now);
+  if (running.processState !== 'running' || running.pid !== pid) {
+    throw new Error('Tracked child does not match the running attempt');
+  }
+  child.once('exit', () => {
+    markAttemptExited(manifestPath, options.now);
+  });
+  return running;
+}
+
 const ASKPASS = `#!/bin/sh
 case "$1" in
   *Username*) printf '%s\\n' 'x-access-token' ;;
@@ -357,6 +512,73 @@ case "$1" in
   *) exit 1 ;;
 esac
 `;
+
+function canonicalDirectory(path: string, name: string): string {
+  if (!isAbsolute(path)) throw new Error(`Invalid ${name}`);
+  const canonical = realpathSync(path);
+  if (!statSync(canonical).isDirectory()) throw new Error(`Invalid ${name}`);
+  return canonical;
+}
+
+function remoteUrlHash(remoteUrl: string): string {
+  return createHash('sha256').update(remoteUrl).digest('hex');
+}
+
+async function readRepositoryIdentity(
+  repositoryPath: string,
+  remoteName: string,
+  runner: CommandRunner,
+): Promise<AttemptRepositoryIdentity> {
+  const validRemoteName = gitRefName(remoteName);
+  try {
+    const root = canonicalDirectory((await runner('git', [
+      '-C', repositoryPath,
+      'rev-parse', '--path-format=absolute', '--show-toplevel',
+    ])).trim(), 'canonical repository root');
+    const gitCommonDir = canonicalDirectory((await runner('git', [
+      '-C', repositoryPath,
+      'rev-parse', '--path-format=absolute', '--git-common-dir',
+    ])).trim(), 'Git common directory');
+    const remoteUrl = stringField((await runner('git', [
+      '-C', repositoryPath,
+      'remote', 'get-url', validRemoteName,
+    ])).trim(), 'remote URL');
+    return decodeRepositoryIdentity({
+      root,
+      gitCommonDir,
+      remoteName: validRemoteName,
+      remoteUrlHash: remoteUrlHash(remoteUrl),
+    });
+  } catch {
+    throw new Error('Attempt repository identity could not be established');
+  }
+}
+
+async function registeredWorktreePaths(
+  gitCommonDir: string,
+  runner: CommandRunner,
+): Promise<string[]> {
+  const porcelain = await runner('git', [
+    `--git-dir=${gitCommonDir}`,
+    'worktree', 'list', '--porcelain', '-z',
+  ]);
+  return porcelain
+    .split('\0')
+    .filter((line) => line.startsWith('worktree '))
+    .map((line) => resolve(line.slice('worktree '.length)));
+}
+
+function canonicalProspectivePath(path: string): string {
+  let existing = resolve(path);
+  const suffix: string[] = [];
+  while (!existsSync(existing)) {
+    const parent = dirname(existing);
+    if (parent === existing) throw new Error('Path has no existing canonical ancestor');
+    suffix.unshift(basename(existing));
+    existing = parent;
+  }
+  return join(realpathSync(existing), ...suffix);
+}
 
 export async function createAttemptWorkspace(
   options: CreateAttemptOptions,
@@ -371,6 +593,11 @@ export async function createAttemptWorkspace(
   const timestamp = (options.now ?? (() => new Date()))().toISOString();
   isoTimestamp(timestamp);
   const subject = safeComponent(options.subject, 'attempt subject');
+  const repository = await readRepositoryIdentity(
+    options.repositoryPath,
+    options.remoteName ?? 'origin',
+    runner,
+  );
   const v2Base = join(options.worktreeBase, 'v2');
   const phaseDir = join(v2Base, runnerId, options.phase);
   const attemptDir = join(phaseDir, `${subject}-${attemptId}`);
@@ -382,19 +609,6 @@ export async function createAttemptWorkspace(
     ghConfigDir: join(attemptDir, 'gh-config'),
     askpass: join(attemptDir, 'askpass'),
   };
-  mkdirSync(phaseDir, { recursive: true, mode: 0o700 });
-  mkdirSync(attemptDir, { mode: 0o700 });
-  mkdirSync(paths.ghConfigDir, { mode: 0o700 });
-  writeFileSync(paths.log, '', { mode: 0o600, flag: 'wx' });
-  writeFileSync(paths.askpass, ASKPASS, { mode: 0o700, flag: 'wx' });
-
-  await runner('git', [
-    '-C', options.repositoryPath,
-    'worktree', 'add', '--detach',
-    paths.worktree,
-    gitOid(options.expectedHead),
-  ]);
-
   const manifest = decodeAttemptManifest({
     version: 2,
     attemptId,
@@ -415,14 +629,55 @@ export async function createAttemptWorkspace(
           reviewRefOid: options.reviewRefOid,
         }),
     selectedLogin: options.selectedLogin,
+    repository,
+    processState: options.pid === undefined || options.pid === null
+      ? 'preparing'
+      : 'running',
     pid: options.pid ?? null,
     paths,
     timestamps: {
       createdAt: timestamp,
       updatedAt: timestamp,
+      ...(options.pid === undefined || options.pid === null
+        ? {}
+        : { childStartedAt: timestamp }),
     },
   });
+  mkdirSync(phaseDir, { recursive: true, mode: 0o700 });
+  mkdirSync(attemptDir, { mode: 0o700 });
+  mkdirSync(paths.ghConfigDir, { mode: 0o700 });
+  writeFileSync(paths.log, '', { mode: 0o600, flag: 'wx' });
+  writeFileSync(paths.askpass, ASKPASS, { mode: 0o700, flag: 'wx' });
   writeManifestAtomic(paths.manifest, manifest);
+  try {
+    await runner('git', [
+      '-C', repository.root,
+      'worktree', 'add', '--detach',
+      paths.worktree,
+      manifest.expectedHead,
+    ]);
+  } catch (error) {
+    try {
+      await runner('git', [
+        `--git-dir=${repository.gitCommonDir}`,
+        'worktree', 'remove', paths.worktree,
+      ]);
+    } catch {
+      // Registration may not have happened. Registry read-back below decides
+      // whether exact local artifacts are safe to remove.
+    }
+    let registered = true;
+    try {
+      registered = (await registeredWorktreePaths(repository.gitCommonDir, runner))
+        .some((path) =>
+          canonicalProspectivePath(path) === canonicalProspectivePath(paths.worktree));
+    } catch {
+      // Retain the strict manifest rather than risk a manifestless registered
+      // worktree when rollback read-back is ambiguous.
+    }
+    if (!registered) rmSync(paths.attemptDir, { recursive: true });
+    throw error;
+  }
   return manifest;
 }
 
@@ -448,9 +703,14 @@ export function countRunnerLiveAttempts(
         const manifest = readAttemptManifest(manifestPath);
         if (
           manifest.runnerId === runnerId
-          && manifest.pid !== null
-          && manifest.timestamps.childExitedAt === undefined
-          && isPidAlive(manifest.pid)
+          && (
+            manifest.processState === 'preparing'
+            || (
+              manifest.processState === 'running'
+              && manifest.pid !== null
+              && isPidAlive(manifest.pid)
+            )
+          )
         ) {
           count++;
         }
@@ -568,6 +828,80 @@ function authFailure(error: unknown): boolean {
     .test(String(error));
 }
 
+function cleanupGitEnvironment(
+  manifest: AttemptManifest,
+  options: CleanupAttemptOptions,
+): Record<string, string> {
+  return {
+    ...sanitizedGitHubCommandOverlay(process.env, options.env),
+    ...isolatedGitCommandOverlay(process.env, manifest.paths.askpass),
+    GH_CONFIG_DIR: manifest.paths.ghConfigDir,
+  };
+}
+
+async function provePublicationReachability(
+  manifest: AttemptManifest,
+  runner: CommandRunner,
+  options: CleanupAttemptOptions,
+  gitContext: readonly string[],
+  localHeadSpec: string,
+): Promise<AttemptCleanupResult | null> {
+  try {
+    await runner('git', [
+      ...gitPublicationArgs(manifest.paths.askpass, []),
+      ...gitContext,
+      'fetch', '--quiet', manifest.repository.remoteName,
+      `${manifest.branch}:refs/remotes/${manifest.repository.remoteName}/${manifest.branch}`,
+    ], {
+      env: cleanupGitEnvironment(manifest, options),
+    });
+  } catch (error) {
+    return retained(
+      authFailure(error) ? 'authentication-failed' : 'ambiguous',
+      authFailure(error)
+        ? 'Remote publication ref could not be authenticated.'
+        : 'Remote publication ref could not be refreshed.',
+      manifest.attemptId,
+    );
+  }
+
+  let head: string;
+  let remoteHead: string;
+  try {
+    head = (await runner('git', [
+      ...gitContext,
+      'rev-parse', '--verify', `${localHeadSpec}^{commit}`,
+    ])).trim();
+    remoteHead = (await runner('git', [
+      ...gitContext,
+      'rev-parse', '--verify',
+      `refs/remotes/${manifest.repository.remoteName}/${manifest.branch}^{commit}`,
+    ])).trim();
+    gitOid(head);
+    gitOid(remoteHead);
+  } catch {
+    return retained(
+      'missing-object',
+      'Recorded local HEAD or expected remote publication object is missing.',
+      manifest.attemptId,
+    );
+  }
+
+  try {
+    await runner('git', [
+      ...gitContext,
+      'merge-base', '--is-ancestor', head, remoteHead,
+    ]);
+  } catch {
+    return retained(
+      'ahead',
+      'Recorded local HEAD is not reachable from the expected remote publication ref.',
+      manifest.attemptId,
+    );
+  }
+  return null;
+}
+
 export async function cleanupAttempt(
   manifestPath: string,
   runner: CommandRunner,
@@ -586,10 +920,97 @@ export async function cleanupAttempt(
       manifest.attemptId,
     );
   }
-  if (manifest.pid !== null && options.isPidAlive(manifest.pid)) {
-    return retained('live', 'Attempt child PID is still live.', manifest.attemptId);
+  if (manifest.processState === 'preparing') {
+    return retained(
+      'ambiguous',
+      'Attempt is still preparing and has no positive terminal process evidence.',
+      manifest.attemptId,
+    );
+  }
+  if (manifest.processState === 'running') {
+    if (manifest.pid === null) {
+      return retained(
+        'ambiguous',
+        'Running attempt has no recorded child PID.',
+        manifest.attemptId,
+      );
+    }
+    if (options.isPidAlive(manifest.pid)) {
+      return retained('live', 'Attempt child PID is still live.', manifest.attemptId);
+    }
+  }
+  let actualRepository: AttemptRepositoryIdentity;
+  try {
+    actualRepository = await readRepositoryIdentity(
+      manifest.repository.root,
+      manifest.repository.remoteName,
+      runner,
+    );
+  } catch {
+    return retained(
+      'ambiguous',
+      'Creating repository identity could not be re-established.',
+      manifest.attemptId,
+    );
+  }
+  if (!sameRepositoryIdentity(actualRepository, manifest.repository)) {
+    return retained(
+      'ambiguous',
+      'Creating repository identity no longer matches the attempt manifest.',
+      manifest.attemptId,
+    );
+  }
+  if (existsSync(manifest.paths.worktree)) {
+    try {
+      const worktreeCommonDir = canonicalDirectory((await runner('git', [
+        '-C', manifest.paths.worktree,
+        'rev-parse', '--path-format=absolute', '--git-common-dir',
+      ])).trim(), 'worktree Git common directory');
+      if (worktreeCommonDir !== manifest.repository.gitCommonDir) {
+        return retained(
+          'ambiguous',
+          'Attempt worktree belongs to a different Git common directory.',
+          manifest.attemptId,
+        );
+      }
+    } catch {
+      return retained(
+        'ambiguous',
+        'Attempt worktree repository identity could not be proven.',
+        manifest.attemptId,
+      );
+    }
   }
   if (!existsSync(manifest.paths.worktree)) {
+    let registered: boolean;
+    try {
+      registered = (await registeredWorktreePaths(
+        manifest.repository.gitCommonDir,
+        runner,
+      )).some((path) =>
+        canonicalProspectivePath(path) === canonicalProspectivePath(manifest.paths.worktree));
+    } catch {
+      return retained(
+        'ambiguous',
+        'Missing worktree could not be checked against the Git worktree registry.',
+        manifest.attemptId,
+      );
+    }
+    if (registered) {
+      return retained(
+        'ambiguous',
+        'Missing worktree remains registered in the creating repository.',
+        manifest.attemptId,
+      );
+    }
+    const proofFailure = await provePublicationReachability(
+      manifest,
+      runner,
+      options,
+      [`--git-dir=${manifest.repository.gitCommonDir}`],
+      manifest.expectedHead,
+    );
+    if (proofFailure !== null) return proofFailure;
     rmSync(manifest.paths.attemptDir, { recursive: true });
     return { status: 'removed', attemptId: manifest.attemptId };
   }
@@ -606,75 +1027,18 @@ export async function cleanupAttempt(
     return retained('ambiguous', 'Git cleanliness inspection failed.', manifest.attemptId);
   }
 
-  try {
-    await runner('git', [
-      ...gitPublicationArgs(manifest.paths.askpass, []),
-      '-C', manifest.paths.worktree,
-      'fetch', '--quiet', 'origin',
-      `${manifest.branch}:refs/remotes/origin/${manifest.branch}`,
-    ], {
-      env: {
-        ...sanitizedGitHubCommandOverlay(process.env, options.env),
-        GH_CONFIG_DIR: manifest.paths.ghConfigDir,
-        GIT_ASKPASS: manifest.paths.askpass,
-        GIT_TERMINAL_PROMPT: '0',
-      },
-    });
-  } catch (error) {
-    return retained(
-      authFailure(error) ? 'authentication-failed' : 'ambiguous',
-      authFailure(error)
-        ? 'Remote publication ref could not be authenticated.'
-        : 'Remote publication ref could not be refreshed.',
-      manifest.attemptId,
-    );
-  }
-
-  let head: string;
-  let remoteHead: string;
-  try {
-    head = (await runner('git', [
-      '-C', manifest.paths.worktree,
-      'rev-parse', '--verify', 'HEAD^{commit}',
-    ])).trim();
-    remoteHead = (await runner('git', [
-      '-C', manifest.paths.worktree,
-      'rev-parse', '--verify',
-      `refs/remotes/origin/${manifest.branch}^{commit}`,
-    ])).trim();
-    gitOid(head);
-    gitOid(remoteHead);
-  } catch {
-    return retained(
-      'missing-object',
-      'Local HEAD or expected remote publication object is missing.',
-      manifest.attemptId,
-    );
-  }
+  const proofFailure = await provePublicationReachability(
+    manifest,
+    runner,
+    options,
+    ['-C', manifest.paths.worktree],
+    'HEAD',
+  );
+  if (proofFailure !== null) return proofFailure;
 
   try {
     await runner('git', [
-      '-C', manifest.paths.worktree,
-      'merge-base', '--is-ancestor', head, remoteHead,
-    ]);
-  } catch {
-    return retained(
-      'ahead',
-      'Local HEAD is not reachable from the expected remote publication ref.',
-      manifest.attemptId,
-    );
-  }
-
-  try {
-    const commonDir = (await runner('git', [
-      '-C', manifest.paths.worktree,
-      'rev-parse', '--path-format=absolute', '--git-common-dir',
-    ])).trim();
-    if (!isAbsolute(commonDir) || !existsSync(commonDir) || !statSync(commonDir).isDirectory()) {
-      return retained('ambiguous', 'Git common directory could not be proven.', manifest.attemptId);
-    }
-    await runner('git', [
-      `--git-dir=${commonDir}`,
+      `--git-dir=${manifest.repository.gitCommonDir}`,
       'worktree', 'remove', manifest.paths.worktree,
     ]);
     rmSync(manifest.paths.attemptDir, { recursive: true });
