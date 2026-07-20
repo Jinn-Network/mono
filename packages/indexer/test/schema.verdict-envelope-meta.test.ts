@@ -62,4 +62,10 @@ describe('verdictEnvelopeMeta schema (#779 retry columns)', () => {
     expect(block).toContain("publisherAgentId: t.text().notNull().default('')");
     expect(block).toContain("manifestHash: t.hex().notNull().default('0x')");
   });
+
+  it('retains every publisher/CID candidate for a request in the primary key', () => {
+    expect(verdictEnvelopeMetaBlock()).toContain(
+      'pk: primaryKey({ columns: [table.requestId, table.publisherAgentId, table.manifestCid, table.chainId] })',
+    );
+  });
 });

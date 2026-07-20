@@ -26,11 +26,12 @@ async function seedEnvelope(args: {
   kind: 'envelope' | 'evaluation' | 'capture';
   publishedAtBlock: bigint;
   logIndex?: number;
+  chainId?: number;
 }): Promise<void> {
   await h.db.execute(
     sql`INSERT INTO ${sql.raw(`"${h.schema}"."envelope"`)}
       ("agent_id","metadata_key","chain_id","kind","manifest_cid","manifest_hash","evidence_tier","published_at_block","log_index")
-      VALUES (${args.agentId}, ${`${args.kind}:${args.cid}`}, ${CHAIN_ID}, ${args.kind}, ${args.cid}, ${'0x'}, ${'committed'}, ${args.publishedAtBlock}, ${args.logIndex ?? 0})`,
+      VALUES (${args.agentId}, ${`${args.kind}:${args.cid}`}, ${args.chainId ?? CHAIN_ID}, ${args.kind}, ${args.cid}, ${'0x'}, ${'committed'}, ${args.publishedAtBlock}, ${args.logIndex ?? 0})`,
   );
 }
 
@@ -42,11 +43,14 @@ async function seedVerdict(args: {
   nextAttemptAt?: bigint | null;
   retryCount?: number;
   actualScore?: string;
+  publisherAgentId?: string;
+  manifestHash?: string;
+  chainId?: number;
 }): Promise<void> {
   await h.db.execute(
     sql`INSERT INTO ${sql.raw(`"${h.schema}"."verdict_envelope_meta"`)}
-      ("request_id","verdict_index","attempt_index","task_id","evaluator","manifest_cid","solver_type","evidence_tier","actual_passed","actual_score","passed_count","total_count","instance_id","solver_net_manifest_cid","evaluator_verdict","enrichment_status","retry_count","next_attempt_at","enriched_at_block","chain_id")
-      VALUES (${args.requestId}, ${0}, ${0}, ${''}, ${'0x'}, ${args.manifestCid}, ${''}, ${''}, ${false}, ${args.actualScore ?? ''}, ${0}, ${0}, ${''}, ${''}, ${'UNKNOWN'}, ${args.enrichmentStatus}, ${args.retryCount ?? 0}, ${args.nextAttemptAt ?? null}, ${args.enrichedAtBlock}, ${CHAIN_ID})`,
+      ("request_id","verdict_index","attempt_index","task_id","evaluator","manifest_cid","publisher_agent_id","manifest_hash","solver_type","evidence_tier","actual_passed","actual_score","passed_count","total_count","instance_id","solver_net_manifest_cid","evaluator_verdict","enrichment_status","retry_count","next_attempt_at","enriched_at_block","chain_id")
+      VALUES (${args.requestId}, ${0}, ${0}, ${''}, ${'0x'}, ${args.manifestCid}, ${args.publisherAgentId ?? '1'}, ${args.manifestHash ?? '0x'}, ${''}, ${''}, ${false}, ${args.actualScore ?? ''}, ${0}, ${0}, ${''}, ${''}, ${'UNKNOWN'}, ${args.enrichmentStatus}, ${args.retryCount ?? 0}, ${args.nextAttemptAt ?? null}, ${args.enrichedAtBlock}, ${args.chainId ?? CHAIN_ID})`,
   );
 }
 
@@ -123,6 +127,68 @@ describe('discoverDue', () => {
     }
     const due = await store.discoverDue(3, 1_000_000n);
     expect(due).toHaveLength(3);
+  });
+
+  it('does not let an ok verdict on chain A suppress the same CID anchor on chain B', async () => {
+    const otherChainId = 1;
+    await seedEnvelope({
+      agentId: '1',
+      cid: 'sharedCid',
+      kind: 'evaluation',
+      publishedAtBlock: 10n,
+      chainId: CHAIN_ID,
+    });
+    await seedEnvelope({
+      agentId: '1',
+      cid: 'sharedCid',
+      kind: 'evaluation',
+      publishedAtBlock: 11n,
+      chainId: otherChainId,
+    });
+    await seedVerdict({
+      requestId: '0xchaina',
+      manifestCid: 'sharedCid',
+      publisherAgentId: '1',
+      enrichmentStatus: 'ok',
+      enrichedAtBlock: 10n,
+      chainId: CHAIN_ID,
+    });
+
+    const due = await store.discoverDue(100, 1_000_000n);
+    expect(due).toEqual([
+      expect.objectContaining({ manifestCid: 'sharedCid', chainId: otherChainId }),
+    ]);
+  });
+
+  it('does not let one publisher suppress another publisher of the same CID on the same chain', async () => {
+    await seedEnvelope({
+      agentId: '1',
+      cid: 'sharedPublisherCid',
+      kind: 'evaluation',
+      publishedAtBlock: 10n,
+    });
+    await seedEnvelope({
+      agentId: '666',
+      cid: 'sharedPublisherCid',
+      kind: 'evaluation',
+      publishedAtBlock: 11n,
+    });
+    await seedVerdict({
+      requestId: '0xlegitimate',
+      manifestCid: 'sharedPublisherCid',
+      publisherAgentId: '1',
+      enrichmentStatus: 'ok',
+      enrichedAtBlock: 10n,
+    });
+
+    const due = await store.discoverDue(100, 1_000_000n);
+    expect(due).toEqual([
+      expect.objectContaining({
+        manifestCid: 'sharedPublisherCid',
+        publisherAgentId: '666',
+        chainId: CHAIN_ID,
+      }),
+    ]);
   });
 
   it('uses FOR UPDATE SKIP LOCKED so concurrent workers claim disjoint sets', async () => {
@@ -251,6 +317,39 @@ describe('upsertVerdict', () => {
     expect(String(row?.enriched_at_block)).toBe('200');
   });
 
+  it('retains a later untrusted publisher/CID candidate for the same request', async () => {
+    await store.upsertVerdict({
+      ...baseRow,
+      enrichedAtBlock: 100n,
+      chainId: CHAIN_ID,
+    });
+    await store.upsertVerdict({
+      ...baseRow,
+      manifestCid: 'cidAttacker',
+      publisherAgentId: '666',
+      manifestHash: `0x${'66'.repeat(32)}`,
+      actualPassed: false,
+      evaluatorVerdict: 'FAIL',
+      enrichedAtBlock: 200n,
+      chainId: CHAIN_ID,
+    });
+
+    const rows = await readVerdicts('0xaa', CHAIN_ID);
+    expect(rows).toHaveLength(2);
+    expect(rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        manifest_cid: 'cidA',
+        publisher_agent_id: '1',
+        actual_passed: true,
+      }),
+      expect.objectContaining({
+        manifest_cid: 'cidAttacker',
+        publisher_agent_id: '666',
+        actual_passed: false,
+      }),
+    ]));
+  });
+
   it('clears any retry bookkeeping when a row goes ok', async () => {
     await seedVerdict({ requestId: '0xaa', manifestCid: 'cidA', enrichmentStatus: 'retry', enrichedAtBlock: 90n, retryCount: 2, nextAttemptAt: 5n });
     await store.upsertVerdict({ ...baseRow, enrichedAtBlock: 100n, chainId: CHAIN_ID });
@@ -295,4 +394,16 @@ async function readVerdict(requestId: string): Promise<Record<string, unknown> |
     sql`SELECT * FROM ${sql.raw(`"${h.schema}"."verdict_envelope_meta"`)} WHERE "request_id" = ${requestId}`,
   );
   return (res.rows as Record<string, unknown>[])[0];
+}
+
+async function readVerdicts(
+  requestId: string,
+  chainId: number,
+): Promise<Record<string, unknown>[]> {
+  const res = await h.db.execute(
+    sql`SELECT * FROM ${sql.raw(`"${h.schema}"."verdict_envelope_meta"`)}
+        WHERE "request_id" = ${requestId} AND "chain_id" = ${chainId}
+        ORDER BY "manifest_cid"`,
+  );
+  return res.rows as Record<string, unknown>[];
 }

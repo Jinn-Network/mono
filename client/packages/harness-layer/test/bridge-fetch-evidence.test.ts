@@ -31,10 +31,14 @@ const TASK_ID = '42';
 const EVALUATOR_SAFE = '0x' + '1'.repeat(40);
 const SOLVER_SAFE = '0x' + '2'.repeat(40);
 const ATTACKER_SAFE = '0x' + '3'.repeat(40);
+const CREATOR_SAFE = '0x' + '6'.repeat(40);
 const EVALUATOR_AGENT_ID = '101';
 const SOLVER_AGENT_ID = '202';
 const VERDICT_HASH = '0x' + '6'.repeat(64);
 const SOLUTION_HASH = '0x' + '7'.repeat(64);
+const TASK_CID_DIGEST = '0x' + 'a'.repeat(64);
+const MANIFEST_DIGEST = '0x' + 'b'.repeat(64);
+const ORIGINAL_TASK_CID = 'bafyOriginalTask';
 
 const AUTHENTICATED_TASK = {
   solverType: 'swe-rebench-v2.v1',
@@ -42,6 +46,10 @@ const AUTHENTICATED_TASK = {
   repo: 'django/django',
   baseCommit: 'a'.repeat(40),
   createdAt: 1_752_000_000_000,
+  originalTaskCid: ORIGINAL_TASK_CID,
+  creatorSafe: CREATOR_SAFE,
+  manifestDigest: MANIFEST_DIGEST,
+  description: 'Fix the widget factory',
 };
 
 // Mirrors the real jinn.execution.v1 TaskProvenanceSchema. solverType belongs
@@ -102,7 +110,7 @@ function boundSolution(over: Record<string, unknown> = {}) {
       agentEoa,
     },
     task: {
-      cid: 'bafyOriginalTask',
+      cid: ORIGINAL_TASK_CID,
       requestId: SOLVE_REQ,
       ...AUTHENTICATED_ENVELOPE_TASK,
     },
@@ -141,6 +149,7 @@ function ports(over: {
   verdict?: unknown;
   task?: unknown;
   verdictRows?: unknown[];
+  taskRows?: unknown[];
   verdictMetas?: unknown[];
   attemptRows?: unknown[];
   attemptMetas?: unknown[];
@@ -184,6 +193,20 @@ function ports(over: {
               taskId: TASK_ID,
               attemptIndex: 0,
               evaluator: EVALUATOR_SAFE,
+            }],
+          },
+        };
+      }
+      if (query.includes('AuthoritativeTask')) {
+        expect(variables).toEqual({ taskId: TASK_ID, chainId: 84532 });
+        return {
+          tasks: {
+            items: over.taskRows ?? [{
+              id: TASK_ID,
+              chainId: 84532,
+              taskCidDigest: TASK_CID_DIGEST,
+              manifestDigest: MANIFEST_DIGEST,
+              creator: CREATOR_SAFE,
             }],
           },
         };
@@ -271,7 +294,18 @@ describe('createEvidenceFetcher', () => {
       verifier: verifierTuple,
     });
     expect(resolveVerifierFacts).toHaveBeenCalledTimes(1);
-    expect(resolveVerifierFacts).toHaveBeenCalledWith(task, ref().instanceId);
+    expect(resolveVerifierFacts).toHaveBeenCalledWith(
+      task,
+      ref().instanceId,
+      {
+        taskId: TASK_ID,
+        chainId: 84532,
+        taskCidDigest: TASK_CID_DIGEST,
+        manifestDigest: MANIFEST_DIGEST,
+        creatorSafe: CREATOR_SAFE,
+        evaluatorSafe: EVALUATOR_SAFE,
+      },
+    );
   });
 
   it('requires solverType on the outer envelope even if a nested task copy claims it', async () => {
@@ -315,7 +349,15 @@ describe('createEvidenceFetcher', () => {
     await expect(fetch(ref())).resolves.toMatchObject({
       taskSummary: 'Fix the widget factory',
     });
-    expect(resolveVerifierFacts).toHaveBeenCalledWith(task, ref().instanceId);
+    expect(resolveVerifierFacts).toHaveBeenCalledWith(
+      task,
+      ref().instanceId,
+      expect.objectContaining({
+        taskId: TASK_ID,
+        taskCidDigest: TASK_CID_DIGEST,
+        creatorSafe: CREATOR_SAFE,
+      }),
+    );
   });
 
   it('rejects a signed inner restorationRequestId masked by an agreeing outer wrapper', async () => {
@@ -398,6 +440,72 @@ describe('createEvidenceFetcher', () => {
     );
   });
 
+  it('recovers the legitimate verdict candidate after an attacker publishes the same request id', async () => {
+    const fetch = createEvidenceFetcher(ports({
+      verdictMetas: [
+        {
+          requestId: EVALUATION_REQ,
+          chainId: 84532,
+          manifestCid: 'bafyAttackerVerdict',
+          publisherAgentId: '999',
+          manifestHash: '0x' + '9'.repeat(64),
+          enrichedAtBlock: '3000',
+        },
+        {
+          requestId: EVALUATION_REQ,
+          chainId: 84532,
+          manifestCid: VERDICT_CID,
+          publisherAgentId: EVALUATOR_AGENT_ID,
+          manifestHash: VERDICT_HASH,
+          enrichedAtBlock: '1000',
+        },
+      ],
+    }));
+
+    await expect(fetch(ref({
+      verdictManifestCid: 'bafyAttackerVerdict',
+    }))).resolves.toMatchObject({ patch: PATCH });
+  });
+
+  it('does not let an untrusted enrichment instance projection relabel authenticated task facts', async () => {
+    const fetch = createEvidenceFetcher({
+      ...ports({ task: producerTask() }),
+      resolveVerifierFacts: async () => authenticatedVerifier(),
+    });
+
+    await expect(fetch(ref({
+      instanceId: 'attacker__metadata-9',
+    }))).resolves.toMatchObject({
+      instanceId: AUTHENTICATED_TASK.instanceId,
+      taskSummary: AUTHENTICATED_TASK.description,
+    });
+  });
+
+  it('recovers the legitimate solution candidate after an attacker publishes the same request id', async () => {
+    const fetch = createEvidenceFetcher(ports({
+      attemptMetas: [
+        {
+          requestId: SOLVE_REQ,
+          chainId: 84532,
+          manifestCid: 'bafyAttackerSolution',
+          publisherAgentId: '999',
+          manifestHash: '0x' + '9'.repeat(64),
+          enrichedAtBlock: '3000',
+        },
+        {
+          requestId: SOLVE_REQ,
+          chainId: 84532,
+          manifestCid: SOLUTION_CID,
+          publisherAgentId: SOLVER_AGENT_ID,
+          manifestHash: SOLUTION_HASH,
+          enrichedAtBlock: '2000',
+        },
+      ],
+    }));
+
+    await expect(fetch(ref())).resolves.toMatchObject({ patch: PATCH });
+  });
+
   it('rejects a verdict whose signed hash is not the MetadataSet commitment', async () => {
     const fetch = createEvidenceFetcher(ports({
       verdictMetas: [{
@@ -472,6 +580,26 @@ describe('createEvidenceFetcher', () => {
 
     await expect(fetch(ref())).rejects.toThrow(
       /mutable task restorationRequestId.*authoritative solution requestId/,
+    );
+  });
+
+  it('rejects verifier facts whose original task lineage disagrees with TaskCreated', async () => {
+    const fetch = createEvidenceFetcher({
+      ...ports({
+        task: producerTask(),
+        taskRows: [{
+          id: TASK_ID,
+          chainId: 84532,
+          taskCidDigest: TASK_CID_DIGEST,
+          manifestDigest: '0x' + 'c'.repeat(64),
+          creator: CREATOR_SAFE,
+        }],
+      }),
+      resolveVerifierFacts: async () => authenticatedVerifier(),
+    });
+
+    await expect(fetch(ref())).rejects.toThrow(
+      /authenticated task manifest digest.*TaskCreated/,
     );
   });
 
@@ -660,16 +788,21 @@ describe('createEvidenceFetcher', () => {
     );
     expect(gql).toHaveBeenNthCalledWith(
       2,
+      expect.stringContaining('AuthoritativeTask'),
+      { taskId: TASK_ID, chainId: 84532 },
+    );
+    expect(gql).toHaveBeenNthCalledWith(
+      3,
       expect.stringContaining('AuthoritativeVerdictEnvelopeMeta'),
       { requestId: EVALUATION_REQ, chainId: 84532 },
     );
     expect(gql).toHaveBeenNthCalledWith(
-      3,
+      4,
       expect.stringContaining('AuthoritativeAttempt'),
       { taskId: TASK_ID, attemptIndex: 0, chainId: 84532 },
     );
     expect(gql).toHaveBeenNthCalledWith(
-      4,
+      5,
       expect.stringContaining('SolutionEnvelopeMeta'),
       { requestId: SOLVE_REQ, chainId: 84532 },
     );
@@ -698,9 +831,10 @@ describe('createEvidenceFetcher', () => {
 
   it.each([
     ['verdict', { verdictRows: [] }, /exactly one authoritative verdict/],
-    ['verdict envelope', { verdictMetas: [] }, /exactly one verdict envelope metadata row/],
+    ['task', { taskRows: [] }, /exactly one authoritative task/],
+    ['verdict envelope', { verdictMetas: [] }, /at least one verdict envelope metadata row/],
     ['attempt', { attemptRows: [] }, /exactly one authoritative attempt/],
-    ['solution envelope', { attemptMetas: [] }, /exactly one solution envelope metadata row/],
+    ['solution envelope', { attemptMetas: [] }, /at least one solution envelope metadata row/],
   ])('fails closed when the %s chain join is missing', async (_name, over, error) => {
     const fetch = createEvidenceFetcher(ports(over));
     await expect(fetch(ref())).rejects.toThrow(error);
@@ -719,7 +853,7 @@ describe('createEvidenceFetcher', () => {
 
   it('throws when no attemptEnvelopeMeta joins the solve request', async () => {
     const fetch = createEvidenceFetcher(ports({ attemptMetas: [] }));
-    await expect(fetch(ref())).rejects.toThrow(/exactly one solution envelope metadata row/);
+    await expect(fetch(ref())).rejects.toThrow(/at least one solution envelope metadata row/);
   });
 
   it('throws when the solution envelope has no payload.patch', async () => {
@@ -736,7 +870,7 @@ describe('createEvidenceFetcher', () => {
     await expect(fetch(ref())).rejects.toThrow(/no payload\.patch/);
   });
 
-  it('rejects a verifier-backed solution envelope that omits authenticated task provenance', async () => {
+  it('accepts a historical solution envelope whose copied task provenance is absent', async () => {
     const fetch = createEvidenceFetcher({
       ...ports({
         task: producerTask(),
@@ -748,9 +882,11 @@ describe('createEvidenceFetcher', () => {
       resolveVerifierFacts: async () => authenticatedVerifier(),
     });
 
-    await expect(fetch(ref())).rejects.toThrow(
-      /solutionEnvelope\.task requires exact authenticated task provenance/,
-    );
+    await expect(fetch(ref())).resolves.toMatchObject({
+      patch: PATCH,
+      repo: AUTHENTICATED_TASK.repo,
+      baseCommit: AUTHENTICATED_TASK.baseCommit,
+    });
   });
 });
 

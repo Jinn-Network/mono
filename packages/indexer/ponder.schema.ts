@@ -12,9 +12,9 @@
  *                           2026-05-13-plug-in-builder-entry-point-design.md
  *   HarnessCheckpoint     — from IdentityRegistry.MetadataSet (key prefix harness.checkpoint:)
  *   AttemptEnvelopeMeta   — IPFS-enriched executor/provenance fields for execution envelopes,
- *                           keyed by (requestId, chainId), joined from Envelope via IPFS fetch
+ *                           keyed by (requestId, publisherAgentId, manifestCid, chainId)
  *   VerdictEnvelopeMeta   — IPFS-enriched actual outcome fields for evaluation envelopes (ebu7.X),
- *                           keyed by (requestId, chainId). The on-chain verdictCode
+ *                           keyed by (requestId, publisherAgentId, manifestCid, chainId). The on-chain verdictCode
  *                           defaults to Pass(1) for failed evaluations (daemon bug); this table
  *                           holds the evaluator's real judgment from the off-chain envelope.
  *   RewardDistribution    — from Base Sepolia ExternalStakingDistributor.RewardsDistributed;
@@ -612,7 +612,10 @@ export const harnessCheckpoint = onchainTable(
  * without the body); Ponder reprocesses on the next sync giving a natural retry.
  * `mode`: 'train' (default when the envelope omits executor.mode) | 'frozen' | 'unknown'.
  *
- * Primary key: (requestId, chainId).
+ * Primary key: (requestId, publisherAgentId, manifestCid, chainId). A request
+ * may have competing MetadataSet candidates; retaining each publisher/CID
+ * anchor lets authenticated consumers reject ambiguity instead of accepting
+ * whichever event happened to arrive last.
  */
 export const attemptEnvelopeMeta = onchainTable(
   'attempt_envelope_meta',
@@ -653,7 +656,8 @@ export const attemptEnvelopeMeta = onchainTable(
     chainId: t.integer().notNull(),
   }),
   (table) => ({
-    pk: primaryKey({ columns: [table.requestId, table.chainId] }),
+    pk: primaryKey({ columns: [table.requestId, table.publisherAgentId, table.manifestCid, table.chainId] }),
+    requestChainIdx: index().on(table.requestId, table.chainId),
     manifestCidIdx: index().on(table.manifestCid),
     implNameIdx: index().on(table.implName),
     modeIdx: index().on(table.mode),
@@ -687,7 +691,10 @@ export const attemptEnvelopeMeta = onchainTable(
  * submitted on-chain (often defaulted to Pass). When both are present and
  * disagree, prefer `actualPassed` in UI and metrics.
  *
- * Primary key: (requestId, chainId).
+ * Primary key: (requestId, publisherAgentId, manifestCid, chainId). A request
+ * may have competing MetadataSet candidates; retaining each publisher/CID
+ * anchor lets authenticated consumers reject ambiguity instead of accepting
+ * whichever event happened to arrive last.
  * Index on manifestCid, evaluator, actualPassed, evaluatorVerdict, taskId.
  */
 export const verdictEnvelopeMeta = onchainTable(
@@ -814,7 +821,8 @@ export const verdictEnvelopeMeta = onchainTable(
     chainId: t.integer().notNull(),
   }),
   (table) => ({
-    pk: primaryKey({ columns: [table.requestId, table.chainId] }),
+    pk: primaryKey({ columns: [table.requestId, table.publisherAgentId, table.manifestCid, table.chainId] }),
+    requestChainIdx: index().on(table.requestId, table.chainId),
     manifestCidIdx: index().on(table.manifestCid),
     evaluatorIdx: index().on(table.evaluator),
     actualPassedIdx: index().on(table.actualPassed),

@@ -31,8 +31,10 @@ its own event loop, and writes the result back into `verdict_envelope_meta`.
    `@jinn-network/indexer/enrichment-parse` module — the SAME parser the handler
    uses, so the in-handler path and this worker cannot drift.
 3. **Write** (`src/db.ts` `upsertVerdict`) — upsert the full field set keyed
-   `(request_id, chain_id)`, guarded by `enriched_at_block` most-recent-wins
-   (mirrors the handler's `onConflictDoUpdate`), with `enrichment_status='ok'`.
+   `(request_id, publisher_agent_id, manifest_cid, chain_id)`, guarded by
+   `enriched_at_block` most-recent-wins (mirrors the handler's
+   `onConflictDoUpdate`), with `enrichment_status='ok'`. Competing
+   publisher/CID candidates remain independently queryable.
    On a `swe-rebench-v2` **task-body** fetch failure the worker
    **graceful-degrades exactly like the handler**: it warns, leaves
    `instance_id=''` / `solver_net_manifest_cid=''`, and still writes the verdict

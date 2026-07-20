@@ -1484,12 +1484,11 @@ export async function handleMetadataSet({
               chainId,
             })
             .onConflictDoUpdate((row) => {
-              // Most-recent-wins: only update if the incoming event is at least
-              // as recent as the stored enrichment. Stale replays are no-ops.
+              // The composite PK makes this conflict specific to one
+              // publisher/CID candidate. Competing candidates insert separate
+              // rows; only replays of this exact anchor are most-recent-wins.
               if (blockNumber >= row.enrichedAtBlock) {
                 return {
-                  manifestCid: envelopeKey.cid,
-                  publisherAgentId: agentId,
                   manifestHash,
                   solverType: meta.solverType,
                   implName: meta.implName,
@@ -1503,13 +1502,10 @@ export async function handleMetadataSet({
                   sourcePublished: meta.sourcePublished,
                   enrichmentStatus: 'ok',
                   enrichedAtBlock: blockNumber,
-                  chainId,
                 };
               }
               // No-op: return existing row fields so Drizzle generates valid SQL.
               return {
-                manifestCid: row.manifestCid,
-                publisherAgentId: row.publisherAgentId,
                 manifestHash: row.manifestHash,
                 solverType: row.solverType,
                 implName: row.implName,
@@ -1523,7 +1519,6 @@ export async function handleMetadataSet({
                 sourcePublished: row.sourcePublished,
                 enrichmentStatus: row.enrichmentStatus,
                 enrichedAtBlock: row.enrichedAtBlock,
-                chainId: row.chainId,
               };
             });
         }
@@ -1615,15 +1610,15 @@ export async function handleMetadataSet({
               chainId,
             })
             .onConflictDoUpdate((row) => {
-              // Most-recent-wins by enrichedAtBlock. Stale replays no-op.
+              // The composite PK makes this conflict specific to one
+              // publisher/CID candidate. Competing candidates insert separate
+              // rows; only replays of this exact anchor are most-recent-wins.
               if (blockNumber >= row.enrichedAtBlock) {
                 return {
                   verdictIndex: meta.verdictIndex,
                   attemptIndex: meta.attemptIndex,
                   taskId: meta.taskId,
                   evaluator: meta.evaluator as `0x${string}`,
-                  manifestCid: envelopeKey.cid,
-                  publisherAgentId: agentId,
                   manifestHash,
                   solverType: meta.solverType,
                   evidenceTier: meta.evidenceTier,
@@ -1637,7 +1632,6 @@ export async function handleMetadataSet({
                   evaluatorVerdict: meta.evaluatorVerdict,
                   enrichmentStatus: 'ok',
                   enrichedAtBlock: blockNumber,
-                  chainId,
                 };
               }
               // No-op: return existing row fields so Drizzle generates valid SQL.
@@ -1646,8 +1640,6 @@ export async function handleMetadataSet({
                 attemptIndex: row.attemptIndex,
                 taskId: row.taskId,
                 evaluator: row.evaluator,
-                manifestCid: row.manifestCid,
-                publisherAgentId: row.publisherAgentId,
                 manifestHash: row.manifestHash,
                 solverType: row.solverType,
                 evidenceTier: row.evidenceTier,
@@ -1661,7 +1653,6 @@ export async function handleMetadataSet({
                 evaluatorVerdict: row.evaluatorVerdict,
                 enrichmentStatus: row.enrichmentStatus,
                 enrichedAtBlock: row.enrichedAtBlock,
-                chainId: row.chainId,
               };
             });
         }

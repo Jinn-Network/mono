@@ -94,6 +94,52 @@ describe('createVerdictSource', () => {
     expect(await source.list()).toEqual([]);
   });
 
+  it('emits only one discovery ref per request, chain, and polarity when retained candidates collide', async () => {
+    const verdicts: VerdictItem[] = [
+      {
+        requestId: RID(8),
+        chainId: 84532,
+        instanceId: 'd__d-8',
+        actualPassed: true,
+        evaluatorVerdict: 'PASS',
+        manifestCid: 'bafyNewestUntrustedCandidate',
+      },
+      {
+        requestId: RID(8),
+        chainId: 84532,
+        instanceId: 'd__d-8',
+        actualPassed: true,
+        evaluatorVerdict: 'PASS',
+        manifestCid: 'bafyOlderAuthenticatedCandidate',
+      },
+      {
+        requestId: RID(8),
+        chainId: 84532,
+        instanceId: 'd__d-8',
+        actualPassed: false,
+        evaluatorVerdict: 'FAIL',
+        manifestCid: 'bafyFailureCandidate',
+      },
+    ];
+    const source = createVerdictSource({
+      graphqlUrl: GQL_URL,
+      fetchImpl: mockFetch(verdicts),
+    });
+
+    await expect(source.list()).resolves.toEqual([
+      expect.objectContaining({
+        requestId: RID(8),
+        polarity: 'pass',
+        verdictManifestCid: 'bafyNewestUntrustedCandidate',
+      }),
+      expect.objectContaining({
+        requestId: RID(8),
+        polarity: 'fail',
+        verdictManifestCid: 'bafyFailureCandidate',
+      }),
+    ]);
+  });
+
   it('appends /graphql to a bare base URL', async () => {
     const fetchImpl = mockFetch([]);
     const source = createVerdictSource({ graphqlUrl: 'https://indexer.example', fetchImpl });
