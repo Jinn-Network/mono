@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
   createEvidenceFetcher,
   type AuthenticatedExecutionEnvelope,
@@ -20,6 +21,10 @@ function ref(over: Partial<AttemptRef> = {}): AttemptRef {
 }
 
 const PATCH = 'diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-old\n+new\n';
+const CODEX_JSONL = readFileSync(
+  new URL('./fixtures/codex-stdout.fixture.jsonl', import.meta.url),
+  'utf8',
+);
 
 const VERDICT_CID = 'bafyVerdict';
 const TASK_CID = 'bafyTask';
@@ -930,36 +935,33 @@ describe('createEvidenceFetcher — snapshot-transcript enrichment (§8, #1472)'
   });
 
   it('derives canonical typed spans from the codex transcript inside system_snapshot', async () => {
-    const codexJsonl = [
-      JSON.stringify({
-        timestamp: '2026-07-20T12:00:00.000Z',
-        type: 'response_item',
-        payload: {
-          type: 'message',
-          role: 'user',
-          content: [{ type: 'input_text', text: 'Run the tests.' }],
-        },
-      }),
-      JSON.stringify({
-        timestamp: '2026-07-20T12:00:01.000Z',
-        type: 'response_item',
-        payload: {
-          type: 'function_call',
-          name: 'shell',
-          arguments: '{"command":"pytest -x"}',
-          call_id: 'call-1',
-        },
-      }),
-    ].join('\n');
-    const fetch = createEvidenceFetcher(ports(solutionWithSnapshot({ '.codex-code/stdout.jsonl': codexJsonl })));
+    const fetch = createEvidenceFetcher(ports(solutionWithSnapshot({
+      '.codex-code/stdout.jsonl': CODEX_JSONL,
+    })));
     const ev = await fetch(ref());
     expect(ev.trajectorySpans).toEqual(expect.arrayContaining([
       expect.objectContaining({
         attributes: expect.objectContaining({
-          'jinn.span.kind': 'jinn.tool_call',
+          'jinn.span.kind': 'jinn.agent_turn',
+          'message.content': expect.stringContaining('learn loop'),
           'jinn.transcript.parser': 'codex-exec-json',
           'jinn.transcript.parserVersion': '1.0.0',
         }),
+      }),
+      expect.objectContaining({
+        attributes: expect.objectContaining({
+          'jinn.span.kind': 'jinn.tool_call',
+          'tool.name': 'command_execution',
+          'jinn.transcript.parser': 'codex-exec-json',
+          'jinn.transcript.parserVersion': '1.0.0',
+        }),
+        events: [
+          expect.objectContaining({
+            attributes: expect.objectContaining({
+              'tool.result': expect.stringContaining('class CodeGenerator'),
+            }),
+          }),
+        ],
       }),
     ]));
   });

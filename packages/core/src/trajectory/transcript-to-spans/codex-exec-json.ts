@@ -8,6 +8,21 @@ const SOURCE_FORMAT = 'codex-exec-json';
 const PARSER_NAME = 'codex-exec-json';
 const PARSER_VERSION = '1.0.0';
 
+interface DirectExecItem {
+  id?: unknown;
+  type?: unknown;
+  text?: unknown;
+  command?: unknown;
+  aggregated_output?: unknown;
+  exit_code?: unknown;
+  status?: unknown;
+}
+
+interface DirectExecRecord {
+  type?: unknown;
+  item?: unknown;
+}
+
 class TimestampCursor {
   private lastGoodNs = 0n;
 
@@ -25,6 +40,95 @@ class TimestampCursor {
 
 function provenanceAttrs(): Record<string, unknown> {
   return makeProvenanceAttrs(SOURCE_FORMAT, PARSER_NAME, PARSER_VERSION);
+}
+
+/**
+ * `codex exec --json` stdout uses item lifecycle records, while Codex home
+ * sessions use timestamped `response_item` envelopes. Convert the direct
+ * stream to the same events consumed below; returning no events preserves the
+ * home-session compatibility fallback.
+ */
+function parseDirectExecEvents(rawText: string): TranscriptEvent[] {
+  const events: TranscriptEvent[] = [];
+  const pendingCommandIds = new Set<string>();
+  let syntheticTimestampMs = 0;
+  const nextTimestamp = (): string =>
+    new Date(syntheticTimestampMs++).toISOString();
+
+  for (const line of rawText.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    let record: DirectExecRecord;
+    try {
+      record = JSON.parse(trimmed) as DirectExecRecord;
+    } catch {
+      continue;
+    }
+    if (!record || (record.type !== 'item.started' && record.type !== 'item.completed')) {
+      continue;
+    }
+    if (!record.item || typeof record.item !== 'object' || Array.isArray(record.item)) {
+      continue;
+    }
+
+    const item = record.item as DirectExecItem;
+    if (
+      record.type === 'item.completed' &&
+      item.type === 'agent_message' &&
+      typeof item.text === 'string' &&
+      item.text.length > 0
+    ) {
+      events.push({
+        kind: 'assistant-message',
+        timestamp: nextTimestamp(),
+        content: item.text,
+      });
+      continue;
+    }
+    if (item.type !== 'command_execution' || typeof item.command !== 'string') {
+      continue;
+    }
+
+    const itemId = typeof item.id === 'string' ? item.id : null;
+    const hasPendingCall = itemId !== null && pendingCommandIds.has(itemId);
+    if (record.type === 'item.started') {
+      events.push({
+        kind: 'tool-call',
+        timestamp: nextTimestamp(),
+        name: 'command_execution',
+        args: { command: item.command },
+      });
+      if (itemId !== null) pendingCommandIds.add(itemId);
+      continue;
+    }
+
+    // A completed-only stream still carries enough evidence for a full call.
+    if (!hasPendingCall) {
+      events.push({
+        kind: 'tool-call',
+        timestamp: nextTimestamp(),
+        name: 'command_execution',
+        args: { command: item.command },
+      });
+    }
+    if (itemId !== null) pendingCommandIds.delete(itemId);
+
+    const output =
+      typeof item.aggregated_output === 'string' ? item.aggregated_output : '';
+    const isError =
+      (typeof item.exit_code === 'number' && item.exit_code !== 0) ||
+      item.status === 'failed';
+    events.push({
+      kind: 'tool-result',
+      timestamp: nextTimestamp(),
+      name: 'command_execution',
+      content: output,
+      isError,
+    });
+  }
+
+  return events;
 }
 
 function findTerminalUsage(
@@ -71,15 +175,17 @@ export class CodexExecJsonParser implements TranscriptSpanParser {
   }
 
   parseText(rawText: string): TranscriptSpanInput[] {
-    let events: TranscriptEvent[];
-    try {
-      const normalized = rawText.endsWith('\n') ? rawText : `${rawText}\n`;
-      events = new CodexSessionParser().parseChunk({
-        sessionId: 'engine-pack',
-        chunk: normalized,
-      });
-    } catch {
-      return [];
+    let events = parseDirectExecEvents(rawText);
+    if (events.length === 0) {
+      try {
+        const normalized = rawText.endsWith('\n') ? rawText : `${rawText}\n`;
+        events = new CodexSessionParser().parseChunk({
+          sessionId: 'engine-pack',
+          chunk: normalized,
+        });
+      } catch {
+        return [];
+      }
     }
 
     const spans: TranscriptSpanInput[] = [];

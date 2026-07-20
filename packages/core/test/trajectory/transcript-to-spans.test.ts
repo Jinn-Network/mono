@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   ClaudeCodeStreamJsonParser,
@@ -87,6 +89,14 @@ const codexTranscript = [
   }),
 ].join('\n');
 
+const directCodexExecFixturePath = fileURLToPath(
+  new URL(
+    '../../../../client/packages/harness-layer/test/fixtures/codex-stdout.fixture.jsonl',
+    import.meta.url,
+  ),
+);
+const directCodexExecTranscript = readFileSync(directCodexExecFixturePath, 'utf8');
+
 describe.each([
   ['Claude Code', new ClaudeCodeStreamJsonParser(), claudeTranscript, true],
   ['Codex', new CodexExecJsonParser(), codexTranscript, false],
@@ -118,5 +128,41 @@ describe.each([
     expect(hasSyntheticTime ? withoutTimestamps(fromFile) : fromFile).toEqual(
       hasSyntheticTime ? withoutTimestamps(fromMemory) : fromMemory,
     );
+  });
+});
+
+describe('Codex direct exec stream', () => {
+  it('parses the captured item stream into turns, paired commands, and terminal usage', async () => {
+    const parser = new CodexExecJsonParser();
+    const spans = await parser.parse(directCodexExecFixturePath);
+    const turns = spans.filter(
+      (span) => span.attributes['jinn.span.kind'] === 'jinn.agent_turn',
+    );
+    const toolCalls = spans.filter(
+      (span) => span.attributes['jinn.span.kind'] === 'jinn.tool_call',
+    );
+
+    expect(turns).toHaveLength(2);
+    expect(turns[0]?.attributes['message.content']).toContain(
+      'I’m starting with the learn loop',
+    );
+    expect(turns[1]?.attributes['gen_ai.usage.input_tokens']).toBe(3_679_427);
+    expect(turns[1]?.attributes['gen_ai.usage.output_tokens']).toBe(14_552);
+
+    expect(toolCalls).toHaveLength(3);
+    expect(
+      toolCalls.every((span) => span.attributes['tool.name'] === 'command_execution'),
+    ).toBe(true);
+    expect(toolCalls[0]?.attributes['tool.args']).toEqual({
+      command: '/bin/bash -lc "sed -n \'1,220p\' src/sqlacodegen/generators.py"',
+    });
+    expect(toolCalls[0]?.events[0]?.attributes?.['tool.result']).toContain(
+      'class CodeGenerator',
+    );
+    expect(toolCalls[0]?.status).toEqual({ code: 'OK' });
+    expect(toolCalls[2]?.events).toEqual([]);
+    expect(toolCalls[2]?.status).toEqual({ code: 'UNSET' });
+
+    expect(parser.parseText(directCodexExecTranscript)).toEqual(spans);
   });
 });

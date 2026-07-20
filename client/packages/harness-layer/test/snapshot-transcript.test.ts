@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import {
   unwrapDonation,
@@ -10,6 +11,10 @@ import {
 import { makeTar, makeTarGz, wrapDonation as wrap } from './tar-fixture.js';
 
 const CLAUDE_JSONL = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'fix the bug' }] } }) + '\n';
+const CODEX_JSONL = readFileSync(
+  new URL('./fixtures/codex-stdout.fixture.jsonl', import.meta.url),
+  'utf8',
+);
 
 describe('unwrapDonation', () => {
   it('decodes base64 data when the declared and computed sha256 match', () => {
@@ -134,31 +139,31 @@ describe('parseSolveTranscript', () => {
   it('uses the canonical Codex parser', () => {
     const spans = parseSolveTranscript({
       harness: 'codex',
-      jsonl: [
-        JSON.stringify({
-          timestamp: '2026-07-20T12:00:00.000Z',
-          type: 'response_item',
-          payload: {
-            type: 'message',
-            role: 'user',
-            content: [{ type: 'input_text', text: 'Run the tests.' }],
-          },
-        }),
-        JSON.stringify({
-          timestamp: '2026-07-20T12:00:01.000Z',
-          type: 'response_item',
-          payload: {
-            type: 'function_call',
-            name: 'shell',
-            arguments: '{"command":"pytest -x"}',
-            call_id: 'call-1',
-          },
-        }),
-      ].join('\n'),
+      jsonl: CODEX_JSONL,
     });
 
-    expect(spans.some((span) => span.attributes['jinn.span.kind'] === 'jinn.tool_call')).toBe(
-      true,
+    expect(spans).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          attributes: expect.objectContaining({
+            'jinn.span.kind': 'jinn.agent_turn',
+            'message.content': expect.stringContaining('learn loop'),
+          }),
+        }),
+        expect.objectContaining({
+          attributes: expect.objectContaining({
+            'jinn.span.kind': 'jinn.tool_call',
+            'tool.name': 'command_execution',
+          }),
+          events: [
+            expect.objectContaining({
+              attributes: expect.objectContaining({
+                'tool.result': expect.stringContaining('class CodeGenerator'),
+              }),
+            }),
+          ],
+        }),
+      ]),
     );
     expect(
       spans.every(

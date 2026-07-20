@@ -48,7 +48,7 @@ A solution carries two:
    | Entry | Content |
    |---|---|
    | `.claude-code/stdout.jsonl` | **The full claude-code session** — `--output-format stream-json` records (assistant text + tool_use + tool_result), the solve's actual decision path (~100KB+) |
-   | `.codex-code/stdout.jsonl` | **The full codex session** — `codex exec --json` records (`response_item`: message / function_call / function_call_output) |
+   | `.codex-code/stdout.jsonl` | **The full codex session** — direct `codex exec --json` lifecycle records (`thread.started`, `turn.started`, `item.started` / `item.completed`, `turn.completed`); messages are `agent_message` items and shell activity is `command_execution` |
    | `.hermes-agent/stdout.log` | Hermes: ~1KB plain text — no decision path |
    | `.execute/solution-payload.json`, `task.json` | The payload + the task the agent was given |
    | (codex runs) `.agents/`, `plugins/` | Installed skills/plugins present in the workdir |
@@ -70,5 +70,8 @@ evidence with no usable transcript is tagged `patch-only`.
 
 Note the format trap: the older parsers under
 `@jinn-network/core/trajectory`'s `transcript-parsers/` directory target the
-tools' **home-dir** session formats. The sibling `transcript-to-spans/`
-parsers target these captured stdout streams.
+tools' **home-dir** session formats. In particular, timestamped
+`response_item` envelopes are Codex home-session records, not current direct
+`codex exec --json` stdout. The sibling `transcript-to-spans/` parsers target
+captured stdout; the Codex parser also retains home-envelope compatibility for
+older snapshots.
