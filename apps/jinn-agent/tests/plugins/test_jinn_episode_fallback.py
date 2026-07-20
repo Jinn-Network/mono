@@ -13,7 +13,13 @@ def _episode() -> dict:
     return {
         "schemaVersion": "jinn.episode.v1",
         "episodeId": "episode/id:1",
-        "session": {"sessionId": "session-1", "capturedAt": "2026-07-15T00:00:00Z"},
+        "retrievalVisible": False,
+        "session": {
+            "sessionId": "session-1",
+            "capturedAt": "2026-07-15T00:00:00Z",
+            "kind": "user",
+        },
+        "origin": {"writer": "jinn-agent", "build": "test"},
         "task": {"summary": "fix it", "distributionTags": []},
         "trajectory": [
             {
@@ -67,6 +73,91 @@ def test_fallback_rejects_non_episode_data_without_writing(tmp_path, monkeypatch
 
     assert distill.write_episode_fallback({"episodeId": "x"}) is None
     assert list(tmp_path.glob("*.json")) == []
+
+
+def test_fallback_rejects_unknown_fields_at_every_strict_write_boundary(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("JINN_LAYER_EPISODES_DIR", str(tmp_path))
+    top_level = _episode()
+    top_level["futureField"] = True
+    nested = _episode()
+    nested["task"]["futureField"] = True
+
+    assert distill.write_episode_fallback(top_level) is None
+    assert distill.write_episode_fallback(nested) is None
+    assert list(tmp_path.glob("*.json")) == []
+
+
+def test_fallback_rejects_reader_only_defaults_and_null_compatibility(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("JINN_LAYER_EPISODES_DIR", str(tmp_path))
+    missing_kind = _episode()
+    missing_kind["session"].pop("kind")
+    missing_origin = _episode()
+    missing_origin.pop("origin")
+    null_optional = _episode()
+    null_optional["task"]["baseCommit"] = None
+
+    assert distill.write_episode_fallback(missing_kind) is None
+    assert distill.write_episode_fallback(missing_origin) is None
+    assert distill.write_episode_fallback(null_optional) is None
+    assert list(tmp_path.glob("*.json")) == []
+
+
+def test_fallback_enforces_write_only_delivery_hash_invariant(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("JINN_LAYER_EPISODES_DIR", str(tmp_path))
+    episode = _episode()
+    episode["activity"] = {
+        "searchedTerms": ["dashboard"],
+        "providedRefs": ["bafy-delivered"],
+        "surfacedRefs": [],
+        "fetchedRefs": [],
+        "installedSkillRefs": [],
+        "retrievalFired": True,
+        "eligibleRefs": ["bafy-delivered"],
+        "deliveredRefs": ["bafy-delivered"],
+        "deliveryMode": "delivered",
+    }
+
+    assert distill.write_episode_fallback(episode) is None
+    assert list(tmp_path.glob("*.json")) == []
+
+
+def test_fallback_materializes_only_strict_writer_defaults(tmp_path, monkeypatch):
+    monkeypatch.setenv("JINN_LAYER_EPISODES_DIR", str(tmp_path))
+    episode = _episode()
+    episode.pop("retrievalVisible")
+    episode.pop("provenance")
+    episode["task"].pop("distributionTags")
+    episode["trajectory"][0].pop("redactedKeys")
+    episode["environment"]["verifier"] = {"type": "none"}
+    episode["attemptGroup"] = {
+        "groupId": "group",
+        "attemptId": "attempt",
+    }
+    episode["outcome"]["verifiabilityTier"] = episode["outcome"].pop(
+        "verificationStrength"
+    )
+
+    path = distill.write_episode_fallback(episode)
+    stored = json.loads(path.read_text(encoding="utf-8"))
+
+    assert stored["retrievalVisible"] is False
+    assert stored["provenance"] == "contributed"
+    assert stored["task"]["distributionTags"] == []
+    assert stored["trajectory"][0]["redactedKeys"] == []
+    assert stored["environment"]["verifier"] == {
+        "type": "none",
+        "failToPass": [],
+        "passToPass": [],
+    }
+    assert stored["attemptGroup"]["relatedAttemptRefs"] == []
+    assert stored["outcome"]["verificationStrength"] == "user-accepted"
+    assert "verifiabilityTier" not in stored["outcome"]
 
 
 def test_fallback_file_names_cannot_alias_after_sanitizing(tmp_path, monkeypatch):

@@ -18,6 +18,7 @@ marker, so a user's own skills can never be deleted through this surface.
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import json
 import logging
@@ -157,6 +158,457 @@ def _episode_verification_strength(outcome: Dict[str, Any]) -> str:
         ("user-accepted", "tests-passed", "evaluator-verified"),
     )
     return str(canonical)
+
+
+def _without_nulls(
+    value: Any,
+    optional_keys: Tuple[str, ...],
+) -> Any:
+    if not isinstance(value, dict):
+        return value
+    normalized = dict(value)
+    for key in optional_keys:
+        if normalized.get(key) is None:
+            normalized.pop(key, None)
+    return normalized
+
+
+def _normalize_episode_read(parsed: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the same additive/defaulted view as TS ``EpisodeV1Schema``."""
+    normalized = copy.deepcopy(parsed)
+    normalized.setdefault("retrievalVisible", False)
+    normalized.setdefault("provenance", "contributed")
+
+    session = _without_nulls(normalized.get("session"), ("parentSessionId",))
+    if isinstance(session, dict):
+        session.setdefault("kind", "user")
+        normalized["session"] = session
+    if "origin" not in normalized:
+        normalized["origin"] = "legacy-unstamped"
+
+    task = _without_nulls(
+        normalized.get("task"),
+        ("repositorySlug", "baseCommit", "createdAt", "instanceId"),
+    )
+    if isinstance(task, dict):
+        task.setdefault("distributionTags", [])
+        normalized["task"] = task
+
+    trajectory = normalized.get("trajectory")
+    if isinstance(trajectory, list):
+        normalized_steps: List[Any] = []
+        for raw_step in trajectory:
+            step = _without_nulls(raw_step, ("truncatedKeys",))
+            if isinstance(step, dict):
+                step.setdefault("redactedKeys", [])
+            normalized_steps.append(step)
+        normalized["trajectory"] = normalized_steps
+
+    environment = _without_nulls(
+        normalized.get("environment"),
+        ("generatorModel", "distributionClass", "verifier"),
+    )
+    if isinstance(environment, dict):
+        generator_model = _without_nulls(
+            environment.get("generatorModel"),
+            ("provider", "openWeights"),
+        )
+        if isinstance(generator_model, dict):
+            environment["generatorModel"] = generator_model
+        verifier = _without_nulls(
+            environment.get("verifier"),
+            ("evalSemanticsVersion",),
+        )
+        if isinstance(verifier, dict):
+            if verifier.get("type") in ("command", "none"):
+                verifier.setdefault("failToPass", [])
+                verifier.setdefault("passToPass", [])
+            environment["verifier"] = verifier
+        normalized["environment"] = environment
+
+    outcome = _without_nulls(
+        normalized.get("outcome"),
+        ("summary", "acceptedDiff", "testRuns"),
+    )
+    if isinstance(outcome, dict) and "verifiabilityTier" in outcome:
+        legacy = outcome["verifiabilityTier"]
+        canonical = outcome.get("verificationStrength")
+        outcome["verificationStrength"] = (
+            [canonical, legacy]
+            if "verificationStrength" in outcome and canonical != legacy
+            else legacy
+        )
+        outcome.pop("verifiabilityTier", None)
+    normalized["outcome"] = outcome
+    normalized["cost"] = _without_nulls(
+        normalized.get("cost"),
+        ("tokens", "usdEstimate"),
+    )
+
+    for key in ("lineage", "attemptGroup", "activity", "eligibility"):
+        if normalized.get(key) is None:
+            normalized.pop(key, None)
+
+    lineage = _without_nulls(normalized.get("lineage"), ("mintRef",))
+    if isinstance(lineage, dict):
+        normalized["lineage"] = lineage
+
+    attempt_group = _without_nulls(
+        normalized.get("attemptGroup"),
+        ("groupSize", "nPass", "nFail"),
+    )
+    if isinstance(attempt_group, dict):
+        attempt_group.setdefault("relatedAttemptRefs", [])
+        normalized["attemptGroup"] = attempt_group
+
+    activity = _without_nulls(
+        normalized.get("activity"),
+        ("deliveredContentHash",),
+    )
+    if isinstance(activity, dict):
+        missing = object()
+        searched_terms = activity.get("searchedTerms", [])
+        legacy_provided = activity.get("providedRefs", missing)
+        delivered_refs = activity.get(
+            "deliveredRefs",
+            [] if legacy_provided is missing else legacy_provided,
+        )
+        eligible_refs = activity.get("eligibleRefs", delivered_refs)
+        retrieval_fired = activity.get(
+            "retrievalFired",
+            (
+                isinstance(searched_terms, list)
+                and len(searched_terms) > 0
+            )
+            or (
+                isinstance(delivered_refs, list)
+                and len(delivered_refs) > 0
+            ),
+        )
+        activity.update({
+            "searchedTerms": searched_terms,
+            "providedRefs": (
+                delivered_refs
+                if legacy_provided is missing
+                else legacy_provided
+            ),
+            "surfacedRefs": activity.get("surfacedRefs", []),
+            "fetchedRefs": activity.get("fetchedRefs", []),
+            "installedSkillRefs": activity.get("installedSkillRefs", []),
+            "retrievalFired": retrieval_fired,
+            "eligibleRefs": eligible_refs,
+            "deliveredRefs": delivered_refs,
+            "deliveryMode": activity.get(
+                "deliveryMode",
+                "delivered" if retrieval_fired is True else "disabled",
+            ),
+        })
+        normalized["activity"] = activity
+
+    return normalized
+
+
+def _strict_object(
+    value: Any,
+    path: str,
+    allowed: Tuple[str, ...],
+    required: Tuple[str, ...] = (),
+    nullable: Tuple[str, ...] = (),
+) -> Dict[str, Any]:
+    obj = _episode_object(value, path)
+    unknown = sorted(set(obj) - set(allowed))
+    if unknown:
+        key = unknown[0]
+        field_path = f"{path}.{key}" if path else key
+        _episode_error(field_path, "a known strict-write field")
+    for key in required:
+        if key not in obj:
+            field_path = f"{path}.{key}" if path else key
+            _episode_error(field_path, "present on canonical writes")
+    for key, item in obj.items():
+        if item is None and key not in nullable:
+            field_path = f"{path}.{key}" if path else key
+            _episode_error(field_path, "non-null on canonical writes")
+    return obj
+
+
+def _validate_episode_write(parsed: Dict[str, Any]) -> Dict[str, Any]:
+    """Strict Python mirror of ``EpisodeV1WriteSchema``.
+
+    Returns the canonical default-materialized writer view. Reader-only null
+    compatibility, additive unknown fields, and legacy origin/session defaults
+    are deliberately not accepted here.
+    """
+    normalized = copy.deepcopy(parsed)
+    top = _strict_object(
+        normalized,
+        "",
+        (
+            "schemaVersion",
+            "episodeId",
+            "retrievalVisible",
+            "session",
+            "origin",
+            "task",
+            "trajectory",
+            "environment",
+            "outcome",
+            "cost",
+            "retention",
+            "provenance",
+            "lineage",
+            "attemptGroup",
+            "activity",
+            "eligibility",
+        ),
+        (
+            "schemaVersion",
+            "episodeId",
+            "session",
+            "origin",
+            "task",
+            "trajectory",
+            "environment",
+            "outcome",
+            "cost",
+            "retention",
+        ),
+    )
+    top.setdefault("retrievalVisible", False)
+    top.setdefault("provenance", "contributed")
+
+    _strict_object(
+        top["session"],
+        "session",
+        ("sessionId", "capturedAt", "kind", "parentSessionId"),
+        ("sessionId", "capturedAt", "kind"),
+    )
+    _strict_object(
+        top["origin"],
+        "origin",
+        ("writer", "build"),
+        ("writer", "build"),
+    )
+    task = _strict_object(
+        top["task"],
+        "task",
+        (
+            "summary",
+            "distributionTags",
+            "repositorySlug",
+            "baseCommit",
+            "createdAt",
+            "instanceId",
+        ),
+        ("summary",),
+    )
+    task.setdefault("distributionTags", [])
+
+    trajectory = top["trajectory"]
+    if isinstance(trajectory, list):
+        for index, raw_step in enumerate(trajectory):
+            step = _strict_object(
+                raw_step,
+                f"trajectory[{index}]",
+                (
+                    "spanId",
+                    "parentSpanId",
+                    "kind",
+                    "name",
+                    "startTimeUnixNano",
+                    "endTimeUnixNano",
+                    "attributes",
+                    "redactedKeys",
+                    "truncatedKeys",
+                ),
+                (
+                    "spanId",
+                    "parentSpanId",
+                    "kind",
+                    "name",
+                    "startTimeUnixNano",
+                    "endTimeUnixNano",
+                    "attributes",
+                ),
+                ("parentSpanId",),
+            )
+            step.setdefault("redactedKeys", [])
+
+    environment = _strict_object(
+        top["environment"],
+        "environment",
+        (
+            "harness",
+            "model",
+            "tools",
+            "skillsLoadout",
+            "generatorModel",
+            "distributionClass",
+            "verifier",
+        ),
+        ("harness", "model", "tools", "skillsLoadout"),
+    )
+    _strict_object(
+        environment["harness"],
+        "environment.harness",
+        ("name", "version"),
+        ("name", "version"),
+    )
+    if "generatorModel" in environment:
+        _strict_object(
+            environment["generatorModel"],
+            "environment.generatorModel",
+            ("id", "provider", "openWeights", "source"),
+            ("id", "source"),
+        )
+    if "verifier" in environment:
+        verifier = _strict_object(
+            environment["verifier"],
+            "environment.verifier",
+            ("type", "failToPass", "passToPass", "evalSemanticsVersion"),
+            ("type",),
+        )
+        if verifier.get("type") == "f2p-p2p":
+            for key in ("failToPass", "passToPass", "evalSemanticsVersion"):
+                if key not in verifier:
+                    _episode_error(
+                        f"environment.verifier.{key}",
+                        "present for f2p-p2p canonical writes",
+                    )
+        elif verifier.get("type") in ("command", "none"):
+            verifier.setdefault("failToPass", [])
+            verifier.setdefault("passToPass", [])
+
+    outcome = _strict_object(
+        top["outcome"],
+        "outcome",
+        (
+            "status",
+            "verificationStrength",
+            "verifiabilityTier",
+            "summary",
+            "acceptedDiff",
+            "testRuns",
+        ),
+        ("status",),
+    )
+    if "verifiabilityTier" in outcome:
+        legacy = outcome["verifiabilityTier"]
+        canonical = outcome.get("verificationStrength")
+        if "verificationStrength" in outcome and canonical != legacy:
+            _episode_error(
+                "outcome.verificationStrength",
+                "equal to outcome.verifiabilityTier when both are present",
+            )
+        outcome["verificationStrength"] = legacy
+        outcome.pop("verifiabilityTier", None)
+    if "verificationStrength" not in outcome:
+        _episode_error(
+            "outcome.verificationStrength",
+            "present on canonical writes",
+        )
+    if "testRuns" in outcome:
+        _strict_object(
+            outcome["testRuns"],
+            "outcome.testRuns",
+            ("passed", "failed"),
+            ("passed", "failed"),
+        )
+
+    cost = _strict_object(
+        top["cost"],
+        "cost",
+        ("durationMs", "tokens", "usdEstimate"),
+        ("durationMs",),
+    )
+    if "tokens" in cost:
+        _strict_object(
+            cost["tokens"],
+            "cost.tokens",
+            ("input", "output"),
+            ("input", "output"),
+        )
+    _strict_object(
+        top["retention"],
+        "retention",
+        ("policy",),
+        ("policy",),
+    )
+
+    if "lineage" in top:
+        _strict_object(
+            top["lineage"],
+            "lineage",
+            ("episodeId", "mintRef"),
+            ("episodeId",),
+        )
+    if "attemptGroup" in top:
+        attempt_group = _strict_object(
+            top["attemptGroup"],
+            "attemptGroup",
+            (
+                "groupId",
+                "attemptId",
+                "relatedAttemptRefs",
+                "groupSize",
+                "nPass",
+                "nFail",
+            ),
+            ("groupId", "attemptId"),
+        )
+        attempt_group.setdefault("relatedAttemptRefs", [])
+    if "activity" in top:
+        activity = _strict_object(
+            top["activity"],
+            "activity",
+            (
+                "searchedTerms",
+                "providedRefs",
+                "surfacedRefs",
+                "fetchedRefs",
+                "installedSkillRefs",
+                "retrievalFired",
+                "eligibleRefs",
+                "deliveredRefs",
+                "deliveryMode",
+                "deliveredContentHash",
+            ),
+            (
+                "retrievalFired",
+                "eligibleRefs",
+                "deliveredRefs",
+                "deliveryMode",
+            ),
+        )
+        for key in (
+            "searchedTerms",
+            "providedRefs",
+            "surfacedRefs",
+            "fetchedRefs",
+            "installedSkillRefs",
+        ):
+            activity.setdefault(key, [])
+        if (
+            activity.get("deliveryMode") == "delivered"
+            or (
+                isinstance(activity.get("deliveredRefs"), list)
+                and len(activity["deliveredRefs"]) > 0
+            )
+        ) and "deliveredContentHash" not in activity:
+            _episode_error(
+                "activity.deliveredContentHash",
+                "present when delivered evidence exists",
+            )
+    if "eligibility" in top:
+        _strict_object(
+            top["eligibility"],
+            "eligibility",
+            ("eligible", "reason", "checkedAt"),
+            ("eligible", "reason", "checkedAt"),
+        )
+
+    _validate_episode(normalized)
+    return normalized
 
 
 def _validate_episode(parsed: Dict[str, Any]) -> None:
@@ -523,15 +975,16 @@ def _extract_trace(record: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:
     if artifact_type == TRACE_ENVELOPE_ARTIFACT_TYPE:
         return parsed, expected
 
-    _validate_episode(parsed)
-    trajectory = parsed.get("trajectory")
-    outcome = parsed.get("outcome")
+    normalized = _normalize_episode_read(parsed)
+    _validate_episode(normalized)
+    trajectory = normalized.get("trajectory")
+    outcome = normalized.get("outcome")
     projected_outcome = dict(outcome) if isinstance(outcome, dict) else {}
     projected_outcome["verifiabilityTier"] = _episode_verification_strength(
         projected_outcome
     )
     return {
-        **parsed,
+        **normalized,
         "steps": trajectory,
         "outcome": projected_outcome,
     }, expected

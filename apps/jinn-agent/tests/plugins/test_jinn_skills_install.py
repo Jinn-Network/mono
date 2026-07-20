@@ -186,6 +186,12 @@ def test_extract_trace_accepts_episode_reader_defaults_and_legacy_outcome_axis()
         "artifacts": [_artifact("jinn.episode.v1", episode)],
     })
 
+    assert projected["retrievalVisible"] is True
+    assert projected["session"]["kind"] == "user"
+    assert projected["origin"] == "legacy-unstamped"
+    assert projected["task"]["distributionTags"] == []
+    assert projected["steps"][0]["redactedKeys"] == []
+    assert projected["provenance"] == "contributed"
     assert projected["outcome"]["verifiabilityTier"] == "tests-passed"
     assert projected["futureTopLevelField"] == {"preserved": True}
     assert projected["steps"][0]["futureStepField"] == "preserved"
@@ -361,8 +367,45 @@ def test_extract_trace_accepts_reader_null_normalization_and_activity_defaults()
         "artifacts": [_artifact("jinn.episode.v1", episode)],
     })
 
-    assert projected["steps"][0]["truncatedKeys"] is None
-    assert projected["activity"]["providedRefs"] == ["bafy-delivered"]
+    assert "parentSessionId" not in projected["session"]
+    assert "repositorySlug" not in projected["task"]
+    assert "baseCommit" not in projected["task"]
+    assert "createdAt" not in projected["task"]
+    assert "instanceId" not in projected["task"]
+    assert "truncatedKeys" not in projected["steps"][0]
+    assert projected["environment"]["generatorModel"] == {
+        "id": "test-model",
+        "source": "config",
+    }
+    assert projected["environment"]["verifier"] == {
+        "type": "none",
+        "failToPass": [],
+        "passToPass": [],
+    }
+    assert "distributionClass" not in projected["environment"]
+    assert "summary" not in projected["outcome"]
+    assert "acceptedDiff" not in projected["outcome"]
+    assert "testRuns" not in projected["outcome"]
+    assert "tokens" not in projected["cost"]
+    assert "usdEstimate" not in projected["cost"]
+    assert projected["lineage"] == {"episodeId": "episode:parent"}
+    assert projected["attemptGroup"] == {
+        "groupId": "group",
+        "attemptId": "attempt",
+        "relatedAttemptRefs": [],
+    }
+    assert projected["activity"] == {
+        "searchedTerms": ["dashboard"],
+        "providedRefs": ["bafy-delivered"],
+        "surfacedRefs": [],
+        "fetchedRefs": [],
+        "installedSkillRefs": [],
+        "retrievalFired": True,
+        "eligibleRefs": ["bafy-delivered"],
+        "deliveredRefs": ["bafy-delivered"],
+        "deliveryMode": "delivered",
+    }
+    assert "eligibility" not in projected
 
 
 def test_extract_trace_reader_does_not_require_write_only_delivered_hash():

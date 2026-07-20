@@ -6,18 +6,21 @@
  * client/scripts/distill-run-live.ts:
  *
  *   verdict envelope (ref.verdictManifestCid)  → .task.cid
- *     → task doc (IPFS)  → .restorationRequestId          (the SOLVE request)
- *     → attemptEnvelopeMetas(requestId = restorationRequestId) → .manifestCid   (solution envelope)
+ *     → task doc (IPFS; description + authenticated verifier facts only)
+ *   verdict(ref.requestId, ref.chainId) → authoritative (taskId, attemptIndex)
+ *     → attempt(taskId, attemptIndex, chainId) → the SOLVE request
+ *     → attemptEnvelopeMeta(requestId, chainId) → .manifestCid (solution envelope)
  *     → solution envelope (IPFS)  → .payload.patch          (the coding diff)
  *   problem statement = task doc .description ?? .spec.problem_statement
  *   step trace (hop 4, best-effort, #1472) = the solution's system_snapshot
  *     artifact → donation unwrap → gunzip+untar → the harness stdout
  *     transcript → outline (snapshot-transcript.ts + transcript-outline.ts)
  *
- * The predecessor joined `attemptEnvelopeMeta(requestId = verdict.requestId)`,
- * which returns empty on the real ledger (the on-chain verdict.requestId is not
- * the solve requestId). The link runs through the task doc's
- * `restorationRequestId` instead.
+ * The predecessor selected the solution with the task document's mutable
+ * `restorationRequestId`. That allowed an otherwise-valid signed task to be
+ * relabelled onto another solution. The selection path now comes exclusively
+ * from chain-indexed verdict + attempt rows. Any outer task copy is only a
+ * consistency assertion and can never select the patch.
  *
  * Both I/O boundaries are injected ports (`ipfs`, `gql`) so this stays
  * unit-testable — the production caller passes an autonolas-gateway `ipfs(cid)`
@@ -164,14 +167,102 @@ function assertMatchingTaskProvenance(
   }
 }
 
+function assertExactTaskProvenance(
+  sourceName: string,
+  value: unknown,
+  authenticated: AuthenticatedTaskProvenance,
+): void {
+  const source = record(value);
+  if (!source) {
+    throw new Error(`${sourceName} requires exact authenticated task provenance`);
+  }
+  for (const field of [
+    'solverType',
+    'instanceId',
+    'repo',
+    'baseCommit',
+  ] as const) {
+    const candidate = source[field];
+    if (candidate === undefined) {
+      throw new Error(`${sourceName} requires exact authenticated task provenance`);
+    }
+    if (candidate !== authenticated[field]) {
+      throw new Error(
+        `authenticated task provenance mismatch at ${sourceName}.${field}: `
+        + `expected ${JSON.stringify(authenticated[field])}, got ${JSON.stringify(candidate)}`,
+      );
+    }
+  }
+}
+
+function assertEnvelopeRequestId(
+  sourceName: string,
+  value: unknown,
+  expectedRequestId: string,
+): void {
+  const task = record(record(value)?.['task']);
+  const requestId = nonEmptyString(task?.['requestId']);
+  if (!requestId || requestId.toLowerCase() !== expectedRequestId.toLowerCase()) {
+    throw new Error(
+      `${sourceName}.task.requestId must match authoritative requestId ${expectedRequestId}`,
+    );
+  }
+}
+
+function exactItems(
+  value: unknown,
+  label: string,
+): Record<string, unknown> {
+  const items = record(value)?.['items'];
+  if (!Array.isArray(items) || items.length !== 1 || !record(items[0])) {
+    throw new Error(
+      `expected exactly one ${label} row; found ${Array.isArray(items) ? items.length : 0}`,
+    );
+  }
+  return record(items[0])!;
+}
+
+const AUTHORITATIVE_VERDICT_QUERY = `
+query AuthoritativeVerdict($requestId: String!, $chainId: Int!) {
+  verdicts(
+    where: { requestId: $requestId, chainId: $chainId },
+    limit: 2
+  ) {
+    items { requestId chainId taskId attemptIndex }
+  }
+}
+`;
+
+const AUTHORITATIVE_ATTEMPT_QUERY = `
+query AuthoritativeAttempt($taskId: String!, $attemptIndex: Int!, $chainId: Int!) {
+  attempts(
+    where: { taskId: $taskId, attemptIndex: $attemptIndex, chainId: $chainId },
+    limit: 2
+  ) {
+    items { requestId chainId taskId attemptIndex }
+  }
+}
+`;
+
+const SOLUTION_ENVELOPE_META_QUERY = `
+query SolutionEnvelopeMeta($requestId: String!, $chainId: Int!) {
+  attemptEnvelopeMetas(
+    where: { requestId: $requestId, chainId: $chainId },
+    limit: 2
+  ) {
+    items { requestId chainId manifestCid }
+  }
+}
+`;
+
 export interface EvidenceFetcherPorts {
   /**
    * Fetch + JSON-parse an IPFS object by CID (autonolas gateway in production).
    * Callers that authenticate smaller artifacts may request a tighter ceiling.
    */
   ipfs: (cid: string, maxBytes?: number) => Promise<any>;
-  /** Run a GraphQL query string against the Ponder indexer, returning `data`. */
-  gql: (query: string) => Promise<any>;
+  /** Run a GraphQL query against the Ponder indexer, returning `data`. */
+  gql: (query: string, variables?: Record<string, unknown>) => Promise<any>;
   /** Resolve one atomic, authenticated verifier proof for an identified SWE task. */
   resolveVerifierFacts?: VerifierFactsResolver;
 }
@@ -234,23 +325,93 @@ export function createEvidenceFetcher(
       throw new Error(`no task.cid on verdict envelope ${verdictCid}`);
     }
 
-    // Hop 2: task doc → the SOLVE request id.
+    // Hop 2: fetch the task doc for its signed task and problem statement.
+    // The outer runtime wrapper is not authenticated and MUST NOT select the
+    // solution request.
     const taskDoc = await ports.ipfs(taskCid);
-    const solveReq = taskDoc?.restorationRequestId;
-    if (!solveReq || typeof solveReq !== 'string') {
-      throw new Error(`no restorationRequestId in task doc ${taskCid}`);
+    if (!Number.isSafeInteger(ref.chainId) || ref.chainId <= 0) {
+      throw new Error(`AttemptRef ${ref.instanceId} has invalid chainId ${ref.chainId}`);
     }
 
-    // Hop 3a: attempt-meta for the solve request → the solution envelope CID.
-    const query = `{ attemptEnvelopeMetas(where:{requestId:"${solveReq}"}){ items { manifestCid } } }`;
-    const data = await ports.gql(query);
-    const solutionCid = data?.attemptEnvelopeMetas?.items?.[0]?.manifestCid;
-    if (!solutionCid || typeof solutionCid !== 'string') {
-      throw new Error(`no attemptEnvelopeMeta for solve requestId ${solveReq.slice(0, 12)}…`);
+    // Hop 3a: the on-chain verdict row authoritatively identifies the task
+    // attempt. A metadata envelope cannot choose a different task tuple.
+    const verdictData = await ports.gql(AUTHORITATIVE_VERDICT_QUERY, {
+      requestId: ref.requestId,
+      chainId: ref.chainId,
+    });
+    const verdictRow = exactItems(
+      record(verdictData)?.['verdicts'],
+      'authoritative verdict',
+    );
+    const verdictRequestId = nonEmptyString(verdictRow['requestId']);
+    const verdictChainId = verdictRow['chainId'];
+    const taskId = nonEmptyString(verdictRow['taskId']);
+    const attemptIndex = verdictRow['attemptIndex'];
+    if (
+      !verdictRequestId
+      || verdictRequestId.toLowerCase() !== ref.requestId.toLowerCase()
+      || verdictChainId !== ref.chainId
+      || !taskId
+      || !Number.isInteger(attemptIndex)
+      || (attemptIndex as number) < 0
+    ) {
+      throw new Error('authoritative verdict row does not match the requested chain tuple');
     }
 
-    // Hop 3b: solution envelope → the coding patch.
+    // Hop 3b: the chain attempt row supplies the SOLVE request id. This is the
+    // only value allowed to select a solution envelope.
+    const attemptData = await ports.gql(AUTHORITATIVE_ATTEMPT_QUERY, {
+      taskId,
+      attemptIndex,
+      chainId: ref.chainId,
+    });
+    const attemptRow = exactItems(
+      record(attemptData)?.['attempts'],
+      'authoritative attempt',
+    );
+    const solveReq = nonEmptyString(attemptRow['requestId']);
+    if (
+      !solveReq
+      || attemptRow['chainId'] !== ref.chainId
+      || attemptRow['taskId'] !== taskId
+      || attemptRow['attemptIndex'] !== attemptIndex
+    ) {
+      throw new Error('authoritative attempt row does not match the verdict task tuple');
+    }
+
+    const outerRestorationRequestId = nonEmptyString(record(taskDoc)?.['restorationRequestId']);
+    if (
+      outerRestorationRequestId
+      && outerRestorationRequestId.toLowerCase() !== solveReq.toLowerCase()
+    ) {
+      throw new Error(
+        `mutable task restorationRequestId does not match authoritative solution requestId ${solveReq}`,
+      );
+    }
+
+    // Hop 3c: the chain-scoped, primary-keyed enrichment row yields the
+    // anchored solution envelope CID. Ambiguous/malformed results fail closed.
+    const metaData = await ports.gql(SOLUTION_ENVELOPE_META_QUERY, {
+      requestId: solveReq,
+      chainId: ref.chainId,
+    });
+    const metaRow = exactItems(
+      record(metaData)?.['attemptEnvelopeMetas'],
+      'solution envelope metadata',
+    );
+    const solutionCid = nonEmptyString(metaRow['manifestCid']);
+    if (
+      !solutionCid
+      || nonEmptyString(metaRow['requestId'])?.toLowerCase() !== solveReq.toLowerCase()
+      || metaRow['chainId'] !== ref.chainId
+    ) {
+      throw new Error('solution envelope metadata row does not match the authoritative attempt');
+    }
+
+    // Hop 3d: solution envelope → the coding patch.
     const solutionEnv = await ports.ipfs(solutionCid);
+    assertEnvelopeRequestId('verdictEnvelope', verdictEnv, ref.requestId);
+    assertEnvelopeRequestId('solutionEnvelope', solutionEnv, solveReq);
     const patch = solutionEnv?.payload?.patch;
     if (!patch || typeof patch !== 'string') {
       throw new Error(`no payload.patch on solution envelope ${solutionCid}`);
@@ -297,9 +458,9 @@ export function createEvidenceFetcher(
       // compared or allowed to override the authenticated signed-task value.
       assertMatchingTaskProvenance('attemptRef', ref, verifier.task);
       assertMatchingTaskProvenance('verdictEnvelope', verdictEnv, verifier.task);
-      assertMatchingTaskProvenance('verdictEnvelope.task', verdictEnv?.task, verifier.task);
       assertMatchingTaskProvenance('solutionEnvelope', solutionEnv, verifier.task);
-      assertMatchingTaskProvenance('solutionEnvelope.task', solutionEnv?.task, verifier.task);
+      assertExactTaskProvenance('verdictEnvelope.task', verdictEnv?.task, verifier.task);
+      assertExactTaskProvenance('solutionEnvelope.task', solutionEnv?.task, verifier.task);
     }
 
     const model = generatorModel(solutionEnv?.executor?.generatorModel);

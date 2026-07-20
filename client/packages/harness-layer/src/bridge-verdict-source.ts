@@ -13,12 +13,13 @@
  *   - carry each verdict row's own `manifestCid` as `verdictManifestCid` — the
  *     entry point of the VERIFIED verdict→solution join done by
  *     `bridge-fetch-evidence.ts` (verdict envelope → task doc →
- *     attemptEnvelopeMeta(restorationRequestId) → solution envelope patch).
+ *     authoritative verdict → attempt tuple → attemptEnvelopeMeta → solution
+ *     envelope patch).
  *
  * The predecessor's `attemptEnvelopeMeta(requestId=verdict.requestId)` join is
  * gone: probed live (see client/scripts/distill-run-live.ts), that key does not
  * match, so the join returned empty. The real link runs through the task doc's
- * `restorationRequestId`, resolved lazily in the evidence fetcher.
+ * chain-indexed verdict/attempt tuple, resolved lazily in the evidence fetcher.
  *
  * I/O is injected (`fetchImpl`) so the module is unit-testable without a live
  * indexer, mirroring `queryCaptureMeta` in ./consume.ts.
@@ -182,7 +183,7 @@ export function createVerdictSource(opts: VerdictSourceOptions): VerdictSource {
           // The attempt-join that once supplied the model is gone; the bridge
           // falls back to 'unknown' when model is empty.
           model: '',
-          // Filled by the evidence fetcher's 3-hop join off verdictManifestCid.
+          // Filled by the evidence fetcher's authoritative join off verdictManifestCid.
           manifestCid: '',
           polarity,
           verdictManifestCid: row.manifestCid,

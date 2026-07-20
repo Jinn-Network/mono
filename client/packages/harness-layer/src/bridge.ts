@@ -37,9 +37,10 @@ export interface AttemptRef {
   /** `pass` = verified solve (→ pattern); `fail` = evaluator-confirmed FAIL (→ lesson). */
   polarity: 'pass' | 'fail';
   /**
-   * The VERDICT envelope CID — the entry point of the verified 3-hop join to
-   * the solver's solution patch (verdict envelope → task doc
-   * `restorationRequestId` → attemptEnvelopeMeta → solution envelope). The
+   * The VERDICT envelope CID — the entry point of the verified join to the
+   * solver's solution patch. The task document supplies authenticated task
+   * facts only; the chain-scoped verdict → attempt tuple supplies the solution
+   * requestId, which resolves one attemptEnvelopeMeta → solution envelope. The
    * verdict-source populates it; callers that already carry a resolved
    * `manifestCid` (e.g. the corpus fetcher) do not need it.
    */
