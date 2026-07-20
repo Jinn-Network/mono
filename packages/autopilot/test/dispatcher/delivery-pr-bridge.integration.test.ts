@@ -33,6 +33,7 @@ function makeMixedRunner(ghCalls: { cmd: string; args: string[] }[]): CommandRun
     // cmd === 'gh'
     ghCalls.push({ cmd, args });
     if (args[0] === 'pr' && args[1] === 'list') return '[]'; // never handled before — proceed
+    if (args[0] === 'api') return JSON.stringify({ state: 'open' }); // Guard 4 provenance check
     if (args[0] === 'pr' && args[1] === 'create') {
       return 'https://github.com/Jinn-Network/mono/pull/9001\n';
     }
@@ -91,8 +92,12 @@ describe('delivery-pr-bridge — integration (local bare git repo as origin, scr
     const lsRemote = execFileSync('git', ['ls-remote', '--heads', bareOrigin, branch]).toString();
     expect(lsRemote.trim()).not.toBe('');
 
-    // The pushed commit really applied the patch: read the file at that ref.
-    const fileAtBranch = execFileSync('git', ['-C', repoRoot, 'show', `${branch}:FIXTURE.md`]).toString();
+    // The pushed commit really applied the patch: read the file via the
+    // REMOTE-tracking ref, not the local branch — the exception-safe cleanup
+    // fix (issue #1892 finding 2) unconditionally deletes the LOCAL branch
+    // ref after a successful push (harmless: `branch -D` never touches
+    // `refs/remotes/origin/*`, and the remote copy is what the PR points at).
+    const fileAtBranch = execFileSync('git', ['-C', repoRoot, 'show', `origin/${branch}:FIXTURE.md`]).toString();
     expect(fileAtBranch).toBe('hello world\n');
 
     // The `gh pr create` call carried the right shape.
@@ -102,8 +107,87 @@ describe('delivery-pr-bridge — integration (local bare git repo as origin, scr
     const body = create!.args[create!.args.indexOf('--body') + 1]!;
     expect(body).toContain('Closes #1892');
 
-    // Worktree cleanup happened — only the checkout is gone, the branch ref survives.
+    // Worktree cleanup happened — the checkout is gone.
     const worktreeList = execFileSync('git', ['-C', repoRoot, 'worktree', 'list', '--porcelain']).toString();
     expect(worktreeList).not.toContain('bridge-1892');
+    // The LOCAL branch ref is gone too (finding 2's unconditional cleanup) —
+    // only the remote-tracking ref (verified above) and the bare origin's
+    // own ref (verified via ls-remote above) remain.
+    const localBranches = execFileSync('git', ['-C', repoRoot, 'branch', '--list', branch]).toString();
+    expect(localBranches.trim()).toBe('');
+  });
+
+  it('finding 2: a scripted mid-flow failure (git push rejection) still cleans up the real worktree/branch, and a second real attempt for the same (issue, task) succeeds', async () => {
+    const bareOrigin = mkdtempSync(join(tmpdir(), 'jinn-bridge-it-origin-'));
+    const repoRoot = mkdtempSync(join(tmpdir(), 'jinn-bridge-it-repo-'));
+    const worktreesBase = mkdtempSync(join(tmpdir(), 'jinn-bridge-it-worktrees-'));
+    cleanupDirs.push(bareOrigin, repoRoot, worktreesBase);
+
+    execFileSync('git', ['init', '--bare', '--quiet', bareOrigin]);
+    execFileSync('git', ['clone', '--quiet', bareOrigin, repoRoot]);
+    execFileSync('git', ['-C', repoRoot, 'checkout', '-q', '-B', 'next']);
+    writeFileSync(join(repoRoot, 'FIXTURE.md'), 'hello\n');
+    execFileSync('git', ['-C', repoRoot, 'add', 'FIXTURE.md']);
+    execFileSync('git', ['-C', repoRoot, 'commit', '-q', '-m', 'init']);
+    execFileSync('git', ['-C', repoRoot, 'push', '-q', '-u', 'origin', 'next']);
+
+    const rec: DeliveredRecord = {
+      manifestCid: liveIssueFixture.manifestCid,
+      envelope: BridgeEnvelopeSchema.parse(liveIssueFixture.envelope),
+      taskRaw: liveIssueFixture.task,
+    };
+    const reader: DeliveryReader = { pollSolutions: async () => [rec] };
+    const ghCalls: { cmd: string; args: string[] }[] = [];
+
+    // Real git throughout, EXCEPT `push` is scripted to reject exactly once
+    // (one of finding 2's own listed exception triggers — "git push
+    // rejection") — the worktree/branch/commit are all real local git state
+    // by the time this fires, so this exercises the exact leak shape finding
+    // 2 describes without real git's non-fast-forward rejection on retry
+    // getting in the way (nothing ever reached the real remote on attempt 1).
+    let pushCalls = 0;
+    const runner: CommandRunner = async (cmd, args) => {
+      if (cmd === 'git' && args.includes('push')) {
+        pushCalls += 1;
+        if (pushCalls === 1) {
+          throw new Error('scripted git push rejection (simulating a remote-side failure)');
+        }
+      }
+      if (cmd === 'git') {
+        const { stdout } = await execFileAsync('git', args);
+        return stdout;
+      }
+      // cmd === 'gh'
+      ghCalls.push({ cmd, args });
+      if (args[0] === 'pr' && args[1] === 'list') return '[]';
+      if (args[0] === 'api') return JSON.stringify({ state: 'open' });
+      if (args[0] === 'pr' && args[1] === 'create') return 'https://github.com/Jinn-Network/mono/pull/9002\n';
+      throw new Error(`unexpected gh call in integration test: ${args.join(' ')}`);
+    };
+
+    const cfg = { enabled: true, repoRoot, worktreesBase, ipfsGatewayUrl: 'https://gateway.autonolas.tech' };
+
+    const first = await runDeliveryBridge(reader, runner, cfg);
+    expect(first.opened).toEqual([]);
+    expect(first.skipped).toHaveLength(1);
+    expect(first.skipped[0]).toContain(liveIssueFixture.manifestCid);
+
+    // No leaked worktree or local branch after the scripted failure — the
+    // `finally` in `processRecord` ran its best-effort cleanup for real.
+    const worktreeListAfterFailure = execFileSync('git', ['-C', repoRoot, 'worktree', 'list', '--porcelain']).toString();
+    expect(worktreeListAfterFailure).not.toContain('bridge-1892');
+    const localBranchesAfterFailure = execFileSync('git', ['-C', repoRoot, 'branch', '--list', 'feat/1892-*']).toString();
+    expect(localBranchesAfterFailure.trim()).toBe('');
+
+    // A second real attempt for the SAME (issue, task) — same deterministic
+    // worktree path/branch name — must not hit "path already exists" /
+    // "branch already exists" (the exact wedge finding 2 fixes) and must
+    // actually succeed this time.
+    const second = await runDeliveryBridge(reader, runner, cfg);
+    expect(second.skipped).toEqual([]);
+    expect(second.stalled).toEqual([]);
+    expect(second.opened).toHaveLength(1);
+    expect(second.opened[0]).toMatchObject({ issueNumber: 1892, prNumber: 9002 });
+    expect(second.opened[0]!.branch).toMatch(/^feat\/1892-jinn-mono-fixture-1892-t[0-9a-f]{8}$/);
   });
 });
