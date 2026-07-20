@@ -94,6 +94,8 @@ const DEFAULT_LOCK = {
   staleAfterMs: 120_000,
 };
 
+const localLockTails = new Map<string, Promise<void>>();
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -506,17 +508,28 @@ export class ContributionStore {
     options: Required<ContributionStoreLockOptions>,
     operation: () => Promise<T>,
   ): Promise<T> {
-    const token = await this.acquireLockAt(lockPath, options);
+    const previous = localLockTails.get(lockPath) ?? Promise.resolve();
+    let release!: () => void;
+    const turn = new Promise<void>((resolve) => { release = resolve; });
+    const tail = previous.catch(() => undefined).then(() => turn);
+    localLockTails.set(lockPath, tail);
+    await previous.catch(() => undefined);
     try {
-      return await operation();
-    } finally {
+      const token = await this.acquireLockAt(lockPath, options);
       try {
-        const owner = JSON.parse(await readFile(join(lockPath, 'owner.json'), 'utf8')) as { token?: unknown };
-        if (owner.token === token) await rm(lockPath, { recursive: true, force: true });
-      } catch (error) {
-        // A missing/corrupt owner record is never permission to remove a lock
-        // we cannot prove is ours. Stale recovery handles it later.
+        return await operation();
+      } finally {
+        try {
+          const owner = JSON.parse(await readFile(join(lockPath, 'owner.json'), 'utf8')) as { token?: unknown };
+          if (owner.token === token) await rm(lockPath, { recursive: true, force: true });
+        } catch (error) {
+          // A missing/corrupt owner record is never permission to remove a lock
+          // we cannot prove is ours. Stale recovery handles it later.
+        }
       }
+    } finally {
+      release();
+      if (localLockTails.get(lockPath) === tail) localLockTails.delete(lockPath);
     }
   }
 
