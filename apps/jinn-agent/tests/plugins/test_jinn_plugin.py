@@ -294,6 +294,7 @@ def test_episode_persists_repository_diff_and_test_run_observables(isolated_home
 
     episode = _session_requests(isolated_home)[0]["episode"]
     assert episode["task"]["repositorySlug"] == "Jinn-Network/example"
+    assert episode["task"]["baseCommit"] == "0123456789abcdef"
     assert episode["outcome"]["acceptedDiff"] is True
     assert episode["outcome"]["testRuns"] == {"passed": 1, "failed": 1}
 

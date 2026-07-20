@@ -47,6 +47,9 @@ export interface AttemptRef {
   /** Echo/lineage key — instances sharing a key are not independent corroboration. */
   sourceLineageKey?: string;
   lookupFlagged?: boolean;
+  /** Optional task provenance carried by richer verdict-row sources. */
+  repo?: string;
+  baseCommit?: string;
 }
 
 /** Evidence fetched for one attempt (the injected IPFS/corpus port). */
@@ -55,9 +58,12 @@ export interface BridgeEvidence {
   taskSummary: string;
   /** The unified-diff patch the attempt produced. */
   patch: string;
-  /** `owner/repo` when known (tag + audit); defaults from the instance id. */
+  /**
+   * Authenticated task tuple returned by the source resolver. These remain
+   * optional on the fetch-only transport shape, but all four are mandatory at
+   * the evaluator-verified publication boundary.
+   */
   repo?: string;
-  /** First-class native tuple facts copied from the signed solution/task. */
   baseCommit?: string;
   taskCreatedAt?: number;
   instanceId?: string;
@@ -135,6 +141,57 @@ export function repoFromInstanceId(instanceId: string): string | null {
 
 const NANO = (d: Date): string => `${d.getTime()}000000`;
 
+function assertAuthenticatedBridgeEvidence(
+  ref: AttemptRef,
+  ev: BridgeEvidence,
+): asserts ev is BridgeEvidence & Required<Pick<
+  BridgeEvidence,
+  'repo' | 'baseCommit' | 'taskCreatedAt' | 'instanceId' | 'verifier'
+>> {
+  const verifier = ev.verifier;
+  const exactStringArray = (value: unknown): value is string[] =>
+    Array.isArray(value)
+    && value.every((item) => typeof item === 'string' && item.length > 0);
+  if (
+    !verifier
+    || !exactStringArray(verifier.failToPass)
+    || !exactStringArray(verifier.passToPass)
+    || typeof verifier.evalSemanticsVersion !== 'string'
+    || verifier.evalSemanticsVersion.length === 0
+  ) {
+    throw new Error(
+      `bridge evidence for ${ref.instanceId} requires authenticated verifier facts before evaluator-verified publication`,
+    );
+  }
+  if (
+    typeof ev.instanceId !== 'string'
+    || ev.instanceId.length === 0
+    || typeof ev.repo !== 'string'
+    || ev.repo.length === 0
+    || typeof ev.baseCommit !== 'string'
+    || ev.baseCommit.length === 0
+    || typeof ev.taskCreatedAt !== 'number'
+    || !Number.isInteger(ev.taskCreatedAt)
+    || ev.taskCreatedAt < 0
+  ) {
+    throw new Error(
+      `bridge evidence for ${ref.instanceId} requires an authenticated task provenance tuple`,
+    );
+  }
+  for (const [field, candidate, authenticated] of [
+    ['instanceId', ref.instanceId, ev.instanceId],
+    ['repo', ref.repo, ev.repo],
+    ['baseCommit', ref.baseCommit, ev.baseCommit],
+  ] as const) {
+    if (candidate !== undefined && candidate !== authenticated) {
+      throw new Error(
+        `authenticated task provenance mismatch at attemptRef.${field}: `
+        + `expected ${JSON.stringify(authenticated)}, got ${JSON.stringify(candidate)}`,
+      );
+    }
+  }
+}
+
 /**
  * Construct the layer-1 `CapturedTask` for one attempt (both polarities, D10).
  *
@@ -152,27 +209,29 @@ const NANO = (d: Date): string => `${d.getTime()}000000`;
  * measurement (§11) can stratify distillation quality by evidence richness.
  */
 export function toBridgeCapturedTask(ref: AttemptRef, ev: BridgeEvidence, now: Date): CapturedTask {
+  assertAuthenticatedBridgeEvidence(ref, ev);
   const nano = NANO(now);
   const isPass = ref.polarity === 'pass';
-  const repo = ev.repo ?? repoFromInstanceId(ref.instanceId) ?? undefined;
+  const repo = ev.repo;
+  const instanceId = ev.instanceId;
   const enriched = typeof ev.stepTrace === 'string' && ev.stepTrace.length > 0;
   return {
     session: {
-      sessionId: `bridge:${ref.instanceId}:${ref.polarity}:${ref.requestId}`,
+      sessionId: `bridge:${instanceId}:${ref.polarity}:${ref.requestId}`,
       capturedAt: now.toISOString(),
     },
     task: {
-      summary: `swe-rebench ${ref.instanceId}: ${ev.taskSummary}`.slice(0, 500),
+      summary: `swe-rebench ${instanceId}: ${ev.taskSummary}`.slice(0, 500),
       distributionTags: [
         'coding',
         'swe-rebench',
-        ...(repo ? [repo.slice(0, 64)] : []),
+        repo.slice(0, 64),
         ...(enriched ? [] : ['patch-only']),
       ],
-      ...(repo ? { repositorySlug: repo } : {}),
-      ...(ev.baseCommit ? { baseCommit: ev.baseCommit } : {}),
-      ...(ev.taskCreatedAt !== undefined ? { createdAt: ev.taskCreatedAt } : {}),
-      instanceId: ev.instanceId ?? ref.instanceId,
+      repositorySlug: repo,
+      baseCommit: ev.baseCommit,
+      createdAt: ev.taskCreatedAt,
+      instanceId,
     },
     environment: {
       harness: { name: 'jinn-execution-ledger-bridge', version: '0.1.0' },
@@ -180,16 +239,12 @@ export function toBridgeCapturedTask(ref: AttemptRef, ev: BridgeEvidence, now: D
       tools: [],
       ...(ev.generatorModel ? { generatorModel: ev.generatorModel } : {}),
       ...(ev.distributionClass ? { distributionClass: ev.distributionClass } : {}),
-      ...(ev.verifier
-        ? {
-            verifier: {
-              type: 'f2p-p2p' as const,
-              failToPass: ev.verifier.failToPass,
-              passToPass: ev.verifier.passToPass,
-              evalSemanticsVersion: ev.verifier.evalSemanticsVersion,
-            },
-          }
-        : {}),
+      verifier: {
+        type: 'f2p-p2p' as const,
+        failToPass: ev.verifier.failToPass,
+        passToPass: ev.verifier.passToPass,
+        evalSemanticsVersion: ev.verifier.evalSemanticsVersion,
+      },
     },
     steps: [
       {
@@ -236,7 +291,7 @@ export function toBridgeCapturedTask(ref: AttemptRef, ev: BridgeEvidence, now: D
         },
     cost: { durationMs: 0 },
     attemptGroup: {
-      groupId: ev.instanceId ?? ref.instanceId,
+      groupId: instanceId,
       attemptId: ref.requestId,
       relatedAttemptRefs: [],
     },

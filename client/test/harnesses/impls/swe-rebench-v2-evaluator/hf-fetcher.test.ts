@@ -181,7 +181,7 @@ describe('HttpHfFetcher — retry budget for transient failures', () => {
     expect(sleep).toHaveBeenCalledWith(25);
   });
 
-  it('honors Retry-After for retryable responses', async () => {
+  it('clamps Retry-After to the configured finite retry schedule', async () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(new Response('rate limited', {
@@ -195,11 +195,12 @@ describe('HttpHfFetcher — retry budget for transient failures', () => {
       retryBackoffMs: [25],
       minRequestIntervalMs: 0,
       sleep,
+      random: () => 0.5,
     });
 
     await fetcher.fetchTaskRow({ hf_dataset: 'd', hf_split: 's', instance_id: 'a__1' });
 
-    expect(sleep).toHaveBeenCalledWith(2000);
+    expect(sleep).toHaveBeenCalledWith(25);
   });
 
   it('serializes requests through the shared throttle', async () => {
@@ -364,7 +365,7 @@ describe('fetchHfWithRetry — shared helper', () => {
     expect(DEFAULT_RETRY_BACKOFF_MS).toEqual([1000, 2000, 4000, 8000]);
   });
 
-  it('honours Retry-After: 2 by sleeping exactly 2000 ms (header overrides jittered schedule)', async () => {
+  it('uses the smaller of Retry-After and the finite jittered schedule', async () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(new Response('rate limited', {
@@ -378,9 +379,30 @@ describe('fetchHfWithRetry — shared helper', () => {
       retryBackoffMs: [1000, 2000],
       minRequestIntervalMs: 0,
       sleep,
-      random: () => 0, // would jitter very low if used
+      random: () => 0.5,
     });
-    expect(sleep).toHaveBeenCalledWith(2000);
+    expect(sleep).toHaveBeenCalledWith(1000);
+  });
+
+  it('does not let an arbitrary Retry-After stall beyond the finite retry schedule', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('rate limited', {
+        status: 429,
+        headers: { 'Retry-After': '999999999' },
+      }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+    const sleep = vi.fn(async () => undefined);
+
+    await fetchHfWithRetry('https://example/test', {
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      retryBackoffMs: [4000],
+      minRequestIntervalMs: 0,
+      sleep,
+      random: () => 0.5,
+    });
+
+    expect(sleep).toHaveBeenCalledWith(4000);
   });
 
   it('does not retry on 4xx that is not 408/429 (404)', async () => {

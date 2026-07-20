@@ -156,15 +156,28 @@ const GeneratorModelShape = {
 const GeneratorModelWriteSchema = z.strictObject(GeneratorModelShape);
 const GeneratorModelReadSchema = z.looseObject(GeneratorModelShape);
 
-const VerifierShape = {
-  type: z.enum(['f2p-p2p', 'command', 'none']),
+const F2pP2pVerifierShape = {
+  type: z.literal('f2p-p2p'),
+  failToPass: z.array(z.string().min(1)),
+  passToPass: z.array(z.string().min(1)),
+  evalSemanticsVersion: z.string().min(1),
+};
+
+const OtherVerifierShape = {
+  type: z.enum(['command', 'none']),
   failToPass: z.array(z.string().min(1)).default([]),
   passToPass: z.array(z.string().min(1)).default([]),
   evalSemanticsVersion: z.string().min(1).optional(),
 };
 
-const VerifierWriteSchema = z.strictObject(VerifierShape);
-const VerifierReadSchema = z.looseObject(VerifierShape);
+const VerifierWriteSchema = z.discriminatedUnion('type', [
+  z.strictObject(F2pP2pVerifierShape),
+  z.strictObject(OtherVerifierShape),
+]);
+const VerifierReadSchema = z.discriminatedUnion('type', [
+  z.looseObject(F2pP2pVerifierShape),
+  z.looseObject(OtherVerifierShape),
+]);
 
 const AttemptGroupShape = {
   groupId: z.string().min(1),
