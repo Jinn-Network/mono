@@ -146,34 +146,60 @@ const OutcomeWriteSchema = z.preprocess(
   z.strictObject(OutcomeShape),
 );
 
-const GeneratorModelSchema = z.strictObject({
+const GeneratorModelShape = {
   id: z.string().min(1),
   provider: z.string().min(1).optional(),
   openWeights: z.boolean().optional(),
   source: z.enum(['stream', 'config']),
-});
+};
 
-const VerifierSchema = z.strictObject({
+const GeneratorModelWriteSchema = z.strictObject(GeneratorModelShape);
+const GeneratorModelReadSchema = z.looseObject(GeneratorModelShape);
+
+const VerifierShape = {
   type: z.enum(['f2p-p2p', 'command', 'none']),
   failToPass: z.array(z.string().min(1)).default([]),
   passToPass: z.array(z.string().min(1)).default([]),
   evalSemanticsVersion: z.string().min(1).optional(),
-});
+};
 
-const AttemptGroupSchema = z.strictObject({
+const VerifierWriteSchema = z.strictObject(VerifierShape);
+const VerifierReadSchema = z.looseObject(VerifierShape);
+
+const AttemptGroupShape = {
   groupId: z.string().min(1),
   attemptId: z.string().min(1),
   relatedAttemptRefs: z.array(z.string().min(1)).default([]),
   groupSize: z.number().int().positive().optional(),
   nPass: z.number().int().nonnegative().optional(),
   nFail: z.number().int().nonnegative().optional(),
-}).superRefine((group, context) => {
-  if (
+};
+
+function attemptGroupCountsMatch(group: {
+  groupSize?: number;
+  nPass?: number;
+  nFail?: number;
+}): boolean {
+  return !(
     group.groupSize !== undefined
     && group.nPass !== undefined
     && group.nFail !== undefined
     && group.groupSize !== group.nPass + group.nFail
-  ) {
+  );
+}
+
+const AttemptGroupWriteSchema = z.strictObject(AttemptGroupShape).superRefine((group, context) => {
+  if (!attemptGroupCountsMatch(group)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['groupSize'],
+      message: 'groupSize must equal nPass + nFail when all counts are materialized',
+    });
+  }
+});
+
+const AttemptGroupReadSchema = z.looseObject(AttemptGroupShape).superRefine((group, context) => {
+  if (!attemptGroupCountsMatch(group)) {
     context.addIssue({
       code: 'custom',
       path: ['groupSize'],
@@ -224,16 +250,16 @@ export const EpisodeV1WriteSchema = z.strictObject({
     model: z.string().min(1),
     tools: z.array(z.string().min(1)),
     skillsLoadout: z.array(z.string().min(1)),
-    generatorModel: GeneratorModelSchema.optional(),
+    generatorModel: GeneratorModelWriteSchema.optional(),
     distributionClass: z.enum(['open', 'restricted-tos', 'unknown']).optional(),
-    verifier: VerifierSchema.optional(),
+    verifier: VerifierWriteSchema.optional(),
   }),
   outcome: OutcomeWriteSchema,
   cost: z.strictObject(CostShape),
   retention: z.strictObject(RetentionShape),
   provenance: z.enum(['contributed', 'imported']).default('contributed'),
   lineage: z.strictObject(LineageShape).optional(),
-  attemptGroup: AttemptGroupSchema.optional(),
+  attemptGroup: AttemptGroupWriteSchema.optional(),
   activity: SessionActivityFactsWriteSchema.optional(),
   eligibility: EligibilityVerdictSchema.optional(),
 });
@@ -402,9 +428,9 @@ const EpisodeV1ReadObjectSchema = z.looseObject({
     model: z.string().min(1),
     tools: z.array(z.string().min(1)),
     skillsLoadout: z.array(z.string().min(1)),
-    generatorModel: GeneratorModelSchema.optional(),
+    generatorModel: GeneratorModelReadSchema.optional(),
     distributionClass: z.enum(['open', 'restricted-tos', 'unknown']).optional(),
-    verifier: VerifierSchema.optional(),
+    verifier: VerifierReadSchema.optional(),
   }),
   outcome: z.looseObject({
     ...OutcomeShape,
@@ -423,7 +449,7 @@ const EpisodeV1ReadObjectSchema = z.looseObject({
   retention: z.looseObject(RetentionShape),
   provenance: z.enum(['contributed', 'imported']).default('contributed'),
   lineage: z.looseObject(LineageShape).optional(),
-  attemptGroup: AttemptGroupSchema.optional(),
+  attemptGroup: AttemptGroupReadSchema.optional(),
   activity: SessionActivityFactsReadSchema.optional(),
   eligibility: z.looseObject({
     eligible: z.boolean(),

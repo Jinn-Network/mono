@@ -137,6 +137,60 @@ describe('EpisodeV1Schema', () => {
     }
   });
 
+  it('preserves future fields in every nested additive read block', () => {
+    const parsed = EpisodeV1Schema.parse({
+      ...valid,
+      environment: {
+        ...valid.environment,
+        generatorModel: {
+          id: 'future-model',
+          source: 'config',
+          futureGeneratorFact: { family: 'future' },
+        },
+        verifier: {
+          type: 'none',
+          futureVerifierFact: ['future'],
+        },
+      },
+      attemptGroup: {
+        groupId: 'future-group',
+        attemptId: 'future-attempt',
+        futureGroupFact: true,
+      },
+    });
+
+    expect(parsed).toMatchObject({
+      environment: {
+        generatorModel: {
+          futureGeneratorFact: { family: 'future' },
+        },
+        verifier: {
+          failToPass: [],
+          passToPass: [],
+          futureVerifierFact: ['future'],
+        },
+      },
+      attemptGroup: {
+        relatedAttemptRefs: [],
+        futureGroupFact: true,
+      },
+    });
+  });
+
+  it('retains the attempt-group count invariant on tolerant reads', () => {
+    expect(() => EpisodeV1Schema.parse({
+      ...valid,
+      attemptGroup: {
+        groupId: 'group',
+        attemptId: 'attempt',
+        relatedAttemptRefs: [],
+        groupSize: 3,
+        nPass: 1,
+        nFail: 1,
+      },
+    })).toThrow(/groupSize must equal nPass \+ nFail/);
+  });
+
   it('rejects a present activity field with the wrong container instead of defaulting it', () => {
     expect(() => EpisodeV1Schema.parse({
       ...valid,
@@ -263,6 +317,43 @@ describe('EpisodeV1Schema', () => {
       lineage: { episodeId: 'ep-0', mintRef: null },
     }],
   ])('strict writers reject null at %s', (_path, input) => {
+    expect(() => EpisodeV1WriteSchema.parse(input)).toThrow();
+  });
+
+  it.each([
+    ['environment.generatorModel', {
+      ...valid,
+      environment: {
+        ...valid.environment,
+        generatorModel: {
+          id: 'future-model',
+          source: 'config',
+          futureGeneratorFact: true,
+        },
+      },
+    }],
+    ['environment.verifier', {
+      ...valid,
+      environment: {
+        ...valid.environment,
+        verifier: {
+          type: 'none',
+          failToPass: [],
+          passToPass: [],
+          futureVerifierFact: true,
+        },
+      },
+    }],
+    ['attemptGroup', {
+      ...valid,
+      attemptGroup: {
+        groupId: 'future-group',
+        attemptId: 'future-attempt',
+        relatedAttemptRefs: [],
+        futureGroupFact: true,
+      },
+    }],
+  ])('strict writers reject unknown fields at %s', (_path, input) => {
     expect(() => EpisodeV1WriteSchema.parse(input)).toThrow();
   });
 
