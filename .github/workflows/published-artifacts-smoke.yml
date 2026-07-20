@@ -1,0 +1,161 @@
+name: Published artifacts smoke
+
+# This gate intentionally consumes only public release channels. It does not
+# checkout mono or build a local plugin/layer artifact: the point is to catch
+# failures that exist only after publication (#1797 class).
+on:
+  schedule:
+    # The normal release is Monday; this gives the channel a weekly fallback
+    # check even when no content-changing split ran.
+    - cron: '17 7 * * 2'
+  workflow_dispatch:
+  workflow_run:
+    workflows: ['Split jinn plugin to slim repo']
+    types: [completed]
+
+concurrency:
+  group: published-artifacts-smoke
+  cancel-in-progress: false
+
+# The smoke installs and executes untrusted-by-default public artifacts in an
+# ephemeral runner. It needs no repository token capability and receives no
+# repository secrets.
+permissions: {}
+
+jobs:
+  smoke:
+    # A manual dry-run of the split workflow is not a release. Post-release
+    # runs are admitted only for the real main-push train.
+    if: >-
+      ${{
+        github.event_name != 'workflow_run' ||
+        (
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == 'main'
+        )
+      }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      HERMES_UPSTREAM_SHA: 9df5f879b4a5925c0f8f947e7e16ed8e845932c3
+      NO_COLOR: '1'
+
+    steps:
+      - name: Isolate the smoke environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "HERMES_HOME=${RUNNER_TEMP}/published-smoke-home"
+            echo "HERMES_VENV=${RUNNER_TEMP}/published-smoke-venv"
+          } >> "${GITHUB_ENV}"
+
+      - name: Require a successful release-channel split
+        if: github.event_name == 'workflow_run'
+        env:
+          UPSTREAM_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${UPSTREAM_CONCLUSION}" != "success" ]]; then
+            echo "::error::The slim-repo publication workflow concluded '${UPSTREAM_CONCLUSION}', so no published artifact is safe to certify."
+            exit 1
+          fi
+
+      # actions/setup-python v6
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+
+      # actions/setup-node v7
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+
+      - name: Install pinned stock Hermes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv "${HERMES_VENV}"
+          "${HERMES_VENV}/bin/python" -m pip install --disable-pip-version-check \
+            "git+https://github.com/NousResearch/hermes-agent.git@${HERMES_UPSTREAM_SHA}"
+          "${HERMES_VENV}/bin/hermes" --help >/dev/null
+
+      - name: Install and enable Jinn from the published slim repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${HERMES_VENV}/bin/hermes" \
+            plugins install Jinn-Network/jinn-plugin --enable
+
+      - name: Run the full published-plugin doctor
+        shell: bash
+        run: |
+          set -uo pipefail
+          DOCTOR_LOG="${RUNNER_TEMP}/jinn-doctor.log"
+          failed=0
+
+          set +e
+          "${HERMES_VENV}/bin/hermes" jinn-doctor 2>&1 | tee "${DOCTOR_LOG}"
+          doctor_status="${PIPESTATUS[0]}"
+          set -e
+
+          if (( doctor_status != 0 )); then
+            echo "::error::Published Jinn doctor exited ${doctor_status}."
+            failed=1
+          fi
+          if grep -Fq '[fail]' "${DOCTOR_LOG}"; then
+            echo "::error::Published Jinn doctor reported at least one failing check."
+            failed=1
+          fi
+          if ! grep -Fxq 'all checks passed.' "${DOCTOR_LOG}"; then
+            echo "::error::Published Jinn doctor did not emit its all-green summary."
+            failed=1
+          fi
+
+          # Pin the current full-set floor. Future checks may append freely;
+          # every appended red is still caught by the [fail] gate above.
+          for check in \
+            plugin-build \
+            layer-available \
+            layer-contract \
+            prerequisites \
+            host-provider
+          do
+            if ! grep -Fq "${check}:" "${DOCTOR_LOG}"; then
+              echo "::error::Published Jinn doctor omitted required check '${check}'."
+              failed=1
+            fi
+          done
+
+          if (( failed != 0 )); then
+            exit 1
+          fi
+
+      - name: Verify installed release-channel identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLUGIN_DIR="${HERMES_HOME}/plugins/jinn"
+          EXPECTED_REMOTE="https://github.com/Jinn-Network/jinn-plugin.git"
+          ACTUAL_REMOTE="$(git -C "${PLUGIN_DIR}" remote get-url origin)"
+          if [[ "${ACTUAL_REMOTE}" != "${EXPECTED_REMOTE}" ]]; then
+            echo "::error::Installed plugin remote is '${ACTUAL_REMOTE}', expected '${EXPECTED_REMOTE}'."
+            exit 1
+          fi
+          if [[ ! -f "${PLUGIN_DIR}/.jinn-split-source" ]]; then
+            echo "::error::Published plugin is missing .jinn-split-source provenance."
+            exit 1
+          fi
+
+          {
+            echo "## Published Jinn plugin"
+            echo
+            echo "- commit: \`$(git -C "${PLUGIN_DIR}" rev-parse HEAD)\`"
+            echo "- provenance:"
+            echo '```'
+            cat "${PLUGIN_DIR}/.jinn-split-source"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
