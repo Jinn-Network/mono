@@ -110,7 +110,7 @@ export interface ReviewSessionPort {
   hasHumanComment(
     prNumber: number,
     expectedHead: GitOid,
-    marker: string,
+    body: string,
   ): Promise<boolean>;
   ensureHumanComment(
     prNumber: number,
@@ -378,6 +378,8 @@ async function enterHuman(
     prNumber: manifest.prNumber!,
     reason,
   });
+  const commentBody =
+    `${marker}\n\nAutopilot parked this review for Human judgment.\n\n${detail}`;
   const pullRequest = observedPullRequest ?? await readExactPullRequest(manifest, port);
   if (pullRequest.open && !pullRequest.draft) {
     await port.setPullRequestDraft(manifest.prNumber!, head, true);
@@ -388,12 +390,12 @@ async function enterHuman(
   if (!pullRequest.labels.includes('review:needs-human')) {
     await port.setPullRequestLabel(manifest.prNumber!, head, 'review:needs-human', true);
   }
-  if (!await port.hasHumanComment(manifest.prNumber!, head, marker)) {
+  if (!await port.hasHumanComment(manifest.prNumber!, head, commentBody)) {
     await port.ensureHumanComment(
       manifest.prNumber!,
       head,
       marker,
-      `${marker}\n\nAutopilot parked this review for Human judgment.\n\n${detail}`,
+      commentBody,
     );
   }
   if (pullRequest.issueNumber === manifest.issueNumber) {

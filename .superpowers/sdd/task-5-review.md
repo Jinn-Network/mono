@@ -42,3 +42,18 @@ Review range: `da1775b298526a4ebb357b47c172142b57c8692e..1bfdd1927b0a48f53a17948
 - `yarn typecheck`
 - `yarn test`
 - `git diff --check`
+
+## Re-review addendum
+
+The findings above are closed. A fresh acceptance review found three remaining
+Important production edges:
+
+1. Revalidate current review-ref authority, durable/projected Human evidence,
+   and effective current native blockers immediately adjacent to the final
+   ready mutation. The production ready operation itself must fail closed if a
+   Human record or blocker arrives after the session-level check.
+2. Native-review pagination must use `gh api --paginate --slurp` (or an
+   equivalent exact page decoder) and flatten every page; concatenated JSON
+   documents are not one JSON value.
+3. Human-comment idempotency must compare the complete canonical comment body,
+   not accept another comment that merely contains the marker as a substring.

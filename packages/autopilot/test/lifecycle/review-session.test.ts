@@ -258,10 +258,10 @@ function harness(options: {
       };
       return currentManifest;
     },
-    hasHumanComment: async (_pr, _head, marker) => comments.has(marker),
-    ensureHumanComment: async (_pr, _head, marker) => {
+    hasHumanComment: async (_pr, _head, body) => comments.has(body),
+    ensureHumanComment: async (_pr, _head, _marker, body) => {
       events.push('human-comment');
-      comments.add(marker);
+      comments.add(body);
     },
     nextMarker: () => MARKER,
     now: () => new Date('2026-07-20T12:01:00.000Z'),

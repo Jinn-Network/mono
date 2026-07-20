@@ -30,6 +30,7 @@ import {
 import { makeGitProtocolPort } from './git-protocol.js';
 import { validateCanonicalGitHubHttpsRemote } from './implementation-executor.js';
 import type { ReviewSessionPort } from './review-session.js';
+import type { ReviewNativeReview } from './review-executor.js';
 import {
   gitOid,
   gitRefName,
@@ -348,6 +349,136 @@ export function makeProductionReviewSessionPort(
       return body;
     });
   };
+  const readAuthority = async (manifest: AttemptManifest) => {
+    await validateRemote(manifest);
+    await validateIdentity(manifest);
+    const ref = `refs/jinn-autopilot/review-claims/v1/${manifest.prNumber}`;
+    const oid = exactRemoteOid(
+      await runGit(manifest, [
+        'ls-remote', manifest.repository.remoteName, ref,
+      ]),
+      ref,
+    );
+    await runGit(manifest, [
+      'fetch', '--quiet', manifest.repository.remoteName, ref,
+    ]);
+    const payload = await runGit(manifest, [
+      'show', `${oid}:jinn-autopilot-review.json`,
+    ]);
+    return { reviewRefOid: oid, record: decodeReviewClaimPayload(payload.trim()) };
+  };
+  const readNativeReviews = async (
+    manifest: AttemptManifest,
+    prNumber: number,
+    expectedHead: GitOid,
+  ): Promise<readonly ReviewNativeReview[]> => {
+    await requireHead(manifest, prNumber, expectedHead);
+    const raw = await run(manifest, 'gh', [
+      'api', `repos/${REPO}/pulls/${prNumber}/reviews`,
+      '--paginate', '--slurp',
+    ]);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw) as unknown;
+    } catch {
+      throw new Error('Malformed native review readback');
+    }
+    if (
+      !Array.isArray(parsed)
+      || !parsed.every((page) => Array.isArray(page))
+    ) {
+      throw new Error('Malformed native review readback');
+    }
+    return parsed.flat().map((value) => {
+      if (typeof value !== 'object' || value === null) {
+        throw new Error('Malformed native review readback');
+      }
+      const review = value as Record<string, unknown>;
+      const user = review.user as { login?: unknown } | undefined;
+      if (
+        typeof user?.login !== 'string'
+        || typeof review.state !== 'string'
+        || typeof review.commit_id !== 'string'
+        || typeof review.body !== 'string'
+        || typeof review.submitted_at !== 'string'
+      ) {
+        throw new Error('Malformed native review readback');
+      }
+      if (![
+        'APPROVED',
+        'CHANGES_REQUESTED',
+        'COMMENTED',
+        'DISMISSED',
+        'PENDING',
+      ].includes(review.state)) {
+        throw new Error('Malformed native review state');
+      }
+      return {
+        reviewer: user.login,
+        state: review.state as 'APPROVED' | 'CHANGES_REQUESTED'
+          | 'COMMENTED' | 'DISMISSED' | 'PENDING',
+        commitId: gitOid(review.commit_id),
+        body: review.body,
+        submittedAt: review.submitted_at,
+      };
+    });
+  };
+  const effectiveNativeBlocker = (
+    reviews: readonly ReviewNativeReview[],
+  ): ReviewNativeReview | undefined => {
+    const latest = new Map<string, ReviewNativeReview>();
+    for (const review of [...reviews].sort((left, right) =>
+      left.submittedAt.localeCompare(right.submittedAt))) {
+      if (
+        !['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(review.state)
+      ) {
+        continue;
+      }
+      latest.set(review.reviewer.toLowerCase(), review);
+    }
+    return [...latest.values()].find(
+      (review) => review.state === 'CHANGES_REQUESTED',
+    );
+  };
+  const requireReadyBoundary = async (
+    manifest: AttemptManifest,
+    prNumber: number,
+    expectedHead: GitOid,
+  ): Promise<void> => {
+    const authority = await readAuthority(manifest);
+    const record = authority.record;
+    if (
+      authority.reviewRefOid !== manifest.reviewRefOid
+      || record.state !== 'terminal-approved'
+      || record.prNumber !== prNumber
+      || record.generation !== manifest.reviewGeneration
+      || record.attempt !== manifest.attemptId
+      || record.reviewer.toLowerCase() !== manifest.selectedLogin.toLowerCase()
+      || record.head !== expectedHead
+    ) {
+      throw new Error('Review ready boundary lost exact terminal authority');
+    }
+    const pullRequest = await requireHead(manifest, prNumber, expectedHead);
+    if (pullRequest.labels.includes('review:needs-human')) {
+      throw new Error('Review ready boundary stopped because Human is dominant');
+    }
+    const secureRunner: CommandRunner = (cmd, args) => run(manifest, cmd, args);
+    const project = await fetchProjectSnapshot(secureRunner);
+    const item = project.items.find((candidate) =>
+      candidate.contentType === 'Issue'
+      && candidate.number === manifest.issueNumber);
+    if (item?.status === 'Human' || item?.blockedOn === 'Human') {
+      throw new Error('Review ready boundary stopped because Human is dominant');
+    }
+    const blocker = effectiveNativeBlocker(
+      await readNativeReviews(manifest, prNumber, expectedHead),
+    );
+    if (blocker !== undefined) {
+      throw new Error(
+        `Native requested changes by ${blocker.reviewer} block automated approval`,
+      );
+    }
+  };
   const mutateWithExactReadback = async (
     mutate: () => Promise<unknown>,
     confirmed: () => Promise<boolean>,
@@ -374,76 +505,14 @@ export function makeProductionReviewSessionPort(
   return {
     readManifest: options.readManifest ?? readAttemptManifest,
 
-    async readAuthority(manifest) {
-      await validateRemote(manifest);
-      await validateIdentity(manifest);
-      const ref = `refs/jinn-autopilot/review-claims/v1/${manifest.prNumber}`;
-      const oid = exactRemoteOid(
-        await runGit(manifest, [
-          'ls-remote', manifest.repository.remoteName, ref,
-        ]),
-        ref,
-      );
-      await runGit(manifest, [
-        'fetch', '--quiet', manifest.repository.remoteName, ref,
-      ]);
-      const payload = await runGit(manifest, [
-        'show', `${oid}:jinn-autopilot-review.json`,
-      ]);
-      return { reviewRefOid: oid, record: decodeReviewClaimPayload(payload.trim()) };
-    },
+    readAuthority,
 
     async readPullRequest(prNumber, expectedHead) {
       return requireHead(currentManifest(), prNumber, expectedHead);
     },
 
     async readNativeReviews(prNumber, expectedHead) {
-      const manifest = currentManifest();
-      await requireHead(manifest, prNumber, expectedHead);
-      const raw = await run(manifest, 'gh', [
-        'api', `repos/${REPO}/pulls/${prNumber}/reviews`,
-        '--paginate',
-      ]);
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(raw) as unknown;
-      } catch {
-        throw new Error('Malformed native review readback');
-      }
-      if (!Array.isArray(parsed)) throw new Error('Malformed native review readback');
-      return parsed.map((value) => {
-        if (typeof value !== 'object' || value === null) {
-          throw new Error('Malformed native review readback');
-        }
-        const review = value as Record<string, unknown>;
-        const user = review.user as { login?: unknown } | undefined;
-        if (
-          typeof user?.login !== 'string'
-          || typeof review.state !== 'string'
-          || typeof review.commit_id !== 'string'
-          || typeof review.body !== 'string'
-          || typeof review.submitted_at !== 'string'
-        ) {
-          throw new Error('Malformed native review readback');
-        }
-        if (![
-          'APPROVED',
-          'CHANGES_REQUESTED',
-          'COMMENTED',
-          'DISMISSED',
-          'PENDING',
-        ].includes(review.state)) {
-          throw new Error('Malformed native review state');
-        }
-        return {
-          reviewer: user.login,
-          state: review.state as 'APPROVED' | 'CHANGES_REQUESTED'
-            | 'COMMENTED' | 'DISMISSED' | 'PENDING',
-          commitId: gitOid(review.commit_id),
-          body: review.body,
-          submittedAt: review.submitted_at,
-        };
-      });
+      return readNativeReviews(currentManifest(), prNumber, expectedHead);
     },
 
     async hasHumanHold(issueNumber, prNumber, expectedHead) {
@@ -588,6 +657,9 @@ export function makeProductionReviewSessionPort(
       const manifest = currentManifest();
       const before = await requireHead(manifest, prNumber, expectedHead);
       if (before.draft === draft) return;
+      if (!draft) {
+        await requireReadyBoundary(manifest, prNumber, expectedHead);
+      }
       await mutateWithExactReadback(
         () => run(manifest, 'gh', [
           'pr', 'ready', String(prNumber), '--repo', REPO,
@@ -659,11 +731,10 @@ export function makeProductionReviewSessionPort(
         options.now,
       ),
 
-    async hasHumanComment(prNumber, expectedHead, marker) {
+    async hasHumanComment(prNumber, expectedHead, body) {
       const manifest = currentManifest();
       await requireHead(manifest, prNumber, expectedHead);
-      return (await readCommentBodies(manifest, prNumber))
-        .some((body) => body.includes(marker));
+      return (await readCommentBodies(manifest, prNumber)).includes(body);
     },
 
     async ensureHumanComment(prNumber, expectedHead, marker, body) {

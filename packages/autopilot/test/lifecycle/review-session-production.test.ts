@@ -17,7 +17,7 @@ const BLOB = gitOid('5'.repeat(40));
 const ATTEMPT = '11111111-1111-4111-8111-111111111111';
 const GENERATION = '22222222-2222-4222-8222-222222222222';
 
-function claim(): ReviewClaimRecord {
+function claim() {
   return {
     kind: 'review-claim',
     protocolVersion: 2,
@@ -28,6 +28,24 @@ function claim(): ReviewClaimRecord {
     head: HEAD,
     state: 'active',
     recordedAt: '2026-07-20T12:00:00.000Z',
+  } satisfies ReviewClaimRecord;
+}
+
+function terminalClaim(): ReviewClaimRecord {
+  return {
+    ...claim(),
+    state: 'terminal-approved',
+    verdict: {
+      state: 'APPROVE',
+      marker: '33333333-3333-4333-8333-333333333333',
+    },
+  };
+}
+
+function humanClaim(): ReviewClaimRecord {
+  return {
+    ...claim(),
+    state: 'human',
   };
 }
 
@@ -411,6 +429,41 @@ describe('production review session port', () => {
             }]);
           }
           if (cmd === 'git' && args.includes('ls-tree')) return '';
+          if (
+            mutation === 'ready'
+            && cmd === 'gh'
+            && args.join(' ') === 'api user --jq .login'
+          ) {
+            return 'review-bot\n';
+          }
+          if (mutation === 'ready' && cmd === 'git' && args.includes('get-url')) {
+            return 'https://github.com/Jinn-Network/mono.git\n';
+          }
+          if (mutation === 'ready' && cmd === 'git' && args.includes('ls-remote')) {
+            return `${REVIEW}\trefs/jinn-autopilot/review-claims/v1/84\n`;
+          }
+          if (mutation === 'ready' && cmd === 'git' && args.includes('fetch')) {
+            return '';
+          }
+          if (mutation === 'ready' && cmd === 'git' && args.includes('show')) {
+            return `${encodeReviewClaimPayload(terminalClaim())}\n`;
+          }
+          if (
+            mutation === 'ready'
+            && cmd === 'gh'
+            && args[0] === 'api'
+            && args[1] === 'graphql'
+          ) {
+            return projectSnapshot('In Review');
+          }
+          if (
+            mutation === 'ready'
+            && cmd === 'gh'
+            && args[0] === 'api'
+            && args[1]?.endsWith('/reviews')
+          ) {
+            return '[[]]';
+          }
           if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'edit') {
             labels = [...labels, 'review:approved'];
             throw new Error('accepted label response lost');
@@ -536,5 +589,222 @@ describe('production review session port', () => {
 
     await expect(port.ensureHumanComment(84, HEAD, marker, `${marker}\n\nExact body.`))
       .rejects.toThrow('accepted comment response lost');
+  });
+
+  it.each([
+    {
+      name: 'a durable Human review record',
+      remoteOid: RECORD,
+      remoteRecord: humanClaim(),
+      projectStatus: 'In Review' as const,
+      reviews: [],
+      error: /authority|Human/i,
+    },
+    {
+      name: 'a projected Human hold',
+      remoteOid: REVIEW,
+      remoteRecord: terminalClaim(),
+      projectStatus: 'Human' as const,
+      reviews: [],
+      error: /Human/i,
+    },
+    {
+      name: 'an effective native requested-changes blocker',
+      remoteOid: REVIEW,
+      remoteRecord: terminalClaim(),
+      projectStatus: 'In Review' as const,
+      reviews: [{
+        user: { login: 'late-human-reviewer' },
+        state: 'CHANGES_REQUESTED',
+        commit_id: HEAD,
+        body: 'Arrived after the session checks.',
+        submitted_at: '2026-07-20T12:05:00.000Z',
+      }],
+      error: /requested changes.*block/i,
+    },
+  ])('fails the production ready boundary closed when $name arrives', async ({
+    remoteOid,
+    remoteRecord,
+    projectStatus,
+    reviews,
+    error,
+  }) => {
+    let readyCalls = 0;
+    let draft = true;
+    const port = makeProductionReviewSessionPort({
+      environment: {
+        GH_TOKEN: 'selected-secret',
+        JINN_AUTOPILOT_SESSION_MANIFEST: '/attempt/manifest.json',
+      },
+      readManifest: () => manifest(),
+      runner: async (cmd, args) => {
+        if (cmd === 'gh' && args.join(' ') === 'api user --jq .login') {
+          return 'review-bot\n';
+        }
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+          return JSON.stringify({
+            number: 84,
+            state: 'OPEN',
+            headRefOid: HEAD,
+            headRefName: 'autopilot/42',
+            baseRefName: 'next',
+            isDraft: draft,
+            body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
+            author: { login: 'implementation-bot' },
+            labels: [{ name: 'engine:review' }],
+            closingIssues: [{ number: 42 }],
+            files: [],
+          });
+        }
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'list') {
+          return JSON.stringify([{
+            number: 84,
+            headRefOid: HEAD,
+            headRefName: 'autopilot/42',
+            closingIssues: [{ number: 42 }],
+          }]);
+        }
+        if (cmd === 'gh' && args[0] === 'api' && args[1] === 'graphql') {
+          return projectSnapshot(projectStatus);
+        }
+        if (cmd === 'gh' && args[0] === 'api' && args[1]?.endsWith('/reviews')) {
+          return JSON.stringify([reviews]);
+        }
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'ready') {
+          readyCalls += 1;
+          draft = false;
+          return '';
+        }
+        if (cmd === 'git' && args.includes('get-url')) {
+          return 'https://github.com/Jinn-Network/mono.git\n';
+        }
+        if (cmd === 'git' && args.includes('ls-remote')) {
+          return `${remoteOid}\trefs/jinn-autopilot/review-claims/v1/84\n`;
+        }
+        if (cmd === 'git' && args.includes('fetch')) return '';
+        if (cmd === 'git' && args.includes('show')) {
+          return `${encodeReviewClaimPayload(remoteRecord)}\n`;
+        }
+        if (cmd === 'git' && args.includes('ls-tree')) return '';
+        throw new Error(`unexpected ${cmd} ${args.join(' ')}`);
+      },
+    });
+
+    await expect(port.setPullRequestDraft(84, HEAD, false)).rejects.toThrow(error);
+    expect(readyCalls).toBe(0);
+  });
+
+  it('uses gh pagination slurp and exactly flattens every native-review page', async () => {
+    const reviewPages = [
+      [{
+        user: { login: 'reviewer-one' },
+        state: 'APPROVED',
+        commit_id: HEAD,
+        body: 'First page.',
+        submitted_at: '2026-07-20T12:00:00.000Z',
+      }],
+      [{
+        user: { login: 'reviewer-two' },
+        state: 'CHANGES_REQUESTED',
+        commit_id: HEAD,
+        body: 'Second page.',
+        submitted_at: '2026-07-20T12:01:00.000Z',
+      }],
+    ];
+    let reviewArgs: readonly string[] | undefined;
+    const port = makeProductionReviewSessionPort({
+      environment: {
+        GH_TOKEN: 'selected-secret',
+        JINN_AUTOPILOT_SESSION_MANIFEST: '/attempt/manifest.json',
+      },
+      readManifest: () => manifest(),
+      runner: async (cmd, args) => {
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+          return JSON.stringify({
+            number: 84,
+            state: 'OPEN',
+            headRefOid: HEAD,
+            headRefName: 'autopilot/42',
+            baseRefName: 'next',
+            isDraft: true,
+            body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
+            author: { login: 'implementation-bot' },
+            labels: [{ name: 'engine:review' }],
+            closingIssues: [{ number: 42 }],
+            files: [],
+          });
+        }
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'list') {
+          return JSON.stringify([{
+            number: 84,
+            headRefOid: HEAD,
+            headRefName: 'autopilot/42',
+            closingIssues: [{ number: 42 }],
+          }]);
+        }
+        if (cmd === 'gh' && args[0] === 'api' && args[1]?.endsWith('/reviews')) {
+          reviewArgs = args;
+          return JSON.stringify(reviewPages);
+        }
+        if (cmd === 'git' && args.includes('ls-tree')) return '';
+        throw new Error(`unexpected ${cmd} ${args.join(' ')}`);
+      },
+    });
+
+    await expect(port.readNativeReviews(84, HEAD)).resolves.toEqual([
+      expect.objectContaining({ reviewer: 'reviewer-one', state: 'APPROVED' }),
+      expect.objectContaining({
+        reviewer: 'reviewer-two',
+        state: 'CHANGES_REQUESTED',
+      }),
+    ]);
+    expect(reviewArgs).toEqual([
+      'api', 'repos/Jinn-Network/mono/pulls/84/reviews',
+      '--paginate', '--slurp',
+    ]);
+  });
+
+  it('matches Human-comment idempotency by complete canonical body', async () => {
+    const marker = '<!-- exact-human-marker -->';
+    const canonicalBody = `${marker}\n\nAutopilot parked this review for Human judgment.`;
+    const port = makeProductionReviewSessionPort({
+      environment: {
+        GH_TOKEN: 'selected-secret',
+        JINN_AUTOPILOT_SESSION_MANIFEST: '/attempt/manifest.json',
+      },
+      readManifest: () => manifest(),
+      runner: async (cmd, args) => {
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+          return JSON.stringify({
+            number: 84,
+            state: 'OPEN',
+            headRefOid: HEAD,
+            headRefName: 'autopilot/42',
+            baseRefName: 'next',
+            isDraft: true,
+            body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
+            author: { login: 'implementation-bot' },
+            labels: [{ name: 'engine:review' }],
+            closingIssues: [{ number: 42 }],
+            files: [],
+          });
+        }
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'list') {
+          return JSON.stringify([{
+            number: 84,
+            headRefOid: HEAD,
+            headRefName: 'autopilot/42',
+            closingIssues: [{ number: 42 }],
+          }]);
+        }
+        if (cmd === 'gh' && args[0] === 'api' && args[1]?.includes('/comments')) {
+          return JSON.stringify([[{ body: `copied ${canonicalBody}` }]]);
+        }
+        if (cmd === 'git' && args.includes('ls-tree')) return '';
+        throw new Error(`unexpected ${cmd} ${args.join(' ')}`);
+      },
+    });
+
+    await expect(port.hasHumanComment(84, HEAD, canonicalBody)).resolves.toBe(false);
   });
 });
