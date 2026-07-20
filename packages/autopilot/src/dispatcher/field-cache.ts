@@ -30,7 +30,11 @@ import { ORG, PROJECT_NUMBER } from './constants.js';
 // Constants
 // ---------------------------------------------------------------------------
 
-const PROJECT_ID = 'PVT_kwDODh3-Ac4BXYaI';
+// Exported (jinn-mono#1883 board-archive sweep): the board-archive executor
+// needs the Project's node id for `archiveProjectV2Item` mutations, and the
+// lean snapshot (`fetchProjectSnapshot`) doesn't carry a project-level id —
+// only per-item ids. Reusing this constant avoids a second magic literal.
+export const PROJECT_ID = 'PVT_kwDODh3-Ac4BXYaI';
 
 /** Every ProjectStatus value — used for fail-loud option validation. */
 const REQUIRED_STATUS_OPTIONS: readonly ProjectStatus[] = [

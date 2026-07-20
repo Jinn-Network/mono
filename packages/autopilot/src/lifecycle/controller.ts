@@ -1,4 +1,5 @@
 import { DEFAULT_FLOOR } from '../dispatcher/rate-limit-guard.js';
+import type { BoardArchiveSweepResult } from './board-archive-executor-production.js';
 import {
   deriveLifecycle,
   deriveOrphanImplementationState,
@@ -55,6 +56,18 @@ export interface LifecycleControllerDeps {
   readonly runnerId: string;
   readonly cycleId: () => string;
   readonly rateLimitFloor?: number;
+  /**
+   * Board-archive sweep (jinn-mono#1883): archives Done, non-current-sprint
+   * Project board items. Optional — omitting it simply skips the sweep.
+   * Wired only for `recover`/`active` (see `runLifecycleCycle`); `observe`'s
+   * zero-write contract never calls it, matching how `writer`/`active` are
+   * gated. Production wiring is `makeProductionBoardArchiveSweep` in
+   * `board-archive-executor-production.ts`.
+   */
+  readonly boardArchiveSweep?: (
+    snapshot: GitHubLifecycleSnapshot,
+    now: Date,
+  ) => Promise<BoardArchiveSweepResult>;
   readonly active?: {
     preflight(): Promise<{ readonly ok: boolean; readonly detail?: string }>;
     readLocalState(): {
@@ -157,6 +170,7 @@ export type LifecycleCycleReport =
       readonly diagnostics: readonly LifecycleStatusDiagnostic[];
       readonly events: readonly LifecycleLogEvent[];
       readonly reconciliation?: ReconciliationReport;
+      readonly boardArchive?: BoardArchiveSweepResult;
     };
 
 function positiveNumber(raw: string | undefined, label: string): number {
@@ -706,6 +720,12 @@ export async function runLifecycleCycle(
       mode === 'active' ? 'active' : 'recover',
     )
   ));
+  // Board-archive sweep (jinn-mono#1883): after reconciliation, never in
+  // `observe` (already returned above) — the sweep itself never throws (see
+  // `runBoardArchiveSweep`), so no try/catch is needed at this call site.
+  const boardArchive = deps.boardArchiveSweep === undefined
+    ? undefined
+    : await deps.boardArchiveSweep(snapshot, now);
   if (mode === 'active') {
     const actionEvents: LifecycleLogEvent[] = [];
     const blockedIssues = blockedIssueNumbers(plan.actions, view);
@@ -773,6 +793,7 @@ export async function runLifecycleCycle(
       diagnostics,
       events: [...reconciliationEvents, ...actionEvents],
       reconciliation,
+      ...(boardArchive === undefined ? {} : { boardArchive }),
     };
   }
   return {
@@ -786,6 +807,7 @@ export async function runLifecycleCycle(
     diagnostics,
     events: reconciliationEvents,
     reconciliation,
+    ...(boardArchive === undefined ? {} : { boardArchive }),
   };
 }
 
@@ -867,14 +889,28 @@ export function explainPullRequest(report: LifecycleCycleReport, prNumber: numbe
     : explanation(item);
 }
 
+function boardArchiveSummary(result: BoardArchiveSweepResult): string {
+  if (result.status === 'skipped-throttled') return 'Board archive sweep: skipped (throttled).';
+  if (result.status === 'failed') return `Board archive sweep: failed (${result.reason}).`;
+  return result.capped
+    ? `Board archive sweep: archived ${result.archived} (capped).`
+    : `Board archive sweep: archived ${result.archived}.`;
+}
+
 export function renderLifecycleHuman(report: LifecycleCycleReport): string {
   if (report.status !== 'ok') return report.message;
+  const boardArchiveLines = report.boardArchive === undefined
+    ? []
+    : [boardArchiveSummary(report.boardArchive)];
   if (
     report.items.length === 0
     && report.orphanBranchClaims.length === 0
     && report.diagnostics.length === 0
   ) {
-    return 'No lifecycle items.';
+    return [
+      'No lifecycle items.',
+      ...boardArchiveLines,
+    ].join('\n');
   }
   return [
     ...report.items.map(explanation),
@@ -884,5 +920,6 @@ export function renderLifecycleHuman(report: LifecycleCycleReport): string {
       `${event.action} ${event.subject}: ${event.outcome}${
         event.reason === undefined ? '' : ` (${event.reason})`
       }.`),
+    ...boardArchiveLines,
   ].join('\n');
 }
