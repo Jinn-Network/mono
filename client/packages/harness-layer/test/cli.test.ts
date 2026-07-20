@@ -157,8 +157,41 @@ describe('bounded IPFS JSON fetcher', () => {
     expect(cancelled).toBe(true);
     expect(fetchImpl).toHaveBeenCalledWith(
       'https://gateway.example/ipfs/bafy-proof',
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      expect.objectContaining({
+        redirect: 'error',
+        signal: expect.any(AbortSignal),
+      }),
     );
+  });
+
+  it('rejects gateway redirects instead of following them to another network destination', async () => {
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect(init?.redirect).toBe('error');
+      return new Response(null, {
+        status: 302,
+        headers: { location: 'http://127.0.0.1/private' },
+      });
+    });
+    const fetchIpfs = createBoundedIpfsJsonFetcher({
+      gateway: 'https://gateway.example',
+      fetchImpl,
+    });
+
+    await expect(fetchIpfs('bafy-proof')).rejects.toThrow(/HTTP 302|redirect/i);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a response whose final URL differs from the configured gateway request', async () => {
+    const redirected = new Response('{"authenticated":true}');
+    Object.defineProperty(redirected, 'url', {
+      value: 'http://169.254.169.254/latest/meta-data',
+    });
+    const fetchIpfs = createBoundedIpfsJsonFetcher({
+      gateway: 'https://gateway.example',
+      fetchImpl: vi.fn(async () => redirected),
+    });
+
+    await expect(fetchIpfs('bafy-proof')).rejects.toThrow(/redirect/i);
   });
 });
 
@@ -681,6 +714,27 @@ describe('jinn-layer distill run', () => {
     };
   }
 
+  function verifiedEvidence(
+    attempt: AttemptRef,
+    over: Partial<BridgeEvidence> = {},
+  ): BridgeEvidence {
+    const match = /^(.+)__(.+)-\d+$/.exec(attempt.instanceId);
+    return {
+      taskSummary: `fix the bug in ${attempt.instanceId}`,
+      patch: `diff --git a/x.py b/x.py\n+ return qs.distinct()  # for ${attempt.instanceId}\n`,
+      repo: match ? `${match[1]}/${match[2]}` : 'unknown/repo',
+      baseCommit: 'a'.repeat(40),
+      taskCreatedAt: 1_752_000_000_000,
+      instanceId: attempt.instanceId,
+      verifier: {
+        failToPass: ['tests/test_regression.py::test_fix'],
+        passToPass: ['tests/test_existing.py::test_still_passes'],
+        evalSemanticsVersion: '4',
+      },
+      ...over,
+    };
+  }
+
   function fakePublishDeps(): HarnessPublishDeps {
     let n = 0;
     return {
@@ -704,10 +758,7 @@ describe('jinn-layer distill run', () => {
           dref('django__django-99999', 'pass'), // held-out → excluded
         ],
       },
-      fetchEvidence: async (r: AttemptRef): Promise<BridgeEvidence> => ({
-        taskSummary: `fix the bug in ${r.instanceId}`,
-        patch: `diff --git a/x.py b/x.py\n+ return qs.distinct()  # for ${r.instanceId}\n`,
-      }),
+      fetchEvidence: async (r: AttemptRef): Promise<BridgeEvidence> => verifiedEvidence(r),
       distill: async (c: DistillCluster): Promise<DistillLLMOutput> => ({
         name: `orm-${c.tier}-${c.instanceIds[0]!.replace(/[^a-z0-9]+/g, '-')}`,
         description: 'Use when a queryset returns duplicate rows after a join. Not for: single-table queries.',
@@ -1047,7 +1098,7 @@ describe('jinn-layer distill run', () => {
         writer,
         distillRunDeps: stubDeps({
           verdictSource: { list },
-          fetchEvidence: async (r: AttemptRef): Promise<BridgeEvidence> => ({
+          fetchEvidence: async (r: AttemptRef): Promise<BridgeEvidence> => verifiedEvidence(r, {
             taskSummary: `short regression summary for ${r.instanceId}`,
             patch: `diff --git a/x.py b/x.py\n+ change ${r.polarity}\n`,
           }),
@@ -1278,7 +1329,7 @@ describe('jinn-layer distill run', () => {
       writer,
       distillRunDeps: stubDeps({
         verdictSource: { list: async () => groupedRefs },
-        fetchEvidence: async (r: AttemptRef): Promise<BridgeEvidence> => ({
+        fetchEvidence: async (r: AttemptRef): Promise<BridgeEvidence> => verifiedEvidence(r, {
           taskSummary: `success regression summary for ${r.instanceId}`,
           patch: `diff --git a/x.py b/x.py\n+ success ${r.requestId}\n`,
         }),

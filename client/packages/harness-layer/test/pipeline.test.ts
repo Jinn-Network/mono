@@ -36,6 +36,27 @@ function ref(instanceId: string, polarity: 'pass' | 'fail'): AttemptRef {
   return { requestId: `0x${instanceId}`, chainId: 84532, instanceId, model: 'claude-haiku-4-5-20251001', manifestCid: `bafy-${instanceId}-${polarity}`, polarity };
 }
 
+function verifiedEvidence(
+  attempt: AttemptRef,
+  over: Partial<BridgeEvidence> = {},
+): BridgeEvidence {
+  const match = /^(.+)__(.+)-\d+$/.exec(attempt.instanceId);
+  return {
+    taskSummary: `fix the bug in ${attempt.instanceId}`,
+    patch: `diff --git a/x.py b/x.py\n+ return qs.distinct()  # for ${attempt.instanceId}\n`,
+    repo: match ? `${match[1]}/${match[2]}` : 'unknown/repo',
+    baseCommit: 'a'.repeat(40),
+    taskCreatedAt: 1_752_000_000_000,
+    instanceId: attempt.instanceId,
+    verifier: {
+      failToPass: ['tests/test_regression.py::test_fix'],
+      passToPass: ['tests/test_existing.py::test_still_passes'],
+      evalSemanticsVersion: '4',
+    },
+    ...over,
+  };
+}
+
 function fakePublishDeps(): { deps: HarnessPublishDeps; envCount: () => number } {
   let n = 0;
   const deps: HarnessPublishDeps = {
@@ -62,10 +83,7 @@ function deps(over: Partial<PipelineDeps> = {}): { d: PipelineDeps; skills: Skil
         ref('django__django-99999', 'pass'), // held-out → excluded
       ],
     },
-    fetchEvidence: async (r): Promise<BridgeEvidence> => ({
-      taskSummary: `fix the bug in ${r.instanceId}`,
-      patch: `diff --git a/x.py b/x.py\n+ return qs.distinct()  # for ${r.instanceId}\n`,
-    }),
+    fetchEvidence: async (r): Promise<BridgeEvidence> => verifiedEvidence(r),
     publishDeps,
     distill: async (c: DistillCluster): Promise<DistillLLMOutput> => ({
       name: `orm-${c.tier}-${c.instanceIds[0]!.replace(/[^a-z0-9]+/g, '-')}`,
@@ -119,7 +137,7 @@ describe('runDistillationPipeline (Tier-0 dry-run)', () => {
     const instanceId = 'jlowin__fastmcp-3235';
     const { d, skills } = deps({
       verdictSource: { list: async () => [ref(instanceId, 'pass')] },
-      fetchEvidence: async (): Promise<BridgeEvidence> => ({
+      fetchEvidence: async (attempt): Promise<BridgeEvidence> => verifiedEvidence(attempt, {
         taskSummary: `SWE-rebench v2: ${instanceId}`,
         patch: 'diff --git a/server.py b/server.py\n+ parser.add_argument("--config", nargs="*")\n',
       }),

@@ -472,9 +472,17 @@ export function createBoundedIpfsJsonFetcher(
     if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
       throw new Error('IPFS fetch ceiling must be a positive safe integer');
     }
-    const response = await fetchImpl(`${gateway}/ipfs/${cid}`, {
+    const requestUrl = new URL(`${gateway}/ipfs/${cid}`).href;
+    const response = await fetchImpl(requestUrl, {
+      redirect: 'error',
       signal: AbortSignal.timeout(timeoutMs),
     });
+    if (
+      response.redirected
+      || (response.url !== '' && response.url !== requestUrl)
+    ) {
+      throw new Error(`ipfs ${cid}: gateway redirects are not allowed`);
+    }
     if (!response.ok) throw new Error(`ipfs ${cid}: HTTP ${response.status}`);
 
     const rawLength = response.headers.get('content-length');

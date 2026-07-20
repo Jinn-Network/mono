@@ -8,6 +8,7 @@
  */
 
 import { z } from 'zod/v3';
+import { keccak256, recoverAddress, toBytes, type Hex } from 'viem';
 import { SweRebenchV2TaskSchema } from '@jinn-network/sdk/solvernets/swe-rebench-v2';
 import { cidToDigestHex } from '../adapters/mech/ipfs.js';
 import { canonicalJson } from '../harnesses/engine/canonical-json.js';
@@ -40,6 +41,13 @@ export interface SweRebenchV2VerifierFacts {
   failToPass: string[];
   passToPass: string[];
   evalSemanticsVersion: string;
+  task: {
+    solverType: string;
+    instanceId: string;
+    repo: string;
+    baseCommit: string;
+    createdAt: number;
+  };
 }
 
 export interface SweRebenchV2VerifierFactPorts {
@@ -421,12 +429,59 @@ function assertV2Admission(
 function facts(
   row: Pick<MintedPoolRow, 'FAIL_TO_PASS' | 'PASS_TO_PASS'>,
   evalSemanticsVersion: string,
+  task: SweRebenchV2VerifierFacts['task'],
 ): SweRebenchV2VerifierFacts {
   return {
     failToPass: [...row.FAIL_TO_PASS],
     passToPass: [...row.PASS_TO_PASS],
     evalSemanticsVersion,
+    task: { ...task },
   };
+}
+
+async function authenticateSignedTask(
+  rawSignedTask: unknown,
+  signedTask: ReturnType<typeof SignedTaskV1Schema.parse>,
+): Promise<void> {
+  if (
+    rawSignedTask === null
+    || typeof rawSignedTask !== 'object'
+    || Array.isArray(rawSignedTask)
+  ) {
+    throw new Error('signed task must be an object');
+  }
+  const { signature: _signature, ...unsignedTask } =
+    rawSignedTask as Record<string, unknown>;
+  const canonicalHash = keccak256(toBytes(canonicalJson(unsignedTask)));
+  if (canonicalHash.toLowerCase() !== signedTask.signature.hash.toLowerCase()) {
+    throw new Error(
+      `signed task signature.hash does not authenticate the canonical unsigned task: expected ${canonicalHash}`,
+    );
+  }
+
+  let recovered: `0x${string}`;
+  try {
+    recovered = await recoverAddress({
+      hash: canonicalHash,
+      signature: signedTask.signature.sig as Hex,
+    });
+  } catch (error) {
+    throw new Error(
+      `signed task signature recovery failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  if (recovered.toLowerCase() !== signedTask.signature.signer.toLowerCase()) {
+    throw new Error(
+      `signed task recovered signer ${recovered} does not match declared signer ${signedTask.signature.signer}`,
+    );
+  }
+  if (recovered.toLowerCase() !== signedTask.creator.agentEoa.toLowerCase()) {
+    throw new Error(
+      `signed task recovered signer ${recovered} does not match creator.agentEoa ${signedTask.creator.agentEoa}`,
+    );
+  }
 }
 
 export async function resolveSweRebenchV2VerifierFacts(args: {
@@ -435,6 +490,7 @@ export async function resolveSweRebenchV2VerifierFacts(args: {
   ports: SweRebenchV2VerifierFactPorts;
 }): Promise<SweRebenchV2VerifierFacts> {
   const signedTask = SignedTaskV1Schema.parse(args.signedTask);
+  await authenticateSignedTask(args.signedTask, signedTask);
   if (
     signedTask.solverType !== 'swe-rebench-v2.v1'
     || signedTask.contractId !== 'swe-rebench-v2'
@@ -443,6 +499,13 @@ export async function resolveSweRebenchV2VerifierFacts(args: {
     throw new Error('signed task is not the swe-rebench-v2.v1 contract');
   }
   const task = SweRebenchV2TaskSchema.parse(signedTask.spec);
+  const taskProvenance: SweRebenchV2VerifierFacts['task'] = {
+    solverType: signedTask.solverType,
+    instanceId: task.instance_id,
+    repo: task.repo,
+    baseCommit: task.base_commit,
+    createdAt: signedTask.createdAt,
+  };
   if (task.instance_id !== args.expectedInstanceId) {
     throw new Error(
       `expected instance ${args.expectedInstanceId} does not match signed task ${task.instance_id}`,
@@ -514,7 +577,7 @@ export async function resolveSweRebenchV2VerifierFacts(args: {
         `raw HF rowHash ${actualRowHash} does not match vetted proof ${admission.rowHash}`,
       );
     }
-    return facts(row, ref.evalSemanticsVersion);
+    return facts(row, ref.evalSemanticsVersion, taskProvenance);
   }
 
   if (task.hf_split !== 'minted') {
@@ -540,10 +603,11 @@ export async function resolveSweRebenchV2VerifierFacts(args: {
   }
   const row = matchingRows[0]!;
   assertMintedTaskIdentity(row, task);
-  if (minted.schemaVersion === 'swe-rebench-v2-minted-pool.v2') {
-    assertV2Admission(row as MintedPoolRowV2, admission);
+  if (minted.schemaVersion !== 'swe-rebench-v2-minted-pool.v2') {
+    throw new Error('minted v1 artifact has no authenticated admission-row binding');
   }
-  return facts(row, ref.evalSemanticsVersion);
+  assertV2Admission(row as MintedPoolRowV2, admission);
+  return facts(row, ref.evalSemanticsVersion, taskProvenance);
 }
 
 /**

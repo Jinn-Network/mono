@@ -562,6 +562,7 @@ def _on_session_end(
     )
     if snapshot_repository:
         episode["task"]["repositorySlug"] = snapshot_repository
+        episode["task"]["baseCommit"] = snapshot.base_head
     test_runs = _episode_test_runs(episode)
     episode["outcome"]["acceptedDiff"] = bool(accepted)
     episode["outcome"]["testRuns"] = {

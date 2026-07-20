@@ -25,7 +25,7 @@
  * returned function is directly usable as `BridgeDeps.fetchEvidence`.
  */
 
-import { type AttemptRef, type BridgeEvidence, repoFromInstanceId } from './bridge.js';
+import { type AttemptRef, type BridgeEvidence } from './bridge.js';
 import { extractSnapshotTranscript } from './snapshot-transcript.js';
 import { outlineTranscript } from './transcript-outline.js';
 
@@ -70,20 +70,25 @@ function record(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-function isIdentifiedSweTask(taskDoc: unknown): boolean {
+function hasExactSweTaskType(taskDoc: unknown): boolean {
   const outer = record(taskDoc);
   const task = record(outer?.['signedTask']) ?? outer;
-  return task?.['solverType'] === 'swe-rebench-v2.v1'
-    || (
-      task?.['contractId'] === 'swe-rebench-v2'
-      && task?.['contractVersion'] === 'v1'
-    );
+  return task?.['solverType'] === 'swe-rebench-v2.v1';
+}
+
+export interface AuthenticatedTaskProvenance {
+  solverType: string;
+  instanceId: string;
+  repo: string;
+  baseCommit: string;
+  createdAt: number;
 }
 
 export interface VerifierFacts {
   failToPass: string[];
   passToPass: string[];
   evalSemanticsVersion: string;
+  task: AuthenticatedTaskProvenance;
 }
 
 export type VerifierFactsResolver = (
@@ -104,7 +109,59 @@ function validateVerifierFacts(value: unknown, instanceId: string): VerifierFact
       `authenticated verifier facts for ${instanceId} require exact failToPass, passToPass, and evalSemanticsVersion`,
     );
   }
-  return { failToPass, passToPass, evalSemanticsVersion };
+  const rawTask = record(facts['task']);
+  const solverType = rawTask?.['solverType'];
+  const authenticatedInstanceId = nonEmptyString(rawTask?.['instanceId']);
+  const repo = nonEmptyString(rawTask?.['repo']);
+  const baseCommit = nonEmptyString(rawTask?.['baseCommit']);
+  const createdAt = rawTask?.['createdAt'];
+  if (
+    solverType !== 'swe-rebench-v2.v1'
+    || !authenticatedInstanceId
+    || !repo
+    || !baseCommit
+    || !Number.isInteger(createdAt)
+    || (createdAt as number) < 0
+  ) {
+    throw new Error(
+      `authenticated verifier facts for ${instanceId} require an exact task provenance tuple`,
+    );
+  }
+  return {
+    failToPass,
+    passToPass,
+    evalSemanticsVersion,
+    task: {
+      solverType,
+      instanceId: authenticatedInstanceId,
+      repo,
+      baseCommit,
+      createdAt: createdAt as number,
+    },
+  };
+}
+
+function assertMatchingTaskProvenance(
+  sourceName: string,
+  value: unknown,
+  authenticated: AuthenticatedTaskProvenance,
+): void {
+  const source = record(value);
+  if (!source) return;
+  for (const field of [
+    'solverType',
+    'instanceId',
+    'repo',
+    'baseCommit',
+  ] as const) {
+    const candidate = source[field];
+    if (candidate !== undefined && candidate !== authenticated[field]) {
+      throw new Error(
+        `authenticated task provenance mismatch at ${sourceName}.${field}: `
+        + `expected ${JSON.stringify(authenticated[field])}, got ${JSON.stringify(candidate)}`,
+      );
+    }
+  }
 }
 
 export interface EvidenceFetcherPorts {
@@ -203,41 +260,48 @@ export function createEvidenceFetcher(
     // solution envelope. Never throws — absence is recorded as `patch-only`.
     const stepTrace = await fetchStepTrace(ports.ipfs, solutionEnv);
 
-    const problem = String(taskDoc?.description ?? taskDoc?.spec?.problem_statement ?? '')
+    const outerTaskDocument = record(taskDoc) ?? {};
+    const signedTaskDocument =
+      record(outerTaskDocument['signedTask']) ?? outerTaskDocument;
+    const signedTaskSpec = record(signedTaskDocument['spec']) ?? {};
+    const problem = String(
+      signedTaskDocument['description']
+      ?? signedTaskSpec['problem_statement']
+      ?? '',
+    )
       .replace(/\s+/g, ' ')
       .trim()
       .slice(0, MAX_PROBLEM_CHARS);
-    const taskProvenance = solutionEnv?.task ?? verdictEnv?.task ?? {};
-    const spec = record(taskDoc?.spec) ?? {};
     let verifier: VerifierFacts | undefined;
-    if (isIdentifiedSweTask(taskDoc)) {
-      if (!ports.resolveVerifierFacts) {
+    if (ports.resolveVerifierFacts) {
+      if (!hasExactSweTaskType(taskDoc)) {
         throw new Error(
-          `identified SWE task ${ref.instanceId} requires authenticated verifier facts`,
+          `verifier resolution for ${ref.instanceId} requires an exact swe-rebench-v2.v1 task type`,
         );
       }
       verifier = validateVerifierFacts(
         await ports.resolveVerifierFacts(taskDoc, ref.instanceId),
         ref.instanceId,
       );
+    } else if (hasExactSweTaskType(taskDoc)) {
+      throw new Error(
+        `identified SWE task ${ref.instanceId} requires authenticated verifier facts`,
+      );
     }
 
-    const instanceId =
-      nonEmptyString(taskProvenance?.instanceId)
-      ?? nonEmptyString(spec?.instance_id)
-      ?? ref.instanceId;
-    const repo =
-      nonEmptyString(taskProvenance?.repo)
-      ?? nonEmptyString(spec?.repo)
-      ?? repoFromInstanceId(instanceId)
-      ?? undefined;
-    const baseCommit =
-      nonEmptyString(taskProvenance?.baseCommit)
-      ?? nonEmptyString(spec?.base_commit);
-    const taskCreatedAt =
-      Number.isInteger(taskProvenance?.createdAt) && taskProvenance.createdAt >= 0
-        ? taskProvenance.createdAt as number
-        : undefined;
+    if (verifier) {
+      // Execution-envelope task.createdAt is the on-chain TaskCreated block
+      // timestamp (epoch seconds), while the authenticated tuple carries the
+      // signed TaskV1 creation time (epoch milliseconds). They are distinct
+      // events, so envelope createdAt is deliberately ignored rather than
+      // compared or allowed to override the authenticated signed-task value.
+      assertMatchingTaskProvenance('attemptRef', ref, verifier.task);
+      assertMatchingTaskProvenance('verdictEnvelope', verdictEnv, verifier.task);
+      assertMatchingTaskProvenance('verdictEnvelope.task', verdictEnv?.task, verifier.task);
+      assertMatchingTaskProvenance('solutionEnvelope', solutionEnv, verifier.task);
+      assertMatchingTaskProvenance('solutionEnvelope.task', solutionEnv?.task, verifier.task);
+    }
+
     const model = generatorModel(solutionEnv?.executor?.generatorModel);
     const distributionClass =
       solutionEnv?.distributionClass === 'open'
@@ -248,13 +312,25 @@ export function createEvidenceFetcher(
     return {
       taskSummary: problem || ref.instanceId,
       patch: patch.slice(0, MAX_PATCH_CHARS),
-      ...(repo ? { repo } : {}),
-      ...(baseCommit ? { baseCommit } : {}),
-      ...(taskCreatedAt !== undefined ? { taskCreatedAt } : {}),
-      ...(instanceId ? { instanceId } : {}),
+      ...(verifier
+        ? {
+            repo: verifier.task.repo,
+            baseCommit: verifier.task.baseCommit,
+            taskCreatedAt: verifier.task.createdAt,
+            instanceId: verifier.task.instanceId,
+          }
+        : {}),
       ...(model ? { generatorModel: model } : {}),
       ...(distributionClass ? { distributionClass } : {}),
-      ...(verifier ? { verifier } : {}),
+      ...(verifier
+        ? {
+            verifier: {
+              failToPass: verifier.failToPass,
+              passToPass: verifier.passToPass,
+              evalSemanticsVersion: verifier.evalSemanticsVersion,
+            },
+          }
+        : {}),
       ...(stepTrace ? { stepTrace } : {}),
     };
   };

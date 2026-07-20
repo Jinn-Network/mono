@@ -279,24 +279,39 @@ def _validate_episode(parsed: Dict[str, Any]) -> None:
             environment["verifier"],
             "environment.verifier",
         )
+        verifier_type = verifier.get("type")
         _episode_enum(
-            verifier.get("type"),
+            verifier_type,
             "environment.verifier.type",
             ("f2p-p2p", "command", "none"),
         )
-        _episode_string_list(
-            verifier.get("failToPass", []),
-            "environment.verifier.failToPass",
-        )
-        _episode_string_list(
-            verifier.get("passToPass", []),
-            "environment.verifier.passToPass",
-        )
-        if verifier.get("evalSemanticsVersion") is not None:
+        if verifier_type == "f2p-p2p":
+            _episode_string_list(
+                verifier.get("failToPass"),
+                "environment.verifier.failToPass",
+            )
+            _episode_string_list(
+                verifier.get("passToPass"),
+                "environment.verifier.passToPass",
+            )
             _episode_string(
-                verifier["evalSemanticsVersion"],
+                verifier.get("evalSemanticsVersion"),
                 "environment.verifier.evalSemanticsVersion",
             )
+        else:
+            _episode_string_list(
+                verifier.get("failToPass", []),
+                "environment.verifier.failToPass",
+            )
+            _episode_string_list(
+                verifier.get("passToPass", []),
+                "environment.verifier.passToPass",
+            )
+            if verifier.get("evalSemanticsVersion") is not None:
+                _episode_string(
+                    verifier["evalSemanticsVersion"],
+                    "environment.verifier.evalSemanticsVersion",
+                )
 
     outcome = _episode_object(parsed.get("outcome"), "outcome")
     _episode_enum(

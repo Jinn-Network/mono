@@ -12,6 +12,25 @@ import { OutcomeStatusSchema, VerifiabilityTierSchema } from './envelope.js';
 /** Unix-nanosecond timestamp string (OTel span convention). */
 const UnixNanoSchema = z.string().regex(/^\d+$/, 'unix-nanosecond digit string');
 
+const F2pP2pVerifierSchema = z.strictObject({
+  type: z.literal('f2p-p2p'),
+  failToPass: z.array(z.string().min(1)),
+  passToPass: z.array(z.string().min(1)),
+  evalSemanticsVersion: z.string().min(1),
+});
+
+const OtherVerifierSchema = z.strictObject({
+  type: z.enum(['command', 'none']),
+  failToPass: z.array(z.string().min(1)).default([]),
+  passToPass: z.array(z.string().min(1)).default([]),
+  evalSemanticsVersion: z.string().min(1).optional(),
+});
+
+const CapturedVerifierSchema = z.discriminatedUnion('type', [
+  F2pP2pVerifierSchema,
+  OtherVerifierSchema,
+]);
+
 /**
  * A captured task — the raw, pre-scrub input to `capture()`. Mirrors the
  * envelope shape minus `consent` (which does not exist pre-consent) with
@@ -49,12 +68,7 @@ export const CapturedTaskSchema = z.strictObject({
       source: z.enum(['stream', 'config']),
     }).optional(),
     distributionClass: z.enum(['open', 'restricted-tos', 'unknown']).optional(),
-    verifier: z.strictObject({
-      type: z.enum(['f2p-p2p', 'command', 'none']),
-      failToPass: z.array(z.string().min(1)).default([]),
-      passToPass: z.array(z.string().min(1)).default([]),
-      evalSemanticsVersion: z.string().min(1).optional(),
-    }).optional(),
+    verifier: CapturedVerifierSchema.optional(),
   }),
   steps: z.array(z.strictObject({
     spanId: z.string().min(1),

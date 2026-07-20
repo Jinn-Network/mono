@@ -24,6 +24,24 @@ const SOLUTION_CID = 'bafySolution';
 const SNAPSHOT_CID = 'bafySnapshot';
 const SOLVE_REQ = '0x' + 'b'.repeat(64);
 
+const AUTHENTICATED_TASK = {
+  solverType: 'swe-rebench-v2.v1',
+  instanceId: 'django__django-11333',
+  repo: 'django/django',
+  baseCommit: 'a'.repeat(40),
+  createdAt: 1_752_000_000_000,
+};
+
+function authenticatedVerifier(over: Record<string, unknown> = {}) {
+  return {
+    failToPass: ['tests/test_widget.py::test_regression'],
+    passToPass: ['tests/test_widget.py::test_existing'],
+    evalSemanticsVersion: '4',
+    task: AUTHENTICATED_TASK,
+    ...over,
+  };
+}
+
 function producerTask(over: Record<string, unknown> = {}) {
   return {
     description: 'Fix the widget factory',
@@ -74,29 +92,30 @@ function ports(over: {
 }
 
 describe('createEvidenceFetcher', () => {
-  it('returns { taskSummary, patch, repo } via the 3-hop verdict→solution join', async () => {
+  it('returns patch content but no unauthenticated provenance when no resolver is expected', async () => {
     const fetch = createEvidenceFetcher(ports());
     const ev = await fetch(ref());
     expect(ev.patch).toBe(PATCH);
     expect(ev.taskSummary).toBe('Fix the widget factory');
-    expect(ev.repo).toBe('django/django');
+    expect(ev.repo).toBeUndefined();
   });
 
   it('resolves one atomic verifier tuple from the exact producer-shaped SWE task document', async () => {
     const task = producerTask();
-    const verifier = {
-      failToPass: ['tests/test_widget.py::test_regression'],
-      passToPass: ['tests/test_widget.py::test_existing'],
-      evalSemanticsVersion: '4',
-    };
+    const verifier = authenticatedVerifier();
     const resolveVerifierFacts = vi.fn(async () => verifier);
     const fetch = createEvidenceFetcher({
       ...ports({ task }),
       resolveVerifierFacts,
     });
 
+    const { task: authenticatedTask, ...verifierTuple } = verifier;
     await expect(fetch(ref())).resolves.toMatchObject({
-      verifier,
+      instanceId: authenticatedTask.instanceId,
+      repo: authenticatedTask.repo,
+      baseCommit: authenticatedTask.baseCommit,
+      taskCreatedAt: authenticatedTask.createdAt,
+      verifier: verifierTuple,
     });
     expect(resolveVerifierFacts).toHaveBeenCalledTimes(1);
     expect(resolveVerifierFacts).toHaveBeenCalledWith(task, ref().instanceId);
@@ -106,75 +125,96 @@ describe('createEvidenceFetcher', () => {
     const signedTask = producerTask();
     delete signedTask['restorationRequestId'];
     const task = {
+      description: 'forged outer description',
       restorationRequestId: SOLVE_REQ,
       signedTask,
     };
     const resolveVerifierFacts = vi.fn(async () => ({
+      ...authenticatedVerifier(),
       failToPass: [],
-      passToPass: ['tests/test_widget.py::test_existing'],
-      evalSemanticsVersion: '4',
     }));
     const fetch = createEvidenceFetcher({
       ...ports({ task }),
       resolveVerifierFacts,
     });
 
-    await fetch(ref());
+    await expect(fetch(ref())).resolves.toMatchObject({
+      taskSummary: 'Fix the widget factory',
+    });
     expect(resolveVerifierFacts).toHaveBeenCalledWith(task, ref().instanceId);
   });
 
-  it('does not project unauthenticated legacy verifier fields or call the resolver for non-SWE tasks', async () => {
-    const resolveVerifierFacts = vi.fn();
+  it.each([
+    ['missing', undefined],
+    ['misspelled', 'swe-rebench-v2.vl'],
+    ['non-SWE', 'prediction.v1'],
+  ])('fails closed when an expected verifier task type is %s', async (_name, solverType) => {
+    const task = producerTask({ solverType });
+    if (solverType === undefined) delete task['solverType'];
+    const resolveVerifierFacts = vi.fn(async () => authenticatedVerifier());
     const fetch = createEvidenceFetcher({
-      ...ports({
-        task: {
-          description: 'Fix the widget factory',
-          restorationRequestId: SOLVE_REQ,
-          spec: {
-            instance_id: 'django__django-11333',
-            repo: 'django/django',
-            base_commit: 'a'.repeat(40),
-            fail_to_pass: ['tests/test_widget.py::test_regression'],
-            pass_to_pass: ['tests/test_widget.py::test_existing'],
-            evalSemanticsVersion: '4',
-          },
-        },
-        solution: {
-          task: {
-            instanceId: 'django__django-11333',
-            repo: 'django/django',
-            baseCommit: 'a'.repeat(40),
-            createdAt: 1_752_000_000,
-          },
-          executor: {
-            generatorModel: {
-              id: 'claude-sonnet-4-6',
-              provider: 'anthropic',
-              source: 'stream',
-            },
-          },
-          distributionClass: 'restricted-tos',
-          payload: { patch: PATCH },
-        },
-      }),
+      ...ports({ task }),
       resolveVerifierFacts,
     });
 
-    const evidence = await fetch(ref());
-    expect(evidence).toMatchObject({
-      instanceId: 'django__django-11333',
-      repo: 'django/django',
-      baseCommit: 'a'.repeat(40),
-      taskCreatedAt: 1_752_000_000,
-      generatorModel: {
-        id: 'claude-sonnet-4-6',
-        provider: 'anthropic',
-        source: 'stream',
-      },
-      distributionClass: 'restricted-tos',
+    await expect(fetch(ref())).rejects.toThrow(/exact swe-rebench-v2\.v1 task type/);
+  });
+
+  it('rejects authenticated task-A facts relabeled by task-B envelope and verdict provenance', async () => {
+    const taskB = {
+      instanceId: 'flask__flask-4200',
+      repo: 'pallets/flask',
+      baseCommit: 'b'.repeat(40),
+      createdAt: 1_753_000_000,
+    };
+    const fetch = createEvidenceFetcher({
+      ...ports({
+        task: producerTask({
+          spec: {
+            ...producerTask().spec,
+            instance_id: taskB.instanceId,
+            repo: taskB.repo,
+            base_commit: taskB.baseCommit,
+          },
+        }),
+        verdict: { task: { cid: TASK_CID, ...taskB } },
+        solution: {
+          task: taskB,
+          payload: { patch: PATCH },
+        },
+      }),
+      resolveVerifierFacts: async () => authenticatedVerifier(),
     });
-    expect(evidence.verifier).toBeUndefined();
-    expect(resolveVerifierFacts).not.toHaveBeenCalled();
+
+    await expect(fetch(ref({
+      instanceId: taskB.instanceId,
+    }))).rejects.toThrow(/authenticated task provenance mismatch.*instanceId/);
+  });
+
+  it('publishes signed-task createdAt and never lets chain-event envelope timestamps override it', async () => {
+    const envelopeTask = {
+      instanceId: AUTHENTICATED_TASK.instanceId,
+      repo: AUTHENTICATED_TASK.repo,
+      baseCommit: AUTHENTICATED_TASK.baseCommit,
+      // Envelope task.createdAt is TaskCreated block time in epoch seconds,
+      // not the signed TaskV1 creation time in epoch milliseconds.
+      createdAt: 1_752_000_000,
+    };
+    const fetch = createEvidenceFetcher({
+      ...ports({
+        task: producerTask(),
+        verdict: { task: { cid: TASK_CID, ...envelopeTask } },
+        solution: {
+          task: envelopeTask,
+          payload: { patch: PATCH },
+        },
+      }),
+      resolveVerifierFacts: async () => authenticatedVerifier(),
+    });
+
+    await expect(fetch(ref())).resolves.toMatchObject({
+      taskCreatedAt: AUTHENTICATED_TASK.createdAt,
+    });
   });
 
   it.each([

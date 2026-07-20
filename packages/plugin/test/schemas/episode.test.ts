@@ -17,6 +17,54 @@ describe('EpisodeV1Schema', () => {
     expect(parsed.trajectory.filter((s) => s.kind === 'jinn.tool_call')).toHaveLength(1);
   });
 
+  it.each([
+    { type: 'f2p-p2p' },
+    {
+      type: 'f2p-p2p',
+      failToPass: [],
+      evalSemanticsVersion: 'swe-rebench-v2.1',
+    },
+    {
+      type: 'f2p-p2p',
+      passToPass: [],
+      evalSemanticsVersion: 'swe-rebench-v2.1',
+    },
+    {
+      type: 'f2p-p2p',
+      failToPass: [],
+      passToPass: [],
+      evalSemanticsVersion: '',
+    },
+  ])('rejects incomplete f2p-p2p verifier facts on reads and writes: %j', (verifier) => {
+    const episode = {
+      ...valid,
+      session: { ...valid.session, kind: 'user' as const },
+      origin: { writer: 'test-writer', build: 'test-build' },
+      environment: { ...valid.environment, verifier },
+    };
+
+    expect(() => EpisodeV1Schema.parse(episode)).toThrow();
+    expect(() => EpisodeV1WriteSchema.parse(episode)).toThrow();
+  });
+
+  it('accepts explicit empty f2p-p2p test arrays with a nonempty semantics version', () => {
+    const verifier = {
+      type: 'f2p-p2p' as const,
+      failToPass: [],
+      passToPass: [],
+      evalSemanticsVersion: 'swe-rebench-v2.1',
+    };
+    const episode = {
+      ...valid,
+      session: { ...valid.session, kind: 'user' as const },
+      origin: { writer: 'test-writer', build: 'test-build' },
+      environment: { ...valid.environment, verifier },
+    };
+
+    expect(EpisodeV1Schema.parse(episode).environment.verifier).toEqual(verifier);
+    expect(EpisodeV1WriteSchema.parse(episode).environment.verifier).toEqual(verifier);
+  });
+
   it('rejects an episode with an unknown top-level field (strict)', () => {
     expect(() => EpisodeV1WriteSchema.parse({
       ...valid,

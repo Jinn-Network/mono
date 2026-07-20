@@ -1,8 +1,11 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
+import { privateKeyToAccount } from 'viem/accounts';
 import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
 import { computeMintedPoolRowV2Hash, type MintedPoolRowV2 } from '../../src/solver-types/_swe-rebench-v2-minted-pool.js';
 import { computeRowHash } from '../../src/solver-types/_swe-rebench-v2-substrate.js';
+import { signTaskV1 } from '../../src/tasks/signing.js';
+import type { TaskV1 } from '../../src/types/task-document.js';
 import {
   hashVettedPoolArtifact,
   type SolverNetArtifactRef,
@@ -26,21 +29,25 @@ const HF_DATASET = 'nebius/SWE-rebench-leaderboard';
 const HF_SPLIT = '2026_07';
 const F2P = ['tests/test_widget.py::test_regression'];
 const P2P = ['tests/test_widget.py::test_existing'];
+const CREATOR_PRIVATE_KEY = `0x${'1'.repeat(64)}` as `0x${string}`;
+const FORGER_PRIVATE_KEY = `0x${'2'.repeat(64)}` as `0x${string}`;
+const CREATOR = privateKeyToAccount(CREATOR_PRIVATE_KEY);
+const FORGER = privateKeyToAccount(FORGER_PRIVATE_KEY);
 
-function signedTask(over: {
+async function signedTask(over: {
   hfDataset?: string;
   hfSplit?: string;
   instanceId?: string;
   repo?: string;
   baseCommit?: string;
   eligibility?: Record<string, unknown>;
-} = {}) {
+} = {}, privateKey = CREATOR_PRIVATE_KEY) {
   const hfDataset = over.hfDataset ?? HF_DATASET;
   const hfSplit = over.hfSplit ?? HF_SPLIT;
   const instanceId = over.instanceId ?? INSTANCE_ID;
   const repo = over.repo ?? REPO;
   const baseCommit = over.baseCommit ?? BASE_COMMIT;
-  return {
+  const task: TaskV1 = {
     schemaVersion: 'task.v1',
     id: 'task-1',
     solverType: 'swe-rebench-v2.v1',
@@ -76,16 +83,11 @@ function signedTask(over: {
     },
     creator: {
       safeAddress: `0x${'1'.repeat(40)}`,
-      agentEoa: `0x${'2'.repeat(40)}`,
+      agentEoa: CREATOR.address,
     },
     createdAt: 1_752_000_000_000,
-    signature: {
-      algo: 'secp256k1',
-      signer: `0x${'2'.repeat(40)}`,
-      hash: `0x${'3'.repeat(64)}`,
-      sig: `0x${'4'.repeat(130)}`,
-    },
   };
+  return signTaskV1(task, privateKey);
 }
 
 function hfRow(over: Record<string, unknown> = {}) {
@@ -157,14 +159,16 @@ function vettedRef(artifact: SweRebenchV2VettedPoolArtifact): SolverNetArtifactR
   };
 }
 
-function withRef(task: ReturnType<typeof signedTask>, ref: SolverNetArtifactRef) {
-  return {
-    ...task,
+async function withRef(taskPromise: ReturnType<typeof signedTask>, ref: SolverNetArtifactRef) {
+  const task = await taskPromise;
+  const { signature: _signature, ...unsigned } = task;
+  return signTaskV1({
+    ...unsigned,
     eligibility: {
       ...task.eligibility,
       vettedPoolRef: ref,
     },
-  };
+  }, CREATOR_PRIVATE_KEY);
 }
 
 function baseEntry(over: Partial<SweRebenchV2VettedPoolArtifactEntry> = {}): SweRebenchV2VettedPoolArtifactEntry {
@@ -321,7 +325,7 @@ describe('resolveSweRebenchV2VerifierFacts — Hugging Face proof', () => {
     const row = hfRow();
     const artifact = vettedArtifact(baseEntry({ rowHash: hfRowHash(row) }));
     const deps = ports({ vetted: artifact, hf: row });
-    const task = withRef(signedTask(), vettedRef(artifact));
+    const task = await withRef(signedTask(), vettedRef(artifact));
     const resolve = createSweRebenchV2VerifierFactsResolver(deps);
 
     await expect(resolve({
@@ -332,6 +336,13 @@ describe('resolveSweRebenchV2VerifierFacts — Hugging Face proof', () => {
       failToPass: F2P,
       passToPass: P2P,
       evalSemanticsVersion: SEMANTICS,
+      task: {
+        solverType: 'swe-rebench-v2.v1',
+        instanceId: INSTANCE_ID,
+        repo: REPO,
+        baseCommit: BASE_COMMIT,
+        createdAt: 1_752_000_000_000,
+      },
     });
     expect(deps.fetchHfRawRow).toHaveBeenCalledWith({
       dataset: HF_DATASET,
@@ -341,10 +352,69 @@ describe('resolveSweRebenchV2VerifierFacts — Hugging Face proof', () => {
     });
   });
 
+  it('rejects when signature.hash does not authenticate the canonical unsigned task', async () => {
+    const row = hfRow();
+    const artifact = vettedArtifact(baseEntry({ rowHash: hfRowHash(row) }));
+    const task = await withRef(signedTask(), vettedRef(artifact));
+
+    await expect(resolveSweRebenchV2VerifierFacts({
+      signedTask: {
+        ...task,
+        signature: { ...task.signature, hash: `0x${'f'.repeat(64)}` },
+      },
+      expectedInstanceId: INSTANCE_ID,
+      ports: ports({ vetted: artifact, hf: row }),
+    })).rejects.toThrow(/signature\.hash|canonical unsigned task/i);
+  });
+
+  it('rejects when the declared signer does not match signature recovery', async () => {
+    const row = hfRow();
+    const artifact = vettedArtifact(baseEntry({ rowHash: hfRowHash(row) }));
+    const task = await withRef(signedTask(), vettedRef(artifact));
+
+    await expect(resolveSweRebenchV2VerifierFacts({
+      signedTask: {
+        ...task,
+        signature: { ...task.signature, signer: FORGER.address },
+      },
+      expectedInstanceId: INSTANCE_ID,
+      ports: ports({ vetted: artifact, hf: row }),
+    })).rejects.toThrow(/recovered signer|declared signer/i);
+  });
+
+  it('rejects a malformed secp256k1 signature', async () => {
+    const row = hfRow();
+    const artifact = vettedArtifact(baseEntry({ rowHash: hfRowHash(row) }));
+    const task = await withRef(signedTask(), vettedRef(artifact));
+
+    await expect(resolveSweRebenchV2VerifierFacts({
+      signedTask: {
+        ...task,
+        signature: { ...task.signature, sig: '0x1234' },
+      },
+      expectedInstanceId: INSTANCE_ID,
+      ports: ports({ vetted: artifact, hf: row }),
+    })).rejects.toThrow(/signature recovery|signature/i);
+  });
+
+  it('rejects a valid signature whose signer is not creator.agentEoa', async () => {
+    const row = hfRow();
+    const artifact = vettedArtifact(baseEntry({ rowHash: hfRowHash(row) }));
+    const task = await withRef(signedTask(), vettedRef(artifact));
+    const { signature: _signature, ...unsigned } = task;
+    const forged = await signTaskV1(unsigned, FORGER_PRIVATE_KEY);
+
+    await expect(resolveSweRebenchV2VerifierFacts({
+      signedTask: forged,
+      expectedInstanceId: INSTANCE_ID,
+      ports: ports({ vetted: artifact, hf: row }),
+    })).rejects.toThrow(/creator\.agentEoa/i);
+  });
+
   it('rejects a tampered raw row instead of trusting its verifier arrays', async () => {
     const admitted = hfRow();
     const artifact = vettedArtifact(baseEntry({ rowHash: hfRowHash(admitted) }));
-    const task = withRef(signedTask(), vettedRef(artifact));
+    const task = await withRef(signedTask(), vettedRef(artifact));
 
     await expect(resolveSweRebenchV2VerifierFacts({
       signedTask: task,
@@ -359,7 +429,7 @@ describe('resolveSweRebenchV2VerifierFacts — Hugging Face proof', () => {
   it('rejects a malformed raw row that omits a row-hash input', async () => {
     const row = hfRow();
     const artifact = vettedArtifact(baseEntry({ rowHash: hfRowHash(row) }));
-    const task = withRef(signedTask(), vettedRef(artifact));
+    const task = await withRef(signedTask(), vettedRef(artifact));
     const { patch: _patch, ...malformed } = row;
 
     await expect(resolveSweRebenchV2VerifierFacts({
@@ -373,7 +443,7 @@ describe('resolveSweRebenchV2VerifierFacts — Hugging Face proof', () => {
     const artifact = vettedArtifact(baseEntry({ rowHash: hfRowHash() }));
 
     await expect(resolveSweRebenchV2VerifierFacts({
-      signedTask: signedTask(),
+      signedTask: await signedTask(),
       expectedInstanceId: INSTANCE_ID,
       ports: ports({ vetted: artifact, hf: hfRow() }),
     })).rejects.toThrow(/vettedPoolRef/i);
@@ -381,7 +451,7 @@ describe('resolveSweRebenchV2VerifierFacts — Hugging Face proof', () => {
 
   it('requires the signed eligibility row identity tuple', async () => {
     const artifact = vettedArtifact(baseEntry({ rowHash: hfRowHash() }));
-    const task = signedTask({
+    const task = await signedTask({
       eligibility: { vettedPoolRef: vettedRef(artifact) },
     });
 
@@ -394,7 +464,7 @@ describe('resolveSweRebenchV2VerifierFacts — Hugging Face proof', () => {
 
   it('rejects a vetted admission entry with no rowHash proof', async () => {
     const artifact = vettedArtifact(baseEntry());
-    const task = withRef(signedTask(), vettedRef(artifact));
+    const task = await withRef(signedTask(), vettedRef(artifact));
 
     await expect(resolveSweRebenchV2VerifierFacts({
       signedTask: task,
@@ -416,7 +486,7 @@ describe('resolveSweRebenchV2VerifierFacts — Hugging Face proof', () => {
         rowHash: hfRowHash(),
       }],
     };
-    const task = withRef(signedTask(), {
+    const task = await withRef(signedTask(), {
       ...vettedRef(vettedArtifact(baseEntry({ rowHash: hfRowHash() }))),
       artifactHash: `sha256:${'f'.repeat(64)}`,
     });
@@ -436,7 +506,7 @@ describe('resolveSweRebenchV2VerifierFacts — Hugging Face proof', () => {
       },
     });
     const artifact = vettedArtifact(baseEntry({ rowHash: hfRowHash(row) }));
-    const task = withRef(signedTask(), vettedRef(artifact));
+    const task = await withRef(signedTask(), vettedRef(artifact));
 
     await expect(resolveSweRebenchV2VerifierFacts({
       signedTask: task,
@@ -446,6 +516,13 @@ describe('resolveSweRebenchV2VerifierFacts — Hugging Face proof', () => {
       failToPass: F2P,
       passToPass: P2P,
       evalSemanticsVersion: SEMANTICS,
+      task: {
+        solverType: 'swe-rebench-v2.v1',
+        instanceId: INSTANCE_ID,
+        repo: REPO,
+        baseCommit: BASE_COMMIT,
+        createdAt: 1_752_000_000_000,
+      },
     });
   });
 });
@@ -568,7 +645,7 @@ describe('createBoundedRawHfRowFetcher', () => {
 describe('resolveSweRebenchV2VerifierFacts — minted v1 proof', () => {
   it('rejects a malformed signed minted CID before the minted artifact fetch', async () => {
     const artifact = vettedArtifact(baseEntry());
-    const task = withRef(
+    const task = await withRef(
       signedTask({
         hfDataset: 'ipfs://notacid',
         hfSplit: 'minted',
@@ -585,11 +662,11 @@ describe('resolveSweRebenchV2VerifierFacts — minted v1 proof', () => {
     expect(deps.fetchIpfsJson).toHaveBeenCalledTimes(1);
   });
 
-  it('returns exact verifier facts from a CID-bound strict v1 artifact', async () => {
+  it('rejects a CID-bound v1 artifact because it has no admission-row binding', async () => {
     const minted = v1Artifact();
     const cid = canonicalRawCid(minted);
     const artifact = vettedArtifact(baseEntry());
-    const task = withRef(
+    const task = await withRef(
       signedTask({ hfDataset: `ipfs://${cid}`, hfSplit: 'minted' }),
       vettedRef(artifact),
     );
@@ -599,11 +676,7 @@ describe('resolveSweRebenchV2VerifierFacts — minted v1 proof', () => {
       signedTask: task,
       expectedInstanceId: INSTANCE_ID,
       ports: deps,
-    })).resolves.toEqual({
-      failToPass: F2P,
-      passToPass: P2P,
-      evalSemanticsVersion: SEMANTICS,
-    });
+    })).rejects.toThrow(/minted v1.*admission.*binding/i);
     expect(deps.fetchIpfsJson).toHaveBeenCalledWith({
       cid,
       maxBytes: 2_000_000,
@@ -614,7 +687,7 @@ describe('resolveSweRebenchV2VerifierFacts — minted v1 proof', () => {
     const original = v1Artifact();
     const cid = canonicalRawCid(original);
     const artifact = vettedArtifact(baseEntry());
-    const task = withRef(
+    const task = await withRef(
       signedTask({ hfDataset: `ipfs://${cid}`, hfSplit: 'minted' }),
       vettedRef(artifact),
     );
@@ -638,7 +711,7 @@ describe('resolveSweRebenchV2VerifierFacts — minted v1 proof', () => {
     };
     const cid = canonicalRawCid(minted);
     const artifact = vettedArtifact(baseEntry());
-    const task = withRef(
+    const task = await withRef(
       signedTask({ hfDataset: `ipfs://${cid}`, hfSplit: 'minted' }),
       vettedRef(artifact),
     );
@@ -658,7 +731,7 @@ describe('resolveSweRebenchV2VerifierFacts — minted v1 proof', () => {
     };
     const cid = canonicalRawCid(minted);
     const artifact = vettedArtifact(baseEntry());
-    const task = withRef(
+    const task = await withRef(
       signedTask({ hfDataset: `ipfs://${cid}`, hfSplit: 'minted' }),
       vettedRef(artifact),
     );
@@ -674,7 +747,7 @@ describe('resolveSweRebenchV2VerifierFacts — minted v1 proof', () => {
     const minted = { ...v1Artifact(), evalSemanticsVersion: 'other-semantics' };
     const cid = canonicalRawCid(minted);
     const artifact = vettedArtifact(baseEntry());
-    const task = withRef(
+    const task = await withRef(
       signedTask({ hfDataset: `ipfs://${cid}`, hfSplit: 'minted' }),
       vettedRef(artifact),
     );
@@ -693,7 +766,7 @@ describe('resolveSweRebenchV2VerifierFacts — minted v2 proof', () => {
     const minted = v2Artifact(row);
     const cid = canonicalRawCid(minted);
     const artifact = vettedArtifact(v2Admission(row));
-    const task = withRef(
+    const task = await withRef(
       signedTask({ hfDataset: `ipfs://${cid}`, hfSplit: 'minted' }),
       vettedRef(artifact),
     );
@@ -706,6 +779,13 @@ describe('resolveSweRebenchV2VerifierFacts — minted v2 proof', () => {
       failToPass: F2P,
       passToPass: P2P,
       evalSemanticsVersion: SEMANTICS,
+      task: {
+        solverType: 'swe-rebench-v2.v1',
+        instanceId: INSTANCE_ID,
+        repo: REPO,
+        baseCommit: BASE_COMMIT,
+        createdAt: 1_752_000_000_000,
+      },
     });
   });
 
@@ -717,7 +797,7 @@ describe('resolveSweRebenchV2VerifierFacts — minted v2 proof', () => {
     });
     const cid = canonicalRawCid(minted);
     const artifact = vettedArtifact(v2Admission(row));
-    const task = withRef(
+    const task = await withRef(
       signedTask({ hfDataset: `ipfs://${cid}`, hfSplit: 'minted' }),
       vettedRef(artifact),
     );
@@ -742,7 +822,7 @@ describe('resolveSweRebenchV2VerifierFacts — minted v2 proof', () => {
       },
     };
     const ref = vettedRef(artifact);
-    const task = withRef(
+    const task = await withRef(
       signedTask({ hfDataset: `ipfs://${cid}`, hfSplit: 'minted' }),
       ref,
     );

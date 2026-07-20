@@ -31,6 +31,28 @@ function ref(over: Partial<AttemptRef> = {}): AttemptRef {
   };
 }
 
+const VERIFIED_FACTS: NonNullable<BridgeEvidence['verifier']> = {
+  failToPass: ['tests/test_widget.py::test_regression'],
+  passToPass: ['tests/test_widget.py::test_existing'],
+  evalSemanticsVersion: '4',
+};
+
+function verifiedEvidence(
+  attempt: AttemptRef = ref(),
+  over: Partial<BridgeEvidence> = {},
+): BridgeEvidence {
+  return {
+    taskSummary: `summary ${attempt.instanceId}`,
+    patch: `patch ${attempt.instanceId}`,
+    repo: repoFromInstanceId(attempt.instanceId) ?? 'unknown/repo',
+    baseCommit: 'a'.repeat(40),
+    taskCreatedAt: 1_752_000_000_000,
+    instanceId: attempt.instanceId,
+    verifier: VERIFIED_FACTS,
+    ...over,
+  };
+}
+
 describe('repoFromInstanceId (SWE-bench owner__repo-N convention)', () => {
   it('derives owner/repo', () => {
     expect(repoFromInstanceId('django__django-11333')).toBe('django/django');
@@ -44,7 +66,15 @@ describe('repoFromInstanceId (SWE-bench owner__repo-N convention)', () => {
 });
 
 describe('toBridgeCapturedTask (both polarities, D10)', () => {
-  const ev: BridgeEvidence = { taskSummary: 'Fix duplicate rows', patch: 'diff --git a/x b/x', repo: 'django/django' };
+  const ev = verifiedEvidence(ref(), {
+    taskSummary: 'Fix duplicate rows',
+    patch: 'diff --git a/x b/x',
+  });
+
+  it('refuses to emit evaluator-verified evidence without authenticated verifier facts', () => {
+    const { verifier: _verifier, ...unverified } = ev;
+    expect(() => toBridgeCapturedTask(ref(), unverified, NOW)).toThrow(/authenticated verifier facts/);
+  });
 
   it('a pass becomes a completed, evaluator-verified pattern-eligible trace', () => {
     const t = toBridgeCapturedTask(ref({ polarity: 'pass' }), ev, NOW);
@@ -54,7 +84,10 @@ describe('toBridgeCapturedTask (both polarities, D10)', () => {
     expect(t.provenance).toBe('contributed');
     expect(t.task.distributionTags).toContain('coding');
     expect(t.steps.some((s) => s.name === 'tool:apply_patch')).toBe(true);
-    expect(t.environment.verifier).toBeUndefined();
+    expect(t.environment.verifier).toMatchObject({
+      type: 'f2p-p2p',
+      evalSemanticsVersion: '4',
+    });
   });
 
   it('a fail becomes a failed, evaluator-verified lesson-eligible trace', () => {
@@ -144,7 +177,7 @@ describe('bridgeAttempts', () => {
       published,
       slateInstanceIds: new Set<string>(),
       now: () => NOW,
-      fetchEvidence: async (r) => ({ taskSummary: `summary ${r.instanceId}`, patch: `patch ${r.instanceId}`, repo: repoFromInstanceId(r.instanceId) ?? undefined }),
+      fetchEvidence: async (r) => verifiedEvidence(r),
       publishEvidence: async (_task, r) => { published.push(r); return { envelopeRef: `env-${r.instanceId}-${r.polarity}`, anchorTx: null }; },
       ...over,
     };
@@ -192,7 +225,7 @@ describe('bridgeAttempts', () => {
       groupCap: 2,
       fetchEvidence: async (r) => {
         if (++call === 1) throw new Error('3-hop join miss');
-        return { taskSummary: `summary ${r.instanceId}`, patch: `patch ${r.instanceId}` };
+        return verifiedEvidence(r);
       },
     });
     const passRefs = ['0xa', '0xb', '0xc'].map((p) => ref({ requestId: p.padEnd(66, '0') }));
@@ -229,7 +262,12 @@ describe('bridgeAttempts', () => {
   });
 
   it('records an error without sinking the batch', async () => {
-    const deps = coreDeps({ fetchEvidence: async (r) => { if (r.instanceId.includes('boom')) throw new Error('ipfs down'); return { taskSummary: 's', patch: 'p' }; } });
+    const deps = coreDeps({
+      fetchEvidence: async (r) => {
+        if (r.instanceId.includes('boom')) throw new Error('ipfs down');
+        return verifiedEvidence(r, { taskSummary: 's', patch: 'p' });
+      },
+    });
     const res = await bridgeAttempts([ref({ instanceId: 'boom__boom-1' }), ref({ instanceId: 'flask__flask-4200' })], deps);
     expect(res.errors).toHaveLength(1);
     expect(res.bridged).toHaveLength(1);
@@ -272,7 +310,11 @@ describe('buildBridgeEvidencePublisher (reuses capture→publish at layer-2 alti
     const publisher = buildBridgeEvidencePublisher(deps);
     const task = toBridgeCapturedTask(
       ref(),
-      { taskSummary: 'Fix the bug before you refactor', patch: 'use this token wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY here' },
+      {
+        ...verifiedEvidence(),
+        taskSummary: 'Fix the bug before you refactor',
+        patch: 'use this token wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY here',
+      },
       NOW,
     );
     const out = await publisher(task, ref());
@@ -293,6 +335,7 @@ describe('buildBridgeEvidencePublisher (reuses capture→publish at layer-2 alti
     const task = toBridgeCapturedTask(
       ref(),
       {
+        ...verifiedEvidence(),
         taskSummary: 'Fix the bug',
         patch: 'diff --git a/x b/x',
         stepTrace: '- read config using wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY [jinn.venue_io]\n- edit models.py [jinn.mcp_call]',
@@ -313,7 +356,11 @@ describe('buildBridgeEvidencePublisher (reuses capture→publish at layer-2 alti
     const { deps, artifacts } = publishDeps();
     const publisher = buildBridgeEvidencePublisher(deps);
     const bigPatch = 'diff --git a/x b/x\n' + 'x'.repeat(20 * 1024); // exceeds MAX_STEP_ATTRIBUTES_BYTES (16 KiB)
-    const task = toBridgeCapturedTask(ref(), { taskSummary: 'a very large patch', patch: bigPatch }, NOW);
+    const task = toBridgeCapturedTask(
+      ref(),
+      { ...verifiedEvidence(), taskSummary: 'a very large patch', patch: bigPatch },
+      NOW,
+    );
     const out = await publisher(task, ref());
     expect(out.envelopeRef).toBe('bafyEnv');
 

@@ -490,6 +490,32 @@ def test_extract_trace_reader_does_not_require_write_only_delivered_hash():
             }),
         ),
         (
+            "environment.verifier.failToPass",
+            lambda episode: episode["environment"].update({
+                "verifier": {"type": "f2p-p2p"},
+            }),
+        ),
+        (
+            "environment.verifier.passToPass",
+            lambda episode: episode["environment"].update({
+                "verifier": {
+                    "type": "f2p-p2p",
+                    "failToPass": [],
+                    "evalSemanticsVersion": "swe-rebench-v2.1",
+                },
+            }),
+        ),
+        (
+            "environment.verifier.evalSemanticsVersion",
+            lambda episode: episode["environment"].update({
+                "verifier": {
+                    "type": "f2p-p2p",
+                    "failToPass": [],
+                    "passToPass": [],
+                },
+            }),
+        ),
+        (
             "environment.verifier.failToPass[0]",
             lambda episode: episode["environment"].update({
                 "verifier": {"type": "none", "failToPass": [""]},
