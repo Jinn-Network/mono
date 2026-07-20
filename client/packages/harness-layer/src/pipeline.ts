@@ -16,13 +16,18 @@
  */
 
 import {
+  buildBridgeManifestPublisher,
   bridgeAttempts,
   type AttemptRef,
   type BridgeEvidence,
   type BridgeResult,
 } from './bridge.js';
 import { capture } from './capture.js';
-import { publish, type HarnessPublishDeps } from './publish.js';
+import {
+  publish,
+  type HarnessPublishDeps,
+  type ManifestBatchPublishDeps,
+} from './publish.js';
 import { buildLayer2ScrubPipeline } from '../../../src/trajectory/scrub/layer2.js';
 import { parseTraceEnvelopeV0, type TraceEnvelopeV0 } from './envelope.js';
 import { clusterEvidence, buildMetaClusters, type MetaCluster, type Stage1PublishedSkill } from './cluster.js';
@@ -36,6 +41,8 @@ export interface PipelineDeps {
   fetchEvidence: (ref: AttemptRef) => Promise<BridgeEvidence>;
   /** Deps for the layer-1 publish (capture→publish). */
   publishDeps: HarnessPublishDeps;
+  /** Bulk bridge records opt into a single manifest anchor; default stays per-record. */
+  anchorMode?: 'per-record' | 'manifest';
   /** The LLM distill port (jinn-skill-distill-prompt-v1 over a cluster). */
   distill: (cluster: DistillCluster) => Promise<DistillLLMOutput>;
   /** Publish a layer-2 skill package (Plan A publishSkill). */
@@ -85,7 +92,10 @@ export interface PreparedDistillationEvidence {
 }
 
 export async function prepareDistillationEvidence(
-  deps: Pick<PipelineDeps, 'verdictSource' | 'fetchEvidence' | 'publishDeps' | 'slate' | 'groupCap' | 'limit' | 'now'>,
+  deps: Pick<
+    PipelineDeps,
+    'verdictSource' | 'fetchEvidence' | 'publishDeps' | 'anchorMode' | 'slate' | 'groupCap' | 'limit' | 'now'
+  >,
 ): Promise<PreparedDistillationEvidence> {
   const layer2 = buildLayer2ScrubPipeline();
   const slateIds = deps.slate.instanceIds;
@@ -108,6 +118,51 @@ export async function prepareDistillationEvidence(
     return { envelopeRef: published.envelopeRef, anchorTx: published.anchorTx };
   };
 
+  let publishManifestBatch:
+    | ReturnType<typeof buildBridgeManifestPublisher>
+    | undefined;
+  if (deps.anchorMode === 'manifest') {
+    if (
+      !('publishManifestBody' in deps.publishDeps) ||
+      !('anchorManifest' in deps.publishDeps) ||
+      !('recordManifestAnchor' in deps.publishDeps)
+    ) {
+      throw new Error('manifest anchor mode requires manifest-capable publish deps');
+    }
+    const manifestDeps = deps.publishDeps as ManifestBatchPublishDeps;
+    const captured: Array<{ instanceId: string; env: TraceEnvelopeV0 }> = [];
+    const publisher = buildBridgeManifestPublisher(manifestDeps, {
+      pipeline: layer2,
+      onCaptured: (pending, { ref }) => {
+        captured.push({
+          instanceId: ref.instanceId,
+          env: parseTraceEnvelopeV0({
+            ...pending.draft,
+            consent: { contributionConsent: true, scrubCompleted: true },
+          }),
+        });
+      },
+    });
+    publishManifestBatch = async (candidates) => {
+      captured.length = 0;
+      const result = await publisher(candidates);
+      if (captured.length !== result.memberRefs.length) {
+        throw new Error(
+          `manifest publisher captured ${captured.length} envelopes for ${result.memberRefs.length} refs`,
+        );
+      }
+      for (let index = 0; index < captured.length; index += 1) {
+        const item = captured[index]!;
+        collected.push({
+          ref: result.memberRefs[index]!,
+          instanceId: item.instanceId,
+          env: item.env,
+        });
+      }
+      return result;
+    };
+  }
+
   // 1. Bridge — ledger → layer-1 evidence (exclusion + dedup live in bridgeAttempts).
   const refs = await deps.verdictSource.list({ ...(deps.limit !== undefined ? { limit: deps.limit } : {}) });
   const verdictsTruncated = deps.limit !== undefined && refs.length >= deps.limit;
@@ -115,6 +170,8 @@ export async function prepareDistillationEvidence(
     slateInstanceIds: slateIds,
     fetchEvidence: deps.fetchEvidence,
     publishEvidence,
+    anchorMode: deps.anchorMode ?? 'per-record',
+    ...(publishManifestBatch ? { publishManifestBatch } : {}),
     groupCap: deps.groupCap ?? 8,
     ...(deps.now ? { now: deps.now } : {}),
   });

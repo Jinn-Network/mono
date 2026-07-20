@@ -240,10 +240,14 @@ export interface Erc8004AnchorInput {
   blockNumber: number | null;
   payloadHex: string;
   anchoredAt: number;
+  gasUsed?: string | null;
+  feeWei?: string | null;
 }
 
-export interface Erc8004AnchorRow extends Erc8004AnchorInput {
+export interface Erc8004AnchorRow extends Omit<Erc8004AnchorInput, 'gasUsed' | 'feeWei'> {
   id: number;
+  gasUsed: string | null;
+  feeWei: string | null;
 }
 
 export type TaskPostingPolicyType = 'once_per_safe' | 'once_per_bucket' | 'interval';
@@ -534,7 +538,9 @@ CREATE TABLE IF NOT EXISTS erc8004_anchors (
   tx_hash TEXT NOT NULL,
   block_number INTEGER,
   payload_hex TEXT NOT NULL,
-  anchored_at INTEGER NOT NULL
+  anchored_at INTEGER NOT NULL,
+  gas_used TEXT,
+  fee_wei TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_erc8004_anchors_envelope_cid ON erc8004_anchors(envelope_cid);
 CREATE INDEX IF NOT EXISTS idx_erc8004_anchors_envelope_id ON erc8004_anchors(envelope_id);
@@ -630,6 +636,7 @@ export class Store {
     this.ensureArtifactsTaskColumns();
     this.ensureRewardClaimsTxIndex();
     this.ensureNetworkArtifactsPeerCatalogId();
+    this.ensureErc8004AnchorGasColumns();
     this.ensureTaskPostsTaskCoordinatorColumns();
     this.ensureEnvelopeProjectionColumns();
     this.ensureActivityEventCostColumns();
@@ -675,6 +682,18 @@ export class Store {
     this.db.exec(
       `CREATE INDEX IF NOT EXISTS idx_network_artifacts_peer_catalog ON network_artifacts (peer_catalog_id)`,
     );
+  }
+
+  /** Databases created before manifest batching do not have receipt cost telemetry. */
+  private ensureErc8004AnchorGasColumns(): void {
+    const cols = this.db.prepare(`PRAGMA table_info(erc8004_anchors)`).all() as Array<{ name: string }>;
+    const names = new Set(cols.map((c) => c.name));
+    if (!names.has('gas_used')) {
+      this.db.exec(`ALTER TABLE erc8004_anchors ADD COLUMN gas_used TEXT`);
+    }
+    if (!names.has('fee_wei')) {
+      this.db.exec(`ALTER TABLE erc8004_anchors ADD COLUMN fee_wei TEXT`);
+    }
   }
 
   /** Fresh v1 state is Task-first; older local DBs get additive columns only. */
@@ -2927,11 +2946,11 @@ export class Store {
       `INSERT INTO erc8004_anchors
          (envelope_id, envelope_cid, content_kind, metadata_key, agent_id,
           chain_id, identity_registry_address, tx_hash, block_number,
-          payload_hex, anchored_at)
+          payload_hex, anchored_at, gas_used, fee_wei)
        VALUES
          (@envelopeId, @envelopeCid, @contentKind, @metadataKey, @agentId,
           @chainId, @identityRegistryAddress, @txHash, @blockNumber,
-          @payloadHex, @anchoredAt)`,
+          @payloadHex, @anchoredAt, @gasUsed, @feeWei)`,
     ).run({
       envelopeId: input.envelopeId,
       envelopeCid: input.envelopeCid,
@@ -2944,6 +2963,8 @@ export class Store {
       blockNumber: input.blockNumber,
       payloadHex: input.payloadHex,
       anchoredAt: input.anchoredAt,
+      gasUsed: input.gasUsed ?? null,
+      feeWei: input.feeWei ?? null,
     });
   }
 
@@ -2955,7 +2976,7 @@ export class Store {
     const rows = this.db.prepare(
       `SELECT id, envelope_id, envelope_cid, content_kind, metadata_key, agent_id,
               chain_id, identity_registry_address, tx_hash, block_number,
-              payload_hex, anchored_at
+              payload_hex, anchored_at, gas_used, fee_wei
          FROM erc8004_anchors
          WHERE envelope_cid IN (${placeholders})
          ORDER BY anchored_at ASC, id ASC`,
@@ -2972,6 +2993,8 @@ export class Store {
       block_number: number | null;
       payload_hex: string;
       anchored_at: number;
+      gas_used: string | null;
+      fee_wei: string | null;
     }>;
     return rows.map((r) => ({
       id: r.id,
@@ -2986,6 +3009,8 @@ export class Store {
       blockNumber: r.block_number,
       payloadHex: r.payload_hex,
       anchoredAt: r.anchored_at,
+      gasUsed: r.gas_used,
+      feeWei: r.fee_wei,
     }));
   }
 

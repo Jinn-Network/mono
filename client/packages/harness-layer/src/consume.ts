@@ -20,6 +20,7 @@ import { createCorpus, type Corpus } from '../../../src/corpus/index.js';
 import type { ArtifactContent, EnvelopeRef } from '../../../src/corpus/types.js';
 import type { SignedEnvelope } from '../../../src/types/envelope.js';
 import { Store } from '../../../src/store/store.js';
+import type { ManifestAnchorStore } from './publish-live.js';
 import { createDiscoveryAPI } from '../../../src/discovery/factory.js';
 import type { DiscoveryAPI } from '../../../src/discovery/types.js';
 import { DEFAULT_TESTNET_DISCOVERY_URL } from '../../../src/config.js';
@@ -200,6 +201,17 @@ function refForCid(manifestCid: string): EnvelopeRef {
     operator: { agentId: '', safeAddress: '' },
     evidenceTier: 'unknown',
     publishedAt: 0,
+  };
+}
+
+/**
+ * Reuse the harness layer's existing, frozen Store seam for manifest-anchor
+ * telemetry instead of adding another package-to-client boundary crossing.
+ */
+export function createManifestAnchorStore(dbPath: string): ManifestAnchorStore {
+  const store = new Store(dbPath);
+  return {
+    saveErc8004Anchor: (input) => store.saveErc8004Anchor(input),
   };
 }
 

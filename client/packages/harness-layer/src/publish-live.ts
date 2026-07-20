@@ -23,7 +23,7 @@ import {
 } from '../../../src/erc8004/index.js';
 import { sha256Hex } from '../../../src/captures/publish.js';
 import { createFileLedger } from './ledger.js';
-import type { HarnessPublishDeps } from './publish.js';
+import type { ManifestBatchPublishDeps } from './publish.js';
 
 const DONATION_ARTIFACT_ENCODING = 'jinn.artifact.donation.v1' as const;
 const ZERO_BYTES32 = `0x${'0'.repeat(64)}` as const;
@@ -33,6 +33,24 @@ export const DEFAULT_TESTNET_RPC_URL = 'https://base-sepolia-rpc.publicnode.com'
 export const DEFAULT_TESTNET_IDENTITY_REGISTRY =
   '0x8004A818BFB912233c491871b3d84c89A494BD9e' as const;
 export const DEFAULT_IPFS_REGISTRY_URL = 'https://registry.autonolas.tech';
+
+export interface ManifestAnchorStore {
+  saveErc8004Anchor(input: {
+    envelopeId: string;
+    envelopeCid: string;
+    contentKind: string;
+    metadataKey: string;
+    agentId: string;
+    chainId: number;
+    identityRegistryAddress: string;
+    txHash: string;
+    blockNumber: number | null;
+    payloadHex: string;
+    anchoredAt: number;
+    gasUsed?: string | null;
+    feeWei?: string | null;
+  }): void;
+}
 
 export interface LivePublishConfig {
   /** Operator agent EOA key — signs the envelope and the anchor tx. */
@@ -48,10 +66,12 @@ export interface LivePublishConfig {
   endpoint?: string;
   ledgerPath?: string;
   clientGitSha?: string;
+  /** Durable anchor telemetry sink. Required when manifest mode is exercised. */
+  store?: ManifestAnchorStore;
 }
 
 /** Build real publish deps: IPFS uploads + ERC-8004 anchor + file ledger. */
-export function createLivePublishDeps(config: LivePublishConfig): HarnessPublishDeps {
+export function createLivePublishDeps(config: LivePublishConfig): ManifestBatchPublishDeps {
   const rpcUrl = config.rpcUrl ?? DEFAULT_TESTNET_RPC_URL;
   const ipfsRegistryUrl = config.ipfsRegistryUrl ?? DEFAULT_IPFS_REGISTRY_URL;
   const endpoint = config.endpoint ?? 'http://127.0.0.1:7331';
@@ -89,6 +109,10 @@ export function createLivePublishDeps(config: LivePublishConfig): HarnessPublish
       const cid = await uploadToIpfs(ipfsRegistryUrl, envelope);
       return { cid, sha256: sha256Hex(canonicalJson(envelope)), endpoint, priceUsdc: '0' };
     },
+    publishManifestBody: async (body) => {
+      const cid = await uploadToIpfs(ipfsRegistryUrl, body);
+      return { cid, sha256: sha256Hex(canonicalJson(body)), endpoint, priceUsdc: '0' };
+    },
     anchorEnvelope: async ({ metadataKey, envelopeCid, envelopeHash, envelope }) => {
       const payload: ExecutionPayloadV2 = {
         version: 2,
@@ -108,5 +132,33 @@ export function createLivePublishDeps(config: LivePublishConfig): HarnessPublish
       });
       return { txHash, blockNumber };
     },
+    anchorManifest: async ({ manifestCid, payload }) => {
+      const { txHash, blockNumber, gasUsed, feeWei } =
+        await identityPublisher.publishManifest({ manifestCid, payload });
+      return { txHash, blockNumber, gasUsed, feeWei };
+    },
+    recordManifestAnchor: (anchor) => {
+      if (!config.store) {
+        throw new Error(
+          'manifest anchor recording requires a Store (configure LivePublishConfig.store)',
+        );
+      }
+      config.store.saveErc8004Anchor({
+        envelopeId: anchor.manifestCid,
+        envelopeCid: anchor.manifestCid,
+        contentKind: anchor.contentKind,
+        metadataKey: anchor.metadataKey,
+        agentId: identityPublisher.agent.toString(),
+        chainId: identityPublisher.chainId,
+        identityRegistryAddress: identityPublisher.registry,
+        txHash: anchor.txHash,
+        blockNumber: anchor.blockNumber,
+        payloadHex: anchor.payloadHex,
+        anchoredAt: anchor.anchoredAt,
+        gasUsed: anchor.gasUsed?.toString() ?? null,
+        feeWei: anchor.feeWei?.toString() ?? null,
+      });
+    },
+    log: (line) => console.log(line),
   };
 }

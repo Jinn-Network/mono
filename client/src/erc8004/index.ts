@@ -19,6 +19,7 @@ export {
   IDENTITY_REGISTRY_SET_METADATA_ABI,
   PAYLOAD_TUPLE,
   PAYLOAD_TUPLE_V2,
+  MANIFEST_PAYLOAD_TUPLE,
   REPUTATION_REGISTRY_ABI,
   VALIDATION_REGISTRY_ABI,
 } from './abis.js';
@@ -46,9 +47,41 @@ export {
   type PublishContentArgs,
   type PublishContentResult,
   type PublishContentV2Args,
+  type ManifestPublishArgs,
   type ResolveAgentIdArgs,
   type ResolvedAgent,
 } from './identity.js';
+
+// ── Manifest batch anchors ───────────────────────────────────────────────────
+export {
+  hashLeaf,
+  merkleRoot,
+  merkleProof,
+  verifyMerkleProof,
+  type MerkleProof,
+} from './merkle.js';
+export {
+  MANIFEST_METADATA_KEY_PREFIX,
+  ManifestPayloadValidationError,
+  buildManifestMetadataKey,
+  parseManifestMetadataKey,
+  encodeManifestPayload,
+  decodeManifestPayload,
+  validateManifestPayload,
+  type ManifestPayload,
+} from './manifest-registry.js';
+export {
+  ManifestAnchorNotFoundError,
+  ManifestRootMismatchError,
+  readManifestAnchor,
+  fetchManifest,
+  enumerateMembers,
+  proveMember,
+  verifyMember,
+  type ManifestAnchor,
+  type ManifestAnchorReadDeps,
+  type ManifestFetchDeps,
+} from './manifest-consumer.js';
 
 // ── ReputationRegistry (client + feedback hook) ────────────────────────────────
 export {

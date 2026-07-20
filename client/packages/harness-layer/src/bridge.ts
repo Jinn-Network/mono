@@ -19,8 +19,14 @@
  * tests.
  */
 
-import { capture, type CapturedTask } from './capture.js';
-import { publish, type HarnessPublishDeps } from './publish.js';
+import { capture, type CapturedTask, type PendingEnvelope } from './capture.js';
+import {
+  publish,
+  publishManifestBatch as publishPendingManifestBatch,
+  type HarnessPublishDeps,
+  type ManifestBatchPublishDeps,
+  type ManifestBatchResult,
+} from './publish.js';
 import { buildLayer2ScrubPipeline } from '../../../src/trajectory/scrub/layer2.js';
 import type { ScrubPipeline } from '../../../src/trajectory/scrub/pipeline.js';
 
@@ -110,6 +116,12 @@ export interface BridgeDeps {
   fetchEvidence: (ref: AttemptRef) => Promise<BridgeEvidence>;
   /** Publish a constructed CapturedTask as layer-1 evidence; returns the corpus ref. */
   publishEvidence: (task: CapturedTask, ref: AttemptRef) => Promise<{ envelopeRef: string; anchorTx: string | null }>;
+  /** Bulk batches opt in explicitly; contributed/retrieval records stay per-record by default. */
+  anchorMode?: 'per-record' | 'manifest';
+  /** One shared manifest publication for every surviving task (manifest mode only). */
+  publishManifestBatch?: (
+    candidates: Array<{ task: CapturedTask; ref: AttemptRef }>,
+  ) => Promise<ManifestBatchResult>;
   /** Weak-suite instance ids (discrimination fail) — excluded from bridge input. */
   weakSuiteInstanceIds?: Set<string>;
   /** Lookup-flagged instance ids — excluded from distillation input. */
@@ -141,6 +153,11 @@ export interface BridgeResult {
    * repos explicitly.
    */
   unresolvedSlateIds: string[];
+  /** Shared batch facts, populated only in manifest mode. */
+  manifestCid?: string;
+  anchorTx?: string | null;
+  gasUsed?: bigint | null;
+  feeWei?: bigint | null;
 }
 
 /**
@@ -324,6 +341,7 @@ export async function bridgeAttempts(refs: AttemptRef[], deps: BridgeDeps): Prom
   // in a stable order); rows beyond the cap are recorded in `deduped`.
   const groupCap = Math.max(1, deps.groupCap ?? 1);
   const kept = new Map<string, number>();
+  const manifestCandidates: Array<{ task: CapturedTask; ref: AttemptRef }> = [];
 
   for (const ref of refs) {
     const candidates = ref.discoveryCandidates?.length
@@ -403,6 +421,11 @@ export async function bridgeAttempts(refs: AttemptRef[], deps: BridgeDeps): Prom
 
     try {
       const task = toBridgeCapturedTask(canonicalRef, ev, now);
+      if (deps.anchorMode === 'manifest') {
+        kept.set(key, (kept.get(key) ?? 0) + 1);
+        manifestCandidates.push({ task, ref: canonicalRef });
+        continue;
+      }
       const pub = await deps.publishEvidence(task, canonicalRef);
       // Count only SUCCESSFUL bridges toward the cap. Publication failures are
       // surfaced once and never retried through another discovery projection:
@@ -419,6 +442,38 @@ export async function bridgeAttempts(refs: AttemptRef[], deps: BridgeDeps): Prom
         requestId: ref.requestId,
         error: err instanceof Error ? err.message : String(err),
       });
+    }
+  }
+
+  if (deps.anchorMode === 'manifest' && manifestCandidates.length > 0) {
+    try {
+      if (!deps.publishManifestBatch) {
+        throw new Error('manifest anchor mode requires publishManifestBatch');
+      }
+      const batch = await deps.publishManifestBatch(manifestCandidates);
+      if (batch.memberRefs.length !== manifestCandidates.length) {
+        throw new Error(
+          `manifest publisher returned ${batch.memberRefs.length} member refs for ${manifestCandidates.length} candidates`,
+        );
+      }
+      result.manifestCid = batch.manifestCid;
+      result.anchorTx = batch.anchorTx;
+      result.gasUsed = batch.gasUsed;
+      result.feeWei = batch.feeWei;
+      for (let index = 0; index < manifestCandidates.length; index += 1) {
+        const candidate = manifestCandidates[index]!;
+        result.bridged.push({
+          instanceId: candidate.ref.instanceId,
+          polarity: candidate.ref.polarity,
+          envelopeRef: batch.memberRefs[index]!,
+          anchorTx: batch.anchorTx,
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      for (const { ref } of manifestCandidates) {
+        result.errors.push({ requestId: ref.requestId, error: message });
+      }
     }
   }
   return result;
@@ -440,5 +495,38 @@ export function buildBridgeEvidencePublisher(
     const published = await publish(pending, deps);
     if (published.vetoed) throw new Error('unexpected veto bridging evidence');
     return { envelopeRef: published.envelopeRef, anchorTx: published.anchorTx };
+  };
+}
+
+/**
+ * Production manifest publisher: capture every bridge task with the shared
+ * layer-2 scrub pipeline, then hand all pending envelopes to the one-anchor
+ * batch publisher with their discovery hints.
+ */
+export function buildBridgeManifestPublisher(
+  deps: ManifestBatchPublishDeps,
+  opts: {
+    pipeline?: ScrubPipeline;
+    onCaptured?: (
+      pending: PendingEnvelope,
+      candidate: { task: CapturedTask; ref: AttemptRef },
+    ) => void;
+  } = {},
+): (
+  candidates: Array<{ task: CapturedTask; ref: AttemptRef }>,
+) => Promise<ManifestBatchResult> {
+  const pipeline = opts.pipeline ?? buildLayer2ScrubPipeline();
+  return async (candidates) => {
+    const members = [];
+    for (const { task, ref } of candidates) {
+      const pending = await capture(task, { pipeline });
+      opts.onCaptured?.(pending, { task, ref });
+      members.push({
+        pending,
+        polarity: ref.polarity,
+        instanceId: ref.instanceId,
+      });
+    }
+    return publishPendingManifestBatch(members, deps, { batchKind: 'bridge' });
   };
 }

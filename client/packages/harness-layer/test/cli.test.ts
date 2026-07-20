@@ -16,7 +16,11 @@ import {
 } from '../src/cli.js';
 import type { CapturedTask } from '../src/capture.js';
 import { createMemoryLedger, type LedgerEntry } from '../src/ledger.js';
-import { TRACE_ENVELOPE_ARTIFACT_TYPE, type HarnessPublishDeps } from '../src/publish.js';
+import {
+  TRACE_ENVELOPE_ARTIFACT_TYPE,
+  type HarnessPublishDeps,
+  type ManifestBatchPublishDeps,
+} from '../src/publish.js';
 import type { AttemptRef, BridgeEvidence } from '../src/bridge.js';
 import type { DistillCluster, DistillLLMOutput, MetaDistillLLMOutput } from '../src/distill.js';
 import type { MetaCluster } from '../src/cluster.js';
@@ -856,6 +860,28 @@ describe('jinn-layer distill run', () => {
     };
   }
 
+  function fakeManifestPublishDeps() {
+    const base = fakePublishDeps();
+    const anchorEnvelope = vi.fn(base.anchorEnvelope);
+    const anchorManifest = vi.fn(async () => ({
+      txHash: `0x${'d'.repeat(64)}` as const,
+      blockNumber: 7,
+      gasUsed: 123456n,
+      feeWei: 789012n,
+    }));
+    const deps: ManifestBatchPublishDeps = {
+      ...base,
+      anchorEnvelope,
+      publishManifestBody: async () => ({
+        cid: 'bafyManifest',
+        sha256: 'c'.repeat(64),
+      }),
+      anchorManifest,
+      recordManifestAnchor: vi.fn(),
+    };
+    return { deps, anchorEnvelope, anchorManifest };
+  }
+
   function stubDeps(over: Partial<DistillRunCliDeps> = {}): DistillRunCliDeps {
     return {
       verdictSource: {
@@ -989,6 +1015,26 @@ describe('jinn-layer distill run', () => {
       // The held-out instance never surfaces in a distilled body.
       expect(md).not.toContain('django__django-99999');
     }
+  });
+
+  it('--anchor-mode manifest batches bridge records into one anchor and prints measured gas', async () => {
+    const { writer, out } = capture();
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-cli-'));
+    const manifest = fakeManifestPublishDeps();
+    const code = await runJinnLayerCli(
+      ['distill', 'run', '--anchor-mode', 'manifest', '--out', outDir],
+      {
+        writer,
+        distillRunDeps: stubDeps({ publishDeps: manifest.deps }),
+      },
+    );
+
+    expect(code).toBe(0);
+    expect(manifest.anchorManifest).toHaveBeenCalledTimes(1);
+    expect(manifest.anchorEnvelope).not.toHaveBeenCalled();
+    expect(out()).toContain(
+      'manifest anchored bafyManifest — 2 members, gasUsed=123456, feeWei=789012',
+    );
   });
 
   it('--json emits the pipeline result with the out dir', async () => {

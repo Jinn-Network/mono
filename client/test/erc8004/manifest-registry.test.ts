@@ -78,6 +78,20 @@ describe('validateManifestPayload', () => {
       ManifestPayloadValidationError,
     );
   });
+  it('rejects a createdAt value that cannot be represented exactly as a number', () => {
+    expect(() =>
+      validateManifestPayload(payload({ createdAt: Number.MAX_SAFE_INTEGER + 1 })),
+    ).toThrow(ManifestPayloadValidationError);
+  });
+  it('rejects an encoded uint64 createdAt that would lose precision when decoded', () => {
+    const encoded = encodeAbiParameters(MANIFEST_PAYLOAD_TUPLE, [
+      0,
+      ROOT,
+      1,
+      0xffff_ffff_ffff_ffffn,
+    ]);
+    expect(() => decodeManifestPayload(encoded)).toThrow(ManifestPayloadValidationError);
+  });
   it('rejects a non-zero version', () => {
     expect(() => validateManifestPayload(payload({ version: 1 as unknown as 0 }))).toThrow(
       ManifestPayloadValidationError,

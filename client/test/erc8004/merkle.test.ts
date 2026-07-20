@@ -80,4 +80,20 @@ describe('tamper detection', () => {
     };
     expect(verifyMerkleProof(cids[0], mutated, root)).toBe(false);
   });
+
+  it('rejects malformed proof indices and hashes without throwing', () => {
+    const cid = 'cid-0';
+    const root = hashLeaf(cid);
+    expect(verifyMerkleProof(cid, { index: -1, siblings: [] }, root)).toBe(false);
+    expect(verifyMerkleProof(cid, { index: 0.5, siblings: [] }, root)).toBe(false);
+    expect(
+      verifyMerkleProof(cid, { index: Number.MAX_SAFE_INTEGER + 1, siblings: [] }, root),
+    ).toBe(false);
+    expect(
+      verifyMerkleProof(cid, { index: 0, siblings: ['0xab' as Hex] }, root),
+    ).toBe(false);
+    expect(
+      verifyMerkleProof(cid, { index: 0, siblings: [] }, '0xab' as Hex),
+    ).toBe(false);
+  });
 });
