@@ -4,6 +4,7 @@ import {
   type AttemptRef,
   type BridgeDeps,
 } from '../src/bridge.js';
+import { ManifestBatchRecordingError } from '../src/publish.js';
 
 const NOW = new Date('2026-07-20T00:00:00.000Z');
 const TX = `0x${'ab'.repeat(32)}` as const;
@@ -129,5 +130,32 @@ describe('bridgeAttempts manifest mode', () => {
       { requestId: ref(1).requestId, error: 'manifest anchor failed' },
       { requestId: ref(2).requestId, error: 'manifest anchor failed' },
     ]);
+  });
+
+  it('preserves irreversible member refs when local finalization fails', async () => {
+    const memberRefs = ['bafy-member-1', 'bafy-member-2'];
+    const { value } = deps({
+      publishManifestBatch: vi.fn().mockRejectedValue(
+        new ManifestBatchRecordingError(
+          {
+            manifestCid: 'bafy-manifest',
+            anchorTx: TX,
+            memberRefs,
+            root: ROOT,
+            gasUsed: 123_456n,
+            feeWei: 987_648n,
+          },
+          new Error('sqlite disk full'),
+        ),
+      ),
+    });
+
+    const result = await bridgeAttempts([ref(1), ref(2)], value);
+
+    expect(result.bridged).toEqual([]);
+    expect(result.manifestMemberRefs).toEqual(memberRefs);
+    expect(result.manifestCid).toBe('bafy-manifest');
+    expect(result.anchorTx).toBe(TX);
+    expect(result.errors).toHaveLength(2);
   });
 });

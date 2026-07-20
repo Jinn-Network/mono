@@ -157,6 +157,8 @@ export interface BridgeResult {
   unresolvedSlateIds: string[];
   /** Shared batch facts, populated only in manifest mode. */
   manifestCid?: string;
+  /** Uploaded member refs, retained even when post-anchor local finalization fails. */
+  manifestMemberRefs?: string[];
   anchorTx?: string | null;
   gasUsed?: bigint | null;
   feeWei?: bigint | null;
@@ -462,6 +464,7 @@ export async function bridgeAttempts(refs: AttemptRef[], deps: BridgeDeps): Prom
         );
       }
       result.manifestCid = batch.manifestCid;
+      result.manifestMemberRefs = [...batch.memberRefs];
       result.anchorTx = batch.anchorTx;
       result.gasUsed = batch.gasUsed;
       result.feeWei = batch.feeWei;
@@ -479,6 +482,7 @@ export async function bridgeAttempts(refs: AttemptRef[], deps: BridgeDeps): Prom
     } catch (error) {
       if (error instanceof ManifestBatchRecordingError) {
         result.manifestCid = error.result.manifestCid;
+        result.manifestMemberRefs = [...error.result.memberRefs];
         result.anchorTx = error.result.anchorTx;
         result.gasUsed = error.result.gasUsed;
         result.feeWei = error.result.feeWei;
@@ -486,6 +490,7 @@ export async function bridgeAttempts(refs: AttemptRef[], deps: BridgeDeps): Prom
         result.manifestConfirmed = true;
       } else if (error instanceof ManifestBatchAnchorError) {
         result.manifestCid = error.manifestCid;
+        result.manifestMemberRefs = [...error.memberRefs];
         result.anchorTx = error.txHash;
         result.manifestConfirmed = false;
       }
