@@ -57,6 +57,7 @@ export interface ProductionReviewActionPortOptions {
 export type ProductionReviewActionPort = Pick<
 ReviewExecutorDeps,
 | 'readCandidate'
+| 'confirmAcquisition'
 | 'createReviewRecord'
 | 'publishReviewClaim'
 | 'createAttempt'
@@ -100,6 +101,28 @@ export function makeProductionReviewActionPort(
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  };
+  const mutateWithExactReadback = async (
+    mutate: () => Promise<unknown>,
+    confirmed: () => Promise<boolean>,
+    ambiguityMessage: string,
+  ): Promise<void> => {
+    let mutationError: unknown;
+    try {
+      await mutate();
+    } catch (error) {
+      mutationError = error;
+    }
+    let exact = false;
+    try {
+      exact = await confirmed();
+    } catch (readbackError) {
+      if (mutationError !== undefined) throw mutationError;
+      throw readbackError;
+    }
+    if (exact) return;
+    if (mutationError !== undefined) throw mutationError;
+    throw new Error(ambiguityMessage);
   };
   const candidateFromSnapshot = async (
     snapshot: GitHubLifecycleSnapshot,
@@ -193,6 +216,9 @@ export function makeProductionReviewActionPort(
     readCandidate: async (prNumber) =>
       candidateFromSnapshot(await options.readSnapshot(), prNumber),
 
+    confirmAcquisition: async ({ prNumber }) =>
+      candidateFromSnapshot(await options.readSnapshot(), prNumber),
+
     createReviewRecord: ({ record, parent, credential }) =>
       withCredential(credential, (_askpass, environment) =>
         createMetadataCommit(encodeReviewClaimPayload(record), parent, environment)),
@@ -257,47 +283,43 @@ export function makeProductionReviewActionPort(
           throw new Error('Review projection lost exact review-ref authority');
         }
         const gh: CommandRunner = (cmd, args) => runner(cmd, args, { env: environment });
-        const prRaw = await gh('gh', [
+        const readPr = async () => JSON.parse(await gh('gh', [
           'pr', 'view', String(candidate.number), '--repo', REPO,
           '--json', 'headRefOid,labels,isDraft',
-        ]);
-        const pr = JSON.parse(prRaw) as {
+        ])) as {
           headRefOid?: string;
           labels?: Array<{ name?: string }>;
           isDraft?: boolean;
         };
+        const exactPr = (pr: Awaited<ReturnType<typeof readPr>>) => (
+          pr.headRefOid === candidate.head
+          && pr.isDraft === candidate.draft
+          && Array.isArray(pr.labels)
+        );
+        const pr = await readPr();
         if (
-          pr.headRefOid !== candidate.head
-          || pr.isDraft !== candidate.draft
-          || !Array.isArray(pr.labels)
+          !exactPr(pr)
         ) {
           throw new Error('Review projection PR authority changed');
         }
-        const labels = pr.labels.map((label) => label.name);
+        const labels = pr.labels!.map((label) => label.name);
         if (labels.includes('review:needs-human')) {
           throw new Error('Review projection stopped because Human is dominant');
         }
         if (!labels.includes('engine:review')) {
-          await gh('gh', [
-            'pr', 'edit', String(candidate.number), '--repo', REPO,
-            '--add-label', 'engine:review',
-          ]);
-          const repairedRaw = await gh('gh', [
-            'pr', 'view', String(candidate.number), '--repo', REPO,
-            '--json', 'headRefOid,labels,isDraft',
-          ]);
-          const repaired = JSON.parse(repairedRaw) as {
-            headRefOid?: string;
-            labels?: Array<{ name?: string }>;
-            isDraft?: boolean;
-          };
-          if (
-            repaired.headRefOid !== candidate.head
-            || repaired.isDraft !== candidate.draft
-            || !repaired.labels?.some((label) => label.name === 'engine:review')
-          ) {
-            throw new Error('Review label projection was ambiguous');
-          }
+          await mutateWithExactReadback(
+            () => gh('gh', [
+              'pr', 'edit', String(candidate.number), '--repo', REPO,
+              '--add-label', 'engine:review',
+            ]),
+            async () => {
+              const repaired = await readPr();
+              return exactPr(repaired)
+                && repaired.labels!.some((label) => label.name === 'engine:review')
+                && !repaired.labels!.some((label) => label.name === 'review:needs-human');
+            },
+            'Review label projection was ambiguous',
+          );
         }
         const project = await fetchProjectSnapshot(gh);
         const item = project.items.find((entry) =>
@@ -308,19 +330,44 @@ export function makeProductionReviewActionPort(
         }
         if (item.status !== 'In Review') {
           const fields = await fetchFieldIds(gh);
-          await gh('gh', [
-            'project', 'item-edit',
-            '--id', item.id,
-            '--project-id', fields.projectId,
-            '--field-id', fields.status.fieldId,
-            '--single-select-option-id', fields.status.options['In Review'],
-          ]);
-          const repaired = await fetchProjectSnapshot(gh);
-          const repairedItem = repaired.items.find((entry) =>
-            entry.contentType === 'Issue' && entry.number === candidate.issueNumber);
-          if (repairedItem?.status !== 'In Review') {
-            throw new Error('Review Project projection was ambiguous');
-          }
+          await mutateWithExactReadback(
+            () => gh('gh', [
+              'project', 'item-edit',
+              '--id', item.id,
+              '--project-id', fields.projectId,
+              '--field-id', fields.status.fieldId,
+              '--single-select-option-id', fields.status.options['In Review'],
+            ]),
+            async () => {
+              const repaired = await fetchProjectSnapshot(gh);
+              const repairedItem = repaired.items.find((entry) =>
+                entry.contentType === 'Issue' && entry.number === candidate.issueNumber);
+              return repairedItem?.status === 'In Review'
+                && repairedItem.blockedOn !== 'Human';
+            },
+            'Review Project projection was ambiguous',
+          );
+        }
+        const finalRef = await git(['ls-remote', CANONICAL_GITHUB_HTTPS_REMOTE, ref]);
+        if (!finalRef.includes(`${expectedReviewRefOid}\t${ref}`)) {
+          throw new Error('Review projection lost exact review-ref authority');
+        }
+        const finalPr = await readPr();
+        if (
+          !exactPr(finalPr)
+          || !finalPr.labels!.some((label) => label.name === 'engine:review')
+          || finalPr.labels!.some((label) => label.name === 'review:needs-human')
+        ) {
+          throw new Error('Review projection final PR authority changed');
+        }
+        const finalProject = await fetchProjectSnapshot(gh);
+        const finalItem = finalProject.items.find((entry) =>
+          entry.contentType === 'Issue' && entry.number === candidate.issueNumber);
+        if (
+          finalItem?.status !== 'In Review'
+          || finalItem.blockedOn === 'Human'
+        ) {
+          throw new Error('Review projection stopped because Human is dominant');
         }
       });
     },

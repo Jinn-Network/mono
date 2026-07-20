@@ -55,7 +55,7 @@ function page(after: string | null): PullRequestPage {
         reviewer: 'reviewer',
         state: 'APPROVED',
         commitId: HEAD,
-        body: '<!-- jinn-autopilot-review:v2 generation=22222222-2222-4222-8222-222222222222 attempt=33333333-3333-4333-8333-333333333333 head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=APPROVE -->',
+        body: '<!-- jinn-autopilot-review:v2 generation=22222222-2222-4222-8222-222222222222 attempt=33333333-3333-4333-8333-333333333333 intent=44444444-4444-4444-8444-444444444444 reviewer=reviewer head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa verdict=APPROVE -->',
         submittedAt: '2026-07-20T10:00:00.000Z',
       }],
       branchClaimTrailers: null,
@@ -163,6 +163,29 @@ describe('buildGitHubLifecycleSnapshot', () => {
     await expect(buildGitHubLifecycleSnapshot(source, {
       authorAllowlist: new Set(['trusted']),
     })).rejects.toBeInstanceOf(SnapshotDecodeError);
+  });
+
+  it('does not recover a copied exact intent marker from the wrong reviewer login', async () => {
+    const copied = page('page-2');
+    const node = copied.nodes[0]!;
+    const source = reader({
+      readPullRequests: async () => ({
+        ...copied,
+        nodes: [{
+          ...node,
+          reviews: node.reviews.map((review) => ({
+            ...review,
+            reviewer: 'marker-copying-bot',
+          })),
+        }],
+      }),
+    });
+
+    const snapshot = await buildGitHubLifecycleSnapshot(source, {
+      authorAllowlist: new Set(['trusted']),
+    });
+
+    expect(snapshot.lifecycle.items[0]).not.toHaveProperty('terminalVerdict');
   });
 
   it('fails closed when pagination says another page exists without a cursor', async () => {
@@ -428,6 +451,47 @@ describe('buildGitHubLifecycleSnapshot', () => {
     expect(snapshot.lifecycle.items[0]).toMatchObject({
       humanHold: true,
       humanReason: explicit,
+    });
+  });
+
+  it('treats a current-head Human review record as authoritative without projections', async () => {
+    const humanClaim = page('page-2').nodes[0]!;
+    const source = reader({
+      readPullRequests: async () => ({
+        nodes: [{
+          ...humanClaim,
+          labels: ['engine:review'],
+          reviewClaim: {
+            ...humanClaim.reviewClaim!,
+            payload: JSON.stringify({
+              protocolVersion: 2,
+              prNumber: 101,
+              generation: '22222222-2222-4222-8222-222222222222',
+              attempt: '33333333-3333-4333-8333-333333333333',
+              reviewer: 'reviewer',
+              head: HEAD,
+              state: 'human',
+              recordedAt: '2026-07-20T09:00:00.000Z',
+            }),
+          },
+          humanReason: null,
+        }],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      }),
+    });
+
+    const snapshot = await buildGitHubLifecycleSnapshot(source, {
+      authorAllowlist: new Set(['trusted']),
+    });
+
+    expect(snapshot.lifecycle.items[0]).toMatchObject({
+      kind: 'pull-request',
+      humanHold: true,
+      humanReason: {
+        phase: 'reviewing',
+        code: 'review-escalation',
+        detail: 'Current-head Human review record',
+      },
     });
   });
 

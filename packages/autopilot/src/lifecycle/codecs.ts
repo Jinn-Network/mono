@@ -332,6 +332,8 @@ export function reviewClaimRef(prNumber: number): GitRefName {
 export interface AutomatedReviewMarker {
   readonly generation: string;
   readonly attempt: string;
+  readonly intent: string;
+  readonly reviewer: string;
   readonly head: GitOid;
   readonly verdict: ReviewVerdictState;
 }
@@ -339,20 +341,32 @@ export interface AutomatedReviewMarker {
 export function formatAutomatedReviewMarker(marker: AutomatedReviewMarker): string {
   uuid(marker.generation, 'generation');
   uuid(marker.attempt, 'attempt');
+  uuid(marker.intent, 'intent');
+  if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(marker.reviewer)) {
+    throw new Error('Invalid reviewer login');
+  }
   gitOid(marker.head);
   if (!VERDICT_STATES.includes(marker.verdict)) throw new Error('Invalid verdict state');
   return `<!-- jinn-autopilot-review:v2 generation=${marker.generation} attempt=${marker.attempt} `
+    + `intent=${marker.intent} reviewer=${marker.reviewer} `
     + `head=${marker.head} verdict=${marker.verdict} -->`;
 }
 
 const REVIEW_MARKER_PATTERN =
-  /^<!-- jinn-autopilot-review:v2 generation=([0-9a-f-]+) attempt=([0-9a-f-]+) head=([0-9a-f]+) verdict=([A-Z_]+) -->$/;
+  /^<!-- jinn-autopilot-review:v2 generation=([0-9a-f-]+) attempt=([0-9a-f-]+) intent=([0-9a-f-]+) reviewer=([A-Za-z0-9-]+) head=([0-9a-f]+) verdict=([A-Z_]+) -->$/;
 
 export function parseAutomatedReviewMarker(marker: string): AutomatedReviewMarker {
   const match = REVIEW_MARKER_PATTERN.exec(marker);
   if (match === null) throw new Error('Invalid automated review marker');
-  const [, generation, attempt, head, verdict] = match;
-  if (generation === undefined || attempt === undefined || head === undefined || verdict === undefined) {
+  const [, generation, attempt, intent, reviewer, head, verdict] = match;
+  if (
+    generation === undefined
+    || attempt === undefined
+    || intent === undefined
+    || reviewer === undefined
+    || head === undefined
+    || verdict === undefined
+  ) {
     throw new Error('Invalid automated review marker');
   }
   if (!VERDICT_STATES.includes(verdict as ReviewVerdictState)) {
@@ -361,6 +375,8 @@ export function parseAutomatedReviewMarker(marker: string): AutomatedReviewMarke
   return {
     generation: uuid(generation, 'generation'),
     attempt: uuid(attempt, 'attempt'),
+    intent: uuid(intent, 'intent'),
+    reviewer,
     head: gitOid(head),
     verdict: verdict as ReviewVerdictState,
   };

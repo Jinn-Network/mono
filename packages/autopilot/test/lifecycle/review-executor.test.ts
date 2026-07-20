@@ -77,6 +77,13 @@ function harness(overrides: Partial<ReviewExecutorDeps> = {}) {
   const generations = [GENERATION_A, GENERATION_B];
   const deps: ReviewExecutorDeps = {
     readCandidate: async () => candidate(),
+    confirmAcquisition: async ({ expectedHead, expectedReviewRefOid }) => candidate({
+      head: expectedHead,
+      reviewRef: {
+        oid: expectedReviewRefOid,
+        record: claim(),
+      },
+    }),
     credentials: pool(),
     createReviewRecord: async ({ record }) => {
       events.push('record');
@@ -237,6 +244,47 @@ describe('review action executor', () => {
     expect(h.events).toEqual([]);
   });
 
+  it('repairs a current-head Human record and never reaps or reclaims it', async () => {
+    const h = harness({
+      readCandidate: async () => candidate({
+        reviewRef: {
+          oid: OLD_RECORD,
+          record: claim({ state: 'human' }),
+        },
+      }),
+    });
+
+    await expect(executeReviewAction({ prNumber: 84 }, h.deps))
+      .resolves.toEqual({
+        status: 'human',
+        prNumber: 84,
+        code: 'review-escalation',
+      });
+    expect(h.human).toHaveLength(1);
+    expect(h.events).toEqual([]);
+  });
+
+  it('repairs the Human projection when the snapshot already exposes the hold', async () => {
+    const h = harness({
+      readCandidate: async () => candidate({
+        humanHold: true,
+        reviewRef: {
+          oid: OLD_RECORD,
+          record: claim({ state: 'human' }),
+        },
+      }),
+    });
+
+    await expect(executeReviewAction({ prNumber: 84 }, h.deps))
+      .resolves.toEqual({
+        status: 'human',
+        prNumber: 84,
+        code: 'review-escalation',
+      });
+    expect(h.human).toHaveLength(1);
+    expect(h.events).toEqual([]);
+  });
+
   it('selects a single reviewer distinct from the author and permits one-credential review', async () => {
     const h = harness({
       credentials: pool([{
@@ -245,6 +293,14 @@ describe('review action executor', () => {
         implementationToken: 'one-secret',
       }]),
       readCandidate: async () => candidate({ author: 'someone-else' }),
+      confirmAcquisition: async ({ expectedHead, expectedReviewRefOid }) => candidate({
+        author: 'someone-else',
+        head: expectedHead,
+        reviewRef: {
+          oid: expectedReviewRefOid,
+          record: claim({ reviewer: 'one-bot' }),
+        },
+      }),
       spawnCoordinator: (input) => {
         expect(input.environment.GH_TOKEN).toBe('one-secret');
         return { pid: 42 };
@@ -305,6 +361,14 @@ describe('review action executor', () => {
     let attempt: Parameters<ReviewExecutorDeps['createAttempt']>[0] | undefined;
     const h = harness({
       readCandidate: async () => candidate({ approvalPolicy: 'human-codeowner' }),
+      confirmAcquisition: async ({ expectedHead, expectedReviewRefOid }) => candidate({
+        approvalPolicy: 'human-codeowner',
+        head: expectedHead,
+        reviewRef: {
+          oid: expectedReviewRefOid,
+          record: claim(),
+        },
+      }),
       createAttempt: async (input) => {
         attempt = input;
         return {
@@ -343,6 +407,39 @@ describe('review action executor', () => {
     });
     expect(h.events.indexOf('projection')).toBeGreaterThan(h.events.indexOf('claim'));
     expect(h.events.indexOf('spawn')).toBeGreaterThan(h.events.indexOf('projection'));
+  });
+
+  it('re-reads exact ref, head, and Human authority after projection before spawn', async () => {
+    let confirmations = 0;
+    const h = harness({
+      confirmAcquisition: async () => {
+        confirmations += 1;
+        return candidate({
+          humanHold: true,
+          reviewRef: { oid: RECORD_A, record: claim() },
+        });
+      },
+    });
+
+    await expect(executeReviewAction({ prNumber: 84 }, h.deps))
+      .resolves.toMatchObject({ status: 'human' });
+    expect(confirmations).toBe(1);
+    expect(h.events).not.toContain('spawn');
+  });
+
+  it('does not spawn when final acquisition readback loses exact ref or head authority', async () => {
+    for (const final of [
+      candidate({ reviewRef: { oid: RECORD_B, record: claim() } }),
+      candidate({ head: OLD_HEAD, reviewRef: { oid: RECORD_A, record: claim({ head: OLD_HEAD }) } }),
+    ]) {
+      const h = harness({
+        confirmAcquisition: async () => final,
+      });
+
+      const result = await executeReviewAction({ prNumber: 84 }, h.deps);
+      expect(result.status).not.toBe('spawned');
+      expect(h.events).not.toContain('spawn');
+    }
   });
 
   it('does not re-review a matching terminal approval, but may claim a terminal older head', async () => {

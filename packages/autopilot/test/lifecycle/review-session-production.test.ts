@@ -73,7 +73,169 @@ function manifest(): AttemptManifest {
   };
 }
 
+function projectSnapshot(status: 'Todo' | 'In Review' | 'Human'): string {
+  return JSON.stringify({
+    data: {
+      rateLimit: {
+        remaining: 4999,
+        used: 1,
+        resetAt: '2026-07-20T13:00:00.000Z',
+      },
+      organization: {
+        projectV2: {
+          sprintField: null,
+          items: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [{
+              id: 'PVTI_issue_42',
+              content: {
+                __typename: 'Issue',
+                number: 42,
+                issueType: { name: 'feat' },
+                blockedBy: { nodes: [] },
+              },
+              status: { name: status },
+              priority: { name: 'P1' },
+              effort: { name: 'High' },
+              blockedOn: { name: 'Nothing' },
+              sprint: null,
+            }],
+          },
+        },
+      },
+    },
+  });
+}
+
+function projectFields(): string {
+  return JSON.stringify({
+    fields: [
+      {
+        id: 'status-field',
+        name: 'Status',
+        options: [
+          { id: 'todo', name: 'Todo' },
+          { id: 'in-progress', name: 'In Progress' },
+          { id: 'human', name: 'Human' },
+          { id: 'in-review', name: 'In Review' },
+          { id: 'done', name: 'Done' },
+        ],
+      },
+      {
+        id: 'blocked-field',
+        name: 'Blocked on',
+        options: [
+          { id: 'nothing', name: 'Nothing' },
+          { id: 'human-blocked', name: 'Human' },
+          { id: 'another-issue', name: 'Another issue' },
+        ],
+      },
+    ],
+  });
+}
+
 describe('production review session port', () => {
+  it('freshly rederives the unique open issue/branch mapping and current-head CODEOWNER policy', async () => {
+    const port = makeProductionReviewSessionPort({
+      environment: {
+        GH_TOKEN: 'selected-secret',
+        JINN_AUTOPILOT_SESSION_MANIFEST: '/attempt/manifest.json',
+      },
+      readManifest: () => manifest(),
+      runner: async (cmd, args) => {
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+          return JSON.stringify({
+            number: 84,
+            state: 'OPEN',
+            headRefOid: HEAD,
+            headRefName: 'autopilot/42',
+            baseRefName: 'next',
+            isDraft: true,
+            body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
+            author: { login: 'implementation-bot' },
+            labels: [{ name: 'engine:review' }],
+            closingIssues: [{ number: 42 }],
+            files: [{ path: 'client/src/dashboard/spa/src/pages/Home.tsx' }],
+          });
+        }
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'list') {
+          return JSON.stringify([{
+            number: 84,
+            headRefOid: HEAD,
+            headRefName: 'autopilot/42',
+            closingIssues: [{ number: 42 }],
+          }]);
+        }
+        if (cmd === 'git' && args.includes('ls-tree')) return '.github/CODEOWNERS\n';
+        if (cmd === 'git' && args.includes('show')) {
+          if (args.at(-1) === `${HEAD}:.github/CODEOWNERS`) {
+            return '/client/src/dashboard/spa/src/pages/ @Jinn-Network/codeowners\n';
+          }
+          throw new Error('path does not exist');
+        }
+        throw new Error(`unexpected ${cmd} ${args.join(' ')}`);
+      },
+    });
+
+    const pullRequest = await port.readPullRequest(84, HEAD);
+    expect(pullRequest).toMatchObject({
+      number: 84,
+      issueNumber: 42,
+      open: true,
+      approvalPolicy: 'human-codeowner',
+    });
+    expect(pullRequest).not.toHaveProperty('mappingProblem');
+  });
+
+  it('reports duplicate open issue or branch mappings instead of trusting the manifest', async () => {
+    const port = makeProductionReviewSessionPort({
+      environment: {
+        GH_TOKEN: 'selected-secret',
+        JINN_AUTOPILOT_SESSION_MANIFEST: '/attempt/manifest.json',
+      },
+      readManifest: () => manifest(),
+      runner: async (cmd, args) => {
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+          return JSON.stringify({
+            number: 84,
+            state: 'OPEN',
+            headRefOid: HEAD,
+            headRefName: 'autopilot/42',
+            baseRefName: 'next',
+            isDraft: true,
+            body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
+            author: { login: 'implementation-bot' },
+            labels: [{ name: 'engine:review' }],
+            closingIssues: [{ number: 42 }],
+            files: [],
+          });
+        }
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'list') {
+          return JSON.stringify([
+            {
+              number: 84,
+              headRefOid: HEAD,
+              headRefName: 'autopilot/42',
+              closingIssues: [{ number: 42 }],
+            },
+            {
+              number: 85,
+              headRefOid: '9'.repeat(40),
+              headRefName: 'feature/duplicate-42',
+              closingIssues: [{ number: 42 }],
+            },
+          ]);
+        }
+        if (cmd === 'git' && args.includes('ls-tree')) return '';
+        throw new Error(`unexpected ${cmd} ${args.join(' ')}`);
+      },
+    });
+
+    await expect(port.readPullRequest(84, HEAD)).resolves.toMatchObject({
+      mappingProblem: expect.stringMatching(/unique|duplicate|mapping/i),
+    });
+  });
+
   it('uses only the selected credential and explicit review commit_id/event/body', async () => {
     const calls: Array<{
       cmd: string;
@@ -96,6 +258,7 @@ describe('production review session port', () => {
         if (cmd === 'gh' && args.includes('view')) {
           return JSON.stringify({
             number: 84,
+            state: 'OPEN',
             headRefOid: HEAD,
             headRefName: 'autopilot/42',
             baseRefName: 'next',
@@ -103,8 +266,19 @@ describe('production review session port', () => {
             body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
             author: { login: 'implementation-bot' },
             labels: [{ name: 'engine:review' }],
+            closingIssues: [{ number: 42 }],
+            files: [],
           });
         }
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'list') {
+          return JSON.stringify([{
+            number: 84,
+            headRefOid: HEAD,
+            headRefName: 'autopilot/42',
+            closingIssues: [{ number: 42 }],
+          }]);
+        }
+        if (cmd === 'git' && args.includes('ls-tree')) return '';
         if (cmd === 'gh' && args.join(' ').includes('repos/Jinn-Network/mono/pulls/84/reviews')) {
           return '{}';
         }
@@ -197,5 +371,170 @@ describe('production review session port', () => {
       .toEqual(expect.arrayContaining([
         '--cacheinfo', `100644,${BLOB},jinn-autopilot-review.json`,
       ]));
+  });
+
+  it.each(['label', 'ready', 'draft', 'comment'] as const)(
+    'accepts a lost %s response only after exact mutation readback',
+    async (mutation) => {
+      let labels = ['engine:review'];
+      let draft = mutation !== 'draft';
+      const comments: string[] = [];
+      const marker = '<!-- exact-human-marker -->';
+      const port = makeProductionReviewSessionPort({
+        environment: {
+          GH_TOKEN: 'selected-secret',
+          JINN_AUTOPILOT_SESSION_MANIFEST: '/attempt/manifest.json',
+        },
+        readManifest: () => manifest(),
+        runner: async (cmd, args) => {
+          if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+            return JSON.stringify({
+              number: 84,
+              state: 'OPEN',
+              headRefOid: HEAD,
+              headRefName: 'autopilot/42',
+              baseRefName: 'next',
+              isDraft: draft,
+              body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
+              author: { login: 'implementation-bot' },
+              labels: labels.map((name) => ({ name })),
+              closingIssues: [{ number: 42 }],
+              files: [],
+            });
+          }
+          if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'list') {
+            return JSON.stringify([{
+              number: 84,
+              headRefOid: HEAD,
+              headRefName: 'autopilot/42',
+              closingIssues: [{ number: 42 }],
+            }]);
+          }
+          if (cmd === 'git' && args.includes('ls-tree')) return '';
+          if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'edit') {
+            labels = [...labels, 'review:approved'];
+            throw new Error('accepted label response lost');
+          }
+          if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'ready') {
+            draft = args.includes('--undo');
+            throw new Error('accepted draft response lost');
+          }
+          if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'comment') {
+            comments.push(args.at(-1)!);
+            throw new Error('accepted comment response lost');
+          }
+          if (cmd === 'gh' && args[0] === 'api' && args[1]?.includes('/comments')) {
+            return JSON.stringify(comments.map((body) => ({ body })));
+          }
+          throw new Error(`unexpected ${cmd} ${args.join(' ')}`);
+        },
+      });
+
+      const operation = mutation === 'label'
+        ? port.setPullRequestLabel(84, HEAD, 'review:approved', true)
+        : mutation === 'ready'
+          ? port.setPullRequestDraft(84, HEAD, false)
+          : mutation === 'draft'
+            ? port.setPullRequestDraft(84, HEAD, true)
+            : port.ensureHumanComment(84, HEAD, marker, marker);
+      await expect(operation).resolves.toBeUndefined();
+    },
+  );
+
+  it('accepts a lost Project response only after exact status readback', async () => {
+    let status: 'Todo' | 'In Review' | 'Human' = 'Todo';
+    const port = makeProductionReviewSessionPort({
+      environment: {
+        GH_TOKEN: 'selected-secret',
+        JINN_AUTOPILOT_SESSION_MANIFEST: '/attempt/manifest.json',
+      },
+      readManifest: () => manifest(),
+      runner: async (cmd, args) => {
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+          return JSON.stringify({
+            number: 84,
+            state: 'OPEN',
+            headRefOid: HEAD,
+            headRefName: 'autopilot/42',
+            baseRefName: 'next',
+            isDraft: true,
+            body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
+            author: { login: 'implementation-bot' },
+            labels: [{ name: 'engine:review' }],
+            closingIssues: [{ number: 42 }],
+            files: [],
+          });
+        }
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'list') {
+          return JSON.stringify([{
+            number: 84,
+            headRefOid: HEAD,
+            headRefName: 'autopilot/42',
+            closingIssues: [{ number: 42 }],
+          }]);
+        }
+        if (cmd === 'git' && args.includes('ls-tree')) return '';
+        if (cmd === 'gh' && args[0] === 'api' && args[1] === 'graphql') {
+          return projectSnapshot(status);
+        }
+        if (cmd === 'gh' && args[0] === 'project' && args[1] === 'field-list') {
+          return projectFields();
+        }
+        if (cmd === 'gh' && args[0] === 'project' && args[1] === 'item-edit') {
+          status = 'In Review';
+          throw new Error('accepted Project response lost');
+        }
+        throw new Error(`unexpected ${cmd} ${args.join(' ')}`);
+      },
+    });
+
+    await expect(port.setProjectStatus(42, HEAD, 'In Review')).resolves.toBeUndefined();
+  });
+
+  it('does not accept a lost Human comment response from a copied marker in a different body', async () => {
+    const marker = '<!-- exact-human-marker -->';
+    const port = makeProductionReviewSessionPort({
+      environment: {
+        GH_TOKEN: 'selected-secret',
+        JINN_AUTOPILOT_SESSION_MANIFEST: '/attempt/manifest.json',
+      },
+      readManifest: () => manifest(),
+      runner: async (cmd, args) => {
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+          return JSON.stringify({
+            number: 84,
+            state: 'OPEN',
+            headRefOid: HEAD,
+            headRefName: 'autopilot/42',
+            baseRefName: 'next',
+            isDraft: true,
+            body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
+            author: { login: 'implementation-bot' },
+            labels: [{ name: 'engine:review' }],
+            closingIssues: [{ number: 42 }],
+            files: [],
+          });
+        }
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'list') {
+          return JSON.stringify([{
+            number: 84,
+            headRefOid: HEAD,
+            headRefName: 'autopilot/42',
+            closingIssues: [{ number: 42 }],
+          }]);
+        }
+        if (cmd === 'git' && args.includes('ls-tree')) return '';
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'comment') {
+          throw new Error('accepted comment response lost');
+        }
+        if (cmd === 'gh' && args[0] === 'api' && args[1]?.includes('/comments')) {
+          return JSON.stringify([{ body: `copied ${marker}` }]);
+        }
+        throw new Error(`unexpected ${cmd} ${args.join(' ')}`);
+      },
+    });
+
+    await expect(port.ensureHumanComment(84, HEAD, marker, `${marker}\n\nExact body.`))
+      .rejects.toThrow('accepted comment response lost');
   });
 });

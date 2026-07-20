@@ -305,6 +305,8 @@ function terminalVerdict(pr: PullRequestSnapshot) {
   const expectedMarker = formatAutomatedReviewMarker({
     generation: claim.generation,
     attempt: claim.attempt,
+    intent: claim.verdict.marker,
+    reviewer: claim.reviewer,
     head: claim.head,
     verdict: claim.verdict.state,
   });
@@ -312,6 +314,7 @@ function terminalVerdict(pr: PullRequestSnapshot) {
   const review = pr.reviews
     .filter((candidate) => (
       candidate.commitId === claim.head
+      && candidate.reviewer.toLowerCase() === claim.reviewer.toLowerCase()
       && candidate.state === nativeState
       && candidate.body.includes(expectedMarker)
     ))
@@ -346,15 +349,18 @@ function lifecyclePr(
   const decisive = latestDecisiveReview(pr);
   const reviewClaim = pr.reviewClaim?.record;
   const issueLabels = [...(issue.labels ?? [])];
-  const humanSource = issue.blockedOn === 'Human'
-    ? 'Project Blocked on: Human'
-    : issue.status === 'Human'
-      ? 'Project status: Human'
-      : pr.labels.includes('review:needs-human')
-        ? 'PR label: review:needs-human'
-        : issueLabels.includes('review:needs-human')
-          ? 'Issue label: review:needs-human'
-          : undefined;
+  const humanSource = reviewClaim?.state === 'human'
+    && reviewClaim.head === pr.headOid
+    ? 'Current-head Human review record'
+    : issue.blockedOn === 'Human'
+      ? 'Project Blocked on: Human'
+      : issue.status === 'Human'
+        ? 'Project status: Human'
+        : pr.labels.includes('review:needs-human')
+          ? 'PR label: review:needs-human'
+          : issueLabels.includes('review:needs-human')
+            ? 'Issue label: review:needs-human'
+            : undefined;
   const implementationActive = pr.branchClaim?.phase === 'implement'
     && pr.branchClaim.phaseComplete !== true;
   const reviewPhase = reviewClaim?.state === 'fixing'

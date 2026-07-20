@@ -7,6 +7,10 @@ import { join } from 'node:path';
 import type { CommandRunner } from '../dispatcher/issue-source.js';
 import { defaultRunner } from '../dispatcher/issue-source.js';
 import { REPO } from '../dispatcher/constants.js';
+import {
+  parseOwnedPrefixes,
+  touchesCodeOwnedPath,
+} from '../dispatcher/code-owned.js';
 import { fetchFieldIds } from '../dispatcher/field-cache.js';
 import { fetchProjectSnapshot } from '../dispatcher/project-snapshot.js';
 import type { AttemptManifest } from './attempt-workspace.js';
@@ -106,7 +110,7 @@ export function makeProductionReviewSessionPort(
     }
     return gitOid(oid);
   };
-  const parsePullRequest = (raw: string, manifest: AttemptManifest) => {
+  const parsePullRequest = (raw: string) => {
     let value: unknown;
     try {
       value = JSON.parse(raw) as unknown;
@@ -119,6 +123,7 @@ export function makeProductionReviewSessionPort(
     const record = value as Record<string, unknown>;
     if (
       typeof record.number !== 'number'
+      || typeof record.state !== 'string'
       || typeof record.headRefOid !== 'string'
       || typeof record.headRefName !== 'string'
       || typeof record.baseRefName !== 'string'
@@ -127,6 +132,8 @@ export function makeProductionReviewSessionPort(
       || typeof record.author !== 'object'
       || record.author === null
       || !Array.isArray(record.labels)
+      || !Array.isArray(record.closingIssues)
+      || !Array.isArray(record.files)
     ) {
       throw new Error('Malformed review PR readback');
     }
@@ -139,26 +146,159 @@ export function makeProductionReviewSessionPort(
       if (typeof name !== 'string') throw new Error('Malformed review PR labels');
       return name;
     });
+    const closingIssueNumbers = record.closingIssues.map((issue) => {
+      const number = typeof issue === 'object' && issue !== null
+        ? (issue as { number?: unknown }).number
+        : undefined;
+      if (typeof number !== 'number' || !Number.isSafeInteger(number) || number <= 0) {
+        throw new Error('Malformed review PR closing issues');
+      }
+      return number;
+    });
+    const files = record.files.map((file) => {
+      const path = typeof file === 'object' && file !== null
+        ? (file as { path?: unknown }).path
+        : undefined;
+      if (typeof path !== 'string' || path.length === 0) {
+        throw new Error('Malformed review PR files');
+      }
+      return path;
+    });
+    if (!['OPEN', 'CLOSED', 'MERGED'].includes(record.state)) {
+      throw new Error('Malformed review PR state');
+    }
     return {
       number: record.number,
-      issueNumber: manifest.issueNumber,
       head: gitOid(record.headRefOid),
       headRefName: record.headRefName,
       baseRefName: record.baseRefName,
+      open: record.state === 'OPEN',
       draft: record.isDraft,
       author,
       labels,
       body: record.body,
+      closingIssueNumbers,
+      files,
     };
+  };
+  const parseOpenPullRequests = (raw: string): Array<{
+    readonly number: number;
+    readonly head: GitOid;
+    readonly branch: string;
+    readonly closingIssueNumbers: readonly number[];
+  }> => {
+    let value: unknown;
+    try {
+      value = JSON.parse(raw) as unknown;
+    } catch {
+      throw new Error('Malformed open review PR mapping readback');
+    }
+    if (!Array.isArray(value)) throw new Error('Malformed open review PR mapping readback');
+    return value.map((entry) => {
+      if (typeof entry !== 'object' || entry === null) {
+        throw new Error('Malformed open review PR mapping readback');
+      }
+      const record = entry as Record<string, unknown>;
+      if (
+        typeof record.number !== 'number'
+        || typeof record.headRefOid !== 'string'
+        || typeof record.headRefName !== 'string'
+        || !Array.isArray(record.closingIssues)
+      ) {
+        throw new Error('Malformed open review PR mapping readback');
+      }
+      const closingIssueNumbers = record.closingIssues.map((issue) => {
+        const number = typeof issue === 'object' && issue !== null
+          ? (issue as { number?: unknown }).number
+          : undefined;
+        if (typeof number !== 'number' || !Number.isSafeInteger(number) || number <= 0) {
+          throw new Error('Malformed open review PR mapping readback');
+        }
+        return number;
+      });
+      return {
+        number: record.number,
+        head: gitOid(record.headRefOid),
+        branch: record.headRefName,
+        closingIssueNumbers,
+      };
+    });
   };
   const readPullRequest = async (
     manifest: AttemptManifest,
     prNumber: number,
-  ) => parsePullRequest(await run(manifest, 'gh', [
-    'pr', 'view', String(prNumber),
-    '--repo', REPO,
-    '--json', 'number,headRefName,baseRefName,headRefOid,isDraft,labels,body,author',
-  ]), manifest);
+  ) => {
+    const pullRequest = parsePullRequest(await run(manifest, 'gh', [
+      'pr', 'view', String(prNumber),
+      '--repo', REPO,
+      '--json',
+      'number,state,headRefName,baseRefName,headRefOid,isDraft,labels,body,author,closingIssues,files',
+    ]));
+    const markerMatches = [...pullRequest.body.matchAll(
+      /<!-- jinn-autopilot:v2 issue=([1-9][0-9]*) branch=([^ >]+) -->/g,
+    )];
+    const markerIssue = markerMatches.length === 1
+      ? Number(markerMatches[0]![1])
+      : undefined;
+    const markerBranch = markerMatches.length === 1
+      ? markerMatches[0]![2]
+      : undefined;
+    const issueNumber = markerIssue
+      ?? (pullRequest.closingIssueNumbers.length === 1
+        ? pullRequest.closingIssueNumbers[0]!
+        : manifest.issueNumber);
+    const openPullRequests = parseOpenPullRequests(await run(manifest, 'gh', [
+      'pr', 'list', '--repo', REPO, '--state', 'open', '--limit', '1000',
+      '--json', 'number,headRefName,headRefOid,closingIssues',
+    ]));
+    const linked = openPullRequests.filter((candidate) => (
+      candidate.branch === pullRequest.headRefName
+      || candidate.closingIssueNumbers.includes(issueNumber)
+    ));
+    const mappingProblem = (
+      markerMatches.length !== 1
+      || markerIssue !== issueNumber
+      || markerBranch !== pullRequest.headRefName
+      || pullRequest.closingIssueNumbers.length !== 1
+      || pullRequest.closingIssueNumbers[0] !== issueNumber
+      || linked.length !== 1
+      || linked[0]?.number !== pullRequest.number
+      || linked[0]?.head !== pullRequest.head
+    )
+      ? 'The current PR does not have a unique open PR, issue, and branch mapping.'
+      : undefined;
+    const treePaths = (await runGit(manifest, [
+      'ls-tree', '-r', '--name-only', pullRequest.head,
+    ])).trim().split('\n').filter(Boolean);
+    const codeownersPath = [
+      '.github/CODEOWNERS',
+      'CODEOWNERS',
+      'docs/CODEOWNERS',
+    ].find((path) => treePaths.includes(path));
+    const codeownersText = codeownersPath === undefined
+      ? ''
+      : await runGit(manifest, ['show', `${pullRequest.head}:${codeownersPath}`]);
+    const approvalPolicy = touchesCodeOwnedPath(
+      [...pullRequest.files],
+      parseOwnedPrefixes(codeownersText),
+    )
+      ? 'human-codeowner' as const
+      : 'approve-eligible' as const;
+    return {
+      number: pullRequest.number,
+      issueNumber,
+      open: pullRequest.open,
+      head: pullRequest.head,
+      headRefName: pullRequest.headRefName,
+      baseRefName: pullRequest.baseRefName,
+      draft: pullRequest.draft,
+      author: pullRequest.author,
+      labels: pullRequest.labels,
+      body: pullRequest.body,
+      approvalPolicy,
+      ...(mappingProblem === undefined ? {} : { mappingProblem }),
+    };
+  };
   const requireHead = async (
     manifest: AttemptManifest,
     prNumber: number,
@@ -180,6 +320,56 @@ export function makeProductionReviewSessionPort(
   const removeMetadata = options.removeMetadataFile ?? ((path: string) => rmSync(path, {
     force: true,
   }));
+  const readCommentBodies = async (
+    manifest: AttemptManifest,
+    prNumber: number,
+  ): Promise<readonly string[]> => {
+    const raw = await run(manifest, 'gh', [
+      'api', `repos/${REPO}/issues/${prNumber}/comments`,
+      '--paginate', '--slurp',
+    ]);
+    let value: unknown;
+    try {
+      value = JSON.parse(raw) as unknown;
+    } catch {
+      throw new Error('Malformed review Human comment readback');
+    }
+    if (!Array.isArray(value)) throw new Error('Malformed review Human comment readback');
+    const comments = value.every((entry) => Array.isArray(entry))
+      ? value.flat()
+      : value;
+    return comments.map((comment) => {
+      const body = typeof comment === 'object' && comment !== null
+        ? (comment as { body?: unknown }).body
+        : undefined;
+      if (typeof body !== 'string') {
+        throw new Error('Malformed review Human comment readback');
+      }
+      return body;
+    });
+  };
+  const mutateWithExactReadback = async (
+    mutate: () => Promise<unknown>,
+    confirmed: () => Promise<boolean>,
+    ambiguityMessage: string,
+  ): Promise<void> => {
+    let mutationError: unknown;
+    try {
+      await mutate();
+    } catch (error) {
+      mutationError = error;
+    }
+    let exact = false;
+    try {
+      exact = await confirmed();
+    } catch (readbackError) {
+      if (mutationError !== undefined) throw mutationError;
+      throw readbackError;
+    }
+    if (exact) return;
+    if (mutationError !== undefined) throw mutationError;
+    throw new Error(ambiguityMessage);
+  };
 
   return {
     readManifest: options.readManifest ?? readAttemptManifest,
@@ -347,14 +537,16 @@ export function makeProductionReviewSessionPort(
       const manifest = currentManifest();
       const before = await requireHead(manifest, prNumber, expectedHead);
       if (before.labels.includes(label) === present) return;
-      await run(manifest, 'gh', [
-        'pr', 'edit', String(prNumber), '--repo', REPO,
-        present ? '--add-label' : '--remove-label', label,
-      ]);
-      const after = await requireHead(manifest, prNumber, expectedHead);
-      if (after.labels.includes(label) !== present) {
-        throw new Error('Review label mutation was ambiguous');
-      }
+      await mutateWithExactReadback(
+        () => run(manifest, 'gh', [
+          'pr', 'edit', String(prNumber), '--repo', REPO,
+          present ? '--add-label' : '--remove-label', label,
+        ]),
+        async () => (
+          await requireHead(manifest, prNumber, expectedHead)
+        ).labels.includes(label) === present,
+        'Review label mutation was ambiguous',
+      );
     },
 
     async setProjectStatus(issueNumber, expectedHead, status) {
@@ -373,32 +565,39 @@ export function makeProductionReviewSessionPort(
         throw new Error('Review Project mutation stopped because Human is dominant');
       }
       const fields = await fetchFieldIds(secureRunner);
-      await run(manifest, 'gh', [
-        'project', 'item-edit',
-        '--id', item.id,
-        '--project-id', fields.projectId,
-        '--field-id', fields.status.fieldId,
-        '--single-select-option-id', fields.status.options[status],
-      ]);
-      await requireHead(manifest, manifest.prNumber!, expectedHead);
-      const after = await fetchProjectSnapshot(secureRunner);
-      const updated = after.items.find((candidate) =>
-        candidate.contentType === 'Issue' && candidate.number === issueNumber);
-      if (updated?.status !== status) {
-        throw new Error('Review Project projection was ambiguous');
-      }
+      await mutateWithExactReadback(
+        () => run(manifest, 'gh', [
+          'project', 'item-edit',
+          '--id', item.id,
+          '--project-id', fields.projectId,
+          '--field-id', fields.status.fieldId,
+          '--single-select-option-id', fields.status.options[status],
+        ]),
+        async () => {
+          await requireHead(manifest, manifest.prNumber!, expectedHead);
+          const after = await fetchProjectSnapshot(secureRunner);
+          return after.items.find((candidate) =>
+            candidate.contentType === 'Issue' && candidate.number === issueNumber
+          )?.status === status;
+        },
+        'Review Project projection was ambiguous',
+      );
     },
 
     async setPullRequestDraft(prNumber, expectedHead, draft) {
       const manifest = currentManifest();
       const before = await requireHead(manifest, prNumber, expectedHead);
       if (before.draft === draft) return;
-      await run(manifest, 'gh', [
-        'pr', 'ready', String(prNumber), '--repo', REPO,
-        ...(draft ? ['--undo'] : []),
-      ]);
-      const after = await requireHead(manifest, prNumber, expectedHead);
-      if (after.draft !== draft) throw new Error('Review draft mutation was ambiguous');
+      await mutateWithExactReadback(
+        () => run(manifest, 'gh', [
+          'pr', 'ready', String(prNumber), '--repo', REPO,
+          ...(draft ? ['--undo'] : []),
+        ]),
+        async () => (
+          await requireHead(manifest, prNumber, expectedHead)
+        ).draft === draft,
+        'Review draft mutation was ambiguous',
+      );
     },
 
     async readLocalFix(manifest) {
@@ -463,25 +662,26 @@ export function makeProductionReviewSessionPort(
     async hasHumanComment(prNumber, expectedHead, marker) {
       const manifest = currentManifest();
       await requireHead(manifest, prNumber, expectedHead);
-      const bodies = await run(manifest, 'gh', [
-        'api', `repos/${REPO}/issues/${prNumber}/comments`,
-        '--paginate', '--jq', '.[].body',
-      ]);
-      return bodies.includes(marker);
+      return (await readCommentBodies(manifest, prNumber))
+        .some((body) => body.includes(marker));
     },
 
     async ensureHumanComment(prNumber, expectedHead, marker, body) {
       const manifest = currentManifest();
+      if (!body.includes(marker)) {
+        throw new Error('Review Human comment body is missing its exact marker');
+      }
       await requireHead(manifest, prNumber, expectedHead);
-      await run(manifest, 'gh', [
-        'pr', 'comment', String(prNumber), '--repo', REPO, '--body', body,
-      ]);
-      await requireHead(manifest, prNumber, expectedHead);
-      const bodies = await run(manifest, 'gh', [
-        'api', `repos/${REPO}/issues/${prNumber}/comments`,
-        '--paginate', '--jq', '.[].body',
-      ]);
-      if (!bodies.includes(marker)) throw new Error('Review Human comment was ambiguous');
+      await mutateWithExactReadback(
+        () => run(manifest, 'gh', [
+          'pr', 'comment', String(prNumber), '--repo', REPO, '--body', body,
+        ]),
+        async () => {
+          await requireHead(manifest, prNumber, expectedHead);
+          return (await readCommentBodies(manifest, prNumber)).includes(body);
+        },
+        'Review Human comment was ambiguous',
+      );
     },
 
     nextMarker: randomUUID,
