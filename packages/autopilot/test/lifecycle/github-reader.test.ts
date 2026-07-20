@@ -41,8 +41,10 @@ function graphQlPr(input: {
   readonly comments?: readonly string[];
   readonly headRefName?: string;
   readonly historyTruncated?: boolean;
+  readonly commentsTruncated?: boolean;
   readonly labels?: readonly string[];
   readonly message?: string;
+  readonly closingIssueNumber?: number;
 }) {
   return {
     number: input.number,
@@ -60,7 +62,7 @@ function graphQlPr(input: {
     },
     closingIssuesReferences: {
       pageInfo: { hasNextPage: false },
-      nodes: [{ number: input.number === 101 ? 42 : 41 }],
+      nodes: [{ number: input.closingIssueNumber ?? (input.number === 101 ? 42 : 41) }],
     },
     mergeable: 'MERGEABLE',
     mergeStateStatus: 'BLOCKED',
@@ -81,7 +83,7 @@ function graphQlPr(input: {
       nodes: [],
     },
     comments: {
-      pageInfo: { hasPreviousPage: false },
+      pageInfo: { hasPreviousPage: input.commentsTruncated ?? false },
       nodes: (input.comments ?? []).map((body, index) => ({
         body,
         createdAt: `2026-07-20T09:0${index}:00.000Z`,
@@ -491,5 +493,126 @@ describe('GhLifecycleReader', () => {
 
     expect(claims[0]?.claimTrailers).toContain('Jinn-Autopilot-Issue: 42');
     expect(claims[0]?.claimTrailers).not.toContain('Jinn-Autopilot-Issue: 99');
+  });
+
+  function pageOf(...nodes: ReturnType<typeof graphQlPr>[]): CommandRunner {
+    return async (_command, args) => {
+      const query = args.find((arg) => arg.startsWith('query=')) ?? '';
+      if (query.includes('ref(qualifiedName')) {
+        return JSON.stringify({ data: { repository: { ref: null } } });
+      }
+      return JSON.stringify({
+        data: {
+          repository: {
+            pullRequests: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes,
+            },
+          },
+        },
+      });
+    };
+  }
+
+  it('degrades a PR with an undecodable Human marker instead of failing the whole page', async () => {
+    const hostile = graphQlPr({
+      number: 201,
+      state: 'OPEN',
+      head: 'c'.repeat(40),
+      headRefName: 'feature/201',
+      comments: [
+        '<!-- jinn-autopilot-human:v2 pr=201 phase=awaiting-review code=review-escalation -->\n\n',
+      ],
+    });
+    const healthy = graphQlPr({
+      number: 202,
+      state: 'OPEN',
+      head: 'd'.repeat(40),
+      headRefName: 'feature/202',
+    });
+
+    const page = await new GhLifecycleReader(pageOf(hostile, healthy)).readPullRequests(null);
+
+    expect(page.nodes.map((pr) => pr.number)).toEqual([201, 202]);
+    const degraded = page.nodes[0];
+    expect(degraded?.humanReason).toMatchObject({
+      phase: 'awaiting-review',
+      code: 'review-escalation',
+    });
+    expect(degraded?.humanReason?.detail).toContain('undecodable structured Human evidence');
+    expect(degraded?.branchClaimTrailers).toBeNull();
+    expect(degraded?.reviewClaim).toBeNull();
+    expect(page.nodes[1]?.humanReason).toBeNull();
+  });
+
+  it('degrades a PR whose Human marker pr= field contradicts its own PR number', async () => {
+    const hostile = graphQlPr({
+      number: 203,
+      state: 'OPEN',
+      head: 'e'.repeat(40),
+      headRefName: 'feature/203',
+      comments: [
+        '<!-- jinn-autopilot-human:v2 pr=999 phase=awaiting-review code=review-escalation -->'
+        + '\n\nA real detail sentence.',
+      ],
+    });
+    const healthy = graphQlPr({
+      number: 204,
+      state: 'OPEN',
+      head: 'f'.repeat(40),
+      headRefName: 'feature/204',
+    });
+
+    const page = await new GhLifecycleReader(pageOf(hostile, healthy)).readPullRequests(null);
+
+    expect(page.nodes.map((pr) => pr.number)).toEqual([203, 204]);
+    expect(page.nodes[0]?.humanReason?.detail).toContain('contradictory structured Human evidence');
+    expect(page.nodes[1]?.humanReason).toBeNull();
+  });
+
+  it('degrades a PR whose comments were truncated by the first-page cap', async () => {
+    const hostile = graphQlPr({
+      number: 205,
+      state: 'OPEN',
+      head: '1'.repeat(40),
+      headRefName: 'feature/205',
+      commentsTruncated: true,
+    });
+    const healthy = graphQlPr({
+      number: 206,
+      state: 'OPEN',
+      head: '2'.repeat(40),
+      headRefName: 'feature/206',
+    });
+
+    const page = await new GhLifecycleReader(pageOf(hostile, healthy)).readPullRequests(null);
+
+    expect(page.nodes.map((pr) => pr.number)).toEqual([205, 206]);
+    expect(page.nodes[0]?.humanReason?.detail).toContain('comments were truncated');
+    expect(page.nodes[0]?.checks).toEqual([]);
+    expect(page.nodes[0]?.reviews).toEqual([]);
+    expect(page.nodes[1]?.humanReason).toBeNull();
+  });
+
+  it('still fails the whole page on errors unrelated to per-PR evidence decoding', async () => {
+    const run: CommandRunner = async (_command, args) => {
+      const query = args.find((arg) => arg.startsWith('query=')) ?? '';
+      if (query.includes('ref(qualifiedName')) {
+        throw new Error('transient GitHub network failure');
+      }
+      return JSON.stringify({
+        data: {
+          repository: {
+            pullRequests: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: [graphQlPr({ number: 301, state: 'OPEN', head: '3'.repeat(40) })],
+            },
+          },
+        },
+      });
+    };
+
+    await expect(new GhLifecycleReader(run).readPullRequests(null))
+      .rejects.toThrow(/transient GitHub network failure/);
   });
 });
