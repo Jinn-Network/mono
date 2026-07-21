@@ -243,6 +243,8 @@ describe('production review session port', () => {
       readManifest: () => manifest(),
       runner: async (cmd, args) => {
         if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+          expect(args.at(-1)).toContain('closingIssuesReferences');
+          expect(args.at(-1)).not.toMatch(/(?:^|,)closingIssues(?:,|$)/);
           return JSON.stringify({
             number: 84,
             state: 'OPEN',
@@ -254,16 +256,18 @@ describe('production review session port', () => {
             body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
             author: { login: 'implementation-bot' },
             labels: [{ name: 'engine:review' }],
-            closingIssues: [{ number: 42 }],
+            closingIssuesReferences: [{ number: 42 }],
             files: [{ path: 'client/src/dashboard/spa/src/pages/Home.tsx' }],
           });
         }
         if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'list') {
+          expect(args.at(-1)).toContain('closingIssuesReferences');
+          expect(args.at(-1)).not.toMatch(/(?:^|,)closingIssues(?:,|$)/);
           return JSON.stringify([{
             number: 84,
             headRefOid: HEAD,
             headRefName: 'autopilot/42',
-            closingIssues: [{ number: 42 }],
+            closingIssuesReferences: [{ number: 42 }],
           }]);
         }
         if (cmd === 'git' && args.includes('ls-tree')) {
@@ -310,7 +314,7 @@ describe('production review session port', () => {
             body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
             author: { login: 'implementation-bot' },
             labels: [{ name: 'engine:review' }],
-            closingIssues: [{ number: 42 }],
+            closingIssuesReferences: [{ number: 42 }],
             files: [{ path: 'client/src/dashboard/spa/src/pages/Home.tsx' }],
           });
         }
@@ -319,7 +323,7 @@ describe('production review session port', () => {
             number: 84,
             headRefOid: HEAD,
             headRefName: 'autopilot/42',
-            closingIssues: [{ number: 42 }],
+            closingIssuesReferences: [{ number: 42 }],
           }]);
         }
         if (cmd === 'git' && args.includes('ls-tree')) {
@@ -360,7 +364,7 @@ describe('production review session port', () => {
             body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
             author: { login: 'implementation-bot' },
             labels: [{ name: 'engine:review' }],
-            closingIssues: [{ number: 42 }],
+            closingIssuesReferences: [{ number: 42 }],
             files: [],
           });
         }
@@ -370,13 +374,13 @@ describe('production review session port', () => {
               number: 84,
               headRefOid: HEAD,
               headRefName: 'autopilot/42',
-              closingIssues: [{ number: 42 }],
+              closingIssuesReferences: [{ number: 42 }],
             },
             {
               number: 85,
               headRefOid: '9'.repeat(40),
               headRefName: 'feature/duplicate-42',
-              closingIssues: [{ number: 42 }],
+              closingIssuesReferences: [{ number: 42 }],
             },
           ]);
         }
@@ -421,7 +425,7 @@ describe('production review session port', () => {
             body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
             author: { login: 'implementation-bot' },
             labels: [{ name: 'engine:review' }],
-            closingIssues: [{ number: 42 }],
+            closingIssuesReferences: [{ number: 42 }],
             files: [],
           });
         }
@@ -430,7 +434,7 @@ describe('production review session port', () => {
             number: 84,
             headRefOid: HEAD,
             headRefName: 'autopilot/42',
-            closingIssues: [{ number: 42 }],
+            closingIssuesReferences: [{ number: 42 }],
           }]);
         }
         if (cmd === 'git' && args.includes('ls-tree')) return '';
@@ -496,7 +500,7 @@ describe('production review session port', () => {
             body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
             author: { login: 'implementation-bot' },
             labels: [{ name: 'engine:review' }],
-            closingIssues: [{ number: 42 }],
+            closingIssuesReferences: [{ number: 42 }],
             files: [],
           });
         }
@@ -505,7 +509,7 @@ describe('production review session port', () => {
             number: 84,
             headRefOid: HEAD,
             headRefName: 'autopilot/42',
-            closingIssues: [{ number: 42 }],
+            closingIssuesReferences: [{ number: 42 }],
           }]);
         }
         if (cmd === 'git' && args.includes('ls-tree')) return '';
@@ -648,7 +652,7 @@ describe('production review session port', () => {
               body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
               author: { login: 'implementation-bot' },
               labels: labels.map((name) => ({ name })),
-              closingIssues: [{ number: 42 }],
+              closingIssuesReferences: [{ number: 42 }],
               files: [],
             });
           }
@@ -657,7 +661,7 @@ describe('production review session port', () => {
               number: 84,
               headRefOid: HEAD,
               headRefName: 'autopilot/42',
-              closingIssues: [{ number: 42 }],
+              closingIssuesReferences: [{ number: 42 }],
             }]);
           }
           if (cmd === 'git' && args.includes('ls-tree')) return '';
@@ -747,7 +751,7 @@ describe('production review session port', () => {
             body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
             author: { login: 'implementation-bot' },
             labels: [{ name: 'engine:review' }],
-            closingIssues: [{ number: 42 }],
+            closingIssuesReferences: [{ number: 42 }],
             files: [],
           });
         }
@@ -756,7 +760,7 @@ describe('production review session port', () => {
             number: 84,
             headRefOid: HEAD,
             headRefName: 'autopilot/42',
-            closingIssues: [{ number: 42 }],
+            closingIssuesReferences: [{ number: 42 }],
           }]);
         }
         if (cmd === 'git' && args.includes('ls-tree')) return '';
@@ -798,7 +802,7 @@ describe('production review session port', () => {
             body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
             author: { login: 'implementation-bot' },
             labels: [{ name: 'engine:review' }],
-            closingIssues: [{ number: 42 }],
+            closingIssuesReferences: [{ number: 42 }],
             files: [],
           });
         }
@@ -807,7 +811,7 @@ describe('production review session port', () => {
             number: 84,
             headRefOid: HEAD,
             headRefName: 'autopilot/42',
-            closingIssues: [{ number: 42 }],
+            closingIssuesReferences: [{ number: 42 }],
           }]);
         }
         if (cmd === 'git' && args.includes('ls-tree')) return '';
@@ -887,7 +891,7 @@ describe('production review session port', () => {
             body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
             author: { login: 'implementation-bot' },
             labels: [{ name: 'engine:review' }],
-            closingIssues: [{ number: 42 }],
+            closingIssuesReferences: [{ number: 42 }],
             files: [],
           });
         }
@@ -896,7 +900,7 @@ describe('production review session port', () => {
             number: 84,
             headRefOid: HEAD,
             headRefName: 'autopilot/42',
-            closingIssues: [{ number: 42 }],
+            closingIssuesReferences: [{ number: 42 }],
           }]);
         }
         if (cmd === 'gh' && args[0] === 'api' && args[1] === 'graphql') {
@@ -966,7 +970,7 @@ describe('production review session port', () => {
             body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
             author: { login: 'implementation-bot' },
             labels: [{ name: 'engine:review' }],
-            closingIssues: [{ number: 42 }],
+            closingIssuesReferences: [{ number: 42 }],
             files: [],
           });
         }
@@ -975,7 +979,7 @@ describe('production review session port', () => {
             number: 84,
             headRefOid: HEAD,
             headRefName: 'autopilot/42',
-            closingIssues: [{ number: 42 }],
+            closingIssuesReferences: [{ number: 42 }],
           }]);
         }
         if (cmd === 'gh' && args[0] === 'api' && args[1]?.endsWith('/reviews')) {
@@ -1022,7 +1026,7 @@ describe('production review session port', () => {
             body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
             author: { login: 'implementation-bot' },
             labels: [{ name: 'engine:review' }],
-            closingIssues: [{ number: 42 }],
+            closingIssuesReferences: [{ number: 42 }],
             files: [],
           });
         }
@@ -1031,7 +1035,7 @@ describe('production review session port', () => {
             number: 84,
             headRefOid: HEAD,
             headRefName: 'autopilot/42',
-            closingIssues: [{ number: 42 }],
+            closingIssuesReferences: [{ number: 42 }],
           }]);
         }
         if (cmd === 'gh' && args[0] === 'api' && args[1]?.includes('/comments')) {

@@ -150,7 +150,7 @@ export function makeProductionReviewSessionPort(
       || typeof record.author !== 'object'
       || record.author === null
       || !Array.isArray(record.labels)
-      || !Array.isArray(record.closingIssues)
+      || !Array.isArray(record.closingIssuesReferences)
       || !Array.isArray(record.files)
     ) {
       throw new Error('Malformed review PR readback');
@@ -164,7 +164,7 @@ export function makeProductionReviewSessionPort(
       if (typeof name !== 'string') throw new Error('Malformed review PR labels');
       return name;
     });
-    const closingIssueNumbers = record.closingIssues.map((issue) => {
+    const closingIssueNumbers = record.closingIssuesReferences.map((issue) => {
       const number = typeof issue === 'object' && issue !== null
         ? (issue as { number?: unknown }).number
         : undefined;
@@ -222,11 +222,11 @@ export function makeProductionReviewSessionPort(
         typeof record.number !== 'number'
         || typeof record.headRefOid !== 'string'
         || typeof record.headRefName !== 'string'
-        || !Array.isArray(record.closingIssues)
+        || !Array.isArray(record.closingIssuesReferences)
       ) {
         throw new Error('Malformed open review PR mapping readback');
       }
-      const closingIssueNumbers = record.closingIssues.map((issue) => {
+      const closingIssueNumbers = record.closingIssuesReferences.map((issue) => {
         const number = typeof issue === 'object' && issue !== null
           ? (issue as { number?: unknown }).number
           : undefined;
@@ -251,7 +251,7 @@ export function makeProductionReviewSessionPort(
       'pr', 'view', String(prNumber),
       '--repo', REPO,
       '--json',
-      'number,state,headRefName,baseRefName,headRefOid,baseRefOid,isDraft,labels,body,author,closingIssues,files',
+      'number,state,headRefName,baseRefName,headRefOid,baseRefOid,isDraft,labels,body,author,closingIssuesReferences,files',
     ]));
     const markerMatches = [...pullRequest.body.matchAll(
       /<!-- jinn-autopilot:v2 issue=([1-9][0-9]*) branch=([^ >]+) -->/g,
@@ -268,7 +268,7 @@ export function makeProductionReviewSessionPort(
         : manifest.issueNumber);
     const openPullRequests = parseOpenPullRequests(await run(manifest, 'gh', [
       'pr', 'list', '--repo', REPO, '--state', 'open', '--limit', '1000',
-      '--json', 'number,headRefName,headRefOid,closingIssues',
+      '--json', 'number,headRefName,headRefOid,closingIssuesReferences',
     ]));
     const linked = openPullRequests.filter((candidate) => (
       candidate.branch === pullRequest.headRefName
