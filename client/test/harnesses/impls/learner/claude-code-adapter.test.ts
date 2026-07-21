@@ -24,7 +24,9 @@ type FakeClaudeChild = EventEmitter & {
   kill: ReturnType<typeof vi.fn>;
 };
 
-function fakeClaudeChild(mode: 'result-then-hang' | 'result-then-exit' | 'crash-no-result'): FakeClaudeChild {
+function fakeClaudeChild(
+  mode: 'result-then-hang' | 'result-then-exit' | 'crash-no-result' | 'result-then-late-output',
+): FakeClaudeChild {
   const child = new EventEmitter() as FakeClaudeChild;
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
@@ -43,6 +45,17 @@ function fakeClaudeChild(mode: 'result-then-hang' | 'result-then-exit' | 'crash-
     child.stdout.emit('data', Buffer.from('{"type":"result","subtype":"success"}\n'));
     if (mode === 'result-then-exit') {
       child.emit('exit', 0, null);
+    }
+    if (mode === 'result-then-late-output') {
+      // The terminal result settles the session and closeLogs() ends the log
+      // streams. A reaped-but-not-yet-dead child then emits more bytes — the
+      // real-world trigger for the "write after end" crash. `.end()` sets
+      // writableEnded synchronously, so one turn of delay suffices.
+      setImmediate(() => {
+        child.stdout.emit('data', Buffer.from('{"type":"assistant","message":{"content":[{"type":"text","text":"late"}]}}\n'));
+        child.stderr.emit('data', Buffer.from('late stderr after close\n'));
+        child.emit('exit', 0, null);
+      });
     }
     // 'result-then-hang': intentionally NEVER emits exit — reproduces #883
     // (claude emits its terminal result but the process lingers, held open by
@@ -137,6 +150,33 @@ describe('ClaudeCodeHarnessAdapter — completion + subprocess reaping (#883)', 
         adapter.runTask(runInputs(workingDir, implStateDir, new AbortController().signal), learnerPluginRoot),
       ).resolves.toBeUndefined();
     } finally {
+      rmSync(workingDir, { recursive: true, force: true });
+      rmSync(implStateDir, { recursive: true, force: true });
+    }
+  }, 8000);
+
+  it('does not crash with "write after end" when the child emits output after the terminal result', async () => {
+    // Regression: the stdout/stderr 'data' handlers wrote to the log streams
+    // unconditionally, but closeLogs() ends those streams on settle. A child
+    // that emits bytes after the terminal result (common once a mid-session
+    // tool-result envelope trips onResult early) then hit ERR_STREAM_WRITE_
+    // AFTER_END, surfacing as an engine "tick: process failed: write after end".
+    const spawnFn = vi.fn(() => fakeClaudeChild('result-then-late-output'));
+    const workingDir = mkdtempSync(join(tmpdir(), 'jinn-claude-late-work-'));
+    const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-claude-late-state-'));
+    const uncaught: Error[] = [];
+    const onUncaught = (e: Error) => { uncaught.push(e); };
+    process.on('uncaughtException', onUncaught);
+    try {
+      const adapter = makeAdapter(spawnFn);
+      await expect(
+        adapter.runTask(runInputs(workingDir, implStateDir, new AbortController().signal), learnerPluginRoot),
+      ).resolves.toBeUndefined();
+      // Let the post-result emissions flush through the (now-ended) streams.
+      await new Promise((r) => setTimeout(r, 50));
+      expect(uncaught.map((e) => e.message)).not.toContain('write after end');
+    } finally {
+      process.off('uncaughtException', onUncaught);
       rmSync(workingDir, { recursive: true, force: true });
       rmSync(implStateDir, { recursive: true, force: true });
     }
