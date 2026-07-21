@@ -158,12 +158,16 @@ export {
 export {
   DEFAULT_CAPTURES_DIR,
   DEFAULT_DISTILL_CAPTURE_LIMIT,
+  DEFAULT_EPISODES_DIR,
   DEFAULT_SKILLS_INSTALL_DIR,
   coveredSessionIds,
+  episodeToCapturedTask,
   localSkillProvenance,
   loadRecentCaptures,
+  loadRecentDistillSources,
   provenanceLabels,
   stagingDirFor,
+  type DistillSourceOptions,
 } from './distill-captures.js';
 
 export {

@@ -767,7 +767,8 @@ def main() -> None:
         assert "captured" in parked_summary.lower()
         assert "contribution recorded" in parked_summary.lower(), parked_summary
         assert SOURCE_REF in parked_summary, parked_summary
-        assert list(CAPTURES_DIR.glob("*.json")), "local distillation tee missing"
+        assert list(EPISODES_DIR.glob("*.episode.json")), "canonical episode missing"
+        assert not list(CAPTURES_DIR.glob("*.json")), "retired CapturedTask tee wrote a file"
         write_local_skill_provenance("stage1-target-task")
         # (7) Sharing off: only /graphql search traffic (never a publish-
         # shaped POST) happened during this session.

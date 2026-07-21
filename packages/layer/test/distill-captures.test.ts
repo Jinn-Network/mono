@@ -6,11 +6,14 @@ import type { CapturedTask } from '../src/capture.js';
 import { buildSkillMarkdown, type SkillPackage } from '../src/skill-package.js';
 import {
   coveredSessionIds,
+  episodeToCapturedTask,
   localSkillProvenance,
   loadRecentCaptures,
+  loadRecentDistillSources,
   provenanceLabels,
   stagingDirFor,
 } from '../src/distill-captures.js';
+import type { EpisodeV1 } from '@jinn-network/plugin';
 
 function capture(sessionId: string, capturedAt: string, summary = sessionId): CapturedTask {
   return {
@@ -36,6 +39,44 @@ function capture(sessionId: string, capturedAt: string, summary = sessionId): Ca
 
 function writeCapture(dir: string, name: string, task: CapturedTask): void {
   writeFileSync(join(dir, name), JSON.stringify(task, null, 2));
+}
+
+function episode(
+  episodeId: string,
+  sessionId: string,
+  capturedAt: string,
+  summary = sessionId,
+): EpisodeV1 {
+  return {
+    schemaVersion: 'jinn.episode.v1',
+    episodeId,
+    retrievalVisible: false,
+    session: { sessionId, capturedAt, kind: 'user' },
+    origin: { writer: 'hermes-agent', build: '1.0.0' },
+    task: { summary, distributionTags: [] },
+    trajectory: [{
+      spanId: `${episodeId}-span`,
+      parentSpanId: null,
+      kind: 'jinn.tool_call',
+      name: 'tool:terminal',
+      startTimeUnixNano: '1752000000000000000',
+      endTimeUnixNano: '1752000001000000000',
+      attributes: { 'tool.args': { command: 'yarn test' } },
+      redactedKeys: [],
+      events: [{ timeUnixNano: '1752000000500000000', name: 'stdout' }],
+      status: { code: 'OK' },
+    }],
+    environment: {
+      harness: { name: 'hermes-agent', version: '1.0.0' },
+      model: 'test-model',
+      tools: ['terminal'],
+      skillsLoadout: ['systematic-debugging'],
+    },
+    outcome: { status: 'completed', verificationStrength: 'tests-passed' },
+    cost: { durationMs: 1000 },
+    retention: { policy: 'local-private' },
+    provenance: 'contributed',
+  };
 }
 
 function skill(name: string, provenance: string[]): SkillPackage {
@@ -68,6 +109,62 @@ function skill(name: string, provenance: string[]): SkillPackage {
 }
 
 describe('distill capture source helpers', () => {
+  it('projects a canonical episode into the existing local-distiller input without losing trace facts', () => {
+    const projected = episodeToCapturedTask(episode(
+      'episode-1',
+      'session-1',
+      '2026-07-09T00:00:00.000Z',
+      'canonical work',
+    ));
+
+    expect(projected).toMatchObject({
+      session: { sessionId: 'session-1' },
+      task: { summary: 'canonical work', distributionTags: ['hermes-agent'] },
+      environment: { skillsLoadout: ['systematic-debugging'] },
+      outcome: { verifiabilityTier: 'tests-passed' },
+    });
+    expect(projected.steps[0]).toMatchObject({
+      kind: 'jinn.tool_call',
+      events: [{ name: 'stdout' }],
+      status: { code: 'OK' },
+    });
+  });
+
+  it('loads episodes first, keeps legacy reads, dedupes by session with canonical precedence, then limits globally', async () => {
+    const episodesDir = mkdtempSync(join(tmpdir(), 'distill-episodes-'));
+    const legacyCapturesDir = mkdtempSync(join(tmpdir(), 'distill-legacy-captures-'));
+    writeFileSync(
+      join(episodesDir, 'canonical.episode.json'),
+      JSON.stringify(episode('ep-shared', 'shared', '2026-07-10T00:00:00.000Z', 'canonical wins')),
+    );
+    writeFileSync(
+      join(episodesDir, 'newest.episode.json'),
+      JSON.stringify(episode('ep-newest', 'newest', '2026-07-12T00:00:00.000Z')),
+    );
+    writeCapture(
+      legacyCapturesDir,
+      'duplicate.json',
+      capture('shared', '2026-07-11T00:00:00.000Z', 'legacy duplicate'),
+    );
+    writeCapture(
+      legacyCapturesDir,
+      'middle.json',
+      capture('middle', '2026-07-11T12:00:00.000Z'),
+    );
+
+    const loaded = await loadRecentDistillSources({
+      episodesDir,
+      legacyCapturesDir,
+      limit: 3,
+    });
+
+    expect(loaded.map((row) => [row.session.sessionId, row.task.summary])).toEqual([
+      ['newest', 'newest'],
+      ['middle', 'middle'],
+      ['shared', 'canonical wins'],
+    ]);
+  });
+
   it('loads newest captures first, applies the limit, and skips malformed files', () => {
     const dir = mkdtempSync(join(tmpdir(), 'distill-captures-'));
     writeCapture(dir, 'old.json', capture('old', '2026-07-08T00:00:00.000Z', 'old work'));

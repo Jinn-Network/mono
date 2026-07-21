@@ -9,14 +9,12 @@ the version-pinned plugin-local npm artifact, ``JINN_LAYER_BIN``, then
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
 import re
 import shutil
 import subprocess
-import tempfile
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -498,42 +496,3 @@ def parse_session_end_response(raw: str) -> Dict[str, Any]:
 def parse_session_pickup_response(raw: str) -> Dict[str, Any]:
     """Parse the outer v1 status envelope; reject transport/version drift."""
     return parse_process_response(raw)
-
-
-def write_task_file(task: Dict[str, Any], directory: Path, session_id: str) -> Path:
-    """Atomically persist one private local CapturedTask."""
-    if directory.is_symlink():
-        raise OSError(f"unsafe capture directory symlink: {directory}")
-    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(directory, 0o700)
-    safe = (
-        session_id
-        if re.fullmatch(r"[A-Za-z0-9_-]{1,80}", session_id or "")
-        else f"task-{hashlib.sha256(session_id.encode('utf-8')).hexdigest()}"
-    )
-    path = directory / f"{safe}.json"
-    if os.path.lexists(path) and (path.is_symlink() or not path.is_file()):
-        raise OSError(f"unsafe capture destination: {path}")
-
-    descriptor = -1
-    tmp_path: Optional[Path] = None
-    try:
-        descriptor, tmp_name = tempfile.mkstemp(
-            prefix=f".{safe}.", suffix=".tmp", dir=directory
-        )
-        tmp_path = Path(tmp_name)
-        os.fchmod(descriptor, 0o600)
-        handle = os.fdopen(descriptor, "w", encoding="utf-8", newline="")
-        descriptor = -1
-        with handle:
-            handle.write(json.dumps(task, indent=2, ensure_ascii=False, allow_nan=False) + "\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp_path, path)
-        os.chmod(path, 0o600)
-        return path
-    finally:
-        if descriptor >= 0:
-            os.close(descriptor)
-        if tmp_path is not None:
-            tmp_path.unlink(missing_ok=True)

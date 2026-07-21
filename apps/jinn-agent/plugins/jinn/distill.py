@@ -1,29 +1,10 @@
-"""Local distillation tee plus EpisodeV1 fallback persistence.
+"""EpisodeV1 fallback persistence and local-distillation command helpers.
 
-The rung-1 ``jinn-layer distill`` loop reads its own captures directory, so
-the plugin tees the legacy CapturedTask shape there. Complete EpisodeV1
-persistence is owned canonically by the core session-end process bridge; the
-separate episodes directory is used only when that bridge cannot confirm its
-write. The retired raw pending/publication queue is never touched here.
-
-Discipline unchanged: all distillation logic (scrub, clustering, consent mode,
-staging) lives in ``jinn-layer``; this module only mirrors the layer's default
-captures path and reads ``distill status --json`` for gating.
-
-Gating (mono#1714 — local distillation is ungated; only an explicit ``off``
-mode opts out; sharing consent is never consulted):
-
-  ============= ==========================================
-  distill mode  tee?
-  ============= ==========================================
-  unset         yes — reserve material for the first run
-  local / defer yes
-  off           no ("off = stop reserving captures")
-  unavailable   no — old layer without the status verb
-  ============= ==========================================
-
-Reserving captures never leaves the machine — it can NEVER cause a share;
-the share path stays gated on the single share consent (see ``_on_session_end``).
+The process contract owns canonical episode persistence. This module supplies
+the host-side fallback when that bridge cannot confirm its write, plus status
+and command rendering for the independently published layer. C7 retired the
+duplicate Hermes CapturedTask tee; no trajectory is written here outside the
+canonical episode store.
 """
 
 from __future__ import annotations
@@ -49,9 +30,6 @@ from . import skills_install
 
 Runner = Callable[[List[str]], Tuple[int, str]]
 
-# Retention: the layer reads only the newest 50 captures and `--resume` skips
-# already-distilled ones, so a count cap is sufficient — no age logic.
-KEEP_CAPTURES = 200
 _EVIDENCE_LOCK_FILE = ".jinn-evidence-store-lock.sqlite"
 _EVIDENCE_LOCK_APPLICATION_ID = 0x4A4C4F43
 _EVIDENCE_LOCK_SCHEMA_VERSION = "1"
@@ -65,21 +43,8 @@ def reset() -> None:
     _cached_mode = None
 
 
-def captures_dir() -> Path:
-    """The layer's own-captures dir — env override mirrors the layer default."""
-    env = (os.environ.get("JINN_LAYER_CAPTURES_DIR") or "").strip()
-    if env:
-        return Path(env).expanduser()
-    return Path.home() / ".jinn-client" / "harness-layer" / "captures"
-
-
 def episodes_dir() -> Path:
-    """Where the host's EpisodeV1 fallback lands — distinct from captures.
-
-    A separate dir keeps EpisodeV1 records out of the legacy captures dir the
-    rung-1 distill loop reads, so the strict ``parseCapturedTask`` reader is
-    never even offered an episode file to skip (mono #1662).
-    """
+    """Where the host's canonical EpisodeV1 fallback lands."""
     env = (os.environ.get("JINN_LAYER_EPISODES_DIR") or "").strip()
     if env:
         return Path(env).expanduser()
@@ -374,52 +339,6 @@ def cached_mode(runner: Optional[Runner] = None, refresh: bool = False) -> str:
         mode = status.get("mode") if status else None
         _cached_mode = mode if isinstance(mode, str) and mode else "unavailable"
     return _cached_mode
-
-
-def should_tee(runner: Optional[Runner] = None) -> bool:
-    """Local distillation is ungated (mono#1714): reserve captures by default.
-
-    The only opt-out is an explicit ``off`` mode from the layer. Sharing
-    consent and process-bridge availability are never consulted — local
-    distillation never leaves the machine.
-    """
-    mode = cached_mode(runner)
-    if mode == "off":
-        return False
-    return True  # local / defer / unset / unavailable — reserve locally
-
-
-def prune_captures(keep: int = KEEP_CAPTURES) -> None:
-    """Best-effort: keep the newest `keep` capture files; never raises."""
-    try:
-        files = sorted(
-            captures_dir().glob("*.json"),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
-        for stale in files[keep:]:
-            try:
-                stale.unlink()
-            except OSError:
-                pass
-    except Exception:
-        pass
-
-
-def tee_capture(task: Dict[str, Any], session_id: str, runner: Optional[Runner] = None) -> Optional[Path]:
-    """Reserve the assembled CapturedTask for local distillation.
-
-    This is the legacy shape consumed by ``parseCapturedTask``. Best-effort:
-    a tee failure must never break a session end.
-    """
-    try:
-        if not should_tee(runner):
-            return None
-        path = jinn_layer.write_task_file(task, captures_dir(), session_id)
-        prune_captures()
-        return path
-    except Exception:
-        return None
 
 
 def write_episode_fallback(episode: Dict[str, Any]) -> Optional[Path]:

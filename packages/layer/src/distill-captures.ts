@@ -1,11 +1,12 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { createEvidenceAdapter } from '@jinn-network/core';
+import type { EpisodeV1, LocalLearningSkill } from '@jinn-network/plugin';
 import { parseCapturedTask, type CapturedTask } from './capture.js';
 import { parseSkillMarkdown } from './skill-package.js';
-import type { LocalLearningSkill } from '@jinn-network/plugin';
 
-/** Own-captures dir the rung-1 `distill` loop reads by default. */
+/** Deprecated CapturedTask directory retained as a read-only fallback. */
 export const DEFAULT_CAPTURES_DIR = join(homedir(), '.jinn-client', 'harness-layer', 'captures');
 /** Canonical complete EpisodeV1 records, distinct from legacy distill captures. */
 export const DEFAULT_EPISODES_DIR = join(homedir(), '.jinn-client', 'harness-layer', 'episodes');
@@ -35,6 +36,88 @@ export function loadRecentCaptures(dir: string, limit: number): CapturedTask[] {
   }
   parsed.sort((a, b) => b.session.capturedAt.localeCompare(a.session.capturedAt));
   return parsed.slice(0, limit);
+}
+
+/**
+ * Project the canonical local evidence record into the input shape consumed by
+ * the existing rung-1 distillation engine. The projection is intentionally
+ * lossless for trace facts the distiller understands; episode-only state stays
+ * in the canonical record and is never copied to another store.
+ */
+export function episodeToCapturedTask(episode: EpisodeV1): CapturedTask {
+  const steps = episode.trajectory.map(({ truncatedKeys: _truncatedKeys, ...step }) => step);
+  return parseCapturedTask({
+    session: episode.session,
+    task: {
+      ...episode.task,
+      // Historical CapturedTask files required at least one distribution tag,
+      // while EpisodeV1 correctly permits an empty list. The harness identity
+      // is a factual local-only fallback needed solely by this compatibility
+      // projection.
+      distributionTags: episode.task.distributionTags.length > 0
+        ? episode.task.distributionTags
+        : [episode.environment.harness.name],
+    },
+    environment: episode.environment,
+    steps,
+    outcome: {
+      status: episode.outcome.status,
+      verifiabilityTier: episode.outcome.verificationStrength,
+      ...(episode.outcome.summary ? { summary: episode.outcome.summary } : {}),
+    },
+    cost: episode.cost,
+    ...(episode.attemptGroup ? { attemptGroup: episode.attemptGroup } : {}),
+    ...(episode.lineage ? { lineage: episode.lineage } : {}),
+    provenance: episode.provenance,
+  });
+}
+
+export interface DistillSourceOptions {
+  /** Canonical EpisodeV1 store. */
+  episodesDir: string;
+  /** Deprecated CapturedTask store, retained for read compatibility only. */
+  legacyCapturesDir?: string;
+  limit: number;
+}
+
+/**
+ * Load recent local-learning inputs from the canonical episode store, then
+ * merge historical CapturedTask files during the deprecation window. A
+ * canonical episode always wins for a duplicate session id, even when the old
+ * file has a later timestamp, and the limit is applied only after global sort.
+ */
+export async function loadRecentDistillSources(
+  options: DistillSourceOptions,
+): Promise<CapturedTask[]> {
+  const evidence = createEvidenceAdapter({ capturesDir: options.episodesDir });
+  const listed = await evidence.list();
+  if (listed.status === 'unavailable') {
+    console.warn(`[distill] canonical episode store unavailable: ${listed.reason}`);
+  }
+
+  const canonicalBySession = new Map<string, CapturedTask>();
+  if (listed.status !== 'unavailable') {
+    for (const episode of listed.value ?? []) {
+      const projected = episodeToCapturedTask(episode);
+      const existing = canonicalBySession.get(projected.session.sessionId);
+      if (!existing || projected.session.capturedAt > existing.session.capturedAt) {
+        canonicalBySession.set(projected.session.sessionId, projected);
+      }
+    }
+  }
+
+  const merged = new Map(canonicalBySession);
+  if (options.legacyCapturesDir) {
+    for (const legacy of loadRecentCaptures(options.legacyCapturesDir, Number.MAX_SAFE_INTEGER)) {
+      if (!merged.has(legacy.session.sessionId)) {
+        merged.set(legacy.session.sessionId, legacy);
+      }
+    }
+  }
+
+  return [...merged.values()]
+    .sort((a, b) => b.session.capturedAt.localeCompare(a.session.capturedAt))
+    .slice(0, options.limit);
 }
 
 /** Staging directory beside the active generated-skill directory. */
