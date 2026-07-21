@@ -3,3 +3,4 @@
 Independent canary entries below are append-only and must all be retained.
 
 - Base entry: this independently merged line must survive mechanical merge preparation.
+- Target entry: exact-head review must be renewed after mechanical merge preparation.
