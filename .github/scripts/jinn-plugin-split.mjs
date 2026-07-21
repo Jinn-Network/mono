@@ -30,6 +30,7 @@ import {
   readdirSync,
   rmSync,
   cpSync,
+  readFileSync,
   writeFileSync,
   appendFileSync,
 } from 'node:fs';
@@ -43,9 +44,9 @@ const DEFAULT_KEEP = ['.git', PROVENANCE_FILE];
 // --- offline-testable logic (exported; free of auth, network, process.exit) --
 // These functions are driven by the test suite against temp git repos. Only
 // buildCommitMessage and validatePluginDir are genuinely pure; mirrorContent
-// (rm+cp), writeProvenance (writes a file), and treeChanged (shells to
-// non-auth git) touch the filesystem or a local repo, but none require a
-// GitHub token, network, or process.exit — the auth-git-in-YAML vs
+// (rm+cp), write/inspectProvenance (write/read a file), and treeChanged
+// (shells to non-auth git) touch the filesystem or a local repo, but none
+// require a GitHub token, network, or process.exit — the auth-git-in-YAML vs
 // non-auth-git-in-helper seam. The local orchestrator run() is exported too.
 
 /**
@@ -139,9 +140,10 @@ export function mirrorContent(pluginDir, slimCheckout, { keep = DEFAULT_KEEP } =
 
 /**
  * Write the single provenance marker at the slim ROOT. It is deterministic for
- * the same promotion (no timestamps). run() calls it only after detecting a
- * plugin-content change, so a later same-content promotion does not rewrite
- * provenance merely because its mono SHA differs.
+ * the same promotion (no timestamps). run() calls it after a plugin-content
+ * change or a one-time marker-contract repair. A later same-content promotion
+ * with a canonical marker does not rewrite provenance merely because its mono
+ * SHA differs.
  * @param {string} slimCheckout
  * @param {{ monoSha: string, workflowPath: string }} fields
  */
@@ -149,10 +151,47 @@ export function writeProvenance(slimCheckout, { monoSha, workflowPath }) {
   const content = [
     `source: Jinn-Network/mono@${monoSha}`,
     `generated-by: ${workflowPath}`,
-    'DO NOT EDIT HERE — edit apps/jinn-agent/plugins/jinn/ in Jinn-Network/mono.',
     '',
   ].join('\n');
   writeFileSync(path.join(slimCheckout, PROVENANCE_FILE), content);
+}
+
+/**
+ * Inspect the existing marker without trusting malformed content. Preserve a
+ * source SHA only when the marker matches the complete canonical contract or
+ * the one complete legacy contract emitted by this workflow. Missing,
+ * duplicate, or otherwise malformed markers fall back to the current mono SHA
+ * in run(), whose mirrored tree was just verified equivalent.
+ * @param {string} slimCheckout
+ * @param {string} workflowPath
+ * @returns {{ canonical: boolean, sourceSha: string | null }}
+ */
+export function inspectProvenance(slimCheckout, workflowPath) {
+  const provenancePath = path.join(slimCheckout, PROVENANCE_FILE);
+  if (!existsSync(provenancePath)) {
+    return { canonical: false, sourceSha: null };
+  }
+
+  const content = readFileSync(provenancePath, 'utf8');
+  const withoutOneFinalNewline = content.endsWith('\n') ? content.slice(0, -1) : content;
+  const lines = withoutOneFinalNewline.split('\n');
+  const sourcePattern = /^source: Jinn-Network\/mono@([0-9a-fA-F]{40})$/;
+  const sourceMatches = lines
+    .map((line) => sourcePattern.exec(line))
+    .filter((match) => match !== null);
+  const exactSourceLine = sourceMatches.length === 1 && lines[0] === sourceMatches[0][0];
+  const exactGeneratorLine = lines[1] === `generated-by: ${workflowPath}`;
+  const canonical =
+    lines.length === 2 &&
+    exactSourceLine &&
+    exactGeneratorLine;
+  const knownLegacy =
+    lines.length === 3 &&
+    exactSourceLine &&
+    exactGeneratorLine &&
+    lines[2] === 'DO NOT EDIT HERE — edit apps/jinn-agent/plugins/jinn/ in Jinn-Network/mono.';
+  const sourceSha = canonical || knownLegacy ? sourceMatches[0][1] : null;
+  return { canonical, sourceSha };
 }
 
 /**
@@ -182,9 +221,9 @@ export function buildCommitMessage({ monoSha }) {
 
 /**
  * Local orchestrator: validate → mirror → stage → detect plugin-content change
- * → update provenance + commit only when content changed (all in slimDir).
- * Therefore a later mono promotion with identical plugin content retains the
- * provenance of the last content-changing promotion and creates no commit.
+ * → update provenance + commit when content changed OR provenance needs one
+ * repair (all in slimDir). A later same-content promotion with canonical
+ * provenance retains the last content-changing source and creates no commit.
  * `git commit` on a local checkout needs no token, so it folds in here; only
  * `git push` (in the YAML) is privileged. Pure of GitHub-specific side effects
  * — no `::error::`, no `process.exit`, no `$GITHUB_OUTPUT`.
@@ -198,10 +237,15 @@ export function run({ pluginDir, slimDir, monoSha, workflowPath }) {
   mirrorContent(pluginDir, slimDir);
   execFileSync('git', ['add', '-A'], { cwd: slimDir });
 
-  const changed = treeChanged(slimDir);
+  const contentChanged = treeChanged(slimDir);
+  const provenance = inspectProvenance(slimDir, workflowPath);
+  const changed = contentChanged || !provenance.canonical;
   const message = buildCommitMessage({ monoSha });
   if (changed) {
-    writeProvenance(slimDir, { monoSha, workflowPath });
+    writeProvenance(slimDir, {
+      monoSha: contentChanged ? monoSha : (provenance.sourceSha ?? monoSha),
+      workflowPath,
+    });
     execFileSync('git', ['add', '-A'], { cwd: slimDir });
     execFileSync('git', ['commit', '-F', '-'], { cwd: slimDir, input: message });
   }

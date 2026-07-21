@@ -213,17 +213,19 @@ test('(e) buildCommitMessage produces the canonical string from the mono SHA', (
 
 // --- (f) provenance file content ---------------------------------------------
 
-test('(f) writeProvenance emits .jinn-split-source at ROOT with sha/path/do-not-edit', () => {
+test('(f) writeProvenance emits the exact two-line source/generator contract at ROOT', () => {
   const slim = makeSlimRepo();
   try {
     writeProvenance(slim, PROV);
     const provPath = path.join(slim, '.jinn-split-source');
     assert.ok(existsSync(provPath), '.jinn-split-source at slim ROOT');
     const content = readFileSync(provPath, 'utf8');
-    assert.match(content, new RegExp(PROV.monoSha), 'contains the mono SHA');
-    assert.doesNotMatch(content, /release:/, 'no release: line (tag axis dropped)');
-    assert.match(content, /\.github\/workflows\/jinn-plugin-split\.yml/, 'contains the workflow path');
-    assert.match(content, /do not edit here/i, 'contains a do-not-edit line');
+    assert.equal(
+      content,
+      `source: Jinn-Network/mono@${PROV.monoSha}\n` +
+        `generated-by: ${PROV.workflowPath}\n`,
+      'provenance is exactly the source and generator contract',
+    );
   } finally {
     cleanup(slim);
   }
@@ -286,6 +288,94 @@ test('(h) identical plugin content at a new mono SHA preserves provenance and cr
       readFileSync(path.join(slim, '.jinn-split-source'), 'utf8'),
       originalProvenance,
       'provenance describes the promotion that last changed plugin content',
+    );
+  } finally {
+    cleanup(pluginDir, slim);
+  }
+});
+
+test('(h2) identical plugin content repairs a legacy three-line provenance marker once', () => {
+  const pluginDir = makePluginDir();
+  const slim = makeSlimRepo();
+  try {
+    run({ ...PROV, pluginDir, slimDir: slim });
+    const legacy = [
+      `source: Jinn-Network/mono@${PROV.monoSha}`,
+      `generated-by: ${PROV.workflowPath}`,
+      'DO NOT EDIT HERE — edit apps/jinn-agent/plugins/jinn/ in Jinn-Network/mono.',
+      '',
+    ].join('\n');
+    writeFileSync(path.join(slim, '.jinn-split-source'), legacy);
+    git(slim, ['add', '-A']);
+    git(slim, ['commit', '-q', '-m', 'legacy provenance fixture']);
+    const beforeRepair = commitCount(slim);
+
+    const repair = run({ ...NEXT_PROV, pluginDir, slimDir: slim });
+
+    assert.equal(repair.changed, true, 'legacy provenance must produce one repair commit');
+    assert.equal(commitCount(slim), String(Number(beforeRepair) + 1));
+    assert.equal(
+      readFileSync(path.join(slim, '.jinn-split-source'), 'utf8'),
+      `source: Jinn-Network/mono@${PROV.monoSha}\n` +
+        `generated-by: ${PROV.workflowPath}\n`,
+      'repair preserves the last valid source SHA while normalizing the contract',
+    );
+
+    const idempotent = run({ ...NEXT_PROV, pluginDir, slimDir: slim });
+    assert.equal(idempotent.changed, false, 'canonical repaired provenance must then no-op');
+  } finally {
+    cleanup(pluginDir, slim);
+  }
+});
+
+test('(h2b) malformed provenance repair uses the current mono SHA, never an embedded SHA', () => {
+  const pluginDir = makePluginDir();
+  const slim = makeSlimRepo();
+  try {
+    run({ ...PROV, pluginDir, slimDir: slim });
+    const attackerSha = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
+    const malformed = [
+      `source: Jinn-Network/mono@${attackerSha}`,
+      'generated-by: attacker',
+      'UNTRUSTED TEXT',
+      '',
+    ].join('\n');
+    writeFileSync(path.join(slim, '.jinn-split-source'), malformed);
+    git(slim, ['add', '-A']);
+    git(slim, ['commit', '-q', '-m', 'malformed provenance fixture']);
+
+    const repair = run({ ...NEXT_PROV, pluginDir, slimDir: slim });
+
+    assert.equal(repair.changed, true, 'malformed provenance must produce one repair commit');
+    assert.equal(
+      readFileSync(path.join(slim, '.jinn-split-source'), 'utf8'),
+      `source: Jinn-Network/mono@${NEXT_PROV.monoSha}\n` +
+        `generated-by: ${NEXT_PROV.workflowPath}\n`,
+      'repair must bind malformed provenance to the currently validated mono SHA',
+    );
+  } finally {
+    cleanup(pluginDir, slim);
+  }
+});
+
+test('(h3) identical plugin content recreates missing provenance from the current mono SHA', () => {
+  const pluginDir = makePluginDir();
+  const slim = makeSlimRepo();
+  try {
+    run({ ...PROV, pluginDir, slimDir: slim });
+    rmSync(path.join(slim, '.jinn-split-source'));
+    git(slim, ['add', '-A']);
+    git(slim, ['commit', '-q', '-m', 'missing provenance fixture']);
+    const beforeRepair = commitCount(slim);
+
+    const repair = run({ ...NEXT_PROV, pluginDir, slimDir: slim });
+
+    assert.equal(repair.changed, true, 'missing provenance must produce one repair commit');
+    assert.equal(commitCount(slim), String(Number(beforeRepair) + 1));
+    assert.equal(
+      readFileSync(path.join(slim, '.jinn-split-source'), 'utf8'),
+      `source: Jinn-Network/mono@${NEXT_PROV.monoSha}\n` +
+        `generated-by: ${NEXT_PROV.workflowPath}\n`,
     );
   } finally {
     cleanup(pluginDir, slim);
