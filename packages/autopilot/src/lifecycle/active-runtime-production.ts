@@ -76,6 +76,17 @@ export interface ProductionActiveRuntimeOptions {
   readonly nextId?: () => string;
   readonly isPidAlive?: (pid: number) => boolean;
   readonly remoteName?: string;
+  /**
+   * Injectable delay for the bounded post-win confirmation retries in
+   * review- and merge-prep-claim acquisition (replication-lag tolerance;
+   * see `confirmReviewAcquisition` in review-executor.ts and its merge-prep
+   * counterpart). Defaults to a real `setTimeout`-based sleep.
+   */
+  readonly sleep?: (ms: number) => Promise<void>;
+}
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => { setTimeout(resolve, ms); });
 }
 
 function isPidAlive(pid: number): boolean {
@@ -198,6 +209,7 @@ export function makeProductionActiveRuntime(
   const ambient = options.environment ?? process.env;
   const now = options.now ?? (() => new Date());
   const nextId = options.nextId ?? randomUUID;
+  const sleep = options.sleep ?? defaultSleep;
   const remoteName = options.remoteName ?? AUTOPILOT_V2_REMOTE;
   const alive = options.isPidAlive ?? isPidAlive;
   const track = (manifestPath: string, child: SpawnResult): void => {
@@ -375,6 +387,7 @@ export function makeProductionActiveRuntime(
           nextGeneration: nextId,
           runnerId: options.runnerId,
           now,
+          sleep,
           staleAfterMs: options.staleAfterMs,
           spawnCoordinator: reviewSpawner,
           trackChild: track,
@@ -404,6 +417,7 @@ export function makeProductionActiveRuntime(
           nextAttemptId: nextId,
           runnerId: options.runnerId,
           now,
+          sleep,
           spawnCoordinator: mergePrepSpawner,
           trackChild: track,
           escalateHuman: async () => {},

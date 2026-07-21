@@ -117,6 +117,13 @@ export interface ReviewExecutorDeps {
   readonly runnerId: string;
   now(): Date;
   readonly staleAfterMs: number;
+  /**
+   * Injectable delay, used only to pace {@link confirmReviewAcquisition}'s
+   * bounded retry against GitHub GraphQL replication lag. Production wires a
+   * real `setTimeout`-based sleep; tests fake it so retries resolve
+   * instantly and can assert on the delay values requested.
+   */
+  sleep(ms: number): Promise<void>;
 }
 
 export type ReviewExecutionResult =
@@ -135,6 +142,141 @@ export type ReviewExecutionResult =
   | { readonly status: 'ineligible'; readonly prNumber: number; readonly detail: string }
   | { readonly status: 'human'; readonly prNumber: number; readonly code: 'reviewer-identity-unavailable' | 'review-escalation' }
   | { readonly status: 'lost' | 'ambiguous'; readonly prNumber: number };
+
+/**
+ * Bounded retry count for {@link confirmReviewAcquisition}'s post-win
+ * confirmation read. jinn-mono#1925 lived this: a review-claim push won its
+ * exact-lease race (confirmed by git-protocol's own ls-remote readback and
+ * by `repairProjection`'s direct ref check) but the very next GraphQL
+ * snapshot read still reported the *pre-push* ref state, because GitHub's
+ * GraphQL API can lag a just-pushed ref's replication by up to a few
+ * seconds. The old single-shot confirm treated that lag as a loss and
+ * orphaned our own winning claim. Three attempts with a short delay between
+ * them gives replication time to catch up without weakening the fencing
+ * invariant below.
+ */
+const REVIEW_ACQUISITION_MAX_ATTEMPTS = 3;
+
+/** Delay between {@link confirmReviewAcquisition} retry attempts. */
+const REVIEW_ACQUISITION_RETRY_DELAY_MS = 1000;
+
+type ReviewAcquisitionOutcome =
+  | { readonly outcome: 'confirmed'; readonly confirmed: ReviewActionCandidate }
+  | {
+      readonly outcome: 'human';
+      readonly candidate: ReviewActionCandidate;
+      readonly reason: HumanReason;
+    }
+  | { readonly outcome: 'lost' }
+  | { readonly outcome: 'ambiguous' };
+
+/**
+ * Confirms a just-published review-claim record is the ref's exact current
+ * state, tolerating GraphQL replication lag without weakening fencing.
+ *
+ * The invariant that must never move: a session spawns only once our exact
+ * record OID has been observed as current. This function re-reads the full
+ * candidate (preserving every existing revalidation: open/head/issue/branch
+ * mapping/approval-policy/Human-hold) on every attempt via the same
+ * `confirmAcquisition` port method the caller used before this fix -- only
+ * the review-claim-ref-specific check at the end gets bounded-retry
+ * treatment, because that is the only field this function reads back that
+ * *we* just wrote in this operation (everything else -- head, labels,
+ * project status -- was already read-back-confirmed by `repairProjection`
+ * before this runs, or predates this operation entirely).
+ *
+ * On each attempt, the observed review-ref OID is one of three things:
+ *   - our own `recordOid` -> confirmed, proceed.
+ *   - the exact pre-push state (`recordParent`, or absent when the parent
+ *     was null) -> replication lag; retry.
+ *   - anything else -> a foreign write actually won the ref; fail closed
+ *     immediately with no further retries.
+ */
+async function confirmReviewAcquisition(
+  deps: ReviewExecutorDeps,
+  input: {
+    readonly candidate: ReviewActionCandidate;
+    readonly recordOid: GitOid;
+    readonly recordParent: GitOid | null;
+    readonly generation: string;
+    readonly attemptId: string;
+    readonly reviewerLogin: string;
+    readonly recoverFixes: boolean;
+  },
+): Promise<ReviewAcquisitionOutcome> {
+  const phase: HumanReason['phase'] = input.recoverFixes ? 'review-fixing' : 'reviewing';
+  for (let attempt = 1; attempt <= REVIEW_ACQUISITION_MAX_ATTEMPTS; attempt += 1) {
+    const confirmed = await deps.confirmAcquisition({
+      prNumber: input.candidate.number,
+      expectedHead: input.candidate.head,
+      expectedReviewRefOid: input.recordOid,
+    });
+    if (confirmed?.humanHold) {
+      return {
+        outcome: 'human',
+        candidate: confirmed,
+        reason: {
+          phase,
+          code: 'review-escalation',
+          detail: 'A Human hold arrived during review acquisition.',
+        },
+      };
+    }
+    if (
+      confirmed === null
+      || !confirmed.open
+      || confirmed.number !== input.candidate.number
+      || confirmed.head !== input.candidate.head
+      || confirmed.issueNumber !== input.candidate.issueNumber
+      || confirmed.headRefName !== input.candidate.headRefName
+      || confirmed.baseRefName !== input.candidate.baseRefName
+      || confirmed.mappingProblem !== undefined
+      || confirmed.approvalPolicy !== input.candidate.approvalPolicy
+    ) {
+      if (
+        confirmed !== null
+        && (
+          confirmed.mappingProblem !== undefined
+          || confirmed.approvalPolicy !== input.candidate.approvalPolicy
+        )
+      ) {
+        return {
+          outcome: 'human',
+          candidate: confirmed,
+          reason: {
+            phase,
+            code: 'review-escalation',
+            detail: confirmed.mappingProblem
+              ?? 'The current-head CODEOWNER approval policy changed during acquisition.',
+          },
+        };
+      }
+      return { outcome: 'lost' };
+    }
+    const confirmedClaim = confirmed.reviewRef;
+    if (
+      confirmedClaim?.oid === input.recordOid
+      && confirmedClaim.record.prNumber === input.candidate.number
+      && confirmedClaim.record.generation === input.generation
+      && confirmedClaim.record.attempt === input.attemptId
+      && confirmedClaim.record.reviewer.toLowerCase() === input.reviewerLogin.toLowerCase()
+      && confirmedClaim.record.head === input.candidate.head
+      && confirmedClaim.record.state === 'active'
+    ) {
+      return { outcome: 'confirmed', confirmed };
+    }
+    const observedOid = confirmedClaim?.oid ?? null;
+    if (observedOid !== input.recordParent) {
+      // Neither our record nor the pre-push state -- a foreign write
+      // genuinely won. Fail closed immediately; no more retries.
+      return { outcome: 'lost' };
+    }
+    if (attempt === REVIEW_ACQUISITION_MAX_ATTEMPTS) return { outcome: 'ambiguous' };
+    await deps.sleep(REVIEW_ACQUISITION_RETRY_DELAY_MS);
+  }
+  /* istanbul ignore next -- unreachable: the loop always returns */
+  return { outcome: 'ambiguous' };
+}
 
 export async function executeReviewAction(
   action: {
@@ -385,69 +527,30 @@ export async function executeReviewAction(
     expectedReviewRefOid: recordOid,
     credential: selection.credential,
   });
-  const confirmed = await deps.confirmAcquisition({
-    prNumber: candidate.number,
-    expectedHead: candidate.head,
-    expectedReviewRefOid: recordOid,
+  const acquisition = await confirmReviewAcquisition(deps, {
+    candidate,
+    recordOid,
+    recordParent: parent,
+    generation,
+    attemptId,
+    reviewerLogin: selection.login,
+    recoverFixes,
   });
-  if (confirmed?.humanHold) {
-    const reason: HumanReason = {
-      phase: recoverFixes ? 'review-fixing' : 'reviewing',
-      code: 'review-escalation',
-      detail: 'A Human hold arrived during review acquisition.',
-    };
-    await deps.escalateHuman({ candidate: confirmed, reason });
+  if (acquisition.outcome === 'human') {
+    await deps.escalateHuman({ candidate: acquisition.candidate, reason: acquisition.reason });
     return {
       status: 'human',
       prNumber: candidate.number,
       code: 'review-escalation',
     };
   }
-  if (
-    confirmed === null
-    || !confirmed.open
-    || confirmed.number !== candidate.number
-    || confirmed.head !== candidate.head
-    || confirmed.issueNumber !== candidate.issueNumber
-    || confirmed.headRefName !== candidate.headRefName
-    || confirmed.baseRefName !== candidate.baseRefName
-    || confirmed.mappingProblem !== undefined
-    || confirmed.approvalPolicy !== candidate.approvalPolicy
-  ) {
-    if (
-      confirmed !== null
-      && (
-        confirmed.mappingProblem !== undefined
-        || confirmed.approvalPolicy !== candidate.approvalPolicy
-      )
-    ) {
-      const reason: HumanReason = {
-        phase: recoverFixes ? 'review-fixing' : 'reviewing',
-        code: 'review-escalation',
-        detail: confirmed.mappingProblem
-          ?? 'The current-head CODEOWNER approval policy changed during acquisition.',
-      };
-      await deps.escalateHuman({ candidate: confirmed, reason });
-      return {
-        status: 'human',
-        prNumber: candidate.number,
-        code: 'review-escalation',
-      };
-    }
+  if (acquisition.outcome === 'lost') {
     return { status: 'lost', prNumber: candidate.number };
   }
-  const confirmedClaim = confirmed.reviewRef;
-  if (
-    confirmedClaim?.oid !== recordOid
-    || confirmedClaim.record.prNumber !== candidate.number
-    || confirmedClaim.record.generation !== generation
-    || confirmedClaim.record.attempt !== attemptId
-    || confirmedClaim.record.reviewer.toLowerCase() !== selection.login.toLowerCase()
-    || confirmedClaim.record.head !== candidate.head
-    || confirmedClaim.record.state !== 'active'
-  ) {
-    return { status: 'lost', prNumber: candidate.number };
+  if (acquisition.outcome === 'ambiguous') {
+    return { status: 'ambiguous', prNumber: candidate.number };
   }
+  const confirmed = acquisition.confirmed;
   const environment = buildSanitizedChildEnv(
     deps.ambientEnvironment,
     selection.credential,

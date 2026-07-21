@@ -109,6 +109,7 @@ function harness(overrides: Partial<MergePrepExecutorDeps> = {}) {
     nextAttemptId: () => attemptIds[attemptIndex++]!,
     runnerId: 'runner-a',
     now: () => new Date('2026-07-20T12:00:00.000Z'),
+    sleep: async () => {},
     ...overrides,
   };
   return { deps, events, claims };
@@ -238,6 +239,73 @@ describe('merge-prep action executor', () => {
       executeMergePrepAction({ prNumber: 84, expectedHead: HEAD }, h.deps),
     ).resolves.toMatchObject({ status: 'lost', reason: 'target-base-changed' });
     expect(h.events).toEqual(['claim', 'projection']);
+  });
+
+  it('confirms a won merge-prep claim through replication lag instead of orphaning it', async () => {
+    // jinn-mono#1925-style regression for merge-prep: the claim commit won
+    // its exact-lease branch push, but the very next GraphQL PR read still
+    // reported the pre-push head. A second read shows our claim commit as
+    // the head. The claim must be confirmed and the session spawned, not
+    // orphaned as lost.
+    let confirmations = 0;
+    const sleeps: number[] = [];
+    const h = harness({
+      confirmAuthority: async ({ claimOid }) => {
+        confirmations += 1;
+        if (confirmations === 1) return candidate();
+        return candidate({
+          head: claimOid,
+          draft: true,
+          terminalApprovalMatches: false,
+          branchClaim: h.claims.at(-1),
+        });
+      },
+      sleep: async (ms) => { sleeps.push(ms); },
+    });
+
+    await expect(
+      executeMergePrepAction({ prNumber: 84, expectedHead: HEAD }, h.deps),
+    ).resolves.toMatchObject({ status: 'spawned', claimOid: CLAIM_A });
+    // Two confirmMergePrepAuthority calls happen in the success path
+    // (post-win, post-attempt-creation); the first one needed one retry.
+    expect(confirmations).toBe(3);
+    expect(sleeps).toHaveLength(1);
+  });
+
+  it('fails closed immediately on a foreign merge-prep branch head, without retrying', async () => {
+    let confirmations = 0;
+    const sleeps: number[] = [];
+    const h = harness({
+      confirmAuthority: async () => {
+        confirmations += 1;
+        return candidate({ head: gitOid('9'.repeat(40)), draft: true });
+      },
+      sleep: async (ms) => { sleeps.push(ms); },
+    });
+
+    await expect(
+      executeMergePrepAction({ prNumber: 84, expectedHead: HEAD }, h.deps),
+    ).resolves.toMatchObject({ status: 'lost', reason: 'authority-changed' });
+    expect(confirmations).toBe(1);
+    expect(sleeps).toHaveLength(0);
+  });
+
+  it('returns ambiguous, not lost, when merge-prep replication lag never resolves within the retry budget', async () => {
+    let confirmations = 0;
+    const sleeps: number[] = [];
+    const h = harness({
+      confirmAuthority: async () => {
+        confirmations += 1;
+        return candidate();
+      },
+      sleep: async (ms) => { sleeps.push(ms); },
+    });
+
+    await expect(
+      executeMergePrepAction({ prNumber: 84, expectedHead: HEAD }, h.deps),
+    ).resolves.toEqual({ status: 'ambiguous', prNumber: 84 });
+    expect(confirmations).toBe(3);
+    expect(sleeps).toEqual([1000, 1000]);
   });
 
   it.each([

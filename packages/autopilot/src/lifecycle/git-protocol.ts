@@ -143,6 +143,16 @@ async function publishLeasedScalar(
         observed: published,
       };
     }
+    if (readback.oid === expectedRemoteOid) {
+      // The ref is exactly where it was before our push attempt -- nobody
+      // else won the exact-lease race, our push simply failed (network
+      // blip, transient auth failure, etc.). That is not a loss: a loss
+      // means a foreign write beat us to the ref. Fail safe as `ambiguous`
+      // (retryable) instead of `lost` (terminal), so a caller can retry
+      // against the same still-open exact-lease race instead of abandoning
+      // a claim nobody else holds.
+      return { status: 'ambiguous', expected: expectedRemoteOid, published, observed: readback.oid };
+    }
     return { status: 'lost', expected: expectedRemoteOid, published, observed: readback.oid };
   }
 }
@@ -292,6 +302,17 @@ export function makeGitProtocolPort(
         }
         if (observed.branch === published.branch && observed.review === published.review) {
           return { status: 'already-applied', expected, published, observed };
+        }
+        if (observed.branch === expected.branch && observed.review === expected.review) {
+          // Both refs are exactly where they were before our push attempt --
+          // nobody else won the exact-lease race on either ref, our atomic
+          // push simply failed (network blip, transient auth failure,
+          // etc.). Same false-loss fix as the scalar path above: fail safe
+          // as `ambiguous` (retryable), not `lost` (terminal). A partial
+          // match (only one ref unchanged) is left as a genuine `lost` --
+          // the atomic push guarantees all-or-nothing, so anything else
+          // observed on either ref is a real foreign write.
+          return { status: 'ambiguous', expected, published, observed };
         }
         return { status: 'lost', expected, published, observed };
       }

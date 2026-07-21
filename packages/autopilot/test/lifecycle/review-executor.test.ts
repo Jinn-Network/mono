@@ -135,6 +135,7 @@ function harness(overrides: Partial<ReviewExecutorDeps> = {}) {
     runnerId: 'runner-a',
     now: () => new Date('2026-07-20T12:00:00.000Z'),
     staleAfterMs: 2 * 60 * 60_000,
+    sleep: async () => {},
     ...overrides,
   };
   return { deps, events, records, human };
@@ -489,6 +490,99 @@ describe('review action executor', () => {
         confirmAcquisition: async () => final,
       });
 
+      const result = await executeReviewAction({ prNumber: 84 }, h.deps);
+      expect(result.status).not.toBe('spawned');
+      expect(h.events).not.toContain('spawn');
+    }
+  });
+
+  it('confirms a won review claim through replication lag instead of orphaning it', async () => {
+    // jinn-mono#1925 live bug: the review-claim ref push won its exact-lease
+    // race (git-protocol readback and repairProjection's own ls-remote both
+    // proved it), but the very next GraphQL snapshot read still reported
+    // the pre-push state (no review ref, since this is a first-ever claim
+    // with a null parent). A second read shows our record. The claim must
+    // be confirmed and the session spawned, not orphaned as lost.
+    let confirmations = 0;
+    const sleeps: number[] = [];
+    const h = harness({
+      confirmAcquisition: async ({ expectedHead }) => {
+        confirmations += 1;
+        if (confirmations === 1) return candidate({ head: expectedHead });
+        return candidate({
+          head: expectedHead,
+          reviewRef: { oid: RECORD_A, record: claim() },
+        });
+      },
+      sleep: async (ms) => { sleeps.push(ms); },
+    });
+
+    await expect(executeReviewAction({ prNumber: 84 }, h.deps))
+      .resolves.toMatchObject({ status: 'spawned', reviewRefOid: RECORD_A });
+    expect(confirmations).toBe(2);
+    expect(sleeps).toHaveLength(1);
+    expect(h.events).toContain('spawn');
+  });
+
+  it('fails closed immediately on a foreign review-claim ref, without retrying', async () => {
+    let confirmations = 0;
+    const sleeps: number[] = [];
+    const h = harness({
+      confirmAcquisition: async ({ expectedHead }) => {
+        confirmations += 1;
+        return candidate({
+          head: expectedHead,
+          reviewRef: { oid: RECORD_B, record: claim({ attempt: ATTEMPT_B }) },
+        });
+      },
+      sleep: async (ms) => { sleeps.push(ms); },
+    });
+
+    await expect(executeReviewAction({ prNumber: 84 }, h.deps))
+      .resolves.toEqual({ status: 'lost', prNumber: 84 });
+    expect(confirmations).toBe(1);
+    expect(sleeps).toHaveLength(0);
+    expect(h.events).not.toContain('spawn');
+  });
+
+  it('returns ambiguous, not lost, when replication lag never resolves within the retry budget', async () => {
+    let confirmations = 0;
+    const sleeps: number[] = [];
+    const h = harness({
+      confirmAcquisition: async ({ expectedHead }) => {
+        confirmations += 1;
+        return candidate({ head: expectedHead });
+      },
+      sleep: async (ms) => { sleeps.push(ms); },
+    });
+
+    await expect(executeReviewAction({ prNumber: 84 }, h.deps))
+      .resolves.toEqual({ status: 'ambiguous', prNumber: 84 });
+    expect(confirmations).toBe(3);
+    expect(sleeps).toEqual([1000, 1000]);
+    expect(h.events).not.toContain('spawn');
+  });
+
+  it('never spawns without an observed-equals-ours review-ref confirmation (fencing guard)', async () => {
+    const scenarios: Array<ReviewExecutorDeps['confirmAcquisition']> = [
+      // Foreign OID -- immediate loss, no amount of retrying should spawn.
+      async ({ expectedHead }) => candidate({
+        head: expectedHead,
+        reviewRef: { oid: RECORD_B, record: claim() },
+      }),
+      // Perpetually pre-push -- exhausts the retry budget without ever
+      // observing our record.
+      async ({ expectedHead }) => candidate({ head: expectedHead }),
+      // The exact OID we published, but the decoded record disagrees with
+      // it on a field git's content-addressing guarantees can't actually
+      // diverge for a real remote -- defense in depth must still refuse.
+      async ({ expectedHead }) => candidate({
+        head: expectedHead,
+        reviewRef: { oid: RECORD_A, record: claim({ generation: GENERATION_B }) },
+      }),
+    ];
+    for (const confirmAcquisition of scenarios) {
+      const h = harness({ confirmAcquisition });
       const result = await executeReviewAction({ prNumber: 84 }, h.deps);
       expect(result.status).not.toBe('spawned');
       expect(h.events).not.toContain('spawn');
