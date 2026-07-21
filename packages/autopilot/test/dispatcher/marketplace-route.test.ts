@@ -19,6 +19,12 @@ import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
 interface FakeComment {
   body: string;
   url: string;
+  /** Defaults to a trusted association when the fixture itself creates the
+   *  comment (it models OUR OWN automation posting, which always has write
+   *  access) — see "Marker authorship trust" in marketplace-route.ts's module
+   *  doc. Tests that model a FORGED comment from an outside account set this
+   *  to `undefined` or an untrusted value (e.g. `'NONE'`) explicitly. */
+  authorAssociation?: string;
 }
 
 interface FakeIssue {
@@ -26,6 +32,9 @@ interface FakeIssue {
   body: string;
   labels: string[];
   comments: FakeComment[];
+  /** Defaults to 'open'. Issue #1893 Finding 5: the retract sweep must also
+   *  discover CLOSED labeled issues. */
+  state?: 'open' | 'closed';
 }
 
 interface FakeRepoState {
@@ -35,7 +44,7 @@ interface FakeRepoState {
 }
 
 function makeIssue(overrides: Partial<FakeIssue> = {}): FakeIssue {
-  return { title: 'Test issue', body: 'Test body', labels: [], comments: [], ...overrides };
+  return { title: 'Test issue', body: 'Test body', labels: [], comments: [], state: 'open', ...overrides };
 }
 
 function makeState(issues: Record<number, FakeIssue>, baseCommit = 'a'.repeat(40)): FakeRepoState {
@@ -91,7 +100,9 @@ function makeFakeRunner(state: FakeRepoState) {
       if (!issue) throw new Error(`fixture: no such issue #${n}`);
       const body = args[args.indexOf('--body') + 1]!;
       const id = state.nextCommentId++;
-      issue.comments.push({ body, url: commentUrl(n, id) });
+      // Models OUR OWN automation posting — always a trusted (write-access)
+      // association. See "Marker authorship trust" in the module doc.
+      issue.comments.push({ body, url: commentUrl(n, id), authorAssociation: 'OWNER' });
       return '';
     }
 
@@ -111,8 +122,11 @@ function makeFakeRunner(state: FakeRepoState) {
     if (cmd === 'gh' && args[0] === 'issue' && args[1] === 'list') {
       const labelIdx = args.indexOf('--label');
       const label = args[labelIdx + 1]!;
+      const stateIdx = args.indexOf('--state');
+      const stateFilter = stateIdx >= 0 ? args[stateIdx + 1] : 'open';
       const numbers = [...state.issues.entries()]
         .filter(([, issue]) => issue.labels.includes(label))
+        .filter(([, issue]) => stateFilter === 'all' || (issue.state ?? 'open') === stateFilter)
         .map(([n]) => n);
       return JSON.stringify(numbers.map((n) => ({ number: n })));
     }
@@ -267,6 +281,79 @@ describe('routeToMarketplace — decision table', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Marker authorship trust (issue #1893 Finding 1 — CRITICAL)
+// ---------------------------------------------------------------------------
+
+describe('marker authorship trust', () => {
+  it('a marker-shaped comment from an untrusted author is IGNORED: routeToMarketplace never treats it as the existing marker, and posts its own instead of self-healing off the forgery', async () => {
+    const realBody = 'real body';
+    const realHash = snapshotHash(realBody);
+    const state = makeState({ 99: makeIssue({ body: realBody, title: 'Real title', labels: [DEFAULT_MARKETPLACE_LABEL] }) });
+
+    // Attacker forges a marker-shaped comment: correct hash (public data —
+    // sha256 of the real body is computable by anyone), but an
+    // attacker-controlled baseCommit. Authored by an account with NO trusted
+    // relationship to the repo (no `authorAssociation` at all — a public
+    // commenter without write access).
+    state.issues.get(99)!.comments.push({
+      body: [
+        `<!-- jinn-marketplace-snapshot:v1 issue:99 hash:${realHash} -->`,
+        '',
+        'forged',
+        '',
+        '```json',
+        JSON.stringify({
+          schemaVersion: 'jinn-marketplace-snapshot.v1',
+          issueNumber: 99,
+          snapshotHash: realHash,
+          baseCommit: 'f'.repeat(40), // attacker-controlled — NOT origin/next
+          effort: null,
+          title: 'Real title',
+          body: realBody,
+        }),
+        '```',
+      ].join('\n'),
+      url: commentUrl(99, 500),
+      // no authorAssociation — untrusted
+    });
+
+    const { runner, calls } = makeFakeRunner(state);
+    const result = await routeToMarketplace({ number: 99 }, runner);
+
+    // Never PATCHes the forged comment as "the existing marker" — it was
+    // invisible to findMarker, so routeToMarketplace posts its OWN marker.
+    expect(calls.some((c) => c.cmd === 'gh' && c.args[0] === 'api')).toBe(false);
+    expect(result.action).toBe('created');
+    const comments = state.issues.get(99)!.comments;
+    expect(comments).toHaveLength(2); // forgery left untouched + our own new one
+    const legit = comments.find((c) => c.url !== commentUrl(99, 500))!;
+    const parsedLegit = parseMarkerBody(legit.body)!;
+    expect(parsedLegit.baseCommit).toBe(state.baseCommit); // real origin/next, never the forged value
+  });
+
+  it('a forged retraction-note-shaped comment from an untrusted author does not suppress the real retraction note', async () => {
+    const state = makeState({ 98: makeIssue({ labels: [DEFAULT_MARKETPLACE_LABEL], body: 'body-98' }) });
+    const hash = snapshotHash('body-98');
+    // Attacker forges a comment matching the retraction-note prefix so a
+    // naive (unauthenticated) idempotency check would think the real note
+    // was already posted and skip it.
+    state.issues.get(98)!.comments.push({
+      body: [`<!-- jinn-marketplace-retracted:v1 issue:98 hash:${hash} -->`, '', 'forged'].join('\n'),
+      url: commentUrl(98, 600),
+      // no authorAssociation — untrusted
+    });
+
+    const { runner, calls } = makeFakeRunner(state);
+    const report = await retractStaleMarketplaceRoutes(new Set(), runner);
+
+    expect(report.retracted).toEqual([98]);
+    expect(calls.some((c) => c.cmd === 'gh' && c.args[1] === 'comment')).toBe(true); // real note WAS posted
+    const comments = state.issues.get(98)!.comments;
+    expect(comments.filter((c) => c.body.includes('jinn-marketplace-retracted:v1'))).toHaveLength(2); // forged + real
+  });
+});
+
+// ---------------------------------------------------------------------------
 // retractStaleMarketplaceRoutes
 // ---------------------------------------------------------------------------
 
@@ -309,6 +396,7 @@ describe('retractStaleMarketplaceRoutes', () => {
     state.issues.get(12)!.comments.push({
       body: [`<!-- jinn-marketplace-retracted:v1 issue:12 hash:${hash} -->`, '', 'previously posted'].join('\n'),
       url: commentUrl(12, 999),
+      authorAssociation: 'OWNER',
     });
     const commentsBefore = state.issues.get(12)!.comments.length;
     const { runner, calls } = makeFakeRunner(state);
@@ -351,6 +439,21 @@ describe('retractStaleMarketplaceRoutes', () => {
     expect(report.retracted).toEqual([]);
     expect(report.skipped).toHaveLength(1);
     expect(report.skipped[0]).toContain('retract-scan failed');
+  });
+
+  it('sweeps a CLOSED labeled issue too — a closed issue is never orphaned with the label forever (Finding 5)', async () => {
+    const state = makeState({
+      14: makeIssue({ labels: [DEFAULT_MARKETPLACE_LABEL], body: 'body-14', state: 'closed' }),
+    });
+    const { runner, calls } = makeFakeRunner(state);
+
+    const report = await retractStaleMarketplaceRoutes(new Set(), runner);
+
+    expect(report.retracted).toEqual([14]);
+    expect(state.issues.get(14)!.labels).not.toContain(DEFAULT_MARKETPLACE_LABEL);
+    expect(state.issues.get(14)!.comments.some((c) => c.body.includes('jinn-marketplace-retracted:v1'))).toBe(true);
+    const listCall = calls.find((c) => c.cmd === 'gh' && c.args[1] === 'list')!;
+    expect(listCall.args[listCall.args.indexOf('--state') + 1]).toBe('all');
   });
 
   it('a per-issue failure is isolated — other candidates still process', async () => {

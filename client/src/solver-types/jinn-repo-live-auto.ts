@@ -24,6 +24,42 @@
  * doc for the identical trade elsewhere in this codebase); the coupling is
  * the documented wire format only, re-parsed independently here.
  *
+ * ── Marker authorship trust (issue #1893 Finding 1 — CRITICAL) ────────────
+ *
+ * `Jinn-Network/mono` is a public repo: ANY GitHub account can comment on a
+ * labeled issue with a body that *looks* like a marker (same
+ * `<!-- jinn-marketplace-snapshot:v1` prefix, same fenced JSON shape) but
+ * carries attacker-chosen `base_commit`/`problem_statement`/`effort`. Left
+ * unchecked, this generator would mint a FUNDED, claimable on-chain task from
+ * ANY such forgery — the daemon is the wallet-holder, so this is the one
+ * place the trust boundary actually matters. `parseMarketplaceMarker` alone
+ * only validates *shape*; it says nothing about *authorship*.
+ *
+ * Every comment is therefore filtered through `isTrustedMarkerAuthor` BEFORE
+ * `parseMarketplaceMarker` is even attempted (see the per-issue loop below).
+ * Trust is established one of two ways, both configured on
+ * `JinnRepoLiveGeneratorConfig`:
+ *
+ *  - `markerAuthorLogin` — an exact GitHub login (case-insensitive) the
+ *    comment's `user.login` (REST field) must match.
+ *  - `markerTrustedAssociations` — a set of REST `author_association` values
+ *    (`OWNER`, `MEMBER`, `COLLABORATOR`, ...) one of which the comment must
+ *    carry. This MUST mirror the set
+ *    `packages/autopilot/src/dispatcher/marketplace-route.ts` trusts
+ *    autopilot-side (currently hardcoded there to `OWNER`/`MEMBER`/
+ *    `COLLABORATOR` — see that module's "Marker authorship trust" doc) or a
+ *    legitimate marker will be silently rejected. There is deliberately no
+ *    shared import between the two packages (see below); the two constant
+ *    sets must be kept in agreement by hand.
+ *
+ * **Fail closed.** If NEITHER `markerAuthorLogin` nor
+ * `markerTrustedAssociations` is configured, `isTrustedMarkerAuthor` trusts
+ * NOTHING — every comment is treated as untrusted, so no marker is ever
+ * found and no task is ever posted. A missing/misconfigured trust gate must
+ * never silently degrade to "trust everyone"; it degrades to "trust no one,"
+ * which is loudly visible (labeled issues pile up with a
+ * "no valid snapshot marker" warning) rather than silently exploitable.
+ *
  * ── Dedup / re-post (the daemon-side half of "cancel + re-post on edit") ─
  *
  * This generator's own state file (mirrors `jinn-repo-auto.ts`'s `posted`
@@ -125,6 +161,32 @@ interface GhIssueListEntry {
 
 interface GhComment {
   body?: string;
+  /** REST field: `GET /repos/{repo}/issues/{n}/comments` returns `user.login`. */
+  user?: { login?: string };
+  /** REST field: the commenter's GitHub-computed relationship to the repo
+   *  (`OWNER`, `MEMBER`, `COLLABORATOR`, `CONTRIBUTOR`, `NONE`, ...). See
+   *  module doc "Marker authorship trust". */
+  author_association?: string;
+}
+
+/**
+ * Trust gate for "is this comment's author allowed to author a marker" —
+ * see module doc "Marker authorship trust" (issue #1893 Finding 1). Fails
+ * closed: with neither `markerAuthorLogin` nor `markerTrustedAssociations`
+ * configured, nothing is trusted.
+ */
+export function isTrustedMarkerAuthor(
+  comment: GhComment,
+  markerAuthorLogin: string | undefined,
+  markerTrustedAssociations: readonly string[] | undefined,
+): boolean {
+  if (markerAuthorLogin) {
+    return (comment.user?.login ?? '').toLowerCase() === markerAuthorLogin.toLowerCase();
+  }
+  if (markerTrustedAssociations && markerTrustedAssociations.length > 0) {
+    return comment.author_association != null && markerTrustedAssociations.includes(comment.author_association);
+  }
+  return false; // fail closed — no trust config configured ⇒ trust nothing
 }
 
 async function fetchJson(
@@ -220,6 +282,24 @@ export interface JinnRepoLiveGeneratorConfig {
    *  raises the REST rate-limit ceiling for a long-lived poller. */
   token?: string;
   claimLeaseTtlSeconds?: number;
+  /**
+   * Exact GitHub login (case-insensitive) a marker comment's author must
+   * match. Takes precedence over `markerTrustedAssociations` when both are
+   * set. See module doc "Marker authorship trust" (issue #1893 Finding 1) —
+   * with NEITHER this nor `markerTrustedAssociations` configured, every
+   * comment is untrusted and no task is ever posted (fail closed).
+   */
+  markerAuthorLogin?: string;
+  /**
+   * Allowed `author_association` values (GitHub REST enum: `OWNER`,
+   * `MEMBER`, `COLLABORATOR`, `CONTRIBUTOR`, `NONE`, ...) for a marker
+   * comment's author. MUST mirror the set
+   * `packages/autopilot/src/dispatcher/marketplace-route.ts` trusts
+   * autopilot-side (currently `OWNER`/`MEMBER`/`COLLABORATOR`) or a
+   * legitimate marker will be silently rejected. See module doc "Marker
+   * authorship trust".
+   */
+  markerTrustedAssociations?: string[];
 }
 
 export function makeJinnRepoLiveGenerator(config: JinnRepoLiveGeneratorConfig): TaskGenerator {
@@ -228,6 +308,8 @@ export function makeJinnRepoLiveGenerator(config: JinnRepoLiveGeneratorConfig): 
   const maxPerTick = config.maxPerTick ?? DEFAULT_MAX_PER_TICK;
   const fetchImpl = config.fetchImpl ?? fetch;
   const claimPolicy = jinnRepoLiveClaimPolicy(config.claimLeaseTtlSeconds ?? DEFAULT_CLAIM_LEASE_TTL_SECONDS);
+  const markerAuthorLogin = config.markerAuthorLogin;
+  const markerTrustedAssociations = config.markerTrustedAssociations;
   const headers: Record<string, string> = {
     Accept: 'application/vnd.github+json',
     ...(config.token ? { Authorization: `Bearer ${config.token}` } : {}),
@@ -270,15 +352,33 @@ export function makeJinnRepoLiveGenerator(config: JinnRepoLiveGeneratorConfig): 
         continue;
       }
 
-      const marker = comments
+      // Trust gate BEFORE shape parsing (issue #1893 Finding 1): an untrusted
+      // comment is never even offered to parseMarketplaceMarker, no matter
+      // how marker-shaped its body is.
+      const trustedComments = comments.filter((c) => isTrustedMarkerAuthor(c, markerAuthorLogin, markerTrustedAssociations));
+      const marker = trustedComments
         .map((c) => (c.body != null ? parseMarketplaceMarker(c.body) : null))
         .find((m): m is MarketplaceMarkerPayload => m != null) ?? null;
 
       if (marker == null) {
-        // Labeled but no valid marker yet (label/comment race, or a foreign
-        // label reuse) — never throws, just skipped with a log; the next
-        // tick re-checks.
-        console.warn(`[jinn-repo-live-gen] #${entry.number} carries "${label}" but no valid snapshot marker — skipped`);
+        const forged = comments.some(
+          (c) =>
+            !isTrustedMarkerAuthor(c, markerAuthorLogin, markerTrustedAssociations) &&
+            c.body != null &&
+            parseMarketplaceMarker(c.body) != null,
+        );
+        if (forged) {
+          // A marker-shaped comment exists but its author is untrusted —
+          // never throws, but distinct from "no marker yet" for observability.
+          console.warn(
+            `[jinn-repo-live-gen] #${entry.number} carries a marker-shaped comment from an untrusted author — ignored`,
+          );
+        } else {
+          // Labeled but no valid marker yet (label/comment race, or a foreign
+          // label reuse) — never throws, just skipped with a log; the next
+          // tick re-checks.
+          console.warn(`[jinn-repo-live-gen] #${entry.number} carries "${label}" but no valid snapshot marker — skipped`);
+        }
         continue;
       }
 
@@ -333,6 +433,10 @@ export interface MakeJinnRepoLiveGeneratorForLaunchedRecordOpts {
     maxPerTick?: number;
     fetchImpl?: GitHubFetch;
     token?: string;
+    /** See `JinnRepoLiveGeneratorConfig.markerAuthorLogin` — issue #1893 Finding 1. */
+    markerAuthorLogin?: string;
+    /** See `JinnRepoLiveGeneratorConfig.markerTrustedAssociations` — issue #1893 Finding 1. */
+    markerTrustedAssociations?: string[];
   };
 }
 
@@ -357,6 +461,8 @@ export function makeJinnRepoLiveGeneratorForLaunchedRecord(
     maxPerTick: staticConfig.maxPerTick,
     fetchImpl: staticConfig.fetchImpl,
     token: staticConfig.token,
+    markerAuthorLogin: staticConfig.markerAuthorLogin,
+    markerTrustedAssociations: staticConfig.markerTrustedAssociations,
   });
 
   return async (): Promise<Task | Task[] | null> => {

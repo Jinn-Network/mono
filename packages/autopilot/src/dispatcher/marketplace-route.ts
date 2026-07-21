@@ -64,18 +64,57 @@ import { REPO } from './constants.js';
  * ── Retraction ordering (crash-safe, no double-comment) ──────────────────
  *
  * `retractStaleMarketplaceRoutes` discovers retract candidates by querying
- * currently-OPEN issues carrying the label (`gh issue list --label ...`) —
- * NOT via the board snapshot (protects the GraphQL budget; this is a REST
- * call). For each candidate no longer in the caller's still-ready set: post
- * the retraction note FIRST (checked for idempotency against a hash-scoped
- * marker prefix so a restart never double-comments), THEN remove the label.
- * This ordering — comment before label removal — means a crash between the
- * two steps leaves the label in place, so the SAME candidate is
- * rediscovered next cycle and the (idempotent) label removal simply
- * completes; posting the note before removing the label is what keeps the
- * note from ever being silently skipped (removing the label first would
- * evict the issue from the very query used to find it, permanently losing
- * the chance to comment if a crash landed between the two steps).
+ * every issue currently carrying the label — open OR closed (`gh issue list
+ * --label ... --state all`), so a CLOSED issue is never orphaned with the
+ * label + stale marker forever (issue #1893 Finding 5) — NOT via the board
+ * snapshot (protects the GraphQL budget; this is a REST call). For each
+ * candidate no longer in the caller's still-ready set: post the retraction
+ * note FIRST (checked for idempotency against a hash-scoped marker prefix so
+ * a restart never double-comments), THEN remove the label. This ordering —
+ * comment before label removal — means a crash between the two steps leaves
+ * the label in place, so the SAME candidate is rediscovered next cycle and
+ * the (idempotent) label removal simply completes; posting the note before
+ * removing the label is what keeps the note from ever being silently
+ * skipped (removing the label first would evict the issue from the very
+ * query used to find it, permanently losing the chance to comment if a
+ * crash landed between the two steps). A closed issue can never be
+ * "ready" (the ready-filter only considers open issues), so it is never
+ * mistaken for still-ready by this same check.
+ *
+ * ── Marker authorship trust (issue #1893 Finding 1 — CRITICAL) ───────────
+ *
+ * The repo is public: ANY GitHub account can comment on a labeled issue with
+ * a body that *looks* like a marker (same `<!-- jinn-marketplace-snapshot:v1`
+ * prefix, same fenced JSON shape) but carries attacker-chosen
+ * `baseCommit`/`title`/`body`. `findMarker` (below) therefore only accepts a
+ * comment as "the existing marker" — for the create/update/self-heal
+ * decision in `routeToMarketplace`, and for the idempotency check in
+ * `hasRetractionNote` — when the comment's `authorAssociation` (returned by
+ * `gh issue view --json comments` per comment) is one of `OWNER`, `MEMBER`,
+ * `COLLABORATOR`. Those are the only associations a real write-access
+ * identity (a human maintainer or this automation's own bot account, which
+ * needs write access to label/comment in the first place) can ever have — an
+ * outside forger's comment is `NONE`/`CONTRIBUTOR`/`FIRST_TIME_CONTRIBUTOR`
+ * and is never mistaken for the marker. A forged comment that fails this
+ * check is simply invisible to `findMarker`: `routeToMarketplace` treats the
+ * issue as having no existing marker and posts its own (fresh, correctly
+ * authored) one rather than "self-healing" by trusting or PATCHing the
+ * forgery.
+ *
+ * This module deliberately does NOT resolve an exact bot login at this call
+ * site (`routeToMarketplace`/`retractStaleMarketplaceRoutes` take only a
+ * `CommandRunner`, not a token/identity — unlike the dual-identity review
+ * loop in `identity.ts`). `authorAssociation` is the safer, always-available
+ * discriminator: it needs no login to be threaded in from the caller, and it
+ * is exactly the property that actually matters (a genuine write-access
+ * identity), rather than one specific account name. The daemon-side consumer
+ * (`client/src/solver-types/jinn-repo-live-auto.ts`) gates on the REST
+ * equivalent field (`author_association`, snake_case there — the raw GitHub
+ * REST API, vs. `gh`'s own camelCase JSON export here) via its
+ * `markerTrustedAssociations` config; **the two sides must be configured
+ * with the same trusted-association set** (`OWNER`/`MEMBER`/`COLLABORATOR`
+ * here is hardcoded, so the daemon operator's `markerTrustedAssociations`
+ * must match) — see that module's doc for its fail-closed default.
  *
  * ── Cancel semantics — soft cancel only (documented here + module callers)
  *
@@ -230,6 +269,19 @@ function retractCommentBody(issueNumber: number, hash: string): string {
 interface GhComment {
   body?: string;
   url?: string;
+  /** `gh issue view --json comments` field: the commenter's GitHub-computed
+   *  relationship to the repo (`OWNER`, `MEMBER`, `COLLABORATOR`,
+   *  `CONTRIBUTOR`, `NONE`, ...). See module doc "Marker authorship trust". */
+  authorAssociation?: string;
+}
+
+/** Associations a genuine write-access identity can have — see module doc
+ *  "Marker authorship trust" (issue #1893 Finding 1). MUST mirror the set
+ *  the daemon-side `markerTrustedAssociations` config is configured with. */
+const TRUSTED_MARKER_ASSOCIATIONS: ReadonlySet<string> = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+
+function isTrustedMarkerAuthor(comment: GhComment): boolean {
+  return comment.authorAssociation != null && TRUSTED_MARKER_ASSOCIATIONS.has(comment.authorAssociation);
 }
 
 interface GhIssueView {
@@ -248,6 +300,7 @@ function extractCommentId(url: string | undefined): string | null {
 function findMarker(comments: GhComment[]): ParsedMarker | null {
   for (const c of comments) {
     if (c.body == null) continue;
+    if (!isTrustedMarkerAuthor(c)) continue; // issue #1893 Finding 1 — never trust a forged marker
     const parsed = parseMarkerBody(c.body);
     if (parsed == null) continue;
     const commentId = extractCommentId(c.url);
@@ -259,7 +312,7 @@ function findMarker(comments: GhComment[]): ParsedMarker | null {
 
 function hasRetractionNote(comments: GhComment[], issueNumber: number, hash: string): boolean {
   const prefix = retractNotePrefix(issueNumber, hash);
-  return comments.some((c) => c.body?.startsWith(prefix) ?? false);
+  return comments.some((c) => isTrustedMarkerAuthor(c) && (c.body?.startsWith(prefix) ?? false));
 }
 
 function hasLabel(labels: Array<{ name?: string }> | undefined, label: string): boolean {
@@ -333,17 +386,21 @@ export async function routeToMarketplace(
   return { issueNumber, action: 'created', snapshotHash: hash };
 }
 
-// ── Retract pass (ALL currently-labeled open issues, not just ready) ────
+// ── Retract pass (ALL currently-labeled issues, open or closed, not just ready) ─
 
 /**
- * Full retract sweep: query every OPEN issue currently carrying the
- * marketplace label (a single `gh issue list --label` REST call, independent
- * of the board snapshot / ready-filter slicing) and retract any whose number
- * is not in `stillReadyNumbers` — the FULL (unsliced) ready set for this
- * cycle, so an issue merely excluded by this cycle's concurrency/backpressure
- * budget is never mistaken for "no longer ready" (that would flap the label
- * every cycle). See module doc for the crash-safe comment-then-label-remove
- * ordering.
+ * Full retract sweep: query every issue — open OR closed — currently
+ * carrying the marketplace label (a single `gh issue list --label --state
+ * all` REST call, independent of the board snapshot / ready-filter slicing)
+ * and retract any whose number is not in `stillReadyNumbers` — the FULL
+ * (unsliced) ready set for this cycle, so an issue merely excluded by this
+ * cycle's concurrency/backpressure budget is never mistaken for "no longer
+ * ready" (that would flap the label every cycle). Sweeping closed issues too
+ * (issue #1893 Finding 5) means a closed issue never keeps the label + stale
+ * marker forever — a closed issue is never "ready" (the ready-filter only
+ * considers open issues), so it can never be mistaken for still-ready by
+ * this same `stillReadyNumbers` check. See module doc for the crash-safe
+ * comment-then-label-remove ordering.
  */
 export async function retractStaleMarketplaceRoutes(
   stillReadyNumbers: ReadonlySet<number>,
@@ -359,7 +416,7 @@ export async function retractStaleMarketplaceRoutes(
     labeledRaw = await runner('gh', [
       'issue', 'list',
       '--repo', repo,
-      '--state', 'open',
+      '--state', 'all', // open AND closed — issue #1893 Finding 5
       '--label', label,
       '--json', 'number',
       '--limit', '200',
@@ -368,9 +425,9 @@ export async function retractStaleMarketplaceRoutes(
     report.skipped.push(`retract-scan failed: ${err instanceof Error ? err.message : String(err)}`);
     return report;
   }
-  const labeledOpen = (JSON.parse(labeledRaw || '[]') as Array<{ number: number }>).map((r) => r.number);
+  const labeledIssues = (JSON.parse(labeledRaw || '[]') as Array<{ number: number }>).map((r) => r.number);
 
-  for (const issueNumber of labeledOpen) {
+  for (const issueNumber of labeledIssues) {
     if (stillReadyNumbers.has(issueNumber)) continue;
     try {
       const viewRaw = await runner('gh', [

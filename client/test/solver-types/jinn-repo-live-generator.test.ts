@@ -15,6 +15,17 @@ const REPO = 'Jinn-Network/mono';
 const LABEL = 'engine:marketplace';
 const FIXED_NOW_ISO = '2026-07-21T10:00:00.000Z';
 
+// A trusted author_association value used throughout as "our own automation's
+// identity" — mirrors the fact that a real marker is always posted by an
+// account with write access (issue #1893 Finding 1). Tests exercising the
+// trust gate itself override this per-comment.
+const TRUSTED_ASSOCIATION = 'MEMBER';
+
+/** A marker-shaped comment authored by a trusted account (default trust config below). */
+function trustedComment(body: string, association: string = TRUSTED_ASSOCIATION): { body: string; author_association: string } {
+  return { body, author_association: association };
+}
+
 // ---------------------------------------------------------------------------
 // Marker fixture builder — mirrors marketplace-route.ts's wire format
 // independently (no shared code between packages/autopilot and client by
@@ -55,7 +66,7 @@ function markerComment(args: {
 
 interface FakeIssue {
   number: number;
-  comments: Array<{ body?: string }>;
+  comments: Array<{ body?: string; author_association?: string; user?: { login?: string } }>;
 }
 
 function makeFakeFetch(issues: FakeIssue[], opts: { failLabeledList?: boolean; failCommentsFor?: number[] } = {}): GitHubFetch {
@@ -134,10 +145,16 @@ describe('makeJinnRepoLiveGenerator', () => {
     const fetchImpl = makeFakeFetch([
       {
         number: 1892,
-        comments: [{ body: markerComment({ issueNumber: 1892, hash, effort: 'High', title: 'Fix X', body: 'Do the thing.' }) }],
+        comments: [trustedComment(markerComment({ issueNumber: 1892, hash, effort: 'High', title: 'Fix X', body: 'Do the thing.' }))],
       },
     ]);
-    const gen = makeJinnRepoLiveGenerator({ stateDir, fetchImpl, repo: REPO, label: LABEL });
+    const gen = makeJinnRepoLiveGenerator({
+      stateDir,
+      fetchImpl,
+      repo: REPO,
+      label: LABEL,
+      markerTrustedAssociations: [TRUSTED_ASSOCIATION],
+    });
 
     const tasks = await gen();
     expect(tasks).not.toBeNull();
@@ -166,9 +183,10 @@ describe('makeJinnRepoLiveGenerator', () => {
   it('second tick with an unchanged snapshot returns null (no re-post)', async () => {
     const hash = 'b'.repeat(64);
     const fetchImpl = makeFakeFetch([
-      { number: 10, comments: [{ body: markerComment({ issueNumber: 10, hash }) }] },
+      { number: 10, comments: [trustedComment(markerComment({ issueNumber: 10, hash }))] },
     ]);
-    const make = () => makeJinnRepoLiveGenerator({ stateDir, fetchImpl, repo: REPO, label: LABEL });
+    const make = () =>
+      makeJinnRepoLiveGenerator({ stateDir, fetchImpl, repo: REPO, label: LABEL, markerTrustedAssociations: [TRUSTED_ASSOCIATION] });
 
     expect((await make()())).not.toBeNull();
     expect(await make()()).toBeNull();
@@ -182,7 +200,8 @@ describe('makeJinnRepoLiveGenerator', () => {
       stateDir,
       repo: REPO,
       label: LABEL,
-      fetchImpl: makeFakeFetch([{ number: 20, comments: [{ body: markerComment({ issueNumber: 20, hash: hashV1 }) }] }]),
+      markerTrustedAssociations: [TRUSTED_ASSOCIATION],
+      fetchImpl: makeFakeFetch([{ number: 20, comments: [trustedComment(markerComment({ issueNumber: 20, hash: hashV1 }))] }]),
     });
     const firstTasks = await genV1();
     expect(firstTasks).not.toBeNull();
@@ -192,7 +211,8 @@ describe('makeJinnRepoLiveGenerator', () => {
       stateDir,
       repo: REPO,
       label: LABEL,
-      fetchImpl: makeFakeFetch([{ number: 20, comments: [{ body: markerComment({ issueNumber: 20, hash: hashV2 }) }] }]),
+      markerTrustedAssociations: [TRUSTED_ASSOCIATION],
+      fetchImpl: makeFakeFetch([{ number: 20, comments: [trustedComment(markerComment({ issueNumber: 20, hash: hashV2 }))] }]),
     });
     const secondTasks = await genV2();
     expect(secondTasks).not.toBeNull();
@@ -228,12 +248,18 @@ describe('makeJinnRepoLiveGenerator', () => {
     const hash = 'e'.repeat(64);
     const fetchImpl = makeFakeFetch(
       [
-        { number: 40, comments: [{ body: markerComment({ issueNumber: 40, hash }) }] },
-        { number: 41, comments: [{ body: markerComment({ issueNumber: 41, hash: 'f'.repeat(64) }) }] },
+        { number: 40, comments: [trustedComment(markerComment({ issueNumber: 40, hash }))] },
+        { number: 41, comments: [trustedComment(markerComment({ issueNumber: 41, hash: 'f'.repeat(64) }))] },
       ],
       { failCommentsFor: [41] },
     );
-    const gen = makeJinnRepoLiveGenerator({ stateDir, fetchImpl, repo: REPO, label: LABEL });
+    const gen = makeJinnRepoLiveGenerator({
+      stateDir,
+      fetchImpl,
+      repo: REPO,
+      label: LABEL,
+      markerTrustedAssociations: [TRUSTED_ASSOCIATION],
+    });
     const tasks = await gen();
     expect(tasks).toHaveLength(1);
     expect(tasks![0]!.eligibility).toMatchObject({ issue_number: 40 });
@@ -241,16 +267,23 @@ describe('makeJinnRepoLiveGenerator', () => {
 
   it('maxPerTick caps the number of tasks emitted per tick', async () => {
     const fetchImpl = makeFakeFetch(
-      [50, 51, 52].map((n) => ({ number: n, comments: [{ body: markerComment({ issueNumber: n, hash: `${n}`.repeat(16) }) }] })),
+      [50, 51, 52].map((n) => ({ number: n, comments: [trustedComment(markerComment({ issueNumber: n, hash: `${n}`.repeat(16) }))] })),
     );
-    const gen = makeJinnRepoLiveGenerator({ stateDir, fetchImpl, repo: REPO, label: LABEL, maxPerTick: 2 });
+    const gen = makeJinnRepoLiveGenerator({
+      stateDir,
+      fetchImpl,
+      repo: REPO,
+      label: LABEL,
+      maxPerTick: 2,
+      markerTrustedAssociations: [TRUSTED_ASSOCIATION],
+    });
     const tasks = await gen();
     expect(tasks).toHaveLength(2);
   });
 
   it('solverNetManifestCid is threaded onto every emitted Task', async () => {
     const fetchImpl = makeFakeFetch([
-      { number: 60, comments: [{ body: markerComment({ issueNumber: 60, hash: 'a1'.repeat(32) }) }] },
+      { number: 60, comments: [trustedComment(markerComment({ issueNumber: 60, hash: 'a1'.repeat(32) }))] },
     ]);
     const gen = makeJinnRepoLiveGenerator({
       stateDir,
@@ -258,9 +291,92 @@ describe('makeJinnRepoLiveGenerator', () => {
       repo: REPO,
       label: LABEL,
       solverNetManifestCid: 'bafyLiveManifestCid',
+      markerTrustedAssociations: [TRUSTED_ASSOCIATION],
     });
     const tasks = await gen();
     expect(tasks![0]!.solverNetManifestCid).toBe('bafyLiveManifestCid');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Marker authorship trust (issue #1893 Finding 1 — CRITICAL)
+// ---------------------------------------------------------------------------
+
+describe('makeJinnRepoLiveGenerator — marker authorship trust', () => {
+  let stateDir: string;
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(join(tmpdir(), 'jinn-repo-live-gen-trust-'));
+  });
+
+  afterEach(async () => {
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  it('fails closed: with no trust config at all, an otherwise-valid marker (even from a would-be-trusted-looking association) is ignored — no task posted', async () => {
+    const hash = 'aa'.repeat(32);
+    const fetchImpl = makeFakeFetch([
+      { number: 90, comments: [trustedComment(markerComment({ issueNumber: 90, hash }), 'OWNER')] },
+    ]);
+    // No markerAuthorLogin, no markerTrustedAssociations configured.
+    const gen = makeJinnRepoLiveGenerator({ stateDir, fetchImpl, repo: REPO, label: LABEL });
+    await expect(gen()).resolves.toBeNull();
+  });
+
+  it('ignores a marker-shaped comment from an author outside the trusted association set — no task posted', async () => {
+    const hash = 'bb'.repeat(32);
+    // A differently-authored comment matching the marker shape byte-for-byte
+    // (same schema, same fence) but authored by an account with no
+    // relationship to the repo.
+    const fetchImpl = makeFakeFetch([
+      { number: 91, comments: [trustedComment(markerComment({ issueNumber: 91, hash }), 'NONE')] },
+    ]);
+    const gen = makeJinnRepoLiveGenerator({
+      stateDir,
+      fetchImpl,
+      repo: REPO,
+      label: LABEL,
+      markerTrustedAssociations: [TRUSTED_ASSOCIATION], // 'MEMBER' — comment's association is 'NONE'
+    });
+    await expect(gen()).resolves.toBeNull();
+  });
+
+  it('markerAuthorLogin: trusts an exact (case-insensitive) login match', async () => {
+    const hash = 'cc'.repeat(32);
+    const fetchImpl = makeFakeFetch([
+      {
+        number: 92,
+        comments: [{ body: markerComment({ issueNumber: 92, hash }), user: { login: 'Jinn-Autopilot-Bot' } }],
+      },
+    ]);
+    const gen = makeJinnRepoLiveGenerator({
+      stateDir,
+      fetchImpl,
+      repo: REPO,
+      label: LABEL,
+      markerAuthorLogin: 'jinn-autopilot-bot',
+    });
+    const tasks = await gen();
+    expect(tasks).toHaveLength(1);
+    expect(tasks![0]!.eligibility).toMatchObject({ issue_number: 92 });
+  });
+
+  it('markerAuthorLogin: a differently-authored comment matching the marker shape is IGNORED — no task posted', async () => {
+    const hash = 'dd'.repeat(32);
+    const fetchImpl = makeFakeFetch([
+      {
+        number: 93,
+        comments: [{ body: markerComment({ issueNumber: 93, hash }), user: { login: 'random-attacker' } }],
+      },
+    ]);
+    const gen = makeJinnRepoLiveGenerator({
+      stateDir,
+      fetchImpl,
+      repo: REPO,
+      label: LABEL,
+      markerAuthorLogin: 'jinn-autopilot-bot',
+    });
+    await expect(gen()).resolves.toBeNull();
   });
 });
 
@@ -321,7 +437,8 @@ describe('makeJinnRepoLiveGeneratorForLaunchedRecord', () => {
       recordRef,
       staticConfig: {
         stateDir,
-        fetchImpl: makeFakeFetch([{ number: 80, comments: [{ body: markerComment({ issueNumber: 80, hash }) }] }]),
+        fetchImpl: makeFakeFetch([{ number: 80, comments: [trustedComment(markerComment({ issueNumber: 80, hash }))] }]),
+        markerTrustedAssociations: [TRUSTED_ASSOCIATION],
       },
     });
     const tasks = await gen();
