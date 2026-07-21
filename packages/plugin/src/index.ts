@@ -67,6 +67,7 @@ export { PickupConfigSchema, DEFAULT_PICKUP_CONFIG, parsePickupConfig, TIER_ORDE
 export type { PickupConfig, Tier } from './schemas/pickup-config.js';
 export {
   deriveRepositorySearchTerms,
+  discriminatingTerms,
   deriveSearchTerms,
   classifyPayload,
   dedupeKnowledgeHits,

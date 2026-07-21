@@ -226,14 +226,44 @@ function haystackFor(hit: KnowledgeHit): string {
   return `${hit.snippet ?? hit.title ?? ''} ${hit.tags.join(' ')}`.toLowerCase();
 }
 
-/** A term matches if it appears verbatim, or — for a term ending in a
- *  simple plural `s` — its singular form does (#1791 lexical v2: closes
- *  small, common bag-of-words vocabulary gaps like `tests` -> `test`).
+const REGEX_META_RE = /[.*+?^${}()|[\]\\]/g;
+
+/** Whole-word containment: the term must not be flanked by another word
+ *  character (#1886). Plain `includes` matched inside longer words — `load`
+ *  hit `payload`, `under` hit `underlying` — and one such accident is enough
+ *  to clear `RELEVANCE_FLOOR`. `_` counts as a word character so an
+ *  identifier term like `update_available` is not split, while `/`, `-`, `.`
+ *  and whitespace remain boundaries, so `dashboard` still matches inside
+ *  `client/src/dashboard/spa`. */
+function matchesWholeWord(haystack: string, term: string): boolean {
+  const escaped = term.replace(REGEX_META_RE, '\\$&');
+  return new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, 'u').test(haystack);
+}
+
+/** A term matches if it appears as a whole word (#1886), or — for a term
+ *  ending in a simple plural `s` — its singular form does (#1791 lexical v2:
+ *  closes small, common bag-of-words vocabulary gaps like `tests` -> `test`).
  *  One-directional (term -> singular only) and length-gated
  *  (`term.length > 3`) so a short word like `its` never folds to `it`. */
 function termMatches(haystack: string, term: string): boolean {
-  if (haystack.includes(term)) return true;
-  return term.endsWith('s') && term.length > 3 && haystack.includes(term.slice(0, -1));
+  if (matchesWholeWord(haystack, term)) return true;
+  return term.endsWith('s') && term.length > 3 && matchesWholeWord(haystack, term.slice(0, -1));
+}
+
+/**
+ * The scoring vocabulary: `terms` minus the repository-name term (#1886).
+ *
+ * The repository name tags every record in an in-repo corpus, so it matches
+ * everything and discriminates nothing — yet it counted 1 toward
+ * `RELEVANCE_FLOOR`, halving the effective floor for any query issued inside
+ * the repository. It remains a *search* term (it is what surfaces
+ * repo-relevant records at all); it just no longer helps a record clear the
+ * floor. Callers pass the full list to search and this list to scoring.
+ */
+export function discriminatingTerms(terms: string[], repositorySlug?: string): string[] {
+  const repoTerms = new Set(deriveRepositorySearchTerms(repositorySlug));
+  if (repoTerms.size === 0) return terms;
+  return terms.filter((term) => !repoTerms.has(term));
 }
 
 /** Count of matched terms across `taskSummary + tags` (rescope §3.3 step 3,

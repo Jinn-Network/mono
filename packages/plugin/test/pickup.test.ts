@@ -4,6 +4,7 @@ import {
   dedupeKnowledgeHits,
   deriveRepositorySearchTerms,
   deriveSearchTerms,
+  discriminatingTerms,
   rankKnowledgeHits,
   scoreKnowledgeHit,
   selectKnowledgeHits,
@@ -273,6 +274,69 @@ describe('scoreKnowledgeHit (rescope §3.3 step 3)', () => {
       const h = hit({ snippet: 'the flaky tests need a fix', tags: [] });
       expect(scoreKnowledgeHit(h, ['tests'])).toBe(1);
     });
+  });
+
+  // #1886: a term used to match anywhere in the haystack, including inside a
+  // longer word. The first two cases are the real strings from the 2026-07-20
+  // local-corpus walkthrough, where an unrelated pgbouncer question was
+  // delivered two dashboard records.
+  describe('whole-word matching (#1886)', () => {
+    it('does not match a term inside a longer word ("load" in "payload")', () => {
+      const h = hit({ snippet: 'add an e2e payload test', tags: [] });
+      expect(scoreKnowledgeHit(h, ['load'])).toBe(0);
+    });
+
+    it('does not match a term that prefixes a longer word ("under" in "underlying")', () => {
+      const h = hit({ snippet: 'anchor waits on the underlying mocks', tags: [] });
+      expect(scoreKnowledgeHit(h, ['under'])).toBe(0);
+    });
+
+    it('still matches a term bounded by path separators', () => {
+      const h = hit({ snippet: 'touches client/src/dashboard/spa', tags: [] });
+      expect(scoreKnowledgeHit(h, ['dashboard'])).toBe(1);
+    });
+
+    it('still matches an identifier-shaped term containing underscores', () => {
+      const h = hit({ snippet: 'the update_available banner races', tags: [] });
+      expect(scoreKnowledgeHit(h, ['update_available'])).toBe(1);
+    });
+
+    it('still matches a term at the very start and end of the haystack', () => {
+      const h = hit({ snippet: 'dashboard', tags: ['flake'] });
+      expect(scoreKnowledgeHit(h, ['dashboard', 'flake'])).toBe(2);
+    });
+
+    it('folds a plural only onto a whole-word singular ("sessions" misses "sessionId")', () => {
+      const h = hit({ snippet: 'the sessionId is reused', tags: [] });
+      expect(scoreKnowledgeHit(h, ['sessions'])).toBe(0);
+    });
+  });
+});
+
+// #1886 root cause 2: the repository name tags every record in an in-repo
+// corpus, so it scores 1 against everything and cannot discriminate. It stays
+// a SEARCH term (it is what finds repo-relevant records) but leaves the
+// scoring vocabulary, so it can no longer help clear RELEVANCE_FLOOR.
+describe('discriminatingTerms (#1886)', () => {
+  it('drops the repository-name term', () => {
+    expect(discriminatingTerms(['mono', 'dashboard', 'flaky'], 'Jinn-Network/mono')).toEqual([
+      'dashboard',
+      'flaky',
+    ]);
+  });
+
+  it('is a no-op without a repository slug', () => {
+    expect(discriminatingTerms(['mono', 'dashboard'], undefined)).toEqual(['mono', 'dashboard']);
+  });
+
+  it('leaves a term that merely contains the repo name', () => {
+    expect(discriminatingTerms(['monorepo', 'mono'], 'Jinn-Network/mono')).toEqual(['monorepo']);
+  });
+
+  it('a record matching only the repository name scores 0 and is not a candidate', () => {
+    const h = hit({ snippet: 'unrelated work', tags: ['mono', 'dashboard'] });
+    const terms = discriminatingTerms(['mono'], 'Jinn-Network/mono');
+    expect(scoreKnowledgeHit(h, terms)).toBe(0);
   });
 });
 
