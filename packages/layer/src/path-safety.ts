@@ -278,6 +278,9 @@ export function writePackageTreeSafely(root: string, files: PackageTreeFile[]): 
     ) {
       throw new Error(`skill output path escapes the install directory: ${file.path}`);
     }
+    if (normalized.has(relativePath)) {
+      throw new Error(`duplicate skill output path: ${file.path}`);
+    }
     normalized.set(relativePath, { relativePath, target, content: file.content });
   }
   const outputs = [...normalized.values()];
@@ -297,6 +300,9 @@ export function writePackageTreeSafely(root: string, files: PackageTreeFile[]): 
     for (const file of outputs) {
       const staged = join(payloadRoot, file.relativePath);
       mkdirSync(dirname(staged), { recursive: true });
+      if (lstatIfPresent(staged)) {
+        throw new Error(`duplicate skill output path on this filesystem: ${file.relativePath}`);
+      }
       writeFileSync(staged, file.content);
     }
 

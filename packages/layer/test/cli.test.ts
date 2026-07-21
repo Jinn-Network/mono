@@ -862,6 +862,31 @@ describe('jinn-layer skills install', () => {
     expect(out()).toMatch(/symlink/i);
   });
 
+  it('rejects a normalized companion path that collides with canonical SKILL.md', async () => {
+    const { writer, out } = capture();
+    const base = mkdtempSync(join(tmpdir(), 'jinn-skills-'));
+    const dir = join(base, 'skill');
+    const replacement = Buffer.from('publisher-controlled replacement\n', 'utf-8');
+    const record = skillRecord({
+      files: [
+        {
+          path: './SKILL.md',
+          contentBase64: replacement.toString('base64'),
+          sha256: createHash('sha256').update(replacement).digest('hex'),
+        },
+      ],
+    });
+
+    const code = await runJinnLayerCli(
+      ['skills', 'install', 'bafySkill', '--out', dir],
+      { layer: fakeLayer({ record }), writer },
+    );
+
+    expect(code).toBe(1);
+    expect(out()).toMatch(/duplicate skill output path/i);
+    expect(existsSync(dir)).toBe(false);
+  });
+
   it.skipIf(process.platform === 'win32')('replaces a hardlinked companion target without mutating its outside inode', async () => {
     const { writer } = capture();
     const base = mkdtempSync(join(tmpdir(), 'jinn-skills-'));
