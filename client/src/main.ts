@@ -1980,11 +1980,25 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     ...launchedRecordGenerators.map(({ solverType, generator }, idx) =>
       new GeneratedTaskSource(`launched:${solverType}:${idx}`, generator, {
         bucketKeyForTask: (task) => {
-          if (task.solverType !== 'swe-rebench-v2.v1') return undefined;
-          const instanceId = task.spec?.['instance_id'];
-          const postedCount = task.eligibility?.['posted_count_after_record'];
-          if (typeof instanceId !== 'string' || typeof postedCount !== 'number') return undefined;
-          return `swe-rebench-v2:${instanceId}:${postedCount}`;
+          if (task.solverType === 'swe-rebench-v2.v1') {
+            const instanceId = task.spec?.['instance_id'];
+            const postedCount = task.eligibility?.['posted_count_after_record'];
+            if (typeof instanceId !== 'string' || typeof postedCount !== 'number') return undefined;
+            return `swe-rebench-v2:${instanceId}:${postedCount}`;
+          }
+          // Issue #1893: jinn-repo.v1 live-issue tasks bucket on
+          // <issueNumber>:<snapshotHash> (carried on `eligibility` by
+          // `jinn-repo-live-auto.ts`) rather than the default window-based
+          // key — the window's startTs/endTs changes every tick, which would
+          // defeat once-per-bucket dedup for a generator whose own re-post
+          // signal is a material issue edit, not the passage of time.
+          if (task.solverType === 'jinn-repo.v1' && task.spec?.['source'] === 'live-issue') {
+            const issueNumber = task.eligibility?.['issue_number'];
+            const snapshotHash = task.eligibility?.['snapshot_hash'];
+            if (typeof issueNumber !== 'number' || typeof snapshotHash !== 'string') return undefined;
+            return `jinn-repo-live:${issueNumber}:${snapshotHash}`;
+          }
+          return undefined;
         },
       }),
     ),

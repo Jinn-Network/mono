@@ -68,7 +68,7 @@ const CFG: DispatcherConfig = {
   hermesPythonPath: '/opt/hermes/python',
   marketplaceBridgeEnabled: false,
   marketplaceIndexerUrl: '',
-  marketplaceIpfsGatewayUrl: 'https://gateway.autonolas.tech',
+  marketplaceIpfsGatewayUrl: 'https://gateway.autonolas.tech', executionMode: 'local',
 };
 
 /**

@@ -15,7 +15,7 @@ const CFG: DispatcherConfig = {
   reviewBotLogin: 'jinn-review', implGhToken: '', reviewGhToken: '',
   mergePrepEnabled: true, mergePrepCap: 1,
   hermesModel: 'gpt-5.6-sol', hermesProvider: 'openai-codex', hermesPythonPath: '/opt/hermes/python',
-  marketplaceBridgeEnabled: false, marketplaceIndexerUrl: '', marketplaceIpfsGatewayUrl: 'https://gateway.autonolas.tech',
+  marketplaceBridgeEnabled: false, marketplaceIndexerUrl: '', marketplaceIpfsGatewayUrl: 'https://gateway.autonolas.tech', executionMode: 'local',
 };
 
 function stuck(n: number, over: Partial<StuckPr> = {}): StuckPr {

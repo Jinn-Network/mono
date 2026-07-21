@@ -195,6 +195,17 @@ export interface DispatcherConfig {
    * links in PR evidence sections. Source: `JINN_MARKETPLACE_IPFS_GATEWAY_URL`.
    */
   marketplaceIpfsGatewayUrl: string;
+  /**
+   * Creation-automation execution-mode switch (issue #1893, spec
+   * 2026-07-20-autopilot-marketplace-execution.md §"Generator"): `'local'`
+   * dispatches ready issues to a local coordinator session (`dispatchIssue`,
+   * unchanged). `'marketplace'` routes them to the marketplace instead
+   * (`routeToMarketplace` — see `./marketplace-route.js`): label + snapshot
+   * marker, no local session, no GitHub credential handed to a solver.
+   * Default `'local'` — fail-safe, mirrors `mergePrepEnabled`. Source:
+   * `JINN_EXECUTION_MODE` (`'marketplace'` arms it; anything else is `local`).
+   */
+  executionMode: 'local' | 'marketplace';
 }
 
 export const DEFAULT_CONFIG: DispatcherConfig = {
@@ -224,6 +235,7 @@ export const DEFAULT_CONFIG: DispatcherConfig = {
   marketplaceBridgeEnabled: false,
   marketplaceIndexerUrl: '',
   marketplaceIpfsGatewayUrl: 'https://gateway.autonolas.tech',
+  executionMode: 'local',
 };
 
 /** A PR as polled from the PR source, with the fields the review loop needs. */
