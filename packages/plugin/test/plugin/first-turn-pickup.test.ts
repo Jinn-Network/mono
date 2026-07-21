@@ -447,6 +447,37 @@ describe('firstTurnPickup over ports — evidence-first pickup (rescope §3/§4.
     expect(result).not.toHaveProperty('deliveredContentHash');
   });
 
+  // #1886 root cause 2, exercised through the real pickup wiring (not the pure
+  // scoreKnowledgeHit unit). The repository name tags every in-repo record, so
+  // it must not by itself help a record clear the floor. This record matches
+  // the query on `mono` (repo tag + synthesis) plus exactly one content term
+  // (`widget`); before `discriminatingTerms` was wired into both scoring sites
+  // it scored 2 and was delivered — the #1886 defect. The `mono` in the
+  // synthesis also pins the content-rescore path (plugin.ts:467), so this one
+  // test fails if either scoring call site regresses to the raw `terms`.
+  it('scenario 4b (#1886): a record matching only on the repository name is withheld', async () => {
+    const repoNameOnly: InMemoryCorpusSeed = {
+      ref: 'bafyRepoNameOnly',
+      kind: 'trace',
+      task: { summary: 'An unrelated maintenance note', repositorySlug: 'Jinn-Network/mono' },
+      outcome: { status: 'completed', verifiabilityTier: 'tests-passed' },
+      synthesis: 'Unrelated maintenance in the mono widget area.',
+      steps: [],
+      tags: ['mono', 'widget'],
+      provenance: 'imported',
+      origin: 'seed:mono-widget',
+      capturedAt: '2026-07-05T00:00:00.000Z',
+      tier: 'tests-passed',
+    };
+    const plugin = buildPlugin(new InMemoryCorpusPort([repoNameOnly]));
+    const session = plugin.session({ ...META, repositorySlug: 'Jinn-Network/mono' });
+    const result = await session.firstTurnPickup('please adjust the widget in mono');
+
+    expect(result.deliveredRefs).not.toContain('bafyRepoNameOnly');
+    expect(result.packets).toEqual([]);
+    expect(result.deliveryMode).toBe('withheld');
+  });
+
   it('scenario 4: retrieval unavailable proceeds honestly with a degraded reason, no injection', async () => {
     const brokenCorpus: CorpusPort = {
       async search(): Promise<PortResult<KnowledgeHit[]>> {
