@@ -3454,6 +3454,8 @@ describe('jinn-layer distill run log + status/runs subverbs (#1535)', () => {
     });
     const status = JSON.parse(out());
     expect(status).toMatchObject({ mode: 'unset', capturesCount: 0, uncoveredCount: 0, stagedCount: 0, installedCount: 0, lastRun: null });
+    expect(status.capturesDir).toBe(emptyCaptures);
+    expect(status.episodesDir).toBe(emptyCaptures);
     expect(existsSync(modePath)).toBe(false);
     const runsOutput = capture();
     expect(await runJinnLayerCli(['distill', 'runs', '--limit', '1', '--json'], { writer: runsOutput.writer, distillDeps: stubDistillDeps() })).toBe(0);

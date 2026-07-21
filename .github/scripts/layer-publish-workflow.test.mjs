@@ -108,6 +108,20 @@ test('layer CI is paths-filtered and rehearses the npm-shaped package', () => {
   assert.match(ci, /yarn build/);
 });
 
+test('layer CI client compatibility filter names only existing test files', () => {
+  const jobs = yamlBlock(ci, 'jobs', 0);
+  const clientCompat = yamlBlock(jobs, 'client-compat');
+  const testPaths = [...clientCompat.matchAll(/\b(test\/[^\s\\]+\.test\.ts)\b/gu)]
+    .map((match) => match[1]);
+  assert.ok(testPaths.length > 0, 'client-compat must run an explicit test filter');
+  for (const testPath of testPaths) {
+    assert.ok(
+      existsSync(resolve(root, 'client', testPath)),
+      `client-compat references missing test: ${testPath}`,
+    );
+  }
+});
+
 test('layer CI runs both stable publish suites when publisher surfaces change', () => {
   const check = yamlBlock(yamlBlock(ci, 'jobs', 0), 'check');
   assert.match(

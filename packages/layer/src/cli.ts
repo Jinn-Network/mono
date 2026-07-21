@@ -1689,6 +1689,8 @@ export async function runJinnLayerCli(
       const status = {
         mode,
         modePath,
+        /** @deprecated Machine compatibility alias for the effective primary source. */
+        capturesDir: statusEpisodesDir,
         episodesDir: statusEpisodesDir,
         legacyCapturesDir: statusLegacyCapturesDir ?? null,
         capturesCount: statusCaptures.length,

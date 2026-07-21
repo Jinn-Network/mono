@@ -13,7 +13,7 @@ import {
   provenanceLabels,
   stagingDirFor,
 } from '../src/distill-captures.js';
-import type { EpisodeV1 } from '@jinn-network/plugin';
+import { EpisodeV1Schema, type EpisodeV1 } from '@jinn-network/plugin';
 
 function capture(sessionId: string, capturedAt: string, summary = sessionId): CapturedTask {
   return {
@@ -128,6 +128,27 @@ describe('distill capture source helpers', () => {
       events: [{ name: 'stdout' }],
       status: { code: 'OK' },
     });
+  });
+
+  it('projects only known CapturedTask fields from additive EpisodeV1 reads', () => {
+    const compatible = EpisodeV1Schema.parse({
+      ...episode('episode-future', 'session-future', '2026-07-09T00:00:00.000Z'),
+      session: {
+        ...episode('episode-future', 'session-future', '2026-07-09T00:00:00.000Z').session,
+        futureSessionFact: 'preserved by the additive reader',
+      },
+      task: {
+        ...episode('episode-future', 'session-future', '2026-07-09T00:00:00.000Z').task,
+        futureTaskFact: 'preserved by the additive reader',
+      },
+      environment: {
+        ...episode('episode-future', 'session-future', '2026-07-09T00:00:00.000Z').environment,
+        futureEnvironmentFact: 'preserved by the additive reader',
+      },
+    });
+
+    expect(() => episodeToCapturedTask(compatible)).not.toThrow();
+    expect(episodeToCapturedTask(compatible).task.summary).toBe('session-future');
   });
 
   it('loads episodes first, keeps legacy reads, dedupes by session with canonical precedence, then limits globally', async () => {
