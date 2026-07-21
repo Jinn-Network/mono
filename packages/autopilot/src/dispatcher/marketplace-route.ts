@@ -294,9 +294,6 @@ export async function routeToMarketplace(
   const body = view.body ?? '';
   const hash = snapshotHash(body);
 
-  const baseCommitRaw = await runner('git', ['rev-parse', 'origin/next']);
-  const baseCommit = baseCommitRaw.trim();
-
   const existing = findMarker(view.comments ?? []);
   const effort = issue.effort?.toLowerCase() ?? null;
 
@@ -304,11 +301,18 @@ export async function routeToMarketplace(
     // Unchanged snapshot. Re-affirm the label defensively (cheap, idempotent)
     // in case it was removed out-of-band without the marker being touched —
     // never fight the retract sweep's own removal, only heal a manual slip.
+    // No `base_commit` re-derivation needed — nothing downstream reads it on
+    // this path.
     if (!hasLabel(view.labels, label)) {
       await runner('gh', ['issue', 'edit', String(issueNumber), '--repo', repo, '--add-label', label]);
     }
     return { issueNumber, action: 'unchanged', snapshotHash: hash };
   }
+
+  // Only fetch `base_commit` when a new/updated marker will actually be
+  // written — the unchanged path above returns before this point.
+  const baseCommitRaw = await runner('git', ['rev-parse', 'origin/next']);
+  const baseCommit = baseCommitRaw.trim();
 
   if (!hasLabel(view.labels, label)) {
     await runner('gh', ['issue', 'edit', String(issueNumber), '--repo', repo, '--add-label', label]);
