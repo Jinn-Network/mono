@@ -1,0 +1,1 @@
+The Autopilot v2 finalizer-ordering canary ran successfully. It verified that finalization undrafts the PR before projecting and moving the board item to `In Review`. This ordering converges under concurrent board writers; see the canonical [Autopilot v2 cutover runbook](../runbooks/autopilot-v2-cutover.md).
