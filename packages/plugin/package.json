@@ -5,13 +5,15 @@
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "license": "MIT",
-  "private": true,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
     "dist/",
     "process-contract.json"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": {
       "import": "./dist/index.js",

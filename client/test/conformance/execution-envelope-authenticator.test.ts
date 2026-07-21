@@ -11,7 +11,7 @@ function goldenEnvelope(): Record<string, unknown> {
   return JSON.parse(
     readFileSync(
       new URL(
-        '../../packages/harness-layer/test/fixtures/golden-envelope.v0.json',
+        '../architecture/client-golden-envelope/golden-envelope.v0.json',
         import.meta.url,
       ),
       'utf8',

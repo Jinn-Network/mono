@@ -1007,6 +1007,7 @@ __metadata:
     "@hono/node-server": "npm:^2.0.5"
     "@huggingface/transformers": "npm:^4.2.0"
     "@jinn-network/core": "npm:0.1.0"
+    "@jinn-network/jinn-layer": "portal:../packages/layer"
     "@jinn-network/plugin": "npm:0.1.0"
     "@jinn-network/sdk": "portal:../packages/sdk"
     "@modelcontextprotocol/sdk": "npm:^1.27.1"
@@ -1064,8 +1065,6 @@ __metadata:
   bin:
     client: ./dist/bin/jinn.js
     jinn: ./dist/bin/jinn.js
-    jinn-distill-mcp: ./dist/bin/jinn-distill-mcp.js
-    jinn-layer: ./dist/bin/jinn-layer.js
     jinn-stop-hook: ./dist/bin/jinn-stop-hook.js
   languageName: unknown
   linkType: soft
@@ -1075,6 +1074,7 @@ __metadata:
   resolution: "@jinn-network/core@portal:../packages/core::locator=%40jinn-network%2Fclient%40workspace%3A."
   dependencies:
     "@huggingface/transformers": "npm:^4.2.0"
+    "@jinn-network/plugin": "npm:0.1.0"
     "@noble/hashes": "npm:^2.2.0"
     "@secretlint/core": "npm:^13.0.2"
     "@secretlint/secretlint-rule-preset-recommend": "npm:^13.0.2"
@@ -1083,7 +1083,6 @@ __metadata:
     openredaction: "npm:^1.1.2"
     zod: "npm:^4.4.3"
   peerDependencies:
-    "@jinn-network/plugin": "*"
     vitest: ^4.1.8
   peerDependenciesMeta:
     vitest:
@@ -1091,17 +1090,22 @@ __metadata:
   languageName: node
   linkType: soft
 
-"@jinn-network/harness-layer@workspace:packages/harness-layer":
+"@jinn-network/jinn-layer@portal:../packages/layer::locator=%40jinn-network%2Fclient%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/harness-layer@workspace:packages/harness-layer"
+  resolution: "@jinn-network/jinn-layer@portal:../packages/layer::locator=%40jinn-network%2Fclient%40workspace%3A."
   dependencies:
-    "@jinn-network/core": "portal:../../../packages/core"
-    "@jinn-network/plugin": "portal:../../../packages/plugin"
+    "@jinn-network/core": "npm:0.1.0"
+    "@jinn-network/plugin": "npm:0.1.0"
     "@modelcontextprotocol/sdk": "npm:^1.27.1"
+    better-sqlite3: "npm:^12.10.0"
+    canonicalize: "npm:^3.0.0"
     viem: "npm:^2.0.0"
     yaml: "npm:^2.8.4"
     zod: "npm:^4.4.3"
-  languageName: unknown
+  bin:
+    jinn-distill-mcp: ./dist/bin/jinn-distill-mcp.js
+    jinn-layer: ./dist/bin/jinn-layer.js
+  languageName: node
   linkType: soft
 
 "@jinn-network/operator-spa@workspace:src/dashboard/spa":

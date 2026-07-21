@@ -91,7 +91,7 @@ const codexTranscript = [
 
 const directCodexExecFixturePath = fileURLToPath(
   new URL(
-    '../../../../client/packages/harness-layer/test/fixtures/codex-stdout.fixture.jsonl',
+    '../fixtures/codex-stdout.fixture.jsonl',
     import.meta.url,
   ),
 );

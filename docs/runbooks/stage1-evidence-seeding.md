@@ -1,9 +1,9 @@
 # Stage 1 evidence seeding
 
-How to turn a completed agentic session into a published evidence-episode
-seed, and how to publish the curated Stage 1 fixture set
-(`client/packages/harness-layer/fixtures/stage1-seeds/`) to the testnet
-corpus so Stage 1's evidence-first retrieval
+How to turn a completed agentic session into a reviewed evidence-episode
+seed and plan the curated Stage 1 fixture set
+(`packages/layer/fixtures/stage1-seeds/`) for eventual testnet publication,
+so Stage 1's evidence-first retrieval
 (`docs/superpowers/plans/2026-07-16-jinn-plugin-stage-1-rescope-plan.md` §3-§4)
 has canonical prior-work evidence to serve. Issue #1771.
 
@@ -23,7 +23,7 @@ distinguishable on the wire: `provenance: 'imported'`, the
 the demand signal and emissions eligibility. The selected scrub profile is a
 local implementation fact proved by code and tests; the current envelope
 schema does not publish a scrub-component manifest. See
-`client/packages/harness-layer/src/seed-import/episode-execute.ts`.
+`packages/layer/src/seed-import/episode-execute.ts`.
 
 ## 1. Record → transform → author
 
@@ -68,7 +68,7 @@ schema does not publish a scrub-component manifest. See
    `mono, dashboard, vitest, version-status, async, flake,
    retrieval:visible.v1`.
 5. **Shape the file** against the seed-episode contract
-   (`client/packages/harness-layer/src/seed-import/episode-fetch.ts`,
+   (`packages/layer/src/seed-import/episode-fetch.ts`,
    `SeedEpisodeSchema`):
 
    ```json
@@ -110,8 +110,9 @@ schema does not publish a scrub-component manifest. See
 6. **Validate locally** before touching the network:
 
    ```bash
-   cd client
-   yarn vitest run packages/harness-layer/test/stage1-seeds-fixtures.test.ts
+   corepack yarn --cwd packages/layer install --immutable
+   corepack yarn --cwd packages/layer vitest run test/stage1-seeds-fixtures.test.ts
+   corepack yarn --cwd packages/layer build
    ```
 
    That test is the curated fixture set's own lint: schema-valid, no absolute
@@ -122,8 +123,8 @@ schema does not publish a scrub-component manifest. See
 ## 2. Plan (zero writes)
 
 ```bash
-cd client
-yarn jinn-layer seed plan --episodes-dir packages/harness-layer/fixtures/stage1-seeds \
+"$PWD/packages/layer/dist/bin/jinn-layer.js" seed plan \
+  --episodes-dir packages/layer/fixtures/stage1-seeds \
   --out /tmp/stage1-episode-report.json
 ```
 
@@ -143,31 +144,24 @@ live from the GitHub API, and these fixtures' placeholder repos
 (`distractor/skill-tdd*`) do not exist — a fetch would 404. Nothing
 publishes them to the shared corpus.
 
-## 3. Execute (publishes to testnet)
+## 3. Execute (parked in the standalone package)
 
-Publishing needs a live operator identity. Derive one from your local
-`~/.jinn-client` keystore and export it for this shell:
+The independent package owns seed planning and import mechanics, but it does
+not link the client's wallet or chain-writing code. In the Stage 2 parked
+state, the standalone CLI therefore fails closed for `derive-env` and live
+`seed execute` unless an authorized host injects the publication adapter.
+Do not work around that boundary with production credentials or by adding a
+client import to the layer.
 
-```bash
-eval "$(yarn jinn-layer derive-env)"
-```
-
-Then run the approved report:
-
-```bash
-yarn jinn-layer seed execute /tmp/stage1-episode-report.json \
-  --episodes-dir packages/harness-layer/fixtures/stage1-seeds
-```
-
-Each `import`-verdict row runs through `capture()` (seed-profile scrub) then
-`publish()` (the same anchor path a real contribution uses) and prints the
-published `envelopeRef` (the corpus ref) plus the anchor tx. `--json`
-emits the machine-readable `EpisodeImportResult` instead of the table.
+The local package and clean-install gates exercise the complete no-network
+planning/session boundary. Live publication remains an operator residual for
+the host-adapter work that reintroduces an explicitly authorized outbound
+lane.
 
 ## 4. Verify retrievability
 
 ```bash
-yarn jinn-layer corpus search "dashboard" --limit 5
+"$PWD/packages/layer/dist/bin/jinn-layer.js" corpus search "dashboard" --limit 5
 ```
 
 The seeded record should appear in the results (ref, `kind: 'trace'`, tags
@@ -175,7 +169,7 @@ including your episode's tags). Fetch it directly to confirm the full
 content round-tripped:
 
 ```bash
-yarn jinn-layer corpus get <ref> --json
+"$PWD/packages/layer/dist/bin/jinn-layer.js" corpus get <ref> --json
 ```
 
 Confirm `provenance: 'imported'`, the `seed:step:*` steps carrying
@@ -189,13 +183,14 @@ checked-in fixtures pass the lane and that the lane constructs the expected
 envelopes; they do **not** prove that a record was published to or is
 retrievable from the live testnet corpus.
 
-After the scrub-profile fix has merged, an operator must run sections 2 and
-3 against the real configured testnet, then verify the previously blocked
-same-repository distractor explicitly:
+After an authorized host publication adapter exists, an operator must run
+section 2 and the host-equivalent execute path against the real configured
+testnet, then verify the previously blocked same-repository distractor
+explicitly:
 
 ```bash
-yarn jinn-layer corpus search "claims" --limit 5
-yarn jinn-layer corpus get <distractor-operator-claims-ref> --json
+"$PWD/packages/layer/dist/bin/jinn-layer.js" corpus search "claims" --limit 5
+"$PWD/packages/layer/dist/bin/jinn-layer.js" corpus get <distractor-operator-claims-ref> --json
 ```
 
 Keep #1784 open until `distractor-operator-claims` appears in the search
@@ -258,8 +253,7 @@ Run the #1825 acceptance against a throwaway file-backed seed state and mocked
 publication dependencies:
 
 ```bash
-cd client
-yarn vitest run packages/harness-layer/test/seed-import-episodes.test.ts \
+corepack yarn --cwd packages/layer vitest run test/seed-import-episodes.test.ts \
   -t "re-publishes the marked Stage 1 source"
 ```
 
@@ -271,13 +265,14 @@ publication occurs. It makes no IPFS, RPC, or testnet call.
 
 ### Post-merge operational gate for #1825
 
-The local rehearsal does not replace the existing shared-corpus record. An
-operator must run sections 2 and 3 from the same machine and seed-state file
-that published the prior unmarked Stage 1 episode. Preserve that state file:
-it supplies the old `envelopeRef` for `supersedes`. Review the fresh plan,
-execute it once, and verify that `source-dashboard-flake` reports the prior
-ref in `supersedes`; an immediate unchanged re-run must report `skipped`.
-This is the only live residual for #1825.
+The local rehearsal does not replace the existing shared-corpus record.
+Preserve the seed-state file from the machine that published the prior
+unmarked Stage 1 episode: it supplies the old `envelopeRef` for
+`supersedes`. Review a fresh plan now, but wait for the authorized host
+publication adapter before executing it. Once that outbound lane exists,
+execute once through the host and verify that `source-dashboard-flake`
+reports the prior ref in `supersedes`; an immediate unchanged re-run must
+report `skipped`. This is the only live residual for #1825.
 
 ## Fixture-file reference
 

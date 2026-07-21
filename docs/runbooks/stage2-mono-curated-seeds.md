@@ -6,7 +6,7 @@ review, publish, and verify the first `Jinn-Network/mono` batch that satisfies
 the shared `K=3` retrieval-visible corpus probe.
 
 The repository supplies a template, an offline mechanical auditor, and the
-existing plan/execute lane. It deliberately supplies no pre-approved batch.
+read-only planning lane. It deliberately supplies no pre-approved batch.
 The operator owns record selection, authorship, privacy review, publication,
 the live testnet probe, and the attributed working-session judgment.
 
@@ -30,13 +30,17 @@ states those boundaries explicitly.
 
 - Run from the Stage 2 candidate that contains the accepted visibility,
   supersede, seed-scrub, corpus-probe, and stock-Hermes work.
-- Use Node 22 and install the client dependencies:
+- Use Node 22 and install/build the independent package chain plus the client:
 
   ```bash
-  cd client
-  corepack yarn install --immutable
-  corepack yarn build:plugin
-  corepack yarn build:core
+  corepack yarn --cwd packages/plugin install --immutable
+  corepack yarn --cwd packages/plugin build
+  corepack yarn --cwd packages/core install --immutable
+  corepack yarn --cwd packages/core build
+  corepack yarn --cwd packages/layer install --immutable
+  corepack yarn --cwd packages/layer build
+  corepack yarn --cwd client install --immutable
+  export JINN_LAYER_BIN="$PWD/packages/layer/dist/bin/jinn-layer.js"
   ```
 
 - Confirm the operator's testnet identity and discovery configuration are the
@@ -51,7 +55,7 @@ Copy the non-loadable template out of the repository fixture tree:
 
 ```bash
 mkdir -p /tmp/jinn-stage2-mono-candidates
-cp packages/harness-layer/fixtures/curated-mono-candidates/episode.template.json \
+cp packages/layer/fixtures/curated-mono-candidates/episode.template.json \
   /tmp/jinn-stage2-mono-candidates/<stable-id>.episode.json
 ```
 
@@ -77,7 +81,7 @@ For each record, the operator must review facts the script cannot establish:
 
 ```bash
 set -o pipefail
-corepack yarn stage2:validate-curated-seeds --episodes-dir \
+corepack yarn --cwd client stage2:validate-curated-seeds --episodes-dir \
   /tmp/jinn-stage2-mono-candidates --repo Jinn-Network/mono --json \
   | tee /tmp/stage2-mono-curated-audit.json
 ```
@@ -94,8 +98,8 @@ Require all of:
 The negative control must fail honestly at the current one-of-three state:
 
 ```bash
-corepack yarn stage2:validate-curated-seeds --episodes-dir \
-  packages/harness-layer/fixtures/stage1-seeds --json
+corepack yarn --cwd client stage2:validate-curated-seeds --episodes-dir \
+  "$PWD/packages/layer/fixtures/stage1-seeds" --json
 ```
 
 That command exits `1`; it is evidence that the tool does not turn the
@@ -129,7 +133,7 @@ or a retry can duplicate immutable records and break supersede lineage.
 Planning performs no corpus or chain writes:
 
 ```bash
-corepack yarn jinn-layer seed plan --episodes-dir \
+"$JINN_LAYER_BIN" seed plan --episodes-dir \
   /tmp/jinn-stage2-mono-candidates \
   --out /tmp/stage2-mono-curated-plan.json
 ```
@@ -138,40 +142,20 @@ Compare the plan digests and rows with the audited files. A human must read
 every final file and explicitly approve this exact plan. Any edit after that
 review requires a fresh audit and plan.
 
-## 6. Publish to the configured testnet
+## 6. Publication is intentionally parked
 
-Only the authorized operator performs this section:
-
-```bash
-unset JINN_LAYER_PRIVATE_KEY JINN_LAYER_SAFE_ADDRESS JINN_LAYER_AGENT_ID
-derived_env="$(corepack yarn jinn-layer derive-env)" || {
-  printf '%s\n' 'derive-env failed; nothing was published' >&2
-  exit 1
-}
-eval "$derived_env"
-: "${JINN_LAYER_PRIVATE_KEY:?derive-env omitted private key}"
-: "${JINN_LAYER_SAFE_ADDRESS:?derive-env omitted Safe address}"
-: "${JINN_LAYER_AGENT_ID:?derive-env omitted agent id}"
-set -o pipefail
-corepack yarn jinn-layer seed execute /tmp/stage2-mono-curated-plan.json \
-  --episodes-dir /tmp/jinn-stage2-mono-candidates --json \
-  | tee /tmp/stage2-mono-curated-publish.json
-```
-
-Preserve each envelope ref, anchor transaction, and any recovery warning.
-Stop on the first warning or error. A transport error is an ambiguous outcome,
-not permission to retry; reconcile the envelope and transaction externally
-before taking another write action.
-
-An unchanged rerun should report `skipped`. A changed file must be re-audited,
-re-planned, and re-approved; when the same stable identity changes, the
-preserved local state supplies the prior envelope ref for `supersedes`.
+The extracted layer deliberately does not import the client's wallet or
+chain-writing implementation. Its CLI rejects `derive-env` and live
+`seed execute` unless an authorized host injects the publication adapter.
+The audit and plan above are safe and read-only; stop there in the parked
+state. Live publication and its immutable-record recovery procedure remain
+an operator gate for the future outbound-lane design.
 
 ## 7. Run the shared live probe
 
 ```bash
 set -o pipefail
-corepack yarn jinn-layer corpus probe "Jinn-Network/mono" --json \
+"$JINN_LAYER_BIN" corpus probe "Jinn-Network/mono" --json \
   | tee /tmp/stage2-mono-corpus-probe.json
 ```
 

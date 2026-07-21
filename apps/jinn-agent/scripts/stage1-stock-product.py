@@ -6,7 +6,7 @@ owns the user-visible lifecycle and a local HTTP stand-in for external corpus
 services; the plugin and ``jinn-layer`` process bridge are the real builds.
 
 Stage 1 rescope (R5, closes #1774): the corpus fixture serves the R4 seed set
-(client/packages/harness-layer/fixtures/stage1-seeds/) instead of one
+(packages/layer/fixtures/stage1-seeds/) instead of one
 hand-written skill trace — the real built `jinn-layer` performs search, get,
 and evidence-first packet projection against it (no plugin stubs). Scenarios
 follow the rescope plan §4.5. The Stage 2 parked-era amendment keeps local
@@ -37,7 +37,7 @@ import yaml
 PINNED_HERMES = "9df5f879b4a5925c0f8f947e7e16ed8e845932c3"
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SEED_FIXTURES_DIR = REPO_ROOT / "client" / "packages" / "harness-layer" / "fixtures" / "stage1-seeds"
+SEED_FIXTURES_DIR = REPO_ROOT / "packages" / "layer" / "fixtures" / "stage1-seeds"
 
 # The five curated Stage 1 seed fixtures (rescope R4, #1771 / PR #1779),
 # identified by filename stem. Refs below are this driver's own stand-in
@@ -62,7 +62,7 @@ DISTRACTOR_SKILL_REF = _to_ref(DISTRACTOR_SKILL)
 DISTRACTOR_SKILL_DUP_REF = _to_ref(DISTRACTOR_SKILL_DUP)
 
 # A distinctive, verbatim excerpt line from the source fixture's "fix" step
-# (client/packages/harness-layer/fixtures/stage1-seeds/source-dashboard-flake.episode.json)
+# (packages/layer/fixtures/stage1-seeds/source-dashboard-flake.episode.json)
 # that is NOT one of the scenario-1 message's derived search terms — proves
 # the injection carries real content, not metadata (rescope plan §4.5 item 1).
 SOURCE_DISTINCTIVE_CONTENT = "apiMocks.getStatus"
@@ -111,15 +111,16 @@ MISSING_LAYER_MESSAGE = "Preserve local capture"
 INCOMPATIBLE_LAYER_MESSAGE = "Preserve incompatible capture"
 
 
-def require_env(name: str) -> Path:
+def require_env(name: str, *, resolve: bool = True) -> Path:
     value = os.environ.get(name, "").strip()
     assert value, f"{name} is required"
-    return Path(value).resolve()
+    path = Path(value)
+    return path.resolve() if resolve else path.absolute()
 
 
 WORK = require_env("JINN_STAGE1_WORK")
 HERMES_HOME = require_env("HERMES_HOME")
-LAYER_BIN = require_env("JINN_LAYER_BIN")
+LAYER_BIN = require_env("JINN_STAGE1_LAYER_BIN", resolve=False)
 EPISODES_DIR = require_env("JINN_LAYER_EPISODES_DIR")
 CAPTURES_DIR = require_env("JINN_LAYER_CAPTURES_DIR")
 MINEABLE_DIR = require_env("JINN_MINEABLE_STATE_DIR")
@@ -158,7 +159,7 @@ def make_repo(path: Path) -> Path:
 # ── Seed fixture loading (rescope R4 seed set → wire shapes) ─────────────────
 #
 # Mirrors the SAME wire shapes the real seed-import lane produces
-# (client/packages/harness-layer/src/seed-import/{episode-execute,execute}.ts)
+# (packages/layer/src/seed-import/{episode-execute,execute}.ts)
 # so the real built jinn-layer performs search/get/packet-projection exactly
 # as it would against a seeded testnet corpus. No bespoke fixture format.
 
@@ -465,8 +466,19 @@ def start_corpus_server(fixture: CorpusFixture) -> tuple[ThreadingHTTPServer, th
 
 def assert_installed_product() -> None:
     assert run("git", "rev-parse", "HEAD", cwd=Path.cwd()) == PINNED_HERMES
+
+    import jinn_plugin
+    from jinn_plugin import jinn_layer
+
+    plugin_dir = Path(jinn_plugin.__file__).resolve().parent
+    assert plugin_dir.is_relative_to(Path(sys.prefix).resolve())
+    resolution = jinn_layer.resolve_binary()
+    assert resolution.source == "plugin-local"
+    assert resolution.argv == (str(LAYER_BIN),)
+    assert resolution.package == "@jinn-network/jinn-layer"
+    assert resolution.version == "0.1.0"
     assert LAYER_BIN.is_file() and os.access(LAYER_BIN, os.X_OK)
-    contract = json.loads(run(str(LAYER_BIN), "contract", "--json"))
+    contract = json.loads(run(*resolution.argv, "contract", "--json"))
     assert contract == {"contractVersion": 1}
 
     distribution = importlib.metadata.distribution("jinn-plugin")
@@ -861,21 +873,32 @@ def main() -> None:
         assert unavailable_context is None
         assert "knowledge searched · nothing relevant found" in unavailable_summary.lower()
 
-        real_layer = os.environ["JINN_LAYER_BIN"]
-        os.environ["JINN_LAYER_BIN"] = str(WORK / "missing-jinn-layer")
-        reset_session_runtime(jinn)
-        missing_summary, missing_context, _missing_marker, _missing_mid = finish_session(
-            jinn,
-            session_id="stage1-missing-layer",
-            task_id="task-missing-layer",
-            repo=clean_repo,
-            message=MISSING_LAYER_MESSAGE,
-            expected_pickup=False,
-        )
-        assert missing_context is None
-        assert "captured locally" in missing_summary.lower()
-        assert "process bridge degraded" in missing_summary.lower()
-        os.environ["JINN_LAYER_BIN"] = real_layer
+        local_layer_bin = Path(jinn.jinn_layer.resolve_binary().argv[0])
+        hidden_layer_bin = local_layer_bin.with_name(".jinn-layer-stage1-hidden")
+        original_layer_override = os.environ.pop("JINN_LAYER_BIN", None)
+        assert not hidden_layer_bin.exists()
+        local_layer_bin.rename(hidden_layer_bin)
+        try:
+            os.environ["JINN_LAYER_BIN"] = str(WORK / "missing-jinn-layer")
+            reset_session_runtime(jinn)
+            missing_summary, missing_context, _missing_marker, _missing_mid = finish_session(
+                jinn,
+                session_id="stage1-missing-layer",
+                task_id="task-missing-layer",
+                repo=clean_repo,
+                message=MISSING_LAYER_MESSAGE,
+                expected_pickup=False,
+            )
+            assert missing_context is None
+            assert "captured locally" in missing_summary.lower()
+            assert "process bridge degraded" in missing_summary.lower()
+        finally:
+            hidden_layer_bin.rename(local_layer_bin)
+            os.environ.pop("JINN_LAYER_BIN", None)
+            if original_layer_override is not None:
+                os.environ["JINN_LAYER_BIN"] = original_layer_override
+
+        assert jinn.jinn_layer.resolve_binary().source == "plugin-local"
 
         class IncompatibleRunner:
             def __call__(

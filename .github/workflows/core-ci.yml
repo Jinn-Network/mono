@@ -45,7 +45,7 @@ jobs:
       - run: yarn test
 
   client-compat:
-    name: Client Typecheck & Harness-Layer Tests
+    name: Client Typecheck & Extracted-Boundary Tests
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -66,5 +66,11 @@ jobs:
           node-version: 22
       - run: corepack enable
       - run: yarn install --immutable
+      - run: yarn build:plugin
+      - run: yarn build:core
+      - run: yarn build:layer
       - run: yarn typecheck
-      - run: yarn vitest run packages/harness-layer/test
+      - run: >-
+          yarn vitest run
+          test/architecture/golden-envelope.test.ts
+          test/bin/jinn-layer-composition.test.ts

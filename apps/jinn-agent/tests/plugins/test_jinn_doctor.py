@@ -196,6 +196,40 @@ def test_layer_checks_healthy(monkeypatch):
     assert "remedy" not in contract
 
 
+@pytest.mark.parametrize(
+    "detail",
+    [
+        "invalid layer runtime contract",
+        "plugin-local layer package manifest is unreadable",
+        "plugin-local layer version mismatch",
+        "plugin-local layer artifact is not executable",
+    ],
+)
+def test_layer_resolution_failure_is_a_structured_doctor_failure(monkeypatch, detail):
+    runner = ContractRunner()
+
+    def broken_resolution():
+        raise jinn_layer.LayerResolutionError(detail)
+
+    monkeypatch.setattr(jinn_layer, "resolve_binary", broken_resolution)
+
+    available, contract = doctor._check_layer(runner=runner)
+
+    assert available == {
+        "name": "layer-available",
+        "ok": False,
+        "detail": f"jinn-layer resolution failed: {detail}",
+        "remedy": "jinn-agent plugins update jinn",
+    }
+    assert contract == {
+        "name": "layer-contract",
+        "ok": False,
+        "detail": "not checked — layer unavailable",
+        "remedy": "jinn-agent plugins update jinn",
+    }
+    assert runner.calls == []
+
+
 def test_layer_unavailable_surfaces_stderr_remediation(monkeypatch):
     monkeypatch.delenv("JINN_LAYER_BIN", raising=False)
     stderr = (

@@ -466,7 +466,7 @@ describe('retrieval-visibility allowlist (#1824)', () => {
 
 // Rebuilds the five-message x three-record validation table from #1791's
 // decision comment as unit tests. Hit shapes mirror the real Stage 1 seed
-// fixtures verbatim (client/packages/harness-layer/fixtures/stage1-seeds/
+// fixtures verbatim (packages/layer/fixtures/stage1-seeds/
 // *.episode.json): taskSummary -> snippet, tags -> tags — the only two
 // fields haystackFor() reads, so this is a faithful proxy for the real
 // corpus records without needing the seed-import/IPFS machinery in a unit

@@ -24,6 +24,8 @@ def test_pyproject_declares_entry_point():
 def test_package_dir_maps_jinn_plugin_to_dot():
     data = tomllib.loads(PYPROJECT.read_text())
     assert data["tool"]["setuptools"]["package-dir"]["jinn_plugin"] == "."
+    package_data = data["tool"]["setuptools"]["package-data"]["jinn_plugin"]
+    assert "layer-runtime.json" in package_data
 
 
 def test_register_is_exposed():

@@ -310,7 +310,7 @@ __metadata:
   resolution: "@jinn-network/core@workspace:."
   dependencies:
     "@huggingface/transformers": "npm:^4.2.0"
-    "@jinn-network/plugin": "portal:../plugin"
+    "@jinn-network/plugin": "npm:0.1.0"
     "@noble/hashes": "npm:^2.2.0"
     "@secretlint/core": "npm:^13.0.2"
     "@secretlint/secretlint-rule-preset-recommend": "npm:^13.0.2"
@@ -323,7 +323,6 @@ __metadata:
     vitest: "npm:^4.1.8"
     zod: "npm:^4.4.3"
   peerDependencies:
-    "@jinn-network/plugin": "*"
     vitest: ^4.1.8
   peerDependenciesMeta:
     vitest:

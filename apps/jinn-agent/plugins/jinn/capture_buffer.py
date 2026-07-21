@@ -3,7 +3,7 @@
 The plugin records the first user message (``pre_llm_call``) and every tool
 call (``post_tool_call``) into an in-memory buffer keyed by task/session,
 then assembles the ``CapturedTask`` JSON that ``jinn-layer`` consumes
-(``client/packages/harness-layer/src/capture.ts`` ``CapturedTaskSchema`` in
+(``packages/core/src/captured-task.ts`` ``CapturedTaskSchema`` in
 the mono repo). Attributes are recorded RAW here — the mandatory,
 fail-closed scrub happens inside ``jinn-layer capture``/``publish`` on this
 machine, before anything can leave it.

@@ -94,6 +94,9 @@ function assertTarballCleanAndComplete() {
       entry.startsWith('package/acceptance-runs/') ||
       entry.startsWith('package/.local/') ||
       entry.includes('/.env')
+      || entry === 'package/dist/bin/jinn-layer.js'
+      || entry === 'package/dist/bin/jinn-distill-mcp.js'
+      || entry.startsWith('package/plugins/local-trace-distiller')
     ));
   if (forbidden.length > 0) {
     console.error('smoke-test-pack: tarball includes local acceptance or secret-bearing state');
@@ -189,45 +192,6 @@ try {
     parseJsonOrExit(doctor.stdout, 'packed jinn doctor');
 
     runOrExit(process.execPath, [nodePtyFix, '--verify'], 'node-pty verification');
-
-    // jinn-layer bin (#1356): usage must print from the packed tarball's bin.
-    const layerUsage = runOrExit('npm', ['exec', '--', 'jinn-layer'], 'jinn-layer usage');
-    if (!layerUsage.stdout.includes('Usage: jinn-layer')) {
-      console.error('smoke-test-pack: jinn-layer bin did not print usage');
-      console.error(layerUsage.stdout);
-      process.exit(1);
-    }
-
-    // C4: prove the installed tarball can load the vendored core plus native
-    // better-sqlite3 and create the derived evidence index.
-    const episodesDir = join(smokeDir, 'episodes');
-    const evidenceIndex = join(smokeDir, 'evidence-index.sqlite');
-    mkdirSync(episodesDir);
-    const reindex = runOrExit(
-      'npm',
-      [
-        'exec',
-        '--',
-        'jinn-layer',
-        'reindex',
-        '--json',
-        '--episodes-dir',
-        episodesDir,
-        '--index-path',
-        evidenceIndex,
-      ],
-      'jinn-layer reindex',
-    );
-    const reindexPayload = parseJsonOrExit(reindex.stdout, 'jinn-layer reindex');
-    if (
-      reindexPayload.status !== 'ok'
-      || reindexPayload.report?.indexedEpisodes !== 0
-      || !existsSync(evidenceIndex)
-    ) {
-      console.error('smoke-test-pack: jinn-layer reindex did not create an empty SQLite index');
-      console.error(reindex.stdout);
-      process.exit(1);
-    }
 
     const npxDirect = runOrExit('npm', ['exec', '--yes', '--package', tarball, '--', 'client', 'version', '--json'], 'npx direct');
     assertVersionPayload(parseJsonOrExit(npxDirect.stdout, 'npx direct'), 'npx direct');

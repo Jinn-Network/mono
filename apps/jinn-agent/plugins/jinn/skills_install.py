@@ -69,7 +69,7 @@ def _sanitise_slug(raw: str) -> str:
 # RESIDUAL (flagged cross-repo, 2026-07-08 design): these read-only envelope
 # helpers still serve corpus_fetch + pickup classification for DISPLAY. They no
 # longer gate any install write (install() defers to the layer). Fully removing
-# them needs an interpreted `jinn-layer corpus get` projection — a harness-layer
+# them needs an interpreted `jinn-layer corpus get` projection — a layer
 # follow-up, tracked separately.
 def _episode_error(path: str, expected: str) -> None:
     raise ValueError(f"jinn.episode.v1 field {path} must be {expected}")

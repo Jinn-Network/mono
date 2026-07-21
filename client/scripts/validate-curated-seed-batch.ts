@@ -3,8 +3,8 @@ import { pathToFileURL } from 'node:url';
 import {
   auditCuratedSeedBatch,
   type CuratedSeedBatchAudit,
-} from '../packages/harness-layer/src/seed-import/curated-batch.js';
-import { createLocalEpisodeSeedSource } from '../packages/harness-layer/src/seed-import/episode-fetch.js';
+  createLocalEpisodeSeedSource,
+} from '@jinn-network/jinn-layer';
 
 const DEFAULT_REPO_SLUG = 'Jinn-Network/mono';
 const MAX_CURATED_EPISODE_FILES = 100;

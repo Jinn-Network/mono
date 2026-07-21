@@ -24,7 +24,7 @@ import { MintedPoolStore } from '../dist/solver-types/_swe-rebench-v2-minted-poo
 const execFileAsync = promisify(execFile);
 const work = resolve(requiredEnv('JINN_STAGE1_WORK'));
 const contributionStateDir = resolve(requiredEnv('JINN_MINEABLE_STATE_DIR'));
-const layerBin = resolve(requiredEnv('JINN_LAYER_BIN'));
+const layerBin = resolve(requiredEnv('JINN_STAGE1_LAYER_BIN'));
 const result = JSON.parse(await readFile(join(work, 'stock-product-result.json'), 'utf8'));
 
 function requiredEnv(name) {

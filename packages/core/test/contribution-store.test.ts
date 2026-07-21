@@ -370,10 +370,15 @@ describe('ContributionStore locking', () => {
 
   it('serializes concurrent read-modify-write operations without dropping records', async () => {
     await withTmpDir(async (stateDir) => {
-      const stores = Array.from({ length: 4 }, () => new ContributionStore({ stateDir }));
-      await Promise.all(Array.from({ length: 40 }, (_, index) =>
+      const stores = Array.from({ length: 4 }, () => new ContributionStore({
+        stateDir,
+        lock: { maxRetries: 0 },
+      }));
+      const results = await Promise.allSettled(Array.from({ length: 40 }, (_, index) =>
         stores[index % stores.length]!.record(candidate(`record-${index}`)),
       ));
+      const failure = results.find((result) => result.status === 'rejected');
+      if (failure?.status === 'rejected') throw failure.reason;
 
       expect(await stores[0]!.list()).toHaveLength(40);
     });

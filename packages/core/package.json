@@ -5,12 +5,14 @@
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "license": "MIT",
-  "private": true,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
     "dist/"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": {
       "import": "./dist/index.js",
@@ -36,6 +38,7 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
+    "@jinn-network/plugin": "0.1.0",
     "@noble/hashes": "^2.2.0",
     "@secretlint/core": "^13.0.2",
     "@secretlint/secretlint-rule-preset-recommend": "^13.0.2",
@@ -45,7 +48,6 @@
     "zod": "^4.4.3"
   },
   "peerDependencies": {
-    "@jinn-network/plugin": "*",
     "vitest": "^4.1.8"
   },
   "peerDependenciesMeta": {
@@ -54,10 +56,12 @@
     }
   },
   "devDependencies": {
-    "@jinn-network/plugin": "portal:../plugin",
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^26.1.0",
     "typescript": "^5.4.0",
     "vitest": "^4.1.8"
+  },
+  "resolutions": {
+    "@jinn-network/plugin": "portal:../plugin"
   }
 }

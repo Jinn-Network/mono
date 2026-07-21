@@ -816,6 +816,14 @@ def _tool_corpus_fetch(args: Dict[str, Any], **_kw: Any) -> str:
 # ── Registration ─────────────────────────────────────────────────────────────
 
 def register(ctx) -> None:
+    # Stock Hermes clones the slim plugin but has no dependency-install hook.
+    # Acquire the exact published layer into the plugin-owned npm prefix on
+    # first registration. Source-tree dogfood keeps using explicit overrides.
+    try:
+        jinn_layer.prepare_installed_plugin_runtime()
+    except jinn_layer.LayerResolutionError as exc:
+        logger.warning("Jinn layer runtime bootstrap failed: %s", exc)
+
     # Establish the fail-closed boundary as soon as an enabled plugin is
     # registered, before the first session can create or inspect a candidate.
     # The first session additionally asks the layer to rewrite queued records.
