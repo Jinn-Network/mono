@@ -28,7 +28,7 @@ function candidate(overrides: Partial<MergePrepCandidate> = {}): MergePrepCandid
     headRefName: gitRefName('autopilot/42'),
     baseRefName: gitRefName('next'),
     targetBaseOid: BASE,
-    draft: false,
+    draft: true,
     labels: ['engine:review'],
     body: 'Closes #42\n\n<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
     humanHold: false,
@@ -116,6 +116,30 @@ function harness(overrides: Partial<MergePrepExecutorDeps> = {}) {
 }
 
 describe('merge-prep action executor', () => {
+  it('accepts a fresh claim after projection has made the PR draft', async () => {
+    const h = harness({
+      readCandidate: async () => candidate({ draft: true }),
+    });
+
+    await expect(
+      executeMergePrepAction({ prNumber: 84, expectedHead: HEAD }, h.deps),
+    ).resolves.toMatchObject({ status: 'spawned', claimOid: CLAIM_A });
+  });
+
+  it('refuses a fresh claim before the mandated draft projection', async () => {
+    const h = harness({
+      readCandidate: async () => candidate({ draft: false }),
+    });
+
+    await expect(
+      executeMergePrepAction({ prNumber: 84, expectedHead: HEAD }, h.deps),
+    ).resolves.toMatchObject({
+      status: 'ineligible',
+      detail: 'Pull request must be draft before merge-prep can begin.',
+    });
+    expect(h.events).toEqual([]);
+  });
+
   it('elects one exact-head contender and only the winner creates a child', async () => {
     const h = harness();
     let remote: GitOid = HEAD;
@@ -167,6 +191,29 @@ describe('merge-prep action executor', () => {
     ).resolves.toMatchObject({ status: 'spawned', claimOid: CLAIM_A });
   });
 
+  it('confirms the published claim before repairing projection', async () => {
+    let confirmations = 0;
+    const h = harness();
+    h.deps.confirmAuthority = async ({ claimOid }) => {
+      confirmations += 1;
+      if (confirmations === 1) return candidate();
+      return candidate({
+        head: claimOid,
+        draft: true,
+        terminalApprovalMatches: false,
+        branchClaim: h.claims.at(-1),
+      });
+    };
+    h.deps.repairProjection = async () => {
+      expect(confirmations).toBeGreaterThan(1);
+      h.events.push('projection');
+    };
+
+    await expect(
+      executeMergePrepAction({ prNumber: 84, expectedHead: HEAD }, h.deps),
+    ).resolves.toMatchObject({ status: 'spawned', claimOid: CLAIM_A });
+  });
+
   it('reclaims stale prep only through a new claim from the exact current head', async () => {
     const h = harness({
       readCandidate: async () => candidate({
@@ -186,7 +233,9 @@ describe('merge-prep action executor', () => {
         },
         head: HEAD,
         draft: true,
-      }),
+        terminalApprovalMatches: false,
+        recoveryApprovalMatches: true,
+      } as Partial<MergePrepCandidate>),
     });
 
     await executeMergePrepAction({
@@ -238,7 +287,7 @@ describe('merge-prep action executor', () => {
     await expect(
       executeMergePrepAction({ prNumber: 84, expectedHead: HEAD }, h.deps),
     ).resolves.toMatchObject({ status: 'lost', reason: 'target-base-changed' });
-    expect(h.events).toEqual(['claim', 'projection']);
+    expect(h.events).toEqual(['claim']);
   });
 
   it('confirms a won merge-prep claim through replication lag instead of orphaning it', async () => {
@@ -309,7 +358,7 @@ describe('merge-prep action executor', () => {
   });
 
   it.each([
-    ['draft', { draft: true }],
+    ['ready', { draft: false }],
     ['Human', { humanHold: true }],
     ['approval', { terminalApprovalMatches: false }],
     ['merge-state', { mergeState: 'clean' as const }],
@@ -323,7 +372,7 @@ describe('merge-prep action executor', () => {
     expect(h.events).toEqual([]);
   });
 
-  it('orders redraft/projection before local attempt and final authority before spawn', async () => {
+  it('confirms authority before projection and local attempt, then again before spawn', async () => {
     const h = harness();
     h.deps.confirmAuthority = async ({ claimOid }) => {
       h.events.push('authority');
@@ -338,8 +387,8 @@ describe('merge-prep action executor', () => {
     await executeMergePrepAction({ prNumber: 84, expectedHead: HEAD }, h.deps);
     expect(h.events).toEqual([
       'claim',
-      'projection',
       'authority',
+      'projection',
       'attempt',
       'authority',
       'spawn',

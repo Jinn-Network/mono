@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AttemptManifest } from '../../src/lifecycle/attempt-workspace.js';
 import {
+  additiveMergeProvesMechanical,
   makeProductionMergePrepSessionPort,
   rangeDiffProvesMechanical,
 } from '../../src/lifecycle/merge-prep-session-production.js';
@@ -13,6 +14,7 @@ import { gitOid, gitRefName } from '../../src/lifecycle/types.js';
 const CLAIM = gitOid('1'.repeat(40));
 const PREPARED = gitOid('2'.repeat(40));
 const BASE = gitOid('3'.repeat(40));
+const HISTORICAL_PR_BASE = gitOid('6'.repeat(40));
 const ATTEMPT = '11111111-1111-4111-8111-111111111111';
 
 describe('production merge-prep session port', () => {
@@ -92,6 +94,89 @@ describe('production merge-prep session port', () => {
       '1:  aaaaaaa < -:  ------- Patch disappeared',
     )).toBe(false);
     expect(rangeDiffProvesMechanical('')).toBe(false);
+  });
+
+  it('classifies only a deletion-free additive union that preserves both sides in order', () => {
+    const branch = [
+      'diff --git a/docs/ledger.md b/docs/ledger.md',
+      'index 111111111..222222222 100644',
+      '--- a/docs/ledger.md',
+      '+++ b/docs/ledger.md',
+      '@@ -3,0 +4,2 @@ Existing entry',
+      '+',
+      '+- Target entry',
+    ].join('\n');
+    const rebasedBranch = [
+      'diff --git a/docs/ledger.md b/docs/ledger.md',
+      'index 333333333..444444444 100644',
+      '--- a/docs/ledger.md',
+      '+++ b/docs/ledger.md',
+      '@@ -5,0 +6 @@ Base entry',
+      '+- Target entry',
+    ].join('\n');
+    const base = branch.replace('Target entry', 'Base entry');
+    const mergedBase = rebasedBranch.replace('Target entry', 'Base entry');
+
+    expect(additiveMergeProvesMechanical(
+      branch,
+      rebasedBranch,
+      base,
+      mergedBase,
+    )).toBe(true);
+    expect(additiveMergeProvesMechanical(
+      branch,
+      rebasedBranch.replace('+- Target entry', '+- Changed target entry'),
+      base,
+      mergedBase,
+    )).toBe(false);
+    expect(additiveMergeProvesMechanical(
+      `${branch}\nold mode 100644\nnew mode 100755`,
+      rebasedBranch,
+      base,
+      mergedBase,
+    )).toBe(false);
+    expect(additiveMergeProvesMechanical(
+      `${branch}\nBinary files a/docs/ledger.md and b/docs/ledger.md differ`,
+      rebasedBranch,
+      base,
+      mergedBase,
+    )).toBe(false);
+    expect(additiveMergeProvesMechanical(
+      branch,
+      rebasedBranch,
+      base,
+      `${mergedBase}\n-Target entry\n+Target entry`,
+    )).toBe(false);
+    expect(additiveMergeProvesMechanical(
+      branch,
+      `${rebasedBranch}\n-`,
+      base,
+      `${mergedBase}\n-`,
+    )).toBe(false);
+    expect(additiveMergeProvesMechanical(
+      branch,
+      `${rebasedBranch}\n+`,
+      base,
+      `${mergedBase}\n+`,
+    )).toBe(false);
+    expect(additiveMergeProvesMechanical(
+      branch,
+      `${rebasedBranch}\n--- header-like deleted content`,
+      base,
+      `${mergedBase}\n--- header-like deleted content`,
+    )).toBe(false);
+    expect(additiveMergeProvesMechanical(
+      branch,
+      `${rebasedBranch}\n+++ header-like extra content`,
+      base,
+      `${mergedBase}\n+++ header-like extra content`,
+    )).toBe(false);
+    expect(additiveMergeProvesMechanical(
+      branch.replace('+- Target entry', '+- First entry\n+- Second entry'),
+      rebasedBranch.replace('+- Target entry', '+- Second entry\n+- First entry'),
+      base,
+      mergedBase,
+    )).toBe(false);
   });
 
   it('publishes the prepared exact child with a selected-identity lease', async () => {
@@ -248,7 +333,7 @@ describe('production merge-prep session port', () => {
           return JSON.stringify({
             changed_files: 2,
             head: { sha: CLAIM },
-            base: { ref: 'next', sha: BASE },
+            base: { ref: 'next', sha: HISTORICAL_PR_BASE },
           });
         }
         if (

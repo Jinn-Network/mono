@@ -7,7 +7,10 @@ import { ensureFieldIds } from '../dispatcher/field-cache.js';
 import { fetchProjectSnapshot } from '../dispatcher/project-snapshot.js';
 import type { CreateAttemptOptions } from './attempt-workspace.js';
 import { createAttemptWorkspace } from './attempt-workspace.js';
-import { encodeBranchClaimTrailers } from './codecs.js';
+import {
+  encodeBranchClaimTrailers,
+  formatAutomatedReviewMarker,
+} from './codecs.js';
 import {
   gitPublicationArgs,
   type SelectedCredential,
@@ -80,16 +83,44 @@ export function makeProductionMergePrepActionPort(
         expectedBaseRefName: pr.baseRefName,
         context: 'Merge-prep',
       });
+      const targetBase = JSON.parse(await run('gh', [
+        'api', `repos/${REPO}/git/ref/heads/${pr.baseRefName}`,
+      ])) as { object?: { sha?: unknown } };
+      if (typeof targetBase.object?.sha !== 'string') {
+        throw new Error('Current target-base ref read was incomplete');
+      }
+      const targetBaseOid = gitOid(targetBase.object.sha);
+      let recoveryClaimTreeMatches = false;
+      if (
+        pr.branchClaim?.phase === 'merge-prep'
+        && pr.branchClaim.phaseComplete !== true
+      ) {
+        const readCommit = async (oid: string) => JSON.parse(await run('gh', [
+          'api', `repos/${REPO}/git/commits/${oid}`,
+        ])) as {
+          tree?: { sha?: unknown };
+          parents?: Array<{ sha?: unknown }>;
+        };
+        const [claimCommit, approvedCommit] = await Promise.all([
+          readCommit(pr.headOid),
+          readCommit(pr.branchClaim.expectedHead),
+        ]);
+        recoveryClaimTreeMatches = claimCommit.parents?.length === 1
+          && claimCommit.parents[0]?.sha === pr.branchClaim.expectedHead
+          && typeof claimCommit.tree?.sha === 'string'
+          && claimCommit.tree.sha === approvedCommit.tree?.sha;
+      }
       const content = JSON.parse(await run('gh', [
         'api',
-        `repos/${REPO}/contents/.github/CODEOWNERS?ref=${changedFiles.baseOid}`,
+        `repos/${REPO}/contents/.github/CODEOWNERS?ref=${targetBaseOid}`,
       ])) as { content?: unknown };
       if (typeof content.content !== 'string') {
         throw new Error('Target-base CODEOWNERS read was incomplete');
       }
       return {
-        baseOid: changedFiles.baseOid,
+        baseOid: targetBaseOid,
         changedFilesComplete: changedFiles.complete,
+        recoveryClaimTreeMatches,
         codeownerSensitive: touchesCodeOwnedPath(
           [...changedFiles.files],
           parseOwnedPrefixes(decodeBase64(content.content)),
@@ -102,10 +133,39 @@ export function makeProductionMergePrepActionPort(
     } else {
       policy = await withCredential(credential, ({ run }) => readPolicy(run));
     }
-    const terminalApprovalMatches = lifecycle.reviewClaim?.state === 'terminal-approved'
-      && lifecycle.reviewClaim.head === pr.headOid
-      && lifecycle.terminalVerdict?.head === pr.headOid
+    const terminalApprovalMatchesHead = (head: string) =>
+      lifecycle.reviewClaim?.state === 'terminal-approved'
+      && lifecycle.reviewClaim.head === head
+      && lifecycle.terminalVerdict?.head === head
       && lifecycle.terminalVerdict.state === 'APPROVE';
+    const terminalApprovalMatches = terminalApprovalMatchesHead(pr.headOid);
+    const recoveryReviewClaim = lifecycle.reviewClaim;
+    let nativeRecoveryApprovalMatches = false;
+    if (recoveryReviewClaim?.state === 'terminal-approved') {
+      const marker = formatAutomatedReviewMarker({
+        generation: recoveryReviewClaim.generation,
+        attempt: recoveryReviewClaim.attempt,
+        intent: recoveryReviewClaim.verdict.marker,
+        reviewer: recoveryReviewClaim.reviewer,
+        head: recoveryReviewClaim.head,
+        verdict: recoveryReviewClaim.verdict.state,
+      });
+      const latest = [...pr.reviews]
+        .filter((review) => (
+          review.reviewer.toLowerCase() === recoveryReviewClaim.reviewer.toLowerCase()
+          && ['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(review.state)
+        ))
+        .sort((left, right) => right.submittedAt.localeCompare(left.submittedAt))[0];
+      nativeRecoveryApprovalMatches = latest?.state === 'APPROVED'
+        && latest.body.includes(marker);
+    }
+    const recoveryApprovalMatches = policy.recoveryClaimTreeMatches
+      && pr.branchClaim?.phase === 'merge-prep'
+      && pr.branchClaim.phaseComplete !== true
+      && recoveryReviewClaim?.state === 'terminal-approved'
+      && recoveryReviewClaim.head === pr.branchClaim.expectedHead
+      && recoveryReviewClaim.verdict.state === 'APPROVE'
+      && nativeRecoveryApprovalMatches;
     return {
       issueNumber: lifecycle.issueNumber,
       prNumber: pr.number,
@@ -121,6 +181,7 @@ export function makeProductionMergePrepActionPort(
         || lifecycle.projectStatus === 'Human'
         || pr.labels.includes('review:needs-human'),
       terminalApprovalMatches,
+      ...(recoveryApprovalMatches ? { recoveryApprovalMatches: true } : {}),
       mergeState: lifecycle.mergeState,
       codeownerSensitive: policy.codeownerSensitive,
       changedFilesComplete: policy.changedFilesComplete,

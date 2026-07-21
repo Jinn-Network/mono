@@ -76,6 +76,128 @@ export function rangeDiffProvesMechanical(raw: string): boolean {
     /^\s*\d+:\s+[0-9a-f]{4,}\s+=\s+\d+:\s+[0-9a-f]{4,}\s+/.test(line));
 }
 
+interface DiffPayload {
+  readonly path: string;
+  readonly additions: readonly string[];
+  readonly deletions: readonly string[];
+}
+
+function parseDiffPayload(raw: string): readonly DiffPayload[] | null {
+  const payloads = new Map<string, { additions: string[]; deletions: string[] }>();
+  let current: { additions: string[]; deletions: string[] } | undefined;
+  let inHunk = false;
+  for (const line of raw.split('\n')) {
+    if (
+      /^(?:old mode|new mode|new file mode|deleted file mode|similarity index|rename from|rename to|copy from|copy to|Binary files|GIT binary patch)/.test(line)
+    ) {
+      return null;
+    }
+    if (line.startsWith('diff --git ')) {
+      const header = /^diff --git a\/([^ ]+) b\/([^ ]+)$/.exec(line);
+      if (header === null || header[1] !== header[2] || payloads.has(header[1]!)) {
+        return null;
+      }
+      current = { additions: [], deletions: [] };
+      payloads.set(header[1]!, current);
+      inHunk = false;
+      continue;
+    }
+    if (line.startsWith('@@ ')) {
+      if (current === undefined) return null;
+      inHunk = true;
+      continue;
+    }
+    if (!inHunk && (line.startsWith('+++ ') || line.startsWith('--- '))) continue;
+    if (line.startsWith('+') || line.startsWith('-')) {
+      if (current === undefined || !inHunk) return null;
+      const content = line.slice(1);
+      (line.startsWith('+') ? current.additions : current.deletions).push(content);
+    }
+  }
+  const result = [...payloads.entries()].map(([path, payload]) => ({
+    path,
+    additions: payload.additions,
+    deletions: payload.deletions,
+  })).sort((left, right) => left.path.localeCompare(right.path));
+  return result.some((payload) =>
+    payload.additions.length > 0 || payload.deletions.length > 0)
+    ? result
+    : null;
+}
+
+function additionsOnly(payloads: readonly DiffPayload[]): boolean {
+  return payloads.every((payload) => payload.deletions.length === 0)
+    && payloads.some((payload) => payload.additions.length > 0);
+}
+
+function withoutSharedAdditions(
+  left: readonly DiffPayload[],
+  right: readonly DiffPayload[],
+): readonly [readonly DiffPayload[], readonly DiffPayload[]] {
+  const rightByPath = new Map(right.map((payload) => [payload.path, payload]));
+  const sharedByPath = new Map<string, Map<string, number>>();
+  for (const payload of left) {
+    const peer = rightByPath.get(payload.path);
+    if (peer === undefined) continue;
+    const leftCounts = new Map<string, number>();
+    const rightCounts = new Map<string, number>();
+    for (const line of payload.additions) {
+      leftCounts.set(line, (leftCounts.get(line) ?? 0) + 1);
+    }
+    for (const line of peer.additions) {
+      rightCounts.set(line, (rightCounts.get(line) ?? 0) + 1);
+    }
+    const shared = new Map<string, number>();
+    for (const [line, count] of leftCounts) {
+      const overlap = Math.min(count, rightCounts.get(line) ?? 0);
+      if (overlap > 0) shared.set(line, overlap);
+    }
+    if (shared.size > 0) sharedByPath.set(payload.path, shared);
+  }
+  const strip = (payloads: readonly DiffPayload[]) => payloads
+    .map((payload): DiffPayload => {
+      const remaining = new Map(sharedByPath.get(payload.path) ?? []);
+      const additions = payload.additions.filter((line) => {
+        const count = remaining.get(line) ?? 0;
+        if (count === 0) return true;
+        remaining.set(line, count - 1);
+        return false;
+      });
+      return { ...payload, additions };
+    })
+    .filter((payload) => payload.additions.length > 0 || payload.deletions.length > 0);
+  return [strip(left), strip(right)];
+}
+
+export function additiveMergeProvesMechanical(
+  branch: string,
+  rebasedBranch: string,
+  base: string,
+  mergedBase: string,
+): boolean {
+  const branchPayload = parseDiffPayload(branch);
+  const rebasedBranchPayload = parseDiffPayload(rebasedBranch);
+  const basePayload = parseDiffPayload(base);
+  const mergedBasePayload = parseDiffPayload(mergedBase);
+  if (
+    branchPayload === null
+    || rebasedBranchPayload === null
+    || basePayload === null
+    || mergedBasePayload === null
+    || !additionsOnly(branchPayload)
+    || !additionsOnly(rebasedBranchPayload)
+    || !additionsOnly(basePayload)
+    || !additionsOnly(mergedBasePayload)
+  ) {
+    return false;
+  }
+  const [branchOnly, baseOnly] = withoutSharedAdditions(branchPayload, basePayload);
+  return branchOnly.length > 0
+    && baseOnly.length > 0
+    && JSON.stringify(branchOnly) === JSON.stringify(rebasedBranchPayload)
+    && JSON.stringify(baseOnly) === JSON.stringify(mergedBasePayload);
+}
+
 export function makeProductionMergePrepSessionPort(
   options: ProductionMergePrepSessionPortOptions = {},
 ): MergePrepSessionPort {
@@ -146,15 +268,22 @@ export function makeProductionMergePrepSessionPort(
       expectedBaseRefName: parsed.baseRefName,
       context: 'Merge-prep',
     });
+    const targetBaseRef = `refs/heads/${parsed.baseRefName}`;
+    const currentTargetBaseOid = exactRemote(
+      await git(manifest, [
+        'ls-remote', manifest.repository.remoteName, targetBaseRef,
+      ]),
+      targetBaseRef,
+    );
     if (
       manifest.targetBaseOid === undefined
-      || changedFiles.baseOid !== manifest.targetBaseOid
+      || currentTargetBaseOid !== manifest.targetBaseOid
     ) {
       throw new Error('Merge-prep target base changed');
     }
     const content = JSON.parse(await run(manifest, 'gh', [
       'api',
-      `repos/${REPO}/contents/.github/CODEOWNERS?ref=${changedFiles.baseOid}`,
+      `repos/${REPO}/contents/.github/CODEOWNERS?ref=${currentTargetBaseOid}`,
     ])) as { content?: unknown };
     if (typeof content.content !== 'string') throw new Error('CODEOWNERS read was incomplete');
     const codeowners = Buffer.from(content.content.replace(/\n/g, ''), 'base64').toString('utf8');
@@ -272,7 +401,29 @@ export function makeProductionMergePrepSessionPort(
           `${originalBase}..${originalHead}`,
           `${manifest.targetBaseOid}..${preparedHead}`,
         ]);
-        return rangeDiffProvesMechanical(rangeDiff)
+        if (rangeDiffProvesMechanical(rangeDiff)) return 'mechanical';
+        const branchDiff = await git(manifest, [
+          'diff', '--no-color', '--no-ext-diff', '--no-renames', '--unified=0',
+          `${originalBase}..${originalHead}`,
+        ]);
+        const rebasedBranchDiff = await git(manifest, [
+          'diff', '--no-color', '--no-ext-diff', '--no-renames', '--unified=0',
+          `${manifest.targetBaseOid}..${preparedHead}`,
+        ]);
+        const baseDiff = await git(manifest, [
+          'diff', '--no-color', '--no-ext-diff', '--no-renames', '--unified=0',
+          `${originalBase}..${manifest.targetBaseOid}`,
+        ]);
+        const mergedBaseDiff = await git(manifest, [
+          'diff', '--no-color', '--no-ext-diff', '--no-renames', '--unified=0',
+          `${originalHead}..${preparedHead}`,
+        ]);
+        return additiveMergeProvesMechanical(
+          branchDiff,
+          rebasedBranchDiff,
+          baseDiff,
+          mergedBaseDiff,
+        )
           ? 'mechanical'
           : 'unproven';
       } catch {
