@@ -1,7 +1,9 @@
 import {
   access,
   chmod,
+  link,
   mkdir,
+  open,
   readdir,
   readFile,
   rename,
@@ -14,12 +16,14 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import {
   ContributionCandidateV1Schema,
+  ContributionCandidateV1ProjectionSchema,
   EpisodeV1Schema,
   type ContributionCandidateV1,
   type EpisodeV1,
   type ContributionLocalState,
   type ContributionPublicationState,
 } from '@jinn-network/plugin';
+import { fsyncDirectory } from './evidence-filesystem.js';
 
 export const CONTRIBUTION_STORE_SCHEMA_VERSION = 'jinn.contribution-store.v3' as const;
 const CONTRIBUTION_STORE_V2_SCHEMA_VERSION = 'jinn.contribution-store.v2' as const;
@@ -579,12 +583,24 @@ export class ContributionStore {
     sourceText: string,
   ): Promise<void> {
     const backupPath = `${this.filePath}.${version}.bak`;
+    const tempPath = `${backupPath}.${process.pid}.${randomUUID()}.tmp`;
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
     try {
-      await writeFile(backupPath, sourceText, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
-      await chmod(backupPath, 0o600);
+      handle = await open(tempPath, 'wx', 0o600);
+      await handle.writeFile(sourceText, 'utf8');
+      await handle.sync();
+      await handle.close();
+      handle = undefined;
+      await link(tempPath, backupPath);
+      fsyncDirectory(dirname(backupPath));
+      await rm(tempPath, { force: true });
+      fsyncDirectory(dirname(backupPath));
       return;
     } catch (error) {
       if (nodeErrorCode(error) !== 'EEXIST') throw error;
+    } finally {
+      await handle?.close().catch(() => undefined);
+      await rm(tempPath, { force: true });
     }
     const existing = await readFile(backupPath, 'utf8');
     if (existing !== sourceText) {
@@ -846,7 +862,7 @@ export class ContributionStore {
     if (episode.episodeId !== record.recordId) {
       throw new Error(`contribution ${record.recordId} does not match episode ${episode.episodeId}`);
     }
-    const candidate = ContributionCandidateV1Schema.safeParse(episode.contributionCandidate);
+    const candidate = ContributionCandidateV1ProjectionSchema.safeParse(episode.contributionCandidate);
     if (!candidate.success || candidate.data.sourceId !== record.recordId) {
       throw new Error(`canonical episode ${record.recordId} has no matching contribution candidate`);
     }

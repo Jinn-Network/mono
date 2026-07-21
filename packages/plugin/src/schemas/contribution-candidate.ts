@@ -46,3 +46,27 @@ export const ContributionCandidateV1ReadSchema = z.looseObject({
 });
 
 export type ContributionCandidateV1 = z.infer<typeof ContributionCandidateV1Schema>;
+
+/** Resolve a forward-additive candidate from a canonical Episode into the
+ * current v1 fields. Unknown future fields stay in the Episode but never make
+ * an otherwise valid local reference look unresolved to an older reader. */
+export const ContributionCandidateV1ProjectionSchema = ContributionCandidateV1ReadSchema
+  .transform((candidate): ContributionCandidateV1 => ({
+    schemaVersion: candidate.schemaVersion,
+    sourceId: candidate.sourceId,
+    repositorySlug: candidate.repositorySlug,
+    baseCommit: candidate.baseCommit,
+    acceptedDiff: candidate.acceptedDiff,
+    testRuns: candidate.testRuns.map((run) => ({
+      command: run.command,
+      exitCode: run.exitCode,
+      at: run.at,
+    })),
+    intermediateFailureDiffs: candidate.intermediateFailureDiffs,
+    skillEvents: candidate.skillEvents.map((event) => ({
+      skillRef: event.skillRef,
+      action: event.action,
+    })),
+    publishMinedTasksConsent: candidate.publishMinedTasksConsent,
+    createdAt: candidate.createdAt,
+  }));

@@ -4,6 +4,7 @@ import {
   EpisodeV1WriteSchema,
   SessionActivityFactsWriteSchema,
 } from '../../src/schemas/episode.js';
+import { ContributionCandidateV1ProjectionSchema } from '../../src/schemas/contribution-candidate.js';
 import { makeSampleEpisode } from '../_fixtures/episode.js';
 
 const valid = makeSampleEpisode({ episodeId: 'ep-1' });
@@ -52,6 +53,29 @@ describe('EpisodeV1Schema', () => {
     expect(EpisodeV1WriteSchema.parse(withCandidate).contributionCandidate)
       .toEqual(contributionCandidate);
     expect(EpisodeV1Schema.parse(withCandidate).contributionCandidate)
+      .toEqual(contributionCandidate);
+  });
+
+  it('projects current contribution fields from a forward-additive canonical episode', () => {
+    const parsed = EpisodeV1Schema.parse({
+      ...valid,
+      session: { ...valid.session, kind: 'user' as const },
+      origin: { writer: 'future-writer', build: '2' },
+      contributionCandidate: {
+        ...contributionCandidate,
+        futurePolicyFact: { version: 2 },
+        testRuns: contributionCandidate.testRuns.map((run) => ({
+          ...run,
+          futureReceipt: 'receipt-v2',
+        })),
+      },
+    });
+
+    expect(parsed.contributionCandidate).toMatchObject({
+      futurePolicyFact: { version: 2 },
+      testRuns: [{ futureReceipt: 'receipt-v2' }],
+    });
+    expect(ContributionCandidateV1ProjectionSchema.parse(parsed.contributionCandidate))
       .toEqual(contributionCandidate);
   });
 

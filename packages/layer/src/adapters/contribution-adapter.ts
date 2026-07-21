@@ -1,9 +1,11 @@
 /** ContributionPort projection over the shared daemon/jinn-layer store. */
+import { isDeepStrictEqual } from 'node:util';
 import {
   deriveContributionStatus,
   degraded,
   ok,
   unavailable,
+  ContributionCandidateV1ProjectionSchema,
   ContributionCandidateV1Schema,
   type ContributionCandidateV1,
   type ContributionLedgerEntry,
@@ -57,14 +59,14 @@ export function createContributionAdapter(deps: ContributionAdapterDeps): Contri
         const episode = evidence.status === 'unavailable' ? null : evidence.value;
         const canonicalCandidate = episode?.contributionCandidate === undefined
           ? undefined
-          : ContributionCandidateV1Schema.safeParse(episode.contributionCandidate);
+          : ContributionCandidateV1ProjectionSchema.safeParse(episode.contributionCandidate);
         if (!episode) {
           return unavailable(`canonical contribution episode is unavailable: ${parsed.sourceId}`);
         }
         if (
           !canonicalCandidate?.success
           || canonicalCandidate.data.sourceId !== episode.episodeId
-          || JSON.stringify(canonicalCandidate.data) !== JSON.stringify(parsed)
+          || !isDeepStrictEqual(canonicalCandidate.data, parsed)
         ) {
           return unavailable(`canonical contribution candidate mismatch: ${parsed.sourceId}`);
         }
@@ -86,7 +88,7 @@ export function createContributionAdapter(deps: ContributionAdapterDeps): Contri
           const episode = evidence.status === 'unavailable' ? null : evidence.value;
           const parsedCandidate = episode?.contributionCandidate === undefined
             ? undefined
-            : ContributionCandidateV1Schema.safeParse(episode.contributionCandidate);
+            : ContributionCandidateV1ProjectionSchema.safeParse(episode.contributionCandidate);
           const candidate = parsedCandidate?.success && parsedCandidate.data.sourceId === record.recordId
             ? parsedCandidate.data
             : undefined;

@@ -19,6 +19,7 @@ export type {
 } from './schemas/episode.js';
 export {
   CONTRIBUTION_CANDIDATE_SCHEMA_VERSION,
+  ContributionCandidateV1ProjectionSchema,
   ContributionCandidateV1Schema,
 } from './schemas/contribution-candidate.js';
 export type { ContributionCandidateV1 } from './schemas/contribution-candidate.js';

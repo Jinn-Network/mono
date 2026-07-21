@@ -4,7 +4,12 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
-import { runHarvestTick, type HarvestLoopConfig } from '../../src/daemon/harvest-loop.js';
+import {
+  HarvestLoop,
+  runHarvestTick,
+  SESSIONS_SOURCE_PARKED_STAGE_2,
+  type HarvestLoopConfig,
+} from '../../src/daemon/harvest-loop.js';
 import { repoSlugFromRemoteUrl } from '../../src/solver-types/_swe-rebench-v2-commit-echo-git.js';
 import { HarvestStateStore } from '../../src/solver-types/_swe-rebench-v2-harvest-state.js';
 import { uploadToIpfs } from '../../src/adapters/mech/ipfs.js';
@@ -639,9 +644,10 @@ describe('runHarvestTick — parked session source', () => {
         baseSourcesConfig(env, { sources: ['commits', 'sessions'] }),
         { mineableStore: legacyStore },
       );
+      delete config.mintDeps;
       expect(await runHarvestTick(config)).toEqual({
         ...emptyTick,
-        skipped: ['sessions-source-parked-stage-2'],
+        skipped: [SESSIONS_SOURCE_PARKED_STAGE_2],
       });
       expect(legacyStore.list).not.toHaveBeenCalled();
     } finally {
@@ -654,14 +660,35 @@ describe('runHarvestTick — parked session source', () => {
     const isDockerAvailable = vi.fn(() => { throw new Error('Docker must not be checked'); });
     const loadPool = vi.fn(async () => { throw new Error('pool must not be loaded'); });
     try {
-      expect(await runHarvestTick(baseSourcesConfig(env, {
+      const config = baseSourcesConfig(env, {
         sources: ['sessions'],
         isDockerAvailable,
         loadPool,
-      }))).toEqual({ ...emptyTick, skipped: ['sessions-source-parked-stage-2'] });
+      });
+      delete config.mintDeps;
+      expect(await runHarvestTick(config)).toEqual({
+        ...emptyTick,
+        skipped: [SESSIONS_SOURCE_PARKED_STAGE_2],
+      });
       expect(isDockerAvailable).not.toHaveBeenCalled();
       expect(loadPool).not.toHaveBeenCalled();
     } finally {
+      await cleanupSessionEnv(env);
+    }
+  });
+
+  it('surfaces the exact parked marker through the production loop wrapper', async () => {
+    const env = await setupSessionEnv();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      const config = baseSourcesConfig(env, { sources: ['sessions'] });
+      delete config.mintDeps;
+
+      await new HarvestLoop(config).runOnce();
+
+      expect(log).toHaveBeenCalledWith(`[harvest-loop] ${SESSIONS_SOURCE_PARKED_STAGE_2}`);
+    } finally {
+      log.mockRestore();
       await cleanupSessionEnv(env);
     }
   });

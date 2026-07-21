@@ -604,15 +604,24 @@ describe('ContributionStore outbound privacy', () => {
       await store.markMinted('private-local-source', 'mint:public-safe-ref');
 
       const record = await store.get('private-local-source') as ContributionStoreRecord;
-      const outbound = store.toOutboundProjection(
-        record,
-        episodeWithCandidate(candidate('private-local-source', {
+      const currentCandidate = candidate('private-local-source', {
           acceptedDiff: 'SECRET_ACCEPTED_DIFF_GOLD',
           intermediateFailureDiffs: ['SECRET_HOLDOUT_FAILURE'],
           skillEvents: [{ skillRef: 'SECRET_LOCAL_SKILL', action: 'loaded' }],
           publishMinedTasksConsent: true,
-        })),
-      );
+        });
+      const canonicalEpisode = {
+        ...episodeWithCandidate(currentCandidate),
+        contributionCandidate: {
+          ...currentCandidate,
+          futurePolicyFact: { version: 2 },
+          testRuns: currentCandidate.testRuns.map((run) => ({
+            ...run,
+            futureReceipt: 'receipt-v2',
+          })),
+        },
+      } as EpisodeV1;
+      const outbound = store.toOutboundProjection(record, canonicalEpisode);
       const serialized = JSON.stringify(outbound);
 
       expect(outbound).toEqual({

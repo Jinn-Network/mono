@@ -2057,47 +2057,59 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     // A sessions-only operator legitimately has zero repos. The loop remains
     // schedulable so it can report the explicit Stage 2 parked marker.
     if (harvestRepos.length > 0 || harvestMinesSessions) {
-      const { readEnabledState, defaultSweRebenchV2EvaluatorImplStateDir } =
-        await import('./harnesses/impls/swe-rebench-v2-evaluator/harness.js');
-      const { existsSync } = await import('node:fs');
-      const enabled = readEnabledState(defaultSweRebenchV2EvaluatorImplStateDir());
-      if (!enabled || !existsSync(enabled.upstreamRepoDir)) {
-        console.warn(
-          '[main] harvest enabled but swe-rebench-v2 evaluator is not set up — run `jinn harnesses enable swe-rebench-v2-evaluator`',
+      const { defaultStateDir } = await import('./solver-types/swe-rebench-v2.js');
+      const harvestStateDir = defaultStateDir();
+      const baseHarvestLoopConfig = {
+        intervalMs: config.harvest.intervalMs,
+        stateDir: harvestStateDir,
+        repos: harvestRepos,
+        limitPerRepo: config.harvest.limitPerRepo,
+        publish: config.harvest.publish,
+        minterSafe: safeAddress,
+        sources: config.harvest.sources,
+      };
+      const hasCommitWork = config.harvest.sources.includes('commits') && harvestRepos.length > 0;
+      if (!hasCommitWork) {
+        harvestLoopConfig = baseHarvestLoopConfig;
+        console.log(
+          `[main] harvest loop enabled: 0 repo(s), sources=${config.harvest.sources.join(',')}, interval=${config.harvest.intervalMs}ms (sessions parked)`,
         );
       } else {
-        const { defaultStateDir, getSweRebenchV2ValidatedPoolStore } =
-          await import('./solver-types/swe-rebench-v2.js');
-        const { getDefaultMintedPoolStore } = await import('./solver-types/_swe-rebench-v2-minted-pool.js');
-        const { HttpHfFetcher } = await import('./harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js');
-        const { PythonEvalRunner } = await import('./harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js');
-        const { createGitHubPublicRepoChecker } = await import('./solver-types/_swe-rebench-v2-guards.js');
-        const harvestStateDir = defaultStateDir();
-        harvestLoopConfig = {
-          intervalMs: config.harvest.intervalMs,
-          stateDir: harvestStateDir,
-          repos: harvestRepos,
-          limitPerRepo: config.harvest.limitPerRepo,
-          publish: config.harvest.publish,
-          minterSafe: safeAddress,
-          sources: config.harvest.sources,
-          mintDeps: {
-            stateDir: harvestStateDir,
-            ipfsRegistryUrl: config.ipfsRegistryUrl,
-            ipfsGatewayUrl: config.ipfsGatewayUrl,
-            validatedStore: getSweRebenchV2ValidatedPoolStore(harvestStateDir),
-            mintedStore: getDefaultMintedPoolStore(harvestStateDir),
-            hfFetcher: new HttpHfFetcher(),
-            runner: new PythonEvalRunner({ upstreamRepoDir: enabled.upstreamRepoDir }),
-            upstreamRepoDir: enabled.upstreamRepoDir,
-            publicRepoChecker: createGitHubPublicRepoChecker({
-              token: process.env.GITHUB_TOKEN,
-            }),
-          },
-        };
-        console.log(
-          `[main] harvest loop enabled: ${harvestRepos.length} repo(s), sources=${config.harvest.sources.join(',')}, interval=${config.harvest.intervalMs}ms`,
-        );
+        const { readEnabledState, defaultSweRebenchV2EvaluatorImplStateDir } =
+          await import('./harnesses/impls/swe-rebench-v2-evaluator/harness.js');
+        const { existsSync } = await import('node:fs');
+        const enabled = readEnabledState(defaultSweRebenchV2EvaluatorImplStateDir());
+        if (!enabled || !existsSync(enabled.upstreamRepoDir)) {
+          console.warn(
+            '[main] harvest enabled but swe-rebench-v2 evaluator is not set up — run `jinn harnesses enable swe-rebench-v2-evaluator`',
+          );
+        } else {
+          const { getSweRebenchV2ValidatedPoolStore } =
+            await import('./solver-types/swe-rebench-v2.js');
+          const { getDefaultMintedPoolStore } = await import('./solver-types/_swe-rebench-v2-minted-pool.js');
+          const { HttpHfFetcher } = await import('./harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js');
+          const { PythonEvalRunner } = await import('./harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js');
+          const { createGitHubPublicRepoChecker } = await import('./solver-types/_swe-rebench-v2-guards.js');
+          harvestLoopConfig = {
+            ...baseHarvestLoopConfig,
+            mintDeps: {
+              stateDir: harvestStateDir,
+              ipfsRegistryUrl: config.ipfsRegistryUrl,
+              ipfsGatewayUrl: config.ipfsGatewayUrl,
+              validatedStore: getSweRebenchV2ValidatedPoolStore(harvestStateDir),
+              mintedStore: getDefaultMintedPoolStore(harvestStateDir),
+              hfFetcher: new HttpHfFetcher(),
+              runner: new PythonEvalRunner({ upstreamRepoDir: enabled.upstreamRepoDir }),
+              upstreamRepoDir: enabled.upstreamRepoDir,
+              publicRepoChecker: createGitHubPublicRepoChecker({
+                token: process.env.GITHUB_TOKEN,
+              }),
+            },
+          };
+          console.log(
+            `[main] harvest loop enabled: ${harvestRepos.length} repo(s), sources=${config.harvest.sources.join(',')}, interval=${config.harvest.intervalMs}ms`,
+          );
+        }
       }
     }
   }

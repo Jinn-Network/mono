@@ -103,6 +103,40 @@ describe('ContributionAdapter — unknown record', () => {
     });
   });
 
+  it('resolves known candidate fields from a forward-additive canonical episode', async () => {
+    const expected = candidate('episode-future');
+    const canonical = {
+      ...episode(expected),
+      contributionCandidate: {
+        ...expected,
+        futurePolicyFact: { version: 2 },
+        testRuns: [{
+          command: 'yarn test',
+          exitCode: 0,
+          at: expected.createdAt,
+          futureReceipt: 'receipt-v2',
+        }],
+      },
+    } as EpisodeV1;
+    const statusStore = createContributionStatusStore(tmpStatusFile());
+    const adapter = createContributionAdapter({
+      statusStore,
+      evidence: { async get() { return ok(canonical); } },
+    });
+
+    expect((await adapter.recordMineable({
+      ...expected,
+      testRuns: [{ command: 'yarn test', exitCode: 0, at: expected.createdAt }],
+    })).status).toBe('ok');
+    expect(await adapter.ledger()).toMatchObject({
+      status: 'ok',
+      value: [{
+        recordId: 'episode-future',
+        verifiabilityTier: 'tests-passed',
+      }],
+    });
+  });
+
   it('returns an honest degraded ledger row for a migrated reference whose episode is absent', async () => {
     const statusStore = createContributionStatusStore(tmpStatusFile());
     await statusStore.recordReference('pruned-episode');

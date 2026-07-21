@@ -7,6 +7,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
+  ContributionCandidateV1ProjectionSchema,
   ContributionCandidateV1Schema,
   type ContributionCandidateV1,
 } from '@jinn-network/plugin';
@@ -133,7 +134,7 @@ export class MineableTraceStore implements MineableTraceStorePort {
     const evidence = await this.evidence.get(record.sourceId);
     const episode = evidence.status === 'ok' ? evidence.value : undefined;
     const canonicalCandidate = episode
-      ? ContributionCandidateV1Schema.safeParse(episode.contributionCandidate)
+      ? ContributionCandidateV1ProjectionSchema.safeParse(episode.contributionCandidate)
       : undefined;
     if (
       !episode
@@ -158,7 +159,7 @@ export class MineableTraceStore implements MineableTraceStorePort {
     const evidence = await this.evidence.get(record.recordId);
     const episode = evidence.status === 'ok' ? evidence.value : undefined;
     if (!episode || episode.episodeId !== record.recordId) return undefined;
-    const candidate = ContributionCandidateV1Schema.safeParse(episode.contributionCandidate);
+    const candidate = ContributionCandidateV1ProjectionSchema.safeParse(episode.contributionCandidate);
     if (!candidate.success || candidate.data.sourceId !== record.recordId) return undefined;
     return {
       ...record,
