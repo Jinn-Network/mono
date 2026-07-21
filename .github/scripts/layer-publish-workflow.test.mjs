@@ -81,15 +81,23 @@ function verifyStableVersion(fixture, version) {
   );
 }
 
-function jobBlock(job) {
-  const start = workflow.indexOf(`  ${job}:`);
-  assert.notEqual(start, -1, `missing ${job}`);
-  const remainder = workflow.slice(start + 1);
-  const nextHeader = remainder.match(/\n  [a-z0-9_-]+:\n/u);
+function yamlBlock(source, key, indent = 2) {
+  const prefix = ' '.repeat(indent);
+  const marker = `${prefix}${key}:\n`;
+  const start = source.indexOf(marker);
+  assert.notEqual(start, -1, `missing ${key}`);
+  const remainder = source.slice(start + marker.length);
+  const nextHeader = remainder.match(
+    new RegExp(`^${prefix}[a-z0-9_-]+:\\s*$`, 'mu'),
+  );
   const next = nextHeader?.index === undefined
     ? -1
-    : start + 1 + nextHeader.index;
-  return workflow.slice(start, next === -1 ? undefined : next);
+    : start + marker.length + nextHeader.index;
+  return source.slice(start, next === -1 ? undefined : next);
+}
+
+function jobBlock(job) {
+  return yamlBlock(yamlBlock(workflow, 'jobs', 0), job);
 }
 
 test('layer CI is paths-filtered and rehearses the npm-shaped package', () => {
@@ -98,6 +106,35 @@ test('layer CI is paths-filtered and rehearses the npm-shaped package', () => {
   assert.match(ci, /yarn typecheck/);
   assert.match(ci, /yarn test/);
   assert.match(ci, /yarn build/);
+});
+
+test('layer CI runs both stable publish suites when publisher surfaces change', () => {
+  const check = yamlBlock(yamlBlock(ci, 'jobs', 0), 'check');
+  assert.match(
+    check,
+    /node --test \.github\/scripts\/layer-publish-workflow\.test\.mjs/,
+  );
+  assert.match(
+    check,
+    /node --test \.github\/scripts\/publish-layer-stable\.test\.mjs/,
+  );
+
+  const triggers = yamlBlock(ci, 'on', 0);
+  for (const event of ['pull_request', 'push']) {
+    const trigger = yamlBlock(triggers, event);
+    for (const path of [
+      '.github/workflows/layer-npm-publish.yml',
+      '.github/scripts/layer-publish-workflow.test.mjs',
+      '.github/scripts/publish-layer-stable.mjs',
+      '.github/scripts/publish-layer-stable.test.mjs',
+      '.github/scripts/verify-layer-stable-version.mjs',
+    ]) {
+      assert.ok(
+        trigger.includes(`- '${path}'`),
+        `${event} must include ${path}`,
+      );
+    }
+  }
 });
 
 test('layer workflows use the repository-compatible checkout credential mode', () => {
@@ -131,11 +168,60 @@ test('stable publication is manual-only from exact next and uses its protected e
   assert.match(stable, /environment: npm-stable-publish/);
   assert.match(stable, /RELEASE_TAG: \$\{\{ inputs\.release_tag \}\}/);
   assert.match(stable, /RELEASE_SHA: \$\{\{ inputs\.release_sha \}\}/);
-  assert.match(stable, /ref: \$\{\{ inputs\.release_sha \}\}/);
+  assert.match(stable, /ref: next/);
+  assert.doesNotMatch(stable, /ref: \$\{\{ inputs\.release_sha \}\}/);
   assert.match(stable, /verify-layer-stable-version\.mjs/);
   assert.match(stable, /git ls-remote origin "refs\/tags\/\$\{RELEASE_TAG\}"/);
   assert.match(stable, /TAG_SHA.*RELEASE_SHA/s);
   assert.doesNotMatch(stable, /github\.event\.release/);
+});
+
+test('stable publication proves release ancestry from trusted next before release checkout', () => {
+  const stable = jobBlock('stable-publish');
+  const trustedCheckout = stable.indexOf('name: Check out trusted next history');
+  const trustGate = stable.indexOf('name: Validate release identity and next ancestry');
+  const releaseCheckout = stable.indexOf('name: Check out validated release commit');
+  const verifier = stable.indexOf('verify-layer-stable-version.mjs');
+  const install = stable.indexOf('npm install -g');
+  const publisher = stable.indexOf('publish-layer-stable.mjs');
+
+  assert.ok(trustedCheckout >= 0);
+  assert.ok(trustGate > trustedCheckout);
+  assert.ok(releaseCheckout > trustGate);
+  assert.ok(verifier > releaseCheckout);
+  assert.ok(install > verifier);
+  assert.ok(publisher > install);
+
+  const trustedCheckoutBlock = stable.slice(trustedCheckout, trustGate);
+  assert.match(trustedCheckoutBlock, /ref: next/);
+  assert.match(trustedCheckoutBlock, /fetch-depth: 0/);
+  assert.doesNotMatch(
+    trustedCheckoutBlock,
+    /ref: \$\{\{ inputs\.release_sha \}\}/,
+  );
+
+  const trustGateBlock = stable.slice(trustGate, releaseCheckout);
+  assert.ok(
+    trustGateBlock.includes('[[ ! "${RELEASE_SHA}" =~ ^[0-9a-f]{40}$ ]]'),
+  );
+  assert.ok(
+    trustGateBlock.includes(
+      '[[ ! "${RELEASE_TAG}" =~ ^layer-v([0-9]+\\.[0-9]+\\.[0-9]+)$ ]]',
+    ),
+  );
+  assert.match(
+    trustGateBlock,
+    /git merge-base --is-ancestor "\$\{RELEASE_SHA\}" origin\/next/,
+  );
+  assert.doesNotMatch(trustGateBlock, /verify-layer-stable-version\.mjs/);
+  assert.doesNotMatch(trustGateBlock, /publish-layer-stable\.mjs/);
+  assert.doesNotMatch(trustGateBlock, /(?:npm|yarn) install/);
+
+  const releaseCheckoutBlock = stable.slice(releaseCheckout, verifier);
+  assert.match(
+    releaseCheckoutBlock,
+    /git checkout --detach "\$\{RELEASE_SHA\}"/,
+  );
 });
 
 test('stable publication builds the complete set before the retry-safe publisher runs', () => {

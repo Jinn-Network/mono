@@ -11,6 +11,11 @@ on:
       - 'packages/plugin/**'
       - 'client/**'
       - '.github/workflows/layer-ci.yml'
+      - '.github/workflows/layer-npm-publish.yml'
+      - '.github/scripts/layer-publish-workflow.test.mjs'
+      - '.github/scripts/publish-layer-stable.mjs'
+      - '.github/scripts/publish-layer-stable.test.mjs'
+      - '.github/scripts/verify-layer-stable-version.mjs'
   push:
     branches: [main, next]
     paths:
@@ -19,6 +24,11 @@ on:
       - 'packages/plugin/**'
       - 'client/**'
       - '.github/workflows/layer-ci.yml'
+      - '.github/workflows/layer-npm-publish.yml'
+      - '.github/scripts/layer-publish-workflow.test.mjs'
+      - '.github/scripts/publish-layer-stable.mjs'
+      - '.github/scripts/publish-layer-stable.test.mjs'
+      - '.github/scripts/verify-layer-stable-version.mjs'
 
 jobs:
   check:
@@ -50,6 +60,8 @@ jobs:
         working-directory: packages/layer
       - name: Test layer workflow contracts
         run: node --test .github/scripts/layer-publish-workflow.test.mjs
+      - name: Test stable publisher
+        run: node --test .github/scripts/publish-layer-stable.test.mjs
 
   client-compat:
     name: Client Compatibility

@@ -165,40 +165,59 @@ jobs:
       RELEASE_TAG: ${{ inputs.release_tag }}
       RELEASE_SHA: ${{ inputs.release_sha }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Check out trusted next history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ inputs.release_sha }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: 22
-      - name: Verify immutable release and exact stable pins
+          ref: next
+          fetch-depth: 0
+      - name: Validate release identity and next ancestry
         shell: bash
         run: |
+          set -euo pipefail
           if [ "${GITHUB_REF}" != "refs/heads/next" ]; then
             echo "::error::Stable layer publication must be dispatched from refs/heads/next"
             exit 1
           fi
-          ACTUAL_SHA="$(git rev-parse HEAD)"
-          if [ "${ACTUAL_SHA}" != "${RELEASE_SHA}" ]; then
-            echo "::error::Checked out ${ACTUAL_SHA}, expected ${RELEASE_SHA}"
+          if [[ ! "${RELEASE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Stable layer releases require an exact 40-character lowercase commit SHA"
             exit 1
           fi
-          case "${RELEASE_TAG}" in
-            layer-v*) PUBLISH_VERSION="${RELEASE_TAG#layer-v}" ;;
-            *)
-              echo "::error::Stable layer releases require layer-v<semver>"
-              exit 1
-              ;;
-          esac
+          if [[ ! "${RELEASE_TAG}" =~ ^layer-v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "::error::Stable layer releases require layer-v<semver>"
+            exit 1
+          fi
+          PUBLISH_VERSION="${BASH_REMATCH[1]}"
           TAG_SHA="$(git ls-remote origin "refs/tags/${RELEASE_TAG}" "refs/tags/${RELEASE_TAG}^{}" | awk '$2 ~ /\^\{\}$/ { peeled=$1 } $2 !~ /\^\{\}$/ { direct=$1 } END { print peeled ? peeled : direct }')"
           if [ -z "${TAG_SHA}" ] || [ "${TAG_SHA}" != "${RELEASE_SHA}" ]; then
             echo "::error::Tag ${RELEASE_TAG} points at ${TAG_SHA:-<missing>}, expected ${RELEASE_SHA}"
             exit 1
           fi
+          if ! git cat-file -e "${RELEASE_SHA}^{commit}" 2>/dev/null; then
+            echo "::error::Release SHA ${RELEASE_SHA} is not available as a commit in the trusted checkout"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "${RELEASE_SHA}" origin/next; then
+            echo "::error::Release SHA ${RELEASE_SHA} is not reachable from protected next"
+            exit 1
+          fi
+          echo "PUBLISH_VERSION=${PUBLISH_VERSION}" >> "${GITHUB_ENV}"
+      - name: Check out validated release commit
+        shell: bash
+        run: |
+          git checkout --detach "${RELEASE_SHA}"
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          if [ "${ACTUAL_SHA}" != "${RELEASE_SHA}" ]; then
+            echo "::error::Checked out ${ACTUAL_SHA}, expected ${RELEASE_SHA}"
+            exit 1
+          fi
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - name: Verify exact stable pins
+        run: |
           node .github/scripts/verify-layer-stable-version.mjs \
             --root . \
             --version "${PUBLISH_VERSION}"
-          echo "PUBLISH_VERSION=${PUBLISH_VERSION}" >> "${GITHUB_ENV}"
       - run: npm install -g npm@11.16.0
       - run: corepack enable
       - run: yarn --cwd packages/plugin install --immutable
