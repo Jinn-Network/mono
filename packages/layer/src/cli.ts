@@ -69,7 +69,7 @@ import { executeEpisodes } from './seed-import/episode-execute.js';
 import { parseEpisodeImportReport, renderEpisodeImportReport } from './seed-import/episode-report.js';
 import { createFileSeedImportState, type SeedImportStateStore } from './seed-import/state.js';
 import { extractSkill } from './skill.js';
-import { isInsidePackageDir } from './path-safety.js';
+import { isInsidePackageDir, writePackageTreeSafely } from './path-safety.js';
 import { IPFS_RAW_CODEC, parseIpfsCid } from './ipfs-cid.js';
 import { runDistillationPipeline } from './pipeline.js';
 import { modelLabel, runEvalPrep } from './eval-prep.js';
@@ -2426,7 +2426,7 @@ export async function runJinnLayerCli(
     }
     // Verify every companion digest and resolved target BEFORE any write —
     // an aborted install must leave nothing on disk.
-    const companions: { target: string; bytes: Buffer }[] = [];
+    const companions: { path: string; bytes: Buffer }[] = [];
     for (const file of skill.files) {
       const bytes = Buffer.from(file.contentBase64, 'base64');
       const digest = createHash('sha256').update(bytes).digest('hex');
@@ -2439,13 +2439,18 @@ export async function runJinnLayerCli(
         writer.write(`error: companion file ${file.path} escapes the install directory\n`);
         return 1;
       }
-      companions.push({ target, bytes });
+      companions.push({ path: file.path, bytes });
     }
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'SKILL.md'), skill.skill.skillMd);
-    for (const { target, bytes } of companions) {
-      mkdirSync(dirname(target), { recursive: true });
-      writeFileSync(target, bytes);
+    try {
+      writePackageTreeSafely(dir, [
+        { path: 'SKILL.md', content: skill.skill.skillMd },
+        ...companions.map((file) => ({ path: file.path, content: file.bytes })),
+      ]);
+    } catch (error) {
+      writer.write(
+        `error: could not safely install skill to ${dir} — ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+      return 1;
     }
     if (parsed.values.json) {
       writer.write(JSON.stringify({

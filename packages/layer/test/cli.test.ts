@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { fileURLToPath } from 'node:url';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -779,6 +779,190 @@ describe('jinn-layer skills install', () => {
     expect(out()).toContain('sha256 mismatch');
     // All-or-nothing: the aborted install leaves no partial tree on disk.
     expect(existsSync(dir)).toBe(false);
+  });
+
+  it.skipIf(process.platform === 'win32')('rejects a symlinked install directory without writing outside it', async () => {
+    const { writer, out } = capture();
+    const base = mkdtempSync(join(tmpdir(), 'jinn-skills-'));
+    const outside = join(base, 'outside');
+    const dir = join(base, 'skill');
+    mkdirSync(outside);
+    writeFileSync(join(outside, 'SKILL.md'), 'outside sentinel\n');
+    symlinkSync(outside, dir, 'dir');
+
+    const code = await runJinnLayerCli(
+      ['skills', 'install', 'bafySkill', '--out', dir],
+      { layer: fakeLayer({ record: skillRecord() }), writer },
+    );
+
+    expect(readFileSync(join(outside, 'SKILL.md'), 'utf-8')).toBe('outside sentinel\n');
+    expect(existsSync(join(outside, 'reference', 'EXAMPLES.md'))).toBe(false);
+    expect(code).toBe(1);
+    expect(out()).toMatch(/symlink/i);
+  });
+
+  it.skipIf(process.platform === 'win32')('rejects a symlinked companion directory without creating an outside file', async () => {
+    const { writer, out } = capture();
+    const base = mkdtempSync(join(tmpdir(), 'jinn-skills-'));
+    const dir = join(base, 'skill');
+    const outside = join(base, 'outside');
+    mkdirSync(dir);
+    mkdirSync(outside);
+    symlinkSync(outside, join(dir, 'reference'), 'dir');
+
+    const code = await runJinnLayerCli(
+      ['skills', 'install', 'bafySkill', '--out', dir],
+      { layer: fakeLayer({ record: skillRecord() }), writer },
+    );
+
+    expect(existsSync(join(outside, 'EXAMPLES.md'))).toBe(false);
+    expect(existsSync(join(dir, 'SKILL.md'))).toBe(false);
+    expect(code).toBe(1);
+    expect(out()).toMatch(/symlink/i);
+  });
+
+  it.skipIf(process.platform === 'win32')('rejects a symlinked companion target without mutating its outside target', async () => {
+    const { writer, out } = capture();
+    const base = mkdtempSync(join(tmpdir(), 'jinn-skills-'));
+    const dir = join(base, 'skill');
+    const reference = join(dir, 'reference');
+    const outside = join(base, 'outside.md');
+    mkdirSync(reference, { recursive: true });
+    writeFileSync(outside, 'outside sentinel\n');
+    symlinkSync(outside, join(reference, 'EXAMPLES.md'));
+
+    const code = await runJinnLayerCli(
+      ['skills', 'install', 'bafySkill', '--out', dir],
+      { layer: fakeLayer({ record: skillRecord() }), writer },
+    );
+
+    expect(readFileSync(outside, 'utf-8')).toBe('outside sentinel\n');
+    expect(existsSync(join(dir, 'SKILL.md'))).toBe(false);
+    expect(code).toBe(1);
+    expect(out()).toMatch(/symlink/i);
+  });
+
+  it.skipIf(process.platform === 'win32')('rejects a symlinked SKILL.md target without mutating its outside target', async () => {
+    const { writer, out } = capture();
+    const base = mkdtempSync(join(tmpdir(), 'jinn-skills-'));
+    const dir = join(base, 'skill');
+    const outside = join(base, 'outside.md');
+    mkdirSync(dir);
+    writeFileSync(outside, 'outside sentinel\n');
+    symlinkSync(outside, join(dir, 'SKILL.md'));
+
+    const code = await runJinnLayerCli(
+      ['skills', 'install', 'bafySkill', '--out', dir],
+      { layer: fakeLayer({ record: skillRecord() }), writer },
+    );
+
+    expect(readFileSync(outside, 'utf-8')).toBe('outside sentinel\n');
+    expect(existsSync(join(dir, 'reference', 'EXAMPLES.md'))).toBe(false);
+    expect(code).toBe(1);
+    expect(out()).toMatch(/symlink/i);
+  });
+
+  it.skipIf(process.platform === 'win32')('replaces a hardlinked companion target without mutating its outside inode', async () => {
+    const { writer } = capture();
+    const base = mkdtempSync(join(tmpdir(), 'jinn-skills-'));
+    const dir = join(base, 'skill');
+    const reference = join(dir, 'reference');
+    const outside = join(base, 'outside.md');
+    mkdirSync(reference, { recursive: true });
+    writeFileSync(outside, 'outside sentinel\n');
+    linkSync(outside, join(reference, 'EXAMPLES.md'));
+
+    const code = await runJinnLayerCli(
+      ['skills', 'install', 'bafySkill', '--out', dir],
+      { layer: fakeLayer({ record: skillRecord() }), writer },
+    );
+
+    expect(code).toBe(0);
+    expect(readFileSync(outside, 'utf-8')).toBe('outside sentinel\n');
+    expect(readFileSync(join(reference, 'EXAMPLES.md'), 'utf-8')).toBe('# examples\n');
+  });
+
+  it('atomically overwrites regular targets while preserving unrelated files', async () => {
+    const { writer } = capture();
+    const base = mkdtempSync(join(tmpdir(), 'jinn-skills-'));
+    const dir = join(base, 'skill');
+    const reference = join(dir, 'reference');
+    mkdirSync(reference, { recursive: true });
+    writeFileSync(join(dir, 'SKILL.md'), 'old skill\n');
+    writeFileSync(join(reference, 'EXAMPLES.md'), 'old examples\n');
+    writeFileSync(join(dir, 'operator-notes.md'), 'keep me\n');
+
+    const code = await runJinnLayerCli(
+      ['skills', 'install', 'bafySkill', '--out', dir],
+      { layer: fakeLayer({ record: skillRecord() }), writer },
+    );
+
+    expect(code).toBe(0);
+    expect(readFileSync(join(dir, 'SKILL.md'), 'utf-8')).toContain('failing test first');
+    expect(readFileSync(join(reference, 'EXAMPLES.md'), 'utf-8')).toBe('# examples\n');
+    expect(readFileSync(join(dir, 'operator-notes.md'), 'utf-8')).toBe('keep me\n');
+    expect(readdirSync(base).some((name) => name.startsWith('.jinn-skill-install-'))).toBe(false);
+  });
+
+  it('cleans private staging and leaves existing output untouched when staging fails', async () => {
+    const { writer, out } = capture();
+    const base = mkdtempSync(join(tmpdir(), 'jinn-skills-'));
+    const dir = join(base, 'skill');
+    mkdirSync(dir);
+    writeFileSync(join(dir, 'SKILL.md'), 'old skill\n');
+    const first = Buffer.from('file blocks directory\n');
+    const second = Buffer.from('unreachable nested file\n');
+    const record = skillRecord({
+      files: [
+        {
+          path: 'reference',
+          contentBase64: first.toString('base64'),
+          sha256: createHash('sha256').update(first).digest('hex'),
+        },
+        {
+          path: 'reference/NESTED.md',
+          contentBase64: second.toString('base64'),
+          sha256: createHash('sha256').update(second).digest('hex'),
+        },
+      ],
+    });
+
+    const code = await runJinnLayerCli(
+      ['skills', 'install', 'bafySkill', '--out', dir],
+      { layer: fakeLayer({ record }), writer },
+    );
+
+    expect(code).toBe(1);
+    expect(out()).toContain('could not safely install skill');
+    expect(readFileSync(join(dir, 'SKILL.md'), 'utf-8')).toBe('old skill\n');
+    expect(existsSync(join(dir, 'reference'))).toBe(false);
+    expect(readdirSync(base).some((name) => name.startsWith('.jinn-skill-install-'))).toBe(false);
+  });
+
+  it.skipIf(process.platform === 'win32')('rolls back earlier target replacements when a later commit fails', async () => {
+    const { writer, out } = capture();
+    const base = mkdtempSync(join(tmpdir(), 'jinn-skills-'));
+    const dir = join(base, 'skill');
+    const reference = join(dir, 'reference');
+    mkdirSync(reference, { recursive: true });
+    writeFileSync(join(dir, 'SKILL.md'), 'old skill\n');
+    chmodSync(reference, 0o500);
+
+    let code: number;
+    try {
+      code = await runJinnLayerCli(
+        ['skills', 'install', 'bafySkill', '--out', dir],
+        { layer: fakeLayer({ record: skillRecord() }), writer },
+      );
+    } finally {
+      chmodSync(reference, 0o700);
+    }
+
+    expect(code!).toBe(1);
+    expect(out()).toContain('could not safely install skill');
+    expect(readFileSync(join(dir, 'SKILL.md'), 'utf-8')).toBe('old skill\n');
+    expect(existsSync(join(reference, 'EXAMPLES.md'))).toBe(false);
+    expect(readdirSync(base).some((name) => name.startsWith('.jinn-skill-install-'))).toBe(false);
   });
 
   it('reports a corrupt jinn.skill.v1 artifact cleanly instead of throwing', async () => {
