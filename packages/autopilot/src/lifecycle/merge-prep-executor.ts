@@ -28,6 +28,7 @@ export interface MergePrepCandidate {
   readonly body: string;
   readonly humanHold: boolean;
   readonly terminalApprovalMatches: boolean;
+  readonly recoveryApprovalMatches?: boolean;
   readonly mergeState: 'clean' | 'behind' | 'conflict' | 'blocked';
   readonly codeownerSensitive: boolean;
   readonly changedFilesComplete: boolean;
@@ -142,8 +143,8 @@ function ineligibility(
 ): string | null {
   if (!candidate.open) return 'Pull request is not open.';
   if (candidate.head !== expectedHead) return 'Pull request head changed.';
-  if (candidate.draft && !recoverStale) {
-    return 'Draft pull requests are not merge-prep eligible.';
+  if (!candidate.draft) {
+    return 'Pull request must be draft before merge-prep can begin.';
   }
   if (
     recoverStale
@@ -164,7 +165,12 @@ function ineligibility(
   if (candidate.humanHold) return 'Human authority is active.';
   if (!candidate.labels.includes('engine:review')) return 'Review lifecycle label is absent.';
   if (!markerMatches(candidate)) return 'Lifecycle mapping marker is contradictory.';
-  if (!candidate.terminalApprovalMatches) return 'Exact-head terminal approval is absent.';
+  if (
+    !candidate.terminalApprovalMatches
+    && !(recoverStale && candidate.recoveryApprovalMatches === true)
+  ) {
+    return 'Exact-head terminal approval is absent.';
+  }
   if (candidate.mergeState !== 'behind' && candidate.mergeState !== 'conflict') {
     return 'Pull request is not behind or conflicting.';
   }
@@ -357,7 +363,6 @@ export async function executeMergePrepAction(
     return { status: 'ambiguous', prNumber: candidate.prNumber };
   }
 
-  await deps.repairProjection({ candidate, claimOid, credential: selection.credential });
   const confirm = () => deps.confirmAuthority({
     prNumber: candidate.prNumber,
     claimOid,
@@ -385,6 +390,7 @@ export async function executeMergePrepAction(
     return { status: 'ambiguous', prNumber: candidate.prNumber };
   }
   let current: MergePrepCandidate = firstConfirm.current;
+  await deps.repairProjection({ candidate, claimOid, credential: selection.credential });
   const attempt = await deps.createAttempt({
     attemptId,
     issueNumber: candidate.issueNumber,

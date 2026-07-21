@@ -4,6 +4,7 @@ import {
   makeProductionMergePrepActionPort,
 } from '../../src/lifecycle/merge-prep-executor-production.js';
 import type { GitHubLifecycleSnapshot } from '../../src/lifecycle/snapshot.js';
+import { formatAutomatedReviewMarker } from '../../src/lifecycle/codecs.js';
 import {
   gitOid,
   gitRefName,
@@ -14,9 +15,52 @@ const HEAD = gitOid('1'.repeat(40));
 const TREE = gitOid('2'.repeat(40));
 const CLAIM = gitOid('3'.repeat(40));
 const ATTEMPT = '11111111-1111-4111-8111-111111111111';
+const REVIEW_ATTEMPT = '22222222-2222-4222-8222-222222222222';
+const REVIEW_GENERATION = '33333333-3333-4333-8333-333333333333';
+const REVIEW_INTENT = '44444444-4444-4444-8444-444444444444';
 const BASE = gitOid('4'.repeat(40));
+const CURRENT_BASE = gitOid('5'.repeat(40));
 
-function candidateSnapshot(): GitHubLifecycleSnapshot {
+type NativeReview = GitHubLifecycleSnapshot['pullRequests'][number]['reviews'][number];
+
+function recoveryReview(overrides: Partial<NativeReview> = {}): NativeReview {
+  return {
+    reviewer: 'review-bot',
+    state: 'APPROVED',
+    // GitHub can retarget this mutable field after a metadata-only claim push.
+    commitId: CLAIM,
+    body: formatAutomatedReviewMarker({
+      generation: REVIEW_GENERATION,
+      attempt: REVIEW_ATTEMPT,
+      intent: REVIEW_INTENT,
+      reviewer: 'review-bot',
+      head: HEAD,
+      verdict: 'APPROVE',
+    }),
+    submittedAt: '2026-07-20T09:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function candidateSnapshot(
+  recovering = false,
+  reviews: readonly NativeReview[] = recovering ? [recoveryReview()] : [],
+): GitHubLifecycleSnapshot {
+  const currentHead = recovering ? CLAIM : HEAD;
+  const branchClaim = recovering ? {
+    kind: 'branch-claim' as const,
+    protocolVersion: 2 as const,
+    phase: 'merge-prep' as const,
+    issueNumber: 42,
+    prNumber: 84,
+    attempt: ATTEMPT,
+    runner: 'runner-a',
+    login: 'implementation-bot',
+    expectedHead: HEAD,
+    targetBase: gitRefName('next'),
+    targetBaseOid: CURRENT_BASE,
+    claimedAt: '2026-07-20T10:00:00.000Z',
+  } : undefined;
   return {
     pullRequests: [{
       number: 84,
@@ -25,16 +69,17 @@ function candidateSnapshot(): GitHubLifecycleSnapshot {
       author: 'implementation-bot',
       baseRefName: 'next',
       headRefName: 'autopilot/42',
-      headOid: HEAD,
+      headOid: currentHead,
       headCommittedAt: '2026-07-20T08:00:00.000Z',
-      isDraft: false,
+      isDraft: recovering,
       state: 'OPEN',
       labels: ['engine:review'],
       closingIssueNumbers: [42],
       mergeability: 'CONFLICTING',
       mergeStateStatus: 'DIRTY',
       checks: [],
-      reviews: [],
+      reviews,
+      ...(branchClaim === undefined ? {} : { branchClaim }),
     }],
     lifecycle: {
       items: [{
@@ -44,19 +89,21 @@ function candidateSnapshot(): GitHubLifecycleSnapshot {
         v2Marked: true,
         projectStatus: 'In Review',
         labels: ['engine:review'],
-        head: HEAD,
+        head: currentHead,
         headChangedAt: '2026-07-20T08:00:00.000Z',
-        isDraft: false,
+        isDraft: recovering,
         merged: false,
         needsReview: false,
         approved: true,
         mergeState: 'conflict',
+        ...(branchClaim === undefined ? {} : { branchClaim }),
         reviewClaim: {
           version: 1,
           prNumber: 84,
           issueNumber: 42,
           head: HEAD,
-          generation: '22222222-2222-4222-8222-222222222222',
+          generation: REVIEW_GENERATION,
+          attempt: REVIEW_ATTEMPT,
           reviewer: 'review-bot',
           runner: 'runner-b',
           startedAt: '2026-07-20T08:00:00.000Z',
@@ -64,17 +111,19 @@ function candidateSnapshot(): GitHubLifecycleSnapshot {
           verdict: {
             state: 'APPROVE',
             head: HEAD,
-            marker: 'approved',
+            marker: REVIEW_INTENT,
             submittedAt: '2026-07-20T09:00:00.000Z',
           },
         },
-        terminalVerdict: {
-          reviewer: 'review-bot',
-          state: 'APPROVE',
-          head: HEAD,
-          marker: 'approved',
-          submittedAt: '2026-07-20T09:00:00.000Z',
-        },
+        ...(recovering ? {} : {
+          terminalVerdict: {
+            reviewer: 'review-bot',
+            state: 'APPROVE',
+            head: HEAD,
+            marker: REVIEW_INTENT,
+            submittedAt: '2026-07-20T09:00:00.000Z',
+          },
+        }),
       }],
     },
     diagnostics: [],
@@ -103,7 +152,10 @@ describe('production merge-prep acquisition port', () => {
         if (endpoint?.startsWith('repos/Jinn-Network/mono/pulls/84/files?')) {
           return JSON.stringify([[{ filename: 'src/visible.ts' }]]);
         }
-        if (endpoint === `repos/Jinn-Network/mono/contents/.github/CODEOWNERS?ref=${BASE}`) {
+        if (endpoint === 'repos/Jinn-Network/mono/git/ref/heads/next') {
+          return JSON.stringify({ object: { sha: CURRENT_BASE } });
+        }
+        if (endpoint === `repos/Jinn-Network/mono/contents/.github/CODEOWNERS?ref=${CURRENT_BASE}`) {
           return JSON.stringify({
             content: Buffer.from('# no owned paths\n').toString('base64'),
           });
@@ -113,12 +165,104 @@ describe('production merge-prep acquisition port', () => {
     });
 
     await expect(port.readCandidate(84)).resolves.toMatchObject({
-      targetBaseOid: BASE,
+      targetBaseOid: CURRENT_BASE,
       changedFilesComplete: false,
       codeownerSensitive: false,
     });
-    expect(endpoints).not.toContain(
+    expect(endpoints).toContain(
       'repos/Jinn-Network/mono/git/ref/heads/next',
+    );
+  });
+
+  it('carries the exact pre-claim approval only for stale merge-prep recovery', async () => {
+    const port = makeProductionMergePrepActionPort({
+      repositoryPath: '/repo',
+      worktreeBase: '/attempts',
+      runnerId: 'runner-a',
+      readSnapshot: async () => candidateSnapshot(true),
+      runner: async (_command, args) => {
+        const endpoint = args.find((arg) => arg.startsWith('repos/'));
+        if (endpoint === 'repos/Jinn-Network/mono/pulls/84') {
+          return JSON.stringify({
+            changed_files: 1,
+            head: { sha: CLAIM },
+            base: { ref: 'next', sha: BASE },
+          });
+        }
+        if (endpoint?.startsWith('repos/Jinn-Network/mono/pulls/84/files?')) {
+          return JSON.stringify([[{ filename: 'docs/notes/canary.md' }]]);
+        }
+        if (endpoint === 'repos/Jinn-Network/mono/git/ref/heads/next') {
+          return JSON.stringify({ object: { sha: CURRENT_BASE } });
+        }
+        if (endpoint === `repos/Jinn-Network/mono/git/commits/${CLAIM}`) {
+          return JSON.stringify({
+            tree: { sha: TREE },
+            parents: [{ sha: HEAD }],
+          });
+        }
+        if (endpoint === `repos/Jinn-Network/mono/git/commits/${HEAD}`) {
+          return JSON.stringify({ tree: { sha: TREE }, parents: [] });
+        }
+        if (endpoint === `repos/Jinn-Network/mono/contents/.github/CODEOWNERS?ref=${CURRENT_BASE}`) {
+          return JSON.stringify({
+            content: Buffer.from('# no owned paths\n').toString('base64'),
+          });
+        }
+        throw new Error(`unexpected ${args.join(' ')}`);
+      },
+    });
+
+    await expect(port.readCandidate(84)).resolves.toMatchObject({
+      head: CLAIM,
+      terminalApprovalMatches: false,
+      recoveryApprovalMatches: true,
+      targetBaseOid: CURRENT_BASE,
+    });
+  });
+
+  it.each([
+    ['missing', []],
+    ['dismissed', [recoveryReview({ state: 'DISMISSED' })]],
+    ['marker-mismatched', [recoveryReview({ body: '<!-- unrelated -->' })]],
+  ])('rejects %s native approval evidence during stale recovery', async (_case, reviews) => {
+    const port = makeProductionMergePrepActionPort({
+      repositoryPath: '/repo',
+      worktreeBase: '/attempts',
+      runnerId: 'runner-a',
+      readSnapshot: async () => candidateSnapshot(true, reviews as readonly NativeReview[]),
+      runner: async (_command, args) => {
+        const endpoint = args.find((arg) => arg.startsWith('repos/'));
+        if (endpoint === 'repos/Jinn-Network/mono/pulls/84') {
+          return JSON.stringify({
+            changed_files: 1,
+            head: { sha: CLAIM },
+            base: { ref: 'next', sha: BASE },
+          });
+        }
+        if (endpoint?.startsWith('repos/Jinn-Network/mono/pulls/84/files?')) {
+          return JSON.stringify([[{ filename: 'docs/notes/canary.md' }]]);
+        }
+        if (endpoint === 'repos/Jinn-Network/mono/git/ref/heads/next') {
+          return JSON.stringify({ object: { sha: CURRENT_BASE } });
+        }
+        if (endpoint === `repos/Jinn-Network/mono/git/commits/${CLAIM}`) {
+          return JSON.stringify({ tree: { sha: TREE }, parents: [{ sha: HEAD }] });
+        }
+        if (endpoint === `repos/Jinn-Network/mono/git/commits/${HEAD}`) {
+          return JSON.stringify({ tree: { sha: TREE }, parents: [] });
+        }
+        if (endpoint === `repos/Jinn-Network/mono/contents/.github/CODEOWNERS?ref=${CURRENT_BASE}`) {
+          return JSON.stringify({
+            content: Buffer.from('# no owned paths\n').toString('base64'),
+          });
+        }
+        throw new Error(`unexpected ${args.join(' ')}`);
+      },
+    });
+
+    await expect(port.readCandidate(84)).resolves.not.toHaveProperty(
+      'recoveryApprovalMatches',
     );
   });
 
