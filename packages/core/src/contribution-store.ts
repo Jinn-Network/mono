@@ -608,7 +608,14 @@ export class ContributionStore {
         `existing contribution store ${version} backup does not match active store; refusing migration`,
       );
     }
-    await chmod(backupPath, 0o600);
+    const existingHandle = await open(backupPath, 'r+');
+    try {
+      await existingHandle.chmod(0o600);
+      await existingHandle.sync();
+    } finally {
+      await existingHandle.close();
+    }
+    fsyncDirectory(dirname(backupPath));
   }
 
   private async loadUnlocked(): Promise<ContributionStoreFile> {
