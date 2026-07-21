@@ -151,6 +151,38 @@ describe('JinnPlugin.completeSession()', () => {
     }
   });
 
+  it('retains current contribution fields from a forward-additive embedded candidate', async () => {
+    const evidence = new InMemoryEvidencePort();
+    const contribution = new InMemoryContributionPort();
+    const current = candidate();
+    const episode = {
+      ...makeSampleEpisode({ episodeId: 'episode-complete' }),
+      contributionCandidate: {
+        ...current,
+        futurePolicyFact: { version: 2 },
+        testRuns: current.testRuns.map((run) => ({
+          ...run,
+          futureReceipt: 'receipt-v2',
+        })),
+      },
+    } as CompleteSessionInput['episode'];
+
+    const result = await invoke(pluginWith(evidence, contribution), {
+      contractVersion: 1,
+      episode,
+      activity: ACTIVITY,
+      eligibilityInputs: { publicRepo: true, acceptedDiff: true },
+    });
+    if (!result) return;
+
+    expect(result.contribution?.status).toBe('ok');
+    expect(contribution.getCandidate('record-1')).toEqual(current);
+    const stored = await evidence.get('episode-complete');
+    expect(stored.status).toBe('ok');
+    expect(stored.status === 'ok' ? stored.value?.contributionCandidate : undefined)
+      .toEqual(current);
+  });
+
   it('persists evidence when contribution recording is unavailable', async () => {
     const evidence = new InMemoryEvidencePort();
     const contribution: ContributionPort = {

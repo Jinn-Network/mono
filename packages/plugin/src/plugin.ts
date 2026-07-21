@@ -7,6 +7,7 @@
 
 /// <reference types="node" />
 import { createHash, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import type {
   ContributionLedgerEntry,
   ContributionPort,
@@ -26,6 +27,7 @@ import {
 } from './schemas/episode.js';
 import type { EpisodeV1, SessionActivityFacts } from './schemas/episode.js';
 import {
+  ContributionCandidateV1ProjectionSchema,
   ContributionCandidateV1Schema,
   type ContributionCandidateV1,
 } from './schemas/contribution-candidate.js';
@@ -237,7 +239,7 @@ async function completeSession(
   );
   const embeddedCandidateResult = capturedEpisode.contributionCandidate === undefined
     ? undefined
-    : ContributionCandidateV1Schema.safeParse(capturedEpisode.contributionCandidate);
+    : ContributionCandidateV1ProjectionSchema.safeParse(capturedEpisode.contributionCandidate);
   const requestCandidateResult = input.contributionCandidate === undefined
     ? undefined
     : ContributionCandidateV1Schema.safeParse(input.contributionCandidate);
@@ -258,7 +260,7 @@ async function completeSession(
     if (
       embeddedCandidate
       && requestCandidate
-      && JSON.stringify(embeddedCandidate) !== JSON.stringify(requestCandidate)
+      && !isDeepStrictEqual(embeddedCandidate, requestCandidate)
     ) {
       contributionUnavailableReason = 'embedded and request contribution candidates must match';
     } else {
