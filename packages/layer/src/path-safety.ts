@@ -15,10 +15,16 @@ import {
 } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
+function escapesPackageDir(relativePath: string): boolean {
+  return relativePath === '..'
+    || relativePath.startsWith(`..${sep}`)
+    || isAbsolute(relativePath);
+}
+
 /** True when `candidate` resolves to `root` or one of its descendants. */
 export function isInsidePackageDir(root: string, candidate: string): boolean {
   const rel = relative(resolve(root), resolve(candidate));
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  return rel === '' || !escapesPackageDir(rel);
 }
 
 export interface PackageTreeFile {
@@ -273,8 +279,7 @@ export function writePackageTreeSafely(root: string, files: PackageTreeFile[]): 
     const relativePath = relative(absoluteRoot, target);
     if (
       relativePath === ''
-      || relativePath.startsWith('..')
-      || isAbsolute(relativePath)
+      || escapesPackageDir(relativePath)
     ) {
       throw new Error(`skill output path escapes the install directory: ${file.path}`);
     }

@@ -128,6 +128,7 @@ test('layer CI runs both stable publish suites when publisher surfaces change', 
       '.github/scripts/publish-layer-stable.mjs',
       '.github/scripts/publish-layer-stable.test.mjs',
       '.github/scripts/verify-layer-stable-version.mjs',
+      'docs/runbooks/layer-npm-publishing.md',
     ]) {
       assert.ok(
         trigger.includes(`- '${path}'`),

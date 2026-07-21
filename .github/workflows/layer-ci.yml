@@ -16,6 +16,7 @@ on:
       - '.github/scripts/publish-layer-stable.mjs'
       - '.github/scripts/publish-layer-stable.test.mjs'
       - '.github/scripts/verify-layer-stable-version.mjs'
+      - 'docs/runbooks/layer-npm-publishing.md'
   push:
     branches: [main, next]
     paths:
@@ -29,6 +30,7 @@ on:
       - '.github/scripts/publish-layer-stable.mjs'
       - '.github/scripts/publish-layer-stable.test.mjs'
       - '.github/scripts/verify-layer-stable-version.mjs'
+      - 'docs/runbooks/layer-npm-publishing.md'
 
 jobs:
   check:

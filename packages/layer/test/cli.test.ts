@@ -887,6 +887,32 @@ describe('jinn-layer skills install', () => {
     expect(existsSync(dir)).toBe(false);
   });
 
+  it('installs an in-tree companion whose filename begins with two dots', async () => {
+    const { writer } = capture();
+    const base = mkdtempSync(join(tmpdir(), 'jinn-skills-'));
+    const dir = join(base, 'skill');
+    const notes = Buffer.from('still inside the selected directory\n', 'utf-8');
+    const record = skillRecord({
+      files: [
+        {
+          path: '..notes.md',
+          contentBase64: notes.toString('base64'),
+          sha256: createHash('sha256').update(notes).digest('hex'),
+        },
+      ],
+    });
+
+    const code = await runJinnLayerCli(
+      ['skills', 'install', 'bafySkill', '--out', dir],
+      { layer: fakeLayer({ record }), writer },
+    );
+
+    expect(code).toBe(0);
+    expect(readFileSync(join(dir, '..notes.md'), 'utf-8')).toBe(
+      'still inside the selected directory\n',
+    );
+  });
+
   it.skipIf(process.platform === 'win32')('replaces a hardlinked companion target without mutating its outside inode', async () => {
     const { writer } = capture();
     const base = mkdtempSync(join(tmpdir(), 'jinn-skills-'));
