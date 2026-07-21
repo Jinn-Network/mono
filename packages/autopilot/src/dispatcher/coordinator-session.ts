@@ -112,6 +112,13 @@ export function spawnCoordinatorSession(
   const env: NodeJS.ProcessEnv = {
     ...spec.env,
     JINN_AUTOPILOT_RUNTIME: cfg.runtime,
+    // Pin the session CLI to the package the DISPATCHER itself runs from.
+    // The skill's fallback is <repo-root>/packages/autopilot resolved from
+    // the session's cwd — the attempt worktree — whose checkout is the
+    // claim's base commit and can carry an older `autopilot session`
+    // implementation (proven live: a review verdict died on next's v1
+    // identity assertion). v1's dispatch.ts always pinned this; v2 must too.
+    JINN_AUTOPILOT_PACKAGE_DIR: join(REPO_ROOT, 'packages', 'autopilot'),
   };
   let result: SpawnResult;
 

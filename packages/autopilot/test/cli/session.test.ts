@@ -547,4 +547,45 @@ describe('production session protocol', () => {
     });
     expect(implementation.calls).toEqual([{ operation: 'checkpoint' }]);
   });
+
+  it('regression: publishes a review verdict with no JINN_REVIEW_* env vars, resolving the reviewer credential from the attempt token file', async () => {
+    // Live-bug shape: a v2 review session's verdict-publication step must
+    // never run the dispatcher's arming assertion (identity.ts
+    // assertReviewIdentities / credentials.ts resolveCredentialPool's
+    // reviewBotLogin<->reviewGhToken pairing check) — those gate the
+    // DISPATCHER'S OWN boot for `--mode active/recover/observe`, not a
+    // session. A session is identified by argv routing to `session` (see
+    // shouldRouteToSession in scripts/run-autopilot-v2.ts, which hands off to
+    // this CLI BEFORE any dispatcher-config parsing) and carries only
+    // JINN_AUTOPILOT_SESSION_MANIFEST plus whatever non-secret-shaped env
+    // survived the coordinator runtime's scrub — here, JINN_REVIEW_BOT_LOGIN
+    // (not secret-shaped) survives while JINN_REVIEW_GH_TOKEN (secret-shaped)
+    // does not, exactly mirroring the Hermes runtime's env scrub. This drives
+    // a review-verdict operation through the real CLI argv routing and lazy
+    // phase-scoped protocol construction with that exact environment and
+    // asserts it resolves cleanly, never touching the implementation or
+    // merge-prep ports.
+    const review = protocol();
+    const env = {
+      JINN_AUTOPILOT_SESSION_MANIFEST: MANIFEST_PATH,
+      JINN_REVIEW_BOT_LOGIN: 'review-bot',
+    };
+    const production = makeProductionSessionProtocol(
+      env,
+      () => { throw new Error('implementation session port must not be constructed for a review-phase operation'); },
+      () => review,
+      () => { throw new Error('merge-prep session port must not be constructed for a review-phase operation'); },
+    );
+    const injected = { ...deps(MANIFEST, production), env };
+
+    const execution = await runSessionCli(
+      ['review-verdict', '--state', 'APPROVE', '--body-file', BODY_PATH],
+      injected,
+    );
+
+    expect(execution.exitCode).toBe(0);
+    expect(review.calls).toEqual([
+      { operation: 'review-verdict', payload: { state: 'APPROVE', body: 'review body\n' } },
+    ]);
+  });
 });
