@@ -159,6 +159,24 @@ test('canary publication is dependency ordered and restricted to next', () => {
   assert.doesNotMatch(workflow, /NODE_AUTH_TOKEN:\s*\$\{\{\s*secrets\./);
 });
 
+test('publish jobs build each package before running its tests', () => {
+  for (const job of ['plugin-canary', 'core-canary', 'layer-canary']) {
+    const block = jobBlock(job);
+    const build = block.indexOf('\n      - run: yarn build\n');
+    const tests = block.indexOf('\n      - run: yarn test\n');
+    assert.ok(build >= 0, `${job} must build its package`);
+    assert.ok(tests > build, `${job} must build before testing`);
+  }
+
+  const stable = jobBlock('stable-publish');
+  for (const packageName of ['plugin', 'core', 'layer']) {
+    const build = stable.indexOf(`yarn --cwd packages/${packageName} build`);
+    const tests = stable.indexOf(`yarn --cwd packages/${packageName} test`);
+    assert.ok(build >= 0, `stable publish must build ${packageName}`);
+    assert.ok(tests > build, `stable publish must build ${packageName} before testing`);
+  }
+});
+
 test('stable publication is manual-only from exact next and uses its protected environment', () => {
   assert.doesNotMatch(workflow, /\n  release:\n\s+types: \[published\]/);
   assert.match(workflow, /workflow_dispatch:/);

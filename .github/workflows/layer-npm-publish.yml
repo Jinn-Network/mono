@@ -51,8 +51,8 @@ jobs:
       - run: corepack enable
       - run: yarn install --immutable
       - run: yarn typecheck
-      - run: yarn test
       - run: yarn build
+      - run: yarn test
       - name: Patch canary version
         shell: bash
         run: |
@@ -89,8 +89,8 @@ jobs:
       - run: yarn --cwd ../plugin build
       - run: yarn install --immutable
       - run: yarn typecheck
-      - run: yarn test
       - run: yarn build
+      - run: yarn test
       - name: Patch canary version and dependency
         shell: bash
         run: |
@@ -132,8 +132,8 @@ jobs:
       - run: yarn --cwd ../core build
       - run: yarn install --immutable
       - run: yarn typecheck
-      - run: yarn test
       - run: yarn build
+      - run: yarn test
       - run: yarn pack:smoke
       - name: Patch canary version and dependencies
         shell: bash
@@ -222,16 +222,16 @@ jobs:
       - run: corepack enable
       - run: yarn --cwd packages/plugin install --immutable
       - run: yarn --cwd packages/plugin typecheck
-      - run: yarn --cwd packages/plugin test
       - run: yarn --cwd packages/plugin build
+      - run: yarn --cwd packages/plugin test
       - run: yarn --cwd packages/core install --immutable
       - run: yarn --cwd packages/core typecheck
-      - run: yarn --cwd packages/core test
       - run: yarn --cwd packages/core build
+      - run: yarn --cwd packages/core test
       - run: yarn --cwd packages/layer install --immutable
       - run: yarn --cwd packages/layer typecheck
-      - run: yarn --cwd packages/layer test
       - run: yarn --cwd packages/layer build
+      - run: yarn --cwd packages/layer test
       - run: yarn --cwd packages/layer pack:smoke
       # npm OIDC trusted publishing does not authenticate npm dist-tag, so a
       # cross-package atomic latest promotion is unavailable without adding a
