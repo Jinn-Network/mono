@@ -463,6 +463,100 @@ describe('production review session port', () => {
     expect(mutation?.env?.JINN_IMPL_GH_TOKEN).toBe('');
   });
 
+  it('regression: publishes a review verdict with no JINN_REVIEW_* env vars, resolving the reviewer credential from the attempt token file', async () => {
+    // Mirrors the live Hermes-scrubbed session shape: the non-secret-shaped
+    // JINN_REVIEW_BOT_LOGIN survives the coordinator runtime's env scrub,
+    // while the secret-shaped GH_TOKEN / JINN_REVIEW_GH_TOKEN do not. The
+    // port must never consult JINN_REVIEW_BOT_LOGIN or demand
+    // JINN_REVIEW_GH_TOKEN — it resolves the reviewer's credential solely
+    // from the attempt-scoped token file (#1883 credential-handoff fix) and
+    // must complete the native review submission without throwing.
+    const bound = tokenFileFixture('file-secret');
+    const calls: Array<{ cmd: string; args: string[]; env?: Record<string, string> }> = [];
+    const port = makeProductionReviewSessionPort({
+      environment: {
+        JINN_REVIEW_BOT_LOGIN: 'review-bot',
+        JINN_AUTOPILOT_SESSION_MANIFEST: bound.paths.manifest,
+      },
+      readManifest: () => bound,
+      runner: async (cmd, args, options) => {
+        calls.push({ cmd, args, env: options?.env });
+        if (cmd === 'gh' && args.join(' ') === 'api user --jq .login') {
+          return 'review-bot\n';
+        }
+        if (cmd === 'gh' && args.includes('view')) {
+          return JSON.stringify({
+            number: 84,
+            state: 'OPEN',
+            headRefOid: HEAD,
+            headRefName: 'autopilot/42',
+            baseRefName: 'next',
+            baseRefOid: BASE,
+            isDraft: false,
+            body: '<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
+            author: { login: 'implementation-bot' },
+            labels: [{ name: 'engine:review' }],
+            closingIssues: [{ number: 42 }],
+            files: [],
+          });
+        }
+        if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'list') {
+          return JSON.stringify([{
+            number: 84,
+            headRefOid: HEAD,
+            headRefName: 'autopilot/42',
+            closingIssues: [{ number: 42 }],
+          }]);
+        }
+        if (cmd === 'git' && args.includes('ls-tree')) return '';
+        if (cmd === 'gh' && args.join(' ').includes('repos/Jinn-Network/mono/pulls/84/reviews')) {
+          return '{}';
+        }
+        throw new Error(`unexpected ${cmd} ${args.join(' ')}`);
+      },
+    });
+
+    await expect(port.submitNativeReview({
+      manifest: bound,
+      prNumber: 84,
+      commitId: HEAD,
+      reviewer: 'review-bot',
+      state: 'APPROVE',
+      body: 'exact body',
+    })).resolves.toBeUndefined();
+
+    const mutation = calls.find((call) => call.args.includes('--method'));
+    expect(mutation?.env?.GH_TOKEN).toBe('file-secret');
+    // The demand this regression guards against never fires: no code path
+    // here reads JINN_REVIEW_BOT_LOGIN, and none of the recorded calls carry
+    // JINN_REVIEW_GH_TOKEN (it was never set in this environment at all).
+    expect(calls.every((call) => call.env?.JINN_REVIEW_GH_TOKEN === undefined
+      || call.env.JINN_REVIEW_GH_TOKEN === '')).toBe(true);
+  });
+
+  it('rejects submitNativeReview when the resolved gh identity no longer matches the manifest reviewer', async () => {
+    const port = makeProductionReviewSessionPort({
+      environment: {
+        GH_TOKEN: 'stale-secret',
+        JINN_AUTOPILOT_SESSION_MANIFEST: '/attempt/manifest.json',
+      },
+      readManifest: () => manifest(),
+      runner: async (cmd, args) => {
+        if (cmd === 'gh' && args.join(' ') === 'api user --jq .login') return 'someone-else\n';
+        throw new Error(`unexpected ${cmd} ${args.join(' ')}`);
+      },
+    });
+
+    await expect(port.submitNativeReview({
+      manifest: manifest(),
+      prNumber: 84,
+      commitId: HEAD,
+      reviewer: 'review-bot',
+      state: 'APPROVE',
+      body: 'exact body',
+    })).rejects.toThrow(/no longer matches the manifest identity/);
+  });
+
   it('reads the exact review ref payload and validates selected identity and canonical HTTPS remote', async () => {
     const calls: string[] = [];
     const port = makeProductionReviewSessionPort({
