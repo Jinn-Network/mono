@@ -18,11 +18,62 @@ def test_cold_stock_script_uses_built_products_and_both_lifecycle_drivers():
 
     assert "9df5f879b4a5925c0f8f947e7e16ed8e845932c3" in script
     assert "pip wheel" in script
+    assert 'PLUGIN="$REPO_ROOT/packages/plugin"' in script
+    assert 'CORE="$REPO_ROOT/packages/core"' in script
     assert 'LAYER="$REPO_ROOT/packages/layer"' in script
-    assert 'JINN_LAYER_BIN="$LAYER/dist/bin/jinn-layer.js"' in script
+    assert "JINN_LAYER_BIN" not in script
+    assert "packages/layer/dist/bin/jinn-layer.js" not in script
     assert "scripts/fixtures/jinn-layer-stub" not in script
     assert "stage1-stock-product.py" in script
     assert "stage1-task-creator-acceptance.mjs" in script
+
+
+def test_cold_stock_installs_all_packed_jinn_packages_into_wheel_runtime():
+    script = (AGENT_ROOT / "scripts" / "cold-stock-e2e.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'npm pack --silent --pack-destination "$WORK/tarballs"' in script
+    assert 'PLUGIN_TARBALL="$(pack_local_package "$PLUGIN")"' in script
+    assert 'CORE_TARBALL="$(pack_local_package "$CORE")"' in script
+    assert 'LAYER_TARBALL="$(pack_local_package "$LAYER")"' in script
+    assert 'PLUGIN_RUNTIME="$PLUGIN_DIR/runtime"' in script
+
+    install_start = script.index("npm install", script.index("PLUGIN_RUNTIME="))
+    install_end = script.index("\n\n", install_start)
+    install = script[install_start:install_end]
+    assert '"$PLUGIN_TARBALL"' in install
+    assert '"$CORE_TARBALL"' in install
+    assert '"$LAYER_TARBALL"' in install
+    assert (
+        'export JINN_STAGE1_LAYER_BIN="$PLUGIN_RUNTIME/node_modules/.bin/jinn-layer"'
+        in script
+    )
+
+
+def test_stock_driver_asserts_the_installed_plugin_local_runtime():
+    driver = (AGENT_ROOT / "scripts" / "stage1-stock-product.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'require_env("JINN_STAGE1_LAYER_BIN", resolve=False)' in driver
+    assert 'require_env("JINN_LAYER_BIN")' not in driver
+    assert "from jinn_plugin import jinn_layer" in driver
+    assert 'resolution.source == "plugin-local"' in driver
+    assert "resolution.argv == (str(LAYER_BIN),)" in driver
+    assert 'resolution.package == "@jinn-network/jinn-layer"' in driver
+    assert 'resolution.version == "0.1.0"' in driver
+    assert "os.access(LAYER_BIN, os.X_OK)" in driver
+    assert 'os.environ.pop("JINN_LAYER_BIN", None)' in driver
+
+
+def test_daemon_acceptance_driver_uses_the_test_only_layer_probe():
+    driver = (
+        REPO_ROOT / "client" / "scripts" / "stage1-task-creator-acceptance.mjs"
+    ).read_text(encoding="utf-8")
+
+    assert "requiredEnv('JINN_STAGE1_LAYER_BIN')" in driver
+    assert "requiredEnv('JINN_LAYER_BIN')" not in driver
 
 
 def test_stage1_gate_is_blocking_for_every_product_boundary():
