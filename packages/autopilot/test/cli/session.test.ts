@@ -418,6 +418,46 @@ describe('session CLI grammar', () => {
     expect(injected.setExitCode).toHaveBeenCalledWith(2);
   });
 
+  it('surfaces a partial implementation-complete result\'s detail in the CLI output (#1883)', async () => {
+    // `ensureCompletionProjection`'s catch blocks used to swallow the
+    // thrown error entirely, leaving `autopilot session
+    // implementation-complete` reporting only that something is pending,
+    // never why. `detail` must flow through the CLI's JSON output
+    // unchanged.
+    const manifest = {
+      ...MANIFEST,
+      phase: 'implement' as const,
+      subject: 'issue-8',
+      prNumber: 9,
+      reviewGeneration: undefined,
+      reviewRefOid: undefined,
+      reviewApprovalPolicy: undefined,
+    };
+    const handler = protocol();
+    const detail =
+      'Pull request record has not caught up with the published head after 3 attempts';
+    handler.implementationComplete = vi.fn(async () => ({
+      status: 'partial' as const,
+      head: NONTERMINAL_HEAD,
+      pending: 'project' as const,
+      detail,
+    }));
+    const injected = deps(manifest, handler);
+
+    const result = await runSessionCli(
+      ['implementation-complete', '--summary-file', SUMMARY_PATH],
+      injected,
+    );
+
+    expect(result.outcome).toMatchObject({ detail });
+    expect(injected.writeOutput).toHaveBeenCalledWith(
+      `${JSON.stringify(result)}\n`,
+    );
+    const written = (injected.writeOutput as ReturnType<typeof vi.fn>).mock.calls
+      .at(-1)?.[0] as string;
+    expect(JSON.parse(written).outcome.detail).toBe(detail);
+  });
+
   it('rejects unbounded injected summary and reason text before delegation', async () => {
     const implementation = {
       ...MANIFEST,

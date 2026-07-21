@@ -173,6 +173,8 @@ function harness(options: {
       labels: [...labels],
       body,
     }),
+    readPullRequestHead: async () => authority.remoteHead,
+    sleep: async () => {},
     ensureCompletionSummary: async (_pr, expectedHead, summary) => {
       events.push('summary');
       expect(expectedHead).toBe(COMPLETE);
@@ -340,6 +342,83 @@ describe('implementation session protocol', () => {
     ]);
   });
 
+  it('converges finalization when the PR record lags the marker push instead of aborting', async () => {
+    // jinn-mono#1883 live bug: the completion marker's git push wins
+    // instantly (ls-remote is current the moment the push returns), but the
+    // very next read of the PR *record* (`gh pr view`) still reports the
+    // pre-push head, because that API replicates with up to a few seconds
+    // of lag. The old single-shot read treated that lag as the PR having
+    // changed and aborted to partial before ever attempting the summary/
+    // label/draft/status projection. Two lagging reads followed by a
+    // caught-up read must still reach `complete` in one call.
+    const h = harness();
+    let reads = 0;
+    const sleeps: number[] = [];
+    h.port.readPullRequestHead = async () => {
+      reads += 1;
+      return reads <= 2 ? WORK : COMPLETE;
+    };
+    h.port.sleep = async (ms) => { sleeps.push(ms); };
+
+    await expect(
+      h.protocol.implementationComplete(h.manifest, 'Implementation summary'),
+    ).resolves.toEqual({ status: 'complete', head: COMPLETE });
+
+    expect(reads).toBe(3);
+    expect(sleeps).toEqual([1000, 1000]);
+    expect(h.project).toBe('In Review');
+    expect(h.draft).toBe(false);
+  });
+
+  it('fails closed immediately when the PR record shows a foreign head, without retrying', async () => {
+    const h = harness();
+    let reads = 0;
+    const sleeps: number[] = [];
+    h.port.readPullRequestHead = async () => {
+      reads += 1;
+      return OTHER;
+    };
+    h.port.sleep = async (ms) => { sleeps.push(ms); };
+
+    await expect(
+      h.protocol.implementationComplete(h.manifest, 'Implementation summary'),
+    ).resolves.toMatchObject({
+      status: 'partial',
+      head: COMPLETE,
+      pending: 'project',
+      detail: expect.stringContaining('foreign write'),
+    });
+
+    expect(reads).toBe(1);
+    expect(sleeps).toHaveLength(0);
+    expect(h.completeCommits).toBe(1);
+    expect(h.events).not.toContain('summary');
+  });
+
+  it('returns partial with a surfaced detail when replication never resolves', async () => {
+    const h = harness();
+    let reads = 0;
+    const sleeps: number[] = [];
+    h.port.readPullRequestHead = async () => {
+      reads += 1;
+      return WORK;
+    };
+    h.port.sleep = async (ms) => { sleeps.push(ms); };
+
+    await expect(
+      h.protocol.implementationComplete(h.manifest, 'Implementation summary'),
+    ).resolves.toMatchObject({
+      status: 'partial',
+      head: COMPLETE,
+      pending: 'project',
+      detail: expect.stringContaining('has not caught up'),
+    });
+
+    expect(reads).toBe(3);
+    expect(sleeps).toEqual([1000, 1000]);
+    expect(h.events).not.toContain('summary');
+  });
+
   it('revalidates the draft PR authority before creating a completion marker', async () => {
     const h = harness({ localHead: CLAIM, realTreeChange: false });
     const read = h.port.readPullRequest;
@@ -428,6 +507,7 @@ describe('implementation session protocol', () => {
         status: 'partial',
         head: COMPLETE,
         pending,
+        detail: 'injected',
       });
       expect(h.completeCommits).toBe(1);
       expect(h.draft).toBe(draftAfterFailure);
@@ -510,6 +590,33 @@ describe('implementation session protocol', () => {
     expect(h.events).not.toContain('completion-commit');
   });
 
+  it('converges through replication lag on a resumed phase-complete retry before projecting', async () => {
+    // Same PR-record-lag scenario as the fresh-marker case, but on the
+    // resumed-session path: the marker is already on the branch (this is a
+    // retry), and `authority.latestClaim.expectedHead` -- the completion
+    // claim's own recorded parent -- is the exact pre-marker head this
+    // convergence wait needs to tell lag apart from a foreign change.
+    const h = harness({
+      expectedHead: COMPLETE,
+      localHead: COMPLETE,
+      remoteHead: COMPLETE,
+      latestClaimOid: COMPLETE,
+      latestClaim: claim({ expectedHead: WORK, phaseComplete: true }),
+      realTreeChange: false,
+    });
+    let reads = 0;
+    h.port.readPullRequestHead = async () => {
+      reads += 1;
+      return reads <= 2 ? WORK : COMPLETE;
+    };
+
+    await expect(
+      h.protocol.implementationComplete(h.manifest, 'Implementation summary'),
+    ).resolves.toEqual({ status: 'complete', head: COMPLETE });
+    expect(reads).toBe(3);
+    expect(h.completeCommits).toBe(0);
+  });
+
   it('retries the same local completion marker after an ambiguous push without treating it as a heartbeat', async () => {
     const h = harness({ localHead: WORK, remoteHead: WORK, expectedHead: WORK });
     const publish = h.port.publishBranch;
@@ -540,6 +647,49 @@ describe('implementation session protocol', () => {
     await expect(
       h.protocol.implementationComplete(h.manifest, 'Implementation summary'),
     ).resolves.toEqual({ status: 'complete', head: COMPLETE });
+    expect(h.completeCommits).toBe(1);
+    expect(h.manifest.expectedHead).toBe(COMPLETE);
+  });
+
+  it('converges through replication lag on the localHead-republish path after an ambiguous marker push', async () => {
+    // Same lag scenario again, but on the retry of an ambiguously-pushed
+    // marker: `manifest.expectedHead` before the republish (captured as
+    // `prePublishHead`) is the exact pre-marker head this convergence wait
+    // needs.
+    const h = harness({ localHead: WORK, remoteHead: WORK, expectedHead: WORK });
+    const publish = h.port.publishBranch;
+    let ambiguous = true;
+    h.port.publishBranch = async (input) => {
+      if (input.newHead === COMPLETE && ambiguous) {
+        ambiguous = false;
+        return {
+          status: 'ambiguous',
+          expected: input.expectedRemoteHead,
+          published: input.newHead,
+          observed: null,
+        };
+      }
+      return publish(input);
+    };
+
+    await expect(
+      h.protocol.implementationComplete(h.manifest, 'Implementation summary'),
+    ).resolves.toEqual({
+      status: 'partial',
+      head: COMPLETE,
+      pending: 'marker',
+    });
+
+    let reads = 0;
+    h.port.readPullRequestHead = async () => {
+      reads += 1;
+      return reads <= 2 ? WORK : COMPLETE;
+    };
+
+    await expect(
+      h.protocol.implementationComplete(h.manifest, 'Implementation summary'),
+    ).resolves.toEqual({ status: 'complete', head: COMPLETE });
+    expect(reads).toBe(3);
     expect(h.completeCommits).toBe(1);
     expect(h.manifest.expectedHead).toBe(COMPLETE);
   });

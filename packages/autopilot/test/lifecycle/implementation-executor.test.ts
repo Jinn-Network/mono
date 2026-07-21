@@ -341,6 +341,8 @@ describe('implementation action executor', () => {
         labels: ['engine:review'],
         body: 'Closes #42\n\n<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
       }),
+      readPullRequestHead: async () => CLAIM_A,
+      sleep: async () => {},
       ensureCompletionSummary: async () => {},
       setPullRequestLabel: async () => {},
       setProjectStatus: async () => {},

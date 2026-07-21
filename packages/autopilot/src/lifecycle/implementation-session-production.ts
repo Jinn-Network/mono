@@ -38,6 +38,17 @@ export interface ProductionImplementationSessionPortOptions {
   readonly environment?: NodeJS.ProcessEnv;
   readonly now?: () => Date;
   readonly readManifest?: (path: string) => AttemptManifest;
+  /**
+   * Injectable delay for the bounded PR-record convergence retry in
+   * `implementation-session.ts`'s `awaitPullRequestHead` (replication-lag
+   * tolerance around a just-published completion marker; see #1883).
+   * Defaults to a real `setTimeout`-based sleep.
+   */
+  readonly sleep?: (ms: number) => Promise<void>;
+}
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => { setTimeout(resolve, ms); });
 }
 
 const NEEDS_HUMAN_LABEL = 'review:needs-human';
@@ -120,6 +131,7 @@ export function makeProductionImplementationSessionPort(
   const runner = options.runner ?? defaultRunner;
   const ambient = options.environment ?? process.env;
   const readManifest = options.readManifest ?? readAttemptManifest;
+  const sleep = options.sleep ?? defaultSleep;
   const manifestPath = ambient.JINN_AUTOPILOT_SESSION_MANIFEST;
   const currentManifest = (): AttemptManifest => {
     if (manifestPath === undefined || manifestPath.length === 0) {
@@ -352,6 +364,13 @@ export function makeProductionImplementationSessionPort(
       const manifest = currentManifest();
       return requirePullRequestHead(manifest, prNumber, expectedHead);
     },
+
+    async readPullRequestHead(prNumber) {
+      const manifest = currentManifest();
+      return (await readPullRequest(manifest, prNumber)).head;
+    },
+
+    sleep,
 
     async ensureCompletionSummary(prNumber, expectedHead, summary) {
       const manifest = currentManifest();

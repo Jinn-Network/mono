@@ -382,6 +382,58 @@ describe('production implementation session port', () => {
     });
   });
 
+  it('reads only the PR head without throwing when it disagrees with any prior expectation', async () => {
+    // Unlike `readPullRequest`, which throws when the observed head isn't
+    // the caller's expectation, `readPullRequestHead` is the raw read
+    // `awaitPullRequestHead` polls with in implementation-session.ts to
+    // tell GitHub PR-record replication lag apart from a genuine change
+    // (#1883) -- it must never throw on a mismatch, because a mismatch is
+    // exactly the lag case it exists to observe.
+    const runner: CommandRunner = async (cmd, args) => {
+      if (cmd === 'gh' && args.includes('view')) {
+        return JSON.stringify({
+          number: 84,
+          headRefName: 'autopilot/42',
+          baseRefName: 'next',
+          headRefOid: WORK,
+          isDraft: true,
+          labels: [],
+          body: 'Closes #42',
+        });
+      }
+      throw new Error(`unexpected call: ${cmd} ${args.join(' ')}`);
+    };
+    const bound = manifest();
+    const port = makeProductionImplementationSessionPort({
+      runner,
+      environment: {
+        GH_TOKEN: 'selected-secret',
+        JINN_AUTOPILOT_SESSION_MANIFEST: bound.paths.manifest,
+      },
+      readManifest: () => bound,
+    });
+
+    await expect(port.readPullRequestHead(84)).resolves.toBe(WORK);
+  });
+
+  it('sleeps for the requested duration via the injected sleep, defaulting to a real timer', async () => {
+    const injected: number[] = [];
+    const port = makeProductionImplementationSessionPort({
+      environment: { GH_TOKEN: 'selected-secret' },
+      sleep: async (ms) => { injected.push(ms); },
+    });
+
+    await port.sleep(1000);
+    expect(injected).toEqual([1000]);
+
+    const defaulted = makeProductionImplementationSessionPort({
+      environment: { GH_TOKEN: 'selected-secret' },
+    });
+    const start = Date.now();
+    await defaulted.sleep(5);
+    expect(Date.now() - start).toBeGreaterThanOrEqual(0);
+  });
+
   it.each([
     ['Project In Review', 'label'],
     ['Project In Review', 'status'],
