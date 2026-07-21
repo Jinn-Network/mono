@@ -495,6 +495,144 @@ describe('active lifecycle controller', () => {
     expect(actions).toEqual([{ kind: 'claim-implementation', issueNumber: 42 }]);
     expect(second.status).toBe('ok');
   });
+
+  // jinn-mono#1883 follow-up: `implementationComplete && item.implementationSummary
+  // !== undefined` is permanently true once implementation finishes, so
+  // `ensure-implementation-summary` is emitted every cycle for a finalized PR
+  // (the writer no-ops once the PR body already matches, but the action
+  // itself stays in the plan). Before excluding it in `blockedIssueNumbers`,
+  // that permanent pending action treated the PR's issue as blocked forever,
+  // so `claim-review` was never scheduled for it.
+  function finalizedPrSnapshot(projectStatus: 'In Review' | 'Todo' = 'In Review'): GitHubLifecycleSnapshot {
+    const head = gitOid('8'.repeat(40));
+    return {
+      project: {
+        items: [],
+        rateLimit: { remaining: 4_000, used: 1_000, resetAt: '2026-07-20T13:00:00.000Z' },
+        currentSprintIterationId: null,
+      },
+      issues: [],
+      branches: [],
+      diagnostics: [],
+      pullRequests: [{
+        number: 84,
+        title: 'implementation',
+        body: 'Closes #42',
+        author: 'implementation-bot',
+        baseRefName: 'next',
+        headRefName: 'autopilot/42',
+        headOid: head,
+        headCommittedAt: '2026-07-20T08:00:00.000Z',
+        isDraft: false,
+        state: 'OPEN',
+        labels: ['engine:review'],
+        closingIssueNumbers: [42],
+        mergeability: 'MERGEABLE',
+        mergeStateStatus: 'CLEAN',
+        checks: [],
+        reviews: [],
+      }],
+      lifecycle: {
+        items: [{
+          kind: 'pull-request',
+          issueNumber: 42,
+          prNumber: 84,
+          v2Marked: true,
+          projectStatus,
+          labels: ['engine:review'],
+          head,
+          headChangedAt: '2026-07-20T08:00:00.000Z',
+          isDraft: false,
+          merged: false,
+          needsReview: true,
+          approved: false,
+          mergeState: 'clean',
+          branchClaim: {
+            kind: 'branch-claim',
+            protocolVersion: 2,
+            phase: 'implement',
+            phaseComplete: true,
+            issueNumber: 42,
+            prNumber: 84,
+            attempt: '55555555-5555-4555-8555-555555555555',
+            runner: 'runner-old',
+            login: 'implementation-bot',
+            expectedHead: head,
+            targetBase: gitRefName('next'),
+            claimedAt: '2026-07-20T08:00:00.000Z',
+          },
+          implementationSummary: 'Implemented the thing.',
+        }],
+      },
+      capturedAt: NOW.toISOString(),
+    };
+  }
+
+  function finalizedPrActive(): NonNullable<LifecycleControllerDeps['active']> {
+    return {
+      preflight: async () => ({ ok: true }),
+      readLocalState: () => ({
+        remaining: { implementation: 1, review: 1, mergePrep: 1 },
+        availableLogins: ['review-bot'],
+        implementationPreferredLogin: 'review-bot',
+      }),
+      implementationBackpressureThreshold: 10,
+      executeAction: async () => ({ outcome: 'spawned' }),
+    };
+  }
+
+  it('schedules a review claim for a finalized PR even though its ensure-implementation-summary projection is pending', async () => {
+    const head = gitOid('8'.repeat(40));
+    const actions: unknown[] = [];
+    const controller = deps({
+      readSnapshot: async () => finalizedPrSnapshot('In Review'),
+      active: finalizedPrActive(),
+    });
+    controller.active!.executeAction = async (action) => {
+      actions.push(action);
+      return { outcome: 'spawned' };
+    };
+
+    const report = await runLifecycleCycle('active', controller);
+    expect(actions).toEqual([{
+      kind: 'claim-review',
+      issueNumber: 42,
+      prNumber: 84,
+      head,
+      recoverFixes: false,
+    }]);
+    if (report.status !== 'ok') throw new Error('expected active report');
+    // Confirms the plan really did carry the pending body-sync action this
+    // cycle -- proving the exclusion, not an absent action, is what let the
+    // claim through.
+    expect(report.reconciliation?.results).toContainEqual(expect.objectContaining({
+      action: expect.objectContaining({ kind: 'ensure-implementation-summary', prNumber: 84 }),
+    }));
+  });
+
+  it('still blocks the claim when a genuinely state-correcting action is pending for the same PR', async () => {
+    // Same finalized PR, but its project status has drifted to 'Todo' (e.g. a
+    // stray manual edit), which plans a real correcting `set-project-status`
+    // action alongside `ensure-implementation-summary`. Proves the new
+    // exclusion is narrow: it does not launder every other action kind past
+    // the reconcile-before-claim guarantee.
+    const actions: unknown[] = [];
+    const controller = deps({
+      readSnapshot: async () => finalizedPrSnapshot('Todo'),
+      active: finalizedPrActive(),
+    });
+    controller.active!.executeAction = async (action) => {
+      actions.push(action);
+      return { outcome: 'spawned' };
+    };
+
+    const report = await runLifecycleCycle('active', controller);
+    expect(actions).toEqual([]);
+    if (report.status !== 'ok') throw new Error('expected active report');
+    expect(report.reconciliation?.results).toContainEqual(expect.objectContaining({
+      action: expect.objectContaining({ kind: 'set-project-status', issueNumber: 42 }),
+    }));
+  });
 });
 
 // jinn-mono#1883: `JINN_AUTOPILOT_ONLY_ISSUES` canary safety knob. Restricts

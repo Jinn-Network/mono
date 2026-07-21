@@ -588,6 +588,15 @@ function phaseForSchedulingSkip(
 // signal as before) so an item whose reconciliation was just corrected this
 // cycle still waits for a fresh snapshot next cycle before claiming — only
 // the *scope* narrows from the whole cycle to the specific item.
+//
+// `ensure-implementation-summary` is excluded alongside `expose-merge-prep`
+// (jinn-mono#1883 follow-up): it is a benign, idempotent PR-body content
+// sync (the writer no-ops once the body already matches) that is orthogonal
+// to claiming — a review or merge-prep claim advances a dedicated ref, never
+// the PR body. `implementationComplete && item.implementationSummary !==
+// undefined` is permanently true once implementation finishes, so without
+// this exclusion the action is emitted every cycle for every finalized PR
+// and its issue is blocked forever, so `claim-review` is never scheduled.
 function blockedIssueNumbers(
   actions: readonly ProjectionAction[],
   view: LifecycleView,
@@ -601,6 +610,7 @@ function blockedIssueNumbers(
   const blocked = new Set<number>();
   for (const action of actions) {
     if (action.kind === 'expose-merge-prep') continue;
+    if (action.kind === 'ensure-implementation-summary') continue;
     if ('issueNumber' in action && action.issueNumber !== undefined) {
       blocked.add(action.issueNumber);
       continue;
