@@ -15,6 +15,10 @@ import {
   type CapabilityAttestation,
 } from './capability-attestation.js';
 import { CANONICAL_GITHUB_HTTPS_REMOTE } from './implementation-executor.js';
+import {
+  parseReviewClaimRefGitListing,
+  REVIEW_CLAIM_REF_GLOB,
+} from './github-reader.js';
 import { gitOid, type GitOid } from './types.js';
 
 export type CapabilityProbeGitRunner = (
@@ -139,6 +143,21 @@ export async function runCapabilityProbe(
     if (await readRef(review) !== one) {
       throw new Error('Capability probe absent-ref creation readback failed');
     }
+    // jinn-mono#1883-follow-up: GitHub's GraphQL `ref(qualifiedName:)`
+    // permanently returns null for refs/jinn-autopilot/* — proven live, and
+    // it silently broke every review-claim read. Prove the git-transport
+    // listing production now uses instead (`GhLifecycleReader`'s
+    // `git ls-remote <remote> '<glob>'`) actually surfaces this disposable
+    // ref with the exact OID just pushed, so this gate covers the read path
+    // as well as the write path.
+    const listedAfterCreation = parseReviewClaimRefGitListing(
+      await git(['ls-remote', options.remoteName, REVIEW_CLAIM_REF_GLOB]),
+    );
+    if (listedAfterCreation.get(`capability-${probeId}`) !== one) {
+      throw new Error(
+        'Capability probe git-transport listing did not surface the disposable review ref',
+      );
+    }
     await requireRejected(() =>
       push([exactLease(review, null), `${two}:${review}`]));
     if (await readRef(review) !== one) {
@@ -233,6 +252,7 @@ export async function runCapabilityProbe(
       atomicPairRejection: true,
       ambiguousReadback: true,
       exactCleanup: true,
+      readViaGitTransport: true,
     },
   }, {
     remoteName: options.remoteName,

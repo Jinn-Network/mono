@@ -7,6 +7,24 @@ import {
 
 const OPEN_HEAD = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const MERGED_HEAD = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+const REVIEW_CLAIM_GLOB = 'refs/jinn-autopilot/review-claims/v1/*';
+
+/**
+ * Every review-claim read now goes over the git transport (a single
+ * `git ls-remote <remote> '<glob>'` per snapshot, see github-reader.ts) —
+ * GitHub's GraphQL `ref(qualifiedName:)` permanently returns null for this
+ * custom ref namespace (jinn-mono#1883-follow-up, proven live). Fakes below
+ * that don't care about review claims answer every `git` call with "no refs
+ * yet" so every PR's `reviewClaim` resolves to null, matching the old
+ * always-absent GraphQL stub they replace.
+ */
+function noReviewClaimRefs(command: string): string | undefined {
+  return command === 'git' ? '' : undefined;
+}
+
+function isReviewClaimListingCall(args: string[]): boolean {
+  return args[2] === 'ls-remote' && args[4] === REVIEW_CLAIM_GLOB;
+}
 
 it('extracts the durable summary from an exact phase-complete commit envelope', () => {
   const trailers = [
@@ -120,7 +138,9 @@ describe('GhLifecycleReader', () => {
       '',
       trailers,
     ].join('\n');
-    const run: CommandRunner = async (_command, args) => {
+    const run: CommandRunner = async (command, args) => {
+      const stub = noReviewClaimRefs(command);
+      if (stub !== undefined) return stub;
       const query = args.find((arg) => arg.startsWith('query=')) ?? '';
       if (query.includes('closedByPullRequestsReferences')) {
         return JSON.stringify({
@@ -135,9 +155,6 @@ describe('GhLifecycleReader', () => {
             },
           },
         });
-      }
-      if (query.includes('ref(qualifiedName')) {
-        return JSON.stringify({ data: { repository: { ref: null } } });
       }
       return JSON.stringify({
         data: {
@@ -166,8 +183,10 @@ describe('GhLifecycleReader', () => {
     const humanComment = '<!-- jinn-autopilot-human:v2 issue=42 pr=101 '
       + 'phase=implementing code=implementation-escalation -->\n\n'
       + 'Autopilot parked this item for Human review.\n\nNeeds product judgment';
-    const run: CommandRunner = async (_command, args) => {
+    const run: CommandRunner = async (command, args) => {
       calls.push(args);
+      const stub = noReviewClaimRefs(command);
+      if (stub !== undefined) return stub;
       const query = args.find((arg) => arg.startsWith('query=')) ?? '';
       if (query.includes('closedByPullRequestsReferences')) {
         return JSON.stringify({
@@ -190,9 +209,6 @@ describe('GhLifecycleReader', () => {
             },
           },
         });
-      }
-      if (query.includes('ref(qualifiedName')) {
-        return JSON.stringify({ data: { repository: { ref: null } } });
       }
       return JSON.stringify({
         data: {
@@ -231,7 +247,10 @@ describe('GhLifecycleReader', () => {
     expect(mergedQuery).not.toContain('reviews(');
     expect(mergedQuery).not.toContain('comments(');
     expect(mergedQuery).not.toContain('statusCheckRollup');
-    expect(queries.filter((query) => query.includes('ref(qualifiedName'))).toHaveLength(1);
+    // Replaces the old per-PR GraphQL ref(qualifiedName) query-count assertion:
+    // review-claim reads are now one shared git-transport listing per page,
+    // not one GraphQL call per PR (jinn-mono#1883-follow-up).
+    expect(calls.filter(isReviewClaimListingCall)).toHaveLength(1);
     expect(page.nodes.map((pr) => [pr.number, pr.state])).toEqual([
       [101, 'OPEN'],
       [99, 'MERGED'],
@@ -260,12 +279,10 @@ describe('GhLifecycleReader', () => {
         committer: { date: '2026-07-20T09:00:00.000Z' },
       },
     }));
-    const run: CommandRunner = async (_command, args) => {
+    const run: CommandRunner = async (command, args) => {
       calls.push(args);
-      const query = args.find((arg) => arg.startsWith('query=')) ?? '';
-      if (query.includes('ref(qualifiedName')) {
-        return JSON.stringify({ data: { repository: { ref: null } } });
-      }
+      const stub = noReviewClaimRefs(command);
+      if (stub !== undefined) return stub;
       if (args[1]?.includes('/commits?')) {
         const page = args[1].includes('page=2') ? 2 : 1;
         return JSON.stringify(historyPage(page));
@@ -401,7 +418,9 @@ describe('GhLifecycleReader', () => {
       labels: [],
       message: claimMessage,
     });
-    const run: CommandRunner = async (_command, args) => {
+    const run: CommandRunner = async (command, args) => {
+      const stub = noReviewClaimRefs(command);
+      if (stub !== undefined) return stub;
       const query = args.find((arg) => arg.startsWith('query=')) ?? '';
       if (query.includes('closedByPullRequestsReferences')) {
         return JSON.stringify({
@@ -419,9 +438,6 @@ describe('GhLifecycleReader', () => {
       }
       if (query.includes('pullRequest(number:')) {
         return JSON.stringify({ data: { repository: { pullRequest: adopted } } });
-      }
-      if (query.includes('ref(qualifiedName')) {
-        return JSON.stringify({ data: { repository: { ref: null } } });
       }
       return JSON.stringify({
         data: {
@@ -496,11 +512,9 @@ describe('GhLifecycleReader', () => {
   });
 
   function pageOf(...nodes: ReturnType<typeof graphQlPr>[]): CommandRunner {
-    return async (_command, args) => {
-      const query = args.find((arg) => arg.startsWith('query=')) ?? '';
-      if (query.includes('ref(qualifiedName')) {
-        return JSON.stringify({ data: { repository: { ref: null } } });
-      }
+    return async (command) => {
+      const stub = noReviewClaimRefs(command);
+      if (stub !== undefined) return stub;
       return JSON.stringify({
         data: {
           repository: {
@@ -595,11 +609,8 @@ describe('GhLifecycleReader', () => {
   });
 
   it('still fails the whole page on errors unrelated to per-PR evidence decoding', async () => {
-    const run: CommandRunner = async (_command, args) => {
-      const query = args.find((arg) => arg.startsWith('query=')) ?? '';
-      if (query.includes('ref(qualifiedName')) {
-        throw new Error('transient GitHub network failure');
-      }
+    const run: CommandRunner = async (command) => {
+      if (command === 'git') throw new Error('transient GitHub network failure');
       return JSON.stringify({
         data: {
           repository: {
@@ -617,7 +628,9 @@ describe('GhLifecycleReader', () => {
   });
 
   function mergedOutcomesRun(nodes: ReturnType<typeof graphQlPr>[]): CommandRunner {
-    return async (_command, args) => {
+    return async (command, args) => {
+      const stub = noReviewClaimRefs(command);
+      if (stub !== undefined) return stub;
       const query = args.find((arg) => arg.startsWith('query=')) ?? '';
       if (query.includes('closedByPullRequestsReferences')) {
         return JSON.stringify({
@@ -632,9 +645,6 @@ describe('GhLifecycleReader', () => {
             },
           },
         });
-      }
-      if (query.includes('ref(qualifiedName')) {
-        return JSON.stringify({ data: { repository: { ref: null } } });
       }
       return JSON.stringify({
         data: {
@@ -740,13 +750,12 @@ describe('GhLifecycleReader', () => {
   });
 
   it('still fails the whole page on a network failure reading merged outcomes', async () => {
-    const run: CommandRunner = async (_command, args) => {
+    const run: CommandRunner = async (command, args) => {
+      const stub = noReviewClaimRefs(command);
+      if (stub !== undefined) return stub;
       const query = args.find((arg) => arg.startsWith('query=')) ?? '';
       if (query.includes('closedByPullRequestsReferences')) {
         throw new Error('transient GitHub network failure');
-      }
-      if (query.includes('ref(qualifiedName')) {
-        return JSON.stringify({ data: { repository: { ref: null } } });
       }
       return JSON.stringify({
         data: {
@@ -781,5 +790,132 @@ describe('GhLifecycleReader', () => {
     await expect(
       new GhLifecycleReader(mergedOutcomesRun([malformed])).readPullRequests(null, [42]),
     ).rejects.toBeInstanceOf(TypeError);
+  });
+
+  describe('review-claim git transport', () => {
+    function openPrPage(...nodes: ReturnType<typeof graphQlPr>[]): string {
+      return JSON.stringify({
+        data: {
+          repository: {
+            pullRequests: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes,
+            },
+          },
+        },
+      });
+    }
+
+    it('resolves a review claim via ls-remote + cat-file, returning the same shape as before', async () => {
+      const oid = 'c'.repeat(40);
+      const payload = '{"protocolVersion":2}';
+      const ref = 'refs/jinn-autopilot/review-claims/v1/101';
+      const gitCalls: string[][] = [];
+      const run: CommandRunner = async (command, args) => {
+        if (command !== 'git') {
+          return openPrPage(graphQlPr({ number: 101, state: 'OPEN', head: OPEN_HEAD }));
+        }
+        const rest = args.slice(2);
+        gitCalls.push(rest);
+        if (rest[0] === 'ls-remote' && rest[2] === REVIEW_CLAIM_GLOB) return `${oid}\t${ref}\n`;
+        if (rest[0] === 'cat-file' && rest[1] === '-e') return ''; // object already present locally
+        if (rest[0] === 'cat-file' && rest[1] === '-p') return payload;
+        throw new Error(`unexpected git call: ${rest.join(' ')}`);
+      };
+
+      const page = await new GhLifecycleReader(run).readPullRequests(null);
+
+      expect(page.nodes[0]?.reviewClaim).toEqual({ oid, payload });
+      // Objects already present locally (this scenario) never trigger a fetch.
+      expect(gitCalls.some((call) => call[0] === 'fetch')).toBe(false);
+    });
+
+    it('caches a review-claim payload by OID: no fetch on a repeated OID, one fetch per changed OID', async () => {
+      const oidX = 'd'.repeat(40);
+      const oidY = 'e'.repeat(40);
+      const ref = 'refs/jinn-autopilot/review-claims/v1/101';
+      let currentOid = oidX;
+      const localObjects = new Set<string>();
+      const fetchCalls: string[][] = [];
+      const run: CommandRunner = async (command, args) => {
+        if (command !== 'git') {
+          return openPrPage(graphQlPr({ number: 101, state: 'OPEN', head: OPEN_HEAD }));
+        }
+        const rest = args.slice(2);
+        if (rest[0] === 'ls-remote' && rest[2] === REVIEW_CLAIM_GLOB) {
+          return `${currentOid}\t${ref}\n`;
+        }
+        if (rest[0] === 'cat-file' && rest[1] === '-e') {
+          if (localObjects.has(rest[2] ?? '')) return '';
+          throw new Error('object not found locally');
+        }
+        if (rest[0] === 'fetch') {
+          fetchCalls.push(rest);
+          localObjects.add(currentOid);
+          return '';
+        }
+        if (rest[0] === 'cat-file' && rest[1] === '-p') {
+          const [payloadOid] = (rest[2] ?? '').split(':');
+          return `{"oid":"${payloadOid}"}`;
+        }
+        throw new Error(`unexpected git call: ${rest.join(' ')}`);
+      };
+      const reader = new GhLifecycleReader(run);
+
+      const first = await reader.readPullRequests(null);
+      expect(fetchCalls).toHaveLength(1);
+      expect(first.nodes[0]?.reviewClaim?.oid).toBe(oidX);
+
+      const second = await reader.readPullRequests(null);
+      expect(fetchCalls).toHaveLength(1);
+      expect(second.nodes[0]?.reviewClaim?.oid).toBe(oidX);
+
+      currentOid = oidY;
+      const third = await reader.readPullRequests(null);
+      expect(fetchCalls).toHaveLength(2);
+      expect(third.nodes[0]?.reviewClaim?.oid).toBe(oidY);
+    });
+
+    it('resolves an absent review claim to null from empty ls-remote output', async () => {
+      const run: CommandRunner = async (command) => {
+        if (command === 'git') return '';
+        return openPrPage(graphQlPr({ number: 101, state: 'OPEN', head: OPEN_HEAD }));
+      };
+
+      const page = await new GhLifecycleReader(run).readPullRequests(null);
+
+      expect(page.nodes[0]?.reviewClaim).toBeNull();
+    });
+
+    it('fails loud on malformed git ls-remote output for review-claim refs', async () => {
+      const run: CommandRunner = async (command) => {
+        if (command === 'git') return 'not-a-valid-tab-separated-line\n';
+        return openPrPage(graphQlPr({ number: 101, state: 'OPEN', head: OPEN_HEAD }));
+      };
+
+      await expect(new GhLifecycleReader(run).readPullRequests(null))
+        .rejects.toThrow(/Malformed git ls-remote output/);
+    });
+
+    it('performs exactly one review-claim ls-remote listing for a snapshot with several PRs', async () => {
+      const listingCalls: string[][] = [];
+      const run: CommandRunner = async (command, args) => {
+        if (command === 'git') {
+          const rest = args.slice(2);
+          if (rest[0] === 'ls-remote' && rest[2] === REVIEW_CLAIM_GLOB) listingCalls.push(rest);
+          return '';
+        }
+        return openPrPage(
+          graphQlPr({ number: 101, state: 'OPEN', head: '1'.repeat(40), headRefName: 'feature/101' }),
+          graphQlPr({ number: 102, state: 'OPEN', head: '2'.repeat(40), headRefName: 'feature/102' }),
+          graphQlPr({ number: 103, state: 'OPEN', head: '3'.repeat(40), headRefName: 'feature/103' }),
+        );
+      };
+
+      const page = await new GhLifecycleReader(run).readPullRequests(null);
+
+      expect(page.nodes).toHaveLength(3);
+      expect(listingCalls).toHaveLength(1);
+    });
   });
 });
