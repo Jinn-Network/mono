@@ -899,7 +899,6 @@ def test_degraded_never_disables_python_pickup_or_local_episode_fallback(wired, 
     monkeypatch.setattr(jinn.pickup, "pickup", lambda *_a, **_k: {"context": "python pickup"})
     local: list[dict] = []
     monkeypatch.setattr(jinn.distill, "write_episode_fallback", lambda episode: local.append(episode))
-    monkeypatch.setattr(jinn.distill, "tee_capture", lambda *_a, **_k: None)
 
     result = jinn._on_pre_llm_call(
         session_id="s1", task_id="t1", user_message="fix tests", is_first_turn=True, model="m"

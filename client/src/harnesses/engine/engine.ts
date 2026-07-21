@@ -19,10 +19,6 @@ import {
   type SyntheticTaskProvenance,
 } from '../../solver-types/_swe-rebench-v2-synthetic-claim.js';
 import {
-  buildMineableRecord,
-} from '../../solver-types/_swe-rebench-v2-mineable-store.js';
-import type { MineableTraceStorePort } from '../../solver-types/_swe-rebench-v2-mineable-store-port.js';
-import {
   reapWorkDirs,
   DEFAULT_ORPHAN_MAX_AGE_MS,
   type ReapWorkDirsReport,
@@ -285,23 +281,6 @@ export interface TaskEngineOptions {
    */
   deliveryDeps?: DeliveryDeps;
   /**
-   * Mineable-trace store (task-creator spec §10, decision D2, tier-1). When
-   * provided, pack() best-effort-appends a MineableTraceRecord for
-   * restoration tasks whose spec carries repo identity (repo + baseCommit)
-   * and whose impl produced a solution patch — other solver types are
-   * skipped rather than fabricating values. Per mono#1714 the daemon always
-   * constructs the store (local retention is unconditional). Store errors are
-   * logged and never fail the task.
-   */
-  mineableStore?: MineableTraceStorePort;
-  /**
-   * The single `share` consent, stamped onto every record this engine appends
-   * via `mineableStore` as `publishMinedTasksConsent` — governs whether a
-   * mined task may be published off the box (see `config.mineableTraces.share`
-   * in `client/src/config.ts`). Defaults to false.
-   */
-  mineablePublishConsent?: boolean;
-  /**
    * Impl registry for resolving which Harness to run.
    * When provided and findFor() returns an impl, runImpl() dispatches to it.
    */
@@ -512,8 +491,6 @@ export class TaskEngine {
   protected readonly packagingDeps: TaskEngineOptions['packagingDeps'];
   protected readonly envelopeDeps: TaskEngineOptions['envelopeDeps'];
   protected readonly deliveryDeps: TaskEngineOptions['deliveryDeps'];
-  protected readonly mineableStore: TaskEngineOptions['mineableStore'];
-  protected readonly mineablePublishConsent: boolean;
   protected readonly implRegistry: TaskEngineOptions['implRegistry'];
   protected readonly solverNetRegistry: TaskEngineOptions['solverNetRegistry'];
   protected readonly scrubPipeline: ScrubPipeline;
@@ -591,8 +568,6 @@ export class TaskEngine {
     this.packagingDeps = opts.packagingDeps;
     this.envelopeDeps = opts.envelopeDeps;
     this.deliveryDeps = opts.deliveryDeps;
-    this.mineableStore = opts.mineableStore;
-    this.mineablePublishConsent = opts.mineablePublishConsent ?? false;
     this.implRegistry = opts.implRegistry;
     this.solverNetRegistry = opts.solverNetRegistry;
     this.scrubPipeline = opts.scrubPipeline ?? buildScrubPipeline();
@@ -1914,64 +1889,15 @@ export class TaskEngine {
       };
     }
 
-    // Task-doc repo identity (spec §10 / #1827), read once for both the
-    // mineable-trace record below and the envelope's task provenance fields.
+    // Task-doc repo identity (#1827), read once for the envelope's task
+    // provenance fields. Contribution refs are produced only from canonical
+    // Episodes by the plugin boundary, never from this requestId-based engine.
     // Correctly absent for solver types without repo identity (e.g.
     // prediction.*) — not a fabricated default.
     const taskSpec = task.task?.spec as Record<string, unknown> | undefined;
     const specRepo = typeof taskSpec?.['repo'] === 'string' ? taskSpec['repo'] : undefined;
     const specBaseCommit = typeof taskSpec?.['base_commit'] === 'string' ? taskSpec['base_commit'] : undefined;
     const specInstanceId = typeof taskSpec?.['instance_id'] === 'string' ? taskSpec['instance_id'] : undefined;
-
-    // 3b. Mineable-trace record (task-creator spec §10, D2 tier-1). Best-effort
-    // and never fatal — a store failure must not fail the task. Only records
-    // for restoration tasks whose spec carries repo identity (repo +
-    // baseCommit) and whose impl produced a solution patch; other solver
-    // types are skipped rather than fabricating values (§10 contract fields
-    // 1-2). `intermediateFailureDiffs` is always [] here — the engine has no
-    // retry-loop plumbing at this hook point today, an honest gap against
-    // contract field 4, not invented data.
-    if (this.mineableStore && !isEvaluation) {
-      try {
-        // Synthetic tasks (minted echoes) must never be re-recorded as mineable
-        // traces — that would let a future harvest mint an echo of an echo,
-        // severing lineage (spec §7: no second-generation echoes).
-        const synthetic = task.task?.eligibility?.['syntheticProvenance'] as
-          | SyntheticTaskProvenance
-          | undefined;
-        const acceptedDiff =
-          typeof implOutput?.solutionPayload?.['patch'] === 'string'
-            ? (implOutput.solutionPayload['patch'] as string)
-            : undefined;
-        if (synthetic?.synthetic) {
-          console.debug(
-            `[harness-engine] ${task.requestId}: mineable-trace record skipped — task is a synthetic mint (no second-generation echoes)`,
-          );
-        } else if (specRepo && specBaseCommit && acceptedDiff) {
-          const record = buildMineableRecord({
-            sourceId: task.requestId,
-            kind: 'solvernet-execution',
-            repo: specRepo,
-            baseCommit: specBaseCommit,
-            acceptedDiff,
-            intermediateFailureDiffs: [],
-            ...(specInstanceId !== undefined ? { sourceInstanceId: specInstanceId } : {}),
-            publishMinedTasksConsent: this.mineablePublishConsent,
-            now: () => new Date().toISOString(),
-          });
-          await this.mineableStore.append(record);
-        } else {
-          console.debug(
-            `[harness-engine] ${task.requestId}: mineable-trace record skipped — repo/baseCommit/patch not present for this solver type`,
-          );
-        }
-      } catch (err) {
-        console.warn(
-          `[harness-engine] ${task.requestId}: mineable-trace record failed (non-fatal):`,
-          err instanceof Error ? err.message : err,
-        );
-      }
-    }
 
     // 4. Persist generatedAt once (first pack); reuse on retry for CID determinism.
     const generatedAt: number = task.manifestGeneratedAt ?? Date.now();

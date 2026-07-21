@@ -42,17 +42,13 @@ def _write_mineable(path: Path) -> None:
     path.write_text(
         json.dumps(
             {
-                "schemaVersion": "jinn.contribution-store.v2",
+                "schemaVersion": "jinn.contribution-store.v3",
                 "records": {
                     "s1-1784122564637021000": {
                         "recordId": "s1-1784122564637021000",
-                        "candidate": {"sourceId": "s1-1784122564637021000"},
                     },
                     "20260717_010605_cf1edc-1784243166765569000": {
                         "recordId": "20260717_010605_cf1edc-1784243166765569000",
-                        "candidate": {
-                            "sourceId": "20260717_010605_cf1edc-1784243166765569000"
-                        },
                     },
                 },
             }

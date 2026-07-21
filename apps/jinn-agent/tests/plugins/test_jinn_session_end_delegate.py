@@ -256,7 +256,6 @@ def test_vetoed_hook_sends_candidate_and_clears_marker_only_after_veto_receipt(m
         "build_contribution_candidate",
         lambda *_a, **_k: candidate,
     )
-    monkeypatch.setattr(jinn.distill, "tee_capture", lambda *_a, **_k: None)
     delegated: list[dict] = []
 
     def delegate(episode, **kwargs):
@@ -316,7 +315,6 @@ def test_no_real_subprocess_is_ever_spawned_by_this_file(monkeypatch):
     monkeypatch.setattr(
         jinn.session_bridge, "build_contribution_candidate", lambda *_a, **_k: candidate
     )
-    monkeypatch.setattr(jinn.distill, "tee_capture", lambda *_a, **_k: None)
     jinn._runner = None  # deliberately unset, exercising the real-runner path
 
     _drive_hook()  # must never reach subprocess.run with a non-git command
@@ -346,7 +344,6 @@ def test_hook_falls_back_once_on_process_failure_and_preserves_episode(monkeypat
     jinn._runner = SessionRunner(code=1, output="boom")
     local: list[dict] = []
     monkeypatch.setattr(jinn.distill, "write_episode_fallback", lambda episode: local.append(episode))
-    monkeypatch.setattr(jinn.distill, "tee_capture", lambda *_a, **_k: None)
 
     _drive_hook()
     jinn._on_session_end(session_id="s1", task_id="t1", completed=True)
@@ -363,7 +360,6 @@ def test_hook_does_not_write_python_episode_when_core_persisted(monkeypatch):
     jinn._runner = SessionRunner()
     local: list[dict] = []
     monkeypatch.setattr(jinn.distill, "write_episode_fallback", lambda episode: local.append(episode))
-    monkeypatch.setattr(jinn.distill, "tee_capture", lambda *_a, **_k: None)
 
     _drive_hook()
 
@@ -378,7 +374,6 @@ def test_old_pending_files_are_preserved_and_never_auto_published(tmp_path, monk
     consent.save_state(True, previewed=True)
     runner = SessionRunner()
     jinn._runner = runner
-    monkeypatch.setattr(jinn.distill, "tee_capture", lambda *_a, **_k: None)
 
     _drive_hook()
 

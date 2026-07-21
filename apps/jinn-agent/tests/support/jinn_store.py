@@ -6,12 +6,11 @@ writes into the developer's real store — leaking fixture pollution that
 corrupts later runs and, on CI, is invisible until it bites.
 
 This mirrors the ``HERMES_HOME`` handling in ``tests/conftest.py``: the
-``_hermetic_environment`` fixture (step 6) points the three store env vars
+``_hermetic_environment`` fixture (step 6) points the writable store env vars
 at a per-test tempdir, and this guard fails loud if any resolved path
 escapes back to the real ``~/.jinn-client`` tree.
 
 The store env vars and their resolvers (see Jinn-Network/mono#1841):
-  JINN_LAYER_CAPTURES_DIR  -> distill.captures_dir()
   JINN_LAYER_EPISODES_DIR  -> distill.episodes_dir()
   JINN_MINEABLE_STATE_DIR  -> session_bridge.contribution_state_dir()
 """
@@ -33,7 +32,6 @@ _NATIVE_PATH = type(Path())
 
 # (env var, resolver) — used by the guard and its own test.
 JINN_STORE_RESOLVERS = (
-    ("JINN_LAYER_CAPTURES_DIR", distill.captures_dir),
     ("JINN_LAYER_EPISODES_DIR", distill.episodes_dir),
     ("JINN_MINEABLE_STATE_DIR", session_bridge.contribution_state_dir),
 )

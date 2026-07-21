@@ -4,7 +4,7 @@ import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { RETRIEVAL_VISIBLE_TAG } from '@jinn-network/plugin';
+import { RETRIEVAL_VISIBLE_TAG, type EpisodeV1 } from '@jinn-network/plugin';
 import type { HarnessLayer, CorpusSearchHit, CorpusRecord } from '../src/consume.js';
 import {
   createBoundedIpfsJsonFetcher,
@@ -82,6 +82,36 @@ function ownCapture(over: Partial<CapturedTask> = {}): CapturedTask {
 function capturesDirWith(...tasks: CapturedTask[]): string {
   const dir = mkdtempSync(join(tmpdir(), 'jinn-captures-'));
   for (const t of tasks) writeFileSync(join(dir, `${t.session.sessionId}.json`), JSON.stringify(t));
+  return dir;
+}
+
+/** Write canonical EpisodeV1 files into a fresh evidence dir. */
+function episodesDirWith(...tasks: CapturedTask[]): string {
+  const dir = mkdtempSync(join(tmpdir(), 'jinn-episodes-'));
+  for (const task of tasks) {
+    const episode: EpisodeV1 = {
+      schemaVersion: 'jinn.episode.v1',
+      episodeId: `episode-${task.session.sessionId}`,
+      retrievalVisible: false,
+      session: { ...task.session, kind: task.session.kind ?? 'user' },
+      origin: { writer: task.environment.harness.name, build: task.environment.harness.version },
+      task: task.task,
+      trajectory: task.steps.map((step) => ({ ...step, kind: step.kind ?? 'jinn.tool_call' })),
+      environment: { ...task.environment, skillsLoadout: task.environment.skillsLoadout ?? [] },
+      outcome: {
+        status: task.outcome.status,
+        verificationStrength: task.outcome.verifiabilityTier,
+        ...(task.outcome.summary ? { summary: task.outcome.summary } : {}),
+      },
+      cost: task.cost,
+      retention: { policy: 'local-private' },
+      provenance: task.provenance,
+    };
+    writeFileSync(
+      join(dir, `${episode.episodeId}.episode.json`),
+      JSON.stringify(episode),
+    );
+  }
   return dir;
 }
 
@@ -2551,6 +2581,21 @@ describe('jinn-layer distill (own captures, rung 1)', () => {
     expect(out()).toContain('nothing left this machine');
   });
 
+  it('AC C7: distills a canonical EpisodeV1 without a legacy captures directory', async () => {
+    const { writer, out } = capture();
+    const episodesDir = episodesDirWith(ownCapture());
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-distill-episode-out-'));
+
+    const code = await runJinnLayerCli(
+      ['distill', '--episodes', episodesDir, '--out', outDir, '--install', 'all', '--json'],
+      { writer, distillDeps: stubDistillDeps() },
+    );
+
+    expect(code).toBe(0);
+    expect(JSON.parse(out())).toMatchObject({ capturesConsidered: 1 });
+    expect(existsSync(join(outDir, 'orm-fanout-dedup', 'SKILL.md'))).toBe(true);
+  });
+
   it('AC: install-all — every produced skill lands in the install dir', async () => {
     const { writer, out } = capture();
     // Two distinct own sessions → two clusters → two installed skills.
@@ -3409,6 +3454,8 @@ describe('jinn-layer distill run log + status/runs subverbs (#1535)', () => {
     });
     const status = JSON.parse(out());
     expect(status).toMatchObject({ mode: 'unset', capturesCount: 0, uncoveredCount: 0, stagedCount: 0, installedCount: 0, lastRun: null });
+    expect(status.capturesDir).toBe(emptyCaptures);
+    expect(status.episodesDir).toBe(emptyCaptures);
     expect(existsSync(modePath)).toBe(false);
     const runsOutput = capture();
     expect(await runJinnLayerCli(['distill', 'runs', '--limit', '1', '--json'], { writer: runsOutput.writer, distillDeps: stubDistillDeps() })).toBe(0);

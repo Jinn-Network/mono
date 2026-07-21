@@ -31,7 +31,7 @@ from typing import Any, NamedTuple
 # holds the ``plugins`` package (same path shim as sample_and_compress.py).
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from plugins.jinn.distill import captures_dir, episodes_dir  # noqa: E402
+from plugins.jinn.distill import episodes_dir  # noqa: E402
 from plugins.jinn.session_bridge import contribution_state_dir  # noqa: E402
 
 
@@ -100,6 +100,14 @@ def _default_dir(resolver, env_var: str) -> Path:
         return Path(resolver()).expanduser()
 
 
+def legacy_captures_dir() -> Path:
+    """Read-only location of the retired CapturedTask tee for cleanup only."""
+    configured = (os.environ.get("JINN_LAYER_CAPTURES_DIR") or "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    return Path.home() / ".jinn-client" / "harness-layer" / "captures"
+
+
 def _lexical(path: Path) -> Path:
     """Return an absolute lexical path without following symlinks."""
     return Path(os.path.abspath(os.fspath(path.expanduser())))
@@ -114,7 +122,7 @@ def store_paths(home: Path | None = None) -> StorePaths:
     selected_home = _lexical(home if home is not None else Path.home())
     root = selected_home / ".jinn-client"
     if home is None:
-        captures = _default_dir(captures_dir, "JINN_LAYER_CAPTURES_DIR")
+        captures = _default_dir(legacy_captures_dir, "JINN_LAYER_CAPTURES_DIR")
         episodes = _default_dir(episodes_dir, "JINN_LAYER_EPISODES_DIR")
         mineable = (
             _default_dir(contribution_state_dir, "JINN_MINEABLE_STATE_DIR")
@@ -262,7 +270,8 @@ def _mineable_edit(
         raise CleanupDataError(f"cannot safely parse contribution store {path}") from exc
     if (
         not isinstance(store, dict)
-        or store.get("schemaVersion") != "jinn.contribution-store.v2"
+        or store.get("schemaVersion")
+        not in {"jinn.contribution-store.v2", "jinn.contribution-store.v3"}
         or not isinstance(store.get("records"), dict)
     ):
         raise CleanupDataError(

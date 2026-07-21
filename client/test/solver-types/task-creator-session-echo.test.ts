@@ -26,6 +26,8 @@ import { syntheticClaimBlocked } from '../../src/solver-types/_swe-rebench-v2-sy
 import { uploadToIpfs } from '../../src/adapters/mech/ipfs.js';
 import type { PoolTask } from '../../src/solver-types/_swe-rebench-v2-pool.js';
 import type { EvalRunner, HfFetcher } from '../../src/harnesses/impls/swe-rebench-v2-evaluator/index.js';
+import { createEvidenceAdapter } from '@jinn-network/core';
+import type { ContributionCandidateV1, EpisodeV1 } from '@jinn-network/plugin';
 
 vi.mock('../../src/adapters/mech/ipfs.js', () => ({
   uploadToIpfs: vi.fn().mockResolvedValue('bafysessionecho'),
@@ -78,6 +80,54 @@ function makeRecord(overrides: Partial<MineableTraceRecord> = {}): MineableTrace
   };
 }
 
+function candidateFromRecord(value: MineableTraceRecord): ContributionCandidateV1 {
+  return {
+    schemaVersion: 'jinn.contribution-candidate.v1',
+    sourceId: value.sourceId,
+    repositorySlug: value.repo,
+    baseCommit: value.baseCommit,
+    acceptedDiff: value.acceptedDiff,
+    testRuns: value.testRuns.map((run) => ({ command: run.cmd, exitCode: run.exitCode, at: run.at })),
+    intermediateFailureDiffs: value.intermediateFailureDiffs,
+    skillEvents: value.skillEvents.map((event) => ({ skillRef: event.skill, action: event.action })),
+    publishMinedTasksConsent: value.publishMinedTasksConsent,
+    createdAt: value.createdAt,
+  };
+}
+
+function episodeForRecord(value: MineableTraceRecord): EpisodeV1 {
+  const candidate = candidateFromRecord(value);
+  return {
+    schemaVersion: 'jinn.episode.v1',
+    episodeId: value.sourceId,
+    retrievalVisible: false,
+    session: { sessionId: value.sourceId, capturedAt: value.createdAt, kind: 'user' },
+    origin: { writer: 'session-echo-test', build: '1' },
+    task: {
+      summary: 'dormant session echo compatibility test',
+      distributionTags: ['coding'],
+      repositorySlug: value.repo,
+      baseCommit: value.baseCommit,
+      ...(value.sourceInstanceId ? { instanceId: value.sourceInstanceId } : {}),
+    },
+    trajectory: [{
+      spanId: 'span', parentSpanId: null, kind: 'jinn.agent_turn', name: 'turn:user',
+      startTimeUnixNano: '1', endTimeUnixNano: '2', attributes: {}, redactedKeys: [],
+    }],
+    environment: {
+      harness: { name: 'session-echo-test', version: '1' },
+      model: 'test',
+      tools: [],
+      skillsLoadout: [],
+    },
+    outcome: { status: 'completed', verificationStrength: 'tests-passed' },
+    cost: { durationMs: 1 },
+    retention: { policy: 'local-private' },
+    provenance: 'contributed',
+    contributionCandidate: candidate,
+  };
+}
+
 const hfFetcher: HfFetcher = {
   fetchTaskRow: vi.fn().mockImplementation(async (args: { instance_id: string }) => {
     if (args.instance_id === SOURCE_INSTANCE) return SOURCE_HF_ROW;
@@ -107,11 +157,20 @@ function makeDeadRunner(): EvalRunner {
   };
 }
 
-async function setup(): Promise<{ stateDir: string; validatedStore: ValidatedPoolStore; mintedStore: MintedPoolStore; mineableStore: MineableTraceStore }> {
+interface SessionTestEnv {
+  stateDir: string;
+  episodesDir: string;
+  validatedStore: ValidatedPoolStore;
+  mintedStore: MintedPoolStore;
+  mineableStore: MineableTraceStore;
+}
+
+async function setup(): Promise<SessionTestEnv> {
   const stateDir = await mkdtemp(join(tmpdir(), 'session-echo-'));
+  const episodesDir = join(stateDir, 'episodes');
   const validatedStore = new ValidatedPoolStore({ stateDir });
   const mintedStore = new MintedPoolStore({ stateDir });
-  const mineableStore = new MineableTraceStore({ stateDir });
+  const mineableStore = new MineableTraceStore({ stateDir, episodesDir });
   await validatedStore.record(SOURCE_INSTANCE, {
     scorable: true,
     reason: 'gold-patch-resolves',
@@ -120,7 +179,15 @@ async function setup(): Promise<{ stateDir: string; validatedStore: ValidatedPoo
     imageName: SOURCE_HF_ROW.image_name,
     imageDigest: `sha256:${'e'.repeat(64)}`,
   }, EVAL_SEMANTICS_VERSION);
-  return { stateDir, validatedStore, mintedStore, mineableStore };
+  return { stateDir, episodesDir, validatedStore, mintedStore, mineableStore };
+}
+
+async function appendRecord(env: SessionTestEnv, record: MineableTraceRecord): Promise<void> {
+  const result = await createEvidenceAdapter({ capturesDir: env.episodesDir }).put(
+    episodeForRecord(record),
+  );
+  expect(result.status).toBe('ok');
+  await env.mineableStore.append(record);
 }
 
 function baseDeps(env: Awaited<ReturnType<typeof setup>>, runner: EvalRunner, opts: {
@@ -158,7 +225,7 @@ describe('mineSessionEchoes', () => {
     const env = await setup();
     try {
       const record = makeRecord();
-      await env.mineableStore.append(record);
+      await appendRecord(env, record);
 
       const result = await mineSessionEchoes(baseDeps(env, makeSuccessfulRunner()));
       expect(result.admitted).toHaveLength(1);
@@ -181,7 +248,7 @@ describe('mineSessionEchoes', () => {
     const env = await setup();
     try {
       const record = makeRecord();
-      await env.mineableStore.append(record);
+      await appendRecord(env, record);
 
       const result = await mineSessionEchoes(baseDeps(env, makeSuccessfulRunner()));
       const mintedId = result.admitted[0]!;
@@ -201,7 +268,7 @@ describe('mineSessionEchoes', () => {
     const env = await setup();
     try {
       const record = makeRecord({ publishMinedTasksConsent: false });
-      await env.mineableStore.append(record);
+      await appendRecord(env, record);
 
       const isPublic = vi.fn().mockResolvedValue(true);
       const result = await mineSessionEchoes(baseDeps(env, makeSuccessfulRunner(), { publish: true, publicRepoChecker: { isPublic } }));
@@ -238,7 +305,7 @@ describe('mineSessionEchoes', () => {
         sourceId: 'retained-stage1-share',
         publishMinedTasksConsent: true,
       });
-      await env.mineableStore.append(retained);
+      await appendRecord(env, retained);
       await env.mineableStore.authorize(retained.sourceId, '2026-07-15T12:01:00.000Z');
       expect(await env.mineableStore.get(retained.sourceId)).toMatchObject({
         localState: 'recorded',
@@ -272,7 +339,7 @@ describe('mineSessionEchoes', () => {
     const env = await setup();
     try {
       const record = makeRecord({ publishMinedTasksConsent: true });
-      await env.mineableStore.append(record);
+      await appendRecord(env, record);
       const isPublic = vi.fn().mockResolvedValue(true);
       const deps = baseDeps(env, makeSuccessfulRunner(), { publish: true, publicRepoChecker: { isPublic } });
 
@@ -312,7 +379,7 @@ describe('mineSessionEchoes', () => {
         skillEvents: [{ skill: 'SECRET_LOCAL_SKILL', action: 'loaded' }],
         publishMinedTasksConsent: true,
       });
-      await env.mineableStore.append(record);
+      await appendRecord(env, record);
       await env.mineableStore.authorize(record.sourceId, '2026-07-15T12:01:00.000Z');
 
       await mineSessionEchoes(baseDeps(env, makeSuccessfulRunner(), { publish: true }));
@@ -335,7 +402,7 @@ describe('mineSessionEchoes', () => {
       const deniedRepo = [...denylist.repos][0]!;
 
       const record = makeRecord({ repo: deniedRepo });
-      await env.mineableStore.append(record);
+      await appendRecord(env, record);
 
       const runner = makeSuccessfulRunner();
       const result = await mineSessionEchoes(baseDeps(env, runner));
@@ -353,7 +420,7 @@ describe('mineSessionEchoes', () => {
     const env = await setup();
     try {
       const record = makeRecord({ publishMinedTasksConsent: true });
-      await env.mineableStore.append(record);
+      await appendRecord(env, record);
       await env.mineableStore.authorize(record.sourceId, '2026-07-15T12:01:00.000Z');
 
       const isPublic = vi.fn().mockResolvedValue(false);
@@ -377,7 +444,7 @@ describe('mineSessionEchoes', () => {
     const env = await setup();
     try {
       const record = makeRecord({ publishMinedTasksConsent: true });
-      await env.mineableStore.append(record);
+      await appendRecord(env, record);
       await env.mineableStore.authorize(record.sourceId, '2026-07-15T12:01:00.000Z');
       const events: string[] = [];
       const runner = makeSuccessfulRunner();
@@ -407,7 +474,7 @@ describe('mineSessionEchoes', () => {
     const env = await setup();
     try {
       const record = makeRecord({ publishMinedTasksConsent: true });
-      await env.mineableStore.append(record);
+      await appendRecord(env, record);
       await env.mineableStore.authorize(record.sourceId, '2026-07-15T12:01:00.000Z');
       const runner = makeSuccessfulRunner();
       const runEval = runner.runEval;
@@ -437,7 +504,7 @@ describe('mineSessionEchoes', () => {
     const env = await setup();
     try {
       const record = makeRecord({ publishMinedTasksConsent: true });
-      await env.mineableStore.append(record);
+      await appendRecord(env, record);
       await env.mineableStore.authorize(record.sourceId, '2026-07-15T12:01:00.000Z');
       const mintedId = sessionEchoInstanceId(REPO, record.sourceId);
       await env.mintedStore.record(mintedId, {
@@ -476,7 +543,7 @@ describe('mineSessionEchoes', () => {
     const env = await setup();
     try {
       const record = makeRecord();
-      await env.mineableStore.append(record);
+      await appendRecord(env, record);
 
       const result = await mineSessionEchoes(baseDeps(env, makeDeadRunner()));
 
@@ -492,7 +559,7 @@ describe('mineSessionEchoes', () => {
     const env = await setup();
     try {
       const record = makeRecord();
-      await env.mineableStore.append(record);
+      await appendRecord(env, record);
 
       const firstResult = await mineSessionEchoes(baseDeps(env, makeSuccessfulRunner()));
       expect(firstResult.discovered).toBe(1);
@@ -535,7 +602,7 @@ describe('mineSessionEchoes', () => {
       }, EVAL_SEMANTICS_VERSION);
 
       const record = makeRecord({ kind: 'solvernet-execution', sourceInstanceId: priorMintedId });
-      await env.mineableStore.append(record);
+      await appendRecord(env, record);
 
       const runner = makeSuccessfulRunner();
       const result = await mineSessionEchoes(baseDeps(env, runner));
@@ -554,7 +621,7 @@ describe('mineSessionEchoes', () => {
     const env = await setup();
     try {
       const record = makeRecord();
-      await env.mineableStore.append(record);
+      await appendRecord(env, record);
 
       await mineSessionEchoes(baseDeps(env, makeDeadRunner()));
       expect(await env.mineableStore.listUnmined()).toEqual([]);
@@ -601,8 +668,8 @@ describe('D2 tier-2 — unpublished mints never enter the postable union (per-en
       // Two session records, same repo: A consents to tier-2 publish, B does not.
       const recordA = makeRecord({ sourceId: 'session-a-consented', publishMinedTasksConsent: true });
       const recordB = makeRecord({ sourceId: 'session-b-tier1-only', publishMinedTasksConsent: false });
-      await env.mineableStore.append(recordA);
-      await env.mineableStore.append(recordB);
+      await appendRecord(env, recordA);
+      await appendRecord(env, recordB);
       await env.mineableStore.authorize(recordA.sourceId, '2026-07-15T12:01:00.000Z');
 
       const result = await mineSessionEchoes(baseDeps(env, makeSmartRunner(), { publish: true }));

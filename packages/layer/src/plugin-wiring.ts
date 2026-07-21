@@ -53,6 +53,7 @@ export function buildPluginDepsFromEnv(overrides: Partial<JinnPluginDeps> = {}):
   });
   const contribution = overrides.contribution ?? createContributionAdapter({
     statusStore: new ContributionStore({ stateDir: resolveContributionStateDir() }),
+    evidence,
   });
   const skills = overrides.skills ?? createSkillsAdapter({ installDir: skillsInstallDir() });
   const localLearning = overrides.localLearning ?? createLocalLearningAdapter({

@@ -74,6 +74,27 @@ describe('local distill MCP server', () => {
     expect(result.isError).toBeUndefined();
   });
 
+  it('passes the canonical episode store without enabling the legacy capture reader', async () => {
+    const child = new FakeChildProcess();
+    const spawn = vi.fn(() => child as never);
+    const resultPromise = runLocalDistill(
+      { episodesDir: '/episodes' },
+      { spawn, env: { JINN_LAYER_BIN: '/bin/jinn-layer' } },
+    );
+
+    child.emit('close', 0);
+    await resultPromise;
+
+    expect(spawn).toHaveBeenCalledWith('/bin/jinn-layer', [
+      'distill',
+      '--where',
+      'local',
+      '--json',
+      '--episodes',
+      '/episodes',
+    ], expect.objectContaining({ stdio: ['ignore', 'pipe', 'pipe'] }));
+  });
+
   it.each([
     {
       name: 'environment override',

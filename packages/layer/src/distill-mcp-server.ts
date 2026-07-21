@@ -6,7 +6,12 @@ import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod/v3';
 import type { CapturedTask } from './capture.js';
-import { DEFAULT_CAPTURES_DIR, DEFAULT_DISTILL_CAPTURE_LIMIT, loadRecentCaptures } from './distill-captures.js';
+import {
+  DEFAULT_CAPTURES_DIR,
+  DEFAULT_DISTILL_CAPTURE_LIMIT,
+  DEFAULT_EPISODES_DIR,
+  loadRecentDistillSources,
+} from './distill-captures.js';
 import {
   clusterTraceCards,
   readTrace,
@@ -39,9 +44,10 @@ export function createDistillMcpServer(deps: DistillMcpDeps = {}): McpServer {
 
   server.tool(
     'distill_trace_search',
-    'Search local trace cards from the shared local distill capture directory. Use this before reading full traces; returns compact cards only.',
+    'Search local trace cards from canonical local episodes (plus a read-only legacy capture fallback). Use this before reading full traces; returns compact cards only.',
     {
-      capturesDir: z.string().optional().describe('Directory containing CapturedTask JSON files. Defaults to JINN_LAYER_CAPTURES_DIR or ~/.jinn-client/harness-layer/captures.'),
+      episodesDir: z.string().optional().describe('Directory containing canonical EpisodeV1 files. Defaults to JINN_LAYER_EPISODES_DIR or ~/.jinn-client/harness-layer/episodes.'),
+      capturesDir: z.string().optional().describe('Deprecated directory containing legacy CapturedTask JSON files.'),
       limit: z.number().int().positive().max(500).optional().describe('Maximum captures to load and maximum cards to return.'),
       query: z.string().optional().describe('Free-text query across summary, tools, commands, files, errors, and outcome.'),
       command: z.string().optional().describe('Command substring filter.'),
@@ -51,9 +57,9 @@ export function createDistillMcpServer(deps: DistillMcpDeps = {}): McpServer {
       outcome: z.enum(['completed', 'failed', 'abandoned']).optional().describe('Outcome status filter.'),
     },
     async (args) => {
-      const capturesDir = args.capturesDir ?? capturesDirFromEnv(deps.env);
+      const source = distillSourceDirs(args, deps.env);
       const limit = args.limit ?? DEFAULT_DISTILL_CAPTURE_LIMIT;
-      const captures = loadRecentCaptures(capturesDir, limit);
+      const captures = await loadRecentDistillSources({ ...source, limit });
       const cards = searchTraceCards(captures.map(traceCardFromCapture), {
         query: args.query,
         command: args.command,
@@ -63,7 +69,7 @@ export function createDistillMcpServer(deps: DistillMcpDeps = {}): McpServer {
         outcome: args.outcome,
         limit,
       });
-      return jsonResponse({ capturesDir, count: cards.length, cards });
+      return jsonResponse({ ...source, count: cards.length, cards });
     },
   );
 
@@ -71,7 +77,8 @@ export function createDistillMcpServer(deps: DistillMcpDeps = {}): McpServer {
     'distill_trace_read',
     'Read a selected local trace by traceId or sessionId. Prefer summary, transcript_excerpt, or tool_calls before requesting full_transcript.',
     {
-      capturesDir: z.string().optional().describe('Directory containing CapturedTask JSON files.'),
+      episodesDir: z.string().optional().describe('Directory containing canonical EpisodeV1 files.'),
+      capturesDir: z.string().optional().describe('Deprecated directory containing legacy CapturedTask JSON files.'),
       limit: z.number().int().positive().max(500).optional().describe('Maximum captures to load while locating the trace.'),
       traceId: z.string().optional().describe('Trace id returned by distill_trace_search, e.g. local-capture:<sessionId>.'),
       sessionId: z.string().optional().describe('Raw session id when traceId is not available.'),
@@ -81,8 +88,11 @@ export function createDistillMcpServer(deps: DistillMcpDeps = {}): McpServer {
       allowFullTranscript: z.boolean().optional().describe('Required explicit opt-in for full_transcript reads.'),
     },
     async (args) => {
-      const capturesDir = args.capturesDir ?? capturesDirFromEnv(deps.env);
-      const captures = loadRecentCaptures(capturesDir, args.limit ?? DEFAULT_DISTILL_CAPTURE_LIMIT);
+      const source = distillSourceDirs(args, deps.env);
+      const captures = await loadRecentDistillSources({
+        ...source,
+        limit: args.limit ?? DEFAULT_DISTILL_CAPTURE_LIMIT,
+      });
       const capture = findCapture(captures, { traceId: args.traceId, sessionId: args.sessionId });
       if (!capture) return errorResponse(`Trace not found: ${args.traceId ?? args.sessionId ?? '(missing id)'}`);
       try {
@@ -102,14 +112,18 @@ export function createDistillMcpServer(deps: DistillMcpDeps = {}): McpServer {
     'distill_trace_cluster',
     'Group local trace cards into candidate skill opportunities using repeated commands, files, and error signals. This is a cheap pre-distill scan.',
     {
-      capturesDir: z.string().optional().describe('Directory containing CapturedTask JSON files.'),
+      episodesDir: z.string().optional().describe('Directory containing canonical EpisodeV1 files.'),
+      capturesDir: z.string().optional().describe('Deprecated directory containing legacy CapturedTask JSON files.'),
       limit: z.number().int().positive().max(500).optional().describe('Maximum captures to load.'),
     },
     async (args) => {
-      const capturesDir = args.capturesDir ?? capturesDirFromEnv(deps.env);
-      const captures = loadRecentCaptures(capturesDir, args.limit ?? DEFAULT_DISTILL_CAPTURE_LIMIT);
+      const source = distillSourceDirs(args, deps.env);
+      const captures = await loadRecentDistillSources({
+        ...source,
+        limit: args.limit ?? DEFAULT_DISTILL_CAPTURE_LIMIT,
+      });
       const candidates = clusterTraceCards(captures.map(traceCardFromCapture));
-      return jsonResponse({ capturesDir, count: candidates.length, candidates });
+      return jsonResponse({ ...source, count: candidates.length, candidates });
     },
   );
 
@@ -118,7 +132,8 @@ export function createDistillMcpServer(deps: DistillMcpDeps = {}): McpServer {
     'Run local skill distillation over captured traces by delegating to jinn-layer distill. Requires confirm:true because it can call an LLM and write staged or installed skills.',
     {
       confirm: z.boolean().optional().describe('Must be true to execute. Omit or false to receive a preview envelope.'),
-      capturesDir: z.string().optional().describe('Directory containing CapturedTask JSON files.'),
+      episodesDir: z.string().optional().describe('Directory containing canonical EpisodeV1 files.'),
+      capturesDir: z.string().optional().describe('Deprecated directory containing legacy CapturedTask JSON files.'),
       out: z.string().optional().describe('Output directory for distilled skills.'),
       limit: z.number().int().positive().max(500).optional().describe('Maximum captures to distill.'),
       traceIds: z.array(z.string()).optional().describe('Optional selected trace IDs to distill, as returned by distill_trace_search or distill_trace_cluster.'),
@@ -136,7 +151,7 @@ export function createDistillMcpServer(deps: DistillMcpDeps = {}): McpServer {
           tool: 'distill_local',
           description: 'Run local distillation over captured traces.',
           effects: [
-            'Reads local captured-task JSON files.',
+            'Reads canonical local EpisodeV1 files and, when using the default location, legacy captured-task JSON as a compatibility fallback.',
             'Calls the selected user LLM provider through the existing jinn-layer distill flow.',
             'Writes distilled skill packages under the output/staging directory and may install selected skills.',
           ],
@@ -147,6 +162,7 @@ export function createDistillMcpServer(deps: DistillMcpDeps = {}): McpServer {
         });
       }
       return runLocalDistill({
+        episodesDir: args.episodesDir,
         capturesDir: args.capturesDir,
         out: args.out,
         limit: args.limit,
@@ -190,6 +206,7 @@ export function createDistillMcpServer(deps: DistillMcpDeps = {}): McpServer {
 }
 
 export interface LocalDistillRunArgs {
+  episodesDir?: string;
   capturesDir?: string;
   out?: string;
   limit?: number;
@@ -203,7 +220,10 @@ export interface LocalDistillRunArgs {
 
 export async function runLocalDistill(args: LocalDistillRunArgs, deps: DistillMcpDeps = {}): Promise<McpToolResponse> {
   const resolved = resolveJinnLayerCommand(deps.env, deps.platform);
-  const selected = materializeSelectedCaptures(args, deps.env);
+  const hasSelection = (args.traceIds?.length ?? 0) > 0 || (args.sessionIds?.length ?? 0) > 0;
+  // Preserve the synchronous spawn boundary for ordinary calls. Selection
+  // needs an async canonical-store read; an unselected run does not.
+  const selected = hasSelection ? await materializeSelectedCaptures(args, deps.env) : {};
   if (selected.error) return errorResponse(selected.error);
   const argv = [
     ...resolved.prefixArgs,
@@ -213,6 +233,7 @@ export async function runLocalDistill(args: LocalDistillRunArgs, deps: DistillMc
     '--json',
   ];
   const capturesDir = selected.capturesDir ?? args.capturesDir;
+  if (!selected.capturesDir && args.episodesDir) argv.push('--episodes', args.episodesDir);
   if (capturesDir) argv.push('--captures', capturesDir);
   if (args.out) argv.push('--out', args.out);
   if (args.limit !== undefined) argv.push('--limit', String(args.limit));
@@ -251,8 +272,18 @@ function errorResponse(message: string): McpToolResponse {
   return jsonResponse({ error: { message } }, true);
 }
 
-function capturesDirFromEnv(env: NodeJS.ProcessEnv = process.env): string {
-  return env['JINN_LAYER_CAPTURES_DIR'] ?? DEFAULT_CAPTURES_DIR;
+function distillSourceDirs(
+  args: { episodesDir?: string; capturesDir?: string },
+  env: NodeJS.ProcessEnv = process.env,
+): { episodesDir: string; legacyCapturesDir?: string } {
+  const episodesOverride = args.episodesDir ?? env['JINN_LAYER_EPISODES_DIR'];
+  const legacyOverride = args.capturesDir ?? env['JINN_LAYER_CAPTURES_DIR'];
+  const episodesDir = episodesOverride ?? legacyOverride ?? DEFAULT_EPISODES_DIR;
+  const legacyCapturesDir = legacyOverride ?? (episodesOverride ? undefined : DEFAULT_CAPTURES_DIR);
+  return {
+    episodesDir,
+    ...(legacyCapturesDir ? { legacyCapturesDir } : {}),
+  };
 }
 
 function findCapture(
@@ -280,21 +311,24 @@ function resolveJinnLayerCommand(
   return { command: 'jinn-layer', prefixArgs: [] };
 }
 
-function materializeSelectedCaptures(
+async function materializeSelectedCaptures(
   args: LocalDistillRunArgs,
   env: NodeJS.ProcessEnv = process.env,
-): { capturesDir?: string; tempDir?: string; traceCount?: number; error?: string } {
+): Promise<{ capturesDir?: string; tempDir?: string; traceCount?: number; error?: string }> {
   const selectedIds = new Set([
     ...(args.sessionIds ?? []),
     ...(args.traceIds ?? []).map((id) => id.replace(/^local-capture:/, '')),
   ].filter((id) => id.trim() !== ''));
   if (selectedIds.size === 0) return {};
 
-  const sourceDir = args.capturesDir ?? capturesDirFromEnv(env);
-  const captures = loadRecentCaptures(sourceDir, args.limit ?? DEFAULT_DISTILL_CAPTURE_LIMIT)
+  const source = distillSourceDirs(args, env);
+  const captures = (await loadRecentDistillSources({
+    ...source,
+    limit: args.limit ?? DEFAULT_DISTILL_CAPTURE_LIMIT,
+  }))
     .filter((capture) => selectedIds.has(capture.session.sessionId));
   if (captures.length === 0) {
-    return { error: `No selected traces found in ${sourceDir}` };
+    return { error: `No selected traces found in ${source.episodesDir}` };
   }
   const tempDir = mkdtempSync(join(tmpdir(), 'jinn-distill-selected-'));
   for (const capture of captures) {

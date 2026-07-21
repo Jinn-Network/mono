@@ -1,8 +1,9 @@
 import {
   access,
   chmod,
-  copyFile,
+  link,
   mkdir,
+  open,
   readdir,
   readFile,
   rename,
@@ -10,18 +11,22 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises';
-import { constants as fsConstants } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import {
   ContributionCandidateV1Schema,
+  ContributionCandidateV1ProjectionSchema,
+  EpisodeV1Schema,
   type ContributionCandidateV1,
+  type EpisodeV1,
   type ContributionLocalState,
   type ContributionPublicationState,
 } from '@jinn-network/plugin';
+import { fsyncDirectory } from './evidence-filesystem.js';
 
-export const CONTRIBUTION_STORE_SCHEMA_VERSION = 'jinn.contribution-store.v2' as const;
+export const CONTRIBUTION_STORE_SCHEMA_VERSION = 'jinn.contribution-store.v3' as const;
+const CONTRIBUTION_STORE_V2_SCHEMA_VERSION = 'jinn.contribution-store.v2' as const;
 export const CONTRIBUTION_STORE_FILE = 'mineable-traces.json' as const;
 export const CONTRIBUTION_PUBLICATION_DISABLED_FILE = 'publication-disabled' as const;
 export const CONTRIBUTION_PUBLICATION_SCHEMA_VERSION = 'jinn.contribution-publication.v1' as const;
@@ -43,17 +48,11 @@ export interface ContributionLocalMetadata {
 
 export interface ContributionStoreRecord {
   recordId: string;
-  candidate: ContributionCandidateV1;
   localState: ContributionLocalState;
   publicationState: ContributionPublicationState;
   mintRef?: string;
   publicationRef?: string;
   rejectionReason?: string;
-  localMetadata?: ContributionLocalMetadata;
-  legacy?: {
-    migratedFrom: 'mineable-trace-store.v1';
-    availability: 'candidate' | 'unavailable';
-  };
 }
 
 interface ContributionStoreFile {
@@ -86,6 +85,11 @@ export interface ContributionStoreOptions {
 
 export interface ContributionStoreRecordOptions {
   publicationState?: 'vetoed';
+}
+
+export interface ContributionStoreReferenceOptions extends ContributionStoreRecordOptions {
+  /** Transition input only; never serialized in the reference store. */
+  publishMinedTasksConsent?: boolean;
 }
 
 const DEFAULT_LOCK = {
@@ -155,44 +159,32 @@ function parseRecord(recordId: string, value: unknown): ContributionStoreRecord 
   if (!value || typeof value !== 'object') throw new Error(`invalid contribution record ${recordId}`);
   const raw = value as Record<string, unknown>;
   if (raw['recordId'] !== recordId) throw new Error(`contribution record key/id mismatch: ${recordId}`);
-  const candidate = ContributionCandidateV1Schema.parse(raw['candidate']);
-  const localMetadata = raw['localMetadata'] && typeof raw['localMetadata'] === 'object'
-    ? raw['localMetadata'] as Record<string, unknown>
-    : undefined;
-  const legacy = raw['legacy'] && typeof raw['legacy'] === 'object'
-    ? raw['legacy'] as Record<string, unknown>
-    : undefined;
+  const allowed = new Set([
+    'recordId',
+    'localState',
+    'publicationState',
+    'mintRef',
+    'publicationRef',
+    'rejectionReason',
+  ]);
+  const unknown = Object.keys(raw).filter((key) => !allowed.has(key));
+  if (unknown.length > 0) {
+    throw new Error(`invalid contribution record ${recordId}: unexpected fields ${unknown.join(', ')}`);
+  }
   const mintRef = optionalNonEmptyString(raw['mintRef'], 'mintRef');
   const publicationRef = optionalNonEmptyString(raw['publicationRef'], 'publicationRef');
   const rejectionReason = optionalNonEmptyString(raw['rejectionReason'], 'rejectionReason');
   return {
     recordId,
-    candidate,
     localState: parseLocalState(raw['localState']),
     publicationState: parsePublicationState(raw['publicationState']),
     ...(mintRef ? { mintRef } : {}),
     ...(publicationRef ? { publicationRef } : {}),
     ...(rejectionReason ? { rejectionReason } : {}),
-    ...(localMetadata ? {
-      localMetadata: {
-        ...(localMetadata['kind'] === 'solvernet-execution' || localMetadata['kind'] === 'harness-session'
-          ? { kind: localMetadata['kind'] }
-          : {}),
-        ...(typeof localMetadata['sourceInstanceId'] === 'string' && localMetadata['sourceInstanceId'].length > 0
-          ? { sourceInstanceId: localMetadata['sourceInstanceId'] }
-          : {}),
-      },
-    } : {}),
-    ...(legacy ? {
-      legacy: {
-        migratedFrom: 'mineable-trace-store.v1',
-        availability: legacy['availability'] === 'candidate' ? 'candidate' : 'unavailable',
-      },
-    } : {}),
   };
 }
 
-function parseV2File(raw: unknown): ContributionStoreFile {
+function parseV3File(raw: unknown): ContributionStoreFile {
   if (!raw || typeof raw !== 'object') throw new Error('invalid contribution store: expected object');
   const value = raw as Record<string, unknown>;
   if (value['schemaVersion'] !== CONTRIBUTION_STORE_SCHEMA_VERSION) {
@@ -221,7 +213,11 @@ function migrateLegacyRecord(recordId: string, rawValue: unknown): ContributionS
   const sourceId = typeof raw['sourceId'] === 'string' && raw['sourceId'].length > 0
     ? raw['sourceId']
     : recordId;
-  const candidate = ContributionCandidateV1Schema.parse({
+  if (sourceId !== recordId) {
+    throw new Error(`v1 contribution record key/sourceId mismatch: ${recordId}`);
+  }
+  // Validate the payload before preserving it in the loss-safe backup only.
+  ContributionCandidateV1Schema.parse({
     schemaVersion: 'jinn.contribution-candidate.v1',
     sourceId,
     repositorySlug: raw['repo'],
@@ -243,27 +239,11 @@ function migrateLegacyRecord(recordId: string, rawValue: unknown): ContributionS
     createdAt: raw['createdAt'],
   });
   const processed = raw['mined'] === true;
-  const kind = raw['kind'];
-  const sourceInstanceId = raw['sourceInstanceId'];
   return {
     recordId,
-    candidate,
     localState: processed ? 'rejected' : 'recorded',
     publicationState: 'disabled',
     ...(processed ? { rejectionReason: 'legacy-processed-unavailable' } : {}),
-    ...(kind === 'solvernet-execution' || kind === 'harness-session' ||
-      (typeof sourceInstanceId === 'string' && sourceInstanceId.length > 0) ? {
-        localMetadata: {
-          ...(kind === 'solvernet-execution' || kind === 'harness-session' ? { kind } : {}),
-          ...(typeof sourceInstanceId === 'string' && sourceInstanceId.length > 0
-            ? { sourceInstanceId }
-            : {}),
-        },
-      } : {}),
-    legacy: {
-      migratedFrom: 'mineable-trace-store.v1',
-      availability: processed ? 'unavailable' : 'candidate',
-    },
   };
 }
 
@@ -285,8 +265,54 @@ function migrateV1File(raw: unknown): ContributionStoreFile {
   };
 }
 
-function sameCandidate(left: ContributionCandidateV1, right: ContributionCandidateV1): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+function migrateV2Record(recordId: string, rawValue: unknown): ContributionStoreRecord {
+  if (!rawValue || typeof rawValue !== 'object') throw new Error(`invalid v2 record ${recordId}`);
+  const raw = rawValue as Record<string, unknown>;
+  if (raw['recordId'] !== recordId) {
+    throw new Error(`v2 contribution record key/id mismatch: ${recordId}`);
+  }
+  const candidate = ContributionCandidateV1Schema.parse(raw['candidate']);
+  if (candidate.sourceId !== recordId) {
+    throw new Error(`v2 contribution record key/sourceId mismatch: ${recordId}`);
+  }
+  const publicationState = parsePublicationState(raw['publicationState']);
+  const mintRef = optionalNonEmptyString(raw['mintRef'], 'mintRef');
+  const publicationRef = optionalNonEmptyString(raw['publicationRef'], 'publicationRef');
+  const rejectionReason = optionalNonEmptyString(raw['rejectionReason'], 'rejectionReason');
+  return {
+    recordId,
+    localState: parseLocalState(raw['localState']),
+    publicationState:
+      publicationState === 'preview-required' || publicationState === 'queued'
+        ? 'disabled'
+        : publicationState,
+    ...(mintRef ? { mintRef } : {}),
+    ...(publicationRef ? { publicationRef } : {}),
+    ...(rejectionReason ? { rejectionReason } : {}),
+  };
+}
+
+function migrateV2File(raw: unknown): ContributionStoreFile {
+  if (!raw || typeof raw !== 'object') throw new Error('invalid v2 contribution store: expected object');
+  const value = raw as Record<string, unknown>;
+  if (value['schemaVersion'] !== CONTRIBUTION_STORE_V2_SCHEMA_VERSION) {
+    throw new Error(`unsupported contribution store schema: ${String(value['schemaVersion'])}`);
+  }
+  if (!value['records'] || typeof value['records'] !== 'object' || Array.isArray(value['records'])) {
+    throw new Error('invalid v2 contribution store records');
+  }
+  const previewAt = optionalNonEmptyString(
+    value['firstSharePreviewAcknowledgedAt'],
+    'firstSharePreviewAcknowledgedAt',
+  );
+  return {
+    schemaVersion: CONTRIBUTION_STORE_SCHEMA_VERSION,
+    ...(previewAt ? { firstSharePreviewAcknowledgedAt: previewAt } : {}),
+    records: contributionRecordMap(
+      Object.entries(value['records'] as Record<string, unknown>)
+        .map(([id, record]): [string, ContributionStoreRecord] => [id, migrateV2Record(id, record)]),
+    ),
+  };
 }
 
 /**
@@ -552,6 +578,46 @@ export class ContributionStore {
     }
   }
 
+  private async preserveMigrationBackup(
+    version: 'v1' | 'v2',
+    sourceText: string,
+  ): Promise<void> {
+    const backupPath = `${this.filePath}.${version}.bak`;
+    const tempPath = `${backupPath}.${process.pid}.${randomUUID()}.tmp`;
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
+    try {
+      handle = await open(tempPath, 'wx', 0o600);
+      await handle.writeFile(sourceText, 'utf8');
+      await handle.sync();
+      await handle.close();
+      handle = undefined;
+      await link(tempPath, backupPath);
+      fsyncDirectory(dirname(backupPath));
+      await rm(tempPath, { force: true });
+      fsyncDirectory(dirname(backupPath));
+      return;
+    } catch (error) {
+      if (nodeErrorCode(error) !== 'EEXIST') throw error;
+    } finally {
+      await handle?.close().catch(() => undefined);
+      await rm(tempPath, { force: true });
+    }
+    const existing = await readFile(backupPath, 'utf8');
+    if (existing !== sourceText) {
+      throw new Error(
+        `existing contribution store ${version} backup does not match active store; refusing migration`,
+      );
+    }
+    const existingHandle = await open(backupPath, 'r+');
+    try {
+      await existingHandle.chmod(0o600);
+      await existingHandle.sync();
+    } finally {
+      await existingHandle.close();
+    }
+    fsyncDirectory(dirname(backupPath));
+  }
+
   private async loadUnlocked(): Promise<ContributionStoreFile> {
     let text: string;
     try {
@@ -562,19 +628,22 @@ export class ContributionStore {
       throw error;
     }
     const raw = JSON.parse(text) as unknown;
-    if (raw && typeof raw === 'object' &&
-      (raw as Record<string, unknown>)['schemaVersion'] === 'mineable-trace-store.v1') {
-      try {
-        await copyFile(this.filePath, `${this.filePath}.v1.bak`, fsConstants.COPYFILE_EXCL);
-        await chmod(`${this.filePath}.v1.bak`, 0o600);
-      } catch (error) {
-        if (nodeErrorCode(error) !== 'EEXIST') throw error;
-      }
+    const schemaVersion = raw && typeof raw === 'object'
+      ? (raw as Record<string, unknown>)['schemaVersion']
+      : undefined;
+    if (schemaVersion === 'mineable-trace-store.v1') {
+      await this.preserveMigrationBackup('v1', text);
       const migrated = migrateV1File(raw);
       await this.writeAtomic(migrated);
       return migrated;
     }
-    return parseV2File(raw);
+    if (schemaVersion === CONTRIBUTION_STORE_V2_SCHEMA_VERSION) {
+      await this.preserveMigrationBackup('v2', text);
+      const migrated = migrateV2File(raw);
+      await this.writeAtomic(migrated);
+      return migrated;
+    }
+    return parseV3File(raw);
   }
 
   private async mutate<T>(operation: (file: ContributionStoreFile) => T): Promise<T> {
@@ -598,29 +667,35 @@ export class ContributionStore {
 
   async record(
     candidateInput: ContributionCandidateV1,
-    localMetadata?: ContributionLocalMetadata,
+    _localMetadata?: ContributionLocalMetadata,
     options?: ContributionStoreRecordOptions,
   ): Promise<ContributionStoreRecord> {
     const candidate = ContributionCandidateV1Schema.parse(candidateInput);
+    return this.recordReference(candidate.sourceId, {
+      publishMinedTasksConsent: candidate.publishMinedTasksConsent,
+      ...options,
+    });
+  }
+
+  async recordReference(
+    episodeId: string,
+    options: ContributionStoreReferenceOptions = {},
+  ): Promise<ContributionStoreRecord> {
+    if (typeof episodeId !== 'string' || episodeId.length === 0) {
+      throw new Error('contribution episode reference must not be empty');
+    }
     return this.withLock(async () => {
       const file = await this.loadUnlocked();
-      const existing = ownRecord(file, candidate.sourceId);
-      if (existing) {
-        if (!sameCandidate(existing.candidate, candidate)) {
-          throw new Error(`contribution sourceId collision: ${candidate.sourceId}`);
-        }
-        return existing;
-      }
+      const existing = ownRecord(file, episodeId);
+      if (existing) return existing;
       const globallyDisabled = await this.publicationDisabledUnlocked();
       const record: ContributionStoreRecord = {
-        recordId: candidate.sourceId,
-        candidate,
+        recordId: episodeId,
         localState: 'recorded',
         publicationState: options?.publicationState ??
-          (candidate.publishMinedTasksConsent && !globallyDisabled
+          (options.publishMinedTasksConsent && !globallyDisabled
             ? (file.firstSharePreviewAcknowledgedAt ? 'queued' : 'preview-required')
             : 'disabled'),
-        ...(localMetadata ? { localMetadata } : {}),
       };
       file.records[record.recordId] = record;
       await this.writeAtomic(file);
@@ -783,14 +858,25 @@ export class ContributionStore {
     }));
   }
 
-  toOutboundProjection(record: ContributionStoreRecord): ContributionPublicationV1 {
+  toOutboundProjection(
+    record: ContributionStoreRecord,
+    episodeInput: EpisodeV1,
+  ): ContributionPublicationV1 {
     if (record.localState !== 'minted' || record.publicationState !== 'queued' || !record.mintRef) {
       throw new Error(`contribution ${record.recordId} is not ready for outbound publication`);
     }
+    const episode = EpisodeV1Schema.parse(episodeInput);
+    if (episode.episodeId !== record.recordId) {
+      throw new Error(`contribution ${record.recordId} does not match episode ${episode.episodeId}`);
+    }
+    const candidate = ContributionCandidateV1ProjectionSchema.safeParse(episode.contributionCandidate);
+    if (!candidate.success || candidate.data.sourceId !== record.recordId) {
+      throw new Error(`canonical episode ${record.recordId} has no matching contribution candidate`);
+    }
     return {
       schemaVersion: CONTRIBUTION_PUBLICATION_SCHEMA_VERSION,
-      repositorySlug: record.candidate.repositorySlug,
-      baseCommit: record.candidate.baseCommit,
+      repositorySlug: candidate.data.repositorySlug,
+      baseCommit: candidate.data.baseCommit,
       mintRef: record.mintRef,
     };
   }

@@ -106,7 +106,7 @@ import {
   DEFAULT_EPISODES_DIR,
   DEFAULT_SKILLS_INSTALL_DIR,
   coveredSessionIds,
-  loadRecentCaptures,
+  loadRecentDistillSources,
   provenanceLabels,
   stagingDirFor,
 } from './distill-captures.js';
@@ -223,7 +223,7 @@ Commands:
                                                  --measure-per-record-control adds one live
                                                  receipt-bound capture anchor for comparison.
   distill [--where local|defer|off] [--install all|<name>|none] [--resume]
-         [--captures <dir>] [--limit N] [--out <dir>]
+         [--episodes <dir>] [--captures <legacy-dir>] [--limit N] [--out <dir>]
          [--distiller claude|codex] [--distiller-model <model>] [--json]
          [--progress ndjson] [--cluster-timeout <seconds>]
                                                  Rung-1 own-captures loop: distill YOUR recent local
@@ -265,7 +265,7 @@ Commands:
                                                  subprocess (seconds; default 600). On expiry the
                                                  child is killed, that cluster lands in errors,
                                                  and the run continues.
-  distill status [--captures <dir>] [--out <dir>] [--json]
+  distill status [--episodes <dir>] [--captures <legacy-dir>] [--out <dir>] [--json]
                                                  The loop's state in one read: mode, reserved
                                                  captures (total + not yet distilled), staged and
                                                  installed counts, resolved distiller, last run.
@@ -320,8 +320,9 @@ Environment (distill — reads the testnet ledger + spends model solves):
   JINN_DISTILL_MODEL       Distiller model (defaults: claude-opus-4-8 for claude, gpt-5.5 for codex)
   (publish env above)      distill also captures + anchors the bridged evidence on testnet unless --local-only
 
-Environment (distill — the rung-1 own-captures loop; runs fully locally):
-  JINN_LAYER_CAPTURES_DIR    Own-captures dir (default: ~/.jinn-client/harness-layer/captures)
+Environment (distill — the rung-1 local episode loop; runs fully locally):
+  JINN_LAYER_EPISODES_DIR    Canonical EpisodeV1 dir (default: ~/.jinn-client/harness-layer/episodes)
+  JINN_LAYER_CAPTURES_DIR    Deprecated legacy CapturedTask read dir (default: ~/.jinn-client/harness-layer/captures)
   JINN_LAYER_DISTILL_MODE_PATH  Where-it-runs mode file (default: ~/.jinn-client/harness-layer/distill.json)
   JINN_LAYER_DISTILL_RUNS_PATH  Run log (default: ~/.jinn-client/harness-layer/distill-runs.jsonl)
   JINN_DISTILL_PROVIDER      Distiller provider: claude or codex (default: claude)
@@ -1280,6 +1281,7 @@ export async function runJinnLayerCli(
         'distiller-model': { type: 'string' },
         'set-distiller': { type: 'string' },
         'set-distiller-model': { type: 'string' },
+        episodes: { type: 'string' },
         captures: { type: 'string' },
         'local-only': { type: 'boolean', default: false },
         'anchor-mode': { type: 'string', default: 'per-record' },
@@ -1667,15 +1669,30 @@ export async function runJinnLayerCli(
     }
     if (sub === 'status') {
       const mode = readDistillMode(modePath);
-      const statusCapturesDir = (parsed.values.captures as string | undefined) ?? process.env['JINN_LAYER_CAPTURES_DIR'] ?? DEFAULT_CAPTURES_DIR;
-      const statusCaptures = loadRecentCaptures(statusCapturesDir, DEFAULT_DISTILL_CAPTURE_LIMIT);
+      const statusEpisodesOverride = (parsed.values.episodes as string | undefined) ?? process.env['JINN_LAYER_EPISODES_DIR'];
+      const statusLegacyOverride = (parsed.values.captures as string | undefined) ?? process.env['JINN_LAYER_CAPTURES_DIR'];
+      const statusLegacyCapturesDir = statusLegacyOverride
+        ?? (statusEpisodesOverride ? undefined : DEFAULT_CAPTURES_DIR);
+      const statusEpisodesDir = statusEpisodesOverride
+        // An explicit legacy source is an isolation boundary as well as a
+        // compatibility flag: do not also inspect the operator's default store.
+        ?? statusLegacyOverride
+        ?? DEFAULT_EPISODES_DIR;
+      const statusCaptures = await loadRecentDistillSources({
+        episodesDir: statusEpisodesDir,
+        ...(statusLegacyCapturesDir ? { legacyCapturesDir: statusLegacyCapturesDir } : {}),
+        limit: DEFAULT_DISTILL_CAPTURE_LIMIT,
+      });
       const statusActiveDir = (parsed.values.out as string | undefined) ?? DEFAULT_SKILLS_INSTALL_DIR;
       const statusStagingDir = stagingDirFor(statusActiveDir);
       const covered = coveredSessionIds([statusActiveDir, statusStagingDir]);
       const status = {
         mode,
         modePath,
-        capturesDir: statusCapturesDir,
+        /** @deprecated Machine compatibility alias for the effective primary source. */
+        capturesDir: statusEpisodesDir,
+        episodesDir: statusEpisodesDir,
+        legacyCapturesDir: statusLegacyCapturesDir ?? null,
         capturesCount: statusCaptures.length,
         uncoveredCount: statusCaptures.filter((capture) => !covered.has(capture.session.sessionId)).length,
         stagingDir: statusStagingDir,
@@ -1689,7 +1706,7 @@ export async function runJinnLayerCli(
       if (json) writer.write(JSON.stringify(status) + '\n');
       else {
         const last = status.lastRun ? `${status.lastRun.startedAt} ${status.lastRun.outcome} (${status.lastRun.published.length} distilled, ${status.lastRun.installed.length} installed)` : 'never';
-        writer.write([`mode        ${status.mode}`, `captures    ${status.capturesCount} reserved (${status.uncoveredCount} not yet distilled) in ${status.capturesDir}`, `staged      ${status.stagedCount} in ${status.stagingDir}`, `installed   ${status.installedCount} in ${status.activeDir}`, `distiller   ${status.distillProvider} · ${status.distillModel}`, `last run    ${last}`].join('\n') + '\n');
+        writer.write([`mode        ${status.mode}`, `episodes    ${status.capturesCount} available (${status.uncoveredCount} not yet distilled) in ${status.episodesDir}`, `legacy      ${status.legacyCapturesDir ? `read-only compatibility in ${status.legacyCapturesDir}` : 'not requested'}`, `staged      ${status.stagedCount} in ${status.stagingDir}`, `installed   ${status.installedCount} in ${status.activeDir}`, `distiller   ${status.distillProvider} · ${status.distillModel}`, `last run    ${last}`].join('\n') + '\n');
       }
       return 0;
     }
@@ -1733,24 +1750,35 @@ export async function runJinnLayerCli(
       return 0;
     }
 
-    // Source: recent OWN captures (default ~/.jinn-client/harness-layer/captures).
-    const capturesDir =
+    // Source: canonical local episodes plus deprecated CapturedTask reads.
+    const episodesOverride =
+      (parsed.values.episodes as string | undefined) ??
+      process.env['JINN_LAYER_EPISODES_DIR'];
+    const legacyOverride =
       (parsed.values.captures as string | undefined) ??
-      process.env['JINN_LAYER_CAPTURES_DIR'] ??
-      DEFAULT_CAPTURES_DIR;
+      process.env['JINN_LAYER_CAPTURES_DIR'];
+    const legacyCapturesDir = legacyOverride ?? (episodesOverride ? undefined : DEFAULT_CAPTURES_DIR);
+    const episodesDir =
+      episodesOverride ??
+      legacyOverride ??
+      DEFAULT_EPISODES_DIR;
     const capN = Number.parseInt(parsed.values.limit as string, 10);
     const capLimit =
       argv.some((a) => a === '--limit' || a.startsWith('--limit=')) && Number.isFinite(capN) && capN > 0
         ? capN
         : DEFAULT_DISTILL_CAPTURE_LIMIT;
-    const captures = loadRecentCaptures(capturesDir, capLimit);
+    const captures = await loadRecentDistillSources({
+      episodesDir,
+      ...(legacyCapturesDir ? { legacyCapturesDir } : {}),
+      limit: capLimit,
+    });
 
     // 1d — empty: nothing to distill, whatever the mode. Short-circuits consent.
     if (captures.length === 0) {
       if (json) {
         writer.write(JSON.stringify({ clusterCount: 0, distilled: { published: [], rejected: [], errors: [] }, capturesConsidered: 0, distillModel }) + '\n');
       } else {
-        writer.write(renderEmpty({ capturesDir }) + '\n');
+        writer.write(renderEmpty({ capturesDir: episodesDir }) + '\n');
       }
       endedEmpty();
       logRun('empty', emptyFacts);
@@ -1774,7 +1802,7 @@ export async function runJinnLayerCli(
       const prompt =
         dd.promptConsent ??
         (isTty
-          ? () => readlineConsentPrompt({ captureCount: captures.length, distillModel, capturesDir, captures, writer })
+          ? () => readlineConsentPrompt({ captureCount: captures.length, distillModel, capturesDir: episodesDir, captures, writer })
           : undefined);
       if (!prompt) {
         // Non-interactive first run: the safe default is defer, and it is NOT
@@ -1783,7 +1811,7 @@ export async function runJinnLayerCli(
           writer.write(JSON.stringify({ mode: 'defer', ran: false, consent: 'unset', capturesConsidered: captures.length }) + '\n');
         } else {
           writer.write(renderConsentDisclosure({ captureCount: captures.length, distillModel }) + '\n\n');
-          writer.write(renderDeferredRun({ captureCount: captures.length, capturesDir }) + '\n');
+          writer.write(renderDeferredRun({ captureCount: captures.length, capturesDir: episodesDir }) + '\n');
         }
         endedEmpty();
         return 0;
@@ -1808,7 +1836,7 @@ export async function runJinnLayerCli(
     }
     if (acting === 'defer') {
       if (json) writer.write(JSON.stringify({ mode: 'defer', ran: false, capturesConsidered: captures.length }) + '\n');
-      else writer.write(renderDeferredRun({ captureCount: captures.length, capturesDir }) + '\n');
+      else writer.write(renderDeferredRun({ captureCount: captures.length, capturesDir: episodesDir }) + '\n');
       endedEmpty();
       return 0;
     }
@@ -1854,7 +1882,7 @@ export async function runJinnLayerCli(
       resume,
       distillProvider,
       distillModel,
-      capturesDir,
+      capturesDir: episodesDir,
       stagingDir,
       activeDir,
     });

@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
  * Daemon-side acceptance over the contribution candidates written by the
- * stock Python host. In the Stage 2 parked era the task creator still mines
- * locally, while every host-created candidate is publication-disabled and
- * the real daemon performs zero outbound I/O.
+ * stock Python host. In the Stage 2 parked era the production daemon does not
+ * mine session echoes; this harness exercises the dormant resolver-backed
+ * miner explicitly while proving that the reference queue remains payload-free
+ * and every host-created candidate is publication-disabled.
  */
 
 import assert from 'node:assert/strict';
@@ -24,6 +25,7 @@ import { MintedPoolStore } from '../dist/solver-types/_swe-rebench-v2-minted-poo
 const execFileAsync = promisify(execFile);
 const work = resolve(requiredEnv('JINN_STAGE1_WORK'));
 const contributionStateDir = resolve(requiredEnv('JINN_MINEABLE_STATE_DIR'));
+const episodesDir = resolve(requiredEnv('JINN_LAYER_EPISODES_DIR'));
 const layerBin = resolve(requiredEnv('JINN_STAGE1_LAYER_BIN'));
 const result = JSON.parse(await readFile(join(work, 'stock-product-result.json'), 'utf8'));
 
@@ -105,7 +107,7 @@ const publicationUrl = `http://127.0.0.1:${address.port}`;
 const daemonStateDir = join(work, 'task-creator-state');
 const validatedStore = new ValidatedPoolStore({ stateDir: daemonStateDir });
 const mintedStore = new MintedPoolStore({ stateDir: daemonStateDir });
-const mineableStore = new MineableTraceStore({ stateDir: contributionStateDir });
+const mineableStore = new MineableTraceStore({ stateDir: contributionStateDir, episodesDir });
 await validatedStore.record(SOURCE_INSTANCE, {
   scorable: true,
   reason: 'gold-patch-resolves',
@@ -153,6 +155,12 @@ try {
   await stat(layerBin);
   const records = await mineableStore.list();
   assert.equal(records.length, 2, 'daemon did not read the two Python-written candidates');
+  const rawQueue = JSON.parse(await readFile(join(contributionStateDir, 'mineable-traces.json'), 'utf8'));
+  assert.equal(rawQueue.schemaVersion, 'jinn.contribution-store.v3');
+  for (const record of Object.values(rawQueue.records)) {
+    assert.ok(!('candidate' in record));
+    assert.ok(!('localMetadata' in record));
+  }
   const target = records.find((row) => row.recordId === result.targetRecordId);
   const noResult = records.find((row) => row.recordId === result.noResultRecordId);
   assert.ok(target && noResult);
@@ -175,8 +183,8 @@ try {
   assert.equal(target.candidate.sourceId, targetSession.episodeId);
   assert.equal(noResult.candidate.sourceId, noResultSession.episodeId);
 
-  // Parked contribution keeps local mining alive but never starts a
-  // publication sidecar or advances a candidate into an outbound state.
+  // Exercise the dormant miner directly as a compatibility proof. Production
+  // harvest reports sessions-source-parked-stage-2 and never invokes this path.
   const localTick = await mineSessionEchoes(deps(successfulRunner(), { publish: false }));
   assert.equal(localTick.admitted.length, 2);
   assert.equal(uploads.length, 0);

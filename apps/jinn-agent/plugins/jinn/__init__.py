@@ -518,10 +518,10 @@ def _on_session_end(
     if input_tokens or output_tokens:
         buf.record_tokens(task_id, logical_session_id, input_tokens or 0, output_tokens or 0)
 
-    # Pop the buffer ONCE for both shapes (assemble pops — see assemble_both).
-    # Stage 2 never prepares a network-facing shape. The same episode remains
-    # the local learning source and contribution-candidate raw material.
-    task, episode = buf.assemble_both(
+    # The canonical EpisodeV1 is the one local-learning and contribution source.
+    # C7 retired the duplicate CapturedTask tee, so session end pops exactly the
+    # episode shape and never writes a second trajectory file.
+    episode = buf.assemble_episode(
         task_id, logical_session_id, completed, interrupted, publish_consented=publish_enabled
     )
 
@@ -536,17 +536,6 @@ def _on_session_end(
             candidate_created=False,
         ))
         return
-
-    # Tee for local distillation (mono #1537) — BEFORE the veto/publish
-    # branching, so held, vetoed and published tasks all reserve a local
-    # capture (a veto withholds from the NETWORK; local distillation never
-    # leaves this machine). Distinct dir + lifecycle from the pending file:
-    # the publish drain unlinks pending files, never captures.
-    tee_path = (
-        distill.tee_capture(task, session_id or task_id, runner=_runner)
-        if task is not None
-        else None
-    )
 
     state = _pop_state(logical_session_id)
     snapshot = state.get("snapshot")
@@ -591,8 +580,8 @@ def _on_session_end(
     if result is None:
         fallback_path = distill.write_episode_fallback(episode)
         learning_status = (
-            "pending" if tee_path is not None
-            else "off" if distill.cached_mode(_runner) == "off"
+            "off" if distill.cached_mode(_runner) == "off"
+            else "pending" if fallback_path is not None
             else "unavailable"
         )
         activity = state.get("activity") or {}
@@ -622,9 +611,8 @@ def _on_session_end(
         ):
             _clear_veto(logical_session_id)
         learning_status = (
-            "pending" if tee_path is not None
-            else "off" if distill.cached_mode(_runner) == "off"
-            else "unavailable"
+            "off" if distill.cached_mode(_runner) == "off"
+            else "pending"
         )
         _user_line(session_view.render_complete(
             summary=result.get("summary"),

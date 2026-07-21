@@ -4,9 +4,23 @@ import {
   EpisodeV1WriteSchema,
   SessionActivityFactsWriteSchema,
 } from '../../src/schemas/episode.js';
+import { ContributionCandidateV1ProjectionSchema } from '../../src/schemas/contribution-candidate.js';
 import { makeSampleEpisode } from '../_fixtures/episode.js';
 
 const valid = makeSampleEpisode({ episodeId: 'ep-1' });
+
+const contributionCandidate = {
+  schemaVersion: 'jinn.contribution-candidate.v1' as const,
+  sourceId: 'ep-1',
+  repositorySlug: 'Jinn-Network/mono',
+  baseCommit: '0123456789abcdef',
+  acceptedDiff: 'diff --git a/a.ts b/a.ts\n+fixed\n',
+  testRuns: [{ command: 'yarn test', exitCode: 0, at: '2026-07-15T12:00:00.000Z' }],
+  intermediateFailureDiffs: ['diff --git a/a.ts b/a.ts\n+failed\n'],
+  skillEvents: [{ skillRef: 'skills/tdd@1', action: 'invoked' as const }],
+  publishMinedTasksConsent: false,
+  createdAt: '2026-07-15T12:01:00.000Z',
+};
 
 describe('EpisodeV1Schema', () => {
   it('preserves derived historical provenance on strict writes and tolerant reads', () => {
@@ -26,6 +40,71 @@ describe('EpisodeV1Schema', () => {
     expect(parsed.trajectory).toHaveLength(3);
     expect(parsed.trajectory.filter((s) => s.kind === 'jinn.agent_turn')).toHaveLength(2);
     expect(parsed.trajectory.filter((s) => s.kind === 'jinn.tool_call')).toHaveLength(1);
+  });
+
+  it('round-trips the optional local contribution payload in the canonical episode', () => {
+    const withCandidate = {
+      ...valid,
+      session: { ...valid.session, kind: 'user' as const },
+      origin: { writer: 'test-writer', build: 'test-build' },
+      contributionCandidate,
+    };
+
+    expect(EpisodeV1WriteSchema.parse(withCandidate).contributionCandidate)
+      .toEqual(contributionCandidate);
+    expect(EpisodeV1Schema.parse(withCandidate).contributionCandidate)
+      .toEqual(contributionCandidate);
+  });
+
+  it('projects current contribution fields from a forward-additive canonical episode', () => {
+    const parsed = EpisodeV1Schema.parse({
+      ...valid,
+      session: { ...valid.session, kind: 'user' as const },
+      origin: { writer: 'future-writer', build: '2' },
+      contributionCandidate: {
+        ...contributionCandidate,
+        futurePolicyFact: { version: 2 },
+        testRuns: contributionCandidate.testRuns.map((run) => ({
+          ...run,
+          futureReceipt: 'receipt-v2',
+        })),
+      },
+    });
+
+    expect(parsed.contributionCandidate).toMatchObject({
+      futurePolicyFact: { version: 2 },
+      testRuns: [{ futureReceipt: 'receipt-v2' }],
+    });
+    expect(ContributionCandidateV1ProjectionSchema.parse(parsed.contributionCandidate))
+      .toEqual(contributionCandidate);
+  });
+
+  it('rejects a contribution payload that references a different episode', () => {
+    const mismatched = {
+      ...valid,
+      session: { ...valid.session, kind: 'user' as const },
+      origin: { writer: 'test-writer', build: 'test-build' },
+      contributionCandidate: { ...contributionCandidate, sourceId: 'different-episode' },
+    };
+
+    expect(() => EpisodeV1WriteSchema.parse(mismatched)).toThrow(/sourceId.*episodeId/i);
+    expect(() => EpisodeV1Schema.parse(mismatched)).toThrow(/sourceId.*episodeId/i);
+  });
+
+  it('rejects contribution payloads on host-internal episodes', () => {
+    const internal = {
+      ...valid,
+      session: {
+        ...valid.session,
+        kind: 'host-internal' as const,
+        parentSessionId: 'parent-session',
+      },
+      origin: { writer: 'test-writer', build: 'test-build' },
+      contributionCandidate,
+    };
+
+    expect(() => EpisodeV1WriteSchema.parse(internal)).toThrow(/host-internal/i);
+    expect(() => EpisodeV1Schema.parse(internal)).toThrow(/host-internal/i);
   });
 
   it('round-trips optional typed tool observations and status on strict and tolerant reads', () => {
@@ -161,6 +240,7 @@ describe('EpisodeV1Schema', () => {
         nFail: null,
       },
       eligibility: null,
+      contributionCandidate: null,
       lineage: { episodeId: 'ep-0', mintRef: null },
       futureAdditiveField: { preserved: true },
     });
@@ -194,6 +274,7 @@ describe('EpisodeV1Schema', () => {
     expect(parsed.attemptGroup).not.toHaveProperty('nPass');
     expect(parsed.attemptGroup).not.toHaveProperty('nFail');
     expect(parsed).not.toHaveProperty('eligibility');
+    expect(parsed).not.toHaveProperty('contributionCandidate');
     expect(parsed.lineage).not.toHaveProperty('mintRef');
     expect(parsed.futureAdditiveField).toEqual({ preserved: true });
   });

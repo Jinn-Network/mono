@@ -1,7 +1,7 @@
 """Verification tests for the jinn store-path sandbox guard (mono#1841).
 
 These prove the lint/guard behaviour:
-  * with the autouse ``_hermetic_environment`` fixture active, the three store
+  * with the autouse ``_hermetic_environment`` fixture active, the writable store
     resolvers point under the per-test tempdir and the guard stays green;
   * a deliberate violation (unsetting a store env var so the resolver returns
     the real default) makes the guard go red.
@@ -24,7 +24,6 @@ def test_guard_green_when_sandboxed():
 
     real_root = (Path.home() / ".jinn-client").resolve()
     for resolved in (
-        distill.captures_dir(),
         distill.episodes_dir(),
         session_bridge.contribution_state_dir(),
     ):
@@ -85,7 +84,6 @@ def test_guard_survives_ordinary_monkeypatch_undo(monkeypatch):
     assert_jinn_store_sandboxed()
     real_root = (Path.home() / ".jinn-client").resolve()
     for resolver in (
-        distill.captures_dir,
         distill.episodes_dir,
         session_bridge.contribution_state_dir,
     ):

@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { OTLPTraceExporter as HttpExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { trace, SpanKind } from '@opentelemetry/api';
@@ -6,6 +10,12 @@ import { Store } from '../../src/store/store.js';
 import { CapturesStore } from '../../src/store/captures.js';
 import { startReceiver, type Receiver } from '../../src/trajectory/receiver.js';
 import { SqliteExporterProcessor } from '../../src/trajectory/processors/sqlite-exporter.js';
+import { ingestStopHookCapture } from '../../src/captures/ingest.js';
+
+const CLAUDE_TRANSCRIPT = fileURLToPath(new URL(
+  '../../fixtures/transcripts/claude-code/example-session.jsonl',
+  import.meta.url,
+));
 
 // End-to-end-ish proof of the capture ingest path: a real OTLP exporter posts a
 // span to the in-process receiver (the same startReceiver + SqliteExporterProcessor
@@ -74,5 +84,30 @@ describe('capture ingest via the in-process OTLP receiver', () => {
     expect(stored.length).toBeGreaterThanOrEqual(1);
     // Ingested raw — the receiver does not scrub; publish does.
     expect(JSON.stringify(stored)).toContain(GH);
+  });
+
+  it('keeps stop-hook ingestion in SQLite without recreating the retired distiller tee', async () => {
+    const legacyCapturesDir = mkdtempSync(join(tmpdir(), 'jinn-retired-distil-tee-'));
+    const originalCapturesDir = process.env['JINN_LAYER_CAPTURES_DIR'];
+    process.env['JINN_LAYER_CAPTURES_DIR'] = legacyCapturesDir;
+    try {
+      await ingestStopHookCapture(captures, receiver, {
+        tool: 'claude-code',
+        sessionId: 'stop-hook-no-tee',
+        stoppedAt: '2026-05-07T00:00:00.000Z',
+        transcriptPath: CLAUDE_TRANSCRIPT,
+      });
+
+      expect(captures.getBySession('stop-hook-no-tee')).toMatchObject({
+        capturePath: 'D',
+        status: 'pending',
+      });
+      expect(captures.getSpansBySession('stop-hook-no-tee').length).toBeGreaterThan(0);
+      expect(readdirSync(legacyCapturesDir)).toEqual([]);
+    } finally {
+      if (originalCapturesDir === undefined) delete process.env['JINN_LAYER_CAPTURES_DIR'];
+      else process.env['JINN_LAYER_CAPTURES_DIR'] = originalCapturesDir;
+      rmSync(legacyCapturesDir, { recursive: true, force: true });
+    }
   });
 });
