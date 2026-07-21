@@ -374,6 +374,71 @@ function assertCompletePrNode(pr: GraphQlPr): void {
   }
 }
 
+/**
+ * Per-PR completeness check for the merged-outcomes decode path
+ * (`readMergedOutcomes`), mirroring `assertCompleteMergedPrNode`'s
+ * open-PR sibling `assertCompletePrNode`. Raises `PrEvidenceInconsistentError`
+ * so the caller can skip just this one merged PR's contribution instead of
+ * failing the whole snapshot (jinn-mono#1883-follow-up: PR #1710 — a real
+ * merged PR whose branch was garbage-collected post-merge — was tripping a
+ * bare `Error` here and halting every v2 cycle).
+ */
+function assertCompleteMergedPrNode(pr: GraphQlMergedPr): void {
+  if (pr.labels.pageInfo.hasNextPage) {
+    throw new PrEvidenceInconsistentError(pr.number, `PR #${pr.number} labels were truncated`);
+  }
+  if (pr.closingIssuesReferences.pageInfo.hasNextPage) {
+    throw new PrEvidenceInconsistentError(
+      pr.number,
+      `PR #${pr.number} closing issue references were truncated`,
+    );
+  }
+}
+
+/**
+ * Decodes one merged-outcomes PR node, or raises `PrEvidenceInconsistentError`
+ * when its evidence can't be trusted (truncated pagination, or a head commit
+ * that no longer matches `headRefOid` — e.g. a merged PR whose branch was
+ * garbage-collected). Callers must skip the PR on that error rather than
+ * assert a Done projection from unverifiable data. Callers must only invoke
+ * this for a node already known to be in the `MERGED` state (the caller's
+ * OPEN/CLOSED branches are handled separately).
+ */
+function rawMergedPullRequest(pr: GraphQlMergedPr): RawPullRequest {
+  assertCompleteMergedPrNode(pr);
+  const latest = pr.commits.nodes.at(-1)?.commit;
+  if (latest === undefined || latest.oid !== pr.headRefOid) {
+    throw new PrEvidenceInconsistentError(
+      pr.number,
+      `PR #${pr.number} is missing its exact merged head commit`,
+    );
+  }
+  return {
+    number: pr.number,
+    title: pr.title,
+    body: pr.body,
+    author: pr.author?.login ?? '',
+    baseRefName: pr.baseRefName,
+    headRefName: pr.headRefName,
+    headOid: pr.headRefOid,
+    headCommittedAt: latest.committedDate,
+    isDraft: pr.isDraft,
+    state: 'MERGED',
+    labels: pr.labels.nodes.map((label) => label.name),
+    closingIssueNumbers: pr.closingIssuesReferences.nodes.map((issue) => issue.number),
+    mergeability: pr.mergeable,
+    mergeStateStatus: pr.mergeStateStatus,
+    checks: [],
+    reviews: [],
+    branchClaimTrailers: null,
+    reviewClaim: null,
+    humanIssueNumber: null,
+    humanReason: null,
+    mergedAt: pr.mergedAt,
+    mergeCommitOid: pr.mergeCommit?.oid ?? null,
+  };
+}
+
 function inconsistentPullRequest(pr: GraphQlPr, detail: string): RawPullRequest {
   return {
     number: pr.number,
@@ -659,7 +724,13 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
           ?.closedByPullRequestsReferences;
         if (connection === undefined) continue;
         if (connection.pageInfo.hasNextPage) {
-          throw new Error(`Issue #${number} closing PR outcomes were truncated`);
+          // Pagination cap on this one issue's closing-PR connection — skip only
+          // this issue's merged-outcome contribution, not the whole batch/snapshot.
+          console.warn(
+            `[github-reader] skipping merged outcomes for issue #${number} (continuing): `
+              + `closing PR outcomes were truncated`,
+          );
+          continue;
         }
         for (const pr of connection.nodes) {
           if (pr.state === 'OPEN') {
@@ -675,40 +746,20 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
             continue;
           }
           if (pr.state === 'CLOSED') continue;
-          if (pr.labels.pageInfo.hasNextPage) {
-            throw new Error(`PR #${pr.number} labels were truncated`);
+          // A single merged PR's evidence (truncated pagination, or a head
+          // commit that no longer matches headRefOid — e.g. a garbage-collected
+          // branch, see PR #1710) must not abort the whole snapshot. Skip just
+          // this PR's contribution to merged outcomes: we cannot verify it, so
+          // we must not assert a Done projection from it (fail-closed-safe).
+          try {
+            merged.push(rawMergedPullRequest(pr));
+          } catch (error: unknown) {
+            if (!(error instanceof PrEvidenceInconsistentError)) throw error;
+            console.warn(
+              `[github-reader] skipping merged PR #${pr.number} evidence (continuing): `
+                + error.message,
+            );
           }
-          if (pr.closingIssuesReferences.pageInfo.hasNextPage) {
-            throw new Error(`PR #${pr.number} closing issue references were truncated`);
-          }
-          const latest = pr.commits.nodes.at(-1)?.commit;
-          if (latest === undefined || latest.oid !== pr.headRefOid) {
-            throw new Error(`PR #${pr.number} is missing its exact merged head commit`);
-          }
-          merged.push({
-            number: pr.number,
-            title: pr.title,
-            body: pr.body,
-            author: pr.author?.login ?? '',
-            baseRefName: pr.baseRefName,
-            headRefName: pr.headRefName,
-            headOid: pr.headRefOid,
-            headCommittedAt: latest.committedDate,
-            isDraft: pr.isDraft,
-            state: pr.state,
-            labels: pr.labels.nodes.map((label) => label.name),
-            closingIssueNumbers: pr.closingIssuesReferences.nodes.map((issue) => issue.number),
-            mergeability: pr.mergeable,
-            mergeStateStatus: pr.mergeStateStatus,
-            checks: [],
-            reviews: [],
-            branchClaimTrailers: null,
-            reviewClaim: null,
-            humanIssueNumber: null,
-            humanReason: null,
-            mergedAt: pr.mergedAt,
-            mergeCommitOid: pr.mergeCommit?.oid ?? null,
-          });
         }
       }
     }

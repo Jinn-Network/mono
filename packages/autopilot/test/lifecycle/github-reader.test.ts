@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
 import {
   extractImplementationCompletionSummary,
@@ -614,5 +614,172 @@ describe('GhLifecycleReader', () => {
 
     await expect(new GhLifecycleReader(run).readPullRequests(null))
       .rejects.toThrow(/transient GitHub network failure/);
+  });
+
+  function mergedOutcomesRun(nodes: ReturnType<typeof graphQlPr>[]): CommandRunner {
+    return async (_command, args) => {
+      const query = args.find((arg) => arg.startsWith('query=')) ?? '';
+      if (query.includes('closedByPullRequestsReferences')) {
+        return JSON.stringify({
+          data: {
+            repository: {
+              issue42: {
+                closedByPullRequestsReferences: {
+                  pageInfo: { hasNextPage: false },
+                  nodes,
+                },
+              },
+            },
+          },
+        });
+      }
+      if (query.includes('ref(qualifiedName')) {
+        return JSON.stringify({ data: { repository: { ref: null } } });
+      }
+      return JSON.stringify({
+        data: {
+          repository: {
+            pullRequests: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: [],
+            },
+          },
+        },
+      });
+    };
+  }
+
+  it('skips a merged PR whose branch was garbage-collected post-merge (PR #1710) instead of failing the snapshot', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // Mirrors the real PR #1710: MERGED, mergeCommit null, and commits(last:1)
+    // no longer matches headRefOid because the branch was deleted after merge.
+    const survivingCommitOid = 'c'.repeat(40);
+    const staleHeadRefOid = 'd'.repeat(40);
+    const goneBranch = {
+      ...graphQlPr({
+        number: 1710,
+        state: 'MERGED',
+        head: survivingCommitOid,
+        closingIssueNumber: 42,
+      }),
+      headRefOid: staleHeadRefOid,
+      mergeCommit: null,
+    };
+    const healthy = graphQlPr({
+      number: 99,
+      state: 'MERGED',
+      head: MERGED_HEAD,
+      closingIssueNumber: 42,
+    });
+
+    const page = await new GhLifecycleReader(mergedOutcomesRun([goneBranch, healthy]))
+      .readPullRequests(null, [42]);
+
+    expect(page.nodes.map((pr) => pr.number)).toEqual([99]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('skipping merged PR #1710 evidence'),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('missing its exact merged head commit'),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('skips a merged PR whose labels were truncated instead of failing the snapshot', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const truncated = {
+      ...graphQlPr({
+        number: 1712,
+        state: 'MERGED',
+        head: 'e'.repeat(40),
+        closingIssueNumber: 42,
+      }),
+      labels: { pageInfo: { hasNextPage: true }, nodes: [] },
+    };
+    const healthy = graphQlPr({
+      number: 99,
+      state: 'MERGED',
+      head: MERGED_HEAD,
+      closingIssueNumber: 42,
+    });
+
+    const page = await new GhLifecycleReader(mergedOutcomesRun([truncated, healthy]))
+      .readPullRequests(null, [42]);
+
+    expect(page.nodes.map((pr) => pr.number)).toEqual([99]);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('labels were truncated'));
+    warnSpy.mockRestore();
+  });
+
+  it('skips a merged PR whose closing issue references were truncated instead of failing the snapshot', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const truncated = {
+      ...graphQlPr({
+        number: 1713,
+        state: 'MERGED',
+        head: 'f'.repeat(40),
+        closingIssueNumber: 42,
+      }),
+      closingIssuesReferences: { pageInfo: { hasNextPage: true }, nodes: [] },
+    };
+    const healthy = graphQlPr({
+      number: 99,
+      state: 'MERGED',
+      head: MERGED_HEAD,
+      closingIssueNumber: 42,
+    });
+
+    const page = await new GhLifecycleReader(mergedOutcomesRun([truncated, healthy]))
+      .readPullRequests(null, [42]);
+
+    expect(page.nodes.map((pr) => pr.number)).toEqual([99]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('closing issue references were truncated'),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('still fails the whole page on a network failure reading merged outcomes', async () => {
+    const run: CommandRunner = async (_command, args) => {
+      const query = args.find((arg) => arg.startsWith('query=')) ?? '';
+      if (query.includes('closedByPullRequestsReferences')) {
+        throw new Error('transient GitHub network failure');
+      }
+      if (query.includes('ref(qualifiedName')) {
+        return JSON.stringify({ data: { repository: { ref: null } } });
+      }
+      return JSON.stringify({
+        data: {
+          repository: {
+            pullRequests: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: [],
+            },
+          },
+        },
+      });
+    };
+
+    await expect(new GhLifecycleReader(run).readPullRequests(null, [42]))
+      .rejects.toThrow(/transient GitHub network failure/);
+  });
+
+  it('does not swallow a non-evidence error while decoding a single merged PR', async () => {
+    // A malformed node (missing `labels` entirely) is a genuinely different
+    // failure than the per-PR evidence-trust conditions the catch targets —
+    // it must still fail the whole read, proving the catch isn't overbroad.
+    const malformed = {
+      ...graphQlPr({
+        number: 1714,
+        state: 'MERGED',
+        head: MERGED_HEAD,
+        closingIssueNumber: 42,
+      }),
+      labels: undefined,
+    } as unknown as ReturnType<typeof graphQlPr>;
+
+    await expect(
+      new GhLifecycleReader(mergedOutcomesRun([malformed])).readPullRequests(null, [42]),
+    ).rejects.toBeInstanceOf(TypeError);
   });
 });
