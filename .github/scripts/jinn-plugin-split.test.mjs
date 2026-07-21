@@ -328,6 +328,36 @@ test('(h2) identical plugin content repairs a legacy three-line provenance marke
   }
 });
 
+test('(h2b) malformed provenance repair uses the current mono SHA, never an embedded SHA', () => {
+  const pluginDir = makePluginDir();
+  const slim = makeSlimRepo();
+  try {
+    run({ ...PROV, pluginDir, slimDir: slim });
+    const attackerSha = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
+    const malformed = [
+      `source: Jinn-Network/mono@${attackerSha}`,
+      'generated-by: attacker',
+      'UNTRUSTED TEXT',
+      '',
+    ].join('\n');
+    writeFileSync(path.join(slim, '.jinn-split-source'), malformed);
+    git(slim, ['add', '-A']);
+    git(slim, ['commit', '-q', '-m', 'malformed provenance fixture']);
+
+    const repair = run({ ...NEXT_PROV, pluginDir, slimDir: slim });
+
+    assert.equal(repair.changed, true, 'malformed provenance must produce one repair commit');
+    assert.equal(
+      readFileSync(path.join(slim, '.jinn-split-source'), 'utf8'),
+      `source: Jinn-Network/mono@${NEXT_PROV.monoSha}\n` +
+        `generated-by: ${NEXT_PROV.workflowPath}\n`,
+      'repair must bind malformed provenance to the currently validated mono SHA',
+    );
+  } finally {
+    cleanup(pluginDir, slim);
+  }
+});
+
 test('(h3) identical plugin content recreates missing provenance from the current mono SHA', () => {
   const pluginDir = makePluginDir();
   const slim = makeSlimRepo();

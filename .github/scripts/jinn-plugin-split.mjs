@@ -157,11 +157,11 @@ export function writeProvenance(slimCheckout, { monoSha, workflowPath }) {
 }
 
 /**
- * Inspect the existing marker without trusting malformed content. A legacy
- * marker may carry one valid source line plus extra prose; preserve that
- * source SHA while normalizing it. Missing, duplicate, or malformed source
- * lines fall back to the current mono SHA in run(), whose mirrored tree was
- * just verified equivalent.
+ * Inspect the existing marker without trusting malformed content. Preserve a
+ * source SHA only when the marker matches the complete canonical contract or
+ * the one complete legacy contract emitted by this workflow. Missing,
+ * duplicate, or otherwise malformed markers fall back to the current mono SHA
+ * in run(), whose mirrored tree was just verified equivalent.
  * @param {string} slimCheckout
  * @param {string} workflowPath
  * @returns {{ canonical: boolean, sourceSha: string | null }}
@@ -175,16 +175,22 @@ export function inspectProvenance(slimCheckout, workflowPath) {
   const content = readFileSync(provenancePath, 'utf8');
   const withoutOneFinalNewline = content.endsWith('\n') ? content.slice(0, -1) : content;
   const lines = withoutOneFinalNewline.split('\n');
-  const sourcePattern = /^source: Jinn-Network\/mono@([0-9a-f]{40})$/i;
+  const sourcePattern = /^source: Jinn-Network\/mono@([0-9a-fA-F]{40})$/;
   const sourceMatches = lines
     .map((line) => sourcePattern.exec(line))
     .filter((match) => match !== null);
-  const sourceSha = sourceMatches.length === 1 ? sourceMatches[0][1] : null;
+  const exactSourceLine = sourceMatches.length === 1 && lines[0] === sourceMatches[0][0];
+  const exactGeneratorLine = lines[1] === `generated-by: ${workflowPath}`;
   const canonical =
     lines.length === 2 &&
-    sourceMatches.length === 1 &&
-    lines[0] === sourceMatches[0][0] &&
-    lines[1] === `generated-by: ${workflowPath}`;
+    exactSourceLine &&
+    exactGeneratorLine;
+  const knownLegacy =
+    lines.length === 3 &&
+    exactSourceLine &&
+    exactGeneratorLine &&
+    lines[2] === 'DO NOT EDIT HERE — edit apps/jinn-agent/plugins/jinn/ in Jinn-Network/mono.';
+  const sourceSha = canonical || knownLegacy ? sourceMatches[0][1] : null;
   return { canonical, sourceSha };
 }
 
