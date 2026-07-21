@@ -98,6 +98,12 @@ export interface MergePrepExecutorDeps {
   nextAttemptId(): string;
   readonly runnerId: string;
   now(): Date;
+  /**
+   * Injectable delay, used only to pace {@link confirmMergePrepAuthority}'s
+   * bounded retry against GitHub GraphQL replication lag. See the identical
+   * seam in review-executor.ts's `confirmReviewAcquisition`.
+   */
+  sleep(ms: number): Promise<void>;
 }
 
 export type MergePrepExecutionResult =
@@ -199,6 +205,91 @@ function exactWinningAuthority(
     && currentClaim.targetBaseOid === claim.targetBaseOid;
 }
 
+/**
+ * Bounded retry count for {@link confirmMergePrepAuthority}'s post-win
+ * confirmation read. Identical seam and rationale to
+ * `confirmReviewAcquisition` in review-executor.ts (jinn-mono#1925): a
+ * merge-prep claim commit can win its exact-lease branch push while the
+ * very next GraphQL PR snapshot read still reports the *pre-push* head,
+ * because GitHub's GraphQL API can lag a just-pushed ref's replication by
+ * up to a few seconds. A single-shot confirm would treat that lag as a
+ * loss and orphan our own winning claim.
+ */
+const MERGE_PREP_CONFIRM_MAX_ATTEMPTS = 3;
+
+/** Delay between {@link confirmMergePrepAuthority} retry attempts. */
+const MERGE_PREP_CONFIRM_RETRY_DELAY_MS = 1000;
+
+type MergePrepConfirmOutcome =
+  | { readonly outcome: 'confirmed'; readonly current: MergePrepCandidate }
+  | { readonly outcome: 'target-base-changed' }
+  | { readonly outcome: 'authority-changed' }
+  | { readonly outcome: 'ambiguous' };
+
+/**
+ * Confirms a just-won merge-prep branch claim is the branch's exact current
+ * state, tolerating GraphQL replication lag without weakening fencing.
+ *
+ * The invariant that must never move: a session spawns only once our exact
+ * claim commit has been observed as the branch's current head. This
+ * function re-reads the full candidate (preserving every existing
+ * revalidation `exactWinningAuthority` performs -- open/issue/PR/branch
+ * mapping/draft/Human-hold/CODEOWNER/label/claim-trailer identity) on every
+ * attempt via the same `confirmAuthority` port method the caller used
+ * before this fix. Only the branch-head-specific check gets bounded-retry
+ * treatment, because `head` is the one field this reads back that *we*
+ * just wrote in this operation; `repairProjection` already read-back
+ * confirmed labels and Project status before this runs.
+ *
+ * On each attempt, the observed head is one of three things:
+ *   - our own `claimOid` -> confirmed (once every other field also
+ *     matches), proceed.
+ *   - the exact pre-push head (`original.head`) -> replication lag; retry.
+ *   - anything else -> a foreign write actually won the branch; fail
+ *     closed immediately with no further retries.
+ *
+ * `distinguishTargetBaseChange` preserves this executor's pre-existing
+ * behavior of giving the first confirmation (right after the win) a
+ * distinct `target-base-changed` reason, separate from the generic
+ * `authority-changed`; the second confirmation (after workspace creation)
+ * folds both into `authority-changed`, matching prior behavior exactly.
+ */
+async function confirmMergePrepAuthority(
+  deps: Pick<MergePrepExecutorDeps, 'sleep'>,
+  input: {
+    readonly confirm: () => Promise<MergePrepCandidate | null>;
+    readonly original: MergePrepCandidate;
+    readonly claim: BranchClaim & { readonly phase: 'merge-prep'; readonly targetBaseOid: GitOid };
+    readonly claimOid: GitOid;
+    readonly distinguishTargetBaseChange: boolean;
+  },
+): Promise<MergePrepConfirmOutcome> {
+  for (let attempt = 1; attempt <= MERGE_PREP_CONFIRM_MAX_ATTEMPTS; attempt += 1) {
+    const current = await input.confirm();
+    if (
+      input.distinguishTargetBaseChange
+      && current?.targetBaseOid !== input.original.targetBaseOid
+    ) {
+      return { outcome: 'target-base-changed' };
+    }
+    // Captured before the type-guard call below: TypeScript's negative
+    // narrowing of a nullable user-defined type-guard parameter collapses
+    // to `never` after an early return from the positive branch, so `head`
+    // is read out here rather than through `current` afterward.
+    const observedHead = current?.head ?? null;
+    if (exactWinningAuthority(current, input.original, input.claim, input.claimOid)) {
+      return { outcome: 'confirmed', current };
+    }
+    if (observedHead !== input.original.head) {
+      return { outcome: 'authority-changed' };
+    }
+    if (attempt === MERGE_PREP_CONFIRM_MAX_ATTEMPTS) return { outcome: 'ambiguous' };
+    await deps.sleep(MERGE_PREP_CONFIRM_RETRY_DELAY_MS);
+  }
+  /* istanbul ignore next -- unreachable: the loop always returns */
+  return { outcome: 'ambiguous' };
+}
+
 export async function executeMergePrepAction(
   action: {
     readonly prNumber: number;
@@ -273,17 +364,27 @@ export async function executeMergePrepAction(
     expectedOldHead: candidate.head,
     targetBaseOid: candidate.targetBaseOid,
   });
-  let current = await confirm();
-  if (current?.targetBaseOid !== candidate.targetBaseOid) {
+  const firstConfirm = await confirmMergePrepAuthority(deps, {
+    confirm,
+    original: candidate,
+    claim,
+    claimOid,
+    distinguishTargetBaseChange: true,
+  });
+  if (firstConfirm.outcome === 'target-base-changed') {
     return {
       status: 'lost',
       prNumber: candidate.prNumber,
       reason: 'target-base-changed',
     };
   }
-  if (!exactWinningAuthority(current, candidate, claim, claimOid)) {
+  if (firstConfirm.outcome === 'authority-changed') {
     return { status: 'lost', prNumber: candidate.prNumber, reason: 'authority-changed' };
   }
+  if (firstConfirm.outcome === 'ambiguous') {
+    return { status: 'ambiguous', prNumber: candidate.prNumber };
+  }
+  let current: MergePrepCandidate = firstConfirm.current;
   const attempt = await deps.createAttempt({
     attemptId,
     issueNumber: candidate.issueNumber,
@@ -299,10 +400,20 @@ export async function executeMergePrepAction(
   if (attempt.attemptId !== attemptId) {
     throw new Error('Detached merge-prep attempt does not match its claim');
   }
-  current = await confirm();
-  if (!exactWinningAuthority(current, candidate, claim, claimOid)) {
+  const secondConfirm = await confirmMergePrepAuthority(deps, {
+    confirm,
+    original: candidate,
+    claim,
+    claimOid,
+    distinguishTargetBaseChange: false,
+  });
+  if (secondConfirm.outcome === 'ambiguous') {
+    return { status: 'ambiguous', prNumber: candidate.prNumber };
+  }
+  if (secondConfirm.outcome !== 'confirmed') {
     return { status: 'lost', prNumber: candidate.prNumber, reason: 'authority-changed' };
   }
+  current = secondConfirm.current;
   const environment = buildSanitizedChildEnv(
     deps.ambientEnvironment,
     selection.credential,

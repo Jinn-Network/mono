@@ -5,6 +5,7 @@ import { gitOid, gitRefName } from '../../src/lifecycle/types.js';
 const EXPECTED = gitOid('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
 const PUBLISHED = gitOid('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
 const OTHER = gitOid('cccccccccccccccccccccccccccccccccccccccc');
+const FOREIGN = gitOid('dddddddddddddddddddddddddddddddddddddddd');
 
 describe('Git protocol port', () => {
   it('claims an exact expected-head branch with a normal fast-forward push', async () => {
@@ -496,6 +497,119 @@ describe('Git protocol port', () => {
       expected: EXPECTED,
       published: PUBLISHED,
       observed: null,
+    });
+  });
+
+  it('reclassifies a failed push with an unchanged ref as ambiguous, not lost', async () => {
+    // jinn-mono#1925: a failed push whose readback shows the ref exactly
+    // where it started (nobody else won the exact-lease race) means our
+    // own push simply failed -- that is retryable, not a loss.
+    const calls: string[][] = [];
+    const port = makeGitProtocolPort(async (_command, args) => {
+      calls.push([...args]);
+      if (args[0] === 'rev-list') return `${PUBLISHED} ${EXPECTED}\n`;
+      if (args[0] === 'push') throw new Error('connection reset');
+      return `${EXPECTED}\trefs/heads/autopilot/42\n`;
+    });
+
+    await expect(port.claimBranch({
+      branch: gitRefName('autopilot/42'),
+      candidateParent: EXPECTED,
+      expectedRemoteHead: EXPECTED,
+      claimOid: PUBLISHED,
+    })).resolves.toEqual({
+      status: 'ambiguous',
+      expected: EXPECTED,
+      published: PUBLISHED,
+      observed: EXPECTED,
+    });
+    expect(calls.filter((call) => call[0] === 'push')).toHaveLength(1);
+  });
+
+  it('keeps a failed push with a foreign readback a genuine loss', async () => {
+    let pushed = false;
+    const port = makeGitProtocolPort(async (_command, args) => {
+      if (args[0] === 'rev-list') return `${PUBLISHED} ${EXPECTED}\n`;
+      if (args[0] === 'push') {
+        pushed = true;
+        throw new Error('rejected');
+      }
+      return `${pushed ? OTHER : EXPECTED}\trefs/heads/autopilot/42\n`;
+    });
+
+    await expect(port.claimBranch({
+      branch: gitRefName('autopilot/42'),
+      candidateParent: EXPECTED,
+      expectedRemoteHead: EXPECTED,
+      claimOid: PUBLISHED,
+    })).resolves.toEqual({
+      status: 'lost',
+      expected: EXPECTED,
+      published: PUBLISHED,
+      observed: OTHER,
+    });
+  });
+
+  it('reclassifies a failed atomic review-fix push with both refs unchanged as ambiguous', async () => {
+    const port = makeGitProtocolPort(async (_command, args) => {
+      if (args[0] === 'rev-list') {
+        return args.at(-1) === PUBLISHED
+          ? `${PUBLISHED} ${EXPECTED}\n`
+          : `${OTHER} ${EXPECTED}\n`;
+      }
+      if (args[0] === 'push') throw new Error('rejected');
+      const ref = args.at(-1);
+      return `${EXPECTED}\t${ref}\n`;
+    });
+
+    await expect(port.publishReviewFix({
+      branch: gitRefName('autopilot/42'),
+      newHeadParent: EXPECTED,
+      expectedRemoteHead: EXPECTED,
+      newHead: PUBLISHED,
+      prNumber: 101,
+      recordParent: EXPECTED,
+      expectedRemoteRecordOid: EXPECTED,
+      recordOid: OTHER,
+    })).resolves.toEqual({
+      status: 'ambiguous',
+      expected: { branch: EXPECTED, review: EXPECTED },
+      published: { branch: PUBLISHED, review: OTHER },
+      observed: { branch: EXPECTED, review: EXPECTED },
+    });
+  });
+
+  it('keeps a failed atomic review-fix push with a foreign readback a genuine loss', async () => {
+    let pushed = false;
+    const port = makeGitProtocolPort(async (_command, args) => {
+      if (args[0] === 'rev-list') {
+        return args.at(-1) === PUBLISHED
+          ? `${PUBLISHED} ${EXPECTED}\n`
+          : `${OTHER} ${EXPECTED}\n`;
+      }
+      if (args[0] === 'push') {
+        pushed = true;
+        throw new Error('rejected');
+      }
+      const ref = args.at(-1);
+      const observed = pushed ? FOREIGN : EXPECTED;
+      return `${observed}\t${ref}\n`;
+    });
+
+    await expect(port.publishReviewFix({
+      branch: gitRefName('autopilot/42'),
+      newHeadParent: EXPECTED,
+      expectedRemoteHead: EXPECTED,
+      newHead: PUBLISHED,
+      prNumber: 101,
+      recordParent: EXPECTED,
+      expectedRemoteRecordOid: EXPECTED,
+      recordOid: OTHER,
+    })).resolves.toEqual({
+      status: 'lost',
+      expected: { branch: EXPECTED, review: EXPECTED },
+      published: { branch: PUBLISHED, review: OTHER },
+      observed: { branch: FOREIGN, review: FOREIGN },
     });
   });
 });
