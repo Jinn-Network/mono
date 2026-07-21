@@ -381,7 +381,20 @@ async function ensureCompletionProjection(
     ) {
       return { status: 'complete', head };
     }
-    if (!pullRequest.draft) {
+    // Re-draft only when the durable work (summary + label) is genuinely
+    // missing. A non-draft PR that already has both is not broken -- it is
+    // a normal transient the reconciler resolves on its own next pass once
+    // the In Review projection lands (see the undraft-before-project-status
+    // ordering below). Re-drafting it here on every partial retry would
+    // thrash the PR's ready state and resurrect the deadlock this ordering
+    // exists to fix: In Review can never be confirmed while draft, so a
+    // session that keeps re-drafting a PR "merely awaiting In Review" would
+    // never converge.
+    if (
+      !pullRequest.draft
+      && (!hasImplementationSummary(pullRequest.body, summary)
+        || !pullRequest.labels.includes('engine:review'))
+    ) {
       await port.setPullRequestDraft(prNumber, head, true);
     }
   } catch {
@@ -394,11 +407,17 @@ async function ensureCompletionProjection(
     return { status: 'partial', head, pending: 'summary' };
   }
 
+  // Label: attach engine:review before undrafting, so the PR is reviewable
+  // the instant it goes ready. requireDraft is false (not true) so this
+  // block stays re-entrant when a prior attempt already undrafted the PR
+  // but failed later -- e.g. at the status write below -- in which case
+  // this read legitimately observes a non-draft PR and must not treat that
+  // as an authority violation.
   try {
     pullRequest = await port.readPullRequest(prNumber, head);
     const projectStatus = await port.readProjectStatus(manifest.issueNumber, head);
     if (
-      !validImplementationPullRequest(manifest, pullRequest, head, true)
+      !validImplementationPullRequest(manifest, pullRequest, head, false)
       || hasHumanHold(pullRequest, projectStatus)
     ) {
       return { status: 'partial', head, pending: 'project' };
@@ -406,16 +425,26 @@ async function ensureCompletionProjection(
     if (!pullRequest.labels.includes('engine:review')) {
       await port.setPullRequestLabel(prNumber, head, 'engine:review', true);
     }
-    await port.setProjectStatus(manifest.issueNumber, head, 'In Review');
   } catch {
     return { status: 'partial', head, pending: 'project' };
   }
 
+  // Undraft precedes the In Review project-status write: a draft PR is
+  // always projected as In Progress by the reconciler (see 8.6 in the
+  // lifecycle design), so writing In Review while still draft is
+  // unstable -- the reconciler (this session's own next cycle, a second
+  // v2 process, or GitHub's project automation) clobbers it straight back,
+  // and this finalizer would then see the clobbered value and bail out
+  // without ever undrafting -- the deadlock this ordering fixes. Undrafting
+  // first means both sides agree on In Review the moment the PR goes
+  // ready. requireDraft is false for the same re-entrancy reason as the
+  // label block above. The Human-hold guard is preserved exactly as the
+  // old non-draft-last ordering had it.
   try {
     pullRequest = await port.readPullRequest(prNumber, head);
     const projectStatus = await port.readProjectStatus(manifest.issueNumber, head);
     if (
-      !validImplementationPullRequest(manifest, pullRequest, head, true)
+      !validImplementationPullRequest(manifest, pullRequest, head, false)
       || hasHumanHold(pullRequest, projectStatus)
     ) {
       return { status: 'partial', head, pending: 'ready' };
@@ -425,6 +454,25 @@ async function ensureCompletionProjection(
     }
   } catch {
     return { status: 'partial', head, pending: 'ready' };
+  }
+
+  // Status: now last, and only safe to write once the PR is non-draft.
+  // requireDraft must be false here -- the PR is non-draft by construction
+  // at this point, so requiring draft would always fail post-undraft.
+  try {
+    pullRequest = await port.readPullRequest(prNumber, head);
+    const projectStatus = await port.readProjectStatus(manifest.issueNumber, head);
+    if (
+      !validImplementationPullRequest(manifest, pullRequest, head, false)
+      || hasHumanHold(pullRequest, projectStatus)
+    ) {
+      return { status: 'partial', head, pending: 'project' };
+    }
+    if (projectStatus !== 'In Review') {
+      await port.setProjectStatus(manifest.issueNumber, head, 'In Review');
+    }
+  } catch {
+    return { status: 'partial', head, pending: 'project' };
   }
   return { status: 'complete', head };
 }

@@ -327,7 +327,7 @@ describe('implementation session protocol', () => {
     expect(h.manifest.expectedHead).toBe(COMPLETE);
     expect(h.project).toBe('In Review');
     expect(h.draft).toBe(false);
-    expect(h.events.at(-1)).toBe('draft:false');
+    expect(h.events.at(-1)).toBe('project:In Review');
     expect(h.events).toEqual([
       `push:${CLAIM}->${WORK}`,
       `manifest:${CLAIM}->${WORK}`,
@@ -335,8 +335,8 @@ describe('implementation session protocol', () => {
       `push:${WORK}->${COMPLETE}`,
       `manifest:${WORK}->${COMPLETE}`,
       'summary',
-      'project:In Review',
       'draft:false',
+      'project:In Review',
     ]);
   });
 
@@ -371,16 +371,21 @@ describe('implementation session protocol', () => {
 
     expect(h.events).toContain('draft:true');
     expect(h.events.indexOf('draft:true')).toBeLessThan(h.events.indexOf('summary'));
-    expect(h.events.at(-1)).toBe('draft:false');
+    expect(h.events.at(-1)).toBe('project:In Review');
   });
 
   it.each([
-    ['summary', 'summary'],
-    ['project:In Review', 'project'],
-    ['draft:false', 'ready'],
+    // failingEvent, pending phase, draft state left behind by the failure.
+    // Undraft now runs *before* the status write, so a failure at the
+    // status write (project:In Review) leaves the PR already non-draft --
+    // unlike a failure at summary or at the undraft call itself, both of
+    // which leave the PR draft.
+    ['summary', 'summary', true],
+    ['project:In Review', 'project', false],
+    ['draft:false', 'ready', true],
   ] as const)(
     'returns a recoverable partial result when %s fails and converges on retry',
-    async (failingEvent, pending) => {
+    async (failingEvent, pending, draftAfterFailure) => {
       const h = harness();
       const original = {
         summary: h.port.ensureCompletionSummary,
@@ -425,15 +430,68 @@ describe('implementation session protocol', () => {
         pending,
       });
       expect(h.completeCommits).toBe(1);
-      expect(h.draft).toBe(true);
+      expect(h.draft).toBe(draftAfterFailure);
 
       await expect(
         h.protocol.implementationComplete(h.manifest, 'Implementation summary'),
       ).resolves.toEqual({ status: 'complete', head: COMPLETE });
       expect(h.completeCommits).toBe(1);
-      expect(h.events.at(-1)).toBe('draft:false');
+      expect(h.draft).toBe(false);
+      expect(h.project).toBe('In Review');
+      expect(h.events.at(-1)).toBe('project:In Review');
     },
   );
+
+  it('finalizes to non-draft + In Review even when the reconciler clobbers status to In Progress during the draft window', async () => {
+    // Regression test for the confirmed live deadlock: a reconciler (this
+    // session's own next cycle, a second v2 process, or GitHub's project
+    // automation) always projects a draft PR as In Progress, and rejects/
+    // clobbers an In Review write attempted while the PR is still draft.
+    // The old ordering wrote In Review before undrafting and deadlocked
+    // forever. The fix undrafts first, so the In Review write is never
+    // even attempted while draft.
+    const h = harness();
+    let recordedStatus: 'In Progress' | 'In Review' = 'In Progress';
+    h.port.readProjectStatus = async () => (h.draft ? 'In Progress' : recordedStatus);
+    h.port.setProjectStatus = async (_issue, expectedHead, status) => {
+      h.events.push(`project:${status}`);
+      if (h.draft) {
+        throw new Error('reconciler clobbered status while PR is still draft');
+      }
+      expect(expectedHead).toBe(h.authority.remoteHead);
+      recordedStatus = status === 'In Review' ? 'In Review' : recordedStatus;
+    };
+
+    await expect(
+      h.protocol.implementationComplete(h.manifest, 'Implementation summary'),
+    ).resolves.toEqual({ status: 'complete', head: COMPLETE });
+
+    expect(h.draft).toBe(false);
+    expect(recordedStatus).toBe('In Review');
+    expect(h.events).toContain('draft:false');
+    expect(h.events.indexOf('draft:false')).toBeLessThan(h.events.indexOf('project:In Review'));
+  });
+
+  it('lets a Human hold that appears after the label block stop the undraft, leaving the PR draft', async () => {
+    const h = harness();
+    h.labels.delete('engine:review');
+    let holdActive = false;
+    h.port.readProjectStatus = async () => (holdActive ? 'Human' : 'In Progress');
+    const setLabel = h.port.setPullRequestLabel;
+    h.port.setPullRequestLabel = async (...args) => {
+      await setLabel(...args);
+      holdActive = true;
+    };
+
+    await expect(
+      h.protocol.implementationComplete(h.manifest, 'Implementation summary'),
+    ).resolves.toEqual({ status: 'partial', head: COMPLETE, pending: 'ready' });
+
+    expect(h.labels).toContain('engine:review');
+    expect(h.draft).toBe(true);
+    expect(h.events).not.toContain('draft:false');
+    expect(h.events).not.toContain('project:In Review');
+  });
 
   it('recognizes an already-pushed exact completion marker idempotently', async () => {
     const h = harness({
