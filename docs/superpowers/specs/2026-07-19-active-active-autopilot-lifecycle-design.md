@@ -354,9 +354,13 @@ Downstream components may rely on the following invariants.
     idempotently by an existing draft PR before substantive implementation.
 11. **P2 — Incremental durability:** meaningful implementation and review-fix
     checkpoints are pushed during the session, not only at its end.
-12. **P3 — Ready last:** a code-changing session makes the PR non-draft only
-    after its final current-head verification and required GitHub projections
-    succeed.
+12. **P3 — Ready precedes In Review:** a code-changing session makes the PR
+    non-draft only after its final current-head verification and durable PR
+    content (summary, lifecycle labels) succeed, and *before* writing the
+    In Review Project status. In Review is unstable while the PR is still
+    draft -- the reconciler projects any draft PR as `In Progress` (8.6) and
+    would clobber an earlier write straight back -- so ready must precede,
+    not follow, that projection.
 13. **P4 — Draft mutation:** implementation, review fixes, and merge-prep
     mutate code only while the PR is draft.
 14. **P5 — Human draft allowed:** a Human-held PR may remain draft even though
@@ -1155,9 +1159,16 @@ Stage 8 becomes:
 
 1. final verification of the current exact head;
 2. push any final meaningful checkpoint;
-3. update the existing PR body and metadata;
-4. project `In Review`;
-5. make the PR non-draft last.
+3. update the existing PR body and metadata (summary, lifecycle labels);
+4. make the PR non-draft;
+5. project `In Review` last.
+
+`In Review` is unstable while the PR is still draft: the reconciler projects
+any draft PR as `In Progress` (8.6), so a Project write issued before the PR
+goes ready races the reconciler and gets clobbered back. Making the PR
+non-draft first means the reconciler and this session agree on `In Review`
+the moment the write lands; the Human-hold gate still guards the undraft
+step exactly as before.
 
 PR creation is no longer a Stage 8 responsibility.
 
