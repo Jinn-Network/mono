@@ -66,6 +66,23 @@ export interface ImplementationSessionPort {
     prNumber: number,
     expectedHead: GitOid,
   ): Promise<ImplementationSessionPullRequest>;
+  /**
+   * Reads only the pull request's current head OID, without validating it
+   * against any expectation -- unlike {@link readPullRequest}, which throws
+   * when the observed head disagrees with `expectedHead`. Used exclusively
+   * by {@link awaitPullRequestHead} to poll GitHub's PR *record* (which
+   * lags a just-pushed branch ref by up to a few seconds, see #1883) until
+   * it catches up with a head this session just published, without
+   * mistaking that lag for the PR having genuinely changed under us.
+   */
+  readPullRequestHead(prNumber: number): Promise<GitOid>;
+  /**
+   * Injectable delay, used only to pace {@link awaitPullRequestHead}'s
+   * bounded retry against GitHub PR-record replication lag. Production
+   * wires a real `setTimeout`-based sleep; tests fake it so retries resolve
+   * instantly and can assert on the delay values requested.
+   */
+  sleep(ms: number): Promise<void>;
   ensureCompletionSummary(
     prNumber: number,
     expectedHead: GitOid,
@@ -114,6 +131,15 @@ export type ImplementationCompleteResult =
       readonly status: 'partial';
       readonly head: GitOid;
       readonly pending: 'checkpoint' | 'marker' | 'summary' | 'project' | 'ready';
+      /**
+       * The swallowed failure reason, when available, so `autopilot session
+       * implementation-complete` can surface *why* a retry is pending
+       * instead of only that one is. Optional: some partial outcomes (e.g.
+       * a Human hold, or an authority mismatch caught upstream) are
+       * self-explanatory from `pending` alone and never had an underlying
+       * thrown error to report.
+       */
+      readonly detail?: string;
     };
 
 export type HumanHoldResult = {
@@ -397,14 +423,14 @@ async function ensureCompletionProjection(
     ) {
       await port.setPullRequestDraft(prNumber, head, true);
     }
-  } catch {
-    return { status: 'partial', head, pending: 'project' };
+  } catch (error) {
+    return { status: 'partial', head, pending: 'project', detail: message(error) };
   }
 
   try {
     await port.ensureCompletionSummary(prNumber, head, summary);
-  } catch {
-    return { status: 'partial', head, pending: 'summary' };
+  } catch (error) {
+    return { status: 'partial', head, pending: 'summary', detail: message(error) };
   }
 
   // Label: attach engine:review before undrafting, so the PR is reviewable
@@ -425,8 +451,8 @@ async function ensureCompletionProjection(
     if (!pullRequest.labels.includes('engine:review')) {
       await port.setPullRequestLabel(prNumber, head, 'engine:review', true);
     }
-  } catch {
-    return { status: 'partial', head, pending: 'project' };
+  } catch (error) {
+    return { status: 'partial', head, pending: 'project', detail: message(error) };
   }
 
   // Undraft precedes the In Review project-status write: a draft PR is
@@ -452,8 +478,8 @@ async function ensureCompletionProjection(
     if (pullRequest.draft) {
       await port.setPullRequestDraft(prNumber, head, false);
     }
-  } catch {
-    return { status: 'partial', head, pending: 'ready' };
+  } catch (error) {
+    return { status: 'partial', head, pending: 'ready', detail: message(error) };
   }
 
   // Status: now last, and only safe to write once the PR is non-draft.
@@ -471,10 +497,114 @@ async function ensureCompletionProjection(
     if (projectStatus !== 'In Review') {
       await port.setProjectStatus(manifest.issueNumber, head, 'In Review');
     }
-  } catch {
-    return { status: 'partial', head, pending: 'project' };
+  } catch (error) {
+    return { status: 'partial', head, pending: 'project', detail: message(error) };
   }
   return { status: 'complete', head };
+}
+
+/**
+ * Bounded retry count for {@link awaitPullRequestHead}'s post-publish
+ * convergence poll. `implementationComplete` publishes its completion
+ * marker (or resumes/republishes one) via the git transport, whose
+ * `ls-remote` readback is immediately current -- but GitHub's PR *record*
+ * (`gh pr view` / the GraphQL API `ensureCompletionProjection` reads next)
+ * lags a just-pushed ref by up to a few seconds. A single-shot read after
+ * publish therefore still shows the pre-publish head, and every downstream
+ * authority check in `ensureCompletionProjection` throws on that stale
+ * head -- the very next line, `catch`, maps EVERY throw to
+ * `partial/pending:'project'`, leaving the PR draft with the marker commit
+ * already on the branch (the live bug this fixes). Three attempts with a
+ * short delay between them gives replication time to catch up.
+ */
+const PULL_REQUEST_HEAD_CONVERGENCE_MAX_ATTEMPTS = 3;
+
+/** Delay between {@link awaitPullRequestHead} retry attempts. */
+const PULL_REQUEST_HEAD_CONVERGENCE_RETRY_DELAY_MS = 1000;
+
+type PullRequestHeadConvergence =
+  | { readonly outcome: 'converged' }
+  | { readonly outcome: 'foreign'; readonly observed: GitOid }
+  | { readonly outcome: 'lagging'; readonly observed: GitOid };
+
+/**
+ * Polls the PR record's head via {@link ImplementationSessionPort.readPullRequestHead}
+ * until it reflects `expectedHead` (the head we just published), tolerating
+ * GitHub PR-record replication lag without weakening fencing.
+ *
+ * On each attempt, the observed head is one of three things:
+ *   - `expectedHead` -> converged, proceed to project onto it.
+ *   - `previousHead` (the exact pre-publish head) -> replication lag; retry.
+ *   - anything else -> a foreign write genuinely changed the PR's branch
+ *     out from under us. Fail closed immediately with no further retries --
+ *     the PR really did change; a later retry/reap resumes safely via the
+ *     existing partial-result contract.
+ *
+ * Exhausting the retry budget while still observing `previousHead` also
+ * returns closed (`lagging`), never forcing the projection through on an
+ * unconfirmed head.
+ */
+async function awaitPullRequestHead(
+  prNumber: number,
+  previousHead: GitOid,
+  expectedHead: GitOid,
+  port: ImplementationSessionPort,
+): Promise<PullRequestHeadConvergence> {
+  for (
+    let attempt = 1;
+    attempt <= PULL_REQUEST_HEAD_CONVERGENCE_MAX_ATTEMPTS;
+    attempt += 1
+  ) {
+    const observed = await port.readPullRequestHead(prNumber);
+    if (observed === expectedHead) return { outcome: 'converged' };
+    if (observed !== previousHead) return { outcome: 'foreign', observed };
+    if (attempt === PULL_REQUEST_HEAD_CONVERGENCE_MAX_ATTEMPTS) {
+      return { outcome: 'lagging', observed };
+    }
+    await port.sleep(PULL_REQUEST_HEAD_CONVERGENCE_RETRY_DELAY_MS);
+  }
+  /* istanbul ignore next -- unreachable: the loop always returns */
+  return { outcome: 'lagging', observed: previousHead };
+}
+
+function pullRequestHeadConvergenceDetail(
+  convergence: Extract<PullRequestHeadConvergence, { outcome: 'foreign' | 'lagging' }>,
+  expectedHead: GitOid,
+): string {
+  return convergence.outcome === 'foreign'
+    ? `Pull request head is ${convergence.observed}, not the published ${expectedHead}: `
+      + 'a foreign write changed the pull request'
+    : `Pull request record has not caught up with the published head ${expectedHead} `
+      + `after ${PULL_REQUEST_HEAD_CONVERGENCE_MAX_ATTEMPTS} attempts`;
+}
+
+/**
+ * Waits for the PR record to converge on `publishedHead` before the caller
+ * projects durable state (summary, labels, draft, Project status) onto it.
+ * Returns `null` once converged; otherwise a partial result -- with a
+ * surfaced `detail` -- fit to return directly without ever calling
+ * {@link ensureCompletionProjection} against a head the PR record hasn't
+ * confirmed yet.
+ */
+async function convergeOnPublishedHead(
+  manifest: AttemptManifest,
+  previousHead: GitOid,
+  publishedHead: GitOid,
+  port: ImplementationSessionPort,
+): Promise<ImplementationCompleteResult | null> {
+  const convergence = await awaitPullRequestHead(
+    manifest.prNumber!,
+    previousHead,
+    publishedHead,
+    port,
+  );
+  if (convergence.outcome === 'converged') return null;
+  return {
+    status: 'partial',
+    head: publishedHead,
+    pending: 'project',
+    detail: pullRequestHeadConvergenceDetail(convergence, publishedHead),
+  };
 }
 
 async function implementationComplete(
@@ -521,6 +651,21 @@ async function implementationComplete(
     if (durableSummary === null || durableSummary.trim() !== summary.trim()) {
       throw new Error('Retry summary does not match the durable summary');
     }
+    // A resumed session: the marker was already published (possibly by a
+    // prior invocation of this very call), so the PR record has usually
+    // long since caught up -- this is a fast no-op in the common case. But
+    // if this is the immediate retry right after that publish, the same
+    // replication lag applies, and `authority.latestClaim.expectedHead` is
+    // exactly the pre-marker head (the completion claim's own recorded
+    // parent), giving the exact `previousHead` to distinguish lag from a
+    // foreign change.
+    const staleProjection = await convergeOnPublishedHead(
+      manifest,
+      authority.latestClaim.expectedHead as GitOid,
+      authority.remoteHead,
+      port,
+    );
+    if (staleProjection !== null) return staleProjection;
     return ensureCompletionProjection(
       manifest,
       authority.remoteHead,
@@ -543,17 +688,25 @@ async function implementationComplete(
         throw new Error('Retry summary does not match the durable summary');
       }
       await requireActiveImplementationPullRequest(manifest, authority, port);
+      const prePublishHead = manifest.expectedHead as GitOid;
       const retry = await port.publishBranch({
         manifest,
-        expectedRemoteHead: manifest.expectedHead as GitOid,
+        expectedRemoteHead: prePublishHead,
         newHead: localHead,
       });
       if (retry.status === 'won' || retry.status === 'already-applied') {
         manifest = port.advanceManifestHead(
           manifest.paths.manifest,
-          manifest.expectedHead as GitOid,
+          prePublishHead,
           localHead,
         );
+        const staleProjection = await convergeOnPublishedHead(
+          manifest,
+          prePublishHead,
+          localHead,
+          port,
+        );
+        if (staleProjection !== null) return staleProjection;
         return ensureCompletionProjection(manifest, localHead, durableSummary, port);
       }
       return { status: 'partial', head: localHead, pending: 'marker' };
@@ -605,6 +758,17 @@ async function implementationComplete(
     manifest.expectedHead as GitOid,
     marker,
   );
+  // `authority.remoteHead` still holds the pre-marker head here -- publish
+  // succeeded but this local variable was never reassigned -- giving the
+  // exact `previousHead` this convergence wait needs to tell replication
+  // lag apart from a genuinely foreign change.
+  const staleProjection = await convergeOnPublishedHead(
+    manifest,
+    authority.remoteHead,
+    marker,
+    port,
+  );
+  if (staleProjection !== null) return staleProjection;
   return ensureCompletionProjection(manifest, marker, summary, port);
 }
 
