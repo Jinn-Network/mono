@@ -40,6 +40,7 @@ describe('decodeCapabilityAttestation timestamps', () => {
         atomicPairRejection: true,
         ambiguousReadback: true,
         exactCleanup: true,
+        readViaGitTransport: true,
       },
     }, {
       remoteName: 'jinn-autopilot-v2',
@@ -70,6 +71,7 @@ describe('decodeCapabilityAttestation timestamps', () => {
         atomicPairRejection: true,
         ambiguousReadback: true,
         exactCleanup: true,
+        readViaGitTransport: true,
       },
     }, {
       remoteName: 'jinn-autopilot-v2',
@@ -120,6 +122,7 @@ describe('production active runtime preflight', () => {
         atomicPairRejection: true,
         ambiguousReadback: true,
         exactCleanup: true,
+        readViaGitTransport: true,
       },
     }, expected);
     const accepted = makeProductionCapabilityPreflight({

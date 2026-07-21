@@ -21,8 +21,11 @@ import {
   decodeBranchClaimTrailers,
   extractImplementationCompletionSummary,
   parseHumanCommentEvidence,
+  reviewClaimRef,
   terminalBranchClaimTrailers,
 } from './codecs.js';
+import { CANONICAL_GITHUB_HTTPS_REMOTE } from './implementation-executor.js';
+import { gitOid, type GitOid, type GitRefName } from './types.js';
 export { extractImplementationCompletionSummary } from './codecs.js';
 
 export const REVIEW_CLAIM_PAYLOAD_FILE = 'jinn-autopilot-review.json';
@@ -110,25 +113,58 @@ ${issues}
 }`;
 }
 
-const REVIEW_REF_QUERY = `query($ref: String!) {
-  repository(owner: "Jinn-Network", name: "mono") {
-    ref(qualifiedName: $ref) {
-      target {
-        oid
-        ... on Commit {
-          tree {
-            entries {
-              name
-              object {
-                ... on Blob { text }
-              }
-            }
-          }
-        }
-      }
+// GitHub's GraphQL `repository.ref(qualifiedName:)` returns null forever for
+// refs under a custom namespace like `refs/jinn-autopilot/...` — proven live
+// (jinn-mono#1883-follow-up): a direct query against a ref that demonstrably
+// exists via `git ls-remote` still resolves to null, while the identical
+// query shape against `refs/heads/next` resolves fine. Every review-claim
+// read below therefore goes over the git transport instead (the mechanism
+// the live capability probe already validates — see capability-probe.ts).
+export const REVIEW_CLAIM_REF_PREFIX = 'refs/jinn-autopilot/review-claims/v1/';
+export const REVIEW_CLAIM_REF_GLOB = `${REVIEW_CLAIM_REF_PREFIX}*`;
+
+/**
+ * Parses `git ls-remote <remote> '<REVIEW_CLAIM_REF_GLOB>'` output into a
+ * map of ref suffix (the text after the fixed prefix) -> OID. A line that
+ * cannot be split into an exact (oid, ref) pair, or whose ref falls outside
+ * the requested prefix, is a transport-level parsing failure and throws.
+ * A well-formed ref under the prefix whose suffix is not a PR number (e.g. a
+ * capability-probe's disposable `capability-<uuid>` ref, see
+ * capability-probe.ts) is not itself malformed — callers filter by shape.
+ */
+export function parseReviewClaimRefGitListing(raw: string): Map<string, GitOid> {
+  const trimmed = raw.trimEnd();
+  const listing = new Map<string, GitOid>();
+  if (trimmed.length === 0) return listing;
+  for (const line of trimmed.split('\n')) {
+    const fields = line.split('\t');
+    const [oid, ref] = fields;
+    if (
+      fields.length !== 2
+      || oid === undefined || oid.length === 0
+      || ref === undefined || !ref.startsWith(REVIEW_CLAIM_REF_PREFIX)
+    ) {
+      throw new Error('Malformed git ls-remote output for review-claim refs');
     }
+    listing.set(ref.slice(REVIEW_CLAIM_REF_PREFIX.length), gitOid(oid));
   }
-}`;
+  return listing;
+}
+
+function parseSingleReviewClaimRef(raw: string, ref: GitRefName): GitOid | null {
+  const trimmed = raw.trimEnd();
+  if (trimmed.length === 0) return null;
+  const lines = trimmed.split('\n');
+  if (lines.length !== 1) {
+    throw new Error(`Review claim ${ref} ls-remote is ambiguous`);
+  }
+  const fields = lines[0]!.split('\t');
+  const [oid, matchedRef] = fields;
+  if (fields.length !== 2 || oid === undefined || oid.length === 0 || matchedRef !== ref) {
+    throw new Error('Malformed git ls-remote output for review-claim ref');
+  }
+  return gitOid(oid);
+}
 
 /**
  * Single-issue targeted read of its Project item's `Status` / `Blocked on`
@@ -280,24 +316,6 @@ interface GraphQlMergedPr {
   mergeCommit: { oid: string } | null;
   commits: {
     nodes: Array<{ commit: { oid: string; committedDate: string } }>;
-  };
-}
-
-interface ReviewRefResponse {
-  data: {
-    repository: {
-      ref: {
-        target: {
-          oid: string;
-          tree: {
-            entries: Array<{
-              name: string;
-              object: { text?: string | null } | null;
-            }>;
-          };
-        };
-      } | null;
-    };
   };
 }
 
@@ -482,16 +500,45 @@ function checks(pr: GraphQlPr): RawPullRequest['checks'] {
   ));
 }
 
+export interface GhLifecycleReaderOptions {
+  /**
+   * Local checkout the git-transport review-claim reads run against
+   * (`git -C <repositoryPath> ...`). Defaults to `.` (the process cwd) —
+   * production callers (scripts/run-autopilot-v2.ts) always pass the
+   * coordinator's own worktree root explicitly.
+   */
+  readonly repositoryPath?: string;
+  /**
+   * Remote argument for `ls-remote`/`fetch` — accepts either a configured
+   * remote name or a bare URL (git treats both identically). Defaults to
+   * the canonical HTTPS URL directly so review-claim reads need no local
+   * `git remote add` precondition and work in every mode (observe/recover
+   * run this before the runbook's "configure jinn-autopilot-v2" step).
+   */
+  readonly remoteName?: string;
+}
+
 export class GhLifecycleReader implements GitHubLifecycleReader {
   private readonly issues: GhIssueSource;
+  private readonly repositoryPath: string;
+  private readonly remoteName: string;
+  // Review-claim metadata commits are content-addressed and append-only: an
+  // OID's payload never changes, so this cache never needs invalidation for
+  // the life of the reader (jinn-mono#1883-follow-up).
+  private readonly reviewClaimPayloadByOid = new Map<GitOid, string>();
   private readonly ancestryByCandidate = new Map<string, Promise<{
     readonly headCommittedAt: string;
     readonly claimTrailers: string | null;
     readonly completionSummary: string | null;
   }>>();
 
-  constructor(private readonly run: CommandRunner = defaultRunner) {
+  constructor(
+    private readonly run: CommandRunner = defaultRunner,
+    options: GhLifecycleReaderOptions = {},
+  ) {
     this.issues = new GhIssueSource(run);
+    this.repositoryPath = options.repositoryPath ?? '.';
+    this.remoteName = options.remoteName ?? CANONICAL_GITHUB_HTTPS_REMOTE;
   }
 
   readProjectSnapshot(): Promise<ProjectSnapshot> {
@@ -508,24 +555,80 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
     return issues;
   }
 
-  private async reviewClaim(prNumber: number): Promise<RawPullRequest['reviewClaim']> {
-    const ref = `refs/jinn-autopilot/review-claims/v1/${prNumber}`;
-    const raw = await this.run('gh', [
-      'api', 'graphql',
-      '-f', `query=${REVIEW_REF_QUERY}`,
-      '-F', `ref=${ref}`,
-    ]);
-    const response = JSON.parse(raw) as ReviewRefResponse;
-    const target = response.data.repository.ref?.target;
-    if (target === undefined) return null;
-    const entry = target.tree.entries.find(
-      (candidate) => candidate.name === REVIEW_CLAIM_PAYLOAD_FILE,
-    );
-    const payload = entry?.object?.text;
-    if (typeof payload !== 'string') {
+  private gitRun(args: string[]): Promise<string> {
+    // GIT_TERMINAL_PROMPT=0: these reads never need a credential (the
+    // review-claims repo is public); fail fast instead of hanging if a
+    // misconfigured transport ever tries to prompt for one.
+    return this.run('git', ['-C', this.repositoryPath, ...args], {
+      env: { GIT_TERMINAL_PROMPT: '0' },
+    });
+  }
+
+  /**
+   * One `git ls-remote` for every review-claim ref, replacing the N
+   * per-PR GraphQL `ref(qualifiedName:)` reads that GitHub permanently
+   * returns null for (jinn-mono#1883-follow-up). Called once per
+   * `readPullRequests` page and shared across its open + merged-outcome PRs.
+   */
+  private async listReviewClaimRefs(): Promise<Map<number, GitOid>> {
+    const raw = await this.gitRun(['ls-remote', this.remoteName, REVIEW_CLAIM_REF_GLOB]);
+    const bySuffix = parseReviewClaimRefGitListing(raw);
+    const byPrNumber = new Map<number, GitOid>();
+    for (const [suffix, oid] of bySuffix) {
+      if (/^[1-9][0-9]*$/.test(suffix)) byPrNumber.set(Number(suffix), oid);
+    }
+    return byPrNumber;
+  }
+
+  /** Targeted single-ref read for the reconciliation single-PR path. */
+  private async readSingleReviewClaimRef(ref: GitRefName): Promise<GitOid | null> {
+    const raw = await this.gitRun(['ls-remote', this.remoteName, ref]);
+    return parseSingleReviewClaimRef(raw, ref);
+  }
+
+  private async objectExistsLocally(oid: GitOid): Promise<boolean> {
+    try {
+      await this.gitRun(['cat-file', '-e', oid]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Reads the `jinn-autopilot-review.json` payload for a review-claim
+   * commit OID, fetching it over git only on a local cache miss (an OID
+   * already present locally — e.g. just pushed by this same process —
+   * costs no network call). Cached by OID afterward: content-addressed,
+   * append-only, so an OID's payload never needs refetching.
+   */
+  private async readReviewClaimPayload(ref: GitRefName, oid: GitOid): Promise<string> {
+    const cached = this.reviewClaimPayloadByOid.get(oid);
+    if (cached !== undefined) return cached;
+    if (!(await this.objectExistsLocally(oid))) {
+      await this.gitRun(['fetch', '--no-tags', '--depth=1', this.remoteName, ref]);
+    }
+    let payload: string;
+    try {
+      payload = await this.gitRun(['cat-file', '-p', `${oid}:${REVIEW_CLAIM_PAYLOAD_FILE}`]);
+    } catch {
       throw new Error(`Review claim ${ref} is missing ${REVIEW_CLAIM_PAYLOAD_FILE}`);
     }
-    return { oid: target.oid, payload };
+    this.reviewClaimPayloadByOid.set(oid, payload);
+    return payload;
+  }
+
+  private async reviewClaim(
+    prNumber: number,
+    listing?: ReadonlyMap<number, GitOid>,
+  ): Promise<RawPullRequest['reviewClaim']> {
+    const ref = reviewClaimRef(prNumber);
+    const oid = listing !== undefined
+      ? listing.get(prNumber) ?? null
+      : await this.readSingleReviewClaimRef(ref);
+    if (oid === null) return null;
+    const payload = await this.readReviewClaimPayload(ref, oid);
+    return { oid, payload };
   }
 
   private branchAncestry(
@@ -608,6 +711,7 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
   private async rawPullRequest(
     pr: GraphQlPr,
     includeReviewClaim: boolean,
+    reviewClaimListing?: ReadonlyMap<number, GitOid>,
   ): Promise<RawPullRequest> {
     if (pr.state === 'CLOSED') {
       throw new Error(`Closed-unmerged PR #${pr.number} is not an active lifecycle item`);
@@ -698,7 +802,9 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
       reviews,
       branchClaimTrailers: claimEvidence?.claimTrailers ?? null,
       implementationCompletionSummary: claimEvidence?.completionSummary ?? null,
-      reviewClaim: includeReviewClaim ? await this.reviewClaim(pr.number) : null,
+      reviewClaim: includeReviewClaim
+        ? await this.reviewClaim(pr.number, reviewClaimListing)
+        : null,
       humanIssueNumber: humanEvidence?.issueNumber ?? null,
       humanReason: humanEvidence?.reason ?? null,
       mergedAt: pr.mergedAt,
@@ -708,6 +814,7 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
 
   private async readMergedOutcomes(
     nonDoneIssueNumbers: readonly number[],
+    reviewClaimListing: ReadonlyMap<number, GitOid>,
   ): Promise<RawPullRequest[]> {
     const unique = [...new Set(nonDoneIssueNumbers)].sort((left, right) => left - right);
     for (const number of unique) {
@@ -738,7 +845,7 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
             const full = await this.readPullRequestByNumber(pr.number);
             if (full.state !== 'OPEN') continue;
             merged.push(
-              await this.rawPullRequest(full, true).catch((error: unknown) => {
+              await this.rawPullRequest(full, true, reviewClaimListing).catch((error: unknown) => {
                 if (!(error instanceof PrEvidenceInconsistentError)) throw error;
                 return inconsistentPullRequest(full, error.message);
               }),
@@ -833,14 +940,18 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
     const raw = await this.run('gh', args);
     const response = JSON.parse(raw) as GraphQlPage;
     const connection = response.data.repository.pullRequests;
+    // One git-transport listing serves every open + merged-outcome PR's
+    // review-claim lookup below (jinn-mono#1883-follow-up) instead of one
+    // GraphQL ref read per PR.
+    const reviewClaimListing = await this.listReviewClaimRefs();
     const openNodes = await Promise.all(connection.nodes.map((pr) => (
-      this.rawPullRequest(pr, true).catch((error: unknown) => {
+      this.rawPullRequest(pr, true, reviewClaimListing).catch((error: unknown) => {
         if (!(error instanceof PrEvidenceInconsistentError)) throw error;
         return inconsistentPullRequest(pr, error.message);
       })
     )));
     const mergedNodes = cursor === null
-      ? await this.readMergedOutcomes(nonDoneIssueNumbers)
+      ? await this.readMergedOutcomes(nonDoneIssueNumbers, reviewClaimListing)
       : [];
     const byNumber = new Map<number, RawPullRequest>();
     for (const pr of [...openNodes, ...mergedNodes]) {

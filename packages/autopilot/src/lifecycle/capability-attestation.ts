@@ -31,6 +31,7 @@ export interface CapabilityAttestation {
     readonly atomicPairRejection: true;
     readonly ambiguousReadback: true;
     readonly exactCleanup: true;
+    readonly readViaGitTransport: true;
   };
 }
 
@@ -154,6 +155,10 @@ export function decodeCapabilityAttestation(
         'ambiguous readback',
       ),
       exactCleanup: exactTrue(proofs.exactCleanup, 'exact cleanup'),
+      readViaGitTransport: exactTrue(
+        proofs.readViaGitTransport,
+        'read via git transport',
+      ),
     },
   };
 }

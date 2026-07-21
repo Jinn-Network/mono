@@ -233,6 +233,12 @@ records:
    parent and prove the publication is rejected with **both refs unchanged**.
 5. **ambiguous read-back** — interrupt or obscure one response and prove the
    adapter classifies the result only by reading both exact refs.
+6. **read via git transport** — after creating the disposable review ref,
+   list it back through the same `git ls-remote <remote> '<glob>'` mechanism
+   production's review-claim reader uses, and require the exact OID just
+   pushed; GitHub's GraphQL `ref(qualifiedName:)` permanently returns null
+   for `refs/jinn-autopilot/*` (proven live), so this proof covers the read
+   path, not just the write path.
 
 It uses no production PR branch and no existing review ref. It writes the
 owner-only attestation only after exact cleanup succeeds. If any outcome or

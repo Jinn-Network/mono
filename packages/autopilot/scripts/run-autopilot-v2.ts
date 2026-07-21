@@ -23,6 +23,7 @@ import { DEFAULT_CONFIG, type DispatcherConfig } from '../src/dispatcher/types.j
 import { shouldRouteToSession } from '../src/cli/routing.js';
 import {
   buildGitHubLifecycleSnapshot,
+  CANONICAL_GITHUB_HTTPS_REMOTE,
   defaultRunnerId,
   explicitEnvironmentFlag,
   explainIssue,
@@ -223,10 +224,21 @@ async function main(): Promise<void> {
     maintenanceCredential = selected.credential;
     runner = selectedReadRunner(selected.credential.secret(), env);
   }
-  const reader = new GhLifecycleReader(runner);
   const repositoryPath = (await runner('git', [
     'rev-parse', '--path-format=absolute', '--show-toplevel',
   ])).trim();
+  // jinn-mono#1883-follow-up: review-claim refs (refs/jinn-autopilot/...) are
+  // read over the git transport, not GraphQL (GitHub's `ref(qualifiedName:)`
+  // permanently returns null for this custom namespace — proven live).
+  // `remoteName` defaults to the canonical HTTPS URL inside GhLifecycleReader
+  // itself, so it's passed explicitly here only for self-documentation; using
+  // the URL (not the `jinn-autopilot-v2` named remote) means observe/recover
+  // never depend on the runbook's "configure jinn-autopilot-v2" step, which
+  // the cutover runbook deliberately runs an observe-mode smoke test before.
+  const reader = new GhLifecycleReader(runner, {
+    repositoryPath,
+    remoteName: CANONICAL_GITHUB_HTTPS_REMOTE,
+  });
   const readSnapshot = (rateLimitFloor?: number) => buildGitHubLifecycleSnapshot(reader, {
     authorAllowlist: allowlist,
     ...(rateLimitFloor === undefined ? {} : { rateLimitFloor }),

@@ -36,6 +36,13 @@ function fakeGit(options: {
     }
     if (command === 'ls-remote') {
       const ref = args[2]!;
+      if (ref.endsWith('*')) {
+        const prefix = ref.slice(0, -1);
+        const lines = [...refs.entries()]
+          .filter(([key]) => key.startsWith(prefix))
+          .map(([key, value]) => `${value}\t${key}`);
+        return lines.length === 0 ? '' : `${lines.join('\n')}\n`;
+      }
       const value = refs.get(ref);
       return value === undefined ? '' : `${value}\t${ref}\n`;
     }
@@ -118,6 +125,7 @@ describe('live GitHub capability probe', () => {
       atomicPairRejection: true,
       ambiguousReadback: true,
       exactCleanup: true,
+      readViaGitTransport: true,
     });
     expect(fake.refs.size).toBe(0);
     expect(fake.pushes.filter((args) => args.includes('--atomic'))).toHaveLength(3);
