@@ -39,8 +39,6 @@ import { emitEvent } from '../observability/emit-event.js';
 import { recordLoopTick } from './loop-heartbeat.js';
 import { canonicalJson } from '../harnesses/engine/canonical-json.js';
 import { uploadToIpfs } from '../adapters/mech/ipfs.js';
-import { mineSessionEchoes } from '../solver-types/_swe-rebench-v2-session-echo.js';
-import type { MineableTraceStorePort } from '../solver-types/_swe-rebench-v2-mineable-store-port.js';
 
 export type HarvestSource = 'commits' | 'sessions';
 
@@ -67,20 +65,11 @@ export interface HarvestLoopConfig {
   store?: Store;
   now?: () => number;
   /**
-   * Which harvest sources this tick mines. Absent ⇒ `['commits']` — existing
-   * configs behave byte-identically. `'sessions'` mines locally-captured
-   * task-creator sessions via {@link mineSessionEchoes} (Task 8); it needs
-   * `mineableStore` set, otherwise that source is skipped (non-fatal).
+   * Which harvest sources this tick considers. Absent ⇒ `['commits']`.
+   * The `'sessions'` source is explicitly parked during Stage 2 until a
+   * canonical publication policy is ratified.
    */
   sources?: HarvestSource[];
-  /** Mineable-trace store to drain when `sources` includes `'sessions'`.
-   *  Always constructed by the daemon (local retention is unconditional per
-   *  mono#1714) — see `main.ts`. */
-  mineableStore?: MineableTraceStorePort;
-  /** Recording operator's Safe, stamped into session-echo provenance as
-   *  `sourceSolverSafe` so the operator's own claim on their own echo is
-   *  refused (spec §7). Same value as `minterSafe` in practice. */
-  operatorSafe?: string;
 }
 
 export interface HarvestTickResult {
@@ -95,6 +84,8 @@ export interface HarvestTickResult {
 function defaultDockerCheck(): boolean {
   return spawnSync('docker', ['info'], { stdio: 'ignore' }).status === 0;
 }
+
+const SESSIONS_SOURCE_PARKED_STAGE_2 = 'sessions-source-parked-stage-2';
 
 const STAGE_RANK: Record<string, number> = {
   discovered: 0,
@@ -199,9 +190,21 @@ async function publishBoundAdmission(args: {
 
 export async function runHarvestTick(config: HarvestLoopConfig): Promise<HarvestTickResult> {
   const sources = config.sources ?? ['commits'];
+  const skipped = sources.includes('sessions') ? [SESSIONS_SOURCE_PARKED_STAGE_2] : [];
+  if (!sources.includes('commits')) {
+    return { discovered: 0, admitted: [], rejected: [], awaitingInput: [], quarantined: [], skipped };
+  }
+
   const dockerOk = (config.isDockerAvailable ?? defaultDockerCheck)();
   if (!dockerOk) {
-    return { discovered: 0, admitted: [], rejected: [], awaitingInput: [], quarantined: [], skipped: ['docker-unavailable'] };
+    return {
+      discovered: 0,
+      admitted: [],
+      rejected: [],
+      awaitingInput: [],
+      quarantined: [],
+      skipped: [...skipped, 'docker-unavailable'],
+    };
   }
 
   const validatedStore = config.validatedStore ?? new ValidatedPoolStore({ stateDir: config.stateDir });
@@ -213,7 +216,6 @@ export async function runHarvestTick(config: HarvestLoopConfig): Promise<Harvest
   const rejected: Array<{ instance_id: string; reason: string }> = [];
   const awaitingInput: Array<{ instance_id: string; reason: string }> = [];
   const quarantined: Array<{ instance_id: string; reason: string }> = [];
-  const skipped: string[] = [];
   let discovered = 0;
 
   for (const repoCfg of sources.includes('commits') ? config.repos : []) {
@@ -505,26 +507,6 @@ export async function runHarvestTick(config: HarvestLoopConfig): Promise<Harvest
         `infrastructure: ${error instanceof Error ? error.message : String(error)}`,
         tickNow ? { now: tickNow } : {},
       );
-    }
-  }
-
-  if (sources.includes('sessions')) {
-    if (config.mineableStore) {
-      const sessionsResult = await mineSessionEchoes({
-        ...config.mintDeps,
-        validatedStore,
-        minterSafe: config.minterSafe,
-        publish: config.publish,
-        mineableStore: config.mineableStore,
-        operatorSafe: config.operatorSafe,
-        pool,
-      });
-      discovered += sessionsResult.discovered;
-      admitted.push(...sessionsResult.admitted);
-      rejected.push(...sessionsResult.rejected);
-      skipped.push(...sessionsResult.skipped);
-    } else {
-      skipped.push('sessions-source-missing-mineable-store');
     }
   }
 

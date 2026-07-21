@@ -1,12 +1,15 @@
 /** ContributionPort projection over the shared daemon/jinn-layer store. */
 import {
   deriveContributionStatus,
+  degraded,
   ok,
   unavailable,
+  ContributionCandidateV1Schema,
   type ContributionCandidateV1,
   type ContributionLedgerEntry,
   type ContributionPort,
   type ContributionStatusSnapshot,
+  type EvidencePort,
   type PortResult,
 } from '@jinn-network/plugin';
 import { ContributionStore } from '@jinn-network/core';
@@ -26,6 +29,8 @@ export function createContributionStatusStore(path: string): ContributionStatusS
 export interface ContributionAdapterDeps {
   /** `statusStore` is retained as a source-compatible dependency name. */
   statusStore: ContributionStatusStore;
+  /** Canonical payload resolver; the status store contains references only. */
+  evidence: Pick<EvidencePort, 'get'>;
   now?: () => string;
 }
 
@@ -47,7 +52,26 @@ export function createContributionAdapter(deps: ContributionAdapterDeps): Contri
   return {
     async recordMineable(candidate, options): Promise<PortResult<{ recordId: string }>> {
       try {
-        const record = await store.record(candidate, undefined, options);
+        const parsed = ContributionCandidateV1Schema.parse(candidate);
+        const evidence = await deps.evidence.get(parsed.sourceId);
+        const episode = evidence.status === 'unavailable' ? null : evidence.value;
+        const canonicalCandidate = episode?.contributionCandidate === undefined
+          ? undefined
+          : ContributionCandidateV1Schema.safeParse(episode.contributionCandidate);
+        if (!episode) {
+          return unavailable(`canonical contribution episode is unavailable: ${parsed.sourceId}`);
+        }
+        if (
+          !canonicalCandidate?.success
+          || canonicalCandidate.data.sourceId !== episode.episodeId
+          || JSON.stringify(canonicalCandidate.data) !== JSON.stringify(parsed)
+        ) {
+          return unavailable(`canonical contribution candidate mismatch: ${parsed.sourceId}`);
+        }
+        const record = await store.recordReference(parsed.sourceId, {
+          publishMinedTasksConsent: parsed.publishMinedTasksConsent,
+          ...options,
+        });
         return ok({ recordId: record.recordId });
       } catch (error) {
         return unavailable(`contribution store recordMineable failed: ${String(error)}`);
@@ -56,22 +80,38 @@ export function createContributionAdapter(deps: ContributionAdapterDeps): Contri
 
     async ledger(): Promise<PortResult<ContributionLedgerEntry[]>> {
       try {
-        const entries = (await store.list()).map((record): ContributionLedgerEntry => ({
-          recordId: record.recordId,
-          sourceId: record.candidate.sourceId,
-          createdAt: record.candidate.createdAt,
-          verifiabilityTier: record.candidate.testRuns.some((run) => run.exitCode === 0)
-            ? 'tests-passed'
-            : 'user-accepted',
-          repositorySlug: record.candidate.repositorySlug,
-          baseCommit: record.candidate.baseCommit,
-          localState: record.localState,
-          publicationState: record.publicationState,
-          ...(record.mintRef ? { mintRef: record.mintRef } : {}),
-          ...(record.publicationRef ? { publicationRef: record.publicationRef } : {}),
-          status: deriveContributionStatus(record),
+        const reasons: string[] = [];
+        const entries = await Promise.all((await store.list()).map(async (record): Promise<ContributionLedgerEntry> => {
+          const evidence = await deps.evidence.get(record.recordId);
+          const episode = evidence.status === 'unavailable' ? null : evidence.value;
+          const parsedCandidate = episode?.contributionCandidate === undefined
+            ? undefined
+            : ContributionCandidateV1Schema.safeParse(episode.contributionCandidate);
+          const candidate = parsedCandidate?.success && parsedCandidate.data.sourceId === record.recordId
+            ? parsedCandidate.data
+            : undefined;
+          if (!candidate) reasons.push(`unresolved canonical episode: ${record.recordId}`);
+          return {
+            recordId: record.recordId,
+            sourceId: record.recordId,
+            ...(candidate ? {
+              createdAt: candidate.createdAt,
+              verifiabilityTier: candidate.testRuns.some((run) => run.exitCode === 0)
+                ? 'tests-passed' as const
+                : 'user-accepted' as const,
+              repositorySlug: candidate.repositorySlug,
+              baseCommit: candidate.baseCommit,
+            } : {}),
+            localState: record.localState,
+            publicationState: record.publicationState,
+            ...(record.mintRef ? { mintRef: record.mintRef } : {}),
+            ...(record.publicationRef ? { publicationRef: record.publicationRef } : {}),
+            status: deriveContributionStatus(record),
+          };
         }));
-        return ok(entries);
+        return reasons.length > 0
+          ? degraded([...new Set(reasons)].join('; '), entries)
+          : ok(entries);
       } catch (error) {
         return unavailable(`contribution ledger failed: ${String(error)}`);
       }

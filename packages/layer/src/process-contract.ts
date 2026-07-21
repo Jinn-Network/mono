@@ -136,15 +136,16 @@ export function sessionPickupEnvelope(
 }
 
 export interface ContributionLedgerRowV1 {
-  time: string;
+  time: string | null;
   task: string;
   env: string | null;
   anchor: string | null;
-  tier: 'user-accepted' | 'tests-passed';
+  tier: 'user-accepted' | 'tests-passed' | null;
   state: ContributionLedgerEntry['status'];
 }
 
-function displayTimestamp(value: string): string {
+function displayTimestamp(value: string | undefined): string | null {
+  if (value === undefined) return null;
   const match = /^\d{4}-(\d{2})-(\d{2})T(\d{2}):(\d{2})/u.exec(value);
   return match ? `${match[1]}-${match[2]} ${match[3]}:${match[4]}` : value;
 }
@@ -159,7 +160,7 @@ export function contributionLedgerRow(entry: ContributionLedgerEntry): Contribut
     task: `${repository} @ ${commit}`,
     env: published ? entry.mintRef ?? null : null,
     anchor: published ? entry.publicationRef ?? null : null,
-    tier: entry.verifiabilityTier,
+    tier: entry.verifiabilityTier ?? null,
     state: entry.status,
   };
 }

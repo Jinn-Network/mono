@@ -26,8 +26,9 @@ export interface ContributionStatusSnapshot extends ContributionState {
 export interface ContributionLedgerEntry extends ContributionStatusSnapshot {
   recordId: string;
   sourceId: string;
-  createdAt: string;
-  verifiabilityTier: 'user-accepted' | 'tests-passed';
+  /** Absent when a migrated reference no longer resolves to retained evidence. */
+  createdAt?: string;
+  verifiabilityTier?: 'user-accepted' | 'tests-passed';
   /** Sanitized repository facts used by the local first-share preview. */
   repositorySlug?: string;
   baseCommit?: string;
@@ -51,7 +52,7 @@ export function deriveContributionStatus(
 }
 
 export interface ContributionPort {
-  /** Always stores the complete candidate locally; consent controls only publication state. */
+  /** Production verifies the canonical Episode, then stores only its reference and state. */
   recordMineable(
     candidate: ContributionCandidateV1,
     options?: ContributionRecordOptions,

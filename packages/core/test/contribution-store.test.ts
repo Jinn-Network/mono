@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ContributionCandidateV1 } from '@jinn-network/plugin';
+import type { ContributionCandidateV1, EpisodeV1 } from '@jinn-network/plugin';
 import { describe, expect, it } from 'vitest';
 import {
   CONTRIBUTION_PUBLICATION_DISABLED_FILE,
@@ -30,6 +30,47 @@ function candidate(
   };
 }
 
+function episodeWithCandidate(input: ContributionCandidateV1): EpisodeV1 {
+  return {
+    schemaVersion: 'jinn.episode.v1',
+    episodeId: input.sourceId,
+    retrievalVisible: false,
+    session: {
+      sessionId: input.sourceId,
+      capturedAt: input.createdAt,
+      kind: 'user',
+    },
+    origin: { writer: 'core-test', build: '1' },
+    task: {
+      summary: `Contribution ${input.sourceId}`,
+      distributionTags: ['coding'],
+      repositorySlug: input.repositorySlug,
+      baseCommit: input.baseCommit,
+    },
+    trajectory: [{
+      spanId: 'span-1',
+      parentSpanId: null,
+      kind: 'jinn.agent_turn',
+      name: 'turn:user',
+      startTimeUnixNano: '1',
+      endTimeUnixNano: '2',
+      attributes: { role: 'user' },
+      redactedKeys: [],
+    }],
+    environment: {
+      harness: { name: 'core-test', version: '1' },
+      model: 'test-model',
+      tools: [],
+      skillsLoadout: [],
+    },
+    outcome: { status: 'completed', verificationStrength: 'tests-passed' },
+    cost: { durationMs: 1 },
+    retention: { policy: 'local-private' },
+    provenance: 'contributed',
+    contributionCandidate: input,
+  };
+}
+
 async function withTmpDir(fn: (dir: string) => Promise<void>): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), 'contribution-store-'));
   try {
@@ -40,7 +81,7 @@ async function withTmpDir(fn: (dir: string) => Promise<void>): Promise<void> {
 }
 
 describe('ContributionStore state model', () => {
-  it('records locally regardless of share consent and persists the canonical candidate verbatim', async () => {
+  it('records only an episode reference and state regardless of share consent', async () => {
     await withTmpDir(async (stateDir) => {
       const store = new ContributionStore({ stateDir });
       const input = candidate('source-disabled');
@@ -49,11 +90,14 @@ describe('ContributionStore state model', () => {
 
       expect(stored).toMatchObject({
         recordId: 'source-disabled',
-        candidate: input,
         localState: 'recorded',
         publicationState: 'disabled',
       });
+      expect(stored).not.toHaveProperty('candidate');
       expect(await store.get('source-disabled')).toEqual(stored);
+      const serialized = await readFile(join(stateDir, 'mineable-traces.json'), 'utf8');
+      expect(serialized).not.toContain(input.acceptedDiff);
+      expect(serialized).not.toMatch(/candidate|repositorySlug|baseCommit|testRuns|intermediateFailureDiffs|skillEvents/);
     });
   });
 
@@ -69,7 +113,6 @@ describe('ContributionStore state model', () => {
         .toEqual(['__proto__', 'constructor', 'toString'].sort());
       expect(await store.get('__proto__')).toMatchObject({
         recordId: '__proto__',
-        candidate: { sourceId: '__proto__' },
       });
     });
   });
@@ -335,23 +378,97 @@ describe('ContributionStore v1 migration', () => {
       expect(await readFile(`${path}.v1.bak`, 'utf8')).toBe(original);
       expect(JSON.parse(await readFile(path, 'utf8')).schemaVersion).toBe(CONTRIBUTION_STORE_SCHEMA_VERSION);
       expect(records.find((record) => record.recordId === 'pending')).toMatchObject({
-        candidate: {
-          schemaVersion: 'jinn.contribution-candidate.v1',
-          repositorySlug: 'Jinn-Network/mono',
-          testRuns: [{ command: 'yarn test' }],
-          skillEvents: [{ skillRef: 'debug', action: 'loaded' }],
-          publishMinedTasksConsent: false,
-        },
         localState: 'recorded',
         publicationState: 'disabled',
-        legacy: { availability: 'candidate' },
       });
       expect(records.find((record) => record.recordId === 'processed')).toMatchObject({
         localState: 'rejected',
         publicationState: 'disabled',
-        legacy: { availability: 'unavailable' },
+        rejectionReason: 'legacy-processed-unavailable',
       });
+      expect(await readFile(path, 'utf8')).not.toMatch(/acceptedDiff|testRuns|skillEvents|candidate/);
       expect((await store.listRecorded()).map((record) => record.recordId)).toEqual(['pending']);
+    });
+  });
+});
+
+describe('ContributionStore v2 migration', () => {
+  it('backs up v2 byte-for-byte, strips payloads, and parks unpublished authorization', async () => {
+    await withTmpDir(async (stateDir) => {
+      const path = join(stateDir, 'mineable-traces.json');
+      const queuedCandidate = candidate('queued-v2', {
+        acceptedDiff: 'SECRET_V2_DIFF',
+        publishMinedTasksConsent: true,
+      });
+      const publishedCandidate = candidate('published-v2', {
+        acceptedDiff: 'SECRET_PUBLISHED_DIFF',
+        publishMinedTasksConsent: true,
+      });
+      const v2 = {
+        schemaVersion: 'jinn.contribution-store.v2',
+        firstSharePreviewAcknowledgedAt: '2026-07-15T12:01:00.000Z',
+        records: {
+          'queued-v2': {
+            recordId: 'queued-v2',
+            candidate: queuedCandidate,
+            localState: 'recorded',
+            publicationState: 'queued',
+          },
+          'published-v2': {
+            recordId: 'published-v2',
+            candidate: publishedCandidate,
+            localState: 'minted',
+            publicationState: 'published',
+            mintRef: 'mint:published',
+            publicationRef: 'ipfs://published',
+          },
+        },
+      };
+      const original = `${JSON.stringify(v2, null, 2)}\n`;
+      await writeFile(path, original, 'utf8');
+
+      const store = new ContributionStore({ stateDir });
+      const records = await store.list();
+      const active = await readFile(path, 'utf8');
+
+      expect(await readFile(`${path}.v2.bak`, 'utf8')).toBe(original);
+      expect(JSON.parse(active).schemaVersion).toBe('jinn.contribution-store.v3');
+      expect(active).not.toMatch(/SECRET_|candidate|acceptedDiff|testRuns|skillEvents|repositorySlug|baseCommit/);
+      expect(records.find((record) => record.recordId === 'queued-v2')).toMatchObject({
+        localState: 'recorded',
+        publicationState: 'disabled',
+      });
+      expect(records.find((record) => record.recordId === 'published-v2')).toMatchObject({
+        localState: 'minted',
+        publicationState: 'published',
+        mintRef: 'mint:published',
+        publicationRef: 'ipfs://published',
+      });
+    });
+  });
+
+  it('refuses migration when an existing backup does not match the active v2 bytes', async () => {
+    await withTmpDir(async (stateDir) => {
+      const path = join(stateDir, 'mineable-traces.json');
+      const v2 = {
+        schemaVersion: 'jinn.contribution-store.v2',
+        records: {
+          source: {
+            recordId: 'source',
+            candidate: candidate('source'),
+            localState: 'recorded',
+            publicationState: 'disabled',
+          },
+        },
+      };
+      const original = `${JSON.stringify(v2)}\n`;
+      await writeFile(path, original, 'utf8');
+      await writeFile(`${path}.v2.bak`, 'different bytes\n', 'utf8');
+
+      await expect(new ContributionStore({ stateDir }).list())
+        .rejects.toThrow(/backup.*does not match|does not match.*backup/i);
+      expect(await readFile(path, 'utf8')).toBe(original);
+      expect(await readFile(`${path}.v2.bak`, 'utf8')).toBe('different bytes\n');
     });
   });
 });
@@ -487,7 +604,15 @@ describe('ContributionStore outbound privacy', () => {
       await store.markMinted('private-local-source', 'mint:public-safe-ref');
 
       const record = await store.get('private-local-source') as ContributionStoreRecord;
-      const outbound = store.toOutboundProjection(record);
+      const outbound = store.toOutboundProjection(
+        record,
+        episodeWithCandidate(candidate('private-local-source', {
+          acceptedDiff: 'SECRET_ACCEPTED_DIFF_GOLD',
+          intermediateFailureDiffs: ['SECRET_HOLDOUT_FAILURE'],
+          skillEvents: [{ skillRef: 'SECRET_LOCAL_SKILL', action: 'loaded' }],
+          publishMinedTasksConsent: true,
+        })),
+      );
       const serialized = JSON.stringify(outbound);
 
       expect(outbound).toEqual({

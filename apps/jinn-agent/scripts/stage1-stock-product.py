@@ -630,7 +630,8 @@ def finish_session(
 
 def read_store_records() -> list[dict[str, Any]]:
     store = json.loads((MINEABLE_DIR / "mineable-traces.json").read_text(encoding="utf-8"))
-    assert store["schemaVersion"] == "jinn.contribution-store.v2"
+    assert store["schemaVersion"] == "jinn.contribution-store.v3"
+    assert all("candidate" not in row and "localMetadata" not in row for row in store["records"].values())
     return list(store["records"].values())
 
 
@@ -839,7 +840,7 @@ def main() -> None:
         parked_records = read_store_records()
         assert len(parked_records) == 2, parked_records
         assert all(
-            not row["candidate"]["publishMinedTasksConsent"]
+            "candidate" not in row and "localMetadata" not in row
             for row in parked_records
         ), parked_records
         assert all(
@@ -986,13 +987,17 @@ def main() -> None:
         # (6) Exactly one contribution candidate per eligible session.
         assert len(records) == 2, records
         episode_ids = {episode["episodeId"] for episode in episodes}
-        assert {row["candidate"]["sourceId"] for row in records}.issubset(episode_ids)
-        assert all(not row["candidate"]["publishMinedTasksConsent"] for row in records)
+        assert {row["recordId"] for row in records}.issubset(episode_ids)
+        assert all(
+            not episode["contributionCandidate"]["publishMinedTasksConsent"]
+            for episode in episodes
+            if episode["episodeId"] in {row["recordId"] for row in records}
+        )
         assert all(row["publicationState"] == "disabled" for row in records)
 
         episode_by_id = {episode["episodeId"]: episode for episode in episodes}
         records_by_session = {
-            episode_by_id[row["candidate"]["sourceId"]]["session"]["sessionId"]: row
+            episode_by_id[row["recordId"]]["session"]["sessionId"]: row
             for row in records
         }
         target_row = records_by_session["stage1-target-task"]
@@ -1010,14 +1015,14 @@ def main() -> None:
             "targetRecordId": target_row["recordId"],
             "noResultRecordId": no_result_row["recordId"],
             # Explicit session handoff for the daemon-side .mjs leg (PR #1781
-            # review): derived from the store rows via each candidate's
-            # sourceId → episode → sessionId, never hard-coded, so renaming a
+            # review): derived from each reference-only store row via
+            # recordId → episode → sessionId, never hard-coded, so renaming a
             # driver session cannot silently break the second leg's lookup.
             "targetSessionId": episode_by_id[
-                target_row["candidate"]["sourceId"]
+                target_row["recordId"]
             ]["session"]["sessionId"],
             "noResultSessionId": episode_by_id[
-                no_result_row["candidate"]["sourceId"]
+                no_result_row["recordId"]
             ]["session"]["sessionId"],
             "legacyPending": str(legacy),
         }

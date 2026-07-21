@@ -64,14 +64,16 @@ try {
   writeFileSync(join(smokeDir, 'consumer.mts'), `
 import type { DaemonConfig } from '@jinn-network/client';
 
-type EngineMineableStore = NonNullable<DaemonConfig['restorationEngine']['mineableStore']>;
-type HarvestMineableStore = NonNullable<NonNullable<DaemonConfig['harvest']>['mineableStore']>;
+type EngineConfig = DaemonConfig['restorationEngine'];
+type HarvestConfig = NonNullable<DaemonConfig['harvest']>;
+type EngineStoreRetired = 'mineableStore' extends keyof EngineConfig ? false : true;
+type HarvestStoreRetired = 'mineableStore' extends keyof HarvestConfig ? false : true;
 
-declare const engineStore: EngineMineableStore;
-declare const harvestStore: HarvestMineableStore;
+const engineStoreRetired: EngineStoreRetired = true;
+const harvestStoreRetired: HarvestStoreRetired = true;
 
-void engineStore.append;
-void harvestStore.listUnmined;
+void engineStoreRetired;
+void harvestStoreRetired;
 `);
   // @safe-global/types-kit@4.0.1 has declarations that reference a package
   // subpath it does not export. Keep that unrelated upstream defect from

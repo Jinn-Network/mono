@@ -305,6 +305,7 @@ export {
   type ContributionStoreLockOptions,
   type ContributionStoreOptions,
   type ContributionStoreRecordOptions,
+  type ContributionStoreReferenceOptions,
   type ContributionStoreRecord,
 } from '@jinn-network/core';
 

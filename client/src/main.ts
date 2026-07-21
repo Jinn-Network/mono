@@ -1638,22 +1638,18 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     evictionRecovery,
   };
 
-  // ── Mineable-trace store (task-creator spec §10) ──────────────────────────
+  // ── Contribution reference queue (task-creator spec §10) ─────────────────
   //
-  // ALWAYS constructed: local retention/mining/distillation happen by default
-  // and never leave the machine. Stage 2 parks the outbound lane regardless of
-  // retained Stage 1 config, while keeping local candidate mining live.
-  const {
-    enforceStage2ParkedPublication,
-    MineableTraceStore,
-    resolveMineableStateDir,
-  } = await import('./solver-types/_swe-rebench-v2-mineable-store.js');
-  const mineableStore = new MineableTraceStore({
-    stateDir: resolveMineableStateDir(),
+  // ALWAYS constructed so legacy v1/v2 files migrate once to the reference-only
+  // v3 schema. Stage 2 keeps every unpublished reference explicitly disabled;
+  // canonical Episode persistence is owned by the harness layer.
+  const { ContributionStore, resolveContributionStateDir } = await import('@jinn-network/core');
+  const contributionStore = new ContributionStore({
+    stateDir: resolveContributionStateDir(),
   });
-  const mineablePublishConsent = await enforceStage2ParkedPublication(mineableStore);
+  await contributionStore.disableUnpublished();
   console.log(
-    '[main] mineable-trace retention: local (always on) — publication=parked',
+    '[main] contribution references: local eligibility queue — publication=parked',
   );
 
   // ── IdentityPublisher (jinn-mono-3zk) ───────────────────────────────────────
@@ -2058,9 +2054,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   ) {
     const { resolveHarvestRepoConfigs } = await import('./daemon/harvest-loop.js');
     const harvestRepos = await resolveHarvestRepoConfigs(config.harvest.repos);
-    // A sessions-only operator legitimately has zero repos — the commit
-    // walker is then a no-op (unchanged), but the loop still needs to build
-    // below so the session-echo miner can run.
+    // A sessions-only operator legitimately has zero repos. The loop remains
+    // schedulable so it can report the explicit Stage 2 parked marker.
     if (harvestRepos.length > 0 || harvestMinesSessions) {
       const { readEnabledState, defaultSweRebenchV2EvaluatorImplStateDir } =
         await import('./harnesses/impls/swe-rebench-v2-evaluator/harness.js');
@@ -2086,11 +2081,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           publish: config.harvest.publish,
           minterSafe: safeAddress,
           sources: config.harvest.sources,
-          // Reuse the same mineable-trace store instance constructed above
-          // (always present per mono#1714 — local retention is unconditional),
-          // not a second store pointing elsewhere.
-          mineableStore,
-          operatorSafe: safeAddress,
           mintDeps: {
             stateDir: harvestStateDir,
             ipfsRegistryUrl: config.ipfsRegistryUrl,
@@ -2217,10 +2207,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // Share the one maintained scrub pipeline (incl. optional ML PII) so task
       // trajectories and captures are scrubbed by the same stack before publish.
       scrubPipeline: sellerScrubPipeline,
-      // Task-creator spec §10 (D2): absent unless the operator opted into
-      // tier-1 local retention above.
-      mineableStore,
-      mineablePublishConsent,
     },
     balanceTopup:
       config.balanceTopupIntervalMs > 0

@@ -62,7 +62,11 @@ Add to `~/.jinn-client/config.json`:
 }
 ```
 
-`sources` defaults to `["commits"]`; set `["commits", "sessions"]` (or `["sessions"]` alone) to also mine locally-captured task-creator sessions from the mineable-trace store (needs `mineableTraces.consent: "retain_local"`).
+`sources` defaults to `["commits"]`. During Stage 2, configuring `"sessions"`
+does not mine locally captured sessions: the loop reports
+`sessions-source-parked-stage-2` and performs no session-source Docker, pool,
+or publication work. `["commits", "sessions"]` still runs commit harvesting;
+`["sessions"]` returns only the parked marker.
 
 Or via env:
 

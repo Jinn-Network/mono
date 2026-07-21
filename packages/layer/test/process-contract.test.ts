@@ -19,7 +19,12 @@ import {
   type KnowledgeHit,
 } from '@jinn-network/plugin';
 import { runJinnLayerCli } from '../src/cli.js';
-import { ContributionStore, EvidenceIndex, defaultEvidenceIndexPath } from '@jinn-network/core';
+import {
+  ContributionStore,
+  EvidenceIndex,
+  createEvidenceAdapter,
+  defaultEvidenceIndexPath,
+} from '@jinn-network/core';
 import { buildSkillMarkdown } from '../src/skill-package.js';
 
 function capture() {
@@ -635,7 +640,9 @@ describe('jinn-layer process contract v1', () => {
   it('projects every real contribution-store transition without requiring a sidecar', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jinn-contribution-ledger-'));
     const previousMineable = process.env['JINN_MINEABLE_STATE_DIR'];
+    const previousEpisodes = process.env['JINN_LAYER_EPISODES_DIR'];
     process.env['JINN_MINEABLE_STATE_DIR'] = root;
+    process.env['JINN_LAYER_EPISODES_DIR'] = join(root, 'episodes');
     const base = request().contributionCandidate as ContributionCandidateV1;
     const candidate = (
       sourceId: string,
@@ -649,10 +656,31 @@ describe('jinn-layer process contract v1', () => {
     });
     try {
       const store = new ContributionStore({ stateDir: root });
-      await store.record(candidate('recorded-local-id', false, '01'));
-      await store.record(candidate('minted-local-id', false, '02'));
+      const evidence = createEvidenceAdapter({ capturesDir: process.env['JINN_LAYER_EPISODES_DIR'] });
+      const record = async (value: ContributionCandidateV1, options?: { publicationState: 'vetoed' }) => {
+        const baseEpisode = episode();
+        const persisted = await evidence.put({
+          ...baseEpisode,
+          episodeId: value.sourceId,
+          session: {
+            ...baseEpisode.session,
+            sessionId: value.sourceId,
+            capturedAt: value.createdAt,
+          },
+          task: {
+            ...baseEpisode.task,
+            repositorySlug: value.repositorySlug,
+            baseCommit: value.baseCommit,
+          },
+          contributionCandidate: value,
+        });
+        expect(persisted.status).not.toBe('unavailable');
+        return store.record(value, undefined, options);
+      };
+      await record(candidate('recorded-local-id', false, '01'));
+      await record(candidate('minted-local-id', false, '02'));
       await store.markMinted('minted-local-id', 'mint:local-only');
-      await store.record(candidate('preview-local-id', true, '03'));
+      await record(candidate('preview-local-id', true, '03'));
 
       const previewOut = capture();
       expect(await runJinnLayerCli(['contribution', 'ledger', '--json'], {
@@ -667,14 +695,14 @@ describe('jinn-layer process contract v1', () => {
         .toEqual(['recorded', 'minted', 'preview-required']);
 
       await store.authorize('preview-local-id', '2026-07-15T12:04:00.000Z');
-      await store.record(candidate('queued-local-id', true, '04'));
-      await store.record(candidate('published-local-id', true, '05'));
+      await record(candidate('queued-local-id', true, '04'));
+      await record(candidate('published-local-id', true, '05'));
       await store.markMinted('published-local-id', 'mint:published');
       await store.markPublished('published-local-id', 'ipfs://published');
-      await store.record(candidate('vetoed-local-id', true, '06'), undefined, {
+      await record(candidate('vetoed-local-id', true, '06'), {
         publicationState: 'vetoed',
       });
-      await store.record(candidate('rejected-local-id', false, '07'));
+      await record(candidate('rejected-local-id', false, '07'));
       await store.markRejected('rejected-local-id', 'not reproducible');
 
       const out = capture();
@@ -707,6 +735,8 @@ describe('jinn-layer process contract v1', () => {
     } finally {
       if (previousMineable === undefined) delete process.env['JINN_MINEABLE_STATE_DIR'];
       else process.env['JINN_MINEABLE_STATE_DIR'] = previousMineable;
+      if (previousEpisodes === undefined) delete process.env['JINN_LAYER_EPISODES_DIR'];
+      else process.env['JINN_LAYER_EPISODES_DIR'] = previousEpisodes;
       rmSync(root, { recursive: true, force: true });
     }
   });

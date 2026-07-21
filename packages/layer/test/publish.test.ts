@@ -160,6 +160,7 @@ describe('toPublishedEpisode', () => {
     expect(episode.outcome).not.toHaveProperty('verifiabilityTier');
     expect(episode).not.toHaveProperty('consent');
     expect(episode).not.toHaveProperty('steps');
+    expect(episode).not.toHaveProperty('contributionCandidate');
   });
 
   it('materializes the W2 retrieval decision as a named canonical field', async () => {

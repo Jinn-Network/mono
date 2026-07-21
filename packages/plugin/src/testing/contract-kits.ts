@@ -76,11 +76,14 @@ export function describeEvidencePortContract(
   });
 }
 
-export function describeContributionPortContract(makeAdapter: () => ContributionPort): void {
+export function describeContributionPortContract(
+  makeAdapter: (candidate?: ContributionCandidateV1) => ContributionPort,
+): void {
   describe('ContributionPort contract', () => {
     it('records a candidate locally even when publication consent is disabled', async () => {
-      const adapter = makeAdapter();
-      const recordResult = await adapter.recordMineable(contributionCandidate());
+      const input = contributionCandidate();
+      const adapter = makeAdapter(input);
+      const recordResult = await adapter.recordMineable(input);
       expect(recordResult.status).toBe('ok');
       if (recordResult.status !== 'ok') return;
       const statusResult = await adapter.mintStatus(recordResult.value.recordId);
@@ -111,10 +114,11 @@ export function describeContributionPortContract(makeAdapter: () => Contribution
     });
 
     it('requires preview authorization before a consented candidate is queued', async () => {
-      const adapter = makeAdapter();
-      const recordResult = await adapter.recordMineable(contributionCandidate({
+      const input = contributionCandidate({
         publishMinedTasksConsent: true,
-      }));
+      });
+      const adapter = makeAdapter(input);
+      const recordResult = await adapter.recordMineable(input);
       if (recordResult.status !== 'ok') throw new Error('recordMineable failed');
       expect(await adapter.mintStatus(recordResult.value.recordId)).toEqual({
         status: 'ok',
@@ -133,10 +137,11 @@ export function describeContributionPortContract(makeAdapter: () => Contribution
     });
 
     it('veto() changes only publication state and preserves the local record', async () => {
-      const adapter = makeAdapter();
-      const recordResult = await adapter.recordMineable(contributionCandidate({
+      const input = contributionCandidate({
         publishMinedTasksConsent: true,
-      }));
+      });
+      const adapter = makeAdapter(input);
+      const recordResult = await adapter.recordMineable(input);
       if (recordResult.status !== 'ok') throw new Error('recordMineable failed');
       const vetoResult = await adapter.veto(recordResult.value.recordId);
       expect(vetoResult).toEqual({
@@ -151,8 +156,9 @@ export function describeContributionPortContract(makeAdapter: () => Contribution
     });
 
     it('ledger() lists recorded entries', async () => {
-      const adapter = makeAdapter();
-      await adapter.recordMineable(contributionCandidate());
+      const input = contributionCandidate();
+      const adapter = makeAdapter(input);
+      await adapter.recordMineable(input);
       const ledgerResult = await adapter.ledger();
       expect(ledgerResult.status).toBe('ok');
       if (ledgerResult.status === 'ok') expect(ledgerResult.value.length).toBeGreaterThan(0);

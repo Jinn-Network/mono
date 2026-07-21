@@ -14,6 +14,10 @@
  */
 import { z } from 'zod';
 import { EligibilityVerdictSchema } from './eligibility-verdict.js';
+import {
+  ContributionCandidateV1ReadSchema,
+  ContributionCandidateV1Schema,
+} from './contribution-candidate.js';
 
 export const EPISODE_SCHEMA_VERSION = 'jinn.episode.v1' as const;
 export const EPISODE_PROVENANCES = [
@@ -264,6 +268,32 @@ const LineageShape = {
   mintRef: z.string().min(1).optional(),
 };
 
+function validateContributionAttachment(
+  episode: {
+    episodeId: string;
+    session: { kind: 'user' | 'host-internal' };
+    contributionCandidate?: { sourceId: string };
+  },
+  context: z.RefinementCtx,
+): void {
+  const candidate = episode.contributionCandidate;
+  if (!candidate) return;
+  if (episode.session.kind === 'host-internal') {
+    context.addIssue({
+      code: 'custom',
+      path: ['contributionCandidate'],
+      message: 'host-internal episodes cannot carry a contribution candidate',
+    });
+  }
+  if (candidate.sourceId !== episode.episodeId) {
+    context.addIssue({
+      code: 'custom',
+      path: ['contributionCandidate', 'sourceId'],
+      message: 'contribution candidate sourceId must match episodeId',
+    });
+  }
+}
+
 export const EpisodeV1WriteSchema = z.strictObject({
   schemaVersion: z.literal(EPISODE_SCHEMA_VERSION),
   episodeId: z.string().min(1),
@@ -291,7 +321,9 @@ export const EpisodeV1WriteSchema = z.strictObject({
   attemptGroup: AttemptGroupWriteSchema.optional(),
   activity: SessionActivityFactsWriteSchema.optional(),
   eligibility: EligibilityVerdictSchema.optional(),
-});
+  /** Private local mining facts. Publication projections must omit this field. */
+  contributionCandidate: ContributionCandidateV1Schema.optional(),
+}).superRefine(validateContributionAttachment);
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -355,7 +387,13 @@ function normalizeEpisodeRead(value: unknown): unknown {
     withoutNulls(raw['outcome'], ['summary', 'acceptedDiff', 'testRuns']),
   );
   normalized['cost'] = withoutNulls(raw['cost'], ['tokens', 'usdEstimate']);
-  for (const key of ['lineage', 'attemptGroup', 'activity', 'eligibility'] as const) {
+  for (const key of [
+    'lineage',
+    'attemptGroup',
+    'activity',
+    'eligibility',
+    'contributionCandidate',
+  ] as const) {
     if (normalized[key] === null) delete normalized[key];
   }
 
@@ -485,7 +523,8 @@ const EpisodeV1ReadObjectSchema = z.looseObject({
     reason: z.string().min(1),
     checkedAt: z.iso.datetime(),
   }).optional(),
-});
+  contributionCandidate: ContributionCandidateV1ReadSchema.optional(),
+}).superRefine(validateContributionAttachment);
 
 export const EpisodeV1Schema = z.preprocess(normalizeEpisodeRead, EpisodeV1ReadObjectSchema);
 

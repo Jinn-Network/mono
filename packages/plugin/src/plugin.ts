@@ -235,8 +235,47 @@ async function completeSession(
     },
     capturedEpisode.session.capturedAt,
   );
+  const embeddedCandidateResult = capturedEpisode.contributionCandidate === undefined
+    ? undefined
+    : ContributionCandidateV1Schema.safeParse(capturedEpisode.contributionCandidate);
+  const requestCandidateResult = input.contributionCandidate === undefined
+    ? undefined
+    : ContributionCandidateV1Schema.safeParse(input.contributionCandidate);
+  let resolvedCandidate: ContributionCandidateV1 | undefined;
+  let contributionUnavailableReason: string | undefined;
+  if (
+    (capturedEpisode.contributionCandidate !== undefined || input.contributionCandidate !== undefined)
+    && capturedEpisode.session.kind === 'host-internal'
+  ) {
+    contributionUnavailableReason = 'host-internal sessions cannot create contribution candidates';
+  } else if (embeddedCandidateResult && !embeddedCandidateResult.success) {
+    contributionUnavailableReason = 'invalid embedded contribution candidate';
+  } else if (requestCandidateResult && !requestCandidateResult.success) {
+    contributionUnavailableReason = 'invalid contribution candidate';
+  } else {
+    const embeddedCandidate = embeddedCandidateResult?.data;
+    const requestCandidate = requestCandidateResult?.data;
+    if (
+      embeddedCandidate
+      && requestCandidate
+      && JSON.stringify(embeddedCandidate) !== JSON.stringify(requestCandidate)
+    ) {
+      contributionUnavailableReason = 'embedded and request contribution candidates must match';
+    } else {
+      resolvedCandidate = requestCandidate ?? embeddedCandidate;
+      if (resolvedCandidate && resolvedCandidate.sourceId !== capturedEpisode.episodeId) {
+        contributionUnavailableReason = 'contribution candidate sourceId must match episodeId';
+        resolvedCandidate = undefined;
+      }
+    }
+  }
+
+  // A contribution payload must be present before the first immutable evidence
+  // write. Invalid or forbidden payloads are dropped so the session evidence
+  // itself is still retained.
+  const { contributionCandidate: _capturedCandidate, ...capturedWithoutCandidate } = capturedEpisode;
   const episode = EpisodeV1WriteSchema.parse({
-    ...capturedEpisode,
+    ...capturedWithoutCandidate,
     session: {
       ...capturedEpisode.session,
       kind: capturedEpisode.session.kind ?? 'user',
@@ -249,6 +288,7 @@ async function completeSession(
       : capturedEpisode.origin,
     activity,
     eligibility,
+    ...(resolvedCandidate ? { contributionCandidate: resolvedCandidate } : {}),
   });
 
   let persistence: PortResult<{ episodeId: string }>;
@@ -259,18 +299,20 @@ async function completeSession(
   }
 
   let contribution: PortResult<ContributionCompletionReceipt> | undefined;
-  if (input.contributionCandidate !== undefined && episode.session.kind === 'host-internal') {
-    contribution = unavailable('host-internal sessions cannot create contribution candidates');
-  } else if (input.contributionCandidate !== undefined) {
-    const parsedCandidate = ContributionCandidateV1Schema.safeParse(input.contributionCandidate);
-    if (!parsedCandidate.success) {
-      contribution = unavailable('invalid contribution candidate');
-    } else if (parsedCandidate.data.sourceId !== episode.episodeId) {
-      contribution = unavailable('contribution candidate sourceId must match episodeId');
+  if (contributionUnavailableReason) {
+    contribution = unavailable(contributionUnavailableReason);
+  } else if (resolvedCandidate !== undefined) {
+    const persistedEpisodeId = persistence.status === 'unavailable'
+      ? undefined
+      : persistence.value?.episodeId;
+    if (persistedEpisodeId !== episode.episodeId) {
+      contribution = unavailable(
+        'contribution reference not recorded because canonical episode persistence was not confirmed',
+      );
     } else {
       try {
         contribution = await deps.contribution.recordMineable(
-          parsedCandidate.data,
+          resolvedCandidate,
           input.contributionVetoed ? { publicationState: 'vetoed' } : undefined,
         );
       } catch (error) {

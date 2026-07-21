@@ -137,10 +137,9 @@ export interface DaemonConfig {
   evictionCheck?: EvictionLoopConfig;
 
   /**
-   * Commit-echo + session-echo harvest loop (task-creator v0). Scans
-   * configured local repos and/or drains the mineable-trace store (per
-   * `harvest.sources`) and admits minted tasks. Omitted or interval 0 → loop
-   * not started.
+   * Commit-echo harvest loop. `harvest.sources: ['sessions']` is retained as
+   * configuration compatibility but reports an explicit Stage 2 parked marker
+   * and performs no session mining. Omitted or interval 0 → loop not started.
    */
   harvest?: HarvestLoopConfig;
 

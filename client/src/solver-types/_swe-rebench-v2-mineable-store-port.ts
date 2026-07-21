@@ -32,7 +32,9 @@ export interface MineableTraceRecord {
   createdAt: string;
 }
 
-/** Structural subset of a persisted contribution consumed by session mining. */
+/** Resolver-backed view consumed by the dormant session miner. The queue
+ * persists only `recordId` and state; candidate/local metadata come from the
+ * matching canonical Episode. */
 export interface StoredMineableTraceRecord {
   recordId: string;
   candidate: {
@@ -55,6 +57,7 @@ export interface StoredMineableTraceRecord {
 }
 
 export interface MineableTraceStorePort {
+  /** Compatibility registration for an already-persisted canonical Episode. */
   append(record: MineableTraceRecord): Promise<void>;
   listUnmined(): Promise<MineableTraceRecord[]>;
   list(): Promise<StoredMineableTraceRecord[]>;
