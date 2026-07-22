@@ -1,6 +1,5 @@
 import { ScrubPipeline } from './pipeline.js';
 import { keyPolicyDetector, type KeyPolicy } from './key-policy.js';
-import { openredactionDetector } from './openredaction-stage.js';
 import { plainPatternsDetector } from './plain-patterns-stage.js';
 import { gitIdentityDetector } from './git-identity-detector.js';
 import { secretlintDetector } from './secretlint-stage.js';
@@ -59,6 +58,13 @@ export interface BuildScrubPipelineOptions {
   piiDetector?: PiiDetector;
   /** Known-identity pack + non-address allowlist (#1971). */
   knownIdentity?: AssembleKnownIdentityOptions | AssembledKnownIdentity;
+  /** Review-queue store for flag resolutions (#1973). */
+  reviewStore?: import('./review-queue.js').ReviewQueueStore;
+  /**
+   * When false, unresolved flags do not abort (tests). Default true for
+   * redact-mode publish lanes.
+   */
+  failClosedOnUnresolvedFlags?: boolean;
 }
 
 function resolveKnownIdentity(
@@ -70,28 +76,24 @@ function resolveKnownIdentity(
 }
 
 /**
- * Shared detector inventory (#1969 / #1970 / #1971 / #1972). Every publish/check
- * consumer runs the same owned detectors (key-policy, plain-patterns including
- * C1 wallet + A1 credential IDs, git-identity B2 carriers, known-identity pack
- * + non-address allowlist, Tier-1 reject/URL/IP/instruments/gitleaks, secretlint).
- * What varies is disposition / check-mode and — temporarily until #1973 — whether
- * the openredaction strangler is included (trace preset only). Seed also keeps
- * the entropy fallback off until the flag review surface can absorb A2 mid-band
- * without refuse-on-detection (#1409 shipped behavior).
+ * Shared detector inventory (#1969 / #1970 / #1971 / #1972 / #1973). Every
+ * publish/check consumer runs the same owned detectors (key-policy,
+ * plain-patterns including C1 wallet + A1 credential IDs, git-identity B2
+ * carriers, known-identity pack + non-address allowlist, Tier-1
+ * reject/URL/IP/instruments/gitleaks, secretlint). What varies is disposition /
+ * check-mode and whether an ML PII detector is injected. Seed keeps the entropy
+ * fallback off until A2 mid-band flags are absorbed without refuse-on-detection
+ * (#1409 shipped behavior). openredaction was retired in #1973.
  */
 export function sharedDetectorInventory(
   policy: KeyPolicy,
   opts: {
-    openredaction?: boolean;
     entropyFallback?: boolean;
     piiDetector?: PiiDetector;
     knownIdentity?: AssembleKnownIdentityOptions | AssembledKnownIdentity;
   } = {},
 ): Detector[] {
   const detectors: Detector[] = [keyPolicyDetector(policy)];
-  if (opts.openredaction) {
-    detectors.push(openredactionDetector(policy));
-  }
   detectors.push(plainPatternsDetector(policy));
   detectors.push(gitIdentityDetector(policy));
   detectors.push(
@@ -110,8 +112,7 @@ export function sharedDetectorInventory(
 }
 
 /**
- * Trace / redact-mode preset over the shared inventory. Includes the
- * openredaction strangler until #1973 retires it.
+ * Trace / redact-mode preset over the shared inventory.
  *
  * @deprecated Prefer thinking in terms of one inventory + policy; this builder
  * remains as a compatibility preset through the migration (#1969).
@@ -120,25 +121,31 @@ export function buildScrubPipeline(opts: BuildScrubPipelineOptions = {}): ScrubP
   const policy = opts.policy ?? DEFAULT_KEY_POLICY;
   return new ScrubPipeline(
     sharedDetectorInventory(policy, {
-      openredaction: true,
       entropyFallback: true,
       piiDetector: opts.piiDetector,
       knownIdentity: opts.knownIdentity,
     }),
-    { policy: DEFAULT_POLICY, checkMode: false },
+    {
+      policy: DEFAULT_POLICY,
+      checkMode: false,
+      reviewStore: opts.reviewStore,
+      failClosedOnUnresolvedFlags: opts.failClosedOnUnresolvedFlags,
+    },
   );
 }
 
 export interface BuildSeedScrubPipelineOptions {
   policy?: KeyPolicy;
   knownIdentity?: AssembleKnownIdentityOptions | AssembledKnownIdentity;
+  piiDetector?: PiiDetector;
+  reviewStore?: import('./review-queue.js').ReviewQueueStore;
+  failClosedOnUnresolvedFlags?: boolean;
 }
 
 /**
- * Seed / redact-mode preset (#1409 / #1969). Same owned inventory as layer-2
- * (no openredaction). Entropy fallback stays off to preserve the shipped
- * zero-corruption seed behavior until A2 mid-band can flag without tripping
- * refuse-on-detection.
+ * Seed / redact-mode preset (#1409 / #1969). Same owned inventory as layer-2.
+ * Entropy fallback stays off to preserve the shipped zero-corruption seed
+ * behavior until A2 mid-band can flag without tripping refuse-on-detection.
  *
  * @deprecated Compatibility preset over the one inventory + policy table.
  */
@@ -152,10 +159,15 @@ export function buildSeedScrubPipeline(
   const policy = opts.policy ?? DEFAULT_KEY_POLICY;
   return new ScrubPipeline(
     sharedDetectorInventory(policy, {
-      openredaction: false,
       entropyFallback: false,
+      piiDetector: opts.piiDetector,
       knownIdentity: opts.knownIdentity,
     }),
-    { policy: DEFAULT_POLICY, checkMode: false },
+    {
+      policy: DEFAULT_POLICY,
+      checkMode: false,
+      reviewStore: opts.reviewStore,
+      failClosedOnUnresolvedFlags: opts.failClosedOnUnresolvedFlags,
+    },
   );
 }

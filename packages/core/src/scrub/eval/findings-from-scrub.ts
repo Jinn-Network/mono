@@ -46,7 +46,6 @@ export function classFromRedactionDetail(detail: string | undefined, stage: stri
   if (d.includes('private-key') || d.includes('bip39') || d.includes('mnemonic')) return 'A4';
   if (d.includes('env-block')) return 'A5';
   if (d.includes('gitleaks')) return 'A1';
-  // openredaction types often uppercase
   if (detail === 'EMAIL' || detail.includes('EMAIL')) return 'B1';
   if (detail.includes('ETHEREUM') || detail.includes('ETH')) return 'C1';
   if (detail.includes('PATH') || detail.includes('USERNAME')) return 'D1';

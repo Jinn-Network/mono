@@ -12,6 +12,11 @@ import {
   type PolicyTable,
 } from './policy.js';
 import { assertNoRejectPublish } from './reject-publish-error.js';
+import {
+  findingFingerprint,
+  type ReviewDecision,
+  type ReviewQueueStore,
+} from './review-queue.js';
 import type { Attributes, RedactionRecord } from './types.js';
 
 export { RejectPublishError, assertNoRejectPublish, rejectPublishFindings } from './reject-publish-error.js';
@@ -23,6 +28,13 @@ export interface ApplyDispositionsOptions {
    * disposition rejects. Still applies redacts so the body change is visible.
    */
   checkMode?: boolean;
+  /**
+   * Optional review-queue store. When provided, resolved flags are honored
+   * (`approve-instance` → pass, `redact-instance` → redact, allowlist /
+   * identity-pack → pass). Unresolved flags stay as `flag` and are listed in
+   * {@link ApplyDispositionsResult.unresolvedFlags}.
+   */
+  reviewStore?: ReviewQueueStore;
 }
 
 export interface ApplyDispositionsResult {
@@ -31,6 +43,8 @@ export interface ApplyDispositionsResult {
   findings: Finding[];
   /** True when a reject-publish disposition fired, or check-mode saw a non-pass. */
   rejected: boolean;
+  /** Flag findings that remain unresolved after consulting the review queue. */
+  unresolvedFlags: Finding[];
 }
 
 /** Stub text for a redact disposition, keyed by class (+ optional evidence hint). */
@@ -67,18 +81,9 @@ export function stubForFinding(finding: Finding, occurrenceIndex: number): strin
     case 'B7':
       if (hint.includes('iban')) return '[IBAN]';
       return '[CARD]';
-    case 'D2':
-      return '[IP]';
-    case 'D3':
-      return '[HOST]';
     default: {
       if (hint.startsWith('ml:')) {
         return `[PII:${hint.slice('ml:'.length)}]`;
-      }
-      // openredaction types: keep a typed placeholder until #1973 retires the detector
-      if (hint.startsWith('openredaction:')) {
-        const type = hint.slice('openredaction:'.length);
-        return `[${type}_${occurrenceIndex}]`;
       }
       if (hint.startsWith('gitleaks:')) {
         return `[SECRET:${hint.slice('gitleaks:'.length)}]`;
@@ -89,15 +94,8 @@ export function stubForFinding(finding: Finding, occurrenceIndex: number): strin
   }
 }
 
-function redactionKind(scrubClass: ScrubClass, finding: Finding): string {
-  if (
-    finding.evidence.includes('drop-key') ||
-    finding.evidence.includes('machine-identity-key')
-  ) {
-    return 'dropped-key';
-  }
+function redactionKind(scrubClass: ScrubClass, _finding: Finding): string {
   if (scrubClass.startsWith('A')) return 'secret';
-  if (finding.evidence.some((e) => e.startsWith('openredaction:'))) return 'pii';
   return 'pii';
 }
 
@@ -108,7 +106,6 @@ function redactionDetail(finding: Finding): string | undefined {
   if (finding.class === 'C1') return 'eth-address';
   if (hint.startsWith('secret:')) return hint.slice('secret:'.length);
   if (hint.startsWith('gitleaks:')) return hint.slice('gitleaks:'.length);
-  if (hint.startsWith('openredaction:')) return hint.slice('openredaction:'.length);
   if (hint.startsWith('ml:')) return hint.slice('ml:'.length);
   return hint;
 }
@@ -120,20 +117,28 @@ function isKeyDropFinding(finding: Finding): boolean {
   );
 }
 
+function decisionOverridesFlag(decision: ReviewDecision | undefined): Disposition | undefined {
+  if (decision === 'redact-instance') return 'redact';
+  if (
+    decision === 'approve-instance' ||
+    decision === 'add-to-allowlist' ||
+    decision === 'add-to-identity-pack'
+  ) {
+    return 'pass';
+  }
+  return undefined;
+}
+
 function effectiveDisposition(
   finding: Finding,
   policy: PolicyTable,
   checkMode: boolean,
+  reviewStore?: ReviewQueueStore,
 ): Disposition {
   let disposition = resolveDisposition(finding.class, finding.confidence, policy);
-  // Temporary strangler (#1969 → #1973 / ML redesign): openredaction and ml-pii
-  // matches used to always redact. Promote flag → redact so those library hits
-  // stay fail-closed until owned Tier-1/Tier-2 detectors replace them.
-  if (
-    disposition === 'flag' &&
-    finding.evidence.some((e) => e.startsWith('openredaction:') || e.startsWith('ml:'))
-  ) {
-    disposition = 'redact';
+  if (disposition === 'flag' && reviewStore) {
+    const override = decisionOverridesFlag(reviewStore.resolutionFor(finding));
+    if (override) disposition = override;
   }
   if (checkMode && disposition !== 'pass') {
     // Check-mode still applies the underlying redact/reject action; the
@@ -154,8 +159,10 @@ export function applyDispositions(
 ): ApplyDispositionsResult {
   const policy = opts.policy ?? DEFAULT_POLICY;
   const checkMode = opts.checkMode ?? false;
+  const reviewStore = opts.reviewStore;
   const out: Attributes = { ...attributes };
   const redactions: RedactionRecord[] = [];
+  const unresolvedFlags: Finding[] = [];
   let rejected = false;
 
   // Key-drop findings first (A5 structural drop-key, D3 machine-identity).
@@ -164,7 +171,7 @@ export function applyDispositions(
   // still rejects so distill stays fail-closed on any non-pass.
   for (const finding of findings) {
     if (!isKeyDropFinding(finding)) continue;
-    const disposition = effectiveDisposition(finding, policy, checkMode);
+    const disposition = effectiveDisposition(finding, policy, checkMode, reviewStore);
     if (disposition === 'pass') continue;
     delete out[finding.span.key];
     redactions.push({
@@ -197,7 +204,7 @@ export function applyDispositions(
     const redactRecords: RedactionRecord[] = [];
 
     for (const finding of sorted) {
-      const disposition = effectiveDisposition(finding, policy, checkMode);
+      const disposition = effectiveDisposition(finding, policy, checkMode, reviewStore);
       if (disposition === 'pass') {
         // Auditable allowlist hit (§6.4): record "we saw it and passed it on purpose".
         const allowEvidence = finding.evidence.find((e) => e.startsWith('allowlist:'));
@@ -224,9 +231,9 @@ export function applyDispositions(
       }
 
       if (disposition === 'flag') {
-        // Flag review surface not shipped yet: in redact-mode leave text and
-        // do not invent a redaction record (would trip refuse-on-detection).
-        // In check-mode, record so consumers reject.
+        unresolvedFlags.push(finding);
+        // In redact-mode leave text (review queue owns the hold). In check-mode,
+        // record so consumers reject.
         if (checkMode) {
           rejected = true;
           redactions.push({
@@ -245,7 +252,7 @@ export function applyDispositions(
       if (covered.some((c) => start < c.end && end > c.start)) continue;
 
       const leftIndex = keyFindings.filter((f) => {
-        if (effectiveDisposition(f, policy, checkMode) !== 'redact') return false;
+        if (effectiveDisposition(f, policy, checkMode, reviewStore) !== 'redact') return false;
         return f.span.start < start;
       }).length;
       const stub = stubForFinding(finding, leftIndex);
@@ -268,7 +275,22 @@ export function applyDispositions(
     rejected = true;
   }
 
-  return { attributes: out, redactions, findings, rejected };
+  // Dedupe unresolved flags by fingerprint (nested walks can re-emit).
+  const seen = new Set<string>();
+  const uniqueUnresolved = unresolvedFlags.filter((f) => {
+    const fp = findingFingerprint(f);
+    if (seen.has(fp)) return false;
+    seen.add(fp);
+    return true;
+  });
+
+  return {
+    attributes: out,
+    redactions,
+    findings,
+    rejected,
+    unresolvedFlags: uniqueUnresolved,
+  };
 }
 
 /**
@@ -276,13 +298,17 @@ export function applyDispositions(
  *
  * For reject-publish classes (A4/A5 content), prefer
  * {@link assertNoRejectPublish} so the abort is a loud class-named error.
+ * For unresolved flags, prefer {@link assertNoUnresolvedFlags} from
+ * `review-queue.ts`.
  */
 export function shouldRejectPublish(result: {
   rejected?: boolean;
   redactions: RedactionRecord[];
   findings?: Finding[];
+  unresolvedFlags?: Finding[];
 }): boolean {
   if (result.rejected) return true;
+  if (result.unresolvedFlags && result.unresolvedFlags.length > 0) return true;
   return result.redactions.length > 0;
 }
 

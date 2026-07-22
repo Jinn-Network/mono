@@ -5,8 +5,8 @@ import { buildSeedScrubPipeline, buildLayer2ScrubPipeline } from '../src/scrub/i
  * Seed profile: wallet-address redaction (#1959) — coupled to #1784.
  *
  * The episode seed lane runs the seed profile (buildSeedScrubPipeline; the
- * #1784 switch landed in c59a0030a). The seed profile drops openredaction, so
- * before this rule it passed `0x`+40-hex wallet addresses through verbatim to
+ * #1784 switch landed in c59a0030a). Before the C1 rule landed it passed
+ * `0x`+40-hex wallet addresses through verbatim to
  * the public, on-chain-anchored corpus — the leak documented in #1959. This
  * pins the deterministic address rule that closes it. The rule is the scrub
  * redesign's C1 detector (PR #1967, `docs/superpowers/specs/2026-07-22-scrub-
@@ -86,12 +86,11 @@ describe('seed profile — wallet-address rule (#1959)', () => {
 /**
  * Seed profile: no over-redaction of ordinary prose (#1784 regression corpus).
  *
- * The #1784 defacement came from openredaction firing on ordinary words and
- * hex-looking ids in reviewed public seed content. The seed profile omits
- * openredaction, so each of these known trigger strings must pass through
- * untouched with zero redactions. This is the corpus the redesign's §7
- * zero-corruption gate permanently locks; pinned here as the tactical
- * regression net.
+ * The #1784 defacement came from regex PII stages firing on ordinary words and
+ * hex-looking ids in reviewed public seed content. Each of these known trigger
+ * strings must pass through untouched with zero redactions. This is the corpus
+ * the redesign's §7 zero-corruption gate permanently locks; pinned here as the
+ * tactical regression net.
  */
 describe('seed profile — no over-redaction of prose (#1784 regression corpus)', () => {
   it.each([

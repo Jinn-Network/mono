@@ -29,12 +29,9 @@ describe('core scrub domain (#1836)', () => {
       'gitleaks',
       'secretlint',
     ];
-    expect(buildScrubPipeline().components.map((component) => component.name)).toEqual([
-      'key-policy',
-      'openredaction',
-      ...core.slice(1),
-    ]);
+    expect(buildScrubPipeline().components.map((component) => component.name)).toEqual(core);
     expect(buildSeedScrubPipeline().components.map((component) => component.name)).toEqual(core);
+    expect(buildScrubPipeline().components.map((c) => c.name)).not.toContain('openredaction');
   });
 });
 

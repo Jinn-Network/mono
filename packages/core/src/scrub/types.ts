@@ -18,6 +18,8 @@ export interface ScrubResult {
   findings?: import('./finding.js').Finding[];
   /** True when reject-publish fired or check-mode saw a non-pass finding. */
   rejected?: boolean;
+  /** Unresolved flag findings held for review (#1973). */
+  unresolvedFlags?: import('./finding.js').Finding[];
 }
 
 /**

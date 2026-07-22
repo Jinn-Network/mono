@@ -119,8 +119,8 @@ export const DEFAULT_POLICY: PolicyTable = {
       LOW: 'flag',
       VERY_LOW: 'pass',
     },
-    // C2: flag is the §3.2 default, but the review-queue surface does not exist
-    // yet — leave as pass so 0x+64 provenance receipts survive (locked Q).
+    // C2: §3.2 default is flag, but provenance receipts (0x+64 tx hashes) must
+    // survive — leave as pass (locked Q / deferred from review-queue landing).
     C2: {
       VERY_HIGH: 'pass',
       HIGH: 'pass',

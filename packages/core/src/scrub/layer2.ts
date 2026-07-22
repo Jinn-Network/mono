@@ -19,10 +19,10 @@ export interface BuildLayer2ScrubPipelineOptions {
 /**
  * Layer-2 / check-mode preset (#1969 / design §6.5).
  *
- * Same owned detector inventory as the seed preset (no openredaction); checkMode
- * maps any non-pass disposition to reject — one mapping line, not a second
- * pipeline. Entropy fallback stays ON (stricter net; a false positive costs one
- * re-distill, never defaces published content).
+ * Same owned detector inventory as the seed preset; checkMode maps any non-pass
+ * disposition to reject — one mapping line, not a second pipeline. Entropy
+ * fallback stays ON (stricter net; a false positive costs one re-distill, never
+ * defaces published content).
  *
  * @deprecated Compatibility preset over the one inventory + policy table.
  */
@@ -36,7 +36,6 @@ export function buildLayer2ScrubPipeline(
   const policy = opts.policy ?? DEFAULT_KEY_POLICY;
   return new ScrubPipeline(
     sharedDetectorInventory(policy, {
-      openredaction: false,
       entropyFallback: true,
       knownIdentity: opts.knownIdentity,
     }),

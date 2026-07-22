@@ -2,6 +2,7 @@ import { buildLayer2ScrubPipeline } from '../layer2.js';
 import { buildScrubPipeline, buildSeedScrubPipeline } from '../build.js';
 import type { ScrubPipeline } from '../pipeline.js';
 import { RejectPublishError } from '../reject-publish-error.js';
+import { UnresolvedFlagError } from '../review-queue.js';
 import { aggregateClassMap, emptyCounts, scoreClass } from './metrics.js';
 import { findingsFromScrubResult } from './findings-from-scrub.js';
 import type {
@@ -10,6 +11,7 @@ import type {
   EvalFixture,
   ScrubClass,
 } from './types.js';
+import { createMemoryReviewQueueStore } from '../review-queue.js';
 
 export function pipelineForProfile(
   profile: EvalFixture['profile'],
@@ -19,14 +21,20 @@ export function pipelineForProfile(
     fixture?.identityPack || fixture?.allowlist
       ? { pack: fixture.identityPack, allowlist: fixture.allowlist }
       : undefined;
+  // Bench must not fail-closed on flags (metrics need the scrubbed text +
+  // unresolvedFlags); use an in-memory review store and disable abort.
+  const reviewOpts = {
+    reviewStore: createMemoryReviewQueueStore(),
+    failClosedOnUnresolvedFlags: false as const,
+  };
   switch (profile ?? 'seed') {
     case 'trace':
-      return buildScrubPipeline({ knownIdentity });
+      return buildScrubPipeline({ knownIdentity, ...reviewOpts });
     case 'layer2':
       return buildLayer2ScrubPipeline({ knownIdentity });
     case 'seed':
     default:
-      return buildSeedScrubPipeline({ knownIdentity });
+      return buildSeedScrubPipeline({ knownIdentity, ...reviewOpts });
   }
 }
 
@@ -50,6 +58,12 @@ export async function scoreFixture(fixture: EvalFixture): Promise<{
       // Reject-publish aborts without redacting the span — count as a hit on
       // the labeled class (or the error's class when unlabeled).
       rejectClass = err.scrubClass;
+      scrubbed = fixture.text;
+      redactions = [];
+    } else if (err instanceof UnresolvedFlagError) {
+      // Flag-hold aborts publish; for bench metrics treat as a class hit on
+      // the first flagged finding (flag-or-redact recall).
+      rejectClass = err.findings[0]?.class;
       scrubbed = fixture.text;
       redactions = [];
     } else {

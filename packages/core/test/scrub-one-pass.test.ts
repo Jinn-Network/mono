@@ -53,7 +53,7 @@ describe('scrub one-pass inventory (#1969)', () => {
     expect(out).not.toContain('/Users/jane');
   });
 
-  it('exposes the same core detector names; openredaction remains trace-only until #1973', () => {
+  it('exposes the same core detector names on every builder (openredaction retired)', () => {
     const core = [
       'key-policy',
       'plain-patterns',
@@ -68,11 +68,7 @@ describe('scrub one-pass inventory (#1969)', () => {
     ];
     expect(buildSeedScrubPipeline().components.map((c) => c.name)).toEqual(core);
     expect(buildLayer2ScrubPipeline().components.map((c) => c.name)).toEqual(core);
-    expect(buildScrubPipeline().components.map((c) => c.name)).toEqual([
-      'key-policy',
-      'openredaction',
-      ...core.slice(1),
-    ]);
+    expect(buildScrubPipeline().components.map((c) => c.name)).toEqual(core);
   });
 
   it('always registers credential-ID shapes (A1) — seed catches bare AKIA without entropy', async () => {
