@@ -4,22 +4,27 @@ import {
   buildSeedScrubPipeline,
 } from '../../../src/trajectory/scrub/build.js';
 
-describe('pipeline builders (#1409)', () => {
-  // Trace-side composition includes known-identity (#1971) after plain-patterns.
-  test('default buildScrubPipeline composition is key-policy → openredaction → plain-patterns → known-identity → secretlint', () => {
+describe('pipeline builders (#1409 / #1970 / #1971 / #1972)', () => {
+  const ownedCore = [
+    'plain-patterns',
+    'git-identity',
+    'known-identity',
+    'url-credentials',
+    'reject-classes',
+    'checksummed-instruments',
+    'ip-address',
+    'gitleaks',
+    'secretlint',
+  ];
+
+  test('default buildScrubPipeline includes openredaction + all owned detectors', () => {
     const names = buildScrubPipeline().components.map((c) => c.name);
-    expect(names).toEqual([
-      'key-policy',
-      'openredaction',
-      'plain-patterns',
-      'known-identity',
-      'secretlint',
-    ]);
+    expect(names).toEqual(['key-policy', 'openredaction', ...ownedCore]);
   });
 
-  test('seed pipeline drops the probabilistic stages: key-policy → plain-patterns → known-identity → secretlint', () => {
+  test('seed pipeline drops openredaction but keeps owned detectors', () => {
     const names = buildSeedScrubPipeline().components.map((c) => c.name);
-    expect(names).toEqual(['key-policy', 'plain-patterns', 'known-identity', 'secretlint']);
+    expect(names).toEqual(['key-policy', ...ownedCore]);
   });
 
   // #1415 regression: secretlint pass-1 does not detect bare AWS access-key

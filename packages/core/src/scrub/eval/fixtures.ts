@@ -19,8 +19,15 @@ function labeled(
   };
 }
 
+/** Synthetic BIP-39 12-word run (wordlist words; not a funded wallet). */
+const SYNTH_MNEMONIC =
+  'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+
+/** Synthetic 64-hex private-key material (not a real key). */
+const SYNTH_PRIVKEY = 'a'.repeat(64);
+
 /**
- * Public synthetic fixtures for CI (#1968). No real PII — template shapes only.
+ * Public synthetic fixtures for CI (#1968 / #1972). No real PII — template shapes only.
  * Targets mirror design §3.2; baseline may miss some classes until later PRs.
  */
 export function syntheticFixtures(): EvalFixture[] {
@@ -49,7 +56,7 @@ export function syntheticFixtures(): EvalFixture[] {
       'Export GITHUB_TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd before running.',
       'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd',
       'A1',
-      { profile: 'trace' },
+      { profile: 'seed' },
     ),
     labeled(
       'A1-aws-key-id',
@@ -57,6 +64,54 @@ export function syntheticFixtures(): EvalFixture[] {
       'AKIAIOSFODNN7EXAMPLE',
       'A1',
       { profile: 'seed' },
+    ),
+    labeled(
+      'A3-url-userinfo',
+      'Fetch https://user:s3cr3t@localhost/v2/manifests/latest then continue.',
+      'user:s3cr3t@',
+      'A3',
+    ),
+    labeled(
+      'A3-url-token-query',
+      'Webhook https://hooks.example/push?token=tok_synth_example_value_001&x=1 fired.',
+      'tok_synth_example_value_001',
+      'A3',
+    ),
+    labeled(
+      'A4-private-key-hex',
+      `Loaded private key ${SYNTH_PRIVKEY} into the signer.`,
+      SYNTH_PRIVKEY,
+      'A4',
+    ),
+    labeled(
+      'A4-bip39-mnemonic',
+      `Recovery phrase: ${SYNTH_MNEMONIC}`,
+      SYNTH_MNEMONIC,
+      'A4',
+    ),
+    labeled(
+      'A5-env-block',
+      'Tool dumped env:\nAPI_KEY=synth\nDATABASE_URL=postgres://x\nSECRET_TOKEN=yyy\nDone.',
+      'API_KEY=synth\nDATABASE_URL=postgres://x\nSECRET_TOKEN=yyy',
+      'A5',
+    ),
+    labeled(
+      'B7-card-luhn',
+      'Customer card: 4111111111111111.',
+      '4111111111111111',
+      'B7',
+    ),
+    labeled(
+      'B7-iban-mod97',
+      'Wire to IBAN GB82WEST12345698765432 only.',
+      'GB82WEST12345698765432',
+      'B7',
+    ),
+    labeled(
+      'D2-public-ip',
+      'Peer connected from 8.8.8.8 during the probe.',
+      '8.8.8.8',
+      'D2',
     ),
     // Hazard: bare UUID must NOT be treated as a secret (batch-2 FP class).
     {
@@ -86,6 +141,14 @@ export function syntheticFixtures(): EvalFixture[] {
     {
       id: 'hazard-env-ref-survive',
       text: 'curl -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/user',
+      labels: [],
+      profile: 'seed',
+      mustSurvive: true,
+    },
+    // Hazard: loopback IP must survive (illustrative config knowledge).
+    {
+      id: 'hazard-loopback-ip-survive',
+      text: 'Listen on 127.0.0.1:7331 for the local dashboard.',
       labels: [],
       profile: 'seed',
       mustSurvive: true,
@@ -142,10 +205,10 @@ export function syntheticFixtures(): EvalFixture[] {
  * Corruption corpus: known-clean prose that must stay byte-identical.
  * Includes #1784 residual samples that seed profile intentionally leaves alone,
  * plus a short excerpt shape from distractor-operator-claims (no secrets).
+ * Checksummed cards/IBANs are labeled fixtures (B7), not corruption samples.
  */
 export function corruptionFixtures(): EvalFixture[] {
   const residuals = [
-    'Customer card: 4111 1111 1111 1111.',
     'Call the customer at +1 (415) 555-2671.',
     'Reporter SSN on file: 123-45-6789.',
     'Medical record MRN: MED123456.',

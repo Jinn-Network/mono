@@ -49,6 +49,15 @@ describe('scrub eval CI fixtures (#1968)', () => {
     expect(report.classes.C1?.recall).toBeGreaterThanOrEqual(0.99);
   });
 
+  it('baseline: reject classes A4/A5 and Tier-1 A3/B7/D2 clear on synthetic fixtures', async () => {
+    const report = await runBench(syntheticFixtures());
+    expect(report.classes.A4?.recall).toBeGreaterThanOrEqual(0.99);
+    expect(report.classes.A5?.recall).toBeGreaterThanOrEqual(0.99);
+    expect(report.classes.A3?.recall).toBeGreaterThanOrEqual(0.99);
+    expect(report.classes.B7?.recall).toBeGreaterThanOrEqual(0.99);
+    expect(report.classes.D2?.recall).toBeGreaterThanOrEqual(0.99);
+  });
+
   it('baseline: seed profile catches B2 git-identity carriers (≥0.95 recall/precision)', async () => {
     const report = await runBench(syntheticFixtures().filter((f) => f.id === 'B2-git-author'));
     expect(report.classes.B2?.recall).toBeGreaterThanOrEqual(0.95);

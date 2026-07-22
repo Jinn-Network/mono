@@ -1,6 +1,7 @@
 import { buildLayer2ScrubPipeline } from '../layer2.js';
 import { buildScrubPipeline, buildSeedScrubPipeline } from '../build.js';
 import type { ScrubPipeline } from '../pipeline.js';
+import { RejectPublishError } from '../reject-publish-error.js';
 import { aggregateClassMap, emptyCounts, scoreClass } from './metrics.js';
 import { findingsFromScrubResult } from './findings-from-scrub.js';
 import type {
@@ -35,17 +36,56 @@ export async function scoreFixture(fixture: EvalFixture): Promise<{
 }> {
   const pipeline = pipelineForProfile(fixture.profile, fixture);
   const key = fixture.key ?? 'content';
-  const result = await pipeline.run({ [key]: fixture.text });
-  const scrubbed = String(result.attributes[key] ?? '');
+
+  let scrubbed: string;
+  let redactions: Array<{ stage: string; detail?: string }> = [];
+  let rejectClass: ScrubClass | undefined;
+
+  try {
+    const result = await pipeline.run({ [key]: fixture.text });
+    scrubbed = String(result.attributes[key] ?? '');
+    redactions = result.redactions;
+  } catch (err) {
+    if (err instanceof RejectPublishError) {
+      // Reject-publish aborts without redacting the span — count as a hit on
+      // the labeled class (or the error's class when unlabeled).
+      rejectClass = err.scrubClass;
+      scrubbed = fixture.text;
+      redactions = [];
+    } else {
+      throw err;
+    }
+  }
 
   if (fixture.mustSurvive) {
     return {
       counts: {},
-      corruptionFailure: scrubbed !== fixture.text,
+      corruptionFailure: scrubbed !== fixture.text || rejectClass !== undefined,
     };
   }
 
-  const findings = findingsFromScrubResult(fixture, scrubbed, result.redactions);
+  if (rejectClass) {
+    const counts: Partial<Record<ScrubClass, ClassCounts>> = {};
+    const labeled = fixture.labels.filter((l) => l.class === rejectClass);
+    if (labeled.length > 0) {
+      counts[rejectClass] = scoreClass(
+        labeled,
+        labeled.map((l) => ({ class: rejectClass!, start: l.start, end: l.end })),
+      );
+    } else {
+      counts[rejectClass] = { tp: 0, fp: 1, fn: 0 };
+    }
+    for (const l of fixture.labels) {
+      if (!counts[l.class]) counts[l.class] = emptyCounts();
+      if (l.class !== rejectClass) {
+        // Other labeled classes missed because publish aborted first.
+        counts[l.class] = scoreClass([l], []);
+      }
+    }
+    return { counts, corruptionFailure: false };
+  }
+
+  const findings = findingsFromScrubResult(fixture, scrubbed, redactions);
   const classes = new Set<ScrubClass>([
     ...fixture.labels.map((l) => l.class),
     ...findings.map((f) => f.class),
@@ -56,7 +96,6 @@ export async function scoreFixture(fixture: EvalFixture): Promise<{
     const pred = findings.filter((f) => f.class === cls);
     counts[cls] = scoreClass(gold, pred);
   }
-  // Ensure every labeled class appears even if empty pred
   for (const l of fixture.labels) {
     if (!counts[l.class]) counts[l.class] = emptyCounts();
   }

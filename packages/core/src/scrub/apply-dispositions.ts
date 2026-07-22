@@ -11,7 +11,10 @@ import {
   type Disposition,
   type PolicyTable,
 } from './policy.js';
+import { assertNoRejectPublish } from './reject-publish-error.js';
 import type { Attributes, RedactionRecord } from './types.js';
+
+export { RejectPublishError, assertNoRejectPublish, rejectPublishFindings } from './reject-publish-error.js';
 
 export interface ApplyDispositionsOptions {
   policy?: PolicyTable;
@@ -59,6 +62,15 @@ export function stubForFinding(finding: Finding, occurrenceIndex: number): strin
       return '[SECRET:redacted]';
     case 'A2':
       return '[SECRET:high-entropy]';
+    case 'A3':
+      return '[SECRET:url-credential]';
+    case 'B7':
+      if (hint.includes('iban')) return '[IBAN]';
+      return '[CARD]';
+    case 'D2':
+      return '[IP]';
+    case 'D3':
+      return '[HOST]';
     default: {
       if (hint.startsWith('ml:')) {
         return `[PII:${hint.slice('ml:'.length)}]`;
@@ -68,6 +80,9 @@ export function stubForFinding(finding: Finding, occurrenceIndex: number): strin
         const type = hint.slice('openredaction:'.length);
         return `[${type}_${occurrenceIndex}]`;
       }
+      if (hint.startsWith('gitleaks:')) {
+        return `[SECRET:${hint.slice('gitleaks:'.length)}]`;
+      }
       const label = hint || finding.class;
       return `[PII:${label}]`;
     }
@@ -75,7 +90,12 @@ export function stubForFinding(finding: Finding, occurrenceIndex: number): strin
 }
 
 function redactionKind(scrubClass: ScrubClass, finding: Finding): string {
-  if (scrubClass === 'A5') return 'dropped-key';
+  if (
+    finding.evidence.includes('drop-key') ||
+    finding.evidence.includes('machine-identity-key')
+  ) {
+    return 'dropped-key';
+  }
   if (scrubClass.startsWith('A')) return 'secret';
   if (finding.evidence.some((e) => e.startsWith('openredaction:'))) return 'pii';
   return 'pii';
@@ -83,13 +103,21 @@ function redactionKind(scrubClass: ScrubClass, finding: Finding): string {
 
 function redactionDetail(finding: Finding): string | undefined {
   const hint = finding.evidence[0] ?? finding.class;
-  if (hint === 'drop-key') return undefined;
+  if (hint === 'drop-key' || hint === 'machine-identity-key') return undefined;
   // Normalize C1 to the shipped detail id so seed/trace/layer2 records match.
   if (finding.class === 'C1') return 'eth-address';
   if (hint.startsWith('secret:')) return hint.slice('secret:'.length);
+  if (hint.startsWith('gitleaks:')) return hint.slice('gitleaks:'.length);
   if (hint.startsWith('openredaction:')) return hint.slice('openredaction:'.length);
   if (hint.startsWith('ml:')) return hint.slice('ml:'.length);
   return hint;
+}
+
+function isKeyDropFinding(finding: Finding): boolean {
+  return (
+    finding.evidence.includes('drop-key') ||
+    finding.evidence.includes('machine-identity-key')
+  );
 }
 
 function effectiveDisposition(
@@ -130,9 +158,12 @@ export function applyDispositions(
   const redactions: RedactionRecord[] = [];
   let rejected = false;
 
-  // Drop-key findings first (A5).
+  // Key-drop findings first (A5 structural drop-key, D3 machine-identity).
+  // Structural key drops remove the attribute; they do NOT reject-publish in
+  // redact-mode (content-level A4/A5 spans own the loud abort). Check-mode
+  // still rejects so distill stays fail-closed on any non-pass.
   for (const finding of findings) {
-    if (!(finding.class === 'A5' && finding.evidence.includes('drop-key'))) continue;
+    if (!isKeyDropFinding(finding)) continue;
     const disposition = effectiveDisposition(finding, policy, checkMode);
     if (disposition === 'pass') continue;
     delete out[finding.span.key];
@@ -141,13 +172,13 @@ export function applyDispositions(
       stage: finding.detector.name,
       kind: 'dropped-key',
     });
-    if (disposition === 'reject-publish' || checkMode) rejected = true;
+    if (checkMode) rejected = true;
   }
 
   // Group remaining span findings by key, apply right-to-left.
   const byKey = new Map<string, Finding[]>();
   for (const finding of findings) {
-    if (finding.class === 'A5' && finding.evidence.includes('drop-key')) continue;
+    if (isKeyDropFinding(finding)) continue;
     if (!(finding.span.key in out)) continue;
     const list = byKey.get(finding.span.key) ?? [];
     list.push(finding);
@@ -240,11 +271,32 @@ export function applyDispositions(
   return { attributes: out, redactions, findings, rejected };
 }
 
-/** True when publish/check should refuse the item. */
+/**
+ * True when publish/check should refuse the item.
+ *
+ * For reject-publish classes (A4/A5 content), prefer
+ * {@link assertNoRejectPublish} so the abort is a loud class-named error.
+ */
 export function shouldRejectPublish(result: {
   rejected?: boolean;
   redactions: RedactionRecord[];
+  findings?: Finding[];
 }): boolean {
   if (result.rejected) return true;
   return result.redactions.length > 0;
+}
+
+/**
+ * Apply dispositions, then abort loudly when a reject-publish class fired.
+ * Use at publish altitude (capture/emit) — not for check-mode distill, which
+ * maps redactions to rejection reasons without throwing.
+ */
+export function applyDispositionsOrReject(
+  attributes: Attributes,
+  findings: Finding[],
+  opts: ApplyDispositionsOptions = {},
+): ApplyDispositionsResult {
+  const applied = applyDispositions(attributes, findings, opts);
+  assertNoRejectPublish(applied, opts.policy ?? DEFAULT_POLICY);
+  return applied;
 }
