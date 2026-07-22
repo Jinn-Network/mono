@@ -247,6 +247,12 @@ async function executeSafeTransactionInner(
               null,
             );
           }
+          if (msg.includes('GS026')) {
+            throw new Error(
+              'Safe execTransaction rejected (GS026: invalid owner — signing key is not a Safe owner). ' +
+                'Repair the Safe owner set or repoint the agent signing key to a current owner.',
+            );
+          }
         }
         throw writeErr;
       }
@@ -259,7 +265,7 @@ async function executeSafeTransactionInner(
         data,
       });
       // Wait inside the retry attempt so reverted Safe executions caused by
-      // stale nonce signatures (GS026/GS013) re-read nonce and re-sign.
+      // stale nonce / signature races re-read nonce and re-sign.
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
       if (receipt.status !== 'success') {
         // Safe v1.3 wraps inner reverts as GS013 — re-simulate to recover
@@ -293,9 +299,13 @@ async function executeSafeTransactionInner(
             hash as Hex,
           );
         }
-        // No inner revert on re-simulation: the on-chain failure was a
-        // signature/owner (GS026) nonce race — retryable, self-heals on re-sign.
-        throw new Error(`Safe execTransaction reverted (GS026/GS013 possible stale nonce, txHash=${hash})`);
+        // No inner revert on re-simulation: likely a stale Safe nonce or
+        // signature race — retryable, self-heals on re-sign. Do not embed
+        // GS026/GS013 in the message: bare GS026 is terminal (invalid owner)
+        // and bare GS013 is terminal (inner revert). Issue #1986.
+        throw new Error(
+          `Safe execTransaction reverted (possible stale Safe nonce or signature race, txHash=${hash})`,
+        );
       }
       await nonceLedger.markResolved();
       return hash;

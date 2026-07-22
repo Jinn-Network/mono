@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import type { Hex } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import { buildSafeSignature, createClients, executeSafeTransaction } from '../../../src/adapters/mech/safe.js';
-import { createMemoryTxSubmissionLedger } from '../../../src/tx-retry.js';
+import { createMemoryTxSubmissionLedger, isRecoverableTransactionError } from '../../../src/tx-retry.js';
 
 const TEST_PRIVATE_KEY = `0x${'22'.repeat(32)}` as const;
 const TEST_SIGNER_ADDRESS = '0x000000000000000000000000000000000000bEEF' as const;
@@ -352,5 +352,91 @@ describe('executeSafeTransaction reconcile-first (issue #897)', () => {
     expect(getTransactionReceipt).not.toHaveBeenCalledWith({ hash: FOREIGN_HASH });
     // Two write attempts: the failed underpriced one, then the fresh re-sign.
     expect(writeContract).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('executeSafeTransaction GS026 owner mismatch (issue #1986)', () => {
+  const makeClients = () => {
+    const signMessage = vi.fn().mockResolvedValue(TEST_SAFE_SIGNATURE);
+    const readContract = vi.fn(async (args: { functionName: string }) => {
+      if (args.functionName === 'nonce') return 0n;
+      if (args.functionName === 'getTransactionHash') return TEST_SAFE_TX_HASH;
+      throw new Error(`unexpected readContract call: ${args.functionName}`);
+    });
+    const estimateFeesPerGas = vi.fn().mockResolvedValue({
+      maxFeePerGas: 100n,
+      maxPriorityFeePerGas: 10n,
+    });
+    const getGasPrice = vi.fn();
+    const getChainId = vi.fn().mockResolvedValue(baseSepolia.id);
+    const getTransactionCount = vi.fn().mockResolvedValue(2301);
+    return {
+      publicClient: {
+        getChainId,
+        getTransactionCount,
+        readContract,
+        estimateFeesPerGas,
+        getGasPrice,
+      } as never,
+      walletClient: {
+        account: { address: TEST_SIGNER_ADDRESS },
+        chain: baseSepolia,
+        signMessage,
+      } as never,
+      signMessage,
+      readContract,
+    };
+  };
+
+  it('surfaces GS026 on the estimate path as a terminal owner-mismatch error', async () => {
+    const { publicClient, walletClient } = makeClients();
+    const writeContract = vi
+      .fn()
+      .mockRejectedValue(new Error('The contract function "execTransaction" reverted: GS026'));
+    const call = vi.fn().mockResolvedValue({ data: '0x' });
+
+    await expect(
+      executeSafeTransaction(
+        { ...publicClient, call } as never,
+        { ...walletClient, writeContract } as never,
+        {
+          safeAddress: TEST_SAFE_ADDRESS,
+          to: TEST_TARGET_ADDRESS,
+          value: 0n,
+          data: TEST_CALL_DATA,
+        },
+        { ledger: createMemoryTxSubmissionLedger() },
+      ),
+    ).rejects.toThrow(/GS026.*owner/i);
+
+    expect(call).toHaveBeenCalled();
+  });
+
+  it('keeps receipt-path stale-nonce races retryable without embedding GS026', async () => {
+    const REVERT_HASH = `0x${'dd'.repeat(32)}` as Hex;
+    const { publicClient, walletClient } = makeClients();
+    const writeContract = vi.fn().mockResolvedValue(REVERT_HASH);
+    const waitForTransactionReceipt = vi.fn().mockResolvedValue({ status: 'reverted' });
+    const call = vi.fn().mockResolvedValue({ data: '0x' });
+
+    await expect(
+      executeSafeTransaction(
+        { ...publicClient, call, waitForTransactionReceipt } as never,
+        { ...walletClient, writeContract } as never,
+        {
+          safeAddress: TEST_SAFE_ADDRESS,
+          to: TEST_TARGET_ADDRESS,
+          value: 0n,
+          data: TEST_CALL_DATA,
+        },
+        { ledger: createMemoryTxSubmissionLedger() },
+      ),
+    ).rejects.toThrow(/possible stale Safe nonce or signature race/);
+
+    const err = new Error(
+      'Safe execTransaction reverted (possible stale Safe nonce or signature race, txHash=0xdead)',
+    );
+    expect(isRecoverableTransactionError(err)).toBe(true);
+    expect(err.message).not.toContain('GS026');
   });
 });

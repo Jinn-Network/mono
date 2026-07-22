@@ -131,24 +131,27 @@ export function isRecoverableTransactionError(error: unknown): boolean {
     // undecoded custom error such as TACTaskAlreadyCredited, 0x33f626d3) — it
     // will revert identically on every retry, so classify it terminal instead
     // of retrying the wrapping GS013 forever. Only when there is no selector
-    // (re-simulation found no inner revert = a signature/nonce race) do we fall
-    // through to the string checks, which keep GS026 retryable.
+    // (re-simulation found no inner revert) do we fall through to the string
+    // checks below.
     const innerSelector = (error as { innerSelector?: string | null }).innerSelector ?? null;
     if (innerSelector != null) return false;
   }
 
-  // Gnosis Safe 1.3.0 error codes. GS026 = the signature/owner set was rejected
-  // — typically a stale-nonce race that `executeSafeTransaction` self-heals by
-  // re-reading the nonce and re-signing, so it stays retryable. GS013 =
-  // require(success || safeTxGas != 0 || gasPrice != 0): the Safe's INNER call
-  // reverted, which is deterministic and never clears on retry. Decodable inner
-  // reverts are already classified above via SafeInnerRevertError; a bare GS013
-  // reaching here (e.g. an estimate-path revert whose custom-error selector we
-  // don't decode) must fail fast rather than wedge the loop. Check GS026 first
-  // so the receipt-path "GS026/GS013 possible stale nonce" message (emitted only
-  // when re-simulation found no inner revert) stays retryable.
-  if (msg.includes('GS026')) return true;
+  // Gnosis Safe 1.3.0 error codes. GS026 = invalid owner / signature rejected
+  // at the Safe boundary — deterministic; retrying with the same signing key
+  // never self-heals (issue #1986). GS013 = require(success || safeTxGas != 0
+  // || gasPrice != 0): the Safe's INNER call reverted, which is deterministic
+  // and never clears on retry. Decodable inner reverts are already classified
+  // above via SafeInnerRevertError; a bare GS013 reaching here (e.g. an
+  // estimate-path revert whose custom-error selector we don't decode) must fail
+  // fast rather than wedge the loop.
+  if (msg.includes('GS026')) return false;
   if (msg.includes('GS013')) return false;
+
+  // Receipt path from safe.ts: inner re-simulation succeeded but the mined
+  // execTransaction reverted — a stale Safe nonce / signature race that
+  // re-read + re-sign self-heals within executeSafeTransaction's retry loop.
+  if (msg.includes('possible stale Safe nonce or signature race')) return true;
 
   if (
     isReplacementUnderpricedError(error) ||
