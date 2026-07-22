@@ -33,6 +33,50 @@ harness or pull latest upstream if empirical runs return `empirical-dead`.
 Pass when the script prints `[harvest-e2e-live] PASS` and writes
 `~/.jinn-client/swe-rebench-v2/harvest-e2e-live-result.json`.
 
+## Session-echo borrowed-image live verify
+
+Opt-in real-Docker check for `mineSessionEchoes` borrowing eval infra
+(`image_name` / `install_config` / `test_patch`) from the first scorable
+same-repo validated-pool instance (`findSourceInstanceForRepo`). Unit tests
+mock `EvalRunner`; this script does not.
+
+```bash
+cd client && yarn task-creator:session-echo-live
+```
+
+Default mode `borrow-mismatch` seeds a session whose `acceptedDiff` is the gold
+patch of a *different* same-repo scorable instance than the borrowed source.
+Expected classification under the review hypothesis: `rejected:empirical-dead`.
+
+Optional control:
+
+```bash
+JINN_SESSION_ECHO_LIVE_MODE=borrow-aligned yarn task-creator:session-echo-live
+```
+
+### Prerequisites (same family as harvest live)
+
+- Docker daemon (`docker info`)
+- `jinn harnesses enable swe-rebench-v2-evaluator`
+- Validated pool with ≥2 scorable instances for the target repo (default
+  `sympy/sympy`) so mismatch can pick a donor gold patch
+- Network for HF row fetch + eval image pull if missing
+- arm64 hosts emulate `linux/amd64` images — expect multi-minute runs
+
+### Pass / classify criteria
+
+Script writes `~/.jinn-client/swe-rebench-v2/session-echo-live-result.json` and
+prints `classification`:
+
+| Classification | Meaning |
+|---|---|
+| `rejected:empirical-dead` | Hypothesis confirmed (default mismatch mode) |
+| `admitted` under mismatch | **Red flag** — worse than hypothesized |
+| `rejected:other` | Product/runner signal other than dead-mint — record `rejected[].reason` |
+| `infra-blocked` | Docker/image/timeout/prereq — not product-red; still record findings |
+
+Findings note: `docs/research/2026-07-22-session-echo-borrowed-image-findings.md`.
+
 ## Prerequisites
 
 - `jinn harnesses enable swe-rebench-v2-evaluator` (upstream repo + Docker)
