@@ -37,6 +37,7 @@ vi.mock('../../../src/adapters/mech/contracts.js', () => ({
   scanEvaluationJobs: vi.fn(),
 }));
 
+import { getEventBuffer } from '../../../src/events/emitter.js';
 import { Store } from '../../../src/store/store.js';
 import { TaskEngine, type TaskEngineOptions } from '../../../src/harnesses/engine/engine.js';
 import { TaskRunPersistence } from '../../../src/harnesses/engine/persistence.js';
@@ -48,6 +49,7 @@ const ROUTING_KEY = 'swe-rebench-v2.v1';
 const MANIFEST_CID = 'bafkrei-window-expiry-single-flight-pin';
 const WINDOW_MS = 100;
 const TERMINAL_WAIT_MS = 5_000;
+const HARNESS_START_WAIT_MS = 2_000;
 
 const TEST_PRIVATE_KEY =
   '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as `0x${string}`;
@@ -72,6 +74,19 @@ function awaitAbort(signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     signal.addEventListener('abort', () => resolve(), { once: true });
   });
+}
+
+async function awaitHarnessStarted(
+  started: ReturnType<typeof deferred<'started'>>,
+): Promise<void> {
+  await expect(
+    Promise.race([
+      started.promise,
+      new Promise((_, rej) =>
+        setTimeout(() => rej(new Error('harness never started')), HARNESS_START_WAIT_MS),
+      ),
+    ]),
+  ).resolves.toBe('started');
 }
 
 function makeTask(requestId: string, windowStartTs: number, windowEndTs: number): Task {
@@ -159,7 +174,18 @@ function packagingOpts(store: Store, dir: string, impl: Harness): TaskEngineOpti
   };
 }
 
+/**
+ * AC4: watchdog stale signals go to the structured-event ring
+ * (`errorCode: loop_watchdog_stale`), not `activity_events`. Also scan
+ * activity rows for accidental watchdog naming. Primary proof remains:
+ * this file never constructs Daemon / WatchdogLoop.
+ */
 function assertNoWatchdogEvents(store: Store): void {
+  const stale = getEventBuffer()
+    .snapshot()
+    .filter((e) => e.errorCode === 'loop_watchdog_stale');
+  expect(stale).toEqual([]);
+
   const rows = store.db
     .prepare(
       `SELECT kind, detail FROM activity_events
@@ -189,6 +215,7 @@ describe('TaskEngine — windowEndTs abort terminalizes and releases single-flig
   let store: Store;
 
   beforeEach(() => {
+    getEventBuffer().clear();
     dir = mkdtempSync(join(tmpdir(), 'jinn-window-expiry-sf-'));
     store = new Store(join(dir, 'jinn.db'));
   });
@@ -267,14 +294,7 @@ describe('TaskEngine — windowEndTs abort terminalizes and releases single-flig
       }),
     );
 
-    await expect(
-      Promise.race([
-        started.promise,
-        new Promise((_, rej) =>
-          setTimeout(() => rej(new Error('harness never started')), 2_000),
-        ),
-      ]),
-    ).resolves.toBe('started');
+    await awaitHarnessStarted(started);
 
     await waitUntil(
       () => persistence.getByRequestId(requestId)?.state === TaskRunState.FAILED,
@@ -313,49 +333,52 @@ describe('TaskEngine — windowEndTs abort terminalizes and releases single-flig
 
     seedRunning(persistence, requestId, impl.name, windowEndTs);
 
-    // Drive RUNNING → POST_SNAPSHOT via abort, then pack/deliver via ticks.
-    // runTickLoop keeps advancing until COMPLETE (process alone stops at POST_SNAPSHOT).
-    const loop = engine.runTickLoop(10);
-
-    await expect(
-      Promise.race([
-        started.promise,
-        new Promise((_, rej) =>
-          setTimeout(() => rej(new Error('harness never started')), 2_000),
-        ),
-      ]),
-    ).resolves.toBe('started');
-
-    await waitUntil(
-      () => {
-        const s = persistence.getByRequestId(requestId)?.state;
-        return s === TaskRunState.COMPLETE || s === TaskRunState.FAILED;
-      },
-      TERMINAL_WAIT_MS,
-      'COMPLETE (or FAILED) after partial abort',
-    );
-
-    engine.stop();
-    await Promise.race([loop, new Promise((r) => setTimeout(r, 500))]);
-
-    const row = persistence.getByRequestId(requestId)!;
-    expect(row.state).toBe(TaskRunState.COMPLETE);
-    expect(row.state).not.toBe(TaskRunState.RUNNING);
-    // Must not assert release from POST_SNAPSHOT/PACKAGING/DELIVERING.
-    expect([
-      TaskRunState.POST_SNAPSHOT,
-      TaskRunState.PACKAGING,
-      TaskRunState.DELIVERING,
-      TaskRunState.RUNNING,
-    ]).not.toContain(row.state);
-
-    const accept = await engine.canAcceptTask({
+    // Slot occupied while RUNNING (same gate keys as AC3 accept below).
+    const blocked = await engine.canAcceptTask({
       solverType: ROUTING_KEY,
       taskRole: 'restoration',
       task: makeTask('win-exp-partial-2', Date.now(), Date.now() + 60_000),
     });
-    expect(accept).toEqual({ ok: true });
+    expect(blocked.ok).toBe(false);
 
-    assertNoWatchdogEvents(store);
+    // Drive RUNNING → POST_SNAPSHOT via abort, then pack/deliver via ticks.
+    // runTickLoop keeps advancing until COMPLETE (process alone stops at POST_SNAPSHOT).
+    const loop = engine.runTickLoop(10);
+    try {
+      await awaitHarnessStarted(started);
+
+      await waitUntil(
+        () => {
+          const s = persistence.getByRequestId(requestId)?.state;
+          return s === TaskRunState.COMPLETE || s === TaskRunState.FAILED;
+        },
+        TERMINAL_WAIT_MS,
+        'COMPLETE (or FAILED) after partial abort',
+      );
+
+      const row = persistence.getByRequestId(requestId)!;
+      expect(row.state).toBe(TaskRunState.COMPLETE);
+      expect(row.state).not.toBe(TaskRunState.RUNNING);
+      // Must not assert release from POST_SNAPSHOT/PACKAGING/DELIVERING.
+      expect([
+        TaskRunState.POST_SNAPSHOT,
+        TaskRunState.PACKAGING,
+        TaskRunState.DELIVERING,
+        TaskRunState.RUNNING,
+      ]).not.toContain(row.state);
+
+      const accept = await engine.canAcceptTask({
+        solverType: ROUTING_KEY,
+        taskRole: 'restoration',
+        task: makeTask('win-exp-partial-2', Date.now(), Date.now() + 60_000),
+      });
+      expect(accept).toEqual({ ok: true });
+
+      assertNoWatchdogEvents(store);
+    } finally {
+      // Always stop so afterEach does not close the Store under a live tick loop.
+      engine.stop();
+      await Promise.race([loop, new Promise((r) => setTimeout(r, 500))]);
+    }
   });
 });
