@@ -269,6 +269,42 @@ describe('lifecycle controller', () => {
     expect(json).not.toContain('"graphqlCost": 0');
   });
 
+  it('surfaces incomplete cycle usage accounting as a warning without crashing the loop', async () => {
+    // Regression (PR #2001): GitHub used/remaining counters are eventually
+    // consistent, so under concurrent reads a cycle's usage accounting can be
+    // incomplete even though every command succeeded. read() must not throw and
+    // the cycle must still produce a report — otherwise the closing opaque probe
+    // skew propagates out of runLifecycleCycle and kills the continuous loop.
+    const meter = new GitHubUsageMeter();
+    let probe = 0;
+    const raw: CommandRunner = async (_command, args) => {
+      if (args[0] !== 'api' || args[1] !== 'graphql') return 'edited';
+      probe += 1;
+      return JSON.stringify({
+        data: {
+          rateLimit: probe === 1
+            ? { cost: 1, remaining: 1_000, resetAt: '2026-07-20T13:00:00.000Z', used: 0, limit: 5_000 }
+            : { cost: 1, remaining: 990, resetAt: '2026-07-20T13:00:00.000Z', used: 12, limit: 5_000 },
+        },
+      });
+    };
+    const run = makeGitHubUsageCommandRunner(raw, meter);
+    await expect(run('gh', ['project', 'item-edit'])).resolves.toBe('edited');
+    expect(meter.read().accountingComplete).toBe(false);
+
+    const report = await runLifecycleCycle('observe', {
+      ...deps(implementation(), []),
+      readGitHubUsage: () => meter.read(),
+    });
+
+    expect(report.status).toBe('ok');
+    expect(report.githubUsage.accountingComplete).toBe(false);
+    const human = renderLifecycleHuman(report);
+    expect(human).toMatch(/usage accounting.*incomplete/i);
+    const json = JSON.parse(renderLifecycleJson(report));
+    expect(json.githubUsage.accountingComplete).toBe(false);
+  });
+
   it('cannot claim work from a fallback that forges a fresh full-reconciliation marker', async () => {
     const eligible: LifecycleItem = {
       kind: 'issue',

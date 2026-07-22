@@ -26,6 +26,17 @@ export interface GitHubUsage {
   readonly restRequests: number;
   readonly restNotModified: number;
   readonly cacheHits: number;
+  /**
+   * Whether every metered command this cycle contributed complete before/after
+   * quota evidence. GitHub's `rateLimit.used`/`remaining` counters are
+   * eventually consistent under concurrency, so this can be `false` for a cycle
+   * whose commands all succeeded and whose numbers are otherwise correct. It is
+   * observability only — never a correctness gate and never a reason to fail a
+   * command or crash the loop.
+   */
+  readonly accountingComplete: boolean;
+  /** Human-readable reason accounting was incomplete; set only when incomplete. */
+  readonly incompleteReason?: string;
 }
 
 export const EMPTY_GITHUB_USAGE: GitHubUsage = Object.freeze({
@@ -36,6 +47,7 @@ export const EMPTY_GITHUB_USAGE: GitHubUsage = Object.freeze({
   restRequests: 0,
   restNotModified: 0,
   cacheHits: 0,
+  accountingComplete: true,
 });
 
 export class GitHubUsageDecodeError extends Error {
@@ -188,33 +200,48 @@ export class GitHubUsageMeter {
     after: unknown,
     credentialKey = 'ambient',
   ): void {
+    // Structural decode failures (missing/negative rateLimit fields) still
+    // throw — they are corrupt evidence, not skew. Everything past this point
+    // is best-effort accounting that must never throw: GitHub's used/remaining
+    // counters are eventually consistent, so under concurrent reads the
+    // before/after probes legitimately disagree even though the command
+    // succeeded. Inconsistency is surfaced via markIncomplete, never raised.
     const start = opaqueRateLimitEvidence(before);
     const end = opaqueRateLimitEvidence(after);
     const startReset = Date.parse(start.resetAt);
     const endReset = Date.parse(end.resetAt);
-    let hiddenCost: number;
+    let hiddenCost = 0;
     if (endReset === startReset) {
-      if (end.limit !== start.limit) {
-        throw new GitHubUsageDecodeError('limit changed inside one reset window');
-      }
       const remainingDelta = start.remaining - end.remaining;
       const usedDelta = end.used - start.used;
-      if (remainingDelta < end.cost || usedDelta < end.cost || remainingDelta !== usedDelta) {
-        throw new GitHubUsageDecodeError('before/after quota evidence is inconsistent');
+      if (
+        end.limit !== start.limit
+        || remainingDelta < end.cost
+        || usedDelta < end.cost
+        || remainingDelta !== usedDelta
+      ) {
+        this.markIncomplete(
+          'opaque-command quota evidence was inconsistent '
+            + '(eventually-consistent rate-limit counter skew)',
+        );
+      } else {
+        hiddenCost = usedDelta - end.cost;
       }
-      hiddenCost = usedDelta - end.cost;
     } else if (endReset > startReset) {
       if (end.used < end.cost) {
-        throw new GitHubUsageDecodeError('new-window used is below probe cost');
+        this.markIncomplete('opaque-command quota evidence straddled a reset inconsistently');
+      } else {
+        // The exact old-window spend is unknowable across a reset. Treat every
+        // point that remained at the first probe as potentially spent, then add
+        // evidenced new-window usage before the closing probe. This
+        // intentionally over-counts rather than understating a straddling cycle.
+        hiddenCost = start.remaining + end.used - end.cost;
       }
-      // The exact old-window spend is unknowable across a reset. Treat every
-      // point that remained at the first probe as potentially spent, then add
-      // evidenced new-window usage before the closing probe. This intentionally
-      // over-counts rather than understating a cycle that straddles a reset.
-      hiddenCost = start.remaining + end.used - end.cost;
     } else {
-      throw new GitHubUsageDecodeError('closing probe belongs to an older reset window');
+      this.markIncomplete('opaque-command closing probe belonged to an older reset window');
     }
+    // Always advance best-effort quota evidence from both probes so
+    // remaining/reset/requests/cost keep moving even when accounting is soft.
     this.recordGraphQlResponse(before, credentialKey);
     this.recordGraphQlResponse(after, credentialKey);
     this.graphqlCost += hiddenCost;
@@ -248,9 +275,10 @@ export class GitHubUsageMeter {
   }
 
   read(): GitHubUsage {
-    if (this.incompleteReason !== null) {
-      throw new GitHubUsageIncompleteError(this.incompleteReason);
-    }
+    // read() never throws on incomplete accounting: GitHub's used/remaining
+    // counters are eventually consistent, so accounting can be incomplete for a
+    // fully-correct cycle. Completeness is surfaced as a flag, not raised — a
+    // throw here would fail a command that succeeded and crash the active loop.
     let lowest: { readonly remaining: number; readonly resetAt: string } | undefined;
     for (const quota of this.quotaByCredential.values()) {
       if (lowest === undefined || quota.remaining < lowest.remaining) lowest = quota;
@@ -263,6 +291,8 @@ export class GitHubUsageMeter {
       restRequests: this.restRequests,
       restNotModified: this.restNotModified,
       cacheHits: this.cacheHits,
+      accountingComplete: this.incompleteReason === null,
+      ...(this.incompleteReason === null ? {} : { incompleteReason: this.incompleteReason }),
     });
   }
 }
@@ -382,22 +412,40 @@ export function makeGitHubUsageCommandRunner(
       } catch (error) {
         commandError = error;
       }
-      let after: string;
+      // The closing quota probe and its span are best-effort accounting, never
+      // the command's result. A probe that fails to transport or a probe span
+      // that is skewed/unparseable must never fail a command that already
+      // succeeded, and must never crash the loop — it only marks accounting
+      // incomplete. The command's own failure is the sole reason to throw.
+      let probeError: unknown;
+      let after: unknown;
       try {
-        after = await run('gh', probeArgs, options);
-        meter.recordOpaqueGraphQlSpan(
-          before,
-          JSON.parse(after) as unknown,
-          credentialKey,
-        );
+        after = JSON.parse(await run('gh', probeArgs, options)) as unknown;
       } catch (error) {
+        probeError = error;
         meter.markIncomplete('the closing opaque-command quota probe failed');
-        if (commandError !== undefined) {
-          throw new AggregateError([commandError, error], 'GitHub command and usage probe failed');
-        }
-        throw error;
       }
-      if (commandError !== undefined) throw commandError;
+      if (after !== undefined) {
+        try {
+          meter.recordOpaqueGraphQlSpan(before, after, credentialKey);
+        } catch (error) {
+          // A structurally-undecodable closing probe is still accounting-only.
+          meter.markIncomplete(
+            `the closing opaque-command quota probe was unusable: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
+      if (commandError !== undefined) {
+        if (probeError !== undefined) {
+          throw new AggregateError(
+            [commandError, probeError],
+            'GitHub command and usage probe failed',
+          );
+        }
+        throw commandError;
+      }
       return result!;
     });
   };

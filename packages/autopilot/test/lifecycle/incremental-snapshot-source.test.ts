@@ -137,6 +137,7 @@ const EMPTY_USAGE: GitHubUsage = {
   restRequests: 0,
   restNotModified: 0,
   cacheHits: 0,
+  accountingComplete: true,
 };
 
 class FakeLifecycleReader implements GitHubLifecycleReader {
