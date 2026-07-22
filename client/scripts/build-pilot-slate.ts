@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve as resolvePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   distillationSourceIds,
@@ -28,9 +29,19 @@ import { fetchHfWithRetry } from '../src/harnesses/impls/swe-rebench-v2-evaluato
 
 const DATASET = 'nebius/SWE-rebench-leaderboard';
 const SOLVER_TYPE = 'swe-rebench-v2.v1';
-const VERSION = 'v3';
+export const VERSION = 'v3';
 const SEED = 'jinn.pilot.validated-clean.v3';
 const POLICY_VERSION = 'jinn.pilot.validated-clean.v1';
+
+/** Active versions to exclude while building `buildingVersion` (older actives only). */
+export function resolveExcludedActiveSlateVersions(
+  active: readonly string[],
+  buildingVersion: string,
+): string[] {
+  // Deliberately wrong stub for #1563 red tests — Task 2 replaces with filter.
+  void buildingVersion;
+  return [...active];
+}
 
 interface Args {
   distillationDir: string;
@@ -80,13 +91,13 @@ async function loadProductionPool() {
   });
 }
 
-interface QualityAssessment {
+export interface QualityAssessment {
   instance_id: string;
   code: 'A' | 'B1' | 'B2' | 'B3' | 'B4' | 'B5' | 'B6';
   reason: string;
 }
 
-function loadQualityScreen(path: string): { bytes: string; assessments: QualityAssessment[] } {
+export function loadQualityScreen(path: string): { bytes: string; assessments: QualityAssessment[] } {
   const bytes = readFileSync(path, 'utf8');
   const raw = JSON.parse(bytes) as unknown;
   if (!Array.isArray(raw)) throw new Error('quality screen must be a JSON array');
@@ -202,7 +213,10 @@ async function main(): Promise<void> {
   console.log(`wrote ${selected.length} validated clean tasks to ${join(args.outDir, `${base}.json`)}`);
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
-});
+const isMain = process.argv[1] === fileURLToPath(import.meta.url);
+if (isMain) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
+}
