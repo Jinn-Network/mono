@@ -578,15 +578,18 @@ def start_run(spawn: Optional[Callable[..., int]] = None, sink: Optional[Sink] =
 
 
 def stop_run() -> str:
+    if is_running():
+        current = _read_current()
+        try:
+            os.kill(current["pid"], signal.SIGTERM)
+        except OSError:
+            pass
+        _archive_current("stopped")
+        return "◇ distill stopped — staged skills are kept; /jinn distill start confirm resumes the rest"
     current = _read_current()
-    if not current or not isinstance(current.get("pid"), int):
-        return "no distillation is running"
-    try:
-        os.kill(current["pid"], signal.SIGTERM)
-    except OSError:
-        pass
-    _archive_current("stopped")
-    return "◇ distill stopped — staged skills are kept; /jinn distill start confirm resumes the rest"
+    if current and isinstance(current.get("pid"), int):
+        _archive_current("died")
+    return "no distillation is running"
 
 
 def _watch_state(sink: Optional[Sink] = None, now_fn: Callable[[], float] = time.monotonic) -> Dict[str, Any]:

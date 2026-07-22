@@ -122,6 +122,22 @@ def test_stop_run_signals_the_pid_and_archives_as_stopped(monkeypatch):
     assert archived["outcome"] == "stopped"
 
 
+def test_stop_run_with_dead_pid_does_not_signal(monkeypatch):
+    spawn = SpawnSpy()
+    monkeypatch.setattr(distill, "_pid_alive", lambda pid: True)
+    distill.start_run(spawn=spawn)
+    monkeypatch.setattr(distill, "_pid_alive", lambda pid: False)
+    killed: list[tuple[int, int]] = []
+    monkeypatch.setattr(distill.os, "kill", lambda pid, sig: killed.append((pid, sig)))
+
+    msg = distill.stop_run()
+    assert killed == []
+    assert "no distillation" in msg.lower()
+    assert not (distill.state_dir() / "current.json").exists()
+    archived = json.loads((distill.state_dir() / "last-run.json").read_text())
+    assert archived["outcome"] == "died"
+
+
 # ── event drain → ◇ lines ────────────────────────────────────────────────────
 
 
