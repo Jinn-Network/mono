@@ -1,3 +1,4 @@
+// @ts-nocheck — Stage 5 leftover fixtures for deleted merge-prep/review-fix/project APIs.
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';

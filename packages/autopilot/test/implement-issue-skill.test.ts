@@ -54,15 +54,15 @@ describe('implement-issue v2 authority contract', () => {
       'git worktree add',
       'git worktree remove',
       'git push origin',
-      'engine:review',
     ];
     for (const marker of prohibited) expect(doc).not.toContain(marker);
+    expect(doc).toContain('three-op finalize');
+    expect(doc).toContain('engine:review');
   });
 
   it('makes implementation completion the only successful terminal handoff', () => {
-    expect(doc).toMatch(
-      /non-draft only after the\s+implementation session ends/,
-    );
+    expect(doc).toContain('three-op finalize');
+    expect(doc).toContain('non-draft only after the implementation');
     expect(doc).toContain('ready-last');
     expect(doc).not.toContain('reviewed, app-tested **draft PR**');
     expect(doc).not.toContain('to a draft PR');

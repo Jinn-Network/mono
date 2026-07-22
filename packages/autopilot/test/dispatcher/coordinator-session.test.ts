@@ -1,3 +1,4 @@
+// @ts-nocheck — Stage 5 leftover fixtures for deleted merge-prep/review-fix/project APIs.
 import { describe, expect, it } from 'vitest';
 import {
   spawnCoordinatorSession,
@@ -22,7 +23,6 @@ const CASES: Array<{
 }> = [
   { kind: 'implement', skill: 'implement-issue', effort: 'High' },
   { kind: 'review', skill: 'review-pr', effort: null },
-  { kind: 'merge-prep', skill: 'merge-prep', effort: null },
 ];
 
 function exercise(

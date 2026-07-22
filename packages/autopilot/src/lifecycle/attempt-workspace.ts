@@ -24,7 +24,7 @@ import {
   type SelectedCredential,
 } from './credentials.js';
 
-export type AttemptPhase = 'implement' | 'review' | 'merge-prep';
+export type AttemptPhase = 'implement' | 'review';
 export type AttemptProcessState = 'preparing' | 'running' | 'exited';
 export type ReviewApprovalPolicy = 'approve-eligible' | 'human-codeowner';
 
@@ -321,7 +321,7 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
   ], 'attempt manifest');
   if (manifest.version !== 2) throw new Error('Unsupported attempt manifest version');
   const phase = manifest.phase;
-  if (phase !== 'implement' && phase !== 'review' && phase !== 'merge-prep') {
+  if (phase !== 'implement' && phase !== 'review') {
     throw new Error('Invalid attempt phase');
   }
   const attemptId = uuid(stringField(manifest.attemptId, 'attempt ID'), 'attempt ID');
@@ -341,11 +341,8 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
   const targetBaseOid = manifest.targetBaseOid === undefined
     ? undefined
     : gitOid(stringField(manifest.targetBaseOid, 'target base OID'));
-  if (phase === 'merge-prep' && targetBaseOid === undefined) {
-    throw new Error('Merge-prep attempts require an exact target base OID');
-  }
-  if (phase !== 'merge-prep' && targetBaseOid !== undefined) {
-    throw new Error('Target base OID is valid only for merge-prep attempts');
+  if (targetBaseOid !== undefined) {
+    throw new Error('Target base OID is not valid for attempt manifests');
   }
   const claimOid = gitOid(stringField(manifest.claimOid, 'claim OID'));
   const reviewGeneration = manifest.reviewGeneration === undefined

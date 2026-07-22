@@ -41,8 +41,12 @@ export type SpawnFn = (
   opts: CoordinatorSpawnOptions,
 ) => SpawnResult;
 
-export type CoordinatorSessionKind = 'implement' | 'review' | 'merge-prep';
-export type CoordinatorSkill = 'implement-issue' | 'review-pr' | 'merge-prep';
+export type CoordinatorSessionKind = 'implement' | 'review';
+export type CoordinatorSkill =
+  | 'implement-issue'
+  | 'review-pr'
+    | 'fix-child'
+  | 'reconcile';
 
 export interface CoordinatorSessionSpec {
   kind: CoordinatorSessionKind;

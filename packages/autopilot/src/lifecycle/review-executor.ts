@@ -101,7 +101,6 @@ export interface ReviewExecutorDeps {
   spawnCoordinator(input: {
     readonly attemptId: string;
     readonly candidate: ReviewActionCandidate;
-    readonly recoverFixes: boolean;
     readonly environment: NodeJS.ProcessEnv;
     readonly worktreePath: string;
     readonly logPath: string;
@@ -135,7 +134,6 @@ export type ReviewExecutionResult =
       readonly attemptId: string;
       readonly generation: string;
       readonly reviewer: string;
-      readonly recoverFixes: boolean;
       readonly approvalPolicy: ReviewApprovalPolicy;
     }
   | { readonly status: 'already-approved'; readonly prNumber: number; readonly head: GitOid }
@@ -201,10 +199,9 @@ async function confirmReviewAcquisition(
     readonly generation: string;
     readonly attemptId: string;
     readonly reviewerLogin: string;
-    readonly recoverFixes: boolean;
   },
 ): Promise<ReviewAcquisitionOutcome> {
-  const phase: HumanReason['phase'] = input.recoverFixes ? 'review-fixing' : 'reviewing';
+  const phase: HumanReason['phase'] = 'reviewing';
   for (let attempt = 1; attempt <= REVIEW_ACQUISITION_MAX_ATTEMPTS; attempt += 1) {
     const confirmed = await deps.confirmAcquisition({
       prNumber: input.candidate.number,
@@ -282,7 +279,6 @@ export async function executeReviewAction(
   action: {
     readonly prNumber: number;
     readonly expectedHead?: GitOid;
-    readonly recoverFixes?: boolean;
   },
   deps: ReviewExecutorDeps,
 ): Promise<ReviewExecutionResult> {
@@ -386,9 +382,9 @@ export async function executeReviewAction(
   }
   // Winning a review claim generation initializes its own progress clock (the
   // one permitted progress event for review, mirroring the branch claim commit
-  // for implement/merge-prep) — see staleEvidence in lifecycle.ts, the
-  // canonical definition this mirrors. Later metadata-only transitions
-  // (verdict-intent, fixing, ...) do not get their own fresh window.
+  // for implement) — see staleEvidence in lifecycle.ts, the canonical
+  // definition this mirrors. Later metadata-only transitions (verdict-intent,
+  // ...) do not get their own fresh window.
   let progressTime = headChangedAt;
   if (currentHeadClaim?.state === 'active') {
     const acquisitionTime = Date.parse(currentHeadClaim.recordedAt);
@@ -414,52 +410,19 @@ export async function executeReviewAction(
       detail: 'The exact PR head already has an active review generation.',
     };
   }
-  const recoverFixes = candidate.draft
-    && currentHeadClaim !== undefined
-    && ['fixing', 'stale', 'verdict-intent'].includes(currentHeadClaim.state)
-    && stale;
-  if (
-    action.recoverFixes !== undefined
-    && action.recoverFixes !== recoverFixes
-  ) {
+  if (candidate.draft) {
     return {
       status: 'ineligible',
       prNumber: candidate.number,
-      detail: 'Review recovery mode changed after scheduling.',
-    };
-  }
-  if (candidate.draft && !recoverFixes) {
-    return {
-      status: 'ineligible',
-      prNumber: candidate.number,
-      detail: 'A draft PR is reviewable only as stale review-fix recovery.',
+      detail: 'Draft pull requests are not claimable for review.',
     };
   }
 
   const selection = selectCredential(deps.credentials, {
     phase: 'review',
     prAuthor: candidate.author,
-    ...(recoverFixes
-      ? {
-          previousReviewerLogin: currentHeadClaim!.reviewer,
-          nativeRequestedChanges: true,
-        }
-      : {}),
   });
   if (selection.status !== 'selected') {
-    if (recoverFixes) {
-      const reason: HumanReason = {
-        phase: 'review-fixing',
-        code: 'reviewer-identity-unavailable',
-        detail: selection.detail,
-      };
-      await deps.escalateHuman({ candidate, reason });
-      return {
-        status: 'human',
-        prNumber: candidate.number,
-        code: 'reviewer-identity-unavailable',
-      };
-    }
     return {
       status: 'ineligible',
       prNumber: candidate.number,
@@ -534,7 +497,6 @@ export async function executeReviewAction(
     generation,
     attemptId,
     reviewerLogin: selection.login,
-    recoverFixes,
   });
   if (acquisition.outcome === 'human') {
     await deps.escalateHuman({ candidate: acquisition.candidate, reason: acquisition.reason });
@@ -563,7 +525,6 @@ export async function executeReviewAction(
   const child = deps.spawnCoordinator({
     attemptId,
     candidate: confirmed,
-    recoverFixes,
     environment,
     worktreePath: attempt.paths.worktree,
     logPath: attempt.paths.log,
@@ -580,7 +541,6 @@ export async function executeReviewAction(
     attemptId,
     generation,
     reviewer: selection.login,
-    recoverFixes,
     approvalPolicy: candidate.approvalPolicy,
   };
 }

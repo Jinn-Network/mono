@@ -76,37 +76,11 @@ export interface ReviewSessionPort {
     label: string,
     present: boolean,
   ): Promise<void>;
-  setProjectStatus(
-    issueNumber: number,
-    expectedHead: GitOid,
-    status: 'In Review' | 'Human',
-  ): Promise<void>;
   setPullRequestDraft(
     prNumber: number,
     expectedHead: GitOid,
     draft: boolean,
   ): Promise<void>;
-  readLocalFix(manifest: AttemptManifest): Promise<{
-    readonly head: GitOid;
-    readonly clean: boolean;
-    readonly parentMatches: boolean;
-    readonly treeChanged: boolean;
-  }>;
-  publishReviewFix(input: {
-    readonly manifest: AttemptManifest;
-    readonly expectedRemoteHead: GitOid;
-    readonly newHead: GitOid;
-    readonly expectedRemoteRecordOid: GitOid;
-    readonly recordOid: GitOid;
-    readonly record: ReviewClaimRecord;
-  }): Promise<PublicationOutcome>;
-  advanceManifestPair(
-    path: string,
-    expectedHead: GitOid,
-    expectedReviewRefOid: GitOid,
-    nextHead: GitOid,
-    nextReviewRefOid: GitOid,
-  ): AttemptManifest;
   hasHumanComment(
     prNumber: number,
     expectedHead: GitOid,
@@ -118,21 +92,31 @@ export interface ReviewSessionPort {
     marker: string,
     body: string,
   ): Promise<void>;
+  fileFindingChild?(input: {
+    readonly parentPr: number;
+    readonly title: string;
+    readonly body: string;
+    readonly effort: 'low' | 'medium' | 'high';
+  }): Promise<
+    | { readonly number: number; readonly created: boolean; readonly runawayHold?: undefined }
+    | { readonly runawayHold: true; readonly priorCount: number }
+  >;
   nextMarker(): string;
   now(): Date;
 }
 
 export type ReviewVerdictResult =
-  | { readonly status: 'fixing'; readonly head: GitOid }
+  | { readonly status: 'requested-changes'; readonly head: GitOid }
   | { readonly status: 'approved'; readonly head: GitOid }
   | { readonly status: 'human'; readonly head: GitOid }
   | { readonly status: 'stale' | 'ambiguous'; readonly head: GitOid };
 
-export type ReviewFixPublishResult =
+export type ReviewFindingsResult =
   | {
-      readonly status: 'published' | 'already-applied';
+      readonly status: 'filed';
       readonly head: GitOid;
-      readonly reviewRefOid: GitOid;
+      readonly childNumber: number;
+      readonly created: boolean;
     }
   | { readonly status: 'human'; readonly head: GitOid }
   | { readonly status: 'stale' | 'ambiguous'; readonly head: GitOid };
@@ -143,7 +127,10 @@ export interface ReviewSessionProtocol {
     state: ReviewVerdictState,
     body: string,
   ): Promise<ReviewVerdictResult>;
-  reviewFixPublish(manifest: AttemptManifest): Promise<ReviewFixPublishResult>;
+  reviewFindings?(
+    manifest: AttemptManifest,
+    findings: string,
+  ): Promise<ReviewFindingsResult>;
   human(
     manifest: AttemptManifest,
     reason: string,
@@ -360,7 +347,7 @@ async function enterHuman(
   let authority = await requireAuthority(manifest, port);
   const head = manifest.expectedHead as GitOid;
   const reason: HumanReason = {
-    phase: authority.record.state === 'fixing' ? 'review-fixing' : 'reviewing',
+    phase: 'reviewing',
     code: 'review-escalation',
     detail,
   };
@@ -398,9 +385,7 @@ async function enterHuman(
       commentBody,
     );
   }
-  if (pullRequest.issueNumber === manifest.issueNumber) {
-    await port.setProjectStatus(manifest.issueNumber, head, 'Human');
-  }
+  // Stage 3: Human Status paint is painter-owned; label+marker are authority.
   return { status: 'human', head };
 }
 
@@ -462,7 +447,7 @@ async function requireNoNativeChangeRequests(
   }
 }
 
-async function reconcileFixingProjection(
+async function releaseRequestedChangesProjection(
   manifest: AttemptManifest,
   pullRequest: ReviewSessionPullRequest,
   port: ReviewSessionPort,
@@ -480,10 +465,7 @@ async function reconcileFixingProjection(
     if (await humanIsActive(manifest, port)) return { status: 'human', head };
     await port.setPullRequestLabel(manifest.prNumber!, head, 'review:approved', false);
   }
-  if (!pullRequest.draft) {
-    await port.setPullRequestDraft(manifest.prNumber!, head, true);
-  }
-  return { status: 'fixing', head };
+  return { status: 'requested-changes', head };
 }
 
 async function reviewVerdict(
@@ -515,10 +497,10 @@ async function reviewVerdict(
     }
     intent = authority.record;
   } else if (
-    authority.record.state === 'fixing'
+    authority.record.state === 'stale'
     && state === 'REQUEST_CHANGES'
   ) {
-    return reconcileFixingProjection(manifest, pullRequest, port);
+    return releaseRequestedChangesProjection(manifest, pullRequest, port);
   } else if (
     authority.record.state === 'terminal-approved'
     && state === 'APPROVE'
@@ -568,15 +550,16 @@ async function reviewVerdict(
   }
 
   if (state === 'REQUEST_CHANGES') {
-    if (authority.record.state !== 'fixing') {
-      const fixing = nextRecord(manifest, 'fixing', port.now());
-      const published = await publishRecord(manifest, authority, fixing, port);
+    // Stage 5: release the claim (stale). No fixing state, no redraft, no branch push.
+    if (authority.record.state !== 'stale') {
+      const released = nextRecord(manifest, 'stale', port.now());
+      const published = await publishRecord(manifest, authority, released, port);
       if (published.status !== 'published') return { status: published.status, head };
       manifest = requireReviewManifest(manifest, port);
       authority = await requireAuthority(manifest, port);
     }
     pullRequest = await requirePullRequest(manifest, port);
-    return reconcileFixingProjection(manifest, pullRequest, port);
+    return releaseRequestedChangesProjection(manifest, pullRequest, port);
   }
 
   await requireNoNativeChangeRequests(manifest, port);
@@ -607,135 +590,122 @@ async function reviewVerdict(
     );
   }
   if (await humanIsActive(manifest, port)) return { status: 'human', head };
-  await port.setProjectStatus(manifest.issueNumber, head, 'In Review');
-  if (await humanIsActive(manifest, port)) return { status: 'human', head };
+  // Stage 3: In Review Status paint is painter-owned (no setProjectStatus).
   await requireNoNativeChangeRequests(manifest, port);
   pullRequest = await requirePullRequest(manifest, port);
+  if (await humanIsActive(manifest, port)) return { status: 'human', head };
   if (pullRequest.draft) {
     await port.setPullRequestDraft(manifest.prNumber!, head, false);
   }
   return { status: 'approved', head };
 }
 
-async function reviewFixPublish(
+/**
+ * Stage 2 children path: native REQUEST_CHANGES + file one finding child +
+ * release the review claim. No redraft, no fixing state, no branch push.
+ */
+async function reviewFindings(
   supplied: AttemptManifest,
+  findings: string,
   port: ReviewSessionPort,
-): Promise<ReviewFixPublishResult> {
-  const manifest = requireReviewManifest(supplied, port);
+): Promise<ReviewFindingsResult> {
+  if (port.fileFindingChild === undefined) {
+    throw new Error('Review findings require a child-issue port');
+  }
+  let manifest = requireReviewManifest(supplied, port);
+  let authority = await requireAuthority(manifest, port);
+  let pullRequest = await readExactPullRequest(manifest, port);
   const head = manifest.expectedHead as GitOid;
-  const authority = await port.readAuthority(manifest);
-  if (!authorityMatchesManifest(authority, manifest)) {
-    const record = authority.record;
-    const recoveredHead = record.head;
-    const isPublishedPair = (
-      authority.reviewRefOid !== manifest.reviewRefOid
-      && recoveredHead !== head
-      && record.state === 'active'
-      && record.prNumber === manifest.prNumber
-      && record.generation === manifest.reviewGeneration
-      && record.attempt === manifest.attemptId
-      && record.reviewer.toLowerCase() === manifest.selectedLogin.toLowerCase()
-    );
-    if (!isPublishedPair) {
-      throw new Error('Review attempt no longer owns the exact review authority');
-    }
-    const progressed = {
-      ...manifest,
-      expectedHead: recoveredHead,
-      reviewRefOid: authority.reviewRefOid,
-    };
-    const pullRequest = await requirePullRequest(progressed, port);
-    if (!pullRequest.draft) {
-      throw new Error('Recovered review fix authority requires a draft PR');
-    }
-    if (await humanIsActive(progressed, port)) {
-      throw new Error('Review fix recovery stopped because a Human hold is active');
-    }
-    const local = await port.readLocalFix(manifest);
-    if (
-      !local.clean
-      || !local.parentMatches
-      || !local.treeChanged
-      || local.head !== recoveredHead
-    ) {
-      throw new Error('Published review fix pair does not match preserved local work');
-    }
-    port.advanceManifestPair(
-      manifest.paths.manifest,
-      head,
-      manifest.reviewRefOid as GitOid,
-      recoveredHead,
-      authority.reviewRefOid,
-    );
-    return {
-      status: 'already-applied',
-      head: recoveredHead,
-      reviewRefOid: authority.reviewRefOid,
-    };
-  }
-  if (authority.record.state !== 'fixing') {
-    throw new Error('Review fix publication requires exact fixing authority');
-  }
-  const pullRequest = await readExactPullRequest(manifest, port);
   const authorityProblem = pullRequestAuthorityProblem(manifest, pullRequest);
   if (authorityProblem !== undefined) {
     return enterHuman(manifest, authorityProblem, port, pullRequest);
   }
-  if (!pullRequest.draft) throw new Error('Review fixes require a draft PR');
-  if (await humanIsActive(manifest, port)) {
-    throw new Error('Review fix publication stopped because a Human hold is active');
+  if (await humanIsActive(manifest, port)) return { status: 'human', head };
+  if (authority.record.state !== 'active' && authority.record.state !== 'verdict-intent') {
+    throw new Error(`Review findings are invalid from ${authority.record.state} authority`);
   }
-  const local = await port.readLocalFix(manifest);
-  if (!local.clean) {
-    throw new Error('Review fix worktree is not clean; preserve local work');
-  }
-  if (!local.parentMatches) {
-    throw new Error('Review fix HEAD is not rooted at the exact old head');
-  }
-  if (!local.treeChanged || local.head === head) {
-    throw new Error('Review fix must contain a genuinely new tree');
-  }
-  const active = {
-    ...nextRecord(manifest, 'active', port.now()),
-    head: local.head,
-  } as ReviewClaimRecord;
-  const recordOid = await port.createReviewRecord({
-    manifest,
-    parent: authority.reviewRefOid,
-    record: active,
+
+  const child = await port.fileFindingChild({
+    parentPr: manifest.prNumber!,
+    title: `Address review findings for PR #${manifest.prNumber}`,
+    body: findings.trim(),
+    effort: 'medium',
   });
-  const outcome = await port.publishReviewFix({
-    manifest,
-    expectedRemoteHead: head,
-    newHead: local.head,
-    expectedRemoteRecordOid: authority.reviewRefOid,
-    recordOid,
-    record: active,
-  });
-  if (outcome.status === 'lost') return { status: 'stale', head };
-  if (outcome.status === 'ambiguous' || !('observed' in outcome)) {
-    return { status: 'ambiguous', head };
+  if (child.runawayHold === true) {
+    return enterHuman(
+      manifest,
+      `Runaway child guard: ${child.priorCount} prior review-finding children `
+      + `on PR #${manifest.prNumber}; parking for Human.`,
+      port,
+      pullRequest,
+    );
   }
-  const observed = outcome.observed;
-  if (
-    typeof observed !== 'object'
-    || observed === null
-    || observed.branch !== local.head
-    || observed.review !== recordOid
-  ) {
-    return { status: 'stale', head };
+
+  let intent: Extract<ReviewClaimRecord, { readonly state: 'verdict-intent' }>;
+  if (authority.record.state === 'verdict-intent') {
+    if (authority.record.verdict.state !== 'REQUEST_CHANGES') {
+      throw new Error('Review findings retry contradicts the current intent');
+    }
+    intent = authority.record;
+  } else {
+    intent = nextRecord(
+      manifest,
+      'verdict-intent',
+      port.now(),
+      { state: 'REQUEST_CHANGES', marker: port.nextMarker() },
+    ) as Extract<ReviewClaimRecord, { readonly state: 'verdict-intent' }>;
+    const published = await publishRecord(manifest, authority, intent, port);
+    if (published.status !== 'published') return { status: published.status, head };
+    manifest = requireReviewManifest(manifest, port);
+    authority = await requireAuthority(manifest, port);
   }
-  port.advanceManifestPair(
-    manifest.paths.manifest,
-    head,
-    authority.reviewRefOid,
-    local.head,
-    recordOid,
-  );
+
+  let confirmed = await matchingNativeReview(manifest, intent.verdict, port);
+  if (confirmed === undefined) {
+    const marker = canonicalMarker(manifest, intent.verdict);
+    let submissionError: unknown;
+    try {
+      await port.submitNativeReview({
+        manifest,
+        prNumber: manifest.prNumber!,
+        commitId: head,
+        reviewer: manifest.selectedLogin,
+        state: 'REQUEST_CHANGES',
+        body: `${findings.trim()}\n\nChild issue: #${child.number}\n\n${marker}`,
+      });
+    } catch (error) {
+      submissionError = error;
+    }
+    confirmed = await matchingNativeReview(manifest, intent.verdict, port);
+    if (confirmed === undefined && submissionError !== undefined) {
+      throw submissionError;
+    }
+  }
+  if (confirmed === undefined) return { status: 'ambiguous', head };
+
+  // Release claim (stale) — children path does not enter fixing / redraft.
+  if (authority.record.state !== 'stale') {
+    const released = nextRecord(manifest, 'stale', port.now());
+    const published = await publishRecord(manifest, authority, released, port);
+    if (published.status !== 'published') return { status: published.status, head };
+  }
+  pullRequest = await requirePullRequest(manifest, port);
+  if (!pullRequest.labels.includes('review:changes-requested')) {
+    await port.setPullRequestLabel(
+      manifest.prNumber!,
+      head,
+      'review:changes-requested',
+      true,
+    );
+  }
+  if (pullRequest.labels.includes('review:approved')) {
+    await port.setPullRequestLabel(manifest.prNumber!, head, 'review:approved', false);
+  }
   return {
-    status: outcome.status === 'already-applied' ? 'already-applied' : 'published',
-    head: local.head,
-    reviewRefOid: recordOid,
+    status: 'filed',
+    head,
+    childNumber: child.number,
+    created: child.created,
   };
 }
 
@@ -745,7 +715,7 @@ export function makeReviewSessionProtocol(
   return {
     reviewVerdict: (manifest, state, body) =>
       reviewVerdict(manifest, state, body, port),
-    reviewFixPublish: (manifest) => reviewFixPublish(manifest, port),
+    reviewFindings: (manifest, findings) => reviewFindings(manifest, findings, port),
     human: (manifest, reason) => enterHuman(manifest, reason, port),
   };
 }

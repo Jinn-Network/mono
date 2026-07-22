@@ -128,53 +128,55 @@ export async function dispatchIssue(
   // Absolute path so git resolves correctly regardless of process cwd.
   const worktreePath = join(WORKTREES_BASE, String(number));
 
-  // 2. Set Status → In Progress FIRST.
-  //    This must happen before the worktree is created. If anything fails
-  //    after this point, the issue stays In Progress (not Todo), so
-  //    selectReady skips it — no infinite retry loop.
+  // 2. Set Status → In Progress FIRST (board items only).
+  //    Machine children may be off-board (`projectItemId === null`, Stage 2);
+  //    Stage 3's painter owns Status for view purposes. When present, this
+  //    still runs before the worktree so a failed later step leaves the
+  //    issue In Progress (not Todo) and selectReady skips it.
   //    Field id + "In Progress" option id come from the boot-time cache
   //    (jinn-mono#599 — see `./field-cache.ts`); item id arrives on
   //    ReadyIssue.projectItemId from the per-cycle snapshot (jinn-mono#585).
   const itemId = issue.projectItemId;
+  if (itemId !== null) {
+    // Wrap item-edit in a narrow stale-id retry: if the cached field id is
+    // stale (rare — happens when the Project field is rebuilt mid-run), `gh`
+    // fails with a stale-id error (see `isStaleFieldError` for the matched
+    // phrasings). We reset + refetch the cache once and retry exactly once
+    // before propagating.
+    //
+    // Propagation model (Stage 5 Finding 1 on jinn-mono#599):
+    //   - The cache module in `./field-cache.ts` owns a singleton.
+    //     `fetchFieldIds` rebinds it; `getFieldCache()` returns the current
+    //     value.
+    //   - Cross-cycle propagation happens via that singleton: run-autopilot.ts
+    //     re-reads `getFieldCache()` at the top of every cycle, so the next
+    //     cycle picks up the refreshed value automatically.
+    //   - Within the in-flight dispatch we also mutate `deps.fieldCache = fresh`
+    //     — this is intra-call only, scoping the refresh to any consumer that
+    //     shares this `deps` reference for the rest of the current dispatch.
+    //     It does NOT propagate across cycles; the singleton re-read does.
+    const itemEditOnce = async (cache: FieldCache): Promise<void> => {
+      await runner('gh', [
+        'project', 'item-edit',
+        '--id', itemId,
+        '--project-id', cache.projectId,
+        '--field-id', cache.status.fieldId,
+        '--single-select-option-id', cache.status.options['In Progress'],
+      ]);
+    };
 
-  // Wrap item-edit in a narrow stale-id retry: if the cached field id is
-  // stale (rare — happens when the Project field is rebuilt mid-run), `gh`
-  // fails with a stale-id error (see `isStaleFieldError` for the matched
-  // phrasings). We reset + refetch the cache once and retry exactly once
-  // before propagating.
-  //
-  // Propagation model (Stage 5 Finding 1 on jinn-mono#599):
-  //   - The cache module in `./field-cache.ts` owns a singleton.
-  //     `fetchFieldIds` rebinds it; `getFieldCache()` returns the current
-  //     value.
-  //   - Cross-cycle propagation happens via that singleton: run-autopilot.ts
-  //     re-reads `getFieldCache()` at the top of every cycle, so the next
-  //     cycle picks up the refreshed value automatically.
-  //   - Within the in-flight dispatch we also mutate `deps.fieldCache = fresh`
-  //     — this is intra-call only, scoping the refresh to any consumer that
-  //     shares this `deps` reference for the rest of the current dispatch.
-  //     It does NOT propagate across cycles; the singleton re-read does.
-  const itemEditOnce = async (cache: FieldCache): Promise<void> => {
-    await runner('gh', [
-      'project', 'item-edit',
-      '--id', itemId,
-      '--project-id', cache.projectId,
-      '--field-id', cache.status.fieldId,
-      '--single-select-option-id', cache.status.options['In Progress'],
-    ]);
-  };
-
-  try {
-    await itemEditOnce(deps.fieldCache);
-  } catch (err) {
-    if (!isStaleFieldError(err)) throw err;
-    resetFieldCache();
-    const fresh = await fetchFieldIds(runner);
-    // Deliberate mutation: propagate the refreshed cache to the call site so
-    // any other consumer holding the same `deps.fieldCache` reference picks
-    // up the new ids on its next read.
-    deps.fieldCache = fresh;
-    await itemEditOnce(fresh);
+    try {
+      await itemEditOnce(deps.fieldCache);
+    } catch (err) {
+      if (!isStaleFieldError(err)) throw err;
+      resetFieldCache();
+      const fresh = await fetchFieldIds(runner);
+      // Deliberate mutation: propagate the refreshed cache to the call site so
+      // any other consumer holding the same `deps.fieldCache` reference picks
+      // up the new ids on its next read.
+      deps.fieldCache = fresh;
+      await itemEditOnce(fresh);
+    }
   }
 
   // 3. Create the worktree — idempotent.

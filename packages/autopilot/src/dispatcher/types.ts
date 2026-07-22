@@ -11,8 +11,9 @@ export type Effort = 'Low' | 'Medium' | 'High' | 'XHigh' | 'Max';
 export type Priority = 'P0' | 'P1' | 'P2' | 'P3' | 'P4';
 // 'Human' is a parked lane: the dispatcher promotes escalated (Blocked on:
 // Human) sessions into it so they leave the active "In Progress" column and
-// are visible at a glance as "needs a human". It is never a dispatchable state
-// (selectReady requires 'Todo') nor an in-flight state.
+// are visible at a glance as "needs a human". It is paint-only — never an
+// admission or hold decision gate (hold authority is labels / Blocked on /
+// structured markers).
 export type ProjectStatus = 'Todo' | 'In Progress' | 'Human' | 'In Review' | 'Done';
 
 /** An issue as polled from the source, with its taxonomy fields. */
@@ -21,6 +22,8 @@ export interface PolledIssue {
   title: string;
   /** Native GitHub labels retained for lifecycle Human-overlay evidence. */
   labels?: string[];
+  /** Issue body; used for child-marker admission (Stage 2). */
+  body?: string;
   /** null = Issue Type not set — the issue is not triage-complete. */
   shape: IssueShape | null;
   blockedOn: BlockedOn | null;
@@ -65,9 +68,13 @@ export interface PolledIssue {
 
 /** An issue that passed the ready-filter — safe to dispatch. */
 export interface ReadyIssue extends PolledIssue {
-  shape: IssueShape;          // non-null: ready issues are triage-complete
-  priority: Priority;         // non-null: needed for ordering
-  projectItemId: string;      // non-null: onBoard:true requires it (see ready-filter)
+  shape: IssueShape;          // non-null: ready issues are triage-complete (children default to fix)
+  priority: Priority;         // non-null: needed for ordering (children may resolve from labels)
+  /**
+   * Project item id when on the board. Machine children may be off-board
+   * (`null`) and still ready (Stage 2).
+   */
+  projectItemId: string | null;
   /**
    * Git ref to branch the worktree off and target the PR at. Set only when the
    * issue was admitted despite `Blocked on: Another issue` because its single
@@ -102,7 +109,7 @@ export interface SessionResult {
 }
 
 export interface DispatcherConfig {
-  /** One process-wide runtime for implementation, review, merge-prep, and stages. */
+  /** One process-wide runtime for implementation, review, and stages. */
   runtime: AutopilotRuntime;
   /** Max simultaneous sessions. Default 3; practical ceiling ~5–7. */
   concurrencyCap: number;
@@ -144,18 +151,6 @@ export interface DispatcherConfig {
    */
   reviewGhToken: string;
   /**
-   * Arm the merge-prep session loop (DR-2026-07-16): when a stuck (conflicting /
-   * still-behind) pipeline PR is detected, dispatch an AI session that resolves
-   * MECHANICAL conflicts on the PR branch and escalates SEMANTIC ones. Default
-   * false — dead code until set. Requires the review loop armed (a re-drafted PR
-   * is re-approved there); enforced fail-loud by `assertMergePrepArming`.
-   * Source: `JINN_MERGE_PREP` (=== '1').
-   */
-  mergePrepEnabled: boolean;
-  /** Max simultaneous merge-prep sessions. Default 1 (singleton — stuck PRs are
-   *  rare, and serializing removes prep-vs-prep races on shared `origin/next`). */
-  mergePrepCap: number;
-  /**
    * Model id for `hermes` coordinator sessions, as `--model` to `hermes chat`.
    * BARE — never `<org>/<model>`: an org-prefixed id makes hermes infer the
    * `openrouter` provider and bill an API key instead of the operator's Codex
@@ -179,7 +174,7 @@ export interface DispatcherConfig {
    * 2026-07-20-autopilot-marketplace-execution.md §"Delivery → PR bridge
    * (host-side)"): poll the marketplace indexer for delivered `jinn-repo.v1`
    * solution envelopes and turn each into a draft PR. Default false —
-   * fail-safe, mirrors `mergePrepEnabled`. Source: `JINN_MARKETPLACE_BRIDGE`
+   * fail-safe. Source: `JINN_MARKETPLACE_BRIDGE`
    * (=== '1').
    */
   marketplaceBridgeEnabled: boolean;
@@ -202,7 +197,7 @@ export interface DispatcherConfig {
    * unchanged). `'marketplace'` routes them to the marketplace instead
    * (`routeToMarketplace` — see `./marketplace-route.js`): label + snapshot
    * marker, no local session, no GitHub credential handed to a solver.
-   * Default `'local'` — fail-safe, mirrors `mergePrepEnabled`. Source:
+   * Default `'local'` — fail-safe. Source:
    * `JINN_EXECUTION_MODE` (`'marketplace'` arms it; anything else is `local`).
    */
   executionMode: 'local' | 'marketplace';
@@ -223,8 +218,7 @@ export const DEFAULT_CONFIG: DispatcherConfig = {
   reviewBotLogin: '',
   implGhToken: '',
   reviewGhToken: '',
-  mergePrepEnabled: false,
-  mergePrepCap: 1,
+
   // Bare id + explicit provider: mirrors the operator's own working codex setup
   // (~/.codex/config.toml model = "gpt-5.6-sol"; ~/.hermes/config.yaml
   // provider: openai-codex). An `openai/`-prefixed id would silently route to
@@ -275,15 +269,4 @@ export interface InFlightReview {
   startedAt: number;
   /** Unique persisted ownership generation; null means cleanup is forbidden. */
   leaseId?: string | null;
-}
-
-/** An in-flight merge-prep session, one per `jinn-mono_worktrees/merge-<N>`
- *  worktree. Mirrors InFlightReview (PR-keyed, no logPath in the derived shape;
- *  the worktree is detached so `branch` is ''). */
-export interface InFlightMergePrep {
-  prNumber: number;
-  branch: string;
-  worktreePath: string;
-  pid: number | null;
-  startedAt: number;
 }

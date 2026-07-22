@@ -1,9 +1,24 @@
 import type { PolledIssue, ReadyIssue, Priority } from './types.js';
 import type { StackReady } from './stack-readiness.js';
+import { isMachineChildIssue } from '../lifecycle/child-issues.js';
 
 const PRIORITY_RANK: Record<Priority, number> = {
   P0: 0, P1: 1, P2: 2, P3: 3, P4: 4,
 };
+
+function labelPriority(issue: PolledIssue): Priority | null {
+  for (const label of issue.labels ?? []) {
+    switch (label) {
+      case 'priority:p0': return 'P0';
+      case 'priority:p1': return 'P1';
+      case 'priority:p2': return 'P2';
+      case 'priority:p3': return 'P3';
+      case 'priority:p4': return 'P4';
+      default: break;
+    }
+  }
+  return null;
+}
 
 /** Audit shape for an issue dropped because its author is not on the allowlist (#497). */
 export interface SkippedForAuthor {
@@ -19,15 +34,16 @@ export interface SelectReadyResult {
 
 /**
  * An issue is **ready** when it is triage-complete (Issue Type set),
- * `Blocked on: Nothing`, on the board, in `Todo`, not already in flight,
- * AND its author is on the allowlist (#497 trust boundary). Output is
+ * `Blocked on: Nothing` (or dependency-satisfied), on the board, not already
+ * in flight, AND its author is on the allowlist (#497 trust boundary).
+ * Project Status is paint-only and is not an admission gate. Output is
  * ordered by current-sprint membership first, then Priority, then FIFO by
  * issue number (#609).
  *
  * The author check is a *second-pass* predicate so `skippedForAuthor` only
  * surfaces issues that would otherwise be ready — operators need to see
  * *who* is being blocked, not just a count. First-pass failures (shape,
- * board, status, ...) are excluded from both arrays.
+ * board, blocked-on, in-flight, ...) are excluded from both arrays.
  *
  * `authorAllowlist` must already be lowercased by the caller; the function
  * lowercases the issue side at compare time. Empty allowlist = dispatch
@@ -46,22 +62,21 @@ export function selectReady(
   // gate admits either `Nothing` OR an issue whose blocker(s) are satisfied per
   // the dependency resolver (`stackReady`) — so a dependent can be dispatched
   // stacked on its blocker's open PR (spec 2026-07-13-eng-loop-dependency-stacking).
-  const firstPass = polled.filter(
-    (i): i is ReadyIssue =>
-      i.shape !== null &&
-      i.priority !== null &&
-      // Admit `Nothing`, OR a dependency-satisfied issue — but ONLY when the
-      // board flag is specifically `Another issue`. An issue a human parked as
-      // `Blocked on: Human` must never be auto-dispatched even if its native
-      // blocker edges happen to be satisfied (the Human lane is an unconditional
-      // override). (review 2026-07-13)
-      (i.blockedOn === 'Nothing' ||
-        (i.blockedOn === 'Another issue' && stackReady.has(i.number))) &&
-      i.onBoard &&
-      i.projectItemId !== null &&     // implied by onBoard, but TS needs the guard
-      i.status === 'Todo' &&
-      !inFlight.has(i.number),
-  );
+  const firstPass = polled.filter((i) => {
+    const child = isMachineChildIssue(i);
+    const priority = i.priority ?? (child ? labelPriority(i) : null);
+    const shapeOk = i.shape !== null || child;
+    const priorityOk = priority !== null;
+    const blockedOk = child
+      || i.blockedOn === 'Nothing'
+      || (i.blockedOn === 'Another issue' && stackReady.has(i.number));
+    const boardOk = child || (i.onBoard && i.projectItemId !== null);
+    return shapeOk
+      && priorityOk
+      && blockedOk
+      && boardOk
+      && !inFlight.has(i.number);
+  });
 
   // Second pass: partition by author allowlist, and stamp the stacked-dispatch
   // base branch onto issues admitted via the dependency path.
@@ -69,14 +84,28 @@ export function selectReady(
   const skippedForAuthor: SkippedForAuthor[] = [];
   for (const issue of firstPass) {
     if (authorAllowlist.has(issue.author.toLowerCase())) {
+      const child = isMachineChildIssue(issue);
+      const priority = issue.priority ?? labelPriority(issue);
+      if (priority === null) continue;
+      const normalized: ReadyIssue = {
+        ...issue,
+        shape: issue.shape ?? 'fix',
+        priority,
+        projectItemId: child ? issue.projectItemId : issue.projectItemId!,
+      };
       // stackBase is set only when the issue was admitted *because* a blocker
       // has an open PR (blockedOn !== 'Nothing') and the base is a real blocker
       // branch — the all-blockers-merged case has baseBranch 'next' and
       // dispatches off `origin/next` normally (stackBase stays undefined).
       const sb = stackReady.get(issue.number)?.baseBranch;
       const stackBase =
-        issue.blockedOn === 'Another issue' && sb != null && sb !== 'next' ? sb : undefined;
-      ready.push(stackBase != null ? { ...issue, stackBase } : issue);
+        !child
+        && issue.blockedOn === 'Another issue'
+        && sb != null
+        && sb !== 'next'
+          ? sb
+          : undefined;
+      ready.push(stackBase != null ? { ...normalized, stackBase } : normalized);
     } else {
       skippedForAuthor.push({ number: issue.number, author: issue.author });
     }

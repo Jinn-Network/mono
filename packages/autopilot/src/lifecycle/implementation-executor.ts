@@ -43,6 +43,11 @@ export interface ImplementationIssue {
   readonly eligible: boolean;
   readonly targetBase: GitRefName;
   readonly effort: Effort | null;
+  /** Present when this issue is a Stage 2 machine child targeting a parent PR. */
+  readonly child?: {
+    readonly parentPr: number;
+    readonly kind: 'review-finding' | 'reconcile';
+  };
 }
 
 export interface ImplementationPullRequest {
@@ -126,6 +131,7 @@ export interface ImplementationExecutorDeps {
   }): Promise<GitOid>;
   claimBranch(input: ClaimPublicationInput): Promise<ClaimOutcome>;
   ensureDraftPullRequest(input: DraftPullRequestInput): Promise<ImplementationPullRequest>;
+  readParentPullRequest?(prNumber: number): Promise<ImplementationPullRequest | null>;
   setProjectInProgress(
     issueNumber: number,
     expectedHead: GitOid,
@@ -137,6 +143,11 @@ export interface ImplementationExecutorDeps {
   escalateHuman(input: {
     readonly issueNumber: number;
     readonly reason: HumanReason;
+  }): Promise<void>;
+  closeChildIssue?(input: {
+    readonly issueNumber: number;
+    readonly comment: string;
+    readonly credential: SelectedCredential;
   }): Promise<void>;
   ambientEnvironment: NodeJS.ProcessEnv;
   nextAttemptId(): string;
@@ -280,6 +291,18 @@ function canonicalScenario(
   prNumber: number,
   worktreePath: string,
 ): string {
+  if (issue.child !== undefined) {
+    const skill = issue.child.kind === 'reconcile' ? 'reconcile' : 'fix-child';
+    return [
+      `Use the ${skill} skill on child issue #${issue.number} for parent PR #${prNumber}.`,
+      `Issue: #${issue.number} — ${issue.title}`,
+      `The v2 lifecycle already claimed parent branch \`${branch}\` (phase ${
+        issue.child.kind === 'reconcile' ? 'reconcile' : 'fix'
+      }) and created the detached worktree at \`${worktreePath}\`.`,
+      'Do not open a new PR. Work lands as append-only commits on the parent branch.',
+      'Finish with `autopilot session child-complete` or park with `autopilot session human --reason-file <path>`.',
+    ].join('\n');
+  }
   return [
     `Use the implement-issue skill on issue #${issue.number}.`,
     `Issue: #${issue.number} — ${issue.title}`,
@@ -293,29 +316,36 @@ export function makeCanonicalImplementationSpawner(
   config: DispatcherConfig,
   spawn: SpawnFn,
 ): ImplementationExecutorDeps['spawnCoordinator'] {
-  return (input) => spawnCoordinatorSession(
-    {
-      kind: 'implement',
-      number: input.issue.number,
-      skill: 'implement-issue',
-      scenario: canonicalScenario(
-        input.issue,
-        input.branch,
-        input.prNumber,
-        input.worktreePath,
-      ),
-      worktreePath: input.worktreePath,
-      effort: input.issue.effort,
-      env: input.environment,
-      spawnOptions: {
-        detached: true,
-        stdio: ['ignore', 'inherit', 'inherit'],
-        logPath: input.logPath,
+  return (input) => {
+    const skill = input.issue.child?.kind === 'reconcile'
+      ? 'reconcile'
+      : input.issue.child?.kind === 'review-finding'
+        ? 'fix-child'
+        : 'implement-issue';
+    return spawnCoordinatorSession(
+      {
+        kind: 'implement',
+        number: input.issue.number,
+        skill,
+        scenario: canonicalScenario(
+          input.issue,
+          input.branch,
+          input.prNumber,
+          input.worktreePath,
+        ),
+        worktreePath: input.worktreePath,
+        effort: input.issue.effort,
+        env: input.environment,
+        spawnOptions: {
+          detached: true,
+          stdio: ['ignore', 'inherit', 'inherit'],
+          logPath: input.logPath,
+        },
       },
-    },
-    config,
-    { spawn },
-  );
+      config,
+      { spawn },
+    );
+  };
 }
 
 export async function executeImplementationAction(
@@ -330,6 +360,13 @@ export async function executeImplementationAction(
       issueNumber,
       detail: issue === null ? 'Issue is missing.' : 'Issue is not currently eligible.',
     };
+  }
+
+  if (issue.child !== undefined) {
+    return executeChildImplementationAction(
+      { ...issue, child: issue.child },
+      deps,
+    );
   }
 
   const reality = await deps.runRealityCheck(issueNumber);
@@ -494,6 +531,127 @@ export async function executeImplementationAction(
     status: 'spawned',
     issueNumber,
     prNumber: pullRequest.number,
+    branch,
+    claimOid,
+    attemptId,
+  };
+}
+
+async function executeChildImplementationAction(
+  issue: ImplementationIssue & {
+    readonly child: { readonly parentPr: number; readonly kind: 'review-finding' | 'reconcile' };
+  },
+  deps: ImplementationExecutorDeps,
+): Promise<ImplementationExecutionResult> {
+  const issueNumber = issue.number;
+  if (!issue.eligible) {
+    return {
+      status: 'ineligible',
+      issueNumber,
+      detail: 'Issue is not currently eligible.',
+    };
+  }
+  if (deps.readParentPullRequest === undefined) {
+    return {
+      status: 'ineligible',
+      issueNumber,
+      detail: 'Parent PR lookup is unavailable for child claims.',
+    };
+  }
+  const parent = await deps.readParentPullRequest(issue.child.parentPr);
+  if (parent === null || parent.baseRefName !== issue.targetBase) {
+    return {
+      status: 'ineligible',
+      issueNumber,
+      detail: 'Parent pull request is missing or retargeted.',
+    };
+  }
+
+  const selection = selectCredential(deps.credentials, { phase: 'implement' });
+  if (selection.status !== 'selected') {
+    return { status: 'ineligible', issueNumber, detail: selection.detail };
+  }
+  const remoteUrl = validateCanonicalGitHubHttpsRemote(deps.remoteUrl);
+  const branch = parent.headRefName;
+  const candidateParent = parent.head;
+  const attemptId = deps.nextAttemptId();
+  const claimedAt = deps.now().toISOString();
+  const phase = issue.child.kind === 'reconcile' ? 'reconcile' as const : 'fix' as const;
+  const claim: BranchClaim = {
+    kind: 'branch-claim',
+    protocolVersion: 2,
+    phase,
+    issueNumber,
+    prNumber: parent.number,
+    attempt: attemptId,
+    runner: deps.runnerId,
+    login: selection.login,
+    expectedHead: gitOid(candidateParent),
+    targetBase: issue.targetBase,
+    claimedAt,
+  };
+  const claimOid = await deps.createClaimCommit({
+    claim,
+    parent: candidateParent,
+    attempt: attemptId,
+    credential: selection.credential,
+  });
+  const outcome = await deps.claimBranch({
+    branch,
+    candidateParent,
+    expectedRemoteHead: parent.head,
+    claimOid,
+    remoteUrl,
+    login: selection.login,
+    credential: selection.credential,
+  });
+  if (outcome.status === 'lost') return { status: 'lost', issueNumber };
+  if (outcome.status === 'ambiguous') return { status: 'ambiguous', issueNumber };
+  if (outcome.published !== claimOid || outcome.observed !== claimOid) {
+    return { status: 'ambiguous', issueNumber };
+  }
+
+  const attempt = await deps.createAttempt({
+    attemptId,
+    issueNumber,
+    branch,
+    targetBase: issue.targetBase,
+    expectedHead: claimOid,
+    claimOid,
+    prNumber: parent.number,
+    selectedLogin: selection.login,
+    credential: selection.credential,
+  });
+  if (attempt.attemptId !== attemptId) {
+    throw new Error('Detached child attempt does not match its claim');
+  }
+  const environment = buildSanitizedChildEnv(
+    deps.ambientEnvironment,
+    selection.credential,
+    {
+      ghConfigDir: attempt.paths.ghConfigDir,
+      askpassPath: attempt.paths.askpass,
+      manifestPath: attempt.paths.manifest,
+    },
+  );
+  const child = deps.spawnCoordinator({
+    attemptId,
+    issue,
+    prNumber: parent.number,
+    branch,
+    targetBase: issue.targetBase,
+    environment,
+    worktreePath: attempt.paths.worktree,
+    logPath: attempt.paths.log,
+  });
+  if (child.pid === undefined) {
+    throw new Error('Child coordinator did not report a child PID');
+  }
+  deps.trackChild(attempt.paths.manifest, child);
+  return {
+    status: 'spawned',
+    issueNumber,
+    prNumber: parent.number,
     branch,
     claimOid,
     attemptId,

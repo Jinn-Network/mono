@@ -15,6 +15,7 @@ import {
   type SelectedCredential,
 } from './credentials.js';
 import { makeGitProtocolPort } from './git-protocol.js';
+import { parseChildMarker } from './child-issues.js';
 import {
   CANONICAL_GITHUB_HTTPS_REMOTE,
   runCanonicalImplementationRealityCheck,
@@ -50,9 +51,11 @@ ImplementationExecutorDeps,
 | 'createClaimCommit'
 | 'claimBranch'
 | 'ensureDraftPullRequest'
+| 'readParentPullRequest'
 | 'setProjectInProgress'
 | 'createAttempt'
 | 'escalateHuman'
+| 'closeChildIssue'
 >;
 
 function parsePullRequest(raw: string): ImplementationPullRequest {
@@ -193,7 +196,6 @@ export function makeProductionImplementationActionPort(
       const eligible = lifecycle.kind === 'issue'
         ? lifecycle.eligible && lifecycle.humanHold !== true
         : selected
-          && lifecycle.projectStatus === 'Todo'
           && lifecycle.humanHold !== true
           && lifecycle.branchClaim?.phase === 'implement'
           && lifecycle.branchClaim.phaseComplete !== true
@@ -209,6 +211,12 @@ export function makeProductionImplementationActionPort(
           ?? 'next',
         ),
         effort: source.effort,
+        ...((): { child?: { parentPr: number; kind: 'review-finding' | 'reconcile' } } => {
+          const marker = parseChildMarker(source.body ?? '');
+          return marker === null
+            ? {}
+            : { child: { parentPr: marker.parentPr, kind: marker.kind } };
+        })(),
       };
     },
 
@@ -231,6 +239,22 @@ export function makeProductionImplementationActionPort(
           labels: [...pr.labels],
           body: pr.body,
         }));
+    },
+
+    async readParentPullRequest(prNumber) {
+      const snapshot = await options.readSnapshot();
+      const pr = snapshot.pullRequests.find((entry) =>
+        entry.number === prNumber && entry.state === 'OPEN');
+      if (pr === undefined) return null;
+      return {
+        number: pr.number,
+        headRefName: gitRefName(pr.headRefName),
+        head: pr.headOid,
+        baseRefName: gitRefName(pr.baseRefName),
+        draft: pr.isDraft,
+        labels: [...pr.labels],
+        body: pr.body,
+      };
     },
 
     readTargetBaseHead: (targetBase, credential) =>
@@ -400,6 +424,16 @@ export function makeProductionImplementationActionPort(
         attemptId: input.attemptId,
         remoteName: options.remoteName ?? 'jinn-autopilot-v2',
       }, runner);
+    },
+
+    async closeChildIssue({ issueNumber, comment, credential }) {
+      await withCredential(credential, async ({ run }) => {
+        await run('gh', [
+          'issue', 'close', String(issueNumber),
+          '--repo', REPO,
+          '--comment', comment,
+        ]);
+      });
     },
 
     async escalateHuman({ issueNumber, reason }) {

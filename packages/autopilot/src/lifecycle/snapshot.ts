@@ -10,6 +10,7 @@ import {
   decodeReviewClaimPayload,
   formatAutomatedReviewMarker,
 } from './codecs.js';
+import { parseChildMarker, isMachineChildIssue, type ChildKind } from './child-issues.js';
 import {
   gitOid,
   isoTimestamp,
@@ -345,6 +346,7 @@ LifecycleItem,
 function lifecyclePr(
   pr: PullRequestSnapshot,
   issue: PolledIssue,
+  openChildKinds: readonly ChildKind[] = [],
 ): Extract<LifecycleItem, { kind: 'pull-request' }> {
   const decisive = latestDecisiveReview(pr);
   const reviewClaim = pr.reviewClaim?.record;
@@ -354,20 +356,18 @@ function lifecyclePr(
     ? 'Current-head Human review record'
     : issue.blockedOn === 'Human'
       ? 'Project Blocked on: Human'
-      : issue.status === 'Human'
-        ? 'Project status: Human'
-        : pr.labels.includes('review:needs-human')
-          ? 'PR label: review:needs-human'
-          : issueLabels.includes('review:needs-human')
-            ? 'Issue label: review:needs-human'
+      : pr.labels.includes('review:needs-human')
+        ? 'PR label: review:needs-human'
+        : issueLabels.includes('review:needs-human')
+          ? 'Issue label: review:needs-human'
+          : issueLabels.includes('autopilot:human')
+            ? 'Issue label: autopilot:human'
             : undefined;
   const implementationActive = pr.branchClaim?.phase === 'implement'
     && pr.branchClaim.phaseComplete !== true;
-  const reviewPhase = reviewClaim?.state === 'fixing'
-    ? 'review-fixing' as const
-    : reviewClaim !== undefined && reviewClaim.head === pr.headOid
-      ? 'reviewing' as const
-      : 'awaiting-review' as const;
+  const reviewPhase = reviewClaim !== undefined && reviewClaim.head === pr.headOid
+    ? 'reviewing' as const
+    : 'awaiting-review' as const;
   const synthesizedHumanReason: HumanReason | undefined = humanSource === undefined
     ? undefined
     : implementationActive
@@ -405,6 +405,7 @@ function lifecyclePr(
     needsReview: decisive?.state !== 'APPROVED',
     approved: decisive?.state === 'APPROVED',
     mergeState: mergeState(pr),
+    ...(openChildKinds.length === 0 ? {} : { openChildKinds: [...openChildKinds] }),
     ...(pr.branchClaim === undefined ? {} : { branchClaim: pr.branchClaim }),
     ...(pr.implementationCompletionSummary === undefined
       ? {}
@@ -568,6 +569,7 @@ function eligibilityEvidence(
   eligible: boolean,
   authorDisallowed: boolean,
   stackReady: ReadonlyMap<number, unknown>,
+  hasClaimBranch = false,
 ): { readonly reason: IssueEligibilityReason; readonly detail: string } {
   if (eligible) return { reason: 'eligible', detail: 'All implementation admission gates pass' };
   if (issue.blockedOn === 'Another issue' && !stackReady.has(issue.number)) {
@@ -585,14 +587,39 @@ function eligibilityEvidence(
       detail: `Issue author ${issue.author || '(missing)'} is not selected by the author allowlist`,
     };
   }
+  if (hasClaimBranch) {
+    return {
+      reason: 'not-selected',
+      detail: `Issue has an in-flight claim branch autopilot/${issue.number}`,
+    };
+  }
+  if (isMachineChildIssue(issue)) {
+    return {
+      reason: 'not-selected',
+      detail: 'Machine child issue is not currently selectable',
+    };
+  }
   const sourceReason =
     issue.shape === null ? 'Issue Type is not set'
       : issue.priority === null ? 'Priority is not set'
         : !issue.onBoard || issue.projectItemId === null ? 'Issue is not on the Project'
-          : issue.status !== 'Todo' ? `Project status is ${issue.status ?? 'unset'}, not Todo`
-            : issue.blockedOn === 'Human' ? 'Project Blocked on is Human'
-              : `Project Blocked on is ${issue.blockedOn ?? 'unset'}`;
+          : issue.blockedOn === 'Human' ? 'Project Blocked on is Human'
+            : `Project Blocked on is ${issue.blockedOn ?? 'unset'}`;
   return { reason: 'not-selected', detail: sourceReason };
+}
+
+function openChildrenByParent(
+  issues: readonly PolledIssue[],
+): Map<number, ChildKind[]> {
+  const byParent = new Map<number, ChildKind[]>();
+  for (const issue of issues) {
+    const marker = parseChildMarker(issue.body ?? '');
+    if (marker === null) continue;
+    const current = byParent.get(marker.parentPr) ?? [];
+    if (!current.includes(marker.kind)) current.push(marker.kind);
+    byParent.set(marker.parentPr, current);
+  }
+  return byParent;
 }
 
 function lifecycleItems(
@@ -627,46 +654,67 @@ function lifecycleItems(
   const mappings = resolveMappings(prs, branches, byIssue);
   const links = prLinksByIssue(prs, mappings.issueByPr);
   const stackReady = resolveStackReady([...issues], links, authorAllowlist);
+  const claimBranchIssues = new Set(
+    branches
+      .filter((branch) => (
+        branch.claim.phase === 'implement'
+        && branch.headRefName === `autopilot/${branch.issueNumber}`
+      ))
+      .map((branch) => branch.issueNumber),
+  );
   const issuesWithPr = new Set([
     ...mappings.issueByPr.values(),
     ...mappings.affectedIssues,
   ]);
-  const selected = selectReady([...issues], issuesWithPr, authorAllowlist, stackReady);
+  const inFlight = new Set([
+    ...issuesWithPr,
+    ...claimBranchIssues,
+  ]);
+  const selected = selectReady([...issues], inFlight, authorAllowlist, stackReady);
   const ready = new Set(selected.ready.map((issue) => issue.number));
   const skippedForAuthor = new Set(selected.skippedForAuthor.map((issue) => issue.number));
+  const childrenByParent = openChildrenByParent([...byIssue.values()]);
   const out: LifecycleItem[] = [];
   for (const issue of issues) {
-    if (issuesWithPr.has(issue.number) || mappings.affectedIssues.has(issue.number)) continue;
-    const eligibility = eligibilityEvidence(
-      issue,
-      ready.has(issue.number),
-      skippedForAuthor.has(issue.number),
-      stackReady,
-    );
+    if (issuesWithPr.has(issue.number)) continue;
     const issueLabels = [...(issue.labels ?? [])];
     const sourceHumanHold = issue.blockedOn === 'Human'
-      || issue.status === 'Human'
-      || issueLabels.includes('review:needs-human');
+      || issueLabels.includes('review:needs-human')
+      || issueLabels.includes('autopilot:human');
+    const selectedReady = ready.has(issue.number);
+    const eligible = selectedReady && !sourceHumanHold;
+    const holdDetail = issue.blockedOn === 'Human'
+      ? 'Project Blocked on is Human'
+      : issueLabels.includes('autopilot:human')
+        ? 'Issue carries autopilot:human'
+        : issueLabels.includes('review:needs-human')
+          ? 'Issue carries review:needs-human'
+          : undefined;
+    const eligibility = sourceHumanHold && selectedReady && holdDetail !== undefined
+      ? { reason: 'not-selected' as const, detail: holdDetail }
+      : eligibilityEvidence(
+        issue,
+        eligible,
+        skippedForAuthor.has(issue.number),
+        stackReady,
+        claimBranchIssues.has(issue.number),
+      );
     const sourceHumanReason: HumanReason | undefined = sourceHumanHold
       ? {
           phase: 'eligible',
           code: 'implementation-escalation',
-          detail: issue.blockedOn === 'Human'
-            ? 'Project Blocked on is Human'
-            : issueLabels.includes('review:needs-human')
-              ? 'Issue carries review:needs-human'
-              : 'Project status is Human',
+          detail: holdDetail ?? 'Human hold',
         }
       : undefined;
     out.push({
       kind: 'issue',
       issueNumber: issue.number,
-      v2Marked: false,
+      v2Marked: isMachineChildIssue(issue),
       projectStatus: issue.status,
       labels: issueLabels,
       ...(sourceHumanHold ? { humanHold: true } : {}),
       ...(sourceHumanReason === undefined ? {} : { humanReason: sourceHumanReason }),
-      eligible: ready.has(issue.number),
+      eligible,
       eligibilityReason: eligibility.reason,
       eligibilityDetail: eligibility.detail,
     });
@@ -675,7 +723,9 @@ function lifecycleItems(
     const issueNumber = mappings.issueByPr.get(pr.number);
     if (issueNumber === undefined) continue;
     const issue = byIssue.get(issueNumber);
-    if (issue !== undefined) out.push(lifecyclePr(pr, issue));
+    if (issue !== undefined) {
+      out.push(lifecyclePr(pr, issue, childrenByParent.get(pr.number) ?? []));
+    }
   }
   return { items: out, diagnostics: mappings.diagnostics };
 }

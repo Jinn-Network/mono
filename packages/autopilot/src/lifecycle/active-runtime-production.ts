@@ -37,9 +37,11 @@ import {
 } from './implementation-executor-production.js';
 import { executeReviewAction } from './review-executor.js';
 import { makeProductionReviewActionPort } from './review-executor-production.js';
-import { executeMergePrepAction } from './merge-prep-executor.js';
-import { makeProductionMergePrepActionPort } from './merge-prep-executor-production.js';
-import { executeMergeAction } from './merge-executor.js';
+import {
+  executeMergeAction,
+  executeFileReconcileChildAction,
+  executeUpdateBranchAction,
+} from './merge-executor.js';
 import { makeProductionMergeActionPort } from './merge-executor-production.js';
 import { makeProductionReconciliationWriter } from './reconciliation-writer-production.js';
 import type { GitHubLifecycleSnapshot } from './snapshot.js';
@@ -59,7 +61,6 @@ export interface ProductionActiveRuntimeOptions {
   readonly caps: {
     readonly implementation: number;
     readonly review: number;
-    readonly mergePrep: number;
   };
   readonly implementationBackpressureThreshold: number;
   /**
@@ -78,9 +79,9 @@ export interface ProductionActiveRuntimeOptions {
   readonly remoteName?: string;
   /**
    * Injectable delay for the bounded post-win confirmation retries in
-   * review- and merge-prep-claim acquisition (replication-lag tolerance;
-   * see `confirmReviewAcquisition` in review-executor.ts and its merge-prep
-   * counterpart). Defaults to a real `setTimeout`-based sleep.
+   * review-claim acquisition (replication-lag tolerance;
+   * see `confirmReviewAcquisition` in review-executor.ts). Defaults to a
+   * real `setTimeout`-based sleep.
    */
   readonly sleep?: (ms: number) => Promise<void>;
 }
@@ -113,33 +114,14 @@ function reviewScenario(input: {
   readonly issueNumber: number;
   readonly head: string;
   readonly worktreePath: string;
-  readonly recoverFixes: boolean;
 }): string {
   return [
     `Use the review-pr skill on PR #${input.prNumber} for issue #${input.issueNumber}.`,
     `The v2 lifecycle already claimed exact head \`${input.head}\` and created the detached worktree at \`${input.worktreePath}\`.`,
-    input.recoverFixes
-      ? 'Resume the same review generation’s fix-and-re-review loop.'
-      : 'Run the canonical review, fix, and re-review loop.',
-    'Publish review fixes with `autopilot session review-fix-publish`.',
     'Finish with `autopilot session review-verdict --state <APPROVE|REQUEST_CHANGES> --body-file <path>` or park with `autopilot session human --reason-file <path>`.',
   ].join('\n');
 }
 
-function mergePrepScenario(input: {
-  readonly prNumber: number;
-  readonly issueNumber: number;
-  readonly head: string;
-  readonly targetBaseOid: string;
-  readonly worktreePath: string;
-}): string {
-  return [
-    `Use the merge-prep skill on PR #${input.prNumber} for issue #${input.issueNumber}.`,
-    `The v2 lifecycle already claimed exact head \`${input.head}\`, bound target base \`${input.targetBaseOid}\`, and created the detached worktree at \`${input.worktreePath}\`.`,
-    'Resolve mechanical conflicts only. Never merge, approve, or bypass a human or CI gate.',
-    'Finish with `autopilot session merge-prep-complete --summary-file <path>` or park with `autopilot session human --reason-file <path>`.',
-  ].join('\n');
-}
 
 export function makeProductionCapabilityPreflight(
   options: Pick<
@@ -237,31 +219,6 @@ export function makeProductionActiveRuntime(
       issueNumber: input.candidate.issueNumber,
       head: input.candidate.head,
       worktreePath: input.worktreePath,
-      recoverFixes: input.recoverFixes,
-    }),
-    worktreePath: input.worktreePath,
-    effort: null,
-    env: input.environment,
-    spawnOptions: {
-      detached: true,
-      stdio: ['ignore', 'inherit', 'inherit'],
-      logPath: input.logPath,
-    },
-  }, options.config, { spawn: options.spawn });
-  const mergePrepSpawner = (
-    input: Parameters<
-    import('./merge-prep-executor.js').MergePrepExecutorDeps['spawnCoordinator']
-    >[0],
-  ) => spawnCoordinatorSession({
-    kind: 'merge-prep',
-    number: input.candidate.prNumber,
-    skill: 'merge-prep',
-    scenario: mergePrepScenario({
-      prNumber: input.candidate.prNumber,
-      issueNumber: input.candidate.issueNumber,
-      head: input.candidate.head,
-      targetBaseOid: input.candidate.targetBaseOid,
-      worktreePath: input.worktreePath,
     }),
     worktreePath: input.worktreePath,
     effort: null,
@@ -302,6 +259,8 @@ export function makeProductionActiveRuntime(
       prNumber: input.candidate.number,
       reason: input.reason,
     });
+    // Authority order: draft → hold label → marker comment.
+    // Decision paths read label+marker; Status paint is painter-owned (Stage 3).
     await writer.setPullRequestDraft(
       input.candidate.number,
       true,
@@ -313,17 +272,13 @@ export function makeProductionActiveRuntime(
       true,
       input.candidate.head,
     );
-    await writer.setProjectStatus(
-      input.candidate.issueNumber,
-      'Human',
-      input.candidate.head,
-    );
     await writer.ensureHumanComment(
       input.candidate.number,
       marker,
       `${marker}\n\n${input.reason.detail}`,
       input.candidate.head,
     );
+    // Stage 3: Human Status paint is painter-owned; label+marker are authority.
   };
 
   return makeActiveRuntime({
@@ -378,7 +333,6 @@ export function makeProductionActiveRuntime(
         return executeReviewAction({
           prNumber: action.prNumber,
           expectedHead: action.head,
-          recoverFixes: action.recoverFixes,
         }, {
           ...port,
           credentials,
@@ -395,34 +349,6 @@ export function makeProductionActiveRuntime(
         });
       },
 
-      mergePrep: (action, credentials) => {
-        const port = makeProductionMergePrepActionPort({
-          repositoryPath: options.repositoryPath,
-          worktreeBase: options.worktreeBase,
-          runnerId: options.runnerId,
-          remoteName,
-          readSnapshot: options.readSnapshot,
-          runner,
-          environment: ambient,
-        });
-        return executeMergePrepAction({
-          prNumber: action.prNumber,
-          expectedHead: action.head,
-          recoverStale: action.recoverStale,
-        }, {
-          ...port,
-          credentials,
-          remoteUrl: CANONICAL_GITHUB_HTTPS_REMOTE,
-          ambientEnvironment: ambient,
-          nextAttemptId: nextId,
-          runnerId: options.runnerId,
-          now,
-          sleep,
-          spawnCoordinator: mergePrepSpawner,
-          trackChild: track,
-          escalateHuman: async () => {},
-        });
-      },
 
       merge: (action, credentials) => executeMergeAction({
         prNumber: action.prNumber,
@@ -436,6 +362,66 @@ export function makeProductionActiveRuntime(
         }),
         credentials,
       }),
+
+      updateBranch: async (action, credentials) => {
+        const result = await executeUpdateBranchAction({
+          prNumber: action.prNumber,
+          expectedHead: action.head,
+        }, {
+          ...makeProductionMergeActionPort({
+            readSnapshot: options.readSnapshot,
+            authorAllowlist: options.authorAllowlist,
+            runner,
+            environment: ambient,
+          }),
+          credentials,
+        });
+        return {
+          status: result.status,
+          ...(result.status === 'ineligible' || result.status === 'rejected'
+            ? { reason: result.reason }
+            : {}),
+        };
+      },
+
+      fileReconcileChild: async (action, credentials) => {
+        const result = await executeFileReconcileChildAction({
+          prNumber: action.prNumber,
+          expectedHead: action.head,
+          effort: action.effort,
+        }, {
+          ...makeProductionMergeActionPort({
+            readSnapshot: options.readSnapshot,
+            authorAllowlist: options.authorAllowlist,
+            runner,
+            environment: ambient,
+          }),
+          credentials,
+        });
+        if (result.status === 'runaway-hold') {
+          await escalateReview({
+            candidate: {
+              issueNumber: action.issueNumber,
+              number: action.prNumber,
+              head: action.head,
+            },
+            reason: {
+              phase: 'merge-ready',
+              code: 'runaway-child',
+              detail:
+                `Runaway child guard: ${result.priorCount} prior reconcile children `
+                + `on PR #${action.prNumber}; parking for Human.`,
+            },
+          }, credentials);
+          return { status: 'human', detail: 'runaway-child-hold' };
+        }
+        return {
+          status: result.status,
+          ...(result.status === 'ineligible'
+            ? { reason: result.reason }
+            : { detail: `child:${result.childNumber}` }),
+        };
+      },
     },
   });
 }

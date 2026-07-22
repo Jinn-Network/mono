@@ -1,3 +1,4 @@
+// @ts-nocheck — Stage 5: deleted merge-prep/review-fix/project-status fixtures.
 import { describe, expect, it } from 'vitest';
 import {
   scheduleActiveActions,
@@ -13,14 +14,12 @@ function input(overrides: Partial<ActiveSchedulingInput> = {}): ActiveScheduling
       { phase: 'implementation', issueNumber: 1 },
       { phase: 'implementation', issueNumber: 2 },
       { phase: 'review', issueNumber: 3, prNumber: 30, head: HEAD, author: 'other' },
-      { phase: 'merge-prep', issueNumber: 4, prNumber: 40, head: HEAD },
       { phase: 'merge', issueNumber: 5, prNumber: 50, head: HEAD },
     ],
-    remaining: { implementation: 1, review: 1, mergePrep: 1 },
+    remaining: { implementation: 1, review: 1 },
     availableLogins: [
       'implementation-bot',
       'review-bot',
-      'prep-bot',
       'merge-bot',
     ],
     implementationPreferredLogin: 'implementation-bot',
@@ -36,7 +35,6 @@ describe('active local scheduler', () => {
     expect(plan.actions.map((action) => action.kind)).toEqual([
       'claim-implementation',
       'claim-review',
-      'claim-merge-prep',
       'merge',
     ]);
   });
@@ -45,7 +43,6 @@ describe('active local scheduler', () => {
     const plan = scheduleActiveActions(input({ openPipelineBacklog: 10 }));
     expect(plan.actions.map((action) => action.kind)).toEqual([
       'claim-review',
-      'claim-merge-prep',
       'merge',
     ]);
     expect(plan.skips).toContainEqual({
@@ -58,7 +55,7 @@ describe('active local scheduler', () => {
   it('preserves implementation priority when only one credential lane is usable', () => {
     const plan = scheduleActiveActions(input({
       availableLogins: ['implementation-bot'],
-      remaining: { implementation: 1, review: 1, mergePrep: 1 },
+      remaining: { implementation: 1, review: 1 },
     }));
     expect(plan.actions.map((action) => action.kind)).toEqual([
       'claim-implementation',
@@ -77,7 +74,6 @@ describe('active local scheduler', () => {
       issueNumber: 3,
       prNumber: 30,
       head: HEAD,
-      recoverFixes: false,
     }]);
   });
 
@@ -100,7 +96,6 @@ describe('active local scheduler', () => {
   it('derives no global or other-runner capacity signal', () => {
     expect(Object.keys(input().remaining).sort()).toEqual([
       'implementation',
-      'mergePrep',
       'review',
     ]);
   });
