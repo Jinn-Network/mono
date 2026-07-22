@@ -51,6 +51,9 @@ painter); only reads-for-decisions and session-side writes go.
 4. **Reviewer/merge-prep session ports** — same project-read removals as (2)
    where they gate decisions (`review-session*`, `merge-prep-session*` keep
    working unchanged otherwise; they are deleted wholesale in Stage 5).
+5. **Skill text** — `implement-issue`: Stage-8 finalize description becomes
+   the three-op sequence; escalation wording moves to label+marker. Skill
+   pins in `workflow-skills-v2.test.ts` updated in the same change.
 
 ### Tests
 
@@ -131,6 +134,9 @@ outrank and pre-empt them).
 6. **Scheduler ordering** — `active-scheduler.ts` / `controller.ts`
    candidates: children (marker-bearing issues) order before fresh
    implementation claims.
+7. **`eng-day` skill** — reads machine triage from `effort:*`/`priority:*`
+   labels so children are not reported as untriaged drift; surfaces open
+   finding/reconcile children as first-class items in the brief.
 
 ### Tests
 
@@ -248,6 +254,36 @@ Only after Stages 1–4 bars are met live.
    two-autopilot budget soak from Stage 4 repeated post-deletion.
 
 ---
+
+## Workflow skills across the stages
+
+Skills are lifecycle contract, not documentation (spec §7). Summary of where
+each one changes, and the pin that enforces it:
+
+| Skill | Stage | Change | Enforcing pin |
+|---|---|---|---|
+| `implement-issue` | 1 | three-op finalize text; label+marker escalation | finalize verbs present; no project-status instruction |
+| `review-pr` | 2 | rewritten: approve ∨ file-child+RC+release | `review-findings` present; **no push/fix instruction anywhere** |
+| `fix-child` (new) | 2 | parent-branch implement variant | `child-complete` present; no `gh pr create` |
+| `reconcile` (new) | 2 | merge-from-base, taxonomy-as-routing | **never contains "rebase"**; `child-complete` present |
+| `eng-day` | 2 | label-triage awareness; children in the brief | label fallback documented |
+| `merge-prep` | 5 | deleted | pin removed with the path |
+| `merge-batch` | 5 | reference cleanup only | unchanged authority assertions |
+| `autopilot-runtime` refs | 2, 5 | verb roster updates | verb list matches `session.ts` |
+
+Two rules from spec §7 bind every stage PR:
+
+- **Skill + verb + dispatcher land atomically** on `next` — sessions read
+  skills from worktrees at the claim base, and the #1883 interim taught us
+  what decoupled contracts do. Superseded code paths stay armed until Stage
+  5 so in-flight sessions on older text always complete.
+- **Pins update in the same change** — the skill-text tests are the
+  authority-regression guard (a reviewer that can push, or a reconciler
+  that rebases, must fail CI locally before it can fail live).
+
+Operational prerequisite (independent of this plan, already outstanding):
+the operator-local `supervise.sh` still launches the legacy entry point and
+must move to the v2 invocation before any long-running deployment.
 
 ## Sequencing, sizing, and ownership
 

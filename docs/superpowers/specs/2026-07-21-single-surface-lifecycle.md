@@ -6,7 +6,7 @@
 - **Work shape:** `design`
 - **Conversation status:** approved by the operator (Ritsu), section by section
 - **Document status:** proposed
-- **Implementation status:** not started; strangler-fig migration plan in §9
+- **Implementation status:** not started; strangler-fig migration plan in §10
 
 This document amends the active-active lifecycle design
 (`2026-07-19-active-active-autopilot-lifecycle-design.md`). Where the two
@@ -14,7 +14,7 @@ conflict, this document wins. The 2026-07-19 document remains authoritative
 for everything it defines that this amendment does not touch: the branch-native
 claim protocol, review-claim ref mechanics, claimless head-pinned merge,
 staleness/reaping, attempt isolation, credential handling, and the capability
-probe (as reduced by §7).
+probe (as reduced by §8).
 
 ## 1. Motivation
 
@@ -221,7 +221,37 @@ The HUMAN overlay (hold label + structured marker comment — the board's
 
 Exit is only by explicit human action.
 
-## 7. What this deletes
+## 7. Workflow skills
+
+The session-facing skills are part of the lifecycle contract and change with
+it. Dispositions:
+
+| Skill | Disposition |
+|---|---|
+| `implement-issue` | Stages 1–7 of its methodology unchanged. Stage 8 text becomes the three-op finalize (marker → label → undraft); escalation wording moves from board-Human to label+marker. Light touch — the session verbs absorb most of the change. |
+| `review-pr` | Rewritten around two terminal outcomes: approve (unchanged), or file the finding child + native REQUEST_CHANGES + release the claim + exit. The fix loop, redraft-before-fix ordering, atomic publication instructions, and the stale-fix recovery entry are removed. The reviewer role is read/judge/file; no branch-mutation instruction may appear in the skill. |
+| `merge-prep` | Deleted with its state (§8). |
+| `reconcile` (new) | Successor to merge-prep's irreducible core: merge-from-base method, the conflict taxonomy as routing (§6.2), canonical lockfile regeneration, flagged-hunk summary, `child-complete`; escalation only by confidence or policy (§6.3). |
+| `fix-child` (new) | implement-issue variant for finding children: work on the parent's branch, append-only checkpoints, no PR of its own, close via `child-complete`. |
+| `eng-day` | The observe-mode derivation remains its authoritative lifecycle source (painter lag is harmless to its conclusions). It must read machine triage from labels so children are not reported as untriaged drift, and it gains review findings and pending reconciliations as visible work items in the brief. |
+| `merge-batch` | Authority unchanged (human-invoked, same gates); merge-prep and Status-field references cleaned up. |
+| `autopilot-runtime` | Mechanics unchanged; verb roster updates only (+`review-findings`, +`child-complete`, −`review-fix-publish`, −`merge-prep-complete`). |
+
+Two normative rules govern how skill changes land:
+
+- **Atomicity with code.** Sessions read skills from their attempt worktree,
+  checked out at the claim base — so a skill change and the dispatcher or
+  session-verb change it depends on must land in the same change on `next`.
+  Superseded code paths stay armed until §10 Stage 5, so an in-flight session
+  holding older skill text always completes against code that honors it.
+- **Machine-enforced contracts.** The skill-text test suite pins each skill's
+  contract: required verbs present, forbidden operations absent (e.g.
+  `review-pr` contains no push instruction; `reconcile` never instructs a
+  rebase). Every stage that edits a skill updates the pins in the same
+  change; the pins are the regression guard for role authority, not just
+  prose style.
+
+## 8. What this deletes
 
 States: REVIEW-FIXING, MERGE-PREP. Machinery: all Status
 projection/reconciliation and its read-backs, the dominance snapshot,
@@ -237,7 +267,7 @@ Retained proven core: branch claim CAS · review ref (simplified lifecycle:
 claimless head-pinned merge · the staleness reaper · attempt isolation and
 file-based credential handoff.
 
-## 8. Governance deltas
+## 9. Governance deltas
 
 - Amends 2026-07-19 §7 (states), §8.3 (fix loop), §8.4 (merge-prep), §8.6
   (projection), §10 (workflow changes) as described; its §8.2, §8.5, §9
@@ -250,7 +280,7 @@ file-based credential handoff.
   findings and integration work become SoR items instead of session-internal
   loops.
 
-## 9. Migration (strangler-fig)
+## 10. Migration (strangler-fig)
 
 Never delete ahead of live proof. Each stage lands behind the previous one's
 canary evidence, on `next`, with the existing v2 machinery still armed until
@@ -272,14 +302,14 @@ Stage 5.
    painter period; budget per cycle measured ≤ ~60 points.
 4. **Stage 4 — approval carry-over on** (if Stage 2's proof held), runaway
    guard, child auto-close sweeps.
-5. **Stage 5 — deletion.** Remove §7's list; shrink the probe; re-mint
+5. **Stage 5 — deletion.** Remove §8's list; shrink the probe; re-mint
    attestations; spec cleanup. Full suite + one final canary ladder + the
    two-process same-host race re-run.
 
 Rollback at any stage: the previous machinery is still present until Stage 5;
 disarm the new path via its config knob.
 
-## 10. Verification
+## 11. Verification
 
 Per stage as above; the terminal bar is the 2026-07-19 §15 ladder re-run on
 the new machine: two-observer agreement, same-host two-process race on one
