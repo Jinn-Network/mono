@@ -38,9 +38,7 @@ export function resolveExcludedActiveSlateVersions(
   active: readonly string[],
   buildingVersion: string,
 ): string[] {
-  // Deliberately wrong stub for #1563 red tests — Task 2 replaces with filter.
-  void buildingVersion;
-  return [...active];
+  return active.filter((version) => version !== buildingVersion);
 }
 
 interface Args {
@@ -148,7 +146,11 @@ async function main(): Promise<void> {
         } as typeof task.meta,
       }
     : task);
-  const olderSlateIds = loadActiveHeldOutSlateIds(SOLVER_TYPE, ACTIVE_HELD_OUT_SLATE_VERSIONS);
+  const excludedVersions = resolveExcludedActiveSlateVersions(
+    ACTIVE_HELD_OUT_SLATE_VERSIONS,
+    VERSION,
+  );
+  const olderSlateIds = loadActiveHeldOutSlateIds(SOLVER_TYPE, excludedVersions);
   const excludedIds = new Set([...sourceIds, ...olderSlateIds]);
   const selected = selectValidatedCleanTasks({
     pool: qualityEnrichedPool,
@@ -197,7 +199,7 @@ async function main(): Promise<void> {
       accepted: qualityScreen.assessments.filter((assessment) => assessment.code === 'A').length,
       assessments: qualityScreen.assessments,
     },
-    excludedActiveSlateVersions: ACTIVE_HELD_OUT_SLATE_VERSIONS,
+    excludedActiveSlateVersions: excludedVersions,
     selected,
   };
 
