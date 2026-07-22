@@ -20,6 +20,8 @@ describe('core scrub domain (#1836)', () => {
     const core = [
       'key-policy',
       'plain-patterns',
+      'git-identity',
+      'known-identity',
       'url-credentials',
       'reject-classes',
       'checksummed-instruments',

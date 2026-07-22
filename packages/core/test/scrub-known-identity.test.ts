@@ -192,7 +192,18 @@ describe('addresses stay stubbed via C1 — no address allowlist (Q1)', () => {
 describe('shared inventory registration (#1971)', () => {
   it('registers known-identity in the seed inventory', () => {
     const names = buildSeedScrubPipeline().components.map((c) => c.name);
-    expect(names).toEqual(['key-policy', 'plain-patterns', 'known-identity', 'secretlint']);
+    expect(names).toEqual([
+      'key-policy',
+      'plain-patterns',
+      'git-identity',
+      'known-identity',
+      'url-credentials',
+      'reject-classes',
+      'checksummed-instruments',
+      'ip-address',
+      'gitleaks',
+      'secretlint',
+    ]);
   });
 
   it('detector emits pack findings without mutating attributes', () => {
