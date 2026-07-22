@@ -164,6 +164,45 @@ describe('intermediateFailureDiffs persistence (#1643)', () => {
     expect(p.getByRequestId('req-ifd-2')!.intermediateFailureDiffsJson).toBeNull();
   });
 
+  it('retains prior patch when next has no patch (skipped overwrite)', () => {
+    advanceToRunning(p, 'req-ifd-skip');
+    store.db.prepare(
+      'UPDATE task_runs SET solution_outputs_json = ? WHERE request_id = ?',
+    ).run(solutionJson('diff --git a/x b/x\n+A\n'), 'req-ifd-skip');
+
+    const skippedJson = JSON.stringify({
+      venueRef: { name: 'legacy' },
+      gating: { skipped: true, reason: 'no-quota' },
+      artifacts: [],
+    });
+    p.recordPriorPatchOnOverwrite('req-ifd-skip', skippedJson);
+
+    expect(JSON.parse(p.getByRequestId('req-ifd-skip')!.intermediateFailureDiffsJson!)).toEqual([
+      'diff --git a/x b/x\n+A\n',
+    ]);
+  });
+
+  it('never throws on malformed solution_outputs_json or intermediate list', () => {
+    advanceToRunning(p, 'req-ifd-malformed');
+    store.db.prepare(
+      'UPDATE task_runs SET solution_outputs_json = ?, intermediate_failure_diffs_json = ? WHERE request_id = ?',
+    ).run('{not-json', '{also-bad', 'req-ifd-malformed');
+    expect(() => {
+      p.recordPriorPatchOnOverwrite('req-ifd-malformed', solutionJson('diff --git a/x b/x\n+B\n'));
+    }).not.toThrow();
+    expect(p.getByRequestId('req-ifd-malformed')!.intermediateFailureDiffsJson).toBe('{also-bad');
+
+    store.db.prepare(
+      'UPDATE task_runs SET solution_outputs_json = ?, intermediate_failure_diffs_json = ? WHERE request_id = ?',
+    ).run(solutionJson('diff --git a/x b/x\n+A\n'), '{also-bad', 'req-ifd-malformed');
+    expect(() => {
+      p.recordPriorPatchOnOverwrite('req-ifd-malformed', solutionJson('diff --git a/x b/x\n+B\n'));
+    }).not.toThrow();
+    expect(JSON.parse(p.getByRequestId('req-ifd-malformed')!.intermediateFailureDiffsJson!)).toEqual([
+      'diff --git a/x b/x\n+A\n',
+    ]);
+  });
+
   it('survives SQLite round-trip and dedupes on second append (AC6, AC3)', () => {
     advanceToRunning(p, 'req-ifd-3');
     store.db.prepare(

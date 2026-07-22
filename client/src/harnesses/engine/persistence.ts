@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS task_runs (
   -- Additive column (#1643, intermediateFailureDiffs / spec §10 field 4):
   -- intermediate_failure_diffs_json: JSON string[] of prior non-empty
   --   solutionPayload.patch values retained when runImpl overwrites
-  --   solution_outputs_json with a different patch. NULL when empty.
+  --   solution_outputs_json (different patch, or no next patch). NULL when empty.
   intermediate_failure_diffs_json TEXT,
   runtime_plugins_json        TEXT,
 
@@ -200,11 +200,6 @@ export type TaskRunPatch = Partial<{
    * Added by WT-C for PACKAGING recovery fidelity.
    */
   solutionOutputsJson: string | null;
-  /**
-   * JSON array of prior failed unified diffs retained when runImpl overwrites
-   * solution_outputs_json with a different patch (#1643).
-   */
-  intermediateFailureDiffsJson: string | null;
   runtimePluginsJson: string | null;
   /** Corpus knowledge refs consumed by this run (#1393). */
   consumedRefsJson: string | null;
@@ -768,15 +763,19 @@ export class TaskRunPersistence {
 
   /**
    * Before overwriting solution_outputs_json, retain the prior non-empty
-   * solutionPayload.patch when it differs from the next patch (#1643).
-   * Dedupes against the existing list. Never throws on malformed JSON.
+   * solutionPayload.patch when it would be lost (#1643).
+   * Retains when next has no patch (e.g. skipped) or a different non-empty
+   * patch. Dedupes against the existing list. Never throws on malformed JSON.
    */
   recordPriorPatchOnOverwrite(requestId: string, nextSolutionOutputsJson: string): void {
     const existing = this.getByRequestId(requestId);
     if (!existing) return;
     const prior = extractSolutionPatch(existing.solutionOutputsJson);
+    if (prior == null) return;
     const next = extractSolutionPatch(nextSolutionOutputsJson);
-    if (prior == null || next == null || prior === next) return;
+    // Identical non-empty next → nothing to archive. Missing/empty next still
+    // overwrites solution_outputs_json, so the prior must be retained.
+    if (next != null && prior === next) return;
 
     let list: string[] = [];
     if (existing.intermediateFailureDiffsJson) {
