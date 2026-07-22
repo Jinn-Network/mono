@@ -461,3 +461,50 @@ def test_corpus_fetch_tool_reads_canonical_episode_content(tmp_path):
     assert "[tests-passed]" in out
     assert "Red, green, project." in out
     assert jinn._state_for("s1")["activity"]["fetchedRefs"] == [ref]
+
+
+def test_corpus_fetch_tool_returns_skill_only_jinn_skill_v1_content(tmp_path):
+    import base64
+    import hashlib
+
+    ref = "bafyDistilledSkillOnly"
+    skill = {
+        "schemaVersion": "jinn.skill.v1",
+        "skill": {
+            "name": "retry-budget-tuning",
+            "skillMd": "# retry-budget-tuning\n\nCap retries at three.",
+        },
+        "files": [],
+        "provenance": {
+            "kind": "distilled",
+            "sourceEnvelopeCids": ["bafySourceEpisode1"],
+            "operator": {"safeAddress": "0x" + "a" * 40},
+            "verifiabilityTier": "evaluator-verified",
+        },
+    }
+    content = json.dumps(skill).encode("utf-8")
+    record = {
+        "ref": ref,
+        "artifacts": [{
+            "artifactType": "jinn.skill.v1",
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "contentBase64": base64.b64encode(content).decode("ascii"),
+        }],
+    }
+
+    def runner(argv):
+        if argv[1] == "corpus" and argv[2] == "get":
+            return 0, json.dumps(record)
+        return 1, f"unexpected: {argv}"
+
+    jinn._runner = runner
+    try:
+        out = jinn._tool_corpus_fetch({"ref": ref}, session_id="s1")
+    finally:
+        jinn._runner = None
+
+    assert "[evaluator-verified]" in out
+    assert "retry-budget-tuning" in out
+    assert "Cap retries at three." in out
+    assert "not readable as an evidence envelope" not in out
+    assert jinn._state_for("s1")["activity"]["fetchedRefs"] == [ref]
