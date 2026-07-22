@@ -72,12 +72,13 @@ function writer(
       fail('ensureImplementationSummary');
       state.summary = summary;
     },
-    findOpenPullRequest: async () => state.prExists ? {
+    readDraftPullRequestAuthority: async () => state.prExists ? {
+      kind: 'linked',
       number: 101,
       head: state.head,
       draft: state.draft,
       labels: [...state.labels],
-    } : null,
+    } : { kind: 'missing' },
     ensureDraftPullRequest: async () => {
       calls.push('ensureDraftPullRequest');
       fail('ensureDraftPullRequest');
@@ -487,6 +488,41 @@ describe('executeProjectionPlan', () => {
     expect(state.status).toBe('In Progress');
     expect(state.draft).toBe(true);
     expect(state.labels.has('engine:review')).toBe(true);
+  });
+
+  it('does not recover a failed draft mutation from malformed issue relation evidence', async () => {
+    const state = initial();
+    const calls: string[] = [];
+    const base = writer(state, calls);
+    let authorityReads = 0;
+    const port: ReconciliationWriter = {
+      ...base,
+      async readDraftPullRequestAuthority() {
+        authorityReads += 1;
+        if (authorityReads === 1) return { kind: 'missing' };
+        throw new Error('malformed issue closing relation');
+      },
+      async ensureDraftPullRequest() {
+        calls.push('ensureDraftPullRequest');
+        throw new Error('create response lost');
+      },
+    };
+
+    const report = await executeProjectionPlan({
+      actions: [{
+        kind: 'ensure-draft-pr',
+        issueNumber: 42,
+        expectedHead: HEAD,
+        headRefName: 'autopilot/42',
+        baseRefName: 'next',
+      }],
+    }, port);
+
+    expect(report.results[0]).toMatchObject({
+      outcome: 'failed',
+      detail: 'create response lost',
+    });
+    expect(authorityReads).toBe(2);
   });
 
   it('defers every remaining action once the GitHub rate-limit budget is hit', async () => {

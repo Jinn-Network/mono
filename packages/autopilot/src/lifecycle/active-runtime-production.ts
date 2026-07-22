@@ -43,8 +43,17 @@ import {
   executeUpdateBranchAction,
 } from './merge-executor.js';
 import { makeProductionMergeActionPort } from './merge-executor-production.js';
-import { makeProductionReconciliationWriter } from './reconciliation-writer-production.js';
+import {
+  makeProductionReconciliationWriter,
+  type ReconciliationProjectItemNode,
+  type ReconciliationPullRequestNode,
+} from './reconciliation-writer-production.js';
 import type { GitHubLifecycleSnapshot } from './snapshot.js';
+import type {
+  TargetedIssueActionContext,
+  TargetedNativeIssue,
+  TargetedOpenPullRequest,
+} from './targeted-action-reader.js';
 import type { GitOid, HumanReason } from './types.js';
 
 export const AUTOPILOT_V2_REMOTE = 'jinn-autopilot-v2';
@@ -56,6 +65,22 @@ export interface ProductionActiveRuntimeOptions {
   readonly credentials: CredentialPool;
   readonly authorAllowlist: ReadonlySet<string>;
   readonly readSnapshot: () => Promise<GitHubLifecycleSnapshot>;
+  /** Targeted reads backing the cycle-snapshot reconciliation writer. */
+  readonly readPullRequestByNumber: (
+    prNumber: number,
+  ) => Promise<ReconciliationPullRequestNode | null>;
+  readonly readProjectItemForReconciliation: (
+    issueNumber: number,
+  ) => Promise<ReconciliationProjectItemNode | null>;
+  readonly readBranchHeadByName: (headRefName: string) => Promise<GitOid | null>;
+  readonly readIssueByNumber: (issueNumber: number) => Promise<TargetedNativeIssue | null>;
+  readonly readBlockedByIssueNumbers: (issueNumber: number) => Promise<readonly number[]>;
+  readonly readOpenPullRequestsByIssue: (
+    issueNumber: number,
+  ) => Promise<readonly TargetedOpenPullRequest[]>;
+  readonly readIssueActionContext: (
+    issueNumber: number,
+  ) => Promise<TargetedIssueActionContext>;
   readonly config: DispatcherConfig;
   readonly spawn: SpawnFn;
   readonly caps: {
@@ -239,12 +264,20 @@ export function makeProductionActiveRuntime(
       readonly reason: HumanReason;
     },
     credentials: CredentialPool,
+    cycleSnapshot: GitHubLifecycleSnapshot,
   ): Promise<void> => {
     const selection = selectCredential(credentials, { phase: 'implement' });
     if (selection.status !== 'selected') throw new Error(selection.detail);
     const writer = makeProductionReconciliationWriter({
       repositoryPath: options.repositoryPath,
-      readSnapshot: options.readSnapshot,
+      cycleSnapshot,
+      readPullRequestByNumber: options.readPullRequestByNumber,
+      readProjectItemForReconciliation: options.readProjectItemForReconciliation,
+      readBranchHeadByName: options.readBranchHeadByName,
+      readIssueByNumber: options.readIssueByNumber,
+      readBlockedByIssueNumbers: options.readBlockedByIssueNumbers,
+      readOpenPullRequestsByIssue: options.readOpenPullRequestsByIssue,
+      readIssueActionContext: options.readIssueActionContext,
       credential: selection.credential,
       runner,
       environment: ambient,
@@ -320,7 +353,7 @@ export function makeProductionActiveRuntime(
         });
       },
 
-      review: (action, credentials) => {
+      review: (action, credentials, cycleSnapshot) => {
         const port = makeProductionReviewActionPort({
           repositoryPath: options.repositoryPath,
           worktreeBase: options.worktreeBase,
@@ -345,7 +378,7 @@ export function makeProductionActiveRuntime(
           staleAfterMs: options.staleAfterMs,
           spawnCoordinator: reviewSpawner,
           trackChild: track,
-          escalateHuman: (input) => escalateReview(input, credentials),
+          escalateHuman: (input) => escalateReview(input, credentials, cycleSnapshot),
         });
       },
 
@@ -384,7 +417,7 @@ export function makeProductionActiveRuntime(
         };
       },
 
-      fileReconcileChild: async (action, credentials) => {
+      fileReconcileChild: async (action, credentials, cycleSnapshot) => {
         const result = await executeFileReconcileChildAction({
           prNumber: action.prNumber,
           expectedHead: action.head,
@@ -412,7 +445,7 @@ export function makeProductionActiveRuntime(
                 `Runaway child guard: ${result.priorCount} prior reconcile children `
                 + `on PR #${action.prNumber}; parking for Human.`,
             },
-          }, credentials);
+          }, credentials, cycleSnapshot);
           return { status: 'human', detail: 'runaway-child-hold' };
         }
         return {

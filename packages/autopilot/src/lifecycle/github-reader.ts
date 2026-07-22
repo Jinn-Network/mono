@@ -9,7 +9,13 @@ import {
 } from '../dispatcher/project-snapshot.js';
 import type { IssueBoardState } from '../dispatcher/issue-source.js';
 import { PROJECT_NUMBER, REPO } from '../dispatcher/constants.js';
-import type { BlockedOn, ProjectStatus } from '../dispatcher/types.js';
+import type {
+  BlockedOn,
+  Effort,
+  IssueShape,
+  Priority,
+  ProjectStatus,
+} from '../dispatcher/types.js';
 import type {
   GitHubLifecycleReader,
   PullRequestPage,
@@ -25,7 +31,13 @@ import {
   terminalBranchClaimTrailers,
 } from './codecs.js';
 import { CANONICAL_GITHUB_HTTPS_REMOTE } from './implementation-executor.js';
-import { gitOid, type GitOid, type GitRefName } from './types.js';
+import { gitOid, gitRefName, type GitOid, type GitRefName } from './types.js';
+import {
+  GitHubUsageMeter,
+  makeGitHubUsageCommandRunner,
+  TARGETED_RELATION_RESERVE,
+  type GitHubUsage,
+} from './github-usage.js';
 export { extractImplementationCompletionSummary } from './codecs.js';
 
 export const REVIEW_CLAIM_PAYLOAD_FILE = 'jinn-autopilot-review.json';
@@ -80,6 +92,7 @@ const MERGED_PR_FIELDS = `
         }`;
 
 const PR_QUERY = `query($cursor: String) {
+  rateLimit { cost remaining resetAt }
   repository(owner: "Jinn-Network", name: "mono") {
     pullRequests(first: ${PR_PAGE_SIZE}, after: $cursor, states: [OPEN], labels: ["engine:review"], orderBy: {field: UPDATED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }
@@ -91,12 +104,31 @@ const PR_QUERY = `query($cursor: String) {
 }`;
 
 const PR_BY_NUMBER_QUERY = `query($number: Int!) {
+  rateLimit { cost remaining resetAt }
   repository(owner: "Jinn-Network", name: "mono") {
     pullRequest(number: $number) {
       ${PR_FIELDS}
     }
   }
 }`;
+
+const TARGETED_CLOSING_ISSUE_LIMIT = 20;
+
+function closingPullRequestNumbersQuery(issueNumbers: readonly number[]): string {
+  const issues = issueNumbers.map((number) => `
+    issue${number}: issue(number: ${number}) {
+      closedByPullRequestsReferences(first: 100, includeClosedPrs: true) {
+        pageInfo { hasNextPage }
+        nodes { number state }
+      }
+    }`).join('\n');
+  return `query IncrementalClosingPullRequests {
+  rateLimit { cost remaining resetAt }
+  repository(owner: "Jinn-Network", name: "mono") {
+${issues}
+  }
+}`;
+}
 
 function mergedOutcomesQuery(issueNumbers: readonly number[]): string {
   const issues = issueNumbers.map((number) => `
@@ -107,6 +139,7 @@ function mergedOutcomesQuery(issueNumbers: readonly number[]): string {
       }
     }`).join('\n');
   return `query {
+  rateLimit { cost remaining resetAt }
   repository(owner: "Jinn-Network", name: "mono") {
 ${issues}
   }
@@ -122,6 +155,8 @@ ${issues}
 // the live capability probe already validates — see capability-probe.ts).
 export const REVIEW_CLAIM_REF_PREFIX = 'refs/jinn-autopilot/review-claims/v1/';
 export const REVIEW_CLAIM_REF_GLOB = `${REVIEW_CLAIM_REF_PREFIX}*`;
+const AUTOPILOT_BRANCH_REF_PREFIX = 'refs/heads/autopilot/';
+export const AUTOPILOT_BRANCH_REF_GLOB = `${AUTOPILOT_BRANCH_REF_PREFIX}*`;
 
 /**
  * Parses `git ls-remote <remote> '<REVIEW_CLAIM_REF_GLOB>'` output into a
@@ -174,33 +209,86 @@ function parseSingleReviewClaimRef(raw: string, ref: GitRefName): GitOid | null 
  * the whole board (~91 pages measured on the live board).
  */
 const PROJECT_ITEM_BY_ISSUE_QUERY = `query($number: Int!) {
+  rateLimit { cost remaining resetAt }
   repository(owner: "Jinn-Network", name: "mono") {
     issue(number: $number) {
       projectItems(first: 10) {
+        pageInfo { hasNextPage }
         nodes {
           id
           project { number }
           status:    fieldValueByName(name: "Status")     { ... on ProjectV2ItemFieldSingleSelectValue { name } }
+          priority:  fieldValueByName(name: "Priority")   { ... on ProjectV2ItemFieldSingleSelectValue { name } }
+          effort:    fieldValueByName(name: "Effort")     { ... on ProjectV2ItemFieldSingleSelectValue { name } }
           blockedOn: fieldValueByName(name: "Blocked on") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
+          issueType: fieldValueByName(name: "Type")       { ... on ProjectV2ItemFieldSingleSelectValue { name } }
         }
       }
     }
   }
 }`;
 
+const ISSUE_ACTION_CONTEXT_QUERY = `query($number: Int!) {
+  rateLimit { cost remaining resetAt }
+  repository(owner: "Jinn-Network", name: "mono") {
+    issue(number: $number) {
+      projectItems(first: 10) {
+        pageInfo { hasNextPage }
+        nodes {
+          id
+          project { number }
+          status:    fieldValueByName(name: "Status")     { ... on ProjectV2ItemFieldSingleSelectValue { name } }
+          priority:  fieldValueByName(name: "Priority")   { ... on ProjectV2ItemFieldSingleSelectValue { name } }
+          effort:    fieldValueByName(name: "Effort")     { ... on ProjectV2ItemFieldSingleSelectValue { name } }
+          blockedOn: fieldValueByName(name: "Blocked on") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
+          issueType: fieldValueByName(name: "Type")       { ... on ProjectV2ItemFieldSingleSelectValue { name } }
+        }
+      }
+      closedByPullRequestsReferences(first: 100, includeClosedPrs: true) {
+        pageInfo { hasNextPage }
+        nodes { number state }
+      }
+    }
+  }
+}`;
+
+interface ProjectItemByIssueNode {
+  readonly id: string;
+  readonly project: { readonly number: number };
+  readonly status: { readonly name: string } | null;
+  readonly priority: { readonly name: string } | null;
+  readonly effort: { readonly name: string } | null;
+  readonly blockedOn: { readonly name: string } | null;
+  readonly issueType: { readonly name: string } | null;
+}
+
 interface ProjectItemByIssueResponse {
   data: {
     repository: {
       issue: {
         projectItems: {
-          nodes: Array<{
-            id: string;
-            project: { number: number };
-            status: { name: string } | null;
-            blockedOn: { name: string } | null;
-          }>;
+          pageInfo: { hasNextPage: boolean };
+          nodes: ProjectItemByIssueNode[];
         };
       } | null;
+    };
+  };
+}
+
+interface IssueActionContextResponse {
+  data: {
+    rateLimit: { cost: number; remaining: number; resetAt: string };
+    repository: {
+      issue: null | {
+        projectItems: {
+          pageInfo: { hasNextPage: boolean };
+          nodes: ProjectItemByIssueNode[];
+        };
+        closedByPullRequestsReferences: {
+          pageInfo: { hasNextPage: boolean };
+          nodes: Array<{ number: number; state: 'OPEN' | 'MERGED' | 'CLOSED' }>;
+        };
+      };
     };
   };
 }
@@ -209,6 +297,11 @@ const VALID_PROJECT_STATUS = new Set<string>([
   'Todo', 'In Progress', 'Human', 'In Review', 'Done',
 ]);
 const VALID_BLOCKED_ON = new Set<string>(['Nothing', 'Human', 'Another issue']);
+const VALID_PRIORITY = new Set<string>(['P0', 'P1', 'P2', 'P3', 'P4']);
+const VALID_EFFORT = new Set<string>(['Low', 'Medium', 'High', 'XHigh', 'Max']);
+const VALID_ISSUE_TYPE = new Set<string>([
+  'feat', 'fix', 'refactor', 'spike', 'chore', 'docs', 'test', 'incident', 'design',
+]);
 
 function parseProjectStatus(name: string | undefined): ProjectStatus | null {
   return name !== undefined && VALID_PROJECT_STATUS.has(name) ? (name as ProjectStatus) : null;
@@ -216,6 +309,40 @@ function parseProjectStatus(name: string | undefined): ProjectStatus | null {
 
 function parseBlockedOn(name: string | undefined): BlockedOn | null {
   return name !== undefined && VALID_BLOCKED_ON.has(name) ? (name as BlockedOn) : null;
+}
+
+function parseSelected<Value extends string>(
+  node: { readonly name: string } | null,
+  values: ReadonlySet<string>,
+  subject: string,
+): Value | null {
+  if (node === null) return null;
+  if (typeof node.name !== 'string' || !values.has(node.name)) {
+    throw new Error(`Targeted Project ${subject} value is unknown`);
+  }
+  return node.name as Value;
+}
+
+function decodeTargetedProjectItem(
+  nodes: readonly ProjectItemByIssueNode[],
+): {
+  readonly id: string;
+  readonly status: ProjectStatus | null;
+  readonly priority: Priority | null;
+  readonly effort: Effort | null;
+  readonly blockedOn: BlockedOn | null;
+  readonly issueType: IssueShape | null;
+} | null {
+  const node = nodes.find((candidate) => candidate.project.number === PROJECT_NUMBER);
+  if (node === undefined) return null;
+  return {
+    id: node.id,
+    status: parseProjectStatus(node.status?.name),
+    priority: parseSelected<Priority>(node.priority, VALID_PRIORITY, 'Priority'),
+    effort: parseSelected<Effort>(node.effort, VALID_EFFORT, 'Effort'),
+    blockedOn: parseBlockedOn(node.blockedOn?.name),
+    issueType: parseSelected<IssueShape>(node.issueType, VALID_ISSUE_TYPE, 'Type'),
+  };
 }
 
 interface GraphQlPage {
@@ -521,12 +648,18 @@ export interface GhLifecycleReaderOptions {
    * run this before the runbook's "configure jinn-autopilot-v2" step).
    */
   readonly remoteName?: string;
+  /** Share a cycle-scoped meter with future conditional REST readers. */
+  readonly usageMeter?: GitHubUsageMeter;
+  /** The supplied runner already records into `usageMeter`. */
+  readonly runnerIsMetered?: boolean;
 }
 
 export class GhLifecycleReader implements GitHubLifecycleReader {
+  private readonly run: CommandRunner;
   private readonly issues: GhIssueSource;
   private readonly repositoryPath: string;
   private readonly remoteName: string;
+  private readonly usageMeter: GitHubUsageMeter;
   // Review-claim metadata commits are content-addressed and append-only: an
   // OID's payload never changes, so this cache never needs invalidation for
   // the life of the reader (jinn-mono#1883-follow-up).
@@ -538,12 +671,24 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
   }>>();
 
   constructor(
-    private readonly run: CommandRunner = defaultRunner,
+    run: CommandRunner = defaultRunner,
     options: GhLifecycleReaderOptions = {},
   ) {
-    this.issues = new GhIssueSource(run);
+    this.usageMeter = options.usageMeter ?? new GitHubUsageMeter();
+    this.run = options.runnerIsMetered === true
+      ? run
+      : makeGitHubUsageCommandRunner(run, this.usageMeter);
+    this.issues = new GhIssueSource(this.run);
     this.repositoryPath = options.repositoryPath ?? '.';
     this.remoteName = options.remoteName ?? CANONICAL_GITHUB_HTTPS_REMOTE;
+  }
+
+  resetGitHubUsage(): void {
+    this.usageMeter.reset();
+  }
+
+  githubUsage(): GitHubUsage {
+    return this.usageMeter.read();
   }
 
   readProjectSnapshot(): Promise<ProjectSnapshot> {
@@ -583,6 +728,155 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
       if (/^[1-9][0-9]*$/.test(suffix)) byPrNumber.set(Number(suffix), oid);
     }
     return byPrNumber;
+  }
+
+  async readReviewClaimRefs(): Promise<ReadonlyMap<number, GitOid>> {
+    return this.listReviewClaimRefs();
+  }
+
+  async readBranchHeadForReconciliation(headRefName: string): Promise<GitOid | null> {
+    const branch = gitRefName(headRefName);
+    const ref = `refs/heads/${branch}`;
+    const raw = await this.gitRun(['ls-remote', this.remoteName, ref]);
+    const trimmed = raw.trimEnd();
+    if (trimmed.length === 0) return null;
+    const lines = trimmed.split('\n');
+    if (lines.length !== 1) throw new Error(`Branch ${branch} readback is ambiguous`);
+    const fields = lines[0]!.split('\t');
+    if (fields.length !== 2 || fields[1] !== ref || fields[0] === undefined) {
+      throw new Error(`Branch ${branch} readback is malformed`);
+    }
+    return gitOid(fields[0]);
+  }
+
+  async readGraphQlRemaining(): Promise<number> {
+    const raw = await this.run('gh', [
+      'api',
+      '-H',
+      'Accept: application/vnd.github+json',
+      '-H',
+      'X-GitHub-Api-Version: 2026-03-10',
+      '/rate_limit',
+    ]);
+    const response = JSON.parse(raw) as {
+      resources?: {
+        graphql?: {
+          remaining?: unknown;
+          reset?: unknown;
+          limit?: unknown;
+          used?: unknown;
+        };
+      };
+    };
+    const graphql = response.resources?.graphql;
+    const remaining = graphql?.remaining;
+    const reset = graphql?.reset;
+    const limit = graphql?.limit;
+    const used = graphql?.used;
+    if (
+      !Number.isSafeInteger(remaining)
+      || (remaining as number) < 0
+      || !Number.isSafeInteger(reset)
+      || (reset as number) <= 0
+      || !Number.isSafeInteger(limit)
+      || (limit as number) <= 0
+      || !Number.isSafeInteger(used)
+      || (used as number) < 0
+      || (remaining as number) + (used as number) !== limit
+    ) {
+      throw new Error(
+        'GitHub REST rate-limit response has invalid resources.graphql quota evidence',
+      );
+    }
+    const resetAt = new Date((reset as number) * 1_000).toISOString();
+    this.usageMeter.recordGraphQlQuotaEvidence(remaining, resetAt);
+    return remaining as number;
+  }
+
+  async readPullRequestNumbersClosingIssues(
+    issueNumbers: readonly number[],
+  ): Promise<ReadonlySet<number>> {
+    const unique = [...new Set(issueNumbers)].sort((left, right) => left - right);
+    for (const number of unique) {
+      if (!Number.isSafeInteger(number) || number <= 0) {
+        throw new Error('Invalid issue number for closing-PR discovery');
+      }
+    }
+    if (unique.length === 0) return new Set();
+    if (unique.length > TARGETED_CLOSING_ISSUE_LIMIT) {
+      throw new Error(
+        `Targeted closing-PR discovery exceeded ${TARGETED_CLOSING_ISSUE_LIMIT} issues`,
+      );
+    }
+    const raw = await this.run('gh', [
+      'api', 'graphql', '-f', `query=${closingPullRequestNumbersQuery(unique)}`,
+    ]);
+    const decoded = JSON.parse(raw) as unknown;
+    if (typeof decoded !== 'object' || decoded === null || Array.isArray(decoded)) {
+      throw new Error('Targeted closing-PR response must be an object');
+    }
+    if (Object.hasOwn(decoded, 'errors')) {
+      const errors = (decoded as { errors?: unknown }).errors;
+      if (!Array.isArray(errors)) {
+        throw new Error('Targeted closing-PR GraphQL errors member is malformed');
+      }
+      if (errors.length > 0) {
+        throw new Error('Targeted closing-PR response contains GraphQL errors');
+      }
+    }
+    const data = (decoded as { data?: unknown }).data;
+    if (typeof data !== 'object' || data === null) {
+      throw new Error('Targeted closing-PR response data is missing');
+    }
+    const repository = (data as { repository?: unknown }).repository;
+    if (typeof repository !== 'object' || repository === null) {
+      throw new Error('Targeted closing-PR repository is missing');
+    }
+    const result = new Set<number>();
+    for (const issueNumber of unique) {
+      const issue = (repository as Record<string, unknown>)[`issue${issueNumber}`];
+      if (issue === null) {
+        throw new Error(`Targeted closing-PR issue #${issueNumber} resolved to null`);
+      }
+      if (typeof issue !== 'object') {
+        throw new Error(`Targeted closing-PR issue #${issueNumber} is malformed`);
+      }
+      const connection = (issue as { closedByPullRequestsReferences?: unknown })
+        .closedByPullRequestsReferences;
+      if (typeof connection !== 'object' || connection === null) {
+        throw new Error(`Targeted closing-PR issue #${issueNumber} connection is missing`);
+      }
+      const pageInfo = (connection as { pageInfo?: unknown }).pageInfo;
+      if (typeof pageInfo !== 'object' || pageInfo === null) {
+        throw new Error(`Targeted closing-PR issue #${issueNumber} pageInfo is missing`);
+      }
+      const hasNextPage = (pageInfo as { hasNextPage?: unknown }).hasNextPage;
+      if (typeof hasNextPage !== 'boolean') {
+        throw new Error(`Targeted closing-PR issue #${issueNumber} pagination is malformed`);
+      }
+      if (hasNextPage) {
+        throw new Error(`Targeted closing-PR issue #${issueNumber} pagination is truncated`);
+      }
+      const nodes = (connection as { nodes?: unknown }).nodes;
+      if (!Array.isArray(nodes)) {
+        throw new Error(`Targeted closing-PR issue #${issueNumber} nodes are missing`);
+      }
+      for (const node of nodes) {
+        if (typeof node !== 'object' || node === null) {
+          throw new Error(`Targeted closing-PR issue #${issueNumber} node is malformed`);
+        }
+        const number = (node as { number?: unknown }).number;
+        const state = (node as { state?: unknown }).state;
+        if (!Number.isSafeInteger(number) || (number as number) <= 0) {
+          throw new Error(`Targeted closing-PR issue #${issueNumber} PR number is invalid`);
+        }
+        if (state !== 'OPEN' && state !== 'CLOSED' && state !== 'MERGED') {
+          throw new Error(`Targeted closing-PR issue #${issueNumber} PR state is unknown`);
+        }
+        if (state === 'OPEN') result.add(number as number);
+      }
+    }
+    return result;
   }
 
   /** Targeted single-ref read for the reconciliation single-PR path. */
@@ -918,7 +1212,10 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
   async readProjectItemForReconciliation(issueNumber: number): Promise<{
     readonly id: string;
     readonly status: ProjectStatus | null;
+    readonly priority: Priority | null;
+    readonly effort: Effort | null;
     readonly blockedOn: BlockedOn | null;
+    readonly issueType: IssueShape | null;
   } | null> {
     const raw = await this.run('gh', [
       'api', 'graphql',
@@ -926,13 +1223,57 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
       '-F', `number=${issueNumber}`,
     ]);
     const response = JSON.parse(raw) as ProjectItemByIssueResponse;
-    const nodes = response.data.repository.issue?.projectItems.nodes ?? [];
-    const node = nodes.find((candidate) => candidate.project.number === PROJECT_NUMBER);
-    if (node === undefined) return null;
+    const projectItems = response.data.repository.issue?.projectItems;
+    if (projectItems?.pageInfo.hasNextPage === true) {
+      throw new Error('Targeted Project-item pagination exceeded its fixed limit');
+    }
+    const nodes = projectItems?.nodes ?? [];
+    return decodeTargetedProjectItem(nodes);
+  }
+
+  /**
+   * One issue-scoped query for all GraphQL relation context needed by an
+   * action: its Project item and the open PR numbers that close it.
+   */
+  async readIssueActionContextForReconciliation(issueNumber: number): Promise<{
+    readonly projectItem: ReturnType<typeof decodeTargetedProjectItem>;
+    readonly openPullRequestNumbers: ReadonlySet<number>;
+  }> {
+    const raw = await this.run('gh', [
+      'api', 'graphql',
+      '-f', `query=${ISSUE_ACTION_CONTEXT_QUERY}`,
+      '-F', `number=${issueNumber}`,
+    ]);
+    const response = JSON.parse(raw) as IssueActionContextResponse;
+    if (response.data.rateLimit.cost > TARGETED_RELATION_RESERVE) {
+      throw new Error(
+        `Targeted issue-action context cost ${response.data.rateLimit.cost} exceeded `
+        + `${TARGETED_RELATION_RESERVE}-point reserve`,
+      );
+    }
+    const issue = response.data.repository.issue;
+    if (issue === null) {
+      return { projectItem: null, openPullRequestNumbers: new Set() };
+    }
+    if (
+      issue.projectItems.pageInfo.hasNextPage
+      || issue.closedByPullRequestsReferences.pageInfo.hasNextPage
+    ) {
+      throw new Error('Targeted issue-action context pagination exceeded its fixed limit');
+    }
+    const openPullRequestNumbers = new Set<number>();
+    for (const node of issue.closedByPullRequestsReferences.nodes) {
+      if (!Number.isSafeInteger(node.number) || node.number <= 0) {
+        throw new Error('Targeted issue-action context returned an invalid PR number');
+      }
+      if (!['OPEN', 'MERGED', 'CLOSED'].includes(node.state)) {
+        throw new Error('Targeted issue-action context returned an unknown PR state');
+      }
+      if (node.state === 'OPEN') openPullRequestNumbers.add(node.number);
+    }
     return {
-      id: node.id,
-      status: parseProjectStatus(node.status?.name),
-      blockedOn: parseBlockedOn(node.blockedOn?.name),
+      projectItem: decodeTargetedProjectItem(issue.projectItems.nodes),
+      openPullRequestNumbers,
     };
   }
 
@@ -965,38 +1306,88 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
     return { nodes: [...byNumber.values()], pageInfo: connection.pageInfo };
   }
 
-  async readBranchClaims(): Promise<readonly RawBranchClaim[]> {
-    const raw = await this.run('gh', [
-      'api',
-      `repos/${REPO}/git/matching-refs/heads/autopilot/`,
-      '--paginate',
-      '--slurp',
-    ]);
-    const parsed = JSON.parse(raw) as unknown;
-    const pages = Array.isArray(parsed) ? parsed : [];
-    const refs = pages.flatMap((page) => Array.isArray(page) ? page : []) as Array<{
-      ref?: string;
-      object?: { sha?: string };
-    }>;
+  private async branchClaimsFromRefs(
+    refs: readonly { readonly name: string; readonly oid: string }[],
+  ): Promise<readonly RawBranchClaim[]> {
     const claims: RawBranchClaim[] = [];
     for (const ref of refs) {
-      const name = ref.ref;
-      const oid = ref.object?.sha;
-      const match = /^refs\/heads\/autopilot\/([1-9][0-9]*)$/.exec(name ?? '');
-      if (match === null || oid === undefined) continue;
+      const match = /^refs\/heads\/autopilot\/([1-9][0-9]*)$/.exec(ref.name);
+      if (match?.[1] === undefined) continue;
       const issueNumber = Number(match[1]);
-      const ancestry = await this.branchAncestry(oid, issueNumber);
+      const ancestry = await this.branchAncestry(ref.oid, issueNumber);
       const trailers = ancestry.claimTrailers;
       if (trailers === null) continue;
       claims.push({
         issueNumber,
         headRefName: `autopilot/${match[1]}`,
-        headOid: oid,
+        headOid: ref.oid,
         headCommittedAt: ancestry.headCommittedAt,
         claimTrailers: trailers,
         implementationCompletionSummary: ancestry.completionSummary,
       });
     }
     return claims;
+  }
+
+  async readIncrementalBranchClaims(): Promise<readonly RawBranchClaim[]> {
+    const raw = await this.gitRun([
+      'ls-remote', this.remoteName, AUTOPILOT_BRANCH_REF_GLOB,
+    ]);
+    const refs: Array<{ readonly name: string; readonly oid: string }> = [];
+    const seenIssues = new Set<number>();
+    const lines = raw.length === 0 ? [] : raw.split('\n');
+    if (lines.at(-1) === '') lines.pop();
+    for (const line of lines) {
+      const fields = line.split('\t');
+      const [oid, name] = fields;
+      if (
+        fields.length !== 2
+        || oid === undefined
+        || name === undefined
+        || !name.startsWith(AUTOPILOT_BRANCH_REF_PREFIX)
+      ) {
+        throw new Error('Malformed git ls-remote Autopilot branch ref listing');
+      }
+      let parsedOid: GitOid;
+      try {
+        parsedOid = gitOid(oid);
+        gitRefName(name);
+      } catch {
+        throw new Error('Malformed git ls-remote Autopilot branch ref listing');
+      }
+      const issueText = name.slice(AUTOPILOT_BRANCH_REF_PREFIX.length);
+      if (!/^[1-9][0-9]*$/.test(issueText)) continue;
+      const issueNumber = Number(issueText);
+      if (!Number.isSafeInteger(issueNumber) || seenIssues.has(issueNumber)) {
+        throw new Error('Malformed git ls-remote Autopilot branch ref listing');
+      }
+      seenIssues.add(issueNumber);
+      refs.push({ name, oid: parsedOid });
+    }
+    return this.branchClaimsFromRefs(refs);
+  }
+
+  async readBranchClaims(): Promise<readonly RawBranchClaim[]> {
+    const refs: Array<{
+      ref?: string;
+      object?: { sha?: string };
+    }> = [];
+    const pageSize = 100;
+    const maxPages = 100;
+    for (let page = 1; page <= maxPages; page += 1) {
+      const endpoint = `repos/${REPO}/git/matching-refs/heads/autopilot/`
+        + `?per_page=${pageSize}&page=${page}`;
+      const raw = await this.run('gh', ['api', endpoint]);
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) throw new Error('Branch ref REST page is malformed');
+      refs.push(...parsed as typeof refs);
+      if (parsed.length < pageSize) break;
+      if (page === maxPages) throw new Error('Branch ref pagination exceeded safety limit');
+    }
+    return this.branchClaimsFromRefs(refs.flatMap((ref) => (
+      ref.ref === undefined || ref.object?.sha === undefined
+        ? []
+        : [{ name: ref.ref, oid: ref.object.sha }]
+    )));
   }
 }

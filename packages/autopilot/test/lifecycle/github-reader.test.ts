@@ -4,10 +4,15 @@ import {
   extractImplementationCompletionSummary,
   GhLifecycleReader,
 } from '../../src/lifecycle/github-reader.js';
+import {
+  GitHubUsageMeter,
+  makeGitHubUsageCommandRunner,
+} from '../../src/lifecycle/github-usage.js';
 
 const OPEN_HEAD = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const MERGED_HEAD = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 const REVIEW_CLAIM_GLOB = 'refs/jinn-autopilot/review-claims/v1/*';
+const AUTOPILOT_BRANCH_GLOB = 'refs/heads/autopilot/*';
 
 /**
  * Every review-claim read now goes over the git transport (a single
@@ -24,6 +29,14 @@ function noReviewClaimRefs(command: string): string | undefined {
 
 function isReviewClaimListingCall(args: string[]): boolean {
   return args[2] === 'ls-remote' && args[4] === REVIEW_CLAIM_GLOB;
+}
+
+function rateLimit() {
+  return {
+    cost: 1,
+    remaining: 4_999,
+    resetAt: '2026-07-22T13:00:00.000Z',
+  };
 }
 
 it('extracts the durable summary from an exact phase-complete commit envelope', () => {
@@ -112,6 +125,404 @@ function graphQlPr(input: {
 }
 
 describe('GhLifecycleReader', () => {
+  it('reads exact live GraphQL remaining evidence from the uncharged REST quota resource', async () => {
+    const calls: string[][] = [];
+    const reader = new GhLifecycleReader(async (_command, args) => {
+      calls.push(args);
+      return JSON.stringify({
+        resources: {
+          graphql: {
+            limit: 5_000,
+            used: 4_490,
+            remaining: 510,
+            reset: 1_784_725_200,
+          },
+        },
+      });
+    });
+
+    await expect(reader.readGraphQlRemaining()).resolves.toBe(510);
+    expect(calls[0]).toEqual([
+      'api',
+      '-H',
+      'Accept: application/vnd.github+json',
+      '-H',
+      'X-GitHub-Api-Version: 2026-03-10',
+      '/rate_limit',
+    ]);
+    expect(reader.githubUsage()).toMatchObject({
+      graphqlRequests: 0,
+      graphqlCost: 0,
+      graphqlRemaining: 510,
+      graphqlResetAt: '2026-07-22T13:00:00.000Z',
+      restRequests: 1,
+    });
+  });
+
+  it.each([
+    ['missing resources', {}],
+    ['missing graphql resource', { resources: {} }],
+    ['invalid remaining', {
+      resources: { graphql: { limit: 5_000, used: 5_001, remaining: -1, reset: 1_784_725_200 } },
+    }],
+    ['missing reset', {
+      resources: { graphql: { limit: 5_000, used: 4_490, remaining: 510 } },
+    }],
+    ['inconsistent limit and used', {
+      resources: { graphql: { limit: 5_000, used: 4_000, remaining: 510, reset: 1_784_725_200 } },
+    }],
+  ])('fails closed when the REST quota response has %s', async (_label, response) => {
+    const reader = new GhLifecycleReader(async () => JSON.stringify(response));
+
+    await expect(reader.readGraphQlRemaining()).rejects.toThrow(/rate-limit.*remaining|graphql/i);
+  });
+
+  it('fails closed when a requested native Project issue alias resolves to null', async () => {
+    let query = '';
+    const reader = new GhLifecycleReader(async (_command, args) => {
+      query = args.find((arg) => arg.startsWith('query=')) ?? '';
+      return JSON.stringify({
+        data: {
+          rateLimit: { cost: 2, remaining: 518, resetAt: '2026-07-22T13:00:00.000Z' },
+          repository: {
+            issue42: {
+              closedByPullRequestsReferences: {
+                pageInfo: { hasNextPage: false },
+                nodes: [{ number: 101, state: 'OPEN' }, { number: 99, state: 'MERGED' }],
+              },
+            },
+            issue43: null,
+          },
+        },
+      });
+    });
+
+    await expect(reader.readPullRequestNumbersClosingIssues([43, 42, 42]))
+      .rejects.toThrow(/issue #43.*null|issue #43.*missing/i);
+    expect(query).toContain('rateLimit { cost remaining resetAt }');
+    expect(query).toContain('issue42: issue(number: 42)');
+    expect(query).toContain('nodes { number state }');
+    expect(reader.githubUsage()).toMatchObject({
+      graphqlRequests: 1,
+      graphqlCost: 2,
+      graphqlRemaining: 518,
+    });
+  });
+
+  it('discovers only open PR numbers closing targeted issues with strict quota evidence', async () => {
+    const reader = new GhLifecycleReader(async () => JSON.stringify({
+      data: {
+        rateLimit: { cost: 2, remaining: 518, resetAt: '2026-07-22T13:00:00.000Z' },
+        repository: {
+          issue42: {
+            closedByPullRequestsReferences: {
+              pageInfo: { hasNextPage: false },
+              nodes: [{ number: 101, state: 'OPEN' }, { number: 99, state: 'MERGED' }],
+            },
+          },
+        },
+      },
+    }));
+
+    await expect(reader.readPullRequestNumbersClosingIssues([42, 42]))
+      .resolves.toEqual(new Set([101]));
+  });
+
+  it.each([
+    ['partial data with GraphQL errors', [{ message: 'issue lookup failed' }]],
+    ['a malformed GraphQL errors member', { message: 'not an array' }],
+  ] as const)('fails closed on %s', async (_label, errors) => {
+    const reader = new GhLifecycleReader(async () => JSON.stringify({
+      errors,
+      data: {
+        rateLimit: { cost: 1, remaining: 518, resetAt: '2026-07-22T13:00:00.000Z' },
+        repository: {
+          issue42: {
+            closedByPullRequestsReferences: {
+              pageInfo: { hasNextPage: false },
+              nodes: [{ number: 101, state: 'OPEN' }],
+            },
+          },
+        },
+      },
+    }));
+
+    await expect(reader.readPullRequestNumbersClosingIssues([42]))
+      .rejects.toThrow(/GraphQL errors/i);
+  });
+
+  it('fails closed when targeted issue-to-closing-PR discovery is truncated', async () => {
+    const reader = new GhLifecycleReader(async () => JSON.stringify({
+      data: {
+        rateLimit: { cost: 1, remaining: 518, resetAt: '2026-07-22T13:00:00.000Z' },
+        repository: {
+          issue42: {
+            closedByPullRequestsReferences: {
+              pageInfo: { hasNextPage: true },
+              nodes: [{ number: 101, state: 'OPEN' }],
+            },
+          },
+        },
+      },
+    }));
+
+    await expect(reader.readPullRequestNumbersClosingIssues([42]))
+      .rejects.toThrow(/truncated|pagination/i);
+  });
+
+  it('fails closed when targeted issue-to-closing-PR discovery omits quota evidence', async () => {
+    const reader = new GhLifecycleReader(async () => JSON.stringify({
+      data: {
+        repository: {
+          issue42: {
+            closedByPullRequestsReferences: {
+              pageInfo: { hasNextPage: false },
+              nodes: [],
+            },
+          },
+        },
+      },
+    }));
+
+    await expect(reader.readPullRequestNumbersClosingIssues([42]))
+      .rejects.toThrow(/rateLimit/i);
+  });
+
+  it('reuses a shared metered runner without counting reader traffic twice', async () => {
+    const raw: CommandRunner = async () => '[]';
+    const meter = new GitHubUsageMeter();
+    const run = makeGitHubUsageCommandRunner(raw, meter);
+    const reader = new GhLifecycleReader(run, {
+      usageMeter: meter,
+      runnerIsMetered: true,
+    });
+
+    await expect(reader.readIssues({
+      currentSprintIterationId: null,
+      getIssue: () => null,
+    })).resolves.toEqual([]);
+    expect(reader.githubUsage().restRequests).toBe(1);
+  });
+
+  it('counts each explicit REST page used to read open issues', async () => {
+    const calls: string[][] = [];
+    const rows = Array.from({ length: 101 }, (_, index) => ({
+      number: index + 1,
+      title: `Issue ${index + 1}`,
+      labels: [],
+      author: { login: 'trusted' },
+      user: { login: 'trusted' },
+    }));
+    const run: CommandRunner = async (command, args) => {
+      calls.push(args);
+      if (command !== 'gh') throw new Error('unexpected command');
+      if (args[0] === 'issue') return JSON.stringify(rows);
+      const endpoint = args[1] ?? '';
+      if (endpoint.endsWith('&page=1')) return JSON.stringify(rows.slice(0, 100));
+      if (endpoint.endsWith('&page=2')) return JSON.stringify(rows.slice(100));
+      throw new Error(`unexpected call: ${args.join(' ')}`);
+    };
+    const reader = new GhLifecycleReader(run);
+
+    const issues = await reader.readIssues({
+      currentSprintIterationId: null,
+      getIssue: () => null,
+    });
+
+    expect(issues).toHaveLength(101);
+    expect(calls).toEqual([
+      ['api', 'repos/Jinn-Network/mono/issues?state=open&per_page=100&page=1'],
+      ['api', 'repos/Jinn-Network/mono/issues?state=open&per_page=100&page=2'],
+    ]);
+    expect(reader.githubUsage().restRequests).toBe(2);
+  });
+
+  it('counts each explicit REST page used to read matching branch refs', async () => {
+    const calls: string[][] = [];
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      ref: `refs/heads/not-autopilot-${index}`,
+      object: { sha: `${index}`.padStart(40, '0') },
+    }));
+    const run: CommandRunner = async (_command, args) => {
+      calls.push(args);
+      if (args.includes('--paginate')) return JSON.stringify([firstPage, []]);
+      const endpoint = args[1] ?? '';
+      if (endpoint.endsWith('&page=1')) return JSON.stringify(firstPage);
+      if (endpoint.endsWith('&page=2')) return JSON.stringify([]);
+      throw new Error(`unexpected call: ${args.join(' ')}`);
+    };
+    const reader = new GhLifecycleReader(run);
+
+    await expect(reader.readBranchClaims()).resolves.toEqual([]);
+
+    expect(calls).toEqual([
+      ['api', 'repos/Jinn-Network/mono/git/matching-refs/heads/autopilot/?per_page=100&page=1'],
+      ['api', 'repos/Jinn-Network/mono/git/matching-refs/heads/autopilot/?per_page=100&page=2'],
+    ]);
+    expect(reader.githubUsage().restRequests).toBe(2);
+  });
+
+  it('requests and meters top-level GraphQL rate-limit evidence', async () => {
+    let query = '';
+    const run: CommandRunner = async (_command, args) => {
+      query = args.find((arg) => arg.startsWith('query=')) ?? '';
+      return JSON.stringify({
+        data: {
+          rateLimit: {
+            cost: 3,
+            remaining: 4_997,
+            resetAt: '2026-07-22T13:00:00.000Z',
+          },
+          repository: {
+            issue: {
+              projectItems: {
+                pageInfo: { hasNextPage: false },
+                nodes: [{
+                  id: 'PVTI_42',
+                  project: { number: 1 },
+                  status: { name: 'In Review' },
+                  priority: { name: 'P1' },
+                  effort: { name: 'Medium' },
+                  blockedOn: { name: 'Nothing' },
+                  issueType: { name: 'fix' },
+                }],
+              },
+            },
+          },
+        },
+      });
+    };
+    const reader = new GhLifecycleReader(run);
+
+    await expect(reader.readProjectItemForReconciliation(42)).resolves.toEqual({
+      id: 'PVTI_42',
+      status: 'In Review',
+      priority: 'P1',
+      effort: 'Medium',
+      blockedOn: 'Nothing',
+      issueType: 'fix',
+    });
+
+    expect(query).toContain('rateLimit { cost remaining resetAt }');
+    expect(query).toContain('fieldValueByName(name: "Priority")');
+    expect(query).toContain('fieldValueByName(name: "Effort")');
+    expect(query).toContain('fieldValueByName(name: "Type")');
+    expect(reader.githubUsage()).toMatchObject({
+      graphqlRequests: 1,
+      graphqlCost: 3,
+      graphqlRemaining: 4_997,
+    });
+  });
+
+  it('fails closed when the direct targeted Project-item lookup exceeds its fixed limit', async () => {
+    const run: CommandRunner = async () => JSON.stringify({
+      data: {
+        rateLimit: { cost: 1, remaining: 4_999, resetAt: '2026-07-22T13:00:00.000Z' },
+        repository: {
+          issue: {
+            projectItems: { pageInfo: { hasNextPage: true }, nodes: [] },
+          },
+        },
+      },
+    });
+
+    await expect(new GhLifecycleReader(run).readProjectItemForReconciliation(42))
+      .rejects.toThrow(/Project-item.*pagination|pagination.*fixed limit/i);
+  });
+
+  it('combines targeted Project and open closing-PR relation evidence in one query', async () => {
+    let query = '';
+    const run: CommandRunner = async (_command, args) => {
+      query = args.find((arg) => arg.startsWith('query=')) ?? '';
+      return JSON.stringify({
+        data: {
+          rateLimit: { cost: 2, remaining: 4_998, resetAt: '2026-07-22T13:00:00.000Z' },
+          repository: {
+            issue: {
+              projectItems: {
+                pageInfo: { hasNextPage: false },
+                nodes: [{
+                  id: 'PVTI_42',
+                  project: { number: 1 },
+                  status: { name: 'In Progress' },
+                  priority: { name: 'P1' },
+                  effort: { name: 'Medium' },
+                  blockedOn: { name: 'Nothing' },
+                  issueType: { name: 'fix' },
+                }],
+              },
+              closedByPullRequestsReferences: {
+                pageInfo: { hasNextPage: false },
+                nodes: [
+                  { number: 101, state: 'OPEN' },
+                  { number: 99, state: 'MERGED' },
+                ],
+              },
+            },
+          },
+        },
+      });
+    };
+    const reader = new GhLifecycleReader(run);
+
+    await expect(reader.readIssueActionContextForReconciliation(42)).resolves.toEqual({
+      projectItem: expect.objectContaining({ id: 'PVTI_42', status: 'In Progress' }),
+      openPullRequestNumbers: new Set([101]),
+    });
+    expect(query).toContain('projectItems(first: 10)');
+    expect(query).toContain('closedByPullRequestsReferences(first: 100, includeClosedPrs: true)');
+    expect(reader.githubUsage()).toMatchObject({ graphqlRequests: 1, graphqlCost: 2 });
+  });
+
+  it('fails closed when the combined targeted issue context is paginated', async () => {
+    const run: CommandRunner = async () => JSON.stringify({
+      data: {
+        rateLimit: { cost: 2, remaining: 4_998, resetAt: '2026-07-22T13:00:00.000Z' },
+        repository: {
+          issue: {
+            projectItems: { pageInfo: { hasNextPage: false }, nodes: [] },
+            closedByPullRequestsReferences: {
+              pageInfo: { hasNextPage: true },
+              nodes: [],
+            },
+          },
+        },
+      },
+    });
+
+    await expect(new GhLifecycleReader(run).readIssueActionContextForReconciliation(42))
+      .rejects.toThrow(/pagination/i);
+  });
+
+  it('fails closed when the combined context reports more than its two-point reserve', async () => {
+    const run: CommandRunner = async () => JSON.stringify({
+      data: {
+        rateLimit: { cost: 3, remaining: 4_997, resetAt: '2026-07-22T13:00:00.000Z' },
+        repository: {
+          issue: {
+            projectItems: { pageInfo: { hasNextPage: false }, nodes: [] },
+            closedByPullRequestsReferences: {
+              pageInfo: { hasNextPage: false },
+              nodes: [],
+            },
+          },
+        },
+      },
+    });
+
+    await expect(new GhLifecycleReader(run).readIssueActionContextForReconciliation(42))
+      .rejects.toThrow(/exceeded 2-point reserve/i);
+  });
+
+  it('fails closed when a lifecycle GraphQL response omits rate-limit evidence', async () => {
+    const run: CommandRunner = async () => JSON.stringify({
+      data: { repository: { issue: { projectItems: { nodes: [] } } } },
+    });
+
+    await expect(new GhLifecycleReader(run).readProjectItemForReconciliation(42))
+      .rejects.toThrow(/rateLimit/i);
+  });
+
   it('parses lifecycle metadata only from the terminal trailer block', async () => {
     const trailers = [
       'Jinn-Autopilot-Protocol: 2',
@@ -145,6 +556,7 @@ describe('GhLifecycleReader', () => {
       if (query.includes('closedByPullRequestsReferences')) {
         return JSON.stringify({
           data: {
+            rateLimit: rateLimit(),
             repository: {
               issue42: {
                 closedByPullRequestsReferences: {
@@ -158,6 +570,7 @@ describe('GhLifecycleReader', () => {
       }
       return JSON.stringify({
         data: {
+          rateLimit: rateLimit(),
           repository: {
             pullRequests: {
               pageInfo: { hasNextPage: false, endCursor: null },
@@ -191,6 +604,7 @@ describe('GhLifecycleReader', () => {
       if (query.includes('closedByPullRequestsReferences')) {
         return JSON.stringify({
           data: {
+            rateLimit: rateLimit(),
             repository: {
               issue42: {
                 closedByPullRequestsReferences: {
@@ -212,6 +626,7 @@ describe('GhLifecycleReader', () => {
       }
       return JSON.stringify({
         data: {
+          rateLimit: rateLimit(),
           repository: {
             pullRequests: {
               pageInfo: { hasNextPage: false, endCursor: null },
@@ -289,6 +704,7 @@ describe('GhLifecycleReader', () => {
       }
       return JSON.stringify({
         data: {
+          rateLimit: rateLimit(),
           repository: {
             pullRequests: {
               pageInfo: { hasNextPage: false, endCursor: null },
@@ -329,10 +745,10 @@ describe('GhLifecycleReader', () => {
     const run: CommandRunner = async (_command, args) => {
       calls.push(args);
       if (args[1]?.includes('matching-refs')) {
-        return JSON.stringify([[{
+        return JSON.stringify([{
           ref: 'refs/heads/autopilot/42',
           object: { sha: OPEN_HEAD },
-        }]]);
+        }]);
       }
       if (args[1]?.includes('/commits?')) {
         const second = args[1].includes('page=2');
@@ -354,6 +770,127 @@ describe('GhLifecycleReader', () => {
     expect(calls.some((args) => args[1]?.includes('page=2'))).toBe(true);
   });
 
+  it('discovers incremental Autopilot branch claims through git transport', async () => {
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const claimMessage = [
+      'claim',
+      '',
+      'Jinn-Autopilot-Protocol: 2',
+      'Jinn-Autopilot-Phase: implement',
+      'Jinn-Autopilot-Issue: 42',
+      'Jinn-Autopilot-Attempt: 11111111-1111-4111-8111-111111111111',
+      'Jinn-Autopilot-Runner: runner-a',
+      'Jinn-Autopilot-Login: trusted',
+      `Jinn-Autopilot-Expected-Head: ${MERGED_HEAD}`,
+      'Jinn-Autopilot-Target-Base: next',
+      'Jinn-Autopilot-Claimed-At: 2026-07-20T08:00:00.000Z',
+    ].join('\n');
+    const run: CommandRunner = async (command, args) => {
+      calls.push({ command, args });
+      if (command === 'git') {
+        expect(args[2]).toBe('ls-remote');
+        expect(args[4]).toBe(AUTOPILOT_BRANCH_GLOB);
+        return `${OPEN_HEAD}\trefs/heads/autopilot/42\n`;
+      }
+      if (args[1]?.includes('/commits?')) {
+        return JSON.stringify([{
+          sha: OPEN_HEAD,
+          commit: {
+            message: claimMessage,
+            committer: { date: '2026-07-20T09:00:00.000Z' },
+          },
+        }]);
+      }
+      throw new Error(`Unexpected call: ${args.join(' ')}`);
+    };
+
+    const claims = await new GhLifecycleReader(run).readIncrementalBranchClaims();
+
+    expect(claims).toEqual([
+      expect.objectContaining({ issueNumber: 42, headOid: OPEN_HEAD }),
+    ]);
+    expect(calls.some(({ args }) => args[1]?.includes('matching-refs'))).toBe(false);
+  });
+
+  it('ignores well-formed nonnumeric and nested refs around numeric incremental claims', async () => {
+    const ignoredOne = 'cccccccccccccccccccccccccccccccccccccccc';
+    const ignoredTwo = 'dddddddddddddddddddddddddddddddddddddddd';
+    const claimMessage = (issueNumber: number) => [
+      'claim',
+      '',
+      'Jinn-Autopilot-Protocol: 2',
+      'Jinn-Autopilot-Phase: implement',
+      `Jinn-Autopilot-Issue: ${issueNumber}`,
+      'Jinn-Autopilot-Attempt: 11111111-1111-4111-8111-111111111111',
+      'Jinn-Autopilot-Runner: runner-a',
+      'Jinn-Autopilot-Login: trusted',
+      `Jinn-Autopilot-Expected-Head: ${MERGED_HEAD}`,
+      'Jinn-Autopilot-Target-Base: next',
+      'Jinn-Autopilot-Claimed-At: 2026-07-20T08:00:00.000Z',
+    ].join('\n');
+    const run: CommandRunner = async (command, args) => {
+      if (command === 'git') {
+        return [
+          `${ignoredOne}\trefs/heads/autopilot/capability-probe`,
+          `${OPEN_HEAD}\trefs/heads/autopilot/42`,
+          `${ignoredTwo}\trefs/heads/autopilot/temporary/nested`,
+          `${MERGED_HEAD}\trefs/heads/autopilot/43`,
+          '',
+        ].join('\n');
+      }
+      if (args[1]?.includes('/commits?')) {
+        const issueNumber = args[1].includes(OPEN_HEAD) ? 42 : 43;
+        const head = issueNumber === 42 ? OPEN_HEAD : MERGED_HEAD;
+        return JSON.stringify([{
+          sha: head,
+          commit: {
+            message: claimMessage(issueNumber),
+            committer: { date: '2026-07-20T09:00:00.000Z' },
+          },
+        }]);
+      }
+      throw new Error(`Unexpected call: ${args.join(' ')}`);
+    };
+
+    await expect(new GhLifecycleReader(run).readIncrementalBranchClaims()).resolves.toEqual([
+      expect.objectContaining({ issueNumber: 42, headOid: OPEN_HEAD }),
+      expect.objectContaining({ issueNumber: 43, headOid: MERGED_HEAD }),
+    ]);
+  });
+
+  it.each([
+    ['a missing tab', `${OPEN_HEAD} refs/heads/autopilot/42\n`],
+    ['an extra tab', `${OPEN_HEAD}\trefs/heads/autopilot/42\textra\n`],
+    ['a trailing empty tab field', `${OPEN_HEAD}\trefs/heads/autopilot/42\t\n`],
+    ['a trailing space in the ref', `${OPEN_HEAD}\trefs/heads/autopilot/42 \n`],
+    ['a whitespace-only line', ' \n'],
+    ['a non-head ref', `${OPEN_HEAD}\trefs/tags/autopilot/42\n`],
+    ['a ref outside the requested prefix', `${OPEN_HEAD}\trefs/heads/not-autopilot/42\n`],
+    ['a control character', `${OPEN_HEAD}\trefs/heads/autopilot/bad\u0001ref\n`],
+    ['an invalid OID', `not-an-oid\trefs/heads/autopilot/42\n`],
+    [
+      'a numeric issue outside the safe integer range',
+      `${OPEN_HEAD}\trefs/heads/autopilot/99999999999999999999\n`,
+    ],
+  ])('fails closed when an incremental branch listing contains %s', async (_label, listing) => {
+    const reader = new GhLifecycleReader(async (command) => (
+      command === 'git' ? listing : '[]'
+    ));
+
+    await expect(reader.readIncrementalBranchClaims())
+      .rejects.toThrow(/branch ref listing|Git OID|Git ref/i);
+  });
+
+  it('fails closed on duplicate numeric incremental branch refs', async () => {
+    const reader = new GhLifecycleReader(async (command) => (
+      command === 'git'
+        ? `${OPEN_HEAD}\trefs/heads/autopilot/42\n${MERGED_HEAD}\trefs/heads/autopilot/42\n`
+        : '[]'
+    ));
+
+    await expect(reader.readIncrementalBranchClaims()).rejects.toThrow(/branch ref listing/i);
+  });
+
   it('retries a transient ancestry read failure on the next cycle', async () => {
     let ancestryAttempts = 0;
     const claimMessage = [
@@ -371,10 +908,10 @@ describe('GhLifecycleReader', () => {
     ].join('\n');
     const run: CommandRunner = async (_command, args) => {
       if (args[1]?.includes('matching-refs')) {
-        return JSON.stringify([[{
+        return JSON.stringify([{
           ref: 'refs/heads/autopilot/42',
           object: { sha: OPEN_HEAD },
-        }]]);
+        }]);
       }
       if (args[1]?.includes('/commits?')) {
         ancestryAttempts += 1;
@@ -425,6 +962,7 @@ describe('GhLifecycleReader', () => {
       if (query.includes('closedByPullRequestsReferences')) {
         return JSON.stringify({
           data: {
+            rateLimit: rateLimit(),
             repository: {
               issue42: {
                 closedByPullRequestsReferences: {
@@ -437,10 +975,13 @@ describe('GhLifecycleReader', () => {
         });
       }
       if (query.includes('pullRequest(number:')) {
-        return JSON.stringify({ data: { repository: { pullRequest: adopted } } });
+        return JSON.stringify({
+          data: { rateLimit: rateLimit(), repository: { pullRequest: adopted } },
+        });
       }
       return JSON.stringify({
         data: {
+          rateLimit: rateLimit(),
           repository: {
             pullRequests: {
               pageInfo: { hasNextPage: false, endCursor: null },
@@ -479,10 +1020,10 @@ describe('GhLifecycleReader', () => {
     ].join('\n');
     const run: CommandRunner = async (_command, args) => {
       if (args[1]?.includes('matching-refs')) {
-        return JSON.stringify([[{
+        return JSON.stringify([{
           ref: 'refs/heads/autopilot/42',
           object: { sha: OPEN_HEAD },
-        }]]);
+        }]);
       }
       if (args[1]?.includes('/commits?')) {
         return JSON.stringify([
@@ -517,6 +1058,7 @@ describe('GhLifecycleReader', () => {
       if (stub !== undefined) return stub;
       return JSON.stringify({
         data: {
+          rateLimit: rateLimit(),
           repository: {
             pullRequests: {
               pageInfo: { hasNextPage: false, endCursor: null },
@@ -613,6 +1155,7 @@ describe('GhLifecycleReader', () => {
       if (command === 'git') throw new Error('transient GitHub network failure');
       return JSON.stringify({
         data: {
+          rateLimit: rateLimit(),
           repository: {
             pullRequests: {
               pageInfo: { hasNextPage: false, endCursor: null },
@@ -635,6 +1178,7 @@ describe('GhLifecycleReader', () => {
       if (query.includes('closedByPullRequestsReferences')) {
         return JSON.stringify({
           data: {
+            rateLimit: rateLimit(),
             repository: {
               issue42: {
                 closedByPullRequestsReferences: {
@@ -648,6 +1192,7 @@ describe('GhLifecycleReader', () => {
       }
       return JSON.stringify({
         data: {
+          rateLimit: rateLimit(),
           repository: {
             pullRequests: {
               pageInfo: { hasNextPage: false, endCursor: null },
@@ -759,6 +1304,7 @@ describe('GhLifecycleReader', () => {
       }
       return JSON.stringify({
         data: {
+          rateLimit: rateLimit(),
           repository: {
             pullRequests: {
               pageInfo: { hasNextPage: false, endCursor: null },
@@ -796,6 +1342,7 @@ describe('GhLifecycleReader', () => {
     function openPrPage(...nodes: ReturnType<typeof graphQlPr>[]): string {
       return JSON.stringify({
         data: {
+          rateLimit: rateLimit(),
           repository: {
             pullRequests: {
               pageInfo: { hasNextPage: false, endCursor: null },
