@@ -795,18 +795,22 @@ def _tool_corpus_fetch(args: Dict[str, Any], **_kw: Any) -> str:
     try:
         if has_skill:
             skill_view, _sha = skills_install._extract_skill(record)
-            tier = str(
-                (skill_view.get("provenance") or {}).get("verifiabilityTier") or "unknown"
-            )
-            header = f"[{tier}] {skill_view.get('name') or ''}"
-            body = str(skill_view.get("skillMd") or "")[:8000]
-            _record_activity(str(_kw.get("session_id") or ""), "fetchedRefs", [ref])
-            return f"{header}\n\n{body}"
-        trace, _sha = skills_install._extract_trace(record)
+        else:
+            trace, _sha = skills_install._extract_trace(record)
     except Exception as exc:
+        # Present-but-corrupt jinn.skill.v1 must not fall through to evidence
+        # (matches layer extractSkill trust posture).
         return f"record is not readable as an evidence envelope: {exc}"
 
     _record_activity(str(_kw.get("session_id") or ""), "fetchedRefs", [ref])
+    if has_skill:
+        tier = str(
+            (skill_view.get("provenance") or {}).get("verifiabilityTier") or "unknown"
+        )
+        header = f"[{tier}] {skill_view.get('name') or ''}"
+        body = str(skill_view.get("skillMd") or "")[:8000]
+        return f"{header}\n\n{body}"
+
     tier = str(((trace.get("outcome") or {}).get("verifiabilityTier")) or "unknown")
     summary = str(((trace.get("task") or {}).get("summary")) or "")
     steps = trace.get("steps") or []
