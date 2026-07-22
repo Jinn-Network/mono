@@ -55,6 +55,35 @@ describe('reject-publish classes A4/A5 (#1972)', () => {
     ).rejects.toThrow(/scrub class A5/);
   });
 
+  it('does not reject GIT_CONFIG tutorial env lines (A5 carve-out, #2005)', async () => {
+    const block = [
+      'export GIT_CONFIG_GLOBAL=/dev/null',
+      'export GIT_CONFIG_SYSTEM=/dev/null',
+      'export GIT_CONFIG_NOSYSTEM=1',
+      'export GIT_CONFIG_COUNT=2',
+      'export GIT_CONFIG_KEY_0=credential.helper',
+      'export GIT_CONFIG_VALUE_0=',
+      'export GIT_CONFIG_KEY_1=core.askPass',
+      'export GIT_CONFIG_VALUE_1=/attempt/askpass',
+    ].join('\n');
+    const result = await buildSeedScrubPipeline().run({
+      'tool.output': `Isolate git credentials:\n${block}\n`,
+    });
+    expect(result.rejected).toBeFalsy();
+    expect(String(result.attributes['tool.output'])).toContain('GIT_CONFIG_KEY_0=credential.helper');
+  });
+
+  it('still rejects a synthetic multi-line secret env dump after GIT_CONFIG carve-out (#2005)', async () => {
+    const block = [
+      'API_KEY=synth_secret_value',
+      'DATABASE_URL=postgres://user:pass@db.internal/app',
+      'SECRET_TOKEN=yyy',
+    ].join('\n');
+    await expect(
+      buildSeedScrubPipeline().run({ 'tool.output': `env:\n${block}\nend` }),
+    ).rejects.toThrow(/scrub class A5/);
+  });
+
   it('does not reject bare 40-hex git SHAs or 0x+64 tx digests', async () => {
     const gitSha = 'd'.repeat(40);
     const tx = `0x${'c'.repeat(64)}`;
