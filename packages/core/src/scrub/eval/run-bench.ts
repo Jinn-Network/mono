@@ -10,15 +10,22 @@ import type {
   ScrubClass,
 } from './types.js';
 
-export function pipelineForProfile(profile: EvalFixture['profile']): ScrubPipeline {
+export function pipelineForProfile(
+  profile: EvalFixture['profile'],
+  fixture?: EvalFixture,
+): ScrubPipeline {
+  const knownIdentity =
+    fixture?.identityPack || fixture?.allowlist
+      ? { pack: fixture.identityPack, allowlist: fixture.allowlist }
+      : undefined;
   switch (profile ?? 'seed') {
     case 'trace':
-      return buildScrubPipeline();
+      return buildScrubPipeline({ knownIdentity });
     case 'layer2':
-      return buildLayer2ScrubPipeline();
+      return buildLayer2ScrubPipeline({ knownIdentity });
     case 'seed':
     default:
-      return buildSeedScrubPipeline();
+      return buildSeedScrubPipeline({ knownIdentity });
   }
 }
 
@@ -26,7 +33,7 @@ export async function scoreFixture(fixture: EvalFixture): Promise<{
   counts: Partial<Record<ScrubClass, ClassCounts>>;
   corruptionFailure: boolean;
 }> {
-  const pipeline = pipelineForProfile(fixture.profile);
+  const pipeline = pipelineForProfile(fixture.profile, fixture);
   const key = fixture.key ?? 'content';
   const result = await pipeline.run({ [key]: fixture.text });
   const scrubbed = String(result.attributes[key] ?? '');

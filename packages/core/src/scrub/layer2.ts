@@ -1,7 +1,20 @@
 import { ScrubPipeline } from './pipeline.js';
 import type { KeyPolicy } from './key-policy.js';
-import { DEFAULT_KEY_POLICY, sharedDetectorInventory } from './build.js';
+import {
+  DEFAULT_KEY_POLICY,
+  sharedDetectorInventory,
+  type BuildSeedScrubPipelineOptions,
+} from './build.js';
+import type {
+  AssembleKnownIdentityOptions,
+  AssembledKnownIdentity,
+} from './known-identity-detector.js';
 import { DEFAULT_POLICY } from './policy.js';
+
+export interface BuildLayer2ScrubPipelineOptions {
+  policy?: KeyPolicy;
+  knownIdentity?: AssembleKnownIdentityOptions | AssembledKnownIdentity;
+}
 
 /**
  * Layer-2 / check-mode preset (#1969 / design §6.5).
@@ -13,9 +26,20 @@ import { DEFAULT_POLICY } from './policy.js';
  *
  * @deprecated Compatibility preset over the one inventory + policy table.
  */
-export function buildLayer2ScrubPipeline(policy: KeyPolicy = DEFAULT_KEY_POLICY): ScrubPipeline {
+export function buildLayer2ScrubPipeline(
+  policyOrOpts: KeyPolicy | BuildLayer2ScrubPipelineOptions = DEFAULT_KEY_POLICY,
+): ScrubPipeline {
+  const opts: BuildSeedScrubPipelineOptions =
+    policyOrOpts && 'safe' in policyOrOpts
+      ? { policy: policyOrOpts }
+      : (policyOrOpts as BuildLayer2ScrubPipelineOptions);
+  const policy = opts.policy ?? DEFAULT_KEY_POLICY;
   return new ScrubPipeline(
-    sharedDetectorInventory(policy, { openredaction: false, entropyFallback: true }),
+    sharedDetectorInventory(policy, {
+      openredaction: false,
+      entropyFallback: true,
+      knownIdentity: opts.knownIdentity,
+    }),
     { policy: DEFAULT_POLICY, checkMode: true },
   );
 }

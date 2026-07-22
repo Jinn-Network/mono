@@ -40,6 +40,14 @@ export function stubForFinding(finding: Finding, occurrenceIndex: number): strin
       return '/users/anon';
     case 'C1':
       return `[ETH_ADDR_${occurrenceIndex}]`;
+    case 'B3':
+      return '[NAME]';
+    case 'B4':
+      return '[USERNAME]';
+    case 'D2':
+      return '[IP]';
+    case 'D3':
+      return '[HOSTNAME]';
     case 'A1':
       if (hint.includes('aws-access-key-id')) return '[SECRET:aws-access-key-id]';
       if (hint.includes('gcp-api-key')) return '[SECRET:gcp-api-key]';
@@ -155,7 +163,19 @@ export function applyDispositions(
 
     for (const finding of sorted) {
       const disposition = effectiveDisposition(finding, policy, checkMode);
-      if (disposition === 'pass') continue;
+      if (disposition === 'pass') {
+        // Auditable allowlist hit (§6.4): record "we saw it and passed it on purpose".
+        const allowEvidence = finding.evidence.find((e) => e.startsWith('allowlist:'));
+        if (allowEvidence) {
+          redactions.push({
+            key,
+            stage: finding.detector.name,
+            kind: 'allowlist-pass',
+            detail: allowEvidence.slice('allowlist:'.length),
+          });
+        }
+        continue;
+      }
 
       if (disposition === 'reject-publish') {
         rejected = true;

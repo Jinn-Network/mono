@@ -98,6 +98,42 @@ export function syntheticFixtures(): EvalFixture[] {
       'B2',
       { profile: 'seed' },
     ),
+    // B4 self-handle — requires known-identity pack (#1971).
+    {
+      id: 'B4-self-handle',
+      text: 'Operator login synth_operator_handle pushed the branch.',
+      labels: [
+        {
+          class: 'B4',
+          start: 'Operator login '.length,
+          end: 'Operator login synth_operator_handle'.length,
+        },
+      ],
+      profile: 'seed',
+      identityPack: { ghLogin: 'synth_operator_handle' },
+    },
+    // D3 self-hostname — requires known-identity pack (#1971).
+    {
+      id: 'D3-self-hostname',
+      text: 'attempt host=synth-laptop-01 completed.',
+      labels: [
+        {
+          class: 'D3',
+          start: 'attempt host='.length,
+          end: 'attempt host=synth-laptop-01'.length,
+        },
+      ],
+      profile: 'seed',
+      identityPack: { hostname: 'synth-laptop-01' },
+    },
+    // Allowlist: loopback IP must survive (D2 pass, #1971 Q1).
+    {
+      id: 'allowlist-loopback-survive',
+      text: 'Bind the health check to 127.0.0.1:7331 before serving.',
+      labels: [],
+      mustSurvive: true,
+      profile: 'seed',
+    },
   ];
 }
 

@@ -25,7 +25,10 @@ export function classFromRedactionDetail(detail: string | undefined, stage: stri
   if (d.includes('person') || d.includes('per') || d.includes('name')) return 'B3';
   if (d.includes('phone')) return 'B5';
   if (d.includes('iban') || d.includes('credit') || d.includes('ssn') || d.includes('card')) return 'B7';
-  if (d.includes('ip')) return 'D2';
+  if (d.includes('ip') || d.includes('loopback') || d.includes('reserved')) return 'D2';
+  if (d.includes('hostname') || d.includes('known-identity:hostname')) return 'D3';
+  if (d.includes('username') || d.includes('gh-login') || d.includes('home-username')) return 'B4';
+  if (d.includes('git-user-name') || d.includes('known-identity:git-user-name')) return 'B3';
   // openredaction types often uppercase
   if (detail === 'EMAIL' || detail.includes('EMAIL')) return 'B1';
   if (detail.includes('ETHEREUM') || detail.includes('ETH')) return 'C1';

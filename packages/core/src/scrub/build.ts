@@ -4,6 +4,12 @@ import { openredactionDetector } from './openredaction-stage.js';
 import { plainPatternsDetector } from './plain-patterns-stage.js';
 import { secretlintDetector } from './secretlint-stage.js';
 import { mlPiiDetector, type PiiDetector } from './ml-pii-stage.js';
+import {
+  assembleKnownIdentity,
+  knownIdentityDetector,
+  type AssembleKnownIdentityOptions,
+  type AssembledKnownIdentity,
+} from './known-identity-detector.js';
 import type { Detector } from './finding.js';
 import { DEFAULT_POLICY } from './policy.js';
 
@@ -34,26 +40,44 @@ export interface BuildScrubPipelineOptions {
   policy?: KeyPolicy;
   /** When provided, the ML PII (GLiNER) detector is appended. */
   piiDetector?: PiiDetector;
+  /** Known-identity pack + non-address allowlist (#1971). */
+  knownIdentity?: AssembleKnownIdentityOptions | AssembledKnownIdentity;
+}
+
+function resolveKnownIdentity(
+  opts?: AssembleKnownIdentityOptions | AssembledKnownIdentity,
+): AssembledKnownIdentity {
+  // AssembledKnownIdentity is a subset of AssembleKnownIdentityOptions;
+  // re-assembly is idempotent (allowlist entries are deduped).
+  return assembleKnownIdentity(opts);
 }
 
 /**
- * Shared detector inventory (#1969). Every publish/check consumer runs the same
- * owned detectors (key-policy, plain-patterns including C1 wallet + A1
- * credential IDs, secretlint). What varies is disposition / check-mode and —
- * temporarily until #1973 — whether the openredaction strangler is included
- * (trace preset only). Seed also keeps the entropy fallback off until the flag
- * review surface can absorb A2 mid-band without refuse-on-detection (#1409
- * shipped behavior).
+ * Shared detector inventory (#1969 / #1971). Every publish/check consumer runs
+ * the same owned detectors (key-policy, plain-patterns including C1 wallet + A1
+ * credential IDs, known-identity pack + non-address allowlist, secretlint).
+ * What varies is disposition / check-mode and — temporarily until #1973 —
+ * whether the openredaction strangler is included (trace preset only). Seed
+ * also keeps the entropy fallback off until the flag review surface can absorb
+ * A2 mid-band without refuse-on-detection (#1409 shipped behavior).
  */
 export function sharedDetectorInventory(
   policy: KeyPolicy,
-  opts: { openredaction?: boolean; entropyFallback?: boolean; piiDetector?: PiiDetector } = {},
+  opts: {
+    openredaction?: boolean;
+    entropyFallback?: boolean;
+    piiDetector?: PiiDetector;
+    knownIdentity?: AssembleKnownIdentityOptions | AssembledKnownIdentity;
+  } = {},
 ): Detector[] {
   const detectors: Detector[] = [keyPolicyDetector(policy)];
   if (opts.openredaction) {
     detectors.push(openredactionDetector(policy));
   }
   detectors.push(plainPatternsDetector(policy));
+  detectors.push(
+    knownIdentityDetector(policy, { assembled: resolveKnownIdentity(opts.knownIdentity) }),
+  );
   detectors.push(secretlintDetector(policy, { entropyFallback: opts.entropyFallback ?? true }));
   if (opts.piiDetector) {
     detectors.push(mlPiiDetector(policy, opts.piiDetector));
@@ -75,9 +99,15 @@ export function buildScrubPipeline(opts: BuildScrubPipelineOptions = {}): ScrubP
       openredaction: true,
       entropyFallback: true,
       piiDetector: opts.piiDetector,
+      knownIdentity: opts.knownIdentity,
     }),
     { policy: DEFAULT_POLICY, checkMode: false },
   );
+}
+
+export interface BuildSeedScrubPipelineOptions {
+  policy?: KeyPolicy;
+  knownIdentity?: AssembleKnownIdentityOptions | AssembledKnownIdentity;
 }
 
 /**
@@ -88,9 +118,20 @@ export function buildScrubPipeline(opts: BuildScrubPipelineOptions = {}): ScrubP
  *
  * @deprecated Compatibility preset over the one inventory + policy table.
  */
-export function buildSeedScrubPipeline(policy: KeyPolicy = DEFAULT_KEY_POLICY): ScrubPipeline {
+export function buildSeedScrubPipeline(
+  policyOrOpts: KeyPolicy | BuildSeedScrubPipelineOptions = DEFAULT_KEY_POLICY,
+): ScrubPipeline {
+  const opts: BuildSeedScrubPipelineOptions =
+    policyOrOpts && 'safe' in policyOrOpts
+      ? { policy: policyOrOpts }
+      : (policyOrOpts as BuildSeedScrubPipelineOptions);
+  const policy = opts.policy ?? DEFAULT_KEY_POLICY;
   return new ScrubPipeline(
-    sharedDetectorInventory(policy, { openredaction: false, entropyFallback: false }),
+    sharedDetectorInventory(policy, {
+      openredaction: false,
+      entropyFallback: false,
+      knownIdentity: opts.knownIdentity,
+    }),
     { policy: DEFAULT_POLICY, checkMode: false },
   );
 }
