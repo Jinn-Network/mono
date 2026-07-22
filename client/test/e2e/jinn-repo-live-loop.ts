@@ -36,6 +36,16 @@
  *   JINN_MONO_REPO_URL   evaluator clone URL (file://... for speed; default:
  *                        this worktree's repo root)
  *   JINN_REPO_LIVE_LOOP_BASE_COMMIT  override the base commit (default: HEAD)
+ *   JINN_E2E_FORK_BLOCK  Anvil fork block override (default: a known
+ *                        stake-able block, see _daemon-harness-helpers.ts)
+ *
+ * Build prerequisites (issue #1913): this driver imports compiled
+ * `@jinn-network/{sdk,core}` and loads solver-nets via the plugin package, so
+ * a clean checkout needs all three built first — `yarn build:sdk` alone is
+ * NOT enough (fails `ERR_MODULE_NOT_FOUND` for @jinn-network/core/dist):
+ *
+ *   cd client && yarn build:sdk && yarn build:core && yarn build:plugin
+ *   npx tsx test/e2e/jinn-repo-live-loop.ts
  */
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -87,7 +97,10 @@ const SYNTHETIC_PATCH = [
   '',
   ' export async function validateAdmissible(',
   '   item: JinnRepoPoolItem,',
-].join('\n');
+  // Trailing newline is required — `git apply` treats a patch whose final
+  // hunk line has no terminating '\n' as corrupt ("corrupt patch at line N"),
+  // which silently turned this into a FAIL-verdict test instead of a PASS one.
+].join('\n') + '\n';
 
 /**
  * Deterministic, zero-credential restoration Harness for jinn-repo.v1 — the

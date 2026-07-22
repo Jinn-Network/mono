@@ -76,6 +76,20 @@ export { compileContracts, ANVIL_PRIVATE_KEYS };
 
 const BASE_RPC_URL = process.env['BASE_RPC_URL'] ?? 'https://mainnet.base.org';
 
+// Anvil fork block for setupAnvilFixture (#912, #1913). Forking live Base HEAD
+// drifts the stOLAS ExternalStakingDistributor's real-world state (lendable
+// OLAS liquidity / epoch conditions) out from under the tests, and
+// distributor.stake() starts reverting nondeterministically as mainnet moves
+// — the exact failure this issue tracks. 47603390 (2026-06-20) is a verified
+// stake-able block (bisected during the #1890 spike). Pinning here makes the
+// bootstrap deterministic from a clean checkout with no env set;
+// JINN_E2E_FORK_BLOCK overrides it (e.g. to re-bisect after distributor state
+// changes again, or to opt back into live HEAD by pointing at a fresh block).
+const DEFAULT_FORK_BLOCK = 47603390;
+const FORK_BLOCK = process.env['JINN_E2E_FORK_BLOCK']
+  ? Number(process.env['JINN_E2E_FORK_BLOCK'])
+  : DEFAULT_FORK_BLOCK;
+
 const CHAIN_CONFIG = getChainConfig('base');
 
 const PASSWORD = 'test-password';
@@ -367,7 +381,7 @@ export async function deployMinimalV3Stack(
  */
 export async function setupAnvilFixture(): Promise<DaemonHarnessFixture> {
   await compileContracts();
-  const anvil = await spawnAnvilFork({ forkUrl: BASE_RPC_URL, silent: true });
+  const anvil = await spawnAnvilFork({ forkUrl: BASE_RPC_URL, forkBlock: FORK_BLOCK, silent: true });
   const operatorEoa = privateKeyToAccount(ANVIL_PRIVATE_KEYS[1]!); // skip deployer
   const publicClient = createPublicClient({
     chain: base,

@@ -151,6 +151,12 @@ try {
 | `yarn stolas` | stolas bootstrap e2e | < 2 min |
 | `yarn e2e:cold-start-builder` | acceptance tier — plug-in builder cold-start | ~90 s |
 
+The live-fork drivers (`jinn-repo-loop.ts`, `jinn-repo-live-loop.ts`,
+`daemon-harness-cycle.ts`, `task-creator-marketplace.ts`) run via `npx tsx
+test/e2e/<driver>.ts` directly, not a `yarn e2e*` script, and need `yarn
+build:sdk && yarn build:core && yarn build:plugin` first (see each driver's
+top-of-file comment; #1913).
+
 ## Acceptance tier (`test/acceptance/`)
 
 The acceptance tier hosts slow, real-integration tests that require external

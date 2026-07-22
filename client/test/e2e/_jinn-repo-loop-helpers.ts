@@ -129,13 +129,14 @@ export async function postJinnRepoTask(
   const responseTimeout = timeoutBounds.min > 0n ? timeoutBounds.min : 3600n;
 
   // ── Step 5: On-chain task policy ───────────────────────────────────────────
-  // Tokenless-OLAS pivot: the on-chain TaskCoordinator.TaskPolicy is now just
-  // `maxClaims`. Windows / lease / quorum / self-eval gating no longer cross the
-  // wire; that off-chain scheduling intent stays on the signed task.v1
-  // `claimPolicy` field. (`opts.disallowSolverSelfEvaluation` is moot — the
-  // coordinator rejects self-evaluation unconditionally now.)
-  void opts.disallowSolverSelfEvaluation;
-  const onchainPolicy = { maxClaims: 10 };
+  // JINN_ROUTER_ABI.createTask's `policy` tuple (src/adapters/mech/types.ts) is
+  // `{ maxClaims, allowSolverSelfEvaluation }` — windows / lease / quorum stay
+  // off-chain on the signed task.v1 `claimPolicy` field above, but
+  // allowSolverSelfEvaluation crosses the wire and is NOT optional; omitting
+  // it encodes `undefined` as the bool and throws at writeContract. This
+  // driver is single-operator solve+evaluate, so self-eval must be allowed
+  // unless the caller opts out via disallowSolverSelfEvaluation.
+  const onchainPolicy = { maxClaims: 10, allowSolverSelfEvaluation: !opts.disallowSolverSelfEvaluation };
 
   // ── Step 6: Post task on-chain via the locally-deployed V3 JinnRouter ──────
   // Trimmed createTask escrows rate*maxClaims per side (solution + verdict); no
@@ -247,7 +248,10 @@ export async function postJinnRepoLiveTask(
   const timeoutBounds = await getTimeoutBounds(fixture.publicClient, marketplaceAddress);
   const responseTimeout = timeoutBounds.min > 0n ? timeoutBounds.min : 3600n;
 
-  const onchainPolicy = { maxClaims: 10 };
+  // See postJinnRepoTask above — the ABI's policy tuple requires
+  // allowSolverSelfEvaluation; this driver is single-operator solve+evaluate
+  // (roles: ['solver', 'evaluator']), so true.
+  const onchainPolicy = { maxClaims: 10, allowSolverSelfEvaluation: true };
 
   const MAX_CLAIMS = 10n;
   const rateArg = deliveryRate > 0n ? deliveryRate : parseEther('0.0001');
