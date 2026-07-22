@@ -657,6 +657,64 @@ describe('lifecycle controller', () => {
     }));
   });
 
+  it('enrolls a fresh review for a delivered non-draft PR (DELIVERED → IN REVIEW)', async () => {
+    // Regression: single-surface lifecycle §4 mandates the active loop schedule
+    // a review claim (review-ref CAS) for a DELIVERED PR — non-draft ∧
+    // engine:review ∧ needsReview ∧ no verdict for the head. activeCandidates
+    // only enrolled stale-draft recovery and the approved integration ladder,
+    // so a freshly delivered non-draft PR sat at awaiting-review forever and the
+    // review → approve → merge half never ran. The correct predicate already
+    // lived in reviewEnrollmentEligible (planCycle), but planCycle is unused by
+    // the v2 controller.
+    const delivered = implementation({
+      branchClaim: {
+        kind: 'branch-claim',
+        protocolVersion: 2,
+        phase: 'implement',
+        issueNumber: 42,
+        prNumber: 101,
+        attempt: '11111111-1111-4111-8111-111111111111',
+        runner: 'runner-a',
+        login: 'implementer',
+        expectedHead: HEAD,
+        targetBase: gitRefName('next'),
+        claimedAt: '2026-07-20T11:00:00.000Z',
+        phaseComplete: true,
+      },
+      isDraft: false,
+      needsReview: true,
+      approved: false,
+    });
+
+    // Fixture self-check: a phase-complete, non-draft PR with no verdict must
+    // derive to awaiting-review (the DELIVERED state), not implementing.
+    const observed = await runLifecycleCycle('observe', deps(delivered, []));
+    expect(observed.items[0]).toMatchObject({ prNumber: 101, phase: 'awaiting-review' });
+
+    const scheduled: { kind: string; prNumber?: number }[] = [];
+    const report = await runLifecycleCycle('active', {
+      ...deps(delivered, []),
+      active: {
+        preflight: async () => ({ ok: true }),
+        readLocalState: () => ({
+          remaining: { implementation: 1, review: 1 },
+          availableLogins: ['reviewer-bot'], // ≠ pr.author ('trusted')
+          implementationPreferredLogin: 'reviewer-bot',
+        }),
+        implementationBackpressureThreshold: 10,
+        executeAction: async (action: { kind: string; prNumber?: number }) => {
+          scheduled.push({ kind: action.kind, prNumber: action.prNumber });
+          return { outcome: 'spawned' };
+        },
+      },
+    });
+
+    expect(report.status).toBe('ok');
+    expect(scheduled).toContainEqual(
+      expect.objectContaining({ kind: 'claim-review', prNumber: 101 }),
+    );
+  });
+
   it.skip('reports legacy stale-looking items without reaping them', async () => {
     const calls: string[] = [];
     const legacy = implementation({

@@ -612,6 +612,24 @@ function activeCandidates(
         author: pr.author,
       });
     } else if (
+      // DELIVERED → IN REVIEW (single-surface §4): a non-draft PR that still
+      // needs a verdict and has no active review claim for its head must be
+      // enrolled for a fresh review. Mirrors reviewEnrollmentEligible's
+      // non-draft branch; the awaiting-review phase already excludes PRs with
+      // an active claim for the current head (those derive to `reviewing`).
+      entry.phase === 'awaiting-review'
+      && !item.isDraft
+      && item.needsReview
+      && !item.approved
+    ) {
+      other.push({
+        phase: 'review',
+        issueNumber: item.issueNumber,
+        prNumber: item.prNumber,
+        head: item.head,
+        author: pr.author,
+      });
+    } else if (
       entry.phase === 'awaiting-review'
       && item.approved
       && !item.needsReview
