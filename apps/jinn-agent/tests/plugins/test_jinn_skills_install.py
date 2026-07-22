@@ -64,6 +64,38 @@ def test_install_shells_to_layer_and_drops_marker(tmp_path, monkeypatch):
     assert ref == "abc123"
 
 
+def test_install_skill_only_ref_still_shells_to_layer(tmp_path, monkeypatch):
+    """AC1: skill-only refs use the same layer shell path as seeded installs."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    skills_root = tmp_path / "skills"
+    skill_only_ref = "bafyDistilledSkillOnly"
+
+    def fake_runner(argv):
+        assert argv[1:4] == ["skills", "install", skill_only_ref]
+        assert "--json" in argv
+        target = skills_root / "retry-budget-tuning"
+        target.mkdir(parents=True)
+        (target / "SKILL.md").write_text(
+            "# retry-budget-tuning\n\nCap retries at three.\n",
+            encoding="utf-8",
+        )
+        return 0, json.dumps({
+            "dir": str(target),
+            "name": "retry-budget-tuning",
+            "shape": "jinn.skill.v1",
+            "files": [],
+            "provenance": {"kind": "distilled"},
+        })
+
+    path = skills_install.install(skill_only_ref, runner=fake_runner)
+    installed = Path(path)
+    assert installed.name == "SKILL.md"
+    assert "Cap retries at three." in installed.read_text(encoding="utf-8")
+    marker = installed.parent / ".jinn-ref"
+    assert marker.exists()
+    assert json.loads(marker.read_text(encoding="utf-8"))["ref"] == skill_only_ref
+
+
 def test_install_raises_on_layer_failure(tmp_path):
     def fake_runner(argv):
         return 1, "sha256 mismatch — refusing to install"
