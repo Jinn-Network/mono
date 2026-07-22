@@ -457,7 +457,6 @@ export async function executeImplementationAction(
     currentIssue === null
     || currentIssue.number !== issueNumber
     || !currentIssue.open
-    || !currentIssue.eligible
     || currentIssue.targetBase !== issue.targetBase
   ) {
     return {

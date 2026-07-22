@@ -540,6 +540,19 @@ describe('implementation action executor', () => {
     expect(events).toEqual(['claim']);
   });
 
+  it('continues after claim when eligibility flips off the ready queue', async () => {
+    let reads = 0;
+    const { deps, events } = harness({
+      readIssue: async () => reads++ === 0
+        ? issue()
+        : issue({ eligible: false }),
+    });
+
+    await expect(executeImplementationAction({ issueNumber: 42 }, deps))
+      .resolves.toMatchObject({ status: 'spawned', issueNumber: 42 });
+    expect(events).toEqual(['claim', 'pr', 'project', 'attempt', 'spawn', 'track']);
+  });
+
   it('fails closed when the claim result remains ambiguous', async () => {
     const { deps, events } = harness({
       claimBranch: async (input) => ({
