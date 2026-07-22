@@ -49,11 +49,29 @@ function writer(): ReconciliationWriter {
   });
 }
 
+function completeSnapshot(value: GitHubLifecycleSnapshot): GitHubLifecycleSnapshot {
+  return {
+    snapshotMode: 'full',
+    snapshotComplete: true,
+    lastFullReconciliationAt: NOW.toISOString(),
+    githubUsage: {
+      graphqlRequests: 1,
+      graphqlCost: 1,
+      graphqlRemaining: 4_000,
+      graphqlResetAt: '2026-07-20T13:00:00.000Z',
+      restRequests: 0,
+      restNotModified: 0,
+      cacheHits: 0,
+    },
+    ...value,
+  };
+}
+
 function deps(
   overrides: Partial<LifecycleControllerDeps> = {},
 ): LifecycleControllerDeps {
+  const readSnapshot = overrides.readSnapshot ?? (async () => snapshot());
   return {
-    readSnapshot: async () => snapshot(),
     writer: writer(),
     now: () => NOW,
     staleAfterMs: 2 * 60 * 60_000,
@@ -70,6 +88,9 @@ function deps(
       executeAction: async () => ({ outcome: 'spawned' }),
     },
     ...overrides,
+    readSnapshot: async (rateLimitFloor) => completeSnapshot(
+      await readSnapshot(rateLimitFloor),
+    ),
   };
 }
 
@@ -115,6 +136,27 @@ describe('active lifecycle controller', () => {
     await runLifecycleCycle('observe', controller);
     expect(actions).toEqual(['claim-implementation']);
     expect(active.status).toBe('ok');
+  });
+
+  it('threads the same immutable cycle snapshot into reconciliation and active execution', async () => {
+    let writerSnapshot: GitHubLifecycleSnapshot | undefined;
+    let actionSnapshot: GitHubLifecycleSnapshot | undefined;
+    const controller = deps({
+      writerForSnapshot: (cycle) => {
+        writerSnapshot = cycle;
+        return writer();
+      },
+    });
+    controller.active!.executeAction = async (_action, cycle) => {
+      actionSnapshot = cycle;
+      return { outcome: 'spawned' };
+    };
+
+    await runLifecycleCycle('active', controller);
+
+    expect(writerSnapshot).toBeDefined();
+    expect(actionSnapshot).toBe(writerSnapshot);
+    expect(actionSnapshot?.snapshotComplete).toBe(true);
   });
 
   it.skip('runs reconciliation first and defers claims after a correcting mutation attempt', async () => {

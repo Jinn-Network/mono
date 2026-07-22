@@ -72,19 +72,25 @@ export type CommandRunner = (
 // Internal shapes that mirror real `gh` JSON output (observed 2026-05-21).
 // ---------------------------------------------------------------------------
 
-/** One entry from `gh issue list --json number,title,labels,author,body`. */
+/** One entry from `GET /repos/{owner}/{repo}/issues`. */
 interface GhIssue {
   number: number;
   title: string;
-  body?: string;
+  /** Issue body; used for child-marker admission (Stage 2). */
+  body?: string | null;
   labels: Array<{ name: string } | string>;
   /**
    * `gh` returns `{ login, ... }`. Optional so older `gh` versions or
    * unexpected payloads degrade to `''` rather than throwing — the empty
    * string never matches an allowlist entry, so the trust boundary fails safe.
    */
-  author?: { login?: string };
+  user?: { login?: string };
+  /** The REST issues endpoint also returns pull requests; those are excluded. */
+  pull_request?: unknown;
 }
+
+const ISSUE_PAGE_SIZE = 100;
+const MAX_ISSUE_PAGES = 100;
 
 // ---------------------------------------------------------------------------
 // Default real CommandRunner
@@ -113,18 +119,20 @@ export class GhIssueSource implements IssueSource {
   }
 
   async poll(board: IssueBoardState): Promise<PolledIssue[]> {
-    // 1. Fetch open issues from the repo (REST — does not consume GraphQL budget).
-    const issueListRaw = await this.run('gh', [
-      'issue', 'list',
-      '--repo', REPO,
-      '--state', 'open',
-      // `labels` remains part of the issue record; runtime selection is
-      // deliberately process-wide.
-      // `author` powers the dispatcher author-allowlist trust boundary (#497).
-      '--json', 'number,title,labels,author,body',
-      '--limit', '200',
-    ]);
-    const ghIssues: GhIssue[] = JSON.parse(issueListRaw) as GhIssue[];
+    // 1. Fetch open issues through explicit REST pages. A CLI-level
+    // `--paginate` call hides how many HTTP responses GitHub returned, which
+    // makes cycle request accounting unknowable; one command per page keeps
+    // the meter exact. The endpoint also returns PRs, filtered below.
+    const ghIssues: GhIssue[] = [];
+    for (let page = 1; page <= MAX_ISSUE_PAGES; page += 1) {
+      const endpoint = `repos/${REPO}/issues?state=open&per_page=${ISSUE_PAGE_SIZE}&page=${page}`;
+      const raw = await this.run('gh', ['api', endpoint]);
+      const rows = JSON.parse(raw) as unknown;
+      if (!Array.isArray(rows)) throw new Error('Open issue REST page is malformed');
+      ghIssues.push(...(rows as GhIssue[]).filter((row) => row.pull_request === undefined));
+      if (rows.length < ISSUE_PAGE_SIZE || ghIssues.length >= 200) break;
+      if (page === MAX_ISSUE_PAGES) throw new Error('Open issue pagination exceeded safety limit');
+    }
 
     // 2. Hoist the active-sprint id; when null, every `inCurrentSprint` is
     //    false and the ready-filter's sprint sort becomes a no-op (#609).
@@ -156,7 +164,7 @@ export class GhIssueSource implements IssueSource {
         status: entry?.status ?? null,
         onBoard,
         // Empty string is the unknown-author sentinel; never matches the allowlist (#497).
-        author: ghIssue.author?.login ?? '',
+        author: ghIssue.user?.login ?? '',
         projectItemId: entry?.id ?? null,
         inCurrentSprint,
       };

@@ -24,6 +24,23 @@ import {
   type ReviewClaimRecord,
   type ReviewVerdictState,
 } from './types.js';
+import {
+  FULL_SCAN_RESERVE,
+  GitHubRateLimitReserveError,
+  assertRateLimitReserve,
+  type GitHubUsage,
+} from './github-usage.js';
+
+export type SnapshotReadMode = 'incremental' | 'full';
+
+export interface LifecycleSnapshotSource {
+  read(options: {
+    readonly mode: SnapshotReadMode;
+    readonly rateLimitFloor: number;
+    /** Internal coordinator retry: preserve already-metered work in this cycle. */
+    readonly resetUsage?: boolean;
+  }): Promise<GitHubLifecycleSnapshot>;
+}
 
 export type NativeReviewState =
   | 'APPROVED'
@@ -145,6 +162,26 @@ export interface GitHubLifecycleReader {
     nonDoneIssueNumbers?: readonly number[],
   ): Promise<PullRequestPage>;
   readBranchClaims?(): Promise<readonly RawBranchClaim[]>;
+  /** Incremental stable-branch ref listing over the existing git transport. */
+  readIncrementalBranchClaims?(): Promise<readonly RawBranchClaim[]>;
+  /** Exact single-PR GraphQL hydration used by incremental discovery. */
+  readPullRequestForReconciliation?(prNumber: number): Promise<RawPullRequest | null>;
+  /** Git-transport review-claim ref listing, keyed by PR number. */
+  readReviewClaimRefs?(): Promise<ReadonlyMap<number, GitOid>>;
+  /** Cheap live GraphQL quota evidence read before a targeted hydration. */
+  readGraphQlRemaining?(): Promise<number>;
+  /** Lightweight targeted discovery for newly-active Project issues. */
+  readPullRequestNumbersClosingIssues?(
+    issueNumbers: readonly number[],
+  ): Promise<ReadonlySet<number>>;
+  resetGitHubUsage?(): void;
+  githubUsage(): GitHubUsage;
+}
+
+export interface LifecycleParityDifference {
+  readonly subject: string;
+  readonly incremental: string | null;
+  readonly full: string | null;
 }
 
 export interface GitHubLifecycleSnapshot {
@@ -155,9 +192,21 @@ export interface GitHubLifecycleSnapshot {
   readonly diagnostics: readonly LifecycleMappingDiagnostic[];
   readonly lifecycle: LifecycleSnapshot;
   readonly capturedAt: string;
+  /** Additive metadata; legacy/custom readers that omit it are treated as partial. */
+  readonly snapshotMode?: SnapshotReadMode;
+  readonly snapshotComplete?: boolean;
+  readonly lastFullReconciliationAt?: string | null;
+  readonly githubUsage?: GitHubUsage;
+  readonly parityDifferences?: readonly LifecycleParityDifference[];
+  /** Why a full oracle could not be compared to a same-boundary incremental candidate. */
+  readonly parityUnavailableReason?: string;
+  /** Present only for a deliberately non-authoritative routine status view. */
+  readonly partialReason?: string;
+  /** A complete cached/incremental view returned after a due full read failed. */
+  readonly snapshotWarning?: string;
 }
 
-function parseBranchClaim(raw: RawBranchClaim): BranchClaimSnapshot {
+export function decodeBranchClaimSnapshot(raw: RawBranchClaim): BranchClaimSnapshot {
   try {
     assertPositiveInteger(raw.issueNumber, 'issue number');
     isoTimestamp(raw.headCommittedAt);
@@ -189,8 +238,17 @@ export class SnapshotDecodeError extends Error {
 }
 
 export class LifecycleRateLimitError extends Error {
-  constructor(readonly remaining: number) {
-    super(`GitHub rate-limit budget low: ${remaining} remaining`);
+  constructor(
+    readonly remaining: number,
+    readonly required = DEFAULT_FLOOR,
+    readonly reserve = 0,
+  ) {
+    super(
+      reserve === 0
+        ? `GitHub rate-limit budget low: ${remaining} remaining`
+        : `GitHub rate-limit budget low: ${remaining} remaining; ${required} required `
+          + `(${required - reserve} floor + ${reserve} reserve)`,
+    );
     this.name = 'LifecycleRateLimitError';
   }
 }
@@ -205,7 +263,7 @@ function assertPositiveInteger(value: number, label: string): void {
   }
 }
 
-function parsePullRequest(raw: RawPullRequest): PullRequestSnapshot {
+export function decodePullRequestSnapshot(raw: RawPullRequest): PullRequestSnapshot {
   try {
     assertPositiveInteger(raw.number, 'PR number');
     const headOid = gitOid(raw.headOid);
@@ -749,6 +807,53 @@ function deepFreeze<Value>(value: Value): Value {
   return value;
 }
 
+export function composeGitHubLifecycleSnapshot(
+  evidence: {
+    readonly project: ProjectSnapshot;
+    readonly issues: readonly PolledIssue[];
+    readonly pullRequests: readonly PullRequestSnapshot[];
+    readonly branches: readonly BranchClaimSnapshot[];
+  },
+  options: {
+    readonly authorAllowlist: ReadonlySet<string>;
+    readonly capturedAt: string;
+    readonly snapshotMode: SnapshotReadMode;
+    readonly lastFullReconciliationAt: string;
+    readonly githubUsage: GitHubUsage;
+    readonly parityDifferences?: readonly LifecycleParityDifference[];
+    readonly parityUnavailableReason?: string;
+  },
+): GitHubLifecycleSnapshot {
+  isoTimestamp(options.capturedAt);
+  isoTimestamp(options.lastFullReconciliationAt);
+  const lifecycle = lifecycleItems(
+    evidence.issues,
+    evidence.pullRequests,
+    evidence.branches,
+    options.authorAllowlist,
+    evidence.project,
+  );
+  return deepFreeze({
+    project: evidence.project,
+    issues: [...evidence.issues],
+    pullRequests: [...evidence.pullRequests],
+    branches: [...evidence.branches],
+    diagnostics: lifecycle.diagnostics,
+    lifecycle: { items: lifecycle.items },
+    capturedAt: options.capturedAt,
+    snapshotMode: options.snapshotMode,
+    snapshotComplete: true,
+    lastFullReconciliationAt: options.lastFullReconciliationAt,
+    githubUsage: options.githubUsage,
+    ...(options.parityDifferences === undefined
+      ? {}
+      : { parityDifferences: [...options.parityDifferences] }),
+    ...(options.parityUnavailableReason === undefined
+      ? {}
+      : { parityUnavailableReason: options.parityUnavailableReason }),
+  });
+}
+
 export async function buildGitHubLifecycleSnapshot(
   reader: GitHubLifecycleReader,
   options: {
@@ -758,9 +863,39 @@ export async function buildGitHubLifecycleSnapshot(
     readonly rateLimitFloor?: number;
   },
 ): Promise<GitHubLifecycleSnapshot> {
+  if (typeof reader.githubUsage !== 'function') {
+    throw new Error('Full lifecycle snapshot requires a cycle usage meter');
+  }
+  if (reader.readGraphQlRemaining === undefined) {
+    throw new Error('Full lifecycle snapshot live rate-limit reader is unavailable');
+  }
+  const usageBeforeFull = reader.githubUsage();
+  const rateLimitFloor = options.rateLimitFloor ?? DEFAULT_FLOOR;
+  try {
+    assertRateLimitReserve(
+      await reader.readGraphQlRemaining(),
+      FULL_SCAN_RESERVE,
+      rateLimitFloor,
+    );
+  } catch (error) {
+    if (!(error instanceof GitHubRateLimitReserveError)) throw error;
+    throw new LifecycleRateLimitError(error.remaining, error.required, error.reserve);
+  }
   const project = await reader.readProjectSnapshot();
-  if (project.rateLimit.remaining < (options.rateLimitFloor ?? DEFAULT_FLOOR)) {
-    throw new LifecycleRateLimitError(project.rateLimit.remaining);
+  const usageAfterProject = reader.githubUsage();
+  const projectGraphQlCost = usageAfterProject.graphqlCost - usageBeforeFull.graphqlCost;
+  if (!Number.isSafeInteger(projectGraphQlCost) || projectGraphQlCost < 0) {
+    throw new Error('Full lifecycle Project read returned inconsistent GraphQL usage evidence');
+  }
+  try {
+    assertRateLimitReserve(
+      project.rateLimit.remaining,
+      Math.max(0, FULL_SCAN_RESERVE - projectGraphQlCost),
+      rateLimitFloor,
+    );
+  } catch (error) {
+    if (!(error instanceof GitHubRateLimitReserveError)) throw error;
+    throw new LifecycleRateLimitError(error.remaining, error.required, error.reserve);
   }
   const issues = await reader.readIssues(toIssueBoardState(project));
   const nonDoneIssueNumbers = project.items
@@ -782,12 +917,12 @@ export async function buildGitHubLifecycleSnapshot(
     seen.add(next);
     cursor = next;
   }
-  const pullRequests = rawPrs.map(parsePullRequest);
+  const pullRequests = rawPrs.map(decodePullRequestSnapshot);
   const branchClaims = await reader.readBranchClaims?.() ?? [];
   const branches: BranchClaimSnapshot[] = [];
   for (const raw of branchClaims) {
     try {
-      branches.push(parseBranchClaim(raw));
+      branches.push(decodeBranchClaimSnapshot(raw));
     } catch (cause) {
       console.warn(
         `[snapshot] skipping undecodable branch claim ${raw.headRefName}: ${
@@ -798,25 +933,31 @@ export async function buildGitHubLifecycleSnapshot(
   }
   const now = (options.now ?? (() => new Date()))();
   isoTimestamp(now.toISOString());
-  const lifecycle = lifecycleItems(
-    issues,
-    pullRequests,
-    branches,
-    options.authorAllowlist,
-    project,
-  );
-  const snapshot: GitHubLifecycleSnapshot = {
-    project,
-    issues: [...issues],
-    pullRequests,
-    branches,
-    diagnostics: lifecycle.diagnostics,
-    lifecycle: {
-      items: lifecycle.items,
-    },
+  const githubUsage = reader.githubUsage();
+  if (
+    githubUsage.graphqlRequests < 1
+    || githubUsage.graphqlRemaining === null
+    || githubUsage.graphqlResetAt === null
+  ) {
+    throw new Error('Full lifecycle snapshot is missing metered GraphQL rate-limit evidence');
+  }
+  try {
+    assertRateLimitReserve(
+      githubUsage.graphqlRemaining,
+      0,
+      rateLimitFloor,
+    );
+  } catch (error) {
+    if (!(error instanceof GitHubRateLimitReserveError)) throw error;
+    throw new LifecycleRateLimitError(error.remaining, error.required, error.reserve);
+  }
+  return composeGitHubLifecycleSnapshot({ project, issues, pullRequests, branches }, {
+    authorAllowlist: options.authorAllowlist,
     capturedAt: now.toISOString(),
-  };
-  return deepFreeze(snapshot);
+    snapshotMode: 'full',
+    lastFullReconciliationAt: now.toISOString(),
+    githubUsage,
+  });
 }
 
 export function nativeStateForVerdict(

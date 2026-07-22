@@ -17,6 +17,8 @@ import {
 import {
   LifecycleRateLimitError,
   type GitHubLifecycleSnapshot,
+  type LifecycleParityDifference,
+  type SnapshotReadMode,
 } from './snapshot.js';
 import {
   scheduleActiveActions,
@@ -36,6 +38,8 @@ import type {
   LifecycleViewItem,
   NewWorkAction,
 } from './types.js';
+import { EMPTY_GITHUB_USAGE, type GitHubUsage } from './github-usage.js';
+import { exactUtcTimestampMs } from './exact-utc-time.js';
 
 export type LifecycleCliCommand =
   | { readonly kind: 'status' }
@@ -47,6 +51,7 @@ export interface LifecycleCliOptions {
   readonly once: boolean;
   readonly command: LifecycleCliCommand;
   readonly json: boolean;
+  readonly fullReconcile: boolean;
 }
 
 export interface LifecycleControllerDeps {
@@ -56,12 +61,18 @@ export interface LifecycleControllerDeps {
    * includes `budget.pointsSpent` (start remaining − end remaining).
    */
   readRateLimitRemaining?(): Promise<number>;
+  /** Reset/read the shared meter at cycle boundaries and report completion. */
+  readonly resetGitHubUsage?: () => void;
+  readonly readGitHubUsage?: () => GitHubUsage;
   readonly writer?: ReconciliationWriter;
+  readonly writerForSnapshot?: (snapshot: GitHubLifecycleSnapshot) => ReconciliationWriter;
   readonly now: () => Date;
   readonly staleAfterMs: number;
   readonly runnerId: string;
   readonly cycleId: () => string;
   readonly rateLimitFloor?: number;
+  /** Persistent runners report pre-mutation snapshot failures and retry next cadence. */
+  readonly snapshotFailureMode?: 'throw' | 'report';
   readonly active?: {
     preflight(): Promise<{ readonly ok: boolean; readonly detail?: string }>;
     readLocalState(): {
@@ -86,6 +97,7 @@ export interface LifecycleControllerDeps {
     readonly onlyIssues?: ReadonlySet<number>;
     executeAction(
       action: NewWorkAction,
+      snapshot: GitHubLifecycleSnapshot,
     ): Promise<{ readonly outcome: string; readonly reason?: string }>;
   };
 }
@@ -144,11 +156,36 @@ export interface LifecycleLogEvent {
   readonly reason?: string;
 }
 
+type LifecycleFailedUsage =
+  | {
+      readonly usageAccounting: { readonly complete: true };
+      readonly githubUsage: GitHubUsage;
+    }
+  | {
+      readonly usageAccounting: {
+        readonly complete: false;
+        readonly reason: string;
+      };
+      readonly githubUsage?: never;
+    };
+
+type LifecycleFailedReport = {
+  readonly status: 'failed';
+  readonly mode: AutopilotMode;
+  readonly message: string;
+  readonly mutationFree: true;
+  readonly items: readonly [];
+  readonly orphanBranchClaims: readonly [];
+  readonly diagnostics: readonly [];
+  readonly events: readonly [];
+} & LifecycleFailedUsage;
+
 export type LifecycleCycleReport =
   | {
       readonly status: 'rejected';
       readonly mode: AutopilotMode;
       readonly message: string;
+      readonly githubUsage: GitHubUsage;
       readonly items: readonly [];
       readonly orphanBranchClaims: readonly [];
       readonly diagnostics: readonly [];
@@ -158,17 +195,27 @@ export type LifecycleCycleReport =
       readonly status: 'rate-limited';
       readonly mode: AutopilotMode;
       readonly message: string;
+      readonly githubUsage: GitHubUsage;
       readonly items: readonly [];
       readonly orphanBranchClaims: readonly [];
       readonly diagnostics: readonly [];
       readonly events: readonly [];
     }
+  | LifecycleFailedReport
   | {
       readonly status: 'ok';
       readonly mode: AutopilotMode;
       readonly cycleId: string;
       readonly runnerId: string;
       readonly capturedAt: string;
+      readonly snapshotMode: SnapshotReadMode;
+      readonly snapshotComplete: boolean;
+      readonly lastFullReconciliationAt: string | null;
+      readonly partialReason?: string;
+      readonly snapshotWarning?: string;
+      readonly parityDifferences?: readonly LifecycleParityDifference[];
+      readonly parityUnavailableReason?: string;
+      readonly githubUsage: GitHubUsage;
       readonly items: readonly LifecycleStatusItem[];
       readonly orphanBranchClaims: readonly LifecycleOrphanBranchClaimStatus[];
       readonly diagnostics: readonly LifecycleStatusDiagnostic[];
@@ -182,6 +229,46 @@ export type LifecycleCycleReport =
       };
     };
 
+function snapshotReportMetadata(snapshot: GitHubLifecycleSnapshot): {
+  readonly snapshotMode: SnapshotReadMode;
+  readonly snapshotComplete: boolean;
+  readonly lastFullReconciliationAt: string | null;
+  readonly partialReason?: string;
+  readonly snapshotWarning?: string;
+  readonly parityDifferences?: readonly LifecycleParityDifference[];
+  readonly parityUnavailableReason?: string;
+} {
+  return {
+    snapshotMode: snapshot.snapshotMode ?? 'full',
+    snapshotComplete: snapshot.snapshotComplete ?? false,
+    lastFullReconciliationAt: snapshot.lastFullReconciliationAt ?? null,
+    ...(snapshot.partialReason === undefined ? {} : { partialReason: snapshot.partialReason }),
+    ...(snapshot.snapshotWarning === undefined
+      ? {}
+      : { snapshotWarning: snapshot.snapshotWarning }),
+    ...(snapshot.parityDifferences === undefined
+      ? {}
+      : { parityDifferences: snapshot.parityDifferences }),
+    ...(snapshot.parityUnavailableReason === undefined
+      ? {}
+      : { parityUnavailableReason: snapshot.parityUnavailableReason }),
+  };
+}
+
+function finalGitHubUsage(
+  deps: LifecycleControllerDeps,
+  snapshot?: GitHubLifecycleSnapshot,
+): GitHubUsage {
+  return deps.readGitHubUsage?.() ?? snapshot?.githubUsage ?? EMPTY_GITHUB_USAGE;
+}
+
+function failedCycleGitHubUsage(deps: LifecycleControllerDeps): GitHubUsage {
+  if (deps.readGitHubUsage === undefined) {
+    throw new Error('GitHub cycle usage meter is unavailable after snapshot failure');
+  }
+  return deps.readGitHubUsage();
+}
+
 function positiveNumber(raw: string | undefined, label: string): number {
   if (raw === undefined || !/^[1-9][0-9]*$/.test(raw)) throw new Error(`Invalid ${label}`);
   const value = Number(raw);
@@ -194,6 +281,7 @@ export function parseLifecycleCli(args: readonly string[]): LifecycleCliOptions 
   let once = false;
   let dryRun = false;
   let json = false;
+  let fullReconcile = false;
   const positional: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]!;
@@ -203,6 +291,9 @@ export function parseLifecycleCli(args: readonly string[]): LifecycleCliOptions 
       dryRun = true;
     } else if (arg === '--json') {
       json = true;
+    } else if (arg === '--full-reconcile') {
+      fullReconcile = true;
+      once = true;
     } else if (arg === '--mode') {
       const value = args[index + 1];
       if (value !== 'observe' && value !== 'recover' && value !== 'active') {
@@ -220,6 +311,9 @@ export function parseLifecycleCli(args: readonly string[]): LifecycleCliOptions 
     mode = 'observe';
     once = true;
   }
+  if (fullReconcile && mode !== 'observe') {
+    throw new Error('--full-reconcile is an authoritative observe-only read');
+  }
   let command: LifecycleCliCommand = { kind: 'status' };
   if (positional.length === 1 && (positional[0] === 'status' || positional[0] === 'sessions')) {
     // Both names intentionally render the same GitHub-derived lifecycle view.
@@ -235,7 +329,7 @@ export function parseLifecycleCli(args: readonly string[]): LifecycleCliOptions 
       throw new Error('Expected explain issue <N> or explain pr <N>');
     }
   }
-  return { mode, once, command, json };
+  return { mode, once, command, json, fullReconcile };
 }
 
 function projectionContext(
@@ -596,7 +690,7 @@ function subjectForAction(action: NewWorkAction): string {
 }
 
 function phaseForSchedulingSkip(
-  skip: ActiveSchedulingSkip,
+  skip: Pick<ActiveSchedulingSkip, 'phase'>,
 ): LifecyclePhase {
   if (skip.phase === 'implementation') return 'eligible';
   if (skip.phase === 'review') return 'awaiting-review';
@@ -667,26 +761,46 @@ export function matchesOnlyIssuesAllowlist(
   return issueNumber !== undefined && onlyIssues.has(issueNumber);
 }
 
+export const MAX_FULL_RECONCILIATION_AGE_MS = 2 * 60 * 60_000;
+
+export function fullReconciliationAllowsNewClaims(
+  lastFullReconciliationAt: string | null | undefined,
+  now: Date,
+): boolean {
+  if (lastFullReconciliationAt === null || lastFullReconciliationAt === undefined) return false;
+  const timestamp = exactUtcTimestampMs(lastFullReconciliationAt);
+  if (timestamp === null) return false;
+  const age = now.getTime() - timestamp;
+  return age >= 0 && age <= MAX_FULL_RECONCILIATION_AGE_MS;
+}
+
 export async function runLifecycleCycle(
   mode: AutopilotMode,
   deps: LifecycleControllerDeps,
 ): Promise<LifecycleCycleReport> {
+  deps.resetGitHubUsage?.();
   if (mode === 'active' && deps.active === undefined) {
     return {
       status: 'rejected',
       mode,
       message: 'active executor not configured',
+      githubUsage: finalGitHubUsage(deps),
       items: [],
       orphanBranchClaims: [],
       diagnostics: [],
       events: [],
     };
   }
-  if ((mode === 'recover' || mode === 'active') && deps.writer === undefined) {
+  if (
+    (mode === 'recover' || mode === 'active')
+    && deps.writer === undefined
+    && deps.writerForSnapshot === undefined
+  ) {
     return {
       status: 'rejected',
       mode,
       message: 'recover writer not configured',
+      githubUsage: finalGitHubUsage(deps),
       items: [],
       orphanBranchClaims: [],
       diagnostics: [],
@@ -702,6 +816,7 @@ export async function runLifecycleCycle(
         message: `active capability preflight failed: ${
           preflight.detail ?? 'required capability is unverified'
         }`,
+        githubUsage: finalGitHubUsage(deps),
         items: [],
         orphanBranchClaims: [],
         diagnostics: [],
@@ -709,7 +824,7 @@ export async function runLifecycleCycle(
       };
     }
   }
-  const rateLimitFloor = deps.rateLimitFloor ?? DEFAULT_FLOOR;
+  const rateLimitFloor = Math.max(DEFAULT_FLOOR, deps.rateLimitFloor ?? DEFAULT_FLOOR);
   let snapshot: GitHubLifecycleSnapshot;
   try {
     snapshot = await deps.readSnapshot(rateLimitFloor);
@@ -719,19 +834,80 @@ export async function runLifecycleCycle(
         status: 'rate-limited',
         mode,
         message: error.message,
+        githubUsage: finalGitHubUsage(deps),
         items: [],
         orphanBranchClaims: [],
         diagnostics: [],
         events: [],
       };
     }
+    if (deps.snapshotFailureMode === 'report') {
+      const failed = {
+        status: 'failed' as const,
+        mode,
+        message: `Lifecycle snapshot failed before mutations: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        mutationFree: true as const,
+        items: [] as const,
+        orphanBranchClaims: [] as const,
+        diagnostics: [] as const,
+        events: [] as const,
+      };
+      try {
+        return {
+          ...failed,
+          usageAccounting: { complete: true as const },
+          githubUsage: failedCycleGitHubUsage(deps),
+        };
+      } catch (usageError) {
+        return {
+          ...failed,
+          usageAccounting: {
+            complete: false as const,
+            reason: usageError instanceof Error ? usageError.message : String(usageError),
+          },
+        };
+      }
+    }
     throw error;
   }
-  if (snapshot.project.rateLimit.remaining < rateLimitFloor) {
+  if (snapshot.snapshotComplete !== true) {
+    if (mode !== 'observe') {
+      return {
+        status: 'rejected',
+        mode,
+        message: 'complete lifecycle snapshot is unavailable; mutations are suppressed',
+        githubUsage: finalGitHubUsage(deps, snapshot),
+        items: [],
+        orphanBranchClaims: [],
+        diagnostics: [],
+        events: [],
+      };
+    }
+    return {
+      status: 'ok',
+      mode,
+      cycleId: deps.cycleId(),
+      runnerId: deps.runnerId,
+      capturedAt: snapshot.capturedAt,
+      ...snapshotReportMetadata(snapshot),
+      githubUsage: finalGitHubUsage(deps, snapshot),
+      items: [],
+      orphanBranchClaims: [],
+      diagnostics: [],
+      events: [],
+    };
+  }
+  const graphqlRemaining = snapshot.githubUsage?.graphqlRemaining ?? null;
+  if (graphqlRemaining === null || graphqlRemaining < rateLimitFloor) {
     return {
       status: 'rate-limited',
       mode,
-      message: `GitHub rate-limit budget low: ${snapshot.project.rateLimit.remaining} remaining`,
+      message: graphqlRemaining === null
+        ? 'GitHub GraphQL rate-limit evidence is unavailable'
+        : `GitHub rate-limit budget low: ${graphqlRemaining} remaining`,
+      githubUsage: finalGitHubUsage(deps, snapshot),
       items: [],
       orphanBranchClaims: [],
       diagnostics: [],
@@ -787,13 +963,16 @@ export async function runLifecycleCycle(
       cycleId,
       runnerId: deps.runnerId,
       capturedAt: snapshot.capturedAt,
+      ...snapshotReportMetadata(snapshot),
+      githubUsage: finalGitHubUsage(deps, snapshot),
       items,
       orphanBranchClaims,
       diagnostics,
       events: [],
     });
   }
-  const reconciliation = await executeProjectionPlan(plan, deps.writer!);
+  const writer = deps.writerForSnapshot?.(snapshot) ?? deps.writer!;
+  const reconciliation = await executeProjectionPlan(plan, writer);
   const reconciliationEvents = reconciliation.results.map((result) => (
     eventFor(
       result,
@@ -815,11 +994,30 @@ export async function runLifecycleCycle(
     const openPipelineBacklog = snapshot.pullRequests.filter((pr) => (
       pr.state === 'OPEN' && pr.labels.includes('engine:review')
     )).length;
+    const candidates = activeCandidates(snapshot, view).filter((candidate) => (
+      !blockedIssues.has(candidate.issueNumber)
+      && matchesOnlyIssuesAllowlist(candidate.issueNumber, deps.active!.onlyIssues)
+    ));
+    const reconciliationFresh = fullReconciliationAllowsNewClaims(
+      snapshot.lastFullReconciliationAt,
+      now,
+    );
+    if (!reconciliationFresh) {
+      actionEvents.push(...candidates.map((candidate): LifecycleLogEvent => ({
+        cycleId,
+        runnerId: deps.runnerId,
+        mode: 'active',
+        phase: phaseForSchedulingSkip(candidate),
+        subject: candidate.phase === 'implementation'
+          ? `issue:${candidate.issueNumber}`
+          : `issue:${candidate.issueNumber}/pr:${candidate.prNumber}`,
+        action: 'schedule',
+        outcome: 'skipped',
+        reason: 'full-reconciliation-stale',
+      })));
+    }
     const scheduling = scheduleActiveActions({
-      candidates: activeCandidates(snapshot, view).filter((candidate) => (
-        !blockedIssues.has(candidate.issueNumber)
-        && matchesOnlyIssuesAllowlist(candidate.issueNumber, deps.active!.onlyIssues)
-      )),
+      candidates: reconciliationFresh ? candidates : [],
       remaining: local.remaining,
       availableLogins: local.availableLogins,
       implementationPreferredLogin: local.implementationPreferredLogin,
@@ -839,7 +1037,7 @@ export async function runLifecycleCycle(
     })));
     for (const action of scheduling.actions) {
       try {
-        const result = await deps.active!.executeAction(action);
+        const result = await deps.active!.executeAction(action, snapshot);
         actionEvents.push({
           cycleId,
           runnerId: deps.runnerId,
@@ -871,6 +1069,8 @@ export async function runLifecycleCycle(
       cycleId,
       runnerId: deps.runnerId,
       capturedAt: snapshot.capturedAt,
+      ...snapshotReportMetadata(snapshot),
+      githubUsage: finalGitHubUsage(deps, snapshot),
       items,
       orphanBranchClaims,
       diagnostics,
@@ -884,6 +1084,8 @@ export async function runLifecycleCycle(
     cycleId,
     runnerId: deps.runnerId,
     capturedAt: snapshot.capturedAt,
+    ...snapshotReportMetadata(snapshot),
+    githubUsage: finalGitHubUsage(deps, snapshot),
     items,
     orphanBranchClaims,
     diagnostics,
@@ -893,7 +1095,24 @@ export async function runLifecycleCycle(
 }
 
 export function renderLifecycleJson(report: LifecycleCycleReport): string {
-  return JSON.stringify(report, null, 2);
+  const githubUsage = report.githubUsage;
+  const lastFullReconciliationAt = 'lastFullReconciliationAt' in report
+    ? report.lastFullReconciliationAt
+    : undefined;
+  return JSON.stringify({
+    ...report,
+    ...(lastFullReconciliationAt === undefined
+      ? {}
+      : { lastFullReconciledAt: lastFullReconciliationAt }),
+    ...(githubUsage === undefined
+      ? {}
+      : {
+          githubUsage: {
+            ...githubUsage,
+            graphqlPoints: githubUsage.graphqlCost,
+          },
+        }),
+  }, null, 2);
 }
 
 function explanation(item: LifecycleStatusItem): string {
@@ -968,8 +1187,65 @@ export function explainPullRequest(report: LifecycleCycleReport, prNumber: numbe
     : explanation(item);
 }
 
+function githubUsageSummary(usage: GitHubUsage): string {
+  return `GitHub usage: GraphQL ${usage.graphqlCost} points across `
+    + `${usage.graphqlRequests} evidence requests, `
+    + `${usage.graphqlRemaining ?? 'unknown'} remaining; `
+    + `REST ${usage.restRequests} requests, ${usage.restNotModified} not modified, `
+    + `${usage.cacheHits} cache hits.`;
+}
+
+function paritySummary(
+  differences: readonly LifecycleParityDifference[] | undefined,
+  complete: boolean,
+  unavailableReason?: string,
+): readonly string[] {
+  if (!complete) return ['Parity comparison: unavailable for a partial view.'];
+  if (unavailableReason !== undefined) {
+    return [`Parity comparison: unavailable (${unavailableReason}).`];
+  }
+  if (differences === undefined) return ['Parity comparison: not run for this snapshot.'];
+  if (differences.length === 0) return ['Parity differences: 0.'];
+  return [
+    `Parity differences: ${differences.length} (${
+      differences.map((difference) => difference.subject).join(', ')
+    }).`,
+    ...differences.map((difference) => (
+      `Parity ${difference.subject}: incremental=${difference.incremental ?? 'absent'}; `
+        + `full=${difference.full ?? 'absent'}.`
+    )),
+  ];
+}
+
 export function renderLifecycleHuman(report: LifecycleCycleReport): string {
-  if (report.status !== 'ok') return report.message;
+  if (report.status === 'failed') {
+    if (report.usageAccounting.complete === false) {
+      return `${report.message}\nGitHub usage: unavailable (${report.usageAccounting.reason}).`;
+    }
+    const usage = report.githubUsage;
+    if (usage === undefined) {
+      return `${report.message}\nGitHub usage: unavailable (complete usage evidence is missing).`;
+    }
+    return `${report.message}\n${githubUsageSummary(usage)}`;
+  }
+  const usageLine = githubUsageSummary(report.githubUsage);
+  if (report.status !== 'ok') return `${report.message}\n${usageLine}`;
+  const snapshotLine = `Snapshot: ${report.snapshotMode} (${
+    report.snapshotComplete ? 'complete' : 'partial'
+  }), captured ${report.capturedAt}, last full reconciliation ${
+    report.lastFullReconciliationAt ?? 'never'
+  }.`;
+  const partialLines = report.partialReason === undefined
+    ? []
+    : [`PARTIAL: ${report.partialReason}.`];
+  const warningLines = report.snapshotWarning === undefined
+    ? []
+    : [`WARNING: ${report.snapshotWarning}.`];
+  const parityLines = paritySummary(
+    report.parityDifferences,
+    report.snapshotComplete,
+    report.parityUnavailableReason,
+  );
   if (
     report.items.length === 0
     && report.orphanBranchClaims.length === 0
@@ -977,9 +1253,21 @@ export function renderLifecycleHuman(report: LifecycleCycleReport): string {
     && report.events.length === 0
     && report.budget === undefined
   ) {
-    return 'No lifecycle items.';
+    return [
+      snapshotLine,
+      ...partialLines,
+      ...warningLines,
+      usageLine,
+      ...parityLines,
+      'No lifecycle items.',
+    ].join('\n');
   }
   return [
+    snapshotLine,
+    ...partialLines,
+    ...warningLines,
+    usageLine,
+    ...parityLines,
     ...report.items.map(explanation),
     ...report.orphanBranchClaims.map(orphanExplanation),
     ...report.diagnostics.map((diagnostic) => `Human diagnostic: ${diagnostic.detail}.`),

@@ -20,7 +20,19 @@ export interface ReconciliationReviewRefState {
     | 'stale';
 }
 
+export type ReconciliationDraftPullRequestAuthority =
+  | { readonly kind: 'missing' }
+  | {
+      readonly kind: 'linked';
+      readonly number: number;
+      readonly head: GitOid;
+      readonly draft: boolean;
+      readonly labels: readonly string[];
+    };
+
 export interface ReconciliationWriter {
+  /** Starts a one-action authority cache. Direct callers may omit it. */
+  actionScope?(): ReconciliationWriter;
   readIssueHead(issueNumber: number): Promise<GitOid | null>;
   readBranchHead(headRefName: string): Promise<GitOid | null>;
   readPullRequest(prNumber: number): Promise<ReconciliationPullRequestState | null>;
@@ -47,12 +59,12 @@ export interface ReconciliationWriter {
     expectedHead: GitOid,
     summary: string,
   ): Promise<void>;
-  findOpenPullRequest(headRefName: string): Promise<{
-    readonly number: number;
-    readonly head: GitOid;
-    readonly draft: boolean;
-    readonly labels: readonly string[];
-  } | null>;
+  readDraftPullRequestAuthority(input: {
+    readonly issueNumber: number;
+    readonly expectedHead: GitOid;
+    readonly headRefName: string;
+    readonly baseRefName: string;
+  }): Promise<ReconciliationDraftPullRequestAuthority>;
   ensureDraftPullRequest(input: {
     readonly issueNumber: number;
     readonly expectedHead: GitOid;
@@ -228,8 +240,8 @@ async function ensureDraftPr(
   if (await writer.readBranchHead(action.headRefName) !== action.expectedHead) {
     return { action, outcome: 'changed-head' };
   }
-  const before = await writer.findOpenPullRequest(action.headRefName);
-  if (before !== null) {
+  const before = await writer.readDraftPullRequestAuthority(action);
+  if (before.kind === 'linked') {
     if (before.head !== action.expectedHead) return { action, outcome: 'changed-head' };
     let applied = false;
     if (!before.draft) {
@@ -267,6 +279,15 @@ async function ensureDraftPr(
       }
       applied ||= result.outcome === 'applied';
     }
+    const confirmed = await writer.readDraftPullRequestAuthority(action);
+    if (
+      confirmed.kind !== 'linked'
+      || confirmed.head !== action.expectedHead
+      || !confirmed.draft
+      || !confirmed.labels.includes(DEFAULT_CONFIG.engineReviewLabel)
+    ) {
+      return { action, outcome: 'lost-race' };
+    }
     return { action, outcome: applied ? 'applied' : 'already-applied' };
   }
   if (await writer.readBranchHead(action.headRefName) !== action.expectedHead) {
@@ -277,8 +298,13 @@ async function ensureDraftPr(
     return { action, outcome: 'applied' };
   } catch (error) {
     try {
-      const after = await writer.findOpenPullRequest(action.headRefName);
-      if (after?.head === action.expectedHead) {
+      const after = await writer.readDraftPullRequestAuthority(action);
+      if (
+        after.kind === 'linked'
+        && after.head === action.expectedHead
+        && after.draft
+        && after.labels.includes(DEFAULT_CONFIG.engineReviewLabel)
+      ) {
         return { action, outcome: 'already-applied' };
       }
     } catch {
@@ -370,7 +396,8 @@ export async function executeProjectionPlan(
       continue;
     }
     try {
-      const result = await executeOne(action, writer);
+      const actionWriter = writer.actionScope?.() ?? writer;
+      const result = await executeOne(action, actionWriter);
       results.push(result);
       previousSucceeded = result.outcome === 'applied'
         || result.outcome === 'already-applied';

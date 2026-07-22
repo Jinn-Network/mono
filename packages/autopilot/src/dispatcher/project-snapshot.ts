@@ -370,6 +370,16 @@ function parseSingleSelect<T extends string>(
   return valid.has(val.name) ? (val.name as T) : null;
 }
 
+function snapshotRateLimit(
+  raw: SnapshotResponse['data']['rateLimit'],
+): RateLimitInfo {
+  return {
+    remaining: raw.remaining,
+    used: raw.used,
+    resetAt: raw.resetAt,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Node → SnapshotItem
 // ---------------------------------------------------------------------------
@@ -447,8 +457,11 @@ export function resolveCurrentSprintIterationId(
  *
  * The query selects only the fields the dispatcher reads (`number`,
  * `contentType`, `status`, `priority`, `effort`, `blockedOn`, `issueType`)
- * plus a top-level `rateLimit { remaining used resetAt }`. Internally paginates
- * via `items(first: 100, after: $cursor)` until `pageInfo.hasNextPage` is false.
+ * plus a top-level `rateLimit { cost remaining used resetAt }`. `cost` is
+ * consumed by the metered command runner; the returned snapshot deliberately
+ * keeps only `remaining`, `used`, and `resetAt` so lifecycle evidence matches
+ * its strict persisted schema. Internally paginates via
+ * `items(first: 100, after: $cursor)` until `pageInfo.hasNextPage` is false.
  *
  * Throws {@link ProjectFieldSchemaError} when a non-empty board returns Issue
  * items where every single-select field is null — see that class for context.
@@ -535,7 +548,7 @@ export async function fetchProjectSnapshot(
       }
     }
 
-    rateLimit = response.data.rateLimit;
+    rateLimit = snapshotRateLimit(response.data.rateLimit);
     // Sprint configuration is duplicated on every page (it's a project-level
     // field, not a per-item value). Capture from the first page that has it;
     // a missing/absent `Sprint` field collapses every iteration list to []

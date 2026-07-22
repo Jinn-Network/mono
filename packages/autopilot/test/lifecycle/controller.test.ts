@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   explainIssue,
   explainPullRequest,
+  fullReconciliationAllowsNewClaims,
   parseLifecycleCli,
   renderLifecycleHuman,
   renderLifecycleJson,
@@ -16,6 +17,14 @@ import {
   type LifecycleItem,
 } from '../../src/lifecycle/types.js';
 import type { ReconciliationWriter } from '../../src/lifecycle/reconciler.js';
+import {
+  GitHubUsageIncompleteError,
+  GitHubUsageMeter,
+  makeGitHubUsageCommandRunner,
+  type GitHubUsage,
+} from '../../src/lifecycle/github-usage.js';
+import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
+import { LifecycleSnapshotCoordinator } from '../../src/lifecycle/runner-snapshot.js';
 
 const HEAD = gitOid('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
 const NOW = new Date('2026-07-20T12:00:00.000Z');
@@ -91,6 +100,18 @@ function snapshot(item: LifecycleItem): GitHubLifecycleSnapshot {
     diagnostics: [],
     lifecycle: { items: [item] },
     capturedAt: NOW.toISOString(),
+    snapshotMode: 'full',
+    snapshotComplete: true,
+    lastFullReconciliationAt: NOW.toISOString(),
+    githubUsage: {
+      graphqlRequests: 3,
+      graphqlCost: 21,
+      graphqlRemaining: 3_979,
+      graphqlResetAt: '2026-07-20T13:00:00.000Z',
+      restRequests: 4,
+      restNotModified: 1,
+      cacheHits: 2,
+    },
   };
 }
 
@@ -127,16 +148,247 @@ describe('lifecycle controller', () => {
       once: false,
       command: { kind: 'status' },
       json: false,
+      fullReconcile: false,
     });
     expect(parseLifecycleCli(['--dry-run', '--mode', 'recover'])).toEqual({
       mode: 'observe',
       once: true,
       command: { kind: 'status' },
       json: false,
+      fullReconcile: false,
     });
     expect(parseLifecycleCli(['--once', '--mode', 'recover'])).toMatchObject({
       mode: 'recover',
       once: true,
+    });
+    expect(parseLifecycleCli(['--full-reconcile'])).toMatchObject({
+      mode: 'observe',
+      once: true,
+      fullReconcile: true,
+    });
+    expect(() => parseLifecycleCli(['--full-reconcile', '--mode', 'active']))
+      .toThrow(/full-reconcile.*observe/i);
+  });
+
+  it('returns a clearly partial zero-write status when complete discovery is unavailable', async () => {
+    const calls: string[] = [];
+    const partial = {
+      ...snapshot(implementation()),
+      project: {
+        items: [],
+        rateLimit: { remaining: 0, used: 0, resetAt: NOW.toISOString() },
+        currentSprintIterationId: null,
+      },
+      pullRequests: [],
+      lifecycle: { items: [] },
+      snapshotMode: 'incremental' as const,
+      snapshotComplete: false,
+      lastFullReconciliationAt: null,
+      partialReason: 'no complete lifecycle cache exists',
+      githubUsage: {
+        ...snapshot(implementation()).githubUsage!,
+        graphqlRemaining: null,
+      },
+    };
+    const report = await runLifecycleCycle('observe', {
+      ...deps(implementation(), calls),
+      readSnapshot: async () => partial,
+    });
+
+    expect(report).toMatchObject({
+      status: 'ok',
+      snapshotMode: 'incremental',
+      snapshotComplete: false,
+      partialReason: 'no complete lifecycle cache exists',
+      items: [],
+      events: [],
+    });
+    expect(calls).toEqual([]);
+    expect(renderLifecycleHuman(report)).toContain('PARTIAL: no complete lifecycle cache exists');
+  });
+
+  it('reports a persistent snapshot failure as mutation-free but keeps one-shot behavior fail-closed', async () => {
+    const calls: string[] = [];
+    const persistent = await runLifecycleCycle('recover', {
+      ...deps(implementation(), calls),
+      snapshotFailureMode: 'report',
+      readGitHubUsage: () => ({
+        graphqlRequests: 2,
+        graphqlCost: 301,
+        graphqlRemaining: 3_200,
+        graphqlResetAt: '2026-07-20T13:00:00.000Z',
+        restRequests: 8,
+        restNotModified: 4,
+        cacheHits: 4,
+      }),
+      readSnapshot: async () => {
+        throw new AggregateError([new Error('full failed'), new Error('fallback failed')], 'both failed');
+      },
+    });
+
+    expect(persistent).toMatchObject({
+      status: 'failed',
+      mutationFree: true,
+      message: expect.stringMatching(/both failed/i),
+      usageAccounting: { complete: true },
+      githubUsage: { graphqlCost: 301, restRequests: 8 },
+      items: [],
+      events: [],
+    });
+    expect(calls).toEqual([]);
+    await expect(runLifecycleCycle('recover', {
+      ...deps(implementation(), calls),
+      readSnapshot: async () => { throw new Error('one-shot failed'); },
+    })).rejects.toThrow('one-shot failed');
+  });
+
+  it('marks failed-cycle usage unavailable instead of reporting invented zero usage', async () => {
+    const report = await runLifecycleCycle('recover', {
+      ...deps(implementation(), []),
+      snapshotFailureMode: 'report',
+      readGitHubUsage: () => {
+        throw new GitHubUsageIncompleteError('opaque GraphQL span has no closing evidence');
+      },
+      readSnapshot: async () => { throw new Error('snapshot failed'); },
+    });
+
+    expect(report).toMatchObject({
+      status: 'failed',
+      mutationFree: true,
+      usageAccounting: {
+        complete: false,
+        reason: expect.stringMatching(/opaque GraphQL span has no closing evidence/i),
+      },
+    });
+    expect(report).not.toHaveProperty('githubUsage');
+    expect(renderLifecycleHuman(report)).toContain('GitHub usage: unavailable');
+    expect(renderLifecycleHuman(report)).not.toContain('GraphQL 0');
+    const json = renderLifecycleJson(report);
+    expect(json).toContain('"complete": false');
+    expect(json).toContain('opaque GraphQL span has no closing evidence');
+    expect(json).not.toContain('"graphqlCost": 0');
+  });
+
+  it('cannot claim work from a fallback that forges a fresh full-reconciliation marker', async () => {
+    const eligible: LifecycleItem = {
+      kind: 'issue',
+      issueNumber: 42,
+      v2Marked: false,
+      projectStatus: 'Todo',
+      labels: [],
+      eligible: true,
+      eligibilityReason: 'eligible',
+      eligibilityDetail: 'selected',
+    };
+    const candidate = snapshot(eligible);
+    const coordinator = new LifecycleSnapshotCoordinator({
+      source: {
+        async read(options) {
+          if (options.mode === 'full') throw new Error('full failed');
+          return {
+            ...candidate,
+            snapshotMode: 'incremental',
+            capturedAt: NOW.toISOString(),
+            lastFullReconciliationAt: NOW.toISOString(),
+          };
+        },
+      },
+      configuredMode: 'incremental',
+      fullReconcileMs: 60 * 60_000,
+      startupFull: true,
+      allowPartial: false,
+      now: () => NOW,
+    });
+    const actions: string[] = [];
+    const writes: string[] = [];
+    const report = await runLifecycleCycle('active', {
+      ...deps(eligible, writes),
+      snapshotFailureMode: 'report',
+      readSnapshot: (floor) => coordinator.read(floor ?? 500),
+      active: {
+        preflight: async () => ({ ok: true }),
+        readLocalState: () => ({
+          remaining: { implementation: 1, review: 1, mergePrep: 1 },
+          availableLogins: ['bot'],
+          implementationPreferredLogin: 'bot',
+        }),
+        implementationBackpressureThreshold: 10,
+        executeAction: async (action) => {
+          actions.push(action.kind);
+          return { outcome: 'spawned' };
+        },
+      },
+    });
+
+    expect(report).toMatchObject({
+      status: 'failed',
+      mutationFree: true,
+      usageAccounting: {
+        complete: false,
+        reason: expect.stringMatching(/usage meter is unavailable/i),
+      },
+    });
+    expect(report).not.toHaveProperty('githubUsage');
+    expect(actions).toEqual([]);
+    expect(writes).toEqual([]);
+  });
+
+  it.each([
+    '2026-07-20T10:00:00+00:00',
+    '2026-07-20 10:00:00.000Z',
+    '2026-02-30T10:00:00.000Z',
+    '2026-07-20T24:00:00.000Z',
+    '2026-07-20T10:00:00.0000Z',
+  ])('fails closed for non-canonical last-full timestamp %s', (timestamp) => {
+    expect(fullReconciliationAllowsNewClaims(timestamp, NOW)).toBe(false);
+  });
+
+  it('renders full/incremental parity differences in human and JSON status', async () => {
+    const current = snapshot(implementation());
+    const report = await runLifecycleCycle('observe', {
+      ...deps(implementation(), []),
+      readSnapshot: async () => ({
+        ...current,
+        snapshotWarning: 'Full reconciliation failed and remains due: oracle drift',
+        parityDifferences: [{
+          subject: 'issue:42',
+          incremental: '{"eligible":true}',
+          full: '{"eligible":false}',
+        }],
+      }),
+    });
+
+    expect(report).toMatchObject({ parityDifferences: [{ subject: 'issue:42' }] });
+    expect(renderLifecycleHuman(report)).toContain('Parity differences: 1 (issue:42).');
+    expect(renderLifecycleHuman(report)).toContain(
+      'WARNING: Full reconciliation failed and remains due: oracle drift.',
+    );
+    expect(renderLifecycleJson(report)).toContain('"parityDifferences"');
+    expect(renderLifecycleJson(report)).toContain('"snapshotWarning"');
+  });
+
+  it('renders an explicit unavailable parity reason without changing lifecycle items', async () => {
+    const current = snapshot(implementation());
+    const baseline = await runLifecycleCycle('observe', deps(implementation(), []));
+    const report = await runLifecycleCycle('observe', {
+      ...deps(implementation(), []),
+      readSnapshot: async () => ({
+        ...current,
+        parityUnavailableReason: 'open PR index changed during the parity oracle',
+      }),
+    });
+
+    expect(report).toMatchObject({
+      status: 'ok',
+      parityUnavailableReason: 'open PR index changed during the parity oracle',
+    });
+    expect(report.items).toEqual(baseline.items);
+    expect(renderLifecycleHuman(report)).toContain(
+      'Parity comparison: unavailable (open PR index changed during the parity oracle).',
+    );
+    expect(JSON.parse(renderLifecycleJson(report))).toMatchObject({
+      parityUnavailableReason: 'open PR index changed during the parity oracle',
+      items: [{ issueNumber: 42, prNumber: 101 }],
     });
   });
 
@@ -158,6 +410,76 @@ describe('lifecycle controller', () => {
         { kind: 'set-pr-draft' },
       ],
     });
+  });
+
+  it('surfaces snapshot completeness, reconciliation time, and GitHub usage in JSON and human output', async () => {
+    const report = await runLifecycleCycle('observe', deps(implementation(), []));
+
+    expect(report).toMatchObject({
+      snapshotMode: 'full',
+      snapshotComplete: true,
+      lastFullReconciliationAt: NOW.toISOString(),
+      githubUsage: {
+        graphqlRequests: 3,
+        graphqlCost: 21,
+        graphqlRemaining: 3_979,
+        restRequests: 4,
+        restNotModified: 1,
+        cacheHits: 2,
+      },
+    });
+    expect(JSON.parse(renderLifecycleJson(report))).toMatchObject({
+      snapshotMode: 'full',
+      lastFullReconciledAt: NOW.toISOString(),
+      githubUsage: {
+        graphqlCost: 21,
+        graphqlPoints: 21,
+      },
+    });
+    expect(renderLifecycleHuman(report)).toContain(
+      'Snapshot: full (complete), captured 2026-07-20T12:00:00.000Z, last full reconciliation 2026-07-20T12:00:00.000Z.',
+    );
+    expect(renderLifecycleHuman(report)).toContain(
+      'GitHub usage: GraphQL 21 points across 3 evidence requests, 3979 remaining; REST 4 requests, 1 not modified, 2 cache hits.',
+    );
+  });
+
+  it('retains the absolute 500-point controller floor when configured lower', async () => {
+    const calls: string[] = [];
+    const low = snapshot(implementation());
+    const report = await runLifecycleCycle('observe', {
+      ...deps(implementation(), calls),
+      rateLimitFloor: 100,
+      readSnapshot: async () => ({
+        ...low,
+        githubUsage: { ...low.githubUsage!, graphqlRemaining: 499 },
+        project: {
+          ...low.project,
+          rateLimit: { ...low.project.rateLimit, remaining: 4_999 },
+        },
+      }),
+    });
+
+    expect(report).toMatchObject({ status: 'rate-limited' });
+    expect(calls).toEqual([]);
+  });
+
+  it('never substitutes REST core remaining for authoritative GraphQL remaining', async () => {
+    const calls: string[] = [];
+    const current = snapshot(implementation());
+    const report = await runLifecycleCycle('observe', {
+      ...deps(implementation(), calls),
+      readSnapshot: async () => ({
+        ...current,
+        project: {
+          ...current.project,
+          rateLimit: { ...current.project.rateLimit, remaining: 1 },
+        },
+        githubUsage: { ...current.githubUsage!, graphqlRemaining: 3_979 },
+      }),
+    });
+
+    expect(report).toMatchObject({ status: 'ok' });
   });
 
   it.skip('recover applies projection only and emits structured safe events', async () => {
@@ -247,6 +569,56 @@ describe('lifecycle controller', () => {
       message: 'active executor not configured',
     });
     expect(calls).toEqual([]);
+  });
+
+  it('suppresses only new active claims when the last full reconciliation is absent or older than two hours', async () => {
+    const eligible: LifecycleItem = {
+      kind: 'issue',
+      issueNumber: 42,
+      v2Marked: false,
+      projectStatus: 'Todo',
+      labels: [],
+      eligible: true,
+      eligibilityReason: 'eligible',
+      eligibilityDetail: 'selected',
+    };
+    const actions: string[] = [];
+    const reconciliation: string[] = [];
+    const writer = throwingWriter(reconciliation);
+    const active = {
+      preflight: async () => ({ ok: true }),
+      readLocalState: () => ({
+        remaining: { implementation: 1, review: 1 },
+        availableLogins: ['bot'],
+        implementationPreferredLogin: 'bot',
+      }),
+      implementationBackpressureThreshold: 10,
+      executeAction: async (action: { kind: string }) => {
+        actions.push(action.kind);
+        return { outcome: 'spawned' };
+      },
+    };
+    const runAt = async (lastFullReconciliationAt: string | null) => {
+      actions.length = 0;
+      const current = snapshot(eligible);
+      const report = await runLifecycleCycle('active', {
+        ...deps(eligible, reconciliation, writer),
+        active,
+        readSnapshot: async () => ({ ...current, lastFullReconciliationAt }),
+      });
+      return { report, actions: [...actions] };
+    };
+
+    expect((await runAt(null)).actions).toEqual([]);
+    expect((await runAt('2026-07-20T09:59:59.999Z')).actions).toEqual([]);
+    expect((await runAt('2026-07-20T10:00:00.000Z')).actions)
+      .toEqual(['claim-implementation']);
+    expect(reconciliation).toEqual([]);
+    expect((await runAt(null)).report.events).toContainEqual(expect.objectContaining({
+      action: 'schedule',
+      outcome: 'skipped',
+      reason: 'full-reconciliation-stale',
+    }));
   });
 
   it.skip('reports legacy stale-looking items without reaping them', async () => {
@@ -831,16 +1203,28 @@ describe.skip('board-archive sweep wiring (jinn-mono#1883)', () => {
       cycleId: 'cycle-1',
       runnerId: 'runner-a',
       capturedAt: NOW.toISOString(),
+      snapshotMode: 'full' as const,
+      snapshotComplete: true,
+      lastFullReconciliationAt: NOW.toISOString(),
+      githubUsage: {
+        graphqlRequests: 0,
+        graphqlCost: 0,
+        graphqlRemaining: null,
+        graphqlResetAt: null,
+        restRequests: 0,
+        restNotModified: 0,
+        cacheHits: 0,
+      },
       items: [],
       orphanBranchClaims: [],
       diagnostics: [],
       events: [],
     };
-    expect(renderLifecycleHuman({ ...base, boardArchive: { status: 'archived', archived: 50, capped: true } }))
+    expect(renderLifecycleHuman({ ...base, boardArchive: { status: 'archived' as const, archived: 50, capped: true } }))
       .toContain('Board archive sweep: archived 50 (capped).');
-    expect(renderLifecycleHuman({ ...base, boardArchive: { status: 'skipped-throttled' } }))
+    expect(renderLifecycleHuman({ ...base, boardArchive: { status: 'skipped-throttled' as const } }))
       .toContain('Board archive sweep: skipped (throttled).');
-    expect(renderLifecycleHuman({ ...base, boardArchive: { status: 'failed', reason: 'boom' } }))
+    expect(renderLifecycleHuman({ ...base, boardArchive: { status: 'failed' as const, reason: 'boom' } }))
       .toContain('Board archive sweep: failed (boom).');
   });
 });

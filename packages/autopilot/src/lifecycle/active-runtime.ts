@@ -2,6 +2,7 @@ import type { AttemptManifest } from './attempt-workspace.js';
 import type { LifecycleControllerDeps } from './controller.js';
 import type { CredentialPool } from './credentials.js';
 import type { NewWorkAction } from './types.js';
+import type { GitHubLifecycleSnapshot } from './snapshot.js';
 
 export interface ActiveRuntimeResult {
   readonly status: string;
@@ -14,22 +15,27 @@ export interface ActiveRuntimeHandlers {
   implementation(
     action: Extract<NewWorkAction, { kind: 'claim-implementation' }>,
     credentials: CredentialPool,
+    snapshot: GitHubLifecycleSnapshot,
   ): Promise<ActiveRuntimeResult>;
   review(
     action: Extract<NewWorkAction, { kind: 'claim-review' }>,
     credentials: CredentialPool,
+    snapshot: GitHubLifecycleSnapshot,
   ): Promise<ActiveRuntimeResult>;
   updateBranch?(
     action: Extract<NewWorkAction, { kind: 'update-branch' }>,
     credentials: CredentialPool,
+    snapshot: GitHubLifecycleSnapshot,
   ): Promise<ActiveRuntimeResult>;
   fileReconcileChild?(
     action: Extract<NewWorkAction, { kind: 'file-reconcile-child' }>,
     credentials: CredentialPool,
+    snapshot: GitHubLifecycleSnapshot,
   ): Promise<ActiveRuntimeResult>;
   merge(
     action: Extract<NewWorkAction, { kind: 'merge' }>,
     credentials: CredentialPool,
+    snapshot: GitHubLifecycleSnapshot,
   ): Promise<ActiveRuntimeResult>;
 }
 
@@ -109,7 +115,7 @@ export function makeActiveRuntime(
         'implementation backpressure threshold',
       ),
     ...(options.onlyIssues === undefined ? {} : { onlyIssues: options.onlyIssues }),
-    async executeAction(action) {
+    async executeAction(action, snapshot) {
       const local = readLocalState();
       const phase = action.kind === 'claim-implementation'
         ? 'implementation'
@@ -124,19 +130,19 @@ export function makeActiveRuntime(
       }
       const credentials = options.credentials.restrictedTo(local.availableLogins);
       const result = action.kind === 'claim-implementation'
-        ? await options.handlers.implementation(action, credentials)
+        ? await options.handlers.implementation(action, credentials, snapshot)
         : action.kind === 'claim-review'
-          ? await options.handlers.review(action, credentials)
+          ? await options.handlers.review(action, credentials, snapshot)
           : action.kind === 'update-branch'
             ? options.handlers.updateBranch === undefined
               ? { status: 'skipped', detail: 'update-branch handler unavailable' }
-              : await options.handlers.updateBranch(action, credentials)
+              : await options.handlers.updateBranch(action, credentials, snapshot)
             : action.kind === 'file-reconcile-child'
               ? options.handlers.fileReconcileChild === undefined
                 ? { status: 'skipped', detail: 'file-reconcile-child handler unavailable' }
-                : await options.handlers.fileReconcileChild(action, credentials)
+                : await options.handlers.fileReconcileChild(action, credentials, snapshot)
               : action.kind === 'merge'
-                ? await options.handlers.merge(action, credentials)
+                ? await options.handlers.merge(action, credentials, snapshot)
                 : {
                     status: 'skipped',
                     detail: `action ${(action as { kind: string }).kind} is not wired`,
