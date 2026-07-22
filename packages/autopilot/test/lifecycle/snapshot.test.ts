@@ -1,5 +1,5 @@
 // @ts-nocheck — Stage 5 leftover fixtures for deleted merge-prep/review-fix/project APIs.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { PolledIssue } from '../../src/dispatcher/types.js';
 import {
   buildGitHubLifecycleSnapshot,
@@ -164,6 +164,41 @@ describe('buildGitHubLifecycleSnapshot', () => {
     await expect(buildGitHubLifecycleSnapshot(source, {
       authorAllowlist: new Set(['trusted']),
     })).rejects.toBeInstanceOf(SnapshotDecodeError);
+  });
+
+  it('skips undecodable legacy merge-prep branch claims without failing the snapshot', async () => {
+    const source = reader({
+      readBranchClaims: async () => [{
+        issueNumber: 1935,
+        headRefName: 'autopilot/1935',
+        headOid: 'dddddddddddddddddddddddddddddddddddddddd',
+        headCommittedAt: '2026-07-21T19:14:05.251Z',
+        claimTrailers: [
+          'Jinn-Autopilot-Protocol: 2',
+          'Jinn-Autopilot-Phase: merge-prep',
+          'Jinn-Autopilot-Issue: 1935',
+          'Jinn-Autopilot-PR: 1943',
+          'Jinn-Autopilot-Attempt: 5a3ec319-150f-4386-8a10-4755896655b6',
+          'Jinn-Autopilot-Runner: rollout-merge-prep-recovery-c',
+          'Jinn-Autopilot-Login: trusted',
+          'Jinn-Autopilot-Expected-Head: fbfb6fd064538f17326fbbcb142c6e1f917bf1d1',
+          'Jinn-Autopilot-Target-Base: next',
+          'Jinn-Autopilot-Claimed-At: 2026-07-21T19:14:05.251Z',
+          'Jinn-Autopilot-Phase-Complete: true',
+        ].join('\n'),
+      }],
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const snapshot = await buildGitHubLifecycleSnapshot(source, {
+      authorAllowlist: new Set(['trusted']),
+    });
+
+    expect(snapshot.branches).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('autopilot/1935'),
+    );
+    warn.mockRestore();
   });
 
   it('does not recover a copied exact intent marker from the wrong reviewer login', async () => {

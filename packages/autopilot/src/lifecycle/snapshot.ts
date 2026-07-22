@@ -217,9 +217,19 @@ function parsePullRequest(raw: RawPullRequest): PullRequestSnapshot {
         commitId: gitOid(review.commitId),
       };
     });
-    const branchClaim = raw.branchClaimTrailers === null
-      ? undefined
-      : decodeBranchClaimTrailers(raw.branchClaimTrailers);
+    const branchClaim = (() => {
+      if (raw.branchClaimTrailers === null) return undefined;
+      try {
+        return decodeBranchClaimTrailers(raw.branchClaimTrailers);
+      } catch (cause) {
+        console.warn(
+          `[snapshot] skipping undecodable PR branch claim on #${raw.number}: ${
+            errorMessage(cause)
+          }`,
+        );
+        return undefined;
+      }
+    })();
     const reviewClaim = raw.reviewClaim === null
       ? undefined
       : {
@@ -773,7 +783,19 @@ export async function buildGitHubLifecycleSnapshot(
     cursor = next;
   }
   const pullRequests = rawPrs.map(parsePullRequest);
-  const branches = (await reader.readBranchClaims?.() ?? []).map(parseBranchClaim);
+  const branchClaims = await reader.readBranchClaims?.() ?? [];
+  const branches: BranchClaimSnapshot[] = [];
+  for (const raw of branchClaims) {
+    try {
+      branches.push(parseBranchClaim(raw));
+    } catch (cause) {
+      console.warn(
+        `[snapshot] skipping undecodable branch claim ${raw.headRefName}: ${
+          errorMessage(cause)
+        }`,
+      );
+    }
+  }
   const now = (options.now ?? (() => new Date()))();
   isoTimestamp(now.toISOString());
   const lifecycle = lifecycleItems(
