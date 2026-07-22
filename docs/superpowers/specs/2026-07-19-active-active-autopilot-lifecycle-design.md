@@ -8,6 +8,22 @@
 - **Document status:** approved
 - **Implementation status:** implemented on the feature branch; live activation has not occurred
 
+**Superseded by** [`2026-07-21-single-surface-lifecycle.md`](2026-07-21-single-surface-lifecycle.md)
+(adopted). Where that amendment touches this document, it wins. In particular:
+
+- **§7 (lifecycle states)** — `REVIEW-FIXING` and `MERGE-PREP` states are deleted;
+  `BLOCKED-BY-CHILD` and the children ladder replace the fix loop and merge-prep.
+- **§8.3 (review fix loop)** — in-session fix publication is deleted; findings become
+  child issues (`review-finding`).
+- **§8.4 (merge-prep protocol)** — deleted; reconcile children + tier-0
+  update-branch replace it.
+- **§8.6 (projection)** — Project Status is paint-only; the scheduled board painter
+  owns outbound Status writes.
+
+This document remains authoritative for claim CAS, review refs, head-bound verdicts,
+claimless merge, staleness/reaping, attempt isolation, and credential handling not
+amended above.
+
 This document redesigns the Jinn Autopilot lifecycle so two or more independent
 Autopilot processes can operate concurrently on the same host or different
 hosts without interfering with one another.
