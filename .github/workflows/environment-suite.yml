@@ -202,6 +202,16 @@ jobs:
         working-directory: ${{ github.workspace }}/contracts
         run: yarn install --immutable
 
+      # Compile once before run-tier-2 (mirrors hermetic-gate.yml). T2.2 + T2.4
+      # run in parallel and both call setupAnvilFixture() → compileContracts();
+      # two concurrent Hardhat builds race on shared artifacts/ and
+      # cache/build-info/ (#1984). Up-front compile + the compileContracts()
+      # no-op/mutex makes the parallel tier-2 callables safe.
+      - name: Compile contracts (for tier-2 harness)
+        if: steps.resolve.outputs.skip != 'true'
+        working-directory: ${{ github.workspace }}/contracts
+        run: yarn compile
+
       # Foundry: the real-harness loop spawns a local Anvil for the deterministic
       # settlement scaffolding inside the consolidated suite, and `cast` is used
       # by the top-up path. Required just like CI / npm-publish.
