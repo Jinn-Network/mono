@@ -95,19 +95,40 @@ export interface QualityAssessment {
   reason: string;
 }
 
-export function loadQualityScreen(path: string): { bytes: string; assessments: QualityAssessment[] } {
-  const bytes = readFileSync(path, 'utf8');
-  const raw = JSON.parse(bytes) as unknown;
-  if (!Array.isArray(raw)) throw new Error('quality screen must be a JSON array');
-  const assessments = raw.map((entry, index) => {
-    if (typeof entry !== 'object' || entry === null) throw new Error(`quality screen entry ${index} is invalid`);
+function parseQualityAssessments(raw: unknown): QualityAssessment[] {
+  if (!Array.isArray(raw)) {
+    throw new Error('quality screen assessments must be a JSON array');
+  }
+  return raw.map((entry, index) => {
+    if (typeof entry !== 'object' || entry === null) {
+      throw new Error(`quality screen entry ${index} is invalid`);
+    }
     const item = entry as Record<string, unknown>;
-    if (typeof item['instance_id'] !== 'string' || !/^(?:A|B[1-6])$/.test(String(item['code'])) || typeof item['reason'] !== 'string') {
+    if (
+      typeof item['instance_id'] !== 'string'
+      || !/^(?:A|B[1-6])$/.test(String(item['code']))
+      || typeof item['reason'] !== 'string'
+    ) {
       throw new Error(`quality screen entry ${index} has invalid fields`);
     }
     return item as unknown as QualityAssessment;
   });
-  return { bytes, assessments };
+}
+
+export function loadQualityScreen(path: string): { bytes: string; assessments: QualityAssessment[] } {
+  const bytes = readFileSync(path, 'utf8');
+  const raw = JSON.parse(bytes) as unknown;
+  if (Array.isArray(raw)) {
+    return { bytes, assessments: parseQualityAssessments(raw) };
+  }
+  if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+    const assessments = (raw as Record<string, unknown>)['assessments'];
+    if (!Array.isArray(assessments)) {
+      throw new Error('quality screen object must include an assessments array');
+    }
+    return { bytes, assessments: parseQualityAssessments(assessments) };
+  }
+  throw new Error('quality screen must be a JSON array or object with assessments');
 }
 
 function sha256(value: string): `sha256:${string}` {
