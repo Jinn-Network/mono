@@ -1,9 +1,9 @@
-import { applyDispositions, shouldRejectPublish } from './apply-dispositions.js';
+import { applyDispositions, assertNoRejectPublish, shouldRejectPublish } from './apply-dispositions.js';
 import type { Detector, Finding } from './finding.js';
 import { DEFAULT_POLICY, type PolicyTable } from './policy.js';
 import type { Attributes, RedactionRecord, ScrubResult, ScrubStage } from './types.js';
 
-export { shouldRejectPublish };
+export { shouldRejectPublish, assertNoRejectPublish };
 
 export interface ScrubPipelineOptions {
   policy?: PolicyTable;
@@ -65,7 +65,11 @@ export class ScrubPipeline {
         typeof value === 'string' ? value : await this.scrubNested(key, value, redactions, findings);
     }
     if (this.checkMode && redactions.length > 0) rejected = true;
-    return { attributes: out, redactions, findings, rejected };
+    const result: ScrubResult = { attributes: out, redactions, findings, rejected };
+    // Publish altitude: reject-publish classes abort loudly with a class name.
+    // Check-mode distill maps redactions → rejection reasons without throwing.
+    if (!this.checkMode) assertNoRejectPublish(result, this.policy);
+    return result;
   }
 
   /** Legacy ScrubStage chain (tests / residual injectors). */

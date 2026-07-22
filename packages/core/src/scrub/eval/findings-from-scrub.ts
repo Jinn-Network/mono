@@ -24,8 +24,13 @@ export function classFromRedactionDetail(detail: string | undefined, stage: stri
   if (d.includes('high-entropy') || d.includes('entropy')) return 'A2';
   if (d.includes('person') || d.includes('per') || d.includes('name')) return 'B3';
   if (d.includes('phone')) return 'B5';
-  if (d.includes('iban') || d.includes('credit') || d.includes('ssn') || d.includes('card')) return 'B7';
-  if (d.includes('ip')) return 'D2';
+  if (d.includes('iban') || d.includes('credit') || d.includes('ssn') || d.includes('card') || d.includes('luhn')) return 'B7';
+  if (d.includes('ipv4') || d === 'ip' || d.startsWith('ip-')) return 'D2';
+  if (d.includes('host') || d.includes('machine-identity')) return 'D3';
+  if (d.includes('url-') || d.includes('userinfo') || d.includes('query-credential')) return 'A3';
+  if (d.includes('private-key') || d.includes('bip39') || d.includes('mnemonic')) return 'A4';
+  if (d.includes('env-block')) return 'A5';
+  if (d.includes('gitleaks')) return 'A1';
   // openredaction types often uppercase
   if (detail === 'EMAIL' || detail.includes('EMAIL')) return 'B1';
   if (detail.includes('ETHEREUM') || detail.includes('ETH')) return 'C1';

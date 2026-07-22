@@ -4,6 +4,11 @@ import { openredactionDetector } from './openredaction-stage.js';
 import { plainPatternsDetector } from './plain-patterns-stage.js';
 import { secretlintDetector } from './secretlint-stage.js';
 import { mlPiiDetector, type PiiDetector } from './ml-pii-stage.js';
+import { urlCredentialsDetector } from './url-credentials-detector.js';
+import { rejectClassesDetector } from './reject-classes-detector.js';
+import { checksummedInstrumentsDetector } from './checksummed-instruments-detector.js';
+import { ipAddressDetector } from './ip-address-detector.js';
+import { gitleaksDetector } from './gitleaks-detector.js';
 import type { Detector } from './finding.js';
 import { DEFAULT_POLICY } from './policy.js';
 
@@ -14,8 +19,9 @@ import { DEFAULT_POLICY } from './policy.js';
  * these never carry sellable content and are never safe to publish. Globs use the
  * trailing-`*` prefix form `classifyKey` supports; the HTTP header keys are listed
  * per request/response direction (a leading `*.header.…` glob is not matched, so
- * we enumerate the concrete keys). Everything else is `content` and flows through
- * the value-scrubbing detectors.
+ * we enumerate the concrete keys). Machine-identity keys (D3 carrier) drop
+ * attempt-manifest `host` / hostname telemetry. Everything else is `content` and
+ * flows through the value-scrubbing detectors.
  */
 export const DEFAULT_KEY_POLICY: KeyPolicy = {
   safe: ['jinn.*'],
@@ -28,6 +34,16 @@ export const DEFAULT_KEY_POLICY: KeyPolicy = {
     'http.response.header.set-cookie',
     'env.*',
   ],
+  machineIdentity: [
+    'host',
+    'hostname',
+    'os.hostname',
+    'attempt.host',
+    'attempt.hostname',
+    'system.hostname',
+    'device.hostname',
+    'device.host',
+  ],
 };
 
 export interface BuildScrubPipelineOptions {
@@ -37,9 +53,8 @@ export interface BuildScrubPipelineOptions {
 }
 
 /**
- * Shared detector inventory (#1969). Every publish/check consumer runs the same
- * owned detectors (key-policy, plain-patterns including C1 wallet + A1
- * credential IDs, secretlint). What varies is disposition / check-mode and —
+ * Shared detector inventory (#1969 / #1972). Every publish/check consumer runs
+ * the same owned detectors. What varies is disposition / check-mode and —
  * temporarily until #1973 — whether the openredaction strangler is included
  * (trace preset only). Seed also keeps the entropy fallback off until the flag
  * review surface can absorb A2 mid-band without refuse-on-detection (#1409
@@ -54,6 +69,11 @@ export function sharedDetectorInventory(
     detectors.push(openredactionDetector(policy));
   }
   detectors.push(plainPatternsDetector(policy));
+  detectors.push(urlCredentialsDetector(policy));
+  detectors.push(rejectClassesDetector(policy));
+  detectors.push(checksummedInstrumentsDetector(policy));
+  detectors.push(ipAddressDetector(policy));
+  detectors.push(gitleaksDetector(policy));
   detectors.push(secretlintDetector(policy, { entropyFallback: opts.entropyFallback ?? true }));
   if (opts.piiDetector) {
     detectors.push(mlPiiDetector(policy, opts.piiDetector));

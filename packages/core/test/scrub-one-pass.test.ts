@@ -54,14 +54,22 @@ describe('scrub one-pass inventory (#1969)', () => {
   });
 
   it('exposes the same core detector names; openredaction remains trace-only until #1973', () => {
-    const core = ['key-policy', 'plain-patterns', 'secretlint'];
+    const core = [
+      'key-policy',
+      'plain-patterns',
+      'url-credentials',
+      'reject-classes',
+      'checksummed-instruments',
+      'ip-address',
+      'gitleaks',
+      'secretlint',
+    ];
     expect(buildSeedScrubPipeline().components.map((c) => c.name)).toEqual(core);
     expect(buildLayer2ScrubPipeline().components.map((c) => c.name)).toEqual(core);
     expect(buildScrubPipeline().components.map((c) => c.name)).toEqual([
       'key-policy',
       'openredaction',
-      'plain-patterns',
-      'secretlint',
+      ...core.slice(1),
     ]);
   });
 

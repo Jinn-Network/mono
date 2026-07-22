@@ -5,13 +5,19 @@ import { applyDispositions } from './apply-dispositions.js';
 export interface KeyPolicy {
   /** keys whose values are structural and safe to publish raw */
   safe: string[];
-  /** keys to delete entirely (never published) */
+  /** keys to delete entirely (never published) — A5 structural drop */
   drop: string[];
+  /**
+   * Machine-identity keys (D3 carrier): attempt-manifest `host`, hostname
+   * telemetry, and similar. Deleted at the key level (redact disposition) —
+   * not reject-publish.
+   */
+  machineIdentity?: string[];
 }
 
-export type KeyClass = 'safe' | 'content' | 'drop';
+export type KeyClass = 'safe' | 'content' | 'drop' | 'machine-identity';
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 
 /** Exact match, or prefix match when the pattern ends with `*`. */
 function matches(key: string, pattern: string): boolean {
@@ -20,19 +26,20 @@ function matches(key: string, pattern: string): boolean {
 }
 
 /**
- * Classify an attribute key against the policy. `drop` wins over `safe` (a key
- * matching both is dropped — fail safe). Unmatched keys are `content` and flow
- * to the value-scrubbing detectors.
+ * Classify an attribute key against the policy. Precedence:
+ * `drop` > `machine-identity` > `safe` > `content`. Fail-safe: a key matching
+ * both drop and anything else is dropped.
  */
 export function classifyKey(key: string, policy: KeyPolicy): KeyClass {
   if (policy.drop.some((p) => matches(key, p))) return 'drop';
+  if ((policy.machineIdentity ?? []).some((p) => matches(key, p))) return 'machine-identity';
   if (policy.safe.some((p) => matches(key, p))) return 'safe';
   return 'content';
 }
 
 /**
- * Key-policy detector: emits A5 drop-key findings for `drop`-classified keys.
- * Disposition removes the key (reject-publish / redact).
+ * Key-policy detector: emits A5 drop-key findings for `drop`-classified keys,
+ * and D3 machine-identity findings for hostname/carrier keys.
  */
 export function keyPolicyDetector(policy: KeyPolicy): Detector {
   const meta = { name: 'key-policy', version: VERSION };
@@ -41,14 +48,24 @@ export function keyPolicyDetector(policy: KeyPolicy): Detector {
     detect(attributes: Attributes): Finding[] {
       const findings: Finding[] = [];
       for (const key of Object.keys(attributes)) {
-        if (classifyKey(key, policy) !== 'drop') continue;
-        findings.push({
-          class: 'A5',
-          span: { key, start: 0, end: 0 },
-          confidence: 'VERY_HIGH',
-          evidence: ['drop-key'],
-          detector: meta,
-        });
+        const cls = classifyKey(key, policy);
+        if (cls === 'drop') {
+          findings.push({
+            class: 'A5',
+            span: { key, start: 0, end: 0 },
+            confidence: 'VERY_HIGH',
+            evidence: ['drop-key'],
+            detector: meta,
+          });
+        } else if (cls === 'machine-identity') {
+          findings.push({
+            class: 'D3',
+            span: { key, start: 0, end: 0 },
+            confidence: 'VERY_HIGH',
+            evidence: ['machine-identity-key'],
+            detector: meta,
+          });
+        }
       }
       return findings;
     },
