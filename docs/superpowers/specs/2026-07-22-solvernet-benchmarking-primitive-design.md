@@ -1,7 +1,15 @@
 # SolverNet Benchmarking Primitive — Consumer Requirements and Design
 
-- **Version:** 0.1
+- **Version:** 0.2
 - **Date:** 2026-07-22
+- **Revision note (v0.2, same day):** added **§1.5 Ownership boundary** — the explicit
+  marketplace-vs-primitive-vs-consumer split (three tiers: Core proves work was done; the primitive
+  proves a comparison was run cleanly; the consumer says what it means), each tier's holdings, and
+  the boundary tests (what each must NOT contain). Names the three generic Core primitives the
+  primitive depends on but does not own — task-owned loadout injection, the generator phase-ledger,
+  the capsule execution contract — with loadout injection called out as the one deep base-layer
+  change. §5's reuse table is the mechanical view of the same split; §1.5 is the ownership view.
+  No contract, scope, or requirement changed. Appendix A #6.
 - **Author:** Ritsu (design session, Claude Opus 4.8)
 - **Shape:** `design` — output is this document; no implementation or implementation plan in this
   session
@@ -78,6 +86,75 @@ per-attempt judging, skill-agnostic. On approval of this document, the Skill Fac
 wave-execution and snapshot machinery (§4.2 selection/holdout waves, §4.4 frozen snapshot) is
 understood as **an instance of this primitive plus factory-side aggregation**; the factory doc
 gains a one-line reference at its next amendment rather than duplicating this spec.
+
+### 1.5 Ownership boundary — marketplace vs primitive vs consumer
+
+Three tiers, and this primitive is the thin middle one. The marketplace (Jinn Core) understands
+only individual tasks; the consumer understands only meaning; the primitive is the layer between
+that turns a *set* of tasks into one verified comparison. The organizing rule:
+
+> Core proves work was done. The primitive proves a comparison was run cleanly. The consumer says
+> what the comparison means. No tier reaches into the next.
+
+**Jinn Core / the task marketplace owns** — everything generic to getting work done and proven,
+while knowing *nothing* about comparisons:
+
+- task lifecycle (create → claim → solve → deliver → evaluate → verdict), signed `task.v1`, claim
+  policy, per-task fee escrow, settlement;
+- identity, signing, ERC-8004 anchoring, envelope hashing; the independent evaluator role and
+  self-eval prevention; verdict recording and finalization;
+- artifact publish/acquire (signed envelopes, IPFS, sha256-verified acquisition), discovery/read;
+- the **eval-item contract** — task capsule + evaluator bundle + admission receipt (the definition
+  of "a task and how it is judged", 2026-07-10 design);
+- three generic engine/daemon primitives this primitive *needs but does not own* — built once in
+  Core, shared with the Skill Factory and future learning applications:
+  1. **task-owned loadout injection** — a task pins its own model/harness/artifact; hash-verified,
+     hermetic per-task mount; recorded in the envelope `executor` block (the one deep base-layer
+     change, inverting today's operator-owned loadout);
+  2. the **generator phase-ledger** + read access to a generator's own posted-task deliveries
+     (durable multi-stage sequencing; today's generators are fire-and-forget-per-tick);
+  3. the **capsule execution contract** — stage clean env → inject submission → run the committed
+     bundle.
+
+**The benchmarking primitive owns** — the concept of a *comparison run*, and nothing above it:
+
+- the **run definition** `BenchmarkRunV1` (capsule set × config matrix × R × policy × budget) and
+  its pre-registration;
+- **config-matrix semantics**: `ConfigV1`, arms, "baseline = empty loadout" — Core has no concept
+  of an arm; the primitive is what knows these cells form one experiment;
+- the **run orchestrator graph**: post cells → track completeness → replace lapsed cells → freeze
+  the snapshot → produce the matrix (built *on* Core's phase-ledger primitive);
+- **cell↔run join** semantics (`cellKey`/`configId` tags Core carries opaquely);
+- the frozen **result matrix** `jinn.bench-matrix.v1` — assembled, closed, anchored (Core anchors
+  the bytes; it does not interpret them);
+- **verification & exclusion policy**: invalidate a cell whose loadout/profile mismatches; record
+  every identity and exclude interested parties from a comparison (over Core-recorded
+  `executor`/identity data);
+- **integrity tiering**: deriving `re-derivable | attested-only` from the admission receipt's
+  replay variance (§3);
+- the **run-level budget ceiling** (Core escrow is per task; the ceiling across a run's tasks is
+  the primitive's ledger);
+- **consumer intake**: validate + price + launch a run.
+
+**Above the primitive, the consumer owns meaning** — aggregation, statistics, quality verdicts,
+promotion, ranking, leaderboards. The primitive stops at the matrix. The Skill Factory's paired
+statistics and promotion rule live here; so does a leaderboard's ranking. This is §1.3 restated as
+a tier: the primitive is skill-agnostic because "skill" is a meaning, and meaning is one tier up.
+
+**Boundary tests (what each tier must NOT contain — a violation is a leak):**
+
+- **Core** must not gain the concept of a comparison, arm, config matrix, or result matrix. A
+  benchmark cell is an ordinary task with a task-context loadout, treated identically to any other
+  task. If Core grows a "benchmark" type, the boundary has leaked down.
+- **The primitive** must not aggregate, compute a p-value, declare a winner, or rank. It produces
+  the matrix; meaning is the consumer's. If it emits a "winner," the boundary has leaked up.
+- **The primitive** must not own identity, escrow, anchoring, or the evaluator role — it borrows
+  all four from Core.
+
+The test of a good split is that the primitive stays **thin** — run definition + matrix +
+orchestration + verification policy — with the heavy substrate (Core) beneath and all meaning (the
+consumer) above. That thinness is the design working; if the primitive starts accreting either
+marketplace mechanics or aggregation, the boundary is being drawn in the wrong place.
 
 ---
 
@@ -336,3 +413,10 @@ generality gated on the G1+ stack; single-harness config axis until profile enfo
 5. **Aggregation is consumer-side, permanently.** The primitive's output is the matrix; every
    verdict-like meaning (pass, promotion, ranking) belongs to a consumer and is re-derivable by
    anyone from the matrix.
+6. **Ownership drawn as three tiers (§1.5).** Core proves work was done and owns identity, escrow,
+   verdicts, anchoring, the eval-item contract, and three generic shared primitives (task-owned
+   loadout injection, generator phase-ledger, capsule execution). The primitive owns only the
+   comparison run — definition, config matrix, orchestration graph, result matrix, verification/
+   exclusion policy, integrity tiering, budget ceiling, intake. The consumer owns meaning
+   (aggregation, verdicts, ranking). Enforced by explicit must-not-contain tests; the primitive
+   staying thin is the signal the boundary is drawn correctly.
