@@ -48,6 +48,16 @@ Default mode `borrow-mismatch` seeds a session whose `acceptedDiff` is the gold
 patch of a *different* same-repo scorable instance than the borrowed source.
 Expected classification under the review hypothesis: `rejected:empirical-dead`.
 
+Held-out / capability-slate denylist applies (`assertRepoAllowedForMint`). Default
+`sympy/sympy` is held-out on current slates — mint refuses before Docker. Override:
+
+```bash
+JINN_SESSION_ECHO_LIVE_REPO=conan-io/conan yarn task-creator:session-echo-live
+```
+
+Pick any validated-pool repo with ≥2 scorable instances that is **not** on the
+mint denylist.
+
 Optional control:
 
 ```bash

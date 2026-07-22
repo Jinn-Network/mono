@@ -58,7 +58,7 @@
     "task-creator:jinn-differential-anvil-e2e": "tsx scripts/task-creator-jinn-differential-anvil-proof.ts",
     "task-creator:harvest-e2e": "vitest run test/solver-types/task-creator-harvest-e2e.test.ts",
     "task-creator:harvest-e2e-live": "tsx scripts/harvest-e2e-live-verify.ts",
-    "task-creator:session-echo-live": "tsx scripts/session-echo-live-verify.ts",
+    "task-creator:session-echo-live": "NODE_OPTIONS='--preserve-symlinks' tsx scripts/session-echo-live-verify.ts",
     "task-creator:public-repo-e2e": "vitest run test/task-creator/public-repo-e2e.test.ts test/task-creator/live-proof.test.ts",
     "task-creator:public-repo-anvil-e2e": "vitest run --config vitest.hermetic.config.ts test/hermetic/public-repo-anvil-lifecycle.test.ts",
     "task-creator:mint-preflight:jinn-mono": "tsx scripts/task-creator-public-repo-proof.ts --fixture jinn-mono",
