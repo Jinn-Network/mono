@@ -161,4 +161,53 @@ describe('launched-record generator dispatcher', () => {
       { solverType: 'jinn-repo.v1', generator: jinnRepoGenerator, getLauncherState: undefined },
     ]);
   });
+
+  it('wires the live-issue generator ALONGSIDE the retrospective one when factories.jinnRepoLive is supplied (issue #1893)', async () => {
+    const jinnRepoGenerator = noopGenerator();
+    const jinnRepoLiveGenerator = noopGenerator();
+    const factories: LaunchedRecordGeneratorFactories = {
+      predictionV1: vi.fn(() => noopGenerator()),
+      sweRebenchV2: vi.fn(() => noopGenerator()),
+      jinnRepo: vi.fn(() => jinnRepoGenerator),
+      jinnRepoLive: vi.fn(() => jinnRepoLiveGenerator),
+    };
+    const jinnRepoRecord = record('5474_jinn-repo-v1_abc12345');
+
+    const result = await wireLaunchedRecordGenerators({
+      pendingGenerators: [pending(jinnRepoRecord)],
+      staticConfig: {},
+      factories,
+    });
+
+    expect(factories.jinnRepo).toHaveBeenCalledTimes(1);
+    expect(factories.jinnRepoLive).toHaveBeenCalledTimes(1);
+    expect(factories.jinnRepoLive).toHaveBeenCalledWith(
+      expect.objectContaining({ recordRef: expect.objectContaining({ current: jinnRepoRecord }) }),
+    );
+    expect(result.generators).toEqual([
+      { solverType: 'jinn-repo.v1', generator: jinnRepoGenerator, getLauncherState: undefined },
+      { solverType: 'jinn-repo.v1', generator: jinnRepoLiveGenerator, getLauncherState: undefined },
+    ]);
+  });
+
+  it('omitting factories.jinnRepoLive wires ONLY the retrospective generator (back-compat)', async () => {
+    const jinnRepoGenerator = noopGenerator();
+    const factories: LaunchedRecordGeneratorFactories = {
+      predictionV1: vi.fn(() => noopGenerator()),
+      sweRebenchV2: vi.fn(() => noopGenerator()),
+      jinnRepo: vi.fn(() => jinnRepoGenerator),
+      // jinnRepoLive deliberately omitted
+    };
+    const jinnRepoRecord = record('5474_jinn-repo-v1_def67890');
+
+    const result = await wireLaunchedRecordGenerators({
+      pendingGenerators: [pending(jinnRepoRecord)],
+      staticConfig: {},
+      factories,
+    });
+
+    expect(result.generators).toEqual([
+      { solverType: 'jinn-repo.v1', generator: jinnRepoGenerator, getLauncherState: undefined },
+    ]);
+  });
 });

@@ -25,6 +25,18 @@ export interface DispatchedSession {
   logPath: string;
 }
 
+/**
+ * One issue routed to the marketplace this cycle instead of a local session
+ * (`cfg.executionMode === 'marketplace'` — issue #1893). `action` mirrors
+ * `RouteResult` from `./marketplace-route.js`: `'created'` (first snapshot),
+ * `'updated'` (material edit re-snapshotted), or `'unchanged'` (idempotent
+ * re-affirmation — the common steady-state case).
+ */
+export interface MarketplaceRoutedIssue {
+  issueNumber: number;
+  action: 'created' | 'updated' | 'unchanged';
+}
+
 /** What one cycle of the dispatcher did (or didn't do). */
 export interface CycleReport {
   /** Sessions dispatched this cycle (in dispatch order), with pid + log path. */
@@ -63,6 +75,23 @@ export interface CycleReport {
    * reconciles it on a later cycle.
    */
   dispatchErrors: Array<{ issueNumber: number; message: string }>;
+  /**
+   * Issues routed to the marketplace this cycle (`cfg.executionMode ===
+   * 'marketplace'` — issue #1893). Always empty in `local` mode (the
+   * default) — `dispatched` carries local sessions instead.
+   */
+  routedToMarketplace: MarketplaceRoutedIssue[];
+  /**
+   * The FULL (unsliced, pre-concurrency/backpressure-budget) ready-issue
+   * number set this cycle — every issue that passed `selectReady`, not just
+   * the ones actually dispatched. Consumed by the marketplace retract sweep
+   * (`retractStaleMarketplaceRoutes` in `./marketplace-route.js`, run
+   * separately by the orchestrator) so an issue merely excluded by this
+   * cycle's budget is never mistaken for "no longer ready" — that distinction
+   * lives here, not in `dispatched`/`routedToMarketplace`, which are both
+   * budget-sliced.
+   */
+  readyIssueNumbers: number[];
 }
 
 // ---------------------------------------------------------------------------
@@ -81,9 +110,17 @@ export interface CycleDeps {
   deriveInFlight(): Promise<{ inFlight: InFlightSession[]; drift: string[] }>;
   /**
    * Dispatch one ready issue — create worktree, set status, spawn session.
-   * Injected so loop.ts stays free of gh/git calls.
+   * Injected so loop.ts stays free of gh/git calls. Used when
+   * `cfg.executionMode === 'local'` (the default).
    */
   dispatchIssue(issue: ReadyIssue): Promise<InFlightSession>;
+  /**
+   * Route one ready issue to the marketplace instead of a local session —
+   * label + snapshot marker (see `./marketplace-route.js`). Used when
+   * `cfg.executionMode === 'marketplace'`; ignored (never called) in `local`
+   * mode. Optional so every existing local-mode caller/test is unaffected.
+   */
+  routeToMarketplace?(issue: ReadyIssue): Promise<MarketplaceRoutedIssue>;
   /**
    * Count open PRs in the ready-for-merge queue.
    * Injected so loop.ts stays free of gh/git calls.
@@ -158,6 +195,7 @@ export async function runCycle(
     cfg,
     deriveInFlight,
     dispatchIssue,
+    routeToMarketplace,
     countOpenReadyPrs,
     fetchIssuePrMap,
     wallClock,
@@ -213,6 +251,13 @@ export async function runCycle(
   // 4b. Apply ready filter (ordered by priority then issue number)
   const { ready, skippedForAuthor } = selectReady(polled, inFlightSet, allowlistSet, stackReady);
 
+  // The FULL (unsliced) ready issue-number set — surfaced regardless of the
+  // backpressure/concurrency gates below so the marketplace retract sweep
+  // (run separately by the orchestrator) can tell "excluded by this cycle's
+  // budget" apart from "genuinely no longer ready" (see `readyIssueNumbers`
+  // doc on `CycleReport`).
+  const readyIssueNumbers = ready.map((i) => i.number);
+
   // 5. Check backpressure
   if (!backpressureOk(openPrCount, cfg.openPrBackpressure)) {
     return {
@@ -227,6 +272,8 @@ export async function runCycle(
       // even when no new work is dispatched this cycle. (#489)
       collected,
       dispatchErrors: [],
+      routedToMarketplace: [],
+      readyIssueNumbers,
     };
   }
 
@@ -239,17 +286,31 @@ export async function runCycle(
   const skippedForThrottle = ready.length - toDispatch.length;
 
   // 7. Dispatch — isolated per issue: one failing dispatch must not abort
-  //    the rest of the batch (review 2026-07-15).
+  //    the rest of the batch (review 2026-07-15). Execution-mode branch
+  //    (issue #1893): `marketplace` routes to the marketplace instead of
+  //    spawning a local session; the ready/backpressure/concurrency gates
+  //    above are identical for both modes.
   const dispatched: DispatchedSession[] = [];
+  const routedToMarketplace: MarketplaceRoutedIssue[] = [];
   const dispatchErrors: Array<{ issueNumber: number; message: string }> = [];
   for (const issue of toDispatch) {
     try {
-      const session = await dispatchIssue(issue);
-      dispatched.push({
-        issueNumber: session.issueNumber,
-        pid: session.pid,
-        logPath: session.logPath,
-      });
+      if (cfg.executionMode === 'marketplace') {
+        if (routeToMarketplace == null) {
+          throw new Error(
+            'executionMode is "marketplace" but no routeToMarketplace dependency was provided',
+          );
+        }
+        const routed = await routeToMarketplace(issue);
+        routedToMarketplace.push(routed);
+      } else {
+        const session = await dispatchIssue(issue);
+        dispatched.push({
+          issueNumber: session.issueNumber,
+          pid: session.pid,
+          logPath: session.logPath,
+        });
+      }
     } catch (err) {
       dispatchErrors.push({
         issueNumber: issue.number,
@@ -267,5 +328,7 @@ export async function runCycle(
     skippedForAuthor,
     collected,
     dispatchErrors,
+    routedToMarketplace,
+    readyIssueNumbers,
   };
 }

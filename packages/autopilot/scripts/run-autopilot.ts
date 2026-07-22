@@ -26,6 +26,7 @@ import { runMergePrepCycle, type PrepAttempt } from '../src/dispatcher/merge-pre
 import { dispatchIssue, REPO_ROOT, WORKTREES_BASE } from '../src/dispatcher/dispatch.js';
 import { runDeliveryBridge } from '../src/dispatcher/delivery-pr-bridge.js';
 import { HttpDeliveryReader } from '../src/dispatcher/delivery-reader.js';
+import { routeToMarketplace, retractStaleMarketplaceRoutes } from '../src/dispatcher/marketplace-route.js';
 import { SESSIONS_LOG_DIR } from '../src/dispatcher/session-log.js';
 import { GhPrSource } from '../src/dispatcher/pr-source.js';
 import { fetchIssuePrMap } from '../src/dispatcher/pr-links.js';
@@ -119,6 +120,13 @@ const MARKETPLACE_BRIDGE_ENV = 'JINN_MARKETPLACE_BRIDGE';
 const MARKETPLACE_INDEXER_URL_ENV = 'JINN_MARKETPLACE_INDEXER_URL';
 /** IPFS gateway base URL for the delivery→PR bridge. */
 const MARKETPLACE_IPFS_GATEWAY_ENV = 'JINN_MARKETPLACE_IPFS_GATEWAY_URL';
+/**
+ * Creation-automation execution-mode switch (issue #1893). `'marketplace'`
+ * arms it; anything else (unset, typo, empty) is the fail-safe `'local'`
+ * default — mirrors the `mergePrepEnabled` / `marketplaceBridgeEnabled`
+ * fail-safe-off convention.
+ */
+const EXECUTION_MODE_ENV = 'JINN_EXECUTION_MODE';
 
 /**
  * Model / provider / Python interpreter for Hermes coordinator sessions.
@@ -251,6 +259,13 @@ export function printReport(report: CycleReport, label: string): void {
     }
   }
 
+  if (report.routedToMarketplace.length > 0) {
+    console.log('   routed to marketplace:');
+    for (const r of report.routedToMarketplace) {
+      console.log(`     #${r.issueNumber} (${r.action})`);
+    }
+  }
+
   console.log(`   skipped (throttle): ${report.skippedForThrottle}`);
 
   if (report.skippedForAuthor.length > 0) {
@@ -339,6 +354,17 @@ export async function runDryRun(opts: RunDryRunOpts): Promise<void> {
       console.log(`[dry-run] would pause #${issueNumber} (wall-clock ceiling) — no board mutation.`);
     };
 
+    // Dry-run stub for routeToMarketplace (issue #1893) — logs the intent but
+    // makes NO gh mutation (no label, no comment), same promise as dryDispatch.
+    const wouldRouteToMarketplace: number[] = [];
+    const dryRouteToMarketplace = async (
+      issue: ReadyIssue,
+    ): Promise<import('../src/dispatcher/loop.js').MarketplaceRoutedIssue> => {
+      wouldRouteToMarketplace.push(issue.number);
+      console.log(`[dry-run] would route #${issue.number} to the marketplace — no label/comment mutation.`);
+      return { issueNumber: issue.number, action: 'created' };
+    };
+
     // Fetch the per-cycle Project snapshot once and share with deriveInFlight
     // (and, after step 5 of the #585 plan, source.poll). Costs ≤2 GraphQL pts
     // versus ~192 in the pre-#585 code.
@@ -348,6 +374,7 @@ export async function runDryRun(opts: RunDryRunOpts): Promise<void> {
       cfg,
       deriveInFlight: () => deriveInFlight(snapshot, runner),
       dispatchIssue: dryDispatch,
+      routeToMarketplace: dryRouteToMarketplace,
       countOpenReadyPrs,
       // Dry-run still polls the live PR map so the "would dispatch" list
       // includes dependency-stacked issues (read-only, no mutation).
@@ -364,8 +391,11 @@ export async function runDryRun(opts: RunDryRunOpts): Promise<void> {
 
     if (wouldDispatch.length > 0) {
       console.log(`\n[dry-run] Would have dispatched: ${wouldDispatch.map((n) => `#${n}`).join(', ')}`);
-    } else {
+    } else if (wouldRouteToMarketplace.length === 0) {
       console.log('\n[dry-run] No issues would be dispatched this cycle.');
+    }
+    if (wouldRouteToMarketplace.length > 0) {
+      console.log(`\n[dry-run] Would have routed to the marketplace: ${wouldRouteToMarketplace.map((n) => `#${n}`).join(', ')}`);
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -603,6 +633,7 @@ async function main(): Promise<void> {
     implGhToken: process.env[IMPL_GH_TOKEN_ENV] ?? '',
     reviewGhToken: process.env[REVIEW_GH_TOKEN_ENV] ?? '',
     mergePrepEnabled: (process.env[MERGE_PREP_ENV] ?? '') === '1',
+    executionMode: process.env[EXECUTION_MODE_ENV] === 'marketplace' ? 'marketplace' : 'local',
     marketplaceBridgeEnabled: (process.env[MARKETPLACE_BRIDGE_ENV] ?? '') === '1',
     marketplaceIndexerUrl: process.env[MARKETPLACE_INDEXER_URL_ENV] ?? '',
     ...(process.env[MARKETPLACE_IPFS_GATEWAY_ENV]
@@ -652,6 +683,16 @@ async function main(): Promise<void> {
   assertMergePrepArming(cfg);
   if (cfg.mergePrepEnabled) {
     console.log(`[autopilot] merge-prep enabled (cap=${cfg.mergePrepCap}) — stuck PRs are prepped, not just escalated`);
+  }
+
+  // Creation automation (issue #1893): 'marketplace' routes ready issues to
+  // the marketplace (label + snapshot marker) instead of a local session.
+  // Default 'local' — every existing local-mode behavior is unchanged.
+  if (cfg.executionMode === 'marketplace') {
+    console.log(
+      '[autopilot] executionMode=marketplace — ready issues are routed to the marketplace, ' +
+        'not dispatched to local sessions',
+    );
   }
 
   // Hermes is a process-wide runtime. Refuse to boot unless its interpreter,
@@ -980,6 +1021,7 @@ async function main(): Promise<void> {
             spawn: makeLoggingSpawn(),
             fieldCache: cycleFieldCache,
           }),
+        routeToMarketplace: (issue) => routeToMarketplace(issue, realRunner),
         countOpenReadyPrs,
         // Reuse the map fetched once above (shared with the stacked-base sweep).
         fetchIssuePrMap: () => Promise.resolve(cyclePrByIssue),
@@ -1004,6 +1046,31 @@ async function main(): Promise<void> {
       }
 
       printReport(result, 'Cycle report');
+
+      // Marketplace retract sweep (issue #1893): runs over ALL currently
+      // labeled OPEN issues (its own targeted `gh issue list --label` scan —
+      // not the board snapshot), independent of this cycle's
+      // concurrency/backpressure budget. `result.readyIssueNumbers` is the
+      // FULL (unsliced) ready set, so an issue merely excluded by budget is
+      // never mistaken for "no longer ready". No-op (and no `gh` calls) when
+      // executionMode is `local` (the default).
+      if (cfg.executionMode === 'marketplace') {
+        try {
+          const rr = await retractStaleMarketplaceRoutes(
+            new Set(result.readyIssueNumbers),
+            realRunner,
+          );
+          if (rr.retracted.length > 0) {
+            console.log(`[autopilot] marketplace: retracted → #${rr.retracted.join(', #')}`);
+          }
+          for (const sk of rr.skipped) {
+            console.log(`[autopilot] marketplace retract-sweep: ${sk}`);
+          }
+        } catch (err) {
+          console.error('[autopilot] marketplace retract-sweep error (cycle unaffected):', err);
+        }
+      }
+
       // Live cycle ran: this cycle's in-flight set becomes next cycle's
       // baseline for the finished-session diff. (#489)
       previousInFlight = inFlight;
