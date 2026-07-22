@@ -1,10 +1,74 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { Store } from '../../../src/store/store.js';
 import {
   TaskRunPersistence,
   type PersistedTaskRunInput,
 } from '../../../src/harnesses/engine/persistence.js';
 import { TaskRunState } from '../../../src/harnesses/engine/state.js';
+import { TaskEngine, type TaskEngineOptions } from '../../../src/harnesses/engine/engine.js';
+import type { Harness, Solution } from '../../../src/harnesses/types.js';
+
+vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
+  uploadToIpfs: vi.fn().mockResolvedValue('bafymock123'),
+  cidToDigestHex: vi.fn().mockReturnValue(`0x${'0'.repeat(64)}`),
+  fetchFromIpfs: vi.fn(),
+  fetchFromDigest: vi.fn(),
+  digestHexToGatewayUrl: vi.fn(),
+}));
+
+vi.mock('../../../src/adapters/mech/contracts.js', () => ({
+  callDeliverToMarketplace: vi.fn().mockResolvedValue('0xdeliverytx'),
+  claimDelivery: vi.fn().mockResolvedValue('0xclaimtx'),
+  submitTask: vi.fn(), submitEvaluationJob: vi.fn(), claimJob: vi.fn(),
+  getJobClaim: vi.fn(), getMechDeliveryRate: vi.fn(), getTimeoutBounds: vi.fn(),
+  pollDeliverEvents: vi.fn(), decodeMarketplaceRequestLogs: vi.fn(),
+  decodeDeliverLogs: vi.fn(), scanTasks: vi.fn(), scanEvaluationJobs: vi.fn(),
+}));
+
+const PRIVATE_KEY = `0x${'1'.repeat(64)}` as `0x${string}`;
+const SOLVER_TYPE = 'swe-rebench-v2.v1';
+
+function patchSolution(patch: string): Solution {
+  return {
+    venueRef: { name: 'swe-rebench-v2' },
+    gating: { ok: true },
+    solutionPayload: { schemaVersion: 'swe-rebench-v2-solution.v1', patch },
+    artifacts: [],
+  };
+}
+
+function makePatchImpl(patch: string): Harness {
+  return {
+    name: 'patch-stub',
+    version: '0.0.1',
+    supports: (s) => s.solverType === SOLVER_TYPE && s.role !== 'evaluation',
+    async run(): Promise<Solution> {
+      return patchSolution(patch);
+    },
+  };
+}
+
+function engineOpts(store: Store, tmp: string, impl: Harness): TaskEngineOptions {
+  return {
+    store,
+    paths: { workingDirRoot: join(tmp, 'work'), implStateDirRoot: join(tmp, 'impl') },
+    implRegistry: { findFor: (s) => (impl.supports(s) ? impl : undefined) },
+    packagingDeps: {
+      store,
+      operatorEndpoint: 'https://op.test',
+      defaultPriceUsdc: '0',
+      perArtifactTypePrice: {},
+    },
+    envelopeDeps: {
+      ipfsRegistryUrl: 'http://ipfs.test',
+      agentEoaPrivateKey: PRIVATE_KEY,
+      safeAddress: `0x${'2'.repeat(40)}`,
+    },
+  };
+}
 
 function makeInput(overrides: Partial<PersistedTaskRunInput> = {}): PersistedTaskRunInput {
   return {
@@ -118,5 +182,72 @@ describe('intermediateFailureDiffs persistence (#1643)', () => {
       'diff --git a/x b/x\n+A\n',
       'diff --git a/x b/x\n+B\n',
     ]);
+  });
+});
+
+describe('runImpl retains prior patches (#1643)', () => {
+  let store: Store;
+  let tmp: string;
+
+  beforeEach(() => {
+    store = new Store(':memory:');
+    tmp = join(tmpdir(), `ifd-engine-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(tmp, { recursive: true });
+  });
+
+  afterEach(() => {
+    store.close();
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('first successful runImpl leaves intermediateFailureDiffs empty (AC2)', async () => {
+    const engine = new TaskEngine(engineOpts(store, tmp, makePatchImpl('diff --git a/x b/x\n+ok\n')));
+    const p = new TaskRunPersistence(store.db);
+    const requestId = 'req-first';
+    await engine.observe(makeInput({
+      requestId,
+      task: { id: requestId, description: 'fix', solverType: SOLVER_TYPE, role: 'restoration', spec: {} },
+    }));
+    p.transition(requestId, TaskRunState.CLAIMED);
+    p.transition(requestId, TaskRunState.WAITING);
+    await engine.process(requestId);
+    const row = p.getByRequestId(requestId)!;
+    expect(row.state).toBe(TaskRunState.POST_SNAPSHOT);
+    expect(row.intermediateFailureDiffsJson).toBeNull();
+  });
+
+  it('retains prior patch A when runImpl overwrites with different patch B (AC1)', async () => {
+    const engine = new TaskEngine(engineOpts(store, tmp, makePatchImpl('diff --git a/x b/x\n+B\n')));
+    const p = new TaskRunPersistence(store.db);
+    const requestId = 'req-overwrite';
+    await engine.observe(makeInput({
+      requestId,
+      task: { id: requestId, description: 'fix', solverType: SOLVER_TYPE, role: 'restoration', spec: {} },
+    }));
+    p.transition(requestId, TaskRunState.CLAIMED);
+    p.transition(requestId, TaskRunState.WAITING);
+    p.transition(requestId, TaskRunState.PRE_SNAPSHOT, {
+      workingDir: join(tmp, 'work', requestId),
+      implStateDir: join(tmp, 'impl'),
+      preSnapshotCapturedAt: Date.now(),
+    });
+    p.transition(requestId, TaskRunState.RUNNING);
+    mkdirSync(join(tmp, 'work', requestId), { recursive: true });
+    mkdirSync(join(tmp, 'impl'), { recursive: true });
+    // Seed prior failed patch while still RUNNING (simulates overwrite target).
+    store.db.prepare(
+      'UPDATE task_runs SET solution_outputs_json = ? WHERE request_id = ?',
+    ).run(solutionJson('diff --git a/x b/x\n+A\n'), requestId);
+
+    await engine.process(requestId);
+
+    const row = p.getByRequestId(requestId)!;
+    expect(row.state).toBe(TaskRunState.POST_SNAPSHOT);
+    expect(JSON.parse(row.intermediateFailureDiffsJson!)).toEqual([
+      'diff --git a/x b/x\n+A\n',
+    ]);
+    expect(JSON.parse(row.solutionOutputsJson!).solutionPayload.patch).toBe(
+      'diff --git a/x b/x\n+B\n',
+    );
   });
 });

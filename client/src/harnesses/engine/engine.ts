@@ -1555,13 +1555,15 @@ export class TaskEngine {
           this.trajectoryCollectors.set(task.requestId, trajectory);
           // No codeDigest for skipped runs — leave map empty.
           // Fall through to persistence below via goto-equivalent pattern.
+          const nextSolutionOutputsJson = JSON.stringify(skippedOutput);
+          this.persistence.recordPriorPatchOnOverwrite(task.requestId, nextSolutionOutputsJson);
           this.persistence.transition(task.requestId, TaskRunState.POST_SNAPSHOT, {
             postSnapshotCapturedAt: Date.now(),
             postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0, payload: null },
             fillsPayload: [],
             gatingClaim: skippedOutput.gating,
             informationalClaim: skippedOutput.informational ?? null,
-            solutionOutputsJson: JSON.stringify(skippedOutput),
+            solutionOutputsJson: nextSolutionOutputsJson,
             implName: impl.name,
             runtimePluginsJson: JSON.stringify(attributedPlugins),
             consumedRefsJson,
@@ -1608,13 +1610,16 @@ export class TaskEngine {
       // find the serialised output in the DB on restart. pack() will hydrate the
       // in-memory map from solutionOutputsJson if the map entry is absent (#6).
       // Capture post-snapshot from impl output so data-driven advance fires
+      // Retain prior failed patch before overwrite (#1643 / spec §10 field 4).
+      const nextSolutionOutputsJson = JSON.stringify(output);
+      this.persistence.recordPriorPatchOnOverwrite(task.requestId, nextSolutionOutputsJson);
       this.persistence.transition(task.requestId, TaskRunState.POST_SNAPSHOT, {
         postSnapshotCapturedAt: Date.now(),
         postSnapshotPayload: output.postSnapshot ?? { capturedAt: Date.now(), hlTime: 0, payload: null },
         fillsPayload: output.fills ?? [],
         gatingClaim: output.gating,
         informationalClaim: output.informational ?? null,
-        solutionOutputsJson: JSON.stringify(output),
+        solutionOutputsJson: nextSolutionOutputsJson,
         implName: impl.name,
         runtimePluginsJson: JSON.stringify(attributedPlugins),
         consumedRefsJson,
