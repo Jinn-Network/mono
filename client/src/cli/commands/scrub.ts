@@ -7,7 +7,8 @@
  */
 
 import type { CommandContext, CommandModule } from '../command.js';
-import { parseCommandArgs, COMMON_FLAGS } from '../command.js';
+import { COMMON_FLAGS } from '../command.js';
+import { parseArgs } from 'node:util';
 import { emitEnvelope } from '../../errors/envelope.js';
 import {
   allCiFixtures,
@@ -19,6 +20,18 @@ import {
   type BenchReport,
   type ReviewDecision,
 } from '@jinn-network/core/scrub';
+
+const SCRUB_OPTIONS = {
+  ...COMMON_FLAGS,
+  corpus: { type: 'string' as const },
+  'ci-only': { type: 'boolean' as const, default: false },
+  resolve: { type: 'string' as const },
+  decision: { type: 'string' as const },
+};
+
+type ScrubParsed = ReturnType<
+  typeof parseArgs<{ options: typeof SCRUB_OPTIONS; allowPositionals: true }>
+>;
 
 const REVIEW_DECISIONS: readonly ReviewDecision[] = [
   'approve-instance',
@@ -63,21 +76,19 @@ Examples:
     async run(ctx: CommandContext): Promise<void> {
       let parsed;
       try {
-        parsed = parseCommandArgs(ctx.argv, {
-          ...COMMON_FLAGS,
-          corpus: { type: 'string' },
-          'ci-only': { type: 'boolean', default: false },
-          resolve: { type: 'string' },
-          decision: { type: 'string' },
-          json: { type: 'boolean', default: false },
-        });
+        parsed = parseArgs({
+          args: ctx.argv,
+          options: SCRUB_OPTIONS,
+          allowPositionals: true,
+        }) as ScrubParsed;
       } catch (err) {
-        emitEnvelope(ctx, {
-          ok: false,
-          code: 'invalid_invocation',
-          message: err instanceof Error ? err.message : String(err),
-        });
-        ctx.exit(2);
+        emitEnvelope(
+          {
+            code: 'invalid_invocation',
+            message: err instanceof Error ? err.message : String(err),
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
         return;
       }
 
@@ -96,26 +107,27 @@ Examples:
         return;
       }
 
-      emitEnvelope(ctx, {
-        ok: false,
-        code: 'invalid_invocation',
-        message: `Unknown scrub subcommand: ${sub} (expected bench|review)`,
-      });
-      ctx.exit(2);
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: `Unknown scrub subcommand: ${sub} (expected bench|review)`,
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
     },
   };
 }
 
-async function runBenchSubcommand(
-  ctx: CommandContext,
-  parsed: ReturnType<typeof parseCommandArgs>,
-): Promise<void> {
+async function runBenchSubcommand(ctx: CommandContext, parsed: ScrubParsed): Promise<void> {
+  const ciOnly = parsed.values['ci-only'] as boolean;
+  const corpusArg = parsed.values.corpus as string | undefined;
+
   const fixtures = [...allCiFixtures()];
   let localCount = 0;
-  if (!parsed.values['ci-only']) {
+  if (!ciOnly) {
     const corpusPath =
-      typeof parsed.values.corpus === 'string' && parsed.values.corpus.length > 0
-        ? parsed.values.corpus
+      typeof corpusArg === 'string' && corpusArg.length > 0
+        ? corpusArg
         : DEFAULT_LOCAL_CORPUS_PATH;
     const local = loadLocalCorpus(corpusPath);
     localCount = local.length;
@@ -135,50 +147,51 @@ async function runBenchSubcommand(
   }
 }
 
-async function runReviewSubcommand(
-  ctx: CommandContext,
-  parsed: ReturnType<typeof parseCommandArgs>,
-): Promise<void> {
+async function runReviewSubcommand(ctx: CommandContext, parsed: ScrubParsed): Promise<void> {
   const resolveId =
     typeof parsed.values.resolve === 'string' ? parsed.values.resolve : undefined;
   const decisionRaw =
     typeof parsed.values.decision === 'string' ? parsed.values.decision : undefined;
+  const json = parsed.values.json as boolean;
 
   if (resolveId || decisionRaw) {
     if (!resolveId || !decisionRaw) {
-      emitEnvelope(ctx, {
-        ok: false,
-        code: 'invalid_invocation',
-        message: 'review --resolve requires --decision (and vice versa)',
-      });
-      ctx.exit(2);
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: 'review --resolve requires --decision (and vice versa)',
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
       return;
     }
     if (!isReviewDecision(decisionRaw)) {
-      emitEnvelope(ctx, {
-        ok: false,
-        code: 'invalid_invocation',
-        message: `Unknown decision: ${decisionRaw} (expected ${REVIEW_DECISIONS.join('|')})`,
-      });
-      ctx.exit(2);
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: `Unknown decision: ${decisionRaw} (expected ${REVIEW_DECISIONS.join('|')})`,
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
       return;
     }
     try {
       const updated = resolveFlag(resolveId, decisionRaw);
       ctx.writer.write(`${JSON.stringify(updated, null, 2)}\n`);
     } catch (err) {
-      emitEnvelope(ctx, {
-        ok: false,
-        code: 'review_resolve_failed',
-        message: err instanceof Error ? err.message : String(err),
-      });
-      ctx.exit(1);
+      emitEnvelope(
+        {
+          code: 'fatal',
+          message: err instanceof Error ? err.message : String(err),
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
     }
     return;
   }
 
   const pending = listFlagged({ status: 'pending' });
-  if (parsed.values.json) {
+  if (json) {
     ctx.writer.write(`${JSON.stringify(pending, null, 2)}\n`);
     return;
   }
