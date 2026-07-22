@@ -67,6 +67,8 @@ const CFG: DispatcherConfig = {
   hermesModel: 'gpt-5.6-sol',
   hermesProvider: 'openai-codex',
   hermesPythonPath: '/opt/hermes/python',
+  cursorModel: 'composer-2.5',
+  cursorBin: 'agent',
   marketplaceBridgeEnabled: false,
   marketplaceIndexerUrl: '',
   marketplaceIpfsGatewayUrl: 'https://gateway.autonolas.tech', executionMode: 'local',
@@ -1075,5 +1077,71 @@ describe('dispatchIssue — global Hermes runtime', () => {
     expect(calls[0].args).toContain('-p');
     expect(calls[0].args).toContain('--effort');
     expect(promptOf(calls[0])).toContain('Global Autopilot runtime: claude');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// cursor coordinator — Cursor Agent CLI via agent -p
+// ---------------------------------------------------------------------------
+
+describe('dispatchIssue — global Cursor runtime', () => {
+  const CURSOR_CFG: DispatcherConfig = {
+    ...CFG,
+    runtime: 'cursor',
+  };
+  const cursorPromptOf = (c: SpawnCall): string => c.args[c.args.length - 1];
+  const modelArg = (c: SpawnCall): string =>
+    c.args[c.args.indexOf('--model') + 1];
+
+  it('spawns agent -p with Effort-routed model for implement (Low → composer)', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    const lowEffortIssue = { ...ISSUE, effort: 'Low' as const };
+    await dispatchIssue(lowEffortIssue, CURSOR_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].cmd).toBe('agent');
+    expect(calls[0].args).toContain('-p');
+    expect(calls[0].args).toContain('--approve-mcps');
+    expect(calls[0].args).toContain('--workspace');
+    expect(calls[0].args[calls[0].args.indexOf('--workspace') + 1])
+      .toBe(EXPECTED_WORKTREE_PATH);
+    expect(modelArg(calls[0])).toBe('composer-2.5');
+  });
+
+  it('routes unset Effort to Grok high for implement sessions', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    const issueNoEffort = { ...ISSUE, effort: null };
+    await dispatchIssue(issueNoEffort, CURSOR_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+    expect(modelArg(calls[0])).toBe('cursor-grok-4.5-high');
+  });
+
+  it('never passes claude-only flags (--effort is claude-only; cursor uses --model)', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchIssue(ISSUE, CURSOR_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+    expect(calls[0].args).not.toContain('--effort');
+  });
+
+  it('passes resolved model in env for stage:run children', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    const lowEffortIssue = { ...ISSUE, effort: 'Low' as const };
+    await dispatchIssue(lowEffortIssue, CURSOR_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+    const env = calls[0].opts.env as Record<string, string>;
+    expect(env.JINN_AUTOPILOT_RUNTIME).toBe('cursor');
+    expect(env.JINN_DISPATCHER_CURSOR_MODEL).toBe('composer-2.5');
+    expect(env.JINN_DISPATCHER_CURSOR_BIN).toBe('agent');
+  });
+
+  it('reframes the headless block for agent -p (no stale claude framing)', async () => {
+    const { runner } = makeRunner();
+    const { spawn, calls } = makeSpawn();
+    await dispatchIssue(ISSUE, CURSOR_CFG, { runner, spawn, fieldCache: { ...FIELD_CACHE } });
+    const prompt = cursorPromptOf(calls[0]);
+    expect(prompt).toContain('`agent -p`');
+    expect(prompt).not.toContain('`claude -p` / `--print`');
+    expect(prompt).toContain('Global Autopilot runtime: cursor');
   });
 });

@@ -69,6 +69,11 @@ import {
   assertHermesBillingRoute,
   assertHermesRuntimeReady,
 } from '../src/dispatcher/hermes-runtime.js';
+import {
+  assertCursorRuntimeReady,
+  CURSOR_BIN_ENV,
+  CURSOR_MODEL_ENV,
+} from '../src/dispatcher/cursor-runtime.js';
 import { WallClock } from '../src/dispatcher/wall-clock.js';
 import {
   shouldRouteToSession,
@@ -133,6 +138,13 @@ const EXECUTION_MODE_ENV = 'JINN_EXECUTION_MODE';
 const HERMES_MODEL_ENV = 'JINN_DISPATCHER_HERMES_MODEL';
 const HERMES_PROVIDER_ENV = 'JINN_DISPATCHER_HERMES_PROVIDER';
 const HERMES_PYTHON_ENV = 'JINN_DISPATCHER_HERMES_PYTHON';
+
+/**
+ * Cursor Agent CLI binary and fixed review model. Active only when
+ * JINN_AUTOPILOT_RUNTIME=cursor. Implement sessions use cursorModelForEffort.
+ */
+const CURSOR_MODEL_ENV_NAME = CURSOR_MODEL_ENV;
+const CURSOR_BIN_ENV_NAME = CURSOR_BIN_ENV;
 
 function attachTerminalCleanup(
   child: ChildProcess,
@@ -637,6 +649,12 @@ async function main(): Promise<void> {
     ...(process.env[HERMES_PYTHON_ENV]
       ? { hermesPythonPath: process.env[HERMES_PYTHON_ENV] }
       : {}),
+    ...(process.env[CURSOR_MODEL_ENV_NAME]
+      ? { cursorModel: process.env[CURSOR_MODEL_ENV_NAME] }
+      : {}),
+    ...(process.env[CURSOR_BIN_ENV_NAME]
+      ? { cursorBin: process.env[CURSOR_BIN_ENV_NAME] }
+      : {}),
   };
 
   console.log(`[autopilot] runtime=${cfg.runtime}`);
@@ -692,6 +710,13 @@ async function main(): Promise<void> {
     console.log(
       `[autopilot] hermes runtime ready (model=${cfg.hermesModel}, provider=${cfg.hermesProvider}, ` +
         `python=${cfg.hermesPythonPath})`,
+    );
+  }
+
+  if (cfg.runtime === 'cursor') {
+    assertCursorRuntimeReady(cfg.cursorBin);
+    console.log(
+      `[autopilot] cursor runtime ready (bin=${cfg.cursorBin}, reviewModel=${cfg.cursorModel})`,
     );
   }
 

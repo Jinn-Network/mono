@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  buildCursorHeadlessPrompt,
   buildHeadlessPrompt,
   buildHermesHeadlessPrompt,
 } from '../headless.js';
@@ -9,6 +10,12 @@ import {
   prepareHermesHome,
   type HermesHomeOpts,
 } from './hermes-home.js';
+import {
+  cursorAgentArgs,
+  cursorModelForEffort,
+  CURSOR_BIN_ENV,
+  CURSOR_MODEL_ENV,
+} from './cursor-runtime.js';
 import { hermesChatArgs } from './hermes-runtime.js';
 import type { DispatcherConfig, Effort } from './types.js';
 
@@ -97,6 +104,16 @@ export function effortFlag(effort: Effort | null): string[] {
   return effort == null ? [] : ['--effort', effort.toLowerCase()];
 }
 
+function resolveCursorSessionModel(
+  kind: CoordinatorSessionKind,
+  effort: Effort | null,
+  cfg: DispatcherConfig,
+): string {
+  return kind === 'implement'
+    ? cursorModelForEffort(effort)
+    : cfg.cursorModel;
+}
+
 /**
  * Launch one AI coordinator through the process-wide runtime.
  *
@@ -111,7 +128,9 @@ export function spawnCoordinatorSession(
   const sessionId = `${spec.kind}-${spec.number}`;
   const runtimePrompt = cfg.runtime === 'hermes'
     ? buildHermesHeadlessPrompt(spec.skill, spec.scenario)
-    : buildHeadlessPrompt(spec.skill, spec.scenario);
+    : cfg.runtime === 'cursor'
+      ? buildCursorHeadlessPrompt(spec.skill, spec.scenario)
+      : buildHeadlessPrompt(spec.skill, spec.scenario);
   const prompt = [loadCanon(), '', runtimePrompt].join('\n');
   const env: NodeJS.ProcessEnv = {
     ...spec.env,
@@ -148,6 +167,28 @@ export function spawnCoordinatorSession(
           JINN_DISPATCHER_HERMES_PYTHON: cfg.hermesPythonPath,
           JINN_DISPATCHER_HERMES_MODEL: cfg.hermesModel,
           JINN_DISPATCHER_HERMES_PROVIDER: cfg.hermesProvider,
+        },
+      },
+    );
+  } else if (cfg.runtime === 'cursor') {
+    const resolvedModel = resolveCursorSessionModel(
+      spec.kind,
+      spec.effort,
+      cfg,
+    );
+    result = deps.spawn(
+      cfg.cursorBin,
+      cursorAgentArgs(prompt, {
+        model: resolvedModel,
+        workspace: spec.worktreePath,
+      }),
+      {
+        ...spec.spawnOptions,
+        cwd: spec.worktreePath,
+        env: {
+          ...env,
+          [CURSOR_MODEL_ENV]: resolvedModel,
+          [CURSOR_BIN_ENV]: cfg.cursorBin,
         },
       },
     );

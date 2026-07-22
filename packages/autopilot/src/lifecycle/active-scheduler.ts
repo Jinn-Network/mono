@@ -64,7 +64,9 @@ export function scheduleActiveActions(
 ): ActiveSchedulingPlan {
   const actions: NewWorkAction[] = [];
   const skips: ActiveSchedulingSkip[] = [];
-  const freeLogins = new Set(input.availableLogins.map((login) => login.toLowerCase()));
+  const configuredLogins = new Set(
+    input.availableLogins.map((login) => login.toLowerCase()),
+  );
   const implementation = input.candidates.filter(
     (candidate): candidate is Extract<ActiveCandidate, { phase: 'implementation' }> =>
       candidate.phase === 'implementation',
@@ -79,13 +81,10 @@ export function scheduleActiveActions(
       skips.push({ phase: candidate.phase, subject: subject(candidate), reason: 'backpressure' });
       continue;
     }
-    const preferred = input.implementationPreferredLogin.toLowerCase();
-    const login = freeLogins.has(preferred) ? preferred : freeLogins.values().next().value;
-    if (login === undefined) {
+    if (configuredLogins.size === 0) {
       skips.push({ phase: candidate.phase, subject: subject(candidate), reason: 'credential-lane' });
       continue;
     }
-    freeLogins.delete(login);
     actions.push({ kind: 'claim-implementation', issueNumber: candidate.issueNumber });
   }
 
@@ -95,18 +94,17 @@ export function scheduleActiveActions(
       skips.push({ phase: candidate.phase, subject: subject(candidate), reason: 'capacity' });
       continue;
     }
-    const reviewer = [...freeLogins].find(
+    const reviewer = [...configuredLogins].find(
       (login) => login !== candidate.author.toLowerCase(),
     );
     if (reviewer === undefined) {
       skips.push({
         phase: candidate.phase,
         subject: subject(candidate),
-        reason: freeLogins.size === 0 ? 'credential-lane' : 'identity',
+        reason: configuredLogins.size === 0 ? 'credential-lane' : 'identity',
       });
       continue;
     }
-    freeLogins.delete(reviewer);
     actions.push({
       kind: 'claim-review',
       issueNumber: candidate.issueNumber,
@@ -138,7 +136,7 @@ export function scheduleActiveActions(
 
   for (const candidate of input.candidates) {
     if (candidate.phase !== 'merge') continue;
-    if (freeLogins.size === 0) {
+    if (configuredLogins.size === 0) {
       skips.push({ phase: candidate.phase, subject: subject(candidate), reason: 'credential-lane' });
       continue;
     }

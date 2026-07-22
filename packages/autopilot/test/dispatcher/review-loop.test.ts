@@ -13,6 +13,7 @@ const CFG: DispatcherConfig = {
   // non-allowlisted authors — covered directly in review-ready-filter.test.ts).
   authorAllowlist: ['a'], reviewCap: 2, engineReviewLabel: 'engine:review', reviewBotLogin: 'jinn-bot',
   implGhToken: '', reviewGhToken: '', mergePrepEnabled: false, mergePrepCap: 1, hermesModel: 'gpt-5.6-sol', hermesProvider: 'openai-codex', hermesPythonPath: '/opt/hermes/python',
+  cursorModel: 'composer-2.5', cursorBin: 'agent',
   marketplaceBridgeEnabled: false, marketplaceIndexerUrl: '', marketplaceIpfsGatewayUrl: 'https://gateway.autonolas.tech', executionMode: 'local',
 };
 function pr(n: number, over: Partial<PolledPr> = {}): PolledPr {

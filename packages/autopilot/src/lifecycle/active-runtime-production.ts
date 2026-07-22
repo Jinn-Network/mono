@@ -13,6 +13,9 @@ import {
   assertHermesRuntimeReady,
 } from '../dispatcher/hermes-runtime.js';
 import {
+  assertCursorRuntimeReady,
+} from '../dispatcher/cursor-runtime.js';
+import {
   listRunnerLiveAttempts,
   trackAttemptChild,
   type TrackableAttemptChild,
@@ -198,6 +201,9 @@ export function makeProductionCapabilityPreflight(
           options.config.hermesProvider,
         );
         assertHermesRuntimeReady(options.config.hermesPythonPath);
+      }
+      if (options.config.runtime === 'cursor') {
+        assertCursorRuntimeReady(options.config.cursorBin);
       }
       return { ok: true };
     } catch (error) {

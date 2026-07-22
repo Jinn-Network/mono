@@ -11,15 +11,15 @@ describe('global Autopilot runtime', () => {
     expect(DEFAULT_CONFIG.runtime).toBe('claude');
   });
 
-  it.each(['claude', 'hermes'] as const)('accepts %s', (runtime) => {
+  it.each(['claude', 'hermes', 'cursor'] as const)('accepts %s', (runtime) => {
     expect(parseAutopilotRuntime(runtime)).toBe(runtime);
   });
 
-  it.each(['', 'codex', 'cursor', 'Hermes', ' claude '])(
+  it.each(['', 'codex', 'Hermes', ' claude '])(
     'fails loudly for unsupported value %j',
     (runtime) => {
       expect(() => parseAutopilotRuntime(runtime))
-        .toThrow(new RegExp(`${AUTOPILOT_RUNTIME_ENV}.*claude.*hermes`, 'i'));
+        .toThrow(new RegExp(`${AUTOPILOT_RUNTIME_ENV}.*claude.*hermes.*cursor`, 'i'));
     },
   );
 });

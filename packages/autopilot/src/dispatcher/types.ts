@@ -1,4 +1,8 @@
 import { DEFAULT_HERMES_PYTHON } from './hermes-runtime.js';
+import {
+  DEFAULT_CURSOR_BIN,
+  DEFAULT_CURSOR_REVIEW_MODEL,
+} from './cursor-runtime.js';
 import type { AutopilotRuntime } from '../autopilot-runtime.js';
 
 /** The nine work-shape Issue Types (DR-2026-05-20-b). */
@@ -170,6 +174,14 @@ export interface DispatcherConfig {
    * `JINN_DISPATCHER_HERMES_PYTHON`. */
   hermesPythonPath: string;
   /**
+   * Fixed Cursor model for review sessions (`effort: null`).
+   * Implement sessions use `cursorModelForEffort` instead. Source:
+   * `JINN_DISPATCHER_CURSOR_MODEL`.
+   */
+  cursorModel: string;
+  /** Cursor Agent CLI binary. Source: `JINN_DISPATCHER_CURSOR_BIN`. */
+  cursorBin: string;
+  /**
    * Arm the delivery→PR bridge (issue #1892, spec
    * 2026-07-20-autopilot-marketplace-execution.md §"Delivery → PR bridge
    * (host-side)"): poll the marketplace indexer for delivered `jinn-repo.v1`
@@ -226,6 +238,8 @@ export const DEFAULT_CONFIG: DispatcherConfig = {
   hermesModel: 'gpt-5.6-sol',
   hermesProvider: 'openai-codex',
   hermesPythonPath: DEFAULT_HERMES_PYTHON,
+  cursorModel: DEFAULT_CURSOR_REVIEW_MODEL,
+  cursorBin: DEFAULT_CURSOR_BIN,
   marketplaceBridgeEnabled: false,
   marketplaceIndexerUrl: '',
   marketplaceIpfsGatewayUrl: 'https://gateway.autonolas.tech',

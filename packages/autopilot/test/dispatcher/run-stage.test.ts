@@ -82,6 +82,8 @@ const HERMES_ENV_KEYS = [
   'JINN_DISPATCHER_HERMES_PYTHON',
   'JINN_DISPATCHER_HERMES_MODEL',
   'JINN_DISPATCHER_HERMES_PROVIDER',
+  'JINN_DISPATCHER_CURSOR_BIN',
+  'JINN_DISPATCHER_CURSOR_MODEL',
 ] as const;
 
 const originalHermesEnv = new Map(
@@ -101,6 +103,8 @@ function restoreHermesEnv(): void {
 
 beforeEach(() => {
   delete process.env.JINN_AUTOPILOT_RUNTIME;
+  delete process.env.JINN_DISPATCHER_CURSOR_BIN;
+  delete process.env.JINN_DISPATCHER_CURSOR_MODEL;
 });
 afterEach(restoreHermesEnv);
 
@@ -304,7 +308,66 @@ describe('runStageHeadless', () => {
     const { spawn, calls } = makeSpawn('close-0', 'ok');
 
     expect(() => runStageHeadless(BASE_OPTS, spawn))
-      .toThrow(/JINN_AUTOPILOT_RUNTIME.*claude.*hermes/i);
+      .toThrow(/JINN_AUTOPILOT_RUNTIME.*claude.*hermes.*cursor/i);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('spawns a fresh Cursor root with inherited model and workspace', async () => {
+    process.env.JINN_DISPATCHER_CURSOR_BIN = 'agent';
+    process.env.JINN_DISPATCHER_CURSOR_MODEL = 'cursor-grok-4.5-high';
+    process.env.JINN_AUTOPILOT_RUNTIME = 'cursor';
+    const { spawn, calls } = makeSpawn('close-0', 'ok');
+
+    await runStageHeadless(BASE_OPTS, spawn);
+
+    expect(calls[0].cmd).toBe('agent');
+    expect(calls[0].args).toContain('-p');
+    expect(calls[0].args).toContain('--approve-mcps');
+    expect(calls[0].args[calls[0].args.indexOf('--workspace') + 1])
+      .toBe(BASE_OPTS.worktreePath);
+    expect(calls[0].args[calls[0].args.indexOf('--model') + 1])
+      .toBe('cursor-grok-4.5-high');
+  });
+
+  it('resolves Cursor bin and model from named environment variables', async () => {
+    process.env.JINN_DISPATCHER_CURSOR_BIN = '/env/bin/agent';
+    process.env.JINN_DISPATCHER_CURSOR_MODEL = 'composer-2.5';
+    process.env.JINN_AUTOPILOT_RUNTIME = 'cursor';
+    const { spawn, calls } = makeSpawn('close-0', 'ok');
+
+    await runStageHeadless(BASE_OPTS, spawn);
+
+    expect(calls[0].cmd).toBe('/env/bin/agent');
+    expect(calls[0].args[calls[0].args.indexOf('--model') + 1])
+      .toBe('composer-2.5');
+  });
+
+  it('reframes the root-stage headless block for Cursor', async () => {
+    process.env.JINN_DISPATCHER_CURSOR_BIN = 'agent';
+    process.env.JINN_DISPATCHER_CURSOR_MODEL = 'composer-2.5';
+    process.env.JINN_AUTOPILOT_RUNTIME = 'cursor';
+    const { spawn, calls } = makeSpawn('close-0', 'ok');
+
+    await runStageHeadless(BASE_OPTS, spawn);
+
+    const prompt = calls[0].args[calls[0].args.length - 1];
+    expect(prompt).toContain('`agent -p`');
+    expect(prompt).not.toContain('`claude -p` / `--print`');
+  });
+
+  it.each([
+    ['JINN_DISPATCHER_CURSOR_BIN', { model: 'composer-2.5' }],
+    ['JINN_DISPATCHER_CURSOR_MODEL', { cursorBin: 'agent' }],
+  ] as const)('fails loudly when %s is missing', (missingName, supplied) => {
+    delete process.env.JINN_DISPATCHER_CURSOR_BIN;
+    delete process.env.JINN_DISPATCHER_CURSOR_MODEL;
+    process.env.JINN_AUTOPILOT_RUNTIME = 'cursor';
+    const { spawn, calls } = makeSpawn('close-0', 'ok');
+
+    expect(() => runStageHeadless({
+      ...BASE_OPTS,
+      ...supplied,
+    }, spawn)).toThrow(missingName);
     expect(calls).toHaveLength(0);
   });
 

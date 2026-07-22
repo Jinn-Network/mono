@@ -52,14 +52,42 @@ describe('active local scheduler', () => {
     });
   });
 
-  it('preserves implementation priority when only one credential lane is usable', () => {
+  it('schedules both implement and review with one login when review targets another author', () => {
     const plan = scheduleActiveActions(input({
+      candidates: [
+        { phase: 'implementation', issueNumber: 1 },
+        { phase: 'review', issueNumber: 3, prNumber: 30, head: HEAD, author: 'other' },
+      ],
       availableLogins: ['implementation-bot'],
       remaining: { implementation: 1, review: 1 },
     }));
     expect(plan.actions.map((action) => action.kind)).toEqual([
       'claim-implementation',
+      'claim-review',
     ]);
+  });
+
+  it('caps implementation concurrency by phase remaining, not login count', () => {
+    const plan = scheduleActiveActions(input({
+      candidates: [
+        { phase: 'implementation', issueNumber: 1 },
+        { phase: 'implementation', issueNumber: 2 },
+        { phase: 'implementation', issueNumber: 3 },
+        { phase: 'implementation', issueNumber: 4 },
+      ],
+      availableLogins: ['implementation-bot'],
+      remaining: { implementation: 3, review: 0 },
+    }));
+    expect(plan.actions).toEqual([
+      { kind: 'claim-implementation', issueNumber: 1 },
+      { kind: 'claim-implementation', issueNumber: 2 },
+      { kind: 'claim-implementation', issueNumber: 3 },
+    ]);
+    expect(plan.skips).toContainEqual({
+      phase: 'implementation',
+      subject: 'issue:4',
+      reason: 'capacity',
+    });
   });
 
   it('uses the one login to review another author when no implementation is selected', () => {

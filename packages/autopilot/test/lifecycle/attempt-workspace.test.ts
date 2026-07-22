@@ -695,6 +695,21 @@ describe('safe attempt cleanup', () => {
     });
   });
 
+  it('reconciles dead running processState to exited before retaining dirty worktrees', async () => {
+    const fixture = repositoryFixture();
+    const manifest = await createAttemptWorkspace(
+      options(fixture, { pid: 4242 }),
+      defaultRunner,
+    );
+    writeFileSync(join(manifest.paths.worktree, 'dirty.txt'), 'dirty\n');
+
+    await expect(cleanupAttempt(manifest.paths.manifest, defaultRunner, {
+      v2Base: join(fixture.base, 'v2'),
+      isPidAlive: () => false,
+    })).resolves.toMatchObject({ status: 'retained', reason: { code: 'dirty' } });
+    expect(readAttemptManifest(manifest.paths.manifest).processState).toBe('exited');
+  });
+
   it('retains dirty, ahead, and live attempts with structured reasons', async () => {
     const dirtyFixture = repositoryFixture();
     const dirty = terminalAttempt(

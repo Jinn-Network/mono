@@ -35,7 +35,7 @@ function attempt(
 }
 
 describe('active runtime boundary', () => {
-  it('derives only this runner’s phase capacity and identity lanes from injected local attempts', () => {
+  it('derives only this runner’s phase capacity from injected local attempts', () => {
     const runtime = makeActiveRuntime({
       credentials: pool(),
       caps: { implementation: 2, review: 1 },
@@ -52,12 +52,12 @@ describe('active runtime boundary', () => {
 
     expect(runtime.readLocalState()).toEqual({
       remaining: { implementation: 1, review: 1 },
-      availableLogins: ['review-bot'],
+      availableLogins: ['implementation-bot', 'review-bot'],
       implementationPreferredLogin: 'implementation-bot',
     });
   });
 
-  it.skip('passes only currently free credentials to an exact-head action handler', async () => {
+  it('passes the full credential pool to an exact-head action handler', async () => {
     const selected: string[][] = [];
     const runtime = makeActiveRuntime({
       credentials: pool(),
@@ -83,6 +83,6 @@ describe('active runtime boundary', () => {
       prNumber: 84,
       head: HEAD,
     })).resolves.toEqual({ outcome: 'spawned' });
-    expect(selected).toEqual([['review-bot']]);
+    expect(selected).toEqual([['implementation-bot', 'review-bot']]);
   });
 });

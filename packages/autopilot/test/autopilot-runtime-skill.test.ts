@@ -10,6 +10,7 @@ const runtimeRoot = join(skillsRoot, 'autopilot-runtime');
 const runtimeSkillPath = join(runtimeRoot, 'SKILL.md');
 const claudeReferencePath = join(runtimeRoot, 'references', 'claude.md');
 const hermesReferencePath = join(runtimeRoot, 'references', 'hermes.md');
+const cursorReferencePath = join(runtimeRoot, 'references', 'cursor.md');
 const workflowNames = ['implement-issue', 'review-pr', 'fix-child', 'reconcile'] as const;
 
 function read(path: string): string {
@@ -32,10 +33,12 @@ describe('shared Autopilot runtime skill contract', () => {
     expect(existsSync(runtimeSkillPath)).toBe(true);
     expect(existsSync(claudeReferencePath)).toBe(true);
     expect(existsSync(hermesReferencePath)).toBe(true);
+    expect(existsSync(cursorReferencePath)).toBe(true);
 
     const runtimeSkill = read(runtimeSkillPath);
     expect(runtimeSkill).toContain('references/claude.md');
     expect(runtimeSkill).toContain('references/hermes.md');
+    expect(runtimeSkill).toContain('references/cursor.md');
 
     for (const workflow of workflowNames) {
       const workflowRoot = join(skillsRoot, workflow);
@@ -43,6 +46,8 @@ describe('shared Autopilot runtime skill contract', () => {
       expect(existsSync(join(workflowRoot, 'references', 'claude.md')))
         .toBe(false);
       expect(existsSync(join(workflowRoot, 'references', 'hermes.md')))
+        .toBe(false);
+      expect(existsSync(join(workflowRoot, 'references', 'cursor.md')))
         .toBe(false);
       expect(doc).not.toContain('delegate_task');
       expect(doc).not.toContain('Agent-tool');
@@ -90,7 +95,7 @@ describe('shared Autopilot runtime skill contract', () => {
   });
 
   it('keeps stage runtime selection inherited from the process', () => {
-    for (const path of [claudeReferencePath, hermesReferencePath]) {
+    for (const path of [claudeReferencePath, hermesReferencePath, cursorReferencePath]) {
       const reference = read(path);
       expect(reference).toContain('JINN_AUTOPILOT_RUNTIME');
       expect(reference).toContain('yarn stage:run');
@@ -113,5 +118,17 @@ describe('shared Autopilot runtime skill contract', () => {
       /does not read, advance, or replace\s+lifecycle authority/,
     );
     expect(runtimeSkill).toContain('No upstream Hermes change is required');
+  });
+
+  it('makes Cursor fan-out a synchronous batch of sanitized depth-0 roots', () => {
+    const cursor = read(cursorReferencePath);
+    expect(cursor).toMatch(
+      /synchronous[\s\S]*parallel[\s\S]*separate `stage:run`/i,
+    );
+    expect(cursor).toMatch(/new depth-0 `agent -p` process/);
+    expect(cursor).toContain('yarn stage:run');
+    expect(cursor).not.toContain('--runtime');
+    expect(cursor).toContain('.cursor/skills');
+    expect(cursor).toContain('.claude/skills');
   });
 });
