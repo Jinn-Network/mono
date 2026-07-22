@@ -10,8 +10,9 @@ The module is retained as a quarantined Stage-3 surface (rescope plan §2):
 the `/jinn skills install|list|uninstall` command branch that used to call
 these functions is removed (Stage 1 rescope R3; skills are Stage 3), and
 pickup's own auto-adopt path (which also called `install()`) is gone with
-it. `skills_dir()`/`_extract_trace()`/`_skill_md_and_slug()` stay live,
-consumed by `/jinn distill`'s staging dir and the `corpus_fetch` agent tool.
+it. `skills_dir()`/`_extract_skill()`/`_extract_trace()`/`_skill_md_and_slug()`
+stay live, consumed by `/jinn distill`'s staging dir and the `corpus_fetch`
+agent tool.
 These tests cover the module's own functions directly, independent of any
 command surface.
 """
@@ -763,3 +764,58 @@ def test_list_and_uninstall_only_touch_jinn_installed(tmp_path):
 
     skills_install.uninstall("test-driven-development")
     assert not (tmp_path / "skills" / "test-driven-development").exists()
+
+
+def _valid_skill_artifact_payload(**overrides):
+    payload = {
+        "schemaVersion": "jinn.skill.v1",
+        "skill": {
+            "name": "retry-budget-tuning",
+            "skillMd": "# retry-budget-tuning\n\nCap retries at three.",
+        },
+        "files": [],
+        "provenance": {
+            "kind": "distilled",
+            "sourceEnvelopeCids": ["bafySourceEpisode1"],
+            "operator": {"safeAddress": "0x" + "a" * 40},
+            "verifiabilityTier": "evaluator-verified",
+            "skillKind": "strategic-pattern",
+        },
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_extract_skill_returns_skill_md_and_provenance_tier():
+    skill = _valid_skill_artifact_payload()
+    view, digest = skills_install._extract_skill({
+        "artifacts": [_artifact("jinn.skill.v1", skill)],
+    })
+    assert view["shape"] == "jinn.skill.v1"
+    assert view["name"] == "retry-budget-tuning"
+    assert "Cap retries at three." in view["skillMd"]
+    assert view["provenance"]["verifiabilityTier"] == "evaluator-verified"
+    assert view["provenance"]["kind"] == "distilled"
+    assert digest == hashlib.sha256(json.dumps(skill).encode("utf-8")).hexdigest()
+
+
+def test_extract_skill_refuses_sha256_mismatch():
+    skill = _valid_skill_artifact_payload()
+    with pytest.raises(ValueError, match="sha256 mismatch"):
+        skills_install._extract_skill({
+            "artifacts": [_artifact("jinn.skill.v1", skill, sha256="0" * 64)],
+        })
+
+
+def test_extract_skill_refuses_empty_skill_md():
+    skill = _valid_skill_artifact_payload()
+    skill["skill"]["skillMd"] = "   "
+    with pytest.raises(ValueError, match="skillMd"):
+        skills_install._extract_skill({
+            "artifacts": [_artifact("jinn.skill.v1", skill)],
+        })
+
+
+def test_extract_skill_raises_when_no_skill_artifact():
+    with pytest.raises(ValueError, match="jinn.skill.v1"):
+        skills_install._extract_skill({"artifacts": []})
