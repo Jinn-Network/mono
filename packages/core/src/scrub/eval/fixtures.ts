@@ -90,7 +90,8 @@ export function syntheticFixtures(): EvalFixture[] {
       profile: 'seed',
       mustSurvive: true,
     },
-    // B2 carrier — baseline may FN until #1970.
+    // B2 carrier — git-identity detector (#1970) jointly covers the name;
+    // email on the same line remains B1 via plain-patterns.
     labeled(
       'B2-git-author',
       'Author: Synth Operator <synth.operator@example.com>',

@@ -15,6 +15,10 @@ export function classFromRedactionDetail(detail: string | undefined, stage: stri
     return undefined;
   }
   const d = detail.toLowerCase();
+  // B2 before generic "name"/"email" — git-identity evidence is carrier-shaped.
+  if (d.includes('git-identity') || d === 'trailer-name' || d === 'user-name' || d === 'user-email') {
+    return 'B2';
+  }
   if (d.includes('email')) return 'B1';
   if (d.includes('home-path') || d.includes('home_path')) return 'D1';
   if (d.includes('eth-address') || d.includes('ethereum') || d.includes('eth_addr')) return 'C1';

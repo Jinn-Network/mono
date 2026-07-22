@@ -36,6 +36,10 @@ export function stubForFinding(finding: Finding, occurrenceIndex: number): strin
   switch (finding.class) {
     case 'B1':
       return '[EMAIL]';
+    case 'B2':
+      // Joint carrier: user.email values stub as email; names as NAME.
+      if (hint.includes('email')) return '[EMAIL]';
+      return '[NAME]';
     case 'D1':
       return '/users/anon';
     case 'C1':

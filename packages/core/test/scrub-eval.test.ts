@@ -49,9 +49,11 @@ describe('scrub eval CI fixtures (#1968)', () => {
     expect(report.classes.C1?.recall).toBeGreaterThanOrEqual(0.99);
   });
 
-  it('baseline records B2 carrier miss until #1970 (FN expected)', async () => {
+  it('baseline: seed profile catches B2 git-identity carriers (≥0.95 recall/precision)', async () => {
     const report = await runBench(syntheticFixtures().filter((f) => f.id === 'B2-git-author'));
-    // Name "Synth Operator" survives; email may be redacted separately
-    expect(report.classes.B2?.fn).toBeGreaterThanOrEqual(1);
+    expect(report.classes.B2?.recall).toBeGreaterThanOrEqual(0.95);
+    expect(report.classes.B2?.precision).toBeGreaterThanOrEqual(0.95);
+    expect(report.classes.B2?.tp).toBeGreaterThanOrEqual(1);
+    expect(report.classes.B2?.fn ?? 0).toBe(0);
   });
 });

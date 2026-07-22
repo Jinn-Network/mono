@@ -2,6 +2,7 @@ import { ScrubPipeline } from './pipeline.js';
 import { keyPolicyDetector, type KeyPolicy } from './key-policy.js';
 import { openredactionDetector } from './openredaction-stage.js';
 import { plainPatternsDetector } from './plain-patterns-stage.js';
+import { gitIdentityDetector } from './git-identity-detector.js';
 import { secretlintDetector } from './secretlint-stage.js';
 import { mlPiiDetector, type PiiDetector } from './ml-pii-stage.js';
 import type { Detector } from './finding.js';
@@ -39,11 +40,11 @@ export interface BuildScrubPipelineOptions {
 /**
  * Shared detector inventory (#1969). Every publish/check consumer runs the same
  * owned detectors (key-policy, plain-patterns including C1 wallet + A1
- * credential IDs, secretlint). What varies is disposition / check-mode and —
- * temporarily until #1973 — whether the openredaction strangler is included
- * (trace preset only). Seed also keeps the entropy fallback off until the flag
- * review surface can absorb A2 mid-band without refuse-on-detection (#1409
- * shipped behavior).
+ * credential IDs, git-identity B2 carriers, secretlint). What varies is
+ * disposition / check-mode and — temporarily until #1973 — whether the
+ * openredaction strangler is included (trace preset only). Seed also keeps the
+ * entropy fallback off until the flag review surface can absorb A2 mid-band
+ * without refuse-on-detection (#1409 shipped behavior).
  */
 export function sharedDetectorInventory(
   policy: KeyPolicy,
@@ -54,6 +55,7 @@ export function sharedDetectorInventory(
     detectors.push(openredactionDetector(policy));
   }
   detectors.push(plainPatternsDetector(policy));
+  detectors.push(gitIdentityDetector(policy));
   detectors.push(secretlintDetector(policy, { entropyFallback: opts.entropyFallback ?? true }));
   if (opts.piiDetector) {
     detectors.push(mlPiiDetector(policy, opts.piiDetector));
