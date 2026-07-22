@@ -6,6 +6,7 @@ import type { CommandRunner } from '../dispatcher/issue-source.js';
 import { defaultRunner } from '../dispatcher/issue-source.js';
 import { ORG, PROJECT_NUMBER, REPO } from '../dispatcher/constants.js';
 import { PROJECT_ID } from '../dispatcher/field-cache.js';
+import { FIX_ISSUE_TYPE_ID } from './child-issues-production.js';
 import {
   type ReviewFollowUpEffort,
   type ReviewFollowUpPort,
@@ -15,7 +16,6 @@ import {
 
 /** Org-level Issue Type node ids (see file-issue gh-taxonomy). */
 export const CHORE_ISSUE_TYPE_ID = 'IT_kwDODh3-Ac4BvpyJ';
-export const FIX_ISSUE_TYPE_ID = 'IT_kwDODh3-Ac4BvpyK';
 export const FEAT_ISSUE_TYPE_ID = 'IT_kwDODh3-Ac4BvpyL';
 export const REFACTOR_ISSUE_TYPE_ID = 'IT_kwDODh3-Ac4CAgNe';
 
@@ -66,7 +66,6 @@ interface TriageFields {
 function parseIssueList(raw: string): readonly {
   readonly number: number;
   readonly body: string;
-  readonly state: string;
 }[] {
   let parsed: unknown;
   try {
@@ -82,17 +81,12 @@ function parseIssueList(raw: string): readonly {
       throw new Error('Malformed review-follow-up list entry');
     }
     const record = entry as Record<string, unknown>;
-    if (
-      typeof record.number !== 'number'
-      || typeof record.body !== 'string'
-      || typeof record.state !== 'string'
-    ) {
+    if (typeof record.number !== 'number' || typeof record.body !== 'string') {
       throw new Error('Malformed review-follow-up list entry fields');
     }
     return {
       number: record.number,
       body: record.body,
-      state: record.state.toLowerCase(),
     };
   });
 }
@@ -221,6 +215,7 @@ export function makeProductionReviewFollowUpPort(
     ...options.issueTypeIds,
   };
   let triageFields: TriageFields | undefined;
+  let openIssuesCache: readonly { readonly number: number; readonly body: string }[] | undefined;
 
   const loadTriageFields = async (): Promise<TriageFields> => {
     if (triageFields !== undefined) return triageFields;
@@ -233,22 +228,31 @@ export function makeProductionReviewFollowUpPort(
     return triageFields;
   };
 
+  const loadOpenIssues = async (): Promise<
+    readonly { readonly number: number; readonly body: string }[]
+  > => {
+    if (openIssuesCache !== undefined) return openIssuesCache;
+    const raw = await runner('gh', [
+      'issue',
+      'list',
+      '--repo',
+      repo,
+      '--state',
+      'open',
+      '--limit',
+      '200',
+      '--json',
+      'number,body',
+    ]);
+    openIssuesCache = parseIssueList(raw);
+    return openIssuesCache;
+  };
+
   return {
     async searchOpenByMarker(marker) {
-      const raw = await runner('gh', [
-        'issue',
-        'list',
-        '--repo',
-        repo,
-        '--state',
-        'open',
-        '--limit',
-        '200',
-        '--json',
-        'number,title,body,state,labels',
-      ]);
-      return parseIssueList(raw)
-        .filter((issue) => issue.state === 'open' && issue.body.includes(marker))
+      const open = await loadOpenIssues();
+      return open
+        .filter((issue) => issue.body.includes(marker))
         .map((issue) => ({ number: issue.number }));
     },
 
@@ -272,6 +276,7 @@ export function makeProductionReviewFollowUpPort(
 
     async ensureTriageComplete(input) {
       const typeId = issueTypeIds[input.type];
+      const fieldsPromise = loadTriageFields();
       const idRaw = await runner('gh', [
         'issue',
         'view',
@@ -311,7 +316,7 @@ export function makeProductionReviewFollowUpPort(
         'json',
       ]);
       const itemId = parseItemAddId(itemRaw);
-      const fields = await loadTriageFields();
+      const fields = await fieldsPromise;
 
       const effortName = EFFORT_PROJECT_NAME[input.effort];
       const priorityName = PRIORITY_PROJECT_NAME[input.priority];
@@ -329,20 +334,18 @@ export function makeProductionReviewFollowUpPort(
         { fieldId: fields.effort.fieldId, optionId: effortOptionId },
         { fieldId: fields.priority.fieldId, optionId: priorityOptionId },
       ];
-      for (const edit of edits) {
-        await runner('gh', [
-          'project',
-          'item-edit',
-          '--id',
-          itemId,
-          '--project-id',
-          fields.projectId,
-          '--field-id',
-          edit.fieldId,
-          '--single-select-option-id',
-          edit.optionId,
-        ]);
-      }
+      await Promise.all(edits.map((edit) => runner('gh', [
+        'project',
+        'item-edit',
+        '--id',
+        itemId,
+        '--project-id',
+        fields.projectId,
+        '--field-id',
+        edit.fieldId,
+        '--single-select-option-id',
+        edit.optionId,
+      ])));
     },
   };
 }

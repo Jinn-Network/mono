@@ -105,7 +105,11 @@ describe('makeProductionReviewFollowUpPort', () => {
     expect(filed).toEqual([{ number: 501, created: true, index: 0 }]);
 
     const listCall = calls.find((args) => args[0] === 'issue' && args[1] === 'list');
-    expect(listCall).toBeDefined();
+    expect(listCall).toEqual(expect.arrayContaining([
+      '--json', 'number,body',
+    ]));
+    expect(listCall!.join(' ')).not.toContain('title');
+    expect(listCall!.join(' ')).not.toContain('labels');
 
     const createCall = calls.find((args) => args[0] === 'issue' && args[1] === 'create');
     expect(createCall).toBeDefined();
@@ -143,24 +147,40 @@ describe('makeProductionReviewFollowUpPort', () => {
     )).toBe(true);
   });
 
-  it('reuses an open follow-up matched by marker without recreating', async () => {
+  it('reuses an open follow-up matched by marker without recreating but still triages', async () => {
     const marker =
       `<!-- jinn-autopilot:review-follow-up pr=84 head=${HEAD} index=0 -->`;
+    const calls: string[][] = [];
     let createCount = 0;
+    let listCount = 0;
     const port = makeProductionReviewFollowUpPort({
       runner: async (_cmd, args) => {
+        calls.push([...args]);
         if (args[0] === 'issue' && args[1] === 'list') {
+          listCount += 1;
           return JSON.stringify([{
             number: 400,
-            title: 'Existing',
             body: `${marker}\n\nold`,
-            state: 'OPEN',
-            labels: [{ name: 'effort:low' }],
           }]);
         }
         if (args[0] === 'issue' && args[1] === 'create') {
           createCount += 1;
           return 'https://github.com/Jinn-Network/mono/issues/999\n';
+        }
+        if (args[0] === 'issue' && args[1] === 'view') {
+          return 'I_kwIssue400\n';
+        }
+        if (args[0] === 'api' && args[1] === 'graphql') {
+          return '{"data":{}}';
+        }
+        if (args[0] === 'project' && args[1] === 'field-list') {
+          return FIELD_LIST_JSON;
+        }
+        if (args[0] === 'project' && args[1] === 'item-add') {
+          return JSON.stringify({ id: 'PVTI_followup400' });
+        }
+        if (args[0] === 'project' && args[1] === 'item-edit') {
+          return '';
         }
         throw new Error(`Unexpected gh args: ${args.join(' ')}`);
       },
@@ -180,5 +200,9 @@ describe('makeProductionReviewFollowUpPort', () => {
 
     expect(filed).toEqual([{ number: 400, created: false, index: 0 }]);
     expect(createCount).toBe(0);
+    expect(listCount).toBe(1);
+    expect(calls.some((args) => args[0] === 'api' && args[1] === 'graphql')).toBe(true);
+    expect(calls.filter((args) => args[0] === 'project' && args[1] === 'item-edit'))
+      .toHaveLength(3);
   });
 });

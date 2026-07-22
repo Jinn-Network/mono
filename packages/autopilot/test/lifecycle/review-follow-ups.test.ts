@@ -56,6 +56,7 @@ describe('parseReviewFollowUpsPayload', () => {
 describe('fileReviewFollowUps', () => {
   it('is idempotent per pr+head+index and applies triage labels without child labels', async () => {
     const created: Array<{ title: string; body: string; labels: string[]; type: string }> = [];
+    const triageCalls: Array<{ issueNumber: number; type: string; effort: string; priority: string }> = [];
     const issues: Array<{ number: number; body: string; state: 'open' | 'closed' }> = [];
     let next = 100;
     const port: ReviewFollowUpPort = {
@@ -70,8 +71,8 @@ describe('fileReviewFollowUps', () => {
         issues.push({ number, body: input.body, state: 'open' });
         return { number };
       },
-      async ensureTriageComplete() {
-        /* asserted via createIssue labels + type in this fake */
+      async ensureTriageComplete(input) {
+        triageCalls.push({ ...input });
       },
     };
 
@@ -95,6 +96,10 @@ describe('fileReviewFollowUps', () => {
     expect(first).toEqual([{ number: 100, created: true, index: 0 }]);
     expect(second).toEqual([{ number: 100, created: false, index: 0 }]);
     expect(created).toHaveLength(1);
+    expect(triageCalls).toEqual([
+      { issueNumber: 100, type: 'feat', effort: 'medium', priority: 'p2' },
+      { issueNumber: 100, type: 'feat', effort: 'medium', priority: 'p2' },
+    ]);
     expect(created[0]!.labels).toEqual(
       expect.arrayContaining(['effort:medium', 'priority:p2']),
     );

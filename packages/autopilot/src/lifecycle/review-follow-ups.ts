@@ -1,4 +1,10 @@
-export const REVIEW_FOLLOW_UP_MARKER_PREFIX = '<!-- jinn-autopilot:review-follow-up';
+import { gitOid } from './types.js';
+
+const REVIEW_FOLLOW_UP_MARKER_TAG = 'jinn-autopilot:review-follow-up';
+const REVIEW_FOLLOW_UP_MARKER_RE = new RegExp(
+  `<!--\\s*${REVIEW_FOLLOW_UP_MARKER_TAG}\\s+pr=(\\d+)\\s+head=([0-9a-fA-F]{40})\\s+index=(\\d+)\\s*-->`,
+);
+
 export const MAX_REVIEW_FOLLOW_UPS_PER_PASS = 5;
 
 export type ReviewFollowUpType = 'feat' | 'chore' | 'fix' | 'refactor';
@@ -43,21 +49,22 @@ export function formatReviewFollowUpMarker(
   if (!Number.isSafeInteger(parentPr) || parentPr <= 0) {
     throw new Error(`Invalid parent PR number: ${parentPr}`);
   }
-  if (!/^[0-9a-f]{40}$/i.test(head)) {
+  let normalizedHead: string;
+  try {
+    normalizedHead = gitOid(head.toLowerCase());
+  } catch {
     throw new Error(`Invalid head SHA: ${head}`);
   }
   if (!Number.isSafeInteger(index) || index < 0) {
     throw new Error(`Invalid follow-up index: ${index}`);
   }
-  return `<!-- jinn-autopilot:review-follow-up pr=${parentPr} head=${head.toLowerCase()} index=${index} -->`;
+  return `<!-- ${REVIEW_FOLLOW_UP_MARKER_TAG} pr=${parentPr} head=${normalizedHead} index=${index} -->`;
 }
 
 export function parseReviewFollowUpMarker(
   body: string,
 ): { readonly parentPr: number; readonly head: string; readonly index: number } | null {
-  const match = body.match(
-    /<!--\s*jinn-autopilot:review-follow-up\s+pr=(\d+)\s+head=([0-9a-fA-F]{40})\s+index=(\d+)\s*-->/,
-  );
+  const match = body.match(REVIEW_FOLLOW_UP_MARKER_RE);
   if (match === null) return null;
   const parentPr = Number(match[1]);
   const index = Number(match[3]);
@@ -143,6 +150,13 @@ export async function fileReviewFollowUps(
     const marker = formatReviewFollowUpMarker(input.parentPr, input.head, index);
     const existing = await port.searchOpenByMarker(marker);
     if (existing.length > 0) {
+      // Create is skipped; triage still runs so a partial prior failure heals.
+      await port.ensureTriageComplete({
+        issueNumber: existing[0]!.number,
+        type: entry.type,
+        effort: entry.effort,
+        priority: entry.priority,
+      });
       filed.push({ number: existing[0]!.number, created: false, index });
       continue;
     }

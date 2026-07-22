@@ -259,7 +259,7 @@ function parseSessionCommand(argv: readonly string[]): ParsedSessionCommand {
         }
         const value = argv[i + 1];
         if (value === undefined || value.startsWith('--')) {
-          throw new Error(`${key} requires a path; ${USAGE}`);
+          throw new Error(`${key} requires a value; ${USAGE}`);
         }
         flags.set(key, value);
         i += 1;
