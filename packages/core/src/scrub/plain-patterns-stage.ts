@@ -15,7 +15,11 @@
  *
  * An opt-in third set (`credentialIds`, #1415) adds deterministic cloud
  * credential-ID prefixes for the seed profile, which runs without the entropy
- * fallback that covers these shapes in the trace profile.
+ * fallback that covers these shapes in the trace profile. An opt-in fourth set
+ * (`walletAddresses`, #1959) adds the deterministic `0x`+40-hex wallet-address
+ * detector the seed profile needs now that it is the episode seed lane's
+ * profile — the class openredaction catches in the trace profile but the seed
+ * profile leaked verbatim to the public corpus.
  */
 
 import { classifyKey, type KeyPolicy } from './key-policy.js';
@@ -30,7 +34,17 @@ const EMAIL_PATTERN =
 /** POSIX home-dir path segment carrying a username. */
 const HOME_PATH_PATTERN = /\/(?:Users|home)\/[^/\s"'`]+/g;
 
-type PatternSpec = { pattern: RegExp; replacement: string; detail: string; kind: string };
+type PatternSpec = {
+  pattern: RegExp;
+  /**
+   * Fixed placeholder, or a factory keyed by the per-value occurrence index so
+   * a rule can emit an indexed stub (e.g. `[ETH_ADDR_0]`) the way the trace
+   * profile's openredaction does.
+   */
+  replacement: string | ((index: number) => string);
+  detail: string;
+  kind: string;
+};
 
 const PATTERNS: PatternSpec[] = [
   { pattern: EMAIL_PATTERN, replacement: '[EMAIL]', detail: 'email', kind: 'pii' },
@@ -66,6 +80,29 @@ const CREDENTIAL_ID_PATTERNS: PatternSpec[] = [
   },
 ];
 
+/**
+ * Ethereum-style wallet address: `0x` + exactly 40 hex chars (#1959). Ported
+ * verbatim from openredaction's `ETHEREUM_ADDRESS` matcher, so the seed
+ * profile catches this class exactly as the trace profile does through
+ * openredaction (parity), without pulling in the rest of that stage. The `0x`
+ * prefix and the `\b` bounds are load-bearing carve-outs: bare 40-hex git
+ * object ids (no `0x`) and `0x`+64-hex transaction hashes are provenance
+ * receipts that must survive, so neither may be swallowed. This is the scrub
+ * redesign's C1 detector (`docs/superpowers/specs/2026-07-22-scrub-redesign-
+ * design.md` §6.2) minus the instance-allowlist refinement — verbatim
+ * forward-compatible.
+ */
+const ETH_ADDRESS_PATTERN = /\b0x[a-fA-F0-9]{40}\b/g;
+
+const WALLET_ADDRESS_PATTERNS: PatternSpec[] = [
+  {
+    pattern: ETH_ADDRESS_PATTERN,
+    replacement: (index) => `[ETH_ADDR_${index}]`,
+    detail: 'eth-address',
+    kind: 'pii',
+  },
+];
+
 export interface PlainPatternsOptions {
   /**
    * Adds the deterministic credential-ID prefixes above (#1415). Default false:
@@ -74,10 +111,21 @@ export interface PlainPatternsOptions {
    * fallback) turns this on.
    */
   credentialIds?: boolean;
+  /**
+   * Adds the deterministic `0x`+40-hex wallet-address detector above (#1959).
+   * Default false: the trace profile already catches this class via
+   * openredaction and must stay byte-identical. The seed profile (which runs
+   * without openredaction) turns this on to close the wallet-address leak.
+   */
+  walletAddresses?: boolean;
 }
 
 export function plainPatternsStage(policy: KeyPolicy, opts: PlainPatternsOptions = {}): ScrubStage {
-  const patterns = opts.credentialIds ? [...PATTERNS, ...CREDENTIAL_ID_PATTERNS] : PATTERNS;
+  const patterns = [
+    ...PATTERNS,
+    ...(opts.credentialIds ? CREDENTIAL_ID_PATTERNS : []),
+    ...(opts.walletAddresses ? WALLET_ADDRESS_PATTERNS : []),
+  ];
   return {
     name: 'plain-patterns',
     version: VERSION,
@@ -93,8 +141,9 @@ export function plainPatternsStage(policy: KeyPolicy, opts: PlainPatternsOptions
         for (const { pattern, replacement, detail, kind } of patterns) {
           let hits = 0;
           scrubbed = scrubbed.replace(pattern, () => {
+            const stub = typeof replacement === 'function' ? replacement(hits) : replacement;
             hits += 1;
-            return replacement;
+            return stub;
           });
           for (let i = 0; i < hits; i += 1) {
             redactions.push({ key, stage: 'plain-patterns', kind, detail });
