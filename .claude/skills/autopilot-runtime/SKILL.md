@@ -1,15 +1,15 @@
 ---
 name: autopilot-runtime
-description: Shared process and child-dispatch mechanics for Jinn Autopilot's implement-issue, review-pr, and merge-prep workflows. Consume this skill from those canonical workflows; it does not define their lifecycle, gates, authority, or deliverables.
+description: Shared process and child-dispatch mechanics for Jinn Autopilot's implement-issue, review-pr, fix-child, and reconcile workflows. Consume this skill from those canonical workflows; it does not define their lifecycle, gates, authority, or deliverables.
 ---
 
 # autopilot-runtime
 
 This skill is the single runtime-mechanics adapter for Autopilot. The canonical
-`implement-issue`, `review-pr`, and `merge-prep` skills own their distinct
-lifecycle policy, authority boundaries, gates, retry behavior, and deliverables.
-Do not copy those workflow rules here, and do not copy runtime mechanics back
-into a workflow skill.
+`implement-issue`, `review-pr`, `fix-child`, and `reconcile` skills own their
+distinct lifecycle policy, authority boundaries, gates, retry behavior, and
+deliverables. Do not copy those workflow rules here, and do not copy runtime
+mechanics back into a workflow skill.
 
 ## Select one process-wide runtime
 
@@ -63,3 +63,17 @@ The capsule is mandatory because fresh roots do not inherit coordinator
 history. Never forward coordinator conversation history. The runtime reference
 controls how these mechanisms are invoked; the calling workflow remains
 authoritative about when and why each one is used.
+
+## Session verb roster
+
+The v2 session surface (see `packages/autopilot/src/cli/session.ts`) is:
+
+- `checkpoint`
+- `implementation-complete --summary-file <path>`
+- `review-verdict --state <APPROVE|REQUEST_CHANGES> --body-file <path>`
+- `review-findings --file <path>`
+- `child-complete`
+- `human --reason-file <path>`
+
+Deleted verbs (`review-fix-publish`, `merge-prep-complete`) must not appear in
+workflow skills.

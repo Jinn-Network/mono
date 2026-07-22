@@ -27,8 +27,11 @@ Modes:
 
 - **observe** — derive and explain lifecycle state; no mutation.
 - **recover** — reconcile projections and stale v2 work; make no new claims.
-- **active** — recover, claim, execute, review, merge-prep, and merge within
-  this process’s local caps.
+- **active** — recover, claim, execute, review, and merge within
+  this process’s local caps. (Historical: merge-prep was a separate lane;
+  Stage 5 of the single-surface lifecycle deleted it — behind/conflict
+  work uses the children ladder. See
+  `docs/superpowers/specs/2026-07-21-single-surface-lifecycle.md`.)
 
 No command in this runbook should be executed merely because the code was
 installed. Activation is an explicit operator decision.
@@ -115,7 +118,7 @@ For every legacy worktree/session, record:
 - local branches and detached heads;
 - ahead commits not reachable from the remote branch;
 - remote branches without PRs;
-- implementation, review, and merge-prep sessions;
+- implementation, review, and (historical) merge-prep sessions;
 - draft and ready PRs;
 - the selected identity when known.
 
@@ -141,7 +144,7 @@ Use this table:
 | Draft review-fix PR | Preserve/finish the legacy reviewer or park Human before v2 recovery |
 | Human-held draft | Preserve and exclude |
 | Current-head native approval | Preserve the native gate |
-| Conflicting approved PR | Eligible for v2 merge-prep after cutover |
+| Conflicting approved PR | File reconcile child (children ladder; merge-prep deleted Stage 5) |
 | Merged PR | Reconcile Done; local cleanup remains disabled |
 
 Do not rename existing branches, synthesize historical review refs, rewrite
@@ -265,14 +268,12 @@ JINN_AUTOPILOT_RUNNER_ID=canary-a \
 JINN_AUTOPILOT_WORKTREE_BASE=/safe/exact/path/canary-a \
 JINN_AUTOPILOT_IMPLEMENTATION_CAP=1 \
 JINN_AUTOPILOT_REVIEW_CAP=1 \
-JINN_AUTOPILOT_MERGE_PREP_CAP=1 \
 yarn autopilot --mode active --once --json status
 
 JINN_AUTOPILOT_RUNNER_ID=canary-b \
 JINN_AUTOPILOT_WORKTREE_BASE=/safe/exact/path/canary-b \
 JINN_AUTOPILOT_IMPLEMENTATION_CAP=1 \
 JINN_AUTOPILOT_REVIEW_CAP=1 \
-JINN_AUTOPILOT_MERGE_PREP_CAP=1 \
 yarn autopilot --mode active --once --json status
 ```
 
@@ -285,7 +286,9 @@ Launch the two commands concurrently. Verify:
 - detached attempt paths do not collide;
 - the loser reports the race without shared cleanup.
 
-Repeat the race for review and merge-prep.
+Repeat the race for review. (Historical: this canary also raced merge-prep via
+`JINN_AUTOPILOT_MERGE_PREP_CAP`; that env and lane were deleted in Stage 5 —
+behind/conflict scheduling is children-ladder only.)
 
 ## 9. Cross-host canary
 
@@ -304,7 +307,7 @@ Enable in this order:
 1. one production implementation slot;
 2. a second independent implementation process;
 3. review with distinct identities;
-4. merge-prep;
+4. children ladder (finding/reconcile children + tier-0 update-branch);
 5. higher per-process caps after backlog/rate-limit health is demonstrated;
 6. cleanup last.
 
@@ -333,3 +336,36 @@ After any v2 claim exists:
 
 Do not restart legacy after v2 has published a claim. Stopping a process must
 not destroy GitHub-visible progress, and rollback is never a cleanup event.
+
+## 12. Operator supervisor (`supervise.sh`)
+
+The operator-local supervisor at `~/.jinn-client/eng-loop/supervise.sh` is
+gitignored and per-operator. After the single-surface lifecycle ships, it must
+launch **only** the v2 entry point:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+cd /path/to/jinn-mono/packages/autopilot
+export JINN_AUTOPILOT_RUNNER_ID="${JINN_AUTOPILOT_RUNNER_ID:-$(hostname)-1}"
+# Required: JINN_IMPL_GH_TOKEN, JINN_DISPATCHER_AUTHOR_ALLOWLIST,
+# JINN_AUTOPILOT_CAPABILITY_ATTESTATION (active mode).
+unset JINN_MERGE_PREP   # deleted — children ladder only
+exec yarn autopilot --mode active
+```
+
+Do **not** invoke `yarn autopilot:legacy`, export `JINN_MERGE_PREP`, or kill
+patterns keyed to the deleted merge-prep lane. Long-running deployments should
+use `run-autopilot-v2.ts` (the default `yarn autopilot` script).
+
+## 13. Board painter token
+
+The scheduled workflow `.github/workflows/autopilot-board-painter.yml` requires
+a repo secret with org Projects v2 write access:
+
+- **Preferred:** `JINN_AUTOPILOT_PAINTER_TOKEN`
+- **Fallback:** `JINN_IMPL_GH_TOKEN`
+
+Confirm one is configured in the repository Actions secrets before relying on
+board convergence in production. The default `GITHUB_TOKEN` is insufficient for
+the org-level "Jinn engineering" project board.

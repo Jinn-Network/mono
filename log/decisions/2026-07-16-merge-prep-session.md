@@ -82,6 +82,16 @@ proxy so merging Stage B to `next` is "the flip" that arms it on the next respaw
 `unset JINN_MERGE_PREP`** — no code change; Stage A's deterministic escalation continues to run,
 so stuck PRs stay visible either way.
 
+## Amendment (2026-07-21, single-surface lifecycle)
+
+The merge-prep session concept in this DR is **subsumed** by reconcile child
+issues and the tier-0 update-branch gate in
+`docs/superpowers/specs/2026-07-21-single-surface-lifecycle.md`. Handbook
+AI-rule 4(c) now references agent-authored mechanical conflict resolutions via
+the children ladder (never rebase; full fresh re-review after reconcile). The
+`JINN_MERGE_PREP` arming path and `supervise.sh` merge-prep exports are
+retired — operators use the v2 entry point only (see cutover runbook §12).
+
 ## Rejected alternatives
 
 - **Session merges directly** (like the manual `/merge-batch`). Rejected: an agent-authored
