@@ -1,11 +1,11 @@
 # One trustworthy scrub for public knowledge — PII/secrets scrub redesign
 
-- **Version:** 0.1
+- **Version:** 0.2 (v0.2 folds in the 2026-07-22 corpus-mining PII inventory: D3 hostname evidence, two measured precision hazards, eval-weighting caveat)
 - **Date:** 2026-07-22
 - **Author:** Claude Fable 5 (drafted, design session); Ritsu (design direction)
 - **Shape:** `design` — output is this spec; implementation lands via the follow-up issues in §9, not in this session
 - **Supersedes (on adoption):** the profile-split portion of `spec/2026-06-15-ts-trajectory-scrub-stack.md` (stage inventory and failure posture carry forward; the strict/seed division does not)
-- **Evidence base:** issues [#1784](https://github.com/Jinn-Network/mono/issues/1784), [#1959](https://github.com/Jinn-Network/mono/issues/1959), the #1372/#1391 denylist lineage, and a 2026-07-21 operator-local scrub stress test over real episodes (`~/.jinn-client/local-corpus/scrub-findings.md` — raw third-party PII; referenced here by class and count only, never quoted)
+- **Evidence base:** issues [#1784](https://github.com/Jinn-Network/mono/issues/1784), [#1959](https://github.com/Jinn-Network/mono/issues/1959), the #1372/#1391 denylist lineage, a 2026-07-21 operator-local scrub stress test over real episodes (`~/.jinn-client/local-corpus/scrub-findings.md`), and a 2026-07-22 operator-local mining inventory over 10 autopilot hermes-home state stores (`~/.jinn-client/local-corpus/mining-batch1-pii-inventory.md`). Both evidence files stay operator-local; this spec references them by class and count only, never quoting PII
 
 ## 1. Summary
 
@@ -137,7 +137,7 @@ verifies).
 | C2 | Transaction hashes (`0x` + 64 hex) | Low–medium — public chain data, but links trace to operator activity beyond the anchor itself | Medium — receipts are Legibility material | Excellent (shape) | policy question — §10 Q1 | flag (default) pending Q1 |
 | D1 | Home paths / usernames in paths | Medium | Low (tail of the path survives) | Excellent (shipped) | ≥ 0.99 / ≥ 0.99 | auto-redact (shipped behavior) |
 | D2 | IP addresses | Public IPs: medium–high (location/infra). Loopback/private/reserved: ~0 and **often illustrative config content** | High for loopback (config examples are knowledge) | Excellent (shape + range classification) | public ≥ 0.95 / ≥ 0.95 | public auto-redact; loopback/reserved pass; private-range flag |
-| D3 | Hostnames, machine names, device serials | Medium | Medium | Poor–fair | flag-only | flag |
+| D3 | Hostnames, machine names, device serials | Medium | Medium | Poor–fair in free text; **excellent via structured carriers** (attempt-manifest `host` fields, `os.hostname()` sources) | carrier ≥ 0.95 / ≥ 0.95; free-text flag-only | carrier auto-redact; free-text flag |
 | E1 | Third-party document content (pasted customer data, medical/financial text) | High–critical | Medium | ML/document-class tier | ≥ 0.7 flag | flag; auto-redact only high-confidence sub-spans |
 
 Notes:
@@ -150,6 +150,19 @@ Notes:
    7–12-hex short SHAs are provenance receipts. Any detector whose pattern can swallow them
   (entropy fallback, hex-shape rules) must carry an explicit carve-out, and §7's corruption
   metric counts them.
+- **D3 is now a measured leak, with a structured carrier** (2026-07-22 mining inventory):
+  a device hostname published through a v2 attempt-manifest `host` field is machine-uncaught
+  by both shipped profiles. The carrier is a *key*, so the fix is key-policy tier
+  (drop/redact the manifest `host`-type keys deterministically), not a content regex.
+  Free-text hostname regexes carry a measured precision hazard: a naive `*.local` rule
+  matches the Yarn version string `0.0.0-use.local` 11–21 times per mined review-home —
+  free-text hostname detection stays in the flag band.
+- **Variable names are not secrets — literals are** (A2 precision hazard, measured): the
+  mined autopilot homes contain zero literal provider tokens but heavy legitimate use of
+  env-var *references* in credential-handoff shell (`$GH_TOKEN`-style). A rule keyed on the
+  variable *name* would have fired 49–230 times per review-home with zero true positives.
+  A2's context words boost confidence only for candidate *values*; an env-reference shape
+  in value position is counter-evidence, never a hit.
 
 ### 3.3 Where human review is load-bearing — and how it shifts with scale
 
@@ -383,8 +396,10 @@ Scoring: deterministic shapes with checksum/carrier context enter at VERY_HIGH; 
 matches enter at MEDIUM and are **boosted** by context words within a window (assignment
 keywords for A2: `token`, `secret`, `password`, `Authorization: Bearer`; carrier keywords
 for B2) or **suppressed** by counter-evidence (instance allowlist hit; git-SHA shape;
-inside a `jinn.*` structural attribute). Band arithmetic is defined in one place; every
-adjustment is recorded in `evidence` so any redaction is explainable after the fact.
+env-var reference shape — `$NAME`/`${NAME}` in value position is a reference, not a
+literal, per the measured §3.2 A2 hazard; inside a `jinn.*` structural attribute). Band
+arithmetic is defined in one place; every adjustment is recorded in `evidence` so any
+redaction is explainable after the fact.
 
 Separating detection from disposition is the load-bearing structural change: it makes "one
 scrub" possible (everyone runs all detectors), makes precision tunable per-detector
@@ -409,6 +424,10 @@ The ~15 shapes this threat model needs, owned in-repo (most already exist or are
 - IP addresses with range classification (D2): loopback/reserved pass, public auto-redact,
   private flag
 - phone with libphonenumber-style validation (B5)
+- **machine-identity keys** (D3 carrier): attempt-manifest `host`-type keys and other
+  structured telemetry keys carrying device identity join the key-policy tier
+  (drop/redact at the key level — the measured hostname leak's carrier is a key, not
+  prose; free-text hostname detection stays flag-only per §3.2)
 - entropy fallback (A2): the shipped, heavily-tuned secretlint pass-2 gate carries forward
   as-is — its #1348/#1391 carve-outs are exactly the kind of owned, tested precision work
   this design keeps — but emits banded findings instead of edits
@@ -435,10 +454,13 @@ overrides:
 
 - **Known-identity pack (redact-list)**: at daemon start, assemble the operator's own
   identity surface from local state — git `user.name` / `user.email`, `gh` login, home-dir
-  username, earning-state addresses (EOA, Safe, mech, service), configured emails. Exact
-  (normalized) matches redact at VERY_HIGH regardless of ML availability. Recall ≈ 1.0 on
-  self-PII, zero inference cost, works in every lane. (scrubadub's known-filth, pointed at
-  the identity Jinn already holds locally.)
+  username, local hostname (`os.hostname()`), earning-state addresses (EOA, Safe, mech,
+  service), configured emails. Exact (normalized) matches redact at VERY_HIGH regardless
+  of ML availability. Recall ≈ 1.0 on self-PII, zero inference cost, works in every lane.
+  (scrubadub's known-filth, pointed at the identity Jinn already holds locally.) The
+  2026-07-22 mining inventory measures the gap this closes: operator handles appear 1–32
+  times per autopilot home, machine-uncaught by both shipped profiles, across all 10 mined
+  homes.
 - **Instance allowlist (pass-list)**: verifiably-public values — the protocol address book
   (JinnRouter, OLAS token, staking contracts, mech marketplace — sourced from the repo's
   own `contracts.ts` constants, not hand-typed), loopback/reserved IPs, the repo's own
@@ -505,11 +527,20 @@ Two-tier, mirroring the constraint that real traces never leave the machine:
    (byte-identical pass-through — this permanently locks the #1784 class of regression);
    git-SHA/protocol-address survival pinned.
 2. **Operator-local real tier (release gate)**: `jinn scrub bench` runs the pipeline over
-   the labeled operator-local corpus (seeded from the 2026-07-21 findings inventory; grown
-   by autopilot trajectories and every review-queue decision). Emits a **metrics-only
-   JSON** (per-class TP/FP/FN counts, recall, precision, Fβ=2 — no text, no spans) that is
-   safe to publish and is attached to release readiness. The labeled data itself never
-   leaves the machine.
+   the labeled operator-local corpus (seeded from the 2026-07-21 findings inventory and
+   the 2026-07-22 mining inventory over 10 autopilot homes; grown by autopilot
+   trajectories and every review-queue decision). Emits a **metrics-only JSON** (per-class
+   TP/FP/FN counts, recall, precision, Fβ=2 — no text, no spans) that is safe to publish
+   and is attached to release readiness. The labeled data itself never leaves the machine.
+
+   **Weighting caveat (measured 2026-07-22):** in autopilot homes a large share of raw
+   hits comes from per-message *replayed context* — the CLAUDE.md injection carries the
+   protocol contract addresses and repo paths into every message — not from distinct
+   trajectory PII. The benchmark labels distinct leak **sources** and dedupes
+   replayed-context repeats, so per-class metrics measure coverage of the leak surface
+   rather than the replay frequency of one injected document. (The same measurement is
+   direct evidence for the §6.4 instance allowlist: every wallet-shaped hit in those homes
+   was a known protocol address.)
 
 Headline metric per class: **Fβ=2** (recall-weighted — a miss is worse than a flag), plus
 the corruption rate as the precision backstop (defacement is measured on content that must
@@ -543,8 +574,12 @@ redesign.** Reasoning:
   profile on `next` (PR #1856), so the leak window is open until #1959 merges.
 
 One interim caution: the #1959 AC as written (redact all `0x`+40-hex) will also redact
-known protocol addresses in seed content. Acceptable for the interim (small defacement,
-zero leak); the §6.4 allowlist restores them at M2.
+known protocol addresses. Acceptable for the interim on the seed lane (small defacement,
+zero leak); the §6.4 allowlist restores them at M2. The 2026-07-22 mining inventory
+raises the stakes for the *autopilot* lane specifically: the CLAUDE.md injection replays
+the protocol addresses into every message, so the interim rule would deface every
+trajectory's replayed context there — the M2 instance allowlist is on the critical path
+for autopilot capture, alongside M3's name coverage.
 
 ### 8.2 Redesign milestones
 
