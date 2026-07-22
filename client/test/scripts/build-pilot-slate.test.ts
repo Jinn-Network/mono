@@ -15,6 +15,7 @@ import {
   ACTIVE_HELD_OUT_SLATE_VERSIONS,
   hashHeldOutSlateArtifact,
   loadActiveHeldOutSlateIds,
+  loadHeldOutSlate,
   type HeldOutSlateArtifact,
 } from '../../src/solver-types/_swe-rebench-v2-held-out-slate.js';
 import type { PoolTask } from '../../src/solver-types/_swe-rebench-v2-pool.js';
@@ -75,6 +76,9 @@ describe('resolveExcludedActiveSlateVersions (#1563)', () => {
   });
 
   it('keeps shipped v3 members out of the older-slate exclusion set', () => {
+    const shipped = loadHeldOutSlate(SOLVER_TYPE, VERSION, { dir: SLATE_DIR });
+    expect(shipped.hash).toBe(SHIPPED_V3_HASH);
+
     const buggy = loadActiveHeldOutSlateIds(
       SOLVER_TYPE,
       ACTIVE_HELD_OUT_SLATE_VERSIONS,
@@ -87,6 +91,10 @@ describe('resolveExcludedActiveSlateVersions (#1563)', () => {
     );
     expect(buggy.has(KNOWN_V3_MEMBER)).toBe(true);
     expect(fixed.has(KNOWN_V3_MEMBER)).toBe(false);
+    for (const id of shipped.instanceIds) {
+      expect(buggy.has(id)).toBe(true);
+      expect(fixed.has(id)).toBe(false);
+    }
     // shipped report field contract
     expect(
       resolveExcludedActiveSlateVersions(ACTIVE_HELD_OUT_SLATE_VERSIONS, VERSION),
@@ -220,7 +228,9 @@ describe('selection impact of self-exclusion (#1563 AC1)', () => {
       hashHeldOutSlateArtifact({ ...artifact, instanceIds: selectedAgain.map((e) => e.instance_id) }),
     ).toBe(hash);
 
-    // Document that the live shipped hash is a different input set (full HF pool).
-    expect(SHIPPED_V3_HASH).toMatch(/^sha256:[0-9a-f]{64}$/);
+    // Shipped hash is locked against the real artifact; fixture hash differs
+    // because hermetic pools cannot replay the original HF + validated-pool inputs.
+    expect(loadHeldOutSlate(SOLVER_TYPE, VERSION, { dir: SLATE_DIR }).hash).toBe(SHIPPED_V3_HASH);
+    expect(hash).not.toBe(SHIPPED_V3_HASH);
   });
 });
