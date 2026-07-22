@@ -335,6 +335,39 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
+  it('forwards ipfsFallbackGatewayUrl: false into fetchSignedTaskFromIpfs (#1648)', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { decodeTaskCreatedLogs } = await import('../../../src/adapters/mech/contracts.js');
+    const { fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    vi.mocked(decodeTaskCreatedLogs).mockReturnValueOnce([{
+      taskId: '7',
+      taskCidDigest: TASK_CID_DIGEST,
+      manifestDigest: MANIFEST_DIGEST,
+      creator: TEST_CONFIG.safeAddress,
+      transactionHash: TX_HASH,
+      blockNumber: 321,
+    }]);
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({ id: 'pinned-fallback-task' }));
+
+    const adapter = new MechAdapter({ ...TEST_CONFIG, ipfsFallbackGatewayUrl: false });
+    await adapter.initialize();
+    (adapter as any).publicClient.getBlockNumber = vi.fn().mockResolvedValue(101n);
+    (adapter as any).publicClient.getLogs = vi.fn().mockResolvedValue([{ data: '0x', topics: [] }]);
+    (adapter as any).requestBlockCursor = 100n;
+
+    const gen = adapter.watchForTasks()[Symbol.asyncIterator]();
+    await gen.next();
+
+    expect(fetchSignedTaskFromIpfs).toHaveBeenCalledWith(
+      TEST_CONFIG.ipfsGatewayUrl,
+      TASK_CID,
+      { fallbackGatewayBase: false },
+    );
+
+    await adapter.stop();
+  });
+
   it('watchForTasks yields discoveryApi-discovered claimable backlog tasks', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { canClaimTask, claimTask } = await import('../../../src/adapters/mech/contracts.js');
