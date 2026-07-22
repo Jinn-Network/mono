@@ -16,6 +16,10 @@ import {
 } from '../src/autopilot-runtime.js';
 import type { SpawnFn } from '../src/dispatcher/coordinator-session.js';
 import {
+  CURSOR_BIN_ENV,
+  CURSOR_MODEL_ENV,
+} from '../src/dispatcher/cursor-runtime.js';
+import {
   defaultRunner,
   type CommandRunner,
 } from '../src/dispatcher/issue-source.js';
@@ -139,6 +143,12 @@ function dispatcherConfig(allowlist: ReadonlySet<string>): DispatcherConfig {
     ...(env.JINN_DISPATCHER_HERMES_PYTHON === undefined
       ? {}
       : { hermesPythonPath: env.JINN_DISPATCHER_HERMES_PYTHON }),
+    ...(env[CURSOR_MODEL_ENV] === undefined
+      ? {}
+      : { cursorModel: env[CURSOR_MODEL_ENV] }),
+    ...(env[CURSOR_BIN_ENV] === undefined
+      ? {}
+      : { cursorBin: env[CURSOR_BIN_ENV] }),
   };
 }
 
@@ -228,6 +238,12 @@ async function main(): Promise<void> {
   const allowlist = authorAllowlist(env.JINN_DISPATCHER_AUTHOR_ALLOWLIST);
   const onlyIssues = parseOnlyIssuesAllowlist(env.JINN_AUTOPILOT_ONLY_ISSUES);
   const config = dispatcherConfig(allowlist);
+  console.log(`[autopilot:v2] runtime=${config.runtime}`);
+  if (config.runtime === 'cursor') {
+    console.log(
+      `[autopilot:v2] cursor config (bin=${config.cursorBin}, reviewModel=${config.cursorModel})`,
+    );
+  }
   const runnerId = defaultRunnerId({
     configured: env.JINN_AUTOPILOT_RUNNER_ID,
     environment: env,

@@ -1225,6 +1225,8 @@ export async function cleanupAttempt(
     if (options.isPidAlive(manifest.pid)) {
       return retained('live', 'Attempt child PID is still live.', manifest.attemptId);
     }
+    markAttemptExited(manifestPath);
+    manifest = readAttemptManifest(manifestPath);
   }
   let actualRepository: AttemptRepositoryIdentity;
   try {

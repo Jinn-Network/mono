@@ -70,7 +70,7 @@ function exercise(
   return { result, call: calls[0], calls, homes, logs };
 }
 
-describe.each(['claude', 'hermes'] as const)(
+describe.each(['claude', 'hermes', 'cursor'] as const)(
   '%s coordinator launcher',
   (runtime) => {
     it.each(CASES)(
@@ -106,7 +106,7 @@ describe.each(['claude', 'hermes'] as const)(
             expect(call.args).not.toContain('--effort');
           }
           expect(call.args.at(-1)).toContain('`claude -p` / `--print`');
-        } else {
+        } else if (runtime === 'hermes') {
           expect(call.cmd).toBe(DEFAULT_CONFIG.hermesPythonPath);
           expect(call.args[0]).toBe(HERMES_STATELESS_LAUNCHER);
           expect(call.args).not.toContain('--effort');
@@ -126,6 +126,23 @@ describe.each(['claude', 'hermes'] as const)(
             sessionId: `${session.kind}-42`,
             effort: session.effort,
           }]);
+        } else {
+          expect(call.cmd).toBe(DEFAULT_CONFIG.cursorBin);
+          expect(call.args[0]).toBe('-p');
+          expect(call.args).toContain('--approve-mcps');
+          expect(call.args).not.toContain('--effort');
+          expect(call.args[call.args.indexOf('--workspace') + 1])
+            .toBe(`/tmp/worktrees/${session.kind}-42`);
+          const expectedModel = session.kind === 'implement'
+            ? 'cursor-grok-4.5-high'
+            : DEFAULT_CONFIG.cursorModel;
+          expect(call.args[call.args.indexOf('--model') + 1]).toBe(expectedModel);
+          expect(call.args.at(-1)).toContain('`agent -p`');
+          expect(call.opts.env).toMatchObject({
+            JINN_DISPATCHER_CURSOR_MODEL: expectedModel,
+            JINN_DISPATCHER_CURSOR_BIN: DEFAULT_CONFIG.cursorBin,
+          });
+          expect(homes).toEqual([]);
         }
 
         expect(logs).toEqual([

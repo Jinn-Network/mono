@@ -1,6 +1,6 @@
 export const AUTOPILOT_RUNTIME_ENV = 'JINN_AUTOPILOT_RUNTIME';
 
-export type AutopilotRuntime = 'claude' | 'hermes';
+export type AutopilotRuntime = 'claude' | 'hermes' | 'cursor';
 
 /**
  * Resolve the single process-wide coordinator runtime.
@@ -12,9 +12,9 @@ export function parseAutopilotRuntime(
   value: string | undefined,
 ): AutopilotRuntime {
   if (value === undefined) return 'claude';
-  if (value === 'claude' || value === 'hermes') return value;
+  if (value === 'claude' || value === 'hermes' || value === 'cursor') return value;
   throw new Error(
     `[autopilot] Invalid ${AUTOPILOT_RUNTIME_ENV}=${JSON.stringify(value)}; ` +
-      'expected claude or hermes.',
+      'expected claude, hermes, or cursor.',
   );
 }

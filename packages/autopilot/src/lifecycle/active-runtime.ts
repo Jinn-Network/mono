@@ -91,17 +91,12 @@ export function makeActiveRuntime(
       implementation: attempts.filter((attempt) => attempt.phase === 'implement').length,
       review: attempts.filter((attempt) => attempt.phase === 'review').length,
     };
-    const occupied = new Set(
-      attempts.map((attempt) => attempt.selectedLogin.toLowerCase()),
-    );
     return {
       remaining: {
         implementation: Math.max(0, caps.implementation - activeByPhase.implementation),
         review: Math.max(0, caps.review - activeByPhase.review),
       },
-      availableLogins: options.credentials.logins().filter(
-        (login) => !occupied.has(login.toLowerCase()),
-      ),
+      availableLogins: options.credentials.logins(),
       implementationPreferredLogin: options.implementationPreferredLogin,
     };
   };
@@ -125,10 +120,7 @@ export function makeActiveRuntime(
       if (phase !== null && local.remaining[phase] === 0) {
         return { outcome: 'skipped', reason: 'local phase capacity is full' };
       }
-      if (local.availableLogins.length === 0) {
-        return { outcome: 'skipped', reason: 'no local credential lane is free' };
-      }
-      const credentials = options.credentials.restrictedTo(local.availableLogins);
+      const credentials = options.credentials;
       const result = action.kind === 'claim-implementation'
         ? await options.handlers.implementation(action, credentials, snapshot)
         : action.kind === 'claim-review'
