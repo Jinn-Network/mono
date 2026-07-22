@@ -99,7 +99,7 @@ describe('runHarvestTick', () => {
         intervalMs: 60_000,
         stateDir: dir,
         repos: [{ path: '/tmp/repo', repo: 'acme/widget' }],
-        limitPerRepo: 1,
+        limitPerRepo: 1, limitPerTick: 3,
         publish: false,
         isDockerAvailable: () => false,
         mintDeps: {
@@ -143,7 +143,7 @@ describe('runHarvestTick', () => {
         intervalMs: 60_000,
         stateDir: dir,
         repos: [{ path: dir, repo: 'acme/widget' }],
-        limitPerRepo: 1,
+        limitPerRepo: 1, limitPerTick: 3,
         publish: false,
         isDockerAvailable: () => true,
         harvestState: state,
@@ -197,7 +197,7 @@ describe('runHarvestTick', () => {
       };
 
       const first = await runHarvestTick({
-        intervalMs: 60_000, stateDir: dir, repos: [{ path: dir, repo: 'acme/widget' }], limitPerRepo: 1,
+        intervalMs: 60_000, stateDir: dir, repos: [{ path: dir, repo: 'acme/widget' }], limitPerRepo: 1, limitPerTick: 3,
         publish: false, isDockerAvailable: () => true, harvestState: state, loadPool: async () => [], mintDeps,
       });
       expect(first.awaitingInput).toHaveLength(1);
@@ -206,7 +206,7 @@ describe('runHarvestTick', () => {
       queueHardenedAdmissionRun(runner.runEval as ReturnType<typeof vi.fn>);
       const second = await runHarvestTick({
         intervalMs: 60_000, stateDir: dir,
-        repos: [{ path: dir, repo: 'acme/widget', explicitRecipe: explicitBootstrap(base) }], limitPerRepo: 1,
+        repos: [{ path: dir, repo: 'acme/widget', explicitRecipe: explicitBootstrap(base) }], limitPerRepo: 1, limitPerTick: 3,
         publish: true, isDockerAvailable: () => true, harvestState: state, loadPool: async () => [], mintDeps,
       });
       expect(second.discovered).toBe(0);
@@ -244,7 +244,7 @@ describe('runHarvestTick', () => {
       );
       const result = await runHarvestTick({
         intervalMs: 60_000, stateDir: dir,
-        repos: [{ path: dir, repo: 'acme/widget', explicitRecipe: explicitBootstrap(base) }], limitPerRepo: 1,
+        repos: [{ path: dir, repo: 'acme/widget', explicitRecipe: explicitBootstrap(base) }], limitPerRepo: 1, limitPerTick: 3,
         publish: false, isDockerAvailable: () => true, harvestState: state, loadPool: async () => [],
         mintDeps: {
           stateDir: dir, ipfsRegistryUrl: 'https://registry.example', ipfsGatewayUrl: 'https://gateway.example',
@@ -308,7 +308,7 @@ describe('runHarvestTick', () => {
       };
       const run = (now: number) => runHarvestTick({
         intervalMs: 60_000, stateDir: dir,
-        repos: [{ path: dir, repo: 'acme/widget', explicitRecipe: explicitBootstrap(base) }], limitPerRepo: 1,
+        repos: [{ path: dir, repo: 'acme/widget', explicitRecipe: explicitBootstrap(base) }], limitPerRepo: 1, limitPerTick: 3,
         publish: true, isDockerAvailable: () => true, harvestState: state, loadPool: async () => [], mintDeps,
         now: () => now,
       });
@@ -384,7 +384,7 @@ describe('runHarvestTick', () => {
       };
       const run = (now: number) => runHarvestTick({
         intervalMs: 60_000, stateDir: dir,
-        repos: [{ path: dir, repo: 'acme/widget', explicitRecipe: explicitBootstrap(base) }], limitPerRepo: 1,
+        repos: [{ path: dir, repo: 'acme/widget', explicitRecipe: explicitBootstrap(base) }], limitPerRepo: 1, limitPerTick: 3,
         publish: true, isDockerAvailable: () => true, harvestState: state, loadPool: async () => [], mintDeps,
         now: () => now,
       });
@@ -446,7 +446,7 @@ describe('runHarvestTick', () => {
       };
       const run = (now: number, publish = false) => runHarvestTick({
         intervalMs: 60_000, stateDir: dir,
-        repos: [{ path: dir, repo: 'acme/widget', explicitRecipe: explicitBootstrap(base) }], limitPerRepo: 1,
+        repos: [{ path: dir, repo: 'acme/widget', explicitRecipe: explicitBootstrap(base) }], limitPerRepo: 1, limitPerTick: 3,
         publish, isDockerAvailable: () => true, harvestState: state, loadPool: async () => [], mintDeps,
         now: () => now,
       });
@@ -538,7 +538,7 @@ describe('runHarvestTick', () => {
       };
       const run = (now: number, bootstrap: ExplicitRecipeBootstrap) => runHarvestTick({
         intervalMs: 60_000, stateDir: dir,
-        repos: [{ path: dir, repo: 'acme/widget', explicitRecipe: bootstrap }], limitPerRepo: 1,
+        repos: [{ path: dir, repo: 'acme/widget', explicitRecipe: bootstrap }], limitPerRepo: 1, limitPerTick: 3,
         publish: true, isDockerAvailable: () => true, harvestState: state, loadPool: async () => [], mintDeps,
         now: () => now,
       });
@@ -594,7 +594,7 @@ function baseSourcesConfig(
     intervalMs: 60_000,
     stateDir: env.stateDir,
     repos: [],
-    limitPerRepo: 1,
+    limitPerRepo: 1, limitPerTick: 3,
     publish: false,
     isDockerAvailable: () => true,
     validatedStore: env.validatedStore,

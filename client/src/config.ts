@@ -644,6 +644,8 @@ export const JinnConfigSchema = z.object({
       enabled: z.boolean().default(false),
       intervalMs: z.number().int().positive().default(60 * 60 * 1000),
       limitPerRepo: z.number().int().positive().default(3),
+      /** Max session-echo records mined per harvest tick (sibling of limitPerRepo). */
+      limitPerTick: z.number().int().positive().default(3),
       publish: z.boolean().default(true),
       repos: z
         .array(
@@ -666,6 +668,7 @@ export const JinnConfigSchema = z.object({
       enabled: false,
       intervalMs: 60 * 60 * 1000,
       limitPerRepo: 3,
+      limitPerTick: 3,
       publish: true,
       repos: [],
       sources: ['commits'],
