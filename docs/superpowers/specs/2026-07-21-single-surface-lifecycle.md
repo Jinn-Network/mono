@@ -299,7 +299,8 @@ Stage 5.
    conflict and one behind-only PR; verify carry-over proof.
 3. **Stage 3 — painter.** Scheduled GitHub Action paints Status + archives;
    autopilot Status writes removed. Canary: board converges within one
-   painter period; budget per cycle measured ≤ ~60 points.
+   painter period; **read-side budget** per §12 (incremental discovery +
+   measured thresholds from #2001), not the pre-#2001 full-snapshot default.
 4. **Stage 4 — approval carry-over on** (if Stage 2's proof held), runaway
    guard, child auto-close sweeps.
 5. **Stage 5 — deletion.** Remove §8's list; shrink the probe; re-mint
@@ -308,6 +309,27 @@ Stage 5.
 
 Rollback at any stage: the previous machinery is still present until Stage 5;
 disarm the new path via its config knob.
+
+## 12. Read-side quota (post-#2001)
+
+Single-surface removes **Status as decision authority**; it does not by
+itself shrink GraphQL reads. Incremental discovery (#2001, ported onto
+`next` after Stage 5 lands) is the read-side complement:
+
+- **Incremental oracle** — `LifecycleSnapshotSource` + `lifecycle-cache`
+  hydrate from REST/event cursors; full GraphQL reconciliation runs on a
+  schedule (hourly) or when cache is cold/stale, not every active cycle.
+- **Targeted prechecks** — `targeted-action-reader` serves claim/review
+  gates from narrow REST reads where the snapshot already has authority.
+- **Measured bars** (live, post-port; supersedes the Stage 3 planning
+  estimate of ≤ ~60 pts/cycle on a full snapshot):
+  - idle active cycle: **≤ 2** GraphQL points
+  - full reconcile: **≤ 450** points per hour
+  - targeted prechecks: **≤ 10** points each
+
+Until #2001 merges, canary hosts pay the full-snapshot cost (~400–2300
+pts/cycle on a contended board) regardless of `JINN_AUTOPILOT_ONLY_ISSUES`
+scoping on claims.
 
 ## 11. Verification
 

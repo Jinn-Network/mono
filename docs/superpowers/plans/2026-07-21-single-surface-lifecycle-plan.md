@@ -204,8 +204,10 @@ Action owns the view.
 ### Canary bar
 
 Painter converges the live board within one period after a full canary
-chain; measured active-cycle budget ≤ ~60 points with zero Project writes
-in the instrumented trace.
+chain; measured active-cycle budget per spec §12 (idle ≤ 2 pts; full
+reconcile ≤ 450 pts/hr; targeted prechecks ≤ 10 pts) with zero Project
+writes in the instrumented trace. Pre-#2001 full-snapshot cycles on a
+contended board remain ~400–2300 pts regardless of claim scoping.
 
 ### Rollback
 
