@@ -10,7 +10,8 @@
  *   yarn task-creator:session-echo-live
  *
  * Optional env:
- *   JINN_SESSION_ECHO_LIVE_REPO — default sympy/sympy
+ *   JINN_SESSION_ECHO_LIVE_REPO — default conan-io/conan
+ *     (sympy/sympy is held-out on current mint slates — refuses before Docker)
  *   JINN_SESSION_ECHO_LIVE_MODE — borrow-mismatch (default) | borrow-aligned
  *   JINN_SWE_REBENCH_V2_STATE_DIR — operator validated-pool root
  *     (default ~/.jinn-client/swe-rebench-v2)
@@ -50,7 +51,7 @@ import {
   type SessionEchoLiveMode,
 } from '../src/solver-types/_swe-rebench-v2-session-echo-live-classify.js';
 
-const REPO = process.env.JINN_SESSION_ECHO_LIVE_REPO ?? 'sympy/sympy';
+const REPO = process.env.JINN_SESSION_ECHO_LIVE_REPO ?? 'conan-io/conan';
 const MODE_RAW = process.env.JINN_SESSION_ECHO_LIVE_MODE ?? 'borrow-mismatch';
 
 function fail(msg: string): never {

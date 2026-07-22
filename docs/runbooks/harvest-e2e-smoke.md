@@ -48,11 +48,13 @@ Default mode `borrow-mismatch` seeds a session whose `acceptedDiff` is the gold
 patch of a *different* same-repo scorable instance than the borrowed source.
 Expected classification under the review hypothesis: `rejected:empirical-dead`.
 
-Held-out / capability-slate denylist applies (`assertRepoAllowedForMint`). Default
-`sympy/sympy` is held-out on current slates — mint refuses before Docker. Override:
+Held-out / capability-slate denylist applies (`assertRepoAllowedForMint`).
+`sympy/sympy` is held-out on current slates — mint refuses before Docker. Default
+repo is `conan-io/conan` (mintable, ≥2 scorable instances on typical pools).
+Override if needed:
 
 ```bash
-JINN_SESSION_ECHO_LIVE_REPO=conan-io/conan yarn task-creator:session-echo-live
+JINN_SESSION_ECHO_LIVE_REPO=<owner/repo> yarn task-creator:session-echo-live
 ```
 
 Pick any validated-pool repo with ≥2 scorable instances that is **not** on the
@@ -64,14 +66,23 @@ Optional control:
 JINN_SESSION_ECHO_LIVE_MODE=borrow-aligned yarn task-creator:session-echo-live
 ```
 
+Constrained hosts (~16–18 GB free) may need a lower disk floor than the default
+20 GB gate (`JINN_EVAL_DISK_FLOOR_GB`):
+
+```bash
+JINN_EVAL_DISK_FLOOR_GB=10 yarn task-creator:session-echo-live
+```
+
 ### Prerequisites (same family as harvest live)
 
 - Docker daemon (`docker info`)
 - `jinn harnesses enable swe-rebench-v2-evaluator`
 - Validated pool with ≥2 scorable instances for the target repo (default
-  `sympy/sympy`) so mismatch can pick a donor gold patch
+  `conan-io/conan`) so mismatch can pick a donor gold patch
 - Network for HF row fetch + eval image pull if missing
 - arm64 hosts emulate `linux/amd64` images — expect multi-minute runs
+- Disk: default floor 20 GB free (`JINN_EVAL_DISK_FLOOR_GB`); override on
+  constrained hosts as above
 
 ### Pass / classify criteria
 
