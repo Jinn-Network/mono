@@ -1,4 +1,3 @@
-import type { ProjectStatus } from '../dispatcher/types.js';
 import { DEFAULT_CONFIG } from '../dispatcher/types.js';
 import type { ProjectionAction, ProjectionPlan } from './projection.js';
 import { LifecycleRateLimitError } from './snapshot.js';
@@ -16,7 +15,6 @@ export interface ReconciliationReviewRefState {
   readonly state:
     | 'active'
     | 'verdict-intent'
-    | 'fixing'
     | 'terminal-approved'
     | 'human'
     | 'stale';
@@ -25,12 +23,6 @@ export interface ReconciliationReviewRefState {
 export interface ReconciliationWriter {
   readIssueHead(issueNumber: number): Promise<GitOid | null>;
   readBranchHead(headRefName: string): Promise<GitOid | null>;
-  readProjectStatus(issueNumber: number): Promise<ProjectStatus | null>;
-  setProjectStatus(
-    issueNumber: number,
-    status: ProjectStatus,
-    expectedHead?: GitOid,
-  ): Promise<void>;
   readPullRequest(prNumber: number): Promise<ReconciliationPullRequestState | null>;
   setPullRequestDraft(
     prNumber: number,
@@ -72,7 +64,7 @@ export interface ReconciliationWriter {
   completeVerdictIntent(
     prNumber: number,
     expectedReviewRefOid: GitOid,
-    state: 'fixing' | 'terminal-approved',
+    state: 'terminal-approved',
   ): Promise<void>;
 }
 
@@ -104,13 +96,6 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function issueHeadMatches(
-  writer: ReconciliationWriter,
-  issueNumber: number,
-  expectedHead: GitOid,
-): Promise<boolean> {
-  return await writer.readIssueHead(issueNumber) === expectedHead;
-}
 
 async function prHeadMatches(
   writer: ReconciliationWriter,
@@ -120,44 +105,6 @@ async function prHeadMatches(
   return (await writer.readPullRequest(prNumber))?.head === expectedHead;
 }
 
-async function setProjectStatus(
-  action: Extract<ProjectionAction, { kind: 'set-project-status' | 'requeue-implementation' }>,
-  writer: ReconciliationWriter,
-): Promise<ReconciliationResult> {
-  if (
-    action.expectedHead !== undefined
-    && !await issueHeadMatches(writer, action.issueNumber, action.expectedHead)
-  ) {
-    return { action, outcome: 'changed-head' };
-  }
-  const desired = action.kind === 'requeue-implementation' ? 'Todo' : action.status;
-  if (await writer.readProjectStatus(action.issueNumber) === desired) {
-    return { action, outcome: 'already-applied' };
-  }
-  if (
-    action.expectedHead !== undefined
-    && !await issueHeadMatches(writer, action.issueNumber, action.expectedHead)
-  ) {
-    return { action, outcome: 'changed-head' };
-  }
-  try {
-    await writer.setProjectStatus(
-      action.issueNumber,
-      desired,
-      action.expectedHead,
-    );
-    return { action, outcome: 'applied' };
-  } catch (error) {
-    try {
-      if (await writer.readProjectStatus(action.issueNumber) === desired) {
-        return { action, outcome: 'already-applied' };
-      }
-    } catch {
-      // Preserve the original mutation error in the report.
-    }
-    return { action, outcome: 'failed', detail: message(error) };
-  }
-}
 
 async function setDraft(
   action: Extract<ProjectionAction, { kind: 'set-pr-draft' }>,
@@ -166,18 +113,6 @@ async function setDraft(
   const before = await writer.readPullRequest(action.prNumber);
   if (before?.head !== action.expectedHead) return { action, outcome: 'changed-head' };
   if (before.draft === action.draft) return { action, outcome: 'already-applied' };
-  if (action.requiresReviewState !== undefined) {
-    const review = await writer.readReviewRef(action.prNumber);
-    if (
-      review?.head !== action.expectedHead
-      || review.state !== action.requiresReviewState
-    ) {
-      return { action, outcome: 'awaiting-prerequisite' };
-    }
-    if (!await prHeadMatches(writer, action.prNumber, action.expectedHead)) {
-      return { action, outcome: 'changed-head' };
-    }
-  }
   try {
     await writer.setPullRequestDraft(
       action.prNumber,
@@ -400,9 +335,6 @@ async function executeOne(
   writer: ReconciliationWriter,
 ): Promise<ReconciliationResult> {
   switch (action.kind) {
-    case 'set-project-status':
-    case 'requeue-implementation':
-      return setProjectStatus(action, writer);
     case 'set-pr-draft':
       return setDraft(action, writer);
     case 'set-pr-label':
@@ -416,8 +348,6 @@ async function executeOne(
     case 'mark-review-stale':
     case 'complete-verdict-intent':
       return updateReviewRef(action, writer);
-    case 'expose-merge-prep':
-      return { action, outcome: 'eligible' };
   }
 }
 

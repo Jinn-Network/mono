@@ -9,11 +9,11 @@ import { isoTimestamp } from './types.js';
 
 export const CAPABILITY_ATTESTATION_ENV =
   'JINN_AUTOPILOT_CAPABILITY_ATTESTATION';
-export const CAPABILITY_ATTESTATION_VERSION = 1;
+export const CAPABILITY_ATTESTATION_VERSION = 2;
 export const CAPABILITY_ATTESTATION_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
 
 export interface CapabilityAttestation {
-  readonly version: 1;
+  readonly version: 2;
   readonly repositoryUrl: typeof CANONICAL_GITHUB_HTTPS_REMOTE;
   readonly remoteName: string;
   readonly probeId: string;
@@ -27,8 +27,6 @@ export interface CapabilityAttestation {
   readonly proofs: {
     readonly absentRefCreation: true;
     readonly expectedParentRejection: true;
-    readonly atomicPairSuccess: true;
-    readonly atomicPairRejection: true;
     readonly ambiguousReadback: true;
     readonly exactCleanup: true;
     readonly readViaGitTransport: true;
@@ -125,7 +123,7 @@ export function decodeCapabilityAttestation(
     throw new Error('Capability attestation refs do not match its probeId');
   }
   return {
-    version: 1,
+    version: 2,
     repositoryUrl: CANONICAL_GITHUB_HTTPS_REMOTE,
     remoteName,
     probeId,
@@ -141,14 +139,6 @@ export function decodeCapabilityAttestation(
       expectedParentRejection: exactTrue(
         proofs.expectedParentRejection,
         'expected-parent rejection',
-      ),
-      atomicPairSuccess: exactTrue(
-        proofs.atomicPairSuccess,
-        'atomic pair success',
-      ),
-      atomicPairRejection: exactTrue(
-        proofs.atomicPairRejection,
-        'atomic pair rejection',
       ),
       ambiguousReadback: exactTrue(
         proofs.ambiguousReadback,

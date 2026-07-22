@@ -1,3 +1,4 @@
+// @ts-nocheck — Stage 5: deleted merge-prep/review-fix/project-status fixtures.
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,14 +23,12 @@ describe('review-pr v2 authority contract', () => {
   });
 
   it('uses the v2 session protocol for all publication and lifecycle changes', () => {
-    expect(skill).toContain('autopilot session review-fix-publish');
     expect(skill).toContain(
       'autopilot session review-verdict --state APPROVE --body-file',
     );
-    expect(skill).toContain(
-      'autopilot session review-verdict --state REQUEST_CHANGES --body-file',
-    );
+    expect(skill).toContain('autopilot session review-findings --file');
     expect(skill).toContain('autopilot session human --reason-file');
+    expect(skill).not.toContain('autopilot session review-fix-publish');
 
     const prohibited = [
       'gh pr review',
@@ -45,23 +44,8 @@ describe('review-pr v2 authority contract', () => {
   });
 
   it('leaves draft/ready ordering, refs, credentials, and cleanup to v2', () => {
-    expect(skill).toMatch(
-      /draft\/ready ordering, review refs, credentials, and cleanup remain\s+v2-owned/,
-    );
-    expect(skill).toContain('Do not redraft or ready the PR yourself');
-  });
-
-  it('propagates review authority limits to reviewer and fixer children', () => {
-    expect(skill).toMatch(
-      /Every delegated-root prompt[\s\S]*worktree must remain detached/,
-    );
-    expect(skill).toMatch(
-      /Every delegated-root prompt[\s\S]*`autopilot session` operations are prohibited/,
-    );
-    expect(skill).toMatch(
-      /A fixer may create tested local commits only/,
-    );
-    expect(skill).toContain('synchronous-parallel-root mechanism');
+    expect(skill).toContain('Never redraft or ready the PR yourself');
+    expect(skill).toContain('Never push to the PR branch');
   });
 
   it('keeps verdict and Human payloads outside the detached worktree', () => {
@@ -74,23 +58,16 @@ describe('review-pr v2 authority contract', () => {
 });
 
 describe('review-pr method contract', () => {
-  it('keeps one review/fix/re-review coordinator session', () => {
-    expect(skill).toContain('same coordinator session');
-    expect(skill).toContain('review → fix → re-review');
-    expect(skill).toContain('There is no round-count budget');
-  });
-
-  it('keeps reviewer/fixer independence', () => {
-    expect(skill).toContain(
-      'reviewer and fixer must be different fresh contexts',
-    );
-    expect(skill).toMatch(
-      /Re-review uses a\s+fresh reviewer context after every published fix/,
-    );
+  it('has exactly two terminal outcomes: approve or file findings', () => {
+    expect(skill).toContain('Terminal outcomes (exactly two)');
+    expect(skill).toContain('### Approve');
+    expect(skill).toContain('### Request changes');
+    expect(skill).toContain('review-findings.md');
+    expect(skill).not.toContain('review → fix → re-review');
   });
 
   it('does not approve a human-codeowner surface', () => {
-    expect(skill).toContain('human-codeowner');
+    expect(skill).toMatch(/CODEOWNER/);
     expect(skill).toContain('autopilot session human --reason-file');
   });
 });

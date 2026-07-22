@@ -341,7 +341,12 @@ function matchingBranchTrailers(
 ): string | null {
   const trailers = branchTrailers(message);
   if (trailers === null) return null;
-  const claim = decodeBranchClaimTrailers(trailers);
+  let claim: ReturnType<typeof decodeBranchClaimTrailers>;
+  try {
+    claim = decodeBranchClaimTrailers(trailers);
+  } catch {
+    return null;
+  }
   if (issueNumber !== undefined && claim.issueNumber !== issueNumber) return null;
   if (
     prNumber !== undefined

@@ -30,7 +30,6 @@ import {
   explainPullRequest,
   GhLifecycleReader,
   makeProductionActiveRuntime,
-  makeProductionBoardArchiveSweep,
   makeProductionReconciliationWriter,
   parseLifecycleCli,
   renderLifecycleHuman,
@@ -116,7 +115,6 @@ function dispatcherConfig(allowlist: ReadonlySet<string>): DispatcherConfig {
     reviewBotLogin: env.JINN_REVIEW_BOT_LOGIN ?? '',
     implGhToken: env.JINN_IMPL_GH_TOKEN ?? '',
     reviewGhToken: env.JINN_REVIEW_GH_TOKEN ?? '',
-    mergePrepEnabled: true,
     ...(env.JINN_DISPATCHER_HERMES_MODEL === undefined
       ? {}
       : { hermesModel: env.JINN_DISPATCHER_HERMES_MODEL }),
@@ -267,18 +265,8 @@ async function main(): Promise<void> {
     });
     return dominanceSnapshotCache;
   };
-  // jinn-mono#1883: board-archive sweep uses the same implementer credential
-  // as the reconciliation writer's maintenance calls (`maintenanceCredential`
-  // above) — only defined when the mode actually needs write credentials
-  // (`observe` never does), matching the sweep's own `recover`/`active`-only
-  // gate in `runLifecycleCycle`.
-  const boardArchiveSweep = maintenanceCredential === undefined
-    ? undefined
-    : makeProductionBoardArchiveSweep({
-        credential: maintenanceCredential,
-        runner,
-        environment: env,
-      });
+  // Stage 3: board-archive + Status paint live in `yarn paint-board`
+  // (scheduled workflow), not the autopilot cycle.
   const worktreeBase = env.JINN_AUTOPILOT_WORKTREE_BASE ?? DEFAULT_WORKTREE_BASE;
   const cleanupEnabled = options.mode === 'active'
     && explicitEnvironmentFlag(
@@ -325,11 +313,6 @@ async function main(): Promise<void> {
             config.reviewCap,
             'JINN_AUTOPILOT_REVIEW_CAP',
           ),
-          mergePrep: positiveEnvironmentInteger(
-            env.JINN_AUTOPILOT_MERGE_PREP_CAP,
-            config.mergePrepCap,
-            'JINN_AUTOPILOT_MERGE_PREP_CAP',
-          ),
         },
         implementationBackpressureThreshold: positiveEnvironmentInteger(
           env.JINN_AUTOPILOT_BACKPRESSURE,
@@ -368,9 +351,22 @@ async function main(): Promise<void> {
     }
     const report = await runLifecycleCycle(options.mode, {
       readSnapshot,
+      readRateLimitRemaining: async () => {
+        const raw = await runner('gh', [
+          'api', 'graphql',
+          '-f', 'query={ rateLimit { remaining } }',
+        ]);
+        const parsed = JSON.parse(raw) as {
+          data?: { rateLimit?: { remaining?: unknown } };
+        };
+        const remaining = parsed.data?.rateLimit?.remaining;
+        if (typeof remaining !== 'number' || !Number.isFinite(remaining)) {
+          throw new Error('Malformed rateLimit.remaining probe');
+        }
+        return remaining;
+      },
       ...(writer === undefined ? {} : { writer }),
       ...(active === undefined ? {} : { active }),
-      ...(boardArchiveSweep === undefined ? {} : { boardArchiveSweep }),
       now: () => new Date(),
       staleAfterMs: STALE_AFTER_MS,
       runnerId,

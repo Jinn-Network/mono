@@ -5,6 +5,8 @@ import { REPO } from '../dispatcher/constants.js';
 import { ensureFieldIds } from '../dispatcher/field-cache.js';
 import { fetchProjectSnapshot } from '../dispatcher/project-snapshot.js';
 import type { SelectedCredential } from './credentials.js';
+import { fileChildIssue } from './child-issues.js';
+import { makeProductionChildIssuePort } from './child-issues-production.js';
 import type {
   MergeCandidate,
   MergeExecutorDeps,
@@ -25,7 +27,7 @@ export interface ProductionMergeActionPortOptions {
 
 export type ProductionMergeActionPort = Pick<
 MergeExecutorDeps,
-'readCandidate' | 'mergeExactHead' | 'reconcileDone'
+'readCandidate' | 'mergeExactHead' | 'reconcileDone' | 'updateBranch' | 'fileReconcileChild'
 >;
 
 function decodeBase64(value: string): string {
@@ -197,6 +199,54 @@ export function makeProductionMergeActionPort(
             throw new Error('Merged Done projection was ambiguous');
           }
         }
+      }),
+
+    updateBranch: ({ prNumber, expectedHead, credential }) =>
+      withCredential(credential, async ({ run }) => {
+        try {
+          await run('gh', [
+            'pr', 'update-branch', String(prNumber),
+            '--repo', REPO,
+          ]);
+        } catch {
+          // Exact readback below classifies the outcome.
+        }
+        const readback = JSON.parse(await run('gh', [
+          'pr', 'view', String(prNumber), '--repo', REPO,
+          '--json', 'headRefOid',
+        ])) as { headRefOid?: unknown };
+        if (typeof readback.headRefOid !== 'string') {
+          return { status: 'rejected' as const, head: expectedHead };
+        }
+        const head = gitOid(readback.headRefOid);
+        if (head === expectedHead) {
+          return { status: 'rejected' as const, head };
+        }
+        return { status: 'updated' as const, head };
+      }),
+
+    fileReconcileChild: ({ prNumber, effort, credential }) =>
+      withCredential(credential, async ({ run }) => {
+        const port = makeProductionChildIssuePort({ runner: run });
+        const filed = await fileChildIssue(port, {
+          parentPr: prNumber,
+          kind: 'reconcile',
+          title: `Reconcile conflicts for PR #${prNumber}`,
+          body: [
+            `Parent pull request: #${prNumber}`,
+            '',
+            'Merge `origin/<base>` into the PR branch (never rebase).',
+            'Classify every conflict before editing; escalate when intent is undeterminable.',
+          ].join('\n'),
+          effort,
+          priority: 'p1',
+        });
+        if ('runawayHold' in filed && filed.runawayHold) {
+          throw new Error(
+            `Reconcile child runaway hold for PR #${prNumber} (prior=${filed.priorCount})`,
+          );
+        }
+        return { number: filed.number, created: filed.created };
       }),
   };
 }

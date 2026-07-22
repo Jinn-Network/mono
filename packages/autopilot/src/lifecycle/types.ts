@@ -55,13 +55,12 @@ export type LifecyclePhase =
   | 'implementing'
   | 'awaiting-review'
   | 'reviewing'
-  | 'review-fixing'
-  | 'merge-prep'
+  | 'blocked-by-child'
   | 'merge-ready'
   | 'human'
   | 'merged';
 
-export type BranchClaimPhase = 'implement' | 'merge-prep';
+export type BranchClaimPhase = 'implement' | 'fix' | 'reconcile';
 
 interface BranchClaimBase {
   readonly kind: 'branch-claim';
@@ -82,15 +81,13 @@ export type BranchClaim =
       readonly prNumber?: number;
     })
   | (BranchClaimBase & {
-      readonly phase: 'merge-prep';
+      readonly phase: 'fix' | 'reconcile';
       readonly prNumber: number;
-      readonly targetBaseOid?: GitOid;
     });
 
 export type ReviewClaimState =
   | 'active'
   | 'verdict-intent'
-  | 'fixing'
   | 'terminal-approved'
   | 'human'
   | 'stale';
@@ -115,7 +112,7 @@ interface ReviewClaimBase {
 
 export type ReviewClaimRecord =
   | (ReviewClaimBase & {
-      readonly state: 'active' | 'fixing' | 'human' | 'stale';
+      readonly state: 'active' | 'human' | 'stale';
       readonly verdict?: never;
     })
   | (ReviewClaimBase & {
@@ -138,7 +135,7 @@ export type HumanReason =
       readonly detail: string;
     }
   | {
-      readonly phase: 'awaiting-review' | 'reviewing' | 'review-fixing';
+      readonly phase: 'awaiting-review' | 'reviewing';
       readonly code:
         | 'review-escalation'
         | 'reviewer-identity-unavailable'
@@ -146,11 +143,12 @@ export type HumanReason =
       readonly detail: string;
     }
   | {
-      readonly phase: 'merge-prep' | 'merge-ready';
+      readonly phase: 'merge-ready';
       readonly code:
         | 'semantic-conflict'
         | 'codeowner-sensitive-conflict'
-        | 'invalid-merge-progress-time';
+        | 'invalid-merge-progress-time'
+        | 'runaway-child';
       readonly detail: string;
     };
 
@@ -193,6 +191,8 @@ export interface PullRequestLifecycleItem extends LifecycleItemBase {
   readonly needsReview: boolean;
   readonly approved: boolean;
   readonly mergeState: 'clean' | 'behind' | 'conflict' | 'blocked';
+  /** Open child issues targeting this PR (Stage 2 single-surface children). */
+  readonly openChildKinds?: readonly ('review-finding' | 'reconcile')[];
   readonly branchClaim?: BranchClaim;
   readonly implementationSummary?: string;
   readonly reviewClaim?: ReviewClaimRecord;
@@ -239,7 +239,6 @@ export interface LifecycleView {
 export interface LocalCapacity {
   readonly implementationSlots: number;
   readonly reviewSlots: number;
-  readonly mergePrepSlots: number;
   readonly usableCredentialLanes: number;
 }
 
@@ -250,14 +249,19 @@ export type NewWorkAction =
       readonly issueNumber: number;
       readonly prNumber: number;
       readonly head: GitOid;
-      readonly recoverFixes: boolean;
     }
   | {
-      readonly kind: 'claim-merge-prep';
+      readonly kind: 'update-branch';
       readonly issueNumber: number;
       readonly prNumber: number;
       readonly head: GitOid;
-      readonly recoverStale: boolean;
+    }
+  | {
+      readonly kind: 'file-reconcile-child';
+      readonly issueNumber: number;
+      readonly prNumber: number;
+      readonly head: GitOid;
+      readonly effort: 'low' | 'medium' | 'high';
     }
   | {
       readonly kind: 'merge';
@@ -267,16 +271,10 @@ export type NewWorkAction =
     };
 
 export type RecoveryAction =
-  | { readonly kind: 'requeue-implementation'; readonly issueNumber: number; readonly expectedHead: GitOid }
   | {
       readonly kind: 'mark-review-stale';
       readonly prNumber: number;
       readonly expectedGeneration: string;
-      readonly expectedHead: GitOid;
-    }
-  | {
-      readonly kind: 'requeue-merge-prep';
-      readonly prNumber: number;
       readonly expectedHead: GitOid;
     };
 
@@ -288,16 +286,10 @@ export type ScalarOidState = {
   readonly observed: GitOid | null;
 };
 
-export type PairedOidState = {
-  readonly expected: Readonly<{ branch: GitOid; review: GitOid | null }>;
-  readonly published: Readonly<{ branch: GitOid; review: GitOid }>;
-  readonly observed: Readonly<{ branch: GitOid | null; review: GitOid | null }>;
-};
-
 export type ClaimOutcome =
   | ({ readonly status: 'won' | 'lost' | 'already-applied' } & ScalarOidState)
   | ({ readonly status: 'ambiguous' } & ScalarOidState);
 
 export type PublicationOutcome =
-  | ({ readonly status: 'won' | 'lost' | 'already-applied' } & (ScalarOidState | PairedOidState))
-  | ({ readonly status: 'ambiguous' } & (ScalarOidState | PairedOidState));
+  | ({ readonly status: 'won' | 'lost' | 'already-applied' } & ScalarOidState)
+  | ({ readonly status: 'ambiguous' } & ScalarOidState);

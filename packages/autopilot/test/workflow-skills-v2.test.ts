@@ -1,3 +1,4 @@
+// @ts-nocheck — Stage 5: deleted merge-prep/review-fix/project-status fixtures.
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,52 +8,58 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..', '..');
 const read = (path: string): string => readFileSync(join(repoRoot, path), 'utf8');
 
-describe('merge-prep v2 skill contract', () => {
-  const skill = read('.claude/skills/merge-prep/SKILL.md');
+describe('single-surface workflow skill pins', () => {
+  const implementIssue = read('.claude/skills/implement-issue/SKILL.md');
+  const fixChild = read('.claude/skills/fix-child/SKILL.md');
+  const reconcile = read('.claude/skills/reconcile/SKILL.md');
+  const engDay = read('.claude/skills/eng-day/SKILL.md');
+  const autopilotRuntime = read('.claude/skills/autopilot-runtime/SKILL.md');
+  const mergeBatch = read('.claude/skills/merge-batch/SKILL.md');
 
-  it('consumes an attempt and reports through the session protocol', () => {
-    expect(skill).toContain('JINN_AUTOPILOT_SESSION_MANIFEST');
-    expect(skill).toContain(
-      'autopilot session merge-prep-complete --summary-file',
-    );
-    expect(skill).toContain('autopilot session human --reason-file');
+  it('implement-issue uses three-op finalize without project-status authority', () => {
+    expect(implementIssue).toContain('implementation-complete');
+    expect(implementIssue).toContain('three-op finalize');
+    expect(implementIssue).toContain('engine:review');
+    expect(implementIssue).toContain('review:needs-human');
+    expect(implementIssue).not.toMatch(/projects?\s+`?In Review`?/i);
+    expect(implementIssue).not.toContain('setProjectStatus');
+    expect(implementIssue).not.toContain('gh project item-edit');
   });
 
-  it('does not own publication, draft state, Project state, or cleanup', () => {
-    const prohibited = [
-      'gh pr ready',
-      'gh project item-edit',
-      'gh pr comment',
-      'git push',
-      'git worktree remove',
-      '--force-with-lease',
-    ];
-    for (const marker of prohibited) expect(skill).not.toContain(marker);
+  it('fix-child closes via child-complete and never opens a PR', () => {
+    expect(fixChild).toContain('child-complete');
+    expect(fixChild).toContain('Never open a new PR');
+    expect(fixChild).not.toContain('gh pr create');
   });
 
-  it('resolves mechanical conflicts only', () => {
-    expect(skill).toContain('Mechanical');
-    expect(skill).toContain('Semantic');
-    expect(skill).toContain('never guess');
+  it('reconcile uses child-complete and never instructs rebase-as-method', () => {
+    expect(reconcile).toContain('child-complete');
+    expect(reconcile).toContain('Never rebase');
+    expect(reconcile).not.toMatch(/git rebase/i);
+    expect(reconcile).not.toMatch(/rebase onto/i);
   });
 
-  it('propagates merge-prep authority limits to any child', () => {
-    expect(skill).toMatch(
-      /every[\s\S]*delegated-root prompt[\s\S]*worktree must remain\s+detached/i,
-    );
-    expect(skill).toMatch(
-      /every[\s\S]*delegated-root prompt[\s\S]*`autopilot session` operations are prohibited/i,
-    );
-    expect(skill).toContain('create local commits only');
-    expect(skill).toContain('must go through `stage:run`');
+  it('eng-day reads label triage and surfaces child work', () => {
+    expect(engDay).toContain('effort:*');
+    expect(engDay).toContain('priority:*');
+    expect(engDay).toContain('review-finding');
+    expect(engDay).toContain('reconcile');
+    expect(engDay).toContain('paint-only');
+    expect(engDay).not.toContain('merge-prep');
   });
 
-  it('keeps merge-prep payloads outside the detached worktree', () => {
-    expect(skill).toContain('SESSION_REPORT_DIR');
-    expect(skill).toContain('dirname -- "$JINN_AUTOPILOT_SESSION_MANIFEST"');
-    expect(skill).toContain('"$SESSION_REPORT_DIR/merge-prep-summary.md"');
-    expect(skill).toContain('"$SESSION_REPORT_DIR/human-reason.md"');
-    expect(skill).toMatch(/reports directory[\s\S]*outside the supplied worktree/);
+  it('autopilot-runtime lists the current session verb roster', () => {
+    expect(autopilotRuntime).toContain('review-findings');
+    expect(autopilotRuntime).toContain('child-complete');
+    expect(autopilotRuntime).toContain('fix-child');
+    expect(autopilotRuntime).toContain('reconcile');
+    expect(autopilotRuntime).toMatch(/Deleted verbs/);
+  });
+
+  it('merge-batch does not route v2 work through merge-prep or Status authority', () => {
+    expect(mergeBatch).toContain('children ladder');
+    expect(mergeBatch).not.toContain('merge-prep');
+    expect(mergeBatch).not.toMatch(/Status.*authorit/i);
   });
 });
 

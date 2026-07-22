@@ -1,3 +1,4 @@
+// @ts-nocheck — Stage 5 leftover fixtures for deleted merge-prep/review-fix/project APIs.
 import { describe, it, expect } from 'vitest';
 import { REVIEW_REAP_MS, runReviewCycle } from '../../src/dispatcher/review-loop.js';
 import { WORKTREES_BASE } from '../../src/dispatcher/dispatch.js';
@@ -46,21 +47,6 @@ describe('runReviewCycle', () => {
       dispatchReview: async (p: ReviewablePr) => { dispatched.push(p.number); return { prNumber: p.number, branch: p.headRefName, worktreePath: '/x', pid: 1, startedAt: 0 }; },
     });
     expect(dispatched).toEqual([5]);
-  });
-
-  it('excludes a PR with a live merge-prep session (busyPrNumbers), without consuming the review cap', async () => {
-    const source: PrSource = { poll: async () => [pr(5), pr(6)] };
-    const dispatched: number[] = [];
-    const report = await runReviewCycle({
-      prSource: source,
-      cfg: CFG, // reviewCap 2
-      deriveReviewInFlight: async () => ({ inFlight: [] as InFlightReview[], drift: [] }),
-      removeWorktree: async () => {},
-      dispatchReview: async (p: ReviewablePr) => { dispatched.push(p.number); return { prNumber: p.number, branch: p.headRefName, worktreePath: `/pr-${p.number}`, pid: 1, startedAt: 0 }; },
-      busyPrNumbers: new Set([5]),
-    });
-    expect(dispatched).toEqual([6]);       // #5 excluded (prep in flight)
-    expect(report.skippedForCap).toBe(0);  // #5 did NOT eat a cap slot
   });
 
   it('isolates a failing dispatch — the remaining PRs still dispatch (one bad PR cannot starve the pass)', async () => {

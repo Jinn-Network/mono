@@ -9,14 +9,19 @@ export type ActiveCandidate =
       readonly prNumber: number;
       readonly head: GitOid;
       readonly author: string;
-      readonly recoverFixes?: boolean;
     }
   | {
-      readonly phase: 'merge-prep';
+      readonly phase: 'update-branch';
       readonly issueNumber: number;
       readonly prNumber: number;
       readonly head: GitOid;
-      readonly recoverStale?: boolean;
+    }
+  | {
+      readonly phase: 'file-reconcile-child';
+      readonly issueNumber: number;
+      readonly prNumber: number;
+      readonly head: GitOid;
+      readonly effort: 'low' | 'medium' | 'high';
     }
   | {
       readonly phase: 'merge';
@@ -30,7 +35,6 @@ export interface ActiveSchedulingInput {
   readonly remaining: {
     readonly implementation: number;
     readonly review: number;
-    readonly mergePrep: number;
   };
   readonly availableLogins: readonly string[];
   readonly implementationPreferredLogin: string;
@@ -108,32 +112,28 @@ export function scheduleActiveActions(
       issueNumber: candidate.issueNumber,
       prNumber: candidate.prNumber,
       head: candidate.head,
-      recoverFixes: candidate.recoverFixes ?? false,
     });
   }
 
   for (const candidate of input.candidates) {
-    if (candidate.phase !== 'merge-prep') continue;
-    if (
-      actions.filter((action) => action.kind === 'claim-merge-prep').length
-        >= input.remaining.mergePrep
-    ) {
-      skips.push({ phase: candidate.phase, subject: subject(candidate), reason: 'capacity' });
+    if (candidate.phase === 'update-branch') {
+      actions.push({
+        kind: 'update-branch',
+        issueNumber: candidate.issueNumber,
+        prNumber: candidate.prNumber,
+        head: candidate.head,
+      });
       continue;
     }
-    const login = freeLogins.values().next().value;
-    if (login === undefined) {
-      skips.push({ phase: candidate.phase, subject: subject(candidate), reason: 'credential-lane' });
-      continue;
+    if (candidate.phase === 'file-reconcile-child') {
+      actions.push({
+        kind: 'file-reconcile-child',
+        issueNumber: candidate.issueNumber,
+        prNumber: candidate.prNumber,
+        head: candidate.head,
+        effort: candidate.effort,
+      });
     }
-    freeLogins.delete(login);
-    actions.push({
-      kind: 'claim-merge-prep',
-      issueNumber: candidate.issueNumber,
-      prNumber: candidate.prNumber,
-      head: candidate.head,
-      recoverStale: candidate.recoverStale ?? false,
-    });
   }
 
   for (const candidate of input.candidates) {

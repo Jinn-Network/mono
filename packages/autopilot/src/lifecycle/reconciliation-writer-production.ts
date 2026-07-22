@@ -8,7 +8,6 @@ import { join } from 'node:path';
 import type { CommandRunner } from '../dispatcher/issue-source.js';
 import { defaultRunner } from '../dispatcher/issue-source.js';
 import { REPO } from '../dispatcher/constants.js';
-import { ensureFieldIds } from '../dispatcher/field-cache.js';
 import { NEEDS_HUMAN_LABEL } from '../dispatcher/merge-sweep.js';
 import type { BlockedOn, ProjectStatus } from '../dispatcher/types.js';
 import {
@@ -213,12 +212,6 @@ function nodeFromSnapshotPr(
 // in the cheap reader-backed version (jinn-mono#1883) — reproduces the
 // pre-fix behavior exactly by plucking the item out of a full
 // `readSnapshot()` call.
-function nodeFromSnapshotProjectItem(
-  item: GitHubLifecycleSnapshot['project']['items'][number] | undefined,
-): ReconciliationProjectItemNode | null {
-  if (item === undefined) return null;
-  return { id: item.id, status: item.status, blockedOn: item.blockedOn };
-}
 
 function issueHead(
   snapshot: GitHubLifecycleSnapshot,
@@ -250,7 +243,7 @@ function humanDominatesPullRequest(
 
 function nextReviewRecord(
   current: ReviewClaimRecord,
-  state: 'fixing' | 'terminal-approved' | 'stale',
+  state: 'terminal-approved' | 'stale',
   recordedAt: string,
 ): ReviewClaimRecord {
   const common = {
@@ -293,11 +286,6 @@ export function makeProductionReconciliationWriter(
     ?? (async (prNumber: number) => nodeFromSnapshotPr(
       (await snapshot()).pullRequests.find((pr) => pr.number === prNumber),
     ));
-  const readProjectItem = options.readProjectItemForReconciliation
-    ?? (async (issueNumber: number) => nodeFromSnapshotProjectItem(
-      (await snapshot()).project.items.find((item) =>
-        item.contentType === 'Issue' && item.number === issueNumber),
-    ));
   const dominanceSnapshot = options.readDominanceSnapshot ?? snapshot;
   const selected = <Value>(
     operation: Parameters<typeof withSelectedCredential<Value>>[2],
@@ -339,7 +327,7 @@ export function makeProductionReconciliationWriter(
   const updateReviewRef = async (
     prNumber: number,
     expectedReviewRefOid: GitOid,
-    desired: 'fixing' | 'terminal-approved' | 'stale',
+    desired: 'terminal-approved' | 'stale',
   ): Promise<void> => {
     const beforeRaw = await readRawPr(prNumber);
     const beforeClaim = beforeRaw?.reviewClaim;
@@ -454,53 +442,7 @@ export function makeProductionReconciliationWriter(
         ?? null;
     },
 
-    async readProjectStatus(issueNumber) {
-      return (await readProjectItem(issueNumber))?.status ?? null;
-    },
 
-    async setProjectStatus(issueNumber, status: ProjectStatus, expectedHead) {
-      const item = await readProjectItem(issueNumber);
-      if (item === null) throw new Error('Issue is missing from Project');
-      if (
-        status !== 'Human'
-        && (item.status === 'Human' || item.blockedOn === 'Human')
-      ) {
-        throw new Error('Human is dominant over Project reconciliation');
-      }
-      if (
-        expectedHead !== undefined
-        && issueHead(await dominanceSnapshot(), issueNumber) !== expectedHead
-      ) {
-        throw new Error('Project reconciliation lost exact-head authority');
-      }
-      if (item.status === status) return;
-      await selected(async ({ run }) => {
-        const secureRunner: CommandRunner = (command, args) => run(command, args);
-        const fields = await ensureFieldIds(secureRunner);
-        await mutateWithExactReadback(
-          () => run('gh', [
-            'project', 'item-edit',
-            '--id', item.id,
-            '--project-id', fields.projectId,
-            '--field-id', fields.status.fieldId,
-            '--single-select-option-id', fields.status.options[status],
-          ]),
-          async () => {
-            const afterItem = await readProjectItem(issueNumber);
-            return afterItem?.status === status
-              && (
-                status === 'Human'
-                || afterItem.blockedOn !== 'Human'
-              )
-              && (
-                expectedHead === undefined
-                || issueHead(await dominanceSnapshot(), issueNumber) === expectedHead
-              );
-          },
-          'Project status reconciliation was ambiguous',
-        );
-      });
-    },
 
     readPullRequest: readPr,
 

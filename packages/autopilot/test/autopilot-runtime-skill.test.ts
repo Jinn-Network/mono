@@ -10,17 +10,20 @@ const runtimeRoot = join(skillsRoot, 'autopilot-runtime');
 const runtimeSkillPath = join(runtimeRoot, 'SKILL.md');
 const claudeReferencePath = join(runtimeRoot, 'references', 'claude.md');
 const hermesReferencePath = join(runtimeRoot, 'references', 'hermes.md');
-const workflowNames = ['implement-issue', 'review-pr', 'merge-prep'] as const;
+const workflowNames = ['implement-issue', 'review-pr', 'fix-child', 'reconcile'] as const;
 
 function read(path: string): string {
   return readFileSync(path, 'utf8');
 }
 
 describe('shared Autopilot runtime skill contract', () => {
-  it('is consumed by all three canonical workflows', () => {
+  it('is consumed by all canonical workflows', () => {
     for (const workflow of workflowNames) {
       const doc = read(join(skillsRoot, workflow, 'SKILL.md'));
       expect(doc).toContain('../autopilot-runtime/SKILL.md');
+    }
+    for (const workflow of ['implement-issue', 'review-pr'] as const) {
+      const doc = read(join(skillsRoot, workflow, 'SKILL.md'));
       expect(doc).toContain('JINN_AUTOPILOT_RUNTIME');
     }
   });
@@ -82,10 +85,8 @@ describe('shared Autopilot runtime skill contract', () => {
     expect(hermes).toMatch(/new\s+depth-0 Hermes process/);
     expect(hermes).not.toContain('--runtime');
     expect(review).toContain('synchronous-parallel-root mechanism');
-    expect(review).toContain('fresh-root mechanism');
-    expect(review).toMatch(
-      /fresh-root fixer[\s\S]*review-fix-publish/i,
-    );
+    expect(review).toContain('review-findings');
+    expect(review).not.toContain('review-fix-publish');
   });
 
   it('keeps stage runtime selection inherited from the process', () => {

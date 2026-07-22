@@ -19,8 +19,12 @@ export interface ActiveRuntimeHandlers {
     action: Extract<NewWorkAction, { kind: 'claim-review' }>,
     credentials: CredentialPool,
   ): Promise<ActiveRuntimeResult>;
-  mergePrep(
-    action: Extract<NewWorkAction, { kind: 'claim-merge-prep' }>,
+  updateBranch?(
+    action: Extract<NewWorkAction, { kind: 'update-branch' }>,
+    credentials: CredentialPool,
+  ): Promise<ActiveRuntimeResult>;
+  fileReconcileChild?(
+    action: Extract<NewWorkAction, { kind: 'file-reconcile-child' }>,
     credentials: CredentialPool,
   ): Promise<ActiveRuntimeResult>;
   merge(
@@ -34,7 +38,6 @@ export interface ActiveRuntimeOptions {
   readonly caps: {
     readonly implementation: number;
     readonly review: number;
-    readonly mergePrep: number;
   };
   readonly implementationPreferredLogin: string;
   readonly implementationBackpressureThreshold: number;
@@ -75,14 +78,12 @@ export function makeActiveRuntime(
   const caps = {
     implementation: nonNegative(options.caps.implementation, 'implementation cap'),
     review: nonNegative(options.caps.review, 'review cap'),
-    mergePrep: nonNegative(options.caps.mergePrep, 'merge-prep cap'),
   };
   const readLocalState = () => {
     const attempts = options.readLocalAttempts();
     const activeByPhase = {
       implementation: attempts.filter((attempt) => attempt.phase === 'implement').length,
       review: attempts.filter((attempt) => attempt.phase === 'review').length,
-      mergePrep: attempts.filter((attempt) => attempt.phase === 'merge-prep').length,
     };
     const occupied = new Set(
       attempts.map((attempt) => attempt.selectedLogin.toLowerCase()),
@@ -91,7 +92,6 @@ export function makeActiveRuntime(
       remaining: {
         implementation: Math.max(0, caps.implementation - activeByPhase.implementation),
         review: Math.max(0, caps.review - activeByPhase.review),
-        mergePrep: Math.max(0, caps.mergePrep - activeByPhase.mergePrep),
       },
       availableLogins: options.credentials.logins().filter(
         (login) => !occupied.has(login.toLowerCase()),
@@ -115,9 +115,7 @@ export function makeActiveRuntime(
         ? 'implementation'
         : action.kind === 'claim-review'
           ? 'review'
-          : action.kind === 'claim-merge-prep'
-            ? 'mergePrep'
-            : null;
+          : null;
       if (phase !== null && local.remaining[phase] === 0) {
         return { outcome: 'skipped', reason: 'local phase capacity is full' };
       }
@@ -129,9 +127,20 @@ export function makeActiveRuntime(
         ? await options.handlers.implementation(action, credentials)
         : action.kind === 'claim-review'
           ? await options.handlers.review(action, credentials)
-          : action.kind === 'claim-merge-prep'
-            ? await options.handlers.mergePrep(action, credentials)
-            : await options.handlers.merge(action, credentials);
+          : action.kind === 'update-branch'
+            ? options.handlers.updateBranch === undefined
+              ? { status: 'skipped', detail: 'update-branch handler unavailable' }
+              : await options.handlers.updateBranch(action, credentials)
+            : action.kind === 'file-reconcile-child'
+              ? options.handlers.fileReconcileChild === undefined
+                ? { status: 'skipped', detail: 'file-reconcile-child handler unavailable' }
+                : await options.handlers.fileReconcileChild(action, credentials)
+              : action.kind === 'merge'
+                ? await options.handlers.merge(action, credentials)
+                : {
+                    status: 'skipped',
+                    detail: `action ${(action as { kind: string }).kind} is not wired`,
+                  };
       const detail = reason(result);
       return {
         outcome: result.status,

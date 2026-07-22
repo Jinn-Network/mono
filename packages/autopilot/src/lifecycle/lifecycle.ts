@@ -117,9 +117,9 @@ function correlatedReviewClaim(item: PullRequestLifecycleItem) {
 }
 
 function humanOverlay(item: LifecycleItem): boolean {
-  return item.projectStatus === 'Human'
-    || item.humanHold === true
+  return item.humanHold === true
     || item.labels.includes('review:needs-human')
+    || item.labels.includes('autopilot:human')
     || item.humanReason !== undefined
     || (item.kind === 'pull-request'
       && (!branchClaimMatchesItem(item)
@@ -132,22 +132,37 @@ function underlyingPhase(item: LifecycleItem): Exclude<LifecyclePhase, 'human'> 
   if (item.merged) return 'merged';
 
   const branchClaim = correlatedBranchClaim(item);
-  if (branchClaim?.phase === 'implement' && branchClaim.phaseComplete !== true) {
+  if (
+    (branchClaim?.phase === 'implement'
+      || branchClaim?.phase === 'fix'
+      || branchClaim?.phase === 'reconcile')
+    && branchClaim.phaseComplete !== true
+  ) {
     return 'implementing';
   }
-  if (branchClaim?.phase === 'merge-prep' && branchClaim.phaseComplete !== true) {
-    return 'merge-prep';
+
+  // Children / head-bound RC outrank an in-flight review claim: the parent is
+  // blocked until the child lands (Stage 2). Checking before review-claim
+  // phases keeps REQUEST_CHANGES from looking like an active review.
+  const openChildren = item.openChildKinds ?? [];
+  const headBoundChangesRequested = item.terminalVerdict?.head === item.head
+    && item.terminalVerdict.state === 'REQUEST_CHANGES';
+  if (openChildren.length > 0 || headBoundChangesRequested) {
+    return 'blocked-by-child';
   }
 
   const review = correlatedReviewClaim(item);
   const currentReview = review !== undefined && review.head === item.head;
   if (currentReview && !['stale', 'terminal-approved', 'human'].includes(review.state)) {
-    return item.isDraft || review.state === 'fixing' ? 'review-fixing' : 'reviewing';
+    return 'reviewing';
   }
 
   if (item.approved && !item.needsReview) {
     if (item.mergeState === 'clean') return 'merge-ready';
-    if (item.mergeState === 'behind' || item.mergeState === 'conflict') return 'merge-prep';
+    // Behind / conflict: integration ladder owns the next mutation; view stays
+    // awaiting-review so review enrollment stays closed while the gate
+    // schedules update-branch / file-reconcile-child.
+    return 'awaiting-review';
   }
   return 'awaiting-review';
 }
@@ -185,7 +200,7 @@ function staleEvidence(
   }
 
   if (
-    (phase === 'implementing' || phase === 'merge-prep')
+    phase === 'implementing'
     && correlatedBranchClaim(item) !== undefined
     && correlatedBranchClaim(item)?.phaseComplete !== true
   ) {
@@ -202,7 +217,7 @@ function staleEvidence(
 
   const review = correlatedReviewClaim(item);
   if (
-    (phase === 'reviewing' || phase === 'review-fixing')
+    phase === 'reviewing'
     && review !== undefined
     && review.head === item.head
     && !['stale', 'terminal-approved', 'human'].includes(review.state)
@@ -214,11 +229,10 @@ function staleEvidence(
     if (headTime > nowMs) return { stale: false };
 
     // Winning a review claim generation is the one permitted progress event for
-    // review (mirrors the branch claim commit for implement/merge-prep): it
-    // initializes the clock even when the PR head is already old. Later
-    // metadata-only transitions within the same generation (verdict-intent,
-    // fixing, ...) do not carry their own recordedAt forward as a reset, so
-    // they cannot re-extend it.
+    // review (mirrors the branch claim commit for implement): it initializes
+    // the clock even when the PR head is already old. Later metadata-only
+    // transitions within the same generation (verdict-intent, ...) do not
+    // carry their own recordedAt forward as a reset, so they cannot re-extend it.
     let progressTime = headTime;
     if (review.state === 'active') {
       const acquisitionTime = timestampMs(review.recordedAt);
@@ -272,7 +286,7 @@ function deriveItem(item: LifecycleItem, nowMs: number, staleAfterMs: number): L
           phase: 'human',
           underlyingPhase: underlying,
           humanReason: {
-            phase: item.isDraft || review.state === 'fixing' ? 'review-fixing' : 'reviewing',
+            phase: 'reviewing',
             code: 'invalid-review-progress-time',
             detail: `Invalid terminal verdict progress timestamp: ${item.terminalVerdict.recordedAt}`,
           },
@@ -293,7 +307,7 @@ function deriveItem(item: LifecycleItem, nowMs: number, staleAfterMs: number): L
         detail: `Invalid branch head progress timestamp: ${item.headChangedAt}`,
       };
     } else if (
-      (underlying === 'merge-prep' || underlying === 'merge-ready')
+      underlying === 'merge-ready'
       && (headTime === null || headTime > nowMs)
     ) {
       invalidProgressReason = {
@@ -302,9 +316,7 @@ function deriveItem(item: LifecycleItem, nowMs: number, staleAfterMs: number): L
         detail: `Invalid merge progress timestamp: ${item.headChangedAt}`,
       };
     } else if (
-      (underlying === 'awaiting-review'
-        || underlying === 'reviewing'
-        || underlying === 'review-fixing')
+      (underlying === 'awaiting-review' || underlying === 'reviewing')
       && (headTime === null || headTime > nowMs)
     ) {
       invalidProgressReason = {
@@ -312,7 +324,7 @@ function deriveItem(item: LifecycleItem, nowMs: number, staleAfterMs: number): L
         code: 'invalid-review-progress-time',
         detail: `Invalid review progress timestamp: ${item.headChangedAt}`,
       };
-    } else if (underlying === 'reviewing' || underlying === 'review-fixing') {
+    } else if (underlying === 'reviewing') {
       const review = correlatedReviewClaim(item);
       if (review !== undefined && review.head === item.head && review.state === 'active') {
         const acquisitionTime = timestampMs(review.recordedAt);
@@ -370,22 +382,9 @@ export function deriveLifecycle(
 function recoveryForView(view: LifecycleViewItem): readonly RecoveryAction[] {
   if (!view.stale || view.phase === 'human' || view.item.kind !== 'pull-request') return [];
   const item = view.item;
-  if (view.phase === 'implementing') {
-    return [{
-      kind: 'requeue-implementation',
-      issueNumber: item.issueNumber,
-      expectedHead: item.head,
-    }];
-  }
-  if (view.phase === 'merge-prep') {
-    return [{
-      kind: 'requeue-merge-prep',
-      prNumber: item.prNumber,
-      expectedHead: item.head,
-    }];
-  }
+  // Stale implementation reclaim is claim-branch / scheduler driven (Stage 3+).
   if (
-    (view.phase === 'reviewing' || view.phase === 'review-fixing')
+    view.phase === 'reviewing'
     && item.reviewClaim !== undefined
   ) {
     return [{
@@ -412,6 +411,7 @@ function nonNegativeSlots(value: number): number {
 }
 
 function reviewEnrollmentEligible(item: PullRequestLifecycleItem): boolean {
+  if (item.approved && !item.needsReview) return false;
   if (!item.isDraft) return item.needsReview && !item.approved;
   return item.reviewClaim?.state === 'stale' && item.reviewClaim.head === item.head;
 }
@@ -429,7 +429,6 @@ export function planCycle(
   let lanes = nonNegativeSlots(localCapacity.usableCredentialLanes);
   let implementationSlots = nonNegativeSlots(localCapacity.implementationSlots);
   let reviewSlots = nonNegativeSlots(localCapacity.reviewSlots);
-  let mergePrepSlots = nonNegativeSlots(localCapacity.mergePrepSlots);
   const planned: PlannedAction[] = [...recovery];
 
   for (const candidate of view.items) {
@@ -464,35 +463,9 @@ export function planCycle(
       issueNumber: candidate.item.issueNumber,
       prNumber: candidate.item.prNumber,
       head: candidate.item.head,
-      recoverFixes: candidate.item.isDraft,
     });
     lanes -= 1;
     reviewSlots -= 1;
-  }
-
-  for (const candidate of view.items) {
-    const reclaimingStaleMergePrep = candidate.item.kind === 'pull-request'
-      && candidate.stale
-      && candidate.item.branchClaim?.phase === 'merge-prep'
-      && candidate.item.branchClaim.phaseComplete !== true;
-    if (
-      lanes === 0
-      || mergePrepSlots === 0
-      || candidate.phase !== 'merge-prep'
-      || candidate.item.kind !== 'pull-request'
-      || (!reclaimingStaleMergePrep && candidate.item.branchClaim !== undefined)
-    ) {
-      continue;
-    }
-    planned.push({
-      kind: 'claim-merge-prep',
-      issueNumber: candidate.item.issueNumber,
-      prNumber: candidate.item.prNumber,
-      head: candidate.item.head,
-      recoverStale: reclaimingStaleMergePrep,
-    });
-    lanes -= 1;
-    mergePrepSlots -= 1;
   }
 
   for (const candidate of view.items) {

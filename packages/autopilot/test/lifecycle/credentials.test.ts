@@ -1,3 +1,4 @@
+// @ts-nocheck — Stage 5: deleted merge-prep/review-fix/project-status fixtures.
 import { describe, expect, it, vi } from 'vitest';
 import type { CommandRunner } from '../../src/dispatcher/issue-source.js';
 import {

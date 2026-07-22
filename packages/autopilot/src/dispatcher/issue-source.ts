@@ -72,10 +72,11 @@ export type CommandRunner = (
 // Internal shapes that mirror real `gh` JSON output (observed 2026-05-21).
 // ---------------------------------------------------------------------------
 
-/** One entry from `gh issue list --json number,title,labels,author`. */
+/** One entry from `gh issue list --json number,title,labels,author,body`. */
 interface GhIssue {
   number: number;
   title: string;
+  body?: string;
   labels: Array<{ name: string } | string>;
   /**
    * `gh` returns `{ login, ... }`. Optional so older `gh` versions or
@@ -120,7 +121,7 @@ export class GhIssueSource implements IssueSource {
       // `labels` remains part of the issue record; runtime selection is
       // deliberately process-wide.
       // `author` powers the dispatcher author-allowlist trust boundary (#497).
-      '--json', 'number,title,labels,author',
+      '--json', 'number,title,labels,author,body',
       '--limit', '200',
     ]);
     const ghIssues: GhIssue[] = JSON.parse(issueListRaw) as GhIssue[];
@@ -131,7 +132,9 @@ export class GhIssueSource implements IssueSource {
 
     // 3. Map each gh issue to PolledIssue. Off-board issues get `onBoard: false`
     //    and null board-derived fields; `selectReady` then drops them (it
-    //    requires `onBoard: true` AND `status === 'Todo'`).
+    //    requires `onBoard: true`) unless they are marker-bearing machine
+    //    children (Stage 2 — label triage, no board required). Project Status
+    //    is paint-only and is not an admission gate.
     return ghIssues.map((ghIssue): PolledIssue => {
       const entry = board.getIssue(ghIssue.number);
       const onBoard = entry != null;
@@ -141,6 +144,7 @@ export class GhIssueSource implements IssueSource {
       return {
         number: ghIssue.number,
         title: ghIssue.title,
+        body: typeof ghIssue.body === 'string' ? ghIssue.body : '',
         labels: ghIssue.labels.map((label) => (
           typeof label === 'string' ? label : label.name
         )),

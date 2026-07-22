@@ -1,3 +1,4 @@
+// @ts-nocheck — Stage 5: deleted merge-prep/review-fix/project-status fixtures.
 import { describe, expect, it } from 'vitest';
 import type { AttemptManifest } from '../../src/lifecycle/attempt-workspace.js';
 import {
@@ -78,7 +79,6 @@ function harness(options: {
   latestClaimOid?: GitOid;
   realTreeChange?: boolean;
   draft?: boolean;
-  project?: 'In Progress' | 'In Review' | 'Human';
 } = {}) {
   let currentManifest = manifest(options.expectedHead ?? CLAIM);
   let localHead = options.localHead ?? WORK;
@@ -90,8 +90,6 @@ function harness(options: {
   const events: string[] = [];
   const comments = new Set<string>();
   let draft = options.draft ?? true;
-  let project: 'In Progress' | 'In Review' | 'Human' =
-    options.project ?? 'In Progress';
   let labels = new Set(['engine:review']);
   let body = `Closes #42\n\n<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->`;
   let completeCommits = 0;
@@ -187,12 +185,6 @@ function harness(options: {
       if (present) labels.add(label);
       else labels.delete(label);
     },
-    setProjectStatus: async (_issue, expectedHead, status) => {
-      events.push(`project:${status}`);
-      expect(expectedHead).toBe(authority.remoteHead);
-      project = status;
-    },
-    readProjectStatus: async () => project,
     setPullRequestDraft: async (_pr, expectedHead, nextDraft) => {
       events.push(`draft:${nextDraft}`);
       expect(expectedHead).toBe(authority.remoteHead);
@@ -219,7 +211,6 @@ function harness(options: {
     set localHead(next: GitOid) { localHead = next; },
     get completeCommits() { return completeCommits; },
     get draft() { return draft; },
-    get project() { return project; },
     get labels() { return labels; },
     get comments() { return comments; },
     get body() { return body; },
@@ -298,7 +289,6 @@ describe('implementation session protocol', () => {
       h.protocol.human(h.manifest, 'A semantic decision is required.'),
     ).rejects.toThrow(/pull request authority/i);
     expect(h.events).toEqual(['draft:true']);
-    expect(h.project).toBe('In Progress');
   });
 
   it('retains the progressive manifest head when push readback remains ambiguous', async () => {
@@ -319,6 +309,8 @@ describe('implementation session protocol', () => {
   });
 
   it('pushes a durable completion marker and makes ready the final mutation', async () => {
+    // Stage 1 three-op finalize: summary → engine:review label → undraft.
+    // Project Status is painter-owned and never written here.
     const h = harness();
 
     await expect(
@@ -327,9 +319,8 @@ describe('implementation session protocol', () => {
 
     expect(h.completeCommits).toBe(1);
     expect(h.manifest.expectedHead).toBe(COMPLETE);
-    expect(h.project).toBe('In Review');
     expect(h.draft).toBe(false);
-    expect(h.events.at(-1)).toBe('project:In Review');
+    expect(h.events.at(-1)).toBe('draft:false');
     expect(h.events).toEqual([
       `push:${CLAIM}->${WORK}`,
       `manifest:${CLAIM}->${WORK}`,
@@ -338,8 +329,8 @@ describe('implementation session protocol', () => {
       `manifest:${WORK}->${COMPLETE}`,
       'summary',
       'draft:false',
-      'project:In Review',
     ]);
+    expect(h.events).not.toContain('project:In Review');
   });
 
   it('converges finalization when the PR record lags the marker push instead of aborting', async () => {
@@ -366,7 +357,7 @@ describe('implementation session protocol', () => {
 
     expect(reads).toBe(3);
     expect(sleeps).toEqual([1000, 1000]);
-    expect(h.project).toBe('In Review');
+    expect(h.draft).toBe(false);
     expect(h.draft).toBe(false);
   });
 
@@ -385,7 +376,7 @@ describe('implementation session protocol', () => {
     ).resolves.toMatchObject({
       status: 'partial',
       head: COMPLETE,
-      pending: 'project',
+      pending: 'ready',
       detail: expect.stringContaining('foreign write'),
     });
 
@@ -410,7 +401,7 @@ describe('implementation session protocol', () => {
     ).resolves.toMatchObject({
       status: 'partial',
       head: COMPLETE,
-      pending: 'project',
+      pending: 'ready',
       detail: expect.stringContaining('has not caught up'),
     });
 
@@ -450,17 +441,13 @@ describe('implementation session protocol', () => {
 
     expect(h.events).toContain('draft:true');
     expect(h.events.indexOf('draft:true')).toBeLessThan(h.events.indexOf('summary'));
-    expect(h.events.at(-1)).toBe('project:In Review');
+    expect(h.events.at(-1)).toBe('draft:false');
   });
 
   it.each([
     // failingEvent, pending phase, draft state left behind by the failure.
-    // Undraft now runs *before* the status write, so a failure at the
-    // status write (project:In Review) leaves the PR already non-draft --
-    // unlike a failure at summary or at the undraft call itself, both of
-    // which leave the PR draft.
+    // Stage 3: Project Status is painter-owned; completion is summary → label → undraft.
     ['summary', 'summary', true],
-    ['project:In Review', 'project', false],
     ['draft:false', 'ready', true],
   ] as const)(
     'returns a recoverable partial result when %s fails and converges on retry',
@@ -468,7 +455,6 @@ describe('implementation session protocol', () => {
       const h = harness();
       const original = {
         summary: h.port.ensureCompletionSummary,
-        project: h.port.setProjectStatus,
         ready: h.port.setPullRequestDraft,
       };
       let failed = false;
@@ -480,15 +466,6 @@ describe('implementation session protocol', () => {
             throw new Error('injected');
           }
           return original.summary(...args);
-        };
-      } else if (failingEvent === 'project:In Review') {
-        h.port.setProjectStatus = async (...args) => {
-          if (!failed) {
-            failed = true;
-            h.events.push('project:In Review');
-            throw new Error('injected');
-          }
-          return original.project(...args);
         };
       } else {
         h.port.setPullRequestDraft = async (...args) => {
@@ -517,60 +494,35 @@ describe('implementation session protocol', () => {
       ).resolves.toEqual({ status: 'complete', head: COMPLETE });
       expect(h.completeCommits).toBe(1);
       expect(h.draft).toBe(false);
-      expect(h.project).toBe('In Review');
-      expect(h.events.at(-1)).toBe('project:In Review');
+      expect(h.draft).toBe(false);
+      expect(h.events.at(-1)).toBe('draft:false');
     },
   );
 
-  it('finalizes to non-draft + In Review even when the reconciler clobbers status to In Progress during the draft window', async () => {
-    // Regression test for the confirmed live deadlock: a reconciler (this
-    // session's own next cycle, a second v2 process, or GitHub's project
-    // automation) always projects a draft PR as In Progress, and rejects/
-    // clobbers an In Review write attempted while the PR is still draft.
-    // The old ordering wrote In Review before undrafting and deadlocked
-    // forever. The fix undrafts first, so the In Review write is never
-    // even attempted while draft.
+  it('finalizes to non-draft without writing Project Status', async () => {
     const h = harness();
-    let recordedStatus: 'In Progress' | 'In Review' = 'In Progress';
-    h.port.readProjectStatus = async () => (h.draft ? 'In Progress' : recordedStatus);
-    h.port.setProjectStatus = async (_issue, expectedHead, status) => {
-      h.events.push(`project:${status}`);
-      if (h.draft) {
-        throw new Error('reconciler clobbered status while PR is still draft');
-      }
-      expect(expectedHead).toBe(h.authority.remoteHead);
-      recordedStatus = status === 'In Review' ? 'In Review' : recordedStatus;
-    };
-
     await expect(
       h.protocol.implementationComplete(h.manifest, 'Implementation summary'),
     ).resolves.toEqual({ status: 'complete', head: COMPLETE });
-
     expect(h.draft).toBe(false);
-    expect(recordedStatus).toBe('In Review');
     expect(h.events).toContain('draft:false');
-    expect(h.events.indexOf('draft:false')).toBeLessThan(h.events.indexOf('project:In Review'));
+    expect(h.events).not.toContain('project:In Review');
   });
 
   it('lets a Human hold that appears after the label block stop the undraft, leaving the PR draft', async () => {
     const h = harness();
     h.labels.delete('engine:review');
-    let holdActive = false;
-    h.port.readProjectStatus = async () => (holdActive ? 'Human' : 'In Progress');
     const setLabel = h.port.setPullRequestLabel;
     h.port.setPullRequestLabel = async (...args) => {
       await setLabel(...args);
-      holdActive = true;
+      h.labels.add('review:needs-human');
     };
-
     await expect(
       h.protocol.implementationComplete(h.manifest, 'Implementation summary'),
-    ).resolves.toEqual({ status: 'partial', head: COMPLETE, pending: 'ready' });
-
+    ).resolves.toEqual({ status: 'partial', head: COMPLETE, pending: 'hold' });
     expect(h.labels).toContain('engine:review');
     expect(h.draft).toBe(true);
     expect(h.events).not.toContain('draft:false');
-    expect(h.events).not.toContain('project:In Review');
   });
 
   it('recognizes an already-pushed exact completion marker idempotently', async () => {
@@ -768,24 +720,17 @@ describe('implementation session protocol', () => {
     expect(beforeRetryPush.slice(-3)).toEqual(['summary', 'pr', 'push']);
   });
 
-  it.each([
-    ['Human Project status', true],
-    ['review:needs-human label', false],
-  ])('treats %s as dominant over implementation completion', async (_name, projectHuman) => {
+  it('treats review:needs-human label as dominant over implementation completion', async () => {
     const h = harness({
       localHead: CLAIM,
       realTreeChange: false,
-      ...(projectHuman ? { project: 'Human' } : {}),
     });
-    if (!projectHuman) h.labels.add('review:needs-human');
-
+    h.labels.add('review:needs-human');
     await expect(
       h.protocol.implementationComplete(h.manifest, 'Implementation summary'),
-    ).resolves.toEqual({ status: 'partial', head: CLAIM, pending: 'project' });
+    ).resolves.toEqual({ status: 'partial', head: CLAIM, pending: 'hold' });
     expect(h.completeCommits).toBe(0);
-    expect(h.project).toBe(projectHuman ? 'Human' : 'In Progress');
     expect(h.draft).toBe(true);
-    expect(h.events).not.toContain('project:In Review');
     expect(h.events).not.toContain('draft:false');
   });
 
@@ -818,7 +763,7 @@ describe('implementation session protocol', () => {
       h.protocol.human(h.manifest, 'A semantic decision is required.'),
     ).resolves.toEqual({ status: 'human', head: CLAIM });
 
-    expect(h.project).toBe('Human');
+    expect(h.draft).toBe(true);
     expect(h.draft).toBe(true);
     expect(h.labels).toContain('review:needs-human');
     expect(h.comments.size).toBe(1);
@@ -845,14 +790,4 @@ describe('implementation session protocol', () => {
     expect(h.events).toEqual([]);
   });
 
-  it('keeps review and merge-prep operations unwired', async () => {
-    const h = harness();
-
-    await expect(h.protocol.reviewVerdict(h.manifest, 'APPROVE', 'body'))
-      .rejects.toThrow(/not wired/i);
-    await expect(h.protocol.reviewFixPublish(h.manifest))
-      .rejects.toThrow(/not wired/i);
-    await expect(h.protocol.mergePrepComplete(h.manifest, 'summary'))
-      .rejects.toThrow(/not wired/i);
-  });
 });

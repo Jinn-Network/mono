@@ -94,15 +94,11 @@ export interface ImplementationSessionPort {
     label: string,
     present: boolean,
   ): Promise<void>;
-  setProjectStatus(
-    issueNumber: number,
-    expectedHead: GitOid,
-    status: 'In Review' | 'Human',
-  ): Promise<void>;
-  readProjectStatus(
-    issueNumber: number,
-    expectedHead: GitOid,
-  ): Promise<'Todo' | 'In Progress' | 'Human' | 'In Review' | 'Done' | null>;
+  /**
+   * Interim board paint for Human escalation only. Finalize no longer writes
+   * Project Status (Stage 1 — decisions off the board); the painter owns the
+   * rest of the Status view from Stage 3.
+   */
   setPullRequestDraft(
     prNumber: number,
     expectedHead: GitOid,
@@ -119,6 +115,16 @@ export interface ImplementationSessionPort {
     marker: string,
     body: string,
   ): Promise<void>;
+  /** Stage 2: true when parent head ancestry includes a child-issue trailer. */
+  parentHeadReferencesChild?(
+    manifest: AttemptManifest,
+    head: GitOid,
+    childIssueNumber: number,
+  ): Promise<boolean>;
+  closeChildIssue?(
+    issueNumber: number,
+    comment: string,
+  ): Promise<void>;
 }
 
 export type CheckpointResult =
@@ -130,7 +136,13 @@ export type ImplementationCompleteResult =
   | {
       readonly status: 'partial';
       readonly head: GitOid;
-      readonly pending: 'checkpoint' | 'marker' | 'summary' | 'project' | 'ready';
+      readonly pending:
+        | 'checkpoint'
+        | 'marker'
+        | 'summary'
+        | 'label'
+        | 'ready'
+        | 'hold';
       /**
        * The swallowed failure reason, when available, so `autopilot session
        * implementation-complete` can surface *why* a retry is pending
@@ -164,13 +176,14 @@ export interface ImplementationSessionProtocol {
     manifest: AttemptManifest,
     summary: string,
   ): Promise<ImplementationCompleteResult>;
+  childComplete?(
+    manifest: AttemptManifest,
+  ): Promise<{ readonly status: 'closed' | 'rejected'; readonly detail?: string }>;
   reviewVerdict(
     manifest: AttemptManifest,
     state: ReviewVerdictState,
     body: string,
   ): Promise<never>;
-  reviewFixPublish(manifest: AttemptManifest): Promise<never>;
-  mergePrepComplete(manifest: AttemptManifest, summary: string): Promise<never>;
   human(manifest: AttemptManifest, reason: string): Promise<HumanHoldResult>;
 }
 
@@ -269,10 +282,8 @@ async function requireActiveImplementationPullRequest(
 
 function hasHumanHold(
   pullRequest: ImplementationSessionPullRequest,
-  projectStatus: Awaited<ReturnType<ImplementationSessionPort['readProjectStatus']>>,
 ): boolean {
-  return projectStatus === 'Human'
-    || pullRequest.labels.includes('review:needs-human');
+  return pullRequest.labels.includes('review:needs-human');
 }
 
 function branchOutcome(
@@ -386,36 +397,31 @@ async function ensureCompletionProjection(
   summary: string,
   port: ImplementationSessionPort,
 ): Promise<ImplementationCompleteResult> {
+  // Three-op finalize (Stage 1): summary → engine:review → undraft → complete.
+  // Project Status is paint-only and is never read or written here.
   const prNumber = manifest.prNumber!;
   let pullRequest: ImplementationSessionPullRequest;
   try {
     pullRequest = await port.readPullRequest(prNumber, head);
-    const projectStatus = await port.readProjectStatus(manifest.issueNumber, head);
     if (
       !validImplementationPullRequest(manifest, pullRequest, head, false)
     ) {
-      return { status: 'partial', head, pending: 'project' };
+      return { status: 'partial', head, pending: 'ready' };
     }
-    if (hasHumanHold(pullRequest, projectStatus)) {
-      return { status: 'partial', head, pending: 'project' };
+    if (hasHumanHold(pullRequest)) {
+      return { status: 'partial', head, pending: 'hold' };
     }
     if (
       !pullRequest.draft
       && hasImplementationSummary(pullRequest.body, summary)
       && pullRequest.labels.includes('engine:review')
-      && projectStatus === 'In Review'
     ) {
       return { status: 'complete', head };
     }
     // Re-draft only when the durable work (summary + label) is genuinely
-    // missing. A non-draft PR that already has both is not broken -- it is
-    // a normal transient the reconciler resolves on its own next pass once
-    // the In Review projection lands (see the undraft-before-project-status
-    // ordering below). Re-drafting it here on every partial retry would
-    // thrash the PR's ready state and resurrect the deadlock this ordering
-    // exists to fix: In Review can never be confirmed while draft, so a
-    // session that keeps re-drafting a PR "merely awaiting In Review" would
-    // never converge.
+    // missing. A non-draft PR that already has both is already complete
+    // (early return above); re-drafting a ready PR that only lacked paint
+    // would thrash the ready state.
     if (
       !pullRequest.draft
       && (!hasImplementationSummary(pullRequest.body, summary)
@@ -424,7 +430,7 @@ async function ensureCompletionProjection(
       await port.setPullRequestDraft(prNumber, head, true);
     }
   } catch (error) {
-    return { status: 'partial', head, pending: 'project', detail: message(error) };
+    return { status: 'partial', head, pending: 'ready', detail: message(error) };
   }
 
   try {
@@ -434,46 +440,30 @@ async function ensureCompletionProjection(
   }
 
   // Label: attach engine:review before undrafting, so the PR is reviewable
-  // the instant it goes ready. requireDraft is false (not true) so this
-  // block stays re-entrant when a prior attempt already undrafted the PR
-  // but failed later -- e.g. at the status write below -- in which case
-  // this read legitimately observes a non-draft PR and must not treat that
-  // as an authority violation.
+  // the instant it goes ready. requireDraft is false so this block stays
+  // re-entrant when a prior attempt already undrafted the PR.
   try {
     pullRequest = await port.readPullRequest(prNumber, head);
-    const projectStatus = await port.readProjectStatus(manifest.issueNumber, head);
-    if (
-      !validImplementationPullRequest(manifest, pullRequest, head, false)
-      || hasHumanHold(pullRequest, projectStatus)
-    ) {
-      return { status: 'partial', head, pending: 'project' };
+    if (!validImplementationPullRequest(manifest, pullRequest, head, false)) {
+      return { status: 'partial', head, pending: 'ready' };
+    }
+    if (hasHumanHold(pullRequest)) {
+      return { status: 'partial', head, pending: 'hold' };
     }
     if (!pullRequest.labels.includes('engine:review')) {
       await port.setPullRequestLabel(prNumber, head, 'engine:review', true);
     }
   } catch (error) {
-    return { status: 'partial', head, pending: 'project', detail: message(error) };
+    return { status: 'partial', head, pending: 'label', detail: message(error) };
   }
 
-  // Undraft precedes the In Review project-status write: a draft PR is
-  // always projected as In Progress by the reconciler (see 8.6 in the
-  // lifecycle design), so writing In Review while still draft is
-  // unstable -- the reconciler (this session's own next cycle, a second
-  // v2 process, or GitHub's project automation) clobbers it straight back,
-  // and this finalizer would then see the clobbered value and bail out
-  // without ever undrafting -- the deadlock this ordering fixes. Undrafting
-  // first means both sides agree on In Review the moment the PR goes
-  // ready. requireDraft is false for the same re-entrancy reason as the
-  // label block above. The Human-hold guard is preserved exactly as the
-  // old non-draft-last ordering had it.
   try {
     pullRequest = await port.readPullRequest(prNumber, head);
-    const projectStatus = await port.readProjectStatus(manifest.issueNumber, head);
-    if (
-      !validImplementationPullRequest(manifest, pullRequest, head, false)
-      || hasHumanHold(pullRequest, projectStatus)
-    ) {
+    if (!validImplementationPullRequest(manifest, pullRequest, head, false)) {
       return { status: 'partial', head, pending: 'ready' };
+    }
+    if (hasHumanHold(pullRequest)) {
+      return { status: 'partial', head, pending: 'hold' };
     }
     if (pullRequest.draft) {
       await port.setPullRequestDraft(prNumber, head, false);
@@ -482,24 +472,6 @@ async function ensureCompletionProjection(
     return { status: 'partial', head, pending: 'ready', detail: message(error) };
   }
 
-  // Status: now last, and only safe to write once the PR is non-draft.
-  // requireDraft must be false here -- the PR is non-draft by construction
-  // at this point, so requiring draft would always fail post-undraft.
-  try {
-    pullRequest = await port.readPullRequest(prNumber, head);
-    const projectStatus = await port.readProjectStatus(manifest.issueNumber, head);
-    if (
-      !validImplementationPullRequest(manifest, pullRequest, head, false)
-      || hasHumanHold(pullRequest, projectStatus)
-    ) {
-      return { status: 'partial', head, pending: 'project' };
-    }
-    if (projectStatus !== 'In Review') {
-      await port.setProjectStatus(manifest.issueNumber, head, 'In Review');
-    }
-  } catch (error) {
-    return { status: 'partial', head, pending: 'project', detail: message(error) };
-  }
   return { status: 'complete', head };
 }
 
@@ -512,8 +484,8 @@ async function ensureCompletionProjection(
  * lags a just-pushed ref by up to a few seconds. A single-shot read after
  * publish therefore still shows the pre-publish head, and every downstream
  * authority check in `ensureCompletionProjection` throws on that stale
- * head -- the very next line, `catch`, maps EVERY throw to
- * `partial/pending:'project'`, leaving the PR draft with the marker commit
+ * head -- the very next line, `catch`, maps EVERY throw to a
+ * recoverable partial, leaving the PR draft with the marker commit
  * already on the branch (the live bug this fixes). Three attempts with a
  * short delay between them gives replication time to catch up.
  */
@@ -580,7 +552,7 @@ function pullRequestHeadConvergenceDetail(
 
 /**
  * Waits for the PR record to converge on `publishedHead` before the caller
- * projects durable state (summary, labels, draft, Project status) onto it.
+ * projects durable state (summary, labels, draft) onto it.
  * Returns `null` once converged; otherwise a partial result -- with a
  * surfaced `detail` -- fit to return directly without ever calling
  * {@link ensureCompletionProjection} against a head the PR record hasn't
@@ -602,7 +574,7 @@ async function convergeOnPublishedHead(
   return {
     status: 'partial',
     head: publishedHead,
-    pending: 'project',
+    pending: 'ready',
     detail: pullRequestHeadConvergenceDetail(convergence, publishedHead),
   };
 }
@@ -620,12 +592,8 @@ async function implementationComplete(
     port,
     false,
   );
-  let projectStatus = await port.readProjectStatus(
-    manifest.issueNumber,
-    authority.remoteHead,
-  );
-  if (hasHumanHold(pullRequest, projectStatus)) {
-    return { status: 'partial', head: authority.remoteHead, pending: 'project' };
+  if (hasHumanHold(pullRequest)) {
+    return { status: 'partial', head: authority.remoteHead, pending: 'hold' };
   }
   let localHead = await port.readLocalHead(manifest);
 
@@ -733,9 +701,8 @@ async function implementationComplete(
     return { status: 'partial', head: authority.remoteHead, pending: 'checkpoint' };
   }
   pullRequest = await requireActiveImplementationPullRequest(manifest, authority, port);
-  projectStatus = await port.readProjectStatus(manifest.issueNumber, authority.remoteHead);
-  if (hasHumanHold(pullRequest, projectStatus)) {
-    return { status: 'partial', head: authority.remoteHead, pending: 'project' };
+  if (hasHumanHold(pullRequest)) {
+    return { status: 'partial', head: authority.remoteHead, pending: 'hold' };
   }
 
   const markerClaim = completionClaim(manifest, authority.remoteHead);
@@ -856,12 +823,56 @@ async function human(
     port,
     false,
   );
-  await port.setProjectStatus(manifest.issueNumber, authority.remoteHead, 'Human');
+  // Stage 3: Human Status paint is painter-owned; label+marker are authority.
   pullRequest = await port.readPullRequest(prNumber, authority.remoteHead);
   if (pullRequest.head !== authority.remoteHead || !pullRequest.draft) {
     throw new Error('Human hold projection did not converge on a draft PR');
   }
   return { status: 'human', head: authority.remoteHead };
+}
+
+async function childComplete(
+  supplied: AttemptManifest,
+  port: ImplementationSessionPort,
+): Promise<{ readonly status: 'closed' | 'rejected'; readonly detail?: string }> {
+  const manifest = port.readManifest(supplied.paths.manifest);
+  if (
+    manifest.phase !== 'implement'
+    || manifest.attemptId !== supplied.attemptId
+    || manifest.issueNumber !== supplied.issueNumber
+  ) {
+    throw new Error('Child-complete manifest authority changed or is invalid');
+  }
+  const authority = await port.readAuthority(manifest);
+  const claim = authority.latestClaim;
+  if (claim.phase !== 'fix' && claim.phase !== 'reconcile') {
+    return { status: 'rejected', detail: 'claim is not a child fix/reconcile phase' };
+  }
+  if (claim.issueNumber !== manifest.issueNumber) {
+    return { status: 'rejected', detail: 'claim issue does not match child attempt' };
+  }
+  if (
+    port.parentHeadReferencesChild === undefined
+    || port.closeChildIssue === undefined
+  ) {
+    return { status: 'rejected', detail: 'child-complete port methods unavailable' };
+  }
+  const references = await port.parentHeadReferencesChild(
+    manifest,
+    authority.remoteHead,
+    manifest.issueNumber,
+  );
+  if (!references) {
+    return {
+      status: 'rejected',
+      detail: 'parent head is missing checkpoint trailers for this child',
+    };
+  }
+  await port.closeChildIssue(
+    manifest.issueNumber,
+    `Closed by child-complete after landing on parent PR #${claim.prNumber}.`,
+  );
+  return { status: 'closed' };
 }
 
 export function makeImplementationSessionProtocol(
@@ -871,9 +882,8 @@ export function makeImplementationSessionProtocol(
     checkpoint: (manifest) => checkpoint(manifest, port),
     implementationComplete: (manifest, summary) =>
       implementationComplete(manifest, summary, port),
+    childComplete: (manifest) => childComplete(manifest, port),
     reviewVerdict: async () => notWired('review-verdict'),
-    reviewFixPublish: async () => notWired('review-fix-publish'),
-    mergePrepComplete: async () => notWired('merge-prep-complete'),
     human: (manifest, reason) => human(manifest, reason, port),
   };
 }
