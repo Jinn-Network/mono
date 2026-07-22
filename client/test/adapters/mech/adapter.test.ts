@@ -330,7 +330,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     });
     expect(value!.task.id).toBe('watched-task');
     expect(value!.task.solverType).toBe('prediction.v1');
-    expect(fetchSignedTaskFromIpfs).toHaveBeenCalledWith(TEST_CONFIG.ipfsGatewayUrl, TASK_CID);
+    expect(fetchSignedTaskFromIpfs).toHaveBeenCalledWith(TEST_CONFIG.ipfsGatewayUrl, TASK_CID, undefined);
 
     await adapter.stop();
   });
@@ -1205,6 +1205,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     expect(fetchSignedTaskFromIpfs).toHaveBeenCalledWith(
       TEST_CONFIG.ipfsGatewayUrl,
       TASK_CID,
+      undefined,
     );
     expect(canClaimEvaluation).toHaveBeenCalledWith(
       expect.anything(),
@@ -2496,7 +2497,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
       { variant: 'v2', kind: 'solution', evidenceHash: expectedHash },
       undefined,
     );
-    expect(fetchSignedEnvelopeFromIpfs).toHaveBeenCalledWith(TEST_CONFIG.ipfsGatewayUrl, TASK_CID);
+    expect(fetchSignedEnvelopeFromIpfs).toHaveBeenCalledWith(TEST_CONFIG.ipfsGatewayUrl, TASK_CID, undefined);
 
     await adapter.stop();
   });
@@ -2557,7 +2558,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
       },
       undefined,
     );
-    expect(fetchSignedEnvelopeFromIpfs).toHaveBeenCalledWith(TEST_CONFIG.ipfsGatewayUrl, TASK_CID);
+    expect(fetchSignedEnvelopeFromIpfs).toHaveBeenCalledWith(TEST_CONFIG.ipfsGatewayUrl, TASK_CID, undefined);
 
     await adapter.stop();
   });
