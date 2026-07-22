@@ -101,6 +101,9 @@ function parsePullRequest(raw: string): ImplementationPullRequest {
   };
 }
 
+const READBACK_CONFIRMATION_ATTEMPTS = 6;
+const READBACK_CONFIRMATION_DELAY_MS = 750;
+
 async function mutateWithExactReadback(
   mutate: () => Promise<unknown>,
   confirmed: () => Promise<boolean>,
@@ -112,7 +115,14 @@ async function mutateWithExactReadback(
   } catch (error) {
     mutationError = error;
   }
-  if (await confirmed()) return;
+  for (let attempt = 0; attempt < READBACK_CONFIRMATION_ATTEMPTS; attempt += 1) {
+    if (await confirmed()) return;
+    if (attempt < READBACK_CONFIRMATION_ATTEMPTS - 1) {
+      await new Promise((resolve) => {
+        setTimeout(resolve, READBACK_CONFIRMATION_DELAY_MS);
+      });
+    }
+  }
   if (mutationError !== undefined) throw mutationError;
   throw new Error(detail);
 }
