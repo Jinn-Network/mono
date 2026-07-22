@@ -129,6 +129,36 @@ describe('solver-nets validate-pool-report', () => {
     expect(out).not.toMatch(/capacity blocker/i);
   });
 
+  it('emits weakSuite.unchecked split into backlog vs orphaned when pool cache is present', async () => {
+    const dir = tmpDir();
+    seedValidatedPool(dir, {
+      'in-pool__1': { scorable: true, reason: 'gold-patch-resolves' },
+      'orphan__1': { scorable: true, reason: 'gold-patch-resolves' },
+    });
+    writeFileSync(join(dir, 'pool-cache.json'), JSON.stringify({
+      schemaVersion: 'swe-rebench-v2-pool-cache.v1',
+      savedAt: '2026-05-25T00:00:00Z',
+      tasks: [{
+        instance_id: 'in-pool__1',
+        hf_dataset: 'nebius/SWE-rebench-leaderboard',
+        hf_split: 'test',
+        repo: 'acme/widget',
+        patch: 'gold',
+        test_patch: 'test',
+        language: 'python',
+      }],
+    }));
+    const made = makeCommandCtx({
+      argv: ['validate-pool-report', 'swe-rebench-v2', '--json'],
+      env: { JINN_SWE_REBENCH_V2_STATE_DIR: dir },
+    });
+    await solverNetsCommand.run(made.ctx);
+    expect(made.exits).toEqual([]);
+    const envelope = JSON.parse(made.writes.join('').trim()) as Record<string, unknown>;
+    const weakSuite = envelope['weakSuite'] as { unchecked: { backlog: number; orphaned: number } };
+    expect(weakSuite.unchecked).toEqual({ backlog: 1, orphaned: 1 });
+  });
+
   it('fails cleanly with a "stale" / "absent" message when validated-pool.json is missing', async () => {
     const dir = tmpDir(); // empty
     const made = makeCommandCtx({

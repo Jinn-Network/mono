@@ -146,7 +146,7 @@ describe('recheckDiscrimination', () => {
       semanticsVersion: EVAL_SEMANTICS_VERSION,
     });
     expect(result.checked).toBe(1);
-    expect(result.skipped).toBe(0);
+    expect(result.skipped).toEqual({ alreadyVerdicted: 0, limitExceeded: 0, orphanedPoolTask: 0, evalError: 0 });
     expect(result.flagged).toEqual(['repo__pkg-1']);
     const entry = await store.getEntry('repo__pkg-1', EVAL_SEMANTICS_VERSION);
     expect(entry?.discrimination).toBe('fail');
@@ -168,10 +168,81 @@ describe('recheckDiscrimination', () => {
       semanticsVersion: EVAL_SEMANTICS_VERSION,
     });
     expect(result.checked).toBe(0);
-    expect(result.skipped).toBe(1);
+    expect(result.skipped).toEqual({ alreadyVerdicted: 1, limitExceeded: 0, orphanedPoolTask: 0, evalError: 0 });
     expect(result.flagged).toEqual([]);
     expect(fetcher.fetchTaskRow).not.toHaveBeenCalled();
     expect(runner.runEval).not.toHaveBeenCalled();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('counts orphaned pool tasks separately from recheckable backlog', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jinn-disc-recheck-'));
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    await store.record('repo__orphan', { scorable: true, reason: 'gold-patch-resolves', checkedAt: new Date().toISOString() }, EVAL_SEMANTICS_VERSION);
+    const fetcher = { fetchTaskRow: vi.fn() };
+    const runner = { runEval: vi.fn() };
+    const result = await recheckDiscrimination({
+      pool: [poolTask('repo__other')],
+      store,
+      fetcher,
+      runner,
+      semanticsVersion: EVAL_SEMANTICS_VERSION,
+    });
+    expect(result.checked).toBe(0);
+    expect(result.skipped).toEqual({ alreadyVerdicted: 0, limitExceeded: 0, orphanedPoolTask: 1, evalError: 0 });
+    expect(fetcher.fetchTaskRow).not.toHaveBeenCalled();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('counts limit-exceeded skips separately once the batch bound is hit', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jinn-disc-recheck-'));
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    await store.record('repo__pkg-1', { scorable: true, reason: 'gold-patch-resolves', checkedAt: new Date().toISOString() }, EVAL_SEMANTICS_VERSION);
+    await store.record('repo__pkg-2', { scorable: true, reason: 'gold-patch-resolves', checkedAt: new Date().toISOString() }, EVAL_SEMANTICS_VERSION);
+    const fetcher = {
+      fetchTaskRow: async () => ({
+        instance_id: 'x',
+        repo: 'acme/widget',
+        image_name: 'img:tag',
+        FAIL_TO_PASS: ['t1'],
+        PASS_TO_PASS: [],
+        test_patch: '',
+        install_config: { test_cmd: 'pytest', log_parser: 'parse_log_pytest' },
+      }),
+    };
+    const runner = {
+      runEval: vi.fn().mockResolvedValue({ passed_match: true, passed: ['t1'], failed: [] }),
+    };
+    const result = await recheckDiscrimination({
+      pool: [poolTask('repo__pkg-1'), poolTask('repo__pkg-2')],
+      store,
+      fetcher,
+      runner,
+      semanticsVersion: EVAL_SEMANTICS_VERSION,
+      limit: 1,
+    });
+    expect(result.checked).toBe(1);
+    expect(result.skipped).toEqual({ alreadyVerdicted: 0, limitExceeded: 1, orphanedPoolTask: 0, evalError: 0 });
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('counts fetch/eval errors separately so a retryable backlog stays visible', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jinn-disc-recheck-'));
+    const store = new ValidatedPoolStore({ stateDir: dir });
+    await store.record('repo__pkg-1', { scorable: true, reason: 'gold-patch-resolves', checkedAt: new Date().toISOString() }, EVAL_SEMANTICS_VERSION);
+    const fetcher = { fetchTaskRow: vi.fn().mockRejectedValue(new Error('hf down')) };
+    const runner = { runEval: vi.fn() };
+    const result = await recheckDiscrimination({
+      pool: [poolTask('repo__pkg-1')],
+      store,
+      fetcher,
+      runner,
+      semanticsVersion: EVAL_SEMANTICS_VERSION,
+    });
+    expect(result.checked).toBe(0);
+    expect(result.skipped).toEqual({ alreadyVerdicted: 0, limitExceeded: 0, orphanedPoolTask: 0, evalError: 1 });
+    const entry = await store.getEntry('repo__pkg-1', EVAL_SEMANTICS_VERSION);
+    expect(entry?.discrimination).toBeUndefined();
     await rm(dir, { recursive: true, force: true });
   });
 });
@@ -187,11 +258,37 @@ describe('summarizeWeakSuite', () => {
         unscorable1: { scorable: false, reason: 'gold-patch-not-resolved', checkedAt: 't' },
       },
     };
-    expect(summarizeWeakSuite(file)).toEqual({ checked: 3, flagged: 1, unchecked: 1, rate: 1 / 3 });
+    expect(summarizeWeakSuite(file)).toEqual({
+      checked: 3,
+      flagged: 1,
+      unchecked: { backlog: 1, orphaned: 0 },
+      rate: 1 / 3,
+    });
   });
 
   it('returns a null rate when nothing has been discrimination-checked yet', () => {
     const file = { entries: { a: { scorable: true, reason: 'gold-patch-resolves', checkedAt: 't' } } };
-    expect(summarizeWeakSuite(file)).toEqual({ checked: 0, flagged: 0, unchecked: 1, rate: null });
+    expect(summarizeWeakSuite(file)).toEqual({
+      checked: 0,
+      flagged: 0,
+      unchecked: { backlog: 1, orphaned: 0 },
+      rate: null,
+    });
+  });
+
+  it('splits unchecked entries into backlog vs orphaned when pool ids are supplied', () => {
+    const file = {
+      entries: {
+        inPool: { scorable: true, reason: 'gold-patch-resolves', checkedAt: 't' },
+        orphan: { scorable: true, reason: 'gold-patch-resolves', checkedAt: 't' },
+        verdicted: { scorable: true, reason: 'gold-patch-resolves', checkedAt: 't', discrimination: 'pass' },
+      },
+    };
+    expect(summarizeWeakSuite(file, new Set(['inPool']))).toEqual({
+      checked: 1,
+      flagged: 0,
+      unchecked: { backlog: 1, orphaned: 1 },
+      rate: 0,
+    });
   });
 });

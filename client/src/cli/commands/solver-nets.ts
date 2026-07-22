@@ -574,7 +574,17 @@ Output flags:
       const evalSemanticsVersion = (raw as { evalSemanticsVersion?: string }).evalSemanticsVersion ?? 'unknown';
       const freshness = await describeSweRebenchV2PoolFreshness({ stateDir });
       const highestYieldBlocker = summary.byReason.find((b) => b.reason !== 'gold-patch-resolves')?.reason ?? null;
-      const weakSuite = summarizeWeakSuite(raw);
+      const { loadSweRebenchV2Pool } = await import('../../solver-types/swe-rebench-v2.js');
+      const { PoolCacheStore, loadPoolWithCacheFallback } = await import('../../solver-types/_swe-rebench-v2-pool-cache.js');
+      const poolResult = await loadPoolWithCacheFallback({
+        loadPool: loadSweRebenchV2Pool,
+        cache: new PoolCacheStore({ stateDir }),
+        currentPool: [],
+      });
+      const poolInstanceIds = poolResult.pool.length > 0
+        ? new Set(poolResult.pool.map((t) => t.instance_id))
+        : undefined;
+      const weakSuite = summarizeWeakSuite(raw, poolInstanceIds);
       const value = {
         verb: 'solver-nets validate-pool-report',
         solverNet: 'swe-rebench-v2',
@@ -609,8 +619,12 @@ Output flags:
         // separately as unchecked, never folded into the rate.
         const pct = s.weakSuite.rate !== null ? (s.weakSuite.rate * 100).toFixed(1) : 'n/a';
         lines.push(`weak-suite rate: ${s.weakSuite.flagged}/${s.weakSuite.checked} checked (${pct}%)`);
-        if (s.weakSuite.unchecked > 0) {
-          lines.push(`  ${s.weakSuite.unchecked} scorable entr${s.weakSuite.unchecked === 1 ? 'y' : 'ies'} unchecked — run \`validate-pool --recheck-discrimination\``);
+        const uncheckedTotal = s.weakSuite.unchecked.backlog + s.weakSuite.unchecked.orphaned;
+        if (uncheckedTotal > 0) {
+          lines.push(`  ${uncheckedTotal} scorable entr${uncheckedTotal === 1 ? 'y' : 'ies'} unchecked — backlog=${s.weakSuite.unchecked.backlog}  orphaned=${s.weakSuite.unchecked.orphaned}`);
+          if (s.weakSuite.unchecked.backlog > 0) {
+            lines.push(`  run \`validate-pool --recheck-discrimination\` for the backlog`);
+          }
         }
         // #806: gold-patch-not-resolved entries whose PASS_TO_PASS tests broke
         // (p2p_broke > 0) are usually an environment/setup problem, not a
@@ -695,8 +709,12 @@ Output flags:
           human,
           json,
           (v) => {
-            const s = v as { checked: number; flagged: string[]; skipped: number };
-            return `recheck-discrimination: checked=${s.checked}  flagged=${s.flagged.length}  skipped=${s.skipped}`;
+            const s = v as { checked: number; flagged: string[]; skipped: { alreadyVerdicted: number; limitExceeded: number; orphanedPoolTask: number; evalError: number } };
+            const sk = s.skipped;
+            return [
+              `recheck-discrimination: checked=${s.checked}  flagged=${s.flagged.length}`,
+              `  skipped: alreadyVerdicted=${sk.alreadyVerdicted}  limitExceeded=${sk.limitExceeded}  orphanedPoolTask=${sk.orphanedPoolTask}  evalError=${sk.evalError}`,
+            ].join('\n');
           },
         );
         return;
