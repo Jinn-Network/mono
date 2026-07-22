@@ -156,8 +156,8 @@ describe('production implementation action port', () => {
         if (command !== 'gh') throw new Error(`unexpected ${command}`);
         calls.push({ args, env: options?.env });
         if (args.includes('create')) throw new Error('response lost');
-        if (args.includes('view')) {
-          return JSON.stringify({
+        if (args.includes('list')) {
+          return JSON.stringify([{
             number: 84,
             headRefName: 'autopilot/42',
             headRefOid: HEAD,
@@ -165,7 +165,7 @@ describe('production implementation action port', () => {
             isDraft: true,
             labels: [{ name: 'engine:review' }],
             body: 'Closes #42\n\n<!-- jinn-autopilot:v2 issue=42 branch=autopilot/42 -->',
-          });
+          }]);
         }
         throw new Error(`unexpected ${args.join(' ')}`);
       },

@@ -161,10 +161,21 @@ export function makeProductionImplementationActionPort(
     branch: string,
     run: CommandRunner,
   ): Promise<ImplementationPullRequest> => run('gh', [
-    'pr', 'view', branch,
-    '--repo', REPO,
+    'pr', 'list', '--repo', REPO,
+    '--head', branch,
+    '--state', 'open',
     '--json', 'number,headRefName,headRefOid,baseRefName,isDraft,labels,body',
-  ]).then(parsePullRequest);
+    '--limit', '1',
+  ]).then((raw) => {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      throw new Error('Open implementation PR is missing');
+    }
+    if (parsed.length > 1) {
+      throw new Error('Open implementation PR mapping is ambiguous');
+    }
+    return parsePullRequest(JSON.stringify(parsed[0]));
+  });
   const exactPr = (
     pr: ImplementationPullRequest,
     input: Parameters<ImplementationExecutorDeps['ensureDraftPullRequest']>[0],
