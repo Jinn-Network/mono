@@ -528,8 +528,10 @@ Two-tier, mirroring the constraint that real traces never leave the machine:
    git-SHA/protocol-address survival pinned.
 2. **Operator-local real tier (release gate)**: `jinn scrub bench` runs the pipeline over
    the labeled operator-local corpus (seeded from the 2026-07-21 findings inventory and
-   the 2026-07-22 mining inventory over 10 autopilot homes; grown by autopilot
-   trajectories and every review-queue decision). Emits a **metrics-only JSON** (per-class
+   the 2026-07-22 mining inventory over 10 autopilot homes; grown by subsequent mining
+   batches — which follow the same operator-local `mining-batch<N>-pii-inventory.md`
+   counts-only convention per the batch-mining method doc — by autopilot trajectories,
+   and by every review-queue decision). Emits a **metrics-only JSON** (per-class
    TP/FP/FN counts, recall, precision, Fβ=2 — no text, no spans) that is safe to publish
    and is attached to release readiness. The labeled data itself never leaves the machine.
 
