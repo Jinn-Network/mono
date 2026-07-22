@@ -1,9 +1,12 @@
+import { parseChildMarker } from './child-issues.js';
 import { gitOid } from './types.js';
 
 const REVIEW_FOLLOW_UP_MARKER_TAG = 'jinn-autopilot:review-follow-up';
 const REVIEW_FOLLOW_UP_MARKER_RE = new RegExp(
   `<!--\\s*${REVIEW_FOLLOW_UP_MARKER_TAG}\\s+pr=(\\d+)\\s+head=([0-9a-fA-F]{40})\\s+index=(\\d+)\\s*-->`,
 );
+/** Fail-closed: follow-up title/body must never inject a child marker (§5.1 / AC2). */
+const CHILD_MARKER_SUBSTRING = 'jinn-autopilot:child';
 
 export const MAX_REVIEW_FOLLOW_UPS_PER_PASS = 5;
 
@@ -77,6 +80,29 @@ const TYPES = new Set(['feat', 'chore', 'fix', 'refactor']);
 const EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
 const PRIORITIES = new Set(['p0', 'p1', 'p2', 'p3', 'p4']);
 
+/**
+ * Reject (do not strip) any follow-up title/body that would look like a
+ * machine child issue to `parseChildMarker` / `openChildrenByParent`.
+ */
+export function assertNoChildMarkerInFollowUp(
+  title: string,
+  body: string,
+  entryIndex?: number,
+): void {
+  const where =
+    entryIndex === undefined ? 'Follow-up entry' : `Follow-up entry ${entryIndex}`;
+  for (const [field, value] of [
+    ['title', title],
+    ['body', body],
+  ] as const) {
+    if (value.includes(CHILD_MARKER_SUBSTRING) || parseChildMarker(value) !== null) {
+      throw new Error(
+        `${where} ${field} must not contain a child marker (jinn-autopilot:child)`,
+      );
+    }
+  }
+}
+
 export function parseReviewFollowUpsPayload(raw: string): ReviewFollowUpEntry[] {
   let parsed: unknown;
   try {
@@ -121,9 +147,11 @@ export function parseReviewFollowUpsPayload(raw: string): ReviewFollowUpEntry[] 
     if (typeof priority !== 'string' || !PRIORITIES.has(priority)) {
       throw new Error(`Follow-up entry ${index} has invalid priority`);
     }
+    const trimmedTitle = title.trim();
+    assertNoChildMarkerInFollowUp(trimmedTitle, body, index);
     return {
       type: type as ReviewFollowUpType,
-      title: title.trim(),
+      title: trimmedTitle,
       body,
       effort: effort as ReviewFollowUpEffort,
       priority: priority as ReviewFollowUpPriority,
@@ -147,6 +175,7 @@ export async function fileReviewFollowUps(
   const filed: FiledReviewFollowUp[] = [];
   for (let index = 0; index < input.entries.length; index += 1) {
     const entry = input.entries[index]!;
+    assertNoChildMarkerInFollowUp(entry.title, entry.body, index);
     const marker = formatReviewFollowUpMarker(input.parentPr, input.head, index);
     const existing = await port.searchOpenByMarker(marker);
     if (existing.length > 0) {
