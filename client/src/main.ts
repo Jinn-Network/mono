@@ -1680,9 +1680,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // ── Seller-side scrub pipeline (publish-time) ─────────────────────────────
   // One pipeline shared by the task engine and the live capture publisher so
   // every published trajectory passes through the same maintained scrub stack
-  // (structural key policy → openredaction → secretlint/entropy → optional ML
-  // PII). The OTLP receiver above runs best-effort ingest-time scrubbers; this
-  // is the authoritative final gate before a trajectory becomes public/sellable.
+  // (structural key policy → owned detectors → secretlint/entropy → GLiNER ML
+  // PII on by default). The OTLP receiver above runs best-effort ingest-time
+  // scrubbers; this is the authoritative final gate before a trajectory becomes
+  // public/sellable.
   const sellerPiiDetector = await maybeBuildPiiDetector(config.captures.piiDetection);
   const sellerScrubPipeline = buildScrubPipeline(
     sellerPiiDetector ? { piiDetector: sellerPiiDetector } : {},

@@ -538,24 +538,26 @@ export const JinnConfigSchema = z.object({
         })
         .default({ enabled: false, port: 7342 }),
       /**
-       * Seller-side ML PII detection (Transformers.js NER, in-process) applied
-       * before captures (and task trajectories) are published. Off by default:
-       * the structural key policy + openredaction + secretlint/entropy stages
-       * always scrub (the non-ML guarantee); this adds person/org/location NER
-       * at the cost of a one-time model download. When enabled, a model-load
+       * Seller-side ML PII detection (GLiNER ONNX, in-process) applied before
+       * captures (and task trajectories) are published. **On by default** for
+       * publish lanes (#1973): free-prose names have no reliable regex shape.
+       * Set `enabled: false` explicitly to disable. When enabled, a model-load
        * failure fails closed at the publish altitude — the trajectory is not
-       * published — while the daemon's other loops keep running.
-       * Env: JINN_CAPTURES_PII_DETECTION_ENABLED=1|true|yes,
+       * published — while the daemon's other loops keep running. Unresolved
+       * flag dispositions also hold unattended publishes until
+       * `jinn scrub review` resolves them.
+       * Env: JINN_CAPTURES_PII_DETECTION_ENABLED=0|false|no to disable,
        *      JINN_CAPTURES_PII_DETECTION_MODEL=<hf-model-id>
+       * Default model: urchade/gliner_multi_pii-v1 (ONNX via onnx-community).
        */
       piiDetection: z
         .object({
-          enabled: z.boolean().default(false),
+          enabled: z.boolean().default(true),
           model: z.string().optional(),
         })
-        .default({ enabled: false }),
+        .default({ enabled: true }),
     })
-    .default({ llmProxy: { enabled: false, port: 7342 }, piiDetection: { enabled: false } }),
+    .default({ llmProxy: { enabled: false, port: 7342 }, piiDetection: { enabled: true } }),
 
   /**
    * Run idempotent legacy migrations at daemon startup (jinn-mono-jgp:

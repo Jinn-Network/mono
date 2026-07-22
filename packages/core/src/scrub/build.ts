@@ -1,9 +1,23 @@
 import { ScrubPipeline } from './pipeline.js';
-import { keyPolicyStage, type KeyPolicy } from './key-policy.js';
-import { openredactionStage } from './openredaction-stage.js';
-import { plainPatternsStage } from './plain-patterns-stage.js';
-import { secretlintStage } from './secretlint-stage.js';
-import { mlPiiStage, type PiiDetector } from './ml-pii-stage.js';
+import { keyPolicyDetector, type KeyPolicy } from './key-policy.js';
+import { plainPatternsDetector } from './plain-patterns-stage.js';
+import { gitIdentityDetector } from './git-identity-detector.js';
+import { secretlintDetector } from './secretlint-stage.js';
+import { mlPiiDetector, type PiiDetector } from './ml-pii-stage.js';
+import {
+  assembleKnownIdentity,
+  knownIdentityDetector,
+  type AssembleKnownIdentityOptions,
+  type AssembledKnownIdentity,
+} from './known-identity-detector.js';
+import { urlCredentialsDetector } from './url-credentials-detector.js';
+import { rejectClassesDetector } from './reject-classes-detector.js';
+import { checksummedInstrumentsDetector } from './checksummed-instruments-detector.js';
+import { ipAddressDetector } from './ip-address-detector.js';
+import { gitleaksDetector } from './gitleaks-detector.js';
+import type { Detector } from './finding.js';
+import { DEFAULT_POLICY } from './policy.js';
+import { computeAllowlistDigest } from './provenance.js';
 
 /**
  * Default key policy. `jinn.*` identity/chain attributes are structural and pass
@@ -12,8 +26,9 @@ import { mlPiiStage, type PiiDetector } from './ml-pii-stage.js';
  * these never carry sellable content and are never safe to publish. Globs use the
  * trailing-`*` prefix form `classifyKey` supports; the HTTP header keys are listed
  * per request/response direction (a leading `*.header.…` glob is not matched, so
- * we enumerate the concrete keys). Everything else is `content` and flows through
- * the value-scrubbing stages.
+ * we enumerate the concrete keys). Machine-identity keys (D3 carrier) drop
+ * attempt-manifest `host` / hostname telemetry. Everything else is `content` and
+ * flows through the value-scrubbing detectors.
  */
 export const DEFAULT_KEY_POLICY: KeyPolicy = {
   safe: ['jinn.*'],
@@ -26,72 +41,173 @@ export const DEFAULT_KEY_POLICY: KeyPolicy = {
     'http.response.header.set-cookie',
     'env.*',
   ],
+  machineIdentity: [
+    'host',
+    'hostname',
+    'os.hostname',
+    'attempt.host',
+    'attempt.hostname',
+    'system.hostname',
+    'device.hostname',
+    'device.host',
+  ],
 };
 
 export interface BuildScrubPipelineOptions {
   policy?: KeyPolicy;
-  /** When provided, the ML PII (GLiNER) stage is appended. */
+  /** When provided, the ML PII (GLiNER) detector is appended. */
   piiDetector?: PiiDetector;
+  /** Known-identity pack + non-address allowlist (#1971). */
+  knownIdentity?: AssembleKnownIdentityOptions | AssembledKnownIdentity;
+  /** Review-queue store for flag resolutions (#1973). */
+  reviewStore?: import('./review-queue.js').ReviewQueueStore;
+  /**
+   * When false, unresolved flags do not abort (tests). Default true for
+   * redact-mode publish lanes.
+   */
+  failClosedOnUnresolvedFlags?: boolean;
+}
+
+export function resolveKnownIdentity(
+  opts?: AssembleKnownIdentityOptions | AssembledKnownIdentity,
+): AssembledKnownIdentity {
+  // AssembledKnownIdentity is a subset of AssembleKnownIdentityOptions;
+  // re-assembly is idempotent (allowlist entries are deduped).
+  return assembleKnownIdentity(opts);
+}
+
+/** Duck-type ML detector metadata for the policy hash (#1974). */
+function provenanceFromPiiDetector(detector: PiiDetector | undefined): {
+  modelId: string | null;
+  labels: readonly string[];
+} {
+  if (!detector) return { modelId: null, labels: [] };
+  const withMeta = detector as PiiDetector & {
+    modelId?: string;
+    labelSet?: readonly string[];
+    model?: string;
+    entityGroups?: Iterable<string>;
+  };
+  if (typeof withMeta.modelId === 'string' && withMeta.labelSet) {
+    return { modelId: withMeta.modelId, labels: withMeta.labelSet };
+  }
+  return { modelId: null, labels: [] };
+}
+
+/** Build provenance extras from known-identity + optional ML detector (#1974). */
+export function buildProvenanceExtras(
+  knownIdentity: AssembledKnownIdentity,
+  piiDetector?: PiiDetector,
+): {
+  modelId: string | null;
+  labels: readonly string[];
+  allowlistDigest: string;
+} {
+  const ml = provenanceFromPiiDetector(piiDetector);
+  return {
+    modelId: ml.modelId,
+    labels: ml.labels,
+    allowlistDigest: computeAllowlistDigest(knownIdentity.allowlist.entries),
+  };
 }
 
 /**
- * Assembles the seller-side scrub pipeline (cost-ascending): structural key
- * policy → openredaction (structured PII) → secretlint + entropy (secrets) →
- * optional GLiNER (ML PII). The GLiNER stage is added only when a detector is
- * supplied, so the daemon degrades gracefully (regex + secrets still scrub) when
- * the ML model is unavailable.
+ * Shared detector inventory (#1969 / #1970 / #1971 / #1972 / #1973). Every
+ * publish/check consumer runs the same owned detectors (key-policy,
+ * plain-patterns including C1 wallet + A1 credential IDs, git-identity B2
+ * carriers, known-identity pack + non-address allowlist, Tier-1
+ * reject/URL/IP/instruments/gitleaks, secretlint). What varies is disposition /
+ * check-mode and whether an ML PII detector is injected. Seed keeps the entropy
+ * fallback off until A2 mid-band flags are absorbed without refuse-on-detection
+ * (#1409 shipped behavior). openredaction was retired in #1973.
+ */
+export function sharedDetectorInventory(
+  policy: KeyPolicy,
+  opts: {
+    entropyFallback?: boolean;
+    piiDetector?: PiiDetector;
+    knownIdentity?: AssembleKnownIdentityOptions | AssembledKnownIdentity;
+  } = {},
+): Detector[] {
+  const detectors: Detector[] = [keyPolicyDetector(policy)];
+  detectors.push(plainPatternsDetector(policy));
+  detectors.push(gitIdentityDetector(policy));
+  detectors.push(
+    knownIdentityDetector(policy, { assembled: resolveKnownIdentity(opts.knownIdentity) }),
+  );
+  detectors.push(urlCredentialsDetector(policy));
+  detectors.push(rejectClassesDetector(policy));
+  detectors.push(checksummedInstrumentsDetector(policy));
+  detectors.push(ipAddressDetector(policy));
+  detectors.push(gitleaksDetector(policy));
+  detectors.push(secretlintDetector(policy, { entropyFallback: opts.entropyFallback ?? true }));
+  if (opts.piiDetector) {
+    detectors.push(mlPiiDetector(policy, opts.piiDetector));
+  }
+  return detectors;
+}
+
+/**
+ * Trace / redact-mode preset over the shared inventory.
+ *
+ * @deprecated Prefer thinking in terms of one inventory + policy; this builder
+ * remains as a compatibility preset through the migration (#1969).
  */
 export function buildScrubPipeline(opts: BuildScrubPipelineOptions = {}): ScrubPipeline {
   const policy = opts.policy ?? DEFAULT_KEY_POLICY;
-  return new ScrubPipeline(assembleScrubStages(policy, opts.piiDetector));
+  const knownIdentity = resolveKnownIdentity(opts.knownIdentity);
+  return new ScrubPipeline(
+    sharedDetectorInventory(policy, {
+      entropyFallback: true,
+      piiDetector: opts.piiDetector,
+      knownIdentity,
+    }),
+    {
+      policy: DEFAULT_POLICY,
+      checkMode: false,
+      reviewStore: opts.reviewStore,
+      failClosedOnUnresolvedFlags: opts.failClosedOnUnresolvedFlags,
+      provenance: buildProvenanceExtras(knownIdentity, opts.piiDetector),
+    },
+  );
 }
 
-function assembleScrubStages(policy: KeyPolicy, piiDetector?: PiiDetector) {
-  // plain-patterns runs after openredaction: deterministic email/home-path
-  // regexes closing gaps the probabilistic stage demonstrably has (#1330).
-  const stages = [
-    keyPolicyStage(policy),
-    openredactionStage(policy),
-    plainPatternsStage(policy),
-    secretlintStage(policy),
-  ];
-  if (piiDetector) {
-    stages.push(mlPiiStage(policy, piiDetector));
-  }
-  return stages;
+export interface BuildSeedScrubPipelineOptions {
+  policy?: KeyPolicy;
+  knownIdentity?: AssembleKnownIdentityOptions | AssembledKnownIdentity;
+  piiDetector?: PiiDetector;
+  reviewStore?: import('./review-queue.js').ReviewQueueStore;
+  failClosedOnUnresolvedFlags?: boolean;
 }
 
 /**
- * Seed-profile scrub pipeline (#1409). Seeds are public, transformed or
- * otherwise human-curated content — not operator trace data — so the
- * probabilistic stages (openredaction, secretlint's pass-2 entropy fallback,
- * ML PII) that exist to catch unknown-shape PII/secrets in private traces are
- * dropped: on prose they false-positive (trigger words, dated env-var slugs,
- * long camelCase identifiers) and deface the corpus. The deterministic
- * detectors stay:
- * structural key policy, plain-patterns (emails, home paths, and — seed-only,
- * #1415 — bare AWS access-key IDs and GCP `AIza…` API keys, deterministic
- * prefix shapes secretlint pass-1 does not cover; and — seed-only,
- * #1959 — `0x`+40-hex wallet addresses, the class openredaction catches in
- * the trace profile), and secretlint's pass-1
- * preset rules (AWS secret-key assignments, GitHub / Slack / npm token
- * shapes, GCP service-account JSON). Accepted residual: JWTs and unprefixed
- * high-entropy blobs (trace profile catches them via the entropy fallback),
- * plus every structured identifier or PII class detected only by the omitted
- * openredaction stage — wallet addresses excepted (#1959) — pass
- * unredacted. The latter is a 570+ pattern surface;
- * payment cards, phone numbers, SSNs, medical or health-plan identifiers,
- * government identity documents, and financial account references are
- * examples, not an exhaustive allowlist. This is acceptable only for public
- * seed material that a curator has transformed and reviewed for those classes.
- * The reduced stage list is inspectable locally through the pipeline's
- * `components` surface. `TraceEnvelopeV0` does not publish that list, so a
- * fetched envelope cannot by itself prove which scrub profile ran.
+ * Seed / redact-mode preset (#1409 / #1969). Same owned inventory as layer-2.
+ * Entropy fallback stays off to preserve the shipped zero-corruption seed
+ * behavior until A2 mid-band can flag without tripping refuse-on-detection.
+ *
+ * @deprecated Compatibility preset over the one inventory + policy table.
  */
-export function buildSeedScrubPipeline(policy: KeyPolicy = DEFAULT_KEY_POLICY): ScrubPipeline {
-  return new ScrubPipeline([
-    keyPolicyStage(policy),
-    plainPatternsStage(policy, { credentialIds: true, walletAddresses: true }),
-    secretlintStage(policy, { entropyFallback: false }),
-  ]);
+export function buildSeedScrubPipeline(
+  policyOrOpts: KeyPolicy | BuildSeedScrubPipelineOptions = DEFAULT_KEY_POLICY,
+): ScrubPipeline {
+  const opts: BuildSeedScrubPipelineOptions =
+    policyOrOpts && 'safe' in policyOrOpts
+      ? { policy: policyOrOpts }
+      : (policyOrOpts as BuildSeedScrubPipelineOptions);
+  const policy = opts.policy ?? DEFAULT_KEY_POLICY;
+  const knownIdentity = resolveKnownIdentity(opts.knownIdentity);
+  return new ScrubPipeline(
+    sharedDetectorInventory(policy, {
+      entropyFallback: false,
+      piiDetector: opts.piiDetector,
+      knownIdentity,
+    }),
+    {
+      policy: DEFAULT_POLICY,
+      checkMode: false,
+      reviewStore: opts.reviewStore,
+      failClosedOnUnresolvedFlags: opts.failClosedOnUnresolvedFlags,
+      provenance: buildProvenanceExtras(knownIdentity, opts.piiDetector),
+    },
+  );
 }
