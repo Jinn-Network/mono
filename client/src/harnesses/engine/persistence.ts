@@ -102,6 +102,11 @@ CREATE TABLE IF NOT EXISTS task_runs (
   --   RUNNING → PACKAGING transition. Enables pack() to recover solution outputs
   --   after a crash without re-executing the impl. NULL once pack() succeeds.
   solution_outputs_json       TEXT,
+  -- Additive column (#1643, intermediateFailureDiffs / spec §10 field 4):
+  -- intermediate_failure_diffs_json: JSON string[] of prior non-empty
+  --   solutionPayload.patch values retained when runImpl overwrites
+  --   solution_outputs_json with a different patch. NULL when empty.
+  intermediate_failure_diffs_json TEXT,
   runtime_plugins_json        TEXT,
 
   -- Additive column (#1393, corpus knowledge autoload):
@@ -195,6 +200,11 @@ export type TaskRunPatch = Partial<{
    * Added by WT-C for PACKAGING recovery fidelity.
    */
   solutionOutputsJson: string | null;
+  /**
+   * JSON array of prior failed unified diffs retained when runImpl overwrites
+   * solution_outputs_json with a different patch (#1643).
+   */
+  intermediateFailureDiffsJson: string | null;
   runtimePluginsJson: string | null;
   /** Corpus knowledge refs consumed by this run (#1393). */
   consumedRefsJson: string | null;
@@ -239,6 +249,7 @@ interface RawRow {
   evidence_hash: string | null;
   task_payload: string | null;
   solution_outputs_json: string | null;
+  intermediate_failure_diffs_json: string | null;
   runtime_plugins_json: string | null;
   consumed_refs_json: string | null;
   executor_mode: string | null;
@@ -264,6 +275,7 @@ function runAdditiveMigrations(db: Database.Database): void {
     // Persists solution outputs so pack() can recover a deterministic manifest CID
     // after a process restart (otherwise in-memory solutionOutputs is lost).
     { column: 'solution_outputs_json',     ddl: 'ALTER TABLE task_runs ADD COLUMN solution_outputs_json TEXT' },
+    { column: 'intermediate_failure_diffs_json', ddl: 'ALTER TABLE task_runs ADD COLUMN intermediate_failure_diffs_json TEXT' },
     { column: 'runtime_plugins_json',      ddl: 'ALTER TABLE task_runs ADD COLUMN runtime_plugins_json TEXT' },
     { column: 'consumed_refs_json',      ddl: 'ALTER TABLE task_runs ADD COLUMN consumed_refs_json TEXT' },
     { column: 'task_role',           ddl: 'ALTER TABLE task_runs ADD COLUMN task_role TEXT' },
@@ -334,6 +346,19 @@ function parseJson<T>(raw: string | null): T | null {
   return JSON.parse(raw) as T;
 }
 
+function extractSolutionPatch(solutionOutputsJson: string | null): string | null {
+  if (solutionOutputsJson == null || solutionOutputsJson === '') return null;
+  try {
+    const parsed = JSON.parse(solutionOutputsJson) as {
+      solutionPayload?: { patch?: unknown };
+    };
+    const patch = parsed.solutionPayload?.patch;
+    return typeof patch === 'string' && patch.length > 0 ? patch : null;
+  } catch {
+    return null;
+  }
+}
+
 function rowToTaskRun(row: RawRow): PersistedTaskRun {
   return {
     requestId: row.request_id,
@@ -368,6 +393,7 @@ function rowToTaskRun(row: RawRow): PersistedTaskRun {
     evidenceHash: row.evidence_hash,
     task: parseJson<Task>(row.task_payload),
     solutionOutputsJson: row.solution_outputs_json,
+    intermediateFailureDiffsJson: row.intermediate_failure_diffs_json,
     runtimePluginsJson: row.runtime_plugins_json,
     consumedRefsJson: row.consumed_refs_json,
     executorMode: (row.executor_mode === 'train' || row.executor_mode === 'frozen')
@@ -738,6 +764,36 @@ export class TaskRunPersistence {
     this.db.prepare(
       'UPDATE task_runs SET consumed_refs_json = ? WHERE request_id = ?',
     ).run(consumedRefsJson, requestId);
+  }
+
+  /**
+   * Before overwriting solution_outputs_json, retain the prior non-empty
+   * solutionPayload.patch when it differs from the next patch (#1643).
+   * Dedupes against the existing list. Never throws on malformed JSON.
+   */
+  recordPriorPatchOnOverwrite(requestId: string, nextSolutionOutputsJson: string): void {
+    const existing = this.getByRequestId(requestId);
+    if (!existing) return;
+    const prior = extractSolutionPatch(existing.solutionOutputsJson);
+    const next = extractSolutionPatch(nextSolutionOutputsJson);
+    if (prior == null || next == null || prior === next) return;
+
+    let list: string[] = [];
+    if (existing.intermediateFailureDiffsJson) {
+      try {
+        const parsed = JSON.parse(existing.intermediateFailureDiffsJson) as unknown;
+        if (Array.isArray(parsed)) {
+          list = parsed.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
+        }
+      } catch {
+        list = [];
+      }
+    }
+    if (list.includes(prior)) return;
+    list.push(prior);
+    this.db.prepare(
+      'UPDATE task_runs SET intermediate_failure_diffs_json = ? WHERE request_id = ?',
+    ).run(JSON.stringify(list), requestId);
   }
 
   /**

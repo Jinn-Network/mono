@@ -73,6 +73,12 @@ export interface PersistedTaskRun {
    * Added by WT-C for PACKAGING recovery fidelity.
    */
   solutionOutputsJson: string | null;
+  /**
+   * JSON array of prior failed unified diffs retained when runImpl overwrites
+   * solution_outputs_json with a different patch (#1643 / spec §10 field 4).
+   * Null when none retained (first success, or pre-migration rows).
+   */
+  intermediateFailureDiffsJson: string | null;
   runtimePluginsJson: string | null;
 
   /**
