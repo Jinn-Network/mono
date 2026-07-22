@@ -339,10 +339,17 @@ export function makeGitHubUsageCommandRunner(
     if (command !== 'gh') return run(command, args, options);
     if (args[0] === 'api' && args[1] !== 'graphql') {
       if (args.includes('--paginate')) {
+        // --paginate collapses N HTTP pages into a single gh invocation, so the
+        // exact per-page request count is unobservable. Per #2013, incomplete
+        // usage accounting is best-effort and must never fail a command or crash
+        // the loop — the review and reconciliation paths legitimately page a
+        // PR's comments and reviews via `--paginate --slurp`. Record the floor of
+        // one request, mark the undercount as incomplete so it is surfaced, and
+        // run the command. Large-N pagination should still prefer explicit
+        // per-page requests for exact metering (see dispatcher/issue-source.ts).
         meter.markIncomplete('an explicit REST command hid its response page count');
-        throw new GitHubUsageIncompleteError(
-          'explicit REST pagination must use one observable command per page',
-        );
+        meter.recordRestRequest();
+        return run(command, args, options);
       }
       if (!args.includes('--include')) {
         meter.recordRestRequest();

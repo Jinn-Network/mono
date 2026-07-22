@@ -427,7 +427,7 @@ describe('GitHubUsageMeter', () => {
     ]);
   });
 
-  it('fails closed instead of counting hidden REST pagination as one request', async () => {
+  it('runs hidden REST pagination best-effort instead of crashing the loop', async () => {
     let called = false;
     const meter = new GitHubUsageMeter();
     const run = makeGitHubUsageCommandRunner(async () => {
@@ -435,16 +435,23 @@ describe('GitHubUsageMeter', () => {
       return '[]';
     }, meter);
 
-    await expect(run('gh', [
+    // --paginate collapses N HTTP pages into one gh invocation, so the exact
+    // per-page request count is unobservable. Per #2013 (never crash the loop
+    // on incomplete usage accounting), that must not fail the command: the
+    // review and reconciliation paths legitimately page a PR's comments and
+    // reviews via `--paginate --slurp`. The command runs; the undercount is
+    // recorded at the one-request floor and surfaced as incomplete, not thrown.
+    const raw = await run('gh', [
       'api',
       'repos/Jinn-Network/mono/issues/42/comments',
       '--paginate',
-    ])).rejects.toThrow(/pagination|page count/i);
-    expect(called).toBe(false);
-    // The --paginate misuse is a programmer error that still fails the command
-    // at call time, but read() itself stays non-fatal: GitHub used/remaining
-    // counters are eventually consistent, so accounting is surfaced, not thrown.
-    expect(meter.read().accountingComplete).toBe(false);
+    ]);
+    expect(raw).toBe('[]');
+    expect(called).toBe(true);
+    const usage = meter.read();
+    expect(usage.restRequests).toBe(1);
+    expect(usage.accountingComplete).toBe(false);
+    expect(usage.incompleteReason).toMatch(/page count/i);
   });
 
   it('records the HTTP status exposed by an included REST response', async () => {
