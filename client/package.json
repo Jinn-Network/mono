@@ -171,7 +171,7 @@
     "@safe-global/safe-deployments": "^1.37.56",
     "@safe-global/types-kit": "^4.0.1",
     "@scure/bip32": "^2.2.0",
-    "@scure/bip39": "^1.4.0",
+    "@scure/bip39": "^2.2.0",
     "@secretlint/core": "^13.0.2",
     "@secretlint/secretlint-rule-preset-recommend": "^13.0.2",
     "@slicekit/erc8128": "^0.3.3",
