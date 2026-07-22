@@ -46,6 +46,7 @@ import defaultStopCommand from '../cli/commands/stop.js';
 import claimRewardsCommand from '../cli/commands/claim-rewards.js';
 import defaultRunCommand from '../cli/commands/run.js';
 import updateCommand from '../cli/commands/update.js';
+import { checkPidfileLiveness } from '../preflight/pidfile-liveness.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -200,17 +201,15 @@ export async function startDetachedDaemon(env: NodeJS.ProcessEnv): Promise<
     join(env['HOME'] ?? '.', '.jinn-client', 'earning');
   const pidPath = join(earningDir, 'daemon.pid');
 
-  if (existsSync(pidPath)) {
+  const liveness = checkPidfileLiveness({ pidPath });
+  if (liveness.decision === 'refuse') {
+    return { ok: true, payload: { pid: liveness.pid, status: 'already_running' } };
+  }
+  if (liveness.decision === 'unlink-stale') {
     try {
-      const existingPid = parseInt(readFileSync(pidPath, 'utf-8').trim(), 10);
-      process.kill(existingPid, 0);
-      return { ok: true, payload: { pid: existingPid, status: 'already_running' } };
+      unlinkSync(pidPath);
     } catch {
-      try {
-        unlinkSync(pidPath);
-      } catch {
-        /* ignore stale pidfile cleanup failures */
-      }
+      /* ignore stale pidfile cleanup failures */
     }
   }
 
