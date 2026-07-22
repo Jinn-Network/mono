@@ -1,14 +1,15 @@
 # Jinn Plugin Onboarding — Stage 2 Design (Session A)
 
-- **Version:** 0.1
-- **Date:** 2026-07-17
-- **Author:** Ritsu (design session, Claude Fable 5)
+- **Version:** 0.2 (v0.2 Stage-2 closing pass: finish the §3.6 gate; light retention coda — 2026-07-22)
+- **Date:** 2026-07-17 (amended 2026-07-22)
+- **Author:** Ritsu (design session, Claude Fable 5); closing-pass amendment Ritsu + agent
 - **Shape:** `design` — output is this spec; implementation lands as Stage 2 issues filed by the
   meta session
 - **Brief:** `docs/superpowers/briefs/2026-07-17-session-a-onboarding.md`, under
   `docs/superpowers/briefs/2026-07-17-stage2-framing-packet.md` (working assumptions W1–W4 apply)
 - **Ground truth:** issue #1654 walkthrough comments (2026-07-16/17) plus a four-agent code
   investigation on `next @ 6609b3e37` (summarized in §2)
+- **Tracking:** Stage 2 umbrella [#1815](https://github.com/Jinn-Network/mono/issues/1815) (fresh-machine walkthrough checkbox)
 
 ## 1. Mission and gate
 
@@ -217,6 +218,45 @@ C's architecture call.
 - Any dependency on upstream Hermes changes — the design works on stock Hermes as shipped at the
   pinned SHA.
 - npm anywhere in the user install path.
+- A full growth/retention playbook or campaign engine — that stays in [`GROWTH.md`](../../../GROWTH.md);
+  this spec only adds the one post-aha beat in §3.8 so Stage 2 does not end at “installed once.”
+
+### 3.8 Stage-2 closing pass (2026-07-22) — finish the gate, light retention
+
+**Framing.** Primary work is completing Session A's unfinished acceptance gate (§3.6), not
+re-deriving install mechanics. A light retention coda sits on top so the first `◇ corpus` moment
+is not a dead-end aha. Skills-network depth remains Stage 3
+(`docs/superpowers/specs/2026-07-14-jinn-plugin-product-roadmap-design.md` §Stage 3).
+
+**Must close (gate — primary).**
+
+1. **Fresh-machine walkthrough** on [#1815](https://github.com/Jinn-Network/mono/issues/1815):
+   stock Hermes → `hermes plugins install` (slim-repo or interim dogfood path) → doctor green →
+   first visible `◇ corpus` inside the 5-minute budget; agent rehearsal transcript attached
+   before operator ratification (§3.6 L3–L4). Unchecked walkthrough = Stage 2 gate open.
+2. **A2 slim-repo release channel** un-parked and exercised, **or** an explicit written interim
+   (dogfood/repo-based install only) recorded on #1815 with a dated deferral — no silent gap.
+3. **Honest dogfood vs stock paths.** Stock users follow §3.1. Dogfooders on mono/worktrees must
+   see documented divergence where the live composition differs (e.g. layer `derive-env` /
+   publish deps requiring a client-linked entrypoint after the layer package extraction). Do not
+   ship Stage 3 on a documented path that fails closed in practice.
+
+**Touch of retention (secondary — one beat only).**
+
+After the first successful `◇ corpus` provide in a real session, the second session should make
+one of these true (implementation may pick the cheapest already-shipping surface):
+
+- the same repo retrieves again with visible attribution, **or**
+- `/jinn status` (or doctor) confirms a healthy install in one glance, **or**
+- session-end already states that knowledge was searched (existing line) so silence is not
+  mistaken for “plugin broken.”
+
+Anything beyond that single beat — skills marketplace loops, multi-session coaching, expansion
+audiences — is Stage 3 / GROWTH engine work, not this closing pass.
+
+**Cross-link.** Beachhead audience remains Hermes / OpenClaw per [`GROWTH.md`](../../../GROWTH.md)
+§2. The funnel step this pass owns is “Run Jinn” (install + first use); Telegram-first CTA and
+campaign loadout stay outside this spec.
 
 ## 4. Working-assumption flags (where this design changes if one flips)
 
@@ -256,7 +296,8 @@ one paired train (the rescope's convergent-file discipline); A6 follows them.
 - From **B**: curated retrieval-visible content exists for a named early user's repos before
   onboarding targets them; B defines "enough corpus" in a form the `corpus-content` check can
   query; B owns the relevance quality bar (wrong-first is worse than empty — #1791's documented
-  collision).
+  collision). v0.2: B's Stage-2 curated feeder for mono is **operator Autopilot / Hermes-home
+  transcripts** (corpus-supply §7.1), not only exhausted harness-layer episode leftovers.
 - From **C**: the layer-acquisition mechanism for the one-command install (resolved —
   DR-2026-07-17 Decision 3: the C6-published layer; §3.1's constraint binds C6); process contract v1 stability
   through the package extraction, or a versioned migration the doctor can name; the plugin

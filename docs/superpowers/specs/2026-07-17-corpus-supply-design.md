@@ -1,11 +1,14 @@
 # Corpus supply and data strategy — Session B design
 
-- **Version:** 0.1
-- **Date:** 2026-07-17
-- **Author:** Claude Fable 5 (drafted, Session B); Ritsu (design direction)
+- **Version:** 0.2 (v0.2 Stage-2 closing pass: Autopilot / Hermes-home transcripts as curated
+  seed feeder — 2026-07-22)
+- **Date:** 2026-07-17 (amended 2026-07-22)
+- **Author:** Claude Fable 5 (drafted, Session B); Ritsu (design direction); closing-pass
+  amendment Ritsu + agent
 - **Shape:** `design` — output is this spec; implementation lands via the meta session's combined issue train (issues proposed in §13, not filed)
 - **Session brief:** `docs/superpowers/briefs/2026-07-17-session-b-corpus-supply.md`; framing packet `docs/superpowers/briefs/2026-07-17-stage2-framing-packet.md` (W1–W4 presumed; flags in §14)
 - **Roadmap anchors:** `docs/superpowers/specs/2026-07-14-jinn-plugin-product-roadmap-design.md`; `spec/2026-07-06-distillation-v1.md` (three stores, D8/D9/D11); `spec/2026-07-06-capability-eval-v0.md` (held-out boundary); DR-2026-07-14 (the trajectory is the transcript); DR-2026-07-09-a (task creator: augment `swe-rebench-v2`)
+- **Cross-links (Stage 2 close):** scrub redesign design `docs/superpowers/specs/2026-07-22-scrub-redesign-design.md` (landed); publish rehearsal [#2006](https://github.com/Jinn-Network/mono/issues/2006); A5 false-reject follow-up [#2005](https://github.com/Jinn-Network/mono/issues/2005)
 
 ## 1. Summary
 
@@ -276,10 +279,44 @@ moves.
 | # | Move | What it unblocks | Cost | Owner |
 |---|---|---|---|---|
 | 1 | **Ship the tier rule** (§5): allowlist mark + pickup enforcement; re-publish Stage 1 episodes marked, post-#1784; skills unmarked (retirement); #1776 sweep in parallel | Everything — no bulk supply is safe before it; A's first-session aha depends on a clean index | Small (plugin filter + seed-lane field + re-publish) | Eng (impl) + operator (curation) |
-| 2 | **Author curated seeds for the repos actual early users touch** (per-repo batches; the A↔B guarantee, §10) | Onboarding: retrieval has something honest to serve in the user's own repo | Hours per episode, recurring; #1784 first | Operator (authoring); eng (lane fixes) |
+| 2 | **Author curated seeds for the repos actual early users touch** (per-repo batches; the A↔B guarantee, §10) — **Stage-2 feeder: Autopilot / Hermes-home transcripts (§7.1)**, not exhausted harness-layer leftovers alone | Onboarding: retrieval has something honest to serve in the user's own repo | Hours per episode, recurring; scrub redesign landed; gate publish rehearsal on #2005 → #2006 | Operator (mining+curation); eng (lane/scrub) |
 | 3 | **Grow native tuple supply on the same substrate**: K>1 minting policy + SWE-rebench-V2 expansion; bridge derivation deferred until the distillation pilot demands it, then run batch-anchored (§9) with gas measured on that batch | The moat data (grouped, verdict-labeled, multilingual); the training substrate | Days (V2 port; minting config); bridge run = compute + IPFS traffic | Eng |
 
 The HF/import policy (§8) is a policy artifact of this spec — zero build beyond guards.
+
+### 7.1 Stage-2 closing pass (2026-07-22) — Autopilot transcripts → curated seeds
+
+**Framing.** Primary Stage-2 corpus work is finishing a **publish-ready curated seed path
+sourced from operator Autopilot / Hermes-home session stores** — the surprise high-signal
+asset after the harness-layer episode pool was exhausted. This is not “generic mono-only
+hand curation,” and it is not “PII scrub mining already done.” Scrub redesign (2026-07-22)
+cleared the redaction traps that blocked a safe publish attempt; it does not by itself produce
+retrieval-marked seeds on chain.
+
+**In scope (one unit of work — no prior spike).** Sampling volume, relevance filtering
+(Jinn-protocol / mono / operator-engineering signal vs noise), and episode shaping are part of
+this mining/curation work. Do not file a separate spike for “how much is there.” Cadence /
+recurring harvest schedules are explicitly **out of scope** for Stage 2.
+
+**Pipeline (ordered).**
+
+1. **Source** — well-structured Autopilot / Hermes-home transcript and session stores on the
+   operator machine (private; never commit raw).
+2. **Filter** — keep sessions that teach something a future Hermes session in `jinn-mono`
+   (or named early-user repos) should retrieve; drop pure ops noise and duplicate shapes.
+3. **Curate** — episode-shaped seeds under the existing seed lane / local-corpus discipline
+   (`seed.attribution`, repo keys, provide-rate bar per §5 / §10).
+4. **Scrub** — redesigned scrub (`packages/core/src/scrub/`, design
+   `docs/superpowers/specs/2026-07-22-scrub-redesign-design.md`). Exclude or fix [#2005](https://github.com/Jinn-Network/mono/issues/2005)
+   false-reject shapes before treating a batch as publish-ready.
+5. **Rehearse publish** — [#2006](https://github.com/Jinn-Network/mono/issues/2006): Human lifts
+   `publication-disabled`, small scrub → review → publish/anchor on Base Sepolia; post-run note
+   with counts + tx links, no PII quoted.
+6. **Mark** — retrieval-visible allowlist mark (§5) on the curated batch so Session A's
+   `corpus-content` / first `◇` can hit real content.
+
+**Non-goals for this pass.** Marketplace mint expansion (move 3), bridge derivation at scale,
+HF mirroring, contribution-lane reactivation (W1), or a standing harvest cadence.
 
 ## 8. Import policy and record-level invariants
 
@@ -290,7 +327,7 @@ The HF/import policy (§8) is a policy artifact of this spec — zero build beyo
 | Benchmark tasks with verifiers (rebench-V2, Multi-SWE-bench/RL, SWE-smith-machinery targets) | **Mint** as marketplace tasks (subject to §8.3) | The factory manufactures fresh, verified, group-structured tuples from them |
 | Public trajectory/solution dumps (SWE-Zero, Open-SWE-Traces, nebius, smith-trajectories) | **Never mirrored.** Enter as **reference records** only | Commodity (600k+ free, permissive); no verification we performed; several are built on our own task instances — they are a contamination surface to *track*, not content to host |
 | Issue+patch pair corpora | Use **directly at train time**; reference record if a training run consumes one | Anyone can `load_dataset()`; hosting adds nothing |
-| Episode-shaped content | **None exists to import** (verified) — the curated lane cannot be outsourced. The conditional lane: where an early user's repo is covered by public issue+fix data, auto-transformed episodes may be proposed — substrate-resident, repo-keyed, entering retrieval only via the same mark and provide-rate test as hand-curated seeds. The set behind this rule is empty today |
+| Episode-shaped content | **None exists to import from public dumps** (verified) — the curated lane cannot be outsourced to HF. **Operator-local Autopilot / Hermes-home transcripts are not an import** — they are the Stage-2 **curate** feeder (§7.1): private source → hand/filtered episode seeds → scrub → mark. The conditional public issue+fix auto-transform lane remains empty today |
 | Held-out eval sets (SWE-bench Verified/Pro, cap-eval slate) | **Never minted, never imported** — reserved as capability gates | Minting them as supply destroys their measurement value |
 
 **Reference records** carry: dataset name, revision hash, license, split, shape mapping to
@@ -429,14 +466,19 @@ record per-anchor and per-manifest cost then; no figures are asserted until meas
 - A dataset-hosting service — references, not mirrors.
 - Indexer schema changes for the tier rule (consumer-side for v0; C may index the mark
   later).
+- **Standing harvest cadence** for Autopilot transcripts (Stage 2 is one publish-ready path,
+  not a schedule) — §7.1.
+- **A pre-mining volume/relevance spike** — sampling is inside the mining unit of work (§7.1),
+  not a separate spike issue.
 
 ## 12. Verification moment (recommended)
 
-After moves 1–2 (§7): **a live retrieval session against the first curated seed batch, run
-by the operator** — a real task in a named early-user repo. Success: pickup serves a marked,
-relevant seed (no skill hits, no false-positive noise); the doctor probe for that repo
-passes; the session's provide-rate observation becomes the measurement baseline for §10.
-This is the A↔B first-session-aha check executed for real.
+After moves 1–2 (§7), including §7.1 Autopilot-sourced seeds published under [#2006](https://github.com/Jinn-Network/mono/issues/2006):
+**a live retrieval session against that curated batch, run by the operator** — a real task in a
+named early-user repo (mono for Stage 2). Success: pickup serves a marked, relevant seed (no
+skill hits, no false-positive noise); the doctor probe for that repo passes; the session's
+provide-rate observation becomes the measurement baseline for §10. This is the A↔B
+first-session-aha check executed for real.
 
 ## 13. Proposed issues (not filed — meta session reconciles)
 
@@ -445,6 +487,7 @@ This is the A↔B first-session-aha check executed for real.
 | Retrieval-visibility mark: allowlist semantics + pickup enforcement | feat | `packages/plugin`, `client/packages/harness-layer` | — | M |
 | Seed lane: emit the retrieval mark; re-publish Stage 1 episodes (supersede unmarked) | feat | `client/packages/harness-layer` | #1784, mark issue | S |
 | Curated seed batches for named early-user repos + per-repo doctor probes | docs/feat | fixtures, `packages/plugin` | #1784, A's repo list | M (recurring) |
+| **Autopilot / Hermes-home → curated seeds (§7.1):** sample+filter+shape (in-work, not a spike); scrub; publish rehearsal | feat | operator-local → seed lane | scrub redesign (landed); [#2005](https://github.com/Jinn-Network/mono/issues/2005) then [#2006](https://github.com/Jinn-Network/mono/issues/2006); filed as [#2010](https://github.com/Jinn-Network/mono/issues/2010) | M |
 | Bridge derivation run v0: paged ledger walk, tuple output, held-out gate, batch manifest | feat | `client/packages/harness-layer`, `client/src` | tier rule; manifest record | L |
 | Manifest anchor record type (`manifest:` namespace) + consumer enumeration + gas measurement | feat | `client/src/erc8004`, `client/packages/harness-layer`, indexer (read-only) | — | M |
 | Native-path tuple fields: `generatorModel`, `distributionClass`, `task.createdAt`, `instanceId` on new solves | feat | `client/src`, `packages/sdk` | C's unification (pairing) | M |
@@ -455,9 +498,10 @@ This is the A↔B first-session-aha check executed for real.
 | Retire #1672 backfill lane (keep parsers), drop `derived_trajectories` writes | chore | `client/scripts`, `client/src/store` | bridge run v0 | S |
 
 (#1776 — hygiene sweep — already open; not re-filed.)
+(#2005 / #2006 — scrub residual + publish rehearsal — filed 2026-07-22; gate §7.1.)
 
 *Banding per DR-2026-07-17 Decision 7:* the mark, seed-lane, curated-batch (scoped to the
-charter's named repo: mono), native-fields, and evaluator-metering rows are gate-blocking;
+charter's named repo: mono), **§7.1 Autopilot feeder**, native-fields, and evaluator-metering rows are gate-blocking;
 the **bridge wave** (bridge run v0, manifest anchor record, #1672 retirement) files as
 trailing, non-gate-blocking; K>1 minting, source expansion, and the dataset-reference
 convention are deferred. See `docs/superpowers/plans/2026-07-17-stage2-umbrella-plan.md` §3.
