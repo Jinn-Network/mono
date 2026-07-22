@@ -216,7 +216,10 @@ export function applyDispositions(
     for (const finding of sorted) {
       const disposition = effectiveDisposition(finding, policy, checkMode, reviewStore);
       if (disposition === 'pass') {
-        // Auditable allowlist hit (§6.4): record "we saw it and passed it on purpose".
+        // Auditable allowlist hit (§6.4): record "we saw it and passed it on
+        // purpose". These must NOT count toward refuse-on-detection /
+        // check-mode rejection (kind `allowlist-pass` is filtered by
+        // {@link countsTowardRefusal}).
         const allowEvidence = finding.evidence.find((e) => e.startsWith('allowlist:'));
         if (allowEvidence) {
           redactions.push({
@@ -230,8 +233,22 @@ export function applyDispositions(
       }
 
       if (disposition === 'reject-publish') {
+        // Always stub the span so A4/A5 plaintext never survives into
+        // check-mode / in-memory capture envelopes; abort is still signaled
+        // via `rejected` + assertNoRejectPublish at publish altitude.
         rejected = true;
-        redactions.push({
+        const { start, end } = finding.span;
+        if (start >= 0 && end <= text.length && start < end &&
+            !covered.some((c) => start < c.end && end > c.start)) {
+          const leftIndex = keyFindings.filter((f) => {
+            const d = effectiveDisposition(f, policy, checkMode, reviewStore);
+            return (d === 'redact' || d === 'reject-publish') && f.span.start < start;
+          }).length;
+          const stub = stubForFinding(finding, leftIndex);
+          text = text.slice(0, start) + stub + text.slice(end);
+          covered.push({ start, end });
+        }
+        redactRecords.unshift({
           key,
           stage: finding.detector.name,
           kind: redactionKind(finding.class, finding),
@@ -308,8 +325,23 @@ export function applyDispositions(
 }
 
 /**
+ * Allowlist-pass records are auditable Legibility receipts, not detections.
+ * They must not trip refuse-on-detection / distill check-mode gates.
+ */
+export function countsTowardRefusal(record: RedactionRecord): boolean {
+  return record.kind !== 'allowlist-pass';
+}
+
+/** Redaction records that imply content was scrubbed or must refuse. */
+export function refusalRedactions(redactions: RedactionRecord[]): RedactionRecord[] {
+  return redactions.filter(countsTowardRefusal);
+}
+
+/**
  * True when publish/check should refuse the item.
  *
+ * Prefer the explicit `rejected` bit (set by dispositions / check-mode).
+ * Fall back to refusal-relevant redaction records only — never `allowlist-pass`.
  * For reject-publish classes (A4/A5 content), prefer
  * {@link assertNoRejectPublish} so the abort is a loud class-named error.
  * For unresolved flags, prefer {@link assertNoUnresolvedFlags} from
@@ -323,7 +355,7 @@ export function shouldRejectPublish(result: {
 }): boolean {
   if (result.rejected) return true;
   if (result.unresolvedFlags && result.unresolvedFlags.length > 0) return true;
-  return result.redactions.length > 0;
+  return refusalRedactions(result.redactions).length > 0;
 }
 
 /**

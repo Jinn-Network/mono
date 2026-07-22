@@ -157,7 +157,9 @@ export class ScrubPipeline {
               },
             );
     }
-    if (this.checkMode && redactions.length > 0) rejected = true;
+    // Check-mode: trust the disposition `rejected` bit. Do not re-derive from
+    // raw redactions.length — allowlist-pass records are auditable passes.
+    if (this.checkMode && flat.rejected) rejected = true;
     const result: ScrubResult = {
       attributes: out,
       redactions,
