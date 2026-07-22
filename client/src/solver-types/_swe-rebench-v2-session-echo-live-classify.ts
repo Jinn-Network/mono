@@ -23,6 +23,24 @@ export interface SessionEchoLiveClassifyResult {
 
 const EMPIRICAL_DEAD_RE = /empirical-dead/i;
 
+/**
+ * Operator-environment failures that may appear as thrown `infraError` *or*
+ * as `mineSessionEchoes` rejection reasons (admission catches
+ * `EvalCouldNotGradeError` / disk errors into `ungradeable:` / `error:` /
+ * `transient:` buckets rather than always throwing).
+ *
+ * Deliberately excludes patch/product reasons (`patch_does_not_apply`,
+ * `pytest_missing`, `gold-patch-not-resolved`, …) — those stay
+ * `rejected:other`.
+ */
+const INFRA_REASON_RE =
+  /(?:^|[\s(:])(?:ungradeable:|transient:|error:)?(?:docker_(?:unavailable|credentials_error|storage_io_error|run_failed)|image_pull_failed|image_arch_mismatch|venv_(?:missing|collision))(?:\b|$)|insufficient disk/i;
+
+function looksLikeInfra(text: string | undefined): boolean {
+  if (!text) return false;
+  return INFRA_REASON_RE.test(text);
+}
+
 export function classifySessionEchoLiveResult(
   input: SessionEchoLiveClassifyInput,
 ): SessionEchoLiveClassifyResult {
@@ -41,6 +59,9 @@ export function classifySessionEchoLiveResult(
     return { classification: 'admitted', hypothesisHolds: null };
   }
   const reason = input.rejected[0]?.reason ?? '';
+  if (looksLikeInfra(reason)) {
+    return { classification: 'infra-blocked', hypothesisHolds: null };
+  }
   if (EMPIRICAL_DEAD_RE.test(reason)) {
     return {
       classification: 'rejected:empirical-dead',
@@ -49,6 +70,8 @@ export function classifySessionEchoLiveResult(
   }
   return {
     classification: 'rejected:other',
-    hypothesisHolds: input.mode === 'borrow-mismatch' ? false : null,
+    // Zero-yield that is not empirical-dead: hypothesis neither confirmed nor
+    // disproven (disproven only by admit-under-mismatch).
+    hypothesisHolds: null,
   };
 }

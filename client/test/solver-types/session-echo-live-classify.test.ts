@@ -37,14 +37,53 @@ describe('classifySessionEchoLiveResult', () => {
     expect(result.hypothesisHolds).toBeNull();
   });
 
-  it('classifies non-dead rejection as rejected:other', () => {
+  it('maps admission-path docker_credentials_error to infra-blocked', () => {
+    const result = classifySessionEchoLiveResult({
+      mode: 'borrow-mismatch',
+      admitted: [],
+      rejected: [{
+        instance_id: 'x',
+        reason: 'ungradeable:docker_credentials_error',
+      }],
+    });
+    expect(result.classification).toBe('infra-blocked');
+    expect(result.hypothesisHolds).toBeNull();
+  });
+
+  it('maps insufficient-disk rejection message to infra-blocked', () => {
+    const result = classifySessionEchoLiveResult({
+      mode: 'borrow-mismatch',
+      admitted: [],
+      rejected: [{
+        instance_id: 'x',
+        reason: 'insufficient disk for swe-rebench eval: 16.2 GB free, need ≥ 20.0 GB',
+      }],
+    });
+    expect(result.classification).toBe('infra-blocked');
+    expect(result.hypothesisHolds).toBeNull();
+  });
+
+  it('classifies gold-patch-not-resolved as rejected:other (inconclusive)', () => {
+    const result = classifySessionEchoLiveResult({
+      mode: 'borrow-mismatch',
+      admitted: [],
+      rejected: [{
+        instance_id: 'x',
+        reason: 'gold-patch-not-resolved (f2p 0, p2p_broke 0)',
+      }],
+    });
+    expect(result.classification).toBe('rejected:other');
+    expect(result.hypothesisHolds).toBeNull();
+  });
+
+  it('classifies non-dead product rejection as rejected:other', () => {
     const result = classifySessionEchoLiveResult({
       mode: 'borrow-mismatch',
       admitted: [],
       rejected: [{ instance_id: 'x', reason: 'patch_does_not_apply' }],
     });
     expect(result.classification).toBe('rejected:other');
-    expect(result.hypothesisHolds).toBe(false);
+    expect(result.hypothesisHolds).toBeNull();
   });
 
   it('treats admit under borrow-aligned as expected (no red flag)', () => {

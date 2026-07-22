@@ -62,17 +62,28 @@ Passed the disk gate and reached the Docker image pull path for the borrowed
 conan eval image. Pull failed with **`docker_credentials_error`**
 (`error getting credentials` signature in `PythonEvalRunner`).
 
-Empirical double-run grading did not complete.
+### (c) Graded admission — SoR artifact
+
+A later run completed Docker grading and wrote the operator result JSON with
+`rejected:other` / `gold-patch-not-resolved (f2p 0, p2p_broke 0)`. That file is
+the campaign SoR (see Final classification + Appendix).
 
 ---
 
 ## Final classification
 
-**infra-blocked**
+**`rejected:other`** — authoritative SoR is
+`~/.jinn-client/swe-rebench-v2/session-echo-live-result.json` (see Appendix).
 
-Not product-red. The live campaign did not finish a clean empirical grade of the
-borrow-mismatch fixture because infra stopped the Docker image pull after the
-disk-floor override.
+Rejection reason: `gold-patch-not-resolved (f2p 0, p2p_broke 0)`.
+
+Earlier attempts (a)/(b) were **infra-blocked** (disk floor →
+`docker_credentials_error` on pull). The latest recorded run completed Docker
+grading far enough to emit an admission-path product reason, not infra.
+
+Not product-red for the red-flag sense (no admit under mismatch). Not
+`rejected:empirical-dead` either — so AC2’s review hypothesis is still
+unconfirmed.
 
 ---
 
@@ -80,8 +91,11 @@ disk-floor override.
 
 **Not confirmed.**
 
-Zero-yield (`rejected:empirical-dead`) vs bad-admit (`admitted` under mismatch)
-could not be distinguished: Docker image pull failed before empirical grading.
+Zero-yield under mismatch was observed (`admitted: []`), but the failure mode
+was `gold-patch-not-resolved`, not `rejected:empirical-dead`. That is
+inconclusive for the “dead-mint, not bad-admit” hypothesis: it is still
+zero-yield and not a red-flag admit, but it does not confirm the hypothesized
+empirical-dead path.
 
 No red-flag admit was observed on the runs that reached classification JSON.
 
@@ -102,13 +116,12 @@ No red-flag admit was observed on the runs that reached classification JSON.
 
 ## Follow-up
 
-Re-run when:
+Re-run on a clean host when aiming to confirm empirical-dead specifically
+(current SoR already graded past Docker pull and landed `gold-patch-not-resolved`).
+Prereqs that blocked earlier attempts:
 
-1. Docker Hub credentials / image pull works for
-   `swerebench/sweb.eval.x86_64.conan-io_1776_conan-18327:latest` (or equivalent
-   borrowed source image), and
-2. Host has ≥20 GB free **or** a documented `JINN_EVAL_DISK_FLOOR_GB` override is
-   intentional.
+1. Docker Hub credentials / image pull for the borrowed source image, and
+2. Host has ≥20 GB free **or** a documented `JINN_EVAL_DISK_FLOOR_GB` override.
 
 Expected under the review hypothesis (borrow-mismatch): `rejected:empirical-dead`.
 Any `admitted` under mismatch is a red flag.
@@ -125,7 +138,7 @@ cat ~/.jinn-client/swe-rebench-v2/session-echo-live-result.json
 
 ## Appendix — result JSON snapshot fields
 
-Operator artifact at write time included:
+Authoritative operator artifact (`session-echo-live-result.json`):
 
 ```json
 {
@@ -137,11 +150,24 @@ Operator artifact at write time included:
   "donorInstanceId": "conan-io__conan-18444",
   "discovered": 1,
   "admitted": [],
+  "rejected": [
+    {
+      "instance_id": "conan-io__conan__session-f3297e7fe953",
+      "reason": "gold-patch-not-resolved (f2p 0, p2p_broke 0)"
+    }
+  ],
+  "classification": "rejected:other",
+  "hypothesisHolds": false,
+  "infraError": null,
   "elapsedSec": 285
 }
 ```
 
-Campaign verdict for #1644 AC2 remains **infra-blocked** (disk floor →
-`docker_credentials_error` on pull). A later on-disk classifier field of
-`rejected:other` / `gold-patch-not-resolved (f2p 0, p2p_broke 0)` still does not
-confirm `rejected:empirical-dead` and is not treated as hypothesis confirmation.
+Campaign AC2 verdict: **`rejected:other`** (inconclusive for empirical-dead).
+Earlier attempts (a)/(b) were infra-blocked; they are not the SoR for the
+final classification once a graded admission reason was recorded.
+
+Note: the on-disk `hypothesisHolds: false` was written by the pre-review
+classifier. Post-fix classification of the same rejection is
+`hypothesisHolds: null` (inconclusive — neither empirical-dead confirmation
+nor bad-admit disproof).
