@@ -10,7 +10,8 @@ import { DEFAULT_KEY_POLICY } from './build.js';
  * shipped #1409 seed profile).
  *
  * Secret-only: the structural key policy + deterministic plain-patterns
- * (emails, home-dir paths, credential-ID prefixes — #1330/#1415) + the FULL
+ * (emails, home-dir paths, credential-ID prefixes — #1330/#1415; plus
+ * `0x`+40-hex wallet addresses, #1959) + the FULL
  * secretlint stage (including its Pass-2 entropy secret-shape fallback). It
  * deliberately DROPS openredaction and ML-PII — the stages whose PII
  * shape-matching and trigger-word behaviour deface ordinary public prose
@@ -27,7 +28,7 @@ import { DEFAULT_KEY_POLICY } from './build.js';
 export function buildLayer2ScrubPipeline(policy: KeyPolicy = DEFAULT_KEY_POLICY): ScrubPipeline {
   return new ScrubPipeline([
     keyPolicyStage(policy),
-    plainPatternsStage(policy, { credentialIds: true }),
+    plainPatternsStage(policy, { credentialIds: true, walletAddresses: true }),
     secretlintStage(policy),
   ]);
 }
