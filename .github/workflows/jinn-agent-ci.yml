@@ -44,45 +44,160 @@ defaults:
     working-directory: apps/jinn-agent
 
 jobs:
-  test:
-    name: Test
+  generate:
+    name: Generate test slices
     if: github.event_name == 'pull_request' || github.event_name == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+
+      - name: Restore duration cache
+        id: durations
+        uses: actions/cache/restore@v5
         with:
-          python-version: '3.11'
-      - run: python -m venv venv && ./venv/bin/pip install -e ".[dev]"
+          path: apps/jinn-agent/test_durations.json
+          key: jinn-agent-test-durations-${{ github.run_id }}
+          restore-keys: |
+            jinn-agent-test-durations-
 
-      # Per-file isolation via scripts/run_tests.sh: each test file runs in its
-      # own freshly-spawned `python -m pytest <file>` subprocess (clean, hermetic
-      # env). Running the whole tree in one pytest process leaked module-level
-      # state across files and produced ~239 spurious failures in tests that pass
-      # individually — this runner is the project's canonical fix for that (also
-      # used by apps/jinn-agent's own tests.yml). The old `--deselect` for the
-      # migration-prompt test is no longer needed: it fails only with live network
-      # access, which the hermetic env (env -i) + conftest live-system guard now
-      # preclude. tests/dehermes/ is the de-hermes acceptance gate (Task 10).
-      #
-      # Two steps because tests/dehermes/test_main_path_acceptance.py is a heavy
-      # outlier (~13 min: it cold-spawns every subcommand's `--help`, and now runs
-      # to completion because the de-hermes gate passes instead of bailing on the
-      # first brand leak). Sharing the parallel pool, its own subprocess fan-out
-      # oversubscribes CPU and it blows any per-file timeout; run it ALONE first so
-      # it is uncontended, then run everything else in parallel, excluding it.
-      - name: Acceptance gate (heavy, run alone)
-        run: ./scripts/run_tests.sh --file-timeout 1200 tests/dehermes/test_main_path_acceptance.py -q
-
-      - name: Unit + dehermes + jinn-plugin suite (per-file isolated, parallel)
+      - name: Seed cold durations if cache miss
+        if: steps.durations.outputs.cache-hit != 'true'
+        working-directory: apps/jinn-agent
         run: |
-          FILES=$( { find tests/hermes_cli tests/dehermes -name 'test_*.py' \
-            ! -name 'test_main_path_acceptance.py'; \
-            find tests/plugins -maxdepth 1 -name 'test_jinn_*.py'; \
-            printf '%s\n' tests/scripts/test_clean_jinn_test_pollution.py; \
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path('test_durations.json')
+          data = {}
+          if path.is_file():
+              try:
+                  data = json.loads(path.read_text())
+              except json.JSONDecodeError:
+                  data = {}
+          # Cold seed: isolate the heavy acceptance gate under LPT on first runs.
+          data.setdefault(
+              'tests/dehermes/test_main_path_acceptance.py',
+              790.0,
+          )
+          path.write_text(json.dumps(data, indent=2, sort_keys=True) + '\n')
+          print(f'seeded {path} entries={len(data)}')
+          PY
+
+      - name: Generate test slices
+        id: matrix
+        working-directory: apps/jinn-agent
+        run: |
+          set -euo pipefail
+          # Same file set as the former two-step job, INCLUDING acceptance.
+          # Ubuntu runners have GNU paste; keep paste -sd: for CI parity with
+          # the previous workflow snippet.
+          FILES=$( {
+            find tests/hermes_cli tests/dehermes -name 'test_*.py'
+            find tests/plugins -maxdepth 1 -name 'test_jinn_*.py'
+            printf '%s\n' tests/scripts/test_clean_jinn_test_pollution.py
           } | sort | paste -sd: )
-          ./scripts/run_tests.sh --files "$FILES" -j 4 --file-timeout 1200 -q
+          MATRIX=$(python3 scripts/run_tests_parallel.py --files "$FILES" --generate-slices 4)
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+
+  test:
+    name: Test slice ${{ matrix.slice.index }}/4
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    needs: generate
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.generate.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # 8.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            apps/jinn-agent/pyproject.toml
+            apps/jinn-agent/uv.lock
+
+      - name: Set up Python 3.11
+        working-directory: apps/jinn-agent
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        uses: ./apps/jinn-agent/.github/actions/retry
+        with:
+          working-directory: apps/jinn-agent
+          command: uv sync --locked --python 3.11 --extra all --extra dev
+
+      - name: Minimize uv cache
+        working-directory: apps/jinn-agent
+        run: uv cache prune --ci
+
+      - name: Run tests (slice ${{ matrix.slice.index }}/4)
+        # Per-file isolation via scripts/run_tests.sh. File list comes from
+        # generate (--generate-slices + --files); no solo acceptance step.
+        run: |
+          source .venv/bin/activate
+          ./scripts/run_tests.sh --files '${{ matrix.slice.files }}' -j 4 --file-timeout 1200 -q
+        env:
+          OPENROUTER_API_KEY: ""
+          OPENAI_API_KEY: ""
+          NOUS_API_KEY: ""
+
+      - name: Upload per-slice durations
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-durations-slice-${{ matrix.slice.index }}
+          path: apps/jinn-agent/test_durations.json
+          retention-days: 1
+          if-no-files-found: warn
+
+  save-durations:
+    name: Save merged test durations
+    needs: test
+    if: >-
+      needs.test.result == 'success' &&
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/next' || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .   # override workflow default (apps/jinn-agent)
+    steps:
+      - name: Download all slice durations
+        uses: actions/download-artifact@v4
+        with:
+          pattern: test-durations-slice-*
+          path: durations
+          merge-multiple: true
+
+      - name: Merge into single durations file
+        run: |
+          python3 - <<'PY'
+          import json, glob, os
+          from pathlib import Path
+          merged = {}
+          # download-artifact may nest as durations/<artifact>/test_durations.json
+          # or flat durations/test_durations.json depending on merge-multiple.
+          paths = glob.glob('durations/**/test_durations.json', recursive=True)
+          if not paths:
+              paths = glob.glob('durations/*test_durations.json')
+          for f in paths:
+              with open(f) as fh:
+                  merged.update(json.load(fh))
+          out = Path('apps/jinn-agent/test_durations.json')
+          out.parent.mkdir(parents=True, exist_ok=True)
+          out.write_text(json.dumps(merged, indent=2, sort_keys=True) + '\n')
+          print(f'Merged {len(merged)} file durations from {len(paths)} artifacts -> {out}')
+          PY
+
+      - name: Save merged duration cache
+        uses: actions/cache/save@v5
+        with:
+          path: apps/jinn-agent/test_durations.json
+          key: jinn-agent-test-durations-${{ github.run_id }}
 
   cold-stock-e2e:
     name: Cold-stock Stage 1 product gate
