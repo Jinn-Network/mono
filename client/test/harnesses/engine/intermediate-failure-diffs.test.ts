@@ -10,6 +10,10 @@ import {
 import { TaskRunState } from '../../../src/harnesses/engine/state.js';
 import { TaskEngine, type TaskEngineOptions } from '../../../src/harnesses/engine/engine.js';
 import type { Harness, Solution } from '../../../src/harnesses/types.js';
+import {
+  buildMineableRecord,
+  intermediateFailureDiffsFromTaskRun,
+} from '../../../src/solver-types/_swe-rebench-v2-mineable-store.js';
 
 vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
   uploadToIpfs: vi.fn().mockResolvedValue('bafymock123'),
@@ -249,5 +253,30 @@ describe('runImpl retains prior patches (#1643)', () => {
     expect(JSON.parse(row.solutionOutputsJson!).solutionPayload.patch).toBe(
       'diff --git a/x b/x\n+B\n',
     );
+  });
+});
+
+describe('intermediateFailureDiffsFromTaskRun (#1643 AC4)', () => {
+  it('returns [] for null / malformed / missing', () => {
+    expect(intermediateFailureDiffsFromTaskRun({ intermediateFailureDiffsJson: null })).toEqual([]);
+    expect(intermediateFailureDiffsFromTaskRun({ intermediateFailureDiffsJson: '{' })).toEqual([]);
+    expect(intermediateFailureDiffsFromTaskRun({ intermediateFailureDiffsJson: '"nope"' })).toEqual([]);
+  });
+
+  it('parses the retained list for buildMineableRecord', () => {
+    const diffs = intermediateFailureDiffsFromTaskRun({
+      intermediateFailureDiffsJson: JSON.stringify(['diff --git a/x b/x\n+A\n']),
+    });
+    const record = buildMineableRecord({
+      sourceId: 'ep-1',
+      kind: 'solvernet-execution',
+      repo: 'org/widget',
+      baseCommit: 'a'.repeat(40),
+      acceptedDiff: 'diff --git a/x b/x\n+B\n',
+      intermediateFailureDiffs: diffs,
+      publishMinedTasksConsent: false,
+      now: () => '2026-07-22T00:00:00.000Z',
+    });
+    expect(record.intermediateFailureDiffs).toEqual(['diff --git a/x b/x\n+A\n']);
   });
 });
