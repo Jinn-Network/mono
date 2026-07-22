@@ -11,14 +11,17 @@
 #   - Major bumps come as INDIVIDUAL PRs so each can be assessed on its
 #     own merits.
 #   - A short list of framework majors is `ignore`-d below — these are
-#     known migrations tracked in #768. The ignore is per-package, not a
-#     blanket "no majors" rule: anything not in the list still surfaces
-#     as a PR, which is how we hear about drift.
+#     known migrations tracked in #768 (and later follow-ups). The ignore
+#     is per-package, not a blanket "no majors" rule: anything not in the
+#     list still surfaces as a PR, which is how we hear about drift.
+#   - Library residuals chai / @scure/bip39 / lucide-react from the
+#     2026-05-27 wave closed via #1596 (majors landed; ignore lines removed).
 #
 # Adding a new live npm manifest? Add an entry below, copying the inline
 # `ignore:` block verbatim (see the note at the first npm entry). To accept
 # a major bump that's currently ignored, remove that dependency's line from
-# the ignore block on EVERY npm entry AND close out the migration row in #768.
+# the ignore block on EVERY npm entry AND close out the migration tracking
+# issue for that package.
 
 version: 2
 updates:
@@ -80,18 +83,12 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "@nomicfoundation/*"
         update-types: ["version-update:semver-major"]
-      - dependency-name: "chai"
-        update-types: ["version-update:semver-major"]
       # Library majors with non-trivial API surface — tracked in #768
       - dependency-name: "@hono/node-server"
         update-types: ["version-update:semver-major"]
       - dependency-name: "sonner"
         update-types: ["version-update:semver-major"]
       - dependency-name: "zod"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@scure/bip39"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "lucide-react"
         update-types: ["version-update:semver-major"]
       - dependency-name: "better-sqlite3"
         update-types: ["version-update:semver-major"]
@@ -136,18 +133,12 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "@nomicfoundation/*"
         update-types: ["version-update:semver-major"]
-      - dependency-name: "chai"
-        update-types: ["version-update:semver-major"]
       # Library majors with non-trivial API surface — tracked in #768
       - dependency-name: "@hono/node-server"
         update-types: ["version-update:semver-major"]
       - dependency-name: "sonner"
         update-types: ["version-update:semver-major"]
       - dependency-name: "zod"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@scure/bip39"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "lucide-react"
         update-types: ["version-update:semver-major"]
       - dependency-name: "better-sqlite3"
         update-types: ["version-update:semver-major"]
@@ -193,18 +184,12 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "@nomicfoundation/*"
         update-types: ["version-update:semver-major"]
-      - dependency-name: "chai"
-        update-types: ["version-update:semver-major"]
       # Library majors with non-trivial API surface — tracked in #768
       - dependency-name: "@hono/node-server"
         update-types: ["version-update:semver-major"]
       - dependency-name: "sonner"
         update-types: ["version-update:semver-major"]
       - dependency-name: "zod"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@scure/bip39"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "lucide-react"
         update-types: ["version-update:semver-major"]
       - dependency-name: "better-sqlite3"
         update-types: ["version-update:semver-major"]
@@ -250,18 +235,12 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "@nomicfoundation/*"
         update-types: ["version-update:semver-major"]
-      - dependency-name: "chai"
-        update-types: ["version-update:semver-major"]
       # Library majors with non-trivial API surface — tracked in #768
       - dependency-name: "@hono/node-server"
         update-types: ["version-update:semver-major"]
       - dependency-name: "sonner"
         update-types: ["version-update:semver-major"]
       - dependency-name: "zod"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@scure/bip39"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "lucide-react"
         update-types: ["version-update:semver-major"]
       - dependency-name: "better-sqlite3"
         update-types: ["version-update:semver-major"]
@@ -306,18 +285,12 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "@nomicfoundation/*"
         update-types: ["version-update:semver-major"]
-      - dependency-name: "chai"
-        update-types: ["version-update:semver-major"]
       # Library majors with non-trivial API surface — tracked in #768
       - dependency-name: "@hono/node-server"
         update-types: ["version-update:semver-major"]
       - dependency-name: "sonner"
         update-types: ["version-update:semver-major"]
       - dependency-name: "zod"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@scure/bip39"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "lucide-react"
         update-types: ["version-update:semver-major"]
       - dependency-name: "better-sqlite3"
         update-types: ["version-update:semver-major"]
@@ -362,18 +335,12 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "@nomicfoundation/*"
         update-types: ["version-update:semver-major"]
-      - dependency-name: "chai"
-        update-types: ["version-update:semver-major"]
       # Library majors with non-trivial API surface — tracked in #768
       - dependency-name: "@hono/node-server"
         update-types: ["version-update:semver-major"]
       - dependency-name: "sonner"
         update-types: ["version-update:semver-major"]
       - dependency-name: "zod"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@scure/bip39"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "lucide-react"
         update-types: ["version-update:semver-major"]
       - dependency-name: "better-sqlite3"
         update-types: ["version-update:semver-major"]
@@ -425,18 +392,12 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "@nomicfoundation/*"
         update-types: ["version-update:semver-major"]
-      - dependency-name: "chai"
-        update-types: ["version-update:semver-major"]
       # Library majors with non-trivial API surface — tracked in #768
       - dependency-name: "@hono/node-server"
         update-types: ["version-update:semver-major"]
       - dependency-name: "sonner"
         update-types: ["version-update:semver-major"]
       - dependency-name: "zod"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@scure/bip39"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "lucide-react"
         update-types: ["version-update:semver-major"]
       - dependency-name: "better-sqlite3"
         update-types: ["version-update:semver-major"]
@@ -481,18 +442,12 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "@nomicfoundation/*"
         update-types: ["version-update:semver-major"]
-      - dependency-name: "chai"
-        update-types: ["version-update:semver-major"]
       # Library majors with non-trivial API surface — tracked in #768
       - dependency-name: "@hono/node-server"
         update-types: ["version-update:semver-major"]
       - dependency-name: "sonner"
         update-types: ["version-update:semver-major"]
       - dependency-name: "zod"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@scure/bip39"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "lucide-react"
         update-types: ["version-update:semver-major"]
       - dependency-name: "better-sqlite3"
         update-types: ["version-update:semver-major"]
@@ -538,18 +493,12 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "@nomicfoundation/*"
         update-types: ["version-update:semver-major"]
-      - dependency-name: "chai"
-        update-types: ["version-update:semver-major"]
       # Library majors with non-trivial API surface — tracked in #768
       - dependency-name: "@hono/node-server"
         update-types: ["version-update:semver-major"]
       - dependency-name: "sonner"
         update-types: ["version-update:semver-major"]
       - dependency-name: "zod"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@scure/bip39"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "lucide-react"
         update-types: ["version-update:semver-major"]
       - dependency-name: "better-sqlite3"
         update-types: ["version-update:semver-major"]
@@ -595,18 +544,12 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "@nomicfoundation/*"
         update-types: ["version-update:semver-major"]
-      - dependency-name: "chai"
-        update-types: ["version-update:semver-major"]
       # Library majors with non-trivial API surface — tracked in #768
       - dependency-name: "@hono/node-server"
         update-types: ["version-update:semver-major"]
       - dependency-name: "sonner"
         update-types: ["version-update:semver-major"]
       - dependency-name: "zod"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@scure/bip39"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "lucide-react"
         update-types: ["version-update:semver-major"]
       - dependency-name: "better-sqlite3"
         update-types: ["version-update:semver-major"]
@@ -651,18 +594,12 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "@nomicfoundation/*"
         update-types: ["version-update:semver-major"]
-      - dependency-name: "chai"
-        update-types: ["version-update:semver-major"]
       # Library majors with non-trivial API surface — tracked in #768
       - dependency-name: "@hono/node-server"
         update-types: ["version-update:semver-major"]
       - dependency-name: "sonner"
         update-types: ["version-update:semver-major"]
       - dependency-name: "zod"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@scure/bip39"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "lucide-react"
         update-types: ["version-update:semver-major"]
       - dependency-name: "better-sqlite3"
         update-types: ["version-update:semver-major"]
@@ -707,18 +644,12 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "@nomicfoundation/*"
         update-types: ["version-update:semver-major"]
-      - dependency-name: "chai"
-        update-types: ["version-update:semver-major"]
       # Library majors with non-trivial API surface — tracked in #768
       - dependency-name: "@hono/node-server"
         update-types: ["version-update:semver-major"]
       - dependency-name: "sonner"
         update-types: ["version-update:semver-major"]
       - dependency-name: "zod"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@scure/bip39"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "lucide-react"
         update-types: ["version-update:semver-major"]
       - dependency-name: "better-sqlite3"
         update-types: ["version-update:semver-major"]
