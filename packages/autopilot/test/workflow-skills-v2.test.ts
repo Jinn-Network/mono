@@ -53,6 +53,7 @@ describe('single-surface workflow skill pins', () => {
     expect(autopilotRuntime).toContain('child-complete');
     expect(autopilotRuntime).toContain('fix-child');
     expect(autopilotRuntime).toContain('reconcile');
+    expect(autopilotRuntime).toMatch(/follow-ups-file/);
     expect(autopilotRuntime).toMatch(/Deleted verbs/);
   });
 
