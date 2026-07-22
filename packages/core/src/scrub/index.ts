@@ -5,6 +5,7 @@ export * from './eval/index.js';
 export * from './finding.js';
 export * from './git-identity-detector.js';
 export * from './key-policy.js';
+export * from './known-identity-detector.js';
 export * from './layer2.js';
 export * from './ml-pii-stage.js';
 export * from './openredaction-stage.js';

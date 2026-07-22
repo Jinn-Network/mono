@@ -31,6 +31,13 @@ export interface EvalFixture {
   mustSurvive?: boolean;
   /** Profile to run: trace (strict), seed, or layer2. Default seed for CI. */
   profile?: 'trace' | 'seed' | 'layer2';
+  /**
+   * Optional known-identity pack for #1971 fixtures (self-handle exact match).
+   * When set, the seed/trace/layer2 builder injects the pack into the inventory.
+   */
+  identityPack?: import('../known-identity-detector.js').KnownIdentityPack;
+  /** Optional extra allowlist entries for #1971 fixtures. */
+  allowlist?: import('../known-identity-detector.js').InstanceAllowlist;
 }
 
 export interface ClassCounts {
