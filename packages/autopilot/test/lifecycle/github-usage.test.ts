@@ -42,6 +42,7 @@ describe('GitHubUsageMeter', () => {
       restRequests: 2,
       restNotModified: 1,
       cacheHits: 1,
+      accountingComplete: true,
     });
   });
 
@@ -152,6 +153,83 @@ describe('GitHubUsageMeter', () => {
     });
   });
 
+  it('surfaces eventually-consistent counter skew as non-fatal incomplete accounting', async () => {
+    // GitHub's rateLimit.used/remaining counters are eventually consistent:
+    // under dozens of concurrent GraphQL reads on one token the before/after
+    // probes disagree (here remaining fell by 10 while used rose by 12). That
+    // skew is expected, not corrupt — the opaque command still succeeded, so
+    // it must return its stdout and the read must stay non-fatal. Accounting
+    // completeness is observability, never a correctness gate.
+    let probe = 0;
+    const raw: CommandRunner = async (_command, args) => {
+      if (args[0] !== 'api' || args[1] !== 'graphql') return 'viewed';
+      probe += 1;
+      return JSON.stringify({
+        data: {
+          rateLimit: probe === 1
+            ? {
+                cost: 1,
+                remaining: 1_000,
+                resetAt: '2026-07-22T13:00:00.000Z',
+                used: 0,
+                limit: 5_000,
+              }
+            : {
+                cost: 1,
+                remaining: 990,
+                resetAt: '2026-07-22T13:00:00.000Z',
+                used: 12,
+                limit: 5_000,
+              },
+        },
+      });
+    };
+    const meter = new GitHubUsageMeter();
+    const run = makeGitHubUsageCommandRunner(raw, meter);
+
+    await expect(run('gh', ['pr', 'view', '42'])).resolves.toBe('viewed');
+
+    const usage = meter.read();
+    expect(usage.accountingComplete).toBe(false);
+    expect(usage.incompleteReason).toMatch(/skew|inconsistent/i);
+    // Best-effort quota evidence from both probes still advances.
+    expect(usage.graphqlRequests).toBe(2);
+    expect(usage.graphqlRemaining).toBe(990);
+    expect(usage.graphqlResetAt).toBe('2026-07-22T13:00:00.000Z');
+  });
+
+  it('keeps a successful opaque command whose closing quota probe fails to transport', async () => {
+    // A closing-probe transport failure is an accounting problem, never the
+    // command's result: a command that already succeeded must return its
+    // stdout, and the read must stay non-fatal.
+    let probe = 0;
+    const raw: CommandRunner = async (_command, args) => {
+      if (args[0] === 'api' && args[1] === 'graphql') {
+        probe += 1;
+        if (probe === 1) {
+          return JSON.stringify({
+            data: {
+              rateLimit: {
+                cost: 1,
+                remaining: 1_000,
+                resetAt: '2026-07-22T13:00:00.000Z',
+                used: 0,
+                limit: 5_000,
+              },
+            },
+          });
+        }
+        throw new Error('closing probe network failure');
+      }
+      return 'viewed';
+    };
+    const meter = new GitHubUsageMeter();
+    const run = makeGitHubUsageCommandRunner(raw, meter);
+
+    await expect(run('gh', ['pr', 'view', '42'])).resolves.toBe('viewed');
+    expect(meter.read().accountingComplete).toBe(false);
+  });
+
   it('fails before an opaque command when its opening probe evidence is malformed', async () => {
     let opaqueExecuted = false;
     const raw: CommandRunner = async (_command, args) => {
@@ -166,7 +244,10 @@ describe('GitHubUsageMeter', () => {
 
     await expect(run('gh', ['project', 'item-edit'])).rejects.toThrow(/rateLimit|cost/i);
     expect(opaqueExecuted).toBe(false);
-    expect(() => meter.read()).toThrow(/incomplete/i);
+    // read() surfaces incompleteness as a non-fatal flag rather than throwing:
+    // GitHub used/remaining counters are eventually consistent under
+    // concurrency, so accounting skew must be observable, never fatal.
+    expect(meter.read().accountingComplete).toBe(false);
   });
 
   it('does not start an opaque mutation span below floor plus its modeled reserve', async () => {
@@ -360,7 +441,10 @@ describe('GitHubUsageMeter', () => {
       '--paginate',
     ])).rejects.toThrow(/pagination|page count/i);
     expect(called).toBe(false);
-    expect(() => meter.read()).toThrow(/incomplete/i);
+    // The --paginate misuse is a programmer error that still fails the command
+    // at call time, but read() itself stays non-fatal: GitHub used/remaining
+    // counters are eventually consistent, so accounting is surfaced, not thrown.
+    expect(meter.read().accountingComplete).toBe(false);
   });
 
   it('records the HTTP status exposed by an included REST response', async () => {

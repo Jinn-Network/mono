@@ -1195,6 +1195,19 @@ function githubUsageSummary(usage: GitHubUsage): string {
     + `${usage.cacheHits} cache hits.`;
 }
 
+// Accounting incompleteness is observability, not failure: GitHub's
+// used/remaining counters are eventually consistent under concurrency, so a
+// cycle whose commands all succeeded can still report incomplete accounting.
+// Surface it as a warning line, never let it gate or crash the cycle.
+function accountingWarningLines(usage: GitHubUsage | undefined): readonly string[] {
+  if (usage === undefined || usage.accountingComplete !== false) return [];
+  return [
+    'WARNING: GitHub usage accounting is incomplete '
+      + `(${usage.incompleteReason ?? 'eventually-consistent rate-limit counter skew'}); `
+      + 'reported quota numbers are best-effort.',
+  ];
+}
+
 function paritySummary(
   differences: readonly LifecycleParityDifference[] | undefined,
   complete: boolean,
@@ -1226,10 +1239,13 @@ export function renderLifecycleHuman(report: LifecycleCycleReport): string {
     if (usage === undefined) {
       return `${report.message}\nGitHub usage: unavailable (complete usage evidence is missing).`;
     }
-    return `${report.message}\n${githubUsageSummary(usage)}`;
+    return [report.message, githubUsageSummary(usage), ...accountingWarningLines(usage)].join('\n');
   }
   const usageLine = githubUsageSummary(report.githubUsage);
-  if (report.status !== 'ok') return `${report.message}\n${usageLine}`;
+  const accountingLines = accountingWarningLines(report.githubUsage);
+  if (report.status !== 'ok') {
+    return [report.message, usageLine, ...accountingLines].join('\n');
+  }
   const snapshotLine = `Snapshot: ${report.snapshotMode} (${
     report.snapshotComplete ? 'complete' : 'partial'
   }), captured ${report.capturedAt}, last full reconciliation ${
@@ -1258,6 +1274,7 @@ export function renderLifecycleHuman(report: LifecycleCycleReport): string {
       ...partialLines,
       ...warningLines,
       usageLine,
+      ...accountingLines,
       ...parityLines,
       'No lifecycle items.',
     ].join('\n');
@@ -1267,6 +1284,7 @@ export function renderLifecycleHuman(report: LifecycleCycleReport): string {
     ...partialLines,
     ...warningLines,
     usageLine,
+    ...accountingLines,
     ...parityLines,
     ...report.items.map(explanation),
     ...report.orphanBranchClaims.map(orphanExplanation),

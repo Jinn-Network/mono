@@ -36,6 +36,7 @@ import {
   explainPullRequest,
   GhLifecycleReader,
   GitHubRestDiscoveryReader,
+  GitHubUsageIncompleteError,
   GitHubUsageMeter,
   createConfiguredIncrementalLifecycleSnapshotSource,
   isRoutineCachedStatus,
@@ -431,18 +432,32 @@ async function main(): Promise<void> {
       });
 
   const runOnce = async (): Promise<void> => {
-    const report = await runLifecycleCycle(options.mode, {
-      readSnapshot: readCycleSnapshot,
-      resetGitHubUsage: () => reader.resetGitHubUsage(),
-      readGitHubUsage: () => reader.githubUsage(),
-      ...(writerForSnapshot === undefined ? {} : { writerForSnapshot }),
-      ...(active === undefined ? {} : { active }),
-      now: () => new Date(),
-      staleAfterMs: STALE_AFTER_MS,
-      runnerId,
-      cycleId: randomUUID,
-      snapshotFailureMode: options.once ? 'throw' : 'report',
-    });
+    let report: Awaited<ReturnType<typeof runLifecycleCycle>>;
+    try {
+      report = await runLifecycleCycle(options.mode, {
+        readSnapshot: readCycleSnapshot,
+        resetGitHubUsage: () => reader.resetGitHubUsage(),
+        readGitHubUsage: () => reader.githubUsage(),
+        ...(writerForSnapshot === undefined ? {} : { writerForSnapshot }),
+        ...(active === undefined ? {} : { active }),
+        now: () => new Date(),
+        staleAfterMs: STALE_AFTER_MS,
+        runnerId,
+        cycleId: randomUUID,
+        snapshotFailureMode: options.once ? 'throw' : 'report',
+      });
+    } catch (error) {
+      // Belt-and-suspenders: GitHub's used/remaining counters are eventually
+      // consistent, so usage-accounting incompleteness must never terminate the
+      // continuous cadence. The meter is already non-fatal (read() no longer
+      // throws on incomplete accounting); this guards any residual thrower so a
+      // one-shot still fails loud while a persistent loop survives to next cycle.
+      if (error instanceof GitHubUsageIncompleteError && !options.once) {
+        console.warn(`[autopilot:v2] ${error.message}; continuing to next cycle`);
+        return;
+      }
+      throw error;
+    }
     // A snapshot-failed cycle must remain mutation-free. Local attempt
     // cleanup therefore follows the same complete-snapshot boundary as all
     // GitHub reconciliation/archive/action mutations.
