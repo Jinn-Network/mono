@@ -1,6 +1,8 @@
+export * from './apply-dispositions.js';
 export * from './build.js';
 export * from './emit-scrub.js';
 export * from './eval/index.js';
+export * from './finding.js';
 export * from './key-policy.js';
 export * from './layer2.js';
 export * from './ml-pii-stage.js';
@@ -8,6 +10,7 @@ export * from './openredaction-stage.js';
 export * from './pii-build.js';
 export * from './pipeline.js';
 export * from './plain-patterns-stage.js';
+export * from './policy.js';
 export * from './secretlint-stage.js';
 export * from './transformers-detector.js';
 export * from './types.js';

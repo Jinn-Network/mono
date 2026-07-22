@@ -1,9 +1,11 @@
 import { ScrubPipeline } from './pipeline.js';
-import { keyPolicyStage, type KeyPolicy } from './key-policy.js';
-import { openredactionStage } from './openredaction-stage.js';
-import { plainPatternsStage } from './plain-patterns-stage.js';
-import { secretlintStage } from './secretlint-stage.js';
-import { mlPiiStage, type PiiDetector } from './ml-pii-stage.js';
+import { keyPolicyDetector, type KeyPolicy } from './key-policy.js';
+import { openredactionDetector } from './openredaction-stage.js';
+import { plainPatternsDetector } from './plain-patterns-stage.js';
+import { secretlintDetector } from './secretlint-stage.js';
+import { mlPiiDetector, type PiiDetector } from './ml-pii-stage.js';
+import type { Detector } from './finding.js';
+import { DEFAULT_POLICY } from './policy.js';
 
 /**
  * Default key policy. `jinn.*` identity/chain attributes are structural and pass
@@ -13,7 +15,7 @@ import { mlPiiStage, type PiiDetector } from './ml-pii-stage.js';
  * trailing-`*` prefix form `classifyKey` supports; the HTTP header keys are listed
  * per request/response direction (a leading `*.header.…` glob is not matched, so
  * we enumerate the concrete keys). Everything else is `content` and flows through
- * the value-scrubbing stages.
+ * the value-scrubbing detectors.
  */
 export const DEFAULT_KEY_POLICY: KeyPolicy = {
   safe: ['jinn.*'],
@@ -30,68 +32,65 @@ export const DEFAULT_KEY_POLICY: KeyPolicy = {
 
 export interface BuildScrubPipelineOptions {
   policy?: KeyPolicy;
-  /** When provided, the ML PII (GLiNER) stage is appended. */
+  /** When provided, the ML PII (GLiNER) detector is appended. */
   piiDetector?: PiiDetector;
 }
 
 /**
- * Assembles the seller-side scrub pipeline (cost-ascending): structural key
- * policy → openredaction (structured PII) → secretlint + entropy (secrets) →
- * optional GLiNER (ML PII). The GLiNER stage is added only when a detector is
- * supplied, so the daemon degrades gracefully (regex + secrets still scrub) when
- * the ML model is unavailable.
+ * Shared detector inventory (#1969). Every publish/check consumer runs the same
+ * owned detectors (key-policy, plain-patterns including C1 wallet + A1
+ * credential IDs, secretlint). What varies is disposition / check-mode and —
+ * temporarily until #1973 — whether the openredaction strangler is included
+ * (trace preset only). Seed also keeps the entropy fallback off until the flag
+ * review surface can absorb A2 mid-band without refuse-on-detection (#1409
+ * shipped behavior).
  */
-export function buildScrubPipeline(opts: BuildScrubPipelineOptions = {}): ScrubPipeline {
-  const policy = opts.policy ?? DEFAULT_KEY_POLICY;
-  return new ScrubPipeline(assembleScrubStages(policy, opts.piiDetector));
-}
-
-function assembleScrubStages(policy: KeyPolicy, piiDetector?: PiiDetector) {
-  // plain-patterns runs after openredaction: deterministic email/home-path
-  // regexes closing gaps the probabilistic stage demonstrably has (#1330).
-  const stages = [
-    keyPolicyStage(policy),
-    openredactionStage(policy),
-    plainPatternsStage(policy),
-    secretlintStage(policy),
-  ];
-  if (piiDetector) {
-    stages.push(mlPiiStage(policy, piiDetector));
+export function sharedDetectorInventory(
+  policy: KeyPolicy,
+  opts: { openredaction?: boolean; entropyFallback?: boolean; piiDetector?: PiiDetector } = {},
+): Detector[] {
+  const detectors: Detector[] = [keyPolicyDetector(policy)];
+  if (opts.openredaction) {
+    detectors.push(openredactionDetector(policy));
   }
-  return stages;
+  detectors.push(plainPatternsDetector(policy));
+  detectors.push(secretlintDetector(policy, { entropyFallback: opts.entropyFallback ?? true }));
+  if (opts.piiDetector) {
+    detectors.push(mlPiiDetector(policy, opts.piiDetector));
+  }
+  return detectors;
 }
 
 /**
- * Seed-profile scrub pipeline (#1409). Seeds are public, transformed or
- * otherwise human-curated content — not operator trace data — so the
- * probabilistic stages (openredaction, secretlint's pass-2 entropy fallback,
- * ML PII) that exist to catch unknown-shape PII/secrets in private traces are
- * dropped: on prose they false-positive (trigger words, dated env-var slugs,
- * long camelCase identifiers) and deface the corpus. The deterministic
- * detectors stay:
- * structural key policy, plain-patterns (emails, home paths, and — seed-only,
- * #1415 — bare AWS access-key IDs and GCP `AIza…` API keys, deterministic
- * prefix shapes secretlint pass-1 does not cover; and — seed-only,
- * #1959 — `0x`+40-hex wallet addresses, the class openredaction catches in
- * the trace profile), and secretlint's pass-1
- * preset rules (AWS secret-key assignments, GitHub / Slack / npm token
- * shapes, GCP service-account JSON). Accepted residual: JWTs and unprefixed
- * high-entropy blobs (trace profile catches them via the entropy fallback),
- * plus every structured identifier or PII class detected only by the omitted
- * openredaction stage — wallet addresses excepted (#1959) — pass
- * unredacted. The latter is a 570+ pattern surface;
- * payment cards, phone numbers, SSNs, medical or health-plan identifiers,
- * government identity documents, and financial account references are
- * examples, not an exhaustive allowlist. This is acceptable only for public
- * seed material that a curator has transformed and reviewed for those classes.
- * The reduced stage list is inspectable locally through the pipeline's
- * `components` surface. `TraceEnvelopeV0` does not publish that list, so a
- * fetched envelope cannot by itself prove which scrub profile ran.
+ * Trace / redact-mode preset over the shared inventory. Includes the
+ * openredaction strangler until #1973 retires it.
+ *
+ * @deprecated Prefer thinking in terms of one inventory + policy; this builder
+ * remains as a compatibility preset through the migration (#1969).
+ */
+export function buildScrubPipeline(opts: BuildScrubPipelineOptions = {}): ScrubPipeline {
+  const policy = opts.policy ?? DEFAULT_KEY_POLICY;
+  return new ScrubPipeline(
+    sharedDetectorInventory(policy, {
+      openredaction: true,
+      entropyFallback: true,
+      piiDetector: opts.piiDetector,
+    }),
+    { policy: DEFAULT_POLICY, checkMode: false },
+  );
+}
+
+/**
+ * Seed / redact-mode preset (#1409 / #1969). Same owned inventory as layer-2
+ * (no openredaction). Entropy fallback stays off to preserve the shipped
+ * zero-corruption seed behavior until A2 mid-band can flag without tripping
+ * refuse-on-detection.
+ *
+ * @deprecated Compatibility preset over the one inventory + policy table.
  */
 export function buildSeedScrubPipeline(policy: KeyPolicy = DEFAULT_KEY_POLICY): ScrubPipeline {
-  return new ScrubPipeline([
-    keyPolicyStage(policy),
-    plainPatternsStage(policy, { credentialIds: true, walletAddresses: true }),
-    secretlintStage(policy, { entropyFallback: false }),
-  ]);
+  return new ScrubPipeline(
+    sharedDetectorInventory(policy, { openredaction: false, entropyFallback: false }),
+    { policy: DEFAULT_POLICY, checkMode: false },
+  );
 }

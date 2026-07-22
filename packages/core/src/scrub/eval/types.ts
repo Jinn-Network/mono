@@ -5,26 +5,8 @@
  * in published artifacts — only metrics-only JSON (counts) is safe to share.
  */
 
-/** Class taxonomy from design §3.2. */
-export type ScrubClass =
-  | 'A1'
-  | 'A2'
-  | 'A3'
-  | 'A4'
-  | 'A5'
-  | 'B1'
-  | 'B2'
-  | 'B3'
-  | 'B4'
-  | 'B5'
-  | 'B6'
-  | 'B7'
-  | 'C1'
-  | 'C2'
-  | 'D1'
-  | 'D2'
-  | 'D3'
-  | 'E1';
+export type { ScrubClass } from '../finding.js';
+import type { ScrubClass } from '../finding.js';
 
 export interface LabeledSpan {
   class: ScrubClass;

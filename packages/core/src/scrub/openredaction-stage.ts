@@ -1,8 +1,10 @@
 import { OpenRedaction } from 'openredaction';
+import { applyDispositions } from './apply-dispositions.js';
+import type { Detector, Finding, ScrubClass } from './finding.js';
 import { classifyKey, type KeyPolicy } from './key-policy.js';
-import type { Attributes, RedactionRecord, ScrubResult, ScrubStage } from './types.js';
+import type { Attributes, ScrubStage } from './types.js';
 
-const VERSION = '0.4.0'; // 0.4.0: #1391 full-corpus denylist extensions (42-seed characterisation)
+const VERSION = '0.5.0'; // 0.5.0: emit findings (#1969); temporary until #1973 retires this detector
 
 /**
  * The narrow detector contract core exposes. Keeping the public signature
@@ -256,39 +258,100 @@ export function buildDefaultDetector(): OpenRedactionDetector {
 }
 
 /**
- * Structured-PII stage backed by `openredaction` (570+ curated regex patterns +
- * checksum validation, e.g. Luhn for cards). Runs only on `content`-classified
- * string attributes; `safe` and non-string values pass through untouched. Each
- * detection is replaced inline (openredaction's placeholder substitution) and
- * returned as a `pii` redaction in the local `ScrubResult` diagnostics. A
- * downstream redaction manifest may report the touched key, but it does not
- * carry this stage/type detail or prove which scrub profile ran.
- *
- * The detector is constructed once at factory time and reused across spans
- * (pattern compilation is not free).
+ * Map openredaction's library-native type names onto the §3.2 ScrubClass
+ * taxonomy. Unknown types land in E1 (flag by default) so they stay audible
+ * without inventing a class.
+ */
+export function scrubClassFromOpenredactionType(type: string): ScrubClass {
+  const t = type.toUpperCase();
+  if (t.includes('EMAIL')) return 'B1';
+  if (t.includes('ETHEREUM') || t === 'ETH_ADDRESS' || t.includes('ETH_ADDR')) return 'C1';
+  if (t.includes('PATH') || t.includes('HOME')) return 'D1';
+  if (t.includes('PHONE') || t.includes('TEL')) return 'B5';
+  if (t.includes('IP_') || t === 'IPV4' || t === 'IPV6' || t.includes('IP_ADDRESS')) return 'D2';
+  if (t.includes('CREDIT') || t.includes('CARD') || t.includes('IBAN') || t.includes('SSN')) return 'B7';
+  if (t.includes('NAME') || t.includes('PERSON')) return 'B3';
+  return 'E1';
+}
+
+/**
+ * Structured-PII detector backed by `openredaction`. Temporary strangler
+ * (#1969 → #1973): still only wired into the trace preset; emits findings
+ * from library matches (offsets recovered via the library's own patterns)
+ * so disposition owns stubs. Seed/layer2 never include this detector.
+ */
+export function openredactionDetector(
+  policy: KeyPolicy,
+  detector: OpenRedactionDetector = buildDefaultDetector(),
+): Detector {
+  const meta = { name: 'openredaction', version: VERSION };
+  const patterns = detector.getPatterns();
+
+  return {
+    ...meta,
+    async detect(attributes: Attributes): Promise<Finding[]> {
+      const findings: Finding[] = [];
+      for (const [key, value] of Object.entries(attributes)) {
+        if (typeof value !== 'string' || classifyKey(key, policy) !== 'content') continue;
+
+        const result = await detector.detect(value);
+        if (result.detections.length === 0) continue;
+
+        const detectedTypes = new Set(result.detections.map((d) => d.type));
+        // Recover offsets from the library patterns for detected types.
+        const recoveredTypes = new Set<string>();
+        for (const pattern of patterns) {
+          if (!detectedTypes.has(pattern.type)) continue;
+          const re = new RegExp(
+            pattern.regex.source,
+            pattern.regex.flags.includes('g') ? pattern.regex.flags : `${pattern.regex.flags}g`,
+          );
+          let match: RegExpExecArray | null;
+          while ((match = re.exec(value)) !== null) {
+            findings.push({
+              class: scrubClassFromOpenredactionType(pattern.type),
+              span: { key, start: match.index, end: match.index + match[0]!.length },
+              confidence: 'HIGH',
+              evidence: [`openredaction:${pattern.type}`],
+              detector: meta,
+            });
+            recoveredTypes.add(pattern.type);
+          }
+        }
+
+        // Types the library reported but pattern recovery missed (checksum-only
+        // or divergent matchers): emit one finding per such detection so we
+        // never silent-drop a reported hit.
+        for (const det of result.detections) {
+          if (recoveredTypes.has(det.type)) continue;
+          findings.push({
+            class: scrubClassFromOpenredactionType(det.type),
+            span: { key, start: 0, end: value.length },
+            confidence: 'MEDIUM',
+            evidence: [`openredaction:${det.type}`, 'offset-unavailable'],
+            detector: meta,
+          });
+        }
+      }
+      return findings;
+    },
+  };
+}
+
+/**
+ * Legacy ScrubStage wrapper around {@link openredactionDetector}.
  */
 export function openredactionStage(
   policy: KeyPolicy,
   detector: OpenRedactionDetector = buildDefaultDetector(),
 ): ScrubStage {
+  const det = openredactionDetector(policy, detector);
   return {
-    name: 'openredaction',
-    version: VERSION,
-    async scrub(attributes: Attributes): Promise<ScrubResult> {
-      const out: Attributes = {};
-      const redactions: RedactionRecord[] = [];
-      for (const [key, value] of Object.entries(attributes)) {
-        if (typeof value !== 'string' || classifyKey(key, policy) !== 'content') {
-          out[key] = value;
-          continue;
-        }
-        const result = await detector.detect(value);
-        out[key] = result.redacted;
-        for (const det of result.detections) {
-          redactions.push({ key, stage: 'openredaction', kind: 'pii', detail: det.type });
-        }
-      }
-      return { attributes: out, redactions };
+    name: det.name,
+    version: det.version,
+    async scrub(attributes: Attributes) {
+      const findings = await det.detect(attributes);
+      return applyDispositions(attributes, findings);
     },
   };
 }

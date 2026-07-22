@@ -14,6 +14,10 @@ export interface RedactionRecord {
 export interface ScrubResult {
   attributes: Attributes;
   redactions: RedactionRecord[];
+  /** Findings from the detection pass (#1969). Optional for legacy stage wrappers. */
+  findings?: import('./finding.js').Finding[];
+  /** True when reject-publish fired or check-mode saw a non-pass finding. */
+  rejected?: boolean;
 }
 
 /**
