@@ -101,6 +101,16 @@ export class GlinerPiiDetector implements PiiDetector {
     this.threshold = opts.threshold ?? 0.5;
   }
 
+  /** Logical model id (hashed into the policy digest — #1974). */
+  get modelId(): string {
+    return this.model;
+  }
+
+  /** Zero-shot labels (hashed into the policy digest — #1974). */
+  get labelSet(): readonly string[] {
+    return this.labels;
+  }
+
   /** Eagerly load the model (daemon boot / first publish). */
   async init(): Promise<void> {
     await this.ensureReady();

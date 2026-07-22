@@ -45,6 +45,16 @@ export class TransformersPiiDetector implements PiiDetector {
     this.entityGroups = new Set(opts.entityGroups ?? DEFAULT_PII_ENTITY_GROUPS);
   }
 
+  /** Model id for the policy hash (#1974). */
+  get modelId(): string {
+    return this.model;
+  }
+
+  /** Entity-group label set for the policy hash (#1974). */
+  get labelSet(): readonly string[] {
+    return [...this.entityGroups].sort((a, b) => a.localeCompare(b));
+  }
+
   /** Eagerly load the model (e.g. at daemon boot) so the first publish isn't slow. */
   async init(): Promise<void> {
     await this.ensureReady();

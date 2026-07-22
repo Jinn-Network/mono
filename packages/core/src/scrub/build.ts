@@ -17,6 +17,7 @@ import { ipAddressDetector } from './ip-address-detector.js';
 import { gitleaksDetector } from './gitleaks-detector.js';
 import type { Detector } from './finding.js';
 import { DEFAULT_POLICY } from './policy.js';
+import { computeAllowlistDigest } from './provenance.js';
 
 /**
  * Default key policy. `jinn.*` identity/chain attributes are structural and pass
@@ -67,12 +68,47 @@ export interface BuildScrubPipelineOptions {
   failClosedOnUnresolvedFlags?: boolean;
 }
 
-function resolveKnownIdentity(
+export function resolveKnownIdentity(
   opts?: AssembleKnownIdentityOptions | AssembledKnownIdentity,
 ): AssembledKnownIdentity {
   // AssembledKnownIdentity is a subset of AssembleKnownIdentityOptions;
   // re-assembly is idempotent (allowlist entries are deduped).
   return assembleKnownIdentity(opts);
+}
+
+/** Duck-type ML detector metadata for the policy hash (#1974). */
+function provenanceFromPiiDetector(detector: PiiDetector | undefined): {
+  modelId: string | null;
+  labels: readonly string[];
+} {
+  if (!detector) return { modelId: null, labels: [] };
+  const withMeta = detector as PiiDetector & {
+    modelId?: string;
+    labelSet?: readonly string[];
+    model?: string;
+    entityGroups?: Iterable<string>;
+  };
+  if (typeof withMeta.modelId === 'string' && withMeta.labelSet) {
+    return { modelId: withMeta.modelId, labels: withMeta.labelSet };
+  }
+  return { modelId: null, labels: [] };
+}
+
+/** Build provenance extras from known-identity + optional ML detector (#1974). */
+export function buildProvenanceExtras(
+  knownIdentity: AssembledKnownIdentity,
+  piiDetector?: PiiDetector,
+): {
+  modelId: string | null;
+  labels: readonly string[];
+  allowlistDigest: string;
+} {
+  const ml = provenanceFromPiiDetector(piiDetector);
+  return {
+    modelId: ml.modelId,
+    labels: ml.labels,
+    allowlistDigest: computeAllowlistDigest(knownIdentity.allowlist.entries),
+  };
 }
 
 /**
@@ -119,17 +155,19 @@ export function sharedDetectorInventory(
  */
 export function buildScrubPipeline(opts: BuildScrubPipelineOptions = {}): ScrubPipeline {
   const policy = opts.policy ?? DEFAULT_KEY_POLICY;
+  const knownIdentity = resolveKnownIdentity(opts.knownIdentity);
   return new ScrubPipeline(
     sharedDetectorInventory(policy, {
       entropyFallback: true,
       piiDetector: opts.piiDetector,
-      knownIdentity: opts.knownIdentity,
+      knownIdentity,
     }),
     {
       policy: DEFAULT_POLICY,
       checkMode: false,
       reviewStore: opts.reviewStore,
       failClosedOnUnresolvedFlags: opts.failClosedOnUnresolvedFlags,
+      provenance: buildProvenanceExtras(knownIdentity, opts.piiDetector),
     },
   );
 }
@@ -157,17 +195,19 @@ export function buildSeedScrubPipeline(
       ? { policy: policyOrOpts }
       : (policyOrOpts as BuildSeedScrubPipelineOptions);
   const policy = opts.policy ?? DEFAULT_KEY_POLICY;
+  const knownIdentity = resolveKnownIdentity(opts.knownIdentity);
   return new ScrubPipeline(
     sharedDetectorInventory(policy, {
       entropyFallback: false,
       piiDetector: opts.piiDetector,
-      knownIdentity: opts.knownIdentity,
+      knownIdentity,
     }),
     {
       policy: DEFAULT_POLICY,
       checkMode: false,
       reviewStore: opts.reviewStore,
       failClosedOnUnresolvedFlags: opts.failClosedOnUnresolvedFlags,
+      provenance: buildProvenanceExtras(knownIdentity, opts.piiDetector),
     },
   );
 }

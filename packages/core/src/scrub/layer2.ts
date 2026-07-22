@@ -2,6 +2,8 @@ import { ScrubPipeline } from './pipeline.js';
 import type { KeyPolicy } from './key-policy.js';
 import {
   DEFAULT_KEY_POLICY,
+  buildProvenanceExtras,
+  resolveKnownIdentity,
   sharedDetectorInventory,
   type BuildSeedScrubPipelineOptions,
 } from './build.js';
@@ -34,11 +36,16 @@ export function buildLayer2ScrubPipeline(
       ? { policy: policyOrOpts }
       : (policyOrOpts as BuildLayer2ScrubPipelineOptions);
   const policy = opts.policy ?? DEFAULT_KEY_POLICY;
+  const knownIdentity = resolveKnownIdentity(opts.knownIdentity);
   return new ScrubPipeline(
     sharedDetectorInventory(policy, {
       entropyFallback: true,
-      knownIdentity: opts.knownIdentity,
+      knownIdentity,
     }),
-    { policy: DEFAULT_POLICY, checkMode: true },
+    {
+      policy: DEFAULT_POLICY,
+      checkMode: true,
+      provenance: buildProvenanceExtras(knownIdentity),
+    },
   );
 }

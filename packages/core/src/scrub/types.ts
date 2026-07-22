@@ -20,6 +20,11 @@ export interface ScrubResult {
   rejected?: boolean;
   /** Unresolved flag findings held for review (#1973). */
   unresolvedFlags?: import('./finding.js').Finding[];
+  /**
+   * Applied disposition counts keyed `${ScrubClass}:${redact|flag|reject}`
+   * (#1974). Optional for legacy stage wrappers.
+   */
+  perClassCounts?: Record<string, number>;
 }
 
 /**

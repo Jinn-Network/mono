@@ -16,6 +16,7 @@ export * from './pii-build.js';
 export * from './pipeline.js';
 export * from './plain-patterns-stage.js';
 export * from './policy.js';
+export * from './provenance.js';
 export * from './reject-classes-detector.js';
 export * from './reject-publish-error.js';
 export * from './review-queue.js';

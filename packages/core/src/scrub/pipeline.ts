@@ -2,6 +2,12 @@ import { applyDispositions, assertNoRejectPublish, shouldRejectPublish } from '.
 import type { Detector, Finding } from './finding.js';
 import { DEFAULT_POLICY, type PolicyTable } from './policy.js';
 import {
+  REDACTION_MANIFEST_SCHEMA_VERSION,
+  computePolicyHash,
+  mergePerClassCounts,
+  type PolicyHashInput,
+} from './provenance.js';
+import {
   UnresolvedFlagError,
   createReviewQueueStore,
   type ReviewQueueStore,
@@ -25,6 +31,11 @@ export interface ScrubPipelineOptions {
    * {@link UnresolvedFlagError}. Check-mode leaves this off.
    */
   failClosedOnUnresolvedFlags?: boolean;
+  /**
+   * Inputs for the published policy hash (#1974). When omitted, emit helpers
+   * still bump `schemaVersion` but leave `policyHash` unset.
+   */
+  provenance?: Omit<PolicyHashInput, 'policy' | 'detectors'>;
 }
 
 function isDetector(item: Detector | ScrubStage): item is Detector {
@@ -48,6 +59,9 @@ export class ScrubPipeline {
   private readonly stages: ScrubStage[] | null;
   private readonly reviewStore: ReviewQueueStore | undefined;
   private readonly failClosedOnUnresolvedFlags: boolean;
+  private readonly provenanceExtras:
+    | Omit<PolicyHashInput, 'policy' | 'detectors'>
+    | undefined;
 
   constructor(
     detectorsOrStages: Array<Detector | ScrubStage>,
@@ -58,6 +72,7 @@ export class ScrubPipeline {
     this.reviewStore = opts.reviewStore;
     this.failClosedOnUnresolvedFlags =
       opts.failClosedOnUnresolvedFlags ?? !this.checkMode;
+    this.provenanceExtras = opts.provenance;
     if (detectorsOrStages.length > 0 && detectorsOrStages.every(isDetector)) {
       this.detectors = detectorsOrStages;
       this.stages = null;
@@ -72,6 +87,49 @@ export class ScrubPipeline {
     return items.map((d) => ({ name: d.name, version: d.version }));
   }
 
+  /** Disposition policy table used by this pipeline (#1974). */
+  get policyTable(): PolicyTable {
+    return this.policy;
+  }
+
+  /**
+   * Additive provenance fields for a redaction manifest (#1974). Always
+   * includes `schemaVersion`; `policyHash` is present when provenance
+   * extras were supplied at construction.
+   */
+  manifestProvenance(perClassCounts?: Record<string, number>): {
+    schemaVersion: number;
+    policyHash?: string;
+    perClassCounts?: Record<string, number>;
+  } {
+    const out: {
+      schemaVersion: number;
+      policyHash?: string;
+      perClassCounts?: Record<string, number>;
+    } = { schemaVersion: REDACTION_MANIFEST_SCHEMA_VERSION };
+    const hash = this.policyHash();
+    if (hash) out.policyHash = hash;
+    if (perClassCounts && Object.keys(perClassCounts).length > 0) {
+      out.perClassCounts = perClassCounts;
+    }
+    return out;
+  }
+
+  /**
+   * Reproducible policy hash, or undefined when provenance inputs were not
+   * configured (legacy stage-only pipelines).
+   */
+  policyHash(): string | undefined {
+    if (!this.provenanceExtras) return undefined;
+    return computePolicyHash({
+      policy: this.policy,
+      detectors: this.components,
+      modelId: this.provenanceExtras.modelId,
+      labels: this.provenanceExtras.labels,
+      allowlistDigest: this.provenanceExtras.allowlistDigest,
+    });
+  }
+
   async run(attributes: Attributes): Promise<ScrubResult> {
     if (this.stages) {
       return this.runLegacyStages(attributes);
@@ -81,12 +139,23 @@ export class ScrubPipeline {
     const redactions = [...flat.redactions];
     const findings = [...flat.findings];
     const unresolvedFlags = [...flat.unresolvedFlags];
+    let perClassCounts = { ...flat.perClassCounts };
     let rejected = flat.rejected;
     for (const [key, value] of Object.entries(flat.attributes)) {
       out[key] =
         typeof value === 'string'
           ? value
-          : await this.scrubNested(key, value, redactions, findings, unresolvedFlags);
+          : await this.scrubNested(
+              key,
+              value,
+              redactions,
+              findings,
+              unresolvedFlags,
+              (nestedCounts) => {
+                perClassCounts =
+                  mergePerClassCounts(perClassCounts, nestedCounts) ?? perClassCounts;
+              },
+            );
     }
     if (this.checkMode && redactions.length > 0) rejected = true;
     const result: ScrubResult = {
@@ -95,6 +164,7 @@ export class ScrubPipeline {
       findings,
       rejected,
       unresolvedFlags,
+      perClassCounts,
     };
     // Publish altitude: reject-publish classes abort loudly with a class name.
     // Check-mode distill maps redactions → rejection reasons without throwing.
@@ -190,6 +260,7 @@ export class ScrubPipeline {
     findings: Finding[];
     rejected: boolean;
     unresolvedFlags: Finding[];
+    perClassCounts: Record<string, number>;
   }> {
     const findings: Finding[] = [];
     for (const detector of this.detectors!) {
@@ -208,19 +279,23 @@ export class ScrubPipeline {
     redactions: RedactionRecord[],
     findings: Finding[],
     unresolvedFlags: Finding[],
+    onCounts: (counts: Record<string, number>) => void,
   ): Promise<unknown> {
     if (typeof value === 'string') {
       const result = await this.runDetectDispose({ [key]: value });
       redactions.push(...result.redactions);
       findings.push(...result.findings);
       unresolvedFlags.push(...result.unresolvedFlags);
+      onCounts(result.perClassCounts);
       const scrubbed = result.attributes[key];
       return typeof scrubbed === 'string' ? scrubbed : value;
     }
     if (Array.isArray(value)) {
       const items: unknown[] = [];
       for (const item of value) {
-        items.push(await this.scrubNested(key, item, redactions, findings, unresolvedFlags));
+        items.push(
+          await this.scrubNested(key, item, redactions, findings, unresolvedFlags, onCounts),
+        );
       }
       return items;
     }
@@ -229,7 +304,14 @@ export class ScrubPipeline {
       if (proto !== Object.prototype && proto !== null) return value;
       const entries: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-        entries[k] = await this.scrubNested(key, v, redactions, findings, unresolvedFlags);
+        entries[k] = await this.scrubNested(
+          key,
+          v,
+          redactions,
+          findings,
+          unresolvedFlags,
+          onCounts,
+        );
       }
       return entries;
     }

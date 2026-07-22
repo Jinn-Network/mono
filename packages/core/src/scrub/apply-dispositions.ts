@@ -11,6 +11,7 @@ import {
   type Disposition,
   type PolicyTable,
 } from './policy.js';
+import { incrementPerClassCount } from './provenance.js';
 import { assertNoRejectPublish } from './reject-publish-error.js';
 import {
   findingFingerprint,
@@ -45,6 +46,11 @@ export interface ApplyDispositionsResult {
   rejected: boolean;
   /** Flag findings that remain unresolved after consulting the review queue. */
   unresolvedFlags: Finding[];
+  /**
+   * Applied disposition counts keyed `${ScrubClass}:${redact|flag|reject}`
+   * (#1974). Pass dispositions are omitted.
+   */
+  perClassCounts: Record<string, number>;
 }
 
 /** Stub text for a redact disposition, keyed by class (+ optional evidence hint). */
@@ -163,6 +169,7 @@ export function applyDispositions(
   const out: Attributes = { ...attributes };
   const redactions: RedactionRecord[] = [];
   const unresolvedFlags: Finding[] = [];
+  const perClassCounts: Record<string, number> = {};
   let rejected = false;
 
   // Key-drop findings first (A5 structural drop-key, D3 machine-identity).
@@ -179,6 +186,9 @@ export function applyDispositions(
       stage: finding.detector.name,
       kind: 'dropped-key',
     });
+    // Structural drops are applied as redacts (key removed), even when the
+    // policy row for A5 content is reject-publish.
+    incrementPerClassCount(perClassCounts, finding.class, 'redact');
     if (checkMode) rejected = true;
   }
 
@@ -227,11 +237,13 @@ export function applyDispositions(
           kind: redactionKind(finding.class, finding),
           detail: redactionDetail(finding),
         });
+        incrementPerClassCount(perClassCounts, finding.class, disposition);
         continue;
       }
 
       if (disposition === 'flag') {
         unresolvedFlags.push(finding);
+        incrementPerClassCount(perClassCounts, finding.class, disposition);
         // In redact-mode leave text (review queue owns the hold). In check-mode,
         // record so consumers reject.
         if (checkMode) {
@@ -264,6 +276,7 @@ export function applyDispositions(
         kind: redactionKind(finding.class, finding),
         detail: redactionDetail(finding),
       });
+      incrementPerClassCount(perClassCounts, finding.class, disposition);
       if (checkMode) rejected = true;
     }
 
@@ -290,6 +303,7 @@ export function applyDispositions(
     findings,
     rejected,
     unresolvedFlags: uniqueUnresolved,
+    perClassCounts,
   };
 }
 

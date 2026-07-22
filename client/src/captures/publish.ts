@@ -286,7 +286,8 @@ async function buildCaptureTrajectoryPayload(
   // the last gate before a trajectory becomes public/sellable. Scrubbing here
   // both sanitises the span attributes and grows each span's redactedKeys, which
   // the manifest below is derived from.
-  const scrubbed = await scrubCaptureSpans(spans, scrubPipeline);
+  const perClassCounts: Record<string, number> = {};
+  const scrubbed = await scrubCaptureSpans(spans, scrubPipeline, { perClassCounts });
   const unsigned = {
     schemaVersion: CAPTURE_TRAJECTORY_ARTIFACT_TYPE,
     sessionId: capture.sessionId,
@@ -296,6 +297,7 @@ async function buildCaptureTrajectoryPayload(
     redactionManifest: {
       spans: scrubbed.map((span) => ({ spanId: span.spanId, redactedKeys: span.redactedKeys })),
       totalRedactions: scrubbed.reduce((sum, span) => sum + span.redactedKeys.length, 0),
+      ...scrubPipeline.manifestProvenance(perClassCounts),
     },
   };
   return unsigned;
