@@ -1,0 +1,55 @@
+name: Evidence Protocol CI
+
+on:
+  pull_request:
+    branches: [next]
+    paths:
+      - "packages/evidence-protocol/**"
+      - "docs/superpowers/specs/2026-07-23-jinn-execution-evidence-protocol-design.md"
+      - ".github/workflows/evidence-protocol-ci.yml"
+  push:
+    branches: [next]
+    paths:
+      - "packages/evidence-protocol/**"
+      - "docs/superpowers/specs/2026-07-23-jinn-execution-evidence-protocol-design.md"
+      - ".github/workflows/evidence-protocol-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/evidence-protocol
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+
+      - name: Install immutable dependencies
+        run: yarn install --immutable
+
+      - name: Check profile and schema drift
+        run: yarn check:profile
+
+      - name: Typecheck
+        run: yarn typecheck
+
+      - name: Test
+        run: yarn test
+
+      - name: Build
+        run: yarn build
+
+      - name: Smoke-test packed distribution
+        run: yarn pack:smoke
