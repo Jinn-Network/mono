@@ -2590,11 +2590,13 @@ export class TaskEngine {
    *   in the L2 fallback chain failed at once) on a task whose delivery window
    *   is still open: leave the row in its current in-flight state so the next
    *   tick re-drives it once the RPCs recover, and emit a `tick_error` (warn)
-   *   event instead of inflating the FAILED counter. Without this the daemon
-   *   stamped the row FAILED, dropping it from `getInFlight()` permanently, so
-   *   L2 work went silent until a manual restart (#912). Past-window transient
-   *   errors still terminalize to avoid churning on work that can no longer
-   *   settle.
+   *   on first occurrence plus every `TRANSIENT_TICK_ERROR_HEARTBEAT_MS`
+   *   thereafter for that requestId (#934) — not once per failing tick —
+   *   instead of inflating the FAILED counter. Without the leave-in-flight
+   *   path the daemon stamped the row FAILED, dropping it from
+   *   `getInFlight()` permanently, so L2 work went silent until a manual
+   *   restart (#912). Past-window transient errors still terminalize to avoid
+   *   churning on work that can no longer settle.
    * - Everything else: existing markFailed behaviour. When invoked from
    *   recovery, `contextLabel === 'recovery'` so the failure_reason
    *   carries the `recovery:` prefix the original code path used.
