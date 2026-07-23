@@ -41,8 +41,9 @@ describe('tx-retry', () => {
     it('returns false for a bare GS013 — the Safe inner call reverted (deterministic)', () => {
       // GS013 = require(success || safeTxGas != 0 || gasPrice != 0): the Safe's
       // INNER call reverted, which is deterministic — it reverts identically on
-      // every retry. (A stale-nonce / signature race surfaces as GS026, not
-      // GS013.) Retrying it forever wedges the loop; observed on testnet wrapping
+      // every retry. (An estimate-path GS026 is classified after checking Safe
+      // ownership; receipt-path races use a dedicated retryable message.)
+      // Retrying it forever wedges the loop; observed on testnet wrapping
       // TACTaskAlreadyCredited (selector 0x33f626d3). It must be terminal.
       const safeWrappedError = new Error(
         'The contract function "execTransaction" reverted with the following reason:\nGS013',

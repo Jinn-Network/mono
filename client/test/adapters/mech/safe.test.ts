@@ -356,11 +356,12 @@ describe('executeSafeTransaction reconcile-first (issue #897)', () => {
 });
 
 describe('executeSafeTransaction GS026 owner mismatch (issue #1986)', () => {
-  const makeClients = () => {
+  const makeClients = (isOwner = false) => {
     const signMessage = vi.fn().mockResolvedValue(TEST_SAFE_SIGNATURE);
     const readContract = vi.fn(async (args: { functionName: string }) => {
       if (args.functionName === 'nonce') return 0n;
       if (args.functionName === 'getTransactionHash') return TEST_SAFE_TX_HASH;
+      if (args.functionName === 'isOwner') return isOwner;
       throw new Error(`unexpected readContract call: ${args.functionName}`);
     });
     const estimateFeesPerGas = vi.fn().mockResolvedValue({
@@ -410,6 +411,39 @@ describe('executeSafeTransaction GS026 owner mismatch (issue #1986)', () => {
     ).rejects.toThrow(/GS026.*owner/i);
 
     expect(call).toHaveBeenCalled();
+    expect(publicClient.readContract).toHaveBeenCalledWith(expect.objectContaining({
+      functionName: 'isOwner',
+      args: [TEST_SIGNER_ADDRESS],
+    }));
+  });
+
+  it('retries estimate-path GS026 when the signer is still a Safe owner', async () => {
+    const { publicClient, walletClient } = makeClients(true);
+    const writeContract = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('The contract function "execTransaction" reverted: GS026'))
+      .mockResolvedValueOnce(TEST_SUCCESS_HASH);
+    const waitForTransactionReceipt = vi.fn().mockResolvedValue({ status: 'success' });
+    const call = vi.fn().mockResolvedValue({ data: '0x' });
+
+    const hash = await executeSafeTransaction(
+      { ...publicClient, call, waitForTransactionReceipt } as never,
+      { ...walletClient, writeContract } as never,
+      {
+        safeAddress: TEST_SAFE_ADDRESS,
+        to: TEST_TARGET_ADDRESS,
+        value: 0n,
+        data: TEST_CALL_DATA,
+      },
+      { ledger: createMemoryTxSubmissionLedger() },
+    );
+
+    expect(hash).toBe(TEST_SUCCESS_HASH);
+    expect(writeContract).toHaveBeenCalledTimes(2);
+    expect(publicClient.readContract).toHaveBeenCalledWith(expect.objectContaining({
+      functionName: 'isOwner',
+      args: [TEST_SIGNER_ADDRESS],
+    }));
   });
 
   it('keeps receipt-path stale-nonce races retryable without embedding GS026', async () => {

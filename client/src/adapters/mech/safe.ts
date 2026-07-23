@@ -11,6 +11,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
 import { SAFE_ABI } from './types.js';
 import {
+  SAFE_STALE_NONCE_ERROR_TOKEN,
   isNonceTooLowError,
   isReplacementUnderpricedError,
   type TxSubmissionLedger,
@@ -248,6 +249,15 @@ async function executeSafeTransactionInner(
             );
           }
           if (msg.includes('GS026')) {
+            const signerIsOwner = await publicClient.readContract({
+              address: safeAddress,
+              abi: SAFE_ABI,
+              functionName: 'isOwner',
+              args: [from],
+            });
+            if (signerIsOwner) {
+              throw new Error(`Safe execTransaction reverted (${SAFE_STALE_NONCE_ERROR_TOKEN})`);
+            }
             throw new Error(
               'Safe execTransaction rejected (GS026: invalid owner — signing key is not a Safe owner). ' +
                 'Repair the Safe owner set or repoint the agent signing key to a current owner.',
@@ -301,10 +311,10 @@ async function executeSafeTransactionInner(
         }
         // No inner revert on re-simulation: likely a stale Safe nonce or
         // signature race — retryable, self-heals on re-sign. Do not embed
-        // GS026/GS013 in the message: bare GS026 is terminal (invalid owner)
-        // and bare GS013 is terminal (inner revert). Issue #1986.
+        // GS026/GS013 in the message: estimate-path GS026 is classified after
+        // probing Safe ownership, and bare GS013 is terminal. Issue #1986.
         throw new Error(
-          `Safe execTransaction reverted (possible stale Safe nonce or signature race, txHash=${hash})`,
+          `Safe execTransaction reverted (${SAFE_STALE_NONCE_ERROR_TOKEN}, txHash=${hash})`,
         );
       }
       await nonceLedger.markResolved();
