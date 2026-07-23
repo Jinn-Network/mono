@@ -5,6 +5,8 @@ import {
   type MarketplaceTaskSubmitPreflightCheck,
   selectMarketplaceTaskSolverNet,
   assertMarketplaceTaskFunding,
+  assertMarketplaceTaskRequestFreshness,
+  MARKETPLACE_TASK_FRESHNESS_RESERVE_MS,
 } from '../../src/tasks/submit-preflight.js';
 
 const categories = [
@@ -115,5 +117,43 @@ describe('assertMarketplaceTaskFunding', () => {
       ...funding(17n),
       safeBalanceWei: 9n,
     })).toThrow(/creator Safe/i);
+  });
+});
+
+describe('assertMarketplaceTaskRequestFreshness', () => {
+  const nowMs = Date.parse('2026-07-24T00:00:00.000Z');
+  const liveAt = nowMs + 60_000 + 1;
+  const request = () => ({
+    claimPolicy: {
+      claimWindowEndTs: liveAt,
+      submissionDeadlineTs: liveAt + 2_000,
+    },
+    spec: {
+      session: {
+        deadline: new Date(liveAt + 1_000).toISOString(),
+      },
+    },
+  });
+
+  it('accepts every operational deadline just beyond the fixed reserve boundary', () => {
+    expect(MARKETPLACE_TASK_FRESHNESS_RESERVE_MS).toBe(60_000);
+    expect(() => assertMarketplaceTaskRequestFreshness(request(), { nowMs })).not.toThrow();
+  });
+
+  it.each([
+    ['claim window end', (value: ReturnType<typeof request>) => {
+      value.claimPolicy.claimWindowEndTs = nowMs + 60_000;
+    }],
+    ['submission deadline', (value: ReturnType<typeof request>) => {
+      value.claimPolicy.submissionDeadlineTs = nowMs + 60_000;
+    }],
+    ['session/adoption deadline', (value: ReturnType<typeof request>) => {
+      value.spec.session.deadline = new Date(nowMs + 60_000).toISOString();
+    }],
+  ])('rejects %s at the reserve boundary', (_label, mutate) => {
+    const value = request();
+    mutate(value);
+    expect(() => assertMarketplaceTaskRequestFreshness(value, { nowMs }))
+      .toThrow(/freshness|reserve|deadline/i);
   });
 });

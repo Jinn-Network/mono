@@ -702,6 +702,7 @@ export class MechAdapter implements ExecutionAdapter {
       maxTimeout,
       this.config.evictionRecovery,
       options?.onTransactionHash,
+      options?.beforeBroadcast,
     );
     if (
       taskSubmission.txHash

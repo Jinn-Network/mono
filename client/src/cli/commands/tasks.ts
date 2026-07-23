@@ -36,6 +36,7 @@ import {
 } from '../../tasks/submit-request.js';
 import {
   assertMarketplaceTaskFunding,
+  assertMarketplaceTaskRequestFreshness,
   resolveMarketplaceTaskSolverNet,
   runMarketplaceTaskSubmitPreflight,
 } from '../../tasks/submit-preflight.js';
@@ -217,6 +218,20 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
           message: `Invalid request file: ${err instanceof Error ? err.message : String(err)}`,
           exampleCli: 'jinn tasks submit --request-file request.json --yes --json',
           details: { field: '--request-file' },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+    try {
+      assertMarketplaceTaskRequestFreshness(machineRequest);
+    } catch (err) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: err instanceof Error ? err.message : String(err),
+          exampleCli: 'jinn tasks submit --request-file request.json --yes --json',
+          details: { field: 'freshness' },
         },
         { writer: ctx.writer, exit: ctx.exit },
       );
@@ -698,7 +713,10 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
   } catch (e) {
     const pendingTxHash =
       e && typeof e === 'object'
-      && (e as { name?: unknown }).name === 'PendingTaskSubmissionError'
+      && (
+        (e as { name?: unknown }).name === 'PendingTaskSubmissionError'
+        || (e as { name?: unknown }).name === 'SafePostBroadcastHookError'
+      )
       && typeof (e as { txHash?: unknown }).txHash === 'string'
         ? (e as { txHash: string }).txHash
         : undefined;

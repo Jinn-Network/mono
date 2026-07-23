@@ -231,6 +231,7 @@ export async function submitTask(
   responseTimeout: bigint,
   evictionRecovery?: EvictionRecoveryConfig,
   onTransactionHash?: (txHash: Hex) => void | Promise<void>,
+  beforeBroadcast?: () => void | Promise<void>,
 ): Promise<{ taskId: string; txHash: Hex; receiptLogCount: number; blockNumber?: number }> {
   const calldata = encodeFunctionData({
     abi: JINN_ROUTER_ABI,
@@ -256,14 +257,21 @@ export async function submitTask(
     publicClient,
     evictionRecovery,
     'createTask',
-    () => executeSafeTransaction(publicClient, walletClient, {
-      safeAddress,
-      to: routerAddress,
-      value: taskBudget,
-      data: calldata,
-    }),
+    () => executeSafeTransaction(
+      publicClient,
+      walletClient,
+      {
+        safeAddress,
+        to: routerAddress,
+        value: taskBudget,
+        data: calldata,
+      },
+      {
+        beforeBroadcast,
+        onBroadcast: onTransactionHash,
+      },
+    ),
   );
-  await onTransactionHash?.(txHash);
 
   let lastError: unknown;
   for (let attempt = 0; attempt < TASK_CREATED_RECONCILE_ATTEMPTS; attempt++) {

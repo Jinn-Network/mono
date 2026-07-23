@@ -218,6 +218,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     const adapter = new MechAdapter(TEST_CONFIG);
     await adapter.initialize();
     const onTransactionHash = vi.fn();
+    const beforeBroadcast = vi.fn();
 
     const posted = await adapter.postTask({
       id: 'prediction-task-1',
@@ -234,6 +235,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
       },
     }, {
       onTransactionHash,
+      beforeBroadcast,
     });
 
     expect(posted).toMatchObject({
@@ -278,6 +280,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
       300n,
       undefined,
       onTransactionHash,
+      beforeBroadcast,
     );
 
     await adapter.stop();

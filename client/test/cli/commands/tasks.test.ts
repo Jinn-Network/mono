@@ -46,7 +46,8 @@ vi.mock('@/cli/execution-context.js', () => ({
     services.find((service) => service.safe_address && service.mech_address),
 }));
 vi.mock('@/cli/introspection-context.js', () => ({ gatherIntrospectionRaw }));
-vi.mock('@/tasks/submit-preflight.js', () => ({
+vi.mock('@/tasks/submit-preflight.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/tasks/submit-preflight.js')>()),
   runMarketplaceTaskSubmitPreflight,
   resolveMarketplaceTaskSolverNet,
 }));
@@ -54,21 +55,25 @@ vi.mock('@/tasks/submit-preflight.js', () => ({
 const V2_ATTEMPT_ID = '11111111-1111-4111-8111-111111111111';
 
 function request(overrides: Record<string, unknown> = {}) {
+  const startTs = 1_900_000_000_000;
+  const endTs = startTs + 3_600_000;
+  const claimEndTs = startTs + 900_000;
+  const submissionDeadlineTs = startTs + 3_300_000;
   return {
     schemaVersion: 'jinn-task-submit-request.v1',
     id: `autopilot:${V2_ATTEMPT_ID}`,
     description: 'Implement issue 42',
     solverType: 'jinn-repo.v1',
     solverNetManifestCid: 'bafy-autopilot-manifest',
-    createdAt: 1_784_761_200_000,
-    window: { startTs: 1_784_761_200_000, endTs: 1_784_764_800_000 },
+    createdAt: startTs,
+    window: { startTs, endTs },
     claimPolicy: {
       mode: 'exclusive',
       maxClaims: 1,
       maxClaimsPerOperator: 1,
-      claimWindowStartTs: 1_784_761_200_000,
-      claimWindowEndTs: 1_784_762_100_000,
-      submissionDeadlineTs: 1_784_764_500_000,
+      claimWindowStartTs: startTs,
+      claimWindowEndTs: claimEndTs,
+      submissionDeadlineTs,
       claimLeaseTtlSeconds: 1800,
       requiredVerdicts: 1,
     },
@@ -103,7 +108,7 @@ function request(overrides: Record<string, unknown> = {}) {
           version: 'v2',
           resultSchema: 'jinn-autopilot-mutation-result.v1',
         },
-        deadline: '2026-07-22T23:50:00.000Z',
+        deadline: new Date(startTs + 1_800_000).toISOString(),
         receiptAuthors: ['jinn-autopilot'],
       },
     },
@@ -183,6 +188,7 @@ describe('tasks submit machine contract', () => {
       async (input: { explicitManifestCid?: string }) =>
         input.explicitManifestCid ?? 'bafy-auto-selected',
     );
+    vi.useRealTimers();
   });
 
   it('rejects request-file combined with legacy loose flags', async () => {
@@ -221,6 +227,39 @@ describe('tasks submit machine contract', () => {
     expect(createCliReadOnlySignerContext).toHaveBeenCalledOnce();
     expect(gatherIntrospectionRaw).not.toHaveBeenCalled();
     expect(runMarketplaceTaskSubmitPreflight).toHaveBeenCalledOnce();
+  });
+
+  it('rejects an expired machine request for dry-run and live paths before mutable work', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-'));
+    const file = join(dir, 'request.json');
+    const config = join(dir, 'config.json');
+    const value = request();
+    writeFileSync(file, JSON.stringify(value));
+    writeFileSync(config, '{}');
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(value.claimPolicy.submissionDeadlineTs + 1));
+    createCliExecutionContext.mockResolvedValue({
+      ok: false,
+      envelope: { code: 'fatal', message: 'mutable context was constructed' },
+    });
+
+    for (const mode of [
+      ['--dry-run'],
+      ['--yes'],
+    ]) {
+      const made = makeCommandCtx({
+        argv: ['submit', '--request-file', file, '--config', config, ...mode, '--json'],
+      });
+      await tasksCommand.run(made.ctx);
+      expect(JSON.parse(made.writes.at(-1)!)).toMatchObject({
+        code: 'invalid_invocation',
+        message: expect.stringMatching(/freshness|expired|deadline/i),
+      });
+    }
+    expect(resolveMarketplaceTaskSolverNet).not.toHaveBeenCalled();
+    expect(createCliReadOnlySignerContext).not.toHaveBeenCalled();
+    expect(createCliExecutionContext).not.toHaveBeenCalled();
+    expect(existsSync(marketplaceTaskSelectionSidecarPath(file))).toBe(false);
   });
 
   it('emits Task CID, chain origin, manifest, and idempotency in JSON', async () => {
@@ -349,7 +388,7 @@ describe('tasks submit machine contract', () => {
         firstSignedTask = task.signedTask;
         await options?.onTransactionHash?.(pendingTxHash);
         throw Object.assign(new Error('simulated crash after Safe submission'), {
-          name: 'PendingTaskSubmissionError',
+          name: 'SafePostBroadcastHookError',
           txHash: pendingTxHash,
         });
       }),

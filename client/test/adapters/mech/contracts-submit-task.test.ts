@@ -61,7 +61,15 @@ describe('submitTask TaskCreated recovery', () => {
   });
 
   it('recovers TaskCreated from nearby router logs when the receipt logs are incomplete', async () => {
-    vi.mocked(executeSafeTransaction).mockResolvedValueOnce(FIRST_TX);
+    const beforeBroadcast = vi.fn();
+    const onTransactionHash = vi.fn();
+    vi.mocked(executeSafeTransaction).mockImplementationOnce(
+      async (_publicClient, _walletClient, _params, options) => {
+        await options?.beforeBroadcast?.();
+        await options?.onBroadcast?.(FIRST_TX);
+        return FIRST_TX;
+      },
+    );
     waitForTransactionReceiptWithRetry.mockResolvedValueOnce({
       status: 'success',
       logs: [],
@@ -83,6 +91,9 @@ describe('submitTask TaskCreated recovery', () => {
       10n,
       10n,
       300n,
+      undefined,
+      onTransactionHash,
+      beforeBroadcast,
     );
 
     expect(result).toMatchObject({
@@ -92,6 +103,8 @@ describe('submitTask TaskCreated recovery', () => {
       blockNumber: 100,
     });
     expect(executeSafeTransaction).toHaveBeenCalledTimes(1);
+    expect(beforeBroadcast).toHaveBeenCalledOnce();
+    expect(onTransactionHash).toHaveBeenCalledWith(FIRST_TX);
     expect(publicClient.getLogs).toHaveBeenCalledWith({
       address: ROUTER_ADDRESS,
       fromBlock: 36n,

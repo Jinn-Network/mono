@@ -11,6 +11,7 @@ import {
 import { encryptMnemonic } from '@/earning/wallet.js';
 import { makeCommandCtx } from '@test/cli.js';
 import { marketplaceTaskSelectionSidecarPath } from '@/tasks/submit-selection.js';
+import { MechAdapter } from '@/adapters/mech/adapter.js';
 
 vi.mock('@/tasks/submit-preflight.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/tasks/submit-preflight.js')>(),
@@ -20,21 +21,24 @@ vi.mock('@/tasks/submit-preflight.js', async (importOriginal) => ({
 
 const V2_ATTEMPT_ID = '11111111-1111-4111-8111-111111111111';
 
-function machineRequest() {
+function machineRequest(startTs = 1_900_000_000_000) {
+  const endTs = startTs + 3_600_000;
+  const claimEndTs = startTs + 900_000;
+  const submissionDeadlineTs = startTs + 3_300_000;
   return {
     schemaVersion: 'jinn-task-submit-request.v1',
     id: `autopilot:${V2_ATTEMPT_ID}`,
     description: 'Dry-run without SQLite',
     solverType: 'jinn-repo.v1',
-    createdAt: 1_784_761_200_000,
-    window: { startTs: 1_784_761_200_000, endTs: 1_784_764_800_000 },
+    createdAt: startTs,
+    window: { startTs, endTs },
     claimPolicy: {
       mode: 'exclusive',
       maxClaims: 1,
       maxClaimsPerOperator: 1,
-      claimWindowStartTs: 1_784_761_200_000,
-      claimWindowEndTs: 1_784_762_100_000,
-      submissionDeadlineTs: 1_784_764_500_000,
+      claimWindowStartTs: startTs,
+      claimWindowEndTs: claimEndTs,
+      submissionDeadlineTs,
       claimLeaseTtlSeconds: 1800,
       requiredVerdicts: 1,
     },
@@ -69,7 +73,7 @@ function machineRequest() {
           version: 'v2',
           resultSchema: 'jinn-autopilot-mutation-result.v1',
         },
-        deadline: '2026-07-22T23:50:00.000Z',
+        deadline: new Date(startTs + 1_800_000).toISOString(),
         receiptAuthors: ['jinn-autopilot'],
       },
     },
@@ -125,5 +129,63 @@ describe('machine Task dry-run filesystem behavior', () => {
     });
     expect(existsSync(absentDbParent)).toBe(false);
     expect(existsSync(marketplaceTaskSelectionSidecarPath(requestPath))).toBe(false);
+  });
+
+  it('rejects an expired live request before sidecar, SQLite, adapter, or broadcast mutation', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-task-live-expired-fs-'));
+    const earningDir = join(dir, 'earning');
+    const absentDbParent = join(dir, 'must-remain-absent');
+    const requestPath = join(dir, 'request.json');
+    const configPath = join(dir, 'config.json');
+    const password = 'test-password';
+    const mnemonic = 'test test test test test test test test test test test junk';
+    const fleetStore = new FleetStateStore(earningDir);
+    await fleetStore.saveMnemonicKeystore(await encryptMnemonic(mnemonic, password));
+    await fleetStore.save({
+      ...createDefaultFleetState('base-sepolia'),
+      services: [{
+        ...createDefaultServiceState(1, '0x1111111111111111111111111111111111111111'),
+        safe_address: '0x00112233445566778899aabbccddeeff00112233',
+        mech_address: '0x2222222222222222222222222222222222222222',
+        step: 'complete' as const,
+      }],
+    });
+    writeFileSync(requestPath, JSON.stringify(machineRequest(1_700_000_000_000)));
+    writeFileSync(configPath, JSON.stringify({
+      network: 'testnet',
+      earningDir,
+      dbPath: join(absentDbParent, 'jinn.db'),
+      rpcUrl: 'http://127.0.0.1:1',
+    }));
+    const initialize = vi.spyOn(MechAdapter.prototype, 'initialize').mockResolvedValue();
+    const postTask = vi.spyOn(MechAdapter.prototype, 'postTask').mockResolvedValue({
+      taskId: 'must-not-post',
+      taskCid: `f01551220${'ab'.repeat(32)}`,
+    });
+
+    const made = makeCommandCtx({
+      argv: [
+        'submit',
+        '--request-file',
+        requestPath,
+        '--config',
+        configPath,
+        '--yes',
+        '--json',
+      ],
+      env: { JINN_PASSWORD: password },
+    });
+    await tasksCommand.run(made.ctx);
+
+    expect(JSON.parse(made.writes.at(-1)!)).toMatchObject({
+      code: 'invalid_invocation',
+      message: expect.stringMatching(/freshness|expired|deadline/i),
+    });
+    expect(existsSync(marketplaceTaskSelectionSidecarPath(requestPath))).toBe(false);
+    expect(existsSync(absentDbParent)).toBe(false);
+    expect(initialize).not.toHaveBeenCalled();
+    expect(postTask).not.toHaveBeenCalled();
+    initialize.mockRestore();
+    postTask.mockRestore();
   });
 });

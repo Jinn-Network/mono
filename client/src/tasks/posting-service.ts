@@ -242,6 +242,22 @@ export class TaskPostingService {
         );
       }
       const posted = await this.adapter.postTask(task, {
+        beforeBroadcast: async () => {
+          const stillOwnsBroadcast = this.store.renewTaskPostLock({
+            creatorSafeAddress,
+            sourceKey: candidate.sourceKey,
+            policyType,
+            scopeKey,
+            ownerToken,
+            lockedAt: this.scheduler.now().toISOString(),
+          });
+          lockLost = !stillOwnsBroadcast;
+          if (!stillOwnsBroadcast) {
+            throw new TransientError(
+              `Task post ownership was lost at the wallet boundary for ${candidate.sourceKey}; refusing to broadcast`,
+            );
+          }
+        },
         onTransactionHash: async (txHash) => {
           this.store.upsertTaskPostRecord({
             creatorSafeAddress,

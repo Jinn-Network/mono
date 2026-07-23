@@ -437,6 +437,68 @@ describe('TaskPostingService', () => {
     await adapter.stop();
   });
 
+  it('uses the wallet-bound fence after delayed adapter setup so a stolen owner never writes', async () => {
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+    let nowMs = Date.parse('2026-07-24T00:00:00.000Z');
+    const scheduler = {
+      now: () => new Date(nowMs),
+      setInterval: (callback: () => void) => callback,
+      clearInterval: () => undefined,
+    };
+    const service = new TaskPostingService(adapter, store, scheduler);
+    let releaseSetup!: () => void;
+    const setupGate = new Promise<void>((resolve) => {
+      releaseSetup = resolve;
+    });
+    const walletWrite = vi.fn();
+    const postTask = vi.fn(async (_task: unknown, options?: {
+      beforeBroadcast?: () => void | Promise<void>;
+    }) => {
+      await setupGate; // IPFS/rate/timeout work inside MechAdapter.
+      await options?.beforeBroadcast?.();
+      walletWrite();
+      return {
+        taskId: 'must-not-land',
+        taskCid: `f01551220${'ef'.repeat(32)}`,
+      };
+    });
+    Object.assign(adapter, { postTask });
+    const signedTask = {
+      schemaVersion: 'task.v1',
+      id: 'autopilot:wallet-fence',
+      solverType: 'jinn-repo.v1',
+      solverNetManifestCid: 'bafy-manifest',
+    } as SignedTaskV1;
+    const candidate = {
+      task: { id: signedTask.id, description: 'wallet fence', signedTask },
+      sourceKey: signedTask.id,
+      postingPolicy: { kind: 'once_per_safe' } as const,
+      sourceMeta: { request: { schemaVersion: 'jinn-task-submit-request.v1' } },
+    };
+
+    const pending = service.postCandidate(candidate, { creatorSafeAddress: SAFE_A });
+    await vi.waitFor(() => expect(postTask).toHaveBeenCalledOnce());
+    nowMs += 61_000;
+    expect(store.acquireTaskPostLock({
+      creatorSafeAddress: getAddress(SAFE_A),
+      sourceKey: candidate.sourceKey,
+      policyType: 'once_per_safe',
+      scopeKey: '',
+      ownerToken: 'winning-owner',
+      lockedAt: new Date(nowMs).toISOString(),
+      staleAfterMs: 60_000,
+    })).toBe(true);
+
+    releaseSetup();
+    await expect(pending).rejects.toBeInstanceOf(TransientError);
+    expect(walletWrite).not.toHaveBeenCalled();
+
+    store.close();
+    await adapter.stop();
+  });
+
   it('fails closed when a completed key is retried with changed signed Task or request bytes', async () => {
     const adapter = new LocalAdapter();
     await adapter.initialize();

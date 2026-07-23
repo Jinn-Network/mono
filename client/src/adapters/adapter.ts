@@ -18,6 +18,7 @@ export interface RecoverTaskPostInput {
 }
 
 export interface PostTaskOptions {
+  beforeBroadcast?: () => void | Promise<void>;
   onTransactionHash?: (txHash: Hex) => void | Promise<void>;
 }
 

@@ -1,6 +1,8 @@
 import type { JinnConfig } from '../config.js';
 import { createHttpDiscoveryAPI } from '../discovery/http.js';
 
+export const MARKETPLACE_TASK_FRESHNESS_RESERVE_MS = 60_000;
+
 export const MARKETPLACE_TASK_SUBMIT_PREFLIGHT_CATEGORIES = [
   'creator',
   'funds',
@@ -15,6 +17,44 @@ export type MarketplaceTaskSubmitPreflightCategory =
   typeof MARKETPLACE_TASK_SUBMIT_PREFLIGHT_CATEGORIES[number];
 
 export type MarketplaceTaskSubmitPreflightCheck = () => Promise<void>;
+
+export function assertMarketplaceTaskRequestFreshness(
+  request: {
+    claimPolicy: {
+      claimWindowEndTs: number;
+      submissionDeadlineTs: number;
+    };
+    spec: {
+      session: {
+        deadline: string;
+      };
+    };
+  },
+  options: {
+    nowMs?: number;
+    reserveMs?: number;
+  } = {},
+): void {
+  const nowMs = options.nowMs ?? Date.now();
+  const reserveMs = options.reserveMs ?? MARKETPLACE_TASK_FRESHNESS_RESERVE_MS;
+  const minimumLiveDeadline = nowMs + reserveMs;
+  const deadlines = [
+    ['claim window end', request.claimPolicy.claimWindowEndTs],
+    ['submission deadline', request.claimPolicy.submissionDeadlineTs],
+    ['session/adoption deadline', Date.parse(request.spec.session.deadline)],
+  ] as const;
+  const expired = deadlines.filter(
+    ([, deadline]) => !Number.isFinite(deadline) || deadline <= minimumLiveDeadline,
+  );
+  if (expired.length > 0) {
+    throw new Error(
+      `Marketplace Task request freshness check failed: ${
+        expired.map(([label]) => label).join(', ')
+      } must remain live beyond ${new Date(minimumLiveDeadline).toISOString()} ` +
+      `(${reserveMs} ms execution reserve)`,
+    );
+  }
+}
 
 export function assertMarketplaceTaskFunding(args: {
   safeBalanceWei: bigint;
