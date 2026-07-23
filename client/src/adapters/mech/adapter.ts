@@ -692,6 +692,7 @@ export class MechAdapter implements ExecutionAdapter {
       spec: state.spec ?? {},
       eligibility: state.eligibility ?? {},
       claimPolicy: state.claimPolicy ?? DEFAULT_MECH_CLAIM_POLICY,
+      ...(state.executionRequest ? { executionRequest: state.executionRequest } : {}),
       creator: {
         safeAddress: getAddress(this.config.safeAddress),
         agentEoa: account.address,

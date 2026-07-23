@@ -56,6 +56,28 @@ export const TaskClaimPolicySchema = z.object({
 
 export type TaskClaimPolicy = z.infer<typeof TaskClaimPolicySchema>;
 
+/**
+ * Generic execution-profile pin (issue #2039). Lets a signed task pin the
+ * exact harness/model/version it must run under, plus an opaque loadout
+ * reference and isolation request. Core carries these fields without
+ * interpreting them — `harness`/`model`/`version` are checked by the engine
+ * against the resolved SolverNet (`solverNetManifestCid`) before claim or
+ * model invocation; `loadoutRef`/`isolation` are consumer-defined (e.g. a
+ * benchmark harness) and pass through unvalidated. Being part of
+ * `TaskV1Fields`, any change to these fields changes the canonical-JSON hash
+ * and therefore invalidates the task's signature — no separate enforcement
+ * needed for that.
+ */
+export const ExecutionRequestSchema = z.object({
+  harness: z.string().min(1).optional(),
+  model: z.string().min(1).optional(),
+  version: z.string().min(1).optional(),
+  loadoutRef: z.string().min(1).optional(),
+  isolation: z.enum(['shared', 'dedicated']).optional(),
+}).strict();
+
+export type ExecutionRequest = z.infer<typeof ExecutionRequestSchema>;
+
 const NoLegacyKindSchema = z.record(z.unknown()).superRefine((spec, ctx) => {
   if (Object.prototype.hasOwnProperty.call(spec, 'kind')) {
     ctx.addIssue({
@@ -95,6 +117,7 @@ const TaskV1Fields = {
   spec: NoLegacyKindSchema,
   eligibility: z.record(z.unknown()),
   claimPolicy: TaskClaimPolicySchema,
+  executionRequest: ExecutionRequestSchema.optional(),
   creator: CreatorSchema,
   createdAt: z.number().int(),
 };

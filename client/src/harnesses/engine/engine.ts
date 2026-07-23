@@ -86,7 +86,7 @@ import {
   type FreezeViolation,
 } from '../../daemon/freeze-fence.js';
 import { recordLoopTick } from '../../daemon/loop-heartbeat.js';
-import { harnessStateDirName } from '../names.js';
+import { harnessStateDirName, harnessNameMatches } from '../names.js';
 import { recordTaskCost } from '../../spend/record.js';
 
 // ── Sentinel error ────────────────────────────────────────────────────────────
@@ -113,18 +113,39 @@ export class NotImplementedError extends Error {
  * `harnesses/engine/registry.ts` (`HarnessRegistry`).
  */
 export interface ImplRegistry {
-  findFor(ctx: { solverType: string; role?: 'restoration' | 'evaluation' }): Harness | undefined;
+  findFor(ctx: {
+    solverType: string;
+    role?: 'restoration' | 'evaluation';
+    /**
+     * Manifest-pinned Harness name (issue #2039) — the name from the
+     * specific joined SolverNet the caller resolved for this task's
+     * `solverNetManifestCid`. Takes priority over any boot-time static
+     * solverType→Harness map. Optional: callers without a task-specific
+     * SolverNet in hand (or `ImplRegistry` implementations that don't care)
+     * omit it and dispatch proceeds exactly as before.
+     */
+    harnessName?: string;
+  }): Harness | undefined;
 }
 
+type LoadedSolverNetView = {
+  name: string;
+  solverType: string;
+  harness: string;
+  model?: string;
+  provider?: import('../provider-ref.js').ProviderRef;
+  runtimePlugins: RuntimePlugin[];
+};
+
 export interface SolverNetRegistryLike {
-  forSolverType(solverType: string, taskRole?: 'restoration' | 'evaluation'): {
-    name: string;
-    solverType: string;
-    harness: string;
-    model?: string;
-    provider?: import('../provider-ref.js').ProviderRef;
-    runtimePlugins: RuntimePlugin[];
-  } | undefined;
+  forSolverType(solverType: string, taskRole?: 'restoration' | 'evaluation'): LoadedSolverNetView | undefined;
+  /**
+   * Resolve by manifest CID rather than solverType registration order
+   * (issue #2039 AC2). Optional so existing `SolverNetRegistryLike`
+   * implementations/mocks that predate this field keep compiling and keep
+   * their prior (registry-order) behavior unchanged.
+   */
+  forManifestCid?(manifestCid: string, taskRole?: 'restoration' | 'evaluation'): LoadedSolverNetView | undefined;
 }
 
 /**
@@ -916,6 +937,62 @@ export class TaskEngine {
   }
 
   /**
+   * Resolve the joined SolverNet for a task. Prefers `task.solverNetManifestCid`
+   * (issue #2039 AC2) — the specific manifest a task is pinned to — over
+   * `solverType` registry-order dispatch, so two joined SolverNets sharing a
+   * `solverType` can't silently substitute for one another. Falls back to
+   * `forSolverType` when the task carries no manifest CID, when nothing is
+   * registered under that CID, or when the wired `SolverNetRegistryLike`
+   * doesn't implement `forManifestCid` — preserving prior behavior for
+   * legacy/no-CID tasks and older mocks (AC4).
+   */
+  private resolveSolverNetForTask(
+    fullTask: Task | null | undefined,
+    routingKey: string | undefined,
+    role: 'restoration' | 'evaluation',
+  ): LoadedSolverNetView | undefined {
+    if (!this.solverNetRegistry) return undefined;
+    const manifestCid = fullTask?.solverNetManifestCid;
+    if (manifestCid) {
+      const byManifest = this.solverNetRegistry.forManifestCid?.(manifestCid, role);
+      // `forManifestCid` matches on CID alone (no solverType filter, unlike
+      // `forSolverType`). Cross-check against the task's own routing key so
+      // a task body whose `solverNetManifestCid` disagrees with its own
+      // `solverType`/`contractId`+`contractVersion` can't leak a foreign
+      // net's harness/model metadata into dispatch or execution-request
+      // validation — fall through instead of trusting the mismatch.
+      if (byManifest && (!routingKey || byManifest.solverType === routingKey)) return byManifest;
+    }
+    return routingKey ? this.solverNetRegistry.forSolverType(routingKey, role) : undefined;
+  }
+
+  /**
+   * Checks a task's execution-profile pin (issue #2039 AC3) against the
+   * already-resolved SolverNet/Harness for this task. `executionRequest` is
+   * an ASSERTION the task carries, not an override — it never widens what
+   * the operator's own config already allows; it only rejects when the
+   * resolved execution doesn't match what was pinned. `loadoutRef`/
+   * `isolation` are consumer-defined (e.g. a benchmark harness) and are not
+   * validated here — Core carries them without interpreting them.
+   */
+  private validateExecutionRequest(
+    request: NonNullable<Task['executionRequest']>,
+    solverNet: LoadedSolverNetView | undefined,
+    impl: Harness,
+  ): string | null {
+    if (request.harness !== undefined && !harnessNameMatches(impl.name, request.harness)) {
+      return `execution request pins harness '${request.harness}' but the resolved Harness is '${impl.name}'`;
+    }
+    if (request.model !== undefined && solverNet?.model !== request.model) {
+      return `execution request pins model '${request.model}' but the resolved SolverNet model is '${solverNet?.model ?? '<unset>'}'`;
+    }
+    if (request.version !== undefined && impl.version !== request.version) {
+      return `execution request pins harness version '${request.version}' but the resolved Harness '${impl.name}' is version '${impl.version}'`;
+    }
+    return null;
+  }
+
+  /**
    * Resolve the task's `solverNetManifestCid` via the registry, fetch the
    * manifest, and validate the task body against `manifest.contract.schemas.task`.
    *
@@ -1129,9 +1206,7 @@ export class TaskEngine {
     })) {
       return `another ${routingKey}/${role} task is already in flight`;
     }
-    const solverNet = this.solverNetRegistry && routingKey
-      ? this.solverNetRegistry.forSolverType(routingKey, role)
-      : undefined;
+    const solverNet = this.resolveSolverNetForTask(task, routingKey, role);
     if (this.solverNetRegistry && routingKey && !solverNet) {
       return `no enabled SolverNet for solverType '${routingKey}' and role '${role}'; run \`jinn solver-nets enable <name>\``;
     }
@@ -1150,7 +1225,7 @@ export class TaskEngine {
     }
     if (!this.implRegistry || !routingKey) return null;
 
-    const impl = this.implRegistry.findFor({ solverType: routingKey, role });
+    const impl = this.implRegistry.findFor({ solverType: routingKey, role, harnessName: solverNet?.harness });
     if (!impl) {
       const setHarnessHint = solverNet
         ? `jinn solver-nets set-harness ${solverNet.name} <harness>`
@@ -1158,6 +1233,10 @@ export class TaskEngine {
       return `no Harness registered or enabled for solverType '${routingKey}'; run \`${setHarnessHint}\``;
     }
     if (task) {
+      if (task.executionRequest) {
+        const mismatch = this.validateExecutionRequest(task.executionRequest, solverNet, impl);
+        if (mismatch) return mismatch;
+      }
       if (this.operatorSafeAddress) {
         const synthetic = task.eligibility?.['syntheticProvenance'] as SyntheticTaskProvenance | undefined;
         const blocked = syntheticClaimBlocked(synthetic, this.operatorSafeAddress);
@@ -1196,8 +1275,20 @@ export class TaskEngine {
     // Resolve the impl via registry so implStateDir matches the path runImpl uses
     // (join(implStateDirRoot, impl.name, solverType)). Falls back to solverType then 'default'
     // when no impl is registered — legacy path preserved for health-check tasks.
+    // Resolves the SolverNet the same manifest-CID-preferred way `runImpl`
+    // does (issue #2039 AC2) so the persisted `implStateDir` agrees with the
+    // Harness that actually executes — two joined SolverNets sharing a
+    // solverType but configured with different harnesses must not share (or
+    // write into the wrong) implStateDir.
+    const preSnapshotSolverNet = run.solverType
+      ? this.resolveSolverNetForTask(run.task, run.solverType, run.taskRole ?? 'restoration')
+      : undefined;
     const resolvedImpl = run.solverType
-      ? this.implRegistry?.findFor({ solverType: run.solverType, role: run.taskRole ?? 'restoration' }) ?? null
+      ? this.implRegistry?.findFor({
+          solverType: run.solverType,
+          role: run.taskRole ?? 'restoration',
+          harnessName: preSnapshotSolverNet?.harness,
+        }) ?? null
       : null;
     const implStateName = harnessStateDirName(run.implName ?? resolvedImpl?.name ?? run.solverType ?? 'default');
     const kindSeg = (run.solverType ?? '').replace(/[.:]/g, '_');
@@ -1250,8 +1341,8 @@ export class TaskEngine {
     // string-keyed harness map.
     const solverType = task.solverType ?? '';
     const role = task.taskRole ?? 'restoration';
-    const solverNet = solverType ? this.solverNetRegistry?.forSolverType(solverType, role) : undefined;
-    const impl = this.implRegistry?.findFor({ solverType, role });
+    const solverNet = this.resolveSolverNetForTask(task.task, solverType, role);
+    const impl = this.implRegistry?.findFor({ solverType, role, harnessName: solverNet?.harness });
     if (!impl) {
       throw new NotImplementedError('runImpl');
     }
@@ -1790,9 +1881,7 @@ export class TaskEngine {
         }))
         .sort((a, b) => `${a.name}@${a.version}`.localeCompare(`${b.name}@${b.version}`));
     const implNameForEnvelope = task.implName ?? solverType;
-    const solverNet = solverType
-      ? this.solverNetRegistry?.forSolverType(solverType, task.taskRole ?? 'restoration')
-      : undefined;
+    const solverNet = this.resolveSolverNetForTask(task.task, solverType, task.taskRole ?? 'restoration');
     const runtimeBundleDigest = `sha256:${createHash('sha256')
       .update(JSON.stringify({
         harness: {

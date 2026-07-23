@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   TaskV1Schema,
   SignedTaskV1Schema,
+  ExecutionRequestSchema,
   parseTaskV1,
   parseSignedTaskV1,
 } from '../../src/types/task-document.js';
@@ -87,6 +88,45 @@ describe('TaskV1Schema', () => {
   it('leaves claimPolicy.requiredVerdicts undefined when omitted', () => {
     const parsed = TaskV1Schema.parse(valid);
     expect(parsed.claimPolicy.requiredVerdicts).toBeUndefined();
+  });
+
+  it('leaves executionRequest undefined when omitted (issue #2039)', () => {
+    const parsed = TaskV1Schema.parse(valid);
+    expect(parsed.executionRequest).toBeUndefined();
+  });
+
+  it('accepts a fully populated executionRequest and round-trips it', () => {
+    const executionRequest = {
+      harness: 'codex',
+      model: 'gpt-5-codex',
+      version: '1.2.3',
+      loadoutRef: 'arm-a',
+      isolation: 'dedicated' as const,
+    };
+    const parsed = TaskV1Schema.parse({ ...valid, executionRequest });
+    expect(parsed.executionRequest).toEqual(executionRequest);
+  });
+
+  it('rejects an executionRequest with an unknown field', () => {
+    expect(() =>
+      TaskV1Schema.parse({ ...valid, executionRequest: { harness: 'codex', bogus: 'x' } }),
+    ).toThrow();
+  });
+
+  it('rejects an unsupported isolation value', () => {
+    expect(() =>
+      TaskV1Schema.parse({ ...valid, executionRequest: { isolation: 'yolo' } }),
+    ).toThrow();
+  });
+});
+
+describe('ExecutionRequestSchema', () => {
+  it('accepts an empty object (all fields optional)', () => {
+    expect(() => ExecutionRequestSchema.parse({})).not.toThrow();
+  });
+
+  it('rejects an empty-string field', () => {
+    expect(() => ExecutionRequestSchema.parse({ harness: '' })).toThrow();
   });
 });
 

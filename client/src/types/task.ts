@@ -5,7 +5,14 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod/v3';
 import { WindowSchema, type Window } from './window.js';
-import { SignedTaskV1Schema, TaskClaimPolicySchema, type SignedTaskV1, type TaskClaimPolicy } from './task-document.js';
+import {
+  SignedTaskV1Schema,
+  TaskClaimPolicySchema,
+  ExecutionRequestSchema,
+  type SignedTaskV1,
+  type TaskClaimPolicy,
+  type ExecutionRequest,
+} from './task-document.js';
 
 export type RequestId = string;
 
@@ -56,6 +63,9 @@ export const TaskSchema = z.object({
   // on loose runtime Tasks so tests/configured tasks can use creator defaults.
   claimPolicy: TaskClaimPolicySchema.optional(),
 
+  // Generic execution-profile pin (issue #2039). See ExecutionRequestSchema.
+  executionRequest: ExecutionRequestSchema.optional(),
+
   signedTask: SignedTaskV1Schema.optional(),
 });
 
@@ -89,6 +99,9 @@ export interface Task {
   eligibility?: Record<string, unknown>;
   claimPolicy?: TaskClaimPolicy;
 
+  /** Generic execution-profile pin (issue #2039). See ExecutionRequestSchema. */
+  executionRequest?: ExecutionRequest;
+
   signedTask?: SignedTaskV1;
 }
 
@@ -115,6 +128,7 @@ export function parseTask(input: unknown): Task {
   const solverNetManifestCid = parsed.solverNetManifestCid ?? signedTask?.solverNetManifestCid;
   const spec = parsedSpec ?? signedTask?.spec;
   const claimPolicy = parsed.claimPolicy ?? signedTask?.claimPolicy;
+  const executionRequest = parsed.executionRequest ?? signedTask?.executionRequest;
   return {
     id: parsed.id ?? signedTask?.id ?? randomUUID(),
     description,
@@ -131,6 +145,7 @@ export function parseTask(input: unknown): Task {
     spec,
     eligibility: parsed.eligibility ?? signedTask?.eligibility,
     claimPolicy,
+    executionRequest,
     signedTask,
   };
 }
