@@ -39,9 +39,10 @@ import type {
   MarketplaceMutationGitPort,
   MarketplaceMutationGitState,
 } from '../../src/lifecycle/marketplace-mutation-git.js';
-import type {
-  MarketplaceMutationVerificationPort,
-  MarketplaceMutationVerificationResult,
+import {
+  MarketplaceVerificationPlanError,
+  type MarketplaceMutationVerificationPort,
+  type MarketplaceMutationVerificationResult,
 } from '../../src/lifecycle/marketplace-mutation-verification.js';
 import {
   gitOid,
@@ -329,6 +330,8 @@ class Harness implements
   child?: MarketplaceMutationAuthority['child'];
   workflow: MutationWorkflow;
   verificationStatus: 'passed' | 'failed' = 'passed';
+  verificationError?: Error;
+  readonly verificationRepositoryPaths: string[] = [];
   codeOwnerRequired = false;
   trustedOperatorIds = ['operator-1'];
   crashBoundary?: MarketplaceMutationAdoptionBoundary;
@@ -344,6 +347,7 @@ class Harness implements
   humanMutations = 0;
   reviewClaimMutations = 0;
   nextCommentId = 9001;
+  clock: () => Date = () => new Date(NOW);
 
   constructor(workflow: MutationWorkflow = 'implement') {
     this.workflow = workflow;
@@ -424,6 +428,13 @@ class Harness implements
   async commit(input: MarketplaceMutationCommitIdentity) {
     if (this.gitState.status === 'committed') return this.gitState;
     expect(this.gitState.status).toBe('pending-change');
+    expect(new TextDecoder().decode(input.artifact)).toBe(PATCH);
+    expect(input.workflow).toBe(this.workflow);
+    expect(input.reconcileBase).toBe(
+      this.workflow === 'reconcile'
+        ? session('reconcile').taskSnapshot.baseSha
+        : undefined,
+    );
     this.commitMutations += 1;
     this.gitState = {
       status: 'committed',
@@ -439,7 +450,11 @@ class Harness implements
     return this.gitState;
   }
 
-  async verify(): Promise<MarketplaceMutationVerificationResult> {
+  async verify(
+    input: { readonly repositoryPath: string },
+  ): Promise<MarketplaceMutationVerificationResult> {
+    this.verificationRepositoryPaths.push(input.repositoryPath);
+    if (this.verificationError !== undefined) throw this.verificationError;
     const common = {
       profile: 'jinn-mono.v1' as const,
       workspaces: ['packages/autopilot'] as const,
@@ -522,6 +537,12 @@ class Harness implements
       if (this.child?.open === true) {
         this.childCloseMutations += 1;
         this.child = { ...this.child, open: false };
+        this.remoteHead = HOST_COMMIT;
+        this.prHead = HOST_COMMIT;
+        this.currentManifest = {
+          ...this.currentManifest,
+          expectedHead: HOST_COMMIT,
+        };
       }
       return { status: 'closed' };
     },
@@ -575,6 +596,7 @@ class Harness implements
     this.gitState = {
       status: 'pending-change',
       head: EXPECTED,
+      tree: HOST_TREE,
       changedPaths: ['value.txt'],
     };
     return { byteLength: new TextEncoder().encode(PATCH).byteLength, touchedPaths: ['value.txt'] };
@@ -599,7 +621,7 @@ class Harness implements
       receipts: this,
       manifestReceipts: this,
       applyPatch: () => this.applyPatch(),
-      now: () => new Date(NOW),
+      now: () => this.clock(),
       onBoundary: (boundary) => this.boundary(boundary),
     });
   }
@@ -643,15 +665,16 @@ describe('marketplace mutation adoption workflows', () => {
         resultingHead: COMPLETION,
         reviewGeneration: GENERATION,
         reviewRefOid: REVIEW_REF,
-      });
+    });
     expect(harness.receiptRecords).toHaveLength(1);
+    expect(harness.verificationRepositoryPaths).toEqual([WORKTREE]);
   });
 
   it.each([
     ['fix-child', 'review-finding'],
     ['reconcile', 'reconcile'],
     ['ci-failure', 'ci-failure'],
-  ] as const)('maps %s through checkpoint and child-complete', async (workflow, kind) => {
+  ] as const)('maps %s directly through child-complete', async (workflow, kind) => {
     const harness = new Harness(workflow);
 
     const result = await adopt(harness);
@@ -669,6 +692,7 @@ describe('marketplace mutation adoption workflows', () => {
       open: false,
     });
     expect(harness.completionMutations).toBe(0);
+    expect(harness.checkpointMutations).toBe(0);
     expect(harness.childCloseMutations).toBe(1);
   });
 
@@ -722,17 +746,23 @@ describe('marketplace mutation adoption rejection policy', () => {
     expect(harness.comments).toHaveLength(1);
   });
 
-  it('rejects when the verified-delivery port returns a different reference tuple', async () => {
+  it('fences a mismatched reference before reading malformed delivery payloads', async () => {
     const harness = new Harness();
+    harness.deliveryValue = {
+      ...harness.deliveryValue,
+      session: { malformed: true } as unknown as AutopilotSessionCapsule,
+      result: { malformed: true } as unknown as AutopilotMutationResult,
+    };
 
     await expect(harness.coordinator().adopt({
       ...harness.reference,
       requestId: 'different-request',
     })).resolves.toMatchObject({
-      status: 'rejected',
-      reason: 'correlation-mismatch',
+      status: 'recoverable',
+      stage: 'delivery-fence',
     });
     expect(harness.applyMutations).toBe(0);
+    expect(harness.comments).toHaveLength(0);
   });
 
   it('rejects an untrusted operator before effects', async () => {
@@ -838,6 +868,24 @@ describe('marketplace mutation adoption rejection policy', () => {
     expect(harness.checkpointMutations).toBe(0);
   });
 
+  it.each(['invalid-path', 'unsupported-path'] as const)(
+    'stably rejects deterministic verification planner error %s',
+    async (code) => {
+      const harness = new Harness();
+      harness.verificationError = new MarketplaceVerificationPlanError(
+        code,
+        `deterministic ${code}`,
+      );
+
+      await expect(adopt(harness)).resolves.toMatchObject({
+        status: 'rejected',
+        reason: 'invalid-artifact',
+        publication: 'published',
+      });
+      expect(harness.commitMutations).toBe(0);
+    },
+  );
+
   it('keeps infrastructure ambiguity recoverable and writes no receipt', async () => {
     const harness = new Harness();
     harness.readExactAuthority = async () => {
@@ -939,6 +987,31 @@ describe('marketplace mutation adoption crash recovery', () => {
     expect(harness.receiptRecords).toHaveLength(1);
   });
 
+  it('recovers the exact accepted receipt across a real-clock crash after comment write', async () => {
+    const harness = new Harness();
+    let tick = 0;
+    harness.clock = () => new Date(
+      tick++ === 0
+        ? '2026-07-24T12:00:00.000Z'
+        : '2026-07-24T12:05:00.000Z',
+    );
+    harness.crashCommentWrite = true;
+
+    await expect(adopt(harness)).resolves.toMatchObject({
+      status: 'recoverable',
+      detail: 'crash after comment write',
+    });
+    const durable =
+      parseAdoptionReceiptComment(harness.comments[0]!.body)!.receipt;
+    await expect(adopt(harness)).resolves.toMatchObject({
+      status: 'accepted',
+      publication: 'already-published',
+      receipt: { recordedAt: durable.recordedAt },
+    });
+    expect(harness.comments).toHaveLength(1);
+    expect(harness.receiptRecords).toEqual([durable]);
+  });
+
   it('recovers after the exact child was closed without closing it twice', async () => {
     const harness = new Harness('fix-child');
     harness.crashBoundary = 'completed';
@@ -951,6 +1024,7 @@ describe('marketplace mutation adoption crash recovery', () => {
       operation: 'child-complete',
     });
     expect(harness.childCloseMutations).toBe(1);
+    expect(harness.checkpointMutations).toBe(0);
     expect(harness.reviewClaimMutations).toBe(1);
     expect(harness.comments).toHaveLength(1);
   });

@@ -8,6 +8,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { encodeBranchClaimTrailers } from '../../src/lifecycle/codecs.js';
 import {
   defaultMarketplaceMutationGitRunner,
   formatMarketplaceMutationCommitMessage,
@@ -15,9 +16,19 @@ import {
   type MarketplaceMutationCommitIdentity,
   type MarketplaceMutationGitCommand,
 } from '../../src/lifecycle/marketplace-mutation-git.js';
-import { gitOid, type GitOid } from '../../src/lifecycle/types.js';
+import { gitOid, gitRefName, type GitOid } from '../../src/lifecycle/types.js';
 
 const directories: string[] = [];
+const PATCH_AFTER = [
+  'diff --git a/value.txt b/value.txt',
+  'index 1111111..2222222 100644',
+  '--- a/value.txt',
+  '+++ b/value.txt',
+  '@@ -1 +1 @@',
+  '-before',
+  '+after',
+  '',
+].join('\n');
 
 function git(cwd: string, args: readonly string[]): string {
   return execFileSync('git', [...args], { cwd, encoding: 'utf8' }).trim();
@@ -39,9 +50,11 @@ function identity(
   worktreePath: string,
   expectedHead: GitOid,
 ): MarketplaceMutationCommitIdentity {
-  return {
+  const value = {
     worktreePath,
     expectedHead,
+    artifact: new TextEncoder().encode(PATCH_AFTER),
+    workflow: 'implement' as const,
     touchedPaths: ['value.txt'],
     summary: 'Adopt the verified marketplace mutation.',
     taskId: 'task-501',
@@ -49,6 +62,7 @@ function identity(
     deliveryEnvelopeCid: 'bafybeimutation',
     v2AttemptId: '123e4567-e89b-42d3-a456-426614174000',
   };
+  return value;
 }
 
 afterEach(() => {
@@ -157,6 +171,19 @@ describe('makeMarketplaceMutationGitPort', () => {
     });
   });
 
+  it('fails closed when the paths match but the tree differs from the delivered patch', async () => {
+    const fixture = repository();
+    writeFileSync(join(fixture.path, 'value.txt'), 'forged\n');
+    const port = makeMarketplaceMutationGitPort({
+      runGit: defaultMarketplaceMutationGitRunner,
+    });
+
+    await expect(port.readState(identity(fixture.path, fixture.head))).resolves.toEqual({
+      status: 'contradiction',
+      detail: 'Worktree tree does not match the delivered patch',
+    });
+  });
+
   it('fails closed when HEAD has matching paths but different evidence trailers', async () => {
     const fixture = repository();
     writeFileSync(join(fixture.path, 'value.txt'), 'foreign\n');
@@ -172,7 +199,7 @@ describe('makeMarketplaceMutationGitPort', () => {
     });
   });
 
-  it('reconstructs the host commit beneath one protocol completion marker', async () => {
+  it('rejects an arbitrary commit above the exact host commit', async () => {
     const fixture = repository();
     const input = identity(fixture.path, fixture.head);
     writeFileSync(join(fixture.path, 'value.txt'), 'after\n');
@@ -184,9 +211,81 @@ describe('makeMarketplaceMutationGitPort', () => {
     const completionHead = gitOid(git(fixture.path, ['rev-parse', 'HEAD']));
 
     await expect(port.readState(input)).resolves.toEqual({
+      status: 'contradiction',
+      detail: 'Local HEAD is not the exact marketplace host commit',
+    });
+    expect(completionHead).not.toBe(committed.head);
+  });
+
+  it('reconstructs beneath the exact validated implementation completion claim', async () => {
+    const fixture = repository();
+    const baseInput = identity(fixture.path, fixture.head);
+    writeFileSync(join(fixture.path, 'value.txt'), 'after\n');
+    const port = makeMarketplaceMutationGitPort({
+      runGit: defaultMarketplaceMutationGitRunner,
+    });
+    const committed = await port.commit(baseInput);
+    const completionClaim = {
+      kind: 'branch-claim',
+      protocolVersion: 2,
+      phase: 'implement',
+      issueNumber: 501,
+      prNumber: 2101,
+      attempt: baseInput.v2AttemptId,
+      runner: 'runner-1',
+      login: 'jinn-autopilot',
+      expectedHead: committed.head,
+      targetBase: gitRefName('next'),
+      claimedAt: '2026-07-24T12:00:00.000Z',
+      phaseComplete: true,
+    } as const;
+    const message = [
+      'Autopilot implementation phase complete',
+      '',
+      baseInput.summary,
+      '',
+      encodeBranchClaimTrailers(completionClaim),
+    ].join('\n');
+    git(fixture.path, ['commit', '--allow-empty', '-qm', message]);
+    const completionHead = gitOid(git(fixture.path, ['rev-parse', 'HEAD']));
+    const input = {
+      ...baseInput,
+      protocolCompletion: {
+        head: completionHead,
+        claim: completionClaim,
+      },
+    };
+
+    await expect(port.readState(input)).resolves.toEqual({
       ...committed,
       localHead: completionHead,
     });
+  });
+
+  it('creates a reconcile merge with the target base as its second parent', async () => {
+    const fixture = repository();
+    git(fixture.path, ['checkout', '-qb', 'target-base']);
+    writeFileSync(join(fixture.path, 'base.txt'), 'target base\n');
+    git(fixture.path, ['add', 'base.txt']);
+    git(fixture.path, ['commit', '-qm', 'target base']);
+    const reconcileBase = gitOid(git(fixture.path, ['rev-parse', 'HEAD']));
+    git(fixture.path, ['checkout', '-q', '-']);
+    writeFileSync(join(fixture.path, 'value.txt'), 'after\n');
+    const input = {
+      ...identity(fixture.path, fixture.head),
+      workflow: 'reconcile' as const,
+      reconcileBase,
+      childIssueNumber: 701,
+    };
+    const port = makeMarketplaceMutationGitPort({
+      runGit: defaultMarketplaceMutationGitRunner,
+    });
+
+    const committed = await port.commit(input);
+
+    expect(git(fixture.path, ['show', '-s', '--format=%P', committed.head]).split(' '))
+      .toEqual([fixture.head, reconcileBase]);
+    await expect(port.readState(input)).resolves.toEqual(committed);
   });
 
   it('propagates runner ambiguity instead of converting it to a rejection state', async () => {

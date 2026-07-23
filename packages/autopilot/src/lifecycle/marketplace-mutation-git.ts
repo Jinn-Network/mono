@@ -1,7 +1,14 @@
 import { Buffer } from 'node:buffer';
 import { spawn } from 'node:child_process';
-import { isAbsolute } from 'node:path';
-import { gitOid, type GitOid } from './types.js';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { isAbsolute, join } from 'node:path';
+import {
+  decodeBranchClaimTrailers,
+  extractImplementationCompletionSummary,
+  terminalBranchClaimTrailers,
+} from './codecs.js';
+import { gitOid, type BranchClaim, type GitOid } from './types.js';
 
 const MAX_GIT_STDOUT_BYTES = 8 * 1024 * 1024;
 const MAX_GIT_STDERR_BYTES = 64 * 1024;
@@ -10,6 +17,8 @@ const GIT_COMMAND_TIMEOUT_MS = 60_000;
 export interface MarketplaceMutationCommitIdentity {
   readonly worktreePath: string;
   readonly expectedHead: GitOid;
+  readonly artifact: Uint8Array;
+  readonly workflow: 'implement' | 'fix-child' | 'reconcile' | 'ci-failure';
   readonly touchedPaths: readonly string[];
   readonly summary: string;
   readonly taskId: string;
@@ -17,6 +26,14 @@ export interface MarketplaceMutationCommitIdentity {
   readonly deliveryEnvelopeCid: string;
   readonly v2AttemptId: string;
   readonly childIssueNumber?: number;
+  readonly reconcileBase?: GitOid;
+  readonly protocolCompletion?: {
+    readonly head: GitOid;
+    readonly claim: BranchClaim & {
+      readonly phase: 'implement';
+      readonly phaseComplete: true;
+    };
+  };
 }
 
 export interface MarketplaceMutationGitCommand {
@@ -24,6 +41,7 @@ export interface MarketplaceMutationGitCommand {
   readonly args: readonly string[];
   readonly cwd: string;
   readonly stdin?: Uint8Array;
+  readonly environment?: Readonly<Record<string, string>>;
 }
 
 export interface MarketplaceMutationGitCommandResult {
@@ -44,6 +62,7 @@ export type MarketplaceMutationGitState =
   | {
       readonly status: 'pending-change';
       readonly head: GitOid;
+      readonly tree: GitOid;
       readonly changedPaths: readonly string[];
     }
   | {
@@ -161,6 +180,96 @@ function samePaths(left: readonly string[], right: readonly string[]): boolean {
     && left.every((path, index) => path === right[index]);
 }
 
+function validateCommitTopology(input: MarketplaceMutationCommitIdentity): void {
+  if (input.artifact.byteLength === 0) {
+    throw new Error('Marketplace commit requires the delivered patch');
+  }
+  if (
+    input.workflow === 'reconcile'
+      ? input.reconcileBase === undefined
+      : input.reconcileBase !== undefined
+  ) {
+    throw new Error('Marketplace reconcile topology is incomplete');
+  }
+  if (
+    input.protocolCompletion !== undefined
+    && input.workflow !== 'implement'
+  ) {
+    throw new Error('Only implementation may carry a completion marker');
+  }
+}
+
+async function withTemporaryIndex<T>(
+  operation: (environment: Readonly<Record<string, string>>) => Promise<T>,
+): Promise<T> {
+  const directory = await mkdtemp(
+    join(tmpdir(), 'jinn-marketplace-mutation-index-'),
+  );
+  try {
+    return await operation({
+      GIT_INDEX_FILE: join(directory, 'index'),
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+async function expectedTreeFromArtifact(
+  input: MarketplaceMutationCommitIdentity,
+  runGit: MarketplaceMutationGitRunner,
+): Promise<GitOid> {
+  return withTemporaryIndex(async (environment) => {
+    await runSuccessful(runGit, {
+      command: 'git',
+      args: ['read-tree', input.expectedHead],
+      cwd: input.worktreePath,
+      environment,
+    });
+    await runSuccessful(runGit, {
+      command: 'git',
+      args: ['apply', '--cached', '--whitespace=nowarn', '--'],
+      cwd: input.worktreePath,
+      stdin: input.artifact,
+      environment,
+    });
+    const tree = await runSuccessful(runGit, {
+      command: 'git',
+      args: ['write-tree'],
+      cwd: input.worktreePath,
+      environment,
+    });
+    return gitOid(outputText(tree).trim());
+  });
+}
+
+async function worktreeTree(
+  input: MarketplaceMutationCommitIdentity,
+  paths: readonly string[],
+  runGit: MarketplaceMutationGitRunner,
+): Promise<GitOid> {
+  return withTemporaryIndex(async (environment) => {
+    await runSuccessful(runGit, {
+      command: 'git',
+      args: ['read-tree', input.expectedHead],
+      cwd: input.worktreePath,
+      environment,
+    });
+    await runSuccessful(runGit, {
+      command: 'git',
+      args: ['add', '--all', '--', ...paths],
+      cwd: input.worktreePath,
+      environment,
+    });
+    const tree = await runSuccessful(runGit, {
+      command: 'git',
+      args: ['write-tree'],
+      cwd: input.worktreePath,
+      environment,
+    });
+    return gitOid(outputText(tree).trim());
+  });
+}
+
 async function currentChangedPaths(
   input: MarketplaceMutationCommitIdentity,
   runGit: MarketplaceMutationGitRunner,
@@ -193,6 +302,90 @@ async function readHead(
   return gitOid(outputText(result).trim());
 }
 
+function expectedParents(
+  input: MarketplaceMutationCommitIdentity,
+): readonly GitOid[] {
+  return input.workflow === 'reconcile'
+    ? [input.expectedHead, input.reconcileBase!]
+    : [input.expectedHead];
+}
+
+function sameClaim(
+  expected: BranchClaim,
+  actual: BranchClaim,
+): boolean {
+  return expected.kind === actual.kind
+    && expected.protocolVersion === actual.protocolVersion
+    && expected.phase === actual.phase
+    && expected.issueNumber === actual.issueNumber
+    && expected.prNumber === actual.prNumber
+    && expected.attempt === actual.attempt
+    && expected.runner === actual.runner
+    && expected.login.toLowerCase() === actual.login.toLowerCase()
+    && expected.expectedHead === actual.expectedHead
+    && expected.targetBase === actual.targetBase
+    && expected.claimedAt === actual.claimedAt
+    && expected.phaseComplete === actual.phaseComplete;
+}
+
+async function exactProtocolCompletionParent(
+  input: MarketplaceMutationCommitIdentity,
+  head: GitOid,
+  runGit: MarketplaceMutationGitRunner,
+): Promise<GitOid | null> {
+  const completion = input.protocolCompletion;
+  if (completion === undefined || completion.head !== head) return null;
+  const [parentsResult, messageResult, treeResult] = await Promise.all([
+    runSuccessful(runGit, {
+      command: 'git',
+      args: ['rev-list', '--parents', '-n', '1', 'HEAD'],
+      cwd: input.worktreePath,
+    }),
+    runSuccessful(runGit, {
+      command: 'git',
+      args: ['show', '-s', '--format=%B', 'HEAD'],
+      cwd: input.worktreePath,
+    }),
+    runSuccessful(runGit, {
+      command: 'git',
+      args: ['rev-parse', '--verify', 'HEAD^{tree}'],
+      cwd: input.worktreePath,
+    }),
+  ]);
+  const commitLine = outputText(parentsResult).trim().split(/\s+/);
+  if (commitLine.length !== 2 || commitLine[0] !== head) return null;
+  const parent = gitOid(commitLine[1]!);
+  const message = outputText(messageResult);
+  const trailers = terminalBranchClaimTrailers(message);
+  if (trailers === null) return null;
+  let claim: BranchClaim;
+  let summary: string | null;
+  try {
+    claim = decodeBranchClaimTrailers(trailers);
+    summary = extractImplementationCompletionSummary(message, trailers);
+  } catch {
+    return null;
+  }
+  if (
+    summary?.trim() !== input.summary.trim()
+    || !sameClaim(completion.claim, claim)
+    || claim.phase !== 'implement'
+    || claim.phaseComplete !== true
+    || claim.expectedHead !== parent
+  ) {
+    return null;
+  }
+  const parentTree = await runSuccessful(runGit, {
+    command: 'git',
+    args: ['rev-parse', '--verify', `${parent}^{tree}`],
+    cwd: input.worktreePath,
+  });
+  if (outputText(treeResult).trim() !== outputText(parentTree).trim()) {
+    return null;
+  }
+  return parent;
+}
+
 async function readCommittedState(
   input: MarketplaceMutationCommitIdentity,
   head: GitOid,
@@ -201,10 +394,11 @@ async function readCommittedState(
   expectedPaths: readonly string[],
   runGit: MarketplaceMutationGitRunner,
 ): Promise<MarketplaceMutationGitState> {
+  const expectedTree = await expectedTreeFromArtifact(input, runGit);
   const results = await Promise.all([
     runSuccessful(runGit, {
       command: 'git',
-      args: ['rev-parse', '--verify', `${revision}^`],
+      args: ['rev-list', '--parents', '-n', '1', revision],
       cwd: input.worktreePath,
     }),
     runSuccessful(runGit, {
@@ -220,24 +414,30 @@ async function readCommittedState(
     runSuccessful(runGit, {
       command: 'git',
       args: [
-        'diff-tree',
-        '--no-commit-id',
+        'diff',
         '--name-only',
         '--no-renames',
-        '-r',
         '-z',
+        input.expectedHead,
         revision,
+        '--',
       ],
       cwd: input.worktreePath,
     }),
   ]);
-  const [parentResult, treeResult, messageResult, pathsResult] = results;
-  const parent = gitOid(outputText(parentResult).trim());
+  const [parentsResult, treeResult, messageResult, pathsResult] = results;
+  const commitLine = outputText(parentsResult).trim().split(/\s+/);
+  const commit = gitOid(commitLine[0]!);
+  const parents = commitLine.slice(1).map((value) => gitOid(value));
+  const parent = parents[0];
   const tree = gitOid(outputText(treeResult).trim());
   const message = outputText(messageResult).trimEnd();
   const changedPaths = parseNulPaths(pathsResult.stdout);
   if (
-    parent !== input.expectedHead
+    commit !== head
+    || parent === undefined
+    || !samePaths(parents, expectedParents(input))
+    || tree !== expectedTree
     || message !== formatMarketplaceMutationCommitMessage(input).trimEnd()
     || !samePaths(changedPaths, expectedPaths)
     || (await currentChangedPaths(input, runGit)).length !== 0
@@ -262,6 +462,7 @@ export function makeMarketplaceMutationGitPort(options: {
 }): MarketplaceMutationGitPort {
   return {
     async readState(input) {
+      validateCommitTopology(input);
       const expectedPaths = normalizedTouchedPaths(input.touchedPaths);
       const head = await readHead(input, options.runGit);
       if (head !== input.expectedHead) {
@@ -274,13 +475,12 @@ export function makeMarketplaceMutationGitPort(options: {
           options.runGit,
         );
         if (direct.status === 'committed') return direct;
-        const parent = await runSuccessful(options.runGit, {
-          command: 'git',
-          args: ['rev-parse', '--verify', 'HEAD^'],
-          cwd: input.worktreePath,
-        });
-        const parentHead = gitOid(outputText(parent).trim());
-        if (parentHead === input.expectedHead) return direct;
+        const parentHead = await exactProtocolCompletionParent(
+          input,
+          head,
+          options.runGit,
+        );
+        if (parentHead === null) return direct;
         return readCommittedState(
           input,
           parentHead,
@@ -298,7 +498,22 @@ export function makeMarketplaceMutationGitPort(options: {
           detail: 'Worktree changes are not exactly the delivered patch paths',
         };
       }
-      return { status: 'pending-change', head, changedPaths };
+      const [expectedTree, candidateTree] = await Promise.all([
+        expectedTreeFromArtifact(input, options.runGit),
+        worktreeTree(input, expectedPaths, options.runGit),
+      ]);
+      if (candidateTree !== expectedTree) {
+        return {
+          status: 'contradiction',
+          detail: 'Worktree tree does not match the delivered patch',
+        };
+      }
+      return {
+        status: 'pending-change',
+        head,
+        tree: candidateTree,
+        changedPaths,
+      };
     },
 
     async commit(input) {
@@ -332,12 +547,58 @@ export function makeMarketplaceMutationGitPort(options: {
           cwd: input.worktreePath,
         }, staged);
       }
-      await runSuccessful(options.runGit, {
+      const stagedTree = await runSuccessful(options.runGit, {
         command: 'git',
-        args: ['commit', '--no-verify', '--file=-'],
+        args: ['write-tree'],
         cwd: input.worktreePath,
-        stdin: new TextEncoder().encode(formatMarketplaceMutationCommitMessage(input)),
       });
+      if (gitOid(outputText(stagedTree).trim()) !== state.tree) {
+        throw new Error('Staged tree differs from the delivered patch');
+      }
+      if (input.workflow === 'reconcile') {
+        const base = await runSuccessful(options.runGit, {
+          command: 'git',
+          args: [
+            'rev-parse',
+            '--verify',
+            `${input.reconcileBase!}^{commit}`,
+          ],
+          cwd: input.worktreePath,
+        });
+        if (gitOid(outputText(base).trim()) !== input.reconcileBase) {
+          throw new Error('Reconcile base commit changed');
+        }
+        const created = await runSuccessful(options.runGit, {
+          command: 'git',
+          args: [
+            'commit-tree',
+            state.tree,
+            '-p',
+            input.expectedHead,
+            '-p',
+            input.reconcileBase!,
+          ],
+          cwd: input.worktreePath,
+          stdin: new TextEncoder().encode(
+            formatMarketplaceMutationCommitMessage(input),
+          ),
+        });
+        const commit = gitOid(outputText(created).trim());
+        await runSuccessful(options.runGit, {
+          command: 'git',
+          args: ['update-ref', 'HEAD', commit, input.expectedHead],
+          cwd: input.worktreePath,
+        });
+      } else {
+        await runSuccessful(options.runGit, {
+          command: 'git',
+          args: ['commit', '--no-verify', '--file=-'],
+          cwd: input.worktreePath,
+          stdin: new TextEncoder().encode(
+            formatMarketplaceMutationCommitMessage(input),
+          ),
+        });
+      }
       const committed = await this.readState(input);
       if (committed.status !== 'committed') {
         throw new Error('Marketplace host commit did not reconstruct after creation');
@@ -352,6 +613,9 @@ export const defaultMarketplaceMutationGitRunner: MarketplaceMutationGitRunner =
 ) => new Promise((resolve, reject) => {
   const child = spawn(command.command, [...command.args], {
     cwd: command.cwd,
+    env: command.environment === undefined
+      ? process.env
+      : { ...process.env, ...command.environment },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   const stdout: Buffer[] = [];

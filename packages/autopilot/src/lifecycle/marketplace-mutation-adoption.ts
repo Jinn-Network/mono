@@ -19,6 +19,7 @@ import type { ImplementationSessionProtocol } from './implementation-session.js'
 import {
   AdoptionReceiptPublicationError,
   publishAdoptionReceipt,
+  readAdoptionReceiptState,
   type AdoptionReceiptExactFacts,
   type AdoptionReceiptPorts,
   type PublishAdoptionReceiptResult,
@@ -39,7 +40,9 @@ import type {
 } from './marketplace-mutation-git.js';
 import {
   JINN_MONO_VERIFICATION_PROFILE,
+  MarketplaceVerificationPlanError,
   type MarketplaceMutationVerificationPort,
+  type MarketplaceMutationVerificationResult,
 } from './marketplace-mutation-verification.js';
 import type { BranchClaim, GitOid } from './types.js';
 
@@ -410,6 +413,16 @@ function pureValidateDelivery(
   }
 }
 
+function deliveryMatchesReference(
+  reference: MarketplaceMutationDeliveryReference,
+  delivery: VerifiedMarketplaceSolutionDelivery,
+): boolean {
+  return reference.taskId === delivery.task.id
+    && reference.attemptIndex === delivery.attempt.index
+    && reference.requestId === delivery.request.id
+    && reference.deliveryEnvelopeCid === delivery.envelope.cid;
+}
+
 function workflowClaimPhase(
   workflow: AutopilotWorkflow,
 ): BranchClaim['phase'] {
@@ -624,11 +637,7 @@ async function publishReceipt(
   session: AutopilotSessionCapsule,
   ports: AdoptionReceiptPorts,
 ): Promise<PublishAdoptionReceiptResult> {
-  const exactFacts: AdoptionReceiptExactFacts = {
-    role: 'solution',
-    correlation: receiptCorrelation(receipt),
-    prHead: receipt.resultingHead ?? receipt.expectedHead,
-  };
+  const exactFacts = receiptExactFacts(receipt);
   return publishAdoptionReceipt({
     receipt,
     exactFacts,
@@ -636,6 +645,51 @@ async function publishReceipt(
     allowedAuthors: session.receiptAuthors,
     publisherLogin: authority.publisherLogin,
   }, ports);
+}
+
+function receiptExactFacts(
+  receipt: AutopilotAdoptionReceipt,
+): AdoptionReceiptExactFacts {
+  return {
+    role: 'solution',
+    correlation: receiptCorrelation(receipt),
+    prHead: receipt.resultingHead ?? receipt.expectedHead,
+  };
+}
+
+function sameReceiptWithoutTimestamp(
+  left: AutopilotAdoptionReceipt,
+  right: AutopilotAdoptionReceipt,
+): boolean {
+  const stable = (receipt: AutopilotAdoptionReceipt) =>
+    Object.fromEntries(
+      Object.entries(receipt).filter(([key]) => key !== 'recordedAt'),
+    );
+  return JSON.stringify(stable(left)) === JSON.stringify(stable(right));
+}
+
+async function recoverDurableReceipt(
+  candidate: AutopilotAdoptionReceipt,
+  session: AutopilotSessionCapsule,
+  ports: AdoptionReceiptPorts,
+): Promise<AutopilotAdoptionReceipt> {
+  const state = await readAdoptionReceiptState(
+    receiptExactFacts(candidate),
+    session.receiptAuthors,
+    ports,
+  );
+  if (
+    (
+      candidate.disposition === 'accepted'
+        ? state.status === 'exact-accepted'
+        : state.status === 'exact-rejected'
+    )
+    && 'receipt' in state
+    && sameReceiptWithoutTimestamp(candidate, state.receipt)
+  ) {
+    return state.receipt;
+  }
+  return candidate;
 }
 
 async function persistReceipt(
@@ -693,12 +747,12 @@ async function stableReject(
       deps,
     );
   }
-  const receipt = rejectedReceipt(
+  const receipt = await recoverDurableReceipt(rejectedReceipt(
     parsed,
     failure,
     deps.now ?? (() => new Date()),
     extras,
-  );
+  ), parsed.session, deps.receipts);
   try {
     const publication = await publishReceipt(
       receipt,
@@ -712,7 +766,7 @@ async function stableReject(
       status: 'rejected',
       reason: failure.reason,
       detail: failure.detail,
-      receipt,
+      receipt: publication.receipt,
       publication: publicationStatus(publication),
     };
   } catch (error) {
@@ -815,6 +869,22 @@ async function readAuthority(
   });
 }
 
+function currentProtocolCompletion(
+  authority: MarketplaceMutationAuthority,
+): MarketplaceMutationCommitIdentity['protocolCompletion'] {
+  const claim = authority.latestClaim;
+  if (claim.phase !== 'implement' || claim.phaseComplete !== true) {
+    return undefined;
+  }
+  return {
+    head: authority.latestClaimOid,
+    claim: {
+      ...claim,
+      phaseComplete: true,
+    },
+  };
+}
+
 async function adoptParsed(
   validation: PureValidation,
   deps: MarketplaceMutationAdoptionDependencies,
@@ -857,9 +927,12 @@ async function adoptParsed(
   const childIssueNumber = parsed.session.workflow === 'implement'
     ? undefined
     : parsed.session.childIssueNumber;
+  const protocolCompletion = currentProtocolCompletion(authority);
   const commitIdentity: MarketplaceMutationCommitIdentity = {
     worktreePath: authority.manifest.paths.worktree,
     expectedHead: parsed.session.expectedHead as GitOid,
+    artifact,
+    workflow: parsed.session.workflow,
     touchedPaths: patch.touchedPaths,
     summary: parsed.result.summary,
     taskId: parsed.delivery.task.id,
@@ -867,6 +940,12 @@ async function adoptParsed(
     deliveryEnvelopeCid: parsed.delivery.envelope.cid,
     v2AttemptId: parsed.session.v2AttemptId,
     ...(childIssueNumber === undefined ? {} : { childIssueNumber }),
+    ...(parsed.session.workflow === 'reconcile'
+      ? { reconcileBase: parsed.session.taskSnapshot.baseSha as GitOid }
+      : {}),
+    ...(protocolCompletion === undefined
+      ? {}
+      : { protocolCompletion }),
   };
 
   let gitState = await deps.git.readState(commitIdentity);
@@ -943,11 +1022,25 @@ async function adoptParsed(
     }, authority, deps);
   }
   if (gitState.status === 'pending-change') {
-    const verification = await deps.verification.verify({
-      profile: JINN_MONO_VERIFICATION_PROFILE,
-      repositoryPath: authority.manifest.repository.root,
-      touchedPaths: patch.touchedPaths,
-    });
+    let verification: MarketplaceMutationVerificationResult;
+    try {
+      verification = await deps.verification.verify({
+        profile: JINN_MONO_VERIFICATION_PROFILE,
+        repositoryPath: authority.manifest.paths.worktree,
+        touchedPaths: patch.touchedPaths,
+      });
+    } catch (error) {
+      if (
+        error instanceof MarketplaceVerificationPlanError
+        && (error.code === 'invalid-path' || error.code === 'unsupported-path')
+      ) {
+        return stableReject(parsed, {
+          reason: 'invalid-artifact',
+          detail: error.message,
+        }, authority, deps);
+      }
+      throw error;
+    }
     if (verification.status === 'failed') {
       return stableReject(parsed, {
         reason: 'verification-failed',
@@ -967,20 +1060,22 @@ async function adoptParsed(
   const hostCommit = gitState;
 
   authority = await readAuthority(parsed, deps);
-  if (authority.latestClaim.phaseComplete !== true) {
-    const checkpoint = await deps.implementation.checkpoint(authority.manifest);
-    if (checkpoint.status === 'stale') {
-      return stableReject(parsed, {
-        reason: 'stale-head',
-        detail: 'Checkpoint lost the exact head fence',
-      }, authority, deps);
+  if (parsed.session.workflow === 'implement') {
+    if (authority.latestClaim.phaseComplete !== true) {
+      const checkpoint = await deps.implementation.checkpoint(authority.manifest);
+      if (checkpoint.status === 'stale') {
+        return stableReject(parsed, {
+          reason: 'stale-head',
+          detail: 'Checkpoint lost the exact head fence',
+        }, authority, deps);
+      }
+      if (checkpoint.status === 'ambiguous') {
+        throw new Error('Checkpoint publication is ambiguous');
+      }
     }
-    if (checkpoint.status === 'ambiguous') {
-      throw new Error('Checkpoint publication is ambiguous');
-    }
+    await deps.onBoundary?.('checkpointed');
+    authority = await readAuthority(parsed, deps);
   }
-  await deps.onBoundary?.('checkpointed');
-  authority = await readAuthority(parsed, deps);
 
   let resultingHead: GitOid;
   let operation: MarketplaceMutationAdoptionOperation;
@@ -1097,17 +1192,21 @@ async function adoptParsed(
     }, authority, deps, { resultingHead, reviewClaim });
   }
 
-  const receipt = AutopilotAdoptionReceiptSchema.parse({
-    schemaVersion: 'jinn-autopilot-marketplace-adoption.v1',
-    disposition: 'accepted',
-    role: 'solution',
-    operation,
-    ...parsed.correlation,
-    resultingHead,
-    reviewGeneration: reviewClaim.generation,
-    reviewRefOid: reviewClaim.refOid,
-    recordedAt: (deps.now ?? (() => new Date()))().toISOString(),
-  });
+  const receipt = await recoverDurableReceipt(
+    AutopilotAdoptionReceiptSchema.parse({
+      schemaVersion: 'jinn-autopilot-marketplace-adoption.v1',
+      disposition: 'accepted',
+      role: 'solution',
+      operation,
+      ...parsed.correlation,
+      resultingHead,
+      reviewGeneration: reviewClaim.generation,
+      reviewRefOid: reviewClaim.refOid,
+      recordedAt: (deps.now ?? (() => new Date()))().toISOString(),
+    }),
+    parsed.session,
+    deps.receipts,
+  );
   let publication: PublishAdoptionReceiptResult;
   try {
     publication = await publishReceipt(
@@ -1180,27 +1279,14 @@ export function makeMarketplaceMutationAdoptionCoordinator(
       let stage = 'delivery-read';
       try {
         const delivery = await deps.deliveries.readVerifiedSolutionDelivery(reference);
-        stage = 'pure-validation';
-        let validation = pureValidateDelivery(delivery);
-        if (
-          validation.ok
-          && (
-            reference.taskId !== delivery.task.id
-            || reference.attemptIndex !== delivery.attempt.index
-            || reference.requestId !== delivery.request.id
-            || reference.deliveryEnvelopeCid !== delivery.envelope.cid
-          )
-        ) {
-          validation = {
-            ok: false,
-            parsed: validation.parsed,
-            failure: {
-              reason: 'correlation-mismatch',
-              detail:
-                'Verified delivery does not match the requested delivery tuple',
-            },
-          };
+        stage = 'delivery-fence';
+        if (!deliveryMatchesReference(reference, delivery)) {
+          throw new Error(
+            'Verified delivery does not match the requested delivery tuple',
+          );
         }
+        stage = 'pure-validation';
+        const validation = pureValidateDelivery(delivery);
         stage = 'adoption';
         return await adoptParsed(validation, deps);
       } catch (error) {
