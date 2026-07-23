@@ -103,6 +103,9 @@ def _park_contribution_publication() -> None:
 
 def _reset_session_state() -> None:
     with _session_state_lock:
+        closed_lifecycles = list(
+            _session_lifecycle_tokens.items()
+        )
         _session_states.clear()
         _session_lifecycle_tokens.clear()
         _session_state_tokens.clear()
@@ -110,6 +113,12 @@ def _reset_session_state() -> None:
         _pickup_checkpoints.clear()
     with _internal_session_lock:
         _internal_sessions.clear()
+    for session_id, lifecycle_token in closed_lifecycles:
+        buf.discard_session(
+            session_id,
+            lifecycle_token=lifecycle_token,
+            include_legacy=True,
+        )
 
 
 def _user_line(msg: str) -> None:
@@ -457,6 +466,7 @@ def _pop_state(
     close_lifecycle: bool = False,
 ) -> Dict[str, Any]:
     key = session_id or "default"
+    lifecycle_token = None
     with _session_state_lock:
         _session_state_tokens.pop(key, None)
         state = _session_states.pop(
@@ -469,9 +479,18 @@ def _pop_state(
         )
         if close_lifecycle:
             _pickup_checkpoints.pop(key, None)
-            _session_lifecycle_tokens.pop(key, None)
+            lifecycle_token = _session_lifecycle_tokens.pop(
+                key,
+                None,
+            )
             _discard_turn_lifecycle_owners_locked(key)
-        return state
+    if close_lifecycle:
+        buf.discard_session(
+            key,
+            lifecycle_token=lifecycle_token,
+            include_legacy=True,
+        )
+    return state
 
 
 def _peek_state(session_id: str) -> Dict[str, Any]:
@@ -675,15 +694,25 @@ def _merge_pickup_deliveries(
                 delivered.append(episode_id)
 
 
-def _close_session_lifecycle(session_id: str) -> None:
+def _close_session_lifecycle(
+    session_id: str,
+) -> Optional[_SessionLifecycleToken]:
     """Atomically invalidate and remove all host-owned session control state."""
     key = session_id or "default"
     with _session_state_lock:
         _session_states.pop(key, None)
         _session_state_tokens.pop(key, None)
         _pickup_checkpoints.pop(key, None)
-        _session_lifecycle_tokens.pop(key, None)
+        lifecycle_token = _session_lifecycle_tokens.pop(key, None)
         _discard_turn_lifecycle_owners_locked(key)
+        return (
+            lifecycle_token
+            if isinstance(
+                lifecycle_token,
+                _SessionLifecycleToken,
+            )
+            else None
+        )
 
 
 def _record_activity(session_id: str, field: str, refs: list[str]) -> None:
@@ -748,10 +777,19 @@ def _on_session_finalize(session_id: str = "", **_: Any) -> None:
         session_id or "default",
         *_release_all_internal_sessions(session_id or "default"),
     ]
-    for owned_session_id in owned_session_ids:
-        _close_session_lifecycle(owned_session_id)
-    for owned_session_id in owned_session_ids:
-        buf.discard_session(owned_session_id)
+    closed_lifecycles = [
+        (
+            owned_session_id,
+            _close_session_lifecycle(owned_session_id),
+        )
+        for owned_session_id in owned_session_ids
+    ]
+    for owned_session_id, lifecycle_token in closed_lifecycles:
+        buf.discard_session(
+            owned_session_id,
+            lifecycle_token=lifecycle_token,
+            include_legacy=True,
+        )
 
 
 def _on_pre_llm_call(

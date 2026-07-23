@@ -20,6 +20,7 @@ from . import harness as _harness
 
 _lock = threading.Lock()
 _buffers: Dict[object, Dict[str, Any]] = {}
+_ALL_LIFECYCLES = object()
 
 
 def _session_key(task_id: str, session_id: str) -> str:
@@ -278,10 +279,30 @@ def discard(
         )
 
 
-def discard_session(session_id: str) -> None:
-    """Drop capture entries for every lifecycle owned by a host session."""
+def discard_session(
+    session_id: str,
+    *,
+    lifecycle_token: object = _ALL_LIFECYCLES,
+    include_legacy: bool = False,
+) -> None:
+    """Drop capture owned by one lifecycle, or every lifecycle for legacy callers.
+
+    Passing ``lifecycle_token`` targets only that token-owned buffer. The
+    optional tokenless legacy entry is a separate exact key, so cleanup for a
+    closed lifecycle can never delete a freshly reopened token-owned buffer.
+    Omitting the token preserves the standalone legacy API's session-wide
+    behavior.
+    """
     session_key = _session_key("", session_id)
     with _lock:
+        if lifecycle_token is not _ALL_LIFECYCLES:
+            _buffers.pop(
+                _key("", session_id, lifecycle_token),
+                None,
+            )
+            if include_legacy:
+                _buffers.pop(session_key, None)
+            return
         for key in list(_buffers):
             key_session = key[0] if isinstance(key, tuple) else key
             if key_session == session_key:

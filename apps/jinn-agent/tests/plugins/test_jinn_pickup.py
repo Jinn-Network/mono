@@ -1499,11 +1499,17 @@ def test_finalize_closes_control_state_atomically_before_capture_cleanup(
         assert release_capture.wait(timeout=2)
         return original_record_first_turn(*args, **kwargs)
 
-    def blocking_finalize_discard(discarded_session_id):
+    def blocking_finalize_discard(
+        discarded_session_id,
+        **kwargs,
+    ):
         if threading.current_thread().name == "finalizer":
             capture_cleanup_started.set()
             assert release_capture_cleanup.wait(timeout=2)
-        original_discard_session(discarded_session_id)
+        original_discard_session(
+            discarded_session_id,
+            **kwargs,
+        )
 
     def run_pre_hook():
         try:
@@ -1562,6 +1568,148 @@ def test_finalize_closes_control_state_atomically_before_capture_cleanup(
         for call in runner.calls
         if call[0][1:3] == ["session", "pickup"]
     ] == []
+
+
+def test_old_finalize_capture_cleanup_preserves_fresh_same_id_lifecycle(
+    monkeypatch,
+):
+    session_id = "finalize-capture-same-id-reopen"
+    cleanup_started = threading.Event()
+    release_cleanup = threading.Event()
+    finalizer_errors = []
+    background_review = [False]
+    original_discard_session = jinn.buf.discard_session
+
+    monkeypatch.setattr(
+        jinn,
+        "is_background_review",
+        lambda: background_review[0],
+    )
+
+    def blocking_discard_session(
+        discarded_session_id,
+        **kwargs,
+    ):
+        if (
+            threading.current_thread().name == "old-finalizer"
+            and not cleanup_started.is_set()
+        ):
+            cleanup_started.set()
+            assert release_cleanup.wait(timeout=2)
+        original_discard_session(
+            discarded_session_id,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        jinn.buf,
+        "discard_session",
+        blocking_discard_session,
+    )
+
+    runner = PickupRunner()
+    jinn._runner = runner
+    finalizer = None
+    try:
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="old-parent-task",
+            turn_id="old-parent-turn",
+            user_message="old parent capture",
+            is_first_turn=True,
+        )
+        old_parent_token = (
+            jinn._current_session_lifecycle_token(session_id)
+        )
+
+        background_review[0] = True
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="old-internal-task",
+            turn_id="old-internal-turn",
+            user_message="old internal capture",
+            is_first_turn=True,
+        )
+        old_internal_session_id = next(
+            logical
+            for (parent, _thread_id), logical
+            in jinn._internal_sessions.items()
+            if parent == session_id
+        )
+        old_internal_token = (
+            jinn._current_session_lifecycle_token(
+                old_internal_session_id
+            )
+        )
+        background_review[0] = False
+
+        def finalize_old_lifecycle():
+            try:
+                jinn._on_session_finalize(
+                    session_id=session_id,
+                    reason="old_session_complete",
+                )
+            except BaseException as exc:
+                finalizer_errors.append(exc)
+
+        finalizer = threading.Thread(
+            name="old-finalizer",
+            target=finalize_old_lifecycle,
+        )
+        finalizer.start()
+        assert cleanup_started.wait(timeout=2)
+        assert session_id not in jinn._session_lifecycle_tokens
+        assert (
+            old_internal_session_id
+            not in jinn._session_lifecycle_tokens
+        )
+
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="fresh-parent-task",
+            turn_id="fresh-parent-turn",
+            user_message="fresh parent capture",
+            is_first_turn=True,
+        )
+        fresh_parent_token = (
+            jinn._current_session_lifecycle_token(session_id)
+        )
+        assert fresh_parent_token is not old_parent_token
+
+        release_cleanup.set()
+        finalizer.join(timeout=2)
+
+        assert not finalizer.is_alive()
+        assert finalizer_errors == []
+        assert (
+            jinn._current_session_lifecycle_token(session_id)
+            is fresh_parent_token
+        )
+        assert (
+            session_id,
+            old_parent_token,
+        ) not in jinn.buf._buffers
+        assert (
+            old_internal_session_id,
+            old_internal_token,
+        ) not in jinn.buf._buffers
+        fresh_buffer = jinn.buf._buffers[
+            (session_id, fresh_parent_token)
+        ]
+        assert [
+            turn["attributes"]["turn.text"]
+            for turn in fresh_buffer["turns"]
+        ] == ["fresh parent capture"]
+    finally:
+        background_review[0] = False
+        release_cleanup.set()
+        if finalizer is not None:
+            finalizer.join(timeout=2)
+        jinn._on_session_finalize(
+            session_id=session_id,
+            reason="test_cleanup",
+        )
+        jinn._runner = None
 
 
 def test_lifecycle_tracking_is_bounded_after_unique_session_cleanup():
