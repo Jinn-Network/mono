@@ -1,6 +1,7 @@
 import { Buffer } from 'node:buffer';
 import { spawn } from 'node:child_process';
-import { isAbsolute } from 'node:path';
+import { lstat } from 'node:fs/promises';
+import { isAbsolute, join } from 'node:path';
 
 export const MAX_MARKETPLACE_PATCH_BYTES = 2 * 1024 * 1024;
 
@@ -35,7 +36,10 @@ export class MarketplacePatchCheckError extends Error {
 export type MarketplacePatchWorktreeRejectionReason =
   | 'git-index-inspection-failed'
   | 'malformed-index-output'
-  | 'unsafe-existing-mode';
+  | 'unsafe-existing-mode'
+  | 'filesystem-inspection-failed'
+  | 'unsafe-filesystem-symlink'
+  | 'unsafe-filesystem-type';
 
 export class MarketplacePatchWorktreeValidationError extends Error {
   readonly reason: MarketplacePatchWorktreeRejectionReason;
@@ -84,6 +88,23 @@ export type MarketplacePatchGitRunner = (
   args: readonly string[],
   options: MarketplacePatchGitOptions,
 ) => Promise<Uint8Array>;
+
+export type MarketplacePatchFilesystemEntryKind =
+  | 'missing'
+  | 'regular-file'
+  | 'directory'
+  | 'symlink'
+  | 'other';
+
+/**
+ * Non-following filesystem classifier used by the worktree safety gate.
+ *
+ * Implementations must use `lstat`-equivalent semantics, return `missing` only
+ * for an absent path, and throw when the path cannot be inspected reliably.
+ */
+export type MarketplacePatchLstat = (
+  absolutePath: string,
+) => Promise<MarketplacePatchFilesystemEntryKind>;
 
 interface ParsedPath {
   readonly value: string;
@@ -560,9 +581,50 @@ function worktreeValidationError(
   throw new MarketplacePatchWorktreeValidationError(reason, message, cause);
 }
 
+interface IndexInspectionScope {
+  readonly queryPaths: readonly string[];
+  readonly candidatePaths: ReadonlySet<string>;
+  readonly ancestorPaths: ReadonlySet<string>;
+}
+
+function indexInspectionScope(
+  touchedPaths: readonly string[],
+): IndexInspectionScope {
+  const candidates = new Set<string>();
+  const ancestors = new Set<string>();
+  for (const path of touchedPaths) {
+    const components = path.split('/');
+    for (let length = 1; length <= components.length; length += 1) {
+      const prefix = components.slice(0, length).join('/');
+      candidates.add(prefix);
+      if (length < components.length) ancestors.add(prefix);
+    }
+  }
+  const queryPaths = [...candidates].sort((left, right) => {
+    const depth = left.split('/').length - right.split('/').length;
+    if (depth !== 0) return depth;
+    return left < right ? -1 : left > right ? 1 : 0;
+  });
+  return {
+    queryPaths,
+    candidatePaths: candidates,
+    ancestorPaths: ancestors,
+  };
+}
+
+function isIndexDirectoryNoise(
+  path: string,
+  ancestorPaths: ReadonlySet<string>,
+): boolean {
+  for (const ancestor of ancestorPaths) {
+    if (path.startsWith(`${ancestor}/`)) return true;
+  }
+  return false;
+}
+
 function validateTouchedPathIndexModes(
   output: Uint8Array,
-  touchedPaths: readonly string[],
+  scope: IndexInspectionScope,
 ): void {
   if (output.byteLength === 0) return;
   if (output[output.byteLength - 1] !== 0) {
@@ -581,7 +643,6 @@ function validateTouchedPathIndexModes(
       'Git index inspection output is not valid UTF-8',
     );
   }
-  const expected = new Set(touchedPaths);
   const observed = new Set<string>();
   const records = decoded.slice(0, -1).split('\0');
   for (const record of records) {
@@ -595,19 +656,142 @@ function validateTouchedPathIndexModes(
     const mode = match[1]!;
     const stage = match[3]!;
     const path = match[4]!;
+    if (observed.has(path)) {
+      worktreeValidationError(
+        'malformed-index-output',
+        'Git index inspection returned a duplicate path',
+      );
+    }
+    observed.add(path);
+    if (!scope.candidatePaths.has(path)) {
+      if (isIndexDirectoryNoise(path, scope.ancestorPaths)) continue;
+      worktreeValidationError(
+        'malformed-index-output',
+        'Git index inspection returned an unexpected path',
+      );
+    }
     if (!REGULAR_FILE_MODES.has(mode)) {
       worktreeValidationError(
         'unsafe-existing-mode',
         `Touched path has unsupported existing index mode ${mode}: ${path}`,
       );
     }
-    if (stage !== '0' || !expected.has(path) || observed.has(path)) {
+    if (stage !== '0') {
       worktreeValidationError(
         'malformed-index-output',
-        'Git index inspection returned an unexpected or duplicate path',
+        'Git index inspection returned a non-zero merge stage',
       );
     }
-    observed.add(path);
+  }
+}
+
+interface FilesystemInspectionPath {
+  readonly absolutePath: string;
+  readonly displayPath: string;
+  readonly isRoot: boolean;
+  readonly isAncestor: boolean;
+  readonly isTouched: boolean;
+}
+
+function filesystemInspectionPaths(
+  worktreePath: string,
+  touchedPaths: readonly string[],
+): readonly FilesystemInspectionPath[] {
+  const touched = new Set(touchedPaths);
+  const ancestors = new Set<string>();
+  const prefixes = new Set<string>();
+  for (const path of touchedPaths) {
+    const components = path.split('/');
+    for (let length = 1; length <= components.length; length += 1) {
+      const prefix = components.slice(0, length).join('/');
+      prefixes.add(prefix);
+      if (length < components.length) ancestors.add(prefix);
+    }
+  }
+  const relativePaths = [...prefixes].sort((left, right) => {
+    const depth = left.split('/').length - right.split('/').length;
+    if (depth !== 0) return depth;
+    return left < right ? -1 : left > right ? 1 : 0;
+  });
+  return [
+    {
+      absolutePath: worktreePath,
+      displayPath: '.',
+      isRoot: true,
+      isAncestor: true,
+      isTouched: false,
+    },
+    ...relativePaths.map((path): FilesystemInspectionPath => ({
+      absolutePath: join(worktreePath, ...path.split('/')),
+      displayPath: path,
+      isRoot: false,
+      isAncestor: ancestors.has(path),
+      isTouched: touched.has(path),
+    })),
+  ];
+}
+
+export const defaultMarketplacePatchLstat: MarketplacePatchLstat = async (
+  absolutePath,
+) => {
+  try {
+    const stats = await lstat(absolutePath);
+    if (stats.isSymbolicLink()) return 'symlink';
+    if (stats.isDirectory()) return 'directory';
+    if (stats.isFile()) return 'regular-file';
+    return 'other';
+  } catch (error) {
+    if (
+      typeof error === 'object'
+      && error !== null
+      && 'code' in error
+      && error.code === 'ENOENT'
+    ) {
+      return 'missing';
+    }
+    throw error;
+  }
+};
+
+async function validateTouchedPathFilesystem(
+  worktreePath: string,
+  touchedPaths: readonly string[],
+  lstatPath: MarketplacePatchLstat,
+): Promise<void> {
+  for (const path of filesystemInspectionPaths(worktreePath, touchedPaths)) {
+    let kind: MarketplacePatchFilesystemEntryKind;
+    try {
+      kind = await lstatPath(path.absolutePath);
+    } catch (error) {
+      throw new MarketplacePatchWorktreeValidationError(
+        'filesystem-inspection-failed',
+        `Marketplace patch could not inspect filesystem path: ${path.displayPath}`,
+        error,
+      );
+    }
+    if (kind === 'symlink') {
+      worktreeValidationError(
+        'unsafe-filesystem-symlink',
+        `Touched path or ancestor is a filesystem symlink: ${path.displayPath}`,
+      );
+    }
+    if (path.isRoot && kind !== 'directory') {
+      worktreeValidationError(
+        'filesystem-inspection-failed',
+        'Marketplace patch worktree root disappeared or changed type',
+      );
+    }
+    if (kind === 'missing') continue;
+    if (
+      kind === 'other'
+      || (path.isAncestor && kind !== 'directory')
+      || (path.isTouched && kind === 'directory')
+    ) {
+      worktreeValidationError(
+        'unsafe-filesystem-type',
+        `Touched path or ancestor has an unsupported filesystem type: ${path.displayPath}`,
+      );
+    }
   }
 }
 
@@ -666,22 +850,24 @@ export interface ApplyMarketplacePatchInput {
   /**
    * Absolute path to a trusted, existing worktree. The caller owns exclusive
    * mutation of both its index and filesystem state until this promise settles.
-   * The function uses one immutable artifact snapshot and adjacent index-mode
-   * inspection/check/apply calls, but Git offers no cross-process lock that can
-   * eliminate unrelated index or worktree races.
+   * The function uses one immutable artifact snapshot and adjacent filesystem
+   * inspection/index-mode inspection/check/apply calls, but Git offers no
+   * cross-process lock that can eliminate unrelated index or worktree races.
    */
   readonly worktreePath: string;
   readonly runGit?: MarketplacePatchGitRunner;
+  readonly lstatPath?: MarketplacePatchLstat;
 }
 
 /**
  * Validates, checks, and applies one marketplace patch to a trusted worktree.
  *
- * Index modes for every touched path are inspected without following filesystem
- * symlinks. That inspection and `git apply --check` always complete before
- * plain `git apply` is invoked. Neither apply invocation uses a patch filename
- * or `--3way`; byte-identical copies of the validated snapshot are sent over
- * stdin.
+ * Every touched path and filesystem ancestor is classified with non-following
+ * `lstat` semantics. Index modes are then inspected for the same repository
+ * paths and ancestors. Both gates and `git apply --check` always complete
+ * before plain `git apply` is invoked. Neither apply invocation uses a patch
+ * filename or `--3way`; byte-identical copies of the validated snapshot are
+ * sent over stdin.
  */
 export async function applyMarketplacePatchToWorktree(
   input: ApplyMarketplacePatchInput,
@@ -699,7 +885,14 @@ export async function applyMarketplacePatchToWorktree(
     );
   }
 
+  await validateTouchedPathFilesystem(
+    input.worktreePath,
+    validated.touchedPaths,
+    input.lstatPath ?? defaultMarketplacePatchLstat,
+  );
+
   const runGit = input.runGit ?? defaultMarketplacePatchGitRunner;
+  const indexScope = indexInspectionScope(validated.touchedPaths);
   let indexOutput: Uint8Array;
   try {
     indexOutput = await runGit(
@@ -710,7 +903,7 @@ export async function applyMarketplacePatchToWorktree(
         '--stage',
         '-z',
         '--',
-        ...validated.touchedPaths,
+        ...indexScope.queryPaths,
       ],
       {
         cwd: input.worktreePath,
@@ -724,7 +917,7 @@ export async function applyMarketplacePatchToWorktree(
       error,
     );
   }
-  validateTouchedPathIndexModes(indexOutput, validated.touchedPaths);
+  validateTouchedPathIndexModes(indexOutput, indexScope);
 
   try {
     await runGit('git', ['apply', '--check'], {

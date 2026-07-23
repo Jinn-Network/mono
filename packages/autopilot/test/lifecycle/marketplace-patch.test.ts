@@ -1,6 +1,7 @@
 import { Buffer } from 'node:buffer';
 import { execFileSync } from 'node:child_process';
 import {
+  mkdirSync,
   mkdtempSync,
   readlinkSync,
   rmSync,
@@ -17,11 +18,15 @@ import {
   MarketplacePatchValidationError,
   applyMarketplacePatchToWorktree,
   type MarketplacePatchGitRunner,
+  type MarketplacePatchLstat,
   validateMarketplacePatch,
 } from '../../src/lifecycle/marketplace-patch.js';
 
 const MAX_BYTES = 2 * 1024 * 1024;
 const EMPTY_GIT_OUTPUT = new Uint8Array();
+const missingExceptTrustedRoot: MarketplacePatchLstat = async (path) => (
+  path === '/trusted/worktree' ? 'directory' : 'missing'
+);
 
 function indexStageRecord(
   path: string,
@@ -417,6 +422,46 @@ describe('marketplace patch validation', () => {
 });
 
 describe('marketplace patch worktree application', () => {
+  it('rejects a mode-less content diff targeting an untracked filesystem symlink', async () => {
+    const repository = mkdtempSync(join(tmpdir(), 'marketplace-patch-untracked-link-'));
+    try {
+      execFileSync('git', ['init', '--quiet'], { cwd: repository });
+      symlinkSync('target-before', join(repository, 'link'));
+      const oldBlob = execFileSync('git', ['hash-object', '--stdin'], {
+        cwd: repository,
+        encoding: 'utf8',
+        input: 'target-before',
+      }).trim();
+      const newBlob = execFileSync('git', ['hash-object', '--stdin'], {
+        cwd: repository,
+        encoding: 'utf8',
+        input: 'target-after',
+      }).trim();
+      const artifact = Buffer.from([
+        'diff --git a/link b/link',
+        `index ${oldBlob.slice(0, 7)}..${newBlob.slice(0, 7)}`,
+        '--- a/link',
+        '+++ b/link',
+        '@@ -1 +1 @@',
+        '-target-before',
+        '\\ No newline at end of file',
+        '+target-after',
+        '\\ No newline at end of file',
+        '',
+      ].join('\n'));
+
+      await expect(applyMarketplacePatchToWorktree({
+        artifact,
+        worktreePath: repository,
+      })).rejects.toMatchObject({
+        reason: 'unsafe-filesystem-symlink',
+      });
+      expect(readlinkSync(join(repository, 'link'))).toBe('target-before');
+    } finally {
+      rmSync(repository, { recursive: true, force: true });
+    }
+  });
+
   it('rejects a mode-less content diff targeting a tracked symlink without repointing it', async () => {
     const repository = mkdtempSync(join(tmpdir(), 'marketplace-patch-symlink-'));
     try {
@@ -450,9 +495,41 @@ describe('marketplace patch worktree application', () => {
         artifact,
         worktreePath: repository,
       })).rejects.toMatchObject({
-        reason: 'unsafe-existing-mode',
+        reason: 'unsafe-filesystem-symlink',
       });
       expect(readlinkSync(join(repository, 'link'))).toBe('target-before');
+    } finally {
+      rmSync(repository, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a filesystem symlink ancestor without modifying its target', async () => {
+    const repository = mkdtempSync(join(tmpdir(), 'marketplace-patch-link-ancestor-'));
+    try {
+      execFileSync('git', ['init', '--quiet'], { cwd: repository });
+      mkdirSync(join(repository, 'real-directory'));
+      writeFileSync(join(repository, 'real-directory', 'value.txt'), 'old\n');
+      symlinkSync('real-directory', join(repository, 'linked-directory'));
+
+      await expect(applyMarketplacePatchToWorktree({
+        artifact: Buffer.from(modificationPatch('linked-directory/value.txt')),
+        worktreePath: repository,
+      })).rejects.toMatchObject({
+        reason: 'unsafe-filesystem-symlink',
+      });
+      expect(
+        execFileSync(
+          'git',
+          ['hash-object', 'real-directory/value.txt'],
+          { cwd: repository, encoding: 'utf8' },
+        ).trim(),
+      ).toBe(
+        execFileSync(
+          'git',
+          ['hash-object', '--stdin'],
+          { cwd: repository, input: 'old\n', encoding: 'utf8' },
+        ).trim(),
+      );
     } finally {
       rmSync(repository, { recursive: true, force: true });
     }
@@ -494,15 +571,73 @@ describe('marketplace patch worktree application', () => {
     }
   });
 
+  it('rejects a patch below a tracked gitlink ancestor', async () => {
+    const repository = mkdtempSync(join(tmpdir(), 'marketplace-patch-gitlink-child-'));
+    try {
+      execFileSync('git', ['init', '--quiet'], { cwd: repository });
+      execFileSync('git', ['config', 'user.email', 'test@example.com'], {
+        cwd: repository,
+      });
+      execFileSync('git', ['config', 'user.name', 'Patch Test'], {
+        cwd: repository,
+      });
+      writeFileSync(join(repository, 'seed.txt'), 'seed\n');
+      execFileSync('git', ['add', '--', 'seed.txt'], { cwd: repository });
+      execFileSync('git', ['commit', '--quiet', '-m', 'seed'], {
+        cwd: repository,
+      });
+      const commit = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: repository,
+        encoding: 'utf8',
+      }).trim();
+      execFileSync(
+        'git',
+        ['update-index', '--add', '--cacheinfo', `160000,${commit},vendor/module`],
+        { cwd: repository },
+      );
+      mkdirSync(join(repository, 'vendor', 'module'), { recursive: true });
+      writeFileSync(join(repository, 'vendor', 'module', 'new.txt'), 'old\n');
+
+      await expect(applyMarketplacePatchToWorktree({
+        artifact: Buffer.from(modificationPatch('vendor/module/new.txt')),
+        worktreePath: repository,
+      })).rejects.toMatchObject({
+        reason: 'unsafe-existing-mode',
+      });
+      expect(
+        execFileSync(
+          'git',
+          ['hash-object', '--stdin'],
+          { cwd: repository, input: 'old\n', encoding: 'utf8' },
+        ).trim(),
+      ).toBe(
+        execFileSync(
+          'git',
+          ['hash-object', 'vendor/module/new.txt'],
+          { cwd: repository, encoding: 'utf8' },
+        ).trim(),
+      );
+    } finally {
+      rmSync(repository, { recursive: true, force: true });
+    }
+  });
+
   it('runs check before apply, uses stdin/argument arrays, and never requests three-way merge', async () => {
     const artifact = Buffer.from(modificationPatch());
+    const events: string[] = [];
     const calls: Array<{
       command: string;
       args: readonly string[];
       cwd: string;
       stdin: Uint8Array;
     }> = [];
+    const lstatPath: MarketplacePatchLstat = async (path) => {
+      events.push(`lstat:${path}`);
+      if (path === '/trusted/worktree' || path.endsWith('/src')) return 'directory';
+      return 'regular-file';
+    };
     const runGit: MarketplacePatchGitRunner = async (command, args, options) => {
+      events.push(`git:${args.join(' ')}`);
       calls.push({
         command,
         args: [...args],
@@ -510,7 +645,10 @@ describe('marketplace patch worktree application', () => {
         stdin: Uint8Array.from(options.stdin),
       });
       if (args[0] === '--literal-pathspecs') {
-        return indexStageRecord('src/value.ts');
+        return Buffer.concat([
+          indexStageRecord('src/value.ts'),
+          indexStageRecord('src/other.ts'),
+        ]);
       }
       return EMPTY_GIT_OUTPUT;
     };
@@ -519,8 +657,17 @@ describe('marketplace patch worktree application', () => {
       artifact,
       worktreePath: '/trusted/worktree',
       runGit,
+      lstatPath,
     })).resolves.toMatchObject({ touchedPaths: ['src/value.ts'] });
 
+    expect(events).toEqual([
+      'lstat:/trusted/worktree',
+      'lstat:/trusted/worktree/src',
+      'lstat:/trusted/worktree/src/value.ts',
+      'git:--literal-pathspecs ls-files --stage -z -- src src/value.ts',
+      'git:apply --check',
+      'git:apply',
+    ]);
     expect(calls.map(({ command, args, cwd }) => ({ command, args, cwd }))).toEqual([
       {
         command: 'git',
@@ -530,6 +677,7 @@ describe('marketplace patch worktree application', () => {
           '--stage',
           '-z',
           '--',
+          'src',
           'src/value.ts',
         ],
         cwd: '/trusted/worktree',
@@ -599,6 +747,7 @@ describe('marketplace patch worktree application', () => {
         artifact: Buffer.from(modificationPatch()),
         worktreePath: '/trusted/worktree',
         runGit,
+        lstatPath: missingExceptTrustedRoot,
       });
     } catch (error) {
       thrown = error;
@@ -613,6 +762,7 @@ describe('marketplace patch worktree application', () => {
         '--stage',
         '-z',
         '--',
+        'src',
         'src/value.ts',
       ],
       ['apply', '--check'],
@@ -635,6 +785,7 @@ describe('marketplace patch worktree application', () => {
         artifact: Buffer.from(modificationPatch()),
         worktreePath: '/trusted/worktree',
         runGit,
+        lstatPath: missingExceptTrustedRoot,
       });
     } catch (error) {
       thrown = error;
@@ -649,6 +800,7 @@ describe('marketplace patch worktree application', () => {
         '--stage',
         '-z',
         '--',
+        'src',
         'src/value.ts',
       ],
       ['apply', '--check'],
@@ -672,6 +824,7 @@ describe('marketplace patch worktree application', () => {
       artifact,
       worktreePath: '/trusted/worktree',
       runGit,
+      lstatPath: missingExceptTrustedRoot,
     });
 
     expect(observed).toHaveLength(2);
@@ -681,6 +834,7 @@ describe('marketplace patch worktree application', () => {
   });
 
   it.each([
+    ['symlink', '120000'],
     ['gitlink', '160000'],
     ['unsupported regular mode', '100600'],
   ])('rejects an existing tracked %s before checking or applying', async (_name, mode) => {
@@ -697,6 +851,7 @@ describe('marketplace patch worktree application', () => {
       artifact: Buffer.from(modificationPatch('vendor/module')),
       worktreePath: '/trusted/worktree',
       runGit,
+      lstatPath: missingExceptTrustedRoot,
     })).rejects.toMatchObject({
       reason: 'unsafe-existing-mode',
     });
@@ -706,6 +861,7 @@ describe('marketplace patch worktree application', () => {
       '--stage',
       '-z',
       '--',
+      'vendor',
       'vendor/module',
     ]]);
   });
@@ -728,7 +884,7 @@ describe('marketplace patch worktree application', () => {
     ],
     [
       'unexpected path',
-      indexStageRecord('src/other.ts'),
+      indexStageRecord('other.ts'),
     ],
     [
       'non-zero merge stage',
@@ -748,6 +904,7 @@ describe('marketplace patch worktree application', () => {
       artifact: Buffer.from(modificationPatch()),
       worktreePath: '/trusted/worktree',
       runGit,
+      lstatPath: missingExceptTrustedRoot,
     })).rejects.toMatchObject({
       reason: 'malformed-index-output',
     });
@@ -765,9 +922,100 @@ describe('marketplace patch worktree application', () => {
       artifact: Buffer.from(modificationPatch()),
       worktreePath: '/trusted/worktree',
       runGit,
+      lstatPath: missingExceptTrustedRoot,
     })).rejects.toMatchObject({
       reason: 'git-index-inspection-failed',
     });
     expect(calls).toHaveLength(1);
+  });
+
+  it('queries index ancestors and rejects a gitlink record before apply commands', async () => {
+    const calls: string[][] = [];
+    const runGit: MarketplacePatchGitRunner = async (_command, args) => {
+      calls.push([...args]);
+      if (args[0] !== '--literal-pathspecs') {
+        throw new Error('apply command must not run');
+      }
+      return indexStageRecord('vendor/module', '160000');
+    };
+
+    await expect(applyMarketplacePatchToWorktree({
+      artifact: Buffer.from(modificationPatch('vendor/module/new.txt')),
+      worktreePath: '/trusted/worktree',
+      runGit,
+      lstatPath: missingExceptTrustedRoot,
+    })).rejects.toMatchObject({
+      reason: 'unsafe-existing-mode',
+    });
+    expect(calls).toEqual([[
+      '--literal-pathspecs',
+      'ls-files',
+      '--stage',
+      '-z',
+      '--',
+      'vendor',
+      'vendor/module',
+      'vendor/module/new.txt',
+    ]]);
+  });
+
+  it.each([
+    ['touched path', '/trusted/worktree/src/value.ts'],
+    ['ancestor', '/trusted/worktree/src'],
+  ])('rejects a filesystem symlink at the %s before invoking Git', async (
+    _name,
+    symlinkPath,
+  ) => {
+    const gitCalls: string[][] = [];
+    const inspected: string[] = [];
+    const lstatPath: MarketplacePatchLstat = async (path) => {
+      inspected.push(path);
+      if (path === symlinkPath) return 'symlink';
+      if (path === '/trusted/worktree' || path.endsWith('/src')) return 'directory';
+      return 'regular-file';
+    };
+    const runGit: MarketplacePatchGitRunner = async (_command, args) => {
+      gitCalls.push([...args]);
+      return EMPTY_GIT_OUTPUT;
+    };
+
+    await expect(applyMarketplacePatchToWorktree({
+      artifact: Buffer.from(modificationPatch()),
+      worktreePath: '/trusted/worktree',
+      runGit,
+      lstatPath,
+    })).rejects.toMatchObject({
+      reason: 'unsafe-filesystem-symlink',
+    });
+    expect(inspected).toContain(symlinkPath);
+    expect(gitCalls).toEqual([]);
+  });
+
+  it.each([
+    ['non-directory ancestor', async (path: string) => (
+      path.endsWith('/src') ? 'regular-file' as const : 'directory' as const
+    ), 'unsafe-filesystem-type'],
+    ['missing worktree root', async () => 'missing' as const, 'filesystem-inspection-failed'],
+    ['inspection failure', async () => {
+      throw new Error('lstat unavailable');
+    }, 'filesystem-inspection-failed'],
+  ])('fails closed for %s without invoking Git', async (
+    _name,
+    lstatPath,
+    reason,
+  ) => {
+    const gitCalls: string[][] = [];
+    const runGit: MarketplacePatchGitRunner = async (_command, args) => {
+      gitCalls.push([...args]);
+      return EMPTY_GIT_OUTPUT;
+    };
+
+    await expect(applyMarketplacePatchToWorktree({
+      artifact: Buffer.from(modificationPatch()),
+      worktreePath: '/trusted/worktree',
+      runGit,
+      lstatPath,
+    })).rejects.toMatchObject({ reason });
+    expect(gitCalls).toEqual([]);
   });
 });
