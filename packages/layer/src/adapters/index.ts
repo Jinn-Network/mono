@@ -12,6 +12,12 @@
  */
 export { createCorpusAdapter } from './corpus-adapter.js';
 export { episodeToCorpusRecord, type EpisodeRecordProjection } from './episode-record.js';
+export {
+  createLocalEpisodeCorpusAdapter,
+  localEpisodeRef,
+  LOCAL_EPISODE_REF_PREFIX,
+  type LocalEpisodeCorpusAdapterDeps,
+} from './local-episode-corpus-adapter.js';
 export { createEvidenceAdapter, capturedTaskToEpisode } from '@jinn-network/core';
 export {
   createContributionAdapter,
