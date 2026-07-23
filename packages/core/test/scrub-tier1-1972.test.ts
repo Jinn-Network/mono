@@ -84,6 +84,19 @@ describe('reject-publish classes A4/A5 (#1972)', () => {
     ).rejects.toThrow(/scrub class A5/);
   });
 
+  it('rejects a secret env dump interleaved with GIT_CONFIG tutorial assignments (#2028)', async () => {
+    const block = [
+      'API_KEY=synth_secret_value',
+      'GIT_CONFIG_GLOBAL=/dev/null',
+      'DATABASE_URL=postgres://user:pass@db.internal/app',
+      'GIT_CONFIG_NOSYSTEM=1',
+      'SECRET_TOKEN=yyy',
+    ].join('\n');
+    await expect(
+      buildSeedScrubPipeline().run({ 'tool.output': `env:\n${block}\nend` }),
+    ).rejects.toThrow(/scrub class A5/);
+  });
+
   it('does not reject bare 40-hex git SHAs or 0x+64 tx digests', async () => {
     const gitSha = 'd'.repeat(40);
     const tx = `0x${'c'.repeat(64)}`;

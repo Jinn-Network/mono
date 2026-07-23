@@ -188,9 +188,9 @@ function scanEnvBlocks(
       }
       runCount += 1;
       runEndOffset = offset + line.length;
-    } else if (trimmed === '' && runCount > 0) {
-      // Blank line inside a dump still counts as continuing the block visually,
-      // but does not increment — only flush on a non-env non-blank line.
+    } else if ((trimmed === '' || isGitConfigEnvAssignment(candidate)) && runCount > 0) {
+      // Blank and GIT_CONFIG tutorial lines inside a dump keep the run open,
+      // but do not increment it — only flush on another non-env line.
     } else {
       flush();
     }
@@ -205,4 +205,10 @@ function isEnvBlockAssignment(candidate: string): boolean {
   const keyMatch = ENV_KEY.exec(candidate);
   if (!keyMatch) return false;
   return !GIT_CONFIG_ENV_KEY.test(keyMatch[1]!);
+}
+
+function isGitConfigEnvAssignment(candidate: string): boolean {
+  if (!ENV_LINE.test(candidate)) return false;
+  const keyMatch = ENV_KEY.exec(candidate);
+  return keyMatch !== null && GIT_CONFIG_ENV_KEY.test(keyMatch[1]!);
 }
