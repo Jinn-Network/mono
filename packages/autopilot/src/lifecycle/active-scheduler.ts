@@ -2,7 +2,16 @@ import type { NewWorkAction } from './types.js';
 import type { GitOid } from './types.js';
 
 export type ActiveCandidate =
-  | { readonly phase: 'implementation'; readonly issueNumber: number }
+  | {
+      readonly phase: 'implementation';
+      readonly issueNumber: number;
+      /**
+       * Machine child (review-finding / reconcile / ci-failure). Children
+       * drain the open-PR backlog; open-pipeline backpressure must not block
+       * them or the loop deadlocks.
+       */
+      readonly isChild?: boolean;
+    }
   | {
       readonly phase: 'review';
       readonly issueNumber: number;
@@ -98,7 +107,12 @@ export function scheduleActiveActions(
       });
       continue;
     }
-    if (input.openPipelineBacklog >= input.implementationBackpressureThreshold) {
+    // Fresh work only: child fixes/reconciles/ci-failures reduce backlog and
+    // must still claim under backpressure (capacity remaining still applies).
+    if (
+      candidate.isChild !== true
+      && input.openPipelineBacklog >= input.implementationBackpressureThreshold
+    ) {
       skips.push({ phase: candidate.phase, subject: subject(candidate), reason: 'backpressure' });
       continue;
     }

@@ -789,6 +789,57 @@ function canonicalProspectivePath(path: string): string {
   return join(realpathSync(existing), ...suffix);
 }
 
+async function commitObjectExists(
+  runner: CommandRunner,
+  repositoryRoot: string,
+  oid: string,
+): Promise<boolean> {
+  try {
+    await runner('git', ['-C', repositoryRoot, 'cat-file', '-e', `${oid}^{commit}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function ensureExpectedHeadAvailable(
+  runner: CommandRunner,
+  repository: AttemptRepositoryIdentity,
+  input: {
+    readonly expectedHead: string;
+    readonly branch: string;
+    readonly prNumber?: number;
+  },
+): Promise<void> {
+  if (await commitObjectExists(runner, repository.root, input.expectedHead)) {
+    return;
+  }
+  const fetchSpecs = [input.branch];
+  if (input.prNumber !== undefined) {
+    fetchSpecs.push(`pull/${input.prNumber}/head`);
+  }
+  for (const spec of fetchSpecs) {
+    try {
+      await runner('git', [
+        '-C', repository.root,
+        'fetch', '--quiet', repository.remoteName, spec,
+      ]);
+    } catch {
+      // Best-effort: the branch or PR ref may not exist on the remote yet.
+    }
+  }
+  if (await commitObjectExists(runner, repository.root, input.expectedHead)) {
+    return;
+  }
+  const prRef = input.prNumber === undefined
+    ? ''
+    : ` and ${repository.remoteName}/pull/${input.prNumber}/head`;
+  throw new Error(
+    `Expected head ${input.expectedHead} is not available after fetching `
+    + `${repository.remoteName}/${input.branch}${prRef}`,
+  );
+}
+
 export async function createAttemptWorkspace(
   options: CreateAttemptOptions,
   runner: CommandRunner,
@@ -879,6 +930,11 @@ export async function createAttemptWorkspace(
   if (registeredBefore) {
     throw new Error('Attempt worktree path is already registered');
   }
+  await ensureExpectedHeadAvailable(runner, repository, {
+    expectedHead: options.expectedHead,
+    branch: options.branch,
+    prNumber: options.prNumber,
+  });
   mkdirSync(phaseDir, { recursive: true, mode: 0o700 });
   mkdirSync(attemptDir, { mode: 0o700 });
   mkdirSync(paths.ghConfigDir, { mode: 0o700 });
