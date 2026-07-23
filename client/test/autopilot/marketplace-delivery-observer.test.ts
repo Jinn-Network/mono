@@ -117,6 +117,7 @@ function reviewResult(): AutopilotReviewResult {
     schemaVersion: 'jinn-autopilot-review-result.v1',
     outcome: 'approve',
     correlation: correlation({
+      resultingHead: REVIEWED_HEAD,
       reviewedHead: REVIEWED_HEAD,
       reviewGeneration: REVIEW_GENERATION,
       reviewRefOid: REVIEW_REF_OID,
@@ -280,6 +281,7 @@ async function harness(options: HarnessOptions = {}) {
   });
   const expectedCorrelation = role === 'verdict'
     ? {
+        resultingHead: REVIEWED_HEAD,
         reviewedHead: REVIEWED_HEAD,
         reviewGeneration: REVIEW_GENERATION,
         reviewRefOid: REVIEW_REF_OID,
@@ -550,6 +552,7 @@ describe('Autopilot marketplace delivery observer', () => {
         schemaVersion: 'jinn-autopilot-review-result.v1',
         outcome: 'approve',
         correlation: {
+          resultingHead: REVIEWED_HEAD,
           reviewedHead: REVIEWED_HEAD,
           reviewGeneration: REVIEW_GENERATION,
           reviewRefOid: REVIEW_REF_OID,
