@@ -188,6 +188,14 @@ function latestHuman(value: unknown, prNumber: number): {
   };
 }
 
+function workflowRunIdFromDetailsUrl(url: unknown): number | undefined {
+  if (typeof url !== 'string') return undefined;
+  const match = url.match(/\/actions\/runs\/(\d+)(?:\/|$)/);
+  if (match === null) return undefined;
+  const id = Number(match[1]);
+  return Number.isSafeInteger(id) && id > 0 ? id : undefined;
+}
+
 function checkRuns(value: unknown): readonly CheckSummary[] {
   const response = record(value, 'check-runs response');
   const parsed = rows(response.check_runs, 'check-runs response.check_runs').map((raw, index) => {
@@ -200,15 +208,16 @@ function checkRuns(value: unknown): readonly CheckSummary[] {
     const suite = check.check_suite === null || check.check_suite === undefined
       ? null
       : record(check.check_suite, `check run ${index}.check_suite`);
-    const runId = check.id;
+    const workflowRunId = workflowRunIdFromDetailsUrl(check.details_url)
+      ?? workflowRunIdFromDetailsUrl(
+        suite === null ? undefined : (suite as { workflow_run?: { html_url?: unknown } }).workflow_run?.html_url,
+      );
     return {
       name: nonEmptyString(check.name, `check run ${index}.name`),
       status: nonEmptyString(check.status, `check run ${index}.status`).toUpperCase(),
       conclusion: conclusion?.toUpperCase() ?? null,
       source: 'check-run' as const,
-      ...(typeof runId === 'number' && Number.isSafeInteger(runId) && runId > 0
-        ? { runId }
-        : {}),
+      ...(workflowRunId === undefined ? {} : { runId: workflowRunId }),
       ...(suite === null ? {} : {
         checkSuiteId: nonNegativeInteger(suite.id, `check run ${index}.check_suite.id`),
       }),

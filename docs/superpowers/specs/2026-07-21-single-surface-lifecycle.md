@@ -135,7 +135,10 @@ delivered work and **outrank fresh claims** in scheduling; Effort routed per
 Children run the ordinary pipeline — ELIGIBLE → CLAIMED → IN PROGRESS — with
 one difference: their claim commit lands on the **parent's branch** (phase
 `fix`/`reconcile`), work lands as append-only checkpoints there, and the child
-closes by landing commits rather than by opening its own PR. The parent's
+closes by landing commits rather than by opening its own PR. Session
+`checkpoint` / `human` accept `fix|reconcile` branch claims and validate the
+parent PR by branch, base, and exact head — not by child-issue body markers or
+draft state. The parent's
 fresh re-review reviews the child's work; children need no independent review.
 
 Filing is idempotent: at most one open child per parent per kind (keyed by the
