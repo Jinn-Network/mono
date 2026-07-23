@@ -228,6 +228,65 @@ def _record_codex_app_server_usage(agent, turn) -> dict[str, Any]:
     }
 
 
+def _invoke_codex_post_llm_hook(
+    agent,
+    *,
+    effective_task_id: str,
+    turn_id: str,
+    original_user_message: Any,
+    assistant_response: str,
+    messages: List[Dict[str, Any]],
+) -> None:
+    """Complete the per-turn post hook bypassed by the Codex early return."""
+    try:
+        from hermes_cli.plugins import invoke_hook
+
+        invoke_hook(
+            "post_llm_call",
+            session_id=agent.session_id,
+            task_id=effective_task_id,
+            turn_id=turn_id,
+            user_message=original_user_message,
+            assistant_response=assistant_response,
+            conversation_history=list(messages),
+            model=agent.model,
+            platform=getattr(agent, "platform", None) or "",
+            input_tokens=getattr(agent, "session_input_tokens", 0),
+            output_tokens=getattr(agent, "session_output_tokens", 0),
+        )
+    except Exception as exc:
+        logger.warning("post_llm_call hook failed: %s", exc)
+
+
+def _invoke_codex_session_end_hook(
+    agent,
+    *,
+    effective_task_id: str,
+    turn_id: str,
+    completed: bool,
+    interrupted: bool,
+) -> None:
+    """Complete the per-turn end hook bypassed by the Codex early return."""
+    try:
+        from hermes_cli.plugins import invoke_hook
+
+        invoke_hook(
+            "on_session_end",
+            session_id=agent.session_id,
+            task_id=effective_task_id,
+            turn_id=turn_id,
+            completed=completed,
+            interrupted=interrupted,
+            model=agent.model,
+            platform=getattr(agent, "platform", None) or "",
+            input_tokens=getattr(agent, "session_input_tokens", 0),
+            output_tokens=getattr(agent, "session_output_tokens", 0),
+            skills_loadout=getattr(agent, "loaded_skill_names", None) or [],
+        )
+    except Exception as exc:
+        logger.warning("on_session_end hook failed: %s", exc)
+
+
 def run_codex_app_server_turn(
     agent,
     *,
@@ -235,6 +294,7 @@ def run_codex_app_server_turn(
     original_user_message: Any,
     messages: List[Dict[str, Any]],
     effective_task_id: str,
+    turn_id: str = "",
     should_review_memory: bool = False,
 ) -> Dict[str, Any]:
     """Codex app-server runtime path. Hands the entire turn to a `codex
@@ -327,7 +387,7 @@ def run_codex_app_server_turn(
         except Exception:
             pass
         agent._codex_session = None
-        return {
+        result = {
             "final_response": (
                 f"Codex app-server turn failed: {exc}. "
                 f"Fall back to default runtime with `/codex-runtime auto`."
@@ -338,6 +398,22 @@ def run_codex_app_server_turn(
             "partial": True,
             "error": str(exc),
         }
+        _invoke_codex_post_llm_hook(
+            agent,
+            effective_task_id=effective_task_id,
+            turn_id=turn_id,
+            original_user_message=original_user_message,
+            assistant_response=result["final_response"],
+            messages=messages,
+        )
+        _invoke_codex_session_end_hook(
+            agent,
+            effective_task_id=effective_task_id,
+            turn_id=turn_id,
+            completed=False,
+            interrupted=False,
+        )
+        return result
 
     # If the turn signalled the underlying client is wedged (deadline
     # blown, post-tool watchdog tripped, OAuth refresh died, subprocess
@@ -395,6 +471,16 @@ def run_codex_app_server_turn(
     )
     usage_result = _record_codex_app_server_usage(agent, turn)
     api_calls = 1
+    completed = not turn.interrupted and turn.error is None
+
+    _invoke_codex_post_llm_hook(
+        agent,
+        effective_task_id=effective_task_id,
+        turn_id=turn_id,
+        original_user_message=original_user_message,
+        assistant_response=turn.final_text,
+        messages=messages,
+    )
 
     # Now check the skill nudge AFTER iters were incremented — same
     # pattern the chat_completions path uses (line ~15432).
@@ -437,11 +523,19 @@ def run_codex_app_server_turn(
         except Exception:
             logger.debug("background review spawn raised", exc_info=True)
 
+    _invoke_codex_session_end_hook(
+        agent,
+        effective_task_id=effective_task_id,
+        turn_id=turn_id,
+        completed=completed,
+        interrupted=turn.interrupted,
+    )
+
     return {
         "final_response": turn.final_text,
         "messages": messages,
         "api_calls": api_calls,
-        "completed": not turn.interrupted and turn.error is None,
+        "completed": completed,
         "partial": turn.interrupted or turn.error is not None,
         "error": turn.error,
         # The codex app-server runtime IS an early-return path that bypasses

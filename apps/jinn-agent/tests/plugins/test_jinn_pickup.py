@@ -21,6 +21,11 @@ import pytest
 jinn = importlib.import_module("plugins.jinn")
 pickup = importlib.import_module("plugins.jinn.pickup")
 jinn_layer = importlib.import_module("plugins.jinn.jinn_layer")
+from tools.skill_provenance import (
+    reset_current_write_origin,
+    set_current_write_origin,
+)
+from tools.thread_context import propagate_context_to_thread
 
 MSG = "The client dashboard vitest suite is flaky again — the update_available check races the version status fetch"
 
@@ -1103,12 +1108,22 @@ def test_parent_finalize_invalidates_blocked_internal_pre_hook(
     capture_started = threading.Event()
     release_capture = threading.Event()
     worker_errors = []
+    background_review = [False]
     original_record_first_turn = jinn.buf.record_first_turn
 
     monkeypatch.setattr(
         jinn,
         "is_background_review",
-        lambda: True,
+        lambda: background_review[0],
+    )
+    runner = PickupRunner()
+    jinn._runner = runner
+    jinn._on_pre_llm_call(
+        session_id=parent_session_id,
+        task_id="parent-task",
+        turn_id="parent-turn",
+        user_message="parent turn",
+        is_first_turn=True,
     )
 
     def blocking_record_first_turn(*args, **kwargs):
@@ -1133,9 +1148,10 @@ def test_parent_finalize_invalidates_blocked_internal_pre_hook(
         except BaseException as exc:
             worker_errors.append(exc)
 
-    runner = PickupRunner()
-    jinn._runner = runner
-    worker = threading.Thread(target=run_internal_pre_hook)
+    background_review[0] = True
+    worker = threading.Thread(
+        target=propagate_context_to_thread(run_internal_pre_hook)
+    )
     try:
         worker.start()
         assert capture_started.wait(timeout=2)
@@ -1153,6 +1169,7 @@ def test_parent_finalize_invalidates_blocked_internal_pre_hook(
         release_capture.set()
         worker.join(timeout=2)
     finally:
+        background_review[0] = False
         release_capture.set()
         worker.join(timeout=2)
         jinn._runner = None
@@ -1164,11 +1181,132 @@ def test_parent_finalize_invalidates_blocked_internal_pre_hook(
     assert logical_session_id not in jinn._pickup_checkpoints
     assert logical_session_id not in jinn._session_lifecycle_tokens
     assert jinn._internal_sessions == {}
-    assert [
-        call
-        for call in runner.calls
-        if call[0][1:3] == ["session", "pickup"]
-    ] == []
+    pickup_requests = [
+        json.loads(raw_input)
+        for argv, raw_input in runner.calls
+        if argv[1:3] == ["session", "pickup"]
+    ]
+    assert all(
+        request["meta"].get("sessionKind") != "host-internal"
+        for request in pickup_requests
+    )
+
+
+def test_late_background_review_cannot_attach_to_reopened_parent_generation(
+    monkeypatch,
+):
+    session_id = "late-background-same-id-reopen"
+    child_ready = threading.Event()
+    release_child = threading.Event()
+    child_results = []
+    child_errors = []
+    fallback_episodes = []
+
+    monkeypatch.setattr(
+        jinn.distill,
+        "write_episode_fallback",
+        lambda episode: fallback_episodes.append(episode) or Path("late.json"),
+    )
+    runner = PickupRunner()
+    jinn._runner = runner
+    try:
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="old-parent-task",
+            turn_id="old-parent-turn",
+            user_message="old parent turn",
+            is_first_turn=True,
+        )
+        old_parent_token = jinn._current_session_lifecycle_token(session_id)
+
+        def late_child():
+            origin_token = set_current_write_origin("background_review")
+            try:
+                child_ready.set()
+                assert release_child.wait(timeout=2)
+                child_results.append(
+                    jinn._on_pre_llm_call(
+                        session_id=session_id,
+                        task_id="late-child-task",
+                        turn_id="late-child-turn",
+                        user_message="review the old parent turn",
+                        is_first_turn=True,
+                    )
+                )
+                jinn._on_post_llm_call(
+                    session_id=session_id,
+                    task_id="late-child-task",
+                    turn_id="late-child-turn",
+                    user_message="review the old parent turn",
+                    assistant_response="old child review",
+                )
+                jinn._on_session_end(
+                    session_id=session_id,
+                    task_id="late-child-task",
+                    turn_id="late-child-turn",
+                    completed=True,
+                    interrupted=False,
+                )
+            except BaseException as exc:
+                child_errors.append(exc)
+            finally:
+                reset_current_write_origin(origin_token)
+
+        worker = threading.Thread(
+            name="late-background-review",
+            target=propagate_context_to_thread(late_child),
+        )
+        worker.start()
+        assert child_ready.wait(timeout=2)
+
+        jinn._on_session_finalize(
+            session_id=session_id,
+            reason="old_parent_complete",
+        )
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="fresh-parent-task",
+            turn_id="fresh-parent-turn",
+            user_message="fresh parent turn",
+            is_first_turn=True,
+        )
+        fresh_parent_token = jinn._current_session_lifecycle_token(session_id)
+        assert fresh_parent_token is not old_parent_token
+
+        release_child.set()
+        worker.join(timeout=2)
+    finally:
+        release_child.set()
+        if "worker" in locals():
+            worker.join(timeout=2)
+        jinn._runner = None
+
+    assert not worker.is_alive()
+    assert child_errors == []
+    assert child_results == [None]
+    assert fallback_episodes == []
+    assert not any(
+        parent == session_id
+        for parent, _thread_id in jinn._internal_sessions
+    )
+    assert not any(
+        parent == session_id
+        for parent, _thread_id
+        in jinn._internal_session_parent_tokens
+    )
+    assert not any(
+        key[0].startswith(f"{session_id}-host-internal-")
+        for key in jinn.buf._buffers
+    )
+    pickup_requests = [
+        json.loads(raw_input)
+        for argv, raw_input in runner.calls
+        if argv[1:3] == ["session", "pickup"]
+    ]
+    assert all(
+        request["meta"].get("sessionKind") != "host-internal"
+        for request in pickup_requests
+    )
 
 
 def test_stale_old_capture_cannot_delete_fresh_same_id_lifecycle(
@@ -1660,6 +1798,130 @@ def test_inflight_old_session_end_cannot_pop_fresh_same_id_lifecycle(
         jinn._runner = None
 
 
+def test_fallback_lease_blocks_finalize_through_same_id_reopen(
+    monkeypatch,
+):
+    session_id = "fallback-lease-same-id-reopen"
+    fallback_started = threading.Event()
+    release_fallback = threading.Event()
+    lifecycle_invalidated = threading.Event()
+    finalize_returned = threading.Event()
+    completion_order = []
+    worker_errors = []
+    original_close = jinn._close_session_lifecycle
+
+    def blocking_fallback(episode):
+        fallback_started.set()
+        assert release_fallback.wait(timeout=2)
+        completion_order.append("fallback_committed")
+        return Path("old-fallback.json")
+
+    def observed_close(closing_session_id):
+        lifecycle_token = original_close(closing_session_id)
+        if closing_session_id == session_id:
+            lifecycle_invalidated.set()
+        return lifecycle_token
+
+    monkeypatch.setattr(jinn, "_delegate_session_end", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        jinn.distill,
+        "write_episode_fallback",
+        blocking_fallback,
+    )
+    monkeypatch.setattr(
+        jinn,
+        "_close_session_lifecycle",
+        observed_close,
+    )
+    runner = PickupRunner()
+    jinn._runner = runner
+    try:
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="old-task",
+            turn_id="old-turn",
+            user_message="old user turn",
+            is_first_turn=True,
+        )
+        old_lifecycle = jinn._current_session_lifecycle_token(session_id)
+
+        def run_old_end():
+            try:
+                jinn._on_session_end(
+                    session_id=session_id,
+                    task_id="old-task",
+                    turn_id="old-turn",
+                    completed=True,
+                    interrupted=False,
+                )
+            except BaseException as exc:
+                worker_errors.append(exc)
+
+        def finalize_old():
+            try:
+                jinn._on_session_finalize(
+                    session_id=session_id,
+                    reason="old_session_complete",
+                )
+                completion_order.append("finalize_returned")
+            except BaseException as exc:
+                worker_errors.append(exc)
+            finally:
+                finalize_returned.set()
+
+        end_worker = threading.Thread(
+            name="old-fallback-session-end",
+            target=run_old_end,
+        )
+        finalizer = threading.Thread(
+            name="old-fallback-finalizer",
+            target=finalize_old,
+        )
+        end_worker.start()
+        assert fallback_started.wait(timeout=2)
+
+        finalizer.start()
+        assert lifecycle_invalidated.wait(timeout=2)
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="fresh-task",
+            turn_id="fresh-turn",
+            user_message="fresh user turn",
+            is_first_turn=True,
+        )
+        fresh_lifecycle = jinn._current_session_lifecycle_token(session_id)
+        assert fresh_lifecycle is not old_lifecycle
+
+        assert not finalize_returned.wait(timeout=0.2)
+        release_fallback.set()
+        end_worker.join(timeout=2)
+        finalizer.join(timeout=2)
+    finally:
+        release_fallback.set()
+        if "end_worker" in locals():
+            end_worker.join(timeout=2)
+        if "finalizer" in locals():
+            finalizer.join(timeout=2)
+        jinn._runner = None
+
+    assert not end_worker.is_alive()
+    assert not finalizer.is_alive()
+    assert worker_errors == []
+    assert completion_order == [
+        "fallback_committed",
+        "finalize_returned",
+    ]
+    assert (
+        jinn._current_session_lifecycle_token(session_id)
+        is fresh_lifecycle
+    )
+    assert jinn.buf.has_capture(
+        "fresh-task",
+        session_id,
+        lifecycle_token=fresh_lifecycle,
+    )
+
+
 def test_post_pop_old_session_end_cannot_persist_or_render_after_reopen(
     monkeypatch,
 ):
@@ -1758,19 +2020,36 @@ def test_post_pop_old_session_end_cannot_persist_or_render_after_reopen(
         jinn._runner = None
 
 
-def test_no_episode_completion_render_is_suppressed_after_reopen(
+def test_no_episode_completion_lease_blocks_finalize_through_reopen(
     monkeypatch,
 ):
     session_id = "no-episode-render-same-id-reopen"
     render_started = threading.Event()
     release_render = threading.Event()
+    lifecycle_invalidated = threading.Event()
+    finalize_returned = threading.Event()
     terminal_lines = []
+    completion_order = []
     worker_errors = []
+    original_close = jinn._close_session_lifecycle
 
     def blocking_render_complete(**kwargs):
         render_started.set()
         assert release_render.wait(timeout=2)
         return "Jinn session complete\n  stale old completion"
+
+    def observed_close(closing_session_id, **kwargs):
+        lifecycle_token = original_close(
+            closing_session_id,
+            **kwargs,
+        )
+        if closing_session_id == session_id:
+            lifecycle_invalidated.set()
+        return lifecycle_token
+
+    def record_terminal_line(line):
+        terminal_lines.append(line)
+        completion_order.append("completion_rendered")
 
     monkeypatch.setattr(
         jinn.session_view,
@@ -1780,7 +2059,12 @@ def test_no_episode_completion_render_is_suppressed_after_reopen(
     monkeypatch.setattr(
         jinn,
         "_user_line",
-        terminal_lines.append,
+        record_terminal_line,
+    )
+    monkeypatch.setattr(
+        jinn,
+        "_close_session_lifecycle",
+        observed_close,
     )
     runner = PickupRunner()
     jinn._runner = runner
@@ -1818,10 +2102,24 @@ def test_no_episode_completion_render_is_suppressed_after_reopen(
         worker.start()
         assert render_started.wait(timeout=2)
 
-        jinn._on_session_finalize(
-            session_id=session_id,
-            reason="old_session_complete",
+        def finalize_old():
+            try:
+                jinn._on_session_finalize(
+                    session_id=session_id,
+                    reason="old_session_complete",
+                )
+                completion_order.append("finalize_returned")
+            except BaseException as exc:
+                worker_errors.append(exc)
+            finally:
+                finalize_returned.set()
+
+        finalizer = threading.Thread(
+            name="old-no-episode-finalizer",
+            target=finalize_old,
         )
+        finalizer.start()
+        assert lifecycle_invalidated.wait(timeout=2)
         jinn._on_pre_llm_call(
             session_id=session_id,
             task_id="fresh-task",
@@ -1832,12 +2130,21 @@ def test_no_episode_completion_render_is_suppressed_after_reopen(
         fresh_state = jinn._session_states[session_id]
         fresh_lifecycle = jinn._session_lifecycle_tokens[session_id]
 
+        assert not finalize_returned.wait(timeout=0.2)
         release_render.set()
         worker.join(timeout=2)
+        finalizer.join(timeout=2)
 
         assert not worker.is_alive()
+        assert not finalizer.is_alive()
         assert worker_errors == []
-        assert terminal_lines == []
+        assert terminal_lines == [
+            "Jinn session complete\n  stale old completion"
+        ]
+        assert completion_order == [
+            "completion_rendered",
+            "finalize_returned",
+        ]
         assert jinn._session_states[session_id] is fresh_state
         assert jinn._session_lifecycle_tokens[session_id] is fresh_lifecycle
         assert jinn.buf.has_capture(
@@ -1849,6 +2156,8 @@ def test_no_episode_completion_render_is_suppressed_after_reopen(
         release_render.set()
         if "worker" in locals():
             worker.join(timeout=2)
+        if "finalizer" in locals():
+            finalizer.join(timeout=2)
         jinn._runner = None
 
 
@@ -2105,6 +2414,7 @@ def test_lifecycle_tracking_is_bounded_after_unique_session_cleanup():
         "_pickup_checkpoint_versions",
         "_session_lifecycle_tokens",
         "_session_state_tokens",
+        "_completion_leases",
     )
     assert sum(
         len(getattr(jinn, name, {}))
@@ -2126,11 +2436,12 @@ def test_host_internal_terminal_cleanup_cannot_leave_reopened_lifecycle(
     release_end_cleanup = threading.Event()
     logical_session_ids = []
     worker_errors = []
+    background_review = [False]
 
     monkeypatch.setattr(
         jinn,
         "is_background_review",
-        lambda: True,
+        lambda: background_review[0],
     )
 
     def blocking_payoff_lines(snapshot):
@@ -2142,6 +2453,15 @@ def test_host_internal_terminal_cleanup_cannot_leave_reopened_lifecycle(
         jinn.distill,
         "payoff_lines",
         blocking_payoff_lines,
+    )
+
+    jinn._runner = PickupRunner()
+    jinn._on_pre_llm_call(
+        session_id=parent_session_id,
+        task_id="parent-task",
+        turn_id="parent-turn",
+        user_message="parent turn",
+        is_first_turn=True,
     )
 
     def run_internal_session():
@@ -2167,16 +2487,23 @@ def test_host_internal_terminal_cleanup_cannot_leave_reopened_lifecycle(
         except BaseException as exc:
             worker_errors.append(exc)
 
-    jinn._runner = PickupRunner()
-    worker = threading.Thread(target=run_internal_session)
+    background_review[0] = True
+    worker = threading.Thread(
+        target=propagate_context_to_thread(run_internal_session)
+    )
     try:
         worker.start()
         assert end_cleanup_started.wait(timeout=2)
         assert len(logical_session_ids) == 1
+        assert any(
+            parent == parent_session_id
+            for parent, _thread_id in jinn._internal_sessions
+        )
         jinn._state_for(logical_session_ids[0])
         release_end_cleanup.set()
         worker.join(timeout=2)
     finally:
+        background_review[0] = False
         release_end_cleanup.set()
         worker.join(timeout=2)
         jinn._runner = None
@@ -2191,6 +2518,11 @@ def test_host_internal_terminal_cleanup_cannot_leave_reopened_lifecycle(
     assert not any(
         parent == parent_session_id
         for parent, _thread_id in jinn._internal_sessions
+    )
+    assert not any(
+        parent == parent_session_id
+        for parent, _thread_id
+        in jinn._internal_session_parent_tokens
     )
 
 

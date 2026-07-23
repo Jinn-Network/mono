@@ -25,6 +25,7 @@ import shlex
 import sys
 import threading
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -65,9 +66,11 @@ _degraded: Optional[str] = None
 # Per-session repo/activity evidence. Populated at session start and consumed
 # once at session end.
 _session_state_lock = threading.Lock()
+_completion_condition = threading.Condition(_session_state_lock)
 _session_states: Dict[str, Dict[str, Any]] = {}
 _session_lifecycle_tokens: Dict[str, object] = {}
 _session_state_tokens: Dict[str, object] = {}
+_completion_leases: Dict[_SessionLifecycleToken, int] = {}
 # Originating turn ownership for asynchronous post-hook callbacks. Keys use
 # the host session id because host-internal logical ids are plugin-owned and
 # must not be recreated merely to resolve a delayed callback.
@@ -80,6 +83,10 @@ _session_turn_lifecycle_owners: Dict[
 _pickup_checkpoints: Dict[str, Dict[str, Any]] = {}
 _internal_session_lock = threading.Lock()
 _internal_sessions: Dict[tuple[str, int], str] = {}
+_internal_session_parent_tokens: Dict[
+    tuple[str, int],
+    _SessionLifecycleToken,
+] = {}
 
 
 def _park_contribution_publication() -> None:
@@ -109,10 +116,14 @@ def _reset_session_state() -> None:
         _session_states.clear()
         _session_lifecycle_tokens.clear()
         _session_state_tokens.clear()
+        _completion_leases.clear()
         _session_turn_lifecycle_owners.clear()
         _pickup_checkpoints.clear()
+        _completion_condition.notify_all()
     with _internal_session_lock:
         _internal_sessions.clear()
+        _internal_session_parent_tokens.clear()
+    _foreground_parent_lifecycle.set(None)
     for session_id, lifecycle_token in closed_lifecycles:
         buf.discard_session(
             session_id,
@@ -250,6 +261,22 @@ class _SessionLifecycleToken:
     """Opaque identity for one active host session lifetime."""
 
 
+@dataclass(frozen=True)
+class _ParentLifecycleIdentity:
+    """Foreground lifecycle generation inherited by a review thread."""
+
+    session_id: str
+    lifecycle_token: _SessionLifecycleToken
+
+
+_foreground_parent_lifecycle: ContextVar[
+    Optional[_ParentLifecycleIdentity]
+] = ContextVar(
+    "jinn_foreground_parent_lifecycle",
+    default=None,
+)
+
+
 _STABLE_TASK_ID_UNSET = object()
 
 
@@ -267,7 +294,14 @@ class _CompletionFence:
 
     logical_session_id: str
     lifecycle_token: _SessionLifecycleToken
-    closed_by_pop: bool
+    parent_session_id: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class _CompletionLease:
+    """One admitted completion path that finalization must await."""
+
+    fence: _CompletionFence
 
 
 @dataclass(frozen=True)
@@ -276,28 +310,77 @@ class _PickupReservation:
     token: _SessionLifecycleToken
 
 
-def _session_identity(session_id: str) -> tuple[str, str, Optional[str]]:
+def _session_identity(
+    session_id: str,
+) -> Optional[
+    tuple[
+        str,
+        str,
+        Optional[str],
+        _SessionLifecycleToken,
+    ]
+]:
     """Separate host-internal review evidence from its foreground parent."""
     parent = session_id or "default"
     if not is_background_review():
-        return parent, "user", None
+        lifecycle_token = _session_lifecycle_token(parent)
+        _foreground_parent_lifecycle.set(
+            _ParentLifecycleIdentity(
+                session_id=parent,
+                lifecycle_token=lifecycle_token,
+            )
+        )
+        return parent, "user", None, lifecycle_token
+
+    parent_identity = _foreground_parent_lifecycle.get()
+    if (
+        parent_identity is None
+        or parent_identity.session_id != parent
+    ):
+        return None
     thread_id = threading.get_ident()
     key = (parent, thread_id)
-    with _internal_session_lock:
-        logical = _internal_sessions.get(key)
-        if logical is None:
-            suffix = hashlib.sha256(
-                f"{parent}:{thread_id}:{time.time_ns()}".encode("utf-8")
-            ).hexdigest()[:16]
-            logical = f"{parent[:96]}-host-internal-{suffix}"[:128]
-            _internal_sessions[key] = logical
-    return logical, "host-internal", parent[:128]
+    with _session_state_lock:
+        if (
+            _session_lifecycle_tokens.get(parent)
+            is not parent_identity.lifecycle_token
+        ):
+            return None
+        with _internal_session_lock:
+            logical = _internal_sessions.get(key)
+            if (
+                logical is None
+                or _internal_session_parent_tokens.get(key)
+                is not parent_identity.lifecycle_token
+            ):
+                suffix = hashlib.sha256(
+                    f"{parent}:{thread_id}:{time.time_ns()}".encode("utf-8")
+                ).hexdigest()[:16]
+                logical = f"{parent[:96]}-host-internal-{suffix}"[:128]
+                _internal_sessions[key] = logical
+                _internal_session_parent_tokens[key] = (
+                    parent_identity.lifecycle_token
+                )
+            lifecycle_token = _session_lifecycle_tokens.get(logical)
+            if not isinstance(
+                lifecycle_token,
+                _SessionLifecycleToken,
+            ):
+                lifecycle_token = _SessionLifecycleToken()
+                _session_lifecycle_tokens[logical] = lifecycle_token
+    return (
+        logical,
+        "host-internal",
+        parent[:128],
+        lifecycle_token,
+    )
 
 
 def _release_internal_session(
     parent_session_id: Optional[str],
     *,
     expected_logical_session_id: Optional[str] = None,
+    expected_parent_token: Optional[_SessionLifecycleToken] = None,
 ) -> None:
     if parent_session_id is None:
         return
@@ -309,21 +392,63 @@ def _release_internal_session(
             != expected_logical_session_id
         ):
             return
+        if (
+            expected_parent_token is not None
+            and _internal_session_parent_tokens.get(key)
+            is not expected_parent_token
+        ):
+            return
         _internal_sessions.pop(key, None)
+        _internal_session_parent_tokens.pop(key, None)
 
 
-def _release_all_internal_sessions(parent_session_id: str) -> list[str]:
+def _release_all_internal_sessions(
+    parent_session_id: str,
+    *,
+    expected_parent_token: Optional[_SessionLifecycleToken] = None,
+) -> list[str]:
     with _internal_session_lock:
         keys = [
             key
             for key in _internal_sessions
-            if key[0] == parent_session_id
+            if (
+                key[0] == parent_session_id
+                and (
+                    expected_parent_token is None
+                    or _internal_session_parent_tokens.get(key)
+                    is expected_parent_token
+                )
+            )
         ]
         logical_session_ids = [
             _internal_sessions.pop(key)
             for key in keys
         ]
+        for key in keys:
+            _internal_session_parent_tokens.pop(key, None)
     return logical_session_ids
+
+
+def _internal_sessions_for_parent(
+    parent_session_id: str,
+    parent_token: Optional[_SessionLifecycleToken],
+) -> list[str]:
+    """Snapshot exact-generation child ownership without releasing it."""
+    if parent_token is None:
+        return []
+    with _internal_session_lock:
+        return [
+            logical_session_id
+            for key, logical_session_id in _internal_sessions.items()
+            if (
+                key[0] == parent_session_id
+                and (
+                    parent_token is None
+                    or _internal_session_parent_tokens.get(key)
+                    is parent_token
+                )
+            )
+        ]
 
 
 def _session_lifecycle_token(
@@ -469,26 +594,59 @@ def _session_lifecycle_is_current(
         return _session_lifecycle_tokens.get(key) is token
 
 
-def _completion_fence_allows(fence: _CompletionFence) -> bool:
-    """Return whether a popped lifecycle may still publish completion effects."""
+def _acquire_completion_lease(
+    fence: _CompletionFence,
+) -> Optional[_CompletionLease]:
+    """Admit completion only while its exact lifecycle generation is current."""
     key = fence.logical_session_id or "default"
     with _session_state_lock:
-        current_token = _session_lifecycle_tokens.get(key)
-        if fence.closed_by_pop:
-            return current_token is None
-        return current_token is fence.lifecycle_token
+        if _session_lifecycle_tokens.get(key) is not fence.lifecycle_token:
+            return None
+        _completion_leases[fence.lifecycle_token] = (
+            _completion_leases.get(fence.lifecycle_token, 0) + 1
+        )
+        return _CompletionLease(fence=fence)
 
 
-def _emit_completion_if_current(
-    fence: _CompletionFence,
+def _release_completion_lease(lease: _CompletionLease) -> None:
+    fence = lease.fence
+    if fence.parent_session_id is not None:
+        _close_internal_session_control(
+            fence.logical_session_id,
+            fence.lifecycle_token,
+        )
+    token = fence.lifecycle_token
+    with _session_state_lock:
+        remaining = _completion_leases.get(token, 0) - 1
+        if remaining > 0:
+            _completion_leases[token] = remaining
+        else:
+            _completion_leases.pop(token, None)
+        _completion_condition.notify_all()
+
+
+def _wait_for_completion_leases(
+    lifecycle_tokens: list[Optional[_SessionLifecycleToken]],
+) -> None:
+    tokens = {
+        token
+        for token in lifecycle_tokens
+        if isinstance(token, _SessionLifecycleToken)
+    }
+    with _session_state_lock:
+        _completion_condition.wait_for(
+            lambda: not any(
+                _completion_leases.get(token, 0)
+                for token in tokens
+            )
+        )
+
+
+def _emit_completion(
     **render_args: Any,
 ) -> None:
-    """Render and publish completion only while its lifecycle remains current."""
-    if not _completion_fence_allows(fence):
-        return
+    """Render a terminal completion under an already-admitted lease."""
     rendered = session_view.render_complete(**render_args)
-    if not _completion_fence_allows(fence):
-        return
     _user_line(rendered)
 
 
@@ -778,10 +936,18 @@ def _merge_pickup_deliveries(
 
 def _close_session_lifecycle(
     session_id: str,
+    *,
+    expected_token: Optional[_SessionLifecycleToken] = None,
 ) -> Optional[_SessionLifecycleToken]:
     """Atomically invalidate and remove all host-owned session control state."""
     key = session_id or "default"
     with _session_state_lock:
+        current_token = _session_lifecycle_tokens.get(key)
+        if (
+            expected_token is not None
+            and current_token is not expected_token
+        ):
+            return None
         _session_states.pop(key, None)
         _session_state_tokens.pop(key, None)
         _pickup_checkpoints.pop(key, None)
@@ -795,6 +961,40 @@ def _close_session_lifecycle(
             )
             else None
         )
+
+
+def _finish_internal_session(
+    parent_session_id: Optional[str],
+    logical_session_id: str,
+    lifecycle_token: _SessionLifecycleToken,
+) -> None:
+    """Close child control state, then release its parent ownership."""
+    if parent_session_id is None:
+        return
+    _close_internal_session_control(
+        logical_session_id,
+        lifecycle_token,
+    )
+    _release_internal_session(
+        parent_session_id,
+        expected_logical_session_id=logical_session_id,
+    )
+
+
+def _close_internal_session_control(
+    logical_session_id: str,
+    lifecycle_token: _SessionLifecycleToken,
+) -> None:
+    """Close child-local state while parent ownership stays registered."""
+    closed_token = _close_session_lifecycle(
+        logical_session_id,
+        expected_token=lifecycle_token,
+    )
+    buf.discard_session(
+        logical_session_id,
+        lifecycle_token=closed_token or lifecycle_token,
+        include_legacy=True,
+    )
 
 
 def _record_activity(session_id: str, field: str, refs: list[str]) -> None:
@@ -854,23 +1054,43 @@ def _on_session_start(session_id: str = "", platform: str = "", **_: Any) -> Non
 
 
 def _on_session_finalize(session_id: str = "", **_: Any) -> None:
-    """Release control state at the real host session boundary."""
-    owned_session_ids = [
-        session_id or "default",
-        *_release_all_internal_sessions(session_id or "default"),
-    ]
+    """Invalidate one host generation and await its admitted completions."""
+    parent_session_id = session_id or "default"
+    parent_token = _close_session_lifecycle(parent_session_id)
+    internal_session_ids = _internal_sessions_for_parent(
+        parent_session_id,
+        parent_token,
+    )
     closed_lifecycles = [
         (
-            owned_session_id,
-            _close_session_lifecycle(owned_session_id),
+            parent_session_id,
+            parent_token,
         )
-        for owned_session_id in owned_session_ids
     ]
+    closed_lifecycles.extend(
+        (
+            internal_session_id,
+            _close_session_lifecycle(internal_session_id),
+        )
+        for internal_session_id in internal_session_ids
+    )
     for owned_session_id, lifecycle_token in closed_lifecycles:
         buf.discard_session(
             owned_session_id,
             lifecycle_token=lifecycle_token,
             include_legacy=True,
+        )
+    _wait_for_completion_leases(
+        [
+            lifecycle_token
+            for _owned_session_id, lifecycle_token
+            in closed_lifecycles
+        ]
+    )
+    if parent_token is not None:
+        _release_all_internal_sessions(
+            parent_session_id,
+            expected_parent_token=parent_token,
         )
 
 
@@ -885,8 +1105,15 @@ def _on_pre_llm_call(
     turn_id: str = "",
     **_: Any,
 ) -> Optional[Dict[str, str]]:
-    logical_session_id, session_kind, parent_session_id = _session_identity(session_id)
-    lifecycle_token = _session_lifecycle_token(logical_session_id)
+    identity = _session_identity(session_id)
+    if identity is None:
+        return None
+    (
+        logical_session_id,
+        session_kind,
+        parent_session_id,
+        lifecycle_token,
+    ) = identity
     if not _bind_session_turn_lifecycle(
         session_id,
         turn_id,
@@ -1162,7 +1389,7 @@ def _episode_test_runs(episode: Dict[str, Any]) -> list[Dict[str, Any]]:
     return runs
 
 
-def _on_session_end(
+def _complete_session_end(
     session_id: str = "",
     task_id: str = "",
     turn_id: str = "",
@@ -1191,10 +1418,6 @@ def _on_session_end(
         session_id,
         turn_id,
         expected_token=lifecycle_token,
-    )
-    _release_internal_session(
-        parent_session_id,
-        expected_logical_session_id=logical_session_id,
     )
     # Usage is native local telemetry, so show payoff independently of sharing
     # consent and before any capture-path early return.
@@ -1240,7 +1463,7 @@ def _on_session_end(
     if episode is None:
         state = _pop_state(
             logical_session_id,
-            close_lifecycle=session_kind == "host-internal",
+            close_lifecycle=False,
             expected_token=lifecycle_token,
         )
         if state is None:
@@ -1248,22 +1471,29 @@ def _on_session_end(
         completion_fence = _CompletionFence(
             logical_session_id=logical_session_id,
             lifecycle_token=lifecycle_token,
-            closed_by_pop=session_kind == "host-internal",
+            parent_session_id=parent_session_id,
         )
-        _emit_completion_if_current(
-            completion_fence,
-            summary=None,
-            activity=state.get("activity") or {},
-            capture_status="unavailable",
-            local_learning_status="unavailable",
-            contribution=None,
-            candidate_created=False,
+        completion_lease = _acquire_completion_lease(
+            completion_fence
         )
+        if completion_lease is None:
+            return
+        try:
+            _emit_completion(
+                summary=None,
+                activity=state.get("activity") or {},
+                capture_status="unavailable",
+                local_learning_status="unavailable",
+                contribution=None,
+                candidate_created=False,
+            )
+        finally:
+            _release_completion_lease(completion_lease)
         return
 
     state = _pop_state(
         logical_session_id,
-        close_lifecycle=session_kind == "host-internal",
+        close_lifecycle=False,
         expected_token=lifecycle_token,
     )
     if state is None:
@@ -1271,7 +1501,7 @@ def _on_session_end(
     completion_fence = _CompletionFence(
         logical_session_id=logical_session_id,
         lifecycle_token=lifecycle_token,
-        closed_by_pop=session_kind == "host-internal",
+        parent_session_id=parent_session_id,
     )
     snapshot = state.get("snapshot")
     try:
@@ -1312,59 +1542,100 @@ def _on_session_end(
         contribution_candidate=candidate,
         contribution_vetoed=vetoed,
     )
-    if result is None:
-        if not _completion_fence_allows(completion_fence):
-            return
-        fallback_path = distill.write_episode_fallback(episode)
-        learning_status = (
-            "off" if distill.cached_mode(_runner) == "off"
-            else "pending" if fallback_path is not None
-            else "unavailable"
-        )
-        activity = state.get("activity") or {}
-        _emit_completion_if_current(
-            completion_fence,
-            summary={
-                "searchedTerms": list(activity.get("searchedTerms") or []),
-                "providedPackets": [
-                    {"ref": ref, "title": ref} for ref in (activity.get("providedRefs") or [])
-                ],
-                "nothingFound": not bool(activity.get("providedRefs")),
-            },
-            activity=activity,
-            capture_status="captured-locally" if fallback_path is not None else "unavailable",
-            local_learning_status=learning_status,
-            contribution=None,
-            candidate_created=candidate is not None,
-        )
-    else:
-        contribution = result.get("contribution")
-        value = contribution.get("value") if isinstance(contribution, dict) else None
-        if (
-            vetoed
-            and isinstance(contribution, dict)
-            and contribution.get("status") in ("ok", "degraded")
-            and isinstance(value, dict)
-            and value.get("status") == "vetoed"
-        ):
-            _clear_veto(
-                logical_session_id,
-                expected_token=lifecycle_token,
-                allow_closed_lifecycle=session_kind == "host-internal",
+    completion_lease = _acquire_completion_lease(
+        completion_fence
+    )
+    if completion_lease is None:
+        return
+    try:
+        if result is None:
+            fallback_path = distill.write_episode_fallback(episode)
+            learning_status = (
+                "off" if distill.cached_mode(_runner) == "off"
+                else "pending" if fallback_path is not None
+                else "unavailable"
             )
-        learning_status = (
-            "off" if distill.cached_mode(_runner) == "off"
-            else "pending"
+            activity = state.get("activity") or {}
+            _emit_completion(
+                summary={
+                    "searchedTerms": list(activity.get("searchedTerms") or []),
+                    "providedPackets": [
+                        {"ref": ref, "title": ref} for ref in (activity.get("providedRefs") or [])
+                    ],
+                    "nothingFound": not bool(activity.get("providedRefs")),
+                },
+                activity=activity,
+                capture_status="captured-locally" if fallback_path is not None else "unavailable",
+                local_learning_status=learning_status,
+                contribution=None,
+                candidate_created=candidate is not None,
+            )
+        else:
+            contribution = result.get("contribution")
+            value = contribution.get("value") if isinstance(contribution, dict) else None
+            if (
+                vetoed
+                and isinstance(contribution, dict)
+                and contribution.get("status") in ("ok", "degraded")
+                and isinstance(value, dict)
+                and value.get("status") == "vetoed"
+            ):
+                _clear_veto(
+                    logical_session_id,
+                    expected_token=lifecycle_token,
+                )
+            learning_status = (
+                "off" if distill.cached_mode(_runner) == "off"
+                else "pending"
+            )
+            _emit_completion(
+                summary=result.get("summary"),
+                activity=state.get("activity") or {},
+                capture_status="captured",
+                local_learning_status=learning_status,
+                contribution=result.get("contribution"),
+                candidate_created=candidate is not None,
+            )
+    finally:
+        _release_completion_lease(completion_lease)
+
+
+def _on_session_end(
+    session_id: str = "",
+    task_id: str = "",
+    turn_id: str = "",
+    completed: bool = False,
+    interrupted: bool = False,
+    skills_loadout: Optional[list] = None,
+    input_tokens: Optional[int] = None,
+    output_tokens: Optional[int] = None,
+    **kwargs: Any,
+) -> None:
+    """Run completion, retaining internal ownership through all cleanup."""
+    owner = _post_hook_lifecycle(session_id, turn_id)
+    if owner is None:
+        return
+    host_session_id = session_id or "default"
+    is_internal = owner.logical_session_id != host_session_id
+    try:
+        _complete_session_end(
+            session_id=session_id,
+            task_id=task_id,
+            turn_id=turn_id,
+            completed=completed,
+            interrupted=interrupted,
+            skills_loadout=skills_loadout,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            **kwargs,
         )
-        _emit_completion_if_current(
-            completion_fence,
-            summary=result.get("summary"),
-            activity=state.get("activity") or {},
-            capture_status="captured",
-            local_learning_status=learning_status,
-            contribution=result.get("contribution"),
-            candidate_created=candidate is not None,
-        )
+    finally:
+        if is_internal:
+            _finish_internal_session(
+                host_session_id[:128],
+                owner.logical_session_id,
+                owner.lifecycle_token,
+            )
 
 
 # ── Slash commands ───────────────────────────────────────────────────────────
