@@ -69,6 +69,30 @@ export interface AttemptRepositoryIdentity {
   readonly remoteUrlHash: string;
 }
 
+export interface MarketplaceTaskProvenance {
+  readonly creationTransactionHash: string;
+  readonly creationBlockNumber: number;
+  readonly solverNetManifestCid?: string;
+}
+
+export interface MarketplaceAdoptionReceiptState
+  extends MarketplaceTaskProvenance {
+  readonly schemaVersion: 'jinn-autopilot-marketplace-adoption-state.v1';
+  readonly role: 'solution';
+  readonly taskId: string;
+  readonly attemptIndex: number;
+  readonly requestId: string;
+  readonly deliveryEnvelopeCid: string;
+  readonly disposition: 'accepted' | 'rejected';
+  readonly commentId: number;
+  readonly resultingHead?: string;
+  readonly reviewAttemptId?: string;
+  readonly reviewManifestPath?: string;
+  readonly reviewGeneration?: string;
+  readonly reviewRefOid?: string;
+  readonly recordedAt: string;
+}
+
 export type AttemptExecution =
   | { readonly backend: 'local' }
   | {
@@ -81,7 +105,11 @@ export type AttemptExecution =
       readonly requestId?: string;
       readonly deliveryTx?: string;
       readonly deliveryEnvelopeCid?: string;
+      readonly creationTransactionHash?: string;
+      readonly creationBlockNumber?: number;
+      readonly solverNetManifestCid?: string;
       readonly adoptionReceipt?: string;
+      readonly adoptionReceiptState?: MarketplaceAdoptionReceiptState;
     };
 
 export interface AttemptManifest {
@@ -224,7 +252,14 @@ function exactKeys(
       'requestId',
       'deliveryTx',
       'deliveryEnvelopeCid',
+      'creationTransactionHash',
+      'creationBlockNumber',
+      'solverNetManifestCid',
       'adoptionReceipt',
+      'adoptionReceiptState',
+      'resultingHead',
+      'reviewAttemptId',
+      'reviewManifestPath',
       'childStartedAt',
       'childExitedAt',
     ].includes(key));
@@ -331,6 +366,124 @@ function nonNegativeInteger(value: unknown, name: string): number {
   return value;
 }
 
+function transactionHash(value: unknown, name: string): string {
+  const hash = stringField(value, name);
+  if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) throw new Error(`Invalid ${name}`);
+  return hash;
+}
+
+function decodeAdoptionReceiptState(
+  value: unknown,
+): MarketplaceAdoptionReceiptState {
+  const state = record(value, 'marketplace adoption receipt state');
+  exactKeys(state, [
+    'schemaVersion',
+    'role',
+    'taskId',
+    'attemptIndex',
+    'requestId',
+    'deliveryEnvelopeCid',
+    'creationTransactionHash',
+    'creationBlockNumber',
+    'solverNetManifestCid',
+    'disposition',
+    'commentId',
+    'resultingHead',
+    'reviewAttemptId',
+    'reviewManifestPath',
+    'reviewGeneration',
+    'reviewRefOid',
+    'recordedAt',
+  ], 'marketplace adoption receipt state');
+  if (
+    state.schemaVersion !== 'jinn-autopilot-marketplace-adoption-state.v1'
+    || state.role !== 'solution'
+    || (state.disposition !== 'accepted' && state.disposition !== 'rejected')
+  ) {
+    throw new Error('Invalid marketplace adoption receipt state');
+  }
+  const resultingHead = state.resultingHead === undefined
+    ? undefined
+    : gitOid(stringField(state.resultingHead, 'adoption resulting head'));
+  const reviewAttemptId = state.reviewAttemptId === undefined
+    ? undefined
+    : uuid(
+      stringField(state.reviewAttemptId, 'adoption review attempt ID'),
+      'adoption review attempt ID',
+    );
+  const reviewManifestPath = state.reviewManifestPath === undefined
+    ? undefined
+    : absolutePath(state.reviewManifestPath, 'adoption review manifest path');
+  const reviewGeneration = state.reviewGeneration === undefined
+    ? undefined
+    : uuid(
+      stringField(state.reviewGeneration, 'adoption review generation'),
+      'adoption review generation',
+    );
+  const reviewRefOid = state.reviewRefOid === undefined
+    ? undefined
+    : gitOid(stringField(state.reviewRefOid, 'adoption review ref OID'));
+  const reviewFields = [
+    reviewAttemptId,
+    reviewManifestPath,
+    reviewGeneration,
+    reviewRefOid,
+  ].filter((field) => field !== undefined).length;
+  if (
+    (reviewFields !== 0 && reviewFields !== 4)
+    || (
+      state.disposition === 'accepted'
+      && (resultingHead === undefined || reviewFields !== 4)
+    )
+  ) {
+    throw new Error('Marketplace adoption review identity is incomplete');
+  }
+  return {
+    schemaVersion: state.schemaVersion,
+    role: state.role,
+    taskId: stringField(state.taskId, 'adoption task ID'),
+    attemptIndex: nonNegativeInteger(
+      state.attemptIndex,
+      'adoption attempt index',
+    ),
+    requestId: stringField(state.requestId, 'adoption request ID'),
+    deliveryEnvelopeCid: stringField(
+      state.deliveryEnvelopeCid,
+      'adoption delivery envelope CID',
+    ),
+    creationTransactionHash: transactionHash(
+      state.creationTransactionHash,
+      'adoption Task creation transaction',
+    ),
+    creationBlockNumber: nonNegativeInteger(
+      state.creationBlockNumber,
+      'adoption Task creation block number',
+    ),
+    ...(state.solverNetManifestCid === undefined
+      ? {}
+      : {
+          solverNetManifestCid: stringField(
+            state.solverNetManifestCid,
+            'adoption SolverNet manifest CID',
+          ),
+        }),
+    disposition: state.disposition,
+    commentId: positiveInteger(state.commentId, 'adoption comment ID'),
+    ...(resultingHead === undefined ? {} : { resultingHead }),
+    ...(reviewAttemptId === undefined
+      ? {}
+      : {
+          reviewAttemptId,
+          reviewManifestPath: reviewManifestPath!,
+          reviewGeneration: reviewGeneration!,
+          reviewRefOid: reviewRefOid!,
+        }),
+    recordedAt: isoTimestamp(
+      stringField(state.recordedAt, 'adoption recorded timestamp'),
+    ),
+  };
+}
+
 function decodeExecution(value: unknown): AttemptExecution {
   if (value === undefined) return { backend: 'local' };
   const execution = record(value, 'attempt execution');
@@ -352,7 +505,11 @@ function decodeExecution(value: unknown): AttemptExecution {
     'requestId',
     'deliveryTx',
     'deliveryEnvelopeCid',
+    'creationTransactionHash',
+    'creationBlockNumber',
+    'solverNetManifestCid',
     'adoptionReceipt',
+    'adoptionReceiptState',
   ], 'marketplace attempt execution');
   const taskId = execution.taskId === undefined
     ? undefined
@@ -381,9 +538,31 @@ function decodeExecution(value: unknown): AttemptExecution {
       execution.deliveryEnvelopeCid,
       'marketplace delivery envelope CID',
     );
+  const creationTransactionHash =
+    execution.creationTransactionHash === undefined
+      ? undefined
+      : transactionHash(
+          execution.creationTransactionHash,
+          'marketplace Task creation transaction',
+        );
+  const creationBlockNumber = execution.creationBlockNumber === undefined
+    ? undefined
+    : nonNegativeInteger(
+        execution.creationBlockNumber,
+        'marketplace Task creation block number',
+      );
+  const solverNetManifestCid = execution.solverNetManifestCid === undefined
+    ? undefined
+    : stringField(
+        execution.solverNetManifestCid,
+        'marketplace SolverNet manifest CID',
+      );
   const adoptionReceipt = execution.adoptionReceipt === undefined
     ? undefined
     : stringField(execution.adoptionReceipt, 'marketplace adoption receipt');
+  const adoptionReceiptState = execution.adoptionReceiptState === undefined
+    ? undefined
+    : decodeAdoptionReceiptState(execution.adoptionReceiptState);
   const submitted = [
     taskId,
     taskCid,
@@ -398,8 +577,34 @@ function decodeExecution(value: unknown): AttemptExecution {
       'Marketplace attempt index and request ID must appear together',
     );
   }
+  if (
+    (creationTransactionHash === undefined)
+      !== (creationBlockNumber === undefined)
+    || (
+      solverNetManifestCid !== undefined
+      && creationTransactionHash === undefined
+    )
+  ) {
+    throw new Error('Marketplace Task creation provenance is incomplete');
+  }
   if (attemptIndex !== undefined && submitted !== 4) {
     throw new Error('Marketplace request correlation requires a submitted handle');
+  }
+  if (
+    adoptionReceiptState !== undefined
+    && (
+      adoptionReceipt === undefined
+      || taskId !== adoptionReceiptState.taskId
+      || attemptIndex !== adoptionReceiptState.attemptIndex
+      || requestId !== adoptionReceiptState.requestId
+      || deliveryEnvelopeCid !== adoptionReceiptState.deliveryEnvelopeCid
+      || creationTransactionHash
+        !== adoptionReceiptState.creationTransactionHash
+      || creationBlockNumber !== adoptionReceiptState.creationBlockNumber
+      || solverNetManifestCid !== adoptionReceiptState.solverNetManifestCid
+    )
+  ) {
+    throw new Error('Marketplace adoption receipt state does not match execution');
   }
   return {
     backend,
@@ -416,7 +621,17 @@ function decodeExecution(value: unknown): AttemptExecution {
       : { attemptIndex, requestId: requestId! }),
     ...(deliveryTx === undefined ? {} : { deliveryTx }),
     ...(deliveryEnvelopeCid === undefined ? {} : { deliveryEnvelopeCid }),
+    ...(creationTransactionHash === undefined
+      ? {}
+      : {
+          creationTransactionHash,
+          creationBlockNumber: creationBlockNumber!,
+        }),
+    ...(solverNetManifestCid === undefined
+      ? {}
+      : { solverNetManifestCid }),
     ...(adoptionReceipt === undefined ? {} : { adoptionReceipt }),
+    ...(adoptionReceiptState === undefined ? {} : { adoptionReceiptState }),
   };
 }
 
