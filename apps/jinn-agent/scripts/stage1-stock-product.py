@@ -103,8 +103,8 @@ NO_RESULT_MESSAGE = (
     "double-counts checkpoint epochs on Base Sepolia."
 )
 
-# Scenario 4 (corpus unavailable): content is irrelevant — the corpus 503s
-# before any query would matter — but still evidence-shaped, for realism.
+# Scenario 4 (public corpus unavailable): reuses the dashboard vocabulary so
+# the healthy local source proves federated pickup survives a public 503.
 UNAVAILABLE_MESSAGE = "Offline corpus investigation for a flaky dashboard test."
 
 MISSING_LAYER_MESSAGE = "Preserve local capture"
@@ -864,7 +864,7 @@ def main() -> None:
         assert "jinn-installed skill" not in parked_history.lower()
         assert "skills install" not in parked_history.lower()
 
-        # ── Scenario 4: corpus 503 — session proceeds, degraded, no injection ──
+        # ── Scenario 4: public corpus 503 — healthy local pickup still delivers ──
         fixture.unavailable = True
         unavailable_summary, unavailable_context, _unavailable_marker, _unavailable_mid = finish_session(
             jinn,
@@ -872,11 +872,14 @@ def main() -> None:
             task_id="task-corpus-unavailable",
             repo=clean_repo,
             message=UNAVAILABLE_MESSAGE,
-            expected_pickup=False,
+            expected_pickup=True,
         )
         fixture.unavailable = False
-        assert unavailable_context is None
-        assert "knowledge searched · nothing relevant found" in unavailable_summary.lower()
+        assert unavailable_context is not None
+        assert "source: local-episode:stage1-target-task-" in unavailable_context
+        assert SOURCE_REF not in unavailable_context
+        assert "knowledge searched" in unavailable_summary.lower()
+        assert "provided 1" in unavailable_summary.lower()
 
         local_layer_bin = Path(jinn.jinn_layer.resolve_binary().argv[0])
         hidden_layer_bin = local_layer_bin.with_name(".jinn-layer-stage1-hidden")
@@ -974,15 +977,25 @@ def main() -> None:
             assert episode["trajectory"]
             assert all(str(span["startTimeUnixNano"]).isdigit() for span in episode["trajectory"])
 
-        # (6) The target-task episode's activity carries populated
-        # searchedTerms/providedRefs; every other episode's providedRefs is
-        # honestly empty.
+        # (6) The target-task episode records the public delivery, while the
+        # public-outage episode records its healthy local fallback. Every
+        # other episode's providedRefs remains honestly empty.
         target_episode = episode_by_provided_ref(episodes, SOURCE_REF)
         assert target_episode is not None, [e.get("activity") for e in episodes]
         assert target_episode["activity"]["searchedTerms"], target_episode["activity"]
         assert target_episode["activity"]["providedRefs"] == [SOURCE_REF]
+        unavailable_episode = next(
+            episode
+            for episode in episodes
+            if episode["session"]["sessionId"] == "stage1-corpus-unavailable"
+        )
+        unavailable_refs = unavailable_episode["activity"]["providedRefs"]
+        assert len(unavailable_refs) == 1, unavailable_episode["activity"]
+        assert unavailable_refs[0].startswith(
+            "local-episode:stage1-target-task-"
+        ), unavailable_episode["activity"]
         for episode in episodes:
-            if episode is target_episode:
+            if episode is target_episode or episode is unavailable_episode:
                 continue
             assert episode.get("activity", {}).get("providedRefs") in ([], None), episode["activity"]
 
