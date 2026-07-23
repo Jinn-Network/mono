@@ -12,7 +12,7 @@
  *     since emit-time's nested walker is content-based (below) and doesn't
  *     independently classify nested key NAMES.
  *   - Emit-time (buildScrubPipeline().run() → scrub/pipeline.ts) is
- *     content-based (openredaction + plain-patterns + secretlint) and walks
+ *     content-based (owned detectors + secretlint) and walks
  *     string leaves of nested object/array attribute values, keyed by the
  *     top-level attribute name for key-policy classification. This is the
  *     stage that reaches secrets embedded inside `tool.args` (an object,
@@ -80,8 +80,8 @@ describe('transcript-to-spans secret scrub (AC-3)', () => {
         // A parsed claude-code/codex tool_call span's tool.args is an
         // object per DR-2026-07-14 — this is the production shape. The
         // apiKey value here is deliberately low-entropy so it would NOT be
-        // caught by the emit-time content-based detectors (openredaction /
-        // secretlint / plain-patterns); only key-name matching catches it.
+        // caught by the emit-time content-based detectors; only key-name
+        // matching catches it.
         'tool.args': { apiKey: 'low-entropy-value', command: 'echo hi' },
         'jinn.transcript.sourceFormat': 'claude-code-stream-json',
         'jinn.transcript.parser': 'claude-code-stream-json',
@@ -112,10 +112,16 @@ describe('transcript-to-spans secret scrub (AC-3)', () => {
 
     const scrubbedArgs = attributes['tool.args'] as { command: string };
     expect(scrubbedArgs.command).not.toContain(GH_TOKEN);
-    // Caught by openredaction's structured GITHUB_TOKEN detector (kind: 'pii') —
-    // confirmed empirically; secretlint's rule set does not independently flag
-    // this exact shape once openredaction has already matched it upstream.
-    expect(redactions.some((r) => r.key === 'tool.args' && r.detail === 'GITHUB_TOKEN')).toBe(true);
+    // The owned gitleaks detector reports the stable GitHub PAT label.
+    expect(
+      redactions.some(
+        (r) =>
+          r.key === 'tool.args' &&
+          r.stage === 'gitleaks' &&
+          r.kind === 'secret' &&
+          r.detail === 'github-pat',
+      ),
+    ).toBe(true);
     // jinn.* structural attrs stay raw — the safe-key policy bypasses scrub for them.
     expect(attributes['jinn.transcript.sourceFormat']).toBe('codex-exec-json');
   });
