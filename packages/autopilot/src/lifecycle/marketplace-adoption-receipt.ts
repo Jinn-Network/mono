@@ -50,7 +50,7 @@ export interface AdoptionReceiptCommentPage {
 export interface AdoptionReceiptExactFacts {
   readonly role: ReceiptRole;
   readonly correlation: AutopilotCorrelation;
-  /** Exact observable PR head at which this receipt is authoritative. */
+  /** Exact PR head described by and correlated with this receipt. */
   readonly prHead: string;
 }
 
@@ -95,6 +95,7 @@ export type AdoptionReceiptPendingReason =
 
 export type AdoptionReceiptContradictionReason =
   | 'accepted-and-rejected'
+  | 'correlation-mismatch'
   | 'different-accepted-receipts'
   | 'different-rejected-receipts';
 
@@ -160,6 +161,11 @@ export class AdoptionReceiptPublicationError extends Error {
 export interface PublishAdoptionReceiptInput {
   readonly receipt: AutopilotAdoptionReceipt;
   readonly exactFacts: AdoptionReceiptExactFacts;
+  /**
+   * Current PR head expected for the guarded comment write. This is separate
+   * from the head described by a stale-head rejection receipt.
+   */
+  readonly expectedPublicationHead: string;
   readonly allowedAuthors: readonly string[];
   readonly publisherLogin: string;
 }
@@ -352,6 +358,19 @@ function receiptMatchesExactFacts(
     );
 }
 
+function receiptMatchesStableDeliveryIdentity(
+  receipt: AutopilotAdoptionReceipt,
+  exactFacts: AdoptionReceiptExactFacts,
+): boolean {
+  const expected = exactFacts.correlation;
+  return receipt.role === exactFacts.role
+    && receipt.taskId === expected.taskId
+    && receipt.attemptIndex === expected.attemptIndex
+    && receipt.requestId === expected.requestId
+    && receipt.deliveryEnvelopeCid === expected.deliveryEnvelopeCid
+    && receipt.v2AttemptId === expected.v2AttemptId;
+}
+
 async function listAllComments(
   prNumber: number,
   ports: AdoptionReceiptReadPorts,
@@ -403,6 +422,10 @@ export async function readAdoptionReceiptState(
 ): Promise<AdoptionReceiptState> {
   const allowed = new Set(allowedAuthors.map(normalizeLogin).filter(Boolean));
   const comments = await listAllComments(exactFacts.correlation.prNumber, ports);
+  const candidates: Array<{
+    readonly comment: AdoptionReceiptComment;
+    readonly parsed: ParsedAdoptionReceiptComment;
+  }> = [];
   const verified: Array<{
     readonly comment: AdoptionReceiptComment;
     readonly parsed: ParsedAdoptionReceiptComment;
@@ -414,10 +437,37 @@ export async function readAdoptionReceiptState(
     const parsed = parseAdoptionReceiptComment(comment.body);
     if (
       parsed === null
-      || !receiptMatchesExactFacts(parsed.receipt, exactFacts)
+      || !receiptMatchesStableDeliveryIdentity(parsed.receipt, exactFacts)
     ) {
       continue;
     }
+    candidates.push({ comment, parsed });
+  }
+
+  const candidateDispositions = new Set(
+    candidates.map(({ parsed }) => parsed.receipt.disposition),
+  );
+  if (
+    candidateDispositions.has('accepted')
+    && candidateDispositions.has('rejected')
+  ) {
+    return {
+      status: 'contradiction',
+      reason: 'accepted-and-rejected',
+      comments: candidates.map(({ comment }) => comment),
+    };
+  }
+  if (candidates.some(
+    ({ parsed }) => !receiptMatchesExactFacts(parsed.receipt, exactFacts),
+  )) {
+    return {
+      status: 'contradiction',
+      reason: 'correlation-mismatch',
+      comments: candidates.map(({ comment }) => comment),
+    };
+  }
+
+  for (const { comment, parsed } of candidates) {
     if (!await ports.verifyReceiptFacts({
       exactFacts,
       receipt: parsed.receipt,
@@ -574,23 +624,23 @@ export async function publishAdoptionReceipt(
   }
 
   const firstHead = await ports.readCurrentPrHead(receipt.prNumber);
-  if (firstHead !== input.exactFacts.prHead) {
+  if (firstHead !== input.expectedPublicationHead) {
     return publicationError(
       'stale-head',
-      `Expected PR head ${input.exactFacts.prHead}, observed ${firstHead}`,
+      `Expected publication head ${input.expectedPublicationHead}, observed ${firstHead}`,
     );
   }
   const currentHead = await ports.readCurrentPrHead(receipt.prNumber);
-  if (currentHead !== input.exactFacts.prHead) {
+  if (currentHead !== input.expectedPublicationHead) {
     return publicationError(
       'stale-head',
-      `Expected PR head ${input.exactFacts.prHead}, observed ${currentHead}`,
+      `Expected publication head ${input.expectedPublicationHead}, observed ${currentHead}`,
     );
   }
 
   const created = await ports.createPrComment({
     prNumber: receipt.prNumber,
-    expectedHead: input.exactFacts.prHead,
+    expectedHead: input.expectedPublicationHead,
     body: formatAdoptionReceiptComment(receipt),
   });
 

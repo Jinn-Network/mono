@@ -309,7 +309,10 @@ describe('readAdoptionReceiptState', () => {
       { ...exact, prHead: OTHER_HEAD },
       ALLOWED_AUTHORS,
       ports,
-    )).toEqual({ status: 'pending', reason: 'not-found' });
+    )).toMatchObject({
+      status: 'contradiction',
+      reason: 'correlation-mismatch',
+    });
   });
 
   it('deduplicates duplicate events and paginates until the exact comment is found', async () => {
@@ -340,11 +343,7 @@ describe('readAdoptionReceiptState', () => {
 
   it('fails closed on accepted/rejected and different-accepted contradictions', async () => {
     const accepted = acceptedSolution();
-    const rejected = rejectedSolution({
-      resultingHead: RESULTING_HEAD,
-      reviewGeneration: REVIEW_GENERATION,
-      reviewRefOid: REVIEW_REF_OID,
-    });
+    const rejected = rejectedSolution();
     const mixed = new MemoryAdoptionReceiptPorts();
     mixed.comments.push(comment(1, accepted), comment(2, rejected));
     expect(await readAdoptionReceiptState(
@@ -370,6 +369,38 @@ describe('readAdoptionReceiptState', () => {
       reason: 'different-accepted-receipts',
     });
   });
+
+  it('fails closed on same-delivery claim, PR, head, and review mismatches', async () => {
+    for (const [exact, mismatched] of [
+      [
+        acceptedSolution(),
+        acceptedSolution({ claimOid: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }),
+      ],
+      [acceptedSolution(), acceptedSolution({ prNumber: 2102 })],
+      [acceptedSolution(), acceptedSolution({ expectedHead: OTHER_HEAD })],
+      [acceptedSolution(), acceptedSolution({ resultingHead: OTHER_HEAD })],
+      [acceptedVerdict(), acceptedVerdict({ reviewedHead: OTHER_HEAD })],
+      [
+        acceptedVerdict(),
+        acceptedVerdict({
+          reviewGeneration: '123e4567-e89b-42d3-a456-426614174002',
+        }),
+      ],
+      [acceptedVerdict(), acceptedVerdict({ reviewRefOid: OTHER_HEAD })],
+    ]) {
+      const ports = new MemoryAdoptionReceiptPorts();
+      ports.comments.push(comment(1, mismatched));
+
+      expect(await readAdoptionReceiptState(
+        factsFor(exact),
+        ALLOWED_AUTHORS,
+        ports,
+      )).toMatchObject({
+        status: 'contradiction',
+        reason: 'correlation-mismatch',
+      });
+    }
+  });
 });
 
 describe('publishAdoptionReceipt', () => {
@@ -388,6 +419,7 @@ describe('publishAdoptionReceipt', () => {
         {
           receipt,
           exactFacts,
+          expectedPublicationHead: exactFacts.prHead,
           allowedAuthors: ALLOWED_AUTHORS,
           publisherLogin: 'Jinn-Autopilot',
         },
@@ -413,6 +445,7 @@ describe('publishAdoptionReceipt', () => {
       {
         receipt,
         exactFacts: factsFor(receipt),
+        expectedPublicationHead: factsFor(receipt).prHead,
         allowedAuthors: ALLOWED_AUTHORS,
         publisherLogin: 'jinn-autopilot',
       },
@@ -433,6 +466,7 @@ describe('publishAdoptionReceipt', () => {
       {
         receipt,
         exactFacts: factsFor(receipt),
+        expectedPublicationHead: EXPECTED_HEAD,
         allowedAuthors: ALLOWED_AUTHORS,
         publisherLogin: 'jinn-autopilot',
       },
@@ -443,6 +477,7 @@ describe('publishAdoptionReceipt', () => {
       {
         receipt,
         exactFacts: factsFor(receipt),
+        expectedPublicationHead: EXPECTED_HEAD,
         allowedAuthors: ALLOWED_AUTHORS,
         publisherLogin: 'jinn-autopilot',
       },
@@ -463,6 +498,7 @@ describe('publishAdoptionReceipt', () => {
         {
           receipt,
           exactFacts: factsFor(receipt),
+          expectedPublicationHead: RESULTING_HEAD,
           allowedAuthors: ALLOWED_AUTHORS,
           publisherLogin: 'jinn-autopilot',
         },
@@ -488,6 +524,7 @@ describe('publishAdoptionReceipt', () => {
       {
         receipt: accepted,
         exactFacts: factsFor(accepted),
+        expectedPublicationHead: RESULTING_HEAD,
         allowedAuthors: ALLOWED_AUTHORS,
         publisherLogin: 'jinn-autopilot',
       },
@@ -504,6 +541,7 @@ describe('publishAdoptionReceipt', () => {
       {
         receipt: accepted,
         exactFacts: factsFor(accepted),
+        expectedPublicationHead: RESULTING_HEAD,
         allowedAuthors: ALLOWED_AUTHORS,
         publisherLogin: 'jinn-autopilot',
       },
@@ -518,6 +556,7 @@ describe('publishAdoptionReceipt', () => {
       {
         receipt: accepted,
         exactFacts: factsFor(accepted),
+        expectedPublicationHead: RESULTING_HEAD,
         allowedAuthors: ALLOWED_AUTHORS,
         publisherLogin: 'jinn-autopilot',
       },
@@ -525,5 +564,41 @@ describe('publishAdoptionReceipt', () => {
     )).rejects.toMatchObject({
       code: 'receipt-contradiction',
     } satisfies Partial<AdoptionReceiptPublicationError>);
+  });
+
+  it('publishes stale-head rejections at a separate current write-fence head', async () => {
+    for (const receipt of [
+      rejectedSolution({
+        reason: 'stale-head',
+        detail: 'The implementation head moved before adoption.',
+      }),
+      rejectedVerdict({
+        reason: 'stale-head',
+        detail: 'The reviewed head moved before verdict adoption.',
+      }),
+    ]) {
+      const exactFacts = factsFor(receipt);
+      const ports = new MemoryAdoptionReceiptPorts();
+      ports.currentHeads = [OTHER_HEAD, OTHER_HEAD];
+
+      const result = await publishAdoptionReceipt(
+        {
+          receipt,
+          exactFacts,
+          expectedPublicationHead: OTHER_HEAD,
+          allowedAuthors: ALLOWED_AUTHORS,
+          publisherLogin: 'jinn-autopilot',
+        },
+        ports,
+      );
+
+      expect(result.status).toBe('published');
+      expect(ports.createCalls).toHaveLength(1);
+      expect(ports.createCalls[0]?.expectedHead).toBe(OTHER_HEAD);
+      expect(ports.verificationCalls).toContainEqual({
+        exactFacts,
+        receipt,
+      });
+    }
   });
 });
