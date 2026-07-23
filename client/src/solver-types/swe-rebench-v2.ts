@@ -170,12 +170,11 @@ interface InternalSweRebenchV2GeneratorConfig extends SweRebenchV2AutoConfig {
 }
 
 export function defaultStateDir(): string {
-  // JINN_STATE_DIR: single volume-aware state root (config.ts). All 7 callers
-  // funnel through `process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ?? defaultStateDir()`,
-  // so the per-key env still wins; here the legacy fallback becomes root-aware.
-  const stateRoot = process.env['JINN_STATE_DIR'];
-  if (stateRoot) return join(stateRoot, 'swe-rebench-v2');
-  return join(process.env['HOME'] ?? homedir(), '.jinn-client', 'swe-rebench-v2');
+  // Legacy constant only. Volume / per-key resolution lives in loadConfig
+  // (`config.sweRebenchV2StateDir`). Callers must not use
+  // `process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ?? defaultStateDir()` in
+  // production — that idiom is retired (#1000).
+  return join(homedir(), '.jinn-client', 'swe-rebench-v2');
 }
 
 /**
