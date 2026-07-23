@@ -339,6 +339,66 @@ function validateDerivations(
         ),
       );
     }
+
+    if (entity["@id"] === "./" && activity) {
+      const source =
+        predecessors.length === 1
+          ? graph.byId.get(predecessors[0]!)
+          : undefined;
+      const policyIds = rawReferences(activity.instrument) ?? [];
+      const policy =
+        policyIds.length === 1 ? graph.byId.get(policyIds[0]!) : undefined;
+      const countIds =
+        rawReferences(activity["jinn:dispositionCount"]) ?? [];
+      const counts = resolved(graph, countIds);
+      const mappings = graph.entities.filter((candidate) => {
+        if (candidate === entity) return false;
+        const generatedBy =
+          rawReferences(candidate["prov:wasGeneratedBy"]) ?? [];
+        const derivedFrom =
+          rawReferences(candidate["prov:wasDerivedFrom"]) ?? [];
+        return (
+          generatedBy.includes(activity["@id"]) && derivedFrom.length > 0
+        );
+      });
+      const generatedEntities = graph.entities.filter((candidate) =>
+        (rawReferences(candidate["prov:wasGeneratedBy"]) ?? []).includes(
+          activity["@id"],
+        ),
+      );
+      const circularDigestDeclared = [activity, ...generatedEntities].some(
+        (candidate) =>
+          candidate.derivedMetadataDigest !== undefined ||
+          candidate["jinn:derivedMetadataDigest"] !== undefined,
+      );
+
+      if (
+        !source ||
+        !contentBound(source) ||
+        !policy ||
+        !contentBound(policy) ||
+        countIds.length === 0 ||
+        countIds.length !== counts.length ||
+        counts.some(
+          (count) =>
+            !hasType(count, "PropertyValue") ||
+            typeof count.name !== "string" ||
+            typeof count.value !== "number" ||
+            count.value < 0,
+        ) ||
+        mappings.length === 0 ||
+        circularDigestDeclared
+      ) {
+        diagnostics.push(
+          issue(
+            "DERIVATION_PROVENANCE_INVALID",
+            graphPath(graph, activity),
+            "Public derivation requires a private source commitment, content-bound policy, artifact mapping, disposition counts, and no circular derived metadata digest.",
+            activity["@id"],
+          ),
+        );
+      }
+    }
   }
 }
 

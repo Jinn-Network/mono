@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "jinn.fixture.public-execution-policy.v1",
+  "name": "Synthetic structure-aware public execution policy",
+  "version": "1.0.0",
+  "rules": [
+    {
+      "class": "absolute-path",
+      "disposition": "redact"
+    },
+    {
+      "class": "credential",
+      "disposition": "redact"
+    },
+    {
+      "class": "protocol-commitment",
+      "disposition": "retain"
+    }
+  ]
+}
