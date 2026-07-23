@@ -1038,6 +1038,7 @@ __metadata:
     "@jinn-network/jinn-layer": "portal:../packages/layer"
     "@jinn-network/plugin": "npm:0.1.0"
     "@jinn-network/sdk": "portal:../packages/sdk"
+    "@lmoe/gliner-onnx": "npm:0.1.0"
     "@modelcontextprotocol/sdk": "npm:^1.27.1"
     "@msgpack/msgpack": "npm:^3.0.0"
     "@noble/ed25519": "npm:^3.1.0"
