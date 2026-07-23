@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve as resolvePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   distillationSourceIds,
@@ -28,9 +29,17 @@ import { fetchHfWithRetry } from '../src/harnesses/impls/swe-rebench-v2-evaluato
 
 const DATASET = 'nebius/SWE-rebench-leaderboard';
 const SOLVER_TYPE = 'swe-rebench-v2.v1';
-const VERSION = 'v3';
+export const VERSION = 'v3';
 const SEED = 'jinn.pilot.validated-clean.v3';
 const POLICY_VERSION = 'jinn.pilot.validated-clean.v1';
+
+/** Active versions to exclude while building `buildingVersion` (older actives only). */
+export function resolveExcludedActiveSlateVersions(
+  active: readonly string[],
+  buildingVersion: string,
+): string[] {
+  return active.filter((version) => version !== buildingVersion);
+}
 
 interface Args {
   distillationDir: string;
@@ -80,25 +89,46 @@ async function loadProductionPool() {
   });
 }
 
-interface QualityAssessment {
+export interface QualityAssessment {
   instance_id: string;
   code: 'A' | 'B1' | 'B2' | 'B3' | 'B4' | 'B5' | 'B6';
   reason: string;
 }
 
-function loadQualityScreen(path: string): { bytes: string; assessments: QualityAssessment[] } {
-  const bytes = readFileSync(path, 'utf8');
-  const raw = JSON.parse(bytes) as unknown;
-  if (!Array.isArray(raw)) throw new Error('quality screen must be a JSON array');
-  const assessments = raw.map((entry, index) => {
-    if (typeof entry !== 'object' || entry === null) throw new Error(`quality screen entry ${index} is invalid`);
+function parseQualityAssessments(raw: unknown): QualityAssessment[] {
+  if (!Array.isArray(raw)) {
+    throw new Error('quality screen assessments must be a JSON array');
+  }
+  return raw.map((entry, index) => {
+    if (typeof entry !== 'object' || entry === null) {
+      throw new Error(`quality screen entry ${index} is invalid`);
+    }
     const item = entry as Record<string, unknown>;
-    if (typeof item['instance_id'] !== 'string' || !/^(?:A|B[1-6])$/.test(String(item['code'])) || typeof item['reason'] !== 'string') {
+    if (
+      typeof item['instance_id'] !== 'string'
+      || !/^(?:A|B[1-6])$/.test(String(item['code']))
+      || typeof item['reason'] !== 'string'
+    ) {
       throw new Error(`quality screen entry ${index} has invalid fields`);
     }
     return item as unknown as QualityAssessment;
   });
-  return { bytes, assessments };
+}
+
+export function loadQualityScreen(path: string): { bytes: string; assessments: QualityAssessment[] } {
+  const bytes = readFileSync(path, 'utf8');
+  const raw = JSON.parse(bytes) as unknown;
+  if (Array.isArray(raw)) {
+    return { bytes, assessments: parseQualityAssessments(raw) };
+  }
+  if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+    const assessments = (raw as Record<string, unknown>)['assessments'];
+    if (!Array.isArray(assessments)) {
+      throw new Error('quality screen object must include an assessments array');
+    }
+    return { bytes, assessments: parseQualityAssessments(assessments) };
+  }
+  throw new Error('quality screen must be a JSON array or object with assessments');
 }
 
 function sha256(value: string): `sha256:${string}` {
@@ -137,7 +167,11 @@ async function main(): Promise<void> {
         } as typeof task.meta,
       }
     : task);
-  const olderSlateIds = loadActiveHeldOutSlateIds(SOLVER_TYPE, ACTIVE_HELD_OUT_SLATE_VERSIONS);
+  const excludedVersions = resolveExcludedActiveSlateVersions(
+    ACTIVE_HELD_OUT_SLATE_VERSIONS,
+    VERSION,
+  );
+  const olderSlateIds = loadActiveHeldOutSlateIds(SOLVER_TYPE, excludedVersions);
   const excludedIds = new Set([...sourceIds, ...olderSlateIds]);
   const selected = selectValidatedCleanTasks({
     pool: qualityEnrichedPool,
@@ -186,7 +220,7 @@ async function main(): Promise<void> {
       accepted: qualityScreen.assessments.filter((assessment) => assessment.code === 'A').length,
       assessments: qualityScreen.assessments,
     },
-    excludedActiveSlateVersions: ACTIVE_HELD_OUT_SLATE_VERSIONS,
+    excludedActiveSlateVersions: excludedVersions,
     selected,
   };
 
@@ -202,7 +236,10 @@ async function main(): Promise<void> {
   console.log(`wrote ${selected.length} validated clean tasks to ${join(args.outDir, `${base}.json`)}`);
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
-});
+const isMain = process.argv[1] === fileURLToPath(import.meta.url);
+if (isMain) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
+}
