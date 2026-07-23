@@ -544,8 +544,11 @@ def register_product(jinn: Any) -> dict[str, Any]:
         "post_llm_call",
         "on_session_end",
     }.issubset(calls["hooks"])
-    assert {"corpus_search", "corpus_fetch"}.issubset(calls["tools"])
-    assert {"jinn", "corpus"}.issubset(calls["commands"])
+    assert "jinn" in calls["commands"]
+    assert "jinn-doctor" in calls["cli"]
+    assert "corpus" not in calls["commands"]
+    assert "corpus_search" not in calls["tools"]
+    assert "corpus_fetch" not in calls["tools"]
     return calls
 
 
@@ -745,11 +748,11 @@ def main() -> None:
             mutate="SECRET_ACCEPTED_DIFF_OFF = True",
         )
         assert target_context is not None
-        # (1) Content, not metadata: a distinctive excerpt line, source
-        # attribution, and the corpus_fetch pointer.
+        # (1) Content, not metadata: a distinctive excerpt line and source
+        # attribution, without advertising a removed manual-fetch surface.
         assert SOURCE_DISTINCTIVE_CONTENT in target_context, target_context
         assert f"source: {SOURCE_REF}" in target_context, target_context
-        assert f"corpus_fetch {SOURCE_REF}" in target_context, target_context
+        assert "corpus_fetch" not in target_context, target_context
         # (2) Most relevant wins: distractor and skill refs absent.
         for absent_ref in (
             DISTRACTOR_SAME_REPO_REF,
