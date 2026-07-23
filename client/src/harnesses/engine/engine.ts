@@ -914,6 +914,9 @@ export class TaskEngine {
         // Terminal — nothing to do.
         break;
     }
+
+    // Successful progress: allow a future outage to emit a fresh first tick_error (#934).
+    this.lastTransientTickErrorAt.delete(requestId);
   }
 
   // ── Transition stubs ────────────────────────────────────────────────────────
@@ -2617,6 +2620,7 @@ export class TaskEngine {
         outcome: 'ok',
         detail,
       }, 'harness-engine');
+      this.lastTransientTickErrorAt.delete(task.requestId);
       return 'race_lost';
     }
     const reason = err instanceof Error ? err.message : String(err);
@@ -2655,6 +2659,7 @@ export class TaskEngine {
     }
     const stamped = contextLabel === 'recovery' ? `recovery: ${reason}` : reason;
     this.persistence.markFailed(task.requestId, stamped);
+    this.lastTransientTickErrorAt.delete(task.requestId);
     return 'failed';
   }
 

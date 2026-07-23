@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Store } from '../../../src/store/store.js';
 import {
   TaskEngine,
+  TRANSIENT_TICK_ERROR_HEARTBEAT_MS,
   type TaskEngineOptions,
 } from '../../../src/harnesses/engine/engine.js';
 import {
@@ -236,5 +237,56 @@ describe('transient RPC stall (#912)', () => {
 
     const status = gatherTaskRunsStatus(store.taskRunReadModel());
     expect(status.totals.failed).toBe(0);
+  });
+
+  it('after a successful process, a new transient on the same requestId emits immediately again (#934)', async () => {
+    const id = 'r-clear-same';
+    seedDelivering(p, id);
+    engine.deliverError = allRpcsFailed();
+
+    await expect(engine.process(id)).rejects.toThrow(/All RPC providers/);
+    await expect(engine.process(id)).rejects.toThrow(/All RPC providers/);
+    expect(countTickErrors(store, id)).toBe(1);
+
+    engine.deliverError = null;
+    await engine.process(id);
+    expect(p.getByRequestId(id)!.state).toBe(TaskRunState.COMPLETE);
+
+    // Test-only: drop terminal row so we can re-seed the same requestId.
+    store.db.prepare('DELETE FROM task_runs WHERE request_id = ?').run(id);
+    seedDelivering(p, id);
+    engine.deliverError = allRpcsFailed();
+    await expect(engine.process(id)).rejects.toThrow(/All RPC providers/);
+
+    // Without clear-on-success the Map still holds `id` → count stays 1.
+    // With clear → second outage's first emit makes count 2.
+    expect(countTickErrors(store, id)).toBe(2);
+  });
+
+  it('emits a second tick_error after the heartbeat window elapses (#934)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-07-23T12:00:00.000Z'));
+
+    try {
+      const id = 'r-heartbeat';
+      seedDelivering(p, id);
+      engine.deliverError = allRpcsFailed();
+
+      await expect(engine.process(id)).rejects.toThrow(/All RPC providers/);
+      expect(countTickErrors(store, id)).toBe(1);
+
+      await expect(engine.process(id)).rejects.toThrow(/All RPC providers/);
+      expect(countTickErrors(store, id)).toBe(1);
+
+      vi.advanceTimersByTime(TRANSIENT_TICK_ERROR_HEARTBEAT_MS);
+
+      await expect(engine.process(id)).rejects.toThrow(/All RPC providers/);
+      expect(countTickErrors(store, id)).toBe(2);
+
+      expect(p.getByRequestId(id)!.state).toBe(TaskRunState.DELIVERING);
+      expect(gatherTaskRunsStatus(store.taskRunReadModel()).totals.failed).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
