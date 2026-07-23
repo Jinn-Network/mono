@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ClaudeCodeStreamJsonParser,
   CodexExecJsonParser,
@@ -29,7 +29,12 @@ async function writeTranscript(rawText: string): Promise<string> {
 }
 
 function withoutTimestamps(spans: TranscriptSpanInput[]): unknown[] {
-  return spans.map(({ startTimeUnixNano: _start, endTimeUnixNano: _end, ...span }) => span);
+  return spans.map(
+    ({ startTimeUnixNano: _start, endTimeUnixNano: _end, events, ...span }) => ({
+      ...span,
+      events: events.map(({ timeUnixNano: _time, ...event }) => event),
+    }),
+  );
 }
 
 const claudeTranscript = [
@@ -122,8 +127,12 @@ describe.each([
 
   it('keeps file and in-memory parsing behavior equivalent', async () => {
     const path = await writeTranscript(rawText);
+    const now = hasSyntheticTime
+      ? vi.spyOn(Date, 'now').mockReturnValueOnce(1_000).mockReturnValueOnce(1_001)
+      : undefined;
     const fromFile = await parser.parse(path);
     const fromMemory = parser.parseText(rawText);
+    now?.mockRestore();
 
     expect(hasSyntheticTime ? withoutTimestamps(fromFile) : fromFile).toEqual(
       hasSyntheticTime ? withoutTimestamps(fromMemory) : fromMemory,
