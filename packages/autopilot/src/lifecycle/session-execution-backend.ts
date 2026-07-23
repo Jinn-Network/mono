@@ -182,7 +182,9 @@ export function makeLocalSessionExecutionBackend(
       );
       const child = spawnCoordinatorSession({
         kind: input.kind === 'review' ? 'review' : 'implement',
-        number: input.kind === 'review' ? input.pr.number : input.issue.number,
+        number: input.kind === 'review'
+          ? input.pr.number
+          : input.childIssueNumber ?? input.issue.number,
         skill: input.kind === 'review' ? 'review-pr' : mutationSkill(input.workflow),
         scenario: localScenario(input),
         worktreePath: input.attempt.worktreePath,

@@ -1,5 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SpawnFn } from '../../src/dispatcher/coordinator-session.js';
+import { HERMES_HOMES_DIR } from '../../src/dispatcher/hermes-home.js';
 import { DEFAULT_CONFIG } from '../../src/dispatcher/types.js';
 import { CredentialPool } from '../../src/lifecycle/credentials.js';
 import {
@@ -41,6 +44,16 @@ const INPUT: ClaimedSessionInput = {
 };
 
 describe('local SessionExecutionBackend', () => {
+  afterEach(() => {
+    for (const issueNumber of [42, 101, 102]) {
+      rmSync(join(HERMES_HOMES_DIR, `implement-${issueNumber}`), {
+        recursive: true,
+        force: true,
+      });
+    }
+    vi.restoreAllMocks();
+  });
+
   it('wraps the current coordinator spawn and durable child tracking', async () => {
     const trackChild = vi.fn();
     const spawn = vi.fn<SpawnFn>(() => ({ pid: 4242 }));
@@ -82,5 +95,81 @@ describe('local SessionExecutionBackend', () => {
     );
     await expect(backend.recover({ backend: 'local', pid: 4242 }))
       .resolves.toEqual({ state: 'running' });
+  });
+
+  it('gives distinct child workflows their own coordinator identities', async () => {
+    const calls: Array<{
+      args: string[];
+      opts: Parameters<SpawnFn>[2];
+    }> = [];
+    let nextPid = 5000;
+    const spawn = vi.fn<SpawnFn>((_command, args, opts) => {
+      calls.push({ args, opts });
+      nextPid += 1;
+      return { pid: nextPid };
+    });
+    const backend = makeLocalSessionExecutionBackend({
+      config: {
+        ...DEFAULT_CONFIG,
+        runtime: 'hermes',
+      },
+      credentials: new CredentialPool([{
+        login: 'implementation-bot',
+        normalizedLogin: 'implementation-bot',
+        implementationToken: 'selected-secret',
+      }]),
+      ambientEnvironment: { PATH: '/usr/bin' },
+      spawn,
+      trackChild: vi.fn(),
+      isPidAlive: () => true,
+      cancelProcess: vi.fn(),
+    });
+    const childInputs: ClaimedSessionInput[] = [
+      {
+        ...INPUT,
+        workflow: 'fix-child',
+        childIssueNumber: 101,
+        parentPrNumber: INPUT.pr.number,
+        attempt: {
+          ...INPUT.attempt,
+          manifestPath: '/attempt/101/manifest.json',
+          worktreePath: '/attempt/101/worktree',
+          logPath: '/attempt/101/session.log',
+        },
+      },
+      {
+        ...INPUT,
+        workflow: 'reconcile',
+        childIssueNumber: 102,
+        parentPrNumber: INPUT.pr.number,
+        attempt: {
+          ...INPUT.attempt,
+          manifestPath: '/attempt/102/manifest.json',
+          worktreePath: '/attempt/102/worktree',
+          logPath: '/attempt/102/session.log',
+        },
+      },
+    ];
+
+    await backend.start(childInputs[0]!);
+    await backend.start(childInputs[1]!);
+
+    expect(calls).toHaveLength(2);
+    expect(calls.map(({ opts }) => (
+      (opts.env as NodeJS.ProcessEnv).HERMES_HOME
+    ))).toEqual([
+      join(HERMES_HOMES_DIR, 'implement-101'),
+      join(HERMES_HOMES_DIR, 'implement-102'),
+    ]);
+    expect(calls.map(({ opts }) => opts.logPath)).toEqual([
+      '/attempt/101/session.log',
+      '/attempt/102/session.log',
+    ]);
+    expect(calls[0]!.args[calls[0]!.args.indexOf('-q') + 1]).toContain(
+      'fix-child skill on child issue #101',
+    );
+    expect(calls[1]!.args[calls[1]!.args.indexOf('-q') + 1]).toContain(
+      'reconcile skill on child issue #102',
+    );
   });
 });

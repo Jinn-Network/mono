@@ -489,4 +489,126 @@ describe('production active runtime preflight', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it('does not extend V2 staleness when preparing recovery happens late', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'autopilot-marketplace-late-recovery-'));
+    try {
+      let currentNow = new Date('2026-07-20T13:50:00.000Z');
+      const attemptId = '22222222-2222-4222-8222-222222222222';
+      const attemptDir = join(
+        root,
+        'v2',
+        'runner-a',
+        'implement',
+        `issue-42-${attemptId}`,
+      );
+      mkdirSync(attemptDir, { recursive: true });
+      const manifestPath = join(attemptDir, 'manifest.json');
+      writeFileSync(manifestPath, `${JSON.stringify({
+        version: 2,
+        attemptId,
+        runnerId: 'runner-a',
+        host: 'host-a',
+        phase: 'implement',
+        subject: 'issue-42',
+        issueNumber: 42,
+        prNumber: 84,
+        branch: 'autopilot/issue-42',
+        targetBase: 'next',
+        expectedHead: '1'.repeat(40),
+        claimOid: '1'.repeat(40),
+        selectedLogin: 'implementation-bot',
+        repository: {
+          root: '/repo',
+          gitCommonDir: '/repo/.git',
+          remoteName: 'jinn-autopilot-v2',
+          remoteUrlHash: '2'.repeat(64),
+        },
+        execution: { backend: 'marketplace' },
+        processState: 'preparing',
+        pid: null,
+        paths: {
+          attemptDir,
+          worktree: join(attemptDir, 'worktree'),
+          manifest: manifestPath,
+          log: join(attemptDir, 'session.log'),
+          ghConfigDir: join(attemptDir, 'gh-config'),
+          askpass: join(attemptDir, 'askpass'),
+          tokenFile: join(attemptDir, 'gh-token'),
+        },
+        timestamps: {
+          createdAt: NOW.toISOString(),
+          updatedAt: NOW.toISOString(),
+        },
+      }, null, 2)}\n`);
+      const recovered = {
+        backend: 'marketplace' as const,
+        taskId: 'task-42',
+        taskCid: 'bafy-task-42',
+        deadline: '2026-07-20T13:30:00.000Z',
+        requestFile: join(attemptDir, 'marketplace-request.json'),
+      };
+      const marketplaceBackend = {
+        start: vi.fn(),
+        recoverPreparing: vi.fn(async () => recovered),
+        recover: vi.fn(async () => ({
+          state: 'failed' as const,
+          detail: 'Marketplace task deadline expired',
+        })),
+        cancel: vi.fn(),
+        preflight: vi.fn(async () => ({ ok: true as const })),
+      };
+      const runtime = makeProductionActiveRuntime({
+        repositoryPath: '/repo',
+        worktreeBase: root,
+        runnerId: 'runner-a',
+        credentials: pool(),
+        authorAllowlist: new Set(['implementation-bot']),
+        readSnapshot: vi.fn(),
+        readPullRequestByNumber: vi.fn(),
+        readProjectItemForReconciliation: vi.fn(),
+        readBranchHeadByName: vi.fn(),
+        readIssueByNumber: vi.fn(),
+        readBlockedByIssueNumbers: vi.fn(),
+        readOpenPullRequestsByIssue: vi.fn(),
+        readIssueActionContext: vi.fn(),
+        config: DEFAULT_CONFIG,
+        spawn: vi.fn(),
+        executionBackendKind: 'marketplace',
+        marketplaceBackend,
+        caps: { implementation: 1, review: 1 },
+        implementationBackpressureThreshold: 1,
+        staleAfterMs: 120 * 60 * 1000,
+        environment: {
+          JINN_AUTOPILOT_CAPABILITY_ATTESTATION: '/attestation.json',
+        },
+        now: () => currentNow,
+        readCapabilityAttestation: () => ({}) as never,
+        runner: async () => 'https://github.com/Jinn-Network/mono.git\n',
+      });
+
+      await expect(runtime.preflight()).resolves.toEqual({ ok: true });
+      expect(JSON.parse(readFileSync(manifestPath, 'utf8'))).toMatchObject({
+        processState: 'running',
+        timestamps: {
+          createdAt: '2026-07-20T12:00:00.000Z',
+          updatedAt: '2026-07-20T13:50:00.000Z',
+        },
+      });
+      expect(runtime.readLocalState().remaining.implementation).toBe(0);
+
+      currentNow = new Date('2026-07-20T14:00:00.000Z');
+      await expect(runtime.preflight()).resolves.toEqual({ ok: true });
+      expect(JSON.parse(readFileSync(manifestPath, 'utf8'))).toMatchObject({
+        processState: 'exited',
+        timestamps: {
+          createdAt: '2026-07-20T12:00:00.000Z',
+          childExitedAt: '2026-07-20T14:00:00.000Z',
+        },
+      });
+      expect(runtime.readLocalState().remaining.implementation).toBe(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

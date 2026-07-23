@@ -360,13 +360,15 @@ export function makeProductionActiveRuntime(
                 markAttemptExited(attempt.paths.manifest, now);
                 continue;
               }
+              // Preparing recovery rewrites updatedAt, so only the immutable
+              // attempt origin may anchor the V2 stale handoff.
               if (
                 (
                   observation.state === 'failed'
                   || observation.state === 'cancelled'
                 )
                 && now().getTime()
-                  - Date.parse(attempt.timestamps.updatedAt)
+                  - Date.parse(attempt.timestamps.createdAt)
                   >= options.staleAfterMs
               ) {
                 markAttemptExited(attempt.paths.manifest, now);
