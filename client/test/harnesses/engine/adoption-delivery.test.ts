@@ -15,6 +15,10 @@ import type {
   AdoptionObservation,
   AdoptionReceiptObserver,
 } from '../../../src/types/task-run.js';
+import {
+  callDeliverToMarketplace,
+  claimDelivery,
+} from '../../../src/adapters/mech/contracts.js';
 
 vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
   cidToDigestHex: vi.fn().mockReturnValue(`0x${'ab'.repeat(32)}` as Hex),
@@ -90,6 +94,7 @@ function autopilotSpec() {
 function taskInput(
   spec: Record<string, unknown> = autopilotSpec(),
   solverType = 'jinn-repo.v1',
+  taskRole: 'restoration' | 'evaluation' = 'restoration',
 ): PersistedTaskRunInput {
   return {
     requestId: REQUEST_ID,
@@ -99,7 +104,7 @@ function taskInput(
     onchainCreationTx: `0x${'44'.repeat(32)}`,
     onchainCreationBlock: 100,
     solverType,
-    taskRole: 'restoration',
+    taskRole,
     windowStartTs: Date.now() - 1_000,
     windowEndTs: Date.now() + 60_000,
     task: {
@@ -108,7 +113,7 @@ function taskInput(
       solverType,
       contractId: solverType === 'jinn-repo.v1' ? 'jinn-repo' : 'portfolio',
       contractVersion: 'v1',
-      role: 'restoration',
+      role: taskRole,
       spec,
     },
   };
@@ -154,6 +159,78 @@ function rejectedReceipt(): AutopilotAdoptionReceipt {
   };
 }
 
+function acceptedVerdictReceipt(
+  override: Partial<AutopilotAdoptionReceipt> = {},
+): AutopilotAdoptionReceipt {
+  return {
+    schemaVersion: 'jinn-autopilot-marketplace-adoption.v1',
+    disposition: 'accepted',
+    role: 'verdict',
+    operation: 'review-verdict',
+    taskId: TASK_ID,
+    attemptIndex: ATTEMPT_INDEX,
+    requestId: REQUEST_ID,
+    deliveryEnvelopeCid: MANIFEST_CID,
+    v2AttemptId: '123e4567-e89b-42d3-a456-426614174000',
+    claimOid: '2'.repeat(40),
+    prNumber: PR_NUMBER,
+    expectedHead: '3'.repeat(40),
+    reviewedHead: '5'.repeat(40),
+    reviewGeneration: '123e4567-e89b-42d3-a456-426614174001',
+    reviewRefOid: '6'.repeat(40),
+    recordedAt: '2026-07-23T12:00:00.000Z',
+    ...override,
+  } as AutopilotAdoptionReceipt;
+}
+
+function persistedAutopilotOutput(
+  taskRole: 'restoration' | 'evaluation',
+): Record<string, unknown> {
+  const correlation = {
+    taskId: TASK_ID,
+    attemptIndex: ATTEMPT_INDEX,
+    requestId: REQUEST_ID,
+    deliveryEnvelopeCid: MANIFEST_CID,
+    v2AttemptId: '123e4567-e89b-42d3-a456-426614174000',
+    claimOid: '2'.repeat(40),
+    prNumber: PR_NUMBER,
+    expectedHead: '3'.repeat(40),
+    ...(taskRole === 'restoration'
+      ? { resultingHead: '5'.repeat(40) }
+      : { reviewedHead: '5'.repeat(40) }),
+    reviewGeneration: '123e4567-e89b-42d3-a456-426614174001',
+    reviewRefOid: '6'.repeat(40),
+  };
+
+  if (taskRole === 'evaluation') {
+    return {
+      venueRef: { name: 'jinn-repo' },
+      gating: {},
+      verdictPayload: {
+        schemaVersion: 'jinn-autopilot-review-result.v1',
+        outcome: 'approve',
+        correlation,
+        body: 'Approved.',
+      },
+    };
+  }
+  return {
+    venueRef: { name: 'jinn-repo' },
+    gating: {},
+    solutionPayload: {
+      schemaVersion: 'jinn-autopilot-mutation-result.v1',
+      outcome: 'mutation-complete',
+      correlation,
+      patch: 'diff --git a/a b/a',
+      summary: 'Implemented.',
+      evidence: {
+        commands: ['corepack yarn test'],
+        tests: ['pass'],
+      },
+    },
+  };
+}
+
 function seedDelivering(persistence: TaskRunPersistence, input = taskInput()): void {
   persistence.insertDiscovered(input);
   persistence.transition(REQUEST_ID, TaskRunState.CLAIMED);
@@ -165,6 +242,9 @@ function seedDelivering(persistence: TaskRunPersistence, input = taskInput()): v
   persistence.transition(REQUEST_ID, TaskRunState.DELIVERING, {
     manifestCid: MANIFEST_CID,
     evidenceHash: EVIDENCE_HASH,
+    solutionOutputsJson: JSON.stringify(
+      persistedAutopilotOutput(input.taskRole ?? 'restoration'),
+    ),
   });
 }
 
@@ -204,7 +284,12 @@ describe('Autopilot adoption-aware delivery', () => {
   let persistence: TaskRunPersistence;
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.mocked(callDeliverToMarketplace)
+      .mockReset()
+      .mockResolvedValue(DELIVERY_TX_HASH as Hex);
+    vi.mocked(claimDelivery)
+      .mockReset()
+      .mockResolvedValue(`0x${'ef'.repeat(32)}` as Hex);
     store = new Store(':memory:');
     persistence = new TaskRunPersistence(store.db);
   });
@@ -279,6 +364,114 @@ describe('Autopilot adoption-aware delivery', () => {
       state: 'accepted',
       receipt: acceptedReceipt(),
     });
+    expect(run.adoptionAcceptedReceipt).toEqual(acceptedReceipt());
+    expect(claimDelivery).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['taskId', { taskId: 'wrong-task' }],
+    ['attemptIndex', { attemptIndex: ATTEMPT_INDEX + 1 }],
+    ['requestId', { requestId: `0x${'99'.repeat(32)}` }],
+    ['deliveryEnvelopeCid', { deliveryEnvelopeCid: 'bafy-wrong-envelope' }],
+    ['v2AttemptId', { v2AttemptId: '123e4567-e89b-42d3-a456-426614174999' }],
+    ['claimOid', { claimOid: '7'.repeat(40) }],
+    ['prNumber', { prNumber: PR_NUMBER + 1 }],
+    ['expectedHead', { expectedHead: '7'.repeat(40) }],
+    ['resultingHead', { resultingHead: '7'.repeat(40) }],
+    ['reviewGeneration', { reviewGeneration: '123e4567-e89b-42d3-a456-426614174999' }],
+    ['reviewRefOid', { reviewRefOid: '7'.repeat(40) }],
+  ] as const)(
+    'fails closed when the accepted receipt mismatches persisted %s',
+    async (_field, override) => {
+      seedDelivering(persistence);
+      const receipt = { ...acceptedReceipt(), ...override } as AutopilotAdoptionReceipt;
+      const engine = new TaskEngine(makeOptions(
+        store,
+        makeObserver({ state: 'accepted', receipt }),
+      ));
+
+      await engine.process(REQUEST_ID);
+      await engine.process(REQUEST_ID);
+
+      const run = persistence.getOrThrow(REQUEST_ID);
+      expect(run.state).toBe(TaskRunState.FAILED);
+      expect(run.failureReason).toContain('adoption-contradiction:receipt correlation mismatch');
+      expect(claimDelivery).not.toHaveBeenCalled();
+    },
+  );
+
+  it('fails closed when the accepted receipt role does not match the run settlement role', async () => {
+    seedDelivering(persistence, taskInput(autopilotSpec(), 'jinn-repo.v1', 'evaluation'));
+    const engine = new TaskEngine(makeOptions(
+      store,
+      makeObserver({ state: 'accepted', receipt: acceptedReceipt() }),
+    ));
+
+    await engine.process(REQUEST_ID);
+    await engine.process(REQUEST_ID);
+
+    const run = persistence.getOrThrow(REQUEST_ID);
+    expect(run.state).toBe(TaskRunState.FAILED);
+    expect(run.failureReason).toBe(
+      'adoption-contradiction:receipt role solution does not match verdict',
+    );
+    expect(claimDelivery).not.toHaveBeenCalled();
+  });
+
+  it('accepts a verdict receipt only when its complete review correlation matches', async () => {
+    seedDelivering(persistence, taskInput(autopilotSpec(), 'jinn-repo.v1', 'evaluation'));
+    const engine = new TaskEngine(makeOptions(
+      store,
+      makeObserver({ state: 'accepted', receipt: acceptedVerdictReceipt() }),
+    ));
+
+    await engine.process(REQUEST_ID);
+    await engine.process(REQUEST_ID);
+
+    expect(persistence.getOrThrow(REQUEST_ID)).toMatchObject({
+      state: TaskRunState.CLAIMING_DELIVERY,
+      adoptionAcceptedReceipt: acceptedVerdictReceipt(),
+    });
+  });
+
+  it('fails closed when a verdict receipt mismatches the persisted reviewed head', async () => {
+    seedDelivering(persistence, taskInput(autopilotSpec(), 'jinn-repo.v1', 'evaluation'));
+    const engine = new TaskEngine(makeOptions(
+      store,
+      makeObserver({
+        state: 'accepted',
+        receipt: acceptedVerdictReceipt({ reviewedHead: '7'.repeat(40) }),
+      }),
+    ));
+
+    await engine.process(REQUEST_ID);
+    await engine.process(REQUEST_ID);
+
+    const run = persistence.getOrThrow(REQUEST_ID);
+    expect(run.state).toBe(TaskRunState.FAILED);
+    expect(run.failureReason).toContain(
+      'adoption-contradiction:receipt correlation mismatch:delivered-output',
+    );
+    expect(claimDelivery).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the observer returns a receipt that does not pass the strict SDK schema', async () => {
+    seedDelivering(persistence);
+    const invalidReceipt = {
+      ...acceptedReceipt(),
+      recordedAt: 'not-an-ISO-timestamp',
+    } as unknown as AutopilotAdoptionReceipt;
+    const engine = new TaskEngine(makeOptions(
+      store,
+      makeObserver({ state: 'accepted', receipt: invalidReceipt }),
+    ));
+
+    await engine.process(REQUEST_ID);
+    await engine.process(REQUEST_ID);
+
+    const run = persistence.getOrThrow(REQUEST_ID);
+    expect(run.state).toBe(TaskRunState.FAILED);
+    expect(run.failureReason).toBe('adoption-contradiction:invalid adoption receipt');
     expect(claimDelivery).not.toHaveBeenCalled();
   });
 
@@ -352,6 +545,80 @@ describe('Autopilot adoption-aware delivery', () => {
     expect(restartedObserver.observe).not.toHaveBeenCalled();
     expect(callDeliverToMarketplace).not.toHaveBeenCalled();
     expect(claimDelivery).toHaveBeenCalledOnce();
+  });
+
+  it('reasserts the persisted accepted receipt before claiming and fails closed on tampering', async () => {
+    seedDelivering(persistence);
+    const firstEngine = new TaskEngine(makeOptions(
+      store,
+      makeObserver({ state: 'accepted', receipt: acceptedReceipt() }),
+    ));
+    await firstEngine.process(REQUEST_ID);
+    await firstEngine.process(REQUEST_ID);
+
+    const tampered = {
+      ...acceptedReceipt(),
+      taskId: 'tampered-task',
+    };
+    store.db.prepare(
+      'UPDATE task_runs SET adoption_accepted_receipt = ? WHERE request_id = ?',
+    ).run(JSON.stringify(tampered), REQUEST_ID);
+    vi.clearAllMocks();
+
+    const restartedEngine = new TaskEngine(makeOptions(store, makeObserver()));
+    await restartedEngine.recoverInFlight();
+
+    const run = persistence.getOrThrow(REQUEST_ID);
+    expect(run.state).toBe(TaskRunState.FAILED);
+    expect(run.failureReason).toContain('adoption-contradiction:persisted accepted receipt');
+    expect(callDeliverToMarketplace).not.toHaveBeenCalled();
+    expect(claimDelivery).not.toHaveBeenCalled();
+  });
+
+  it('stays recoverable without an observer and never claims delivery', async () => {
+    seedDelivering(persistence);
+    const engine = new TaskEngine(makeOptions(store));
+
+    await engine.process(REQUEST_ID);
+    await engine.process(REQUEST_ID);
+
+    const run = persistence.getOrThrow(REQUEST_ID);
+    expect(run.state).toBe(TaskRunState.AWAITING_ADOPTION);
+    expect(run.failureReason).toBeNull();
+    expect(run.adoptionLastError).toBe('adoption receipt observer is not configured');
+    expect(claimDelivery).not.toHaveBeenCalled();
+  });
+
+  it('single-flights simultaneous direct and tick processing for one delivery', async () => {
+    seedDelivering(persistence);
+    const engine = new TaskEngine(makeOptions(store, makeObserver()));
+    let releaseDelivery!: () => void;
+    let deliveryStarted!: () => void;
+    const started = new Promise<void>((resolve) => { deliveryStarted = resolve; });
+    const release = new Promise<void>((resolve) => { releaseDelivery = resolve; });
+    vi.mocked(callDeliverToMarketplace).mockImplementation(async () => {
+      deliveryStarted();
+      await release;
+      return DELIVERY_TX_HASH as Hex;
+    });
+
+    const direct = engine.process(REQUEST_ID);
+    await started;
+    const duplicateDirect = engine.process(REQUEST_ID);
+    const tick = engine.tick();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const callsBeforeRelease = vi.mocked(callDeliverToMarketplace).mock.calls.length;
+    releaseDelivery();
+    const outcomes = await Promise.allSettled([direct, duplicateDirect, tick]);
+
+    expect(outcomes.every((outcome) => outcome.status === 'fulfilled')).toBe(true);
+    expect(callsBeforeRelease).toBe(1);
+    expect(callDeliverToMarketplace).toHaveBeenCalledOnce();
+    expect(persistence.getOrThrow(REQUEST_ID).state).toBe(
+      TaskRunState.AWAITING_ADOPTION,
+    );
+    expect(persistence.getOrThrow(REQUEST_ID).failureReason).toBeNull();
   });
 
   it('keeps live-issue jinn-repo tasks on DELIVERING → COMPLETE compatibility', async () => {

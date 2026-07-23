@@ -82,6 +82,8 @@ export interface PersistedTaskRun {
   adoptionWaitStartedAt: number | null;
   /** Most recent durable receipt observation, including an accepted receipt. */
   adoptionLastObservation: AdoptionObservation | null;
+  /** Strictly validated accepted receipt required again at Router claim time. */
+  adoptionAcceptedReceipt: AutopilotAdoptionReceipt | null;
   /** Most recent retryable observer error; cleared after a successful observation. */
   adoptionLastError: string | null;
 

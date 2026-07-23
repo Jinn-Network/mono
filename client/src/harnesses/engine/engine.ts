@@ -96,7 +96,13 @@ import { recordLoopTick } from '../../daemon/loop-heartbeat.js';
 import { harnessStateDirName } from '../names.js';
 import { recordTaskCost } from '../../spend/record.js';
 import {
+  AutopilotAdoptionReceiptSchema,
+  JinnRepoAutopilotSolutionPayloadSchema,
+  JinnRepoAutopilotVerdictPayloadSchema,
   JinnRepoTaskSchema,
+  autopilotCorrelationMatches,
+  type AutopilotAdoptionReceipt,
+  type AutopilotCorrelation,
   type JinnRepoAutopilotSessionTask,
 } from '@jinn-network/sdk/solvernets/jinn-repo';
 import type {
@@ -569,7 +575,7 @@ export class TaskEngine {
   /** requestId → epoch ms of last transient tick_error emit (#934) */
   private readonly lastTransientTickErrorAt = new Map<string, number>();
 
-  private readonly processingRequestIds = new Set<string>();
+  private readonly processingByRequestId = new Map<string, Promise<void>>();
 
   /** Set by stop(); causes runTickLoop to exit at the next iteration. */
   private stopped = false;
@@ -678,15 +684,10 @@ export class TaskEngine {
       // #1422: recovery runs concurrently with the tick/watcher loops, so
       // each task must hold the same in-flight guard `scheduleProcess` uses —
       // otherwise a tick fired mid-recovery double-drives the task's impl.
-      inflight.map((task) => {
-        if (this.processingRequestIds.has(task.requestId)) {
-          return Promise.resolve();
-        }
-        this.processingRequestIds.add(task.requestId);
-        return this._recoverOne(task).finally(() => {
-          this.processingRequestIds.delete(task.requestId);
-        });
-      }),
+      inflight.map((task) => this.runRequestSingleFlight(
+        task.requestId,
+        () => this._recoverOne(task),
+      ).promise),
     );
 
     const reports: RecoveryReport[] = results.map((result, i) => {
@@ -809,20 +810,37 @@ export class TaskEngine {
   }
 
   private scheduleProcess(requestId: string): Promise<ProcessReport> | null {
-    if (this.processingRequestIds.has(requestId)) {
-      return null;
-    }
-    this.processingRequestIds.add(requestId);
-    return this.process(requestId)
+    const scheduled = this.runRequestSingleFlight(
+      requestId,
+      () => this._process(requestId),
+    );
+    if (!scheduled.started) return null;
+    return scheduled.promise
       .then((): ProcessReport => ({ requestId, outcome: 'ok' }))
       .catch((err: unknown): ProcessReport => ({
         requestId,
         outcome: 'failed',
         error: err instanceof Error ? err.message : String(err),
-      }))
+      }));
+  }
+
+  private runRequestSingleFlight(
+    requestId: string,
+    operation: () => Promise<void>,
+  ): { promise: Promise<void>; started: boolean } {
+    const existing = this.processingByRequestId.get(requestId);
+    if (existing) return { promise: existing, started: false };
+
+    let promise: Promise<void>;
+    promise = Promise.resolve()
+      .then(operation)
       .finally(() => {
-        this.processingRequestIds.delete(requestId);
+        if (this.processingByRequestId.get(requestId) === promise) {
+          this.processingByRequestId.delete(requestId);
+        }
       });
+    this.processingByRequestId.set(requestId, promise);
+    return { promise, started: true };
   }
 
   private logProcessReport(source: string, report: ProcessReport): void {
@@ -837,6 +855,13 @@ export class TaskEngine {
    * Called both by recovery and by the ongoing event-processing loop.
    */
   async process(requestId: string): Promise<void> {
+    return this.runRequestSingleFlight(
+      requestId,
+      () => this._process(requestId),
+    ).promise;
+  }
+
+  private async _process(requestId: string): Promise<void> {
     const task = this.persistence.getByRequestId(requestId);
     if (!task) {
       throw new Error(`process: task not found: ${requestId}`);
@@ -868,7 +893,7 @@ export class TaskEngine {
           // the post-transition state so RUNNING fires in the same pass (jinn-mono-sae).
           const after = this.persistence.getByRequestId(task.requestId);
           if (after && after.state === TaskRunState.RUNNING) {
-            await this.process(task.requestId);
+            await this._process(task.requestId);
           }
         }
         // else: not yet time — caller is responsible for scheduling retry
@@ -893,7 +918,7 @@ export class TaskEngine {
           // at RUNNING until the next tick/restart and runImpl never executes.
           const after = this.persistence.getByRequestId(task.requestId);
           if (after && after.state === TaskRunState.RUNNING) {
-            await this.process(task.requestId);
+            await this._process(task.requestId);
           }
         }
         break;
@@ -2257,7 +2282,6 @@ export class TaskEngine {
     let observation;
     try {
       observation = await this.adoptionReceiptObserver.observe(task);
-      this.persistence.setAdoptionObservation(task.requestId, observation);
     } catch (err) {
       this.persistence.setAdoptionError(
         task.requestId,
@@ -2268,37 +2292,60 @@ export class TaskEngine {
 
     switch (observation.state) {
       case 'pending':
+        this.persistence.setAdoptionObservation(task.requestId, observation);
         return;
-      case 'accepted':
-        if (observation.receipt.disposition !== 'accepted') {
+      case 'accepted': {
+        const validation = this.validateAdoptionReceipt(task, observation.receipt);
+        if (!validation.ok) {
+          this.persistence.markFailed(task.requestId, validation.reason);
+          return;
+        }
+        if (validation.receipt.disposition !== 'accepted') {
           this.persistence.markFailed(
             task.requestId,
             'adoption-contradiction:accepted observation carried a rejected receipt',
           );
           return;
         }
+        const acceptedObservation = {
+          state: 'accepted' as const,
+          receipt: validation.receipt,
+        };
         this.persistence.transition(task.requestId, TaskRunState.CLAIMING_DELIVERY, {
-          adoptionLastObservation: observation,
+          adoptionLastObservation: acceptedObservation,
+          adoptionAcceptedReceipt: validation.receipt,
           adoptionLastError: null,
         });
         console.log(
           `[harness-engine] ${task.requestId} AWAITING_ADOPTION → CLAIMING_DELIVERY`,
         );
         return;
-      case 'rejected':
-        if (observation.receipt.disposition !== 'rejected') {
+      }
+      case 'rejected': {
+        const validation = this.validateAdoptionReceipt(task, observation.receipt);
+        if (!validation.ok) {
+          this.persistence.markFailed(task.requestId, validation.reason);
+          return;
+        }
+        if (validation.receipt.disposition !== 'rejected') {
           this.persistence.markFailed(
             task.requestId,
             'adoption-contradiction:rejected observation carried an accepted receipt',
           );
           return;
         }
+        this.persistence.setAdoptionObservation(task.requestId, {
+          state: 'rejected',
+          receipt: validation.receipt,
+        });
         this.persistence.markFailed(
           task.requestId,
-          `adoption-rejected:${observation.receipt.reason}`,
+          `adoption-rejected:${validation.receipt.reason}`,
         );
         return;
+      }
       case 'contradictory':
+        this.persistence.setAdoptionObservation(task.requestId, observation);
         this.persistence.markFailed(
           task.requestId,
           `adoption-contradiction:${observation.detail}`,
@@ -2310,6 +2357,31 @@ export class TaskEngine {
   protected async claimAdoptedDelivery(task: PersistedTaskRun): Promise<void> {
     if (!this.deliveryDeps) {
       throw new NotImplementedError('claimAdoptedDelivery');
+    }
+    const persistedValidation = this.validateAdoptionReceipt(
+      task,
+      task.adoptionAcceptedReceipt,
+    );
+    const observedValidation = task.adoptionLastObservation?.state === 'accepted'
+      ? this.validateAdoptionReceipt(task, task.adoptionLastObservation.receipt)
+      : null;
+    if (
+      !persistedValidation.ok
+      || persistedValidation.receipt.disposition !== 'accepted'
+      || !observedValidation?.ok
+      || observedValidation.receipt.disposition !== 'accepted'
+      || !autopilotCorrelationMatches(
+        persistedValidation.receipt,
+        observedValidation.receipt,
+      )
+      || JSON.stringify(persistedValidation.receipt)
+        !== JSON.stringify(observedValidation.receipt)
+    ) {
+      this.persistence.markFailed(
+        task.requestId,
+        'adoption-contradiction:persisted accepted receipt mismatch',
+      );
+      return;
     }
     const manifestCid = task.manifestCid;
     if (!manifestCid) {
@@ -2331,6 +2403,89 @@ export class TaskEngine {
       `[harness-engine] ${task.requestId} CLAIMING_DELIVERY → COMPLETE claimTx=${claimTxHash}`,
     );
     await this.afterDeliveryClaimed(task, manifestCid, evidenceHash);
+  }
+
+  private validateAdoptionReceipt(
+    task: PersistedTaskRun,
+    input: unknown,
+  ): (
+    { ok: true; receipt: AutopilotAdoptionReceipt }
+    | { ok: false; reason: string }
+  ) {
+    const parsed = AutopilotAdoptionReceiptSchema.safeParse(input);
+    if (!parsed.success) {
+      return {
+        ok: false,
+        reason: 'adoption-contradiction:invalid adoption receipt',
+      };
+    }
+
+    const receipt = parsed.data;
+    const expectedRole = task.taskRole === 'evaluation' ? 'verdict' : 'solution';
+    if (receipt.role !== expectedRole) {
+      return {
+        ok: false,
+        reason: `adoption-contradiction:receipt role ${receipt.role} does not match ${expectedRole}`,
+      };
+    }
+
+    const autopilotTask = this.autopilotSessionTask(task);
+    const expectedCorrelation = {
+      taskId: task.taskId,
+      attemptIndex: task.attemptIndex,
+      requestId: task.requestId,
+      deliveryEnvelopeCid: task.manifestCid,
+      v2AttemptId: autopilotTask?.session.v2AttemptId ?? null,
+      claimOid: autopilotTask?.session.claimOid ?? null,
+      prNumber: autopilotTask?.session.prNumber ?? null,
+      expectedHead: autopilotTask?.session.expectedHead ?? null,
+    };
+    for (const [field, expected] of Object.entries(expectedCorrelation)) {
+      if (receipt[field as keyof typeof receipt] !== expected) {
+        return {
+          ok: false,
+          reason: `adoption-contradiction:receipt correlation mismatch:${field}`,
+        };
+      }
+    }
+
+    if (receipt.disposition === 'accepted') {
+      const deliveredCorrelation = this.persistedAutopilotCorrelation(
+        task,
+        expectedRole,
+      );
+      if (
+        !deliveredCorrelation
+        || !autopilotCorrelationMatches(deliveredCorrelation, receipt)
+      ) {
+        return {
+          ok: false,
+          reason: 'adoption-contradiction:receipt correlation mismatch:delivered-output',
+        };
+      }
+    }
+
+    return { ok: true, receipt };
+  }
+
+  private persistedAutopilotCorrelation(
+    task: PersistedTaskRun,
+    role: 'solution' | 'verdict',
+  ): AutopilotCorrelation | null {
+    if (!task.solutionOutputsJson) return null;
+
+    try {
+      const output = JSON.parse(task.solutionOutputsJson) as {
+        solutionPayload?: unknown;
+        verdictPayload?: unknown;
+      };
+      const parsed = role === 'solution'
+        ? JinnRepoAutopilotSolutionPayloadSchema.safeParse(output.solutionPayload)
+        : JinnRepoAutopilotVerdictPayloadSchema.safeParse(output.verdictPayload);
+      return parsed.success ? parsed.data.correlation : null;
+    } catch {
+      return null;
+    }
   }
 
   private autopilotSessionTask(

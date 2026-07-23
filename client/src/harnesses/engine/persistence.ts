@@ -17,6 +17,9 @@ import type {
   AdoptionReceiptLocation,
   PersistedTaskRun,
 } from '../../types/task-run.js';
+import type {
+  AutopilotAdoptionReceipt,
+} from '@jinn-network/sdk/solvernets/jinn-repo';
 
 // ── Concurrency error ─────────────────────────────────────────────────────────
 
@@ -83,6 +86,7 @@ CREATE TABLE IF NOT EXISTS task_runs (
   adoption_receipt_authors  TEXT,
   adoption_wait_started_at  INTEGER,
   adoption_last_observation TEXT,
+  adoption_accepted_receipt TEXT,
   adoption_last_error       TEXT,
 
   -- Additive columns (schema migration 2026-04-17):
@@ -199,6 +203,7 @@ export type TaskRunPatch = Partial<{
   adoptionReceiptAuthors: string[] | null;
   adoptionWaitStartedAt: number | null;
   adoptionLastObservation: AdoptionObservation | null;
+  adoptionAcceptedReceipt: AutopilotAdoptionReceipt | null;
   adoptionLastError: string | null;
   /** Persisted once at first PACKAGING entry; reused on retry. */
   manifestGeneratedAt: number | null;
@@ -256,6 +261,7 @@ interface RawRow {
   adoption_receipt_authors: string | null;
   adoption_wait_started_at: number | null;
   adoption_last_observation: string | null;
+  adoption_accepted_receipt: string | null;
   adoption_last_error: string | null;
   manifest_generated_at: number | null;
   evidence_hash: string | null;
@@ -312,6 +318,7 @@ function runAdditiveMigrations(db: Database.Database): void {
     { column: 'adoption_receipt_authors', ddl: 'ALTER TABLE task_runs ADD COLUMN adoption_receipt_authors TEXT' },
     { column: 'adoption_wait_started_at', ddl: 'ALTER TABLE task_runs ADD COLUMN adoption_wait_started_at INTEGER' },
     { column: 'adoption_last_observation', ddl: 'ALTER TABLE task_runs ADD COLUMN adoption_last_observation TEXT' },
+    { column: 'adoption_accepted_receipt', ddl: 'ALTER TABLE task_runs ADD COLUMN adoption_accepted_receipt TEXT' },
     { column: 'adoption_last_error', ddl: 'ALTER TABLE task_runs ADD COLUMN adoption_last_error TEXT' },
   ];
 
@@ -397,6 +404,7 @@ function rowToTaskRun(row: RawRow): PersistedTaskRun {
     adoptionReceiptAuthors: parseJson<string[]>(row.adoption_receipt_authors),
     adoptionWaitStartedAt: row.adoption_wait_started_at,
     adoptionLastObservation: parseJson<AdoptionObservation>(row.adoption_last_observation),
+    adoptionAcceptedReceipt: parseJson<AutopilotAdoptionReceipt>(row.adoption_accepted_receipt),
     adoptionLastError: row.adoption_last_error,
     manifestGeneratedAt: row.manifest_generated_at,
     evidenceHash: row.evidence_hash,
@@ -562,6 +570,12 @@ export class TaskRunPersistence {
       params['adoptionLastObservation'] = patch.adoptionLastObservation === null
         ? null
         : JSON.stringify(patch.adoptionLastObservation);
+    }
+    if (patch.adoptionAcceptedReceipt !== undefined) {
+      setClauses.push('adoption_accepted_receipt = @adoptionAcceptedReceipt');
+      params['adoptionAcceptedReceipt'] = patch.adoptionAcceptedReceipt === null
+        ? null
+        : JSON.stringify(patch.adoptionAcceptedReceipt);
     }
     if (patch.adoptionLastError !== undefined) {
       setClauses.push('adoption_last_error = @adoptionLastError');
