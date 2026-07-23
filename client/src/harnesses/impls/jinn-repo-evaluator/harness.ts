@@ -51,7 +51,6 @@ import {
   type SemanticAgentRunner,
 } from './autopilot-semantic.js';
 import { ExactHeadMechanicalRunner } from './autopilot-mechanical-runner.js';
-import { ClaudeSemanticAgentRunner } from './claude-semantic-agent.js';
 import {
   admitAutopilotEvaluationOpportunity,
 } from './autopilot-evaluation-context.js';
@@ -227,8 +226,6 @@ export interface JinnRepoEvaluatorHarnessOptions {
   mechanicalRunner?: AutopilotMechanicalRunner;
   /** Configured generic semantic runtime, injectable for hermetic tests. */
   semanticAgentRunner?: SemanticAgentRunner;
-  claudePath?: string;
-  claudeModel?: string;
 }
 
 export class JinnRepoEvaluatorHarness implements Harness {
@@ -241,7 +238,7 @@ export class JinnRepoEvaluatorHarness implements Harness {
   private readonly grade: GradeFn;
   private readonly gradeLive: LiveGradeFn;
   private readonly mechanicalRunner: AutopilotMechanicalRunner;
-  private readonly semanticAgentRunner: SemanticAgentRunner;
+  private readonly semanticAgentRunner: SemanticAgentRunner | undefined;
 
   constructor(opts: JinnRepoEvaluatorHarnessOptions = {}) {
     this.stub = opts.stub ?? false;
@@ -261,12 +258,7 @@ export class JinnRepoEvaluatorHarness implements Harness {
       ?? new ExactHeadMechanicalRunner({
         monoRepoUrl: process.env['JINN_MONO_REPO_URL'] ?? DEFAULT_MONO_REPO_URL,
       });
-    this.semanticAgentRunner =
-      opts.semanticAgentRunner
-      ?? new ClaudeSemanticAgentRunner({
-        claudePath: opts.claudePath,
-        model: opts.claudeModel,
-      });
+    this.semanticAgentRunner = opts.semanticAgentRunner;
   }
 
   supports(ctx: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {
@@ -282,7 +274,14 @@ export class JinnRepoEvaluatorHarness implements Harness {
     }
     if (rawTaskSpecSource(task.spec) === 'autopilot-session') {
       const parsed = parseAutopilotEvaluationTask(task);
-      return parsed.ok ? { ok: true } : { ok: false, reason: parsed.reason };
+      if (!parsed.ok) return { ok: false, reason: parsed.reason };
+      if (!this.semanticAgentRunner) {
+        return {
+          ok: false,
+          reason: 'Autopilot semantic evaluator runtime is not configured',
+        };
+      }
+      return { ok: true };
     }
     // A live-issue spec with a field defect (missing `issue_number`, a
     // malformed `base_commit`, etc.) is rejected here with a specific reason
@@ -367,11 +366,17 @@ export class JinnRepoEvaluatorHarness implements Harness {
           `jinn-repo-evaluator: ${parsed.reason}`,
         );
       }
+      const semanticAgentRunner = this.semanticAgentRunner;
+      if (!semanticAgentRunner) {
+        throw new SkippableError(
+          'autopilot_eval_pending',
+          'jinn-repo-evaluator: Autopilot semantic evaluator runtime is not configured',
+        );
+      }
       const result = await runAutopilotSemanticReview({
         context: parsed.context,
         mechanicalRunner: this.mechanicalRunner,
-        agentRunner: this.semanticAgentRunner,
-        model: ctx.solverNet?.model,
+        agentRunner: semanticAgentRunner,
         abort: ctx.abort,
       });
       const artifactPath = 'jinn-autopilot-review-result.json';

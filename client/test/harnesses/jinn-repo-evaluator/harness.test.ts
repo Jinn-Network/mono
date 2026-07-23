@@ -385,7 +385,16 @@ describe('JinnRepoEvaluatorHarness — Autopilot semantic evaluation', () => {
     });
   });
 
-  it('emits the typed semantic review payload and configured model without legacy patch grading', async () => {
+  it('requires an explicitly injected semantic evaluator runtime', async () => {
+    const { task } = autopilotHarnessFixtures();
+    const h = new JinnRepoEvaluatorHarness();
+    await expect(h.canAttempt(task)).resolves.toEqual({
+      ok: false,
+      reason: 'Autopilot semantic evaluator runtime is not configured',
+    });
+  });
+
+  it('emits the typed semantic review payload through the injected runtime without legacy patch grading', async () => {
     const { task, context } = autopilotHarnessFixtures();
     const cleanup = vi.fn().mockResolvedValue(undefined);
     const mechanicalRunner = {
@@ -413,16 +422,7 @@ describe('JinnRepoEvaluatorHarness — Autopilot semantic evaluation', () => {
       grade,
       gradeLive,
     });
-    const harnessContext = {
-      ...buildHarnessContext(task, dir),
-      solverNet: {
-        name: 'jinn-repo',
-        solverType: 'jinn-repo.v1',
-        model: 'configured-review-model',
-      },
-    };
-
-    const result = await h.run(harnessContext);
+    const result = await h.run(buildHarnessContext(task, dir));
 
     expect(result.verdictPayload).toMatchObject({
       schemaVersion: 'jinn-autopilot-review-result.v1',
@@ -442,8 +442,8 @@ describe('JinnRepoEvaluatorHarness — Autopilot semantic evaluation', () => {
     ]);
     expect(agentRunner.run).toHaveBeenCalledWith(expect.objectContaining({
       cwd: '/tmp/exact-head',
-      model: 'configured-review-model',
     }));
+    expect(agentRunner.run.mock.calls[0]![0]).not.toHaveProperty('model');
     expect(cleanup).toHaveBeenCalledTimes(1);
     expect(grade).not.toHaveBeenCalled();
     expect(gradeLive).not.toHaveBeenCalled();

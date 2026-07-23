@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { buildHarnesses } from '../../../src/harnesses/impls/index.js';
 import { CLAUDE_CODE_HARNESS, CODEX_HARNESS } from '../../../src/harnesses/names.js';
 import { HarnessRegistry } from '../../../src/harnesses/engine/registry.js';
@@ -89,6 +89,20 @@ describe('buildHarnesses — external impls + disabledNames', () => {
     });
     expect(impls.some((impl) => impl.name === CODEX_HARNESS)).toBe(false);
     expect(impls.some((impl) => impl.name === CLAUDE_CODE_HARNESS)).toBe(true);
+  });
+
+  it('inherits an explicitly configured semantic evaluator runtime without choosing a provider', () => {
+    const semanticEvaluatorRunner = {
+      run: vi.fn().mockResolvedValue('{}'),
+    };
+    const impls = buildHarnesses({
+      ...ENV,
+      semanticEvaluatorRunner,
+    });
+    const evaluator = impls.find((impl) => impl.name === 'jinn-repo-evaluator');
+    expect((evaluator as unknown as {
+      semanticAgentRunner?: unknown;
+    }).semanticAgentRunner).toBe(semanticEvaluatorRunner);
   });
 });
 

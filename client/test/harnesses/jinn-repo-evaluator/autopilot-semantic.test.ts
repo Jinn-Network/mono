@@ -127,7 +127,7 @@ function agent(output: unknown): SemanticAgentRunner & { run: ReturnType<typeof 
 }
 
 describe('runAutopilotSemanticReview', () => {
-  it('reviews the complete exact head with the configured model and review-pr contract', async () => {
+  it('reviews the complete exact head through the injected runtime and review-pr contract', async () => {
     const mechanicalRunner = mechanical();
     const agentRunner = agent({
       schemaVersion: 'jinn-autopilot-review-result.v1',
@@ -147,7 +147,6 @@ describe('runAutopilotSemanticReview', () => {
       context: context(),
       mechanicalRunner,
       agentRunner,
-      model: 'configured-solvernet-model',
       abort: new AbortController().signal,
     });
 
@@ -165,12 +164,15 @@ describe('runAutopilotSemanticReview', () => {
       verdict: 'PASS',
       verdictCode: 1,
     });
-    expect(mechanicalRunner.run).toHaveBeenCalledWith(context());
+    expect(mechanicalRunner.run).toHaveBeenCalledWith(
+      context(),
+      expect.any(AbortSignal),
+    );
     expect(agentRunner.run).toHaveBeenCalledWith(expect.objectContaining({
       cwd: '/tmp/exact-head',
-      model: 'configured-solvernet-model',
       abort: expect.any(AbortSignal),
     }));
+    expect(agentRunner.run.mock.calls[0]![0]).not.toHaveProperty('model');
     const prompt = agentRunner.run.mock.calls[0]![0].prompt as string;
     expect(prompt).toContain('review-pr');
     expect(prompt).toContain('complete effective PR diff');
@@ -301,8 +303,46 @@ describe('runAutopilotSemanticReview', () => {
     expect(result.gating.verdict).toBe('UNRESOLVED');
   });
 
+  it('does not let checkout cleanup failure replace a typed semantic verdict', async () => {
+    const result = await runAutopilotSemanticReview({
+      context: context(),
+      mechanicalRunner: mechanical({
+        kind: 'passed',
+        checkoutDir: '/tmp/exact-head',
+        changedFiles: ['client/src/a.ts'],
+        checks: ['exact-head', 'typecheck', 'tests'],
+        cleanup: vi.fn().mockRejectedValue(new Error('temporary cleanup failure')),
+      }),
+      agentRunner: agent({
+        schemaVersion: 'jinn-autopilot-review-result.v1',
+        outcome: 'approve',
+        correlation: correlation(),
+        body: 'The exact-head review passed.',
+      }),
+      abort: new AbortController().signal,
+    });
+    expect(result.review).toMatchObject({ outcome: 'approve' });
+    expect(result.gating.verdict).toBe('PASS');
+  });
+
   it.each([
     ['malformed JSON', 'not json', 'semantic-output-invalid'],
+    [
+      'incomplete native follow-up metadata',
+      {
+        schemaVersion: 'jinn-autopilot-review-result.v1',
+        outcome: 'approve',
+        correlation: correlation(),
+        body: 'Approval with an incomplete follow-up.',
+        followUps: [{
+          type: 'refactor',
+          title: 'Missing priority',
+          body: 'This must not pass strict publication validation.',
+          effort: 'low',
+        }],
+      },
+      'semantic-output-invalid',
+    ],
     [
       'stale result correlation',
       {

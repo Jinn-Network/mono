@@ -28,13 +28,15 @@ export type AutopilotMechanicalResult =
     };
 
 export interface AutopilotMechanicalRunner {
-  run(context: AutopilotEvaluationContext): Promise<AutopilotMechanicalResult>;
+  run(
+    context: AutopilotEvaluationContext,
+    abort?: AbortSignal,
+  ): Promise<AutopilotMechanicalResult>;
 }
 
 export interface SemanticAgentRunnerInput {
   prompt: string;
   cwd: string;
-  model?: string;
   abort: AbortSignal;
 }
 
@@ -55,42 +57,6 @@ export interface AutopilotSemanticReviewResult {
     changedFiles?: string[];
     checks?: string[];
   };
-}
-
-interface FullFollowUp {
-  type: 'feat' | 'chore' | 'fix' | 'refactor';
-  title: string;
-  body: string;
-  effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-  priority: 'p0' | 'p1' | 'p2' | 'p3' | 'p4';
-}
-
-const FOLLOW_UP_TYPES = new Set(['feat', 'chore', 'fix', 'refactor']);
-const FOLLOW_UP_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
-const FOLLOW_UP_PRIORITIES = new Set(['p0', 'p1', 'p2', 'p3', 'p4']);
-
-function completeFollowUps(value: unknown): FullFollowUp[] | undefined {
-  if (value === undefined) return undefined;
-  if (!Array.isArray(value) || value.length > 5) return undefined;
-  const result: FullFollowUp[] = [];
-  for (const item of value) {
-    if (item === null || typeof item !== 'object' || Array.isArray(item)) return undefined;
-    const record = item as Record<string, unknown>;
-    if (
-      Object.keys(record).some((key) => !['type', 'title', 'body', 'effort', 'priority'].includes(key))
-      || !FOLLOW_UP_TYPES.has(String(record['type']))
-      || typeof record['title'] !== 'string'
-      || record['title'].length === 0
-      || typeof record['body'] !== 'string'
-      || record['body'].length === 0
-      || !FOLLOW_UP_EFFORTS.has(String(record['effort']))
-      || !FOLLOW_UP_PRIORITIES.has(String(record['priority']))
-    ) {
-      return undefined;
-    }
-    result.push(record as unknown as FullFollowUp);
-  }
-  return result;
 }
 
 function humanResult(
@@ -173,28 +139,7 @@ function parseAgentReview(
     );
   }
 
-  const rawRecord = raw !== null && typeof raw === 'object'
-    ? raw as Record<string, unknown>
-    : null;
-  const rawFollowUps = rawRecord?.['outcome'] === 'approve'
-    ? rawRecord['followUps']
-    : undefined;
-  const fullFollowUps = completeFollowUps(rawFollowUps);
-  let parsed = AutopilotReviewResultSchema.safeParse(raw);
-  // Compatibility only for the pre-tightening SDK reader: it rejected the
-  // newly-required triage fields as unknown. The current SDK accepts `raw`
-  // directly, so this path disappears after integration.
-  if (
-    !parsed.success
-    && rawRecord?.['outcome'] === 'approve'
-    && rawFollowUps !== undefined
-    && fullFollowUps !== undefined
-  ) {
-    parsed = AutopilotReviewResultSchema.safeParse({
-      ...rawRecord,
-      followUps: fullFollowUps.map(({ title, body }) => ({ title, body })),
-    });
-  }
+  const parsed = AutopilotReviewResultSchema.safeParse(raw);
   if (!parsed.success) {
     return humanResult(
       context,
@@ -212,22 +157,6 @@ function parseAgentReview(
     );
   }
 
-  if (parsed.data.outcome === 'approve') {
-    if (rawFollowUps !== undefined && fullFollowUps === undefined) {
-      return humanResult(
-        context,
-        'semantic-output-invalid',
-        'Approve followUps must be bounded triage-complete entries with type, title, body, effort, and priority.',
-      );
-    }
-    // Preserve the full follow-up contract even when running against an older
-    // SDK reader that accepted only title/body. The current strict SDK schema
-    // validates these fields directly; this compatibility spread is additive.
-    return {
-      ...parsed.data,
-      ...(fullFollowUps !== undefined ? { followUps: fullFollowUps } : {}),
-    } as AutopilotReviewResult;
-  }
   return parsed.data;
 }
 
@@ -235,12 +164,11 @@ export async function runAutopilotSemanticReview(args: {
   context: AutopilotEvaluationContext;
   mechanicalRunner: AutopilotMechanicalRunner;
   agentRunner: SemanticAgentRunner;
-  model?: string;
   abort: AbortSignal;
 }): Promise<AutopilotSemanticReviewResult> {
   let mechanical: AutopilotMechanicalResult;
   try {
-    mechanical = await args.mechanicalRunner.run(args.context);
+    mechanical = await args.mechanicalRunner.run(args.context, args.abort);
   } catch (error) {
     const review = humanResult(
       args.context,
@@ -292,7 +220,6 @@ export async function runAutopilotSemanticReview(args: {
       const output = await args.agentRunner.run({
         prompt: buildAutopilotReviewPrompt(args.context, mechanical.changedFiles),
         cwd: mechanical.checkoutDir,
-        model: args.model,
         abort: args.abort,
       });
       review = parseAgentReview(output, args.context);
@@ -313,6 +240,11 @@ export async function runAutopilotSemanticReview(args: {
       },
     };
   } finally {
-    await mechanical.cleanup();
+    try {
+      await mechanical.cleanup();
+    } catch {
+      // Checkout disposal is operational hygiene. It cannot replace an
+      // already-produced typed review outcome with an infrastructure error.
+    }
   }
 }

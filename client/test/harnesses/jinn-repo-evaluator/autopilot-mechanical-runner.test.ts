@@ -179,6 +179,43 @@ describe('ExactHeadMechanicalRunner', () => {
     expect(command.mock.calls.some(([, args]) => args[0] === 'yarn')).toBe(false);
   });
 
+  it('marks a non-empty diff outside every supported package unscorable', async () => {
+    const command = commandRunner({
+      changedFiles: 'contracts/src/Autopilot.sol\n',
+    });
+    const result = await runner(command).run(context());
+    expect(result).toEqual({
+      kind: 'unscorable',
+      detail: 'unsupported-diff-scope: no deterministic checks cover contracts/src/Autopilot.sol',
+    });
+    expect(command.mock.calls.some(([, args]) => args[0] === 'yarn')).toBe(false);
+  });
+
+  it('propagates cancellation to an in-flight repository command', async () => {
+    const controller = new AbortController();
+    const command = vi.fn((
+      _command: string,
+      _args: string[],
+      options: { signal?: AbortSignal },
+    ) => new Promise<{ stdout: string; stderr: string }>((_resolve, reject) => {
+      expect(options.signal).toBe(controller.signal);
+      options.signal?.addEventListener('abort', () => {
+        reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+      }, { once: true });
+    })) as RepositoryCommandRunner & ReturnType<typeof vi.fn>;
+
+    const pending = runner(command).run(context(), controller.signal);
+    while (command.mock.calls.length === 0) {
+      await Promise.resolve();
+    }
+    controller.abort();
+
+    await expect(pending).resolves.toEqual({
+      kind: 'unscorable',
+      detail: 'evaluation-cancelled',
+    });
+  });
+
   it('returns a deterministic typecheck failure instead of continuing to tests', async () => {
     const failure = Object.assign(new Error('typecheck red'), { code: 1, stderr: 'TS2322' });
     const command = commandRunner({

@@ -23,14 +23,14 @@ export interface RepositoryCommandRunner {
   (
     command: string,
     args: string[],
-    options: { cwd?: string },
+    options: { cwd?: string; signal?: AbortSignal },
   ): Promise<{ stdout: string; stderr: string }>;
 }
 
 async function defaultCommand(
   command: string,
   args: string[],
-  options: { cwd?: string },
+  options: { cwd?: string; signal?: AbortSignal },
 ): Promise<{ stdout: string; stderr: string }> {
   const result = await execFileAsync(command, args, {
     ...options,
@@ -108,7 +108,13 @@ export class ExactHeadMechanicalRunner implements AutopilotMechanicalRunner {
     this.pathExists = options.pathExists ?? defaultPathExists;
   }
 
-  async run(context: AutopilotEvaluationContext): Promise<AutopilotMechanicalResult> {
+  async run(
+    context: AutopilotEvaluationContext,
+    abort?: AbortSignal,
+  ): Promise<AutopilotMechanicalResult> {
+    if (abort?.aborted) {
+      return { kind: 'unscorable', detail: 'evaluation-cancelled' };
+    }
     const root = await this.makeTempDir();
     const repoDir = join(root, 'repo');
     let cleaned = false;
@@ -121,16 +127,32 @@ export class ExactHeadMechanicalRunner implements AutopilotMechanicalRunner {
       await cleanup();
       return { kind: 'unscorable', detail: detail.slice(0, LOG_LIMIT) };
     };
+    const cancelled = (error?: unknown): boolean => (
+      abort?.aborted === true
+      || (error as { name?: unknown } | undefined)?.name === 'AbortError'
+    );
+    const runCommand = (
+      command: string,
+      args: string[],
+      cwd?: string,
+    ): Promise<{ stdout: string; stderr: string }> => this.command(
+      command,
+      args,
+      {
+        ...(cwd ? { cwd } : {}),
+        ...(abort ? { signal: abort } : {}),
+      },
+    );
 
     try {
-      await this.command('git', [
+      await runCommand('git', [
         'clone',
         '--filter=blob:none',
         '--no-checkout',
         this.monoRepoUrl,
         repoDir,
-      ], {});
-      await this.command('git', [
+      ]);
+      await runCommand('git', [
         '-C',
         repoDir,
         'fetch',
@@ -138,21 +160,21 @@ export class ExactHeadMechanicalRunner implements AutopilotMechanicalRunner {
         'origin',
         context.reviewTarget.baseOid,
         context.reviewTarget.resultingHead,
-      ], {});
-      await this.command('git', [
+      ]);
+      await runCommand('git', [
         '-C',
         repoDir,
         'checkout',
         '--detach',
         context.reviewTarget.resultingHead,
-      ], {});
+      ]);
 
-      const exact = await this.command('git', [
+      const exact = await runCommand('git', [
         '-C',
         repoDir,
         'rev-parse',
         'HEAD',
-      ], {});
+      ]);
       const actualHead = exact.stdout.trim().toLowerCase();
       const expectedHead = context.reviewTarget.resultingHead.toLowerCase();
       if (actualHead !== expectedHead) {
@@ -162,27 +184,28 @@ export class ExactHeadMechanicalRunner implements AutopilotMechanicalRunner {
       }
 
       try {
-        await this.command('git', [
+        await runCommand('git', [
           '-C',
           repoDir,
           'merge-base',
           '--is-ancestor',
           context.reviewTarget.baseOid,
           context.reviewTarget.resultingHead,
-        ], {});
+        ]);
       } catch (error) {
+        if (cancelled(error)) return await unscorable('evaluation-cancelled');
         return await unscorable(
           `base-head-mismatch: ${commandErrorDetail(error)}`,
         );
       }
 
-      const diff = await this.command('git', [
+      const diff = await runCommand('git', [
         '-C',
         repoDir,
         'diff',
         '--name-only',
         `${context.reviewTarget.baseOid}...${context.reviewTarget.resultingHead}`,
-      ], {});
+      ]);
       const changedFiles = diff.stdout
         .split('\n')
         .map((line) => line.trim())
@@ -193,23 +216,31 @@ export class ExactHeadMechanicalRunner implements AutopilotMechanicalRunner {
       }
 
       const scopes = scopeTestsForChangedFiles(changedFiles, this.packages);
+      if (changedFiles.length > 0 && scopes.length === 0) {
+        return await unscorable(
+          `unsupported-diff-scope: no deterministic checks cover ${changedFiles.join(', ')}`,
+        );
+      }
       for (const scope of scopes) {
         const pkgDir = join(repoDir, scope.pkg.root);
         try {
-          await this.command('corepack', ['enable'], { cwd: pkgDir });
-        } catch {
+          await runCommand('corepack', ['enable'], pkgDir);
+        } catch (error) {
+          if (cancelled(error)) return await unscorable('evaluation-cancelled');
           // Non-fatal; the pinned `yarn install` command is authoritative.
         }
         try {
-          await this.command('yarn', ['install', '--immutable'], { cwd: pkgDir });
+          await runCommand('yarn', ['install', '--immutable'], pkgDir);
         } catch (error) {
+          if (cancelled(error)) return await unscorable('evaluation-cancelled');
           return await unscorable(
             `install-failed[${scope.pkg.root}]: ${commandErrorDetail(error)}`,
           );
         }
         try {
-          await this.command('yarn', [scope.pkg.typecheckScript], { cwd: pkgDir });
+          await runCommand('yarn', [scope.pkg.typecheckScript], pkgDir);
         } catch (error) {
+          if (cancelled(error)) return await unscorable('evaluation-cancelled');
           if (!isDeterministicCommandFailure(error)) {
             return await unscorable(
               `typecheck-spawn-failed[${scope.pkg.root}]: ${commandErrorDetail(error)}`,
@@ -242,8 +273,9 @@ export class ExactHeadMechanicalRunner implements AutopilotMechanicalRunner {
             ]
           : [scope.pkg.testScript];
         try {
-          await this.command('yarn', testArgs, { cwd: pkgDir });
+          await runCommand('yarn', testArgs, pkgDir);
         } catch (error) {
+          if (cancelled(error)) return await unscorable('evaluation-cancelled');
           if (!isDeterministicCommandFailure(error)) {
             return await unscorable(
               `test-spawn-failed[${scope.pkg.root}]: ${commandErrorDetail(error)}`,
@@ -268,6 +300,7 @@ export class ExactHeadMechanicalRunner implements AutopilotMechanicalRunner {
         cleanup,
       };
     } catch (error) {
+      if (cancelled(error)) return await unscorable('evaluation-cancelled');
       return await unscorable(`repository-precheck-failed: ${commandErrorDetail(error)}`);
     }
   }
