@@ -61,7 +61,8 @@ const verdictEnvelope = {
   manifestCid: ENVELOPE_CID,
   publisherAgentId: '8',
   manifestHash: MANIFEST_HASH,
-  enrichedAtBlock: '121',
+  // Pre-adoption metadata is anchored before the optional Router verdict row.
+  enrichedAtBlock: '112',
 };
 
 interface Script {
@@ -296,7 +297,7 @@ describe('HttpDiscoveryAPI.getAutopilotDeliveryCandidates', () => {
         manifestCid: ENVELOPE_CID,
         publisherAgentId: '8',
         manifestHash: MANIFEST_HASH,
-        enrichedAtBlock: 121,
+        enrichedAtBlock: 112,
       },
     });
 
@@ -304,14 +305,15 @@ describe('HttpDiscoveryAPI.getAutopilotDeliveryCandidates', () => {
       { taskId: TASK_ID, chainId: CHAIN_ID },
       { taskId: TASK_ID, chainId: CHAIN_ID },
       { taskId: TASK_ID, chainId: CHAIN_ID },
-      { requestId: VERDICT_REQUEST_ID, chainId: CHAIN_ID },
+      { taskId: TASK_ID, chainId: CHAIN_ID },
     ]);
   });
 
-  it('keeps an unindexed verdict pending after resolving the solution attempt', async () => {
+  it('returns the exact pre-adoption verdict metadata when no Router verdict row exists yet', async () => {
     const fixture = clientFor({
       tasks: [task],
       attempts: [attempt],
+      verdictEnvelopes: [verdictEnvelope],
     });
 
     await expect(fixture.api.getAutopilotDeliveryCandidates({
@@ -319,10 +321,29 @@ describe('HttpDiscoveryAPI.getAutopilotDeliveryCandidates', () => {
       taskId: TASK_ID,
       role: 'verdict',
     })).resolves.toEqual({
-      status: 'pending',
-      reason: 'verdict-not-indexed',
-      taskId: TASK_ID,
+      status: 'ready',
       role: 'verdict',
+      task: {
+        taskId: TASK_ID,
+        taskCidDigest: TASK_CID_DIGEST,
+        createdAtBlock: 100,
+        createdAtTx: TASK_CREATED_TX,
+      },
+      attempt: {
+        taskId: TASK_ID,
+        attemptIndex: 0,
+        requestId: VERDICT_REQUEST_ID,
+        operator: EVALUATOR,
+        createdAtBlock: null,
+      },
+      solutionOperator: OPERATOR,
+      envelope: {
+        requestId: VERDICT_REQUEST_ID,
+        manifestCid: ENVELOPE_CID,
+        publisherAgentId: '8',
+        manifestHash: MANIFEST_HASH,
+        enrichedAtBlock: 112,
+      },
     });
   });
 
@@ -330,6 +351,7 @@ describe('HttpDiscoveryAPI.getAutopilotDeliveryCandidates', () => {
     const ambiguous = clientFor({
       tasks: [task],
       attempts: [attempt],
+      verdictEnvelopes: [verdictEnvelope],
       verdicts: [verdict, { ...verdict, verdictIndex: 2 }],
     });
     await expect(ambiguous.api.getAutopilotDeliveryCandidates({
@@ -344,6 +366,7 @@ describe('HttpDiscoveryAPI.getAutopilotDeliveryCandidates', () => {
     const wrongAttempt = clientFor({
       tasks: [task],
       attempts: [attempt],
+      verdictEnvelopes: [verdictEnvelope],
       verdicts: [{ ...verdict, attemptIndex: 1 }],
     });
     await expect(wrongAttempt.api.getAutopilotDeliveryCandidates({
@@ -353,6 +376,51 @@ describe('HttpDiscoveryAPI.getAutopilotDeliveryCandidates', () => {
     })).resolves.toMatchObject({
       status: 'contradiction',
       reason: 'inconsistent-indexer-data',
+    });
+  });
+
+  it('rejects an optional Router verdict row that conflicts with pre-adoption metadata', async () => {
+    const fixture = clientFor({
+      tasks: [task],
+      attempts: [attempt],
+      verdictEnvelopes: [verdictEnvelope],
+      verdicts: [{
+        ...verdict,
+        requestId: `0x${'99'.repeat(32)}`,
+      }],
+    });
+
+    await expect(fixture.api.getAutopilotDeliveryCandidates({
+      chainId: CHAIN_ID,
+      taskId: TASK_ID,
+      role: 'verdict',
+    })).resolves.toMatchObject({
+      status: 'contradiction',
+      reason: 'inconsistent-indexer-data',
+    });
+  });
+
+  it('rejects ambiguous pre-adoption verdict metadata candidates', async () => {
+    const fixture = clientFor({
+      tasks: [task],
+      attempts: [attempt],
+      verdictEnvelopes: [
+        verdictEnvelope,
+        {
+          ...verdictEnvelope,
+          requestId: `0x${'98'.repeat(32)}`,
+          manifestCid: `f01551220${'97'.repeat(32)}`,
+        },
+      ],
+    });
+
+    await expect(fixture.api.getAutopilotDeliveryCandidates({
+      chainId: CHAIN_ID,
+      taskId: TASK_ID,
+      role: 'verdict',
+    })).resolves.toMatchObject({
+      status: 'contradiction',
+      reason: 'multiple-envelopes',
     });
   });
 });

@@ -189,9 +189,9 @@ query ExactAutopilotVerdicts($taskId: String!, $chainId: Int!) {
 `;
 
 const EXACT_AUTOPILOT_VERDICT_ENVELOPES_QUERY = `
-query ExactAutopilotVerdictEnvelopeMetadata($requestId: String!, $chainId: Int!) {
+query ExactAutopilotVerdictEnvelopeMetadata($taskId: String!, $chainId: Int!) {
   verdictEnvelopeMetas(
-    where: { requestId: $requestId, chainId: $chainId },
+    where: { taskId: $taskId, chainId: $chainId },
     limit: 2
   ) {
     items {
@@ -1075,16 +1075,41 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
       return contradiction('inconsistent-indexer-data');
     }
 
-    let deliveryRequestId = attemptRow.requestId;
-    let deliveryOperator = attemptRow.operator;
-    let deliveryCreatedAtBlock = attemptCreatedAtBlock;
-    let verdictJoin: {
-      attemptIndex: number;
-      verdictIndex: number;
-      evaluator: string;
-    } | null = null;
-
     if (args.role === 'verdict') {
+      // The evaluation metadata anchor exists before adoption and Router
+      // settlement. It is therefore the authoritative pre-adoption source for
+      // the evaluation request and evaluator Safe. A verdict row is only an
+      // optional postcondition cross-check once claimDelivery has happened.
+      const envelopeData = await postGql<ExactAutopilotVerdictEnvelopesPage>(
+        gqlUrl,
+        fetchImpl,
+        EXACT_AUTOPILOT_VERDICT_ENVELOPES_QUERY,
+        { taskId: args.taskId, chainId: args.chainId },
+      );
+      const envelopeRows = envelopeData.verdictEnvelopeMetas?.items ?? [];
+      if (envelopeRows.length === 0) return pending('envelope-not-indexed');
+      if (envelopeRows.length !== 1) return contradiction('multiple-envelopes');
+      const envelopeRow = envelopeRows[0];
+      const enrichedAtBlock = parseExactBlock(envelopeRow.enrichedAtBlock);
+      if (
+        envelopeRow.taskId !== args.taskId
+        || envelopeRow.chainId !== args.chainId
+        || envelopeRow.attemptIndex !== attemptRow.attemptIndex
+        || !Number.isSafeInteger(envelopeRow.verdictIndex)
+        || envelopeRow.verdictIndex < 0
+        || !isBytes32(envelopeRow.requestId)
+        || envelopeRow.requestId.toLowerCase() === attemptRow.requestId.toLowerCase()
+        || !isAddress(envelopeRow.evaluator)
+        || typeof envelopeRow.manifestCid !== 'string'
+        || envelopeRow.manifestCid.length === 0
+        || !/^[1-9][0-9]*$/.test(envelopeRow.publisherAgentId)
+        || !isBytes32(envelopeRow.manifestHash)
+        || enrichedAtBlock === undefined
+        || enrichedAtBlock < attemptCreatedAtBlock
+      ) {
+        return contradiction('inconsistent-indexer-data');
+      }
+
       const verdictData = await postGql<ExactAutopilotVerdictsPage>(
         gqlUrl,
         fetchImpl,
@@ -1092,83 +1117,79 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
         { taskId: args.taskId, chainId: args.chainId },
       );
       const verdictRows = verdictData.verdicts?.items ?? [];
-      if (verdictRows.length === 0) return pending('verdict-not-indexed');
-      if (verdictRows.length !== 1) return contradiction('multiple-verdicts');
-      const verdictRow = verdictRows[0];
-      const verdictCreatedAtBlock = parseExactBlock(verdictRow.createdAtBlock);
-      if (
-        verdictRow.taskId !== args.taskId
-        || verdictRow.chainId !== args.chainId
-        || verdictRow.attemptIndex !== attemptRow.attemptIndex
-        || !Number.isSafeInteger(verdictRow.verdictIndex)
-        || verdictRow.verdictIndex < 0
-        || !isBytes32(verdictRow.requestId)
-        || !isAddress(verdictRow.evaluator)
-        || !Number.isSafeInteger(verdictRow.verdictCode)
-        || verdictCreatedAtBlock === undefined
-        || verdictCreatedAtBlock < attemptCreatedAtBlock
-      ) {
-        return contradiction('inconsistent-indexer-data');
+      if (verdictRows.length > 1) return contradiction('multiple-verdicts');
+      let verdictCreatedAtBlock: number | null = null;
+      if (verdictRows.length === 1) {
+        const verdictRow = verdictRows[0];
+        verdictCreatedAtBlock = parseExactBlock(verdictRow.createdAtBlock) ?? null;
+        if (
+          verdictRow.taskId !== args.taskId
+          || verdictRow.chainId !== args.chainId
+          || verdictRow.attemptIndex !== envelopeRow.attemptIndex
+          || verdictRow.verdictIndex !== envelopeRow.verdictIndex
+          || !isBytes32(verdictRow.requestId)
+          || verdictRow.requestId.toLowerCase() !== envelopeRow.requestId.toLowerCase()
+          || !isAddress(verdictRow.evaluator)
+          || verdictRow.evaluator.toLowerCase() !== envelopeRow.evaluator.toLowerCase()
+          || !Number.isSafeInteger(verdictRow.verdictCode)
+          || verdictCreatedAtBlock === null
+          || verdictCreatedAtBlock < attemptCreatedAtBlock
+        ) {
+          return contradiction('inconsistent-indexer-data');
+        }
       }
-      deliveryRequestId = verdictRow.requestId;
-      deliveryOperator = verdictRow.evaluator;
-      deliveryCreatedAtBlock = verdictCreatedAtBlock;
-      verdictJoin = {
-        attemptIndex: verdictRow.attemptIndex,
-        verdictIndex: verdictRow.verdictIndex,
-        evaluator: verdictRow.evaluator,
+
+      return {
+        status: 'ready',
+        role: args.role,
+        task: {
+          taskId: taskRow.id,
+          taskCidDigest: taskRow.taskCidDigest,
+          createdAtBlock: taskCreatedAtBlock,
+          createdAtTx: taskRow.createdAtTx,
+        },
+        attempt: {
+          taskId: attemptRow.taskId,
+          attemptIndex: envelopeRow.attemptIndex,
+          requestId: envelopeRow.requestId,
+          operator: envelopeRow.evaluator,
+          createdAtBlock: verdictCreatedAtBlock,
+        },
+        solutionOperator: attemptRow.operator,
+        envelope: {
+          requestId: envelopeRow.requestId,
+          manifestCid: envelopeRow.manifestCid,
+          publisherAgentId: envelopeRow.publisherAgentId,
+          manifestHash: envelopeRow.manifestHash,
+          enrichedAtBlock,
+        },
       };
     }
 
-    const envelopeData = args.role === 'verdict'
-      ? await postGql<ExactAutopilotVerdictEnvelopesPage>(
-          gqlUrl,
-          fetchImpl,
-          EXACT_AUTOPILOT_VERDICT_ENVELOPES_QUERY,
-          { requestId: deliveryRequestId, chainId: args.chainId },
-        )
-      : await postGql<ExactAutopilotEnvelopesPage>(
-          gqlUrl,
-          fetchImpl,
-          EXACT_AUTOPILOT_ENVELOPES_QUERY,
-          { requestId: deliveryRequestId, chainId: args.chainId },
-        );
-    const envelopeRows = args.role === 'verdict'
-      ? (envelopeData as ExactAutopilotVerdictEnvelopesPage).verdictEnvelopeMetas?.items ?? []
-      : (envelopeData as ExactAutopilotEnvelopesPage).attemptEnvelopeMetas?.items ?? [];
+    const envelopeData = await postGql<ExactAutopilotEnvelopesPage>(
+      gqlUrl,
+      fetchImpl,
+      EXACT_AUTOPILOT_ENVELOPES_QUERY,
+      { requestId: attemptRow.requestId, chainId: args.chainId },
+    );
+    const envelopeRows = envelopeData.attemptEnvelopeMetas?.items ?? [];
     if (envelopeRows.length === 0) return pending('envelope-not-indexed');
     if (envelopeRows.length !== 1) return contradiction('multiple-envelopes');
     const envelopeRow = envelopeRows[0];
     const enrichedAtBlock = parseExactBlock(envelopeRow.enrichedAtBlock);
     if (
       !isBytes32(envelopeRow.requestId)
-      || envelopeRow.requestId.toLowerCase() !== deliveryRequestId.toLowerCase()
+      || envelopeRow.requestId.toLowerCase() !== attemptRow.requestId.toLowerCase()
       || envelopeRow.chainId !== args.chainId
       || typeof envelopeRow.manifestCid !== 'string'
       || envelopeRow.manifestCid.length === 0
       || !/^(0|[1-9][0-9]*)$/.test(envelopeRow.publisherAgentId)
       || !isBytes32(envelopeRow.manifestHash)
       || enrichedAtBlock === undefined
-      || enrichedAtBlock < deliveryCreatedAtBlock
+      || enrichedAtBlock < attemptCreatedAtBlock
     ) {
       return contradiction('inconsistent-indexer-data');
     }
-    if (
-      verdictJoin !== null
-      && (() => {
-        const row = envelopeRow as ExactAutopilotVerdictEnvelopesPage[
-          'verdictEnvelopeMetas'
-        ]['items'][number];
-        return row.taskId !== args.taskId
-          || row.attemptIndex !== verdictJoin.attemptIndex
-          || row.verdictIndex !== verdictJoin.verdictIndex
-          || !isAddress(row.evaluator)
-          || row.evaluator.toLowerCase() !== verdictJoin.evaluator.toLowerCase();
-      })()
-    ) {
-      return contradiction('inconsistent-indexer-data');
-    }
-
     return {
       status: 'ready',
       role: args.role,
@@ -1181,9 +1202,9 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
       attempt: {
         taskId: attemptRow.taskId,
         attemptIndex: attemptRow.attemptIndex,
-        requestId: deliveryRequestId,
-        operator: deliveryOperator,
-        createdAtBlock: deliveryCreatedAtBlock,
+        requestId: attemptRow.requestId,
+        operator: attemptRow.operator,
+        createdAtBlock: attemptCreatedAtBlock,
       },
       solutionOperator: attemptRow.operator,
       envelope: {

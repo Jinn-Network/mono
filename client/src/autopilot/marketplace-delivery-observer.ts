@@ -114,7 +114,7 @@ export interface VerifiedAutopilotMarketplaceDelivery {
     attemptIndex: number;
     requestId: Hex;
     operator: Address;
-    createdAtBlock: number;
+    createdAtBlock: number | null;
   };
   delivery: {
     envelopeCid: string;
@@ -301,7 +301,10 @@ export function createAutopilotMarketplaceDeliveryObserver(
         || !/^0x[0-9a-fA-F]{40}$/.test(lookup.attempt.operator)
         || !/^0x[0-9a-fA-F]{40}$/.test(lookup.solutionOperator)
         || !sameHex(lookup.envelope.requestId, lookup.attempt.requestId)
-        || lookup.task.createdAtBlock > lookup.attempt.createdAtBlock
+        || (
+          lookup.attempt.createdAtBlock !== null
+          && lookup.task.createdAtBlock > lookup.attempt.createdAtBlock
+        )
       ) {
         return contradiction(
           'discovery-mismatch',

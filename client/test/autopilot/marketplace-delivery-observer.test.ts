@@ -244,7 +244,7 @@ async function harness(options: HarnessOptions = {}) {
       attemptIndex: 0,
       requestId: REQUEST_ID,
       operator: role === 'verdict' ? EVALUATOR : OPERATOR,
-      createdAtBlock: 100,
+      createdAtBlock: role === 'verdict' ? null : 100,
     },
     solutionOperator: OPERATOR,
     envelope: {

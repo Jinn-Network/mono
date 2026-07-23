@@ -132,7 +132,8 @@ export interface AutopilotDeliveryAttemptCandidate {
   attemptIndex: number;
   requestId: `0x${string}`;
   operator: `0x${string}`;
-  createdAtBlock: number;
+  /** Indexed attempt/delivery block when present; null for pre-adoption verdict metadata. */
+  createdAtBlock: number | null;
 }
 
 export interface AutopilotDeliveryEnvelopeCandidate {
@@ -149,7 +150,6 @@ export type AutopilotDeliveryCandidateLookup =
       reason:
         | 'task-not-indexed'
         | 'attempt-not-indexed'
-        | 'verdict-not-indexed'
         | 'envelope-not-indexed'
         | 'exact-indexer-required';
       taskId: string;
