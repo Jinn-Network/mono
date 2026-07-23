@@ -13,6 +13,7 @@ import {
   ok,
   unavailable,
   type CorpusRecord,
+  type CorpusPort,
   type ContributionCandidateV1,
   type EpisodeV1,
   type JinnPluginDeps,
@@ -26,6 +27,10 @@ import {
   defaultEvidenceIndexPath,
 } from '@jinn-network/core';
 import { buildSkillMarkdown } from '../src/skill-package.js';
+import {
+  createFederatedCorpusAdapter,
+  createLocalEpisodeCorpusAdapter,
+} from '../src/adapters/index.js';
 
 function capture() {
   let output = '';
@@ -220,6 +225,69 @@ describe('jinn-layer process contract v1', () => {
     expect(Array.isArray(reply.value.searchedTerms)).toBe(true);
     expect(reply.value).not.toHaveProperty('suggestions');
     expect(reply.value).not.toHaveProperty('markers');
+  });
+
+  it('delivers persisted local context when public retrieval is unavailable without rewriting visibility', async () => {
+    const episodesDir = mkdtempSync(join(tmpdir(), 'jinn-local-pickup-'));
+    const evidence = createEvidenceAdapter({ capturesDir: episodesDir });
+    const storedEpisode = {
+      ...episode(),
+      episodeId: 'local-pickup-episode',
+      retrievalVisible: false,
+      task: {
+        ...episode().task,
+        summary: 'Fix the session bridge',
+        distributionTags: ['bridge'],
+      },
+      trajectory: [{
+        ...episode().trajectory[0],
+        attributes: { 'seed.synthesis': 'Repair the session bridge before retrying pickup.' },
+      }],
+    };
+    const persisted = await evidence.put(storedEpisode);
+    expect(persisted.status).toBe('ok');
+    const publicCorpus: CorpusPort = {
+      search: async () => unavailable('public corpus offline'),
+      get: async () => unavailable('public corpus offline'),
+    };
+    const corpus = createFederatedCorpusAdapter({
+      local: createLocalEpisodeCorpusAdapter({ evidence }),
+      public: publicCorpus,
+    });
+    const out = capture();
+
+    try {
+      expect(await runJinnLayerCli(['session', 'pickup'], {
+        writer: out.writer,
+        reader: async () => JSON.stringify({
+          contractVersion: 1,
+          meta: {
+            sessionId: 'pickup-local-evidence',
+            taskSummary: 'Fix the session bridge',
+            harness: { name: 'host', version: '1' },
+            model: 'test',
+            tools: [],
+          },
+          firstMessage: 'session bridge',
+        }),
+        pluginOverrides: memoryDeps({ corpus, evidence }),
+      })).toBe(0);
+
+      const reply = JSON.parse(out.output());
+      expect(reply).toMatchObject({
+        contractVersion: 1,
+        status: 'degraded',
+        value: {
+          deliveryMode: 'degraded',
+          packets: [{ ref: 'local-episode:local-pickup-episode' }],
+        },
+      });
+      expect(reply.value.contextBlock).toContain('Fix the session bridge');
+      expect(JSON.parse(readFileSync(join(episodesDir, 'local-pickup-episode.episode.json'), 'utf8')))
+        .toMatchObject({ retrievalVisible: false });
+    } finally {
+      rmSync(episodesDir, { recursive: true, force: true });
+    }
   });
 
   it('provides real evidence content end to end through the process contract (additive shape, rescope R2 #1772)', async () => {
