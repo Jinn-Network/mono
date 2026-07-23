@@ -239,6 +239,7 @@ describe('content-aware search via capture meta (#1344)', () => {
     expect(hits[0]!.repositorySlug).toBe('obra/superpowers');
     expect(hits[0]!.synthesis).toBe('Use a red-green-refactor loop.');
     expect(hits[0]!.retrievalVisible).toBe(true);
+    expect(hits[0]!.verifiabilityTier).toBe('user-accepted');
     expect(acquireFn).not.toHaveBeenCalled();
   });
 

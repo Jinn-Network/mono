@@ -16,6 +16,8 @@ import {
   ok,
   hasRetrievalMark,
   RETRIEVAL_VISIBLE_TAG,
+  TIER_ORDER,
+  type Tier,
 } from '@jinn-network/plugin';
 import {
   createHarnessLayer,
@@ -41,6 +43,10 @@ function isLayerDeps(deps: CorpusAdapterDeps | HarnessLayerConfig): deps is Corp
   return 'layer' in deps;
 }
 
+function pickupTier(value: string | undefined): Tier | undefined {
+  return TIER_ORDER.includes(value as Tier) ? value as Tier : undefined;
+}
+
 /**
  * `CorpusSearchHit` → `KnowledgeHit`. `summary` → `snippet`; `score` omitted.
  * `origin` is the identity used by cross-record content dedup: prefer the
@@ -50,6 +56,7 @@ function isLayerDeps(deps: CorpusAdapterDeps | HarnessLayerConfig): deps is Corp
 function toKnowledgeHit(hit: CorpusSearchHit): KnowledgeHit {
   const origin = hit.operator.agentId || hit.ref;
   const tags = hit.tags ?? [];
+  const tier = pickupTier(hit.verifiabilityTier);
   // Named indexed metadata is authoritative when present. The legacy mark is
   // only a fallback for rows indexed before that field existed.
   const retrievalVisible = hit.retrievalVisible ?? hasRetrievalMark(tags);
@@ -62,6 +69,7 @@ function toKnowledgeHit(hit: CorpusSearchHit): KnowledgeHit {
     ...(origin ? { origin } : {}),
     publishedAt: hit.publishedAt,
     retrievalVisible,
+    ...(tier ? { tier } : {}),
   };
 }
 

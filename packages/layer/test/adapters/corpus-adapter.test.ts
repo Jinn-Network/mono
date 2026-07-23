@@ -90,6 +90,23 @@ describe('CorpusAdapter mapping', () => {
     expect(result.value[0]).toMatchObject({ tags: ['dashboard', 'vitest'], origin: '42' });
   });
 
+  it('maps a recognized public verification tier without inventing one', async () => {
+    const layer = makeFakeLayer();
+    layer.corpus.search = async () => [
+      makeHit({ verifiabilityTier: 'tests-passed' }),
+      makeHit({ ref: 'legacy-no-tier', verifiabilityTier: undefined }),
+      makeHit({ ref: 'future-tier', verifiabilityTier: 'future-tier' }),
+    ];
+
+    const result = await createCorpusAdapter({ layer }).search('anything');
+
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok') return;
+    expect(result.value[0]?.tier).toBe('tests-passed');
+    expect(result.value[1]?.tier).toBeUndefined();
+    expect(result.value[2]?.tier).toBeUndefined();
+  });
+
   it('does not let a forged safeAddress collapse distinct unattributed records during content dedup', async () => {
     const layer = makeFakeLayer();
     layer.corpus.search = async () => [
