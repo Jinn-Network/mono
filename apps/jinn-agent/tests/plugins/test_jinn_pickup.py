@@ -1660,6 +1660,198 @@ def test_inflight_old_session_end_cannot_pop_fresh_same_id_lifecycle(
         jinn._runner = None
 
 
+def test_post_pop_old_session_end_cannot_persist_or_render_after_reopen(
+    monkeypatch,
+):
+    session_id = "post-pop-session-end-same-id-reopen"
+    delegate_started = threading.Event()
+    release_delegate = threading.Event()
+    fallback_episodes = []
+    terminal_lines = []
+    worker_errors = []
+
+    def blocking_delegate(*args, **kwargs):
+        delegate_started.set()
+        assert release_delegate.wait(timeout=2)
+        return None
+
+    monkeypatch.setattr(jinn, "_delegate_session_end", blocking_delegate)
+    monkeypatch.setattr(
+        jinn.distill,
+        "write_episode_fallback",
+        lambda episode: fallback_episodes.append(episode) or Path("stale.json"),
+    )
+    monkeypatch.setattr(
+        jinn,
+        "_user_line",
+        terminal_lines.append,
+    )
+    runner = PickupRunner()
+    jinn._runner = runner
+    try:
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="old-task",
+            turn_id="old-turn",
+            user_message="old user turn",
+            is_first_turn=True,
+        )
+
+        def run_old_end():
+            try:
+                jinn._on_session_end(
+                    session_id=session_id,
+                    task_id="old-task",
+                    turn_id="old-turn",
+                    completed=True,
+                    interrupted=False,
+                )
+            except BaseException as exc:
+                worker_errors.append(exc)
+
+        worker = threading.Thread(
+            name="old-post-pop-session-end",
+            target=run_old_end,
+        )
+        worker.start()
+        assert delegate_started.wait(timeout=2)
+
+        jinn._on_session_finalize(
+            session_id=session_id,
+            reason="old_session_complete",
+        )
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="fresh-task",
+            turn_id="fresh-turn",
+            user_message="fresh user turn",
+            is_first_turn=True,
+        )
+        fresh_state = jinn._session_states[session_id]
+        fresh_lifecycle = jinn._session_lifecycle_tokens[session_id]
+
+        release_delegate.set()
+        worker.join(timeout=2)
+
+        assert not worker.is_alive()
+        assert worker_errors == []
+        assert fallback_episodes == []
+        assert not any(
+            line.startswith("Jinn session complete")
+            for line in terminal_lines
+        )
+        assert jinn._session_states[session_id] is fresh_state
+        assert jinn._session_lifecycle_tokens[session_id] is fresh_lifecycle
+        assert jinn.buf.has_capture(
+            "fresh-task",
+            session_id,
+            lifecycle_token=fresh_lifecycle,
+        )
+        assert (
+            session_id,
+            "fresh-turn",
+        ) in jinn._session_turn_lifecycle_owners
+    finally:
+        release_delegate.set()
+        if "worker" in locals():
+            worker.join(timeout=2)
+        jinn._runner = None
+
+
+def test_no_episode_completion_render_is_suppressed_after_reopen(
+    monkeypatch,
+):
+    session_id = "no-episode-render-same-id-reopen"
+    render_started = threading.Event()
+    release_render = threading.Event()
+    terminal_lines = []
+    worker_errors = []
+
+    def blocking_render_complete(**kwargs):
+        render_started.set()
+        assert release_render.wait(timeout=2)
+        return "Jinn session complete\n  stale old completion"
+
+    monkeypatch.setattr(
+        jinn.session_view,
+        "render_complete",
+        blocking_render_complete,
+    )
+    monkeypatch.setattr(
+        jinn,
+        "_user_line",
+        terminal_lines.append,
+    )
+    runner = PickupRunner()
+    jinn._runner = runner
+    try:
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="old-task",
+            turn_id="old-turn",
+            user_message="old user turn",
+            is_first_turn=True,
+        )
+        old_lifecycle = jinn._session_lifecycle_tokens[session_id]
+        jinn.buf.discard(
+            "old-task",
+            session_id,
+            lifecycle_token=old_lifecycle,
+        )
+
+        def run_old_end():
+            try:
+                jinn._on_session_end(
+                    session_id=session_id,
+                    task_id="old-task",
+                    turn_id="old-turn",
+                    completed=True,
+                    interrupted=False,
+                )
+            except BaseException as exc:
+                worker_errors.append(exc)
+
+        worker = threading.Thread(
+            name="old-no-episode-session-end",
+            target=run_old_end,
+        )
+        worker.start()
+        assert render_started.wait(timeout=2)
+
+        jinn._on_session_finalize(
+            session_id=session_id,
+            reason="old_session_complete",
+        )
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="fresh-task",
+            turn_id="fresh-turn",
+            user_message="fresh user turn",
+            is_first_turn=True,
+        )
+        fresh_state = jinn._session_states[session_id]
+        fresh_lifecycle = jinn._session_lifecycle_tokens[session_id]
+
+        release_render.set()
+        worker.join(timeout=2)
+
+        assert not worker.is_alive()
+        assert worker_errors == []
+        assert terminal_lines == []
+        assert jinn._session_states[session_id] is fresh_state
+        assert jinn._session_lifecycle_tokens[session_id] is fresh_lifecycle
+        assert jinn.buf.has_capture(
+            "fresh-task",
+            session_id,
+            lifecycle_token=fresh_lifecycle,
+        )
+    finally:
+        release_render.set()
+        if "worker" in locals():
+            worker.join(timeout=2)
+        jinn._runner = None
+
+
 def test_finalize_closes_control_state_atomically_before_capture_cleanup(
     monkeypatch,
 ):

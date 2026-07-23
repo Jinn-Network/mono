@@ -262,6 +262,15 @@ class _TurnLifecycleOwner:
 
 
 @dataclass(frozen=True)
+class _CompletionFence:
+    """Lifecycle identity allowed to publish post-pop completion effects."""
+
+    logical_session_id: str
+    lifecycle_token: _SessionLifecycleToken
+    closed_by_pop: bool
+
+
+@dataclass(frozen=True)
 class _PickupReservation:
     excluded_canonical_episode_ids: tuple[str, ...]
     token: _SessionLifecycleToken
@@ -458,6 +467,29 @@ def _session_lifecycle_is_current(
     key = logical_session_id or "default"
     with _session_state_lock:
         return _session_lifecycle_tokens.get(key) is token
+
+
+def _completion_fence_allows(fence: _CompletionFence) -> bool:
+    """Return whether a popped lifecycle may still publish completion effects."""
+    key = fence.logical_session_id or "default"
+    with _session_state_lock:
+        current_token = _session_lifecycle_tokens.get(key)
+        if fence.closed_by_pop:
+            return current_token is None
+        return current_token is fence.lifecycle_token
+
+
+def _emit_completion_if_current(
+    fence: _CompletionFence,
+    **render_args: Any,
+) -> None:
+    """Render and publish completion only while its lifecycle remains current."""
+    if not _completion_fence_allows(fence):
+        return
+    rendered = session_view.render_complete(**render_args)
+    if not _completion_fence_allows(fence):
+        return
+    _user_line(rendered)
 
 
 def _state_for(
@@ -1213,14 +1245,20 @@ def _on_session_end(
         )
         if state is None:
             return
-        _user_line(session_view.render_complete(
+        completion_fence = _CompletionFence(
+            logical_session_id=logical_session_id,
+            lifecycle_token=lifecycle_token,
+            closed_by_pop=session_kind == "host-internal",
+        )
+        _emit_completion_if_current(
+            completion_fence,
             summary=None,
             activity=state.get("activity") or {},
             capture_status="unavailable",
             local_learning_status="unavailable",
             contribution=None,
             candidate_created=False,
-        ))
+        )
         return
 
     state = _pop_state(
@@ -1230,6 +1268,11 @@ def _on_session_end(
     )
     if state is None:
         return
+    completion_fence = _CompletionFence(
+        logical_session_id=logical_session_id,
+        lifecycle_token=lifecycle_token,
+        closed_by_pop=session_kind == "host-internal",
+    )
     snapshot = state.get("snapshot")
     try:
         accepted = session_bridge.accepted_diff(snapshot) if snapshot is not None else ""
@@ -1270,6 +1313,8 @@ def _on_session_end(
         contribution_vetoed=vetoed,
     )
     if result is None:
+        if not _completion_fence_allows(completion_fence):
+            return
         fallback_path = distill.write_episode_fallback(episode)
         learning_status = (
             "off" if distill.cached_mode(_runner) == "off"
@@ -1277,7 +1322,8 @@ def _on_session_end(
             else "unavailable"
         )
         activity = state.get("activity") or {}
-        _user_line(session_view.render_complete(
+        _emit_completion_if_current(
+            completion_fence,
             summary={
                 "searchedTerms": list(activity.get("searchedTerms") or []),
                 "providedPackets": [
@@ -1290,7 +1336,7 @@ def _on_session_end(
             local_learning_status=learning_status,
             contribution=None,
             candidate_created=candidate is not None,
-        ))
+        )
     else:
         contribution = result.get("contribution")
         value = contribution.get("value") if isinstance(contribution, dict) else None
@@ -1310,14 +1356,15 @@ def _on_session_end(
             "off" if distill.cached_mode(_runner) == "off"
             else "pending"
         )
-        _user_line(session_view.render_complete(
+        _emit_completion_if_current(
+            completion_fence,
             summary=result.get("summary"),
             activity=state.get("activity") or {},
             capture_status="captured",
             local_learning_status=learning_status,
             contribution=result.get("contribution"),
             candidate_created=candidate is not None,
-        ))
+        )
 
 
 # ── Slash commands ───────────────────────────────────────────────────────────
