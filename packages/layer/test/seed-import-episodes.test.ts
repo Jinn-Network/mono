@@ -301,6 +301,7 @@ describe('executeEpisodes()', () => {
     ['email address', 'Contact the reporter at jane.doe@example.com for repro steps.'],
     ['home-dir path', 'Logs were written to /Users/jdoe/project/output.log.'],
     ['AWS access-key id', 'Found a stray credential: AKIAIOSFODNN7EXAMPLE in the diff.'],
+    ['Luhn-valid payment card', 'Customer card: 4111 1111 1111 1111.'],
   ])('rejects %s before any publish call', async (_label, sensitiveText) => {
     const source = mockEpisodeSource([
       episode({
@@ -340,7 +341,6 @@ describe('executeEpisodes()', () => {
   });
 
   it.each([
-    ['payment-card-shaped string', 'Customer card: 4111 1111 1111 1111.'],
     ['phone-shaped string', 'Call the customer at +1 (415) 555-2671.'],
     [
       'JWT-shaped string',
@@ -358,12 +358,13 @@ describe('executeEpisodes()', () => {
     // probabilistic stages false-positive on ordinary words and hex-looking
     // ids in that content (#1784). Every structured identifier or PII class
     // detected only by openredaction is therefore residual risk — not just
-    // the representative payment, contact, government identity, medical,
-    // and financial cases sampled here. JWTs and unprefixed high-entropy
-    // blobs are likewise residuals from the omitted entropy fallback. The
-    // trace profile still catches these classes; seed curators must catch
-    // them by review. This test pins that trade-off as intentional, not a
-    // complete enumeration of openredaction's 570+ pattern surface.
+    // the representative contact, government identity, medical, and
+    // financial cases sampled here. Luhn-valid cards are no longer residual:
+    // the shared Tier-1 checksummed-instruments detector catches them in every
+    // lane (#1972). JWTs and unprefixed high-entropy blobs remain residuals
+    // from the omitted entropy fallback. Seed curators must catch the remaining
+    // classes by review. This test pins that trade-off as intentional, not a
+    // complete enumeration of openredaction's former 570+ pattern surface.
     const source = mockEpisodeSource([
       episode({
         steps: [{ label: 'note', title: 'residual fixture', text: residualText }],
