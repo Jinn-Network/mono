@@ -39,11 +39,39 @@ describe('active local scheduler', () => {
     ]);
   });
 
-  it('suppresses only implementation at the GitHub backlog threshold', () => {
+  it('suppresses only fresh implementation at the GitHub backlog threshold', () => {
     const plan = scheduleActiveActions(input({ openPipelineBacklog: 10 }));
     expect(plan.actions.map((action) => action.kind)).toEqual([
       'claim-review',
       'merge',
+    ]);
+    expect(plan.skips).toContainEqual({
+      phase: 'implementation',
+      subject: 'issue:1',
+      reason: 'backpressure',
+    });
+  });
+
+  it('still claims machine children under open-pipeline backpressure', () => {
+    const plan = scheduleActiveActions(input({
+      candidates: [
+        { phase: 'implementation', issueNumber: 99, isChild: true },
+        { phase: 'implementation', issueNumber: 1 },
+        { phase: 'review', issueNumber: 3, prNumber: 30, head: HEAD, author: 'other' },
+        { phase: 'merge', issueNumber: 5, prNumber: 50, head: HEAD },
+      ],
+      openPipelineBacklog: 10,
+      remaining: { implementation: 2, review: 1 },
+    }));
+    expect(plan.actions).toEqual([
+      { kind: 'claim-implementation', issueNumber: 99 },
+      {
+        kind: 'claim-review',
+        issueNumber: 3,
+        prNumber: 30,
+        head: HEAD,
+      },
+      { kind: 'merge', issueNumber: 5, prNumber: 50, head: HEAD },
     ]);
     expect(plan.skips).toContainEqual({
       phase: 'implementation',

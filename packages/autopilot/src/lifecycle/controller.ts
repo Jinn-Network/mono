@@ -586,6 +586,7 @@ function activeCandidates(
       (isChild ? childImplementation : freshImplementation).push({
         phase: 'implementation',
         issueNumber: item.issueNumber,
+        ...(isChild ? { isChild: true } : {}),
       });
       continue;
     }
