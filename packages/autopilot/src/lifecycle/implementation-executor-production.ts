@@ -15,7 +15,7 @@ import {
   type SelectedCredential,
 } from './credentials.js';
 import { makeGitProtocolPort } from './git-protocol.js';
-import { parseChildMarker } from './child-issues.js';
+import { hasChildKindLabel, parseChildMarker } from './child-issues.js';
 import {
   CANONICAL_GITHUB_HTTPS_REMOTE,
   runCanonicalImplementationRealityCheck,
@@ -214,13 +214,21 @@ export function makeProductionImplementationActionPort(
           pr.closingIssueNumbers.includes(issueNumber)
           || pr.body.includes(`<!-- jinn-autopilot:v2 issue=${issueNumber} `)
         ));
-      const eligible = lifecycle.kind === 'issue'
+      const marker = parseChildMarker(source.body ?? '');
+      const childKindLabel = hasChildKindLabel(source.labels);
+      let eligible = lifecycle.kind === 'issue'
         ? lifecycle.eligible && lifecycle.humanHold !== true
         : selected
           && lifecycle.humanHold !== true
           && lifecycle.branchClaim?.phase === 'implement'
           && lifecycle.branchClaim.phaseComplete !== true
           && lifecycle.isDraft;
+      // Machine children must route through fix-child on the parent branch.
+      // A kind label without a body marker means the incremental index omitted
+      // the marker — fail closed instead of ordinary implement-issue.
+      if (childKindLabel && marker === null) {
+        eligible = false;
+      }
       return {
         number: source.number,
         title: source.title,
@@ -232,12 +240,9 @@ export function makeProductionImplementationActionPort(
           ?? 'next',
         ),
         effort: source.effort,
-        ...((): { child?: { parentPr: number; kind: 'review-finding' | 'reconcile' | 'ci-failure' } } => {
-          const marker = parseChildMarker(source.body ?? '');
-          return marker === null
-            ? {}
-            : { child: { parentPr: marker.parentPr, kind: marker.kind } };
-        })(),
+        ...(marker === null
+          ? {}
+          : { child: { parentPr: marker.parentPr, kind: marker.kind } }),
       };
     },
 

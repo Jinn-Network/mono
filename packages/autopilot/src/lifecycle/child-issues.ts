@@ -39,7 +39,11 @@ export function isChildIssueBody(body: string): boolean {
   return parseChildMarker(body) !== null;
 }
 
-const CHILD_KIND_LABELS = new Set(['review-finding', 'reconcile', 'ci-failure']);
+const CHILD_KIND_LABELS = new Set<string>(CHILD_KINDS);
+
+export function hasChildKindLabel(labels: readonly string[] | undefined): boolean {
+  return (labels ?? []).some((label) => CHILD_KIND_LABELS.has(label));
+}
 
 /**
  * Machine-created child issues carry a body marker plus a kind label.

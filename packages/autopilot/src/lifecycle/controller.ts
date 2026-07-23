@@ -25,7 +25,7 @@ import {
   type ActiveCandidate,
   type ActiveSchedulingSkip,
 } from './active-scheduler.js';
-import { childrenPathEnabled } from './child-issues.js';
+import { childrenPathEnabled, isMachineChildIssue } from './child-issues.js';
 import { classifyCiChecks, isCiGreen } from './ci-classifier.js';
 import { chooseIntegrationLadderAction } from './integration-ladder.js';
 import type {
@@ -580,9 +580,12 @@ function activeCandidates(
       && item.eligible
       && !item.humanHold
     ) {
-      const isChild = item.labels.includes('review-finding')
-        || item.labels.includes('reconcile')
-        || item.labels.includes('ci-failure');
+      const issueSource = snapshot.issues.find((candidate) =>
+        candidate.number === item.issueNumber);
+      const isChild = isMachineChildIssue({
+        body: issueSource?.body,
+        labels: item.labels,
+      });
       (isChild ? childImplementation : freshImplementation).push({
         phase: 'implementation',
         issueNumber: item.issueNumber,
