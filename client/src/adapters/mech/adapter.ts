@@ -55,6 +55,7 @@ import {
   canClaimEvaluation,
   type RouterTaskPolicy,
   type DecodedTaskCreated,
+  scanTasks,
 } from './contracts.js';
 import { type MechAdapterConfig } from './types.js';
 import {
@@ -730,6 +731,36 @@ export class MechAdapter implements ExecutionAdapter {
       taskCid: restorationTaskCid,
       txHash: taskSubmission.txHash,
       blockNumber: taskSubmission.blockNumber,
+    };
+  }
+
+  async recoverTaskPost(input: {
+    creatorSafeAddress: string;
+    signedTask: SignedTaskV1;
+  }): Promise<PostedTask | null> {
+    const cid = await uploadToIpfs(this.config.ipfsRegistryUrl, input.signedTask);
+    const taskCidDigest = cidToDigestHex(cid);
+    const manifestDigest = manifestDigestForCid(input.signedTask.solverNetManifestCid);
+    const head = await this.publicClient.getBlockNumber();
+    const fromBlock = DEFAULT_TASK_DISCOVERY_FROM_BLOCK[this.config.chainId] ?? 0n;
+    const matches = await scanTasks(
+      this.publicClient,
+      this.config.routerAddress,
+      getAddress(input.creatorSafeAddress),
+      fromBlock,
+      head,
+    );
+    const match = matches.find((event) =>
+      event.taskCidDigest.toLowerCase() === taskCidDigest.toLowerCase()
+      && event.manifestDigest?.toLowerCase() === manifestDigest.toLowerCase()
+    );
+    if (!match) return null;
+    const digest = taskCidDigest.slice(2);
+    return {
+      taskId: match.taskId,
+      taskCid: `f01551220${digest}`,
+      txHash: match.transactionHash,
+      blockNumber: match.blockNumber,
     };
   }
 

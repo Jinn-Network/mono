@@ -4,6 +4,7 @@ import { TaskPostingService } from '../../src/tasks/posting-service.js';
 import { Store } from '../../src/store/store.js';
 import { TransientError } from '../../src/types/index.js';
 import type { SignedTaskV1 } from '../../src/types/task-document.js';
+import { getAddress } from 'viem';
 
 const SAFE_A = '0x00112233445566778899aabbccddeeff00112233';
 const SAFE_B = '0x1111222233334444555566667777888899990000';
@@ -148,6 +149,64 @@ describe('TaskPostingService', () => {
     expect(postSpy).toHaveBeenCalledOnce();
     const posted = postSpy.mock.calls[0][0];
     expect(posted.signedTask).toBe(stubTask);
+
+    store.close();
+    await adapter.stop();
+  });
+
+  it('persists exact signed content before broadcast and recovers a matching chain event after a crash', async () => {
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+    const service = new TaskPostingService(adapter, store);
+    const signedTask = {
+      schemaVersion: 'task.v1',
+      id: 'autopilot:attempt-1',
+      solverType: 'jinn-repo.v1',
+      solverNetManifestCid: 'bafy-manifest',
+    } as SignedTaskV1;
+    const candidate = {
+      task: {
+        id: signedTask.id,
+        description: 'recover me',
+        solverType: signedTask.solverType,
+        solverNetManifestCid: signedTask.solverNetManifestCid,
+        signedTask,
+      },
+      sourceKey: 'autopilot:attempt-1',
+      postingPolicy: { kind: 'once_per_safe' } as const,
+      sourceMeta: { request: { schemaVersion: 'jinn-task-submit-request.v1' } },
+    };
+    vi.spyOn(adapter, 'postTask').mockRejectedValueOnce(new Error('process crashed after broadcast'));
+    const recover = vi.fn().mockResolvedValue({
+      taskId: '77',
+      taskCid: 'f01551220' + 'ab'.repeat(32),
+      txHash: `0x${'cd'.repeat(32)}`,
+      blockNumber: 123,
+    });
+    Object.assign(adapter, { recoverTaskPost: recover });
+
+    await expect(service.postCandidate(candidate, { creatorSafeAddress: SAFE_A })).rejects.toThrow();
+    const pending = store.getTaskPostRecord({
+      creatorSafeAddress: getAddress(SAFE_A),
+      sourceKey: candidate.sourceKey,
+      policyType: 'once_per_safe',
+      scopeKey: '',
+    });
+    expect(pending?.canonicalTaskJson).toContain('"autopilot:attempt-1"');
+
+    const recovered = await service.postCandidate(candidate, { creatorSafeAddress: SAFE_A });
+    expect(recovered).toMatchObject({
+      taskId: '77',
+      idempotent: true,
+      source: 'recovered',
+      txHash: `0x${'cd'.repeat(32)}`,
+      blockNumber: 123,
+    });
+    expect(recover).toHaveBeenCalledWith(expect.objectContaining({
+      creatorSafeAddress: getAddress(SAFE_A),
+      signedTask,
+    }));
 
     store.close();
     await adapter.stop();

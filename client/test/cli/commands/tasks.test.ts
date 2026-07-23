@@ -1,0 +1,183 @@
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import tasksCommand from '@/cli/commands/tasks.js';
+import {
+  MarketplaceTaskSubmitRequestSchema,
+  parseMarketplaceTaskSubmitRequest,
+} from '@/tasks/submit-request.js';
+import { makeCommandCtx } from '@test/cli.js';
+import { LocalAdapter } from '@/adapters/local/adapter.js';
+import { Store } from '@/store/store.js';
+
+const createCliExecutionContext = vi.hoisted(() => vi.fn());
+const gatherIntrospectionRaw = vi.hoisted(() => vi.fn(async () => ({
+  fleet: {
+    services: [{
+      step: 'complete',
+      safe_address: '0x00112233445566778899aabbccddeeff00112233',
+    }],
+  },
+})));
+vi.mock('@/cli/execution-context.js', () => ({ createCliExecutionContext }));
+vi.mock('@/cli/introspection-context.js', () => ({ gatherIntrospectionRaw }));
+
+const V2_ATTEMPT_ID = '11111111-1111-4111-8111-111111111111';
+
+function request(overrides: Record<string, unknown> = {}) {
+  return {
+    schemaVersion: 'jinn-task-submit-request.v1',
+    id: `autopilot:${V2_ATTEMPT_ID}`,
+    description: 'Implement issue 42',
+    solverType: 'jinn-repo.v1',
+    solverNetManifestCid: 'bafy-autopilot-manifest',
+    createdAt: 1_784_761_200_000,
+    window: { startTs: 1_784_761_200_000, endTs: 1_784_764_800_000 },
+    claimPolicy: {
+      mode: 'exclusive',
+      maxClaims: 1,
+      maxClaimsPerOperator: 1,
+      claimWindowStartTs: 1_784_761_200_000,
+      claimWindowEndTs: 1_784_762_100_000,
+      submissionDeadlineTs: 1_784_764_500_000,
+      claimLeaseTtlSeconds: 1800,
+      requiredVerdicts: 1,
+    },
+    spec: {
+      schemaVersion: 'jinn-repo.v1',
+      source: 'autopilot-session',
+      instance_id: `autopilot:${V2_ATTEMPT_ID}`,
+      repo: 'Jinn-Network/mono',
+      base_commit: 'a'.repeat(40),
+      language: 'typescript',
+      problem_statement: 'Implement issue 42',
+      session: {
+        schemaVersion: 'jinn-autopilot-session.v1',
+        workflow: 'implement',
+        repository: 'Jinn-Network/mono',
+        issueNumber: 42,
+        prNumber: 314,
+        targetBase: 'next',
+        branch: 'autopilot/issue-42',
+        claimOid: 'b'.repeat(40),
+        expectedHead: 'c'.repeat(40),
+        v2AttemptId: V2_ATTEMPT_ID,
+        runnerId: 'runner-1',
+        taskSnapshot: {
+          title: 'Issue 42',
+          body: 'Implement it',
+          prBody: 'Draft',
+          baseSha: 'd'.repeat(40),
+        },
+        workflowContract: {
+          skill: 'implement-issue',
+          version: 'v2',
+          resultSchema: 'jinn-autopilot-mutation-result.v1',
+        },
+        deadline: '2026-07-23T14:00:00.000Z',
+        receiptAuthors: ['jinn-autopilot'],
+      },
+    },
+    ...overrides,
+  };
+}
+
+describe('MarketplaceTaskSubmitRequestSchema', () => {
+  it('accepts the exact machine submission contract', () => {
+    expect(MarketplaceTaskSubmitRequestSchema.parse(request()).id)
+      .toBe(`autopilot:${V2_ATTEMPT_ID}`);
+  });
+
+  it('rejects unknown fields and malformed policy values', () => {
+    expect(() => parseMarketplaceTaskSubmitRequest(request({ unexpected: true }))).toThrow();
+    expect(() => parseMarketplaceTaskSubmitRequest(request({
+      claimPolicy: { ...request().claimPolicy, maxClaims: 2 },
+    }))).toThrow();
+  });
+
+  it('requires the deterministic key to match the V2 attempt', () => {
+    expect(() => parseMarketplaceTaskSubmitRequest(request({ id: 'manual-key' })))
+      .toThrow(/autopilot:/);
+  });
+});
+
+describe('tasks submit machine contract', () => {
+  afterEach(() => {
+    createCliExecutionContext.mockReset();
+  });
+
+  it('rejects request-file combined with legacy loose flags', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-'));
+    const file = join(dir, 'request.json');
+    writeFileSync(file, JSON.stringify(request()));
+    const made = makeCommandCtx({
+      argv: ['submit', '--request-file', file, '--id', 'legacy', '--dry-run', '--json'],
+    });
+
+    await tasksCommand.run(made.ctx);
+
+    const output = JSON.parse(made.writes.at(-1)!);
+    expect(output.code).toBe('invalid_invocation');
+    expect(output.message).toMatch(/mutually exclusive/i);
+    expect(made.exits).toEqual([11]);
+  });
+
+  it('dry-run validates without constructing a posting context', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-'));
+    const file = join(dir, 'request.json');
+    const config = join(dir, 'config.json');
+    writeFileSync(file, JSON.stringify(request()));
+    writeFileSync(config, '{}');
+    const made = makeCommandCtx({
+      argv: ['submit', '--request-file', file, '--config', config, '--dry-run', '--json'],
+    });
+
+    await tasksCommand.run(made.ctx);
+
+    expect(JSON.parse(made.writes.at(-1)!)).toMatchObject({
+      dryRun: true,
+      verb: 'tasks submit',
+    });
+    expect(createCliExecutionContext).not.toHaveBeenCalled();
+  });
+
+  it('emits Task CID, chain origin, manifest, and idempotency in JSON', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-'));
+    const file = join(dir, 'request.json');
+    const config = join(dir, 'config.json');
+    writeFileSync(file, JSON.stringify(request()));
+    writeFileSync(config, '{}');
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+    createCliExecutionContext.mockResolvedValue({
+      ok: true,
+      ctx: {
+        adapter,
+        jinnStore: store,
+        primaryService: {
+          index: 0,
+          safe_address: '0x00112233445566778899aabbccddeeff00112233',
+        },
+        mnemonic: 'test test test test test test test test test test test junk',
+      },
+    });
+    const made = makeCommandCtx({
+      argv: ['submit', '--request-file', file, '--config', config, '--yes', '--json'],
+    });
+
+    await tasksCommand.run(made.ctx);
+
+    expect(JSON.parse(made.writes.at(-1)!)).toMatchObject({
+      taskId: '1',
+      taskCid: 'local-1',
+      creationTx: expect.stringMatching(/^0x/),
+      creationBlock: expect.any(Number),
+      solverNetManifestCid: 'bafy-autopilot-manifest',
+      idempotent: false,
+    });
+    store.close();
+    await adapter.stop();
+  });
+});

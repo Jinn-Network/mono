@@ -6,6 +6,7 @@ import type { Store } from '../store/store.js';
 import type { TaskPostRecord, TaskPostingPolicyType } from '../store/store.js';
 import { TransientError, type Task } from '../types/index.js';
 import type { TaskCandidate, TaskPostingPolicy } from './sources.js';
+import { canonicalJson } from '../harnesses/engine/canonical-json.js';
 
 const GLOBAL_CREATOR_SCOPE = '__global__';
 const POST_LOCK_STALE_AFTER_MS = 60_000;
@@ -19,7 +20,7 @@ export interface TaskPostResult {
   attemptNumber: number;
   attemptId: string;
   idempotent: boolean;
-  source: 'store' | 'posted';
+  source: 'store' | 'posted' | 'recovered';
 }
 
 export interface PostTaskCandidateOptions {
@@ -74,7 +75,7 @@ export class TaskPostingService {
       policyType,
       scopeKey,
     });
-    if (existing && shouldSkipPost(existing, candidate.postingPolicy, nowMs)) {
+    if (existing?.protocolTaskId && shouldSkipPost(existing, candidate.postingPolicy, nowMs)) {
       return this.buildIdempotentResult(candidate, existing, 'store');
     }
 
@@ -101,7 +102,7 @@ export class TaskPostingService {
         policyType,
         scopeKey,
       });
-      if (lockedExisting && shouldSkipPost(lockedExisting, candidate.postingPolicy, nowMs)) {
+      if (lockedExisting?.protocolTaskId && shouldSkipPost(lockedExisting, candidate.postingPolicy, nowMs)) {
         return this.buildIdempotentResult(candidate, lockedExisting, 'store');
       }
 
@@ -114,6 +115,63 @@ export class TaskPostingService {
         attemptId,
         attemptNumber,
       };
+      const canonicalTaskJson = task.signedTask ? canonicalJson(task.signedTask) : null;
+      const requestJson = candidate.sourceMeta?.request
+        ? canonicalJson(candidate.sourceMeta.request)
+        : null;
+      if (
+        lockedExisting?.canonicalTaskJson
+        && lockedExisting.canonicalTaskJson !== canonicalTaskJson
+      ) {
+        throw new Error(
+          `Task post recovery content mismatch for ${candidate.sourceKey}; refusing to sign or broadcast different content`,
+        );
+      }
+      this.store.upsertTaskPostRecord({
+        creatorSafeAddress,
+        sourceKey: candidate.sourceKey,
+        policyType,
+        scopeKey,
+        taskId: candidate.task.id,
+        requestId: candidate.task.id,
+        firstPostedAt: lockedExisting?.firstPostedAt ?? nowIso,
+        lastPostedAt: lockedExisting?.lastPostedAt ?? nowIso,
+        postCount: previousPostCount,
+        canonicalTaskJson,
+        requestJson,
+      });
+
+      if (lockedExisting && task.signedTask && this.adapter.recoverTaskPost) {
+        const recovered = await this.adapter.recoverTaskPost({
+          creatorSafeAddress,
+          signedTask: task.signedTask,
+        });
+        if (recovered) {
+          this.store.upsertTaskPostRecord({
+            creatorSafeAddress,
+            sourceKey: candidate.sourceKey,
+            policyType,
+            scopeKey,
+            taskId: candidate.task.id,
+            requestId: recovered.taskId,
+            protocolTaskId: recovered.taskId,
+            taskCid: recovered.taskCid,
+            firstPostedAt: lockedExisting.firstPostedAt,
+            lastPostedAt: nowIso,
+            postCount: attemptNumber,
+            canonicalTaskJson,
+            requestJson,
+          });
+          return {
+            ...recovered,
+            task,
+            attemptNumber,
+            attemptId,
+            idempotent: true,
+            source: 'recovered',
+          };
+        }
+      }
       const posted = await this.adapter.postTask(task);
 
       this.store.recordOwnActivity(posted.taskId, 'created');
@@ -139,6 +197,8 @@ export class TaskPostingService {
         firstPostedAt: lockedExisting?.firstPostedAt ?? nowIso,
         lastPostedAt: nowIso,
         postCount: attemptNumber,
+        canonicalTaskJson,
+        requestJson,
       });
       return {
         taskId: posted.taskId,

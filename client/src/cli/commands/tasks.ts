@@ -25,6 +25,10 @@ import {
   joinedDisplayName,
   solverTypeFromJoinedContract,
 } from '../../solver-nets/registry.js';
+import {
+  parseMarketplaceTaskSubmitRequest,
+  type MarketplaceTaskSubmitRequest,
+} from '../../tasks/submit-request.js';
 
 async function runSubmit(ctx: CommandContext): Promise<void> {
   let parsed;
@@ -38,6 +42,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
         'solver-net': { type: 'string' },
         'solver-type': { type: 'string' },
         'spec-file': { type: 'string' },
+        'request-file': { type: 'string' },
         'manifest-cid': { type: 'string' },
         'max-claims': { type: 'string' },
         'required-verdicts': { type: 'string' },
@@ -59,10 +64,47 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     return;
   }
 
-  const id = parsed.values.id as string | undefined;
-  const description = parsed.values.description as string | undefined;
-  const requestedSolverNet = parsed.values['solver-net'] as string | undefined;
-  const requestedSolverType = parsed.values['solver-type'] as string | undefined;
+  const requestFilePath = parsed.values['request-file'] as string | undefined;
+  const legacyLooseFlags = [
+    'id', 'description', 'solver-net', 'solver-type', 'spec-file',
+    'manifest-cid', 'max-claims', 'required-verdicts',
+  ] as const;
+  if (requestFilePath && legacyLooseFlags.some((flag) => parsed.values[flag] !== undefined)) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: '--request-file is mutually exclusive with legacy loose task flags',
+        exampleCli: 'jinn tasks submit --request-file request.json --yes --json',
+        details: { field: '--request-file', expected: 'no legacy task flags' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+  let machineRequest: MarketplaceTaskSubmitRequest | undefined;
+  if (requestFilePath) {
+    try {
+      machineRequest = parseMarketplaceTaskSubmitRequest(
+        JSON.parse(readFileSync(resolve(requestFilePath), 'utf8')),
+      );
+    } catch (err) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: `Invalid request file: ${err instanceof Error ? err.message : String(err)}`,
+          exampleCli: 'jinn tasks submit --request-file request.json --yes --json',
+          details: { field: '--request-file' },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+  }
+
+  const id = machineRequest?.id ?? parsed.values.id as string | undefined;
+  const description = machineRequest?.description ?? parsed.values.description as string | undefined;
+  const requestedSolverNet = machineRequest?.solverNet ?? parsed.values['solver-net'] as string | undefined;
+  const requestedSolverType = machineRequest?.solverType ?? parsed.values['solver-type'] as string | undefined;
 
   if (!id) {
     emitEnvelope(
@@ -312,7 +354,9 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     // canonical task envelope rather than a loose TaskPayload.
     const agentEoaPrivateKey = walletPrivateKeyAtIndex(mnemonic, primaryService.index);
     const agentEoaAddress = privateKeyToAccount(agentEoaPrivateKey).address;
-    const overlay = specOverlay ?? {};
+    const overlay = machineRequest
+      ? { solverType: machineRequest.solverType, window: machineRequest.window, spec: machineRequest.spec }
+      : (specOverlay ?? {});
     const taskKind = overlay.solverType ?? requestedSolverType ?? solverTypeFromNet ?? 'prediction.v1';
     const taskWindow = overlay.window ?? { startTs: Date.now(), endTs: Date.now() + 86_400_000 };
     // Task 24 (spec/2026-05-05-solvernet-creation-and-launch.md §14): the
@@ -321,10 +365,9 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     // --manifest-cid flag → joinedSolverNets[--solver-net].manifestCid.
     // Without one we refuse to submit; admin paths posting orphan tasks
     // need to supply a cid.
-    const explicitManifestCid = parsed.values['manifest-cid'] as string | undefined;
-    const joinedManifestCid = requestedSolverNet
-      ? config.joinedSolverNets?.[requestedSolverNet]?.manifestCid
-      : undefined;
+    const explicitManifestCid = machineRequest?.solverNetManifestCid
+      ?? parsed.values['manifest-cid'] as string | undefined;
+    const joinedManifestCid = matchedJoined?.manifestCid;
     const solverNetManifestCid = explicitManifestCid ?? joinedManifestCid;
     if (!solverNetManifestCid) {
       emitEnvelope(
@@ -351,7 +394,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     // auto-generator's policy (parallel, maxClaims = maxClaimsPerOperator). The
     // default (no flag) stays single-attempt exclusive — unchanged production
     // behaviour for one-shot SolverTypes.
-    const claimPolicy: TaskV1['claimPolicy'] = {
+    const claimPolicy: TaskV1['claimPolicy'] = machineRequest?.claimPolicy ?? {
       mode: maxClaimsOverride && maxClaimsOverride > 1 ? 'parallel' : 'exclusive',
       maxClaims: maxClaimsOverride ?? 1,
       maxClaimsPerOperator: maxClaimsOverride ?? 1,
@@ -380,7 +423,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
         safeAddress: getAddress(safe),
         agentEoa: agentEoaAddress,
       },
-      createdAt: Date.now(),
+      createdAt: machineRequest?.createdAt ?? Date.now(),
     };
     const signedTask = await signTaskV1(taskDoc, agentEoaPrivateKey);
     const task: Task = {
@@ -402,9 +445,13 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     const postResult = await postingService.postCandidate(
       {
         task,
-        sourceKey: `manual:${id}`,
+        sourceKey: machineRequest ? machineRequest.id : `manual:${id}`,
         postingPolicy: { kind: 'once_per_safe' },
-        sourceMeta: { solverType: task.solverType, note: 'manual' },
+        sourceMeta: {
+          solverType: task.solverType,
+          note: machineRequest ? 'machine' : 'manual',
+          ...(machineRequest ? { request: machineRequest } : {}),
+        },
       },
       {
         creatorSafeAddress: safe,
@@ -418,6 +465,10 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
         id,
         creatorMultisig: getAddress(safe),
         taskId: postResult.taskId,
+        taskCid: postResult.taskCid,
+        creationTx: postResult.txHash,
+        creationBlock: postResult.blockNumber,
+        solverNetManifestCid,
         status: postResult.idempotent ? 'already_submitted' : 'submitted',
         attemptId: postResult.attemptId,
         attemptNumber: postResult.attemptNumber,
@@ -532,6 +583,7 @@ const command: CommandModule = {
   summary: 'Submit and inspect Tasks',
   helpText: `Usage:
   jinn tasks submit --id <id> --description <text> (--solver-net <name> | --solver-type <type>) [--spec-file <path>] [--dry-run] [--yes] [--human]
+  jinn tasks submit --request-file <path> [--dry-run] --yes --json
   jinn tasks list
   jinn tasks show <id>
 
