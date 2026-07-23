@@ -5753,7 +5753,7 @@ class AIAgent:
         original_user_message: Any,
         messages: List[Dict[str, Any]],
         effective_task_id: str,
-        turn_id: str,
+        turn_id: str = "",
         should_review_memory: bool = False,
     ) -> Dict[str, Any]:
         """Forwarder — see ``agent.codex_runtime.run_codex_app_server_turn``."""

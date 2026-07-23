@@ -287,7 +287,67 @@ def _invoke_codex_session_end_hook(
         logger.warning("on_session_end hook failed: %s", exc)
 
 
-def run_codex_app_server_turn(
+class _CodexLifecycleHookGuard:
+    """Emit the Codex early-return lifecycle tail exactly once."""
+
+    def __init__(
+        self,
+        agent,
+        *,
+        effective_task_id: str,
+        turn_id: str,
+        original_user_message: Any,
+        messages: List[Dict[str, Any]],
+    ) -> None:
+        self.agent = agent
+        self.effective_task_id = effective_task_id
+        self.turn_id = turn_id
+        self.original_user_message = original_user_message
+        self.messages = messages
+        self.assistant_response = ""
+        self.completed = False
+        self.interrupted = False
+        self._post_called = False
+        self._end_called = False
+
+    def set_outcome(
+        self,
+        *,
+        assistant_response: str,
+        completed: bool,
+        interrupted: bool,
+    ) -> None:
+        self.assistant_response = assistant_response
+        self.completed = completed
+        self.interrupted = interrupted
+
+    def post_once(self) -> None:
+        if self._post_called:
+            return
+        self._post_called = True
+        _invoke_codex_post_llm_hook(
+            self.agent,
+            effective_task_id=self.effective_task_id,
+            turn_id=self.turn_id,
+            original_user_message=self.original_user_message,
+            assistant_response=self.assistant_response,
+            messages=self.messages,
+        )
+
+    def end_once(self) -> None:
+        if self._end_called:
+            return
+        self._end_called = True
+        _invoke_codex_session_end_hook(
+            self.agent,
+            effective_task_id=self.effective_task_id,
+            turn_id=self.turn_id,
+            completed=self.completed,
+            interrupted=self.interrupted,
+        )
+
+
+def _run_codex_app_server_turn(
     agent,
     *,
     user_message: str,
@@ -296,6 +356,7 @@ def run_codex_app_server_turn(
     effective_task_id: str,
     turn_id: str = "",
     should_review_memory: bool = False,
+    hook_guard: _CodexLifecycleHookGuard,
 ) -> Dict[str, Any]:
     """Codex app-server runtime path. Hands the entire turn to a `codex
     app-server` subprocess and projects its events back into Hermes'
@@ -398,22 +459,21 @@ def run_codex_app_server_turn(
             "partial": True,
             "error": str(exc),
         }
-        _invoke_codex_post_llm_hook(
-            agent,
-            effective_task_id=effective_task_id,
-            turn_id=turn_id,
-            original_user_message=original_user_message,
+        hook_guard.set_outcome(
             assistant_response=result["final_response"],
-            messages=messages,
-        )
-        _invoke_codex_session_end_hook(
-            agent,
-            effective_task_id=effective_task_id,
-            turn_id=turn_id,
             completed=False,
             interrupted=False,
         )
+        hook_guard.post_once()
+        hook_guard.end_once()
         return result
+
+    completed = not turn.interrupted and turn.error is None
+    hook_guard.set_outcome(
+        assistant_response=turn.final_text,
+        completed=completed,
+        interrupted=turn.interrupted,
+    )
 
     # If the turn signalled the underlying client is wedged (deadline
     # blown, post-tool watchdog tripped, OAuth refresh died, subprocess
@@ -471,16 +531,8 @@ def run_codex_app_server_turn(
     )
     usage_result = _record_codex_app_server_usage(agent, turn)
     api_calls = 1
-    completed = not turn.interrupted and turn.error is None
 
-    _invoke_codex_post_llm_hook(
-        agent,
-        effective_task_id=effective_task_id,
-        turn_id=turn_id,
-        original_user_message=original_user_message,
-        assistant_response=turn.final_text,
-        messages=messages,
-    )
+    hook_guard.post_once()
 
     # Now check the skill nudge AFTER iters were incremented — same
     # pattern the chat_completions path uses (line ~15432).
@@ -523,13 +575,7 @@ def run_codex_app_server_turn(
         except Exception:
             logger.debug("background review spawn raised", exc_info=True)
 
-    _invoke_codex_session_end_hook(
-        agent,
-        effective_task_id=effective_task_id,
-        turn_id=turn_id,
-        completed=completed,
-        interrupted=turn.interrupted,
-    )
+    hook_guard.end_once()
 
     return {
         "final_response": turn.final_text,
@@ -554,6 +600,42 @@ def run_codex_app_server_turn(
         "codex_turn_id": turn.turn_id,
         **usage_result,
     }
+
+
+def run_codex_app_server_turn(
+    agent,
+    *,
+    user_message: str,
+    original_user_message: Any,
+    messages: List[Dict[str, Any]],
+    effective_task_id: str,
+    turn_id: str = "",
+    should_review_memory: bool = False,
+) -> Dict[str, Any]:
+    """Run one Codex turn with an exactly-once plugin lifecycle tail."""
+    hook_guard = _CodexLifecycleHookGuard(
+        agent,
+        effective_task_id=effective_task_id,
+        turn_id=turn_id,
+        original_user_message=original_user_message,
+        messages=messages,
+    )
+    try:
+        return _run_codex_app_server_turn(
+            agent,
+            user_message=user_message,
+            original_user_message=original_user_message,
+            messages=messages,
+            effective_task_id=effective_task_id,
+            turn_id=turn_id,
+            should_review_memory=should_review_memory,
+            hook_guard=hook_guard,
+        )
+    finally:
+        try:
+            hook_guard.post_once()
+        finally:
+            hook_guard.end_once()
 
 
 # ---------------------------------------------------------------------------

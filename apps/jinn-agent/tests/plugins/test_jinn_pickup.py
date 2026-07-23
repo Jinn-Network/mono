@@ -1922,34 +1922,47 @@ def test_fallback_lease_blocks_finalize_through_same_id_reopen(
     )
 
 
-def test_post_pop_old_session_end_cannot_persist_or_render_after_reopen(
+def test_admitted_post_pop_session_end_cannot_contaminate_reopen(
     monkeypatch,
 ):
     session_id = "post-pop-session-end-same-id-reopen"
     delegate_started = threading.Event()
     release_delegate = threading.Event()
+    lifecycle_invalidated = threading.Event()
+    finalize_returned = threading.Event()
     fallback_episodes = []
-    terminal_lines = []
     worker_errors = []
+    original_close = jinn._close_session_lifecycle
 
     def blocking_delegate(*args, **kwargs):
         delegate_started.set()
         assert release_delegate.wait(timeout=2)
         return None
 
+    def observed_close(closing_session_id, **kwargs):
+        lifecycle_token = original_close(
+            closing_session_id,
+            **kwargs,
+        )
+        if closing_session_id == session_id:
+            lifecycle_invalidated.set()
+        return lifecycle_token
+
     monkeypatch.setattr(jinn, "_delegate_session_end", blocking_delegate)
+    monkeypatch.setattr(
+        jinn,
+        "_close_session_lifecycle",
+        observed_close,
+    )
     monkeypatch.setattr(
         jinn.distill,
         "write_episode_fallback",
         lambda episode: fallback_episodes.append(episode) or Path("stale.json"),
     )
-    monkeypatch.setattr(
-        jinn,
-        "_user_line",
-        terminal_lines.append,
-    )
     runner = PickupRunner()
     jinn._runner = runner
+    worker = None
+    finalizer = None
     try:
         jinn._on_pre_llm_call(
             session_id=session_id,
@@ -1971,17 +1984,32 @@ def test_post_pop_old_session_end_cannot_persist_or_render_after_reopen(
             except BaseException as exc:
                 worker_errors.append(exc)
 
+        def finalize_old():
+            try:
+                jinn._on_session_finalize(
+                    session_id=session_id,
+                    reason="old_session_complete",
+                )
+            except BaseException as exc:
+                worker_errors.append(exc)
+            finally:
+                finalize_returned.set()
+
         worker = threading.Thread(
             name="old-post-pop-session-end",
             target=run_old_end,
         )
+        finalizer = threading.Thread(
+            name="old-post-pop-finalizer",
+            target=finalize_old,
+        )
         worker.start()
         assert delegate_started.wait(timeout=2)
 
-        jinn._on_session_finalize(
-            session_id=session_id,
-            reason="old_session_complete",
-        )
+        finalizer.start()
+        assert lifecycle_invalidated.wait(timeout=2)
+        assert not finalize_returned.wait(timeout=0.2)
+
         jinn._on_pre_llm_call(
             session_id=session_id,
             task_id="fresh-task",
@@ -1994,14 +2022,12 @@ def test_post_pop_old_session_end_cannot_persist_or_render_after_reopen(
 
         release_delegate.set()
         worker.join(timeout=2)
+        finalizer.join(timeout=2)
 
         assert not worker.is_alive()
+        assert not finalizer.is_alive()
         assert worker_errors == []
-        assert fallback_episodes == []
-        assert not any(
-            line.startswith("Jinn session complete")
-            for line in terminal_lines
-        )
+        assert len(fallback_episodes) == 1
         assert jinn._session_states[session_id] is fresh_state
         assert jinn._session_lifecycle_tokens[session_id] is fresh_lifecycle
         assert jinn.buf.has_capture(
@@ -2015,9 +2041,237 @@ def test_post_pop_old_session_end_cannot_persist_or_render_after_reopen(
         ) in jinn._session_turn_lifecycle_owners
     finally:
         release_delegate.set()
-        if "worker" in locals():
+        if worker is not None:
             worker.join(timeout=2)
+        if finalizer is not None:
+            finalizer.join(timeout=2)
         jinn._runner = None
+
+
+def test_canonical_delegate_completion_lease_blocks_finalize(
+    monkeypatch,
+):
+    session_id = "canonical-delegate-finalize-fence"
+    delegate_started = threading.Event()
+    release_delegate = threading.Event()
+    finalize_returned = threading.Event()
+    completion_order = []
+    worker_errors = []
+
+    def blocking_delegate(*args, **kwargs):
+        delegate_started.set()
+        assert release_delegate.wait(timeout=2)
+        completion_order.append("delegate_committed")
+        return {
+            "summary": None,
+            "contribution": None,
+        }
+
+    monkeypatch.setattr(
+        jinn,
+        "_delegate_session_end",
+        blocking_delegate,
+    )
+    monkeypatch.setattr(
+        jinn,
+        "_user_line",
+        lambda line: None,
+    )
+    jinn._runner = PickupRunner()
+    end_worker = None
+    finalizer = None
+    try:
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="canonical-task",
+            turn_id="canonical-turn",
+            user_message="persist this canonical episode",
+            is_first_turn=True,
+        )
+
+        def run_end():
+            try:
+                jinn._on_session_end(
+                    session_id=session_id,
+                    task_id="canonical-task",
+                    turn_id="canonical-turn",
+                    completed=True,
+                    interrupted=False,
+                )
+            except BaseException as exc:
+                worker_errors.append(exc)
+
+        def finalize():
+            try:
+                jinn._on_session_finalize(
+                    session_id=session_id,
+                    reason="session_complete",
+                )
+                completion_order.append("finalize_returned")
+            except BaseException as exc:
+                worker_errors.append(exc)
+            finally:
+                finalize_returned.set()
+
+        end_worker = threading.Thread(
+            name="canonical-delegate-session-end",
+            target=run_end,
+        )
+        finalizer = threading.Thread(
+            name="canonical-delegate-finalizer",
+            target=finalize,
+        )
+        end_worker.start()
+        assert delegate_started.wait(timeout=2)
+
+        finalizer.start()
+        assert not finalize_returned.wait(timeout=0.2)
+
+        release_delegate.set()
+        end_worker.join(timeout=2)
+        finalizer.join(timeout=2)
+    finally:
+        release_delegate.set()
+        if end_worker is not None:
+            end_worker.join(timeout=2)
+        if finalizer is not None:
+            finalizer.join(timeout=2)
+        jinn._runner = None
+
+    assert not end_worker.is_alive()
+    assert not finalizer.is_alive()
+    assert worker_errors == []
+    assert completion_order == [
+        "delegate_committed",
+        "finalize_returned",
+    ]
+
+
+def test_internal_completion_retains_parent_child_ownership_until_delegate_finishes(
+    monkeypatch,
+):
+    parent_session_id = "canonical-internal-parent"
+    delegate_started = threading.Event()
+    release_delegate = threading.Event()
+    finalize_returned = threading.Event()
+    logical_session_ids = []
+    completion_order = []
+    worker_errors = []
+    background_review = [False]
+
+    monkeypatch.setattr(
+        jinn,
+        "is_background_review",
+        lambda: background_review[0],
+    )
+
+    def blocking_delegate(*args, **kwargs):
+        delegate_started.set()
+        assert release_delegate.wait(timeout=2)
+        completion_order.append("delegate_committed")
+        return {
+            "summary": None,
+            "contribution": None,
+        }
+
+    monkeypatch.setattr(
+        jinn,
+        "_delegate_session_end",
+        blocking_delegate,
+    )
+    monkeypatch.setattr(
+        jinn,
+        "_user_line",
+        lambda line: None,
+    )
+    jinn._runner = PickupRunner()
+    jinn._on_pre_llm_call(
+        session_id=parent_session_id,
+        task_id="parent-task",
+        turn_id="parent-turn",
+        user_message="parent turn",
+        is_first_turn=True,
+    )
+
+    def run_internal_completion():
+        try:
+            jinn._on_pre_llm_call(
+                session_id=parent_session_id,
+                task_id="internal-task",
+                turn_id="internal-turn",
+                user_message="review the parent turn",
+                is_first_turn=True,
+            )
+            logical_session_ids.extend(
+                logical
+                for (parent, _thread_id), logical
+                in jinn._internal_sessions.items()
+                if parent == parent_session_id
+            )
+            jinn._on_session_end(
+                session_id=parent_session_id,
+                task_id="internal-task",
+                turn_id="internal-turn",
+                completed=True,
+                interrupted=False,
+            )
+        except BaseException as exc:
+            worker_errors.append(exc)
+
+    def finalize_parent():
+        try:
+            jinn._on_session_finalize(
+                session_id=parent_session_id,
+                reason="parent_complete",
+            )
+            completion_order.append("finalize_returned")
+        except BaseException as exc:
+            worker_errors.append(exc)
+        finally:
+            finalize_returned.set()
+
+    background_review[0] = True
+    end_worker = threading.Thread(
+        name="canonical-internal-session-end",
+        target=propagate_context_to_thread(
+            run_internal_completion
+        ),
+    )
+    finalizer = threading.Thread(
+        name="canonical-internal-finalizer",
+        target=finalize_parent,
+    )
+    try:
+        end_worker.start()
+        assert delegate_started.wait(timeout=2)
+        background_review[0] = False
+        assert len(logical_session_ids) == 1
+        logical_session_id = logical_session_ids[0]
+        assert logical_session_id in jinn._internal_sessions.values()
+
+        finalizer.start()
+        assert not finalize_returned.wait(timeout=0.2)
+        assert logical_session_id in jinn._internal_sessions.values()
+
+        release_delegate.set()
+        end_worker.join(timeout=2)
+        finalizer.join(timeout=2)
+    finally:
+        background_review[0] = False
+        release_delegate.set()
+        end_worker.join(timeout=2)
+        if finalizer.ident is not None:
+            finalizer.join(timeout=2)
+        jinn._runner = None
+
+    assert not end_worker.is_alive()
+    assert not finalizer.is_alive()
+    assert worker_errors == []
+    assert completion_order == [
+        "delegate_committed",
+        "finalize_returned",
+    ]
+    assert logical_session_id not in jinn._internal_sessions.values()
 
 
 def test_no_episode_completion_lease_blocks_finalize_through_reopen(

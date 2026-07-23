@@ -1390,6 +1390,7 @@ def _episode_test_runs(episode: Dict[str, Any]) -> list[Dict[str, Any]]:
 
 
 def _complete_session_end(
+    owner: _TurnLifecycleOwner,
     session_id: str = "",
     task_id: str = "",
     turn_id: str = "",
@@ -1400,14 +1401,7 @@ def _complete_session_end(
     output_tokens: Optional[int] = None,
     **_: Any,
 ) -> None:
-    # Resolve the lifecycle that originated this exact turn before touching
-    # capture or session state. A delayed end callback from a finalized
-    # lifecycle must not attach itself to a freshly reopened same-ID session.
-    # Legacy/direct callbacks without a turn id retain their existing behavior
-    # only while an ownership lifecycle is already active.
-    owner = _post_hook_lifecycle(session_id, turn_id)
-    if owner is None:
-        return
+    """Complete one turn under its caller's already-admitted owner lease."""
     logical_session_id = owner.logical_session_id
     lifecycle_token = owner.lifecycle_token
     host_session_id = session_id or "default"
@@ -1468,27 +1462,14 @@ def _complete_session_end(
         )
         if state is None:
             return
-        completion_fence = _CompletionFence(
-            logical_session_id=logical_session_id,
-            lifecycle_token=lifecycle_token,
-            parent_session_id=parent_session_id,
+        _emit_completion(
+            summary=None,
+            activity=state.get("activity") or {},
+            capture_status="unavailable",
+            local_learning_status="unavailable",
+            contribution=None,
+            candidate_created=False,
         )
-        completion_lease = _acquire_completion_lease(
-            completion_fence
-        )
-        if completion_lease is None:
-            return
-        try:
-            _emit_completion(
-                summary=None,
-                activity=state.get("activity") or {},
-                capture_status="unavailable",
-                local_learning_status="unavailable",
-                contribution=None,
-                candidate_created=False,
-            )
-        finally:
-            _release_completion_lease(completion_lease)
         return
 
     state = _pop_state(
@@ -1498,11 +1479,6 @@ def _complete_session_end(
     )
     if state is None:
         return
-    completion_fence = _CompletionFence(
-        logical_session_id=logical_session_id,
-        lifecycle_token=lifecycle_token,
-        parent_session_id=parent_session_id,
-    )
     snapshot = state.get("snapshot")
     try:
         accepted = session_bridge.accepted_diff(snapshot) if snapshot is not None else ""
@@ -1542,62 +1518,54 @@ def _complete_session_end(
         contribution_candidate=candidate,
         contribution_vetoed=vetoed,
     )
-    completion_lease = _acquire_completion_lease(
-        completion_fence
-    )
-    if completion_lease is None:
-        return
-    try:
-        if result is None:
-            fallback_path = distill.write_episode_fallback(episode)
-            learning_status = (
-                "off" if distill.cached_mode(_runner) == "off"
-                else "pending" if fallback_path is not None
-                else "unavailable"
+    if result is None:
+        fallback_path = distill.write_episode_fallback(episode)
+        learning_status = (
+            "off" if distill.cached_mode(_runner) == "off"
+            else "pending" if fallback_path is not None
+            else "unavailable"
+        )
+        activity = state.get("activity") or {}
+        _emit_completion(
+            summary={
+                "searchedTerms": list(activity.get("searchedTerms") or []),
+                "providedPackets": [
+                    {"ref": ref, "title": ref} for ref in (activity.get("providedRefs") or [])
+                ],
+                "nothingFound": not bool(activity.get("providedRefs")),
+            },
+            activity=activity,
+            capture_status="captured-locally" if fallback_path is not None else "unavailable",
+            local_learning_status=learning_status,
+            contribution=None,
+            candidate_created=candidate is not None,
+        )
+    else:
+        contribution = result.get("contribution")
+        value = contribution.get("value") if isinstance(contribution, dict) else None
+        if (
+            vetoed
+            and isinstance(contribution, dict)
+            and contribution.get("status") in ("ok", "degraded")
+            and isinstance(value, dict)
+            and value.get("status") == "vetoed"
+        ):
+            _clear_veto(
+                logical_session_id,
+                expected_token=lifecycle_token,
             )
-            activity = state.get("activity") or {}
-            _emit_completion(
-                summary={
-                    "searchedTerms": list(activity.get("searchedTerms") or []),
-                    "providedPackets": [
-                        {"ref": ref, "title": ref} for ref in (activity.get("providedRefs") or [])
-                    ],
-                    "nothingFound": not bool(activity.get("providedRefs")),
-                },
-                activity=activity,
-                capture_status="captured-locally" if fallback_path is not None else "unavailable",
-                local_learning_status=learning_status,
-                contribution=None,
-                candidate_created=candidate is not None,
-            )
-        else:
-            contribution = result.get("contribution")
-            value = contribution.get("value") if isinstance(contribution, dict) else None
-            if (
-                vetoed
-                and isinstance(contribution, dict)
-                and contribution.get("status") in ("ok", "degraded")
-                and isinstance(value, dict)
-                and value.get("status") == "vetoed"
-            ):
-                _clear_veto(
-                    logical_session_id,
-                    expected_token=lifecycle_token,
-                )
-            learning_status = (
-                "off" if distill.cached_mode(_runner) == "off"
-                else "pending"
-            )
-            _emit_completion(
-                summary=result.get("summary"),
-                activity=state.get("activity") or {},
-                capture_status="captured",
-                local_learning_status=learning_status,
-                contribution=result.get("contribution"),
-                candidate_created=candidate is not None,
-            )
-    finally:
-        _release_completion_lease(completion_lease)
+        learning_status = (
+            "off" if distill.cached_mode(_runner) == "off"
+            else "pending"
+        )
+        _emit_completion(
+            summary=result.get("summary"),
+            activity=state.get("activity") or {},
+            capture_status="captured",
+            local_learning_status=learning_status,
+            contribution=result.get("contribution"),
+            candidate_created=candidate is not None,
+        )
 
 
 def _on_session_end(
@@ -1611,14 +1579,33 @@ def _on_session_end(
     output_tokens: Optional[int] = None,
     **kwargs: Any,
 ) -> None:
-    """Run completion, retaining internal ownership through all cleanup."""
+    """Admit the exact owner before any terminal completion side effect."""
     owner = _post_hook_lifecycle(session_id, turn_id)
     if owner is None:
         return
     host_session_id = session_id or "default"
     is_internal = owner.logical_session_id != host_session_id
+    parent_session_id = (
+        host_session_id[:128] if is_internal else None
+    )
+    completion_lease = _acquire_completion_lease(
+        _CompletionFence(
+            logical_session_id=owner.logical_session_id,
+            lifecycle_token=owner.lifecycle_token,
+            parent_session_id=parent_session_id,
+        )
+    )
+    if completion_lease is None:
+        if is_internal:
+            _finish_internal_session(
+                parent_session_id,
+                owner.logical_session_id,
+                owner.lifecycle_token,
+            )
+        return
     try:
         _complete_session_end(
+            owner=owner,
             session_id=session_id,
             task_id=task_id,
             turn_id=turn_id,
@@ -1630,9 +1617,10 @@ def _on_session_end(
             **kwargs,
         )
     finally:
+        _release_completion_lease(completion_lease)
         if is_internal:
             _finish_internal_session(
-                host_session_id[:128],
+                parent_session_id,
                 owner.logical_session_id,
                 owner.lifecycle_token,
             )

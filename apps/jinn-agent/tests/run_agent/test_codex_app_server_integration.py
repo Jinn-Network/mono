@@ -656,6 +656,93 @@ class TestReviewForkApiModeDowngrade:
 
 
 class TestErrorHandling:
+    def test_constructor_failure_still_closes_plugin_lifecycle(
+        self,
+        monkeypatch,
+    ):
+        hook_events = _record_plugin_lifecycle_hooks(monkeypatch)
+
+        def fail_constructor(self, *args, **kwargs):
+            raise RuntimeError("constructor failed")
+
+        monkeypatch.setattr(
+            CodexAppServerSession,
+            "__init__",
+            fail_constructor,
+        )
+
+        agent = _make_codex_agent()
+        with patch.object(
+            agent,
+            "_spawn_background_review",
+            return_value=None,
+        ):
+            with pytest.raises(
+                RuntimeError,
+                match="constructor failed",
+            ):
+                agent.run_conversation("hi")
+
+        assert [
+            name
+            for name, _turn_id in hook_events
+        ] == [
+            "pre_llm_call",
+            "post_llm_call",
+            "on_session_end",
+        ]
+        assert len(
+            {
+                turn_id
+                for _name, turn_id in hook_events
+            }
+        ) == 1
+
+    def test_usage_postprocessing_failure_still_closes_plugin_lifecycle(
+        self,
+        monkeypatch,
+        fake_session,
+    ):
+        import agent.codex_runtime as codex_runtime
+
+        hook_events = _record_plugin_lifecycle_hooks(monkeypatch)
+
+        def fail_usage(*args, **kwargs):
+            raise RuntimeError("usage recording failed")
+
+        monkeypatch.setattr(
+            codex_runtime,
+            "_record_codex_app_server_usage",
+            fail_usage,
+        )
+
+        agent = _make_codex_agent()
+        with patch.object(
+            agent,
+            "_spawn_background_review",
+            return_value=None,
+        ):
+            with pytest.raises(
+                RuntimeError,
+                match="usage recording failed",
+            ):
+                agent.run_conversation("hi")
+
+        assert [
+            name
+            for name, _turn_id in hook_events
+        ] == [
+            "pre_llm_call",
+            "post_llm_call",
+            "on_session_end",
+        ]
+        assert len(
+            {
+                turn_id
+                for _name, turn_id in hook_events
+            }
+        ) == 1
+
     def test_session_exception_returns_partial_with_error(self, monkeypatch):
         hook_events = _record_plugin_lifecycle_hooks(monkeypatch)
 
@@ -709,6 +796,37 @@ class TestErrorHandling:
             "on_session_end",
         ]
         assert len({turn_id for _name, turn_id in hook_events}) == 1
+
+
+class TestLegacyCodexForwarder:
+    def test_turn_id_defaults_to_empty_string(
+        self,
+        monkeypatch,
+    ):
+        import agent.codex_runtime as codex_runtime
+
+        forwarded = {}
+
+        def record_forward(*args, **kwargs):
+            forwarded.update(kwargs)
+            return {"completed": True}
+
+        monkeypatch.setattr(
+            codex_runtime,
+            "run_codex_app_server_turn",
+            record_forward,
+        )
+        agent = _make_codex_agent()
+
+        result = agent._run_codex_app_server_turn(
+            user_message="hi",
+            original_user_message="hi",
+            messages=[],
+            effective_task_id="legacy-task",
+        )
+
+        assert result == {"completed": True}
+        assert forwarded["turn_id"] == ""
 
 
 class TestSessionRetirementOnRunAgent:
