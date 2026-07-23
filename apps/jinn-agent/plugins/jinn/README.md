@@ -1,6 +1,7 @@
 # Jinn for Hermes
 
-Give Hermes relevant evidence from the public Jinn corpus while you work.
+Give Hermes relevant evidence from retained local episodes and the public Jinn
+corpus while you work.
 
 > Requires [Hermes](https://github.com/NousResearch/hermes-agent), Node.js 22+,
 > and npm.
@@ -33,9 +34,10 @@ Start a fresh chat and describe the task you want help with:
 hermes chat
 ```
 
-No slash command is required. Jinn checks the first message for relevant prior
-evidence before Hermes answers. When it has evidence it can retrieve for the
-task, you will see a line like:
+No slash command is required. Jinn checks retained local episodes and the
+public Jinn corpus for evidence relevant to the first message before Hermes
+answers. When it has evidence it can retrieve for the task, you will see a line
+like:
 
 ```text
 ◇ corpus  provided 1 evidence packet  ·  searched: dashboard, version, test
@@ -57,8 +59,8 @@ machine.
 
 ## Local task capture
 
-Jinn keeps a scrubbed episode of each session locally. Nothing is published to
-the Jinn network automatically.
+Jinn keeps a scrubbed episode of each session locally so later tasks can reuse
+relevant evidence. Nothing is published to the Jinn network automatically.
 
 ## Update
 
