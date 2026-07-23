@@ -319,6 +319,21 @@ describe('BenchMatrixV1', () => {
     expect(result.ok).toBe(false);
   });
 
+  it('rejects runId mismatch against preRegistration.runId (#2067)', () => {
+    const run = makeValidRun();
+    const matrix = buildValidMatrix(run);
+    const mismatched = { ...matrix, runId: 'a-different-run-id' };
+    const withHash = {
+      ...mismatched,
+      matrixHash: hashBenchMatrixV1(mismatched as BenchMatrixV1),
+    };
+    const result = validateBenchMatrixV1(withHash);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.issues.some((i) => i.message.includes('runId mismatch'))).toBe(true);
+    }
+  });
+
   for (const key of [
     'aggregate',
     'aggregates',
