@@ -994,6 +994,7 @@ export interface DecodedDeliverEvent {
   requestId: string;
   deliveryDataHex: string;
   mechAddress: string;
+  transactionHash?: Hex;
   blockNumber?: bigint;
 }
 
@@ -1018,6 +1019,7 @@ export function decodeDeliverLogs(logs: Log[]): DecodedDeliverEvent[] {
           requestId: String(args.requestId),
           deliveryDataHex: String(args.data),
           mechAddress: String(args.mechServiceMultisig),
+          transactionHash: log.transactionHash ?? undefined,
           blockNumber: log.blockNumber ?? undefined,
         });
       }
@@ -1122,10 +1124,41 @@ export async function findLatestDeliveryDataHexForRequest(
   return dataByRid.get(requestId.toLowerCase()) ?? null;
 }
 
+/**
+ * Most recent exact Deliver event for one request, including the originating
+ * transaction hash needed to close the engine's post-delivery crash window.
+ */
+export async function findLatestDeliveryForRequest(
+  publicClient: PublicClient,
+  mechContractAddress: Address,
+  requestId: string,
+  fromBlock: bigint,
+  toBlock: bigint,
+): Promise<DecodedDeliverEvent | null> {
+  let latest: DecodedDeliverEvent | null = null;
+  const normalizedRequestId = requestId.toLowerCase();
+  for (let start = fromBlock; start <= toBlock; start += LOG_SCAN_CHUNK + 1n) {
+    const end = start + LOG_SCAN_CHUNK > toBlock ? toBlock : start + LOG_SCAN_CHUNK;
+    const logs = await publicClient.getLogs({
+      address: mechContractAddress,
+      event: MECH_DELIVER_EVENT,
+      fromBlock: start,
+      toBlock: end,
+    });
+    for (const decoded of decodeDeliverLogs(logs)) {
+      if (decoded.requestId.toLowerCase() === normalizedRequestId) {
+        latest = decoded;
+      }
+    }
+  }
+  return latest;
+}
+
 // ── Delivery ─────────────────────────────────────────────────────────────────
 
-// Error names reported by the Mech Marketplace contract for duplicate delivery.
-// The exact name varies across contract versions; we match all known variants.
+// Legacy immediate-settlement callers historically accept these duplicate
+// reverts as idempotent. Adoption-aware callers opt into exact recovery and
+// must re-resolve the Deliver event instead of trusting revert text.
 const ALREADY_DELIVERED_PATTERNS = [
   'AlreadyDelivered',
   'DeliveryAlreadyCompleted',
@@ -1141,6 +1174,7 @@ export async function callDeliverToMarketplace(
   requestIds: Hex[],
   datas: Hex[],
   evictionRecovery?: EvictionRecoveryConfig,
+  requireExactRecovery = false,
 ): Promise<Hex> {
   const calldata = encodeFunctionData({
     abi: MECH_ABI,
@@ -1162,12 +1196,13 @@ export async function callDeliverToMarketplace(
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    // Idempotent: if the mech already recorded this delivery (e.g. crash
-    // recovery re-entered this path), treat it as success. The tx hash is
-    // unavailable at this point, but the engine's deliveryTxHash column would
-    // have been set by the previous attempt's onDeliveryTxLanded callback.
-    if (ALREADY_DELIVERED_PATTERNS.some(p => message.includes(p))) {
-      console.error(`[mech] callDeliverToMarketplace: already delivered (idempotent), requestIds=${requestIds.join(',')}`);
+    if (
+      !requireExactRecovery
+      && ALREADY_DELIVERED_PATTERNS.some(pattern => message.includes(pattern))
+    ) {
+      console.error(
+        `[mech] callDeliverToMarketplace: already delivered (legacy idempotent), requestIds=${requestIds.join(',')}`,
+      );
       return '0x' as Hex;
     }
     throw err;

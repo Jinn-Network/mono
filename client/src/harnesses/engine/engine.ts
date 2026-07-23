@@ -44,10 +44,13 @@ import {
 } from './envelope-assembly.js';
 import {
   claimRouterDelivery,
+  createMarketplaceDeliveryRecovery,
   deliverToMarketplace,
   deliverAndClaim,
   type DeliveryClaimOptions,
   type DeliveryDeps,
+  type MarketplaceDeliveryExpectation,
+  type MarketplaceDeliveryRecovery,
 } from './delivery.js';
 import {
   SafeInnerRevertError,
@@ -298,6 +301,12 @@ export interface TaskEngineOptions {
    */
   deliveryDeps?: DeliveryDeps;
   /**
+   * Exact read-only recovery for a Mech delivery that may have landed before
+   * the local tx hash was persisted. Defaults to the production chain +
+   * envelope-projection implementation.
+   */
+  marketplaceDeliveryRecovery?: MarketplaceDeliveryRecovery;
+  /**
    * Read-only observer for durable Autopilot adoption receipts. The engine
    * never implements GitHub access itself; production wiring injects it.
    */
@@ -516,6 +525,7 @@ export class TaskEngine {
   protected readonly packagingDeps: TaskEngineOptions['packagingDeps'];
   protected readonly envelopeDeps: TaskEngineOptions['envelopeDeps'];
   protected readonly deliveryDeps: TaskEngineOptions['deliveryDeps'];
+  protected readonly marketplaceDeliveryRecovery: MarketplaceDeliveryRecovery | undefined;
   protected readonly adoptionReceiptObserver: TaskEngineOptions['adoptionReceiptObserver'];
   protected readonly implRegistry: TaskEngineOptions['implRegistry'];
   protected readonly solverNetRegistry: TaskEngineOptions['solverNetRegistry'];
@@ -597,6 +607,15 @@ export class TaskEngine {
     this.packagingDeps = opts.packagingDeps;
     this.envelopeDeps = opts.envelopeDeps;
     this.deliveryDeps = opts.deliveryDeps;
+    this.marketplaceDeliveryRecovery = opts.marketplaceDeliveryRecovery
+      ?? (opts.deliveryDeps
+        ? createMarketplaceDeliveryRecovery({
+            publicClient: opts.deliveryDeps.publicClient,
+            mechContractAddress: opts.deliveryDeps.mechContractAddress,
+            safeAddress: opts.deliveryDeps.safeAddress,
+            store: opts.store,
+          })
+        : undefined);
     this.adoptionReceiptObserver = opts.adoptionReceiptObserver;
     this.implRegistry = opts.implRegistry;
     this.solverNetRegistry = opts.solverNetRegistry;
@@ -2216,19 +2235,60 @@ export class TaskEngine {
     const autopilotTask = this.autopilotSessionTask(task);
 
     if (autopilotTask) {
+      if (!evidenceHash) {
+        throw new MissingEvidenceHashError(task.requestId);
+      }
       let deliveryTxHash = task.deliveryTxHash as `0x${string}` | null;
       let deliveryDigest = task.deliveryDigest as `0x${string}` | null;
+      const expectedDeliveryDigest = cidToDigestHex(manifestCid);
       if (!deliveryTxHash) {
-        const delivery = await deliverToMarketplace(
-          requestId as `0x${string}`,
+        const expectedRole: 'solution' | 'verdict' =
+          task.taskRole === 'evaluation' ? 'verdict' : 'solution';
+        const expectedRecovery: MarketplaceDeliveryExpectation = {
+          requestId: requestId as `0x${string}`,
           manifestCid,
-          this.deliveryDeps,
+          deliveryDigest: expectedDeliveryDigest,
+          evidenceHash: evidenceHash as `0x${string}`,
+          role: expectedRole,
+          fromBlock: BigInt(task.onchainCreationBlock),
+        };
+        let recovered = await this.resolveExactMarketplaceDelivery(
+          task,
+          expectedRecovery,
         );
-        deliveryTxHash = delivery.deliveryTxHash;
-        deliveryDigest = delivery.deliveryDigest;
-        persistence.setDeliveryTxHash(requestId, deliveryTxHash);
+        if (recovered.state === 'terminal') return;
+        if (recovered.state === 'matching') {
+          deliveryTxHash = recovered.deliveryTxHash;
+          deliveryDigest = expectedDeliveryDigest;
+          persistence.setDeliveryTxHash(requestId, deliveryTxHash);
+        } else {
+          let delivery: Awaited<ReturnType<typeof deliverToMarketplace>> | null = null;
+          try {
+            delivery = await deliverToMarketplace(
+              requestId as `0x${string}`,
+              manifestCid,
+              this.deliveryDeps,
+              true,
+            );
+          } catch (deliveryError) {
+            recovered = await this.resolveExactMarketplaceDelivery(
+              task,
+              expectedRecovery,
+            );
+            if (recovered.state === 'terminal') return;
+            if (recovered.state === 'absent') throw deliveryError;
+            deliveryTxHash = recovered.deliveryTxHash;
+            deliveryDigest = expectedDeliveryDigest;
+            persistence.setDeliveryTxHash(requestId, deliveryTxHash);
+          }
+          if (delivery) {
+            deliveryTxHash = delivery.deliveryTxHash;
+            deliveryDigest = delivery.deliveryDigest;
+            persistence.setDeliveryTxHash(requestId, deliveryTxHash);
+          }
+        }
       }
-      deliveryDigest ??= cidToDigestHex(manifestCid);
+      deliveryDigest ??= expectedDeliveryDigest;
 
       persistence.transition(requestId, TaskRunState.AWAITING_ADOPTION, {
         deliveryTxHash,
@@ -2267,6 +2327,55 @@ export class TaskEngine {
     });
     console.log(`[harness-engine] ${requestId} DELIVERING → COMPLETE deliveryTx=${deliveryTxHash} claimTx=${claimTxHash}`);
     await this.afterDeliveryClaimed(task, manifestCid, evidenceHash);
+  }
+
+  private async resolveExactMarketplaceDelivery(
+    task: PersistedTaskRun,
+    expected: MarketplaceDeliveryExpectation,
+  ): Promise<
+    | { state: 'absent' }
+    | { state: 'terminal' }
+    | { state: 'matching'; deliveryTxHash: `0x${string}` }
+  > {
+    if (!this.marketplaceDeliveryRecovery) {
+      this.persistence.markFailed(
+        task.requestId,
+        'delivery-recovery-contradiction:exact delivery recovery is not configured',
+      );
+      return { state: 'terminal' };
+    }
+    const recovered = await this.marketplaceDeliveryRecovery
+      .resolveExistingDelivery(expected);
+    if (recovered.state === 'absent') return recovered;
+    if (recovered.state === 'contradictory') {
+      this.persistence.markFailed(
+        task.requestId,
+        `delivery-recovery-contradiction:${recovered.detail}`,
+      );
+      return { state: 'terminal' };
+    }
+    const matchesExpected = (
+      recovered.requestId === expected.requestId
+      && recovered.manifestCid === expected.manifestCid
+      && recovered.deliveryDigest.toLowerCase()
+        === expected.deliveryDigest.toLowerCase()
+      && recovered.evidenceHash.toLowerCase()
+        === expected.evidenceHash.toLowerCase()
+      && recovered.role === expected.role
+      && recovered.fromBlock === expected.fromBlock
+      && /^0x[0-9a-f]{64}$/i.test(recovered.deliveryTxHash)
+    );
+    if (!matchesExpected) {
+      this.persistence.markFailed(
+        task.requestId,
+        'delivery-recovery-contradiction:recovery metadata differs from persisted intent',
+      );
+      return { state: 'terminal' };
+    }
+    return {
+      state: 'matching',
+      deliveryTxHash: recovered.deliveryTxHash,
+    };
   }
 
   /** Observe adoption without repeating delivery or claiming settlement. */
@@ -2454,9 +2563,18 @@ export class TaskEngine {
         task,
         expectedRole,
       );
+      const correlationMatches = deliveredCorrelation
+        && (
+          expectedRole === 'solution'
+            ? this.autopilotCorrelationIsReceiptPrefix(
+              deliveredCorrelation,
+              receipt,
+            )
+            : autopilotCorrelationMatches(deliveredCorrelation, receipt)
+        );
       if (
         !deliveredCorrelation
-        || !autopilotCorrelationMatches(deliveredCorrelation, receipt)
+        || !correlationMatches
       ) {
         return {
           ok: false,
@@ -2466,6 +2584,16 @@ export class TaskEngine {
     }
 
     return { ok: true, receipt };
+  }
+
+  private autopilotCorrelationIsReceiptPrefix(
+    delivered: AutopilotCorrelation,
+    receipt: AutopilotCorrelation,
+  ): boolean {
+    return Object.entries(delivered).every(([field, expected]) => (
+      expected === undefined
+      || receipt[field as keyof AutopilotCorrelation] === expected
+    ));
   }
 
   private persistedAutopilotCorrelation(

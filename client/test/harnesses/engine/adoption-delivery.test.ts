@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Hex } from 'viem';
 import type { AutopilotAdoptionReceipt } from '@jinn-network/sdk/solvernets/jinn-repo';
@@ -52,6 +53,19 @@ const MANIFEST_CID = 'bafy-autopilot-result';
 const EVIDENCE_HASH = `0x${'22'.repeat(32)}`;
 const DELIVERY_DIGEST = `0x${'ab'.repeat(32)}`;
 const DELIVERY_TX_HASH = `0x${'cd'.repeat(32)}`;
+const SDK_FIXTURE_DIRECTORY = new URL(
+  '../../../../packages/sdk/test/fixtures/autopilot-session/',
+  import.meta.url,
+);
+
+function sdkFixture(name: string): Record<string, unknown> {
+  return JSON.parse(
+    readFileSync(new URL(`${name}.json`, SDK_FIXTURE_DIRECTORY), 'utf8'),
+  ) as Record<string, unknown>;
+}
+
+const SDK_GOLDEN_MUTATION = sdkFixture('mutation-complete');
+const SDK_GOLDEN_ACCEPTED_SOLUTION = sdkFixture('receipt-solution-accepted');
 
 function autopilotSpec() {
   return {
@@ -116,6 +130,53 @@ function taskInput(
       role: taskRole,
       spec,
     },
+  };
+}
+
+function goldenTaskInput(): PersistedTaskRunInput {
+  const correlation = SDK_GOLDEN_MUTATION['correlation'] as Record<string, unknown>;
+  const spec = autopilotSpec();
+  const session = spec.session;
+  const taskId = String(correlation['taskId']);
+  const requestId = String(correlation['requestId']);
+  return {
+    ...taskInput({
+      ...spec,
+      session: {
+        ...session,
+        prNumber: correlation['prNumber'],
+        claimOid: correlation['claimOid'],
+        expectedHead: correlation['expectedHead'],
+        v2AttemptId: correlation['v2AttemptId'],
+      },
+    }),
+    requestId,
+    taskId,
+    attemptIndex: Number(correlation['attemptIndex']),
+    task: {
+      ...taskInput().task,
+      id: taskId,
+      spec: {
+        ...spec,
+        session: {
+          ...session,
+          prNumber: correlation['prNumber'],
+          claimOid: correlation['claimOid'],
+          expectedHead: correlation['expectedHead'],
+          v2AttemptId: correlation['v2AttemptId'],
+        },
+      },
+    },
+  };
+}
+
+function goldenSolutionOutput(
+  mutation: Record<string, unknown> = SDK_GOLDEN_MUTATION,
+): Record<string, unknown> {
+  return {
+    venueRef: { name: 'jinn-repo' },
+    gating: {},
+    solutionPayload: mutation,
   };
 }
 
@@ -231,20 +292,24 @@ function persistedAutopilotOutput(
   };
 }
 
-function seedDelivering(persistence: TaskRunPersistence, input = taskInput()): void {
+function seedDelivering(
+  persistence: TaskRunPersistence,
+  input = taskInput(),
+  solutionOutput = persistedAutopilotOutput(input.taskRole ?? 'restoration'),
+  manifestCid = MANIFEST_CID,
+): void {
+  const requestId = input.requestId;
   persistence.insertDiscovered(input);
-  persistence.transition(REQUEST_ID, TaskRunState.CLAIMED);
-  persistence.transition(REQUEST_ID, TaskRunState.WAITING);
-  persistence.transition(REQUEST_ID, TaskRunState.PRE_SNAPSHOT);
-  persistence.transition(REQUEST_ID, TaskRunState.RUNNING);
-  persistence.transition(REQUEST_ID, TaskRunState.POST_SNAPSHOT);
-  persistence.transition(REQUEST_ID, TaskRunState.PACKAGING);
-  persistence.transition(REQUEST_ID, TaskRunState.DELIVERING, {
-    manifestCid: MANIFEST_CID,
+  persistence.transition(requestId, TaskRunState.CLAIMED);
+  persistence.transition(requestId, TaskRunState.WAITING);
+  persistence.transition(requestId, TaskRunState.PRE_SNAPSHOT);
+  persistence.transition(requestId, TaskRunState.RUNNING);
+  persistence.transition(requestId, TaskRunState.POST_SNAPSHOT);
+  persistence.transition(requestId, TaskRunState.PACKAGING);
+  persistence.transition(requestId, TaskRunState.DELIVERING, {
+    manifestCid,
     evidenceHash: EVIDENCE_HASH,
-    solutionOutputsJson: JSON.stringify(
-      persistedAutopilotOutput(input.taskRole ?? 'restoration'),
-    ),
+    solutionOutputsJson: JSON.stringify(solutionOutput),
   });
 }
 
@@ -275,8 +340,17 @@ function makeOptions(
       routerAddress: `0x${'99'.repeat(20)}`,
       claimDeliveryVariant: 'v3',
     },
+    marketplaceDeliveryRecovery: {
+      resolveExistingDelivery: vi.fn().mockResolvedValue({ state: 'absent' }),
+    },
     adoptionReceiptObserver,
   };
+}
+
+class DirectDeliveryEngine extends TaskEngine {
+  async deliverCurrent(requestId: string): Promise<void> {
+    await this.deliver(this.persistence.getOrThrow(requestId));
+  }
 }
 
 describe('Autopilot adoption-aware delivery', () => {
@@ -366,6 +440,93 @@ describe('Autopilot adoption-aware delivery', () => {
     });
     expect(run.adoptionAcceptedReceipt).toEqual(acceptedReceipt());
     expect(claimDelivery).not.toHaveBeenCalled();
+  });
+
+  it('accepts the SDK golden mutation-complete prefix and adoption-added Solution fields', async () => {
+    const input = goldenTaskInput();
+    const receipt = SDK_GOLDEN_ACCEPTED_SOLUTION as unknown as AutopilotAdoptionReceipt;
+    seedDelivering(
+      persistence,
+      input,
+      goldenSolutionOutput(),
+      String(receipt.deliveryEnvelopeCid),
+    );
+    const engine = new TaskEngine(makeOptions(
+      store,
+      makeObserver({ state: 'accepted', receipt }),
+    ));
+
+    await engine.process(input.requestId);
+    await engine.process(input.requestId);
+
+    expect(persistence.getOrThrow(input.requestId)).toMatchObject({
+      state: TaskRunState.CLAIMING_DELIVERY,
+      adoptionAcceptedReceipt: receipt,
+    });
+  });
+
+  it('rejects an accepted Solution receipt when a delivered core field differs', async () => {
+    const input = goldenTaskInput();
+    const correlation = SDK_GOLDEN_MUTATION['correlation'] as Record<string, unknown>;
+    const delivered = {
+      ...SDK_GOLDEN_MUTATION,
+      correlation: {
+        ...correlation,
+        claimOid: '9'.repeat(40),
+      },
+    };
+    const receipt = SDK_GOLDEN_ACCEPTED_SOLUTION as unknown as AutopilotAdoptionReceipt;
+    seedDelivering(
+      persistence,
+      input,
+      goldenSolutionOutput(delivered),
+      String(receipt.deliveryEnvelopeCid),
+    );
+    const engine = new TaskEngine(makeOptions(
+      store,
+      makeObserver({ state: 'accepted', receipt }),
+    ));
+
+    await engine.process(input.requestId);
+    await engine.process(input.requestId);
+
+    const run = persistence.getOrThrow(input.requestId);
+    expect(run.state).toBe(TaskRunState.FAILED);
+    expect(run.failureReason).toContain(
+      'adoption-contradiction:receipt correlation mismatch:delivered-output',
+    );
+  });
+
+  it('rejects an accepted Solution receipt when a delivered optional field differs', async () => {
+    const input = goldenTaskInput();
+    const correlation = SDK_GOLDEN_MUTATION['correlation'] as Record<string, unknown>;
+    const delivered = {
+      ...SDK_GOLDEN_MUTATION,
+      correlation: {
+        ...correlation,
+        resultingHead: '9'.repeat(40),
+      },
+    };
+    const receipt = SDK_GOLDEN_ACCEPTED_SOLUTION as unknown as AutopilotAdoptionReceipt;
+    seedDelivering(
+      persistence,
+      input,
+      goldenSolutionOutput(delivered),
+      String(receipt.deliveryEnvelopeCid),
+    );
+    const engine = new TaskEngine(makeOptions(
+      store,
+      makeObserver({ state: 'accepted', receipt }),
+    ));
+
+    await engine.process(input.requestId);
+    await engine.process(input.requestId);
+
+    const run = persistence.getOrThrow(input.requestId);
+    expect(run.state).toBe(TaskRunState.FAILED);
+    expect(run.failureReason).toContain(
+      'adoption-contradiction:receipt correlation mismatch:delivered-output',
+    );
   });
 
   it.each([
@@ -545,6 +706,171 @@ describe('Autopilot adoption-aware delivery', () => {
     expect(restartedObserver.observe).not.toHaveBeenCalled();
     expect(callDeliverToMarketplace).not.toHaveBeenCalled();
     expect(claimDelivery).toHaveBeenCalledOnce();
+  });
+
+  it('recovers the exact crash after Mech delivery without submitting a second delivery', async () => {
+    seedDelivering(persistence);
+    const firstEngine = new DirectDeliveryEngine(makeOptions(store, makeObserver()));
+    const persistenceCrash = vi.spyOn(
+      TaskRunPersistence.prototype,
+      'setDeliveryTxHash',
+    ).mockImplementationOnce(() => {
+      throw new Error('simulated process crash before tx-hash persistence');
+    });
+
+    await expect(firstEngine.deliverCurrent(REQUEST_ID)).rejects.toThrow(
+      'simulated process crash before tx-hash persistence',
+    );
+    persistenceCrash.mockRestore();
+    expect(callDeliverToMarketplace).toHaveBeenCalledOnce();
+    expect(persistence.getOrThrow(REQUEST_ID)).toMatchObject({
+      state: TaskRunState.DELIVERING,
+      deliveryTxHash: null,
+    });
+
+    const recovery = {
+      resolveExistingDelivery: vi.fn().mockResolvedValue({
+        state: 'matching',
+        requestId: REQUEST_ID,
+        deliveryTxHash: DELIVERY_TX_HASH,
+        deliveryDigest: DELIVERY_DIGEST,
+        manifestCid: MANIFEST_CID,
+        evidenceHash: EVIDENCE_HASH,
+        role: 'solution',
+        fromBlock: 100n,
+      }),
+    };
+    const restartedEngine = new TaskEngine({
+      ...makeOptions(store, makeObserver()),
+      marketplaceDeliveryRecovery: recovery,
+    } as TaskEngineOptions);
+
+    await restartedEngine.recoverInFlight();
+
+    expect(recovery.resolveExistingDelivery).toHaveBeenCalledOnce();
+    expect(callDeliverToMarketplace).toHaveBeenCalledOnce();
+    expect(persistence.getOrThrow(REQUEST_ID)).toMatchObject({
+      state: TaskRunState.AWAITING_ADOPTION,
+      deliveryTxHash: DELIVERY_TX_HASH,
+      deliveryDigest: DELIVERY_DIGEST,
+    });
+  });
+
+  it('same-process retry resolves the landed event instead of Mech-delivering twice', async () => {
+    seedDelivering(persistence);
+    const recovery = {
+      resolveExistingDelivery: vi.fn()
+        .mockResolvedValueOnce({ state: 'absent' })
+        .mockResolvedValueOnce({
+          state: 'matching',
+          requestId: REQUEST_ID,
+          deliveryTxHash: DELIVERY_TX_HASH,
+          deliveryDigest: DELIVERY_DIGEST,
+          manifestCid: MANIFEST_CID,
+          evidenceHash: EVIDENCE_HASH,
+          role: 'solution',
+          fromBlock: 100n,
+        }),
+    };
+    const engine = new DirectDeliveryEngine({
+      ...makeOptions(store, makeObserver()),
+      marketplaceDeliveryRecovery: recovery,
+    });
+    const persistenceCrash = vi.spyOn(
+      TaskRunPersistence.prototype,
+      'setDeliveryTxHash',
+    ).mockImplementationOnce(() => {
+      throw new Error('simulated live-process persistence failure');
+    });
+
+    await expect(engine.deliverCurrent(REQUEST_ID)).rejects.toThrow(
+      'simulated live-process persistence failure',
+    );
+    persistenceCrash.mockRestore();
+    await engine.deliverCurrent(REQUEST_ID);
+
+    expect(recovery.resolveExistingDelivery).toHaveBeenCalledTimes(2);
+    expect(callDeliverToMarketplace).toHaveBeenCalledOnce();
+    expect(persistence.getOrThrow(REQUEST_ID)).toMatchObject({
+      state: TaskRunState.AWAITING_ADOPTION,
+      deliveryTxHash: DELIVERY_TX_HASH,
+    });
+  });
+
+  it('resolves exact chain state after a duplicate delivery revert instead of trusting its message', async () => {
+    seedDelivering(persistence);
+    const recovery = {
+      resolveExistingDelivery: vi.fn()
+        .mockResolvedValueOnce({ state: 'absent' })
+        .mockResolvedValueOnce({
+          state: 'matching',
+          requestId: REQUEST_ID,
+          deliveryTxHash: DELIVERY_TX_HASH,
+          deliveryDigest: DELIVERY_DIGEST,
+          manifestCid: MANIFEST_CID,
+          evidenceHash: EVIDENCE_HASH,
+          role: 'solution',
+          fromBlock: 100n,
+        }),
+    };
+    vi.mocked(callDeliverToMarketplace).mockRejectedValueOnce(
+      new Error('AlreadyDelivered'),
+    );
+    const engine = new DirectDeliveryEngine({
+      ...makeOptions(store, makeObserver()),
+      marketplaceDeliveryRecovery: recovery,
+    });
+
+    await engine.deliverCurrent(REQUEST_ID);
+
+    expect(callDeliverToMarketplace).toHaveBeenCalledOnce();
+    expect(recovery.resolveExistingDelivery).toHaveBeenCalledTimes(2);
+    expect(persistence.getOrThrow(REQUEST_ID)).toMatchObject({
+      state: TaskRunState.AWAITING_ADOPTION,
+      deliveryTxHash: DELIVERY_TX_HASH,
+    });
+  });
+
+  it('Mech-delivers during recovery only after exact recovery reports authoritative absence', async () => {
+    seedDelivering(persistence);
+    const recovery = {
+      resolveExistingDelivery: vi.fn().mockResolvedValue({ state: 'absent' }),
+    };
+    const restartedEngine = new TaskEngine({
+      ...makeOptions(store, makeObserver()),
+      marketplaceDeliveryRecovery: recovery,
+    } as TaskEngineOptions);
+
+    await restartedEngine.recoverInFlight();
+
+    expect(recovery.resolveExistingDelivery).toHaveBeenCalledOnce();
+    expect(callDeliverToMarketplace).toHaveBeenCalledOnce();
+    expect(persistence.getOrThrow(REQUEST_ID).state).toBe(
+      TaskRunState.AWAITING_ADOPTION,
+    );
+  });
+
+  it('fails closed when exact delivery recovery finds contradictory metadata', async () => {
+    seedDelivering(persistence);
+    const recovery = {
+      resolveExistingDelivery: vi.fn().mockResolvedValue({
+        state: 'contradictory',
+        detail: 'on-chain envelope digest differs',
+      }),
+    };
+    const restartedEngine = new TaskEngine({
+      ...makeOptions(store, makeObserver()),
+      marketplaceDeliveryRecovery: recovery,
+    } as TaskEngineOptions);
+
+    await restartedEngine.recoverInFlight();
+
+    expect(recovery.resolveExistingDelivery).toHaveBeenCalledOnce();
+    expect(callDeliverToMarketplace).not.toHaveBeenCalled();
+    expect(persistence.getOrThrow(REQUEST_ID)).toMatchObject({
+      state: TaskRunState.FAILED,
+      failureReason: 'delivery-recovery-contradiction:on-chain envelope digest differs',
+    });
   });
 
   it('reasserts the persisted accepted receipt before claiming and fails closed on tampering', async () => {

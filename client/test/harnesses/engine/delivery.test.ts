@@ -15,6 +15,7 @@ vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
 vi.mock('../../../src/adapters/mech/contracts.js', () => ({
   callDeliverToMarketplace: vi.fn().mockResolvedValue('0xdeliverytx' as `0x${string}`),
   claimDelivery: vi.fn().mockResolvedValue('0xclaimtx' as `0x${string}`),
+  findLatestDeliveryForRequest: vi.fn(),
   submitTask: vi.fn(),
   submitEvaluationJob: vi.fn(),
   claimJob: vi.fn(),
@@ -245,5 +246,123 @@ describe('split delivery operations', () => {
     expect(claimTxHash).toBe('0xclaimtx');
     expect(callDeliverToMarketplace).not.toHaveBeenCalled();
     expect(claimDelivery).toHaveBeenCalledOnce();
+  });
+});
+
+describe('exact marketplace delivery recovery', () => {
+  const expected = {
+    requestId: '0xreq001' as `0x${string}`,
+    manifestCid: 'bafymanifest123',
+    deliveryDigest: '0xdeadbeef00000000000000000000000000000000000000000000000000000000' as `0x${string}`,
+    evidenceHash: '0xevidence' as `0x${string}`,
+    role: 'solution' as const,
+    fromBlock: 100n,
+  };
+
+  function projection(overrides: Record<string, unknown> = {}) {
+    return {
+      requestId: expected.requestId,
+      envelopeCid: expected.manifestCid,
+      signatureHash: expected.evidenceHash,
+      role: expected.role,
+      ...overrides,
+    };
+  }
+
+  async function makeRecovery(overrides: Record<string, unknown> = {}) {
+    const delivery = await import('../../../src/harnesses/engine/delivery.js');
+    const store = {
+      queryEnvelopeProjections: vi.fn().mockReturnValue([
+        projection(overrides),
+      ]),
+    };
+    const publicClient = {
+      getBlockNumber: vi.fn().mockResolvedValue(200n),
+    } as unknown as import('viem').PublicClient;
+    const recovery = delivery.createMarketplaceDeliveryRecovery({
+      publicClient,
+      mechContractAddress: '0xmech' as `0x${string}`,
+      safeAddress: '0xsafe' as `0x${string}`,
+      store,
+    });
+    return { recovery, store, publicClient };
+  }
+
+  beforeEach(async () => {
+    const { findLatestDeliveryForRequest } = await import(
+      '../../../src/adapters/mech/contracts.js'
+    );
+    vi.mocked(findLatestDeliveryForRequest).mockReset();
+  });
+
+  it('returns exact tx and envelope metadata for a matching Mech Deliver event', async () => {
+    const { findLatestDeliveryForRequest } = await import(
+      '../../../src/adapters/mech/contracts.js'
+    );
+    vi.mocked(findLatestDeliveryForRequest).mockResolvedValue({
+      requestId: expected.requestId,
+      deliveryDataHex: expected.deliveryDigest,
+      transactionHash: '0xdeliverytx' as `0x${string}`,
+      mechAddress: '0xsafe',
+      blockNumber: 150n,
+    });
+    const { recovery } = await makeRecovery();
+
+    await expect(recovery.resolveExistingDelivery(expected)).resolves.toEqual({
+      state: 'matching',
+      ...expected,
+      deliveryTxHash: '0xdeliverytx',
+    });
+    expect(findLatestDeliveryForRequest).toHaveBeenCalledWith(
+      expect.anything(),
+      '0xmech',
+      expected.requestId,
+      100n,
+      200n,
+    );
+  });
+
+  it.each([
+    ['role', { role: 'verdict' }],
+    ['evidence', { signatureHash: '0xwrong-evidence' }],
+  ])('fails closed when the persisted envelope %s contradicts expectations', async (
+    _field,
+    override,
+  ) => {
+    const { recovery } = await makeRecovery(override);
+
+    await expect(recovery.resolveExistingDelivery(expected)).resolves.toMatchObject({
+      state: 'contradictory',
+    });
+  });
+
+  it('fails closed when the on-chain delivery digest contradicts the envelope', async () => {
+    const { findLatestDeliveryForRequest } = await import(
+      '../../../src/adapters/mech/contracts.js'
+    );
+    vi.mocked(findLatestDeliveryForRequest).mockResolvedValue({
+      requestId: expected.requestId,
+      deliveryDataHex: '0xwrong-digest',
+      transactionHash: '0xdeliverytx' as `0x${string}`,
+      mechAddress: '0xsafe',
+      blockNumber: 150n,
+    });
+    const { recovery } = await makeRecovery();
+
+    await expect(recovery.resolveExistingDelivery(expected)).resolves.toMatchObject({
+      state: 'contradictory',
+    });
+  });
+
+  it('reports authoritative absence only after scanning through the latest block', async () => {
+    const { findLatestDeliveryForRequest } = await import(
+      '../../../src/adapters/mech/contracts.js'
+    );
+    vi.mocked(findLatestDeliveryForRequest).mockResolvedValue(null);
+    const { recovery } = await makeRecovery();
+
+    await expect(recovery.resolveExistingDelivery(expected)).resolves.toEqual({
+      state: 'absent',
+    });
   });
 });
