@@ -855,8 +855,7 @@ function renderKnowledgePacket(packet: KnowledgePacket): string {
   for (const excerpt of packet.excerpts) lines.push(`- ${excerpt.label}: ${excerpt.text}`);
   const capturedDate = packet.attribution.capturedAt.slice(0, 10);
   lines.push(
-    `  source: ${packet.ref} · ${packet.attribution.origin} · captured ${capturedDate} · `
-    + `full episode: corpus_fetch ${packet.ref}`,
+    `  source: ${packet.ref} · ${packet.attribution.origin} · captured ${capturedDate}`,
   );
   return lines.join('\n');
 }

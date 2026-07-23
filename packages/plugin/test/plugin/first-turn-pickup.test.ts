@@ -700,7 +700,7 @@ describe('firstTurnPickup over ports — evidence-first pickup (rescope §3/§4.
     expect(result.contextBlock).toContain('expected "up to date" got "checking..."');
     expect(result.contextBlock).toContain('await fetchVersionStatus()');
     expect(result.contextBlock).toContain('source: bafySourceEpisode');
-    expect(result.contextBlock).toContain('corpus_fetch bafySourceEpisode');
+    expect(result.contextBlock).not.toContain('corpus_fetch');
     expect(result.retrievalFired).toBe(true);
     expect(result.eligibleRefs).toContain('bafySourceEpisode');
     expect(result.deliveredRefs).toEqual(['bafySourceEpisode']);

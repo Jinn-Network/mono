@@ -171,13 +171,14 @@ function selectExcerpts(steps: CorpusRecordStep[]): ExcerptCandidate[] {
 }
 
 /**
- * Line-boundary-aware truncation ending with an explicit, pointer-bearing
- * tail. Returns an empty string when the budget cannot fit both meaningful
- * source text and the complete tail.
+ * Line-boundary-aware truncation ending with a neutral marker. The `ref`
+ * parameter remains required for source compatibility with the public helper.
+ * Returns an empty string when the budget cannot fit both meaningful source
+ * text and the complete tail.
  */
-export function truncateLineBoundary(text: string, maxChars: number, ref: string): string {
+export function truncateLineBoundary(text: string, maxChars: number, _ref: string): string {
   if (text.length <= maxChars) return text;
-  const tail = `\n[truncated — full episode: corpus_fetch ${ref}]`;
+  const tail = '\n[truncated]';
   const budget = maxChars - tail.length;
   if (budget <= 0) return '';
   let cut = text.slice(0, budget);

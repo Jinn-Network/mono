@@ -77,7 +77,7 @@ describe('truncateLineBoundary', () => {
     expect(truncateLineBoundary('short', 100, 'ref-1')).toBe('short');
   });
 
-  it('truncates at a line boundary and appends the corpus_fetch pointer', () => {
+  it('truncates at a line boundary without advertising a fetch surface', () => {
     const text = [
       'first line of real output stays intact',
       'second line also fits comfortably inside the budget',
@@ -86,7 +86,8 @@ describe('truncateLineBoundary', () => {
     const truncated = truncateLineBoundary(text, 100, 'ref-1');
     expect(truncated.startsWith('first line of real output stays intact')).toBe(true);
     expect(truncated).not.toContain('third line');
-    expect(truncated).toContain('[truncated — full episode: corpus_fetch ref-1]');
+    expect(truncated).toContain('[truncated]');
+    expect(truncated).not.toContain('corpus_fetch');
     expect(truncated.length).toBeLessThanOrEqual(100);
   });
 });
@@ -205,7 +206,7 @@ describe('projectKnowledgePacket (rescope §3.2)', () => {
     expect(packet.synthesis).toBeUndefined();
   });
 
-  it('enforces the default 3,500-char combined budget, truncating with the corpus_fetch tail', () => {
+  it('enforces the default 3,500-char combined budget with a neutral truncation tail', () => {
     const longOutput = 'x'.repeat(10_000);
     const steps: CorpusRecordStep[] = [
       step({ attributes: { 'tool.args': 'run-long-command', 'tool.result': longOutput, 'tool.exitCode': 1 } }),
@@ -214,7 +215,8 @@ describe('projectKnowledgePacket (rescope §3.2)', () => {
     const totalChars = (packet.synthesis?.length ?? 0)
       + packet.excerpts.reduce((sum, e) => sum + e.text.length, 0);
     expect(totalChars).toBeLessThanOrEqual(DEFAULT_PACKET_CHAR_BUDGET);
-    expect(packet.excerpts[0]?.text).toContain('[truncated — full episode: corpus_fetch bafySeedEpisode1]');
+    expect(packet.excerpts[0]?.text).toContain('[truncated]');
+    expect(packet.excerpts[0]?.text).not.toContain('corpus_fetch');
   });
 
   it('respects a caller-supplied budget smaller than the default', () => {
@@ -229,7 +231,7 @@ describe('projectKnowledgePacket (rescope §3.2)', () => {
 
   it.each([
     { remaining: 80, expectedExcerpts: 1 },
-    { remaining: 20, expectedExcerpts: 0 },
+    { remaining: 20, expectedExcerpts: 1 },
     { remaining: 5, expectedExcerpts: 0 },
   ])(
     'never exceeds 3,500 chars with $remaining chars remaining for a truncated excerpt',

@@ -537,12 +537,6 @@ def test_status_reports_contribution_parked_and_no_sharing_lines(isolated_home):
     assert "pending trace:" not in out
 
 
-def test_corpus_command_delegates_to_layer(isolated_home):
-    out = jinn._handle_corpus(command_args="prediction")
-    assert out == "ok"
-    assert isolated_home.calls[0][1:4] == ["corpus", "search", "prediction"]
-
-
 def test_removed_surfaces_fall_through_to_help(isolated_home):
     # consent / preview / ledger are deleted verbs: they no longer dispatch a
     # branch and fall through to the help text (no outbound call is made).
