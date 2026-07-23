@@ -74,6 +74,10 @@ export interface PersistedTaskRun {
   deliveryTxHash: string | null;
   /** bytes32 digest delivered through Mech; persisted before adoption polling. */
   deliveryDigest: string | null;
+  /** ERC-8004 metadata tx that makes this delivery exactly discoverable pre-claim. */
+  deliveryDiscoveryAnchorTxHash: string | null;
+  /** Confirmed block for the pre-claim discovery anchor. */
+  deliveryDiscoveryAnchorBlockNumber: number | null;
   /** Exact GitHub surface on which the adoption receipt is expected. */
   adoptionReceiptLocation: AdoptionReceiptLocation | null;
   /** Allowlisted GitHub authors accepted by the injected observer. */

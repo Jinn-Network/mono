@@ -146,6 +146,22 @@ export class TaskCreationTimestampUnavailableError extends Error {
   }
 }
 
+/** A delivery cannot enter adoption polling until its exact metadata anchor is confirmed. */
+export class DeliveryDiscoveryAnchorUnavailableError extends Error {
+  readonly requestId: string;
+  readonly cause: unknown;
+
+  constructor(requestId: string, cause: unknown) {
+    super(
+      `delivery discovery anchor unavailable for ${requestId}: `
+      + `${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+    this.name = 'DeliveryDiscoveryAnchorUnavailableError';
+    this.requestId = requestId;
+    this.cause = cause;
+  }
+}
+
 // ── Registry types ────────────────────────────────────────────────────────────
 
 /**
@@ -2290,6 +2306,12 @@ export class TaskEngine {
       }
       deliveryDigest ??= expectedDeliveryDigest;
 
+      await this.ensureAutopilotDeliveryDiscoveryAnchor(
+        task,
+        manifestCid,
+        evidenceHash,
+      );
+
       persistence.transition(requestId, TaskRunState.AWAITING_ADOPTION, {
         deliveryTxHash,
         deliveryDigest,
@@ -2327,6 +2349,143 @@ export class TaskEngine {
     });
     console.log(`[harness-engine] ${requestId} DELIVERING → COMPLETE deliveryTx=${deliveryTxHash} claimTx=${claimTxHash}`);
     await this.afterDeliveryClaimed(task, manifestCid, evidenceHash);
+  }
+
+  /**
+   * Publish a self-signed ERC-8004 anchor before adoption polling begins.
+   *
+   * The broadcast hash is journaled synchronously, then reconciled on retry.
+   * This closes the crash window without blindly sending duplicate metadata
+   * transactions and gives exact discovery a durable pre-claim join anchor.
+   */
+  private async ensureAutopilotDeliveryDiscoveryAnchor(
+    task: PersistedTaskRun,
+    manifestCid: string,
+    evidenceHash: `0x${string}`,
+  ): Promise<void> {
+    const publisher = this.identityPublisher;
+    if (!publisher) {
+      throw new DeliveryDiscoveryAnchorUnavailableError(
+        task.requestId,
+        new Error('identity publisher is not configured'),
+      );
+    }
+
+    const kind: 'envelope' | 'evaluation' =
+      task.taskRole === 'evaluation' ? 'evaluation' : 'envelope';
+    const zeroMeasurement =
+      '0x0000000000000000000000000000000000000000000000000000000000000000' as const;
+    const canEmitV2 =
+      !!task.executorMode
+      && !!task.executorCodeDigest
+      && !!task.implName;
+
+    const buildEncodedPayload = (): {
+      payloadHex: `0x${string}`;
+      publish: () => Promise<{
+        txHash: `0x${string}`;
+        blockNumber: number | null;
+        gasUsed: bigint | null;
+        feeWei: bigint | null;
+      }>;
+    } => {
+      const onBroadcast = (txHash: `0x${string}`): void => {
+        this.persistence.setDeliveryDiscoveryAnchor(task.requestId, txHash, null);
+      };
+      if (canEmitV2) {
+        const payload: ExecutionPayloadV2 = {
+          version: 2,
+          tier: 0,
+          manifestHash: evidenceHash,
+          attestationQuoteCid: '0x',
+          sourceMeasurement: zeroMeasurement,
+          codeDigest: codeDigestSha256ToBytes32(task.executorCodeDigest!),
+          implName: task.implName!,
+          modeFlag: modeStringToFlag(task.executorMode!),
+        };
+        return {
+          payloadHex: encodeExecutionPayloadV2(payload),
+          publish: () => publisher.publishContentV2({
+            kind,
+            cid: manifestCid,
+            payload,
+            requireSuccessfulReceipt: true,
+            onBroadcast,
+          }),
+        };
+      }
+      const payload: ExecutionPayload = {
+        version: 1,
+        tier: 0,
+        manifestHash: evidenceHash,
+        attestationQuoteCid: '0x',
+        sourceMeasurement: zeroMeasurement,
+      };
+      return {
+        payloadHex: encodeExecutionPayload(payload),
+        publish: () => publisher.publishContent({
+          kind,
+          cid: manifestCid,
+          payload,
+          requireSuccessfulReceipt: true,
+          onBroadcast,
+        }),
+      };
+    };
+
+    const { payloadHex, publish } = buildEncodedPayload();
+    let result: {
+      txHash: `0x${string}`;
+      blockNumber: number | null;
+      gasUsed: bigint | null;
+      feeWei: bigint | null;
+    };
+    try {
+      const journaledTx = task.deliveryDiscoveryAnchorTxHash as `0x${string}` | null;
+      if (journaledTx && task.deliveryDiscoveryAnchorBlockNumber !== null) return;
+      if (journaledTx) {
+        const reconciliation = await publisher.reconcileTransaction(journaledTx);
+        if (reconciliation.status === 'pending') {
+          throw new Error(`metadata transaction ${journaledTx} is still pending`);
+        }
+        if (reconciliation.status === 'reverted') {
+          this.persistence.setDeliveryDiscoveryAnchor(task.requestId, null, null);
+          result = await publish();
+        } else {
+          result = reconciliation;
+        }
+      } else {
+        result = await publish();
+      }
+      if (result.blockNumber === null) {
+        this.persistence.setDeliveryDiscoveryAnchor(task.requestId, result.txHash, null);
+        throw new Error(`metadata transaction ${result.txHash} has no confirmed block`);
+      }
+
+      this.store.saveErc8004Anchor({
+        envelopeId: evidenceHash,
+        envelopeCid: manifestCid,
+        contentKind: kind,
+        metadataKey: `${kind}:${manifestCid}`,
+        agentId: publisher.agent.toString(),
+        chainId: publisher.chainId,
+        identityRegistryAddress: publisher.registry,
+        txHash: result.txHash,
+        blockNumber: result.blockNumber,
+        payloadHex,
+        anchoredAt: Math.floor(Date.now() / 1000),
+        gasUsed: result.gasUsed?.toString() ?? null,
+        feeWei: result.feeWei?.toString() ?? null,
+      });
+      this.persistence.setDeliveryDiscoveryAnchor(
+        task.requestId,
+        result.txHash,
+        result.blockNumber,
+      );
+    } catch (error) {
+      if (error instanceof DeliveryDiscoveryAnchorUnavailableError) throw error;
+      throw new DeliveryDiscoveryAnchorUnavailableError(task.requestId, error);
+    }
   }
 
   private async resolveExactMarketplaceDelivery(
@@ -2673,13 +2832,11 @@ export class TaskEngine {
     // (legacy path may have already inserted).
     this.emitCycleArtifact(task, manifestCid, evidenceHash);
 
-    // ── ERC-8004 setMetadata — fires AFTER claimDelivery succeeds ────────────
+    // ── ERC-8004 committed setMetadata republish ─────────────────────────────
     //
-    // Moved here from pack() per PR#37 review2 must-fix #2. 'committed' means
-    // "observable on-chain evidenceHash exists" — publishing before claim would
-    // lie during failures. evidenceHash comes from task (persisted in
-    // DELIVERING state by pack()); idempotent on retry (setMetadata is a pure
-    // key-value write; re-running with the same payload is safe).
+    // Autopilot runs already published a tier-0 discovery anchor after Mech
+    // delivery. Only this post-Router-claim write may upgrade the same key to
+    // tier 1 ('committed'). Non-Autopilot paths publish here for the first time.
     //
     // Both roles publish (jinn-mono-n93o): restoration runs emit
     // `envelope:<cid>`; evaluation runs emit `evaluation:<cid>`. The indexer's
@@ -3097,7 +3254,8 @@ export class TaskEngine {
     // the delivery window has closed, so we never churn on work that can no
     // longer settle on-chain.
     const recoverablePrerequisite =
-      err instanceof TaskCreationTimestampUnavailableError;
+      err instanceof TaskCreationTimestampUnavailableError
+      || err instanceof DeliveryDiscoveryAnchorUnavailableError;
     if (
       task.windowEndTs > Date.now()
       && (recoverablePrerequisite || isRecoverableTransactionError(err))

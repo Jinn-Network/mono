@@ -34,6 +34,7 @@ const REQUEST_ID = `0x${'11'.repeat(32)}` as Hex;
 const ENVELOPE_DIGEST = `0x${'55'.repeat(32)}` as Hex;
 const ENVELOPE_CID = `f01551220${'55'.repeat(32)}`;
 const OPERATOR = `0x${'22'.repeat(20)}` as Address;
+const EVALUATOR = `0x${'23'.repeat(20)}` as Address;
 const MECH = `0x${'aa'.repeat(20)}` as Address;
 const DELIVERY_TX = `0x${'77'.repeat(32)}` as Hex;
 const PRIVATE_KEY =
@@ -141,7 +142,7 @@ async function signedEnvelope(
       requestId: REQUEST_ID,
     },
     participant: {
-      safeAddress: OPERATOR,
+      safeAddress: role === 'verdict' ? EVALUATOR : OPERATOR,
       agentEoa: AGENT_EOA,
     },
     window: { startTs: 1_753_349_000, endTs: 1_753_351_000 },
@@ -216,6 +217,8 @@ interface HarnessOptions {
   logs?: unknown[];
   rpcError?: Error;
   ipfsError?: Error;
+  publisherSafe?: Address;
+  publisherError?: Error;
   expectation?: Partial<AutopilotMarketplaceDeliveryExpectation>;
 }
 
@@ -240,9 +243,10 @@ async function harness(options: HarnessOptions = {}) {
       taskId: TASK_ID,
       attemptIndex: 0,
       requestId: REQUEST_ID,
-      operator: OPERATOR,
+      operator: role === 'verdict' ? EVALUATOR : OPERATOR,
       createdAtBlock: 100,
     },
+    solutionOperator: OPERATOR,
     envelope: {
       requestId: REQUEST_ID,
       manifestCid: ENVELOPE_CID,
@@ -262,11 +266,17 @@ async function harness(options: HarnessOptions = {}) {
   const fetchEnvelopeBytes = options.ipfsError
     ? vi.fn().mockRejectedValue(options.ipfsError)
     : vi.fn().mockResolvedValue(new TextEncoder().encode(JSON.stringify(envelope)));
+  const resolvePublisherSafe = options.publisherError
+    ? vi.fn().mockRejectedValue(options.publisherError)
+    : vi.fn().mockResolvedValue(
+        options.publisherSafe ?? (role === 'verdict' ? EVALUATOR : OPERATOR),
+      );
   const observer = createAutopilotMarketplaceDeliveryObserver({
     discovery,
     publicClient: { getLogs } as unknown as PublicClient,
     mechContractAddress: MECH,
     fetchEnvelopeBytes,
+    resolvePublisherSafe,
   });
   const expectedCorrelation = role === 'verdict'
     ? {
@@ -284,6 +294,7 @@ async function harness(options: HarnessOptions = {}) {
     fromBlock: 100n,
     toBlock: 150n,
     expectedCorrelation,
+    ...(role === 'verdict' ? { solutionOperator: OPERATOR } : {}),
     ...options.expectation,
   };
   return {
@@ -292,6 +303,7 @@ async function harness(options: HarnessOptions = {}) {
     discovery,
     getLogs,
     fetchEnvelopeBytes,
+    resolvePublisherSafe,
     envelope,
   };
 }
@@ -327,6 +339,11 @@ describe('Autopilot marketplace delivery observer', () => {
       toBlock: 150n,
     }));
     expect(fixture.fetchEnvelopeBytes).toHaveBeenCalledWith(ENVELOPE_CID);
+    expect(fixture.resolvePublisherSafe).toHaveBeenCalledWith(
+      CHAIN_ID,
+      '7',
+      121n,
+    );
   });
 
   it('keeps not-yet-observable and transport failures pending', async () => {
@@ -362,6 +379,10 @@ describe('Autopilot marketplace delivery observer', () => {
     const ipfsDown = await harness({ ipfsError: new TypeError('fetch failed') });
     await expect(ipfsDown.observer.observe(ipfsDown.expectation))
       .resolves.toMatchObject({ status: 'pending', reason: 'envelope-unavailable' });
+
+    const identityRpcDown = await harness({ publisherError: new Error('RPC down') });
+    await expect(identityRpcDown.observer.observe(identityRpcDown.expectation))
+      .resolves.toMatchObject({ status: 'pending', reason: 'publisher-identity-unavailable' });
   });
 
   it('propagates exact discovery contradictions without touching RPC', async () => {
@@ -519,10 +540,12 @@ describe('Autopilot marketplace delivery observer', () => {
 
   it('validates the additive Verdict result schema and review correlation', async () => {
     const fixture = await harness({ role: 'verdict' });
+    fixture.getLogs.mockResolvedValue([deliverLog({ operator: EVALUATOR })]);
 
     await expect(fixture.observer.observe(fixture.expectation)).resolves.toMatchObject({
       status: 'verified',
       role: 'verdict',
+      attempt: { operator: EVALUATOR },
       result: {
         schemaVersion: 'jinn-autopilot-review-result.v1',
         outcome: 'approve',
@@ -533,6 +556,52 @@ describe('Autopilot marketplace delivery observer', () => {
         },
       },
     });
+  });
+
+  it('rejects a forged publisher agent whose historical Safe is not the delivery operator', async () => {
+    const fixture = await harness({
+      publisherSafe: `0x${'88'.repeat(20)}` as Address,
+    });
+
+    await expect(fixture.observer.observe(fixture.expectation)).resolves.toMatchObject({
+      status: 'contradiction',
+      reason: 'publisher-mismatch',
+    });
+    expect(fixture.getLogs).not.toHaveBeenCalled();
+  });
+
+  it('rejects a verdict evaluator that is also the solution operator', async () => {
+    const fixture = await harness({ role: 'verdict' });
+    const ready = await fixture.discovery.getAutopilotDeliveryCandidates({
+      chainId: CHAIN_ID,
+      taskId: TASK_ID,
+      role: 'verdict',
+    }) as Extract<AutopilotDeliveryCandidateLookup, { status: 'ready' }>;
+    fixture.discovery.getAutopilotDeliveryCandidates = vi.fn().mockResolvedValue({
+      ...ready,
+      attempt: { ...ready.attempt, operator: OPERATOR },
+      solutionOperator: OPERATOR,
+    });
+
+    await expect(fixture.observer.observe(fixture.expectation)).resolves.toMatchObject({
+      status: 'contradiction',
+      reason: 'evaluator-is-solver',
+    });
+    expect(fixture.getLogs).not.toHaveBeenCalled();
+  });
+
+  it('rejects a discovered solution operator that differs from the authoritative expectation', async () => {
+    const fixture = await harness({
+      expectation: {
+        solutionOperator: `0x${'88'.repeat(20)}`,
+      },
+    });
+
+    await expect(fixture.observer.observe(fixture.expectation)).resolves.toMatchObject({
+      status: 'contradiction',
+      reason: 'discovery-mismatch',
+    });
+    expect(fixture.resolvePublisherSafe).not.toHaveBeenCalled();
   });
 
   it('rejects invalid expectations before performing discovery', async () => {

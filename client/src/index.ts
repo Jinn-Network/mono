@@ -28,6 +28,11 @@ export {
   type AutopilotMarketplaceDeliveryPendingReason,
   type VerifiedAutopilotMarketplaceDelivery,
 } from './autopilot/marketplace-delivery-observer.js';
+export {
+  createPublisherSafeResolver,
+  type PublisherSafeResolverOptions,
+  type RegistryReadClient,
+} from './erc8004/publisher-safe-resolver.js';
 
 // Store
 export { Store } from './store/store.js';

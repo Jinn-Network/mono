@@ -6,7 +6,9 @@ const INDEXER_URL = 'https://indexer.example';
 const CHAIN_ID = 84532;
 const TASK_ID = '501';
 const REQUEST_ID = `0x${'11'.repeat(32)}` as const;
+const VERDICT_REQUEST_ID = `0x${'12'.repeat(32)}` as const;
 const OPERATOR = `0x${'22'.repeat(20)}` as const;
+const EVALUATOR = `0x${'23'.repeat(20)}` as const;
 const TASK_CID_DIGEST = `0x${'33'.repeat(32)}` as const;
 const TASK_CREATED_TX = `0x${'44'.repeat(32)}` as const;
 const ENVELOPE_CID = `f01551220${'55'.repeat(32)}`;
@@ -38,10 +40,36 @@ const envelope = {
   enrichedAtBlock: '120',
 };
 
+const verdict = {
+  taskId: TASK_ID,
+  chainId: CHAIN_ID,
+  attemptIndex: 0,
+  verdictIndex: 1,
+  requestId: VERDICT_REQUEST_ID,
+  evaluator: EVALUATOR,
+  verdictCode: 1,
+  createdAtBlock: '115',
+};
+
+const verdictEnvelope = {
+  taskId: TASK_ID,
+  chainId: CHAIN_ID,
+  attemptIndex: 0,
+  verdictIndex: 1,
+  requestId: VERDICT_REQUEST_ID,
+  evaluator: EVALUATOR,
+  manifestCid: ENVELOPE_CID,
+  publisherAgentId: '8',
+  manifestHash: MANIFEST_HASH,
+  enrichedAtBlock: '121',
+};
+
 interface Script {
   tasks?: unknown[];
   attempts?: unknown[];
   envelopes?: unknown[];
+  verdicts?: unknown[];
+  verdictEnvelopes?: unknown[];
 }
 
 function scriptedFetch(script: Script) {
@@ -58,7 +86,11 @@ function scriptedFetch(script: Script) {
       ? { tasks: { items: script.tasks ?? [] } }
       : body.query.includes('ExactAutopilotSolutionAttempts(')
         ? { attempts: { items: script.attempts ?? [] } }
-        : { attemptEnvelopeMetas: { items: script.envelopes ?? [] } };
+        : body.query.includes('ExactAutopilotVerdicts(')
+          ? { verdicts: { items: script.verdicts ?? [] } }
+          : body.query.includes('ExactAutopilotVerdictEnvelopeMetadata(')
+            ? { verdictEnvelopeMetas: { items: script.verdictEnvelopes ?? [] } }
+            : { attemptEnvelopeMetas: { items: script.envelopes ?? [] } };
     return new Response(JSON.stringify({ data: collection }), {
       status: 200,
       headers: { 'content-type': 'application/json' },
@@ -145,6 +177,7 @@ describe('HttpDiscoveryAPI.getAutopilotDeliveryCandidates', () => {
         operator: OPERATOR,
         createdAtBlock: 110,
       },
+      solutionOperator: OPERATOR,
       envelope: {
         requestId: REQUEST_ID,
         manifestCid: ENVELOPE_CID,
@@ -213,7 +246,7 @@ describe('HttpDiscoveryAPI.getAutopilotDeliveryCandidates', () => {
     });
   });
 
-  it('fails closed on inconsistent exact rows and leaves verdict additive', async () => {
+  it('fails closed on inconsistent exact rows', async () => {
     const inconsistent = clientFor({
       tasks: [task],
       attempts: [{ ...attempt, taskId: '999' }],
@@ -227,17 +260,99 @@ describe('HttpDiscoveryAPI.getAutopilotDeliveryCandidates', () => {
       reason: 'inconsistent-indexer-data',
     });
 
-    const verdict = clientFor({});
-    await expect(verdict.api.getAutopilotDeliveryCandidates({
+  });
+
+  it('resolves verdict delivery through the evaluation request and evaluator Safe', async () => {
+    const fixture = clientFor({
+      tasks: [task],
+      attempts: [attempt],
+      verdicts: [verdict],
+      verdictEnvelopes: [verdictEnvelope],
+    });
+
+    await expect(fixture.api.getAutopilotDeliveryCandidates({
+      chainId: CHAIN_ID,
+      taskId: TASK_ID,
+      role: 'verdict',
+    })).resolves.toEqual({
+      status: 'ready',
+      role: 'verdict',
+      task: {
+        taskId: TASK_ID,
+        taskCidDigest: TASK_CID_DIGEST,
+        createdAtBlock: 100,
+        createdAtTx: TASK_CREATED_TX,
+      },
+      attempt: {
+        taskId: TASK_ID,
+        attemptIndex: 0,
+        requestId: VERDICT_REQUEST_ID,
+        operator: EVALUATOR,
+        createdAtBlock: 115,
+      },
+      solutionOperator: OPERATOR,
+      envelope: {
+        requestId: VERDICT_REQUEST_ID,
+        manifestCid: ENVELOPE_CID,
+        publisherAgentId: '8',
+        manifestHash: MANIFEST_HASH,
+        enrichedAtBlock: 121,
+      },
+    });
+
+    expect(fixture.posts.map(({ variables }) => variables)).toEqual([
+      { taskId: TASK_ID, chainId: CHAIN_ID },
+      { taskId: TASK_ID, chainId: CHAIN_ID },
+      { taskId: TASK_ID, chainId: CHAIN_ID },
+      { requestId: VERDICT_REQUEST_ID, chainId: CHAIN_ID },
+    ]);
+  });
+
+  it('keeps an unindexed verdict pending after resolving the solution attempt', async () => {
+    const fixture = clientFor({
+      tasks: [task],
+      attempts: [attempt],
+    });
+
+    await expect(fixture.api.getAutopilotDeliveryCandidates({
       chainId: CHAIN_ID,
       taskId: TASK_ID,
       role: 'verdict',
     })).resolves.toEqual({
       status: 'pending',
-      reason: 'role-not-supported',
+      reason: 'verdict-not-indexed',
       taskId: TASK_ID,
       role: 'verdict',
     });
-    expect(verdict.posts).toHaveLength(0);
+  });
+
+  it('fails closed when verdict rows are ambiguous or do not join the solution attempt', async () => {
+    const ambiguous = clientFor({
+      tasks: [task],
+      attempts: [attempt],
+      verdicts: [verdict, { ...verdict, verdictIndex: 2 }],
+    });
+    await expect(ambiguous.api.getAutopilotDeliveryCandidates({
+      chainId: CHAIN_ID,
+      taskId: TASK_ID,
+      role: 'verdict',
+    })).resolves.toMatchObject({
+      status: 'contradiction',
+      reason: 'multiple-verdicts',
+    });
+
+    const wrongAttempt = clientFor({
+      tasks: [task],
+      attempts: [attempt],
+      verdicts: [{ ...verdict, attemptIndex: 1 }],
+    });
+    await expect(wrongAttempt.api.getAutopilotDeliveryCandidates({
+      chainId: CHAIN_ID,
+      taskId: TASK_ID,
+      role: 'verdict',
+    })).resolves.toMatchObject({
+      status: 'contradiction',
+      reason: 'inconsistent-indexer-data',
+    });
   });
 });

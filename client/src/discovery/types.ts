@@ -149,8 +149,8 @@ export type AutopilotDeliveryCandidateLookup =
       reason:
         | 'task-not-indexed'
         | 'attempt-not-indexed'
+        | 'verdict-not-indexed'
         | 'envelope-not-indexed'
-        | 'role-not-supported'
         | 'exact-indexer-required';
       taskId: string;
       role: AutopilotDeliveryRole;
@@ -160,6 +160,7 @@ export type AutopilotDeliveryCandidateLookup =
       reason:
         | 'multiple-tasks'
         | 'multiple-attempts'
+        | 'multiple-verdicts'
         | 'multiple-envelopes'
         | 'inconsistent-indexer-data';
       taskId: string;
@@ -170,6 +171,8 @@ export type AutopilotDeliveryCandidateLookup =
       role: AutopilotDeliveryRole;
       task: AutopilotDeliveryTaskCandidate;
       attempt: AutopilotDeliveryAttemptCandidate;
+      /** Safe that authored the solution attempt; distinct from a verdict evaluator. */
+      solutionOperator: `0x${string}`;
       envelope: AutopilotDeliveryEnvelopeCandidate;
     };
 

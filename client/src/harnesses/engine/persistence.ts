@@ -82,6 +82,8 @@ CREATE TABLE IF NOT EXISTS task_runs (
   manifest_cid            TEXT,
   delivery_tx_hash        TEXT,
   delivery_digest         TEXT,
+  delivery_discovery_anchor_tx_hash TEXT,
+  delivery_discovery_anchor_block_number INTEGER,
   adoption_receipt_location TEXT,
   adoption_receipt_authors  TEXT,
   adoption_wait_started_at  INTEGER,
@@ -199,6 +201,8 @@ export type TaskRunPatch = Partial<{
   manifestCid: string | null;
   deliveryTxHash: string | null;
   deliveryDigest: string | null;
+  deliveryDiscoveryAnchorTxHash: string | null;
+  deliveryDiscoveryAnchorBlockNumber: number | null;
   adoptionReceiptLocation: AdoptionReceiptLocation | null;
   adoptionReceiptAuthors: string[] | null;
   adoptionWaitStartedAt: number | null;
@@ -257,6 +261,8 @@ interface RawRow {
   manifest_cid: string | null;
   delivery_tx_hash: string | null;
   delivery_digest: string | null;
+  delivery_discovery_anchor_tx_hash: string | null;
+  delivery_discovery_anchor_block_number: number | null;
   adoption_receipt_location: string | null;
   adoption_receipt_authors: string | null;
   adoption_wait_started_at: number | null;
@@ -314,6 +320,8 @@ function runAdditiveMigrations(db: Database.Database): void {
     // run yet — never backfilled with a guess.
     { column: 'onchain_creation_timestamp', ddl: 'ALTER TABLE task_runs ADD COLUMN onchain_creation_timestamp INTEGER' },
     { column: 'delivery_digest', ddl: 'ALTER TABLE task_runs ADD COLUMN delivery_digest TEXT' },
+    { column: 'delivery_discovery_anchor_tx_hash', ddl: 'ALTER TABLE task_runs ADD COLUMN delivery_discovery_anchor_tx_hash TEXT' },
+    { column: 'delivery_discovery_anchor_block_number', ddl: 'ALTER TABLE task_runs ADD COLUMN delivery_discovery_anchor_block_number INTEGER' },
     { column: 'adoption_receipt_location', ddl: 'ALTER TABLE task_runs ADD COLUMN adoption_receipt_location TEXT' },
     { column: 'adoption_receipt_authors', ddl: 'ALTER TABLE task_runs ADD COLUMN adoption_receipt_authors TEXT' },
     { column: 'adoption_wait_started_at', ddl: 'ALTER TABLE task_runs ADD COLUMN adoption_wait_started_at INTEGER' },
@@ -400,6 +408,8 @@ function rowToTaskRun(row: RawRow): PersistedTaskRun {
     manifestCid: row.manifest_cid,
     deliveryTxHash: row.delivery_tx_hash,
     deliveryDigest: row.delivery_digest,
+    deliveryDiscoveryAnchorTxHash: row.delivery_discovery_anchor_tx_hash,
+    deliveryDiscoveryAnchorBlockNumber: row.delivery_discovery_anchor_block_number,
     adoptionReceiptLocation: parseJson<AdoptionReceiptLocation>(row.adoption_receipt_location),
     adoptionReceiptAuthors: parseJson<string[]>(row.adoption_receipt_authors),
     adoptionWaitStartedAt: row.adoption_wait_started_at,
@@ -548,6 +558,14 @@ export class TaskRunPersistence {
     if (patch.deliveryDigest !== undefined) {
       setClauses.push('delivery_digest = @deliveryDigest');
       params['deliveryDigest'] = patch.deliveryDigest;
+    }
+    if (patch.deliveryDiscoveryAnchorTxHash !== undefined) {
+      setClauses.push('delivery_discovery_anchor_tx_hash = @deliveryDiscoveryAnchorTxHash');
+      params['deliveryDiscoveryAnchorTxHash'] = patch.deliveryDiscoveryAnchorTxHash;
+    }
+    if (patch.deliveryDiscoveryAnchorBlockNumber !== undefined) {
+      setClauses.push('delivery_discovery_anchor_block_number = @deliveryDiscoveryAnchorBlockNumber');
+      params['deliveryDiscoveryAnchorBlockNumber'] = patch.deliveryDiscoveryAnchorBlockNumber;
     }
     if (patch.adoptionReceiptLocation !== undefined) {
       setClauses.push('adoption_receipt_location = @adoptionReceiptLocation');
@@ -801,6 +819,20 @@ export class TaskRunPersistence {
     this.db.prepare(
       'UPDATE task_runs SET delivery_tx_hash = ? WHERE request_id = ?',
     ).run(deliveryTxHash, requestId);
+  }
+
+  /** Journal and confirm the correctness-critical pre-adoption metadata anchor. */
+  setDeliveryDiscoveryAnchor(
+    requestId: string,
+    txHash: string | null,
+    blockNumber: number | null,
+  ): void {
+    this.db.prepare(`
+      UPDATE task_runs
+      SET delivery_discovery_anchor_tx_hash = ?,
+          delivery_discovery_anchor_block_number = ?
+      WHERE request_id = ? AND state = 'DELIVERING'
+    `).run(txHash, blockNumber, requestId);
   }
 
   /** Persist a receipt observation while the run remains AWAITING_ADOPTION. */

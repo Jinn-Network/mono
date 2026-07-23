@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Hex } from 'viem';
+import type { IdentityPublisher } from '../../../src/erc8004/index.js';
 import type { AutopilotAdoptionReceipt } from '@jinn-network/sdk/solvernets/jinn-repo';
 import { Store } from '../../../src/store/store.js';
 import {
@@ -53,6 +54,7 @@ const MANIFEST_CID = 'bafy-autopilot-result';
 const EVIDENCE_HASH = `0x${'22'.repeat(32)}`;
 const DELIVERY_DIGEST = `0x${'ab'.repeat(32)}`;
 const DELIVERY_TX_HASH = `0x${'cd'.repeat(32)}`;
+const ANCHOR_TX_HASH = `0x${'ad'.repeat(32)}` as Hex;
 const SDK_FIXTURE_DIRECTORY = new URL(
   '../../../../packages/sdk/test/fixtures/autopilot-session/',
   import.meta.url,
@@ -332,6 +334,7 @@ function makeObserver(...observations: AdoptionObservation[]): AdoptionReceiptOb
 function makeOptions(
   store: Store,
   adoptionReceiptObserver?: AdoptionReceiptObserver,
+  identityPublisher: IdentityPublisher = makeIdentityPublisher(),
 ): TaskEngineOptions {
   return {
     store,
@@ -348,7 +351,31 @@ function makeOptions(
       resolveExistingDelivery: vi.fn().mockResolvedValue({ state: 'absent' }),
     },
     adoptionReceiptObserver,
+    identityPublisher,
   };
+}
+
+function makeIdentityPublisher(overrides: Partial<IdentityPublisher> = {}): IdentityPublisher {
+  return {
+    agent: 7n,
+    registry: `0x${'66'.repeat(20)}`,
+    chainId: 84532,
+    publishContent: vi.fn().mockResolvedValue({
+      txHash: ANCHOR_TX_HASH,
+      blockNumber: 120,
+      gasUsed: 1n,
+      feeWei: 1n,
+    }),
+    publishContentV2: vi.fn(),
+    reconcileTransaction: vi.fn().mockResolvedValue({
+      status: 'confirmed',
+      txHash: ANCHOR_TX_HASH,
+      blockNumber: 120,
+      gasUsed: 1n,
+      feeWei: 1n,
+    }),
+    ...overrides,
+  } as unknown as IdentityPublisher;
 }
 
 class DirectDeliveryEngine extends TaskEngine {
@@ -378,7 +405,17 @@ describe('Autopilot adoption-aware delivery', () => {
 
   it('pauses a parsed Autopilot session after Mech delivery and persists the full wait payload', async () => {
     seedDelivering(persistence);
-    const engine = new TaskEngine(makeOptions(store, makeObserver()));
+    const identityPublisher = makeIdentityPublisher();
+    vi.mocked(identityPublisher.publishContent).mockImplementationOnce(async () => {
+      expect(persistence.getOrThrow(REQUEST_ID).state).toBe(TaskRunState.DELIVERING);
+      return {
+        txHash: ANCHOR_TX_HASH,
+        blockNumber: 120,
+        gasUsed: 1n,
+        feeWei: 1n,
+      };
+    });
+    const engine = new TaskEngine(makeOptions(store, makeObserver(), identityPublisher));
     const { callDeliverToMarketplace, claimDelivery } = await import('../../../src/adapters/mech/contracts.js');
 
     await engine.process(REQUEST_ID);
@@ -402,7 +439,66 @@ describe('Autopilot adoption-aware delivery', () => {
     expect(run.adoptionLastObservation).toBeNull();
     expect(run.adoptionLastError).toBeNull();
     expect(callDeliverToMarketplace).toHaveBeenCalledOnce();
+    expect(identityPublisher.publishContent).toHaveBeenCalledWith({
+      kind: 'envelope',
+      cid: MANIFEST_CID,
+      payload: expect.objectContaining({
+        version: 1,
+        tier: 0,
+        manifestHash: EVIDENCE_HASH,
+      }),
+      requireSuccessfulReceipt: true,
+      onBroadcast: expect.any(Function),
+    });
     expect(claimDelivery).not.toHaveBeenCalled();
+  });
+
+  it('does not begin adoption polling when the correctness-critical publisher is absent', async () => {
+    seedDelivering(persistence);
+    const engine = new TaskEngine({
+      ...makeOptions(store, makeObserver()),
+      identityPublisher: undefined,
+    });
+
+    await expect(engine.process(REQUEST_ID)).rejects.toThrow(
+      'delivery discovery anchor unavailable',
+    );
+    expect(persistence.getOrThrow(REQUEST_ID)).toMatchObject({
+      state: TaskRunState.DELIVERING,
+      adoptionWaitStartedAt: null,
+    });
+  });
+
+  it('persists the pre-claim anchor broadcast and reconciles it after a crash before adoption', async () => {
+    seedDelivering(persistence);
+    const firstPublisher = makeIdentityPublisher();
+    vi.mocked(firstPublisher.publishContent).mockImplementationOnce(async (args) => {
+      args.onBroadcast?.(ANCHOR_TX_HASH);
+      throw new Error('receipt temporarily unavailable');
+    });
+    const firstEngine = new TaskEngine(makeOptions(store, makeObserver(), firstPublisher));
+
+    await expect(firstEngine.process(REQUEST_ID)).rejects.toThrow(
+      'delivery discovery anchor unavailable',
+    );
+    expect(persistence.getOrThrow(REQUEST_ID)).toMatchObject({
+      state: TaskRunState.DELIVERING,
+      deliveryTxHash: DELIVERY_TX_HASH,
+      deliveryDiscoveryAnchorTxHash: ANCHOR_TX_HASH,
+      deliveryDiscoveryAnchorBlockNumber: null,
+    });
+
+    const retryPublisher = makeIdentityPublisher();
+    const retryEngine = new TaskEngine(makeOptions(store, makeObserver(), retryPublisher));
+    await retryEngine.process(REQUEST_ID);
+
+    expect(retryPublisher.reconcileTransaction).toHaveBeenCalledWith(ANCHOR_TX_HASH);
+    expect(retryPublisher.publishContent).not.toHaveBeenCalled();
+    expect(persistence.getOrThrow(REQUEST_ID)).toMatchObject({
+      state: TaskRunState.AWAITING_ADOPTION,
+      deliveryDiscoveryAnchorTxHash: ANCHOR_TX_HASH,
+      deliveryDiscoveryAnchorBlockNumber: 120,
+    });
   });
 
   it('keeps a pending receipt in flight without marking FAILED', async () => {
@@ -444,6 +540,36 @@ describe('Autopilot adoption-aware delivery', () => {
     });
     expect(run.adoptionAcceptedReceipt).toEqual(acceptedReceipt());
     expect(claimDelivery).not.toHaveBeenCalled();
+  });
+
+  it('republishes the anchor as committed only after the Router claim succeeds', async () => {
+    seedDelivering(persistence);
+    const identityPublisher = makeIdentityPublisher();
+    const engine = new TaskEngine(makeOptions(
+      store,
+      makeObserver({ state: 'accepted', receipt: acceptedReceipt() }),
+      identityPublisher,
+    ));
+
+    await engine.process(REQUEST_ID);
+    await engine.process(REQUEST_ID);
+    await engine.process(REQUEST_ID);
+
+    expect(persistence.getOrThrow(REQUEST_ID).state).toBe(TaskRunState.COMPLETE);
+    expect(identityPublisher.publishContent).toHaveBeenCalledTimes(2);
+    expect(identityPublisher.publishContent).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        payload: expect.objectContaining({ tier: 0 }),
+        requireSuccessfulReceipt: true,
+      }),
+    );
+    expect(identityPublisher.publishContent).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        payload: expect.objectContaining({ tier: 1 }),
+      }),
+    );
   });
 
   it('accepts the SDK golden mutation-complete prefix and adoption-added Solution fields', async () => {

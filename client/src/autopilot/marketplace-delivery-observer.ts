@@ -27,6 +27,12 @@ export interface AutopilotMarketplaceDeliveryObserverDeps {
   mechContractAddress: Address;
   /** Fetch the exact bytes stored for one IPFS CID. */
   fetchEnvelopeBytes(cid: string): Promise<Uint8Array>;
+  /** Resolve the publisher agent's Safe at the exact metadata anchor block. */
+  resolvePublisherSafe(
+    chainId: number,
+    publisherAgentId: string,
+    publishedAtBlock: bigint,
+  ): Promise<string>;
 }
 
 export interface AutopilotExpectedCorrelationExtension {
@@ -55,6 +61,8 @@ export interface AutopilotMarketplaceDeliveryExpectation {
   deliveryEnvelopeCid?: string;
   deliveryTransactionHash?: string;
   deliveryBlockNumber?: bigint;
+  /** Authoritative solution-attempt Safe, required when observing a verdict. */
+  solutionOperator?: string;
   expectedCorrelation?: AutopilotExpectedCorrelationExtension;
 }
 
@@ -73,12 +81,15 @@ export type AutopilotMarketplaceDeliveryPendingReason =
   | 'discovery-unavailable'
   | 'delivery-not-found'
   | 'rpc-unavailable'
+  | 'publisher-identity-unavailable'
   | 'envelope-unavailable';
 
 export type AutopilotMarketplaceDeliveryContradictionReason =
   | DiscoveryContradictionReason
   | 'invalid-expectation'
   | 'discovery-mismatch'
+  | 'publisher-mismatch'
+  | 'evaluator-is-solver'
   | 'stale-attempt'
   | 'stale-delivery'
   | 'task-mismatch'
@@ -178,6 +189,21 @@ function validateExpectation(
   ) {
     return contradiction('invalid-expectation', 'invalid chain, Task, CID, or block bounds');
   }
+  if (
+    expected.solutionOperator !== undefined
+    && !/^0x[0-9a-fA-F]{40}$/.test(expected.solutionOperator)
+  ) {
+    return contradiction(
+      'invalid-expectation',
+      'authoritative solution operator is invalid',
+    );
+  }
+  if (expected.role === 'verdict' && expected.solutionOperator === undefined) {
+    return contradiction(
+      'invalid-expectation',
+      'verdict observation requires the authoritative solution operator',
+    );
+  }
   if ((expected.attemptIndex === undefined) !== (expected.requestId === undefined)) {
     return contradiction(
       'invalid-expectation',
@@ -272,12 +298,51 @@ export function createAutopilotMarketplaceDeliveryObserver(
         lookup.role !== expected.role
         || lookup.task.taskId !== expected.taskId
         || lookup.attempt.taskId !== expected.taskId
+        || !/^0x[0-9a-fA-F]{40}$/.test(lookup.attempt.operator)
+        || !/^0x[0-9a-fA-F]{40}$/.test(lookup.solutionOperator)
         || !sameHex(lookup.envelope.requestId, lookup.attempt.requestId)
         || lookup.task.createdAtBlock > lookup.attempt.createdAtBlock
       ) {
         return contradiction(
           'discovery-mismatch',
           'exact discovery rows do not form the expected Task/attempt/envelope join',
+        );
+      }
+      if (
+        !sameHex(
+          lookup.solutionOperator,
+          expected.solutionOperator ?? lookup.attempt.operator,
+        )
+      ) {
+        return contradiction(
+          'discovery-mismatch',
+          'exact discovery solution operator differs from the authoritative attempt',
+        );
+      }
+      if (
+        expected.role === 'verdict'
+        && sameHex(lookup.attempt.operator, lookup.solutionOperator)
+      ) {
+        return contradiction(
+          'evaluator-is-solver',
+          'verdict evaluator must be distinct from the solution operator',
+        );
+      }
+
+      let publisherSafe: string;
+      try {
+        publisherSafe = await deps.resolvePublisherSafe(
+          expected.chainId,
+          lookup.envelope.publisherAgentId,
+          BigInt(lookup.envelope.enrichedAtBlock),
+        );
+      } catch (error) {
+        return pending('publisher-identity-unavailable', errorDetail(error));
+      }
+      if (!sameHex(publisherSafe, lookup.attempt.operator)) {
+        return contradiction(
+          'publisher-mismatch',
+          'publisher agent historical Safe differs from the delivery operator',
         );
       }
 

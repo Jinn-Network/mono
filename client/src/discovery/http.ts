@@ -168,6 +168,48 @@ query ExactAutopilotEnvelopeMetadata($requestId: String!, $chainId: Int!) {
 }
 `;
 
+const EXACT_AUTOPILOT_VERDICTS_QUERY = `
+query ExactAutopilotVerdicts($taskId: String!, $chainId: Int!) {
+  verdicts(
+    where: { taskId: $taskId, chainId: $chainId },
+    limit: 2
+  ) {
+    items {
+      taskId
+      chainId
+      attemptIndex
+      verdictIndex
+      requestId
+      evaluator
+      verdictCode
+      createdAtBlock
+    }
+  }
+}
+`;
+
+const EXACT_AUTOPILOT_VERDICT_ENVELOPES_QUERY = `
+query ExactAutopilotVerdictEnvelopeMetadata($requestId: String!, $chainId: Int!) {
+  verdictEnvelopeMetas(
+    where: { requestId: $requestId, chainId: $chainId },
+    limit: 2
+  ) {
+    items {
+      taskId
+      chainId
+      attemptIndex
+      verdictIndex
+      requestId
+      evaluator
+      manifestCid
+      publisherAgentId
+      manifestHash
+      enrichedAtBlock
+    }
+  }
+}
+`;
+
 /** Page cap for the task-post-rate scan (1000 rows/page → 50k recent tasks). */
 const MAX_TASK_POST_PAGES = 50;
 
@@ -610,6 +652,38 @@ interface ExactAutopilotEnvelopesPage {
   };
 }
 
+interface ExactAutopilotVerdictsPage {
+  verdicts: {
+    items: Array<{
+      taskId: string;
+      chainId: number;
+      attemptIndex: number;
+      verdictIndex: number;
+      requestId: string;
+      evaluator: string;
+      verdictCode: number;
+      createdAtBlock: string | number;
+    }>;
+  };
+}
+
+interface ExactAutopilotVerdictEnvelopesPage {
+  verdictEnvelopeMetas: {
+    items: Array<{
+      taskId: string;
+      chainId: number;
+      attemptIndex: number;
+      verdictIndex: number;
+      requestId: string;
+      evaluator: string;
+      manifestCid: string;
+      publisherAgentId: string;
+      manifestHash: string;
+      enrichedAtBlock: string | number;
+    }>;
+  };
+}
+
 // ── Plug-in publication queries (attd) ───────────────────────────────────────
 
 const LIST_PLUGIN_PUBLICATIONS_QUERY = `
@@ -946,7 +1020,6 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
       role: args.role,
     });
 
-    if (args.role === 'verdict') return pending('role-not-supported');
     if (
       !Number.isSafeInteger(args.chainId)
       || args.chainId < 0
@@ -997,30 +1070,101 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
       || !isBytes32(attemptRow.requestId)
       || !isAddress(attemptRow.operator)
       || attemptCreatedAtBlock === undefined
+      || attemptCreatedAtBlock < taskCreatedAtBlock
     ) {
       return contradiction('inconsistent-indexer-data');
     }
 
-    const envelopeData = await postGql<ExactAutopilotEnvelopesPage>(
-      gqlUrl,
-      fetchImpl,
-      EXACT_AUTOPILOT_ENVELOPES_QUERY,
-      { requestId: attemptRow.requestId, chainId: args.chainId },
-    );
-    const envelopeRows = envelopeData.attemptEnvelopeMetas?.items ?? [];
+    let deliveryRequestId = attemptRow.requestId;
+    let deliveryOperator = attemptRow.operator;
+    let deliveryCreatedAtBlock = attemptCreatedAtBlock;
+    let verdictJoin: {
+      attemptIndex: number;
+      verdictIndex: number;
+      evaluator: string;
+    } | null = null;
+
+    if (args.role === 'verdict') {
+      const verdictData = await postGql<ExactAutopilotVerdictsPage>(
+        gqlUrl,
+        fetchImpl,
+        EXACT_AUTOPILOT_VERDICTS_QUERY,
+        { taskId: args.taskId, chainId: args.chainId },
+      );
+      const verdictRows = verdictData.verdicts?.items ?? [];
+      if (verdictRows.length === 0) return pending('verdict-not-indexed');
+      if (verdictRows.length !== 1) return contradiction('multiple-verdicts');
+      const verdictRow = verdictRows[0];
+      const verdictCreatedAtBlock = parseExactBlock(verdictRow.createdAtBlock);
+      if (
+        verdictRow.taskId !== args.taskId
+        || verdictRow.chainId !== args.chainId
+        || verdictRow.attemptIndex !== attemptRow.attemptIndex
+        || !Number.isSafeInteger(verdictRow.verdictIndex)
+        || verdictRow.verdictIndex < 0
+        || !isBytes32(verdictRow.requestId)
+        || !isAddress(verdictRow.evaluator)
+        || !Number.isSafeInteger(verdictRow.verdictCode)
+        || verdictCreatedAtBlock === undefined
+        || verdictCreatedAtBlock < attemptCreatedAtBlock
+      ) {
+        return contradiction('inconsistent-indexer-data');
+      }
+      deliveryRequestId = verdictRow.requestId;
+      deliveryOperator = verdictRow.evaluator;
+      deliveryCreatedAtBlock = verdictCreatedAtBlock;
+      verdictJoin = {
+        attemptIndex: verdictRow.attemptIndex,
+        verdictIndex: verdictRow.verdictIndex,
+        evaluator: verdictRow.evaluator,
+      };
+    }
+
+    const envelopeData = args.role === 'verdict'
+      ? await postGql<ExactAutopilotVerdictEnvelopesPage>(
+          gqlUrl,
+          fetchImpl,
+          EXACT_AUTOPILOT_VERDICT_ENVELOPES_QUERY,
+          { requestId: deliveryRequestId, chainId: args.chainId },
+        )
+      : await postGql<ExactAutopilotEnvelopesPage>(
+          gqlUrl,
+          fetchImpl,
+          EXACT_AUTOPILOT_ENVELOPES_QUERY,
+          { requestId: deliveryRequestId, chainId: args.chainId },
+        );
+    const envelopeRows = args.role === 'verdict'
+      ? (envelopeData as ExactAutopilotVerdictEnvelopesPage).verdictEnvelopeMetas?.items ?? []
+      : (envelopeData as ExactAutopilotEnvelopesPage).attemptEnvelopeMetas?.items ?? [];
     if (envelopeRows.length === 0) return pending('envelope-not-indexed');
     if (envelopeRows.length !== 1) return contradiction('multiple-envelopes');
     const envelopeRow = envelopeRows[0];
     const enrichedAtBlock = parseExactBlock(envelopeRow.enrichedAtBlock);
     if (
       !isBytes32(envelopeRow.requestId)
-      || envelopeRow.requestId.toLowerCase() !== attemptRow.requestId.toLowerCase()
+      || envelopeRow.requestId.toLowerCase() !== deliveryRequestId.toLowerCase()
       || envelopeRow.chainId !== args.chainId
       || typeof envelopeRow.manifestCid !== 'string'
       || envelopeRow.manifestCid.length === 0
       || !/^(0|[1-9][0-9]*)$/.test(envelopeRow.publisherAgentId)
       || !isBytes32(envelopeRow.manifestHash)
       || enrichedAtBlock === undefined
+      || enrichedAtBlock < deliveryCreatedAtBlock
+    ) {
+      return contradiction('inconsistent-indexer-data');
+    }
+    if (
+      verdictJoin !== null
+      && (() => {
+        const row = envelopeRow as ExactAutopilotVerdictEnvelopesPage[
+          'verdictEnvelopeMetas'
+        ]['items'][number];
+        return row.taskId !== args.taskId
+          || row.attemptIndex !== verdictJoin.attemptIndex
+          || row.verdictIndex !== verdictJoin.verdictIndex
+          || !isAddress(row.evaluator)
+          || row.evaluator.toLowerCase() !== verdictJoin.evaluator.toLowerCase();
+      })()
     ) {
       return contradiction('inconsistent-indexer-data');
     }
@@ -1037,10 +1181,11 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
       attempt: {
         taskId: attemptRow.taskId,
         attemptIndex: attemptRow.attemptIndex,
-        requestId: attemptRow.requestId,
-        operator: attemptRow.operator,
-        createdAtBlock: attemptCreatedAtBlock,
+        requestId: deliveryRequestId,
+        operator: deliveryOperator,
+        createdAtBlock: deliveryCreatedAtBlock,
       },
+      solutionOperator: attemptRow.operator,
       envelope: {
         requestId: envelopeRow.requestId,
         manifestCid: envelopeRow.manifestCid,
