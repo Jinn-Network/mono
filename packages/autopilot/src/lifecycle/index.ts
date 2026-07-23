@@ -42,3 +42,4 @@ export * from './board-archive.js';
 export * from './board-archive-executor-production.js';
 export * from './board-painter.js';
 export * from './marketplace-adoption-receipt.js';
+export * from './marketplace-review-adoption.js';
