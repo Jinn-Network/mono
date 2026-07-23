@@ -16,6 +16,19 @@ export { ClaudeRunner } from './runner/claude.js';
 export { Daemon, type DaemonConfig } from './daemon/daemon.js';
 export { DeliveryWatcherLoop } from './daemon/delivery-watcher.js';
 
+// Autopilot marketplace read-side verification
+export {
+  createAutopilotMarketplaceDeliveryObserver,
+  type AutopilotExpectedCorrelationExtension,
+  type AutopilotMarketplaceDeliveryContradictionReason,
+  type AutopilotMarketplaceDeliveryExpectation,
+  type AutopilotMarketplaceDeliveryObservation,
+  type AutopilotMarketplaceDeliveryObserver,
+  type AutopilotMarketplaceDeliveryObserverDeps,
+  type AutopilotMarketplaceDeliveryPendingReason,
+  type VerifiedAutopilotMarketplaceDelivery,
+} from './autopilot/marketplace-delivery-observer.js';
+
 // Store
 export { Store } from './store/store.js';
 
