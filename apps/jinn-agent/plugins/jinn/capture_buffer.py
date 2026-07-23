@@ -467,9 +467,57 @@ def assemble_episode(
 ) -> Optional[Dict[str, Any]]:
     """Pop the buffer and return the EpisodeV1 dict (None if empty)."""
     buf = _pop(task_id, session_id, lifecycle_token)
-    if buf is None:
+    return assemble_claimed_episode(
+        buf,
+        completed,
+        interrupted,
+        publish_consented,
+    )
+
+
+def claim_episode_inputs(
+    task_id: str,
+    session_id: str,
+    *,
+    lifecycle_token: object | None = None,
+) -> Optional[Dict[str, Any]]:
+    """Detach one exact-generation buffer for an admitted completion."""
+    return _pop(
+        task_id,
+        session_id,
+        lifecycle_token,
+    )
+
+
+def assemble_claimed_episode(
+    claimed: Optional[Dict[str, Any]],
+    completed: bool,
+    interrupted: bool,
+    publish_consented: bool = False,
+    *,
+    skills_loadout: Optional[List[str]] = None,
+    input_tokens: Optional[int] = None,
+    output_tokens: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
+    """Build an episode from inputs detached at completion admission."""
+    if claimed is None:
         return None
-    return _build_episode(buf, completed, interrupted, publish_consented)
+    if skills_loadout is not None:
+        claimed.setdefault(
+            "skillsLoadout",
+            list(skills_loadout),
+        )
+    if input_tokens or output_tokens:
+        claimed["tokens"] = {
+            "input": int(input_tokens or 0),
+            "output": int(output_tokens or 0),
+        }
+    return _build_episode(
+        claimed,
+        completed,
+        interrupted,
+        publish_consented,
+    )
 
 
 def assemble_both(

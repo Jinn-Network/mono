@@ -87,6 +87,10 @@ _internal_session_parent_tokens: Dict[
     tuple[str, int],
     _SessionLifecycleToken,
 ] = {}
+_internal_session_lifecycle_tokens: Dict[
+    tuple[str, int],
+    _SessionLifecycleToken,
+] = {}
 
 
 def _park_contribution_publication() -> None:
@@ -123,6 +127,7 @@ def _reset_session_state() -> None:
     with _internal_session_lock:
         _internal_sessions.clear()
         _internal_session_parent_tokens.clear()
+        _internal_session_lifecycle_tokens.clear()
     _foreground_parent_lifecycle.set(None)
     for session_id, lifecycle_token in closed_lifecycles:
         buf.discard_session(
@@ -299,9 +304,11 @@ class _CompletionFence:
 
 @dataclass(frozen=True)
 class _CompletionLease:
-    """One admitted completion path that finalization must await."""
+    """One admitted completion and its detached generation-owned inputs."""
 
     fence: _CompletionFence
+    state: Dict[str, Any]
+    episode_inputs: Optional[Dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -368,6 +375,9 @@ def _session_identity(
             ):
                 lifecycle_token = _SessionLifecycleToken()
                 _session_lifecycle_tokens[logical] = lifecycle_token
+            _internal_session_lifecycle_tokens[key] = (
+                lifecycle_token
+            )
     return (
         logical,
         "host-internal",
@@ -400,6 +410,7 @@ def _release_internal_session(
             return
         _internal_sessions.pop(key, None)
         _internal_session_parent_tokens.pop(key, None)
+        _internal_session_lifecycle_tokens.pop(key, None)
 
 
 def _release_all_internal_sessions(
@@ -426,20 +437,30 @@ def _release_all_internal_sessions(
         ]
         for key in keys:
             _internal_session_parent_tokens.pop(key, None)
+            _internal_session_lifecycle_tokens.pop(key, None)
     return logical_session_ids
 
 
 def _internal_sessions_for_parent(
     parent_session_id: str,
     parent_token: Optional[_SessionLifecycleToken],
-) -> list[str]:
+) -> list[tuple[str, _SessionLifecycleToken]]:
     """Snapshot exact-generation child ownership without releasing it."""
     if parent_token is None:
         return []
     with _internal_session_lock:
         return [
-            logical_session_id
+            (
+                logical_session_id,
+                child_token,
+            )
             for key, logical_session_id in _internal_sessions.items()
+            if isinstance(
+                child_token := (
+                    _internal_session_lifecycle_tokens.get(key)
+                ),
+                _SessionLifecycleToken,
+            )
             if (
                 key[0] == parent_session_id
                 and (
@@ -596,16 +617,36 @@ def _session_lifecycle_is_current(
 
 def _acquire_completion_lease(
     fence: _CompletionFence,
+    *,
+    task_id: str,
 ) -> Optional[_CompletionLease]:
-    """Admit completion only while its exact lifecycle generation is current."""
+    """Admit completion and atomically detach its generation-owned inputs."""
     key = fence.logical_session_id or "default"
     with _session_state_lock:
         if _session_lifecycle_tokens.get(key) is not fence.lifecycle_token:
             return None
+        _session_state_tokens.pop(key, None)
+        state = _session_states.pop(
+            key,
+            {
+                "snapshot": None,
+                "activity": _empty_activity(),
+                "intermediateFailureDiffs": [],
+            },
+        )
+        episode_inputs = buf.claim_episode_inputs(
+            task_id,
+            key,
+            lifecycle_token=fence.lifecycle_token,
+        )
         _completion_leases[fence.lifecycle_token] = (
             _completion_leases.get(fence.lifecycle_token, 0) + 1
         )
-        return _CompletionLease(fence=fence)
+        return _CompletionLease(
+            fence=fence,
+            state=state,
+            episode_inputs=episode_inputs,
+        )
 
 
 def _release_completion_lease(lease: _CompletionLease) -> None:
@@ -1057,7 +1098,7 @@ def _on_session_finalize(session_id: str = "", **_: Any) -> None:
     """Invalidate one host generation and await its admitted completions."""
     parent_session_id = session_id or "default"
     parent_token = _close_session_lifecycle(parent_session_id)
-    internal_session_ids = _internal_sessions_for_parent(
+    internal_lifecycles = _internal_sessions_for_parent(
         parent_session_id,
         parent_token,
     )
@@ -1067,13 +1108,17 @@ def _on_session_finalize(session_id: str = "", **_: Any) -> None:
             parent_token,
         )
     ]
-    closed_lifecycles.extend(
-        (
+    for internal_session_id, internal_token in internal_lifecycles:
+        _close_session_lifecycle(
             internal_session_id,
-            _close_session_lifecycle(internal_session_id),
+            expected_token=internal_token,
         )
-        for internal_session_id in internal_session_ids
-    )
+        closed_lifecycles.append(
+            (
+                internal_session_id,
+                internal_token,
+            )
+        )
     for owned_session_id, lifecycle_token in closed_lifecycles:
         buf.discard_session(
             owned_session_id,
@@ -1391,6 +1436,7 @@ def _episode_test_runs(episode: Dict[str, Any]) -> list[Dict[str, Any]]:
 
 def _complete_session_end(
     owner: _TurnLifecycleOwner,
+    completion_lease: _CompletionLease,
     session_id: str = "",
     task_id: str = "",
     turn_id: str = "",
@@ -1424,44 +1470,22 @@ def _complete_session_end(
     # Local capture is unconditional. Stage 2 keeps the contribution substrate
     # local-only even when a Stage 1 consent file still says shareConsent=true.
     publish_enabled = False
-    # Record the skills loadout + token fallback (host forward, mono #1662) —
-    # local writes, so unconditional per mono#1714, before the popping assembly.
-    buf.record_environment(
-        task_id,
-        logical_session_id,
-        skills_loadout or [],
-        lifecycle_token=lifecycle_token,
-    )
-    # See _on_post_llm_call — zero/no usage omits cost.tokens (AC2, mono #1662).
-    if input_tokens or output_tokens:
-        buf.record_tokens(
-            task_id,
-            logical_session_id,
-            input_tokens or 0,
-            output_tokens or 0,
-            lifecycle_token=lifecycle_token,
-        )
 
     # The canonical EpisodeV1 is the one local-learning and contribution source.
     # C7 retired the duplicate CapturedTask tee, so session end pops exactly the
     # episode shape and never writes a second trajectory file.
-    episode = buf.assemble_episode(
-        task_id,
-        logical_session_id,
+    episode = buf.assemble_claimed_episode(
+        completion_lease.episode_inputs,
         completed,
         interrupted,
         publish_consented=publish_enabled,
-        lifecycle_token=lifecycle_token,
+        skills_loadout=skills_loadout or [],
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
     )
+    state = completion_lease.state
 
     if episode is None:
-        state = _pop_state(
-            logical_session_id,
-            close_lifecycle=False,
-            expected_token=lifecycle_token,
-        )
-        if state is None:
-            return
         _emit_completion(
             summary=None,
             activity=state.get("activity") or {},
@@ -1472,13 +1496,6 @@ def _complete_session_end(
         )
         return
 
-    state = _pop_state(
-        logical_session_id,
-        close_lifecycle=False,
-        expected_token=lifecycle_token,
-    )
-    if state is None:
-        return
     snapshot = state.get("snapshot")
     try:
         accepted = session_bridge.accepted_diff(snapshot) if snapshot is not None else ""
@@ -1593,7 +1610,8 @@ def _on_session_end(
             logical_session_id=owner.logical_session_id,
             lifecycle_token=owner.lifecycle_token,
             parent_session_id=parent_session_id,
-        )
+        ),
+        task_id=task_id,
     )
     if completion_lease is None:
         if is_internal:
@@ -1606,6 +1624,7 @@ def _on_session_end(
     try:
         _complete_session_end(
             owner=owner,
+            completion_lease=completion_lease,
             session_id=session_id,
             task_id=task_id,
             turn_id=turn_id,

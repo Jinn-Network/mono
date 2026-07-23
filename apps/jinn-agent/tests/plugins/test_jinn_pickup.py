@@ -2048,6 +2048,192 @@ def test_admitted_post_pop_session_end_cannot_contaminate_reopen(
         jinn._runner = None
 
 
+def test_admitted_completion_keeps_old_inputs_through_finalize_and_reopen(
+    monkeypatch,
+):
+    session_id = "admitted-inputs-same-id-reopen"
+    payoff_started = threading.Event()
+    release_payoff = threading.Event()
+    lifecycle_invalidated = threading.Event()
+    finalize_returned = threading.Event()
+    delegated_episodes = []
+    rendered_completions = []
+    completion_order = []
+    worker_errors = []
+    original_close = jinn._close_session_lifecycle
+
+    def blocking_payoff_lines(snapshot):
+        assert jinn._completion_leases.get(old_lifecycle) == 1
+        payoff_started.set()
+        assert release_payoff.wait(timeout=2)
+        return []
+
+    def observed_close(closing_session_id, **kwargs):
+        lifecycle_token = original_close(
+            closing_session_id,
+            **kwargs,
+        )
+        if closing_session_id == session_id:
+            lifecycle_invalidated.set()
+        return lifecycle_token
+
+    def persist_episode(episode, **kwargs):
+        delegated_episodes.append(episode)
+        completion_order.append("old_episode_persisted")
+        return {
+            "summary": None,
+            "contribution": None,
+        }
+
+    def render_completion(**kwargs):
+        rendered_completions.append(kwargs)
+        completion_order.append("old_completion_rendered")
+        return "old completion rendered"
+
+    monkeypatch.setattr(
+        jinn.distill,
+        "payoff_lines",
+        blocking_payoff_lines,
+    )
+    monkeypatch.setattr(
+        jinn,
+        "_close_session_lifecycle",
+        observed_close,
+    )
+    monkeypatch.setattr(
+        jinn,
+        "_delegate_session_end",
+        persist_episode,
+    )
+    monkeypatch.setattr(
+        jinn.session_view,
+        "render_complete",
+        render_completion,
+    )
+    monkeypatch.setattr(jinn, "_user_line", lambda line: None)
+
+    jinn._runner = PickupRunner()
+    end_worker = None
+    finalizer = None
+    try:
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="old-task",
+            turn_id="old-turn",
+            user_message="old user turn",
+            is_first_turn=True,
+        )
+        jinn._on_post_llm_call(
+            session_id=session_id,
+            task_id="old-task",
+            turn_id="old-turn",
+            assistant_response="old assistant turn",
+        )
+        old_lifecycle = jinn._session_lifecycle_tokens[session_id]
+        old_state = jinn._session_states[session_id]
+
+        def run_old_end():
+            try:
+                jinn._on_session_end(
+                    session_id=session_id,
+                    task_id="old-task",
+                    turn_id="old-turn",
+                    completed=True,
+                    interrupted=False,
+                )
+            except BaseException as exc:
+                worker_errors.append(exc)
+
+        def finalize_old():
+            try:
+                jinn._on_session_finalize(
+                    session_id=session_id,
+                    reason="old_session_complete",
+                )
+                completion_order.append("old_finalize_returned")
+            except BaseException as exc:
+                worker_errors.append(exc)
+            finally:
+                finalize_returned.set()
+
+        end_worker = threading.Thread(
+            name="admitted-input-session-end",
+            target=run_old_end,
+        )
+        finalizer = threading.Thread(
+            name="admitted-input-finalizer",
+            target=finalize_old,
+        )
+        end_worker.start()
+        assert payoff_started.wait(timeout=2)
+
+        finalizer.start()
+        assert lifecycle_invalidated.wait(timeout=2)
+        assert not finalize_returned.wait(timeout=0.2)
+
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="fresh-task",
+            turn_id="fresh-turn",
+            user_message="fresh user turn",
+            is_first_turn=True,
+        )
+        fresh_lifecycle = jinn._session_lifecycle_tokens[session_id]
+        fresh_state = jinn._session_states[session_id]
+        assert fresh_lifecycle is not old_lifecycle
+        assert fresh_state is not old_state
+
+        release_payoff.set()
+        end_worker.join(timeout=2)
+        finalizer.join(timeout=2)
+    finally:
+        release_payoff.set()
+        if end_worker is not None:
+            end_worker.join(timeout=2)
+        if finalizer is not None:
+            finalizer.join(timeout=2)
+        jinn._runner = None
+
+    assert not end_worker.is_alive()
+    assert not finalizer.is_alive()
+    assert worker_errors == []
+    assert len(delegated_episodes) == 1
+    old_turn_texts = [
+        span["attributes"]["turn.text"]
+        for span in delegated_episodes[0]["trajectory"]
+        if span["kind"] == "jinn.agent_turn"
+    ]
+    assert old_turn_texts == [
+        "old user turn",
+        "old assistant turn",
+    ]
+    assert len(rendered_completions) == 1
+    assert completion_order == [
+        "old_episode_persisted",
+        "old_completion_rendered",
+        "old_finalize_returned",
+    ]
+    assert (
+        jinn._session_lifecycle_tokens[session_id]
+        is fresh_lifecycle
+    )
+    assert jinn._session_states[session_id] is fresh_state
+    assert jinn.buf.has_capture(
+        "fresh-task",
+        session_id,
+        lifecycle_token=fresh_lifecycle,
+    )
+    assert (
+        session_id,
+        old_lifecycle,
+    ) not in jinn.buf._buffers
+    assert old_lifecycle not in jinn._completion_leases
+    assert (
+        session_id,
+        "fresh-turn",
+    ) in jinn._session_turn_lifecycle_owners
+
+
 def test_canonical_delegate_completion_lease_blocks_finalize(
     monkeypatch,
 ):
@@ -2272,6 +2458,203 @@ def test_internal_completion_retains_parent_child_ownership_until_delegate_finis
         "finalize_returned",
     ]
     assert logical_session_id not in jinn._internal_sessions.values()
+
+
+def test_parent_finalize_waits_for_child_token_release_cleanup_gap(
+    monkeypatch,
+):
+    parent_session_id = "child-release-gap-parent"
+    child_cleanup_started = threading.Event()
+    release_child_cleanup = threading.Event()
+    child_cleanup_finished = threading.Event()
+    finalize_returned = threading.Event()
+    logical_session_ids = []
+    child_lifecycle_tokens = []
+    completion_order = []
+    worker_errors = []
+    background_review = [False]
+    original_discard_session = jinn.buf.discard_session
+
+    monkeypatch.setattr(
+        jinn,
+        "is_background_review",
+        lambda: background_review[0],
+    )
+
+    def persist_episode(episode, **kwargs):
+        return {
+            "summary": None,
+            "contribution": None,
+        }
+
+    def blocking_child_discard(
+        session_id,
+        *,
+        lifecycle_token=jinn.buf._ALL_LIFECYCLES,
+        include_legacy=False,
+    ):
+        if (
+            threading.current_thread().name
+            == "child-release-gap-session-end"
+            and logical_session_ids
+            and session_id == logical_session_ids[0]
+            and not child_cleanup_started.is_set()
+        ):
+            assert (
+                jinn._current_session_lifecycle_token(session_id)
+                is None
+            )
+            assert lifecycle_token is child_lifecycle_tokens[0]
+            child_cleanup_started.set()
+            assert release_child_cleanup.wait(timeout=2)
+            result = original_discard_session(
+                session_id,
+                lifecycle_token=lifecycle_token,
+                include_legacy=include_legacy,
+            )
+            completion_order.append("child_cleanup_finished")
+            child_cleanup_finished.set()
+            return result
+        return original_discard_session(
+            session_id,
+            lifecycle_token=lifecycle_token,
+            include_legacy=include_legacy,
+        )
+
+    monkeypatch.setattr(
+        jinn,
+        "_delegate_session_end",
+        persist_episode,
+    )
+    monkeypatch.setattr(
+        jinn.buf,
+        "discard_session",
+        blocking_child_discard,
+    )
+    monkeypatch.setattr(jinn, "_user_line", lambda line: None)
+
+    jinn._runner = PickupRunner()
+    jinn._on_pre_llm_call(
+        session_id=parent_session_id,
+        task_id="parent-task",
+        turn_id="parent-turn",
+        user_message="parent turn",
+        is_first_turn=True,
+    )
+
+    def run_internal_end():
+        try:
+            jinn._on_pre_llm_call(
+                session_id=parent_session_id,
+                task_id="child-task",
+                turn_id="child-turn",
+                user_message="child user turn",
+                is_first_turn=True,
+            )
+            logical_session_id = next(
+                logical
+                for (parent, _thread_id), logical
+                in jinn._internal_sessions.items()
+                if parent == parent_session_id
+            )
+            logical_session_ids.append(logical_session_id)
+            child_lifecycle_tokens.append(
+                jinn._current_session_lifecycle_token(
+                    logical_session_id
+                )
+            )
+            jinn._on_post_llm_call(
+                session_id=parent_session_id,
+                task_id="child-task",
+                turn_id="child-turn",
+                assistant_response="child assistant turn",
+            )
+            jinn._on_session_end(
+                session_id=parent_session_id,
+                task_id="child-task",
+                turn_id="child-turn",
+                completed=True,
+                interrupted=False,
+            )
+        except BaseException as exc:
+            worker_errors.append(exc)
+
+    def finalize_parent():
+        try:
+            jinn._on_session_finalize(
+                session_id=parent_session_id,
+                reason="parent_complete",
+            )
+            completion_order.append("parent_finalize_returned")
+        except BaseException as exc:
+            worker_errors.append(exc)
+        finally:
+            finalize_returned.set()
+
+    background_review[0] = True
+    end_worker = threading.Thread(
+        name="child-release-gap-session-end",
+        target=propagate_context_to_thread(run_internal_end),
+    )
+    finalizer = threading.Thread(
+        name="child-release-gap-finalizer",
+        target=finalize_parent,
+    )
+    try:
+        end_worker.start()
+        assert child_cleanup_started.wait(timeout=2)
+        background_review[0] = False
+        assert len(logical_session_ids) == 1
+        logical_session_id = logical_session_ids[0]
+        child_lifecycle_token = child_lifecycle_tokens[0]
+        assert child_lifecycle_token is not None
+        assert (
+            jinn._completion_leases.get(
+                child_lifecycle_token
+            )
+            == 1
+        )
+        assert logical_session_id in jinn._internal_sessions.values()
+
+        finalizer.start()
+        assert not finalize_returned.wait(timeout=0.2)
+        assert logical_session_id in jinn._internal_sessions.values()
+        assert not child_cleanup_finished.is_set()
+
+        release_child_cleanup.set()
+        end_worker.join(timeout=2)
+        finalizer.join(timeout=2)
+    finally:
+        background_review[0] = False
+        release_child_cleanup.set()
+        end_worker.join(timeout=2)
+        if finalizer.ident is not None:
+            finalizer.join(timeout=2)
+        jinn._runner = None
+
+    assert not end_worker.is_alive()
+    assert not finalizer.is_alive()
+    assert worker_errors == []
+    assert completion_order == [
+        "child_cleanup_finished",
+        "parent_finalize_returned",
+    ]
+    assert child_lifecycle_token not in jinn._completion_leases
+    assert logical_session_id not in jinn._internal_sessions.values()
+    assert not any(
+        parent == parent_session_id
+        for parent, _thread_id
+        in jinn._internal_session_parent_tokens
+    )
+    assert not any(
+        parent == parent_session_id
+        for parent, _thread_id
+        in jinn._internal_session_lifecycle_tokens
+    )
+    assert (
+        logical_session_id,
+        child_lifecycle_token,
+    ) not in jinn.buf._buffers
 
 
 def test_no_episode_completion_lease_blocks_finalize_through_reopen(
