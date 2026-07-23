@@ -41,6 +41,8 @@ export interface TestnetAutoContext {
   safeAddress?: `0x${string}`;
   /** Agent EOA private key — threaded into auto-gen configs so generators can sign SignedTaskV1. */
   agentPrivateKey?: `0x${string}`;
+  /** Resolved swe-rebench-v2 state dir from loadConfig (optional; unused call graph today). */
+  sweRebenchV2StateDir?: string;
 }
 
 export interface SolverTypeDefinition<GenConfig = unknown> {

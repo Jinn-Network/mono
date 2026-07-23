@@ -90,6 +90,8 @@ export interface HarnessEnv {
    * don't need IPFS leave this unused.
    */
   ipfsRegistryUrl?: string;
+  /** From `config.sweRebenchV2StateDir` — swe-rebench-v2 evaluator substrate. */
+  sweRebenchV2StateDir?: string;
   /**
    * Pre-loaded external (operator-supplied) Harnesses — produced by
    * `loadExternalImpl()` in `client/src/harnesses/external-impls/`. Appended to
@@ -219,6 +221,7 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
         ? `${env.implStateDirRoot}/swe-rebench-v2-evaluator`
         : undefined,
       ipfsRegistryUrl: env.ipfsRegistryUrl,
+      ...(env.sweRebenchV2StateDir ? { stateDir: env.sweRebenchV2StateDir } : {}),
     }),
   );
   out.push(
