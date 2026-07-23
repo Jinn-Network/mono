@@ -37,10 +37,28 @@ export function createLocalEpisodeCorpusAdapter(
   deps: LocalEpisodeCorpusAdapterDeps,
 ): CorpusPort {
   let snapshot: Promise<PortResult<EpisodeV1[]>> | undefined;
+  let snapshotMultiplicity: Promise<Map<string, number>> | undefined;
   const episodes = (): Promise<PortResult<EpisodeV1[]>> => {
     snapshot ??= deps.evidence.list();
     return snapshot;
   };
+  const multiplicity = (): Promise<Map<string, number>> => {
+    snapshotMultiplicity ??= episodes().then((result) => {
+      const counts = new Map<string, number>();
+      const listed = result.status === 'ok'
+        ? result.value
+        : result.status === 'degraded' ? result.value ?? [] : [];
+      for (const episode of listed) {
+        counts.set(episode.episodeId, (counts.get(episode.episodeId) ?? 0) + 1);
+      }
+      return counts;
+    });
+    return snapshotMultiplicity;
+  };
+
+  function duplicateReason(episodeIds: readonly string[]): string {
+    return `local corpus: duplicate episode ids: ${episodeIds.join(', ')}`;
+  }
 
   function toHit(episode: EpisodeV1): KnowledgeHit {
     const publishedAt = Date.parse(episode.session.capturedAt);
@@ -63,29 +81,40 @@ export function createLocalEpisodeCorpusAdapter(
     if (result.status === 'unavailable') {
       return unavailable(`local corpus: ${result.reason}`);
     }
+    const duplicateEpisodeIds = [...(await multiplicity()).entries()]
+      .filter(([, count]) => count > 1)
+      .map(([episodeId]) => episodeId)
+      .sort();
     const needle = query.toLocaleLowerCase();
     const hits = (result.status === 'ok' ? result.value : result.value ?? [])
+      .filter((episode) => !duplicateEpisodeIds.includes(episode.episodeId))
       .filter((episode) => [
         episode.task.summary,
         ...episode.task.distributionTags,
       ].some((value) => value.toLocaleLowerCase().includes(needle)))
       .map(toHit);
-    return result.status === 'degraded'
-      ? degraded(`local corpus: ${result.reason}`, hits)
-      : ok(hits);
+    const reasons = [
+      ...(result.status === 'degraded' ? [`local corpus: ${result.reason}`] : []),
+      ...(duplicateEpisodeIds.length > 0 ? [duplicateReason(duplicateEpisodeIds)] : []),
+    ];
+    return reasons.length > 0 ? degraded(reasons.join('; '), hits) : ok(hits);
   }
 
   async function get(ref: string): Promise<PortResult<CorpusRecord | null>> {
     const episodeId = localEpisodeId(ref);
     if (episodeId === null) return ok(null);
 
-    // Search is backed by the lazy list snapshot, which can contain supported
-    // legacy captures that EvidencePort.get() cannot address by episode id.
-    // Serve an advertised episode from that same read-only snapshot so
-    // search/get stay symmetric without migrating or rewriting storage.
-    if (snapshot !== undefined) {
-      const listed = await snapshot;
-      if (listed.status !== 'unavailable') {
+    // Read the same lazy snapshot before every local get so duplicate ids
+    // cannot resolve to an arbitrary record. If search already materialized
+    // it, serve its advertised legacy capture directly; otherwise preserve
+    // the normal EvidencePort.get() path for a unique id.
+    const hadSnapshot = snapshot !== undefined;
+    const listed = await episodes();
+    if (listed.status !== 'unavailable') {
+      if (((await multiplicity()).get(episodeId) ?? 0) > 1) {
+        return degraded(duplicateReason([episodeId]), null);
+      }
+      if (hadSnapshot) {
         const listedEpisode = (listed.status === 'ok'
           ? listed.value
           : listed.value ?? [])

@@ -459,38 +459,38 @@ describe('selectKnowledgeHits (rescope §3.3)', () => {
     ]);
   });
 
-  it('ranks an entire mixed-domain tie group transitively before applying the packet cap', () => {
-    const localOld = hit({
-      ref: 'z-local-old',
+  it('preserves local-then-public input order for an incomparable mixed-domain tie group', () => {
+    const local = hit({
+      ref: 'local-episode:z-local',
       snippet: 'dashboard vitest flake',
       tier: 'tests-passed',
       publishedAt: 10,
       recencyDomain: 'unix-ms',
-      origin: 'local-old',
+      origin: 'local',
     });
-    const publicBlock = hit({
-      ref: 'a-public',
+    const publicFirst = hit({
+      ref: 'a-public-first',
       snippet: 'dashboard vitest flake',
       tier: 'tests-passed',
       publishedAt: 99,
       recencyDomain: 'block-number',
-      origin: 'public',
+      origin: 'public-first',
     });
-    const localNew = hit({
-      ref: 'b-local-new',
+    const publicSecond = hit({
+      ref: 'b-public-second',
       snippet: 'dashboard vitest flake',
       tier: 'tests-passed',
-      publishedAt: 20,
-      recencyDomain: 'unix-ms',
-      origin: 'local-new',
+      publishedAt: 98,
+      recencyDomain: 'block-number',
+      origin: 'public-second',
     });
 
     expect(selectKnowledgeHits(
-      [localOld, publicBlock, localNew],
+      [local, publicFirst, publicSecond],
       ['dashboard', 'vitest', 'flake'],
     ).map((candidate) => candidate.ref)).toEqual([
-      publicBlock.ref,
-      localNew.ref,
+      local.ref,
+      publicFirst.ref,
     ]);
   });
 

@@ -8,7 +8,7 @@ import {
   InMemoryLocalLearningPort,
   InMemorySkillsPort,
 } from '../../src/testing.js';
-import { ok, unavailable, type PortResult } from '../../src/outcome.js';
+import { degraded, ok, unavailable, type PortResult } from '../../src/outcome.js';
 import type { CorpusPort, CorpusRecord } from '../../src/ports/corpus-port.js';
 import type { KnowledgeHit } from '../../src/schemas/knowledge-hit.js';
 import type { InMemoryCorpusSeed } from '../../src/testing/in-memory-corpus.js';
@@ -450,6 +450,20 @@ function orderedMixedCorpus(
 }
 
 describe('firstTurnPickup — mixed local/public canonical policy', () => {
+  it('projects a usable degraded final record and retains its reason', async () => {
+    const hit = mixedHit('bafyDegradedFinal', 'dashboard retry failure');
+    const corpus = orderedMixedCorpus([hit], async (ref) => degraded(
+      'partial local store',
+      mixedRecord(ref, 'dashboard retry failure'),
+    ));
+
+    const result = await buildPlugin(corpus).session(META)
+      .firstTurnPickup('dashboard retry failure');
+
+    expect(result.packets.map((packet) => packet.ref)).toEqual([hit.ref]);
+    expect(result.degraded).toBe('partial local store');
+  });
+
   it('ranks local and public hits globally with the existing two-packet cap', async () => {
     const hits = [
       mixedHit('local-episode:local-third', 'dashboard retry'),

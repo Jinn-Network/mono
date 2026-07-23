@@ -545,11 +545,17 @@ export class PluginSession {
 
       if (preferredHit !== undefined && preferredHit.ref !== hit.ref) {
         const preferredResult = await fetchRecord(preferredHit);
-        if (preferredResult.status !== 'ok') {
+        if (preferredResult.status === 'unavailable') {
           preferredFailureReason = preferredResult.reason;
-        } else if (preferredResult.value !== null) {
-          selectedHit = preferredHit;
-          record = preferredResult.value;
+        } else {
+          if (preferredResult.status === 'degraded') {
+            preferredFailureReason = preferredResult.reason;
+          }
+          const preferredRecord = valueOr(preferredResult, null as CorpusRecord | null);
+          if (preferredRecord !== null) {
+            selectedHit = preferredHit;
+            record = preferredRecord;
+          }
         }
       }
       return {
@@ -571,16 +577,18 @@ export class PluginSession {
         preferredFailureReason?: string;
       }> => {
         const result = await fetchRecord(hit);
-        if (result.status !== 'ok' || result.value === null) {
+        if (result.status === 'unavailable') {
           return { result, selectedHit: hit, record: null };
         }
+        const fetchedRecord = valueOr(result, null as CorpusRecord | null);
+        if (fetchedRecord === null) return { result, selectedHit: hit, record: null };
         if (
-          result.value.canonicalEpisodeId !== undefined
-          && excludedCanonicalEpisodeIds.has(result.value.canonicalEpisodeId)
+          fetchedRecord.canonicalEpisodeId !== undefined
+          && excludedCanonicalEpisodeIds.has(fetchedRecord.canonicalEpisodeId)
         ) {
           return { result, selectedHit: hit, record: null };
         }
-        const preferred = await resolvePreferredRecord(hit, result.value);
+        const preferred = await resolvePreferredRecord(hit, fetchedRecord);
         return { result, ...preferred };
       }),
     );
@@ -589,9 +597,12 @@ export class PluginSession {
     for (let index = 0; index < nearMisses.length; index += 1) {
       const candidate = nearMisses[index]!;
       const nearMissResult = nearMissResults[index]!;
-      if (nearMissResult.result.status !== 'ok') {
+      if (nearMissResult.result.status === 'unavailable') {
         if (degradedReason === undefined) degradedReason = nearMissResult.result.reason;
         continue;
+      }
+      if (nearMissResult.result.status === 'degraded') {
+        degradedReason ??= nearMissResult.result.reason;
       }
       degradedReason ??= nearMissResult.preferredFailureReason;
       const record = nearMissResult.record;
@@ -641,11 +652,12 @@ export class PluginSession {
     for (const hit of ranked) {
       if (packets.length >= MAX_SELECTED_PACKETS) break;
       const result = await fetchRecord(hit);
-      if (result.status !== 'ok') {
+      if (result.status === 'unavailable') {
         if (degradedReason === undefined) degradedReason = result.reason;
         continue;
       }
-      const fetchedRecord = result.value;
+      if (result.status === 'degraded') degradedReason ??= result.reason;
+      const fetchedRecord = valueOr(result, null as CorpusRecord | null);
       if (fetchedRecord === null) continue;
       const fetchedCanonicalEpisodeId = fetchedRecord.canonicalEpisodeId;
       if (

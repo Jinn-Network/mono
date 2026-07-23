@@ -10,7 +10,7 @@ import {
   InMemoryLocalLearningPort,
   InMemorySkillsPort,
 } from '../../src/testing.js';
-import { ok, unavailable, type PortResult } from '../../src/outcome.js';
+import { degraded, ok, unavailable, type PortResult } from '../../src/outcome.js';
 import type { CorpusPort, CorpusRecord } from '../../src/ports/corpus-port.js';
 import type { KnowledgeHit } from '../../src/schemas/knowledge-hit.js';
 
@@ -93,6 +93,19 @@ describe('firstTurnPickup — bounded content rescore escalation (#1792)', () =>
 
     expect(result.packets.map((packet) => packet.ref)).toEqual(['synthesis-match']);
     expect(getCalls).toEqual(['synthesis-match']);
+  });
+
+  it('promotes a usable degraded near-miss record and retains its reason', async () => {
+    const candidate = hit('degraded-near-miss', 'alpha');
+    const corpus = fixedCorpus([candidate], async (ref) => degraded(
+      'partial local store',
+      record(ref, { synthesis: 'the beta regression was fixed by awaiting the request' }),
+    ));
+
+    const result = await buildPlugin(corpus).session(META).firstTurnPickup('alpha beta');
+
+    expect(result.packets.map((packet) => packet.ref)).toEqual([candidate.ref]);
+    expect(result.degraded).toBe('partial local store');
   });
 
   it('promotes a score-1 metadata candidate when a step title matches another original term', async () => {
@@ -255,6 +268,33 @@ describe('firstTurnPickup — bounded content rescore escalation (#1792)', () =>
     expect(result.packets.map((packet) => packet.ref)).toEqual([localHit.ref]);
     expect(result.packets[0]?.synthesis).toContain('full private solution');
     expect(getCalls).toEqual([publicHit.ref, localHit.ref]);
+  });
+
+  it('uses a usable degraded preferred local record and retains its reason', async () => {
+    const localHit = hit('local-episode:episode-shared', 'unrelated local form', {
+      canonicalEpisodeId: 'episode-shared',
+      origin: 'local:episode-shared',
+    });
+    const publicHit = hit('bafyPublicShared', 'alpha', { origin: 'agent-1' });
+    const corpus = fixedCorpus([localHit, publicHit], async (ref) => {
+      if (ref === localHit.ref) {
+        return degraded('partial local store', record(ref, {
+          canonicalEpisodeId: 'episode-shared',
+          synthesis: 'the beta failure needs the full private solution',
+          origin: 'local:episode-shared',
+        }));
+      }
+      return ok(record(ref, {
+        canonicalEpisodeId: 'episode-shared',
+        synthesis: 'public summary without the missing vocabulary',
+        origin: 'agent-1',
+      }));
+    });
+
+    const result = await buildPlugin(corpus).session(META).firstTurnPickup('alpha beta');
+
+    expect(result.packets.map((packet) => packet.ref)).toEqual([localHit.ref]);
+    expect(result.degraded).toBe('partial local store');
   });
 
   it('retains a promoted public near-miss and degrades when its preferred local fetch rejects', async () => {

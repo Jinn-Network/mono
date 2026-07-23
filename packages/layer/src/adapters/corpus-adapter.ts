@@ -218,12 +218,15 @@ function decodeRecord(record: WireCorpusRecord): CorpusRecord | null {
  */
 export function createCorpusAdapter(deps: CorpusAdapterDeps | HarnessLayerConfig): CorpusPort {
   const layer = isLayerDeps(deps) ? deps.layer : createHarnessLayer(deps);
+  const advertisedRefs = new Set<string>();
 
   return {
     async search(query: string): Promise<PortResult<KnowledgeHit[]>> {
       try {
         const hits = await layer.corpus.search(query);
-        return ok(hits.map(toKnowledgeHit));
+        const mapped = hits.map(toKnowledgeHit);
+        for (const hit of mapped) advertisedRefs.add(hit.ref);
+        return ok(mapped);
       } catch (e) {
         // Empty array keeps callers alive when discovery is unreachable.
         return degraded(`corpus search failed: ${String(e)}`, []);
@@ -234,12 +237,14 @@ export function createCorpusAdapter(deps: CorpusAdapterDeps | HarnessLayerConfig
       let record: WireCorpusRecord;
       try {
         record = await layer.corpus.get(ref);
-      } catch {
+      } catch (error) {
         // `corpus.get` throws on a missing manifest, and the contract requires
-        // `ok(null)` for that unknown-ref path (Stage 1). A genuine transport
-        // error is currently indistinguishable from not-found via the throw, so
-        // it also collapses to `ok(null)` here; distinguishing the two is a
-        // follow-up on `consume.ts`'s `corpus.get` surface, not this shim.
+        // `ok(null)` for a never-advertised unknown-ref path. Once a ref was
+        // advertised by this adapter invocation, a throwing acquisition is
+        // evidence of an unavailable record and must remain observable.
+        if (advertisedRefs.has(ref)) {
+          return degraded(`corpus get failed for ${ref}: ${String(error)}`, null);
+        }
         return ok(null);
       }
       try {

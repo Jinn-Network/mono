@@ -333,9 +333,9 @@ function compareRef(a: ScoredKnowledgeHit, b: ScoredKnowledgeHit): number {
  *
  * Recency is a group property, not a pairwise comparator: within each equal
  * score+tier group, use recency only when every hit declares the same domain
- * (including the all-omitted legacy group). A mixed-domain group ignores
- * recency wholesale and orders by ref, which keeps the relation transitive
- * without introducing source priority or depending on adapter merge order.
+ * (including the all-omitted legacy group). A mixed-domain group preserves
+ * its stable score/tier input order rather than comparing incomparable
+ * recency values or inventing a source priority.
  */
 export function rankScoredKnowledgeHits(
   candidates: ScoredKnowledgeHit[],
@@ -357,14 +357,14 @@ export function rankScoredKnowledgeHits(
     const comparableRecency = tieGroup.every(
       (candidate) => candidate.hit.recencyDomain === recencyDomain,
     );
-    tieGroup.sort((a, b) => {
-      if (comparableRecency) {
+    if (comparableRecency) {
+      tieGroup.sort((a, b) => {
         const recencyDiff =
           (b.hit.publishedAt ?? 0) - (a.hit.publishedAt ?? 0);
         if (recencyDiff !== 0) return recencyDiff;
-      }
-      return compareRef(a, b);
-    });
+        return compareRef(a, b);
+      });
+    }
     ranked.push(...tieGroup);
     start = end;
   }

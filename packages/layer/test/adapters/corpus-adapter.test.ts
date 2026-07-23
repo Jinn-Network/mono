@@ -286,6 +286,24 @@ describe('CorpusAdapter mapping', () => {
     expect(result.status).toBe('degraded');
     if (result.status === 'degraded') expect(result.value).toEqual([]);
   });
+
+  it('surfaces an advertised public fetch outage while retaining direct unknown-ref absence', async () => {
+    const layer = makeFakeLayer();
+    layer.corpus.search = async () => [makeHit({ ref: 'bafyAdvertised' })];
+    layer.corpus.get = async () => {
+      throw new Error('gateway offline');
+    };
+    const adapter = createCorpusAdapter({ layer });
+
+    await adapter.search('anything');
+
+    await expect(adapter.get('bafyAdvertised')).resolves.toMatchObject({
+      status: 'degraded',
+      reason: expect.stringContaining('corpus get failed'),
+      value: null,
+    });
+    await expect(adapter.get('never-advertised')).resolves.toEqual({ status: 'ok', value: null });
+  });
 });
 
 function traceEnvelope(overrides: Partial<TraceEnvelopeV0> = {}): TraceEnvelopeV0 {

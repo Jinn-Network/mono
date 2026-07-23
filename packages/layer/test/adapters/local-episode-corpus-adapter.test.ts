@@ -273,4 +273,69 @@ describe('LocalEpisodeCorpusAdapter', () => {
     });
     expect(readFileSync(legacyPath, 'utf8')).toBe(before);
   });
+
+  it('degrades and excludes an ambiguous duplicate local episode identity', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'jinn-local-duplicate-'));
+    const duplicateId = 'duplicate-episode';
+    writeFileSync(join(capturesDir, `${duplicateId}.episode.json`), JSON.stringify(makeEpisode({
+      episodeId: duplicateId,
+      task: { summary: 'Canonical unrelated capture', distributionTags: [] },
+    })), 'utf8');
+    writeFileSync(join(capturesDir, 'legacy-capture.json'), JSON.stringify({
+      session: {
+        sessionId: duplicateId,
+        capturedAt: '2026-07-13T00:00:00.000Z',
+      },
+      task: {
+        summary: 'Legacy duplicate retrieval phrase',
+        distributionTags: ['duplicate'],
+      },
+      environment: {
+        harness: { name: 'hermes', version: '1.0.0' },
+        model: 'test',
+        tools: ['terminal'],
+      },
+      steps: [{
+        spanId: 'legacy-turn-1',
+        parentSpanId: null,
+        name: 'jinn.transcript.user-message',
+        startTimeUnixNano: '1000000000',
+        endTimeUnixNano: '1000000000',
+        attributes: {
+          'jinn.capture.event.kind': 'user-message',
+          'message.content': 'fix it',
+        },
+        redactedKeys: [],
+      }],
+      outcome: {
+        status: 'completed',
+        verifiabilityTier: 'tests-passed',
+      },
+      cost: { durationMs: 1 },
+      provenance: 'contributed',
+    }), 'utf8');
+    const adapter = createLocalEpisodeCorpusAdapter({
+      evidence: createEvidenceAdapter({ capturesDir }),
+    });
+
+    const directFetched = await adapter.get(localEpisodeRef(duplicateId));
+    const searched = await adapter.search('retrieval phrase');
+    const fetched = await adapter.get(localEpisodeRef(duplicateId));
+
+    expect(directFetched).toMatchObject({
+      status: 'degraded',
+      reason: expect.stringContaining(duplicateId),
+      value: null,
+    });
+    expect(searched).toMatchObject({
+      status: 'degraded',
+      reason: expect.stringContaining(duplicateId),
+      value: [],
+    });
+    expect(fetched).toMatchObject({
+      status: 'degraded',
+      reason: expect.stringContaining(duplicateId),
+      value: null,
+    });
+  });
 });
