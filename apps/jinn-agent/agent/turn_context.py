@@ -34,6 +34,7 @@ from agent.model_metadata import (
     estimate_messages_tokens_rough,
     estimate_request_tokens_rough,
 )
+from agent.runtime_cwd import resolve_agent_cwd
 
 logger = logging.getLogger(__name__)
 
@@ -443,6 +444,7 @@ def build_turn_context(
             model=agent.model,
             platform=getattr(agent, "platform", None) or "",
             sender_id=getattr(agent, "_user_id", None) or "",
+            cwd=str(resolve_agent_cwd()),
         )
         _ctx_parts: list[str] = []
         for r in _pre_results:

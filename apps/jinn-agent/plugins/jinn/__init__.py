@@ -25,6 +25,7 @@ import shlex
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Set
@@ -65,6 +66,12 @@ _degraded: Optional[str] = None
 # once at session end.
 _session_state_lock = threading.Lock()
 _session_states: Dict[str, Dict[str, Any]] = {}
+_session_state_epoch = 0
+_session_state_versions: Dict[str, int] = {}
+# Pickup exclusions/checkpoints span run_conversation turns and are cleared
+# only at the host's real session-finalize boundary.
+_pickup_checkpoints: Dict[str, Dict[str, Any]] = {}
+_pickup_checkpoint_versions: Dict[str, int] = {}
 _internal_session_lock = threading.Lock()
 _internal_sessions: Dict[tuple[str, int], str] = {}
 
@@ -89,8 +96,13 @@ def _park_contribution_publication() -> None:
 
 
 def _reset_session_state() -> None:
+    global _session_state_epoch
     with _session_state_lock:
+        _session_state_epoch += 1
         _session_states.clear()
+        _session_state_versions.clear()
+        _pickup_checkpoints.clear()
+        _pickup_checkpoint_versions.clear()
     with _internal_session_lock:
         _internal_sessions.clear()
 
@@ -195,6 +207,25 @@ def _empty_pickup_checkpoint() -> Dict[str, Any]:
     }
 
 
+@dataclass(frozen=True)
+class _PickupRepositoryIdentity:
+    repository_slug: Optional[str]
+    repository_cwd: Optional[str]
+    verified: bool
+
+
+@dataclass(frozen=True)
+class _PickupCheckpointToken:
+    epoch: int
+    version: int
+
+
+@dataclass(frozen=True)
+class _PickupReservation:
+    excluded_canonical_episode_ids: tuple[str, ...]
+    token: _PickupCheckpointToken
+
+
 def _session_identity(session_id: str) -> tuple[str, str, Optional[str]]:
     """Separate host-internal review evidence from its foreground parent."""
     parent = session_id or "default"
@@ -224,13 +255,25 @@ def _state_for(session_id: str, cwd: Optional[Path] = None) -> Dict[str, Any]:
     key = session_id or "default"
     with _session_state_lock:
         state = _session_states.get(key)
+        if state is not None:
+            return state
+        epoch = _session_state_epoch
+        version = _session_state_versions.get(key, 0)
+
+    candidate = {
+        "snapshot": session_bridge.snapshot_repository(key, cwd=cwd),
+        "activity": _empty_activity(),
+        "intermediateFailureDiffs": [],
+    }
+    with _session_state_lock:
+        if (
+            epoch != _session_state_epoch
+            or version != _session_state_versions.get(key, 0)
+        ):
+            return candidate
+        state = _session_states.get(key)
         if state is None:
-            state = {
-                "snapshot": session_bridge.snapshot_repository(key, cwd=cwd),
-                "activity": _empty_activity(),
-                "intermediateFailureDiffs": [],
-                "pickupCheckpoint": _empty_pickup_checkpoint(),
-            }
+            state = candidate
             _session_states[key] = state
         return state
 
@@ -238,13 +281,15 @@ def _state_for(session_id: str, cwd: Optional[Path] = None) -> Dict[str, Any]:
 def _pop_state(session_id: str) -> Dict[str, Any]:
     key = session_id or "default"
     with _session_state_lock:
+        _session_state_versions[key] = (
+            _session_state_versions.get(key, 0) + 1
+        )
         return _session_states.pop(
             key,
             {
                 "snapshot": None,
                 "activity": _empty_activity(),
                 "intermediateFailureDiffs": [],
-                "pickupCheckpoint": _empty_pickup_checkpoint(),
             },
         )
 
@@ -253,10 +298,16 @@ def _peek_state(session_id: str) -> Dict[str, Any]:
     key = session_id or "default"
     with _session_state_lock:
         state = _session_states.get(key)
+        checkpoint = dict(
+            _pickup_checkpoints.get(key) or _empty_pickup_checkpoint()
+        )
+        checkpoint["deliveredCanonicalEpisodeIds"] = list(
+            checkpoint.get("deliveredCanonicalEpisodeIds") or []
+        )
         if state is None:
             return {
                 "activity": _empty_activity(),
-                "pickupCheckpoint": _empty_pickup_checkpoint(),
+                "pickupCheckpoint": checkpoint,
             }
         activity = dict(state.get("activity") or {})
         for field in (
@@ -269,12 +320,6 @@ def _peek_state(session_id: str) -> Dict[str, Any]:
             "installedSkillRefs",
         ):
             activity[field] = list(activity.get(field) or [])
-        checkpoint = dict(
-            state.get("pickupCheckpoint") or _empty_pickup_checkpoint()
-        )
-        checkpoint["deliveredCanonicalEpisodeIds"] = list(
-            checkpoint.get("deliveredCanonicalEpisodeIds") or []
-        )
         return {
             **state,
             "activity": activity,
@@ -282,17 +327,43 @@ def _peek_state(session_id: str) -> Dict[str, Any]:
         }
 
 
-def _pickup_repository_slug(
+def _pickup_repository_identity(
     logical_session_id: str,
     state: Dict[str, Any],
     cwd_value: Any,
-) -> tuple[Optional[str], Optional[str]]:
+) -> _PickupRepositoryIdentity:
     """Resolve current repository identity without replacing the start snapshot."""
+    key = logical_session_id or "default"
+    with _session_state_lock:
+        checkpoint = _pickup_checkpoints.get(key)
+        checkpoint_slug = (
+            checkpoint.get("repositorySlug")
+            if checkpoint is not None
+            else None
+        )
+        checkpoint_cwd = (
+            checkpoint.get("repositoryCwd")
+            if checkpoint is not None
+            else None
+        )
+
     if not isinstance(cwd_value, str) or not cwd_value:
         snapshot = state.get("snapshot")
-        return (
-            snapshot.repository_slug if snapshot is not None else None,
+        snapshot_slug = (
+            snapshot.repository_slug
+            if snapshot is not None
+            else None
+        )
+        if not isinstance(snapshot_slug, str) or not snapshot_slug.strip():
+            return _PickupRepositoryIdentity(
+                checkpoint_slug,
+                checkpoint_cwd,
+                False,
+            )
+        return _PickupRepositoryIdentity(
+            snapshot_slug,
             None,
+            True,
         )
 
     try:
@@ -302,11 +373,17 @@ def _pickup_repository_slug(
             "jinn: pickup repository resolve failed open: %s",
             exc,
         )
-        return None, None
-    with _session_state_lock:
-        checkpoint = state["pickupCheckpoint"]
-        if checkpoint.get("repositoryCwd") == resolved:
-            return checkpoint.get("repositorySlug"), resolved
+        return _PickupRepositoryIdentity(
+            checkpoint_slug,
+            checkpoint_cwd,
+            False,
+        )
+    if checkpoint_cwd == resolved:
+        return _PickupRepositoryIdentity(
+            checkpoint_slug,
+            resolved,
+            True,
+        )
 
     try:
         snapshot = session_bridge.snapshot_repository(
@@ -318,41 +395,84 @@ def _pickup_repository_slug(
             "jinn: pickup repository probe failed open: %s",
             exc,
         )
-        return None, resolved
-    return (
-        snapshot.repository_slug if snapshot is not None else None,
+        return _PickupRepositoryIdentity(
+            checkpoint_slug,
+            checkpoint_cwd,
+            False,
+        )
+    snapshot_slug = (
+        snapshot.repository_slug
+        if snapshot is not None
+        else None
+    )
+    if not isinstance(snapshot_slug, str) or not snapshot_slug.strip():
+        return _PickupRepositoryIdentity(
+            checkpoint_slug,
+            checkpoint_cwd,
+            False,
+        )
+    return _PickupRepositoryIdentity(
+        snapshot_slug,
         resolved,
+        True,
     )
 
 
+def _pickup_checkpoint_token(
+    logical_session_id: str,
+) -> _PickupCheckpointToken:
+    key = logical_session_id or "default"
+    with _session_state_lock:
+        return _PickupCheckpointToken(
+            epoch=_session_state_epoch,
+            version=_pickup_checkpoint_versions.get(key, 0),
+        )
+
+
 def _reserve_pickup_checkpoint(
-    state: Dict[str, Any],
+    logical_session_id: str,
     *,
+    expected_token: _PickupCheckpointToken,
     is_first_turn: bool,
     stable_task_id: Optional[str],
     repository_slug: Optional[str],
     repository_cwd: Optional[str],
-) -> Optional[list[str]]:
+    repository_verified: bool,
+) -> Optional[_PickupReservation]:
     """Atomically decide and reserve a pickup, returning prior exclusions.
 
     Reservation happens before the process call so concurrent hooks for the
     same checkpoint cannot both invoke it. The process runs after this helper
     releases ``_session_state_lock``.
     """
+    key = logical_session_id or "default"
     with _session_state_lock:
-        checkpoint = state["pickupCheckpoint"]
+        if (
+            expected_token.epoch != _session_state_epoch
+            or expected_token.version
+            != _pickup_checkpoint_versions.get(key, 0)
+        ):
+            return None
+        checkpoint = _pickup_checkpoints.get(key)
+        if checkpoint is None:
+            checkpoint = _empty_pickup_checkpoint()
+            _pickup_checkpoints[key] = checkpoint
         has_run = bool(checkpoint.get("hasRun"))
         checkpoint_changed = has_run and (
             (
                 stable_task_id is not None
                 and stable_task_id != checkpoint.get("taskId")
             )
-            or repository_slug != checkpoint.get("repositorySlug")
+            or (
+                repository_verified
+                and repository_slug != checkpoint.get("repositorySlug")
+            )
         )
         should_pick_up = (is_first_turn and not has_run) or checkpoint_changed
         if not should_pick_up:
             if (
                 has_run
+                and repository_verified
                 and repository_slug == checkpoint.get("repositorySlug")
             ):
                 checkpoint["repositoryCwd"] = repository_cwd
@@ -363,22 +483,44 @@ def _reserve_pickup_checkpoint(
         )
         checkpoint["hasRun"] = True
         checkpoint["taskId"] = stable_task_id
-        checkpoint["repositorySlug"] = repository_slug
-        checkpoint["repositoryCwd"] = repository_cwd
-        return excluded
+        if repository_verified:
+            checkpoint["repositorySlug"] = repository_slug
+            checkpoint["repositoryCwd"] = repository_cwd
+        return _PickupReservation(
+            excluded_canonical_episode_ids=tuple(excluded),
+            token=expected_token,
+        )
 
 
 def _merge_pickup_deliveries(
-    state: Dict[str, Any],
+    logical_session_id: str,
+    reservation: _PickupReservation,
     delivered_canonical_episode_ids: tuple[str, ...],
 ) -> None:
+    key = logical_session_id or "default"
     with _session_state_lock:
-        delivered = state["pickupCheckpoint"][
-            "deliveredCanonicalEpisodeIds"
-        ]
+        if (
+            reservation.token.epoch != _session_state_epoch
+            or reservation.token.version
+            != _pickup_checkpoint_versions.get(key, 0)
+        ):
+            return
+        checkpoint = _pickup_checkpoints.get(key)
+        if checkpoint is None:
+            return
+        delivered = checkpoint["deliveredCanonicalEpisodeIds"]
         for episode_id in delivered_canonical_episode_ids:
             if episode_id not in delivered:
                 delivered.append(episode_id)
+
+
+def _clear_pickup_checkpoint(session_id: str) -> None:
+    key = session_id or "default"
+    with _session_state_lock:
+        _pickup_checkpoints.pop(key, None)
+        _pickup_checkpoint_versions[key] = (
+            _pickup_checkpoint_versions.get(key, 0) + 1
+        )
 
 
 def _record_activity(session_id: str, field: str, refs: list[str]) -> None:
@@ -437,6 +579,12 @@ def _on_session_start(session_id: str = "", platform: str = "", **_: Any) -> Non
     _distill_usage_snapshot = distill.snapshot_usage()
 
 
+def _on_session_finalize(session_id: str = "", **_: Any) -> None:
+    """Release control state at the real host session boundary."""
+    _pop_state(session_id)
+    _clear_pickup_checkpoint(session_id)
+
+
 def _on_pre_llm_call(
     session_id: str = "",
     user_message: str = "",
@@ -447,6 +595,7 @@ def _on_pre_llm_call(
     **_: Any,
 ) -> Optional[Dict[str, str]]:
     logical_session_id, session_kind, parent_session_id = _session_identity(session_id)
+    pickup_token = _pickup_checkpoint_token(logical_session_id)
     # Local capture — UNCONDITIONAL (mono#1714): filling the buffer never
     # leaves the machine; local retention, mining, and distillation happen by
     # default. Not gated on is_first_turn: the buffer is keyed per session and
@@ -470,19 +619,21 @@ def _on_pre_llm_call(
         if isinstance(task_id, str) and task_id.strip()
         else None
     )
-    repository_slug, repository_cwd = _pickup_repository_slug(
+    repository_identity = _pickup_repository_identity(
         logical_session_id,
         state,
         _.get("cwd") or _.get("working_directory"),
     )
-    excluded = _reserve_pickup_checkpoint(
-        state,
+    reservation = _reserve_pickup_checkpoint(
+        logical_session_id,
+        expected_token=pickup_token,
         is_first_turn=is_first_turn,
         stable_task_id=stable_task_id,
-        repository_slug=repository_slug,
-        repository_cwd=repository_cwd,
+        repository_slug=repository_identity.repository_slug,
+        repository_cwd=repository_identity.repository_cwd,
+        repository_verified=repository_identity.verified,
     )
-    if excluded is None:
+    if reservation is None:
         return None
 
     outcome = pickup.pickup_with_outcome(
@@ -491,13 +642,16 @@ def _on_pre_llm_call(
         activity=state["activity"],
         session_id=logical_session_id,
         model=model,
-        repository_slug=repository_slug,
+        repository_slug=repository_identity.repository_slug,
         session_kind=session_kind,
         parent_session_id=parent_session_id,
-        exclude_canonical_episode_ids=excluded,
+        exclude_canonical_episode_ids=(
+            reservation.excluded_canonical_episode_ids
+        ),
     )
     _merge_pickup_deliveries(
-        state,
+        logical_session_id,
+        reservation,
         outcome.delivered_canonical_episode_ids,
     )
     return outcome.context
@@ -646,6 +800,8 @@ def _on_session_end(
 ) -> None:
     logical_session_id, session_kind, parent_session_id = _session_identity(session_id)
     _release_internal_session(parent_session_id)
+    if session_kind == "host-internal":
+        _clear_pickup_checkpoint(logical_session_id)
     # Usage is native local telemetry, so show payoff independently of sharing
     # consent and before any capture-path early return.
     try:
@@ -977,6 +1133,7 @@ def register(ctx) -> None:
         description="Fetch a corpus record by ref (hash-verified) and read its content in-session — e.g. a published skill's full text.",
     )
     ctx.register_hook("on_session_start", _on_session_start)
+    ctx.register_hook("on_session_finalize", _on_session_finalize)
     ctx.register_hook("pre_llm_call", _on_pre_llm_call)
     ctx.register_hook("post_tool_call", _on_post_tool_call)
     ctx.register_hook("post_llm_call", _on_post_llm_call)

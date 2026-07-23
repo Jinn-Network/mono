@@ -498,7 +498,7 @@ def test_changed_repository_triggers_pickup_again(tmp_path, monkeypatch):
 def test_repository_probe_failure_fails_open_with_unknown_identity(
     tmp_path, monkeypatch
 ):
-    state = jinn._state_for("s1")
+    jinn._state_for("s1")
     supplied_cwd = tmp_path / "unreadable-repository"
     supplied_cwd.mkdir()
 
@@ -522,10 +522,175 @@ def test_repository_probe_failure_fails_open_with_unknown_identity(
     assert result == {"context": CONTEXT_BLOCK}
     request = json.loads(runner.calls[0][1])
     assert "repositorySlug" not in request["meta"]
-    checkpoint = state["pickupCheckpoint"]
+    checkpoint = jinn._peek_state("s1")["pickupCheckpoint"]
     assert checkpoint["hasRun"] is True
     assert checkpoint["repositorySlug"] is None
-    assert checkpoint["repositoryCwd"] == str(supplied_cwd.resolve())
+    assert checkpoint["repositoryCwd"] is None
+
+
+def test_failed_repository_transition_does_not_repeat_or_poison_retry(
+    tmp_path, monkeypatch
+):
+    session_id = "probe-retry-session"
+    jinn._state_for(session_id)
+    first_cwd = tmp_path / "first"
+    second_cwd = tmp_path / "second"
+    first_cwd.mkdir()
+    second_cwd.mkdir()
+    fail_second_probe = True
+    probed_cwds = []
+
+    def snapshot_repository(probe_session_id, cwd=None):
+        nonlocal fail_second_probe
+        resolved = Path(cwd).resolve()
+        probed_cwds.append(resolved)
+        if resolved == second_cwd.resolve() and fail_second_probe:
+            raise ValueError("transient repository probe failure")
+        slug = (
+            "acme/first"
+            if resolved == first_cwd.resolve()
+            else "acme/second"
+        )
+        return jinn.session_bridge.RepositorySnapshot(
+            session_id=probe_session_id,
+            root=resolved,
+            origin=f"https://github.com/{slug}.git",
+            repository_slug=slug,
+            base_head="0123456789abcdef",
+        )
+
+    monkeypatch.setattr(
+        jinn.session_bridge,
+        "snapshot_repository",
+        snapshot_repository,
+    )
+    runner = PickupRunner()
+    jinn._runner = runner
+    try:
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="stable-task",
+            user_message=MSG,
+            is_first_turn=True,
+            cwd=str(first_cwd),
+        )
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="stable-task",
+            user_message="Continue after a transient probe failure",
+            is_first_turn=False,
+            cwd=str(second_cwd),
+        )
+
+        assert len(runner.calls) == 1
+        checkpoint_after_failure = jinn._peek_state(session_id)[
+            "pickupCheckpoint"
+        ]
+        assert checkpoint_after_failure["repositorySlug"] == "acme/first"
+        assert checkpoint_after_failure["repositoryCwd"] == str(
+            first_cwd.resolve()
+        )
+
+        fail_second_probe = False
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="stable-task",
+            user_message="Continue after the repository probe recovers",
+            is_first_turn=False,
+            cwd=str(second_cwd),
+        )
+    finally:
+        jinn._runner = None
+
+    assert probed_cwds.count(second_cwd.resolve()) == 2
+    assert len(runner.calls) == 2
+    second_request = json.loads(runner.calls[1][1])
+    assert second_request["meta"]["repositorySlug"] == "acme/second"
+    assert second_request["excludeCanonicalEpisodeIds"] == [
+        "episode-dashboard-fix",
+    ]
+
+
+def test_unknown_repository_transition_does_not_repeat_or_poison_retry(
+    tmp_path, monkeypatch
+):
+    session_id = "unknown-probe-retry-session"
+    jinn._state_for(session_id)
+    first_cwd = tmp_path / "first"
+    second_cwd = tmp_path / "second"
+    first_cwd.mkdir()
+    second_cwd.mkdir()
+    second_slug_is_unknown = True
+    probed_cwds = []
+
+    def snapshot_repository(probe_session_id, cwd=None):
+        resolved = Path(cwd).resolve()
+        probed_cwds.append(resolved)
+        if resolved == second_cwd.resolve() and second_slug_is_unknown:
+            slug = None
+            origin = None
+        else:
+            slug = (
+                "acme/first"
+                if resolved == first_cwd.resolve()
+                else "acme/second"
+            )
+            origin = f"https://github.com/{slug}.git"
+        return jinn.session_bridge.RepositorySnapshot(
+            session_id=probe_session_id,
+            root=resolved,
+            origin=origin,
+            repository_slug=slug,
+            base_head="0123456789abcdef",
+        )
+
+    monkeypatch.setattr(
+        jinn.session_bridge,
+        "snapshot_repository",
+        snapshot_repository,
+    )
+    runner = PickupRunner()
+    jinn._runner = runner
+    try:
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="stable-task",
+            user_message=MSG,
+            is_first_turn=True,
+            cwd=str(first_cwd),
+        )
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="stable-task",
+            user_message="Continue while repository identity is unknown",
+            is_first_turn=False,
+            cwd=str(second_cwd),
+        )
+
+        assert len(runner.calls) == 1
+        checkpoint_after_unknown = jinn._peek_state(session_id)[
+            "pickupCheckpoint"
+        ]
+        assert checkpoint_after_unknown["repositorySlug"] == "acme/first"
+        assert checkpoint_after_unknown["repositoryCwd"] == str(
+            first_cwd.resolve()
+        )
+
+        second_slug_is_unknown = False
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="stable-task",
+            user_message="Continue after repository identity recovers",
+            is_first_turn=False,
+            cwd=str(second_cwd),
+        )
+    finally:
+        jinn._runner = None
+
+    assert probed_cwds.count(second_cwd.resolve()) == 2
+    assert len(runner.calls) == 2
+    second_request = json.loads(runner.calls[1][1])
+    assert second_request["meta"]["repositorySlug"] == "acme/second"
 
 
 def test_missing_stable_task_id_stays_first_turn_only():
@@ -582,6 +747,77 @@ def test_repeat_pickup_sends_ids_delivered_by_the_prior_pickup():
         "episode-dashboard-fix",
         "episode-follow-up",
     ]
+
+
+def test_checkpoint_and_exclusions_survive_real_per_turn_session_end():
+    runner = PickupRunner()
+    session_id = "lifecycle-session"
+    jinn._runner = runner
+    try:
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="turn-task-1",
+            user_message=MSG,
+            is_first_turn=True,
+        )
+        first_state = jinn._state_for(session_id)
+        jinn._on_session_end(
+            session_id=session_id,
+            task_id="turn-task-1",
+            completed=True,
+            interrupted=False,
+        )
+        assert session_id not in jinn._session_states
+
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="turn-task-2",
+            user_message="Fix the next real user turn",
+            is_first_turn=False,
+        )
+        second_state = jinn._state_for(session_id)
+    finally:
+        jinn._runner = None
+
+    pickup_requests = [
+        json.loads(raw_input)
+        for argv, raw_input in runner.calls
+        if argv[1:3] == ["session", "pickup"]
+    ]
+    session_end_request = next(
+        json.loads(raw_input)
+        for argv, raw_input in runner.calls
+        if argv[1:3] == ["session", "end"]
+    )
+    assert len(pickup_requests) == 2
+    assert pickup_requests[1]["excludeCanonicalEpisodeIds"] == [
+        "episode-dashboard-fix",
+    ]
+    assert second_state is not first_state
+    assert "deliveredCanonicalEpisodeIds" not in second_state["activity"]
+    assert "pickupCheckpoint" not in session_end_request
+    assert "deliveredCanonicalEpisodeIds" not in session_end_request["activity"]
+
+
+def test_session_finalize_clears_persistent_pickup_checkpoint():
+    runner = PickupRunner()
+    jinn._runner = runner
+    try:
+        jinn._on_pre_llm_call(
+            session_id="finalized-session",
+            task_id="turn-task-1",
+            user_message=MSG,
+            is_first_turn=True,
+        )
+    finally:
+        jinn._runner = None
+
+    assert jinn._peek_state("finalized-session")["pickupCheckpoint"]["hasRun"]
+    jinn._on_session_finalize(
+        session_id="finalized-session",
+        reason="shutdown",
+    )
+    assert not jinn._peek_state("finalized-session")["pickupCheckpoint"]["hasRun"]
 
 
 def test_failed_pickup_advances_checkpoint_instead_of_retrying_each_iteration():
@@ -646,6 +882,119 @@ def test_concurrent_same_checkpoint_does_not_duplicate_or_hold_state_lock():
 
     assert returned_while_pickup_running is True
     assert calls == 1
+
+
+def test_state_snapshot_is_created_without_holding_session_state_lock(
+    tmp_path, monkeypatch
+):
+    snapshot = jinn.session_bridge.RepositorySnapshot(
+        session_id="snapshot-lock-session",
+        root=tmp_path,
+        origin="https://github.com/acme/lock-check.git",
+        repository_slug="acme/lock-check",
+        base_head="0123456789abcdef",
+    )
+    lock_was_available = []
+
+    def snapshot_repository(session_id, cwd=None):
+        acquired = jinn._session_state_lock.acquire(blocking=False)
+        lock_was_available.append(acquired)
+        if acquired:
+            jinn._session_state_lock.release()
+        return snapshot
+
+    monkeypatch.setattr(
+        jinn.session_bridge,
+        "snapshot_repository",
+        snapshot_repository,
+    )
+
+    state = jinn._state_for("snapshot-lock-session", cwd=tmp_path)
+
+    assert lock_was_available == [True]
+    assert state["snapshot"] is snapshot
+
+
+def test_state_snapshot_cannot_reinstall_state_after_turn_end(
+    tmp_path, monkeypatch
+):
+    snapshot_started = threading.Event()
+    release_snapshot = threading.Event()
+    returned_states = []
+    snapshot = jinn.session_bridge.RepositorySnapshot(
+        session_id="snapshot-pop-session",
+        root=tmp_path,
+        origin="https://github.com/acme/pop-check.git",
+        repository_slug="acme/pop-check",
+        base_head="0123456789abcdef",
+    )
+
+    def snapshot_repository(session_id, cwd=None):
+        snapshot_started.set()
+        assert release_snapshot.wait(timeout=2)
+        return snapshot
+
+    monkeypatch.setattr(
+        jinn.session_bridge,
+        "snapshot_repository",
+        snapshot_repository,
+    )
+    worker = threading.Thread(
+        target=lambda: returned_states.append(
+            jinn._state_for("snapshot-pop-session", cwd=tmp_path)
+        )
+    )
+    worker.start()
+    assert snapshot_started.wait(timeout=2)
+
+    jinn._pop_state("snapshot-pop-session")
+    release_snapshot.set()
+    worker.join(timeout=2)
+
+    assert not worker.is_alive()
+    assert returned_states[0]["snapshot"] is snapshot
+    assert "snapshot-pop-session" not in jinn._session_states
+
+
+def test_finalize_during_pickup_cannot_resurrect_checkpoint():
+    pickup_started = threading.Event()
+    release_pickup = threading.Event()
+
+    class BlockingPickupRunner(PickupRunner):
+        def __call__(self, argv, *, input=None):
+            self.calls.append((argv, input))
+            if argv[1:3] == ["session", "pickup"]:
+                pickup_started.set()
+                assert release_pickup.wait(timeout=2)
+            return self.code, self.out
+
+    runner = BlockingPickupRunner()
+    jinn._runner = runner
+    worker = threading.Thread(
+        target=lambda: jinn._on_pre_llm_call(
+            session_id="finalize-during-pickup",
+            task_id="stable-task",
+            user_message=MSG,
+            is_first_turn=True,
+        )
+    )
+    try:
+        worker.start()
+        assert pickup_started.wait(timeout=2)
+        jinn._on_session_finalize(
+            session_id="finalize-during-pickup",
+            reason="shutdown",
+        )
+        release_pickup.set()
+        worker.join(timeout=2)
+    finally:
+        release_pickup.set()
+        worker.join(timeout=2)
+        jinn._runner = None
+
+    assert not worker.is_alive()
+    assert "finalize-during-pickup" not in jinn._pickup_checkpoints
+    assert "finalize-during-pickup" not in jinn._session_states
 
 
 # ── Agent tools (unaffected by the pickup delegation) ───────────────────────

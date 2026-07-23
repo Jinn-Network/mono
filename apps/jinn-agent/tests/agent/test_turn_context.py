@@ -206,6 +206,24 @@ def test_persist_user_message_becomes_original():
     assert ctx.messages[-1]["content"] == "api-prefixed"
 
 
+def test_pre_llm_hook_receives_live_runtime_cwd(tmp_path, monkeypatch):
+    agent = _FakeAgent()
+    monkeypatch.setenv("TERMINAL_CWD", str(tmp_path))
+
+    with patch(
+        "hermes_cli.plugins.invoke_hook",
+        return_value=[],
+    ) as invoke_hook:
+        _build(agent, task_id="fixed-task")
+
+    pre_llm_call = next(
+        call
+        for call in invoke_hook.call_args_list
+        if call.args == ("pre_llm_call",)
+    )
+    assert pre_llm_call.kwargs.get("cwd") == str(tmp_path)
+
+
 def test_memory_nudge_fires_at_interval():
     agent = _FakeAgent()
     agent._memory_nudge_interval = 1
@@ -363,4 +381,3 @@ def test_expired_cooldown_allows_preflight(tmp_path):
     assert isinstance(ctx, TurnContext)
     agent._emit_status.assert_called_once()
     agent._compress_context.assert_called()
-
