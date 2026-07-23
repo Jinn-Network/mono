@@ -179,7 +179,11 @@
         },
         "verdict": {
           "type": "string",
-          "minLength": 1
+          "enum": [
+            "verified",
+            "rejected",
+            "inconclusive"
+          ]
         },
         "checks": {
           "type": "array",
@@ -192,7 +196,11 @@
               },
               "status": {
                 "type": "string",
-                "minLength": 1
+                "enum": [
+                  "pass",
+                  "fail",
+                  "unknown"
+                ]
               },
               "explanation": {
                 "type": "string"

@@ -187,7 +187,11 @@
         },
         "verdict": {
           "type": "string",
-          "minLength": 1
+          "enum": [
+            "pass",
+            "fail",
+            "inconclusive"
+          ]
         },
         "measurements": {
           "type": "array",

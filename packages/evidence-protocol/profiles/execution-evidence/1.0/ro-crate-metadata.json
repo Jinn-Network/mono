@@ -116,7 +116,7 @@
       "@type": "File",
       "name": "schemas/execution-verification-statement.schema.json",
       "encodingFormat": "application/schema+json",
-      "sha256": "f6804fa5fc61ee0588128be492d5788bc4e80dae156c615ee789447d5a61232a"
+      "sha256": "b6a75273d2ef8e90b10eb2a80e3746ab3ba2e980b3a2d0ced21edf1399371315"
     },
     {
       "@id": "schemas/resource-descriptor.schema.json",
@@ -130,7 +130,7 @@
       "@type": "File",
       "name": "schemas/result-evaluation-statement.schema.json",
       "encodingFormat": "application/schema+json",
-      "sha256": "6fc5df3a5582cd8b5f916800399004d3cb12ec376927558a413492c030e9ec62"
+      "sha256": "8c9dff1f77f54b35d97b31e3747986c8f599530c8357c3c9dce43d89cea63d65"
     }
   ]
 }
