@@ -127,8 +127,11 @@ interrupted prep) are deleted along with the states that required them.
 
 A **child issue** is an ordinary issue created by the machine against a parent
 PR. It carries: type `fix`, a kind label (`review-finding`, `reconcile`, or
-`ci-failure`), a structured body marker naming the parent (`<!-- jinn-autopilot:child pr=<N>
-kind=<kind> -->`), and machine triage (Priority high — children unblock
+`ci-failure` — best-effort discovery tag), and a structured body marker naming
+the parent (`<!-- jinn-autopilot:child pr=<N>
+kind=<kind> -->`). The body marker is the source of truth for machine-child
+identity and scheduling; CI-red on the parent PR drives `ci-failure` filing, not
+the child label. Machine triage (Priority high — children unblock
 delivered work and **outrank fresh claims** in scheduling; Effort routed per
 §6.2).
 
