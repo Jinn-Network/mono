@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -10,8 +10,23 @@ import {
 import { makeCommandCtx } from '@test/cli.js';
 import { LocalAdapter } from '@/adapters/local/adapter.js';
 import { Store } from '@/store/store.js';
+import { marketplaceTaskSelectionSidecarPath } from '@/tasks/submit-selection.js';
+import { canonicalJson } from '@/harnesses/engine/canonical-json.js';
 
 const createCliExecutionContext = vi.hoisted(() => vi.fn());
+const createCliReadOnlySignerContext = vi.hoisted(() => vi.fn(async () => ({
+  ok: true,
+  ctx: {
+    fleetState: {
+      services: [{
+        index: 0,
+        step: 'complete',
+        safe_address: '0x00112233445566778899aabbccddeeff00112233',
+        mech_address: '0x2222222222222222222222222222222222222222',
+      }],
+    },
+  },
+})));
 const runMarketplaceTaskSubmitPreflight = vi.hoisted(() => vi.fn(async () => undefined));
 const resolveMarketplaceTaskSolverNet = vi.hoisted(() => vi.fn(async (input: {
   explicitManifestCid?: string;
@@ -24,7 +39,12 @@ const gatherIntrospectionRaw = vi.hoisted(() => vi.fn(async () => ({
     }],
   },
 })));
-vi.mock('@/cli/execution-context.js', () => ({ createCliExecutionContext }));
+vi.mock('@/cli/execution-context.js', () => ({
+  createCliExecutionContext,
+  createCliReadOnlySignerContext,
+  pickPrimaryMechService: (services: Array<{ safe_address?: string; mech_address?: string }>) =>
+    services.find((service) => service.safe_address && service.mech_address),
+}));
 vi.mock('@/cli/introspection-context.js', () => ({ gatherIntrospectionRaw }));
 vi.mock('@/tasks/submit-preflight.js', () => ({
   runMarketplaceTaskSubmitPreflight,
@@ -115,6 +135,12 @@ describe('MarketplaceTaskSubmitRequestSchema', () => {
     expect(parseMarketplaceTaskSubmitRequest(value).solverNetManifestCid).toBeUndefined();
   });
 
+  it('rejects contradictory manifest CID and SolverNet name selection', () => {
+    expect(() => parseMarketplaceTaskSubmitRequest(request({
+      solverNet: 'Autopilot production',
+    }))).toThrow(/mutually exclusive/i);
+  });
+
   it.each([
     ['claim window ordering', (value: any) => {
       value.claimPolicy.claimWindowEndTs = value.claimPolicy.claimWindowStartTs;
@@ -149,8 +175,14 @@ describe('MarketplaceTaskSubmitRequestSchema', () => {
 describe('tasks submit machine contract', () => {
   afterEach(() => {
     createCliExecutionContext.mockReset();
+    createCliReadOnlySignerContext.mockClear();
+    gatherIntrospectionRaw.mockClear();
     runMarketplaceTaskSubmitPreflight.mockClear();
-    resolveMarketplaceTaskSolverNet.mockClear();
+    resolveMarketplaceTaskSolverNet.mockReset();
+    resolveMarketplaceTaskSolverNet.mockImplementation(
+      async (input: { explicitManifestCid?: string }) =>
+        input.explicitManifestCid ?? 'bafy-auto-selected',
+    );
   });
 
   it('rejects request-file combined with legacy loose flags', async () => {
@@ -186,6 +218,8 @@ describe('tasks submit machine contract', () => {
       verb: 'tasks submit',
     });
     expect(createCliExecutionContext).not.toHaveBeenCalled();
+    expect(createCliReadOnlySignerContext).toHaveBeenCalledOnce();
+    expect(gatherIntrospectionRaw).not.toHaveBeenCalled();
     expect(runMarketplaceTaskSubmitPreflight).toHaveBeenCalledOnce();
   });
 
@@ -258,6 +292,7 @@ describe('tasks submit machine contract', () => {
     expect(JSON.parse(dry.writes.at(-1)!).plan[0]).toMatchObject({
       solverNetManifestCid: 'bafy-auto-selected',
     });
+    expect(existsSync(marketplaceTaskSelectionSidecarPath(file))).toBe(false);
 
     const adapter = new LocalAdapter();
     await adapter.initialize();
@@ -286,7 +321,107 @@ describe('tasks submit machine contract', () => {
       explicitManifestCid: undefined,
       requestedName: undefined,
     }));
+    expect(existsSync(marketplaceTaskSelectionSidecarPath(file))).toBe(true);
     store.close();
     await adapter.stop();
+  });
+
+  it('reuses a crash-frozen auto-selection without catalog access and signs identical Task bytes', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-'));
+    const file = join(dir, 'request.json');
+    const config = join(dir, 'config.json');
+    const dbPath = join(dir, 'jinn.db');
+    const value = request();
+    delete value.solverNetManifestCid;
+    writeFileSync(file, JSON.stringify(value));
+    writeFileSync(config, '{}');
+    resolveMarketplaceTaskSolverNet.mockResolvedValueOnce('bafy-frozen-selection');
+
+    const firstAdapter = new LocalAdapter();
+    await firstAdapter.initialize();
+    const firstStore = new Store(dbPath);
+    let firstSignedTask: unknown;
+    const pendingTxHash = `0x${'ef'.repeat(32)}` as const;
+    Object.assign(firstAdapter, {
+      postTask: vi.fn(async (task: { signedTask?: unknown }, options?: {
+        onTransactionHash?: (txHash: typeof pendingTxHash) => void | Promise<void>;
+      }) => {
+        firstSignedTask = task.signedTask;
+        await options?.onTransactionHash?.(pendingTxHash);
+        throw Object.assign(new Error('simulated crash after Safe submission'), {
+          name: 'PendingTaskSubmissionError',
+          txHash: pendingTxHash,
+        });
+      }),
+    });
+    createCliExecutionContext.mockResolvedValueOnce({
+      ok: true,
+      ctx: {
+        adapter: firstAdapter,
+        jinnStore: firstStore,
+        primaryService: {
+          index: 0,
+          safe_address: '0x00112233445566778899aabbccddeeff00112233',
+        },
+        mnemonic: 'test test test test test test test test test test test junk',
+      },
+    });
+    const first = makeCommandCtx({
+      argv: ['submit', '--request-file', file, '--config', config, '--yes', '--json'],
+    });
+    await tasksCommand.run(first.ctx);
+    expect(JSON.parse(first.writes.at(-1)!)).toMatchObject({
+      code: 'transient_error',
+      details: { txHash: pendingTxHash },
+    });
+    expect(firstSignedTask).toMatchObject({
+      solverNetManifestCid: 'bafy-frozen-selection',
+    });
+    expect(existsSync(marketplaceTaskSelectionSidecarPath(file))).toBe(true);
+    firstStore.close();
+    await firstAdapter.stop();
+
+    resolveMarketplaceTaskSolverNet.mockRejectedValue(new Error('catalog unavailable'));
+    const secondAdapter = new LocalAdapter();
+    await secondAdapter.initialize();
+    let recoveredSignedTask: unknown;
+    Object.assign(secondAdapter, {
+      recoverTaskPost: vi.fn(async (input: { signedTask: unknown }) => {
+        recoveredSignedTask = input.signedTask;
+        return {
+          taskId: 'frozen-task-77',
+          taskCid: `f01551220${'ab'.repeat(32)}`,
+          txHash: pendingTxHash,
+          blockNumber: 777,
+        };
+      }),
+    });
+    const secondStore = new Store(dbPath);
+    createCliExecutionContext.mockResolvedValueOnce({
+      ok: true,
+      ctx: {
+        adapter: secondAdapter,
+        jinnStore: secondStore,
+        primaryService: {
+          index: 0,
+          safe_address: '0x00112233445566778899aabbccddeeff00112233',
+        },
+        mnemonic: 'test test test test test test test test test test test junk',
+      },
+    });
+    const second = makeCommandCtx({
+      argv: ['submit', '--request-file', file, '--config', config, '--yes', '--json'],
+    });
+    await tasksCommand.run(second.ctx);
+
+    expect(JSON.parse(second.writes.at(-1)!)).toMatchObject({
+      taskId: 'frozen-task-77',
+      solverNetManifestCid: 'bafy-frozen-selection',
+      status: 'already_submitted',
+    });
+    expect(canonicalJson(recoveredSignedTask)).toBe(canonicalJson(firstSignedTask));
+    expect(resolveMarketplaceTaskSolverNet).toHaveBeenCalledTimes(1);
+    secondStore.close();
+    await secondAdapter.stop();
   });
 });

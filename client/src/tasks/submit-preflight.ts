@@ -16,6 +16,32 @@ export type MarketplaceTaskSubmitPreflightCategory =
 
 export type MarketplaceTaskSubmitPreflightCheck = () => Promise<void>;
 
+export function assertMarketplaceTaskFunding(args: {
+  safeBalanceWei: bigint;
+  agentBalanceWei: bigint;
+  solutionMaxDeliveryRateWei: bigint;
+  verdictMaxDeliveryRateWei: bigint;
+  maxClaims: number;
+  agentGasReserveWei: bigint;
+}): void {
+  const maxClaims = BigInt(args.maxClaims);
+  const taskBudgetWei =
+    args.solutionMaxDeliveryRateWei * maxClaims
+    + args.verdictMaxDeliveryRateWei * maxClaims;
+  if (args.safeBalanceWei < taskBudgetWei) {
+    throw new Error(
+      `creator Safe requires ${taskBudgetWei} wei task budget but has ${args.safeBalanceWei} wei`,
+    );
+  }
+  const requiredAgentWei = taskBudgetWei + args.agentGasReserveWei;
+  if (args.agentBalanceWei < requiredAgentWei) {
+    throw new Error(
+      `creator agent EOA requires ${requiredAgentWei} wei: ${taskBudgetWei} wei outer Safe exec value ` +
+      `plus ${args.agentGasReserveWei} wei gas reserve, but has ${args.agentBalanceWei} wei`,
+    );
+  }
+}
+
 export interface MarketplaceSolverNetSummary {
   manifestCid: string;
   name?: string;

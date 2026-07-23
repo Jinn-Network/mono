@@ -4,6 +4,7 @@ import {
   runMarketplaceTaskSubmitPreflight,
   type MarketplaceTaskSubmitPreflightCheck,
   selectMarketplaceTaskSolverNet,
+  assertMarketplaceTaskFunding,
 } from '../../src/tasks/submit-preflight.js';
 
 const categories = [
@@ -87,5 +88,32 @@ describe('selectMarketplaceTaskSolverNet', () => {
       requestedName: 'Autopilot production',
       summaries: [compatible('bafy-public', 'Autopilot production')],
     })).toBe('bafy-public');
+  });
+});
+
+describe('assertMarketplaceTaskFunding', () => {
+  const funding = (agentBalanceWei: bigint) => ({
+    safeBalanceWei: 20n,
+    agentBalanceWei,
+    solutionMaxDeliveryRateWei: 5n,
+    verdictMaxDeliveryRateWei: 5n,
+    maxClaims: 1,
+    agentGasReserveWei: 7n,
+  });
+
+  it('rejects a one-wei EOA and an EOA funded for task value but not gas', () => {
+    expect(() => assertMarketplaceTaskFunding(funding(1n))).toThrow(/agent EOA/i);
+    expect(() => assertMarketplaceTaskFunding(funding(10n))).toThrow(/gas reserve/i);
+  });
+
+  it('accepts Safe task budget plus EOA task value and conservative gas reserve', () => {
+    expect(() => assertMarketplaceTaskFunding(funding(17n))).not.toThrow();
+  });
+
+  it('retains the independent creator Safe task-budget gate', () => {
+    expect(() => assertMarketplaceTaskFunding({
+      ...funding(17n),
+      safeBalanceWei: 9n,
+    })).toThrow(/creator Safe/i);
   });
 });

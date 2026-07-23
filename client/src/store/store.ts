@@ -1230,8 +1230,8 @@ export class Store {
          post_count = excluded.post_count,
          canonical_task_json = excluded.canonical_task_json,
          request_json = excluded.request_json,
-         creation_tx_hash = excluded.creation_tx_hash,
-         creation_block_number = excluded.creation_block_number`,
+         creation_tx_hash = COALESCE(excluded.creation_tx_hash, task_posts.creation_tx_hash),
+         creation_block_number = COALESCE(excluded.creation_block_number, task_posts.creation_block_number)`,
     ).run(params);
   }
 

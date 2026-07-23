@@ -4,6 +4,7 @@ import { TaskPostingService } from '../../src/tasks/posting-service.js';
 import { Store } from '../../src/store/store.js';
 import { TransientError } from '../../src/types/index.js';
 import type { SignedTaskV1 } from '../../src/types/task-document.js';
+import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
 import { getAddress } from 'viem';
 
 const SAFE_A = '0x00112233445566778899aabbccddeeff00112233';
@@ -273,7 +274,7 @@ describe('TaskPostingService', () => {
     await adapter.stop();
   });
 
-  it('persists a surfaced Safe transaction hash before receipt reconciliation completes', async () => {
+  it('preserves a surfaced Safe transaction hash across repeated pending recovery until the event lands', async () => {
     const adapter = new LocalAdapter();
     await adapter.initialize();
     const store = new Store(':memory:');
@@ -285,11 +286,24 @@ describe('TaskPostingService', () => {
       await options.onTransactionHash?.(txHash);
       throw Object.assign(new Error('pending reconciliation'), { txHash });
     });
-    const recoverTaskPost = vi.fn(async (input: { pendingTxHash?: typeof txHash }) => {
-      throw Object.assign(new Error('still pending reconciliation'), {
-        txHash: input.pendingTxHash,
-      });
-    });
+    const recovered = {
+      taskId: 'pending-task-77',
+      taskCid: `f01551220${'ab'.repeat(32)}`,
+      txHash,
+      blockNumber: 777,
+    };
+    const recoverTaskPost = vi.fn()
+      .mockImplementationOnce(async (input: { pendingTxHash?: typeof txHash }) => {
+        throw Object.assign(new Error('still pending reconciliation'), {
+          txHash: input.pendingTxHash,
+        });
+      })
+      .mockImplementationOnce(async (input: { pendingTxHash?: typeof txHash }) => {
+        throw Object.assign(new Error('still pending reconciliation'), {
+          txHash: input.pendingTxHash,
+        });
+      })
+      .mockResolvedValueOnce(recovered);
     Object.assign(adapter, {
       postTask,
       recoverTaskPost,
@@ -310,18 +324,113 @@ describe('TaskPostingService', () => {
     await expect(
       service.postCandidate(candidate, { creatorSafeAddress: SAFE_A }),
     ).rejects.toThrow('pending reconciliation');
-    expect(store.getTaskPostRecord({
+    const pendingRecord = store.getTaskPostRecord({
       creatorSafeAddress: getAddress(SAFE_A),
       sourceKey: candidate.sourceKey,
       policyType: 'once_per_safe',
       scopeKey: '',
-    })).toMatchObject({ creationTxHash: txHash, protocolTaskId: null });
+    });
+    expect(pendingRecord).toMatchObject({ creationTxHash: txHash, protocolTaskId: null });
+    store.upsertTaskPostRecord({
+      ...pendingRecord!,
+      creationBlockNumber: 776,
+    });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await expect(
+        service.postCandidate(candidate, { creatorSafeAddress: SAFE_A }),
+      ).rejects.toThrow('still pending reconciliation');
+      expect(store.getTaskPostRecord({
+        creatorSafeAddress: getAddress(SAFE_A),
+        sourceKey: candidate.sourceKey,
+        policyType: 'once_per_safe',
+        scopeKey: '',
+      })).toMatchObject({
+        creationTxHash: txHash,
+        creationBlockNumber: 776,
+        protocolTaskId: null,
+      });
+    }
     await expect(
       service.postCandidate(candidate, { creatorSafeAddress: SAFE_A }),
-    ).rejects.toThrow('still pending reconciliation');
-    expect(recoverTaskPost).toHaveBeenCalledWith(expect.objectContaining({
-      pendingTxHash: txHash,
+    ).resolves.toMatchObject({
+      taskId: recovered.taskId,
+      txHash,
+      blockNumber: recovered.blockNumber,
+      source: 'recovered',
+    });
+    expect(recoverTaskPost).toHaveBeenCalledTimes(3);
+    for (const [input] of recoverTaskPost.mock.calls) {
+      expect(input).toMatchObject({ pendingTxHash: txHash });
+    }
+    expect(postTask).toHaveBeenCalledOnce();
+
+    store.close();
+    await adapter.stop();
+  });
+
+  it('fences a stale owner immediately before broadcast when its lease was stolen during recovery', async () => {
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+    let nowMs = Date.parse('2026-07-23T00:00:00.000Z');
+    const scheduler = {
+      now: () => new Date(nowMs),
+      setInterval: (callback: () => void) => callback,
+      clearInterval: () => undefined,
+    };
+    const firstService = new TaskPostingService(adapter, store, scheduler);
+    const secondService = new TaskPostingService(adapter, store, scheduler);
+    const signedTask = {
+      schemaVersion: 'task.v1',
+      id: 'autopilot:lease-fence',
+      solverType: 'jinn-repo.v1',
+      solverNetManifestCid: 'bafy-manifest',
+    } as SignedTaskV1;
+    const candidate = {
+      task: { id: signedTask.id, description: 'lease fence', signedTask },
+      sourceKey: signedTask.id,
+      postingPolicy: { kind: 'once_per_safe' } as const,
+      sourceMeta: { request: { schemaVersion: 'jinn-task-submit-request.v1' } },
+    };
+    store.upsertTaskPostRecord({
+      creatorSafeAddress: getAddress(SAFE_A),
+      sourceKey: candidate.sourceKey,
+      policyType: 'once_per_safe',
+      scopeKey: '',
+      taskId: candidate.task.id,
+      requestId: candidate.task.id,
+      firstPostedAt: new Date(nowMs).toISOString(),
+      lastPostedAt: new Date(nowMs).toISOString(),
+      postCount: 0,
+      canonicalTaskJson: canonicalJson(signedTask),
+      requestJson: canonicalJson(candidate.sourceMeta.request),
+    });
+
+    let releaseFirstRecovery!: () => void;
+    const firstRecoveryGate = new Promise<void>((resolve) => {
+      releaseFirstRecovery = resolve;
+    });
+    const recoverTaskPost = vi.fn()
+      .mockImplementationOnce(async () => {
+        await firstRecoveryGate;
+        return null;
+      })
+      .mockResolvedValueOnce(null);
+    const postTask = vi.fn(async () => ({
+      taskId: 'lease-winner',
+      taskCid: `f01551220${'cd'.repeat(32)}`,
     }));
+    Object.assign(adapter, { recoverTaskPost, postTask });
+
+    const staleOwner = firstService.postCandidate(candidate, { creatorSafeAddress: SAFE_A });
+    await vi.waitFor(() => expect(recoverTaskPost).toHaveBeenCalledTimes(1));
+    nowMs += 61_000;
+    const winner = await secondService.postCandidate(candidate, { creatorSafeAddress: SAFE_A });
+    expect(winner.taskId).toBe('lease-winner');
+    expect(postTask).toHaveBeenCalledOnce();
+
+    releaseFirstRecovery();
+    await expect(staleOwner).rejects.toBeInstanceOf(TransientError);
     expect(postTask).toHaveBeenCalledOnce();
 
     store.close();

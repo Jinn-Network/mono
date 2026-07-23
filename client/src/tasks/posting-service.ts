@@ -228,6 +228,19 @@ export class TaskPostingService {
           };
         }
       }
+      const stillOwnsPost = this.store.renewTaskPostLock({
+        creatorSafeAddress,
+        sourceKey: candidate.sourceKey,
+        policyType,
+        scopeKey,
+        ownerToken,
+        lockedAt: this.scheduler.now().toISOString(),
+      });
+      if (!stillOwnsPost) {
+        throw new TransientError(
+          `Task post ownership was lost before posting ${candidate.sourceKey}; refusing to broadcast`,
+        );
+      }
       const posted = await this.adapter.postTask(task, {
         onTransactionHash: async (txHash) => {
           this.store.upsertTaskPostRecord({

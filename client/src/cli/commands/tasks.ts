@@ -11,8 +11,9 @@ import { ensureConfirmed, emitDryRun } from '../action.js';
 import { gatherIntrospectionRaw } from '../introspection-context.js';
 import {
   createCliExecutionContext,
-  createCliSignerContext,
+  createCliReadOnlySignerContext,
   pickPrimaryMechService,
+  type CliSignerContext,
 } from '../execution-context.js';
 import { isRecoverableTransactionError } from '../../tx-retry.js';
 import type { Task } from '../../types/task.js';
@@ -34,9 +35,14 @@ import {
   type MarketplaceTaskSubmitRequest,
 } from '../../tasks/submit-request.js';
 import {
+  assertMarketplaceTaskFunding,
   resolveMarketplaceTaskSolverNet,
   runMarketplaceTaskSubmitPreflight,
 } from '../../tasks/submit-preflight.js';
+import {
+  readMarketplaceTaskSelection,
+  writeMarketplaceTaskSelection,
+} from '../../tasks/submit-selection.js';
 import { createHttpDiscoveryAPI } from '../../discovery/http.js';
 import { fetchFromIpfs } from '../../adapters/mech/ipfs.js';
 import { getJinnRouterAddress } from '../../contracts/addresses.js';
@@ -49,14 +55,9 @@ function machinePreflightChecks(args: {
   ctx: CommandContext;
   config: ReturnType<typeof loadConfig>;
   manifestCid: string;
+  signerContext: CliSignerContext;
 }) {
-  let signerPromise: ReturnType<typeof createCliSignerContext> | undefined;
-  const signer = async () => {
-    signerPromise ??= createCliSignerContext({ argv: args.ctx.argv, env: args.ctx.env });
-    const built = await signerPromise;
-    if (!built.ok) throw new Error(built.envelope.message);
-    return built.ctx;
-  };
+  const signer = async () => args.signerContext;
   let launchedPromise: ReturnType<ReturnType<typeof createHttpDiscoveryAPI>['listLaunchedSolverNets']> | undefined;
   const launched = async () => {
     const discovery = args.config.discovery;
@@ -95,13 +96,14 @@ function machinePreflightChecks(args: {
           getAddress(service.mech_address!),
         ),
       ]);
-      const requiredTaskBudget = deliveryRate * 2n;
-      if (balance < requiredTaskBudget) {
-        throw new Error(
-          `creator Safe requires ${requiredTaskBudget} wei but has ${balance} wei`,
-        );
-      }
-      if (agentBalance <= 0n) throw new Error('creator agent EOA has no native gas funds');
+      assertMarketplaceTaskFunding({
+        safeBalanceWei: balance,
+        agentBalanceWei: agentBalance,
+        solutionMaxDeliveryRateWei: deliveryRate,
+        verdictMaxDeliveryRateWei: deliveryRate,
+        maxClaims: 1,
+        agentGasReserveWei: built.chainConfig.minEoaGasEth,
+      });
     },
     rpc: async () => {
       const built = await signer();
@@ -340,11 +342,16 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
   let selectedMachineManifestCid: string | undefined;
   if (machineRequest) {
     try {
-      selectedMachineManifestCid = await resolveMarketplaceTaskSolverNet({
-        config,
-        explicitManifestCid: machineRequest.solverNetManifestCid,
-        requestedName: machineRequest.solverNet,
+      const frozenSelection = readMarketplaceTaskSelection({
+        requestPath: requestFilePath!,
+        request: machineRequest,
       });
+      selectedMachineManifestCid = frozenSelection?.solverNetManifestCid
+        ?? await resolveMarketplaceTaskSolverNet({
+          config,
+          explicitManifestCid: machineRequest.solverNetManifestCid,
+          requestedName: machineRequest.solverNet,
+        });
     } catch (err) {
       emitEnvelope(
         {
@@ -446,8 +453,20 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
   }
 
   if (dryRun) {
-    const raw = await gatherIntrospectionRaw({ argv: ctx.argv });
-    const service = raw.fleet?.services.find(s => isOperationalServiceStep(s.step));
+    let service: { safe_address?: string | null } | undefined;
+    let machineSignerContext: CliSignerContext | undefined;
+    if (machineRequest) {
+      const built = await createCliReadOnlySignerContext({ argv: ctx.argv, env: ctx.env });
+      if (!built.ok) {
+        emitEnvelope(built.envelope, { writer: ctx.writer, exit: ctx.exit });
+        return;
+      }
+      machineSignerContext = built.ctx;
+      service = pickPrimaryMechService(built.ctx.fleetState.services);
+    } else {
+      const raw = await gatherIntrospectionRaw({ argv: ctx.argv });
+      service = raw.fleet?.services.find(s => isOperationalServiceStep(s.step));
+    }
     if (!service?.safe_address) {
       emitEnvelope(
         {
@@ -469,6 +488,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
           ctx,
           config,
           manifestCid: selectedMachineManifestCid!,
+          signerContext: machineSignerContext!,
         }));
       } catch (err) {
         emitEnvelope(
@@ -505,6 +525,27 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
   }
 
   if (!ensureConfirmed(ctx, { yes, dryRun: false })) return;
+  if (machineRequest) {
+    try {
+      writeMarketplaceTaskSelection({
+        requestPath: requestFilePath!,
+        request: machineRequest,
+        solverNetManifestCid: selectedMachineManifestCid!,
+        ...(machineRequest.solverNet ? { solverNetName: machineRequest.solverNet } : {}),
+      });
+    } catch (err) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: err instanceof Error ? err.message : String(err),
+          exampleCli: 'jinn tasks submit --request-file request.json --yes --json',
+          details: { field: '--request-file' },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+  }
 
   const built = await createCliExecutionContext({ argv: ctx.argv, env: ctx.env });
   if (!built.ok) {
@@ -655,14 +696,27 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
       },
     );
   } catch (e) {
-    if (isRecoverableTransactionError(e)) {
+    const pendingTxHash =
+      e && typeof e === 'object'
+      && (e as { name?: unknown }).name === 'PendingTaskSubmissionError'
+      && typeof (e as { txHash?: unknown }).txHash === 'string'
+        ? (e as { txHash: string }).txHash
+        : undefined;
+    if (pendingTxHash || isRecoverableTransactionError(e)) {
       emitEnvelope(
         {
           code: 'transient_error',
           message: e instanceof Error ? e.message : String(e),
-          hint: 'Retry when the RPC endpoint is healthy or fees clear.',
-          exampleCli: 'jinn tasks submit --id my-task --description "..." --yes',
-          details: { cause: e instanceof Error ? e.message : String(e) },
+          hint: pendingTxHash
+            ? 'Retry to reconcile this exact submitted transaction; a new Safe transaction will not be broadcast while it remains pending.'
+            : 'Retry when the RPC endpoint is healthy or fees clear.',
+          exampleCli: machineRequest
+            ? 'jinn tasks submit --request-file request.json --yes --json'
+            : 'jinn tasks submit --id my-task --description "..." --yes',
+          details: {
+            cause: e instanceof Error ? e.message : String(e),
+            ...(pendingTxHash ? { txHash: pendingTxHash } : {}),
+          },
         },
         { writer: ctx.writer, exit: ctx.exit },
       );
