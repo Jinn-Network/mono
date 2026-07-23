@@ -458,6 +458,9 @@ export interface TaskEngineOptions {
 
 const TASK_CREATION_TIMESTAMP_LOOKUP_ATTEMPTS = 3;
 
+/** Min interval between transient-RPC tick_error emits per requestId (#934). */
+export const TRANSIENT_TICK_ERROR_HEARTBEAT_MS = 5 * 60_000;
+
 // ── Recovery report ───────────────────────────────────────────────────────────
 
 /** Per-task outcome from a recovery pass. */
@@ -545,6 +548,9 @@ export class TaskEngine {
   // out of RUNNING) reuses this instead of re-querying the corpus and
   // re-emitting the corpus_knowledge event. Cleared after successful pack.
   private readonly consumedRefsByRequest = new Map<string, string | null>();
+
+  /** requestId → epoch ms of last transient tick_error emit (#934) */
+  private readonly lastTransientTickErrorAt = new Map<string, number>();
 
   private readonly processingRequestIds = new Set<string>();
 
@@ -2628,15 +2634,23 @@ export class TaskEngine {
       task.windowEndTs > Date.now()
       && (recoverablePrerequisite || isRecoverableTransactionError(err))
     ) {
-      emitEvent(this.store, {
-        kind: 'tick_error',
-        requestId: task.requestId,
-        solverType: task.solverType ?? undefined,
-        outcome: 'warn',
-        detail:
-          `${recoverablePrerequisite ? 'recoverable prerequisite failure' : 'transient RPC failure'} `
-          + `in ${contextLabel}; left ${task.state} for retry: ${reason}`,
-      }, 'harness-engine');
+      const now = Date.now();
+      const last = this.lastTransientTickErrorAt.get(task.requestId);
+      if (
+        last === undefined
+        || now - last >= TRANSIENT_TICK_ERROR_HEARTBEAT_MS
+      ) {
+        emitEvent(this.store, {
+          kind: 'tick_error',
+          requestId: task.requestId,
+          solverType: task.solverType ?? undefined,
+          outcome: 'warn',
+          detail:
+            `${recoverablePrerequisite ? 'recoverable prerequisite failure' : 'transient RPC failure'} `
+            + `in ${contextLabel}; left ${task.state} for retry: ${reason}`,
+        }, 'harness-engine');
+        this.lastTransientTickErrorAt.set(task.requestId, now);
+      }
       return 'transient';
     }
     const stamped = contextLabel === 'recovery' ? `recovery: ${reason}` : reason;
