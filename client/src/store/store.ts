@@ -1304,6 +1304,26 @@ export class Store {
     ).run(args);
   }
 
+  renewTaskPostLock(args: {
+    creatorSafeAddress: string;
+    sourceKey: string;
+    policyType: TaskPostingPolicyType;
+    scopeKey: string;
+    ownerToken: string;
+    lockedAt: string;
+  }): boolean {
+    const result = this.db.prepare(
+      `UPDATE task_post_locks
+       SET locked_at = @lockedAt
+       WHERE creator_safe_address = @creatorSafeAddress
+         AND source_key = @sourceKey
+         AND policy_type = @policyType
+         AND scope_key = @scopeKey
+         AND owner_token = @ownerToken`,
+    ).run(args);
+    return result.changes === 1;
+  }
+
   /** Counts of protocol roles recorded for this node (best-effort activity hints). */
   getOwnActivityCounts(): Record<string, number> {
     const counts = this.getActivityCountsByKind();

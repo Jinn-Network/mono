@@ -4,8 +4,14 @@ import { submitTask } from '../../../src/adapters/mech/contracts.js';
 import { JINN_ROUTER_ABI } from '../../../src/adapters/mech/types.js';
 import { executeSafeTransaction } from '../../../src/adapters/mech/safe.js';
 
+const waitForTransactionReceiptWithRetry = vi.hoisted(() => vi.fn());
 vi.mock('../../../src/adapters/mech/safe.js', () => ({
   executeSafeTransaction: vi.fn(),
+}));
+vi.mock('../../../src/tx-retry.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../../src/tx-retry.js')>(),
+  waitForTransactionReceiptWithRetry,
+  backoffDelay: vi.fn(async () => undefined),
 }));
 
 const SAFE_ADDRESS = '0x1111111111111111111111111111111111111111' as Address;
@@ -56,12 +62,12 @@ describe('submitTask TaskCreated recovery', () => {
 
   it('recovers TaskCreated from nearby router logs when the receipt logs are incomplete', async () => {
     vi.mocked(executeSafeTransaction).mockResolvedValueOnce(FIRST_TX);
+    waitForTransactionReceiptWithRetry.mockResolvedValueOnce({
+      status: 'success',
+      logs: [],
+      blockNumber: 100n,
+    });
     const publicClient = {
-      waitForTransactionReceipt: vi.fn().mockResolvedValue({
-        status: 'success',
-        logs: [],
-        blockNumber: 100n,
-      }),
       getBlockNumber: vi.fn().mockResolvedValue(100n),
       getLogs: vi.fn().mockResolvedValue([taskCreatedLog(42n, FIRST_TX, 100n)]),
     };
@@ -93,24 +99,14 @@ describe('submitTask TaskCreated recovery', () => {
     });
   });
 
-  it('retries createTask when neither receipt nor nearby logs contain TaskCreated', async () => {
-    vi.mocked(executeSafeTransaction)
-      .mockResolvedValueOnce(FIRST_TX)
-      .mockResolvedValueOnce(SECOND_TX);
+  it('recovers the landed TaskCreated after receipt polling exhausts without executing the Safe twice', async () => {
+    vi.mocked(executeSafeTransaction).mockResolvedValueOnce(FIRST_TX);
+    waitForTransactionReceiptWithRetry.mockRejectedValueOnce(
+      new Error('HTTP request failed: 503'),
+    );
     const publicClient = {
-      waitForTransactionReceipt: vi.fn()
-        .mockResolvedValueOnce({
-          status: 'success',
-          logs: [],
-          blockNumber: 200n,
-        })
-        .mockResolvedValueOnce({
-          status: 'success',
-          logs: [taskCreatedLog(43n, SECOND_TX, 201n)],
-          blockNumber: 201n,
-        }),
       getBlockNumber: vi.fn().mockResolvedValue(200n),
-      getLogs: vi.fn().mockResolvedValue([]),
+      getLogs: vi.fn().mockResolvedValue([taskCreatedLog(43n, FIRST_TX, 199n)]),
     };
 
     const result = await submitTask(
@@ -128,10 +124,35 @@ describe('submitTask TaskCreated recovery', () => {
 
     expect(result).toMatchObject({
       taskId: '43',
-      txHash: SECOND_TX,
-      receiptLogCount: 1,
-      blockNumber: 201,
+      txHash: FIRST_TX,
+      receiptLogCount: 0,
+      blockNumber: 199,
     });
-    expect(executeSafeTransaction).toHaveBeenCalledTimes(2);
+    expect(executeSafeTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an event-less submitted hash recoverable without immediate rebroadcast', async () => {
+    vi.mocked(executeSafeTransaction).mockResolvedValueOnce(FIRST_TX);
+    waitForTransactionReceiptWithRetry.mockRejectedValue(
+      new Error('HTTP request failed: 503'),
+    );
+    const publicClient = {
+      getBlockNumber: vi.fn().mockResolvedValue(200n),
+      getLogs: vi.fn().mockResolvedValue([]),
+    };
+
+    await expect(submitTask(
+      publicClient as never,
+      {} as never,
+      SAFE_ADDRESS,
+      ROUTER_ADDRESS,
+      TASK_CID_DIGEST,
+      MANIFEST_DIGEST,
+      POLICY,
+      10n,
+      10n,
+      300n,
+    )).rejects.toMatchObject({ txHash: FIRST_TX });
+    expect(executeSafeTransaction).toHaveBeenCalledTimes(1);
   });
 });

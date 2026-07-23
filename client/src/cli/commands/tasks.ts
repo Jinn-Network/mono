@@ -33,7 +33,10 @@ import {
   parseMarketplaceTaskSubmitRequest,
   type MarketplaceTaskSubmitRequest,
 } from '../../tasks/submit-request.js';
-import { runMarketplaceTaskSubmitPreflight } from '../../tasks/submit-preflight.js';
+import {
+  resolveMarketplaceTaskSolverNet,
+  runMarketplaceTaskSubmitPreflight,
+} from '../../tasks/submit-preflight.js';
 import { createHttpDiscoveryAPI } from '../../discovery/http.js';
 import { fetchFromIpfs } from '../../adapters/mech/ipfs.js';
 import { getJinnRouterAddress } from '../../contracts/addresses.js';
@@ -319,7 +322,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
   const solverTypeFromNet = matchedJoined
     ? solverTypeFromJoinedContract(matchedJoined)
     : undefined;
-  if (requestedSolverNet && !solverTypeFromNet) {
+  if (!machineRequest && requestedSolverNet && !solverTypeFromNet) {
     const available = Object.entries(config.joinedSolverNets ?? {})
       .map(([cid, entry]) => joinedDisplayName(cid, entry))
       .join('|');
@@ -334,20 +337,26 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     );
     return;
   }
-  const selectedMachineManifestCid = machineRequest
-    ? (machineRequest.solverNetManifestCid ?? matchedJoined?.manifestCid)
-    : undefined;
-  if (machineRequest && !selectedMachineManifestCid) {
-    emitEnvelope(
-      {
-        code: 'invalid_invocation',
-        message: 'The machine request did not resolve an exact SolverNet manifest CID',
-        exampleCli: 'jinn tasks submit --request-file request.json --dry-run --json',
-        details: { field: 'solverNetManifestCid' },
-      },
-      { writer: ctx.writer, exit: ctx.exit },
-    );
-    return;
+  let selectedMachineManifestCid: string | undefined;
+  if (machineRequest) {
+    try {
+      selectedMachineManifestCid = await resolveMarketplaceTaskSolverNet({
+        config,
+        explicitManifestCid: machineRequest.solverNetManifestCid,
+        requestedName: machineRequest.solverNet,
+      });
+    } catch (err) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: err instanceof Error ? err.message : String(err),
+          exampleCli: 'jinn tasks submit --request-file request.json --dry-run --json',
+          details: { field: 'solverNetManifestCid' },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
   }
 
   const specFilePath = parsed.values['spec-file'] as string | undefined;
@@ -485,6 +494,9 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
           creatorMultisig,
           asset: 'native',
           txCount: 1,
+          ...(selectedMachineManifestCid
+            ? { solverNetManifestCid: selectedMachineManifestCid }
+            : {}),
           ...(specOverlay ? { solverType: specOverlay.solverType, spec: specOverlay.spec } : {}),
         },
       ],

@@ -14,6 +14,11 @@ import type { SignedTaskV1 } from '../types/task-document.js';
 export interface RecoverTaskPostInput {
   creatorSafeAddress: string;
   signedTask: SignedTaskV1;
+  pendingTxHash?: Hex;
+}
+
+export interface PostTaskOptions {
+  onTransactionHash?: (txHash: Hex) => void | Promise<void>;
 }
 
 export interface ExecutionAdapter {
@@ -22,7 +27,7 @@ export interface ExecutionAdapter {
   initialize(): Promise<void>;
 
   // Creator
-  postTask(state: Task): Promise<PostedTask>;
+  postTask(state: Task, options?: PostTaskOptions): Promise<PostedTask>;
   recoverTaskPost?(input: RecoverTaskPostInput): Promise<PostedTask | null>;
 
   /**

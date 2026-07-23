@@ -13,6 +13,9 @@ import { Store } from '@/store/store.js';
 
 const createCliExecutionContext = vi.hoisted(() => vi.fn());
 const runMarketplaceTaskSubmitPreflight = vi.hoisted(() => vi.fn(async () => undefined));
+const resolveMarketplaceTaskSolverNet = vi.hoisted(() => vi.fn(async (input: {
+  explicitManifestCid?: string;
+}) => input.explicitManifestCid ?? 'bafy-auto-selected'));
 const gatherIntrospectionRaw = vi.hoisted(() => vi.fn(async () => ({
   fleet: {
     services: [{
@@ -23,7 +26,10 @@ const gatherIntrospectionRaw = vi.hoisted(() => vi.fn(async () => ({
 })));
 vi.mock('@/cli/execution-context.js', () => ({ createCliExecutionContext }));
 vi.mock('@/cli/introspection-context.js', () => ({ gatherIntrospectionRaw }));
-vi.mock('@/tasks/submit-preflight.js', () => ({ runMarketplaceTaskSubmitPreflight }));
+vi.mock('@/tasks/submit-preflight.js', () => ({
+  runMarketplaceTaskSubmitPreflight,
+  resolveMarketplaceTaskSolverNet,
+}));
 
 const V2_ATTEMPT_ID = '11111111-1111-4111-8111-111111111111';
 
@@ -103,6 +109,12 @@ describe('MarketplaceTaskSubmitRequestSchema', () => {
       .toThrow(/autopilot:/);
   });
 
+  it('accepts omission of SolverNet selection for unique-live indexer resolution', () => {
+    const value = request();
+    delete value.solverNetManifestCid;
+    expect(parseMarketplaceTaskSubmitRequest(value).solverNetManifestCid).toBeUndefined();
+  });
+
   it.each([
     ['claim window ordering', (value: any) => {
       value.claimPolicy.claimWindowEndTs = value.claimPolicy.claimWindowStartTs;
@@ -138,6 +150,7 @@ describe('tasks submit machine contract', () => {
   afterEach(() => {
     createCliExecutionContext.mockReset();
     runMarketplaceTaskSubmitPreflight.mockClear();
+    resolveMarketplaceTaskSolverNet.mockClear();
   });
 
   it('rejects request-file combined with legacy loose flags', async () => {
@@ -225,6 +238,54 @@ describe('tasks submit machine contract', () => {
       solverNetManifestCid: first.solverNetManifestCid,
       idempotent: true,
     });
+    store.close();
+    await adapter.stop();
+  });
+
+  it('uses the unique public-indexer SolverNet for dry-run and real submission when omitted', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-'));
+    const file = join(dir, 'request.json');
+    const config = join(dir, 'config.json');
+    const value = request();
+    delete value.solverNetManifestCid;
+    writeFileSync(file, JSON.stringify(value));
+    writeFileSync(config, '{}');
+
+    const dry = makeCommandCtx({
+      argv: ['submit', '--request-file', file, '--config', config, '--dry-run', '--json'],
+    });
+    await tasksCommand.run(dry.ctx);
+    expect(JSON.parse(dry.writes.at(-1)!).plan[0]).toMatchObject({
+      solverNetManifestCid: 'bafy-auto-selected',
+    });
+
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+    createCliExecutionContext.mockResolvedValue({
+      ok: true,
+      ctx: {
+        adapter,
+        jinnStore: store,
+        primaryService: {
+          index: 0,
+          safe_address: '0x00112233445566778899aabbccddeeff00112233',
+        },
+        mnemonic: 'test test test test test test test test test test test junk',
+      },
+    });
+    const real = makeCommandCtx({
+      argv: ['submit', '--request-file', file, '--config', config, '--yes', '--json'],
+    });
+    await tasksCommand.run(real.ctx);
+    expect(JSON.parse(real.writes.at(-1)!)).toMatchObject({
+      solverNetManifestCid: 'bafy-auto-selected',
+      idempotent: false,
+    });
+    expect(resolveMarketplaceTaskSolverNet).toHaveBeenCalledWith(expect.objectContaining({
+      explicitManifestCid: undefined,
+      requestedName: undefined,
+    }));
     store.close();
     await adapter.stop();
   });

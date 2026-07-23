@@ -100,6 +100,67 @@ describe('TaskPostingService', () => {
     await adapter.stop();
   });
 
+  it('renews immutable machine-post ownership across work longer than the stale-lock window', async () => {
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+    let nowMs = Date.parse('2026-07-23T00:00:00.000Z');
+    const intervals = new Set<() => void>();
+    const scheduler = {
+      now: () => new Date(nowMs),
+      setInterval: (callback: () => void) => {
+        intervals.add(callback);
+        return callback;
+      },
+      clearInterval: (handle: unknown) => {
+        intervals.delete(handle as () => void);
+      },
+    };
+    const firstService = new TaskPostingService(adapter, store, scheduler);
+    const secondService = new TaskPostingService(adapter, store, scheduler);
+    let releasePost!: () => void;
+    const postingGate = new Promise<void>((resolve) => { releasePost = resolve; });
+    const postSpy = vi.spyOn(adapter, 'postTask').mockImplementation(async () => {
+      await postingGate;
+      return {
+        taskId: 'machine-long-1',
+        taskCid: `f01551220${'ab'.repeat(32)}`,
+      };
+    });
+    const candidate = {
+      task: {
+        id: 'autopilot:long-post',
+        description: 'long immutable post',
+        signedTask: {
+          schemaVersion: 'task.v1',
+          id: 'autopilot:long-post',
+          solverType: 'jinn-repo.v1',
+          solverNetManifestCid: 'bafy-manifest',
+        } as SignedTaskV1,
+      },
+      sourceKey: 'autopilot:long-post',
+      postingPolicy: { kind: 'once_per_safe' } as const,
+      sourceMeta: { request: { schemaVersion: 'jinn-task-submit-request.v1' } },
+    };
+
+    const first = firstService.postCandidate(candidate, { creatorSafeAddress: SAFE_A });
+    await vi.waitFor(() => expect(postSpy).toHaveBeenCalledOnce());
+    expect(intervals.size).toBe(1);
+    nowMs += 61_000;
+    for (const heartbeat of intervals) heartbeat();
+
+    await expect(
+      secondService.postCandidate(candidate, { creatorSafeAddress: SAFE_A }),
+    ).rejects.toBeInstanceOf(TransientError);
+    expect(postSpy).toHaveBeenCalledOnce();
+
+    releasePost();
+    await first;
+    expect(intervals.size).toBe(0);
+    store.close();
+    await adapter.stop();
+  });
+
   it('propagates SignedTaskV1 on Task through to the adapter unchanged', async () => {
     const adapter = new LocalAdapter();
     await adapter.initialize();
@@ -207,6 +268,61 @@ describe('TaskPostingService', () => {
       creatorSafeAddress: getAddress(SAFE_A),
       signedTask,
     }));
+
+    store.close();
+    await adapter.stop();
+  });
+
+  it('persists a surfaced Safe transaction hash before receipt reconciliation completes', async () => {
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+    const service = new TaskPostingService(adapter, store);
+    const txHash = `0x${'ef'.repeat(32)}` as const;
+    const postTask = vi.fn(async (_task: unknown, options: {
+      onTransactionHash?: (hash: typeof txHash) => void | Promise<void>;
+    }) => {
+      await options.onTransactionHash?.(txHash);
+      throw Object.assign(new Error('pending reconciliation'), { txHash });
+    });
+    const recoverTaskPost = vi.fn(async (input: { pendingTxHash?: typeof txHash }) => {
+      throw Object.assign(new Error('still pending reconciliation'), {
+        txHash: input.pendingTxHash,
+      });
+    });
+    Object.assign(adapter, {
+      postTask,
+      recoverTaskPost,
+    });
+    const signedTask = {
+      schemaVersion: 'task.v1',
+      id: 'autopilot:pending-hash',
+      solverType: 'jinn-repo.v1',
+      solverNetManifestCid: 'bafy-manifest',
+    } as SignedTaskV1;
+    const candidate = {
+      task: { id: signedTask.id, description: 'pending hash', signedTask },
+      sourceKey: 'autopilot:pending-hash',
+      postingPolicy: { kind: 'once_per_safe' } as const,
+      sourceMeta: { request: { schemaVersion: 'jinn-task-submit-request.v1' } },
+    };
+
+    await expect(
+      service.postCandidate(candidate, { creatorSafeAddress: SAFE_A }),
+    ).rejects.toThrow('pending reconciliation');
+    expect(store.getTaskPostRecord({
+      creatorSafeAddress: getAddress(SAFE_A),
+      sourceKey: candidate.sourceKey,
+      policyType: 'once_per_safe',
+      scopeKey: '',
+    })).toMatchObject({ creationTxHash: txHash, protocolTaskId: null });
+    await expect(
+      service.postCandidate(candidate, { creatorSafeAddress: SAFE_A }),
+    ).rejects.toThrow('still pending reconciliation');
+    expect(recoverTaskPost).toHaveBeenCalledWith(expect.objectContaining({
+      pendingTxHash: txHash,
+    }));
+    expect(postTask).toHaveBeenCalledOnce();
 
     store.close();
     await adapter.stop();

@@ -2,7 +2,7 @@ import { getAddress, type Address, type Hex, type Log, type PublicClient, type W
 import { keccak256, toBytes } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { base, baseSepolia } from 'viem/chains';
-import type { ExecutionAdapter } from '../adapter.js';
+import type { ExecutionAdapter, PostTaskOptions } from '../adapter.js';
 import type {
   Task,
   RequestId,
@@ -56,6 +56,7 @@ import {
   type RouterTaskPolicy,
   type DecodedTaskCreated,
   scanTasks,
+  PendingTaskSubmissionError,
 } from './contracts.js';
 import { type MechAdapterConfig } from './types.js';
 import {
@@ -652,7 +653,7 @@ export class MechAdapter implements ExecutionAdapter {
     return true;
   }
 
-  async postTask(state: Task): Promise<PostedTask> {
+  async postTask(state: Task, options?: PostTaskOptions): Promise<PostedTask> {
     const restorationState: Task = {
       ...state,
       role: state.role ?? 'restoration',
@@ -700,6 +701,7 @@ export class MechAdapter implements ExecutionAdapter {
       deliveryRate,
       maxTimeout,
       this.config.evictionRecovery,
+      options?.onTransactionHash,
     );
     if (
       taskSubmission.txHash
@@ -737,6 +739,7 @@ export class MechAdapter implements ExecutionAdapter {
   async recoverTaskPost(input: {
     creatorSafeAddress: string;
     signedTask: SignedTaskV1;
+    pendingTxHash?: Hex;
   }): Promise<PostedTask | null> {
     const cid = await uploadToIpfs(this.config.ipfsRegistryUrl, input.signedTask);
     const taskCidDigest = cidToDigestHex(cid);
@@ -754,7 +757,12 @@ export class MechAdapter implements ExecutionAdapter {
       event.taskCidDigest.toLowerCase() === taskCidDigest.toLowerCase()
       && event.manifestDigest?.toLowerCase() === manifestDigest.toLowerCase()
     );
-    if (!match) return null;
+    if (!match) {
+      if (input.pendingTxHash) {
+        throw new PendingTaskSubmissionError(input.pendingTxHash);
+      }
+      return null;
+    }
     const digest = taskCidDigest.slice(2);
     return {
       taskId: match.taskId,

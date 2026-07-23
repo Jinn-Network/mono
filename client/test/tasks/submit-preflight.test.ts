@@ -3,6 +3,7 @@ import {
   MarketplaceTaskSubmitPreflightError,
   runMarketplaceTaskSubmitPreflight,
   type MarketplaceTaskSubmitPreflightCheck,
+  selectMarketplaceTaskSolverNet,
 } from '../../src/tasks/submit-preflight.js';
 
 const categories = [
@@ -41,5 +42,50 @@ describe('runMarketplaceTaskSubmitPreflight', () => {
 
     for (const category of categories) expect(checks[category]).toHaveBeenCalledOnce();
     expect(MarketplaceTaskSubmitPreflightError).toBeTypeOf('function');
+  });
+});
+
+describe('selectMarketplaceTaskSolverNet', () => {
+  const compatible = (manifestCid: string, name = manifestCid) => ({
+    manifestCid,
+    name,
+    status: 'launched' as const,
+    contractId: 'jinn-repo',
+    contractVersion: 'v1',
+  });
+
+  it('auto-selects the unique live jinn-repo.v1 SolverNet when selection is omitted', () => {
+    expect(selectMarketplaceTaskSolverNet({
+      summaries: [compatible('bafy-unique'), {
+        ...compatible('bafy-other'),
+        contractId: 'prediction',
+      }],
+    })).toBe('bafy-unique');
+  });
+
+  it.each([
+    ['zero', []],
+    ['multiple', [compatible('bafy-a'), compatible('bafy-b')]],
+  ])('requires an explicit manifest when %s compatible SolverNets are live', (_label, summaries) => {
+    expect(() => selectMarketplaceTaskSolverNet({ summaries }))
+      .toThrow(/explicit solverNetManifestCid/i);
+  });
+
+  it('verifies an explicit manifest is live and compatible', () => {
+    expect(selectMarketplaceTaskSolverNet({
+      explicitManifestCid: 'bafy-target',
+      summaries: [compatible('bafy-target'), compatible('bafy-other')],
+    })).toBe('bafy-target');
+    expect(() => selectMarketplaceTaskSolverNet({
+      explicitManifestCid: 'bafy-paused',
+      summaries: [{ ...compatible('bafy-paused'), status: 'paused' }],
+    })).toThrow(/not a live jinn-repo.v1/i);
+  });
+
+  it('resolves a public indexer name without a locally joined display name', () => {
+    expect(selectMarketplaceTaskSolverNet({
+      requestedName: 'Autopilot production',
+      summaries: [compatible('bafy-public', 'Autopilot production')],
+    })).toBe('bafy-public');
   });
 });

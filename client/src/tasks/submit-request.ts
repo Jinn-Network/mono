@@ -61,13 +61,6 @@ export const MarketplaceTaskSubmitRequestSchema: ZodType<MarketplaceTaskSubmitRe
         message: `id must be the deterministic Task key ${expectedId}`,
       });
     }
-    if (!request.solverNetManifestCid && !request.solverNet) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['solverNetManifestCid'],
-        message: 'solverNetManifestCid or solverNet is required',
-      });
-    }
     if (request.window.endTs <= request.window.startTs) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

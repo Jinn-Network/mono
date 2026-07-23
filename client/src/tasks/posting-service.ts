@@ -10,6 +10,19 @@ import { canonicalJson } from '../harnesses/engine/canonical-json.js';
 
 const GLOBAL_CREATOR_SCOPE = '__global__';
 const POST_LOCK_STALE_AFTER_MS = 60_000;
+const POST_LOCK_HEARTBEAT_MS = 20_000;
+
+export interface TaskPostingServiceScheduler {
+  now: () => Date;
+  setInterval: (callback: () => void, intervalMs: number) => unknown;
+  clearInterval: (handle: unknown) => void;
+}
+
+const DEFAULT_SCHEDULER: TaskPostingServiceScheduler = {
+  now: () => new Date(),
+  setInterval: (callback, intervalMs) => setInterval(callback, intervalMs),
+  clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
+};
 
 export interface TaskPostResult {
   taskId: string;
@@ -87,6 +100,7 @@ export class TaskPostingService {
   constructor(
     private readonly adapter: ExecutionAdapter,
     private readonly store: Store,
+    private readonly scheduler: TaskPostingServiceScheduler = DEFAULT_SCHEDULER,
   ) {}
 
   async postCandidate(
@@ -96,7 +110,7 @@ export class TaskPostingService {
     const creatorSafeAddress = normalizeCreatorSafeAddress(opts.creatorSafeAddress);
     const policyType = policyTypeOf(candidate.postingPolicy);
     const scopeKey = scopeKeyOf(candidate.postingPolicy);
-    const now = new Date();
+    const now = this.scheduler.now();
     const nowIso = now.toISOString();
     const nowMs = now.getTime();
     const immutableBytes = canonicalCandidateBytes(candidate);
@@ -127,6 +141,21 @@ export class TaskPostingService {
         `Task post already in progress for ${candidate.sourceKey} (${candidate.task.id})`,
       );
     }
+
+    let lockLost = false;
+    const heartbeat = immutableBytes.requestJson !== null
+      ? this.scheduler.setInterval(() => {
+        const renewed = this.store.renewTaskPostLock({
+          creatorSafeAddress,
+          sourceKey: candidate.sourceKey,
+          policyType,
+          scopeKey,
+          ownerToken,
+          lockedAt: this.scheduler.now().toISOString(),
+        });
+        if (!renewed) lockLost = true;
+      }, POST_LOCK_HEARTBEAT_MS)
+      : undefined;
 
     try {
       const lockedExisting = this.store.getTaskPostRecord({
@@ -169,6 +198,7 @@ export class TaskPostingService {
         const recovered = await this.adapter.recoverTaskPost({
           creatorSafeAddress,
           signedTask: task.signedTask,
+          pendingTxHash: lockedExisting.creationTxHash ?? undefined,
         });
         if (recovered) {
           this.store.upsertTaskPostRecord({
@@ -198,7 +228,29 @@ export class TaskPostingService {
           };
         }
       }
-      const posted = await this.adapter.postTask(task);
+      const posted = await this.adapter.postTask(task, {
+        onTransactionHash: async (txHash) => {
+          this.store.upsertTaskPostRecord({
+            creatorSafeAddress,
+            sourceKey: candidate.sourceKey,
+            policyType,
+            scopeKey,
+            taskId: candidate.task.id,
+            requestId: candidate.task.id,
+            firstPostedAt: lockedExisting?.firstPostedAt ?? nowIso,
+            lastPostedAt: nowIso,
+            postCount: previousPostCount,
+            canonicalTaskJson,
+            requestJson,
+            creationTxHash: txHash,
+          });
+        },
+      });
+      if (lockLost) {
+        throw new TransientError(
+          `Task post ownership was lost while posting ${candidate.sourceKey}; reconciliation required`,
+        );
+      }
 
       this.store.recordOwnActivity(posted.taskId, 'created');
       emitEvent(this.store, {
@@ -240,6 +292,7 @@ export class TaskPostingService {
         source: 'posted',
       };
     } finally {
+      if (heartbeat !== undefined) this.scheduler.clearInterval(heartbeat);
       this.store.releaseTaskPostLock({
         creatorSafeAddress,
         sourceKey: candidate.sourceKey,
