@@ -333,4 +333,20 @@ describe('adoptMarketplaceReview', () => {
     });
     expect(h.reviewVerdict).not.toHaveBeenCalled();
   });
+
+  it('refuses configuration that does not review the exact adopted resulting head', async () => {
+    const h = makePorts();
+
+    await expect(adoptMarketplaceReview({
+      ...commonInput,
+      expectedCorrelation: {
+        ...correlation,
+        resultingHead: '9999999999999999999999999999999999999999',
+      },
+    }, h.ports)).rejects.toMatchObject({
+      code: 'invalid-expected-correlation',
+    });
+    expect(h.reviewVerdict).not.toHaveBeenCalled();
+    expect(h.publishReceipt).not.toHaveBeenCalled();
+  });
 });

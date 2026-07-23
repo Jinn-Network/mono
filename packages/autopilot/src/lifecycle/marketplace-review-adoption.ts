@@ -90,6 +90,7 @@ function requireExpectedCorrelation(
     || parsed.data.reviewedHead === undefined
     || parsed.data.reviewGeneration === undefined
     || parsed.data.reviewRefOid === undefined
+    || parsed.data.resultingHead !== parsed.data.reviewedHead
   ) {
     throw new MarketplaceReviewAdoptionError(
       'invalid-expected-correlation',
