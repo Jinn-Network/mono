@@ -321,14 +321,34 @@ describe('BenchMatrixV1', () => {
 
   for (const key of [
     'aggregate',
+    'aggregates',
     'ranking',
+    'rankings',
     'winner',
+    'winners',
     'leaderboard',
+    'leaderboards',
     'recommendation',
+    'recommendations',
   ] as const) {
     it(`rejects forbidden matrix meaning field: ${key} (AC4)`, () => {
-      const raw = { schemaVersion: 'jinn.bench-matrix.v1', [key]: {}, matrixHash: digest('f') };
-      expect(BenchMatrixV1Schema.safeParse(raw).success).toBe(false);
+      // Must start from an otherwise-valid matrix — incomplete stubs fail for
+      // missing required fields even without the forbidden key, which would
+      // leave AC4 unpinned if .strict() regressed.
+      const raw = { ...buildValidMatrix(makeValidRun()), [key]: {} };
+      const parsed = BenchMatrixV1Schema.safeParse(raw);
+      expect(parsed.success).toBe(false);
+      if (!parsed.success) {
+        expect(
+          parsed.error.issues.some(
+            (issue) =>
+              issue.code === 'unrecognized_keys' &&
+              'keys' in issue &&
+              Array.isArray(issue.keys) &&
+              issue.keys.includes(key),
+          ),
+        ).toBe(true);
+      }
     });
   }
 });
