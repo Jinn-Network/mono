@@ -57,6 +57,24 @@ describe('InMemoryCorpusPort (rescope §3 — content-bearing get())', () => {
     }]);
   });
 
+  it('preserves a seeded canonical episode identity through get() and may expose it on search()', async () => {
+    const port = new InMemoryCorpusPort([
+      seedRecord({ canonicalEpisodeId: 'episode-contract' }),
+    ]);
+
+    const recordResult = await port.get('bafySeed1');
+    expect(recordResult).toMatchObject({
+      status: 'ok',
+      value: { canonicalEpisodeId: 'episode-contract' },
+    });
+
+    const hitResult = await port.search('dashboard');
+    expect(hitResult).toMatchObject({
+      status: 'ok',
+      value: [{ canonicalEpisodeId: 'episode-contract' }],
+    });
+  });
+
   // #1824: seeds default to retrieval-visible so pre-allowlist scenarios keep
   // working; an explicit false must survive both views for exclusion tests.
   it('carries an explicit retrievalVisible: false through both search() and get()', async () => {

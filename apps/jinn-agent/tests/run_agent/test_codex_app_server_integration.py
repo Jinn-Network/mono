@@ -64,6 +64,31 @@ def _make_codex_agent():
     )
 
 
+def _record_plugin_lifecycle_hooks(monkeypatch):
+    from hermes_cli.plugins import get_plugin_manager
+
+    events = []
+    manager = get_plugin_manager()
+
+    def record(hook_name):
+        def callback(**kwargs):
+            events.append((hook_name, kwargs.get("turn_id")))
+
+        return callback
+
+    for hook_name in (
+        "pre_llm_call",
+        "post_llm_call",
+        "on_session_end",
+    ):
+        monkeypatch.setitem(
+            manager._hooks,
+            hook_name,
+            [record(hook_name)],
+        )
+    return events
+
+
 class TestApiModeAccepted:
     def test_api_mode_is_codex_app_server(self):
         agent = _make_codex_agent()
@@ -177,6 +202,108 @@ class TestRunConversationCodexPath:
             agent.run_conversation("second")
         assert agent._iters_since_skill == 2
         assert agent._user_turn_count == 2
+
+    def test_each_turn_runs_matching_plugin_post_and_end_hooks(
+        self,
+        fake_session,
+        monkeypatch,
+    ):
+        import importlib
+
+        from hermes_cli.plugins import get_plugin_manager
+
+        jinn = importlib.import_module("plugins.jinn")
+        manager = get_plugin_manager()
+        monkeypatch.setitem(
+            manager._hooks,
+            "pre_llm_call",
+            [jinn._on_pre_llm_call],
+        )
+        monkeypatch.setitem(
+            manager._hooks,
+            "post_llm_call",
+            [jinn._on_post_llm_call],
+        )
+        monkeypatch.setitem(
+            manager._hooks,
+            "on_session_end",
+            [jinn._on_session_end],
+        )
+
+        hook_events = []
+        owner_counts = []
+        original_invoke_hook = manager.invoke_hook
+
+        def recording_invoke_hook(hook_name, **kwargs):
+            if hook_name in {
+                "pre_llm_call",
+                "post_llm_call",
+                "on_session_end",
+            }:
+                hook_events.append(
+                    (hook_name, kwargs.get("turn_id"))
+                )
+            return original_invoke_hook(hook_name, **kwargs)
+
+        monkeypatch.setattr(
+            manager,
+            "invoke_hook",
+            recording_invoke_hook,
+        )
+        monkeypatch.setattr(
+            jinn.pickup,
+            "pickup_with_outcome",
+            lambda *args, **kwargs: jinn.pickup.PickupOutcome(
+                context=None,
+            ),
+        )
+        monkeypatch.setattr(
+            jinn,
+            "_delegate_session_end",
+            lambda *args, **kwargs: None,
+        )
+        monkeypatch.setattr(
+            jinn.distill,
+            "write_episode_fallback",
+            lambda episode: None,
+        )
+
+        jinn._reset_session_state()
+        agent = _make_codex_agent()
+        agent.session_id = "codex-hook-lifecycle"
+        try:
+            with patch.object(
+                agent,
+                "_spawn_background_review",
+                return_value=None,
+            ):
+                for message in ("first turn", "second turn"):
+                    agent.run_conversation(message)
+                    owner_counts.append(
+                        len(jinn._session_turn_lifecycle_owners)
+                    )
+        finally:
+            jinn._reset_session_state()
+
+        pre_turn_ids = [
+            turn_id
+            for hook_name, turn_id in hook_events
+            if hook_name == "pre_llm_call"
+        ]
+        post_turn_ids = [
+            turn_id
+            for hook_name, turn_id in hook_events
+            if hook_name == "post_llm_call"
+        ]
+        end_turn_ids = [
+            turn_id
+            for hook_name, turn_id in hook_events
+            if hook_name == "on_session_end"
+        ]
+        assert len(pre_turn_ids) == 2
+        assert post_turn_ids == pre_turn_ids
+        assert end_turn_ids == pre_turn_ids
+        assert owner_counts == [0, 0]
 
     def test_user_message_not_duplicated(self, fake_session):
         """Regression guard: the user message must appear exactly once in
@@ -529,7 +656,96 @@ class TestReviewForkApiModeDowngrade:
 
 
 class TestErrorHandling:
+    def test_constructor_failure_still_closes_plugin_lifecycle(
+        self,
+        monkeypatch,
+    ):
+        hook_events = _record_plugin_lifecycle_hooks(monkeypatch)
+
+        def fail_constructor(self, *args, **kwargs):
+            raise RuntimeError("constructor failed")
+
+        monkeypatch.setattr(
+            CodexAppServerSession,
+            "__init__",
+            fail_constructor,
+        )
+
+        agent = _make_codex_agent()
+        with patch.object(
+            agent,
+            "_spawn_background_review",
+            return_value=None,
+        ):
+            with pytest.raises(
+                RuntimeError,
+                match="constructor failed",
+            ):
+                agent.run_conversation("hi")
+
+        assert [
+            name
+            for name, _turn_id in hook_events
+        ] == [
+            "pre_llm_call",
+            "post_llm_call",
+            "on_session_end",
+        ]
+        assert len(
+            {
+                turn_id
+                for _name, turn_id in hook_events
+            }
+        ) == 1
+
+    def test_usage_postprocessing_failure_still_closes_plugin_lifecycle(
+        self,
+        monkeypatch,
+        fake_session,
+    ):
+        import agent.codex_runtime as codex_runtime
+
+        hook_events = _record_plugin_lifecycle_hooks(monkeypatch)
+
+        def fail_usage(*args, **kwargs):
+            raise RuntimeError("usage recording failed")
+
+        monkeypatch.setattr(
+            codex_runtime,
+            "_record_codex_app_server_usage",
+            fail_usage,
+        )
+
+        agent = _make_codex_agent()
+        with patch.object(
+            agent,
+            "_spawn_background_review",
+            return_value=None,
+        ):
+            with pytest.raises(
+                RuntimeError,
+                match="usage recording failed",
+            ):
+                agent.run_conversation("hi")
+
+        assert [
+            name
+            for name, _turn_id in hook_events
+        ] == [
+            "pre_llm_call",
+            "post_llm_call",
+            "on_session_end",
+        ]
+        assert len(
+            {
+                turn_id
+                for _name, turn_id in hook_events
+            }
+        ) == 1
+
     def test_session_exception_returns_partial_with_error(self, monkeypatch):
+        hook_events = _record_plugin_lifecycle_hooks(monkeypatch)
+
         def boom_run_turn(self, user_input, **kwargs):
             raise RuntimeError("subprocess died")
 
@@ -544,8 +760,16 @@ class TestErrorHandling:
         assert result["partial"] is True
         assert "subprocess died" in result["error"]
         assert "codex-runtime auto" in result["final_response"]
+        assert [name for name, _turn_id in hook_events] == [
+            "pre_llm_call",
+            "post_llm_call",
+            "on_session_end",
+        ]
+        assert len({turn_id for _name, turn_id in hook_events}) == 1
 
     def test_interrupted_turn_marked_partial(self, monkeypatch):
+        hook_events = _record_plugin_lifecycle_hooks(monkeypatch)
+
         def interrupted_turn(self, user_input, **kwargs):
             return TurnResult(
                 final_text="",
@@ -566,6 +790,43 @@ class TestErrorHandling:
         assert result["completed"] is False
         assert result["partial"] is True
         assert result["error"] == "user interrupted"
+        assert [name for name, _turn_id in hook_events] == [
+            "pre_llm_call",
+            "post_llm_call",
+            "on_session_end",
+        ]
+        assert len({turn_id for _name, turn_id in hook_events}) == 1
+
+
+class TestLegacyCodexForwarder:
+    def test_turn_id_defaults_to_empty_string(
+        self,
+        monkeypatch,
+    ):
+        import agent.codex_runtime as codex_runtime
+
+        forwarded = {}
+
+        def record_forward(*args, **kwargs):
+            forwarded.update(kwargs)
+            return {"completed": True}
+
+        monkeypatch.setattr(
+            codex_runtime,
+            "run_codex_app_server_turn",
+            record_forward,
+        )
+        agent = _make_codex_agent()
+
+        result = agent._run_codex_app_server_turn(
+            user_message="hi",
+            original_user_message="hi",
+            messages=[],
+            effective_task_id="legacy-task",
+        )
+
+        assert result == {"completed": True}
+        assert forwarded["turn_id"] == ""
 
 
 class TestSessionRetirementOnRunAgent:
@@ -718,4 +979,3 @@ class TestCodexToolProgressBridge:
 
         assert "on_event" in captured_init and captured_init["on_event"] is not None
         assert ("tool.started", "exec_command", "pytest") in events
-

@@ -8,7 +8,7 @@ import {
   InMemoryLocalLearningPort,
   InMemorySkillsPort,
 } from '../../src/testing.js';
-import { ok, unavailable, type PortResult } from '../../src/outcome.js';
+import { degraded, ok, unavailable, type PortResult } from '../../src/outcome.js';
 import type { CorpusPort, CorpusRecord } from '../../src/ports/corpus-port.js';
 import type { KnowledgeHit } from '../../src/schemas/knowledge-hit.js';
 import type { InMemoryCorpusSeed } from '../../src/testing/in-memory-corpus.js';
@@ -399,6 +399,294 @@ function compoundRank4Valid(): InMemoryCorpusSeed {
 
 const TARGET_MESSAGE = 'the dashboard `version-status` test is flaking on vitest, likely an unawaited async fetch';
 
+function mixedHit(
+  ref: string,
+  snippet: string,
+  overrides: Partial<KnowledgeHit> = {},
+): KnowledgeHit {
+  return {
+    ref,
+    kind: 'trace',
+    snippet,
+    tags: [],
+    tier: 'tests-passed',
+    origin: ref.startsWith('local-episode:') ? `local:${ref}` : `agent:${ref}`,
+    publishedAt: 1,
+    retrievalVisible: true,
+    ...overrides,
+  };
+}
+
+function mixedRecord(
+  ref: string,
+  summary: string,
+  overrides: Partial<CorpusRecord> = {},
+): CorpusRecord {
+  return {
+    ref,
+    task: { summary },
+    outcome: { status: 'completed', verifiabilityTier: 'tests-passed' },
+    synthesis: `${summary} solution`,
+    steps: [],
+    tags: [],
+    provenance: 'imported',
+    origin: ref.startsWith('local-episode:') ? `local:${ref}` : `agent:${ref}`,
+    capturedAt: '2026-07-23T00:00:00.000Z',
+    retrievalVisible: true,
+    ...overrides,
+  };
+}
+
+function orderedMixedCorpus(
+  hits: KnowledgeHit[],
+  get: (ref: string) => Promise<PortResult<CorpusRecord | null>>,
+): CorpusPort {
+  return {
+    async search(): Promise<PortResult<KnowledgeHit[]>> {
+      return ok(hits);
+    },
+    get,
+  };
+}
+
+describe('firstTurnPickup — mixed local/public canonical policy', () => {
+  it('projects a usable degraded final record and retains its reason', async () => {
+    const hit = mixedHit('bafyDegradedFinal', 'dashboard retry failure');
+    const corpus = orderedMixedCorpus([hit], async (ref) => degraded(
+      'partial local store',
+      mixedRecord(ref, 'dashboard retry failure'),
+    ));
+
+    const result = await buildPlugin(corpus).session(META)
+      .firstTurnPickup('dashboard retry failure');
+
+    expect(result.packets.map((packet) => packet.ref)).toEqual([hit.ref]);
+    expect(result.degraded).toBe('partial local store');
+  });
+
+  it('ranks local and public hits globally with the existing two-packet cap', async () => {
+    const hits = [
+      mixedHit('local-episode:local-third', 'dashboard retry'),
+      mixedHit('bafyPublicSecond', 'dashboard retry failure'),
+      mixedHit('local-episode:local-first', 'dashboard retry failure cache'),
+    ];
+    const records = new Map(hits.map((hit) => [
+      hit.ref,
+      mixedRecord(hit.ref, hit.snippet ?? hit.ref),
+    ]));
+    const corpus = orderedMixedCorpus(hits, async (ref) => ok(records.get(ref) ?? null));
+
+    const result = await buildPlugin(corpus).session(META)
+      .firstTurnPickup('dashboard retry failure cache');
+
+    expect(result.packets.map((packet) => packet.ref)).toEqual([
+      'local-episode:local-first',
+      'bafyPublicSecond',
+    ]);
+    expect(result.packets).toHaveLength(2);
+  });
+
+  it('lets public win when it is more relevant and local win when it is more relevant', async () => {
+    const run = async (hits: KnowledgeHit[]) => {
+      const records = new Map(hits.map((hit) => [
+        hit.ref,
+        mixedRecord(hit.ref, hit.snippet ?? hit.ref),
+      ]));
+      return buildPlugin(orderedMixedCorpus(
+        hits,
+        async (ref) => ok(records.get(ref) ?? null),
+      )).session(META).firstTurnPickup('dashboard retry failure');
+    };
+
+    const publicWinner = await run([
+      mixedHit('local-episode:local-runner-up', 'dashboard retry'),
+      mixedHit('bafyPublicWinner', 'dashboard retry failure'),
+    ]);
+    const localWinner = await run([
+      mixedHit('local-episode:local-winner', 'dashboard retry failure'),
+      mixedHit('bafyPublicRunnerUp', 'dashboard retry'),
+    ]);
+
+    expect(publicWinner.packets.map((packet) => packet.ref)).toEqual([
+      'bafyPublicWinner',
+      'local-episode:local-runner-up',
+    ]);
+    expect(localWinner.packets.map((packet) => packet.ref)).toEqual([
+      'local-episode:local-winner',
+      'bafyPublicRunnerUp',
+    ]);
+  });
+
+  it('deduplicates one local/public episode and prefers the local record', async () => {
+    const localHit: KnowledgeHit = {
+      ref: 'local-episode:episode-shared',
+      canonicalEpisodeId: 'episode-shared',
+      kind: 'trace',
+      snippet: 'dashboard retry failure',
+      tags: [],
+      origin: 'local:episode-shared',
+      retrievalVisible: true,
+    };
+    const publicHit: KnowledgeHit = {
+      ref: 'bafyPublicShared',
+      kind: 'trace',
+      snippet: 'dashboard retry failure cache',
+      tags: [],
+      origin: 'agent-1',
+      retrievalVisible: true,
+    };
+    const getCalls: string[] = [];
+    const corpus = orderedMixedCorpus([localHit, publicHit], async (ref) => {
+      getCalls.push(ref);
+      if (ref === localHit.ref) {
+        return ok(mixedRecord(ref, 'dashboard retry failure', {
+          canonicalEpisodeId: 'episode-shared',
+          synthesis: 'full private solution',
+        }));
+      }
+      return ok(mixedRecord(ref, 'dashboard retry failure cache', {
+        canonicalEpisodeId: 'episode-shared',
+        synthesis: 'abridged public solution',
+      }));
+    });
+
+    const result = await buildPlugin(corpus).session(META)
+      .firstTurnPickup('dashboard retry failure cache');
+
+    expect(result.packets.map((packet) => packet.ref)).toEqual([localHit.ref]);
+    expect(result.packets[0]?.synthesis).toBe('full private solution');
+    expect(result.contextBlock).not.toContain('abridged public solution');
+    expect(getCalls).toEqual([publicHit.ref, localHit.ref]);
+  });
+
+  it('continues to the next ranked unique episode after a duplicate', async () => {
+    const localHit = mixedHit(
+      'local-episode:episode-shared',
+      'dashboard retry failure',
+      { canonicalEpisodeId: 'episode-shared', origin: 'local:episode-shared' },
+    );
+    const publicHit = mixedHit(
+      'bafyPublicShared',
+      'dashboard retry failure cache',
+      { origin: 'agent-1' },
+    );
+    const nextUniqueHit = mixedHit(
+      'bafyNextUnique',
+      'dashboard retry',
+      { origin: 'agent-2' },
+    );
+    const records = new Map<string, CorpusRecord>([
+      [localHit.ref, mixedRecord(localHit.ref, 'dashboard retry failure', {
+        canonicalEpisodeId: 'episode-shared',
+        synthesis: 'full private solution',
+      })],
+      [publicHit.ref, mixedRecord(publicHit.ref, 'dashboard retry failure cache', {
+        canonicalEpisodeId: 'episode-shared',
+        synthesis: 'abridged public solution',
+      })],
+      [nextUniqueHit.ref, mixedRecord(nextUniqueHit.ref, 'dashboard retry', {
+        canonicalEpisodeId: 'episode-next',
+        synthesis: 'second unique solution',
+      })],
+    ]);
+
+    const result = await buildPlugin(orderedMixedCorpus(
+      [localHit, publicHit, nextUniqueHit],
+      async (ref) => ok(records.get(ref) ?? null),
+    )).session(META).firstTurnPickup('dashboard retry failure cache');
+
+    expect(result.packets.map((packet) => packet.ref)).toEqual([
+      localHit.ref,
+      nextUniqueHit.ref,
+    ]);
+    expect(result.packets).toHaveLength(2);
+  });
+
+  it('excludes canonical ids delivered by an earlier pickup', async () => {
+    const excludedLocal = mixedHit(
+      'local-episode:episode-delivered',
+      'dashboard retry failure cache',
+      { canonicalEpisodeId: 'episode-delivered' },
+    );
+    const excludedPublic = mixedHit('bafyPublicDelivered', 'dashboard retry failure');
+    const unique = mixedHit('bafyUnique', 'dashboard retry');
+    const records = new Map<string, CorpusRecord>([
+      [excludedLocal.ref, mixedRecord(excludedLocal.ref, 'dashboard retry failure cache', {
+        canonicalEpisodeId: 'episode-delivered',
+      })],
+      [excludedPublic.ref, mixedRecord(excludedPublic.ref, 'dashboard retry failure', {
+        canonicalEpisodeId: 'episode-delivered',
+      })],
+      [unique.ref, mixedRecord(unique.ref, 'dashboard retry', {
+        canonicalEpisodeId: 'episode-unique',
+      })],
+    ]);
+    const getCalls: string[] = [];
+    const corpus = orderedMixedCorpus(
+      [excludedLocal, excludedPublic, unique],
+      async (ref) => {
+        getCalls.push(ref);
+        return ok(records.get(ref) ?? null);
+      },
+    );
+
+    const result = await buildPlugin(corpus).session(META).firstTurnPickup(
+      'dashboard retry failure cache',
+      { excludeCanonicalEpisodeIds: ['episode-delivered'] },
+    );
+
+    expect(result.packets.map((packet) => packet.ref)).toEqual([unique.ref]);
+    expect(result.deliveredCanonicalEpisodeIds).toEqual(['episode-unique']);
+    expect(getCalls).not.toContain(excludedLocal.ref);
+  });
+
+  it('returns the canonical ids of records that produced packets', async () => {
+    const canonical = mixedHit(
+      'local-episode:episode-one',
+      'dashboard retry failure',
+      { canonicalEpisodeId: 'episode-one' },
+    );
+    const legacy = mixedHit('bafyLegacy', 'dashboard retry');
+    const records = new Map<string, CorpusRecord>([
+      [canonical.ref, mixedRecord(canonical.ref, 'dashboard retry failure', {
+        canonicalEpisodeId: 'episode-one',
+      })],
+      [legacy.ref, mixedRecord(legacy.ref, 'dashboard retry')],
+    ]);
+
+    const result = await buildPlugin(orderedMixedCorpus(
+      [canonical, legacy],
+      async (ref) => ok(records.get(ref) ?? null),
+    )).session(META).firstTurnPickup('dashboard retry failure');
+
+    expect(result.packets.map((packet) => packet.ref)).toEqual([canonical.ref, legacy.ref]);
+    expect(result.deliveredCanonicalEpisodeIds).toEqual(['episode-one']);
+  });
+
+  it('retains a healthy public record without degradation when the preferred local record is absent', async () => {
+    const localHit = mixedHit(
+      'local-episode:episode-shared',
+      'dashboard retry',
+      { canonicalEpisodeId: 'episode-shared' },
+    );
+    const publicHit = mixedHit('bafyPublicShared', 'dashboard retry failure');
+    const corpus = orderedMixedCorpus([localHit, publicHit], async (ref) => {
+      if (ref === localHit.ref) return ok(null);
+      return ok(mixedRecord(ref, 'dashboard retry failure', {
+        canonicalEpisodeId: 'episode-shared',
+        synthesis: 'healthy public evidence',
+      }));
+    });
+
+    const result = await buildPlugin(corpus).session(META)
+      .firstTurnPickup('dashboard retry failure');
+
+    expect(result.packets.map((packet) => packet.ref)).toEqual([publicHit.ref]);
+    expect(result.packets[0]?.synthesis).toBe('healthy public evidence');
+    expect(result).not.toHaveProperty('degraded');
+  });
+});
+
 describe('firstTurnPickup over ports — evidence-first pickup (rescope §3/§4.5)', () => {
   it('scenario 1: provides relevant evidence content (not metadata) for a matching task', async () => {
     const plugin = buildPlugin(new InMemoryCorpusPort([sourceEvidence()]));
@@ -445,6 +733,7 @@ describe('firstTurnPickup over ports — evidence-first pickup (rescope §3/§4.
     expect(result.contextBlock).toBeNull();
     expect(result.deliveryMode).toBe('withheld');
     expect(result).not.toHaveProperty('deliveredContentHash');
+    expect(result.deliveredCanonicalEpisodeIds).toEqual([]);
   });
 
   // #1886 root cause 2, exercised through the real pickup wiring (not the pure
@@ -620,6 +909,7 @@ describe('firstTurnPickup over ports — evidence-first pickup (rescope §3/§4.
     expect(result.searchedTerms).toEqual([]);
     expect(result.deliveryMode).toBe('withheld');
     expect(result).not.toHaveProperty('deliveredContentHash');
+    expect(result.deliveredCanonicalEpisodeIds).toEqual([]);
   });
 
   it('is a no-op when config disables pickup', async () => {
@@ -631,6 +921,7 @@ describe('firstTurnPickup over ports — evidence-first pickup (rescope §3/§4.
     const result = await session.firstTurnPickup(TARGET_MESSAGE);
     expect(result.packets).toEqual([]);
     expect(result.contextBlock).toBeNull();
+    expect(result.deliveredCanonicalEpisodeIds).toEqual([]);
   });
 });
 
