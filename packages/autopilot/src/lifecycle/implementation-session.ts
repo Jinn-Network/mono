@@ -212,6 +212,14 @@ function requireImplementationManifest(
   return fresh;
 }
 
+function isOwnedImplementationPhase(phase: BranchClaim['phase']): boolean {
+  return phase === 'implement' || phase === 'fix' || phase === 'reconcile';
+}
+
+function isChildFixPhase(phase: BranchClaim['phase']): boolean {
+  return phase === 'fix' || phase === 'reconcile';
+}
+
 async function requireAuthority(
   manifest: AttemptManifest,
   port: ImplementationSessionPort,
@@ -219,7 +227,7 @@ async function requireAuthority(
   const authority = await port.readAuthority(manifest);
   const latest = authority.latestClaim;
   if (
-    latest.phase !== 'implement'
+    !isOwnedImplementationPhase(latest.phase)
     || latest.attempt !== manifest.attemptId
     || latest.issueNumber !== manifest.issueNumber
     || (
@@ -254,6 +262,29 @@ function validImplementationPullRequest(
     && pullRequest.body.includes(marker);
 }
 
+function validChildFixPullRequest(
+  manifest: AttemptManifest,
+  pullRequest: ImplementationSessionPullRequest,
+  expectedHead: GitOid,
+): boolean {
+  return pullRequest.number === manifest.prNumber
+    && pullRequest.head === expectedHead
+    && pullRequest.headRefName === manifest.branch
+    && pullRequest.baseRefName === manifest.targetBase;
+}
+
+async function requireChildFixPullRequestAuthority(
+  manifest: AttemptManifest,
+  authority: ImplementationAuthority,
+  port: ImplementationSessionPort,
+): Promise<ImplementationSessionPullRequest> {
+  const pullRequest = await port.readPullRequest(manifest.prNumber!, authority.remoteHead);
+  if (!validChildFixPullRequest(manifest, pullRequest, authority.remoteHead)) {
+    throw new Error('Child fix pull request authority changed or is invalid');
+  }
+  return pullRequest;
+}
+
 async function requireImplementationPullRequestAuthority(
   manifest: AttemptManifest,
   authority: ImplementationAuthority,
@@ -280,6 +311,28 @@ async function requireActiveImplementationPullRequest(
   return requireImplementationPullRequestAuthority(manifest, authority, port, true);
 }
 
+async function requireCheckpointPullRequestAuthority(
+  manifest: AttemptManifest,
+  authority: ImplementationAuthority,
+  port: ImplementationSessionPort,
+): Promise<ImplementationSessionPullRequest> {
+  if (isChildFixPhase(authority.latestClaim.phase)) {
+    return requireChildFixPullRequestAuthority(manifest, authority, port);
+  }
+  return requireActiveImplementationPullRequest(manifest, authority, port);
+}
+
+async function requireHumanPullRequestAuthority(
+  manifest: AttemptManifest,
+  authority: ImplementationAuthority,
+  port: ImplementationSessionPort,
+): Promise<ImplementationSessionPullRequest> {
+  if (isChildFixPhase(authority.latestClaim.phase)) {
+    return requireChildFixPullRequestAuthority(manifest, authority, port);
+  }
+  return requireImplementationPullRequestAuthority(manifest, authority, port, false);
+}
+
 function hasHumanHold(
   pullRequest: ImplementationSessionPullRequest,
 ): boolean {
@@ -304,7 +357,7 @@ async function checkpoint(
   if (authority.latestClaim.phaseComplete === true) {
     throw new Error('Implementation is already phase-complete');
   }
-  await requireActiveImplementationPullRequest(manifest, authority, port);
+  await requireCheckpointPullRequestAuthority(manifest, authority, port);
   const localHead = await port.readLocalHead(manifest);
 
   if (authority.remoteHead !== manifest.expectedHead) {
@@ -765,20 +818,10 @@ async function human(
     reason,
   });
   const body = `${marker}\n\nAutopilot parked this item for Human review.\n\n${detail}`;
-  let pullRequest = await requireImplementationPullRequestAuthority(
-    manifest,
-    authority,
-    port,
-    false,
-  );
+  let pullRequest = await requireHumanPullRequestAuthority(manifest, authority, port);
   if (!pullRequest.draft) {
     await port.setPullRequestDraft(prNumber, authority.remoteHead, true);
-    pullRequest = await requireImplementationPullRequestAuthority(
-      manifest,
-      authority,
-      port,
-      false,
-    );
+    pullRequest = await requireHumanPullRequestAuthority(manifest, authority, port);
   }
   if (!pullRequest.labels.includes('engine:review')) {
     await port.setPullRequestLabel(
@@ -787,12 +830,7 @@ async function human(
       'engine:review',
       true,
     );
-    pullRequest = await requireImplementationPullRequestAuthority(
-      manifest,
-      authority,
-      port,
-      false,
-    );
+    pullRequest = await requireHumanPullRequestAuthority(manifest, authority, port);
   }
   if (!pullRequest.labels.includes('review:needs-human')) {
     await port.setPullRequestLabel(
@@ -801,28 +839,13 @@ async function human(
       'review:needs-human',
       true,
     );
-    pullRequest = await requireImplementationPullRequestAuthority(
-      manifest,
-      authority,
-      port,
-      false,
-    );
+    pullRequest = await requireHumanPullRequestAuthority(manifest, authority, port);
   }
   if (!await port.hasHumanComment(prNumber, authority.remoteHead, marker)) {
-    await requireImplementationPullRequestAuthority(
-      manifest,
-      authority,
-      port,
-      false,
-    );
+    await requireHumanPullRequestAuthority(manifest, authority, port);
     await port.ensureHumanComment(prNumber, authority.remoteHead, marker, body);
   }
-  await requireImplementationPullRequestAuthority(
-    manifest,
-    authority,
-    port,
-    false,
-  );
+  await requireHumanPullRequestAuthority(manifest, authority, port);
   // Stage 3: Human Status paint is painter-owned; label+marker are authority.
   pullRequest = await port.readPullRequest(prNumber, authority.remoteHead);
   if (pullRequest.head !== authority.remoteHead || !pullRequest.draft) {

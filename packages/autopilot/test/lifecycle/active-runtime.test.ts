@@ -52,6 +52,31 @@ describe('active runtime boundary', () => {
 
     expect(runtime.readLocalState()).toEqual({
       remaining: { implementation: 1, review: 1 },
+      newWorkPaused: false,
+      availableLogins: ['implementation-bot', 'review-bot'],
+      implementationPreferredLogin: 'implementation-bot',
+    });
+  });
+
+  it('zeros implementation and review remaining when new work is paused', () => {
+    const runtime = makeActiveRuntime({
+      credentials: pool(),
+      caps: { implementation: 2, review: 1 },
+      implementationPreferredLogin: 'implementation-bot',
+      implementationBackpressureThreshold: 30,
+      readLocalAttempts: () => [],
+      newWorkPaused: () => true,
+      preflight: async () => ({ ok: true }),
+      handlers: {
+        implementation: async () => ({ status: 'spawned' }),
+        review: async () => ({ status: 'spawned' }),
+        merge: async () => ({ status: 'merged' }),
+      },
+    });
+
+    expect(runtime.readLocalState()).toEqual({
+      remaining: { implementation: 0, review: 0 },
+      newWorkPaused: true,
       availableLogins: ['implementation-bot', 'review-bot'],
       implementationPreferredLogin: 'implementation-bot',
     });

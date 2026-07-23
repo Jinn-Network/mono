@@ -13,6 +13,7 @@ import {
   type RecoveryAction,
   type ReviewClaimRecord,
 } from './types.js';
+import { isCiGreen } from './ci-classifier.js';
 
 export function timestampMs(value: string): number | null {
   try {
@@ -158,6 +159,7 @@ function underlyingPhase(item: LifecycleItem): Exclude<LifecyclePhase, 'human'> 
   }
 
   if (item.approved && !item.needsReview) {
+    if (!isCiGreen(item.checks ?? [])) return 'ci-blocked';
     if (item.mergeState === 'clean') return 'merge-ready';
     // Behind / conflict: integration ladder owns the next mutation; view stays
     // awaiting-review so review enrollment stays closed while the gate
@@ -307,11 +309,11 @@ function deriveItem(item: LifecycleItem, nowMs: number, staleAfterMs: number): L
         detail: `Invalid branch head progress timestamp: ${item.headChangedAt}`,
       };
     } else if (
-      underlying === 'merge-ready'
+      (underlying === 'merge-ready' || underlying === 'ci-blocked')
       && (headTime === null || headTime > nowMs)
     ) {
       invalidProgressReason = {
-        phase: underlying,
+        phase: underlying === 'ci-blocked' ? 'merge-ready' : underlying,
         code: 'invalid-merge-progress-time',
         detail: `Invalid merge progress timestamp: ${item.headChangedAt}`,
       };

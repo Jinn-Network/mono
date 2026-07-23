@@ -64,6 +64,7 @@ interface DiscoveredField {
 export interface OpenIssueIndexEntry {
   readonly number: number;
   readonly title: string;
+  readonly body: string;
   readonly updatedAt: string;
   readonly author: string;
   readonly labels: readonly string[];
@@ -414,6 +415,7 @@ function parseIssueIndexRow(input: unknown, index: number): OpenIssueIndexEntry 
   return {
     number,
     title: nonEmptyString(issue.title, `open issue ${index}.title`),
+    body: typeof issue.body === 'string' ? issue.body : '',
     updatedAt: isoTimestamp(issue.updated_at, `open issue ${index}.updated_at`),
     author: user === null ? '' : nonEmptyString(user.login, `open issue ${index}.user.login`),
     labels: parseLabels(issue.labels, `open issue ${index}.labels`),

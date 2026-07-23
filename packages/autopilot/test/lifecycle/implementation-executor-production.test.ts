@@ -249,4 +249,122 @@ describe('production implementation action port', () => {
     )).rejects.toThrow('Human is dominant');
     expect(mutations).toBe(0);
   });
+
+  it('resolves machine children from issue bodies in incremental snapshots', async () => {
+    const marker = '<!-- jinn-autopilot:child pr=2065 kind=review-finding -->';
+    const current: GitHubLifecycleSnapshot = {
+      ...snapshot(),
+      issues: [{
+        number: 2069,
+        title: 'Address review findings for PR #2065',
+        body: `${marker}\n\nFindings`,
+        labels: ['review-finding'],
+        shape: 'fix',
+        blockedOn: 'Nothing',
+        blockedByIssues: [],
+        effort: 'Low',
+        priority: 'P2',
+        status: 'Todo',
+        onBoard: true,
+        author: 'ritsukai',
+        projectItemId: 'PVTI_child',
+        inCurrentSprint: false,
+      }],
+      pullRequests: [{
+        number: 2065,
+        title: 'Parent PR',
+        body: 'Closes #2044',
+        author: 'ritsukai',
+        baseRefName: 'next',
+        headRefName: 'autopilot/2044',
+        headOid: HEAD,
+        headCommittedAt: '2026-07-20T08:00:00.000Z',
+        isDraft: false,
+        state: 'OPEN',
+        labels: ['engine:review'],
+        closingIssueNumbers: [2044],
+        mergeability: 'UNKNOWN',
+        mergeStateStatus: 'BLOCKED',
+        checks: [],
+        reviews: [],
+      }],
+      lifecycle: {
+        items: [{
+          kind: 'issue',
+          issueNumber: 2069,
+          v2Marked: true,
+          projectStatus: 'Todo',
+          labels: ['review-finding'],
+          eligible: true,
+          eligibilityReason: 'eligible',
+        }],
+      },
+    };
+    const port = makeProductionImplementationActionPort({
+      repositoryPath: '/repo',
+      worktreeBase: '/attempts',
+      runnerId: 'runner-a',
+      credentials: new CredentialPool([{
+        login: 'implementation-bot',
+        normalizedLogin: 'implementation-bot',
+        implementationToken: 'selected-secret',
+      }]),
+      authorAllowlist: new Set(['ritsukai']),
+      readSnapshot: async () => current,
+    });
+
+    await expect(port.readIssue(2069)).resolves.toMatchObject({
+      eligible: true,
+      child: { parentPr: 2065, kind: 'review-finding' },
+    });
+    await expect(port.readParentPullRequest!(2065)).resolves.toMatchObject({
+      number: 2065,
+      headRefName: 'autopilot/2044',
+      head: HEAD,
+    });
+  });
+
+  it('fails closed when a child kind label is present without a body marker', async () => {
+    const current: GitHubLifecycleSnapshot = {
+      ...snapshot(),
+      issues: [{
+        number: 2069,
+        title: 'Address review findings for PR #2065',
+        labels: ['review-finding'],
+        shape: 'fix',
+        blockedOn: 'Nothing',
+        blockedByIssues: [],
+        effort: 'Low',
+        priority: 'P2',
+        status: 'Todo',
+        onBoard: true,
+        author: 'ritsukai',
+        projectItemId: 'PVTI_child',
+        inCurrentSprint: false,
+      }],
+      lifecycle: {
+        items: [{
+          kind: 'issue',
+          issueNumber: 2069,
+          v2Marked: true,
+          projectStatus: 'Todo',
+          labels: ['review-finding'],
+          eligible: true,
+          eligibilityReason: 'eligible',
+        }],
+      },
+    };
+    const port = makeProductionImplementationActionPort({
+      repositoryPath: '/repo',
+      worktreeBase: '/attempts',
+      runnerId: 'runner-a',
+      credentials: new CredentialPool([]),
+      authorAllowlist: new Set(['ritsukai']),
+      readSnapshot: async () => current,
+    });
+
+    await expect(port.readIssue(2069)).resolves.toMatchObject({
+      eligible: false,
+    });
+  });
 });
