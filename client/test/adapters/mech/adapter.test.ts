@@ -158,6 +158,7 @@ vi.mock('../../../src/types/envelope.js', () => ({
   normalizeEnvelopeRole: vi.fn((role: unknown) => role === 'restoration' ? 'solution' : role),
   SignedEnvelopeSchema: {
     parse: vi.fn(),
+    safeParse: vi.fn().mockReturnValue({ success: false }),
   },
 }));
 
@@ -203,6 +204,109 @@ function makeConfigStore(initial: Record<string, string> = {}, lastProcessedBloc
     }),
     values,
   };
+}
+
+function autopilotEvaluationFixtures() {
+  const v2AttemptId = '123e4567-e89b-42d3-a456-426614174001';
+  const reviewGeneration = '123e4567-e89b-42d3-a456-426614174010';
+  const session = {
+    schemaVersion: 'jinn-autopilot-session.v1' as const,
+    workflow: 'implement' as const,
+    repository: 'Jinn-Network/mono' as const,
+    issueNumber: 2001,
+    prNumber: 2101,
+    targetBase: 'next',
+    branch: 'codex/issue-2001',
+    claimOid: '1'.repeat(40),
+    expectedHead: '2'.repeat(40),
+    v2AttemptId,
+    runnerId: 'runner-1',
+    taskSnapshot: {
+      title: 'Implement the exact session',
+      body: 'Body.',
+      prBody: 'PR body.',
+      baseSha: '3'.repeat(40),
+    },
+    workflowContract: {
+      skill: 'implement-issue' as const,
+      version: 'v2' as const,
+      resultSchema: 'jinn-autopilot-mutation-result.v1' as const,
+    },
+    deadline: '2026-07-25T00:00:00.000Z',
+    receiptAuthors: ['trusted-host'],
+  };
+  const taskSpec = {
+    schemaVersion: 'jinn-repo.v1' as const,
+    source: 'autopilot-session' as const,
+    instance_id: 'autopilot:1:0',
+    repo: 'Jinn-Network/mono' as const,
+    base_commit: '3'.repeat(40),
+    language: 'typescript' as const,
+    problem_statement: 'Implement the exact session.',
+    session,
+  };
+  const mutation = {
+    schemaVersion: 'jinn-autopilot-mutation-result.v1' as const,
+    outcome: 'mutation-complete' as const,
+    correlation: {
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      deliveryEnvelopeCid: TASK_CID,
+      v2AttemptId,
+      claimOid: '1'.repeat(40),
+      prNumber: 2101,
+      expectedHead: '2'.repeat(40),
+    },
+    patch: 'diff --git a/client/src/a.ts b/client/src/a.ts\n',
+    summary: 'Implemented the exact session.',
+    evidence: {
+      commands: ['yarn typecheck'],
+      tests: ['yarn test'],
+    },
+  };
+  const context = {
+    schemaVersion: 'jinn-autopilot-evaluation-context.v1' as const,
+    operators: {
+      solutionSafe: `0x${'66'.repeat(20)}`,
+      evaluatorSafe: TEST_CONFIG.safeAddress,
+    },
+    reviewTarget: {
+      repository: 'Jinn-Network/mono' as const,
+      issueNumber: 2001,
+      prNumber: 2101,
+      targetBase: 'next',
+      baseOid: '3'.repeat(40),
+      headRef: 'codex/issue-2001',
+      resultingHead: '4'.repeat(40),
+      reviewGeneration,
+      reviewRefOid: '5'.repeat(40),
+    },
+    session,
+    correlation: {
+      ...mutation.correlation,
+      resultingHead: '4'.repeat(40),
+      reviewedHead: '4'.repeat(40),
+      reviewGeneration,
+      reviewRefOid: '5'.repeat(40),
+    },
+    solution: {
+      summary: mutation.summary,
+      evidence: mutation.evidence,
+      adoptionReceipt: {
+        schemaVersion: 'jinn-autopilot-marketplace-adoption.v1' as const,
+        disposition: 'accepted' as const,
+        role: 'solution' as const,
+        operation: 'implementation-complete' as const,
+        ...mutation.correlation,
+        resultingHead: '4'.repeat(40),
+        reviewGeneration,
+        reviewRefOid: '5'.repeat(40),
+        recordedAt: '2026-07-24T22:00:00.000Z',
+      },
+    },
+  };
+  return { taskSpec, mutation, context };
 }
 
 describe('MechAdapter TaskCoordinator flow', () => {
@@ -1281,6 +1385,120 @@ describe('MechAdapter TaskCoordinator flow', () => {
       taskCid: 'QmFakeCid',
     });
 
+    await adapter.stop();
+  });
+
+  it('constructs an Autopilot evaluation Task only from an accepted exact context', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { fetchFromIpfs, fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const { SignedEnvelopeSchema } = await import('../../../src/types/envelope.js');
+    const fixtures = autopilotEvaluationFixtures();
+    const resolver = {
+      resolve: vi.fn().mockResolvedValue({
+        state: 'accepted',
+        context: fixtures.context,
+      }),
+    };
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({
+      id: 'autopilot-task',
+      solverType: 'jinn-repo.v1',
+      contractId: 'jinn-repo',
+      contractVersion: 'v1',
+      spec: fixtures.taskSpec,
+    }));
+    vi.mocked(fetchFromIpfs).mockResolvedValueOnce(
+      solutionEnvelopeFixture(JSON.stringify({ envelope: true })),
+    );
+    vi.mocked(SignedEnvelopeSchema.safeParse).mockReturnValueOnce({
+      success: true,
+      data: {
+        solverType: 'jinn-repo.v1',
+        role: 'solution',
+        payload: fixtures.mutation,
+      },
+    } as never);
+
+    const adapter = new MechAdapter({
+      ...TEST_CONFIG,
+      autopilotEvaluationContextResolver: resolver,
+    });
+    await adapter.initialize();
+    seedCanonicalTaskCreation(adapter);
+    const solution = {
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: `0x${'66'.repeat(20)}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    };
+    (adapter as any).pendingEvaluationSolutions.set(REQUEST_ID, solution);
+
+    const announcement = await (adapter as any).evaluationAnnouncementForSolution(solution);
+
+    expect(announcement?.task.context?.['autopilotEvaluation']).toEqual(fixtures.context);
+    expect(resolver.resolve).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      solutionEnvelopeCid: TASK_CID,
+      solutionOperatorSafe: solution.operator,
+      evaluatorOperatorSafe: TEST_CONFIG.safeAddress,
+      task: expect.objectContaining({ source: 'autopilot-session' }),
+      solution: fixtures.mutation,
+    }));
+    await adapter.stop();
+  });
+
+  it('keeps an Autopilot Solution pending when its adoption context is not accepted', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { fetchFromIpfs, fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const { SignedEnvelopeSchema } = await import('../../../src/types/envelope.js');
+    const fixtures = autopilotEvaluationFixtures();
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({
+      id: 'autopilot-task',
+      solverType: 'jinn-repo.v1',
+      contractId: 'jinn-repo',
+      contractVersion: 'v1',
+      spec: fixtures.taskSpec,
+    }));
+    vi.mocked(fetchFromIpfs).mockResolvedValueOnce(
+      solutionEnvelopeFixture(JSON.stringify({ envelope: true })),
+    );
+    vi.mocked(SignedEnvelopeSchema.safeParse).mockReturnValueOnce({
+      success: true,
+      data: {
+        solverType: 'jinn-repo.v1',
+        role: 'solution',
+        payload: fixtures.mutation,
+      },
+    } as never);
+
+    const adapter = new MechAdapter({
+      ...TEST_CONFIG,
+      autopilotEvaluationContextResolver: {
+        resolve: vi.fn().mockResolvedValue({
+          state: 'pending',
+          detail: 'accepted Solution adoption receipt not published',
+        }),
+      },
+    });
+    await adapter.initialize();
+    seedCanonicalTaskCreation(adapter);
+    const solution = {
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: `0x${'66'.repeat(20)}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    };
+    (adapter as any).pendingEvaluationSolutions.set(REQUEST_ID, solution);
+
+    const announcement = await (adapter as any).evaluationAnnouncementForSolution(solution);
+
+    expect(announcement).toBeUndefined();
+    expect((adapter as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(true);
     await adapter.stop();
   });
 

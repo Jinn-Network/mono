@@ -76,7 +76,15 @@ import {
   SOLUTION_ENVELOPE_CID_CONTEXT_KEY,
   SOLUTION_TASK_CID_CONTEXT_KEY,
   RESTORATION_TASK_CID_CONTEXT_KEY,
+  AUTOPILOT_EVALUATION_CONTEXT_KEY,
 } from '../../harnesses/impls/evaluation-context.js';
+import {
+  JinnRepoAutopilotSessionTaskSchema,
+  JinnRepoAutopilotSolutionPayloadSchema,
+} from '@jinn-network/sdk/solvernets/jinn-repo';
+import {
+  admitAutopilotEvaluationOpportunity,
+} from '../../harnesses/impls/jinn-repo-evaluator/autopilot-evaluation-context.js';
 import { signTaskV1 } from '../../tasks/signing.js';
 import type { SignedTaskV1, TaskClaimPolicy, TaskV1 } from '../../types/task-document.js';
 
@@ -850,6 +858,7 @@ export class MechAdapter implements ExecutionAdapter {
     resultData: string;
     solutionEnvelopeCid: string;
     taskCid?: string;
+    autopilotEvaluationContext?: Record<string, unknown>;
   }): Task {
     return {
       ...params.task,
@@ -864,6 +873,12 @@ export class MechAdapter implements ExecutionAdapter {
         [SOLUTION_TASK_CID_CONTEXT_KEY]:
           params.task.context?.[SOLUTION_TASK_CID_CONTEXT_KEY] ?? params.task.context?.[RESTORATION_TASK_CID_CONTEXT_KEY] ?? params.taskCid,
         [SOLUTION_ENVELOPE_CID_CONTEXT_KEY]: params.solutionEnvelopeCid,
+        ...(params.autopilotEvaluationContext
+          ? {
+              [AUTOPILOT_EVALUATION_CONTEXT_KEY]:
+                params.autopilotEvaluationContext,
+            }
+          : {}),
       },
     };
   }
@@ -1214,6 +1229,80 @@ export class MechAdapter implements ExecutionAdapter {
       );
     }
     const resultData = (resultPayload.data as string) ?? JSON.stringify(resultPayload);
+    let autopilotEvaluationContext: Record<string, unknown> | undefined;
+    if (
+      restoration.task.spec?.['source'] === 'autopilot-session'
+    ) {
+      const parsedTask = JinnRepoAutopilotSessionTaskSchema.safeParse(
+        restoration.task.spec,
+      );
+      if (!parsedTask.success) {
+        console.log(
+          `[mech] keeping Autopilot evaluation opportunity ${solution.requestId} pending: malformed source Task`,
+        );
+        return undefined;
+      }
+
+      let parsedEnvelope: ReturnType<typeof SignedEnvelopeSchema.safeParse>;
+      try {
+        parsedEnvelope = SignedEnvelopeSchema.safeParse(JSON.parse(resultData));
+      } catch {
+        console.log(
+          `[mech] keeping Autopilot evaluation opportunity ${solution.requestId} pending: malformed Solution envelope`,
+        );
+        return undefined;
+      }
+      if (
+        !parsedEnvelope.success
+        || parsedEnvelope.data.solverType !== 'jinn-repo.v1'
+        || normalizeEnvelopeRole(parsedEnvelope.data.role) !== 'solution'
+      ) {
+        console.log(
+          `[mech] keeping Autopilot evaluation opportunity ${solution.requestId} pending: invalid Solution envelope`,
+        );
+        return undefined;
+      }
+      const parsedSolution = JinnRepoAutopilotSolutionPayloadSchema.safeParse(
+        parsedEnvelope.data.payload,
+      );
+      if (!parsedSolution.success) {
+        console.log(
+          `[mech] keeping Autopilot evaluation opportunity ${solution.requestId} pending: invalid mutation result`,
+        );
+        return undefined;
+      }
+
+      const observation =
+        await this.config.autopilotEvaluationContextResolver?.resolve({
+          task: parsedTask.data,
+          solution: parsedSolution.data,
+          taskId: solution.taskId,
+          attemptIndex: solution.attemptIndex,
+          requestId: solution.requestId,
+          solutionEnvelopeCid,
+          solutionOperatorSafe: solution.operator,
+          evaluatorOperatorSafe: this.config.safeAddress,
+        });
+      const admission = admitAutopilotEvaluationOpportunity({
+        task: parsedTask.data,
+        solution: parsedSolution.data,
+        taskId: solution.taskId,
+        attemptIndex: solution.attemptIndex,
+        requestId: solution.requestId,
+        solutionEnvelopeCid,
+        solutionOperatorSafe: solution.operator,
+        evaluatorOperatorSafe: this.config.safeAddress,
+        observation,
+      });
+      if (admission.kind !== 'accepted') {
+        console.log(
+          `[mech] keeping Autopilot evaluation opportunity ${solution.requestId} pending: ${admission.reason}`,
+        );
+        return undefined;
+      }
+      autopilotEvaluationContext =
+        admission.context as unknown as Record<string, unknown>;
+    }
     const evaluationTask = this.buildEvaluationTask({
       task: restoration.task,
       solutionRequestId: solution.requestId,
@@ -1221,6 +1310,7 @@ export class MechAdapter implements ExecutionAdapter {
       resultData,
       solutionEnvelopeCid,
       taskCid: restoration.taskCid,
+      autopilotEvaluationContext,
     });
     const opportunityId = `evaluation:${solution.taskId}:${solution.attemptIndex}:${solution.requestId}`;
     const announcement: TaskAnnouncement = {

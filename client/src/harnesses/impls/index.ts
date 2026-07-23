@@ -234,6 +234,8 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
   out.push(
     new JinnRepoEvaluatorHarness({
       stub: isStub,
+      claudePath: env.claudePath,
+      claudeModel: env.claudeModel,
       implStateDir: env.implStateDirRoot
         ? `${env.implStateDirRoot}/jinn-repo-evaluator`
         : undefined,

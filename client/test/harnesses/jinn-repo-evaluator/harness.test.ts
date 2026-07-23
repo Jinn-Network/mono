@@ -152,6 +152,131 @@ function buildHarnessContext(task: Task, dir: string): HarnessContext {
   };
 }
 
+function autopilotHarnessFixtures() {
+  const requestId = '0xsolution';
+  const solutionEnvelopeCid = 'bafy-solution';
+  const v2AttemptId = '123e4567-e89b-42d3-a456-426614174001';
+  const reviewGeneration = '123e4567-e89b-42d3-a456-426614174010';
+  const solutionSafe = `0x${'2'.repeat(40)}`;
+  const evaluatorSafe = `0x${'6'.repeat(40)}`;
+  const session = {
+    schemaVersion: 'jinn-autopilot-session.v1',
+    workflow: 'implement',
+    repository: 'Jinn-Network/mono',
+    issueNumber: 2001,
+    prNumber: 2101,
+    targetBase: 'next',
+    branch: 'codex/issue-2001',
+    claimOid: '1'.repeat(40),
+    expectedHead: '2'.repeat(40),
+    v2AttemptId,
+    runnerId: 'runner-1',
+    taskSnapshot: {
+      title: 'Implement the exact session',
+      body: 'Body.',
+      prBody: 'PR body.',
+      baseSha: '3'.repeat(40),
+    },
+    workflowContract: {
+      skill: 'implement-issue',
+      version: 'v2',
+      resultSchema: 'jinn-autopilot-mutation-result.v1',
+    },
+    deadline: '2026-07-25T00:00:00.000Z',
+    receiptAuthors: ['trusted-host'],
+  };
+  const spec = {
+    schemaVersion: 'jinn-repo.v1',
+    source: 'autopilot-session',
+    instance_id: 'autopilot:501:0',
+    repo: 'Jinn-Network/mono',
+    base_commit: '3'.repeat(40),
+    language: 'typescript',
+    problem_statement: 'Implement the exact session.',
+    session,
+  };
+  const mutation = {
+    schemaVersion: 'jinn-autopilot-mutation-result.v1',
+    outcome: 'mutation-complete',
+    correlation: {
+      taskId: '501',
+      attemptIndex: 0,
+      requestId,
+      deliveryEnvelopeCid: solutionEnvelopeCid,
+      v2AttemptId,
+      claimOid: '1'.repeat(40),
+      prNumber: 2101,
+      expectedHead: '2'.repeat(40),
+    },
+    patch: 'diff --git a/client/src/a.ts b/client/src/a.ts\n',
+    summary: 'Implemented the exact session.',
+    evidence: {
+      commands: ['yarn typecheck'],
+      tests: ['yarn test'],
+    },
+  };
+  const context = {
+    schemaVersion: 'jinn-autopilot-evaluation-context.v1',
+    operators: { solutionSafe, evaluatorSafe },
+    reviewTarget: {
+      repository: 'Jinn-Network/mono',
+      issueNumber: 2001,
+      prNumber: 2101,
+      targetBase: 'next',
+      baseOid: '3'.repeat(40),
+      headRef: 'codex/issue-2001',
+      resultingHead: '4'.repeat(40),
+      reviewGeneration,
+      reviewRefOid: '5'.repeat(40),
+    },
+    session,
+    correlation: {
+      ...mutation.correlation,
+      resultingHead: '4'.repeat(40),
+      reviewedHead: '4'.repeat(40),
+      reviewGeneration,
+      reviewRefOid: '5'.repeat(40),
+    },
+    solution: {
+      summary: mutation.summary,
+      evidence: mutation.evidence,
+      adoptionReceipt: {
+        schemaVersion: 'jinn-autopilot-marketplace-adoption.v1',
+        disposition: 'accepted',
+        role: 'solution',
+        operation: 'implementation-complete',
+        ...mutation.correlation,
+        resultingHead: '4'.repeat(40),
+        reviewGeneration,
+        reviewRefOid: '5'.repeat(40),
+        recordedAt: '2026-07-24T22:00:00.000Z',
+      },
+    },
+  };
+  const envelope = buildSolverEnvelope({
+    participant: {
+      safeAddress: solutionSafe,
+      agentEoa: `0x${'3'.repeat(40)}`,
+    },
+    payload: mutation,
+  });
+  const task: Task = {
+    id: 'autopilot:501:0:evaluation:0',
+    description: 'semantic exact-head evaluation',
+    solverType: 'jinn-repo.v1',
+    role: 'evaluation',
+    attemptNumber: 0,
+    restorationRequestId: requestId,
+    spec,
+    context: {
+      restorationResult: envelope,
+      solutionEnvelopeCid,
+      autopilotEvaluation: context,
+    },
+  };
+  return { task, context, mutation };
+}
+
 describe('JinnRepoEvaluatorHarness — supports', () => {
   it('claims solverType=jinn-repo.v1 with role=evaluation only', () => {
     const h = new JinnRepoEvaluatorHarness();
@@ -237,6 +362,90 @@ describe('JinnRepoEvaluatorHarness — run', () => {
 
     expect(sol.verdictPayload).toMatchObject({ schemaVersion: 'jinn-repo-verdict.v1' });
     expect(grade).toHaveBeenCalledTimes(1);
+    expect(gradeLive).not.toHaveBeenCalled();
+  });
+});
+
+describe('JinnRepoEvaluatorHarness — Autopilot semantic evaluation', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'jinn-repo-autopilot-evaluator-test-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('keeps an Autopilot task without accepted strict context ungradeable', async () => {
+    const { task } = autopilotHarnessFixtures();
+    task.context = { restorationResult: task.context!['restorationResult'] };
+    const h = new JinnRepoEvaluatorHarness();
+    await expect(h.canAttempt(task)).resolves.toMatchObject({
+      ok: false,
+      reason: expect.stringContaining('autopilotEvaluation'),
+    });
+  });
+
+  it('emits the typed semantic review payload and configured model without legacy patch grading', async () => {
+    const { task, context } = autopilotHarnessFixtures();
+    const cleanup = vi.fn().mockResolvedValue(undefined);
+    const mechanicalRunner = {
+      run: vi.fn().mockResolvedValue({
+        kind: 'passed',
+        checkoutDir: '/tmp/exact-head',
+        changedFiles: ['client/src/a.ts'],
+        checks: ['exact-head', 'typecheck', 'tests'],
+        cleanup,
+      }),
+    };
+    const agentRunner = {
+      run: vi.fn().mockResolvedValue(JSON.stringify({
+        schemaVersion: 'jinn-autopilot-review-result.v1',
+        outcome: 'approve',
+        correlation: context.correlation,
+        body: 'The complete exact-head diff is correct.',
+      })),
+    };
+    const grade = vi.fn();
+    const gradeLive = vi.fn();
+    const h = new JinnRepoEvaluatorHarness({
+      mechanicalRunner,
+      semanticAgentRunner: agentRunner,
+      grade,
+      gradeLive,
+    });
+    const harnessContext = {
+      ...buildHarnessContext(task, dir),
+      solverNet: {
+        name: 'jinn-repo',
+        solverType: 'jinn-repo.v1',
+        model: 'configured-review-model',
+      },
+    };
+
+    const result = await h.run(harnessContext);
+
+    expect(result.verdictPayload).toMatchObject({
+      schemaVersion: 'jinn-autopilot-review-result.v1',
+      outcome: 'approve',
+      correlation: context.correlation,
+    });
+    expect(result.gating).toMatchObject({
+      passed: true,
+      verdict: 'PASS',
+      verdictCode: 1,
+    });
+    expect(result.artifacts).toEqual([
+      expect.objectContaining({
+        path: 'jinn-autopilot-review-result.json',
+        artifactType: 'jinn_autopilot_review_result',
+      }),
+    ]);
+    expect(agentRunner.run).toHaveBeenCalledWith(expect.objectContaining({
+      cwd: '/tmp/exact-head',
+      model: 'configured-review-model',
+    }));
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(grade).not.toHaveBeenCalled();
     expect(gradeLive).not.toHaveBeenCalled();
   });
 });

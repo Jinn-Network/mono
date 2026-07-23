@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AutopilotAdoptionReceiptSchema,
   AutopilotCorrelationSchema,
+  AutopilotEvaluationContextSchema,
   AutopilotMutationResultSchema,
   AutopilotReviewResultSchema,
   AutopilotSessionCapsuleSchema,
@@ -25,6 +26,50 @@ function withoutKey(
   const copy = { ...value };
   delete copy[key];
   return copy;
+}
+
+function evaluationContext(): Record<string, unknown> {
+  const session = fixture('session-implement') as Record<string, unknown>;
+  const receipt = fixture('receipt-solution-accepted') as Record<string, unknown>;
+  const mutation = fixture('mutation-complete') as Record<string, unknown>;
+  return {
+    schemaVersion: 'jinn-autopilot-evaluation-context.v1',
+    operators: {
+      solutionSafe: `0x${'1'.repeat(40)}`,
+      evaluatorSafe: `0x${'2'.repeat(40)}`,
+    },
+    reviewTarget: {
+      repository: 'Jinn-Network/mono',
+      issueNumber: 2001,
+      prNumber: 2101,
+      targetBase: 'next',
+      baseOid: '3'.repeat(40),
+      headRef: 'codex/issue-2001',
+      resultingHead: '4'.repeat(40),
+      reviewGeneration: '123e4567-e89b-42d3-a456-426614174010',
+      reviewRefOid: '5'.repeat(40),
+    },
+    session,
+    correlation: {
+      taskId: '501',
+      attemptIndex: 0,
+      requestId: '0xrequest',
+      deliveryEnvelopeCid: 'bafy-envelope',
+      v2AttemptId: '123e4567-e89b-42d3-a456-426614174001',
+      claimOid: '1'.repeat(40),
+      prNumber: 2101,
+      expectedHead: '2'.repeat(40),
+      resultingHead: '4'.repeat(40),
+      reviewedHead: '4'.repeat(40),
+      reviewGeneration: '123e4567-e89b-42d3-a456-426614174010',
+      reviewRefOid: '5'.repeat(40),
+    },
+    solution: {
+      summary: mutation.summary,
+      evidence: mutation.evidence,
+      adoptionReceipt: receipt,
+    },
+  };
 }
 
 describe('AutopilotSessionCapsuleSchema', () => {
@@ -151,6 +196,101 @@ describe('Autopilot result schemas', () => {
         followUps: [withoutKey(followUps[0]!, key)],
       })).toThrow();
     }
+  });
+});
+
+describe('AutopilotEvaluationContextSchema', () => {
+  it('parses a strict full-head evaluator context bound to an accepted Solution receipt', () => {
+    const value = evaluationContext();
+    expect(AutopilotEvaluationContextSchema.parse(value)).toEqual(value);
+  });
+
+  it('rejects missing or rejected Solution receipts', () => {
+    const value = evaluationContext();
+    const solution = value.solution as Record<string, unknown>;
+    expect(() => AutopilotEvaluationContextSchema.parse({
+      ...value,
+      solution: withoutKey(solution, 'adoptionReceipt'),
+    })).toThrow();
+    expect(() => AutopilotEvaluationContextSchema.parse({
+      ...value,
+      solution: {
+        ...solution,
+        adoptionReceipt: fixture('receipt-solution-rejected'),
+      },
+    })).toThrow();
+  });
+
+  it('rejects self-evaluation and every stale head/generation/ref binding', () => {
+    const value = evaluationContext();
+    const operators = value.operators as Record<string, unknown>;
+    expect(() => AutopilotEvaluationContextSchema.parse({
+      ...value,
+      operators: {
+        ...operators,
+        evaluatorSafe: operators.solutionSafe,
+      },
+    })).toThrow();
+
+    const reviewTarget = value.reviewTarget as Record<string, unknown>;
+    for (const [field, replacement] of [
+      ['resultingHead', '9'.repeat(40)],
+      ['reviewGeneration', '123e4567-e89b-42d3-a456-426614174099'],
+      ['reviewRefOid', '8'.repeat(40)],
+    ] as const) {
+      expect(() => AutopilotEvaluationContextSchema.parse({
+        ...value,
+        reviewTarget: { ...reviewTarget, [field]: replacement },
+      }), field).toThrow();
+    }
+  });
+
+  it('rejects stale repository, PR, issue, base/head refs, and source correlation', () => {
+    const value = evaluationContext();
+    const reviewTarget = value.reviewTarget as Record<string, unknown>;
+    const targetMutations = {
+      repository: 'other/repo',
+      issueNumber: 2002,
+      prNumber: 2102,
+      targetBase: 'main',
+      baseOid: '8'.repeat(40),
+      headRef: 'codex/other',
+    };
+    for (const [field, replacement] of Object.entries(targetMutations)) {
+      expect(() => AutopilotEvaluationContextSchema.parse({
+        ...value,
+        reviewTarget: { ...reviewTarget, [field]: replacement },
+      }), field).toThrow();
+    }
+
+    const correlation = value.correlation as Record<string, unknown>;
+    for (const [field, replacement] of Object.entries({
+      taskId: '502',
+      attemptIndex: 1,
+      requestId: '0xother',
+      deliveryEnvelopeCid: 'bafy-other',
+      reviewedHead: '8'.repeat(40),
+    })) {
+      expect(() => AutopilotEvaluationContextSchema.parse({
+        ...value,
+        correlation: { ...correlation, [field]: replacement },
+      }), field).toThrow();
+    }
+  });
+
+  it('is strict at every additive context boundary', () => {
+    const value = evaluationContext();
+    expect(() => AutopilotEvaluationContextSchema.parse({
+      ...value,
+      looseReceipt: true,
+    })).toThrow();
+    expect(() => AutopilotEvaluationContextSchema.parse({
+      ...value,
+      reviewTarget: {
+        ...(value.reviewTarget as Record<string, unknown>),
+        surprise: true,
+      },
+    })).toThrow();
   });
 });
 

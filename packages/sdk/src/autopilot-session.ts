@@ -108,7 +108,7 @@ export const AutopilotCorrelationSchema = z.object(
 
 export type AutopilotCorrelation = z.infer<typeof AutopilotCorrelationSchema>;
 
-const AutopilotReviewCorrelationSchema = z.object({
+export const AutopilotReviewCorrelationSchema = z.object({
   ...autopilotCorrelationFields,
   resultingHead: GitOidSchema,
   reviewedHead: GitOidSchema,
@@ -143,7 +143,7 @@ const AutopilotHumanReasonSchema = z.object({
   detail: z.string().min(1),
 }).strict();
 
-const AutopilotMutationEvidenceSchema = z.object({
+export const AutopilotMutationEvidenceSchema = z.object({
   commands: z.array(z.string().min(1)).max(MAX_EVIDENCE_ENTRIES),
   tests: z.array(z.string().min(1)).max(MAX_EVIDENCE_ENTRIES),
   notes: z.array(z.string().min(1)).max(MAX_EVIDENCE_ENTRIES).optional(),
@@ -241,7 +241,7 @@ const adoptionReceiptCommonFields = {
   recordedAt: IsoTimestampSchema,
 };
 
-const AcceptedSolutionAdoptionReceiptSchema = z.object({
+export const AcceptedSolutionAdoptionReceiptSchema = z.object({
   ...adoptionReceiptCommonFields,
   disposition: z.literal('accepted'),
   role: z.literal('solution'),
@@ -295,3 +295,101 @@ export const AutopilotAdoptionReceiptSchema = z.union([
 ]);
 
 export type AutopilotAdoptionReceipt = z.infer<typeof AutopilotAdoptionReceiptSchema>;
+
+const SafeAddressSchema = z.string().regex(/^0x[0-9a-fA-F]{40}$/);
+
+const AutopilotEvaluationCorrelationSchema = AutopilotReviewCorrelationSchema.extend({
+  resultingHead: GitOidSchema,
+}).strict();
+
+/**
+ * Additive evaluation-only context attached after an Autopilot Solution has
+ * been adopted and claimed through the Router. It is intentionally one strict
+ * codec rather than a bag of Task.context fields: the accepted Solution
+ * receipt, source correlation, full PR target, and the two canonical Safe
+ * identities must agree before any semantic agent can run.
+ */
+export const AutopilotEvaluationContextSchema = z.object({
+  schemaVersion: z.literal('jinn-autopilot-evaluation-context.v1'),
+  operators: z.object({
+    solutionSafe: SafeAddressSchema,
+    evaluatorSafe: SafeAddressSchema,
+  }).strict(),
+  reviewTarget: z.object({
+    repository: z.literal('Jinn-Network/mono'),
+    issueNumber: PositiveIntegerSchema,
+    childIssueNumber: PositiveIntegerSchema.optional(),
+    prNumber: PositiveIntegerSchema,
+    targetBase: PrintableStringSchema,
+    baseOid: GitOidSchema,
+    headRef: PrintableStringSchema,
+    resultingHead: GitOidSchema,
+    reviewGeneration: UuidSchema,
+    reviewRefOid: GitOidSchema,
+  }).strict(),
+  session: AutopilotSessionCapsuleSchema,
+  correlation: AutopilotEvaluationCorrelationSchema,
+  solution: z.object({
+    summary: z.string().min(1),
+    evidence: AutopilotMutationEvidenceSchema,
+    adoptionReceipt: AcceptedSolutionAdoptionReceiptSchema,
+  }).strict(),
+}).strict().superRefine((value, ctx) => {
+  const mismatch = (path: Array<string | number>, message: string): void => {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path, message });
+  };
+  const { session, reviewTarget, correlation, operators } = value;
+  const receipt = value.solution.adoptionReceipt;
+
+  if (operators.solutionSafe.toLowerCase() === operators.evaluatorSafe.toLowerCase()) {
+    mismatch(['operators', 'evaluatorSafe'], 'Evaluator Safe must differ from Solution Safe');
+  }
+
+  const targetBindings: Array<[unknown, unknown, Array<string | number>, string]> = [
+    [reviewTarget.repository, session.repository, ['reviewTarget', 'repository'], 'repository'],
+    [reviewTarget.issueNumber, session.issueNumber, ['reviewTarget', 'issueNumber'], 'issue number'],
+    [reviewTarget.childIssueNumber, session.childIssueNumber, ['reviewTarget', 'childIssueNumber'], 'child issue number'],
+    [reviewTarget.prNumber, session.prNumber, ['reviewTarget', 'prNumber'], 'PR number'],
+    [reviewTarget.targetBase, session.targetBase, ['reviewTarget', 'targetBase'], 'target base'],
+    [reviewTarget.baseOid, session.taskSnapshot.baseSha, ['reviewTarget', 'baseOid'], 'base OID'],
+    [reviewTarget.headRef, session.branch, ['reviewTarget', 'headRef'], 'head ref'],
+  ];
+  for (const [actual, expected, path, label] of targetBindings) {
+    if (actual !== expected) mismatch(path, `Evaluation ${label} does not match session`);
+  }
+
+  const receiptBindings: Array<[unknown, unknown, Array<string | number>, string]> = [
+    [correlation.taskId, receipt.taskId, ['correlation', 'taskId'], 'taskId'],
+    [correlation.attemptIndex, receipt.attemptIndex, ['correlation', 'attemptIndex'], 'attemptIndex'],
+    [correlation.requestId, receipt.requestId, ['correlation', 'requestId'], 'requestId'],
+    [correlation.deliveryEnvelopeCid, receipt.deliveryEnvelopeCid, ['correlation', 'deliveryEnvelopeCid'], 'deliveryEnvelopeCid'],
+    [correlation.v2AttemptId, receipt.v2AttemptId, ['correlation', 'v2AttemptId'], 'v2AttemptId'],
+    [correlation.claimOid, receipt.claimOid, ['correlation', 'claimOid'], 'claimOid'],
+    [correlation.prNumber, receipt.prNumber, ['correlation', 'prNumber'], 'prNumber'],
+    [correlation.expectedHead, receipt.expectedHead, ['correlation', 'expectedHead'], 'expectedHead'],
+    [correlation.resultingHead, receipt.resultingHead, ['correlation', 'resultingHead'], 'resultingHead'],
+    [correlation.reviewedHead, receipt.resultingHead, ['correlation', 'reviewedHead'], 'reviewedHead'],
+    [correlation.reviewGeneration, receipt.reviewGeneration, ['correlation', 'reviewGeneration'], 'reviewGeneration'],
+    [correlation.reviewRefOid, receipt.reviewRefOid, ['correlation', 'reviewRefOid'], 'reviewRefOid'],
+    [reviewTarget.resultingHead, receipt.resultingHead, ['reviewTarget', 'resultingHead'], 'resulting head'],
+    [reviewTarget.reviewGeneration, receipt.reviewGeneration, ['reviewTarget', 'reviewGeneration'], 'review generation'],
+    [reviewTarget.reviewRefOid, receipt.reviewRefOid, ['reviewTarget', 'reviewRefOid'], 'review ref OID'],
+  ];
+  for (const [actual, expected, path, label] of receiptBindings) {
+    if (actual !== expected) mismatch(path, `Evaluation ${label} does not match accepted Solution receipt`);
+  }
+
+  const sessionBindings: Array<[unknown, unknown, Array<string | number>, string]> = [
+    [receipt.v2AttemptId, session.v2AttemptId, ['solution', 'adoptionReceipt', 'v2AttemptId'], 'v2AttemptId'],
+    [receipt.claimOid, session.claimOid, ['solution', 'adoptionReceipt', 'claimOid'], 'claimOid'],
+    [receipt.prNumber, session.prNumber, ['solution', 'adoptionReceipt', 'prNumber'], 'prNumber'],
+    [receipt.expectedHead, session.expectedHead, ['solution', 'adoptionReceipt', 'expectedHead'], 'expectedHead'],
+  ];
+  for (const [actual, expected, path, label] of sessionBindings) {
+    if (actual !== expected) mismatch(path, `Accepted Solution receipt ${label} does not match session`);
+  }
+});
+
+export type AutopilotEvaluationContext = z.infer<
+  typeof AutopilotEvaluationContextSchema
+>;
