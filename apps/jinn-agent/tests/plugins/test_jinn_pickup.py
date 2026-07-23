@@ -997,6 +997,478 @@ def test_finalize_during_pickup_cannot_resurrect_checkpoint():
     assert "finalize-during-pickup" not in jinn._session_states
 
 
+def test_stale_pre_hook_cannot_reopen_finalized_session(
+    monkeypatch,
+):
+    session_id = "finalize-before-state"
+    task_id = "stale-task"
+    capture_started = threading.Event()
+    release_capture = threading.Event()
+    worker_errors = []
+    original_record_first_turn = jinn.buf.record_first_turn
+
+    def blocking_record_first_turn(*args, **kwargs):
+        capture_started.set()
+        assert release_capture.wait(timeout=2)
+        return original_record_first_turn(*args, **kwargs)
+
+    def run_stale_pre_hook():
+        try:
+            jinn._on_pre_llm_call(
+                session_id=session_id,
+                task_id=task_id,
+                user_message=MSG,
+                is_first_turn=True,
+            )
+        except BaseException as exc:
+            worker_errors.append(exc)
+
+    monkeypatch.setattr(
+        jinn.buf,
+        "record_first_turn",
+        blocking_record_first_turn,
+    )
+    runner = PickupRunner()
+    jinn._runner = runner
+    worker = threading.Thread(target=run_stale_pre_hook)
+    try:
+        worker.start()
+        assert capture_started.wait(timeout=2)
+        jinn._on_session_finalize(
+            session_id=session_id,
+            reason="shutdown",
+        )
+        release_capture.set()
+        worker.join(timeout=2)
+    finally:
+        release_capture.set()
+        worker.join(timeout=2)
+        jinn._runner = None
+
+    assert not worker.is_alive()
+    assert worker_errors == []
+    assert session_id not in jinn._session_states
+    assert session_id not in jinn._pickup_checkpoints
+    assert not jinn.buf.has_capture(task_id, session_id)
+    assert [
+        call
+        for call in runner.calls
+        if call[0][1:3] == ["session", "pickup"]
+    ] == []
+
+
+def test_parent_finalize_invalidates_blocked_internal_pre_hook(
+    monkeypatch,
+):
+    parent_session_id = "blocked-internal-parent"
+    capture_started = threading.Event()
+    release_capture = threading.Event()
+    worker_errors = []
+    original_record_first_turn = jinn.buf.record_first_turn
+
+    monkeypatch.setattr(
+        jinn,
+        "is_background_review",
+        lambda: True,
+    )
+
+    def blocking_record_first_turn(*args, **kwargs):
+        capture_started.set()
+        assert release_capture.wait(timeout=2)
+        return original_record_first_turn(*args, **kwargs)
+
+    monkeypatch.setattr(
+        jinn.buf,
+        "record_first_turn",
+        blocking_record_first_turn,
+    )
+
+    def run_internal_pre_hook():
+        try:
+            jinn._on_pre_llm_call(
+                session_id=parent_session_id,
+                task_id="internal-task",
+                user_message=MSG,
+                is_first_turn=True,
+            )
+        except BaseException as exc:
+            worker_errors.append(exc)
+
+    runner = PickupRunner()
+    jinn._runner = runner
+    worker = threading.Thread(target=run_internal_pre_hook)
+    try:
+        worker.start()
+        assert capture_started.wait(timeout=2)
+        logical_session_ids = [
+            logical
+            for (parent, _thread_id), logical
+            in jinn._internal_sessions.items()
+            if parent == parent_session_id
+        ]
+        assert len(logical_session_ids) == 1
+        jinn._on_session_finalize(
+            session_id=parent_session_id,
+            reason="shutdown",
+        )
+        release_capture.set()
+        worker.join(timeout=2)
+    finally:
+        release_capture.set()
+        worker.join(timeout=2)
+        jinn._runner = None
+
+    logical_session_id = logical_session_ids[0]
+    assert not worker.is_alive()
+    assert worker_errors == []
+    assert logical_session_id not in jinn._session_states
+    assert logical_session_id not in jinn._pickup_checkpoints
+    assert logical_session_id not in jinn._session_lifecycle_tokens
+    assert jinn._internal_sessions == {}
+    assert [
+        call
+        for call in runner.calls
+        if call[0][1:3] == ["session", "pickup"]
+    ] == []
+
+
+def test_stale_old_capture_cannot_delete_fresh_same_id_lifecycle(
+    monkeypatch,
+):
+    session_id = "same-id-reopen"
+    old_capture_started = threading.Event()
+    release_old_capture = threading.Event()
+    old_worker_errors = []
+    original_record_first_turn = jinn.buf.record_first_turn
+
+    def blocking_old_record_first_turn(*args, **kwargs):
+        if threading.current_thread().name == "old-pre-hook":
+            old_capture_started.set()
+            assert release_old_capture.wait(timeout=2)
+        return original_record_first_turn(*args, **kwargs)
+
+    monkeypatch.setattr(
+        jinn.buf,
+        "record_first_turn",
+        blocking_old_record_first_turn,
+    )
+
+    def run_old_pre_hook():
+        try:
+            jinn._on_pre_llm_call(
+                session_id=session_id,
+                task_id="old-task",
+                user_message="stale old user turn",
+                is_first_turn=True,
+            )
+        except BaseException as exc:
+            old_worker_errors.append(exc)
+
+    runner = PickupRunner()
+    jinn._runner = runner
+    old_worker = threading.Thread(
+        name="old-pre-hook",
+        target=run_old_pre_hook,
+    )
+    try:
+        old_worker.start()
+        assert old_capture_started.wait(timeout=2)
+        jinn._on_session_finalize(
+            session_id=session_id,
+            reason="old_session_complete",
+        )
+        fresh_result = jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="fresh-task",
+            user_message="fresh new user turn",
+            is_first_turn=True,
+        )
+        release_old_capture.set()
+        old_worker.join(timeout=2)
+    finally:
+        release_old_capture.set()
+        old_worker.join(timeout=2)
+        jinn._runner = None
+
+    matching_buffers = [
+        buffer
+        for key, buffer in jinn.buf._buffers.items()
+        if key == session_id
+        or (
+            isinstance(key, tuple)
+            and key[0] == session_id
+        )
+    ]
+    assert not old_worker.is_alive()
+    assert old_worker_errors == []
+    assert fresh_result == {"context": CONTEXT_BLOCK}
+    assert len(matching_buffers) == 1
+    turn_texts = [
+        turn["attributes"]["turn.text"]
+        for turn in matching_buffers[0]["turns"]
+    ]
+    assert turn_texts == ["fresh new user turn"]
+    assert len(runner.calls) == 1
+
+
+def test_finalize_closes_control_state_atomically_before_capture_cleanup(
+    monkeypatch,
+):
+    session_id = "finalize-control-atomically"
+    capture_started = threading.Event()
+    release_capture = threading.Event()
+    capture_cleanup_started = threading.Event()
+    release_capture_cleanup = threading.Event()
+    original_record_first_turn = jinn.buf.record_first_turn
+    original_discard_session = jinn.buf.discard_session
+    worker_errors = []
+
+    def blocking_record_first_turn(*args, **kwargs):
+        capture_started.set()
+        assert release_capture.wait(timeout=2)
+        return original_record_first_turn(*args, **kwargs)
+
+    def blocking_finalize_discard(discarded_session_id):
+        if threading.current_thread().name == "finalizer":
+            capture_cleanup_started.set()
+            assert release_capture_cleanup.wait(timeout=2)
+        original_discard_session(discarded_session_id)
+
+    def run_pre_hook():
+        try:
+            jinn._on_pre_llm_call(
+                session_id=session_id,
+                task_id="stale-task",
+                user_message=MSG,
+                is_first_turn=True,
+            )
+        except BaseException as exc:
+            worker_errors.append(exc)
+
+    monkeypatch.setattr(
+        jinn.buf,
+        "record_first_turn",
+        blocking_record_first_turn,
+    )
+    monkeypatch.setattr(
+        jinn.buf,
+        "discard_session",
+        blocking_finalize_discard,
+    )
+    runner = PickupRunner()
+    jinn._runner = runner
+    pre_worker = threading.Thread(target=run_pre_hook)
+    finalizer = threading.Thread(
+        name="finalizer",
+        target=lambda: jinn._on_session_finalize(
+            session_id=session_id,
+            reason="shutdown",
+        ),
+    )
+    try:
+        pre_worker.start()
+        assert capture_started.wait(timeout=2)
+        finalizer.start()
+        assert capture_cleanup_started.wait(timeout=2)
+        release_capture.set()
+        pre_worker.join(timeout=2)
+        release_capture_cleanup.set()
+        finalizer.join(timeout=2)
+    finally:
+        release_capture.set()
+        release_capture_cleanup.set()
+        pre_worker.join(timeout=2)
+        finalizer.join(timeout=2)
+        jinn._runner = None
+
+    assert not pre_worker.is_alive()
+    assert not finalizer.is_alive()
+    assert worker_errors == []
+    assert session_id not in jinn._session_states
+    assert session_id not in jinn._pickup_checkpoints
+    assert [
+        call
+        for call in runner.calls
+        if call[0][1:3] == ["session", "pickup"]
+    ] == []
+
+
+def test_lifecycle_tracking_is_bounded_after_unique_session_cleanup():
+    jinn._runner = PickupRunner()
+    try:
+        for index in range(100):
+            session_id = f"internal-cleanup-{index}"
+            jinn._on_pre_llm_call(
+                session_id=session_id,
+                task_id=f"task-{index}",
+                user_message=MSG,
+                is_first_turn=True,
+            )
+            jinn._on_session_finalize(
+                session_id=session_id,
+                reason="host_internal_complete",
+            )
+    finally:
+        jinn._runner = None
+
+    lifecycle_maps = (
+        "_session_state_versions",
+        "_pickup_checkpoint_versions",
+        "_session_lifecycle_tokens",
+        "_session_state_tokens",
+    )
+    assert sum(
+        len(getattr(jinn, name, {}))
+        for name in lifecycle_maps
+    ) == 0
+    assert not any(
+        (
+            key[0] if isinstance(key, tuple) else key
+        ).startswith("internal-cleanup-")
+        for key in jinn.buf._buffers
+    )
+
+
+def test_host_internal_terminal_cleanup_cannot_leave_reopened_lifecycle(
+    monkeypatch,
+):
+    parent_session_id = "host-internal-parent"
+    end_cleanup_started = threading.Event()
+    release_end_cleanup = threading.Event()
+    logical_session_ids = []
+    worker_errors = []
+
+    monkeypatch.setattr(
+        jinn,
+        "is_background_review",
+        lambda: True,
+    )
+
+    def blocking_payoff_lines(snapshot):
+        end_cleanup_started.set()
+        assert release_end_cleanup.wait(timeout=2)
+        return []
+
+    monkeypatch.setattr(
+        jinn.distill,
+        "payoff_lines",
+        blocking_payoff_lines,
+    )
+
+    def run_internal_session():
+        try:
+            jinn._on_pre_llm_call(
+                session_id=parent_session_id,
+                task_id="internal-task",
+                user_message=MSG,
+                is_first_turn=True,
+            )
+            logical_session_ids.extend(
+                logical
+                for (parent, _thread_id), logical
+                in jinn._internal_sessions.items()
+                if parent == parent_session_id
+            )
+            jinn._on_session_end(
+                session_id=parent_session_id,
+                task_id="internal-task",
+                completed=True,
+                interrupted=False,
+            )
+        except BaseException as exc:
+            worker_errors.append(exc)
+
+    jinn._runner = PickupRunner()
+    worker = threading.Thread(target=run_internal_session)
+    try:
+        worker.start()
+        assert end_cleanup_started.wait(timeout=2)
+        assert len(logical_session_ids) == 1
+        jinn._state_for(logical_session_ids[0])
+        release_end_cleanup.set()
+        worker.join(timeout=2)
+    finally:
+        release_end_cleanup.set()
+        worker.join(timeout=2)
+        jinn._runner = None
+
+    logical_session_id = logical_session_ids[0]
+    assert not worker.is_alive()
+    assert worker_errors == []
+    assert logical_session_id not in jinn._session_states
+    assert logical_session_id not in jinn._session_state_tokens
+    assert logical_session_id not in jinn._pickup_checkpoints
+    assert logical_session_id not in jinn._session_lifecycle_tokens
+    assert not any(
+        parent == parent_session_id
+        for parent, _thread_id in jinn._internal_sessions
+    )
+
+
+def test_session_start_opens_fresh_lifecycle_after_finalize(
+    monkeypatch,
+):
+    session_id = "reopened-lifecycle"
+    monkeypatch.setattr(
+        jinn,
+        "_park_contribution_publication",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        jinn.doctor,
+        "run_checks",
+        lambda **kwargs: [],
+    )
+    monkeypatch.setattr(
+        jinn.doctor,
+        "degraded_reason",
+        lambda checks: None,
+    )
+    monkeypatch.setattr(
+        jinn.doctor,
+        "_first_session_done",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        jinn.distill,
+        "reattach_watcher",
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr(
+        jinn.distill,
+        "snapshot_usage",
+        lambda: {},
+    )
+
+    jinn._on_session_finalize(
+        session_id=session_id,
+        reason="prior_session_complete",
+    )
+    jinn._on_session_start(
+        session_id=session_id,
+        platform="cli",
+    )
+
+    runner = PickupRunner()
+    jinn._runner = runner
+    try:
+        result = jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="new-task",
+            user_message=MSG,
+            is_first_turn=True,
+        )
+    finally:
+        jinn._runner = None
+        jinn._on_session_finalize(
+            session_id=session_id,
+            reason="test_cleanup",
+        )
+
+    assert result == {"context": CONTEXT_BLOCK}
+    assert len(runner.calls) == 1
+
+
 # ── Agent tools (unaffected by the pickup delegation) ───────────────────────
 
 def test_corpus_search_tool_formats_hits_and_records_surfaced_refs(tmp_path):

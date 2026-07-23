@@ -19,16 +19,27 @@ from typing import Any, Dict, List, Optional
 from . import harness as _harness
 
 _lock = threading.Lock()
-_buffers: Dict[str, Dict[str, Any]] = {}
+_buffers: Dict[object, Dict[str, Any]] = {}
 
 
-def _key(task_id: str, session_id: str) -> str:
+def _session_key(task_id: str, session_id: str) -> str:
     # Key on the session, which is stable for the whole conversation. task_id is
     # a fresh per-turn uuid on the interactive path (the agent mints one when no
     # explicit task is set), so keying on it fragments a session's trace across
     # buffers — record_first_turn lands in one, the tool steps + assemble in
     # another, and the published envelope loses its summary/model (mono #1404).
     return session_id or task_id or "default"
+
+
+def _key(
+    task_id: str,
+    session_id: str,
+    lifecycle_token: object | None = None,
+) -> object:
+    session_key = _session_key(task_id, session_id)
+    if lifecycle_token is None:
+        return session_key
+    return (session_key, lifecycle_token)
 
 
 def _fresh_buffer(session_id: str, key: str) -> Dict[str, Any]:
@@ -52,10 +63,18 @@ def record_first_turn(
     user_message: str,
     model: str,
     platform: str = "",
+    *,
+    lifecycle_token: object | None = None,
 ) -> None:
-    key = _key(task_id, session_id)
+    key = _key(task_id, session_id, lifecycle_token)
     with _lock:
-        buf = _buffers.setdefault(key, _fresh_buffer(session_id, key))
+        buf = _buffers.setdefault(
+            key,
+            _fresh_buffer(
+                session_id,
+                _session_key(task_id, session_id),
+            ),
+        )
         # Guard an empty/whitespace first message: "".splitlines()[0] raises
         # IndexError, which — swallowed by the hook dispatcher — would skip the
         # model write below and strand the trace without metadata (mono #1404).
@@ -74,15 +93,17 @@ def record_tool_call(
     args: Any,
     result: Any,
     duration_ms: Optional[int] = None,
+    *,
+    lifecycle_token: object | None = None,
 ) -> None:
-    key = _key(task_id, session_id)
+    key = _key(task_id, session_id, lifecycle_token)
     end_ns = time.time_ns()
     start_ns = end_ns - int((duration_ms or 0) * 1_000_000)
     with _lock:
         buf = _buffers.setdefault(
             key,
             {
-                "sessionId": session_id or key,
+                "sessionId": session_id or _session_key(task_id, session_id),
                 "capturedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 "startedNs": start_ns,
                 "steps": [],
@@ -105,7 +126,14 @@ def record_tool_call(
         )
 
 
-def _record_turn(task_id: str, session_id: str, role: str, text: str) -> None:
+def _record_turn(
+    task_id: str,
+    session_id: str,
+    role: str,
+    text: str,
+    *,
+    lifecycle_token: object | None = None,
+) -> None:
     """Append an ordered agent-turn span (user or assistant) into the buffer.
 
     Legacy steps carry no ``kind`` — the ``jinn.agent_turn`` discriminator is
@@ -113,10 +141,16 @@ def _record_turn(task_id: str, session_id: str, role: str, text: str) -> None:
     lands in the same ``steps`` list as tool calls so append order preserves the
     per-turn interleaving user → tool* → assistant.
     """
-    key = _key(task_id, session_id)
+    key = _key(task_id, session_id, lifecycle_token)
     now_ns = time.time_ns()
     with _lock:
-        buf = _buffers.setdefault(key, _fresh_buffer(session_id, key))
+        buf = _buffers.setdefault(
+            key,
+            _fresh_buffer(
+                session_id,
+                _session_key(task_id, session_id),
+            ),
+        )
         turns = buf.setdefault("turns", [])
         turns.append(
             {
@@ -132,42 +166,133 @@ def _record_turn(task_id: str, session_id: str, role: str, text: str) -> None:
         )
 
 
-def record_user_turn(task_id: str, session_id: str, user_message: str) -> None:
-    _record_turn(task_id, session_id, "user", user_message)
+def record_user_turn(
+    task_id: str,
+    session_id: str,
+    user_message: str,
+    *,
+    lifecycle_token: object | None = None,
+) -> None:
+    _record_turn(
+        task_id,
+        session_id,
+        "user",
+        user_message,
+        lifecycle_token=lifecycle_token,
+    )
 
 
-def record_assistant_turn(task_id: str, session_id: str, assistant_response: str) -> None:
-    _record_turn(task_id, session_id, "assistant", assistant_response)
+def record_assistant_turn(
+    task_id: str,
+    session_id: str,
+    assistant_response: str,
+    *,
+    lifecycle_token: object | None = None,
+) -> None:
+    _record_turn(
+        task_id,
+        session_id,
+        "assistant",
+        assistant_response,
+        lifecycle_token=lifecycle_token,
+    )
 
 
-def record_environment(task_id: str, session_id: str, skills_loadout: List[str]) -> None:
-    key = _key(task_id, session_id)
+def record_environment(
+    task_id: str,
+    session_id: str,
+    skills_loadout: List[str],
+    *,
+    lifecycle_token: object | None = None,
+) -> None:
+    key = _key(task_id, session_id, lifecycle_token)
     with _lock:
-        buf = _buffers.setdefault(key, _fresh_buffer(session_id, key))
+        buf = _buffers.setdefault(
+            key,
+            _fresh_buffer(
+                session_id,
+                _session_key(task_id, session_id),
+            ),
+        )
         buf.setdefault("skillsLoadout", list(skills_loadout or []))
 
 
-def record_tokens(task_id: str, session_id: str, input: int, output: int) -> None:
-    key = _key(task_id, session_id)
+def record_tokens(
+    task_id: str,
+    session_id: str,
+    input: int,
+    output: int,
+    *,
+    lifecycle_token: object | None = None,
+) -> None:
+    key = _key(task_id, session_id, lifecycle_token)
     with _lock:
-        buf = _buffers.setdefault(key, _fresh_buffer(session_id, key))
+        buf = _buffers.setdefault(
+            key,
+            _fresh_buffer(
+                session_id,
+                _session_key(task_id, session_id),
+            ),
+        )
         buf["tokens"] = {"input": int(input), "output": int(output)}
 
 
-def has_steps(task_id: str, session_id: str) -> bool:
+def has_steps(
+    task_id: str,
+    session_id: str,
+    *,
+    lifecycle_token: object | None = None,
+) -> bool:
     with _lock:
-        buf = _buffers.get(_key(task_id, session_id))
+        buf = _buffers.get(
+            _key(task_id, session_id, lifecycle_token)
+        )
         return bool(buf and buf["steps"])
 
 
-def has_capture(task_id: str, session_id: str) -> bool:
+def has_capture(
+    task_id: str,
+    session_id: str,
+    *,
+    lifecycle_token: object | None = None,
+) -> bool:
     """Whether any ordinary agent activity is currently captured locally."""
     with _lock:
-        buf = _buffers.get(_key(task_id, session_id))
+        buf = _buffers.get(
+            _key(task_id, session_id, lifecycle_token)
+        )
         return bool(buf and (buf["steps"] or buf.get("turns")))
 
 
-def _pop(task_id: str, session_id: str) -> Optional[Dict[str, Any]]:
+def discard(
+    task_id: str,
+    session_id: str,
+    *,
+    lifecycle_token: object | None = None,
+) -> None:
+    """Drop unfinished capture at a host session-finalize boundary."""
+    with _lock:
+        _buffers.pop(
+            _key(task_id, session_id, lifecycle_token),
+            None,
+        )
+
+
+def discard_session(session_id: str) -> None:
+    """Drop capture entries for every lifecycle owned by a host session."""
+    session_key = _session_key("", session_id)
+    with _lock:
+        for key in list(_buffers):
+            key_session = key[0] if isinstance(key, tuple) else key
+            if key_session == session_key:
+                _buffers.pop(key, None)
+
+
+def _pop(
+    task_id: str,
+    session_id: str,
+    lifecycle_token: object | None = None,
+) -> Optional[Dict[str, Any]]:
     """Pop the buffer once (None if absent or wholly empty).
 
     "Wholly empty" = no tool steps AND no turn spans. A turn-only session (no
@@ -175,7 +300,10 @@ def _pop(task_id: str, session_id: str) -> Optional[Dict[str, Any]]:
     turn; the legacy assemble() re-checks steps and returns None for it.
     """
     with _lock:
-        buf = _buffers.pop(_key(task_id, session_id), None)
+        buf = _buffers.pop(
+            _key(task_id, session_id, lifecycle_token),
+            None,
+        )
     if not buf or (not buf["steps"] and not buf.get("turns")):
         return None
     return buf
@@ -297,9 +425,11 @@ def assemble(
     session_id: str,
     completed: bool,
     interrupted: bool,
+    *,
+    lifecycle_token: object | None = None,
 ) -> Optional[Dict[str, Any]]:
     """Pop the buffer and return the CapturedTask dict (None if empty)."""
-    buf = _pop(task_id, session_id)
+    buf = _pop(task_id, session_id, lifecycle_token)
     if buf is None or not buf["steps"]:
         return None
     return _build_legacy(buf, completed, interrupted)
@@ -311,9 +441,11 @@ def assemble_episode(
     completed: bool,
     interrupted: bool,
     publish_consented: bool = False,
+    *,
+    lifecycle_token: object | None = None,
 ) -> Optional[Dict[str, Any]]:
     """Pop the buffer and return the EpisodeV1 dict (None if empty)."""
-    buf = _pop(task_id, session_id)
+    buf = _pop(task_id, session_id, lifecycle_token)
     if buf is None:
         return None
     return _build_episode(buf, completed, interrupted, publish_consented)
@@ -325,6 +457,8 @@ def assemble_both(
     completed: bool,
     interrupted: bool,
     publish_consented: bool = False,
+    *,
+    lifecycle_token: object | None = None,
 ) -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Pop the buffer ONCE and return (legacy CapturedTask, EpisodeV1).
 
@@ -332,7 +466,7 @@ def assemble_both(
     ``assemble()`` pops, so calling it twice would strand the second read.
     Both are ``None`` when the buffer is empty.
     """
-    buf = _pop(task_id, session_id)
+    buf = _pop(task_id, session_id, lifecycle_token)
     if buf is None:
         return None, None
     legacy = _build_legacy(buf, completed, interrupted) if buf["steps"] else None

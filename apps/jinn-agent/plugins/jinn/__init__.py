@@ -66,12 +66,11 @@ _degraded: Optional[str] = None
 # once at session end.
 _session_state_lock = threading.Lock()
 _session_states: Dict[str, Dict[str, Any]] = {}
-_session_state_epoch = 0
-_session_state_versions: Dict[str, int] = {}
+_session_lifecycle_tokens: Dict[str, object] = {}
+_session_state_tokens: Dict[str, object] = {}
 # Pickup exclusions/checkpoints span run_conversation turns and are cleared
 # only at the host's real session-finalize boundary.
 _pickup_checkpoints: Dict[str, Dict[str, Any]] = {}
-_pickup_checkpoint_versions: Dict[str, int] = {}
 _internal_session_lock = threading.Lock()
 _internal_sessions: Dict[tuple[str, int], str] = {}
 
@@ -96,13 +95,11 @@ def _park_contribution_publication() -> None:
 
 
 def _reset_session_state() -> None:
-    global _session_state_epoch
     with _session_state_lock:
-        _session_state_epoch += 1
         _session_states.clear()
-        _session_state_versions.clear()
+        _session_lifecycle_tokens.clear()
+        _session_state_tokens.clear()
         _pickup_checkpoints.clear()
-        _pickup_checkpoint_versions.clear()
     with _internal_session_lock:
         _internal_sessions.clear()
 
@@ -214,16 +211,14 @@ class _PickupRepositoryIdentity:
     verified: bool
 
 
-@dataclass(frozen=True)
-class _PickupCheckpointToken:
-    epoch: int
-    version: int
+class _SessionLifecycleToken:
+    """Opaque identity for one active host session lifetime."""
 
 
 @dataclass(frozen=True)
 class _PickupReservation:
     excluded_canonical_episode_ids: tuple[str, ...]
-    token: _PickupCheckpointToken
+    token: _SessionLifecycleToken
 
 
 def _session_identity(session_id: str) -> tuple[str, str, Optional[str]]:
@@ -251,14 +246,73 @@ def _release_internal_session(parent_session_id: Optional[str]) -> None:
         _internal_sessions.pop((parent_session_id, threading.get_ident()), None)
 
 
-def _state_for(session_id: str, cwd: Optional[Path] = None) -> Dict[str, Any]:
+def _release_all_internal_sessions(parent_session_id: str) -> list[str]:
+    with _internal_session_lock:
+        keys = [
+            key
+            for key in _internal_sessions
+            if key[0] == parent_session_id
+        ]
+        logical_session_ids = [
+            _internal_sessions.pop(key)
+            for key in keys
+        ]
+    return logical_session_ids
+
+
+def _session_lifecycle_token(
+    logical_session_id: str,
+) -> _SessionLifecycleToken:
+    key = logical_session_id or "default"
+    with _session_state_lock:
+        token = _session_lifecycle_tokens.get(key)
+        if token is None:
+            token = _SessionLifecycleToken()
+            _session_lifecycle_tokens[key] = token
+        return token
+
+
+def _current_session_lifecycle_token(
+    logical_session_id: str,
+) -> Optional[_SessionLifecycleToken]:
+    key = logical_session_id or "default"
+    with _session_state_lock:
+        token = _session_lifecycle_tokens.get(key)
+        return token if isinstance(token, _SessionLifecycleToken) else None
+
+
+def _session_lifecycle_is_current(
+    logical_session_id: str,
+    token: _SessionLifecycleToken,
+) -> bool:
+    key = logical_session_id or "default"
+    with _session_state_lock:
+        return _session_lifecycle_tokens.get(key) is token
+
+
+def _state_for(
+    session_id: str,
+    cwd: Optional[Path] = None,
+    *,
+    expected_token: Optional[_SessionLifecycleToken] = None,
+) -> Optional[Dict[str, Any]]:
     key = session_id or "default"
     with _session_state_lock:
+        lifecycle_token = _session_lifecycle_tokens.get(key)
+        if expected_token is not None:
+            if lifecycle_token is not expected_token:
+                return None
+            lifecycle_token = expected_token
+        elif lifecycle_token is None:
+            lifecycle_token = _SessionLifecycleToken()
+            _session_lifecycle_tokens[key] = lifecycle_token
         state = _session_states.get(key)
         if state is not None:
             return state
-        epoch = _session_state_epoch
-        version = _session_state_versions.get(key, 0)
+        state_token = _session_state_tokens.get(key)
+        if state_token is None:
+            state_token = object()
+            _session_state_tokens[key] = state_token
 
     candidate = {
         "snapshot": session_bridge.snapshot_repository(key, cwd=cwd),
@@ -267,9 +321,11 @@ def _state_for(session_id: str, cwd: Optional[Path] = None) -> Dict[str, Any]:
     }
     with _session_state_lock:
         if (
-            epoch != _session_state_epoch
-            or version != _session_state_versions.get(key, 0)
+            _session_lifecycle_tokens.get(key) is not lifecycle_token
+            or _session_state_tokens.get(key) is not state_token
         ):
+            if expected_token is not None:
+                return None
             return candidate
         state = _session_states.get(key)
         if state is None:
@@ -278,13 +334,15 @@ def _state_for(session_id: str, cwd: Optional[Path] = None) -> Dict[str, Any]:
         return state
 
 
-def _pop_state(session_id: str) -> Dict[str, Any]:
+def _pop_state(
+    session_id: str,
+    *,
+    close_lifecycle: bool = False,
+) -> Dict[str, Any]:
     key = session_id or "default"
     with _session_state_lock:
-        _session_state_versions[key] = (
-            _session_state_versions.get(key, 0) + 1
-        )
-        return _session_states.pop(
+        _session_state_tokens.pop(key, None)
+        state = _session_states.pop(
             key,
             {
                 "snapshot": None,
@@ -292,6 +350,10 @@ def _pop_state(session_id: str) -> Dict[str, Any]:
                 "intermediateFailureDiffs": [],
             },
         )
+        if close_lifecycle:
+            _pickup_checkpoints.pop(key, None)
+            _session_lifecycle_tokens.pop(key, None)
+        return state
 
 
 def _peek_state(session_id: str) -> Dict[str, Any]:
@@ -418,21 +480,10 @@ def _pickup_repository_identity(
     )
 
 
-def _pickup_checkpoint_token(
-    logical_session_id: str,
-) -> _PickupCheckpointToken:
-    key = logical_session_id or "default"
-    with _session_state_lock:
-        return _PickupCheckpointToken(
-            epoch=_session_state_epoch,
-            version=_pickup_checkpoint_versions.get(key, 0),
-        )
-
-
 def _reserve_pickup_checkpoint(
     logical_session_id: str,
     *,
-    expected_token: _PickupCheckpointToken,
+    expected_token: _SessionLifecycleToken,
     is_first_turn: bool,
     stable_task_id: Optional[str],
     repository_slug: Optional[str],
@@ -447,11 +498,7 @@ def _reserve_pickup_checkpoint(
     """
     key = logical_session_id or "default"
     with _session_state_lock:
-        if (
-            expected_token.epoch != _session_state_epoch
-            or expected_token.version
-            != _pickup_checkpoint_versions.get(key, 0)
-        ):
+        if _session_lifecycle_tokens.get(key) is not expected_token:
             return None
         checkpoint = _pickup_checkpoints.get(key)
         if checkpoint is None:
@@ -499,11 +546,7 @@ def _merge_pickup_deliveries(
 ) -> None:
     key = logical_session_id or "default"
     with _session_state_lock:
-        if (
-            reservation.token.epoch != _session_state_epoch
-            or reservation.token.version
-            != _pickup_checkpoint_versions.get(key, 0)
-        ):
+        if _session_lifecycle_tokens.get(key) is not reservation.token:
             return
         checkpoint = _pickup_checkpoints.get(key)
         if checkpoint is None:
@@ -514,13 +557,14 @@ def _merge_pickup_deliveries(
                 delivered.append(episode_id)
 
 
-def _clear_pickup_checkpoint(session_id: str) -> None:
+def _close_session_lifecycle(session_id: str) -> None:
+    """Atomically invalidate and remove all host-owned session control state."""
     key = session_id or "default"
     with _session_state_lock:
+        _session_states.pop(key, None)
+        _session_state_tokens.pop(key, None)
         _pickup_checkpoints.pop(key, None)
-        _pickup_checkpoint_versions[key] = (
-            _pickup_checkpoint_versions.get(key, 0) + 1
-        )
+        _session_lifecycle_tokens.pop(key, None)
 
 
 def _record_activity(session_id: str, field: str, refs: list[str]) -> None:
@@ -581,8 +625,14 @@ def _on_session_start(session_id: str = "", platform: str = "", **_: Any) -> Non
 
 def _on_session_finalize(session_id: str = "", **_: Any) -> None:
     """Release control state at the real host session boundary."""
-    _pop_state(session_id)
-    _clear_pickup_checkpoint(session_id)
+    owned_session_ids = [
+        session_id or "default",
+        *_release_all_internal_sessions(session_id or "default"),
+    ]
+    for owned_session_id in owned_session_ids:
+        _close_session_lifecycle(owned_session_id)
+    for owned_session_id in owned_session_ids:
+        buf.discard_session(owned_session_id)
 
 
 def _on_pre_llm_call(
@@ -595,7 +645,7 @@ def _on_pre_llm_call(
     **_: Any,
 ) -> Optional[Dict[str, str]]:
     logical_session_id, session_kind, parent_session_id = _session_identity(session_id)
-    pickup_token = _pickup_checkpoint_token(logical_session_id)
+    lifecycle_token = _session_lifecycle_token(logical_session_id)
     # Local capture — UNCONDITIONAL (mono#1714): filling the buffer never
     # leaves the machine; local retention, mining, and distillation happen by
     # default. Not gated on is_first_turn: the buffer is keyed per session and
@@ -603,17 +653,41 @@ def _on_pre_llm_call(
     # recovers the summary/model even when the first-turn signal is unreliable
     # on some provider paths (mono #1404). Only the share step (a task leaving
     # the machine) is gated — see _on_session_end.
-    buf.record_first_turn(task_id, logical_session_id, user_message, model, platform)
+    buf.record_first_turn(
+        task_id,
+        logical_session_id,
+        user_message,
+        model,
+        platform,
+        lifecycle_token=lifecycle_token,
+    )
     # Ordered user-turn span for the EpisodeV1 trajectory (mono #1662).
     # record_first_turn stores metadata only; this appends the turn span so it
     # precedes this turn's tool calls (post_tool_call) and the assistant turn
     # (post_llm_call). Local capture, so unconditional per mono#1714.
-    buf.record_user_turn(task_id, logical_session_id, user_message)
+    buf.record_user_turn(
+        task_id,
+        logical_session_id,
+        user_message,
+        lifecycle_token=lifecycle_token,
+    )
     # Consumption side — NEVER consent-gated: evidence-first corpus pickup.
     # Returns {"context": ...} (injected into the user message, cache-safe)
     # on the first turn and whenever a stable task/repository checkpoint
     # changes. Fails open inside pickup_with_outcome().
-    state = _state_for(logical_session_id)
+    state = _state_for(
+        logical_session_id,
+        expected_token=lifecycle_token,
+    )
+    if state is None:
+        # Finalization may race a pre-hook while local capture is in progress.
+        # Remove any late capture rows before returning from the stale hook.
+        buf.discard(
+            task_id,
+            logical_session_id,
+            lifecycle_token=lifecycle_token,
+        )
+        return None
     stable_task_id = (
         task_id.strip()
         if isinstance(task_id, str) and task_id.strip()
@@ -626,7 +700,7 @@ def _on_pre_llm_call(
     )
     reservation = _reserve_pickup_checkpoint(
         logical_session_id,
-        expected_token=pickup_token,
+        expected_token=lifecycle_token,
         is_first_turn=is_first_turn,
         stable_task_id=stable_task_id,
         repository_slug=repository_identity.repository_slug,
@@ -668,12 +742,30 @@ def _on_post_tool_call(
     **_: Any,
 ) -> None:
     logical_session_id, _, _ = _session_identity(session_id)
+    lifecycle_token = _session_lifecycle_token(logical_session_id)
     # Local capture — UNCONDITIONAL (mono#1714): recording tool calls never
     # leaves the machine.
     buf.record_tool_call(
-        task_id, logical_session_id, tool_name, tool_call_id, args, result, duration_ms
+        task_id,
+        logical_session_id,
+        tool_name,
+        tool_call_id,
+        args,
+        result,
+        duration_ms,
+        lifecycle_token=lifecycle_token,
     )
-    state = _state_for(logical_session_id)
+    state = _state_for(
+        logical_session_id,
+        expected_token=lifecycle_token,
+    )
+    if state is None:
+        buf.discard(
+            task_id,
+            logical_session_id,
+            lifecycle_token=lifecycle_token,
+        )
+        return
     run = session_bridge.test_run_from_tool_call(
         tool_name, args, result, str(time.time_ns())
     )
@@ -696,16 +788,37 @@ def _on_post_llm_call(
     **_: Any,
 ) -> None:
     logical_session_id, _, _ = _session_identity(session_id)
+    lifecycle_token = _session_lifecycle_token(logical_session_id)
     # Complete the EpisodeV1 turn (mono #1662): the assistant span lands AFTER
     # this turn's tool calls (post_tool_call fires inside the tool loop, which
     # completes before post_llm_call). Local capture is UNCONDITIONAL (mono#1714)
     # — the buffer never leaves the machine; only the share step is gated.
-    buf.record_assistant_turn(task_id, logical_session_id, assistant_response)
+    buf.record_assistant_turn(
+        task_id,
+        logical_session_id,
+        assistant_response,
+        lifecycle_token=lifecycle_token,
+    )
     # Record tokens only when the host reports meaningful usage. Zero/zero (the
     # getattr default when the agent has no usage) is treated as "no usage" so
     # cost.tokens is OMITTED rather than emitted as {0,0} (AC2, mono #1662).
     if input_tokens or output_tokens:
-        buf.record_tokens(task_id, logical_session_id, input_tokens or 0, output_tokens or 0)
+        buf.record_tokens(
+            task_id,
+            logical_session_id,
+            input_tokens or 0,
+            output_tokens or 0,
+            lifecycle_token=lifecycle_token,
+        )
+    if not _session_lifecycle_is_current(
+        logical_session_id,
+        lifecycle_token,
+    ):
+        buf.discard(
+            task_id,
+            logical_session_id,
+            lifecycle_token=lifecycle_token,
+        )
 
 
 def _normalized_activity(activity: Dict[str, Any]) -> Dict[str, Any]:
@@ -799,9 +912,8 @@ def _on_session_end(
     **_: Any,
 ) -> None:
     logical_session_id, session_kind, parent_session_id = _session_identity(session_id)
+    lifecycle_token = _current_session_lifecycle_token(logical_session_id)
     _release_internal_session(parent_session_id)
-    if session_kind == "host-internal":
-        _clear_pickup_checkpoint(logical_session_id)
     # Usage is native local telemetry, so show payoff independently of sharing
     # consent and before any capture-path early return.
     try:
@@ -815,20 +927,39 @@ def _on_session_end(
     publish_enabled = False
     # Record the skills loadout + token fallback (host forward, mono #1662) —
     # local writes, so unconditional per mono#1714, before the popping assembly.
-    buf.record_environment(task_id, logical_session_id, skills_loadout or [])
+    buf.record_environment(
+        task_id,
+        logical_session_id,
+        skills_loadout or [],
+        lifecycle_token=lifecycle_token,
+    )
     # See _on_post_llm_call — zero/no usage omits cost.tokens (AC2, mono #1662).
     if input_tokens or output_tokens:
-        buf.record_tokens(task_id, logical_session_id, input_tokens or 0, output_tokens or 0)
+        buf.record_tokens(
+            task_id,
+            logical_session_id,
+            input_tokens or 0,
+            output_tokens or 0,
+            lifecycle_token=lifecycle_token,
+        )
 
     # The canonical EpisodeV1 is the one local-learning and contribution source.
     # C7 retired the duplicate CapturedTask tee, so session end pops exactly the
     # episode shape and never writes a second trajectory file.
     episode = buf.assemble_episode(
-        task_id, logical_session_id, completed, interrupted, publish_consented=publish_enabled
+        task_id,
+        logical_session_id,
+        completed,
+        interrupted,
+        publish_consented=publish_enabled,
+        lifecycle_token=lifecycle_token,
     )
 
     if episode is None:
-        state = _pop_state(logical_session_id)
+        state = _pop_state(
+            logical_session_id,
+            close_lifecycle=session_kind == "host-internal",
+        )
         _user_line(session_view.render_complete(
             summary=None,
             activity=state.get("activity") or {},
@@ -839,7 +970,10 @@ def _on_session_end(
         ))
         return
 
-    state = _pop_state(logical_session_id)
+    state = _pop_state(
+        logical_session_id,
+        close_lifecycle=session_kind == "host-internal",
+    )
     snapshot = state.get("snapshot")
     try:
         accepted = session_bridge.accepted_diff(snapshot) if snapshot is not None else ""
@@ -969,9 +1103,14 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
 
     if sub == "session":
         state = _peek_state(session_id)
+        lifecycle_token = _current_session_lifecycle_token(session_id)
         return session_view.render_current(
             activity=state.get("activity") or {},
-            capture_active=buf.has_capture(task_id, session_id),
+            capture_active=buf.has_capture(
+                task_id,
+                session_id,
+                lifecycle_token=lifecycle_token,
+            ),
         )
 
     if sub == "history":
@@ -1003,7 +1142,12 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
         return distill.handle_command(parts[1:], runner=_runner)
 
     if sub == "veto":
-        if not buf.has_steps(task_id, session_id):
+        lifecycle_token = _current_session_lifecycle_token(session_id)
+        if not buf.has_steps(
+            task_id,
+            session_id,
+            lifecycle_token=lifecycle_token,
+        ):
             # mono issue #1383 — vetoing nothing must not return the success
             # copy: with no capture under way the mark would be a no-op.
             return "No active task to veto — veto marks the task currently running in this session."
