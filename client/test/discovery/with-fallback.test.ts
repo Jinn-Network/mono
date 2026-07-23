@@ -535,6 +535,36 @@ describe('withFallback — all four methods', () => {
     expect(result).toBe(floorResult);
     expect(floor.getVerdictTallies).toHaveBeenCalledOnce();
   });
+
+  it('getTaskLifecycleEvidence delegates to the primary on success (#2044)', async () => {
+    const primaryResult = new Map();
+    const primary = {
+      getTaskLifecycleEvidence: vi.fn(async () => primaryResult),
+    } as unknown as DiscoveryAPI;
+    const floor = {
+      getTaskLifecycleEvidence: vi.fn(async () => new Map()),
+    } as unknown as DiscoveryAPI;
+    const api = makeWrapper(primary, floor);
+    const result = await api.getTaskLifecycleEvidence({ taskIds: ['7'] });
+    expect(result).toBe(primaryResult);
+    expect(floor.getTaskLifecycleEvidence).not.toHaveBeenCalled();
+  });
+
+  it('getTaskLifecycleEvidence routes to floor on DiscoveryUnavailableError — tolerant (#2044)', async () => {
+    const floorResult = new Map();
+    const primary = {
+      getTaskLifecycleEvidence: vi.fn(async () => {
+        throw new DiscoveryUnavailableError('indexer down');
+      }),
+    } as unknown as DiscoveryAPI;
+    const floor = {
+      getTaskLifecycleEvidence: vi.fn(async () => floorResult),
+    } as unknown as DiscoveryAPI;
+    const api = makeWrapper(primary, floor);
+    const result = await api.getTaskLifecycleEvidence({ taskIds: ['7'] });
+    expect(result).toBe(floorResult);
+    expect(floor.getTaskLifecycleEvidence).toHaveBeenCalledOnce();
+  });
 });
 
 describe('DiscoveryUnavailableError', () => {
