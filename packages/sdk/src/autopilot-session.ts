@@ -25,9 +25,8 @@ export const AutopilotWorkflowSchema = z.enum([
 
 export type AutopilotWorkflow = z.infer<typeof AutopilotWorkflowSchema>;
 
-export const AutopilotSessionCapsuleSchema = z.object({
+const autopilotSessionCommonFields = {
   schemaVersion: z.literal('jinn-autopilot-session.v1'),
-  workflow: AutopilotWorkflowSchema,
   repository: z.literal('Jinn-Network/mono'),
   issueNumber: PositiveIntegerSchema,
   childIssueNumber: PositiveIntegerSchema.optional(),
@@ -45,21 +44,46 @@ export const AutopilotSessionCapsuleSchema = z.object({
     prBody: z.string(),
     baseSha: GitOidSchema,
   }).strict(),
-  workflowContract: z.object({
-    skill: z.enum(['implement-issue', 'fix-child', 'reconcile']),
-    version: z.literal('v2'),
-    resultSchema: z.enum([
-      'jinn-autopilot-mutation-result.v1',
-      'jinn-autopilot-review-result.v1',
-    ]),
-  }).strict(),
   deadline: IsoTimestampSchema,
   receiptAuthors: z.array(PrintableStringSchema).min(1).max(MAX_RECEIPT_AUTHORS),
-}).strict();
+};
+
+function mutationWorkflowContractSchema<
+  Skill extends 'implement-issue' | 'fix-child' | 'reconcile',
+>(skill: Skill) {
+  return z.object({
+    skill: z.literal(skill),
+    version: z.literal('v2'),
+    resultSchema: z.literal('jinn-autopilot-mutation-result.v1'),
+  }).strict();
+}
+
+export const AutopilotSessionCapsuleSchema = z.discriminatedUnion('workflow', [
+  z.object({
+    ...autopilotSessionCommonFields,
+    workflow: z.literal('implement'),
+    workflowContract: mutationWorkflowContractSchema('implement-issue'),
+  }).strict(),
+  z.object({
+    ...autopilotSessionCommonFields,
+    workflow: z.literal('fix-child'),
+    workflowContract: mutationWorkflowContractSchema('fix-child'),
+  }).strict(),
+  z.object({
+    ...autopilotSessionCommonFields,
+    workflow: z.literal('reconcile'),
+    workflowContract: mutationWorkflowContractSchema('reconcile'),
+  }).strict(),
+  z.object({
+    ...autopilotSessionCommonFields,
+    workflow: z.literal('ci-failure'),
+    workflowContract: mutationWorkflowContractSchema('fix-child'),
+  }).strict(),
+]);
 
 export type AutopilotSessionCapsule = z.infer<typeof AutopilotSessionCapsuleSchema>;
 
-const autopilotCorrelationFields = {
+const autopilotCorrelationRequiredFields = {
   taskId: PrintableStringSchema,
   attemptIndex: z.number().int().nonnegative(),
   requestId: PrintableStringSchema,
@@ -68,6 +92,10 @@ const autopilotCorrelationFields = {
   claimOid: GitOidSchema,
   prNumber: PositiveIntegerSchema,
   expectedHead: GitOidSchema,
+};
+
+const autopilotCorrelationFields = {
+  ...autopilotCorrelationRequiredFields,
   resultingHead: GitOidSchema.optional(),
   reviewedHead: GitOidSchema.optional(),
   reviewGeneration: UuidSchema.optional(),
@@ -79,6 +107,13 @@ export const AutopilotCorrelationSchema = z.object(
 ).strict();
 
 export type AutopilotCorrelation = z.infer<typeof AutopilotCorrelationSchema>;
+
+const AutopilotReviewCorrelationSchema = z.object({
+  ...autopilotCorrelationFields,
+  reviewedHead: GitOidSchema,
+  reviewGeneration: UuidSchema,
+  reviewRefOid: GitOidSchema,
+}).strict();
 
 const correlationKeys = [
   'taskId',
@@ -151,7 +186,7 @@ const AutopilotReviewFindingSchema = z.object({
 const AutopilotReviewApproveResultSchema = z.object({
   schemaVersion: z.literal('jinn-autopilot-review-result.v1'),
   outcome: z.literal('approve'),
-  correlation: AutopilotCorrelationSchema,
+  correlation: AutopilotReviewCorrelationSchema,
   body: z.string().min(1),
   followUps: z.array(AutopilotReviewFollowUpSchema).max(MAX_REVIEW_FOLLOW_UPS).optional(),
 }).strict();
@@ -159,14 +194,14 @@ const AutopilotReviewApproveResultSchema = z.object({
 const AutopilotReviewRequestChangesResultSchema = z.object({
   schemaVersion: z.literal('jinn-autopilot-review-result.v1'),
   outcome: z.literal('request-changes'),
-  correlation: AutopilotCorrelationSchema,
+  correlation: AutopilotReviewCorrelationSchema,
   findings: z.array(AutopilotReviewFindingSchema).min(1).max(MAX_REVIEW_FINDINGS),
 }).strict();
 
 const AutopilotReviewHumanResultSchema = z.object({
   schemaVersion: z.literal('jinn-autopilot-review-result.v1'),
   outcome: z.literal('human'),
-  correlation: AutopilotCorrelationSchema,
+  correlation: AutopilotReviewCorrelationSchema,
   reason: AutopilotHumanReasonSchema,
 }).strict();
 
@@ -198,7 +233,7 @@ export type AutopilotAdoptionRejectionReason = z.infer<
 
 const adoptionReceiptCommonFields = {
   schemaVersion: z.literal('jinn-autopilot-marketplace-adoption.v1'),
-  ...autopilotCorrelationFields,
+  ...autopilotCorrelationRequiredFields,
   recordedAt: IsoTimestampSchema,
 };
 
@@ -208,6 +243,7 @@ const AcceptedSolutionAdoptionReceiptSchema = z.object({
   role: z.literal('solution'),
   operation: z.enum(['implementation-complete', 'child-complete']),
   resultingHead: GitOidSchema,
+  reviewedHead: z.never().optional(),
   reviewGeneration: UuidSchema,
   reviewRefOid: GitOidSchema,
 }).strict();
@@ -218,6 +254,10 @@ const RejectedSolutionAdoptionReceiptSchema = z.object({
   role: z.literal('solution'),
   reason: AutopilotAdoptionRejectionReasonSchema,
   detail: z.string().min(1),
+  resultingHead: GitOidSchema.optional(),
+  reviewedHead: z.never().optional(),
+  reviewGeneration: UuidSchema.optional(),
+  reviewRefOid: GitOidSchema.optional(),
 }).strict();
 
 const AcceptedVerdictAdoptionReceiptSchema = z.object({
@@ -225,6 +265,7 @@ const AcceptedVerdictAdoptionReceiptSchema = z.object({
   disposition: z.literal('accepted'),
   role: z.literal('verdict'),
   operation: z.enum(['review-verdict', 'review-findings', 'human']),
+  resultingHead: z.never().optional(),
   reviewedHead: GitOidSchema,
   reviewGeneration: UuidSchema,
   reviewRefOid: GitOidSchema,
@@ -236,6 +277,10 @@ const RejectedVerdictAdoptionReceiptSchema = z.object({
   role: z.literal('verdict'),
   reason: AutopilotAdoptionRejectionReasonSchema,
   detail: z.string().min(1),
+  resultingHead: z.never().optional(),
+  reviewedHead: GitOidSchema,
+  reviewGeneration: UuidSchema,
+  reviewRefOid: GitOidSchema,
 }).strict();
 
 export const AutopilotAdoptionReceiptSchema = z.union([

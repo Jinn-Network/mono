@@ -18,6 +18,15 @@ function fixture(name: string): unknown {
   return JSON.parse(readFileSync(`${fixtureDirectory}${name}.json`, 'utf8')) as unknown;
 }
 
+function withoutKey(
+  value: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> {
+  const copy = { ...value };
+  delete copy[key];
+  return copy;
+}
+
 describe('AutopilotSessionCapsuleSchema', () => {
   for (const workflow of ['implement', 'fix-child', 'reconcile', 'ci-failure']) {
     it(`parses the ${workflow} workflow fixture`, () => {
@@ -50,6 +59,32 @@ describe('AutopilotSessionCapsuleSchema', () => {
     ]) {
       expect(() => AutopilotSessionCapsuleSchema.parse({ ...value, ...patch }))
         .toThrow();
+    }
+  });
+
+  it('binds each mutation workflow to its canonical skill and result schema', () => {
+    const cases = [
+      ['implement', 'fix-child'],
+      ['fix-child', 'reconcile'],
+      ['reconcile', 'implement-issue'],
+      ['ci-failure', 'implement-issue'],
+    ] as const;
+
+    for (const [workflow, wrongSkill] of cases) {
+      const value = fixture(`session-${workflow}`) as Record<string, unknown>;
+      const workflowContract = value.workflowContract as Record<string, unknown>;
+
+      expect(() => AutopilotSessionCapsuleSchema.parse({
+        ...value,
+        workflowContract: { ...workflowContract, skill: wrongSkill },
+      })).toThrow();
+      expect(() => AutopilotSessionCapsuleSchema.parse({
+        ...value,
+        workflowContract: {
+          ...workflowContract,
+          resultSchema: 'jinn-autopilot-review-result.v1',
+        },
+      })).toThrow();
     }
   });
 });
@@ -88,19 +123,65 @@ describe('Autopilot result schemas', () => {
       patch: 'é'.repeat(1_048_577),
     })).toThrow();
   });
+
+  it('requires the complete review target correlation for every review outcome', () => {
+    for (const outcome of ['approve', 'request-changes', 'human']) {
+      const value = fixture(`review-${outcome}`) as Record<string, unknown>;
+      const correlation = value.correlation as Record<string, unknown>;
+      for (const key of ['reviewedHead', 'reviewGeneration', 'reviewRefOid']) {
+        expect(() => AutopilotReviewResultSchema.parse({
+          ...value,
+          correlation: withoutKey(correlation, key),
+        })).toThrow();
+      }
+    }
+  });
 });
 
 describe('AutopilotCorrelationSchema', () => {
-  it('rejects a mismatch in any member of the complete correlation tuple', () => {
+  it('rejects a mismatch in every required member of the correlation tuple', () => {
     const pair = fixture('correlation-mismatch') as {
       expected: unknown;
       actual: unknown;
     };
     const expected = AutopilotCorrelationSchema.parse(pair.expected);
-    const actual = AutopilotCorrelationSchema.parse(pair.actual);
-
     expect(autopilotCorrelationMatches(expected, expected)).toBe(true);
-    expect(autopilotCorrelationMatches(expected, actual)).toBe(false);
+
+    const mutations = {
+      taskId: '502',
+      attemptIndex: 1,
+      requestId: '0xother-request',
+      deliveryEnvelopeCid: 'bafy-other-envelope',
+      v2AttemptId: '123e4567-e89b-42d3-a456-426614174099',
+      claimOid: '9'.repeat(40),
+      prNumber: 2102,
+      expectedHead: '8'.repeat(40),
+    } satisfies Record<string, unknown>;
+
+    for (const [key, value] of Object.entries(mutations)) {
+      const actual = AutopilotCorrelationSchema.parse({ ...expected, [key]: value });
+      expect(autopilotCorrelationMatches(expected, actual), key).toBe(false);
+    }
+  });
+
+  it('treats every optional missing-vs-present correlation field as a mismatch', () => {
+    const base = AutopilotCorrelationSchema.parse(
+      (fixture('correlation-mismatch') as { expected: unknown }).expected,
+    );
+    const optionalValues = {
+      resultingHead: '4'.repeat(40),
+      reviewedHead: '5'.repeat(40),
+      reviewGeneration: '123e4567-e89b-42d3-a456-426614174010',
+      reviewRefOid: '6'.repeat(40),
+    } satisfies Record<string, unknown>;
+
+    for (const [key, value] of Object.entries(optionalValues)) {
+      const present = AutopilotCorrelationSchema.parse({ ...base, [key]: value });
+      expect(autopilotCorrelationMatches(base, present), `${key}: missing/present`)
+        .toBe(false);
+      expect(autopilotCorrelationMatches(present, base), `${key}: present/missing`)
+        .toBe(false);
+    }
   });
 
   it('is strict', () => {
@@ -173,5 +254,38 @@ describe('AutopilotAdoptionReceiptSchema', () => {
       ...value,
       reviewGeneration: 'generation-1',
     })).toThrow();
+  });
+
+  it('requires exact-head review correlation on accepted and rejected Verdict receipts', () => {
+    for (const disposition of ['accepted', 'rejected']) {
+      const value = fixture(`receipt-verdict-${disposition}`) as Record<string, unknown>;
+      for (const key of ['reviewedHead', 'reviewGeneration', 'reviewRefOid']) {
+        expect(() => AutopilotAdoptionReceiptSchema.parse(withoutKey(value, key)))
+          .toThrow();
+      }
+    }
+  });
+
+  it('requires resulting-head review-claim correlation on accepted Solution receipts', () => {
+    const value = fixture('receipt-solution-accepted') as Record<string, unknown>;
+    for (const key of ['resultingHead', 'reviewGeneration', 'reviewRefOid']) {
+      expect(() => AutopilotAdoptionReceiptSchema.parse(withoutKey(value, key)))
+        .toThrow();
+    }
+  });
+
+  it('rejects role-inapplicable known correlation fields in every receipt branch', () => {
+    const cases = [
+      ['receipt-solution-accepted', { reviewedHead: '7'.repeat(40) }],
+      ['receipt-solution-rejected', { reviewedHead: '7'.repeat(40) }],
+      ['receipt-verdict-accepted', { resultingHead: '7'.repeat(40) }],
+      ['receipt-verdict-rejected', { resultingHead: '7'.repeat(40) }],
+    ] as const;
+
+    for (const [name, patch] of cases) {
+      const value = fixture(name) as Record<string, unknown>;
+      expect(() => AutopilotAdoptionReceiptSchema.parse({ ...value, ...patch }))
+        .toThrow();
+    }
   });
 });
