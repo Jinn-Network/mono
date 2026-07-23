@@ -143,7 +143,7 @@ function harness(overrides: Partial<ReviewExecutorDeps> = {}) {
 }
 
 describe('review action executor', () => {
-  it('suppresses standalone review dispatch in marketplace mode before claiming', async () => {
+  it('durably escalates an unanchored standalone marketplace review before claiming', async () => {
     const h = harness({
       executionBackendKind: 'marketplace',
       spawnCoordinator: () => {
@@ -153,12 +153,20 @@ describe('review action executor', () => {
 
     await expect(executeReviewAction({ prNumber: 84 }, h.deps))
       .resolves.toEqual({
-        status: 'ineligible',
+        status: 'human',
         prNumber: 84,
-        detail:
-          'Marketplace review is evaluator-anchored during Solution adoption.',
+        code: 'review-escalation',
       });
     expect(h.events).toEqual([]);
+    expect(h.human).toEqual([{
+      candidate: expect.objectContaining({ number: 84 }),
+      reason: {
+        phase: 'awaiting-review',
+        code: 'review-escalation',
+        detail:
+          'Standalone marketplace review is unanchored; semantic review must be evaluator-anchored during Solution adoption.',
+      },
+    }]);
   });
 
   it.skip('fails closed when the scheduled exact head changes before acquisition', async () => {

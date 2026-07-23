@@ -5,6 +5,7 @@ import {
   autopilotExecutionBackend,
   autopilotDiskFloorBytes,
   explicitEnvironmentFlag,
+  marketplaceSolverNetManifestCid,
 } from '../../src/lifecycle/active-config.js';
 
 describe('active runtime configuration', () => {
@@ -53,6 +54,21 @@ describe('active runtime configuration', () => {
     expect(autopilotExecutionBackend('marketplace')).toBe('marketplace');
     expect(() => autopilotExecutionBackend('daemon')).toThrow(
       /JINN_AUTOPILOT_EXECUTION_BACKEND.*local.*marketplace/i,
+    );
+  });
+
+  it('parses an optional explicit marketplace manifest CID and rejects empty values', () => {
+    expect(marketplaceSolverNetManifestCid(undefined)).toBeUndefined();
+    expect(marketplaceSolverNetManifestCid('bafy-explicit-manifest'))
+      .toBe('bafy-explicit-manifest');
+    expect(() => marketplaceSolverNetManifestCid('')).toThrow(
+      /JINN_AUTOPILOT_MARKETPLACE_SOLVERNET_MANIFEST_CID.*non-empty/i,
+    );
+    expect(() => marketplaceSolverNetManifestCid('  ')).toThrow(
+      /JINN_AUTOPILOT_MARKETPLACE_SOLVERNET_MANIFEST_CID.*non-empty/i,
+    );
+    expect(() => marketplaceSolverNetManifestCid(' bafy-cid')).toThrow(
+      /JINN_AUTOPILOT_MARKETPLACE_SOLVERNET_MANIFEST_CID.*whitespace/i,
     );
   });
 });

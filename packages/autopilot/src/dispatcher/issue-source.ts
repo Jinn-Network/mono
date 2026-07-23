@@ -65,7 +65,10 @@ export interface IssueSource {
 export type CommandRunner = (
   cmd: string,
   args: string[],
-  opts?: { env?: Record<string, string> },
+  opts?: {
+    readonly env?: Record<string, string>;
+    readonly replaceEnv?: boolean;
+  },
 ) => Promise<string>;
 
 // ---------------------------------------------------------------------------
@@ -100,9 +103,15 @@ export const defaultRunner: CommandRunner = async (cmd, args, opts) => {
   const { stdout } = await execFileAsync(cmd, args, {
     maxBuffer: 10 * 1024 * 1024,
     // Per-call env overlay (used to run `gh` as a specific identity via
-    // GH_TOKEN — the dual-identity boot check, DR-2026-06-15). Merged over the
-    // ambient env so PATH etc. survive.
-    ...(opts?.env ? { env: { ...process.env, ...opts.env } } : {}),
+    // GH_TOKEN — the dual-identity boot check, DR-2026-06-15). Callers that
+    // cross an authority boundary may instead request an exact replacement.
+    ...(opts?.env
+      ? {
+          env: opts.replaceEnv
+            ? opts.env
+            : { ...process.env, ...opts.env },
+        }
+      : {}),
   });
   return stdout;
 };

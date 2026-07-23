@@ -22,6 +22,8 @@ export const DEFAULT_ATTEMPT_GRACE_MS = 30 * 60 * 1000;
 export const DEFAULT_AUTOPILOT_DISK_FLOOR_GB = 10;
 export const AUTOPILOT_EXECUTION_BACKEND_ENV =
   'JINN_AUTOPILOT_EXECUTION_BACKEND';
+export const AUTOPILOT_MARKETPLACE_SOLVERNET_MANIFEST_CID_ENV =
+  'JINN_AUTOPILOT_MARKETPLACE_SOLVERNET_MANIFEST_CID';
 export type AutopilotExecutionBackend = 'local' | 'marketplace';
 
 export function autopilotExecutionBackend(
@@ -32,6 +34,28 @@ export function autopilotExecutionBackend(
   throw new Error(
     `${AUTOPILOT_EXECUTION_BACKEND_ENV} must be local or marketplace`,
   );
+}
+
+/**
+ * Optional production escape hatch for zero/ambiguous live jinn-repo.v1
+ * manifests. Unset preserves public auto-selection; an explicitly set value
+ * must be one non-empty CID without surrounding whitespace.
+ */
+export function marketplaceSolverNetManifestCid(
+  raw: string | undefined,
+): string | undefined {
+  if (raw === undefined) return undefined;
+  if (raw.trim().length === 0) {
+    throw new Error(
+      `${AUTOPILOT_MARKETPLACE_SOLVERNET_MANIFEST_CID_ENV} must be non-empty when set`,
+    );
+  }
+  if (raw !== raw.trim()) {
+    throw new Error(
+      `${AUTOPILOT_MARKETPLACE_SOLVERNET_MANIFEST_CID_ENV} must not contain surrounding whitespace`,
+    );
+  }
+  return raw;
 }
 
 export function nonNegativeEnvironmentInteger(

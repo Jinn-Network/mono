@@ -50,4 +50,26 @@ describe('Autopilot runtime boot guard', () => {
     );
     expect(output).not.toContain('Cycle report');
   });
+
+  it('rejects an explicitly empty marketplace manifest override before a cycle', () => {
+    const result = spawnSync(
+      'yarn',
+      ['autopilot', '--dry-run'],
+      {
+        cwd: packageRoot,
+        env: {
+          ...process.env,
+          JINN_AUTOPILOT_MARKETPLACE_SOLVERNET_MANIFEST_CID: '',
+        },
+        encoding: 'utf8',
+      },
+    );
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    expect(result.status).toBe(1);
+    expect(output).toMatch(
+      /JINN_AUTOPILOT_MARKETPLACE_SOLVERNET_MANIFEST_CID.*non-empty/i,
+    );
+    expect(output).not.toContain('Cycle report');
+  });
 });

@@ -101,6 +101,7 @@ export interface ProductionActiveRuntimeOptions {
   readonly config: DispatcherConfig;
   readonly spawn: SpawnFn;
   readonly executionBackendKind?: AutopilotExecutionBackend;
+  readonly marketplaceSolverNetManifestCid?: string;
   readonly marketplaceBackend?: MarketplaceSessionBackend;
   readonly marketplacePreflight?: () => Promise<{
     readonly ok: boolean;
@@ -276,6 +277,12 @@ export function makeProductionActiveRuntime(
         runner,
         environment: ambient,
         now,
+        ...(options.marketplaceSolverNetManifestCid === undefined
+          ? {}
+          : {
+              solverNetManifestCid:
+                options.marketplaceSolverNetManifestCid,
+            }),
       })
     : undefined;
   const executionBackend = marketplaceBackend
@@ -349,7 +356,19 @@ export function makeProductionActiveRuntime(
                 };
               }
               const observation = await marketplaceBackend.recover(handle);
-              if (observation.state !== 'running') {
+              if (observation.state === 'completed') {
+                markAttemptExited(attempt.paths.manifest, now);
+                continue;
+              }
+              if (
+                (
+                  observation.state === 'failed'
+                  || observation.state === 'cancelled'
+                )
+                && now().getTime()
+                  - Date.parse(attempt.timestamps.updatedAt)
+                  >= options.staleAfterMs
+              ) {
                 markAttemptExited(attempt.paths.manifest, now);
               }
             }

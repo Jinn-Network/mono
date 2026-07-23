@@ -314,11 +314,17 @@ export async function executeReviewAction(
     };
   }
   if (deps.executionBackendKind === 'marketplace') {
-    return {
-      status: 'ineligible',
-      prNumber: candidate.number,
+    const reason: HumanReason = {
+      phase: 'awaiting-review',
+      code: 'review-escalation',
       detail:
-        'Marketplace review is evaluator-anchored during Solution adoption.',
+        'Standalone marketplace review is unanchored; semantic review must be evaluator-anchored during Solution adoption.',
+    };
+    await deps.escalateHuman({ candidate, reason });
+    return {
+      status: 'human',
+      prNumber: candidate.number,
+      code: 'review-escalation',
     };
   }
   const lifecycleMarker =

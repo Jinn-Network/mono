@@ -35,6 +35,7 @@ import {
   attemptGraceMs,
   autopilotExecutionBackend,
   autopilotDiskFloorBytes,
+  marketplaceSolverNetManifestCid,
   explainIssue,
   explainPullRequest,
   GhLifecycleReader,
@@ -240,6 +241,9 @@ async function main(): Promise<void> {
   const executionBackendKind = autopilotExecutionBackend(
     env.JINN_AUTOPILOT_EXECUTION_BACKEND,
   );
+  const marketplaceManifestCid = marketplaceSolverNetManifestCid(
+    env.JINN_AUTOPILOT_MARKETPLACE_SOLVERNET_MANIFEST_CID,
+  );
   const options = parseLifecycleCli(argv.slice(2));
   const snapshotRuntime = parseSnapshotRuntimeConfig(env);
   const stateDirectory = parseAutopilotStateDirectory(env);
@@ -423,6 +427,12 @@ async function main(): Promise<void> {
         config,
         spawn: makeLoggingSpawn(),
         executionBackendKind,
+        ...(marketplaceManifestCid === undefined
+          ? {}
+          : {
+              marketplaceSolverNetManifestCid:
+                marketplaceManifestCid,
+            }),
         caps: {
           implementation: positiveEnvironmentInteger(
             env.JINN_AUTOPILOT_IMPLEMENTATION_CAP,

@@ -272,9 +272,68 @@ describe('production active runtime preflight', () => {
     expect(marketplaceRecovery).not.toHaveBeenCalled();
   });
 
-  it('reattaches preparing work and recovers its running handle before capacity is read', async () => {
+  it('threads the explicit manifest CID into the production marketplace preflight', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'autopilot-marketplace-config-'));
+    try {
+      const requests: Array<Record<string, unknown>> = [];
+      const runner = async (command: string, args: string[]) => {
+        if (command === 'git') {
+          return 'https://github.com/Jinn-Network/mono.git\n';
+        }
+        if (command === 'jinn') {
+          const requestPath = args[args.indexOf('--request-file') + 1]!;
+          requests.push(JSON.parse(readFileSync(requestPath, 'utf8')));
+          return JSON.stringify({ dryRun: true, verb: 'tasks submit' });
+        }
+        throw new Error(`unexpected command: ${command}`);
+      };
+      const runtime = makeProductionActiveRuntime({
+        repositoryPath: '/repo',
+        worktreeBase: root,
+        runnerId: 'runner-a',
+        credentials: pool(),
+        authorAllowlist: new Set(['implementation-bot']),
+        readSnapshot: vi.fn(),
+        readPullRequestByNumber: vi.fn(),
+        readProjectItemForReconciliation: vi.fn(),
+        readBranchHeadByName: vi.fn(),
+        readIssueByNumber: vi.fn(),
+        readBlockedByIssueNumbers: vi.fn(),
+        readOpenPullRequestsByIssue: vi.fn(),
+        readIssueActionContext: vi.fn(),
+        config: DEFAULT_CONFIG,
+        spawn: vi.fn(),
+        executionBackendKind: 'marketplace',
+        marketplaceSolverNetManifestCid: 'bafy-production-manifest',
+        caps: { implementation: 1, review: 1 },
+        implementationBackpressureThreshold: 1,
+        staleAfterMs: 120 * 60 * 1000,
+        environment: {
+          PATH: '/usr/bin',
+          HOME: '/operator/home',
+          JINN_AUTOPILOT_CAPABILITY_ATTESTATION: '/attestation.json',
+        },
+        now: () => NOW,
+        readCapabilityAttestation: () => ({}) as never,
+        runner,
+      });
+
+      await expect(runtime.preflight()).resolves.toEqual({ ok: true });
+      expect(requests).toEqual([
+        expect.objectContaining({
+          solverType: 'jinn-repo.v1',
+          solverNetManifestCid: 'bafy-production-manifest',
+        }),
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('retains failed or cancelled marketplace recovery until V2 staleness', async () => {
     const root = mkdtempSync(join(tmpdir(), 'autopilot-marketplace-recovery-'));
     try {
+      let currentNow = NOW;
       const attemptId = '11111111-1111-4111-8111-111111111111';
       const attemptDir = join(
         root,
@@ -337,6 +396,14 @@ describe('production active runtime preflight', () => {
           .mockResolvedValueOnce({
             state: 'failed' as const,
             detail: 'Marketplace task deadline expired',
+          })
+          .mockResolvedValueOnce({
+            state: 'cancelled' as const,
+            detail: 'authority was released',
+          })
+          .mockResolvedValueOnce({
+            state: 'cancelled' as const,
+            detail: 'authority was released',
           }),
         cancel: vi.fn(),
         preflight: vi.fn(async () => ({ ok: true as const })),
@@ -365,7 +432,7 @@ describe('production active runtime preflight', () => {
         environment: {
           JINN_AUTOPILOT_CAPABILITY_ATTESTATION: '/attestation.json',
         },
-        now: () => NOW,
+        now: () => currentNow,
         readCapabilityAttestation: () => ({}) as never,
         runner: async () => 'https://github.com/Jinn-Network/mono.git\n',
       });
@@ -385,12 +452,13 @@ describe('production active runtime preflight', () => {
         },
       });
 
+      currentNow = new Date('2026-07-20T13:30:00.000Z');
       await expect(runtime.preflight()).resolves.toEqual({ ok: true });
       expect(marketplaceBackend.recoverPreparing).toHaveBeenCalledOnce();
       expect(marketplaceBackend.recover).toHaveBeenCalledTimes(2);
       expect(marketplaceBackend.recover).toHaveBeenLastCalledWith(recovered);
       expect(JSON.parse(readFileSync(manifestPath, 'utf8'))).toMatchObject({
-        processState: 'exited',
+        processState: 'running',
         pid: null,
         execution: {
           backend: 'marketplace',
@@ -398,6 +466,25 @@ describe('production active runtime preflight', () => {
           taskCid: 'bafy-task-42',
         },
       });
+      expect(runtime.readLocalState().remaining.implementation).toBe(0);
+
+      currentNow = new Date('2026-07-20T13:59:59.999Z');
+      await expect(runtime.preflight()).resolves.toEqual({ ok: true });
+      expect(marketplaceBackend.recover).toHaveBeenCalledTimes(3);
+      expect(JSON.parse(readFileSync(manifestPath, 'utf8'))).toMatchObject({
+        processState: 'running',
+        pid: null,
+      });
+      expect(runtime.readLocalState().remaining.implementation).toBe(0);
+
+      currentNow = new Date('2026-07-20T14:00:00.000Z');
+      await expect(runtime.preflight()).resolves.toEqual({ ok: true });
+      expect(marketplaceBackend.recover).toHaveBeenCalledTimes(4);
+      expect(JSON.parse(readFileSync(manifestPath, 'utf8'))).toMatchObject({
+        processState: 'exited',
+        pid: null,
+      });
+      expect(runtime.readLocalState().remaining.implementation).toBe(1);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

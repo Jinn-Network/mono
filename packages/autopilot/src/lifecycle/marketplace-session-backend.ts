@@ -11,10 +11,6 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import type { CommandRunner } from '../dispatcher/issue-source.js';
 import { defaultRunner } from '../dispatcher/issue-source.js';
-import {
-  isGitHubSecretEnvironmentKey,
-  sanitizedGitHubCommandOverlay,
-} from './credentials.js';
 import type {
   ClaimedMutationSessionInput,
   ClaimedSessionInput,
@@ -219,20 +215,59 @@ function readCancellation(
 function marketplaceEnvironment(
   ambient: NodeJS.ProcessEnv,
 ): Record<string, string> {
-  const sanitized: Record<string, string> = Object.fromEntries(
+  return Object.fromEntries(
     Object.entries(ambient)
-      .filter((entry): entry is [string, string] => entry[1] !== undefined),
+      .filter((entry): entry is [string, string] => (
+        entry[1] !== undefined
+        && marketplaceEnvironmentKey(entry[0])
+      )),
   );
-  Object.assign(sanitized, sanitizedGitHubCommandOverlay(ambient));
-  for (const key of Object.keys(sanitized)) {
-    if (
-      isGitHubSecretEnvironmentKey(key)
-      || key === 'JINN_AUTOPILOT_SESSION_MANIFEST'
-    ) {
-      sanitized[key] = '';
-    }
+}
+
+const MARKETPLACE_PROCESS_ENVIRONMENT_KEYS = new Set([
+  'PATH',
+  'HOME',
+  'TMPDIR',
+  'TMP',
+  'TEMP',
+  'USER',
+  'LOGNAME',
+  'SHELL',
+  'LANG',
+  'LANGUAGE',
+  'TZ',
+  'TERM',
+  'NO_COLOR',
+  'FORCE_COLOR',
+]);
+
+const MARKETPLACE_PROXY_ENVIRONMENT_KEYS = new Set([
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'ALL_PROXY',
+  'NO_PROXY',
+]);
+
+const MARKETPLACE_CERTIFICATE_ENVIRONMENT_KEYS = new Set([
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'NODE_EXTRA_CA_CERTS',
+  'REQUESTS_CA_BUNDLE',
+  'CURL_CA_BUNDLE',
+  'AWS_CA_BUNDLE',
+]);
+
+function marketplaceEnvironmentKey(key: string): boolean {
+  const upper = key.toUpperCase();
+  if (MARKETPLACE_PROCESS_ENVIRONMENT_KEYS.has(upper)) return true;
+  if (upper.startsWith('LC_')) return true;
+  if (MARKETPLACE_PROXY_ENVIRONMENT_KEYS.has(upper)) return true;
+  if (MARKETPLACE_CERTIFICATE_ENVIRONMENT_KEYS.has(upper)) return true;
+  if (upper === 'BASE_RPC_URL' || upper === 'BASE_SEPOLIA_RPC_URL') {
+    return true;
   }
-  return sanitized;
+  return /^JINN_(?:CONFIG|STATE_DIR|EARNING_DIR|DB_PATH|NETWORK|PASSWORD|NODE_ENDPOINT|IPFS_(?:REGISTRY|GATEWAY)_URL|DISCOVERY_(?:MODE|URL|FALLBACK)|IDENTITY_REGISTRY_ADDRESS|VALIDATION_REGISTRY_ADDRESS|ROUTER_CLAIM_DELIVERY_VERSION|ENABLE_MAINNET|TESTNET_[A-Z0-9_]+_DEPLOYMENT|RPC_URL|[A-Z0-9_]+_RPC_URL)$/
+    .test(upper);
 }
 
 function submitOutput(raw: string): MarketplaceSubmitOutput {
@@ -313,7 +348,10 @@ export function makeMarketplaceSessionBackend(
     '--yes',
     '--json',
     ...(dryRun ? ['--dry-run'] : []),
-  ], { env: marketplaceEnvironment(ambient) });
+  ], {
+    env: marketplaceEnvironment(ambient),
+    replaceEnv: true,
+  });
 
   const submit = async (
     input: ClaimedMutationSessionInput,

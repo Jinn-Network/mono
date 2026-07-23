@@ -59,13 +59,23 @@ describe('marketplace SessionExecutionBackend', () => {
     const root = mkdtempSync(join(tmpdir(), 'jinn-marketplace-backend-'));
     roots.push(root);
     writeFileSync(join(root, 'manifest.json'), '{}');
-    const calls: Array<{ command: string; args: string[]; env?: Record<string, string> }> = [];
+    const calls: Array<{
+      command: string;
+      args: string[];
+      env?: Record<string, string>;
+      replaceEnv?: boolean;
+    }> = [];
     const runner = vi.fn(async (
       command: string,
       args: string[],
-      options?: { env?: Record<string, string> },
+      options?: { env?: Record<string, string>; replaceEnv?: boolean },
     ) => {
-      calls.push({ command, args, env: options?.env });
+      calls.push({
+        command,
+        args,
+        env: options?.env,
+        replaceEnv: options?.replaceEnv,
+      });
       return JSON.stringify({
         taskId: '501',
         taskCid: 'bafy-task',
@@ -81,11 +91,25 @@ describe('marketplace SessionExecutionBackend', () => {
         PATH: '/usr/bin',
         HOME: '/operator/home',
         JINN_RPC_URL: 'https://rpc.example',
-      JINN_CONFIG: '/operator/config.json',
-      GH_TOKEN: 'must-not-leak',
-      JINN_IMPL_GH_TOKEN: 'must-not-leak',
-      CUSTOM_GITHUB_PAT: 'must-not-leak',
-      JINN_AUTOPILOT_SESSION_MANIFEST: '/must/not/leak',
+        JINN_CONFIG: '/operator/config.json',
+        JINN_PASSWORD: 'local-keystore-password',
+        HTTPS_PROXY: 'https://proxy.example',
+        NODE_EXTRA_CA_CERTS: '/operator/ca.pem',
+        GH_TOKEN: 'must-not-leak',
+        GITHUB_TOKEN: 'must-not-leak',
+        JINN_IMPL_GH_TOKEN: 'must-not-leak',
+        CUSTOM_GITHUB_PAT: 'must-not-leak',
+        GH_CONFIG_DIR: '/must/not/leak/gh',
+        GIT_ASKPASS: '/must/not/leak/askpass',
+        SSH_AUTH_SOCK: '/must/not/leak/ssh-agent',
+        GIT_SSH: '/must/not/leak/git-ssh',
+        GIT_SSH_COMMAND: '/must/not/leak/git-ssh-command',
+        GIT_CONFIG_GLOBAL: '/must/not/leak/gitconfig',
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: 'credential.helper',
+        JINN_AUTOPILOT_SESSION_MANIFEST: '/must/not/leak/manifest',
+        OPENAI_API_KEY: 'must-not-leak',
+        UNRELATED_SECRET: 'must-not-leak',
       },
       now: () => new Date('2026-07-23T12:00:00.000Z'),
     });
@@ -106,16 +130,15 @@ describe('marketplace SessionExecutionBackend', () => {
       '--yes',
       '--json',
     ]);
-    expect(calls[0]!.env).toMatchObject({
+    expect(calls[0]!.replaceEnv).toBe(true);
+    expect(calls[0]!.env).toEqual({
       PATH: '/usr/bin',
       HOME: '/operator/home',
       JINN_RPC_URL: 'https://rpc.example',
       JINN_CONFIG: '/operator/config.json',
-      GH_TOKEN: '',
-      GITHUB_TOKEN: '',
-      JINN_IMPL_GH_TOKEN: '',
-      CUSTOM_GITHUB_PAT: '',
-      JINN_AUTOPILOT_SESSION_MANIFEST: '',
+      JINN_PASSWORD: 'local-keystore-password',
+      HTTPS_PROXY: 'https://proxy.example',
+      NODE_EXTRA_CA_CERTS: '/operator/ca.pem',
     });
     const requestText = readFileSync(join(root, 'marketplace-request.json'), 'utf8');
     const request = JSON.parse(requestText) as Record<string, unknown>;
@@ -215,6 +238,27 @@ describe('marketplace SessionExecutionBackend', () => {
     ]);
   });
 
+  it('uses the explicit manifest override in the exact dry-run preflight request', async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    const backend = makeMarketplaceSessionBackend({
+      runner: async (_command, args) => {
+        const requestPath = args[args.indexOf('--request-file') + 1]!;
+        requests.push(JSON.parse(readFileSync(requestPath, 'utf8')));
+        return JSON.stringify({ dryRun: true, verb: 'tasks submit' });
+      },
+      solverNetManifestCid: 'bafy-explicit-manifest',
+      now: () => new Date('2026-07-23T12:00:00.000Z'),
+    });
+
+    await expect(backend.preflight()).resolves.toEqual({ ok: true });
+    expect(requests).toEqual([
+      expect.objectContaining({
+        solverType: 'jinn-repo.v1',
+        solverNetManifestCid: 'bafy-explicit-manifest',
+      }),
+    ]);
+  });
+
   it('preflights the exact one-shot path without broadcasting', async () => {
     const calls: string[][] = [];
     const backend = makeMarketplaceSessionBackend({
@@ -273,19 +317,26 @@ describe('marketplace SessionExecutionBackend', () => {
       .toBe(requestBefore);
   });
 
-  it('reports an expired submitted handle as failed instead of live forever', async () => {
-    const backend = makeMarketplaceSessionBackend({
+  it('reports an expired submitted handle as failed across backend restarts', async () => {
+    const options = {
       runner: async () => '',
       now: () => new Date('2026-07-23T14:00:00.000Z'),
-    });
-
-    await expect(backend.recover({
-      backend: 'marketplace',
+    };
+    const handle = {
+      backend: 'marketplace' as const,
       taskId: '501',
       taskCid: 'bafy-task',
       deadline: '2026-07-23T13:30:00.000Z',
       requestFile: '/attempt/marketplace-request.json',
-    })).resolves.toEqual({
+    };
+
+    await expect(makeMarketplaceSessionBackend(options).recover(handle))
+      .resolves.toEqual({
+        state: 'failed',
+        detail: 'Marketplace task deadline expired',
+      });
+    await expect(makeMarketplaceSessionBackend(options).recover(handle))
+      .resolves.toEqual({
       state: 'failed',
       detail: 'Marketplace task deadline expired',
     });
