@@ -52,6 +52,37 @@ function shouldSkipPost(record: TaskPostRecord, policy: TaskPostingPolicy, nowMs
   return Number.isFinite(lastPostedAt) && (nowMs - lastPostedAt) < policy.intervalMs;
 }
 
+function canonicalCandidateBytes(candidate: TaskCandidate): {
+  canonicalTaskJson: string | null;
+  requestJson: string | null;
+} {
+  return {
+    canonicalTaskJson: candidate.task.signedTask
+      ? canonicalJson(candidate.task.signedTask)
+      : null,
+    requestJson: candidate.sourceMeta?.request
+      ? canonicalJson(candidate.sourceMeta.request)
+      : null,
+  };
+}
+
+function assertImmutableCandidate(
+  candidate: TaskCandidate,
+  record: TaskPostRecord,
+  current: ReturnType<typeof canonicalCandidateBytes>,
+): void {
+  const immutableMachinePost = record.requestJson !== null || current.requestJson !== null;
+  if (!immutableMachinePost) return;
+  if (
+    record.canonicalTaskJson !== current.canonicalTaskJson
+    || record.requestJson !== current.requestJson
+  ) {
+    throw new Error(
+      `Task post recovery content mismatch for ${candidate.sourceKey}; refusing to overwrite or broadcast different content`,
+    );
+  }
+}
+
 export class TaskPostingService {
   constructor(
     private readonly adapter: ExecutionAdapter,
@@ -68,6 +99,7 @@ export class TaskPostingService {
     const now = new Date();
     const nowIso = now.toISOString();
     const nowMs = now.getTime();
+    const immutableBytes = canonicalCandidateBytes(candidate);
 
     const existing = this.store.getTaskPostRecord({
       creatorSafeAddress,
@@ -76,6 +108,7 @@ export class TaskPostingService {
       scopeKey,
     });
     if (existing?.protocolTaskId && shouldSkipPost(existing, candidate.postingPolicy, nowMs)) {
+      assertImmutableCandidate(candidate, existing, immutableBytes);
       return this.buildIdempotentResult(candidate, existing, 'store');
     }
 
@@ -103,6 +136,7 @@ export class TaskPostingService {
         scopeKey,
       });
       if (lockedExisting?.protocolTaskId && shouldSkipPost(lockedExisting, candidate.postingPolicy, nowMs)) {
+        assertImmutableCandidate(candidate, lockedExisting, immutableBytes);
         return this.buildIdempotentResult(candidate, lockedExisting, 'store');
       }
 
@@ -115,18 +149,8 @@ export class TaskPostingService {
         attemptId,
         attemptNumber,
       };
-      const canonicalTaskJson = task.signedTask ? canonicalJson(task.signedTask) : null;
-      const requestJson = candidate.sourceMeta?.request
-        ? canonicalJson(candidate.sourceMeta.request)
-        : null;
-      if (
-        lockedExisting?.canonicalTaskJson
-        && lockedExisting.canonicalTaskJson !== canonicalTaskJson
-      ) {
-        throw new Error(
-          `Task post recovery content mismatch for ${candidate.sourceKey}; refusing to sign or broadcast different content`,
-        );
-      }
+      const { canonicalTaskJson, requestJson } = immutableBytes;
+      if (lockedExisting) assertImmutableCandidate(candidate, lockedExisting, immutableBytes);
       this.store.upsertTaskPostRecord({
         creatorSafeAddress,
         sourceKey: candidate.sourceKey,
@@ -161,6 +185,8 @@ export class TaskPostingService {
             postCount: attemptNumber,
             canonicalTaskJson,
             requestJson,
+            creationTxHash: recovered.txHash,
+            creationBlockNumber: recovered.blockNumber,
           });
           return {
             ...recovered,
@@ -199,6 +225,8 @@ export class TaskPostingService {
         postCount: attemptNumber,
         canonicalTaskJson,
         requestJson,
+        creationTxHash: posted.txHash,
+        creationBlockNumber: posted.blockNumber,
       });
       return {
         taskId: posted.taskId,
@@ -232,6 +260,8 @@ export class TaskPostingService {
     return {
       taskId: record.protocolTaskId ?? record.requestId,
       taskCid: record.taskCid ?? '',
+      txHash: record.creationTxHash ?? undefined,
+      blockNumber: record.creationBlockNumber ?? undefined,
       task: {
         ...candidate.task,
         role: 'restoration',

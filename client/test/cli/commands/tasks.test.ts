@@ -12,6 +12,7 @@ import { LocalAdapter } from '@/adapters/local/adapter.js';
 import { Store } from '@/store/store.js';
 
 const createCliExecutionContext = vi.hoisted(() => vi.fn());
+const runMarketplaceTaskSubmitPreflight = vi.hoisted(() => vi.fn(async () => undefined));
 const gatherIntrospectionRaw = vi.hoisted(() => vi.fn(async () => ({
   fleet: {
     services: [{
@@ -22,6 +23,7 @@ const gatherIntrospectionRaw = vi.hoisted(() => vi.fn(async () => ({
 })));
 vi.mock('@/cli/execution-context.js', () => ({ createCliExecutionContext }));
 vi.mock('@/cli/introspection-context.js', () => ({ gatherIntrospectionRaw }));
+vi.mock('@/tasks/submit-preflight.js', () => ({ runMarketplaceTaskSubmitPreflight }));
 
 const V2_ATTEMPT_ID = '11111111-1111-4111-8111-111111111111';
 
@@ -75,7 +77,7 @@ function request(overrides: Record<string, unknown> = {}) {
           version: 'v2',
           resultSchema: 'jinn-autopilot-mutation-result.v1',
         },
-        deadline: '2026-07-23T14:00:00.000Z',
+        deadline: '2026-07-22T23:50:00.000Z',
         receiptAuthors: ['jinn-autopilot'],
       },
     },
@@ -100,11 +102,42 @@ describe('MarketplaceTaskSubmitRequestSchema', () => {
     expect(() => parseMarketplaceTaskSubmitRequest(request({ id: 'manual-key' })))
       .toThrow(/autopilot:/);
   });
+
+  it.each([
+    ['claim window ordering', (value: any) => {
+      value.claimPolicy.claimWindowEndTs = value.claimPolicy.claimWindowStartTs;
+    }],
+    ['claim start within Task window', (value: any) => {
+      value.claimPolicy.claimWindowStartTs = value.window.startTs - 1;
+    }],
+    ['claim end within Task window', (value: any) => {
+      value.claimPolicy.claimWindowEndTs = value.window.endTs + 1;
+    }],
+    ['submission after claim window', (value: any) => {
+      value.claimPolicy.submissionDeadlineTs = value.claimPolicy.claimWindowEndTs;
+    }],
+    ['submission within Task window', (value: any) => {
+      value.claimPolicy.submissionDeadlineTs = value.window.endTs + 1;
+    }],
+    ['creation no later than Task start', (value: any) => {
+      value.createdAt = value.window.startTs + 1;
+    }],
+    ['session deadline within submission deadline', (value: any) => {
+      value.spec.session.deadline = new Date(
+        value.claimPolicy.submissionDeadlineTs + 1,
+      ).toISOString();
+    }],
+  ])('rejects invalid timing: %s', (_name, mutate) => {
+    const value = request();
+    mutate(value);
+    expect(() => parseMarketplaceTaskSubmitRequest(value)).toThrow();
+  });
 });
 
 describe('tasks submit machine contract', () => {
   afterEach(() => {
     createCliExecutionContext.mockReset();
+    runMarketplaceTaskSubmitPreflight.mockClear();
   });
 
   it('rejects request-file combined with legacy loose flags', async () => {
@@ -140,6 +173,7 @@ describe('tasks submit machine contract', () => {
       verb: 'tasks submit',
     });
     expect(createCliExecutionContext).not.toHaveBeenCalled();
+    expect(runMarketplaceTaskSubmitPreflight).toHaveBeenCalledOnce();
   });
 
   it('emits Task CID, chain origin, manifest, and idempotency in JSON', async () => {
@@ -169,13 +203,27 @@ describe('tasks submit machine contract', () => {
 
     await tasksCommand.run(made.ctx);
 
-    expect(JSON.parse(made.writes.at(-1)!)).toMatchObject({
+    const first = JSON.parse(made.writes.at(-1)!);
+    expect(first).toMatchObject({
       taskId: '1',
       taskCid: 'local-1',
       creationTx: expect.stringMatching(/^0x/),
       creationBlock: expect.any(Number),
       solverNetManifestCid: 'bafy-autopilot-manifest',
       idempotent: false,
+    });
+    const retryMade = makeCommandCtx({
+      argv: ['submit', '--request-file', file, '--config', config, '--yes', '--json'],
+    });
+    await tasksCommand.run(retryMade.ctx);
+    const retry = JSON.parse(retryMade.writes.at(-1)!);
+    expect(retry).toMatchObject({
+      taskId: first.taskId,
+      taskCid: first.taskCid,
+      creationTx: first.creationTx,
+      creationBlock: first.creationBlock,
+      solverNetManifestCid: first.solverNetManifestCid,
+      idempotent: true,
     });
     store.close();
     await adapter.stop();

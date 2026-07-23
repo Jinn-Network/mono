@@ -238,6 +238,8 @@ export interface TaskPostRecord {
   postCount: number;
   canonicalTaskJson?: string | null;
   requestJson?: string | null;
+  creationTxHash?: `0x${string}` | null;
+  creationBlockNumber?: number | null;
 }
 
 interface LocalTaskRunProjectionRow {
@@ -379,6 +381,8 @@ CREATE TABLE IF NOT EXISTS task_posts (
   post_count INTEGER NOT NULL DEFAULT 1,
   canonical_task_json TEXT,
   request_json TEXT,
+  creation_tx_hash TEXT,
+  creation_block_number INTEGER,
   PRIMARY KEY (creator_safe_address, source_key, policy_type, scope_key)
 );
 
@@ -699,6 +703,12 @@ export class Store {
     if (!names.has('request_json')) {
       this.db.exec(`ALTER TABLE task_posts ADD COLUMN request_json TEXT`);
     }
+    if (!names.has('creation_tx_hash')) {
+      this.db.exec(`ALTER TABLE task_posts ADD COLUMN creation_tx_hash TEXT`);
+    }
+    if (!names.has('creation_block_number')) {
+      this.db.exec(`ALTER TABLE task_posts ADD COLUMN creation_block_number INTEGER`);
+    }
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_task_posts_task ON task_posts (task_id)`);
   }
 
@@ -991,7 +1001,8 @@ export class Store {
     const row = this.db.prepare(
       `SELECT creator_safe_address, source_key, policy_type, scope_key, task_id,
               protocol_task_id, task_cid, request_id,
-              first_posted_at, last_posted_at, post_count, canonical_task_json, request_json
+              first_posted_at, last_posted_at, post_count, canonical_task_json, request_json,
+              creation_tx_hash, creation_block_number
        FROM task_posts
        WHERE creator_safe_address = @creatorSafeAddress
          AND source_key = @sourceKey
@@ -1011,6 +1022,8 @@ export class Store {
       post_count: number;
       canonical_task_json: string | null;
       request_json: string | null;
+      creation_tx_hash: `0x${string}` | null;
+      creation_block_number: number | null;
     } | undefined;
     if (!row) return null;
     return {
@@ -1027,6 +1040,8 @@ export class Store {
       postCount: row.post_count,
       canonicalTaskJson: row.canonical_task_json,
       requestJson: row.request_json,
+      creationTxHash: row.creation_tx_hash,
+      creationBlockNumber: row.creation_block_number,
     };
   }
 
@@ -1193,14 +1208,18 @@ export class Store {
       taskCid: record.taskCid ?? null,
       canonicalTaskJson: record.canonicalTaskJson ?? null,
       requestJson: record.requestJson ?? null,
+      creationTxHash: record.creationTxHash ?? null,
+      creationBlockNumber: record.creationBlockNumber ?? null,
     };
     this.db.prepare(
       `INSERT INTO task_posts
          (creator_safe_address, source_key, policy_type, scope_key, task_id, protocol_task_id, task_cid, request_id,
-          first_posted_at, last_posted_at, post_count, canonical_task_json, request_json)
+          first_posted_at, last_posted_at, post_count, canonical_task_json, request_json,
+          creation_tx_hash, creation_block_number)
        VALUES
          (@creatorSafeAddress, @sourceKey, @policyType, @scopeKey, @taskId, @protocolTaskId, @taskCid, @requestId,
-          @firstPostedAt, @lastPostedAt, @postCount, @canonicalTaskJson, @requestJson)
+          @firstPostedAt, @lastPostedAt, @postCount, @canonicalTaskJson, @requestJson,
+          @creationTxHash, @creationBlockNumber)
        ON CONFLICT(creator_safe_address, source_key, policy_type, scope_key) DO UPDATE SET
          task_id = excluded.task_id,
          protocol_task_id = excluded.protocol_task_id,
@@ -1210,7 +1229,9 @@ export class Store {
          last_posted_at = excluded.last_posted_at,
          post_count = excluded.post_count,
          canonical_task_json = excluded.canonical_task_json,
-         request_json = excluded.request_json`,
+         request_json = excluded.request_json,
+         creation_tx_hash = excluded.creation_tx_hash,
+         creation_block_number = excluded.creation_block_number`,
     ).run(params);
   }
 

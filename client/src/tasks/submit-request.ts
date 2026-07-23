@@ -75,6 +75,57 @@ export const MarketplaceTaskSubmitRequestSchema: ZodType<MarketplaceTaskSubmitRe
         message: 'window.endTs must be after window.startTs',
       });
     }
+    const policy = request.claimPolicy;
+    const timingIssues: Array<[Array<string | number>, boolean, string]> = [
+      [
+        ['createdAt'],
+        request.createdAt <= request.window.startTs,
+        'createdAt must be no later than window.startTs',
+      ],
+      [
+        ['claimPolicy', 'claimWindowStartTs'],
+        policy.claimWindowStartTs >= request.window.startTs,
+        'claimWindowStartTs must be within the Task window',
+      ],
+      [
+        ['claimPolicy', 'claimWindowEndTs'],
+        policy.claimWindowEndTs > policy.claimWindowStartTs,
+        'claimWindowEndTs must be after claimWindowStartTs',
+      ],
+      [
+        ['claimPolicy', 'claimWindowEndTs'],
+        policy.claimWindowEndTs <= request.window.endTs,
+        'claimWindowEndTs must be within the Task window',
+      ],
+      [
+        ['claimPolicy', 'submissionDeadlineTs'],
+        policy.submissionDeadlineTs > policy.claimWindowEndTs,
+        'submissionDeadlineTs must be after claimWindowEndTs',
+      ],
+      [
+        ['claimPolicy', 'submissionDeadlineTs'],
+        policy.submissionDeadlineTs <= request.window.endTs,
+        'submissionDeadlineTs must be within the Task window',
+      ],
+    ];
+    const sessionDeadline = Date.parse(request.spec.session.deadline);
+    timingIssues.push(
+      [
+        ['spec', 'session', 'deadline'],
+        Number.isFinite(sessionDeadline) && sessionDeadline >= policy.claimWindowEndTs,
+        'session deadline must not precede claimWindowEndTs',
+      ],
+      [
+        ['spec', 'session', 'deadline'],
+        Number.isFinite(sessionDeadline) && sessionDeadline <= policy.submissionDeadlineTs,
+        'session deadline must be within submissionDeadlineTs',
+      ],
+    );
+    for (const [path, valid, message] of timingIssues) {
+      if (!valid) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path, message });
+      }
+    }
   });
 
 export function parseMarketplaceTaskSubmitRequest(

@@ -196,6 +196,10 @@ describe('Store', () => {
       firstPostedAt: '2026-04-23T10:00:00.000Z',
       lastPostedAt: '2026-04-23T10:00:00.000Z',
       postCount: 1,
+      canonicalTaskJson: '{"id":"test-1"}',
+      requestJson: '{"id":"request-1"}',
+      creationTxHash: `0x${'ab'.repeat(32)}`,
+      creationBlockNumber: 123,
     });
 
     expect(store.getTaskPostRecord({
@@ -207,7 +211,48 @@ describe('Store', () => {
       requestId: 'req-1',
       taskId: 'test-1',
       postCount: 1,
+      canonicalTaskJson: '{"id":"test-1"}',
+      requestJson: '{"id":"request-1"}',
+      creationTxHash: `0x${'ab'.repeat(32)}`,
+      creationBlockNumber: 123,
     });
+  });
+
+  it('migrates legacy task_posts with nullable immutable bytes and creation provenance', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-task-post-migration-'));
+    const dbPath = join(dir, 'legacy.sqlite');
+    const legacy = new Database(dbPath);
+    legacy.exec(`
+      CREATE TABLE task_posts (
+        creator_safe_address TEXT NOT NULL,
+        source_key TEXT NOT NULL,
+        policy_type TEXT NOT NULL,
+        scope_key TEXT NOT NULL DEFAULT '',
+        task_id TEXT NOT NULL,
+        request_id TEXT NOT NULL,
+        first_posted_at TEXT NOT NULL,
+        last_posted_at TEXT NOT NULL,
+        post_count INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY (creator_safe_address, source_key, policy_type, scope_key)
+      );
+    `);
+    legacy.close();
+
+    const migrated = new Store(dbPath);
+    try {
+      const inspect = new Database(dbPath, { readonly: true });
+      const columns = inspect.prepare('PRAGMA table_info(task_posts)')
+        .all() as Array<{ name: string }>;
+      inspect.close();
+      expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
+        'canonical_task_json',
+        'request_json',
+        'creation_tx_hash',
+        'creation_block_number',
+      ]));
+    } finally {
+      migrated.close();
+    }
   });
 
   it('lists posted tasks by creator with solverType denormalised from activity_events', () => {

@@ -212,6 +212,109 @@ describe('TaskPostingService', () => {
     await adapter.stop();
   });
 
+  it('fails closed when a completed key is retried with changed signed Task or request bytes', async () => {
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+    const service = new TaskPostingService(adapter, store);
+    const signedTask = {
+      schemaVersion: 'task.v1',
+      id: 'autopilot:immutable',
+      solverType: 'jinn-repo.v1',
+      solverNetManifestCid: 'bafy-manifest',
+      spec: { session: { expectedHead: 'a'.repeat(40) } },
+    } as unknown as SignedTaskV1;
+    const candidate = {
+      task: {
+        id: signedTask.id,
+        description: 'immutable',
+        signedTask,
+      },
+      sourceKey: 'autopilot:immutable',
+      postingPolicy: { kind: 'once_per_safe' } as const,
+      sourceMeta: { request: { deadline: 100 } },
+    };
+    const postSpy = vi.spyOn(adapter, 'postTask');
+    await service.postCandidate(candidate, { creatorSafeAddress: SAFE_A });
+
+    await expect(service.postCandidate({
+      ...candidate,
+      task: {
+        ...candidate.task,
+        signedTask: {
+          ...signedTask,
+          spec: { session: { expectedHead: 'b'.repeat(40) } },
+        } as unknown as SignedTaskV1,
+      },
+    }, { creatorSafeAddress: SAFE_A })).rejects.toThrow(/content mismatch/);
+    await expect(service.postCandidate({
+      ...candidate,
+      sourceMeta: { request: { deadline: 101 } },
+    }, { creatorSafeAddress: SAFE_A })).rejects.toThrow(/content mismatch/);
+    expect(postSpy).toHaveBeenCalledOnce();
+
+    store.close();
+    await adapter.stop();
+  });
+
+  it('fails closed when an unfinished key is retried with changed capsule content', async () => {
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+    const service = new TaskPostingService(adapter, store);
+    const signedTask = {
+      schemaVersion: 'task.v1',
+      id: 'autopilot:unfinished',
+      solverType: 'jinn-repo.v1',
+      solverNetManifestCid: 'bafy-manifest',
+      spec: { session: { expectedHead: 'a'.repeat(40) } },
+    } as unknown as SignedTaskV1;
+    const candidate = {
+      task: { id: signedTask.id, description: 'unfinished', signedTask },
+      sourceKey: 'autopilot:unfinished',
+      postingPolicy: { kind: 'once_per_safe' } as const,
+      sourceMeta: { request: { deadline: 100 } },
+    };
+    vi.spyOn(adapter, 'postTask').mockRejectedValue(new Error('crash'));
+    await expect(service.postCandidate(candidate, { creatorSafeAddress: SAFE_A })).rejects.toThrow('crash');
+
+    await expect(service.postCandidate({
+      ...candidate,
+      task: {
+        ...candidate.task,
+        signedTask: {
+          ...signedTask,
+          spec: { session: { expectedHead: 'b'.repeat(40) } },
+        } as unknown as SignedTaskV1,
+      },
+    }, { creatorSafeAddress: SAFE_A })).rejects.toThrow(/content mismatch/);
+
+    store.close();
+    await adapter.stop();
+  });
+
+  it('returns identical creation provenance on the initial post and store retry', async () => {
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+    const service = new TaskPostingService(adapter, store);
+    const candidate = {
+      task: { id: 'provenance', description: 'persist chain origin' },
+      sourceKey: 'manual:provenance',
+      postingPolicy: { kind: 'once_per_safe' } as const,
+    };
+
+    const first = await service.postCandidate(candidate, { creatorSafeAddress: SAFE_A });
+    const retry = await service.postCandidate(candidate, { creatorSafeAddress: SAFE_A });
+
+    expect(retry.txHash).toBe(first.txHash);
+    expect(retry.blockNumber).toBe(first.blockNumber);
+    expect(retry.taskCid).toBe(first.taskCid);
+
+    store.close();
+    await adapter.stop();
+  });
+
   // ERC-8004 per-execution registration is rebuilt under bead jinn-mono-3zk
   // against the operator-rooted entity model — see DR
   // docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md. The

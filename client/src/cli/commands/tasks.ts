@@ -9,10 +9,14 @@ import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { ensureConfirmed, emitDryRun } from '../action.js';
 import { gatherIntrospectionRaw } from '../introspection-context.js';
-import { createCliExecutionContext } from '../execution-context.js';
+import {
+  createCliExecutionContext,
+  createCliSignerContext,
+  pickPrimaryMechService,
+} from '../execution-context.js';
 import { isRecoverableTransactionError } from '../../tx-retry.js';
 import type { Task } from '../../types/task.js';
-import type { TaskV1 } from '../../types/task-document.js';
+import { parseTaskV1, type TaskV1 } from '../../types/task-document.js';
 import { SOLVER_TYPES, unknownSolverTypeMessage } from '../../solver-types/index.js';
 import { signTaskV1 } from '../../tasks/signing.js';
 import { TaskPostingService } from '../../tasks/posting-service.js';
@@ -29,6 +33,120 @@ import {
   parseMarketplaceTaskSubmitRequest,
   type MarketplaceTaskSubmitRequest,
 } from '../../tasks/submit-request.js';
+import { runMarketplaceTaskSubmitPreflight } from '../../tasks/submit-preflight.js';
+import { createHttpDiscoveryAPI } from '../../discovery/http.js';
+import { fetchFromIpfs } from '../../adapters/mech/ipfs.js';
+import { getJinnRouterAddress } from '../../contracts/addresses.js';
+import {
+  getMechDeliveryRate,
+  getTimeoutBounds,
+} from '../../adapters/mech/contracts.js';
+
+function machinePreflightChecks(args: {
+  ctx: CommandContext;
+  config: ReturnType<typeof loadConfig>;
+  manifestCid: string;
+}) {
+  let signerPromise: ReturnType<typeof createCliSignerContext> | undefined;
+  const signer = async () => {
+    signerPromise ??= createCliSignerContext({ argv: args.ctx.argv, env: args.ctx.env });
+    const built = await signerPromise;
+    if (!built.ok) throw new Error(built.envelope.message);
+    return built.ctx;
+  };
+  let launchedPromise: ReturnType<ReturnType<typeof createHttpDiscoveryAPI>['listLaunchedSolverNets']> | undefined;
+  const launched = async () => {
+    const discovery = args.config.discovery;
+    if (discovery?.mode !== 'http' || !discovery.url) {
+      throw new Error('HTTP discovery indexer must be configured for machine Task submission');
+    }
+    launchedPromise ??= createHttpDiscoveryAPI({
+      url: discovery.url,
+    }).listLaunchedSolverNets({ status: ['launched'] });
+    return launchedPromise;
+  };
+  const primary = async () => {
+    const built = await signer();
+    const service = pickPrimaryMechService(built.fleetState.services);
+    if (!service?.safe_address || !service.mech_address) {
+      throw new Error('no operational creator Safe and Mech service is configured');
+    }
+    return service;
+  };
+  return {
+    creator: async () => {
+      await primary();
+    },
+    funds: async () => {
+      const [built, service] = await Promise.all([signer(), primary()]);
+      const agentAddress = privateKeyToAccount(
+        walletPrivateKeyAtIndex(built.mnemonic, service.index),
+      ).address;
+      const [balance, agentBalance, deliveryRate] = await Promise.all([
+        built.publicClient.getBalance({
+          address: getAddress(service.safe_address!),
+        }),
+        built.publicClient.getBalance({ address: agentAddress }),
+        getMechDeliveryRate(
+          built.publicClient,
+          getAddress(service.mech_address!),
+        ),
+      ]);
+      const requiredTaskBudget = deliveryRate * 2n;
+      if (balance < requiredTaskBudget) {
+        throw new Error(
+          `creator Safe requires ${requiredTaskBudget} wei but has ${balance} wei`,
+        );
+      }
+      if (agentBalance <= 0n) throw new Error('creator agent EOA has no native gas funds');
+    },
+    rpc: async () => {
+      const built = await signer();
+      const [chainId] = await Promise.all([
+        built.publicClient.getChainId(),
+        built.publicClient.getBlockNumber(),
+      ]);
+      if (chainId !== built.chainConfig.chainId) {
+        throw new Error(`RPC chain ${chainId} does not match configured chain ${built.chainConfig.chainId}`);
+      }
+    },
+    contracts: async () => {
+      const [built, service] = await Promise.all([signer(), primary()]);
+      const router = (built.chainConfig.jinnRouter
+        ?? getJinnRouterAddress(built.chainConfig.chainId)) as `0x${string}`;
+      const [routerCode, mechCode] = await Promise.all([
+        built.publicClient.getBytecode({ address: router }),
+        built.publicClient.getBytecode({ address: getAddress(service.mech_address!) }),
+        getTimeoutBounds(
+          built.publicClient,
+          built.chainConfig.mechMarketplace as `0x${string}`,
+        ),
+      ]);
+      if (!routerCode || routerCode === '0x') throw new Error(`Router contract missing at ${router}`);
+      if (!mechCode || mechCode === '0x') {
+        throw new Error(`Mech contract missing at ${service.mech_address}`);
+      }
+    },
+    indexer: async () => {
+      await launched();
+    },
+    gateway: async () => {
+      await fetchFromIpfs(args.config.ipfsGatewayUrl, args.manifestCid);
+    },
+    solverNet: async () => {
+      const summaries = await launched();
+      const target = summaries.find((entry) => entry.manifestCid === args.manifestCid);
+      if (!target || target.status !== 'launched') {
+        throw new Error(`SolverNet ${args.manifestCid} is not live`);
+      }
+      if (target.contractId !== 'jinn-repo' || target.contractVersion !== 'v1') {
+        throw new Error(
+          `SolverNet ${args.manifestCid} is not compatible with jinn-repo.v1`,
+        );
+      }
+    },
+  };
+}
 
 async function runSubmit(ctx: CommandContext): Promise<void> {
   let parsed;
@@ -216,6 +334,21 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     );
     return;
   }
+  const selectedMachineManifestCid = machineRequest
+    ? (machineRequest.solverNetManifestCid ?? matchedJoined?.manifestCid)
+    : undefined;
+  if (machineRequest && !selectedMachineManifestCid) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: 'The machine request did not resolve an exact SolverNet manifest CID',
+        exampleCli: 'jinn tasks submit --request-file request.json --dry-run --json',
+        details: { field: 'solverNetManifestCid' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
 
   const specFilePath = parsed.values['spec-file'] as string | undefined;
   let specOverlay: { solverType?: string; window?: any; spec?: any; eligibility?: any } | undefined;
@@ -321,6 +454,27 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
       return;
     }
     const creatorMultisig = getAddress(service.safe_address);
+    if (machineRequest) {
+      try {
+        await runMarketplaceTaskSubmitPreflight(machinePreflightChecks({
+          ctx,
+          config,
+          manifestCid: selectedMachineManifestCid!,
+        }));
+      } catch (err) {
+        emitEnvelope(
+          {
+            code: 'transient_error',
+            message: err instanceof Error ? err.message : String(err),
+            hint: 'Resolve every failed machine Task submission dependency and retry the dry-run.',
+            exampleCli: 'jinn tasks submit --request-file request.json --dry-run --json',
+            details: { field: 'preflight' },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
+    }
     emitDryRun(ctx, {
       verb: 'tasks submit',
       description: `Would post task '${id}' from ${creatorMultisig}`,
@@ -365,7 +519,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     // --manifest-cid flag → joinedSolverNets[--solver-net].manifestCid.
     // Without one we refuse to submit; admin paths posting orphan tasks
     // need to supply a cid.
-    const explicitManifestCid = machineRequest?.solverNetManifestCid
+    const explicitManifestCid = selectedMachineManifestCid
       ?? parsed.values['manifest-cid'] as string | undefined;
     const joinedManifestCid = matchedJoined?.manifestCid;
     const solverNetManifestCid = explicitManifestCid ?? joinedManifestCid;
@@ -406,7 +560,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
         ? { requiredVerdicts: requiredVerdictsOverride }
         : {}),
     };
-    const taskDoc: TaskV1 = {
+    const taskDoc = parseTaskV1({
       schemaVersion: 'task.v1',
       id,
       solverType: taskKind,
@@ -424,7 +578,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
         agentEoa: agentEoaAddress,
       },
       createdAt: machineRequest?.createdAt ?? Date.now(),
-    };
+    });
     const signedTask = await signTaskV1(taskDoc, agentEoaPrivateKey);
     const task: Task = {
       id,
