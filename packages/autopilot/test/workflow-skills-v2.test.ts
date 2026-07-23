@@ -53,7 +53,16 @@ describe('single-surface workflow skill pins', () => {
     expect(autopilotRuntime).toContain('child-complete');
     expect(autopilotRuntime).toContain('fix-child');
     expect(autopilotRuntime).toContain('reconcile');
+    expect(autopilotRuntime).toMatch(/follow-ups-file/);
     expect(autopilotRuntime).toMatch(/Deleted verbs/);
+  });
+
+  it('§5.1 documents approve with optional non-blocking follow-ups', () => {
+    const spec = read('docs/superpowers/specs/2026-07-21-single-surface-lifecycle.md');
+    expect(spec).toContain('### 5.1');
+    expect(spec).toMatch(/follow-ups-file/);
+    expect(spec).toContain('jinn-autopilot:review-follow-up');
+    expect(spec).toMatch(/does not enter BLOCKED-BY-CHILD|never.*openChildKinds/i);
   });
 
   it('merge-batch does not route v2 work through merge-prep or Status authority', () => {

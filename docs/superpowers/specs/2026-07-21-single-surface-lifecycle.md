@@ -135,17 +135,30 @@ body marker). Children auto-close when the parent merges or closes.
 
 ### 5.1 Review findings become children
 
-The review session has exactly two terminal outcomes:
+The review session still has exactly two **native** terminal verdicts
+(APPROVE vs REQUEST_CHANGES). Approve may optionally file non-blocking
+follow-ups in the same session command:
 
-- **Approve:** native APPROVE + terminal ref, as today.
-- **Request changes:** native REQUEST_CHANGES (head-bound) + one child issue
-  per round listing all blocking findings (reviewer may split genuinely
-  independent findings) + release the claim + exit.
+- **Approve:** native APPROVE + terminal ref, as today. Optional
+  `--follow-ups-file` on `autopilot session review-verdict --state APPROVE`
+  files zero-or-more **ordinary** issues (not children) with body marker
+  `<!-- jinn-autopilot:review-follow-up pr=<N> head=<sha> index=<i> -->`,
+  Issue Type `feat|chore|fix|refactor`, and machine triage
+  (`effort:*` / `priority:*` labels plus Project Blocked on / Effort /
+  Priority; default Blocked on: Nothing). Cap ≤5 per exact head. Filing is
+  idempotent on `pr+head+index` and runs before terminal publish. These
+  issues never carry `review-finding`/`reconcile` labels or the child
+  marker, never appear in `openChildKinds`, and **do not** move the parent
+  into BLOCKED-BY-CHILD.
+- **Request changes:** native REQUEST_CHANGES (head-bound) + one
+  `review-finding` child per round listing all **blocking** findings
+  (reviewer may split genuinely independent findings) + release the claim
+  + exit.
 
 The REVIEW-FIXING state, the atomic two-ref fix publication, the
-redraft-before-fix ordering, and the fix-loop recovery carve-out are deleted.
-The reviewer credential loses branch-push authority entirely: reviewers read,
-verdict, file, and exit.
+redraft-before-fix ordering, and the fix-loop recovery carve-out remain
+deleted. The reviewer credential still has no branch-push authority:
+reviewers read, verdict, file, and exit.
 
 ### 5.2 Integration becomes a ladder
 

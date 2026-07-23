@@ -33,6 +33,10 @@ import type {
 } from '../lifecycle/review-session.js';
 import { makeProductionReviewSessionPort } from '../lifecycle/review-session-production.js';
 import { childrenPathEnabled } from '../lifecycle/child-issues.js';
+import {
+  parseReviewFollowUpsPayload,
+  type ReviewFollowUpEntry,
+} from '../lifecycle/review-follow-ups.js';
 import type { ReviewVerdictState } from '../lifecycle/types.js';
 
 export interface SessionProtocol {
@@ -45,6 +49,7 @@ export interface SessionProtocol {
     manifest: AttemptManifest,
     state: ReviewVerdictState,
     body: string,
+    followUps?: readonly ReviewFollowUpEntry[],
   ): Promise<ReviewVerdictResult>;
   reviewFindings?(
     manifest: AttemptManifest,
@@ -79,6 +84,7 @@ type ParsedSessionCommand =
       readonly operation: 'review-verdict';
       readonly state: ReviewVerdictState;
       readonly bodyFile: string;
+      readonly followUpsFile?: string;
     }
   | {
       readonly operation: 'review-findings';
@@ -107,7 +113,7 @@ export interface SessionCliExecution {
 const USAGE =
   'usage: autopilot session checkpoint | ' +
   'implementation-complete --summary-file <path> | ' +
-  'review-verdict --state <APPROVE|REQUEST_CHANGES> --body-file <path> | ' +
+  'review-verdict --state <APPROVE|REQUEST_CHANGES> --body-file <path> [--follow-ups-file <path>] | ' +
   'review-findings --file <path> | child-complete | ' +
   'human --reason-file <path>';
 const MAX_SESSION_TEXT_BYTES = 65_536;
@@ -239,24 +245,58 @@ function parseSessionCommand(argv: readonly string[]): ParsedSessionCommand {
         summaryFile: requiredPath(argv[2], '--summary-file'),
       };
     case 'review-verdict': {
-      if (
-        argv.length !== 5
-        || argv[1] !== '--state'
-        || argv[3] !== '--body-file'
-      ) {
+      const flags = new Map<string, string>();
+      for (let i = 1; i < argv.length; i += 1) {
+        const key = argv[i];
+        if (key === undefined || !key.startsWith('--')) {
+          throw new Error(
+            'review-verdict requires --state <APPROVE|REQUEST_CHANGES> --body-file <path>; ' +
+            USAGE,
+          );
+        }
+        if (flags.has(key)) {
+          throw new Error(`review-verdict duplicate flag ${key}; ${USAGE}`);
+        }
+        const value = argv[i + 1];
+        if (value === undefined || value.startsWith('--')) {
+          throw new Error(`${key} requires a value; ${USAGE}`);
+        }
+        flags.set(key, value);
+        i += 1;
+      }
+      const state = flags.get('--state');
+      const bodyFile = flags.get('--body-file');
+      const followUpsFile = flags.get('--follow-ups-file');
+      for (const key of flags.keys()) {
+        if (
+          key !== '--state'
+          && key !== '--body-file'
+          && key !== '--follow-ups-file'
+        ) {
+          throw new Error(`review-verdict unknown flag ${key}; ${USAGE}`);
+        }
+      }
+      if (state === undefined || bodyFile === undefined) {
         throw new Error(
           'review-verdict requires --state <APPROVE|REQUEST_CHANGES> --body-file <path>; ' +
           USAGE,
         );
       }
-      const state = argv[2];
       if (state !== 'APPROVE' && state !== 'REQUEST_CHANGES') {
         throw new Error(`invalid review verdict state; ${USAGE}`);
+      }
+      if (followUpsFile !== undefined && state !== 'APPROVE') {
+        throw new Error(
+          '--follow-ups-file is only valid with --state APPROVE; ' + USAGE,
+        );
       }
       return {
         operation: command,
         state,
-        bodyFile: requiredPath(argv[4], '--body-file'),
+        bodyFile: requiredPath(bodyFile, '--body-file'),
+        ...(followUpsFile === undefined
+          ? {}
+          : { followUpsFile: requiredPath(followUpsFile, '--follow-ups-file') }),
       };
     }
     case 'review-findings':
@@ -361,8 +401,8 @@ export function makeProductionSessionProtocol(
     checkpoint: (manifest) => implementationProtocol().checkpoint(manifest),
     implementationComplete: (manifest, summary) =>
       implementationProtocol().implementationComplete(manifest, summary),
-    reviewVerdict: (manifest, state, body) =>
-      reviewProtocol().reviewVerdict(manifest, state, body),
+    reviewVerdict: (manifest, state, body, followUps) =>
+      reviewProtocol().reviewVerdict(manifest, state, body, followUps),
     reviewFindings: (manifest, findings) => {
       const findingsHandler = reviewProtocol().reviewFindings;
       if (findingsHandler === undefined) {
@@ -435,6 +475,15 @@ export async function runSessionCli(
     }
     case 'review-verdict': {
       requiredPhase(manifest, command.operation, 'review');
+      const followUps = command.followUpsFile === undefined
+        ? undefined
+        : parseReviewFollowUpsPayload(
+          boundedText(readText(attemptReportPath(
+            manifest,
+            command.followUpsFile,
+            validateReportFile,
+          ))),
+        );
       const outcome = await protocol.reviewVerdict(
         manifest,
         command.state,
@@ -443,6 +492,7 @@ export async function runSessionCli(
           command.bodyFile,
           validateReportFile,
         ))),
+        followUps,
       );
       return finishSessionCommand(
         command.operation,
