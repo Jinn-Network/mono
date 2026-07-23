@@ -15,12 +15,13 @@ import { AllRpcsFailedError } from '../../../src/rpc/transport.js';
 import { gatherTaskRunsStatus } from '../../../src/api/task-runs-build.js';
 
 /**
- * Regression test for #912: a transient transport error (AllRpcsFailedError —
- * every provider in the L2 fallback chain failed at once) was stamping the
- * in-flight task FAILED, dropping it from getInFlight() permanently so the
- * next tick never re-drove it. L2 work went silent until a manual restart.
+ * Regression test for #912 / #934: a transient transport error
+ * (AllRpcsFailedError — every provider in the L2 fallback chain failed at
+ * once) was stamping the in-flight task FAILED, dropping it from
+ * getInFlight() permanently so the next tick never re-drove it. L2 work went
+ * silent until a manual restart.
  *
- * Expected behaviour after the fix:
+ * Expected behaviour after #912:
  *  - A transport-transient error on a task whose delivery window is still
  *    open leaves the row in its in-flight state (DELIVERING) so the next
  *    tick re-drives it; it does NOT land in FAILED.
@@ -31,6 +32,10 @@ import { gatherTaskRunsStatus } from '../../../src/api/task-runs-build.js';
  *  - A genuine (non-transient) error still lands in FAILED (guard).
  *  - A transient error on a task whose window has already passed still
  *    terminalizes FAILED (guard against infinite churn).
+ *
+ * Expected behaviour after #934:
+ *  - Transient `tick_error` warn emits for a given requestId are bounded to
+ *    first occurrence + a 5-minute heartbeat (not one per failing tick).
  */
 
 function makeOpts(store: Store): TaskEngineOptions {
@@ -64,6 +69,13 @@ function makeInput(
 
 function allRpcsFailed(): AllRpcsFailedError {
   return new AllRpcsFailedError(['rpc-a.example', 'rpc-b.example']);
+}
+
+function countTickErrors(store: Store, requestId: string): number {
+  return store
+    .getRecentActivityEvents(200)
+    .filter((e) => e.kind === 'tick_error' && e.requestId === requestId)
+    .length;
 }
 
 /**
@@ -137,14 +149,14 @@ describe('transient RPC stall (#912)', () => {
       const status = gatherTaskRunsStatus(store.taskRunReadModel());
       expect(status.totals.failed).toBe(0);
       expect(status.totals.raceLost).toBe(0);
-
-      const events = store.getRecentActivityEvents(50);
-      const tickError = events.find(
-        (e) => e.kind === 'tick_error' && e.requestId === 'r-transient',
-      );
-      expect(tickError).toBeDefined();
-      expect(tickError!.outcome).toBe('warn');
     }
+
+    // #934: three same-clock-window transient ticks → exactly one tick_error
+    expect(countTickErrors(store, 'r-transient')).toBe(1);
+    const firstWarn = store
+      .getRecentActivityEvents(50)
+      .find((e) => e.kind === 'tick_error' && e.requestId === 'r-transient');
+    expect(firstWarn?.outcome).toBe('warn');
 
     // RPCs recover — the SAME engine instance drives the row to COMPLETE
     // without any restart.
@@ -205,5 +217,24 @@ describe('transient RPC stall (#912)', () => {
 
     const status = gatherTaskRunsStatus(store.taskRunReadModel());
     expect(status.totals.failed).toBe(1);
+  });
+
+  it('emits at most one tick_error across N consecutive transient ticks for the same requestId (#934)', async () => {
+    const id = 'r-bound-n';
+    seedDelivering(p, id);
+    engine.deliverError = allRpcsFailed();
+
+    const N = 10;
+    for (let i = 0; i < N; i++) {
+      await expect(engine.process(id)).rejects.toThrow(
+        /All RPC providers in the fallback chain failed/,
+      );
+      expect(p.getByRequestId(id)!.state).toBe(TaskRunState.DELIVERING);
+    }
+
+    expect(countTickErrors(store, id)).toBe(1);
+
+    const status = gatherTaskRunsStatus(store.taskRunReadModel());
+    expect(status.totals.failed).toBe(0);
   });
 });
