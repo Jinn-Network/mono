@@ -1,8 +1,8 @@
-import { rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SpawnFn } from '../../src/dispatcher/coordinator-session.js';
-import { HERMES_HOMES_DIR } from '../../src/dispatcher/hermes-home.js';
 import { DEFAULT_CONFIG } from '../../src/dispatcher/types.js';
 import { CredentialPool } from '../../src/lifecycle/credentials.js';
 import {
@@ -10,6 +10,21 @@ import {
   type ClaimedSessionInput,
 } from '../../src/lifecycle/session-execution-backend.js';
 import { gitOid, gitRefName } from '../../src/lifecycle/types.js';
+
+const hermesHomeFixture = vi.hoisted(() => ({ root: '' }));
+
+vi.mock('../../src/dispatcher/hermes-home.js', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('../../src/dispatcher/hermes-home.js')
+  >();
+  const { join: joinPath } = await import('node:path');
+  return {
+    ...actual,
+    prepareHermesHome: (options: { sessionId: string }) => ({
+      hermesHome: joinPath(hermesHomeFixture.root, options.sessionId),
+    }),
+  };
+});
 
 const INPUT: ClaimedSessionInput = {
   kind: 'mutation',
@@ -44,12 +59,17 @@ const INPUT: ClaimedSessionInput = {
 };
 
 describe('local SessionExecutionBackend', () => {
+  beforeEach(() => {
+    hermesHomeFixture.root = mkdtempSync(
+      join(tmpdir(), 'autopilot-local-backend-hermes-'),
+    );
+  });
+
   afterEach(() => {
-    for (const issueNumber of [42, 101, 102]) {
-      rmSync(join(HERMES_HOMES_DIR, `implement-${issueNumber}`), {
-        recursive: true,
-        force: true,
-      });
+    const fixtureRoot = hermesHomeFixture.root;
+    hermesHomeFixture.root = '';
+    if (fixtureRoot.length > 0) {
+      rmSync(fixtureRoot, { recursive: true, force: true });
     }
     vi.restoreAllMocks();
   });
@@ -158,8 +178,8 @@ describe('local SessionExecutionBackend', () => {
     expect(calls.map(({ opts }) => (
       (opts.env as NodeJS.ProcessEnv).HERMES_HOME
     ))).toEqual([
-      join(HERMES_HOMES_DIR, 'implement-101'),
-      join(HERMES_HOMES_DIR, 'implement-102'),
+      join(hermesHomeFixture.root, 'implement-101'),
+      join(hermesHomeFixture.root, 'implement-102'),
     ]);
     expect(calls.map(({ opts }) => opts.logPath)).toEqual([
       '/attempt/101/session.log',
