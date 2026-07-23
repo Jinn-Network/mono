@@ -81,9 +81,14 @@ export interface FirstTurnPickupResult {
   retrievalFired: boolean;
   eligibleRefs: string[];
   deliveredRefs: string[];
+  deliveredCanonicalEpisodeIds: string[];
   deliveryMode: 'delivered' | 'disabled' | 'degraded' | 'withheld';
   deliveredContentHash?: string;
   degraded?: string;
+}
+
+export interface FirstTurnPickupOptions {
+  excludeCanonicalEpisodeIds?: readonly string[];
 }
 
 export interface ToolCallEvent {
@@ -393,7 +398,13 @@ export class PluginSession {
     private readonly meta: SessionMeta,
   ) {}
 
-  async firstTurnPickup(firstMessage: string): Promise<FirstTurnPickupResult> {
+  async firstTurnPickup(
+    firstMessage: string,
+    options: FirstTurnPickupOptions = {},
+  ): Promise<FirstTurnPickupResult> {
+    const excludedCanonicalEpisodeIds = new Set(
+      options.excludeCanonicalEpisodeIds ?? [],
+    );
     const config = parsePickupConfig(this.meta.pickup);
     if (!config.enabled) {
       return {
@@ -403,6 +414,7 @@ export class PluginSession {
         retrievalFired: false,
         eligibleRefs: [],
         deliveredRefs: [],
+        deliveredCanonicalEpisodeIds: [],
         deliveryMode: 'disabled',
       };
     }
@@ -424,6 +436,7 @@ export class PluginSession {
         retrievalFired: true,
         eligibleRefs: [],
         deliveredRefs: [],
+        deliveredCanonicalEpisodeIds: [],
         deliveryMode: this.deliveryMode,
       };
     }
@@ -457,7 +470,26 @@ export class PluginSession {
       }
     }
 
-    const candidates = rankKnowledgeCandidates([...byRef.values()], scoringTerms);
+    // Only the production local search adapter exposes this hit-level hint in
+    // this release. Federated search is stable local-then-public, so the first
+    // hit for an identity is the deterministic local form to prefer once a
+    // fetched public record reveals that same identity.
+    const preferredHitByCanonicalEpisodeId = new Map<string, KnowledgeHit>();
+    for (const hit of byRef.values()) {
+      if (
+        hit.canonicalEpisodeId !== undefined
+        && !preferredHitByCanonicalEpisodeId.has(hit.canonicalEpisodeId)
+      ) {
+        preferredHitByCanonicalEpisodeId.set(hit.canonicalEpisodeId, hit);
+      }
+    }
+
+    const candidates = rankKnowledgeCandidates(
+      [...byRef.values()].filter((hit) =>
+        hit.canonicalEpisodeId === undefined
+        || !excludedCanonicalEpisodeIds.has(hit.canonicalEpisodeId)),
+      scoringTerms,
+    );
     if (candidates.length === 0) {
       this.deliveryMode = degradedReason === undefined ? 'withheld' : 'degraded';
       return {
@@ -467,6 +499,7 @@ export class PluginSession {
         retrievalFired: true,
         eligibleRefs: [],
         deliveredRefs: [],
+        deliveredCanonicalEpisodeIds: [],
         deliveryMode: this.deliveryMode,
         ...(degradedReason !== undefined ? { degraded: degradedReason } : {}),
       };
@@ -481,30 +514,87 @@ export class PluginSession {
     // duplicate corpus/cache read. Any individual failure stays below the
     // floor and records an honest degraded reason (fail open).
     const fetchedRefs: string[] = [];
-    const prefetchedByRef = new Map<string, PortResult<CorpusRecord | null>>();
+    const prefetchedByRef = new Map<string, Promise<PortResult<CorpusRecord | null>>>();
+    const fetchRecord = (hit: KnowledgeHit): Promise<PortResult<CorpusRecord | null>> => {
+      const prefetched = prefetchedByRef.get(hit.ref);
+      if (prefetched !== undefined) return prefetched;
+
+      fetchedRefs.push(hit.ref);
+      const pending = this.deps.corpus.get(hit.ref).catch((error: unknown) =>
+        degraded<CorpusRecord | null>(`corpus get rejected for ${hit.ref}: ${errorReason(error)}`),
+      );
+      prefetchedByRef.set(hit.ref, pending);
+      return pending;
+    };
+
+    const resolvePreferredRecord = async (
+      hit: KnowledgeHit,
+      fetchedRecord: CorpusRecord,
+    ): Promise<{
+      selectedHit: KnowledgeHit;
+      record: CorpusRecord;
+      preferredFailureReason?: string;
+    }> => {
+      let selectedHit = hit;
+      let record = fetchedRecord;
+      let preferredFailureReason: string | undefined;
+      const canonicalEpisodeId = record.canonicalEpisodeId;
+      const preferredHit = canonicalEpisodeId === undefined
+        ? undefined
+        : preferredHitByCanonicalEpisodeId.get(canonicalEpisodeId);
+
+      if (preferredHit !== undefined && preferredHit.ref !== hit.ref) {
+        const preferredResult = await fetchRecord(preferredHit);
+        if (preferredResult.status !== 'ok') {
+          preferredFailureReason = preferredResult.reason;
+        } else if (preferredResult.value !== null) {
+          selectedHit = preferredHit;
+          record = preferredResult.value;
+        }
+      }
+      return {
+        selectedHit,
+        record,
+        ...(preferredFailureReason !== undefined ? { preferredFailureReason } : {}),
+      };
+    };
+
     const directCandidates = candidates.filter((candidate) => candidate.score >= RELEVANCE_FLOOR);
     const nearMisses = candidates
       .filter((candidate) => candidate.score < RELEVANCE_FLOOR)
       .slice(0, MAX_CONTENT_RESCORE_CANDIDATES);
     const nearMissResults = await Promise.all(
-      nearMisses.map(({ hit }) => {
-        fetchedRefs.push(hit.ref);
-        return this.deps.corpus.get(hit.ref).catch((error: unknown) =>
-          degraded<CorpusRecord | null>(`corpus get rejected for ${hit.ref}: ${errorReason(error)}`),
-        );
+      nearMisses.map(async ({ hit }): Promise<{
+        result: PortResult<CorpusRecord | null>;
+        selectedHit: KnowledgeHit;
+        record: CorpusRecord | null;
+        preferredFailureReason?: string;
+      }> => {
+        const result = await fetchRecord(hit);
+        if (result.status !== 'ok' || result.value === null) {
+          return { result, selectedHit: hit, record: null };
+        }
+        if (
+          result.value.canonicalEpisodeId !== undefined
+          && excludedCanonicalEpisodeIds.has(result.value.canonicalEpisodeId)
+        ) {
+          return { result, selectedHit: hit, record: null };
+        }
+        const preferred = await resolvePreferredRecord(hit, result.value);
+        return { result, ...preferred };
       }),
     );
 
     const promotedCandidates: typeof candidates = [];
     for (let index = 0; index < nearMisses.length; index += 1) {
       const candidate = nearMisses[index]!;
-      const result = nearMissResults[index]!;
-      prefetchedByRef.set(candidate.hit.ref, result);
-      if (result.status !== 'ok') {
-        if (degradedReason === undefined) degradedReason = result.reason;
+      const nearMissResult = nearMissResults[index]!;
+      if (nearMissResult.result.status !== 'ok') {
+        if (degradedReason === undefined) degradedReason = nearMissResult.result.reason;
         continue;
       }
-      const record = result.value;
+      degradedReason ??= nearMissResult.preferredFailureReason;
+      const record = nearMissResult.record;
       if (record === null) continue;
       if (record.isSkillPayload === true) continue;
       if (record.retrievalVisible !== true) continue;
@@ -526,6 +616,7 @@ export class PluginSession {
         retrievalFired: true,
         eligibleRefs: [],
         deliveredRefs: [],
+        deliveredCanonicalEpisodeIds: [],
         deliveryMode: this.deliveryMode,
         ...(degradedReason !== undefined ? { degraded: degradedReason } : {}),
       };
@@ -533,33 +624,56 @@ export class PluginSession {
 
     // Fetch full content for ranked candidates and project packets, walking
     // down the ranked list until MAX_SELECTED_PACKETS valid packets are
-    // found or candidates are exhausted (mono #1782). Three post-fetch
-    // guards can disqualify a candidate without spending its slot, promoting
-    // the next-ranked one: (1) content-level skill classification — excludes
-    // a legacy skill-shaped record (skill.md step attribute) or a
-    // jinn.skill.v1-backed record that slipped the wire kind filter, exactly
-    // as a wire kind:'skill' hit is excluded at selection time; (2)
-    // retrieval-visibility content verification (#1824, W2) — fail-closed
-    // where the other two are fail-open; (3) empty-packet honesty — a
-    // projection with zero excerpts and no synthesis is not evidence. A
-    // projection failure degrades that one ref to nothing-found rather than
-    // throwing into the caller (§3.5).
+    // found or candidates are exhausted (mono #1782). Post-fetch guards can
+    // disqualify a candidate without spending its slot, promoting the
+    // next-ranked one: (1) canonical exclusion/dedup; (2) content-level
+    // skill classification — which excludes a legacy skill-shaped record
+    // (skill.md step attribute) or a jinn.skill.v1-backed record that slipped
+    // the wire kind filter, exactly as a wire kind:'skill' hit is excluded at
+    // selection time; (3) retrieval-visibility content verification (#1824,
+    // W2) — fail-closed where the other guards are fail-open; (4)
+    // empty-packet honesty — a projection with zero excerpts and no synthesis
+    // is not evidence. A projection failure degrades that one ref to
+    // nothing-found rather than throwing into the caller (§3.5).
     const packets: KnowledgePacket[] = [];
+    const deliveredCanonicalEpisodeIds: string[] = [];
+    const deliveredCanonicalSet = new Set<string>();
     for (const hit of ranked) {
       if (packets.length >= MAX_SELECTED_PACKETS) break;
-      let result = prefetchedByRef.get(hit.ref);
-      if (result === undefined) {
-        fetchedRefs.push(hit.ref);
-        result = await this.deps.corpus.get(hit.ref).catch((error: unknown) =>
-          degraded<CorpusRecord | null>(`corpus get rejected for ${hit.ref}: ${errorReason(error)}`),
-        );
-      }
+      const result = await fetchRecord(hit);
       if (result.status !== 'ok') {
         if (degradedReason === undefined) degradedReason = result.reason;
         continue;
       }
-      const record: CorpusRecord | null = result.value;
-      if (record === null) continue;
+      const fetchedRecord = result.value;
+      if (fetchedRecord === null) continue;
+      const fetchedCanonicalEpisodeId = fetchedRecord.canonicalEpisodeId;
+      if (
+        fetchedCanonicalEpisodeId !== undefined
+        && (
+          excludedCanonicalEpisodeIds.has(fetchedCanonicalEpisodeId)
+          || deliveredCanonicalSet.has(fetchedCanonicalEpisodeId)
+        )
+      ) {
+        continue;
+      }
+
+      const {
+        selectedHit,
+        record,
+        preferredFailureReason,
+      } = await resolvePreferredRecord(hit, fetchedRecord);
+      degradedReason ??= preferredFailureReason;
+      const canonicalEpisodeId = record.canonicalEpisodeId;
+      if (
+        canonicalEpisodeId !== undefined
+        && (
+          excludedCanonicalEpisodeIds.has(canonicalEpisodeId)
+          || deliveredCanonicalSet.has(canonicalEpisodeId)
+        )
+      ) {
+        continue;
+      }
       if (record.isSkillPayload === true) continue;
       // Post-fetch content guard (#1824, W2): content is the truth, the
       // search-hit's retrievalVisible was only a hint used to clear ranking.
@@ -571,12 +685,16 @@ export class PluginSession {
       try {
         packet = projectKnowledgePacket(record);
       } catch (error) {
-        degradedReason ??= `packet projection failed for ${hit.ref}: ${errorReason(error)}`;
+        degradedReason ??= `packet projection failed for ${selectedHit.ref}: ${errorReason(error)}`;
         continue;
       }
       if (packet.excerpts.length === 0 && packet.synthesis === undefined) continue;
 
       packets.push(packet);
+      if (canonicalEpisodeId !== undefined) {
+        deliveredCanonicalSet.add(canonicalEpisodeId);
+        deliveredCanonicalEpisodeIds.push(canonicalEpisodeId);
+      }
     }
 
     this.fetchedRefs = fetchedRefs;
@@ -593,6 +711,7 @@ export class PluginSession {
         retrievalFired: true,
         eligibleRefs: this.eligibleRefs,
         deliveredRefs: [],
+        deliveredCanonicalEpisodeIds: [],
         deliveryMode: this.deliveryMode,
         ...(degradedReason !== undefined ? { degraded: degradedReason } : {}),
       };
@@ -608,6 +727,7 @@ export class PluginSession {
       retrievalFired: true,
       eligibleRefs: this.eligibleRefs,
       deliveredRefs: this.providedRefs,
+      deliveredCanonicalEpisodeIds,
       deliveryMode: this.deliveryMode,
       deliveredContentHash: this.deliveredContentHash,
       ...(degradedReason !== undefined ? { degraded: degradedReason } : {}),

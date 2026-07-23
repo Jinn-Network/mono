@@ -226,4 +226,98 @@ describe('firstTurnPickup — bounded content rescore escalation (#1792)', () =>
     expect(result.contextBlock).not.toContain('skill-payload');
     expect(result.contextBlock).not.toContain('content-invisible');
   });
+
+  it('uses the preferred local record while rescoring a public near-miss', async () => {
+    const localHit = hit('local-episode:episode-shared', 'unrelated local form', {
+      canonicalEpisodeId: 'episode-shared',
+      origin: 'local:episode-shared',
+    });
+    const publicHit = hit('bafyPublicShared', 'alpha', { origin: 'agent-1' });
+    const getCalls: string[] = [];
+    const corpus = fixedCorpus([localHit, publicHit], async (ref) => {
+      getCalls.push(ref);
+      if (ref === localHit.ref) {
+        return ok(record(ref, {
+          canonicalEpisodeId: 'episode-shared',
+          synthesis: 'the beta failure needs the full private solution',
+          origin: 'local:episode-shared',
+        }));
+      }
+      return ok(record(ref, {
+        canonicalEpisodeId: 'episode-shared',
+        synthesis: 'public summary without the missing vocabulary',
+        origin: 'agent-1',
+      }));
+    });
+
+    const result = await buildPlugin(corpus).session(META).firstTurnPickup('alpha beta');
+
+    expect(result.packets.map((packet) => packet.ref)).toEqual([localHit.ref]);
+    expect(result.packets[0]?.synthesis).toContain('full private solution');
+    expect(getCalls).toEqual([publicHit.ref, localHit.ref]);
+  });
+
+  it('retains a promoted public near-miss and degrades when its preferred local fetch rejects', async () => {
+    const localHit = hit('local-episode:episode-shared', 'unrelated local form', {
+      canonicalEpisodeId: 'episode-shared',
+      origin: 'local:episode-shared',
+    });
+    const publicHit = hit('bafyPublicShared', 'alpha', { origin: 'agent-1' });
+    const getCalls: string[] = [];
+    const corpus = fixedCorpus([localHit, publicHit], async (ref) => {
+      getCalls.push(ref);
+      if (ref === localHit.ref) throw new Error('local episode fetch exploded');
+      return ok(record(ref, {
+        canonicalEpisodeId: 'episode-shared',
+        synthesis: 'the beta fix is preserved as healthy public evidence',
+        origin: 'agent-1',
+      }));
+    });
+
+    const result = await buildPlugin(corpus).session(META).firstTurnPickup('alpha beta');
+
+    expect(result.packets.map((packet) => packet.ref)).toEqual([publicHit.ref]);
+    expect(result.packets[0]?.synthesis).toContain('healthy public evidence');
+    expect(result.degraded).toContain('local episode fetch exploded');
+    expect(getCalls).toEqual([publicHit.ref, localHit.ref]);
+  });
+
+  it('keeps preferred-local failure reporting in ranked near-miss order', async () => {
+    const hits = [
+      hit('local-episode:episode-first', 'unrelated local form', {
+        canonicalEpisodeId: 'episode-first',
+        origin: 'local:episode-first',
+      }),
+      hit('bafyPublicFirst', 'alpha', { origin: 'agent-1', publishedAt: 2 }),
+      hit('local-episode:episode-second', 'another unrelated form', {
+        canonicalEpisodeId: 'episode-second',
+        origin: 'local:episode-second',
+      }),
+      hit('bafyPublicSecond', 'alpha', { origin: 'agent-2', publishedAt: 1 }),
+    ];
+    const corpus = fixedCorpus(hits, async (ref) => {
+      if (ref === 'local-episode:episode-first') {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        return unavailable('first-ranked local unavailable');
+      }
+      if (ref === 'local-episode:episode-second') {
+        return unavailable('second-ranked local unavailable');
+      }
+      const canonicalEpisodeId = ref === 'bafyPublicFirst'
+        ? 'episode-first'
+        : 'episode-second';
+      return ok(record(ref, {
+        canonicalEpisodeId,
+        synthesis: 'beta evidence promotes this public near-miss',
+      }));
+    });
+
+    const result = await buildPlugin(corpus).session(META).firstTurnPickup('alpha beta');
+
+    expect(result.packets.map((packet) => packet.ref)).toEqual([
+      'bafyPublicFirst',
+      'bafyPublicSecond',
+    ]);
+    expect(result.degraded).toBe('first-ranked local unavailable');
+  });
 });
