@@ -6,20 +6,6 @@ const PRIORITY_RANK: Record<Priority, number> = {
   P0: 0, P1: 1, P2: 2, P3: 3, P4: 4,
 };
 
-function labelPriority(issue: PolledIssue): Priority | null {
-  for (const label of issue.labels ?? []) {
-    switch (label) {
-      case 'priority:p0': return 'P0';
-      case 'priority:p1': return 'P1';
-      case 'priority:p2': return 'P2';
-      case 'priority:p3': return 'P3';
-      case 'priority:p4': return 'P4';
-      default: break;
-    }
-  }
-  return null;
-}
-
 /** Audit shape for an issue dropped because its author is not on the allowlist (#497). */
 export interface SkippedForAuthor {
   number: number;
@@ -64,13 +50,11 @@ export function selectReady(
   // stacked on its blocker's open PR (spec 2026-07-13-eng-loop-dependency-stacking).
   const firstPass = polled.filter((i) => {
     const child = isMachineChildIssue(i);
-    const priority = i.priority ?? (child ? labelPriority(i) : null);
+    const priorityOk = i.priority !== null;
     const shapeOk = i.shape !== null || child;
-    const priorityOk = priority !== null;
-    const blockedOk = child
-      || i.blockedOn === 'Nothing'
+    const blockedOk = i.blockedOn === 'Nothing'
       || (i.blockedOn === 'Another issue' && stackReady.has(i.number));
-    const boardOk = child || (i.onBoard && i.projectItemId !== null);
+    const boardOk = i.onBoard && i.projectItemId !== null;
     return shapeOk
       && priorityOk
       && blockedOk
@@ -85,13 +69,13 @@ export function selectReady(
   for (const issue of firstPass) {
     if (authorAllowlist.has(issue.author.toLowerCase())) {
       const child = isMachineChildIssue(issue);
-      const priority = issue.priority ?? labelPriority(issue);
+      const priority = issue.priority;
       if (priority === null) continue;
       const normalized: ReadyIssue = {
         ...issue,
         shape: issue.shape ?? 'fix',
         priority,
-        projectItemId: child ? issue.projectItemId : issue.projectItemId!,
+        projectItemId: issue.projectItemId!,
       };
       // stackBase is set only when the issue was admitted *because* a blocker
       // has an open PR (blockedOn !== 'Nothing') and the base is a real blocker

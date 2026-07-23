@@ -39,19 +39,11 @@ export function isChildIssueBody(body: string): boolean {
   return parseChildMarker(body) !== null;
 }
 
-const EFFORT_LABELS = new Set(['effort:low', 'effort:medium', 'effort:high']);
-const PRIORITY_LABELS = new Set([
-  'priority:p0',
-  'priority:p1',
-  'priority:p2',
-  'priority:p3',
-  'priority:p4',
-]);
 const CHILD_KIND_LABELS = new Set(['review-finding', 'reconcile', 'ci-failure']);
 
 /**
- * Machine-created child issues carry a body marker plus kind + effort +
- * priority labels. They are eligible without board membership (Stage 2).
+ * Machine-created child issues carry a body marker plus a kind label.
+ * Triage (Blocked on / Effort / Priority) lives on the Project board.
  */
 export function isMachineChildIssue(input: {
   readonly body?: string;
@@ -59,13 +51,8 @@ export function isMachineChildIssue(input: {
 }): boolean {
   if (!isChildIssueBody(input.body ?? '')) return false;
   const labels = input.labels ?? [];
-  return labels.some((label) => CHILD_KIND_LABELS.has(label))
-    && labels.some((label) => EFFORT_LABELS.has(label))
-    && labels.some((label) => PRIORITY_LABELS.has(label));
+  return labels.some((label) => CHILD_KIND_LABELS.has(label));
 }
-
-export type ChildEffortLabel = 'effort:low' | 'effort:medium' | 'effort:high';
-export type ChildPriorityLabel = 'priority:p1' | 'priority:p2';
 
 export interface FileChildIssueInput {
   readonly parentPr: number;
@@ -98,15 +85,12 @@ export interface ChildIssuePort {
     readonly labels: readonly string[];
   }): Promise<{ readonly number: number }>;
   setIssueTypeFix(issueNumber: number): Promise<void>;
+  ensureTriageComplete(input: {
+    readonly issueNumber: number;
+    readonly effort: FileChildIssueInput['effort'];
+    readonly priority: FileChildIssueInput['priority'];
+  }): Promise<void>;
   closeIssue(issueNumber: number, comment: string): Promise<void>;
-}
-
-function effortLabel(effort: FileChildIssueInput['effort']): ChildEffortLabel {
-  return `effort:${effort}`;
-}
-
-function priorityLabel(priority: FileChildIssueInput['priority']): ChildPriorityLabel {
-  return `priority:${priority}`;
 }
 
 export type FileChildIssueResult =
@@ -126,6 +110,12 @@ export async function fileChildIssue(
   const marker = formatChildMarker(input.parentPr, input.kind);
   const existing = await port.searchOpenByMarker(marker);
   if (existing.length > 0) {
+    // Heal label-only children filed before Project-field triage.
+    await port.ensureTriageComplete({
+      issueNumber: existing[0]!.number,
+      effort: input.effort,
+      priority: input.priority,
+    });
     return { number: existing[0]!.number, created: false };
   }
 
@@ -137,18 +127,17 @@ export async function fileChildIssue(
   const body = input.body.includes(marker)
     ? input.body
     : `${marker}\n\n${input.body.trim()}`;
-  const labels = [
-    input.kind,
-    effortLabel(input.effort),
-    priorityLabel(input.priority),
-  ] as const;
-
   const created = await port.createIssue({
     title: input.title,
     body,
-    labels: [...labels],
+    labels: [input.kind],
   });
   await port.setIssueTypeFix(created.number);
+  await port.ensureTriageComplete({
+    issueNumber: created.number,
+    effort: input.effort,
+    priority: input.priority,
+  });
   return { number: created.number, created: true };
 }
 
