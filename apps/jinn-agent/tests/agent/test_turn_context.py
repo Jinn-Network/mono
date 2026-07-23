@@ -222,6 +222,7 @@ def test_pre_llm_hook_receives_live_runtime_cwd(tmp_path, monkeypatch):
         if call.args == ("pre_llm_call",)
     )
     assert pre_llm_call.kwargs.get("cwd") == str(tmp_path)
+    assert pre_llm_call.kwargs.get("turn_id") == agent._current_turn_id
 
 
 def test_memory_nudge_fires_at_interval():

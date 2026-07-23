@@ -1211,6 +1211,277 @@ def test_stale_old_capture_cannot_delete_fresh_same_id_lifecycle(
     assert len(runner.calls) == 1
 
 
+def test_delayed_post_tool_after_finalize_cannot_recreate_ownership():
+    session_id = "delayed-post-tool"
+    task_id = "old-task"
+    runner = PickupRunner()
+    jinn._runner = runner
+    try:
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id=task_id,
+            turn_id="old-turn",
+            user_message="old user turn",
+            is_first_turn=True,
+        )
+        jinn._on_session_finalize(
+            session_id=session_id,
+            reason="old_session_complete",
+        )
+
+        jinn._on_post_tool_call(
+            session_id=session_id,
+            task_id=task_id,
+            turn_id="old-turn",
+            tool_name="terminal",
+            tool_call_id="old-tool",
+            args={"command": "old command"},
+            result={"exit_code": 0},
+        )
+    finally:
+        jinn._runner = None
+
+    assert session_id not in jinn._session_lifecycle_tokens
+    assert session_id not in jinn._session_states
+    assert session_id not in jinn._pickup_checkpoints
+    assert getattr(jinn, "_session_turn_lifecycle_owners", {}) == {}
+    assert not any(
+        (key[0] if isinstance(key, tuple) else key) == session_id
+        for key in jinn.buf._buffers
+    )
+
+
+def test_delayed_post_llm_after_finalize_cannot_recreate_capture():
+    session_id = "delayed-post-llm"
+    task_id = "old-task"
+    runner = PickupRunner()
+    jinn._runner = runner
+    try:
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id=task_id,
+            turn_id="old-turn",
+            user_message="old user turn",
+            is_first_turn=True,
+        )
+        jinn._on_session_finalize(
+            session_id=session_id,
+            reason="old_session_complete",
+        )
+
+        jinn._on_post_llm_call(
+            session_id=session_id,
+            task_id=task_id,
+            turn_id="old-turn",
+            assistant_response="stale old response",
+        )
+    finally:
+        jinn._runner = None
+
+    assert session_id not in jinn._session_lifecycle_tokens
+    assert getattr(jinn, "_session_turn_lifecycle_owners", {}) == {}
+    assert not any(
+        (key[0] if isinstance(key, tuple) else key) == session_id
+        for key in jinn.buf._buffers
+    )
+
+
+def test_old_post_callbacks_cannot_contaminate_fresh_same_id_turn():
+    session_id = "post-callback-same-id-reopen"
+    runner = PickupRunner()
+    jinn._runner = runner
+    try:
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="old-task",
+            turn_id="old-turn",
+            user_message="old user turn",
+            is_first_turn=True,
+        )
+        jinn._on_session_finalize(
+            session_id=session_id,
+            reason="old_session_complete",
+        )
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="fresh-task",
+            turn_id="fresh-turn",
+            user_message="fresh user turn",
+            is_first_turn=True,
+        )
+
+        jinn._on_post_tool_call(
+            session_id=session_id,
+            task_id="old-task",
+            turn_id="old-turn",
+            tool_name="terminal",
+            tool_call_id="old-tool",
+            args={"command": "old command"},
+            result={"exit_code": 0},
+        )
+        jinn._on_post_llm_call(
+            session_id=session_id,
+            task_id="old-task",
+            turn_id="old-turn",
+            assistant_response="stale old response",
+        )
+        jinn._on_post_tool_call(
+            session_id=session_id,
+            task_id="fresh-task",
+            turn_id="fresh-turn",
+            tool_name="read_file",
+            tool_call_id="fresh-tool",
+            args={"path": "fresh.txt"},
+            result="fresh contents",
+        )
+        jinn._on_post_llm_call(
+            session_id=session_id,
+            task_id="fresh-task",
+            turn_id="fresh-turn",
+            assistant_response="fresh response",
+        )
+
+        matching_buffers = [
+            buffer
+            for key, buffer in jinn.buf._buffers.items()
+            if (
+                key[0] if isinstance(key, tuple) else key
+            ) == session_id
+        ]
+        assert len(matching_buffers) == 1
+        buffer = matching_buffers[0]
+        assert [
+            step["name"]
+            for step in buffer["steps"]
+        ] == ["tool:read_file"]
+        assert [
+            turn["attributes"]["turn.text"]
+            for turn in buffer["turns"]
+        ] == ["fresh user turn", "fresh response"]
+    finally:
+        jinn._runner = None
+        jinn._on_session_finalize(
+            session_id=session_id,
+            reason="test_cleanup",
+        )
+
+
+def test_post_hooks_without_turn_id_require_an_active_lifecycle():
+    session_id = "legacy-post-active-only"
+
+    jinn._on_post_tool_call(
+        session_id=session_id,
+        task_id="orphan-task",
+        tool_name="terminal",
+        tool_call_id="orphan-tool",
+        args={"command": "orphan"},
+        result={"exit_code": 0},
+    )
+    assert session_id not in jinn._session_lifecycle_tokens
+    assert not any(
+        (key[0] if isinstance(key, tuple) else key) == session_id
+        for key in jinn.buf._buffers
+    )
+
+    jinn._runner = PickupRunner()
+    try:
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="active-task",
+            user_message="active user turn",
+            is_first_turn=True,
+        )
+        jinn._on_post_tool_call(
+            session_id=session_id,
+            task_id="active-task",
+            tool_name="terminal",
+            tool_call_id="active-tool",
+            args={"command": "active"},
+            result={"exit_code": 0},
+        )
+        assert jinn.buf.has_steps(
+            "active-task",
+            session_id,
+            lifecycle_token=jinn._current_session_lifecycle_token(
+                session_id
+            ),
+        )
+        jinn._on_session_finalize(
+            session_id=session_id,
+            reason="session_complete",
+        )
+        jinn._on_post_llm_call(
+            session_id=session_id,
+            task_id="active-task",
+            assistant_response="late legacy response",
+        )
+    finally:
+        jinn._runner = None
+
+    assert session_id not in jinn._session_lifecycle_tokens
+    assert not any(
+        (key[0] if isinstance(key, tuple) else key) == session_id
+        for key in jinn.buf._buffers
+    )
+
+
+def test_turn_lifecycle_ownership_is_bounded_after_turn_and_finalize():
+    session_id = "bounded-turn-ownership"
+    runner = PickupRunner()
+    jinn._runner = runner
+    try:
+        for index in range(10):
+            turn_id = f"turn-{index}"
+            task_id = f"task-{index}"
+            jinn._on_pre_llm_call(
+                session_id=session_id,
+                task_id=task_id,
+                turn_id=turn_id,
+                user_message=f"user turn {index}",
+                is_first_turn=index == 0,
+            )
+            jinn._on_post_llm_call(
+                session_id=session_id,
+                task_id=task_id,
+                turn_id=turn_id,
+                assistant_response=f"response {index}",
+            )
+            jinn._on_session_end(
+                session_id=session_id,
+                task_id=task_id,
+                turn_id=turn_id,
+                completed=True,
+                interrupted=False,
+            )
+            assert getattr(
+                jinn,
+                "_session_turn_lifecycle_owners",
+                {},
+            ) == {}
+        jinn._on_session_finalize(
+            session_id=session_id,
+            reason="session_complete",
+        )
+    finally:
+        jinn._runner = None
+
+    lifecycle_maps = (
+        "_session_states",
+        "_session_state_tokens",
+        "_pickup_checkpoints",
+        "_session_lifecycle_tokens",
+        "_session_turn_lifecycle_owners",
+    )
+    assert sum(
+        len(getattr(jinn, name, {}))
+        for name in lifecycle_maps
+    ) == 0
+    assert not any(
+        (key[0] if isinstance(key, tuple) else key) == session_id
+        for key in jinn.buf._buffers
+    )
+
+
 def test_finalize_closes_control_state_atomically_before_capture_cleanup(
     monkeypatch,
 ):

@@ -68,6 +68,13 @@ _session_state_lock = threading.Lock()
 _session_states: Dict[str, Dict[str, Any]] = {}
 _session_lifecycle_tokens: Dict[str, object] = {}
 _session_state_tokens: Dict[str, object] = {}
+# Originating turn ownership for asynchronous post-hook callbacks. Keys use
+# the host session id because host-internal logical ids are plugin-owned and
+# must not be recreated merely to resolve a delayed callback.
+_session_turn_lifecycle_owners: Dict[
+    tuple[str, str],
+    _TurnLifecycleOwner,
+] = {}
 # Pickup exclusions/checkpoints span run_conversation turns and are cleared
 # only at the host's real session-finalize boundary.
 _pickup_checkpoints: Dict[str, Dict[str, Any]] = {}
@@ -99,6 +106,7 @@ def _reset_session_state() -> None:
         _session_states.clear()
         _session_lifecycle_tokens.clear()
         _session_state_tokens.clear()
+        _session_turn_lifecycle_owners.clear()
         _pickup_checkpoints.clear()
     with _internal_session_lock:
         _internal_sessions.clear()
@@ -216,6 +224,14 @@ class _SessionLifecycleToken:
 
 
 @dataclass(frozen=True)
+class _TurnLifecycleOwner:
+    """Logical session lifecycle that originated one host turn."""
+
+    logical_session_id: str
+    lifecycle_token: _SessionLifecycleToken
+
+
+@dataclass(frozen=True)
 class _PickupReservation:
     excluded_canonical_episode_ids: tuple[str, ...]
     token: _SessionLifecycleToken
@@ -279,6 +295,107 @@ def _current_session_lifecycle_token(
     with _session_state_lock:
         token = _session_lifecycle_tokens.get(key)
         return token if isinstance(token, _SessionLifecycleToken) else None
+
+
+def _bind_session_turn_lifecycle(
+    session_id: str,
+    turn_id: str,
+    logical_session_id: str,
+    lifecycle_token: _SessionLifecycleToken,
+) -> bool:
+    """Bind a real host turn to the lifecycle opened by its pre hook."""
+    logical_key = logical_session_id or "default"
+    host_key = session_id or "default"
+    with _session_state_lock:
+        if _session_lifecycle_tokens.get(logical_key) is not lifecycle_token:
+            return False
+        if turn_id:
+            _session_turn_lifecycle_owners[(host_key, turn_id)] = (
+                _TurnLifecycleOwner(
+                    logical_session_id=logical_key,
+                    lifecycle_token=lifecycle_token,
+                )
+            )
+        return True
+
+
+def _active_logical_session_id(session_id: str) -> Optional[str]:
+    """Resolve the current logical id without creating internal ownership."""
+    parent = session_id or "default"
+    if not is_background_review():
+        return parent
+    with _internal_session_lock:
+        return _internal_sessions.get(
+            (parent, threading.get_ident())
+        )
+
+
+def _post_hook_lifecycle(
+    session_id: str,
+    turn_id: str,
+) -> Optional[_TurnLifecycleOwner]:
+    """Resolve post-hook ownership without opening a lifecycle.
+
+    Real host callbacks carry ``turn_id`` and must match the lifecycle bound
+    by their pre hook. Legacy/direct callbacks without a turn id may observe
+    an already-active lifecycle, but can never create one.
+    """
+    host_key = session_id or "default"
+    if turn_id:
+        with _session_state_lock:
+            owner = _session_turn_lifecycle_owners.get(
+                (host_key, turn_id)
+            )
+            if (
+                owner is None
+                or _session_lifecycle_tokens.get(
+                    owner.logical_session_id
+                ) is not owner.lifecycle_token
+            ):
+                return None
+            return owner
+
+    logical_session_id = _active_logical_session_id(session_id)
+    if logical_session_id is None:
+        return None
+    with _session_state_lock:
+        lifecycle_token = _session_lifecycle_tokens.get(
+            logical_session_id
+        )
+        if not isinstance(
+            lifecycle_token,
+            _SessionLifecycleToken,
+        ):
+            return None
+        return _TurnLifecycleOwner(
+            logical_session_id=logical_session_id,
+            lifecycle_token=lifecycle_token,
+        )
+
+
+def _release_session_turn_lifecycle(
+    session_id: str,
+    turn_id: str,
+) -> None:
+    """Release exact turn ownership at its run-conversation boundary."""
+    if not turn_id:
+        return
+    with _session_state_lock:
+        _session_turn_lifecycle_owners.pop(
+            (session_id or "default", turn_id),
+            None,
+        )
+
+
+def _discard_turn_lifecycle_owners_locked(
+    logical_session_id: str,
+) -> None:
+    """Drop every turn binding owned by one closing logical lifecycle."""
+    for key, owner in list(
+        _session_turn_lifecycle_owners.items()
+    ):
+        if owner.logical_session_id == logical_session_id:
+            _session_turn_lifecycle_owners.pop(key, None)
 
 
 def _session_lifecycle_is_current(
@@ -353,6 +470,7 @@ def _pop_state(
         if close_lifecycle:
             _pickup_checkpoints.pop(key, None)
             _session_lifecycle_tokens.pop(key, None)
+            _discard_turn_lifecycle_owners_locked(key)
         return state
 
 
@@ -565,6 +683,7 @@ def _close_session_lifecycle(session_id: str) -> None:
         _session_state_tokens.pop(key, None)
         _pickup_checkpoints.pop(key, None)
         _session_lifecycle_tokens.pop(key, None)
+        _discard_turn_lifecycle_owners_locked(key)
 
 
 def _record_activity(session_id: str, field: str, refs: list[str]) -> None:
@@ -642,10 +761,18 @@ def _on_pre_llm_call(
     model: str = "",
     platform: str = "",
     task_id: str = "",
+    turn_id: str = "",
     **_: Any,
 ) -> Optional[Dict[str, str]]:
     logical_session_id, session_kind, parent_session_id = _session_identity(session_id)
     lifecycle_token = _session_lifecycle_token(logical_session_id)
+    if not _bind_session_turn_lifecycle(
+        session_id,
+        turn_id,
+        logical_session_id,
+        lifecycle_token,
+    ):
+        return None
     # Local capture — UNCONDITIONAL (mono#1714): filling the buffer never
     # leaves the machine; local retention, mining, and distillation happen by
     # default. Not gated on is_first_turn: the buffer is keyed per session and
@@ -736,13 +863,17 @@ def _on_post_tool_call(
     args: Any = None,
     session_id: str = "",
     task_id: str = "",
+    turn_id: str = "",
     tool_call_id: str = "",
     result: Any = None,
     duration_ms: Optional[int] = None,
     **_: Any,
 ) -> None:
-    logical_session_id, _, _ = _session_identity(session_id)
-    lifecycle_token = _session_lifecycle_token(logical_session_id)
+    owner = _post_hook_lifecycle(session_id, turn_id)
+    if owner is None:
+        return
+    logical_session_id = owner.logical_session_id
+    lifecycle_token = owner.lifecycle_token
     # Local capture — UNCONDITIONAL (mono#1714): recording tool calls never
     # leaves the machine.
     buf.record_tool_call(
@@ -781,14 +912,18 @@ def _on_post_tool_call(
 def _on_post_llm_call(
     session_id: str = "",
     task_id: str = "",
+    turn_id: str = "",
     user_message: str = "",
     assistant_response: str = "",
     input_tokens: Optional[int] = None,
     output_tokens: Optional[int] = None,
     **_: Any,
 ) -> None:
-    logical_session_id, _, _ = _session_identity(session_id)
-    lifecycle_token = _session_lifecycle_token(logical_session_id)
+    owner = _post_hook_lifecycle(session_id, turn_id)
+    if owner is None:
+        return
+    logical_session_id = owner.logical_session_id
+    lifecycle_token = owner.lifecycle_token
     # Complete the EpisodeV1 turn (mono #1662): the assistant span lands AFTER
     # this turn's tool calls (post_tool_call fires inside the tool loop, which
     # completes before post_llm_call). Local capture is UNCONDITIONAL (mono#1714)
@@ -904,6 +1039,7 @@ def _episode_test_runs(episode: Dict[str, Any]) -> list[Dict[str, Any]]:
 def _on_session_end(
     session_id: str = "",
     task_id: str = "",
+    turn_id: str = "",
     completed: bool = False,
     interrupted: bool = False,
     skills_loadout: Optional[list] = None,
@@ -913,6 +1049,7 @@ def _on_session_end(
 ) -> None:
     logical_session_id, session_kind, parent_session_id = _session_identity(session_id)
     lifecycle_token = _current_session_lifecycle_token(logical_session_id)
+    _release_session_turn_lifecycle(session_id, turn_id)
     _release_internal_session(parent_session_id)
     # Usage is native local telemetry, so show payoff independently of sharing
     # consent and before any capture-path early return.
