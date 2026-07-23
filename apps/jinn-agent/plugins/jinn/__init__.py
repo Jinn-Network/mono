@@ -183,13 +183,31 @@ def _session_vetoed(session_id: str) -> bool:
     return _veto_path(session_id).is_file()
 
 
-def _clear_veto(session_id: str) -> None:
-    try:
-        _veto_path(session_id).unlink(missing_ok=True)
-    except OSError:
-        return
-    with _veto_lock:
-        _vetoed_tasks.discard(session_id)
+def _clear_veto(
+    session_id: str,
+    *,
+    expected_token: Optional[_SessionLifecycleToken] = None,
+    allow_closed_lifecycle: bool = False,
+) -> None:
+    with _session_state_lock:
+        current_token = _session_lifecycle_tokens.get(
+            session_id or "default"
+        )
+        if (
+            expected_token is not None
+            and current_token is not expected_token
+            and not (
+                allow_closed_lifecycle
+                and current_token is None
+            )
+        ):
+            return
+        try:
+            _veto_path(session_id).unlink(missing_ok=True)
+        except OSError:
+            return
+        with _veto_lock:
+            _vetoed_tasks.discard(session_id)
 
 
 def _empty_activity() -> Dict[str, Any]:
@@ -267,11 +285,22 @@ def _session_identity(session_id: str) -> tuple[str, str, Optional[str]]:
     return logical, "host-internal", parent[:128]
 
 
-def _release_internal_session(parent_session_id: Optional[str]) -> None:
+def _release_internal_session(
+    parent_session_id: Optional[str],
+    *,
+    expected_logical_session_id: Optional[str] = None,
+) -> None:
     if parent_session_id is None:
         return
     with _internal_session_lock:
-        _internal_sessions.pop((parent_session_id, threading.get_ident()), None)
+        key = (parent_session_id, threading.get_ident())
+        if (
+            expected_logical_session_id is not None
+            and _internal_sessions.get(key)
+            != expected_logical_session_id
+        ):
+            return
+        _internal_sessions.pop(key, None)
 
 
 def _release_all_internal_sessions(parent_session_id: str) -> list[str]:
@@ -388,13 +417,25 @@ def _post_hook_lifecycle(
 def _release_session_turn_lifecycle(
     session_id: str,
     turn_id: str,
+    *,
+    expected_token: Optional[_SessionLifecycleToken] = None,
 ) -> None:
     """Release exact turn ownership at its run-conversation boundary."""
     if not turn_id:
         return
     with _session_state_lock:
+        key = (session_id or "default", turn_id)
+        owner = _session_turn_lifecycle_owners.get(key)
+        if (
+            expected_token is not None
+            and (
+                owner is None
+                or owner.lifecycle_token is not expected_token
+            )
+        ):
+            return
         _session_turn_lifecycle_owners.pop(
-            (session_id or "default", turn_id),
+            key,
             None,
         )
 
@@ -467,10 +508,16 @@ def _pop_state(
     session_id: str,
     *,
     close_lifecycle: bool = False,
-) -> Dict[str, Any]:
+    expected_token: Optional[_SessionLifecycleToken] = None,
+) -> Optional[Dict[str, Any]]:
     key = session_id or "default"
     lifecycle_token = None
     with _session_state_lock:
+        if (
+            expected_token is not None
+            and _session_lifecycle_tokens.get(key) is not expected_token
+        ):
+            return None
         _session_state_tokens.pop(key, None)
         state = _session_states.pop(
             key,
@@ -1108,8 +1155,15 @@ def _on_session_end(
     is_internal = logical_session_id != host_session_id
     session_kind = "host-internal" if is_internal else "user"
     parent_session_id = host_session_id[:128] if is_internal else None
-    _release_session_turn_lifecycle(session_id, turn_id)
-    _release_internal_session(parent_session_id)
+    _release_session_turn_lifecycle(
+        session_id,
+        turn_id,
+        expected_token=lifecycle_token,
+    )
+    _release_internal_session(
+        parent_session_id,
+        expected_logical_session_id=logical_session_id,
+    )
     # Usage is native local telemetry, so show payoff independently of sharing
     # consent and before any capture-path early return.
     try:
@@ -1155,7 +1209,10 @@ def _on_session_end(
         state = _pop_state(
             logical_session_id,
             close_lifecycle=session_kind == "host-internal",
+            expected_token=lifecycle_token,
         )
+        if state is None:
+            return
         _user_line(session_view.render_complete(
             summary=None,
             activity=state.get("activity") or {},
@@ -1169,7 +1226,10 @@ def _on_session_end(
     state = _pop_state(
         logical_session_id,
         close_lifecycle=session_kind == "host-internal",
+        expected_token=lifecycle_token,
     )
+    if state is None:
+        return
     snapshot = state.get("snapshot")
     try:
         accepted = session_bridge.accepted_diff(snapshot) if snapshot is not None else ""
@@ -1241,7 +1301,11 @@ def _on_session_end(
             and isinstance(value, dict)
             and value.get("status") == "vetoed"
         ):
-            _clear_veto(logical_session_id)
+            _clear_veto(
+                logical_session_id,
+                expected_token=lifecycle_token,
+                allow_closed_lifecycle=session_kind == "host-internal",
+            )
         learning_status = (
             "off" if distill.cached_mode(_runner) == "off"
             else "pending"

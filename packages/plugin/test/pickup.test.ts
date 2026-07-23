@@ -434,7 +434,7 @@ describe('selectKnowledgeHits (rescope §3.3)', () => {
 
   it('does not compare recency magnitudes from different domains', () => {
     const publicBlock = hit({
-      ref: 'public-block',
+      ref: 'a-public-block',
       snippet: 'dashboard vitest flake',
       tier: 'tests-passed',
       publishedAt: 22_000_000,
@@ -442,7 +442,7 @@ describe('selectKnowledgeHits (rescope §3.3)', () => {
       origin: 'public',
     });
     const localWallClock = hit({
-      ref: 'local-wall-clock',
+      ref: 'z-local-wall-clock',
       snippet: 'dashboard vitest flake',
       tier: 'tests-passed',
       publishedAt: 1_753_286_400_000,
@@ -456,6 +456,41 @@ describe('selectKnowledgeHits (rescope §3.3)', () => {
     ).map((candidate) => candidate.ref)).toEqual([
       publicBlock.ref,
       localWallClock.ref,
+    ]);
+  });
+
+  it('ranks an entire mixed-domain tie group transitively before applying the packet cap', () => {
+    const localOld = hit({
+      ref: 'z-local-old',
+      snippet: 'dashboard vitest flake',
+      tier: 'tests-passed',
+      publishedAt: 10,
+      recencyDomain: 'unix-ms',
+      origin: 'local-old',
+    });
+    const publicBlock = hit({
+      ref: 'a-public',
+      snippet: 'dashboard vitest flake',
+      tier: 'tests-passed',
+      publishedAt: 99,
+      recencyDomain: 'block-number',
+      origin: 'public',
+    });
+    const localNew = hit({
+      ref: 'b-local-new',
+      snippet: 'dashboard vitest flake',
+      tier: 'tests-passed',
+      publishedAt: 20,
+      recencyDomain: 'unix-ms',
+      origin: 'local-new',
+    });
+
+    expect(selectKnowledgeHits(
+      [localOld, publicBlock, localNew],
+      ['dashboard', 'vitest', 'flake'],
+    ).map((candidate) => candidate.ref)).toEqual([
+      publicBlock.ref,
+      localNew.ref,
     ]);
   });
 

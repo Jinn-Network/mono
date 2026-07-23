@@ -1572,6 +1572,94 @@ def test_delayed_old_session_end_cannot_pop_fresh_same_id_lifecycle():
         jinn._runner = None
 
 
+def test_inflight_old_session_end_cannot_pop_fresh_same_id_lifecycle(
+    monkeypatch,
+):
+    session_id = "inflight-session-end-same-id-reopen"
+    old_end_resolved = threading.Event()
+    release_old_end = threading.Event()
+    worker_errors = []
+
+    def blocking_payoff_lines(snapshot):
+        if threading.current_thread().name == "old-session-end":
+            old_end_resolved.set()
+            assert release_old_end.wait(timeout=2)
+        return []
+
+    monkeypatch.setattr(
+        jinn.distill,
+        "payoff_lines",
+        blocking_payoff_lines,
+    )
+    runner = PickupRunner()
+    jinn._runner = runner
+    try:
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="old-task",
+            turn_id="old-turn",
+            user_message="old user turn",
+            is_first_turn=True,
+        )
+
+        def run_old_end():
+            try:
+                jinn._on_session_end(
+                    session_id=session_id,
+                    task_id="old-task",
+                    turn_id="old-turn",
+                    completed=True,
+                    interrupted=False,
+                )
+            except BaseException as exc:
+                worker_errors.append(exc)
+
+        worker = threading.Thread(
+            name="old-session-end",
+            target=run_old_end,
+        )
+        worker.start()
+        assert old_end_resolved.wait(timeout=2)
+
+        jinn._on_session_finalize(
+            session_id=session_id,
+            reason="old_session_complete",
+        )
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="fresh-task",
+            turn_id="fresh-turn",
+            user_message="fresh user turn",
+            is_first_turn=True,
+        )
+        fresh_state = jinn._session_states[session_id]
+        fresh_lifecycle = jinn._session_lifecycle_tokens[session_id]
+        fresh_checkpoint = jinn._pickup_checkpoints[session_id]
+
+        release_old_end.set()
+        worker.join(timeout=2)
+
+        assert not worker.is_alive()
+        assert worker_errors == []
+        assert jinn._session_states[session_id] is fresh_state
+        assert jinn._session_lifecycle_tokens[session_id] is fresh_lifecycle
+        assert jinn._pickup_checkpoints[session_id] is fresh_checkpoint
+        assert jinn.buf.has_capture(
+            "fresh-task",
+            session_id,
+            lifecycle_token=fresh_lifecycle,
+        )
+        assert (
+            session_id,
+            "fresh-turn",
+        ) in jinn._session_turn_lifecycle_owners
+    finally:
+        release_old_end.set()
+        if "worker" in locals():
+            worker.join(timeout=2)
+        jinn._runner = None
+
+
 def test_finalize_closes_control_state_atomically_before_capture_cleanup(
     monkeypatch,
 ):
