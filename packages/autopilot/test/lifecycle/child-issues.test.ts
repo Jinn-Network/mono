@@ -7,6 +7,7 @@ import {
   fileChildIssue,
   findOpenChildren,
   formatChildMarker,
+  isMachineChildIssue,
   parseChildMarker,
   shouldFileRunawayHold,
   type ChildIssuePort,
@@ -103,6 +104,18 @@ describe('child marker parse/format', () => {
     expect(parseChildMarker('<!-- jinn-autopilot:child pr=0 kind=reconcile -->')).toBeNull();
     expect(parseChildMarker('<!-- jinn-autopilot:child pr=1 kind=finding -->')).toBeNull();
     expect(parseChildMarker('no marker')).toBeNull();
+  });
+});
+
+describe('isMachineChildIssue', () => {
+  it('recognizes marker-only issues without kind labels', () => {
+    const body = formatChildMarker(42, 'ci-failure');
+    expect(isMachineChildIssue({ body, labels: [] })).toBe(true);
+    expect(isMachineChildIssue({ body })).toBe(true);
+  });
+
+  it('rejects label-only issues without a body marker', () => {
+    expect(isMachineChildIssue({ body: 'no marker', labels: ['ci-failure'] })).toBe(false);
   });
 });
 
@@ -224,47 +237,47 @@ describe('runaway helpers and knobs', () => {
   });
 });
 
+const FIELD_LIST_JSON = JSON.stringify({
+  fields: [
+    {
+      id: 'PVTSSF_blocked',
+      name: 'Blocked on',
+      options: [
+        { id: 'opt_nothing', name: 'Nothing' },
+        { id: 'opt_human', name: 'Human' },
+      ],
+    },
+    {
+      id: 'PVTSSF_effort',
+      name: 'Effort',
+      options: [
+        { id: 'opt_low', name: 'Low' },
+        { id: 'opt_medium', name: 'Medium' },
+        { id: 'opt_high', name: 'High' },
+        { id: 'opt_xhigh', name: 'XHigh' },
+        { id: 'opt_max', name: 'Max' },
+      ],
+    },
+    {
+      id: 'PVTSSF_priority',
+      name: 'Priority',
+      options: [
+        { id: 'opt_p0', name: 'P0' },
+        { id: 'opt_p1', name: 'P1' },
+        { id: 'opt_p2', name: 'P2' },
+        { id: 'opt_p3', name: 'P3' },
+        { id: 'opt_p4', name: 'P4' },
+      ],
+    },
+  ],
+});
+
 describe('production port GraphQL type assign contract', () => {
   it('uses the fix Issue Type id constant and applies Project triage', async () => {
     const { FIX_ISSUE_TYPE_ID, makeProductionChildIssuePort } = await import(
       '../../src/lifecycle/child-issues-production.js'
     );
     expect(FIX_ISSUE_TYPE_ID).toBe('IT_kwDODh3-Ac4BvpyK');
-
-    const FIELD_LIST_JSON = JSON.stringify({
-      fields: [
-        {
-          id: 'PVTSSF_blocked',
-          name: 'Blocked on',
-          options: [
-            { id: 'opt_nothing', name: 'Nothing' },
-            { id: 'opt_human', name: 'Human' },
-          ],
-        },
-        {
-          id: 'PVTSSF_effort',
-          name: 'Effort',
-          options: [
-            { id: 'opt_low', name: 'Low' },
-            { id: 'opt_medium', name: 'Medium' },
-            { id: 'opt_high', name: 'High' },
-            { id: 'opt_xhigh', name: 'XHigh' },
-            { id: 'opt_max', name: 'Max' },
-          ],
-        },
-        {
-          id: 'PVTSSF_priority',
-          name: 'Priority',
-          options: [
-            { id: 'opt_p0', name: 'P0' },
-            { id: 'opt_p1', name: 'P1' },
-            { id: 'opt_p2', name: 'P2' },
-            { id: 'opt_p3', name: 'P3' },
-            { id: 'opt_p4', name: 'P4' },
-          ],
-        },
-      ],
-    });
 
     const calls: string[][] = [];
     const port = makeProductionChildIssuePort({
@@ -326,5 +339,65 @@ describe('production port GraphQL type assign contract', () => {
     )).toBe(true);
     // silence unused vi import if tree-shaken differently
     expect(vi).toBeDefined();
+  });
+
+  it('creates without labels when labeled create fails, then best-effort adds label', async () => {
+    const { makeProductionChildIssuePort } = await import(
+      '../../src/lifecycle/child-issues-production.js'
+    );
+    let createAttempts = 0;
+    const calls: string[][] = [];
+    const port = makeProductionChildIssuePort({
+      runner: async (_cmd, args) => {
+        calls.push([...args]);
+        if (args[0] === 'label' && args[1] === 'create') {
+          throw new Error('label create denied');
+        }
+        if (args[0] === 'issue' && args[1] === 'list') {
+          return '[]';
+        }
+        if (args[0] === 'issue' && args[1] === 'create') {
+          createAttempts += 1;
+          if (createAttempts === 1) {
+            throw new Error('could not add label: ci-failure');
+          }
+          return 'https://github.com/Jinn-Network/mono/issues/100\n';
+        }
+        if (args[0] === 'issue' && args[1] === 'view') {
+          return 'I_kwIssue100\n';
+        }
+        if (args[0] === 'issue' && args[1] === 'edit') {
+          return '';
+        }
+        if (args[0] === 'api' && args[1] === 'graphql') {
+          return '{"data":{}}';
+        }
+        if (args[0] === 'project' && args[1] === 'field-list') {
+          return FIELD_LIST_JSON;
+        }
+        if (args[0] === 'project' && args[1] === 'item-add') {
+          return JSON.stringify({ id: 'PVTI_child100' });
+        }
+        if (args[0] === 'project' && args[1] === 'item-edit') {
+          return '';
+        }
+        return '';
+      },
+    });
+
+    const filed = await fileChildIssue(port, {
+      parentPr: 55,
+      kind: 'ci-failure',
+      title: 'Fix CI for PR #55',
+      body: 'checks red',
+      effort: 'medium',
+      priority: 'p1',
+    });
+    expect(filed).toEqual({ number: 100, created: true });
+    expect(createAttempts).toBe(2);
+    expect(calls.some((args) => args.includes('--label') && args.includes('ci-failure'))).toBe(true);
+    expect(calls.some((args) =>
+      args[0] === 'issue' && args[1] === 'edit' && args.includes('--add-label'),
+    )).toBe(true);
   });
 });
