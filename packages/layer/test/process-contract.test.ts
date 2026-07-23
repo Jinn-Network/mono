@@ -363,6 +363,61 @@ describe('jinn-layer process contract v1', () => {
     }
   });
 
+  it('delivers public context when the local episode store is empty', async () => {
+    const episodesDir = mkdtempSync(join(tmpdir(), 'jinn-empty-local-pickup-'));
+    const evidence = createEvidenceAdapter({ capturesDir: episodesDir });
+    const publicCorpus = new InMemoryCorpusPort([{
+      ref: 'bafyPublicOnlyEpisode',
+      kind: 'trace',
+      task: { summary: 'Fix the session bridge' },
+      outcome: { status: 'completed', verifiabilityTier: 'tests-passed' },
+      synthesis: 'Repair the public session bridge evidence.',
+      steps: [],
+      tags: ['session', 'bridge'],
+      provenance: 'imported',
+      origin: 'seed:public-session-bridge',
+      capturedAt: '2026-07-23T00:00:00.000Z',
+      tier: 'tests-passed',
+      retrievalVisible: true,
+    }]);
+    const corpus = createFederatedCorpusAdapter({
+      local: createLocalEpisodeCorpusAdapter({ evidence }),
+      public: publicCorpus,
+    });
+    const out = capture();
+
+    try {
+      expect(await runJinnLayerCli(['session', 'pickup'], {
+        writer: out.writer,
+        reader: async () => JSON.stringify({
+          contractVersion: 1,
+          meta: {
+            sessionId: 'pickup-empty-local',
+            taskSummary: 'Fix the session bridge',
+            harness: { name: 'host', version: '1' },
+            model: 'test',
+            tools: [],
+          },
+          firstMessage: 'session bridge',
+        }),
+        pluginOverrides: memoryDeps({ corpus, evidence }),
+      })).toBe(0);
+
+      const reply = JSON.parse(out.output());
+      expect(reply).toMatchObject({
+        contractVersion: 1,
+        status: 'ok',
+        value: {
+          deliveryMode: 'delivered',
+          packets: [{ ref: 'bafyPublicOnlyEpisode' }],
+        },
+      });
+      expect(reply.value.contextBlock).toContain('Fix the session bridge');
+    } finally {
+      rmSync(episodesDir, { recursive: true, force: true });
+    }
+  });
+
   it('provides real evidence content end to end through the process contract (additive shape, rescope R2 #1772)', async () => {
     const corpus = new InMemoryCorpusPort([{
       ref: 'bafySourceEpisode',
