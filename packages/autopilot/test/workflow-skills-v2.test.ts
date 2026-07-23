@@ -156,7 +156,8 @@ describe('v2 operator entry point and migration', () => {
     expect(runbook).toContain('dirty worktrees');
     expect(runbook).toContain('ahead commits');
     expect(runbook).toContain('existing branches');
-    expect(runbook).toContain('cleanup remains disabled');
+    expect(runbook).toContain('is on by default in active mode');
+    expect(runbook).toContain('ci-blocked');
     expect(runbook).toMatch(/same-host/i);
     expect(runbook).toMatch(/cross-host/i);
     expect(runbook).toContain('Hermes');
