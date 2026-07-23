@@ -536,6 +536,82 @@ describe('TaskPostingService', () => {
     await secondAdapter.stop();
   });
 
+  it('keeps unsigned legacy posts retryable across process crashes without durable intent', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-task-legacy-retry-'));
+    const dbPath = join(dir, 'jinn.sqlite');
+    const candidate = {
+      task: {
+        id: 'legacy-unsigned-retry',
+        description: 'legacy adapter signs this task during posting',
+      },
+      sourceKey: 'legacy:unsigned-retry',
+      postingPolicy: { kind: 'once_per_safe' } as const,
+    };
+    const key = {
+      creatorSafeAddress: getAddress(SAFE_A),
+      sourceKey: candidate.sourceKey,
+      policyType: 'once_per_safe' as const,
+      scopeKey: '',
+    };
+    const walletWrite = vi.fn();
+
+    const firstAdapter = new LocalAdapter();
+    await firstAdapter.initialize();
+    Object.assign(firstAdapter, {
+      postTask: vi.fn(async (_task: unknown, options?: {
+        beforeBroadcast?: () => void | Promise<void>;
+      }) => {
+        await options?.beforeBroadcast?.();
+        walletWrite();
+        throw new Error('simulated legacy process crash after wallet boundary');
+      }),
+    });
+    const firstStore = new Store(dbPath);
+    const firstService = new TaskPostingService(firstAdapter, firstStore);
+
+    await expect(
+      firstService.postCandidate(candidate, { creatorSafeAddress: SAFE_A }),
+    ).rejects.toThrow(/legacy process crash/);
+    expect(walletWrite).toHaveBeenCalledOnce();
+    expect(firstStore.getTaskPostRecord(key)).toMatchObject({
+      requestJson: null,
+      canonicalTaskJson: null,
+      broadcastIntentAt: null,
+    });
+    firstStore.close();
+    await firstAdapter.stop();
+
+    const secondAdapter = new LocalAdapter();
+    await secondAdapter.initialize();
+    const secondPostTask = vi.fn(async (_task: unknown, options?: {
+      beforeBroadcast?: () => void | Promise<void>;
+    }) => {
+      await options?.beforeBroadcast?.();
+      walletWrite();
+      return {
+        taskId: 'legacy-retry-landed',
+        taskCid: 'local-legacy-retry',
+      };
+    });
+    Object.assign(secondAdapter, { postTask: secondPostTask });
+    const secondStore = new Store(dbPath);
+    const secondService = new TaskPostingService(secondAdapter, secondStore);
+
+    await expect(
+      secondService.postCandidate(candidate, { creatorSafeAddress: SAFE_A }),
+    ).resolves.toMatchObject({
+      taskId: 'legacy-retry-landed',
+      source: 'posted',
+      idempotent: false,
+    });
+    expect(secondPostTask).toHaveBeenCalledOnce();
+    expect(walletWrite).toHaveBeenCalledTimes(2);
+    expect(secondStore.getTaskPostRecord(key)?.broadcastIntentAt).toBeNull();
+
+    secondStore.close();
+    await secondAdapter.stop();
+  });
+
   it('fences a stale owner immediately before broadcast when its lease was stolen during recovery', async () => {
     const adapter = new LocalAdapter();
     await adapter.initialize();
@@ -633,17 +709,10 @@ describe('TaskPostingService', () => {
       };
     });
     Object.assign(adapter, { postTask });
-    const signedTask = {
-      schemaVersion: 'task.v1',
-      id: 'autopilot:wallet-fence',
-      solverType: 'jinn-repo.v1',
-      solverNetManifestCid: 'bafy-manifest',
-    } as SignedTaskV1;
     const candidate = {
-      task: { id: signedTask.id, description: 'wallet fence', signedTask },
-      sourceKey: signedTask.id,
+      task: { id: 'legacy-wallet-fence', description: 'legacy wallet fence' },
+      sourceKey: 'legacy:wallet-fence',
       postingPolicy: { kind: 'once_per_safe' } as const,
-      sourceMeta: { request: { schemaVersion: 'jinn-task-submit-request.v1' } },
     };
 
     const pending = service.postCandidate(candidate, { creatorSafeAddress: SAFE_A });
@@ -662,6 +731,12 @@ describe('TaskPostingService', () => {
     releaseSetup();
     await expect(pending).rejects.toBeInstanceOf(TransientError);
     expect(walletWrite).not.toHaveBeenCalled();
+    expect(store.getTaskPostRecord({
+      creatorSafeAddress: getAddress(SAFE_A),
+      sourceKey: candidate.sourceKey,
+      policyType: 'once_per_safe',
+      scopeKey: '',
+    })?.broadcastIntentAt).toBeNull();
 
     store.close();
     await adapter.stop();

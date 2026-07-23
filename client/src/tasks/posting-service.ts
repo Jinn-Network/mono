@@ -198,6 +198,8 @@ export class TaskPostingService {
         attemptNumber,
       };
       const { canonicalTaskJson, requestJson } = immutableBytes;
+      const usesDurableBroadcastIntent =
+        requestJson !== null && task.signedTask !== undefined;
       if (lockedExisting) assertImmutableCandidate(candidate, lockedExisting, immutableBytes);
       this.store.upsertTaskPostRecord({
         creatorSafeAddress,
@@ -247,7 +249,11 @@ export class TaskPostingService {
           };
         }
       }
-      if (lockedExisting?.broadcastIntentAt && !lockedExisting.protocolTaskId) {
+      if (
+        lockedExisting?.broadcastIntentAt
+        && lockedExisting.requestJson !== null
+        && !lockedExisting.protocolTaskId
+      ) {
         throw new TaskPostBroadcastUncertainError(
           lockedExisting.broadcastIntentAt,
           candidate.sourceKey,
@@ -270,15 +276,24 @@ export class TaskPostingService {
         beforeBroadcast: async () => {
           await opts.beforeBroadcast?.();
           const intentAt = this.scheduler.now().toISOString();
-          const stillOwnsBroadcast = this.store.markTaskPostBroadcastIntent({
-            creatorSafeAddress,
-            sourceKey: candidate.sourceKey,
-            policyType,
-            scopeKey,
-            ownerToken,
-            lockedAt: intentAt,
-            broadcastIntentAt: intentAt,
-          });
+          const stillOwnsBroadcast = usesDurableBroadcastIntent
+            ? this.store.markTaskPostBroadcastIntent({
+                creatorSafeAddress,
+                sourceKey: candidate.sourceKey,
+                policyType,
+                scopeKey,
+                ownerToken,
+                lockedAt: intentAt,
+                broadcastIntentAt: intentAt,
+              })
+            : this.store.renewTaskPostLock({
+                creatorSafeAddress,
+                sourceKey: candidate.sourceKey,
+                policyType,
+                scopeKey,
+                ownerToken,
+                lockedAt: intentAt,
+              });
           lockLost = !stillOwnsBroadcast;
           if (!stillOwnsBroadcast) {
             throw new TaskPostOwnershipLostError(
