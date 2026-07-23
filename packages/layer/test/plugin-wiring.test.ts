@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import * as os from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
 import {
   InMemoryContributionPort,
   InMemoryCorpusPort,
@@ -12,6 +15,7 @@ import {
   composeDefaultCorpus,
 } from '../src/plugin-wiring.js';
 import { runJinnLayerCli } from '../src/cli.js';
+import { localEpisodeRef } from '../src/adapters/local-episode-corpus-adapter.js';
 
 function capture() {
   let output = '';
@@ -101,6 +105,35 @@ describe('default plugin corpus wiring', () => {
     const deps = buildPluginDepsFromEnv(completeOverrides({ corpus }));
 
     expect(deps.corpus).toBe(corpus);
+  });
+
+  it('backs the default local corpus with the explicit evidence instance', async () => {
+    const root = mkdtempSync(join(os.tmpdir(), 'jinn-default-corpus-'));
+    const evidence = new InMemoryEvidencePort();
+    const { corpus: _corpus, ...overrides } = completeOverrides({ evidence });
+
+    try {
+      vi.resetModules();
+      vi.doMock('node:os', async (importOriginal) => ({
+        ...await importOriginal<typeof import('node:os')>(),
+        homedir: () => root,
+      }));
+      const { buildPluginDepsFromEnv: buildDefaultDeps } = await import('../src/plugin-wiring.js');
+      const deps = buildDefaultDeps(overrides);
+      await deps.evidence.put(episode());
+
+      await expect(deps.corpus.get(localEpisodeRef('local-bridge-episode'))).resolves.toMatchObject({
+        status: 'ok',
+        value: {
+          canonicalEpisodeId: 'local-bridge-episode',
+          origin: 'local:local-bridge-episode',
+        },
+      });
+    } finally {
+      vi.doUnmock('node:os');
+      vi.resetModules();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('uses an explicit evidence override for plugin persistence', async () => {
