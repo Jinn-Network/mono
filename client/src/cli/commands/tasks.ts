@@ -52,6 +52,31 @@ import {
   getTimeoutBounds,
 } from '../../adapters/mech/contracts.js';
 
+function findNamedErrorCause(
+  error: unknown,
+  name: string,
+): Record<string, unknown> | undefined {
+  const seen = new Set<object>();
+  let current = error;
+  for (let depth = 0; depth < 8 && current && typeof current === 'object'; depth++) {
+    if (seen.has(current)) return undefined;
+    seen.add(current);
+    const value = current as Record<string, unknown>;
+    if (value['name'] === name) return value;
+    current = value['cause'];
+  }
+  return undefined;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error
+    ? error.message
+    : typeof error === 'object' && error !== null
+      && typeof (error as { message?: unknown }).message === 'string'
+      ? (error as { message: string }).message
+      : String(error);
+}
+
 function machinePreflightChecks(args: {
   ctx: CommandContext;
   config: ReturnType<typeof loadConfig>;
@@ -677,6 +702,12 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
       },
       {
         creatorSafeAddress: safe,
+        ...(machineRequest
+          ? {
+              beforeBroadcast: () =>
+                assertMarketplaceTaskRequestFreshness(machineRequest),
+            }
+          : {}),
       },
     );
     emitResult(
@@ -711,6 +742,54 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
       },
     );
   } catch (e) {
+    const policyExpiration = findNamedErrorCause(
+      e,
+      'MarketplaceTaskRequestExpiredError',
+    );
+    if (policyExpiration) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: errorMessage(policyExpiration),
+          hint: 'Create a fresh marketplace Task request before retrying.',
+          exampleCli: 'jinn tasks submit --request-file request.json --yes --json',
+          details: {
+            field: 'freshness',
+            reason: 'policy_expired',
+            cause: errorMessage(policyExpiration),
+          },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+
+    const broadcastUncertain = findNamedErrorCause(
+      e,
+      'TaskPostBroadcastUncertainError',
+    );
+    if (broadcastUncertain) {
+      emitEnvelope(
+        {
+          code: 'transient_error',
+          message: errorMessage(broadcastUncertain),
+          hint:
+            'Retry later to recover the exact TaskCreated event; this request will not broadcast again while its outcome is uncertain.',
+          exampleCli: 'jinn tasks submit --request-file request.json --yes --json',
+          details: {
+            reason: 'broadcast_uncertain',
+            cause: errorMessage(broadcastUncertain),
+            ...(typeof broadcastUncertain['broadcastIntentAt'] === 'string'
+              ? { broadcastIntentAt: broadcastUncertain['broadcastIntentAt'] }
+              : {}),
+          },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+
+    const ownershipLost = findNamedErrorCause(e, 'TaskPostOwnershipLostError');
     const pendingTxHash =
       e && typeof e === 'object'
       && (
@@ -720,19 +799,22 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
       && typeof (e as { txHash?: unknown }).txHash === 'string'
         ? (e as { txHash: string }).txHash
         : undefined;
-    if (pendingTxHash || isRecoverableTransactionError(e)) {
+    if (ownershipLost || pendingTxHash || isRecoverableTransactionError(e)) {
       emitEnvelope(
         {
           code: 'transient_error',
           message: e instanceof Error ? e.message : String(e),
-          hint: pendingTxHash
-            ? 'Retry to reconcile this exact submitted transaction; a new Safe transaction will not be broadcast while it remains pending.'
-            : 'Retry when the RPC endpoint is healthy or fees clear.',
+          hint: ownershipLost
+            ? 'Retry after the competing Task submission owner finishes or its lease expires.'
+            : pendingTxHash
+              ? 'Retry to reconcile this exact submitted transaction; a new Safe transaction will not be broadcast while it remains pending.'
+              : 'Retry when the RPC endpoint is healthy or fees clear.',
           exampleCli: machineRequest
             ? 'jinn tasks submit --request-file request.json --yes --json'
             : 'jinn tasks submit --id my-task --description "..." --yes',
           details: {
             cause: e instanceof Error ? e.message : String(e),
+            ...(ownershipLost ? { reason: 'ownership_lost' } : {}),
             ...(pendingTxHash ? { txHash: pendingTxHash } : {}),
           },
         },

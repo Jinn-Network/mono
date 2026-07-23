@@ -12,6 +12,13 @@ import { LocalAdapter } from '@/adapters/local/adapter.js';
 import { Store } from '@/store/store.js';
 import { marketplaceTaskSelectionSidecarPath } from '@/tasks/submit-selection.js';
 import { canonicalJson } from '@/harnesses/engine/canonical-json.js';
+import {
+  executeSafeTransaction,
+  SafePostBroadcastHookError,
+} from '@/adapters/mech/safe.js';
+import { createMemoryTxSubmissionLedger } from '@/tx-retry.js';
+import { baseSepolia } from 'viem/chains';
+import Database from 'better-sqlite3';
 
 const createCliExecutionContext = vi.hoisted(() => vi.fn());
 const createCliReadOnlySignerContext = vi.hoisted(() => vi.fn(async () => ({
@@ -53,6 +60,58 @@ vi.mock('@/tasks/submit-preflight.js', async (importOriginal) => ({
 }));
 
 const V2_ATTEMPT_ID = '11111111-1111-4111-8111-111111111111';
+const SAFE_WRAPPER_TX_HASH = `0x${'9a'.repeat(32)}` as const;
+
+async function postThroughSafeWalletBoundary(
+  options: {
+    beforeBroadcast?: () => void | Promise<void>;
+    onTransactionHash?: (txHash: typeof SAFE_WRAPPER_TX_HASH) => void | Promise<void>;
+  } | undefined,
+  writeContract: ReturnType<typeof vi.fn>,
+) {
+  const safeTxHash = `0x${'77'.repeat(32)}` as const;
+  const signature = `0x${'ab'.repeat(32)}${'cd'.repeat(32)}1b` as const;
+  const txHash = await executeSafeTransaction(
+    {
+      getChainId: vi.fn().mockResolvedValue(baseSepolia.id),
+      getTransactionCount: vi.fn().mockResolvedValue(7),
+      readContract: vi.fn(async (args: { functionName: string }) => {
+        if (args.functionName === 'nonce') return 0n;
+        if (args.functionName === 'getTransactionHash') return safeTxHash;
+        throw new Error(`unexpected readContract call: ${args.functionName}`);
+      }),
+      estimateFeesPerGas: vi.fn().mockResolvedValue({
+        maxFeePerGas: 100n,
+        maxPriorityFeePerGas: 10n,
+      }),
+      getGasPrice: vi.fn(),
+      waitForTransactionReceipt: vi.fn().mockResolvedValue({ status: 'success' }),
+    } as never,
+    {
+      account: { address: '0x000000000000000000000000000000000000beef' },
+      chain: baseSepolia,
+      signMessage: vi.fn().mockResolvedValue(signature),
+      writeContract,
+    } as never,
+    {
+      safeAddress: '0x00112233445566778899aabbccddeeff00112233',
+      to: '0x2222222222222222222222222222222222222222',
+      value: 0n,
+      data: '0xdeadbeef',
+    },
+    {
+      ledger: createMemoryTxSubmissionLedger(),
+      beforeBroadcast: options?.beforeBroadcast,
+      onBroadcast: options?.onTransactionHash,
+    },
+  );
+  return {
+    taskId: 'wallet-boundary-task',
+    taskCid: `f01551220${'ab'.repeat(32)}`,
+    txHash,
+    blockNumber: 88,
+  };
+}
 
 function request(overrides: Record<string, unknown> = {}) {
   const startTs = 1_900_000_000_000;
@@ -262,6 +321,110 @@ describe('tasks submit machine contract', () => {
     expect(existsSync(marketplaceTaskSelectionSidecarPath(file))).toBe(false);
   });
 
+  it('emits Safe-wrapped wallet-boundary ownership loss as transient without retrying or writing', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-task-owner-fence-'));
+    const file = join(dir, 'request.json');
+    const config = join(dir, 'config.json');
+    const dbPath = join(dir, 'jinn.db');
+    writeFileSync(file, JSON.stringify(request()));
+    writeFileSync(config, '{}');
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(dbPath);
+    const writeContract = vi.fn().mockResolvedValue(SAFE_WRAPPER_TX_HASH);
+    Object.assign(adapter, {
+      postTask: vi.fn(async (_task: unknown, options?: {
+        beforeBroadcast?: () => void | Promise<void>;
+        onTransactionHash?: (txHash: typeof SAFE_WRAPPER_TX_HASH) => void | Promise<void>;
+      }) => {
+        const tamper = new Database(dbPath);
+        tamper.prepare(`UPDATE task_post_locks SET owner_token = 'stolen-owner'`).run();
+        tamper.close();
+        return postThroughSafeWalletBoundary(options, writeContract);
+      }),
+    });
+    createCliExecutionContext.mockResolvedValueOnce({
+      ok: true,
+      ctx: {
+        adapter,
+        jinnStore: store,
+        primaryService: {
+          index: 0,
+          safe_address: '0x00112233445566778899aabbccddeeff00112233',
+        },
+        mnemonic: 'test test test test test test test test test test test junk',
+      },
+    });
+    const made = makeCommandCtx({
+      argv: ['submit', '--request-file', file, '--config', config, '--yes', '--json'],
+    });
+
+    await tasksCommand.run(made.ctx);
+
+    expect(JSON.parse(made.writes.at(-1)!)).toMatchObject({
+      code: 'transient_error',
+      details: { reason: 'ownership_lost' },
+    });
+    expect(writeContract).not.toHaveBeenCalled();
+    store.close();
+    await adapter.stop();
+  });
+
+  it('rechecks freshness after slow preparation at the Safe wallet boundary and never writes', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-task-final-freshness-'));
+    const file = join(dir, 'request.json');
+    const config = join(dir, 'config.json');
+    const value = request();
+    writeFileSync(file, JSON.stringify(value));
+    writeFileSync(config, '{}');
+    vi.useFakeTimers();
+    vi.setSystemTime(value.claimPolicy.claimWindowEndTs - 60_001);
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+    const writeContract = vi.fn().mockResolvedValue(SAFE_WRAPPER_TX_HASH);
+    Object.assign(adapter, {
+      postTask: vi.fn(async (_task: unknown, options?: {
+        beforeBroadcast?: () => void | Promise<void>;
+        onTransactionHash?: (txHash: typeof SAFE_WRAPPER_TX_HASH) => void | Promise<void>;
+      }) => {
+        vi.setSystemTime(value.claimPolicy.claimWindowEndTs - 59_999);
+        return postThroughSafeWalletBoundary(options, writeContract);
+      }),
+    });
+    createCliExecutionContext.mockResolvedValueOnce({
+      ok: true,
+      ctx: {
+        adapter,
+        jinnStore: store,
+        primaryService: {
+          index: 0,
+          safe_address: '0x00112233445566778899aabbccddeeff00112233',
+        },
+        mnemonic: 'test test test test test test test test test test test junk',
+      },
+    });
+    const made = makeCommandCtx({
+      argv: ['submit', '--request-file', file, '--config', config, '--yes', '--json'],
+    });
+
+    await tasksCommand.run(made.ctx);
+
+    expect(JSON.parse(made.writes.at(-1)!)).toMatchObject({
+      code: 'invalid_invocation',
+      details: { field: 'freshness', reason: 'policy_expired' },
+    });
+    expect(writeContract).not.toHaveBeenCalled();
+    expect(store.getTaskPostRecord({
+      creatorSafeAddress: '0x00112233445566778899AABbCCdDeeFf00112233',
+      sourceKey: value.id,
+      policyType: 'once_per_safe',
+      scopeKey: '',
+    })?.broadcastIntentAt).toBeNull();
+    store.close();
+    await adapter.stop();
+  });
+
   it('emits Task CID, chain origin, manifest, and idempotency in JSON', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-'));
     const file = join(dir, 'request.json');
@@ -379,18 +542,30 @@ describe('tasks submit machine contract', () => {
     const firstAdapter = new LocalAdapter();
     await firstAdapter.initialize();
     const firstStore = new Store(dbPath);
+    const realUpsert = firstStore.upsertTaskPostRecord.bind(firstStore);
+    vi.spyOn(firstStore, 'upsertTaskPostRecord').mockImplementation((record) => {
+      if (record.creationTxHash) {
+        throw new Error('simulated durable task_posts hash write failure');
+      }
+      realUpsert(record);
+    });
     let firstSignedTask: unknown;
     const pendingTxHash = `0x${'ef'.repeat(32)}` as const;
+    const firstWalletWrite = vi.fn();
     Object.assign(firstAdapter, {
       postTask: vi.fn(async (task: { signedTask?: unknown }, options?: {
+        beforeBroadcast?: () => void | Promise<void>;
         onTransactionHash?: (txHash: typeof pendingTxHash) => void | Promise<void>;
       }) => {
         firstSignedTask = task.signedTask;
-        await options?.onTransactionHash?.(pendingTxHash);
-        throw Object.assign(new Error('simulated crash after Safe submission'), {
-          name: 'SafePostBroadcastHookError',
-          txHash: pendingTxHash,
-        });
+        await options?.beforeBroadcast?.();
+        firstWalletWrite();
+        try {
+          await options?.onTransactionHash?.(pendingTxHash);
+        } catch (cause) {
+          throw new SafePostBroadcastHookError(pendingTxHash, cause);
+        }
+        throw new Error('expected durable hash persistence to fail');
       }),
     });
     createCliExecutionContext.mockResolvedValueOnce({
@@ -416,6 +591,7 @@ describe('tasks submit machine contract', () => {
     expect(firstSignedTask).toMatchObject({
       solverNetManifestCid: 'bafy-frozen-selection',
     });
+    expect(firstWalletWrite).toHaveBeenCalledOnce();
     expect(existsSync(marketplaceTaskSelectionSidecarPath(file))).toBe(true);
     firstStore.close();
     await firstAdapter.stop();
@@ -424,8 +600,10 @@ describe('tasks submit machine contract', () => {
     const secondAdapter = new LocalAdapter();
     await secondAdapter.initialize();
     let recoveredSignedTask: unknown;
-    Object.assign(secondAdapter, {
-      recoverTaskPost: vi.fn(async (input: { signedTask: unknown }) => {
+    const secondPostTask = vi.fn();
+    const recoverTaskPost = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockImplementationOnce(async (input: { signedTask: unknown }) => {
         recoveredSignedTask = input.signedTask;
         return {
           taskId: 'frozen-task-77',
@@ -433,10 +611,13 @@ describe('tasks submit machine contract', () => {
           txHash: pendingTxHash,
           blockNumber: 777,
         };
-      }),
+      });
+    Object.assign(secondAdapter, {
+      recoverTaskPost,
+      postTask: secondPostTask,
     });
     const secondStore = new Store(dbPath);
-    createCliExecutionContext.mockResolvedValueOnce({
+    createCliExecutionContext.mockResolvedValue({
       ok: true,
       ctx: {
         adapter: secondAdapter,
@@ -454,12 +635,24 @@ describe('tasks submit machine contract', () => {
     await tasksCommand.run(second.ctx);
 
     expect(JSON.parse(second.writes.at(-1)!)).toMatchObject({
+      code: 'transient_error',
+      details: { reason: 'broadcast_uncertain' },
+    });
+    expect(secondPostTask).not.toHaveBeenCalled();
+
+    const third = makeCommandCtx({
+      argv: ['submit', '--request-file', file, '--config', config, '--yes', '--json'],
+    });
+    await tasksCommand.run(third.ctx);
+    expect(JSON.parse(third.writes.at(-1)!)).toMatchObject({
       taskId: 'frozen-task-77',
       solverNetManifestCid: 'bafy-frozen-selection',
       status: 'already_submitted',
     });
     expect(canonicalJson(recoveredSignedTask)).toBe(canonicalJson(firstSignedTask));
     expect(resolveMarketplaceTaskSolverNet).toHaveBeenCalledTimes(1);
+    expect(recoverTaskPost).toHaveBeenCalledTimes(2);
+    expect(secondPostTask).not.toHaveBeenCalled();
     secondStore.close();
     await secondAdapter.stop();
   });

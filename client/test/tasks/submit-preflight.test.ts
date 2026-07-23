@@ -7,6 +7,7 @@ import {
   assertMarketplaceTaskFunding,
   assertMarketplaceTaskRequestFreshness,
   MARKETPLACE_TASK_FRESHNESS_RESERVE_MS,
+  MarketplaceTaskRequestExpiredError,
 } from '../../src/tasks/submit-preflight.js';
 
 const categories = [
@@ -138,6 +139,14 @@ describe('assertMarketplaceTaskRequestFreshness', () => {
   it('accepts every operational deadline just beyond the fixed reserve boundary', () => {
     expect(MARKETPLACE_TASK_FRESHNESS_RESERVE_MS).toBe(60_000);
     expect(() => assertMarketplaceTaskRequestFreshness(request(), { nowMs })).not.toThrow();
+  });
+
+  it('throws a named policy-expiration error for command-boundary classification', () => {
+    const value = request();
+    value.claimPolicy.claimWindowEndTs = nowMs + 60_000;
+    expect(MarketplaceTaskRequestExpiredError).toBeTypeOf('function');
+    expect(() => assertMarketplaceTaskRequestFreshness(value, { nowMs }))
+      .toThrow(MarketplaceTaskRequestExpiredError);
   });
 
   it.each([

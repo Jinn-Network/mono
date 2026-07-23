@@ -3,6 +3,10 @@ import { createHttpDiscoveryAPI } from '../discovery/http.js';
 
 export const MARKETPLACE_TASK_FRESHNESS_RESERVE_MS = 60_000;
 
+export class MarketplaceTaskRequestExpiredError extends Error {
+  readonly name = 'MarketplaceTaskRequestExpiredError';
+}
+
 export const MARKETPLACE_TASK_SUBMIT_PREFLIGHT_CATEGORIES = [
   'creator',
   'funds',
@@ -47,7 +51,7 @@ export function assertMarketplaceTaskRequestFreshness(
     ([, deadline]) => !Number.isFinite(deadline) || deadline <= minimumLiveDeadline,
   );
   if (expired.length > 0) {
-    throw new Error(
+    throw new MarketplaceTaskRequestExpiredError(
       `Marketplace Task request freshness check failed: ${
         expired.map(([label]) => label).join(', ')
       } must remain live beyond ${new Date(minimumLiveDeadline).toISOString()} ` +

@@ -38,6 +38,25 @@ export interface TaskPostResult {
 
 export interface PostTaskCandidateOptions {
   creatorSafeAddress?: string;
+  beforeBroadcast?: () => void | Promise<void>;
+}
+
+export class TaskPostOwnershipLostError extends TransientError {
+  readonly name = 'TaskPostOwnershipLostError';
+}
+
+export class TaskPostBroadcastUncertainError extends TransientError {
+  readonly name = 'TaskPostBroadcastUncertainError';
+
+  constructor(
+    readonly broadcastIntentAt: string,
+    sourceKey: string,
+  ) {
+    super(
+      `Task post ${sourceKey} has durable broadcast intent from ${broadcastIntentAt} ` +
+      'but no matching TaskCreated event is visible; refusing to broadcast again',
+    );
+  }
 }
 
 function normalizeCreatorSafeAddress(safeAddress?: string): string {
@@ -228,6 +247,12 @@ export class TaskPostingService {
           };
         }
       }
+      if (lockedExisting?.broadcastIntentAt && !lockedExisting.protocolTaskId) {
+        throw new TaskPostBroadcastUncertainError(
+          lockedExisting.broadcastIntentAt,
+          candidate.sourceKey,
+        );
+      }
       const stillOwnsPost = this.store.renewTaskPostLock({
         creatorSafeAddress,
         sourceKey: candidate.sourceKey,
@@ -243,17 +268,20 @@ export class TaskPostingService {
       }
       const posted = await this.adapter.postTask(task, {
         beforeBroadcast: async () => {
-          const stillOwnsBroadcast = this.store.renewTaskPostLock({
+          await opts.beforeBroadcast?.();
+          const intentAt = this.scheduler.now().toISOString();
+          const stillOwnsBroadcast = this.store.markTaskPostBroadcastIntent({
             creatorSafeAddress,
             sourceKey: candidate.sourceKey,
             policyType,
             scopeKey,
             ownerToken,
-            lockedAt: this.scheduler.now().toISOString(),
+            lockedAt: intentAt,
+            broadcastIntentAt: intentAt,
           });
           lockLost = !stillOwnsBroadcast;
           if (!stillOwnsBroadcast) {
-            throw new TransientError(
+            throw new TaskPostOwnershipLostError(
               `Task post ownership was lost at the wallet boundary for ${candidate.sourceKey}; refusing to broadcast`,
             );
           }

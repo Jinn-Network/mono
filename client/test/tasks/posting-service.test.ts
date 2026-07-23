@@ -6,6 +6,9 @@ import { TransientError } from '../../src/types/index.js';
 import type { SignedTaskV1 } from '../../src/types/task-document.js';
 import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
 import { getAddress } from 'viem';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const SAFE_A = '0x00112233445566778899aabbccddeeff00112233';
 const SAFE_B = '0x1111222233334444555566667777888899990000';
@@ -366,6 +369,171 @@ describe('TaskPostingService', () => {
 
     store.close();
     await adapter.stop();
+  });
+
+  it('never reposts across processes when the broadcast hash Store write fails, then adopts exact recovery', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-task-broadcast-intent-'));
+    const dbPath = join(dir, 'jinn.sqlite');
+    const txHash = `0x${'de'.repeat(32)}` as const;
+    const signedTask = {
+      schemaVersion: 'task.v1',
+      id: 'autopilot:store-write-failure',
+      solverType: 'jinn-repo.v1',
+      solverNetManifestCid: 'bafy-manifest',
+    } as SignedTaskV1;
+    const candidate = {
+      task: { id: signedTask.id, description: 'durable uncertainty', signedTask },
+      sourceKey: signedTask.id,
+      postingPolicy: { kind: 'once_per_safe' } as const,
+      sourceMeta: { request: { schemaVersion: 'jinn-task-submit-request.v1' } },
+    };
+    const key = {
+      creatorSafeAddress: getAddress(SAFE_A),
+      sourceKey: candidate.sourceKey,
+      policyType: 'once_per_safe' as const,
+      scopeKey: '',
+    };
+
+    const firstAdapter = new LocalAdapter();
+    await firstAdapter.initialize();
+    const firstStore = new Store(dbPath);
+    const realUpsert = firstStore.upsertTaskPostRecord.bind(firstStore);
+    vi.spyOn(firstStore, 'upsertTaskPostRecord').mockImplementation((record) => {
+      if (record.creationTxHash) {
+        throw new Error('simulated durable task_posts hash write failure');
+      }
+      realUpsert(record);
+    });
+    const walletWrite = vi.fn();
+    Object.assign(firstAdapter, {
+      postTask: vi.fn(async (_task: unknown, options?: {
+        beforeBroadcast?: () => void | Promise<void>;
+        onTransactionHash?: (hash: typeof txHash) => void | Promise<void>;
+      }) => {
+        await options?.beforeBroadcast?.();
+        walletWrite();
+        await options?.onTransactionHash?.(txHash);
+        throw new Error('unreachable after failed hash persistence');
+      }),
+    });
+    const firstService = new TaskPostingService(firstAdapter, firstStore);
+
+    await expect(
+      firstService.postCandidate(candidate, { creatorSafeAddress: SAFE_A }),
+    ).rejects.toThrow(/hash write failure/);
+    expect(walletWrite).toHaveBeenCalledOnce();
+    expect(firstStore.getTaskPostRecord(key)?.broadcastIntentAt).toEqual(expect.any(String));
+    firstStore.close();
+    await firstAdapter.stop();
+
+    const secondAdapter = new LocalAdapter();
+    await secondAdapter.initialize();
+    const recovered = {
+      taskId: 'recovered-task-91',
+      taskCid: `f01551220${'ab'.repeat(32)}`,
+      txHash,
+      blockNumber: 901,
+    };
+    const recoverTaskPost = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(recovered);
+    const secondPostTask = vi.fn(async () => ({
+      taskId: 'must-not-repost',
+      taskCid: `f01551220${'cd'.repeat(32)}`,
+    }));
+    Object.assign(secondAdapter, { recoverTaskPost, postTask: secondPostTask });
+    const secondStore = new Store(dbPath);
+    const secondService = new TaskPostingService(secondAdapter, secondStore);
+
+    await expect(
+      secondService.postCandidate(candidate, { creatorSafeAddress: SAFE_A }),
+    ).rejects.toMatchObject({
+      name: 'TaskPostBroadcastUncertainError',
+      broadcastIntentAt: expect.any(String),
+    });
+    expect(secondPostTask).not.toHaveBeenCalled();
+
+    await expect(
+      secondService.postCandidate(candidate, { creatorSafeAddress: SAFE_A }),
+    ).resolves.toMatchObject({
+      taskId: recovered.taskId,
+      txHash,
+      source: 'recovered',
+      idempotent: true,
+    });
+    expect(recoverTaskPost).toHaveBeenCalledTimes(2);
+    expect(secondPostTask).not.toHaveBeenCalled();
+
+    secondStore.close();
+    await secondAdapter.stop();
+  });
+
+  it('keeps a crash after durable intent but before wallet write uncertain across processes', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-task-prewrite-intent-'));
+    const dbPath = join(dir, 'jinn.sqlite');
+    const signedTask = {
+      schemaVersion: 'task.v1',
+      id: 'autopilot:prewrite-crash',
+      solverType: 'jinn-repo.v1',
+      solverNetManifestCid: 'bafy-manifest',
+    } as SignedTaskV1;
+    const candidate = {
+      task: { id: signedTask.id, description: 'crash before write', signedTask },
+      sourceKey: signedTask.id,
+      postingPolicy: { kind: 'once_per_safe' } as const,
+      sourceMeta: { request: { schemaVersion: 'jinn-task-submit-request.v1' } },
+    };
+
+    const firstAdapter = new LocalAdapter();
+    await firstAdapter.initialize();
+    const firstStore = new Store(dbPath);
+    const walletWrite = vi.fn();
+    Object.assign(firstAdapter, {
+      postTask: vi.fn(async (_task: unknown, options?: {
+        beforeBroadcast?: () => void | Promise<void>;
+      }) => {
+        await options?.beforeBroadcast?.();
+        throw new Error('simulated process crash before wallet write');
+      }),
+    });
+    const firstService = new TaskPostingService(firstAdapter, firstStore);
+
+    await expect(
+      firstService.postCandidate(candidate, { creatorSafeAddress: SAFE_A }),
+    ).rejects.toThrow(/before wallet write/);
+    expect(walletWrite).not.toHaveBeenCalled();
+    expect(firstStore.getTaskPostRecord({
+      creatorSafeAddress: getAddress(SAFE_A),
+      sourceKey: candidate.sourceKey,
+      policyType: 'once_per_safe',
+      scopeKey: '',
+    })?.broadcastIntentAt).toEqual(expect.any(String));
+    firstStore.close();
+    await firstAdapter.stop();
+
+    const secondAdapter = new LocalAdapter();
+    await secondAdapter.initialize();
+    const recoverTaskPost = vi.fn().mockResolvedValue(null);
+    const secondPostTask = vi.fn(async () => {
+      walletWrite();
+      return {
+        taskId: 'must-not-post-after-uncertainty',
+        taskCid: `f01551220${'ef'.repeat(32)}`,
+      };
+    });
+    Object.assign(secondAdapter, { recoverTaskPost, postTask: secondPostTask });
+    const secondStore = new Store(dbPath);
+    const secondService = new TaskPostingService(secondAdapter, secondStore);
+
+    await expect(
+      secondService.postCandidate(candidate, { creatorSafeAddress: SAFE_A }),
+    ).rejects.toMatchObject({ name: 'TaskPostBroadcastUncertainError' });
+    expect(recoverTaskPost).toHaveBeenCalledOnce();
+    expect(secondPostTask).not.toHaveBeenCalled();
+    expect(walletWrite).not.toHaveBeenCalled();
+
+    secondStore.close();
+    await secondAdapter.stop();
   });
 
   it('fences a stale owner immediately before broadcast when its lease was stolen during recovery', async () => {
