@@ -553,6 +553,54 @@ describe('implementation action executor', () => {
     expect(events).toEqual(['claim', 'pr', 'project', 'attempt', 'spawn', 'track']);
   });
 
+  it('claims the parent branch for machine child issues instead of opening a new PR', async () => {
+    const parent = pr({
+      number: 2065,
+      headRefName: gitRefName('autopilot/2044'),
+      head: ADOPTED_HEAD,
+      baseRefName: gitRefName('next'),
+      draft: false,
+    });
+    const spawns: unknown[] = [];
+    const { deps, claims } = harness({
+      readIssue: async () => issue({
+        number: 2069,
+        title: 'Address review findings for PR #2065',
+        child: { parentPr: 2065, kind: 'review-finding' },
+      }),
+      readParentPullRequest: async () => parent,
+      spawnCoordinator: (input) => {
+        spawns.push(input);
+        return { pid: 4242 };
+      },
+    });
+
+    const result = await executeImplementationAction({ issueNumber: 2069 }, deps);
+
+    expect(result).toMatchObject({
+      status: 'spawned',
+      issueNumber: 2069,
+      prNumber: 2065,
+      branch: parent.headRefName,
+    });
+    expect(claims[0]).toMatchObject({
+      branch: parent.headRefName,
+      candidateParent: parent.head,
+      expectedRemoteHead: parent.head,
+      claimOid: CLAIM_A,
+      remoteUrl: HTTPS_REMOTE,
+      login: 'implementation-bot',
+    });
+    expect(spawns[0]).toMatchObject({
+      issue: expect.objectContaining({
+        number: 2069,
+        child: { parentPr: 2065, kind: 'review-finding' },
+      }),
+      prNumber: 2065,
+      branch: parent.headRefName,
+    });
+  });
+
   it('fails closed when the claim result remains ambiguous', async () => {
     const { deps, events } = harness({
       claimBranch: async (input) => ({
