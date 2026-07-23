@@ -49,9 +49,63 @@ export interface DeliveryResult {
   claimTxHash: Hex;
 }
 
+export interface MarketplaceDeliveryResult {
+  deliveryTxHash: Hex;
+  deliveryDigest: Hex;
+}
+
 export interface DeliveryClaimOptions {
   kind?: 'solution' | 'verdict';
   verdictCode?: VerdictCode;
+}
+
+/** Deliver an envelope through Mech without recording it on JinnRouter. */
+export async function deliverToMarketplace(
+  requestId: Hex,
+  manifestCid: string,
+  deps: DeliveryDeps,
+): Promise<MarketplaceDeliveryResult> {
+  const deliveryDigest = cidToDigestHex(manifestCid);
+  console.log(`[harness-engine] deliverToMarketplace requestId=${requestId}`);
+  const deliveryTxHash = await callDeliverToMarketplace(
+    deps.publicClient,
+    deps.walletClient,
+    deps.safeAddress,
+    deps.mechContractAddress,
+    [requestId],
+    [deliveryDigest],
+    deps.evictionRecovery,
+  );
+  console.log(`[harness-engine] deliverToMarketplace tx=${deliveryTxHash}`);
+  return { deliveryTxHash, deliveryDigest };
+}
+
+/** Record an already Mech-delivered envelope on JinnRouter. */
+export async function claimRouterDelivery(
+  requestId: Hex,
+  evidenceHash: Hex,
+  deps: DeliveryDeps,
+  claimOptions: DeliveryClaimOptions = {},
+): Promise<Hex> {
+  console.log(`[harness-engine] claimDelivery requestId=${requestId}`);
+  const claimTxHash = await claimDelivery(
+    deps.publicClient,
+    deps.walletClient,
+    deps.safeAddress,
+    deps.routerAddress,
+    requestId,
+    {
+      variant: deps.claimDeliveryVariant,
+      kind: claimOptions.kind ?? 'solution',
+      evidenceHash: deps.claimDeliveryVariant === 'v2' || deps.claimDeliveryVariant === 'v3'
+        ? evidenceHash
+        : undefined,
+      verdictCode: claimOptions.verdictCode,
+    },
+    deps.evictionRecovery,
+  );
+  console.log(`[harness-engine] claimDelivery tx=${claimTxHash}`);
+  return claimTxHash;
 }
 
 /**
@@ -89,21 +143,8 @@ export async function deliverAndClaim(
     console.log(`[harness-engine] deliverToMarketplace already done (recovery), tx=${preExistingDeliveryTxHash}`);
     deliveryTxHash = preExistingDeliveryTxHash;
   } else {
-    // 1. Convert manifest CID to 32-byte digest for on-chain delivery data
-    const deliveryDigest = cidToDigestHex(manifestCid);
-
-    // 2. deliverToMarketplace via Safe
-    console.log(`[harness-engine] deliverToMarketplace requestId=${requestId}`);
-    deliveryTxHash = await callDeliverToMarketplace(
-      deps.publicClient,
-      deps.walletClient,
-      deps.safeAddress,
-      deps.mechContractAddress,
-      [requestId],
-      [deliveryDigest],
-      deps.evictionRecovery,
-    );
-    console.log(`[harness-engine] deliverToMarketplace tx=${deliveryTxHash}`);
+    const delivery = await deliverToMarketplace(requestId, manifestCid, deps);
+    deliveryTxHash = delivery.deliveryTxHash;
 
     // Persist the tx hash before proceeding to claimDelivery. If the process
     // crashes between here and the COMPLETE transition, recovery will read this
@@ -113,25 +154,12 @@ export async function deliverAndClaim(
     }
   }
 
-  // 3. claim delivery on JinnRouter
-  console.log(`[harness-engine] claimDelivery requestId=${requestId}`);
-  const claimTxHash = await claimDelivery(
-    deps.publicClient,
-    deps.walletClient,
-    deps.safeAddress,
-    deps.routerAddress,
+  const claimTxHash = await claimRouterDelivery(
     requestId,
-    {
-      variant: deps.claimDeliveryVariant,
-      kind: claimOptions.kind ?? 'solution',
-      evidenceHash: deps.claimDeliveryVariant === 'v2' || deps.claimDeliveryVariant === 'v3'
-        ? evidenceHash
-        : undefined,
-      verdictCode: claimOptions.verdictCode,
-    },
-    deps.evictionRecovery,
+    evidenceHash,
+    deps,
+    claimOptions,
   );
-  console.log(`[harness-engine] claimDelivery tx=${claimTxHash}`);
 
   return { deliveryTxHash, claimTxHash };
 }

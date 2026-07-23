@@ -43,7 +43,10 @@ import {
   type EnvelopeInputs,
 } from './envelope-assembly.js';
 import {
+  claimRouterDelivery,
+  deliverToMarketplace,
   deliverAndClaim,
+  type DeliveryClaimOptions,
   type DeliveryDeps,
 } from './delivery.js';
 import {
@@ -80,7 +83,7 @@ import {
   buildScrubPipeline,
   type ScrubPipeline,
 } from '@jinn-network/core/scrub';
-import { uploadToIpfs } from '../../adapters/mech/ipfs.js';
+import { cidToDigestHex, uploadToIpfs } from '../../adapters/mech/ipfs.js';
 import { VerdictCode } from '../../adapters/mech/verdict-code.js';
 import { buildInfo } from '../../build-info.js';
 import { getSolverNetContract } from '@jinn-network/sdk/solvernets';
@@ -92,6 +95,13 @@ import {
 import { recordLoopTick } from '../../daemon/loop-heartbeat.js';
 import { harnessStateDirName } from '../names.js';
 import { recordTaskCost } from '../../spend/record.js';
+import {
+  JinnRepoTaskSchema,
+  type JinnRepoAutopilotSessionTask,
+} from '@jinn-network/sdk/solvernets/jinn-repo';
+import type {
+  AdoptionReceiptObserver,
+} from '../../types/task-run.js';
 
 // ── Sentinel error ────────────────────────────────────────────────────────────
 
@@ -281,6 +291,11 @@ export interface TaskEngineOptions {
    * When absent, deliver() falls back to NotImplementedError.
    */
   deliveryDeps?: DeliveryDeps;
+  /**
+   * Read-only observer for durable Autopilot adoption receipts. The engine
+   * never implements GitHub access itself; production wiring injects it.
+   */
+  adoptionReceiptObserver?: AdoptionReceiptObserver;
   /**
    * Impl registry for resolving which Harness to run.
    * When provided and findFor() returns an impl, runImpl() dispatches to it.
@@ -495,6 +510,7 @@ export class TaskEngine {
   protected readonly packagingDeps: TaskEngineOptions['packagingDeps'];
   protected readonly envelopeDeps: TaskEngineOptions['envelopeDeps'];
   protected readonly deliveryDeps: TaskEngineOptions['deliveryDeps'];
+  protected readonly adoptionReceiptObserver: TaskEngineOptions['adoptionReceiptObserver'];
   protected readonly implRegistry: TaskEngineOptions['implRegistry'];
   protected readonly solverNetRegistry: TaskEngineOptions['solverNetRegistry'];
   protected readonly scrubPipeline: ScrubPipeline;
@@ -575,6 +591,7 @@ export class TaskEngine {
     this.packagingDeps = opts.packagingDeps;
     this.envelopeDeps = opts.envelopeDeps;
     this.deliveryDeps = opts.deliveryDeps;
+    this.adoptionReceiptObserver = opts.adoptionReceiptObserver;
     this.implRegistry = opts.implRegistry;
     this.solverNetRegistry = opts.solverNetRegistry;
     this.scrubPipeline = opts.scrubPipeline ?? buildScrubPipeline();
@@ -907,6 +924,14 @@ export class TaskEngine {
 
       case TaskRunState.DELIVERING:
         await this._runTransition(task, () => this.deliver(task));
+        break;
+
+      case TaskRunState.AWAITING_ADOPTION:
+        await this._runTransition(task, () => this.awaitAdoption(task));
+        break;
+
+      case TaskRunState.CLAIMING_DELIVERY:
+        await this._runTransition(task, () => this.claimAdoptedDelivery(task));
         break;
 
       case TaskRunState.COMPLETE:
@@ -2161,9 +2186,42 @@ export class TaskEngine {
       throw new MissingEvidenceHashError(task.requestId);
     }
 
-    // Capture locals for use in the onDeliveryTxLanded closure.
     const requestId = task.requestId;
     const persistence = this.persistence;
+    const autopilotTask = this.autopilotSessionTask(task);
+
+    if (autopilotTask) {
+      let deliveryTxHash = task.deliveryTxHash as `0x${string}` | null;
+      let deliveryDigest = task.deliveryDigest as `0x${string}` | null;
+      if (!deliveryTxHash) {
+        const delivery = await deliverToMarketplace(
+          requestId as `0x${string}`,
+          manifestCid,
+          this.deliveryDeps,
+        );
+        deliveryTxHash = delivery.deliveryTxHash;
+        deliveryDigest = delivery.deliveryDigest;
+        persistence.setDeliveryTxHash(requestId, deliveryTxHash);
+      }
+      deliveryDigest ??= cidToDigestHex(manifestCid);
+
+      persistence.transition(requestId, TaskRunState.AWAITING_ADOPTION, {
+        deliveryTxHash,
+        deliveryDigest,
+        adoptionReceiptLocation: {
+          repository: autopilotTask.session.repository,
+          prNumber: autopilotTask.session.prNumber,
+        },
+        adoptionReceiptAuthors: autopilotTask.session.receiptAuthors,
+        adoptionWaitStartedAt: task.adoptionWaitStartedAt ?? Date.now(),
+        adoptionLastObservation: null,
+        adoptionLastError: null,
+      });
+      console.log(
+        `[harness-engine] ${requestId} DELIVERING → AWAITING_ADOPTION deliveryTx=${deliveryTxHash}`,
+      );
+      return;
+    }
 
     const { deliveryTxHash, claimTxHash } = await deliverAndClaim(
       requestId as `0x${string}`,
@@ -2176,17 +2234,134 @@ export class TaskEngine {
       async (txHash) => {
         persistence.setDeliveryTxHash(requestId, txHash);
       },
-      {
-        kind: task.taskRole === 'evaluation' ? 'verdict' : 'solution',
-        verdictCode: task.taskRole === 'evaluation' ? this.verdictCodeForTask(task) : undefined,
-      },
+      this.deliveryClaimOptions(task),
     );
 
     this.persistence.transition(requestId, TaskRunState.COMPLETE, {
       deliveryTxHash,
     });
     console.log(`[harness-engine] ${requestId} DELIVERING → COMPLETE deliveryTx=${deliveryTxHash} claimTx=${claimTxHash}`);
+    await this.afterDeliveryClaimed(task, manifestCid, evidenceHash);
+  }
 
+  /** Observe adoption without repeating delivery or claiming settlement. */
+  protected async awaitAdoption(task: PersistedTaskRun): Promise<void> {
+    if (!this.adoptionReceiptObserver) {
+      this.persistence.setAdoptionError(
+        task.requestId,
+        'adoption receipt observer is not configured',
+      );
+      return;
+    }
+
+    let observation;
+    try {
+      observation = await this.adoptionReceiptObserver.observe(task);
+      this.persistence.setAdoptionObservation(task.requestId, observation);
+    } catch (err) {
+      this.persistence.setAdoptionError(
+        task.requestId,
+        err instanceof Error ? err.message : String(err),
+      );
+      return;
+    }
+
+    switch (observation.state) {
+      case 'pending':
+        return;
+      case 'accepted':
+        if (observation.receipt.disposition !== 'accepted') {
+          this.persistence.markFailed(
+            task.requestId,
+            'adoption-contradiction:accepted observation carried a rejected receipt',
+          );
+          return;
+        }
+        this.persistence.transition(task.requestId, TaskRunState.CLAIMING_DELIVERY, {
+          adoptionLastObservation: observation,
+          adoptionLastError: null,
+        });
+        console.log(
+          `[harness-engine] ${task.requestId} AWAITING_ADOPTION → CLAIMING_DELIVERY`,
+        );
+        return;
+      case 'rejected':
+        if (observation.receipt.disposition !== 'rejected') {
+          this.persistence.markFailed(
+            task.requestId,
+            'adoption-contradiction:rejected observation carried an accepted receipt',
+          );
+          return;
+        }
+        this.persistence.markFailed(
+          task.requestId,
+          `adoption-rejected:${observation.receipt.reason}`,
+        );
+        return;
+      case 'contradictory':
+        this.persistence.markFailed(
+          task.requestId,
+          `adoption-contradiction:${observation.detail}`,
+        );
+    }
+  }
+
+  /** Retry only the Router claim for a previously accepted adoption receipt. */
+  protected async claimAdoptedDelivery(task: PersistedTaskRun): Promise<void> {
+    if (!this.deliveryDeps) {
+      throw new NotImplementedError('claimAdoptedDelivery');
+    }
+    const manifestCid = task.manifestCid;
+    if (!manifestCid) {
+      throw new Error(`claimAdoptedDelivery: manifestCid missing for ${task.requestId}`);
+    }
+    const evidenceHash = task.evidenceHash as `0x${string}` | null | undefined;
+    if (!evidenceHash && (this.deliveryDeps.claimDeliveryVariant === 'v2' || this.deliveryDeps.claimDeliveryVariant === 'v3')) {
+      throw new MissingEvidenceHashError(task.requestId);
+    }
+
+    const claimTxHash = await claimRouterDelivery(
+      task.requestId as `0x${string}`,
+      evidenceHash as `0x${string}`,
+      this.deliveryDeps,
+      this.deliveryClaimOptions(task),
+    );
+    this.persistence.transition(task.requestId, TaskRunState.COMPLETE);
+    console.log(
+      `[harness-engine] ${task.requestId} CLAIMING_DELIVERY → COMPLETE claimTx=${claimTxHash}`,
+    );
+    await this.afterDeliveryClaimed(task, manifestCid, evidenceHash);
+  }
+
+  private autopilotSessionTask(
+    task: PersistedTaskRun,
+  ): JinnRepoAutopilotSessionTask | null {
+    const runtimeTask = task.task;
+    const isJinnRepo = task.solverType === 'jinn-repo.v1'
+      || (
+        runtimeTask?.contractId === 'jinn-repo'
+        && runtimeTask.contractVersion === 'v1'
+      );
+    if (!isJinnRepo) return null;
+    const parsed = JinnRepoTaskSchema.safeParse(runtimeTask?.spec);
+    if (!parsed.success || parsed.data.source !== 'autopilot-session') return null;
+    return parsed.data;
+  }
+
+  private deliveryClaimOptions(task: PersistedTaskRun): DeliveryClaimOptions {
+    return {
+      kind: task.taskRole === 'evaluation' ? 'verdict' : 'solution',
+      verdictCode: task.taskRole === 'evaluation' ? this.verdictCodeForTask(task) : undefined,
+    };
+  }
+
+  private async afterDeliveryClaimed(
+    task: PersistedTaskRun,
+    manifestCid: string,
+    evidenceHash: `0x${string}` | null | undefined,
+  ): Promise<void> {
+    if (!this.deliveryDeps) return;
+    const requestId = task.requestId;
     // #1393 review finding 1: now that claimDelivery has actually succeeded
     // (on-chain evidenceHash confirmed), upgrade the local corpus projection
     // — saved as 'self-signed' by pack() regardless of intent — to the tier
@@ -2801,8 +2976,19 @@ export class TaskEngine {
         await this.deliver(task);
         break;
 
+      case TaskRunState.AWAITING_ADOPTION:
+        // Receipt observation only. Never repeats Mech delivery.
+        await this.awaitAdoption(task);
+        break;
+
+      case TaskRunState.CLAIMING_DELIVERY:
+        // Router claim only. Never rechecks adoption or repeats Mech delivery.
+        await this.claimAdoptedDelivery(task);
+        break;
+
       case TaskRunState.COMPLETE:
       case TaskRunState.FAILED:
+      case TaskRunState.RACE_LOST:
         // Terminal — nothing to recover.
         break;
     }

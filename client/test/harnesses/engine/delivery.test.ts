@@ -195,3 +195,55 @@ describe('deliverAndClaim', () => {
     expect(onLanded).not.toHaveBeenCalled();
   });
 });
+
+describe('split delivery operations', () => {
+  const mockPublicClient = {} as import('viem').PublicClient;
+  const mockWalletClient = {} as import('viem').WalletClient;
+  const deps = {
+    publicClient: mockPublicClient,
+    walletClient: mockWalletClient,
+    safeAddress: '0xsafe' as `0x${string}`,
+    mechContractAddress: '0xmech' as `0x${string}`,
+    routerAddress: '0xrouter' as `0x${string}`,
+    claimDeliveryVariant: 'v3' as const,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('Mech-delivers without claiming the Router delivery', async () => {
+    const { deliverToMarketplace } = await import('../../../src/harnesses/engine/delivery.js');
+    const { callDeliverToMarketplace, claimDelivery } = await import('../../../src/adapters/mech/contracts.js');
+    vi.mocked(callDeliverToMarketplace).mockResolvedValue('0xdeliverytx' as `0x${string}`);
+
+    const result = await deliverToMarketplace(
+      '0xreq001' as `0x${string}`,
+      'bafymanifest123',
+      deps,
+    );
+
+    expect(result).toEqual({
+      deliveryTxHash: '0xdeliverytx',
+      deliveryDigest: '0xdeadbeef00000000000000000000000000000000000000000000000000000000',
+    });
+    expect(callDeliverToMarketplace).toHaveBeenCalledOnce();
+    expect(claimDelivery).not.toHaveBeenCalled();
+  });
+
+  it('claims the Router delivery without Mech-delivering', async () => {
+    const { claimRouterDelivery } = await import('../../../src/harnesses/engine/delivery.js');
+    const { callDeliverToMarketplace, claimDelivery } = await import('../../../src/adapters/mech/contracts.js');
+
+    const claimTxHash = await claimRouterDelivery(
+      '0xreq001' as `0x${string}`,
+      '0xevidence' as `0x${string}`,
+      deps,
+      { kind: 'verdict', verdictCode: 2 },
+    );
+
+    expect(claimTxHash).toBe('0xclaimtx');
+    expect(callDeliverToMarketplace).not.toHaveBeenCalled();
+    expect(claimDelivery).toHaveBeenCalledOnce();
+  });
+});

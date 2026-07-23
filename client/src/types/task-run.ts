@@ -10,9 +10,25 @@
  * neutral access.
  */
 import type { Task } from './task.js';
+import type { AutopilotAdoptionReceipt } from '@jinn-network/sdk/solvernets/jinn-repo';
 
 export type { TaskRunState } from '../harnesses/engine/state.js';
 import type { TaskRunState } from '../harnesses/engine/state.js';
+
+export type AdoptionObservation =
+  | { state: 'pending'; observedAt: string; detail?: string }
+  | { state: 'accepted'; receipt: AutopilotAdoptionReceipt }
+  | { state: 'rejected'; receipt: AutopilotAdoptionReceipt }
+  | { state: 'contradictory'; detail: string };
+
+export interface AdoptionReceiptObserver {
+  observe(run: PersistedTaskRun): Promise<AdoptionObservation>;
+}
+
+export interface AdoptionReceiptLocation {
+  repository: 'Jinn-Network/mono';
+  prNumber: number;
+}
 
 export interface PersistedTaskRun {
   requestId: string;
@@ -56,6 +72,18 @@ export interface PersistedTaskRun {
   artifactCids: Record<string, string> | null;  // { path: cid }
   manifestCid: string | null;
   deliveryTxHash: string | null;
+  /** bytes32 digest delivered through Mech; persisted before adoption polling. */
+  deliveryDigest: string | null;
+  /** Exact GitHub surface on which the adoption receipt is expected. */
+  adoptionReceiptLocation: AdoptionReceiptLocation | null;
+  /** Allowlisted GitHub authors accepted by the injected observer. */
+  adoptionReceiptAuthors: string[] | null;
+  /** Unix ms timestamp when this run first entered AWAITING_ADOPTION. */
+  adoptionWaitStartedAt: number | null;
+  /** Most recent durable receipt observation, including an accepted receipt. */
+  adoptionLastObservation: AdoptionObservation | null;
+  /** Most recent retryable observer error; cleared after a successful observation. */
+  adoptionLastError: string | null;
 
   /** Persisted once at first PACKAGING entry; reused on retry for manifest CID determinism. */
   manifestGeneratedAt: number | null;
