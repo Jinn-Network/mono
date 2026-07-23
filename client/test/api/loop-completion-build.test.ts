@@ -80,4 +80,80 @@ describe('gatherLoopCompletion short-TTL memo (#999)', () => {
 
     expect(runs.calls).toBe(2);
   });
+
+  it('on getGatingRows throw, returns empty without caching (next within-TTL call rescans)', () => {
+    const gating = [...SAMPLE_ROWS];
+    let shouldThrow = true;
+    const runs: TaskRunReadModel & { calls: number } = {
+      calls: 0,
+      getInFlight: () => [],
+      getByState: () => [],
+      getGatingRows() {
+        runs.calls += 1;
+        if (shouldThrow) throw new Error('transient read failure');
+        return gating;
+      },
+    };
+    const cacheKey = {};
+    const ttlMs = 1_000;
+    const now = 1_000_000;
+
+    const first = gatherLoopCompletion(runs, { cacheKey, now, ttlMs });
+    shouldThrow = false;
+    const second = gatherLoopCompletion(runs, { cacheKey, now: now + 500, ttlMs });
+
+    expect(first).toEqual({
+      total: 0,
+      delivered: 0,
+      withGating: 0,
+      reachedExecute: 0,
+      reachedImprove: 0,
+      reachedMemoryConsolidation: 0,
+      fullLoop: 0,
+      phaseCounts: {},
+    });
+    expect(runs.calls).toBe(2);
+    expect(second).toEqual(EXPECTED);
+  });
+
+  it('after TTL expiry, recomputes reflects mutated gating rows', () => {
+    const gating: Array<{ phasesJson: string | null; deliveredTxHash: string | null }> = [
+      ...SAMPLE_ROWS,
+    ];
+    const runs = new CountingGatingReadModel(gating);
+    const cacheKey = {};
+    const ttlMs = 1_000;
+    const now = 1_000_000;
+
+    const first = gatherLoopCompletion(runs, { cacheKey, now, ttlMs });
+    gating.push({
+      phasesJson: JSON.stringify(['execute', 'improve', 'memory-consolidation']),
+      deliveredTxHash: '0xdef',
+    });
+    const after = gatherLoopCompletion(runs, { cacheKey, now: now + ttlMs, ttlMs });
+
+    expect(runs.calls).toBe(2);
+    expect(first).toEqual(EXPECTED);
+    expect(after).toEqual({
+      total: 3,
+      delivered: 2,
+      withGating: 2,
+      reachedExecute: 2,
+      reachedImprove: 2,
+      reachedMemoryConsolidation: 1,
+      fullLoop: 1,
+      phaseCounts: { execute: 2, improve: 2, 'memory-consolidation': 1 },
+    });
+  });
+
+  it('distinct cacheKeys do not share a memo (ephemeral keys always miss)', () => {
+    const runs = new CountingGatingReadModel([...SAMPLE_ROWS]);
+    const ttlMs = 1_000;
+    const now = 1_000_000;
+
+    gatherLoopCompletion(runs, { cacheKey: {}, now, ttlMs });
+    gatherLoopCompletion(runs, { cacheKey: {}, now: now + 100, ttlMs });
+
+    expect(runs.calls).toBe(2);
+  });
 });
