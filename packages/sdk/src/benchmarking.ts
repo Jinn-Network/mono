@@ -234,7 +234,7 @@ const VerificationZ = z
 
 const CostZ = z
   .object({
-    reported: z.union([NumericStringZ, z.number()]),
+    reported: z.union([NumericStringZ, z.number().finite().nonnegative()]),
     source: z.string().min(1),
   })
   .strict();
@@ -278,15 +278,15 @@ export const BenchMatrixV1Schema = z
     ),
     attrition: z
       .object({
-        perConfig: z.record(z.string(), z.number()),
-        perCapsule: z.record(z.string(), z.number()),
+        perConfig: z.record(z.string(), z.number().finite().nonnegative()),
+        perCapsule: z.record(z.string(), z.number().finite().nonnegative()),
         asymmetryFlags: z.array(z.string()),
       })
       .strict(),
     completeness: z
       .object({
-        achieved: z.number(),
-        floor: z.number(),
+        achieved: z.number().finite().nonnegative(),
+        floor: z.number().finite().nonnegative(),
         runOutcome: z.enum(['complete', 'partial', 'cancelled']),
       })
       .strict(),
