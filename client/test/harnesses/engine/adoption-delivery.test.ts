@@ -236,6 +236,7 @@ function acceptedVerdictReceipt(
     claimOid: '2'.repeat(40),
     prNumber: PR_NUMBER,
     expectedHead: '3'.repeat(40),
+    resultingHead: '5'.repeat(40),
     reviewedHead: '5'.repeat(40),
     reviewGeneration: '123e4567-e89b-42d3-a456-426614174001',
     reviewRefOid: '6'.repeat(40),
@@ -258,7 +259,10 @@ function persistedAutopilotOutput(
     expectedHead: '3'.repeat(40),
     ...(taskRole === 'restoration'
       ? { resultingHead: '5'.repeat(40) }
-      : { reviewedHead: '5'.repeat(40) }),
+      : {
+          resultingHead: '5'.repeat(40),
+          reviewedHead: '5'.repeat(40),
+        }),
     reviewGeneration: '123e4567-e89b-42d3-a456-426614174001',
     reviewRefOid: '6'.repeat(40),
   };

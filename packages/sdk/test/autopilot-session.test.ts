@@ -128,12 +128,28 @@ describe('Autopilot result schemas', () => {
     for (const outcome of ['approve', 'request-changes', 'human']) {
       const value = fixture(`review-${outcome}`) as Record<string, unknown>;
       const correlation = value.correlation as Record<string, unknown>;
-      for (const key of ['reviewedHead', 'reviewGeneration', 'reviewRefOid']) {
+      for (const key of [
+        'resultingHead',
+        'reviewedHead',
+        'reviewGeneration',
+        'reviewRefOid',
+      ]) {
         expect(() => AutopilotReviewResultSchema.parse({
           ...value,
           correlation: withoutKey(correlation, key),
         })).toThrow();
       }
+    }
+  });
+
+  it('requires complete native follow-up issue metadata on approval', () => {
+    const value = fixture('review-approve') as Record<string, unknown>;
+    const followUps = value.followUps as Array<Record<string, unknown>>;
+    for (const key of ['type', 'title', 'body', 'effort', 'priority']) {
+      expect(() => AutopilotReviewResultSchema.parse({
+        ...value,
+        followUps: [withoutKey(followUps[0]!, key)],
+      })).toThrow();
     }
   });
 });
@@ -259,7 +275,12 @@ describe('AutopilotAdoptionReceiptSchema', () => {
   it('requires exact-head review correlation on accepted and rejected Verdict receipts', () => {
     for (const disposition of ['accepted', 'rejected']) {
       const value = fixture(`receipt-verdict-${disposition}`) as Record<string, unknown>;
-      for (const key of ['reviewedHead', 'reviewGeneration', 'reviewRefOid']) {
+      for (const key of [
+        'resultingHead',
+        'reviewedHead',
+        'reviewGeneration',
+        'reviewRefOid',
+      ]) {
         expect(() => AutopilotAdoptionReceiptSchema.parse(withoutKey(value, key)))
           .toThrow();
       }
@@ -274,12 +295,10 @@ describe('AutopilotAdoptionReceiptSchema', () => {
     }
   });
 
-  it('rejects role-inapplicable known correlation fields in every receipt branch', () => {
+  it('rejects reviewedHead on Solution receipts before evaluation exists', () => {
     const cases = [
       ['receipt-solution-accepted', { reviewedHead: '7'.repeat(40) }],
       ['receipt-solution-rejected', { reviewedHead: '7'.repeat(40) }],
-      ['receipt-verdict-accepted', { resultingHead: '7'.repeat(40) }],
-      ['receipt-verdict-rejected', { resultingHead: '7'.repeat(40) }],
     ] as const;
 
     for (const [name, patch] of cases) {

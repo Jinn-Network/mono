@@ -110,6 +110,7 @@ export type AutopilotCorrelation = z.infer<typeof AutopilotCorrelationSchema>;
 
 const AutopilotReviewCorrelationSchema = z.object({
   ...autopilotCorrelationFields,
+  resultingHead: GitOidSchema,
   reviewedHead: GitOidSchema,
   reviewGeneration: UuidSchema,
   reviewRefOid: GitOidSchema,
@@ -172,8 +173,11 @@ export const AutopilotMutationResultSchema = z.discriminatedUnion('outcome', [
 export type AutopilotMutationResult = z.infer<typeof AutopilotMutationResultSchema>;
 
 const AutopilotReviewFollowUpSchema = z.object({
+  type: z.enum(['feat', 'chore', 'fix', 'refactor']),
   title: z.string().min(1),
   body: z.string().min(1),
+  effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']),
+  priority: z.enum(['p0', 'p1', 'p2', 'p3', 'p4']),
 }).strict();
 
 const AutopilotReviewFindingSchema = z.object({
@@ -265,7 +269,7 @@ const AcceptedVerdictAdoptionReceiptSchema = z.object({
   disposition: z.literal('accepted'),
   role: z.literal('verdict'),
   operation: z.enum(['review-verdict', 'review-findings', 'human']),
-  resultingHead: z.never().optional(),
+  resultingHead: GitOidSchema,
   reviewedHead: GitOidSchema,
   reviewGeneration: UuidSchema,
   reviewRefOid: GitOidSchema,
@@ -277,7 +281,7 @@ const RejectedVerdictAdoptionReceiptSchema = z.object({
   role: z.literal('verdict'),
   reason: AutopilotAdoptionRejectionReasonSchema,
   detail: z.string().min(1),
-  resultingHead: z.never().optional(),
+  resultingHead: GitOidSchema,
   reviewedHead: GitOidSchema,
   reviewGeneration: UuidSchema,
   reviewRefOid: GitOidSchema,
