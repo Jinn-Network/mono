@@ -9,8 +9,8 @@ queue is never created or drained here.
 
 Outbound contribution is parked for Stage 2. Retained Stage 1 consent state
 is ignored; local capture, candidate recording, mining, and distillation stay
-live. ``/jinn`` exposes status, session, history, veto, distill, and corpus
-consumption.
+live. Automatic pickup is the only corpus-consumption path; ``/jinn`` exposes
+status, session, history, veto, and distill.
 
 Upstream-merge procedure: see JINN.md at the repo root.
 """
@@ -41,7 +41,6 @@ from . import jinn_layer
 from . import pickup
 from . import session_bridge
 from . import session_view
-from . import skills_install
 from . import style
 
 logger = logging.getLogger(__name__)
@@ -227,10 +226,12 @@ def _clear_veto(
 
 
 def _empty_activity() -> Dict[str, Any]:
-    """Evidence-first pickup facts (searchedTerms/providedRefs, rescope §3.6)
-    plus the internal fetch-attempt detail the corpus_search/corpus_fetch
-    agent tools still record (surfacedRefs/fetchedRefs). installedSkillRefs
-    is gone with the skill adopt/install path pickup no longer has."""
+    """Evidence-first pickup facts plus legacy read-compatible activity fields.
+
+    ``surfacedRefs``/``fetchedRefs``/``installedSkillRefs`` remain present so
+    older episodes retain their schema shape; automatic pickup records current
+    delivery through ``searchedTerms``/``providedRefs``.
+    """
     return {
         "retrievalFired": False,
         "eligibleRefs": [],
@@ -1038,24 +1039,6 @@ def _close_internal_session_control(
     )
 
 
-def _record_activity(session_id: str, field: str, refs: list[str]) -> None:
-    """Record only refs a successful host action actually observed.
-
-    Internal fetch-attempt detail only (surfacedRefs/fetchedRefs, from the
-    corpus_search/corpus_fetch agent tools) — searchedTerms/providedRefs are
-    set wholesale by pickup.pickup_with_outcome()'s own response, not
-    appended here.
-    """
-    if not session_id or field not in ("surfacedRefs", "fetchedRefs"):
-        return
-    state = _state_for(session_id)
-    with _session_state_lock:
-        seen = state["activity"][field]
-        for ref in refs:
-            if ref and ref not in seen:
-                seen.append(ref)
-
-
 # ── Hooks ────────────────────────────────────────────────────────────────────
 
 def _on_session_start(session_id: str = "", platform: str = "", **_: Any) -> None:
@@ -1745,93 +1728,6 @@ def _handle_jinn(command_args: str = "", session_id: str = "", task_id: str = ""
     return _JINN_HELP
 
 
-def _handle_corpus(command_args: str = "", **_: Any) -> str:
-    query = (command_args or "").strip()
-    if not query:
-        return "usage: /corpus <query> — search the public corpus"
-    code, out, err = jinn_layer.corpus_search(query, runner=_runner)
-    return out if code == 0 else f"corpus search failed:\n{err or out}"
-
-
-# ── Agent tools — in-session corpus consumption ──────────────────────────────
-
-_CORPUS_SEARCH_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "query": {"type": "string", "description": "Substring to search for (matches distribution tags and task summaries, e.g. 'tdd')."},
-        "limit": {"type": "integer", "description": "Max results (default 5)."},
-    },
-    "required": ["query"],
-}
-
-_CORPUS_FETCH_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "ref": {"type": "string", "description": "Corpus record ref (from corpus_search results)."},
-    },
-    "required": ["ref"],
-}
-
-
-def _tool_corpus_search(args: Dict[str, Any], **_kw: Any) -> str:
-    query = str(args.get("query") or "").strip()
-    if not query:
-        return "corpus_search requires a query."
-    limit = int(args.get("limit") or 5)
-    code, out, err = jinn_layer.run(["corpus", "search", query, "--json", "--limit", str(limit)], _runner)
-    if code != 0:
-        return f"corpus search unavailable: {err or out}"
-    try:
-        hits = json.loads(out)
-    except json.JSONDecodeError:
-        return "corpus search returned an unreadable response."
-    if not isinstance(hits, list) or not hits:
-        return f"No corpus records matched {query!r}."
-    lines = []
-    surfaced: list[str] = []
-    for hit in hits[:limit]:
-        if not isinstance(hit, dict):
-            continue
-        ref = str(hit.get("ref") or "").strip()
-        tags = ",".join(hit.get("tags") or []) or "-"
-        summary = str(hit.get("summary") or hit.get("title") or "")[:100]
-        lines.append(f"ref={ref} tags=[{tags}] {summary}")
-        if ref:
-            surfaced.append(ref)
-    _record_activity(str(_kw.get("session_id") or ""), "surfacedRefs", surfaced)
-    lines.append("Use corpus_fetch with a ref to read the full content.")
-    return "\n".join(lines)
-
-
-def _tool_corpus_fetch(args: Dict[str, Any], **_kw: Any) -> str:
-    ref = str(args.get("ref") or "").strip()
-    if not ref:
-        return "corpus_fetch requires a ref."
-    code, out, err = jinn_layer.run(["corpus", "get", ref, "--json"], _runner)
-    if code != 0:
-        return f"corpus get unavailable: {err or out}"
-    try:
-        record = json.loads(out)
-        trace, _sha = skills_install._extract_trace(record)
-    except Exception as exc:
-        return f"record is not readable as an evidence envelope: {exc}"
-    _record_activity(str(_kw.get("session_id") or ""), "fetchedRefs", [ref])
-    tier = str(((trace.get("outcome") or {}).get("verifiabilityTier")) or "unknown")
-    summary = str(((trace.get("task") or {}).get("summary")) or "")
-    steps = trace.get("steps") or []
-    skill_md = None
-    for step in steps:
-        attrs = step.get("attributes") if isinstance(step, dict) else None
-        if isinstance(attrs, dict) and isinstance(attrs.get("skill.md"), str):
-            skill_md = attrs["skill.md"]
-            break
-    header = f"[{tier}] {summary}"
-    if skill_md is not None:
-        body = skill_md[:8000]
-        return f"{header}\n\n{body}"
-    return f"{header}\n\n(trace envelope with {len(steps)} steps; no skill.md payload)"
-
-
 # ── Registration ─────────────────────────────────────────────────────────────
 
 def register(ctx) -> None:
@@ -1847,20 +1743,6 @@ def register(ctx) -> None:
     # registered, before the first session can create or inspect a candidate.
     # The first session additionally asks the layer to rewrite queued records.
     session_bridge.set_publication_enabled(False)
-    ctx.register_tool(
-        name="corpus_search",
-        toolset="jinn",
-        schema=_CORPUS_SEARCH_SCHEMA,
-        handler=_tool_corpus_search,
-        description="Search the public Jinn corpus by content (distribution tags + task summaries). Use when the task type looks like something the network may already have knowledge about.",
-    )
-    ctx.register_tool(
-        name="corpus_fetch",
-        toolset="jinn",
-        schema=_CORPUS_FETCH_SCHEMA,
-        handler=_tool_corpus_fetch,
-        description="Fetch a corpus record by ref (hash-verified) and read its content in-session — e.g. a published skill's full text.",
-    )
     ctx.register_hook("on_session_start", _on_session_start)
     ctx.register_hook("on_session_finalize", _on_session_finalize)
     ctx.register_hook("pre_llm_call", _on_pre_llm_call)
@@ -1870,12 +1752,7 @@ def register(ctx) -> None:
     ctx.register_command(
         "jinn",
         handler=_handle_jinn,
-        description="Jinn layer: session, history, and corpus state.",
-    )
-    ctx.register_command(
-        "corpus",
-        handler=_handle_corpus,
-        description="Search the public Jinn corpus.",
+        description="Jinn layer: session, history, and automatic evidence state.",
     )
     # `jinn-agent jinn-doctor` — the doctor without a TUI session (mono #1817).
     # NOT named `doctor`: that collides with the built-in hermes subcommand
