@@ -7,8 +7,11 @@ import {
   hashBenchmarkRunV1,
   computeRunHash,
   hashCapsuleSet,
+  BenchPreregistrationV1Schema,
+  validateBenchPreregistrationV1,
   type ConfigV1,
   type BenchmarkRunV1,
+  type BenchPreregistrationV1,
 } from '../src/benchmarking.js';
 
 const validConfigArtifact: ConfigV1 = {
@@ -215,5 +218,34 @@ describe('BenchmarkRunV1', () => {
 
   it('types selfEvaluation as literal false', () => {
     expectTypeOf<BenchmarkRunV1['policy']['selfEvaluation']>().toEqualTypeOf<false>();
+  });
+});
+
+describe('BenchPreregistrationV1', () => {
+  it('accepts a signed envelope with a valid nested run', () => {
+    const run = makeValidRun();
+    const envelope: BenchPreregistrationV1 = {
+      schemaVersion: 'jinn.bench-preregistration.v1',
+      run,
+      signature: {
+        alg: 'eip-191',
+        signer: '0xabc',
+        value: '0xdef',
+      },
+    };
+    expect(BenchPreregistrationV1Schema.parse(envelope).schemaVersion).toBe(
+      'jinn.bench-preregistration.v1',
+    );
+    expect(validateBenchPreregistrationV1(envelope).ok).toBe(true);
+  });
+
+  it('rejects when nested run hash is tampered', () => {
+    const run = { ...makeValidRun(), preRegistrationHash: digest('e') };
+    const envelope = {
+      schemaVersion: 'jinn.bench-preregistration.v1',
+      run,
+      signature: { alg: 'eip-191', signer: '0xabc', value: '0xdef' },
+    };
+    expect(validateBenchPreregistrationV1(envelope).ok).toBe(false);
   });
 });

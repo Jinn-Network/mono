@@ -187,3 +187,39 @@ export function validateBenchmarkRunV1(
   if (issues.length > 0) return { ok: false, issues };
   return { ok: true, value: run };
 }
+
+const SignatureZ = z
+  .object({
+    alg: z.literal('eip-191'),
+    signer: HexStringZ,
+    value: HexStringZ,
+  })
+  .strict();
+
+export const BenchPreregistrationV1Schema = z
+  .object({
+    schemaVersion: z.literal('jinn.bench-preregistration.v1'),
+    run: BenchmarkRunV1Schema,
+    signature: SignatureZ,
+  })
+  .strict();
+
+export type BenchPreregistrationV1 = z.infer<typeof BenchPreregistrationV1Schema>;
+
+export function validateBenchPreregistrationV1(
+  value: unknown,
+): BenchmarkValidationResult<BenchPreregistrationV1> {
+  const parsed = BenchPreregistrationV1Schema.safeParse(value);
+  if (!parsed.success) return { ok: false, issues: issuesFromZod(parsed.error) };
+  const runCheck = validateBenchmarkRunV1(parsed.data.run);
+  if (!runCheck.ok) {
+    return {
+      ok: false,
+      issues: runCheck.issues.map((i) => ({
+        path: i.path === '<root>' ? 'run' : `run.${i.path}`,
+        message: i.message,
+      })),
+    };
+  }
+  return { ok: true, value: parsed.data };
+}
