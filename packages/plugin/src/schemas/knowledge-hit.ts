@@ -4,6 +4,7 @@ import { TIER_ORDER } from './pickup-config.js';
 
 export const KnowledgeHitSchema = z.strictObject({
   ref: z.string().min(1),
+  canonicalEpisodeId: z.string().min(1).optional(),
   kind: z.enum(['seed', 'trace', 'skill']),
   title: z.string().min(1).optional(),
   snippet: z.string().min(1).optional(),

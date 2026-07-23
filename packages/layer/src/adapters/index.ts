@@ -11,6 +11,7 @@
  * FROM `@jinn-network/plugin`; the plugin package never imports `client/**`.
  */
 export { createCorpusAdapter } from './corpus-adapter.js';
+export { episodeToCorpusRecord, type EpisodeRecordProjection } from './episode-record.js';
 export { createEvidenceAdapter, capturedTaskToEpisode } from '@jinn-network/core';
 export {
   createContributionAdapter,

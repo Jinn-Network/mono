@@ -321,6 +321,41 @@ function wireRecordWithEpisode(
 }
 
 describe('CorpusAdapter.get() — content-bearing decode (rescope R2, #1772)', () => {
+  it('projects a canonical EpisodeV1 identity for cross-source dedup', async () => {
+    const layer = makeFakeLayer();
+    layer.corpus.get = async () => wireRecordWithEpisode(
+      { episodeId: 'episode:shared' },
+      'bafyPublicShared',
+    );
+
+    const result = await createCorpusAdapter({ layer }).get('bafyPublicShared');
+
+    expect(result).toMatchObject({
+      status: 'ok',
+      value: {
+        ref: 'bafyPublicShared',
+        canonicalEpisodeId: 'episode:shared',
+      },
+    });
+  });
+
+  it('uses the legacy trace session id as its canonical identity', async () => {
+    const layer = makeFakeLayer();
+    layer.corpus.get = async () => wireRecordWithTrace({
+      session: {
+        sessionId: 'legacy-session:shared',
+        capturedAt: '2026-07-04T00:00:00.000Z',
+      },
+    });
+
+    const result = await createCorpusAdapter({ layer }).get('bafySourceEpisode');
+
+    expect(result).toMatchObject({
+      status: 'ok',
+      value: { canonicalEpisodeId: 'legacy-session:shared' },
+    });
+  });
+
   it('decodes the canonical jinn.episode.v1 payload while retaining trace-envelope.v0 read compatibility', async () => {
     const layer = makeFakeLayer();
     layer.corpus.get = async () => wireRecordWithEpisode();
@@ -419,6 +454,7 @@ describe('CorpusAdapter.get() — content-bearing decode (rescope R2, #1772)', (
     if (result.status !== 'ok' || result.value === null) throw new Error('expected a decoded record');
     expect(result.value).toEqual({
       ref: 'bafySourceEpisode',
+      canonicalEpisodeId: 'seed:mono-dashboard-flake',
       task: { summary: 'Fix the dashboard version-status flake' },
       outcome: { status: 'completed', verifiabilityTier: 'tests-passed' },
       synthesis: 'Awaited the fetch; the flake is fixed.',

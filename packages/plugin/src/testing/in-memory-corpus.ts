@@ -15,6 +15,9 @@ export type InMemoryCorpusSeed = CorpusRecord & Pick<KnowledgeHit, 'kind'> & Par
 function toKnowledgeHit(seed: InMemoryCorpusSeed): KnowledgeHit {
   return {
     ref: seed.ref,
+    ...(seed.canonicalEpisodeId !== undefined
+      ? { canonicalEpisodeId: seed.canonicalEpisodeId }
+      : {}),
     kind: seed.kind,
     ...(seed.title !== undefined ? { title: seed.title } : {}),
     snippet: seed.task.summary,
