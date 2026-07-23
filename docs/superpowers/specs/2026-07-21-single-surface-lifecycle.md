@@ -81,6 +81,7 @@ Each state is a predicate, never a stored value. HUMAN overrides everything.
 | DELIVERED | non-draft ∧ `engine:review` ∧ completion marker ∧ no verdict for head |
 | IN REVIEW | review ref `active` for exact head, reviewer ≠ author |
 | BLOCKED-BY-CHILD | open child issue targeting the PR ∨ `REQUEST_CHANGES` on current head |
+| CI-BLOCKED | non-draft ∧ terminal approval for head ∧ CI not green ∧ no human hold ∧ no open child |
 | MERGE-READY | non-draft ∧ terminal approval for head ∧ CI green ∧ clean vs base ∧ no open children |
 | DONE | PR merged (issue auto-closes via `Closes #N`; zero writes) |
 | HUMAN (overlay) | hold label + structured marker comment |
@@ -105,6 +106,11 @@ write to verify, race on, or reconcile.
 | BLOCKED-BY-CHILD → DELIVERED | child session | fix commits land on parent branch (head moves → head-bound RC stales; child closes) |
 | gate: behind+clean → MERGE-READY | deterministic gate | update-branch API + approval carry-over (§6.1) |
 | gate: conflicting → BLOCKED-BY-CHILD | deterministic gate | file reconcile child (idempotent) |
+| gate: approved+CI not green → CI-BLOCKED | derivation | no mutation; visible stall state |
+| CI-BLOCKED → CI-BLOCKED | scheduler | wait while checks are pending/missing (no retry consumed) |
+| CI-BLOCKED → CI-BLOCKED | scheduler | one exact-head CAS-fenced `rerun-failed-jobs` per head |
+| CI-BLOCKED → MERGE-READY | gate | rerun passes ∧ integration ladder satisfied |
+| CI-BLOCKED → BLOCKED-BY-CHILD | scheduler | persistent failure after rerun, or external-only failure → file `ci-failure` child |
 | MERGE-READY → DONE | any process | claimless head-pinned squash merge |
 
 Session finalization is three PR-surface operations. The `pending: project`
@@ -118,8 +124,8 @@ interrupted prep) are deleted along with the states that required them.
 ## 5. Children: the only loop
 
 A **child issue** is an ordinary issue created by the machine against a parent
-PR. It carries: type `fix`, a kind label (`review-finding` or `reconcile`), a
-structured body marker naming the parent (`<!-- jinn-autopilot:child pr=<N>
+PR. It carries: type `fix`, a kind label (`review-finding`, `reconcile`, or
+`ci-failure`), a structured body marker naming the parent (`<!-- jinn-autopilot:child pr=<N>
 kind=<kind> -->`), and machine triage (Priority high — children unblock
 delivered work and **outrank fresh claims** in scheduling; Effort routed per
 §6.2).

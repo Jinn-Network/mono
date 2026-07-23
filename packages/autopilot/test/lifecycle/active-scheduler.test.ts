@@ -127,4 +127,22 @@ describe('active local scheduler', () => {
       'review',
     ]);
   });
+
+  it('reports disk-floor skips when new work is paused', () => {
+    const plan = scheduleActiveActions(input({
+      remaining: { implementation: 0, review: 0 },
+      newWorkPaused: true,
+    }));
+    expect(plan.actions.map((action) => action.kind)).toEqual(['merge']);
+    expect(plan.skips).toContainEqual({
+      phase: 'implementation',
+      subject: 'issue:1',
+      reason: 'disk-floor',
+    });
+    expect(plan.skips).toContainEqual({
+      phase: 'review',
+      subject: 'pr:30',
+      reason: 'disk-floor',
+    });
+  });
 });

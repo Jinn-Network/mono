@@ -196,10 +196,25 @@ function checkRuns(value: unknown): readonly CheckSummary[] {
     if (conclusion !== null && typeof conclusion !== 'string') {
       throw new GitHubRestSchemaError(`check run ${index}.conclusion must be a string or null`);
     }
+    const runAttempt = check.run_attempt;
+    const suite = check.check_suite === null || check.check_suite === undefined
+      ? null
+      : record(check.check_suite, `check run ${index}.check_suite`);
+    const runId = check.id;
     return {
       name: nonEmptyString(check.name, `check run ${index}.name`),
       status: nonEmptyString(check.status, `check run ${index}.status`).toUpperCase(),
       conclusion: conclusion?.toUpperCase() ?? null,
+      source: 'check-run' as const,
+      ...(typeof runId === 'number' && Number.isSafeInteger(runId) && runId > 0
+        ? { runId }
+        : {}),
+      ...(suite === null ? {} : {
+        checkSuiteId: nonNegativeInteger(suite.id, `check run ${index}.check_suite.id`),
+      }),
+      ...(runAttempt === undefined || runAttempt === null ? {} : {
+        runAttempt: nonNegativeInteger(runAttempt, `check run ${index}.run_attempt`),
+      }),
     };
   });
   if (nonNegativeInteger(response.total_count, 'check-runs response.total_count') !== parsed.length) {
@@ -217,6 +232,7 @@ function commitStatuses(value: unknown): readonly CheckSummary[] {
       name: nonEmptyString(status.context, `commit status ${index}.context`),
       status: 'COMPLETED',
       conclusion: nonEmptyString(status.state, `commit status ${index}.state`).toUpperCase(),
+      source: 'commit-status' as const,
     };
   });
   if (nonNegativeInteger(response.total_count, 'commit-status response.total_count') !== parsed.length) {
@@ -229,6 +245,22 @@ function canonical<Value>(values: readonly Value[]): string {
   return JSON.stringify([...values].sort((left, right) => (
     JSON.stringify(left).localeCompare(JSON.stringify(right))
   )));
+}
+
+function normalizeCheckForComparison(check: CheckSummary): {
+  readonly name: string;
+  readonly status: string;
+  readonly conclusion: string | null;
+} {
+  return {
+    name: check.name,
+    status: check.status,
+    conclusion: check.conclusion,
+  };
+}
+
+function canonicalChecks(checks: readonly CheckSummary[]): string {
+  return canonical(checks.map(normalizeCheckForComparison));
 }
 
 export class ConditionalPullRequestEvidenceProbe implements PullRequestEvidenceProbe {
@@ -284,6 +316,6 @@ export class ConditionalPullRequestEvidenceProbe implements PullRequestEvidenceP
         !== JSON.stringify({ ...cachedDetail, labels: [...cachedDetail.labels].sort() })
       || canonical(currentReviews) !== canonical(pr.reviews)
       || JSON.stringify(currentHuman) !== JSON.stringify(cachedHuman)
-      || canonical(currentChecks) !== canonical(pr.checks);
+      || canonicalChecks(currentChecks) !== canonicalChecks(pr.checks);
   }
 }

@@ -232,7 +232,7 @@ export function makeProductionImplementationActionPort(
           ?? 'next',
         ),
         effort: source.effort,
-        ...((): { child?: { parentPr: number; kind: 'review-finding' | 'reconcile' } } => {
+        ...((): { child?: { parentPr: number; kind: 'review-finding' | 'reconcile' | 'ci-failure' } } => {
           const marker = parseChildMarker(source.body ?? '');
           return marker === null
             ? {}
