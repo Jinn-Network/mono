@@ -5,6 +5,7 @@
 import type { CommandRunner } from '../dispatcher/issue-source.js';
 import { defaultRunner } from '../dispatcher/issue-source.js';
 import { REPO } from '../dispatcher/constants.js';
+import { createProjectTriageApplier } from './project-triage.js';
 import {
   CHILD_KINDS,
   parseChildMarker,
@@ -108,6 +109,7 @@ export function makeProductionChildIssuePort(
   const runner = options.runner ?? defaultRunner;
   const repo = options.repo ?? REPO;
   const fixTypeId = options.fixIssueTypeId ?? FIX_ISSUE_TYPE_ID;
+  const triageApplier = createProjectTriageApplier(runner, { repo });
 
   const listOpen = async (): Promise<readonly ChildIssueRecord[]> => {
     const raw = await runner('gh', [
@@ -235,6 +237,14 @@ export function makeProductionChildIssuePort(
         '-f',
         `typeId=${fixTypeId}`,
       ]);
+    },
+
+    async ensureTriageComplete(input) {
+      await triageApplier.applyMachineTriage({
+        issueNumber: input.issueNumber,
+        effort: input.effort,
+        priority: input.priority,
+      });
     },
 
     async closeIssue(issueNumber, comment) {
