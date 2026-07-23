@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "jinn.fixture.evaluation-report.v1",
+  "evaluatedAt": "2026-07-23T16:00:00Z",
+  "command": "vitest run test/slug.test.ts",
+  "result": {
+    "testsPassed": 4,
+    "testsFailed": 0,
+    "exitCode": 0
+  },
+  "taskCriteriaObserved": [
+    "repeated-separators",
+    "surrounding-punctuation",
+    "punctuation-only-input"
+  ]
+}

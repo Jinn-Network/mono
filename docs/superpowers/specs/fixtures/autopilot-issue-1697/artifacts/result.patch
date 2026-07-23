@@ -1,0 +1,33 @@
+diff --git a/.github/workflows/hermetic-gate.yml b/.github/workflows/hermetic-gate.yml
+index 2fefd627c..697016b40 100644
+--- a/.github/workflows/hermetic-gate.yml
++++ b/.github/workflows/hermetic-gate.yml
+@@ -79,6 +79,28 @@ jobs:
+         with:
+           version: nightly-1c7c4bebce1e075989780fd401bf6bffcb424746
+ 
++      # A gate named *hermetic* must not hit a third-party CDN per run. `client`
++      # depends (via @huggingface/transformers) on onnxruntime-node, whose
++      # postinstall downloads a prebuilt native `.node` binary from an external
++      # CDN — that fetch flaked (ETIMEDOUT) and red-gated PR #1622 (#1697).
++      # Cache `client/node_modules` specifically: with `nodeLinker: node-modules`
++      # the downloaded binary lives inside node_modules (not the yarn cache), so
++      # a warm run restores it and `--immutable` reconciles without re-running the
++      # postinstall — CDN is never contacted (AC-1). A cold run (miss on a changed
++      # `client/yarn.lock`) may fall back to the CDN fetch once, then primes the
++      # cache for subsequent warm runs (AC-2). The `restore-keys` prefix lets a
++      # run whose `client/yarn.lock` changed for an unrelated reason still restore
++      # the prior `node_modules` as a base tree — `--immutable` reconciles only the
++      # deltas against it instead of a cold CDN fetch (a genuinely bumped
++      # onnxruntime version would still re-fetch, which is unavoidable).
++      - name: Cache client node_modules (holds onnxruntime-node prebuilt binary)
++        uses: actions/cache@v4
++        with:
++          path: client/node_modules
++          key: ${{ runner.os }}-client-nodemodules-${{ hashFiles('client/yarn.lock') }}
++          restore-keys: |
++            ${{ runner.os }}-client-nodemodules-
++
+       - name: Install client deps
+         working-directory: client
+         run: yarn install --immutable

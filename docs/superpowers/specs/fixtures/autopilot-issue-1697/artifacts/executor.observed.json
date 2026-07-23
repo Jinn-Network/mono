@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "jinn.fixture.executor-observation.v1",
+  "name": "Claude Code Autopilot implement-issue coordinator",
+  "software": {
+    "name": "Claude Code",
+    "version": "2.1.197"
+  },
+  "modelService": {
+    "provider": "Anthropic",
+    "model": "claude-opus-4-8",
+    "immutableArtifactObserved": false
+  },
+  "workflow": {
+    "name": "implement-issue",
+    "contentDigestObserved": false
+  },
+  "observedTools": [
+    "Agent",
+    "Bash",
+    "Monitor",
+    "Read",
+    "Skill",
+    "ToolSearch"
+  ],
+  "observedSubagentStages": [
+    "design",
+    "implement",
+    "simplify",
+    "independent-review",
+    "security-review",
+    "review-fix"
+  ],
+  "limitations": [
+    "The transcript identifies the harness version and model service name but does not bind the executable, model implementation, skill bytes, system prompt, or complete effective configuration to immutable artifacts.",
+    "Subagent implementation identities and complete child transcripts were reported to the coordinator but were not packaged as immutable inputs."
+  ]
+}

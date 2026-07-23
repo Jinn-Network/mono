@@ -1,0 +1,74 @@
+{
+  "schemaVersion": "jinn.autopilot.trace-projection.v1",
+  "executionId": "urn:uuid:1b110a92-0095-4cd5-b230-847c7f0d6ba2",
+  "source": {
+    "format": "Claude Code project transcript JSONL",
+    "sessionId": "1b110a92-0095-4cd5-b230-847c7f0d6ba2",
+    "sha256": "96ab38d496a593d9217aefd7e9d37538c8e94bcf4d78650127ca0b8a892f5a00",
+    "records": 151,
+    "bytes": 549916,
+    "accessClassification": "local-private"
+  },
+  "events": [
+    {
+      "timestamp": "2026-07-14T19:30:16.751Z",
+      "kind": "task-dispatched",
+      "summary": "Autopilot was asked to implement GitHub issue #1697."
+    },
+    {
+      "timestamp": "2026-07-14T19:30:28.030Z",
+      "kind": "task-loaded",
+      "summary": "The issue title, description, and two acceptance criteria were fetched."
+    },
+    {
+      "timestamp": "2026-07-14T19:33:55.817Z",
+      "kind": "design-completed",
+      "summary": "A design child selected a client/node_modules cache keyed by client/yarn.lock."
+    },
+    {
+      "timestamp": "2026-07-14T19:35:14.668Z",
+      "kind": "implementation-completed",
+      "summary": "An implementation child changed one workflow file and reported commit 9056f80ee898826e6f78eb0e9e18173158d2cc2a."
+    },
+    {
+      "timestamp": "2026-07-14T19:35:57.846Z",
+      "kind": "simplification-completed",
+      "summary": "A simplification child made no changes."
+    },
+    {
+      "timestamp": "2026-07-14T19:36:56.840Z",
+      "kind": "security-review-completed",
+      "summary": "The security review reported no fixable issues and recorded cache-scope limitations."
+    },
+    {
+      "timestamp": "2026-07-14T19:37:41.627Z",
+      "kind": "result-review-completed",
+      "summary": "The independent review approved the initial patch with one non-blocking restore-keys recommendation."
+    },
+    {
+      "timestamp": "2026-07-14T19:38:48.982Z",
+      "kind": "review-fix-completed",
+      "summary": "A fix child applied restore-keys and reported final commit c1c814049eb9acbebf9d319e5f1663fb142b3e96."
+    },
+    {
+      "timestamp": "2026-07-14T19:39:15.262Z",
+      "kind": "verification-observed",
+      "summary": "The final workflow parsed successfully as YAML and the branch push completed."
+    },
+    {
+      "timestamp": "2026-07-14T19:39:38.019Z",
+      "kind": "delivery-observed",
+      "summary": "Draft pull request #1704 was confirmed against next."
+    },
+    {
+      "timestamp": "2026-07-14T19:40:20.856Z",
+      "kind": "execution-completed",
+      "summary": "The coordinator reported the pipeline complete and distinguished the skipped application test from YAML validation."
+    }
+  ],
+  "limitations": [
+    "This is a task-relevant public projection, not the richest native transcript.",
+    "Startup hooks, local paths, identities, tool payloads, and unrelated operator context were not copied.",
+    "The projection preserves event order and summaries but cannot reproduce every model turn or tool invocation."
+  ]
+}

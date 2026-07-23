@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "jinn.repository-snapshot.v1",
+  "repository": "https://code.example.invalid/repositories/slug-fixture",
+  "revisionIdentifier": "urn:uuid:88888888-8888-4888-8888-888888888888",
+  "capturedAt": "2026-07-23T14:59:55Z",
+  "entries": [
+    {
+      "path": "src/slug.ts",
+      "sha256": "a47e413df6cdc33ce9634783b047dc702b4a78177debe476ee2b0698eba7b5ff"
+    },
+    {
+      "path": "test/slug.test.ts",
+      "sha256": "2ddfeb6b357adaa5a86a59c7d78ca1d26d721c52e47f12e7e5a689f61860fc92"
+    }
+  ]
+}

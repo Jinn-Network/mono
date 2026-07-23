@@ -1,0 +1,79 @@
+{
+  "schemaVersion": "jinn.scrub-receipt.v1",
+  "source": {
+    "trace": {
+      "sha256": "96ab38d496a593d9217aefd7e9d37538c8e94bcf4d78650127ca0b8a892f5a00",
+      "records": 151,
+      "bytes": 549916,
+      "accessClassification": "local-private"
+    },
+    "task": {
+      "sha256": "e756ba2396b38269c424e753938da5a0d5cbdc508a83965bd9fd8f9e8eb19462",
+      "bytes": 1197,
+      "accessClassification": "local-private"
+    }
+  },
+  "checkOnlyScan": {
+    "implementationRepositoryCommit": "de3996ee67a4808d26e30c9401e237b70834ea3e",
+    "policyVersion": "1.0.0",
+    "manifestSchemaVersion": 2,
+    "rejected": true,
+    "findings": 559,
+    "redactions": 411,
+    "unresolvedFlags": 0,
+    "perClassCounts": {
+      "A2:redact": 165,
+      "B1:redact": 17,
+      "C1:redact": 31,
+      "D1:redact": 185,
+      "D2:redact": 5
+    },
+    "redactionStageCounts": {
+      "known-identity": 13,
+      "plain-patterns": 233,
+      "secretlint": 165
+    },
+    "meaning": "Check mode rejects on any non-pass finding. These counts contain no detected values."
+  },
+  "projection": {
+    "implementation": "manual source-backed task-event projection",
+    "version": "0.1.0",
+    "completedAt": "2026-07-23T20:00:49Z",
+    "sourceRecords": 151,
+    "projectedEvents": 11,
+    "sourceRecordsNotCopied": 140,
+    "mappings": [
+      {
+        "sourceSha256": "e756ba2396b38269c424e753938da5a0d5cbdc508a83965bd9fd8f9e8eb19462",
+        "derivedPath": "task.public.md",
+        "derivedSha256": "da4c3b0e697ec22c44b204b87b65f5db46a654de06f4ffcd0bd1511a631e43e3"
+      },
+      {
+        "sourceSha256": "96ab38d496a593d9217aefd7e9d37538c8e94bcf4d78650127ca0b8a892f5a00",
+        "derivedPath": "trace.public.json",
+        "derivedSha256": "8960a023ee136ca0c90e4eebc223e5cb9ac2b4486c75d8961496713504790ec1"
+      }
+    ],
+    "limitations": [
+      "The public trace is a projection rather than a field-for-field redaction of the native transcript.",
+      "Publication has not been authorized by this fixture."
+    ]
+  },
+  "publicFixtureCheck": {
+    "policyVersion": "1.0.0",
+    "rejected": true,
+    "findings": 5,
+    "redactions": 5,
+    "unresolvedFlags": 0,
+    "perClassCounts": {
+      "A2:redact": 5
+    },
+    "likelyFalsePositiveShapes": [
+      "long public Git branch name",
+      "pinned nightly tool version containing a commit-like identifier",
+      "Git blob identifier",
+      "long structural field name"
+    ],
+    "meaning": "The public candidate is not publishable through the current fail-closed check without an allowlist or detector correction. The exact Result patch must not be silently altered to make the check pass."
+  }
+}

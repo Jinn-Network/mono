@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "jinn.fixture.repository-input-observation.v1",
+  "repository": "https://github.com/Jinn-Network/mono",
+  "targetBase": "next",
+  "branch": "chore/1697-hermetic-gate-downloads-onnxruntime-prebuilt-from-external-c",
+  "baseCommit": null,
+  "baseCommitObserved": false,
+  "observedPreimage": {
+    "path": ".github/workflows/hermetic-gate.yml",
+    "gitBlobSha1": "2fefd627c877981b63ef3390200e0648875d5952"
+  },
+  "reportedResultCommits": [
+    "9056f80ee898826e6f78eb0e9e18173158d2cc2a",
+    "c1c814049eb9acbebf9d319e5f1663fb142b3e96"
+  ],
+  "limitations": [
+    "The raw transcript did not record the original base commit or repository tree digest.",
+    "The two reported result commit objects no longer resolve in the current local object database after later branch-history rewriting; the final patch bytes remain preserved in the transcript."
+  ]
+}
