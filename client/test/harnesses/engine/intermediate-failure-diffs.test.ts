@@ -10,6 +10,7 @@ import {
 import { TaskRunState } from '../../../src/harnesses/engine/state.js';
 import { TaskEngine, type TaskEngineOptions } from '../../../src/harnesses/engine/engine.js';
 import type { Harness, Solution } from '../../../src/harnesses/types.js';
+import { SkippableError } from '../../../src/harnesses/types.js';
 import {
   buildMineableRecord,
   intermediateFailureDiffsFromTaskRun,
@@ -51,6 +52,17 @@ function makePatchImpl(patch: string): Harness {
     supports: (s) => s.solverType === SOLVER_TYPE && s.role !== 'evaluation',
     async run(): Promise<Solution> {
       return patchSolution(patch);
+    },
+  };
+}
+
+function makeSkipImpl(reason = 'no-quota'): Harness {
+  return {
+    name: 'skip-stub',
+    version: '0.0.1',
+    supports: (s) => s.solverType === SOLVER_TYPE && s.role !== 'evaluation',
+    async run(): Promise<Solution> {
+      throw new SkippableError(reason, 'declined for test');
     },
   };
 }
@@ -292,6 +304,46 @@ describe('runImpl retains prior patches (#1643)', () => {
     expect(JSON.parse(row.solutionOutputsJson!).solutionPayload.patch).toBe(
       'diff --git a/x b/x\n+B\n',
     );
+  });
+
+  it('retains prior patch A when runImpl skips (empty next) (AC5)', async () => {
+    const engine = new TaskEngine(engineOpts(store, tmp, makeSkipImpl()));
+    const p = new TaskRunPersistence(store.db);
+    const requestId = 'req-skip-overwrite';
+    await engine.observe(makeInput({
+      requestId,
+      task: {
+        id: requestId,
+        description: 'fix',
+        solverType: SOLVER_TYPE,
+        role: 'restoration',
+        spec: {},
+      },
+    }));
+    p.transition(requestId, TaskRunState.CLAIMED);
+    p.transition(requestId, TaskRunState.WAITING);
+    p.transition(requestId, TaskRunState.PRE_SNAPSHOT, {
+      workingDir: join(tmp, 'work', requestId),
+      implStateDir: join(tmp, 'impl'),
+      preSnapshotCapturedAt: Date.now(),
+    });
+    p.transition(requestId, TaskRunState.RUNNING);
+    mkdirSync(join(tmp, 'work', requestId), { recursive: true });
+    mkdirSync(join(tmp, 'impl'), { recursive: true });
+    store.db.prepare(
+      'UPDATE task_runs SET solution_outputs_json = ? WHERE request_id = ?',
+    ).run(solutionJson('diff --git a/x b/x\n+A\n'), requestId);
+
+    await engine.process(requestId);
+
+    const row = p.getByRequestId(requestId)!;
+    expect(row.state).toBe(TaskRunState.POST_SNAPSHOT);
+    expect(JSON.parse(row.intermediateFailureDiffsJson!)).toEqual([
+      'diff --git a/x b/x\n+A\n',
+    ]);
+    const skipped = JSON.parse(row.solutionOutputsJson!);
+    expect(skipped.gating?.skipped).toBe(true);
+    expect(skipped.solutionPayload?.patch).toBeUndefined();
   });
 });
 
