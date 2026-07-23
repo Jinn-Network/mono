@@ -51,6 +51,7 @@ import {
   getMechDeliveryRate,
   getTimeoutBounds,
 } from '../../adapters/mech/contracts.js';
+import { runObserveAutopilotDelivery } from './tasks-observe-autopilot.js';
 
 function findNamedErrorCause(
   error: unknown,
@@ -842,6 +843,9 @@ async function run(ctx: CommandContext): Promise<void> {
   if (subverb === 'submit') {
     return runSubmit({ ...ctx, argv: rest });
   }
+  if (subverb === 'observe-autopilot-delivery') {
+    return runObserveAutopilotDelivery({ ...ctx, argv: rest });
+  }
   if (subverb === 'list') {
     const config = loadConfig(getConfigPathFromArgs(rest));
     emitResult(
@@ -892,7 +896,10 @@ async function run(ctx: CommandContext): Promise<void> {
       code: 'invalid_invocation',
       message: `Unknown tasks subverb: ${subverb}`,
       exampleCli: 'jinn tasks submit --id my-task --description "..." --solver-net prediction',
-      details: { field: 'subverb', expected: 'submit|list|show' },
+      details: {
+        field: 'subverb',
+        expected: 'submit|observe-autopilot-delivery|list|show',
+      },
     },
     { writer: ctx.writer, exit: ctx.exit },
   );
@@ -904,6 +911,7 @@ const command: CommandModule = {
   helpText: `Usage:
   jinn tasks submit --id <id> --description <text> (--solver-net <name> | --solver-type <type>) [--spec-file <path>] [--dry-run] [--yes] [--human]
   jinn tasks submit --request-file <path> [--dry-run] --yes --json
+  jinn tasks observe-autopilot-delivery --expectation-file <path> --json
   jinn tasks list
   jinn tasks show <id>
 
