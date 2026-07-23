@@ -80,6 +80,10 @@ export interface MarketplaceExecutionHandle {
   readonly backend: 'marketplace';
   readonly taskId: string;
   readonly taskCid: string;
+  /** Present on every new machine submission; optional only for old manifests. */
+  readonly creationTransactionHash?: string;
+  readonly creationBlockNumber?: number;
+  readonly solverNetManifestCid?: string;
   readonly deadline: string;
   readonly requestFile: string;
   readonly attemptIndex?: number;

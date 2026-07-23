@@ -79,8 +79,8 @@ describe('marketplace SessionExecutionBackend', () => {
       return JSON.stringify({
         taskId: '501',
         taskCid: 'bafy-task',
-        creationTransactionHash: `0x${'a'.repeat(64)}`,
-        creationBlockNumber: 123,
+        creationTx: `0x${'a'.repeat(64)}`,
+        creationBlock: 123,
         solverNetManifestCid: 'bafy-manifest',
         idempotent: false,
       });
@@ -121,6 +121,9 @@ describe('marketplace SessionExecutionBackend', () => {
       taskId: '501',
       taskCid: 'bafy-task',
       deadline: '2026-07-23T13:30:00.000Z',
+      creationTransactionHash: `0x${'a'.repeat(64)}`,
+      creationBlockNumber: 123,
+      solverNetManifestCid: 'bafy-manifest',
     });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.command).toBe('jinn');
@@ -201,6 +204,23 @@ describe('marketplace SessionExecutionBackend', () => {
     await expect(backend.start(input(root))).rejects.toThrow('network unavailable');
   });
 
+  it('fails closed when the machine submit response omits creation provenance', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jinn-marketplace-backend-'));
+    roots.push(root);
+    writeFileSync(join(root, 'manifest.json'), '{}');
+    const backend = makeMarketplaceSessionBackend({
+      runner: async () => JSON.stringify({
+        taskId: '501',
+        taskCid: 'bafy-task',
+      }),
+      now: () => new Date('2026-07-23T12:00:00.000Z'),
+    });
+
+    await expect(backend.start(input(root))).rejects.toThrow(
+      'creation provenance',
+    );
+  });
+
   it('includes an explicit manifest override without requiring a local joined net', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jinn-marketplace-backend-'));
     roots.push(root);
@@ -211,6 +231,9 @@ describe('marketplace SessionExecutionBackend', () => {
     ) => JSON.stringify({
         taskId: '501',
         taskCid: 'bafy-task',
+        creationTx: `0x${'c'.repeat(64)}`,
+        creationBlock: 321,
+        solverNetManifestCid: 'bafy-explicit-manifest',
       }));
     const backend = makeMarketplaceSessionBackend({
       runner,
@@ -292,6 +315,9 @@ describe('marketplace SessionExecutionBackend', () => {
         return JSON.stringify({
           taskId: '501',
           taskCid: 'bafy-task',
+          creationTx: `0x${'b'.repeat(64)}`,
+          creationBlock: 456,
+          solverNetManifestCid: 'bafy-manifest',
           idempotent: calls.length > 1,
         });
       },
@@ -310,6 +336,9 @@ describe('marketplace SessionExecutionBackend', () => {
         taskCid: 'bafy-task',
         deadline: '2026-07-23T13:30:00.000Z',
         requestFile: join(root, 'marketplace-request.json'),
+        creationTransactionHash: `0x${'b'.repeat(64)}`,
+        creationBlockNumber: 456,
+        solverNetManifestCid: 'bafy-manifest',
       });
     expect(calls).toHaveLength(2);
     expect(calls[1]).toEqual(calls[0]);

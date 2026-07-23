@@ -31,6 +31,9 @@ const PRE_FLIGHT_ATTEMPT =
 interface MarketplaceSubmitOutput {
   readonly taskId: string;
   readonly taskCid: string;
+  readonly creationTransactionHash: string;
+  readonly creationBlockNumber: number;
+  readonly solverNetManifestCid: string;
 }
 
 interface MarketplaceCancellation {
@@ -277,20 +280,33 @@ function submitOutput(raw: string): MarketplaceSubmitOutput {
   } catch {
     throw new Error('Marketplace task submission returned malformed JSON');
   }
+  const output = parsed as Record<string, unknown>;
   if (
     typeof parsed !== 'object'
     || parsed === null
     || Array.isArray(parsed)
-    || typeof (parsed as Record<string, unknown>).taskId !== 'string'
-    || (parsed as Record<string, unknown>).taskId === ''
-    || typeof (parsed as Record<string, unknown>).taskCid !== 'string'
-    || (parsed as Record<string, unknown>).taskCid === ''
+    || typeof output.taskId !== 'string'
+    || output.taskId === ''
+    || typeof output.taskCid !== 'string'
+    || output.taskCid === ''
+    || typeof output.creationTx !== 'string'
+    || !/^0x[0-9a-fA-F]{64}$/.test(output.creationTx)
+    || typeof output.creationBlock !== 'number'
+    || !Number.isSafeInteger(output.creationBlock)
+    || output.creationBlock < 0
+    || typeof output.solverNetManifestCid !== 'string'
+    || output.solverNetManifestCid === ''
   ) {
-    throw new Error('Marketplace task submission omitted taskId or taskCid');
+    throw new Error(
+      'Marketplace task submission omitted Task identity or creation provenance',
+    );
   }
   return {
-    taskId: (parsed as { taskId: string }).taskId,
-    taskCid: (parsed as { taskCid: string }).taskCid,
+    taskId: output.taskId,
+    taskCid: output.taskCid,
+    creationTransactionHash: output.creationTx,
+    creationBlockNumber: output.creationBlock,
+    solverNetManifestCid: output.solverNetManifestCid,
   };
 }
 
@@ -400,6 +416,9 @@ export function makeMarketplaceSessionBackend(
         backend: 'marketplace',
         taskId: submitted.taskId,
         taskCid: submitted.taskCid,
+        creationTransactionHash: submitted.creationTransactionHash,
+        creationBlockNumber: submitted.creationBlockNumber,
+        solverNetManifestCid: submitted.solverNetManifestCid,
         deadline: submissionDeadline(input.deadline),
         requestFile: join(
           dirname(input.attempt.manifestPath),
@@ -479,6 +498,9 @@ export function makeMarketplaceSessionBackend(
         backend: 'marketplace',
         taskId: submitted.taskId,
         taskCid: submitted.taskCid,
+        creationTransactionHash: submitted.creationTransactionHash,
+        creationBlockNumber: submitted.creationBlockNumber,
+        solverNetManifestCid: submitted.solverNetManifestCid,
         deadline: submissionDeadline(sessionDeadline),
         requestFile,
       };
