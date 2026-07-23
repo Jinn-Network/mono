@@ -437,6 +437,11 @@ def build_turn_context(
             "pre_llm_call",
             session_id=agent.session_id,
             task_id=effective_task_id,
+            # Keep the execution/capture id stable with existing Hermes
+            # behavior while exposing the caller's optional logical identity
+            # separately. An omitted caller id must not become a fresh
+            # UUID-shaped task change at plugin boundaries.
+            stable_task_id=task_id,
             turn_id=turn_id,
             user_message=original_user_message,
             conversation_history=list(messages),

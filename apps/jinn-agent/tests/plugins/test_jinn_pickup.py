@@ -716,6 +716,45 @@ def test_missing_stable_task_id_stays_first_turn_only():
     assert len(runner.calls) == 1
 
 
+def test_effective_turn_ids_do_not_masquerade_as_stable_task_changes():
+    runner = PickupRunner()
+    jinn._runner = runner
+    try:
+        jinn._on_pre_llm_call(
+            session_id="production-boundary",
+            task_id="generated-effective-1",
+            stable_task_id=None,
+            user_message=MSG,
+            is_first_turn=True,
+        )
+        omitted_second = jinn._on_pre_llm_call(
+            session_id="production-boundary",
+            task_id="generated-effective-2",
+            stable_task_id=None,
+            user_message="A later caller-ID-free turn",
+            is_first_turn=False,
+        )
+        jinn._on_pre_llm_call(
+            session_id="production-boundary",
+            task_id="generated-effective-3",
+            stable_task_id="caller-task-a",
+            user_message="A caller supplied a stable task",
+            is_first_turn=False,
+        )
+        jinn._on_pre_llm_call(
+            session_id="production-boundary",
+            task_id="generated-effective-4",
+            stable_task_id="caller-task-b",
+            user_message="The caller changed the stable task",
+            is_first_turn=False,
+        )
+    finally:
+        jinn._runner = None
+
+    assert omitted_second is None
+    assert len(runner.calls) == 3
+
+
 def test_repeat_pickup_sends_ids_delivered_by_the_prior_pickup():
     runner = PickupRunner()
     jinn._runner = runner
@@ -1480,6 +1519,57 @@ def test_turn_lifecycle_ownership_is_bounded_after_turn_and_finalize():
         (key[0] if isinstance(key, tuple) else key) == session_id
         for key in jinn.buf._buffers
     )
+
+
+def test_delayed_old_session_end_cannot_pop_fresh_same_id_lifecycle():
+    session_id = "session-end-same-id-reopen"
+    runner = PickupRunner()
+    jinn._runner = runner
+    try:
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="old-task",
+            turn_id="old-turn",
+            user_message="old user turn",
+            is_first_turn=True,
+        )
+        jinn._on_session_finalize(
+            session_id=session_id,
+            reason="old_session_complete",
+        )
+        jinn._on_pre_llm_call(
+            session_id=session_id,
+            task_id="fresh-task",
+            turn_id="fresh-turn",
+            user_message="fresh user turn",
+            is_first_turn=True,
+        )
+        fresh_state = jinn._session_states[session_id]
+        fresh_lifecycle = jinn._session_lifecycle_tokens[session_id]
+        fresh_checkpoint = jinn._pickup_checkpoints[session_id]
+
+        jinn._on_session_end(
+            session_id=session_id,
+            task_id="old-task",
+            turn_id="old-turn",
+            completed=True,
+            interrupted=False,
+        )
+
+        assert jinn._session_states[session_id] is fresh_state
+        assert jinn._session_lifecycle_tokens[session_id] is fresh_lifecycle
+        assert jinn._pickup_checkpoints[session_id] is fresh_checkpoint
+        assert jinn.buf.has_capture(
+            "fresh-task",
+            session_id,
+            lifecycle_token=fresh_lifecycle,
+        )
+        assert (
+            session_id,
+            "fresh-turn",
+        ) in jinn._session_turn_lifecycle_owners
+    finally:
+        jinn._runner = None
 
 
 def test_finalize_closes_control_state_atomically_before_capture_cleanup(

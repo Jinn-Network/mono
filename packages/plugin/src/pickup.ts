@@ -321,6 +321,9 @@ function compareScoredKnowledgeHits(a: ScoredKnowledgeHit, b: ScoredKnowledgeHit
   if (b.score !== a.score) return b.score - a.score;
   const tierDiff = tierRank(b.hit.tier) - tierRank(a.hit.tier);
   if (tierDiff !== 0) return tierDiff;
+  const aDomain = a.hit.recencyDomain;
+  const bDomain = b.hit.recencyDomain;
+  if (aDomain !== bDomain) return 0;
   return (b.hit.publishedAt ?? 0) - (a.hit.publishedAt ?? 0);
 }
 

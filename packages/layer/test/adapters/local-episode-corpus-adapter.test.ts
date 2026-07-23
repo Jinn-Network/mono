@@ -1,3 +1,10 @@
+import {
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   degraded,
@@ -6,6 +13,7 @@ import {
   type EvidencePort,
 } from '@jinn-network/plugin';
 import { InMemoryEvidencePort } from '@jinn-network/plugin/testing';
+import { createEvidenceAdapter } from '@jinn-network/core';
 import {
   createLocalEpisodeCorpusAdapter,
   localEpisodeRef,
@@ -100,6 +108,7 @@ describe('LocalEpisodeCorpusAdapter', () => {
       tags: ['Vitest', 'Async'],
       tier: 'tests-passed',
       origin: 'local:episode/local:1',
+      recencyDomain: 'unix-ms',
       retrievalVisible: true,
     });
     expect(hit?.publishedAt).toBe(Date.parse(episode.session.capturedAt));
@@ -204,5 +213,64 @@ describe('LocalEpisodeCorpusAdapter', () => {
       status: 'ok',
       value: { retrievalVisible: false },
     });
+  });
+
+  it('fetches a legacy list-only capture advertised by local search without rewriting storage', async () => {
+    const capturesDir = mkdtempSync(join(tmpdir(), 'jinn-local-legacy-'));
+    const legacyPath = join(capturesDir, 'legacy-capture.json');
+    writeFileSync(legacyPath, JSON.stringify({
+      session: {
+        sessionId: 'legacy-list-only',
+        capturedAt: '2026-07-13T00:00:00.000Z',
+      },
+      task: {
+        summary: 'Fix legacy dashboard failure',
+        distributionTags: ['dashboard'],
+      },
+      environment: {
+        harness: { name: 'hermes', version: '1.0.0' },
+        model: 'test',
+        tools: ['terminal'],
+      },
+      steps: [{
+        spanId: 'legacy-turn-1',
+        parentSpanId: null,
+        name: 'jinn.transcript.user-message',
+        startTimeUnixNano: '1000000000',
+        endTimeUnixNano: '1000000000',
+        attributes: {
+          'jinn.capture.event.kind': 'user-message',
+          'message.content': 'fix it',
+        },
+        redactedKeys: [],
+      }],
+      outcome: {
+        status: 'completed',
+        verifiabilityTier: 'tests-passed',
+      },
+      cost: { durationMs: 1 },
+      provenance: 'contributed',
+    }), 'utf8');
+    const before = readFileSync(legacyPath, 'utf8');
+    const adapter = createLocalEpisodeCorpusAdapter({
+      evidence: createEvidenceAdapter({ capturesDir }),
+    });
+
+    const searched = await adapter.search('dashboard');
+    expect(searched.status).toBe('ok');
+    if (searched.status !== 'ok') return;
+    expect(searched.value).toHaveLength(1);
+
+    const fetched = await adapter.get(searched.value[0]!.ref);
+
+    expect(fetched).toMatchObject({
+      status: 'ok',
+      value: {
+        canonicalEpisodeId: 'legacy-list-only',
+        task: { summary: 'Fix legacy dashboard failure' },
+        retrievalVisible: true,
+      },
+    });
+    expect(readFileSync(legacyPath, 'utf8')).toBe(before);
   });
 });

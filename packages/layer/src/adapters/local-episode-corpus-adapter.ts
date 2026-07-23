@@ -53,6 +53,7 @@ export function createLocalEpisodeCorpusAdapter(
       tier: episode.outcome.verificationStrength,
       origin: `local:${episode.episodeId}`,
       ...(Number.isFinite(publishedAt) ? { publishedAt } : {}),
+      recencyDomain: 'unix-ms',
       retrievalVisible: true,
     };
   }
@@ -77,6 +78,30 @@ export function createLocalEpisodeCorpusAdapter(
   async function get(ref: string): Promise<PortResult<CorpusRecord | null>> {
     const episodeId = localEpisodeId(ref);
     if (episodeId === null) return ok(null);
+
+    // Search is backed by the lazy list snapshot, which can contain supported
+    // legacy captures that EvidencePort.get() cannot address by episode id.
+    // Serve an advertised episode from that same read-only snapshot so
+    // search/get stay symmetric without migrating or rewriting storage.
+    if (snapshot !== undefined) {
+      const listed = await snapshot;
+      if (listed.status !== 'unavailable') {
+        const listedEpisode = (listed.status === 'ok'
+          ? listed.value
+          : listed.value ?? [])
+          .find((candidate) => candidate.episodeId === episodeId);
+        if (listedEpisode !== undefined) {
+          const value = episodeToCorpusRecord(listedEpisode, {
+            ref,
+            origin: `local:${listedEpisode.episodeId}`,
+            retrievalVisible: true,
+          });
+          return listed.status === 'degraded'
+            ? degraded(`local corpus: ${listed.reason}`, value)
+            : ok(value);
+        }
+      }
+    }
 
     const result = await deps.evidence.get(episodeId);
     if (result.status === 'unavailable') {

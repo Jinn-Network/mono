@@ -68,6 +68,7 @@ function toKnowledgeHit(hit: CorpusSearchHit): KnowledgeHit {
     tags: tags.filter((tag) => tag !== RETRIEVAL_VISIBLE_TAG),
     ...(origin ? { origin } : {}),
     publishedAt: hit.publishedAt,
+    recencyDomain: 'block-number',
     retrievalVisible,
     ...(tier ? { tier } : {}),
   };

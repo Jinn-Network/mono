@@ -2,12 +2,17 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   dedupeKnowledgeHits,
+  rankKnowledgeHits,
   RETRIEVAL_VISIBLE_TAG,
   type EpisodeV1Write,
 } from '@jinn-network/plugin';
-import { describeCorpusPortContract } from '@jinn-network/plugin/testing';
+import {
+  describeCorpusPortContract,
+  InMemoryEvidencePort,
+} from '@jinn-network/plugin/testing';
 import type { HarnessLayer, CorpusSearchHit, CorpusRecord as WireCorpusRecord } from '../../src/consume.js';
 import { createCorpusAdapter } from '../../src/adapters/corpus-adapter.js';
+import { createLocalEpisodeCorpusAdapter } from '../../src/adapters/local-episode-corpus-adapter.js';
 import {
   EPISODE_ARTIFACT_TYPE,
   TRACE_ENVELOPE_ARTIFACT_TYPE,
@@ -69,9 +74,72 @@ describe('CorpusAdapter mapping', () => {
     expect(result.status).toBe('ok');
     if (result.status !== 'ok') return;
     expect(result.value).toEqual([
-      { ref: 'bafySkill', kind: 'skill', title: 'skill / one', snippet: 'a distilled skill', tags: [], origin: '1', publishedAt: 0, retrievalVisible: false },
-      { ref: 'bafyTrace', kind: 'trace', title: 'trace / two', snippet: 'a prior trace', tags: [], origin: '1', publishedAt: 0, retrievalVisible: false },
+      { ref: 'bafySkill', kind: 'skill', title: 'skill / one', snippet: 'a distilled skill', tags: [], origin: '1', publishedAt: 0, recencyDomain: 'block-number', retrievalVisible: false },
+      { ref: 'bafyTrace', kind: 'trace', title: 'trace / two', snippet: 'a prior trace', tags: [], origin: '1', publishedAt: 0, recencyDomain: 'block-number', retrievalVisible: false },
     ]);
+  });
+
+  it('does not let a local ISO timestamp outrank an equal public block-valued hit', async () => {
+    const evidence = new InMemoryEvidencePort();
+    await evidence.put({
+      schemaVersion: 'jinn.episode.v1',
+      episodeId: 'episode-local-recency',
+      retrievalVisible: false,
+      session: {
+        sessionId: 'session-local-recency',
+        capturedAt: '2026-07-23T12:00:00.000Z',
+        kind: 'user',
+      },
+      origin: { writer: 'vitest', build: '0.1.0' },
+      task: {
+        summary: 'dashboard vitest flake',
+        distributionTags: [],
+      },
+      trajectory: [],
+      environment: {
+        harness: { name: 'vitest', version: '0.1.0' },
+        model: 'test',
+        tools: [],
+        skillsLoadout: [],
+      },
+      outcome: {
+        status: 'completed',
+        verificationStrength: 'tests-passed',
+      },
+      cost: { durationMs: 1 },
+      retention: { policy: 'local-private' },
+      provenance: 'imported',
+    });
+    const publicLayer = makeFakeLayer();
+    publicLayer.corpus.search = async () => [
+      makeHit({
+        ref: 'bafyPublicBlock',
+        summary: 'dashboard vitest flake',
+        tags: [RETRIEVAL_VISIBLE_TAG],
+        retrievalVisible: true,
+        verifiabilityTier: 'tests-passed',
+        publishedAt: 22_000_000,
+        operator: { agentId: 'public-agent', safeAddress: '' },
+      }),
+    ];
+
+    const local = await createLocalEpisodeCorpusAdapter({ evidence }).search('dashboard');
+    const publicResult = await createCorpusAdapter({ layer: publicLayer }).search('dashboard');
+    expect(local.status).toBe('ok');
+    expect(publicResult.status).toBe('ok');
+    if (local.status !== 'ok' || publicResult.status !== 'ok') return;
+
+    const ranked = rankKnowledgeHits(
+      [...publicResult.value, ...local.value],
+      ['dashboard', 'vitest', 'flake'],
+    );
+
+    expect(ranked.map((hit) => hit.ref)).toEqual([
+      'bafyPublicBlock',
+      local.value[0]?.ref,
+    ]);
+    expect(publicResult.value[0]?.recencyDomain).toBe('block-number');
+    expect(local.value[0]?.recencyDomain).toBe('unix-ms');
   });
 
   it('carries capture-meta tags and prefers the agentId as origin over the free-form safeAddress', async () => {

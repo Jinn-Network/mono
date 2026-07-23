@@ -16,8 +16,15 @@ export const KnowledgeHitSchema = z.strictObject({
   /** Trustworthy content-dedup identity: on-chain agentId when known, otherwise
    *  the record ref. Never a manifest-supplied safeAddress. */
   origin: z.string().min(1).optional(),
-  /** Unix-ms publish time — the selection policy's recency tiebreaker (rescope §3.3). */
+  /** Adapter-native recency value — comparable only within `recencyDomain`. */
   publishedAt: z.number().int().nonnegative().optional(),
+  /**
+   * Adapter-declared comparison domain for `publishedAt` (for example,
+   * `unix-ms` or `block-number`). Recency is comparable only within one
+   * explicit domain. When both hits omit this additive field, ranking keeps
+   * the legacy raw-number behavior.
+   */
+  recencyDomain: z.string().min(1).optional(),
   /** Computed by the adapter from the wire hit's tags (issue #1824) — presence
    *  of RETRIEVAL_VISIBLE_TAG. Absent = treat as not visible (fail-closed at
    *  ranking). */

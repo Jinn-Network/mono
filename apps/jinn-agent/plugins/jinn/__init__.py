@@ -232,6 +232,9 @@ class _SessionLifecycleToken:
     """Opaque identity for one active host session lifetime."""
 
 
+_STABLE_TASK_ID_UNSET = object()
+
+
 @dataclass(frozen=True)
 class _TurnLifecycleOwner:
     """Logical session lifecycle that originated one host turn."""
@@ -799,6 +802,7 @@ def _on_pre_llm_call(
     model: str = "",
     platform: str = "",
     task_id: str = "",
+    stable_task_id: Any = _STABLE_TASK_ID_UNSET,
     turn_id: str = "",
     **_: Any,
 ) -> Optional[Dict[str, str]]:
@@ -853,9 +857,14 @@ def _on_pre_llm_call(
             lifecycle_token=lifecycle_token,
         )
         return None
-    stable_task_id = (
-        task_id.strip()
-        if isinstance(task_id, str) and task_id.strip()
+    task_identity = (
+        task_id
+        if stable_task_id is _STABLE_TASK_ID_UNSET
+        else stable_task_id
+    )
+    normalized_stable_task_id = (
+        task_identity.strip()
+        if isinstance(task_identity, str) and task_identity.strip()
         else None
     )
     repository_identity = _pickup_repository_identity(
@@ -867,7 +876,7 @@ def _on_pre_llm_call(
         logical_session_id,
         expected_token=lifecycle_token,
         is_first_turn=is_first_turn,
-        stable_task_id=stable_task_id,
+        stable_task_id=normalized_stable_task_id,
         repository_slug=repository_identity.repository_slug,
         repository_cwd=repository_identity.repository_cwd,
         repository_verified=repository_identity.verified,
@@ -1085,8 +1094,20 @@ def _on_session_end(
     output_tokens: Optional[int] = None,
     **_: Any,
 ) -> None:
-    logical_session_id, session_kind, parent_session_id = _session_identity(session_id)
-    lifecycle_token = _current_session_lifecycle_token(logical_session_id)
+    # Resolve the lifecycle that originated this exact turn before touching
+    # capture or session state. A delayed end callback from a finalized
+    # lifecycle must not attach itself to a freshly reopened same-ID session.
+    # Legacy/direct callbacks without a turn id retain their existing behavior
+    # only while an ownership lifecycle is already active.
+    owner = _post_hook_lifecycle(session_id, turn_id)
+    if owner is None:
+        return
+    logical_session_id = owner.logical_session_id
+    lifecycle_token = owner.lifecycle_token
+    host_session_id = session_id or "default"
+    is_internal = logical_session_id != host_session_id
+    session_kind = "host-internal" if is_internal else "user"
+    parent_session_id = host_session_id[:128] if is_internal else None
     _release_session_turn_lifecycle(session_id, turn_id)
     _release_internal_session(parent_session_id)
     # Usage is native local telemetry, so show payoff independently of sharing

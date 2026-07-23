@@ -197,6 +197,38 @@ def test_task_id_passthrough():
     assert agent._current_task_id == "fixed-task"
 
 
+def test_pre_llm_hook_receives_original_optional_task_identity_separately():
+    generated_agent = _FakeAgent()
+    with patch(
+        "hermes_cli.plugins.invoke_hook",
+        return_value=[],
+    ) as generated_hook:
+        _build(generated_agent, task_id=None)
+
+    generated_call = next(
+        call
+        for call in generated_hook.call_args_list
+        if call.args == ("pre_llm_call",)
+    )
+    assert generated_call.kwargs["task_id"] == generated_agent._current_task_id
+    assert generated_call.kwargs["stable_task_id"] is None
+
+    supplied_agent = _FakeAgent()
+    with patch(
+        "hermes_cli.plugins.invoke_hook",
+        return_value=[],
+    ) as supplied_hook:
+        _build(supplied_agent, task_id="caller-task")
+
+    supplied_call = next(
+        call
+        for call in supplied_hook.call_args_list
+        if call.args == ("pre_llm_call",)
+    )
+    assert supplied_call.kwargs["task_id"] == "caller-task"
+    assert supplied_call.kwargs["stable_task_id"] == "caller-task"
+
+
 def test_persist_user_message_becomes_original():
     agent = _FakeAgent()
     ctx = _build(agent, user_message="api-prefixed", persist_user_message="clean")
