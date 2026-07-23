@@ -6,7 +6,7 @@
  * the body marker.
  */
 
-export const CHILD_KINDS = ['review-finding', 'reconcile'] as const;
+export const CHILD_KINDS = ['review-finding', 'reconcile', 'ci-failure'] as const;
 export type ChildKind = (typeof CHILD_KINDS)[number];
 
 export const CHILD_MARKER_PREFIX = '<!-- jinn-autopilot:child';
@@ -26,7 +26,7 @@ export function parseChildMarker(
   body: string,
 ): { readonly parentPr: number; readonly kind: ChildKind } | null {
   const match = body.match(
-    /<!--\s*jinn-autopilot:child\s+pr=(\d+)\s+kind=(review-finding|reconcile)\s*-->/,
+    /<!--\s*jinn-autopilot:child\s+pr=(\d+)\s+kind=(review-finding|reconcile|ci-failure)\s*-->/,
   );
   if (match === null) return null;
   const parentPr = Number(match[1]);
@@ -47,7 +47,7 @@ const PRIORITY_LABELS = new Set([
   'priority:p3',
   'priority:p4',
 ]);
-const CHILD_KIND_LABELS = new Set(['review-finding', 'reconcile']);
+const CHILD_KIND_LABELS = new Set(['review-finding', 'reconcile', 'ci-failure']);
 
 /**
  * Machine-created child issues carry a body marker plus kind + effort +

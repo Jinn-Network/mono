@@ -81,8 +81,8 @@ function fakePort(seed: ChildIssueRecord[] = []): ChildIssuePort & {
 }
 
 describe('child marker parse/format', () => {
-  it('round-trips review-finding and reconcile markers', () => {
-    for (const kind of ['review-finding', 'reconcile'] as const) {
+  it('round-trips review-finding, reconcile, and ci-failure markers', () => {
+    for (const kind of ['review-finding', 'reconcile', 'ci-failure'] as const) {
       const marker = formatChildMarker(42, kind);
       expect(marker).toBe(`<!-- jinn-autopilot:child pr=42 kind=${kind} -->`);
       expect(parseChildMarker(marker)).toEqual({ parentPr: 42, kind });

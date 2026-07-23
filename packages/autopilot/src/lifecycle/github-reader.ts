@@ -75,7 +75,7 @@ const PR_FIELDS = `
             pageInfo { hasNextPage }
             nodes {
               __typename
-              ... on CheckRun { name status conclusion }
+              ... on CheckRun { name status conclusion databaseId }
               ... on StatusContext { context state }
             }
           }
@@ -155,6 +155,8 @@ ${issues}
 // the live capability probe already validates — see capability-probe.ts).
 export const REVIEW_CLAIM_REF_PREFIX = 'refs/jinn-autopilot/review-claims/v1/';
 export const REVIEW_CLAIM_REF_GLOB = `${REVIEW_CLAIM_REF_PREFIX}*`;
+export const CI_RERUN_REF_PREFIX = 'refs/jinn-autopilot/ci-reruns/v1/pr-';
+export const CI_RERUN_REF_GLOB = `${CI_RERUN_REF_PREFIX}*`;
 const AUTOPILOT_BRANCH_REF_PREFIX = 'refs/heads/autopilot/';
 export const AUTOPILOT_BRANCH_REF_GLOB = `${AUTOPILOT_BRANCH_REF_PREFIX}*`;
 
@@ -412,6 +414,7 @@ interface GraphQlPr {
         name?: string;
         status?: string;
         conclusion?: string | null;
+        databaseId?: number | null;
         context?: string;
         state?: string;
       }>;
@@ -623,11 +626,16 @@ function checks(pr: GraphQlPr): RawPullRequest['checks'] {
           name: node.name ?? '',
           status: node.status ?? 'UNKNOWN',
           conclusion: node.conclusion ?? null,
+          source: 'check-run' as const,
+          ...(node.databaseId === undefined || node.databaseId === null ? {} : {
+            runId: node.databaseId,
+          }),
         }
       : {
           name: node.context ?? '',
           status: 'COMPLETED',
           conclusion: node.state ?? null,
+          source: 'commit-status' as const,
         }
   ));
 }
@@ -732,6 +740,19 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
 
   async readReviewClaimRefs(): Promise<ReadonlyMap<number, GitOid>> {
     return this.listReviewClaimRefs();
+  }
+
+  private async listCiRerunRecordedHeads(): Promise<Set<string>> {
+    const raw = await this.gitRun(['ls-remote', this.remoteName, CI_RERUN_REF_GLOB]);
+    const trimmed = raw.trimEnd();
+    const recorded = new Set<string>();
+    if (trimmed.length === 0) return recorded;
+    for (const line of trimmed.split('\n')) {
+      const [, ref] = line.split('\t');
+      if (ref === undefined || !ref.startsWith(CI_RERUN_REF_PREFIX)) continue;
+      recorded.add(ref.slice(CI_RERUN_REF_PREFIX.length));
+    }
+    return recorded;
   }
 
   async readBranchHeadForReconciliation(headRefName: string): Promise<GitOid | null> {
@@ -1290,11 +1311,16 @@ export class GhLifecycleReader implements GitHubLifecycleReader {
     // review-claim lookup below (jinn-mono#1883-follow-up) instead of one
     // GraphQL ref read per PR.
     const reviewClaimListing = await this.listReviewClaimRefs();
+    const ciRerunRecorded = await this.listCiRerunRecordedHeads();
     const openNodes = await Promise.all(connection.nodes.map((pr) => (
       this.rawPullRequest(pr, true, reviewClaimListing).catch((error: unknown) => {
         if (!(error instanceof PrEvidenceInconsistentError)) throw error;
         return inconsistentPullRequest(pr, error.message);
       })
+    ))).then((nodes) => nodes.map((pr) => (
+      ciRerunRecorded.has(`${pr.number}/${pr.headOid}`)
+        ? { ...pr, ciRerunRecorded: true as const }
+        : pr
     )));
     const mergedNodes = cursor === null
       ? await this.readMergedOutcomes(nonDoneIssueNumbers, reviewClaimListing)
