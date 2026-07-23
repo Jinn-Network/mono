@@ -677,8 +677,9 @@ export interface DiscoveryAPI {
    * Empty `taskIds` → empty Map, no I/O. Unknown taskIds are omitted.
    * Tolerant under withFallback: indexer outage falls through to the on-chain
    * floor (authoritative spine only; candidates empty). On-chain scans are
-   * hard-capped (50 × ~1999-block chunks); a task whose history falls outside
-   * the cap is omitted rather than returned partially.
+   * hard-capped (50 × ~1999-block chunks); HTTP GraphQL legs are hard-capped
+   * at 50 pages × 1000 rows. If either cap would truncate a result set, the
+   * call returns an empty Map (absence > partial lie) rather than a partial spine.
    *
    * Separation rule: every field under `authoritative` is sourced exclusively
    * from on-chain event projections. Every `*EnvelopeCandidates` entry is

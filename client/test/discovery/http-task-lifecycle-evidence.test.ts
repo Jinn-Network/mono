@@ -102,4 +102,37 @@ describe('HttpDiscoveryAPI.getTaskLifecycleEvidence (#2044)', () => {
     const map = await api.getTaskLifecycleEvidence({ taskIds: ['7'] });
     expect(map.size).toBe(0);
   });
+
+  it('returns empty Map when an HTTP leg hits the page cap (absence > partial lie)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (isReadyProbe(url)) return new Response('ok', { status: 200 });
+      // Always claim another page so the 50-page hard cap binds on the tasks leg.
+      return new Response(JSON.stringify({
+        data: {
+          tasks: {
+            items: [{
+              id: '7', chainId: 84532, manifestDigest: `0x${'11'.repeat(32)}`,
+              taskCidDigest: `0x${'22'.repeat(32)}`, creator: `0x${'aa'.repeat(20)}`,
+              maxClaims: 1, requiredVerdicts: 1, createdAtBlock: '10',
+              finalized: false, refunded: false,
+            }],
+            pageInfo: { hasNextPage: true, endCursor: 'next' },
+          },
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as unknown as typeof fetch;
+    const api = createHttpDiscoveryAPI({
+      url: 'http://stub/graphql',
+      fetchImpl,
+    });
+    const map = await api.getTaskLifecycleEvidence({ taskIds: ['7'] });
+    expect(map.size).toBe(0);
+    const gqlCalls = fetchImpl.mock.calls.filter(([u]) => !isReadyProbe(String(u)));
+    expect(gqlCalls).toHaveLength(50);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('HTTP page cap hit on tasks'),
+    );
+    warn.mockRestore();
+  });
 });

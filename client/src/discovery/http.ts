@@ -1613,6 +1613,9 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
   // Authoritative task→attempt→verdict spine + untrusted envelope candidates.
   // Empty taskIds short-circuits with no query. Unknown taskIds are omitted.
   // Candidates attach last by (requestId, chainId) and never rewrite spine.
+  // If any GraphQL leg hits MAX_OPERATOR_COUNT_TASK_PAGES with more pages
+  // remaining, return empty (absence > partial lie) — same honesty rule as the
+  // on-chain floor's chunk-cap pre-check.
   async function getTaskLifecycleEvidence(args: {
     taskIds: string[];
   }): Promise<Map<string, TaskLifecycleEvidence>> {
@@ -1621,6 +1624,24 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
 
     const requestedIds = Array.from(new Set(args.taskIds.filter(Boolean)));
     if (requestedIds.length === 0) return new Map();
+
+    type LifecyclePageInfo = { hasNextPage?: boolean; endCursor?: string | null } | undefined;
+    /** Advance a cursor page, or signal truncation when the hard page cap binds. */
+    const nextLifecyclePage = (
+      page: number,
+      pageInfo: LifecyclePageInfo,
+    ): { kind: 'done' } | { kind: 'next'; cursor: string } | { kind: 'truncated' } => {
+      if (!pageInfo?.hasNextPage || !pageInfo.endCursor) return { kind: 'done' };
+      if (page + 1 >= MAX_OPERATOR_COUNT_TASK_PAGES) return { kind: 'truncated' };
+      return { kind: 'next', cursor: pageInfo.endCursor };
+    };
+    const emptyOnLifecycleTruncate = (leg: string): Map<string, TaskLifecycleEvidence> => {
+      console.warn(
+        `[discovery] getTaskLifecycleEvidence: HTTP page cap hit on ${leg}; ` +
+          'omitting results (absence > partial lie)',
+      );
+      return new Map();
+    };
 
     type LifecycleTaskGql = {
       id: string;
@@ -1726,9 +1747,10 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
         }
         tasks.push(task);
       }
-      const pageInfo = data.tasks?.pageInfo;
-      if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
-      taskCursor = pageInfo.endCursor;
+      const advance = nextLifecyclePage(page, data.tasks?.pageInfo);
+      if (advance.kind === 'done') break;
+      if (advance.kind === 'truncated') return emptyOnLifecycleTruncate('tasks');
+      taskCursor = advance.cursor;
     }
 
     if (tasks.length === 0) return new Map();
@@ -1767,9 +1789,10 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
             createdAtBlock,
           });
         }
-        const pageInfo = data.attempts?.pageInfo;
-        if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
-        attemptCursor = pageInfo.endCursor;
+        const advance = nextLifecyclePage(page, data.attempts?.pageInfo);
+        if (advance.kind === 'done') break;
+        if (advance.kind === 'truncated') return emptyOnLifecycleTruncate('attempts');
+        attemptCursor = advance.cursor;
       }
     }
 
@@ -1800,9 +1823,10 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
             createdAtBlock,
           });
         }
-        const pageInfo = data.verdicts?.pageInfo;
-        if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
-        verdictCursor = pageInfo.endCursor;
+        const advance = nextLifecyclePage(page, data.verdicts?.pageInfo);
+        if (advance.kind === 'done') break;
+        if (advance.kind === 'truncated') return emptyOnLifecycleTruncate('verdicts');
+        verdictCursor = advance.cursor;
       }
     }
 
@@ -1847,9 +1871,10 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
           if (row.enrichmentStatus) cand.enrichmentStatus = row.enrichmentStatus;
           attemptCandidates.push(cand);
         }
-        const pageInfo = data.attemptEnvelopeMetas?.pageInfo;
-        if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
-        metaCursor = pageInfo.endCursor;
+        const advance = nextLifecyclePage(page, data.attemptEnvelopeMetas?.pageInfo);
+        if (advance.kind === 'done') break;
+        if (advance.kind === 'truncated') return emptyOnLifecycleTruncate('attemptEnvelopeMetas');
+        metaCursor = advance.cursor;
       }
     }
 
@@ -1897,9 +1922,10 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
           }
           verdictCandidates.push(cand);
         }
-        const pageInfo = data.verdictEnvelopeMetas?.pageInfo;
-        if (!pageInfo?.hasNextPage || !pageInfo.endCursor) break;
-        metaCursor = pageInfo.endCursor;
+        const advance = nextLifecyclePage(page, data.verdictEnvelopeMetas?.pageInfo);
+        if (advance.kind === 'done') break;
+        if (advance.kind === 'truncated') return emptyOnLifecycleTruncate('verdictEnvelopeMetas');
+        metaCursor = advance.cursor;
       }
     }
 
