@@ -389,12 +389,14 @@ describe('executeSafeTransaction GS026 owner mismatch (issue #1986)', () => {
     };
   };
 
-  it('surfaces GS026 on the estimate path as a terminal owner-mismatch error', async () => {
+  it('prioritizes a GS026 owner mismatch over an unrelated inner revert', async () => {
     const { publicClient, walletClient } = makeClients();
     const writeContract = vi
       .fn()
       .mockRejectedValue(new Error('The contract function "execTransaction" reverted: GS026'));
-    const call = vi.fn().mockResolvedValue({ data: '0x' });
+    const call = vi.fn().mockRejectedValue(
+      Object.assign(new Error('target call reverted'), { data: '0x33f626d3' }),
+    );
 
     await expect(
       executeSafeTransaction(
@@ -410,7 +412,7 @@ describe('executeSafeTransaction GS026 owner mismatch (issue #1986)', () => {
       ),
     ).rejects.toThrow(/GS026.*owner/i);
 
-    expect(call).toHaveBeenCalled();
+    expect(call).not.toHaveBeenCalled();
     expect(publicClient.readContract).toHaveBeenCalledWith(expect.objectContaining({
       functionName: 'isOwner',
       args: [TEST_SIGNER_ADDRESS],

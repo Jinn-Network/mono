@@ -224,6 +224,20 @@ async function executeSafeTransactionInner(
         // can distinguish self-already-claimed from lost-race from transient.
         const msg = writeErr instanceof Error ? writeErr.message : String(writeErr);
         if (msg.includes('GS013') || msg.includes('GS026')) {
+          if (msg.includes('GS026')) {
+            const signerIsOwner = await publicClient.readContract({
+              address: safeAddress,
+              abi: SAFE_ABI,
+              functionName: 'isOwner',
+              args: [from],
+            });
+            if (!signerIsOwner) {
+              throw new Error(
+                'Safe execTransaction rejected (GS026: invalid owner — signing key is not a Safe owner). ' +
+                  'Repair the Safe owner set or repoint the agent signing key to a current owner.',
+              );
+            }
+          }
           const inner = await decodeSafeInnerRevert(publicClient, params);
           if (inner.decodedName) {
             const formatted = formatDecodedRevert(inner.decodedName, inner.decodedArgs);
@@ -249,19 +263,7 @@ async function executeSafeTransactionInner(
             );
           }
           if (msg.includes('GS026')) {
-            const signerIsOwner = await publicClient.readContract({
-              address: safeAddress,
-              abi: SAFE_ABI,
-              functionName: 'isOwner',
-              args: [from],
-            });
-            if (signerIsOwner) {
-              throw new Error(`Safe execTransaction reverted (${SAFE_STALE_NONCE_ERROR_TOKEN})`);
-            }
-            throw new Error(
-              'Safe execTransaction rejected (GS026: invalid owner — signing key is not a Safe owner). ' +
-                'Repair the Safe owner set or repoint the agent signing key to a current owner.',
-            );
+            throw new Error(`Safe execTransaction reverted (${SAFE_STALE_NONCE_ERROR_TOKEN})`);
           }
         }
         throw writeErr;
