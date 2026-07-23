@@ -59,6 +59,19 @@ const VERDICT_DELIVERY_CLAIMED_ABI = [
   },
 ] as const;
 
+const TASK_BUDGET_REFUNDED_ABI = [
+  {
+    type: 'event',
+    name: 'TaskBudgetRefunded',
+    inputs: [
+      { name: 'taskId', type: 'uint256', indexed: true },
+      { name: 'creator', type: 'address', indexed: true },
+      { name: 'solutionAmount', type: 'uint256', indexed: false },
+      { name: 'verdictAmount', type: 'uint256', indexed: false },
+    ],
+  },
+] as const;
+
 function buildTaskCreatedLog(
   taskId: bigint,
   blockNumber: bigint,
@@ -164,6 +177,37 @@ function buildVerdictLog(
   } as unknown as Log;
 }
 
+function buildTaskBudgetRefundedLog(
+  taskId: bigint,
+  blockNumber: bigint,
+  opts?: { creator?: Hex; solutionAmount?: bigint; verdictAmount?: bigint },
+): Log {
+  const creator = (opts?.creator ?? `0x${'aa'.repeat(20)}`) as `0x${string}`;
+  const topics = encodeEventTopics({
+    abi: TASK_BUDGET_REFUNDED_ABI,
+    eventName: 'TaskBudgetRefunded',
+    args: { taskId, creator },
+  });
+  const data = encodeAbiParameters(
+    [
+      { name: 'solutionAmount', type: 'uint256' },
+      { name: 'verdictAmount', type: 'uint256' },
+    ],
+    [opts?.solutionAmount ?? 1000n, opts?.verdictAmount ?? 500n],
+  );
+  return {
+    address: ROUTER,
+    data,
+    topics,
+    blockNumber,
+    blockHash: `0x${'00'.repeat(32)}` as Hex,
+    transactionHash: `0x${'aa'.repeat(32)}` as Hex,
+    transactionIndex: 0,
+    logIndex: 0,
+    removed: false,
+  } as unknown as Log;
+}
+
 function buildMockClient(logs: Log[]): {
   getBlockNumber: ReturnType<typeof vi.fn>;
   getLogs: ReturnType<typeof vi.fn>;
@@ -218,6 +262,7 @@ describe('OnchainDiscoveryAPI.getTaskLifecycleEvidence (#2044)', () => {
         evaluator: `0x${'e0'.repeat(20)}` as Hex,
         verdictCode: 1,
       }),
+      buildTaskBudgetRefundedLog(7n, HEAD - 55n),
       // Unrelated task — must be filtered out
       buildTaskCreatedLog(99n, HEAD - 50n, {
         creator: `0x${'ff'.repeat(20)}` as Hex,
@@ -235,7 +280,8 @@ describe('OnchainDiscoveryAPI.getTaskLifecycleEvidence (#2044)', () => {
     const ev = map.get('7')!;
     expect(ev.authoritative.task.taskId).toBe('7');
     expect(ev.authoritative.task.requiredVerdicts).toBe(1);
-    expect(ev.authoritative.task.finalized).toBe(false);
+    expect(ev.authoritative.task.finalized).toBe(true);
+    expect(ev.authoritative.task.refunded).toBe(true);
     expect(ev.authoritative.task.createdAtTx).toBe(`0x${'77'.repeat(32)}`);
     expect(ev.authoritative.attempts.map((a) => a.attemptIndex)).toEqual([0, 1]);
     expect(ev.authoritative.attempts[0]!.requestId).toBe(solve0);

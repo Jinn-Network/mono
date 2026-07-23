@@ -49,6 +49,7 @@ import { JINN_ROUTER_ADDRESSES, IDENTITY_REGISTRY_ADDRESSES } from '../contracts
 import {
   canClaimTask,
   ROUTER_TASK_ATTEMPT_CREATED_EVENT,
+  ROUTER_TASK_BUDGET_REFUNDED_EVENT,
   ROUTER_TASK_CREATED_EVENT,
   ROUTER_VERDICT_DELIVERY_CLAIMED_EVENT,
 } from '../adapters/mech/contracts.js';
@@ -1443,6 +1444,8 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
                 taskCidDigest: evArgs.taskCidDigest.toLowerCase() as `0x${string}`,
                 creator: evArgs.creator.toLowerCase() as `0x${string}`,
                 maxClaims: Number(evArgs.maxClaims),
+                // Tokenless JinnRouterV3 finalizes on the first delivered
+                // verdict; requiredVerdicts is not present in TaskCreated.
                 requiredVerdicts: 1,
                 createdAtBlock,
                 finalized: false,
@@ -1598,6 +1601,64 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
         `OnchainDiscoveryAPI.getTaskLifecycleEvidence: getLogs for VerdictDeliveryClaimed failed`,
         err,
       );
+    }
+
+    let refundedTaskIds: Set<string>;
+    try {
+      const lists = await scanLogsInChunks(
+        async (start, end) => {
+          const logs = await (client as PublicClient).getLogs({
+            address: routerAddress,
+            event: ROUTER_TASK_BUDGET_REFUNDED_EVENT,
+            fromBlock: start,
+            toBlock: end,
+          });
+          const decoded: string[] = [];
+          for (const log of logs) {
+            try {
+              const event = decodeEventLog({
+                abi: JINN_ROUTER_ABI,
+                data: log.data,
+                topics: log.topics,
+              });
+              if (event.eventName !== 'TaskBudgetRefunded') continue;
+              const taskId = String((event.args as { taskId: bigint }).taskId);
+              if (knownTaskIds.has(taskId)) decoded.push(taskId);
+            } catch {
+              // Not a TaskBudgetRefunded event — skip.
+            }
+          }
+          return decoded;
+        },
+        fromBlock,
+        currentBlock,
+        chunk,
+        undefined,
+        MAX_OPERATOR_COUNT_TASK_PAGES,
+      );
+      refundedTaskIds = new Set(lists);
+    } catch (err) {
+      if (err instanceof DiscoveryUnavailableError) throw err;
+      throw new DiscoveryUnavailableError(
+        `OnchainDiscoveryAPI.getTaskLifecycleEvidence: getLogs for TaskBudgetRefunded failed`,
+        err,
+      );
+    }
+
+    const verdictCountsByAttempt = new Map<string, number>();
+    for (const verdict of verdicts) {
+      const key = `${verdict.taskId}|${verdict.attemptIndex}|${verdict.chainId}`;
+      verdictCountsByAttempt.set(key, (verdictCountsByAttempt.get(key) ?? 0) + 1);
+    }
+    for (const task of tasks) {
+      task.finalized = attempts.some((attempt) =>
+        attempt.taskId === task.taskId
+        && attempt.chainId === task.chainId
+        && (verdictCountsByAttempt.get(
+          `${attempt.taskId}|${attempt.attemptIndex}|${attempt.chainId}`,
+        ) ?? 0) >= task.requiredVerdicts,
+      );
+      task.refunded = refundedTaskIds.has(task.taskId);
     }
 
     return assembleTaskLifecycleEvidence({
