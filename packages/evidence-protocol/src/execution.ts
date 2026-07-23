@@ -55,6 +55,14 @@ function hasType(entity: Entity | undefined, type: string): boolean {
   return types(entity).includes(type);
 }
 
+function isAgentEntity(entity: Entity | undefined): boolean {
+  return types(entity).some((type) =>
+    ["Person", "Organization", "prov:Agent", "prov:SoftwareAgent"].includes(
+      type,
+    ),
+  );
+}
+
 function values(value: unknown): readonly unknown[] {
   return value === undefined ? [] : Array.isArray(value) ? value : [value];
 }
@@ -99,13 +107,20 @@ function issue(
 function ordered(
   diagnostics: readonly ConformanceDiagnostic[],
 ): readonly ConformanceDiagnostic[] {
-  return [...diagnostics].sort(
+  const sorted = [...diagnostics].sort(
     (left, right) =>
       left.path.localeCompare(right.path) ||
       left.code.localeCompare(right.code) ||
       (left.entityId ?? "").localeCompare(right.entityId ?? "") ||
       left.message.localeCompare(right.message),
   );
+  const seen = new Set<string>();
+  return sorted.filter((diagnostic) => {
+    const key = `${diagnostic.code}\0${diagnostic.path}\0${diagnostic.entityId ?? ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function parseJson(
@@ -459,6 +474,7 @@ function validateRoot(
     creators.length !== 1 ||
     !creator ||
     !isAbsoluteIri(creator["@id"]) ||
+    !isAgentEntity(creator) ||
     typeof root.datePublished !== "string"
   ) {
     diagnostics.push(
@@ -638,11 +654,7 @@ function validateExecution(
     const agent = agents[0]!;
     if (
       !isAbsoluteIri(agent["@id"]) ||
-      !types(agent).some((type) =>
-        ["Person", "Organization", "prov:Agent", "prov:SoftwareAgent"].includes(
-          type,
-        ),
-      )
+      !isAgentEntity(agent)
     ) {
       diagnostics.push(
         issue(
@@ -911,16 +923,7 @@ export function validateExecutionEvidence(
     validateProfileEntity(graph, diagnostics);
     validateArtifacts(graph, diagnostics);
     validateDerivations(graph, diagnostics);
-    for (const entity of graph.entities.filter((candidate) =>
-      types(candidate).some((type) =>
-        [
-          "Person",
-          "Organization",
-          "prov:Agent",
-          "prov:SoftwareAgent",
-        ].includes(type),
-      ),
-    )) {
+    for (const entity of graph.entities.filter(isAgentEntity)) {
       if (!isAbsoluteIri(entity["@id"])) {
         diagnostics.push(
           issue(
