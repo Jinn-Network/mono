@@ -65,9 +65,11 @@ Project field for lifecycle state, and no machine path ever writes one.**
   Status from derived facts on a relaxed cadence. Drift is cosmetic and
   self-corrects; nothing consumes the painted value. The painter also archives
   stale Done items (relocating the board-archive sweep).
-- **Machine-created work never touches the board.** Child issues (§5) are born
-  triaged via labels/body and are eligible without board membership. The
-  painter may add them for visibility.
+- **Machine-created work uses the same Project triage surface.** Child issues
+  (§5) are added to the board at filing with Blocked on / Effort / Priority set
+  via the production port. Kind labels (`review-finding`, `reconcile`,
+  `ci-failure`) remain flat tags. The painter may still repaint Status for
+  visibility.
 
 ## 3. States
 
@@ -149,9 +151,9 @@ follow-ups in the same session command:
   `--follow-ups-file` on `autopilot session review-verdict --state APPROVE`
   files zero-or-more **ordinary** issues (not children) with body marker
   `<!-- jinn-autopilot:review-follow-up pr=<N> head=<sha> index=<i> -->`,
-  Issue Type `feat|chore|fix|refactor`, and machine triage
-  (`effort:*` / `priority:*` labels plus Project Blocked on / Effort /
-  Priority; default Blocked on: Nothing). Cap ≤5 per exact head. Filing is
+  Issue Type `feat|chore|fix|refactor`, and machine triage on the Project
+  (Blocked on / Effort / Priority; default Blocked on: Nothing). Cap ≤5 per
+  exact head. Filing is
   idempotent on `pr+head+index` and runs before terminal publish. These
   issues never carry `review-finding`/`reconcile` labels or the child
   marker, never appear in `openChildKinds`, and **do not** move the parent
@@ -252,7 +254,7 @@ it. Dispositions:
 | `merge-prep` | Deleted with its state (§8). |
 | `reconcile` (new) | Successor to merge-prep's irreducible core: merge-from-base method, the conflict taxonomy as routing (§6.2), canonical lockfile regeneration, flagged-hunk summary, `child-complete`; escalation only by confidence or policy (§6.3). |
 | `fix-child` (new) | implement-issue variant for finding children: work on the parent's branch, append-only checkpoints, no PR of its own, close via `child-complete`. |
-| `eng-day` | The observe-mode derivation remains its authoritative lifecycle source (painter lag is harmless to its conclusions). It must read machine triage from labels so children are not reported as untriaged drift, and it gains review findings and pending reconciliations as visible work items in the brief. |
+| `eng-day` | The observe-mode derivation remains its authoritative lifecycle source (painter lag is harmless to its conclusions). Machine-created children and follow-ups use the same Project triage fields as human work; it gains review findings and pending reconciliations as visible work items in the brief. |
 | `merge-batch` | Authority unchanged (human-invoked, same gates); merge-prep and Status-field references cleaned up. |
 | `autopilot-runtime` | Mechanics unchanged; verb roster updates only (+`review-findings`, +`child-complete`, −`review-fix-publish`, −`merge-prep-complete`). |
 

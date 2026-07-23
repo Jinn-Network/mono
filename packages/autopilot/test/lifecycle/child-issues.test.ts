@@ -21,7 +21,7 @@ function record(
     title: over.title ?? `Child ${over.number}`,
     body: over.body ?? `${marker}\n\nfindings`,
     state: over.state ?? 'open',
-    labels: over.labels ?? [over.kind, 'effort:low', 'priority:p1'],
+    labels: over.labels ?? [over.kind],
     ...over,
   };
 }
@@ -30,16 +30,19 @@ function fakePort(seed: ChildIssueRecord[] = []): ChildIssuePort & {
   readonly created: { title: string; body: string; labels: string[] }[];
   readonly closed: number[];
   readonly typed: number[];
+  readonly triaged: Array<{ issueNumber: number; effort: string; priority: string }>;
 } {
   const issues = [...seed];
   const created: { title: string; body: string; labels: string[] }[] = [];
   const closed: number[] = [];
   const typed: number[] = [];
+  const triaged: Array<{ issueNumber: number; effort: string; priority: string }> = [];
   let next = Math.max(0, ...issues.map((issue) => issue.number)) + 1;
   return {
     created,
     closed,
     typed,
+    triaged,
     async searchOpenByMarker(marker) {
       return issues.filter(
         (issue) => issue.state === 'open' && issue.body.includes(marker),
@@ -69,6 +72,9 @@ function fakePort(seed: ChildIssueRecord[] = []): ChildIssuePort & {
     },
     async setIssueTypeFix(issueNumber) {
       typed.push(issueNumber);
+    },
+    async ensureTriageComplete(input) {
+      triaged.push({ ...input });
     },
     async closeIssue(issueNumber, _comment) {
       closed.push(issueNumber);
@@ -114,13 +120,12 @@ describe('fileChildIssue', () => {
     expect(first).toMatchObject({ created: true });
     if ('runawayHold' in first && first.runawayHold) throw new Error('unexpected hold');
     expect(port.created).toHaveLength(1);
-    expect(port.created[0]!.labels).toEqual([
-      'review-finding',
-      'effort:low',
-      'priority:p1',
-    ]);
+    expect(port.created[0]!.labels).toEqual(['review-finding']);
     expect(port.created[0]!.body).toContain(formatChildMarker(10, 'review-finding'));
     expect(port.typed).toEqual([first.number]);
+    expect(port.triaged).toEqual([
+      { issueNumber: first.number, effort: 'low', priority: 'p1' },
+    ]);
 
     const second = await fileChildIssue(port, {
       parentPr: 10,
@@ -132,6 +137,10 @@ describe('fileChildIssue', () => {
     });
     expect(second).toEqual({ number: first.number, created: false });
     expect(port.created).toHaveLength(1);
+    expect(port.triaged).toEqual([
+      { issueNumber: first.number, effort: 'low', priority: 'p1' },
+      { issueNumber: first.number, effort: 'medium', priority: 'p1' },
+    ]);
   });
 
   it('allows a different kind on the same parent', async () => {
@@ -216,11 +225,46 @@ describe('runaway helpers and knobs', () => {
 });
 
 describe('production port GraphQL type assign contract', () => {
-  it('uses the fix Issue Type id constant', async () => {
+  it('uses the fix Issue Type id constant and applies Project triage', async () => {
     const { FIX_ISSUE_TYPE_ID, makeProductionChildIssuePort } = await import(
       '../../src/lifecycle/child-issues-production.js'
     );
     expect(FIX_ISSUE_TYPE_ID).toBe('IT_kwDODh3-Ac4BvpyK');
+
+    const FIELD_LIST_JSON = JSON.stringify({
+      fields: [
+        {
+          id: 'PVTSSF_blocked',
+          name: 'Blocked on',
+          options: [
+            { id: 'opt_nothing', name: 'Nothing' },
+            { id: 'opt_human', name: 'Human' },
+          ],
+        },
+        {
+          id: 'PVTSSF_effort',
+          name: 'Effort',
+          options: [
+            { id: 'opt_low', name: 'Low' },
+            { id: 'opt_medium', name: 'Medium' },
+            { id: 'opt_high', name: 'High' },
+            { id: 'opt_xhigh', name: 'XHigh' },
+            { id: 'opt_max', name: 'Max' },
+          ],
+        },
+        {
+          id: 'PVTSSF_priority',
+          name: 'Priority',
+          options: [
+            { id: 'opt_p0', name: 'P0' },
+            { id: 'opt_p1', name: 'P1' },
+            { id: 'opt_p2', name: 'P2' },
+            { id: 'opt_p3', name: 'P3' },
+            { id: 'opt_p4', name: 'P4' },
+          ],
+        },
+      ],
+    });
 
     const calls: string[][] = [];
     const port = makeProductionChildIssuePort({
@@ -238,6 +282,15 @@ describe('production port GraphQL type assign contract', () => {
         if (args[0] === 'api' && args[1] === 'graphql') {
           return '{"data":{}}';
         }
+        if (args[0] === 'project' && args[1] === 'field-list') {
+          return FIELD_LIST_JSON;
+        }
+        if (args[0] === 'project' && args[1] === 'item-add') {
+          return JSON.stringify({ id: 'PVTI_child99' });
+        }
+        if (args[0] === 'project' && args[1] === 'item-edit') {
+          return '';
+        }
         return '';
       },
     });
@@ -254,6 +307,23 @@ describe('production port GraphQL type assign contract', () => {
     const graphql = calls.find((args) => args[0] === 'api' && args[1] === 'graphql');
     expect(graphql?.join(' ')).toContain('typeId=IT_kwDODh3-Ac4BvpyK');
     expect(graphql?.join(' ')).toContain('issueId=I_kwIssue99');
+
+    const createCall = calls.find((args) => args[0] === 'issue' && args[1] === 'create');
+    expect(createCall).toEqual(expect.arrayContaining(['--label', 'reconcile']));
+    expect(createCall!.join(' ')).not.toContain('effort:');
+    expect(createCall!.join(' ')).not.toContain('priority:');
+
+    const itemEdits = calls.filter((args) => args[0] === 'project' && args[1] === 'item-edit');
+    expect(itemEdits).toHaveLength(3);
+    expect(itemEdits.some((args) =>
+      args.includes('PVTSSF_blocked') && args.includes('opt_nothing'),
+    )).toBe(true);
+    expect(itemEdits.some((args) =>
+      args.includes('PVTSSF_effort') && args.includes('opt_low'),
+    )).toBe(true);
+    expect(itemEdits.some((args) =>
+      args.includes('PVTSSF_priority') && args.includes('opt_p1'),
+    )).toBe(true);
     // silence unused vi import if tree-shaken differently
     expect(vi).toBeDefined();
   });
