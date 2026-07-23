@@ -41,3 +41,4 @@ export * from './integration-ladder.js';
 export * from './board-archive.js';
 export * from './board-archive-executor-production.js';
 export * from './board-painter.js';
+export * from './marketplace-adoption-receipt.js';
