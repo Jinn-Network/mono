@@ -55,6 +55,22 @@ describe('reject-publish classes A4/A5 (#1972)', () => {
     ).rejects.toThrow(/scrub class A5/);
   });
 
+  it('drops structural secret-carrier keys without rejecting publish', async () => {
+    const result = await buildSeedScrubPipeline().run({
+      'env.OPENAI_API_KEY': 'sk-synthetic-not-a-real-key',
+      'http.request.header.authorization': 'Bearer synthetic-token',
+      content: 'ordinary publishable evidence',
+    });
+
+    expect(result.attributes['env.OPENAI_API_KEY']).toBeUndefined();
+    expect(result.attributes['http.request.header.authorization']).toBeUndefined();
+    expect(result.attributes.content).toBe('ordinary publishable evidence');
+    expect(result.rejected).toBe(false);
+    expect(
+      result.redactions.filter((redaction) => redaction.kind === 'dropped-key'),
+    ).toHaveLength(2);
+  });
+
   it('does not reject bare 40-hex git SHAs or 0x+64 tx digests', async () => {
     const gitSha = 'd'.repeat(40);
     const tx = `0x${'c'.repeat(64)}`;

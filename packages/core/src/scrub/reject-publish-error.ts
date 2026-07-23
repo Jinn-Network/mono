@@ -24,14 +24,20 @@ export class RejectPublishError extends Error {
   }
 }
 
-/** Findings whose policy disposition is reject-publish. */
+/**
+ * Content findings whose policy disposition is reject-publish.
+ * Structural `drop-key` findings are already removed by applyDispositions and
+ * intentionally continue through redact-mode publish lanes.
+ */
 export function rejectPublishFindings(
   findings: Finding[] | undefined,
   policy: PolicyTable = DEFAULT_POLICY,
 ): Finding[] {
   if (!findings?.length) return [];
   return findings.filter(
-    (f) => resolveDisposition(f.class, f.confidence, policy) === 'reject-publish',
+    (f) =>
+      !f.evidence.includes('drop-key') &&
+      resolveDisposition(f.class, f.confidence, policy) === 'reject-publish',
   );
 }
 
