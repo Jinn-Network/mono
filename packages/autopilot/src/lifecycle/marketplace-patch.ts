@@ -32,6 +32,25 @@ export class MarketplacePatchCheckError extends Error {
   }
 }
 
+export type MarketplacePatchWorktreeRejectionReason =
+  | 'git-index-inspection-failed'
+  | 'malformed-index-output'
+  | 'unsafe-existing-mode';
+
+export class MarketplacePatchWorktreeValidationError extends Error {
+  readonly reason: MarketplacePatchWorktreeRejectionReason;
+
+  constructor(
+    reason: MarketplacePatchWorktreeRejectionReason,
+    message: string,
+    cause?: unknown,
+  ) {
+    super(message, { cause });
+    this.name = 'MarketplacePatchWorktreeValidationError';
+    this.reason = reason;
+  }
+}
+
 export type MarketplacePatchApplicationFailureReason =
   | 'invalid-worktree-path'
   | 'git-apply-failed';
@@ -64,7 +83,7 @@ export type MarketplacePatchGitRunner = (
   command: 'git',
   args: readonly string[],
   options: MarketplacePatchGitOptions,
-) => Promise<void>;
+) => Promise<Uint8Array>;
 
 interface ParsedPath {
   readonly value: string;
@@ -104,6 +123,8 @@ const INDEX_LINE_PATTERN =
   /^index [0-9a-f]+\.\.[0-9a-f]+(?: ([0-7]{6}))?$/i;
 const HUNK_HEADER_PATTERN =
   /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@(?: .*)?$/;
+const INDEX_STAGE_RECORD_PATTERN =
+  /^([0-7]{6}) ([0-9a-f]{40}|[0-9a-f]{64}) ([0-3])\t(.+)$/;
 
 function validationError(
   reason: MarketplacePatchRejectionReason,
@@ -531,6 +552,65 @@ export function validateMarketplacePatch(
   };
 }
 
+function worktreeValidationError(
+  reason: MarketplacePatchWorktreeRejectionReason,
+  message: string,
+  cause?: unknown,
+): never {
+  throw new MarketplacePatchWorktreeValidationError(reason, message, cause);
+}
+
+function validateTouchedPathIndexModes(
+  output: Uint8Array,
+  touchedPaths: readonly string[],
+): void {
+  if (output.byteLength === 0) return;
+  if (output[output.byteLength - 1] !== 0) {
+    worktreeValidationError(
+      'malformed-index-output',
+      'Git index inspection output is not NUL-terminated',
+    );
+  }
+
+  let decoded: string;
+  try {
+    decoded = textDecoder.decode(output);
+  } catch {
+    return worktreeValidationError(
+      'malformed-index-output',
+      'Git index inspection output is not valid UTF-8',
+    );
+  }
+  const expected = new Set(touchedPaths);
+  const observed = new Set<string>();
+  const records = decoded.slice(0, -1).split('\0');
+  for (const record of records) {
+    const match = INDEX_STAGE_RECORD_PATTERN.exec(record);
+    if (match === null) {
+      worktreeValidationError(
+        'malformed-index-output',
+        'Git index inspection returned a malformed stage record',
+      );
+    }
+    const mode = match[1]!;
+    const stage = match[3]!;
+    const path = match[4]!;
+    if (!REGULAR_FILE_MODES.has(mode)) {
+      worktreeValidationError(
+        'unsafe-existing-mode',
+        `Touched path has unsupported existing index mode ${mode}: ${path}`,
+      );
+    }
+    if (stage !== '0' || !expected.has(path) || observed.has(path)) {
+      worktreeValidationError(
+        'malformed-index-output',
+        'Git index inspection returned an unexpected or duplicate path',
+      );
+    }
+    observed.add(path);
+  }
+}
+
 export const defaultMarketplacePatchGitRunner: MarketplacePatchGitRunner = (
   command,
   args,
@@ -538,8 +618,10 @@ export const defaultMarketplacePatchGitRunner: MarketplacePatchGitRunner = (
 ) => new Promise((resolve, reject) => {
   const child = spawn(command, [...args], {
     cwd: options.cwd,
-    stdio: ['pipe', 'ignore', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe'],
   });
+  const stdoutChunks: Buffer[] = [];
+  let stdoutBytes = 0;
   const stderrChunks: Buffer[] = [];
   let stderrBytes = 0;
   let settled = false;
@@ -549,6 +631,14 @@ export const defaultMarketplacePatchGitRunner: MarketplacePatchGitRunner = (
     reject(error);
   };
 
+  child.stdout.on('data', (chunk: Buffer) => {
+    stdoutChunks.push(chunk);
+    stdoutBytes += chunk.byteLength;
+    if (stdoutBytes > 8 * 1024 * 1024) {
+      child.kill();
+      rejectOnce(new Error('Git command output exceeded safety limit'));
+    }
+  });
   child.stderr.on('data', (chunk: Buffer) => {
     const remaining = 64 * 1024 - stderrBytes;
     if (remaining <= 0) return;
@@ -562,11 +652,11 @@ export const defaultMarketplacePatchGitRunner: MarketplacePatchGitRunner = (
     if (settled) return;
     settled = true;
     if (code === 0) {
-      resolve();
+      resolve(Buffer.concat(stdoutChunks));
       return;
     }
     const stderr = Buffer.concat(stderrChunks).toString('utf8').trim();
-    reject(new Error(`git apply exited with code ${code ?? 'unknown'}${stderr ? `: ${stderr}` : ''}`));
+    reject(new Error(`git exited with code ${code ?? 'unknown'}${stderr ? `: ${stderr}` : ''}`));
   });
   child.stdin.end(Buffer.from(options.stdin));
 });
@@ -575,9 +665,10 @@ export interface ApplyMarketplacePatchInput {
   readonly artifact: Uint8Array;
   /**
    * Absolute path to a trusted, existing worktree. The caller owns exclusive
-   * mutation of that worktree until this promise settles. The function uses
-   * one immutable artifact snapshot and adjacent check/apply calls, but Git
-   * offers no cross-process lock that can eliminate unrelated worktree races.
+   * mutation of both its index and filesystem state until this promise settles.
+   * The function uses one immutable artifact snapshot and adjacent index-mode
+   * inspection/check/apply calls, but Git offers no cross-process lock that can
+   * eliminate unrelated index or worktree races.
    */
   readonly worktreePath: string;
   readonly runGit?: MarketplacePatchGitRunner;
@@ -586,9 +677,11 @@ export interface ApplyMarketplacePatchInput {
 /**
  * Validates, checks, and applies one marketplace patch to a trusted worktree.
  *
- * `git apply --check` always completes before plain `git apply` is invoked.
- * Neither invocation uses a patch filename or `--3way`; byte-identical copies
- * of the validated snapshot are sent over stdin.
+ * Index modes for every touched path are inspected without following filesystem
+ * symlinks. That inspection and `git apply --check` always complete before
+ * plain `git apply` is invoked. Neither apply invocation uses a patch filename
+ * or `--3way`; byte-identical copies of the validated snapshot are sent over
+ * stdin.
  */
 export async function applyMarketplacePatchToWorktree(
   input: ApplyMarketplacePatchInput,
@@ -607,6 +700,32 @@ export async function applyMarketplacePatchToWorktree(
   }
 
   const runGit = input.runGit ?? defaultMarketplacePatchGitRunner;
+  let indexOutput: Uint8Array;
+  try {
+    indexOutput = await runGit(
+      'git',
+      [
+        '--literal-pathspecs',
+        'ls-files',
+        '--stage',
+        '-z',
+        '--',
+        ...validated.touchedPaths,
+      ],
+      {
+        cwd: input.worktreePath,
+        stdin: new Uint8Array(),
+      },
+    );
+  } catch (error) {
+    throw new MarketplacePatchWorktreeValidationError(
+      'git-index-inspection-failed',
+      'Marketplace patch could not inspect touched index modes',
+      error,
+    );
+  }
+  validateTouchedPathIndexModes(indexOutput, validated.touchedPaths);
+
   try {
     await runGit('git', ['apply', '--check'], {
       cwd: input.worktreePath,

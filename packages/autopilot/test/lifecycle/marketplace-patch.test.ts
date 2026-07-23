@@ -1,4 +1,14 @@
 import { Buffer } from 'node:buffer';
+import { execFileSync } from 'node:child_process';
+import {
+  mkdtempSync,
+  readlinkSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   MAX_MARKETPLACE_PATCH_BYTES,
@@ -11,6 +21,18 @@ import {
 } from '../../src/lifecycle/marketplace-patch.js';
 
 const MAX_BYTES = 2 * 1024 * 1024;
+const EMPTY_GIT_OUTPUT = new Uint8Array();
+
+function indexStageRecord(
+  path: string,
+  mode = '100644',
+  stage = '0',
+): Uint8Array {
+  return Buffer.from(
+    `${mode} ${'a'.repeat(40)} ${stage}\t${path}\0`,
+    'utf8',
+  );
+}
 
 function modificationPatch(path = 'src/value.ts'): string {
   return [
@@ -395,6 +417,83 @@ describe('marketplace patch validation', () => {
 });
 
 describe('marketplace patch worktree application', () => {
+  it('rejects a mode-less content diff targeting a tracked symlink without repointing it', async () => {
+    const repository = mkdtempSync(join(tmpdir(), 'marketplace-patch-symlink-'));
+    try {
+      execFileSync('git', ['init', '--quiet'], { cwd: repository });
+      symlinkSync('target-before', join(repository, 'link'));
+      execFileSync('git', ['add', '--', 'link'], { cwd: repository });
+      const oldBlob = execFileSync('git', ['hash-object', '--stdin'], {
+        cwd: repository,
+        encoding: 'utf8',
+        input: 'target-before',
+      }).trim();
+      const newBlob = execFileSync('git', ['hash-object', '--stdin'], {
+        cwd: repository,
+        encoding: 'utf8',
+        input: 'target-after',
+      }).trim();
+      const artifact = Buffer.from([
+        'diff --git a/link b/link',
+        `index ${oldBlob.slice(0, 7)}..${newBlob.slice(0, 7)}`,
+        '--- a/link',
+        '+++ b/link',
+        '@@ -1 +1 @@',
+        '-target-before',
+        '\\ No newline at end of file',
+        '+target-after',
+        '\\ No newline at end of file',
+        '',
+      ].join('\n'));
+
+      await expect(applyMarketplacePatchToWorktree({
+        artifact,
+        worktreePath: repository,
+      })).rejects.toMatchObject({
+        reason: 'unsafe-existing-mode',
+      });
+      expect(readlinkSync(join(repository, 'link'))).toBe('target-before');
+    } finally {
+      rmSync(repository, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a tracked gitlink observed from a real Git index', async () => {
+    const repository = mkdtempSync(join(tmpdir(), 'marketplace-patch-gitlink-'));
+    try {
+      execFileSync('git', ['init', '--quiet'], { cwd: repository });
+      execFileSync('git', ['config', 'user.email', 'test@example.com'], {
+        cwd: repository,
+      });
+      execFileSync('git', ['config', 'user.name', 'Patch Test'], {
+        cwd: repository,
+      });
+      writeFileSync(join(repository, 'seed.txt'), 'seed\n');
+      execFileSync('git', ['add', '--', 'seed.txt'], { cwd: repository });
+      execFileSync('git', ['commit', '--quiet', '-m', 'seed'], {
+        cwd: repository,
+      });
+      const commit = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: repository,
+        encoding: 'utf8',
+      }).trim();
+      execFileSync(
+        'git',
+        ['update-index', '--add', '--cacheinfo', `160000,${commit},vendor/module`],
+        { cwd: repository },
+      );
+
+      await expect(applyMarketplacePatchToWorktree({
+        artifact: Buffer.from(modificationPatch('vendor/module')),
+        worktreePath: repository,
+      })).rejects.toMatchObject({
+        reason: 'unsafe-existing-mode',
+      });
+    } finally {
+      rmSync(repository, { recursive: true, force: true });
+    }
+  });
+
   it('runs check before apply, uses stdin/argument arrays, and never requests three-way merge', async () => {
     const artifact = Buffer.from(modificationPatch());
     const calls: Array<{
@@ -410,6 +509,10 @@ describe('marketplace patch worktree application', () => {
         cwd: options.cwd,
         stdin: Uint8Array.from(options.stdin),
       });
+      if (args[0] === '--literal-pathspecs') {
+        return indexStageRecord('src/value.ts');
+      }
+      return EMPTY_GIT_OUTPUT;
     };
 
     await expect(applyMarketplacePatchToWorktree({
@@ -419,6 +522,18 @@ describe('marketplace patch worktree application', () => {
     })).resolves.toMatchObject({ touchedPaths: ['src/value.ts'] });
 
     expect(calls.map(({ command, args, cwd }) => ({ command, args, cwd }))).toEqual([
+      {
+        command: 'git',
+        args: [
+          '--literal-pathspecs',
+          'ls-files',
+          '--stage',
+          '-z',
+          '--',
+          'src/value.ts',
+        ],
+        cwd: '/trusted/worktree',
+      },
       {
         command: 'git',
         args: ['apply', '--check'],
@@ -431,14 +546,16 @@ describe('marketplace patch worktree application', () => {
       },
     ]);
     expect(calls.every((call) => !call.args.includes('--3way'))).toBe(true);
-    expect(Buffer.from(calls[0]!.stdin).equals(artifact)).toBe(true);
+    expect(calls[0]!.stdin).toHaveLength(0);
     expect(Buffer.from(calls[1]!.stdin).equals(artifact)).toBe(true);
+    expect(Buffer.from(calls[2]!.stdin).equals(artifact)).toBe(true);
   });
 
   it('does not invoke Git when validation fails', async () => {
     const calls: string[][] = [];
     const runGit: MarketplacePatchGitRunner = async (_command, args) => {
       calls.push([...args]);
+      return EMPTY_GIT_OUTPUT;
     };
 
     await expect(applyMarketplacePatchToWorktree({
@@ -455,6 +572,7 @@ describe('marketplace patch worktree application', () => {
     const calls: string[][] = [];
     const runGit: MarketplacePatchGitRunner = async (_command, args) => {
       calls.push([...args]);
+      return EMPTY_GIT_OUTPUT;
     };
 
     await expect(applyMarketplacePatchToWorktree({
@@ -471,6 +589,7 @@ describe('marketplace patch worktree application', () => {
     const calls: string[][] = [];
     const runGit: MarketplacePatchGitRunner = async (_command, args) => {
       calls.push([...args]);
+      if (args[0] === '--literal-pathspecs') return EMPTY_GIT_OUTPUT;
       throw new Error('patch does not apply');
     };
 
@@ -487,7 +606,17 @@ describe('marketplace patch worktree application', () => {
 
     expect(thrown).toBeInstanceOf(MarketplacePatchCheckError);
     expect(thrown).toMatchObject({ reason: 'git-check-failed' });
-    expect(calls).toEqual([['apply', '--check']]);
+    expect(calls).toEqual([
+      [
+        '--literal-pathspecs',
+        'ls-files',
+        '--stage',
+        '-z',
+        '--',
+        'src/value.ts',
+      ],
+      ['apply', '--check'],
+    ]);
   });
 
   it('exposes a stable application error after a successful check', async () => {
@@ -497,6 +626,7 @@ describe('marketplace patch worktree application', () => {
       if (args[0] === 'apply' && args.length === 1) {
         throw new Error('worktree changed after check');
       }
+      return EMPTY_GIT_OUTPUT;
     };
 
     let thrown: unknown;
@@ -513,6 +643,14 @@ describe('marketplace patch worktree application', () => {
     expect(thrown).toBeInstanceOf(MarketplacePatchApplicationError);
     expect(thrown).toMatchObject({ reason: 'git-apply-failed' });
     expect(calls).toEqual([
+      [
+        '--literal-pathspecs',
+        'ls-files',
+        '--stage',
+        '-z',
+        '--',
+        'src/value.ts',
+      ],
       ['apply', '--check'],
       ['apply'],
     ]);
@@ -522,9 +660,12 @@ describe('marketplace patch worktree application', () => {
     const artifact = Buffer.from(modificationPatch());
     const expected = Buffer.from(artifact);
     const observed: Buffer[] = [];
-    const runGit: MarketplacePatchGitRunner = async (_command, _args, options) => {
-      observed.push(Buffer.from(options.stdin));
-      options.stdin.fill(0);
+    const runGit: MarketplacePatchGitRunner = async (_command, args, options) => {
+      if (args[0] === 'apply') {
+        observed.push(Buffer.from(options.stdin));
+        options.stdin.fill(0);
+      }
+      return EMPTY_GIT_OUTPUT;
     };
 
     await applyMarketplacePatchToWorktree({
@@ -537,5 +678,96 @@ describe('marketplace patch worktree application', () => {
     expect(observed[0]!.equals(expected)).toBe(true);
     expect(observed[1]!.equals(expected)).toBe(true);
     expect(artifact.equals(expected)).toBe(true);
+  });
+
+  it.each([
+    ['gitlink', '160000'],
+    ['unsupported regular mode', '100600'],
+  ])('rejects an existing tracked %s before checking or applying', async (_name, mode) => {
+    const calls: string[][] = [];
+    const runGit: MarketplacePatchGitRunner = async (_command, args) => {
+      calls.push([...args]);
+      if (args[0] !== '--literal-pathspecs') {
+        throw new Error('apply command must not run');
+      }
+      return indexStageRecord('vendor/module', mode);
+    };
+
+    await expect(applyMarketplacePatchToWorktree({
+      artifact: Buffer.from(modificationPatch('vendor/module')),
+      worktreePath: '/trusted/worktree',
+      runGit,
+    })).rejects.toMatchObject({
+      reason: 'unsafe-existing-mode',
+    });
+    expect(calls).toEqual([[
+      '--literal-pathspecs',
+      'ls-files',
+      '--stage',
+      '-z',
+      '--',
+      'vendor/module',
+    ]]);
+  });
+
+  it.each([
+    [
+      'malformed record',
+      Buffer.from('not-an-index-record\0'),
+    ],
+    [
+      'non-NUL-terminated',
+      Buffer.from(`100644 ${'a'.repeat(40)} 0\tsrc/value.ts`),
+    ],
+    [
+      'duplicate',
+      Buffer.concat([
+        indexStageRecord('src/value.ts'),
+        indexStageRecord('src/value.ts'),
+      ]),
+    ],
+    [
+      'unexpected path',
+      indexStageRecord('src/other.ts'),
+    ],
+    [
+      'non-zero merge stage',
+      indexStageRecord('src/value.ts', '100644', '1'),
+    ],
+  ])('rejects %s index output before checking or applying', async (_name, output) => {
+    const calls: string[][] = [];
+    const runGit: MarketplacePatchGitRunner = async (_command, args) => {
+      calls.push([...args]);
+      if (args[0] !== '--literal-pathspecs') {
+        throw new Error('apply command must not run');
+      }
+      return output;
+    };
+
+    await expect(applyMarketplacePatchToWorktree({
+      artifact: Buffer.from(modificationPatch()),
+      worktreePath: '/trusted/worktree',
+      runGit,
+    })).rejects.toMatchObject({
+      reason: 'malformed-index-output',
+    });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('exposes a stable index-inspection error without checking or applying', async () => {
+    const calls: string[][] = [];
+    const runGit: MarketplacePatchGitRunner = async (_command, args) => {
+      calls.push([...args]);
+      throw new Error('index unavailable');
+    };
+
+    await expect(applyMarketplacePatchToWorktree({
+      artifact: Buffer.from(modificationPatch()),
+      worktreePath: '/trusted/worktree',
+      runGit,
+    })).rejects.toMatchObject({
+      reason: 'git-index-inspection-failed',
+    });
+    expect(calls).toHaveLength(1);
   });
 });
