@@ -34,37 +34,31 @@ hermes chat
 ```
 
 No slash command is required. Jinn checks the first message for relevant prior
-evidence before Hermes answers. When it finds an eligible match, you will see a
-line like:
+evidence before Hermes answers. When it has evidence it can retrieve for the
+task, you will see a line like:
 
 ```text
 ◇ corpus  provided 1 evidence packet  ·  searched: dashboard, version, test
 ```
 
-Hermes receives that evidence as context and can use it in its answer. It can
-also search and fetch corpus evidence later in the task when useful.
+Hermes receives that evidence as context and can use it in its answer.
 
-If there is no relevant evidence, Jinn stays out of the way. At the end of the
-session, Hermes reports:
+If no retrievable evidence matches the task, Jinn stays out of the way. At the
+end of the session, Hermes reports:
 
 ```text
 knowledge searched · nothing relevant found
 ```
 
-That is a successful search, not an installation problem.
-
-## Check the corpus manually
-
-Inside a Hermes chat, `/corpus <query>` shows raw search results. This is useful
-for inspection and troubleshooting, but it is not required during normal use.
-
-If corpus access fails, run `hermes jinn-doctor`. The doctor names the failed
-check and prints the next command to run; it does not change your machine.
+That is a successful search, not an installation problem. If Jinn reports a
+corpus access failure instead, run `hermes jinn-doctor`. The doctor names the
+failed check and prints the next command to run; it does not change your
+machine.
 
 ## Local task capture
 
-Jinn keeps a scrubbed episode of each session locally. Nothing is shared
-automatically.
+Jinn keeps a scrubbed episode of each session locally. Nothing is published to
+the Jinn network automatically.
 
 ## Update
 
