@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 import importlib
 import hashlib
+import threading
+from pathlib import Path
 
 import pytest
 
@@ -38,6 +40,7 @@ def ok_response(**value_overrides) -> str:
         "searchedTerms": ["dashboard", "vitest", "update_available"],
         "eligibleRefs": ["bafySourceEpisode"],
         "deliveredRefs": ["bafySourceEpisode"],
+        "deliveredCanonicalEpisodeIds": ["episode-dashboard-fix"],
         "deliveryMode": "delivered",
         **value_overrides,
     }
@@ -92,6 +95,68 @@ def test_pickup_omits_repository_slug_when_unknown():
     pickup.pickup(MSG, runner=runner, session_id="s1")
     request = json.loads(runner.calls[0][1])
     assert "repositorySlug" not in request["meta"]
+
+
+def test_pickup_sends_canonical_exclusions_and_returns_delivered_ids():
+    runner = PickupRunner()
+
+    outcome = pickup.pickup_with_outcome(
+        MSG,
+        runner=runner,
+        exclude_canonical_episode_ids=["episode-old"],
+    )
+
+    request = json.loads(runner.calls[0][1])
+    assert request["excludeCanonicalEpisodeIds"] == ["episode-old"]
+    assert outcome.delivered_canonical_episode_ids == (
+        "episode-dashboard-fix",
+    )
+
+
+def test_pickup_filters_malformed_canonical_request_and_response_ids():
+    runner = PickupRunner(out=ok_response(
+        deliveredCanonicalEpisodeIds=[
+            "episode-dashboard-fix",
+            "",
+            None,
+            42,
+            "episode-follow-up",
+        ],
+    ))
+
+    outcome = pickup.pickup_with_outcome(
+        MSG,
+        runner=runner,
+        exclude_canonical_episode_ids=[
+            "episode-old",
+            "",
+            None,
+            42,
+            "episode-older",
+        ],
+    )
+
+    request = json.loads(runner.calls[0][1])
+    assert request["excludeCanonicalEpisodeIds"] == [
+        "episode-old",
+        "episode-older",
+    ]
+    assert outcome.delivered_canonical_episode_ids == (
+        "episode-dashboard-fix",
+        "episode-follow-up",
+    )
+
+
+def test_legacy_pickup_api_still_returns_only_context():
+    runner = PickupRunner()
+
+    result = pickup.pickup(
+        MSG,
+        runner=runner,
+        exclude_canonical_episode_ids=["episode-old"],
+    )
+
+    assert result == {"context": CONTEXT_BLOCK}
 
 
 def test_pickup_renders_the_context_block_verbatim():
@@ -330,6 +395,257 @@ def test_hook_returns_pickup_context_on_first_turn():
         jinn._runner = None
     assert result is not None and "context" in result
     assert jinn._on_pre_llm_call(session_id="s1", user_message=MSG, is_first_turn=False) is None
+
+
+def test_same_task_and_repository_only_pick_up_once():
+    runner = PickupRunner()
+    jinn._runner = runner
+    try:
+        first = jinn._on_pre_llm_call(
+            session_id="s1",
+            task_id="t1",
+            user_message=MSG,
+            is_first_turn=True,
+        )
+        second = jinn._on_pre_llm_call(
+            session_id="s1",
+            task_id="t1",
+            user_message=MSG,
+            is_first_turn=False,
+        )
+    finally:
+        jinn._runner = None
+
+    assert first == {"context": CONTEXT_BLOCK}
+    assert second is None
+    assert len(runner.calls) == 1
+
+
+def test_changed_non_empty_task_id_triggers_pickup_again():
+    runner = PickupRunner()
+    jinn._runner = runner
+    try:
+        jinn._on_pre_llm_call(
+            session_id="s1",
+            task_id="t1",
+            user_message=MSG,
+            is_first_turn=True,
+        )
+        result = jinn._on_pre_llm_call(
+            session_id="s1",
+            task_id="t2",
+            user_message="Fix the next dashboard failure",
+            is_first_turn=False,
+        )
+    finally:
+        jinn._runner = None
+
+    assert result == {"context": CONTEXT_BLOCK}
+    assert len(runner.calls) == 2
+
+
+def test_changed_repository_triggers_pickup_again(tmp_path, monkeypatch):
+    first_cwd = tmp_path / "first"
+    second_cwd = tmp_path / "second"
+    first_cwd.mkdir()
+    second_cwd.mkdir()
+
+    def snapshot_repository(session_id, cwd=None):
+        resolved = Path(cwd).resolve() if cwd is not None else tmp_path.resolve()
+        slug = (
+            "acme/first"
+            if resolved == first_cwd.resolve()
+            else "acme/second"
+            if resolved == second_cwd.resolve()
+            else "acme/session-start"
+        )
+        return jinn.session_bridge.RepositorySnapshot(
+            session_id=session_id,
+            root=resolved,
+            origin=f"https://github.com/{slug}.git",
+            repository_slug=slug,
+            base_head="0123456789abcdef",
+        )
+
+    monkeypatch.setattr(jinn.session_bridge, "snapshot_repository", snapshot_repository)
+    runner = PickupRunner()
+    jinn._runner = runner
+    try:
+        jinn._on_pre_llm_call(
+            session_id="s1",
+            task_id="",
+            user_message=MSG,
+            is_first_turn=True,
+            cwd=str(first_cwd),
+        )
+        result = jinn._on_pre_llm_call(
+            session_id="s1",
+            task_id="",
+            user_message="Continue in the second repository",
+            is_first_turn=False,
+            cwd=str(second_cwd),
+        )
+    finally:
+        jinn._runner = None
+
+    assert result == {"context": CONTEXT_BLOCK}
+    assert len(runner.calls) == 2
+    requests = [json.loads(raw_input) for _, raw_input in runner.calls]
+    assert requests[0]["meta"]["repositorySlug"] == "acme/first"
+    assert requests[1]["meta"]["repositorySlug"] == "acme/second"
+
+
+def test_repository_probe_failure_fails_open_with_unknown_identity(
+    tmp_path, monkeypatch
+):
+    state = jinn._state_for("s1")
+    supplied_cwd = tmp_path / "unreadable-repository"
+    supplied_cwd.mkdir()
+
+    def broken_probe(session_id, cwd=None):
+        raise ValueError("invalid repository cwd")
+
+    monkeypatch.setattr(jinn.session_bridge, "snapshot_repository", broken_probe)
+    runner = PickupRunner()
+    jinn._runner = runner
+    try:
+        result = jinn._on_pre_llm_call(
+            session_id="s1",
+            task_id="t1",
+            user_message=MSG,
+            is_first_turn=True,
+            cwd=str(supplied_cwd),
+        )
+    finally:
+        jinn._runner = None
+
+    assert result == {"context": CONTEXT_BLOCK}
+    request = json.loads(runner.calls[0][1])
+    assert "repositorySlug" not in request["meta"]
+    checkpoint = state["pickupCheckpoint"]
+    assert checkpoint["hasRun"] is True
+    assert checkpoint["repositorySlug"] is None
+    assert checkpoint["repositoryCwd"] == str(supplied_cwd.resolve())
+
+
+def test_missing_stable_task_id_stays_first_turn_only():
+    runner = PickupRunner()
+    jinn._runner = runner
+    try:
+        jinn._on_pre_llm_call(
+            session_id="s1",
+            task_id="",
+            user_message=MSG,
+            is_first_turn=True,
+        )
+        result = jinn._on_pre_llm_call(
+            session_id="s1",
+            task_id="   ",
+            user_message="A later model iteration",
+            is_first_turn=False,
+        )
+    finally:
+        jinn._runner = None
+
+    assert result is None
+    assert len(runner.calls) == 1
+
+
+def test_repeat_pickup_sends_ids_delivered_by_the_prior_pickup():
+    runner = PickupRunner()
+    jinn._runner = runner
+    try:
+        jinn._on_pre_llm_call(
+            session_id="s1",
+            task_id="t1",
+            user_message=MSG,
+            is_first_turn=True,
+        )
+        runner.out = ok_response(
+            deliveredCanonicalEpisodeIds=["episode-follow-up"],
+        )
+        jinn._on_pre_llm_call(
+            session_id="s1",
+            task_id="t2",
+            user_message="Fix the follow-up failure",
+            is_first_turn=False,
+        )
+    finally:
+        jinn._runner = None
+
+    second_request = json.loads(runner.calls[1][1])
+    assert second_request["excludeCanonicalEpisodeIds"] == [
+        "episode-dashboard-fix",
+    ]
+    checkpoint = jinn._peek_state("s1")["pickupCheckpoint"]
+    assert checkpoint["deliveredCanonicalEpisodeIds"] == [
+        "episode-dashboard-fix",
+        "episode-follow-up",
+    ]
+
+
+def test_failed_pickup_advances_checkpoint_instead_of_retrying_each_iteration():
+    runner = PickupRunner(code=1, out="boom")
+    jinn._runner = runner
+    try:
+        jinn._on_pre_llm_call(
+            session_id="s1",
+            task_id="t1",
+            user_message=MSG,
+            is_first_turn=True,
+        )
+        jinn._on_pre_llm_call(
+            session_id="s1",
+            task_id="t1",
+            user_message="A later model iteration",
+            is_first_turn=False,
+        )
+    finally:
+        jinn._runner = None
+
+    assert len(runner.calls) == 1
+
+
+def test_concurrent_same_checkpoint_does_not_duplicate_or_hold_state_lock():
+    started = threading.Event()
+    release = threading.Event()
+    second_finished = threading.Event()
+    calls = 0
+    calls_lock = threading.Lock()
+
+    def runner(argv, *, input=None):
+        nonlocal calls
+        with calls_lock:
+            calls += 1
+        started.set()
+        assert release.wait(timeout=5)
+        return 0, ok_response()
+
+    def invoke():
+        jinn._on_pre_llm_call(
+            session_id="s1",
+            task_id="t1",
+            user_message=MSG,
+            is_first_turn=True,
+        )
+
+    first = threading.Thread(target=invoke)
+    second = threading.Thread(target=lambda: (invoke(), second_finished.set()))
+    jinn._runner = runner
+    try:
+        first.start()
+        assert started.wait(timeout=2)
+        second.start()
+        returned_while_pickup_running = second_finished.wait(timeout=1)
+        release.set()
+        first.join(timeout=2)
+        second.join(timeout=2)
+    finally:
+        release.set()
+        jinn._runner = None
+
+    assert returned_while_pickup_running is True
+    assert calls == 1
 
 
 # ── Agent tools (unaffected by the pickup delegation) ───────────────────────

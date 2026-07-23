@@ -184,6 +184,17 @@ def _empty_activity() -> Dict[str, Any]:
     }
 
 
+def _empty_pickup_checkpoint() -> Dict[str, Any]:
+    """Host control state for task/repository-scoped corpus delivery."""
+    return {
+        "hasRun": False,
+        "taskId": None,
+        "repositorySlug": None,
+        "repositoryCwd": None,
+        "deliveredCanonicalEpisodeIds": [],
+    }
+
+
 def _session_identity(session_id: str) -> tuple[str, str, Optional[str]]:
     """Separate host-internal review evidence from its foreground parent."""
     parent = session_id or "default"
@@ -218,6 +229,7 @@ def _state_for(session_id: str, cwd: Optional[Path] = None) -> Dict[str, Any]:
                 "snapshot": session_bridge.snapshot_repository(key, cwd=cwd),
                 "activity": _empty_activity(),
                 "intermediateFailureDiffs": [],
+                "pickupCheckpoint": _empty_pickup_checkpoint(),
             }
             _session_states[key] = state
         return state
@@ -232,6 +244,7 @@ def _pop_state(session_id: str) -> Dict[str, Any]:
                 "snapshot": None,
                 "activity": _empty_activity(),
                 "intermediateFailureDiffs": [],
+                "pickupCheckpoint": _empty_pickup_checkpoint(),
             },
         )
 
@@ -241,7 +254,10 @@ def _peek_state(session_id: str) -> Dict[str, Any]:
     with _session_state_lock:
         state = _session_states.get(key)
         if state is None:
-            return {"activity": _empty_activity()}
+            return {
+                "activity": _empty_activity(),
+                "pickupCheckpoint": _empty_pickup_checkpoint(),
+            }
         activity = dict(state.get("activity") or {})
         for field in (
             "eligibleRefs",
@@ -253,10 +269,116 @@ def _peek_state(session_id: str) -> Dict[str, Any]:
             "installedSkillRefs",
         ):
             activity[field] = list(activity.get(field) or [])
+        checkpoint = dict(
+            state.get("pickupCheckpoint") or _empty_pickup_checkpoint()
+        )
+        checkpoint["deliveredCanonicalEpisodeIds"] = list(
+            checkpoint.get("deliveredCanonicalEpisodeIds") or []
+        )
         return {
             **state,
             "activity": activity,
+            "pickupCheckpoint": checkpoint,
         }
+
+
+def _pickup_repository_slug(
+    logical_session_id: str,
+    state: Dict[str, Any],
+    cwd_value: Any,
+) -> tuple[Optional[str], Optional[str]]:
+    """Resolve current repository identity without replacing the start snapshot."""
+    if not isinstance(cwd_value, str) or not cwd_value:
+        snapshot = state.get("snapshot")
+        return (
+            snapshot.repository_slug if snapshot is not None else None,
+            None,
+        )
+
+    try:
+        resolved = str(Path(cwd_value).resolve())
+    except Exception as exc:
+        logger.warning(
+            "jinn: pickup repository resolve failed open: %s",
+            exc,
+        )
+        return None, None
+    with _session_state_lock:
+        checkpoint = state["pickupCheckpoint"]
+        if checkpoint.get("repositoryCwd") == resolved:
+            return checkpoint.get("repositorySlug"), resolved
+
+    try:
+        snapshot = session_bridge.snapshot_repository(
+            f"{logical_session_id}:pickup",
+            cwd=Path(resolved),
+        )
+    except Exception as exc:
+        logger.warning(
+            "jinn: pickup repository probe failed open: %s",
+            exc,
+        )
+        return None, resolved
+    return (
+        snapshot.repository_slug if snapshot is not None else None,
+        resolved,
+    )
+
+
+def _reserve_pickup_checkpoint(
+    state: Dict[str, Any],
+    *,
+    is_first_turn: bool,
+    stable_task_id: Optional[str],
+    repository_slug: Optional[str],
+    repository_cwd: Optional[str],
+) -> Optional[list[str]]:
+    """Atomically decide and reserve a pickup, returning prior exclusions.
+
+    Reservation happens before the process call so concurrent hooks for the
+    same checkpoint cannot both invoke it. The process runs after this helper
+    releases ``_session_state_lock``.
+    """
+    with _session_state_lock:
+        checkpoint = state["pickupCheckpoint"]
+        has_run = bool(checkpoint.get("hasRun"))
+        checkpoint_changed = has_run and (
+            (
+                stable_task_id is not None
+                and stable_task_id != checkpoint.get("taskId")
+            )
+            or repository_slug != checkpoint.get("repositorySlug")
+        )
+        should_pick_up = (is_first_turn and not has_run) or checkpoint_changed
+        if not should_pick_up:
+            if (
+                has_run
+                and repository_slug == checkpoint.get("repositorySlug")
+            ):
+                checkpoint["repositoryCwd"] = repository_cwd
+            return None
+
+        excluded = list(
+            checkpoint.get("deliveredCanonicalEpisodeIds") or []
+        )
+        checkpoint["hasRun"] = True
+        checkpoint["taskId"] = stable_task_id
+        checkpoint["repositorySlug"] = repository_slug
+        checkpoint["repositoryCwd"] = repository_cwd
+        return excluded
+
+
+def _merge_pickup_deliveries(
+    state: Dict[str, Any],
+    delivered_canonical_episode_ids: tuple[str, ...],
+) -> None:
+    with _session_state_lock:
+        delivered = state["pickupCheckpoint"][
+            "deliveredCanonicalEpisodeIds"
+        ]
+        for episode_id in delivered_canonical_episode_ids:
+            if episode_id not in delivered:
+                delivered.append(episode_id)
 
 
 def _record_activity(session_id: str, field: str, refs: list[str]) -> None:
@@ -264,7 +386,8 @@ def _record_activity(session_id: str, field: str, refs: list[str]) -> None:
 
     Internal fetch-attempt detail only (surfacedRefs/fetchedRefs, from the
     corpus_search/corpus_fetch agent tools) — searchedTerms/providedRefs are
-    set wholesale by pickup.pickup()'s own response, not appended here.
+    set wholesale by pickup.pickup_with_outcome()'s own response, not
+    appended here.
     """
     if not session_id or field not in ("surfacedRefs", "fetchedRefs"):
         return
@@ -339,22 +462,45 @@ def _on_pre_llm_call(
     buf.record_user_turn(task_id, logical_session_id, user_message)
     # Consumption side — NEVER consent-gated: evidence-first corpus pickup.
     # Returns {"context": ...} (injected into the user message, cache-safe)
-    # or None. Fails open inside pickup().
-    if is_first_turn:
-        state = _state_for(logical_session_id)
-        snapshot = state.get("snapshot")
-        repository_slug = snapshot.repository_slug if snapshot is not None else None
-        return pickup.pickup(
-            user_message,
-            runner=_runner,
-            activity=state["activity"],
-            session_id=logical_session_id,
-            model=model,
-            repository_slug=repository_slug,
-            session_kind=session_kind,
-            parent_session_id=parent_session_id,
-        )
-    return None
+    # on the first turn and whenever a stable task/repository checkpoint
+    # changes. Fails open inside pickup_with_outcome().
+    state = _state_for(logical_session_id)
+    stable_task_id = (
+        task_id.strip()
+        if isinstance(task_id, str) and task_id.strip()
+        else None
+    )
+    repository_slug, repository_cwd = _pickup_repository_slug(
+        logical_session_id,
+        state,
+        _.get("cwd") or _.get("working_directory"),
+    )
+    excluded = _reserve_pickup_checkpoint(
+        state,
+        is_first_turn=is_first_turn,
+        stable_task_id=stable_task_id,
+        repository_slug=repository_slug,
+        repository_cwd=repository_cwd,
+    )
+    if excluded is None:
+        return None
+
+    outcome = pickup.pickup_with_outcome(
+        user_message,
+        runner=_runner,
+        activity=state["activity"],
+        session_id=logical_session_id,
+        model=model,
+        repository_slug=repository_slug,
+        session_kind=session_kind,
+        parent_session_id=parent_session_id,
+        exclude_canonical_episode_ids=excluded,
+    )
+    _merge_pickup_deliveries(
+        state,
+        outcome.delivered_canonical_episode_ids,
+    )
+    return outcome.context
 
 
 def _on_post_tool_call(
