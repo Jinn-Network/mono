@@ -40,7 +40,7 @@ import {
   type PublicClient,
 } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
-import type { DiscoveryAPI, ClaimableTaskCandidate, InstanceClaimCount, TaskStatusSnapshot, VerdictTallyResult, SolverNetManifestSummary, SolverNetLifecycleStatus, PluginPublication, PluginScoreHistoryRow, PublishedArtifact, CodeDigestRewardRow, TaskPostCounts } from './types.js';
+import type { DiscoveryAPI, ClaimableTaskCandidate, InstanceClaimCount, TaskStatusSnapshot, VerdictTallyResult, TaskLifecycleEvidence, SolverNetManifestSummary, SolverNetLifecycleStatus, PluginPublication, PluginScoreHistoryRow, PublishedArtifact, CodeDigestRewardRow, TaskPostCounts } from './types.js';
 import { DiscoveryUnavailableError, TASK_POST_WINDOW_BLOCKS, bucketTaskPostCounts } from './types.js';
 import type { EnvelopeRef, CorpusQuery } from '../corpus/types.js';
 import { runOnchainCorpusQuery, DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK } from '../corpus/onchain-query.js';
@@ -1358,6 +1358,16 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     return new Map();
   }
 
+  // ── getTaskLifecycleEvidence (#2044) — stub ────────────────────────────────
+  // Full getLogs spine reconstruction lands in a follow-up commit. Empty Map
+  // for now so DiscoveryAPI typechecks; candidates remain empty on the floor.
+  async function getTaskLifecycleEvidence(_args: {
+    taskIds: string[];
+  }): Promise<Map<string, TaskLifecycleEvidence>> {
+    void _args;
+    return new Map();
+  }
+
   // ── getTaskPostCounts (#918) ───────────────────────────────────────────────
   // Windowed count of TaskCreated events (last 1h / 6h / 24h) sourced directly
   // from the JinnRouter logs. Block-window approximation; capped at
@@ -1558,5 +1568,6 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     getMostRecentTaskCidDigest,
     getTaskStatuses,
     getVerdictTallies,
+    getTaskLifecycleEvidence,
   };
 }

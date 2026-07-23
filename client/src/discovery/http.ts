@@ -19,6 +19,7 @@ import type {
   InstanceClaimCount,
   TaskStatusSnapshot,
   VerdictTallyResult,
+  TaskLifecycleEvidence,
   SolverNetManifestSummary,
   SolverNetLifecycleStatus,
   EnvelopeRef,
@@ -1447,6 +1448,18 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     return new Map();
   }
 
+  // ── getTaskLifecycleEvidence (#2044) ───────────────────────────────────────
+  // Authoritative task→attempt→verdict spine + untrusted envelope candidates.
+  // Empty taskIds short-circuits with no query. Full GraphQL legs land in a
+  // follow-up commit.
+  async function getTaskLifecycleEvidence(args: {
+    taskIds: string[];
+  }): Promise<Map<string, TaskLifecycleEvidence>> {
+    if (args.taskIds.length === 0) return new Map();
+    // Full legs land in Task 4.
+    return new Map();
+  }
+
   return {
     findClaimableTasks,
     listLaunchedSolverNets,
@@ -1463,5 +1476,6 @@ export function createHttpDiscoveryAPI(opts: HttpDiscoveryAPIOptions): Discovery
     getMostRecentTaskCidDigest,
     getTaskStatuses,
     getVerdictTallies,
+    getTaskLifecycleEvidence,
   };
 }
