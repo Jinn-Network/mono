@@ -18,6 +18,11 @@ export {
   LOCAL_EPISODE_REF_PREFIX,
   type LocalEpisodeCorpusAdapterDeps,
 } from './local-episode-corpus-adapter.js';
+export {
+  createFederatedCorpusAdapter,
+  DEFAULT_FEDERATED_CHILD_TIMEOUT_MS,
+  type FederatedCorpusAdapterDeps,
+} from './federated-corpus-adapter.js';
 export { createEvidenceAdapter, capturedTaskToEpisode } from '@jinn-network/core';
 export {
   createContributionAdapter,
