@@ -223,3 +223,121 @@ export function validateBenchPreregistrationV1(
   }
   return { ok: true, value: parsed.data };
 }
+
+const VerificationZ = z
+  .object({
+    loadout: z.enum(['match', 'mismatch', 'unverifiable']),
+    profile: z.enum(['match', 'mismatch', 'unverifiable']),
+    isolation: z.string().min(1),
+  })
+  .strict();
+
+const CostZ = z
+  .object({
+    reported: z.union([NumericStringZ, z.number()]),
+    source: z.string().min(1),
+  })
+  .strict();
+
+export const CellV1Schema = z
+  .object({
+    cellKey: z.string().min(1),
+    capsuleDigest: z.string().min(1),
+    configId: z.string().min(1),
+    replicate: z.number().int().nonnegative(),
+    attemptEnvelopeCid: z.string().min(1).optional(),
+    verdictEnvelopeRef: z.string().min(1).optional(),
+    outcome: z.enum(['judged', 'unscorable', 'expired', 'invalidated']),
+    verification: VerificationZ,
+    judgeIntegrityTier: z.enum(['re-derivable', 'attested-only']),
+    solverId: z.string().min(1),
+    evaluatorId: z.string().min(1),
+    cost: CostZ,
+    latencyMs: z.number().finite().nonnegative(),
+  })
+  .strict();
+
+export type CellV1 = z.infer<typeof CellV1Schema>;
+
+const CloseBoundaryZ = z
+  .object({
+    blockNumber: z.number().int().positive().optional(),
+    timestamp: z.string().min(1),
+  })
+  .strict();
+
+export const BenchMatrixV1Schema = z
+  .object({
+    schemaVersion: z.literal('jinn.bench-matrix.v1'),
+    runId: z.string().min(1),
+    preRegistration: BenchmarkRunV1Schema,
+    closeBoundary: CloseBoundaryZ,
+    cells: z.array(CellV1Schema),
+    exclusions: z.array(
+      z.object({ cellKey: z.string().min(1), reason: z.string().min(1) }).strict(),
+    ),
+    attrition: z
+      .object({
+        perConfig: z.record(z.string(), z.number()),
+        perCapsule: z.record(z.string(), z.number()),
+        asymmetryFlags: z.array(z.string()),
+      })
+      .strict(),
+    completeness: z
+      .object({
+        achieved: z.number(),
+        floor: z.number(),
+        runOutcome: z.enum(['complete', 'partial', 'cancelled']),
+      })
+      .strict(),
+    matrixHash: Sha256DigestZ,
+  })
+  .strict()
+  .superRefine((matrix, ctx) => {
+    const seen = new Set<string>();
+    for (let i = 0; i < matrix.cells.length; i++) {
+      const key = matrix.cells[i]!.cellKey;
+      if (seen.has(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `duplicate cellKey: ${key}`,
+          path: ['cells', i, 'cellKey'],
+        });
+      }
+      seen.add(key);
+    }
+  });
+
+export type BenchMatrixV1 = z.infer<typeof BenchMatrixV1Schema>;
+
+export function hashBenchMatrixV1(matrix: BenchMatrixV1): `sha256:${string}` {
+  const { matrixHash: _omit, ...rest } = matrix;
+  return sha256Digest(canonicalJson(rest));
+}
+
+export function validateBenchMatrixV1(
+  value: unknown,
+): BenchmarkValidationResult<BenchMatrixV1> {
+  const parsed = BenchMatrixV1Schema.safeParse(value);
+  if (!parsed.success) return { ok: false, issues: issuesFromZod(parsed.error) };
+  const matrix = parsed.data;
+  const issues: BenchmarkValidationIssue[] = [];
+
+  const runCheck = validateBenchmarkRunV1(matrix.preRegistration);
+  if (!runCheck.ok) {
+    for (const i of runCheck.issues) {
+      issues.push({
+        path: i.path === '<root>' ? 'preRegistration' : `preRegistration.${i.path}`,
+        message: i.message,
+      });
+    }
+  }
+
+  const expected = hashBenchMatrixV1(matrix);
+  if (matrix.matrixHash !== expected) {
+    issues.push({ path: 'matrixHash', message: 'hash mismatch' });
+  }
+
+  if (issues.length > 0) return { ok: false, issues };
+  return { ok: true, value: matrix };
+}

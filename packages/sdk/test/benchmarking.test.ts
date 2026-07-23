@@ -9,9 +9,13 @@ import {
   hashCapsuleSet,
   BenchPreregistrationV1Schema,
   validateBenchPreregistrationV1,
+  BenchMatrixV1Schema,
+  validateBenchMatrixV1,
+  hashBenchMatrixV1,
   type ConfigV1,
   type BenchmarkRunV1,
   type BenchPreregistrationV1,
+  type BenchMatrixV1,
 } from '../src/benchmarking.js';
 
 const validConfigArtifact: ConfigV1 = {
@@ -248,4 +252,83 @@ describe('BenchPreregistrationV1', () => {
     };
     expect(validateBenchPreregistrationV1(envelope).ok).toBe(false);
   });
+});
+
+function buildValidMatrix(run: BenchmarkRunV1): BenchMatrixV1 {
+  const withoutHash = {
+    schemaVersion: 'jinn.bench-matrix.v1' as const,
+    runId: run.runId,
+    preRegistration: run,
+    closeBoundary: { timestamp: '2026-07-23T12:00:00.000Z' },
+    cells: [
+      {
+        cellKey: 'cell-0',
+        capsuleDigest: run.capsuleSet.capsuleDigests[0]!,
+        configId: run.configs[0]!.configId,
+        replicate: 0,
+        outcome: 'judged' as const,
+        verification: {
+          loadout: 'match' as const,
+          profile: 'match' as const,
+          isolation: 'receipt:iso-1',
+        },
+        judgeIntegrityTier: 're-derivable' as const,
+        solverId: 'solver-1',
+        evaluatorId: 'eval-1',
+        cost: { reported: '1000', source: 'harness' },
+        latencyMs: 12,
+      },
+    ],
+    exclusions: [],
+    attrition: { perConfig: {}, perCapsule: {}, asymmetryFlags: [] },
+    completeness: { achieved: 1, floor: 0.8, runOutcome: 'complete' as const },
+    matrixHash: digest('f'),
+  };
+  return {
+    ...withoutHash,
+    matrixHash: hashBenchMatrixV1(withoutHash as BenchMatrixV1),
+  };
+}
+
+describe('BenchMatrixV1', () => {
+  it('parses a valid matrix and checks matrixHash (AC2)', () => {
+    const run = makeValidRun();
+    const matrix = buildValidMatrix(run);
+    expect(validateBenchMatrixV1(matrix)).toEqual({ ok: true, value: matrix });
+    expect(hashBenchMatrixV1(matrix)).toBe(matrix.matrixHash);
+  });
+
+  it('rejects matrixHash tampering (AC3)', () => {
+    const matrix = { ...buildValidMatrix(makeValidRun()), matrixHash: digest('e') };
+    const result = validateBenchMatrixV1(matrix);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.issues.some((i) => i.message.includes('hash mismatch'))).toBe(true);
+    }
+  });
+
+  it('rejects duplicate cellKey (AC3)', () => {
+    const run = makeValidRun();
+    const matrix = buildValidMatrix(run);
+    const dup = {
+      ...matrix,
+      cells: [matrix.cells[0]!, { ...matrix.cells[0]!, replicate: 1 }],
+    };
+    const withHash = { ...dup, matrixHash: hashBenchMatrixV1(dup as BenchMatrixV1) };
+    const result = validateBenchMatrixV1(withHash);
+    expect(result.ok).toBe(false);
+  });
+
+  for (const key of [
+    'aggregate',
+    'ranking',
+    'winner',
+    'leaderboard',
+    'recommendation',
+  ] as const) {
+    it(`rejects forbidden matrix meaning field: ${key} (AC4)`, () => {
+      const raw = { schemaVersion: 'jinn.bench-matrix.v1', [key]: {}, matrixHash: digest('f') };
+      expect(BenchMatrixV1Schema.safeParse(raw).success).toBe(false);
+    });
+  }
 });
