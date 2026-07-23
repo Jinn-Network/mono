@@ -20,6 +20,19 @@ export function activeCleanupEnabled(
 
 export const DEFAULT_ATTEMPT_GRACE_MS = 30 * 60 * 1000;
 export const DEFAULT_AUTOPILOT_DISK_FLOOR_GB = 10;
+export const AUTOPILOT_EXECUTION_BACKEND_ENV =
+  'JINN_AUTOPILOT_EXECUTION_BACKEND';
+export type AutopilotExecutionBackend = 'local' | 'marketplace';
+
+export function autopilotExecutionBackend(
+  raw: string | undefined,
+): AutopilotExecutionBackend {
+  if (raw === undefined || raw === '' || raw === 'local') return 'local';
+  if (raw === 'marketplace') return 'marketplace';
+  throw new Error(
+    `${AUTOPILOT_EXECUTION_BACKEND_ENV} must be local or marketplace`,
+  );
+}
 
 export function nonNegativeEnvironmentInteger(
   raw: string | undefined,

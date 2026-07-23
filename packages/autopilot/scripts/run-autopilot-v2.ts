@@ -33,6 +33,7 @@ import {
   defaultRunnerId,
   activeCleanupEnabled,
   attemptGraceMs,
+  autopilotExecutionBackend,
   autopilotDiskFloorBytes,
   explainIssue,
   explainPullRequest,
@@ -236,13 +237,18 @@ async function main(): Promise<void> {
     return;
   }
 
+  const executionBackendKind = autopilotExecutionBackend(
+    env.JINN_AUTOPILOT_EXECUTION_BACKEND,
+  );
   const options = parseLifecycleCli(argv.slice(2));
   const snapshotRuntime = parseSnapshotRuntimeConfig(env);
   const stateDirectory = parseAutopilotStateDirectory(env);
   const allowlist = authorAllowlist(env.JINN_DISPATCHER_AUTHOR_ALLOWLIST);
   const onlyIssues = parseOnlyIssuesAllowlist(env.JINN_AUTOPILOT_ONLY_ISSUES);
   const config = dispatcherConfig(allowlist);
-  console.log(`[autopilot:v2] runtime=${config.runtime}`);
+  console.log(
+    `[autopilot:v2] runtime=${config.runtime} executionBackend=${executionBackendKind}`,
+  );
   if (config.runtime === 'cursor') {
     console.log(
       `[autopilot:v2] cursor config (bin=${config.cursorBin}, reviewModel=${config.cursorModel})`,
@@ -416,6 +422,7 @@ async function main(): Promise<void> {
         ...reconciliationTargets,
         config,
         spawn: makeLoggingSpawn(),
+        executionBackendKind,
         caps: {
           implementation: positiveEnvironmentInteger(
             env.JINN_AUTOPILOT_IMPLEMENTATION_CAP,

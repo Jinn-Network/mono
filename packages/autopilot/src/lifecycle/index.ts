@@ -23,6 +23,8 @@ export * from './active-runtime.js';
 export * from './active-runtime-production.js';
 export * from './credentials.js';
 export * from './attempt-workspace.js';
+export * from './session-execution-backend.js';
+export * from './marketplace-session-backend.js';
 export * from './implementation-executor.js';
 export * from './implementation-executor-production.js';
 export * from './implementation-session.js';

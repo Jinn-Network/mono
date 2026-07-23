@@ -15,6 +15,14 @@ import {
   type SelectedCredential,
 } from './credentials.js';
 import type { HumanReason } from './types.js';
+import type {
+  AutopilotExecutionBackend,
+} from './active-config.js';
+import type {
+  ClaimedMutationSessionInput,
+  ExecutionHandle,
+  SessionExecutionBackend,
+} from './session-execution-backend.js';
 import {
   gitOid,
   gitRefName,
@@ -39,6 +47,7 @@ export async function runCanonicalImplementationRealityCheck(
 export interface ImplementationIssue {
   readonly number: number;
   readonly title: string;
+  readonly body: string;
   readonly open: boolean;
   readonly eligible: boolean;
   readonly targetBase: GitRefName;
@@ -103,6 +112,7 @@ interface CreateAttemptInput {
   readonly prNumber: number;
   readonly selectedLogin: string;
   readonly credential: SelectedCredential;
+  readonly executionBackend?: AutopilotExecutionBackend;
 }
 
 interface SpawnImplementationInput {
@@ -138,8 +148,16 @@ export interface ImplementationExecutorDeps {
     credential: SelectedCredential,
   ): Promise<void>;
   createAttempt(input: CreateAttemptInput): Promise<ImplementationAttemptBinding>;
-  spawnCoordinator(input: SpawnImplementationInput): SpawnResult;
-  trackChild(manifestPath: string, child: SpawnResult): void;
+  spawnCoordinator?(input: SpawnImplementationInput): SpawnResult;
+  trackChild?(manifestPath: string, child: SpawnResult): void;
+  readonly executionBackendKind?: AutopilotExecutionBackend;
+  readonly executionBackend?: SessionExecutionBackend;
+  readonly sessionDeadline?: () => string;
+  readonly receiptAuthors?: readonly string[];
+  readonly persistExecutionHandle?: (
+    manifestPath: string,
+    handle: ExecutionHandle,
+  ) => void | Promise<void>;
   escalateHuman(input: {
     readonly issueNumber: number;
     readonly reason: HumanReason;
@@ -153,6 +171,81 @@ export interface ImplementationExecutorDeps {
   nextAttemptId(): string;
   runnerId: string;
   now(): Date;
+}
+
+function sessionDeadline(deps: ImplementationExecutorDeps): string {
+  return deps.sessionDeadline?.()
+    ?? new Date(deps.now().getTime() + 60 * 60 * 1000).toISOString();
+}
+
+function parentIssueNumber(
+  pullRequest: ImplementationPullRequest,
+  childIssueNumber: number,
+): number {
+  const lifecycle = /<!--\s*jinn-autopilot:v2\s+issue=([1-9][0-9]*)\s+/.exec(
+    pullRequest.body,
+  );
+  const closes = /\bCloses\s+#([1-9][0-9]*)\b/i.exec(pullRequest.body);
+  return Number(lifecycle?.[1] ?? closes?.[1] ?? childIssueNumber);
+}
+
+async function startClaimedMutation(
+  input: ClaimedMutationSessionInput,
+  legacyEnvironment: NodeJS.ProcessEnv,
+  deps: ImplementationExecutorDeps,
+): Promise<void> {
+  if (deps.executionBackend !== undefined) {
+    const handle = await deps.executionBackend.start(input);
+    if (handle.backend === 'marketplace') {
+      if (deps.persistExecutionHandle === undefined) {
+        throw new Error(
+          'Marketplace execution handle persistence is unavailable',
+        );
+      }
+      await deps.persistExecutionHandle(input.attempt.manifestPath, handle);
+    }
+    return;
+  }
+  if (deps.executionBackendKind === 'marketplace') {
+    throw new Error('Marketplace execution backend is unavailable');
+  }
+  if (deps.spawnCoordinator === undefined || deps.trackChild === undefined) {
+    throw new Error('Local execution backend is unavailable');
+  }
+  const child = deps.spawnCoordinator({
+    attemptId: input.v2AttemptId,
+    issue: {
+      number: input.childIssueNumber ?? input.issue.number,
+      title: input.issue.title,
+      body: input.issue.body,
+      open: true,
+      eligible: true,
+      targetBase: input.targetBase,
+      effort: input.effort,
+      ...(input.childIssueNumber === undefined
+        ? {}
+        : {
+            child: {
+              parentPr: input.parentPrNumber!,
+              kind: input.workflow === 'reconcile'
+                ? 'reconcile' as const
+                : input.workflow === 'ci-failure'
+                  ? 'ci-failure' as const
+                  : 'review-finding' as const,
+            },
+          }),
+    },
+    prNumber: input.pr.number,
+    branch: input.branch,
+    targetBase: input.targetBase,
+    environment: legacyEnvironment,
+    worktreePath: input.attempt.worktreePath,
+    logPath: input.attempt.logPath,
+  });
+  if (child.pid === undefined) {
+    throw new Error('Implementation coordinator did not report a child PID');
+  }
+  deps.trackChild(input.attempt.manifestPath, child);
 }
 
 export type ImplementationExecutionResult =
@@ -501,6 +594,7 @@ export async function executeImplementationAction(
     prNumber: pullRequest.number,
     selectedLogin: selection.login,
     credential: selection.credential,
+    executionBackend: deps.executionBackendKind ?? 'local',
   });
   if (attempt.attemptId !== attemptId) {
     throw new Error('Detached implementation attempt does not match its claim');
@@ -514,20 +608,37 @@ export async function executeImplementationAction(
       manifestPath: attempt.paths.manifest,
     },
   );
-  const child = deps.spawnCoordinator({
-    attemptId,
-    issue,
-    prNumber: pullRequest.number,
-    branch,
+  await startClaimedMutation({
+    kind: 'mutation',
+    workflow: 'implement',
+    issue: {
+      number: issue.number,
+      title: issue.title,
+      body: issue.body,
+    },
+    pr: {
+      number: pullRequest.number,
+      body: pullRequest.body,
+    },
     targetBase: issue.targetBase,
-    environment,
-    worktreePath: attempt.paths.worktree,
-    logPath: attempt.paths.log,
-  });
-  if (child.pid === undefined) {
-    throw new Error('Implementation coordinator did not report a child PID');
-  }
-  deps.trackChild(attempt.paths.manifest, child);
+    branch,
+    claimOid,
+    expectedHead: claimOid,
+    baseSha: candidateParent,
+    v2AttemptId: attemptId,
+    runnerId: deps.runnerId,
+    selectedLogin: selection.login,
+    effort: issue.effort,
+    deadline: sessionDeadline(deps),
+    receiptAuthors: deps.receiptAuthors ?? [selection.login],
+    attempt: {
+      manifestPath: attempt.paths.manifest,
+      worktreePath: attempt.paths.worktree,
+      logPath: attempt.paths.log,
+      ghConfigDir: attempt.paths.ghConfigDir,
+      askpassPath: attempt.paths.askpass,
+    },
+  }, environment, deps);
   return {
     status: 'spawned',
     issueNumber,
@@ -622,6 +733,7 @@ async function executeChildImplementationAction(
     prNumber: parent.number,
     selectedLogin: selection.login,
     credential: selection.credential,
+    executionBackend: deps.executionBackendKind ?? 'local',
   });
   if (attempt.attemptId !== attemptId) {
     throw new Error('Detached child attempt does not match its claim');
@@ -635,20 +747,45 @@ async function executeChildImplementationAction(
       manifestPath: attempt.paths.manifest,
     },
   );
-  const child = deps.spawnCoordinator({
-    attemptId,
-    issue,
-    prNumber: parent.number,
-    branch,
+  const workflow = issue.child.kind === 'reconcile'
+    ? 'reconcile'
+    : issue.child.kind === 'ci-failure'
+      ? 'ci-failure'
+      : 'fix-child';
+  const rootIssueNumber = parentIssueNumber(parent, issue.number);
+  await startClaimedMutation({
+    kind: 'mutation',
+    workflow,
+    issue: {
+      number: rootIssueNumber,
+      title: issue.title,
+      body: issue.body,
+    },
+    childIssueNumber: issue.number,
+    parentPrNumber: parent.number,
+    pr: {
+      number: parent.number,
+      body: parent.body,
+    },
     targetBase: issue.targetBase,
-    environment,
-    worktreePath: attempt.paths.worktree,
-    logPath: attempt.paths.log,
-  });
-  if (child.pid === undefined) {
-    throw new Error('Child coordinator did not report a child PID');
-  }
-  deps.trackChild(attempt.paths.manifest, child);
+    branch,
+    claimOid,
+    expectedHead: claimOid,
+    baseSha: candidateParent,
+    v2AttemptId: attemptId,
+    runnerId: deps.runnerId,
+    selectedLogin: selection.login,
+    effort: issue.effort,
+    deadline: sessionDeadline(deps),
+    receiptAuthors: deps.receiptAuthors ?? [selection.login],
+    attempt: {
+      manifestPath: attempt.paths.manifest,
+      worktreePath: attempt.paths.worktree,
+      logPath: attempt.paths.log,
+      ghConfigDir: attempt.paths.ghConfigDir,
+      askpassPath: attempt.paths.askpass,
+    },
+  }, environment, deps);
   return {
     status: 'spawned',
     issueNumber,

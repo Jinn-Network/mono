@@ -24,6 +24,10 @@ import {
   sanitizedGitHubCommandOverlay,
   type SelectedCredential,
 } from './credentials.js';
+import type {
+  MarketplaceExecutionHandle,
+} from './session-execution-backend.js';
+import type { AutopilotExecutionBackend } from './active-config.js';
 
 export type AttemptPhase = 'implement' | 'review';
 export type AttemptProcessState = 'preparing' | 'running' | 'exited';
@@ -65,6 +69,21 @@ export interface AttemptRepositoryIdentity {
   readonly remoteUrlHash: string;
 }
 
+export type AttemptExecution =
+  | { readonly backend: 'local' }
+  | {
+      readonly backend: 'marketplace';
+      readonly taskId?: string;
+      readonly taskCid?: string;
+      readonly deadline?: string;
+      readonly requestFile?: string;
+      readonly attemptIndex?: number;
+      readonly requestId?: string;
+      readonly deliveryTx?: string;
+      readonly deliveryEnvelopeCid?: string;
+      readonly adoptionReceipt?: string;
+    };
+
 export interface AttemptManifest {
   readonly version: 2;
   readonly attemptId: string;
@@ -84,6 +103,7 @@ export interface AttemptManifest {
   readonly reviewApprovalPolicy?: ReviewApprovalPolicy;
   readonly selectedLogin: string;
   readonly repository: AttemptRepositoryIdentity;
+  readonly execution: AttemptExecution;
   readonly processState: AttemptProcessState;
   readonly pid: number | null;
   readonly terminalHead?: string;
@@ -116,6 +136,7 @@ export interface CreateAttemptOptions {
    * without depending on any inherited environment variable.
    */
   readonly credential: SelectedCredential;
+  readonly executionBackend?: AutopilotExecutionBackend;
   readonly remoteName?: string;
   readonly pid?: number | null;
   readonly attemptId?: string;
@@ -194,6 +215,16 @@ function exactKeys(
       'reviewApprovalPolicy',
       'targetBaseOid',
       'terminalHead',
+      'execution',
+      'taskId',
+      'taskCid',
+      'deadline',
+      'requestFile',
+      'attemptIndex',
+      'requestId',
+      'deliveryTx',
+      'deliveryEnvelopeCid',
+      'adoptionReceipt',
       'childStartedAt',
       'childExitedAt',
     ].includes(key));
@@ -293,6 +324,102 @@ function processState(value: unknown): AttemptProcessState {
   return value;
 }
 
+function nonNegativeInteger(value: unknown, name: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`Invalid ${name}`);
+  }
+  return value;
+}
+
+function decodeExecution(value: unknown): AttemptExecution {
+  if (value === undefined) return { backend: 'local' };
+  const execution = record(value, 'attempt execution');
+  const backend = execution.backend;
+  if (backend === 'local') {
+    exactKeys(execution, ['backend'], 'local attempt execution');
+    return { backend };
+  }
+  if (backend !== 'marketplace') {
+    throw new Error('Invalid attempt execution backend');
+  }
+  exactKeys(execution, [
+    'backend',
+    'taskId',
+    'taskCid',
+    'deadline',
+    'requestFile',
+    'attemptIndex',
+    'requestId',
+    'deliveryTx',
+    'deliveryEnvelopeCid',
+    'adoptionReceipt',
+  ], 'marketplace attempt execution');
+  const taskId = execution.taskId === undefined
+    ? undefined
+    : stringField(execution.taskId, 'marketplace task ID');
+  const taskCid = execution.taskCid === undefined
+    ? undefined
+    : stringField(execution.taskCid, 'marketplace task CID');
+  const deadline = execution.deadline === undefined
+    ? undefined
+    : isoTimestamp(stringField(execution.deadline, 'marketplace deadline'));
+  const requestFile = execution.requestFile === undefined
+    ? undefined
+    : absolutePath(execution.requestFile, 'marketplace request file');
+  const attemptIndex = execution.attemptIndex === undefined
+    ? undefined
+    : nonNegativeInteger(execution.attemptIndex, 'marketplace attempt index');
+  const requestId = execution.requestId === undefined
+    ? undefined
+    : stringField(execution.requestId, 'marketplace request ID');
+  const deliveryTx = execution.deliveryTx === undefined
+    ? undefined
+    : stringField(execution.deliveryTx, 'marketplace delivery transaction');
+  const deliveryEnvelopeCid = execution.deliveryEnvelopeCid === undefined
+    ? undefined
+    : stringField(
+      execution.deliveryEnvelopeCid,
+      'marketplace delivery envelope CID',
+    );
+  const adoptionReceipt = execution.adoptionReceipt === undefined
+    ? undefined
+    : stringField(execution.adoptionReceipt, 'marketplace adoption receipt');
+  const submitted = [
+    taskId,
+    taskCid,
+    deadline,
+    requestFile,
+  ].filter((field) => field !== undefined).length;
+  if (submitted !== 0 && submitted !== 4) {
+    throw new Error('Marketplace execution handle is incomplete');
+  }
+  if ((attemptIndex === undefined) !== (requestId === undefined)) {
+    throw new Error(
+      'Marketplace attempt index and request ID must appear together',
+    );
+  }
+  if (attemptIndex !== undefined && submitted !== 4) {
+    throw new Error('Marketplace request correlation requires a submitted handle');
+  }
+  return {
+    backend,
+    ...(taskId === undefined
+      ? {}
+      : {
+          taskId,
+          taskCid: taskCid!,
+          deadline: deadline!,
+          requestFile: requestFile!,
+        }),
+    ...(attemptIndex === undefined
+      ? {}
+      : { attemptIndex, requestId: requestId! }),
+    ...(deliveryTx === undefined ? {} : { deliveryTx }),
+    ...(deliveryEnvelopeCid === undefined ? {} : { deliveryEnvelopeCid }),
+    ...(adoptionReceipt === undefined ? {} : { adoptionReceipt }),
+  };
+}
+
 export function decodeAttemptManifest(value: unknown): AttemptManifest {
   const manifest = record(value, 'attempt manifest');
   exactKeys(manifest, [
@@ -314,6 +441,7 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
     'reviewApprovalPolicy',
     'selectedLogin',
     'repository',
+    'execution',
     'processState',
     'pid',
     'terminalHead',
@@ -380,12 +508,13 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
     throw new Error('Review generation metadata is valid only for review attempts');
   }
   const decodedProcessState = processState(manifest.processState);
+  const execution = decodeExecution(manifest.execution);
   const pid = nullablePid(manifest.pid);
   const terminalHead = manifest.terminalHead === undefined
     ? undefined
     : gitOid(stringField(manifest.terminalHead, 'terminal head'));
   const timestamps = decodeTimestamps(manifest.timestamps);
-  if (
+  const localStateDisagrees = execution.backend === 'local' && (
     (decodedProcessState === 'preparing'
       && (pid !== null
         || timestamps.childStartedAt !== undefined
@@ -398,7 +527,25 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
       && (pid === null
         || timestamps.childStartedAt === undefined
         || timestamps.childExitedAt === undefined))
-  ) {
+  );
+  const marketplaceSubmitted = execution.backend === 'marketplace'
+    && execution.taskId !== undefined;
+  const marketplaceStateDisagrees = execution.backend === 'marketplace' && (
+    pid !== null
+    || (decodedProcessState === 'preparing'
+      && (marketplaceSubmitted
+        || timestamps.childStartedAt !== undefined
+        || timestamps.childExitedAt !== undefined))
+    || (decodedProcessState === 'running'
+      && (!marketplaceSubmitted
+        || timestamps.childStartedAt === undefined
+        || timestamps.childExitedAt !== undefined))
+    || (decodedProcessState === 'exited'
+      && (!marketplaceSubmitted
+        || timestamps.childStartedAt === undefined
+        || timestamps.childExitedAt === undefined))
+  );
+  if (localStateDisagrees || marketplaceStateDisagrees) {
     throw new Error('Attempt process state, PID, and timestamps disagree');
   }
   if (decodedProcessState !== 'exited' && terminalHead !== undefined) {
@@ -427,6 +574,7 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
         }),
     selectedLogin: stringField(manifest.selectedLogin, 'selected login'),
     repository: decodeRepositoryIdentity(manifest.repository),
+    execution,
     processState: decodedProcessState,
     pid,
     ...(terminalHead === undefined ? {} : { terminalHead }),
@@ -486,6 +634,7 @@ export function updateAttemptManifest(
 ): AttemptManifest {
   const previous = readAttemptManifest(path);
   const progressiveManifestFields = new Set([
+    'execution',
     'processState',
     'pid',
     'terminalHead',
@@ -595,13 +744,52 @@ export function markAttemptRunning(
   const validPid = positiveInteger(pid, 'PID');
   const timestamp = transitionTimestamp(now);
   return updateAttemptManifest(manifestPath, (current) => {
-    if (current.processState !== 'preparing') {
+    if (
+      current.execution.backend !== 'local'
+      || current.processState !== 'preparing'
+    ) {
       throw new Error('Only a preparing attempt may transition to running');
     }
     return {
       ...current,
       processState: 'running',
       pid: validPid,
+      timestamps: {
+        ...current.timestamps,
+        updatedAt: timestamp,
+        childStartedAt: timestamp,
+      },
+    };
+  });
+}
+
+export function markMarketplaceAttemptRunning(
+  manifestPath: string,
+  handle: MarketplaceExecutionHandle,
+  now: () => Date = () => new Date(),
+): AttemptManifest {
+  const execution = decodeExecution(handle);
+  if (
+    execution.backend !== 'marketplace'
+    || execution.taskId === undefined
+  ) {
+    throw new Error('Marketplace attempt requires a complete execution handle');
+  }
+  const timestamp = transitionTimestamp(now);
+  return updateAttemptManifest(manifestPath, (current) => {
+    if (
+      current.execution.backend !== 'marketplace'
+      || current.processState !== 'preparing'
+    ) {
+      throw new Error(
+        'Only a preparing marketplace attempt may transition to running',
+      );
+    }
+    return {
+      ...current,
+      execution,
+      processState: 'running',
+      pid: null,
       timestamps: {
         ...current.timestamps,
         updatedAt: timestamp,
@@ -909,6 +1097,9 @@ export async function createAttemptWorkspace(
         }),
     selectedLogin: options.selectedLogin,
     repository,
+    execution: {
+      backend: options.executionBackend ?? 'local',
+    },
     processState: options.pid === undefined || options.pid === null
       ? 'preparing'
       : 'running',
@@ -1028,8 +1219,13 @@ export function listRunnerLiveAttempts(
             manifest.processState === 'preparing'
             || (
               manifest.processState === 'running'
-              && manifest.pid !== null
-              && isPidAlive(manifest.pid)
+              && (
+                manifest.execution.backend === 'marketplace'
+                || (
+                  manifest.pid !== null
+                  && isPidAlive(manifest.pid)
+                )
+              )
             )
           )
         ) {
@@ -1104,9 +1300,9 @@ function isAttemptChildLive(
   manifest: AttemptManifest,
   isPidAlive: (pid: number) => boolean,
 ): boolean {
-  return manifest.processState === 'running'
-    && manifest.pid !== null
-    && isPidAlive(manifest.pid);
+  if (manifest.processState !== 'running') return false;
+  if (manifest.execution.backend === 'marketplace') return true;
+  return manifest.pid !== null && isPidAlive(manifest.pid);
 }
 
 function retained(

@@ -34,6 +34,7 @@ function issue(overrides: Partial<ImplementationIssue> = {}): ImplementationIssu
   return {
     number: 42,
     title: 'Implement exact lifecycle ownership',
+    body: 'Preserve exact lifecycle ownership.',
     open: true,
     eligible: true,
     targetBase: gitRefName('next'),
@@ -624,5 +625,58 @@ describe('implementation action executor', () => {
     await expect(executeImplementationAction({ issueNumber: 42 }, deps))
       .resolves.toMatchObject({ status: 'ambiguous' });
     expect(events).toEqual([]);
+  });
+
+  it('routes the claimed mutation through the selected backend without local fallback', async () => {
+    const starts: unknown[] = [];
+    const persisted: unknown[] = [];
+    const { deps, events } = harness({
+      executionBackendKind: 'marketplace',
+      executionBackend: {
+        start: async (input) => {
+          starts.push(input);
+          return {
+            backend: 'marketplace',
+            taskId: '501',
+            taskCid: 'bafy-task',
+            deadline: input.deadline,
+            requestFile: '/tmp/request.json',
+          };
+        },
+        recover: async () => ({ state: 'running' }),
+        cancel: async () => {},
+      },
+      sessionDeadline: () => '2026-07-20T13:00:00.000Z',
+      receiptAuthors: ['implementation-bot'],
+      persistExecutionHandle: (manifestPath, handle) => {
+        persisted.push({ manifestPath, handle });
+      },
+      spawnCoordinator: () => {
+        throw new Error('local spawn must never be called');
+      },
+    });
+
+    await expect(executeImplementationAction({ issueNumber: 42 }, deps))
+      .resolves.toMatchObject({ status: 'spawned', attemptId: ATTEMPT_A });
+    expect(starts).toEqual([expect.objectContaining({
+      kind: 'mutation',
+      workflow: 'implement',
+      issue: expect.objectContaining({
+        number: 42,
+        body: 'Preserve exact lifecycle ownership.',
+      }),
+      pr: expect.objectContaining({ number: 84 }),
+      expectedHead: CLAIM_A,
+      v2AttemptId: ATTEMPT_A,
+    })]);
+    expect(persisted).toEqual([{
+      manifestPath: `/tmp/${ATTEMPT_A}/manifest.json`,
+      handle: expect.objectContaining({
+        backend: 'marketplace',
+        taskId: '501',
+        taskCid: 'bafy-task',
+      }),
+    }]);
+    expect(events).toEqual(['claim', 'pr', 'project', 'attempt']);
   });
 });

@@ -4,9 +4,7 @@ import type { DispatcherConfig } from '../dispatcher/types.js';
 import type { CommandRunner } from '../dispatcher/issue-source.js';
 import { defaultRunner } from '../dispatcher/issue-source.js';
 import {
-  spawnCoordinatorSession,
   type SpawnFn,
-  type SpawnResult,
 } from '../dispatcher/coordinator-session.js';
 import {
   assertHermesBillingRoute,
@@ -17,6 +15,8 @@ import {
 } from '../dispatcher/cursor-runtime.js';
 import {
   listRunnerLiveAttempts,
+  markAttemptExited,
+  markMarketplaceAttemptRunning,
   trackAttemptChild,
   type TrackableAttemptChild,
 } from './attempt-workspace.js';
@@ -33,7 +33,6 @@ import {
 import {
   CANONICAL_GITHUB_HTTPS_REMOTE,
   executeImplementationAction,
-  makeCanonicalImplementationSpawner,
 } from './implementation-executor.js';
 import {
   makeProductionImplementationActionPort,
@@ -62,6 +61,17 @@ import type {
   TargetedOpenPullRequest,
 } from './targeted-action-reader.js';
 import type { GitOid, HumanReason } from './types.js';
+import type { AutopilotExecutionBackend } from './active-config.js';
+import {
+  makeLocalSessionExecutionBackend,
+  type MarketplaceExecutionHandle,
+} from './session-execution-backend.js';
+import {
+  makeMarketplaceSessionBackend,
+  MARKETPLACE_AGENT_SOFT_DEADLINE_MS,
+  MARKETPLACE_ADOPTION_RESERVE_MS,
+  type MarketplaceSessionBackend,
+} from './marketplace-session-backend.js';
 
 export const AUTOPILOT_V2_REMOTE = 'jinn-autopilot-v2';
 
@@ -90,6 +100,16 @@ export interface ProductionActiveRuntimeOptions {
   ) => Promise<TargetedIssueActionContext>;
   readonly config: DispatcherConfig;
   readonly spawn: SpawnFn;
+  readonly executionBackendKind?: AutopilotExecutionBackend;
+  readonly marketplaceBackend?: MarketplaceSessionBackend;
+  readonly marketplacePreflight?: () => Promise<{
+    readonly ok: boolean;
+    readonly detail?: string;
+  }>;
+  readonly marketplaceRecovery?: () => Promise<{
+    readonly ok: boolean;
+    readonly detail?: string;
+  }>;
   readonly caps: {
     readonly implementation: number;
     readonly review: number;
@@ -132,30 +152,6 @@ function isPidAlive(pid: number): boolean {
   }
 }
 
-function requireTrackable(child: SpawnResult): TrackableAttemptChild {
-  if (
-    child.pid === undefined
-    || typeof (child as Partial<TrackableAttemptChild>).once !== 'function'
-  ) {
-    throw new Error('Production coordinator child is not trackable');
-  }
-  return child as TrackableAttemptChild;
-}
-
-function reviewScenario(input: {
-  readonly prNumber: number;
-  readonly issueNumber: number;
-  readonly head: string;
-  readonly worktreePath: string;
-}): string {
-  return [
-    `Use the review-pr skill on PR #${input.prNumber} for issue #${input.issueNumber}.`,
-    `The v2 lifecycle already claimed exact head \`${input.head}\` and created the detached worktree at \`${input.worktreePath}\`.`,
-    'Finish with `autopilot session review-verdict --state <APPROVE|REQUEST_CHANGES> --body-file <path>` or park with `autopilot session human --reason-file <path>`.',
-  ].join('\n');
-}
-
-
 export function makeProductionCapabilityPreflight(
   options: Pick<
   ProductionActiveRuntimeOptions,
@@ -167,6 +163,10 @@ export function makeProductionCapabilityPreflight(
   | 'environment'
   | 'now'
   | 'readCapabilityAttestation'
+  | 'executionBackendKind'
+  | 'marketplacePreflight'
+  | 'marketplaceRecovery'
+  | 'staleAfterMs'
   >,
 ): () => Promise<{ readonly ok: boolean; readonly detail?: string }> {
   const runner = options.runner ?? defaultRunner;
@@ -200,14 +200,47 @@ export function makeProductionCapabilityPreflight(
         configuredLogins: options.credentials.logins(),
         now: now(),
       });
-      if (options.config.runtime === 'hermes') {
+      if (options.executionBackendKind === 'marketplace') {
+        const remoteDeadlineMs =
+          MARKETPLACE_AGENT_SOFT_DEADLINE_MS
+          + MARKETPLACE_ADOPTION_RESERVE_MS;
+        if (
+          options.staleAfterMs !== undefined
+          && options.staleAfterMs <= remoteDeadlineMs
+        ) {
+          throw new Error(
+            'marketplace submission deadline must be shorter than V2 staleness',
+          );
+        }
+        if (options.marketplacePreflight === undefined) {
+          throw new Error('marketplace one-shot preflight is unavailable');
+        }
+        const marketplace = await options.marketplacePreflight();
+        if (!marketplace.ok) {
+          throw new Error(
+            marketplace.detail ?? 'marketplace one-shot preflight failed',
+          );
+        }
+        if (options.marketplaceRecovery === undefined) {
+          throw new Error('marketplace attempt recovery is unavailable');
+        }
+        const recovery = await options.marketplaceRecovery();
+        if (!recovery.ok) {
+          throw new Error(
+            recovery.detail ?? 'marketplace attempt recovery failed',
+          );
+        }
+      } else if (options.config.runtime === 'hermes') {
         assertHermesBillingRoute(
           options.config.hermesModel,
           options.config.hermesProvider,
         );
         assertHermesRuntimeReady(options.config.hermesPythonPath);
       }
-      if (options.config.runtime === 'cursor') {
+      if (
+        options.executionBackendKind !== 'marketplace'
+        && options.config.runtime === 'cursor'
+      ) {
         assertCursorRuntimeReady(options.config.cursorBin);
       }
       return { ok: true };
@@ -230,9 +263,7 @@ export function makeProductionActiveRuntime(
   const sleep = options.sleep ?? defaultSleep;
   const remoteName = options.remoteName ?? AUTOPILOT_V2_REMOTE;
   const alive = options.isPidAlive ?? isPidAlive;
-  const track = (manifestPath: string, child: SpawnResult): void => {
-    trackAttemptChild(manifestPath, requireTrackable(child), { now });
-  };
+  const executionBackendKind = options.executionBackendKind ?? 'local';
   const implementationPreferred = selectCredential(
     options.credentials,
     { phase: 'implement' },
@@ -240,31 +271,97 @@ export function makeProductionActiveRuntime(
   const implementationPreferredLogin = implementationPreferred.status === 'selected'
     ? implementationPreferred.login
     : options.credentials.logins()[0] ?? '';
-  const implementationSpawner = makeCanonicalImplementationSpawner(
-    options.config,
-    options.spawn,
+  const marketplaceBackend = executionBackendKind === 'marketplace'
+    ? options.marketplaceBackend ?? makeMarketplaceSessionBackend({
+        runner,
+        environment: ambient,
+        now,
+      })
+    : undefined;
+  const executionBackend = marketplaceBackend
+    ?? makeLocalSessionExecutionBackend({
+      config: options.config,
+      credentials: options.credentials,
+      ambientEnvironment: ambient,
+      spawn: options.spawn,
+      trackChild: (manifestPath, child) => {
+        const trackable = child as TrackableAttemptChild;
+        if (
+          trackable.pid === undefined
+          || typeof trackable.once !== 'function'
+        ) {
+          throw new Error('Production coordinator child is not trackable');
+        }
+        trackAttemptChild(manifestPath, trackable, { now });
+      },
+      isPidAlive: alive,
+    });
+  const sessionDeadline = () => new Date(
+    now().getTime() + MARKETPLACE_AGENT_SOFT_DEADLINE_MS,
+  ).toISOString();
+  const receiptAuthors = options.credentials.logins();
+  const recoverMarketplaceAttempts = options.marketplaceRecovery ?? (
+    marketplaceBackend === undefined
+      ? undefined
+      : async () => {
+          try {
+            const attempts = listRunnerLiveAttempts(
+              join(options.worktreeBase, 'v2'),
+              options.runnerId,
+              alive,
+            );
+            for (const attempt of attempts) {
+              if (attempt.execution.backend !== 'marketplace') continue;
+              let handle: MarketplaceExecutionHandle;
+              if (attempt.processState === 'preparing') {
+                handle = await marketplaceBackend.recoverPreparing(
+                  attempt.paths.manifest,
+                );
+                markMarketplaceAttemptRunning(
+                  attempt.paths.manifest,
+                  handle,
+                  now,
+                );
+              } else {
+                const execution = attempt.execution;
+                if (
+                  execution.taskId === undefined
+                  || execution.taskCid === undefined
+                  || execution.deadline === undefined
+                  || execution.requestFile === undefined
+                ) {
+                  throw new Error(
+                    `Marketplace attempt ${attempt.attemptId} has no durable execution handle`,
+                  );
+                }
+                handle = {
+                  backend: 'marketplace',
+                  taskId: execution.taskId,
+                  taskCid: execution.taskCid,
+                  deadline: execution.deadline,
+                  requestFile: execution.requestFile,
+                  ...(execution.attemptIndex === undefined
+                    ? {}
+                    : {
+                        attemptIndex: execution.attemptIndex,
+                        requestId: execution.requestId!,
+                      }),
+                };
+              }
+              const observation = await marketplaceBackend.recover(handle);
+              if (observation.state !== 'running') {
+                markAttemptExited(attempt.paths.manifest, now);
+              }
+            }
+            return { ok: true };
+          } catch (error) {
+            return {
+              ok: false,
+              detail: error instanceof Error ? error.message : String(error),
+            };
+          }
+        }
   );
-  const reviewSpawner = (
-    input: Parameters<import('./review-executor.js').ReviewExecutorDeps['spawnCoordinator']>[0],
-  ) => spawnCoordinatorSession({
-    kind: 'review',
-    number: input.candidate.number,
-    skill: 'review-pr',
-    scenario: reviewScenario({
-      prNumber: input.candidate.number,
-      issueNumber: input.candidate.issueNumber,
-      head: input.candidate.head,
-      worktreePath: input.worktreePath,
-    }),
-    worktreePath: input.worktreePath,
-    effort: null,
-    env: input.environment,
-    spawnOptions: {
-      detached: true,
-      stdio: ['ignore', 'inherit', 'inherit'],
-      logPath: input.logPath,
-    },
-  }, options.config, { spawn: options.spawn });
   const escalateReview = async (
     input: {
       readonly candidate: {
@@ -337,7 +434,13 @@ export function makeProductionActiveRuntime(
       options.runnerId,
       alive,
     ),
-    preflight: makeProductionCapabilityPreflight(options),
+    preflight: makeProductionCapabilityPreflight({
+      ...options,
+      executionBackendKind,
+      marketplacePreflight: options.marketplacePreflight
+        ?? marketplaceBackend?.preflight,
+      marketplaceRecovery: recoverMarketplaceAttempts,
+    }),
     ...(options.newWorkPaused === undefined
       ? {}
       : { newWorkPaused: options.newWorkPaused }),
@@ -362,8 +465,14 @@ export function makeProductionActiveRuntime(
           nextAttemptId: nextId,
           runnerId: options.runnerId,
           now,
-          spawnCoordinator: implementationSpawner,
-          trackChild: track,
+          executionBackendKind,
+          executionBackend,
+          sessionDeadline,
+          receiptAuthors,
+          persistExecutionHandle: (manifestPath, handle) => {
+            if (handle.backend !== 'marketplace') return;
+            markMarketplaceAttemptRunning(manifestPath, handle, now);
+          },
         });
       },
 
@@ -390,8 +499,10 @@ export function makeProductionActiveRuntime(
           now,
           sleep,
           staleAfterMs: options.staleAfterMs,
-          spawnCoordinator: reviewSpawner,
-          trackChild: track,
+          executionBackendKind,
+          executionBackend,
+          sessionDeadline,
+          receiptAuthors,
           escalateHuman: (input) => escalateReview(input, credentials, cycleSnapshot),
         });
       },

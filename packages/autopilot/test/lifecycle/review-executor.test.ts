@@ -143,6 +143,24 @@ function harness(overrides: Partial<ReviewExecutorDeps> = {}) {
 }
 
 describe('review action executor', () => {
+  it('suppresses standalone review dispatch in marketplace mode before claiming', async () => {
+    const h = harness({
+      executionBackendKind: 'marketplace',
+      spawnCoordinator: () => {
+        throw new Error('standalone local review must never spawn');
+      },
+    });
+
+    await expect(executeReviewAction({ prNumber: 84 }, h.deps))
+      .resolves.toEqual({
+        status: 'ineligible',
+        prNumber: 84,
+        detail:
+          'Marketplace review is evaluator-anchored during Solution adoption.',
+      });
+    expect(h.events).toEqual([]);
+  });
+
   it.skip('fails closed when the scheduled exact head changes before acquisition', async () => {
     const { deps, events } = harness();
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   activeCleanupEnabled,
   attemptGraceMs,
+  autopilotExecutionBackend,
   autopilotDiskFloorBytes,
   explicitEnvironmentFlag,
 } from '../../src/lifecycle/active-config.js';
@@ -43,5 +44,15 @@ describe('active runtime configuration', () => {
       '1',
       'JINN_AUTOPILOT_CLEANUP_ENABLED',
     )).toThrow('must be true or false');
+  });
+
+  it('selects the V2 execution backend independently and defaults to local', () => {
+    expect(autopilotExecutionBackend(undefined)).toBe('local');
+    expect(autopilotExecutionBackend('')).toBe('local');
+    expect(autopilotExecutionBackend('local')).toBe('local');
+    expect(autopilotExecutionBackend('marketplace')).toBe('marketplace');
+    expect(() => autopilotExecutionBackend('daemon')).toThrow(
+      /JINN_AUTOPILOT_EXECUTION_BACKEND.*local.*marketplace/i,
+    );
   });
 });
