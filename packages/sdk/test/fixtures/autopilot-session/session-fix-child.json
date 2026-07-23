@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "jinn-autopilot-session.v1",
+  "workflow": "fix-child",
+  "repository": "Jinn-Network/mono",
+  "issueNumber": 2002,
+  "childIssueNumber": 2003,
+  "parentPrNumber": 2102,
+  "prNumber": 2102,
+  "targetBase": "next",
+  "branch": "codex/issue-2002",
+  "claimOid": "1111111111111111111111111111111111111111",
+  "expectedHead": "2222222222222222222222222222222222222222",
+  "v2AttemptId": "123e4567-e89b-42d3-a456-426614174002",
+  "runnerId": "runner-1",
+  "taskSnapshot": {
+    "title": "Address review findings",
+    "body": "Repair the blocking finding.",
+    "prBody": "Parent implementation PR.",
+    "baseSha": "3333333333333333333333333333333333333333"
+  },
+  "workflowContract": {
+    "skill": "fix-child",
+    "version": "v2",
+    "resultSchema": "jinn-autopilot-mutation-result.v1"
+  },
+  "deadline": "2026-07-23T23:00:00.000Z",
+  "receiptAuthors": ["jinn-autopilot"]
+}

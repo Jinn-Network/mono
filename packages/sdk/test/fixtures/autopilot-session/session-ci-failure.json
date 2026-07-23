@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "jinn-autopilot-session.v1",
+  "workflow": "ci-failure",
+  "repository": "Jinn-Network/mono",
+  "issueNumber": 2006,
+  "childIssueNumber": 2007,
+  "parentPrNumber": 2106,
+  "prNumber": 2106,
+  "targetBase": "next",
+  "branch": "codex/issue-2006",
+  "claimOid": "1111111111111111111111111111111111111111",
+  "expectedHead": "2222222222222222222222222222222222222222",
+  "v2AttemptId": "123e4567-e89b-42d3-a456-426614174004",
+  "runnerId": "runner-1",
+  "taskSnapshot": {
+    "title": "Repair persistent CI failure",
+    "body": "Diagnose and repair the failing check.",
+    "prBody": "Parent implementation PR.",
+    "baseSha": "3333333333333333333333333333333333333333"
+  },
+  "workflowContract": {
+    "skill": "fix-child",
+    "version": "v2",
+    "resultSchema": "jinn-autopilot-mutation-result.v1"
+  },
+  "deadline": "2026-07-23T23:00:00.000Z",
+  "receiptAuthors": ["jinn-autopilot"]
+}

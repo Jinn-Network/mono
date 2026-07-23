@@ -17,9 +17,22 @@
 import { describe, it, expect } from 'vitest';
 import {
   JinnRepoTaskSchema,
+  isAutopilotSessionTask,
   isMergedPrTask,
   isLiveIssueTask,
 } from '../src/jinn-repo.js';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+const autopilotFixtureDirectory = fileURLToPath(
+  new URL('./fixtures/autopilot-session/', import.meta.url),
+);
+
+function autopilotFixture(name: string): unknown {
+  return JSON.parse(
+    readFileSync(`${autopilotFixtureDirectory}${name}.json`, 'utf8'),
+  ) as unknown;
+}
 
 describe('JinnRepoTaskSchema (SDK) — merged-pr branch (retrospective)', () => {
   // A legacy document — no `source` field, exactly as every jinn-repo task
@@ -42,6 +55,13 @@ describe('JinnRepoTaskSchema (SDK) — merged-pr branch (retrospective)', () => 
 
   it('rejects a merged-pr task carrying live-issue-only fields', () => {
     expect(() => JinnRepoTaskSchema.parse({ ...legacyValid, issue_number: 5 })).toThrow();
+  });
+
+  it('rejects a merged-pr task carrying an Autopilot session capsule', () => {
+    expect(() => JinnRepoTaskSchema.parse({
+      ...legacyValid,
+      session: autopilotFixture('session-implement'),
+    })).toThrow();
   });
 });
 
@@ -76,6 +96,13 @@ describe('JinnRepoTaskSchema (SDK) — live-issue branch (prospective)', () => {
     expect(() =>
       JinnRepoTaskSchema.parse({ ...validLiveIssue, test_cmd: 'yarn vitest run t.test.ts' }),
     ).toThrow();
+  });
+
+  it('rejects a live-issue task carrying an Autopilot session capsule', () => {
+    expect(() => JinnRepoTaskSchema.parse({
+      ...validLiveIssue,
+      session: autopilotFixture('session-implement'),
+    })).toThrow();
   });
 
   it('rejects an unknown `source` value', () => {
@@ -113,5 +140,41 @@ describe('isMergedPrTask / isLiveIssueTask (SDK)', () => {
     });
     expect(isMergedPrTask(task)).toBe(false);
     expect(isLiveIssueTask(task)).toBe(true);
+  });
+});
+
+describe('JinnRepoTaskSchema (SDK) — autopilot-session branch', () => {
+  const valid = {
+    schemaVersion: 'jinn-repo.v1',
+    source: 'autopilot-session' as const,
+    instance_id: 'autopilot:123e4567-e89b-42d3-a456-426614174001',
+    repo: 'Jinn-Network/mono',
+    base_commit: 'a'.repeat(40),
+    language: 'typescript',
+    problem_statement: 'Implement exact marketplace contracts.',
+    session: autopilotFixture('session-implement'),
+  };
+
+  it('accepts a well-formed Autopilot session task and narrows it', () => {
+    const parsed = JinnRepoTaskSchema.parse(valid);
+    expect(parsed).toEqual(valid);
+    expect(isAutopilotSessionTask(parsed)).toBe(true);
+    expect(isMergedPrTask(parsed)).toBe(false);
+    expect(isLiveIssueTask(parsed)).toBe(false);
+  });
+
+  it('rejects missing or malformed strict session capsules', () => {
+    const { session: _session, ...missing } = valid;
+    expect(() => JinnRepoTaskSchema.parse(missing)).toThrow();
+
+    expect(() => JinnRepoTaskSchema.parse({
+      ...valid,
+      session: { ...(valid.session as object), surprise: true },
+    })).toThrow();
+  });
+
+  it('keeps legacy task wrappers permissive while the new nested codec is strict', () => {
+    expect(JinnRepoTaskSchema.parse({ ...valid, wrapperMetadata: 'kept-compatible' }))
+      .toEqual(valid);
   });
 });

@@ -12,10 +12,15 @@ import {
   SweRebenchV2SolutionPayloadSchema,
   SweRebenchV2VerdictPayloadSchema,
 } from './payloads/swe-rebench-v2.js';
-import { JinnRepoTaskSchema } from './jinn-repo.js';
+import {
+  JinnRepoTaskSchema,
+  type JinnRepoTask,
+} from './jinn-repo.js';
 import {
   JinnRepoSolutionPayloadSchema,
   JinnRepoVerdictPayloadSchema,
+  type JinnRepoSolutionPayload,
+  type JinnRepoVerdictPayload,
 } from './payloads/jinn-repo.js';
 import {
   SessionDerivedSolutionSchema,
@@ -448,12 +453,14 @@ function assertValid<T>(result: PayloadValidationResult<T>): T {
 }
 
 export function validateTask(solverType: 'prediction.v1', task: unknown): PayloadValidationResult<PredictionV1Task>;
+export function validateTask(solverType: 'jinn-repo.v1', task: unknown): PayloadValidationResult<JinnRepoTask>;
 export function validateTask(solverType: string, task: unknown): PayloadValidationResult<unknown>;
 export function validateTask(solverType: string, task: unknown): PayloadValidationResult<unknown> {
   return validateWithSchema(solverType, 'task', task);
 }
 
 export function assertTask(solverType: 'prediction.v1', task: unknown): PredictionV1Task;
+export function assertTask(solverType: 'jinn-repo.v1', task: unknown): JinnRepoTask;
 export function assertTask(solverType: string, task: unknown): unknown;
 export function assertTask(solverType: string, task: unknown): unknown {
   return assertValid(validateTask(solverType, task));
@@ -463,6 +470,10 @@ export function validateSolutionPayload(
   solverType: 'prediction.v1',
   payload: unknown,
 ): PayloadValidationResult<PredictionV1RestorationPayload>;
+export function validateSolutionPayload(
+  solverType: 'jinn-repo.v1',
+  payload: unknown,
+): PayloadValidationResult<JinnRepoSolutionPayload>;
 export function validateSolutionPayload(solverType: string, payload: unknown): PayloadValidationResult<Record<string, unknown>>;
 export function validateSolutionPayload(solverType: string, payload: unknown): PayloadValidationResult<unknown> {
   return validateWithSchema(solverType, 'solution', payload);
@@ -472,6 +483,10 @@ export function assertSolutionPayload(
   solverType: 'prediction.v1',
   payload: unknown,
 ): PredictionV1RestorationPayload;
+export function assertSolutionPayload(
+  solverType: 'jinn-repo.v1',
+  payload: unknown,
+): JinnRepoSolutionPayload;
 export function assertSolutionPayload(solverType: string, payload: unknown): Record<string, unknown>;
 export function assertSolutionPayload(solverType: string, payload: unknown): unknown {
   return assertValid(validateSolutionPayload(solverType, payload));
@@ -481,6 +496,10 @@ export function validateVerdictPayload(
   solverType: 'prediction.v1',
   payload: unknown,
 ): PayloadValidationResult<PredictionV1VerdictPayload>;
+export function validateVerdictPayload(
+  solverType: 'jinn-repo.v1',
+  payload: unknown,
+): PayloadValidationResult<JinnRepoVerdictPayload>;
 export function validateVerdictPayload(solverType: string, payload: unknown): PayloadValidationResult<Record<string, unknown>>;
 export function validateVerdictPayload(solverType: string, payload: unknown): PayloadValidationResult<unknown> {
   return validateWithSchema(solverType, 'verdict', payload);
@@ -490,6 +509,10 @@ export function assertVerdictPayload(
   solverType: 'prediction.v1',
   payload: unknown,
 ): PredictionV1VerdictPayload;
+export function assertVerdictPayload(
+  solverType: 'jinn-repo.v1',
+  payload: unknown,
+): JinnRepoVerdictPayload;
 export function assertVerdictPayload(solverType: string, payload: unknown): Record<string, unknown>;
 export function assertVerdictPayload(solverType: string, payload: unknown): unknown {
   return assertValid(validateVerdictPayload(solverType, payload));
