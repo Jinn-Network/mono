@@ -562,6 +562,7 @@ describe('implementation action executor', () => {
       draft: false,
     });
     const spawns: unknown[] = [];
+    const claimCommits: BranchClaim[] = [];
     const { deps, claims } = harness({
       readIssue: async () => issue({
         number: 2069,
@@ -569,6 +570,10 @@ describe('implementation action executor', () => {
         child: { parentPr: 2065, kind: 'review-finding' },
       }),
       readParentPullRequest: async () => parent,
+      createClaimCommit: async ({ claim }) => {
+        claimCommits.push(claim);
+        return CLAIM_A;
+      },
       spawnCoordinator: (input) => {
         spawns.push(input);
         return { pid: 4242 };
@@ -582,6 +587,11 @@ describe('implementation action executor', () => {
       issueNumber: 2069,
       prNumber: 2065,
       branch: parent.headRefName,
+    });
+    expect(claimCommits[0]).toMatchObject({
+      phase: 'fix',
+      issueNumber: 2069,
+      prNumber: 2065,
     });
     expect(claims[0]).toMatchObject({
       branch: parent.headRefName,
