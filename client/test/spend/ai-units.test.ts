@@ -8,6 +8,7 @@
  * peg.
  */
 import { describe, expect, it, vi } from 'vitest';
+import { estimateModelCost } from '../../src/harnesses/cost-estimates.js';
 import {
   GPT_5_4_MINI_USD_PER_BLOCK,
   REFERENCE_CEILING,
@@ -31,6 +32,11 @@ describe('AI-units calibration', () => {
   it('GPT_5_4_MINI_USD_PER_BLOCK is a positive number (the AI-unit peg)', () => {
     expect(typeof GPT_5_4_MINI_USD_PER_BLOCK).toBe('number');
     expect(GPT_5_4_MINI_USD_PER_BLOCK).toBeGreaterThan(0);
+  });
+
+  it('pins the Haiku worked example against peg/rate drift (issue #830, item 3)', () => {
+    // 50k input * $0.001/1k + 20k output * $0.005/1k = 0.05 + 0.10 = 0.15 USD.
+    expect(estimateModelCost('claude-haiku-4-5-20251001')?.usd).toBeCloseTo(0.15, 4);
   });
 });
 

@@ -46,16 +46,15 @@ export function hasChildKindLabel(labels: readonly string[] | undefined): boolea
 }
 
 /**
- * Machine-created child issues carry a body marker plus a kind label.
- * Triage (Blocked on / Effort / Priority) lives on the Project board.
+ * Machine-created child issues are identified by the structured body marker.
+ * Kind labels are best-effort discovery tags; CI-red is derived from the parent
+ * PR, not from the child label. Triage lives on the Project board.
  */
 export function isMachineChildIssue(input: {
   readonly body?: string;
   readonly labels?: readonly string[];
 }): boolean {
-  if (!isChildIssueBody(input.body ?? '')) return false;
-  const labels = input.labels ?? [];
-  return labels.some((label) => CHILD_KIND_LABELS.has(label));
+  return isChildIssueBody(input.body ?? '');
 }
 
 export interface FileChildIssueInput {

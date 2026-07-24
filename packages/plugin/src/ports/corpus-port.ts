@@ -21,6 +21,11 @@ export interface CorpusRecordStep {
  */
 export interface CorpusRecord {
   ref: string;
+  /**
+   * Canonical EpisodeV1 episodeId, or the legacy trace sessionId used as its
+   * read-compatible identity. Application metadata for deduplication only.
+   */
+  canonicalEpisodeId?: string;
   task: {
     summary: string;
     repositorySlug?: string;

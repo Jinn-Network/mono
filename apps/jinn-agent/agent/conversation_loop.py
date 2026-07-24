@@ -627,6 +627,7 @@ def run_conversation(
             original_user_message=original_user_message,
             messages=messages,
             effective_task_id=effective_task_id,
+            turn_id=turn_id,
             should_review_memory=_should_review_memory,
         )
 

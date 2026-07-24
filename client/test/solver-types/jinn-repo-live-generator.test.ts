@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DEFAULT_POSTING_WINDOW_MS } from '../../src/solver-types/_jinn-repo-posting-window.js';
 import {
   makeJinnRepoLiveGenerator,
   makeJinnRepoLiveGeneratorForLaunchedRecord,
@@ -296,6 +297,71 @@ describe('makeJinnRepoLiveGenerator', () => {
     const tasks = await gen();
     expect(tasks![0]!.solverNetManifestCid).toBe('bafyLiveManifestCid');
   });
+
+  it('default posting window is exactly six hours on emitted task', async () => {
+    const hash = 'e'.repeat(64);
+    const fetchImpl = makeFakeFetch([
+      {
+        number: 42,
+        comments: [trustedComment(markerComment({ issueNumber: 42, hash }))],
+      },
+    ]);
+    const gen = makeJinnRepoLiveGenerator({
+      stateDir,
+      fetchImpl,
+      repo: REPO,
+      label: LABEL,
+      markerTrustedAssociations: [TRUSTED_ASSOCIATION],
+    });
+    const tasks = await gen();
+    expect(tasks).toHaveLength(1);
+    expect(tasks![0]!.window.endTs - tasks![0]!.window.startTs).toBe(
+      DEFAULT_POSTING_WINDOW_MS,
+    );
+  });
+
+  it('postingWindowMs override appears as emitted window duration', async () => {
+    const override = 7 * 60 * 60 * 1000;
+    const hash = 'f'.repeat(64);
+    const fetchImpl = makeFakeFetch([
+      {
+        number: 43,
+        comments: [trustedComment(markerComment({ issueNumber: 43, hash }))],
+      },
+    ]);
+    const gen = makeJinnRepoLiveGenerator({
+      stateDir,
+      fetchImpl,
+      repo: REPO,
+      label: LABEL,
+      markerTrustedAssociations: [TRUSTED_ASSOCIATION],
+      postingWindowMs: override,
+    });
+    const tasks = await gen();
+    expect(tasks![0]!.window.endTs - tasks![0]!.window.startTs).toBe(override);
+  });
+
+  it('invalid postingWindowMs throws at construction (no silent fallback)', () => {
+    const fetchImpl = makeFakeFetch([]);
+    expect(() =>
+      makeJinnRepoLiveGenerator({
+        stateDir,
+        fetchImpl,
+        repo: REPO,
+        label: LABEL,
+        postingWindowMs: 0,
+      }),
+    ).toThrow(/postingWindowMs/);
+    expect(() =>
+      makeJinnRepoLiveGenerator({
+        stateDir,
+        fetchImpl,
+        repo: REPO,
+        label: LABEL,
+        postingWindowMs: Number.NaN,
+      }),
+    ).toThrow(/postingWindowMs/);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -443,5 +509,58 @@ describe('makeJinnRepoLiveGeneratorForLaunchedRecord', () => {
     });
     const tasks = await gen();
     expect(Array.isArray(tasks) ? tasks[0]!.solverNetManifestCid : undefined).toBe('bafyThreadedManifest');
+  });
+
+  it('throws when generatorConfig.posting_window_ms is invalid and staticConfig omits postingWindowMs', () => {
+    expect(() =>
+      makeJinnRepoLiveGeneratorForLaunchedRecord({
+        recordRef: {
+          current: record({ generatorConfig: { posting_window_ms: 'fast' } }),
+        },
+        staticConfig: { stateDir, fetchImpl: makeFakeFetch([]) },
+      }),
+    ).toThrow(/postingWindowMs/);
+  });
+
+  it('staticConfig.postingWindowMs wins over invalid generatorConfig.posting_window_ms', () => {
+    expect(() =>
+      makeJinnRepoLiveGeneratorForLaunchedRecord({
+        recordRef: {
+          current: record({ generatorConfig: { posting_window_ms: 0 } }),
+        },
+        staticConfig: {
+          stateDir,
+          fetchImpl: makeFakeFetch([]),
+          postingWindowMs: 8 * 60 * 60 * 1000,
+        },
+      }),
+    ).not.toThrow();
+  });
+
+  it('generatorConfig.posting_window_ms override appears on emitted window when static omits it', async () => {
+    const override = 7 * 60 * 60 * 1000;
+    const hash = 'a2'.repeat(32);
+    const gen = makeJinnRepoLiveGeneratorForLaunchedRecord({
+      recordRef: {
+        current: record({
+          generatorConfig: { posting_window_ms: override },
+        }),
+      },
+      staticConfig: {
+        stateDir,
+        fetchImpl: makeFakeFetch([
+          {
+            number: 81,
+            comments: [
+              trustedComment(markerComment({ issueNumber: 81, hash })),
+            ],
+          },
+        ]),
+        markerTrustedAssociations: [TRUSTED_ASSOCIATION],
+      },
+    });
+    const tasks = await gen();
+    const task = Array.isArray(tasks) ? tasks[0]! : tasks!;
+    expect(task.window.endTs - task.window.startTs).toBe(override);
   });
 });

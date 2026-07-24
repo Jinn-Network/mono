@@ -301,6 +301,7 @@ describe('executeEpisodes()', () => {
     ['email address', 'Contact the reporter at jane.doe@example.com for repro steps.'],
     ['home-dir path', 'Logs were written to /Users/jdoe/project/output.log.'],
     ['AWS access-key id', 'Found a stray credential: AKIAIOSFODNN7EXAMPLE in the diff.'],
+    ['Luhn-valid payment card', 'Customer card: 4111 1111 1111 1111.'],
   ])('rejects %s before any publish call', async (_label, sensitiveText) => {
     const source = mockEpisodeSource([
       episode({
@@ -340,7 +341,6 @@ describe('executeEpisodes()', () => {
   });
 
   it.each([
-    ['payment-card-shaped string', 'Customer card: 4111 1111 1111 1111.'],
     ['phone-shaped string', 'Call the customer at +1 (415) 555-2671.'],
     [
       'JWT-shaped string',
@@ -352,18 +352,16 @@ describe('executeEpisodes()', () => {
     ['government-identity identifier', 'Passport: A1234567.'],
     ['financial-account identifier', 'Bank account: 1234 5678.'],
   ])('accepts a %s under the seed profile (documented residual, #1409/#1784)', async (_label, residualText) => {
-    // The seed profile deliberately does not run openredaction or the
-    // entropy fallback (build.ts's buildSeedScrubPipeline doc comment,
-    // #1409): seeds are public, transformed, human-reviewed prose, and those
-    // probabilistic stages false-positive on ordinary words and hex-looking
-    // ids in that content (#1784). Every structured identifier or PII class
-    // detected only by openredaction is therefore residual risk — not just
-    // the representative payment, contact, government identity, medical,
-    // and financial cases sampled here. JWTs and unprefixed high-entropy
-    // blobs are likewise residuals from the omitted entropy fallback. The
-    // trace profile still catches these classes; seed curators must catch
-    // them by review. This test pins that trade-off as intentional, not a
-    // complete enumeration of openredaction's 570+ pattern surface.
+    // The seed profile deliberately omits the optional GLiNER detector and the
+    // entropy fallback (buildSeedScrubPipeline, #1409): seeds are public,
+    // transformed, human-reviewed prose, and probabilistic stages
+    // false-positive on ordinary words and hex-looking ids (#1784). Every
+    // structured identifier or PII class detected only by those omitted stages
+    // is therefore residual risk. Luhn-valid cards are not residual: the shared
+    // Tier-1 checksummed-instruments detector catches them in every lane
+    // (#1972). JWTs and unprefixed high-entropy blobs remain residuals from the
+    // omitted entropy fallback. Seed curators must catch the remaining classes
+    // by review; this test pins that trade-off as intentional, not exhaustive.
     const source = mockEpisodeSource([
       episode({
         steps: [{ label: 'note', title: 'residual fixture', text: residualText }],

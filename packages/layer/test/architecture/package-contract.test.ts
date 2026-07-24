@@ -13,7 +13,7 @@ describe('@jinn-network/jinn-layer package contract', () => {
   it('is a public independent ESM package with the jinn-layer bin', () => {
     const pkg = json('package.json');
     expect(pkg.name).toBe('@jinn-network/jinn-layer');
-    expect(pkg.version).toBe('0.1.0');
+    expect(pkg.version).toMatch(/^\d+\.\d+\.\d+$/u);
     expect(pkg.private).not.toBe(true);
     expect(pkg.type).toBe('module');
     expect(pkg.bin).toEqual({

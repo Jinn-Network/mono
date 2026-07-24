@@ -58,10 +58,26 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@huggingface/jinja@npm:^0.5.6":
+"@huggingface/hub@npm:^1.0.0":
+  version: 1.1.2
+  resolution: "@huggingface/hub@npm:1.1.2"
+  dependencies:
+    "@huggingface/tasks": "npm:^0.18.2"
+  checksum: 10c0/7403a93a343778cca0a160d67486d2d4bdefa5f4a9d52f54fbf4d0b8d6d5fb2d64f8459ceddac062d3758c66e94acd1c098aa870b97ad6c503d2d7beed922b16
+  languageName: node
+  linkType: hard
+
+"@huggingface/jinja@npm:^0.5.3, @huggingface/jinja@npm:^0.5.6":
   version: 0.5.9
   resolution: "@huggingface/jinja@npm:0.5.9"
   checksum: 10c0/dab021c4c94ac931983682a66de2558b4ee6ffded45495bed403b3909b934f2a09129cd4274a6f75622d89ea9af8e95fd5957ecee6445c6e2bf983181df09aa5
+  languageName: node
+  linkType: hard
+
+"@huggingface/tasks@npm:^0.18.2":
+  version: 0.18.12
+  resolution: "@huggingface/tasks@npm:0.18.12"
+  checksum: 10c0/30f814e473d02d0244770066712789396a87874d2f2d645d69e4d7aa61d09e47fca5e5f7998915390689d8ea8837b34f517ffc2ba4fc397c731236aff1350436
   languageName: node
   linkType: hard
 
@@ -69,6 +85,18 @@ __metadata:
   version: 0.1.3
   resolution: "@huggingface/tokenizers@npm:0.1.3"
   checksum: 10c0/58b89e167c8194e5f55635e1f1c68714ae002ca8b93d1e1819987e8ea4ccddb5a649a7c8ad5bcba63bbd6f023a32d8ee2469d2c4d255b95f4714508c5c1982e8
+  languageName: node
+  linkType: hard
+
+"@huggingface/transformers@npm:^3.0.0":
+  version: 3.8.1
+  resolution: "@huggingface/transformers@npm:3.8.1"
+  dependencies:
+    "@huggingface/jinja": "npm:^0.5.3"
+    onnxruntime-node: "npm:1.21.0"
+    onnxruntime-web: "npm:1.22.0-dev.20250409-89f8206ba4"
+    sharp: "npm:^0.34.1"
+  checksum: 10c0/5fa8112ecf4fecee21eb82b1970b6290e0ab7b32166bc67ee12b539ff9d23a0d1fe6eab308a478e31167118c963b9eeef5fdbcc27ba19a20a350ef51e36fb0f6
   languageName: node
   linkType: hard
 
@@ -326,13 +354,13 @@ __metadata:
   resolution: "@jinn-network/core@portal:../core::locator=%40jinn-network%2Fjinn-layer%40workspace%3A."
   dependencies:
     "@huggingface/transformers": "npm:^4.2.0"
-    "@jinn-network/plugin": "npm:0.1.0"
+    "@jinn-network/plugin": "npm:0.1.1"
+    "@lmoe/gliner-onnx": "npm:0.1.0"
     "@noble/hashes": "npm:^2.2.0"
     "@secretlint/core": "npm:^13.0.2"
     "@secretlint/secretlint-rule-preset-recommend": "npm:^13.0.2"
     better-sqlite3: "npm:^12.10.0"
     canonicalize: "npm:^3.0.0"
-    openredaction: "npm:^1.1.2"
     zod: "npm:^4.4.3"
   peerDependencies:
     vitest: ^4.1.8
@@ -346,8 +374,8 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/jinn-layer@workspace:."
   dependencies:
-    "@jinn-network/core": "npm:0.1.0"
-    "@jinn-network/plugin": "npm:0.1.0"
+    "@jinn-network/core": "npm:0.1.1"
+    "@jinn-network/plugin": "npm:0.1.1"
     "@modelcontextprotocol/sdk": "npm:^1.27.1"
     "@types/better-sqlite3": "npm:^7.6.0"
     "@types/node": "npm:^26.1.0"
@@ -381,6 +409,16 @@ __metadata:
   version: 1.5.5
   resolution: "@jridgewell/sourcemap-codec@npm:1.5.5"
   checksum: 10c0/f9e538f302b63c0ebc06eecb1dd9918dd4289ed36147a0ddce35d6ea4d7ebbda243cda7b2213b6a5e1d8087a298d5cf630fb2bd39329cdecb82017023f6081a0
+  languageName: node
+  linkType: hard
+
+"@lmoe/gliner-onnx@npm:0.1.0":
+  version: 0.1.0
+  resolution: "@lmoe/gliner-onnx@npm:0.1.0"
+  dependencies:
+    "@huggingface/hub": "npm:^1.0.0"
+    "@huggingface/transformers": "npm:^3.0.0"
+  checksum: 10c0/60e0ef6f15f99aa14d7ef9054cd5bf635f14cafd79185de17c29e3d2968b6997f606fe5c1220593584911448752f9d2e1700bc08e2b0e3917c3bf1c7de899aa1
   languageName: node
   linkType: hard
 
@@ -2101,6 +2139,20 @@ __metadata:
   languageName: node
   linkType: hard
 
+"onnxruntime-common@npm:1.21.0":
+  version: 1.21.0
+  resolution: "onnxruntime-common@npm:1.21.0"
+  checksum: 10c0/424a83ad21b770fbf69e85f9736911ef238ea5b3ace73fa9a49fc584c98eed0a2f2fe977d2277fe725f8f6ec65d1fce3ad635c2d0a908163c6a7a03cc7478775
+  languageName: node
+  linkType: hard
+
+"onnxruntime-common@npm:1.22.0-dev.20250409-89f8206ba4":
+  version: 1.22.0-dev.20250409-89f8206ba4
+  resolution: "onnxruntime-common@npm:1.22.0-dev.20250409-89f8206ba4"
+  checksum: 10c0/11d68e3580f24c2413a4134d99f162a3897bcd76f1fd7a56aa927add3608e98c3bed75245b42d203abc61cf8155eb7c72082fbee995ef28867cbbcd0698d0769
+  languageName: node
+  linkType: hard
+
 "onnxruntime-common@npm:1.24.0-dev.20251116-b39e144322":
   version: 1.24.0-dev.20251116-b39e144322
   resolution: "onnxruntime-common@npm:1.24.0-dev.20251116-b39e144322"
@@ -2112,6 +2164,18 @@ __metadata:
   version: 1.24.3
   resolution: "onnxruntime-common@npm:1.24.3"
   checksum: 10c0/3160a08a8addf7b1c8f2ff0c12c126c84847d5b36f8c047cf05560d05faf7605fe4c3366c725cfbd305d4399d0930c632a22bd6a600488ac2c6f9ee3e2aebe25
+  languageName: node
+  linkType: hard
+
+"onnxruntime-node@npm:1.21.0":
+  version: 1.21.0
+  resolution: "onnxruntime-node@npm:1.21.0"
+  dependencies:
+    global-agent: "npm:^3.0.0"
+    onnxruntime-common: "npm:1.21.0"
+    tar: "npm:^7.0.1"
+  checksum: 10c0/7a2a7c3104da9c64fe9a2a9d04dce255aaabd337741c5369c0627575e03cd165b393f0e11c827ab352726d3f8493adc3ff842a60f135770038fb8d584500baa8
+  conditions: (os=win32 | os=darwin | os=linux)
   languageName: node
   linkType: hard
 
@@ -2127,6 +2191,20 @@ __metadata:
   languageName: node
   linkType: hard
 
+"onnxruntime-web@npm:1.22.0-dev.20250409-89f8206ba4":
+  version: 1.22.0-dev.20250409-89f8206ba4
+  resolution: "onnxruntime-web@npm:1.22.0-dev.20250409-89f8206ba4"
+  dependencies:
+    flatbuffers: "npm:^25.1.24"
+    guid-typescript: "npm:^1.0.9"
+    long: "npm:^5.2.3"
+    onnxruntime-common: "npm:1.22.0-dev.20250409-89f8206ba4"
+    platform: "npm:^1.3.6"
+    protobufjs: "npm:^7.2.4"
+  checksum: 10c0/da5ee356a00be38c9571610777e212f23670a0b59f20e2d41e551c337420a64641eab9d21ff25c8c501cc7e93d71ce329732edc39f859f5818a383e0a7e35123
+  languageName: node
+  linkType: hard
+
 "onnxruntime-web@npm:1.26.0-dev.20260416-b7804b056c":
   version: 1.26.0-dev.20260416-b7804b056c
   resolution: "onnxruntime-web@npm:1.26.0-dev.20260416-b7804b056c"
@@ -2138,27 +2216,6 @@ __metadata:
     platform: "npm:^1.3.6"
     protobufjs: "npm:^7.2.4"
   checksum: 10c0/81c6ccdd81844f9590b0c1fccd220d31d201341969ca7ad659a36542ba7741cb0e090020ca85f61d3656a9ccc96ce0889106986a6bab8afc29c3cb1895ddb38e
-  languageName: node
-  linkType: hard
-
-"openredaction@npm:^1.1.2":
-  version: 1.1.2
-  resolution: "openredaction@npm:1.1.2"
-  peerDependencies:
-    mammoth: ^1.6.0
-    pdf-parse: ^1.1.1
-    react: ^18.0.0 || ^19.0.0
-    tesseract.js: ^5.0.0
-  peerDependenciesMeta:
-    mammoth:
-      optional: true
-    pdf-parse:
-      optional: true
-    react:
-      optional: true
-    tesseract.js:
-      optional: true
-  checksum: 10c0/3b0348f9068622dc67d93b03da07b1740e52acf3b4efe4b4db182c2825418284fbba2c025c50ababe13e275bf1261857e1806ae2c627f753dbb1178873ea394e
   languageName: node
   linkType: hard
 
@@ -2541,7 +2598,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"sharp@npm:^0.34.5":
+"sharp@npm:^0.34.1, sharp@npm:^0.34.5":
   version: 0.34.5
   resolution: "sharp@npm:0.34.5"
   dependencies:
@@ -2796,6 +2853,19 @@ __metadata:
     inherits: "npm:^2.0.3"
     readable-stream: "npm:^3.1.1"
   checksum: 10c0/2f4c910b3ee7196502e1ff015a7ba321ec6ea837667220d7bcb8d0852d51cb04b87f7ae471008a6fb8f5b1a1b5078f62f3a82d30c706f20ada1238ac797e7692
+  languageName: node
+  linkType: hard
+
+"tar@npm:^7.0.1":
+  version: 7.5.21
+  resolution: "tar@npm:7.5.21"
+  dependencies:
+    "@isaacs/fs-minipass": "npm:^4.0.0"
+    chownr: "npm:^3.0.0"
+    minipass: "npm:^7.1.2"
+    minizlib: "npm:^3.1.0"
+    yallist: "npm:^5.0.0"
+  checksum: 10c0/bce0e51692356078e6f6a909d5c93f5b4c099c097ffea19b1b1bf10385539a429baba26bca59aabbace68c4519d16f2f1c07afe7eaab55876a449a032480fabc
   languageName: node
   linkType: hard
 

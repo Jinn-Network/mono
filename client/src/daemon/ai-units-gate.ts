@@ -1,12 +1,11 @@
 /**
  * AI-units claim gate — issue #815.
  *
- * Pure decision function: given the credential's current 6h-block sum,
- * 7d-window sum, the projected debit for the next claim, and the
- * per-block / per-week caps, decide whether the claim may proceed. The
- * gate fails over to *proceed* when projection is unknown (paranoia: a
- * model gap must not silently halt a working daemon — log loudly,
- * keep claiming).
+ * The spend comparison delegates to the shared, side-effect-free
+ * `classifyAiUnitsSpend` primitive. This wrapper adds operator warnings and
+ * pause-edge deduplication around that decision. The classifier fails over
+ * to *proceed* when projection is unknown (paranoia: a model gap must not
+ * silently halt a working daemon — log loudly, keep claiming).
  *
  * Module-level memo tracks per-credential paused state keyed on
  * (credentialId, window, blockId) so the daemon emits exactly one
@@ -16,8 +15,12 @@
  * new 6h block instead of one silent indefinite mute.
  */
 import type { GateLogger } from './gate-logger.js';
+import {
+  classifyAiUnitsSpend,
+  type AiUnitsSpendWindow,
+} from '../spend/ai-units.js';
 
-export type AiUnitsGateWindow = 'block' | 'week';
+export type AiUnitsGateWindow = AiUnitsSpendWindow;
 
 export interface AiUnitsGateArgs {
   credentialId: string;
@@ -79,6 +82,8 @@ function memoKey(credentialId: string, window: AiUnitsGateWindow): string {
 const warnedUnknownProjection = new Set<string>();
 
 export function gateClaimByAiUnits(args: AiUnitsGateArgs): AiUnitsGateDecision {
+  const classification = classifyAiUnitsSpend(args);
+
   if (args.projectedUsdMicros == null) {
     if (!warnedUnknownProjection.has(args.credentialId)) {
       args.logger.warn(
@@ -87,17 +92,17 @@ export function gateClaimByAiUnits(args: AiUnitsGateArgs): AiUnitsGateDecision {
       );
       warnedUnknownProjection.add(args.credentialId);
     }
-    return { proceed: true };
+    if (!classification.proceed) {
+      throw new Error('unreachable: unknown AI-spend projection must classify fail-open');
+    }
+    return classification;
   }
 
   const projected = args.projectedUsdMicros;
   const blockTotal = args.usdMicrosThisBlock + projected;
   const weekTotal = args.usdMicrosThisWeek + projected;
 
-  const overBlock = blockTotal > args.capPerBlockUsdMicros;
-  const overWeek = weekTotal > args.capPerWeekUsdMicros;
-
-  if (!overBlock && !overWeek) {
+  if (classification.proceed) {
     // Clear memos for this credential when we are below both caps.
     lastPausedMemo.delete(memoKey(args.credentialId, 'block'));
     lastPausedMemo.delete(memoKey(args.credentialId, 'week'));
@@ -106,7 +111,7 @@ export function gateClaimByAiUnits(args: AiUnitsGateArgs): AiUnitsGateDecision {
 
   // Prefer the block reason when both fire — the block is the tighter,
   // operator-relevant frame; the weekly cap is the safety net.
-  const window: AiUnitsGateWindow = overBlock ? 'block' : 'week';
+  const window = classification.window;
   const total = window === 'block' ? blockTotal : weekTotal;
   const cap = window === 'block' ? args.capPerBlockUsdMicros : args.capPerWeekUsdMicros;
   const reason =

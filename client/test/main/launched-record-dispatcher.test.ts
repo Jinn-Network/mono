@@ -56,6 +56,7 @@ describe('launched-record generator dispatcher', () => {
           repostable: 3,
           saturated: 4,
         },
+        poolPublicationStale: true,
         totalPosted: 4,
         lastPostedInstanceId: 'astropy__astropy-14096',
         config: {
@@ -129,6 +130,7 @@ describe('launched-record generator dispatcher', () => {
         repostable: 3,
         saturated: 4,
       },
+      poolPublicationStale: true,
       totalPosted: 4,
       lastPostedInstanceId: 'astropy__astropy-14096',
     });

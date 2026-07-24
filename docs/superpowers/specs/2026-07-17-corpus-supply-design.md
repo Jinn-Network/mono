@@ -395,6 +395,22 @@ manifest anchor + member CID.
 **Measurement before scale-up:** the first bridge batch doubles as the gas measurement —
 record per-anchor and per-manifest cost then; no figures are asserted until measured.
 
+**Measured (Base Sepolia, 2026-07-22, operator agent 5474):** first live manifest batch
+used the direct substrate publish path because the testnet indexer's swe-rebench enrichment
+join is incomplete for bridge derivation (authoritative `verdicts` / `attemptEnvelopeMetas`
+gaps on recent rows). Batch: 10 substrate members, one `manifest:` anchor + one per-record
+control anchor (`--measure-per-record-control`).
+
+| Anchor | Tx | `gasUsed` | `feeWei` |
+|---|---|---:|---:|
+| Manifest (`manifest:` namespace, 10 members) | `0x6c420c70f9252952e10567e06527a6fc7864b516dbdaad45cf7f60c41ef1858f` | 130271 | 781626000000 |
+| Per-record control (first member) | `0xccd66a4c4c8e0d1b31dee76273a2b5048620cdd551f68bcf06e4d520b7ad27b0` | 229470 | 1376820000000 |
+
+Manifest CID (raw-leaf IPFS): `f0155122018d0b31fa7f7763806db1cc4b60c99bda691df8d09692c2014c73a7c621238f4`.
+Merkle root: `0x00ab54c956a7a1fcdf3d920a2c60f0df4225535b882a7f567a07eaa407029edd`.
+Consumer inclusion proof verified in-process against the anchored root (all 10 member CIDs).
+Runner: `client/scripts/distill-run-manifest-live.ts` (`--limit 10 --yes`).
+
 ## 10. Supply quality measurement and the A↔B guarantee
 
 - **Retrieval (the tier's health): provide-rate** — fraction of real sessions in target
