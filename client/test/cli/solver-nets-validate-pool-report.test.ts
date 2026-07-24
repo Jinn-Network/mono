@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -35,6 +35,7 @@ function withSweStateDirEnv(dir: string): () => void {
 }
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   for (const d of tmps.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
@@ -150,6 +151,66 @@ describe('solver-nets validate-pool-report', () => {
       const out = made.writes.join('');
       expect(out).not.toContain('gold-patch-not-resolved:p2p-broke');
       expect(out).not.toMatch(/capacity blocker/i);
+    } finally {
+      restore();
+    }
+  });
+
+  it('uses seeded cache membership without calling a live loader that would succeed', async () => {
+    const dir = tmpDir();
+    seedValidatedPool(dir, {
+      'in-pool__1': { scorable: true, reason: 'gold-patch-resolves' },
+      'orphan__1': { scorable: true, reason: 'gold-patch-resolves' },
+    });
+    writeFileSync(join(dir, 'pool-cache.json'), JSON.stringify({
+      schemaVersion: 'swe-rebench-v2-pool-cache.v1',
+      savedAt: '2026-05-25T00:00:00Z',
+      tasks: [{
+        instance_id: 'in-pool__1',
+        hf_dataset: 'nebius/SWE-rebench-leaderboard',
+        hf_split: 'test',
+        repo: 'acme/widget',
+        patch: 'gold',
+        test_patch: 'test',
+        language: 'python',
+      }],
+    }));
+    const liveFetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/splits?')) {
+        return new Response(JSON.stringify({ splits: [{ split: '2026_01' }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({
+        rows: [{
+          row: {
+            instance_id: 'live-only__1',
+            repo: 'live/repo',
+            base_commit: 'abc123',
+            language: 'python',
+            patch: 'live gold',
+            test_patch: 'live test',
+          },
+        }],
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', liveFetch);
+    const restore = withSweStateDirEnv(dir);
+    try {
+      const made = makeCommandCtx({
+        argv: ['validate-pool-report', 'swe-rebench-v2', '--json'],
+      });
+      await solverNetsCommand.run(made.ctx);
+      expect(made.exits).toEqual([]);
+      const envelope = JSON.parse(made.writes.join('').trim()) as Record<string, unknown>;
+      const weakSuite = envelope['weakSuite'] as { unchecked: { backlog: number; orphaned: number } };
+      expect(weakSuite.unchecked).toEqual({ backlog: 1, orphaned: 1 });
+      expect(liveFetch).not.toHaveBeenCalled();
     } finally {
       restore();
     }
