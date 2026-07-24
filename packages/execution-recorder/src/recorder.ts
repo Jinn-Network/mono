@@ -2,9 +2,9 @@
 
 import { randomUUID } from "node:crypto";
 
-import { EXECUTION_EVIDENCE_PROFILE_URI } from "@jinn-network/evidence-protocol";
 import type { EvidenceRepository } from "@jinn-network/evidence-repository";
 
+import { findContextualIdentityConflict } from "./contextual-identities.js";
 import {
   assertRecorderOperationActive,
   ExecutionRecorderError,
@@ -36,7 +36,6 @@ import type {
   ExecutionRecorder,
   ExecutionRecorderOptions,
   ExecutionRecording,
-  CaptureOrigin,
   FinalizeExecutionInput,
   FinalizeExecutionResult,
   InputCapture,
@@ -141,224 +140,11 @@ function sameHead(left: WorkspaceState, right: WorkspaceState): boolean {
   );
 }
 
-type ContextualIdentityKind =
-  | "agent"
-  | "contextual-agent"
-  | "component"
-  | "execution"
-  | "license"
-  | "reserved"
-  | "trace-format";
-
-interface ContextualIdentityClaim {
-  readonly kind: ContextualIdentityKind;
-  readonly fingerprint?: string;
-}
-
-function originActorIds(origin: CaptureOrigin): readonly string[] {
-  switch (origin.kind) {
-    case "producer-observed":
-      return [origin.observer];
-    case "executor-reported":
-      return [origin.reporter, origin.capturedBy];
-    case "external-observed":
-      return [origin.observer, origin.capturedBy];
+function assertContextualIdentities(state: WorkspaceState): void {
+  const issue = findContextualIdentityConflict(state);
+  if (issue !== undefined) {
+    conflict(state, issue.message, issue.entityId);
   }
-}
-
-function artifactOrigins(
-  artifact: PersistedArtifactCapture,
-): readonly CaptureOrigin[] {
-  return [
-    artifact.origin,
-    ...(artifact.kind === "file"
-      ? []
-      : artifact.members.flatMap(artifactOrigins)),
-  ];
-}
-
-function registerContextualClaim(
-  state: WorkspaceState,
-  claims: Map<string, ContextualIdentityClaim>,
-  id: string,
-  kind: ContextualIdentityKind,
-  value?: unknown,
-): void {
-  const fingerprint =
-    value === undefined
-      ? undefined
-      : captureFingerprint(`graph-identity:${kind}`, value);
-  const current = claims.get(id);
-  if (current === undefined) {
-    claims.set(id, { kind, fingerprint });
-    return;
-  }
-  if (
-    (current.kind === "agent" && kind === "contextual-agent") ||
-    (current.kind === "contextual-agent" && kind === "agent") ||
-    (current.kind === "contextual-agent" &&
-      kind === "contextual-agent")
-  ) {
-    if (kind === "agent") claims.set(id, { kind, fingerprint });
-    return;
-  }
-  if (
-    current.kind === kind &&
-    current.fingerprint === fingerprint
-  ) {
-    return;
-  }
-  conflict(
-    state,
-    `Graph identity ${id} is reused for incompatible contextual roles.`,
-    id,
-  );
-}
-
-function registerOrigins(
-  state: WorkspaceState,
-  claims: Map<string, ContextualIdentityClaim>,
-  origins: readonly CaptureOrigin[],
-): void {
-  for (const origin of origins) {
-    for (const id of originActorIds(origin)) {
-      registerContextualClaim(
-        state,
-        claims,
-        id,
-        "contextual-agent",
-      );
-    }
-  }
-}
-
-function contextualClaims(
-  state: WorkspaceState,
-): Map<string, ContextualIdentityClaim> {
-  const claims = new Map<string, ContextualIdentityClaim>();
-  for (const id of [
-    EXECUTION_EVIDENCE_PROFILE_URI,
-    "urn:jinn:execution-recorder:role:producer-observer",
-    "urn:jinn:execution-recorder:role:executor-reporter",
-    "urn:jinn:execution-recorder:role:external-observer",
-    "urn:jinn:execution-recorder:role:capture-agent",
-  ]) {
-    registerContextualClaim(state, claims, id, "reserved");
-  }
-  const recording = state.recording;
-  if (recording === undefined) return claims;
-  registerContextualClaim(
-    state,
-    claims,
-    recording.executionId,
-    "execution",
-  );
-  registerContextualClaim(
-    state,
-    claims,
-    recording.record.license,
-    "license",
-  );
-  for (const value of [recording.executor, recording.producer]) {
-    registerContextualClaim(
-      state,
-      claims,
-      value.entityId,
-      "agent",
-      value,
-    );
-    registerOrigins(state, claims, [value.origin]);
-  }
-  registerOrigins(state, claims, [
-    recording.task.origin,
-    recording.runtime.origin,
-    ...recording.initialInputs.flatMap(artifactOrigins),
-    ...(recording.repositoryState === undefined
-      ? []
-      : artifactOrigins(recording.repositoryState.artifact)),
-  ]);
-  for (const component of recording.runtime.components) {
-    if (component.kind === "controlled") {
-      registerOrigins(state, claims, artifactOrigins(component.artifact));
-      continue;
-    }
-    registerOrigins(state, claims, artifactOrigins(component.descriptor));
-    registerContextualClaim(
-      state,
-      claims,
-      component.component.entityId,
-      "component",
-      component.component,
-    );
-    if (component.component.provider !== undefined) {
-      registerContextualClaim(
-        state,
-        claims,
-        component.component.provider,
-        "contextual-agent",
-      );
-    }
-  }
-  for (const input of state.inputs) {
-    registerOrigins(state, claims, artifactOrigins(input));
-  }
-  for (const result of state.results) {
-    registerOrigins(state, claims, artifactOrigins(result));
-  }
-  for (const observation of state.runtimeObservations) {
-    if (observation.kind === "resource") {
-      registerOrigins(state, claims, [observation.origin]);
-    } else if (observation.kind === "environment") {
-      registerOrigins(
-        state,
-        claims,
-        artifactOrigins(observation.artifact),
-      );
-    } else {
-      registerOrigins(
-        state,
-        claims,
-        artifactOrigins(observation.component.descriptor),
-      );
-      registerContextualClaim(
-        state,
-        claims,
-        observation.component.component.entityId,
-        "component",
-        observation.component.component,
-      );
-      if (observation.component.component.provider !== undefined) {
-        registerContextualClaim(
-          state,
-          claims,
-          observation.component.component.provider,
-          "contextual-agent",
-        );
-      }
-    }
-  }
-  if (state.nativeTrace !== undefined) {
-    registerOrigins(
-      state,
-      claims,
-      artifactOrigins(state.nativeTrace.artifact),
-    );
-    registerContextualClaim(
-      state,
-      claims,
-      state.nativeTrace.format.entityId,
-      "trace-format",
-      state.nativeTrace.format,
-    );
-  }
-  return claims;
-}
-
-function assertArtifactOriginsCompatible(
-  state: WorkspaceState,
-  artifact: PersistedArtifactCapture,
-): void {
-  registerOrigins(state, contextualClaims(state), artifactOrigins(artifact));
 }
 
 class ExecutionRecordingHandle implements ExecutionRecording {
@@ -415,7 +201,10 @@ class ExecutionRecordingHandle implements ExecutionRecording {
       input,
       options?.signal,
     );
-    assertArtifactOriginsCompatible(this.state, persisted);
+    assertContextualIdentities({
+      ...this.state,
+      inputs: [...this.state.inputs, persisted],
+    });
     const fingerprint = captureFingerprint("input", persisted);
     const sameIdentity = this.state.inputs.find(
       ({ entityId }) => entityId === persisted.entityId,
@@ -466,37 +255,13 @@ class ExecutionRecordingHandle implements ExecutionRecording {
       observation,
       options?.signal,
     );
-    const claims = contextualClaims(this.state);
-    if (persisted.kind === "resource") {
-      registerOrigins(this.state, claims, [persisted.origin]);
-    } else if (persisted.kind === "environment") {
-      registerOrigins(
-        this.state,
-        claims,
-        artifactOrigins(persisted.artifact),
-      );
-    } else {
-      registerOrigins(
-        this.state,
-        claims,
-        artifactOrigins(persisted.component.descriptor),
-      );
-      registerContextualClaim(
-        this.state,
-        claims,
-        persisted.component.component.entityId,
-        "component",
-        persisted.component.component,
-      );
-      if (persisted.component.component.provider !== undefined) {
-        registerContextualClaim(
-          this.state,
-          claims,
-          persisted.component.component.provider,
-          "contextual-agent",
-        );
-      }
-    }
+    assertContextualIdentities({
+      ...this.state,
+      runtimeObservations: [
+        ...this.state.runtimeObservations,
+        persisted,
+      ],
+    });
     const identity = identityForObservation(persisted);
     const fingerprint = captureFingerprint(
       "runtime-observation",
@@ -554,19 +319,10 @@ class ExecutionRecordingHandle implements ExecutionRecording {
       trace,
       options?.signal,
     );
-    const claims = contextualClaims(this.state);
-    registerOrigins(
-      this.state,
-      claims,
-      artifactOrigins(persisted.artifact),
-    );
-    registerContextualClaim(
-      this.state,
-      claims,
-      persisted.format.entityId,
-      "trace-format",
-      persisted.format,
-    );
+    assertContextualIdentities({
+      ...this.state,
+      nativeTrace: persisted,
+    });
     const fingerprint = captureFingerprint("native-trace", persisted);
     if (this.state.nativeTrace !== undefined) {
       if (
@@ -675,7 +431,7 @@ class ExecutionRecorderImpl implements ExecutionRecorder {
       state.executionId,
       input.signal,
     );
-    contextualClaims({
+    assertContextualIdentities({
       ...state,
       recording: persisted,
       inputs: persisted.initialInputs,

@@ -329,6 +329,44 @@ describe("replayed workspace state", () => {
     expect(reopened.nativeTrace).toBeUndefined();
   });
 
+  test("rejects finalization material with a conflicting contextual identity before publication", async () => {
+    const workspaceDir = await temporaryWorkspace();
+    let state = await createWorkspaceState(workspaceDir, EXECUTION_ID);
+    const source = await storeObject(
+      state.paths,
+      new TextEncoder().encode("source"),
+    );
+    const start = initialized(source);
+    state = await appendWorkspaceEvent(
+      state,
+      start,
+      "2026-07-24T10:00:00Z",
+    );
+    const nativeTrace = {
+      artifact: file("trace/trace.json", source),
+      format: { entityId: start.recording.executor.entityId },
+    } as const;
+    const material = { results: [], nativeTrace };
+
+    await expect(
+      appendWorkspaceEvent(
+        state,
+        {
+          type: "finalization-material-captured",
+          ...material,
+          declarationFingerprint: captureFingerprint(
+            "finalization-material",
+            material,
+          ),
+        },
+        "2026-07-24T10:00:01Z",
+      ),
+    ).rejects.toMatchObject({ code: "WORKSPACE_CORRUPT" });
+    expect((await openWorkspaceState(workspaceDir)).head).toEqual(
+      state.head,
+    );
+  });
+
   test("rejects a replay whose journal references a corrupted object", async () => {
     const workspaceDir = await temporaryWorkspace();
     let state = await createWorkspaceState(workspaceDir, EXECUTION_ID);

@@ -15,6 +15,7 @@ import {
   assertRecorderOperationActive,
   ExecutionRecorderError,
 } from "./errors.js";
+import { findContextualIdentityConflict } from "./contextual-identities.js";
 import { buildFinalizationCandidate } from "./finalization-candidate.js";
 import { finalizationIntentFingerprint } from "./finalization-intent.js";
 import type {
@@ -586,6 +587,14 @@ export async function finalizeWorkspaceState(
   );
   const addedTrace =
     state.nativeTrace === undefined ? nativeTrace : undefined;
+  const identityIssue = findContextualIdentityConflict({
+    ...state,
+    results: mergedResults.results,
+    nativeTrace,
+  });
+  if (identityIssue !== undefined) {
+    conflict(state, identityIssue.message);
+  }
   if (mergedResults.added.length > 0 || addedTrace !== undefined) {
     const material = {
       results: mergedResults.added,

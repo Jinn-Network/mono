@@ -6,6 +6,7 @@ import type {
 } from "@jinn-network/evidence-repository";
 
 import { assertRecorderOperationActive, ExecutionRecorderError } from "./errors.js";
+import { findContextualIdentityConflict } from "./contextual-identities.js";
 import { buildFinalizationCandidate } from "./finalization-candidate.js";
 import { finalizationIntentFingerprint } from "./finalization-intent.js";
 import {
@@ -179,6 +180,39 @@ async function verifyEventObjects(
       state,
       "Journal declaration fingerprint does not match its payload.",
     );
+  }
+  const projectedIdentityState =
+    event.type === "initialized"
+      ? {
+          ...state,
+          recording: event.recording,
+          inputs: event.recording.initialInputs,
+        }
+      : event.type === "input-captured"
+        ? { ...state, inputs: [...state.inputs, event.input] }
+        : event.type === "runtime-observation-captured"
+          ? {
+              ...state,
+              runtimeObservations: [
+                ...state.runtimeObservations,
+                event.observation,
+              ],
+            }
+          : event.type === "native-trace-attached"
+            ? { ...state, nativeTrace: event.trace }
+            : event.type === "finalization-material-captured"
+              ? {
+                  ...state,
+                  results: [...state.results, ...event.results],
+                  nativeTrace:
+                    event.nativeTrace ?? state.nativeTrace,
+                }
+              : state;
+  const identityIssue = findContextualIdentityConflict(
+    projectedIdentityState,
+  );
+  if (identityIssue !== undefined) {
+    throw corruptState(state, identityIssue.message);
   }
   const unique = new Map<Sha256Digest, StoredObjectReference>();
   for (const reference of eventObjectReferences(event)) {

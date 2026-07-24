@@ -619,6 +619,57 @@ describe("execution recorder finalization lifecycle", () => {
     ).toBe(true);
   });
 
+  test("rejects contextual identity conflicts before finalization material becomes durable", async () => {
+    const workspaceDir = await workspace();
+    const repository = new InMemoryEvidenceRepository();
+    const recording = await createExecutionRecorder({
+      repository,
+    }).start(startInput(workspaceDir));
+
+    await expect(
+      recording.finalize({
+        outcome: "completed",
+        endedAt: "2026-07-24T10:01:00Z",
+        results: [
+          {
+            ...file("results/result.txt", "result\n"),
+            origin: {
+              kind: "producer-observed",
+              observer:
+                "https://spdx.org/licenses/Apache-2.0.html",
+            },
+          },
+        ],
+        nativeTrace: nativeTrace(),
+      }),
+    ).rejects.toMatchObject({ code: "RECORDING_CONFLICT" });
+    expect((await openWorkspaceState(workspaceDir)).head.revision).toBe(1);
+
+    await expect(
+      recording.finalize({
+        outcome: "completed",
+        endedAt: "2026-07-24T10:01:00Z",
+        results: [file("results/result.txt", "result\n")],
+        nativeTrace: {
+          ...nativeTrace(),
+          format: {
+            entityId: "https://executor.example/agent",
+          },
+        },
+      }),
+    ).rejects.toMatchObject({ code: "RECORDING_CONFLICT" });
+    expect((await openWorkspaceState(workspaceDir)).head.revision).toBe(1);
+
+    expect(
+      await recording.finalize({
+        outcome: "completed",
+        endedAt: "2026-07-24T10:01:00Z",
+        results: [file("results/result.txt", "result\n")],
+        nativeTrace: nativeTrace(),
+      }),
+    ).toMatchObject({ finalized: true });
+  });
+
   test("resume completes a journaled finalization after a repository interruption", async () => {
     const workspaceDir = await workspace();
     const backing = new InMemoryEvidenceRepository();
