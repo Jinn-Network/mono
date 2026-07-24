@@ -17,17 +17,21 @@ import {
 
 describe('core scrub domain (#1836)', () => {
   it('preserves the trace and seed scrub compositions', () => {
-    expect(buildScrubPipeline().components.map((component) => component.name)).toEqual([
-      'key-policy',
-      'openredaction',
-      'plain-patterns',
-      'secretlint',
-    ]);
-    expect(buildSeedScrubPipeline().components.map((component) => component.name)).toEqual([
+    const core = [
       'key-policy',
       'plain-patterns',
+      'git-identity',
+      'known-identity',
+      'url-credentials',
+      'reject-classes',
+      'checksummed-instruments',
+      'ip-address',
+      'gitleaks',
       'secretlint',
-    ]);
+    ];
+    expect(buildScrubPipeline().components.map((component) => component.name)).toEqual(core);
+    expect(buildSeedScrubPipeline().components.map((component) => component.name)).toEqual(core);
+    expect(buildScrubPipeline().components.map((c) => c.name)).not.toContain('openredaction');
   });
 });
 

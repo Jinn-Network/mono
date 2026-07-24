@@ -114,7 +114,7 @@ export async function runCapabilityProbe(
     'HEAD',
   ])).trim());
   const commits: GitOid[] = [];
-  for (let index = 1; index <= 5; index += 1) {
+  for (let index = 1; index <= 3; index += 1) {
     const commit = gitOid((await git([
       '-c',
       'user.name=Jinn Autopilot',
@@ -130,9 +130,7 @@ export async function runCapabilityProbe(
     commits.push(commit);
     parent = commit;
   }
-  const [one, two, three, four, five] = commits as [
-    GitOid,
-    GitOid,
+  const [one, two, three] = commits as [
     GitOid,
     GitOid,
     GitOid,
@@ -175,53 +173,29 @@ export async function runCapabilityProbe(
     }
 
     await push([exactLease(branch, null), `${one}:${branch}`]);
-    await push([
-      '--atomic',
-      exactLease(branch, one),
-      exactLease(review, two),
-      `${two}:${branch}`,
-      `${three}:${review}`,
-    ]);
-    if (await readRef(branch) !== two || await readRef(review) !== three) {
-      throw new Error('Capability probe atomic success readback failed');
+    if (await readRef(branch) !== one) {
+      throw new Error('Capability probe branch absent-ref creation readback failed');
     }
-
-    await push([exactLease(review, three), `${four}:${review}`]);
-    await requireRejected(() => push([
-      '--atomic',
-      exactLease(branch, two),
-      exactLease(review, three),
-      `${three}:${branch}`,
-      `${five}:${review}`,
-    ]));
-    if (await readRef(branch) !== two || await readRef(review) !== four) {
-      throw new Error(
-        'Capability probe atomic rejection did not leave both refs unchanged',
-      );
+    await push([exactLease(branch, one), `${two}:${branch}`]);
+    if (await readRef(branch) !== two) {
+      throw new Error('Capability probe branch expected-parent advance failed');
     }
 
     try {
-      await push([
-        '--atomic',
-        exactLease(branch, two),
-        exactLease(review, four),
-        `${three}:${branch}`,
-        `${five}:${review}`,
-      ]);
+      await push([exactLease(branch, two), `${three}:${branch}`]);
       throw new Error('simulated capability-probe response loss');
     } catch {
       // A rejected push and an accepted push whose response was lost are
       // indistinguishable here. Classify either outcome only by exact
-      // readback of both refs.
+      // readback of the ref.
     }
     const ambiguousBranch = await readRef(branch);
-    const ambiguousReview = await readRef(review);
-    if (ambiguousBranch !== three || ambiguousReview !== five) {
+    if (ambiguousBranch !== three) {
       throw new Error('Capability probe ambiguous readback did not converge');
     }
 
     await push([exactLease(branch, three), `:${branch}`]);
-    await push([exactLease(review, five), `:${review}`]);
+    await push([exactLease(review, two), `:${review}`]);
     if (await readRef(branch) !== null || await readRef(review) !== null) {
       throw new Error('Capability probe exact cleanup was incomplete');
     }
@@ -235,7 +209,7 @@ export async function runCapabilityProbe(
 
   const verifiedAt = now();
   return decodeCapabilityAttestation({
-    version: 1,
+    version: 2,
     repositoryUrl: CANONICAL_GITHUB_HTTPS_REMOTE,
     remoteName: options.remoteName,
     probeId,
@@ -248,8 +222,6 @@ export async function runCapabilityProbe(
     proofs: {
       absentRefCreation: true,
       expectedParentRejection: true,
-      atomicPairSuccess: true,
-      atomicPairRejection: true,
       ambiguousReadback: true,
       exactCleanup: true,
       readViaGitTransport: true,

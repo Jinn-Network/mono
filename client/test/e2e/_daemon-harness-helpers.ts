@@ -1045,6 +1045,9 @@ export async function startDaemon(
     agentEoaPrivateKey: operator.agentPrivateKey,
     ipfsRegistryUrl: resolvedIpfsRegistryUrl,
     ipfsGatewayUrl: resolvedIpfsGatewayUrl,
+    // Hermetic Anvil+mock e2es always pass mockIpfs.baseUrl as ipfsGatewayUrl.
+    // Pin primary-only so a mock 404 cannot leak to public ipfs.io (#1648).
+    ...(ipfsGatewayUrl !== undefined ? { ipfsFallbackGatewayUrl: false as const } : {}),
     pollIntervalMs: 300,
     chainId: 8453,
     routerClaimDeliveryVariant,

@@ -17,6 +17,11 @@ import {
   assertHermesBillingRoute,
   hermesChatArgs,
 } from './hermes-runtime.js';
+import {
+  CURSOR_BIN_ENV,
+  CURSOR_MODEL_ENV,
+  cursorAgentArgs,
+} from './cursor-runtime.js';
 
 /**
  * A minimal child handle the stage runner needs: stdout/stderr streams to
@@ -72,6 +77,8 @@ export interface StageRunOpts {
   hermesPythonPath?: string;
   /** Explicit Hermes provider (for example, the subscription-backed provider). */
   provider?: string;
+  /** Cursor Agent CLI binary override. */
+  cursorBin?: string;
   /** Wall-clock ceiling; default 10 minutes (pressure-suite starting value). */
   timeoutMs?: number;
   /** Coordinator environment to reduce to a non-authoritative stage view. */
@@ -123,6 +130,16 @@ function requireHermesValue(
 ): string {
   if (value == null || value === '') {
     throw new Error(`[autopilot] Hermes runtime is missing ${envName}.`);
+  }
+  return value;
+}
+
+function requireCursorValue(
+  value: string | undefined,
+  envName: string,
+): string {
+  if (value == null || value === '') {
+    throw new Error(`[autopilot] Cursor runtime is missing ${envName}.`);
   }
   return value;
 }
@@ -211,6 +228,17 @@ export function runStageHeadless(
     assertHermesBillingRoute(model, provider);
     cmd = pythonPath;
     args = hermesChatArgs(prompt, { model, provider });
+  } else if (runtime === 'cursor') {
+    const binPath = requireCursorValue(
+      opts.cursorBin ?? ambient[CURSOR_BIN_ENV],
+      CURSOR_BIN_ENV,
+    );
+    const model = requireCursorValue(
+      opts.model ?? ambient[CURSOR_MODEL_ENV],
+      CURSOR_MODEL_ENV,
+    );
+    cmd = binPath;
+    args = cursorAgentArgs(prompt, { model, workspace: opts.worktreePath });
   } else {
     cmd = 'claude';
     args = ['-p', ...(opts.model ? ['--model', opts.model] : []), prompt];

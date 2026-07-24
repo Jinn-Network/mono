@@ -297,6 +297,7 @@ export class LearnerHarness implements Harness {
       taskCid: ctx.taskCid,
       solverType: ctx.task.solverType,
       model: ctx.solverNet?.model,
+      ...(ctx.solverNet?.provider !== undefined ? { provider: ctx.solverNet.provider } : {}),
       claudeModel: ctx.solverNet?.model,
       taskBody: ctx.task as TaskSessionInputs['taskBody'],
       implStateDir: ctx.implStateDir,

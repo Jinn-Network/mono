@@ -83,6 +83,22 @@ describe('RedactionManifestSchema', () => {
     };
     expect(() => RedactionManifestSchema.parse(m)).toThrow();
   });
+
+  it('accepts additive v2 provenance fields and still parses legacy manifests', () => {
+    const legacy = {
+      spans: [{ spanId: '1'.repeat(16), redactedKeys: ['a'] }],
+      totalRedactions: 1,
+    };
+    expect(() => RedactionManifestSchema.parse(legacy)).not.toThrow();
+    expect(() =>
+      RedactionManifestSchema.parse({
+        ...legacy,
+        schemaVersion: 2,
+        policyHash: 'ab'.repeat(32),
+        perClassCounts: { 'A1:redact': 1 },
+      }),
+    ).not.toThrow();
+  });
 });
 
 describe('JinnTrajectoryV1Schema', () => {

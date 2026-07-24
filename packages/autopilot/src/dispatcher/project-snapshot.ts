@@ -16,6 +16,10 @@
  * Tracking: jinn-mono#585.
  */
 
+import {
+  EFFORT_SET,
+  ISSUE_SHAPE_SET,
+} from './types.js';
 import type {
   BlockedOn,
   Effort,
@@ -348,18 +352,13 @@ interface SnapshotResponse {
 // `null` rather than corrupting the typed snapshot.
 // ---------------------------------------------------------------------------
 
-const VALID_SHAPES = new Set<string>([
-  'feat', 'fix', 'refactor', 'spike', 'chore', 'docs', 'test', 'incident', 'design',
-]);
-
 const VALID_BLOCKED_ON = new Set<string>(['Nothing', 'Human', 'Another issue']);
-const VALID_EFFORT = new Set<string>(['Low', 'Medium', 'High', 'XHigh', 'Max']);
 const VALID_PRIORITY = new Set<string>(['P0', 'P1', 'P2', 'P3', 'P4']);
 const VALID_STATUS = new Set<string>(['Todo', 'In Progress', 'Human', 'In Review', 'Done']);
 
 function parseShape(name: string | null | undefined): IssueShape | null {
   if (name == null) return null;
-  return VALID_SHAPES.has(name) ? (name as IssueShape) : null;
+  return ISSUE_SHAPE_SET.has(name as IssueShape) ? (name as IssueShape) : null;
 }
 
 function parseSingleSelect<T extends string>(
@@ -368,6 +367,16 @@ function parseSingleSelect<T extends string>(
 ): T | null {
   if (val == null) return null;
   return valid.has(val.name) ? (val.name as T) : null;
+}
+
+function snapshotRateLimit(
+  raw: SnapshotResponse['data']['rateLimit'],
+): RateLimitInfo {
+  return {
+    remaining: raw.remaining,
+    used: raw.used,
+    resetAt: raw.resetAt,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -403,7 +412,7 @@ function parseNode(node: ResponseNode): SnapshotItem | null {
     contentType,
     status: parseSingleSelect<ProjectStatus>(node.status, VALID_STATUS),
     priority: parseSingleSelect<Priority>(node.priority, VALID_PRIORITY),
-    effort: parseSingleSelect<Effort>(node.effort, VALID_EFFORT),
+    effort: parseSingleSelect<Effort>(node.effort, EFFORT_SET),
     blockedOn: parseSingleSelect<BlockedOn>(node.blockedOn, VALID_BLOCKED_ON),
     issueType,
     blockedByIssues,
@@ -447,8 +456,11 @@ export function resolveCurrentSprintIterationId(
  *
  * The query selects only the fields the dispatcher reads (`number`,
  * `contentType`, `status`, `priority`, `effort`, `blockedOn`, `issueType`)
- * plus a top-level `rateLimit { remaining used resetAt }`. Internally paginates
- * via `items(first: 100, after: $cursor)` until `pageInfo.hasNextPage` is false.
+ * plus a top-level `rateLimit { cost remaining used resetAt }`. `cost` is
+ * consumed by the metered command runner; the returned snapshot deliberately
+ * keeps only `remaining`, `used`, and `resetAt` so lifecycle evidence matches
+ * its strict persisted schema. Internally paginates via
+ * `items(first: 100, after: $cursor)` until `pageInfo.hasNextPage` is false.
  *
  * Throws {@link ProjectFieldSchemaError} when a non-empty board returns Issue
  * items where every single-select field is null — see that class for context.
@@ -535,7 +547,7 @@ export async function fetchProjectSnapshot(
       }
     }
 
-    rateLimit = response.data.rateLimit;
+    rateLimit = snapshotRateLimit(response.data.rateLimit);
     // Sprint configuration is duplicated on every page (it's a project-level
     // field, not a per-item value). Capture from the first page that has it;
     // a missing/absent `Sprint` field collapses every iteration list to []

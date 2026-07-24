@@ -53,16 +53,8 @@ describe('credential-ID patterns (#1415)', () => {
   const AWS_KEY_ID = 'AKIAIOSFODNN7EXAMPLE';
   const GCP_API_KEY = 'AIzaSyDaGmWKa4JsXZ-HjGw7ISLn_3namBGewQe';
 
-  it('default options leave bare AWS key IDs and GCP API keys untouched (trace profile unchanged)', async () => {
+  it('always redacts bare AWS access-key IDs (shared inventory, #1969)', async () => {
     const stage = plainPatternsStage(DEFAULT_KEY_POLICY);
-    const input = `aws key ${AWS_KEY_ID} and gcp key ${GCP_API_KEY}`;
-    const result = await stage.scrub({ 'skill.md': input });
-    expect(result.attributes['skill.md']).toBe(input);
-    expect(result.redactions).toHaveLength(0);
-  });
-
-  it('with credentialIds, redacts a bare AWS access-key ID', async () => {
-    const stage = plainPatternsStage(DEFAULT_KEY_POLICY, { credentialIds: true });
     const result = await stage.scrub({ 'skill.md': `export AWS_ACCESS_KEY_ID=${AWS_KEY_ID}` });
     const out = String(result.attributes['skill.md']);
     expect(out).not.toContain(AWS_KEY_ID);
@@ -74,8 +66,8 @@ describe('credential-ID patterns (#1415)', () => {
     ).toBe(true);
   });
 
-  it('with credentialIds, redacts a GCP AIza API key', async () => {
-    const stage = plainPatternsStage(DEFAULT_KEY_POLICY, { credentialIds: true });
+  it('always redacts a GCP AIza API key (shared inventory, #1969)', async () => {
+    const stage = plainPatternsStage(DEFAULT_KEY_POLICY);
     const result = await stage.scrub({ 'skill.md': `curl "https://example.test/v1?key=${GCP_API_KEY}"` });
     const out = String(result.attributes['skill.md']);
     expect(out).not.toContain(GCP_API_KEY);
@@ -87,8 +79,8 @@ describe('credential-ID patterns (#1415)', () => {
     ).toBe(true);
   });
 
-  it('with credentialIds, leaves prose and shorter look-alike tokens alone', async () => {
-    const stage = plainPatternsStage(DEFAULT_KEY_POLICY, { credentialIds: true });
+  it('leaves prose and shorter look-alike tokens alone', async () => {
+    const stage = plainPatternsStage(DEFAULT_KEY_POLICY);
     const input = 'The AKIA prefix marks AWS key IDs; AIzaSy is the GCP prefix.';
     const result = await stage.scrub({ 'skill.md': input });
     expect(result.attributes['skill.md']).toBe(input);

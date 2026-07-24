@@ -15,6 +15,7 @@ import {
   type SelectedCredential,
 } from './credentials.js';
 import { makeGitProtocolPort } from './git-protocol.js';
+import { hasChildKindLabel, parseChildMarker } from './child-issues.js';
 import {
   CANONICAL_GITHUB_HTTPS_REMOTE,
   runCanonicalImplementationRealityCheck,
@@ -50,9 +51,11 @@ ImplementationExecutorDeps,
 | 'createClaimCommit'
 | 'claimBranch'
 | 'ensureDraftPullRequest'
+| 'readParentPullRequest'
 | 'setProjectInProgress'
 | 'createAttempt'
 | 'escalateHuman'
+| 'closeChildIssue'
 >;
 
 function parsePullRequest(raw: string): ImplementationPullRequest {
@@ -98,6 +101,9 @@ function parsePullRequest(raw: string): ImplementationPullRequest {
   };
 }
 
+const READBACK_CONFIRMATION_ATTEMPTS = 6;
+const READBACK_CONFIRMATION_DELAY_MS = 750;
+
 async function mutateWithExactReadback(
   mutate: () => Promise<unknown>,
   confirmed: () => Promise<boolean>,
@@ -109,7 +115,14 @@ async function mutateWithExactReadback(
   } catch (error) {
     mutationError = error;
   }
-  if (await confirmed()) return;
+  for (let attempt = 0; attempt < READBACK_CONFIRMATION_ATTEMPTS; attempt += 1) {
+    if (await confirmed()) return;
+    if (attempt < READBACK_CONFIRMATION_ATTEMPTS - 1) {
+      await new Promise((resolve) => {
+        setTimeout(resolve, READBACK_CONFIRMATION_DELAY_MS);
+      });
+    }
+  }
   if (mutationError !== undefined) throw mutationError;
   throw new Error(detail);
 }
@@ -148,10 +161,21 @@ export function makeProductionImplementationActionPort(
     branch: string,
     run: CommandRunner,
   ): Promise<ImplementationPullRequest> => run('gh', [
-    'pr', 'view', branch,
-    '--repo', REPO,
+    'pr', 'list', '--repo', REPO,
+    '--head', branch,
+    '--state', 'open',
     '--json', 'number,headRefName,headRefOid,baseRefName,isDraft,labels,body',
-  ]).then(parsePullRequest);
+    '--limit', '1',
+  ]).then((raw) => {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      throw new Error('Open implementation PR is missing');
+    }
+    if (parsed.length > 1) {
+      throw new Error('Open implementation PR mapping is ambiguous');
+    }
+    return parsePullRequest(JSON.stringify(parsed[0]));
+  });
   const exactPr = (
     pr: ImplementationPullRequest,
     input: Parameters<ImplementationExecutorDeps['ensureDraftPullRequest']>[0],
@@ -190,14 +214,21 @@ export function makeProductionImplementationActionPort(
           pr.closingIssueNumbers.includes(issueNumber)
           || pr.body.includes(`<!-- jinn-autopilot:v2 issue=${issueNumber} `)
         ));
-      const eligible = lifecycle.kind === 'issue'
+      const marker = parseChildMarker(source.body ?? '');
+      const childKindLabel = hasChildKindLabel(source.labels);
+      let eligible = lifecycle.kind === 'issue'
         ? lifecycle.eligible && lifecycle.humanHold !== true
         : selected
-          && lifecycle.projectStatus === 'Todo'
           && lifecycle.humanHold !== true
           && lifecycle.branchClaim?.phase === 'implement'
           && lifecycle.branchClaim.phaseComplete !== true
           && lifecycle.isDraft;
+      // Machine children must route through fix-child on the parent branch.
+      // A kind label without a body marker means the incremental index omitted
+      // the marker — fail closed instead of ordinary implement-issue.
+      if (childKindLabel && marker === null) {
+        eligible = false;
+      }
       return {
         number: source.number,
         title: source.title,
@@ -209,6 +240,9 @@ export function makeProductionImplementationActionPort(
           ?? 'next',
         ),
         effort: source.effort,
+        ...(marker === null
+          ? {}
+          : { child: { parentPr: marker.parentPr, kind: marker.kind } }),
       };
     },
 
@@ -231,6 +265,22 @@ export function makeProductionImplementationActionPort(
           labels: [...pr.labels],
           body: pr.body,
         }));
+    },
+
+    async readParentPullRequest(prNumber) {
+      const snapshot = await options.readSnapshot();
+      const pr = snapshot.pullRequests.find((entry) =>
+        entry.number === prNumber && entry.state === 'OPEN');
+      if (pr === undefined) return null;
+      return {
+        number: pr.number,
+        headRefName: gitRefName(pr.headRefName),
+        head: pr.headOid,
+        baseRefName: gitRefName(pr.baseRefName),
+        draft: pr.isDraft,
+        labels: [...pr.labels],
+        body: pr.body,
+      };
     },
 
     readTargetBaseHead: (targetBase, credential) =>
@@ -400,6 +450,16 @@ export function makeProductionImplementationActionPort(
         attemptId: input.attemptId,
         remoteName: options.remoteName ?? 'jinn-autopilot-v2',
       }, runner);
+    },
+
+    async closeChildIssue({ issueNumber, comment, credential }) {
+      await withCredential(credential, async ({ run }) => {
+        await run('gh', [
+          'issue', 'close', String(issueNumber),
+          '--repo', REPO,
+          '--comment', comment,
+        ]);
+      });
     },
 
     async escalateHuman({ issueNumber, reason }) {

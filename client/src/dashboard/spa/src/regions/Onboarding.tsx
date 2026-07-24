@@ -52,6 +52,7 @@ import { type PhaseStatus } from './onboarding/PhaseStatusTag.js';
 import { SubStateLine } from './onboarding/SubStateLine.js';
 import { SolverNetStep } from './onboarding/SolverNetStep.js';
 import { HarnessSelectStep, type HarnessSelection } from './onboarding/HarnessSelectStep.js';
+import { providerForModel } from '../pages/configuration/claudeModels.js';
 
 import { useCallback, useState, type JSX } from 'react';
 
@@ -145,10 +146,12 @@ export function Onboarding(): JSX.Element {
   const enterMutation = useMutation({
     mutationFn: async () => {
       if (primaryCid && harnessSel) {
+        const provider = providerForModel(harnessSel.model, harnessSel.harness);
         await api.operator.join(primaryCid, {
           roles: ['solver'],
           harness: harnessSel.harness,
           model: harnessSel.model,
+          ...(provider !== undefined ? { provider } : {}),
         });
       }
       await api.operator.completeOnboarding();

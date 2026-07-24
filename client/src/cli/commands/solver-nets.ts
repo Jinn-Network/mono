@@ -28,7 +28,6 @@ import {
 } from '../../solver-types/_swe-rebench-v2-validated-pool.js';
 import { parseMintedEnvironmentBindingV1 } from '../../solver-types/_swe-rebench-v2-minted-pool.js';
 import type { MintTasksInput } from '../../solver-types/_swe-rebench-v2-mint-cli.js';
-import { defaultStateDir as sweRebenchV2DefaultStateDir } from '../../solver-types/swe-rebench-v2.js';
 
 const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
 
@@ -555,7 +554,7 @@ Output flags:
         fail(ctx, 'solver-nets validate-pool-report currently supports only `swe-rebench-v2`');
         return;
       }
-      const stateDir = ctx.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ?? sweRebenchV2DefaultStateDir();
+      const stateDir = loadConfig(configPath).sweRebenchV2StateDir;
       const path = join(stateDir, 'validated-pool.json');
       let raw: unknown;
       try {
@@ -677,7 +676,9 @@ Output flags:
         poolTasks = poolTasks.filter((t) => wanted.has(t.instance_id));
         process.stderr.write(`[validate-pool] restricted to ${poolTasks.length} of ${wanted.size} requested instance ids\n`);
       }
-      const store = getSweRebenchV2ValidatedPoolStore();
+      const store = getSweRebenchV2ValidatedPoolStore(
+        loadConfig(configPath).sweRebenchV2StateDir,
+      );
 
       if (Boolean(parsed.values['recheck-discrimination'])) {
         const result = await recheckDiscrimination({
@@ -856,7 +857,7 @@ Output flags:
         return;
       }
       if (net.solverType === 'swe-rebench-v2.v1') {
-        const stateDir = process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ?? sweRebenchV2DefaultStateDir();
+        const stateDir = loadConfig(configPath).sweRebenchV2StateDir;
         const freshness = await describeSweRebenchV2PoolFreshness({ stateDir });
         const sanitized = sanitizeLegacySolverNet(net);
         emit(
@@ -1008,7 +1009,7 @@ Output flags:
       }
 
       const loaded = loadConfig(configPath);
-      const stateDir = sweRebenchV2DefaultStateDir();
+      const stateDir = loaded.sweRebenchV2StateDir;
       const raw = JSON.parse(readFileSync(resolvePath(candidatesPath), 'utf8')) as unknown;
       const noPost = Boolean(parsed.values['no-post']);
       const candidates = parseMintTaskCandidates(raw, noPost);

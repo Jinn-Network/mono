@@ -24,7 +24,7 @@ describe('Autopilot runtime boot guard', () => {
     const output = `${result.stdout}\n${result.stderr}`;
 
     expect(result.status).toBe(1);
-    expect(output).toMatch(/JINN_AUTOPILOT_RUNTIME.*claude.*hermes/i);
+    expect(output).toMatch(/JINN_AUTOPILOT_RUNTIME.*claude.*hermes.*cursor/i);
     expect(output).not.toContain('Cycle report');
   });
 });

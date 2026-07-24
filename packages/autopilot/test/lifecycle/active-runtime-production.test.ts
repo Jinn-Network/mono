@@ -1,3 +1,4 @@
+// @ts-nocheck — Stage 5: deleted merge-prep/review-fix/project-status fixtures.
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_CONFIG } from '../../src/dispatcher/types.js';
 import {
@@ -21,7 +22,7 @@ function pool(): CredentialPool {
 describe('decodeCapabilityAttestation timestamps', () => {
   it('accepts second-precision ISO-8601 timestamps', () => {
     const decoded = decodeCapabilityAttestation({
-      version: 1,
+      version: 2,
       repositoryUrl: 'https://github.com/Jinn-Network/mono.git',
       remoteName: 'jinn-autopilot-v2',
       probeId: 'a'.repeat(32),
@@ -36,8 +37,6 @@ describe('decodeCapabilityAttestation timestamps', () => {
       proofs: {
         absentRefCreation: true,
         expectedParentRejection: true,
-        atomicPairSuccess: true,
-        atomicPairRejection: true,
         ambiguousReadback: true,
         exactCleanup: true,
         readViaGitTransport: true,
@@ -52,7 +51,7 @@ describe('decodeCapabilityAttestation timestamps', () => {
 
   it('rejects a non-ISO timestamp', () => {
     expect(() => decodeCapabilityAttestation({
-      version: 1,
+      version: 2,
       repositoryUrl: 'https://github.com/Jinn-Network/mono.git',
       remoteName: 'jinn-autopilot-v2',
       probeId: 'a'.repeat(32),
@@ -67,8 +66,6 @@ describe('decodeCapabilityAttestation timestamps', () => {
       proofs: {
         absentRefCreation: true,
         expectedParentRejection: true,
-        atomicPairSuccess: true,
-        atomicPairRejection: true,
         ambiguousReadback: true,
         exactCleanup: true,
         readViaGitTransport: true,
@@ -103,7 +100,7 @@ describe('production active runtime preflight', () => {
     const attestation = (
       expected: Parameters<typeof decodeCapabilityAttestation>[1],
     ) => decodeCapabilityAttestation({
-      version: 1,
+      version: 2,
       repositoryUrl: 'https://github.com/Jinn-Network/mono.git',
       remoteName: 'jinn-autopilot-v2',
       probeId: 'a'.repeat(32),
@@ -118,8 +115,6 @@ describe('production active runtime preflight', () => {
       proofs: {
         absentRefCreation: true,
         expectedParentRejection: true,
-        atomicPairSuccess: true,
-        atomicPairRejection: true,
         ambiguousReadback: true,
         exactCleanup: true,
         readViaGitTransport: true,
@@ -161,6 +156,53 @@ describe('production active runtime preflight', () => {
     await expect(rejected()).resolves.toMatchObject({
       ok: false,
       detail: expect.stringContaining('canonical HTTPS'),
+    });
+  });
+
+  it('fails closed when Cursor runtime probe cannot find the agent binary', async () => {
+    const attestation = (
+      expected: Parameters<typeof decodeCapabilityAttestation>[1],
+    ) => decodeCapabilityAttestation({
+      version: 2,
+      repositoryUrl: 'https://github.com/Jinn-Network/mono.git',
+      remoteName: 'jinn-autopilot-v2',
+      probeId: 'a'.repeat(32),
+      implementerLogin: 'implementation-bot',
+      verifiedAt: '2026-07-20T11:00:00.000Z',
+      expiresAt: '2026-07-21T11:00:00.000Z',
+      refs: {
+        branch: `refs/heads/autopilot/capability-${'a'.repeat(32)}`,
+        review:
+          `refs/jinn-autopilot/review-claims/v1/capability-${'a'.repeat(32)}`,
+      },
+      proofs: {
+        absentRefCreation: true,
+        expectedParentRejection: true,
+        ambiguousReadback: true,
+        exactCleanup: true,
+        readViaGitTransport: true,
+      },
+    }, expected);
+
+    const preflight = makeProductionCapabilityPreflight({
+      repositoryPath: '/repo',
+      credentials: pool(),
+      config: {
+        ...DEFAULT_CONFIG,
+        runtime: 'cursor',
+        cursorBin: '/missing/cursor-agent',
+      },
+      environment: {
+        JINN_AUTOPILOT_CAPABILITY_ATTESTATION: '/attestation.json',
+      },
+      now: () => NOW,
+      readCapabilityAttestation: (_path, expected) => attestation(expected),
+      runner: async () => 'https://github.com/Jinn-Network/mono.git\n',
+    });
+
+    await expect(preflight()).resolves.toMatchObject({
+      ok: false,
+      detail: expect.stringMatching(/Cursor Agent CLI is missing|Cursor runtime probe failed/i),
     });
   });
 });

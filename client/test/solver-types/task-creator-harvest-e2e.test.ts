@@ -185,6 +185,7 @@ EOF`], { cwd: repoDir });
       stateDir,
       repos: [{ path: repoDir, repo: REPO }],
       limitPerRepo: 1,
+      limitPerTick: 3,
       publish: true,
       minterSafe: MINTER_SAFE,
       isDockerAvailable: () => true,

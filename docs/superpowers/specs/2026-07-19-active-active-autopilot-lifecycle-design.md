@@ -8,6 +8,22 @@
 - **Document status:** approved
 - **Implementation status:** implemented on the feature branch; live activation has not occurred
 
+**Superseded by** [`2026-07-21-single-surface-lifecycle.md`](2026-07-21-single-surface-lifecycle.md)
+(adopted). Where that amendment touches this document, it wins. In particular:
+
+- **§7 (lifecycle states)** — `REVIEW-FIXING` and `MERGE-PREP` states are deleted;
+  `BLOCKED-BY-CHILD` and the children ladder replace the fix loop and merge-prep.
+- **§8.3 (review fix loop)** — in-session fix publication is deleted; findings become
+  child issues (`review-finding`).
+- **§8.4 (merge-prep protocol)** — deleted; reconcile children + tier-0
+  update-branch replace it.
+- **§8.6 (projection)** — Project Status is paint-only; the scheduled board painter
+  owns outbound Status writes.
+
+This document remains authoritative for claim CAS, review refs, head-bound verdicts,
+claimless merge, staleness/reaping, attempt isolation, and credential handling not
+amended above.
+
 This document redesigns the Jinn Autopilot lifecycle so two or more independent
 Autopilot processes can operate concurrently on the same host or different
 hosts without interfering with one another.
@@ -401,8 +417,10 @@ Downstream components may rely on the following invariants.
 
 26. **C1 — Local capacity:** every process enforces only its own implementation,
     review, and merge-prep caps.
-27. **C2 — Shared backpressure:** the GitHub-visible queue may suppress new
-    implementation, but no global scheduler or license pool exists.
+27. **C2 — Shared backpressure:** the GitHub-visible queue may suppress *fresh*
+    implementation, but machine children (`review-finding` / `reconcile` /
+    `ci-failure`) remain claimable because they drain that queue. No global
+    scheduler or license pool exists.
 28. **H1 — Global runtime:** when Hermes is configured, it remains the selected
     process-wide runtime for implementation, review, merge-prep, and root
     stages.
@@ -923,7 +941,7 @@ boundary.
 | Inputs and outputs | Inputs: eligible candidates, local active children, per-phase caps, GitHub backlog, rate-limit health. Output: ordered claim attempts or skips with reasons. |
 | Durable source of truth | GitHub backlog for shared pressure; configuration for local caps. |
 | Local versus shared | Capacity counters, ordering, and resource measurements are local. Backlog and rate limits are shared observations. |
-| Authority and prohibitions | May defer or attempt a claim. It cannot reserve global capacity or suppress another process. |
+| Authority and prohibitions | May defer or attempt a claim. It cannot reserve global capacity or suppress another process. Open-pipeline backpressure suppresses only fresh implementation candidates; machine children still claim under local phase remaining. |
 | Idempotency | Re-evaluation may choose again; only the claim transition has external effect. |
 | Concurrent behavior | Runners schedule independently and may race. Losing a claim immediately returns local capacity. |
 | Failure and recovery | Scheduler crash loses only local choices. Restart derives GitHub work and local children again. |

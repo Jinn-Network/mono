@@ -49,6 +49,7 @@ import predictionScoreboardCommand from './commands/prediction-scoreboard.js';
 import captureCommand from './commands/capture.js';
 import codedigestRevertCheckCommand from './commands/codedigest-revert-check.js';
 import evalCommand from './commands/eval.js';
+import scrubCommand from './commands/scrub.js';
 
 const COMMANDS: CommandModule[] = [
   versionCommand,
@@ -87,6 +88,7 @@ const COMMANDS: CommandModule[] = [
   integrationsCommand,
   codedigestRevertCheckCommand,
   evalCommand,
+  scrubCommand,
 ];
 
 /**

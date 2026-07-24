@@ -70,6 +70,12 @@ export interface ScrubRedaction {
   field: string;
   /** Scrub-pipeline stage (`key-policy`, `openredaction`, `secretlint`, …) or `fit`. */
   stage: string;
+  /**
+   * Pipeline redaction category when present (e.g. `secret`, `pii`,
+   * `allowlist-pass`). Carried through so seed/publish refuse filters can
+   * ignore auditable allowlist passes without treating them as leaks.
+   */
+  kind?: string;
   /** Rule / entity detail when the stage reports one (e.g. `AWS_ACCESS_KEY`). */
   detail?: string;
   /** Original value — local display only, never persisted. */
@@ -280,6 +286,7 @@ async function scrubStepObservations(
             `steps[${stepIndex}].events[${eventIndex}].attributes`
             + `[${JSON.stringify(record.key)}]`,
           stage: record.stage,
+          ...(record.kind ? { kind: record.kind } : {}),
           ...(record.detail ? { detail: record.detail } : {}),
           before: originalAttributes[record.key],
           after: fitted.attributes[record.key],
@@ -315,6 +322,7 @@ async function scrubStepObservations(
         redactions.push({
           field: `steps[${stepIndex}].status.message`,
           stage: record.stage,
+          ...(record.kind ? { kind: record.kind } : {}),
           ...(record.detail ? { detail: record.detail } : {}),
           before: status.message,
           after,
@@ -624,6 +632,7 @@ export async function capture(
       redactions.push({
         field: fieldRef(index, record.key),
         stage: record.stage,
+        ...(record.kind ? { kind: record.kind } : {}),
         ...(record.detail ? { detail: record.detail } : {}),
         before: run.before[record.key],
         after: fitted.attributes[record.key],
@@ -654,6 +663,7 @@ export async function capture(
     redactions.push({
       field: record.key,
       stage: record.stage,
+      ...(record.kind ? { kind: record.kind } : {}),
       ...(record.detail ? { detail: record.detail } : {}),
       before: summaryBag[record.key],
       after: summaryRun.attributes[record.key],
@@ -663,6 +673,7 @@ export async function capture(
     redactions.push({
       field: record.key,
       stage: record.stage,
+      ...(record.kind ? { kind: record.kind } : {}),
       ...(record.detail ? { detail: record.detail } : {}),
       before: factBag[record.key],
       after: factRun.attributes[record.key],

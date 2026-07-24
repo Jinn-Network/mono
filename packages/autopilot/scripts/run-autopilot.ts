@@ -18,14 +18,12 @@ import type { CommandRunner } from '../src/dispatcher/issue-source.js';
 import { deriveInFlight, listTaskWorktrees } from '../src/dispatcher/state.js';
 import { syncReviewLabels } from '../src/dispatcher/label-sweep.js';
 import { syncDrift } from '../src/dispatcher/drift-sweep.js';
-import { syncMerges, touchesOwned } from '../src/dispatcher/merge-sweep.js';
-import { escalateStuckPrs, escalateStuckPr } from '../src/dispatcher/stuck-escalation.js';
-import { deriveMergePrepInFlight } from '../src/dispatcher/merge-prep-state.js';
-import { dispatchMergePrep } from '../src/dispatcher/merge-prep-dispatch.js';
-import { runMergePrepCycle, type PrepAttempt } from '../src/dispatcher/merge-prep-loop.js';
+import { syncMerges } from '../src/dispatcher/merge-sweep.js';
+import { escalateStuckPrs } from '../src/dispatcher/stuck-escalation.js';
 import { dispatchIssue, REPO_ROOT, WORKTREES_BASE } from '../src/dispatcher/dispatch.js';
 import { runDeliveryBridge } from '../src/dispatcher/delivery-pr-bridge.js';
 import { HttpDeliveryReader } from '../src/dispatcher/delivery-reader.js';
+import { routeToMarketplace, retractStaleMarketplaceRoutes } from '../src/dispatcher/marketplace-route.js';
 import { SESSIONS_LOG_DIR } from '../src/dispatcher/session-log.js';
 import { GhPrSource } from '../src/dispatcher/pr-source.js';
 import { fetchIssuePrMap } from '../src/dispatcher/pr-links.js';
@@ -42,7 +40,7 @@ import {
   reviewWorktreePath,
   type ReviewLeaseStore,
 } from '../src/dispatcher/review-lease.js';
-import { assertReviewIdentities, assertMergePrepArming } from '../src/dispatcher/identity.js';
+import { assertReviewIdentities } from '../src/dispatcher/identity.js';
 import type { SpawnFn } from '../src/dispatcher/dispatch.js';
 import type { ReviewablePr } from '../src/dispatcher/types.js';
 import {
@@ -71,6 +69,11 @@ import {
   assertHermesBillingRoute,
   assertHermesRuntimeReady,
 } from '../src/dispatcher/hermes-runtime.js';
+import {
+  assertCursorRuntimeReady,
+  CURSOR_BIN_ENV,
+  CURSOR_MODEL_ENV,
+} from '../src/dispatcher/cursor-runtime.js';
 import { WallClock } from '../src/dispatcher/wall-clock.js';
 import {
   shouldRouteToSession,
@@ -112,13 +115,19 @@ const REVIEW_BOT_LOGIN_ENV = 'JINN_REVIEW_BOT_LOGIN';
 const IMPL_GH_TOKEN_ENV = 'JINN_IMPL_GH_TOKEN';
 const REVIEW_GH_TOKEN_ENV = 'JINN_REVIEW_GH_TOKEN';
 /** Arm the merge-prep session loop (DR-2026-07-16). '1' = on. Default off. */
-const MERGE_PREP_ENV = 'JINN_MERGE_PREP';
 /** Arm the delivery→PR bridge (issue #1892). '1' = on. Default off. */
 const MARKETPLACE_BRIDGE_ENV = 'JINN_MARKETPLACE_BRIDGE';
 /** Indexer base URL the delivery→PR bridge queries. Empty disables it regardless of the flag above. */
 const MARKETPLACE_INDEXER_URL_ENV = 'JINN_MARKETPLACE_INDEXER_URL';
 /** IPFS gateway base URL for the delivery→PR bridge. */
 const MARKETPLACE_IPFS_GATEWAY_ENV = 'JINN_MARKETPLACE_IPFS_GATEWAY_URL';
+/**
+ * Creation-automation execution-mode switch (issue #1893). `'marketplace'`
+ * arms it; anything else (unset, typo, empty) is the fail-safe `'local'`
+ * default — mirrors the `mergePrepEnabled` / `marketplaceBridgeEnabled`
+ * fail-safe-off convention.
+ */
+const EXECUTION_MODE_ENV = 'JINN_EXECUTION_MODE';
 
 /**
  * Model / provider / Python interpreter for Hermes coordinator sessions.
@@ -129,6 +138,13 @@ const MARKETPLACE_IPFS_GATEWAY_ENV = 'JINN_MARKETPLACE_IPFS_GATEWAY_URL';
 const HERMES_MODEL_ENV = 'JINN_DISPATCHER_HERMES_MODEL';
 const HERMES_PROVIDER_ENV = 'JINN_DISPATCHER_HERMES_PROVIDER';
 const HERMES_PYTHON_ENV = 'JINN_DISPATCHER_HERMES_PYTHON';
+
+/**
+ * Cursor Agent CLI binary and fixed review model. Active only when
+ * JINN_AUTOPILOT_RUNTIME=cursor. Implement sessions use cursorModelForEffort.
+ */
+const CURSOR_MODEL_ENV_NAME = CURSOR_MODEL_ENV;
+const CURSOR_BIN_ENV_NAME = CURSOR_BIN_ENV;
 
 function attachTerminalCleanup(
   child: ChildProcess,
@@ -251,6 +267,13 @@ export function printReport(report: CycleReport, label: string): void {
     }
   }
 
+  if (report.routedToMarketplace.length > 0) {
+    console.log('   routed to marketplace:');
+    for (const r of report.routedToMarketplace) {
+      console.log(`     #${r.issueNumber} (${r.action})`);
+    }
+  }
+
   console.log(`   skipped (throttle): ${report.skippedForThrottle}`);
 
   if (report.skippedForAuthor.length > 0) {
@@ -339,6 +362,17 @@ export async function runDryRun(opts: RunDryRunOpts): Promise<void> {
       console.log(`[dry-run] would pause #${issueNumber} (wall-clock ceiling) — no board mutation.`);
     };
 
+    // Dry-run stub for routeToMarketplace (issue #1893) — logs the intent but
+    // makes NO gh mutation (no label, no comment), same promise as dryDispatch.
+    const wouldRouteToMarketplace: number[] = [];
+    const dryRouteToMarketplace = async (
+      issue: ReadyIssue,
+    ): Promise<import('../src/dispatcher/loop.js').MarketplaceRoutedIssue> => {
+      wouldRouteToMarketplace.push(issue.number);
+      console.log(`[dry-run] would route #${issue.number} to the marketplace — no label/comment mutation.`);
+      return { issueNumber: issue.number, action: 'created' };
+    };
+
     // Fetch the per-cycle Project snapshot once and share with deriveInFlight
     // (and, after step 5 of the #585 plan, source.poll). Costs ≤2 GraphQL pts
     // versus ~192 in the pre-#585 code.
@@ -348,6 +382,7 @@ export async function runDryRun(opts: RunDryRunOpts): Promise<void> {
       cfg,
       deriveInFlight: () => deriveInFlight(snapshot, runner),
       dispatchIssue: dryDispatch,
+      routeToMarketplace: dryRouteToMarketplace,
       countOpenReadyPrs,
       // Dry-run still polls the live PR map so the "would dispatch" list
       // includes dependency-stacked issues (read-only, no mutation).
@@ -364,8 +399,11 @@ export async function runDryRun(opts: RunDryRunOpts): Promise<void> {
 
     if (wouldDispatch.length > 0) {
       console.log(`\n[dry-run] Would have dispatched: ${wouldDispatch.map((n) => `#${n}`).join(', ')}`);
-    } else {
+    } else if (wouldRouteToMarketplace.length === 0) {
       console.log('\n[dry-run] No issues would be dispatched this cycle.');
+    }
+    if (wouldRouteToMarketplace.length > 0) {
+      console.log(`\n[dry-run] Would have routed to the marketplace: ${wouldRouteToMarketplace.map((n) => `#${n}`).join(', ')}`);
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -400,9 +438,7 @@ export async function runReviewPass(
   // Exclude PRs with a live merge-prep session from review dispatch (symmetric
   // to the prep loop's reviewInFlight guard) so the two never push to the same
   // branch at once. Only relevant when merge-prep is armed.
-  const busyPrNumbers = cfg.mergePrepEnabled
-    ? new Set<number>((await deriveMergePrepInFlight(runner)).inFlight.map((w) => w.prNumber))
-    : undefined;
+  const busyPrNumbers = new Set<number>();
   const report = await runReviewCycle({
     prSource,
     cfg,
@@ -602,7 +638,7 @@ async function main(): Promise<void> {
     reviewBotLogin: process.env[REVIEW_BOT_LOGIN_ENV] ?? '',
     implGhToken: process.env[IMPL_GH_TOKEN_ENV] ?? '',
     reviewGhToken: process.env[REVIEW_GH_TOKEN_ENV] ?? '',
-    mergePrepEnabled: (process.env[MERGE_PREP_ENV] ?? '') === '1',
+    executionMode: process.env[EXECUTION_MODE_ENV] === 'marketplace' ? 'marketplace' : 'local',
     marketplaceBridgeEnabled: (process.env[MARKETPLACE_BRIDGE_ENV] ?? '') === '1',
     marketplaceIndexerUrl: process.env[MARKETPLACE_INDEXER_URL_ENV] ?? '',
     ...(process.env[MARKETPLACE_IPFS_GATEWAY_ENV]
@@ -612,6 +648,12 @@ async function main(): Promise<void> {
     ...(process.env[HERMES_PROVIDER_ENV] ? { hermesProvider: process.env[HERMES_PROVIDER_ENV] } : {}),
     ...(process.env[HERMES_PYTHON_ENV]
       ? { hermesPythonPath: process.env[HERMES_PYTHON_ENV] }
+      : {}),
+    ...(process.env[CURSOR_MODEL_ENV_NAME]
+      ? { cursorModel: process.env[CURSOR_MODEL_ENV_NAME] }
+      : {}),
+    ...(process.env[CURSOR_BIN_ENV_NAME]
+      ? { cursorBin: process.env[CURSOR_BIN_ENV_NAME] }
       : {}),
   };
 
@@ -649,9 +691,15 @@ async function main(): Promise<void> {
   // Fail-loud merge-prep arming (DR-2026-07-16): a prepped PR is re-drafted and
   // relies on the review loop to re-approve/un-draft it — refuse to arm
   // merge-prep without the review loop, or every prep wedges its PR in draft.
-  assertMergePrepArming(cfg);
-  if (cfg.mergePrepEnabled) {
-    console.log(`[autopilot] merge-prep enabled (cap=${cfg.mergePrepCap}) — stuck PRs are prepped, not just escalated`);
+
+  // Creation automation (issue #1893): 'marketplace' routes ready issues to
+  // the marketplace (label + snapshot marker) instead of a local session.
+  // Default 'local' — every existing local-mode behavior is unchanged.
+  if (cfg.executionMode === 'marketplace') {
+    console.log(
+      '[autopilot] executionMode=marketplace — ready issues are routed to the marketplace, ' +
+        'not dispatched to local sessions',
+    );
   }
 
   // Hermes is a process-wide runtime. Refuse to boot unless its interpreter,
@@ -662,6 +710,13 @@ async function main(): Promise<void> {
     console.log(
       `[autopilot] hermes runtime ready (model=${cfg.hermesModel}, provider=${cfg.hermesProvider}, ` +
         `python=${cfg.hermesPythonPath})`,
+    );
+  }
+
+  if (cfg.runtime === 'cursor') {
+    assertCursorRuntimeReady(cfg.cursorBin);
+    console.log(
+      `[autopilot] cursor runtime ready (bin=${cfg.cursorBin}, reviewModel=${cfg.cursorModel})`,
     );
   }
 
@@ -693,10 +748,6 @@ async function main(): Promise<void> {
   // One `gh pr update-branch` per BEHIND PR per process run (merge sweep,
   // #1735) — still-behind-after-update is surfaced, never retried forever.
   const attemptedUpdateBranch = new Set<number>();
-  // Per-process merge-prep attempt tracking (DR-2026-07-16): a same-head second
-  // sighting escalates; ≤MAX_PREP_ATTEMPTS across advancing heads. Lost on
-  // restart (same tradeoff as attemptedUpdateBranch).
-  const attemptedPrep = new Map<number, PrepAttempt>();
 
   if (isDryRun) {
     // Dry-run intentionally skips the field-id cache + makePauseSession + any
@@ -877,36 +928,12 @@ async function main(): Promise<void> {
           for (const s of mr.skipped) {
             console.log(`[autopilot] merge (waiting/needs a human): ${s}`);
           }
-          // Stuck PRs (conflict / still-behind). Armed → the merge-prep session
-          // resolves mechanical conflicts and escalates the rest (DR-2026-07-16).
-          // Disarmed → Stage A deterministic escalation only (label
-          // review:needs-human + linked-issue Blocked on: Human + one comment).
-          // Both are idempotent via StuckPr.escalated.
-          if (mr.stuck.length > 0 && cfg.mergePrepEnabled) {
-            const reviewInFlight = new Set<number>(
-              (await deriveReviewInFlight(realRunner)).inFlight.map((r) => r.prNumber),
-            );
-            const mp = await runMergePrepCycle({
-              stuck: mr.stuck,
-              cfg,
-              attemptedPrep,
-              reviewInFlight,
-              deriveInFlight: () => deriveMergePrepInFlight(realRunner),
-              dispatch: (s) => dispatchMergePrep(s, cfg, { runner: realRunner, spawn: makeLoggingSpawn() }),
-              escalate: async (s, why) => {
-                console.log(`[autopilot] merge-prep: escalating PR #${s.number} — ${why}`);
-                await escalateStuckPr(s, snapshot, cyclePrByIssue, cycleFieldCache, realRunner);
-              },
-              isCodeOwned: (n) => touchesOwned(n, realRunner),
-              removeWorktree: async (w) => {
-                await realRunner('git', ['worktree', 'remove', '--force', w.worktreePath]);
-              },
-            });
-            if (mp.dispatched.length > 0) console.log(`[autopilot] merge-prep dispatched → PR #${mp.dispatched.join(', PR #')}`);
-            if (mp.escalated.length > 0) console.log(`[autopilot] merge-prep escalated (needs-human) → PR #${mp.escalated.join(', PR #')}`);
-            if (mp.reaped.length > 0) console.log(`[autopilot] merge-prep reaped stale worktree → PR #${mp.reaped.join(', PR #')}`);
-            if (mp.waiting.length > 0) console.log(`[autopilot] merge-prep waiting (in-flight) → PR #${mp.waiting.join(', PR #')}`);
-          } else if (mr.stuck.length > 0) {
+          // Stuck PRs (conflict / still-behind): Stage A deterministic
+          // escalation only (label review:needs-human + linked-issue
+          // Blocked on: Human + one comment). Merge-prep sessions were
+          // deleted in single-surface Stage 5 — reconcile children own
+          // integration work. Idempotent via StuckPr.escalated.
+          if (mr.stuck.length > 0) {
             const esc = await escalateStuckPrs(
               mr.stuck, snapshot, cyclePrByIssue, cycleFieldCache, realRunner,
             );
@@ -980,6 +1007,7 @@ async function main(): Promise<void> {
             spawn: makeLoggingSpawn(),
             fieldCache: cycleFieldCache,
           }),
+        routeToMarketplace: (issue) => routeToMarketplace(issue, realRunner),
         countOpenReadyPrs,
         // Reuse the map fetched once above (shared with the stacked-base sweep).
         fetchIssuePrMap: () => Promise.resolve(cyclePrByIssue),
@@ -1004,6 +1032,31 @@ async function main(): Promise<void> {
       }
 
       printReport(result, 'Cycle report');
+
+      // Marketplace retract sweep (issue #1893): runs over ALL currently
+      // labeled OPEN issues (its own targeted `gh issue list --label` scan —
+      // not the board snapshot), independent of this cycle's
+      // concurrency/backpressure budget. `result.readyIssueNumbers` is the
+      // FULL (unsliced) ready set, so an issue merely excluded by budget is
+      // never mistaken for "no longer ready". No-op (and no `gh` calls) when
+      // executionMode is `local` (the default).
+      if (cfg.executionMode === 'marketplace') {
+        try {
+          const rr = await retractStaleMarketplaceRoutes(
+            new Set(result.readyIssueNumbers),
+            realRunner,
+          );
+          if (rr.retracted.length > 0) {
+            console.log(`[autopilot] marketplace: retracted → #${rr.retracted.join(', #')}`);
+          }
+          for (const sk of rr.skipped) {
+            console.log(`[autopilot] marketplace retract-sweep: ${sk}`);
+          }
+        } catch (err) {
+          console.error('[autopilot] marketplace retract-sweep error (cycle unaffected):', err);
+        }
+      }
+
       // Live cycle ran: this cycle's in-flight set becomes next cycle's
       // baseline for the finished-session diff. (#489)
       previousInFlight = inFlight;
