@@ -242,6 +242,7 @@ export class ExactHeadMechanicalRunner implements AutopilotMechanicalRunner {
         'diff',
         '--name-only',
         '-z',
+        '--no-renames',
         `${context.reviewTarget.baseOid}...${context.reviewTarget.resultingHead}`,
       ]);
       if (diff.stdout.length > 0 && !diff.stdout.endsWith('\0')) {

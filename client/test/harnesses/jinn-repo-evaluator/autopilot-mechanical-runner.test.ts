@@ -97,6 +97,7 @@ function commandRunner(overrides: {
   head?: string;
   changedFiles?: string;
   reviewDiff?: string;
+  rename?: { source: string; destination: string };
   reject?: (args: string[]) => unknown;
 } = {}): RepositoryCommandRunner & ReturnType<typeof vi.fn> {
   return vi.fn(async (_command: string, args: string[]) => {
@@ -106,6 +107,14 @@ function commandRunner(overrides: {
       return { stdout: `${overrides.head ?? '4'.repeat(40)}\n`, stderr: '' };
     }
     if (args.includes('--name-only')) {
+      if (overrides.rename) {
+        return {
+          stdout: args.includes('--no-renames')
+            ? `${overrides.rename.source}\0${overrides.rename.destination}\0`
+            : `${overrides.rename.destination}\0`,
+          stderr: '',
+        };
+      }
       return {
         stdout: overrides.changedFiles
           ?? 'packages/sdk/src/autopilot-session.ts\0client/src/harnesses/engine/engine.ts\0',
@@ -186,6 +195,7 @@ describe('ExactHeadMechanicalRunner', () => {
       'diff',
       '--name-only',
       '-z',
+      '--no-renames',
       `${'3'.repeat(40)}...${'4'.repeat(40)}`,
     ], expect.objectContaining({ env: expect.any(Object) }));
     expect(command).toHaveBeenCalledWith('git', [
@@ -252,6 +262,22 @@ describe('ExactHeadMechanicalRunner', () => {
     });
     const immutableVerifier = passingVerifier();
     const result = await runner(command, immutableVerifier).run(context());
+
+    expect(result).toEqual({
+      kind: 'unscorable',
+      detail: 'unsupported-diff-scope: no deterministic checks cover .claude/settings.json',
+    });
+    expect(immutableVerifier.verify).not.toHaveBeenCalled();
+  });
+
+  it('validates both sides when an unsupported path is renamed into a supported package', async () => {
+    const immutableVerifier = passingVerifier();
+    const result = await runner(commandRunner({
+      rename: {
+        source: '.claude/settings.json',
+        destination: 'client/src/moved.ts',
+      },
+    }), immutableVerifier).run(context());
 
     expect(result).toEqual({
       kind: 'unscorable',

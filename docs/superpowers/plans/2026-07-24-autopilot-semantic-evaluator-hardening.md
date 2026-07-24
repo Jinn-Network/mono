@@ -189,9 +189,10 @@ execution. Invoke the immutable verifier only after exact-head and total-path
 policy checks. Without it, clean up and return unscorable.
 
 After verification passes, capture the complete diff with NUL-delimited raw
-path discovery and with external/text-conversion diff drivers disabled. Reject
-raw whitespace/control-character paths without normalization and fail
-unscorable if the full diff exceeds its explicit byte bound.
+path discovery, rename collapsing disabled, and external/text-conversion diff
+drivers disabled. Reject raw whitespace/control-character paths without
+normalization and fail unscorable if the full diff exceeds its explicit byte
+bound.
 
 - [ ] **Step 4: Verify GREEN**
 

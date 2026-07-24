@@ -32,7 +32,9 @@ mechanical pass.
 After immutable verification passes, the trusted host captures a bounded
 complete `base...head` diff with external diff drivers and text-conversion
 drivers disabled. Git path discovery is NUL-delimited and validates the exact
-raw paths before package policy checks; paths are never trimmed or normalized.
+raw paths before package policy checks; paths are never trimmed or normalized,
+and rename collapsing is disabled so both deletion and addition paths are
+covered.
 
 ## Semantic trust boundary
 
