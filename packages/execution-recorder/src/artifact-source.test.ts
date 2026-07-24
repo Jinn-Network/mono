@@ -2,7 +2,9 @@
 
 import {
   chmod,
+  mkdir,
   mkdtemp,
+  realpath,
   rm,
   symlink,
   writeFile,
@@ -26,7 +28,7 @@ afterEach(async () => {
 });
 
 async function temporaryDirectory(prefix: string): Promise<string> {
-  const path = await mkdtemp(join(tmpdir(), prefix));
+  const path = await realpath(await mkdtemp(join(tmpdir(), prefix)));
   temporaryDirectories.push(path);
   return path;
 }
@@ -95,6 +97,35 @@ describe("artifact source snapshots", () => {
         mediaType: "application/octet-stream",
       }),
     ).rejects.toMatchObject({ code: "UNSAFE_PATH" });
+  });
+
+  test("rejects a regular source reached through a symlinked ancestor", async () => {
+    const root = await temporaryDirectory(
+      "jinn-recorder-source-ancestor-symlink-",
+    );
+    const targetDirectory = join(root, "target");
+    const linkedDirectory = join(root, "linked");
+    await mkdir(targetDirectory);
+    await writeFile(join(targetDirectory, "source.txt"), "content");
+    await symlink(targetDirectory, linkedDirectory);
+
+    await expect(
+      snapshotArtifactSource({
+        path: join(linkedDirectory, "source.txt"),
+        mediaType: "text/plain",
+      }),
+    ).rejects.toMatchObject({ code: "UNSAFE_PATH" });
+  });
+
+  test("preserves IO failure semantics for a missing source path", async () => {
+    const root = await temporaryDirectory("jinn-recorder-source-missing-");
+
+    await expect(
+      snapshotArtifactSource({
+        path: join(root, "missing.txt"),
+        mediaType: "text/plain",
+      }),
+    ).rejects.toMatchObject({ code: "IO_FAILURE" });
   });
 
   test("honors cancellation before reading a path source", async () => {

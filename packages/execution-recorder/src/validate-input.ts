@@ -488,6 +488,14 @@ export function validateStartExecutionRecordingInput(
   }
 
   if (input.repositoryState !== undefined) {
+    if (
+      input.repositoryState.artifact?.kind !== "dataset" &&
+      input.repositoryState.artifact?.kind !== "collection"
+    ) {
+      invalidCaptureInput(
+        "repositoryState/artifact must be a dataset or collection artifact.",
+      );
+    }
     validateArtifact(
       input.repositoryState.artifact,
       "repositoryState/artifact",

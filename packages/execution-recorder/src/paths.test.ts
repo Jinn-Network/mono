@@ -5,6 +5,7 @@ import {
   mkdir,
   mkdtemp,
   open,
+  realpath,
   rename,
   rm,
   symlink,
@@ -33,7 +34,7 @@ afterEach(async () => {
 });
 
 async function temporaryDirectory(prefix: string): Promise<string> {
-  const path = await mkdtemp(join(tmpdir(), prefix));
+  const path = await realpath(await mkdtemp(join(tmpdir(), prefix)));
   temporaryDirectories.push(path);
   return path;
 }
@@ -65,6 +66,47 @@ describe("workspace paths", () => {
       prepareWorkspaceDirectories(workspacePaths(linked)),
     ).rejects.toMatchObject({
       code: "UNSAFE_PATH",
+    });
+  });
+
+  test("rejects an existing workspace reached through a symlinked ancestor", async () => {
+    const parent = await temporaryDirectory(
+      "jinn-recorder-ancestor-symlink-",
+    );
+    const targetParent = join(parent, "target");
+    const linkedParent = join(parent, "linked");
+    const target = join(targetParent, "recording");
+    await mkdir(targetParent);
+    await prepareWorkspaceDirectories(workspacePaths(target));
+    await symlink(targetParent, linkedParent);
+
+    await expect(
+      prepareWorkspaceDirectories(
+        workspacePaths(join(linkedParent, "recording")),
+      ),
+    ).rejects.toMatchObject({
+      code: "UNSAFE_PATH",
+    });
+  });
+
+  test("rejects a symlinked ancestor before creating a missing workspace root", async () => {
+    const parent = await temporaryDirectory(
+      "jinn-recorder-missing-root-ancestor-symlink-",
+    );
+    const targetParent = join(parent, "target");
+    const linkedParent = join(parent, "linked");
+    await mkdir(targetParent);
+    await symlink(targetParent, linkedParent);
+    const target = join(linkedParent, "first", "recording");
+
+    await expect(
+      prepareWorkspaceDirectories(workspacePaths(target)),
+    ).rejects.toMatchObject({
+      code: "UNSAFE_PATH",
+    });
+
+    await expect(lstat(join(targetParent, "first"))).rejects.toMatchObject({
+      code: "ENOENT",
     });
   });
 

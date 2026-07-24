@@ -70,12 +70,48 @@ export function assertWorkspaceContained(
   }
 }
 
+/**
+ * Rejects symbolic links already present in the lexical path.
+ *
+ * Missing suffix components are left to the caller so creation and
+ * missing-path behavior remain unchanged. Node does not expose openat-style
+ * relative traversal, so a concurrent ancestor replacement remains a race
+ * that callers must prevent.
+ */
+export async function assertNoSymlinkPathComponents(path: string): Promise<void> {
+  const components: string[] = [];
+  let current = resolve(path);
+  while (true) {
+    components.unshift(current);
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+
+  for (const component of components) {
+    let status;
+    try {
+      status = await lstat(component);
+    } catch (error) {
+      if (nodeErrorCode(error) === "ENOENT") return;
+      throw error;
+    }
+    if (status.isSymbolicLink()) {
+      throw new ExecutionRecorderError(
+        "UNSAFE_PATH",
+        `Path must not contain symbolic links: ${component}`,
+      );
+    }
+  }
+}
+
 export async function prepareWorkspaceDirectory(
   paths: WorkspacePaths,
   path: string,
 ): Promise<void> {
   assertWorkspaceContained(paths, path);
   try {
+    await assertNoSymlinkPathComponents(path);
     if (path === paths.root) {
       const missing: string[] = [];
       let current = path;
@@ -217,6 +253,7 @@ export async function validateWorkspaceParentChain(
 ): Promise<boolean> {
   assertWorkspaceContained(paths, path);
   try {
+    await assertNoSymlinkPathComponents(paths.root);
     await secureWorkspaceDirectory(paths, paths.root, false);
   } catch (error) {
     if (missingAllowed && nodeErrorCode(error) === "ENOENT") return false;
@@ -251,6 +288,7 @@ export async function validateWorkspaceDirectory(
 ): Promise<void> {
   assertWorkspaceContained(paths, path);
   try {
+    await assertNoSymlinkPathComponents(path);
     await secureWorkspaceDirectory(paths, path, false);
   } catch (error) {
     throw recorderIoError(
@@ -268,6 +306,7 @@ export async function pinWorkspaceDirectory(
   assertWorkspaceContained(paths, path);
   let handle: FileHandle | undefined;
   try {
+    await assertNoSymlinkPathComponents(path);
     const before = await lstat(path, { bigint: true });
     if (!before.isDirectory() || before.isSymbolicLink()) {
       throw new ExecutionRecorderError(
@@ -316,6 +355,7 @@ export async function assertPinnedWorkspaceDirectory(
 ): Promise<void> {
   assertWorkspaceContained(paths, pinned.path);
   try {
+    await assertNoSymlinkPathComponents(pinned.path);
     const [current, opened] = await Promise.all([
       lstat(pinned.path, { bigint: true }),
       pinned.handle.stat({ bigint: true }),

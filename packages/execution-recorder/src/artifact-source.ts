@@ -5,7 +5,10 @@ import { lstat, open } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { assertRecorderOperationActive, ExecutionRecorderError } from "./errors.js";
-import { recorderIoError } from "./paths.js";
+import {
+  assertNoSymlinkPathComponents,
+  recorderIoError,
+} from "./paths.js";
 import type { ArtifactSource } from "./types.js";
 
 export interface ArtifactSourceSnapshot {
@@ -36,6 +39,7 @@ export async function snapshotArtifactSource(
   const path = resolve(source.path);
   let handle;
   try {
+    await assertNoSymlinkPathComponents(path);
     const before = await lstat(path);
     if (!before.isFile() || before.isSymbolicLink()) {
       throw new ExecutionRecorderError(
