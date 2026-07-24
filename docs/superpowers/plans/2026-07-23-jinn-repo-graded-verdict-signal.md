@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
-> **Scope of issue #1976:** This issue is **shape `design`**. Its done bar is the ratified design + this plan — **not** shipping F1–F4. After human ratification of the design, file the F* Issues and close #1976. Implementation Autopilot sessions run against those follow-up Issues.
+> **Scope of issue #1976:** This issue is **shape `design`**. Its done bar is the ratified design + this plan — **not** shipping F1–F4. Human ratification was recorded on 2026-07-24; implementation is filed as #2113–#2116.
 
 **Goal:** Carry Lever A–identical observational `passedCount`/`totalCount` on live-issue jinn-repo verdicts (`jinn-repo-verdict.v3`), through evaluator → SDK → indexer → discovery/corpus, without changing binary settlement or sizing emissions.
 
@@ -43,7 +43,7 @@ This design Issue's ACs are satisfied by the locked design (+ this plan). Verifi
 | **4.** Complete evaluator → payload/envelope → indexer/discovery → corpus-association path, testable | Design §3 D hops + numbered assertions 1–7; §4.3–4.4 | F2 + F3 + F4 |
 | **5.** Bounded follow-up `feat` work units (one session each) | Design §3 E table (F1–F4); expanded below | (filing Issues after ratification) |
 
-**Explicit close path for #1976:** After human ratification of the design (and resolution or deferral of §Open questions below), file GitHub Issues F1–F4 (Issue Type `feat`), link them as sub-issues or blockers of any parent epic if desired, then close #1976. **This plan does not ship code in #1976.**
+**Explicit close path for #1976:** Ratification choices are recorded below and GitHub Issues [#2113](https://github.com/Jinn-Network/mono/issues/2113)–[#2116](https://github.com/Jinn-Network/mono/issues/2116) are filed with native blocker edges. Merging the design PR closes #1976. **This plan does not ship code in #1976.**
 
 ---
 
@@ -63,7 +63,7 @@ F1 (SDK v3 schema)
 
 ---
 
-## Human-ratification open questions (from design §7)
+## Human-ratification decisions (from design §7)
 
 These shape or gate F* scope; they do **not** block writing this plan. Record the human answer on the design (or in the F* Issue body) before implementation starts.
 
@@ -71,7 +71,7 @@ These shape or gate F* scope; they do **not** block writing this plan. Record th
 |---|---|---|---|
 | **Q1** | Non-vitest package fallback scripts: omit counts vs graded-only unscorable? | **Omit counts**; boolean `gates.tests` still settles | F2 |
 | **Q2** | Is generalizing the swe-rebench-only task-body IPFS fetch into F3 in-scope? | **Yes — inside F3** (needed for `#1433` join on jinn-repo) | F3 |
-| **Q3** | Discovery auth posture: restore a verified `getCodeDigestRewards` route vs corpus-local graded path? | Product choice; **F1–F3 payload/indexer contract unblocked** either way | F4 |
+| **Q3** | Discovery auth posture: restore a verified `getCodeDigestRewards` route vs corpus-local graded path? | **Corpus-local graded path.** Keep shape-parsed HTTP reward projections empty until a verified route exists. | F4 / #2116 |
 
 ---
 
@@ -109,10 +109,10 @@ These shape or gate F* scope; they do **not** block writing this plan. Record th
 
 **Files:** none in-repo (GitHub Issues only)
 
-- [ ] **Step 1:** Human ratifies `docs/superpowers/specs/2026-07-23-jinn-repo-graded-verdict-signal-design.md` (status → ratified / DR if required by process).
-- [ ] **Step 2:** Record Q1–Q3 answers on the design or in F2/F3/F4 Issue bodies.
-- [ ] **Step 3:** File four `feat` Issues with titles from design §3 E; paste the matching Phase below as the Issue implementation pointer; set Effort from triage; Blocked on: F2/F3 → F1, F4 → F3.
-- [ ] **Step 4:** Close #1976 with a comment linking the design, this plan, and F1–F4.
+- [x] **Step 1:** Human ratified `docs/superpowers/specs/2026-07-23-jinn-repo-graded-verdict-signal-design.md`.
+- [x] **Step 2:** Q1–Q3 answers are recorded on the design and in the matching Issue bodies.
+- [x] **Step 3:** Filed four `feat` Issues: F1 [#2113](https://github.com/Jinn-Network/mono/issues/2113), F2 [#2114](https://github.com/Jinn-Network/mono/issues/2114), F3 [#2115](https://github.com/Jinn-Network/mono/issues/2115), and F4 [#2116](https://github.com/Jinn-Network/mono/issues/2116), with native blocker edges.
+- [x] **Step 4:** Merge of PR #2027 closes #1976 and leaves the implementation train live.
 
 **Success criteria:** #1976 closed; F1–F4 open; no production code required from #1976 itself.
 

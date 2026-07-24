@@ -2,7 +2,7 @@
 title: Graded verdict signal for jinn-repo (beyond the v2 gate vector)
 date: 2026-07-23
 author: cursor-grok (Stage 1 design for Autopilot issue #1976; headless)
-status: design — awaiting human ratification
+status: human-ratified — follow-up implementation filed
 version: 0.1
 issue: https://github.com/Jinn-Network/mono/issues/1976
 relates-to: >
@@ -57,6 +57,16 @@ evaluator through payload → envelope → indexer → discovery → corpus asso
    The graded fields never overrule the bit.
 2. **Graded is observational learning-only.** It does not size emissions,
    rewards, or any Phase B.2 economic policy. Out of scope here.
+
+### Human ratification (2026-07-24)
+
+The signal shape, v3 schema, null semantics, and carry path are accepted as written. The three open choices are resolved as follows:
+
+1. Non-Vitest fallback scripts keep their authoritative boolean gate result and omit counts.
+2. The jinn-repo task-body fetch generalization is part of F3 so handler and enrichment-worker joins remain in lockstep.
+3. F4 uses the verified corpus-local association path. It does not restore shape-parsed GraphQL projections as reward evidence; a verified discovery route may be designed separately.
+
+Implementation is filed as [#2113](https://github.com/Jinn-Network/mono/issues/2113) → ([#2114](https://github.com/Jinn-Network/mono/issues/2114) ∥ [#2115](https://github.com/Jinn-Network/mono/issues/2115)) → [#2116](https://github.com/Jinn-Network/mono/issues/2116).
 
 ---
 
@@ -206,10 +216,10 @@ Each unit is sized for one implementation session:
 
 | # | Proposed title | Scope | Depends on |
 |---|---|---|---|
-| **F1** | `feat(sdk): add jinn-repo-verdict.v3 graded counts` | Zod schemas + union + SDK unit tests (mirror swe-rebench v2 tests) | — |
-| **F2** | `feat(evaluator): emit jinn-repo v3 passedCount/totalCount` | `live-eval-runner` + harness: JSON reporter, reuse `parseVitestJsonV1`, aggregate multi-package, omit-on-short-circuit; unit tests with fixtures | F1 |
-| **F3** | `feat(indexer): carry jinn-repo graded counts + join keys` | `enrichment-parse` jinn-repo branch (`payload.passed` → `actualPassed`, counts); generalize task-body fetch beyond swe-rebench for `solutionRequestId` / `solverNetManifestCid`; handler + enrichment-worker parity tests | F1 |
-| **F4** | `feat(discovery+corpus): surface jinn-repo gradedScores for learning` | Discovery/GraphQL path so jinn-repo attempts contribute `gradedScores[]`; wire `scoreMetadata` (or equivalent) so corpus/revision consumers can read counts; boundary test that emissions code does not import them | F3 |
+| **F1 / [#2113](https://github.com/Jinn-Network/mono/issues/2113)** | `feat(sdk): add jinn-repo-verdict.v3 graded counts` | Zod schemas + union + SDK unit tests (mirror swe-rebench v2 tests) | — |
+| **F2 / [#2114](https://github.com/Jinn-Network/mono/issues/2114)** | `feat(evaluator): emit jinn-repo v3 passedCount/totalCount` | `live-eval-runner` + harness: JSON reporter, reuse `parseVitestJsonV1`, aggregate multi-package, omit-on-short-circuit; unit tests with fixtures | F1 |
+| **F3 / [#2115](https://github.com/Jinn-Network/mono/issues/2115)** | `feat(indexer): carry jinn-repo graded counts + join keys` | `enrichment-parse` jinn-repo branch (`payload.passed` → `actualPassed`, counts); generalize task-body fetch beyond swe-rebench for `solutionRequestId` / `solverNetManifestCid`; handler + enrichment-worker parity tests | F1 |
+| **F4 / [#2116](https://github.com/Jinn-Network/mono/issues/2116)** | `feat(corpus): surface jinn-repo graded scores for learning` | Wire `scoreMetadata` (or equivalent) through the verified corpus-local join so revision consumers can read counts; keep unverified HTTP reward projections empty; boundary test that emissions code does not import graded fields | F3 |
 
 Optional sequenced (not blocking #1976 ACs): per-package count arrays; merged-pr
 v1 gold-test counts; Consolidator Tier-2 sensitivity for jinn-repo specifically
@@ -332,19 +342,15 @@ paths. Documented in F4 as a regression assertion.
 
 ---
 
-## 7. Open questions for human ratification
+## 7. Ratified defaults
 
-1. **Package fallback scripts** that are not vitest: confirm omit-counts
-   (recommended) vs. marking those runs unscorable for the graded layer only.
-   This design locks omit-counts so the boolean gate still settles.
-2. **F3 task-body fetch generalization** — confirm it is in-scope for the
-   indexer feat (required for the `#1433` join on jinn-repo) rather than a
-   separate chore. This design includes it inside F3.
-3. **Discovery auth posture** — `HttpDiscoveryAPI.getCodeDigestRewards`
-   currently returns `[]` (shape-parsed projections are not treated as
-   verified reward evidence). F4 must either restore a verified route or
-   document a corpus-local graded path; product choice left to ratification
-   without blocking the payload/indexer contract in F1–F3.
+1. **Package fallback scripts that are not Vitest:** omit counts; the boolean
+   `gates.tests` result remains authoritative.
+2. **F3 task-body fetch generalization:** in scope for the indexer feat,
+   because the `#1433` jinn-repo join requires it.
+3. **Discovery auth posture:** use the verified corpus-local graded path in
+   F4. `HttpDiscoveryAPI.getCodeDigestRewards` stays empty until a separately
+   verified route exists.
 
-No other blockers: signal shape, null semantics, schema bump, and hop
-assertions are locked above.
+No open ratification blockers remain: signal shape, null semantics, schema
+bump, hop assertions, and the F1–F4 split are locked above.
