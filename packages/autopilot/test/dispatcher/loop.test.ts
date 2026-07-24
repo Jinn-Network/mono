@@ -494,7 +494,7 @@ describe('runCycle — collectCompletions / report.collected', () => {
       return Promise.resolve(makeInFlight(issue.number));
     });
     const prMap = new Map<number, PrLink[]>([
-      [100, [{ prNumber: 10, headRefName: 'feat/100-base', baseRefName: 'next', state: 'OPEN', isDraft: true, author: 'alice' }]],
+      [100, [{ prNumber: 10, headRefName: 'feat/100-base', baseRefName: 'next', state: 'OPEN', isDraft: true, author: 'alice', labels: [] }]],
     ]);
     const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
       source: makeSource([blocked]),
@@ -516,7 +516,7 @@ describe('runCycle — collectCompletions / report.collected', () => {
     const blocked = makePolled({ number: 200, blockedOn: 'Another issue', blockedByIssues: [100] });
     const dispatchIssue = vi.fn();
     const prMap = new Map<number, PrLink[]>([
-      [100, [{ prNumber: 10, headRefName: 'feat/100-base', baseRefName: 'next', state: 'OPEN', isDraft: true, author: 'outsider' }]],
+      [100, [{ prNumber: 10, headRefName: 'feat/100-base', baseRefName: 'next', state: 'OPEN', isDraft: true, author: 'outsider', labels: [] }]],
     ]);
     const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
       source: makeSource([blocked]),
@@ -532,5 +532,180 @@ describe('runCycle — collectCompletions / report.collected', () => {
     });
     expect(report.dispatched).toEqual([]);
     expect(dispatchIssue).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dispatch isolation (review 2026-07-15): one failing dispatchIssue must not
+// abort the remaining dispatches — observed live when a dangling branch ref
+// fataled `worktree add` and took the whole cycle's dispatch loop down.
+// ---------------------------------------------------------------------------
+
+describe('runCycle — dispatch isolation', () => {
+  it('a failing dispatch is reported and the rest of the batch still dispatches', async () => {
+    const a = makePolled({ number: 100 });
+    const b = makePolled({ number: 200 });
+    const dispatchIssue = vi.fn().mockImplementation((issue: ReadyIssue) => {
+      if (issue.number === 100) {
+        return Promise.reject(new Error('git worktree add failed: branch already exists'));
+      }
+      return Promise.resolve(makeInFlight(issue.number));
+    });
+    const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
+      source: makeSource([a, b]),
+      cfg: makeCfg({ concurrencyCap: 5 }),
+      deriveInFlight: vi.fn().mockResolvedValue({ inFlight: [], drift: [] }),
+      dispatchIssue,
+      countOpenReadyPrs: vi.fn().mockResolvedValue(0),
+      wallClock: makeNeverExpiredClock(),
+      pauseSession: vi.fn().mockResolvedValue(undefined),
+      prevInFlight: [],
+      collectCompletions: vi.fn().mockResolvedValue([]),
+    });
+    expect(dispatchIssue).toHaveBeenCalledTimes(2);
+    expect(report.dispatched.map((d) => d.issueNumber)).toEqual([200]);
+    expect(report.dispatchErrors).toEqual([
+      { issueNumber: 100, message: 'git worktree add failed: branch already exists' },
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Execution-mode branch (issue #1893, spec
+// 2026-07-20-autopilot-marketplace-execution.md §Generator): `local` (the
+// default) dispatches unchanged via `dispatchIssue`; `marketplace` routes
+// ready issues to the marketplace via `routeToMarketplace` instead. Both
+// share every gate above (ready-filter, backpressure, concurrency) — only
+// the terminal per-issue action in step 7 differs.
+// ---------------------------------------------------------------------------
+
+describe('runCycle — execution-mode branch (issue #1893)', () => {
+  it("executionMode default ('local') never calls routeToMarketplace, even when provided (fail-safe)", async () => {
+    const issues = [makePolled({ number: 301 })];
+    const dispatchIssue = vi.fn().mockResolvedValue(makeInFlight(301));
+    const routeToMarketplace = vi.fn().mockResolvedValue({ issueNumber: 301, action: 'created' });
+
+    const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
+      source: makeSource(issues),
+      cfg: makeCfg(), // executionMode defaults to 'local' via DEFAULT_CONFIG
+      deriveInFlight: vi.fn().mockResolvedValue({ inFlight: [], drift: [] }),
+      dispatchIssue,
+      routeToMarketplace,
+      countOpenReadyPrs: vi.fn().mockResolvedValue(0),
+      wallClock: makeNeverExpiredClock(),
+      pauseSession: vi.fn().mockResolvedValue(undefined),
+      prevInFlight: [],
+      collectCompletions: vi.fn().mockResolvedValue([]),
+    });
+
+    expect(dispatchIssue).toHaveBeenCalledTimes(1);
+    expect(routeToMarketplace).not.toHaveBeenCalled();
+    expect(report.dispatched.map((d) => d.issueNumber)).toEqual([301]);
+    expect(report.routedToMarketplace).toEqual([]);
+  });
+
+  it("executionMode 'marketplace' routes ready issues via routeToMarketplace instead of dispatchIssue", async () => {
+    const issues = [
+      makePolled({ number: 401, priority: 'P1' }),
+      makePolled({ number: 402, priority: 'P2' }),
+    ];
+    const dispatchIssue = vi.fn().mockResolvedValue(makeInFlight(999));
+    const routeToMarketplace = vi.fn().mockImplementation((issue: ReadyIssue) =>
+      Promise.resolve({ issueNumber: issue.number, action: 'created' as const }),
+    );
+
+    const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
+      source: makeSource(issues),
+      cfg: makeCfg({ executionMode: 'marketplace', concurrencyCap: 3 }),
+      deriveInFlight: vi.fn().mockResolvedValue({ inFlight: [], drift: [] }),
+      dispatchIssue,
+      routeToMarketplace,
+      countOpenReadyPrs: vi.fn().mockResolvedValue(0),
+      wallClock: makeNeverExpiredClock(),
+      pauseSession: vi.fn().mockResolvedValue(undefined),
+      prevInFlight: [],
+      collectCompletions: vi.fn().mockResolvedValue([]),
+    });
+
+    expect(dispatchIssue).not.toHaveBeenCalled();
+    expect(routeToMarketplace).toHaveBeenCalledTimes(2);
+    expect(report.dispatched).toEqual([]);
+    expect(report.routedToMarketplace).toEqual([
+      { issueNumber: 401, action: 'created' },
+      { issueNumber: 402, action: 'created' },
+    ]);
+  });
+
+  it("executionMode 'marketplace' respects the same concurrency budget as local mode", async () => {
+    const issues = [
+      makePolled({ number: 501, priority: 'P1' }),
+      makePolled({ number: 502, priority: 'P2' }),
+      makePolled({ number: 503, priority: 'P3' }),
+    ];
+    const routeToMarketplace = vi.fn().mockImplementation((issue: ReadyIssue) =>
+      Promise.resolve({ issueNumber: issue.number, action: 'created' as const }),
+    );
+
+    const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
+      source: makeSource(issues),
+      cfg: makeCfg({ executionMode: 'marketplace', concurrencyCap: 1 }),
+      deriveInFlight: vi.fn().mockResolvedValue({ inFlight: [], drift: [] }),
+      dispatchIssue: vi.fn(),
+      routeToMarketplace,
+      countOpenReadyPrs: vi.fn().mockResolvedValue(0),
+      wallClock: makeNeverExpiredClock(),
+      pauseSession: vi.fn().mockResolvedValue(undefined),
+      prevInFlight: [],
+      collectCompletions: vi.fn().mockResolvedValue([]),
+    });
+
+    expect(routeToMarketplace).toHaveBeenCalledTimes(1);
+    expect(report.routedToMarketplace).toEqual([{ issueNumber: 501, action: 'created' }]);
+    expect(report.skippedForThrottle).toBe(2);
+    // The FULL ready set (unsliced) is still surfaced for the retract sweep,
+    // regardless of the concurrency budget applied to `routedToMarketplace`.
+    expect(report.readyIssueNumbers).toEqual([501, 502, 503]);
+  });
+
+  it("executionMode 'marketplace' without a routeToMarketplace dep fails per-issue (not the whole cycle)", async () => {
+    const issues = [makePolled({ number: 601 })];
+
+    const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
+      source: makeSource(issues),
+      cfg: makeCfg({ executionMode: 'marketplace' }),
+      deriveInFlight: vi.fn().mockResolvedValue({ inFlight: [], drift: [] }),
+      dispatchIssue: vi.fn(),
+      // routeToMarketplace deliberately omitted
+      countOpenReadyPrs: vi.fn().mockResolvedValue(0),
+      wallClock: makeNeverExpiredClock(),
+      pauseSession: vi.fn().mockResolvedValue(undefined),
+      prevInFlight: [],
+      collectCompletions: vi.fn().mockResolvedValue([]),
+    });
+
+    expect(report.routedToMarketplace).toEqual([]);
+    expect(report.dispatchErrors).toHaveLength(1);
+    expect(report.dispatchErrors[0]!.issueNumber).toBe(601);
+    expect(report.dispatchErrors[0]!.message).toContain('routeToMarketplace');
+  });
+
+  it('readyIssueNumbers surfaces the full ready set even when backpressure trips (local mode)', async () => {
+    const issues = [makePolled({ number: 701 }), makePolled({ number: 702 })];
+
+    const report: CycleReport = await runCycle(EMPTY_SNAPSHOT, {
+      source: makeSource(issues),
+      cfg: makeCfg({ openPrBackpressure: 1 }),
+      deriveInFlight: vi.fn().mockResolvedValue({ inFlight: [], drift: [] }),
+      dispatchIssue: vi.fn(),
+      countOpenReadyPrs: vi.fn().mockResolvedValue(10), // over the threshold
+      wallClock: makeNeverExpiredClock(),
+      pauseSession: vi.fn().mockResolvedValue(undefined),
+      prevInFlight: [],
+      collectCompletions: vi.fn().mockResolvedValue([]),
+    });
+
+    expect(report.backpressureTripped).toBe(true);
+    expect(report.routedToMarketplace).toEqual([]);
+    expect(report.readyIssueNumbers).toEqual([701, 702]);
   });
 });

@@ -376,19 +376,19 @@ export const JinnConfigSchema = z.object({
    * Mineable-trace retention consent (task-creator spec §10, decision D2).
    * Two independent, deliberate opt-in tiers:
    *   - `consent` ('off' default) — retain contract fields (repo,
-   *     commit, diff, test outcomes) locally for mining. The store is
-   *     fail-closed: the daemon only constructs it when this is
-   *     'retain_local'.
-   *   - `publishConsent` (false default) — even with tier-1 on, publishing
-   *     a mined task as public work needs its own separate approval.
-   * Env: JINN_MINEABLE_CONSENT, JINN_MINEABLE_PUBLISH_CONSENT.
+   * The single sharing consent (mono#1714): local capture, mining, and
+   * distillation happen unconditionally (they never leave the machine), and
+   * `share` governs only whether a mined task is published off the box.
+   * Default is false — nothing derived from work leaves the machine unless
+   * the operator opts in. Env: JINN_SHARE_CONSENT. Legacy
+   * `consent`/`publishConsent` (and JINN_MINEABLE_PUBLISH_CONSENT) migrate to
+   * `share` at load time (only the old publish bit maps).
    */
   mineableTraces: z
     .object({
-      consent: z.enum(['off', 'retain_local']).default('off'),
-      publishConsent: z.boolean().default(false),
+      share: z.boolean().default(false),
     })
-    .default({ consent: 'off', publishConsent: false }),
+    .default({ share: false }),
 
   /**
    * Manifest-keyed joined SolverNets.
@@ -481,6 +481,12 @@ export const JinnConfigSchema = z.object({
     .object({
       workingDirRoot: z.string().optional(),
       implStateDirRoot: z.string().optional(),
+      /**
+       * Auto-load top-3 corpus solution records for the task's solverType
+       * into task.context.corpusKnowledge before each restoration harness
+       * spawn (#1393). Default true; env JINN_ENGINE_KNOWLEDGE_AUTOLOAD.
+       */
+      knowledgeAutoload: z.boolean().optional(),
     })
     .optional(),
 
@@ -546,24 +552,26 @@ export const JinnConfigSchema = z.object({
         })
         .default({ enabled: false, port: 7342 }),
       /**
-       * Seller-side ML PII detection (Transformers.js NER, in-process) applied
-       * before captures (and task trajectories) are published. Off by default:
-       * the structural key policy + openredaction + secretlint/entropy stages
-       * always scrub (the non-ML guarantee); this adds person/org/location NER
-       * at the cost of a one-time model download. When enabled, a model-load
+       * Seller-side ML PII detection (GLiNER ONNX, in-process) applied before
+       * captures (and task trajectories) are published. **On by default** for
+       * publish lanes (#1973): free-prose names have no reliable regex shape.
+       * Set `enabled: false` explicitly to disable. When enabled, a model-load
        * failure fails closed at the publish altitude — the trajectory is not
-       * published — while the daemon's other loops keep running.
-       * Env: JINN_CAPTURES_PII_DETECTION_ENABLED=1|true|yes,
+       * published — while the daemon's other loops keep running. Unresolved
+       * flag dispositions also hold unattended publishes until
+       * `jinn scrub review` resolves them.
+       * Env: JINN_CAPTURES_PII_DETECTION_ENABLED=0|false|no to disable,
        *      JINN_CAPTURES_PII_DETECTION_MODEL=<hf-model-id>
+       * Default model: urchade/gliner_multi_pii-v1 (ONNX via onnx-community).
        */
       piiDetection: z
         .object({
-          enabled: z.boolean().default(false),
+          enabled: z.boolean().default(true),
           model: z.string().optional(),
         })
-        .default({ enabled: false }),
+        .default({ enabled: true }),
     })
-    .default({ llmProxy: { enabled: false, port: 7342 }, piiDetection: { enabled: false } }),
+    .default({ llmProxy: { enabled: false, port: 7342 }, piiDetection: { enabled: true } }),
 
   /**
    * Run idempotent legacy migrations at daemon startup (jinn-mono-jgp:
@@ -642,8 +650,9 @@ export const JinnConfigSchema = z.object({
    *
    * `sources` selects which harvest sources the loop mines each tick — absent
    * ⇒ `['commits']`, so existing configs behave identically. `'sessions'`
-   * mines locally-captured task-creator sessions (needs `mineableTraces.consent
-   * === 'retain_local'`, see `mineableTraces` above). Env: JINN_HARVEST_SOURCES
+   * mines locally-captured task-creator sessions (local retention is
+   * unconditional per mono#1714; whether a mined task is published off the box
+   * is gated by `mineableTraces.share`, see above). Env: JINN_HARVEST_SOURCES
    * (comma-separated).
    */
   harvest: z
@@ -651,6 +660,8 @@ export const JinnConfigSchema = z.object({
       enabled: z.boolean().default(false),
       intervalMs: z.number().int().positive().default(60 * 60 * 1000),
       limitPerRepo: z.number().int().positive().default(3),
+      /** Max session-echo records mined per harvest tick (sibling of limitPerRepo). */
+      limitPerTick: z.number().int().positive().default(3),
       publish: z.boolean().default(true),
       repos: z
         .array(
@@ -673,6 +684,7 @@ export const JinnConfigSchema = z.object({
       enabled: false,
       intervalMs: 60 * 60 * 1000,
       limitPerRepo: 3,
+      limitPerTick: 3,
       publish: true,
       repos: [],
       sources: ['commits'],
@@ -707,7 +719,7 @@ export type JinnConfig = Omit<
   archiveRpcUrl?: string;
   archiveRpcUrls?: readonly string[];
   tasks: Task[];
-  engine: { workingDirRoot: string; implStateDirRoot: string };
+  engine: { workingDirRoot: string; implStateDirRoot: string; knowledgeAutoload: boolean };
 };
 
 // ── Defaults ────────────────────────────────────────────────────────────────
@@ -1089,13 +1101,18 @@ export function loadConfig(configPath?: string): JinnConfig {
       sources,
     };
   }
-  if (env['JINN_MINEABLE_CONSENT'] !== undefined || env['JINN_MINEABLE_PUBLISH_CONSENT'] !== undefined) {
+  // Single sharing consent (mono#1714). JINN_SHARE_CONSENT is authoritative;
+  // the legacy JINN_MINEABLE_PUBLISH_CONSENT still maps to `share` for one
+  // release (only the old publish bit ever meant "a task may leave").
+  if (env['JINN_SHARE_CONSENT'] !== undefined || env['JINN_MINEABLE_PUBLISH_CONSENT'] !== undefined) {
+    const truthy = (v: string) => ['1', 'true', 'yes'].includes(v.trim().toLowerCase());
+    const share =
+      env['JINN_SHARE_CONSENT'] !== undefined
+        ? truthy(env['JINN_SHARE_CONSENT'])
+        : truthy(env['JINN_MINEABLE_PUBLISH_CONSENT'] as string);
     merged.mineableTraces = {
       ...(typeof merged.mineableTraces === 'object' && merged.mineableTraces ? merged.mineableTraces : {}),
-      ...(env['JINN_MINEABLE_CONSENT'] !== undefined ? { consent: env['JINN_MINEABLE_CONSENT'] } : {}),
-      ...(env['JINN_MINEABLE_PUBLISH_CONSENT'] !== undefined
-        ? { publishConsent: ['1', 'true', 'yes'].includes(env['JINN_MINEABLE_PUBLISH_CONSENT'].trim().toLowerCase()) }
-        : {}),
+      share,
     };
   }
 
@@ -1179,7 +1196,11 @@ export function loadConfig(configPath?: string): JinnConfig {
     };
   }
 
-  if (env['JINN_ENGINE_WORKING_DIR_ROOT'] || env['JINN_ENGINE_IMPL_STATE_DIR_ROOT']) {
+  if (
+    env['JINN_ENGINE_WORKING_DIR_ROOT'] ||
+    env['JINN_ENGINE_IMPL_STATE_DIR_ROOT'] ||
+    env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'] !== undefined
+  ) {
     const prev = typeof merged['engine'] === 'object' && merged['engine'] !== null
       ? (merged['engine'] as Record<string, unknown>)
       : {};
@@ -1187,6 +1208,9 @@ export function loadConfig(configPath?: string): JinnConfig {
       ...prev,
       ...(env['JINN_ENGINE_WORKING_DIR_ROOT'] ? { workingDirRoot: env['JINN_ENGINE_WORKING_DIR_ROOT'] } : {}),
       ...(env['JINN_ENGINE_IMPL_STATE_DIR_ROOT'] ? { implStateDirRoot: env['JINN_ENGINE_IMPL_STATE_DIR_ROOT'] } : {}),
+      ...(env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'] !== undefined
+        ? { knowledgeAutoload: ['1', 'true', 'yes'].includes(env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'].trim().toLowerCase()) }
+        : {}),
     };
   }
 
@@ -1307,6 +1331,19 @@ export function loadConfig(configPath?: string): JinnConfig {
     persistLegacySolverNetsMigration(filePath);
   }
 
+  // Migrate legacy `mineableTraces.{consent,publishConsent}` → single `share`
+  // (mono#1714, one release). Only the old publish bit ever meant "a task may
+  // leave the machine"; the tier-1 retention bit is discarded (retention is now
+  // unconditional). Env-set `share` (above) wins over the legacy file keys.
+  if (typeof merged.mineableTraces === 'object' && merged.mineableTraces) {
+    const mt = merged.mineableTraces as Record<string, unknown>;
+    if (!('share' in mt) && ('publishConsent' in mt || 'consent' in mt)) {
+      merged.mineableTraces = { share: mt['publishConsent'] === true };
+    }
+    // A stray legacy `consent`/`publishConsent` alongside `share` is dropped by
+    // the schema's non-strict parse — no explicit reshape needed.
+  }
+
   // Backfill `provider: 'openrouter'` onto legacy `{model}`-only joined entries
   // whose model id is OpenRouter-shaped (issue #1243). Runs after the legacy
   // migration so synthetic `legacy:*` entries are covered too. In-memory only —
@@ -1372,6 +1409,7 @@ export function loadConfig(configPath?: string): JinnConfig {
     engine: {
       workingDirRoot: parsed.engine?.workingDirRoot ?? DEFAULT_ENGINE.workingDirRoot,
       implStateDirRoot: parsed.engine?.implStateDirRoot ?? DEFAULT_ENGINE.implStateDirRoot,
+      knowledgeAutoload: parsed.engine?.knowledgeAutoload ?? true,
     },
   };
 }
@@ -1487,6 +1525,7 @@ const TRACKED_ENV_VARS = [
   'JINN_TASKS',
   'JINN_ENGINE_WORKING_DIR_ROOT',
   'JINN_ENGINE_IMPL_STATE_DIR_ROOT',
+  'JINN_ENGINE_KNOWLEDGE_AUTOLOAD',
   'JINN_SWE_REBENCH_V2_STATE_DIR',
   'JINN_OPERATOR_PUBLIC_ENDPOINT',
   'JINN_OPERATOR_DEFAULT_PRICE_USDC',

@@ -521,6 +521,11 @@ _JINN_TIPS = [
     and len(_jinn_rebrand_tip(_tip)) <= 150
 ]
 
+# Jinn-layer features with no upstream tip to rebrand (mono #1551).
+_JINN_TIPS.append(
+    "Distill your recent work into reusable skills, fully on this machine — /jinn distill"
+)
+
 _upstream_get_random_tip = get_random_tip
 
 

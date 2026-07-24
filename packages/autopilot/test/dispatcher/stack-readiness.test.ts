@@ -26,7 +26,7 @@ const base: PolledIssue = {
 const ALLOW: ReadonlySet<string> = new Set(['ritsukai', 'oaksprout']);
 
 function link(state: PrState, head: string, over: Partial<PrLink> = {}): PrLink {
-  return { prNumber: 500, headRefName: head, baseRefName: 'next', state, isDraft: true, author: 'ritsukai', ...over };
+  return { prNumber: 500, headRefName: head, baseRefName: 'next', state, isDraft: true, author: 'ritsukai', labels: [], ...over };
 }
 
 function prMap(entries: Record<number, PrLink[]>): Map<number, PrLink[]> {

@@ -6,6 +6,7 @@ import {
   fetchSignedTaskFromIpfs,
   fetchSourceBundleFromIpfs,
   cidToDigestHex,
+  rawSha256CidToDigestHex,
 } from '../../../src/adapters/mech/ipfs.js';
 
 const DEFAULT_CLAIM_POLICY = {
@@ -266,6 +267,25 @@ describe('cidToDigestHex', () => {
     // 'xnotacid' hits the else branch (base58Decode of 'notacid') and the resulting
     // bytes fail the multihash check (fn !== 0x12 || len !== 0x20).
     expect(() => cidToDigestHex('xnotacid')).toThrow();
+  });
+});
+
+describe('rawSha256CidToDigestHex', () => {
+  it.each([
+    `f01551220${KNOWN_DIGEST_HEX}`,
+    `F01551220${KNOWN_DIGEST_HEX.toUpperCase()}`,
+    'bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku',
+  ])('accepts canonical CIDv1 raw sha2-256 form %s', (cid) => {
+    expect(rawSha256CidToDigestHex(cid)).toBe(KNOWN_DIGEST);
+  });
+
+  it.each([
+    'QmdfTbBqBPQ7VNxZEYEj14VmRuZBkqFbiwReogJgS1zR1n',
+    'zb2rhmy65F3REf8SZp7De11gxtECBGgUKaLdiDj7MCGCHxbDW',
+    `f01701220${KNOWN_DIGEST_HEX}`,
+    'bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvykv',
+  ])('rejects noncanonical aliases or a non-raw codec: %s', (cid) => {
+    expect(() => rawSha256CidToDigestHex(cid)).toThrow(/manifest CID/);
   });
 });
 

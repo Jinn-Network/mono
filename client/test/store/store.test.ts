@@ -4,6 +4,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../../src/store/store.js';
+import { createLegacyArtifactsSchemaDb } from '../helpers/legacy-artifacts-schema.js';
 
 describe('Store', () => {
   let store: Store;
@@ -155,6 +156,35 @@ describe('Store', () => {
     }
   });
 
+  it('insertArtifact succeeds against a legacy desired_state_id NOT NULL schema (regression #506)', () => {
+    // Issue #506: a successful on-chain delivery was persisted as FAILED
+    // because insertArtifact() threw on this legacy NOT NULL column, and the
+    // engine's error path flipped the run to FAILED. Guard against a
+    // regression of that throw.
+    const { dbPath } = createLegacyArtifactsSchemaDb('jinn-legacy-insert-');
+
+    const legacyStore = new Store(dbPath);
+    try {
+      expect(() =>
+        legacyStore.insertArtifact({
+          id: 'art-legacy-insert-1',
+          taskId: 'task-legacy-1',
+          requestId: 'req-legacy-1',
+          title: 'Restoration result',
+          content: 'content',
+          tags: ['restoration-result'],
+          outcome: 'SUCCESS',
+        }),
+      ).not.toThrow();
+
+      const results = legacyStore.searchArtifacts({ taskId: 'task-legacy-1' });
+      expect(results).toHaveLength(1);
+      expect(results[0].id).toBe('art-legacy-insert-1');
+    } finally {
+      legacyStore.close();
+    }
+  });
+
   it('stores durable task post records', () => {
     store.upsertTaskPostRecord({
       creatorSafeAddress: '0x00112233445566778899AABbCCdDeeFf00112233',
@@ -254,4 +284,25 @@ describe('Store', () => {
     });
     expect(otherSolverType).toBe(0);
   });
+
+  it('does not create the retired derived_trajectories backfill sink', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-retired-derived-trajectories-'));
+    const dbPath = join(dir, 'jinn.sqlite');
+    const freshStore = new Store(dbPath);
+    const inspector = new Database(dbPath, { readonly: true });
+
+    try {
+      const table = inspector
+        .prepare(
+          `SELECT name FROM sqlite_master
+           WHERE type = 'table' AND name = 'derived_trajectories'`,
+        )
+        .get();
+      expect(table).toBeUndefined();
+    } finally {
+      inspector.close();
+      freshStore.close();
+    }
+  });
+
 });

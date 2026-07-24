@@ -4,16 +4,19 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
-import { runHarvestTick, type HarvestLoopConfig } from '../../src/daemon/harvest-loop.js';
+import {
+  HarvestLoop,
+  runHarvestTick,
+  SESSIONS_SOURCE_PARKED_STAGE_2,
+  type HarvestLoopConfig,
+} from '../../src/daemon/harvest-loop.js';
 import { repoSlugFromRemoteUrl } from '../../src/solver-types/_swe-rebench-v2-commit-echo-git.js';
 import { HarvestStateStore } from '../../src/solver-types/_swe-rebench-v2-harvest-state.js';
 import { uploadToIpfs } from '../../src/adapters/mech/ipfs.js';
 import { ValidatedPoolStore, EVAL_SEMANTICS_VERSION } from '../../src/solver-types/_swe-rebench-v2-validated-pool.js';
 import { MintedPoolStore } from '../../src/solver-types/_swe-rebench-v2-minted-pool.js';
-import { MineableTraceStore, type MineableTraceRecord } from '../../src/solver-types/_swe-rebench-v2-mineable-store.js';
 import type { ExplicitRecipeBootstrap } from '../../src/solver-types/_swe-rebench-v2-harvest.js';
-import type { PoolTask } from '../../src/solver-types/_swe-rebench-v2-pool.js';
-import type { EvalRunner, HfFetcher } from '../../src/harnesses/impls/swe-rebench-v2-evaluator/index.js';
+import type { EvalRunner } from '../../src/harnesses/impls/swe-rebench-v2-evaluator/index.js';
 import type { MintedEnvironmentVerifier } from '../../src/solver-types/_swe-rebench-v2-minted-environment-verifier.js';
 import type { TaskEnvironmentSpecV1 } from '../../src/task-creator/environment/contracts.js';
 
@@ -96,7 +99,7 @@ describe('runHarvestTick', () => {
         intervalMs: 60_000,
         stateDir: dir,
         repos: [{ path: '/tmp/repo', repo: 'acme/widget' }],
-        limitPerRepo: 1,
+        limitPerRepo: 1, limitPerTick: 3,
         publish: false,
         isDockerAvailable: () => false,
         mintDeps: {
@@ -140,7 +143,7 @@ describe('runHarvestTick', () => {
         intervalMs: 60_000,
         stateDir: dir,
         repos: [{ path: dir, repo: 'acme/widget' }],
-        limitPerRepo: 1,
+        limitPerRepo: 1, limitPerTick: 3,
         publish: false,
         isDockerAvailable: () => true,
         harvestState: state,
@@ -194,7 +197,7 @@ describe('runHarvestTick', () => {
       };
 
       const first = await runHarvestTick({
-        intervalMs: 60_000, stateDir: dir, repos: [{ path: dir, repo: 'acme/widget' }], limitPerRepo: 1,
+        intervalMs: 60_000, stateDir: dir, repos: [{ path: dir, repo: 'acme/widget' }], limitPerRepo: 1, limitPerTick: 3,
         publish: false, isDockerAvailable: () => true, harvestState: state, loadPool: async () => [], mintDeps,
       });
       expect(first.awaitingInput).toHaveLength(1);
@@ -203,7 +206,7 @@ describe('runHarvestTick', () => {
       queueHardenedAdmissionRun(runner.runEval as ReturnType<typeof vi.fn>);
       const second = await runHarvestTick({
         intervalMs: 60_000, stateDir: dir,
-        repos: [{ path: dir, repo: 'acme/widget', explicitRecipe: explicitBootstrap(base) }], limitPerRepo: 1,
+        repos: [{ path: dir, repo: 'acme/widget', explicitRecipe: explicitBootstrap(base) }], limitPerRepo: 1, limitPerTick: 3,
         publish: true, isDockerAvailable: () => true, harvestState: state, loadPool: async () => [], mintDeps,
       });
       expect(second.discovered).toBe(0);
@@ -241,7 +244,7 @@ describe('runHarvestTick', () => {
       );
       const result = await runHarvestTick({
         intervalMs: 60_000, stateDir: dir,
-        repos: [{ path: dir, repo: 'acme/widget', explicitRecipe: explicitBootstrap(base) }], limitPerRepo: 1,
+        repos: [{ path: dir, repo: 'acme/widget', explicitRecipe: explicitBootstrap(base) }], limitPerRepo: 1, limitPerTick: 3,
         publish: false, isDockerAvailable: () => true, harvestState: state, loadPool: async () => [],
         mintDeps: {
           stateDir: dir, ipfsRegistryUrl: 'https://registry.example', ipfsGatewayUrl: 'https://gateway.example',
@@ -305,7 +308,7 @@ describe('runHarvestTick', () => {
       };
       const run = (now: number) => runHarvestTick({
         intervalMs: 60_000, stateDir: dir,
-        repos: [{ path: dir, repo: 'acme/widget', explicitRecipe: explicitBootstrap(base) }], limitPerRepo: 1,
+        repos: [{ path: dir, repo: 'acme/widget', explicitRecipe: explicitBootstrap(base) }], limitPerRepo: 1, limitPerTick: 3,
         publish: true, isDockerAvailable: () => true, harvestState: state, loadPool: async () => [], mintDeps,
         now: () => now,
       });
@@ -381,7 +384,7 @@ describe('runHarvestTick', () => {
       };
       const run = (now: number) => runHarvestTick({
         intervalMs: 60_000, stateDir: dir,
-        repos: [{ path: dir, repo: 'acme/widget', explicitRecipe: explicitBootstrap(base) }], limitPerRepo: 1,
+        repos: [{ path: dir, repo: 'acme/widget', explicitRecipe: explicitBootstrap(base) }], limitPerRepo: 1, limitPerTick: 3,
         publish: true, isDockerAvailable: () => true, harvestState: state, loadPool: async () => [], mintDeps,
         now: () => now,
       });
@@ -443,7 +446,7 @@ describe('runHarvestTick', () => {
       };
       const run = (now: number, publish = false) => runHarvestTick({
         intervalMs: 60_000, stateDir: dir,
-        repos: [{ path: dir, repo: 'acme/widget', explicitRecipe: explicitBootstrap(base) }], limitPerRepo: 1,
+        repos: [{ path: dir, repo: 'acme/widget', explicitRecipe: explicitBootstrap(base) }], limitPerRepo: 1, limitPerTick: 3,
         publish, isDockerAvailable: () => true, harvestState: state, loadPool: async () => [], mintDeps,
         now: () => now,
       });
@@ -535,7 +538,7 @@ describe('runHarvestTick', () => {
       };
       const run = (now: number, bootstrap: ExplicitRecipeBootstrap) => runHarvestTick({
         intervalMs: 60_000, stateDir: dir,
-        repos: [{ path: dir, repo: 'acme/widget', explicitRecipe: bootstrap }], limitPerRepo: 1,
+        repos: [{ path: dir, repo: 'acme/widget', explicitRecipe: bootstrap }], limitPerRepo: 1, limitPerTick: 3,
         publish: true, isDockerAvailable: () => true, harvestState: state, loadPool: async () => [], mintDeps,
         now: () => now,
       });
@@ -572,100 +575,15 @@ describe('repoSlugFromRemoteUrl', () => {
   });
 });
 
-// ── Task 9: harvest.sources union (commit-echo + session-echo) ─────────────
-
-const SESSION_REPO = 'acme/widget';
-const SOURCE_INSTANCE = 'acme__widget-1';
-const MINTER_SAFE = '0x00000000000000000000000000000000000000aa';
-const OPERATOR_SAFE = '0x00000000000000000000000000000000000000bb';
-
-const SOURCE_TASK: PoolTask = {
-  instance_id: SOURCE_INSTANCE,
-  hf_dataset: 'nebius/SWE-rebench-leaderboard',
-  hf_split: '2024_06',
-  repo: SESSION_REPO,
-  base_commit: 'sourcebase123',
-  patch: 'source-gold-patch',
-  test_patch: 'diff --git a/tests/test_x.py',
-  language: 'python',
-};
-
-const SOURCE_HF_ROW = {
-  instance_id: SOURCE_INSTANCE,
-  repo: SESSION_REPO,
-  image_name: 'acme/widget:img',
-  FAIL_TO_PASS: ['tests/test_x.py::test_fix'],
-  PASS_TO_PASS: ['tests/test_x.py::test_other'],
-  test_patch: 'diff --git a/tests/test_x.py',
-  install_config: {
-    test_cmd: 'pytest tests/test_x.py',
-    log_parser: 'parse_log_pytest',
-    install: ['pip install -e .'],
-  },
-};
-
-function makeSessionRecord(overrides: Partial<MineableTraceRecord> = {}): MineableTraceRecord {
-  return {
-    sourceId: 'session-secret-do-not-leak-abc123',
-    kind: 'harness-session',
-    repo: SESSION_REPO,
-    baseCommit: 'basecommit456',
-    acceptedDiff: 'diff --git a/src/x.py b/src/x.py\n+fix\n',
-    testRuns: [],
-    intermediateFailureDiffs: [],
-    skillEvents: [],
-    publishMinedTasksConsent: true,
-    createdAt: '2026-07-13T00:00:00.000Z',
-    ...overrides,
-  };
-}
-
-const sessionHfFetcher: HfFetcher = {
-  fetchTaskRow: async (args: { instance_id: string }) => {
-    if (args.instance_id === SOURCE_INSTANCE) return SOURCE_HF_ROW;
-    throw new Error(`unexpected hfFetcher.fetchTaskRow(${args.instance_id})`);
-  },
-};
-
-/** Standard 4-call sequence: empirical before/after (not dead), gold
- *  admission (with imageDigest so `docker image inspect` is never hit),
- *  discrimination known-bad (must legitimately fail to admit). */
-function makeSuccessfulSessionRunner(): EvalRunner {
-  let call = 0;
-  const responses = [
-    { passed: ['tests/test_x.py::test_other'], failed: ['tests/test_x.py::test_fix'], passed_match: false },
-    { passed: ['tests/test_x.py::test_fix', 'tests/test_x.py::test_other'], failed: [], passed_match: true },
-    { passed: ['tests/test_x.py::test_fix', 'tests/test_x.py::test_other'], failed: [], passed_match: true, imageDigest: `sha256:${'d'.repeat(64)}` },
-    { passed: [], failed: ['tests/test_x.py::test_fix'], passed_match: false },
-  ];
-  return {
-    runEval: async () => {
-      const r = responses[call] ?? responses[responses.length - 1]!;
-      call += 1;
-      return r;
-    },
-  };
-}
-
 async function setupSessionEnv(): Promise<{
   stateDir: string;
   validatedStore: ValidatedPoolStore;
   mintedStore: MintedPoolStore;
-  mineableStore: MineableTraceStore;
 }> {
   const stateDir = await mkdtemp(join(tmpdir(), 'harvest-sources-'));
   const validatedStore = new ValidatedPoolStore({ stateDir });
   const mintedStore = new MintedPoolStore({ stateDir });
-  const mineableStore = new MineableTraceStore({ stateDir });
-  await validatedStore.record(SOURCE_INSTANCE, {
-    scorable: true,
-    reason: 'gold-patch-resolves',
-    checkedAt: new Date().toISOString(),
-    rowHash: 'sha256:seed',
-    imageName: SOURCE_HF_ROW.image_name,
-    imageDigest: `sha256:${'e'.repeat(64)}`,
-  }, EVAL_SEMANTICS_VERSION);
-  return { stateDir, validatedStore, mintedStore, mineableStore };
+  return { stateDir, validatedStore, mintedStore };
 }
 
 function baseSourcesConfig(
@@ -676,23 +594,20 @@ function baseSourcesConfig(
     intervalMs: 60_000,
     stateDir: env.stateDir,
     repos: [],
-    limitPerRepo: 1,
+    limitPerRepo: 1, limitPerTick: 3,
     publish: false,
-    minterSafe: MINTER_SAFE,
-    operatorSafe: OPERATOR_SAFE,
     isDockerAvailable: () => true,
     validatedStore: env.validatedStore,
-    mineableStore: env.mineableStore,
-    loadPool: async () => [SOURCE_TASK],
+    loadPool: async () => [],
     mintDeps: {
       stateDir: env.stateDir,
       ipfsRegistryUrl: 'https://registry.example',
       ipfsGatewayUrl: 'https://gateway.example',
       validatedStore: env.validatedStore,
       mintedStore: env.mintedStore,
-      hfFetcher: sessionHfFetcher,
-      runner: makeSuccessfulSessionRunner(),
-      upstreamRepoDir: env.stateDir, // not a git repo — resolveUpstreamEvalCommit fails soft to null
+      hfFetcher: { fetchTaskRow: async () => { throw new Error('session source must stay parked'); } },
+      runner: { runEval: async () => { throw new Error('session source must stay parked'); } },
+      upstreamRepoDir: env.stateDir,
       publicRepoChecker: { isPublic: async () => true },
     },
     ...overrides,
@@ -703,82 +618,77 @@ async function cleanupSessionEnv(env: { stateDir: string }): Promise<void> {
   await rm(env.stateDir, { recursive: true, force: true });
 }
 
-describe('runHarvestTick — harvest.sources union (Task 9)', () => {
-  it('(a) sources absent (default ["commits"]) never touches the mineable store', async () => {
+describe('runHarvestTick — parked session source', () => {
+  const emptyTick = {
+    discovered: 0,
+    admitted: [],
+    rejected: [],
+    awaitingInput: [],
+    quarantined: [],
+  };
+
+  it('defaults to commit harvesting with no parked marker', async () => {
     const env = await setupSessionEnv();
     try {
-      const record = makeSessionRecord();
-      await env.mineableStore.append(record, 'retain_local');
-
-      const result = await runHarvestTick(baseSourcesConfig(env));
-
-      expect(result).toEqual({ discovered: 0, admitted: [], rejected: [], awaitingInput: [], quarantined: [], skipped: [] });
-      // The mineable-store record was never drained — proves the default
-      // (no `sources` field) runs only the commit walker.
-      expect(await env.mineableStore.listUnmined()).toHaveLength(1);
+      expect(await runHarvestTick(baseSourcesConfig(env))).toEqual({ ...emptyTick, skipped: [] });
     } finally {
       await cleanupSessionEnv(env);
     }
   });
 
-  it('(b) sources: ["commits","sessions"] drains the mineable store and merges results', async () => {
+  it('runs commits and reports the exact parked marker when sessions are also configured', async () => {
     const env = await setupSessionEnv();
+    const legacyStore = { list: vi.fn(() => { throw new Error('must stay parked'); }) };
     try {
-      const record = makeSessionRecord();
-      await env.mineableStore.append(record, 'retain_local');
-
-      const result = await runHarvestTick(baseSourcesConfig(env, { sources: ['commits', 'sessions'] }));
-
-      // repos: [] ⇒ commits contributes nothing; sessions contributes the
-      // one admitted echo — proving the two HarvestTickResults are summed
-      // (discovered) and concatenated (admitted/rejected/skipped), not
-      // replaced.
-      expect(result.discovered).toBe(1);
-      expect(result.admitted).toHaveLength(1);
-      expect(result.admitted[0]).toMatch(/^acme__widget__session-[0-9a-f]{12}$/);
-      expect(result.rejected).toEqual([]);
-      expect(await env.mineableStore.listUnmined()).toEqual([]);
+      const config = Object.assign(
+        baseSourcesConfig(env, { sources: ['commits', 'sessions'] }),
+        { mineableStore: legacyStore },
+      );
+      delete config.mintDeps;
+      expect(await runHarvestTick(config)).toEqual({
+        ...emptyTick,
+        skipped: [SESSIONS_SOURCE_PARKED_STAGE_2],
+      });
+      expect(legacyStore.list).not.toHaveBeenCalled();
     } finally {
       await cleanupSessionEnv(env);
     }
   });
 
-  it('(c) sources: ["sessions"] with an empty mineable store is a clean no-op tick', async () => {
+  it('returns only the parked marker for sessions-only without touching Docker or the pool', async () => {
     const env = await setupSessionEnv();
+    const isDockerAvailable = vi.fn(() => { throw new Error('Docker must not be checked'); });
+    const loadPool = vi.fn(async () => { throw new Error('pool must not be loaded'); });
     try {
-      const result = await runHarvestTick(baseSourcesConfig(env, { sources: ['sessions'] }));
-      expect(result).toEqual({ discovered: 0, admitted: [], rejected: [], awaitingInput: [], quarantined: [], skipped: [] });
+      const config = baseSourcesConfig(env, {
+        sources: ['sessions'],
+        isDockerAvailable,
+        loadPool,
+      });
+      delete config.mintDeps;
+      expect(await runHarvestTick(config)).toEqual({
+        ...emptyTick,
+        skipped: [SESSIONS_SOURCE_PARKED_STAGE_2],
+      });
+      expect(isDockerAvailable).not.toHaveBeenCalled();
+      expect(loadPool).not.toHaveBeenCalled();
     } finally {
       await cleanupSessionEnv(env);
     }
   });
 
-  it('(d) sessions deps carry operatorSafe/minterSafe as wired', async () => {
+  it('surfaces the exact parked marker through the production loop wrapper', async () => {
     const env = await setupSessionEnv();
-    try {
-      const record = makeSessionRecord();
-      await env.mineableStore.append(record, 'retain_local');
-
-      const result = await runHarvestTick(baseSourcesConfig(env, { sources: ['sessions'] }));
-      const mintedId = result.admitted[0]!;
-      const entry = await env.mintedStore.getEntry(mintedId, EVAL_SEMANTICS_VERSION);
-
-      expect(entry!.provenance.minterSafe).toBe(MINTER_SAFE);
-      expect((entry!.provenance as { sourceSolverSafe?: string }).sourceSolverSafe).toBe(OPERATOR_SAFE);
-    } finally {
-      await cleanupSessionEnv(env);
-    }
-  });
-
-  it('sources: ["sessions"] without a configured mineableStore skips (non-fatal), never crashes', async () => {
-    const env = await setupSessionEnv();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     try {
       const config = baseSourcesConfig(env, { sources: ['sessions'] });
-      delete config.mineableStore;
+      delete config.mintDeps;
 
-      const result = await runHarvestTick(config);
-      expect(result).toEqual({ discovered: 0, admitted: [], rejected: [], awaitingInput: [], quarantined: [], skipped: ['sessions-source-missing-mineable-store'] });
+      await new HarvestLoop(config).runOnce();
+
+      expect(log).toHaveBeenCalledWith(`[harvest-loop] ${SESSIONS_SOURCE_PARKED_STAGE_2}`);
     } finally {
+      log.mockRestore();
       await cleanupSessionEnv(env);
     }
   });

@@ -44,4 +44,13 @@ describe('selectReviewable', () => {
     const ready = selectReviewable([pr(1), pr(2)], new Set(), new Set());
     expect(ready).toEqual([]);
   });
+
+  it('selects an approved draft marked for reconciliation but not an approved ready PR', () => {
+    const ready = selectReviewable([
+      pr(20, { isDraft: true, needsReview: true }),
+      pr(21, { isDraft: false, needsReview: false }),
+    ], new Set(), ALLOW);
+
+    expect(ready.map((p) => p.number)).toEqual([20]);
+  });
 });

@@ -1,0 +1,1 @@
+The Autopilot v2 full-loop canary ran on 2026-07-21. It exercised implementation through the implement stage. It exercised review under a distinct reviewer identity. It completed the loop by exercising merge.

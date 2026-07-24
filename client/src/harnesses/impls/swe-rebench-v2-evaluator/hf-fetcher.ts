@@ -158,7 +158,12 @@ export async function fetchHfWithRetry(
       if (attempt >= retryBackoffMs.length) throw err;
     }
     const base = retryBackoffMs[attempt] ?? 0;
-    await sleep(retryAfterMs ?? withJitter(base, random));
+    const scheduledDelayMs = withJitter(base, random);
+    await sleep(
+      retryAfterMs === undefined
+        ? scheduledDelayMs
+        : Math.min(retryAfterMs, scheduledDelayMs),
+    );
   }
   // Unreachable: the loop returns or throws on every iteration. Kept to
   // satisfy TS control-flow analysis.

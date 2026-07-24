@@ -416,6 +416,51 @@ describe('tx-retry', () => {
       expect(sendTransaction.mock.calls[0]![0].nonce).toBe(7);
       expect(sendTransaction.mock.calls[1]![0].nonce).toBe(8);
     });
+
+    it('journals a successful broadcast before nonce-ledger bookkeeping and never retries it', async () => {
+      const txHash = `0x${'cc'.repeat(32)}` as const;
+      const onBroadcast = vi.fn();
+      const publicClient = {
+        getChainId: vi.fn().mockResolvedValue(84532),
+        getTransactionCount: vi.fn().mockResolvedValue(7),
+        estimateFeesPerGas: vi.fn().mockResolvedValue({
+          maxFeePerGas: 100n,
+          maxPriorityFeePerGas: 10n,
+        }),
+        getGasPrice: vi.fn(),
+      };
+      const sendTransaction = vi.fn().mockResolvedValue(txHash);
+      const ledger = {
+        getTxSubmission: vi.fn().mockResolvedValue(null),
+        recordTxSubmission: vi.fn().mockImplementation(async () => {
+          expect(onBroadcast).toHaveBeenCalledWith(txHash);
+          throw new Error('network timeout writing nonce ledger');
+        }),
+        markTxSubmissionResolved: vi.fn(),
+      };
+
+      const error = await viemSendTransactionWithRetry(
+        { sendTransaction },
+        publicClient as never,
+        {
+          account,
+          to: '0x2222222222222222222222222222222222222222',
+          value: 1n,
+        },
+        {
+          ledger,
+          maxAttempts: 2,
+          baseDelayMs: 1,
+          maxDelayMs: 1,
+          onBroadcast,
+        },
+      ).catch((caught: unknown) => caught);
+
+      expect(error).toMatchObject({ txHash });
+      expect(onBroadcast).toHaveBeenCalledTimes(1);
+      expect(sendTransaction).toHaveBeenCalledTimes(1);
+      expect(ledger.recordTxSubmission).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('withNonceLedger', () => {

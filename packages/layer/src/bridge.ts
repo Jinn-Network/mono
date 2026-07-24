@@ -1,0 +1,654 @@
+/**
+ * The bridge — SolverNet execution ledger → layer-1 evidence
+ * (spec/2026-07-06-distillation-v1.md §8, D5/D10).
+ *
+ * Turns swe-rebench attempts into canonical `jinn.episode.v1` evidence via
+ * the existing `capture()`→`publish()` pipe, scrubbed at the **layer-2
+ * (secret-only) altitude** (D6 — a verified swe-rebench solve is public-repo
+ * work, not raw private-machine activity). It sources **both polarities** (D10):
+ * verified passes → pattern-eligible evidence; evaluator-confirmed failures →
+ * lesson-eligible evidence. Held-out `cap-v0` slate instances are excluded by
+ * `instance_id` AND repo; each `(instance_id, polarity)` is retained up to
+ * `groupCap` attempts (default 1) so the per-instance attempt group survives for
+ * group-relative distillation (#1478).
+ *
+ * This module is the bridge **core + the publish adapter**. The ledger row
+ * source (indexer GraphQL over `verdictEnvelopeMeta`, both polarities) and the
+ * IPFS/corpus evidence fetch are injected ports (`BridgeDeps`) — the production
+ * adapters are thin and wired at run time; the logic here is what carries the
+ * tests.
+ */
+
+import { capture, type CapturedTask, type PendingEnvelope } from './capture.js';
+import {
+  ManifestBatchAnchorError,
+  ManifestBatchPreparationError,
+  ManifestBatchRecordingError,
+  ManifestBatchSetError,
+  publish,
+  publishManifestBatch as publishPendingManifestBatch,
+  type HarnessPublishDeps,
+  type ManifestBatchPublishDeps,
+  type ManifestBatchResult,
+  type ManifestBatchSetResult,
+} from './publish.js';
+import {
+  buildLayer2ScrubPipeline,
+  type ScrubPipeline,
+} from '@jinn-network/core/scrub';
+import type { TranscriptSpanInput } from '@jinn-network/core/trajectory';
+
+/** A verdict row from the execution ledger, one polarity. */
+export interface AttemptRef {
+  requestId: string;
+  chainId: number;
+  /**
+   * Enrichment-projected swe-rebench `instance_id` (owner__repo-N). This is a
+   * discovery hint, never authoritative task identity.
+   */
+  instanceId: string;
+  /** Model the attempt ran under (from `attemptEnvelopeMeta.model`). */
+  model: string;
+  /** The attempt envelope CID — where the solution patch + task descriptor live. */
+  manifestCid: string;
+  /** `pass` = verified solve (→ pattern); `fail` = evaluator-confirmed FAIL (→ lesson). */
+  polarity: 'pass' | 'fail';
+  /**
+   * The VERDICT envelope CID — the entry point of the verified join to the
+   * solver's solution patch. The task document supplies authenticated task
+   * facts only; the chain-scoped verdict → attempt tuple supplies the solution
+   * requestId, which resolves one attemptEnvelopeMeta → solution envelope. The
+   * verdict-source populates it; callers that already carry a resolved
+   * `manifestCid` (e.g. the corpus fetcher) do not need it.
+   */
+  verdictManifestCid?: string;
+  /**
+   * Bounded, permissionless enrichment projections retained for one
+   * `(requestId, chainId, polarity)` tuple. The bridge tries them only to let
+   * the evidence fetcher reach signed task facts; none may drive exclusion,
+   * grouping, or publication identity.
+   */
+  discoveryCandidates?: Array<{
+    instanceId: string;
+    verdictManifestCid: string;
+  }>;
+  /** Echo/lineage key — instances sharing a key are not independent corroboration. */
+  sourceLineageKey?: string;
+  lookupFlagged?: boolean;
+  /** Optional task provenance carried by richer verdict-row sources. */
+  repo?: string;
+  baseCommit?: string;
+}
+
+/** Evidence fetched for one attempt (the injected IPFS/corpus port). */
+export interface BridgeEvidence {
+  /** The instance problem statement (scrubbed downstream by capture's layer-2 pipeline). */
+  taskSummary: string;
+  /** The unified-diff patch the attempt produced. */
+  patch: string;
+  /**
+   * Authenticated task tuple returned by the source resolver. These remain
+   * optional on the fetch-only transport shape, but all four are mandatory at
+   * the evaluator-verified publication boundary.
+   */
+  repo?: string;
+  baseCommit?: string;
+  taskCreatedAt?: number;
+  instanceId?: string;
+  generatorModel?: CapturedTask['environment']['generatorModel'];
+  distributionClass?: CapturedTask['environment']['distributionClass'];
+  /** Authenticated verifier facts are all-or-nothing; partial facts are never published. */
+  verifier?: {
+    failToPass: string[];
+    passToPass: string[];
+    evalSemanticsVersion: string;
+  };
+  /** Authenticated source artifacts retained for audit and lineage. */
+  verdictEnvelopeCid?: string;
+  solutionEnvelopeCid?: string;
+  rawSnapshotRef?: string;
+  /**
+   * The solver's canonical typed decision-path spans, derived from the raw
+   * harness transcript inside the solution's `system_snapshot` artifact
+   * (`.claude-code/stdout.jsonl` / `.codex-code/stdout.jsonl` — §8, #1472;
+   * `jinn.trajectory.v1` carries no reasoning until #1473). The bridge uses the
+   * same parser implementation as the live path. When absent (Hermes,
+   * missing/corrupt snapshot), the layer-1 record is
+   * tagged `patch-only` (see `toBridgeCapturedTask`) so measurement can
+   * stratify by evidence richness. Rides a step attribute → scrubbed by the
+   * same layer-2 pipeline as every other attribute; it does not bypass scrub.
+   */
+  trajectorySpans?: TranscriptSpanInput[];
+}
+
+export interface BridgeDeps {
+  /** The held-out `cap-v0` slate instance ids (§12). Repo exclusion is derived from these. */
+  slateInstanceIds: Set<string>;
+  /** Fetch the patch + task descriptor for an attempt (IPFS/corpus). */
+  fetchEvidence: (ref: AttemptRef) => Promise<BridgeEvidence>;
+  /** Publish a constructed CapturedTask as layer-1 evidence; returns the corpus ref. */
+  publishEvidence: (task: CapturedTask, ref: AttemptRef) => Promise<{ envelopeRef: string; anchorTx: string | null }>;
+  /** Bulk batches opt in explicitly; contributed/retrieval records stay per-record by default. */
+  anchorMode?: 'per-record' | 'manifest';
+  /** One shared manifest publication for every surviving task (manifest mode only). */
+  publishManifestBatch?: (
+    candidates: Array<{ task: CapturedTask; ref: AttemptRef }>,
+  ) => Promise<ManifestBatchSetResult>;
+  /** Weak-suite instance ids (discrimination fail) — excluded from bridge input. */
+  weakSuiteInstanceIds?: Set<string>;
+  /** Lookup-flagged instance ids — excluded from distillation input. */
+  lookupFlaggedInstanceIds?: Set<string>;
+  /**
+   * Attempts retained per `(instance_id, polarity)` — the per-instance attempt
+   * GROUP is the distiller's raw material for group-relative distillation
+   * (#1478). Default 1 keeps the single-exemplar behavior for standalone
+   * callers; the pipeline passes a higher cap so clustering receives the whole
+   * group. Rows beyond the cap are recorded in `BridgeResult.deduped`, and
+   * since refs arrive in a stable order the kept K are deterministic.
+   */
+  groupCap?: number;
+  now?: () => Date;
+}
+
+export interface BridgeManifestBatch {
+  batchKey?: string;
+  manifestCid: string;
+  memberRefs: string[];
+  root: `0x${string}`;
+  anchorTx: `0x${string}` | null;
+  gasUsed: bigint | null;
+  feeWei: bigint | null;
+  control?: ManifestBatchResult['control'];
+  confirmed: boolean;
+}
+
+export interface BridgeResult {
+  bridged: Array<{ instanceId: string; polarity: 'pass' | 'fail'; envelopeRef: string; anchorTx: string | null }>;
+  excludedHeldOut: Array<{ instanceId: string; reason: 'instance_id' | 'repo' }>;
+  /** Attempts dropped because their `(instance_id, polarity)` group already held `groupCap` (#1478). */
+  deduped: Array<{ instanceId: string; polarity: 'pass' | 'fail' }>;
+  errors: Array<{ requestId: string; error: string }>;
+  /**
+   * Slate `instance_id`s whose repo could NOT be derived (`repoFromInstanceId`
+   * → null). Repo-axis exclusion (§12) is incomplete for these: a same-repo
+   * sibling of such a slate id would NOT be caught by the derived-repo guard,
+   * only by an exact `instance_id` match. Surfaced (not silently dropped) so an
+   * operator sees the contamination-boundary gap; empty once cap-v0 carries
+   * repos explicitly.
+   */
+  unresolvedSlateIds: string[];
+  /** Shared batch facts, populated only in manifest mode. */
+  manifestCid?: string;
+  /** One observation per manifest partition, including recovery-only anchors. */
+  manifestBatches?: BridgeManifestBatch[];
+  /** Uploaded member refs, retained even when post-anchor local finalization fails. */
+  manifestMemberRefs?: string[];
+  /** Durable recovery identity for the manifest batch, when journaling is active. */
+  manifestBatchKey?: string;
+  anchorTx?: string | null;
+  gasUsed?: bigint | null;
+  feeWei?: bigint | null;
+  control?: ManifestBatchResult['control'];
+  /** False means a tx was broadcast but not confirmed successful. */
+  manifestConfirmed?: boolean;
+}
+
+/**
+ * Derive `owner/repo` from a SWE-bench `instance_id` (`owner__repo-<pr#>`),
+ * or null when the id does not match the convention. cap-v0 will carry repos
+ * explicitly; until then repo exclusion (§12) is derived here.
+ */
+export function repoFromInstanceId(instanceId: string): string | null {
+  const m = /^(.+)__(.+)-\d+$/.exec(instanceId);
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+
+const NANO = (d: Date): string => `${d.getTime()}000000`;
+
+function assertAuthenticatedBridgeEvidence(
+  ref: AttemptRef,
+  ev: BridgeEvidence,
+): asserts ev is BridgeEvidence & Required<Pick<
+  BridgeEvidence,
+  'repo' | 'baseCommit' | 'taskCreatedAt' | 'instanceId' | 'verifier'
+>> {
+  const verifier = ev.verifier;
+  const exactStringArray = (value: unknown): value is string[] =>
+    Array.isArray(value)
+    && value.every((item) => typeof item === 'string' && item.length > 0);
+  if (
+    !verifier
+    || !exactStringArray(verifier.failToPass)
+    || !exactStringArray(verifier.passToPass)
+    || typeof verifier.evalSemanticsVersion !== 'string'
+    || verifier.evalSemanticsVersion.length === 0
+  ) {
+    throw new Error(
+      `bridge evidence for ${ref.instanceId} requires authenticated verifier facts before evaluator-verified publication`,
+    );
+  }
+  if (
+    typeof ev.instanceId !== 'string'
+    || ev.instanceId.length === 0
+    || typeof ev.repo !== 'string'
+    || ev.repo.length === 0
+    || typeof ev.baseCommit !== 'string'
+    || ev.baseCommit.length === 0
+    || typeof ev.taskCreatedAt !== 'number'
+    || !Number.isInteger(ev.taskCreatedAt)
+    || ev.taskCreatedAt < 0
+  ) {
+    throw new Error(
+      `bridge evidence for ${ref.instanceId} requires an authenticated task provenance tuple`,
+    );
+  }
+}
+
+/**
+ * Construct the layer-1 `CapturedTask` for one attempt (both polarities, D10).
+ *
+ * The full patch goes into the `apply_patch` step attribute. Note: `capture()`
+ * caps step attributes at `MAX_STEP_ATTRIBUTES_BYTES` (16 KiB) and truncates the
+ * largest value with a receipted `…[truncated]` suffix, so a patch over that
+ * bound is stored truncated (inherited from the frozen pipe, D5 — not
+ * re-implemented here). Real SWE-bench patches can exceed 16 KiB; the truncation
+ * is recorded in the envelope's step receipt, not silent.
+ *
+ * Evidence-richness (§8): canonical typed transcript spans are inserted
+ * between the patch and verdict steps. When no usable spans exist, a
+ * `patch-only` tag is appended to `distributionTags`.
+ */
+export function toBridgeCapturedTask(ref: AttemptRef, ev: BridgeEvidence, now: Date): CapturedTask {
+  assertAuthenticatedBridgeEvidence(ref, ev);
+  const nano = NANO(now);
+  const isPass = ref.polarity === 'pass';
+  const repo = ev.repo;
+  const instanceId = ev.instanceId;
+  const historySteps: CapturedTask['steps'] = (ev.trajectorySpans ?? []).flatMap(
+    (span, index) => {
+      const spanKind = span.attributes['jinn.span.kind'];
+      if (spanKind !== 'jinn.agent_turn' && spanKind !== 'jinn.tool_call') {
+        return [];
+      }
+      return [{
+        spanId: `history-${String(index + 1).padStart(6, '0')}`,
+        parentSpanId: null,
+        kind: spanKind,
+        name: span.name,
+        startTimeUnixNano: span.startTimeUnixNano,
+        endTimeUnixNano: span.endTimeUnixNano,
+        attributes: span.attributes,
+        redactedKeys: [],
+        ...(span.events.length > 0 ? { events: span.events } : {}),
+        ...(span.status ? { status: span.status } : {}),
+      }];
+    },
+  );
+  const enriched = historySteps.length > 0;
+  return {
+    session: {
+      sessionId: `bridge:${instanceId}:${ref.polarity}:${ref.requestId}`,
+      capturedAt: now.toISOString(),
+    },
+    task: {
+      summary: `swe-rebench ${instanceId}: ${ev.taskSummary}`.slice(0, 500),
+      distributionTags: [
+        'coding',
+        'swe-rebench',
+        `repo:${repo}`.slice(0, 64),
+        ...(enriched ? [] : ['patch-only']),
+      ],
+      repositorySlug: repo,
+      baseCommit: ev.baseCommit,
+      createdAt: ev.taskCreatedAt,
+      instanceId,
+    },
+    environment: {
+      harness: { name: 'jinn-execution-ledger-bridge', version: '0.1.0' },
+      model: ref.model || 'unknown',
+      tools: [],
+      ...(ev.generatorModel ? { generatorModel: ev.generatorModel } : {}),
+      ...(ev.distributionClass ? { distributionClass: ev.distributionClass } : {}),
+      verifier: {
+        type: 'f2p-p2p' as const,
+        failToPass: ev.verifier.failToPass,
+        passToPass: ev.verifier.passToPass,
+        evalSemanticsVersion: ev.verifier.evalSemanticsVersion,
+      },
+    },
+    steps: [
+      {
+        spanId: 'patch',
+        parentSpanId: null,
+        kind: 'jinn.tool_call' as const,
+        name: 'tool:apply_patch',
+        startTimeUnixNano: nano,
+        endTimeUnixNano: nano,
+        attributes: { patch: ev.patch },
+        redactedKeys: [],
+      },
+      ...historySteps,
+      {
+        spanId: 'verdict',
+        parentSpanId: null,
+        kind: 'jinn.tool_call' as const,
+        name: 'evaluator:verdict',
+        startTimeUnixNano: nano,
+        endTimeUnixNano: nano,
+        attributes: { evaluatorVerdict: isPass ? 'PASS' : 'FAIL', actualPassed: isPass },
+        redactedKeys: [],
+      },
+    ],
+    outcome: isPass
+      ? { status: 'completed', verifiabilityTier: 'evaluator-verified' }
+      : {
+          status: 'failed',
+          verifiabilityTier: 'evaluator-verified',
+          summary: 'evaluator-confirmed failure (lesson-eligible)',
+        },
+    cost: { durationMs: 0 },
+    attemptGroup: {
+      groupId: instanceId,
+      attemptId: ref.requestId,
+      relatedAttemptRefs: [
+        ev.verdictEnvelopeCid,
+        ev.solutionEnvelopeCid,
+        ev.rawSnapshotRef,
+      ].filter((value): value is string => value !== undefined),
+    },
+    ...(ev.solutionEnvelopeCid
+      ? { lineage: { episodeId: ev.solutionEnvelopeCid } }
+      : {}),
+    provenance: 'derived-from-history',
+  };
+}
+
+/**
+ * Bridge a batch of ledger verdict rows into layer-1 evidence. Permissionless
+ * enrichment projections are used only to discover authenticated evidence.
+ * Exclusion and dedup use the signed task identity returned by `fetchEvidence`.
+ */
+export async function bridgeAttempts(refs: AttemptRef[], deps: BridgeDeps): Promise<BridgeResult> {
+  const now = deps.now?.() ?? new Date();
+  // Derive the slate repos for axis-2 exclusion, and surface any slate id whose
+  // repo cannot be derived — repo-exclusion is incomplete for those (see
+  // BridgeResult.unresolvedSlateIds), rather than silently narrowing the guard.
+  const slateRepos = new Set<string>();
+  const unresolvedSlateIds: string[] = [];
+  for (const id of deps.slateInstanceIds) {
+    const r = repoFromInstanceId(id);
+    if (r) slateRepos.add(r);
+    else unresolvedSlateIds.push(id);
+  }
+  const result: BridgeResult = { bridged: [], excludedHeldOut: [], deduped: [], errors: [], unresolvedSlateIds };
+  // Retain up to `groupCap` attempts per (instance_id, polarity) — keep the whole
+  // attempt group, not one exemplar (#1478). Kept-K is deterministic (refs arrive
+  // in a stable order); rows beyond the cap are recorded in `deduped`.
+  const groupCap = Math.max(1, deps.groupCap ?? 1);
+  const kept = new Map<string, number>();
+  const manifestCandidates: Array<{ task: CapturedTask; ref: AttemptRef }> = [];
+
+  for (const ref of refs) {
+    const candidates = ref.discoveryCandidates?.length
+      ? ref.discoveryCandidates
+      : [{
+          instanceId: ref.instanceId,
+          verdictManifestCid: ref.verdictManifestCid ?? '',
+        }];
+    let selected:
+      | {
+          ref: AttemptRef;
+          evidence: BridgeEvidence & Required<Pick<
+            BridgeEvidence,
+            'repo' | 'baseCommit' | 'taskCreatedAt' | 'instanceId' | 'verifier'
+          >>;
+        }
+      | undefined;
+    let lastError: unknown;
+
+    for (const candidate of candidates) {
+      const candidateRef: AttemptRef = {
+        ...ref,
+        instanceId: candidate.instanceId,
+        verdictManifestCid: candidate.verdictManifestCid,
+        discoveryCandidates: undefined,
+      };
+      try {
+        const ev = await deps.fetchEvidence(candidateRef);
+        assertAuthenticatedBridgeEvidence(candidateRef, ev);
+        selected = { ref: candidateRef, evidence: ev };
+        break;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    // Candidate-level misses are intentionally suppressed when a later
+    // projection reaches the authenticated task. Surface one error only when
+    // the entire bounded candidate set fails.
+    if (!selected) {
+      result.errors.push({
+        requestId: ref.requestId,
+        error: lastError instanceof Error ? lastError.message : String(lastError),
+      });
+      continue;
+    }
+
+    const ev = selected.evidence;
+    const instanceId = ev.instanceId;
+    const canonicalRef: AttemptRef = {
+      ...selected.ref,
+      instanceId,
+      repo: ev.repo,
+      baseCommit: ev.baseCommit,
+    };
+    if (deps.weakSuiteInstanceIds?.has(instanceId)) {
+      result.excludedHeldOut.push({ instanceId, reason: 'instance_id' });
+      continue;
+    }
+    if (deps.lookupFlaggedInstanceIds?.has(instanceId)) {
+      result.deduped.push({ instanceId, polarity: ref.polarity });
+      continue;
+    }
+    if (deps.slateInstanceIds.has(instanceId)) {
+      result.excludedHeldOut.push({ instanceId, reason: 'instance_id' });
+      continue;
+    }
+    if (slateRepos.has(ev.repo)) {
+      result.excludedHeldOut.push({ instanceId, reason: 'repo' });
+      continue;
+    }
+    const key = `${instanceId}:${ref.polarity}`;
+    if ((kept.get(key) ?? 0) >= groupCap) {
+      result.deduped.push({ instanceId, polarity: ref.polarity });
+      continue;
+    }
+
+    try {
+      const task = toBridgeCapturedTask(canonicalRef, ev, now);
+      if (deps.anchorMode === 'manifest') {
+        kept.set(key, (kept.get(key) ?? 0) + 1);
+        manifestCandidates.push({ task, ref: canonicalRef });
+        continue;
+      }
+      const pub = await deps.publishEvidence(task, canonicalRef);
+      // Count only SUCCESSFUL bridges toward the cap. Publication failures are
+      // surfaced once and never retried through another discovery projection:
+      // a failed publish may already have external side effects.
+      kept.set(key, (kept.get(key) ?? 0) + 1);
+      result.bridged.push({
+        instanceId,
+        polarity: ref.polarity,
+        envelopeRef: pub.envelopeRef,
+        anchorTx: pub.anchorTx,
+      });
+    } catch (err) {
+      result.errors.push({
+        requestId: ref.requestId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  if (deps.anchorMode === 'manifest' && manifestCandidates.length > 0) {
+    const observations: BridgeManifestBatch[] = [];
+    const addCompleted = (
+      batches: ManifestBatchResult[],
+      candidateOffset: number,
+    ): number => {
+      let cursor = candidateOffset;
+      for (const batch of batches) {
+        observations.push({ ...batch, confirmed: true });
+        for (const memberRef of batch.memberRefs) {
+          const candidate = manifestCandidates[cursor];
+          if (!candidate) {
+            throw new Error('manifest publisher returned more member refs than candidates');
+          }
+          result.bridged.push({
+            instanceId: candidate.ref.instanceId,
+            polarity: candidate.ref.polarity,
+            envelopeRef: memberRef,
+            anchorTx: batch.anchorTx,
+          });
+          cursor += 1;
+        }
+      }
+      return cursor;
+    };
+    const addFailedObservation = (error: unknown): void => {
+      if (error instanceof ManifestBatchRecordingError) {
+        observations.push({ ...error.result, confirmed: true });
+      } else if (error instanceof ManifestBatchAnchorError) {
+        observations.push({
+          manifestCid: error.manifestCid,
+          memberRefs: [...error.memberRefs],
+          root: error.root,
+          anchorTx: error.txHash,
+          gasUsed: null,
+          feeWei: null,
+          confirmed: false,
+        });
+      }
+    };
+    const finishManifestFacts = (memberRefs: string[]): void => {
+      result.manifestMemberRefs = [...memberRefs];
+      if (observations.length > 0) {
+        result.manifestBatches = observations;
+        const batchKey = observations.find((batch) => batch.batchKey)?.batchKey;
+        if (batchKey) result.manifestBatchKey = batchKey;
+        result.control = observations.find((batch) => batch.control)?.control;
+      }
+      if (observations.length === 1) {
+        const only = observations[0]!;
+        result.manifestCid = only.manifestCid;
+        result.anchorTx = only.anchorTx;
+        result.gasUsed = only.gasUsed;
+        result.feeWei = only.feeWei;
+        result.manifestConfirmed = only.confirmed;
+      }
+    };
+    try {
+      if (!deps.publishManifestBatch) {
+        throw new Error('manifest anchor mode requires publishManifestBatch');
+      }
+      const publication = await deps.publishManifestBatch(manifestCandidates);
+      const flattened = publication.batches.flatMap((batch) => batch.memberRefs);
+      if (
+        publication.memberRefs.length !== manifestCandidates.length ||
+        flattened.length !== publication.memberRefs.length ||
+        flattened.some((ref, index) => ref !== publication.memberRefs[index])
+      ) {
+        throw new Error(
+          `manifest publisher returned an inconsistent ${publication.memberRefs.length}-member partition set for ${manifestCandidates.length} candidates`,
+        );
+      }
+      addCompleted(publication.batches, 0);
+      finishManifestFacts(publication.memberRefs);
+    } catch (error) {
+      let completedCount = 0;
+      let failed = error;
+      let memberRefs: string[] = [];
+      if (error instanceof ManifestBatchSetError) {
+        completedCount = addCompleted(error.completed, 0);
+        failed = error.failed;
+        memberRefs = [...error.memberRefs];
+        if (error.batchKey) result.manifestBatchKey = error.batchKey;
+        addFailedObservation(failed);
+      } else if (error instanceof ManifestBatchRecordingError) {
+        memberRefs = [...error.result.memberRefs];
+        if (error.batchKey) result.manifestBatchKey = error.batchKey;
+        addFailedObservation(error);
+      } else if (error instanceof ManifestBatchAnchorError) {
+        memberRefs = [...error.memberRefs];
+        if (error.batchKey) result.manifestBatchKey = error.batchKey;
+        addFailedObservation(error);
+      } else if (error instanceof ManifestBatchPreparationError) {
+        memberRefs = [...error.memberRefs];
+        if (error.batchKey) result.manifestBatchKey = error.batchKey;
+      }
+      if (memberRefs.length > 0) finishManifestFacts(memberRefs);
+      const message = failed instanceof Error ? failed.message : String(failed);
+      for (const { ref } of manifestCandidates.slice(completedCount)) {
+        result.errors.push({ requestId: ref.requestId, error: message });
+      }
+    }
+  }
+  return result;
+}
+
+/**
+ * The production `publishEvidence`: run the CapturedTask through `capture()`
+ * with the **layer-2 (secret-only) pipeline** injected (D6), then `publish()` —
+ * emitting a canonical `jinn.episode.v1` artifact. Reuses the scrubbed pipe; the only
+ * departure from a native capture is the scrub altitude.
+ */
+export function buildBridgeEvidencePublisher(
+  deps: HarnessPublishDeps,
+  opts: { pipeline?: ScrubPipeline } = {},
+): (task: CapturedTask, ref: AttemptRef) => Promise<{ envelopeRef: string; anchorTx: string | null }> {
+  const pipeline = opts.pipeline ?? buildLayer2ScrubPipeline();
+  return async (task) => {
+    const pending = await capture(task, { pipeline });
+    const published = await publish(pending, deps);
+    if (published.vetoed) throw new Error('unexpected veto bridging evidence');
+    return { envelopeRef: published.envelopeRef, anchorTx: published.anchorTx };
+  };
+}
+
+/**
+ * Production manifest publisher: capture every bridge task with the shared
+ * layer-2 scrub pipeline, then hand all pending envelopes to the one-anchor
+ * batch publisher with their discovery hints.
+ */
+export function buildBridgeManifestPublisher(
+  deps: ManifestBatchPublishDeps,
+  opts: {
+    pipeline?: ScrubPipeline;
+    measurePerRecordControl?: boolean;
+    onCaptured?: (
+      pending: PendingEnvelope,
+      candidate: { task: CapturedTask; ref: AttemptRef },
+    ) => void;
+  } = {},
+): (
+  candidates: Array<{ task: CapturedTask; ref: AttemptRef }>,
+) => Promise<ManifestBatchSetResult> {
+  const pipeline = opts.pipeline ?? buildLayer2ScrubPipeline();
+  return async (candidates) => {
+    const members = [];
+    for (const { task, ref } of candidates) {
+      const pending = await capture(task, { pipeline });
+      opts.onCaptured?.(pending, { task, ref });
+      members.push({
+        pending,
+        polarity: ref.polarity,
+        instanceId: ref.instanceId,
+        sourceId: ref.requestId,
+      });
+    }
+    return publishPendingManifestBatch(members, deps, {
+      batchKind: 'bridge',
+      ...(opts.measurePerRecordControl ? { measurePerRecordControl: true } : {}),
+    });
+  };
+}

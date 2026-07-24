@@ -1,0 +1,30 @@
+{
+  "session_id": "sess_example",
+  "model": "anthropic/claude-opus-4.6",
+  "base_url": null,
+  "platform": "hermes",
+  "session_start": "2026-07-15T00:00:00Z",
+  "last_updated": "2026-07-15T00:00:05Z",
+  "system_prompt": "You are a coding agent.",
+  "tools": ["read_file", "write_file"],
+  "message_count": 5,
+  "messages": [
+    { "role": "system", "content": "You are a coding agent." },
+    { "role": "user", "content": "Fix the failing test in pkg/foo.py" },
+    {
+      "role": "assistant",
+      "reasoning": "Let me look at the file first.",
+      "content": "I will read the file first.",
+      "tool_calls": [
+        {
+          "id": "call_1",
+          "type": "function",
+          "function": { "name": "read_file", "arguments": "{\"path\": \"pkg/foo.py\"}" }
+        }
+      ],
+      "finish_reason": "tool_calls"
+    },
+    { "role": "tool", "tool_call_id": "call_1", "content": "def foo(): ..." },
+    { "role": "assistant", "content": "The fix is applied.", "finish_reason": "stop" }
+  ]
+}

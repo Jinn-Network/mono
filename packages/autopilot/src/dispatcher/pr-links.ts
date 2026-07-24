@@ -21,6 +21,13 @@ export interface PrLink {
    * matches the allowlist (fail-safe). (review 2026-07-13)
    */
   author: string;
+  /**
+   * Label names on the PR. Feeds the review-label enforcement sweep (#1733):
+   * a session-opened PR missing `engine:review` is invisible to the review
+   * loop (GhPrSource polls BY that label), so the dispatcher re-applies it
+   * from here. Same single per-cycle `gh pr list` call — no extra API cost.
+   */
+  labels: string[];
 }
 
 interface GhPrListEntry {
@@ -30,6 +37,7 @@ interface GhPrListEntry {
   state: string;
   isDraft: boolean;
   author?: { login?: string };
+  labels?: Array<{ name?: string }>;
   closingIssuesReferences?: Array<{ number: number }>;
 }
 
@@ -61,7 +69,7 @@ export async function fetchIssuePrMap(
     'pr', 'list',
     '--repo', REPO,
     '--state', 'all',
-    '--json', 'number,headRefName,baseRefName,state,isDraft,author,closingIssuesReferences',
+    '--json', 'number,headRefName,baseRefName,state,isDraft,author,labels,closingIssuesReferences',
     '--limit', String(PR_LIST_LIMIT),
   ]);
   const entries = JSON.parse(raw) as GhPrListEntry[];
@@ -76,6 +84,7 @@ export async function fetchIssuePrMap(
       state,
       isDraft: Boolean(e.isDraft),
       author: e.author?.login ?? '',
+      labels: (e.labels ?? []).map((l) => l.name ?? '').filter((n) => n !== ''),
     };
     for (const ref of e.closingIssuesReferences ?? []) {
       const list = map.get(ref.number);

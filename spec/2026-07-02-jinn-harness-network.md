@@ -6,7 +6,15 @@
   interface (§5.2 — local/network backends, rung 3 = network); reconciled the moat framing to name
   the bonded economy as the durable asset (§2, §10). A Decision Record may be warranted — see §13.**
   **v0.5, 2026-07-14, issue #1657: D3 amended to default-decline/review-first (§1, §3, §5, §6.1);
-  Stage 1 gate-lane note added (§14).**)
+  Stage 1 gate-lane note added (§14).**
+  **v0.6, 2026-07-15, mono#1714: consent collapsed to ONE `shareConsent` (default decline)
+  gating only mint-leaves-machine; local retention/mining/distillation unconditional; trace
+  publication is no longer a distinct sharing prompt (D3, §14 amendment).**
+  **v0.7, 2026-07-17, DR-2026-07-17 (Stage 2 charter): D3's consent ask and D5's
+  earn-for-contribution lane sequenced behind the outbound un-park boundary (re-decided no
+  earlier than the Stage 3 boundary, with attribution evidence in hand); local capture/mining/
+  distillation unconditional throughout; D8's skills.sh seeds become substrate-only under the
+  W2 retrieval allowlist (retirement from retrieval, not deletion).**)
 - **Date:** 2026-07-14
 - **Author:** Oak (design session)
 - **Shape:** `design` — output is this spec; implementation lands as per-phase plans and Issues
@@ -80,7 +88,7 @@ decisions rather than re-argued:
 |---|----------|-----------|
 | D1 | Harness-first distribution: fork Hermes; the Jinn layer is the product surface | Adoption is product adoption; the network is a side effect of use |
 | D2 | The Jinn layer is a **package**; the fork is Hermes + package pre-wired | One component, two containers: same layer becomes the plugin for other harnesses; upstream Hermes merges stay cheap |
-| D3 | Contribution is **default-decline, review-first — consent asked explicitly at onboarding (default off), one-time first-publish preview, per-task veto retained**, task-traces only | Trust needs legibility before it needs signal — the user consents explicitly, sees the first publish before it's silent, and can inspect exactly what left the machine, on chain (amended v0.5, 2026-07-14 — §14) |
+| D3 | Contribution is **default-decline, review-first — ONE `shareConsent` asked at onboarding (default off), one-time first-share preview, per-task veto retained**. The single sharing lane is the user-originated public task mint (a reproducible OSS problem based on the user's work); local traces are input-only and never leave the machine. Local retention, mining, and distillation are unconditional. | Trust needs legibility before it needs signal — the user consents once, sees the first shared task before it's silent, and can inspect exactly what left the machine, on chain (amended v0.5, 2026-07-14 — §14; collapsed to one consent v0.6, 2026-07-15, mono#1714) |
 | D4 | Pure readers allowed (consume without contributing) | Adoption over symmetry, early |
 | D5 | Earn-for-contribution via staked sidecar service + contribution-counting activity checker | Reuses the entire earning bootstrap; the checker only counts **verified, anchored** contributions (quality gate wired into emissions eligibility — anti-farming) |
 | D6 | Contributor self-steering: earned OLAS → veOLAS → gauge weight toward per-distribution staking programs | Makes "deepen narrowly" endogenous; manufactures the dispersed electorate that retires founder-decisive steering |
@@ -90,6 +98,11 @@ decisions rather than re-argued:
 | D10 | **Rung 1 — local single-player distillation** ships first: own scrubbed captures → frontier-distilled skills → cheaper open-weight runs, private by default, no publish. Surface is the **harness CLI** (`jinn-layer`), not the operator dashboard SPA (§4.2) | Day-one solo usefulness with zero network dependency; the frontier-distil → cheap-run arbitrage is value the user keeps whether or not they contribute outward |
 | D11 | **One Distiller interface, two backends** (§5.2): `LocalDistiller` runs the merged distillation engine in-process over own captures (private sink, no anchor); `NetworkDistiller` (rung 3) rebinds source + sink to the bonded network's verified evidence and the public anchored corpus | Local and network distillation stay symmetric; rung 3 is a drop-in behind a proven local one (Gall's Law), deferred until rung 1 earns adoption |
 | D12 | **Rung 2 (selling distilled skills) rejected** | A skill is a non-excludable information good — public-domain on first sale; paywalling leaks immediately and breaks corpus-as-public-good (§2 No enclosure) |
+
+> **Sequencing note (v0.7, DR-2026-07-17):** D3's onboarding consent ask and D5's
+> earn-for-contribution lane do not run while outbound contribution is parked (through Jinn
+> Plugin Stage 2); the un-park decision is re-taken no earlier than the Stage 3 boundary.
+> D8's skills.sh seeds are substrate-resident only under the W2 retrieval allowlist.
 
 ## 4. Architecture
 
@@ -113,7 +126,7 @@ decisions rather than re-argued:
 | Component | Contents |
 |---|---|
 | `@jinn-network/harness-layer` package | The three functions in one embeddable package: capture (wraps the existing pipeline), consume (wraps corpus runtime + MCP), node (spawns/attaches the existing daemon). Plus the contribution ledger UI surface (what left this machine, with anchor tx links) |
-| Jinn-Hermes fork | Upstream Hermes + harness-layer pre-wired + first-run consent flow ("contribute scrubbed traces? run a node?") . Kept as a thin patch over upstream |
+| Jinn-Hermes fork | Upstream Hermes + harness-layer pre-wired + first-run consent flow (one sharing question: "contribute tasks from your work? run a node?") . Kept as a thin patch over upstream |
 | `ContributionActivityChecker` (contract) | Counts verified, anchored capture-envelope publishes per Safe (reads ERC-8004 anchoring events / an on-chain counter); same interface as `RestorationActivityChecker` so it drops into a staking program |
 | Seed importer | skills.sh (and other open libraries) → per-skill licence check → scrub → anchor with `provenance: imported` metadata → corpus |
 | Distribution signal surface | Aggregation over contributions (discovery API already exposes `getTaskPostCounts()`-style aggregates) → "where is usage concentrating" view driving deepening decisions |
@@ -295,6 +308,12 @@ VoteWeighting today, no new infrastructure. Steering ships in two stages:
   run the seed-profile scrub (deterministic secret patterns only — key policy, plain-patterns,
   secretlint preset rules; no probabilistic openredaction/entropy stages) because they are public,
   licence-checked content, not operator trace data (#1409).
+- **Stage 1 note (2026-07-16, mono rescope):** Stage 1 acceptance requires **evidence seeds** —
+  canonical prior-work episodes published through the same scrub → publish path — because the
+  plugin's Stage 1 retrieval serves evidence records only. skills.sh skill imports remain in the
+  corpus for later stages (and distillation measurement) but are excluded from Stage 1
+  auto-pickup. Evidence-seed imports must be idempotent and set `supersedes` on re-import. See
+  `docs/superpowers/plans/2026-07-16-jinn-plugin-stage-1-rescope-plan.md` §4.
 
 ## 8. Phasing
 
@@ -423,6 +442,20 @@ this spec amendment.
 was ratified in the approved Stage 1 product design (PR #1653, product design + package
 architecture + decomposition plan), which explicitly required "a one-line spec amendment" here — no
 separate DR is needed for this change.
+
+### 14.1 Amendment: consent collapsed to one sharing question (v0.6, 2026-07-15, mono#1714)
+
+**Supersedes** both the "publish scrubbed traces by default" language wherever it survived in
+§1/§3/§5/§6.1 **and** the #1657 tier-1/tier-2 framing in §14 above. There is now exactly **one**
+contribution consent — `shareConsent`, default decline — and it gates a single thing: whether a
+**mined task leaves the machine** (the user-originated public task mint of P3 — a reproducible OSS
+problem based on the user's work, at `repo@commit` with blinded provenance). Local traces are
+**input-only and never leave**: local capture, mining, and distillation are **unconditional** (no
+consent gate) because none of them cross the machine boundary. Trace publication is **no longer a
+distinct sharing prompt** — the only lane out is the mint. Review-first safety (one-time preview +
+per-task veto + ledger) still applies on top of the single consent. Where §14 (v0.5) referenced a
+separate tier-1 "retain local" consent and a tier-2 "publish mined tasks" consent, read both as the
+one `shareConsent`; the old tier-1 retention question is gone (retention is always on).
 
 Context: issue #1657 (this amendment), parent #1654, roadmap PR #1651 (merged 44ac8a484), Stage 1
 product design + plan PR #1653 (merged befcfdf3f).

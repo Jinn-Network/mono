@@ -1,0 +1,5 @@
+{
+  "package": "@jinn-network/jinn-layer",
+  "version": "0.1.0",
+  "bin": "runtime/node_modules/.bin/jinn-layer"
+}

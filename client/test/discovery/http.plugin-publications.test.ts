@@ -69,3 +69,17 @@ describe('HttpDiscoveryAPI.listPluginPublications (attd)', () => {
     expect(callBody.variables.where).toMatchObject({ revoked: false });
   });
 });
+
+describe('HttpDiscoveryAPI.getPluginScores (attd)', () => {
+  it('fails closed without querying permissionless attempt projections', async () => {
+    const fetchImpl = vi.fn();
+    const api = createHttpDiscoveryAPI({
+      url: 'http://indexer.test/graphql',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    await expect(api.getPluginScores({ pluginCid: 'bafyplugincid' }))
+      .resolves.toEqual([]);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});

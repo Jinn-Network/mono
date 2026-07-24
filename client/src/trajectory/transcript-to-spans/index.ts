@@ -21,8 +21,9 @@
 import { join } from 'node:path';
 import { ClaudeCodeStreamJsonParser } from './claude-code-stream-json.js';
 import { CodexExecJsonParser } from './codex-exec-json.js';
+import { HermesSessionJsonParser } from './hermes-session-json.js';
 import type { TranscriptSpanParserResolution } from './types.js';
-import { CLAUDE_CODE_HARNESS, CODEX_HARNESS } from '../../harnesses/names.js';
+import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, HERMES_AGENT_HARNESS } from '../../harnesses/names.js';
 import type { TrajectoryCollector } from '../collector.js';
 
 export function getTranscriptSpanParser(
@@ -39,6 +40,15 @@ export function getTranscriptSpanParser(
     return {
       parser: new CodexExecJsonParser(),
       transcriptPath: join(workingDir, '.codex-code', 'stdout.jsonl'),
+    };
+  }
+  if (implName === HERMES_AGENT_HARNESS) {
+    // The hermes-agent adapter lifts the finished
+    // `$HERMES_HOME/sessions/session_*.json` record into this path after a
+    // successful solve (see src/harnesses/impls/hermes-agent/adapter.ts).
+    return {
+      parser: new HermesSessionJsonParser(),
+      transcriptPath: join(workingDir, '.hermes-agent', 'session.json'),
     };
   }
   return null;

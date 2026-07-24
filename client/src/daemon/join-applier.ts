@@ -32,6 +32,11 @@ export interface JoinApplierDeps {
   registry: SolverNetRegistry;
   /** The in-memory operator config block (kept consistent for launcher reads). */
   config: { joinedSolverNets?: Record<string, JoinedSolverNetConfig> };
+  /**
+   * #547: flip the MechAdapter's evaluator gate on live when an evaluator-role
+   * join lands. A join never removes a role, so there is no "off" counterpart.
+   */
+  enableEvaluator?: () => void;
 }
 
 export type JoinApplier = (entry: JoinedSolverNetConfig) => Promise<void>;
@@ -45,6 +50,9 @@ export function createJoinApplier(deps: JoinApplierDeps): JoinApplier {
     if (entry.roles.includes('solver') && !deps.taskDiscovery.solverNetManifestCids.includes(cid)) {
       deps.taskDiscovery.solverNetManifestCids.push(cid);
     }
+
+    // #547: an evaluator-role join enables the adapter's evaluation scan live.
+    if (entry.roles.includes('evaluator')) deps.enableEvaluator?.();
 
     // (b) engine eligibility view.
     deps.view.set(cid, { roles: entry.roles });

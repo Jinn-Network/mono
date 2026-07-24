@@ -22,6 +22,7 @@ import { spawn, spawnSync, type SpawnOptions } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 import {
   SweRebenchV2TaskSchema,
@@ -110,6 +111,25 @@ const PATCH_BUNDLE_FILE = 'swe-rebench-v2-evaluator.bundle.v1.patch';
 const VITEST_JSON_PARSER = { id: 'vitest-json.v1', version: 'v1' } as const;
 const STATE_FILE = 'state.json';
 const ENABLE_CLI = 'jinn harnesses enable swe-rebench-v2-evaluator';
+const DEFAULT_EVAL_COMPUTE_USD_PER_HOUR = 0.2;
+
+/**
+ * Resolve the compute rate (USD/hour) used to meter `evaluator_cost_usd`
+ * from wall-clock grade() time (#1828). Env-only: unset → default 0.20;
+ * explicit invalid or ≤0 value → 0 with a warning — a misconfigured rate
+ * must never throw or block an eval.
+ */
+function resolveComputeUsdPerHour(): number {
+  const envRaw = process.env['JINN_EVAL_COMPUTE_USD_PER_HOUR'];
+  if (envRaw === undefined) return DEFAULT_EVAL_COMPUTE_USD_PER_HOUR;
+  const parsed = Number(envRaw);
+  if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  console.warn(
+    '[swe-rebench-v2] JINN_EVAL_COMPUTE_USD_PER_HOUR is not a positive number — ' +
+      'recording evaluator_cost_usd=0',
+  );
+  return 0;
+}
 
 /**
  * The source tree keeps the bundle in `client/scripts`; the published package
@@ -1320,6 +1340,10 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
     const runner: EvalRunner = this.getRunner(state.upstreamRepoDir);
     const evaluator = new SweRebenchV2Evaluator({ fetcher, runner });
 
+    // Meter real evaluator cost as grade() wall-time × compute rate (#1828).
+    // Only the grade() call is timed — not the IPFS upload or the substrate
+    // recheck above.
+    const gradeStartedAtMs = performance.now();
     let graded: Awaited<ReturnType<SweRebenchV2Evaluator['grade']>>;
     try {
       graded = await evaluator.grade({ task, solutionPayload, row: recheckRow });
@@ -1335,6 +1359,16 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
         );
       }
       throw err;
+    }
+    const computedEvaluatorCostUsd =
+      (Math.max(0, performance.now() - gradeStartedAtMs) / 3_600_000) * resolveComputeUsdPerHour();
+    let evaluatorCostUsd = computedEvaluatorCostUsd;
+    if (!Number.isFinite(computedEvaluatorCostUsd) || computedEvaluatorCostUsd < 0) {
+      console.warn(
+        '[swe-rebench-v2] evaluator cost computation was not finite and nonnegative — ' +
+          'recording evaluator_cost_usd=0',
+      );
+      evaluatorCostUsd = 0;
     }
 
     // Pin the test log to IPFS so anyone (evaluator dispute, audit, model
@@ -1353,7 +1387,7 @@ export class SweRebenchV2EvaluatorHarness implements Harness {
       schemaVersion: 'swe-rebench-v2-verdict.v2',
       score: graded.score,
       passed_match: graded.passed_match,
-      evaluator_cost_usd: 0,
+      evaluator_cost_usd: evaluatorCostUsd,
       passedCount: graded.passedCount,
       totalCount: graded.totalCount,
     };

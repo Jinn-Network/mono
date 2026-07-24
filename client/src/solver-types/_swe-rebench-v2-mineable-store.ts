@@ -1,60 +1,95 @@
 /**
- * Local mineable-trace retention store for task-creator sessions.
- * Spec: spec/2026-07-08-task-creator-v0.md §10 (decision D2) — sessions are
- * retained for mining ONLY under tier-1 consent ('retain_local'); default is
- * 'off' and the store fails closed (throws, retains nothing).
+ * Task-creator compatibility facade over harness-layer's canonical
+ * ContributionStore. New jinn-layer and daemon callers therefore share one
+ * cacheless schema, migration, lock, and atomic read-modify-write path.
  */
+import { isDeepStrictEqual } from 'node:util';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import {
+  ContributionCandidateV1ProjectionSchema,
+  ContributionCandidateV1Schema,
+  type ContributionCandidateV1,
+} from '@jinn-network/plugin';
+import {
+  CONTRIBUTION_STORE_SCHEMA_VERSION,
+  ContributionStore,
+  createEvidenceAdapter,
+  resolveContributionStateDir,
+  type ContributionStoreRecord,
+} from '@jinn-network/core';
+import type {
+  MineableSkillEvent,
+  MineableTestRun,
+  MineableTraceRecord,
+  MineableTraceStorePort,
+  StoredMineableTraceRecord,
+} from './_swe-rebench-v2-mineable-store-port.js';
 
-import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
-import { resolve as resolvePath, join } from 'node:path';
+export type {
+  MineableSkillEvent,
+  MineableTestRun,
+  MineableTraceRecord,
+  MineableTraceStorePort,
+  StoredMineableTraceRecord,
+} from './_swe-rebench-v2-mineable-store-port.js';
 
-export const MINEABLE_TRACE_STORE_SCHEMA_VERSION = 'mineable-trace-store.v1' as const;
-const MINEABLE_TRACE_FILE = 'mineable-traces.json';
+export const MINEABLE_TRACE_STORE_SCHEMA_VERSION = CONTRIBUTION_STORE_SCHEMA_VERSION;
+export const resolveMineableStateDir = resolveContributionStateDir;
 
-export interface MineableTestRun {
-  cmd: string;
-  exitCode: number;
-  at: string;
+function defaultEpisodesDir(): string {
+  return process.env['JINN_LAYER_EPISODES_DIR']
+    ?? join(homedir(), '.jinn-client', 'harness-layer', 'episodes');
 }
 
-export interface MineableSkillEvent {
-  skill: string;
-  action: 'loaded' | 'invoked';
+function toCandidate(record: MineableTraceRecord): ContributionCandidateV1 {
+  return {
+    schemaVersion: 'jinn.contribution-candidate.v1',
+    sourceId: record.sourceId,
+    repositorySlug: record.repo,
+    baseCommit: record.baseCommit,
+    acceptedDiff: record.acceptedDiff,
+    testRuns: record.testRuns.map((run) => ({
+      command: run.cmd,
+      exitCode: run.exitCode,
+      at: run.at,
+    })),
+    intermediateFailureDiffs: record.intermediateFailureDiffs,
+    skillEvents: record.skillEvents.map((event) => ({
+      skillRef: event.skill,
+      action: event.action,
+    })),
+    publishMinedTasksConsent: record.publishMinedTasksConsent,
+    createdAt: record.createdAt,
+  };
 }
 
-export interface MineableTraceRecord {
-  sourceId: string; // opaque local id; never published
-  kind: 'solvernet-execution' | 'harness-session';
-  repo: string; // owner/name
-  baseCommit: string;
-  acceptedDiff: string; // candidate gold (spec §10 field 2)
-  testRuns: MineableTestRun[]; // verifier seed (field 3)
-  intermediateFailureDiffs: string[]; // negative exemplars (field 4)
-  skillEvents: MineableSkillEvent[]; // §12 option value (field 5)
-  sourceInstanceId?: string; // set when kind === 'solvernet-execution'
-  publishMinedTasksConsent: boolean; // tier-2, from the capture manifest
-  createdAt: string; // ISO — injected by caller, never Date.now() in the store
+export function mineableTraceRecordFromStored(record: StoredMineableTraceRecord): MineableTraceRecord {
+  const candidate = record.candidate;
+  return {
+    sourceId: candidate.sourceId,
+    kind: record.localMetadata?.kind ?? 'harness-session',
+    repo: candidate.repositorySlug,
+    baseCommit: candidate.baseCommit,
+    acceptedDiff: candidate.acceptedDiff,
+    testRuns: candidate.testRuns.map((run) => ({
+      cmd: run.command,
+      exitCode: run.exitCode,
+      at: run.at,
+    })),
+    intermediateFailureDiffs: candidate.intermediateFailureDiffs,
+    skillEvents: candidate.skillEvents.map((event) => ({
+      skill: event.skillRef,
+      action: event.action,
+    })),
+    ...(record.localMetadata?.sourceInstanceId
+      ? { sourceInstanceId: record.localMetadata.sourceInstanceId }
+      : {}),
+    publishMinedTasksConsent: candidate.publishMinedTasksConsent,
+    createdAt: candidate.createdAt,
+  };
 }
 
-interface MineableTraceFile {
-  schemaVersion: typeof MINEABLE_TRACE_STORE_SCHEMA_VERSION;
-  records: Record<string, MineableTraceRecord & { mined?: boolean }>;
-}
-
-async function writeJsonAtomic(file: string, data: unknown): Promise<void> {
-  await mkdir(resolvePath(join(file, '..')), { recursive: true });
-  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
-  await rename(tmp, file);
-}
-
-/**
- * Pure assembler: builds a well-formed {@link MineableTraceRecord} from
- * whatever fields a producer (e.g. the engine's pack() hook, Task 7) has in
- * scope, filling optional contract fields (§10) with empty defaults rather
- * than leaving them undefined. `now` is injected so callers stay
- * deterministic in tests — the store itself never calls Date.now().
- */
 export function buildMineableRecord(ctx: {
   sourceId: string;
   kind: MineableTraceRecord['kind'];
@@ -83,62 +118,120 @@ export function buildMineableRecord(ctx: {
   };
 }
 
-export class MineableTraceStore {
-  private readonly file: string;
-  private cache: MineableTraceFile | null = null;
+export class MineableTraceStore implements MineableTraceStorePort {
+  private readonly store: ContributionStore;
+  private readonly evidence: ReturnType<typeof createEvidenceAdapter>;
 
-  constructor(opts: { stateDir: string }) {
-    this.file = resolvePath(join(opts.stateDir, MINEABLE_TRACE_FILE));
+  constructor(options: { stateDir: string; episodesDir?: string }) {
+    this.store = new ContributionStore({ stateDir: options.stateDir });
+    this.evidence = createEvidenceAdapter({
+      capturesDir: options.episodesDir ?? defaultEpisodesDir(),
+    });
   }
 
-  private fresh(): MineableTraceFile {
+  async append(record: MineableTraceRecord): Promise<void> {
+    const candidate = ContributionCandidateV1Schema.parse(toCandidate(record));
+    const evidence = await this.evidence.get(record.sourceId);
+    const episode = evidence.status === 'ok' ? evidence.value : undefined;
+    const canonicalCandidate = episode
+      ? ContributionCandidateV1ProjectionSchema.safeParse(episode.contributionCandidate)
+      : undefined;
+    if (
+      !episode
+      || !canonicalCandidate?.success
+      || episode.episodeId !== record.sourceId
+      || canonicalCandidate.data.sourceId !== record.sourceId
+      || !isDeepStrictEqual(canonicalCandidate.data, candidate)
+      || (record.sourceInstanceId !== undefined && episode.task.instanceId !== record.sourceInstanceId)
+    ) {
+      throw new Error(
+        `cannot register contribution reference ${record.sourceId}: matching canonical episode is required`,
+      );
+    }
+    await this.store.recordReference(record.sourceId, {
+      publishMinedTasksConsent: candidate.publishMinedTasksConsent,
+    });
+  }
+
+  private async resolve(
+    record: ContributionStoreRecord,
+  ): Promise<StoredMineableTraceRecord | undefined> {
+    const evidence = await this.evidence.get(record.recordId);
+    const episode = evidence.status === 'ok' ? evidence.value : undefined;
+    if (!episode || episode.episodeId !== record.recordId) return undefined;
+    const candidate = ContributionCandidateV1ProjectionSchema.safeParse(episode.contributionCandidate);
+    if (!candidate.success || candidate.data.sourceId !== record.recordId) return undefined;
     return {
-      schemaVersion: MINEABLE_TRACE_STORE_SCHEMA_VERSION,
-      records: {},
+      ...record,
+      candidate: candidate.data,
+      localMetadata: {
+        kind: 'harness-session',
+        ...(episode.task.instanceId ? { sourceInstanceId: episode.task.instanceId } : {}),
+      },
     };
   }
 
-  private async load(): Promise<MineableTraceFile> {
-    if (this.cache) return this.cache;
-    try {
-      const raw = JSON.parse(await readFile(this.file, 'utf8')) as MineableTraceFile;
-      if (raw.schemaVersion === MINEABLE_TRACE_STORE_SCHEMA_VERSION) {
-        this.cache = raw;
-        return raw;
-      }
-    } catch {
-      // missing
-    }
-    this.cache = this.fresh();
-    return this.cache;
+  async get(recordId: string): Promise<StoredMineableTraceRecord | undefined> {
+    const record = await this.store.get(recordId);
+    return record ? this.resolve(record) : undefined;
   }
 
-  /** Fail-closed: throws if tier-1 consent is not 'retain_local'. */
-  async append(record: MineableTraceRecord, consent: 'off' | 'retain_local'): Promise<void> {
-    if (consent !== 'retain_local') {
-      throw new Error(
-        `MineableTraceStore.append refused: tier-1 consent is '${consent}', not 'retain_local' (D2 fail-closed)`,
-      );
-    }
-    const file = await this.load();
-    file.records[record.sourceId] = { ...record };
-    await writeJsonAtomic(this.file, file);
-    this.cache = file;
+  async list(): Promise<StoredMineableTraceRecord[]> {
+    const resolved = await Promise.all((await this.store.list()).map((record) => this.resolve(record)));
+    return resolved.filter((record): record is StoredMineableTraceRecord => record !== undefined);
   }
 
   async listUnmined(): Promise<MineableTraceRecord[]> {
-    const file = await this.load();
-    return Object.values(file.records)
-      .filter((r) => !r.mined)
-      .map(({ mined: _mined, ...record }) => record);
+    return (await this.list())
+      .filter((record) => record.localState === 'recorded')
+      .map(mineableTraceRecordFromStored);
   }
 
-  async markMined(sourceId: string): Promise<void> {
-    const file = await this.load();
-    const record = file.records[sourceId];
-    if (!record) return;
-    record.mined = true;
-    await writeJsonAtomic(this.file, file);
-    this.cache = file;
+  async authorize(recordId: string, acknowledgedAt: string): Promise<unknown> {
+    return this.store.authorize(recordId, acknowledgedAt);
   }
+
+  async markMinted(recordId: string, mintRef?: string): Promise<unknown> {
+    return this.store.markMinted(recordId, mintRef);
+  }
+
+  async markRejected(recordId: string, reason?: string): Promise<unknown> {
+    return this.store.markRejected(recordId, reason);
+  }
+
+  async veto(recordId: string): Promise<unknown> {
+    return this.store.veto(recordId);
+  }
+
+  async publishAuthorized<T>(
+    recordId: string,
+    operation: () => Promise<{ value: T; mintRef: string; publicationRef: string }>,
+  ): Promise<T> {
+    return this.store.publishAuthorized(recordId, operation);
+  }
+
+  async markPublished(recordId: string, publicationRef: string): Promise<unknown> {
+    return this.store.markPublished(recordId, publicationRef);
+  }
+
+  async disableUnpublished(): Promise<string[]> {
+    return this.store.disableUnpublished();
+  }
+
+  /** Legacy alias: session mining completed locally, whether admitted or not. */
+  async markMined(sourceId: string): Promise<void> {
+    await this.store.markMinted(sourceId);
+  }
+}
+
+/**
+ * Stage 2 keeps the contribution substrate local while preserving local
+ * candidate mining. Revoke retained Stage 1 queue authorization and return
+ * the only candidate-consent value production may stamp in this stage.
+ */
+export async function enforceStage2ParkedPublication(
+  store: Pick<MineableTraceStore, 'disableUnpublished'>,
+): Promise<false> {
+  await store.disableUnpublished();
+  return false;
 }

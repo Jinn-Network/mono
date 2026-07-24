@@ -5,7 +5,7 @@
 - **Author:** Ritsu (planning session, Claude Fable 5)
 - **Shape:** `design`
 - **Parent:** `docs/superpowers/specs/2026-07-14-jinn-plugin-stage-1-product-design.md` (approved);
-  PR #1651 roadmap (unmerged — blocker for implementation issues).
+  merged PR #1651 roadmap.
 
 ## 1. Decision
 
@@ -43,6 +43,9 @@ plugin.session(meta): PluginSession
   .noteUserTurn/.noteAssistantTurn/.noteToolCall   // or batch events at end
   .end(outcome, events?) -> { episodeRef, eligibility, summary }
 
+plugin.completeSession({ episode, activity, eligibilityInputs, contributionCandidate? })
+  -> { episodeRef, persistence, eligibility, contribution?, summary }
+
 plugin.history(query)      // derived view: episodes + contribution + distilled skills
 plugin.explain(sessionRef) // what Jinn surfaced/did in that session
 plugin.skills.{install,list,uninstall}
@@ -52,8 +55,11 @@ plugin.contribution.{ledger,status,veto}
 
 **Process API (cross-language contract):** the `jinn-layer` CLI verbs map ~1:1 onto the library
 API and return versioned JSON. `jinn-layer contract --json -> { contractVersion }` is checked by
-host adapters at session start (mismatch degrades with an instructive message — closes the
-#1380 skew class). Typical session cost: two process calls (first-turn pickup, session end).
+host adapters at session start. `session end` delegates the complete host-captured episode;
+`session pickup` is available to future hosts, while the Stage 1 Hermes adapter keeps its
+existing in-Python pickup path (#1732 tracks that later refactor). A missing or incompatible
+binary disables only the additive process bridge: pickup, capture, and local distillation keep
+working, and Python performs one local episode write at session end.
 
 ## 4. Ports (five)
 
@@ -61,7 +67,7 @@ host adapters at session start (mismatch degrades with an instructive message �
 |---|---|---|---|
 | `CorpusPort` — search/get | first-turn pickup, `/corpus`, agent tools | shim over `harness-layer` consume (discovery + IPFS + cache) | ranking, payment, publication |
 | `EvidencePort` — put/list/get episodes, retention | session-end persistence; distiller + history reads | shim over the captures-dir store | remote storage, indexing |
-| `ContributionPort` — recordMineable, ledger, mintStatus, veto | background contribution; inspection surfaces | shims over mineable-trace store, mint pool (read), capture-publish ledger | mint validation (Docker F2P/P2P) and chain publication — **sidecar-owned** |
+| `ContributionPort` — recordMineable, authorize, ledger, mintStatus, veto | local candidate recording; background contribution; inspection surfaces | shim over the shared locked contribution store used by `jinn-layer` and the task-creator daemon | mint validation (Docker F2P/P2P) and chain publication — **sidecar-owned** |
 | `LocalLearningPort` — run/status/list | `/distill` surfaces; distilled skills in history | shim over rung-1 distiller pipeline | network distillation (rung 3) |
 | `SkillsPort` — install/list/uninstall | corpus skill install, `.jinn-ref` fencing | shim over skills-install machinery | skill lifecycle manager (Stage 2), hub |
 
@@ -78,10 +84,11 @@ queues; nothing crashes into the host session.
 ## 5. Type ownership
 
 The package owns the product schemas: **`EpisodeV1`** (complete-trajectory episode — superset
-of today's `CapturedTask`: the full trajectory as one ordered `kind`-discriminated span sequence
+of today's `CapturedTask`: the full trajectory as one first-class ordered `kind`-discriminated span sequence
 (agent turns and tool calls as steps under a single time base, per DR-2026-07-14 §6), a skills
 loadout, token + USD cost, a per-record privacy/retention field, and lineage hooks),
-`KnowledgeHit`, `EligibilityVerdict` (cheap
+optional persisted activity and authoritative session-end eligibility facts, the host-neutral
+`ContributionCandidateV1`, `KnowledgeHit`, `EligibilityVerdict` (cheap
 candidate verdict; authoritative validation is sidecar-side), `SessionSummary`, `HistoryEntry`.
 Adapters map to/from infra types and handle legacy `CapturedTask` reads.
 **Dependency direction: `harness-layer` imports schemas from `@jinn-network/plugin` — never the
@@ -117,8 +124,9 @@ network mocked.
 - **Production:** the `jinn-layer` CLI bin (stays in `harness-layer`) wires core + real
   adapters and carries the process API. The daemon never links the core in-process.
 - **Test:** in-memory wiring in `./testing`.
-- **Python host adapter:** hooks + rendering + fs glue only; its retrieval policy moves into
-  the core (`pickup.py` becomes transport around `jinn-layer session pickup`).
+- **Python host adapter:** hooks + rendering + fs glue. For Stage 1 it retains the shipped
+  in-Python pickup implementation and delegates the already-captured episode through
+  `jinn-layer session end`; #1732 tracks moving pickup behind the process contract later.
 
 ## 10. Responsibility placement
 
@@ -126,7 +134,7 @@ network mocked.
 |---|---|
 | End-to-end workflow, product state/lifecycle, retrieval decisions, episode assembly, eligibility candidate-verdict, history derivation, summary composition, action definitions, presentation state, ports, public API | `packages/plugin` |
 | In-session event buffering, hook wiring, TUI rendering, `$HERMES_HOME` glue, skills-dir writes | Hermes host adapter (pip `jinn-plugin`) |
-| Corpus/discovery/IPFS mechanics, scrub, captures store, publish/anchor, distiller engine, mineable-trace + mint-pool stores | Jinn Core adapters (`harness-layer` shims over `client/src`) |
+| Corpus/discovery/IPFS mechanics, scrub, captures store, publish/anchor, distiller engine, shared contribution store + mint-pool stores | Jinn Core adapters (`harness-layer` shims over `client/src`) |
 | Wiring, CLI process API, env/config parsing | composition root (`jinn-layer` bin) |
 | Mint validation (Docker), chain publication, HarvestLoop | sidecar daemon (outside plugin) |
 | Marketplace/SolverPlugin authoring types | SDK (untouched) |
@@ -135,9 +143,36 @@ network mocked.
 ## 11. Migration (foundation work, sequenced against the open PR stack)
 
 Scaffold package + CI → schemas + ports + in-memory kit → core workflow with tests → adapter
-shims in `harness-layer` → CLI verbs rewired to the core (+ contract handshake) → Python adapter
-switched to the new verbs → architecture tests land. No existing file moves; `harness-layer`
-edits are additive shims + CLI wiring (merge order coordinated with #1543–#1554).
+shims in `harness-layer` → CLI session-end contract + handshake → Python session-end delegation
+with local fallback → shared contribution-store extraction → architecture tests. Pickup remains
+in Python for Stage 1. No Hermes core changes or model tools are required.
+
+## 11a. Amendment — Stage 1 rescope (2026-07-16)
+
+Per `docs/superpowers/plans/2026-07-16-jinn-plugin-stage-1-rescope-plan.md` (walkthrough
+decision: iterate):
+
+- **`SkillsPort` is quarantined later-stage machinery.** It is not reachable from pickup or any
+  registered Stage 1 command; its sole Stage 1 consumer is the local-distill staging install.
+  `plugin.skills.{install,list,uninstall}` in §3's library API is a Stage 3 surface and is not
+  part of the Stage 1 process contract.
+- **§3's library-API sample is design-time illustration, superseded by the shipped subset**
+  (reconciles issue #1755, all items): `plugin.skills.*` (above) and `plugin.distill.*` are
+  later-stage surfaces, not Stage 1 contract; contribution inspection ships as
+  `contribution.{ledger,mintStatus}` with veto carried via `completeSession(...
+  contributionVetoed)` rather than `plugin.contribution.{status,veto}`; `history()` takes no
+  query; `.end(outcome)` takes no events batch (the host delegates the complete episode);
+  `.firstTurnPickup` returns `{ contextBlock, packets, searchedTerms, degraded? }` per the
+  rescope R1 (`suggestions[]`/`markers` are superseded); §4.3's `jinn-layer publish
+  <task-file>` note describes the retained-internal legacy verb, not a product surface. §3 is
+  not retro-edited (dated design record); this section is authoritative for the shipped
+  contract until the Stage 2 boundary refactor restates it.
+- **`CorpusPort.get` returns a content-bearing record** (not metadata-only), so the core can
+  project `jinn.knowledge-packet.v1` — the §4 CorpusPort row's Stage 1 behavior is evidence
+  retrieval; skill records are excluded from pickup.
+- Episode `activity` gains `searchedTerms`/`providedRefs`; `SessionSummary` replaces
+  `surfacedHits`/`installedSkillRefs` with searched/provided facts. Legacy fields remain
+  accepted on read.
 
 ## 12. Boundary requirements compliance (prompt's 15)
 

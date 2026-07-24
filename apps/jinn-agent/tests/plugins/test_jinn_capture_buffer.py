@@ -30,6 +30,8 @@ def test_empty_first_message_does_not_crash_and_keeps_model():
     assert task is not None
     # Model survives even when the first message carried no summary text.
     assert task["environment"]["model"] == "step-3.7-flash"
+    assert task["outcome"]["verifiabilityTier"] == "user-accepted"
+    assert "verificationStrength" not in task["outcome"]
 
 
 def test_empty_first_message_lets_a_later_message_set_the_summary():
@@ -54,6 +56,57 @@ def test_buffer_keys_on_session_across_unstable_task_ids():
     assert task["task"]["summary"] == "Do the thing"
     assert task["environment"]["model"] == "m"
     assert len(task["steps"]) == 1
+
+
+def test_records_user_and_assistant_turns_in_order():
+    # A driven turn appends spans in order: user (pre_llm_call) → tool
+    # (post_tool_call) → assistant (post_llm_call). assemble_episode reads the
+    # same buffer and emits an ordered trajectory.
+    capture_buffer.reset()
+    capture_buffer.record_first_turn("s", "s", "do X", "m", "cli")
+    capture_buffer.record_user_turn("s", "s", "do X")
+    capture_buffer.record_tool_call("s", "s", "terminal", "c1", {"command": "ls"}, "ok", 5)
+    capture_buffer.record_assistant_turn("s", "s", "done")
+    ep = capture_buffer.assemble_episode("s", "s", completed=True, interrupted=False)
+    capture_buffer.reset()
+    assert ep is not None
+    assert ep["session"]["kind"] == "user"
+    assert ep["origin"] == {
+        "writer": ep["environment"]["harness"]["name"],
+        "build": ep["environment"]["harness"]["version"],
+    }
+    assert ep["outcome"]["verificationStrength"] == "user-accepted"
+    assert "verifiabilityTier" not in ep["outcome"]
+    traj = ep["trajectory"]
+    assert [step["kind"] for step in traj] == [
+        "jinn.agent_turn",
+        "jinn.tool_call",
+        "jinn.agent_turn",
+    ]
+    assert traj[0]["attributes"]["role"] == "user"
+    assert traj[2]["attributes"]["role"] == "assistant"
+    for step in traj:
+        assert int(step["startTimeUnixNano"]) <= int(step["endTimeUnixNano"])
+
+
+def test_records_skills_loadout_and_tokens():
+    capture_buffer.reset()
+    capture_buffer.record_first_turn("s", "s", "do X", "m", "cli")
+    capture_buffer.record_user_turn("s", "s", "do X")
+    capture_buffer.record_environment("s", "s", skills_loadout=["tdd"])
+    capture_buffer.record_tokens("s", "s", input=100, output=50)
+    ep = capture_buffer.assemble_episode("s", "s", completed=True, interrupted=False)
+    capture_buffer.reset()
+    assert ep["environment"]["skillsLoadout"] == ["tdd"]
+    assert ep["cost"]["tokens"] == {"input": 100, "output": 50}
+
+
+def test_tokens_omitted_when_never_recorded():
+    capture_buffer.reset()
+    capture_buffer.record_user_turn("s", "s", "do X")
+    ep = capture_buffer.assemble_episode("s", "s", completed=True, interrupted=False)
+    capture_buffer.reset()
+    assert "tokens" not in ep["cost"]
 
 
 def test_assemble_uses_resolved_harness_when_stock(monkeypatch):

@@ -166,6 +166,25 @@ describe('harvestOutput', () => {
     expect((out.solutionPayload as Record<string, unknown>).patch).toContain('old = False');
   });
 
+  // ── Empty run — no payload, no phase artifacts (#814) ───────────────────────
+
+  it('empty run: no typed payload and no phase artifacts — names the missing deliverable, not .orient/summary.json', async () => {
+    // The harness produced nothing: no solution-payload.json and no phase dirs.
+    // The error must be deliverable-oriented, not phase-telemetry-oriented.
+    await expect(harvestOutput(workingDir, 'full')).rejects.toThrow(/appears empty/);
+    await expect(harvestOutput(workingDir, 'full')).rejects.not.toThrow(/\.orient\/summary\.json/);
+  });
+
+  it('partial run: some phase artifacts present but a required primary missing — still throws Required artifact missing', async () => {
+    // A non-required phase (orient) produced artifacts, so the run is not empty,
+    // but post-execute requires debrief whose primary artifact is absent.
+    writePhaseArtifact(workingDir, 'orient', 'summary.json', { topics: [] });
+    const requiredPath = join(workingDir, '.debrief', 'analysis.json');
+    await expect(harvestOutput(workingDir, 'post-execute')).rejects.toThrow(
+      `Required artifact missing: ${requiredPath}`,
+    );
+  });
+
   // ── Optional artifact handling (warn, don't throw) ──────────────────────────
 
   it('does not throw when optional artifact is absent; logs a warning', async () => {

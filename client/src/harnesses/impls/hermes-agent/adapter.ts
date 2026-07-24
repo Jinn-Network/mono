@@ -1,6 +1,6 @@
 // client/src/harnesses/impls/hermes-agent/adapter.ts
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
-import { createWriteStream, mkdirSync } from 'node:fs';
+import { copyFileSync, createWriteStream, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { finished } from 'node:stream/promises';
@@ -88,6 +88,53 @@ export interface HermesHarnessAdapterConfig {
    */
   operatorHermesHome?: string;
   _spawnFn?: typeof spawn;
+}
+
+/**
+ * Snapshot the newest existing `session_*.json` mtime BEFORE the solve runs so
+ * the post-solve lift can distinguish a record THIS run wrote from a prior
+ * task's. Returns 0 when the dir is missing/unreadable or holds no records.
+ */
+function snapshotHermesSessionMtime(hermesHome: string): number {
+  try {
+    const sessionsDir = join(hermesHome, 'sessions');
+    return readdirSync(sessionsDir)
+      .filter((f) => /^session_.*\.json$/.test(f))
+      .reduce((max, f) => Math.max(max, statSync(join(sessionsDir, f)).mtimeMs), 0);
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Copies THIS run's `$HERMES_HOME/sessions/session_*.json` (Hermes's finished
+ * session record) into `<workingDir>/.hermes-agent/session.json` so it (a)
+ * rides system_snapshot — which tars only workingDir — and (b) is readable by
+ * the hermes-session-json transcript-to-spans parser (#1670).
+ *
+ * `$HERMES_HOME` (= implStateDir) is shared and persistent across tasks of the
+ * same solverType — NOT fresh per solve — so `sessions/` accumulates prior
+ * tasks' records. We therefore lift only a record strictly newer than `sinceMs`
+ * (the pre-spawn baseline). If no record post-dates the baseline (a solve that
+ * wrote none), we degrade and lift nothing rather than bleed another task's
+ * transcript into this task's signed snapshot and trajectory. Wrapped so any
+ * failure only warns and never throws — a missing record must not fail an
+ * otherwise-successful solve. The `.hermes-agent/` target dir already exists
+ * (created on the spawn path before the child runs).
+ */
+function liftHermesSession(hermesHome: string, workingDir: string, sinceMs: number): void {
+  try {
+    const sessionsDir = join(hermesHome, 'sessions');
+    const candidate = readdirSync(sessionsDir)
+      .filter((f) => /^session_.*\.json$/.test(f))
+      .map((f) => ({ f, m: statSync(join(sessionsDir, f)).mtimeMs }))
+      .filter((e) => e.m > sinceMs)
+      .sort((a, b) => b.m - a.m)[0];
+    if (!candidate) return;
+    copyFileSync(join(sessionsDir, candidate.f), join(workingDir, '.hermes-agent', 'session.json'));
+  } catch (err) {
+    console.warn(`hermes-agent: session record lift skipped: ${String(err)}`);
+  }
 }
 
 function buildAgentEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
@@ -257,6 +304,7 @@ export class HermesHarnessAdapter {
         await Promise.all([finished(stdoutLog), finished(stderrLog)]);
       };
 
+      const sessionBaselineMs = snapshotHermesSessionMtime(hermesHome);
       const child: ChildProcess = this.spawnFn(this.hermesPath, args, spawnOpts);
 
       if (inputs.abort.aborted) {
@@ -285,6 +333,11 @@ export class HermesHarnessAdapter {
       child.on('exit', (code, signal) => {
         settle(() => {
           if (code === 0) {
+            // Lift the finished Hermes session record into workingDir so it
+            // rides system_snapshot and the transcript-to-spans parser can read
+            // it (#1670). Wrapped so a missing/failed lift never fails an
+            // otherwise-successful solve (degrade, not fail).
+            liftHermesSession(hermesHome, inputs.workingDir, sessionBaselineMs);
             resolvePromise();
           } else if (inputs.abort.aborted) {
             resolvePromise(); // graceful-abort exits are success

@@ -1144,19 +1144,41 @@ describe('harness.mode config field', () => {
   });
 });
 
-describe('mineableTraces config field (task-creator spec §10, D2)', () => {
+describe('mineableTraces.share config field (mono#1714 single sharing consent)', () => {
   afterEach(() => {
-    delete process.env['JINN_MINEABLE_CONSENT'];
+    delete process.env['JINN_SHARE_CONSENT'];
     delete process.env['JINN_MINEABLE_PUBLISH_CONSENT'];
   });
 
-  it('defaults to off / declined (fail-closed)', () => {
+  it('defaults to share: false (nothing leaves the machine)', () => {
     const config = loadConfig();
-    expect(config.mineableTraces?.consent).toBe('off');
-    expect(config.mineableTraces?.publishConsent).toBe(false);
+    expect(config.mineableTraces?.share).toBe(false);
   });
 
-  it('accepts consent: retain_local and publishConsent: true from a config file', async () => {
+  it('accepts share: true from a config file', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-config-'));
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify({ mineableTraces: { share: true } }, null, 2));
+    const config = loadConfig(configPath);
+    expect(config.mineableTraces?.share).toBe(true);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('rejects invalid share values', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-config-'));
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify({ mineableTraces: { share: 'yes' } }, null, 2));
+    expect(() => loadConfig(configPath)).toThrow();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('JINN_SHARE_CONSENT env var overrides the file', async () => {
+    process.env['JINN_SHARE_CONSENT'] = 'true';
+    const config = loadConfig();
+    expect(config.mineableTraces?.share).toBe(true);
+  });
+
+  it('migrates legacy publishConsent: true to share', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-config-'));
     const configPath = path.join(dir, 'config.json');
     await writeFile(
@@ -1164,25 +1186,26 @@ describe('mineableTraces config field (task-creator spec §10, D2)', () => {
       JSON.stringify({ mineableTraces: { consent: 'retain_local', publishConsent: true } }, null, 2),
     );
     const config = loadConfig(configPath);
-    expect(config.mineableTraces?.consent).toBe('retain_local');
-    expect(config.mineableTraces?.publishConsent).toBe(true);
+    expect(config.mineableTraces?.share).toBe(true);
     await rm(dir, { recursive: true, force: true });
   });
 
-  it('rejects invalid consent values', async () => {
+  it('migrates legacy retain_local-only (publishConsent false) to share: false', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-config-'));
     const configPath = path.join(dir, 'config.json');
-    await writeFile(configPath, JSON.stringify({ mineableTraces: { consent: 'on' } }, null, 2));
-    expect(() => loadConfig(configPath)).toThrow();
+    await writeFile(
+      configPath,
+      JSON.stringify({ mineableTraces: { consent: 'retain_local', publishConsent: false } }, null, 2),
+    );
+    const config = loadConfig(configPath);
+    expect(config.mineableTraces?.share).toBe(false);
     await rm(dir, { recursive: true, force: true });
   });
 
-  it('JINN_MINEABLE_CONSENT and JINN_MINEABLE_PUBLISH_CONSENT env vars override the file', async () => {
-    process.env['JINN_MINEABLE_CONSENT'] = 'retain_local';
-    process.env['JINN_MINEABLE_PUBLISH_CONSENT'] = 'true';
+  it('migrates legacy JINN_MINEABLE_PUBLISH_CONSENT env to share', () => {
+    process.env['JINN_MINEABLE_PUBLISH_CONSENT'] = '1';
     const config = loadConfig();
-    expect(config.mineableTraces?.consent).toBe('retain_local');
-    expect(config.mineableTraces?.publishConsent).toBe(true);
+    expect(config.mineableTraces?.share).toBe(true);
   });
 });
 
@@ -1610,5 +1633,52 @@ describe('migrateLegacySolverNets', () => {
     migrateLegacySolverNets(raw);
     expect((raw.joinedSolverNets as Record<string, { contract: unknown }>)['legacy:broken-net'].contract)
       .toEqual({ id: 'broken-net', version: 'v1' });
+  });
+});
+
+describe('engine.knowledgeAutoload (#1393)', () => {
+  const dirs: string[] = [];
+  const originalEnv = process.env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'];
+
+  afterEach(async () => {
+    if (originalEnv === undefined) {
+      delete process.env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'];
+    } else {
+      process.env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'] = originalEnv;
+    }
+    await Promise.all(dirs.map((d) => rm(d, { recursive: true, force: true })));
+    dirs.length = 0;
+  });
+
+  const writeConfig = async (body: Record<string, unknown>): Promise<string> => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-config-test-'));
+    dirs.push(dir);
+    const configPath = path.join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify(body));
+    return configPath;
+  };
+
+  it('defaults to true when neither file nor env sets it', async () => {
+    delete process.env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'];
+    const config = loadConfig(await writeConfig({}));
+    expect(config.engine.knowledgeAutoload).toBe(true);
+  });
+
+  it('respects engine.knowledgeAutoload: false from the config file', async () => {
+    delete process.env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'];
+    const config = loadConfig(await writeConfig({ engine: { knowledgeAutoload: false } }));
+    expect(config.engine.knowledgeAutoload).toBe(false);
+  });
+
+  it('JINN_ENGINE_KNOWLEDGE_AUTOLOAD=0 overrides a file-set true', async () => {
+    process.env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'] = '0';
+    const config = loadConfig(await writeConfig({ engine: { knowledgeAutoload: true } }));
+    expect(config.engine.knowledgeAutoload).toBe(false);
+  });
+
+  it('JINN_ENGINE_KNOWLEDGE_AUTOLOAD=true enables it over a file-set false', async () => {
+    process.env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'] = 'true';
+    const config = loadConfig(await writeConfig({ engine: { knowledgeAutoload: false } }));
+    expect(config.engine.knowledgeAutoload).toBe(true);
   });
 });

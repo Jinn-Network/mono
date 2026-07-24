@@ -45,6 +45,8 @@ OPENROUTER_API_KEY=sk-or-...
 
 For OAuth / pooled credentials, run `hermes login`; it writes `~/.hermes/auth/` and `~/.hermes/auth.json`, which the daemon seeds per Task.
 
+Model / provider precedence: `JINN_HERMES_MODEL` / `JINN_HERMES_PROVIDER` in the daemon env win over the per-SolverNet config value, which wins over `~/.hermes/config.yaml`. When `JINN_HERMES_BASE_URL` (a local OpenAI-compatible endpoint) is set the provider stays `custom` regardless of `JINN_HERMES_PROVIDER`; the model name is still env-overridable.
+
 > Note on the rotate subcommand: a `hermes auth add` subcommand could **not** be confirmed in the harness code as shipped. The verified surfaces are `hermes login` (OAuth), the `~/.hermes/.env` file (provider key), and `hermes auth list` (used by the readiness probe). For an explicit add/rotate subcommand, run `hermes --help` against your installed version rather than relying on an unverified command.
 
 ## client/.env is dev-only

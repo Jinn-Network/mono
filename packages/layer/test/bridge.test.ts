@@ -1,0 +1,600 @@
+import { describe, it, expect } from 'vitest';
+import {
+  EPISODE_SCHEMA_VERSION,
+  EpisodeV1WriteSchema,
+  RETRIEVAL_VISIBLE_TAG,
+} from '@jinn-network/plugin';
+import {
+  repoFromInstanceId,
+  bridgeAttempts,
+  toBridgeCapturedTask,
+  buildBridgeEvidencePublisher,
+  type AttemptRef,
+  type BridgeEvidence,
+  type BridgeDeps,
+} from '../src/bridge.js';
+import { parseTraceEnvelopeV0 } from '../src/envelope.js';
+import { createMemoryLedger } from '../src/ledger.js';
+import type { HarnessPublishDeps } from '../src/publish.js';
+
+const NOW = new Date('2026-07-06T00:00:00.000Z');
+const RID_FOR_TEST = (n: number): string => `0x${String(n).repeat(64).slice(0, 64)}`;
+
+function ref(over: Partial<AttemptRef> = {}): AttemptRef {
+  return {
+    requestId: '0x' + 'a'.repeat(64),
+    chainId: 84532,
+    instanceId: 'django__django-11333',
+    model: 'claude-sonnet-4-6',
+    manifestCid: 'bafyAttempt',
+    polarity: 'pass',
+    ...over,
+  };
+}
+
+const VERIFIED_FACTS: NonNullable<BridgeEvidence['verifier']> = {
+  failToPass: ['tests/test_widget.py::test_regression'],
+  passToPass: ['tests/test_widget.py::test_existing'],
+  evalSemanticsVersion: '4',
+};
+
+function verifiedEvidence(
+  attempt: AttemptRef = ref(),
+  over: Partial<BridgeEvidence> = {},
+): BridgeEvidence {
+  return {
+    taskSummary: `summary ${attempt.instanceId}`,
+    patch: `patch ${attempt.instanceId}`,
+    repo: repoFromInstanceId(attempt.instanceId) ?? 'unknown/repo',
+    baseCommit: 'a'.repeat(40),
+    taskCreatedAt: 1_752_000_000_000,
+    instanceId: attempt.instanceId,
+    verifier: VERIFIED_FACTS,
+    ...over,
+  };
+}
+
+describe('repoFromInstanceId (SWE-bench owner__repo-N convention)', () => {
+  it('derives owner/repo', () => {
+    expect(repoFromInstanceId('django__django-11333')).toBe('django/django');
+    expect(repoFromInstanceId('sympy__sympy-27510')).toBe('sympy/sympy');
+    expect(repoFromInstanceId('scikit-learn__scikit-learn-12345')).toBe('scikit-learn/scikit-learn');
+  });
+  it('returns null for a malformed id', () => {
+    expect(repoFromInstanceId('not-an-instance')).toBeNull();
+    expect(repoFromInstanceId('')).toBeNull();
+  });
+});
+
+describe('toBridgeCapturedTask (both polarities, D10)', () => {
+  const ev = verifiedEvidence(ref(), {
+    taskSummary: 'Fix duplicate rows',
+    patch: 'diff --git a/x b/x',
+  });
+
+  it('refuses to emit evaluator-verified evidence without authenticated verifier facts', () => {
+    const { verifier: _verifier, ...unverified } = ev;
+    expect(() => toBridgeCapturedTask(ref(), unverified, NOW)).toThrow(/authenticated verifier facts/);
+  });
+
+  it('a pass becomes a completed, evaluator-verified pattern-eligible trace', () => {
+    const t = toBridgeCapturedTask(ref({ polarity: 'pass' }), ev, NOW);
+    expect(t.outcome.status).toBe('completed');
+    expect(t.outcome.verifiabilityTier).toBe('evaluator-verified');
+    expect(t.environment.harness.name).toBe('jinn-execution-ledger-bridge');
+    expect(t.provenance).toBe('derived-from-history');
+    expect(t.task.distributionTags).toContain('coding');
+    expect(t.steps.some((s) => s.name === 'tool:apply_patch')).toBe(true);
+    expect(t.environment.verifier).toMatchObject({
+      type: 'f2p-p2p',
+      evalSemanticsVersion: '4',
+    });
+  });
+
+  it('a fail becomes a failed, evaluator-verified lesson-eligible trace', () => {
+    const t = toBridgeCapturedTask(ref({ polarity: 'fail' }), ev, NOW);
+    expect(t.outcome.status).toBe('failed');
+    expect(t.outcome.verifiabilityTier).toBe('evaluator-verified');
+    const verdictStep = t.steps.find((s) => s.name === 'evaluator:verdict');
+    expect(verdictStep?.attributes.actualPassed).toBe(false);
+  });
+
+  it('inserts canonical typed spans between patch and verdict when enriched', () => {
+    const t = toBridgeCapturedTask(ref(), {
+      ...ev,
+      trajectorySpans: [
+        {
+          name: 'agent_turn.assistant',
+          kind: 'INTERNAL',
+          startTimeUnixNano: '100',
+          endTimeUnixNano: '101',
+          attributes: {
+            'jinn.span.kind': 'jinn.agent_turn',
+            'jinn.turn.role': 'assistant',
+            'message.content': 'plan the fix',
+            'jinn.transcript.sourceFormat': 'claude-code-stream-json',
+            'jinn.transcript.parser': 'claude-code-stream-json',
+            'jinn.transcript.parserVersion': '1.0.0',
+          },
+          events: [],
+          status: { code: 'OK' },
+        },
+        {
+          name: 'tool_call.Edit',
+          kind: 'INTERNAL',
+          startTimeUnixNano: '102',
+          endTimeUnixNano: '103',
+          attributes: {
+            'jinn.span.kind': 'jinn.tool_call',
+            'tool.name': 'Edit',
+            'tool.args': { path: 'x.ts' },
+            'jinn.transcript.sourceFormat': 'claude-code-stream-json',
+            'jinn.transcript.parser': 'claude-code-stream-json',
+            'jinn.transcript.parserVersion': '1.0.0',
+          },
+          events: [{
+            timeUnixNano: '103',
+            name: 'tool_result',
+            attributes: {
+              'tool.result': 'edit failed',
+              'tool.result.is_error': true,
+            },
+          }],
+          status: { code: 'ERROR', message: 'write rejected' },
+        },
+      ],
+    }, NOW);
+    const names = t.steps.map((s) => s.name);
+    expect(names).toEqual([
+      'tool:apply_patch',
+      'agent_turn.assistant',
+      'tool_call.Edit',
+      'evaluator:verdict',
+    ]);
+    expect(t.steps.slice(1, 3)).toEqual([
+      expect.objectContaining({
+        spanId: 'history-000001',
+        kind: 'jinn.agent_turn',
+        attributes: expect.objectContaining({
+          'jinn.transcript.parser': 'claude-code-stream-json',
+          'jinn.transcript.parserVersion': '1.0.0',
+        }),
+      }),
+      expect.objectContaining({
+        spanId: 'history-000002',
+        kind: 'jinn.tool_call',
+        events: [{
+          timeUnixNano: '103',
+          name: 'tool_result',
+          attributes: {
+            'tool.result': 'edit failed',
+            'tool.result.is_error': true,
+          },
+        }],
+        status: { code: 'ERROR', message: 'write rejected' },
+      }),
+    ]);
+    expect(t.task.distributionTags).not.toContain('patch-only');
+  });
+
+  it('tags patch-only and inserts no history steps when the trajectory is unavailable', () => {
+    const t = toBridgeCapturedTask(ref(), ev, NOW);
+    expect(t.steps.map((s) => s.name)).toEqual(['tool:apply_patch', 'evaluator:verdict']);
+    expect(t.task.distributionTags).toContain('patch-only');
+  });
+
+  it('never emits the retrieval-visibility mark on a bridged record (#1824 sequencing guard: bulk derivation cannot self-admit into pickup)', () => {
+    for (const polarity of ['pass', 'fail'] as const) {
+      for (const evidence of [ev, {
+        ...ev,
+        trajectorySpans: [{
+          name: 'agent_turn.assistant',
+          kind: 'INTERNAL' as const,
+          startTimeUnixNano: '100',
+          endTimeUnixNano: '101',
+          attributes: {
+            'jinn.span.kind': 'jinn.agent_turn',
+            'jinn.transcript.sourceFormat': 'claude-code-stream-json',
+            'jinn.transcript.parser': 'claude-code-stream-json',
+            'jinn.transcript.parserVersion': '1.0.0',
+          },
+          events: [],
+          status: { code: 'OK' as const },
+        }],
+      }]) {
+        const t = toBridgeCapturedTask(ref({ polarity }), evidence, NOW);
+        expect(t.task.distributionTags).not.toContain(RETRIEVAL_VISIBLE_TAG);
+      }
+    }
+  });
+
+  it('namespaces an authenticated repository that equals the reserved retrieval mark', () => {
+    const task = toBridgeCapturedTask(ref(), {
+      ...ev,
+      repo: RETRIEVAL_VISIBLE_TAG,
+    }, NOW);
+
+    expect(task.task.repositorySlug).toBe(RETRIEVAL_VISIBLE_TAG);
+    expect(task.task.distributionTags).not.toContain(RETRIEVAL_VISIBLE_TAG);
+    expect(task.task.distributionTags).toContain(`repo:${RETRIEVAL_VISIBLE_TAG}`);
+  });
+
+  it('projects every available post-training tuple fact into the captured task', () => {
+    const t = toBridgeCapturedTask(ref(), {
+      ...ev,
+      baseCommit: 'a'.repeat(40),
+      taskCreatedAt: 1_752_000_000,
+      instanceId: 'django__django-11333',
+      generatorModel: {
+        id: 'claude-sonnet-4-6',
+        provider: 'anthropic',
+        source: 'stream',
+      },
+      distributionClass: 'restricted-tos',
+      verifier: {
+        failToPass: ['tests/test_widget.py::test_regression'],
+        passToPass: ['tests/test_widget.py::test_existing'],
+        evalSemanticsVersion: '4',
+      },
+      verdictEnvelopeCid: 'bafyVerdictEnvelope',
+      solutionEnvelopeCid: 'bafySolutionEnvelope',
+      rawSnapshotRef: 'bafyRawSnapshot',
+    }, NOW);
+
+    expect(t.task).toMatchObject({
+      repositorySlug: 'django/django',
+      baseCommit: 'a'.repeat(40),
+      createdAt: 1_752_000_000,
+      instanceId: 'django__django-11333',
+    });
+    expect(t.environment).toMatchObject({
+      generatorModel: {
+        id: 'claude-sonnet-4-6',
+        source: 'stream',
+      },
+      distributionClass: 'restricted-tos',
+      verifier: {
+        type: 'f2p-p2p',
+        failToPass: ['tests/test_widget.py::test_regression'],
+        passToPass: ['tests/test_widget.py::test_existing'],
+        evalSemanticsVersion: '4',
+      },
+    });
+    expect(t.attemptGroup).toEqual({
+      groupId: 'django__django-11333',
+      attemptId: ref().requestId,
+      relatedAttemptRefs: [
+        'bafyVerdictEnvelope',
+        'bafySolutionEnvelope',
+        'bafyRawSnapshot',
+      ],
+    });
+    expect(t.lineage).toEqual({ episodeId: 'bafySolutionEnvelope' });
+    expect(t.steps.every((step) => step.kind === 'jinn.tool_call')).toBe(true);
+  });
+});
+
+describe('bridgeAttempts', () => {
+  function coreDeps(over: Partial<BridgeDeps> = {}): BridgeDeps & { published: AttemptRef[] } {
+    const published: AttemptRef[] = [];
+    const deps: BridgeDeps & { published: AttemptRef[] } = {
+      published,
+      slateInstanceIds: new Set<string>(),
+      now: () => NOW,
+      fetchEvidence: async (r) => verifiedEvidence(r),
+      publishEvidence: async (_task, r) => { published.push(r); return { envelopeRef: `env-${r.instanceId}-${r.polarity}`, anchorTx: null }; },
+      ...over,
+    };
+    return deps;
+  }
+
+  it('bridges both a pass and a fail for the same instance (complementary, not deduped)', async () => {
+    const deps = coreDeps();
+    const res = await bridgeAttempts(
+      [ref({ polarity: 'pass' }), ref({ polarity: 'fail' })],
+      deps,
+    );
+    expect(res.bridged.map((b) => b.polarity).sort()).toEqual(['fail', 'pass']);
+  });
+
+  it('dedups a repeated (instance_id, polarity)', async () => {
+    const deps = coreDeps();
+    const res = await bridgeAttempts(
+      [ref({ requestId: '0x1'.padEnd(66, '0') }), ref({ requestId: '0x2'.padEnd(66, '0') })],
+      deps,
+    );
+    expect(res.bridged).toHaveLength(1);
+    expect(res.deduped).toHaveLength(1);
+  });
+
+  it('retains up to groupCap attempts per (instance_id, polarity); overflow → deduped, kept-K stable-ordered (#1478)', async () => {
+    const deps = coreDeps({ groupCap: 2 });
+    const passRefs = ['0xa', '0xb', '0xc'].map((p) => ref({ requestId: p.padEnd(66, '0') }));
+    const res = await bridgeAttempts(passRefs, deps);
+    // exactly K kept, the remainder recorded as over-cap.
+    expect(res.bridged).toHaveLength(2);
+    expect(res.deduped).toHaveLength(1);
+    // the kept K are the FIRST K in arrival order (deterministic selection).
+    expect(deps.published.map((r) => r.requestId)).toEqual([
+      '0xa'.padEnd(66, '0'),
+      '0xb'.padEnd(66, '0'),
+    ]);
+  });
+
+  it('a failed fetch does NOT consume a group slot — a later candidate backfills (#1478)', async () => {
+    // groupCap=2, but the FIRST candidate's evidence fetch fails: the cap must
+    // count successful bridges only, so the 2nd and 3rd still fill the group.
+    let call = 0;
+    const deps = coreDeps({
+      groupCap: 2,
+      fetchEvidence: async (r) => {
+        if (++call === 1) throw new Error('3-hop join miss');
+        return verifiedEvidence(r);
+      },
+    });
+    const passRefs = ['0xa', '0xb', '0xc'].map((p) => ref({ requestId: p.padEnd(66, '0') }));
+    const res = await bridgeAttempts(passRefs, deps);
+    expect(res.bridged).toHaveLength(2);       // the group still reached groupCap
+    expect(res.errors).toHaveLength(1);        // the miss is recorded, not silent
+    expect(res.deduped).toHaveLength(0);       // no valid candidate wrongly dropped as over-cap
+  });
+
+  it('caps each polarity independently (a group is per (instance, polarity)) (#1478)', async () => {
+    const deps = coreDeps({ groupCap: 2 });
+    const refs = [
+      ...['0xa', '0xb', '0xc'].map((p) => ref({ requestId: p.padEnd(66, '0'), polarity: 'pass' })),
+      ...['0xd', '0xe', '0xf'].map((p) => ref({ requestId: p.padEnd(66, '0'), polarity: 'fail' })),
+    ];
+    const res = await bridgeAttempts(refs, deps);
+    expect(res.bridged.filter((b) => b.polarity === 'pass')).toHaveLength(2);
+    expect(res.bridged.filter((b) => b.polarity === 'fail')).toHaveLength(2);
+    expect(res.deduped).toHaveLength(2);
+  });
+
+  it('excludes held-out by instance_id AND by repo (derived)', async () => {
+    const deps = coreDeps({ slateInstanceIds: new Set(['django__django-99999']) });
+    const res = await bridgeAttempts(
+      [
+        ref({ instanceId: 'django__django-99999' }),  // slate instance → excluded (instance_id)
+        ref({ instanceId: 'django__django-11333' }),  // same repo as a slate instance → excluded (repo)
+        ref({ instanceId: 'flask__flask-4200' }),      // clean → bridged
+      ],
+      deps,
+    );
+    expect(res.bridged.map((b) => b.instanceId)).toEqual(['flask__flask-4200']);
+    expect(res.excludedHeldOut.map((e) => e.reason).sort()).toEqual(['instance_id', 'repo']);
+  });
+
+  it('uses authenticated evidence identity for held-out exclusion, not the projected ref identity', async () => {
+    const projectedHeldOut = 'django__django-99999';
+    const authenticatedClean = 'flask__flask-4200';
+    const deps = coreDeps({
+      slateInstanceIds: new Set([projectedHeldOut]),
+      fetchEvidence: async () => verifiedEvidence(ref({ instanceId: authenticatedClean })),
+    });
+
+    const res = await bridgeAttempts([ref({ instanceId: projectedHeldOut })], deps);
+
+    expect(res.bridged.map((row) => row.instanceId)).toEqual([authenticatedClean]);
+    expect(res.excludedHeldOut).toEqual([]);
+    expect(deps.published.map((row) => row.instanceId)).toEqual([authenticatedClean]);
+  });
+
+  it('applies weak-suite and lookup exclusions to authenticated evidence identity', async () => {
+    const weak = 'flask__flask-4200';
+    const lookup = 'sympy__sympy-27510';
+    const refs = [
+      ref({ requestId: RID_FOR_TEST(1), instanceId: 'projection__clean-1' }),
+      ref({ requestId: RID_FOR_TEST(2), instanceId: 'projection__clean-2' }),
+    ];
+    const deps = coreDeps({
+      weakSuiteInstanceIds: new Set([weak]),
+      lookupFlaggedInstanceIds: new Set([lookup]),
+      fetchEvidence: async (candidate) => verifiedEvidence(
+        ref({
+          instanceId: candidate.requestId === RID_FOR_TEST(1) ? weak : lookup,
+        }),
+      ),
+    });
+
+    const res = await bridgeAttempts(refs, deps);
+
+    expect(res.bridged).toEqual([]);
+    expect(res.excludedHeldOut).toEqual([{ instanceId: weak, reason: 'instance_id' }]);
+    expect(res.deduped).toEqual([{ instanceId: lookup, polarity: 'pass' }]);
+  });
+
+  it('groups and caps by authenticated evidence identity', async () => {
+    const authenticated = 'flask__flask-4200';
+    const deps = coreDeps({
+      fetchEvidence: async () => verifiedEvidence(ref({ instanceId: authenticated })),
+    });
+    const res = await bridgeAttempts([
+      ref({ requestId: RID_FOR_TEST(3), instanceId: 'attacker__one-1' }),
+      ref({ requestId: RID_FOR_TEST(4), instanceId: 'attacker__two-2' }),
+    ], deps);
+
+    expect(res.bridged).toHaveLength(1);
+    expect(res.bridged[0]?.instanceId).toBe(authenticated);
+    expect(res.deduped).toEqual([{ instanceId: authenticated, polarity: 'pass' }]);
+    expect(deps.published).toHaveLength(1);
+  });
+
+  it('records an error without sinking the batch', async () => {
+    const deps = coreDeps({
+      fetchEvidence: async (r) => {
+        if (r.instanceId.includes('boom')) throw new Error('ipfs down');
+        return verifiedEvidence(r, { taskSummary: 's', patch: 'p' });
+      },
+    });
+    const res = await bridgeAttempts([ref({ instanceId: 'boom__boom-1' }), ref({ instanceId: 'flask__flask-4200' })], deps);
+    expect(res.errors).toHaveLength(1);
+    expect(res.bridged).toHaveLength(1);
+  });
+
+  it('never retries a failed publication through another discovery projection', async () => {
+    let fetchCalls = 0;
+    let publishCalls = 0;
+    const deps = coreDeps({
+      fetchEvidence: async (candidate) => {
+        fetchCalls += 1;
+        return verifiedEvidence(candidate);
+      },
+      publishEvidence: async () => {
+        publishCalls += 1;
+        throw new Error('anchor receipt unavailable after submission');
+      },
+    });
+    const attempt = ref({
+      discoveryCandidates: [
+        { instanceId: 'django__django-11333', verdictManifestCid: 'bafyFirst' },
+        { instanceId: 'django__django-11333', verdictManifestCid: 'bafySecond' },
+      ],
+    });
+
+    const res = await bridgeAttempts([attempt], deps);
+
+    expect(res.bridged).toEqual([]);
+    expect(res.errors).toEqual([{
+      requestId: attempt.requestId,
+      error: 'anchor receipt unavailable after submission',
+    }]);
+    expect(fetchCalls).toBe(1);
+    expect(publishCalls).toBe(1);
+  });
+
+  it('surfaces a slate instance_id whose repo cannot be derived (repo-exclusion incomplete, not silent)', async () => {
+    const deps = coreDeps({ slateInstanceIds: new Set(['malformed-slate-id', 'django__django-99999']) });
+    const res = await bridgeAttempts([ref({ instanceId: 'flask__flask-4200' })], deps);
+    // The unparseable slate id is reported; the well-formed one is not.
+    expect(res.unresolvedSlateIds).toEqual(['malformed-slate-id']);
+    // Exact-id exclusion is unaffected; a clean instance still bridges.
+    expect(res.bridged.map((b) => b.instanceId)).toEqual(['flask__flask-4200']);
+  });
+
+  it('reports no unresolved slate ids when every slate id is well-formed', async () => {
+    const deps = coreDeps({ slateInstanceIds: new Set(['django__django-99999', 'flask__flask-1']) });
+    const res = await bridgeAttempts([ref({ instanceId: 'sympy__sympy-27510' })], deps);
+    expect(res.unresolvedSlateIds).toEqual([]);
+  });
+});
+
+describe('buildBridgeEvidencePublisher (reuses capture→publish at layer-2 altitude)', () => {
+  function publishDeps(): { deps: HarnessPublishDeps; artifacts: Array<{ artifactType: string; payload: unknown }> } {
+    const artifacts: Array<{ artifactType: string; payload: unknown }> = [];
+    const deps: HarnessPublishDeps = {
+      participant: { safeAddress: `0x${'1'.repeat(40)}`, agentEoa: `0x${'2'.repeat(40)}` },
+      signer: { address: `0x${'2'.repeat(40)}`, privateKey: `0x${'a'.repeat(64)}` },
+      clientGitSha: 'sha',
+      defaultArtifactEndpoint: 'http://127.0.0.1:7331',
+      ledger: createMemoryLedger(),
+      publishArtifact: async (i) => { artifacts.push(i); return { cid: 'bafyArt', sha256: 'a'.repeat(64) }; },
+      publishEnvelope: async () => ({ cid: 'bafyEnv', sha256: 'b'.repeat(64) }),
+      anchorEnvelope: async () => ({ txHash: `0x${'e'.repeat(64)}`, blockNumber: 1 }),
+    };
+    return { deps, artifacts };
+  }
+
+  it('publishes a canonical jinn.episode.v1 with the patch scrubbed at layer-2 (secret gone, prose kept)', async () => {
+    const { deps, artifacts } = publishDeps();
+    const publisher = buildBridgeEvidencePublisher(deps);
+    const task = toBridgeCapturedTask(
+      ref(),
+      {
+        ...verifiedEvidence(),
+        taskSummary: 'Fix the bug before you refactor',
+        patch: 'use this token wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY here',
+      },
+      NOW,
+    );
+    const out = await publisher(task, ref());
+    expect(out.envelopeRef).toBe('bafyEnv');
+
+    const episodeUpload = artifacts.find((a) => a.artifactType === EPISODE_SCHEMA_VERSION);
+    expect(episodeUpload).toBeTruthy();
+    const env = EpisodeV1WriteSchema.parse(episodeUpload!.payload);
+    const patchStep = env.trajectory.find((s) => s.name === 'tool:apply_patch');
+    const patchVal = String(patchStep!.attributes.patch);
+    expect(patchVal).not.toContain('wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'); // secret redacted
+    expect(patchVal).toContain('use this token'); // ordinary prose preserved (layer-2 altitude)
+  });
+
+  it('publishes typed history spans as derived and retrieval-invisible', async () => {
+    const { deps, artifacts } = publishDeps();
+    const publisher = buildBridgeEvidencePublisher(deps);
+    const task = toBridgeCapturedTask(
+      ref(),
+      {
+        ...verifiedEvidence(),
+        taskSummary: 'Fix the bug',
+        patch: 'diff --git a/x b/x',
+        trajectorySpans: [{
+          name: 'agent_turn.assistant',
+          kind: 'INTERNAL',
+          startTimeUnixNano: '100',
+          endTimeUnixNano: '101',
+          attributes: {
+            'jinn.span.kind': 'jinn.agent_turn',
+            'message.content': 'read config using wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+            'jinn.transcript.sourceFormat': 'claude-code-stream-json',
+            'jinn.transcript.parser': 'claude-code-stream-json',
+            'jinn.transcript.parserVersion': '1.0.0',
+          },
+          events: [{
+            timeUnixNano: '101',
+            name: 'tool_result',
+            attributes: {
+              'tool.result': 'failed with wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+              'tool.result.is_error': true,
+            },
+          }],
+          status: { code: 'ERROR', message: 'command failed' },
+        }],
+      },
+      NOW,
+    );
+    await publisher(task, ref());
+
+    const episodeUpload = artifacts.find((a) => a.artifactType === EPISODE_SCHEMA_VERSION);
+    const env = EpisodeV1WriteSchema.parse(episodeUpload!.payload);
+    const historyStep = env.trajectory.find((s) => s.name === 'agent_turn.assistant')!;
+    expect(String(historyStep.attributes['message.content'])).not.toContain(
+      'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+    );
+    expect(historyStep.attributes['jinn.transcript.parserVersion']).toBe('1.0.0');
+    expect(historyStep.events).toEqual([{
+      timeUnixNano: '101',
+      name: 'tool_result',
+      attributes: {
+        'tool.result': expect.not.stringContaining(
+          'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+        ),
+        'tool.result.is_error': true,
+      },
+    }]);
+    expect(historyStep.status).toEqual({ code: 'ERROR', message: 'command failed' });
+    expect(env.provenance).toBe('derived-from-history');
+    expect(env.retrievalVisible).toBe(false);
+    expect(env.task.distributionTags).not.toContain(RETRIEVAL_VISIBLE_TAG);
+  });
+
+  it('bridges a patch larger than the 16 KiB step-attribute cap with a receipted truncation (not a crash, not silent)', async () => {
+    const { deps, artifacts } = publishDeps();
+    const publisher = buildBridgeEvidencePublisher(deps);
+    const bigPatch = 'diff --git a/x b/x\n' + 'x'.repeat(20 * 1024); // exceeds MAX_STEP_ATTRIBUTES_BYTES (16 KiB)
+    const task = toBridgeCapturedTask(
+      ref(),
+      { ...verifiedEvidence(), taskSummary: 'a very large patch', patch: bigPatch },
+      NOW,
+    );
+    const out = await publisher(task, ref());
+    expect(out.envelopeRef).toBe('bafyEnv');
+
+    const episodeUpload = artifacts.find((a) => a.artifactType === EPISODE_SCHEMA_VERSION);
+    const env = EpisodeV1WriteSchema.parse(episodeUpload!.payload);
+    const patchStep = env.trajectory.find((s) => s.name === 'tool:apply_patch')!;
+    const stored = String(patchStep.attributes.patch);
+    expect(stored.length).toBeLessThan(bigPatch.length); // truncated to fit the cap
+    expect(patchStep.truncatedKeys ?? []).toContain('patch'); // receipted, never silent
+  });
+});

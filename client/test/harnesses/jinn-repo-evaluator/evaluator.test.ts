@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { JinnRepoEvaluator } from '../../../src/harnesses/impls/jinn-repo-evaluator/evaluator.js';
 
 describe('JinnRepoEvaluator', () => {
-  const task = { schemaVersion: 'jinn-repo.v1', instance_id: 'x-1', repo: 'Jinn-Network/mono',
+  const task = { schemaVersion: 'jinn-repo.v1', source: 'merged-pr', instance_id: 'x-1', repo: 'Jinn-Network/mono',
     base_commit: 'a'.repeat(40), merged_pr: 1, language: 'typescript',
     problem_statement: 'p', test_files: ['t.test.ts'], test_cmd: 'yarn vitest run t.test.ts',
     gold_tests: { 't.test.ts': 'x' }, solution_patch: 'diff' } as const;

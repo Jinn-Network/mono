@@ -8,6 +8,7 @@ import type { JinnRepoPoolItem } from '../../src/solver-types/_jinn-repo-pool.js
 function poolItem(n: number): JinnRepoPoolItem {
   return {
     schemaVersion: 'jinn-repo.v1',
+    source: 'merged-pr',
     instance_id: `jinn__mono-${n}`,
     repo: 'Jinn-Network/mono',
     base_commit: 'a'.repeat(40),

@@ -33,6 +33,7 @@ export async function extractPoolItem(pr: PrSummary, deps: ExtractDeps): Promise
   const issue = await deps.fetchIssue(pr.closingIssues[0]!);
   const item: JinnRepoPoolItem = {
     schemaVersion: 'jinn-repo.v1',
+    source: 'merged-pr',
     instance_id: `Jinn-Network__mono-${pr.number}`,
     repo: 'Jinn-Network/mono',
     base_commit: base,

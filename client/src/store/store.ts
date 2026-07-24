@@ -210,10 +210,14 @@ export interface Erc8004AnchorInput {
   blockNumber: number | null;
   payloadHex: string;
   anchoredAt: number;
+  gasUsed?: string | null;
+  feeWei?: string | null;
 }
 
-export interface Erc8004AnchorRow extends Erc8004AnchorInput {
+export interface Erc8004AnchorRow extends Omit<Erc8004AnchorInput, 'gasUsed' | 'feeWei'> {
   id: number;
+  gasUsed: string | null;
+  feeWei: string | null;
 }
 
 export type TaskPostingPolicyType = 'once_per_safe' | 'once_per_bucket' | 'interval';
@@ -483,10 +487,18 @@ CREATE TABLE IF NOT EXISTS erc8004_anchors (
   tx_hash TEXT NOT NULL,
   block_number INTEGER,
   payload_hex TEXT NOT NULL,
-  anchored_at INTEGER NOT NULL
+  anchored_at INTEGER NOT NULL,
+  gas_used TEXT,
+  fee_wei TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_erc8004_anchors_envelope_cid ON erc8004_anchors(envelope_cid);
 CREATE INDEX IF NOT EXISTS idx_erc8004_anchors_envelope_id ON erc8004_anchors(envelope_id);
+
+CREATE TABLE IF NOT EXISTS manifest_batch_journal (
+  batch_key TEXT PRIMARY KEY,
+  state_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 CREATE TABLE IF NOT EXISTS task_post_locks (
   creator_safe_address TEXT NOT NULL,
@@ -579,6 +591,8 @@ export class Store {
     this.ensureArtifactsTaskColumns();
     this.ensureRewardClaimsTxIndex();
     this.ensureNetworkArtifactsPeerCatalogId();
+    this.ensureErc8004AnchorGasColumns();
+    this.ensureErc8004AnchorFinalizationIndex();
     this.ensureTaskPostsTaskCoordinatorColumns();
     this.ensureEnvelopeProjectionColumns();
     this.ensureActivityEventCostColumns();
@@ -624,6 +638,41 @@ export class Store {
     this.db.exec(
       `CREATE INDEX IF NOT EXISTS idx_network_artifacts_peer_catalog ON network_artifacts (peer_catalog_id)`,
     );
+  }
+
+  /** Databases created before manifest batching do not have receipt cost telemetry. */
+  private ensureErc8004AnchorGasColumns(): void {
+    const cols = this.db.prepare(`PRAGMA table_info(erc8004_anchors)`).all() as Array<{ name: string }>;
+    const names = new Set(cols.map((c) => c.name));
+    if (!names.has('gas_used')) {
+      this.db.exec(`ALTER TABLE erc8004_anchors ADD COLUMN gas_used TEXT`);
+    }
+    if (!names.has('fee_wei')) {
+      this.db.exec(`ALTER TABLE erc8004_anchors ADD COLUMN fee_wei TEXT`);
+    }
+  }
+
+  /**
+   * Exact anchor finalization is idempotent across process crashes. Older
+   * databases may contain duplicates from the pre-journal path, so retain the
+   * first local receipt before adding the durable key.
+   */
+  private ensureErc8004AnchorFinalizationIndex(): void {
+    this.db.exec(`
+      DELETE FROM erc8004_anchors
+       WHERE id NOT IN (
+         SELECT MIN(id)
+           FROM erc8004_anchors
+          GROUP BY chain_id, identity_registry_address, metadata_key, tx_hash
+       );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_erc8004_anchors_finalization
+        ON erc8004_anchors (
+          chain_id,
+          identity_registry_address,
+          metadata_key,
+          tx_hash
+        );
+    `);
   }
 
   /** Fresh v1 state is Task-first; older local DBs get additive columns only. */
@@ -2516,6 +2565,81 @@ export class Store {
     ];
   }
 
+  /**
+   * Deterministic per-envelopeCid artifact lookup — no recency window, unlike
+   * searchOwnAndCached. Used by corpus-knowledge autoload (#1393 review
+   * finding 2) to backfill artifact refs for a small, already-ranked set of
+   * envelope CIDs regardless of how many other artifact rows exist locally.
+   */
+  getArtifactsByEnvelopeCids(envelopeCids: readonly string[]): Array<{
+    sha256: string;
+    artifactType: string;
+    source: 'served' | 'network';
+    envelopeCid: string | null;
+    createdAt: string;
+    contentSize: number;
+    priceUsdc?: string;
+    sourceEndpoint?: string | null;
+    sourceOperator?: string | null;
+    paidAmountUsdc?: string;
+  }> {
+    if (envelopeCids.length === 0) return [];
+    const params: Record<string, unknown> = {};
+    const placeholders = envelopeCids.map((cid, index) => {
+      const key = `cid${index}`;
+      params[key] = cid;
+      return `@${key}`;
+    }).join(', ');
+
+    const own = this.db.prepare(
+      `SELECT sha256, artifact_type, envelope_cid, content_size, price_usdc, created_at
+       FROM served_artifacts WHERE envelope_cid IN (${placeholders})`,
+    ).all(params) as Array<{
+      sha256: string;
+      artifact_type: string;
+      envelope_cid: string | null;
+      content_size: number;
+      price_usdc: string;
+      created_at: string;
+    }>;
+    const cached = this.db.prepare(
+      `SELECT sha256, artifact_type, envelope_cid, content_size, source_operator, source_endpoint, paid_amount_usdc, fetched_at
+       FROM network_artifacts WHERE envelope_cid IN (${placeholders})`,
+    ).all(params) as Array<{
+      sha256: string;
+      artifact_type: string;
+      envelope_cid: string | null;
+      content_size: number;
+      source_operator: string | null;
+      source_endpoint: string | null;
+      paid_amount_usdc: string;
+      fetched_at: string;
+    }>;
+
+    return [
+      ...own.map((r) => ({
+        sha256: r.sha256,
+        artifactType: r.artifact_type,
+        source: 'served' as const,
+        envelopeCid: r.envelope_cid,
+        createdAt: r.created_at,
+        contentSize: r.content_size,
+        priceUsdc: r.price_usdc,
+      })),
+      ...cached.map((r) => ({
+        sha256: r.sha256,
+        artifactType: r.artifact_type,
+        source: 'network' as const,
+        envelopeCid: r.envelope_cid,
+        createdAt: r.fetched_at,
+        contentSize: r.content_size,
+        sourceEndpoint: r.source_endpoint,
+        sourceOperator: r.source_operator,
+        paidAmountUsdc: r.paid_amount_usdc,
+      })),
+    ];
+  }
+
   saveEnvelopeProjection(projection: EnvelopeProjection): void {
     const tx = this.db.transaction((p: EnvelopeProjection) => {
       this.db.prepare(
@@ -2593,6 +2717,21 @@ export class Store {
       }
     });
     tx(projection);
+  }
+
+  /**
+   * Upgrade a previously-saved projection's evidence_tier in place (#1393
+   * review finding 1). pack() saves projections as 'self-signed' regardless
+   * of the envelope's own (aspirational) tier — a race-lost or failed
+   * delivery must never leave a 'committed' projection outranking genuinely
+   * delivered self-signed work. deliver() calls this to upgrade the tier
+   * only once on-chain evidence actually exists (claimDelivery succeeded).
+   * No-op if the envelope_id isn't found (defensive; never fatal to deliver()).
+   */
+  upgradeEnvelopeProjectionEvidenceTier(envelopeId: string, tier: EnvelopeProjection['evidenceTier']): void {
+    this.db.prepare(
+      `UPDATE envelope_projections SET evidence_tier = @tier WHERE envelope_id = @envelopeId`,
+    ).run({ envelopeId, tier });
   }
 
   queryEnvelopeProjections(query: EnvelopeProjectionQuery = {}): EnvelopeProjection[] {
@@ -2697,14 +2836,14 @@ export class Store {
 
   saveErc8004Anchor(input: Erc8004AnchorInput): void {
     this.db.prepare(
-      `INSERT INTO erc8004_anchors
+      `INSERT OR IGNORE INTO erc8004_anchors
          (envelope_id, envelope_cid, content_kind, metadata_key, agent_id,
           chain_id, identity_registry_address, tx_hash, block_number,
-          payload_hex, anchored_at)
+          payload_hex, anchored_at, gas_used, fee_wei)
        VALUES
          (@envelopeId, @envelopeCid, @contentKind, @metadataKey, @agentId,
           @chainId, @identityRegistryAddress, @txHash, @blockNumber,
-          @payloadHex, @anchoredAt)`,
+          @payloadHex, @anchoredAt, @gasUsed, @feeWei)`,
     ).run({
       envelopeId: input.envelopeId,
       envelopeCid: input.envelopeCid,
@@ -2717,7 +2856,51 @@ export class Store {
       blockNumber: input.blockNumber,
       payloadHex: input.payloadHex,
       anchoredAt: input.anchoredAt,
+      gasUsed: input.gasUsed ?? null,
+      feeWei: input.feeWei ?? null,
     });
+  }
+
+  loadManifestBatchJournal(batchKey: string): string | null {
+    const row = this.db.prepare(
+      `SELECT state_json
+         FROM manifest_batch_journal
+        WHERE batch_key = ?`,
+    ).get(batchKey) as { state_json: string } | undefined;
+    return row?.state_json ?? null;
+  }
+
+  saveManifestBatchJournal(batchKey: string, stateJson: string): void {
+    this.db.prepare(
+      `INSERT INTO manifest_batch_journal (batch_key, state_json, updated_at)
+       VALUES (@batchKey, @stateJson, datetime('now'))
+       ON CONFLICT(batch_key) DO UPDATE SET
+         state_json = excluded.state_json,
+         updated_at = excluded.updated_at`,
+    ).run({ batchKey, stateJson });
+  }
+
+  compareAndSwapManifestBatchJournal(
+    batchKey: string,
+    expectedStateJson: string | null,
+    nextStateJson: string,
+  ): boolean {
+    if (expectedStateJson === null) {
+      const result = this.db.prepare(
+        `INSERT INTO manifest_batch_journal (batch_key, state_json, updated_at)
+         VALUES (@batchKey, @nextStateJson, datetime('now'))
+         ON CONFLICT(batch_key) DO NOTHING`,
+      ).run({ batchKey, nextStateJson });
+      return result.changes === 1;
+    }
+    const result = this.db.prepare(
+      `UPDATE manifest_batch_journal
+          SET state_json = @nextStateJson,
+              updated_at = datetime('now')
+        WHERE batch_key = @batchKey
+          AND state_json = @expectedStateJson`,
+    ).run({ batchKey, expectedStateJson, nextStateJson });
+    return result.changes === 1;
   }
 
   listErc8004AnchorsByEnvelopeCids(envelopeCids: readonly string[]): Erc8004AnchorRow[] {
@@ -2728,7 +2911,7 @@ export class Store {
     const rows = this.db.prepare(
       `SELECT id, envelope_id, envelope_cid, content_kind, metadata_key, agent_id,
               chain_id, identity_registry_address, tx_hash, block_number,
-              payload_hex, anchored_at
+              payload_hex, anchored_at, gas_used, fee_wei
          FROM erc8004_anchors
          WHERE envelope_cid IN (${placeholders})
          ORDER BY anchored_at ASC, id ASC`,
@@ -2745,6 +2928,8 @@ export class Store {
       block_number: number | null;
       payload_hex: string;
       anchored_at: number;
+      gas_used: string | null;
+      fee_wei: string | null;
     }>;
     return rows.map((r) => ({
       id: r.id,
@@ -2759,6 +2944,8 @@ export class Store {
       blockNumber: r.block_number,
       payloadHex: r.payload_hex,
       anchoredAt: r.anchored_at,
+      gasUsed: r.gas_used,
+      feeWei: r.fee_wei,
     }));
   }
 

@@ -163,7 +163,7 @@ jobs:
       # so the Thursday skip-if-unchanged short-circuit (§8) cleanly no-ops the
       # whole run when next HEAD already has an environment-suite verdict.
       - if: steps.resolve.outputs.skip != 'true'
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 22
       - if: steps.resolve.outputs.skip != 'true'
@@ -178,6 +178,18 @@ jobs:
       - name: Build SDK package for preflight harness imports
         if: steps.resolve.outputs.skip != 'true'
         run: yarn build:sdk
+
+      # Since the layer extraction (#1914), client source (e.g.
+      # src/harnesses/engine/canonical-json.ts) imports @jinn-network/core,
+      # which resolves to packages/core/dist and itself imports
+      # @jinn-network/plugin (packages/plugin/dist). tsx loads client source on a
+      # clean runner in both the preflight and the suite, so build plugin then
+      # core (order matters — core depends on plugin) or the import ERR_MODULE_NOT_FOUNDs.
+      - name: Build layer packages for preflight client imports
+        if: steps.resolve.outputs.skip != 'true'
+        run: |
+          yarn build:plugin
+          yarn build:core
 
       # The tier-2 daemon-harness deploys the JinnRouterV3 stack onto its Anvil
       # fork by compiling contracts at runtime (`yarn compile` in `contracts/` —

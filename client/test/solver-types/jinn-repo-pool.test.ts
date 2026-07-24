@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { solverView, JinnRepoPoolItemSchema } from '../../src/solver-types/_jinn-repo-pool.js';
 
 const item = {
-  schemaVersion: 'jinn-repo.v1', instance_id: 'Jinn-Network__mono-1042', repo: 'Jinn-Network/mono',
+  schemaVersion: 'jinn-repo.v1', source: 'merged-pr' as const,
+  instance_id: 'Jinn-Network__mono-1042', repo: 'Jinn-Network/mono',
   base_commit: 'a'.repeat(40), merged_pr: 1042, language: 'typescript',
   problem_statement: 'Mech safe nonce stale on retry.',
   test_files: ['client/test/adapters/mech/safe.nonce.test.ts'],
