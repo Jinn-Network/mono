@@ -335,7 +335,7 @@ describe('tasks submit machine contract', () => {
     expect(runMarketplaceTaskSubmitPreflight).toHaveBeenCalledOnce();
   });
 
-  it('rejects an expired machine request for dry-run and live paths before mutable work', async () => {
+  it('rejects a first-time expired machine request without posting', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-'));
     const file = join(dir, 'request.json');
     const config = join(dir, 'config.json');
@@ -344,28 +344,136 @@ describe('tasks submit machine contract', () => {
     writeFileSync(config, '{}');
     vi.useFakeTimers();
     vi.setSystemTime(new Date(value.claimPolicy.submissionDeadlineTs + 1));
-    createCliExecutionContext.mockResolvedValue({
-      ok: false,
-      envelope: { code: 'fatal', message: 'mutable context was constructed' },
+    const dryRun = makeCommandCtx({
+      argv: ['submit', '--request-file', file, '--config', config, '--dry-run', '--json'],
     });
-
-    for (const mode of [
-      ['--dry-run'],
-      ['--yes'],
-    ]) {
-      const made = makeCommandCtx({
-        argv: ['submit', '--request-file', file, '--config', config, ...mode, '--json'],
-      });
-      await tasksCommand.run(made.ctx);
-      expect(JSON.parse(made.writes.at(-1)!)).toMatchObject({
-        code: 'invalid_invocation',
-        message: expect.stringMatching(/freshness|expired|deadline/i),
-      });
-    }
+    await tasksCommand.run(dryRun.ctx);
+    expect(JSON.parse(dryRun.writes.at(-1)!)).toMatchObject({
+      code: 'invalid_invocation',
+      message: expect.stringMatching(/freshness|expired|deadline/i),
+    });
     expect(resolveMarketplaceTaskSolverNet).not.toHaveBeenCalled();
     expect(createCliReadOnlySignerContext).not.toHaveBeenCalled();
     expect(createCliExecutionContext).not.toHaveBeenCalled();
     expect(existsSync(marketplaceTaskSelectionSidecarPath(file))).toBe(false);
+
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+    const postTask = vi.spyOn(adapter, 'postTask');
+    createCliExecutionContext.mockResolvedValueOnce({
+      ok: true,
+      ctx: {
+        adapter,
+        jinnStore: store,
+        primaryService: {
+          index: 0,
+          safe_address: '0x00112233445566778899aabbccddeeff00112233',
+        },
+        mnemonic: 'test test test test test test test test test test test junk',
+      },
+    });
+    const live = makeCommandCtx({
+      argv: ['submit', '--request-file', file, '--config', config, '--yes', '--json'],
+    });
+    await tasksCommand.run(live.ctx);
+    expect(JSON.parse(live.writes.at(-1)!)).toMatchObject({
+      code: 'invalid_invocation',
+      details: { field: 'freshness', reason: 'policy_expired' },
+    });
+    expect(postTask).not.toHaveBeenCalled();
+    store.close();
+    await adapter.stop();
+  });
+
+  it('recovers an expired crashed machine request without a second transaction broadcast', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-task-expired-recovery-'));
+    const file = join(dir, 'request.json');
+    const config = join(dir, 'config.json');
+    const dbPath = join(dir, 'jinn.db');
+    const value = request();
+    writeFileSync(file, JSON.stringify(value));
+    writeFileSync(config, '{}');
+    vi.useFakeTimers();
+    vi.setSystemTime(value.claimPolicy.claimWindowEndTs - 60_001);
+
+    const firstAdapter = new LocalAdapter();
+    await firstAdapter.initialize();
+    const firstStore = new Store(dbPath);
+    const firstBroadcast = vi.fn();
+    Object.assign(firstAdapter, {
+      postTask: vi.fn(async (_task: unknown, options?: {
+        beforeBroadcast?: () => void | Promise<void>;
+      }) => {
+        await options?.beforeBroadcast?.();
+        firstBroadcast();
+        throw new Error('simulated crash after first transaction broadcast');
+      }),
+    });
+    createCliExecutionContext.mockResolvedValueOnce({
+      ok: true,
+      ctx: {
+        adapter: firstAdapter,
+        jinnStore: firstStore,
+        primaryService: {
+          index: 0,
+          safe_address: '0x00112233445566778899aabbccddeeff00112233',
+        },
+        mnemonic: 'test test test test test test test test test test test junk',
+      },
+    });
+    const first = makeCommandCtx({
+      argv: ['submit', '--request-file', file, '--config', config, '--yes', '--json'],
+    });
+    await tasksCommand.run(first.ctx);
+    expect(firstBroadcast).toHaveBeenCalledOnce();
+    firstStore.close();
+    await firstAdapter.stop();
+
+    vi.setSystemTime(value.claimPolicy.claimWindowEndTs + 1);
+    const secondAdapter = new LocalAdapter();
+    await secondAdapter.initialize();
+    const secondBroadcast = vi.fn();
+    const recoverTaskPost = vi.fn().mockResolvedValue({
+      taskId: 'expired-recovered-task',
+      taskCid: `f01551220${'ab'.repeat(32)}`,
+      txHash: `0x${'cd'.repeat(32)}`,
+      blockNumber: 321,
+    });
+    Object.assign(secondAdapter, {
+      recoverTaskPost,
+      postTask: vi.fn(async () => {
+        secondBroadcast();
+        throw new Error('must not broadcast a second transaction');
+      }),
+    });
+    const secondStore = new Store(dbPath);
+    createCliExecutionContext.mockResolvedValueOnce({
+      ok: true,
+      ctx: {
+        adapter: secondAdapter,
+        jinnStore: secondStore,
+        primaryService: {
+          index: 0,
+          safe_address: '0x00112233445566778899aabbccddeeff00112233',
+        },
+        mnemonic: 'test test test test test test test test test test test junk',
+      },
+    });
+    const second = makeCommandCtx({
+      argv: ['submit', '--request-file', file, '--config', config, '--yes', '--json'],
+    });
+    await tasksCommand.run(second.ctx);
+
+    expect(JSON.parse(second.writes.at(-1)!)).toMatchObject({
+      taskId: 'expired-recovered-task',
+      status: 'already_submitted',
+      idempotent: true,
+    });
+    expect(recoverTaskPost).toHaveBeenCalledOnce();
+    expect(secondBroadcast).not.toHaveBeenCalled();
+    secondStore.close();
+    await secondAdapter.stop();
   });
 
   it('emits Safe-wrapped wallet-boundary ownership loss as transient without retrying or writing', async () => {

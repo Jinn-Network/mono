@@ -39,6 +39,7 @@ export interface TaskPostResult {
 export interface PostTaskCandidateOptions {
   creatorSafeAddress?: string;
   beforeBroadcast?: () => void | Promise<void>;
+  recoveryOnly?: boolean;
 }
 
 export class TaskPostOwnershipLostError extends TransientError {
@@ -55,6 +56,17 @@ export class TaskPostBroadcastUncertainError extends TransientError {
     super(
       `Task post ${sourceKey} has durable broadcast intent from ${broadcastIntentAt} ` +
       'but no matching TaskCreated event is visible; refusing to broadcast again',
+    );
+  }
+}
+
+export class TaskPostRecoveryOnlyError extends Error {
+  readonly name = 'TaskPostRecoveryOnlyError';
+
+  constructor(sourceKey: string) {
+    super(
+      `Task post ${sourceKey} has no existing immutable record that can be recovered; ` +
+      'refusing recovery-only submission',
     );
   }
 }
@@ -140,9 +152,23 @@ export class TaskPostingService {
       policyType,
       scopeKey,
     });
+    if (opts.recoveryOnly && existing?.protocolTaskId) {
+      assertImmutableCandidate(candidate, existing, immutableBytes);
+      return this.buildIdempotentResult(candidate, existing, 'store');
+    }
     if (existing?.protocolTaskId && shouldSkipPost(existing, candidate.postingPolicy, nowMs)) {
       assertImmutableCandidate(candidate, existing, immutableBytes);
       return this.buildIdempotentResult(candidate, existing, 'store');
+    }
+    if (
+      opts.recoveryOnly
+      && (
+        !existing
+        || existing.requestJson === null
+        || candidate.task.signedTask === undefined
+      )
+    ) {
+      throw new TaskPostRecoveryOnlyError(candidate.sourceKey);
     }
 
     const ownerToken = randomUUID();
@@ -186,6 +212,17 @@ export class TaskPostingService {
       if (lockedExisting?.protocolTaskId && shouldSkipPost(lockedExisting, candidate.postingPolicy, nowMs)) {
         assertImmutableCandidate(candidate, lockedExisting, immutableBytes);
         return this.buildIdempotentResult(candidate, lockedExisting, 'store');
+      }
+
+      if (
+        opts.recoveryOnly
+        && (
+          !lockedExisting
+          || lockedExisting.requestJson === null
+          || candidate.task.signedTask === undefined
+        )
+      ) {
+        throw new TaskPostRecoveryOnlyError(candidate.sourceKey);
       }
 
       const previousPostCount = lockedExisting?.postCount ?? 0;
@@ -258,6 +295,9 @@ export class TaskPostingService {
           lockedExisting.broadcastIntentAt,
           candidate.sourceKey,
         );
+      }
+      if (opts.recoveryOnly) {
+        throw new TaskPostRecoveryOnlyError(candidate.sourceKey);
       }
       const stillOwnsPost = this.store.renewTaskPostLock({
         creatorSafeAddress,

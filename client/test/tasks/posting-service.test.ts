@@ -277,6 +277,122 @@ describe('TaskPostingService', () => {
     await adapter.stop();
   });
 
+  it('returns an existing completed immutable post during recovery-only submission', async () => {
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+    const service = new TaskPostingService(adapter, store);
+    const signedTask = {
+      schemaVersion: 'task.v1',
+      id: 'autopilot:completed-recovery-only',
+      solverType: 'jinn-repo.v1',
+      solverNetManifestCid: 'bafy-manifest',
+    } as SignedTaskV1;
+    const candidate = {
+      task: { id: signedTask.id, description: 'completed recovery', signedTask },
+      sourceKey: signedTask.id,
+      postingPolicy: { kind: 'once_per_safe' } as const,
+      sourceMeta: { request: { schemaVersion: 'jinn-task-submit-request.v1' } },
+    };
+
+    const first = await service.postCandidate(candidate, { creatorSafeAddress: SAFE_A });
+    const postSpy = vi.spyOn(adapter, 'postTask');
+    const recovered = await service.postCandidate(candidate, {
+      creatorSafeAddress: SAFE_A,
+      recoveryOnly: true,
+    });
+
+    expect(recovered).toMatchObject({
+      taskId: first.taskId,
+      idempotent: true,
+      source: 'store',
+    });
+    expect(postSpy).not.toHaveBeenCalled();
+
+    store.close();
+    await adapter.stop();
+  });
+
+  it('adopts a recovered pending immutable post during recovery-only submission', async () => {
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+    const service = new TaskPostingService(adapter, store);
+    const signedTask = {
+      schemaVersion: 'task.v1',
+      id: 'autopilot:pending-recovery-only',
+      solverType: 'jinn-repo.v1',
+      solverNetManifestCid: 'bafy-manifest',
+    } as SignedTaskV1;
+    const candidate = {
+      task: { id: signedTask.id, description: 'pending recovery', signedTask },
+      sourceKey: signedTask.id,
+      postingPolicy: { kind: 'once_per_safe' } as const,
+      sourceMeta: { request: { schemaVersion: 'jinn-task-submit-request.v1' } },
+    };
+    const postTask = vi.spyOn(adapter, 'postTask').mockRejectedValueOnce(new Error('crash'));
+    const recoverTaskPost = vi.fn().mockResolvedValue({
+      taskId: 'recovered-pending-task',
+      taskCid: `f01551220${'ab'.repeat(32)}`,
+      txHash: `0x${'cd'.repeat(32)}`,
+      blockNumber: 123,
+    });
+    Object.assign(adapter, { recoverTaskPost });
+
+    await expect(service.postCandidate(candidate, { creatorSafeAddress: SAFE_A })).rejects.toThrow('crash');
+    const recovered = await service.postCandidate(candidate, {
+      creatorSafeAddress: SAFE_A,
+      recoveryOnly: true,
+    });
+
+    expect(recovered).toMatchObject({
+      taskId: 'recovered-pending-task',
+      idempotent: true,
+      source: 'recovered',
+    });
+    expect(postTask).toHaveBeenCalledOnce();
+    expect(recoverTaskPost).toHaveBeenCalledOnce();
+
+    store.close();
+    await adapter.stop();
+  });
+
+  it('refuses recovery-only submission when no immutable post can be recovered', async () => {
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+    const service = new TaskPostingService(adapter, store);
+    const signedTask = {
+      schemaVersion: 'task.v1',
+      id: 'autopilot:no-recovery-only-record',
+      solverType: 'jinn-repo.v1',
+      solverNetManifestCid: 'bafy-manifest',
+    } as SignedTaskV1;
+    const candidate = {
+      task: { id: signedTask.id, description: 'no recovery record', signedTask },
+      sourceKey: signedTask.id,
+      postingPolicy: { kind: 'once_per_safe' } as const,
+      sourceMeta: { request: { schemaVersion: 'jinn-task-submit-request.v1' } },
+    };
+    const postSpy = vi.spyOn(adapter, 'postTask');
+
+    await expect(service.postCandidate(candidate, {
+      creatorSafeAddress: SAFE_A,
+      recoveryOnly: true,
+    })).rejects.toThrow(/recovery-only/i);
+
+    expect(postSpy).not.toHaveBeenCalled();
+    expect(store.getTaskPostRecord({
+      creatorSafeAddress: getAddress(SAFE_A),
+      sourceKey: candidate.sourceKey,
+      policyType: 'once_per_safe',
+      scopeKey: '',
+    })).toBeNull();
+
+    store.close();
+    await adapter.stop();
+  });
+
   it('preserves a surfaced Safe transaction hash across repeated pending recovery until the event lands', async () => {
     const adapter = new LocalAdapter();
     await adapter.initialize();

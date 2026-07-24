@@ -258,7 +258,10 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     );
     return;
   }
+  const dryRun = parsed.values['dry-run'] as boolean;
+  const yes = parsed.values.yes as boolean;
   let machineRequest: TaskSubmitRequestV1 | undefined;
+  let machineRequestFreshnessError: unknown;
   if (requestFilePath) {
     try {
       machineRequest = TaskSubmitRequestV1Schema.parse(
@@ -279,16 +282,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     try {
       assertMarketplaceTaskRequestFreshness(machineRequest);
     } catch (err) {
-      emitEnvelope(
-        {
-          code: 'invalid_invocation',
-          message: err instanceof Error ? err.message : String(err),
-          exampleCli: 'jinn tasks submit --request-file request.json --yes --json',
-          details: { field: 'freshness' },
-        },
-        { writer: ctx.writer, exit: ctx.exit },
-      );
-      return;
+      machineRequestFreshnessError = err;
     }
   }
 
@@ -322,8 +316,18 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     return;
   }
 
-  const dryRun = parsed.values['dry-run'] as boolean;
-  const yes = parsed.values.yes as boolean;
+  if (machineRequestFreshnessError && dryRun) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: errorMessage(machineRequestFreshnessError),
+        exampleCli: 'jinn tasks submit --request-file request.json --yes --json',
+        details: { field: 'freshness' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
 
   // ── claim-policy override: --max-claims ─────────────────────────────────────
   // The on-chain `claimPolicy` defaults to a single attempt slot
@@ -730,6 +734,9 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
       },
       {
         creatorSafeAddress: safe,
+        ...(machineRequest && machineRequestFreshnessError
+          ? { recoveryOnly: true }
+          : {}),
         ...(machineRequest
           ? {
               beforeBroadcast: () =>
@@ -778,17 +785,19 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
       e,
       'MarketplaceTaskRequestExpiredError',
     );
-    if (policyExpiration) {
+    const recoveryOnly = findNamedErrorCause(e, 'TaskPostRecoveryOnlyError');
+    if (policyExpiration || recoveryOnly) {
+      const freshnessError = policyExpiration ?? machineRequestFreshnessError ?? recoveryOnly;
       emitEnvelope(
         {
           code: 'invalid_invocation',
-          message: errorMessage(policyExpiration),
+          message: errorMessage(freshnessError),
           hint: 'Create a fresh marketplace Task request before retrying.',
           exampleCli: 'jinn tasks submit --request-file request.json --yes --json',
           details: {
             field: 'freshness',
             reason: 'policy_expired',
-            cause: errorMessage(policyExpiration),
+            cause: errorMessage(freshnessError),
           },
         },
         { writer: ctx.writer, exit: ctx.exit },
