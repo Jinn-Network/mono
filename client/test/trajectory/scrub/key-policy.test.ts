@@ -48,6 +48,13 @@ describe('DEFAULT_KEY_POLICY', () => {
     expect(classifyKey(key, DEFAULT_KEY_POLICY)).toBe('drop');
   });
 
+  test.each(['host', 'hostname', 'attempt.host', 'os.hostname'])(
+    'machine-identity drops %s (D3 carrier)',
+    (key) => {
+      expect(classifyKey(key, DEFAULT_KEY_POLICY)).toBe('machine-identity');
+    },
+  );
+
   test('keeps jinn.* attributes safe', () => {
     expect(classifyKey('jinn.span.kind', DEFAULT_KEY_POLICY)).toBe('safe');
   });

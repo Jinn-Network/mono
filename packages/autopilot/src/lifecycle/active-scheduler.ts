@@ -2,21 +2,47 @@ import type { NewWorkAction } from './types.js';
 import type { GitOid } from './types.js';
 
 export type ActiveCandidate =
-  | { readonly phase: 'implementation'; readonly issueNumber: number }
+  | {
+      readonly phase: 'implementation';
+      readonly issueNumber: number;
+      /**
+       * Machine child (review-finding / reconcile / ci-failure). Children
+       * drain the open-PR backlog; open-pipeline backpressure must not block
+       * them or the loop deadlocks.
+       */
+      readonly isChild?: boolean;
+    }
   | {
       readonly phase: 'review';
       readonly issueNumber: number;
       readonly prNumber: number;
       readonly head: GitOid;
       readonly author: string;
-      readonly recoverFixes?: boolean;
     }
   | {
-      readonly phase: 'merge-prep';
+      readonly phase: 'update-branch';
       readonly issueNumber: number;
       readonly prNumber: number;
       readonly head: GitOid;
-      readonly recoverStale?: boolean;
+    }
+  | {
+      readonly phase: 'file-reconcile-child';
+      readonly issueNumber: number;
+      readonly prNumber: number;
+      readonly head: GitOid;
+      readonly effort: 'low' | 'medium' | 'high';
+    }
+  | {
+      readonly phase: 'rerun-failed-checks';
+      readonly issueNumber: number;
+      readonly prNumber: number;
+      readonly head: GitOid;
+    }
+  | {
+      readonly phase: 'file-ci-failure-child';
+      readonly issueNumber: number;
+      readonly prNumber: number;
+      readonly head: GitOid;
     }
   | {
       readonly phase: 'merge';
@@ -30,18 +56,18 @@ export interface ActiveSchedulingInput {
   readonly remaining: {
     readonly implementation: number;
     readonly review: number;
-    readonly mergePrep: number;
   };
   readonly availableLogins: readonly string[];
   readonly implementationPreferredLogin: string;
   readonly openPipelineBacklog: number;
   readonly implementationBackpressureThreshold: number;
+  readonly newWorkPaused?: boolean;
 }
 
 export interface ActiveSchedulingSkip {
   readonly phase: ActiveCandidate['phase'];
   readonly subject: string;
-  readonly reason: 'capacity' | 'credential-lane' | 'identity' | 'backpressure';
+  readonly reason: 'capacity' | 'credential-lane' | 'identity' | 'backpressure' | 'disk-floor';
 }
 
 export interface ActiveSchedulingPlan {
@@ -55,12 +81,18 @@ function subject(candidate: ActiveCandidate): string {
     : `pr:${candidate.prNumber}`;
 }
 
+function capacitySkipReason(input: ActiveSchedulingInput): ActiveSchedulingSkip['reason'] {
+  return input.newWorkPaused === true ? 'disk-floor' : 'capacity';
+}
+
 export function scheduleActiveActions(
   input: ActiveSchedulingInput,
 ): ActiveSchedulingPlan {
   const actions: NewWorkAction[] = [];
   const skips: ActiveSchedulingSkip[] = [];
-  const freeLogins = new Set(input.availableLogins.map((login) => login.toLowerCase()));
+  const configuredLogins = new Set(
+    input.availableLogins.map((login) => login.toLowerCase()),
+  );
   const implementation = input.candidates.filter(
     (candidate): candidate is Extract<ActiveCandidate, { phase: 'implementation' }> =>
       candidate.phase === 'implementation',
@@ -68,77 +100,100 @@ export function scheduleActiveActions(
   for (const candidate of implementation) {
     if (actions.filter((action) => action.kind === 'claim-implementation').length
       >= input.remaining.implementation) {
-      skips.push({ phase: candidate.phase, subject: subject(candidate), reason: 'capacity' });
+      skips.push({
+        phase: candidate.phase,
+        subject: subject(candidate),
+        reason: capacitySkipReason(input),
+      });
       continue;
     }
-    if (input.openPipelineBacklog >= input.implementationBackpressureThreshold) {
+    // Fresh work only: child fixes/reconciles/ci-failures reduce backlog and
+    // must still claim under backpressure (capacity remaining still applies).
+    if (
+      candidate.isChild !== true
+      && input.openPipelineBacklog >= input.implementationBackpressureThreshold
+    ) {
       skips.push({ phase: candidate.phase, subject: subject(candidate), reason: 'backpressure' });
       continue;
     }
-    const preferred = input.implementationPreferredLogin.toLowerCase();
-    const login = freeLogins.has(preferred) ? preferred : freeLogins.values().next().value;
-    if (login === undefined) {
+    if (configuredLogins.size === 0) {
       skips.push({ phase: candidate.phase, subject: subject(candidate), reason: 'credential-lane' });
       continue;
     }
-    freeLogins.delete(login);
     actions.push({ kind: 'claim-implementation', issueNumber: candidate.issueNumber });
   }
 
   for (const candidate of input.candidates) {
     if (candidate.phase !== 'review') continue;
     if (actions.filter((action) => action.kind === 'claim-review').length >= input.remaining.review) {
-      skips.push({ phase: candidate.phase, subject: subject(candidate), reason: 'capacity' });
+      skips.push({
+        phase: candidate.phase,
+        subject: subject(candidate),
+        reason: capacitySkipReason(input),
+      });
       continue;
     }
-    const reviewer = [...freeLogins].find(
+    const reviewer = [...configuredLogins].find(
       (login) => login !== candidate.author.toLowerCase(),
     );
     if (reviewer === undefined) {
       skips.push({
         phase: candidate.phase,
         subject: subject(candidate),
-        reason: freeLogins.size === 0 ? 'credential-lane' : 'identity',
+        reason: configuredLogins.size === 0 ? 'credential-lane' : 'identity',
       });
       continue;
     }
-    freeLogins.delete(reviewer);
     actions.push({
       kind: 'claim-review',
       issueNumber: candidate.issueNumber,
       prNumber: candidate.prNumber,
       head: candidate.head,
-      recoverFixes: candidate.recoverFixes ?? false,
     });
   }
 
   for (const candidate of input.candidates) {
-    if (candidate.phase !== 'merge-prep') continue;
-    if (
-      actions.filter((action) => action.kind === 'claim-merge-prep').length
-        >= input.remaining.mergePrep
-    ) {
-      skips.push({ phase: candidate.phase, subject: subject(candidate), reason: 'capacity' });
+    if (candidate.phase === 'update-branch') {
+      actions.push({
+        kind: 'update-branch',
+        issueNumber: candidate.issueNumber,
+        prNumber: candidate.prNumber,
+        head: candidate.head,
+      });
       continue;
     }
-    const login = freeLogins.values().next().value;
-    if (login === undefined) {
-      skips.push({ phase: candidate.phase, subject: subject(candidate), reason: 'credential-lane' });
+    if (candidate.phase === 'file-reconcile-child') {
+      actions.push({
+        kind: 'file-reconcile-child',
+        issueNumber: candidate.issueNumber,
+        prNumber: candidate.prNumber,
+        head: candidate.head,
+        effort: candidate.effort,
+      });
       continue;
     }
-    freeLogins.delete(login);
-    actions.push({
-      kind: 'claim-merge-prep',
-      issueNumber: candidate.issueNumber,
-      prNumber: candidate.prNumber,
-      head: candidate.head,
-      recoverStale: candidate.recoverStale ?? false,
-    });
+    if (candidate.phase === 'rerun-failed-checks') {
+      actions.push({
+        kind: 'rerun-failed-checks',
+        issueNumber: candidate.issueNumber,
+        prNumber: candidate.prNumber,
+        head: candidate.head,
+      });
+      continue;
+    }
+    if (candidate.phase === 'file-ci-failure-child') {
+      actions.push({
+        kind: 'file-ci-failure-child',
+        issueNumber: candidate.issueNumber,
+        prNumber: candidate.prNumber,
+        head: candidate.head,
+      });
+    }
   }
 
   for (const candidate of input.candidates) {
     if (candidate.phase !== 'merge') continue;
-    if (freeLogins.size === 0) {
+    if (configuredLogins.size === 0) {
       skips.push({ phase: candidate.phase, subject: subject(candidate), reason: 'credential-lane' });
       continue;
     }

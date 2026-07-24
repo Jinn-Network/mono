@@ -4,7 +4,7 @@ import { emitEvent } from '../observability/emit-event.js';
 import { isRecoverableTransactionError } from '../tx-retry.js';
 import { SignedEnvelopeSchema } from '../types/envelope.js';
 import { validatePayload } from '../types/payloads/index.js';
-import { getSweRebenchV2StateStore } from '../solver-types/swe-rebench-v2.js';
+import { getSweRebenchV2StateStore, defaultStateDir } from '../solver-types/swe-rebench-v2.js';
 import { TaskRunPersistence } from '../harnesses/engine/persistence.js';
 
 export class DeliveryWatcherLoop {
@@ -17,6 +17,7 @@ export class DeliveryWatcherLoop {
   constructor(
     private readonly adapter: ExecutionAdapter,
     private readonly store?: Store,
+    private readonly sweRebenchV2StateDir: string = defaultStateDir(),
   ) {
     this.stopPromise = new Promise(resolve => {
       this.stopResolve = resolve;
@@ -63,7 +64,7 @@ export class DeliveryWatcherLoop {
                 ) {
                   const instanceId = delivery.task.spec?.['instance_id'];
                   if (typeof instanceId === 'string' && instanceId.length > 0) {
-                    const stateStore = getSweRebenchV2StateStore();
+                    const stateStore = getSweRebenchV2StateStore(this.sweRebenchV2StateDir);
                     stateStore.recordSuccess(instanceId).catch((err) => {
                       console.warn(
                         `[delivery-watcher] swe-rebench-v2 recordSuccess failed for ${instanceId}: ${err instanceof Error ? err.message : err}`,

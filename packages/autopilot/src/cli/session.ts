@@ -28,15 +28,15 @@ import type {
 import { makeProductionImplementationSessionPort } from '../lifecycle/implementation-session-production.js';
 import { makeReviewSessionProtocol } from '../lifecycle/review-session.js';
 import type {
-  ReviewFixPublishResult,
+  ReviewFindingsResult,
   ReviewVerdictResult,
 } from '../lifecycle/review-session.js';
 import { makeProductionReviewSessionPort } from '../lifecycle/review-session-production.js';
-import { makeMergePrepSessionProtocol } from '../lifecycle/merge-prep-session.js';
-import type {
-  MergePrepCompleteResult,
-} from '../lifecycle/merge-prep-session.js';
-import { makeProductionMergePrepSessionPort } from '../lifecycle/merge-prep-session-production.js';
+import { childrenPathEnabled } from '../lifecycle/child-issues.js';
+import {
+  parseReviewFollowUpsPayload,
+  type ReviewFollowUpEntry,
+} from '../lifecycle/review-follow-ups.js';
 import type { ReviewVerdictState } from '../lifecycle/types.js';
 
 export interface SessionProtocol {
@@ -49,12 +49,15 @@ export interface SessionProtocol {
     manifest: AttemptManifest,
     state: ReviewVerdictState,
     body: string,
+    followUps?: readonly ReviewFollowUpEntry[],
   ): Promise<ReviewVerdictResult>;
-  reviewFixPublish(manifest: AttemptManifest): Promise<ReviewFixPublishResult>;
-  mergePrepComplete(
+  reviewFindings?(
     manifest: AttemptManifest,
-    summary: string,
-  ): Promise<MergePrepCompleteResult>;
+    findings: string,
+  ): Promise<ReviewFindingsResult>;
+  childComplete?(
+    manifest: AttemptManifest,
+  ): Promise<{ readonly status: 'closed' | 'rejected'; readonly detail?: string }>;
   human(manifest: AttemptManifest, reason: string): Promise<HumanHoldResult>;
 }
 
@@ -81,12 +84,13 @@ type ParsedSessionCommand =
       readonly operation: 'review-verdict';
       readonly state: ReviewVerdictState;
       readonly bodyFile: string;
+      readonly followUpsFile?: string;
     }
-  | { readonly operation: 'review-fix-publish' }
   | {
-      readonly operation: 'merge-prep-complete';
-      readonly summaryFile: string;
+      readonly operation: 'review-findings';
+      readonly file: string;
     }
+  | { readonly operation: 'child-complete' }
   | {
       readonly operation: 'human';
       readonly reasonFile: string;
@@ -96,9 +100,9 @@ type SessionOperationOutcome =
   | CheckpointResult
   | ImplementationCompleteResult
   | ReviewVerdictResult
-  | ReviewFixPublishResult
-  | MergePrepCompleteResult
-  | HumanHoldResult;
+  | ReviewFindingsResult
+  | HumanHoldResult
+  | { readonly status: 'closed' | 'rejected'; readonly detail?: string };
 
 export interface SessionCliExecution {
   readonly operation: ParsedSessionCommand['operation'];
@@ -109,8 +113,8 @@ export interface SessionCliExecution {
 const USAGE =
   'usage: autopilot session checkpoint | ' +
   'implementation-complete --summary-file <path> | ' +
-  'review-verdict --state <APPROVE|REQUEST_CHANGES> --body-file <path> | ' +
-  'review-fix-publish | merge-prep-complete --summary-file <path> | ' +
+  'review-verdict --state <APPROVE|REQUEST_CHANGES> --body-file <path> [--follow-ups-file <path>] | ' +
+  'review-findings --file <path> | child-complete | ' +
   'human --reason-file <path>';
 const MAX_SESSION_TEXT_BYTES = 65_536;
 
@@ -241,39 +245,73 @@ function parseSessionCommand(argv: readonly string[]): ParsedSessionCommand {
         summaryFile: requiredPath(argv[2], '--summary-file'),
       };
     case 'review-verdict': {
-      if (
-        argv.length !== 5
-        || argv[1] !== '--state'
-        || argv[3] !== '--body-file'
-      ) {
+      const flags = new Map<string, string>();
+      for (let i = 1; i < argv.length; i += 1) {
+        const key = argv[i];
+        if (key === undefined || !key.startsWith('--')) {
+          throw new Error(
+            'review-verdict requires --state <APPROVE|REQUEST_CHANGES> --body-file <path>; ' +
+            USAGE,
+          );
+        }
+        if (flags.has(key)) {
+          throw new Error(`review-verdict duplicate flag ${key}; ${USAGE}`);
+        }
+        const value = argv[i + 1];
+        if (value === undefined || value.startsWith('--')) {
+          throw new Error(`${key} requires a value; ${USAGE}`);
+        }
+        flags.set(key, value);
+        i += 1;
+      }
+      const state = flags.get('--state');
+      const bodyFile = flags.get('--body-file');
+      const followUpsFile = flags.get('--follow-ups-file');
+      for (const key of flags.keys()) {
+        if (
+          key !== '--state'
+          && key !== '--body-file'
+          && key !== '--follow-ups-file'
+        ) {
+          throw new Error(`review-verdict unknown flag ${key}; ${USAGE}`);
+        }
+      }
+      if (state === undefined || bodyFile === undefined) {
         throw new Error(
           'review-verdict requires --state <APPROVE|REQUEST_CHANGES> --body-file <path>; ' +
           USAGE,
         );
       }
-      const state = argv[2];
       if (state !== 'APPROVE' && state !== 'REQUEST_CHANGES') {
         throw new Error(`invalid review verdict state; ${USAGE}`);
+      }
+      if (followUpsFile !== undefined && state !== 'APPROVE') {
+        throw new Error(
+          '--follow-ups-file is only valid with --state APPROVE; ' + USAGE,
+        );
       }
       return {
         operation: command,
         state,
-        bodyFile: requiredPath(argv[4], '--body-file'),
+        bodyFile: requiredPath(bodyFile, '--body-file'),
+        ...(followUpsFile === undefined
+          ? {}
+          : { followUpsFile: requiredPath(followUpsFile, '--follow-ups-file') }),
       };
     }
-    case 'review-fix-publish':
-      if (argv.length !== 1) {
-        throw new Error(`review-fix-publish has unknown or trailing input; ${USAGE}`);
-      }
-      return { operation: command };
-    case 'merge-prep-complete':
-      if (argv.length !== 3 || argv[1] !== '--summary-file') {
-        throw new Error(`merge-prep-complete requires --summary-file <path>; ${USAGE}`);
+    case 'review-findings':
+      if (argv.length !== 3 || argv[1] !== '--file') {
+        throw new Error(`review-findings requires --file <path>; ${USAGE}`);
       }
       return {
         operation: command,
-        summaryFile: requiredPath(argv[2], '--summary-file'),
+        file: requiredPath(argv[2], '--file'),
       };
+    case 'child-complete':
+      if (argv.length !== 1) {
+        throw new Error(`child-complete has unknown or trailing input; ${USAGE}`);
+      }
+      return { operation: command };
     case 'human':
       if (argv.length !== 3 || argv[1] !== '--reason-file') {
         throw new Error(`human requires --reason-file <path>; ${USAGE}`);
@@ -331,8 +369,8 @@ export const unwiredSessionProtocol: SessionProtocol = {
   checkpoint: async () => operationNotWired('checkpoint'),
   implementationComplete: async () => operationNotWired('implementation-complete'),
   reviewVerdict: async () => operationNotWired('review-verdict'),
-  reviewFixPublish: async () => operationNotWired('review-fix-publish'),
-  mergePrepComplete: async () => operationNotWired('merge-prep-complete'),
+  reviewFindings: async () => operationNotWired('review-findings'),
+  childComplete: async () => operationNotWired('child-complete'),
   human: async () => operationNotWired('human'),
 };
 
@@ -344,20 +382,13 @@ export function makeProductionSessionProtocol(
     ),
   makeReview: () => Pick<
   SessionProtocol,
-  'reviewVerdict' | 'reviewFixPublish' | 'human'
+  'reviewVerdict' | 'reviewFindings' | 'human'
   > = () => makeReviewSessionProtocol(
     makeProductionReviewSessionPort({ environment }),
-  ),
-  makeMergePrep: () => Pick<
-  SessionProtocol,
-  'mergePrepComplete' | 'human'
-  > = () => makeMergePrepSessionProtocol(
-    makeProductionMergePrepSessionPort({ environment }),
   ),
 ): SessionProtocol {
   let implementation: SessionProtocol | undefined;
   let review: ReturnType<typeof makeReview> | undefined;
-  let mergePrep: ReturnType<typeof makeMergePrep> | undefined;
   const implementationProtocol = (): SessionProtocol => {
     implementation ??= makeImplementation();
     return implementation;
@@ -366,23 +397,28 @@ export function makeProductionSessionProtocol(
     review ??= makeReview();
     return review;
   };
-  const mergePrepProtocol = (): ReturnType<typeof makeMergePrep> => {
-    mergePrep ??= makeMergePrep();
-    return mergePrep;
-  };
   return {
     checkpoint: (manifest) => implementationProtocol().checkpoint(manifest),
     implementationComplete: (manifest, summary) =>
       implementationProtocol().implementationComplete(manifest, summary),
-    reviewVerdict: (manifest, state, body) =>
-      reviewProtocol().reviewVerdict(manifest, state, body),
-    reviewFixPublish: (manifest) => reviewProtocol().reviewFixPublish(manifest),
-    mergePrepComplete: (manifest, summary) =>
-      mergePrepProtocol().mergePrepComplete(manifest, summary),
+    reviewVerdict: (manifest, state, body, followUps) =>
+      reviewProtocol().reviewVerdict(manifest, state, body, followUps),
+    reviewFindings: (manifest, findings) => {
+      const findingsHandler = reviewProtocol().reviewFindings;
+      if (findingsHandler === undefined) {
+        return operationNotWired('review-findings');
+      }
+      return findingsHandler(manifest, findings);
+    },
+    childComplete: (manifest) => {
+      const handler = implementationProtocol().childComplete;
+      if (handler === undefined) {
+        return operationNotWired('child-complete');
+      }
+      return handler(manifest);
+    },
     human: (manifest, reason) => manifest.phase === 'review'
       ? reviewProtocol().human(manifest, reason)
-      : manifest.phase === 'merge-prep'
-        ? mergePrepProtocol().human(manifest, reason)
       : implementationProtocol().human(manifest, reason),
   };
 }
@@ -439,6 +475,15 @@ export async function runSessionCli(
     }
     case 'review-verdict': {
       requiredPhase(manifest, command.operation, 'review');
+      const followUps = command.followUpsFile === undefined
+        ? undefined
+        : parseReviewFollowUpsPayload(
+          boundedText(readText(attemptReportPath(
+            manifest,
+            command.followUpsFile,
+            validateReportFile,
+          ))),
+        );
       const outcome = await protocol.reviewVerdict(
         manifest,
         command.state,
@@ -447,6 +492,7 @@ export async function runSessionCli(
           command.bodyFile,
           validateReportFile,
         ))),
+        followUps,
       );
       return finishSessionCommand(
         command.operation,
@@ -454,44 +500,54 @@ export async function runSessionCli(
         (
           command.state === 'APPROVE'
             ? outcome.status === 'approved'
-            : outcome.status === 'fixing'
+            : outcome.status === 'requested-changes'
         ),
         deps,
       );
     }
-    case 'review-fix-publish': {
+    case 'review-findings': {
       requiredPhase(manifest, command.operation, 'review');
-      const outcome = await protocol.reviewFixPublish(manifest);
-      return finishSessionCommand(
-        command.operation,
-        outcome,
-        outcome.status === 'published' || outcome.status === 'already-applied',
-        deps,
-      );
-    }
-    case 'merge-prep-complete': {
-      requiredPhase(manifest, command.operation, 'merge-prep');
-      const outcome = await protocol.mergePrepComplete(
+      if (!childrenPathEnabled(env)) {
+        throw new Error(
+          'review-findings requires JINN_AUTOPILOT_CHILDREN (default on); '
+          + 'use review-verdict REQUEST_CHANGES when children are disarmed',
+        );
+      }
+      const findingsHandler = protocol.reviewFindings;
+      if (findingsHandler === undefined) {
+        operationNotWired('review-findings');
+      }
+      const outcome = await findingsHandler(
         manifest,
         boundedText(readText(attemptReportPath(
           manifest,
-          command.summaryFile,
+          command.file,
           validateReportFile,
         ))),
       );
       return finishSessionCommand(
         command.operation,
         outcome,
-        outcome.status === 'complete',
+        outcome.status === 'filed',
+        deps,
+      );
+    }
+    case 'child-complete': {
+      requiredPhase(manifest, command.operation, 'implement');
+      const handler = protocol.childComplete;
+      if (handler === undefined) {
+        operationNotWired('child-complete');
+      }
+      const outcome = await handler(manifest);
+      return finishSessionCommand(
+        command.operation,
+        outcome,
+        outcome.status === 'closed',
         deps,
       );
     }
     case 'human':
-      if (
-        manifest.phase !== 'implement'
-        && manifest.phase !== 'review'
-        && manifest.phase !== 'merge-prep'
-      ) {
+      if (manifest.phase !== 'implement' && manifest.phase !== 'review') {
         throw new Error(`${command.operation} is not valid for ${manifest.phase} attempts`);
       }
       return finishSessionCommand(

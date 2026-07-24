@@ -2,24 +2,23 @@
  * Regression coverage for issue #1004 — the /v1/status `aiUnits` payload now
  * carries actual-USD-spend fields (`usdMicrosThisBlock`, `usdMicrosThisWeek`,
  * `capPerBlockUsdMicros`, `capPerWeekUsdMicros`) plus an `estimated` flag, and
- * the legacy unit fields the SPA still reads (`unitsThisBlock`, `unitsThisWeek`,
- * `capPerBlock`, `capPerWeek`) are now DERIVED from the USD accumulator via the
- * GPT-5.4-mini peg rather than summed directly.
+ * the legacy unit fields (`unitsThisBlock`, `unitsThisWeek`, `capPerBlock`,
+ * `capPerWeek`) are now DERIVED from the USD accumulator via the GPT-5.4-mini
+ * peg rather than summed directly.
  *
- * This PR is daemon/API-only — the SPA relabel to USD is spun out to #1006. So
- * the SPA must continue to render its AI-units surfaces (the Overview
- * `AiUnitsPauseAlert`) correctly against the NEW payload shape: additive USD
- * fields present, legacy unit fields still present and sensible.
+ * The Overview `AiUnitsPauseAlert` now renders the USD fields directly (#1802)
+ * and prefers the daemon's binding `pausedWindow` (#830), while retaining the
+ * legacy unit fields for older daemons.
  *
  * The mock below mirrors the exact derivation the daemon produces (verified in
  * `test/api/status-ai-units.test.ts`): a credential with $0.35 actual spend
  * this block ($0.60 over the week is irrelevant; block is the binding window)
  * over a $0.50 block cap is paused, and its peg-derived `unitsThisBlock` is
  * `0.35 / 0.50 * 100 = 70` against a `capPerBlock` of 100. The test pins the
- * SPA-side render of those derived figures so that:
+ * SPA-side render of that payload so that:
  *   1. the pause alert renders against the new payload without crashing,
- *   2. the displayed unit figures are the correct peg-derived numbers (no NaN,
- *      no `undefined`, no spurious zero where the mock supplies non-zero spend),
+ *   2. the displayed USD figures and estimated/metered qualifier are correct
+ *      (no NaN, no `undefined`, no spurious zero),
  *   3. no new console errors / page errors / error boundary are introduced.
  */
 import { test, expect } from '@playwright/test';
@@ -106,6 +105,24 @@ test('Overview AI-units pause alert renders correctly against the #1004 USD payl
   // Playwright runs the most-recently-registered matching route first, so this
   // override wins over the DEFAULT_STATUS_PAYLOAD route inside mockDaemonApi.
   await mockDaemonApi(page);
+  await page.route(
+    (url) => url.pathname === '/v1/rewards',
+    (route) =>
+      route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          schemaVersion: 1,
+          generatedAt: '2026-06-03T13:00:00.000Z',
+          readState: 'ready',
+          totalPending: '0',
+          totalClaimed: '0',
+          lastClaimAt: null,
+          lastClaimTickAt: null,
+          nextCheckpointAt: null,
+          services: [],
+        }),
+      }),
+  );
 
   const statusWithUsdAiUnits = {
     ...DEFAULT_STATUS_PAYLOAD,
@@ -129,6 +146,7 @@ test('Overview AI-units pause alert renders correctly against the #1004 USD payl
           // WEEK window — but here we keep it under both to first assert the
           // unpaused render is clean, then a second credential exercises pause.
           paused: false,
+          pausedWindow: null,
           blockResetsAt: '2026-06-03T18:00:00.000Z',
           weekResetsAt: '2026-06-09T13:00:00.000Z',
         },
@@ -145,6 +163,7 @@ test('Overview AI-units pause alert renders correctly against the #1004 USD payl
           capPerWeekUsdMicros: 14_000_000,
           estimated: false,
           paused: true,
+          pausedWindow: 'block',
           blockResetsAt: '2026-06-03T18:00:00.000Z',
           weekResetsAt: '2026-06-09T13:00:00.000Z',
         },
@@ -172,10 +191,10 @@ test('Overview AI-units pause alert renders correctly against the #1004 USD payl
   await expect(alert).toContainText('Paused');
   await expect(alert).toContainText('anthropic:subscription');
 
-  // Acceptance 2 — displayed unit figures are the peg-derived numbers, with no
-  // NaN / undefined / spurious zero. The block window is binding (100 >= 100),
-  // so the alert reads "100 / 100 units this block".
-  await expect(alert).toContainText('100 / 100 units this block');
+  // Acceptance 2 — displayed USD figures are metered and non-zero. The daemon
+  // says the block window is binding, so that window's actual spend is shown.
+  await expect(alert).toContainText('metered $0.5000 / $0.5000 this block');
+  await expect(alert).not.toContainText('units');
   await expect(alert).not.toContainText('NaN');
   await expect(alert).not.toContainText('undefined');
 

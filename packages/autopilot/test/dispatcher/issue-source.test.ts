@@ -19,9 +19,9 @@ import type {
  * `source.poll(SNAPSHOT)` call site below wraps the snapshot in
  * `toIssueBoardState(...)`.
  *
- * Only `gh issue list` (REST) remains as a runner call inside the source.
+ * Only explicit `gh api` REST pages remain as runner calls inside the source.
  *
- * gh issue list --repo Jinn-Network/mono --state open --json number,title,labels
+ * gh api repos/Jinn-Network/mono/issues?state=open&per_page=100&page=1
  *   → [{"labels":[],"number":403,"title":"fix(client): something"}, ...]
  */
 
@@ -30,25 +30,25 @@ const ISSUE_ON_BOARD_WITH_TYPE = 403;
 const ISSUE_ON_BOARD_NO_TYPE = 328;
 const ISSUE_NOT_ON_BOARD = 471;
 
-/** Canned gh issue list response — includes all three test issues. */
+/** Canned REST issue response — includes all three test issues. */
 const ISSUE_LIST_JSON = JSON.stringify([
   {
     labels: [],
     number: ISSUE_ON_BOARD_WITH_TYPE,
     title: 'fix(client): test-gated TaskClaimEmitter redeploy',
-    author: { login: 'alice' },
+    user: { login: 'alice' },
   },
   {
     labels: [],
     number: ISSUE_ON_BOARD_NO_TYPE,
     title: 'Release feedback — v0.1.6 operator app dogfood (2026-05-19)',
-    author: { login: 'bob' },
+    user: { login: 'bob' },
   },
   {
     labels: [],
     number: ISSUE_NOT_ON_BOARD,
     title: 'feat(operator-app): expose generator health',
-    author: { login: 'carol' },
+    user: { login: 'carol' },
   },
 ]);
 
@@ -98,12 +98,11 @@ const SNAPSHOT: ProjectSnapshot = {
 /** Build a fake CommandRunner that returns canned JSON matching real gh shapes. */
 function makeFakeRunner(): CommandRunner {
   return async (cmd: string, args: string[]): Promise<string> => {
-    if (cmd === 'gh' && args[0] === 'issue') {
-      // gh issue list --repo ... --state open --json number,title,labels --limit ...
+    if (cmd === 'gh' && args[0] === 'api' && args[1]?.includes('/issues?')) {
       return ISSUE_LIST_JSON;
     }
     // Post-#585: GhIssueSource.poll no longer calls `gh project` or
-    // `gh api graphql` — both are folded into the orchestrator-supplied
+    // GraphQL — both are folded into the orchestrator-supplied
     // snapshot.
     throw new Error(`Unexpected command: ${cmd} ${args.join(' ')}`);
   };

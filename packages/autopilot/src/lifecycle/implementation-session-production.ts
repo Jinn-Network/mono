@@ -1,8 +1,6 @@
 import type { CommandRunner } from '../dispatcher/issue-source.js';
 import { defaultRunner } from '../dispatcher/issue-source.js';
 import { REPO } from '../dispatcher/constants.js';
-import { ensureFieldIds } from '../dispatcher/field-cache.js';
-import { fetchProjectSnapshot } from '../dispatcher/project-snapshot.js';
 import {
   advanceAttemptExpectedHead,
   readAttemptManifest,
@@ -234,26 +232,17 @@ export function makeProductionImplementationSessionPort(
   };
   const requireNoHumanHold = async (
     manifest: AttemptManifest,
-    issueNumber: number,
     prNumber: number,
     expectedHead: GitOid,
   ): Promise<void> => {
+    // Stage 1: hold authority is the PR label only. Project Status Human is
+    // paint and must not block undraft / other PR mutations.
     const pullRequest = await requirePullRequestHead(
       manifest,
       prNumber,
       expectedHead,
     );
-    const secureRunner: CommandRunner = (cmd, args) => run(manifest, cmd, args);
-    const snapshot = await fetchProjectSnapshot(secureRunner);
-    const item = snapshot.items.find((candidate) =>
-      candidate.contentType === 'Issue' && candidate.number === issueNumber);
-    if (item === undefined) {
-      throw new Error('Implementation issue is missing from Project');
-    }
-    if (
-      pullRequest.labels.includes(NEEDS_HUMAN_LABEL)
-      || item.status === 'Human'
-    ) {
+    if (pullRequest.labels.includes(NEEDS_HUMAN_LABEL)) {
       throw new Error('Implementation mutation stopped because a Human hold is active');
     }
   };
@@ -328,7 +317,7 @@ export function makeProductionImplementationSessionPort(
       return makeGitProtocolPort(
         secureCommandRunner(manifest),
         { remote: manifest.repository.remoteName },
-      ).publishMergePrep({
+      ).publishBranchHead({
         branch: gitRefName(manifest.branch),
         expectedRemoteHead,
         newHead,
@@ -402,48 +391,6 @@ export function makeProductionImplementationSessionPort(
       }
     },
 
-    async setProjectStatus(issueNumber, expectedHead, status) {
-      const manifest = currentManifest();
-      await requirePullRequestHead(manifest, manifest.prNumber!, expectedHead);
-      const secureRunner: CommandRunner = (cmd, args) => run(manifest, cmd, args);
-      const snapshot = await fetchProjectSnapshot(secureRunner);
-      const item = snapshot.items.find((candidate) =>
-        candidate.contentType === 'Issue' && candidate.number === issueNumber);
-      if (item === undefined) throw new Error('Implementation issue is missing from Project');
-      if (item.status === status) return;
-      const fields = await ensureFieldIds(secureRunner);
-      if (status === 'In Review') {
-        await requireNoHumanHold(
-          manifest,
-          issueNumber,
-          manifest.prNumber!,
-          expectedHead,
-        );
-      }
-      await run(manifest, 'gh', [
-        'project', 'item-edit',
-        '--id', item.id,
-        '--project-id', fields.projectId,
-        '--field-id', fields.status.fieldId,
-        '--single-select-option-id', fields.status.options[status],
-      ]);
-      await requirePullRequestHead(manifest, manifest.prNumber!, expectedHead);
-      const after = await fetchProjectSnapshot(secureRunner);
-      const updated = after.items.find((candidate) =>
-        candidate.contentType === 'Issue' && candidate.number === issueNumber);
-      if (updated?.status !== status) {
-        throw new Error('Implementation Project projection was ambiguous');
-      }
-    },
-
-    async readProjectStatus(issueNumber, expectedHead) {
-      const manifest = currentManifest();
-      await requirePullRequestHead(manifest, manifest.prNumber!, expectedHead);
-      const secureRunner: CommandRunner = (cmd, args) => run(manifest, cmd, args);
-      const snapshot = await fetchProjectSnapshot(secureRunner);
-      return snapshot.items.find((candidate) =>
-        candidate.contentType === 'Issue' && candidate.number === issueNumber)?.status ?? null;
-    },
 
     async setPullRequestDraft(prNumber, expectedHead, draft) {
       const manifest = currentManifest();
@@ -452,7 +399,6 @@ export function makeProductionImplementationSessionPort(
       if (!draft) {
         await requireNoHumanHold(
           manifest,
-          manifest.issueNumber!,
           prNumber,
           expectedHead,
         );
@@ -496,6 +442,24 @@ export function makeProductionImplementationSessionPort(
       if (!bodies.includes(marker)) {
         throw new Error('Implementation Human comment mutation was ambiguous');
       }
+    },
+
+    async parentHeadReferencesChild(manifest, head, childIssueNumber) {
+      const log = await run(manifest, 'git', [
+        '-C', manifest.paths.worktree,
+        'log', '-n', '32', '--format=%B%x00', head,
+      ]);
+      const needle = `Jinn-Autopilot-Issue: ${childIssueNumber}`;
+      return log.includes(needle);
+    },
+
+    async closeChildIssue(issueNumber, comment) {
+      const manifest = currentManifest();
+      await run(manifest, 'gh', [
+        'issue', 'close', String(issueNumber),
+        '--repo', REPO,
+        '--comment', comment,
+      ]);
     },
   };
 }

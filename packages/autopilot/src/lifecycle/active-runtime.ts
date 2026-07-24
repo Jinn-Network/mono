@@ -2,6 +2,7 @@ import type { AttemptManifest } from './attempt-workspace.js';
 import type { LifecycleControllerDeps } from './controller.js';
 import type { CredentialPool } from './credentials.js';
 import type { NewWorkAction } from './types.js';
+import type { GitHubLifecycleSnapshot } from './snapshot.js';
 
 export interface ActiveRuntimeResult {
   readonly status: string;
@@ -14,18 +15,37 @@ export interface ActiveRuntimeHandlers {
   implementation(
     action: Extract<NewWorkAction, { kind: 'claim-implementation' }>,
     credentials: CredentialPool,
+    snapshot: GitHubLifecycleSnapshot,
   ): Promise<ActiveRuntimeResult>;
   review(
     action: Extract<NewWorkAction, { kind: 'claim-review' }>,
     credentials: CredentialPool,
+    snapshot: GitHubLifecycleSnapshot,
   ): Promise<ActiveRuntimeResult>;
-  mergePrep(
-    action: Extract<NewWorkAction, { kind: 'claim-merge-prep' }>,
+  updateBranch?(
+    action: Extract<NewWorkAction, { kind: 'update-branch' }>,
     credentials: CredentialPool,
+    snapshot: GitHubLifecycleSnapshot,
+  ): Promise<ActiveRuntimeResult>;
+  fileReconcileChild?(
+    action: Extract<NewWorkAction, { kind: 'file-reconcile-child' }>,
+    credentials: CredentialPool,
+    snapshot: GitHubLifecycleSnapshot,
+  ): Promise<ActiveRuntimeResult>;
+  rerunFailedChecks?(
+    action: Extract<NewWorkAction, { kind: 'rerun-failed-checks' }>,
+    credentials: CredentialPool,
+    snapshot: GitHubLifecycleSnapshot,
+  ): Promise<ActiveRuntimeResult>;
+  fileCiFailureChild?(
+    action: Extract<NewWorkAction, { kind: 'file-ci-failure-child' }>,
+    credentials: CredentialPool,
+    snapshot: GitHubLifecycleSnapshot,
   ): Promise<ActiveRuntimeResult>;
   merge(
     action: Extract<NewWorkAction, { kind: 'merge' }>,
     credentials: CredentialPool,
+    snapshot: GitHubLifecycleSnapshot,
   ): Promise<ActiveRuntimeResult>;
 }
 
@@ -34,7 +54,6 @@ export interface ActiveRuntimeOptions {
   readonly caps: {
     readonly implementation: number;
     readonly review: number;
-    readonly mergePrep: number;
   };
   readonly implementationPreferredLogin: string;
   readonly implementationBackpressureThreshold: number;
@@ -50,6 +69,7 @@ export interface ActiveRuntimeOptions {
     readonly ok: boolean;
     readonly detail?: string;
   }>;
+  readonly newWorkPaused?: () => boolean;
   readonly handlers: ActiveRuntimeHandlers;
 }
 
@@ -75,27 +95,23 @@ export function makeActiveRuntime(
   const caps = {
     implementation: nonNegative(options.caps.implementation, 'implementation cap'),
     review: nonNegative(options.caps.review, 'review cap'),
-    mergePrep: nonNegative(options.caps.mergePrep, 'merge-prep cap'),
   };
   const readLocalState = () => {
+    const newWorkPaused = options.newWorkPaused?.() ?? false;
     const attempts = options.readLocalAttempts();
     const activeByPhase = {
       implementation: attempts.filter((attempt) => attempt.phase === 'implement').length,
       review: attempts.filter((attempt) => attempt.phase === 'review').length,
-      mergePrep: attempts.filter((attempt) => attempt.phase === 'merge-prep').length,
     };
-    const occupied = new Set(
-      attempts.map((attempt) => attempt.selectedLogin.toLowerCase()),
-    );
     return {
-      remaining: {
-        implementation: Math.max(0, caps.implementation - activeByPhase.implementation),
-        review: Math.max(0, caps.review - activeByPhase.review),
-        mergePrep: Math.max(0, caps.mergePrep - activeByPhase.mergePrep),
-      },
-      availableLogins: options.credentials.logins().filter(
-        (login) => !occupied.has(login.toLowerCase()),
-      ),
+      remaining: newWorkPaused
+        ? { implementation: 0, review: 0 }
+        : {
+            implementation: Math.max(0, caps.implementation - activeByPhase.implementation),
+            review: Math.max(0, caps.review - activeByPhase.review),
+          },
+      newWorkPaused,
+      availableLogins: options.credentials.logins(),
       implementationPreferredLogin: options.implementationPreferredLogin,
     };
   };
@@ -109,29 +125,43 @@ export function makeActiveRuntime(
         'implementation backpressure threshold',
       ),
     ...(options.onlyIssues === undefined ? {} : { onlyIssues: options.onlyIssues }),
-    async executeAction(action) {
+    async executeAction(action, snapshot) {
       const local = readLocalState();
       const phase = action.kind === 'claim-implementation'
         ? 'implementation'
         : action.kind === 'claim-review'
           ? 'review'
-          : action.kind === 'claim-merge-prep'
-            ? 'mergePrep'
-            : null;
+          : null;
       if (phase !== null && local.remaining[phase] === 0) {
         return { outcome: 'skipped', reason: 'local phase capacity is full' };
       }
-      if (local.availableLogins.length === 0) {
-        return { outcome: 'skipped', reason: 'no local credential lane is free' };
-      }
-      const credentials = options.credentials.restrictedTo(local.availableLogins);
+      const credentials = options.credentials;
       const result = action.kind === 'claim-implementation'
-        ? await options.handlers.implementation(action, credentials)
+        ? await options.handlers.implementation(action, credentials, snapshot)
         : action.kind === 'claim-review'
-          ? await options.handlers.review(action, credentials)
-          : action.kind === 'claim-merge-prep'
-            ? await options.handlers.mergePrep(action, credentials)
-            : await options.handlers.merge(action, credentials);
+          ? await options.handlers.review(action, credentials, snapshot)
+          : action.kind === 'update-branch'
+            ? options.handlers.updateBranch === undefined
+              ? { status: 'skipped', detail: 'update-branch handler unavailable' }
+              : await options.handlers.updateBranch(action, credentials, snapshot)
+            : action.kind === 'file-reconcile-child'
+              ? options.handlers.fileReconcileChild === undefined
+                ? { status: 'skipped', detail: 'file-reconcile-child handler unavailable' }
+                : await options.handlers.fileReconcileChild(action, credentials, snapshot)
+              : action.kind === 'rerun-failed-checks'
+                ? options.handlers.rerunFailedChecks === undefined
+                  ? { status: 'skipped', detail: 'rerun-failed-checks handler unavailable' }
+                  : await options.handlers.rerunFailedChecks(action, credentials, snapshot)
+                : action.kind === 'file-ci-failure-child'
+                  ? options.handlers.fileCiFailureChild === undefined
+                    ? { status: 'skipped', detail: 'file-ci-failure-child handler unavailable' }
+                    : await options.handlers.fileCiFailureChild(action, credentials, snapshot)
+              : action.kind === 'merge'
+                ? await options.handlers.merge(action, credentials, snapshot)
+                : {
+                    status: 'skipped',
+                    detail: `action ${(action as { kind: string }).kind} is not wired`,
+                  };
       const detail = reason(result);
       return {
         outcome: result.status,

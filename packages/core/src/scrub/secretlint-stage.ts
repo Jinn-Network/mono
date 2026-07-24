@@ -1,9 +1,11 @@
 import { lintSource } from '@secretlint/core';
 import { creator } from '@secretlint/secretlint-rule-preset-recommend';
+import { applyDispositions } from './apply-dispositions.js';
+import type { Detector, Finding } from './finding.js';
 import { classifyKey, type KeyPolicy } from './key-policy.js';
-import type { Attributes, RedactionRecord, ScrubResult, ScrubStage } from './types.js';
+import type { Attributes, ScrubStage } from './types.js';
 
-const VERSION = '0.4.1'; // 0.4.1: public SWE-rebench instance ids skip the entropy fallback
+const VERSION = '0.5.0'; // 0.5.0: emit findings (#1969); disposition owns stubs
 const PRESET_RULE_ID = '@secretlint/secretlint-rule-preset-recommend';
 
 // Entropy fallback thresholds. Conservative on purpose: a long token whose
@@ -212,91 +214,88 @@ function shortRule(ruleId: string): string {
 const TOKEN_WRAPPING = /^([("'`[{,;:]*)([\s\S]*?)([)"'`\]},;:.]*)$/;
 
 /**
- * Secrets stage. Two passes over each `content`-classified string value:
- *  1. secretlint preset-recommend rules (AWS secret-key assignments, GitHub,
- *     Slack, npm, GCP service-account JSON, …) — each match replaced inline
- *     with `[SECRET:<rule>]`. Note the preset's defaults are narrower than the
- *     rule names suggest: bare AWS key IDs (AKIA…) and `AIza…` GCP API keys
- *     are NOT detected in this pass.
- *  2. a conservative Shannon-entropy + secret-shape fallback that catches
- *     near-random tokens no specific rule matched (≥ 20 chars by entropy alone,
- *     or 16–19 chars when the token is a single high-density secret-charset run
- *     mixing multiple character classes), replaced with `[SECRET:high-entropy]`.
- *     Path-shaped tokens (`owner/repo/slug` and friends, #1348) are judged
- *     per-segment rather than whole-token, so slug identifiers survive while a
- *     secret embedded as a path segment still redacts.
- * `safe` and non-string values pass through untouched.
+ * Secrets detector. Two passes over each `content`-classified string value:
+ *  1. secretlint preset-recommend rules → A1 findings
+ *  2. Shannon-entropy + secret-shape fallback → A2 findings
+ *
+ * Emits findings only; disposition owns stubs (#1969).
  */
 export interface SecretlintStageOptions {
   /**
-   * Gate for the pass-2 Shannon-entropy fallback (#1409). Default true (trace
-   * profile, unchanged). The seed-import profile sets false for public,
-   * transformed, or otherwise human-curated evidence where the probabilistic
-   * sweep demonstrably false-positives (env-var assignments with dated slugs,
-   * ≥20-char camelCase identifiers) — pass-1 deterministic rules still run
-   * unconditionally. With the fallback off, bare AWS key IDs (AKIA…),
-   * `AIza…` GCP API keys, JWTs, and generic high-entropy blobs pass this stage
-   * unredacted (pass-1 catches AWS secret-key assignments and GCP
-   * service-account JSON only). The seed profile covers the AWS/GCP key-ID
-   * shapes upstream in plain-patterns (#1415). JWTs and other high-entropy
-   * residuals remain the local curator's responsibility; using this profile
-   * does not itself establish that an input is safe to publish.
+   * Gate for the pass-2 Shannon-entropy fallback. Default true. Under the
+   * one-inventory redesign (#1969) every builder leaves this on; the option
+   * remains for unit tests that pin the fallback in isolation.
    */
   entropyFallback?: boolean;
 }
 
-export function secretlintStage(
+export function secretlintDetector(
   policy: KeyPolicy,
   opts: SecretlintStageOptions = {},
-): ScrubStage {
+): Detector {
   const entropyFallback = opts.entropyFallback ?? true;
   const config = { rules: [{ id: PRESET_RULE_ID, rule: creator }] };
+  const meta = { name: 'secretlint', version: VERSION };
 
   return {
-    name: 'secretlint',
-    version: VERSION,
-    async scrub(attributes: Attributes): Promise<ScrubResult> {
-      const out: Attributes = {};
-      const redactions: RedactionRecord[] = [];
+    ...meta,
+    async detect(attributes: Attributes): Promise<Finding[]> {
+      const findings: Finding[] = [];
 
       for (const [key, value] of Object.entries(attributes)) {
-        if (typeof value !== 'string' || classifyKey(key, policy) !== 'content') {
-          out[key] = value;
-          continue;
-        }
+        if (typeof value !== 'string' || classifyKey(key, policy) !== 'content') continue;
 
-        // Pass 1 — rule-based detection.
         const result = await lintSource({
           source: { filePath: '/span', content: value, ext: '.txt', contentType: 'text' },
           options: { config },
         });
-        let text = value;
-        // Replace from last range to first so earlier indices stay valid.
-        const ranges = [...result.messages].sort((a, b) => b.range[0] - a.range[0]);
-        for (const m of ranges) {
+        for (const m of result.messages) {
           const label = shortRule(m.ruleId);
-          text = text.slice(0, m.range[0]) + `[SECRET:${label}]` + text.slice(m.range[1]);
-          redactions.push({ key, stage: 'secretlint', kind: 'secret', detail: label });
-        }
-
-        // Pass 2 — entropy + secret-shape fallback on whatever survived.
-        // Wrapping punctuation is preserved around the placeholder (#1378).
-        // Skipped entirely under the seed profile (#1409).
-        if (entropyFallback) {
-          text = text.replace(/\S+/g, (token) => {
-            const [, lead = '', core = token, trail = ''] = TOKEN_WRAPPING.exec(token) ?? [];
-            if (isSecretShapedToken(core)) {
-              redactions.push({ key, stage: 'secretlint', kind: 'secret', detail: 'high-entropy' });
-              return `${lead}[SECRET:high-entropy]${trail}`;
-            }
-            return token;
+          findings.push({
+            class: 'A1',
+            span: { key, start: m.range[0], end: m.range[1] },
+            confidence: 'VERY_HIGH',
+            evidence: [`secret:${label}`],
+            detector: meta,
           });
         }
 
-        out[key] = text;
+        if (!entropyFallback) continue;
+
+        const tokenRe = /\S+/g;
+        let tokenMatch: RegExpExecArray | null;
+        while ((tokenMatch = tokenRe.exec(value)) !== null) {
+          const token = tokenMatch[0]!;
+          const [, lead = '', core = token] = TOKEN_WRAPPING.exec(token) ?? [];
+          if (!isSecretShapedToken(core)) continue;
+          const coreStart = tokenMatch.index + lead.length;
+          findings.push({
+            class: 'A2',
+            span: { key, start: coreStart, end: coreStart + core.length },
+            confidence: 'HIGH',
+            evidence: ['secret:high-entropy'],
+            detector: meta,
+          });
+        }
       }
 
-      return { attributes: out, redactions };
+      return findings;
+    },
+  };
+}
+
+/** Legacy ScrubStage wrapper around {@link secretlintDetector}. */
+export function secretlintStage(
+  policy: KeyPolicy,
+  opts: SecretlintStageOptions = {},
+): ScrubStage {
+  const detector = secretlintDetector(policy, opts);
+  return {
+    name: detector.name,
+    version: detector.version,
+    async scrub(attributes: Attributes) {
+      const findings = await detector.detect(attributes);
+      return applyDispositions(attributes, findings);
     },
   };
 }

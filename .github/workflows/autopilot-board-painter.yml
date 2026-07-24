@@ -1,0 +1,51 @@
+# Scheduled board painter for the single-surface lifecycle (Stage 3).
+#
+# Paints Project Status from git/PR/label facts, archives stale Done items,
+# and closes orphan children. No AI. Spec:
+# docs/superpowers/specs/2026-07-21-single-surface-lifecycle.md §3 / §9.
+#
+# Auth note: the default GITHUB_TOKEN cannot write org-level Projects v2.
+# This workflow uses JINN_AUTOPILOT_PAINTER_TOKEN (preferred) or falls back
+# to JINN_IMPL_GH_TOKEN — a PAT / App token with `project` + `repo` scope.
+
+name: autopilot board painter
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/15 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: autopilot-board-painter
+  cancel-in-progress: false
+
+jobs:
+  paint-board:
+    name: Paint board Status
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Install autopilot dependencies
+        run: yarn --cwd packages/autopilot install --immutable
+
+      - name: Paint board
+        env:
+          # Org Projects v2 mutations require a PAT/App token; GITHUB_TOKEN
+          # is insufficient for the Jinn-Network org project board.
+          JINN_AUTOPILOT_PAINTER_TOKEN: ${{ secrets.JINN_AUTOPILOT_PAINTER_TOKEN }}
+          JINN_IMPL_GH_TOKEN: ${{ secrets.JINN_IMPL_GH_TOKEN }}
+          GH_TOKEN: ${{ secrets.JINN_AUTOPILOT_PAINTER_TOKEN || secrets.JINN_IMPL_GH_TOKEN }}
+        run: yarn --cwd packages/autopilot paint-board

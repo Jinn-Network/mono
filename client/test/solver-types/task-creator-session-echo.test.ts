@@ -741,4 +741,39 @@ describe('D2 tier-2 — unpublished mints never enter the postable union (per-en
       await cleanup(env);
     }
   });
+
+  it('bounds session-echo mints per harvest tick via limitPerTick', async () => {
+    const env = await setup();
+    try {
+      for (let i = 0; i < 5; i++) {
+        await appendRecord(env, makeRecord({ sourceId: `session-cap-${i}` }));
+      }
+
+      const first = await mineSessionEchoes({
+        ...baseDeps(env, makeSmartRunner()),
+        limitPerTick: 2,
+      });
+
+      expect(first.discovered).toBe(2);
+      expect(first.admitted).toHaveLength(2);
+
+      const second = await mineSessionEchoes({
+        ...baseDeps(env, makeSmartRunner()),
+        limitPerTick: 2,
+      });
+
+      expect(second.discovered).toBe(2);
+      expect(second.admitted).toHaveLength(2);
+
+      const third = await mineSessionEchoes({
+        ...baseDeps(env, makeSmartRunner()),
+        limitPerTick: 2,
+      });
+
+      expect(third.discovered).toBe(1);
+      expect(third.admitted).toHaveLength(1);
+    } finally {
+      await cleanup(env);
+    }
+  });
 });

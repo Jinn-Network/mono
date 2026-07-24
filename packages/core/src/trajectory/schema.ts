@@ -66,6 +66,15 @@ export const RedactionManifestSchema = z
       }),
     ),
     totalRedactions: z.number().int().nonnegative(),
+    /**
+     * Additive provenance (#1974 / design §6.7, locked Q5). Optional so
+     * pre-v2 envelopes remain readable. Present on newly emitted manifests.
+     */
+    schemaVersion: z.number().int().positive().optional(),
+    /** sha256 hex over policy + detector inventory + model/labels + allowlist. */
+    policyHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+    /** Applied disposition counts keyed `${ScrubClass}:${redact|flag|reject}`. */
+    perClassCounts: z.record(z.number().int().nonnegative()).optional(),
   })
   .refine(
     (m) => m.spans.reduce((acc, s) => acc + s.redactedKeys.length, 0) === m.totalRedactions,

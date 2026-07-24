@@ -8,6 +8,7 @@ import {
   buildIpfsHexCidCandidatesFromPartialHex,
   fetchFromIpfs,
   normalizeIpfsGatewayBase,
+  type FetchFromIpfsOptions,
 } from '@jinn-network/core/corpus-read';
 
 export {
@@ -15,6 +16,7 @@ export {
   buildIpfsHexCidCandidatesFromPartialHex,
   fetchFromIpfs,
   normalizeIpfsGatewayBase,
+  type FetchFromIpfsOptions,
 } from '@jinn-network/core/corpus-read';
 
 export interface TaskPayload {
@@ -94,6 +96,22 @@ const IPFS_FETCH_TIMEOUT_MS = 15_000;
 const IPFS_UPLOAD_TIMEOUT_MS = 60_000;
 
 const FALLBACK_IPFS_GATEWAY_BASE = 'https://ipfs.io/ipfs/';
+
+/** Same opts semantics as core `fetchFromIpfs` — raw fetchers share the pin for hermetic parity (#1648). */
+function resolveMechIpfsGateways(
+  gatewayUrl: string,
+  opts?: FetchFromIpfsOptions,
+): Array<readonly [string, string]> {
+  const primary = normalizeIpfsGatewayBase(gatewayUrl);
+  const list: Array<readonly [string, string]> = [['primary', primary]];
+  if (opts?.fallbackGatewayBase === false) return list;
+  if (typeof opts?.fallbackGatewayBase === 'string') {
+    list.push(['fallback', normalizeIpfsGatewayBase(opts.fallbackGatewayBase)]);
+    return list;
+  }
+  list.push(['fallback', FALLBACK_IPFS_GATEWAY_BASE]);
+  return list;
+}
 
 export function normalizeIpfsRegistryAddUrl(registryUrl: string): string {
   let t = registryUrl.trim();
@@ -175,8 +193,9 @@ export async function uploadToIpfs(
 export async function fetchSignedTaskFromIpfs(
   gatewayUrl: string,
   cid: string,
+  opts?: FetchFromIpfsOptions,
 ): Promise<SignedTaskV1> {
-  const raw = await fetchFromIpfs(gatewayUrl, cid);
+  const raw = await fetchFromIpfs(gatewayUrl, cid, opts);
   return parseSignedTaskV1(raw);
 }
 
@@ -323,15 +342,13 @@ async function fetchRawBytesFromUrl(url: string, signal: AbortSignal): Promise<U
 export async function fetchSignedEnvelopeBytesRaw(
   gatewayUrl: string,
   cid: string,
+  opts?: FetchFromIpfsOptions,
 ): Promise<Uint8Array> {
-  const base = normalizeIpfsGatewayBase(gatewayUrl);
+  const gateways = resolveMechIpfsGateways(gatewayUrl, opts);
   const candidates = buildIpfsFetchCidPathCandidates(cid);
   const errors: string[] = [];
   for (const cidPath of candidates) {
-    for (const [name, baseUrl] of [
-      ['primary', base] as const,
-      ['fallback', FALLBACK_IPFS_GATEWAY_BASE] as const,
-    ]) {
+    for (const [name, baseUrl] of gateways) {
       const url = `${baseUrl}${cidPath}`;
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), IPFS_FETCH_TIMEOUT_MS);
@@ -355,8 +372,9 @@ export async function fetchSignedEnvelopeBytesRaw(
 export async function fetchSignedEnvelopeFromIpfs(
   gatewayUrl: string,
   cid: string,
+  opts?: FetchFromIpfsOptions,
 ): Promise<unknown> {
-  return fetchFromIpfs(gatewayUrl, cid);
+  return fetchFromIpfs(gatewayUrl, cid, opts);
 }
 
 /**
@@ -366,8 +384,9 @@ export async function fetchSignedEnvelopeFromIpfs(
 export async function fetchTrajectoryFromIpfs(
   gatewayUrl: string,
   cid: string,
+  opts?: FetchFromIpfsOptions,
 ): Promise<unknown> {
-  return fetchFromIpfs(gatewayUrl, cid);
+  return fetchFromIpfs(gatewayUrl, cid, opts);
 }
 
 /**
@@ -380,15 +399,13 @@ export async function fetchTrajectoryFromIpfs(
 export async function fetchRawBytesFromIpfs(
   gatewayUrl: string,
   cid: string,
+  opts?: FetchFromIpfsOptions,
 ): Promise<Uint8Array> {
-  const base = normalizeIpfsGatewayBase(gatewayUrl);
+  const gateways = resolveMechIpfsGateways(gatewayUrl, opts);
   const candidates = buildIpfsFetchCidPathCandidates(cid);
   const errors: string[] = [];
   for (const cidPath of candidates) {
-    for (const [name, baseUrl] of [
-      ['primary', base] as const,
-      ['fallback', FALLBACK_IPFS_GATEWAY_BASE] as const,
-    ]) {
+    for (const [name, baseUrl] of gateways) {
       const url = `${baseUrl}${cidPath}`;
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), IPFS_FETCH_TIMEOUT_MS);
@@ -414,8 +431,9 @@ export async function fetchRawBytesFromIpfs(
 export async function fetchTextFromIpfs(
   gatewayUrl: string,
   cid: string,
+  opts?: FetchFromIpfsOptions,
 ): Promise<string> {
-  const bytes = await fetchRawBytesFromIpfs(gatewayUrl, cid);
+  const bytes = await fetchRawBytesFromIpfs(gatewayUrl, cid, opts);
   return new TextDecoder('utf-8').decode(bytes);
 }
 
@@ -433,9 +451,10 @@ export async function fetchTextFromIpfs(
 export async function fetchSourceBundleFromIpfs(
   gatewayUrl: string,
   bundleCid: string,
+  opts?: FetchFromIpfsOptions,
 ): Promise<{ files: Map<string, string>; manifest?: Record<string, unknown> }> {
   // Manifest is a JSON document — JSON fetch is correct here.
-  const manifest = await fetchFromIpfs(gatewayUrl, bundleCid) as Record<string, unknown>;
+  const manifest = await fetchFromIpfs(gatewayUrl, bundleCid, opts) as Record<string, unknown>;
   const fileEntries = manifest['files'] as Array<{ path: string; cid: string }> | undefined;
 
   const files = new Map<string, string>();
@@ -443,7 +462,7 @@ export async function fetchSourceBundleFromIpfs(
     await Promise.all(
       fileEntries.map(async ({ path, cid }) => {
         // Source files are raw text, not JSON — use fetchTextFromIpfs.
-        const content = await fetchTextFromIpfs(gatewayUrl, cid);
+        const content = await fetchTextFromIpfs(gatewayUrl, cid, opts);
         files.set(path, content);
       }),
     );

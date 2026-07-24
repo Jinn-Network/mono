@@ -10,6 +10,7 @@ import {
   renameSync,
   rmSync,
   statSync,
+  statfsSync,
   writeFileSync,
 } from 'node:fs';
 import { hostname as systemHostname } from 'node:os';
@@ -24,7 +25,7 @@ import {
   type SelectedCredential,
 } from './credentials.js';
 
-export type AttemptPhase = 'implement' | 'review' | 'merge-prep';
+export type AttemptPhase = 'implement' | 'review';
 export type AttemptProcessState = 'preparing' | 'running' | 'exited';
 export type ReviewApprovalPolicy = 'approve-eligible' | 'human-codeowner';
 
@@ -321,7 +322,7 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
   ], 'attempt manifest');
   if (manifest.version !== 2) throw new Error('Unsupported attempt manifest version');
   const phase = manifest.phase;
-  if (phase !== 'implement' && phase !== 'review' && phase !== 'merge-prep') {
+  if (phase !== 'implement' && phase !== 'review') {
     throw new Error('Invalid attempt phase');
   }
   const attemptId = uuid(stringField(manifest.attemptId, 'attempt ID'), 'attempt ID');
@@ -341,11 +342,8 @@ export function decodeAttemptManifest(value: unknown): AttemptManifest {
   const targetBaseOid = manifest.targetBaseOid === undefined
     ? undefined
     : gitOid(stringField(manifest.targetBaseOid, 'target base OID'));
-  if (phase === 'merge-prep' && targetBaseOid === undefined) {
-    throw new Error('Merge-prep attempts require an exact target base OID');
-  }
-  if (phase !== 'merge-prep' && targetBaseOid !== undefined) {
-    throw new Error('Target base OID is valid only for merge-prep attempts');
+  if (targetBaseOid !== undefined) {
+    throw new Error('Target base OID is not valid for attempt manifests');
   }
   const claimOid = gitOid(stringField(manifest.claimOid, 'claim OID'));
   const reviewGeneration = manifest.reviewGeneration === undefined
@@ -791,6 +789,57 @@ function canonicalProspectivePath(path: string): string {
   return join(realpathSync(existing), ...suffix);
 }
 
+async function commitObjectExists(
+  runner: CommandRunner,
+  repositoryRoot: string,
+  oid: string,
+): Promise<boolean> {
+  try {
+    await runner('git', ['-C', repositoryRoot, 'cat-file', '-e', `${oid}^{commit}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function ensureExpectedHeadAvailable(
+  runner: CommandRunner,
+  repository: AttemptRepositoryIdentity,
+  input: {
+    readonly expectedHead: string;
+    readonly branch: string;
+    readonly prNumber?: number;
+  },
+): Promise<void> {
+  if (await commitObjectExists(runner, repository.root, input.expectedHead)) {
+    return;
+  }
+  const fetchSpecs = [input.branch];
+  if (input.prNumber !== undefined) {
+    fetchSpecs.push(`pull/${input.prNumber}/head`);
+  }
+  for (const spec of fetchSpecs) {
+    try {
+      await runner('git', [
+        '-C', repository.root,
+        'fetch', '--quiet', repository.remoteName, spec,
+      ]);
+    } catch {
+      // Best-effort: the branch or PR ref may not exist on the remote yet.
+    }
+  }
+  if (await commitObjectExists(runner, repository.root, input.expectedHead)) {
+    return;
+  }
+  const prRef = input.prNumber === undefined
+    ? ''
+    : ` and ${repository.remoteName}/pull/${input.prNumber}/head`;
+  throw new Error(
+    `Expected head ${input.expectedHead} is not available after fetching `
+    + `${repository.remoteName}/${input.branch}${prRef}`,
+  );
+}
+
 export async function createAttemptWorkspace(
   options: CreateAttemptOptions,
   runner: CommandRunner,
@@ -881,6 +930,11 @@ export async function createAttemptWorkspace(
   if (registeredBefore) {
     throw new Error('Attempt worktree path is already registered');
   }
+  await ensureExpectedHeadAvailable(runner, repository, {
+    expectedHead: options.expectedHead,
+    branch: options.branch,
+    prNumber: options.prNumber,
+  });
   mkdirSync(phaseDir, { recursive: true, mode: 0o700 });
   mkdirSync(attemptDir, { mode: 0o700 });
   mkdirSync(paths.ghConfigDir, { mode: 0o700 });
@@ -1016,6 +1070,43 @@ export interface CleanupAttemptOptions {
   readonly v2Base: string;
   readonly isPidAlive: (pid: number) => boolean;
   readonly env?: Record<string, string>;
+  /** Grace period before dead dirty/ahead/preparing attempts may be removed. */
+  readonly graceMs?: number;
+  readonly now?: () => Date;
+  /** When true, skip grace and publication proof for dead attempts. */
+  readonly evictUnpublished?: boolean;
+}
+
+export function freeDiskBytes(path: string): number {
+  const stats = statfsSync(path);
+  return Number(stats.bavail) * Number(stats.bsize);
+}
+
+function attemptEndedAtMs(manifest: AttemptManifest): number {
+  const timestamp = manifest.timestamps.childExitedAt
+    ?? manifest.timestamps.updatedAt
+    ?? manifest.timestamps.createdAt;
+  return Date.parse(timestamp);
+}
+
+function graceAllowsForceRemoval(
+  manifest: AttemptManifest,
+  options: CleanupAttemptOptions,
+): boolean {
+  if (options.evictUnpublished === true) return true;
+  const graceMs = options.graceMs;
+  if (graceMs === undefined) return false;
+  const now = options.now?.() ?? new Date();
+  return now.getTime() - attemptEndedAtMs(manifest) >= graceMs;
+}
+
+function isAttemptChildLive(
+  manifest: AttemptManifest,
+  isPidAlive: (pid: number) => boolean,
+): boolean {
+  return manifest.processState === 'running'
+    && manifest.pid !== null
+    && isPidAlive(manifest.pid);
 }
 
 function retained(
@@ -1192,6 +1283,32 @@ async function provePublicationReachability(
   return null;
 }
 
+async function removeAttemptWorktree(
+  manifest: AttemptManifest,
+  runner: CommandRunner,
+  force: boolean,
+): Promise<AttemptCleanupResult | null> {
+  if (!existsSync(manifest.paths.worktree)) return null;
+  try {
+    await runner('git', [
+      `--git-dir=${manifest.repository.gitCommonDir}`,
+      'worktree',
+      'remove',
+      ...(force ? ['--force'] : []),
+      manifest.paths.worktree,
+    ]);
+    return null;
+  } catch {
+    return retained(
+      'ambiguous',
+      force
+        ? 'Exact worktree force-removal failed.'
+        : 'Exact worktree removal failed.',
+      manifest.attemptId,
+    );
+  }
+}
+
 export async function cleanupAttempt(
   manifestPath: string,
   runner: CommandRunner,
@@ -1211,13 +1328,14 @@ export async function cleanupAttempt(
     );
   }
   if (manifest.processState === 'preparing') {
-    return retained(
-      'ambiguous',
-      'Attempt is still preparing and has no positive terminal process evidence.',
-      manifest.attemptId,
-    );
-  }
-  if (manifest.processState === 'running') {
+    if (!graceAllowsForceRemoval(manifest, options)) {
+      return retained(
+        'ambiguous',
+        'Attempt is still preparing and has no positive terminal process evidence.',
+        manifest.attemptId,
+      );
+    }
+  } else if (manifest.processState === 'running') {
     if (manifest.pid === null) {
       return retained(
         'ambiguous',
@@ -1228,6 +1346,8 @@ export async function cleanupAttempt(
     if (options.isPidAlive(manifest.pid)) {
       return retained('live', 'Attempt child PID is still live.', manifest.attemptId);
     }
+    markAttemptExited(manifestPath);
+    manifest = readAttemptManifest(manifestPath);
   }
   let actualRepository: AttemptRepositoryIdentity;
   try {
@@ -1273,11 +1393,14 @@ export async function cleanupAttempt(
   }
   if (!existsSync(manifest.paths.worktree)) {
     if (manifest.terminalHead === undefined) {
-      return retained(
-        'ambiguous',
-        'Missing worktree has no recorded terminal HEAD.',
-        manifest.attemptId,
-      );
+      if (!graceAllowsForceRemoval(manifest, options)) {
+        return retained(
+          'ambiguous',
+          'Missing worktree has no recorded terminal HEAD.',
+          manifest.attemptId,
+        );
+      }
+      return removeAttemptMetadata(manifest);
     }
     let registered: boolean;
     try {
@@ -1294,57 +1417,134 @@ export async function cleanupAttempt(
       );
     }
     if (registered) {
-      return retained(
-        'ambiguous',
-        'Missing worktree remains registered in the creating repository.',
-        manifest.attemptId,
-      );
+      if (!graceAllowsForceRemoval(manifest, options)) {
+        return retained(
+          'ambiguous',
+          'Missing worktree remains registered in the creating repository.',
+          manifest.attemptId,
+        );
+      }
+      const worktreeFailure = await removeAttemptWorktree(manifest, runner, true);
+      if (worktreeFailure !== null) return worktreeFailure;
+      return removeAttemptMetadata(manifest);
     }
+    if (!graceAllowsForceRemoval(manifest, options)) {
+      const proofFailure = await provePublicationReachability(
+        manifest,
+        runner,
+        options,
+        [`--git-dir=${manifest.repository.gitCommonDir}`],
+        manifest.terminalHead,
+      );
+      if (proofFailure !== null) return proofFailure;
+    }
+    return removeAttemptMetadata(manifest);
+  }
+
+  const forceRemoval = graceAllowsForceRemoval(manifest, options);
+  if (!forceRemoval) {
+    try {
+      const status = await runner('git', [
+        '-C', manifest.paths.worktree,
+        'status', '--porcelain', '--untracked-files=all',
+      ]);
+      if (status.trim() !== '') {
+        return retained('dirty', 'Worktree contains uncommitted changes.', manifest.attemptId);
+      }
+    } catch {
+      return retained('ambiguous', 'Git cleanliness inspection failed.', manifest.attemptId);
+    }
+  }
+
+  if (!forceRemoval) {
     const proofFailure = await provePublicationReachability(
       manifest,
       runner,
       options,
-      [`--git-dir=${manifest.repository.gitCommonDir}`],
-      manifest.terminalHead,
+      ['-C', manifest.paths.worktree],
+      'HEAD',
     );
     if (proofFailure !== null) return proofFailure;
-    return removeAttemptMetadata(manifest);
   }
 
-  try {
-    const status = await runner('git', [
-      '-C', manifest.paths.worktree,
-      'status', '--porcelain', '--untracked-files=all',
-    ]);
-    if (status.trim() !== '') {
-      return retained('dirty', 'Worktree contains uncommitted changes.', manifest.attemptId);
-    }
-  } catch {
-    return retained('ambiguous', 'Git cleanliness inspection failed.', manifest.attemptId);
-  }
-
-  const proofFailure = await provePublicationReachability(
-    manifest,
-    runner,
-    options,
-    ['-C', manifest.paths.worktree],
-    'HEAD',
-  );
-  if (proofFailure !== null) return proofFailure;
-
-  try {
-    await runner('git', [
-      `--git-dir=${manifest.repository.gitCommonDir}`,
-      'worktree', 'remove', manifest.paths.worktree,
-    ]);
-  } catch {
-    return retained('ambiguous', 'Exact worktree removal failed.', manifest.attemptId);
-  }
+  const worktreeFailure = await removeAttemptWorktree(manifest, runner, forceRemoval);
+  if (worktreeFailure !== null) return worktreeFailure;
   return removeAttemptMetadata(manifest);
 }
 
 export interface SweepDeadAttemptsOptions extends CleanupAttemptOptions {
   readonly host?: string;
+  readonly diskFloorBytes?: number;
+  readonly diskPath?: string;
+  readonly readFreeDiskBytes?: (path: string) => number;
+}
+
+interface CollectedAttempt {
+  readonly manifestPath: string;
+  readonly manifest: AttemptManifest;
+}
+
+function collectHostedAttempts(v2Base: string, host: string): CollectedAttempt[] {
+  const attempts: CollectedAttempt[] = [];
+  for (const runnerDir of directories(v2Base)) {
+    for (const phaseDir of directories(runnerDir)) {
+      for (const attemptDir of directories(phaseDir)) {
+        const manifestPath = join(attemptDir, 'manifest.json');
+        try {
+          const manifest = readAttemptManifest(manifestPath);
+          if (manifest.host !== host) continue;
+          attempts.push({ manifestPath, manifest });
+        } catch {
+          // Malformed manifests are handled by the orphan sweep.
+        }
+      }
+    }
+  }
+  return attempts;
+}
+
+function sweepOrphanAttemptDirs(
+  v2Base: string,
+  graceMs: number | undefined,
+  now: () => Date,
+): AttemptCleanupResult[] {
+  if (graceMs === undefined) return [];
+  const results: AttemptCleanupResult[] = [];
+  const cutoff = now().getTime() - graceMs;
+  for (const runnerDir of directories(v2Base)) {
+    for (const phaseDir of directories(runnerDir)) {
+      for (const attemptDir of directories(phaseDir)) {
+        if (!isBelow(v2Base, attemptDir)) continue;
+        const manifestPath = join(attemptDir, 'manifest.json');
+        try {
+          readAttemptManifest(manifestPath);
+          continue;
+        } catch {
+          // Orphan candidate.
+        }
+        try {
+          if (statSync(attemptDir).mtimeMs >= cutoff) {
+            results.push(retained(
+              'malformed',
+              'Malformed attempt directory is still inside the grace period.',
+            ));
+            continue;
+          }
+          rmSync(attemptDir, { recursive: true });
+          results.push({
+            status: 'removed',
+            attemptId: basename(attemptDir),
+          });
+        } catch {
+          results.push(retained(
+            'malformed',
+            'Malformed attempt directory could not be removed.',
+          ));
+        }
+      }
+    }
+  }
+  return results;
 }
 
 export async function sweepDeadAttempts(
@@ -1353,6 +1553,36 @@ export async function sweepDeadAttempts(
 ): Promise<AttemptCleanupResult[]> {
   const host = filesystemSafeHostname(options.host ?? systemHostname());
   const results: AttemptCleanupResult[] = [];
+  const diskPath = options.diskPath ?? options.v2Base;
+  const diskFloorBytes = options.diskFloorBytes;
+  const readFreeDiskBytes = options.readFreeDiskBytes ?? freeDiskBytes;
+
+  if (
+    diskFloorBytes !== undefined
+    && diskFloorBytes > 0
+    && readFreeDiskBytes(diskPath) < diskFloorBytes
+  ) {
+    const deadAttempts = collectHostedAttempts(options.v2Base, host)
+      .filter((attempt) => !isAttemptChildLive(attempt.manifest, options.isPidAlive))
+      .sort((left, right) =>
+        attemptEndedAtMs(left.manifest) - attemptEndedAtMs(right.manifest));
+    for (const attempt of deadAttempts) {
+      if (readFreeDiskBytes(diskPath) >= diskFloorBytes) break;
+      try {
+        results.push(await cleanupAttempt(attempt.manifestPath, runner, {
+          ...options,
+          evictUnpublished: true,
+        }));
+      } catch {
+        results.push(retained(
+          'ambiguous',
+          'Emergency disk-floor attempt cleanup failed unexpectedly and was isolated.',
+          attempt.manifest.attemptId,
+        ));
+      }
+    }
+  }
+
   for (const runnerDir of directories(options.v2Base)) {
     for (const phaseDir of directories(runnerDir)) {
       for (const attemptDir of directories(phaseDir)) {
@@ -1377,5 +1607,10 @@ export async function sweepDeadAttempts(
       }
     }
   }
+  results.push(...sweepOrphanAttemptDirs(
+    options.v2Base,
+    options.graceMs,
+    options.now ?? (() => new Date()),
+  ));
   return results;
 }

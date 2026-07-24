@@ -14,6 +14,17 @@ export interface RedactionRecord {
 export interface ScrubResult {
   attributes: Attributes;
   redactions: RedactionRecord[];
+  /** Findings from the detection pass (#1969). Optional for legacy stage wrappers. */
+  findings?: import('./finding.js').Finding[];
+  /** True when reject-publish fired or check-mode saw a non-pass finding. */
+  rejected?: boolean;
+  /** Unresolved flag findings held for review (#1973). */
+  unresolvedFlags?: import('./finding.js').Finding[];
+  /**
+   * Applied disposition counts keyed `${ScrubClass}:${redact|flag|reject}`
+   * (#1974). Optional for legacy stage wrappers.
+   */
+  perClassCounts?: Record<string, number>;
 }
 
 /**
