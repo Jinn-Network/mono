@@ -128,8 +128,8 @@ These shape or gate F* scope; they do **not** block writing this plan. Record th
 
 ## Phase F1 — `feat(sdk): add jinn-repo-verdict.v3 graded counts`
 
-**Depends on:** —  
-**Session sizing:** one Autopilot implement session  
+**Depends on:** —
+**Session sizing:** one Autopilot implement session
 **Proposed Issue title:** `feat(sdk): add jinn-repo-verdict.v3 graded counts`
 
 ### Task F1.1: Additive `jinn-repo-verdict.v3` schema + union
@@ -303,9 +303,9 @@ EOF
 
 ## Phase F2 — `feat(evaluator): emit jinn-repo v3 passedCount/totalCount`
 
-**Depends on:** F1  
-**Session sizing:** one Autopilot implement session  
-**Proposed Issue title:** `feat(evaluator): emit jinn-repo v3 passedCount/totalCount`  
+**Depends on:** F1
+**Session sizing:** one Autopilot implement session
+**Proposed Issue title:** `feat(evaluator): emit jinn-repo v3 passedCount/totalCount`
 **Q1 default:** omit counts on non-vitest package-script fallback.
 
 ### Task F2.1: Runner returns optional counts from vitest JSON
@@ -526,9 +526,9 @@ EOF
 
 ## Phase F3 — `feat(indexer): carry jinn-repo graded counts + join keys`
 
-**Depends on:** F1 (schema field names); may land parallel to F2  
-**Session sizing:** one Autopilot implement session  
-**Proposed Issue title:** `feat(indexer): carry jinn-repo graded counts + join keys`  
+**Depends on:** F1 (schema field names); may land parallel to F2
+**Session sizing:** one Autopilot implement session
+**Proposed Issue title:** `feat(indexer): carry jinn-repo graded counts + join keys`
 **Q2 default:** task-body fetch generalization is **in scope** for this Issue.
 
 ### Task F3.1: `parseVerdictEnvelopeLite` jinn-repo branch
