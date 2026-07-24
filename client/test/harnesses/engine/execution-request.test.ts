@@ -13,7 +13,13 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Store } from '../../../src/store/store.js';
-import { TaskEngine, joinedSolverNetsViewFromConfig } from '../../../src/harnesses/engine/engine.js';
+import {
+  TaskEngine,
+  joinedSolverNetsViewFromConfig,
+  type JoinedSolverNetsView,
+  type ManifestResolver,
+  type SolverNetRegistryLike,
+} from '../../../src/harnesses/engine/engine.js';
 import { HarnessRegistry } from '../../../src/harnesses/engine/registry.js';
 import { SolverNetRegistry, registerJoinedNet } from '../../../src/solver-nets/registry.js';
 import type { Harness, Solution } from '../../../src/harnesses/types.js';
@@ -52,14 +58,32 @@ describe('execution request (issue #2039)', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  async function makeEngine(): Promise<TaskEngine> {
+  function makeImplRegistry(): HarnessRegistry {
     const implRegistry = new HarnessRegistry();
     // Registered first: registry-order (solverType-only) dispatch would pick
     // this one by default for `prediction.v1`, which is exactly the bug AC2
     // guards against.
     implRegistry.register(stubHarness('codex', '1.0.0', codexCanAttempt));
     implRegistry.register(stubHarness('claude-code', '2.0.0', claudeCanAttempt));
+    return implRegistry;
+  }
 
+  function buildEngine(opts: {
+    solverNetRegistry?: SolverNetRegistryLike;
+    manifestResolver: ManifestResolver;
+    joinedSolverNets?: JoinedSolverNetsView;
+  }): TaskEngine {
+    return new TaskEngine({
+      store,
+      paths: { workingDirRoot: join(dir, 'work'), implStateDirRoot: join(dir, 'impl-state') },
+      implRegistry: makeImplRegistry(),
+      manifestResolver: opts.manifestResolver,
+      ...(opts.solverNetRegistry ? { solverNetRegistry: opts.solverNetRegistry } : {}),
+      ...(opts.joinedSolverNets ? { joinedSolverNets: opts.joinedSolverNets } : {}),
+    });
+  }
+
+  async function makeEngine(): Promise<TaskEngine> {
     const solverNetRegistry = new SolverNetRegistry();
     // CID_A registered first, same solverType as CID_B, DIFFERENT harness/model.
     await registerJoinedNet(solverNetRegistry, CID_A, {
@@ -89,10 +113,7 @@ describe('execution request (issue #2039)', () => {
       [CID_B]: buildPredictionV1ManifestStub({ solverNetId: 'prediction-v1-b', name: 'Prediction (B)' }),
     });
 
-    return new TaskEngine({
-      store,
-      paths: { workingDirRoot: join(dir, 'work'), implStateDirRoot: join(dir, 'impl-state') },
-      implRegistry,
+    return buildEngine({
       solverNetRegistry,
       manifestResolver,
       ...(joinedSolverNets ? { joinedSolverNets } : {}),
@@ -119,6 +140,140 @@ describe('execution request (issue #2039)', () => {
 
       expect(accept).toEqual({ ok: true });
       expect(codexCanAttempt).toHaveBeenCalledTimes(1);
+      expect(claudeCanAttempt).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unknown exact manifest instead of falling back to another same-type net', async () => {
+      const missingCid = 'bafy-prediction-v1-execution-request-missing';
+      const solverNetRegistry = new SolverNetRegistry();
+      await registerJoinedNet(solverNetRegistry, CID_A, {
+        manifestCid: CID_A,
+        contract: { id: 'prediction', version: 'v1' },
+        roles: ['solver'],
+        harness: 'codex',
+        plugins: [],
+      });
+      const engine = buildEngine({
+        solverNetRegistry,
+        manifestResolver: makeStubManifestResolver({
+          [missingCid]: buildPredictionV1ManifestStub(),
+        }),
+      });
+      const task = makePredictionV1Task({ solverNetManifestCid: missingCid });
+      expect(task.executionRequest).toBeUndefined();
+
+      const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
+
+      expect(accept.ok).toBe(false);
+      expect(codexCanAttempt).not.toHaveBeenCalled();
+      expect(claudeCanAttempt).not.toHaveBeenCalled();
+    });
+
+    it('rejects an exact manifest lacking the requested role instead of using another eligible net', async () => {
+      const solverNetRegistry = new SolverNetRegistry();
+      await registerJoinedNet(solverNetRegistry, CID_A, {
+        manifestCid: CID_A,
+        contract: { id: 'prediction', version: 'v1' },
+        roles: ['evaluator'],
+        harness: 'codex',
+        plugins: [],
+      });
+      await registerJoinedNet(solverNetRegistry, CID_B, {
+        manifestCid: CID_B,
+        contract: { id: 'prediction', version: 'v1' },
+        roles: ['solver'],
+        harness: 'claude-code',
+        plugins: [],
+      });
+      const engine = buildEngine({
+        solverNetRegistry,
+        manifestResolver: makeStubManifestResolver({
+          [CID_A]: buildPredictionV1ManifestStub(),
+        }),
+      });
+      const task = makePredictionV1Task({ solverNetManifestCid: CID_A });
+      expect(task.executionRequest).toBeUndefined();
+
+      const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
+
+      expect(accept.ok).toBe(false);
+      expect(codexCanAttempt).not.toHaveBeenCalled();
+      expect(claudeCanAttempt).not.toHaveBeenCalled();
+    });
+
+    it('rejects an exact manifest whose registered solver type disagrees with the task', async () => {
+      const solverNetRegistry = new SolverNetRegistry();
+      await registerJoinedNet(solverNetRegistry, CID_A, {
+        manifestCid: CID_A,
+        contract: { id: 'swe-rebench-v2', version: 'v1' },
+        roles: ['solver'],
+        harness: 'codex',
+        plugins: [],
+      });
+      await registerJoinedNet(solverNetRegistry, CID_B, {
+        manifestCid: CID_B,
+        contract: { id: 'prediction', version: 'v1' },
+        roles: ['solver'],
+        harness: 'claude-code',
+        plugins: [],
+      });
+      const engine = buildEngine({
+        solverNetRegistry,
+        manifestResolver: makeStubManifestResolver({
+          [CID_A]: buildPredictionV1ManifestStub(),
+        }),
+      });
+      const task = makePredictionV1Task({ solverNetManifestCid: CID_A });
+      expect(task.executionRequest).toBeUndefined();
+
+      const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
+
+      expect(accept.ok).toBe(false);
+      expect(codexCanAttempt).not.toHaveBeenCalled();
+      expect(claudeCanAttempt).not.toHaveBeenCalled();
+    });
+
+    it('rejects a manifest-bound task when the registry lacks exact-CID lookup', async () => {
+      const solverNetRegistry = new SolverNetRegistry();
+      await registerJoinedNet(solverNetRegistry, CID_A, {
+        manifestCid: CID_A,
+        contract: { id: 'prediction', version: 'v1' },
+        roles: ['solver'],
+        harness: 'codex',
+        plugins: [],
+      });
+      const legacyRegistry: SolverNetRegistryLike = {
+        forSolverType: solverNetRegistry.forSolverType.bind(solverNetRegistry),
+      };
+      const engine = buildEngine({
+        solverNetRegistry: legacyRegistry,
+        manifestResolver: makeStubManifestResolver({
+          [CID_A]: buildPredictionV1ManifestStub(),
+        }),
+      });
+      const task = makePredictionV1Task({ solverNetManifestCid: CID_A });
+      expect(task.executionRequest).toBeUndefined();
+
+      const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
+
+      expect(accept.ok).toBe(false);
+      expect(codexCanAttempt).not.toHaveBeenCalled();
+      expect(claudeCanAttempt).not.toHaveBeenCalled();
+    });
+
+    it('rejects a manifest-bound task when no SolverNet registry is wired', async () => {
+      const engine = buildEngine({
+        manifestResolver: makeStubManifestResolver({
+          [CID_A]: buildPredictionV1ManifestStub(),
+        }),
+      });
+      const task = makePredictionV1Task({ solverNetManifestCid: CID_A });
+      expect(task.executionRequest).toBeUndefined();
+
+      const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
+
+      expect(accept.ok).toBe(false);
+      expect(codexCanAttempt).not.toHaveBeenCalled();
       expect(claudeCanAttempt).not.toHaveBeenCalled();
     });
   });

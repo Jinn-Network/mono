@@ -167,9 +167,9 @@ export interface SolverNetRegistryLike {
   forSolverType(solverType: string, taskRole?: 'restoration' | 'evaluation'): LoadedSolverNetView | undefined;
   /**
    * Resolve by manifest CID rather than solverType registration order
-   * (issue #2039 AC2). Optional so existing `SolverNetRegistryLike`
-   * implementations/mocks that predate this field keep compiling and keep
-   * their prior (registry-order) behavior unchanged.
+   * (issue #2039 AC2). Optional at the interface boundary so legacy
+   * no-manifest tasks and older mocks keep compiling; manifest-bound tasks
+   * fail closed when this method is unavailable.
    */
   forManifestCid?(manifestCid: string, taskRole?: 'restoration' | 'evaluation'): LoadedSolverNetView | undefined;
 }
@@ -1062,29 +1062,29 @@ export class TaskEngine {
    * Resolve the joined SolverNet for a task. Prefers `task.solverNetManifestCid`
    * (issue #2039 AC2) — the specific manifest a task is pinned to — over
    * `solverType` registry-order dispatch, so two joined SolverNets sharing a
-   * `solverType` can't silently substitute for one another. Falls back to
-   * `forSolverType` when the task carries no manifest CID, when nothing is
-   * registered under that CID, or when the wired `SolverNetRegistryLike`
-   * doesn't implement `forManifestCid` — preserving prior behavior for
-   * legacy/no-CID tasks and older mocks (AC4).
+   * `solverType` can't silently substitute for one another. A manifest-bound
+   * task never falls back: missing exact lookup support, a missing/disabled
+   * CID, role ineligibility, or a solverType mismatch all resolve to
+   * `undefined`. `forSolverType` remains only for legacy/no-CID tasks (AC4).
    */
   private resolveSolverNetForTask(
     fullTask: Task | null | undefined,
     routingKey: string | undefined,
     role: 'restoration' | 'evaluation',
   ): LoadedSolverNetView | undefined {
-    if (!this.solverNetRegistry) return undefined;
     const manifestCid = fullTask?.solverNetManifestCid;
     if (manifestCid) {
-      const byManifest = this.solverNetRegistry.forManifestCid?.(manifestCid, role);
+      const byManifest = this.solverNetRegistry?.forManifestCid?.(manifestCid, role);
       // `forManifestCid` matches on CID alone (no solverType filter, unlike
       // `forSolverType`). Cross-check against the task's own routing key so
       // a task body whose `solverNetManifestCid` disagrees with its own
       // `solverType`/`contractId`+`contractVersion` can't leak a foreign
       // net's harness/model metadata into dispatch or execution-request
-      // validation — fall through instead of trusting the mismatch.
+      // validation.
       if (byManifest && (!routingKey || byManifest.solverType === routingKey)) return byManifest;
+      return undefined;
     }
+    if (!this.solverNetRegistry) return undefined;
     return routingKey ? this.solverNetRegistry.forSolverType(routingKey, role) : undefined;
   }
 
@@ -1329,6 +1329,12 @@ export class TaskEngine {
       return `another ${routingKey}/${role} task is already in flight`;
     }
     const solverNet = this.resolveSolverNetForTask(task, routingKey, role);
+    if (task?.solverNetManifestCid && !solverNet) {
+      return (
+        `no exact enabled SolverNet for manifest CID '${task.solverNetManifestCid}', ` +
+        `solverType '${routingKey ?? '<unknown>'}', and role '${role}'`
+      );
+    }
     if (this.solverNetRegistry && routingKey && !solverNet) {
       return `no enabled SolverNet for solverType '${routingKey}' and role '${role}'; run \`jinn solver-nets enable <name>\``;
     }
@@ -1405,6 +1411,11 @@ export class TaskEngine {
     const preSnapshotSolverNet = run.solverType
       ? this.resolveSolverNetForTask(run.task, run.solverType, run.taskRole ?? 'restoration')
       : undefined;
+    if (run.task?.solverNetManifestCid && !preSnapshotSolverNet) {
+      throw new Error(
+        `no exact enabled SolverNet for manifest CID '${run.task.solverNetManifestCid}' during pre-snapshot`,
+      );
+    }
     const resolvedImpl = run.solverType
       ? this.implRegistry?.findFor({
           solverType: run.solverType,
@@ -1464,6 +1475,11 @@ export class TaskEngine {
     const solverType = task.solverType ?? '';
     const role = task.taskRole ?? 'restoration';
     const solverNet = this.resolveSolverNetForTask(task.task, solverType, role);
+    if (task.task?.solverNetManifestCid && !solverNet) {
+      throw new Error(
+        `no exact enabled SolverNet for manifest CID '${task.task.solverNetManifestCid}' during execution`,
+      );
+    }
     const impl = this.implRegistry?.findFor({ solverType, role, harnessName: solverNet?.harness });
     if (!impl) {
       throw new NotImplementedError('runImpl');
@@ -2054,6 +2070,11 @@ export class TaskEngine {
         .sort((a, b) => `${a.name}@${a.version}`.localeCompare(`${b.name}@${b.version}`));
     const implNameForEnvelope = task.implName ?? solverType;
     const solverNet = this.resolveSolverNetForTask(task.task, solverType, task.taskRole ?? 'restoration');
+    if (task.task?.solverNetManifestCid && !solverNet) {
+      throw new Error(
+        `no exact enabled SolverNet for manifest CID '${task.task.solverNetManifestCid}' during packaging`,
+      );
+    }
     const runtimeBundleDigest = `sha256:${createHash('sha256')
       .update(JSON.stringify({
         harness: {
