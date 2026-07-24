@@ -506,7 +506,7 @@ describe('JinnRepoEvaluatorHarness — Autopilot semantic evaluation', () => {
     expect(gradeLive).not.toHaveBeenCalled();
   });
 
-  it('keeps an Autopilot task pending when its exact SolverNet has no runtime', async () => {
+  it('refuses to claim an Autopilot task when its exact SolverNet has no runtime', async () => {
     const { task } = autopilotHarnessFixtures();
     const h = new JinnRepoEvaluatorHarness({
       semanticAgentRunnerResolver: {
@@ -519,7 +519,10 @@ describe('JinnRepoEvaluatorHarness — Autopilot semantic evaluation', () => {
       model: 'missing-model',
     });
 
-    await expect(h.canAttempt(task)).resolves.toEqual({ ok: true });
+    await expect(h.canAttempt(task)).resolves.toEqual({
+      ok: false,
+      reason: expect.stringContaining('not configured for SolverNet'),
+    });
     await expect(h.run(ctx)).rejects.toMatchObject({
       reason: 'autopilot_eval_pending',
       message: expect.stringContaining('not configured for SolverNet'),

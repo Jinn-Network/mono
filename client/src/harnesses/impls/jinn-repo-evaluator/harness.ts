@@ -281,6 +281,19 @@ export class JinnRepoEvaluatorHarness implements Harness {
           reason: 'Autopilot semantic evaluator runtime is not configured',
         };
       }
+      const semanticRuntime = await this.semanticAgentRunnerResolver.resolve({
+        ...(task.solverNetManifestCid
+          ? { manifestCid: task.solverNetManifestCid }
+          : {}),
+      });
+      if (!semanticRuntime) {
+        return {
+          ok: false,
+          reason:
+            'Autopilot semantic evaluator runtime is not configured for SolverNet '
+            + (task.solverNetManifestCid ?? '<unknown>'),
+        };
+      }
       return { ok: true };
     }
     // A live-issue spec with a field defect (missing `issue_number`, a

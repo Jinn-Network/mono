@@ -80,6 +80,9 @@ import { createAutopilotGitHubAdoptionReceiptObserver } from './autopilot/github
 import { createJinnMonoGitHubAdoptionReadPort } from './autopilot/github-rest-adoption-read.js';
 import { createJoinApplier } from './daemon/join-applier.js';
 import { buildHarnesses } from './harnesses/impls/index.js';
+import {
+  makeConfiguredSemanticEvaluatorRunnerResolver,
+} from './harnesses/impls/jinn-repo-evaluator/semantic-runner-resolver.js';
 import { loadExternalImpl } from './harnesses/external-impls/index.js';
 import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, HERMES_AGENT_HARNESS, harnessStateDirName } from './harnesses/names.js';
 import { resolveContractFromSolverNetId } from './solvernets/launched-record-dispatcher.js';
@@ -1543,6 +1546,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     hermesDoctorTimeoutMs: config.hermesDoctorTimeoutMs,
     codexPath: config.codexPath,
     codexDoctorTimeoutMs: config.codexDoctorTimeoutMs,
+    semanticEvaluatorRunnerResolver:
+      makeConfiguredSemanticEvaluatorRunnerResolver({
+        joinedSolverNets: config.joinedSolverNets,
+        claudePath: activeClaudePath,
+      }),
   })) {
     implRegistry.register(impl);
   }
