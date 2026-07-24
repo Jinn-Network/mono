@@ -169,6 +169,45 @@ describe('review action executor', () => {
     }]);
   });
 
+  it('acquires an evaluator-anchored marketplace review claim without dispatching a session', async () => {
+    const executionBackend = {
+      start: async () => {
+        throw new Error('the evaluator leg must not submit a second Task');
+      },
+      recover: async () => ({ state: 'running' as const }),
+      cancel: async () => {},
+    };
+    const h = harness({
+      executionBackendKind: 'marketplace',
+      anchoredMarketplaceReview: true,
+      executionBackend,
+      spawnCoordinator: () => {
+        throw new Error('the evaluator leg must not spawn a local session');
+      },
+    });
+
+    await expect(executeReviewAction({
+      prNumber: 84,
+      expectedHead: HEAD,
+    }, h.deps)).resolves.toEqual({
+      status: 'spawned',
+      prNumber: 84,
+      head: HEAD,
+      reviewRefOid: RECORD_A,
+      attemptId: ATTEMPT_A,
+      generation: GENERATION_A,
+      reviewer: 'review-bot',
+      approvalPolicy: 'approve-eligible',
+    });
+    expect(h.events).toEqual([
+      'record',
+      'claim',
+      'attempt',
+      'projection',
+    ]);
+    expect(h.human).toEqual([]);
+  });
+
   it.skip('fails closed when the scheduled exact head changes before acquisition', async () => {
     const { deps, events } = harness();
 

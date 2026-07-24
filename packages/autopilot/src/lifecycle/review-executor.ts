@@ -112,6 +112,12 @@ export interface ReviewExecutorDeps {
   }): SpawnResult;
   trackChild?(manifestPath: string, child: SpawnResult): void;
   readonly executionBackendKind?: AutopilotExecutionBackend;
+  /**
+   * The review claim belongs to the evaluator leg of an already-created
+   * marketplace Task. Acquire its exact-head manifest without dispatching a
+   * second session. Normal marketplace review scheduling never sets this.
+   */
+  readonly anchoredMarketplaceReview?: boolean;
   readonly executionBackend?: SessionExecutionBackend;
   readonly sessionDeadline?: () => string;
   readonly receiptAuthors?: readonly string[];
@@ -313,7 +319,10 @@ export async function executeReviewAction(
       detail: 'Pull request head changed after scheduling.',
     };
   }
-  if (deps.executionBackendKind === 'marketplace') {
+  if (
+    deps.executionBackendKind === 'marketplace'
+    && deps.anchoredMarketplaceReview !== true
+  ) {
     const reason: HumanReason = {
       phase: 'awaiting-review',
       code: 'review-escalation',
@@ -537,6 +546,21 @@ export async function executeReviewAction(
     return { status: 'ambiguous', prNumber: candidate.number };
   }
   const confirmed = acquisition.confirmed;
+  if (
+    deps.executionBackendKind === 'marketplace'
+    && deps.anchoredMarketplaceReview === true
+  ) {
+    return {
+      status: 'spawned',
+      prNumber: candidate.number,
+      head: candidate.head,
+      reviewRefOid: recordOid,
+      attemptId,
+      generation,
+      reviewer: selection.login,
+      approvalPolicy: candidate.approvalPolicy,
+    };
+  }
   const environment = buildSanitizedChildEnv(
     deps.ambientEnvironment,
     selection.credential,
