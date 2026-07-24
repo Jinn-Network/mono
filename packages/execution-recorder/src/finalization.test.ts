@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -293,7 +293,9 @@ class ByteMutatingRepository implements EvidenceRepository {
 }
 
 async function initializedState(): Promise<WorkspaceState> {
-  const parent = await mkdtemp(join(tmpdir(), "jinn-recorder-finalization-"));
+  const parent = await realpath(
+    await mkdtemp(join(tmpdir(), "jinn-recorder-finalization-")),
+  );
   temporaryDirectories.push(parent);
   const workspaceDir = join(parent, "recording");
   let state = await createWorkspaceState(workspaceDir, EXECUTION_ID);

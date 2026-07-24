@@ -638,7 +638,9 @@ describe("execution recorder finalization lifecycle", () => {
 
   test("durably snapshots incomplete finalization material for a later retry", async () => {
     const workspaceDir = await workspace();
-    const sourceDir = await mkdtemp(join(tmpdir(), "jinn-recorder-result-"));
+    const sourceDir = await realpath(
+      await mkdtemp(join(tmpdir(), "jinn-recorder-result-")),
+    );
     roots.push(sourceDir);
     const resultPath = join(sourceDir, "result.txt");
     await writeFile(resultPath, "captured result\n");
