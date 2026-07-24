@@ -21,6 +21,7 @@ import { z } from 'zod/v3';
 import { TaskSchema, parseTask } from './types/task.js';
 import type { Task } from './types/task.js';
 import { canonicalHarnessName, CLAUDE_CODE_HARNESS } from './harnesses/names.js';
+import { isOpenRouterModelId } from './harnesses/provider-ref.js';
 import { parseRpcUrls } from './rpc/transport.js';
 import { canonicalLocalHttpBaseUrl } from './local-provider-url.js';
 
@@ -430,6 +431,19 @@ export const JinnConfigSchema = z.object({
           .min(1, 'each joined SolverNet must enable at least one role'),
         harness: HarnessNameSchema.optional(),
         model: z.string().optional(),
+        // Provider route (issue #1243): a named provider (string) or a custom
+        // OpenAI-compatible endpoint object. Optional — legacy `{model}`-only
+        // entries are backfilled at load time (see `backfillJoinedProviders`).
+        provider: z
+          .union([
+            z.string().trim().min(1),
+            z.object({
+              name: z.string().trim().min(1),
+              baseUrl: z.string().trim().min(1).optional(),
+              authVar: z.string().trim().min(1).optional(),
+            }),
+          ])
+          .optional(),
         plugins: z.array(z.string()).default([]),
         disabledDefaultPlugins: z.array(z.string()).default([]),
       }),
@@ -880,6 +894,12 @@ export function migrateLegacySolverNets(raw: Record<string, unknown>): number {
       roles: Array.from(new Set(roles)),
       ...(typeof entry.harness === 'string' ? { harness: entry.harness } : {}),
       ...(typeof entry.model === 'string' ? { model: entry.model } : {}),
+      // Stamp the OpenRouter provider first-class when the migrated model is
+      // OpenRouter-shaped (issue #1243) so the synthetic entry matches what a
+      // fresh join would persist and the adapter routes without inference.
+      ...(typeof entry.model === 'string' && isOpenRouterModelId(entry.model)
+        ? { provider: 'openrouter' as const }
+        : {}),
       plugins: Array.isArray(entry.plugins) ? entry.plugins : [],
       disabledDefaultPlugins: [],
     };
@@ -891,6 +911,32 @@ export function migrateLegacySolverNets(raw: Record<string, unknown>): number {
   }
   delete raw['solverNets'];
   return migrated;
+}
+
+/**
+ * Backfill `provider: 'openrouter'` onto legacy `joinedSolverNets` entries that
+ * carry an OpenRouter-shaped `model` id but no `provider` (issue #1243). A
+ * v0.1.6 config only persisted `{ model }` and relied on the adapter inferring
+ * the provider from the id shape at runtime; stamping it here makes the route
+ * first-class so pre-provider configs migrate silently.
+ *
+ * Mutates `merged` in place. Idempotent — entries that already carry a
+ * `provider`, or whose `model` is absent / not OpenRouter-shaped, are untouched.
+ * Returns the number of entries backfilled.
+ */
+export function backfillJoinedProviders(merged: Record<string, unknown>): number {
+  const joined = merged['joinedSolverNets'];
+  if (!joined || typeof joined !== 'object' || Array.isArray(joined)) return 0;
+  let backfilled = 0;
+  for (const entry of Object.values(joined as Record<string, unknown>)) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const e = entry as Record<string, unknown>;
+    if (e['provider'] !== undefined) continue;
+    if (!isOpenRouterModelId(e['model'] as string | undefined)) continue;
+    e['provider'] = 'openrouter';
+    backfilled += 1;
+  }
+  return backfilled;
 }
 
 /**
@@ -1312,6 +1358,13 @@ export function loadConfig(configPath?: string): JinnConfig {
     // A stray legacy `consent`/`publishConsent` alongside `share` is dropped by
     // the schema's non-strict parse — no explicit reshape needed.
   }
+
+  // Backfill `provider: 'openrouter'` onto legacy `{model}`-only joined entries
+  // whose model id is OpenRouter-shaped (issue #1243). Runs after the legacy
+  // migration so synthetic `legacy:*` entries are covered too. In-memory only —
+  // the on-disk config re-persists provider first-class on the operator's next
+  // join via the SPA; a load-time-only backfill keeps existing files loading.
+  backfillJoinedProviders(merged);
 
   // 3. Validate
   const result = JinnConfigSchema.safeParse(merged);

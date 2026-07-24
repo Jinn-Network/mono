@@ -39,6 +39,7 @@ import type {
   RewardsResponse,
   ClaimRewardsResponse,
 } from './types.js';
+import type { ProviderRef } from '../../../../harnesses/provider-ref.js';
 
 interface JsonErrorPayload {
   error?: string;
@@ -453,6 +454,7 @@ export const api = {
         roles: Array<'solver' | 'evaluator'>;
         harness?: string;
         model?: string;
+        provider?: ProviderRef;
         plugins?: string[];
         disabledDefaultPlugins?: string[];
       },
@@ -468,6 +470,7 @@ export const api = {
           roles: Array<'solver' | 'evaluator'>;
           harness?: string;
           model?: string;
+          provider?: ProviderRef;
           plugins?: string[];
           disabledDefaultPlugins?: string[];
         };
@@ -492,6 +495,7 @@ export const api = {
             roles: Array<'solver' | 'evaluator'>;
             harness?: string;
             model?: string;
+            provider?: ProviderRef;
             plugins?: string[];
             disabledDefaultPlugins?: string[];
           }

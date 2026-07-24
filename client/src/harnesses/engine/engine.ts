@@ -148,6 +148,7 @@ export interface SolverNetRegistryLike {
     solverType: string;
     harness: string;
     model?: string;
+    provider?: import('../provider-ref.js').ProviderRef;
     runtimePlugins: RuntimePlugin[];
   } | undefined;
 }
@@ -1516,6 +1517,9 @@ export class TaskEngine {
               name: solverNet.name,
               solverType: solverNet.solverType,
               ...(solverNet.model ? { model: solverNet.model } : {}),
+              // Provider route travels alongside model (issue #1243) so the
+              // Hermes adapter can route first-class instead of inferring.
+              ...(solverNet.provider !== undefined ? { provider: solverNet.provider } : {}),
             }
           : undefined,
         runtimePlugins,
