@@ -472,11 +472,28 @@ def assert_installed_product() -> None:
 
     plugin_dir = Path(jinn_plugin.__file__).resolve().parent
     assert plugin_dir.is_relative_to(Path(sys.prefix).resolve())
+    runtime_manifest = json.loads(
+        (plugin_dir / "layer-runtime.json").read_text(encoding="utf-8")
+    )
+    installed_layer_manifest = json.loads(
+        (
+            plugin_dir
+            / "runtime"
+            / "node_modules"
+            / "@jinn-network"
+            / "jinn-layer"
+            / "package.json"
+        ).read_text(encoding="utf-8")
+    )
+    expected_layer_version = runtime_manifest["version"]
     resolution = jinn_layer.resolve_binary()
     assert resolution.source == "plugin-local"
     assert resolution.argv == (str(LAYER_BIN),)
-    assert resolution.package == "@jinn-network/jinn-layer"
-    assert resolution.version == "0.1.0"
+    assert runtime_manifest["package"] == "@jinn-network/jinn-layer"
+    assert resolution.package == runtime_manifest["package"]
+    assert resolution.version == expected_layer_version
+    assert installed_layer_manifest["name"] == resolution.package
+    assert installed_layer_manifest["version"] == expected_layer_version
     assert LAYER_BIN.is_file() and os.access(LAYER_BIN, os.X_OK)
     contract = json.loads(run(*resolution.argv, "contract", "--json"))
     assert contract == {"contractVersion": 1}

@@ -147,6 +147,32 @@ describe('projectKnowledgePacket (rescope §3.2)', () => {
     expect(packet.excerpts).toEqual([{ label: 'note', text: 'Just a remark, no commands here.' }]);
   });
 
+  it('prefers the retained assistant answer over the user prompt for conversational episodes', () => {
+    const steps: CorpusRecordStep[] = [
+      step({
+        name: 'user turn',
+        attributes: {
+          role: 'user',
+          'turn.text': 'Why does the Docker evaluation stop after the first task?',
+        },
+      }),
+      step({
+        name: 'assistant turn',
+        attributes: {
+          role: 'assistant',
+          'turn.text': 'The container exits when stdin closes. Keep stdin open for the evaluation process.',
+        },
+      }),
+    ];
+
+    const packet = projectKnowledgePacket(record({ synthesis: undefined, steps }));
+
+    expect(packet.excerpts).toEqual([{
+      label: 'note',
+      text: 'The container exits when stdin closes. Keep stdin open for the evaluation process.',
+    }]);
+  });
+
   it('produces no excerpts (but a valid packet) when the record has no steps and no notes', () => {
     const packet = projectKnowledgePacket(record({ steps: [] }));
     expect(packet.excerpts).toEqual([]);
