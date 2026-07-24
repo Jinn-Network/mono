@@ -1095,8 +1095,11 @@ export class TaskEngine {
    * A wired registry makes the manifest binding authoritative even for legacy
    * tasks. An execution request also requires exact resolution because its
    * Harness/model/version assertions cannot be validated without the joined
-   * SolverNet profile. Legacy tasks with no execution request retain the
-   * pre-registry dispatch path when no registry is wired (issue #2039 AC4).
+   * SolverNet profile. Callers must reject `executionRequest` without a
+   * `solverNetManifestCid` before consulting this helper — a profile pin
+   * without a CID cannot be bound to a specific net (issue #2039 AC3).
+   * Legacy tasks with no execution request retain the pre-registry dispatch
+   * path when no registry is wired (issue #2039 AC4).
    */
   private requiresExactSolverNetResolution(
     fullTask: Task | null | undefined,
@@ -1105,6 +1108,20 @@ export class TaskEngine {
       fullTask?.solverNetManifestCid
       && (this.solverNetRegistry || fullTask.executionRequest),
     );
+  }
+
+  /**
+   * Fail-closed guard for issue #2039 AC3: an execution-profile pin is only
+   * meaningful against a specific joined SolverNet. Without a manifest CID
+   * the pin would fall through to registry-order / first-match dispatch.
+   */
+  private executionRequestMissingManifestCid(
+    fullTask: Task | null | undefined,
+  ): string | null {
+    if (fullTask?.executionRequest && !fullTask.solverNetManifestCid) {
+      return 'execution request requires solverNetManifestCid';
+    }
+    return null;
   }
 
   /**
@@ -1324,6 +1341,9 @@ export class TaskEngine {
       if (eligibility) return eligibility;
     }
 
+    const missingCid = this.executionRequestMissingManifestCid(task);
+    if (missingCid) return missingCid;
+
     // Prefer the contract-derived routing alias when the task carries
     // `contractId`/`contractVersion` (Task 24); fall back to the explicit
     // `solverType` parameter for legacy pre-migration paths and PersistedTaskRun
@@ -1493,6 +1513,10 @@ export class TaskEngine {
     // string-keyed harness map.
     const solverType = task.solverType ?? '';
     const role = task.taskRole ?? 'restoration';
+    const missingCid = this.executionRequestMissingManifestCid(task.task);
+    if (missingCid) {
+      throw new Error(`${missingCid} during execution`);
+    }
     const solverNet = this.resolveSolverNetForTask(task.task, solverType, role);
     if (this.requiresExactSolverNetResolution(task.task) && !solverNet) {
       throw new Error(
@@ -1502,6 +1526,14 @@ export class TaskEngine {
     const impl = this.implRegistry?.findFor({ solverType, role, harnessName: solverNet?.harness });
     if (!impl) {
       throw new NotImplementedError('runImpl');
+    }
+    // Re-check the profile pin at model-invocation time (issue #2039 AC3).
+    // Claim already validates, but RUNNING recovery / re-drive skips claim —
+    // a config change between claim and execution must still fail closed
+    // before Harness.run.
+    if (task.task?.executionRequest) {
+      const mismatch = this.validateExecutionRequest(task.task.executionRequest, solverNet, impl);
+      if (mismatch) throw new Error(mismatch);
     }
     const runtimePlugins: RuntimePlugin[] = solverNet?.runtimePlugins ?? [];
     // #1035: merge harness self-attributed plugins (e.g. claude-code-learner)

@@ -21,9 +21,12 @@ import {
   type SolverNetRegistryLike,
 } from '../../../src/harnesses/engine/engine.js';
 import { HarnessRegistry } from '../../../src/harnesses/engine/registry.js';
+import { TaskRunPersistence } from '../../../src/harnesses/engine/persistence.js';
+import { TaskRunState } from '../../../src/harnesses/engine/state.js';
 import { SolverNetRegistry, registerJoinedNet } from '../../../src/solver-nets/registry.js';
 import type { Harness, Solution } from '../../../src/harnesses/types.js';
 import type { Task } from '../../../src/types/task.js';
+import { makeIntentInput } from '@test/engine.js';
 import { makePredictionV1Task } from '../impls/prediction-v1-test-helpers.js';
 import { buildPredictionV1ManifestStub, makeStubManifestResolver } from './manifest-resolver-stub.js';
 
@@ -281,6 +284,88 @@ describe('execution request (issue #2039)', () => {
       expect(accept.ok).toBe(false);
       expect(codexCanAttempt).not.toHaveBeenCalled();
       expect(claudeCanAttempt).not.toHaveBeenCalled();
+    });
+
+    it('rejects an execution request that lacks solverNetManifestCid', async () => {
+      const engine = await makeEngine();
+      const { solverNetManifestCid: _drop, ...rest } = makePredictionV1Task({
+        solverNetManifestCid: CID_A,
+      });
+      const task = {
+        ...rest,
+        executionRequest: { harness: 'codex' },
+      } as Task;
+
+      const accept = await engine.canAcceptTask({ taskRole: 'restoration', task });
+
+      expect(accept.ok).toBe(false);
+      if (!accept.ok) {
+        expect(accept.reason).toMatch(/execution request requires solverNetManifestCid/);
+      }
+      expect(codexCanAttempt).not.toHaveBeenCalled();
+      expect(claudeCanAttempt).not.toHaveBeenCalled();
+    });
+
+    it('rejects a mismatched execution request during RUNNING dispatch before Harness.run', async () => {
+      const runCalled = vi.fn();
+      const implRegistry = new HarnessRegistry();
+      implRegistry.register({
+        name: 'claude-code',
+        version: '1.0.0',
+        supports: ({ solverType }) => solverType === 'prediction.v1',
+        canAttempt: async () => ({ ok: true as const }),
+        run: async (): Promise<Solution> => {
+          runCalled();
+          return { venueRef: { name: 'stub' }, gating: {} };
+        },
+      });
+
+      const solverNetRegistry = new SolverNetRegistry();
+      await registerJoinedNet(solverNetRegistry, CID_B, {
+        manifestCid: CID_B,
+        contract: { id: 'prediction', version: 'v1' },
+        roles: ['solver'],
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        plugins: [],
+      });
+
+      const engine = buildEngine({
+        implRegistry,
+        solverNetRegistry,
+        manifestResolver: makeStubManifestResolver({
+          [CID_B]: buildPredictionV1ManifestStub({ solverNetId: 'prediction-v1-b', name: 'Prediction (B)' }),
+        }),
+      });
+
+      const requestId = 'running-exec-request-mismatch';
+      const now = Date.now();
+      const task: Task = {
+        ...makePredictionV1Task({ solverNetManifestCid: CID_B }),
+        // Pin a harness version that does not match the registered Harness —
+        // claim would reject this, but RUNNING recovery/re-drive skips claim.
+        executionRequest: { version: '2.0.0' },
+      };
+      await engine.observe(makeIntentInput({
+        requestId,
+        solverType: 'prediction.v1',
+        windowStartTs: now - 1000,
+        windowEndTs: now + 86_400_000,
+        task,
+      }));
+
+      const persistence = new TaskRunPersistence(store.db);
+      persistence.transition(requestId, TaskRunState.CLAIMED);
+      persistence.transition(requestId, TaskRunState.WAITING);
+      persistence.transition(requestId, TaskRunState.PRE_SNAPSHOT);
+      persistence.transition(requestId, TaskRunState.RUNNING);
+
+      await expect(engine.process(requestId)).rejects.toThrow(
+        /pins harness version '2\.0\.0'/,
+      );
+
+      expect(runCalled).not.toHaveBeenCalled();
+      expect(persistence.getByRequestId(requestId)?.state).toBe(TaskRunState.FAILED);
     });
 
     it('rejects a harness pin that does not match the resolved SolverNet', async () => {
