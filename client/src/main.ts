@@ -75,6 +75,9 @@ import {
   HarnessRegistry,
 } from './harnesses/engine/registry.js';
 import { createMutableJoinedSolverNetsView } from './harnesses/engine/engine.js';
+import { createAutopilotEvaluationContextResolver } from './autopilot/autopilot-evaluation-context-resolver.js';
+import { createAutopilotGitHubAdoptionReceiptObserver } from './autopilot/github-adoption-receipt-observer.js';
+import { createJinnMonoGitHubAdoptionReadPort } from './autopilot/github-rest-adoption-read.js';
 import { createJoinApplier } from './daemon/join-applier.js';
 import { buildHarnesses } from './harnesses/impls/index.js';
 import { loadExternalImpl } from './harnesses/external-impls/index.js';
@@ -1394,6 +1397,20 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       : {}),
   };
 
+  // Autopilot marketplace Tasks use GitHub only as the authenticated adoption
+  // surface. Reads remain available for the public repository without a token;
+  // an operator token raises rate limits and permits private-fork deployments.
+  const autopilotGitHubRead = createJinnMonoGitHubAdoptionReadPort({
+    token:
+      process.env['JINN_AUTOPILOT_GITHUB_TOKEN']
+      ?? process.env['GH_TOKEN']
+      ?? process.env['GITHUB_TOKEN'],
+  });
+  const autopilotEvaluationContextResolver =
+    createAutopilotEvaluationContextResolver({ github: autopilotGitHubRead });
+  const autopilotAdoptionReceiptObserver =
+    createAutopilotGitHubAdoptionReceiptObserver({ github: autopilotGitHubRead });
+
   const adapter = new MechAdapter({
     rpcUrl: config.rpcUrls,
     mechMarketplaceAddress: MARKETPLACE_ADDRESS,
@@ -1409,6 +1426,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     evictionRecovery,
     taskDiscovery,
     evaluatorEnabled,
+    autopilotEvaluationContextResolver,
   }, sharedStore);
 
   // ── TaskEngine wiring ─────────────────────────────────────────────────
@@ -2198,6 +2216,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       packagingDeps,
       envelopeDeps,
       deliveryDeps,
+      adoptionReceiptObserver: autopilotAdoptionReceiptObserver,
       implRegistry,
       solverNetRegistry,
       // #1827: resolves envelope.task.createdAt at claim() time. getBlock
