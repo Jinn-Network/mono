@@ -621,6 +621,23 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
 
   const built = await createCliExecutionContext({ argv: ctx.argv, env: ctx.env });
   if (!built.ok) {
+    if (machineRequestFreshnessError) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: errorMessage(machineRequestFreshnessError),
+          hint: 'Create a fresh marketplace Task request before retrying.',
+          exampleCli: 'jinn tasks submit --request-file request.json --yes --json',
+          details: {
+            field: 'freshness',
+            reason: 'policy_expired',
+            cause: errorMessage(machineRequestFreshnessError),
+          },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
     emitEnvelope(built.envelope, { writer: ctx.writer, exit: ctx.exit });
     return;
   }

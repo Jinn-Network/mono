@@ -152,14 +152,6 @@ export class TaskPostingService {
       policyType,
       scopeKey,
     });
-    if (opts.recoveryOnly && existing?.protocolTaskId) {
-      assertImmutableCandidate(candidate, existing, immutableBytes);
-      return this.buildIdempotentResult(candidate, existing, 'store');
-    }
-    if (existing?.protocolTaskId && shouldSkipPost(existing, candidate.postingPolicy, nowMs)) {
-      assertImmutableCandidate(candidate, existing, immutableBytes);
-      return this.buildIdempotentResult(candidate, existing, 'store');
-    }
     if (
       opts.recoveryOnly
       && (
@@ -170,7 +162,14 @@ export class TaskPostingService {
     ) {
       throw new TaskPostRecoveryOnlyError(candidate.sourceKey);
     }
-
+    if (opts.recoveryOnly && existing?.protocolTaskId) {
+      assertImmutableCandidate(candidate, existing, immutableBytes);
+      return this.buildIdempotentResult(candidate, existing, 'store');
+    }
+    if (existing?.protocolTaskId && shouldSkipPost(existing, candidate.postingPolicy, nowMs)) {
+      assertImmutableCandidate(candidate, existing, immutableBytes);
+      return this.buildIdempotentResult(candidate, existing, 'store');
+    }
     const ownerToken = randomUUID();
     const lockAcquired = this.store.acquireTaskPostLock({
       creatorSafeAddress,
@@ -209,11 +208,6 @@ export class TaskPostingService {
         policyType,
         scopeKey,
       });
-      if (lockedExisting?.protocolTaskId && shouldSkipPost(lockedExisting, candidate.postingPolicy, nowMs)) {
-        assertImmutableCandidate(candidate, lockedExisting, immutableBytes);
-        return this.buildIdempotentResult(candidate, lockedExisting, 'store');
-      }
-
       if (
         opts.recoveryOnly
         && (
@@ -223,6 +217,10 @@ export class TaskPostingService {
         )
       ) {
         throw new TaskPostRecoveryOnlyError(candidate.sourceKey);
+      }
+      if (lockedExisting?.protocolTaskId && shouldSkipPost(lockedExisting, candidate.postingPolicy, nowMs)) {
+        assertImmutableCandidate(candidate, lockedExisting, immutableBytes);
+        return this.buildIdempotentResult(candidate, lockedExisting, 'store');
       }
 
       const previousPostCount = lockedExisting?.postCount ?? 0;

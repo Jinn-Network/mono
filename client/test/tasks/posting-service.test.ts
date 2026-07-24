@@ -313,6 +313,30 @@ describe('TaskPostingService', () => {
     await adapter.stop();
   });
 
+  it('refuses recovery-only submission for a completed legacy unsigned post', async () => {
+    const adapter = new LocalAdapter();
+    await adapter.initialize();
+    const store = new Store(':memory:');
+    const service = new TaskPostingService(adapter, store);
+    const candidate = {
+      task: { id: 'legacy:completed-recovery-only', description: 'legacy completed recovery' },
+      sourceKey: 'legacy:completed-recovery-only',
+      postingPolicy: { kind: 'once_per_safe' } as const,
+    };
+
+    await service.postCandidate(candidate, { creatorSafeAddress: SAFE_A });
+    const postSpy = vi.spyOn(adapter, 'postTask');
+
+    await expect(service.postCandidate(candidate, {
+      creatorSafeAddress: SAFE_A,
+      recoveryOnly: true,
+    })).rejects.toThrow(/recovery-only/i);
+
+    expect(postSpy).not.toHaveBeenCalled();
+    store.close();
+    await adapter.stop();
+  });
+
   it('adopts a recovered pending immutable post during recovery-only submission', async () => {
     const adapter = new LocalAdapter();
     await adapter.initialize();

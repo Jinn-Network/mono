@@ -386,6 +386,37 @@ describe('tasks submit machine contract', () => {
     await adapter.stop();
   });
 
+  it('returns freshness invalid_invocation when expired recovery context is unavailable', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-task-expired-context-'));
+    const file = join(dir, 'request.json');
+    const config = join(dir, 'config.json');
+    const value = request();
+    writeFileSync(file, JSON.stringify(value));
+    writeFileSync(config, '{}');
+    vi.useFakeTimers();
+    vi.setSystemTime(value.claimPolicy.claimWindowEndTs + 1);
+    const postTask = vi.fn();
+    createCliExecutionContext.mockResolvedValueOnce({
+      ok: false,
+      envelope: {
+        code: 'bootstrap_incomplete',
+        message: 'no operational creator Safe',
+      },
+      ctx: { adapter: { postTask } },
+    });
+    const made = makeCommandCtx({
+      argv: ['submit', '--request-file', file, '--config', config, '--yes', '--json'],
+    });
+
+    await tasksCommand.run(made.ctx);
+
+    expect(JSON.parse(made.writes.at(-1)!)).toMatchObject({
+      code: 'invalid_invocation',
+      details: { field: 'freshness', reason: 'policy_expired' },
+    });
+    expect(postTask).not.toHaveBeenCalled();
+  });
+
   it('recovers an expired crashed machine request without a second transaction broadcast', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-task-expired-recovery-'));
     const file = join(dir, 'request.json');
