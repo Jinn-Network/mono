@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { constants } from "node:fs";
-import { lstat, mkdir, open } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  open,
+  type FileHandle,
+} from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { ExecutionRecorderError } from "./errors.js";
@@ -11,6 +16,13 @@ export interface WorkspacePaths {
   readonly marker: string;
   readonly objects: string;
   readonly journal: string;
+}
+
+export interface PinnedWorkspaceDirectory {
+  readonly path: string;
+  readonly device: bigint;
+  readonly inode: bigint;
+  readonly handle: FileHandle;
 }
 
 function nodeErrorCode(error: unknown): string | undefined {
@@ -65,9 +77,32 @@ export async function prepareWorkspaceDirectory(
   assertWorkspaceContained(paths, path);
   try {
     if (path === paths.root) {
-      const created = await mkdir(path, { recursive: true, mode: 0o700 });
+      const missing: string[] = [];
+      let current = path;
+      while (true) {
+        try {
+          await lstat(current);
+          break;
+        } catch (error) {
+          if (nodeErrorCode(error) !== "ENOENT") throw error;
+          missing.unshift(current);
+          const parent = dirname(current);
+          if (parent === current) throw error;
+          current = parent;
+        }
+      }
+      for (const directory of missing) {
+        let created = false;
+        try {
+          await mkdir(directory, { mode: 0o700 });
+          created = true;
+        } catch (error) {
+          if (nodeErrorCode(error) !== "EEXIST") throw error;
+        }
+        await secureWorkspaceDirectory(paths, directory, true);
+        if (created) await syncDirectory(dirname(directory));
+      }
       await secureWorkspaceDirectory(paths, path, true);
-      if (created !== undefined) await syncDirectory(dirname(path));
       return;
     }
 
@@ -221,6 +256,89 @@ export async function validateWorkspaceDirectory(
     throw recorderIoError(
       error,
       `Unable to validate recorder workspace directory: ${path}`,
+      "UNSAFE_PATH",
+    );
+  }
+}
+
+export async function pinWorkspaceDirectory(
+  paths: WorkspacePaths,
+  path: string,
+): Promise<PinnedWorkspaceDirectory> {
+  assertWorkspaceContained(paths, path);
+  let handle: FileHandle | undefined;
+  try {
+    const before = await lstat(path, { bigint: true });
+    if (!before.isDirectory() || before.isSymbolicLink()) {
+      throw new ExecutionRecorderError(
+        "UNSAFE_PATH",
+        `Recorder workspace path must be a directory and not a symlink: ${path}`,
+        { workspaceDir: paths.root },
+      );
+    }
+    handle = await open(
+      path,
+      constants.O_RDONLY |
+        (constants.O_NOFOLLOW ?? 0) |
+        (constants.O_DIRECTORY ?? 0),
+    );
+    const opened = await handle.stat({ bigint: true });
+    if (
+      !opened.isDirectory() ||
+      opened.dev !== before.dev ||
+      opened.ino !== before.ino
+    ) {
+      throw new ExecutionRecorderError(
+        "UNSAFE_PATH",
+        `Recorder workspace directory changed while pinning: ${path}`,
+        { workspaceDir: paths.root },
+      );
+    }
+    return {
+      path,
+      device: opened.dev,
+      inode: opened.ino,
+      handle,
+    };
+  } catch (error) {
+    await handle?.close().catch(() => undefined);
+    throw recorderIoError(
+      error,
+      `Unable to pin recorder workspace directory: ${path}`,
+      "UNSAFE_PATH",
+    );
+  }
+}
+
+export async function assertPinnedWorkspaceDirectory(
+  paths: WorkspacePaths,
+  pinned: PinnedWorkspaceDirectory,
+): Promise<void> {
+  assertWorkspaceContained(paths, pinned.path);
+  try {
+    const [current, opened] = await Promise.all([
+      lstat(pinned.path, { bigint: true }),
+      pinned.handle.stat({ bigint: true }),
+    ]);
+    if (
+      !current.isDirectory() ||
+      current.isSymbolicLink() ||
+      !opened.isDirectory() ||
+      current.dev !== pinned.device ||
+      current.ino !== pinned.inode ||
+      opened.dev !== pinned.device ||
+      opened.ino !== pinned.inode
+    ) {
+      throw new ExecutionRecorderError(
+        "UNSAFE_PATH",
+        `Recorder workspace directory changed during operation: ${pinned.path}`,
+        { workspaceDir: paths.root },
+      );
+    }
+  } catch (error) {
+    throw recorderIoError(
+      error,
+      `Unable to verify pinned recorder workspace directory: ${pinned.path}`,
       "UNSAFE_PATH",
     );
   }

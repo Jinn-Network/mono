@@ -24,6 +24,10 @@ import {
   readWorkspaceMarker,
   replayJournal,
 } from "./journal.js";
+import type {
+  JournalEvent,
+  PersistedStartRecording,
+} from "./journal-types.js";
 import { workspacePaths, type WorkspacePaths } from "./paths.js";
 
 const EXECUTION_ID = "urn:uuid:11111111-1111-4111-8111-111111111111";
@@ -32,6 +36,75 @@ const ARTIFACT_DIGEST =
   `sha256:${"a".repeat(64)}` as Sha256Digest;
 const temporaryDirectories: string[] = [];
 let paths: WorkspacePaths;
+
+const PERSISTED_SOURCE = {
+  digest: ARTIFACT_DIGEST,
+  size: 7,
+  mediaType: "application/octet-stream",
+} as const;
+const ORIGIN = {
+  kind: "producer-observed" as const,
+  observer: "urn:uuid:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as const,
+};
+
+function initializedEvent(): Extract<
+  JournalEvent,
+  { type: "initialized" }
+> {
+  const recording: PersistedStartRecording = {
+    executionId: EXECUTION_ID,
+    startedAt: "2026-07-24T10:00:00Z",
+    record: {
+      name: "Fixture",
+      description: "Fixture recording",
+      license: "https://creativecommons.org/publicdomain/zero/1.0/",
+    },
+    task: {
+      entityId: "task/task.md",
+      name: "Fixture task",
+      source: PERSISTED_SOURCE,
+      origin: ORIGIN,
+    },
+    initialInputs: [],
+    executor: {
+      entityId: "urn:uuid:22222222-2222-4222-8222-222222222222",
+      kind: "software",
+      name: "Executor",
+      origin: ORIGIN,
+    },
+    runtime: {
+      entityId: "runtime/runtime.json",
+      specification: {
+        ...PERSISTED_SOURCE,
+        mediaType: "application/json",
+      },
+      name: "Runtime",
+      origin: ORIGIN,
+      components: [
+        {
+          kind: "controlled",
+          artifact: {
+            kind: "file",
+            entityId: "runtime/runner.mjs",
+            source: PERSISTED_SOURCE,
+            origin: ORIGIN,
+          },
+        },
+      ],
+    },
+    producer: {
+      entityId: ORIGIN.observer,
+      kind: "software",
+      name: "Producer",
+      origin: ORIGIN,
+    },
+  };
+  return {
+    type: "initialized",
+    recording,
+    declarationFingerprint: `sha256:${"1".repeat(64)}`,
+  };
+}
 
 afterEach(async () => {
   await Promise.all(
@@ -216,6 +289,187 @@ describe("workspace journal", () => {
         },
         declarationFingerprint: `sha256:${"1".repeat(64)}`,
       } as never,
+      EMPTY_JOURNAL_HEAD,
+      "2026-07-24T10:00:00Z",
+    );
+
+    await expect(replayJournal(paths)).rejects.toMatchObject({
+      code: "WORKSPACE_CORRUPT",
+    });
+  });
+
+  test.each([
+    [
+      "startedAt",
+      (event: ReturnType<typeof initializedEvent>) => ({
+        ...event,
+        recording: { ...event.recording, startedAt: "not-a-timestamp" },
+      }),
+    ],
+    [
+      "record metadata",
+      (event: ReturnType<typeof initializedEvent>) => ({
+        ...event,
+        recording: {
+          ...event.recording,
+          record: { ...event.recording.record, name: "" },
+        },
+      }),
+    ],
+    [
+      "artifact entity id",
+      (event: ReturnType<typeof initializedEvent>) => ({
+        ...event,
+        recording: {
+          ...event.recording,
+          task: { ...event.recording.task, entityId: "../escape" },
+        },
+      }),
+    ],
+    [
+      "capture origin",
+      (event: ReturnType<typeof initializedEvent>) => ({
+        ...event,
+        recording: {
+          ...event.recording,
+          task: {
+            ...event.recording.task,
+            origin: { ...ORIGIN, observer: "relative" },
+          },
+        },
+      }),
+    ],
+    [
+      "executor",
+      (event: ReturnType<typeof initializedEvent>) => ({
+        ...event,
+        recording: {
+          ...event.recording,
+          executor: { ...event.recording.executor, name: "" },
+        },
+      }),
+    ],
+    [
+      "recursive artifact metadata",
+      (event: ReturnType<typeof initializedEvent>) => ({
+        ...event,
+        recording: {
+          ...event.recording,
+          runtime: {
+            ...event.recording.runtime,
+            components: [
+              {
+                kind: "controlled",
+                artifact: {
+                  kind: "file",
+                  entityId: "runtime/runner.mjs",
+                  origin: ORIGIN,
+                  source: {
+                    ...PERSISTED_SOURCE,
+                    mediaType: "",
+                  },
+                },
+              },
+            ],
+          },
+        },
+      }),
+    ],
+    [
+      "repository-state aggregate shape",
+      (event: ReturnType<typeof initializedEvent>) => ({
+        ...event,
+        recording: {
+          ...event.recording,
+          repositoryState: {
+            artifact: {
+              kind: "file",
+              entityId: "repository/state.json",
+              source: {
+                ...PERSISTED_SOURCE,
+                mediaType: "application/json",
+              },
+              origin: ORIGIN,
+            },
+          },
+        },
+      }),
+    ],
+    [
+      "producer",
+      (event: ReturnType<typeof initializedEvent>) => ({
+        ...event,
+        recording: {
+          ...event.recording,
+          producer: { ...event.recording.producer, entityId: "relative" },
+        },
+      }),
+    ],
+  ])("rejects invalid persisted %s fields", async (_name, mutate) => {
+    await initializeWorkspaceMarker(paths, EXECUTION_ID);
+    await appendJournalEntry(
+      paths,
+      mutate(initializedEvent()) as never,
+      EMPTY_JOURNAL_HEAD,
+      "2026-07-24T10:00:00Z",
+    );
+
+    await expect(replayJournal(paths)).rejects.toMatchObject({
+      code: "WORKSPACE_CORRUPT",
+    });
+  });
+
+  test.each([
+    [
+      "resource observation",
+      {
+        type: "runtime-observation-captured",
+        observation: {
+          kind: "resource",
+          entityId: "observations/tokens",
+          name: "",
+          value: { invalid: true },
+          origin: ORIGIN,
+        },
+        declarationFingerprint: `sha256:${"2".repeat(64)}`,
+      },
+    ],
+    [
+      "trace format",
+      {
+        type: "native-trace-attached",
+        trace: {
+          artifact: {
+            kind: "file",
+            entityId: "trace/trace.json",
+            source: PERSISTED_SOURCE,
+            origin: ORIGIN,
+          },
+          format: { entityId: "relative" },
+        },
+        declarationFingerprint: `sha256:${"3".repeat(64)}`,
+      },
+    ],
+    [
+      "final receipt",
+      {
+        type: "finalized",
+        receipt: {
+          executionId: EXECUTION_ID,
+          record: {
+            family: "execution-evidence",
+            digest: ARTIFACT_DIGEST,
+          },
+          artifacts: [{ digest: ARTIFACT_DIGEST }],
+          finalizedAt: "not-a-timestamp",
+        },
+      },
+    ],
+  ])("rejects invalid persisted %s semantics", async (_name, event) => {
+    await initializeWorkspaceMarker(paths, EXECUTION_ID);
+    await appendJournalEntry(
+      paths,
+      event as never,
       EMPTY_JOURNAL_HEAD,
       "2026-07-24T10:00:00Z",
     );

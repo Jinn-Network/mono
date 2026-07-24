@@ -18,15 +18,35 @@ import {
   WORKSPACE_FORMAT_VERSION,
   type JournalEntry,
   type JournalEvent,
+  type PersistedArtifactCapture,
+  type PersistedNativeTraceCapture,
+  type PersistedRuntimeObservationCapture,
+  type PersistedStartRecording,
 } from "./journal-types.js";
 import {
+  assertPinnedWorkspaceDirectory,
+  pinWorkspaceDirectory,
   prepareWorkspaceDirectories,
   recorderIoError,
-  validateWorkspaceDirectory,
   validateWorkspaceParentChain,
+  type PinnedWorkspaceDirectory,
   type WorkspacePaths,
 } from "./paths.js";
-import type { ExecutionId } from "./types.js";
+import {
+  isStrictRfc3339,
+  validateFinalizeExecutionInput,
+  validateNativeTraceCapture,
+  validateRuntimeObservationCapture,
+  validateStartExecutionRecordingInput,
+} from "./validate-input.js";
+import type {
+  ArtifactCapture,
+  ArtifactSource,
+  ExecutionId,
+  NativeTraceCapture,
+  RuntimeObservationCapture,
+  StartExecutionRecordingInput,
+} from "./types.js";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -164,6 +184,7 @@ async function publishNewWorkspaceFile(
   bytes: Uint8Array,
   conflictMessage: string,
   signal?: AbortSignal,
+  pinnedParent?: PinnedWorkspaceDirectory,
 ): Promise<void> {
   const parent = dirname(path);
   const temporary = join(
@@ -171,20 +192,34 @@ async function publishNewWorkspaceFile(
     `.${path.slice(parent.length + 1)}.${process.pid}.${randomUUID()}.tmp`,
   );
   let handle;
+  let pinned = pinnedParent;
+  let ownsPin = false;
   try {
-    await validateWorkspaceDirectory(paths, parent);
+    if (pinned === undefined) {
+      pinned = await pinWorkspaceDirectory(paths, parent);
+      ownsPin = true;
+    } else if (pinned.path !== parent) {
+      throw new ExecutionRecorderError(
+        "UNSAFE_PATH",
+        `Pinned recorder directory does not contain publication target: ${path}`,
+        { workspaceDir: paths.root },
+      );
+    }
+    await assertPinnedWorkspaceDirectory(paths, pinned);
     handle = await open(temporary, "wx", 0o600);
+    await assertPinnedWorkspaceDirectory(paths, pinned);
     await handle.writeFile(bytes);
     if (process.platform !== "win32") await handle.chmod(0o600);
     await handle.sync();
     await handle.close();
     handle = undefined;
     assertRecorderOperationActive(signal);
-    await validateWorkspaceDirectory(paths, parent);
+    await assertPinnedWorkspaceDirectory(paths, pinned);
     try {
       await link(temporary, path);
-      await validateWorkspaceDirectory(paths, parent);
+      await assertPinnedWorkspaceDirectory(paths, pinned);
       await syncDirectory(parent);
+      await assertPinnedWorkspaceDirectory(paths, pinned);
     } catch (error) {
       if (nodeErrorCode(error) === "EEXIST") {
         throw new ExecutionRecorderError(
@@ -196,16 +231,30 @@ async function publishNewWorkspaceFile(
       }
       throw error;
     }
+    await assertPinnedWorkspaceDirectory(paths, pinned);
     await unlink(temporary);
+    await assertPinnedWorkspaceDirectory(paths, pinned);
     await syncDirectory(parent);
+    await assertPinnedWorkspaceDirectory(paths, pinned);
   } catch (error) {
     await handle?.close().catch(() => undefined);
-    await unlink(temporary).catch(() => undefined);
+    if (pinned !== undefined) {
+      try {
+        await assertPinnedWorkspaceDirectory(paths, pinned);
+        await unlink(temporary);
+        await assertPinnedWorkspaceDirectory(paths, pinned);
+      } catch {
+        // A temp file in a replaced directory is safer left behind than
+        // removed through a pathname whose containing identity changed.
+      }
+    }
     if (error instanceof ExecutionRecorderError) throw error;
     throw recorderIoError(
       error,
       `Unable to publish recorder workspace file: ${path}`,
     );
+  } finally {
+    if (ownsPin) await pinned?.handle.close().catch(() => undefined);
   }
 }
 
@@ -372,6 +421,7 @@ function parseEntry(
     candidate.revision !== expectedRevision ||
     candidate.previousEntryDigest !== expectedPreviousDigest ||
     typeof candidate.committedAt !== "string" ||
+    !isStrictRfc3339(candidate.committedAt) ||
     event === null ||
     !JOURNAL_EVENT_TYPES.has(
       event?.type as JournalEvent["type"],
@@ -436,19 +486,29 @@ function isPersistedArtifactSource(value: unknown): boolean {
   );
 }
 
+function isPersistedFileArtifact(value: unknown): boolean {
+  return (
+    isObject(value) &&
+    value.kind === "file" &&
+    isPersistedArtifactSource(value.source)
+  );
+}
+
+function isPersistedAggregateArtifact(value: unknown): boolean {
+  return (
+    isObject(value) &&
+    (value.kind === "dataset" || value.kind === "collection") &&
+    isPersistedArtifactSource(value.manifest) &&
+    Array.isArray(value.members) &&
+    value.members.every(isPersistedArtifact)
+  );
+}
+
 function isPersistedArtifact(value: unknown): boolean {
-  if (!isObject(value)) return false;
-  if (value.kind === "file") {
-    return isPersistedArtifactSource(value.source);
-  }
-  if (value.kind === "dataset" || value.kind === "collection") {
-    return (
-      isPersistedArtifactSource(value.manifest) &&
-      Array.isArray(value.members) &&
-      value.members.every(isPersistedArtifact)
-    );
-  }
-  return false;
+  return (
+    isPersistedFileArtifact(value) ||
+    isPersistedAggregateArtifact(value)
+  );
 }
 
 function isPersistedNativeTrace(value: unknown): boolean {
@@ -458,6 +518,115 @@ function isPersistedNativeTrace(value: unknown): boolean {
     isObject(value.format) &&
     typeof value.format.entityId === "string"
   );
+}
+
+function artifactSourceForValidation(
+  source: Record<string, unknown>,
+): ArtifactSource {
+  return {
+    bytes: new Uint8Array(),
+    mediaType: source.mediaType as string,
+    ...(source.name === undefined ? {} : { name: source.name as string }),
+  };
+}
+
+function artifactForValidation(
+  artifact: PersistedArtifactCapture,
+): ArtifactCapture {
+  if (artifact.kind === "file") {
+    return {
+      ...artifact,
+      source: artifactSourceForValidation(
+        artifact.source as unknown as Record<string, unknown>,
+      ),
+    };
+  }
+  return {
+    ...artifact,
+    manifest: artifactSourceForValidation(
+      artifact.manifest as unknown as Record<string, unknown>,
+    ),
+    members: artifact.members.map(artifactForValidation),
+  };
+}
+
+function nativeTraceForValidation(
+  trace: PersistedNativeTraceCapture,
+): NativeTraceCapture {
+  return {
+    ...trace,
+    artifact: artifactForValidation(trace.artifact),
+  };
+}
+
+function runtimeObservationForValidation(
+  observation: PersistedRuntimeObservationCapture,
+): RuntimeObservationCapture {
+  if (observation.kind === "resource") return observation;
+  if (observation.kind === "environment") {
+    return {
+      ...observation,
+      artifact: artifactForValidation(observation.artifact),
+    };
+  }
+  return {
+    ...observation,
+    component: {
+      ...observation.component,
+      descriptor: artifactForValidation(
+        observation.component.descriptor,
+      ) as Extract<ArtifactCapture, { kind: "file" }>,
+    },
+  };
+}
+
+function startRecordingForValidation(
+  recording: PersistedStartRecording,
+): StartExecutionRecordingInput {
+  return {
+    workspaceDir: "journal-replay",
+    executionId: recording.executionId,
+    startedAt: recording.startedAt,
+    record: recording.record,
+    task: {
+      ...recording.task,
+      source: artifactSourceForValidation(
+        recording.task.source as unknown as Record<string, unknown>,
+      ),
+    },
+    initialInputs: recording.initialInputs.map(artifactForValidation),
+    ...(recording.repositoryState === undefined
+      ? {}
+      : {
+          repositoryState: {
+            ...recording.repositoryState,
+            artifact: artifactForValidation(
+              recording.repositoryState.artifact,
+            ) as Extract<ArtifactCapture, { kind: "dataset" | "collection" }>,
+          },
+        }),
+    executor: recording.executor,
+    runtime: {
+      ...recording.runtime,
+      specification: artifactSourceForValidation(
+        recording.runtime.specification as unknown as Record<string, unknown>,
+      ),
+      components: recording.runtime.components.map((component) =>
+        component.kind === "controlled"
+          ? {
+              ...component,
+              artifact: artifactForValidation(component.artifact),
+            }
+          : {
+              ...component,
+              descriptor: artifactForValidation(
+                component.descriptor,
+              ) as Extract<ArtifactCapture, { kind: "file" }>,
+            },
+      ),
+    },
+    producer: recording.producer,
+  };
 }
 
 function isPersistedRuntimeObservation(value: unknown): boolean {
@@ -470,7 +639,7 @@ function isPersistedRuntimeObservation(value: unknown): boolean {
     value.kind === "opaque-component" &&
     isObject(value.component) &&
     value.component.kind === "opaque" &&
-    isPersistedArtifact(value.component.descriptor)
+    isPersistedFileArtifact(value.component.descriptor)
   );
 }
 
@@ -492,7 +661,7 @@ function isPersistedStartRecording(value: unknown): boolean {
   if (
     value.repositoryState !== undefined &&
     (!isObject(value.repositoryState) ||
-      !isPersistedArtifact(value.repositoryState.artifact))
+      !isPersistedAggregateArtifact(value.repositoryState.artifact))
   ) {
     return false;
   }
@@ -501,7 +670,7 @@ function isPersistedStartRecording(value: unknown): boolean {
     return component.kind === "controlled"
       ? isPersistedArtifact(component.artifact)
       : component.kind === "opaque" &&
-          isPersistedArtifact(component.descriptor);
+          isPersistedFileArtifact(component.descriptor);
   });
 }
 
@@ -527,7 +696,8 @@ function isFinalizedReceipt(value: unknown): boolean {
     value.artifacts.every(
       (artifact) => isObject(artifact) && isDigest(artifact.digest),
     ) &&
-    typeof value.finalizedAt === "string"
+    typeof value.finalizedAt === "string" &&
+    isStrictRfc3339(value.finalizedAt)
   );
 }
 
@@ -536,40 +706,90 @@ function validJournalEventPayload(
 ): boolean {
   switch (event.type) {
     case "initialized":
-      return (
-        isPersistedStartRecording(event.recording) &&
-        isDigest(event.declarationFingerprint)
+      if (
+        !isPersistedStartRecording(event.recording) ||
+        !isDigest(event.declarationFingerprint)
+      ) {
+        return false;
+      }
+      validateStartExecutionRecordingInput(
+        startRecordingForValidation(
+          event.recording as unknown as PersistedStartRecording,
+        ),
       );
+      return true;
     case "input-captured":
-      return (
-        isPersistedArtifact(event.input) &&
-        isDigest(event.declarationFingerprint)
-      );
+      if (
+        !isPersistedArtifact(event.input) ||
+        !isDigest(event.declarationFingerprint)
+      ) {
+        return false;
+      }
+      validateRuntimeObservationCapture({
+        kind: "environment",
+        artifact: artifactForValidation(
+          event.input as unknown as PersistedArtifactCapture,
+        ),
+      });
+      return true;
     case "runtime-observation-captured":
-      return (
-        isPersistedRuntimeObservation(event.observation) &&
-        isDigest(event.declarationFingerprint)
+      if (
+        !isPersistedRuntimeObservation(event.observation) ||
+        !isDigest(event.declarationFingerprint)
+      ) {
+        return false;
+      }
+      validateRuntimeObservationCapture(
+        runtimeObservationForValidation(
+          event.observation as unknown as PersistedRuntimeObservationCapture,
+        ),
       );
+      return true;
     case "native-trace-attached":
-      return (
-        isPersistedNativeTrace(event.trace) &&
-        isDigest(event.declarationFingerprint)
+      if (
+        !isPersistedNativeTrace(event.trace) ||
+        !isDigest(event.declarationFingerprint)
+      ) {
+        return false;
+      }
+      validateNativeTraceCapture(
+        nativeTraceForValidation(
+          event.trace as unknown as PersistedNativeTraceCapture,
+        ),
       );
+      return true;
     case "finalization-prepared":
-      return (
-        isDigest(event.intentFingerprint) &&
-        typeof event.finalizedAt === "string" &&
-        ["completed", "failed", "abandoned"].includes(
+      if (
+        !isDigest(event.intentFingerprint) ||
+        typeof event.finalizedAt !== "string" ||
+        !isStrictRfc3339(event.finalizedAt) ||
+        !["completed", "failed", "abandoned"].includes(
           event.outcome as string,
-        ) &&
-        typeof event.endedAt === "string" &&
-        Array.isArray(event.results) &&
-        event.results.every(isPersistedArtifact) &&
-        isPersistedNativeTrace(event.nativeTrace) &&
-        isStoredObjectReference(event.metadata) &&
-        Array.isArray(event.artifactDigests) &&
-        event.artifactDigests.every(isDigest)
+        ) ||
+        typeof event.endedAt !== "string" ||
+        !Array.isArray(event.results) ||
+        !event.results.every(isPersistedArtifact) ||
+        !isPersistedNativeTrace(event.nativeTrace) ||
+        !isStoredObjectReference(event.metadata) ||
+        !Array.isArray(event.artifactDigests) ||
+        !event.artifactDigests.every(isDigest)
+      ) {
+        return false;
+      }
+      validateFinalizeExecutionInput(
+        {
+          outcome: event.outcome as "completed" | "failed" | "abandoned",
+          endedAt: event.endedAt,
+          results: (
+            event.results as unknown as PersistedArtifactCapture[]
+          ).map(artifactForValidation),
+          nativeTrace: nativeTraceForValidation(
+            event.nativeTrace as unknown as PersistedNativeTraceCapture,
+          ),
+        },
+        event.endedAt,
       );
+      return true;
     case "repository-artifact-written":
       return isDigest(event.digest);
     case "repository-record-written":
@@ -581,17 +801,24 @@ function validJournalEventPayload(
   }
 }
 
-export async function replayJournal(
+async function replayPinnedJournal(
   paths: WorkspacePaths,
+  pinned: PinnedWorkspaceDirectory,
   signal?: AbortSignal,
 ): Promise<JournalReplay> {
-  assertRecorderOperationActive(signal);
-  await readWorkspaceMarker(paths, signal);
+  /*
+   * Node 22 exposes no openat/linkat or directory-handle-relative readdir.
+   * The open handle plus bigint device/inode checks therefore ensure a
+   * persistent pathname replacement is never accepted. A same-user actor
+   * already able to rename this 0700 directory can still swap a staged
+   * directory in for one pathname syscall and restore it before the
+   * following check; callers must treat that as the residual stdlib race.
+   */
   let names: string[];
   try {
-    await validateWorkspaceDirectory(paths, paths.journal);
+    await assertPinnedWorkspaceDirectory(paths, pinned);
     names = await readdir(paths.journal);
-    await validateWorkspaceDirectory(paths, paths.journal);
+    await assertPinnedWorkspaceDirectory(paths, pinned);
   } catch (error) {
     throw recorderIoError(
       error,
@@ -623,11 +850,13 @@ export async function replayJournal(
         `Recorder journal has a gap before revision ${file.revision}.`,
       );
     }
+    await assertPinnedWorkspaceDirectory(paths, pinned);
     const bytes = await readWorkspaceFile(
       paths,
       join(paths.journal, file.name),
       false,
     );
+    await assertPinnedWorkspaceDirectory(paths, pinned);
     if (bytes === null) {
       throw workspaceCorrupt(
         paths,
@@ -641,7 +870,22 @@ export async function replayJournal(
       digest: journalDigest(bytes),
     };
   }
+  await assertPinnedWorkspaceDirectory(paths, pinned);
   return { entries, head };
+}
+
+export async function replayJournal(
+  paths: WorkspacePaths,
+  signal?: AbortSignal,
+): Promise<JournalReplay> {
+  assertRecorderOperationActive(signal);
+  await readWorkspaceMarker(paths, signal);
+  const pinned = await pinWorkspaceDirectory(paths, paths.journal);
+  try {
+    return await replayPinnedJournal(paths, pinned, signal);
+  } finally {
+    await pinned.handle.close();
+  }
 }
 
 export async function appendJournalEntry(
@@ -652,37 +896,44 @@ export async function appendJournalEntry(
   signal?: AbortSignal,
 ): Promise<AppendedJournalEntry> {
   assertRecorderOperationActive(signal);
-  const replay = await replayJournal(paths, signal);
-  if (
-    replay.head.revision !== expectedHead.revision ||
-    replay.head.digest !== expectedHead.digest
-  ) {
-    throw new ExecutionRecorderError(
-      "RECORDING_CONFLICT",
-      "Recorder journal advanced since this writer last replayed it.",
-      { workspaceDir: paths.root },
+  await readWorkspaceMarker(paths, signal);
+  const pinned = await pinWorkspaceDirectory(paths, paths.journal);
+  try {
+    const replay = await replayPinnedJournal(paths, pinned, signal);
+    if (
+      replay.head.revision !== expectedHead.revision ||
+      replay.head.digest !== expectedHead.digest
+    ) {
+      throw new ExecutionRecorderError(
+        "RECORDING_CONFLICT",
+        "Recorder journal advanced since this writer last replayed it.",
+        { workspaceDir: paths.root },
+      );
+    }
+    const entry: JournalEntry = {
+      formatVersion: WORKSPACE_FORMAT_VERSION,
+      revision: expectedHead.revision + 1,
+      previousEntryDigest: expectedHead.digest,
+      committedAt,
+      event,
+    };
+    const bytes = entryBytes(entry);
+    await publishNewWorkspaceFile(
+      paths,
+      journalEntryPath(paths, entry.revision),
+      bytes,
+      `Journal revision ${entry.revision} was committed by another writer.`,
+      signal,
+      pinned,
     );
+    return {
+      entry,
+      head: {
+        revision: entry.revision,
+        digest: journalDigest(bytes),
+      },
+    };
+  } finally {
+    await pinned.handle.close();
   }
-  const entry: JournalEntry = {
-    formatVersion: WORKSPACE_FORMAT_VERSION,
-    revision: expectedHead.revision + 1,
-    previousEntryDigest: expectedHead.digest,
-    committedAt,
-    event,
-  };
-  const bytes = entryBytes(entry);
-  await publishNewWorkspaceFile(
-    paths,
-    journalEntryPath(paths, entry.revision),
-    bytes,
-    `Journal revision ${entry.revision} was committed by another writer.`,
-    signal,
-  );
-  return {
-    entry,
-    head: {
-      revision: entry.revision,
-      digest: journalDigest(bytes),
-    },
-  };
 }

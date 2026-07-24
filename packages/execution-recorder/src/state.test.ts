@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -27,6 +27,10 @@ const ORIGIN = {
   observer: "urn:uuid:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as const,
 };
 const temporaryDirectories: string[] = [];
+const protocolFixtureRoot = new URL(
+  "../../evidence-protocol/fixtures/golden-execution-evidence-v1/execution/",
+  import.meta.url,
+);
 
 afterEach(async () => {
   await Promise.all(
@@ -112,29 +116,26 @@ function initialized(
 
 async function finalizingState(
   workspaceDir: string,
-  artifactCount = 1,
 ): Promise<{
   readonly state: WorkspaceState;
   readonly metadata: StoredObjectReference;
   readonly artifactDigests: readonly Sha256Digest[];
 }> {
   let state = await createWorkspaceState(workspaceDir, EXECUTION_ID);
-  const artifacts = await Promise.all(
-    Array.from({ length: artifactCount }, (_value, index) =>
-      storeObject(
-        state.paths,
-        new TextEncoder().encode(`artifact-${index + 1}`),
-      ),
-    ),
-  );
-  artifacts.sort((left, right) => left.digest.localeCompare(right.digest));
-  const metadata = await storeObject(
-    state.paths,
-    new TextEncoder().encode("metadata"),
-  );
+  const { artifacts, metadata, artifactDigests } =
+    await conformingMetadataFixture(state);
+  const start = initialized(artifacts[0]);
   state = await appendWorkspaceEvent(
     state,
-    initialized(artifacts[0]),
+    {
+      ...start,
+      recording: {
+        ...start.recording,
+        initialInputs: artifacts.map((artifact, index) =>
+          file(`inputs/fixture-${index}.bin`, artifact),
+        ),
+      },
+    },
     "2026-07-24T10:00:00Z",
   );
   state = await appendWorkspaceEvent(
@@ -153,14 +154,128 @@ async function finalizingState(
         format: { entityId: "https://example.com/trace-format" },
       },
       metadata,
-      artifactDigests: artifacts.map(({ digest }) => digest),
+      artifactDigests,
     },
     "2026-07-24T10:01:00Z",
   );
   return {
     state,
     metadata,
+    artifactDigests,
+  };
+}
+
+async function conformingMetadataFixture(
+  state: WorkspaceState,
+  options: { readonly descriptorSha?: boolean } = {},
+): Promise<{
+  readonly artifacts: readonly StoredObjectReference[];
+  readonly metadata: StoredObjectReference;
+  readonly artifactDigests: readonly Sha256Digest[];
+  readonly extra: StoredObjectReference;
+}> {
+  const metadataBytes = await readFile(
+    new URL("ro-crate-metadata.json", protocolFixtureRoot),
+  );
+  const document = JSON.parse(new TextDecoder().decode(metadataBytes)) as {
+    "@graph": Array<{ "@id": string; sha256?: string }>;
+  };
+  const byDigest = new Map<Sha256Digest, StoredObjectReference>();
+  for (const entity of document["@graph"]) {
+    if (
+      entity["@id"] === "ro-crate-metadata.json" ||
+      typeof entity.sha256 !== "string"
+    ) {
+      continue;
+    }
+    const reference = await storeObject(
+      state.paths,
+      await readFile(new URL(entity["@id"], protocolFixtureRoot)),
+    );
+    expect(reference.digest).toBe(`sha256:${entity.sha256}`);
+    byDigest.set(reference.digest, reference);
+  }
+  const artifacts = [...byDigest.values()].sort((left, right) =>
+    left.digest.localeCompare(right.digest),
+  );
+  const extra = await storeObject(
+    state.paths,
+    new TextEncoder().encode("captured-but-not-in-metadata"),
+  );
+  if (options.descriptorSha) {
+    const descriptor = document["@graph"].find(
+      (entity) => entity["@id"] === "ro-crate-metadata.json",
+    );
+    if (descriptor === undefined) throw new Error("Missing metadata descriptor");
+    descriptor.sha256 = extra.digest.slice("sha256:".length);
+  }
+  return {
+    artifacts,
+    metadata: await storeObject(
+      state.paths,
+      options.descriptorSha
+        ? new TextEncoder().encode(JSON.stringify(document))
+        : metadataBytes,
+    ),
     artifactDigests: artifacts.map(({ digest }) => digest),
+    extra,
+  };
+}
+
+async function initializedConformingMetadataState(
+  workspaceDir: string,
+  options: { readonly descriptorSha?: boolean } = {},
+): Promise<{
+  readonly state: WorkspaceState;
+  readonly metadata: StoredObjectReference;
+  readonly artifactDigests: readonly Sha256Digest[];
+  readonly extra: StoredObjectReference;
+  readonly trace: StoredObjectReference;
+}> {
+  let state = await createWorkspaceState(workspaceDir, EXECUTION_ID);
+  const fixture = await conformingMetadataFixture(state, options);
+  const start = initialized(fixture.artifacts[0]);
+  state = await appendWorkspaceEvent(
+    state,
+    {
+      ...start,
+      recording: {
+        ...start.recording,
+        initialInputs: [...fixture.artifacts, fixture.extra].map(
+          (artifact, index) =>
+            file(`inputs/fixture-${index}.bin`, artifact),
+        ),
+      },
+    },
+    "2026-07-24T10:00:00Z",
+  );
+  return {
+    state,
+    metadata: fixture.metadata,
+    artifactDigests: fixture.artifactDigests,
+    extra: fixture.extra,
+    trace: fixture.artifacts[0],
+  };
+}
+
+function finalizationEvent(
+  metadata: StoredObjectReference,
+  trace: StoredObjectReference,
+  artifactDigests: readonly Sha256Digest[],
+): Extract<JournalEvent, { type: "finalization-prepared" }> {
+  return {
+    type: "finalization-prepared",
+    intentFingerprint: `sha256:${"4".repeat(64)}`,
+    finalizedAt: "2026-07-24T10:01:00Z",
+    outcome: "completed",
+    endedAt: "2026-07-24T10:00:59Z",
+    results: [],
+    nativeTrace: {
+      artifact: file("trace/trace.json", trace),
+      format: { entityId: "https://example.com/trace-format" },
+    },
+    metadata,
+    artifactDigests,
   };
 }
 
@@ -293,6 +408,86 @@ describe("replayed workspace state", () => {
           artifactDigests: [
             `sha256:${"f".repeat(64)}`,
           ],
+        },
+        "2026-07-24T10:01:00Z",
+      ),
+    ).rejects.toMatchObject({ code: "WORKSPACE_CORRUPT" });
+  });
+
+  test("rejects finalization artifact digests that omit metadata-bound artifacts", async () => {
+    const workspaceDir = await temporaryWorkspace();
+    const { state, metadata, artifactDigests, trace } =
+      await initializedConformingMetadataState(workspaceDir);
+
+    await expect(
+      appendWorkspaceEvent(
+        state,
+        finalizationEvent(metadata, trace, artifactDigests.slice(1)),
+        "2026-07-24T10:01:00Z",
+      ),
+    ).rejects.toMatchObject({ code: "WORKSPACE_CORRUPT" });
+  });
+
+  test("rejects captured artifact digests absent from the persisted metadata", async () => {
+    const workspaceDir = await temporaryWorkspace();
+    const { state, metadata, artifactDigests, extra, trace } =
+      await initializedConformingMetadataState(workspaceDir);
+    const withExtra = [...artifactDigests, extra.digest].sort();
+
+    await expect(
+      appendWorkspaceEvent(
+        state,
+        finalizationEvent(metadata, trace, withExtra),
+        "2026-07-24T10:01:00Z",
+      ),
+    ).rejects.toMatchObject({ code: "WORKSPACE_CORRUPT" });
+  });
+
+  test("excludes the metadata descriptor hash by entity identity", async () => {
+    const workspaceDir = await temporaryWorkspace();
+    const { state, metadata, artifactDigests, trace } =
+      await initializedConformingMetadataState(workspaceDir, {
+        descriptorSha: true,
+      });
+
+    await expect(
+      appendWorkspaceEvent(
+        state,
+        finalizationEvent(metadata, trace, artifactDigests),
+        "2026-07-24T10:01:00Z",
+      ),
+    ).resolves.toMatchObject({ status: "finalizing" });
+  });
+
+  test("rejects a finalization object reference whose prior digest has a conflicting size", async () => {
+    const workspaceDir = await temporaryWorkspace();
+    const { state, metadata, artifactDigests, trace } =
+      await initializedConformingMetadataState(workspaceDir);
+
+    await expect(
+      appendWorkspaceEvent(
+        state,
+        finalizationEvent(
+          metadata,
+          { ...trace, size: trace.size + 1 },
+          artifactDigests,
+        ),
+        "2026-07-24T10:01:00Z",
+      ),
+    ).rejects.toMatchObject({ code: "WORKSPACE_CORRUPT" });
+  });
+
+  test("rejects a finalization end time before the recorded start time", async () => {
+    const workspaceDir = await temporaryWorkspace();
+    const { state, metadata, artifactDigests, trace } =
+      await initializedConformingMetadataState(workspaceDir);
+
+    await expect(
+      appendWorkspaceEvent(
+        state,
+        {
+          ...finalizationEvent(metadata, trace, artifactDigests),
+          endedAt: "2026-07-24T09:59:59Z",
         },
         "2026-07-24T10:01:00Z",
       ),
@@ -434,7 +629,7 @@ describe("replayed workspace state", () => {
   test("binds the finalized receipt exactly to the finalization intent", async () => {
     const workspaceDir = await temporaryWorkspace();
     let { state, metadata, artifactDigests } =
-      await finalizingState(workspaceDir, 2);
+      await finalizingState(workspaceDir);
     for (const digest of artifactDigests) {
       state = await appendWorkspaceEvent(
         state,

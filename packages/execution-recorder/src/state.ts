@@ -4,6 +4,7 @@ import type {
   EvidenceRecordReference,
   Sha256Digest,
 } from "@jinn-network/evidence-repository";
+import { validateExecutionEvidence } from "@jinn-network/evidence-protocol";
 
 import { assertRecorderOperationActive, ExecutionRecorderError } from "./errors.js";
 import {
@@ -134,6 +135,13 @@ async function verifyEventObjects(
   }
   if (event.type === "finalization-prepared") {
     for (const reference of stateObjectReferences(state)) {
+      const previous = unique.get(reference.digest);
+      if (previous !== undefined && previous.size !== reference.size) {
+        throw corruptState(
+          state,
+          `Captured object ${reference.digest} has conflicting persisted sizes.`,
+        );
+      }
       unique.set(reference.digest, reference);
     }
     for (const digest of event.artifactDigests) {
@@ -145,8 +153,57 @@ async function verifyEventObjects(
       }
     }
   }
+  let metadataBytes: Uint8Array | undefined;
   for (const reference of unique.values()) {
-    await readStoredObject(state.paths, reference, signal);
+    const bytes = await readStoredObject(state.paths, reference, signal);
+    if (
+      event.type === "finalization-prepared" &&
+      reference.digest === event.metadata.digest
+    ) {
+      metadataBytes = bytes;
+    }
+  }
+  if (event.type === "finalization-prepared") {
+    if (metadataBytes === undefined) {
+      throw corruptState(
+        state,
+        "Finalization metadata object was not captured.",
+      );
+    }
+    const report = validateExecutionEvidence(metadataBytes);
+    if (!report.conforms || report.value === undefined) {
+      throw corruptState(
+        state,
+        "Finalization metadata is not conforming Execution Evidence.",
+      );
+    }
+    const expectedDigests = [
+      ...new Set(
+        report.value["@graph"]
+          .filter(
+            (entity) => entity["@id"] !== "ro-crate-metadata.json",
+          )
+          .map((entity) =>
+            typeof entity.sha256 === "string"
+              ? (`sha256:${entity.sha256}` as Sha256Digest)
+              : null,
+          )
+          .filter(
+            (digest): digest is Sha256Digest => digest !== null,
+          ),
+      ),
+    ].sort();
+    if (
+      expectedDigests.length !== event.artifactDigests.length ||
+      !expectedDigests.every(
+        (digest, index) => digest === event.artifactDigests[index],
+      )
+    ) {
+      throw corruptState(
+        state,
+        "Finalization artifact digests do not match persisted metadata.",
+      );
+    }
   }
 }
 
@@ -215,6 +272,15 @@ function reduceEvent(state: WorkspaceState, event: JournalEvent): WorkspaceState
         throw corruptState(
           state,
           "Recorder journal contains incompatible finalization transitions.",
+        );
+      }
+      if (
+        Date.parse(event.endedAt) <
+        Date.parse(state.recording.startedAt)
+      ) {
+        throw corruptState(
+          state,
+          "Finalization end time precedes the recorded start time.",
         );
       }
       for (const [index, digest] of event.artifactDigests.entries()) {

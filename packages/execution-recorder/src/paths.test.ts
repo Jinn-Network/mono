@@ -1,12 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { lstat, mkdtemp, open, rm, symlink } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  rename,
+  rm,
+  symlink,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
+  assertPinnedWorkspaceDirectory,
+  pinWorkspaceDirectory,
   prepareWorkspaceDirectories,
   workspacePaths,
 } from "./paths.js";
@@ -70,5 +80,54 @@ describe("workspace paths", () => {
 
     await prepareWorkspaceDirectories(paths);
     expect(sync).toHaveBeenCalledTimes(4);
+  });
+
+  test("creates and flushes every missing workspace ancestor", async () => {
+    const parent = await temporaryDirectory(
+      "jinn-recorder-nested-path-sync-",
+    );
+    const probe = await open(parent, "r");
+    const sync = vi.spyOn(Object.getPrototypeOf(probe), "sync");
+    await probe.close();
+    const first = join(parent, "first");
+    const second = join(first, "second");
+    const paths = workspacePaths(join(second, "recording"));
+
+    await prepareWorkspaceDirectories(paths);
+
+    for (const path of [
+      first,
+      second,
+      paths.root,
+      join(paths.root, "objects"),
+      paths.objects,
+      paths.journal,
+    ]) {
+      expect((await lstat(path)).mode & 0o777).toBe(0o700);
+    }
+    expect(sync).toHaveBeenCalledTimes(6);
+
+    await prepareWorkspaceDirectories(paths);
+    expect(sync).toHaveBeenCalledTimes(6);
+  });
+
+  test("detects replacement of a pinned workspace directory", async () => {
+    const parent = await temporaryDirectory("jinn-recorder-path-pin-");
+    const paths = workspacePaths(join(parent, "recording"));
+    await prepareWorkspaceDirectories(paths);
+    const pinned = await pinWorkspaceDirectory(paths, paths.journal);
+
+    try {
+      expect(typeof pinned.device).toBe("bigint");
+      expect(typeof pinned.inode).toBe("bigint");
+      await rename(paths.journal, join(paths.root, "journal-moved"));
+      await mkdir(paths.journal, { mode: 0o700 });
+
+      await expect(
+        assertPinnedWorkspaceDirectory(paths, pinned),
+      ).rejects.toMatchObject({ code: "UNSAFE_PATH" });
+    } finally {
+      await pinned.handle.close();
+    }
   });
 });
