@@ -1,8 +1,8 @@
 # Impl-state sharing by codeDigest — spike follow-ups (#945)
 
-> **For agentic workers:** This is a **spike close-out plan**, not a production TDD implementation plan. After Captain accepts the finding recommendation, file the ordered Issues below (via `file-issue`), then implement each `feat` with `writing-plans` → `test-driven-development` → `executing-plans` / `subagent-driven-development`. Do **not** merge production client code under #945.
+> **For agentic workers:** This is a **spike close-out plan**, not a production TDD implementation plan. The finding was human-accepted and F0–F3 were filed on 2026-07-24. Implement each follow-up with `writing-plans` → `test-driven-development` → `executing-plans` / `subagent-driven-development`. Do **not** merge production client code under #945.
 
-**Goal:** Close spike #945 when a human accepts the finding recommendation (complete voluntary HarnessCheckpoint + digest discovery; do not auto-pin on every delivery) and the follow-up Issue train is filed with clear acceptance criteria.
+**Goal:** Close spike #945 with the human-accepted recommendation (complete voluntary HarnessCheckpoint + digest discovery; do not auto-pin on every delivery) and keep its filed follow-up Issue train explicit and executable.
 
 **Architecture:** Reuse the ratified `HarnessCheckpoint` artifact (`packages/sdk/src/checkpoint.ts`, `jinn checkpoint publish|install`) as the network-legible source behind `codeDigest`. Prerequisite: exclude `secrets/` from `hashImplStateDir` so published bytes can re-hash to the advertised digest. Then make publish/install real (replace empty-buffer pin stub), then expose digest→checkpoint discovery via indexer + MCP.
 
@@ -25,14 +25,16 @@
 
 ## Spike success criteria (close #945)
 
-A human reviewer may accept and close the spike when **all** of the following are true:
+The spike closes when **all** of the following are true:
 
 1. Finding answers every #945 investigate checkbox (mechanism, integrity, safety, economics, trust/lineage, recommendation) — see verification checklist below.
 2. Recommendation is explicit and actionable: **complete HarnessCheckpoint; no auto-upload on every train delivery; secrets-out-of-hash first.**
 3. This plan exists at the path above and maps ACs → ordered follow-up Issues with shapes, ACs, and dependencies.
 4. No production runtime code was introduced solely to “prove” the spike.
 
-Filing the follow-up Issues is **Captain / post-accept** work (or a subsequent `chore`/`docs` session with `file-issue`). Closing #945 does **not** require those Issues to be implemented — only that the path is clear.
+Human ratification and the #2117–#2120 filing satisfy these documentation gates.
+Merging the spike PR closes #945. The follow-up Issues are filed with native
+blocker edges; closing #945 does **not** require their implementation.
 
 ---
 
@@ -83,7 +85,7 @@ Filing the follow-up Issues is **Captain / post-accept** work (or a subsequent `
 
 ## Ordered follow-up Issues
 
-### F0 — `design` / `docs`: amend §7 + short DR-2026-05-06-d note
+### F0 / [#2117](https://github.com/Jinn-Network/mono/issues/2117) — `docs`: amend §7 + short DR-2026-05-06-d note
 
 **Proposed title:** `docs(harness): amend checkpoint §7 + DR-d for hashIgnore / digest discovery`
 
@@ -104,13 +106,13 @@ Filing the follow-up Issues is **Captain / post-accept** work (or a subsequent `
 
 ---
 
-### F1 — `feat(client): exclude secrets from freeze codeDigest`
+### F1 / [#2118](https://github.com/Jinn-Network/mono/issues/2118) — `feat(client): exclude secrets from freeze codeDigest`
 
 **Proposed title:** `feat(client): exclude secrets from freeze codeDigest + document hashIgnore contract`
 
 **Shape:** `feat`
 
-**Depends on:** F0 preferred (or finding field names if F0 deferred one sprint).
+**Depends on:** F0 / #2117.
 
 **Blocks:** F2 (publish cannot be integrity-safe while secrets remain in the digest).
 
@@ -142,7 +144,7 @@ it('secrets/ contents do not change codeDigest when ignored', async () => {
 
 ---
 
-### F2 — `feat(client): real HarnessCheckpoint publish/install with re-hash verify`
+### F2 / [#2119](https://github.com/Jinn-Network/mono/issues/2119) — `feat(client): real HarnessCheckpoint publish/install with re-hash verify`
 
 **Proposed title:** `feat(client): real HarnessCheckpoint publish/install with re-hash verify`
 
@@ -182,7 +184,7 @@ Replace with walk → serialize (tar/CAR per existing IPFS helpers) → pin byte
 
 ---
 
-### F3 — `feat(discovery/mcp): resolve impl-state by codeDigest`
+### F3 / [#2120](https://github.com/Jinn-Network/mono/issues/2120) — `feat(discovery/mcp): resolve impl-state by codeDigest`
 
 **Proposed title:** `feat(discovery/mcp): resolve impl-state by codeDigest via harness_checkpoint`
 
@@ -312,5 +314,5 @@ Reviewer walks this list against the finding + this plan. Check every box before
 
 1. **Chose `docs` as default for F0** after spike accept (not a second full `design` session) because the finding already selects Option B and only needs §7 / DR-d ratification text.
 2. **Kept F4 unfiled** until F1–F3 soak — matches finding non-goals.
-3. **Did not file Issues via `gh`/`file-issue`** — stage authority forbids shared GitHub mutation; Captain files after accept.
+3. **Stage agents did not file Issues via `gh`/`file-issue`** because their authority forbade shared GitHub mutation; the human-ratification pass filed #2117–#2120 after acceptance.
 4. **Did not implement production code** — spike output is finding + this plan only.

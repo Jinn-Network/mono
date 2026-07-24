@@ -3,7 +3,7 @@
 - **Version:** 0.2 (spike finding + Stage-2 follow-up plan pointer)
 - **Date:** 2026-07-23
 - **Author:** Cursor Grok 4.5 (Autopilot stage-1 design + stage-2 plan, issue #945)
-- **Status:** Finding — ready for Captain review; actionable follow-ups live in [`docs/superpowers/plans/2026-07-23-impl-state-sharing-by-codedigest-followups.md`](../plans/2026-07-23-impl-state-sharing-by-codedigest-followups.md) (Issues not filed by this stage)
+- **Status:** Human-accepted finding; actionable follow-ups live in [`docs/superpowers/plans/2026-07-23-impl-state-sharing-by-codedigest-followups.md`](../plans/2026-07-23-impl-state-sharing-by-codedigest-followups.md)
 - **Shape:** `spike` — output is this finding + plan; spike code does not merge
 - **Issue:** [#945](https://github.com/Jinn-Network/mono/issues/945)
 - **Anchors:**
@@ -24,6 +24,17 @@
 **Recommendation:** do **not** auto-upload impl-state on every train delivery. Complete the existing voluntary **HarnessCheckpoint** path (opt-in, frozen-preferred), make published state discoverable **by `codeDigest`**, and require consumers to re-run `hashImplStateDir` with the same ignore list. Before that is safe, **exclude `secrets/` (and equivalent sensitive bags) from the freeze hash** so publishable bytes can match the advertised digest without leaking credentials.
 
 Smallest viable path is a thin amendment to the existing §7 design + 2–3 follow-up `feat` Issues — not a greenfield artifact type, and not a new DR unless the hash-ignore change is treated as a trust-stack amendment (recommended: short DR-amend note under DR-2026-05-06-d).
+
+### Human ratification (2026-07-24)
+
+The recommendation is accepted as written:
+
+- publication is voluntary through `HarnessCheckpoint`, never automatic on every train delivery;
+- secret bags must be outside the canonical hash before real publication can ship;
+- consumers verify the materialized tree against the advertised digest using the same versioned ignore policy;
+- v0 is free and attributed; automatic delivery sharing and x402 pricing remain deferred.
+
+The ordered implementation train is filed as [#2117](https://github.com/Jinn-Network/mono/issues/2117) (canonical §7 / DR-d amendment) → [#2118](https://github.com/Jinn-Network/mono/issues/2118) (secrets-out-of-hash parity) → [#2119](https://github.com/Jinn-Network/mono/issues/2119) (real publish/install) → [#2120](https://github.com/Jinn-Network/mono/issues/2120) (digest discovery/MCP). The optional on-delivery F4 remains deliberately unfiled until F1–F3 have soak evidence.
 
 ---
 
@@ -283,7 +294,7 @@ Optional later: link from attempt envelopes that *claim* a digest to the checkpo
 
 ---
 
-## 8. Proposed follow-up Issues (for Captain / file-issue — not filed by this stage)
+## 8. Filed follow-up Issues
 
 Canonical ordering, acceptance criteria, dependencies, and verification live in the Stage-2 plan:
 
@@ -291,12 +302,12 @@ Canonical ordering, acceptance criteria, dependencies, and verification live in 
 
 Summary (Issue Types match handbook shapes):
 
-1. **`design` / `docs`** — short DR-amend under DR-2026-05-06-d + light §7 amend (hashIgnore, allowlist, scrub, digest discovery).
-2. **`feat(client): exclude secrets from freeze codeDigest + document hashIgnore contract`**  
+1. **[#2117](https://github.com/Jinn-Network/mono/issues/2117) (`docs`)** — short DR-amend under DR-2026-05-06-d + light §7 amend (hashIgnore, allowlist, scrub, digest discovery).
+2. **[#2118](https://github.com/Jinn-Network/mono/issues/2118) — `feat(client): exclude secrets from freeze codeDigest + document hashIgnore contract`**
    Acceptance: `secrets/` never affects `hashImplStateDir` for learner (and default policy for other harnesses); tests for ignore parity; migration note for operators whose historical digests included secrets.
-3. **`feat(client): real HarnessCheckpoint publish/install with re-hash verify`**  
+3. **[#2119](https://github.com/Jinn-Network/mono/issues/2119) — `feat(client): real HarnessCheckpoint publish/install with re-hash verify`**
    Acceptance: publish pins actual tree; install refuses digest mismatch; allowlist + scrub gate; replaces empty-buffer stub; unit + one integration test with local IPFS mock.
-4. **`feat(discovery/mcp): resolve impl-state by codeDigest via harness_checkpoint`**  
+4. **[#2120](https://github.com/Jinn-Network/mono/issues/2120) — `feat(discovery/mcp): resolve impl-state by codeDigest via harness_checkpoint`**
    Acceptance: given `sha256:<hex>`, return checkpoint CID + `implStateDirCid` when enriched row exists; MCP tool usable from consolidator/Improve; graceful empty when unpublished.
 
 Optional later: `feat` opt-in `implStateShare.onDelivery: frozen` (Option A) once (2)–(4) are stable.
