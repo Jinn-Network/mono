@@ -184,3 +184,60 @@ describe('assembleAndSignEnvelope', () => {
     });
   });
 });
+
+describe('assembleAndSignEnvelope — generatorModel / distributionClass / task provenance (#1827)', () => {
+  it('stamps distributionClass="restricted-tos" when executor.generatorModel.provider is anthropic', async () => {
+    const inputs: EnvelopeInputs = {
+      ...baseInputs,
+      executor: {
+        ...baseInputs.executor,
+        generatorModel: { id: 'claude-sonnet-4-6', provider: 'anthropic', source: 'stream' },
+      },
+    };
+    const { envelope } = await assembleAndSignEnvelope(inputs, deps);
+    expect(envelope.distributionClass).toBe('restricted-tos');
+    expect(envelope.executor.generatorModel).toEqual({ id: 'claude-sonnet-4-6', provider: 'anthropic', source: 'stream' });
+  });
+
+  it('stamps distributionClass="unknown" when executor.generatorModel is absent', async () => {
+    const { envelope } = await assembleAndSignEnvelope(baseInputs, deps);
+    expect(envelope.distributionClass).toBe('unknown');
+    expect(envelope.executor.generatorModel).toBeUndefined();
+  });
+
+  it('threads task.createdAt / instanceId / repo / baseCommit through to the signed envelope', async () => {
+    const inputs: EnvelopeInputs = {
+      ...baseInputs,
+      task: {
+        ...baseInputs.task,
+        createdAt: 1752000000,
+        instanceId: 'astropy__astropy-12907',
+        repo: 'astropy/astropy',
+        baseCommit: 'abc123def456',
+      },
+    };
+    const { envelope } = await assembleAndSignEnvelope(inputs, deps);
+    expect(envelope.task).toMatchObject({
+      createdAt: 1752000000,
+      instanceId: 'astropy__astropy-12907',
+      repo: 'astropy/astropy',
+      baseCommit: 'abc123def456',
+    });
+  });
+
+  it('produces an envelope that still passes SignedEnvelopeSchema with all four new fields set', async () => {
+    const inputs: EnvelopeInputs = {
+      ...baseInputs,
+      task: { ...baseInputs.task, createdAt: 1752000000, instanceId: 'x', repo: 'y/z', baseCommit: 'abc' },
+      executor: { ...baseInputs.executor, generatorModel: { id: 'claude-sonnet-4-6', provider: 'anthropic', source: 'stream' } },
+    };
+    const { envelope } = await assembleAndSignEnvelope(inputs, deps);
+    expect(() => SignedEnvelopeSchema.parse(envelope)).not.toThrow();
+  });
+
+  it('omits task.createdAt/instanceId/repo/baseCommit when not supplied (no fabricated defaults)', async () => {
+    const { envelope } = await assembleAndSignEnvelope(baseInputs, deps);
+    expect((envelope.task as { createdAt?: unknown }).createdAt).toBeUndefined();
+    expect((envelope.task as { instanceId?: unknown }).instanceId).toBeUndefined();
+  });
+});

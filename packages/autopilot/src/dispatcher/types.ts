@@ -1,21 +1,40 @@
+import { DEFAULT_HERMES_PYTHON } from './hermes-runtime.js';
+import {
+  DEFAULT_CURSOR_BIN,
+  DEFAULT_CURSOR_REVIEW_MODEL,
+} from './cursor-runtime.js';
+import type { AutopilotRuntime } from '../autopilot-runtime.js';
+
 /** The nine work-shape Issue Types (DR-2026-05-20-b). */
-export type IssueShape =
-  | 'feat' | 'fix' | 'refactor' | 'spike'
-  | 'chore' | 'docs' | 'test' | 'incident' | 'design';
+export const ISSUE_SHAPES = [
+  'feat', 'fix', 'refactor', 'spike',
+  'chore', 'docs', 'test', 'incident', 'design',
+] as const;
+export type IssueShape = (typeof ISSUE_SHAPES)[number];
+/** Runtime validation set — derive parsers from `ISSUE_SHAPES`, never re-list literals. */
+export const ISSUE_SHAPE_SET: ReadonlySet<IssueShape> = new Set(ISSUE_SHAPES);
 
 export type BlockedOn = 'Nothing' | 'Human' | 'Another issue';
-export type Effort = 'Low' | 'Medium' | 'High' | 'XHigh' | 'Max';
+export const EFFORTS = ['Low', 'Medium', 'High', 'XHigh', 'Max'] as const;
+export type Effort = (typeof EFFORTS)[number];
+/** Runtime validation set — derive parsers from `EFFORTS`, never re-list literals. */
+export const EFFORT_SET: ReadonlySet<Effort> = new Set(EFFORTS);
 export type Priority = 'P0' | 'P1' | 'P2' | 'P3' | 'P4';
 // 'Human' is a parked lane: the dispatcher promotes escalated (Blocked on:
 // Human) sessions into it so they leave the active "In Progress" column and
-// are visible at a glance as "needs a human". It is never a dispatchable state
-// (selectReady requires 'Todo') nor an in-flight state.
+// are visible at a glance as "needs a human". It is paint-only — never an
+// admission or hold decision gate (hold authority is labels / Blocked on /
+// structured markers).
 export type ProjectStatus = 'Todo' | 'In Progress' | 'Human' | 'In Review' | 'Done';
 
 /** An issue as polled from the source, with its taxonomy fields. */
 export interface PolledIssue {
   number: number;
   title: string;
+  /** Native GitHub labels retained for lifecycle Human-overlay evidence. */
+  labels?: string[];
+  /** Issue body; used for child-marker admission (Stage 2). */
+  body?: string;
   /** null = Issue Type not set — the issue is not triage-complete. */
   shape: IssueShape | null;
   blockedOn: BlockedOn | null;
@@ -60,9 +79,10 @@ export interface PolledIssue {
 
 /** An issue that passed the ready-filter — safe to dispatch. */
 export interface ReadyIssue extends PolledIssue {
-  shape: IssueShape;          // non-null: ready issues are triage-complete
+  shape: IssueShape;          // non-null: ready issues are triage-complete (children default to fix)
   priority: Priority;         // non-null: needed for ordering
-  projectItemId: string;      // non-null: onBoard:true requires it (see ready-filter)
+  /** Project item id — non-null for ready issues (machine children included). */
+  projectItemId: string;
   /**
    * Git ref to branch the worktree off and target the PR at. Set only when the
    * issue was admitted despite `Blocked on: Another issue` because its single
@@ -96,38 +116,15 @@ export interface SessionResult {
   escalationStatus?: 'needs-decision' | 'blocked' | 'stuck';
 }
 
-/** The CLI implementer agents the dispatcher can route work to. */
-export type Implementer = 'claude' | 'codex' | 'cursor';
-
-/**
- * One entry in the ordered implementer-routing policy. A rule matches an issue
- * when *every* specified predicate holds: `effort` (if present) must equal the
- * issue's Effort, and `shape` (if present) must equal the issue's Issue Type. A
- * rule with neither `effort` nor `shape` matches every issue (a catch-all).
- * Resolution is first-match-wins over the ordered `implementerRules` list.
- */
-export interface ImplementerRule {
-  effort?: Effort;
-  shape?: IssueShape;
-  implementer: Implementer;
-}
-
 export interface DispatcherConfig {
+  /** One process-wide runtime for implementation, review, and stages. */
+  runtime: AutopilotRuntime;
   /** Max simultaneous sessions. Default 3; practical ceiling ~5–7. */
   concurrencyCap: number;
   /** Stop pulling new issues when open ready PRs exceed this. */
   openPrBackpressure: number;
   /** Per-session wall-clock ceiling, ms. Generous — hours. */
   wallClockMs: number;
-  /** v1 default implementer; per-issue label can override. */
-  defaultImplementer: Implementer;
-  /**
-   * Ordered implementer-routing policy (#887). Empty (the default) = fall
-   * through to `defaultImplementer` — today's single-implementer behaviour.
-   * First-match-wins; see `ImplementerRule`. Source of truth is
-   * `JINN_DISPATCHER_IMPLEMENTER_RULES` (runner-read JSON array).
-   */
-  implementerRules: ImplementerRule[];
   /**
    * GitHub logins whose issues the dispatcher may pick up (#497). Compared
    * case-insensitively against `PolledIssue.author`. Empty (the default) =
@@ -161,9 +158,69 @@ export interface DispatcherConfig {
    * Both are checked fail-loud at boot. Source: `JINN_REVIEW_GH_TOKEN`.
    */
   reviewGhToken: string;
+  /**
+   * Model id for `hermes` coordinator sessions, as `--model` to `hermes chat`.
+   * BARE — never `<org>/<model>`: an org-prefixed id makes hermes infer the
+   * `openrouter` provider and bill an API key instead of the operator's Codex
+   * subscription. Hermes does not validate the id at runtime; only the provider
+   * can reject it. Source: `JINN_DISPATCHER_HERMES_MODEL`.
+   */
+  hermesModel: string;
+  /**
+   * Provider for `hermes` coordinator sessions, passed EXPLICITLY (never
+   * inferred). `openai-codex` = "Codex CLI via ChatGPT subscription or API key"
+   * (models.py ProviderEntry) — it auto-selects the `codex_responses` api_mode
+   * and the Codex base_url, and resolves credentials from hermes' own Codex
+   * token store. Source: `JINN_DISPATCHER_HERMES_PROVIDER`.
+   */
+  hermesProvider: string;
+  /** Python interpreter from the Hermes installation. Source:
+   * `JINN_DISPATCHER_HERMES_PYTHON`. */
+  hermesPythonPath: string;
+  /**
+   * Fixed Cursor model for review sessions (`effort: null`).
+   * Implement sessions use `cursorModelForEffort` instead. Source:
+   * `JINN_DISPATCHER_CURSOR_MODEL`.
+   */
+  cursorModel: string;
+  /** Cursor Agent CLI binary. Source: `JINN_DISPATCHER_CURSOR_BIN`. */
+  cursorBin: string;
+  /**
+   * Arm the delivery→PR bridge (issue #1892, spec
+   * 2026-07-20-autopilot-marketplace-execution.md §"Delivery → PR bridge
+   * (host-side)"): poll the marketplace indexer for delivered `jinn-repo.v1`
+   * solution envelopes and turn each into a draft PR. Default false —
+   * fail-safe. Source: `JINN_MARKETPLACE_BRIDGE`
+   * (=== '1').
+   */
+  marketplaceBridgeEnabled: boolean;
+  /**
+   * Indexer base URL the bridge's `DeliveryReader` queries for solution
+   * envelopes (GraphQL). Empty (the default) disables the bridge regardless
+   * of `marketplaceBridgeEnabled` — no reader is constructed without it.
+   * Source: `JINN_MARKETPLACE_INDEXER_URL`.
+   */
+  marketplaceIndexerUrl: string;
+  /**
+   * IPFS gateway base URL the bridge reads envelope/task documents from and
+   * links in PR evidence sections. Source: `JINN_MARKETPLACE_IPFS_GATEWAY_URL`.
+   */
+  marketplaceIpfsGatewayUrl: string;
+  /**
+   * Creation-automation execution-mode switch (issue #1893, spec
+   * 2026-07-20-autopilot-marketplace-execution.md §"Generator"): `'local'`
+   * dispatches ready issues to a local coordinator session (`dispatchIssue`,
+   * unchanged). `'marketplace'` routes them to the marketplace instead
+   * (`routeToMarketplace` — see `./marketplace-route.js`): label + snapshot
+   * marker, no local session, no GitHub credential handed to a solver.
+   * Default `'local'` — fail-safe. Source:
+   * `JINN_EXECUTION_MODE` (`'marketplace'` arms it; anything else is `local`).
+   */
+  executionMode: 'local' | 'marketplace';
 }
 
 export const DEFAULT_CONFIG: DispatcherConfig = {
+  runtime: 'claude',
   concurrencyCap: 3,
   // PR backpressure ceiling: pause dispatch when this many open PRs target `next`.
   // 30 is enough headroom for a normal sprint's worth of in-flight + parked work
@@ -171,14 +228,26 @@ export const DEFAULT_CONFIG: DispatcherConfig = {
   // `--backpressure N` on scripts/run-autopilot.ts.
   openPrBackpressure: 30,
   wallClockMs: 4 * 60 * 60 * 1000,
-  defaultImplementer: 'claude',
-  implementerRules: [],
   authorAllowlist: [],
   reviewCap: 3,
   engineReviewLabel: 'engine:review',
   reviewBotLogin: '',
   implGhToken: '',
   reviewGhToken: '',
+
+  // Bare id + explicit provider: mirrors the operator's own working codex setup
+  // (~/.codex/config.toml model = "gpt-5.6-sol"; ~/.hermes/config.yaml
+  // provider: openai-codex). An `openai/`-prefixed id would silently route to
+  // OpenRouter instead of the subscription.
+  hermesModel: 'gpt-5.6-sol',
+  hermesProvider: 'openai-codex',
+  hermesPythonPath: DEFAULT_HERMES_PYTHON,
+  cursorModel: DEFAULT_CURSOR_REVIEW_MODEL,
+  cursorBin: DEFAULT_CURSOR_BIN,
+  marketplaceBridgeEnabled: false,
+  marketplaceIndexerUrl: '',
+  marketplaceIpfsGatewayUrl: 'https://gateway.autonolas.tech',
+  executionMode: 'local',
 };
 
 /** A PR as polled from the PR source, with the fields the review loop needs. */
@@ -196,8 +265,9 @@ export interface PolledPr {
   hasReviewLabel: boolean;
   /**
    * True iff the PR needs a (re)review: no review by `reviewBotLogin` has been
-   * submitted at or after the PR's latest commit. Once a current review exists
-   * this is false, so the dispatcher stops re-spawning for an unchanged PR.
+   * submitted at or after the PR's latest commit, or the bot's current verdict
+   * is APPROVED while the PR is still draft (an incomplete ready transition).
+   * A current approval suppresses redispatch only once the PR is non-draft.
    */
   needsReview: boolean;
 }
@@ -215,4 +285,6 @@ export interface InFlightReview {
   worktreePath: string;
   pid: number | null;
   startedAt: number;
+  /** Unique persisted ownership generation; null means cleanup is forbidden. */
+  leaseId?: string | null;
 }

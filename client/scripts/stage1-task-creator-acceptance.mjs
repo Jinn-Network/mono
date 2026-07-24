@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * Stage 1 daemon-side acceptance over the contribution candidate written by
- * the stock Python host. External evaluation/publication services are local
- * fakes; the task-creator miner, stores, privacy projection and jinn-layer
- * history binary are the real build.
+ * Daemon-side acceptance over the contribution candidates written by the
+ * stock Python host. In the Stage 2 parked era the production daemon does not
+ * mine session echoes; this harness exercises the dormant resolver-backed
+ * miner explicitly while proving that the reference queue remains payload-free
+ * and every host-created candidate is publication-disabled.
  */
 
 import assert from 'node:assert/strict';
@@ -24,7 +25,8 @@ import { MintedPoolStore } from '../dist/solver-types/_swe-rebench-v2-minted-poo
 const execFileAsync = promisify(execFile);
 const work = resolve(requiredEnv('JINN_STAGE1_WORK'));
 const contributionStateDir = resolve(requiredEnv('JINN_MINEABLE_STATE_DIR'));
-const layerBin = resolve(requiredEnv('JINN_LAYER_BIN'));
+const episodesDir = resolve(requiredEnv('JINN_LAYER_EPISODES_DIR'));
+const layerBin = resolve(requiredEnv('JINN_STAGE1_LAYER_BIN'));
 const result = JSON.parse(await readFile(join(work, 'stock-product-result.json'), 'utf8'));
 
 function requiredEnv(name) {
@@ -105,7 +107,7 @@ const publicationUrl = `http://127.0.0.1:${address.port}`;
 const daemonStateDir = join(work, 'task-creator-state');
 const validatedStore = new ValidatedPoolStore({ stateDir: daemonStateDir });
 const mintedStore = new MintedPoolStore({ stateDir: daemonStateDir });
-const mineableStore = new MineableTraceStore({ stateDir: contributionStateDir });
+const mineableStore = new MineableTraceStore({ stateDir: contributionStateDir, episodesDir });
 await validatedStore.record(SOURCE_INSTANCE, {
   scorable: true,
   reason: 'gold-patch-resolves',
@@ -149,159 +151,68 @@ async function layerJson(...args) {
   return JSON.parse(stdout);
 }
 
-function candidate(sourceId, overrides = {}) {
-  return {
-    sourceId,
-    kind: 'harness-session',
-    repo: REPO,
-    baseCommit: 'a'.repeat(40),
-    acceptedDiff: `SECRET_ACCEPTED_DIFF_${sourceId}`,
-    testRuns: [],
-    intermediateFailureDiffs: [`SECRET_FAILURE_${sourceId}`],
-    skillEvents: [{ skill: `SECRET_SKILL_${sourceId}`, action: 'loaded' }],
-    publishMinedTasksConsent: true,
-    createdAt: '2026-07-15T00:00:00.000Z',
-    ...overrides,
-  };
-}
-
 try {
   await stat(layerBin);
-  let records = await mineableStore.list();
+  const records = await mineableStore.list();
   assert.equal(records.length, 2, 'daemon did not read the two Python-written candidates');
-  const shareOff = records.find((row) => row.recordId === result.shareOffRecordId);
-  const shareOn = records.find((row) => row.recordId === result.shareOnRecordId);
-  assert.ok(shareOff && shareOn);
-  assert.equal(shareOff.publicationState, 'disabled');
-  assert.equal(shareOn.publicationState, 'queued');
-  assert.equal(shareOff.candidate.sourceId, result.shareOffRecordId);
-  assert.equal(shareOn.candidate.sourceId, result.shareOnRecordId);
-  const shareOnSession = result.sessions.find((row) => row.sessionId === 'stage1-share-on');
-  assert.ok(shareOnSession);
-  assert.equal(shareOn.candidate.sourceId, shareOnSession.episodeId);
+  const rawQueue = JSON.parse(await readFile(join(contributionStateDir, 'mineable-traces.json'), 'utf8'));
+  assert.equal(rawQueue.schemaVersion, 'jinn.contribution-store.v3');
+  for (const record of Object.values(rawQueue.records)) {
+    assert.ok(!('candidate' in record));
+    assert.ok(!('localMetadata' in record));
+  }
+  const target = records.find((row) => row.recordId === result.targetRecordId);
+  const noResult = records.find((row) => row.recordId === result.noResultRecordId);
+  assert.ok(target && noResult);
+  for (const record of records) {
+    assert.equal(record.candidate.publishMinedTasksConsent, false);
+    assert.equal(record.publicationState, 'disabled');
+    assert.equal(record.candidate.sourceId, record.recordId);
+  }
+  // The Python driver declares which of its sessions carried each candidate
+  // — look the sessions up by that declared id,
+  // then verify the store linkage independently via episodeId. Selecting by
+  // episodeId instead would make the linkage assertion tautological.
+  const targetSession = result.sessions.find(
+    (row) => row.sessionId === result.targetSessionId,
+  );
+  const noResultSession = result.sessions.find(
+    (row) => row.sessionId === result.noResultSessionId,
+  );
+  assert.ok(targetSession && noResultSession);
+  assert.equal(target.candidate.sourceId, targetSession.episodeId);
+  assert.equal(noResult.candidate.sourceId, noResultSession.episodeId);
 
-  // With no publication sidecar, both records still mint locally and nothing
-  // leaves the machine. The share-enabled record remains durably queued.
+  // Exercise the dormant miner directly as a compatibility proof. Production
+  // harvest reports sessions-source-parked-stage-2 and never invokes this path.
   const localTick = await mineSessionEchoes(deps(successfulRunner(), { publish: false }));
   assert.equal(localTick.admitted.length, 2);
   assert.equal(uploads.length, 0);
-  assert.deepEqual(await mineableStore.get(result.shareOffRecordId).then((row) => ({
-    localState: row?.localState,
-    publicationState: row?.publicationState,
-  })), { localState: 'minted', publicationState: 'disabled' });
-  assert.deepEqual(await mineableStore.get(result.shareOnRecordId).then((row) => ({
-    localState: row?.localState,
-    publicationState: row?.publicationState,
-  })), { localState: 'minted', publicationState: 'queued' });
-
-  const queuedHistory = await layerJson('history', '--json');
-  assert.equal(queuedHistory.contractVersion, 1);
-  assert.equal(queuedHistory.status, 'degraded');
-  assert.match(queuedHistory.reason ?? '', /predate activity or eligibility/);
-  const queuedHistoryText = JSON.stringify(queuedHistory);
-  assert.match(queuedHistoryText, /queued/);
-  const queuedEntry = queuedHistory.value.entries.find(
-    (entry) => entry.sessionId === shareOnSession.sessionId,
-  );
-  assert.ok(queuedEntry);
-  assert.equal(queuedEntry.capturedAt, shareOnSession.capturedAt);
-  assert.equal(queuedEntry.contributionState.status, 'queued');
-
-  // Once the acknowledged candidate has a publication worker, D5 is checked
-  // immediately before the one outbound public-task artifact.
-  const publicChecks = [];
-  const publishTick = await mineSessionEchoes(deps(successfulRunner(), {
-    publish: true,
-    isPublic: async (repo) => {
-      publicChecks.push(repo);
-      return true;
-    },
-  }));
-  assert.ok(publishTick.admitted.length >= 1);
-  assert.deepEqual(publicChecks, [REPO]);
-  assert.equal(uploads.length, 1);
-  const published = await mineableStore.get(result.shareOnRecordId);
-  assert.equal(published?.localState, 'minted');
-  assert.equal(published?.publicationState, 'published');
-  assert.equal(published?.publicationRef, 'ipfs://bafyStage1Published');
-
-  const outbound = uploads[0].body.toString('utf8');
   for (const record of records) {
-    assert.ok(!outbound.includes(record.candidate.sourceId));
-    assert.ok(!outbound.includes(record.candidate.acceptedDiff));
-    for (const failure of record.candidate.intermediateFailureDiffs) {
-      assert.ok(!outbound.includes(failure));
-    }
-    for (const skill of record.candidate.skillEvents) {
-      assert.ok(!outbound.includes(skill.skillRef));
-    }
+    assert.deepEqual(await mineableStore.get(record.recordId).then((row) => ({
+      localState: row?.localState,
+      publicationState: row?.publicationState,
+    })), { localState: 'minted', publicationState: 'disabled' });
   }
-  assert.ok(!outbound.includes('LEGACY_RAW_TRACE_SENTINEL'));
 
-  const publishedHistory = await layerJson('history', '--json');
-  const publishedHistoryText = JSON.stringify(publishedHistory);
-  assert.match(publishedHistoryText, /published/);
-  const publishedEntry = publishedHistory.value.entries.find(
-    (entry) => entry.sessionId === shareOnSession.sessionId,
-  );
-  assert.equal(publishedEntry?.capturedAt, shareOnSession.capturedAt);
-  assert.equal(publishedEntry?.contributionState.status, 'published');
-  assert.equal(publishedEntry?.contributionState.anchorRef, 'ipfs://bafyStage1Published');
-  assert.ok(!publishedHistoryText.includes('SECRET_ACCEPTED_DIFF'));
-  await assert.rejects(
-    () => mineableStore.veto(result.shareOnRecordId),
-    /published and immutable/,
-  );
-
-  await mineableStore.append(candidate('stage1-veto-candidate'));
-  assert.equal((await mineableStore.get('stage1-veto-candidate'))?.publicationState, 'queued');
-  await mineableStore.veto('stage1-veto-candidate');
-  const uploadsBeforeVetoTick = uploads.length;
-  const vetoTick = await mineSessionEchoes(deps(successfulRunner(), { publish: true }));
-  assert.equal(vetoTick.discovered, 1);
-  assert.equal(vetoTick.admitted.length, 1, 'veto must not suppress useful local minting');
-  assert.equal(uploads.length, uploadsBeforeVetoTick);
-  assert.deepEqual(await mineableStore.get('stage1-veto-candidate').then((row) => ({
-    localState: row?.localState,
-    publicationState: row?.publicationState,
-  })), { localState: 'minted', publicationState: 'vetoed' });
-
-  await mineableStore.append(candidate('stage1-private-candidate'));
-  const privateChecks = [];
-  const privateTick = await mineSessionEchoes(deps(successfulRunner(), {
-    publish: true,
-    isPublic: async (repo) => {
-      privateChecks.push(repo);
-      return false;
-    },
-  }));
-  assert.deepEqual(privateChecks, [REPO]);
-  assert.match(privateTick.rejected[0]?.reason ?? '', /not public/);
-  assert.equal(uploads.length, uploadsBeforeVetoTick);
-  assert.deepEqual(await mineableStore.get('stage1-private-candidate').then((row) => ({
-    localState: row?.localState,
-    publicationState: row?.publicationState,
-  })), { localState: 'minted', publicationState: 'queued' });
-
-  await mineableStore.append(candidate('stage1-sidecar-absent'));
-  await mineSessionEchoes(deps(successfulRunner(), { publish: false }));
-  assert.deepEqual(await mineableStore.get('stage1-sidecar-absent').then((row) => ({
-    localState: row?.localState,
-    publicationState: row?.publicationState,
-  })), { localState: 'minted', publicationState: 'queued' });
-  assert.equal(uploads.length, uploadsBeforeVetoTick);
-
-  const contributionLedger = await layerJson('contribution', 'ledger', '--json');
-  const contributionLedgerText = JSON.stringify(contributionLedger);
-  assert.match(contributionLedgerText, /vetoed/);
-  assert.match(contributionLedgerText, /queued/);
-
-  const disabled = await layerJson('contribution', 'disable', '--json');
-  assert.equal(disabled.contractVersion, 1);
-  assert.equal(disabled.status, 'ok');
-  assert.equal((await mineableStore.get('stage1-private-candidate'))?.publicationState, 'disabled');
-  assert.equal((await mineableStore.get('stage1-sidecar-absent'))?.publicationState, 'disabled');
-  assert.equal((await mineableStore.get('stage1-veto-candidate'))?.publicationState, 'vetoed');
+  const parkedHistory = await layerJson('history', '--json');
+  assert.equal(parkedHistory.contractVersion, 1);
+  assert.equal(parkedHistory.status, 'degraded');
+  assert.match(parkedHistory.reason ?? '', /predate activity or eligibility/);
+  const parkedHistoryText = JSON.stringify(parkedHistory);
+  assert.doesNotMatch(parkedHistoryText, /preview-required|queued|published/);
+  for (const session of [targetSession, noResultSession]) {
+    const entry = parkedHistory.value.entries.find(
+      (candidateEntry) => candidateEntry.sessionId === session.sessionId,
+    );
+    assert.ok(entry);
+    assert.equal(entry.capturedAt, session.capturedAt);
+    assert.equal(entry.contributionState.status, 'minted');
+  }
+  assert.ok(!parkedHistoryText.includes('SECRET_ACCEPTED_DIFF'));
+  assert.ok(!parkedHistoryText.includes('SECRET_PRIVATE_FAILURE_DIFF'));
+  assert.ok(!parkedHistoryText.includes('SECRET_LOCAL_SKILL'));
+  assert.equal(uploads.length, 0);
 
   const legacy = await readFile(result.legacyPending, 'utf8');
   assert.equal(legacy, '{"raw":"LEGACY_RAW_TRACE_SENTINEL"}\n');

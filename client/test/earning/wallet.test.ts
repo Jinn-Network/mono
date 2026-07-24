@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { mnemonicToSeedSync } from '@scure/bip39';
 import {
   generateMnemonic,
   encryptMnemonic,
@@ -12,6 +13,16 @@ import {
 
 describe('HD wallet', () => {
   const TEST_PASSWORD = 'test-password';
+
+  it('produces the BIP39 known-vector seed for abandon…about (empty passphrase)', () => {
+    const mnemonic =
+      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+    // BIP39 test vector — empty passphrase; identical under @scure/bip39 v1.6.0 and v2.2.0
+    const expected =
+      '5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4';
+    const seed = mnemonicToSeedSync(mnemonic);
+    expect(Buffer.from(seed).toString('hex')).toBe(expected);
+  });
 
   it('generates a 12-word mnemonic', () => {
     const mnemonic = generateMnemonic();

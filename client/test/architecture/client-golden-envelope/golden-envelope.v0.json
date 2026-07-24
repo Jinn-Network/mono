@@ -1,0 +1,51 @@
+{
+  "schemaVersion": "jinn.execution.v1",
+  "solverType": "prediction.v0",
+  "role": "solution",
+  "generatedAt": 1750000000,
+  "task": {
+    "cid": "bafybeigoldenenvelopefixture0000000000000000000000000000000",
+    "onchainCreationTx": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "onchainCreationBlock": 1,
+    "requestId": "0x2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "participant": {
+    "safeAddress": "0x3333333333333333333333333333333333333333",
+    "agentEoa": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+  },
+  "window": {
+    "startTs": 1749999000,
+    "endTs": 1750000000
+  },
+  "executor": {
+    "implName": "golden-fixture",
+    "implVersion": "0.0.1",
+    "clientGitSha": "0000000000000000000000000000000000000000",
+    "codeDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "runtimeBundleDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "plugins": [],
+    "signingKey": {
+      "kind": "agent-eoa",
+      "pubkey": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    },
+    "mode": "frozen"
+  },
+  "evidenceTier": "self-signed",
+  "attestation": null,
+  "trajectory": null,
+  "artifacts": [],
+  "payload": {
+    "prediction": {
+      "probability": "0.5",
+      "submittedAt": 1750000000,
+      "modelId": "golden-fixture"
+    }
+  },
+  "distributionClass": "unknown",
+  "signature": {
+    "algo": "secp256k1",
+    "signer": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "hash": "0x7f5aad1db6c6bf1a18cd67c5855e9716f731a8d159ddc8677dbf7d1d0141dd91",
+    "sig": "0xcfd81ff25f0c444c17c73488d394b179afd522657e4b1a6a30d59e1626235f25011cc842d80481642269e515c7249ed2ed8ceb8fa83133905d6c969a5a8bf88f00"
+  }
+}

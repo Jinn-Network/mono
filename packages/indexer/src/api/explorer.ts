@@ -332,10 +332,26 @@ type VerdictTruthRow = {
 };
 
 function verdictEnvelopeJoinCondition() {
-  return and(
-    eq(schema.verdictEnvelopeMeta.requestId, schema.verdict.requestId),
-    eq(schema.verdictEnvelopeMeta.chainId, schema.verdict.chainId),
-  );
+  // verdictEnvelopeMeta is permissionless and shape-parsed. Even a sole row
+  // can copy every public authoritative tuple field, so an exact-one join is
+  // not authentication. Keep explorer truth on-chain-only until a canonical
+  // projection binds historical publisher Safe, signature/hash, and task facts.
+  return sql`false`;
+}
+
+/**
+ * Canonical attempt-envelope join.
+ *
+ * Unlike verdict metadata, AttemptEnvelopeMeta currently has no projected Safe
+ * address that can be compared with attempt.operator. Until an authenticated
+ * canonical projection exists, the only non-order-dependent policy is
+ * fail-closed: one request+chain candidate may enrich an authoritative attempt;
+ * two or more candidates leave it unenriched.
+ */
+function attemptEnvelopeJoinCondition() {
+  // As above, request/chain uniqueness cannot prove that the on-chain operator
+  // published or signed this projection.
+  return sql`false`;
 }
 
 /**
@@ -594,7 +610,8 @@ app.get('/network', async (c) => {
           pluginsJson: schema.attemptEnvelopeMeta.pluginsJson,
         })
         .from(schema.attemptEnvelopeMeta)
-        .where(eq(schema.attemptEnvelopeMeta.chainId, EXPLORER_CHAIN_ID)),
+        .innerJoin(schema.attempt, attemptEnvelopeJoinCondition())
+        .where(eq(schema.attempt.chainId, EXPLORER_CHAIN_ID)),
 
       // Total attempt count for enrichmentCoverage.share denominator — scoped to EXPLORER_CHAIN_ID.
       db
@@ -917,10 +934,7 @@ app.get('/solvernet/:cid', async (c) => {
             .from(schema.attemptEnvelopeMeta)
             .innerJoin(
               schema.attempt,
-              and(
-                eq(schema.attemptEnvelopeMeta.requestId, schema.attempt.requestId),
-                eq(schema.attempt.chainId, EXPLORER_CHAIN_ID),
-              ),
+              attemptEnvelopeJoinCondition(),
             )
             .where(
               and(
@@ -1020,10 +1034,7 @@ app.get('/solvernet/:cid', async (c) => {
               .from(schema.attemptEnvelopeMeta)
               .innerJoin(
                 schema.attempt,
-                and(
-                  eq(schema.attemptEnvelopeMeta.requestId, schema.attempt.requestId),
-                  eq(schema.attempt.chainId, EXPLORER_CHAIN_ID),
-                ),
+                attemptEnvelopeJoinCondition(),
               )
               .where(
                 and(
@@ -1455,10 +1466,11 @@ app.get('/operator/:addr', async (c) => {
             solverType: schema.attemptEnvelopeMeta.solverType,
           })
           .from(schema.attemptEnvelopeMeta)
+          .innerJoin(schema.attempt, attemptEnvelopeJoinCondition())
           .where(
             and(
               inArray(schema.attemptEnvelopeMeta.requestId, requestIds),
-              eq(schema.attemptEnvelopeMeta.chainId, EXPLORER_CHAIN_ID),
+              eq(schema.attempt.chainId, EXPLORER_CHAIN_ID),
             ),
           )
       : [];
@@ -1682,10 +1694,7 @@ app.get('/slice', async (c) => {
     )
     .leftJoin(
       schema.attemptEnvelopeMeta,
-      and(
-        eq(schema.attemptEnvelopeMeta.requestId, schema.attempt.requestId),
-        eq(schema.attemptEnvelopeMeta.chainId, schema.attempt.chainId),
-      ),
+      attemptEnvelopeJoinCondition(),
     )
     .where(
       and(
@@ -2196,8 +2205,7 @@ async function buildLeaderboardRows(
       .innerJoin(
         schema.attemptEnvelopeMeta,
         and(
-          eq(schema.attempt.requestId, schema.attemptEnvelopeMeta.requestId),
-          eq(schema.attemptEnvelopeMeta.chainId, EXPLORER_CHAIN_ID),
+          attemptEnvelopeJoinCondition(),
           eq(schema.attemptEnvelopeMeta.mode, mode),
         ),
       )
@@ -2325,10 +2333,7 @@ async function getDominantModeAndHarness(
     .from(schema.attempt)
     .innerJoin(
       schema.attemptEnvelopeMeta,
-      and(
-        eq(schema.attempt.requestId, schema.attemptEnvelopeMeta.requestId),
-        eq(schema.attemptEnvelopeMeta.chainId, EXPLORER_CHAIN_ID),
-      ),
+      attemptEnvelopeJoinCondition(),
     )
     .where(
       and(
@@ -2393,8 +2398,7 @@ async function buildLeaderboardRowsWithHarnessFilter(
 ): Promise<LeaderboardRow[]> {
   // Build the envelope filter conditions
   const envelopeConditions = [
-    eq(schema.attempt.requestId, schema.attemptEnvelopeMeta.requestId),
-    eq(schema.attemptEnvelopeMeta.chainId, EXPLORER_CHAIN_ID),
+    attemptEnvelopeJoinCondition(),
     eq(schema.attemptEnvelopeMeta.implName, harnessFilter),
     ...(modeFilter !== undefined ? [eq(schema.attemptEnvelopeMeta.mode, modeFilter)] : []),
   ];

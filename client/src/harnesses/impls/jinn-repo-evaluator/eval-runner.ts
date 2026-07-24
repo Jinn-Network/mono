@@ -25,7 +25,9 @@ import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { prepareRepro, PatchDoesNotApplyError } from './repro.js';
-import type { JinnRepoTask } from '../../../solver-types/jinn-repo.js';
+// Retrospective-only: grading needs `base_commit` + `test_cmd`, which only
+// the merged-pr branch carries (a live-issue task has no gold test_cmd).
+import type { JinnRepoMergedPrTask } from '../../../solver-types/jinn-repo.js';
 
 const sh = promisify(execFile);
 
@@ -45,7 +47,7 @@ function stripClientPrefix(arg: string): string {
 }
 
 export async function runJinnRepoEval(args: {
-  task: JinnRepoTask;
+  task: JinnRepoMergedPrTask;
   patch: string;
   monoRepoUrl: string;
   goldTests: Record<string, string>;

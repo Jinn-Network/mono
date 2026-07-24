@@ -105,36 +105,6 @@ export interface ServedArtifactMetadataRow {
   createdAt: string;
 }
 
-/** A backfilled derived-trajectory record (#1672). */
-export type DerivedTrajectoryOutcome = 'parsed' | 'no_transcript' | 'unavailable';
-
-export interface DerivedTrajectoryInput {
-  sourceSha256: string;
-  sourceEnvelopeCid?: string | null;
-  sourceRequestId?: string | null;
-  harness?: string | null;
-  outcome: DerivedTrajectoryOutcome;
-  spanCount: number;
-  trajectoryJson?: string | null;
-  parserName?: string | null;
-  parserVersion?: string | null;
-  createdAt: string;
-}
-
-export interface DerivedTrajectoryRow {
-  sourceSha256: string;
-  sourceEnvelopeCid: string | null;
-  sourceRequestId: string | null;
-  harness: string | null;
-  outcome: DerivedTrajectoryOutcome;
-  spanCount: number;
-  trajectoryJson: string | null;
-  parserName: string | null;
-  parserVersion: string | null;
-  publishedCid: string | null;
-  createdAt: string;
-}
-
 export type ArtifactAccessOutcome =
   | 'free_served'
   | 'payment_required'
@@ -241,10 +211,14 @@ export interface Erc8004AnchorInput {
   blockNumber: number | null;
   payloadHex: string;
   anchoredAt: number;
+  gasUsed?: string | null;
+  feeWei?: string | null;
 }
 
-export interface Erc8004AnchorRow extends Erc8004AnchorInput {
+export interface Erc8004AnchorRow extends Omit<Erc8004AnchorInput, 'gasUsed' | 'feeWei'> {
   id: number;
+  gasUsed: string | null;
+  feeWei: string | null;
 }
 
 export type TaskPostingPolicyType = 'once_per_safe' | 'once_per_bucket' | 'interval';
@@ -418,27 +392,6 @@ CREATE INDEX IF NOT EXISTS idx_served_artifacts_request ON served_artifacts (req
 CREATE INDEX IF NOT EXISTS idx_served_artifacts_envelope ON served_artifacts (envelope_cid);
 CREATE INDEX IF NOT EXISTS idx_served_artifacts_artifact_type ON served_artifacts (artifact_type);
 
--- Derived jinn.trajectory.v1 records backfilled from historical system_snapshot
--- transcripts (#1672). Keyed on the SOURCE snapshot sha256 (idempotency), NOT
--- the derived blob's own hash. Records no_transcript / unavailable skips too so
--- re-runs don't re-untar them. Stored unsigned/unscrubbed at rest (local only);
--- signing + layer-2 scrub happen only on the opt-in publish edge.
-CREATE TABLE IF NOT EXISTS derived_trajectories (
-  source_sha256       TEXT PRIMARY KEY,
-  source_envelope_cid TEXT,
-  source_request_id   TEXT,
-  harness             TEXT,
-  outcome             TEXT NOT NULL,
-  span_count          INTEGER NOT NULL DEFAULT 0,
-  trajectory_json     TEXT,
-  parser_name         TEXT,
-  parser_version      TEXT,
-  published_cid       TEXT,
-  created_at          TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_derived_trajectories_envelope ON derived_trajectories (source_envelope_cid);
-CREATE INDEX IF NOT EXISTS idx_derived_trajectories_outcome  ON derived_trajectories (outcome);
-
 CREATE TABLE IF NOT EXISTS artifact_access_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   sha256 TEXT NOT NULL,
@@ -535,10 +488,18 @@ CREATE TABLE IF NOT EXISTS erc8004_anchors (
   tx_hash TEXT NOT NULL,
   block_number INTEGER,
   payload_hex TEXT NOT NULL,
-  anchored_at INTEGER NOT NULL
+  anchored_at INTEGER NOT NULL,
+  gas_used TEXT,
+  fee_wei TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_erc8004_anchors_envelope_cid ON erc8004_anchors(envelope_cid);
 CREATE INDEX IF NOT EXISTS idx_erc8004_anchors_envelope_id ON erc8004_anchors(envelope_id);
+
+CREATE TABLE IF NOT EXISTS manifest_batch_journal (
+  batch_key TEXT PRIMARY KEY,
+  state_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 CREATE TABLE IF NOT EXISTS task_post_locks (
   creator_safe_address TEXT NOT NULL,
@@ -631,6 +592,8 @@ export class Store {
     this.ensureArtifactsTaskColumns();
     this.ensureRewardClaimsTxIndex();
     this.ensureNetworkArtifactsPeerCatalogId();
+    this.ensureErc8004AnchorGasColumns();
+    this.ensureErc8004AnchorFinalizationIndex();
     this.ensureTaskPostsTaskCoordinatorColumns();
     this.ensureEnvelopeProjectionColumns();
     this.ensureActivityEventCostColumns();
@@ -676,6 +639,41 @@ export class Store {
     this.db.exec(
       `CREATE INDEX IF NOT EXISTS idx_network_artifacts_peer_catalog ON network_artifacts (peer_catalog_id)`,
     );
+  }
+
+  /** Databases created before manifest batching do not have receipt cost telemetry. */
+  private ensureErc8004AnchorGasColumns(): void {
+    const cols = this.db.prepare(`PRAGMA table_info(erc8004_anchors)`).all() as Array<{ name: string }>;
+    const names = new Set(cols.map((c) => c.name));
+    if (!names.has('gas_used')) {
+      this.db.exec(`ALTER TABLE erc8004_anchors ADD COLUMN gas_used TEXT`);
+    }
+    if (!names.has('fee_wei')) {
+      this.db.exec(`ALTER TABLE erc8004_anchors ADD COLUMN fee_wei TEXT`);
+    }
+  }
+
+  /**
+   * Exact anchor finalization is idempotent across process crashes. Older
+   * databases may contain duplicates from the pre-journal path, so retain the
+   * first local receipt before adding the durable key.
+   */
+  private ensureErc8004AnchorFinalizationIndex(): void {
+    this.db.exec(`
+      DELETE FROM erc8004_anchors
+       WHERE id NOT IN (
+         SELECT MIN(id)
+           FROM erc8004_anchors
+          GROUP BY chain_id, identity_registry_address, metadata_key, tx_hash
+       );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_erc8004_anchors_finalization
+        ON erc8004_anchors (
+          chain_id,
+          identity_registry_address,
+          metadata_key,
+          tx_hash
+        );
+    `);
   }
 
   /** Fresh v1 state is Task-first; older local DBs get additive columns only. */
@@ -2173,37 +2171,21 @@ export class Store {
     };
   }
 
-  listServedArtifactMetadata(
-    filter: { artifactType?: string; limit?: number; before?: string; beforeSha256?: string } = {},
-  ): ServedArtifactMetadataRow[] {
+  listServedArtifactMetadata(filter: { artifactType?: string; limit?: number } = {}): ServedArtifactMetadataRow[] {
     const limit = Math.min(Math.max(1, filter.limit ?? 100), 500);
-    // `before` is a created_at cursor for a full paginated walk (#1672): pass
-    // the last row's createdAt to fetch the next DESC page past the 500 clamp.
-    // When `beforeSha256` is also supplied, page on the composite key
-    // (created_at, sha256) so rows sharing an exact created_at millisecond
-    // across a page boundary are never skipped (#1672). sha256 is the PK, so
-    // it is a total tiebreak; without it a strict `created_at < @before` drops
-    // every row at the boundary timestamp.
-    const conditions: string[] = [];
-    if (filter.artifactType) conditions.push('artifact_type = @artifactType');
-    if (filter.before && filter.beforeSha256) {
-      conditions.push(
-        '(created_at < @before OR (created_at = @before AND sha256 < @beforeSha256))',
-      );
-    } else if (filter.before) {
-      conditions.push('created_at < @before');
-    }
-    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-    const sql = `SELECT sha256, artifact_type, request_id, envelope_cid, content_size, price_usdc, created_at
+    const sql = filter.artifactType
+      ? `SELECT sha256, artifact_type, request_id, envelope_cid, content_size, price_usdc, created_at
          FROM served_artifacts
-         ${where}
-         ORDER BY created_at DESC, sha256 DESC
+         WHERE artifact_type = @artifactType
+         ORDER BY created_at DESC
+         LIMIT @limit`
+      : `SELECT sha256, artifact_type, request_id, envelope_cid, content_size, price_usdc, created_at
+         FROM served_artifacts
+         ORDER BY created_at DESC
          LIMIT @limit`;
     const rows = this.db.prepare(sql).all({
       limit,
       ...(filter.artifactType ? { artifactType: filter.artifactType } : {}),
-      ...(filter.before ? { before: filter.before } : {}),
-      ...(filter.before && filter.beforeSha256 ? { beforeSha256: filter.beforeSha256 } : {}),
     }) as Array<{
       sha256: string;
       artifact_type: string;
@@ -2222,76 +2204,6 @@ export class Store {
       priceUsdc: row.price_usdc,
       createdAt: row.created_at,
     }));
-  }
-
-  /** Idempotency probe: has this source snapshot already been backfilled? (#1672) */
-  hasDerivedTrajectory(sourceSha256: string): boolean {
-    const row = this.db
-      .prepare('SELECT 1 FROM derived_trajectories WHERE source_sha256 = ?')
-      .get(sourceSha256);
-    return row !== undefined;
-  }
-
-  saveDerivedTrajectory(input: DerivedTrajectoryInput): void {
-    this.db.prepare(
-      `INSERT OR REPLACE INTO derived_trajectories
-         (source_sha256, source_envelope_cid, source_request_id, harness, outcome,
-          span_count, trajectory_json, parser_name, parser_version, published_cid, created_at)
-       VALUES
-         (@sourceSha256, @sourceEnvelopeCid, @sourceRequestId, @harness, @outcome,
-          @spanCount, @trajectoryJson, @parserName, @parserVersion, NULL, @createdAt)`,
-    ).run({
-      sourceSha256: input.sourceSha256,
-      sourceEnvelopeCid: input.sourceEnvelopeCid ?? null,
-      sourceRequestId: input.sourceRequestId ?? null,
-      harness: input.harness ?? null,
-      outcome: input.outcome,
-      spanCount: input.spanCount,
-      trajectoryJson: input.trajectoryJson ?? null,
-      parserName: input.parserName ?? null,
-      parserVersion: input.parserVersion ?? null,
-      createdAt: input.createdAt,
-    });
-  }
-
-  getDerivedTrajectory(sourceSha256: string): DerivedTrajectoryRow | null {
-    const row = this.db.prepare(
-      `SELECT source_sha256, source_envelope_cid, source_request_id, harness, outcome,
-              span_count, trajectory_json, parser_name, parser_version, published_cid, created_at
-       FROM derived_trajectories WHERE source_sha256 = ?`,
-    ).get(sourceSha256) as {
-      source_sha256: string;
-      source_envelope_cid: string | null;
-      source_request_id: string | null;
-      harness: string | null;
-      outcome: DerivedTrajectoryOutcome;
-      span_count: number;
-      trajectory_json: string | null;
-      parser_name: string | null;
-      parser_version: string | null;
-      published_cid: string | null;
-      created_at: string;
-    } | undefined;
-    if (!row) return null;
-    return {
-      sourceSha256: row.source_sha256,
-      sourceEnvelopeCid: row.source_envelope_cid,
-      sourceRequestId: row.source_request_id,
-      harness: row.harness,
-      outcome: row.outcome,
-      spanCount: row.span_count,
-      trajectoryJson: row.trajectory_json,
-      parserName: row.parser_name,
-      parserVersion: row.parser_version,
-      publishedCid: row.published_cid,
-      createdAt: row.created_at,
-    };
-  }
-
-  setDerivedTrajectoryPublishedCid(sourceSha256: string, cid: string): void {
-    this.db
-      .prepare('UPDATE derived_trajectories SET published_cid = ? WHERE source_sha256 = ?')
-      .run(cid, sourceSha256);
   }
 
   recordArtifactAccessEvent(input: ArtifactAccessEventInput): void {
@@ -2967,14 +2879,14 @@ export class Store {
 
   saveErc8004Anchor(input: Erc8004AnchorInput): void {
     this.db.prepare(
-      `INSERT INTO erc8004_anchors
+      `INSERT OR IGNORE INTO erc8004_anchors
          (envelope_id, envelope_cid, content_kind, metadata_key, agent_id,
           chain_id, identity_registry_address, tx_hash, block_number,
-          payload_hex, anchored_at)
+          payload_hex, anchored_at, gas_used, fee_wei)
        VALUES
          (@envelopeId, @envelopeCid, @contentKind, @metadataKey, @agentId,
           @chainId, @identityRegistryAddress, @txHash, @blockNumber,
-          @payloadHex, @anchoredAt)`,
+          @payloadHex, @anchoredAt, @gasUsed, @feeWei)`,
     ).run({
       envelopeId: input.envelopeId,
       envelopeCid: input.envelopeCid,
@@ -2987,7 +2899,51 @@ export class Store {
       blockNumber: input.blockNumber,
       payloadHex: input.payloadHex,
       anchoredAt: input.anchoredAt,
+      gasUsed: input.gasUsed ?? null,
+      feeWei: input.feeWei ?? null,
     });
+  }
+
+  loadManifestBatchJournal(batchKey: string): string | null {
+    const row = this.db.prepare(
+      `SELECT state_json
+         FROM manifest_batch_journal
+        WHERE batch_key = ?`,
+    ).get(batchKey) as { state_json: string } | undefined;
+    return row?.state_json ?? null;
+  }
+
+  saveManifestBatchJournal(batchKey: string, stateJson: string): void {
+    this.db.prepare(
+      `INSERT INTO manifest_batch_journal (batch_key, state_json, updated_at)
+       VALUES (@batchKey, @stateJson, datetime('now'))
+       ON CONFLICT(batch_key) DO UPDATE SET
+         state_json = excluded.state_json,
+         updated_at = excluded.updated_at`,
+    ).run({ batchKey, stateJson });
+  }
+
+  compareAndSwapManifestBatchJournal(
+    batchKey: string,
+    expectedStateJson: string | null,
+    nextStateJson: string,
+  ): boolean {
+    if (expectedStateJson === null) {
+      const result = this.db.prepare(
+        `INSERT INTO manifest_batch_journal (batch_key, state_json, updated_at)
+         VALUES (@batchKey, @nextStateJson, datetime('now'))
+         ON CONFLICT(batch_key) DO NOTHING`,
+      ).run({ batchKey, nextStateJson });
+      return result.changes === 1;
+    }
+    const result = this.db.prepare(
+      `UPDATE manifest_batch_journal
+          SET state_json = @nextStateJson,
+              updated_at = datetime('now')
+        WHERE batch_key = @batchKey
+          AND state_json = @expectedStateJson`,
+    ).run({ batchKey, expectedStateJson, nextStateJson });
+    return result.changes === 1;
   }
 
   listErc8004AnchorsByEnvelopeCids(envelopeCids: readonly string[]): Erc8004AnchorRow[] {
@@ -2998,7 +2954,7 @@ export class Store {
     const rows = this.db.prepare(
       `SELECT id, envelope_id, envelope_cid, content_kind, metadata_key, agent_id,
               chain_id, identity_registry_address, tx_hash, block_number,
-              payload_hex, anchored_at
+              payload_hex, anchored_at, gas_used, fee_wei
          FROM erc8004_anchors
          WHERE envelope_cid IN (${placeholders})
          ORDER BY anchored_at ASC, id ASC`,
@@ -3015,6 +2971,8 @@ export class Store {
       block_number: number | null;
       payload_hex: string;
       anchored_at: number;
+      gas_used: string | null;
+      fee_wei: string | null;
     }>;
     return rows.map((r) => ({
       id: r.id,
@@ -3029,6 +2987,8 @@ export class Store {
       blockNumber: r.block_number,
       payloadHex: r.payload_hex,
       anchoredAt: r.anchored_at,
+      gasUsed: r.gas_used,
+      feeWei: r.fee_wei,
     }));
   }
 

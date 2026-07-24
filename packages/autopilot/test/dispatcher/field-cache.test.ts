@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
+  ensureFieldIds,
   fetchFieldIds,
   getFieldCache,
   isStaleFieldError,
@@ -350,5 +351,21 @@ describe('field-cache', () => {
     expect(second.status.fieldId).toBe('PVTSSF_STATUS_FIELD_ID_NEW');
     expect(second.status.options['In Progress']).toBe('opt_in_progress_NEW');
     expect(getFieldCache()).toBe(second);
+  });
+});
+
+describe('ensureFieldIds', () => {
+  it('fetches once, then serves the module cache without re-running field-list', async () => {
+    resetFieldCache();
+    const calls: string[][] = [];
+    const runner: CommandRunner = async (cmd, args) => {
+      calls.push([cmd, ...args]);
+      return FIELD_LIST_JSON;
+    };
+    const first = await ensureFieldIds(runner);
+    const second = await ensureFieldIds(runner);
+    expect(first).toBe(second);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain('field-list');
   });
 });

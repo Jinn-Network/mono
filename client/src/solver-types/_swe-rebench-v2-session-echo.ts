@@ -12,8 +12,8 @@
 
 import {
   mineableTraceRecordFromStored,
-  type MineableTraceStore,
 } from './_swe-rebench-v2-mineable-store.js';
+import type { MineableTraceStorePort } from './_swe-rebench-v2-mineable-store-port.js';
 import type { PoolTask } from './_swe-rebench-v2-pool.js';
 import type { HarvestTickResult } from '../daemon/harvest-loop.js';
 
@@ -46,7 +46,7 @@ import { uploadToIpfs } from '../adapters/mech/ipfs.js';
 import { EVAL_SEMANTICS_VERSION } from './_swe-rebench-v2-validated-pool.js';
 
 export interface SessionEchoMintDeps extends HarvestMintDeps {
-  mineableStore: MineableTraceStore;
+  mineableStore: MineableTraceStorePort;
   /** Recording operator's Safe — stamped into provenance as `sourceSolverSafe`
    *  so `syntheticClaimBlocked` refuses that operator's own claim (§7). */
   operatorSafe?: string;
@@ -55,7 +55,12 @@ export interface SessionEchoMintDeps extends HarvestMintDeps {
    *  install config, test framework) the echo borrows. Plays no role in
    *  naming or provenance. */
   pool: PoolTask[];
+  /** Max session-echo records processed per harvest tick (sibling of
+   *  `harvest.limitPerRepo`). Unprocessed backlog remains for later ticks. */
+  limitPerTick?: number;
 }
+
+const DEFAULT_LIMIT_PER_TICK = 3;
 
 export async function mineSessionEchoes(deps: SessionEchoMintDeps): Promise<SessionEchoTickResult> {
   const scorableIds = await deps.validatedStore.getScorableIds(EVAL_SEMANTICS_VERSION);
@@ -71,14 +76,14 @@ export async function mineSessionEchoes(deps: SessionEchoMintDeps): Promise<Sess
     record.localState === 'recorded' ||
     (Boolean(deps.publish) && record.localState === 'minted' && record.publicationState === 'queued'),
   );
-  const records = pending.map(mineableTraceRecordFromStored);
+  const limitPerTick = deps.limitPerTick ?? DEFAULT_LIMIT_PER_TICK;
+  const batch = pending.slice(0, limitPerTick);
   const denylist = loadMintRepoDenylist();
   const admitted: string[] = [];
   const rejected: Array<{ instance_id: string; reason: string }> = [];
 
-  for (const record of records) {
-    const stored = pending.find((candidate) => candidate.recordId === record.sourceId);
-    if (!stored) continue;
+  for (const stored of batch) {
+    const record = mineableTraceRecordFromStored(stored);
     const provisionalId = sessionEchoInstanceId(record.repo, record.sourceId);
 
     const rejectAndFinish = async (reason: string): Promise<void> => {
@@ -242,5 +247,5 @@ export async function mineSessionEchoes(deps: SessionEchoMintDeps): Promise<Sess
     }
   }
 
-  return { discovered: records.length, admitted, rejected, skipped: [] };
+  return { discovered: batch.length, admitted, rejected, skipped: [] };
 }

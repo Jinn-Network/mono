@@ -2,10 +2,16 @@ name: CI
 
 on:
   pull_request:
-    paths: ['client/**']
+    paths:
+      - 'client/**'
+      - 'packages/core/**'
+      - 'packages/plugin/**'
   push:
     branches: [main]
-    paths: ['client/**']
+    paths:
+      - 'client/**'
+      - 'packages/core/**'
+      - 'packages/plugin/**'
   # Manual trigger for the soft-gate e2e jobs (task-creator-marketplace-e2e).
   # Deliberately NOT wired to `schedule:` — a cron trigger on this workflow
   # would run every other job nightly too; dispatch keeps the soft gate
@@ -61,38 +67,14 @@ jobs:
       - run: yarn install --immutable
       - run: yarn build
 
-      # Pack the artifact exactly as it would be published
-      - run: yarn pack -o jinn-client.tgz
+      # Exercise the npm-shaped artifact and its vendored private runtime,
+      # including client-only public imports and a native-SQLite reindex from
+      # an isolated install, then retain that exact smoke-validated archive.
+      - run: node scripts/smoke-test-pack.mjs --output jinn-client.tgz
 
-      # Install the packed tarball in a clean temp dir and run smoke tests
-      # against the packaged artifact, NOT the source tree
-      - name: Smoke test packed artifact
-        working-directory: /tmp
-        run: |
-          mkdir smoke && cd smoke
-          npm init -y
-          npm install $GITHUB_WORKSPACE/client/jinn-client.tgz
-
-          # version must emit valid JSON with schemaVersion
-          OUTPUT=$(npm exec -- jinn version --json 2>/dev/null || true)
-          echo "$OUTPUT" | node -e "
-            const d = JSON.parse(require('fs').readFileSync(0, 'utf8'));
-            if (d.schemaVersion !== 1) { process.exit(1); }
-            console.log('✓ jinn version: schema OK, v' + d.client.version);
-          "
-
-          # --help must exit 0
-          npm exec -- jinn --help > /dev/null
-          echo "✓ jinn --help: exit 0"
-
-          # doctor may fail (no keystore) but must not crash with code 50
-          EXIT=0
-          npm exec -- jinn doctor --json 2>/dev/null || EXIT=$?
-          if [ "$EXIT" -eq 50 ]; then
-            echo "✗ jinn doctor crashed with fatal error (exit 50)"
-            exit 1
-          fi
-          echo "✓ jinn doctor: no crash (exit $EXIT)"
+      # Exercise the installed declaration graph and startup-reachable private
+      # runtime seam independently.
+      - run: yarn pack:smoke:private-runtime
 
       # Verify tarball contents — only expected files shipped
       - name: Verify tarball contents

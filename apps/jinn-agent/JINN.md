@@ -1,9 +1,12 @@
 # jinn-agent — the Jinn harness
 
 **jinn-agent** is an open coding harness plugged into the Jinn network: it
-reads from the public corpus, and (with consent) contributes scrubbed task
-traces back to it. The product name is `jinn-agent`, everywhere a human
-looks; this repository is technically a thin fork of an upstream agent core
+reads relevant evidence from the public corpus, captures complete sessions
+locally, and distills local knowledge for reuse. Stage-2 contribution is
+parked: nothing derived from user work leaves the machine, regardless of any
+retained Stage-1 consent file. The product name is `jinn-agent`, everywhere a
+human looks; this repository is technically a thin fork of an upstream agent
+core
 ([NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent))
 — that name is provenance, not product, and no user-facing surface should
 use it. Spec: `spec/2026-07-02-jinn-harness-network.md` in
@@ -17,15 +20,10 @@ issue #1312.
 bin/jinn-agent        # start the harness
 ```
 
-In-session: `/jinn consent` to decide about contributing (default: decline —
-reader only), `/corpus <query>` to search the network's knowledge,
-`/jinn ledger` for the receipt trail of anything that left your machine.
-
-First run: `jinn-agent onboarding` walks the core loop once, one confirmed
-step at a time — consent → your first publish → rewards → corpus signals.
-It is remembered per machine and never repeats (a returning operator with
-consent recorded and a non-empty ledger sees nothing); `jinn-agent
-onboarding --replay` re-shows all four screens without re-asking consent.
+In-session: `/corpus <query>` searches network knowledge; `/jinn status`,
+`/jinn session`, and `/jinn history` make the local lifecycle visible; `/jinn
+distill` manages local learning. There is no contribution setup step in Stage
+2 because outbound publication is structurally disabled.
 
 ## Coexists with a stock upstream install
 
@@ -50,22 +48,26 @@ Provider keys go in the jinn-agent home on first run (`~/.jinn-agent/.env`).
 
 The Jinn layer also ships as a standalone **plugin** (`plugins/jinn/`) that
 installs into an *unmodified* upstream Hermes — the user keeps their harness and
-gains corpus reads, skill install, and consent-gated contribution. It is the
+gains corpus evidence, local session capture, and local distillation. It is the
 **same artifact** the fork loads from its bundled path; the plugin is never
-forked per harness.
+forked per harness and its Stage-2 outbound lane remains parked in either host.
 
 ```bash
-pip install "git+https://github.com/Jinn-Network/jinn-agent#subdirectory=plugins/jinn"
-hermes plugins enable jinn
+hermes plugins install Jinn-Network/jinn-plugin
 ```
+
+Answer `y` at Hermes's enable prompt, then verify the install with
+`hermes jinn-doctor`.
 
 The plugin feature-detects its host (never fork-detects): it imports nothing
 fork-only, writes only under `$HERMES_HOME`, and resolves its harness identity
 from `JINN_HARNESS_NAME` — the fork's `bin/jinn-agent` sets it; unset (a stock
-host) it honestly reports `hermes-agent`, so nothing published or displayed
-claims the user runs jinn-agent when they do not. All scrubbing / publishing /
-anchoring / corpus-read logic stays in the `jinn-layer` CLI; the plugin is a
-thin adapter. Details: [`plugins/jinn/README.md`](plugins/jinn/README.md).
+host) it honestly reports `hermes-agent`. Corpus access, local capture,
+scrubbing, and distillation stay behind the Jinn layer boundary; the plugin is
+a thin adapter. The plugin install carries that layer and
+`hermes plugins update jinn` refreshes both. Details:
+[`plugins/jinn/README.md`](plugins/jinn/README.md), including disable, removal,
+backup, and full local-state purge.
 
 ## What the Jinn layer adds — one integration surface
 
@@ -88,10 +90,10 @@ Every other upstream file is unmodified.
 | Path | What it is |
 |---|---|
 | `bin/jinn-agent`, `setup.sh` | The human-facing entrypoints (run + one-time setup) |
-| `plugins/jinn/` | The integration surface: first-run consent flow, capture buffer + payload-agnostic pickup, `jinn-layer` subprocess wrapper, agent tools, `/jinn` + `/corpus` slash commands |
+| `plugins/jinn/` | The integration surface: capture buffer + evidence pickup, Jinn layer subprocess wrapper, agent tools, `/jinn` + `/corpus` slash commands, and the fail-closed parked publication boundary |
 | `plugins/jinn/skin/jinn.yaml` | The jinn-agent skin (branding strings + banner art); installed to `$HERMES_HOME/skins/` by `bin/jinn-agent`, defaulted for fresh installs, never overwrites an explicit skin choice |
 | `plugins/jinn/soul/SOUL.md` | The jinn-agent identity template (mono#1386) — the upstream default soul with the identity sentence rewritten; installed to `$HERMES_HOME/SOUL.md` by `bin/jinn-agent` ONLY when SOUL.md is absent. An existing soul (user-written or previously seeded) is never overwritten — unlike the skin sync |
-| `tests/plugins/test_jinn_plugin.py` | Consent-gating integration tests |
+| `tests/plugins/test_jinn_plugin.py` | Plugin lifecycle and fail-closed privacy integration tests |
 | `tests/plugins/test_jinn_branding.py` | Runtime-branding regression tests (mono#1358) — first screen says jinn-agent, no upstream brand words in default session chrome |
 | `JINN.md` | This document |
 
@@ -113,56 +115,39 @@ off the default cold-start path or explicit-invocation-only; owning the
 `cli.py` / `hermes_cli/main.py` argparse and help surfaces for them would
 violate thin-fork discipline.
 
-Everything that touches scrubbing, consent conversion, publishing, anchoring,
-the ledger or the corpus lives in the **`@jinn-network/harness-layer`
-package** (the `jinn-layer` CLI from `@jinn-network/client`), not in fork
-code. The plugin shells out to it. That is the thin-fork discipline: the same
-layer becomes the plugin for other harnesses, and upstream merges stay cheap.
+Corpus access, canonical evidence persistence, scrubbing, and local
+distillation live behind the Jinn layer package rather than in fork code. The
+plugin consumes its stable process contract. Retained outbound machinery is
+quarantined behind an unconditional disabled boundary in Stage 2; retained
+consent values do not cross it. That is the thin-fork discipline: the same
+layer serves other harnesses, and upstream merges stay cheap.
 
 ## Behaviour
 
-- **Consent is OFF by default.** `unset` and `declined` both mean: nothing is
-  buffered, nothing is written, nothing leaves the machine. The harness works
-  fully as a corpus **reader** either way. Run `/jinn consent` to decide; the
-  flow's safe default (bare Enter) is decline.
-- **Capture is harness task traces only** — the plugin buffers the session's
-  first user message and its tool calls, never anything outside a task.
-- **Scrub is fail-closed and happens locally** inside `jinn-layer` before
-  anything can publish. If scrubbing can't finish, nothing sends.
-- **Preview-gated first publish**: after accepting, nothing publishes until
-  you run `/jinn preview` once and see the exact outgoing envelope.
-- **Per-task veto**: `/jinn veto` withholds the current task; the ledger
-  records `vetoed (local only)`.
-- **Publish failure retains locally**: the assembled trace stays under
-  `$HERMES_HOME/jinn/pending/` and the ledger/UI shows
-  `publish failed — retained locally`.
-- `/jinn ledger` — what left this machine, with anchor links.
-- `/corpus <query>` — in-session corpus search.
-- **Payload-agnostic auto-pickup** — at task start the harness derives the
-  task's distribution, looks up the corpus, and decides per candidate by
-  **verification tier, not human keystroke**: payloads at or above the
-  configured threshold (default `evaluator-verified`) are adopted
-  automatically — verification under bond is the trust gate; anything below
-  is surfaced to the agent as injected context, install stays deliberate.
-  Adopters are a registry keyed by payload type (`skill` ships in v0;
-  loadout recommendations and full loadouts plug in as new adopters — same
-  rail, richer payloads). Config: `$HERMES_HOME/jinn/pickup.json`
-  (`enabled`, `autoAdoptTier`, `maxCandidates`). Fails open; never
-  consent-gated (consuming is always allowed). Today's corpus holds nothing
-  verified, so today this runs suggest-only — honestly.
-- **Agent tools `corpus_search` / `corpus_fetch`** — the agent itself can
-  search the corpus by content and read a record's full text mid-task
-  (hash-verified), with or without installing anything.
-- **`/jinn skills install <ref>`** — install a corpus-published skill into
-  Hermes's native skills: `corpus get` → sha256 verification → SKILL.md
-  written to `$HERMES_HOME/skills/<slug>/`; Hermes's loader takes over.
-  Consuming is always allowed — no consent needed to install (consent gates
-  contributing, never reading). `/jinn skills list` / `uninstall <slug>`
-  manage jinn-installed skills only (a `.jinn-ref` marker fences them; a
-  user's own skills are never touched).
+- **Corpus evidence on the first turn.** The plugin derives bounded search
+  terms from the user's task and repository, excludes non-retrieval content,
+  fetches canonical evidence, and visibly labels anything it supplies. Finding
+  no relevant result is an honest, non-blocking outcome.
+- **Explicit corpus access.** `/corpus <query>` searches in-session.
+  `corpus_search` and `corpus_fetch` let the agent inspect hash-verified
+  evidence mid-task.
+- **One Hermes session becomes one canonical local episode.** Foreground user,
+  assistant, and tool activity accumulates until the host's true session
+  finalization boundary.
+- **Local learning remains live.** `/jinn distill` controls distillation of
+  local episodes. `/jinn session`, `/jinn history`, and `/jinn status` expose
+  current and finalized state.
+- **Contribution is parked.** A local candidate may be retained for future
+  use, but nothing leaves this machine. The plugin forces publication disabled
+  at registration and session start, independent of old consent or queued
+  state. The splash and `/jinn status` state this explicitly.
+- **Failure is additive.** Missing corpus or layer services degrade Jinn's
+  additions without disabling the underlying harness; local fallback capture
+  preserves the episode where possible.
 
-Requires the `jinn-layer` CLI on PATH (`npm install -g @jinn-network/client`)
-or `JINN_LAYER_BIN` pointing at it. Testnet in v0.
+The plugin install carries the required Jinn layer. `JINN_LAYER_BIN` remains a
+developer override for a local build. Stage 2 is testnet-only and local-only on
+the outbound side.
 
 ## Upstream-merge procedure (the thin-fork proof)
 

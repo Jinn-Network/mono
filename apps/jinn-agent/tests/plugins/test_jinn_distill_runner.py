@@ -122,6 +122,22 @@ def test_stop_run_signals_the_pid_and_archives_as_stopped(monkeypatch):
     assert archived["outcome"] == "stopped"
 
 
+def test_stop_run_with_dead_pid_does_not_signal(monkeypatch):
+    spawn = SpawnSpy()
+    monkeypatch.setattr(distill, "_pid_alive", lambda pid: True)
+    distill.start_run(spawn=spawn)
+    monkeypatch.setattr(distill, "_pid_alive", lambda pid: False)
+    killed: list[tuple[int, int]] = []
+    monkeypatch.setattr(distill.os, "kill", lambda pid, sig: killed.append((pid, sig)))
+
+    msg = distill.stop_run()
+    assert killed == []
+    assert "no distillation" in msg.lower()
+    assert not (distill.state_dir() / "current.json").exists()
+    archived = json.loads((distill.state_dir() / "last-run.json").read_text())
+    assert archived["outcome"] == "died"
+
+
 # ── event drain → ◇ lines ────────────────────────────────────────────────────
 
 
@@ -190,6 +206,42 @@ def test_lines_are_throttled_per_event_type(monkeypatch):
     distill._drain_events(state)
     staged_lines = [l for l in printed if "staged" in l]
     assert len(staged_lines) == 2
+
+
+def test_drain_preserves_partial_ndjson_line_for_next_poll(monkeypatch):
+    clock = [1000.0]
+    spawn = SpawnSpy()
+    monkeypatch.setattr(distill, "_pid_alive", lambda pid: True)
+    distill.start_run(spawn=spawn)
+    events_path = Path(json.loads((distill.state_dir() / "current.json").read_text())["eventsPath"])
+
+    full_line = ev(
+        "run_end",
+        outcome="ok",
+        clusterCount=1,
+        published=["skill-a"],
+        rejectedCount=0,
+        errorCount=0,
+        installed=[],
+    ) + "\n"
+    partial = full_line[:20]
+    events_path.write_bytes(partial.encode("utf-8"))
+
+    printed: list[str] = []
+    state = distill._watch_state(sink=printed.append, now_fn=lambda: clock[0])
+
+    done = distill._drain_events(state)
+    assert not done
+    assert printed == []
+    assert state["offset"] == 0
+
+    with events_path.open("ab") as handle:
+        handle.write(full_line[len(partial) :].encode("utf-8"))
+
+    done = distill._drain_events(state)
+    assert done
+    assert any("done" in line for line in printed), printed
+    assert json.loads((distill.state_dir() / "last-run.json").read_text())["outcome"] == "ok"
 
 
 def test_dead_pid_without_run_end_archives_as_died(monkeypatch):

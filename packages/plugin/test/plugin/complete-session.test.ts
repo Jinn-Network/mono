@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createJinnPlugin,
+  degraded,
   unavailable,
   type CompleteSessionInput,
   type ContributionCandidateV1,
@@ -18,6 +19,12 @@ import {
 import { makeSampleEpisode } from '../_fixtures/episode.js';
 
 const ACTIVITY = {
+  retrievalFired: true,
+  eligibleRefs: ['knowledge/fetched-1'] as string[],
+  deliveredRefs: [] as string[],
+  deliveryMode: 'withheld' as const,
+  searchedTerms: [] as string[],
+  providedRefs: [] as string[],
   surfacedRefs: ['knowledge/surfaced-1'],
   fetchedRefs: ['knowledge/fetched-1'],
   installedSkillRefs: ['skills/tdd@1'],
@@ -61,6 +68,38 @@ async function invoke(plugin: JinnPlugin, input: CompleteSessionInput) {
 }
 
 describe('JinnPlugin.completeSession()', () => {
+  it('persists host-internal evidence but rejects its contribution candidate', async () => {
+    const evidence = new InMemoryEvidencePort();
+    const contribution = new InMemoryContributionPort();
+    const episode = makeSampleEpisode({
+      episodeId: 'episode-complete',
+      session: {
+        sessionId: 'child-session',
+        capturedAt: '2026-07-15T11:59:00.000Z',
+        kind: 'host-internal',
+        parentSessionId: 'parent-session',
+      },
+      origin: { writer: 'hermes', build: '0.1.0' },
+    });
+
+    const result = await invoke(pluginWith(evidence, contribution), {
+      contractVersion: 1,
+      episode,
+      activity: ACTIVITY,
+      eligibilityInputs: { publicRepo: true, acceptedDiff: true },
+      contributionCandidate: candidate(),
+    });
+
+    expect(result?.persistence.status).toBe('ok');
+    expect(result?.contribution).toEqual({
+      status: 'unavailable',
+      reason: 'host-internal sessions cannot create contribution candidates',
+    });
+    expect((await contribution.ledger())).toEqual({ status: 'ok', value: [] });
+    const stored = await evidence.get('episode-complete');
+    expect(stored.status === 'ok' ? stored.value : null).not.toHaveProperty('contributionCandidate');
+  });
+
   it('augments an already-captured episode without changing captured identity or provenance', async () => {
     const episode = makeSampleEpisode({
       episodeId: 'episode-complete',
@@ -92,22 +131,56 @@ describe('JinnPlugin.completeSession()', () => {
         status: 'recorded',
       },
     });
-    expect(result.summary.surfacedRefs).toEqual(ACTIVITY.surfacedRefs);
-    expect(result.summary.fetchedRefs).toEqual(ACTIVITY.fetchedRefs);
-
     const stored = await evidence.get('episode-complete');
     expect(stored.status).toBe('ok');
     if (stored.status !== 'ok' || !stored.value) return;
     expect(stored.value.episodeId).toBe(original.episodeId);
-    expect(stored.value.session).toEqual(original.session);
+    expect(stored.value.session).toEqual({ ...original.session, kind: 'user' });
+    expect(stored.value.origin).toEqual({
+      writer: original.environment.harness.name,
+      build: original.environment.harness.version,
+    });
     expect(stored.value.trajectory).toEqual(original.trajectory);
     expect(stored.value.provenance).toBe(original.provenance);
     expect(stored.value.activity).toEqual(ACTIVITY);
     expect(stored.value.eligibility).toEqual(result.eligibility);
+    expect(stored.value.contributionCandidate).toEqual(candidate());
 
     if (result.contribution?.status === 'ok') {
       expect(contribution.getCandidate(result.contribution.value.recordId)).toEqual(candidate());
     }
+  });
+
+  it('retains current contribution fields from a forward-additive embedded candidate', async () => {
+    const evidence = new InMemoryEvidencePort();
+    const contribution = new InMemoryContributionPort();
+    const current = candidate();
+    const episode = {
+      ...makeSampleEpisode({ episodeId: 'episode-complete' }),
+      contributionCandidate: {
+        ...current,
+        futurePolicyFact: { version: 2 },
+        testRuns: current.testRuns.map((run) => ({
+          ...run,
+          futureReceipt: 'receipt-v2',
+        })),
+      },
+    } as CompleteSessionInput['episode'];
+
+    const result = await invoke(pluginWith(evidence, contribution), {
+      contractVersion: 1,
+      episode,
+      activity: ACTIVITY,
+      eligibilityInputs: { publicRepo: true, acceptedDiff: true },
+    });
+    if (!result) return;
+
+    expect(result.contribution?.status).toBe('ok');
+    expect(contribution.getCandidate('record-1')).toEqual(current);
+    const stored = await evidence.get('episode-complete');
+    expect(stored.status).toBe('ok');
+    expect(stored.status === 'ok' ? stored.value?.contributionCandidate : undefined)
+      .toEqual(current);
   });
 
   it('persists evidence when contribution recording is unavailable', async () => {
@@ -137,7 +210,7 @@ describe('JinnPlugin.completeSession()', () => {
     expect((await evidence.get('episode-complete')).status).toBe('ok');
   });
 
-  it('records the candidate when evidence persistence is unavailable', async () => {
+  it('does not create a dangling contribution reference when evidence persistence is unavailable', async () => {
     const contribution = new InMemoryContributionPort();
     const evidence: EvidencePort = {
       async put() { return unavailable('evidence store offline'); },
@@ -158,10 +231,68 @@ describe('JinnPlugin.completeSession()', () => {
     if (!result) return;
 
     expect(result.persistence).toEqual({ status: 'unavailable', reason: 'evidence store offline' });
-    expect(result.contribution?.status).toBe('ok');
-    if (result.contribution?.status === 'ok') {
-      expect(contribution.getCandidate(result.contribution.value.recordId)).toEqual(candidate());
-    }
+    expect(result.contribution).toEqual({
+      status: 'unavailable',
+      reason: 'contribution reference not recorded because canonical episode persistence was not confirmed',
+    });
+    expect(await contribution.ledger()).toEqual({ status: 'ok', value: [] });
+  });
+
+  it('does not create a reference for degraded persistence without a confirmed episode id', async () => {
+    const contribution = new InMemoryContributionPort();
+    const evidence: EvidencePort = {
+      async put() { return degraded('index refresh failed'); },
+      async get() { return { status: 'ok', value: null }; },
+      async list() { return { status: 'ok', value: [] }; },
+      async retention() {
+        return { status: 'ok', value: { policy: 'local-private', maxEpisodes: 200 } };
+      },
+    };
+
+    const result = await invoke(pluginWith(evidence, contribution), {
+      contractVersion: 1,
+      episode: makeSampleEpisode({ episodeId: 'episode-complete' }),
+      activity: ACTIVITY,
+      eligibilityInputs: { publicRepo: true, acceptedDiff: true },
+      contributionCandidate: candidate(),
+    });
+
+    expect(result?.contribution).toEqual({
+      status: 'unavailable',
+      reason: 'contribution reference not recorded because canonical episode persistence was not confirmed',
+    });
+    expect(await contribution.ledger()).toEqual({ status: 'ok', value: [] });
+  });
+
+  it('records a reference after degraded persistence confirms the matching episode id', async () => {
+    const contribution = new InMemoryContributionPort();
+    const evidence: EvidencePort = {
+      async put(episode) {
+        expect(episode.contributionCandidate).toEqual(candidate());
+        return degraded('derived index refresh failed', { episodeId: episode.episodeId });
+      },
+      async get() { return { status: 'ok', value: null }; },
+      async list() { return { status: 'ok', value: [] }; },
+      async retention() {
+        return { status: 'ok', value: { policy: 'local-private', maxEpisodes: 200 } };
+      },
+    };
+
+    const result = await invoke(pluginWith(evidence, contribution), {
+      contractVersion: 1,
+      episode: makeSampleEpisode({ episodeId: 'episode-complete' }),
+      activity: ACTIVITY,
+      eligibilityInputs: { publicRepo: true, acceptedDiff: true },
+      contributionCandidate: candidate(),
+    });
+
+    expect(result?.persistence).toEqual({
+      status: 'degraded',
+      reason: 'derived index refresh failed',
+      value: { episodeId: 'episode-complete' },
+    });
+    expect(result?.contribution?.status).toBe('ok');
+    expect((await contribution.ledger()).status).toBe('ok');
   });
 
   it('keeps a recorded candidate when its immediate status projection is unavailable', async () => {
@@ -208,7 +339,9 @@ describe('JinnPlugin.completeSession()', () => {
       reason: 'contribution candidate sourceId must match episodeId',
     });
     expect((await contribution.ledger())).toEqual({ status: 'ok', value: [] });
-    expect((await evidence.get('episode-complete')).status).toBe('ok');
+    const stored = await evidence.get('episode-complete');
+    expect(stored.status).toBe('ok');
+    expect(stored.status === 'ok' ? stored.value : null).not.toHaveProperty('contributionCandidate');
   });
 
   it('records a candidate before applying a per-task veto', async () => {

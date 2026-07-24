@@ -39,6 +39,7 @@ import {
   solverView,
   type JinnRepoPoolItem,
 } from './_jinn-repo-pool.js';
+import { resolvePostingWindowMs } from './_jinn-repo-posting-window.js';
 import { loadHeldOutSlate } from './_swe-rebench-v2-held-out-slate.js';
 
 const SOLVER_TYPE = 'jinn-repo.v1';
@@ -47,8 +48,6 @@ const CONTRACT_VERSION = 'v1';
 
 const DEFAULT_MAX_PER_TICK = 5;
 const DEFAULT_TARGET_SUCCESSES_PER_INSTANCE = 1;
-/** On-chain claim-window deadline applied to each posted Task. */
-const DEFAULT_POSTING_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 
 const STATE_SCHEMA_VERSION = 'jinn-repo-generator-state.v1' as const;
 
@@ -67,6 +66,8 @@ export interface JinnRepoGeneratorConfig {
   targetSuccessesPerInstance?: number;
   /** Inject the pool directly (tests); bypasses `poolPath`. */
   loadPool?: () => JinnRepoPoolItem[];
+  /** Solve / posting window duration in ms (default: six hours). */
+  postingWindowMs?: number;
 }
 
 interface PostedCounters {
@@ -143,6 +144,7 @@ export function makeJinnRepoGenerator(config: JinnRepoGeneratorConfig): TaskGene
   const maxPerTick = config.maxPerTick ?? DEFAULT_MAX_PER_TICK;
   const target = config.targetSuccessesPerInstance ?? DEFAULT_TARGET_SUCCESSES_PER_INSTANCE;
   const slateVersion = config.slateVersion ?? 'v1';
+  const postingWindowMs = resolvePostingWindowMs(config.postingWindowMs);
   const warnedRef = { slate: false };
   const claimPolicy = jinnRepoClaimPolicy();
 
@@ -161,7 +163,7 @@ export function makeJinnRepoGenerator(config: JinnRepoGeneratorConfig): TaskGene
 
     const selected = candidates.slice(0, maxPerTick);
     const now = Date.now();
-    const windowEndTs = now + DEFAULT_POSTING_WINDOW_MS;
+    const windowEndTs = now + postingWindowMs;
 
     const tasks: Task[] = selected.map((item) => ({
       id: randomUUID(),
@@ -197,6 +199,7 @@ export interface MakeJinnRepoGeneratorForLaunchedRecordOpts {
     slateVersion?: string;
     maxPerTick?: number;
     targetSuccessesPerInstance?: number;
+    postingWindowMs?: number;
   };
 }
 
@@ -213,6 +216,11 @@ export function makeJinnRepoGeneratorForLaunchedRecord(
   const stateDir =
     staticConfig.stateDir ?? process.env['JINN_JINN_REPO_STATE_DIR'] ?? defaultStateDir();
 
+  const postingWindowMs = resolvePostingWindowMs(
+    staticConfig.postingWindowMs ??
+      recordRef.current.generatorConfig?.['posting_window_ms'],
+  );
+
   const generator = makeJinnRepoGenerator({
     stateDir,
     solverNetManifestCid: recordRef.current.manifestCid,
@@ -220,6 +228,7 @@ export function makeJinnRepoGeneratorForLaunchedRecord(
     slateVersion: staticConfig.slateVersion,
     maxPerTick: staticConfig.maxPerTick,
     targetSuccessesPerInstance: staticConfig.targetSuccessesPerInstance,
+    postingWindowMs,
   });
 
   return async (): Promise<Task | Task[] | null> => {

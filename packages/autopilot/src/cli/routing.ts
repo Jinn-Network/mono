@@ -13,3 +13,8 @@
 export function shouldRouteToSessions(argv: string[]): boolean {
   return argv[2] === 'sessions';
 }
+
+/** Route the singular, attempt-internal lifecycle protocol shell. */
+export function shouldRouteToSession(argv: string[]): boolean {
+  return argv[2] === 'session';
+}

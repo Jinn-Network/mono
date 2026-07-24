@@ -8,7 +8,7 @@ import { startApiServer, type ApiServer } from '../api/server.js';
 import type { StatusGatherConfig } from '../api/gather-status.js';
 import { PeerSync } from './peer-sync.js';
 import type { EthHttpSigner } from '../auth/erc8128.js';
-import type { Corpus } from '../corpus/index.js';
+import type { Corpus as CoreCorpus } from '@jinn-network/core/corpus-read';
 import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop.js';
 import { TaskEngine, type TaskEngineOptions } from '../harnesses/engine/engine.js';
 import { BalanceTopupLoop, type BalanceTopupLoopConfig } from './balance-topup-loop.js';
@@ -26,6 +26,7 @@ import {
 } from '../adapters/mech/safe-revert.js';
 import { StaticConfiguredTaskSource, type TaskSource } from '../tasks/sources.js';
 import type { Task } from '../types/index.js';
+import type { SignedEnvelope } from '../types/envelope.js';
 import type { HarnessReadinessRegistry } from '../harnesses/readiness-registry.js';
 import { gateClaimByReadiness } from './readiness-gate.js';
 import { gateClaimBySpendCap } from './spend-cap-gate.js';
@@ -34,6 +35,8 @@ import { gateClaimByAiUnits } from './ai-units-gate.js';
 import type { AiUnitsDaemonConfig } from '../spend/ai-units-config.js';
 import { blockIdUtc } from '../spend/ai-units.js';
 import { SkipLogDeduper } from './skip-log-dedup.js';
+
+type Corpus = CoreCorpus<SignedEnvelope>;
 
 const DEFAULT_API_PORT = 7331;
 
@@ -134,10 +137,9 @@ export interface DaemonConfig {
   evictionCheck?: EvictionLoopConfig;
 
   /**
-   * Commit-echo + session-echo harvest loop (task-creator v0). Scans
-   * configured local repos and/or drains the mineable-trace store (per
-   * `harvest.sources`) and admits minted tasks. Omitted or interval 0 → loop
-   * not started.
+   * Commit-echo harvest loop. `harvest.sources: ['sessions']` is retained as
+   * configuration compatibility but reports an explicit Stage 2 parked marker
+   * and performs no session mining. Omitted or interval 0 → loop not started.
    */
   harvest?: HarvestLoopConfig;
 
@@ -198,6 +200,9 @@ export interface DaemonConfig {
    * DB would collide. Optional for backwards compatibility.
    */
   creatorSafeAddress?: string;
+
+  /** Resolved swe-rebench-v2 state dir from loadConfig; threaded to creator/delivery hooks. */
+  sweRebenchV2StateDir?: string;
 
   /**
    * TaskEngine — sole path for marketplace request → claim → run → deliver.
@@ -299,8 +304,13 @@ export class Daemon {
       taskSources,
       this.store,
       config.creatorSafeAddress,
+      config.sweRebenchV2StateDir,
     );
-    this.deliveryWatcherLoop = new DeliveryWatcherLoop(this.adapter, this.store);
+    this.deliveryWatcherLoop = new DeliveryWatcherLoop(
+      this.adapter,
+      this.store,
+      config.sweRebenchV2StateDir,
+    );
 
     this.restorationEngine = new TaskEngine({
       ...config.restorationEngine,
@@ -337,7 +347,7 @@ export class Daemon {
       this.harvestLoop = new HarvestLoop({ ...config.harvest, store: this.store });
     }
     if (config.checkpoint && config.checkpoint.intervalMs > 0) {
-      this.checkpointLoop = new CheckpointLoop(config.checkpoint);
+      this.checkpointLoop = new CheckpointLoop({ ...config.checkpoint, jinnStore: this.store });
     }
   }
 
@@ -547,6 +557,7 @@ export class Daemon {
       if (this.rewardClaimLoop) started.add('reward-claim');
       if (this.balanceTopupLoop) started.add('balance-topup');
       if (this.evictionLoop) started.add('eviction-check');
+      if (this.checkpointLoop) started.add('checkpoint');
       if (this.harvestLoop) started.add('harvest');
       if (peers.length > 0) started.add('peer-sync');
       const overrides: Partial<Record<LoopName, number>> = {
@@ -554,6 +565,7 @@ export class Daemon {
         'reward-claim': this.config.rewardClaim?.intervalMs,
         'balance-topup': this.config.balanceTopup?.intervalMs,
         'eviction-check': this.config.evictionCheck?.intervalMs,
+        checkpoint: this.config.checkpoint?.intervalMs,
         harvest: this.config.harvest?.intervalMs,
       };
       const registrations: WatchdogLoopRegistration[] = LOOP_REGISTRY
@@ -649,7 +661,9 @@ export class Daemon {
    * For portfolio.v0 tasks, the engine dispatches to claude-mcp-hyperliquid.
    * For portfolio.v0.eval tasks, the engine dispatches to portfolio-v0-evaluator.
    *
-   * On-chain provenance is populated from TaskCreated and TaskAttemptCreated.
+   * Canonical task provenance is populated from TaskCreated. The adapter keeps
+   * the later TaskAttemptCreated/evaluation claim provenance in separate
+   * `onchainClaim*` fields so it cannot overwrite the task creation anchor.
    */
   private async _runEngineWatcherLoop(engine: TaskEngine): Promise<void> {
     const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1_000; // 24 h
@@ -893,11 +907,22 @@ export class Daemon {
       if (!request.taskCid) {
         console.warn(`[daemon] task ${request.requestId} missing provenance field taskCid — manifest integrity checks may fail`);
       }
-      if (!request.onchainCreationTx) {
-        console.warn(`[daemon] task ${request.requestId} missing provenance field onchainCreationTx — manifest integrity checks may fail`);
-      }
-      if (request.onchainCreationBlock == null) {
-        console.warn(`[daemon] task ${request.requestId} missing provenance field onchainCreationBlock — manifest integrity checks may fail`);
+      if (!request.onchainCreationTx || request.onchainCreationBlock == null) {
+        const missing = [
+          !request.onchainCreationTx ? 'onchainCreationTx' : null,
+          request.onchainCreationBlock == null ? 'onchainCreationBlock' : null,
+        ].filter((field): field is string => field !== null);
+        const error = new Error(
+          `task ${request.requestId} missing canonical TaskCreated provenance: ${missing.join(', ')}`,
+        );
+        console.error(`[daemon] ${error.message}; refusing to create an engine row`);
+        emitTickErrorOrRaceLost(
+          this.store,
+          error,
+          { requestId: request.requestId, solverType },
+          'daemon',
+        );
+        continue;
       }
 
       try {
@@ -906,8 +931,8 @@ export class Daemon {
           taskId: request.taskId ?? taskAnnouncement.taskId,
           attemptIndex: request.attemptIndex,
           taskCid: request.taskCid ?? '',
-          onchainCreationTx: request.onchainCreationTx ?? (request.requestId as `0x${string}`),
-          onchainCreationBlock: request.onchainCreationBlock ?? 0,
+          onchainCreationTx: request.onchainCreationTx,
+          onchainCreationBlock: request.onchainCreationBlock,
           solverType,
           taskRole: (request.task.role ?? 'restoration') as 'restoration' | 'evaluation',
           windowStartTs,

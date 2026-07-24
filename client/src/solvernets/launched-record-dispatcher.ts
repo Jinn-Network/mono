@@ -8,6 +8,7 @@ import type {
   SweRebenchV2GeneratorRuntimeConfig,
 } from '../solver-types/swe-rebench-v2.js';
 import type { MakeJinnRepoGeneratorForLaunchedRecordOpts } from '../solver-types/jinn-repo-auto.js';
+import type { MakeJinnRepoLiveGeneratorForLaunchedRecordOpts } from '../solver-types/jinn-repo-live-auto.js';
 import type { PendingGeneratorSpawn } from './daemon-init.js';
 import type { LaunchedSolverNetRecord } from './store.js';
 
@@ -29,6 +30,8 @@ export interface LaunchedRecordGeneratorStaticConfig {
   /** IPFS gateway, passed through to the swe-rebench-v2 generator for the
    *  fresh-volume vetted-pool recovery fetch (#957). */
   ipfsGatewayUrl?: string;
+  /** From `config.sweRebenchV2StateDir` — swe-rebench-v2 generator root. */
+  stateDir?: string;
 }
 
 export interface LaunchedRecordGeneratorFactories {
@@ -39,6 +42,17 @@ export interface LaunchedRecordGeneratorFactories {
   }) => TaskGenerator;
   sweRebenchV2: (opts: MakeSweRebenchV2GeneratorForLaunchedRecordOpts) => TaskGenerator;
   jinnRepo: (opts: MakeJinnRepoGeneratorForLaunchedRecordOpts) => TaskGenerator;
+  /**
+   * ALONGSIDE `jinnRepo`, not a replacement (issue #1893): for a launched
+   * `jinn-repo.v1` record, `wireLaunchedRecordGenerators` wires BOTH the
+   * retrospective (merged-PR pool) generator AND this live-issue (labeled
+   * GitHub issue) generator — they draw from disjoint instance spaces
+   * (pool `instance_id`s vs. issue numbers) under the same manifest, so
+   * nothing double-posts. Optional so existing callers/tests that don't
+   * inject it are unaffected (`wireLaunchedRecordGenerators` only invokes it
+   * when present).
+   */
+  jinnRepoLive?: (opts: MakeJinnRepoLiveGeneratorForLaunchedRecordOpts) => TaskGenerator;
 }
 
 export interface LaunchedRecordGeneratorLogger {
@@ -134,15 +148,18 @@ async function defaultFactories(): Promise<LaunchedRecordGeneratorFactories> {
     { makePredictionV1GeneratorForLaunchedRecord },
     { makeSweRebenchV2GeneratorForLaunchedRecord },
     { makeJinnRepoGeneratorForLaunchedRecord },
+    { makeJinnRepoLiveGeneratorForLaunchedRecord },
   ] = await Promise.all([
     import('../solver-types/prediction-v1-auto.js'),
     import('../solver-types/swe-rebench-v2.js'),
     import('../solver-types/jinn-repo-auto.js'),
+    import('../solver-types/jinn-repo-live-auto.js'),
   ]);
   return {
     predictionV1: makePredictionV1GeneratorForLaunchedRecord,
     sweRebenchV2: makeSweRebenchV2GeneratorForLaunchedRecord,
     jinnRepo: makeJinnRepoGeneratorForLaunchedRecord,
+    jinnRepoLive: makeJinnRepoLiveGeneratorForLaunchedRecord,
   };
 }
 
@@ -304,6 +321,21 @@ export async function wireLaunchedRecordGenerators(
       `[main] launched-record generator wired: ${pending.record.solverNetId} ` +
         `(${contract.id}.${contract.version}, status=${pending.record.status})`,
     );
+
+    // Issue #1893: for a launched jinn-repo.v1 record, wire the live-issue
+    // generator ALONGSIDE the retrospective one just pushed above — never a
+    // replacement. Draws from a disjoint instance space (labeled GitHub
+    // issues vs. the merged-PR pool), so nothing double-posts under the same
+    // manifest. Skipped when the caller's factories don't supply it (e.g.
+    // existing tests that only exercise the retrospective path).
+    if (contract.id === 'jinn-repo' && contract.version === 'v1' && factories.jinnRepoLive) {
+      const liveGenerator = factories.jinnRepoLive({ recordRef: pending.recordRef });
+      generators.push({ solverType: contract.solverType, generator: liveGenerator, getLauncherState: undefined });
+      logger.info?.(
+        `[main] launched-record generator wired: ${pending.record.solverNetId} ` +
+          `(${contract.id}.${contract.version} live-issue variant, status=${pending.record.status})`,
+      );
+    }
   }
 
   return { generators, predictionGeneratorRef, generatorStatesBySolverType };

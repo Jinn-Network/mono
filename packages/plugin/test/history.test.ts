@@ -31,7 +31,7 @@ function candidate(sourceId: string, consent = false): ContributionCandidateV1 {
 
 function currentEpisode(overrides: Partial<EpisodeV1> = {}): EpisodeV1 {
   return makeSampleEpisode({
-    activity: { surfacedRefs: [], fetchedRefs: [], installedSkillRefs: [] },
+    activity: { searchedTerms: [], providedRefs: [], surfacedRefs: [], fetchedRefs: [], installedSkillRefs: [] },
     eligibility: {
       eligible: false,
       reason: 'no accepted diff',
@@ -56,6 +56,25 @@ function buildPlugin(
 }
 
 describe('plugin.history / explain (AC3 — reproducible from port reads)', () => {
+  it('excludes host-internal child sessions from the default history fold', async () => {
+    const evidence = new InMemoryEvidencePort();
+    await evidence.put(currentEpisode({ episodeId: 'ep-parent' }));
+    await evidence.put(currentEpisode({
+      episodeId: 'ep-child',
+      session: {
+        sessionId: 'child',
+        capturedAt: '2026-07-14T00:01:00.000Z',
+        kind: 'host-internal',
+        parentSessionId: 'sess-fixture-1',
+      },
+    }));
+
+    const plugin = buildPlugin(evidence);
+    expect((await plugin.history()).entries.map((entry) => entry.sessionId))
+      .toEqual(['sess-fixture-1']);
+    expect((await plugin.explain('child')).found).toBe(true);
+  });
+
   it('is reproducible: two calls over the same port state are deep-equal', async () => {
     const evidence = new InMemoryEvidencePort();
     await evidence.put(currentEpisode({ episodeId: 'ep-1' }));
@@ -103,7 +122,7 @@ describe('plugin.history / explain (AC3 — reproducible from port reads)', () =
     expect(ex.eligibility).toBeNull();
   });
 
-  it('projects persisted activity facts and the authoritative eligibility verdict', async () => {
+  it('explain exposes canonical searched/provided fields from legacy activity via the established fallback', async () => {
     const evidence = new InMemoryEvidencePort();
     const eligibility = {
       eligible: true,
@@ -113,6 +132,8 @@ describe('plugin.history / explain (AC3 — reproducible from port reads)', () =
     await evidence.put(currentEpisode({
       episodeId: 'ep-enriched',
       activity: {
+        searchedTerms: [],
+        providedRefs: [],
         surfacedRefs: ['knowledge/a', 'knowledge/b'],
         fetchedRefs: ['knowledge/b'],
         installedSkillRefs: ['skills/tdd@1'],
@@ -129,10 +150,49 @@ describe('plugin.history / explain (AC3 — reproducible from port reads)', () =
     });
 
     const explanation = await plugin.explain('sess-fixture-1');
-    expect(explanation.surfacedRefs).toEqual(['knowledge/a', 'knowledge/b']);
-    expect(explanation.fetchedRefs).toEqual(['knowledge/b']);
-    expect(explanation.installedSkillRefs).toEqual(['skills/tdd@1']);
+    expect(explanation.searchedTerms).toEqual(['knowledge/a', 'knowledge/b']);
+    expect(explanation.providedRefs).toEqual(['knowledge/b']);
     expect(explanation.eligibility).toEqual(eligibility);
+  });
+
+  it('explain exposes canonical searched/provided fields from new-shape activity without legacy fallback', async () => {
+    const evidence = new InMemoryEvidencePort();
+    await evidence.put(currentEpisode({
+      episodeId: 'ep-rescoped',
+      activity: {
+        searchedTerms: ['dashboard', 'vitest', 'flake'],
+        providedRefs: ['bafyProvided1'],
+        surfacedRefs: [],
+        fetchedRefs: [],
+        installedSkillRefs: [],
+      },
+    }));
+    const plugin = buildPlugin(evidence);
+
+    const history = await plugin.history();
+    expect(history.entries[0]).toMatchObject({ knowledgeSurfaced: 3, knowledgeUsed: 1 });
+
+    const explanation = await plugin.explain('sess-fixture-1');
+    expect(explanation.searchedTerms).toEqual(['dashboard', 'vitest', 'flake']);
+    expect(explanation.providedRefs).toEqual(['bafyProvided1']);
+  });
+
+  it('reports zero/zero for a rescoped nothing-found episode rather than falling back to legacy fields', async () => {
+    const evidence = new InMemoryEvidencePort();
+    await evidence.put(currentEpisode({
+      episodeId: 'ep-rescoped-empty',
+      activity: {
+        searchedTerms: [],
+        providedRefs: [],
+        surfacedRefs: [],
+        fetchedRefs: [],
+        installedSkillRefs: [],
+      },
+    }));
+    const plugin = buildPlugin(evidence);
+
+    const history = await plugin.history();
+    expect(history.entries[0]).toMatchObject({ knowledgeSurfaced: 0, knowledgeUsed: 0 });
   });
 
   it('explain returns a structured trace for a session', async () => {
@@ -143,7 +203,8 @@ describe('plugin.history / explain (AC3 — reproducible from port reads)', () =
     expect(ex.sessionRef).toBe('sess-fixture-1');
     expect(ex.captureStatus).toBe('captured');
     expect(ex.degraded).toBe(false);
-    expect(Array.isArray(ex.surfacedRefs)).toBe(true);
+    expect(Array.isArray(ex.searchedTerms)).toBe(true);
+    expect(Array.isArray(ex.providedRefs)).toBe(true);
   });
 
   it('explain marks an unknown session not-captured', async () => {

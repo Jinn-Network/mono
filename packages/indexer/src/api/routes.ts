@@ -9,13 +9,12 @@
  * The Hono handlers in `src/api/index.ts` query the Ponder db, then delegate
  * to these functions for the JSON-shape logic.
  *
- * ebu7 dependency:
- *   Routes 3 (/plugins/:cid/scores) and 5 (/builders/:address/scores) require
- *   the `attemptEnvelopeMeta` and `verdict` indexer entities shipped by
- *   jinn-mono-ebu7. Until ebu7 merges, callers pass empty arrays for both and
- *   these functions return [] gracefully. The routes are additive — calling
- *   them from day one means the SPA picks up live data automatically when
- *   ebu7 lands, without changes to this file.
+ * Trust boundary:
+ *   Routes 3 (/plugins/:cid/scores) and 5 (/builders/:address/scores) return
+ *   [] until the indexer exposes canonical attempt/verdict projections bound
+ *   to the historical publisher Safe, envelope signature/hash, authoritative
+ *   chain row, and original task. Permissionless shape projections are stored
+ *   for authenticated consumers but never promoted to score history here.
  *
  * JSON serialisation note:
  *   `publishedAt` is stored as bigint in the schema (unix seconds from the
@@ -97,23 +96,6 @@ export interface PluginScoreHistoryOutput {
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
-interface EnvelopePluginEntry {
-  name: string;
-  version: string;
-  cid?: string;
-  sha256: string;
-}
-
-function normaliseSha(sha: string): string {
-  return sha.replace(/^0x/i, '').toLowerCase();
-}
-
-function sha256Matches(pubSha: string, envSha: string): boolean {
-  const a = normaliseSha(pubSha);
-  const b = normaliseSha(envSha);
-  return a.length === 64 && b.length === 64 && a === b;
-}
-
 function rowToOutput(row: PluginPublicationRow): PluginPublicationOutput {
   const out: PluginPublicationOutput = {
     artifactType: 'plugin',
@@ -140,43 +122,14 @@ function buildScoreRows(
   attemptEnvelopeMetas: AttemptEnvelopeMetaRow[],
   verdicts: VerdictRow[],
 ): PluginScoreHistoryOutput[] {
-  if (attemptEnvelopeMetas.length === 0 || verdicts.length === 0) return [];
-
-  const pubByCid = new Map<string, PluginPublicationRow>();
-  for (const p of publications) pubByCid.set(p.pluginCid, p);
-
-  const verdictByReq = new Map<string, VerdictRow>();
-  for (const v of verdicts) verdictByReq.set(v.requestId.toLowerCase(), v);
-
-  const out: PluginScoreHistoryOutput[] = [];
-  for (const meta of attemptEnvelopeMetas) {
-    let plugins: EnvelopePluginEntry[] = [];
-    try {
-      plugins = JSON.parse(meta.pluginsJson) as EnvelopePluginEntry[];
-    } catch {
-      continue;
-    }
-    const verdict = verdictByReq.get(meta.requestId.toLowerCase());
-    if (!verdict) continue;
-
-    for (const entry of plugins) {
-      if (!entry.cid) continue;
-      const pub = pubByCid.get(entry.cid);
-      if (!pub) continue;
-      const forkSuspected = !sha256Matches(pub.pluginSha256, entry.sha256);
-      const row: PluginScoreHistoryOutput = {
-        pluginCid: pub.pluginCid,
-        taskId: verdict.taskId,
-        operatorAgentId: verdict.operatorAgentId,
-        verdict: verdict.verdict,
-        ts: verdict.ts,
-        forkSuspected,
-      };
-      if (typeof verdict.score === 'number') row.score = verdict.score;
-      out.push(row);
-    }
-  }
-  return out;
+  void publications;
+  void attemptEnvelopeMetas;
+  void verdicts;
+  // These rows are permissionless shape projections. An exact request join or
+  // an unambiguous singleton does not authenticate the historical publisher,
+  // envelope signature/hash, or authoritative attempt. Publish no score rows
+  // until the indexer exposes that canonical authenticated projection.
+  return [];
 }
 
 // ── Route 1: GET /plugins?solverNet=<id>[&includeRevoked=false] ───────────────
@@ -286,6 +239,12 @@ export interface CaptureEnvelopeMetaRow {
   taskSummary: string;
   /** JSON.stringify(task.distributionTags) — first tag is the primary (v0 cluster key). */
   tagsJson: string;
+  /** task.repositorySlug — named capture metadata. Optional for legacy rows. */
+  repositorySlug?: string;
+  /** Authored outcome/seed synthesis. Optional for legacy rows. */
+  synthesis?: string;
+  /** Canonical W2 allowlist decision. Optional for legacy rows. */
+  retrievalVisible?: boolean;
   provenance: string;
   verifiabilityTier: string;
   /** environment.harness "<name> <version>" — corpus detail (#1406). Optional for back-compat. */
@@ -401,6 +360,9 @@ export interface CaptureMetaSearchHit {
   taskSummary: string;
   /** Parsed distribution tags ([] when tagsJson is malformed). */
   tags: string[];
+  repositorySlug?: string;
+  synthesis?: string;
+  retrievalVisible?: boolean;
   provenance: string;
   verifiabilityTier: string;
 }
@@ -439,6 +401,13 @@ export function searchCaptureMeta(
       contributor: meta.contributor,
       taskSummary: meta.taskSummary,
       tags,
+      ...(meta.repositorySlug !== undefined
+        ? { repositorySlug: meta.repositorySlug }
+        : {}),
+      ...(meta.synthesis !== undefined ? { synthesis: meta.synthesis } : {}),
+      ...(meta.retrievalVisible !== undefined
+        ? { retrievalVisible: meta.retrievalVisible }
+        : {}),
       provenance: meta.provenance,
       verifiabilityTier: meta.verifiabilityTier,
     });

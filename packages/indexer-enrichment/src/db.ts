@@ -27,6 +27,8 @@ export interface DrizzleLike {
 /** A due anchor: an evaluation envelope with no `ok` verdict row (or a due retry). */
 export interface DueAnchor {
   manifestCid: string;
+  publisherAgentId: string;
+  manifestHash: string;
   publishedAtBlock: bigint;
   chainId: number;
 }
@@ -38,6 +40,8 @@ export interface UpsertVerdictArgs {
   taskId: string;
   evaluator: string;
   manifestCid: string;
+  publisherAgentId: string;
+  manifestHash: string;
   solverType: string;
   evidenceTier: string;
   actualPassed: boolean;
@@ -152,11 +156,15 @@ export class EnrichmentStore {
     const nowMs = BigInt(now);
     const res = await exec.execute(sql`
       SELECT e."manifest_cid" AS manifest_cid,
+             e."agent_id" AS publisher_agent_id,
+             e."manifest_hash" AS manifest_hash,
              e."published_at_block" AS published_at_block,
              e."chain_id" AS chain_id
       FROM ${this.q('envelope')} e
       LEFT JOIN ${this.q('verdict_envelope_meta')} v
         ON v."manifest_cid" = e."manifest_cid"
+       AND v."publisher_agent_id" = e."agent_id"
+       AND v."chain_id" = e."chain_id"
       LEFT JOIN ${this.q('enrichment_attempt')} a
         ON a."manifest_cid" = e."manifest_cid" AND a."chain_id" = e."chain_id"
       WHERE e."kind" = 'evaluation'
@@ -180,6 +188,8 @@ export class EnrichmentStore {
     `);
     return res.rows.map((r) => ({
       manifestCid: String(r.manifest_cid),
+      publisherAgentId: String(r.publisher_agent_id),
+      manifestHash: String(r.manifest_hash),
       publishedAtBlock: BigInt(String(r.published_at_block)),
       chainId: Number(r.chain_id),
     }));
@@ -230,28 +240,30 @@ export class EnrichmentStore {
   }
 
   /**
-   * Upsert a fully-enriched verdict row keyed (request_id, chain_id), guarded by
-   * enriched_at_block most-recent-wins — mirrors the handler's onConflictDoUpdate
-   * (handlers.ts). On a newer/equal block the row is overwritten with
+   * Upsert a fully-enriched verdict candidate keyed by
+   * (request_id, publisher_agent_id, manifest_cid, chain_id), guarded by
+   * enriched_at_block most-recent-wins — mirrors the handler's
+   * onConflictDoUpdate (handlers.ts). Competing publisher/CID anchors remain
+   * separate rows. On a newer block the exact candidate is updated with
    * enrichment_status='ok' and retry bookkeeping cleared; on an older or equal
    * block it is a no-op (AC6).
    */
   async upsertVerdict(args: UpsertVerdictArgs): Promise<void> {
     await this.db.execute(sql`
       INSERT INTO ${this.q('verdict_envelope_meta')}
-        ("request_id","verdict_index","attempt_index","task_id","evaluator","manifest_cid","solver_type","evidence_tier","actual_passed","actual_score","passed_count","total_count","instance_id","solver_net_manifest_cid","solution_request_id","evaluator_verdict","enrichment_status","retry_count","next_attempt_at","enriched_at_block","chain_id")
+        ("request_id","verdict_index","attempt_index","task_id","evaluator","manifest_cid","publisher_agent_id","manifest_hash","solver_type","evidence_tier","actual_passed","actual_score","passed_count","total_count","instance_id","solver_net_manifest_cid","solution_request_id","evaluator_verdict","enrichment_status","retry_count","next_attempt_at","enriched_at_block","chain_id")
       VALUES (
         ${args.requestId}, ${args.verdictIndex}, ${args.attemptIndex}, ${args.taskId}, ${args.evaluator},
-        ${args.manifestCid}, ${args.solverType}, ${args.evidenceTier}, ${args.actualPassed}, ${args.actualScore},
+        ${args.manifestCid}, ${args.publisherAgentId}, ${args.manifestHash}, ${args.solverType}, ${args.evidenceTier}, ${args.actualPassed}, ${args.actualScore},
         ${args.passedCount}, ${args.totalCount}, ${args.instanceId}, ${args.solverNetManifestCid}, ${args.solutionRequestId}, ${args.evaluatorVerdict},
         'ok', 0, NULL, ${args.enrichedAtBlock}, ${args.chainId}
       )
-      ON CONFLICT ("request_id","chain_id") DO UPDATE SET
+      ON CONFLICT ("request_id","publisher_agent_id","manifest_cid","chain_id") DO UPDATE SET
         "verdict_index" = EXCLUDED."verdict_index",
         "attempt_index" = EXCLUDED."attempt_index",
         "task_id" = EXCLUDED."task_id",
         "evaluator" = EXCLUDED."evaluator",
-        "manifest_cid" = EXCLUDED."manifest_cid",
+        "manifest_hash" = EXCLUDED."manifest_hash",
         "solver_type" = EXCLUDED."solver_type",
         "evidence_tier" = EXCLUDED."evidence_tier",
         "actual_passed" = EXCLUDED."actual_passed",

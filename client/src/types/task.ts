@@ -146,8 +146,13 @@ export interface TaskAnnouncement {
   taskId: string;
   task: Task;
   taskCid?: string;
+  /** Transaction that emitted the task's canonical TaskCreated event. */
   onchainCreationTx?: `0x${string}`;
+  /** Block that emitted the task's canonical TaskCreated event. */
   onchainCreationBlock?: number;
+  /** Event that surfaced this opportunity when it is not TaskCreated itself. */
+  onchainOpportunityTx?: `0x${string}`;
+  onchainOpportunityBlock?: number;
 }
 
 export interface TaskRequest {
@@ -158,10 +163,16 @@ export interface TaskRequest {
   payment?: string;
   timeout?: number;
 
-  // On-chain provenance from the TaskCreated / TaskAttemptCreated event path
-  taskCid?: string;                 // IPFS CID of the Task payload
-  onchainCreationTx?: `0x${string}`; // tx hash of JinnRouterV3.createTask / claimTask
-  onchainCreationBlock?: number;      // block number containing the tx
+  // Canonical task provenance. These always refer to TaskCreated, never the
+  // later TaskAttemptCreated / evaluation-claim event.
+  taskCid?: string;                   // IPFS CID of the Task payload
+  onchainCreationTx?: `0x${string}`; // tx hash of JinnRouterV3.createTask
+  onchainCreationBlock?: number;      // block number containing TaskCreated
+
+  // Claim provenance is kept separate so a later attempt block can never be
+  // mistaken for task creation when task.createdAt is assembled.
+  onchainClaimTx?: `0x${string}`;
+  onchainClaimBlock?: number;
 }
 
 export interface TaskResult {

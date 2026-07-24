@@ -51,7 +51,7 @@ def test_history_renders_real_session_facts_and_skill_state():
     out = _plain(history_view.render_history([_entry()]))
     assert "Jinn history · 1 session" in out
     assert "Fix the retry bridge" in out
-    assert "2 surfaced · 1 used" in out
+    assert "knowledge searched 2 · provided 1" in out
     assert "eligible" in out
     assert "contribution queued" in out
     assert "retry-budget (installed)" in out
@@ -133,3 +133,32 @@ def test_jinn_history_reports_missing_layer_as_unavailable(monkeypatch):
     monkeypatch.setattr(jinn, "_runner", lambda _argv: (127, "jinn-layer: not found"))
     out = jinn._handle_jinn(command_args="history")
     assert out == "history unavailable:\njinn-layer: not found"
+
+
+def test_jinn_history_renders_normally_when_stderr_carries_a_warning(monkeypatch):
+    """mono#1787: a real dogfooding machine hit `history unavailable: jinn-layer
+    returned malformed JSON` because `_default_runner` merged the harness's
+    `[evidence] skipping malformed legacy capture ...` stderr warning into the
+    same string as the stdout JSON before parsing. A stderr diagnostic must
+    never corrupt a structurally valid stdout response."""
+    envelope = json.dumps({
+        "contractVersion": 1,
+        "status": "ok",
+        "value": {"entries": [_entry()]},
+    })
+
+    def fake_default_runner(argv, cwd=None, input=None, timeout_s=jinn_layer._TIMEOUT_S):
+        return (
+            0,
+            envelope,
+            "[evidence] skipping malformed legacy capture "
+            "s1-1784122564637021000.json: some warning",
+        )
+
+    monkeypatch.setattr(jinn_layer, "_default_runner", fake_default_runner)
+    monkeypatch.setattr(jinn, "_runner", None)
+
+    out = _plain(jinn._handle_jinn(command_args="history"))
+
+    assert "history unavailable" not in out
+    assert "Fix the retry bridge" in out

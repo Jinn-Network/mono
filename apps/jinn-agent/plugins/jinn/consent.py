@@ -66,14 +66,6 @@ RECORDED_OFF = (
     "Sharing is OFF. Nothing derived from your work leaves this machine. "
     "Turn on any time: /jinn consent"
 )
-NODE_STUB = (
-    "Run a network node? Running a node executes tasks for others and earns "
-    "rewards. Separate setup; not needed to share or read. "
-    "[L] Later — show docs · [Enter] Skip"
-)
-NODE_STUB_LATER = (
-    "See docs.jinn.network/run-a-node when you're ready. Nothing to do now."
-)
 
 KEYS_LINE = "[Y] Yes · [N] No · [P] Preview what would be shared · [?] Docs"
 
@@ -228,7 +220,9 @@ def run_consent_flow(
     Returns the recorded shareConsent (True when sharing was accepted).
 
     Per-action lifecycle ``idle -> confirming -> recorded``. Bare Enter
-    defaults to decline — the safe default shares nothing.
+    defaults to decline — the safe default shares nothing. This is the ONE
+    sharing question (mono#1714 copy collapse) — no second, unrelated
+    question follows it.
     """
     print_fn(render_explainer_styled())
     while True:
@@ -263,13 +257,7 @@ def run_consent_flow(
             print_fn(render_recorded_styled(on=False))
             break
 
-    share = share_enabled()
-
-    print_fn(render_node_stub_styled())
-    node = input_fn("> ").strip().lower()
-    if node == "l":
-        print_fn(NODE_STUB_LATER)
-    return share
+    return share_enabled()
 
 
 # ── Styled renderers — reuse the #1417 splash palette ────────────────────────
@@ -379,7 +367,6 @@ def render_recorded_styled(on: bool) -> str:
     dim = lambda s: _style.wrap(pal, rst, "dim", s)
     fg = lambda s: _style.wrap(pal, rst, "fg", s)
     sky = lambda s: _style.wrap(pal, rst, "sky", s)
-    gold = lambda s: _style.wrap(pal, rst, "gold", s)
     green = lambda s: _style.wrap(pal, rst, "green", s)
     if on:
         body = [
@@ -387,9 +374,7 @@ def render_recorded_styled(on: bool) -> str:
             "",
             dim("  " + RECORDED_ON),
             "",
-            dim("  Verified shared tasks earn ") + gold("OLAS") + dim("."),
-            "",
-            dim("  Manage:  ") + sky("/jinn consent") + dim("  |  ") + sky("/jinn veto") + dim("  |  ") + sky("/jinn ledger"),
+            dim("  Manage:  ") + sky("/jinn veto"),
         ]
     else:
         body = [
@@ -398,25 +383,6 @@ def render_recorded_styled(on: bool) -> str:
             dim("  " + RECORDED_OFF),
         ]
     return "\n".join([_sigil_head(pal, rst), "", *body])
-
-
-def render_node_stub_styled() -> str:
-    pal, rst = _style.palette()
-    dim = lambda s: _style.wrap(pal, rst, "dim", s)
-    fg = lambda s: _style.wrap(pal, rst, "fg", s)
-    gold = lambda s: _style.wrap(pal, rst, "gold", s)
-    kbd = lambda s: _style.wrap(pal, rst, "gold", s)
-    return "\n".join([
-        _sigil_head(pal, rst),
-        "",
-        dim("  One more, optional —"),
-        "",
-        gold("  RUN A NETWORK NODE?"),
-        dim("  Running a node executes tasks for others and earns rewards. It is a"),
-        dim("  separate setup and is not needed to share or to read."),
-        "",
-        "  " + kbd("[L]") + fg(" Later — show me the docs") + dim("  (recommended)") + "     " + kbd("[Enter]") + dim(" Skip for now"),
-    ])
 
 
 def render_preview_example() -> str:

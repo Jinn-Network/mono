@@ -42,7 +42,7 @@ import { DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK } from '../../corpus/onchain-que
 import { solverTypeFromJoinedContract } from '../../solver-nets/registry.js';
 import type { RuntimePlugin } from '../../harnesses/types.js';
 import { loadHeldOutSlate } from '../../solver-types/_swe-rebench-v2-held-out-slate.js';
-import { loadSweRebenchV2Pool, defaultStateDir } from '../../solver-types/swe-rebench-v2.js';
+import { loadSweRebenchV2Pool } from '../../solver-types/swe-rebench-v2.js';
 import { PoolCacheStore, loadPoolWithCacheFallback } from '../../solver-types/_swe-rebench-v2-pool-cache.js';
 import { LearnerHarness } from '../../harnesses/impls/learner/harness.js';
 import {
@@ -533,8 +533,7 @@ const PRODUCTION_DEPS: EvalCommandDeps = {
     } else {
       // swe-rebench-v2 (production): real HF fetcher; per-instance dataset/split
       // from the pool.
-      const stateDir =
-        process.env['JINN_SWE_REBENCH_V2_STATE_DIR'] ?? defaultStateDir();
+      const stateDir = config.sweRebenchV2StateDir;
       const fetcher = new HttpHfFetcher();
       tasksWithRows = await resolveSlateAgainstPool({
         instanceIds: slate.instanceIds,

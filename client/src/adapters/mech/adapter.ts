@@ -54,6 +54,7 @@ import {
   canClaimTask,
   canClaimEvaluation,
   type RouterTaskPolicy,
+  type DecodedTaskCreated,
 } from './contracts.js';
 import { type MechAdapterConfig } from './types.js';
 import {
@@ -91,6 +92,35 @@ interface PendingEvaluationSolution {
    * daemon bounce. Pruned once it exceeds MAX_EVALUATION_RETRY_ATTEMPTS.
    */
   failedAttempts?: number;
+}
+
+interface CanonicalTaskCreationProvenance {
+  onchainCreationTx: `0x${string}`;
+  onchainCreationBlock: number;
+}
+
+function taskCreationProvenanceFromSolutionEnvelope(
+  value: unknown,
+): CanonicalTaskCreationProvenance | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const task = (value as Record<string, unknown>)['task'];
+  if (typeof task !== 'object' || task === null) return undefined;
+  const record = task as Record<string, unknown>;
+  const tx = record['onchainCreationTx'];
+  const block = record['onchainCreationBlock'];
+  if (
+    typeof tx !== 'string'
+    || !/^0x[0-9a-fA-F]{64}$/.test(tx)
+    || typeof block !== 'number'
+    || !Number.isSafeInteger(block)
+    || block < 0
+  ) {
+    return undefined;
+  }
+  return {
+    onchainCreationTx: tx as `0x${string}`,
+    onchainCreationBlock: block,
+  };
 }
 
 const ROUTER_REQUEST_CURSOR_CONFIG_KEY = 'mech_router_request_block_cursor_v1';
@@ -231,11 +261,20 @@ export class MechAdapter implements ExecutionAdapter {
    * its own attempt on a multi-attempt (`maxClaims > 1`) task it posted.
    */
   private restorationBodyCache = new Map<string, TaskAnnouncement>();
+  /**
+   * TaskCreated anchors observed directly from router logs (or our own
+   * confirmed createTask receipt). Evaluator envelopes are solver-controlled,
+   * so their embedded anchors are only claims until they match this chain
+   * source.
+   */
+  private canonicalTaskCreationProvenance = new Map<string, CanonicalTaskCreationProvenance>();
   private requestKinds = new Map<string, 'solution' | 'verdict'>();
   private evaluationOpportunities = new Map<string, {
     taskId: string;
     attemptIndex: number;
     task: Task;
+    onchainCreationTx?: `0x${string}`;
+    onchainCreationBlock?: number;
   }>();
   private pendingEvaluationSolutions = new Map<string, PendingEvaluationSolution>();
   // Original Tasks keyed by request ID (restoration and evaluation)
@@ -255,6 +294,13 @@ export class MechAdapter implements ExecutionAdapter {
    */
   private get evaluatorEnabled(): boolean {
     return this.config.evaluatorEnabled !== false;
+  }
+
+  /** Maps config pin → core `FetchFromIpfsOptions` (omit when unset = production ipfs.io). */
+  private ipfsFetchOpts(): { fallbackGatewayBase?: string | false } | undefined {
+    const fallback = this.config.ipfsFallbackGatewayUrl;
+    if (fallback === undefined) return undefined;
+    return { fallbackGatewayBase: fallback };
   }
 
   /**
@@ -654,6 +700,15 @@ export class MechAdapter implements ExecutionAdapter {
       maxTimeout,
       this.config.evictionRecovery,
     );
+    if (
+      taskSubmission.txHash
+      && taskSubmission.blockNumber !== undefined
+    ) {
+      this.canonicalTaskCreationProvenance.set(taskSubmission.taskId, {
+        onchainCreationTx: taskSubmission.txHash,
+        onchainCreationBlock: taskSubmission.blockNumber,
+      });
+    }
 
     // Deliberately do NOT seed `observedTasks` with the task we just posted.
     // `observedTasks` is the dedup set for `watchForTasks`: the on-chain
@@ -789,7 +844,11 @@ export class MechAdapter implements ExecutionAdapter {
     );
     const digest = taskCidDigest.startsWith('0x') ? taskCidDigest.slice(2) : taskCidDigest;
     const taskCid = `f01551220${digest}`;
-    const signed = await fetchSignedTaskFromIpfs(this.config.ipfsGatewayUrl, taskCid);
+    const signed = await fetchSignedTaskFromIpfs(
+      this.config.ipfsGatewayUrl,
+      taskCid,
+      this.ipfsFetchOpts(),
+    );
     const task = parseTask({ signedTask: signed });
     const announcement: TaskAnnouncement = {
       taskId,
@@ -798,6 +857,49 @@ export class MechAdapter implements ExecutionAdapter {
     };
     this.restorationBodyCache.set(taskId, announcement);
     return announcement;
+  }
+
+  private rememberCanonicalTaskCreated(event: DecodedTaskCreated): void {
+    if (
+      event.transactionHash === undefined
+      || !/^0x[0-9a-fA-F]{64}$/.test(event.transactionHash)
+      || event.blockNumber === undefined
+      || !Number.isSafeInteger(event.blockNumber)
+      || event.blockNumber < 0
+    ) {
+      return;
+    }
+    this.canonicalTaskCreationProvenance.set(event.taskId, {
+      onchainCreationTx: event.transactionHash,
+      onchainCreationBlock: event.blockNumber,
+    });
+  }
+
+  private async canonicalTaskCreationForEvaluation(
+    taskId: string,
+    opportunityBlock?: number,
+  ): Promise<CanonicalTaskCreationProvenance> {
+    const cached = this.canonicalTaskCreationProvenance.get(taskId);
+    if (cached) return cached;
+
+    const toBlock = opportunityBlock !== undefined
+      ? BigInt(opportunityBlock)
+      : await this.publicClient.getBlockNumber();
+    const fromBlock = this.taskAdmissionFloorBlock() ?? 0n;
+    if (fromBlock <= toBlock) {
+      const logs = await this.getRouterLogsInChunks(fromBlock, toBlock);
+      for (const event of decodeTaskCreatedLogs(logs)) {
+        this.rememberCanonicalTaskCreated(event);
+      }
+    }
+
+    const resolved = this.canonicalTaskCreationProvenance.get(taskId);
+    if (!resolved) {
+      throw new Error(
+        `evaluation task ${taskId} has no canonical TaskCreated provenance in router logs`,
+      );
+    }
+    return resolved;
   }
 
   private async restorationAnnouncementFromDigest(params: {
@@ -810,7 +912,11 @@ export class MechAdapter implements ExecutionAdapter {
       ? params.taskCidDigest.slice(2)
       : params.taskCidDigest;
     const taskCid = `f01551220${digest}`;
-    const signed = await fetchSignedTaskFromIpfs(this.config.ipfsGatewayUrl, taskCid);
+    const signed = await fetchSignedTaskFromIpfs(
+      this.config.ipfsGatewayUrl,
+      taskCid,
+      this.ipfsFetchOpts(),
+    );
     const task = parseTask({ signedTask: signed });
     const announcement: TaskAnnouncement = {
       taskId: params.taskId,
@@ -1033,7 +1139,40 @@ export class MechAdapter implements ExecutionAdapter {
     const resultPayload = await fetchFromIpfs(
       this.config.ipfsGatewayUrl,
       solutionEnvelopeCid,
+      this.ipfsFetchOpts(),
     ) as Record<string, unknown>;
+    let creationProvenance = taskCreationProvenanceFromSolutionEnvelope(resultPayload);
+    if (!creationProvenance && typeof resultPayload.data === 'string') {
+      try {
+        creationProvenance = taskCreationProvenanceFromSolutionEnvelope(
+          JSON.parse(resultPayload.data),
+        );
+      } catch {
+        // Legacy non-envelope result payload. The fail-closed check below
+        // keeps it out of the new provenance-bearing writer path.
+      }
+    }
+    if (!creationProvenance) {
+      throw new Error(
+        `evaluation opportunity ${solution.requestId} is missing canonical TaskCreated provenance in its solution envelope`,
+      );
+    }
+    const canonicalCreationProvenance =
+      await this.canonicalTaskCreationForEvaluation(
+        solution.taskId,
+        solution.blockNumber,
+      );
+    if (
+      creationProvenance.onchainCreationTx.toLowerCase()
+        !== canonicalCreationProvenance.onchainCreationTx.toLowerCase()
+      || creationProvenance.onchainCreationBlock
+        !== canonicalCreationProvenance.onchainCreationBlock
+    ) {
+      throw new Error(
+        `evaluation opportunity ${solution.requestId} solution-envelope provenance `
+        + `does not match canonical TaskCreated provenance for task ${solution.taskId}`,
+      );
+    }
     const resultData = (resultPayload.data as string) ?? JSON.stringify(resultPayload);
     const evaluationTask = this.buildEvaluationTask({
       task: restoration.task,
@@ -1048,13 +1187,17 @@ export class MechAdapter implements ExecutionAdapter {
       taskId: opportunityId,
       task: evaluationTask,
       taskCid: restoration.taskCid,
-      onchainCreationTx: solution.transactionHash,
-      onchainCreationBlock: solution.blockNumber,
+      onchainCreationTx: canonicalCreationProvenance.onchainCreationTx,
+      onchainCreationBlock: canonicalCreationProvenance.onchainCreationBlock,
+      onchainOpportunityTx: solution.transactionHash,
+      onchainOpportunityBlock: solution.blockNumber,
     };
     this.evaluationOpportunities.set(opportunityId, {
       taskId: solution.taskId,
       attemptIndex: solution.attemptIndex,
       task: evaluationTask,
+      onchainCreationTx: canonicalCreationProvenance.onchainCreationTx,
+      onchainCreationBlock: canonicalCreationProvenance.onchainCreationBlock,
     });
     this.observedTasks.set(opportunityId, announcement);
     // #645: a successful announcement means the candidate has made progress;
@@ -1125,6 +1268,9 @@ export class MechAdapter implements ExecutionAdapter {
 
           const joinedManifestDigests = this.joinedManifestDigestSet();
           const createdTasks = decodeTaskCreatedLogs(logs);
+          for (const event of createdTasks) {
+            this.rememberCanonicalTaskCreated(event);
+          }
           for (const { taskId, taskCidDigest, manifestDigest, transactionHash, blockNumber } of createdTasks) {
             if (!this.isDiscoveryTaskAllowed(taskId)) continue;
             if (this.observedTasks.has(taskId)) continue;
@@ -1202,8 +1348,10 @@ export class MechAdapter implements ExecutionAdapter {
         attemptIndex: claimed.attemptIndex,
         task: evaluationOpportunity.task,
         taskCid: evaluationCid,
-        onchainCreationTx: claimed.txHash,
-        onchainCreationBlock: claimed.blockNumber,
+        onchainCreationTx: evaluationOpportunity.onchainCreationTx,
+        onchainCreationBlock: evaluationOpportunity.onchainCreationBlock,
+        onchainClaimTx: claimed.txHash,
+        onchainClaimBlock: claimed.blockNumber,
       };
     }
 
@@ -1232,8 +1380,10 @@ export class MechAdapter implements ExecutionAdapter {
       attemptIndex: claimed.attemptIndex,
       task,
       taskCid: announcement.taskCid,
-      onchainCreationTx: claimed.txHash,
-      onchainCreationBlock: claimed.blockNumber,
+      onchainCreationTx: announcement.onchainCreationTx,
+      onchainCreationBlock: announcement.onchainCreationBlock,
+      onchainClaimTx: claimed.txHash,
+      onchainClaimBlock: claimed.blockNumber,
     };
   }
 
@@ -1321,6 +1471,7 @@ export class MechAdapter implements ExecutionAdapter {
     const rawEnvelope = await fetchSignedEnvelopeFromIpfs(
       this.config.ipfsGatewayUrl,
       envelopeCid,
+      this.ipfsFetchOpts(),
     );
     const parsed = SignedEnvelopeSchema.parse(rawEnvelope);
     const rawSigned = rawEnvelope as Record<string, unknown>;
@@ -1541,7 +1692,11 @@ export class MechAdapter implements ExecutionAdapter {
             // (c) Yield the delivery result.
             try {
               const deliveryDigest = deliveryDataHex.startsWith('0x') ? deliveryDataHex.slice(2) : deliveryDataHex;
-              const resultPayload = await fetchFromIpfs(this.config.ipfsGatewayUrl, `f01551220${deliveryDigest}`) as Record<string, unknown>;
+              const resultPayload = await fetchFromIpfs(
+                this.config.ipfsGatewayUrl,
+                `f01551220${deliveryDigest}`,
+                this.ipfsFetchOpts(),
+              ) as Record<string, unknown>;
 
               const restorationResult: TaskResult = {
                 data: (resultPayload.data as string) ?? JSON.stringify(resultPayload),

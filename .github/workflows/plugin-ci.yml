@@ -29,3 +29,25 @@ jobs:
       - run: yarn build
       - run: yarn typecheck
       - run: yarn test
+
+  client-compat:
+    name: Client Typecheck & Extracted-Boundary Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: yarn install --immutable
+      - run: yarn build:plugin
+      - run: yarn build:core
+      - run: yarn build:layer
+      - run: yarn typecheck
+      - run: >-
+          yarn vitest run
+          test/architecture/golden-envelope.test.ts
+          test/bin/jinn-layer-composition.test.ts

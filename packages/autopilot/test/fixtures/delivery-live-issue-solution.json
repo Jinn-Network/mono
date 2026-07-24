@@ -1,0 +1,27 @@
+{
+  "manifestCid": "bafkreisolutionfixturelivexxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "envelope": {
+    "schemaVersion": "jinn.execution.v1",
+    "solverType": "jinn-repo.v1",
+    "role": "solution",
+    "generatedAt": 1753027200,
+    "task": {
+      "cid": "bafkreitaskfixturelivexxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "onchainCreationTx": "0x1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "payload": {
+      "schemaVersion": "jinn-repo-solution.v1",
+      "patch": "--- a/FIXTURE.md\n+++ b/FIXTURE.md\n@@ -1 +1 @@\n-hello\n+hello world\n"
+    }
+  },
+  "task": {
+    "schemaVersion": "jinn-repo.v1",
+    "instance_id": "jinn-mono-fixture-1892",
+    "repo": "Jinn-Network/mono",
+    "base_commit": "0000000000000000000000000000000000000000",
+    "language": "typescript",
+    "problem_statement": "Fixture: append world to FIXTURE.md",
+    "source": "live-issue",
+    "issue_number": 1892
+  }
+}

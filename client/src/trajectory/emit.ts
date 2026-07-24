@@ -27,12 +27,6 @@ export interface EmitTrajectoryParams {
   runId: string;
   /** Set to the parent restoration envelope CID for a verdict trajectory; null otherwise. */
   parentEnvelopeCid?: string | null;
-  /**
-   * Source envelope CID (or snapshot sha256) a backfilled trajectory was
-   * derived from (#1672). Omitted on the live path. Threaded into the unsigned
-   * blob so the signature covers it.
-   */
-  derivedFrom?: string | null;
   signerPrivateKey: Hex;
   signerAddress: `0x${string}`;
   ipfsRegistryUrl: string;
@@ -92,6 +86,15 @@ function scrubSnapshot(
     redactionManifest: {
       spans: [...redactionManifest.spans, ...extraManifestEntries],
       totalRedactions: redactionManifest.totalRedactions + extraRedactions,
+      ...(redactionManifest.schemaVersion !== undefined
+        ? { schemaVersion: redactionManifest.schemaVersion }
+        : {}),
+      ...(redactionManifest.policyHash !== undefined
+        ? { policyHash: redactionManifest.policyHash }
+        : {}),
+      ...(redactionManifest.perClassCounts !== undefined
+        ? { perClassCounts: redactionManifest.perClassCounts }
+        : {}),
     },
   };
 }
@@ -112,8 +115,6 @@ export async function emitTrajectory(
     schemaVersion: 'jinn.trajectory.v1' as const,
     runId: p.runId,
     parentEnvelopeCid: p.parentEnvelopeCid ?? null,
-    // Only present it when set, so the live path's canonical form is unchanged.
-    ...(p.derivedFrom != null ? { derivedFrom: p.derivedFrom } : {}),
     spans: scrubbed.spans,
     redactionManifest: scrubbed.redactionManifest,
   };

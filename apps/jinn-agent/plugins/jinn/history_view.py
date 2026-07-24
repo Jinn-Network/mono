@@ -29,11 +29,13 @@ def _time(value: object) -> str:
 
 
 def _knowledge(entry: Dict[str, Any]) -> str:
-    surfaced = entry.get("knowledgeSurfaced")
-    used = entry.get("knowledgeUsed")
-    if not isinstance(surfaced, int) or not isinstance(used, int):
+    # knowledgeSurfaced/knowledgeUsed are the wire field names (unchanged);
+    # their meaning is searched/provided counts as of the rescope (§3.6).
+    searched = entry.get("knowledgeSurfaced")
+    provided = entry.get("knowledgeUsed")
+    if not isinstance(searched, int) or not isinstance(provided, int):
         return "knowledge unavailable"
-    return f"knowledge {surfaced} surfaced · {used} used"
+    return f"knowledge searched {searched} · provided {provided}"
 
 
 def _eligibility(value: object) -> str:

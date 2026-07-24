@@ -2,6 +2,7 @@ import { resolveSolverPlugin } from '../plugins/index.js';
 import type { SolverPluginEntry } from '../plugins/types.js';
 import type { RuntimePlugin } from '../harnesses/types.js';
 import { canonicalHarnessName, CLAUDE_CODE_HARNESS } from '../harnesses/names.js';
+import type { ProviderRef } from '../harnesses/provider-ref.js';
 import { getSolverNetContract, type SolverNetContract } from './contracts.js';
 
 export const JINN_NETWORK_TOOLS_PLUGIN = 'bundled:network-tools' as const;
@@ -21,6 +22,8 @@ export interface SolverNetConfig {
   roles?: SolverNetOperatorRole[];
   harness: string;
   model?: string;
+  /** Provider route for the model (issue #1243). See {@link ProviderRef}. */
+  provider?: ProviderRef;
   plugins: SolverPluginEntry[];
   taskGenerator: { enabled: boolean };
 }
@@ -32,6 +35,8 @@ export interface JoinedSolverNetConfig {
   roles: Array<'solver' | 'evaluator'>;
   harness?: string;
   model?: string;
+  /** Provider route for the model (issue #1243). See {@link ProviderRef}. */
+  provider?: ProviderRef;
   plugins?: SolverPluginEntry[];
   disabledDefaultPlugins?: string[];
 }
@@ -45,6 +50,8 @@ export interface LoadedSolverNet {
   contract: SolverNetContract;
   harness: string;
   model?: string;
+  /** Provider route for the model (issue #1243). See {@link ProviderRef}. */
+  provider?: ProviderRef;
   runtimePlugins: RuntimePlugin[];
   taskGenerator: { enabled: boolean };
 }
@@ -281,6 +288,7 @@ export async function registerJoinedNet(
     roles,
     harness,
     ...(joined.model ? { model: joined.model } : {}),
+    ...(joined.provider !== undefined ? { provider: joined.provider } : {}),
     plugins: [...defaultPlugins, ...(joined.plugins ?? [])],
     taskGenerator: { enabled: false },
   };
@@ -329,6 +337,7 @@ export async function registerJoinedNet(
     contract,
     harness: canonicalHarnessName(net.harness),
     ...(net.model ? { model: net.model } : {}),
+    ...(net.provider !== undefined ? { provider: net.provider } : {}),
     runtimePlugins,
     taskGenerator: net.taskGenerator,
   });

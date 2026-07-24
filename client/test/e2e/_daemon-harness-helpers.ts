@@ -69,6 +69,7 @@ import {
 import { signCanonical } from '../../src/harnesses/engine/signing.js';
 import { startApiServer } from '../../src/api/server.js';
 import type { SolverNetRegistry } from '../../src/solver-nets/registry.js';
+import type { Harness } from '../../src/harnesses/types.js';
 export { compileContracts, ANVIL_PRIVATE_KEYS };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -87,6 +88,8 @@ export interface PostedPredictionTask {
   taskId: bigint;
   taskCidDigest: `0x${string}`;
   manifestDigest: `0x${string}`;
+  /** Transaction that emitted TaskCreated for this task. */
+  creationTxHash: `0x${string}`;
   /**
    * Block number containing the TaskCreated event. waitForDaemonClaim uses
    * this as the initial scan floor so the claim event cannot be missed by a
@@ -878,6 +881,18 @@ export async function startDaemon(
    * Defaults to undefined → no behavioural change.
    */
   solverNetRegistry?: SolverNetRegistry,
+  /**
+   * Extra raw Harness instances registered directly into the HarnessRegistry
+   * alongside `harnessList` (in addition to, not instead of, the named
+   * harnesses `buildHarnesses` constructs). Used by the jinn-repo live-issue
+   * loop driver to inject a deterministic, no-LLM synthetic restoration
+   * harness for `jinn-repo.v1` (mirrors `PredictionV1BaselineImpl`'s
+   * zero-credential pattern) — the mechanical evaluator under test needs a
+   * candidate patch delivered on-chain through the real claim → execute →
+   * deliver pipeline, not an actual solve leg. Defaults to `[]` → no
+   * behavioural change for existing consumers.
+   */
+  extraHarnesses?: Harness[],
 ): Promise<RunningDaemon> {
   const rpcUrl = fixture.anvil.rpcUrl;
   const chainCfg = getChainConfig('base');
@@ -992,6 +1007,9 @@ export async function startDaemon(
   for (const impl of harnessList) {
     implRegistry.register(impl);
   }
+  for (const impl of extraHarnesses ?? []) {
+    implRegistry.register(impl);
+  }
 
   // 5. Build MechAdapter. Translation of main.ts §1469.
   //    - routerClaimDeliveryVariant: 'v3' when v3Env is provided (local stack);
@@ -1027,6 +1045,9 @@ export async function startDaemon(
     agentEoaPrivateKey: operator.agentPrivateKey,
     ipfsRegistryUrl: resolvedIpfsRegistryUrl,
     ipfsGatewayUrl: resolvedIpfsGatewayUrl,
+    // Hermetic Anvil+mock e2es always pass mockIpfs.baseUrl as ipfsGatewayUrl.
+    // Pin primary-only so a mock 404 cannot leak to public ipfs.io (#1648).
+    ...(ipfsGatewayUrl !== undefined ? { ipfsFallbackGatewayUrl: false as const } : {}),
     pollIntervalMs: 300,
     chainId: 8453,
     routerClaimDeliveryVariant,
@@ -1125,6 +1146,15 @@ export async function startDaemon(
       packagingDeps,
       envelopeDeps,
       deliveryDeps,
+      // #1827: mirrors main.ts's blockTimestamp wiring so this rig covers
+      // envelope.task.createdAt resolution against the Anvil fork.
+      blockTimestamp: {
+        getBlockTimestamp: async (blockNumber: number): Promise<number | undefined> => {
+          const block = await agentClients.publicClient.getBlock({ blockNumber: BigInt(blockNumber) });
+          return Number(block.timestamp);
+        },
+        configuredRpcUrls: [rpcUrl],
+      },
       // joinedSolverNets: omitted — engine falls back to legacy solverType gate.
       // Harness dispatch for non-baseline selectors is driven by
       // implRegistry.config.solverTypeHarnesses (wired in step 4 above).
@@ -1320,7 +1350,13 @@ async function postSignedTaskOnChain(
   const taskId = BigInt(String(taskCreated['taskId']));
   const createdAtBlock = BigInt(created.receipt.blockNumber ?? 0n);
 
-  return { taskId, taskCidDigest, manifestDigest, createdAtBlock };
+  return {
+    taskId,
+    taskCidDigest,
+    manifestDigest,
+    creationTxHash: created.hash,
+    createdAtBlock,
+  };
 }
 
 /**
@@ -1362,7 +1398,10 @@ export async function postPredictionV1Task(
    *   and can solve + self-evaluate + close the loop solo (the verdict leg is
    *   what credits the solver's activity counter).
    */
-  opts: { disallowSolverSelfEvaluation?: boolean } = {},
+  opts: {
+    disallowSolverSelfEvaluation?: boolean;
+    provenance?: { instanceId: string; repo: string; baseCommit: string };
+  } = {},
 ): Promise<PostedPredictionTask> {
   const now = Date.now();
   const nowSec = Math.floor(now / 1000);
@@ -1425,6 +1464,13 @@ export async function postPredictionV1Task(
         orderbookAgeSeconds: 5,
         selectionReason: 'deterministic daemon-harness e2e Task 4 fixture',
       },
+      ...(opts.provenance
+        ? {
+            instance_id: opts.provenance.instanceId,
+            repo: opts.provenance.repo,
+            base_commit: opts.provenance.baseCommit,
+          }
+        : {}),
     },
     eligibility: {},
     claimPolicy: {

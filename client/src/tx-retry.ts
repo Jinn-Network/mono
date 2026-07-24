@@ -271,6 +271,12 @@ export interface TxRetryOptions {
   ledger?: TxSubmissionLedger;
   logicalTx?: string;
   stuckNonceAfterMs?: number;
+  /**
+   * Invoked synchronously after the wallet returns a transaction hash and
+   * before any awaited nonce-ledger bookkeeping. A failure is post-broadcast
+   * and is therefore never retried.
+   */
+  onBroadcast?: (txHash: Hex) => void;
   /** If set, invoked before each retry (attempt >= 1) for logging/metrics */
   onRetry?: (info: { attempt: number; error: unknown; message: string }) => void;
 }
@@ -912,6 +918,7 @@ export async function viemSendTransactionWithRetry(
 
     let lastError: unknown;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      let broadcastHash: Hex | null = null;
       try {
         const feeResult = nonceLedger
           ? await nonceLedger.feeResultForAttempt(attempt, { forceEstimate: true })
@@ -931,6 +938,8 @@ export async function viemSendTransactionWithRetry(
         removeConflictingLegacyGasPrice(req);
 
         const hash = await walletClient.sendTransaction(req);
+        broadcastHash = hash;
+        options.onBroadcast?.(hash);
         if (nonceLedger && !isEmptyFees(feeResult.snapshot)) {
           await nonceLedger.recordSubmitted({
             hash,
@@ -943,6 +952,22 @@ export async function viemSendTransactionWithRetry(
         }
         return hash;
       } catch (err) {
+        if (broadcastHash !== null) {
+          if (
+            typeof err === 'object' &&
+            err !== null &&
+            (err as { txHash?: unknown }).txHash === broadcastHash
+          ) {
+            throw err;
+          }
+          throw Object.assign(
+            new Error(
+              `post-broadcast bookkeeping failed for ${broadcastHash}: ${flattenErrorMessage(err)}`,
+              { cause: err },
+            ),
+            { txHash: broadcastHash },
+          );
+        }
         lastError = err;
         if (!isRecoverableTransactionError(err) || attempt >= maxAttempts - 1) {
           throw err;

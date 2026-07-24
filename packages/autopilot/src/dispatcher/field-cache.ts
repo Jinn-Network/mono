@@ -30,7 +30,11 @@ import { ORG, PROJECT_NUMBER } from './constants.js';
 // Constants
 // ---------------------------------------------------------------------------
 
-const PROJECT_ID = 'PVT_kwDODh3-Ac4BXYaI';
+// Exported (jinn-mono#1883 board-archive sweep): the board-archive executor
+// needs the Project's node id for `archiveProjectV2Item` mutations, and the
+// lean snapshot (`fetchProjectSnapshot`) doesn't carry a project-level id —
+// only per-item ids. Reusing this constant avoids a second magic literal.
+export const PROJECT_ID = 'PVT_kwDODh3-Ac4BXYaI';
 
 /** Every ProjectStatus value — used for fail-loud option validation. */
 const REQUIRED_STATUS_OPTIONS: readonly ProjectStatus[] = [
@@ -156,6 +160,19 @@ export async function fetchFieldIds(runner: CommandRunner): Promise<FieldCache> 
 /** Read the cached value, or `null` if {@link fetchFieldIds} hasn't run. */
 export function getFieldCache(): FieldCache | null {
   return cached;
+}
+
+/**
+ * Cached read-through: serve the module-level cache when populated, fetch
+ * exactly once otherwise. The field-list response is constant for the life
+ * of a process (measured at 102 GraphQL points per call — per-action
+ * refetching burned ~1,300 points in one reconcile cycle), so every v2
+ * lifecycle call site goes through this instead of {@link fetchFieldIds};
+ * the stale-id retry path keeps calling `resetFieldCache` + `fetchFieldIds`
+ * for its deliberate refresh.
+ */
+export async function ensureFieldIds(runner: CommandRunner): Promise<FieldCache> {
+  return cached ?? fetchFieldIds(runner);
 }
 
 /** Drop the cached value. The next read returns `null` until the next fetch. */

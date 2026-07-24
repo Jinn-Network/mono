@@ -1,0 +1,144 @@
+# Split jinn plugin to the slim release repo (Jinn-Network/jinn-plugin).
+#
+# WHAT: On each Monday `main` promote (and on plugin hotfixes that land on
+# `main`), mirror `apps/jinn-agent/plugins/jinn/` to the ROOT of the slim
+# standalone repo `Jinn-Network/jinn-plugin`, so
+# `hermes plugins install Jinn-Network/jinn-plugin` (a git clone) yields a
+# working plugin. This is a deterministic CONTENT-MIRROR
+# (not `git subtree split`): one linear, fast-forwardable commit per promotion
+# that changes plugin content, idempotent no-op when a later promotion has the
+# same plugin tree, loud failure on any error. Provenance identifies the mono
+# promotion that last changed the published plugin content.
+# The mirror decision logic lives in the tested helper
+# `.github/scripts/jinn-plugin-split.mjs`; this YAML owns only auth + the push.
+#
+# EDIT IN MONO, NOT HERE: the slim repo is generated. The source of truth is the
+# plugin dir in Jinn-Network/mono. Never hand-edit the slim repo — it is
+# overwritten on the next promote.
+#
+# CHARTER DECISION 3 (BINDING): NO layer artifact rides the split. The plugin
+# dir is published verbatim; the published plugin references the independently
+# published @jinn-network/jinn-layer. Nothing here packages npm / layer artifacts.
+#
+# SECRET — JINN_PLUGIN_PUSH_TOKEN: a PAT / fine-grained token with
+# `contents: write` on Jinn-Network/jinn-plugin (this is "the A2 push secret").
+# It is exposed only to the token guard and fixed main-branch push steps. Both
+# repository checkouts use read-only credentials without persisting them. If
+# the operator's secret is under a different name, rename it to
+# JINN_PLUGIN_PUSH_TOKEN or swap this name throughout.
+#
+# SAFETY: workflow_dispatch is always a token-free dry-run. source_ref exists
+# only to inspect an alternate mono ref in such a dry-run. Publication is
+# possible only for a push whose exact triggering ref is refs/heads/main.
+
+name: Split jinn plugin to slim repo
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Mono ref to inspect in this dry-run (default = triggering ref).
+        type: string
+        required: false
+
+concurrency:
+  group: jinn-plugin-split
+  cancel-in-progress: false
+
+permissions:
+  contents: read # default GITHUB_TOKEN needs nothing; the slim push uses the PAT
+
+jobs:
+  split:
+    runs-on: ubuntu-latest
+    env:
+      PUBLISH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      WORKFLOW_PATH: .github/workflows/jinn-plugin-split.yml
+    steps:
+      - name: Checkout mono at the promoted SHA
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.sha }}
+          fetch-depth: 1
+          path: mono
+          persist-credentials: false
+
+      - name: Checkout the slim repo
+        uses: actions/checkout@v7
+        with:
+          repository: Jinn-Network/jinn-plugin
+          ref: main
+          path: slim
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Resolve mono SHA and set git identity
+        id: prep
+        run: |
+          set -euo pipefail
+          MONO_SHA="$(git -C mono rev-parse HEAD)"
+          echo "mono_sha=${MONO_SHA}" >> "$GITHUB_OUTPUT"
+          git -C slim config user.name "github-actions[bot]"
+          git -C slim config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Mirror the plugin dir into the slim checkout (validate + provenance + local commit)
+        id: mirror
+        env:
+          PLUGIN_DIR: mono/apps/jinn-agent/plugins/jinn
+          SLIM_DIR: slim
+          MONO_SHA: ${{ steps.prep.outputs.mono_sha }}
+        run: |
+          set -euo pipefail
+          node mono/.github/scripts/jinn-plugin-split.mjs
+
+      - name: Report workflow_dispatch dry-run
+        if: env.PUBLISH != 'true'
+        run: |
+          set -euo pipefail
+          echo "::notice::workflow_dispatch is dry-run-only — planned local commit + diff below; no token was exposed and nothing will be pushed."
+          git -C slim status --porcelain
+          git -C slim log -1 --stat || true
+
+      - name: Token guard (gates the real-push path only)
+        if: env.PUBLISH == 'true' && steps.mirror.outputs.changed == 'true'
+        env:
+          JINN_PLUGIN_PUSH_TOKEN: ${{ secrets.JINN_PLUGIN_PUSH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${JINN_PLUGIN_PUSH_TOKEN:-}" ]; then
+            echo "::error::JINN_PLUGIN_PUSH_TOKEN is not configured — cannot push the slim repo. This is the A2 push secret: a repo/org secret with contents:write on Jinn-Network/jinn-plugin. See this workflow's header comment."
+            exit 1
+          fi
+
+      - name: Report unchanged main promotion
+        if: env.PUBLISH == 'true' && steps.mirror.outputs.changed != 'true'
+        run: echo "::notice::nothing to push — this main promotion has the same plugin content as the last published promotion."
+
+      - name: Push to the slim main branch
+        if: env.PUBLISH == 'true' && steps.mirror.outputs.changed == 'true'
+        env:
+          JINN_PLUGIN_PUSH_TOKEN: ${{ secrets.JINN_PLUGIN_PUSH_TOKEN }}
+          MONO_SHA: ${{ steps.prep.outputs.mono_sha }}
+        run: |
+          set -euo pipefail
+          ASKPASS="$(mktemp)"
+          trap 'rm -f "${ASKPASS}"' EXIT
+          cat > "${ASKPASS}" <<'EOF'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s\n' 'x-access-token' ;;
+            *Password*) printf '%s\n' "${JINN_PLUGIN_PUSH_TOKEN}" ;;
+          esac
+          EOF
+          chmod 700 "${ASKPASS}"
+          GIT_ASKPASS="${ASKPASS}" GIT_TERMINAL_PROMPT=0 \
+            git -C slim push https://github.com/Jinn-Network/jinn-plugin.git \
+              HEAD:refs/heads/main
+          echo "::notice::pushed content-changing mirror @ ${MONO_SHA} to Jinn-Network/jinn-plugin (main)"

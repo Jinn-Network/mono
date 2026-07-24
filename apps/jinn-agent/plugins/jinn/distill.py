@@ -1,29 +1,10 @@
-"""Local distillation tee plus EpisodeV1 fallback persistence.
+"""EpisodeV1 fallback persistence and local-distillation command helpers.
 
-The rung-1 ``jinn-layer distill`` loop reads its own captures directory, so
-the plugin tees the legacy CapturedTask shape there. Complete EpisodeV1
-persistence is owned canonically by the core session-end process bridge; the
-separate episodes directory is used only when that bridge cannot confirm its
-write. The retired raw pending/publication queue is never touched here.
-
-Discipline unchanged: all distillation logic (scrub, clustering, consent mode,
-staging) lives in ``jinn-layer``; this module only mirrors the layer's default
-captures path and reads ``distill status --json`` for gating.
-
-Gating (mono#1714 — local distillation is ungated; only an explicit ``off``
-mode opts out; sharing consent is never consulted):
-
-  ============= ==========================================
-  distill mode  tee?
-  ============= ==========================================
-  unset         yes — reserve material for the first run
-  local / defer yes
-  off           no ("off = stop reserving captures")
-  unavailable   no — old layer without the status verb
-  ============= ==========================================
-
-Reserving captures never leaves the machine — it can NEVER cause a share;
-the share path stays gated on the single share consent (see ``_on_session_end``).
+The process contract owns canonical episode persistence. This module supplies
+the host-side fallback when that bridge cannot confirm its write, plus status
+and command rendering for the independently published layer. C7 retired the
+duplicate Hermes CapturedTask tee; no trajectory is written here outside the
+canonical episode store.
 """
 
 from __future__ import annotations
@@ -32,23 +13,26 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
 import tempfile
 import signal
+import stat
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import consent, jinn_layer
+from . import consent, harness, jinn_layer
 from . import skills_install
 
 Runner = Callable[[List[str]], Tuple[int, str]]
 
-# Retention: the layer reads only the newest 50 captures and `--resume` skips
-# already-distilled ones, so a count cap is sufficient — no age logic.
-KEEP_CAPTURES = 200
+_EVIDENCE_LOCK_FILE = ".jinn-evidence-store-lock.sqlite"
+_EVIDENCE_LOCK_APPLICATION_ID = 0x4A4C4F43
+_EVIDENCE_LOCK_SCHEMA_VERSION = "1"
 
 _cached_mode: Optional[str] = None
 
@@ -59,25 +43,265 @@ def reset() -> None:
     _cached_mode = None
 
 
-def captures_dir() -> Path:
-    """The layer's own-captures dir — env override mirrors the layer default."""
-    env = (os.environ.get("JINN_LAYER_CAPTURES_DIR") or "").strip()
-    if env:
-        return Path(env).expanduser()
-    return Path.home() / ".jinn-client" / "harness-layer" / "captures"
-
-
 def episodes_dir() -> Path:
-    """Where the host's EpisodeV1 fallback lands — distinct from captures.
-
-    A separate dir keeps EpisodeV1 records out of the legacy captures dir the
-    rung-1 distill loop reads, so the strict ``parseCapturedTask`` reader is
-    never even offered an episode file to skip (mono #1662).
-    """
+    """Where the host's canonical EpisodeV1 fallback lands."""
     env = (os.environ.get("JINN_LAYER_EPISODES_DIR") or "").strip()
     if env:
         return Path(env).expanduser()
     return Path.home() / ".jinn-client" / "harness-layer" / "episodes"
+
+
+def _assert_private_evidence_dir(directory: Path) -> None:
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    info = directory.lstat()
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        raise OSError(f"evidence store must be a regular directory: {directory}")
+    if hasattr(os, "getuid") and info.st_uid != os.getuid():
+        raise OSError(f"evidence store must be owned by uid {os.getuid()}: {directory}")
+    os.chmod(directory, 0o700)
+
+
+def _verified_regular_identity(path: Path) -> tuple[int, int]:
+    info = path.lstat()
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        raise OSError(f"evidence file must be a regular file: {path}")
+    if info.st_nlink != 1:
+        raise OSError(f"evidence file must not be hardlinked: {path}")
+    if hasattr(os, "getuid") and info.st_uid != os.getuid():
+        raise OSError(f"evidence file must be owned by uid {os.getuid()}: {path}")
+    return info.st_dev, info.st_ino
+
+
+def _writer_temp_canonical_name(name: str) -> Optional[str]:
+    core = re.fullmatch(
+        r"\.(.+\.episode\.json)\.\d+\."
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+        r"[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp",
+        name,
+        re.IGNORECASE,
+    )
+    if core:
+        return core.group(1)
+    python = re.fullmatch(r"\.(.+)\.([A-Za-z0-9_-]{8})\.tmp", name)
+    return f"{python.group(1)}.episode.json" if python else None
+
+
+def _assert_linked_publication(info: os.stat_result, path: Path, label: str) -> None:
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        raise OSError(f"{label} must be a regular file: {path}")
+    if hasattr(os, "getuid") and info.st_uid != os.getuid():
+        raise OSError(f"{label} must be owned by uid {os.getuid()}: {path}")
+
+
+def _recover_writer_publication_aliases(directory: Path) -> None:
+    """Remove a proven writer temp alias left by a crash after link(2)."""
+    names = sorted(path.name for path in directory.iterdir())
+    for canonical_name in (
+        name for name in names if name.endswith(".episode.json")
+    ):
+        canonical_path = directory / canonical_name
+        canonical = canonical_path.lstat()
+        if canonical.st_nlink == 1:
+            continue
+        _assert_linked_publication(
+            canonical, canonical_path, "published evidence episode"
+        )
+        if canonical.st_nlink != 2:
+            continue
+        identity = (canonical.st_dev, canonical.st_ino)
+        aliases = []
+        for name in names:
+            if _writer_temp_canonical_name(name) != canonical_name:
+                continue
+            alias = (directory / name).lstat()
+            if (alias.st_dev, alias.st_ino) == identity:
+                aliases.append(name)
+        if len(aliases) != 1:
+            continue
+
+        alias_path = directory / aliases[0]
+        alias = alias_path.lstat()
+        _assert_linked_publication(
+            alias, alias_path, "evidence publication temp alias"
+        )
+        if alias.st_nlink != 2 or (alias.st_dev, alias.st_ino) != identity:
+            continue
+
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        canonical_fd = os.open(canonical_path, flags)
+        alias_fd = os.open(alias_path, flags)
+        try:
+            opened_canonical = os.fstat(canonical_fd)
+            opened_alias = os.fstat(alias_fd)
+            _assert_linked_publication(
+                opened_canonical, canonical_path, "published evidence episode"
+            )
+            _assert_linked_publication(
+                opened_alias, alias_path, "evidence publication temp alias"
+            )
+            if (
+                opened_canonical.st_nlink != 2
+                or opened_alias.st_nlink != 2
+                or (opened_canonical.st_dev, opened_canonical.st_ino) != identity
+                or (opened_alias.st_dev, opened_alias.st_ino) != identity
+            ):
+                raise OSError(
+                    f"evidence publication aliases changed during recovery: "
+                    f"{canonical_path}"
+                )
+            alias_at_commit = alias_path.lstat()
+            canonical_at_commit = canonical_path.lstat()
+            if (
+                (alias_at_commit.st_dev, alias_at_commit.st_ino) != identity
+                or (canonical_at_commit.st_dev, canonical_at_commit.st_ino)
+                != identity
+            ):
+                raise OSError(
+                    f"evidence publication aliases changed before recovery: "
+                    f"{canonical_path}"
+                )
+            alias_path.unlink()
+            directory_fd = os.open(
+                directory,
+                os.O_RDONLY
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+            )
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        finally:
+            os.close(alias_fd)
+            os.close(canonical_fd)
+        _verified_regular_identity(canonical_path)
+
+    for name in names:
+        if _writer_temp_canonical_name(name) is None:
+            continue
+        path = directory / name
+        try:
+            identity = _verified_regular_identity(path)
+        except FileNotFoundError:
+            continue
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(path, flags)
+        try:
+            opened = os.fstat(fd)
+            _assert_linked_publication(
+                opened, path, "abandoned evidence publication temp"
+            )
+            if (
+                opened.st_nlink != 1
+                or (opened.st_dev, opened.st_ino) != identity
+            ):
+                raise OSError(
+                    f"abandoned evidence publication temp changed while opening: {path}"
+                )
+            at_commit = path.lstat()
+            _assert_linked_publication(
+                at_commit, path, "abandoned evidence publication temp"
+            )
+            if (
+                at_commit.st_nlink != 1
+                or (at_commit.st_dev, at_commit.st_ino) != identity
+            ):
+                raise OSError(
+                    f"abandoned evidence publication temp changed before cleanup: {path}"
+                )
+            path.unlink()
+            directory_fd = os.open(
+                directory,
+                os.O_RDONLY
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+            )
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        finally:
+            os.close(fd)
+
+
+@contextmanager
+def _evidence_store_lock(directory: Path):
+    """Crash-recoverable mutex shared with core's scan-through-publish lock."""
+    _assert_private_evidence_dir(directory)
+    lock_path = directory / _EVIDENCE_LOCK_FILE
+    flags = os.O_RDWR | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(lock_path, flags, 0o600)
+    except FileExistsError:
+        fd = -1
+    if fd >= 0:
+        try:
+            os.fchmod(fd, 0o600)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+    identity = _verified_regular_identity(lock_path)
+    connection = sqlite3.connect(lock_path, timeout=30, isolation_level=None)
+    try:
+        if _verified_regular_identity(lock_path) != identity:
+            raise OSError(f"evidence store lock changed while opening: {lock_path}")
+        connection.execute("PRAGMA busy_timeout = 30000")
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            application_id = connection.execute("PRAGMA application_id").fetchone()[0]
+            tables = [
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+                )
+            ]
+            if application_id == 0 and tables == []:
+                connection.execute(
+                    f"PRAGMA application_id = {_EVIDENCE_LOCK_APPLICATION_ID}"
+                )
+                connection.execute(
+                    "CREATE TABLE evidence_store_lock_meta "
+                    "(key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+                )
+                connection.execute(
+                    "INSERT INTO evidence_store_lock_meta(key, value) VALUES (?, ?)",
+                    ("schema_version", _EVIDENCE_LOCK_SCHEMA_VERSION),
+                )
+            else:
+                if application_id != _EVIDENCE_LOCK_APPLICATION_ID:
+                    raise OSError(f"not a Jinn evidence store lock: {lock_path}")
+                if tables != ["evidence_store_lock_meta"]:
+                    raise OSError(f"unexpected evidence store lock schema: {lock_path}")
+                row = connection.execute(
+                    "SELECT value FROM evidence_store_lock_meta WHERE key = ?",
+                    ("schema_version",),
+                ).fetchone()
+                if row is None or row[0] != _EVIDENCE_LOCK_SCHEMA_VERSION:
+                    raise OSError(f"unsupported evidence store lock schema: {lock_path}")
+            connection.execute("COMMIT")
+        except Exception:
+            if connection.in_transaction:
+                connection.execute("ROLLBACK")
+            raise
+
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            _recover_writer_publication_aliases(directory)
+            yield
+            connection.execute("COMMIT")
+        except Exception:
+            if connection.in_transaction:
+                connection.execute("ROLLBACK")
+            raise
+    finally:
+        connection.close()
+        if _verified_regular_identity(lock_path) != identity:
+            raise OSError(f"evidence store lock changed while closing: {lock_path}")
+        os.chmod(lock_path, 0o600)
 
 
 def distill_status(runner: Optional[Runner] = None) -> Optional[Dict[str, Any]]:
@@ -89,7 +313,7 @@ def distill_status(runner: Optional[Runner] = None) -> Optional[Dict[str, Any]]:
     run — e2e finding).
     """
     try:
-        code, out = jinn_layer.run(
+        code, out, _err = jinn_layer.run(
             ["distill", "status", "--json", "--out", str(skills_install.skills_dir())], runner
         )
     except Exception:
@@ -117,52 +341,6 @@ def cached_mode(runner: Optional[Runner] = None, refresh: bool = False) -> str:
     return _cached_mode
 
 
-def should_tee(runner: Optional[Runner] = None) -> bool:
-    """Local distillation is ungated (mono#1714): reserve captures by default.
-
-    The only opt-out is an explicit ``off`` mode from the layer. Sharing
-    consent and process-bridge availability are never consulted — local
-    distillation never leaves the machine.
-    """
-    mode = cached_mode(runner)
-    if mode == "off":
-        return False
-    return True  # local / defer / unset / unavailable — reserve locally
-
-
-def prune_captures(keep: int = KEEP_CAPTURES) -> None:
-    """Best-effort: keep the newest `keep` capture files; never raises."""
-    try:
-        files = sorted(
-            captures_dir().glob("*.json"),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
-        for stale in files[keep:]:
-            try:
-                stale.unlink()
-            except OSError:
-                pass
-    except Exception:
-        pass
-
-
-def tee_capture(task: Dict[str, Any], session_id: str, runner: Optional[Runner] = None) -> Optional[Path]:
-    """Reserve the assembled CapturedTask for local distillation.
-
-    This is the legacy shape consumed by ``parseCapturedTask``. Best-effort:
-    a tee failure must never break a session end.
-    """
-    try:
-        if not should_tee(runner):
-            return None
-        path = jinn_layer.write_task_file(task, captures_dir(), session_id)
-        prune_captures()
-        return path
-    except Exception:
-        return None
-
-
 def write_episode_fallback(episode: Dict[str, Any]) -> Optional[Path]:
     """Persist one complete EpisodeV1 when the core did not.
 
@@ -172,19 +350,22 @@ def write_episode_fallback(episode: Dict[str, Any]) -> Optional[Path]:
     retries are idempotent while different content for the same id fails closed.
     """
     try:
-        if episode.get("schemaVersion") != "jinn.episode.v1":
-            return None
-        episode_id = episode.get("episodeId")
-        if not isinstance(episode_id, str) or not episode_id:
-            return None
-        safe = re.fullmatch(r"[A-Za-z0-9._-]+", episode_id) and episode_id not in (".", "..")
+        canonical_episode = skills_install._validate_episode_write(episode)
+        episode_id = canonical_episode["episodeId"]
+        suffix = ".episode.json"
+        safe = (
+            re.fullmatch(r"[A-Za-z0-9._-]+", episode_id)
+            and episode_id not in (".", "..")
+            and not re.fullmatch(r"episode-[a-f0-9]{64}", episode_id)
+            and len(f"{episode_id}{suffix}".encode("utf-8")) <= 255
+        )
         stem = (
             episode_id
             if safe
             else f"episode-{hashlib.sha256(episode_id.encode('utf-8')).hexdigest()}"
         )
         serialized = json.dumps(
-            episode,
+            canonical_episode,
             ensure_ascii=False,
             allow_nan=False,
             sort_keys=True,
@@ -192,60 +373,108 @@ def write_episode_fallback(episode: Dict[str, Any]) -> Optional[Path]:
         ) + "\n"
         canonical_episode = json.loads(serialized)
         directory = episodes_dir()
-        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(directory, 0o700)
-        path = directory / f"{stem}.episode.json"
+        path = directory / f"{stem}{suffix}"
 
-        def existing_is_identical() -> bool:
-            try:
-                if path.is_symlink() or not path.is_file():
-                    return False
-                os.chmod(path, 0o600)
-                existing = json.loads(path.read_text(encoding="utf-8"))
-                return existing == canonical_episode
-            except (OSError, ValueError, TypeError):
-                return False
-
-        if os.path.lexists(path):
-            if not existing_is_identical():
-                return None
-            os.chmod(path, 0o600)
-            return path
-
-        fd = -1
-        tmp_path: Optional[Path] = None
-        try:
-            fd, tmp_name = tempfile.mkstemp(
-                prefix=f".{stem}.", suffix=".tmp", dir=directory
-            )
-            tmp_path = Path(tmp_name)
-            os.fchmod(fd, 0o600)
-            handle = os.fdopen(fd, "w", encoding="utf-8", newline="")
+        def existing_state() -> str:
             fd = -1
-            with handle:
-                handle.write(serialized)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.chmod(tmp_path, 0o600)
             try:
-                # Unlike rename/replace, link never overwrites a concurrent
-                # winner. The destination appears only after the temp is whole.
-                os.link(tmp_path, path)
-            except FileExistsError:
-                if not existing_is_identical():
-                    return None
-                os.chmod(path, 0o600)
+                expected = _verified_regular_identity(path)
+                flags = os.O_RDONLY
+                if hasattr(os, "O_NOFOLLOW"):
+                    flags |= os.O_NOFOLLOW
+                fd = os.open(path, flags)
+                opened = os.fstat(fd)
+                if (
+                    not stat.S_ISREG(opened.st_mode)
+                    or opened.st_nlink != 1
+                    or (opened.st_dev, opened.st_ino) != expected
+                    or (
+                        hasattr(os, "getuid")
+                        and opened.st_uid != os.getuid()
+                    )
+                ):
+                    return "collision"
+                os.fchmod(fd, 0o600)
+                with os.fdopen(fd, "r", encoding="utf-8") as handle:
+                    fd = -1
+                    existing = json.load(handle)
+                return "identical" if existing == canonical_episode else "collision"
+            except FileNotFoundError:
+                return "missing"
+            except (OSError, ValueError, TypeError):
+                return "collision"
+            finally:
+                if fd >= 0:
+                    os.close(fd)
+
+        def write_locked() -> Optional[Path]:
+            state = existing_state()
+            if state == "identical":
                 return path
-            os.chmod(path, 0o600)
-            return path
-        finally:
-            if fd >= 0:
-                os.close(fd)
-            if tmp_path is not None:
+            if state == "collision":
+                return None
+
+            fd = -1
+            tmp_path: Optional[Path] = None
+            try:
+                fd, tmp_name = tempfile.mkstemp(
+                    prefix=f".{stem}.", suffix=".tmp", dir=directory
+                )
+                tmp_path = Path(tmp_name)
+                os.fchmod(fd, 0o600)
+                handle = os.fdopen(fd, "w", encoding="utf-8", newline="")
+                fd = -1
+                with handle:
+                    handle.write(serialized)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                expected = _verified_regular_identity(tmp_path)
                 try:
-                    tmp_path.unlink()
-                except FileNotFoundError:
-                    pass
+                    # Unlike rename/replace, link never overwrites a concurrent
+                    # winner. The destination appears only after the temp is whole.
+                    os.link(tmp_path, path)
+                except FileExistsError:
+                    return path if existing_state() == "identical" else None
+                source_info = tmp_path.lstat()
+                target_info = path.lstat()
+                if (
+                    not stat.S_ISREG(source_info.st_mode)
+                    or not stat.S_ISREG(target_info.st_mode)
+                    or (source_info.st_dev, source_info.st_ino) != expected
+                    or (target_info.st_dev, target_info.st_ino) != expected
+                ):
+                    raise OSError(f"evidence episode changed while publishing: {path}")
+                directory_fd = os.open(
+                    directory,
+                    os.O_RDONLY
+                    | getattr(os, "O_DIRECTORY", 0)
+                    | getattr(os, "O_NOFOLLOW", 0),
+                )
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+                return path
+            finally:
+                if fd >= 0:
+                    os.close(fd)
+                if tmp_path is not None:
+                    try:
+                        tmp_path.unlink()
+                    except FileNotFoundError:
+                        pass
+
+        with _evidence_store_lock(directory):
+            result = write_locked()
+        if result is not None:
+            try:
+                # Reindex uses the same store mutex, so refresh only after the
+                # fallback transaction has fully released it. The episode is
+                # primary evidence; a derived-view failure never rolls it back.
+                jinn_layer.run(["reindex", "--json"], timeout_s=30)
+            except Exception:
+                pass
+        return result
     except Exception:
         return None
 
@@ -349,15 +578,18 @@ def start_run(spawn: Optional[Callable[..., int]] = None, sink: Optional[Sink] =
 
 
 def stop_run() -> str:
+    if is_running():
+        current = _read_current()
+        try:
+            os.kill(current["pid"], signal.SIGTERM)
+        except OSError:
+            pass
+        _archive_current("stopped")
+        return "◇ distill stopped — staged skills are kept; /jinn distill start confirm resumes the rest"
     current = _read_current()
-    if not current or not isinstance(current.get("pid"), int):
-        return "no distillation is running"
-    try:
-        os.kill(current["pid"], signal.SIGTERM)
-    except OSError:
-        pass
-    _archive_current("stopped")
-    return "◇ distill stopped — staged skills are kept; /jinn distill start confirm resumes the rest"
+    if current and isinstance(current.get("pid"), int):
+        _archive_current("died")
+    return "no distillation is running"
 
 
 def _watch_state(sink: Optional[Sink] = None, now_fn: Callable[[], float] = time.monotonic) -> Dict[str, Any]:
@@ -412,8 +644,14 @@ def _drain_events(state: Dict[str, Any]) -> bool:
         text = ""
         if path is not None and path.exists():
             raw = path.read_bytes()
-            text = raw[state["offset"] :].decode("utf-8", errors="replace")
-            state["offset"] = len(raw)
+            chunk = raw[state["offset"] :]
+            last_newline = chunk.rfind(b"\n")
+            if last_newline == -1:
+                text = ""
+            else:
+                consumed = last_newline + 1
+                state["offset"] += consumed
+                text = chunk[:consumed].decode("utf-8", errors="replace")
         done_outcome: Optional[str] = None
         for line in text.split("\n"):
             line = line.strip()
@@ -559,14 +797,16 @@ def payoff_lines(snapshot: Dict[str, int]) -> List[str]:
 #
 # All handlers return stateless strings (input() would deadlock the TUI; the
 # two-step pattern from /jinn consent covers anything that needs confirming).
-# First-run detection is facts-over-flags (onboarding.py precedent): the FACT
+# First-run detection is facts-over-flags: the FACT
 # is `mode == "unset"` from the layer's status read; the only stored flag is
 # that the splash was shown.
 
-UPDATE_LAYER_LINE = (
-    "The Jinn layer here doesn't know distillation yet — update it:\n"
-    "  npm install -g @jinn-network/client@canary"
-)
+def _update_layer_line() -> str:
+    """Host-native layer refresh copy shared by stock Hermes and the fork."""
+    return (
+        "The Jinn layer here doesn't know distillation yet — update it:\n"
+        f"  {harness.cli_name()} plugins update jinn"
+    )
 
 
 def ux_flags_path() -> Path:
@@ -661,7 +901,7 @@ def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
             return "a distillation is already running — /jinn distill stop to end it"
         status = distill_status(runner)
         if status is None:
-            return UPDATE_LAYER_LINE
+            return _update_layer_line()
         uncovered = status.get("uncoveredCount", 0)
         if not uncovered:
             return "nothing to distill yet — captures accrue as you work; check back after a few tasks"
@@ -672,9 +912,9 @@ def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
                 # and this explicit two-step start IS that consent. Record it
                 # the same way the CLI flag does, or the spawned run would
                 # read the persisted mode and silently run nothing.
-                code, out = jinn_layer.run(["distill", "--where", "local", "--json"], runner)
+                code, out, err = jinn_layer.run(["distill", "--where", "local", "--json"], runner)
                 if code != 0:
-                    return out.strip() or UPDATE_LAYER_LINE
+                    return (err or out).strip() or _update_layer_line()
                 cached_mode(runner, refresh=True)
             ok, msg = start_run()
             return msg
@@ -695,15 +935,15 @@ def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
         return stop_run()
 
     if action == "review":
-        code, out = jinn_layer.run(
+        code, out, err = jinn_layer.run(
             ["distill", "staged", "--json", "--out", str(skills_install.skills_dir())], runner
         )
         if code != 0:
-            return out.strip() or UPDATE_LAYER_LINE
+            return (err or out).strip() or _update_layer_line()
         try:
             staged = json.loads(out)
         except ValueError:
-            return UPDATE_LAYER_LINE
+            return _update_layer_line()
         if not staged:
             return "nothing staged — /jinn distill start runs a distillation over your captures"
         lines = ["◇ distilled skills — staged, waiting for your choice", ""]
@@ -725,7 +965,7 @@ def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
         skills_dir = skills_install.skills_dir()
         # Read the staged provenance FIRST — the install below clears the
         # staged copies, and the marker (payoff join, uninstall guard) needs it.
-        staged_code, staged_out = jinn_layer.run(
+        staged_code, staged_out, _staged_err = jinn_layer.run(
             ["distill", "staged", "--json", "--out", str(skills_dir)], runner
         )
         provenance_by_name: Dict[str, List[str]] = {}
@@ -736,15 +976,15 @@ def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
             except ValueError:
                 pass
         selector = ["--all"] if target == "all" else [target]
-        code, out = jinn_layer.run(
+        code, out, err = jinn_layer.run(
             ["distill", "install", *selector, "--json", "--out", str(skills_dir)], runner
         )
         if code != 0:
-            return out.strip() or UPDATE_LAYER_LINE
+            return (err or out).strip() or _update_layer_line()
         try:
             result = json.loads(out)
         except ValueError:
-            return UPDATE_LAYER_LINE
+            return _update_layer_line()
         installed = result.get("installed") or []
         if not installed:
             return "nothing staged — /jinn distill start runs a distillation over your captures"
@@ -804,9 +1044,9 @@ def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
         mode = parts[1] if len(parts) > 1 else ""
         if mode not in ("local", "defer", "off"):
             return "usage: /jinn distill where local|defer|off"
-        code, out = jinn_layer.run(["distill", "--where", mode, "--json"], runner)
+        code, out, err = jinn_layer.run(["distill", "--where", mode, "--json"], runner)
         if code != 0:
-            return out.strip() or UPDATE_LAYER_LINE
+            return (err or out).strip() or _update_layer_line()
         cached_mode(runner, refresh=True)
         behaviour = {
             "local": "runs happen here when you start them",
@@ -818,7 +1058,7 @@ def handle_command(parts: List[str], runner: Optional[Runner] = None) -> str:
     if action == "":
         status = distill_status(runner)
         if status is None:
-            return UPDATE_LAYER_LINE
+            return _update_layer_line()
         cached_mode(runner, refresh=True)
         if status.get("mode") == "unset" and not load_ux_flags()["splash_shown"]:
             mark_ux_flag("splash_shown")

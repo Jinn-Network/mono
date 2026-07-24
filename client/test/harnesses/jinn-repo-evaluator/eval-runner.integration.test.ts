@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { JinnRepoTaskSchema } from '../../../src/solver-types/jinn-repo.js';
+// This fixture is a real merged-PR instance (gold test_files/test_cmd) — parse
+// via the merged-pr branch schema directly rather than the general union.
+import { JinnRepoMergedPrTaskSchema } from '../../../src/solver-types/jinn-repo.js';
 import { runJinnRepoEval } from '../../../src/harnesses/impls/jinn-repo-evaluator/eval-runner.js';
 import { validateAdmissible } from '../../../src/solver-types/jinn-repo-admit.js';
 import type { JinnRepoPoolItem } from '../../../src/solver-types/_jinn-repo-pool.js';
@@ -20,7 +22,7 @@ function readGold(dir: string, paths: string[]): Record<string, string> {
 }
 
 describe.runIf(RUN)('runJinnRepoEval', () => {
-  const task = JinnRepoTaskSchema.parse(JSON.parse(readFileSync(join(FIXTURE, 'task.json'), 'utf8')));
+  const task = JinnRepoMergedPrTaskSchema.parse(JSON.parse(readFileSync(join(FIXTURE, 'task.json'), 'utf8')));
   const goldTests = readGold(FIXTURE, task.test_files);
 
   it('PASS when the real solution patch is applied', async () => {

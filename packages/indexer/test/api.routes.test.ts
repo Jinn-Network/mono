@@ -229,7 +229,7 @@ describe('getPluginScores', () => {
     expect(result).toHaveLength(0);
   });
 
-  it('returns matched score rows when attemptEnvelopeMeta + verdicts are populated', () => {
+  it('fails closed when only shape-parsed attempt metadata is populated', () => {
     const meta = makeEnvelopeMeta({ requestId: '0xreq1' as `0x${string}`, pluginCid: 'bafypluginA' });
     const verdict = makeVerdict({ requestId: '0xreq1' as `0x${string}`, verdict: 'Pass', score: 100 });
 
@@ -239,17 +239,10 @@ describe('getPluginScores', () => {
       attemptEnvelopeMetas: [meta],
       verdicts: [verdict],
     });
-    expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({
-      pluginCid: 'bafypluginA',
-      taskId: '7',
-      verdict: 'Pass',
-      score: 100,
-      forkSuspected: false,
-    });
+    expect(result).toEqual([]);
   });
 
-  it('flags forkSuspected=true when the envelope sha256 does not match the publication', () => {
+  it('does not expose an unauthenticated fork signal as score history', () => {
     const meta = makeEnvelopeMeta({
       requestId: '0xreq2' as `0x${string}`,
       pluginCid: 'bafypluginA',
@@ -263,8 +256,29 @@ describe('getPluginScores', () => {
       attemptEnvelopeMetas: [meta],
       verdicts: [verdict],
     });
-    expect(result).toHaveLength(1);
-    expect(result[0]!.forkSuspected).toBe(true);
+    expect(result).toEqual([]);
+  });
+
+  it('fails closed when retained candidates disagree for one request and chain', () => {
+    const legitimate = makeEnvelopeMeta({
+      requestId: '0xreq2' as `0x${string}`,
+      pluginCid: 'bafypluginA',
+    });
+    const competing = makeEnvelopeMeta({
+      requestId: '0xreq2' as `0x${string}`,
+      pluginCid: 'bafypluginA',
+      sha256: FORK_SHA,
+    });
+    const verdict = makeVerdict({ requestId: '0xreq2' as `0x${string}` });
+
+    const result = getPluginScores({
+      publications: [pub],
+      pluginCid: 'bafypluginA',
+      attemptEnvelopeMetas: [legitimate, competing],
+      verdicts: [verdict],
+    });
+
+    expect(result).toEqual([]);
   });
 
   it('returns empty when the requested cid has no matching publication', () => {
@@ -336,7 +350,7 @@ describe('listBuilderScores', () => {
     expect(result).toHaveLength(0);
   });
 
-  it('returns per-artifact score rows for all plug-ins belonging to a builder', () => {
+  it('does not return unauthenticated per-artifact score rows', () => {
     const metaA = makeEnvelopeMeta({ requestId: '0xreqA' as `0x${string}`, pluginCid: 'bafypluginA' });
     const metaB = makeEnvelopeMeta({ requestId: '0xreqB' as `0x${string}`, pluginCid: 'bafypluginB' });
     const verdictA = makeVerdict({ requestId: '0xreqA' as `0x${string}`, verdict: 'Pass', score: 100 });
@@ -349,10 +363,7 @@ describe('listBuilderScores', () => {
       verdicts: [verdictA, verdictB],
     });
 
-    expect(result).toHaveLength(2);
-    const cids = result.map((r) => r.pluginCid);
-    expect(cids).toContain('bafypluginA');
-    expect(cids).toContain('bafypluginB');
+    expect(result).toEqual([]);
   });
 
   it('does not return score rows for another builder\'s plug-ins', () => {

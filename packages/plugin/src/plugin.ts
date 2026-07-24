@@ -6,13 +6,14 @@
  */
 
 /// <reference types="node" />
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import type {
   ContributionLedgerEntry,
   ContributionPort,
   ContributionStatusSnapshot,
 } from './ports/contribution-port.js';
-import type { CorpusPort } from './ports/corpus-port.js';
+import type { CorpusPort, CorpusRecord } from './ports/corpus-port.js';
 import type { EvidencePort } from './ports/evidence-port.js';
 import type { LocalLearningPort } from './ports/local-learning-port.js';
 import type { SkillsPort } from './ports/skills-port.js';
@@ -20,21 +21,28 @@ import type { EligibilityVerdict } from './schemas/eligibility-verdict.js';
 import {
   EPISODE_SCHEMA_VERSION,
   EpisodeV1Schema,
+  EpisodeV1WriteSchema,
   SessionActivityFactsSchema,
+  SessionActivityFactsWriteSchema,
 } from './schemas/episode.js';
 import type { EpisodeV1, SessionActivityFacts } from './schemas/episode.js';
 import {
+  ContributionCandidateV1ProjectionSchema,
   ContributionCandidateV1Schema,
   type ContributionCandidateV1,
 } from './schemas/contribution-candidate.js';
 import type { KnowledgeHit } from './schemas/knowledge-hit.js';
 import type { SessionSummary } from './schemas/session-summary.js';
+import { projectKnowledgePacket, type KnowledgePacket } from './schemas/knowledge-packet.js';
 import {
-  decidePickup,
-  deriveTerms,
-  hitToCandidate,
-  renderPickupDecision,
-  type PickupCandidate,
+  deriveSearchTerms,
+  discriminatingTerms,
+  rankKnowledgeCandidates,
+  rankScoredKnowledgeHits,
+  scoreKnowledgeRecord,
+  MAX_CONTENT_RESCORE_CANDIDATES,
+  MAX_SELECTED_PACKETS,
+  RELEVANCE_FLOOR,
 } from './pickup.js';
 import { degraded, ok, unavailable, valueOr, type PortResult } from './outcome.js';
 import { parsePickupConfig, type PickupConfig } from './schemas/pickup-config.js';
@@ -58,12 +66,24 @@ export interface SessionMeta {
   tools: string[];
   skillsLoadout?: string[];
   pickup?: PickupConfig;
+  /** Known at session start (e.g. `session_bridge.snapshot_repository`) —
+   *  fed into `deriveSearchTerms`, which derives the repository's name (not
+   *  its full slug) as a normal search term (#1790). */
+  repositorySlug?: string;
+  kind?: 'user' | 'host-internal';
+  parentSessionId?: string;
 }
 
 export interface FirstTurnPickupResult {
-  contextBlock?: string;
-  suggestions: KnowledgeHit[];
-  markers: string[];
+  contextBlock: string | null;
+  packets: KnowledgePacket[];
+  searchedTerms: string[];
+  retrievalFired: boolean;
+  eligibleRefs: string[];
+  deliveredRefs: string[];
+  deliveryMode: 'delivered' | 'disabled' | 'degraded' | 'withheld';
+  deliveredContentHash?: string;
+  degraded?: string;
 }
 
 export interface ToolCallEvent {
@@ -85,6 +105,7 @@ export interface SessionOutcome {
   retentionPolicy: 'local-private' | 'contribution-eligible';
   publicRepo?: boolean;
   acceptedDiff?: boolean;
+  testRuns?: { passed: number; failed: number };
 }
 
 export interface SessionEndResult {
@@ -180,18 +201,26 @@ export interface CompleteSessionInput {
 }
 
 interface CompletionSummaryHits {
-  surfacedHits: KnowledgeHit[];
-  fetchedHits: KnowledgeHit[];
+  /** The packets actually provided to the agent this session, when the
+   *  caller drove pickup through `PluginSession` (embedded-host path). Absent
+   *  (defaults to `[]`) for process-delegated `session end` calls, which
+   *  never round-trip packets through this in-process value. */
+  providedPackets: KnowledgePacket[];
 }
 
 function errorReason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** Titles for `SessionSummary.providedPackets` — the packet's own task summary. */
+function packetTitle(packet: KnowledgePacket): { ref: string; title: string } {
+  return { ref: packet.ref, title: packet.task.summary };
+}
+
 async function completeSession(
   deps: JinnPluginDeps,
   input: CompleteSessionInput,
-  hits: CompletionSummaryHits = { surfacedHits: [], fetchedHits: [] },
+  hits: CompletionSummaryHits = { providedPackets: [] },
 ): Promise<SessionEndResult> {
   if (input.contractVersion !== JINN_PLUGIN_CONTRACT_VERSION) {
     throw new Error(`unsupported plugin contract version: ${String(input.contractVersion)}`);
@@ -202,17 +231,67 @@ async function completeSession(
   const eligibility = deriveEligibility(
     {
       status: capturedEpisode.outcome.status,
-      verifiabilityTier: capturedEpisode.outcome.verifiabilityTier,
+      verifiabilityTier: capturedEpisode.outcome.verificationStrength,
       retentionPolicy: capturedEpisode.retention.policy,
       publicRepo: input.eligibilityInputs.publicRepo,
       acceptedDiff: input.eligibilityInputs.acceptedDiff,
     },
     capturedEpisode.session.capturedAt,
   );
-  const episode = EpisodeV1Schema.parse({
-    ...capturedEpisode,
+  const embeddedCandidateResult = capturedEpisode.contributionCandidate === undefined
+    ? undefined
+    : ContributionCandidateV1ProjectionSchema.safeParse(capturedEpisode.contributionCandidate);
+  const requestCandidateResult = input.contributionCandidate === undefined
+    ? undefined
+    : ContributionCandidateV1Schema.safeParse(input.contributionCandidate);
+  let resolvedCandidate: ContributionCandidateV1 | undefined;
+  let contributionUnavailableReason: string | undefined;
+  if (
+    (capturedEpisode.contributionCandidate !== undefined || input.contributionCandidate !== undefined)
+    && capturedEpisode.session.kind === 'host-internal'
+  ) {
+    contributionUnavailableReason = 'host-internal sessions cannot create contribution candidates';
+  } else if (embeddedCandidateResult && !embeddedCandidateResult.success) {
+    contributionUnavailableReason = 'invalid embedded contribution candidate';
+  } else if (requestCandidateResult && !requestCandidateResult.success) {
+    contributionUnavailableReason = 'invalid contribution candidate';
+  } else {
+    const embeddedCandidate = embeddedCandidateResult?.data;
+    const requestCandidate = requestCandidateResult?.data;
+    if (
+      embeddedCandidate
+      && requestCandidate
+      && !isDeepStrictEqual(embeddedCandidate, requestCandidate)
+    ) {
+      contributionUnavailableReason = 'embedded and request contribution candidates must match';
+    } else {
+      resolvedCandidate = requestCandidate ?? embeddedCandidate;
+      if (resolvedCandidate && resolvedCandidate.sourceId !== capturedEpisode.episodeId) {
+        contributionUnavailableReason = 'contribution candidate sourceId must match episodeId';
+        resolvedCandidate = undefined;
+      }
+    }
+  }
+
+  // A contribution payload must be present before the first immutable evidence
+  // write. Invalid or forbidden payloads are dropped so the session evidence
+  // itself is still retained.
+  const { contributionCandidate: _capturedCandidate, ...capturedWithoutCandidate } = capturedEpisode;
+  const episode = EpisodeV1WriteSchema.parse({
+    ...capturedWithoutCandidate,
+    session: {
+      ...capturedEpisode.session,
+      kind: capturedEpisode.session.kind ?? 'user',
+    },
+    origin: capturedEpisode.origin === 'legacy-unstamped'
+      ? {
+          writer: capturedEpisode.environment.harness.name,
+          build: capturedEpisode.environment.harness.version,
+        }
+      : capturedEpisode.origin,
     activity,
     eligibility,
+    ...(resolvedCandidate ? { contributionCandidate: resolvedCandidate } : {}),
   });
 
   let persistence: PortResult<{ episodeId: string }>;
@@ -223,16 +302,20 @@ async function completeSession(
   }
 
   let contribution: PortResult<ContributionCompletionReceipt> | undefined;
-  if (input.contributionCandidate !== undefined) {
-    const parsedCandidate = ContributionCandidateV1Schema.safeParse(input.contributionCandidate);
-    if (!parsedCandidate.success) {
-      contribution = unavailable('invalid contribution candidate');
-    } else if (parsedCandidate.data.sourceId !== episode.episodeId) {
-      contribution = unavailable('contribution candidate sourceId must match episodeId');
+  if (contributionUnavailableReason) {
+    contribution = unavailable(contributionUnavailableReason);
+  } else if (resolvedCandidate !== undefined) {
+    const persistedEpisodeId = persistence.status === 'unavailable'
+      ? undefined
+      : persistence.value?.episodeId;
+    if (persistedEpisodeId !== episode.episodeId) {
+      contribution = unavailable(
+        'contribution reference not recorded because canonical episode persistence was not confirmed',
+      );
     } else {
       try {
         contribution = await deps.contribution.recordMineable(
-          parsedCandidate.data,
+          resolvedCandidate,
           input.contributionVetoed ? { publicationState: 'vetoed' } : undefined,
         );
       } catch (error) {
@@ -272,18 +355,16 @@ async function completeSession(
     }
   }
 
+  const providedPackets = hits.providedPackets.length > 0
+    ? hits.providedPackets.map(packetTitle)
+    : activity.providedRefs.map((ref) => ({ ref, title: ref }));
+
   const summary: SessionSummary = {
     episodeRef: episode.episodeId,
-    surfacedRefs: activity.surfacedRefs,
-    fetchedRefs: activity.fetchedRefs,
-    surfacedHits: hits.surfacedHits,
-    fetchedHits: hits.fetchedHits,
-    installedSkillRefs: activity.installedSkillRefs,
+    searchedTerms: activity.searchedTerms,
+    providedPackets,
     eligibility,
-    nothingFound:
-      activity.surfacedRefs.length === 0
-      && activity.fetchedRefs.length === 0
-      && activity.installedSkillRefs.length === 0,
+    nothingFound: activity.providedRefs.length === 0,
   };
 
   return {
@@ -297,9 +378,14 @@ async function completeSession(
 
 export class PluginSession {
   private readonly trajectory: EpisodeV1['trajectory'] = [];
-  private surfacedHits: KnowledgeHit[] = [];
-  private fetchedHits: KnowledgeHit[] = [];
-  private installedSkillRefs: string[] = [];
+  private searchedTerms: string[] = [];
+  private providedRefs: string[] = [];
+  private fetchedRefs: string[] = [];
+  private packets: KnowledgePacket[] = [];
+  private retrievalFired = false;
+  private eligibleRefs: string[] = [];
+  private deliveryMode: FirstTurnPickupResult['deliveryMode'] = 'disabled';
+  private deliveredContentHash: string | undefined;
   private readonly capturedAt = new Date().toISOString();
 
   constructor(
@@ -308,64 +394,223 @@ export class PluginSession {
   ) {}
 
   async firstTurnPickup(firstMessage: string): Promise<FirstTurnPickupResult> {
-    const empty: FirstTurnPickupResult = { contextBlock: undefined, suggestions: [], markers: [] };
     const config = parsePickupConfig(this.meta.pickup);
-    if (!config.enabled) return empty;
+    if (!config.enabled) {
+      return {
+        contextBlock: null,
+        packets: [],
+        searchedTerms: [],
+        retrievalFired: false,
+        eligibleRefs: [],
+        deliveredRefs: [],
+        deliveryMode: 'disabled',
+      };
+    }
 
-    const terms = deriveTerms(firstMessage);
-    if (terms.length === 0) return empty;
+    const terms = deriveSearchTerms(firstMessage, this.meta.repositorySlug);
+    // Search with every term; score with the discriminating ones only — the
+    // repository name tags every record in an in-repo corpus, so counting it
+    // halved the effective relevance floor (#1886).
+    const scoringTerms = discriminatingTerms(terms, this.meta.repositorySlug);
+    this.searchedTerms = terms;
+    this.retrievalFired = true;
+    this.deliveryMode = 'delivered';
+    if (terms.length === 0) {
+      this.deliveryMode = 'withheld';
+      return {
+        contextBlock: null,
+        packets: [],
+        searchedTerms: terms,
+        retrievalFired: true,
+        eligibleRefs: [],
+        deliveredRefs: [],
+        deliveryMode: this.deliveryMode,
+      };
+    }
 
-    // Phase 1: search per term, dedupe by ref (skip non-ok reads → fail open).
+    // Issue all per-term searches concurrently — the searches are
+    // independent (mono #1795: sequential awaits serialized ~1.6s/term of
+    // live indexer round-trips, blowing the 15s host deadline once lexical
+    // v2 widened the term budget to 10). `Promise.all` preserves result
+    // order by term index regardless of resolution order, so the merge
+    // below stays in term order — dedup priority and the first-observed
+    // degraded reason are byte-identical to the old sequential loop. A
+    // rejected promise would violate the PortResult convention (ports
+    // resolve, never throw), but is guarded anyway: it degrades that one
+    // term's contribution rather than the whole pickup (fail-open).
+    const results = await Promise.all(
+      terms.map((term) =>
+        this.deps.corpus.search(term).catch((error: unknown) =>
+          degraded<KnowledgeHit[]>(`corpus search rejected: ${errorReason(error)}`),
+        ),
+      ),
+    );
+
+    // Merge hits in term order (skip non-ok reads → fail open; keep the
+    // first degraded reason observed for an honest, non-crashing report).
+    let degradedReason: string | undefined;
     const byRef = new Map<string, KnowledgeHit>();
-    for (const term of terms) {
-      const hits = valueOr(await this.deps.corpus.search(term), [] as KnowledgeHit[]);
-      for (const hit of hits) if (!byRef.has(hit.ref)) byRef.set(hit.ref, hit);
-    }
-    if (byRef.size === 0) return empty;
-
-    // Phase 2: get per capped candidate to classify (tier + payloadKind).
-    const refs = [...byRef.keys()].slice(0, config.maxCandidates);
-    const fetched: KnowledgeHit[] = [];
-    const candidates: PickupCandidate[] = [];
-    for (const ref of refs) {
-      const hit = valueOr(await this.deps.corpus.get(ref), null as KnowledgeHit | null);
-      if (!hit) continue;
-      fetched.push(hit);
-      candidates.push(hitToCandidate(hit));
-    }
-    this.surfacedHits = fetched;
-    this.fetchedHits = fetched;
-    if (candidates.length === 0) return empty;
-
-    // Installed-slug dedup (fail open: unknown installed set on non-ok read).
-    const listed = valueOr(await this.deps.skills.list(), []);
-    const installedSlugs = new Set<string>(listed.map((r) => r.ref.split('/').pop() ?? r.ref));
-
-    const decision = decidePickup(candidates, installedSlugs, config);
-
-    // Auto-adopt actually installs (the adopter rail; dormant by default).
-    // Only a confirmed port success may be rendered as an installed skill.
-    const adopted: PickupCandidate[] = [];
-    const failedAdoptions: PickupCandidate[] = [];
-    for (const c of decision.adopted) {
-      const res = await this.deps.skills.install(c.ref);
-      if (res.status === 'ok') {
-        this.installedSkillRefs.push(c.ref);
-        adopted.push(c);
-      } else {
-        failedAdoptions.push(c);
+    for (const result of results) {
+      if (result.status !== 'ok' && degradedReason === undefined) degradedReason = result.reason;
+      for (const hit of valueOr(result, [] as KnowledgeHit[])) {
+        if (!byRef.has(hit.ref)) byRef.set(hit.ref, hit);
       }
     }
 
-    const contextBlock = renderPickupDecision(
-      adopted,
-      [...decision.suggested, ...failedAdoptions],
+    const candidates = rankKnowledgeCandidates([...byRef.values()], scoringTerms);
+    if (candidates.length === 0) {
+      this.deliveryMode = degradedReason === undefined ? 'withheld' : 'degraded';
+      return {
+        contextBlock: null,
+        packets: [],
+        searchedTerms: terms,
+        retrievalFired: true,
+        eligibleRefs: [],
+        deliveredRefs: [],
+        deliveryMode: this.deliveryMode,
+        ...(degradedReason !== undefined ? { degraded: degradedReason } : {}),
+      };
+    }
+
+    // Metadata score-1 candidates are plausible enough to inspect but not
+    // relevant enough to inject. Fetch only the deterministic top K and
+    // re-score the original normalized terms against concise authored
+    // content (synthesis + step titles). Gets run concurrently inside the
+    // same host deadline as search; Promise.all preserves candidate order.
+    // Reuse successful fetched records below so escalation never causes a
+    // duplicate corpus/cache read. Any individual failure stays below the
+    // floor and records an honest degraded reason (fail open).
+    const fetchedRefs: string[] = [];
+    const prefetchedByRef = new Map<string, PortResult<CorpusRecord | null>>();
+    const directCandidates = candidates.filter((candidate) => candidate.score >= RELEVANCE_FLOOR);
+    const nearMisses = candidates
+      .filter((candidate) => candidate.score < RELEVANCE_FLOOR)
+      .slice(0, MAX_CONTENT_RESCORE_CANDIDATES);
+    const nearMissResults = await Promise.all(
+      nearMisses.map(({ hit }) => {
+        fetchedRefs.push(hit.ref);
+        return this.deps.corpus.get(hit.ref).catch((error: unknown) =>
+          degraded<CorpusRecord | null>(`corpus get rejected for ${hit.ref}: ${errorReason(error)}`),
+        );
+      }),
     );
 
+    const promotedCandidates: typeof candidates = [];
+    for (let index = 0; index < nearMisses.length; index += 1) {
+      const candidate = nearMisses[index]!;
+      const result = nearMissResults[index]!;
+      prefetchedByRef.set(candidate.hit.ref, result);
+      if (result.status !== 'ok') {
+        if (degradedReason === undefined) degradedReason = result.reason;
+        continue;
+      }
+      const record = result.value;
+      if (record === null) continue;
+      if (record.isSkillPayload === true) continue;
+      if (record.retrievalVisible !== true) continue;
+      const score = scoreKnowledgeRecord(candidate.hit, record, scoringTerms);
+      if (score >= RELEVANCE_FLOOR) promotedCandidates.push({ hit: candidate.hit, score });
+    }
+
+    const ranked = rankScoredKnowledgeHits([
+      ...directCandidates,
+      ...promotedCandidates,
+    ]).map((candidate) => candidate.hit);
+    if (ranked.length === 0) {
+      this.fetchedRefs = fetchedRefs;
+      this.deliveryMode = degradedReason === undefined ? 'withheld' : 'degraded';
+      return {
+        contextBlock: null,
+        packets: [],
+        searchedTerms: terms,
+        retrievalFired: true,
+        eligibleRefs: [],
+        deliveredRefs: [],
+        deliveryMode: this.deliveryMode,
+        ...(degradedReason !== undefined ? { degraded: degradedReason } : {}),
+      };
+    }
+
+    // Fetch full content for ranked candidates and project packets, walking
+    // down the ranked list until MAX_SELECTED_PACKETS valid packets are
+    // found or candidates are exhausted (mono #1782). Three post-fetch
+    // guards can disqualify a candidate without spending its slot, promoting
+    // the next-ranked one: (1) content-level skill classification — excludes
+    // a legacy skill-shaped record (skill.md step attribute) or a
+    // jinn.skill.v1-backed record that slipped the wire kind filter, exactly
+    // as a wire kind:'skill' hit is excluded at selection time; (2)
+    // retrieval-visibility content verification (#1824, W2) — fail-closed
+    // where the other two are fail-open; (3) empty-packet honesty — a
+    // projection with zero excerpts and no synthesis is not evidence. A
+    // projection failure degrades that one ref to nothing-found rather than
+    // throwing into the caller (§3.5).
+    const packets: KnowledgePacket[] = [];
+    for (const hit of ranked) {
+      if (packets.length >= MAX_SELECTED_PACKETS) break;
+      let result = prefetchedByRef.get(hit.ref);
+      if (result === undefined) {
+        fetchedRefs.push(hit.ref);
+        result = await this.deps.corpus.get(hit.ref).catch((error: unknown) =>
+          degraded<CorpusRecord | null>(`corpus get rejected for ${hit.ref}: ${errorReason(error)}`),
+        );
+      }
+      if (result.status !== 'ok') {
+        if (degradedReason === undefined) degradedReason = result.reason;
+        continue;
+      }
+      const record: CorpusRecord | null = result.value;
+      if (record === null) continue;
+      if (record.isSkillPayload === true) continue;
+      // Post-fetch content guard (#1824, W2): content is the truth, the
+      // search-hit's retrievalVisible was only a hint used to clear ranking.
+      // Fail-closed — undefined excludes, exactly like isSkillPayload's
+      // fail-open is the opposite case.
+      if (record.retrievalVisible !== true) continue;
+
+      let packet: KnowledgePacket;
+      try {
+        packet = projectKnowledgePacket(record);
+      } catch (error) {
+        degradedReason ??= `packet projection failed for ${hit.ref}: ${errorReason(error)}`;
+        continue;
+      }
+      if (packet.excerpts.length === 0 && packet.synthesis === undefined) continue;
+
+      packets.push(packet);
+    }
+
+    this.fetchedRefs = fetchedRefs;
+    this.providedRefs = packets.map((packet) => packet.ref);
+    this.eligibleRefs = [...this.providedRefs];
+    this.packets = packets;
+
+    if (packets.length === 0) {
+      this.deliveryMode = degradedReason === undefined ? 'withheld' : 'degraded';
+      return {
+        contextBlock: null,
+        packets: [],
+        searchedTerms: terms,
+        retrievalFired: true,
+        eligibleRefs: this.eligibleRefs,
+        deliveredRefs: [],
+        deliveryMode: this.deliveryMode,
+        ...(degradedReason !== undefined ? { degraded: degradedReason } : {}),
+      };
+    }
+
+    const contextBlock = renderKnowledgePackets(packets);
+    this.deliveryMode = degradedReason === undefined ? 'delivered' : 'degraded';
+    this.deliveredContentHash = `sha256:${createHash('sha256').update(contextBlock).digest('hex')}`;
     return {
       contextBlock,
-      suggestions: fetched,
-      markers: contextBlock ? ['corpus'] : [],
+      packets,
+      searchedTerms: terms,
+      retrievalFired: true,
+      eligibleRefs: this.eligibleRefs,
+      deliveredRefs: this.providedRefs,
+      deliveryMode: this.deliveryMode,
+      deliveredContentHash: this.deliveredContentHash,
+      ...(degradedReason !== undefined ? { degraded: degradedReason } : {}),
     };
   }
 
@@ -397,13 +642,23 @@ export class PluginSession {
   }
 
   async end(outcome: SessionOutcome): Promise<SessionEndResult> {
-    const episode: EpisodeV1 = EpisodeV1Schema.parse({
+    const episode: EpisodeV1 = EpisodeV1WriteSchema.parse({
       schemaVersion: EPISODE_SCHEMA_VERSION,
       episodeId: randomUUID(),
-      session: { sessionId: this.meta.sessionId, capturedAt: this.capturedAt },
+      session: {
+        sessionId: this.meta.sessionId,
+        capturedAt: this.capturedAt,
+        kind: this.meta.kind ?? 'user',
+        ...(this.meta.parentSessionId ? { parentSessionId: this.meta.parentSessionId } : {}),
+      },
+      origin: {
+        writer: this.meta.harness.name,
+        build: this.meta.harness.version,
+      },
       task: {
         summary: this.meta.taskSummary,
         distributionTags: this.meta.distributionTags ?? [],
+        ...(this.meta.repositorySlug ? { repositorySlug: this.meta.repositorySlug } : {}),
       },
       trajectory: this.trajectory,
       environment: {
@@ -414,8 +669,10 @@ export class PluginSession {
       },
       outcome: {
         status: outcome.status,
-        verifiabilityTier: outcome.verifiabilityTier,
+        verificationStrength: outcome.verifiabilityTier,
         ...(outcome.summary !== undefined ? { summary: outcome.summary } : {}),
+        ...(outcome.acceptedDiff !== undefined ? { acceptedDiff: outcome.acceptedDiff } : {}),
+        ...(outcome.testRuns !== undefined ? { testRuns: outcome.testRuns } : {}),
       },
       cost: {
         durationMs: outcome.durationMs,
@@ -431,18 +688,52 @@ export class PluginSession {
         contractVersion: JINN_PLUGIN_CONTRACT_VERSION,
         episode,
         activity: {
-          surfacedRefs: this.surfacedHits.map((hit) => hit.ref),
-          fetchedRefs: this.fetchedHits.map((hit) => hit.ref),
-          installedSkillRefs: this.installedSkillRefs,
+          searchedTerms: this.searchedTerms,
+          providedRefs: this.providedRefs,
+          retrievalFired: this.retrievalFired,
+          eligibleRefs: this.eligibleRefs,
+          deliveredRefs: this.providedRefs,
+          deliveryMode: this.deliveryMode,
+          ...(this.deliveredContentHash
+            ? { deliveredContentHash: this.deliveredContentHash }
+            : {}),
+          surfacedRefs: [],
+          fetchedRefs: this.fetchedRefs,
+          installedSkillRefs: [],
         },
         eligibilityInputs: {
           publicRepo: outcome.publicRepo,
           acceptedDiff: outcome.acceptedDiff,
         },
       },
-      { surfacedHits: this.surfacedHits, fetchedHits: this.fetchedHits },
+      { providedPackets: this.packets },
     );
   }
+}
+
+/**
+ * Composes the block the host injects into the first user message, verbatim
+ * and cache-safe (rescope §3.4).
+ */
+function renderKnowledgePacket(packet: KnowledgePacket): string {
+  const lines: string[] = [
+    `${packet.task.summary} · ${packet.outcome.status}/${packet.outcome.verifiabilityTier}`,
+  ];
+  if (packet.synthesis) lines.push(packet.synthesis);
+  for (const excerpt of packet.excerpts) lines.push(`- ${excerpt.label}: ${excerpt.text}`);
+  const capturedDate = packet.attribution.capturedAt.slice(0, 10);
+  lines.push(
+    `  source: ${packet.ref} · ${packet.attribution.origin} · captured ${capturedDate} · `
+    + `full episode: corpus_fetch ${packet.ref}`,
+  );
+  return lines.join('\n');
+}
+
+function renderKnowledgePackets(packets: KnowledgePacket[]): string {
+  return [
+    '[jinn corpus] Prior evidence relevant to this task:',
+    ...packets.map(renderKnowledgePacket),
+  ].join('\n');
 }
 
 export interface JinnPlugin {

@@ -2,13 +2,13 @@
 
 The splash is the first surface every operator sees at launch: sigil +
 lowercase ``jinn`` wordmark + gold rule + version + four live status lines
-(network, corpus, contribution, node). Design artifact:
+(network, corpus, parked contribution, node). Design artifact:
 ``docs/design/artifacts/2026-07-06-corpus-onboarding/1319-terminal-splash.html``.
 
 These tests assert the exact rendered strings and colours per state — not an
 eyeball. They cover: the status lines in every documented state, the fixed
-ordering, contribution-line omission pre-consent, node-line omission (the fork
-has no node source), ``checking…`` for unresolved network/corpus values, no
+ordering, contribution's unconditional Stage-2 parked state, node-line omission
+(the fork has no node source), ``checking…`` for unresolved network/corpus values, no
 emoji, gold-appears-exactly-twice-on-testnet (with the sanctioned mainnet
 three-gold exception — the network line is gold on mainnet), and the 80x24
 ASCII fallback fit. banner.py is an owned upstream file (JINN.md); this splash
@@ -52,8 +52,7 @@ def _healthy_state(**over) -> dict:
         "network_label": "testnet",
         "corpus": "connected",
         "corpus_count": 1284902,
-        "contribution": "on",
-        "contribution_count": 1284,
+        "contribution": "parked",
         "node": "running",
         "node_vessel": "vessel-0x91be…44a2",
         "version": "v0.4.2",
@@ -108,18 +107,12 @@ def test_corpus_checking_when_unresolved_is_dim():
     assert f"{_TC['dim']}checking…" in out
 
 
-def test_contribution_on_string_and_count():
+def test_contribution_parked_local_only_is_dim():
     out = render_jinn_splash(_healthy_state(), truecolor=True)
     plain = _plain(out)
-    assert "contribution   on · 1,284 traces published" in plain
-    assert f"{_TC['green']}on · 1,284 traces published" in out
-
-
-def test_contribution_off_reader_only_is_dim():
-    out = render_jinn_splash(_healthy_state(contribution="off"), truecolor=True)
-    plain = _plain(out)
-    assert "contribution   off · reader only" in plain
-    assert f"{_TC['dim']}off · reader only" in out
+    assert "contribution   parked · local only" in plain
+    assert f"{_TC['dim']}parked · local only" in out
+    assert "traces published" not in plain
 
 
 def test_node_running_string_and_vessel():
@@ -138,7 +131,7 @@ def test_node_not_running_is_dim():
 def test_node_line_omitted_when_key_absent():
     # The fork has no local node concept (node operation is the separate mono
     # client daemon), so an absent node key omits the line entirely — same rule
-    # as the pre-consent contribution line. A perpetual node "checking…" that
+    # as other unavailable status lines. A perpetual node "checking…" that
     # can never resolve would be misleading, so it must not render.
     state = _healthy_state()
     del state["node"]
@@ -158,7 +151,7 @@ def test_node_omitted_in_fallback_too():
     assert "node" not in plain
 
 
-# ── ordering + pre-consent omission ──────────────────────────────────────────
+# ── ordering + parked contribution ───────────────────────────────────────────
 
 
 def test_status_lines_fixed_order():
@@ -168,24 +161,26 @@ def test_status_lines_fixed_order():
     assert positions == sorted(positions), plain
 
 
-def test_pre_consent_omits_contribution_line_entirely():
-    # Consent unset → contribution key absent → line must not appear at all.
+def test_missing_or_legacy_contribution_state_still_renders_parked():
     state = _healthy_state()
     del state["contribution"]
-    del state["contribution_count"]
     plain = _plain(render_jinn_splash(state, truecolor=True))
-    assert "contribution" not in plain, plain
-    # the other three lines still render, in order
-    for label in ("network", "corpus", "node"):
-        assert f"\n     {label}" in plain
+    assert "contribution   parked · local only" in plain
+
+    # A retained Stage-1 renderer input must not resurrect publishing copy.
+    legacy = _plain(render_jinn_splash(
+        _healthy_state(contribution="on", contribution_count=1284),
+        truecolor=True,
+    ))
+    assert "contribution   parked · local only" in legacy
+    assert "traces published" not in legacy
 
 
-def test_pre_consent_omits_contribution_in_fallback_too():
+def test_parked_contribution_renders_in_fallback_too():
     state = _healthy_state()
     del state["contribution"]
-    del state["contribution_count"]
     plain = _plain(render_jinn_splash(state, truecolor=False))
-    assert "contribution" not in plain
+    assert "contribution   parked * local only" in plain
 
 
 # ── gold appears exactly twice; update-available ─────────────────────────────
@@ -328,18 +323,21 @@ def test_gather_state_reads_jinn_network_env(monkeypatch):
     assert banner.gather_splash_state()["network"] == "testnet"  # invalid → testnet
 
 
-def test_gather_state_contribution_follows_consent(monkeypatch, tmp_path):
+def test_gather_state_retained_consent_true_stays_parked_local_only(monkeypatch, tmp_path):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     from plugins.jinn import consent
 
-    # unset → contribution key absent (line omitted pre-consent)
-    assert "contribution" not in banner.gather_splash_state()
-
+    # Stage-1 consent remains on disk for conservative migration, but Stage 2
+    # publication is structurally parked and the splash must not imply otherwise.
     consent.save_state(True)
-    assert banner.gather_splash_state().get("contribution") == "on"
+    _resolve(contribution_count=7)
+    state = banner.gather_splash_state()
 
-    consent.save_state(False)
-    assert banner.gather_splash_state().get("contribution") == "off"
+    assert state.get("contribution") == "parked"
+    assert "contribution_count" not in state
+    plain = _plain(render_jinn_splash(state, truecolor=True))
+    assert "contribution   parked · local only" in plain
+    assert "traces published" not in plain
 
 
 # ── splash reads prefetch (#1420) ────────────────────────────────────────────
@@ -370,19 +368,12 @@ def test_resolved_unreachable_sets_corpus_no_count(monkeypatch):
     assert "corpus_count" not in state  # AC1
 
 
-def test_contribution_count_only_when_on(monkeypatch, tmp_path):
+def test_legacy_contribution_count_is_never_surfaced(monkeypatch, tmp_path):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     from plugins.jinn import consent
 
     consent.save_state(True)
     _resolve(contribution_count=7)
-    assert banner.gather_splash_state()["contribution_count"] == 7  # AC2
-
-
-def test_contribution_count_suppressed_when_off(monkeypatch, tmp_path):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    from plugins.jinn import consent
-
-    consent.save_state(False)
-    _resolve(contribution_count=7)
-    assert "contribution_count" not in banner.gather_splash_state()  # AC2 gate
+    state = banner.gather_splash_state()
+    assert state["contribution"] == "parked"
+    assert "contribution_count" not in state

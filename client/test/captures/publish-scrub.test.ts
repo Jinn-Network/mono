@@ -161,14 +161,14 @@ describe('publishCaptureEnvelope in-process scrub', () => {
 // span attribute (`tool.output`) and the published capture trajectory must not
 // leak it. Captures carry only content-class keys (synthetic-span-builder.ts), so
 // the structural drop tier never bites — value-scrubbing is the entire defense.
-// This locks in the recall the full pipeline (key-policy → openredaction →
-// secretlint + entropy/shape) provides, so a future change can't silently regress
-// it. Each row notes which stage is the load-bearing catch.
+// This locks in the recall the full owned pipeline (key-policy → plain-patterns
+// → gitleaks/secretlint + entropy/shape → reject-classes) provides, so a future
+// change can't silently regress it. Each row notes which stage is the load-bearing catch.
 describe('publishCaptureEnvelope secret regression corpus', () => {
   const CORPUS: Array<{ name: string; secret: string; matchOn?: string; via: string }> = [
-    // openredaction has an AWS access-key-id pattern; entropy alone misses it
+    // plain-patterns / gitleaks catch AKIA…; entropy alone misses it
     // (AKIA… is ≈3.68 bits/char, below the 4.0 floor).
-    { name: 'AWS access key id', secret: 'AKIAIOSFODNN7EXAMPLE', via: 'openredaction (AWS_KEY)' },
+    { name: 'AWS access key id', secret: 'AKIAIOSFODNN7EXAMPLE', via: 'plain-patterns / gitleaks (AWS_KEY)' },
     // A generic (non-provider-shaped) bearer/secret token: a random 31-char
     // base64url string. No specific provider rule matches it, so it exercises
     // the entropy fallback directly (the path the prior review flagged). Kept
@@ -179,7 +179,7 @@ describe('publishCaptureEnvelope secret regression corpus', () => {
       name: 'JWT',
       secret:
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c',
-      via: 'openredaction (JWT)',
+      via: 'secretlint / gitleaks (JWT)',
     },
     {
       // The whole connection string is redacted; assert the password substring is
@@ -187,13 +187,16 @@ describe('publishCaptureEnvelope secret regression corpus', () => {
       name: 'DB connection-string password',
       secret: 'connect with postgres://user:S3cr3tPw@host:5432/mydb please',
       matchOn: 'S3cr3tPw',
-      via: 'openredaction (DATABASE_CONNECTION)',
+      via: 'url-credentials',
     },
     {
-      name: 'PEM private key block',
+      // Entropy fallback redacts the PEM body line; markers may survive.
+      // Catastrophic 64-hex private keys are A4 reject-publish (separate path).
+      name: 'PEM private key body',
       secret:
-        '-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA1234567890abcdefghijklmnopqrstuvwxyz\n-----END RSA PRIVATE KEY-----',
-      via: 'openredaction (PRIVATE_KEY)',
+        '-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOP\n-----END RSA PRIVATE KEY-----',
+      matchOn: 'MIIEpAIBAAKCAQEA1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOP',
+      via: 'secretlint entropy (PEM body)',
     },
   ];
 

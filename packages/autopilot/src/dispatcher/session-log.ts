@@ -31,3 +31,4 @@ export function sessionLogPath(issueNumber: number): string {
 export function sessionStartedAtPath(issueNumber: number): string {
   return join(SESSIONS_LOG_DIR, `${issueNumber}.started-at`);
 }
+
