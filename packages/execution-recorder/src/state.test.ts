@@ -18,6 +18,7 @@ import {
   appendWorkspaceEvent,
   createWorkspaceState,
   openWorkspaceState,
+  type WorkspaceState,
 } from "./state.js";
 
 const EXECUTION_ID = "urn:uuid:11111111-1111-4111-8111-111111111111";
@@ -106,6 +107,60 @@ function initialized(
     recording,
     declarationFingerprint:
       `sha256:${"1".repeat(64)}` as Sha256Digest,
+  };
+}
+
+async function finalizingState(
+  workspaceDir: string,
+  artifactCount = 1,
+): Promise<{
+  readonly state: WorkspaceState;
+  readonly metadata: StoredObjectReference;
+  readonly artifactDigests: readonly Sha256Digest[];
+}> {
+  let state = await createWorkspaceState(workspaceDir, EXECUTION_ID);
+  const artifacts = await Promise.all(
+    Array.from({ length: artifactCount }, (_value, index) =>
+      storeObject(
+        state.paths,
+        new TextEncoder().encode(`artifact-${index + 1}`),
+      ),
+    ),
+  );
+  artifacts.sort((left, right) => left.digest.localeCompare(right.digest));
+  const metadata = await storeObject(
+    state.paths,
+    new TextEncoder().encode("metadata"),
+  );
+  state = await appendWorkspaceEvent(
+    state,
+    initialized(artifacts[0]),
+    "2026-07-24T10:00:00Z",
+  );
+  state = await appendWorkspaceEvent(
+    state,
+    {
+      type: "finalization-prepared",
+      intentFingerprint: `sha256:${"4".repeat(64)}`,
+      finalizedAt: "2026-07-24T10:01:00Z",
+      outcome: "completed",
+      endedAt: "2026-07-24T10:00:59Z",
+      results: artifacts.slice(1).map((artifact, index) =>
+        file(`results/result-${index + 1}.bin`, artifact),
+      ),
+      nativeTrace: {
+        artifact: file("trace/trace.json", artifacts[0]),
+        format: { entityId: "https://example.com/trace-format" },
+      },
+      metadata,
+      artifactDigests: artifacts.map(({ digest }) => digest),
+    },
+    "2026-07-24T10:01:00Z",
+  );
+  return {
+    state,
+    metadata,
+    artifactDigests: artifacts.map(({ digest }) => digest),
   };
 }
 
@@ -242,6 +297,196 @@ describe("replayed workspace state", () => {
         "2026-07-24T10:01:00Z",
       ),
     ).rejects.toMatchObject({ code: "WORKSPACE_CORRUPT" });
+  });
+
+  test("rejects duplicate intended artifact digests", async () => {
+    const workspaceDir = await temporaryWorkspace();
+    let state = await createWorkspaceState(workspaceDir, EXECUTION_ID);
+    const source = await storeObject(state.paths, new TextEncoder().encode("source"));
+    const metadata = await storeObject(
+      state.paths,
+      new TextEncoder().encode("metadata"),
+    );
+    state = await appendWorkspaceEvent(
+      state,
+      initialized(source),
+      "2026-07-24T10:00:00Z",
+    );
+
+    await expect(
+      appendWorkspaceEvent(
+        state,
+        {
+          type: "finalization-prepared",
+          intentFingerprint: `sha256:${"4".repeat(64)}`,
+          finalizedAt: "2026-07-24T10:01:00Z",
+          outcome: "completed",
+          endedAt: "2026-07-24T10:00:59Z",
+          results: [],
+          nativeTrace: {
+            artifact: file("trace/trace.json", source),
+            format: { entityId: "https://example.com/trace-format" },
+          },
+          metadata,
+          artifactDigests: [source.digest, source.digest],
+        },
+        "2026-07-24T10:01:00Z",
+      ),
+    ).rejects.toMatchObject({ code: "WORKSPACE_CORRUPT" });
+  });
+
+  test("rejects unexpected and duplicate repository artifact acknowledgements", async () => {
+    const workspaceDir = await temporaryWorkspace();
+    let { state, artifactDigests } = await finalizingState(workspaceDir);
+
+    await expect(
+      appendWorkspaceEvent(
+        state,
+        {
+          type: "repository-artifact-written",
+          digest: `sha256:${"f".repeat(64)}`,
+        },
+        "2026-07-24T10:01:01Z",
+      ),
+    ).rejects.toMatchObject({ code: "WORKSPACE_CORRUPT" });
+
+    state = await appendWorkspaceEvent(
+      state,
+      {
+        type: "repository-artifact-written",
+        digest: artifactDigests[0],
+      },
+      "2026-07-24T10:01:01Z",
+    );
+    await expect(
+      appendWorkspaceEvent(
+        state,
+        {
+          type: "repository-artifact-written",
+          digest: artifactDigests[0],
+        },
+        "2026-07-24T10:01:02Z",
+      ),
+    ).rejects.toMatchObject({ code: "WORKSPACE_CORRUPT" });
+  });
+
+  test("requires every intended artifact before the repository record", async () => {
+    const workspaceDir = await temporaryWorkspace();
+    const { state, metadata } = await finalizingState(workspaceDir);
+
+    await expect(
+      appendWorkspaceEvent(
+        state,
+        {
+          type: "repository-record-written",
+          reference: {
+            family: "execution-evidence",
+            digest: metadata.digest,
+          },
+        },
+        "2026-07-24T10:01:02Z",
+      ),
+    ).rejects.toMatchObject({ code: "WORKSPACE_CORRUPT" });
+  });
+
+  test.each([
+    [
+      "record family",
+      {
+        family: "result-evaluation" as const,
+        digest: null,
+      },
+    ],
+    [
+      "metadata digest",
+      {
+        family: "execution-evidence" as const,
+        digest: `sha256:${"e".repeat(64)}` as Sha256Digest,
+      },
+    ],
+  ])("rejects a repository record with the wrong %s", async (_name, patch) => {
+    const workspaceDir = await temporaryWorkspace();
+    let { state, metadata, artifactDigests } =
+      await finalizingState(workspaceDir);
+    for (const digest of artifactDigests) {
+      state = await appendWorkspaceEvent(
+        state,
+        { type: "repository-artifact-written", digest },
+        "2026-07-24T10:01:01Z",
+      );
+    }
+
+    await expect(
+      appendWorkspaceEvent(
+        state,
+        {
+          type: "repository-record-written",
+          reference: {
+            family: patch.family,
+            digest: patch.digest ?? metadata.digest,
+          },
+        },
+        "2026-07-24T10:01:02Z",
+      ),
+    ).rejects.toMatchObject({ code: "WORKSPACE_CORRUPT" });
+  });
+
+  test("binds the finalized receipt exactly to the finalization intent", async () => {
+    const workspaceDir = await temporaryWorkspace();
+    let { state, metadata, artifactDigests } =
+      await finalizingState(workspaceDir, 2);
+    for (const digest of artifactDigests) {
+      state = await appendWorkspaceEvent(
+        state,
+        { type: "repository-artifact-written", digest },
+        "2026-07-24T10:01:01Z",
+      );
+    }
+    const record = {
+      family: "execution-evidence" as const,
+      digest: metadata.digest,
+    };
+    state = await appendWorkspaceEvent(
+      state,
+      { type: "repository-record-written", reference: record },
+      "2026-07-24T10:01:02Z",
+    );
+
+    await expect(
+      appendWorkspaceEvent(
+        state,
+        {
+          type: "finalized",
+          receipt: {
+            executionId: EXECUTION_ID,
+            record,
+            artifacts: [...artifactDigests]
+              .reverse()
+              .map((digest) => ({ digest })),
+            finalizedAt: "2026-07-24T10:01:00Z",
+          },
+        },
+        "2026-07-24T10:01:03Z",
+      ),
+    ).rejects.toMatchObject({ code: "WORKSPACE_CORRUPT" });
+
+    const finalized = await appendWorkspaceEvent(
+      state,
+      {
+        type: "finalized",
+        receipt: {
+          executionId: EXECUTION_ID,
+          record,
+          artifacts: artifactDigests.map((digest) => ({ digest })),
+          finalizedAt: "2026-07-24T10:01:00Z",
+        },
+      },
+      "2026-07-24T10:01:03Z",
+    );
+    expect(finalized).toMatchObject({
+      status: "finalized",
+      receipt: { executionId: EXECUTION_ID, record },
+    });
   });
 
   test("honors cancellation while opening state", async () => {

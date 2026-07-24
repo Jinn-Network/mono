@@ -3,6 +3,7 @@
 import {
   lstat,
   mkdtemp,
+  readdir,
   readFile,
   rename,
   rm,
@@ -204,6 +205,26 @@ describe("workspace journal", () => {
     });
   });
 
+  test("rejects malformed nested capture payloads before state dereference", async () => {
+    await initializeWorkspaceMarker(paths, EXECUTION_ID);
+    await appendJournalEntry(
+      paths,
+      {
+        type: "initialized",
+        recording: {
+          executionId: EXECUTION_ID,
+        },
+        declarationFingerprint: `sha256:${"1".repeat(64)}`,
+      } as never,
+      EMPTY_JOURNAL_HEAD,
+      "2026-07-24T10:00:00Z",
+    );
+
+    await expect(replayJournal(paths)).rejects.toMatchObject({
+      code: "WORKSPACE_CORRUPT",
+    });
+  });
+
   test("rejects stale and concurrently racing writers", async () => {
     await initializeWorkspaceMarker(paths, EXECUTION_ID);
     const first = await appendJournalEntry(
@@ -288,5 +309,33 @@ describe("workspace journal", () => {
     await expect(replayJournal(paths)).rejects.toMatchObject({
       code: "UNSAFE_PATH",
     });
+  });
+
+  test("rejects a journal directory replaced by a symbolic link before replay", async () => {
+    await initializeWorkspaceMarker(paths, EXECUTION_ID);
+    const moved = join(paths.root, "journal-moved");
+    await rename(paths.journal, moved);
+    await symlink(moved, paths.journal);
+
+    await expect(replayJournal(paths)).rejects.toMatchObject({
+      code: "UNSAFE_PATH",
+    });
+  });
+
+  test("does not publish through a journal directory symbolic link", async () => {
+    await initializeWorkspaceMarker(paths, EXECUTION_ID);
+    const moved = join(paths.root, "journal-moved");
+    await rename(paths.journal, moved);
+    await symlink(moved, paths.journal);
+
+    await expect(
+      appendJournalEntry(
+        paths,
+        { type: "repository-artifact-written", digest: ARTIFACT_DIGEST },
+        EMPTY_JOURNAL_HEAD,
+        "2026-07-24T10:00:00Z",
+      ),
+    ).rejects.toMatchObject({ code: "UNSAFE_PATH" });
+    expect(await readdir(moved)).toEqual([]);
   });
 });

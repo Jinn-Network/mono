@@ -217,6 +217,14 @@ function reduceEvent(state: WorkspaceState, event: JournalEvent): WorkspaceState
           "Recorder journal contains incompatible finalization transitions.",
         );
       }
+      for (const [index, digest] of event.artifactDigests.entries()) {
+        if (index > 0 && event.artifactDigests[index - 1] >= digest) {
+          throw corruptState(
+            state,
+            "Finalization artifact digests must be sorted and unique.",
+          );
+        }
+      }
       return {
         ...state,
         status: "finalizing",
@@ -228,6 +236,16 @@ function reduceEvent(state: WorkspaceState, event: JournalEvent): WorkspaceState
         throw corruptState(
           state,
           "Repository artifact transition precedes finalization intent.",
+        );
+      }
+      if (
+        state.repositoryRecord !== undefined ||
+        !state.finalization.artifactDigests.includes(event.digest) ||
+        state.repositoryArtifactDigests.includes(event.digest)
+      ) {
+        throw corruptState(
+          state,
+          "Repository artifact transition contradicts finalization intent.",
         );
       }
       return {
@@ -244,12 +262,48 @@ function reduceEvent(state: WorkspaceState, event: JournalEvent): WorkspaceState
           "Repository record transition precedes finalization intent.",
         );
       }
+      if (
+        state.repositoryRecord !== undefined ||
+        event.reference.family !== "execution-evidence" ||
+        event.reference.digest !== state.finalization.metadata.digest ||
+        state.repositoryArtifactDigests.length !==
+          state.finalization.artifactDigests.length ||
+        !state.finalization.artifactDigests.every((digest) =>
+          state.repositoryArtifactDigests.includes(digest),
+        )
+      ) {
+        throw corruptState(
+          state,
+          "Repository record transition contradicts finalization intent.",
+        );
+      }
       return { ...state, repositoryRecord: event.reference };
     case "finalized":
-      if (state.repositoryRecord === undefined) {
+      if (
+        state.repositoryRecord === undefined ||
+        state.finalization === undefined
+      ) {
         throw corruptState(
           state,
           "Finalized transition precedes the repository record transition.",
+        );
+      }
+      if (
+        state.receipt !== undefined ||
+        event.receipt.executionId !== state.executionId ||
+        event.receipt.record.family !== state.repositoryRecord.family ||
+        event.receipt.record.digest !== state.repositoryRecord.digest ||
+        event.receipt.finalizedAt !== state.finalization.finalizedAt ||
+        event.receipt.artifacts.length !==
+          state.finalization.artifactDigests.length ||
+        !event.receipt.artifacts.every(
+          (reference, index) =>
+            reference.digest === state.finalization?.artifactDigests[index],
+        )
+      ) {
+        throw corruptState(
+          state,
+          "Finalized receipt contradicts finalization intent.",
         );
       }
       return { ...state, status: "finalized", receipt: event.receipt };

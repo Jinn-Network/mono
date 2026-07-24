@@ -2,7 +2,7 @@
 
 import { constants } from "node:fs";
 import { lstat, mkdir, open } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { ExecutionRecorderError } from "./errors.js";
 
@@ -65,8 +65,9 @@ export async function prepareWorkspaceDirectory(
   assertWorkspaceContained(paths, path);
   try {
     if (path === paths.root) {
-      await mkdir(path, { recursive: true, mode: 0o700 });
+      const created = await mkdir(path, { recursive: true, mode: 0o700 });
       await secureWorkspaceDirectory(paths, path, true);
+      if (created !== undefined) await syncDirectory(dirname(path));
       return;
     }
 
@@ -75,12 +76,15 @@ export async function prepareWorkspaceDirectory(
     let current = paths.root;
     for (const segment of segments) {
       current = join(current, segment);
+      let created = false;
       try {
         await mkdir(current, { mode: 0o700 });
+        created = true;
       } catch (error) {
         if (nodeErrorCode(error) !== "EEXIST") throw error;
       }
       await secureWorkspaceDirectory(paths, current, true);
+      if (created) await syncDirectory(dirname(current));
     }
   } catch (error) {
     if (nodeErrorCode(error) === "ELOOP") {
@@ -94,6 +98,31 @@ export async function prepareWorkspaceDirectory(
       error,
       `Unable to prepare recorder workspace directory: ${path}`,
     );
+  }
+}
+
+async function syncDirectory(path: string): Promise<void> {
+  if (process.platform === "win32") return;
+  const handle = await open(
+    path,
+    constants.O_RDONLY |
+      (constants.O_NOFOLLOW ?? 0) |
+      (constants.O_DIRECTORY ?? 0),
+  );
+  try {
+    try {
+      await handle.sync();
+    } catch (error) {
+      if (
+        !["EINVAL", "ENOSYS", "ENOTSUP"].includes(
+          nodeErrorCode(error) ?? "",
+        )
+      ) {
+        throw error;
+      }
+    }
+  } finally {
+    await handle.close();
   }
 }
 
@@ -179,4 +208,20 @@ export async function validateWorkspaceParentChain(
     }
   }
   return true;
+}
+
+export async function validateWorkspaceDirectory(
+  paths: WorkspacePaths,
+  path: string,
+): Promise<void> {
+  assertWorkspaceContained(paths, path);
+  try {
+    await secureWorkspaceDirectory(paths, path, false);
+  } catch (error) {
+    throw recorderIoError(
+      error,
+      `Unable to validate recorder workspace directory: ${path}`,
+      "UNSAFE_PATH",
+    );
+  }
 }

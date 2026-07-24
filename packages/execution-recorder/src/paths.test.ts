@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { lstat, mkdtemp, rm, symlink } from "node:fs/promises";
+import { lstat, mkdtemp, open, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   prepareWorkspaceDirectories,
@@ -14,6 +14,7 @@ import {
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(
     temporaryDirectories.splice(0).map((path) =>
       rm(path, { recursive: true, force: true }),
@@ -55,5 +56,19 @@ describe("workspace paths", () => {
     ).rejects.toMatchObject({
       code: "UNSAFE_PATH",
     });
+  });
+
+  test("flushes each containing directory after creating managed directories", async () => {
+    const parent = await temporaryDirectory("jinn-recorder-path-sync-");
+    const probe = await open(parent, "r");
+    const sync = vi.spyOn(Object.getPrototypeOf(probe), "sync");
+    await probe.close();
+    const paths = workspacePaths(join(parent, "recording"));
+
+    await prepareWorkspaceDirectories(paths);
+    expect(sync).toHaveBeenCalledTimes(4);
+
+    await prepareWorkspaceDirectories(paths);
+    expect(sync).toHaveBeenCalledTimes(4);
   });
 });

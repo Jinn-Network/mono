@@ -22,6 +22,7 @@ import {
 import {
   prepareWorkspaceDirectories,
   recorderIoError,
+  validateWorkspaceDirectory,
   validateWorkspaceParentChain,
   type WorkspacePaths,
 } from "./paths.js";
@@ -171,6 +172,7 @@ async function publishNewWorkspaceFile(
   );
   let handle;
   try {
+    await validateWorkspaceDirectory(paths, parent);
     handle = await open(temporary, "wx", 0o600);
     await handle.writeFile(bytes);
     if (process.platform !== "win32") await handle.chmod(0o600);
@@ -178,8 +180,10 @@ async function publishNewWorkspaceFile(
     await handle.close();
     handle = undefined;
     assertRecorderOperationActive(signal);
+    await validateWorkspaceDirectory(paths, parent);
     try {
       await link(temporary, path);
+      await validateWorkspaceDirectory(paths, parent);
       await syncDirectory(parent);
     } catch (error) {
       if (nodeErrorCode(error) === "EEXIST") {
@@ -387,7 +391,17 @@ function parseEntry(
       `Journal revision ${expectedRevision} has an invalid predecessor digest.`,
     );
   }
-  if (event === null || !validJournalEventPayload(event)) {
+  let validPayload = false;
+  try {
+    validPayload = event !== null && validJournalEventPayload(event);
+  } catch (error) {
+    throw workspaceCorrupt(
+      paths,
+      `Journal revision ${expectedRevision} has a malformed nested event payload.`,
+      error,
+    );
+  }
+  if (!validPayload) {
     throw workspaceCorrupt(
       paths,
       `Journal revision ${expectedRevision} has a malformed event payload.`,
@@ -413,21 +427,134 @@ function isStoredObjectReference(value: unknown): boolean {
   );
 }
 
+function isPersistedArtifactSource(value: unknown): boolean {
+  return (
+    isStoredObjectReference(value) &&
+    typeof (value as Record<string, unknown>).mediaType === "string" &&
+    ((value as Record<string, unknown>).name === undefined ||
+      typeof (value as Record<string, unknown>).name === "string")
+  );
+}
+
+function isPersistedArtifact(value: unknown): boolean {
+  if (!isObject(value)) return false;
+  if (value.kind === "file") {
+    return isPersistedArtifactSource(value.source);
+  }
+  if (value.kind === "dataset" || value.kind === "collection") {
+    return (
+      isPersistedArtifactSource(value.manifest) &&
+      Array.isArray(value.members) &&
+      value.members.every(isPersistedArtifact)
+    );
+  }
+  return false;
+}
+
+function isPersistedNativeTrace(value: unknown): boolean {
+  return (
+    isObject(value) &&
+    isPersistedArtifact(value.artifact) &&
+    isObject(value.format) &&
+    typeof value.format.entityId === "string"
+  );
+}
+
+function isPersistedRuntimeObservation(value: unknown): boolean {
+  if (!isObject(value)) return false;
+  if (value.kind === "resource") return true;
+  if (value.kind === "environment") {
+    return isPersistedArtifact(value.artifact);
+  }
+  return (
+    value.kind === "opaque-component" &&
+    isObject(value.component) &&
+    value.component.kind === "opaque" &&
+    isPersistedArtifact(value.component.descriptor)
+  );
+}
+
+function isPersistedStartRecording(value: unknown): boolean {
+  if (
+    !isObject(value) ||
+    typeof value.executionId !== "string" ||
+    !EXECUTION_ID.test(value.executionId) ||
+    !isObject(value.task) ||
+    !isPersistedArtifactSource(value.task.source) ||
+    !Array.isArray(value.initialInputs) ||
+    !value.initialInputs.every(isPersistedArtifact) ||
+    !isObject(value.runtime) ||
+    !isPersistedArtifactSource(value.runtime.specification) ||
+    !Array.isArray(value.runtime.components)
+  ) {
+    return false;
+  }
+  if (
+    value.repositoryState !== undefined &&
+    (!isObject(value.repositoryState) ||
+      !isPersistedArtifact(value.repositoryState.artifact))
+  ) {
+    return false;
+  }
+  return value.runtime.components.every((component) => {
+    if (!isObject(component)) return false;
+    return component.kind === "controlled"
+      ? isPersistedArtifact(component.artifact)
+      : component.kind === "opaque" &&
+          isPersistedArtifact(component.descriptor);
+  });
+}
+
+function isRecordReference(value: unknown): boolean {
+  return (
+    isObject(value) &&
+    [
+      "execution-evidence",
+      "result-evaluation",
+      "execution-verification",
+    ].includes(value.family as string) &&
+    isDigest(value.digest)
+  );
+}
+
+function isFinalizedReceipt(value: unknown): boolean {
+  return (
+    isObject(value) &&
+    typeof value.executionId === "string" &&
+    EXECUTION_ID.test(value.executionId) &&
+    isRecordReference(value.record) &&
+    Array.isArray(value.artifacts) &&
+    value.artifacts.every(
+      (artifact) => isObject(artifact) && isDigest(artifact.digest),
+    ) &&
+    typeof value.finalizedAt === "string"
+  );
+}
+
 function validJournalEventPayload(
   event: Record<string, unknown>,
 ): boolean {
   switch (event.type) {
     case "initialized":
-      return isObject(event.recording) && isDigest(event.declarationFingerprint);
+      return (
+        isPersistedStartRecording(event.recording) &&
+        isDigest(event.declarationFingerprint)
+      );
     case "input-captured":
-      return isObject(event.input) && isDigest(event.declarationFingerprint);
+      return (
+        isPersistedArtifact(event.input) &&
+        isDigest(event.declarationFingerprint)
+      );
     case "runtime-observation-captured":
       return (
-        isObject(event.observation) &&
+        isPersistedRuntimeObservation(event.observation) &&
         isDigest(event.declarationFingerprint)
       );
     case "native-trace-attached":
-      return isObject(event.trace) && isDigest(event.declarationFingerprint);
+      return (
+        isPersistedNativeTrace(event.trace) &&
+        isDigest(event.declarationFingerprint)
+      );
     case "finalization-prepared":
       return (
         isDigest(event.intentFingerprint) &&
@@ -437,7 +564,8 @@ function validJournalEventPayload(
         ) &&
         typeof event.endedAt === "string" &&
         Array.isArray(event.results) &&
-        isObject(event.nativeTrace) &&
+        event.results.every(isPersistedArtifact) &&
+        isPersistedNativeTrace(event.nativeTrace) &&
         isStoredObjectReference(event.metadata) &&
         Array.isArray(event.artifactDigests) &&
         event.artifactDigests.every(isDigest)
@@ -445,17 +573,9 @@ function validJournalEventPayload(
     case "repository-artifact-written":
       return isDigest(event.digest);
     case "repository-record-written":
-      return (
-        isObject(event.reference) &&
-        [
-          "execution-evidence",
-          "result-evaluation",
-          "execution-verification",
-        ].includes(event.reference.family as string) &&
-        isDigest(event.reference.digest)
-      );
+      return isRecordReference(event.reference);
     case "finalized":
-      return isObject(event.receipt);
+      return isFinalizedReceipt(event.receipt);
     default:
       return false;
   }
@@ -469,7 +589,9 @@ export async function replayJournal(
   await readWorkspaceMarker(paths, signal);
   let names: string[];
   try {
+    await validateWorkspaceDirectory(paths, paths.journal);
     names = await readdir(paths.journal);
+    await validateWorkspaceDirectory(paths, paths.journal);
   } catch (error) {
     throw recorderIoError(
       error,
